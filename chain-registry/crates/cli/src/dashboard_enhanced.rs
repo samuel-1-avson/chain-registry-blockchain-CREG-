@@ -9,7 +9,7 @@ use crossterm::{
 };
 use ratatui::{
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout, Rect, Alignment, Margin},
+    layout::{Constraint, Direction, Layout, Rect, Alignment},
     style::{Color, Modifier, Style},
     text::Span,
     widgets::{Block, Borders, List, ListItem, Paragraph, Row, Table, Clear, Wrap},
@@ -173,8 +173,12 @@ pub async fn run(node_url: Option<&str>) -> Result<()> {
     let mut terminal = Terminal::new(backend)?;
 
     let mut app = App::new(api_base.clone());
+
+    // Load data immediately on startup
+    let _ = app.refresh_data().await;
+
     let (tx, mut rx) = mpsc::channel(100);
-    
+
     // Spawn SSE listener
     let tx_sse = tx.clone();
     let api_base_sse = api_base.clone();
@@ -349,19 +353,20 @@ fn draw_main_view(f: &mut Frame, app: &App) {
     let block_items: Vec<ListItem> = app.blocks.iter().enumerate()
         .map(|(i, b)| {
             let h = b["header"]["height"].as_u64().unwrap_or(0);
-            let hash = b["hash"].as_str().unwrap_or("?");
+            // Use merkle_root as block fingerprint — API has no top-level hash field
+            let root = b["header"]["merkle_root"].as_str().unwrap_or("0000000000000000");
+            let hash_display = &root[..root.len().min(14)];
             let txs = b["transactions"].as_array().map(|v| v.len()).unwrap_or(0);
-            let is_shielded = b["transactions"].as_array()
-                .map(|txs_arr| txs_arr.iter().any(|tx| tx["shielded"].as_bool().unwrap_or(false)))
-                .unwrap_or(false);
-            let icon = if is_shielded { "🔒" } else { "  " };
-            let hash_display = if hash.len() > 16 { &hash[..16] } else { hash };
-            let content = format!("#{} {} {} ({} tx)", h, icon, hash_display, txs);
+            let tx_kinds: Vec<&str> = b["transactions"].as_array()
+                .map(|arr| arr.iter().filter_map(|t| t["type"].as_str()).collect())
+                .unwrap_or_default();
+            let content = format!("#{:<4}  {}..  ({} tx: {})", h, hash_display, txs,
+                if tx_kinds.is_empty() { "empty".to_string() } else { tx_kinds.join(", ") });
             
             let style = if i == app.selection.block_index {
                 Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD).add_modifier(Modifier::REVERSED)
-            } else if is_shielded {
-                Style::default().fg(Color::Yellow)
+            } else if h == 0 {
+                Style::default().fg(Color::DarkGray)
             } else {
                 Style::default().fg(Color::Gray)
             };
@@ -379,67 +384,92 @@ fn draw_main_view(f: &mut Frame, app: &App) {
     // Validator table with selection
     let rows: Vec<Row> = app.nodes.iter().enumerate()
         .map(|(i, n)| {
-            let id = n["id"].as_str().unwrap_or("?");
-            let stake = format!("{}k", n["stake"].as_u64().unwrap_or(0) / 1000);
+            let id     = n["id"].as_str().unwrap_or("?");
+            let alias  = n["alias"].as_str().unwrap_or("");
+            let stake  = format!("{} CREG", n["stake"].as_u64().unwrap_or(0));
+            let rep    = format!("{}/100", n["reputation"].as_u64().unwrap_or(0));
             let status = n["status"].as_str().unwrap_or("?");
-            
+            let label  = if alias.is_empty() { id.to_string() } else { format!("{} ({})", id, alias) };
+
             let style = if i == app.selection.validator_index {
                 Style::default().add_modifier(Modifier::REVERSED)
             } else {
                 Style::default()
             };
-            
+
             Row::new(vec![
-                Span::styled(id, Style::default().fg(Color::Yellow)),
+                Span::styled(label, Style::default().fg(Color::Yellow)),
                 Span::raw(stake),
-                Span::styled(status, Style::default().fg(if status == "online" || status == "self" { Color::Green } else { Color::Red })),
+                Span::raw(rep),
+                Span::styled(status, Style::default().fg(
+                    if status == "online" || status == "self" { Color::Green } else { Color::Red }
+                )),
             ]).style(style)
         })
         .collect();
-    
-    let network_table = Table::new(rows, [Constraint::Percentage(40), Constraint::Percentage(30), Constraint::Percentage(30)])
-        .block(Block::default().borders(Borders::ALL).title(" NETWORK HEALTH (←→ to navigate, v for details) "))
-        .header(Row::new(vec!["Validator", "Stake", "Status"]).style(Style::default().fg(Color::Gray)));
+
+    let network_table = Table::new(rows, [
+            Constraint::Percentage(35),
+            Constraint::Percentage(25),
+            Constraint::Percentage(15),
+            Constraint::Percentage(25),
+        ])
+        .block(Block::default().borders(Borders::ALL).title(" NETWORK HEALTH (←→ navigate, v for details) "))
+        .header(Row::new(vec!["Validator", "Stake", "Rep", "Status"]).style(Style::default().fg(Color::Gray)));
     f.render_widget(network_table, body_chunks[1]);
 
-    // Event feed
-    let event_items: Vec<ListItem> = app.events.iter()
-        .map(|e| ListItem::new(e.clone()).style(Style::default().fg(Color::DarkGray)))
-        .collect();
-    let event_list = List::new(event_items)
-        .block(Block::default().borders(Borders::ALL).title(" LIVE FEED "))
+    // Event feed — pre-populated with block history, SSE events appended live
+    let mut feed: Vec<ListItem> = Vec::new();
+    let tip   = app.stats["tip_height"].as_u64().unwrap_or(0);
+    let pkgs  = app.stats["package_count"].as_u64().unwrap_or(0);
+    let blks  = app.stats["block_count"].as_u64().unwrap_or(0);
+    feed.push(ListItem::new(format!(
+        "[chain]  height={}  packages={}  blocks={}", tip, pkgs, blks
+    )).style(Style::default().fg(Color::Cyan)));
+    for b in app.blocks.iter().take(8) {
+        let h = b["header"]["height"].as_u64().unwrap_or(0);
+        let txs = b["transactions"].as_array().map(|v| v.len()).unwrap_or(0);
+        let tx_kinds: Vec<&str> = b["transactions"].as_array()
+            .map(|arr| arr.iter().filter_map(|t| t["type"].as_str()).collect())
+            .unwrap_or_default();
+        let summary = if tx_kinds.is_empty() { "empty".to_string() } else { tx_kinds.join(", ") };
+        feed.push(ListItem::new(format!("[block#{:<3}]  {} tx — {}", h, txs, summary))
+            .style(Style::default().fg(Color::DarkGray)));
+    }
+    for e in app.events.iter() {
+        feed.push(ListItem::new(e.clone()).style(Style::default().fg(Color::Green)));
+    }
+    let event_list = List::new(feed)
+        .block(Block::default().borders(Borders::ALL)
+            .title(" LIVE FEED  (h=help  r=refresh  q=quit) "))
         .style(Style::default().fg(Color::Gray));
     f.render_widget(event_list, chunks[2]);
 
-    // L2 Settlement Health (Enhanced with Efficiency Metric)
-    let rollup_status = app.bridge["bridge_sync_status"].as_str().unwrap_or("Idle");
-    let state_root = app.bridge["current_state_root"].as_str().unwrap_or("0x0");
-    let eth_block = app.bridge["last_finalized_eth_block"].as_u64().unwrap_or(0);
-    
-    // Efficiency Calculation: 120k gas per tx on L1 vs L2 batching.
+    // L2 Settlement Health
+    let rollup_status = app.bridge["bridge_sync_status"].as_str().unwrap_or("Dev (Local Anvil)");
+    let state_root    = app.bridge["current_state_root"].as_str().unwrap_or("n/a");
+    let eth_block     = app.bridge["last_finalized_eth_block"].as_u64().unwrap_or(0);
     let verified_count = app.stats["package_count"].as_u64().unwrap_or(0);
-    let estimated_savings = verified_count * 115_000; // Average savings per pkg
-    
-    let l2_info = format!(
-        "Rollup: {} | Root: {} | L1 Finality: #{}\n⚡ Gas Savings: {}k units (Estimated)",
-        rollup_status, 
-        if state_root.len() > 18 { format!("{}...{}", &state_root[..8], &state_root[state_root.len()-6..]) } else { state_root.to_string() },
-        eth_block,
-        estimated_savings / 1000
-    );
-    
-    let l2_block = Paragraph::new(l2_info)
-        .block(Block::default().borders(Borders::ALL).title(" ⛓️ L2 SETTLEMENT HEALTH ")
-        .border_style(Style::default().fg(if rollup_status == "L2 Scaled" { Color::Green } else { Color::Yellow })))
-        .style(Style::default().fg(Color::White))
-        .alignment(Alignment::Center);
-    f.render_widget(l2_block, chunks[3]);
+    let estimated_savings = verified_count * 115_000;
+    let root_display = if state_root.len() > 18 {
+        format!("{}..{}", &state_root[..8], &state_root[state_root.len()-6..])
+    } else {
+        state_root.to_string()
+    };
 
-    // Help hint at bottom
-    let help_text = Paragraph::new("Press 'h' for help, 'q' to quit, 'r' to refresh")
-        .style(Style::default().fg(Color::DarkGray))
-        .alignment(Alignment::Center);
-    f.render_widget(help_text, chunks[2].inner(&Margin { horizontal: 1, vertical: 1 }));
+    let l2_info = format!(
+        " Rollup: {}  |  Root: {}  |  L1 Block: #{}  |  Gas Saved: ~{}k units",
+        rollup_status, root_display, eth_block, estimated_savings / 1000
+    );
+
+    let border_color = if rollup_status.contains("Scaled") { Color::Green } else { Color::Yellow };
+    let l2_block = Paragraph::new(l2_info)
+        .block(Block::default().borders(Borders::ALL)
+            .title(" L2 SETTLEMENT HEALTH ")
+            .border_style(Style::default().fg(border_color)))
+        .style(Style::default().fg(Color::White))
+        .alignment(Alignment::Left);
+    f.render_widget(l2_block, chunks[3]);
 }
 
 fn draw_package_detail(f: &mut Frame, app: &App) {
@@ -484,13 +514,13 @@ fn draw_validator_detail(f: &mut Frame, app: &App) {
         
         format!(
             "Validator Details\n\n\
-            ID: {}\n\
-            Alias: {}\n\
-            Stake: {} ETH\n\
+            ID:         {}\n\
+            Alias:      {}\n\
+            Stake:      {} CREG\n\
             Reputation: {}/100\n\
-            Status: {}\n\n\
+            Status:     {}\n\n\
             Press ESC or q to return",
-            id, alias, stake / 1_000_000_000_000_000_000, reputation, status
+            id, alias, stake, reputation, status
         )
     } else {
         "No validator selected\n\nPress ESC or q to return".to_string()

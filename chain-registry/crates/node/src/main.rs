@@ -42,6 +42,7 @@ pub struct NodeState {
     pub event_bus:       EventBus,
     pub p2p:             p2p::P2PHandle,
     pub zk_validator:    Arc<zk_validator::ZkValidator>,
+    pub tx_sender:       FinalizedTxSender,
     // Live metrics for Explorer
     pub p2p_status:      P2PStatus,
     pub bridge_status:   BridgeStatus,
@@ -125,6 +126,10 @@ async fn main() -> Result<()> {
     // ── P2P Networking (libp2p) ───────────────────────────────────────────────
     let (p2p_node, p2p_handle) = p2p::P2PNode::new(&config.p2p_listen)?;
     
+    // ── Finalized-tx channel (created before state so API can send to it) ───────
+    let (tx_sender, tx_receiver): (FinalizedTxSender, FinalizedTxReceiver) =
+        finalized_tx::channel();
+
     // ── Shared state ──────────────────────────────────────────────────────────
     let state: SharedState = Arc::new(RwLock::new(NodeState {
         chain,
@@ -136,6 +141,7 @@ async fn main() -> Result<()> {
         event_bus:       Arc::clone(&event_bus),
         p2p:             p2p_handle.clone(),
         zk_validator:    Arc::new(zk_validator::ZkValidator::default()),
+        tx_sender:       tx_sender.clone(),
         p2p_status:      P2PStatus::default(),
         bridge_status:   BridgeStatus {
             registry_address: config.registry_addr.clone(),
@@ -153,12 +159,8 @@ async fn main() -> Result<()> {
             }
         }
     });
-    
-    tokio::spawn(p2p_node.run(Arc::clone(&state)));
 
-    // ── Channels and shared services ──────────────────────────────────────────
-    let (tx_sender, tx_receiver): (FinalizedTxSender, FinalizedTxReceiver) =
-        finalized_tx::channel();
+    tokio::spawn(p2p_node.run(Arc::clone(&state)));
 
     // ── Spawn background tasks ────────────────────────────────────────────────
     tracing::info!("Starting subsystems...");

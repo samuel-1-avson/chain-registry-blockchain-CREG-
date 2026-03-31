@@ -1,9 +1,11 @@
 # docker-compose.yml
-# Spins up a local chain registry cluster for development with all Phases 1-3 features:
-#   - 3 validator nodes with ZK/ML/WASM validation
-#   - 1 IPFS node for tarball storage
-#   - 1 local Ethereum node (Anvil) for smart contracts
-#   - All Phase 1-3 smart contracts deployed
+# Spins up a single-validator local development cluster.
+#
+# IMPORTANT — Architecture note:
+#   In a real deployment every validator runs on its own separate machine.
+#   This file runs ONE validator node alongside IPFS and Anvil (local Ethereum).
+#   When new validators join the network in production, they each run their own
+#   instance of this stack on their own hardware and connect via P2P seeds.
 
 version: "3.9"
 
@@ -14,9 +16,9 @@ services:
     image: ipfs/kubo:v0.27.0
     container_name: creg-ipfs
     ports:
-      - "4001:4001"    # swarm
+      - "4001:4001"    # P2P swarm
       - "5001:5001"    # API
-      - "8081:8080"    # gateway
+      - "8081:8080"    # Gateway
     volumes:
       - ipfs-data:/data/ipfs
       - ./scripts/ipfs-cors.sh:/container-init.d/ipfs-cors.sh:ro
@@ -25,7 +27,9 @@ services:
       - IPFS_PROFILE=server
     restart: unless-stopped
 
-  # ── Anvil (local EVM) ─────────────────────────────────────────────────────
+  # ── Anvil (local Ethereum L1) ─────────────────────────────────────────────
+  # Simulates Ethereum on your machine so contracts can be deployed and tested
+  # without spending real ETH. In production this points to Ethereum mainnet.
   anvil:
     image: ghcr.io/foundry-rs/foundry:latest
     container_name: creg-anvil
@@ -43,7 +47,8 @@ services:
       retries: 10
 
   # ── Contract Deployer ─────────────────────────────────────────────────────
-  # Deploys all Phase 1-3 contracts to Anvil
+  # Runs once at startup: compiles and deploys all smart contracts to Anvil.
+  # On mainnet this step is done manually by the project owner.
   deploy-contracts:
     image: ghcr.io/foundry-rs/foundry:latest
     container_name: creg-deploy
@@ -56,81 +61,98 @@ services:
     working_dir: /contracts
     command: |
       sh -c "
-        echo 'Waiting for Anvil to be ready...' &&
-        sleep 5 &&
+        echo 'Waiting for Anvil...' &&
+        sleep 3 &&
         forge build &&
-        echo 'Deploying Phase 1-3 contracts...' &&
+        echo 'Deploying contracts...' &&
         forge script script/Deploy.s.sol --rpc-url http://anvil:8545 --broadcast -vvvv
       "
     environment:
       - RPC_URL=http://anvil:8545
       - DEPLOYER_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
 
-  # ── Node 1 (primary validator) ────────────────────────────────────────────
-  node-1:
+  # ── Single Validator Node ─────────────────────────────────────────────────
+  # This is YOUR validator — the one running on this machine.
+  # Every other validator in the network runs an identical container on THEIR machine.
+  # They connect to you (or you connect to them) via CREG_P2P_SEEDS.
+  node:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: creg-node-1
+    container_name: creg-node
     environment:
-      # Core Configuration
-      CREG_LISTEN:          "0.0.0.0:8080"
-      CREG_DATA_DIR:        "/data"
+      # ── Identity ────────────────────────────────────────────────────────
       CREG_NODE_ID:         "node-1"
       CREG_IS_VALIDATOR:    "true"
       CREG_VALIDATOR_KEY:   "${NODE1_VALIDATOR_KEY}"
-      CREG_P2P_LISTEN:      "/ip4/0.0.0.0/tcp/4001"
+
+      # ── Network ─────────────────────────────────────────────────────────
+      CREG_LISTEN:          "0.0.0.0:8080"
+      CREG_DATA_DIR:        "/data"
+      CREG_P2P_LISTEN:      "/ip4/0.0.0.0/tcp/9000"
+      # To connect to another validator on a different machine, add their address:
+      # CREG_P2P_SEEDS:     "/ip4/<their-ip>/tcp/9000/p2p/<their-peer-id>"
       CREG_P2P_SEEDS:       ""
       CREG_ETH_RPC:         "http://anvil:8545"
       CREG_BLOCK_INTERVAL:  "5"
       CREG_IPFS_URL:        "http://ipfs:5001"
-      
-      # Phase 0: Core Contracts
-      CREG_REGISTRY_ADDR:           "0x5FbDB2315678afecb367f032d93F642f64180aa3"
-      CREG_STAKING_ADDR:            "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512"
-      CREG_REPUTATION_ADDR:         "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
-      CREG_VRF_ADDR:                "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"
-      CREG_GOVERNANCE_ADDR:         "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9"
-      
-      # Phase 1: Advanced Security
-      CREG_ZK_ENABLED:              "true"
-      CREG_ZK_VERIFIER_ADDR:        "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707"
-      CREG_ZK_CIRCUITS_PATH:        "/app/circuits"
-      CREG_ML_ENABLED:              "true"
-      CREG_ML_MODEL_PATH:           "/app/models"
-      CREG_WASM_ENABLED:            "true"
-      CREG_WASM_VALIDATORS_PATH:    "/app/validators"
-      CREG_WASM_MEMORY_LIMIT:       "268435456"  # 256MB
-      CREG_WASM_TIMEOUT:            "30"
-      
-      # Phase 2: Enterprise Contracts
-      CREG_PRIVATE_REGISTRY_ADDR:   "0x0165878A594ca255338adfa4d48449f69242Eb8F"
-      CREG_CROSS_CHAIN_ADDR:        "0xa513E6E4b8f2a923D98304ec87F64353C4D5C853"
-      
-      # Phase 3: Ecosystem Contracts
-      CREG_CREG_TOKEN_ADDR:         "0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6"
-      CREG_GOVERNANCE_V2_ADDR:      "0x8A791620dd6260079BF849Dc5567aDC3F2FdC318"
-      CREG_INSURANCE_ADDR:          "0x610178dA211FEF7D417bC0e6FeD39F05609AD788"
-      
-      # Phase 3: Insurance Configuration
-      CREG_INSURANCE_ENABLED:       "true"
-      CREG_BASE_PREMIUM_RATE:       "100"  # 1% in basis points
-      
-      # Validator Set Configuration
-      CREG_VALIDATOR_SET:   '{"validators":[{"id":"node-1","alias":"Atomic","stake":150000,"reputation":98,"status":"online"},{"id":"node-2","alias":"Consensus","stake":125000,"reputation":99,"status":"online"},{"id":"node-3","alias":"Beacon","stake":100000,"reputation":95,"status":"online"}]}'
-      
-      # API Keys for AI/ML services
-      OPENROUTER_API_KEY:   "${OPENROUTER_API_KEY}"
-      ANTHROPIC_API_KEY:    "${ANTHROPIC_API_KEY}"
-      
-      # Logging
-      RUST_LOG:             "info,chain_registry_node=debug,zk_validator=debug,ml_validator=debug"
+
+      # ── Single-validator mode ────────────────────────────────────────────
+      # With only one validator, PBFT quorum is 1/1.
+      # Disable this when you have 3+ validators across multiple machines.
+      CREG_SINGLE_VALIDATOR_MODE: "true"
+
+      # ── Dev sandbox mode ─────────────────────────────────────────────────
+      # nsjail is not available in the local dev container. Set to "true" to
+      # skip the kernel sandbox and return a simulated clean result instead.
+      # NEVER set this on a production validator — it disables behavioural analysis.
+      CREG_DEV_SANDBOX: "true"
+
+      # ── Phase 0: Core Contracts ──────────────────────────────────────────
+      CREG_REGISTRY_ADDR:   "0x5FbDB2315678afecb367f032d93F642f64180aa3"
+      CREG_STAKING_ADDR:    "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512"
+      CREG_REPUTATION_ADDR: "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
+      CREG_VRF_ADDR:        "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"
+      CREG_GOVERNANCE_ADDR: "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9"
+
+      # ── Phase 1: Advanced Security ───────────────────────────────────────
+      CREG_ZK_ENABLED:           "true"
+      CREG_ZK_VERIFIER_ADDR:     "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707"
+      CREG_ZK_CIRCUITS_PATH:     "/app/circuits"
+      CREG_ML_ENABLED:           "true"
+      CREG_ML_MODEL_PATH:        "/app/models"
+      CREG_WASM_ENABLED:         "true"
+      CREG_WASM_VALIDATORS_PATH: "/app/validators"
+      CREG_WASM_MEMORY_LIMIT:    "268435456"
+      CREG_WASM_TIMEOUT:         "30"
+
+      # ── Phase 2: Enterprise Contracts ────────────────────────────────────
+      CREG_PRIVATE_REGISTRY_ADDR: "0x0165878A594ca255338adfa4d48449f69242Eb8F"
+      CREG_CROSS_CHAIN_ADDR:      "0xa513E6E4b8f2a923D98304ec87F64353C4D5C853"
+
+      # ── Phase 3: Ecosystem Contracts ─────────────────────────────────────
+      CREG_CREG_TOKEN_ADDR:    "0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6"
+      CREG_GOVERNANCE_V2_ADDR: "0x8A791620dd6260079BF849Dc5567aDC3F2FdC318"
+      CREG_INSURANCE_ADDR:     "0x610178dA211FEF7D417bC0e6FeD39F05609AD788"
+      CREG_INSURANCE_ENABLED:  "true"
+      CREG_BASE_PREMIUM_RATE:  "100"
+
+      # ── Validator set (this node only for now) ───────────────────────────
+      CREG_VALIDATOR_SET: '{"validators":[{"id":"node-1","alias":"Atomic","stake":100,"reputation":100,"status":"online"}]}'
+
+      # ── Optional AI/ML API Keys ──────────────────────────────────────────
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
+      ANTHROPIC_API_KEY:  "${ANTHROPIC_API_KEY}"
+
+      # ── Logging ──────────────────────────────────────────────────────────
+      RUST_LOG: "info,chain_registry_node=debug,zk_validator=debug,ml_validator=debug"
+
     ports:
-      - "8080:8080"
-      - "50051:50051" # gRPC primary
-      # P2P port 4001 is used by IPFS, node uses it internally only
+      - "8080:8080"    # HTTP API + Explorer UI
+      - "50051:50051"  # gRPC
+      - "9000:9000"    # P2P (for other validators to connect)
     volumes:
-      - node1-data:/data
+      - node-data:/data
       - ./circuits:/app/circuits:ro
       - ./validators:/app/validators:ro
     depends_on:
@@ -147,111 +169,9 @@ services:
       timeout: 5s
       retries: 5
 
-  # ── Node 2 (validator) ────────────────────────────────────────────────────
-  node-2:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: creg-node-2
-    environment:
-      CREG_LISTEN:          "0.0.0.0:8080"
-      CREG_DATA_DIR:        "/data"
-      CREG_NODE_ID:         "node-2"
-      CREG_IS_VALIDATOR:    "true"
-      CREG_VALIDATOR_KEY:   "${NODE2_VALIDATOR_KEY}"
-      CREG_P2P_LISTEN:      "/ip4/0.0.0.0/tcp/4001"
-      CREG_P2P_SEEDS:       "/dns4/node-1/tcp/4001"
-      CREG_ETH_RPC:         "http://anvil:8545"
-      CREG_BLOCK_INTERVAL:  "5"
-      CREG_IPFS_URL:        "http://ipfs:5001"
-      
-      # Phase 1 Features
-      CREG_ZK_ENABLED:      "true"
-      CREG_ML_ENABLED:      "true"
-      CREG_WASM_ENABLED:    "true"
-      
-      # All Contract Addresses (same as node-1)
-      CREG_REGISTRY_ADDR:           "0x5FbDB2315678afecb367f032d93F642f64180aa3"
-      CREG_ZK_VERIFIER_ADDR:        "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707"
-      CREG_PRIVATE_REGISTRY_ADDR:   "0x0165878A594ca255338adfa4d48449f69242Eb8F"
-      CREG_CROSS_CHAIN_ADDR:        "0xa513E6E4b8f2a923D98304ec87F64353C4D5C853"
-      CREG_CREG_TOKEN_ADDR:         "0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6"
-      CREG_GOVERNANCE_V2_ADDR:      "0x8A791620dd6260079BF849Dc5567aDC3F2FdC318"
-      CREG_INSURANCE_ADDR:          "0x610178dA211FEF7D417bC0e6FeD39F05609AD788"
-      
-      CREG_VALIDATOR_SET:   '{"validators":[{"id":"node-1","alias":"Atomic","stake":150000,"reputation":98,"status":"online"},{"id":"node-2","alias":"Consensus","stake":125000,"reputation":99,"status":"online"},{"id":"node-3","alias":"Beacon","stake":100000,"reputation":95,"status":"online"}]}'
-      RUST_LOG:             "info"
-    ports:
-      - "8082:8080"
-      - "50052:50051" # gRPC
-    volumes:
-      - node2-data:/data
-      - ./circuits:/app/circuits:ro
-      - ./validators:/app/validators:ro
-    depends_on:
-      ipfs:
-        condition: service_started
-      anvil:
-        condition: service_healthy
-      deploy-contracts:
-        condition: service_completed_successfully
-      node-1:
-        condition: service_healthy
-    restart: unless-stopped
-
-  # ── Node 3 (validator) ────────────────────────────────────────────────────
-  node-3:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: creg-node-3
-    environment:
-      CREG_LISTEN:          "0.0.0.0:8080"
-      CREG_DATA_DIR:        "/data"
-      CREG_NODE_ID:         "node-3"
-      CREG_IS_VALIDATOR:    "true"
-      CREG_VALIDATOR_KEY:   "${NODE3_VALIDATOR_KEY}"
-      CREG_P2P_LISTEN:      "/ip4/0.0.0.0/tcp/4001"
-      CREG_P2P_SEEDS:       "/dns4/node-1/tcp/4001"
-      CREG_ETH_RPC:         "http://anvil:8545"
-      CREG_BLOCK_INTERVAL:  "5"
-      CREG_IPFS_URL:        "http://ipfs:5001"
-      
-      # Phase 1 Features
-      CREG_ZK_ENABLED:      "true"
-      CREG_ML_ENABLED:      "true"
-      CREG_WASM_ENABLED:    "true"
-      
-      # All Contract Addresses (same as node-1)
-      CREG_REGISTRY_ADDR:           "0x5FbDB2315678afecb367f032d93F642f64180aa3"
-      CREG_ZK_VERIFIER_ADDR:        "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707"
-      CREG_PRIVATE_REGISTRY_ADDR:   "0x0165878A594ca255338adfa4d48449f69242Eb8F"
-      CREG_CROSS_CHAIN_ADDR:        "0xa513E6E4b8f2a923D98304ec87F64353C4D5C853"
-      CREG_CREG_TOKEN_ADDR:         "0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6"
-      CREG_GOVERNANCE_V2_ADDR:      "0x8A791620dd6260079BF849Dc5567aDC3F2FdC318"
-      CREG_INSURANCE_ADDR:          "0x610178dA211FEF7D417bC0e6FeD39F05609AD788"
-      
-      CREG_VALIDATOR_SET:   '{"validators":[{"id":"node-1","alias":"Atomic","stake":150000,"reputation":98,"status":"online"},{"id":"node-2","alias":"Consensus","stake":125000,"reputation":99,"status":"online"},{"id":"node-3","alias":"Beacon","stake":100000,"reputation":95,"status":"online"}]}'
-      RUST_LOG:             "info"
-    ports:
-      - "8083:8080"
-      - "50053:50051" # gRPC
-    volumes:
-      - node3-data:/data
-      - ./circuits:/app/circuits:ro
-      - ./validators:/app/validators:ro
-    depends_on:
-      ipfs:
-        condition: service_started
-      anvil:
-        condition: service_healthy
-      deploy-contracts:
-        condition: service_completed_successfully
-      node-1:
-        condition: service_healthy
-    restart: unless-stopped
-
-  # ── CLI Service (for management commands) ─────────────────────────────────
+  # ── CLI (run management commands) ─────────────────────────────────────────
+  # Usage: docker compose run --rm cli <command>
+  # Example: docker compose run --rm cli status
   cli:
     build:
       context: .
@@ -260,16 +180,14 @@ services:
     entrypoint: ["/app/creg"]
     command: ["--help"]
     environment:
-      CREG_NODE_URL: "http://node-1:50051" # Use gRPC by default in docker cluster
-      CREG_ETH_RPC: "http://anvil:8545"
+      CREG_NODE_URL: "http://node:8080"
+      CREG_ETH_RPC:  "http://anvil:8545"
     depends_on:
-      - node-1
+      - node
     profiles:
       - cli
 
 volumes:
   ipfs-data:
   anvil-data:
-  node1-data:
-  node2-data:
-  node3-data:
+  node-data:

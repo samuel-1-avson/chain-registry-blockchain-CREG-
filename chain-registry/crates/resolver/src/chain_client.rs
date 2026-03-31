@@ -40,7 +40,7 @@ pub async fn fetch_verdict(id: &PackageId, node_url: &str) -> Result<TrustVerdic
                     status: VerdictStatus::Verified {
                         block_hash:   String::new(),
                         content_hash: res.content_hash,
-                        ipfs_cid:     res.ipfs_cid,
+                        ipfs_cid:     String::new(), // not in gRPC response; populated via REST fallback
                         findings:     vec![],
                     },
                     resolved_at: Utc::now(),

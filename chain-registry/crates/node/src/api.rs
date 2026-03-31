@@ -235,7 +235,17 @@ async fn revoke_package(
     let s = state.read().await;
 
     match s.chain.get_package(&canonical) {
-        Ok(Some(_)) => {
+        Ok(Some(record)) => {
+            let tx = common::Transaction::Revoke {
+                package_canonical: canonical.clone(),
+                reason:            req.reason.clone(),
+                revoked_by:        "api-request".into(),
+                evidence_hash:     record.content_hash.clone(),
+            };
+            // Send directly to finalized-tx channel so the block producer picks it up.
+            if s.tx_sender.send(tx).await.is_err() {
+                return server_err("Finalized-tx channel closed".to_string());
+            }
             events::emit(
                 &s.event_bus,
                 events::RegistryEvent::package_revoked(&canonical, &req.reason, "api-request"),

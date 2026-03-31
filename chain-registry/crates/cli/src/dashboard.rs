@@ -100,8 +100,12 @@ pub async fn run(node_url: Option<&str>) -> Result<()> {
     let mut terminal = Terminal::new(backend)?;
 
     let mut app = App::new();
+
+    // Load data immediately — don't make the user wait 5 seconds
+    let _ = app.refresh_data(&api_base).await;
+
     let (tx, mut rx) = mpsc::channel(100);
-    
+
     // Spawn SSE listener
     let tx_sse = tx.clone();
     let api_base_sse = api_base.clone();
@@ -226,15 +230,16 @@ fn ui(f: &mut Frame, app: &App) {
     let block_items: Vec<ListItem> = app.blocks.iter()
         .map(|b| {
             let h = b["header"]["height"].as_u64().unwrap_or(0);
-            let hash = b["hash"].as_str().unwrap_or("?");
+            // API doesn't return top-level hash — use merkle_root as block fingerprint
+            let root = b["header"]["merkle_root"].as_str().unwrap_or("0000000000000000");
+            let hash_display = &root[..root.len().min(14)];
             let txs = b["transactions"].as_array().map(|v| v.len()).unwrap_or(0);
-            let is_shielded = b["transactions"].as_array()
-                .map(|txs_arr| txs_arr.iter().any(|tx| tx["shielded"].as_bool().unwrap_or(false)))
-                .unwrap_or(false);
-            let icon = if is_shielded { "🔒" } else { "  " };
-            let hash_display = if hash.len() > 16 { &hash[..16] } else { hash };
-            let content = format!("#{} {} {} ({} tx)", h, icon, hash_display, txs);
-            let style = if is_shielded { Style::default().fg(Color::Yellow) } else { Style::default().fg(Color::Gray) };
+            let content = format!("#{:<4}  {}..  ({} tx)", h, hash_display, txs);
+            let style = if h == 0 {
+                Style::default().fg(Color::DarkGray)
+            } else {
+                Style::default().fg(Color::Gray)
+            };
             ListItem::new(content).style(style)
         })
         .collect();
@@ -247,26 +252,55 @@ fn ui(f: &mut Frame, app: &App) {
     // Right: Network
     let rows: Vec<Row> = app.nodes.iter()
         .map(|n| {
-            let id = n["id"].as_str().unwrap_or("?");
-            let stake = format!("{}k", n["stake"].as_u64().unwrap_or(0) / 1000);
+            let id     = n["id"].as_str().unwrap_or("?");
+            let alias  = n["alias"].as_str().unwrap_or("");
+            let stake  = format!("{} CREG", n["stake"].as_u64().unwrap_or(0));
+            let rep    = format!("{}/100", n["reputation"].as_u64().unwrap_or(0));
             let status = n["status"].as_str().unwrap_or("?");
+            let label  = if alias.is_empty() { id.to_string() } else { format!("{} ({})", id, alias) };
             Row::new(vec![
-                Span::styled(id, Style::default().fg(Color::Yellow)),
+                Span::styled(label, Style::default().fg(Color::Yellow)),
                 Span::raw(stake),
-                Span::styled(status, Style::default().fg(if status == "online" || status == "self" { Color::Green } else { Color::Red })),
+                Span::raw(rep),
+                Span::styled(status, Style::default().fg(
+                    if status == "online" || status == "self" { Color::Green } else { Color::Red }
+                )),
             ])
         })
         .collect();
-    let network_table = Table::new(rows, [Constraint::Percentage(40), Constraint::Percentage(30), Constraint::Percentage(30)])
+    let network_table = Table::new(rows, [
+            Constraint::Percentage(35),
+            Constraint::Percentage(25),
+            Constraint::Percentage(20),
+            Constraint::Percentage(20),
+        ])
         .block(Block::default().borders(Borders::ALL).title(" NETWORK HEALTH "))
-        .header(Row::new(vec!["Validator", "Stake", "Status"]).style(Style::default().fg(Color::Gray)));
+        .header(Row::new(vec!["Validator", "Stake", "Rep", "Status"]).style(Style::default().fg(Color::Gray)));
     f.render_widget(network_table, body_chunks[1]);
 
     // ── Footer: Live Events ──────────────────────────────────────────────────
-    let event_items: Vec<ListItem> = app.events.iter()
-        .map(|e| ListItem::new(e.clone()).style(Style::default().fg(Color::DarkGray)))
-        .collect();
-    let event_list = List::new(event_items)
+    let height = app.stats["tip_height"].as_u64().unwrap_or(0);
+    let pkg_count = app.stats["package_count"].as_u64().unwrap_or(0);
+    // Build feed: chain summary lines + live SSE events
+    let mut feed: Vec<ListItem> = Vec::new();
+    feed.push(ListItem::new(format!(
+        "[chain]  height={} packages={} blocks={}",
+        height, pkg_count, app.stats["block_count"].as_u64().unwrap_or(0)
+    )).style(Style::default().fg(Color::Cyan)));
+    for b in app.blocks.iter().take(5) {
+        let h = b["header"]["height"].as_u64().unwrap_or(0);
+        let txs = b["transactions"].as_array().map(|v| v.len()).unwrap_or(0);
+        let tx_kinds: Vec<&str> = b["transactions"].as_array()
+            .map(|arr| arr.iter().filter_map(|t| t["type"].as_str()).collect())
+            .unwrap_or_default();
+        let summary = if tx_kinds.is_empty() { "empty".into() } else { tx_kinds.join(", ") };
+        feed.push(ListItem::new(format!("[block#{}] {} tx — {}", h, txs, summary))
+            .style(Style::default().fg(Color::DarkGray)));
+    }
+    for e in app.events.iter() {
+        feed.push(ListItem::new(e.clone()).style(Style::default().fg(Color::Green)));
+    }
+    let event_list = List::new(feed)
         .block(Block::default().borders(Borders::ALL).title(" LIVE FEED (Press 'q' to quit) "))
         .style(Style::default().fg(Color::Gray));
     f.render_widget(event_list, chunks[2]);

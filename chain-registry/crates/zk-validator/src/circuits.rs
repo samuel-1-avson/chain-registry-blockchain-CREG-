@@ -108,9 +108,8 @@ impl ConstraintSynthesizer<Fr> for PackageValidationCircuit {
             .iter()
             .enumerate()
             .fold(ark_r1cs_std::fields::fp::FpVar::zero(), |acc, (i, b)| {
-                let bit_val = b.to_owned();
                 let coeff = Fr::from(1u64 << i);
-                acc + bit_val.to_owned() * coeff
+                acc + FpVar::from(b.to_owned()) * FpVar::constant(coeff)
             });
         let threshold_le = ark_r1cs_std::fields::fp::FpVar::constant(Fr::from(80u64));
         // Enforce score_field - threshold_field >= 0 by constraining the difference
@@ -128,7 +127,7 @@ impl ConstraintSynthesizer<Fr> for PackageValidationCircuit {
             .enumerate()
             .fold(ark_r1cs_std::fields::fp::FpVar::zero(), |acc, (i, b)| {
                 let coeff = Fr::from(1u64 << i);
-                acc + b.to_owned() * coeff
+                acc + FpVar::from(b.to_owned()) * FpVar::constant(coeff)
             });
         diff_le.enforce_equal(&diff_recomputed)?;
 
@@ -147,7 +146,7 @@ impl ConstraintSynthesizer<Fr> for PackageValidationCircuit {
             .enumerate()
             .fold(ark_r1cs_std::fields::fp::FpVar::zero(), |acc, (i, b)| {
                 let coeff = Fr::from(1u64 << i);
-                acc + b.to_owned() * coeff
+                acc + FpVar::from(b.to_owned()) * FpVar::constant(coeff)
             });
         let complexity_le = complexity_var
             .to_bits_le()?
@@ -155,7 +154,7 @@ impl ConstraintSynthesizer<Fr> for PackageValidationCircuit {
             .enumerate()
             .fold(ark_r1cs_std::fields::fp::FpVar::zero(), |acc, (i, b)| {
                 let coeff = Fr::from(1u64 << i);
-                acc + b.to_owned() * coeff
+                acc + FpVar::from(b.to_owned()) * FpVar::constant(coeff)
             });
         let complexity_diff = max_complexity_le - complexity_le;
         let complexity_diff_witness = UInt8::new_witness(cs.clone(), || {
@@ -167,7 +166,7 @@ impl ConstraintSynthesizer<Fr> for PackageValidationCircuit {
             .enumerate()
             .fold(ark_r1cs_std::fields::fp::FpVar::zero(), |acc, (i, b)| {
                 let coeff = Fr::from(1u64 << i);
-                acc + b.to_owned() * coeff
+                acc + FpVar::from(b.to_owned()) * FpVar::constant(coeff)
             });
         complexity_diff.enforce_equal(&complexity_diff_recomputed)?;
         

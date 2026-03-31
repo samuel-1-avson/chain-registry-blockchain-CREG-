@@ -1,0 +1,24 @@
+# Rust build output — gigabytes, never needed in Docker context
+target/
+
+# Node.js dependencies — reinstalled inside Docker
+node_modules/
+explorer/node_modules/
+explorer/dist/
+
+# Git history
+.git/
+.github/
+
+# Local dev / secrets
+.env
+*.key
+*.pem
+
+# IDE
+.vscode/
+.idea/
+
+# Logs and temp files
+*.log
+data/
