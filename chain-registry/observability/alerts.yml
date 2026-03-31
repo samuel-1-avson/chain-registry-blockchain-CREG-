@@ -1,0 +1,115 @@
+# observability/alerts.yml
+# Prometheus alerting rules for the chain-registry cluster.
+
+groups:
+
+  - name: chain_registry_chain
+    rules:
+
+      # ── Chain health ────────────────────────────────────────────────────────
+
+      - alert: ChainStalled
+        expr: |
+          increase(creg_chain_height[5m]) == 0
+          AND creg_pending_pool_size > 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Chain is stalled ({{ $labels.instance }})"
+          description: >
+            No new blocks have been produced in 5 minutes despite {{ $value }}
+            packages waiting in the pending pool. The block producer or consensus
+            layer may be broken.
+
+      - alert: ChainNodeDown
+        expr: up{job="chain_registry_nodes"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Chain node is unreachable ({{ $labels.instance }})"
+          description: >
+            Prometheus cannot scrape {{ $labels.instance }}.
+            The node may have crashed or lost network connectivity.
+
+      - alert: ChainNodesLow
+        expr: count(up{job="chain_registry_nodes"} == 1) < 2
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Fewer than 2 chain nodes reachable"
+          description: >
+            Only {{ $value }} node(s) are reachable. PBFT consensus requires
+            at least ⌊2n/3⌋+1 nodes. With fewer than 2 nodes, new packages
+            cannot reach consensus.
+
+      # ── Pending pool ────────────────────────────────────────────────────────
+
+      - alert: PendingPoolBacklog
+        expr: creg_pending_pool_size > 50
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Large pending pool backlog ({{ $labels.instance }})"
+          description: >
+            {{ $value }} packages have been in the pending pool for more than
+            5 minutes. Validator throughput may be too low for the submission rate.
+
+      - alert: PendingPoolCritical
+        expr: creg_pending_pool_size > 200
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical pending pool backlog — packages may time out"
+          description: >
+            {{ $value }} packages are awaiting validation. At this rate packages
+            will time out before reaching consensus.
+
+      # ── Block production ────────────────────────────────────────────────────
+
+      - alert: BlockHeightDivergence
+        expr: |
+          max(creg_chain_height) - min(creg_chain_height) > 10
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Chain height divergence between nodes"
+          description: >
+            The chain height difference between the highest and lowest node is
+            {{ $value }} blocks. One or more nodes may be partitioned or syncing
+            slowly.
+
+  - name: chain_registry_packages
+    rules:
+
+      - alert: PackageVerificationRateDropped
+        expr: |
+          rate(creg_package_count[10m]) < 0.01
+          AND rate(creg_pending_pool_size[10m]) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Package verification rate has dropped significantly"
+          description: >
+            Packages are being submitted but few are being verified. Check
+            validator node health and the PBFT consensus logs.
+
+  - name: chain_registry_infrastructure
+    rules:
+
+      - alert: IPFSDown
+        expr: up{job="ipfs"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "IPFS node is unreachable"
+          description: >
+            The IPFS node is down. Package tarballs cannot be fetched by
+            validator nodes, which will stall all pending validations.

@@ -1,0 +1,220 @@
+{
+  "title": "Chain Registry — Node Dashboard",
+  "uid": "chain-registry-main",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "10s",
+  "time": { "from": "now-1h", "to": "now" },
+  "tags": ["chain-registry", "blockchain", "packages"],
+  "panels": [
+
+    {
+      "id": 1,
+      "title": "Chain height",
+      "type": "stat",
+      "gridPos": { "x": 0, "y": 0, "w": 4, "h": 4 },
+      "targets": [{
+        "expr": "max(creg_chain_height)",
+        "legendFormat": "tip height"
+      }],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "value": null, "color": "green" }
+            ]
+          }
+        }
+      }
+    },
+
+    {
+      "id": 2,
+      "title": "Verified packages",
+      "type": "stat",
+      "gridPos": { "x": 4, "y": 0, "w": 4, "h": 4 },
+      "targets": [{
+        "expr": "max(creg_package_count)",
+        "legendFormat": "packages"
+      }],
+      "options": { "colorMode": "background" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [{ "value": null, "color": "blue" }]
+          }
+        }
+      }
+    },
+
+    {
+      "id": 3,
+      "title": "Pending pool size",
+      "type": "stat",
+      "gridPos": { "x": 8, "y": 0, "w": 4, "h": 4 },
+      "targets": [{
+        "expr": "max(creg_pending_pool_size)",
+        "legendFormat": "pending"
+      }],
+      "options": { "colorMode": "background" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "value": null,  "color": "green"  },
+              { "value": 20,    "color": "yellow" },
+              { "value": 50,    "color": "red"    }
+            ]
+          }
+        }
+      }
+    },
+
+    {
+      "id": 4,
+      "title": "Nodes online",
+      "type": "stat",
+      "gridPos": { "x": 12, "y": 0, "w": 4, "h": 4 },
+      "targets": [{
+        "expr": "count(up{job='chain_registry_nodes'} == 1)",
+        "legendFormat": "nodes"
+      }],
+      "options": { "colorMode": "background" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "value": null, "color": "red"    },
+              { "value": 2,    "color": "yellow" },
+              { "value": 3,    "color": "green"  }
+            ]
+          }
+        }
+      }
+    },
+
+    {
+      "id": 5,
+      "title": "Unique publishers",
+      "type": "stat",
+      "gridPos": { "x": 16, "y": 0, "w": 4, "h": 4 },
+      "targets": [{
+        "expr": "max(creg_publisher_count)",
+        "legendFormat": "publishers"
+      }],
+      "options": { "colorMode": "value" }
+    },
+
+    {
+      "id": 6,
+      "title": "Chain height over time (per node)",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
+      "targets": [{
+        "expr": "creg_chain_height",
+        "legendFormat": "{{ instance }}"
+      }],
+      "options": {
+        "tooltip": { "mode": "multi" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "lineWidth": 2, "fillOpacity": 8 }
+        }
+      }
+    },
+
+    {
+      "id": 7,
+      "title": "Pending pool over time",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
+      "targets": [{
+        "expr": "creg_pending_pool_size",
+        "legendFormat": "{{ instance }}"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "value": null, "color": "green"  },
+              { "value": 20,   "color": "yellow" },
+              { "value": 50,   "color": "red"    }
+            ]
+          },
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "thresholdsStyle": { "mode": "dashed" }
+          }
+        }
+      }
+    },
+
+    {
+      "id": 8,
+      "title": "Packages verified rate (per minute)",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
+      "targets": [{
+        "expr": "rate(creg_package_count[1m]) * 60",
+        "legendFormat": "packages/min ({{ instance }})"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "lineWidth": 2, "fillOpacity": 10 }
+        }
+      }
+    },
+
+    {
+      "id": 9,
+      "title": "Block production rate (per minute)",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
+      "targets": [{
+        "expr": "rate(creg_block_count[1m]) * 60",
+        "legendFormat": "blocks/min ({{ instance }})"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "lineWidth": 2, "fillOpacity": 10 }
+        }
+      }
+    },
+
+    {
+      "id": 10,
+      "title": "Node height divergence",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 20, "w": 24, "h": 6 },
+      "targets": [{
+        "expr": "max(creg_chain_height) - min(creg_chain_height)",
+        "legendFormat": "height divergence (blocks)"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "value": null, "color": "green"  },
+              { "value": 3,    "color": "yellow" },
+              { "value": 10,   "color": "red"    }
+            ]
+          },
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 20,
+            "thresholdsStyle": { "mode": "area" }
+          }
+        }
+      }
+    }
+  ]
+}

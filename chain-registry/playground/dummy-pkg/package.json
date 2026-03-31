@@ -1,0 +1,7 @@
+{
+  "name": "dummy-system-test",
+  "version": "1.0.0",
+  "description": "Dummy package for testing registry validation pipeline.",
+  "main": "index.js",
+  "author": "Antigravity tester"
+}

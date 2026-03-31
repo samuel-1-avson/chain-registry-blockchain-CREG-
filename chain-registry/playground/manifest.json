@@ -1,0 +1,6 @@
+{
+  "allowed_network_hosts": [],
+  "allowed_fs_writes": ["/tmp"],
+  "spawns_processes": false,
+  "description": "Dummy package for system testing."
+}

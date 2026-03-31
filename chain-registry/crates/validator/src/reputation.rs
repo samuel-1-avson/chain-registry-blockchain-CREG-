@@ -1,0 +1,224 @@
+// crates/validator/src/reputation.rs
+// Stage 3: Reputation-weighted voting.
+// Before casting its PBFT vote, a validator checks the publisher's
+// on-chain history: prior revocations, stake size, and submission volume.
+// This stage cannot alone block a package — it adjusts the confidence
+// score that feeds into the final ValidatorVote.
+
+use serde::{Deserialize, Serialize};
+
+/// Confidence adjustment produced by the reputation stage.
+/// A very negative adjustment will tip a borderline static/sandbox result
+/// into a Reject. A strong positive will not override clear malice.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReputationAssessment {
+    /// -100 (deeply untrusted) to +100 (highly trusted publisher).
+    pub confidence_delta: i32,
+    pub publisher_pubkey: String,
+    pub notes: Vec<String>,
+}
+
+/// Query the reputation of a publisher from the chain node.
+/// In a full deployment this calls GET /v1/publishers/:pubkey on the node.
+pub async fn assess_publisher(
+    publisher_pubkey: &str,
+    node_url: &str,
+) -> anyhow::Result<ReputationAssessment> {
+    let url = format!(
+        "{}/v1/publishers/{}",
+        node_url.trim_end_matches('/'),
+        publisher_pubkey
+    );
+
+    match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(4))
+        .build()?
+        .get(&url)
+        .send()
+        .await
+    {
+        Ok(resp) if resp.status().is_success() => {
+            let body: PublisherRecord = resp.json().await?;
+            Ok(build_assessment(publisher_pubkey, &body))
+        }
+        // If the node is unreachable or publisher is unknown, treat as neutral.
+        _ => Ok(ReputationAssessment {
+            confidence_delta: 0,
+            publisher_pubkey: publisher_pubkey.to_string(),
+            notes: vec!["Publisher reputation unknown — treating as neutral".into()],
+        }),
+    }
+}
+
+/// Publisher record as returned by the chain node REST API.
+#[derive(Deserialize)]
+struct PublisherRecord {
+    total_packages:   u32,
+    verified_count:   u32,
+    revoked_count:    u32,
+    stake_wei:        u64,
+    first_seen_days:  u32,
+}
+
+fn build_assessment(pubkey: &str, rec: &PublisherRecord) -> ReputationAssessment {
+    let mut delta: i32 = 0;
+    let mut notes = Vec::new();
+
+    // ── Revocation penalty ────────────────────────────────────────────────────
+    if rec.revoked_count > 0 {
+        let penalty = (rec.revoked_count as i32) * -25;
+        delta += penalty;
+        notes.push(format!(
+            "{} prior revocation(s) → -{} confidence",
+            rec.revoked_count,
+            penalty.abs()
+        ));
+    }
+
+    // ── Track record bonus ────────────────────────────────────────────────────
+    if rec.verified_count >= 10 {
+        delta += 20;
+        notes.push(format!("{} verified packages on record → +20", rec.verified_count));
+    } else if rec.verified_count >= 3 {
+        delta += 10;
+        notes.push(format!("{} verified packages on record → +10", rec.verified_count));
+    } else if rec.verified_count == 0 && rec.total_packages == 0 {
+        delta -= 10;
+        notes.push("First-time publisher — no track record → -10".into());
+    }
+
+    // ── Stake size bonus (skin in the game) ──────────────────────────────────
+    // 1 ETH = 1e18 wei
+    let stake_eth = rec.stake_wei / 1_000_000_000_000_000_000;
+    if stake_eth >= 5 {
+        delta += 15;
+        notes.push(format!("{} ETH staked → +15 confidence", stake_eth));
+    } else if stake_eth >= 1 {
+        delta += 5;
+        notes.push(format!("{} ETH staked → +5 confidence", stake_eth));
+    }
+
+    // ── Account age bonus ─────────────────────────────────────────────────────
+    if rec.first_seen_days >= 365 {
+        delta += 10;
+        notes.push(format!("Account {} days old → +10", rec.first_seen_days));
+    } else if rec.first_seen_days < 7 {
+        delta -= 15;
+        notes.push(format!("Account only {} days old → -15", rec.first_seen_days));
+    }
+
+    // Hard floor/ceiling.
+    delta = delta.clamp(-100, 100);
+
+    ReputationAssessment {
+        confidence_delta: delta,
+        publisher_pubkey: pubkey.to_string(),
+        notes,
+    }
+}
+
+/// Combine static analysis + sandbox findings with the reputation delta
+/// to produce a final pass/fail decision with a confidence score.
+pub fn final_decision(
+    static_critical: bool,
+    sandbox_critical: bool,
+    reputation_delta: i32,
+) -> FinalDecision {
+    // Any critical finding is always a hard reject regardless of reputation.
+    if static_critical || sandbox_critical {
+        return FinalDecision::Reject {
+            reason: if static_critical {
+                "Critical static analysis finding".into()
+            } else {
+                "Critical sandbox behavior finding".into()
+            },
+            confidence: 95,
+        };
+    }
+
+    // No critical findings — use reputation to decide.
+    // Scale: delta < -50 → reject; -50 to 0 → warn (approve with flag);
+    //        0 to +100 → approve with increasing confidence.
+    match reputation_delta {
+        i32::MIN..=-50 => FinalDecision::Reject {
+            reason: format!(
+                "Publisher reputation score {} falls below trust threshold",
+                reputation_delta
+            ),
+            confidence: 70,
+        },
+        -49..=-1 => FinalDecision::ApproveWithWarning {
+            warning: format!(
+                "Publisher reputation is low (delta {}). Monitor this package.",
+                reputation_delta
+            ),
+            confidence: (50 + reputation_delta).max(10) as u8,
+        },
+        0..=i32::MAX => FinalDecision::Approve {
+            confidence: (60 + reputation_delta / 2).min(100) as u8,
+        },
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum FinalDecision {
+    Approve         { confidence: u8 },
+    ApproveWithWarning { warning: String, confidence: u8 },
+    Reject          { reason: String, confidence: u8 },
+}
+
+impl FinalDecision {
+    pub fn is_reject(&self) -> bool {
+        matches!(self, FinalDecision::Reject { .. })
+    }
+
+    pub fn reject_reason(&self) -> Option<&str> {
+        match self {
+            FinalDecision::Reject { reason, .. } => Some(reason),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn critical_finding_always_rejects() {
+        let d = final_decision(true, false, 100);
+        assert!(d.is_reject());
+    }
+
+    #[test]
+    fn bad_reputation_rejects_clean_package() {
+        let d = final_decision(false, false, -80);
+        assert!(d.is_reject());
+    }
+
+    #[test]
+    fn good_reputation_approves() {
+        let d = final_decision(false, false, 50);
+        assert!(!d.is_reject());
+        assert!(matches!(d, FinalDecision::Approve { confidence } if confidence > 60));
+    }
+
+    #[test]
+    fn marginal_reputation_warns() {
+        let d = final_decision(false, false, -20);
+        assert!(matches!(d, FinalDecision::ApproveWithWarning { .. }));
+    }
+
+    #[test]
+    fn multiple_revocations_tank_score() {
+        let rec = PublisherRecord {
+            total_packages: 5,
+            verified_count: 3,
+            revoked_count: 3,
+            stake_wei: 0,
+            first_seen_days: 30,
+        };
+        let assessment = build_assessment("pubkey", &rec);
+        assert!(assessment.confidence_delta < -50);
+    }
+}

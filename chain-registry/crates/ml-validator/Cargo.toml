@@ -1,0 +1,52 @@
+[package]
+name = "ml-validator"
+version = "0.1.0"
+edition = "2021"
+authors = ["Chain Registry Team"]
+description = "Machine learning-based threat detection for package validation"
+
+[dependencies]
+# ONNX Runtime for inference
+ort = { workspace = true, features = ["ndarray"] }
+ndarray = { version = "0.15", features = ["rayon"] }
+
+# Tokenization for code
+tokenizers = { version = "0.15", default-features = false, features = ["onig"] }
+
+# Feature extraction
+tree-sitter = "0.20"
+tree-sitter-javascript = "0.20"
+tree-sitter-python = "0.20"
+tree-sitter-rust = "0.20"
+
+# Cryptographic hash for feature hashing
+sha2 = "0.10"
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
+
+# Statistics
+statrs = "0.16"
+regex = "1"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Async
+tokio = { workspace = true }
+futures = "0.3"
+
+# Error handling
+thiserror = "1.0"
+anyhow = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Parallel processing
+rayon = "1.7"
+
+# Common crate
+common = { path = "../common" }
+
+[dev-dependencies]
+tempfile = "3"

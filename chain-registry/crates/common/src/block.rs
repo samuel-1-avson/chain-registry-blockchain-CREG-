@@ -1,0 +1,104 @@
+// crates/common/src/block.rs
+
+use serde::{Deserialize, Serialize};
+use chrono::{DateTime, Utc};
+use crate::{sha256_hex, ChainRecord};
+
+/// A single block in the package registry blockchain.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Block {
+    pub header: BlockHeader,
+    pub transactions: Vec<Transaction>,
+}
+
+impl Block {
+    /// Compute the block hash over the serialized header.
+    pub fn hash(&self) -> String {
+        let header_bytes = serde_json::to_vec(&self.header)
+            .expect("BlockHeader must be serializable");
+        sha256_hex(&header_bytes)
+    }
+
+    /// Genesis block — the first block in the chain with no parent.
+    pub fn genesis() -> Self {
+        Self {
+            header: BlockHeader {
+                height: 0,
+                prev_hash: "0".repeat(64),
+                merkle_root: "0".repeat(64),
+                proposer_id: "genesis".into(),
+                timestamp: DateTime::parse_from_rfc3339("2024-01-01T00:00:00Z")
+                    .unwrap()
+                    .with_timezone(&Utc),
+                validator_set_hash: "0".repeat(64),
+            },
+            transactions: vec![],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlockHeader {
+    pub height: u64,
+    /// Hash of the previous block — links the chain.
+    pub prev_hash: String,
+    /// Merkle root of all transaction hashes in this block.
+    pub merkle_root: String,
+    /// ID of the validator node that proposed this block.
+    pub proposer_id: String,
+    pub timestamp: DateTime<Utc>,
+    /// Hash of the current active validator set (detects set changes).
+    pub validator_set_hash: String,
+}
+
+/// Every action recorded on the chain is a Transaction.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Transaction {
+    /// A new package accepted by consensus.
+    Publish(ChainRecord),
+    /// A previously accepted package has been revoked.
+    Revoke {
+        package_canonical: String,
+        reason: String,
+        revoked_by: String,
+        evidence_hash: String,
+    },
+    /// A validator's stake was slashed for bad behaviour.
+    Slash {
+        validator_id: String,
+        amount: u64,
+        reason: String,
+    },
+    /// A new validator joined the active set.
+    ValidatorJoin {
+        validator_id: String,
+        pubkey: String,
+        stake: u64,
+    },
+    /// A validator left the active set.
+    ValidatorLeave {
+        validator_id: String,
+    },
+}
+
+/// Computes the Merkle root of a list of transaction hashes.
+/// Returns a fixed "empty" hash for an empty list.
+pub fn merkle_root(txs: &[Transaction]) -> String {
+    if txs.is_empty() {
+        return sha256_hex(b"empty");
+    }
+    let mut hashes: Vec<String> = txs.iter()
+        .map(|tx| sha256_hex(serde_json::to_vec(tx).unwrap().as_slice()))
+        .collect();
+
+    while hashes.len() > 1 {
+        if hashes.len() % 2 != 0 {
+            hashes.push(hashes.last().unwrap().clone());
+        }
+        hashes = hashes.chunks(2)
+            .map(|pair| sha256_hex(format!("{}{}", pair[0], pair[1]).as_bytes()))
+            .collect();
+    }
+    hashes.remove(0)
+}

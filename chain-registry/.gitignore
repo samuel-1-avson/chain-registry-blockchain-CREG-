@@ -1,0 +1,50 @@
+# Rust
+/target/
+Cargo.lock
+creg.exe
+creg-node.exe
+*.pdb
+
+# Solidity / Core Logic (Local Execution Only)
+contracts/
+*.sol
+out/
+cache/
+deployments/
+
+# Environment & Secrets
+.env
+*.key
+*.pem
+.gemini/
+
+# Data & Storage
+/data/
+/node*-data/
+/ipfs-data/
+/anvil_state.json
+/dev-data/
+
+# TUI & Logs
+*.log
+node_err.log
+publish_log.txt
+build_log.txt
+
+# Package Artifacts
+*.tgz
+demo-v2/
+malicious-pkg/
+good-pkg-v1/
+good-pkg-v2/
+evil-pkg-v1/
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+
+# Coverage
+coverage/

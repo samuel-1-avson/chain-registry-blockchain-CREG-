@@ -1,0 +1,39 @@
+# observability/prometheus.yml
+# Prometheus scrape config for the chain-registry cluster.
+# Place this file alongside your Prometheus install and restart.
+
+global:
+  scrape_interval:     15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: chain-registry
+
+# Alerting rules file.
+rule_files:
+  - "alerts.yml"
+
+scrape_configs:
+
+  # ── Chain registry nodes ──────────────────────────────────────────────────
+  - job_name: chain_registry_nodes
+    static_configs:
+      - targets:
+          - "node-1:8080"
+          - "node-2:8080"
+          - "node-3:8080"
+        labels:
+          cluster: chain-registry
+    metrics_path: /metrics
+    scrape_interval: 10s
+
+  # ── IPFS node ─────────────────────────────────────────────────────────────
+  - job_name: ipfs
+    static_configs:
+      - targets: ["ipfs:5001"]
+    metrics_path: /debug/metrics/prometheus
+    scrape_interval: 30s
+
+  # ── Prometheus itself ─────────────────────────────────────────────────────
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

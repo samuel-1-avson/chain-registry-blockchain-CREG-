@@ -1,0 +1,64 @@
+# Ignore all .md files everywhere
+**/*.md
+*.md
+
+# Allow ONLY the root README.md
+!/README.md
+
+# Rust
+target/
+Cargo.lock
+**/*.pdb
+creg.exe
+creg-node.exe
+
+# Solidity / Core Logic (Do not include smart contracts)
+contracts/
+**/contracts/
+*.sol
+**/*.sol
+out/
+cache/
+deployments/
+
+# Environment & Secrets
+.env
+*.key
+*.pem
+.gemini/
+.claude/
+
+# Data & Storage
+data/
+node*-data/
+ipfs-data/
+anvil_state.json
+dev-data/
+tmp/
+
+# TUI & Logs
+*.log
+node_err.log
+publish_log.txt
+build_log.txt
+
+# Package Artifacts
+*.tgz
+demo-v2/
+malicious-pkg/
+good-pkg-v1/
+good-pkg-v2/
+evil-pkg-v1/
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+
+# Coverage
+coverage/
+
+# Misc
+node_modules/

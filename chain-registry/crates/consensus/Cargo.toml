@@ -1,0 +1,19 @@
+[package]
+name    = "consensus"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+common     = { path = "../common" }
+serde      = { workspace = true }
+serde_json = { workspace = true }
+anyhow     = { workspace = true }
+tracing    = { workspace = true }
+chrono     = { workspace = true }
+hex        = { workspace = true }
+sha2       = { workspace = true }
+rand       = { workspace = true }
+
+# Ethereum cryptographic primitives for ECDSA signature verification
+ethers-core = { version = "2.0", default-features = false }
+k256 = { version = "0.13", features = ["ecdsa", "sha256"] }
