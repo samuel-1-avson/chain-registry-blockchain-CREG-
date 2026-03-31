@@ -4,6 +4,7 @@
 
 use anyhow::Result;
 use common::{PackageManifest, Finding, FindingSeverity};
+use serde_json;
 
 pub struct StaticAnalysisResult {
     pub findings: Vec<Finding>,
@@ -140,9 +141,13 @@ pub async fn run(
         }
     }
 
-    // Check for typosquatting indicators vs known popular packages.
-    if let Some(finding) = check_typosquatting(&files) {
-        findings.push(finding);
+    // Check for typosquatting using Levenshtein distance against all popular packages.
+    // Extract the package name from package.json / Cargo.toml / setup.py for the check.
+    let (pkg_name, ecosystem) = extract_package_identity(&files);
+    if !pkg_name.is_empty() {
+        if let Some(finding) = check_typosquatting_real(&pkg_name, &ecosystem) {
+            findings.push(finding);
+        }
     }
 
     Ok(StaticAnalysisResult { findings })
@@ -201,39 +206,47 @@ fn extract_text_files(tarball: &[u8]) -> Result<Vec<(String, String)>> {
     Ok(files)
 }
 
-fn check_typosquatting(files: &[(String, String)]) -> Option<Finding> {
-    // Simplified: check if package.json name closely matches a known package.
-    let known = ["express", "lodash", "react", "axios", "moment", "chalk"];
+use crate::typosquat;
+
+/// Extract the package name and ecosystem from the tarball's manifest files.
+fn extract_package_identity(files: &[(String, String)]) -> (String, String) {
     for (path, content) in files {
         if path.ends_with("package.json") {
-            for popular in &known {
-                // Levenshtein distance check omitted for brevity.
-                // A real implementation would use a proper edit-distance library.
-                if content.contains(&format!("\"{}\"", popular.replace('e', "3"))) {
-                    return Some(Finding {
-                        id: "SA010".into(),
-                        title: "Typosquatting mismatch".into(),
-                        severity: FindingSeverity::Critical,
-                        description: format!("Possible typosquatting of '{}'", popular),
-                        file: path.clone(),
-                        line: None,
-                    });
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(content) {
+                if let Some(name) = v["name"].as_str() {
+                    return (name.to_string(), "npm".to_string());
+                }
+            }
+        }
+        if path.ends_with("Cargo.toml") {
+            for line in content.lines() {
+                if let Some(rest) = line.strip_prefix("name") {
+                    let name = rest.trim_start_matches([' ', '=', '"']).trim_end_matches('"').trim();
+                    if !name.is_empty() {
+                        return (name.to_string(), "cargo".to_string());
+                    }
+                }
+            }
+        }
+        if path.ends_with("setup.py") || path.ends_with("setup.cfg") || path.ends_with("pyproject.toml") {
+            for line in content.lines() {
+                if line.trim_start().starts_with("name") {
+                    let name = line.splitn(2, '=').nth(1)
+                        .unwrap_or("")
+                        .trim()
+                        .trim_matches(['"', '\'', ' ']);
+                    if !name.is_empty() {
+                        return (name.to_string(), "pypi".to_string());
+                    }
                 }
             }
         }
     }
-    None
+    (String::new(), String::new())
 }
 
-// ── Real typosquatting check using Levenshtein distance ──────────────────────
-
-use crate::typosquat;
-
-/// Replace the placeholder typosquat check with the real Levenshtein implementation.
-pub fn check_typosquatting_real(
-    package_name: &str,
-    ecosystem: &str,
-) -> Option<Finding> {
+/// Levenshtein-distance based typosquat check against all known popular packages.
+pub fn check_typosquatting_real(package_name: &str, ecosystem: &str) -> Option<Finding> {
     typosquat::check(package_name, ecosystem).map(|m| Finding {
         id:          "SA010".into(),
         title:       "Typosquatting detected".into(),

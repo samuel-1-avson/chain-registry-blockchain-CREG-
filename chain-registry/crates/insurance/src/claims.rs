@@ -260,7 +260,7 @@ impl ClaimEvaluator {
     }
     
     /// Batch evaluate claims
-    pub fn batch_evaluate(&self, claims: &[(Claim, Vec<Evidence>)]) -> Vec<(&Claim, EvaluationResult)> {
+    pub fn batch_evaluate<'a>(&self, claims: &'a [(Claim, Vec<Evidence>)]) -> Vec<(&'a Claim, EvaluationResult)> {
         claims
             .iter()
             .map(|(claim, evidence)| (claim, self.evaluate(claim, evidence)))

@@ -26,6 +26,10 @@ chrono = { workspace = true }
 # Math
 statrs = "0.16"
 
+# HTTP client for chain data lookups
+reqwest = { workspace = true, features = ["blocking", "json"] }
+urlencoding = "2.1"
+
 # Common crate
 common = { path = "../common" }
 

@@ -249,9 +249,10 @@ impl InsurancePool {
         
         self.balance += policy.premium;
         self.total_coverage = new_coverage;
-        self.policies.insert(policy.id.clone(), policy);
-        
-        info!("Policy {} added to pool", policy.id);
+        let policy_id = policy.id.clone();
+        self.policies.insert(policy_id.clone(), policy);
+
+        info!("Policy {} added to pool", policy_id);
         
         Ok(())
     }
