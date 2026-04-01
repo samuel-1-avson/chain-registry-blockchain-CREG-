@@ -17,10 +17,22 @@ mod dashboard_enhanced;
 mod config_file;
 mod batch;
 mod advanced;
+mod retry;
+// New command modules
+mod doctor;
+mod search;
+mod info;
+mod graph;
+mod diff;
+mod policy;
+mod sbom;
+mod update;
+mod multisig;
 
 use clap::{Parser, Subcommand, CommandFactory};
 use clap_complete::{generate, Shell};
 use anyhow::Result;
+use colored::Colorize;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
@@ -44,6 +56,16 @@ struct Cli {
     /// Disable colored output.
     #[arg(long, global = true)]
     no_color: bool,
+
+    /// Output format: text (default) or json.
+    #[arg(long, global = true, default_value = "text", value_name = "FORMAT")]
+    output: OutputFormat,
+}
+
+#[derive(Debug, Clone, clap::ValueEnum)]
+enum OutputFormat {
+    Text,
+    Json,
 }
 
 #[derive(Subcommand)]
@@ -109,6 +131,9 @@ enum Commands {
         /// Output file path (defaults to ~/.creg/<role>.key)
         #[arg(short, long)]
         output: Option<std::path::PathBuf>,
+        /// Rotate an existing key instead of generating a fresh one.
+        #[arg(long)]
+        rotate: bool,
     },
 
     /// Manage the local pkg-lock.chain file.
@@ -119,6 +144,9 @@ enum Commands {
         /// Clear the lockfile.
         #[arg(long)]
         clear: bool,
+        /// Diff the lockfile against current chain state.
+        #[arg(long)]
+        diff: bool,
     },
 
     /// Audit all currently-installed packages against the chain.
@@ -132,6 +160,9 @@ enum Commands {
         /// Output raw JSON.
         #[arg(long)]
         json: bool,
+        /// Attempt to auto-remediate revoked packages.
+        #[arg(long)]
+        fix: bool,
     },
 
     /// Verify a single package and optionally save a proof checkpoint.
@@ -155,6 +186,9 @@ enum Commands {
         /// Override the node URL for this session.
         #[arg(long)]
         node_url: Option<String>,
+        /// CI mode: exit 1 on any Critical security event.
+        #[arg(long)]
+        ci: bool,
     },
 
     /// Stake ETH as a publisher or validator.
@@ -211,6 +245,81 @@ enum Commands {
     Advanced {
         #[command(subcommand)]
         command: AdvancedCommands,
+    },
+
+    /// Check system prerequisites (node, IPFS, key, nsjail, gpg).
+    Doctor,
+
+    /// Search for packages in the chain registry.
+    Search {
+        /// Search query
+        query: String,
+        /// Ecosystem filter (npm, pip, cargo, …)
+        #[arg(short, long)]
+        ecosystem: Option<String>,
+    },
+
+    /// Show detailed information about a registered package.
+    Info {
+        /// Package canonical name or "name@version"
+        package: String,
+        /// Ecosystem
+        #[arg(short, long)]
+        ecosystem: Option<String>,
+    },
+
+    /// Visualize the dependency graph for a package.
+    Graph {
+        /// Package name (e.g. express@4.18.2)
+        package: String,
+        /// Ecosystem
+        #[arg(short, long)]
+        ecosystem: Option<String>,
+        /// Maximum recursion depth
+        #[arg(short, long, default_value = "3")]
+        depth: u32,
+    },
+
+    /// Show file-level diff between two published package versions.
+    Diff {
+        /// First package version (e.g. express@4.17.0)
+        pkg_a: String,
+        /// Second package version (e.g. express@4.18.2)
+        pkg_b: String,
+    },
+
+    /// Policy management (policy-as-code).
+    Policy {
+        #[command(subcommand)]
+        command: PolicyCommands,
+    },
+
+    /// Export a Software Bill of Materials (SBOM) for a package.
+    Sbom {
+        /// Package name
+        package: String,
+        /// Ecosystem
+        #[arg(short, long)]
+        ecosystem: Option<String>,
+        /// SBOM format: spdx (default) or cyclonedx
+        #[arg(short, long, default_value = "spdx")]
+        format: String,
+        /// Save to this file (defaults to stdout)
+        #[arg(long, value_name = "FILE")]
+        save: Option<std::path::PathBuf>,
+    },
+
+    /// Self-update the creg binary.
+    Update {
+        /// Only check for updates, don't install.
+        #[arg(long)]
+        check: bool,
+    },
+
+    /// Multi-signature publish workflow.
+    Multisig {
+        #[command(subcommand)]
+        command: MultisigCommands,
     },
 }
 
@@ -269,6 +378,9 @@ enum AdvancedCommands {
         /// Output file for ZK proof
         #[arg(short, long)]
         output: Option<std::path::PathBuf>,
+        /// Verify an existing proof file instead of generating
+        #[arg(long)]
+        verify: Option<std::path::PathBuf>,
     },
     /// Verify using ML-based threat detection
     MlVerify {
@@ -317,6 +429,57 @@ enum AdvancedCommands {
     },
 }
 
+#[derive(Subcommand)]
+enum PolicyCommands {
+    /// Show active policy and insurance records
+    Show {
+        /// Publisher pubkey to query (defaults to CREG_PUBLISHER_PUBKEY env var)
+        #[arg(long)]
+        pubkey: Option<String>,
+    },
+    /// Apply a policy file as the active org policy
+    Apply {
+        /// Path to the policy TOML file
+        policy_file: std::path::PathBuf,
+        /// Validate the policy file without applying it
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Print an example policy template
+    Init,
+}
+
+#[derive(Subcommand)]
+enum MultisigCommands {
+    /// Initialize a new multisig session for a tarball
+    Init {
+        /// Path to the package tarball
+        tarball: std::path::PathBuf,
+        /// Minimum number of signatures required (M-of-N)
+        #[arg(short, long, default_value = "2")]
+        threshold: usize,
+        /// Output session file path
+        #[arg(short, long, default_value = ".creg-multisig.json")]
+        output: std::path::PathBuf,
+    },
+    /// Add your signature to a multisig session
+    Sign {
+        /// Path to the multisig session file
+        session: std::path::PathBuf,
+        /// Your Ed25519 private key (hex)
+        #[arg(short, long, env = "CREG_PUBLISHER_KEY")]
+        key: String,
+    },
+    /// Submit a completed multisig session to the chain
+    Submit {
+        /// Path to the multisig session file
+        session: std::path::PathBuf,
+        /// Optional manifest file
+        #[arg(short, long)]
+        manifest: Option<std::path::PathBuf>,
+    },
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -325,6 +488,7 @@ async fn main() -> Result<()> {
         .init();
 
     let cli = Cli::parse();
+    let json_out = matches!(cli.output, OutputFormat::Json);
 
     match cli.command {
         Commands::Install { package, ecosystem, unverified } => {
@@ -337,7 +501,7 @@ async fn main() -> Result<()> {
                 ecosystem.as_deref(),
                 cli.node_url.as_deref(),
             ).await?;
-            if json {
+            if json || json_out {
                 println!("{}", serde_json::to_string_pretty(&verdict)?);
             } else {
                 output::print_verdict(&verdict);
@@ -360,27 +524,38 @@ async fn main() -> Result<()> {
                 resolver::cache::print_entries()?;
             }
         }
-        Commands::Keygen { role, output } => {
-            keygen::run(output.as_deref(), &role)?;
+        Commands::Keygen { role, output, rotate } => {
+            if rotate {
+                keygen::rotate(output.as_deref(), &role)?;
+            } else {
+                keygen::run(output.as_deref(), &role)?;
+            }
         }
-        Commands::Lockfile { clear, dir } => {
+        Commands::Lockfile { clear, dir, diff } => {
             let d = dir.unwrap_or_else(|| std::env::current_dir().unwrap());
             if clear {
                 let path = d.join("pkg-lock.chain");
                 if path.exists() { std::fs::remove_file(&path)?; }
                 println!("pkg-lock.chain cleared.");
+            } else if diff {
+                lockfile::diff(&d, cli.node_url.as_deref()).await?;
             } else {
                 lockfile::print_lockfile(&d)?;
             }
         }
-        Commands::Audit { ecosystem, strict, json } => {
-            let code = audit::run(
-                ecosystem.as_deref(),
-                cli.node_url.as_deref(),
-                strict,
-                json,
-            ).await?;
-            std::process::exit(code);
+        Commands::Audit { ecosystem, strict, json, fix } => {
+            if fix {
+                let code = audit::run_fix(ecosystem.as_deref(), cli.node_url.as_deref()).await?;
+                std::process::exit(code);
+            } else {
+                let code = audit::run(
+                    ecosystem.as_deref(),
+                    cli.node_url.as_deref(),
+                    strict,
+                    json || json_out,
+                ).await?;
+                std::process::exit(code);
+            }
         }
         Commands::Verify { package, ecosystem, checkpoint, json } => {
             verify::run(
@@ -388,12 +563,12 @@ async fn main() -> Result<()> {
                 ecosystem.as_deref(),
                 cli.node_url.as_deref(),
                 checkpoint.as_ref().and_then(|p: &std::path::PathBuf| p.to_str()),
-                json,
+                json || json_out,
             ).await?;
         }
-        Commands::Watch { filter, node_url } => {
+        Commands::Watch { filter, node_url, ci } => {
             let url = node_url.or(cli.node_url);
-            watch::run(filter.as_deref(), url.as_deref()).await?;
+            watch::run(filter.as_deref(), url.as_deref(), ci).await?;
         }
         Commands::Stake { amount, role, staking_addr, rpc_url, key } => {
             use stake::{parse_amount, StakeRole};
@@ -427,9 +602,9 @@ async fn main() -> Result<()> {
                 ConfigCommands::Get { key } => {
                     let config = config_file::Config::load()?;
                     let value = match key.as_str() {
-                        "node.url" => config.node.url,
+                        "node.url"     => config.node.url,
                         "node.timeout" => config.node.timeout.to_string(),
-                        "ipfs.url" => config.ipfs.url,
+                        "ipfs.url"     => config.ipfs.url,
                         "display.colors" => config.display.colors.to_string(),
                         _ => {
                             eprintln!("Unknown config key: {}", key);
@@ -456,60 +631,132 @@ async fn main() -> Result<()> {
         }
         Commands::Advanced { command } => {
             match command {
-                AdvancedCommands::ZkProof { tarball, manifest, output } => {
-                    let output_path = output.unwrap_or_else(|| {
-                        std::path::PathBuf::from("proof.bin")
-                    });
-                    advanced::generate_and_save_zk_proof(&tarball, manifest.as_ref(), &output_path).await?;
+                AdvancedCommands::ZkProof { tarball, manifest, output, verify } => {
+                    if let Some(proof_path) = verify {
+                        let valid = advanced::verify_zk_proof_file(&proof_path, &tarball).await?;
+                        if json_out {
+                            println!("{}", serde_json::json!({ "valid": valid }));
+                        } else {
+                            if valid {
+                                println!("{} ZK proof is VALID", "✓".green().bold());
+                            } else {
+                                println!("{} ZK proof is INVALID", "✗".red().bold());
+                                std::process::exit(1);
+                            }
+                        }
+                    } else {
+                        let output_path = output.unwrap_or_else(|| std::path::PathBuf::from("proof.bin"));
+                        advanced::generate_and_save_zk_proof(&tarball, manifest.as_ref(), &output_path).await?;
+                    }
                 }
-                AdvancedCommands::MlVerify { tarball, ecosystem, json: _json } => {
+                AdvancedCommands::MlVerify { tarball, ecosystem, json } => {
                     let result = advanced::ml_verify(&tarball, &ecosystem).await?;
-                    println!("ML Verification Result:");
-                    println!("  Threat Score: {}/100", result.threat_score);
-                    println!("  Threat Level: {:?}", result.threat_level);
-                    println!("  Confidence: {:.2}%", result.confidence * 100.0);
-                    println!("  Description: {}", result.threat_level.description());
+                    if json || json_out {
+                        println!("{}", serde_json::json!({
+                            "threat_score": result.threat_score,
+                            "threat_level": format!("{:?}", result.threat_level),
+                            "confidence":   result.confidence,
+                        }));
+                    } else {
+                        println!("ML Verification Result:");
+                        println!("  Threat Score: {}/100", result.threat_score);
+                        println!("  Threat Level: {:?}", result.threat_level);
+                        println!("  Confidence:   {:.2}%", result.confidence * 100.0);
+                        println!("  Description:  {}", result.threat_level.description());
+                    }
                 }
                 AdvancedCommands::WasmValidate { tarball, name, version, ecosystem } => {
                     let result = advanced::wasm_validate(&tarball, &name, &version, &ecosystem).await?;
-                    println!("WASM Validation Result:");
-                    println!("  Success: {}", result.success);
-                    println!("  Exit Code: {}", result.exit_code);
-                    println!("  CPU Time: {}ms", result.resource_usage.cpu_time_ms);
-                    if !result.findings.is_empty() {
-                        println!("  Findings:");
-                        for finding in &result.findings {
-                            println!("    - [{:?}] {}", finding.severity, finding.description);
+                    if json_out {
+                        println!("{}", serde_json::json!({
+                            "success":   result.success,
+                            "exit_code": result.exit_code,
+                            "findings":  result.findings.len(),
+                        }));
+                    } else {
+                        println!("WASM Validation Result:");
+                        println!("  Success:   {}", result.success);
+                        println!("  Exit Code: {}", result.exit_code);
+                        println!("  CPU Time:  {}ms", result.resource_usage.cpu_time_ms);
+                        if !result.findings.is_empty() {
+                            println!("  Findings:");
+                            for f in &result.findings {
+                                println!("    - [{:?}] {}", f.severity, f.description);
+                            }
                         }
                     }
                 }
                 AdvancedCommands::FullValidate { tarball, name, version, ecosystem, zk, output } => {
                     println!("Running full advanced validation pipeline...");
-                    
-                    // Step 1: ML Verification
                     println!("\n[1/3] ML-based threat detection...");
                     let ml_result = advanced::ml_verify(&tarball, &ecosystem).await?;
                     println!("  Score: {}/100 ({:?})", ml_result.threat_score, ml_result.threat_level);
-                    
-                    // Step 2: WASM Validation
+
                     println!("\n[2/3] WASM sandbox validation...");
                     let wasm_result = advanced::wasm_validate(&tarball, &name, &version, &ecosystem).await?;
                     println!("  Success: {} (Exit: {})", wasm_result.success, wasm_result.exit_code);
-                    
-                    // Step 3: ZK Proof Generation (if requested)
+
                     if zk {
                         println!("\n[3/3] ZK proof generation...");
                         let proof = advanced::generate_zk_proof(&tarball, None).await?;
                         println!("  Proof size: {} bytes", proof.len());
-                        
                         if let Some(out_dir) = output {
                             let proof_path = out_dir.join("proof.bin");
                             tokio::fs::write(&proof_path, &proof).await?;
                             println!("  Proof saved to {:?}", proof_path);
                         }
                     }
-                    
-                    println!("\n✓ Validation complete!");
+                    println!("\n{} Validation complete!", "✓".green().bold());
+                }
+            }
+        }
+
+        // ── New commands ──────────────────────────────────────────────────────
+        Commands::Doctor => {
+            doctor::run(cli.node_url.as_deref()).await?;
+        }
+        Commands::Search { query, ecosystem } => {
+            search::run(&query, ecosystem.as_deref(), cli.node_url.as_deref(), json_out).await?;
+        }
+        Commands::Info { package, ecosystem } => {
+            info::run(&package, ecosystem.as_deref(), cli.node_url.as_deref(), json_out).await?;
+        }
+        Commands::Graph { package, ecosystem, depth } => {
+            graph::run(&package, ecosystem.as_deref(), depth, cli.node_url.as_deref(), json_out).await?;
+        }
+        Commands::Diff { pkg_a, pkg_b } => {
+            diff::run(&pkg_a, &pkg_b, cli.node_url.as_deref(), json_out).await?;
+        }
+        Commands::Policy { command } => {
+            match command {
+                PolicyCommands::Show { pubkey } => {
+                    policy::show(pubkey.as_deref(), cli.node_url.as_deref(), json_out).await?;
+                }
+                PolicyCommands::Apply { policy_file, dry_run } => {
+                    policy::apply(&policy_file, dry_run).await?;
+                }
+                PolicyCommands::Init => {
+                    policy::show_policy_init()?;
+                }
+            }
+        }
+        Commands::Sbom { package, ecosystem, format, save } => {
+            let fmt: sbom::SbomFormat = format.parse()?;
+            sbom::run(&package, ecosystem.as_deref(), fmt, save.as_deref(), cli.node_url.as_deref()).await?;
+        }
+        Commands::Update { check } => {
+            update::run(cli.node_url.as_deref(), check).await?;
+        }
+        Commands::Multisig { command } => {
+            match command {
+                MultisigCommands::Init { tarball, threshold, output } => {
+                    multisig::init(&tarball, threshold, cli.node_url.as_deref(), &output).await?;
+                }
+                MultisigCommands::Sign { session, key } => {
+                    multisig::sign(&session, &key)?;
+                }
+                MultisigCommands::Submit { session, manifest } => {
+                    multisig::submit(&session, manifest.as_deref(), cli.node_url.as_deref()).await?;
                 }
             }
         }

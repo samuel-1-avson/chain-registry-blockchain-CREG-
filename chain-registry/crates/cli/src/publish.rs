@@ -72,6 +72,11 @@ pub async fn run(
     let msg = format!("{}{}", pkg_id.canonical(), content_hash);
     let signature = signing_key.sign(msg.as_bytes());
 
+    // ── 5.5. Optional PGP signing ─────────────────────────────────────────────
+    // If PGP_PRIVATE_KEY_PATH is set, load the armored secret key and sign the
+    // tarball to produce a detached PGP signature over the content hash.
+    let (pgp_signature, pgp_public_key) = sign_with_pgp_if_configured(&tarball_bytes)?;
+
     let request = PublishRequest {
         id: pkg_id.clone(),
         content_hash: content_hash.clone(),
@@ -82,8 +87,8 @@ pub async fn run(
         submitted_at: Utc::now(),
         shielded: shield,
         key_bundle,
-        pgp_signature: std::env::var("CREG_PGP_SIG").ok(),
-        pgp_public_key: std::env::var("CREG_PGP_KEY").ok(),
+        pgp_signature,
+        pgp_public_key,
     };
 
     // ── 5.5. Generate ZK Content-Hash Proof (publisher-side attestation) ──────
@@ -319,6 +324,78 @@ fn extract_toml_field<'a>(content: &'a str, field: &str) -> Option<&'a str> {
     let start = prefix.len();
     let end   = line[start..].find('"')? + start;
     Some(&line[start..end])
+}
+
+/// Sign the tarball with PGP if configured.
+///
+/// Three modes (checked in order):
+///  1. `CREG_PGP_PRIVATE_KEY_PATH` — path to an armored secret key file. Signs
+///     the tarball using `gpg --batch --yes --detach-sign`.
+///  2. `CREG_PGP_SIG` / `CREG_PGP_KEY` — pre-computed armored sig + pubkey
+///     passed through directly (backwards compat).
+///  3. Nothing set — returns `(None, None)` silently.
+fn sign_with_pgp_if_configured(tarball: &[u8]) -> Result<(Option<String>, Option<String>)> {
+    // Mode 2 backwards compat
+    if let (Some(sig), Some(key)) = (
+        std::env::var("CREG_PGP_SIG").ok(),
+        std::env::var("CREG_PGP_KEY").ok(),
+    ) {
+        return Ok((Some(sig), Some(key)));
+    }
+
+    let key_path = match std::env::var("CREG_PGP_PRIVATE_KEY_PATH").ok() {
+        Some(p) => std::path::PathBuf::from(p),
+        None => return Ok((None, None)),
+    };
+
+    // Write tarball to a temp file so gpg can sign it.
+    let tmp_dir = std::env::temp_dir();
+    let tarball_tmp = tmp_dir.join("creg_publish_gpg.tgz");
+    std::fs::write(&tarball_tmp, tarball)
+        .context("Failed to write temp tarball for GPG signing")?;
+
+    // Run: gpg --batch --yes --no-tty --pinentry-mode loopback
+    //          --default-key <fingerprint-or-key-path>
+    //          --detach-sign --armor --output <sig_file> <tarball>
+    let sig_tmp = tmp_dir.join("creg_publish_gpg.sig");
+
+    let status = std::process::Command::new("gpg")
+        .args([
+            "--batch", "--yes", "--no-tty",
+            "--pinentry-mode", "loopback",
+            "--secret-keyring", key_path.to_str().unwrap_or(""),
+            "--detach-sign", "--armor",
+            "--output", sig_tmp.to_str().unwrap_or(""),
+            tarball_tmp.to_str().unwrap_or(""),
+        ])
+        .status()
+        .context("Failed to invoke gpg — ensure GnuPG is installed")?;
+
+    if !status.success() {
+        anyhow::bail!("gpg exited with status {}. Check CREG_PGP_PRIVATE_KEY_PATH and gpg-agent.", status);
+    }
+
+    let sig_armored = std::fs::read_to_string(&sig_tmp)
+        .context("Failed to read GPG detached signature output")?;
+
+    // Export the corresponding public key in armored form.
+    let pubkey_output = std::process::Command::new("gpg")
+        .args([
+            "--batch", "--no-tty",
+            "--export", "--armor",
+            "--secret-keyring", key_path.to_str().unwrap_or(""),
+        ])
+        .output()
+        .context("Failed to export GPG public key")?;
+
+    let pub_armored = String::from_utf8_lossy(&pubkey_output.stdout).to_string();
+
+    // Cleanup temp files
+    let _ = std::fs::remove_file(&tarball_tmp);
+    let _ = std::fs::remove_file(&sig_tmp);
+
+    println!("  PGP: signed with key at {}", key_path.display());
+    Ok((Some(sig_armored), Some(pub_armored)))
 }
 
 /// Encrypt the tarball for the validator set using AES-GCM-256 and ECIES.

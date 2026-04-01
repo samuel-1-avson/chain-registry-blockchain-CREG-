@@ -4,6 +4,7 @@
 // so it can be registered on-chain.
 
 use anyhow::{Context, Result};
+use colored::Colorize;
 use std::path::{Path, PathBuf};
 
 /// Generate a new keypair and save it to `output_path`.
@@ -55,6 +56,57 @@ pub fn run(output_path: Option<&Path>, role: &str) -> Result<()> {
     }
 
     println!("  Keep your private key safe and never share it.\n");
+
+    Ok(())
+}
+
+/// Rotate an existing keypair: generate a new key, back up the old one,
+/// write the new one to the same path, and print the new public key.
+pub fn rotate(key_path: Option<&Path>, role: &str) -> Result<()> {
+    use ed25519_dalek::SigningKey;
+    use rand::RngCore;
+    use rand::rngs::OsRng;
+
+    let path = key_path
+        .map(PathBuf::from)
+        .unwrap_or_else(|| default_key_path(role));
+
+    if !path.exists() {
+        anyhow::bail!("No existing key found at {}. Run: creg keygen", path.display());
+    }
+
+    // Back up old key
+    let backup_path = path.with_extension("key.bak");
+    std::fs::copy(&path, &backup_path)
+        .with_context(|| format!("Failed to backup old key to {}", backup_path.display()))?;
+    println!("  {} Old key backed up to {}", "✓".green(), backup_path.display());
+
+    // Print old public key for reference
+    let old_privkey_hex = std::fs::read_to_string(&path)
+        .context("Failed to read old key")?;
+    if let Ok(old_bytes) = hex::decode(old_privkey_hex.trim()) {
+        if let Ok(old_sk) = SigningKey::try_from(old_bytes.as_slice()) {
+            println!("  Old pubkey: {}", hex::encode(old_sk.verifying_key().as_bytes()));
+        }
+    }
+
+    // Generate new key
+    let mut secret_bytes = [0u8; 32];
+    OsRng.fill_bytes(&mut secret_bytes);
+    let new_sk  = SigningKey::from_bytes(&secret_bytes);
+    let new_pk  = new_sk.verifying_key();
+    let new_priv = hex::encode(new_sk.as_bytes());
+    let new_pub  = hex::encode(new_pk.as_bytes());
+
+    write_key_file(&path, &new_priv)?;
+
+    println!("  {} New key written to {}", "✓".green(), path.display());
+    println!("  New pubkey: {}", new_pub);
+    println!();
+    println!("  {} Action required:", "⚠".yellow().bold());
+    println!("  Register the new public key on-chain before publishing:");
+    println!("  creg stake --amount 0 --pubkey {} (re-stake with new key)", new_pub);
+    println!("  The old backup at {} can be deleted once confirmed.", backup_path.display());
 
     Ok(())
 }

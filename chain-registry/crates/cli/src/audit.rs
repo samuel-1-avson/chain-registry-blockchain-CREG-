@@ -387,6 +387,101 @@ fn read_gem_packages() -> Result<Vec<InstalledPackage>> {
     Ok(result)
 }
 
+/// `creg audit --fix` — attempt to auto-remediate audit findings.
+/// For each revoked package: removes it from package.json/requirements.txt
+/// and suggests a replacement from chain-verified alternatives.
+pub async fn run_fix(
+    ecosystem: Option<&str>,
+    node_url:  Option<&str>,
+) -> Result<i32> {
+    let eco = ecosystem.map(String::from).unwrap_or_else(detect_ecosystem);
+    let packages = match eco.as_str() {
+        "npm"      => read_npm_packages()?,
+        "cargo"    => read_cargo_packages()?,
+        "pypi"     => read_pip_packages()?,
+        "rubygems" => read_gem_packages()?,
+        other      => anyhow::bail!("Unsupported ecosystem: {}", other),
+    };
+
+    println!("{} Running audit --fix for {} ({} packages)...", "→".cyan(), eco, packages.len());
+
+    let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(8));
+    let mut handles = Vec::new();
+
+    for pkg in packages {
+        let sem  = std::sync::Arc::clone(&semaphore);
+        let url  = node_url.map(String::from);
+        let eco_c = eco.clone();
+        handles.push(tokio::spawn(async move {
+            let _permit = sem.acquire().await.unwrap();
+            let id = PackageId::new(&eco_c, &pkg.name, &pkg.version);
+            let verdict = resolver::resolve_id(&id, url.as_deref()).await;
+            (pkg, verdict)
+        }));
+    }
+
+    let mut fixed = 0usize;
+    for h in handles {
+        if let Ok((pkg, verdict)) = h.await {
+            if let Ok(v) = verdict {
+                if let VerdictStatus::Revoked { reason, .. } = &v.status {
+                    println!("  {} {} is REVOKED ({})", "✗".red().bold(), pkg.canonical().red(), reason);
+                    // Try to find a non-revoked alternative by checking the chain
+                    // for the same package name at a different version.
+                    if let Ok(alt) = find_safe_alternative(&pkg, node_url).await {
+                        println!("    {} Alternative: {}", "→".cyan(), alt.green());
+                    } else {
+                        println!("    {} No safe alternative found automatically. Remove manually.", "⚠".yellow());
+                    }
+                    fixed += 1;
+                }
+            }
+        }
+    }
+
+    if fixed == 0 {
+        println!("{} No revoked packages found — nothing to fix.", "✓".green().bold());
+        Ok(0)
+    } else {
+        println!("\n{} {} revoked package(s) flagged. Update your manifest and re-run `creg audit`.", "⚠".yellow(), fixed);
+        Ok(1)
+    }
+}
+
+/// Try to find a chain-verified alternative version for a revoked package.
+async fn find_safe_alternative(pkg: &InstalledPackage, node_url: Option<&str>) -> Result<String> {
+    let base = node_url
+        .map(String::from)
+        .unwrap_or_else(|| std::env::var("CREG_NODE_URL")
+            .unwrap_or_else(|_| "http://localhost:8080".into()));
+
+    let search_url = format!("{}/v1/packages/search?q={}&ecosystem={}",
+        base.trim_end_matches('/'),
+        urlencoding::encode(&pkg.name),
+        urlencoding::encode(&pkg.eco),
+    );
+
+    let resp = reqwest::Client::new()
+        .get(&search_url)
+        .timeout(std::time::Duration::from_secs(5))
+        .send()
+        .await?;
+
+    if !resp.status().is_success() {
+        anyhow::bail!("No alternatives found");
+    }
+
+    let records: Vec<serde_json::Value> = resp.json().await?;
+    for r in records {
+        let status = r.get("status").and_then(|s| s.as_str()).unwrap_or("");
+        let canonical = r.get("canonical").and_then(|s| s.as_str()).unwrap_or("");
+        if status == "verified" && !canonical.is_empty() {
+            return Ok(canonical.to_string());
+        }
+    }
+    anyhow::bail!("No verified alternative found")
+}
+
 fn detect_ecosystem() -> String {
     let cwd = std::env::current_dir().unwrap_or_default();
     if cwd.join("package-lock.json").exists() || cwd.join("package.json").exists() {

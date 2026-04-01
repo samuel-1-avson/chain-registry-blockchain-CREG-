@@ -12,6 +12,7 @@
 
 use anyhow::{Context, Result};
 use chrono::Utc;
+use colored::Colorize;
 use common::{TrustVerdict, VerdictSource, VerdictStatus};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -157,6 +158,81 @@ pub fn print_lockfile(project_dir: &Path) -> Result<()> {
     }
 
     println!("\n  {} total receipts\n", receipts.len());
+    Ok(())
+}
+
+/// Diff the local lockfile against current chain state.
+/// Reports packages that have been revoked or changed since the lockfile was written.
+pub async fn diff(project_dir: &Path, node_url: Option<&str>) -> Result<()> {
+    use colored::Colorize;
+
+    let receipts = read_receipts(project_dir)?;
+    if receipts.is_empty() {
+        println!("{} No receipts in lockfile to diff.", "ℹ".blue());
+        return Ok(());
+    }
+
+    let base = node_url
+        .map(String::from)
+        .unwrap_or_else(|| std::env::var("CREG_NODE_URL")
+            .unwrap_or_else(|_| "http://localhost:8080".into()));
+
+    println!("{} Diffing {} lockfile entries against chain...", "→".cyan(), receipts.len());
+
+    let client = reqwest::Client::new();
+    let mut drifted = 0usize;
+
+    for receipt in &receipts {
+        let url = format!("{}/v1/packages/{}", base.trim_end_matches('/'),
+            urlencoding::encode(&receipt.canonical));
+
+        let chain_status = match client.get(&url)
+            .timeout(std::time::Duration::from_secs(5))
+            .send()
+            .await
+        {
+            Ok(r) if r.status().is_success() => {
+                r.json::<serde_json::Value>().await
+                    .ok()
+                    .and_then(|v| v.get("status").and_then(|s| s.as_str()).map(String::from))
+                    .unwrap_or_else(|| "unknown".into())
+            }
+            _ => "unreachable".into(),
+        };
+
+        let local_status = receipt.status.as_str();
+        let chain_changed = chain_status != local_status && chain_status != "unreachable";
+        let now_revoked   = chain_status == "revoked" && local_status != "revoked";
+
+        if now_revoked {
+            println!("  {} {} — {} locally, {} on chain",
+                "⚠".red().bold(),
+                receipt.canonical.white().bold(),
+                local_status.green(),
+                "REVOKED".red().bold()
+            );
+            drifted += 1;
+        } else if chain_changed {
+            println!("  {} {} — {} → {}",
+                "~".yellow(),
+                receipt.canonical,
+                local_status.dimmed(),
+                chain_status.yellow()
+            );
+            drifted += 1;
+        } else {
+            println!("  {} {}", "✓".green(), receipt.canonical.dimmed());
+        }
+    }
+
+    println!();
+    if drifted == 0 {
+        println!("{} Lockfile is in sync with chain.", "✓".green().bold());
+    } else {
+        println!("{} {} package(s) have drifted from the lockfile.", "⚠".yellow().bold(), drifted);
+        println!("  Run: creg audit --fix  to remediate automatically.");
+    }
+
     Ok(())
 }
 

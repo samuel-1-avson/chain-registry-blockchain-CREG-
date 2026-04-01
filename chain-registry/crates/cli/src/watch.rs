@@ -10,7 +10,7 @@
 use anyhow::{Context, Result};
 use colored::Colorize;
 
-pub async fn run(filter: Option<&str>, node_url: Option<&str>) -> Result<()> {
+pub async fn run(filter: Option<&str>, node_url: Option<&str>, ci_mode: bool) -> Result<()> {
     let url = format!(
         "{}/v1/events",
         node_url
@@ -22,6 +22,9 @@ pub async fn run(filter: Option<&str>, node_url: Option<&str>) -> Result<()> {
             .trim_end_matches('/')
     );
 
+    if ci_mode {
+        println!("{} CI mode — watching for Critical security events (exits 1 on Critical)", "⚠".yellow().bold());
+    }
     println!(
         "{} Connecting to event stream at {}",
         "→".cyan(),
@@ -73,6 +76,10 @@ pub async fn run(filter: Option<&str>, node_url: Option<&str>) -> Result<()> {
             if let Some(event) = parse_sse(&message) {
                 if should_display(&event, filter) {
                     render_event(&event);
+                    if ci_mode && is_critical_event(&event) {
+                        eprintln!("{} Critical security event detected — exiting with code 1 (CI mode)", "✗".red().bold());
+                        std::process::exit(1);
+                    }
                 }
             }
         }
@@ -107,6 +114,11 @@ fn parse_sse(raw: &str) -> Option<SseEvent> {
 
     let json: serde_json::Value = serde_json::from_str(&data).ok()?;
     Some(SseEvent { kind, data: json })
+}
+
+fn is_critical_event(event: &SseEvent) -> bool {
+    // In CI mode, any rejected or revoked package event is critical.
+    matches!(event.kind.as_str(), "PackageRejected" | "PackageRevoked")
 }
 
 fn should_display(event: &SseEvent, filter: Option<&str>) -> bool {

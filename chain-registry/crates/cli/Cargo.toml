@@ -23,6 +23,7 @@ path = "src/shims/cargo_shim.rs"
 [dependencies]
 common       = { path = "../common" }
 resolver     = { path = "../resolver" }
+validator    = { path = "../validator" }
 zk-validator = { path = "../zk-validator" }
 ml-validator = { path = "../ml-validator" }
 wasm-sandbox = { path = "../wasm-sandbox" }
@@ -34,7 +35,7 @@ clap_complete = "4"
 anyhow     = { workspace = true }
 tracing    = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-reqwest    = { workspace = true, features = ["stream"] }
+reqwest    = { workspace = true, features = ["stream", "multipart", "json"] }
 futures    = { workspace = true }
 chrono     = { workspace = true }
 ed25519-dalek = { workspace = true }
@@ -53,3 +54,4 @@ tokio-stream = "0.1"
 aes-gcm      = "0.10"
 x25519-dalek = { version = "2.0", features = ["static_secrets"] }
 toml         = "0.8"
+urlencoding  = "2.1"
