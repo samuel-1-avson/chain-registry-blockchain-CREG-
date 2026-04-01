@@ -129,8 +129,8 @@ enum Commands {
         #[arg(default_value = "publisher")]
         role: String,
         /// Output file path (defaults to ~/.creg/<role>.key)
-        #[arg(short, long)]
-        output: Option<std::path::PathBuf>,
+        #[arg(short = 'k', long = "key-path")]
+        key_path: Option<std::path::PathBuf>,
         /// Rotate an existing key instead of generating a fresh one.
         #[arg(long)]
         rotate: bool,
@@ -376,8 +376,8 @@ enum AdvancedCommands {
         #[arg(short, long)]
         manifest: Option<std::path::PathBuf>,
         /// Output file for ZK proof
-        #[arg(short, long)]
-        output: Option<std::path::PathBuf>,
+        #[arg(short = 'p', long = "proof-out")]
+        proof_out: Option<std::path::PathBuf>,
         /// Verify an existing proof file instead of generating
         #[arg(long)]
         verify: Option<std::path::PathBuf>,
@@ -424,8 +424,8 @@ enum AdvancedCommands {
         #[arg(long)]
         zk: bool,
         /// Output directory for results
-        #[arg(short, long)]
-        output: Option<std::path::PathBuf>,
+        #[arg(short = 'd', long = "out-dir")]
+        out_dir: Option<std::path::PathBuf>,
     },
 }
 
@@ -459,8 +459,8 @@ enum MultisigCommands {
         #[arg(short, long, default_value = "2")]
         threshold: usize,
         /// Output session file path
-        #[arg(short, long, default_value = ".creg-multisig.json")]
-        output: std::path::PathBuf,
+        #[arg(short = 's', long = "session-out", default_value = ".creg-multisig.json")]
+        session_out: std::path::PathBuf,
     },
     /// Add your signature to a multisig session
     Sign {
@@ -524,11 +524,11 @@ async fn main() -> Result<()> {
                 resolver::cache::print_entries()?;
             }
         }
-        Commands::Keygen { role, output, rotate } => {
+        Commands::Keygen { role, key_path, rotate } => {
             if rotate {
-                keygen::rotate(output.as_deref(), &role)?;
+                keygen::rotate(key_path.as_deref(), &role)?;
             } else {
-                keygen::run(output.as_deref(), &role)?;
+                keygen::run(key_path.as_deref(), &role)?;
             }
         }
         Commands::Lockfile { clear, dir, diff } => {
@@ -631,7 +631,7 @@ async fn main() -> Result<()> {
         }
         Commands::Advanced { command } => {
             match command {
-                AdvancedCommands::ZkProof { tarball, manifest, output, verify } => {
+                AdvancedCommands::ZkProof { tarball, manifest, proof_out, verify } => {
                     if let Some(proof_path) = verify {
                         let valid = advanced::verify_zk_proof_file(&proof_path, &tarball).await?;
                         if json_out {
@@ -645,7 +645,7 @@ async fn main() -> Result<()> {
                             }
                         }
                     } else {
-                        let output_path = output.unwrap_or_else(|| std::path::PathBuf::from("proof.bin"));
+                        let output_path = proof_out.unwrap_or_else(|| std::path::PathBuf::from("proof.bin"));
                         advanced::generate_and_save_zk_proof(&tarball, manifest.as_ref(), &output_path).await?;
                     }
                 }
@@ -686,7 +686,7 @@ async fn main() -> Result<()> {
                         }
                     }
                 }
-                AdvancedCommands::FullValidate { tarball, name, version, ecosystem, zk, output } => {
+                AdvancedCommands::FullValidate { tarball, name, version, ecosystem, zk, out_dir } => {
                     println!("Running full advanced validation pipeline...");
                     println!("\n[1/3] ML-based threat detection...");
                     let ml_result = advanced::ml_verify(&tarball, &ecosystem).await?;
@@ -700,7 +700,7 @@ async fn main() -> Result<()> {
                         println!("\n[3/3] ZK proof generation...");
                         let proof = advanced::generate_zk_proof(&tarball, None).await?;
                         println!("  Proof size: {} bytes", proof.len());
-                        if let Some(out_dir) = output {
+                        if let Some(out_dir) = out_dir {
                             let proof_path = out_dir.join("proof.bin");
                             tokio::fs::write(&proof_path, &proof).await?;
                             println!("  Proof saved to {:?}", proof_path);
@@ -749,8 +749,8 @@ async fn main() -> Result<()> {
         }
         Commands::Multisig { command } => {
             match command {
-                MultisigCommands::Init { tarball, threshold, output } => {
-                    multisig::init(&tarball, threshold, cli.node_url.as_deref(), &output).await?;
+                MultisigCommands::Init { tarball, threshold, session_out } => {
+                    multisig::init(&tarball, threshold, cli.node_url.as_deref(), &session_out).await?;
                 }
                 MultisigCommands::Sign { session, key } => {
                     multisig::sign(&session, &key)?;
