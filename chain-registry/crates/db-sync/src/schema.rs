@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS packages (
     findings         JSONB DEFAULT '[]',
     access_count     INT DEFAULT 0,
     last_accessed    TIMESTAMPTZ,
+    revocation_reason TEXT,
     created_at       TIMESTAMPTZ DEFAULT NOW(),
     updated_at       TIMESTAMPTZ DEFAULT NOW()
 );

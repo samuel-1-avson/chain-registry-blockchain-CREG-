@@ -1,65 +1,141 @@
-# Ignore all .md files everywhere EXCEPT root README.md
-**/*.md
-*.md
-!/README.md
+# =============================================================================
+# Chain Registry - Git Ignore
+# SECURITY: Never commit private keys, seed phrases, or API credentials
+# =============================================================================
 
-# Rust
+# =============================================================================
+# ENVIRONMENT & SECRETS (CRITICAL - NEVER COMMIT)
+# =============================================================================
+.env
+.env.*
+!.env.example
+*.env
+secrets/
+**secrets/
+*secret*
+*password*
+*credential*
+*.key
+**/*.key
+*.pem
+**/*.pem
+*.p12
+*.pfx
+*.crt
+*.cer
+*wallet*
+*mnemonic*
+*seed*
+private*
+privkey*
+
+# =============================================================================
+# VALIDATOR KEYS (CRITICAL - NEVER COMMIT)
+# =============================================================================
+validator*
+**/validator*
+!**/validator*/README*
+!**/validator*/.gitkeep
+publisher.key
+testnet-keys/
+generated-keys/
+
+# =============================================================================
+# SMART CONTRACTS - DO NOT INCLUDE COMPiled artifacts
+# =============================================================================
+# Note: Source contracts are in the repo, but build artifacts are ignored
+out/
+**/out/
+cache/
+**/cache/
+foundry.lock
+**/foundry.lock
+deployments/local/
+deployments/anvil/
+broadcast/
+**/broadcast/
+
+# =============================================================================
+# DATA & STORAGE
+# =============================================================================
+data/
+**/data/
+node*-data/
+**/node*-data/
+validator*-data/
+**/validator*-data/
+ipfs-data/
+**/ipfs-data/
+postgres-data/
+**/postgres-data/
+anvil_state.json
+**/anvil_state.json
+dev-data/
+/dev-data/
+tmp/
+**/tmp/
+temp/
+**/temp/
+*.db
+*.sqlite
+*.sqlite3
+
+# =============================================================================
+# RUST BUILD ARTIFACTS
+# =============================================================================
 target/
 **/target/
 **/*.target/
 target[0-9]*/
 Cargo.lock
 **/*.pdb
-creg.exe
-creg-node.exe
+**/*.exe
+*.exe
+creg
+creg-node
+creg-cli
 
-# Solidity / Core Logic (Do not include smart contracts)
-contracts/
-**/contracts/
-*.sol
-**/*.sol
-out/
-**/out/
-cache/
-**/cache/
-deployments/
-**/deployments/
-**/foundry.lock
-**/remappings.txt
+# =============================================================================
+# ZK CIRCUIT BUILD ARTIFACTS
+# =============================================================================
+circuits/build/
+circuits/keys/
+circuits/*.r1cs
+circuits/*.wasm
+circuits/*.sym
+circuits/*.zkey
+circuits/*.ptau
+!circuits/*.circom
+!circuits/*.sh
+!circuits/README.md
 
-# Environment & Secrets
-.env*
-*.key
-*.pem
-*.json
-!**/*.json
-**/*_secret*
-**/*_key*
-.gemini/
-.claude/
-publisher.key
-validators/
+# =============================================================================
+# ML MODELS & TRAINING DATA (Large files)
+# =============================================================================
+models/
+**/models/
+*.pkl
+**/*.pkl
+*.onnx
+**/*.onnx
+*.pt
+**/*.pt
+*.pth
+**/*.pth
+train_cache/
+datasets/
+**/datasets/
 secret-model/
+**/secret-model/
 
-# Data & Storage
-data/
-**/data/
-node*-data/
-**/node*-data/
-ipfs-data/
-**/ipfs-data/
-validator*-data/
-**/validator*-data/
-anvil_state.json
-dev-data/
-tmp/
-**/tmp/
-temp/
-**/temp/
-
-# TUI & Logs
+# =============================================================================
+# LOGS
+# =============================================================================
 *.log
 **/*.log
+*.log.*
+logs/
+**/logs/
 node_err.log
 publish_log.txt
 build_log.txt
@@ -68,23 +144,133 @@ check.log
 cli-check.log
 node-check*.log
 
-# Package Artifacts
+# =============================================================================
+# PACKAGE ARTIFACTS
+# =============================================================================
 *.tgz
+*.tar.gz
+*.zip
 demo-v2/
 malicious-pkg/
 good-pkg-v1/
 good-pkg-v2/
 evil-pkg-v1/
+package/
+packages/
+dist/
+build/
 
-# IDE & OS
+# =============================================================================
+# NODE.JS / NPM
+# =============================================================================
+node_modules/
+**/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+
+# =============================================================================
+# PYTHON
+# =============================================================================
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# =============================================================================
+# IDE & EDITOR
+# =============================================================================
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
 .DS_Store
 Thumbs.db
-*.swp
+*.sublime-project
+*.sublime-workspace
+.project
+.classpath
+.settings/
 
-# Coverage
+# =============================================================================
+# COVERAGE & TESTING
+# =============================================================================
 coverage/
+**/coverage/
+*.coverage
+htmlcov/
+.tox/
+.nox/
+.pytest_cache/
 
-# Misc
-node_modules/
+# =============================================================================
+# DOCKER
+# =============================================================================
+.dockerignore
+Dockerfile.*
+!Dockerfile
+docker-compose.override.yml
+
+# =============================================================================
+# MISCELLANEOUS
+# =============================================================================
+*.bak
+*.backup
+*.old
+*.orig
+*.rej
+*.patch
+
+# =============================================================================
+# PROJECT SPECIFIC - NEVER COMMIT THESE
+# =============================================================================
+.gemini/
+.claude/
+.cursor/
+.ai/
+
+# Config files that might contain real values
+config/*/deployment.json
+config/local/
+config/production/
+!config/example/
+!config/template/
+
+# Testnet specific - regenerated by scripts
+scripts/*.key
+scripts/*.json
+!scripts/*.py
+!scripts/*.ps1
+!scripts/*.sh
+
+# =============================================================================
+# ALLOW THESE (Must come after ignores)
+# =============================================================================
+!README.md
+!CONTRIBUTING.md
+!LICENSE
+!.gitignore
+!.github/

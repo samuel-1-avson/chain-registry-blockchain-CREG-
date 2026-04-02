@@ -38,7 +38,7 @@ x-node-base: &node-base
     CREG_IS_VALIDATOR: "true"
     CREG_ETH_RPC: "http://anvil:8545"
     CREG_IPFS_URL: "http://ipfs:5001"
-    CREG_BLOCK_INTERVAL: "5"
+    CREG_BLOCK_INTERVAL: "2"
     CREG_SINGLE_VALIDATOR_MODE: "false"
     CREG_DEV_SANDBOX: "true"
     CREG_ZK_ENABLED: "true"
@@ -118,16 +118,16 @@ services:
       "
     environment:
       - RPC_URL=http://anvil:8545
-      - DEPLOYER_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+      - DEPLOYER_KEY=${DEPLOYER_KEY}
 
   # ── PostgreSQL Mirror (optional but recommended for testnet) ─────────────────
   postgres:
     image: postgres:16-alpine
     container_name: creg-testnet-postgres
     environment:
-      POSTGRES_USER: creg
-      POSTGRES_PASSWORD: creg
-      POSTGRES_DB: chain_registry
+      - POSTGRES_USER=${POSTGRES_USER:-creg}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-creg}
+      - POSTGRES_DB=${POSTGRES_DB:-chain_registry}
     ports:
       - "5432:5432"
     volumes:
@@ -162,7 +162,7 @@ services:
       CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/9000"
       CREG_P2P_SEEDS: ""
       CREG_VALIDATOR_SET: "${VALIDATOR_SET_JSON}"
-      CREG_PG_URL: "${CREG_PG_URL:-postgres://creg:creg@postgres:5432/chain_registry}"
+      CREG_PG_URL: "${CREG_PG_URL:-postgres://${POSTGRES_USER:-creg}:${POSTGRES_PASSWORD:-creg}@postgres:5432/${POSTGRES_DB:-chain_registry}}"
 
   node-2:
     <<: *node-base
@@ -184,7 +184,7 @@ services:
       CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/9000"
       CREG_P2P_SEEDS: "/dns4/node-1/tcp/9000"
       CREG_VALIDATOR_SET: "${VALIDATOR_SET_JSON}"
-      CREG_PG_URL: "${CREG_PG_URL:-postgres://creg:creg@postgres:5432/chain_registry}"
+      CREG_PG_URL: "${CREG_PG_URL:-postgres://${POSTGRES_USER:-creg}:${POSTGRES_PASSWORD:-creg}@postgres:5432/${POSTGRES_DB:-chain_registry}}"
 
   node-3:
     <<: *node-base
@@ -206,7 +206,7 @@ services:
       CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/9000"
       CREG_P2P_SEEDS: "/dns4/node-1/tcp/9000"
       CREG_VALIDATOR_SET: "${VALIDATOR_SET_JSON}"
-      CREG_PG_URL: "${CREG_PG_URL:-postgres://creg:creg@postgres:5432/chain_registry}"
+      CREG_PG_URL: "${CREG_PG_URL:-postgres://${POSTGRES_USER:-creg}:${POSTGRES_PASSWORD:-creg}@postgres:5432/${POSTGRES_DB:-chain_registry}}"
 
   node-4:
     <<: *node-base
@@ -228,7 +228,7 @@ services:
       CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/9000"
       CREG_P2P_SEEDS: "/dns4/node-1/tcp/9000"
       CREG_VALIDATOR_SET: "${VALIDATOR_SET_JSON}"
-      CREG_PG_URL: "${CREG_PG_URL:-postgres://creg:creg@postgres:5432/chain_registry}"
+      CREG_PG_URL: "${CREG_PG_URL:-postgres://${POSTGRES_USER:-creg}:${POSTGRES_PASSWORD:-creg}@postgres:5432/${POSTGRES_DB:-chain_registry}}"
 
   node-5:
     <<: *node-base
@@ -250,7 +250,7 @@ services:
       CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/9000"
       CREG_P2P_SEEDS: "/dns4/node-1/tcp/9000"
       CREG_VALIDATOR_SET: "${VALIDATOR_SET_JSON}"
-      CREG_PG_URL: "${CREG_PG_URL:-postgres://creg:creg@postgres:5432/chain_registry}"
+      CREG_PG_URL: "${CREG_PG_URL:-postgres://${POSTGRES_USER:-creg}:${POSTGRES_PASSWORD:-creg}@postgres:5432/${POSTGRES_DB:-chain_registry}}"
 
   node-6:
     <<: *node-base
@@ -272,7 +272,7 @@ services:
       CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/9000"
       CREG_P2P_SEEDS: "/dns4/node-1/tcp/9000"
       CREG_VALIDATOR_SET: "${VALIDATOR_SET_JSON}"
-      CREG_PG_URL: "${CREG_PG_URL:-postgres://creg:creg@postgres:5432/chain_registry}"
+      CREG_PG_URL: "${CREG_PG_URL:-postgres://${POSTGRES_USER:-creg}:${POSTGRES_PASSWORD:-creg}@postgres:5432/${POSTGRES_DB:-chain_registry}}"
 
   node-7:
     <<: *node-base
@@ -294,7 +294,7 @@ services:
       CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/9000"
       CREG_P2P_SEEDS: "/dns4/node-1/tcp/9000"
       CREG_VALIDATOR_SET: "${VALIDATOR_SET_JSON}"
-      CREG_PG_URL: "${CREG_PG_URL:-postgres://creg:creg@postgres:5432/chain_registry}"
+      CREG_PG_URL: "${CREG_PG_URL:-postgres://${POSTGRES_USER:-creg}:${POSTGRES_PASSWORD:-creg}@postgres:5432/${POSTGRES_DB:-chain_registry}}"
 
   node-8:
     <<: *node-base
@@ -316,7 +316,7 @@ services:
       CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/9000"
       CREG_P2P_SEEDS: "/dns4/node-1/tcp/9000"
       CREG_VALIDATOR_SET: "${VALIDATOR_SET_JSON}"
-      CREG_PG_URL: "${CREG_PG_URL:-postgres://creg:creg@postgres:5432/chain_registry}"
+      CREG_PG_URL: "${CREG_PG_URL:-postgres://${POSTGRES_USER:-creg}:${POSTGRES_PASSWORD:-creg}@postgres:5432/${POSTGRES_DB:-chain_registry}}"
 
   node-9:
     <<: *node-base
@@ -338,7 +338,7 @@ services:
       CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/9000"
       CREG_P2P_SEEDS: "/dns4/node-1/tcp/9000"
       CREG_VALIDATOR_SET: "${VALIDATOR_SET_JSON}"
-      CREG_PG_URL: "${CREG_PG_URL:-postgres://creg:creg@postgres:5432/chain_registry}"
+      CREG_PG_URL: "${CREG_PG_URL:-postgres://${POSTGRES_USER:-creg}:${POSTGRES_PASSWORD:-creg}@postgres:5432/${POSTGRES_DB:-chain_registry}}"
 
   node-10:
     <<: *node-base
@@ -360,7 +360,7 @@ services:
       CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/9000"
       CREG_P2P_SEEDS: "/dns4/node-1/tcp/9000"
       CREG_VALIDATOR_SET: "${VALIDATOR_SET_JSON}"
-      CREG_PG_URL: "${CREG_PG_URL:-postgres://creg:creg@postgres:5432/chain_registry}"
+      CREG_PG_URL: "${CREG_PG_URL:-postgres://${POSTGRES_USER:-creg}:${POSTGRES_PASSWORD:-creg}@postgres:5432/${POSTGRES_DB:-chain_registry}}"
 
   # ── CLI helper service ──────────────────────────────────────────────────────
   cli:

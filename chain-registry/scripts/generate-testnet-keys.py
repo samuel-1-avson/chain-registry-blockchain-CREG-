@@ -108,7 +108,7 @@ def main():
         "",
         "CREG_ETH_RPC=http://localhost:8545",
         "CREG_IPFS_URL=http://localhost:5001",
-        "CREG_PG_URL=postgres://creg:creg@localhost:5432/chain_registry",
+        "CREG_PG_URL=postgres://${POSTGRES_USER:-creg}:${POSTGRES_PASSWORD:-creg}@localhost:5432/${POSTGRES_DB:-chain_registry}",
         "",
     ]
 

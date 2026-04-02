@@ -100,10 +100,15 @@ impl SyncWorker {
                 findings         JSONB DEFAULT '[]',
                 access_count     INT DEFAULT 0,
                 last_accessed    TIMESTAMPTZ,
+                revocation_reason TEXT,
                 created_at       TIMESTAMPTZ DEFAULT NOW(),
                 updated_at       TIMESTAMPTZ DEFAULT NOW()
             )"
         ).execute(pool).await?;
+
+        // Add revocation_reason column if missing (migration)
+        sqlx::query("ALTER TABLE packages ADD COLUMN IF NOT EXISTS revocation_reason TEXT")
+            .execute(pool).await?;
 
         // Create indexes
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_packages_ecosystem ON packages(ecosystem)")

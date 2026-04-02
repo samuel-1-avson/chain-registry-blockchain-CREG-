@@ -34,8 +34,10 @@ use tracing::{debug, info, instrument};
 
 pub mod circuits;
 pub mod constraints;
+pub mod slashing;
 
 pub use circuits::PackageValidationCircuit;
+pub use slashing::*;
 
 /// Errors that can occur during ZK validation
 #[derive(Error, Debug)]

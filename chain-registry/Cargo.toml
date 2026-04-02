@@ -13,6 +13,7 @@ members = [
     "crates/cross-chain",
     "crates/insurance",
     "crates/db-sync",
+    "crates/ipfs-pinner",
 ]
 resolver = "2"
 

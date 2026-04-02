@@ -34,9 +34,13 @@ use tracing::{debug, info, instrument};
 
 pub mod shamir;
 pub mod access_control;
+pub mod distribution;
+pub mod service;
 
 pub use shamir::{ShamirSecretSharing, Share};
 pub use access_control::AccessPolicy;
+pub use distribution::{ShieldedPackageMetadata, AccessPolicy as ShieldedAccessPolicy, DecryptionRequest, DecryptionResponse};
+pub use service::{DecryptionService, ServiceConfig};
 
 /// Errors that can occur in threshold encryption
 #[derive(Error, Debug)]

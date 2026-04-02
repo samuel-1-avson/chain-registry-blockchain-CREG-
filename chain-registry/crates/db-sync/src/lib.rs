@@ -90,6 +90,7 @@ pub async fn apply_block(pool: &PgPool, block: &Block) -> Result<()> {
          ON CONFLICT (height) DO NOTHING"
     )
     .bind(block.header.height as i64)
+    .bind(&block.header.hash)
     .bind(&block.header.prev_hash)
     .bind(&block.header.merkle_root)
     .bind(&block.header.proposer_id)

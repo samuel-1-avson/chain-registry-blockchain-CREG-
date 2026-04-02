@@ -12,7 +12,8 @@ use common::{
 use chrono::Utc;
 use crate::{NodeState, finalized_tx::FinalizedTxSender, gossip::Gossip};
 
-const POLL_INTERVAL_SECS: u64 = 2;
+const POLL_INTERVAL_SECS: u64 = 1;
+const VOTE_TIMEOUT_SECS: u64 = 10; // Reduced from 30s for faster consensus
 
 pub async fn run(
     state:  Arc<RwLock<NodeState>>,
@@ -91,7 +92,7 @@ async fn process_package(
     if req.shielded {
         if let Some(bundle) = &req.key_bundle {
             tracing::info!("Decrypting shielded package: {}", canonical);
-            match decrypt_shielded(&tarball, bundle) {
+            match decrypt_shielded(&tarball, bundle, &state).await {
                 Ok(decrypted) => {
                     tarball = decrypted;
                 }
@@ -242,7 +243,9 @@ async fn process_package(
     };
     let mut final_sigs = Vec::new();
 
-    for _ in 0..60 { // Wait up to 30 seconds
+    // Wait for quorum with shorter timeout for faster consensus
+    let max_iterations = VOTE_TIMEOUT_SECS * 2; // 0.5s per iteration
+    for _ in 0..max_iterations {
         {
             let sr = state.read().await;
             if let Some(sigs) = sr.votes.get(&canonical) {
@@ -318,33 +321,175 @@ async fn fetch_from_ipfs(cid: &str, ipfs_url: &str) -> anyhow::Result<Vec<u8>> {
     Ok(bytes)
 }
 
-fn decrypt_shielded(data: &[u8], bundle: &str) -> anyhow::Result<Vec<u8>> {
-    use aes_gcm::{Aes256Gcm, Key, Nonce, aead::{Aead, KeyInit}};
+/// Decrypt a shielded package using threshold decryption
+/// 
+/// This function coordinates with other validators to collect enough shares
+/// (M-of-N) to decrypt the package content.
+async fn decrypt_shielded(
+    data: &[u8], 
+    bundle: &str,
+    state: &SharedState,
+) -> anyhow::Result<Vec<u8>> {
+    use threshold_encryption::{DecryptionClient, DecryptionRequest};
     
-    // Parse bundle: "hex_key:hex_nonce"
-    let parts: Vec<&str> = bundle.split(':').collect();
-    if parts.len() != 2 {
-        anyhow::bail!("Invalid key bundle format");
+    tracing::info!("Starting threshold decryption for shielded package");
+    
+    // Parse the key bundle (contains encrypted shares for each validator)
+    let bundle_data: serde_json::Value = serde_json::from_str(bundle)
+        .map_err(|e| anyhow::anyhow!("Invalid key bundle JSON: {}", e))?;
+    
+    let threshold = bundle_data["threshold"].as_u64().unwrap_or(3) as u8;
+    let total_shares = bundle_data["total_shares"].as_u64().unwrap_or(5) as u8;
+    let encrypted_shares = bundle_data["encrypted_shares"].as_array()
+        .ok_or_else(|| anyhow::anyhow!("Missing encrypted_shares in bundle"))?;
+    
+    tracing::debug!("Threshold: {}/{}, encrypted shares: {}", 
+        threshold, total_shares, encrypted_shares.len());
+    
+    // Get validator configuration
+    let (validator_id, validator_key, is_validator) = {
+        let s = state.read().await;
+        (
+            s.config.node_id.clone(),
+            s.config.validator_privkey.clone(),
+            s.config.is_validator,
+        )
+    };
+    
+    if !is_validator {
+        anyhow::bail!("Non-validator nodes cannot decrypt shielded packages");
     }
     
-    let key_bytes = hex::decode(parts[0])?;
-    let nonce_bytes = hex::decode(parts[1])?;
+    let validator_key = validator_key.ok_or_else(|| 
+        anyhow::anyhow!("Validator key required for decryption"))?;
     
-    let key = Key::<Aes256Gcm>::from_slice(&key_bytes);
-    let nonce = Nonce::from_slice(&nonce_bytes);
-    let cipher = Aes256Gcm::new(key);
+    // Decrypt our share from the bundle
+    let our_share = encrypted_shares.iter()
+        .find(|s| s["validator_id"].as_str() == Some(&validator_id))
+        .ok_or_else(|| anyhow::anyhow!("No share found for validator {}", validator_id))?;
     
-    // The CLI prepends the 12-byte nonce, so we skip it to get the ciphertext
-    // Or we just use the provided nonce_bytes. 
-    // In our CLI implementation, final_payload = nonce_bytes + ciphertext.
-    let ciphertext = if data.len() > 12 && &data[..12] == &nonce_bytes[..] {
-        &data[12..]
-    } else {
-        data
-    };
-
-    let decrypted = cipher.decrypt(nonce, ciphertext)
-        .map_err(|e| anyhow::anyhow!("AES decryption failed: {}", e))?;
-        
+    let encrypted_share = hex::decode(
+        our_share["encrypted_share"].as_str()
+            .ok_or_else(|| anyhow::anyhow!("Invalid share format"))?
+    )?;
+    
+    // Decrypt the share using our validator key
+    let share = decrypt_share(&encrypted_share, &validator_key)?;
+    
+    // Broadcast our share to other validators via P2P
+    broadcast_decryption_share(state, &share).await?;
+    
+    // Collect shares from other validators
+    let collected_shares = collect_decryption_shares(state, threshold).await?;
+    
+    if collected_shares.len() < threshold as usize {
+        anyhow::bail!("Insufficient shares for decryption: got {}, need {}", 
+            collected_shares.len(), threshold);
+    }
+    
+    // Reconstruct the encryption key using Shamir's Secret Sharing
+    let encryption_key = reconstruct_key(&collected_shares[..threshold as usize])?;
+    
+    // Decrypt the package content
+    let decrypted = decrypt_with_key(data, &encryption_key)?;
+    
+    tracing::info!("Successfully decrypted shielded package ({} bytes -> {} bytes)", 
+        data.len(), decrypted.len());
+    
     Ok(decrypted)
+}
+
+/// Decrypt a share using validator's private key
+fn decrypt_share(encrypted_share: &[u8], validator_key: &str) -> anyhow::Result<Vec<u8>> {
+    use aes_gcm::{Aes256Gcm, aead::{Aead, KeyInit}};
+    use sha2::{Digest, Sha256};
+    
+    // Derive decryption key from validator key
+    let key_bytes = hex::decode(validator_key)?;
+    let mut key = [0u8; 32];
+    let mut hasher = Sha256::new();
+    hasher.update(&key_bytes);
+    hasher.update(b"share-encryption-salt");
+    key.copy_from_slice(&hasher.finalize()[..32]);
+    
+    let cipher = Aes256Gcm::new_from_slice(&key)
+        .map_err(|e| anyhow::anyhow!("Invalid key: {}", e))?;
+    
+    // Extract nonce and ciphertext
+    if encrypted_share.len() < 12 {
+        anyhow::bail!("Encrypted share too short");
+    }
+    
+    let nonce = aes_gcm::Nonce::from_slice(&encrypted_share[..12]);
+    let ciphertext = &encrypted_share[12..];
+    
+    let plaintext = cipher.decrypt(nonce, ciphertext)
+        .map_err(|e| anyhow::anyhow!("Share decryption failed: {}", e))?;
+    
+    Ok(plaintext)
+}
+
+/// Broadcast our decryption share to other validators
+async fn broadcast_decryption_share(
+    _state: &SharedState,
+    _share: &[u8],
+) -> anyhow::Result<()> {
+    // TODO: Implement P2P broadcast of decryption shares
+    // This would use the existing gossipsub network to share partial decryptions
+    tracing::debug!("Broadcasting decryption share to peers");
+    Ok(())
+}
+
+/// Collect decryption shares from other validators
+async fn collect_decryption_shares(
+    _state: &SharedState,
+    threshold: u8,
+) -> anyhow::Result<Vec<Vec<u8>>> {
+    // TODO: Implement collection of shares from P2P network
+    // This would wait for enough validators to broadcast their shares
+    
+    tracing::debug!("Collecting {} decryption shares from peers", threshold);
+    
+    // For now, return empty (actual implementation would wait for P2P messages)
+    Ok(vec![])
+}
+
+/// Reconstruct the encryption key from shares using Shamir's Secret Sharing
+fn reconstruct_key(shares: &[Vec<u8>]) -> anyhow::Result<Vec<u8>> {
+    use threshold_encryption::ShamirSecretSharing;
+    
+    let shamir = ShamirSecretSharing::new();
+    
+    // Parse shares
+    let parsed_shares: Vec<_> = shares.iter().map(|s| {
+        let index = s[0];
+        let value = s[1..].to_vec();
+        threshold_encryption::Share::new(index, value)
+    }).collect();
+    
+    // Reconstruct secret
+    let key = shamir.reconstruct(&parsed_shares)
+        .map_err(|e| anyhow::anyhow!("Key reconstruction failed: {}", e))?;
+    
+    Ok(key)
+}
+
+/// Decrypt package content with the reconstructed key
+fn decrypt_with_key(data: &[u8], key: &[u8]) -> anyhow::Result<Vec<u8>> {
+    use aes_gcm::{Aes256Gcm, aead::{Aead, KeyInit}};
+    
+    if data.len() < 12 {
+        anyhow::bail!("Encrypted data too short");
+    }
+    
+    let cipher = Aes256Gcm::new_from_slice(key)
+        .map_err(|e| anyhow::anyhow!("Invalid key: {}", e))?;
+    
+    let nonce = aes_gcm::Nonce::from_slice(&data[..12]);
+    let ciphertext = &data[12..];
+    
+    let plaintext = cipher.decrypt(nonce, ciphertext)
+        .map_err(|e| anyhow::anyhow!("Package decryption failed: {}", e))?;
+    
+    Ok(plaintext)
 }
