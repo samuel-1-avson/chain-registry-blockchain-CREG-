@@ -12,6 +12,7 @@ members = [
     "crates/threshold-encryption",
     "crates/cross-chain",
     "crates/insurance",
+    "crates/db-sync",
 ]
 resolver = "2"
 
@@ -52,6 +53,7 @@ ark-r1cs-std  = "0.4"
 # ML dependencies
 ort           = "2.0.0-rc.12"
 tract-onnx    = "0.21"
+tokenizers    = "0.15"
 
 # WASM dependencies
 wasmtime      = { version = "18", features = ["async", "cranelift"] }

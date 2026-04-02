@@ -19,9 +19,11 @@ static_assertions = "1.1"
 flate2     = "1"
 tar        = "0.4"
 strsim     = "0.11"
+once_cell  = "1"
 pgp        = "0.11"
 wasmtime   = { workspace = true }
 wasmtime-wasi = { workspace = true }
 tempfile   = "3"
 cap-std    = "3"
+ml-validator = { path = "../ml-validator" }
 

@@ -1,0 +1,50 @@
+# observability/prometheus.testnet.yml
+# Prometheus scrape config for the 10-validator testnet.
+# Usage:
+#   docker compose -f docker-compose.testnet.yml \
+#                  -f observability/docker-compose.observability.yml \
+#                  -f docker-compose.testnet.observability.yml up -d
+
+global:
+  scrape_interval:     10s
+  evaluation_interval: 10s
+  external_labels:
+    cluster: chain-registry-testnet
+
+rule_files:
+  - "alerts.yml"
+
+scrape_configs:
+
+  - job_name: chain_registry_testnet_nodes
+    static_configs:
+      - targets:
+          - "node-1:8080"
+          - "node-2:8080"
+          - "node-3:8080"
+          - "node-4:8080"
+          - "node-5:8080"
+          - "node-6:8080"
+          - "node-7:8080"
+          - "node-8:8080"
+          - "node-9:8080"
+          - "node-10:8080"
+        labels:
+          cluster: chain-registry-testnet
+    metrics_path: /metrics
+    scrape_interval: 10s
+
+  - job_name: ipfs
+    static_configs:
+      - targets: ["ipfs:5001"]
+    metrics_path: /debug/metrics/prometheus
+    scrape_interval: 30s
+
+  - job_name: postgres
+    static_configs:
+      - targets: ["postgres:5432"]
+    scrape_interval: 30s
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

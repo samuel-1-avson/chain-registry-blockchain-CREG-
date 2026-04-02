@@ -36,12 +36,15 @@ pub fn sha256_hex(data: &[u8]) -> String {
 pub struct Validator {
     pub id:         String,
     pub alias:      String,
+    /// Hex-encoded Ed25519 public key used to verify validator votes.
+    #[serde(default)]
+    pub pubkey:     String,
     pub stake:      u64,
     pub reputation: u32,
     pub status:     String, // "online", "self", "offline"
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default)]
 pub struct ValidatorSet {
     pub validators: Vec<Validator>,
 }
@@ -55,4 +58,11 @@ impl ValidatorSet {
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub enum GossipMessage {
     PublishRequest(PublishRequest),
+    VrfProof {
+        validator_id: String,
+        pubkey: String,
+        epoch_seed: String,
+        output: String,
+        proof: String,
+    },
 }

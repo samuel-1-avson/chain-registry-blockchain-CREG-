@@ -1,12 +1,13 @@
-# Ignore all .md files everywhere
+# Ignore all .md files everywhere EXCEPT root README.md
 **/*.md
 *.md
-
-# Allow ONLY the root README.md
 !/README.md
 
 # Rust
 target/
+**/target/
+**/*.target/
+target[0-9]*/
 Cargo.lock
 **/*.pdb
 creg.exe
@@ -18,29 +19,54 @@ contracts/
 *.sol
 **/*.sol
 out/
+**/out/
 cache/
+**/cache/
 deployments/
+**/deployments/
+**/foundry.lock
+**/remappings.txt
 
 # Environment & Secrets
-.env
+.env*
 *.key
 *.pem
+*.json
+!**/*.json
+**/*_secret*
+**/*_key*
 .gemini/
 .claude/
+publisher.key
+validators/
+secret-model/
 
 # Data & Storage
 data/
+**/data/
 node*-data/
+**/node*-data/
 ipfs-data/
+**/ipfs-data/
+validator*-data/
+**/validator*-data/
 anvil_state.json
 dev-data/
 tmp/
+**/tmp/
+temp/
+**/temp/
 
 # TUI & Logs
 *.log
+**/*.log
 node_err.log
 publish_log.txt
 build_log.txt
+api-test.log
+check.log
+cli-check.log
+node-check*.log
 
 # Package Artifacts
 *.tgz

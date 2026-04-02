@@ -5,6 +5,7 @@ mod api;
 mod block_producer;
 mod chain_store;
 mod config;
+mod db_sync_proxy;
 mod events;
 mod finalized_tx;
 mod gossip;
@@ -46,6 +47,8 @@ pub struct NodeState {
     // Live metrics for Explorer
     pub p2p_status:      P2PStatus,
     pub bridge_status:   BridgeStatus,
+    /// Cached VRF proofs from other validators: validator_id -> (output, proof)
+    pub vrf_proofs:      std::collections::HashMap<String, (String, String)>,
 }
 
 #[derive(Serialize, Clone, Default)]
@@ -104,6 +107,7 @@ async fn main() -> Result<()> {
 
     // ── Open persistent storage ───────────────────────────────────────────────
     let chain = chain_store::ChainStore::open(&config.data_dir)?;
+    let chain_for_sync = chain.clone();
     let tip   = chain.tip_height()?;
     tracing::info!("  chain tip:   height={}", tip);
 
@@ -147,6 +151,7 @@ async fn main() -> Result<()> {
             registry_address: config.registry_addr.clone(),
             ..BridgeStatus::default()
         },
+        vrf_proofs:      std::collections::HashMap::new(),
     }));
 
     // Start P2P node in background
@@ -164,6 +169,25 @@ async fn main() -> Result<()> {
 
     // ── Spawn background tasks ────────────────────────────────────────────────
     tracing::info!("Starting subsystems...");
+
+    // PostgreSQL sync worker (sled → PostgreSQL ETL)
+    if !config.pg_url.is_empty() {
+        let sync_config = db_sync::sync_worker::SyncConfig {
+            poll_interval: std::time::Duration::from_secs(1),
+            pg_url: config.pg_url.clone(),
+        };
+        let chain_proxy: db_sync::sync_worker::ChainStoreHandle =
+            Arc::new(tokio::sync::RwLock::new(chain_for_sync));
+        match db_sync::SyncWorker::new(sync_config, chain_proxy).await {
+            Ok(worker) => {
+                tokio::spawn(worker.run());
+                tracing::info!("PostgreSQL sync worker started");
+            }
+            Err(e) => {
+                tracing::warn!("Failed to start PostgreSQL sync worker: {}", e);
+            }
+        }
+    }
 
     tokio::spawn(sync::run(
         Arc::clone(&state),
@@ -186,7 +210,7 @@ async fn main() -> Result<()> {
     // ── Start gRPC Server (Industrial Speed) ──────────────────────────────────
     let grpc_state = Arc::clone(&state);
     tokio::spawn(async move {
-        let addr = "0.0.0.0:50051".parse().unwrap();
+        let addr = "0.0.0.0:50051".parse().expect("gRPC bind address must be valid");
         let registry = grpc::MyRegistry::new(Arc::clone(&grpc_state));
         let watcher  = grpc::MyWatcher::new(Arc::clone(&grpc_state));
         let explorer = grpc::MyExplorer::new(Arc::clone(&grpc_state));

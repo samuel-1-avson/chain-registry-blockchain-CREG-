@@ -122,6 +122,17 @@ pub struct P2PRateLimiter {
     config: P2PRateLimitConfig,
 }
 
+/// Lock a mutex, recovering gracefully if it was poisoned.
+fn lock_peers<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<T> {
+    match mutex.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            tracing::warn!("P2P rate limiter mutex poisoned; recovering");
+            poisoned.into_inner()
+        }
+    }
+}
+
 impl P2PRateLimiter {
     pub fn new(config: P2PRateLimitConfig) -> Self {
         Self {
@@ -133,7 +144,7 @@ impl P2PRateLimiter {
     /// Check if a vote message is allowed from this peer.
     /// Returns true if allowed, false if rate limited.
     pub fn check_vote(&self, peer: PeerId) -> bool {
-        let mut peers = self.peers.lock().unwrap();
+        let mut peers = lock_peers(&self.peers);
         let bucket = peers.entry(peer).or_insert_with(PeerBucket::new);
         
         // If banned, reject immediately
@@ -159,7 +170,7 @@ impl P2PRateLimiter {
     /// Check if a block announcement is allowed from this peer.
     /// Returns true if allowed, false if rate limited.
     pub fn check_block(&self, peer: PeerId) -> bool {
-        let mut peers = self.peers.lock().unwrap();
+        let mut peers = lock_peers(&self.peers);
         let bucket = peers.entry(peer).or_insert_with(PeerBucket::new);
         
         // If banned, reject immediately
@@ -184,7 +195,7 @@ impl P2PRateLimiter {
     /// Check if a general message is allowed from this peer.
     /// Returns true if allowed, false if rate limited.
     pub fn check_general(&self, peer: PeerId) -> bool {
-        let mut peers = self.peers.lock().unwrap();
+        let mut peers = lock_peers(&self.peers);
         let bucket = peers.entry(peer).or_insert_with(PeerBucket::new);
         
         // If banned, reject immediately
@@ -208,13 +219,13 @@ impl P2PRateLimiter {
 
     /// Check if a peer is currently banned.
     pub fn is_banned(&self, peer: PeerId) -> bool {
-        let peers = self.peers.lock().unwrap();
+        let peers = lock_peers(&self.peers);
         peers.get(&peer).map_or(false, |b| b.is_banned())
     }
 
     /// Get ban info for a peer.
     pub fn get_ban_info(&self, peer: PeerId) -> Option<(bool, u32, Option<Instant>)> {
-        let peers = self.peers.lock().unwrap();
+        let peers = lock_peers(&self.peers);
         peers.get(&peer).map(|b| {
             (b.is_banned(), b.violation_count, b.banned_until)
         })
@@ -222,7 +233,7 @@ impl P2PRateLimiter {
 
     /// Manually ban a peer (for governance actions).
     pub fn ban_peer(&self, peer: PeerId, duration: Duration) {
-        let mut peers = self.peers.lock().unwrap();
+        let mut peers = lock_peers(&self.peers);
         let bucket = peers.entry(peer).or_insert_with(PeerBucket::new);
         bucket.ban(duration);
         tracing::info!("P2P Rate limit: Peer {} manually banned for {:?}", peer, duration);
@@ -230,7 +241,7 @@ impl P2PRateLimiter {
 
     /// Unban a peer.
     pub fn unban_peer(&self, peer: PeerId) {
-        let mut peers = self.peers.lock().unwrap();
+        let mut peers = lock_peers(&self.peers);
         if let Some(bucket) = peers.get_mut(&peer) {
             bucket.banned_until = None;
             tracing::info!("P2P Rate limit: Peer {} unbanned", peer);
@@ -243,7 +254,7 @@ impl P2PRateLimiter {
         let now = Instant::now();
         let window = self.config.window;
         
-        let mut peers = self.peers.lock().unwrap();
+        let mut peers = lock_peers(&self.peers);
         peers.retain(|peer_id, bucket| {
             // Remove old timestamps
             bucket.vote_timestamps.retain(|&t| now - t < window);
@@ -266,7 +277,7 @@ impl P2PRateLimiter {
 
     /// Get stats about the rate limiter.
     pub fn get_stats(&self) -> P2PRateLimitStats {
-        let peers = self.peers.lock().unwrap();
+        let peers = lock_peers(&self.peers);
         let total_peers = peers.len();
         let banned_peers = peers.values().filter(|b| b.is_banned()).count();
         let total_violations: u32 = peers.values().map(|b| b.violation_count).sum();

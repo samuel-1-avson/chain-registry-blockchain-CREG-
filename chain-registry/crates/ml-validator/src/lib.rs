@@ -8,6 +8,7 @@
 //! - **Feature Extraction**: AST-based feature extraction for multiple languages
 //! - **Rule-based Detection**: Fast rule-based threat scoring
 //! - **Batch Processing**: Parallel processing of multiple packages
+//! - **Deep Scanning**: Transformer-based semantic malware detection via ONNX
 //!
 //! # Example
 //!
@@ -20,10 +21,18 @@
 //! ```
 
 use std::collections::HashMap;
-use tracing::{debug, info, instrument};
+use tracing::{debug, instrument};
 
 pub mod features;
 pub use features::{FeatureExtractor, PackageFeatures};
+
+pub mod tokenizer;
+pub use tokenizer::CodeTokenizer;
+
+pub mod deep_scan;
+pub use deep_scan::{
+    deep_scan, DeepScanResult, DeepScanner, MlError, SuspiciousFile, ThreatClassification,
+};
 
 /// Threat level classification
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

@@ -56,6 +56,35 @@ impl PbftRound {
         if !self.validator_set.is_member(proposer_id) {
             bail!("Proposer {} is not in the validator set", proposer_id);
         }
+        // If the block includes a VRF proof, verify it and the proposer selection.
+        if let (Some(ref proof), Some(ref output)) = (&self.block.header.vrf_proof, &self.block.header.vrf_output) {
+            let validator = self.validator_set.validators.get(proposer_id)
+                .ok_or_else(|| anyhow::anyhow!("Proposer {} not found in validator set", proposer_id))?;
+            let epoch_seed = &self.block.header.prev_hash;
+            crate::vrf::verify(epoch_seed.as_bytes(), &validator.pubkey, output, proof)
+                .map_err(|e| anyhow::anyhow!("VRF verification failed for proposer {}: {}", proposer_id, e))?;
+            let mut active: Vec<crate::vrf::VrfValidator> = self.validator_set.validators.values()
+                .filter(|v| v.is_active)
+                .map(|v| crate::vrf::VrfValidator {
+                    id: v.id.clone(),
+                    pubkey: v.pubkey.clone(),
+                    vrf_output: None,
+                    vrf_proof: None,
+                })
+                .collect();
+            // Inject the proposer's VRF output+proof so select_proposer can verify it.
+            for v in &mut active {
+                if v.id == proposer_id {
+                    v.vrf_output = Some(output.clone());
+                    v.vrf_proof = Some(proof.clone());
+                }
+            }
+            let selected = crate::vrf::select_proposer(&active, epoch_seed)
+                .ok_or_else(|| anyhow::anyhow!("No active validators to select proposer"))?;
+            if &selected != proposer_id {
+                bail!("Proposer {} is not the VRF-selected proposer (expected {})", proposer_id, selected);
+            }
+        }
         // Broadcast the block hash — validators use this as the message digest.
         let block_hash = self.block.hash();
         tracing::info!("[PBFT] PRE-PREPARE: block {} from {}", &block_hash[..12], proposer_id);

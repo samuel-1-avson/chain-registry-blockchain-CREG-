@@ -81,6 +81,7 @@ fn make_request(ecosystem: &str, name: &str, version: &str) -> PublishRequest {
         signature:        hex::encode(sig.to_bytes()),
         manifest:         PackageManifest::default(),
         submitted_at:     Utc::now(),
+        ..Default::default()
     }
 }
 

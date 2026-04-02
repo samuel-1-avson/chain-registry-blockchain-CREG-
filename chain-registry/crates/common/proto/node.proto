@@ -54,6 +54,9 @@ message SubmitRequest {
     bytes zk_proof = 8;
     uint32 static_analysis_score = 9;
     bool sandbox_safe = 10;
+    repeated string publisher_pubkeys = 11;
+    repeated string signatures = 12;
+    uint32 threshold = 13;
 }
 
 message SubmitResponse {

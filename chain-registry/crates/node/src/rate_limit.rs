@@ -75,6 +75,17 @@ impl Bucket {
     }
 }
 
+/// Lock a mutex, recovering gracefully if it was poisoned.
+fn lock_buckets<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<T> {
+    match mutex.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            tracing::warn!("Rate limiter mutex poisoned; recovering");
+            poisoned.into_inner()
+        }
+    }
+}
+
 /// Shared rate limit state (IP → bucket per endpoint class).
 #[derive(Clone)]
 pub struct RateLimiter {
@@ -95,7 +106,7 @@ impl RateLimiter {
     }
 
     fn check(&self, buckets: &Arc<Mutex<HashMap<IpAddr, Bucket>>>, ip: IpAddr, limit: u32) -> bool {
-        let mut map = buckets.lock().unwrap();
+        let mut map = lock_buckets(buckets);
         let bucket  = map.entry(ip).or_insert_with(Bucket::new);
         bucket.is_allowed(self.config.window, limit)
     }
@@ -117,7 +128,7 @@ impl RateLimiter {
         let now    = Instant::now();
         let window = self.config.window;
         for buckets in [&self.general, &self.publish, &self.vote] {
-            let mut map = buckets.lock().unwrap();
+            let mut map = lock_buckets(buckets);
             map.retain(|_, bucket| {
                 bucket.timestamps.retain(|&t| now - t < window);
                 !bucket.timestamps.is_empty()

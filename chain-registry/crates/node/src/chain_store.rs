@@ -8,6 +8,7 @@ use sled::{Db, Tree};
 use std::path::Path;
 use semver;
 
+#[derive(Clone)]
 pub struct ChainStore {
     #[allow(dead_code)]
     db:            Db,
@@ -66,6 +67,18 @@ impl ChainStore {
                     }
                 }
             }
+            if let common::Transaction::RotatePublisherKey { canonical_prefix, old_pubkey, new_pubkey, .. } = tx {
+                for item in self.packages.scan_prefix(canonical_prefix.as_bytes()) {
+                    let Ok((key_bytes, bytes)) = item else { continue };
+                    let Ok(mut rec) = serde_json::from_slice::<ChainRecord>(&bytes) else { continue };
+                    if rec.publisher_pubkey == *old_pubkey {
+                        rec.publisher_pubkey = new_pubkey.clone();
+                        if let Ok(updated) = serde_json::to_vec(&rec) {
+                            let _ = self.packages.insert(key_bytes, updated);
+                        }
+                    }
+                }
+            }
         }
 
         tracing::info!("Block {} inserted (height {})", &hash[..hash.len().min(12)], block.header.height);
@@ -93,7 +106,8 @@ impl ChainStore {
         match self.blocks_by_height.last()? {
             None => Ok(0),
             Some((key, _)) => {
-                let bytes: [u8; 8] = key.as_ref().try_into().unwrap_or([0; 8]);
+                let bytes: [u8; 8] = key.as_ref().try_into()
+                    .unwrap_or_else(|_| [0; 8]);
                 Ok(u64::from_be_bytes(bytes))
             }
         }
@@ -168,6 +182,18 @@ impl ChainStore {
 
     pub fn package_count(&self) -> usize {
         self.packages.len()
+    }
+
+    /// Check whether `publisher_pubkey` owns at least one package with the given prefix.
+    pub fn has_publisher_for_prefix(&self, prefix: &str, publisher_pubkey: &str) -> bool {
+        for item in self.packages.scan_prefix(prefix.as_bytes()) {
+            let Ok((_, bytes)) = item else { continue };
+            let Ok(record) = serde_json::from_slice::<ChainRecord>(&bytes) else { continue };
+            if record.publisher_pubkey == publisher_pubkey {
+                return true;
+            }
+        }
+        false
     }
 
     // ── Chain stats ───────────────────────────────────────────────────────────

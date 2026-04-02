@@ -10,7 +10,9 @@ COPY explorer/ ./
 RUN npm run build
 
 # ── Stage 2: Build Rust Backend ───────────────────────────────────────────────
-FROM rust:1.90-slim-bookworm AS builder
+# Ubuntu 24.04 is required because ort (ONNX Runtime) 2.0.0-rc.12 prebuilt binaries
+# link against glibc 2.38+ symbols (__isoc23_strtoll etc.) not present in Debian 12.
+FROM ubuntu:24.04 AS builder
 
 # Install native dependencies for:
 # - OpenSSL (reqwest)
@@ -18,6 +20,8 @@ FROM rust:1.90-slim-bookworm AS builder
 # - ML/ONNX (math libraries)
 # - WASM (wasmtime dependencies)
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
     pkg-config \
     libssl-dev \
     build-essential \
@@ -29,6 +33,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     protobuf-compiler \
     libprotobuf-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Rust toolchain manually (official rust images are Debian-based and too old for glibc)
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.90.0 \
+    && . "$HOME/.cargo/env" \
+    && cargo --version \
+    && rustc --version
+ENV PATH="/root/.cargo/bin:$PATH"
 
 WORKDIR /build
 
@@ -58,6 +69,7 @@ COPY crates/cross-chain/Cargo.toml        crates/cross-chain/
 
 # Phase 3: Ecosystem crates
 COPY crates/insurance/Cargo.toml        crates/insurance/
+COPY crates/db-sync/Cargo.toml          crates/db-sync/
 
 # Stub sources so Cargo can resolve dependencies before we copy real code.
 RUN mkdir -p crates/common/src     && echo "pub fn _stub() {}" > crates/common/src/lib.rs
@@ -78,6 +90,7 @@ RUN mkdir -p crates/cross-chain/src        && echo "pub fn _stub() {}" > crates/
 
 # Phase 3 stubs
 RUN mkdir -p crates/insurance/src        && echo "pub fn _stub() {}" > crates/insurance/src/lib.rs
+RUN mkdir -p crates/db-sync/src          && echo "pub fn _stub() {}" > crates/db-sync/src/lib.rs
 
 # Pre-build dependencies (cached layer)
 RUN cargo build --release --package chain-registry-node 2>/dev/null || true
@@ -96,7 +109,8 @@ RUN cargo build --release --package chain-registry-node
 RUN cargo build --release --package chain-registry-cli
 
 # ── Stage 3: Runtime ──────────────────────────────────────────────────────────
-FROM debian:bookworm-slim AS runtime
+# Must match builder glibc version (Ubuntu 24.04 has glibc 2.39)
+FROM ubuntu:24.04 AS runtime
 
 # Production-hardened validator deps:
 # - ca-certificates & curl: for IPFS / Eth RPC communication

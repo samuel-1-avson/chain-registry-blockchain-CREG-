@@ -13,6 +13,7 @@ validator = { path = "../validator" }
 consensus = { path = "../consensus" }
 resolver  = { path = "../resolver" }
 zk-validator = { path = "../zk-validator" }
+db-sync   = { path = "../db-sync" }
 
 tokio        = { workspace = true }
 serde        = { workspace = true }

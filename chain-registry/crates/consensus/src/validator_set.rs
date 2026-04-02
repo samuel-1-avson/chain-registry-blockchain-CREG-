@@ -18,7 +18,7 @@ pub struct ValidatorInfo {
 
 #[derive(Debug, Clone)]
 pub struct ValidatorSet {
-    validators: HashMap<String, ValidatorInfo>,
+    pub(crate) validators: HashMap<String, ValidatorInfo>,
 }
 
 impl ValidatorSet {

@@ -14,6 +14,7 @@ pub async fn run(
     tarball_path: &Path,
     manifest_path: Option<&Path>,
     privkey_hex: &str,
+    extra_privkeys: &[String],
     node_url: Option<&str>,
     shield: bool,
 ) -> Result<()> {
@@ -72,6 +73,20 @@ pub async fn run(
     let msg = format!("{}{}", pkg_id.canonical(), content_hash);
     let signature = signing_key.sign(msg.as_bytes());
 
+    let mut publisher_pubkeys = vec![hex::encode(pubkey.as_bytes())];
+    let mut signatures = vec![hex::encode(signature.to_bytes())];
+
+    for key_hex in extra_privkeys {
+        let key_bytes = hex::decode(key_hex.trim())
+            .with_context(|| format!("Invalid extra private key hex: {}", key_hex))?;
+        let sk = SigningKey::try_from(key_bytes.as_slice())
+            .with_context(|| format!("Invalid Ed25519 extra private key: {}", key_hex))?;
+        let pk = sk.verifying_key();
+        let sig = sk.sign(msg.as_bytes());
+        publisher_pubkeys.push(hex::encode(pk.as_bytes()));
+        signatures.push(hex::encode(sig.to_bytes()));
+    }
+
     // ── 5.5. Optional PGP signing ─────────────────────────────────────────────
     // If PGP_PRIVATE_KEY_PATH is set, load the armored secret key and sign the
     // tarball to produce a detached PGP signature over the content hash.
@@ -81,14 +96,18 @@ pub async fn run(
         id: pkg_id.clone(),
         content_hash: content_hash.clone(),
         ipfs_cid: final_ipfs_cid.clone(),
-        publisher_pubkey: hex::encode(pubkey.as_bytes()),
-        signature: hex::encode(signature.to_bytes()),
+        publisher_pubkey: publisher_pubkeys[0].clone(),
+        signature: signatures[0].clone(),
         manifest,
         submitted_at: Utc::now(),
         shielded: shield,
         key_bundle,
         pgp_signature,
         pgp_public_key,
+        publisher_pubkeys: publisher_pubkeys.clone(),
+        signatures: signatures.clone(),
+        threshold: if publisher_pubkeys.len() >= 2 { 2 } else { 1 },
+        ..Default::default()
     };
 
     // ── 5.5. Generate ZK Content-Hash Proof (publisher-side attestation) ──────
@@ -157,12 +176,15 @@ pub async fn run(
             version: pkg_id.version.clone(),
             content_hash: content_hash.clone(),
             ipfs_cid: final_ipfs_cid,
-            publisher_pubkey: hex::encode(pubkey.as_bytes()),
-            signature: hex::encode(signature.to_bytes()),
+            publisher_pubkey: publisher_pubkeys[0].clone(),
+            signature: signatures[0].clone(),
             zk_proof: proof_bytes,
             // Scores are set to 0 — validator nodes will evaluate these.
             static_analysis_score: 0,
             sandbox_safe: false,
+            publisher_pubkeys: publisher_pubkeys.clone(),
+            signatures: signatures.clone(),
+            threshold: if publisher_pubkeys.len() >= 2 { 2 } else { 1 },
         };
         
         match client.submit_package(grpc_req).await {

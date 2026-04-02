@@ -1,5 +1,7 @@
 # Rust
 /target/
+/target[0-9]*/
+**/*.target/
 Cargo.lock
 creg.exe
 creg-node.exe
@@ -11,25 +13,37 @@ contracts/
 out/
 cache/
 deployments/
+foundry.lock
+remappings.txt
 
 # Environment & Secrets
-.env
+.env*
 *.key
 *.pem
 .gemini/
+publisher.key
+validators/
+secret-model/
 
 # Data & Storage
 /data/
 /node*-data/
+/validator*-data/
 /ipfs-data/
 /anvil_state.json
 /dev-data/
+/tmp/
+/temp/
 
 # TUI & Logs
 *.log
 node_err.log
 publish_log.txt
 build_log.txt
+api-test.log
+check.log
+cli-check.log
+node-check*.log
 
 # Package Artifacts
 *.tgz

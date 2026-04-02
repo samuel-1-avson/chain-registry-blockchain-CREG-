@@ -1,0 +1,84 @@
+{
+  "validators": [
+    {
+      "id": "node-1",
+      "alias": "Validator-1",
+      "pubkey": "808704b7245921ce7fa3d923bccd0cc30cea91885bc639e92ba4e4c20fcfe6bd",
+      "stake": 100,
+      "reputation": 100,
+      "status": "online"
+    },
+    {
+      "id": "node-2",
+      "alias": "Validator-2",
+      "pubkey": "65fba7b91a320f4ef5e61f14dcb6906c7258334d5619f5a0f2f1e6bc57eb74a0",
+      "stake": 100,
+      "reputation": 100,
+      "status": "online"
+    },
+    {
+      "id": "node-3",
+      "alias": "Validator-3",
+      "pubkey": "08ab08823dbc4d8b22de7fa5b01b9b25ab33fd31fd0c0383d2295518ffce736f",
+      "stake": 100,
+      "reputation": 100,
+      "status": "online"
+    },
+    {
+      "id": "node-4",
+      "alias": "Validator-4",
+      "pubkey": "aae520254ef67b11580d19c6f886aa3c785bd66f2a897ce910629c55d1b33c84",
+      "stake": 100,
+      "reputation": 100,
+      "status": "online"
+    },
+    {
+      "id": "node-5",
+      "alias": "Validator-5",
+      "pubkey": "83898d5931310977a99c9a49799bb81449c70ae84c8f3d7f53c3ce1c96bd882d",
+      "stake": 100,
+      "reputation": 100,
+      "status": "online"
+    },
+    {
+      "id": "node-6",
+      "alias": "Validator-6",
+      "pubkey": "5ce759f66caba2849bbf7adb0bc89c03367dfb62655cde1a7f95da95cdaf858e",
+      "stake": 100,
+      "reputation": 100,
+      "status": "online"
+    },
+    {
+      "id": "node-7",
+      "alias": "Validator-7",
+      "pubkey": "9da90e656f08f9d1723758a8cd5edcfa837393f1e03a0119f9297eea737b8bb6",
+      "stake": 100,
+      "reputation": 100,
+      "status": "online"
+    },
+    {
+      "id": "node-8",
+      "alias": "Validator-8",
+      "pubkey": "a0dfab182dbec70dd4de19b5d819fd02c650ae16d7356c17389cd97993b8bd29",
+      "stake": 100,
+      "reputation": 100,
+      "status": "online"
+    },
+    {
+      "id": "node-9",
+      "alias": "Validator-9",
+      "pubkey": "636afccf407ce32955021e16572706e9cc5497cbd6510573e3cf0817eb53b508",
+      "stake": 100,
+      "reputation": 100,
+      "status": "online"
+    },
+    {
+      "id": "node-10",
+      "alias": "Validator-10",
+      "pubkey": "3cb96ea88c4d376bc134073d8c7786678ffca6ed35e6978c5dca9b950efad22e",
+      "stake": 100,
+      "reputation": 100,
+      "status": "online"
+    }
+  ]
+}

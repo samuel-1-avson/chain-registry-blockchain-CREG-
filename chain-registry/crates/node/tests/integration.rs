@@ -41,6 +41,7 @@ mod helpers {
             signature:        hex::encode(sig.to_bytes()),
             manifest:         PackageManifest::default(),
             submitted_at:     Utc::now(),
+            ..Default::default()
         };
 
         (request, tarball)
@@ -95,6 +96,8 @@ mod chain_store_tests {
                 proposer_id:        "test-node".into(),
                 timestamp:          Utc::now(),
                 validator_set_hash: "dev".into(),
+                vrf_output: None,
+                vrf_proof: None,
             },
             transactions: vec![],
         };
@@ -119,6 +122,7 @@ mod chain_store_tests {
             published_at:         Utc::now(),
             validator_signatures: vec![],
             status:               PackageStatus::Verified,
+            ..Default::default()
         };
 
         let tx = Transaction::Publish(record);
@@ -130,6 +134,8 @@ mod chain_store_tests {
                 proposer_id:        "test".into(),
                 timestamp:          Utc::now(),
                 validator_set_hash: "dev".into(),
+                vrf_output: None,
+                vrf_proof: None,
             },
             transactions: vec![tx],
         };
@@ -154,6 +160,7 @@ mod chain_store_tests {
             published_at:         Utc::now(),
             validator_signatures: vec![],
             status:               PackageStatus::Verified,
+            ..Default::default()
         };
 
         let pub_tx = Transaction::Publish(record);
@@ -162,6 +169,8 @@ mod chain_store_tests {
                 height: 1, prev_hash: store.tip_hash().unwrap(),
                 merkle_root: "a".into(), proposer_id: "t".into(),
                 timestamp: Utc::now(), validator_set_hash: "dev".into(),
+                vrf_output: None,
+                vrf_proof: None,
             },
             transactions: vec![pub_tx],
         };
@@ -179,6 +188,8 @@ mod chain_store_tests {
                 height: 2, prev_hash: block1.hash(),
                 merkle_root: "b".into(), proposer_id: "t".into(),
                 timestamp: Utc::now(), validator_set_hash: "dev".into(),
+                vrf_output: None,
+                vrf_proof: None,
             },
             transactions: vec![revoke_tx],
         };
@@ -224,6 +235,8 @@ mod consensus_tests {
                 proposer_id:        "val-1".into(),
                 timestamp:          Utc::now(),
                 validator_set_hash: "dev".into(),
+                vrf_output: None,
+                vrf_proof: None,
             },
             transactions: vec![],
         }

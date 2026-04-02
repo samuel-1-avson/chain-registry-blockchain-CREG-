@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use uuid::Uuid;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct NodeConfig {
     /// HTTP bind address for the REST API.
     pub listen_addr: String,
@@ -29,6 +29,8 @@ pub struct NodeConfig {
     pub block_interval_secs: u64,
     /// IPFS API base URL.
     pub ipfs_url: String,
+    /// PostgreSQL connection URL for the sync worker.
+    pub pg_url: String,
     /// The set of active validators (JSON-encoded).
     pub validator_set: common::ValidatorSet,
 }
@@ -58,6 +60,7 @@ impl NodeConfig {
             registry_addr: env("CREG_REGISTRY_ADDR", "0x0000000000000000000000000000000000000000"),
             block_interval_secs: env("CREG_BLOCK_INTERVAL", "5").parse().unwrap_or(5),
             ipfs_url: env("CREG_IPFS_URL", "http://127.0.0.1:5001"),
+            pg_url: env("CREG_PG_URL", ""),
             validator_set: serde_json::from_str(&env("CREG_VALIDATOR_SET", "{\"validators\":[]}"))
                 .unwrap_or_else(|_| common::ValidatorSet::new(vec![])),
         }

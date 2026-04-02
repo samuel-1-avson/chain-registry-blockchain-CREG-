@@ -127,19 +127,24 @@ async fn process_package(
         (s.config.is_validator, s.config.node_id.clone(), s.config.validator_privkey.clone(), prev.map(|r| req.manifest.clone()))
     };
 
-    let (vote, pgp_fingerprint, findings) = if is_validator && privkey_opt.is_some() {
-        let privkey = privkey_opt.as_ref().unwrap();
-        tracing::info!("[Consensus] Node is a validator — running full analysis for {}", canonical);
-        match validator::validate_package(&req, &tarball, &privkey, prev_manifest.as_ref()).await {
-            Ok(res)  => (res.vote, res.pgp_fingerprint, res.findings),
-            Err(e) => {
-                tracing::error!("Validation error for {}: {}", canonical, e);
-                cleanup(&state, &canonical).await;
-                return;
+    let (vote, pgp_fingerprint, findings) = if is_validator {
+        if let Some(privkey) = privkey_opt.as_ref() {
+            tracing::info!("[Consensus] Node is a validator — running full analysis for {}", canonical);
+            match validator::validate_package(&req, &tarball, privkey, prev_manifest.as_ref()).await {
+                Ok(res)  => (res.vote, res.pgp_fingerprint, res.findings),
+                Err(e) => {
+                    tracing::error!("Validation error for {}: {}", canonical, e);
+                    cleanup(&state, &canonical).await;
+                    return;
+                }
             }
+        } else {
+            tracing::error!("[Consensus] Validator node missing private key — cannot analyze {}", canonical);
+            cleanup(&state, &canonical).await;
+            return;
         }
     } else {
-        tracing::warn!("[Consensus] Node is NOT a validator or missing key — skipping analysis for {}", canonical);
+        tracing::warn!("[Consensus] Node is NOT a validator — skipping analysis for {}", canonical);
         (ValidatorVote::Approve, None, Vec::new()) // Non-validators trust the consensus result.
     };
 
@@ -263,6 +268,7 @@ async fn process_package(
                 content_hash:         req.content_hash.clone(),
                 ipfs_cid:             req.ipfs_cid.clone(),
                 publisher_pubkey:     req.publisher_pubkey.clone(),
+                publisher_pubkeys:    req.publisher_pubkeys.clone(),
                 block_hash:           "pending".into(),
                 published_at:         Utc::now(),
                 validator_signatures: final_sigs,
@@ -273,6 +279,7 @@ async fn process_package(
                 findings,
                 access_count:         0,
                 last_accessed:        None,
+                ..Default::default()
             };
             Transaction::Publish(record)
         }

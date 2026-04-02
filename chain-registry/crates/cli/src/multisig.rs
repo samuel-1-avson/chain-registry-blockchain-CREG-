@@ -172,7 +172,7 @@ pub async fn submit(session_path: &Path, manifest_path: Option<&Path>, node_url:
         "→".cyan(), session.signatures.len(), session.threshold);
 
     // Build a publish request using the first signer as the primary publisher
-    // and embedding all signatures in a JSON field.
+    // and the new first-class multi-sig fields.
     let (primary_pubkey, primary_sig) = session.signatures.first()
         .context("No signatures in session")?;
 
@@ -181,9 +181,7 @@ pub async fn submit(session_path: &Path, manifest_path: Option<&Path>, node_url:
         None    => common::PackageManifest::default(),
     };
 
-    let all_sigs: serde_json::Value = session.signatures.iter().map(|(pk, sig)| {
-        serde_json::json!({ "pubkey": pk, "signature": sig })
-    }).collect::<Vec<_>>().into();
+    let (publisher_pubkeys, signatures): (Vec<String>, Vec<String>) = session.signatures.iter().cloned().unzip();
 
     let request = common::PublishRequest {
         id: common::PackageId {
@@ -201,9 +199,13 @@ pub async fn submit(session_path: &Path, manifest_path: Option<&Path>, node_url:
         manifest,
         submitted_at:       chrono::Utc::now(),
         shielded:           false,
-        key_bundle:         Some(serde_json::to_string(&all_sigs)?),
+        key_bundle:         None,
         pgp_signature:      None,
         pgp_public_key:     None,
+        publisher_pubkeys,
+        signatures,
+        threshold: session.threshold,
+        ..Default::default()
     };
 
     let url = format!("{}/v1/packages", base.trim_end_matches('/'));

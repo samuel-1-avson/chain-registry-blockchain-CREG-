@@ -1,5 +1,7 @@
-# Rust build output — gigabytes, never needed in Docker context
+# Rust build output
 target/
+target[0-9]*/
+**/*.target/
 
 # Node.js dependencies — reinstalled inside Docker
 node_modules/
@@ -10,15 +12,40 @@ explorer/dist/
 .git/
 .github/
 
-# Local dev / secrets
-.env
+# Environment & Secrets
+.env*
 *.key
 *.pem
+publisher.key
 
 # IDE
 .vscode/
 .idea/
+.DS_Store
+Thumbs.db
+*.swp
 
-# Logs and temp files
+# TUI & Logs
 *.log
+node_err.log
+publish_log.txt
+build_log.txt
+api-test.log
+check.log
+cli-check.log
+node-check*.log
+
+# Data and artifacts
 data/
+node*-data/
+validator*-data/
+ipfs-data/
+anvil_state.json
+dev-data/
+tmp/
+temp/
+secret-model/
+validators/
+*.tgz
+*.zip
+*.tar.gz

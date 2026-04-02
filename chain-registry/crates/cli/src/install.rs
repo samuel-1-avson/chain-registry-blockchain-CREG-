@@ -96,9 +96,16 @@ pub async fn run(
 
     // ── 4. Swarm Download (Decentralised Distribution) ───────────────────────
     let mut local_tarball: Option<std::path::PathBuf> = None;
-    if let VerdictStatus::Verified { content_hash, ipfs_cid, .. } = &verdict.status {
-        if !ipfs_cid.is_empty() {
-            println!("{} Fetching from P2P swarm...", "→".cyan());
+    match &verdict.status {
+        VerdictStatus::Verified { content_hash, ipfs_cid, .. } => {
+            if ipfs_cid.is_empty() {
+                bail!(
+                    "{} Verified package '{}' has no IPFS CID. Cannot install without verified content.",
+                    "X".red(),
+                    pkg_id.canonical()
+                );
+            }
+            println!("{} Fetching from P2P swarm...", "->".cyan());
             let nodes = vec![node_url.unwrap_or("http://localhost:8080").to_string()];
             let downloader = resolver::downloader::P2PDownloader::new(nodes);
             let temp_file = std::env::temp_dir()
@@ -109,9 +116,21 @@ pub async fn run(
                     local_tarball = Some(temp_file);
                 }
                 Err(e) => {
-                    tracing::warn!("P2P download failed ({}): falling back to original registry", e);
+                    bail!(
+                        "{} P2P download failed for verified package '{}': {}. \
+                         Refusing to fall back to unverified original registry.",
+                        "X".red(),
+                        pkg_id.canonical(),
+                        e
+                    );
                 }
             }
+        }
+        VerdictStatus::Unverified | VerdictStatus::Unknown => {
+            // For unverified/unknown packages, falling back to the original registry is acceptable.
+        }
+        VerdictStatus::Revoked { .. } => {
+            // Already bailed above; unreachable.
         }
     }
 

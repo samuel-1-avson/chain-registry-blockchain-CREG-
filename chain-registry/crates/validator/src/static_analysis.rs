@@ -150,6 +150,59 @@ pub async fn run(
         }
     }
 
+    // ── Deep Learning Malware Scan (Phase 2) ────────────────────────────────
+    // Runs after rule-based static analysis to provide semantic understanding.
+    match ml_validator::deep_scan(tarball_bytes) {
+        Ok(deep) => {
+            let prob = deep.malicious_probability;
+            match deep.classification {
+                ml_validator::ThreatClassification::ConfirmedMalicious => {
+                    findings.push(Finding {
+                        id: "DS003".into(),
+                        title: "AI Deep Scan: Confirmed Malicious".into(),
+                        severity: FindingSeverity::Critical,
+                        description: format!(
+                            "CodeBERT deep-learning classifier indicates high probability ({:.2}) of malicious intent.",
+                            prob
+                        ),
+                        file: "deep_scan".into(),
+                        line: None,
+                    });
+                }
+                ml_validator::ThreatClassification::LikelyMalicious => {
+                    findings.push(Finding {
+                        id: "DS002".into(),
+                        title: "AI Deep Scan: Likely Malicious".into(),
+                        severity: FindingSeverity::High,
+                        description: format!(
+                            "CodeBERT deep-learning classifier indicates likely malicious intent (probability: {:.2}).",
+                            prob
+                        ),
+                        file: "deep_scan".into(),
+                        line: None,
+                    });
+                }
+                ml_validator::ThreatClassification::Suspicious => {
+                    findings.push(Finding {
+                        id: "DS001".into(),
+                        title: "AI Deep Scan: Suspicious".into(),
+                        severity: FindingSeverity::Medium,
+                        description: format!(
+                            "CodeBERT deep-learning classifier flagged suspicious patterns (probability: {:.2}).",
+                            prob
+                        ),
+                        file: "deep_scan".into(),
+                        line: None,
+                    });
+                }
+                _ => {}
+            }
+        }
+        Err(e) => {
+            tracing::warn!("Deep scan failed: {}; continuing with static analysis only", e);
+        }
+    }
+
     Ok(StaticAnalysisResult { findings })
 }
 

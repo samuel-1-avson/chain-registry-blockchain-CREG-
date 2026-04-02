@@ -28,9 +28,11 @@ impl Block {
                 merkle_root: "0".repeat(64),
                 proposer_id: "genesis".into(),
                 timestamp: DateTime::parse_from_rfc3339("2024-01-01T00:00:00Z")
-                    .unwrap()
+                    .expect("genesis timestamp must be valid")
                     .with_timezone(&Utc),
                 validator_set_hash: "0".repeat(64),
+                vrf_output: None,
+                vrf_proof: None,
             },
             transactions: vec![],
         }
@@ -49,6 +51,12 @@ pub struct BlockHeader {
     pub timestamp: DateTime<Utc>,
     /// Hash of the current active validator set (detects set changes).
     pub validator_set_hash: String,
+    /// VRF output (hex) used for proposer selection.
+    #[serde(default)]
+    pub vrf_output: Option<String>,
+    /// VRF proof (hex signature) proving the proposer's legitimacy.
+    #[serde(default)]
+    pub vrf_proof: Option<String>,
 }
 
 /// Every action recorded on the chain is a Transaction.
@@ -80,6 +88,15 @@ pub enum Transaction {
     ValidatorLeave {
         validator_id: String,
     },
+    /// A publisher rotated their Ed25519 signing key.
+    RotatePublisherKey {
+        canonical_prefix: String,
+        old_pubkey: String,
+        new_pubkey: String,
+        sig_from_old: String,
+        sig_from_new: String,
+        timestamp: DateTime<Utc>,
+    },
 }
 
 /// Computes the Merkle root of a list of transaction hashes.
@@ -89,12 +106,13 @@ pub fn merkle_root(txs: &[Transaction]) -> String {
         return sha256_hex(b"empty");
     }
     let mut hashes: Vec<String> = txs.iter()
-        .map(|tx| sha256_hex(serde_json::to_vec(tx).unwrap().as_slice()))
+        .map(|tx| sha256_hex(serde_json::to_vec(tx).expect("transaction must be serializable").as_slice()))
         .collect();
 
     while hashes.len() > 1 {
         if hashes.len() % 2 != 0 {
-            hashes.push(hashes.last().unwrap().clone());
+            let last = hashes.last().expect("hashes is non-empty").clone();
+            hashes.push(last);
         }
         hashes = hashes.chunks(2)
             .map(|pair| sha256_hex(format!("{}{}", pair[0], pair[1]).as_bytes()))

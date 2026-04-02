@@ -109,10 +109,12 @@ impl P2PNode {
         let votes_topic = gossipsub::IdentTopic::new("creg/v1/votes");
         let blocks_topic = gossipsub::IdentTopic::new("creg/v1/blocks");
         let submissions_topic = gossipsub::IdentTopic::new("creg/v1/submissions");
+        let vrf_proofs_topic = gossipsub::IdentTopic::new("creg/v1/vrf-proofs");
         
         self.swarm.behaviour_mut().gossipsub.subscribe(&votes_topic)?;
         self.swarm.behaviour_mut().gossipsub.subscribe(&blocks_topic)?;
         self.swarm.behaviour_mut().gossipsub.subscribe(&submissions_topic)?;
+        self.swarm.behaviour_mut().gossipsub.subscribe(&vrf_proofs_topic)?;
 
         loop {
             tokio::select! {
@@ -159,6 +161,26 @@ impl P2PNode {
                                 if !s.pending_pool.contains(&req.id.canonical()) {
                                     s.pending_pool.insert(req.clone());
                                     tracing::info!("Received {} via gossip", req.id.canonical());
+                                }
+                            }
+                            continue;
+                        }
+
+                        if topic_str.contains("vrf-proofs") {
+                            if let Ok(common::GossipMessage::VrfProof { validator_id, pubkey, epoch_seed, output, proof }) = serde_json::from_slice(&message.data) {
+                                let mut s = state.write().await;
+                                let current_seed = match s.chain.tip_hash() {
+                                    Ok(h) => h,
+                                    Err(_) => continue,
+                                };
+                                // Only accept proofs for the current epoch seed
+                                if epoch_seed == current_seed {
+                                    if let Err(e) = consensus::vrf::verify(epoch_seed.as_bytes(), &pubkey, &output, &proof) {
+                                        tracing::debug!("Dropped invalid VRF proof from {}: {}", validator_id, e);
+                                    } else {
+                                        s.vrf_proofs.insert(validator_id.clone(), (output.clone(), proof.clone()));
+                                        tracing::debug!("Accepted VRF proof from {} for epoch {}", validator_id, &epoch_seed[..epoch_seed.len().min(12)]);
+                                    }
                                 }
                             }
                             continue;

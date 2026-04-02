@@ -109,13 +109,20 @@ impl RegistryService for MyRegistry {
             signature: req.signature,
             manifest: common::PackageManifest::default(),
             submitted_at: chrono::Utc::now(),
-            shielded: false, 
+            shielded: false,
             key_bundle: None,
             pgp_signature: None,
             pgp_public_key: None,
+            publisher_pubkeys: req.publisher_pubkeys,
+            signatures: req.signatures,
+            threshold: req.threshold as usize,
+            ..Default::default()
         };
 
         {
+            if let Err(e) = crate::api::verify_publish_sig(&publish_req) {
+                return Err(Status::permission_denied(format!("Invalid publisher signature: {}", e)));
+            }
             let mut state = self.state.write().await;
             state.pending_pool.insert(publish_req);
             tracing::info!("[Consensus] Package {} added to pending pool via gRPC", req.name);

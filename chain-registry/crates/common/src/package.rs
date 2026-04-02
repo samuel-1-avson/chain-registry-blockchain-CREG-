@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum FindingSeverity {
     /// Package must be rejected — direct evidence of malice.
     Critical,
@@ -12,6 +12,7 @@ pub enum FindingSeverity {
     /// Notable but possibly legitimate — shown as warning.
     Medium,
     /// Informational only.
+    #[default]
     Low,
 }
 
@@ -26,7 +27,7 @@ pub struct Finding {
 }
 
 /// Uniquely identifies a package across all ecosystems.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub struct PackageId {
     /// Ecosystem: "npm" | "pypi" | "cargo" | "rubygems" | "maven"
     pub ecosystem: String,
@@ -71,7 +72,7 @@ pub struct PackageManifest {
 }
 
 /// Submitted by a publisher to place a package in the pending pool.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PublishRequest {
     pub id: PackageId,
     /// SHA-256 of the tarball bytes.
@@ -92,10 +93,19 @@ pub struct PublishRequest {
     pub pgp_signature: Option<String>,
     /// Optional PGP public key for verification.
     pub pgp_public_key: Option<String>,
+    /// Multi-sig: minimum signatures required (default 2).
+    #[serde(default)]
+    pub threshold: usize,
+    /// Multi-sig: list of publisher pubkeys (2-of-3 support).
+    #[serde(default)]
+    pub publisher_pubkeys: Vec<String>,
+    /// Multi-sig: signatures corresponding to `publisher_pubkeys`.
+    #[serde(default)]
+    pub signatures: Vec<String>,
 }
 
 /// A single entry in the on-chain package index.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ChainRecord {
     pub id: PackageId,
     pub content_hash: String,
@@ -118,14 +128,21 @@ pub struct ChainRecord {
     /// Real-time access metrics (Kind Enhancement)
     pub access_count: u32,
     pub last_accessed: Option<DateTime<Utc>>,
+    /// Multi-sig: minimum signatures required.
+    #[serde(default)]
+    pub threshold: usize,
+    /// Multi-sig: list of publisher pubkeys.
+    #[serde(default)]
+    pub publisher_pubkeys: Vec<String>,
 }
 
 /// Current lifecycle state of a package on the chain.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum PackageStatus {
     /// Accepted by consensus — safe to install.
     Verified,
     /// Submitted but not yet through consensus — pending pool only.
+    #[default]
     Pending,
     /// Rejected by consensus or later found malicious.
     Revoked { reason: String },
@@ -141,8 +158,9 @@ pub struct ValidatorSignature {
     pub signed_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ValidatorVote {
+    #[default]
     Approve,
     Reject { reason: String },
 }

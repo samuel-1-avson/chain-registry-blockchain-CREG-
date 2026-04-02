@@ -119,6 +119,25 @@ impl PublisherIndex {
                 }
             }
 
+            Transaction::RotatePublisherKey { canonical_prefix, old_pubkey, new_pubkey, .. } => {
+                // Update canonical → pubkey reverse mappings.
+                let keys_to_update: Vec<String> = self.canonical_to_pubkey
+                    .iter()
+                    .filter(|(canonical, pubkey)| {
+                        canonical.starts_with(canonical_prefix) && *pubkey == old_pubkey
+                    })
+                    .map(|(canonical, _)| canonical.clone())
+                    .collect();
+                for canonical in keys_to_update {
+                    self.canonical_to_pubkey.insert(canonical, new_pubkey.clone());
+                }
+                // Migrate aggregated stats to the new pubkey.
+                if let Some(mut stats) = self.stats.remove(old_pubkey) {
+                    stats.pubkey = new_pubkey.clone();
+                    self.stats.insert(new_pubkey.clone(), stats);
+                }
+            }
+
             _ => {} // ValidatorJoin / ValidatorLeave don't affect publisher index.
         }
     }

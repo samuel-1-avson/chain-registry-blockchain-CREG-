@@ -8,10 +8,10 @@ description = "Machine learning-based threat detection for package validation"
 [dependencies]
 # ONNX Runtime for inference
 ort = { workspace = true, features = ["ndarray"] }
-ndarray = { version = "0.15", features = ["rayon"] }
+ndarray = { version = "0.17", features = ["rayon"] }
 
 # Tokenization for code
-tokenizers = { version = "0.15", default-features = false, features = ["onig"] }
+tokenizers = { workspace = true, default-features = false, features = ["onig"] }
 
 # Feature extraction
 tree-sitter = "0.20"
@@ -34,6 +34,10 @@ serde_json = "1.0"
 # Async
 tokio = { workspace = true }
 futures = "0.3"
+
+# Archive extraction for tarball scanning
+flate2 = "1"
+tar = "0.4"
 
 # Error handling
 thiserror = "1.0"

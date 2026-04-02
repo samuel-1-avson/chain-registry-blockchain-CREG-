@@ -286,6 +286,7 @@ mod tests {
                 published_at:         Utc::now(),
                 validator_signatures: vec![],
                 status:               PackageStatus::Verified,
+                ..Default::default()
             })
         }).collect();
 
@@ -297,6 +298,8 @@ mod tests {
                 proposer_id:        "test".into(),
                 timestamp:          Utc::now(),
                 validator_set_hash: "dev".into(),
+                vrf_output: None,
+                vrf_proof: None,
             },
             transactions: txs,
         };

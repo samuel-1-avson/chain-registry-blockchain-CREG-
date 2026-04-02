@@ -50,7 +50,7 @@ pub async fn run(state: Arc<RwLock<NodeState>>) {
             s.config.eth_rpc_url.clone()
         };
 
-        match ProviderBuilder::new().on_http(rpc_url.parse().unwrap()).get_chain_id().await {
+        match ProviderBuilder::new().on_http(rpc_url.parse().expect("CREG_ETH_RPC must be a valid URL")).get_chain_id().await {
             Ok(id) => {
                 tracing::info!("Connected to Ethereum RPC (Chain ID: {})", id);
                 rpc_ready = true;

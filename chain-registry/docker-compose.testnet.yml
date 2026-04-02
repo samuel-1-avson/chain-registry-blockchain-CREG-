@@ -1,0 +1,438 @@
+# docker-compose.testnet.yml
+# Spins up a 10-validator Chain Registry testnet for Phase 1 validation.
+#
+# Architecture:
+#   - 1 shared IPFS node
+#   - 1 shared Anvil (local Ethereum L1)
+#   - 10 validator nodes (node-1 through node-10)
+#   - Each validator has its own data volume and distinct ports
+#
+# Usage:
+#   1. Generate keys: python scripts/generate-testnet-keys.py --nodes 10
+#   2. Deploy:        docker compose -f docker-compose.testnet.yml up -d --build
+#   3. Monitor:       docker compose -f docker-compose.testnet.yml logs -f
+#
+# IMPORTANT: In production, each validator runs on separate hardware.
+# This compose file is for testnet / CI / load-testing only.
+
+version: "3.9"
+
+x-node-base: &node-base
+  build:
+    context: .
+    dockerfile: Dockerfile
+  restart: unless-stopped
+  depends_on:
+    ipfs:
+      condition: service_started
+    anvil:
+      condition: service_healthy
+    deploy-contracts:
+      condition: service_completed_successfully
+  volumes:
+    - ./circuits:/app/circuits:ro
+    - ./validators:/app/validators:ro
+    - ./models:/app/models:ro
+  environment: &node-env
+    CREG_DATA_DIR: "/data"
+    CREG_IS_VALIDATOR: "true"
+    CREG_ETH_RPC: "http://anvil:8545"
+    CREG_IPFS_URL: "http://ipfs:5001"
+    CREG_BLOCK_INTERVAL: "5"
+    CREG_SINGLE_VALIDATOR_MODE: "false"
+    CREG_DEV_SANDBOX: "true"
+    CREG_ZK_ENABLED: "true"
+    CREG_ZK_VERIFIER_ADDR: "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707"
+    CREG_ML_ENABLED: "true"
+    CREG_ML_MODEL_PATH: "/app/models"
+    CREG_WASM_ENABLED: "true"
+    CREG_WASM_VALIDATORS_PATH: "/app/validators"
+    CREG_REGISTRY_ADDR: "0x5FbDB2315678afecb367f032d93F642f64180aa3"
+    CREG_STAKING_ADDR: "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512"
+    CREG_REPUTATION_ADDR: "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
+    CREG_VRF_ADDR: "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"
+    CREG_GOVERNANCE_ADDR: "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9"
+    CREG_CREG_TOKEN_ADDR: "0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6"
+    CREG_GOVERNANCE_V2_ADDR: "0x8A791620dd6260079BF849Dc5567aDC3F2FdC318"
+    CREG_INSURANCE_ADDR: "0x610178dA211FEF7D417bC0e6FeD39F05609AD788"
+    RUST_LOG: "info,chain_registry_node=debug,consensus=debug"
+  healthcheck:
+    test: ["CMD", "curl", "-f", "http://localhost:8080/v1/health"]
+    interval: 10s
+    timeout: 5s
+    retries: 5
+
+services:
+
+  # ── Shared IPFS ─────────────────────────────────────────────────────────────
+  ipfs:
+    image: ipfs/kubo:v0.27.0
+    container_name: creg-testnet-ipfs
+    ports:
+      - "4001:4001"
+      - "5001:5001"
+      - "8081:8080"
+    volumes:
+      - ipfs-data:/data/ipfs
+      - ./scripts/ipfs-cors.sh:/container-init.d/ipfs-cors.sh:ro
+    command: ["daemon", "--init", "--init-profile=server", "--routing=dhtclient"]
+    environment:
+      - IPFS_PROFILE=server
+    restart: unless-stopped
+
+  # ── Shared Anvil (local Ethereum) ───────────────────────────────────────────
+  anvil:
+    image: ghcr.io/foundry-rs/foundry:latest
+    container_name: creg-testnet-anvil
+    entrypoint: ["anvil", "--host", "0.0.0.0", "--chain-id", "31337", "--block-time", "1", "--accounts", "10"]
+    ports:
+      - "8545:8545"
+    volumes:
+      - ./contracts:/contracts
+      - anvil-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "cast", "chain-id", "--rpc-url", "http://localhost:8545"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ── Contract Deployer ───────────────────────────────────────────────────────
+  deploy-contracts:
+    image: ghcr.io/foundry-rs/foundry:latest
+    container_name: creg-testnet-deploy
+    depends_on:
+      anvil:
+        condition: service_healthy
+    volumes:
+      - ./contracts:/contracts
+      - ./config:/config
+    working_dir: /contracts
+    command: |
+      sh -c "
+        echo 'Waiting for Anvil...' &&
+        sleep 3 &&
+        forge build &&
+        echo 'Deploying contracts...' &&
+        forge script script/Deploy.s.sol --rpc-url http://anvil:8545 --broadcast -vvvv
+      "
+    environment:
+      - RPC_URL=http://anvil:8545
+      - DEPLOYER_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+
+  # ── PostgreSQL Mirror (optional but recommended for testnet) ─────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: creg-testnet-postgres
+    environment:
+      POSTGRES_USER: creg
+      POSTGRES_PASSWORD: creg
+      POSTGRES_DB: chain_registry
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U creg"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ── Validator Nodes 1–10 ────────────────────────────────────────────────────
+  # node-1 is the bootstrap seed for the other 9 nodes.
+
+  node-1:
+    <<: *node-base
+    container_name: creg-testnet-node-1
+    ports:
+      - "8080:8080"
+      - "50051:50051"
+      - "9000:9000"
+    volumes:
+      - node-1-data:/data
+      - ./circuits:/app/circuits:ro
+      - ./validators:/app/validators:ro
+      - ./models:/app/models:ro
+    environment:
+      <<: *node-env
+      CREG_NODE_ID: "node-1"
+      CREG_VALIDATOR_KEY: "${NODE1_VALIDATOR_KEY}"
+      CREG_LISTEN: "0.0.0.0:8080"
+      CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/9000"
+      CREG_P2P_SEEDS: ""
+      CREG_VALIDATOR_SET: "${VALIDATOR_SET_JSON}"
+      CREG_PG_URL: "${CREG_PG_URL:-postgres://creg:creg@postgres:5432/chain_registry}"
+
+  node-2:
+    <<: *node-base
+    container_name: creg-testnet-node-2
+    ports:
+      - "8082:8080"
+      - "50052:50051"
+      - "9002:9000"
+    volumes:
+      - node-2-data:/data
+      - ./circuits:/app/circuits:ro
+      - ./validators:/app/validators:ro
+      - ./models:/app/models:ro
+    environment:
+      <<: *node-env
+      CREG_NODE_ID: "node-2"
+      CREG_VALIDATOR_KEY: "${NODE2_VALIDATOR_KEY}"
+      CREG_LISTEN: "0.0.0.0:8080"
+      CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/9000"
+      CREG_P2P_SEEDS: "/dns4/node-1/tcp/9000"
+      CREG_VALIDATOR_SET: "${VALIDATOR_SET_JSON}"
+      CREG_PG_URL: "${CREG_PG_URL:-postgres://creg:creg@postgres:5432/chain_registry}"
+
+  node-3:
+    <<: *node-base
+    container_name: creg-testnet-node-3
+    ports:
+      - "8083:8080"
+      - "50053:50051"
+      - "9003:9000"
+    volumes:
+      - node-3-data:/data
+      - ./circuits:/app/circuits:ro
+      - ./validators:/app/validators:ro
+      - ./models:/app/models:ro
+    environment:
+      <<: *node-env
+      CREG_NODE_ID: "node-3"
+      CREG_VALIDATOR_KEY: "${NODE3_VALIDATOR_KEY}"
+      CREG_LISTEN: "0.0.0.0:8080"
+      CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/9000"
+      CREG_P2P_SEEDS: "/dns4/node-1/tcp/9000"
+      CREG_VALIDATOR_SET: "${VALIDATOR_SET_JSON}"
+      CREG_PG_URL: "${CREG_PG_URL:-postgres://creg:creg@postgres:5432/chain_registry}"
+
+  node-4:
+    <<: *node-base
+    container_name: creg-testnet-node-4
+    ports:
+      - "8084:8080"
+      - "50054:50051"
+      - "9004:9000"
+    volumes:
+      - node-4-data:/data
+      - ./circuits:/app/circuits:ro
+      - ./validators:/app/validators:ro
+      - ./models:/app/models:ro
+    environment:
+      <<: *node-env
+      CREG_NODE_ID: "node-4"
+      CREG_VALIDATOR_KEY: "${NODE4_VALIDATOR_KEY}"
+      CREG_LISTEN: "0.0.0.0:8080"
+      CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/9000"
+      CREG_P2P_SEEDS: "/dns4/node-1/tcp/9000"
+      CREG_VALIDATOR_SET: "${VALIDATOR_SET_JSON}"
+      CREG_PG_URL: "${CREG_PG_URL:-postgres://creg:creg@postgres:5432/chain_registry}"
+
+  node-5:
+    <<: *node-base
+    container_name: creg-testnet-node-5
+    ports:
+      - "8085:8080"
+      - "50055:50051"
+      - "9005:9000"
+    volumes:
+      - node-5-data:/data
+      - ./circuits:/app/circuits:ro
+      - ./validators:/app/validators:ro
+      - ./models:/app/models:ro
+    environment:
+      <<: *node-env
+      CREG_NODE_ID: "node-5"
+      CREG_VALIDATOR_KEY: "${NODE5_VALIDATOR_KEY}"
+      CREG_LISTEN: "0.0.0.0:8080"
+      CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/9000"
+      CREG_P2P_SEEDS: "/dns4/node-1/tcp/9000"
+      CREG_VALIDATOR_SET: "${VALIDATOR_SET_JSON}"
+      CREG_PG_URL: "${CREG_PG_URL:-postgres://creg:creg@postgres:5432/chain_registry}"
+
+  node-6:
+    <<: *node-base
+    container_name: creg-testnet-node-6
+    ports:
+      - "8086:8080"
+      - "50056:50051"
+      - "9006:9000"
+    volumes:
+      - node-6-data:/data
+      - ./circuits:/app/circuits:ro
+      - ./validators:/app/validators:ro
+      - ./models:/app/models:ro
+    environment:
+      <<: *node-env
+      CREG_NODE_ID: "node-6"
+      CREG_VALIDATOR_KEY: "${NODE6_VALIDATOR_KEY}"
+      CREG_LISTEN: "0.0.0.0:8080"
+      CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/9000"
+      CREG_P2P_SEEDS: "/dns4/node-1/tcp/9000"
+      CREG_VALIDATOR_SET: "${VALIDATOR_SET_JSON}"
+      CREG_PG_URL: "${CREG_PG_URL:-postgres://creg:creg@postgres:5432/chain_registry}"
+
+  node-7:
+    <<: *node-base
+    container_name: creg-testnet-node-7
+    ports:
+      - "8087:8080"
+      - "50057:50051"
+      - "9007:9000"
+    volumes:
+      - node-7-data:/data
+      - ./circuits:/app/circuits:ro
+      - ./validators:/app/validators:ro
+      - ./models:/app/models:ro
+    environment:
+      <<: *node-env
+      CREG_NODE_ID: "node-7"
+      CREG_VALIDATOR_KEY: "${NODE7_VALIDATOR_KEY}"
+      CREG_LISTEN: "0.0.0.0:8080"
+      CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/9000"
+      CREG_P2P_SEEDS: "/dns4/node-1/tcp/9000"
+      CREG_VALIDATOR_SET: "${VALIDATOR_SET_JSON}"
+      CREG_PG_URL: "${CREG_PG_URL:-postgres://creg:creg@postgres:5432/chain_registry}"
+
+  node-8:
+    <<: *node-base
+    container_name: creg-testnet-node-8
+    ports:
+      - "8088:8080"
+      - "50058:50051"
+      - "9008:9000"
+    volumes:
+      - node-8-data:/data
+      - ./circuits:/app/circuits:ro
+      - ./validators:/app/validators:ro
+      - ./models:/app/models:ro
+    environment:
+      <<: *node-env
+      CREG_NODE_ID: "node-8"
+      CREG_VALIDATOR_KEY: "${NODE8_VALIDATOR_KEY}"
+      CREG_LISTEN: "0.0.0.0:8080"
+      CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/9000"
+      CREG_P2P_SEEDS: "/dns4/node-1/tcp/9000"
+      CREG_VALIDATOR_SET: "${VALIDATOR_SET_JSON}"
+      CREG_PG_URL: "${CREG_PG_URL:-postgres://creg:creg@postgres:5432/chain_registry}"
+
+  node-9:
+    <<: *node-base
+    container_name: creg-testnet-node-9
+    ports:
+      - "8089:8080"
+      - "50059:50051"
+      - "9009:9000"
+    volumes:
+      - node-9-data:/data
+      - ./circuits:/app/circuits:ro
+      - ./validators:/app/validators:ro
+      - ./models:/app/models:ro
+    environment:
+      <<: *node-env
+      CREG_NODE_ID: "node-9"
+      CREG_VALIDATOR_KEY: "${NODE9_VALIDATOR_KEY}"
+      CREG_LISTEN: "0.0.0.0:8080"
+      CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/9000"
+      CREG_P2P_SEEDS: "/dns4/node-1/tcp/9000"
+      CREG_VALIDATOR_SET: "${VALIDATOR_SET_JSON}"
+      CREG_PG_URL: "${CREG_PG_URL:-postgres://creg:creg@postgres:5432/chain_registry}"
+
+  node-10:
+    <<: *node-base
+    container_name: creg-testnet-node-10
+    ports:
+      - "8090:8080"
+      - "50060:50051"
+      - "9010:9000"
+    volumes:
+      - node-10-data:/data
+      - ./circuits:/app/circuits:ro
+      - ./validators:/app/validators:ro
+      - ./models:/app/models:ro
+    environment:
+      <<: *node-env
+      CREG_NODE_ID: "node-10"
+      CREG_VALIDATOR_KEY: "${NODE10_VALIDATOR_KEY}"
+      CREG_LISTEN: "0.0.0.0:8080"
+      CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/9000"
+      CREG_P2P_SEEDS: "/dns4/node-1/tcp/9000"
+      CREG_VALIDATOR_SET: "${VALIDATOR_SET_JSON}"
+      CREG_PG_URL: "${CREG_PG_URL:-postgres://creg:creg@postgres:5432/chain_registry}"
+
+  # ── CLI helper service ──────────────────────────────────────────────────────
+  cli:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: creg-testnet-cli
+    entrypoint: ["/app/creg"]
+    command: ["--help"]
+    environment:
+      CREG_NODE_URL: "http://node-1:8080"
+      CREG_ETH_RPC: "http://anvil:8545"
+    depends_on:
+      - node-1
+    profiles:
+      - cli
+
+  # ── Stress Test service ─────────────────────────────────────────────────────
+  stress-test:
+    image: python:3.11-slim
+    container_name: creg-stress-test
+    working_dir: /app
+    volumes:
+      - ./scripts/stress-test.py:/app/stress-test.py:ro
+      - ./.env.testnet:/app/.env.testnet:ro
+    environment:
+      DOCKER_MODE: "true"
+      CREG_IPFS_URL: "http://ipfs:5001"
+    env_file:
+      - .env.testnet
+    command: |
+      sh -c "
+        pip install aiohttp pynacl &&
+        python stress-test.py --nodes 10 --packages 50 --concurrency 5 --timeout 120
+      "
+    depends_on:
+      node-1:
+        condition: service_healthy
+      node-2:
+        condition: service_healthy
+      node-3:
+        condition: service_healthy
+      node-4:
+        condition: service_healthy
+      node-5:
+        condition: service_healthy
+      node-6:
+        condition: service_healthy
+      node-7:
+        condition: service_healthy
+      node-8:
+        condition: service_healthy
+      node-9:
+        condition: service_healthy
+      node-10:
+        condition: service_healthy
+      ipfs:
+        condition: service_started
+    profiles:
+      - stress-test
+
+volumes:
+  ipfs-data:
+  anvil-data:
+  postgres-data:
+  node-1-data:
+  node-2-data:
+  node-3-data:
+  node-4-data:
+  node-5-data:
+  node-6-data:
+  node-7-data:
+  node-8-data:
+  node-9-data:
+  node-10-data:

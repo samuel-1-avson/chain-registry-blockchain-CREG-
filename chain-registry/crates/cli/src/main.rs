@@ -102,6 +102,9 @@ enum Commands {
         /// Publisher's Ed25519 private key file (hex-encoded).
         #[arg(short, long, env = "CREG_PUBLISHER_KEY")]
         key: String,
+        /// Additional Ed25519 private keys for 2-of-3 multi-sig publishing.
+        #[arg(long = "extra-key")]
+        extra_keys: Vec<String>,
         /// Encrypt the package for the validator quorum (Shielded).
         #[arg(long)]
         shield: bool,
@@ -507,8 +510,8 @@ async fn main() -> Result<()> {
                 output::print_verdict(&verdict);
             }
         }
-        Commands::Publish { tarball, manifest, key, shield } => {
-            publish::run(&tarball, manifest.as_deref(), &key, cli.node_url.as_deref(), shield).await?;
+        Commands::Publish { tarball, manifest, key, extra_keys, shield } => {
+            publish::run(&tarball, manifest.as_deref(), &key, &extra_keys, cli.node_url.as_deref(), shield).await?;
         }
         Commands::SetupShims { shim_dir } => {
             intercept::setup_shims(shim_dir.as_deref())?;

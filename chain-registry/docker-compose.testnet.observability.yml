@@ -1,0 +1,13 @@
+# docker-compose.testnet.observability.yml
+# Override file that swaps in the testnet Prometheus config.
+#
+# Usage:
+#   docker compose -f docker-compose.testnet.yml \
+#                  -f observability/docker-compose.observability.yml \
+#                  -f docker-compose.testnet.observability.yml up -d
+
+services:
+  prometheus:
+    volumes:
+      - ./observability/prometheus.testnet.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/alerts.yml:/etc/prometheus/alerts.yml:ro

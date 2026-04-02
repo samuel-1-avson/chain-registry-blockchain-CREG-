@@ -1,3 +1,136 @@
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use common::{PackageId, PackageManifest};
+    use ed25519_dalek::{SigningKey, Signer};
+
+    fn make_keypair() -> (SigningKey, String) {
+        use rand::RngCore;
+        let mut rng = rand::thread_rng();
+        let mut bytes = [0u8; 32];
+        rng.fill_bytes(&mut bytes);
+        let sk = SigningKey::from_bytes(&bytes);
+        let pk = hex::encode(sk.verifying_key().as_bytes());
+        (sk, pk)
+    }
+
+    fn make_request_with_sigs(
+        publisher_pubkeys: Vec<String>,
+        signatures: Vec<String>,
+        threshold: usize,
+    ) -> PublishRequest {
+        PublishRequest {
+            id: PackageId::new("npm", "test", "1.0.0"),
+            content_hash: common::sha256_hex(b"test"),
+            ipfs_cid: "bafytest".into(),
+            publisher_pubkey: publisher_pubkeys.first().cloned().unwrap_or_default(),
+            signature: signatures.first().cloned().unwrap_or_default(),
+            manifest: PackageManifest::default(),
+            submitted_at: chrono::Utc::now(),
+            shielded: false,
+            key_bundle: None,
+            pgp_signature: None,
+            pgp_public_key: None,
+            threshold,
+            publisher_pubkeys,
+            signatures,
+        }
+    }
+
+    #[test]
+    fn single_sig_verifies() {
+        let (sk, pk) = make_keypair();
+        let req = make_request_with_sigs(vec![], vec![], 0);
+        let msg = format!("{}{}", req.id.canonical(), req.content_hash);
+        let sig = sk.sign(msg.as_bytes());
+
+        let req = PublishRequest {
+            publisher_pubkey: pk,
+            signature: hex::encode(sig.to_bytes()),
+            ..req
+        };
+        assert!(verify_publish_sig(&req).is_ok());
+    }
+
+    #[test]
+    fn single_sig_rejects_bad_signature() {
+        let (_sk, pk) = make_keypair();
+        let req = PublishRequest {
+            publisher_pubkey: pk,
+            signature: "deadbeef".repeat(8),
+            ..make_request_with_sigs(vec![], vec![], 0)
+        };
+        assert!(verify_publish_sig(&req).is_err());
+    }
+
+    #[test]
+    fn multisig_2_of_3_verifies() {
+        let (sk1, pk1) = make_keypair();
+        let (sk2, pk2) = make_keypair();
+        let (sk3, pk3) = make_keypair();
+
+        let msg = format!("{}{}", PackageId::new("npm", "test", "1.0.0").canonical(), common::sha256_hex(b"test"));
+        let sig1 = sk1.sign(msg.as_bytes());
+        let sig2 = sk2.sign(msg.as_bytes());
+
+        let req = make_request_with_sigs(
+            vec![pk1.clone(), pk2.clone(), pk3.clone()],
+            vec![hex::encode(sig1.to_bytes()), hex::encode(sig2.to_bytes()), String::new()],
+            2,
+        );
+        assert!(verify_publish_sig(&req).is_ok());
+    }
+
+    #[test]
+    fn multisig_rejects_insufficient_sigs() {
+        let (sk1, pk1) = make_keypair();
+        let (_sk2, pk2) = make_keypair();
+        let (_sk3, pk3) = make_keypair();
+
+        let msg = format!("{}{}", PackageId::new("npm", "test", "1.0.0").canonical(), common::sha256_hex(b"test"));
+        let sig1 = sk1.sign(msg.as_bytes());
+
+        let req = make_request_with_sigs(
+            vec![pk1.clone(), pk2.clone(), pk3.clone()],
+            vec![hex::encode(sig1.to_bytes()), String::new(), String::new()],
+            2,
+        );
+        assert!(verify_publish_sig(&req).is_err());
+    }
+
+    #[test]
+    fn multisig_3_of_3_verifies() {
+        let (sk1, pk1) = make_keypair();
+        let (sk2, pk2) = make_keypair();
+        let (sk3, pk3) = make_keypair();
+
+        let msg = format!("{}{}", PackageId::new("npm", "test", "1.0.0").canonical(), common::sha256_hex(b"test"));
+        let sig1 = sk1.sign(msg.as_bytes());
+        let sig2 = sk2.sign(msg.as_bytes());
+        let sig3 = sk3.sign(msg.as_bytes());
+
+        let req = make_request_with_sigs(
+            vec![pk1.clone(), pk2.clone(), pk3.clone()],
+            vec![
+                hex::encode(sig1.to_bytes()),
+                hex::encode(sig2.to_bytes()),
+                hex::encode(sig3.to_bytes()),
+            ],
+            3,
+        );
+        assert!(verify_publish_sig(&req).is_ok());
+    }
+
+    #[test]
+    fn multisig_rejects_mismatched_counts() {
+        let req = make_request_with_sigs(
+            vec!["aa".into(), "bb".into()],
+            vec!["cc".into()],
+            2,
+        );
+        assert!(verify_publish_sig(&req).is_err());
+    }
+}
 // crates/node/src/api.rs
 // Axum REST API — all HTTP endpoints for the chain registry node.
 
@@ -41,6 +174,7 @@ pub fn router(state: SharedState, event_bus: EventBus, limiter: RateLimiter) -> 
         .route("/v1/pending",                         get(list_pending))
         // Consensus
         .route("/v1/consensus/vote",                  post(receive_vote))
+        .route("/v1/publishers/rotate-key",           post(rotate_publisher_key))
         // Appeals & AAA
         .route("/v1/appeals/:id/audit",               post(submit_audit))
         // Observability
@@ -335,6 +469,77 @@ async fn list_pending(State(state): State<SharedState>) -> impl IntoResponse {
     }))
 }
 
+// POST /v1/publishers/rotate-key
+#[derive(Deserialize)]
+pub struct RotateKeyRequest {
+    pub canonical_prefix: String,
+    pub old_pubkey:       String,
+    pub new_pubkey:       String,
+    pub sig_from_old:     String,
+    pub sig_from_new:     String,
+}
+
+async fn rotate_publisher_key(
+    State(state): State<SharedState>,
+    Json(req): Json<RotateKeyRequest>,
+) -> Response {
+    use ed25519_dalek::{VerifyingKey, Signature, Verifier};
+
+    // 1. Verify sig_from_old: old key signs new_pubkey
+    let verify_sig = |pubkey_hex: &str, msg: &str, sig_hex: &str| -> anyhow::Result<()> {
+        let pk_bytes = hex::decode(pubkey_hex)?;
+        let sig_bytes = hex::decode(sig_hex)?;
+        let vk = VerifyingKey::try_from(pk_bytes.as_slice())
+            .map_err(|_| anyhow::anyhow!("bad pubkey"))?;
+        let sig = Signature::try_from(sig_bytes.as_slice())
+            .map_err(|_| anyhow::anyhow!("bad signature"))?;
+        vk.verify(msg.as_bytes(), &sig)
+            .map_err(|_| anyhow::anyhow!("signature verification failed"))
+    };
+
+    if let Err(e) = verify_sig(&req.old_pubkey, &req.new_pubkey, &req.sig_from_old) {
+        return (StatusCode::BAD_REQUEST, Json(ErrorResponse {
+            error: format!("Invalid sig_from_old: {}", e),
+        })).into_response();
+    }
+    if let Err(e) = verify_sig(&req.new_pubkey, &req.old_pubkey, &req.sig_from_new) {
+        return (StatusCode::BAD_REQUEST, Json(ErrorResponse {
+            error: format!("Invalid sig_from_new: {}", e),
+        })).into_response();
+    }
+
+    // 2. Replay protection: timestamp must be recent (enforced at block inclusion).
+    let now = chrono::Utc::now();
+
+    // 3. Verify old_pubkey owns at least one package matching the prefix.
+    let has_match = state.read().await.chain.has_publisher_for_prefix(&req.canonical_prefix, &req.old_pubkey);
+    if !has_match {
+        return (StatusCode::FORBIDDEN, Json(ErrorResponse {
+            error: format!("old_pubkey does not own any package matching {}", req.canonical_prefix),
+        })).into_response();
+    }
+
+    // 4. Queue the rotation transaction.
+    let tx = common::Transaction::RotatePublisherKey {
+        canonical_prefix: req.canonical_prefix.clone(),
+        old_pubkey:       req.old_pubkey.clone(),
+        new_pubkey:       req.new_pubkey.clone(),
+        sig_from_old:     req.sig_from_old.clone(),
+        sig_from_new:     req.sig_from_new.clone(),
+        timestamp:        now,
+    };
+
+    let s = state.read().await;
+    if s.tx_sender.send(tx).await.is_err() {
+        return server_err("Finalized-tx channel closed".to_string());
+    }
+
+    Json(serde_json::json!({
+        "status": "queued",
+        "message": "Key rotation will be included in the next block"
+    })).into_response()
+}
+
 // POST /v1/consensus/vote
 #[derive(Deserialize, Serialize)]
 pub struct VoteMessage {
@@ -360,12 +565,21 @@ async fn receive_vote(
 
         let s = state.read().await;
 
-        // 1. Check the claimed validator is in the active validator set.
-        let is_known = s.validator_set.validators.iter()
-            .any(|v| v.id == vote.validator_id);
-        if !is_known {
+        // 1. Check the claimed validator is in the active validator set
+        //    AND that the supplied pubkey matches the registered pubkey.
+        let validator = s.validator_set.validators.iter()
+            .find(|v| v.id == vote.validator_id);
+        let Some(validator) = validator else {
             return (StatusCode::FORBIDDEN, Json(ErrorResponse {
                 error: format!("Unknown validator: {}", vote.validator_id),
+            })).into_response();
+        };
+        if !validator.pubkey.is_empty() && vote.validator_pubkey != validator.pubkey {
+            return (StatusCode::FORBIDDEN, Json(ErrorResponse {
+                error: format!(
+                    "Validator pubkey mismatch for {}: expected {}, got {}",
+                    vote.validator_id, validator.pubkey, vote.validator_pubkey
+                ),
             })).into_response();
         }
 
@@ -467,18 +681,199 @@ async fn prometheus_metrics(State(state): State<SharedState>) -> impl IntoRespon
 
 // ─── Publisher signature verification ────────────────────────────────────────
 
-fn verify_publish_sig(req: &PublishRequest) -> anyhow::Result<()> {
+pub(crate) fn verify_publish_sig(req: &PublishRequest) -> anyhow::Result<()> {
     use ed25519_dalek::{VerifyingKey, Signature, Verifier};
-    let pubkey_bytes = hex::decode(&req.publisher_pubkey)?;
-    let sig_bytes    = hex::decode(&req.signature)?;
-    let vk = VerifyingKey::try_from(pubkey_bytes.as_slice())
-        .map_err(|_| anyhow::anyhow!("Invalid Ed25519 public key"))?;
-    let sig = Signature::try_from(sig_bytes.as_slice())
-        .map_err(|_| anyhow::anyhow!("Invalid Ed25519 signature"))?;
+
     let msg = format!("{}{}", req.id.canonical(), req.content_hash);
-    vk.verify(msg.as_bytes(), &sig)
-        .map_err(|_| anyhow::anyhow!("Signature verification failed"))
+
+    // Single-signature fallback.
+    if req.publisher_pubkeys.is_empty() {
+        let pubkey_bytes = hex::decode(&req.publisher_pubkey)?;
+        let sig_bytes    = hex::decode(&req.signature)?;
+        let vk = VerifyingKey::try_from(pubkey_bytes.as_slice())
+            .map_err(|_| anyhow::anyhow!("Invalid Ed25519 public key"))?;
+        let sig = Signature::try_from(sig_bytes.as_slice())
+            .map_err(|_| anyhow::anyhow!("Invalid Ed25519 signature"))?;
+        return vk.verify(msg.as_bytes(), &sig)
+            .map_err(|_| anyhow::anyhow!("Signature verification failed"));
+    }
+
+    // Multi-signature: require at least threshold-of-N valid signatures.
+    let threshold = if req.threshold == 0 { 2 } else { req.threshold };
+
+    if req.signatures.len() != req.publisher_pubkeys.len() {
+        anyhow::bail!(
+            "Signature count ({}) does not match pubkey count ({})",
+            req.signatures.len(),
+            req.publisher_pubkeys.len()
+        );
+    }
+
+    let mut valid = 0usize;
+    for (pubkey_hex, sig_hex) in req.publisher_pubkeys.iter().zip(req.signatures.iter()) {
+        let pk_bytes = match hex::decode(pubkey_hex) {
+            Ok(b) => b,
+            Err(_) => continue,
+        };
+        let sig_bytes = match hex::decode(sig_hex) {
+            Ok(b) => b,
+            Err(_) => continue,
+        };
+        let vk = match VerifyingKey::try_from(pk_bytes.as_slice()) {
+            Ok(k) => k,
+            Err(_) => continue,
+        };
+        let sig = match Signature::try_from(sig_bytes.as_slice()) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        if vk.verify(msg.as_bytes(), &sig).is_ok() {
+            valid += 1;
+        }
+    }
+
+    if valid >= threshold {
+        Ok(())
+    } else {
+        anyhow::bail!(
+            "Multi-sig verification failed: only {}/{} valid signatures (need {})",
+            valid,
+            req.publisher_pubkeys.len(),
+            threshold
+        )
+    }
 }
 
 
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use common::{PackageId, PackageManifest};
+    use ed25519_dalek::{SigningKey, Signer};
+    use rand::rngs::OsRng;
+
+    fn make_keypair() -> (SigningKey, String) {
+        let sk = SigningKey::generate(&mut OsRng);
+        let pk = hex::encode(sk.verifying_key().as_bytes());
+        (sk, pk)
+    }
+
+    fn make_request_with_sigs(
+        publisher_pubkeys: Vec<String>,
+        signatures: Vec<String>,
+        threshold: usize,
+    ) -> PublishRequest {
+        PublishRequest {
+            id: PackageId::new("npm", "test", "1.0.0"),
+            content_hash: common::sha256_hex(b"test"),
+            ipfs_cid: "bafytest".into(),
+            publisher_pubkey: publisher_pubkeys.first().cloned().unwrap_or_default(),
+            signature: signatures.first().cloned().unwrap_or_default(),
+            manifest: PackageManifest::default(),
+            submitted_at: chrono::Utc::now(),
+            shielded: false,
+            key_bundle: None,
+            pgp_signature: None,
+            pgp_public_key: None,
+            threshold,
+            publisher_pubkeys,
+            signatures,
+        }
+    }
+
+    #[test]
+    fn single_sig_verifies() {
+        let (sk, pk) = make_keypair();
+        let req = make_request_with_sigs(vec![], vec![], 0);
+        let msg = format!("{}{}", req.id.canonical(), req.content_hash);
+        let sig = sk.sign(msg.as_bytes());
+
+        let req = PublishRequest {
+            publisher_pubkey: pk,
+            signature: hex::encode(sig.to_bytes()),
+            ..req
+        };
+        assert!(verify_publish_sig(&req).is_ok());
+    }
+
+    #[test]
+    fn single_sig_rejects_bad_signature() {
+        let (_sk, pk) = make_keypair();
+        let req = PublishRequest {
+            publisher_pubkey: pk,
+            signature: "deadbeef".repeat(8),
+            ..make_request_with_sigs(vec![], vec![], 0)
+        };
+        assert!(verify_publish_sig(&req).is_err());
+    }
+
+    #[test]
+    fn multisig_2_of_3_verifies() {
+        let (sk1, pk1) = make_keypair();
+        let (sk2, pk2) = make_keypair();
+        let (sk3, pk3) = make_keypair();
+
+        let msg = format!("{}{}", PackageId::new("npm", "test", "1.0.0").canonical(), common::sha256_hex(b"test"));
+        let sig1 = sk1.sign(msg.as_bytes());
+        let sig2 = sk2.sign(msg.as_bytes());
+
+        let req = make_request_with_sigs(
+            vec![pk1.clone(), pk2.clone(), pk3.clone()],
+            vec![hex::encode(sig1.to_bytes()), hex::encode(sig2.to_bytes()), String::new()],
+            2,
+        );
+        assert!(verify_publish_sig(&req).is_ok());
+    }
+
+    #[test]
+    fn multisig_rejects_insufficient_sigs() {
+        let (sk1, pk1) = make_keypair();
+        let (_sk2, pk2) = make_keypair();
+        let (_sk3, pk3) = make_keypair();
+
+        let msg = format!("{}{}", PackageId::new("npm", "test", "1.0.0").canonical(), common::sha256_hex(b"test"));
+        let sig1 = sk1.sign(msg.as_bytes());
+
+        let req = make_request_with_sigs(
+            vec![pk1.clone(), pk2.clone(), pk3.clone()],
+            vec![hex::encode(sig1.to_bytes()), String::new(), String::new()],
+            2,
+        );
+        assert!(verify_publish_sig(&req).is_err());
+    }
+
+    #[test]
+    fn multisig_3_of_3_verifies() {
+        let (sk1, pk1) = make_keypair();
+        let (sk2, pk2) = make_keypair();
+        let (sk3, pk3) = make_keypair();
+
+        let msg = format!("{}{}", PackageId::new("npm", "test", "1.0.0").canonical(), common::sha256_hex(b"test"));
+        let sig1 = sk1.sign(msg.as_bytes());
+        let sig2 = sk2.sign(msg.as_bytes());
+        let sig3 = sk3.sign(msg.as_bytes());
+
+        let req = make_request_with_sigs(
+            vec![pk1.clone(), pk2.clone(), pk3.clone()],
+            vec![
+                hex::encode(sig1.to_bytes()),
+                hex::encode(sig2.to_bytes()),
+                hex::encode(sig3.to_bytes()),
+            ],
+            3,
+        );
+        assert!(verify_publish_sig(&req).is_ok());
+    }
+
+    #[test]
+    fn multisig_rejects_mismatched_counts() {
+        let req = make_request_with_sigs(
+            vec!["aa".into(), "bb".into()],
+            vec!["cc".into()],
+            2,
+        );
+        assert!(verify_publish_sig(&req).is_err());
+    }
+}
