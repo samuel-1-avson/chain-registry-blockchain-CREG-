@@ -3,52 +3,52 @@
 
 mod api;
 mod block_producer;
+mod bridge;
 mod chain_store;
 mod config;
 mod db_sync_proxy;
 mod events;
+mod explorer;
 mod finalized_tx;
 mod gossip;
+mod grpc;
 mod metrics;
+mod p2p;
+mod p2p_rate_limit;
 mod pending_pool;
 mod proof;
 mod publisher_index;
-mod sync;
-mod explorer;
 mod rate_limit;
-mod p2p_rate_limit;
+mod sync;
 mod validator_pipeline;
-mod p2p;
-mod bridge;
-mod grpc;
 
 use anyhow::Result;
+use serde::Serialize;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use serde::Serialize;
 use tracing_subscriber::EnvFilter;
 
-use events::{EventBus, new_event_bus};
+use events::{new_event_bus, EventBus};
 use finalized_tx::{FinalizedTxReceiver, FinalizedTxSender};
 use publisher_index::PublisherIndex;
 
 /// Shared mutable state passed to every subsystem via Arc<RwLock<_>>.
 pub struct NodeState {
-    pub chain:           chain_store::ChainStore,
-    pub pending_pool:    pending_pool::PendingPool,
+    pub chain: chain_store::ChainStore,
+    pub pending_pool: pending_pool::PendingPool,
     pub publisher_index: PublisherIndex,
-    pub validator_set:   common::ValidatorSet,
-    pub votes:           std::collections::HashMap<String, Vec<common::ValidatorSignature>>, // block_hash/canonical -> sigs
-    pub config:          config::NodeConfig,
-    pub event_bus:       EventBus,
-    pub p2p:             p2p::P2PHandle,
-    pub zk_validator:    Arc<zk_validator::ZkValidator>,
-    pub tx_sender:       FinalizedTxSender,
+    pub validator_set: common::ValidatorSet,
+    pub votes: std::collections::HashMap<String, Vec<common::ValidatorSignature>>, // block_hash/canonical -> sigs
+    pub config: config::NodeConfig,
+    pub event_bus: EventBus,
+    pub p2p: p2p::P2PHandle,
+    pub zk_validator: Arc<zk_validator::ZkValidator>,
+    pub tx_sender: FinalizedTxSender,
     // Live metrics for Explorer
-    pub p2p_status:      P2PStatus,
-    pub bridge_status:   BridgeStatus,
+    pub p2p_status: P2PStatus,
+    pub bridge_status: BridgeStatus,
     /// Cached VRF proofs from other validators: validator_id -> (output, proof)
-    pub vrf_proofs:      std::collections::HashMap<String, (String, String)>,
+    pub vrf_proofs: std::collections::HashMap<String, (String, String)>,
 }
 
 #[derive(Serialize, Clone, Default)]
@@ -71,8 +71,7 @@ pub type SharedState = Arc<RwLock<NodeState>>;
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("info"))
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
         )
         .with_target(true)
         .init();
@@ -88,7 +87,8 @@ async fn main() -> Result<()> {
         }
         // Non-fatal for warnings (e.g. zero registry addr), but validator key
         // absence on a validator node is a hard stop.
-        let hard_errors: Vec<_> = config_errors.iter()
+        let hard_errors: Vec<_> = config_errors
+            .iter()
             .filter(|e| e.contains("CREG_VALIDATOR_KEY"))
             .collect();
         if !hard_errors.is_empty() {
@@ -97,7 +97,10 @@ async fn main() -> Result<()> {
     }
 
     tracing::info!("╔══════════════════════════════════════╗");
-    tracing::info!("║    chain-registry node v{}        ║", env!("CARGO_PKG_VERSION"));
+    tracing::info!(
+        "║    chain-registry node v{}        ║",
+        env!("CARGO_PKG_VERSION")
+    );
     tracing::info!("╚══════════════════════════════════════╝");
     tracing::info!("  listen:      {}", config.listen_addr);
     tracing::info!("  data dir:    {}", config.data_dir.display());
@@ -108,7 +111,7 @@ async fn main() -> Result<()> {
     // ── Open persistent storage ───────────────────────────────────────────────
     let chain = chain_store::ChainStore::open(&config.data_dir)?;
     let chain_for_sync = chain.clone();
-    let tip   = chain.tip_height()?;
+    let tip = chain.tip_height()?;
     tracing::info!("  chain tip:   height={}", tip);
 
     // ── Rebuild publisher index from chain history ────────────────────────────
@@ -129,7 +132,7 @@ async fn main() -> Result<()> {
 
     // ── P2P Networking (libp2p) ───────────────────────────────────────────────
     let (p2p_node, p2p_handle) = p2p::P2PNode::new(&config.p2p_listen)?;
-    
+
     // ── Finalized-tx channel (created before state so API can send to it) ───────
     let (tx_sender, tx_receiver): (FinalizedTxSender, FinalizedTxReceiver) =
         finalized_tx::channel();
@@ -137,21 +140,21 @@ async fn main() -> Result<()> {
     // ── Shared state ──────────────────────────────────────────────────────────
     let state: SharedState = Arc::new(RwLock::new(NodeState {
         chain,
-        pending_pool:    pending_pool::PendingPool::new(),
+        pending_pool: pending_pool::PendingPool::new(),
         publisher_index,
-        validator_set:   config.validator_set.clone(),
-        votes:           std::collections::HashMap::new(),
-        config:          config.clone(),
-        event_bus:       Arc::clone(&event_bus),
-        p2p:             p2p_handle.clone(),
-        zk_validator:    Arc::new(zk_validator::ZkValidator::default()),
-        tx_sender:       tx_sender.clone(),
-        p2p_status:      P2PStatus::default(),
-        bridge_status:   BridgeStatus {
+        validator_set: config.validator_set.clone(),
+        votes: std::collections::HashMap::new(),
+        config: config.clone(),
+        event_bus: Arc::clone(&event_bus),
+        p2p: p2p_handle.clone(),
+        zk_validator: Arc::new(zk_validator::ZkValidator::default()),
+        tx_sender: tx_sender.clone(),
+        p2p_status: P2PStatus::default(),
+        bridge_status: BridgeStatus {
             registry_address: config.registry_addr.clone(),
             ..BridgeStatus::default()
         },
-        vrf_proofs:      std::collections::HashMap::new(),
+        vrf_proofs: std::collections::HashMap::new(),
     }));
 
     // Start P2P node in background
@@ -160,7 +163,10 @@ async fn main() -> Result<()> {
     tokio::spawn(async move {
         for seed in seeds {
             if let Ok(addr) = seed.parse() {
-                let _ = p2p_handle_for_seeds.sender.send(p2p::P2PCommand::Dial { addr }).await;
+                let _ = p2p_handle_for_seeds
+                    .sender
+                    .send(p2p::P2PCommand::Dial { addr })
+                    .await;
             }
         }
     });
@@ -189,38 +195,34 @@ async fn main() -> Result<()> {
         }
     }
 
-    tokio::spawn(sync::run(
-        Arc::clone(&state),
-    ));
+    tokio::spawn(sync::run(Arc::clone(&state)));
 
-    tokio::spawn(validator_pipeline::run(
-        Arc::clone(&state),
-        tx_sender,
-    ));
+    tokio::spawn(validator_pipeline::run(Arc::clone(&state), tx_sender));
 
-    tokio::spawn(block_producer::run(
-        Arc::clone(&state),
-        tx_receiver,
-    ));
+    tokio::spawn(block_producer::run(Arc::clone(&state), tx_receiver));
 
-    tokio::spawn(bridge::run(
-        Arc::clone(&state),
-    ));
+    tokio::spawn(bridge::run(Arc::clone(&state)));
 
     // ── Start gRPC Server (Industrial Speed) ──────────────────────────────────
     let grpc_state = Arc::clone(&state);
     tokio::spawn(async move {
-        let addr = "0.0.0.0:50051".parse().expect("gRPC bind address must be valid");
+        let addr = "0.0.0.0:50051"
+            .parse()
+            .expect("gRPC bind address must be valid");
         let registry = grpc::MyRegistry::new(Arc::clone(&grpc_state));
-        let watcher  = grpc::MyWatcher::new(Arc::clone(&grpc_state));
+        let watcher = grpc::MyWatcher::new(Arc::clone(&grpc_state));
         let explorer = grpc::MyExplorer::new(Arc::clone(&grpc_state));
 
         tracing::info!("gRPC API listening on {}", addr);
 
         tonic::transport::Server::builder()
-            .add_service(common::proto::registry_service_server::RegistryServiceServer::new(registry))
+            .add_service(
+                common::proto::registry_service_server::RegistryServiceServer::new(registry),
+            )
             .add_service(common::proto::watch_service_server::WatchServiceServer::new(watcher))
-            .add_service(common::proto::explorer_service_server::ExplorerServiceServer::new(explorer))
+            .add_service(
+                common::proto::explorer_service_server::ExplorerServiceServer::new(explorer),
+            )
             .serve(addr)
             .await
             .expect("gRPC server failed");
@@ -235,9 +237,12 @@ async fn main() -> Result<()> {
     tracing::info!("REST API listening on http://{}", config.listen_addr);
 
     // ── Graceful shutdown on SIGINT (Ctrl-C) or SIGTERM ───────────────────────
-    axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>())
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await?;
 
     tracing::info!("Node shut down cleanly.");
     Ok(())

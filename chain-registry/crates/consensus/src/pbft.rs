@@ -3,10 +3,10 @@
 // Safety guarantee: the network is correct as long as fewer than ⌊n/3⌋
 // validators are faulty or Byzantine.
 
+use crate::ValidatorSet;
 use anyhow::{bail, Result};
 use common::{Block, ValidatorSignature, ValidatorVote};
 use std::collections::HashMap;
-use crate::ValidatorSet;
 
 /// Current phase of a PBFT round for a given block proposal.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,13 +57,30 @@ impl PbftRound {
             bail!("Proposer {} is not in the validator set", proposer_id);
         }
         // If the block includes a VRF proof, verify it and the proposer selection.
-        if let (Some(ref proof), Some(ref output)) = (&self.block.header.vrf_proof, &self.block.header.vrf_output) {
-            let validator = self.validator_set.validators.get(proposer_id)
-                .ok_or_else(|| anyhow::anyhow!("Proposer {} not found in validator set", proposer_id))?;
+        if let (Some(ref proof), Some(ref output)) =
+            (&self.block.header.vrf_proof, &self.block.header.vrf_output)
+        {
+            let validator = self
+                .validator_set
+                .validators
+                .get(proposer_id)
+                .ok_or_else(|| {
+                    anyhow::anyhow!("Proposer {} not found in validator set", proposer_id)
+                })?;
             let epoch_seed = &self.block.header.prev_hash;
-            crate::vrf::verify(epoch_seed.as_bytes(), &validator.pubkey, output, proof)
-                .map_err(|e| anyhow::anyhow!("VRF verification failed for proposer {}: {}", proposer_id, e))?;
-            let mut active: Vec<crate::vrf::VrfValidator> = self.validator_set.validators.values()
+            crate::vrf::verify(epoch_seed.as_bytes(), &validator.pubkey, output, proof).map_err(
+                |e| {
+                    anyhow::anyhow!(
+                        "VRF verification failed for proposer {}: {}",
+                        proposer_id,
+                        e
+                    )
+                },
+            )?;
+            let mut active: Vec<crate::vrf::VrfValidator> = self
+                .validator_set
+                .validators
+                .values()
                 .filter(|v| v.is_active)
                 .map(|v| crate::vrf::VrfValidator {
                     id: v.id.clone(),
@@ -82,23 +99,27 @@ impl PbftRound {
             let selected = crate::vrf::select_proposer(&active, epoch_seed)
                 .ok_or_else(|| anyhow::anyhow!("No active validators to select proposer"))?;
             if &selected != proposer_id {
-                bail!("Proposer {} is not the VRF-selected proposer (expected {})", proposer_id, selected);
+                bail!(
+                    "Proposer {} is not the VRF-selected proposer (expected {})",
+                    proposer_id,
+                    selected
+                );
             }
         }
         // Broadcast the block hash — validators use this as the message digest.
         let block_hash = self.block.hash();
-        tracing::info!("[PBFT] PRE-PREPARE: block {} from {}", &block_hash[..12], proposer_id);
+        tracing::info!(
+            "[PBFT] PRE-PREPARE: block {} from {}",
+            &block_hash[..12],
+            proposer_id
+        );
         self.phase = PbftPhase::Prepare;
         Ok(block_hash)
     }
 
     // ── Phase 2: PREPARE ─────────────────────────────────────────────────────
     /// A validator casts its PREPARE vote (approve or reject) over the block hash.
-    pub fn receive_prepare(
-        &mut self,
-        validator_id: &str,
-        sig: ValidatorSignature,
-    ) -> Result<bool> {
+    pub fn receive_prepare(&mut self, validator_id: &str, sig: ValidatorSignature) -> Result<bool> {
         if self.phase != PbftPhase::Prepare {
             bail!("Not in PREPARE phase");
         }
@@ -123,11 +144,7 @@ impl PbftRound {
     // ── Phase 3: COMMIT ──────────────────────────────────────────────────────
     /// A validator sends its COMMIT signature. Once quorum is reached the
     /// block is finalised and can be written to the chain.
-    pub fn receive_commit(
-        &mut self,
-        validator_id: &str,
-        sig: ValidatorSignature,
-    ) -> Result<bool> {
+    pub fn receive_commit(&mut self, validator_id: &str, sig: ValidatorSignature) -> Result<bool> {
         if self.phase != PbftPhase::Commit {
             bail!("Not in COMMIT phase");
         }
@@ -140,7 +157,9 @@ impl PbftRound {
 
         if self.commit_sigs.len() >= self.quorum() {
             // Check if enough commits are approvals (not rejections).
-            let approvals = self.commit_sigs.values()
+            let approvals = self
+                .commit_sigs
+                .values()
                 .filter(|s| s.vote == ValidatorVote::Approve)
                 .count();
 
@@ -155,7 +174,11 @@ impl PbftRound {
                 return Ok(true);
             } else {
                 self.phase = PbftPhase::Failed;
-                tracing::warn!("[PBFT] FAILED — insufficient approvals ({}/{})", approvals, self.quorum());
+                tracing::warn!(
+                    "[PBFT] FAILED — insufficient approvals ({}/{})",
+                    approvals,
+                    self.quorum()
+                );
                 return Ok(false);
             }
         }
@@ -175,7 +198,9 @@ pub struct PbftEngine {
 
 impl PbftEngine {
     pub fn new() -> Self {
-        Self { rounds: HashMap::new() }
+        Self {
+            rounds: HashMap::new(),
+        }
     }
 
     pub fn start_round(&mut self, block: Block, vs: ValidatorSet) -> Result<String> {
@@ -187,20 +212,30 @@ impl PbftEngine {
         Ok(hash)
     }
 
-    pub fn prepare(&mut self, block_hash: &str, vid: &str, sig: ValidatorSignature) -> Result<bool> {
-        let round = self.rounds.get_mut(block_hash)
+    pub fn prepare(
+        &mut self,
+        block_hash: &str,
+        vid: &str,
+        sig: ValidatorSignature,
+    ) -> Result<bool> {
+        let round = self
+            .rounds
+            .get_mut(block_hash)
             .ok_or_else(|| anyhow::anyhow!("No active round for block {}", block_hash))?;
         round.receive_prepare(vid, sig)
     }
 
     pub fn commit(&mut self, block_hash: &str, vid: &str, sig: ValidatorSignature) -> Result<bool> {
-        let round = self.rounds.get_mut(block_hash)
+        let round = self
+            .rounds
+            .get_mut(block_hash)
             .ok_or_else(|| anyhow::anyhow!("No active round for block {}", block_hash))?;
         round.receive_commit(vid, sig)
     }
 
     pub fn finalised_sigs(&self, block_hash: &str) -> Vec<ValidatorSignature> {
-        self.rounds.get(block_hash)
+        self.rounds
+            .get(block_hash)
             .map(|r| r.finalised_signatures())
             .unwrap_or_default()
     }

@@ -15,9 +15,9 @@ pub enum StakeRole {
 /// transaction. Here we provide the correct calldata and guidance.
 pub async fn run(
     amount_eth: f64,
-    role:       StakeRole,
-    privkey:    Option<&str>,
-    rpc_url:    Option<&str>,
+    role: StakeRole,
+    privkey: Option<&str>,
+    rpc_url: Option<&str>,
     staking_addr: Option<&str>,
 ) -> Result<()> {
     let rpc = rpc_url.unwrap_or("http://127.0.0.1:8545");
@@ -28,14 +28,16 @@ pub async fn run(
     }
 
     let min_eth = match role {
-        StakeRole::Publisher  => 0.01,
-        StakeRole::Validator  => 1.0,
+        StakeRole::Publisher => 0.01,
+        StakeRole::Validator => 1.0,
     };
 
     if amount_eth < min_eth {
         bail!(
             "Minimum stake for {:?} is {} ETH (you specified {} ETH)",
-            role, min_eth, amount_eth
+            role,
+            min_eth,
+            amount_eth
         );
     }
 
@@ -47,8 +49,8 @@ pub async fn run(
 
     // Keccak4 of function selectors.
     let selector_hex = match role {
-        StakeRole::Publisher => "9c52a7f1",  // keccak256("stakeAsPublisher()")[:4]
-        StakeRole::Validator => "d9d98ce4",  // keccak256("joinAsValidator()")[:4]
+        StakeRole::Publisher => "9c52a7f1", // keccak256("stakeAsPublisher()")[:4]
+        StakeRole::Validator => "d9d98ce4", // keccak256("joinAsValidator()")[:4]
     };
 
     println!("\n  Staking {} ETH as {:?}", amount_eth, role);
@@ -65,9 +67,12 @@ pub async fn run(
                 "send",
                 contract,
                 &format!("0x{}", selector_hex),
-                "--value", &format!("{}wei", wei),
-                "--private-key", key,
-                "--rpc-url", rpc,
+                "--value",
+                &format!("{}wei", wei),
+                "--private-key",
+                key,
+                "--rpc-url",
+                rpc,
             ])
             .status()
             .context("cast not found — install Foundry: https://getfoundry.sh")?;
@@ -79,7 +84,9 @@ pub async fn run(
                     println!("    You can now publish packages with: creg publish <tarball>");
                 }
                 StakeRole::Validator => {
-                    println!("    Set CREG_IS_VALIDATOR=true and restart creg-node to join consensus.");
+                    println!(
+                        "    Set CREG_IS_VALIDATOR=true and restart creg-node to join consensus."
+                    );
                 }
             }
         } else {
@@ -88,14 +95,8 @@ pub async fn run(
     } else {
         // No key — print the cast command for the user to run manually.
         println!("\n  No private key provided. Run this command to stake:\n");
-        println!(
-            "  cast send {} 0x{} \\",
-            contract, selector_hex
-        );
-        println!(
-            "    --value {}wei \\",
-            wei
-        );
+        println!("  cast send {} 0x{} \\", contract, selector_hex);
+        println!("    --value {}wei \\", wei);
         println!("    --private-key $YOUR_PRIVATE_KEY \\");
         println!("    --rpc-url {}", rpc);
     }
@@ -115,7 +116,8 @@ pub fn parse_amount(s: &str) -> Result<f64> {
         return Ok(eth);
     }
     // Plain number — assume ETH.
-    s.parse::<f64>().context("Invalid amount — use '0.01eth' or '1000wei'")
+    s.parse::<f64>()
+        .context("Invalid amount — use '0.01eth' or '1000wei'")
 }
 
 #[cfg(test)]
@@ -142,7 +144,9 @@ mod tests {
     #[test]
     fn publisher_min_stake() {
         // 0.001 ETH should fail for publisher (min 0.01)
-        tokio::runtime::Builder::new_current_thread().build().unwrap()
+        tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap()
             .block_on(run(0.001, StakeRole::Publisher, None, None, None))
             .unwrap_err();
     }

@@ -271,9 +271,12 @@ impl PinningManager {
 
     async fn ensure_registered(&self) -> Result<()> {
         let is_registered = self.contract.is_registered().await?;
-        
+
         if !is_registered {
-            info!("Registering as pinner with stake: {}", self.config.min_stake);
+            info!(
+                "Registering as pinner with stake: {}",
+                self.config.min_stake
+            );
             self.contract
                 .register_pinner(self.config.min_stake)
                 .await
@@ -287,19 +290,19 @@ impl PinningManager {
     async fn load_existing_pins(&self) -> Result<()> {
         // Query contract for existing pins
         let cids = self.contract.get_pinner_cids().await?;
-        
+
         for cid_hash in cids {
             let cid = bytes32_to_cid(&cid_hash)?;
             let pin_info = self.contract.get_pin_info(cid_hash).await?;
-            
+
             let pin = PinInfo {
                 cid: cid.clone(),
                 size: pin_info.size,
                 pinned_at: DateTime::from_timestamp(pin_info.pinned_at as i64, 0)
                     .unwrap_or_else(|| Utc::now()),
-                last_verified: pin_info.last_verified.map(|t| {
-                    DateTime::from_timestamp(t as i64, 0).unwrap_or_else(|| Utc::now())
-                }),
+                last_verified: pin_info
+                    .last_verified
+                    .map(|t| DateTime::from_timestamp(t as i64, 0).unwrap_or_else(|| Utc::now())),
                 access_count: pin_info.access_count,
                 is_active: pin_info.is_active,
                 local_path: None,
@@ -365,11 +368,11 @@ fn cid_to_bytes32(cid: &str) -> Result<[u8; 32]> {
     // For now, we hash the CID string
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
-    
+
     let mut hasher = DefaultHasher::new();
     cid.hash(&mut hasher);
     let hash = hasher.finish();
-    
+
     let mut result = [0u8; 32];
     result[0..8].copy_from_slice(&hash.to_le_bytes());
     Ok(result)

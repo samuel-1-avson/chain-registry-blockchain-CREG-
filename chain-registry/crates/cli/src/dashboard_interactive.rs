@@ -88,12 +88,11 @@ pub async fn run(node_url: Option<&str>) -> Result<()> {
     let stdout = io::stdout();
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
-    
+
     let mut app = DashboardApp::new();
-    let api_base = node_url
-        .map(String::from)
-        .unwrap_or_else(|| std::env::var("CREG_NODE_URL")
-            .unwrap_or_else(|_| "http://localhost:8080".into()));
+    let api_base = node_url.map(String::from).unwrap_or_else(|| {
+        std::env::var("CREG_NODE_URL").unwrap_or_else(|_| "http://localhost:8080".into())
+    });
 
     let mut last_tick = std::time::Instant::now();
     let tick_rate = Duration::from_millis(250);
@@ -132,9 +131,9 @@ fn ui(f: &mut Frame, app: &mut DashboardApp) {
         .direction(Direction::Vertical)
         .margin(1)
         .constraints([
-            Constraint::Length(3),  // Header
-            Constraint::Min(0),     // Main content
-            Constraint::Length(3),  // Footer
+            Constraint::Length(3), // Header
+            Constraint::Min(0),    // Main content
+            Constraint::Length(3), // Footer
         ])
         .split(f.size());
 
@@ -144,14 +143,22 @@ fn ui(f: &mut Frame, app: &mut DashboardApp) {
         .iter()
         .map(|(_, title)| Line::from(title.as_str()))
         .collect();
-    
+
     let tabs = Tabs::new(titles)
-        .block(Block::default().borders(Borders::ALL).title("Chain Registry Dashboard"))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Chain Registry Dashboard"),
+        )
         .select(app.active_tab)
         .style(Style::default().fg(Color::White))
-        .highlight_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+        .highlight_style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )
         .divider(" | ");
-    
+
     f.render_widget(tabs, chunks[0]);
 
     // Main content based on tab
@@ -189,16 +196,40 @@ fn draw_overview_tab(f: &mut Frame, area: Rect) {
 
     // Left: Stats
     let stats_text = vec![
-        Line::from(vec![Span::raw("Blocks: "), Span::styled("15,234", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))]),
-        Line::from(vec![Span::raw("Packages: "), Span::styled("1,892", Style::default().fg(Color::Cyan))]),
-        Line::from(vec![Span::raw("Validators: "), Span::styled("10/10", Style::default().fg(Color::Green))]),
+        Line::from(vec![
+            Span::raw("Blocks: "),
+            Span::styled(
+                "15,234",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(vec![
+            Span::raw("Packages: "),
+            Span::styled("1,892", Style::default().fg(Color::Cyan)),
+        ]),
+        Line::from(vec![
+            Span::raw("Validators: "),
+            Span::styled("10/10", Style::default().fg(Color::Green)),
+        ]),
         Line::from(""),
-        Line::from(vec![Span::raw("Network Status: "), Span::styled("✓ Healthy", Style::default().fg(Color::Green))]),
-        Line::from(vec![Span::raw("Sync: "), Span::styled("100%", Style::default().fg(Color::Green))]),
+        Line::from(vec![
+            Span::raw("Network Status: "),
+            Span::styled("✓ Healthy", Style::default().fg(Color::Green)),
+        ]),
+        Line::from(vec![
+            Span::raw("Sync: "),
+            Span::styled("100%", Style::default().fg(Color::Green)),
+        ]),
     ];
-    
+
     let stats = Paragraph::new(stats_text)
-        .block(Block::default().borders(Borders::ALL).title("Network Stats"))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Network Stats"),
+        )
         .wrap(Wrap { trim: true });
     f.render_widget(stats, chunks[0]);
 
@@ -209,9 +240,12 @@ fn draw_overview_tab(f: &mut Frame, area: Rect) {
         Line::from("• lodash@4.17.21 verified (12s ago)"),
         Line::from("• Validator node-7 voted (15s ago)"),
     ];
-    
-    let activity = Paragraph::new(activities)
-        .block(Block::default().borders(Borders::ALL).title("Recent Activity"));
+
+    let activity = Paragraph::new(activities).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Recent Activity"),
+    );
     f.render_widget(activity, chunks[1]);
 }
 
@@ -222,12 +256,16 @@ fn draw_packages_tab(f: &mut Frame, area: Rect) {
         ListItem::new("⚠ axios@1.4.0       Pending     1/3 votes"),
         ListItem::new("✗ malicious-pkg     Rejected    0/3 votes"),
     ];
-    
+
     let packages = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title("Recent Packages"))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Recent Packages"),
+        )
         .highlight_style(Style::default().add_modifier(Modifier::BOLD))
         .highlight_symbol("> ");
-    
+
     f.render_widget(packages, area);
 }
 
@@ -239,12 +277,29 @@ fn draw_validator_tab(f: &mut Frame, area: Rect) {
 
     // Validator status
     let status_text = vec![
-        Line::from(vec![Span::raw("Status: "), Span::styled("🟢 Active", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
-        Line::from(vec![Span::raw("Stake: "), Span::styled("50 CREG", Style::default().fg(Color::Cyan))]),
-        Line::from(vec![Span::raw("Rewards: "), Span::styled("12.5 CREG", Style::default().fg(Color::Yellow))]),
-        Line::from(vec![Span::raw("Reputation: "), Span::styled("98/100 ⭐⭐⭐⭐⭐", Style::default().fg(Color::Yellow))]),
+        Line::from(vec![
+            Span::raw("Status: "),
+            Span::styled(
+                "🟢 Active",
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(vec![
+            Span::raw("Stake: "),
+            Span::styled("50 CREG", Style::default().fg(Color::Cyan)),
+        ]),
+        Line::from(vec![
+            Span::raw("Rewards: "),
+            Span::styled("12.5 CREG", Style::default().fg(Color::Yellow)),
+        ]),
+        Line::from(vec![
+            Span::raw("Reputation: "),
+            Span::styled("98/100 ⭐⭐⭐⭐⭐", Style::default().fg(Color::Yellow)),
+        ]),
     ];
-    
+
     let status = Paragraph::new(status_text)
         .block(Block::default().borders(Borders::ALL).title("My Validator"));
     f.render_widget(status, chunks[0]);
@@ -256,11 +311,18 @@ fn draw_validator_tab(f: &mut Frame, area: Rect) {
         Row::new(vec!["Block Proposals", "45"]),
         Row::new(vec!["Uptime", "99.9%"]),
     ];
-    
-    let table = Table::new(rows, vec![Constraint::Percentage(50), Constraint::Percentage(50)])
-        .block(Block::default().borders(Borders::ALL).title("Performance (30 days)"))
-        .column_spacing(1);
-    
+
+    let table = Table::new(
+        rows,
+        vec![Constraint::Percentage(50), Constraint::Percentage(50)],
+    )
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Performance (30 days)"),
+    )
+    .column_spacing(1);
+
     f.render_widget(table, chunks[1]);
 }
 
@@ -272,27 +334,30 @@ fn draw_settings_tab(f: &mut Frame, area: Rect) {
 
 fn draw_stake_dialog(f: &mut Frame) {
     let area = centered_rect(60, 40, f.size());
-    
+
     let dialog = Paragraph::new("Stake Dialog\n\nPress ESC to close")
         .block(Block::default().borders(Borders::ALL).title("Stake CREG"));
-    
+
     f.render_widget(Clear, area);
     f.render_widget(dialog, area);
 }
 
 fn draw_publish_dialog(f: &mut Frame) {
     let area = centered_rect(60, 40, f.size());
-    
-    let dialog = Paragraph::new("Publish Dialog\n\nPress ESC to close")
-        .block(Block::default().borders(Borders::ALL).title("Publish Package"));
-    
+
+    let dialog = Paragraph::new("Publish Dialog\n\nPress ESC to close").block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Publish Package"),
+    );
+
     f.render_widget(Clear, area);
     f.render_widget(dialog, area);
 }
 
 fn draw_help_dialog(f: &mut Frame) {
     let area = centered_rect(70, 80, f.size());
-    
+
     let help_text = vec![
         Line::from("Keyboard Shortcuts:"),
         Line::from(""),
@@ -306,10 +371,10 @@ fn draw_help_dialog(f: &mut Frame) {
         Line::from(""),
         Line::from("Press ESC to close this help"),
     ];
-    
-    let dialog = Paragraph::new(help_text)
-        .block(Block::default().borders(Borders::ALL).title("Help"));
-    
+
+    let dialog =
+        Paragraph::new(help_text).block(Block::default().borders(Borders::ALL).title("Help"));
+
     f.render_widget(Clear, area);
     f.render_widget(dialog, area);
 }

@@ -2,25 +2,25 @@
 // Mechanical consensus validator — runs all three stages concurrently
 // and returns a signed vote to the consensus engine.
 
-pub mod static_analysis;
-pub mod sandbox;
-pub mod reputation;
-pub mod report;
-pub mod typosquat;
 pub mod diff;
-pub mod pgp;
 pub mod llm;
+pub mod pgp;
+pub mod report;
+pub mod reputation;
+pub mod sandbox;
+pub mod static_analysis;
+pub mod typosquat;
 
 use anyhow::Result;
-use common::{PublishRequest, ValidatorVote, Finding};
-use report::{ValidationReport, AuditProof};
+use common::{Finding, PublishRequest, ValidatorVote};
+use report::{AuditProof, ValidationReport};
 use reputation::{assess_publisher, final_decision, FinalDecision};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ValidationResult {
-    pub vote:            ValidatorVote,
+    pub vote: ValidatorVote,
     pub pgp_fingerprint: Option<String>,
-    pub findings:        Vec<Finding>,
+    pub findings: Vec<Finding>,
 }
 
 /// Run all three validator stages concurrently and produce a vote.
@@ -28,16 +28,16 @@ pub struct ValidationResult {
 /// Stage 2: sandbox behavioral analysis
 /// Stage 3: publisher reputation assessment
 pub async fn validate_package(
-    req:           &PublishRequest,
-    tarball:       &[u8],
-    _privkey:      &str,
+    req: &PublishRequest,
+    tarball: &[u8],
+    _privkey: &str,
     prev_manifest: Option<&common::PackageManifest>,
 ) -> Result<ValidationResult> {
     let canonical = req.id.canonical();
     tracing::info!("Starting 3-stage validation for {}", canonical);
 
-    let node_url = std::env::var("CREG_NODE_URL")
-        .unwrap_or_else(|_| "http://127.0.0.1:8080".into());
+    let node_url =
+        std::env::var("CREG_NODE_URL").unwrap_or_else(|_| "http://127.0.0.1:8080".into());
 
     // ── All three stages run concurrently ─────────────────────────────────────
     let (static_result, rep_result) = tokio::join!(
@@ -76,11 +76,7 @@ pub async fn validate_package(
     }
 
     // ── Final decision combines all three stages ───────────────────────────────
-    let mut decision = final_decision(
-        report.has_critical_findings(),
-        false,
-        rep.confidence_delta,
-    );
+    let mut decision = final_decision(report.has_critical_findings(), false, rep.confidence_delta);
 
     // ── AAA (Automated AI Auditor) Stage ──────────────────────────────────────
     // If the initial decision is a Reject, trigger the deep audit stage.
@@ -90,12 +86,18 @@ pub async fn validate_package(
             report.aaa_verdict = Some(proof);
             // Overrule the rejection if the AI proof is strong.
             decision = FinalDecision::Approve { confidence: 85 };
-            tracing::info!("[{}] AAA cleared the package with a cryptographically-signed proof", canonical);
+            tracing::info!(
+                "[{}] AAA cleared the package with a cryptographically-signed proof",
+                canonical
+            );
         }
     }
 
     let vote = if decision.is_reject() {
-        let base   = decision.reject_reason().unwrap_or("Validation failed").to_string();
+        let base = decision
+            .reject_reason()
+            .unwrap_or("Validation failed")
+            .to_string();
         let detail = if report.has_critical_findings() {
             format!("{}; {}", base, report.critical_finding_summary())
         } else {
@@ -120,10 +122,7 @@ pub async fn validate_package(
 }
 
 /// Deep Audit call to an external AI Auditor provider.
-async fn aaa_audit(
-    report: &ValidationReport,
-    tarball: &[u8],
-) -> Result<AuditProof> {
+async fn aaa_audit(report: &ValidationReport, tarball: &[u8]) -> Result<AuditProof> {
     let auditor_url = std::env::var("AAA_AUDITOR_URL")
         .unwrap_or_else(|_| "http://ai-auditor-central.service.cluster.local/v1/audit".into());
 
@@ -131,15 +130,15 @@ async fn aaa_audit(
 
     #[derive(serde::Serialize)]
     struct AuditReq<'a> {
-        package:      &'a common::PackageId,
-        findings:     &'a [Finding],
-        tarball_hex:  String,
+        package: &'a common::PackageId,
+        findings: &'a [Finding],
+        tarball_hex: String,
     }
 
     let req = AuditReq {
-        package:      &report.package,
-        findings:     &report.findings,
-        tarball_hex:  hex::encode(tarball),
+        package: &report.package,
+        findings: &report.findings,
+        tarball_hex: hex::encode(tarball),
     };
 
     let resp = reqwest::Client::new()

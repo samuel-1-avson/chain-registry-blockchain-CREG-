@@ -3,7 +3,7 @@
 // Scans the tarball for known malicious patterns without executing anything.
 
 use anyhow::Result;
-use common::{PackageManifest, Finding, FindingSeverity};
+use common::{Finding, FindingSeverity, PackageManifest};
 use serde_json;
 
 pub struct StaticAnalysisResult {
@@ -70,10 +70,7 @@ const PATTERNS: &[Pattern] = &[
     },
 ];
 
-pub async fn run(
-    tarball_bytes: &[u8],
-    manifest: &PackageManifest,
-) -> Result<StaticAnalysisResult> {
+pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<StaticAnalysisResult> {
     let mut findings = Vec::new();
 
     // Extract files from the tarball (tar.gz).
@@ -81,12 +78,16 @@ pub async fn run(
 
     for (path, content) in &files {
         // Only analyse JS/TS/Python/Rust/Ruby source files.
-        if !is_source_file(path) { continue; }
+        if !is_source_file(path) {
+            continue;
+        }
 
         for pat in PATTERNS {
             if content.contains(pat.needle) {
                 // Cross-check against the publisher's declared manifest.
-                if is_excused_by_manifest(pat, manifest) { continue; }
+                if is_excused_by_manifest(pat, manifest) {
+                    continue;
+                }
 
                 findings.push(Finding {
                     id: pat.id.to_string(),
@@ -199,7 +200,10 @@ pub async fn run(
             }
         }
         Err(e) => {
-            tracing::warn!("Deep scan failed: {}; continuing with static analysis only", e);
+            tracing::warn!(
+                "Deep scan failed: {}; continuing with static analysis only",
+                e
+            );
         }
     }
 
@@ -218,7 +222,9 @@ fn is_excused_by_manifest(pat: &Pattern, manifest: &PackageManifest) -> bool {
 /// Shannon entropy of a string — high values indicate obfuscation.
 fn shannon_entropy(s: &str) -> f64 {
     let mut freq = [0usize; 256];
-    for b in s.bytes() { freq[b as usize] += 1; }
+    for b in s.bytes() {
+        freq[b as usize] += 1;
+    }
     let len = s.len() as f64;
     freq.iter()
         .filter(|&&c| c > 0)
@@ -234,12 +240,19 @@ fn is_source_file(path: &str) -> bool {
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("");
-    matches!(ext, "js" | "ts" | "mjs" | "cjs" | "py" | "rb" | "rs" | "java")
+    matches!(
+        ext,
+        "js" | "ts" | "mjs" | "cjs" | "py" | "rb" | "rs" | "java"
+    )
 }
 
 fn find_line_number(content: &str, needle: &str) -> Option<usize> {
     content.lines().enumerate().find_map(|(i, l)| {
-        if l.contains(needle) { Some(i + 1) } else { None }
+        if l.contains(needle) {
+            Some(i + 1)
+        } else {
+            None
+        }
     })
 }
 
@@ -274,17 +287,25 @@ fn extract_package_identity(files: &[(String, String)]) -> (String, String) {
         if path.ends_with("Cargo.toml") {
             for line in content.lines() {
                 if let Some(rest) = line.strip_prefix("name") {
-                    let name = rest.trim_start_matches([' ', '=', '"']).trim_end_matches('"').trim();
+                    let name = rest
+                        .trim_start_matches([' ', '=', '"'])
+                        .trim_end_matches('"')
+                        .trim();
                     if !name.is_empty() {
                         return (name.to_string(), "cargo".to_string());
                     }
                 }
             }
         }
-        if path.ends_with("setup.py") || path.ends_with("setup.cfg") || path.ends_with("pyproject.toml") {
+        if path.ends_with("setup.py")
+            || path.ends_with("setup.cfg")
+            || path.ends_with("pyproject.toml")
+        {
             for line in content.lines() {
                 if line.trim_start().starts_with("name") {
-                    let name = line.splitn(2, '=').nth(1)
+                    let name = line
+                        .splitn(2, '=')
+                        .nth(1)
                         .unwrap_or("")
                         .trim()
                         .trim_matches(['"', '\'', ' ']);
@@ -301,14 +322,14 @@ fn extract_package_identity(files: &[(String, String)]) -> (String, String) {
 /// Levenshtein-distance based typosquat check against all known popular packages.
 pub fn check_typosquatting_real(package_name: &str, ecosystem: &str) -> Option<Finding> {
     typosquat::check(package_name, ecosystem).map(|m| Finding {
-        id:          "SA010".into(),
-        title:       "Typosquatting detected".into(),
-        severity:    FindingSeverity::Critical,
+        id: "SA010".into(),
+        title: "Typosquatting detected".into(),
+        severity: FindingSeverity::Critical,
         description: format!(
             "Possible typosquatting: '{}' is edit distance {} from popular package '{}'",
             m.candidate, m.distance, m.target
         ),
-        file:        "package manifest".into(),
-        line:        None,
+        file: "package manifest".into(),
+        line: None,
     })
 }

@@ -259,7 +259,7 @@ impl IpfsPinner for MockPinner {
     async fn get_stats(&self) -> Result<PinnerStats> {
         let pins = self.pins.read().await;
         let total_size: u64 = pins.values().map(|v| v.len() as u64).sum();
-        
+
         Ok(PinnerStats {
             total_pins: pins.len(),
             total_size,

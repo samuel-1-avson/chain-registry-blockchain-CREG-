@@ -1,4 +1,4 @@
-use anyhow::{Result, Context};
+use anyhow::{Context, Result};
 use reqwest::Client;
 use serde_json::json;
 
@@ -14,7 +14,7 @@ pub async fn predict_intent(code_snippet: &str) -> Result<u8> {
     };
 
     let client = Client::new();
-    
+
     // We use OpenRouter as a gateway, preferring Claude 3 Haiku for fast analysis
     let prompt = format!(
         "Analyze the following code snippet. Is it malicious obfuscation meant to hide unauthorized access, shell execution, or data exfiltration, or is it just benign minified code? Return ONLY a JSON object with a single key 'maliciousness_score' containing an integer from 0 (completely benign) to 100 (definitely malicious).\n\nCODE:\n{}",
@@ -55,10 +55,15 @@ pub async fn predict_intent(code_snippet: &str) -> Result<u8> {
         .unwrap_or("{}");
 
     // Clean up potentially malformed JSON containing markdown codeblocks
-    let clean_json = content.replace("```json", "").replace("```", "").trim().to_string();
+    let clean_json = content
+        .replace("```json", "")
+        .replace("```", "")
+        .trim()
+        .to_string();
 
-    let parsed: serde_json::Value = serde_json::from_str(&clean_json).unwrap_or(json!({"maliciousness_score": 0}));
-    
+    let parsed: serde_json::Value =
+        serde_json::from_str(&clean_json).unwrap_or(json!({"maliciousness_score": 0}));
+
     let score = parsed["maliciousness_score"].as_u64().unwrap_or(0) as u8;
     Ok(score)
 }

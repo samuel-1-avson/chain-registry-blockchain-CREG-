@@ -2,18 +2,18 @@
 // End-to-end integration tests for the chain registry node.
 // Spins up a real in-process node and drives the full publish → verify lifecycle.
 
-use common::{PackageId, PackageManifest, PublishRequest, VerdictStatus};
 use chrono::Utc;
+use common::{PackageId, PackageManifest, PublishRequest, VerdictStatus};
 
 mod helpers {
     use super::*;
-    use ed25519_dalek::{SigningKey, Signer};
+    use ed25519_dalek::{Signer, SigningKey};
     use rand::rngs::OsRng;
 
     /// Generate a throwaway Ed25519 keypair for tests.
     pub fn generate_keypair() -> (SigningKey, String, String) {
         let signing_key = SigningKey::generate(&mut OsRng);
-        let pubkey_hex  = hex::encode(signing_key.verifying_key().as_bytes());
+        let pubkey_hex = hex::encode(signing_key.verifying_key().as_bytes());
         (signing_key, pubkey_hex, String::new())
     }
 
@@ -36,11 +36,11 @@ mod helpers {
         let request = PublishRequest {
             id,
             content_hash,
-            ipfs_cid:         format!("bafyDev{}", &common::sha256_hex(b"test")[..32]),
+            ipfs_cid: format!("bafyDev{}", &common::sha256_hex(b"test")[..32]),
             publisher_pubkey: pubkey_hex,
-            signature:        hex::encode(sig.to_bytes()),
-            manifest:         PackageManifest::default(),
-            submitted_at:     Utc::now(),
+            signature: hex::encode(sig.to_bytes()),
+            manifest: PackageManifest::default(),
+            submitted_at: Utc::now(),
             ..Default::default()
         };
 
@@ -66,9 +66,9 @@ mod helpers {
 
 #[cfg(test)]
 mod chain_store_tests {
-    use node::chain_store::ChainStore;
-    use common::{Block, BlockHeader, Transaction, ChainRecord, PackageStatus, PackageId};
     use chrono::Utc;
+    use common::{Block, BlockHeader, ChainRecord, PackageId, PackageStatus, Transaction};
+    use node::chain_store::ChainStore;
     use tempfile::TempDir;
 
     fn make_store() -> (ChainStore, TempDir) {
@@ -90,11 +90,11 @@ mod chain_store_tests {
         let (store, _dir) = make_store();
         let block = common::Block {
             header: BlockHeader {
-                height:             1,
-                prev_hash:          store.tip_hash().unwrap(),
-                merkle_root:        "abc".into(),
-                proposer_id:        "test-node".into(),
-                timestamp:          Utc::now(),
+                height: 1,
+                prev_hash: store.tip_hash().unwrap(),
+                merkle_root: "abc".into(),
+                proposer_id: "test-node".into(),
+                timestamp: Utc::now(),
                 validator_set_hash: "dev".into(),
                 vrf_output: None,
                 vrf_proof: None,
@@ -114,25 +114,25 @@ mod chain_store_tests {
         let (store, _dir) = make_store();
 
         let record = ChainRecord {
-            id:                   PackageId::new("npm", "express", "4.18.2"),
-            content_hash:         "abc123".into(),
-            ipfs_cid:             "bafytest".into(),
-            publisher_pubkey:     "pubkey".into(),
-            block_hash:           "0".repeat(64),
-            published_at:         Utc::now(),
+            id: PackageId::new("npm", "express", "4.18.2"),
+            content_hash: "abc123".into(),
+            ipfs_cid: "bafytest".into(),
+            publisher_pubkey: "pubkey".into(),
+            block_hash: "0".repeat(64),
+            published_at: Utc::now(),
             validator_signatures: vec![],
-            status:               PackageStatus::Verified,
+            status: PackageStatus::Verified,
             ..Default::default()
         };
 
         let tx = Transaction::Publish(record);
         let block = common::Block {
             header: BlockHeader {
-                height:             1,
-                prev_hash:          store.tip_hash().unwrap(),
-                merkle_root:        common::merkle_root(&[tx.clone()]),
-                proposer_id:        "test".into(),
-                timestamp:          Utc::now(),
+                height: 1,
+                prev_hash: store.tip_hash().unwrap(),
+                merkle_root: common::merkle_root(&[tx.clone()]),
+                proposer_id: "test".into(),
+                timestamp: Utc::now(),
                 validator_set_hash: "dev".into(),
                 vrf_output: None,
                 vrf_proof: None,
@@ -152,23 +152,26 @@ mod chain_store_tests {
 
         // First insert a verified package.
         let record = ChainRecord {
-            id:                   PackageId::new("npm", "malicious", "1.0.0"),
-            content_hash:         "abc".into(),
-            ipfs_cid:             "bafytest".into(),
-            publisher_pubkey:     "pub".into(),
-            block_hash:           "0".repeat(64),
-            published_at:         Utc::now(),
+            id: PackageId::new("npm", "malicious", "1.0.0"),
+            content_hash: "abc".into(),
+            ipfs_cid: "bafytest".into(),
+            publisher_pubkey: "pub".into(),
+            block_hash: "0".repeat(64),
+            published_at: Utc::now(),
             validator_signatures: vec![],
-            status:               PackageStatus::Verified,
+            status: PackageStatus::Verified,
             ..Default::default()
         };
 
         let pub_tx = Transaction::Publish(record);
         let block1 = common::Block {
             header: BlockHeader {
-                height: 1, prev_hash: store.tip_hash().unwrap(),
-                merkle_root: "a".into(), proposer_id: "t".into(),
-                timestamp: Utc::now(), validator_set_hash: "dev".into(),
+                height: 1,
+                prev_hash: store.tip_hash().unwrap(),
+                merkle_root: "a".into(),
+                proposer_id: "t".into(),
+                timestamp: Utc::now(),
+                validator_set_hash: "dev".into(),
                 vrf_output: None,
                 vrf_proof: None,
             },
@@ -179,15 +182,18 @@ mod chain_store_tests {
         // Then revoke it.
         let revoke_tx = Transaction::Revoke {
             package_canonical: "npm:malicious@1.0.0".into(),
-            reason:            "Contains cryptocurrency miner".into(),
-            revoked_by:        "governance".into(),
-            evidence_hash:     "evidence".into(),
+            reason: "Contains cryptocurrency miner".into(),
+            revoked_by: "governance".into(),
+            evidence_hash: "evidence".into(),
         };
         let block2 = common::Block {
             header: BlockHeader {
-                height: 2, prev_hash: block1.hash(),
-                merkle_root: "b".into(), proposer_id: "t".into(),
-                timestamp: Utc::now(), validator_set_hash: "dev".into(),
+                height: 2,
+                prev_hash: block1.hash(),
+                merkle_root: "b".into(),
+                proposer_id: "t".into(),
+                timestamp: Utc::now(),
+                validator_set_hash: "dev".into(),
                 vrf_output: None,
                 vrf_proof: None,
             },
@@ -202,27 +208,27 @@ mod chain_store_tests {
 
 #[cfg(test)]
 mod consensus_tests {
-    use consensus::{PbftEngine, ValidatorSet, validator_set::ValidatorInfo};
-    use common::{ValidatorSignature, ValidatorVote, Block, BlockHeader, Transaction};
     use chrono::Utc;
+    use common::{Block, BlockHeader, Transaction, ValidatorSignature, ValidatorVote};
+    use consensus::{validator_set::ValidatorInfo, PbftEngine, ValidatorSet};
 
     fn make_validator(id: &str) -> ValidatorInfo {
         ValidatorInfo {
-            id:         id.to_string(),
-            pubkey:     format!("pubkey-{}", id),
-            stake:      1_000_000,
+            id: id.to_string(),
+            pubkey: format!("pubkey-{}", id),
+            stake: 1_000_000,
             reputation: 75,
-            is_active:  true,
+            is_active: true,
         }
     }
 
     fn make_sig(id: &str, vote: ValidatorVote) -> ValidatorSignature {
         ValidatorSignature {
-            validator_id:    id.to_string(),
+            validator_id: id.to_string(),
             validator_pubkey: format!("pubkey-{}", id),
-            signature:       common::sha256_hex(id.as_bytes()),
+            signature: common::sha256_hex(id.as_bytes()),
             vote,
-            signed_at:       Utc::now(),
+            signed_at: Utc::now(),
         }
     }
 
@@ -230,10 +236,10 @@ mod consensus_tests {
         Block {
             header: BlockHeader {
                 height,
-                prev_hash:          prev.to_string(),
-                merkle_root:        "root".into(),
-                proposer_id:        "val-1".into(),
-                timestamp:          Utc::now(),
+                prev_hash: prev.to_string(),
+                merkle_root: "root".into(),
+                proposer_id: "val-1".into(),
+                timestamp: Utc::now(),
                 validator_set_hash: "dev".into(),
                 vrf_output: None,
                 vrf_proof: None,
@@ -247,10 +253,12 @@ mod consensus_tests {
         let mut engine = PbftEngine::new();
         let mut vs = ValidatorSet::new();
         // 4 validators → quorum = (2*4/3)+1 = 3
-        for i in 1..=4 { vs.add(make_validator(&format!("val-{}", i))); }
+        for i in 1..=4 {
+            vs.add(make_validator(&format!("val-{}", i)));
+        }
 
         let block = make_block(1, &"0".repeat(64));
-        let hash  = engine.start_round(block, vs).unwrap();
+        let hash = engine.start_round(block, vs).unwrap();
 
         // Send 3 PREPARE votes.
         for i in 1..=3 {
@@ -271,10 +279,12 @@ mod consensus_tests {
     fn pbft_fails_without_quorum() {
         let mut engine = PbftEngine::new();
         let mut vs = ValidatorSet::new();
-        for i in 1..=4 { vs.add(make_validator(&format!("val-{}", i))); }
+        for i in 1..=4 {
+            vs.add(make_validator(&format!("val-{}", i)));
+        }
 
         let block = make_block(1, &"0".repeat(64));
-        let hash  = engine.start_round(block, vs).unwrap();
+        let hash = engine.start_round(block, vs).unwrap();
 
         for i in 1..=3 {
             let sig = make_sig(&format!("val-{}", i), ValidatorVote::Approve);
@@ -288,7 +298,10 @@ mod consensus_tests {
         }
 
         let sigs = engine.finalised_sigs(&hash);
-        assert!(sigs.len() < 3, "Should not have finalised sigs without quorum");
+        assert!(
+            sigs.len() < 3,
+            "Should not have finalised sigs without quorum"
+        );
     }
 
     #[test]
@@ -312,7 +325,9 @@ mod resolver_tests {
     async fn resolver_returns_unknown_for_unreachable_node() {
         let id = PackageId::new("npm", "nonexistent-pkg-xyz", "1.0.0");
         // Point at a definitely unreachable node.
-        let verdict = resolver::resolve_id(&id, Some("http://127.0.0.1:19999")).await.unwrap();
+        let verdict = resolver::resolve_id(&id, Some("http://127.0.0.1:19999"))
+            .await
+            .unwrap();
         assert_eq!(verdict.status, VerdictStatus::Unknown);
     }
 
@@ -324,8 +339,18 @@ mod resolver_tests {
 
     #[test]
     fn verdict_status_helpers() {
-        assert!( VerdictStatus::Verified { block_hash: "a".into(), content_hash: "b".into(), ipfs_cid: String::new(), findings: vec![] }.is_safe());
-        assert!( VerdictStatus::Revoked { reason: "bad".into(), findings: vec![] }.is_blocked());
+        assert!(VerdictStatus::Verified {
+            block_hash: "a".into(),
+            content_hash: "b".into(),
+            ipfs_cid: String::new(),
+            findings: vec![]
+        }
+        .is_safe());
+        assert!(VerdictStatus::Revoked {
+            reason: "bad".into(),
+            findings: vec![]
+        }
+        .is_blocked());
         assert!(!VerdictStatus::Unverified.is_safe());
         assert!(!VerdictStatus::Unknown.is_safe());
     }

@@ -1,25 +1,25 @@
 // crates/node/src/bridge.rs
 // Monitors PBFT consensus and finalizes records on the Ethereum Registry contract.
 
-use std::sync::Arc;
-use tokio::sync::RwLock;
-use tokio::time::{interval, sleep, Duration};
+use crate::NodeState;
 use alloy::{
     network::EthereumWallet,
     providers::{Provider, ProviderBuilder},
     signers::local::PrivateKeySigner,
     sol,
 };
-use common::{Transaction, PackageStatus};
+use common::{PackageStatus, Transaction};
 use sha2::Digest;
-use crate::NodeState;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use tokio::time::{interval, sleep, Duration};
 
 // ── Contract Binding ──────────────────────────────────────────────────────────
 sol!(
     #[sol(rpc)]
     interface IRegistry {
         function latestStateRoot() external view returns (bytes32 _0);
-        
+
         function finalizePackage(
             string calldata canonical,
             bytes[] calldata validatorSignatures
@@ -50,7 +50,11 @@ pub async fn run(state: Arc<RwLock<NodeState>>) {
             s.config.eth_rpc_url.clone()
         };
 
-        match ProviderBuilder::new().on_http(rpc_url.parse().expect("CREG_ETH_RPC must be a valid URL")).get_chain_id().await {
+        match ProviderBuilder::new()
+            .on_http(rpc_url.parse().expect("CREG_ETH_RPC must be a valid URL"))
+            .get_chain_id()
+            .await
+        {
             Ok(id) => {
                 tracing::info!("Connected to Ethereum RPC (Chain ID: {})", id);
                 rpc_ready = true;
@@ -69,7 +73,10 @@ pub async fn run(state: Arc<RwLock<NodeState>>) {
             // Check if it's a connection error to reduce noise
             let err_str = e.to_string();
             if err_str.contains("error sending request") || err_str.contains("connection refused") {
-                tracing::warn!("Bridge RPC connection issue: {}. Retrying in 10s...", err_str);
+                tracing::warn!(
+                    "Bridge RPC connection issue: {}. Retrying in 10s...",
+                    err_str
+                );
             } else {
                 tracing::error!("Bridge tick error: {}", e);
             }
@@ -77,10 +84,7 @@ pub async fn run(state: Arc<RwLock<NodeState>>) {
     }
 }
 
-async fn tick(
-    state: Arc<RwLock<NodeState>>,
-    last_height: &mut u64,
-) -> anyhow::Result<()> {
+async fn tick(state: Arc<RwLock<NodeState>>, last_height: &mut u64) -> anyhow::Result<()> {
     let (rpc_url, registry_addr, priv_key_opt, current_tip) = {
         let s = state.read().await;
         (
@@ -134,7 +138,10 @@ async fn tick(
     }
 
     if !batch_transactions.is_empty() {
-        tracing::info!("Preparing L2 Rollup Batch with {} transactions", batch_transactions.len());
+        tracing::info!(
+            "Preparing L2 Rollup Batch with {} transactions",
+            batch_transactions.len()
+        );
 
         // Calculate Data Root (Merkle-style hash of the batch)
         let mut data_hasher = sha2::Sha256::new();
@@ -143,7 +150,7 @@ async fn tick(
             data_hasher.update(tx.content_hash.as_bytes());
         }
         let data_root: [u8; 32] = data_hasher.finalize().into();
-        
+
         // Calculate Next State Root
         let mut state_hasher = sha2::Sha256::new();
         state_hasher.update(prev_root);
@@ -153,15 +160,15 @@ async fn tick(
         // Generate a real Groth16 ZK proof that commits to this batch's state transition.
         // The proof witnesses: prev_root, data_root, next_root (all computed above).
         let (proof, public_inputs) = {
-            use zk_validator::{ZkValidator, PackageInputs};
+            use zk_validator::{PackageInputs, ZkValidator};
 
             // Use data_root as content_hash and next_root as manifest_hash —
             // both are deterministic SHA-256 digests of the actual batch data.
             let inputs = PackageInputs::new(
-                data_root,    // content_hash  = hash of all package canonical+hash pairs
-                next_root,    // manifest_hash = resulting state root
-                100u8,        // all transactions passed consensus before reaching the bridge
-                true,         // sandbox_safe  = verified by the validator pipeline
+                data_root, // content_hash  = hash of all package canonical+hash pairs
+                next_root, // manifest_hash = resulting state root
+                100u8,     // all transactions passed consensus before reaching the bridge
+                true,      // sandbox_safe  = verified by the validator pipeline
             );
 
             let zk = state.read().await.zk_validator.clone();
@@ -184,7 +191,10 @@ async fn tick(
                     (arr, pi)
                 }
                 Err(e) => {
-                    tracing::warn!("ZK proof generation failed, submitting empty commitment: {}", e);
+                    tracing::warn!(
+                        "ZK proof generation failed, submitting empty commitment: {}",
+                        e
+                    );
                     let pi = vec![
                         alloy::primitives::U256::from_be_bytes(prev_root.into()),
                         alloy::primitives::U256::from_be_bytes(next_root),
@@ -200,7 +210,7 @@ async fn tick(
             alloy::primitives::U256::from(batch_transactions.len()),
             data_root.into(),
             proof,
-            public_inputs
+            public_inputs,
         );
 
         if let Err(e) = call.send().await {
@@ -208,7 +218,10 @@ async fn tick(
             let mut s = state.write().await;
             s.bridge_status.bridge_sync_status = format!("Rollup Error: {}", e);
         } else {
-            tracing::info!("Successfully settled Rollup Batch on L1. New State Root: 0x{}", hex::encode(next_root));
+            tracing::info!(
+                "Successfully settled Rollup Batch on L1. New State Root: 0x{}",
+                hex::encode(next_root)
+            );
             let eth_block = provider.get_block_number().await.unwrap_or(0);
             let mut s = state.write().await;
             s.bridge_status.bridge_sync_status = "L2 Scaled".into();

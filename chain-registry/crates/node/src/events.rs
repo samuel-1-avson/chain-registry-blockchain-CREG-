@@ -56,11 +56,11 @@ impl fmt::Display for EventKind {
         // Produce the same snake_case string that serde outputs.
         let s = match self {
             EventKind::PackageSubmitted => "package_submitted",
-            EventKind::PackageVerified  => "package_verified",
-            EventKind::PackageRejected  => "package_rejected",
-            EventKind::PackageRevoked   => "package_revoked",
-            EventKind::BlockProduced    => "block_produced",
-            EventKind::ValidatorVoted   => "validator_voted",
+            EventKind::PackageVerified => "package_verified",
+            EventKind::PackageRejected => "package_rejected",
+            EventKind::PackageRevoked => "package_revoked",
+            EventKind::BlockProduced => "block_produced",
+            EventKind::ValidatorVoted => "validator_voted",
         };
         f.write_str(s)
     }
@@ -70,7 +70,7 @@ impl RegistryEvent {
     pub fn package_submitted(canonical: &str, publisher_pubkey: &str) -> Self {
         Self {
             kind: EventKind::PackageSubmitted,
-            ts:   Utc::now().to_rfc3339(),
+            ts: Utc::now().to_rfc3339(),
             payload: serde_json::json!({
                 "canonical":        canonical,
                 "publisher_pubkey": &publisher_pubkey[..publisher_pubkey.len().min(16)],
@@ -81,7 +81,7 @@ impl RegistryEvent {
     pub fn package_verified(canonical: &str, block_hash: &str, validator_count: usize) -> Self {
         Self {
             kind: EventKind::PackageVerified,
-            ts:   Utc::now().to_rfc3339(),
+            ts: Utc::now().to_rfc3339(),
             payload: serde_json::json!({
                 "canonical":       canonical,
                 "block_hash":      &block_hash[..block_hash.len().min(12)],
@@ -93,7 +93,7 @@ impl RegistryEvent {
     pub fn package_rejected(canonical: &str, reason: &str) -> Self {
         Self {
             kind: EventKind::PackageRejected,
-            ts:   Utc::now().to_rfc3339(),
+            ts: Utc::now().to_rfc3339(),
             payload: serde_json::json!({
                 "canonical": canonical,
                 "reason":    reason,
@@ -104,7 +104,7 @@ impl RegistryEvent {
     pub fn package_revoked(canonical: &str, reason: &str, revoked_by: &str) -> Self {
         Self {
             kind: EventKind::PackageRevoked,
-            ts:   Utc::now().to_rfc3339(),
+            ts: Utc::now().to_rfc3339(),
             payload: serde_json::json!({
                 "canonical":  canonical,
                 "reason":     reason,
@@ -116,7 +116,7 @@ impl RegistryEvent {
     pub fn block_produced(height: u64, hash: &str, tx_count: usize) -> Self {
         Self {
             kind: EventKind::BlockProduced,
-            ts:   Utc::now().to_rfc3339(),
+            ts: Utc::now().to_rfc3339(),
             payload: serde_json::json!({
                 "height":   height,
                 "hash":     &hash[..hash.len().min(12)],
@@ -128,7 +128,7 @@ impl RegistryEvent {
     pub fn validator_voted(validator_id: &str, canonical: &str, approved: bool) -> Self {
         Self {
             kind: EventKind::ValidatorVoted,
-            ts:   Utc::now().to_rfc3339(),
+            ts: Utc::now().to_rfc3339(),
             payload: serde_json::json!({
                 "validator_id": validator_id,
                 "canonical":    canonical,
@@ -172,7 +172,11 @@ async fn handle_ws_client(mut socket: axum::extract::ws::WebSocket, bus: EventBu
             Err(_) => continue,
         };
 
-        if socket.send(axum::extract::ws::Message::Text(msg)).await.is_err() {
+        if socket
+            .send(axum::extract::ws::Message::Text(msg))
+            .await
+            .is_err()
+        {
             // Client abruptly disconnected
             break;
         }
@@ -191,23 +195,22 @@ pub async fn sse_handler(
     let rx = bus.subscribe();
 
     // Convert the broadcast receiver into an SSE-compatible stream.
-    let stream = tokio_stream::wrappers::BroadcastStream::new(rx)
-        .filter_map(|result| {
-            match result {
-                Ok(event) => {
-                    let data = serde_json::to_string(&event).unwrap_or_default();
-                    let sse_event = Event::default()
-                        .event(event.kind.to_string())  // snake_case via Display
-                        .data(data);
-                    Some(Ok(sse_event))
-                }
-                // Lagged — subscriber fell too far behind, drop and continue.
-                Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(n)) => {
-                    tracing::warn!("SSE client lagged — dropped {} events", n);
-                    None
-                }
+    let stream = tokio_stream::wrappers::BroadcastStream::new(rx).filter_map(|result| {
+        match result {
+            Ok(event) => {
+                let data = serde_json::to_string(&event).unwrap_or_default();
+                let sse_event = Event::default()
+                    .event(event.kind.to_string()) // snake_case via Display
+                    .data(data);
+                Some(Ok(sse_event))
             }
-        });
+            // Lagged — subscriber fell too far behind, drop and continue.
+            Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(n)) => {
+                tracing::warn!("SSE client lagged — dropped {} events", n);
+                None
+            }
+        }
+    });
 
     // Heartbeat: send a comment every 30s to keep the connection alive
     // through proxies that close idle SSE connections.

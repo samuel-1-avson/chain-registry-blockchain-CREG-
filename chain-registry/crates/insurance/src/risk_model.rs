@@ -26,7 +26,7 @@ impl RiskFactor {
             score: score.clamp(0.0, 100.0),
         }
     }
-    
+
     /// Calculate weighted contribution
     pub fn contribution(&self) -> f64 {
         self.weight * self.score
@@ -64,14 +64,14 @@ impl PackageMetrics {
     /// Calculate age risk (older = lower risk)
     pub fn age_risk(&self) -> f64 {
         match self.age_days {
-            0..=30 => 80.0,     // New package - high risk
-            31..=90 => 60.0,    // Young package - medium-high risk
-            91..=365 => 40.0,   // Established - medium risk
-            366..=730 => 20.0,  // Mature - low risk
-            _ => 10.0,          // Very mature - very low risk
+            0..=30 => 80.0,    // New package - high risk
+            31..=90 => 60.0,   // Young package - medium-high risk
+            91..=365 => 40.0,  // Established - medium risk
+            366..=730 => 20.0, // Mature - low risk
+            _ => 10.0,         // Very mature - very low risk
         }
     }
-    
+
     /// Calculate dependency risk (more deps = higher risk)
     pub fn dependency_risk(&self) -> f64 {
         match self.dependency_count {
@@ -82,7 +82,7 @@ impl PackageMetrics {
             _ => 85.0,
         }
     }
-    
+
     /// Calculate popularity risk (more dependents = higher impact if compromised)
     pub fn popularity_risk(&self) -> f64 {
         match self.dependent_count {
@@ -93,7 +93,7 @@ impl PackageMetrics {
             _ => 90.0,
         }
     }
-    
+
     /// Calculate vulnerability risk
     pub fn vulnerability_risk(&self) -> f64 {
         let base_risk = match self.vulnerability_count {
@@ -102,7 +102,7 @@ impl PackageMetrics {
             2..=5 => 60.0,
             _ => 90.0,
         };
-        
+
         // Adjust based on time since last update
         let recency_factor: f64 = if self.last_update_days > 365 {
             1.5 // Not maintained
@@ -114,7 +114,7 @@ impl PackageMetrics {
 
         (base_risk * recency_factor).min(100.0_f64)
     }
-    
+
     /// Calculate maintenance risk
     pub fn maintenance_risk(&self) -> f64 {
         let mut risk: f64 = 0.0;
@@ -125,27 +125,27 @@ impl PackageMetrics {
         } else if self.maintainer_count == 1 {
             risk += 30.0;
         }
-        
+
         // Not updated recently
         if self.last_update_days > 365 {
             risk += 40.0;
         } else if self.last_update_days > 180 {
             risk += 20.0;
         }
-        
+
         // Deprecated
         if self.is_deprecated {
             risk += 80.0;
         }
-        
+
         risk.min(100.0)
     }
-    
+
     /// Calculate complexity risk
     pub fn complexity_risk(&self) -> f64 {
         self.complexity_score.clamp(0.0, 100.0)
     }
-    
+
     /// Calculate audit benefit
     pub fn audit_benefit(&self) -> f64 {
         if self.has_audit {
@@ -154,7 +154,7 @@ impl PackageMetrics {
             0.0
         }
     }
-    
+
     /// Calculate historical incident risk
     pub fn incident_risk(&self) -> f64 {
         match self.incident_count {
@@ -185,7 +185,7 @@ impl Default for RiskModel {
         weights.insert("maintenance".to_string(), 0.15);
         weights.insert("complexity".to_string(), 0.05);
         weights.insert("incidents".to_string(), 0.05);
-        
+
         Self {
             weights,
             historical_incidents: HashMap::new(),
@@ -201,7 +201,7 @@ impl RiskModel {
             historical_incidents: HashMap::new(),
         }
     }
-    
+
     /// Calculate risk score for a package using real chain data.
     /// Fetches the ChainRecord from the local node API to derive genuine metrics.
     pub fn calculate_score(&self, package: &str) -> Result<f64, super::InsuranceError> {
@@ -210,43 +210,67 @@ impl RiskModel {
         debug!("Risk score for {}: {:.2}", package, score);
         Ok(score)
     }
-    
+
     /// Calculate risk from metrics
     pub fn calculate_from_metrics(&self, metrics: &PackageMetrics) -> f64 {
         let mut factors: Vec<(String, f64, f64)> = vec![
             ("age".to_string(), self.weights["age"], metrics.age_risk()),
-            ("dependencies".to_string(), self.weights["dependencies"], metrics.dependency_risk()),
-            ("popularity".to_string(), self.weights["popularity"], metrics.popularity_risk()),
-            ("vulnerabilities".to_string(), self.weights["vulnerabilities"], metrics.vulnerability_risk()),
-            ("maintenance".to_string(), self.weights["maintenance"], metrics.maintenance_risk()),
-            ("complexity".to_string(), self.weights["complexity"], metrics.complexity_risk()),
-            ("incidents".to_string(), self.weights["incidents"], metrics.incident_risk()),
+            (
+                "dependencies".to_string(),
+                self.weights["dependencies"],
+                metrics.dependency_risk(),
+            ),
+            (
+                "popularity".to_string(),
+                self.weights["popularity"],
+                metrics.popularity_risk(),
+            ),
+            (
+                "vulnerabilities".to_string(),
+                self.weights["vulnerabilities"],
+                metrics.vulnerability_risk(),
+            ),
+            (
+                "maintenance".to_string(),
+                self.weights["maintenance"],
+                metrics.maintenance_risk(),
+            ),
+            (
+                "complexity".to_string(),
+                self.weights["complexity"],
+                metrics.complexity_risk(),
+            ),
+            (
+                "incidents".to_string(),
+                self.weights["incidents"],
+                metrics.incident_risk(),
+            ),
         ];
-        
+
         // Calculate weighted sum
         let mut total_score = 0.0;
         let mut total_weight = 0.0;
-        
+
         for (_, weight, score) in &factors {
             total_score += weight * score;
             total_weight += weight;
         }
-        
+
         // Add audit benefit
         total_score += metrics.audit_benefit();
-        
+
         // Normalize and clamp
         let final_score = (total_score / total_weight).clamp(0.0, 100.0);
-        
+
         final_score
     }
-    
+
     /// Fetch real package metrics from the chain node REST API.
     /// Uses the on-chain ChainRecord (submission date, findings, content hash, status)
     /// to compute genuine risk metrics instead of hash-based pseudo-random values.
     fn fetch_metrics_from_chain(&self, package: &str) -> PackageMetrics {
-        let node_url = std::env::var("CREG_NODE_URL")
-            .unwrap_or_else(|_| "http://localhost:8080".into());
+        let node_url =
+            std::env::var("CREG_NODE_URL").unwrap_or_else(|_| "http://localhost:8080".into());
         let encoded = urlencoding::encode(package).into_owned();
         let url = format!("{}/v1/packages/{}", node_url.trim_end_matches('/'), encoded);
 
@@ -262,28 +286,35 @@ impl RiskModel {
                 Some(v) if v.get("error").is_none() => Some(v),
                 _ => None,
             }
-        }).join().ok().flatten();
+        })
+        .join()
+        .ok()
+        .flatten();
 
         let Some(rec) = record else {
-            tracing::warn!("Insurance: could not fetch chain record for '{}' — using conservative defaults", package);
+            tracing::warn!(
+                "Insurance: could not fetch chain record for '{}' — using conservative defaults",
+                package
+            );
             // Unknown package: treat as high-risk new package
             return PackageMetrics {
-                age_days:            0,
-                dependency_count:    0,
-                dependent_count:     0,
+                age_days: 0,
+                dependency_count: 0,
+                dependent_count: 0,
                 vulnerability_count: 0,
-                has_audit:           false,
-                last_update_days:    0,
-                complexity_score:    50.0,
-                download_count:      0,
-                maintainer_count:    1,
-                is_deprecated:       false,
-                incident_count:      self.get_incidents(package),
+                has_audit: false,
+                last_update_days: 0,
+                complexity_score: 50.0,
+                download_count: 0,
+                maintainer_count: 1,
+                is_deprecated: false,
+                incident_count: self.get_incidents(package),
             };
         };
 
         // Derive age from submitted_at timestamp.
-        let age_days = rec["published_at"].as_str()
+        let age_days = rec["published_at"]
+            .as_str()
             .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
             .map(|dt| {
                 let now = chrono::Utc::now();
@@ -299,7 +330,8 @@ impl RiskModel {
         let vulnerability_count = if is_revoked { 5 } else { 0 };
 
         // Count findings from the static analysis if available
-        let findings_count = rec["findings"].as_array()
+        let findings_count = rec["findings"]
+            .as_array()
             .map(|a| a.len() as u32)
             .unwrap_or(0);
 
@@ -309,29 +341,32 @@ impl RiskModel {
 
         PackageMetrics {
             age_days,
-            dependency_count:    findings_count,       // proxy: findings ≈ risky dependencies
-            dependent_count:     0,                    // on-chain registry doesn't track dependents yet
+            dependency_count: findings_count, // proxy: findings ≈ risky dependencies
+            dependent_count: 0,               // on-chain registry doesn't track dependents yet
             vulnerability_count: vulnerability_count + findings_count / 3,
-            has_audit:           rec["status"].as_str() == Some("verified"),
+            has_audit: rec["status"].as_str() == Some("verified"),
             last_update_days,
             complexity_score,
-            download_count:      0,                    // not tracked on-chain
-            maintainer_count:    1,                    // one publisher per canonical
-            is_deprecated:       is_revoked,
-            incident_count:      self.get_incidents(package),
+            download_count: 0,   // not tracked on-chain
+            maintainer_count: 1, // one publisher per canonical
+            is_deprecated: is_revoked,
+            incident_count: self.get_incidents(package),
         }
     }
-    
+
     /// Add historical incident
     pub fn add_incident(&mut self, package: &str) {
-        *self.historical_incidents.entry(package.to_string()).or_insert(0) += 1;
+        *self
+            .historical_incidents
+            .entry(package.to_string())
+            .or_insert(0) += 1;
     }
-    
+
     /// Get incident count
     pub fn get_incidents(&self, package: &str) -> u32 {
         self.historical_incidents.get(package).copied().unwrap_or(0)
     }
-    
+
     /// Get risk category
     pub fn risk_category(score: f64) -> RiskCategory {
         match score as u32 {
@@ -342,15 +377,15 @@ impl RiskModel {
             _ => RiskCategory::VeryHigh,
         }
     }
-    
+
     /// Get premium rate for risk category
     pub fn premium_rate(category: RiskCategory) -> f64 {
         match category {
-            RiskCategory::VeryLow => 0.005,  // 0.5%
-            RiskCategory::Low => 0.01,       // 1%
-            RiskCategory::Medium => 0.025,   // 2.5%
-            RiskCategory::High => 0.05,      // 5%
-            RiskCategory::VeryHigh => 0.10,  // 10%
+            RiskCategory::VeryLow => 0.005, // 0.5%
+            RiskCategory::Low => 0.01,      // 1%
+            RiskCategory::Medium => 0.025,  // 2.5%
+            RiskCategory::High => 0.05,     // 5%
+            RiskCategory::VeryHigh => 0.10, // 10%
         }
     }
 }
@@ -389,25 +424,31 @@ mod tests {
 
     #[test]
     fn test_package_metrics_age() {
-        let young = PackageMetrics { age_days: 10, ..Default::default() };
-        let old = PackageMetrics { age_days: 500, ..Default::default() };
-        
+        let young = PackageMetrics {
+            age_days: 10,
+            ..Default::default()
+        };
+        let old = PackageMetrics {
+            age_days: 500,
+            ..Default::default()
+        };
+
         assert!(young.age_risk() > old.age_risk());
     }
 
     #[test]
     fn test_risk_score_calculation() {
         let model = RiskModel::default();
-        
+
         let metrics = PackageMetrics {
             age_days: 30,
             vulnerability_count: 2,
             is_deprecated: false,
             ..Default::default()
         };
-        
+
         let score = model.calculate_from_metrics(&metrics);
-        
+
         // Should be medium-high risk
         assert!(score > 30.0 && score < 80.0);
     }
@@ -425,7 +466,7 @@ mod tests {
     fn test_premium_rates() {
         let very_low = RiskModel::premium_rate(RiskCategory::VeryLow);
         let very_high = RiskModel::premium_rate(RiskCategory::VeryHigh);
-        
+
         assert!(very_high > very_low);
         assert_eq!(very_low, 0.005);
         assert_eq!(very_high, 0.10);

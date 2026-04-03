@@ -1,11 +1,11 @@
 // crates/cli/src/install.rs
 // Resolves trust verdict, then either proceeds or blocks the install.
 
+use crate::output;
 use anyhow::{bail, Result};
 use colored::Colorize;
 use common::{PackageId, VerdictStatus};
 use dialoguer::Confirm;
-use crate::output;
 
 pub async fn run(
     raw_package: &str,
@@ -27,16 +27,28 @@ pub async fn run(
 
     // ── 3. Trust decision ─────────────────────────────────────────────────────
     match &verdict.status {
-        VerdictStatus::Verified { block_hash, findings, ipfs_cid: _, content_hash: _ } => {
+        VerdictStatus::Verified {
+            block_hash,
+            findings,
+            ipfs_cid: _,
+            content_hash: _,
+        } => {
             output::print_verdict(&verdict);
             if !block_hash.is_empty() {
-                println!("  {} chain record: block {}", "✓".green(), &block_hash[..std::cmp::min(12, block_hash.len())]);
+                println!(
+                    "  {} chain record: block {}",
+                    "✓".green(),
+                    &block_hash[..std::cmp::min(12, block_hash.len())]
+                );
             }
 
             // Defense-in-depth: check if findings are severe despite verification
-            let has_severe = findings.iter().any(|f| 
-                matches!(f.severity, common::FindingSeverity::Critical | common::FindingSeverity::High)
-            );
+            let has_severe = findings.iter().any(|f| {
+                matches!(
+                    f.severity,
+                    common::FindingSeverity::Critical | common::FindingSeverity::High
+                )
+            });
             if has_severe && !allow_unverified {
                 let proceed = Confirm::new()
                     .with_prompt(format!(
@@ -46,7 +58,9 @@ pub async fn run(
                     ))
                     .default(false)
                     .interact()?;
-                if !proceed { bail!("Install cancelled due to security findings."); }
+                if !proceed {
+                    bail!("Install cancelled due to security findings.");
+                }
             }
         }
 
@@ -66,7 +80,10 @@ pub async fn run(
                     bail!("Install cancelled — package not chain-verified.");
                 }
             } else {
-                println!("{} installing unverified package (--unverified flag set)", "⚠".yellow());
+                println!(
+                    "{} installing unverified package (--unverified flag set)",
+                    "⚠".yellow()
+                );
             }
         }
 
@@ -90,14 +107,21 @@ pub async fn run(
                     pkg_id.canonical()
                 );
             }
-            println!("{} unknown to chain registry — falling through to original registry", "⚠".yellow());
+            println!(
+                "{} unknown to chain registry — falling through to original registry",
+                "⚠".yellow()
+            );
         }
     }
 
     // ── 4. Swarm Download (Decentralised Distribution) ───────────────────────
     let mut local_tarball: Option<std::path::PathBuf> = None;
     match &verdict.status {
-        VerdictStatus::Verified { content_hash, ipfs_cid, .. } => {
+        VerdictStatus::Verified {
+            content_hash,
+            ipfs_cid,
+            ..
+        } => {
             if ipfs_cid.is_empty() {
                 bail!(
                     "{} Verified package '{}' has no IPFS CID. Cannot install without verified content.",
@@ -108,10 +132,13 @@ pub async fn run(
             println!("{} Fetching from P2P swarm...", "->".cyan());
             let nodes = vec![node_url.unwrap_or("http://localhost:8080").to_string()];
             let downloader = resolver::downloader::P2PDownloader::new(nodes);
-            let temp_file = std::env::temp_dir()
-                .join(format!("{}.tgz", pkg_id.name.replace('/', "_")));
+            let temp_file =
+                std::env::temp_dir().join(format!("{}.tgz", pkg_id.name.replace('/', "_")));
 
-            match downloader.download(ipfs_cid, content_hash, &temp_file).await {
+            match downloader
+                .download(ipfs_cid, content_hash, &temp_file)
+                .await
+            {
                 Ok(_) => {
                     local_tarball = Some(temp_file);
                 }
@@ -148,27 +175,25 @@ pub async fn run(
 /// Calls the real package manager (the one on PATH *after* our shim dir).
 fn delegate_to_real_pm(ecosystem: &str, raw_package: &str) -> Result<()> {
     let real_bin = which::which_all(match ecosystem {
-        "npm"      => "npm",
-        "pypi"     => "pip",
-        "cargo"    => "cargo",
+        "npm" => "npm",
+        "pypi" => "pip",
+        "cargo" => "cargo",
         "rubygems" => "gem",
-        _          => bail!("Unknown ecosystem: {}", ecosystem),
+        _ => bail!("Unknown ecosystem: {}", ecosystem),
     })?
     // Skip the first hit — that's our own shim.
     .nth(1)
     .ok_or_else(|| anyhow::anyhow!("Real package manager not found in PATH"))?;
 
     let args: Vec<&str> = match ecosystem {
-        "npm"      => vec!["install", raw_package],
-        "pypi"     => vec!["install", raw_package],
-        "cargo"    => vec!["add", raw_package],
+        "npm" => vec!["install", raw_package],
+        "pypi" => vec!["install", raw_package],
+        "cargo" => vec!["add", raw_package],
         "rubygems" => vec!["install", raw_package],
-        _          => unreachable!(),
+        _ => unreachable!(),
     };
 
-    let status = std::process::Command::new(&real_bin)
-        .args(&args)
-        .status()?;
+    let status = std::process::Command::new(&real_bin).args(&args).status()?;
 
     if !status.success() {
         bail!("Package manager exited with status {}", status);
@@ -197,11 +222,20 @@ fn parse_package_arg(raw: &str) -> (String, Option<String>) {
 /// Detects the current project's ecosystem from files in the working directory.
 fn detect_ecosystem() -> String {
     let cwd = std::env::current_dir().unwrap_or_default();
-    if cwd.join("package.json").exists()   { return "npm".into(); }
-    if cwd.join("Cargo.toml").exists()     { return "cargo".into(); }
-    if cwd.join("requirements.txt").exists()
-    || cwd.join("pyproject.toml").exists() { return "pypi".into(); }
-    if cwd.join("Gemfile").exists()        { return "rubygems".into(); }
-    if cwd.join("pom.xml").exists()        { return "maven".into(); }
+    if cwd.join("package.json").exists() {
+        return "npm".into();
+    }
+    if cwd.join("Cargo.toml").exists() {
+        return "cargo".into();
+    }
+    if cwd.join("requirements.txt").exists() || cwd.join("pyproject.toml").exists() {
+        return "pypi".into();
+    }
+    if cwd.join("Gemfile").exists() {
+        return "rubygems".into();
+    }
+    if cwd.join("pom.xml").exists() {
+        return "maven".into();
+    }
     "unknown".into()
 }

@@ -2,10 +2,10 @@
 // Hybrid client that queries a chain node via gRPC (fast) or REST (fallback).
 
 use anyhow::{Context, Result};
-use common::{PackageId, TrustVerdict, VerdictSource, VerdictStatus};
 use chrono::Utc;
 use common::proto::registry_service_client::RegistryServiceClient;
 use common::proto::{GetVersionRequest, GetVersionResponse};
+use common::{PackageId, TrustVerdict, VerdictSource, VerdictStatus};
 
 /// Resolve a verdict using the best available protocol (gRPC -> REST).
 pub async fn fetch_verdict(id: &PackageId, node_url: &str) -> Result<TrustVerdict> {
@@ -20,10 +20,11 @@ pub async fn fetch_verdict(id: &PackageId, node_url: &str) -> Result<TrustVerdic
     let grpc_url = format!("http://{}:50051", base_url);
 
     // Attempt connection
-    let mut client: RegistryServiceClient<tonic::transport::Channel> = match RegistryServiceClient::connect(grpc_url).await {
-        Ok(c) => c,
-        Err(_) => return fetch_verdict_rest(id, node_url).await,
-    };
+    let mut client: RegistryServiceClient<tonic::transport::Channel> =
+        match RegistryServiceClient::connect(grpc_url).await {
+            Ok(c) => c,
+            Err(_) => return fetch_verdict_rest(id, node_url).await,
+        };
 
     let request = tonic::Request::new(GetVersionRequest {
         ecosystem: id.ecosystem.clone(),
@@ -38,13 +39,15 @@ pub async fn fetch_verdict(id: &PackageId, node_url: &str) -> Result<TrustVerdic
                 return Ok(TrustVerdict {
                     package: id.clone(),
                     status: VerdictStatus::Verified {
-                        block_hash:   String::new(),
+                        block_hash: String::new(),
                         content_hash: res.content_hash,
-                        ipfs_cid:     String::new(), // not in gRPC response; populated via REST fallback
-                        findings:     vec![],
+                        ipfs_cid: String::new(), // not in gRPC response; populated via REST fallback
+                        findings: vec![],
                     },
                     resolved_at: Utc::now(),
-                    source: VerdictSource::Chain { node_url: node_url.to_string() },
+                    source: VerdictSource::Chain {
+                        node_url: node_url.to_string(),
+                    },
                 });
             }
         }
@@ -78,22 +81,24 @@ async fn fetch_verdict_rest(id: &PackageId, node_url: &str) -> Result<TrustVerdi
             package: id.clone(),
             status: VerdictStatus::Unknown,
             resolved_at: Utc::now(),
-            source: VerdictSource::Chain { node_url: node_url.to_string() },
+            source: VerdictSource::Chain {
+                node_url: node_url.to_string(),
+            },
         });
     }
 
     // Deserialize as the API's PackageResp shape (not ChainRecord directly).
     #[derive(serde::Deserialize, Default)]
     struct PackageApiResp {
-        canonical:         String,
-        status:            String,
-        block_hash:        Option<String>,
-        content_hash:      Option<String>,
-        ipfs_cid:          Option<String>,
+        canonical: String,
+        status: String,
+        block_hash: Option<String>,
+        content_hash: Option<String>,
+        ipfs_cid: Option<String>,
         #[allow(dead_code)]
-        publisher:         Option<String>,
+        publisher: Option<String>,
         #[allow(dead_code)]
-        published_at:      Option<String>,
+        published_at: Option<String>,
         revocation_reason: Option<String>,
     }
 
@@ -106,13 +111,13 @@ async fn fetch_verdict_rest(id: &PackageId, node_url: &str) -> Result<TrustVerdi
 
     let status = match record.status.as_str() {
         "verified" => VerdictStatus::Verified {
-            block_hash:   record.block_hash.unwrap_or_default(),
+            block_hash: record.block_hash.unwrap_or_default(),
             content_hash: record.content_hash.unwrap_or_default(),
-            ipfs_cid:     record.ipfs_cid.unwrap_or_default(),
-            findings:     vec![], // Findings not included in the lightweight REST response
+            ipfs_cid: record.ipfs_cid.unwrap_or_default(),
+            findings: vec![], // Findings not included in the lightweight REST response
         },
         "revoked" => VerdictStatus::Revoked {
-            reason:   record.revocation_reason.unwrap_or_else(|| "Revoked".into()),
+            reason: record.revocation_reason.unwrap_or_else(|| "Revoked".into()),
             findings: vec![],
         },
         _ => VerdictStatus::Unverified,
@@ -123,6 +128,8 @@ async fn fetch_verdict_rest(id: &PackageId, node_url: &str) -> Result<TrustVerdi
         package: id.clone(),
         status,
         resolved_at: Utc::now(),
-        source: VerdictSource::Chain { node_url: node_url.to_string() },
+        source: VerdictSource::Chain {
+            node_url: node_url.to_string(),
+        },
     })
 }

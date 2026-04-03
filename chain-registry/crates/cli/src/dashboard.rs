@@ -4,6 +4,7 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
+use futures::StreamExt;
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
@@ -13,9 +14,11 @@ use ratatui::{
     Frame, Terminal,
 };
 use serde_json::Value;
-use std::{io, time::{Duration, Instant}};
+use std::{
+    io,
+    time::{Duration, Instant},
+};
 use tokio::sync::mpsc;
-use futures::StreamExt;
 
 // const API_BASE: &str = "http://localhost:8080";
 
@@ -45,14 +48,18 @@ impl App {
 
     async fn refresh_data(&mut self, api_base: &str) -> Result<()> {
         let client = reqwest::Client::new();
-        
+
         // Stats
-        if let Ok(res) = client.get(format!("{}/v1/chain/stats", api_base)).send().await {
+        if let Ok(res) = client
+            .get(format!("{}/v1/chain/stats", api_base))
+            .send()
+            .await
+        {
             if let Ok(json) = res.json::<Value>().await {
                 self.stats = json;
             }
         }
-        
+
         // Nodes
         if let Ok(res) = client.get(format!("{}/v1/nodes", api_base)).send().await {
             if let Ok(json) = res.json::<Vec<Value>>().await {
@@ -64,7 +71,11 @@ impl App {
         let height = self.stats["tip_height"].as_u64().unwrap_or(0);
         let mut recent_blocks = Vec::new();
         for h in (height.saturating_sub(10)..=height).rev() {
-            if let Ok(res) = client.get(format!("{}/v1/blocks/{}", api_base, h)).send().await {
+            if let Ok(res) = client
+                .get(format!("{}/v1/blocks/{}", api_base, h))
+                .send()
+                .await
+            {
                 if let Ok(json) = res.json::<Value>().await {
                     recent_blocks.push(json);
                 }
@@ -73,7 +84,11 @@ impl App {
         self.blocks = recent_blocks;
 
         // Bridge Status
-        if let Ok(res) = client.get(format!("{}/v1/bridge/status", api_base)).send().await {
+        if let Ok(res) = client
+            .get(format!("{}/v1/bridge/status", api_base))
+            .send()
+            .await
+        {
             if let Ok(json) = res.json::<Value>().await {
                 self.bridge_status = json;
             }
@@ -87,8 +102,7 @@ pub async fn run(node_url: Option<&str>) -> Result<()> {
     let api_base = node_url
         .map(String::from)
         .unwrap_or_else(|| {
-            std::env::var("CREG_NODE_URL")
-                .unwrap_or_else(|_| "http://localhost:8080".into())
+            std::env::var("CREG_NODE_URL").unwrap_or_else(|_| "http://localhost:8080".into())
         })
         .trim_end_matches('/')
         .to_string();
@@ -143,7 +157,9 @@ pub async fn run(node_url: Option<&str>) -> Result<()> {
         // Handle SSE messages
         while let Ok(msg) = rx.try_recv() {
             app.events.insert(0, msg);
-            if app.events.len() > 50 { app.events.pop(); }
+            if app.events.len() > 50 {
+                app.events.pop();
+            }
         }
     }
 
@@ -174,12 +190,13 @@ async fn listen_sse(tx: mpsc::Sender<String>, api_base: String) -> Result<()> {
             while let Some(end) = buffer.find("\n\n") {
                 let msg = buffer[..end].to_string();
                 buffer = buffer[end + 2..].to_string();
-                
+
                 for line in msg.lines() {
                     if let Some(data) = line.strip_prefix("data: ") {
                         if let Ok(v) = serde_json::from_str::<Value>(data) {
                             let kind = v["kind"].as_str().unwrap_or("Event");
-                            let payload = v["payload"].get("canonical")
+                            let payload = v["payload"]
+                                .get("canonical")
                                 .or_else(|| v["payload"].get("hash"))
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("");
@@ -207,17 +224,38 @@ fn ui(f: &mut Frame, app: &App) {
     // ── Header ───────────────────────────────────────────────────────────────
     let height = app.stats["tip_height"].as_u64().unwrap_or(0);
     let pkg_count = app.stats["package_count"].as_u64().unwrap_or(0);
-    let rollup_status = app.bridge_status["bridge_sync_status"].as_str().unwrap_or("?");
-    let root = app.bridge_status["current_state_root"].as_str().unwrap_or("0x0");
-    let root_short = if root.len() > 10 { format!("{}...{}", &root[..6], &root[root.len()-4..]) } else { root.to_string() };
+    let rollup_status = app.bridge_status["bridge_sync_status"]
+        .as_str()
+        .unwrap_or("?");
+    let root = app.bridge_status["current_state_root"]
+        .as_str()
+        .unwrap_or("0x0");
+    let root_short = if root.len() > 10 {
+        format!("{}...{}", &root[..6], &root[root.len() - 4..])
+    } else {
+        root.to_string()
+    };
 
     let header_text = format!(
         " CHAIN REGISTRY | Height: {} | Pkgs: {} | Nodes: {} | Rollup: {} ({})",
-        height, pkg_count, app.nodes.len(), rollup_status, root_short
+        height,
+        pkg_count,
+        app.nodes.len(),
+        rollup_status,
+        root_short
     );
     let header = Paragraph::new(header_text)
-        .block(Block::default().borders(Borders::ALL).title(" DASHBOARD ").border_style(Style::default().fg(Color::Cyan)))
-        .style(Style::default().fg(Color::White).add_modifier(Modifier::BOLD));
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" DASHBOARD ")
+                .border_style(Style::default().fg(Color::Cyan)),
+        )
+        .style(
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        );
     f.render_widget(header, chunks[0]);
 
     // ── Main Content ──────────────────────────────────────────────────────────
@@ -227,11 +265,15 @@ fn ui(f: &mut Frame, app: &App) {
         .split(chunks[1]);
 
     // Left: Blocks
-    let block_items: Vec<ListItem> = app.blocks.iter()
+    let block_items: Vec<ListItem> = app
+        .blocks
+        .iter()
         .map(|b| {
             let h = b["header"]["height"].as_u64().unwrap_or(0);
             // API doesn't return top-level hash — use merkle_root as block fingerprint
-            let root = b["header"]["merkle_root"].as_str().unwrap_or("0000000000000000");
+            let root = b["header"]["merkle_root"]
+                .as_str()
+                .unwrap_or("0000000000000000");
             let hash_display = &root[..root.len().min(14)];
             let txs = b["transactions"].as_array().map(|v| v.len()).unwrap_or(0);
             let content = format!("#{:<4}  {}..  ({} tx)", h, hash_display, txs);
@@ -244,38 +286,63 @@ fn ui(f: &mut Frame, app: &App) {
         })
         .collect();
     let block_list = List::new(block_items)
-        .block(Block::default().borders(Borders::ALL).title(" RECENT BLOCKS "))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" RECENT BLOCKS "),
+        )
         .highlight_style(Style::default().add_modifier(Modifier::ITALIC))
         .highlight_symbol(">>");
     f.render_widget(block_list, body_chunks[0]);
 
     // Right: Network
-    let rows: Vec<Row> = app.nodes.iter()
+    let rows: Vec<Row> = app
+        .nodes
+        .iter()
         .map(|n| {
-            let id     = n["id"].as_str().unwrap_or("?");
-            let alias  = n["alias"].as_str().unwrap_or("");
-            let stake  = format!("{} CREG", n["stake"].as_u64().unwrap_or(0));
-            let rep    = format!("{}/100", n["reputation"].as_u64().unwrap_or(0));
+            let id = n["id"].as_str().unwrap_or("?");
+            let alias = n["alias"].as_str().unwrap_or("");
+            let stake = format!("{} CREG", n["stake"].as_u64().unwrap_or(0));
+            let rep = format!("{}/100", n["reputation"].as_u64().unwrap_or(0));
             let status = n["status"].as_str().unwrap_or("?");
-            let label  = if alias.is_empty() { id.to_string() } else { format!("{} ({})", id, alias) };
+            let label = if alias.is_empty() {
+                id.to_string()
+            } else {
+                format!("{} ({})", id, alias)
+            };
             Row::new(vec![
                 Span::styled(label, Style::default().fg(Color::Yellow)),
                 Span::raw(stake),
                 Span::raw(rep),
-                Span::styled(status, Style::default().fg(
-                    if status == "online" || status == "self" { Color::Green } else { Color::Red }
-                )),
+                Span::styled(
+                    status,
+                    Style::default().fg(if status == "online" || status == "self" {
+                        Color::Green
+                    } else {
+                        Color::Red
+                    }),
+                ),
             ])
         })
         .collect();
-    let network_table = Table::new(rows, [
+    let network_table = Table::new(
+        rows,
+        [
             Constraint::Percentage(35),
             Constraint::Percentage(25),
             Constraint::Percentage(20),
             Constraint::Percentage(20),
-        ])
-        .block(Block::default().borders(Borders::ALL).title(" NETWORK HEALTH "))
-        .header(Row::new(vec!["Validator", "Stake", "Rep", "Status"]).style(Style::default().fg(Color::Gray)));
+        ],
+    )
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" NETWORK HEALTH "),
+    )
+    .header(
+        Row::new(vec!["Validator", "Stake", "Rep", "Status"])
+            .style(Style::default().fg(Color::Gray)),
+    );
     f.render_widget(network_table, body_chunks[1]);
 
     // ── Footer: Live Events ──────────────────────────────────────────────────
@@ -283,25 +350,41 @@ fn ui(f: &mut Frame, app: &App) {
     let pkg_count = app.stats["package_count"].as_u64().unwrap_or(0);
     // Build feed: chain summary lines + live SSE events
     let mut feed: Vec<ListItem> = Vec::new();
-    feed.push(ListItem::new(format!(
-        "[chain]  height={} packages={} blocks={}",
-        height, pkg_count, app.stats["block_count"].as_u64().unwrap_or(0)
-    )).style(Style::default().fg(Color::Cyan)));
+    feed.push(
+        ListItem::new(format!(
+            "[chain]  height={} packages={} blocks={}",
+            height,
+            pkg_count,
+            app.stats["block_count"].as_u64().unwrap_or(0)
+        ))
+        .style(Style::default().fg(Color::Cyan)),
+    );
     for b in app.blocks.iter().take(5) {
         let h = b["header"]["height"].as_u64().unwrap_or(0);
         let txs = b["transactions"].as_array().map(|v| v.len()).unwrap_or(0);
-        let tx_kinds: Vec<&str> = b["transactions"].as_array()
+        let tx_kinds: Vec<&str> = b["transactions"]
+            .as_array()
             .map(|arr| arr.iter().filter_map(|t| t["type"].as_str()).collect())
             .unwrap_or_default();
-        let summary = if tx_kinds.is_empty() { "empty".into() } else { tx_kinds.join(", ") };
-        feed.push(ListItem::new(format!("[block#{}] {} tx — {}", h, txs, summary))
-            .style(Style::default().fg(Color::DarkGray)));
+        let summary = if tx_kinds.is_empty() {
+            "empty".into()
+        } else {
+            tx_kinds.join(", ")
+        };
+        feed.push(
+            ListItem::new(format!("[block#{}] {} tx — {}", h, txs, summary))
+                .style(Style::default().fg(Color::DarkGray)),
+        );
     }
     for e in app.events.iter() {
         feed.push(ListItem::new(e.clone()).style(Style::default().fg(Color::Green)));
     }
     let event_list = List::new(feed)
-        .block(Block::default().borders(Borders::ALL).title(" LIVE FEED (Press 'q' to quit) "))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" LIVE FEED (Press 'q' to quit) "),
+        )
         .style(Style::default().fg(Color::Gray));
     f.render_widget(event_list, chunks[2]);
 }

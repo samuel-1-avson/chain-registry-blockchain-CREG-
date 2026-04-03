@@ -12,10 +12,10 @@
 // be more efficient, but for a registry where each block contains a handful
 // of package verification transactions, linear sync is perfectly adequate.
 
+use crate::NodeState;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{interval, Duration};
-use crate::NodeState;
 
 /// Sync interval — check for new blocks from peers every 10 seconds.
 const SYNC_INTERVAL_SECS: u64 = 10;
@@ -37,9 +37,7 @@ pub async fn run(state: Arc<RwLock<NodeState>>) {
     }
 }
 
-async fn sync_once(
-    state: Arc<RwLock<NodeState>>,
-) -> anyhow::Result<()> {
+async fn sync_once(state: Arc<RwLock<NodeState>>) -> anyhow::Result<()> {
     let (our_height, peer_urls) = {
         let s = state.read().await;
         (s.chain.tip_height()?, s.config.peers.clone())
@@ -48,11 +46,14 @@ async fn sync_once(
     // Ask peers for their tip.
     let mut peer_height = 0;
     let client = reqwest::Client::new();
-    
+
     for url in &peer_urls {
         let full_url = format!("{}/v1/chain/stats", url.trim_end_matches('/'));
         if let Ok(resp) = client.get(&full_url).send().await {
-            #[derive(serde::Deserialize)] struct Stats { tip_height: u64 }
+            #[derive(serde::Deserialize)]
+            struct Stats {
+                tip_height: u64,
+            }
             if let Ok(stats) = resp.json::<Stats>().await {
                 peer_height = peer_height.max(stats.tip_height);
             }
@@ -66,7 +67,9 @@ async fn sync_once(
 
     tracing::info!(
         "Chain sync: our height={} peer height={} — fetching {} blocks",
-        our_height, peer_height, peer_height - our_height
+        our_height,
+        peer_height,
+        peer_height - our_height
     );
 
     // Fetch each missing block in order and validate the chain linkage.
@@ -89,7 +92,7 @@ async fn sync_once(
 
         let block = match block {
             Some(b) => b,
-            None    => {
+            None => {
                 tracing::warn!("Could not fetch block {} from any peer", height);
                 break;
             }
@@ -99,7 +102,9 @@ async fn sync_once(
         if block.header.prev_hash != prev_hash {
             tracing::error!(
                 "Block {} has wrong prev_hash (expected {}, got {})",
-                height, &prev_hash[..12], &block.header.prev_hash[..12]
+                height,
+                &prev_hash[..12],
+                &block.header.prev_hash[..12]
             );
             break;
         }
@@ -107,7 +112,8 @@ async fn sync_once(
         if block.header.height != height {
             tracing::error!(
                 "Block claims height {} but we requested {}",
-                block.header.height, height
+                block.header.height,
+                height
             );
             break;
         }

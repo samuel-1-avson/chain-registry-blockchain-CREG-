@@ -29,7 +29,7 @@
 
 use anyhow::{Context, Result};
 use common::{Block, ChainRecord, PackageStatus, Transaction};
-use sqlx::{PgPool, postgres::PgQueryResult};
+use sqlx::{postgres::PgQueryResult, PgPool};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
@@ -37,7 +37,7 @@ use tracing::{info, warn};
 pub mod schema;
 pub mod sync_worker;
 
-pub use sync_worker::{SyncWorker, ChainStoreProxy};
+pub use sync_worker::{ChainStoreProxy, SyncWorker};
 
 /// Connection string validation helper.
 pub fn validate_connection_string(url: &str) -> Result<()> {
@@ -59,7 +59,11 @@ pub async fn apply_block(pool: &PgPool, block: &Block) -> Result<()> {
                     upsert_validator_vote(&mut *tx, &record.id.canonical(), sig).await?;
                 }
             }
-            Transaction::Revoke { package_canonical, reason, .. } => {
+            Transaction::Revoke {
+                package_canonical,
+                reason,
+                ..
+            } => {
                 sqlx::query(
                     "UPDATE packages SET status = 'revoked', revocation_reason = $1 WHERE canonical = $2"
                 )
@@ -68,7 +72,13 @@ pub async fn apply_block(pool: &PgPool, block: &Block) -> Result<()> {
                 .execute(&mut *tx)
                 .await?;
             }
-            Transaction::RotatePublisherKey { canonical_prefix, old_pubkey, new_pubkey, timestamp, .. } => {
+            Transaction::RotatePublisherKey {
+                canonical_prefix,
+                old_pubkey,
+                new_pubkey,
+                timestamp,
+                ..
+            } => {
                 sqlx::query(
                     "UPDATE packages SET publisher_pubkey = $1, updated_at = $2 WHERE canonical LIKE $3 AND publisher_pubkey = $4"
                 )
@@ -87,7 +97,7 @@ pub async fn apply_block(pool: &PgPool, block: &Block) -> Result<()> {
     sqlx::query(
         "INSERT INTO blocks (height, hash, prev_hash, merkle_root, proposer_id, timestamp)
          VALUES ($1, $2, $3, $4, $5, $6)
-         ON CONFLICT (height) DO NOTHING"
+         ON CONFLICT (height) DO NOTHING",
     )
     .bind(block.header.height as i64)
     .bind(&block.hash())
@@ -126,7 +136,7 @@ where
             publisher_pubkey = EXCLUDED.publisher_pubkey,
             block_hash = EXCLUDED.block_hash,
             findings = EXCLUDED.findings,
-            updated_at = NOW()"
+            updated_at = NOW()",
     )
     .bind(record.id.canonical())
     .bind(&record.id.ecosystem)
@@ -173,7 +183,7 @@ where
             signature = EXCLUDED.signature,
             vote = EXCLUDED.vote,
             reason = EXCLUDED.reason,
-            signed_at = EXCLUDED.signed_at"
+            signed_at = EXCLUDED.signed_at",
     )
     .bind(canonical)
     .bind(&sig.validator_id)

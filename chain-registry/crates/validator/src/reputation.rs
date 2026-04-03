@@ -53,11 +53,11 @@ pub async fn assess_publisher(
 /// Publisher record as returned by the chain node REST API.
 #[derive(Deserialize)]
 struct PublisherRecord {
-    total_packages:   u32,
-    verified_count:   u32,
-    revoked_count:    u32,
-    stake_wei:        u64,
-    first_seen_days:  u32,
+    total_packages: u32,
+    verified_count: u32,
+    revoked_count: u32,
+    stake_wei: u64,
+    first_seen_days: u32,
 }
 
 fn build_assessment(pubkey: &str, rec: &PublisherRecord) -> ReputationAssessment {
@@ -78,10 +78,16 @@ fn build_assessment(pubkey: &str, rec: &PublisherRecord) -> ReputationAssessment
     // ── Track record bonus ────────────────────────────────────────────────────
     if rec.verified_count >= 10 {
         delta += 20;
-        notes.push(format!("{} verified packages on record → +20", rec.verified_count));
+        notes.push(format!(
+            "{} verified packages on record → +20",
+            rec.verified_count
+        ));
     } else if rec.verified_count >= 3 {
         delta += 10;
-        notes.push(format!("{} verified packages on record → +10", rec.verified_count));
+        notes.push(format!(
+            "{} verified packages on record → +10",
+            rec.verified_count
+        ));
     } else if rec.verified_count == 0 && rec.total_packages == 0 {
         delta -= 10;
         notes.push("First-time publisher — no track record → -10".into());
@@ -104,7 +110,10 @@ fn build_assessment(pubkey: &str, rec: &PublisherRecord) -> ReputationAssessment
         notes.push(format!("Account {} days old → +10", rec.first_seen_days));
     } else if rec.first_seen_days < 7 {
         delta -= 15;
-        notes.push(format!("Account only {} days old → -15", rec.first_seen_days));
+        notes.push(format!(
+            "Account only {} days old → -15",
+            rec.first_seen_days
+        ));
     }
 
     // Hard floor/ceiling.
@@ -162,9 +171,9 @@ pub fn final_decision(
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum FinalDecision {
-    Approve         { confidence: u8 },
+    Approve { confidence: u8 },
     ApproveWithWarning { warning: String, confidence: u8 },
-    Reject          { reason: String, confidence: u8 },
+    Reject { reason: String, confidence: u8 },
 }
 
 impl FinalDecision {

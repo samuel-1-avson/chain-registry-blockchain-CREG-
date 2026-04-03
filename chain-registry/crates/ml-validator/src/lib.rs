@@ -57,7 +57,7 @@ impl ThreatLevel {
             _ => ThreatLevel::Malicious,
         }
     }
-    
+
     /// Human-readable description
     pub fn description(&self) -> &'static str {
         match self {
@@ -67,7 +67,7 @@ impl ThreatLevel {
             ThreatLevel::Malicious => "Malicious - Likely harmful",
         }
     }
-    
+
     /// Whether this level should block installation
     pub fn should_block(&self) -> bool {
         matches!(self, ThreatLevel::Malicious)
@@ -104,7 +104,7 @@ impl PredictionResult {
             feature_importance: None,
         }
     }
-    
+
     /// Whether this package should be rejected
     pub fn should_reject(&self) -> bool {
         self.threat_level.should_block()
@@ -119,30 +119,30 @@ impl MlValidator {
     pub fn new() -> Self {
         Self
     }
-    
+
     /// Predict threat score for a package
     #[instrument(skip(self, features), level = "debug")]
     pub fn predict(&self, features: &PackageFeatures) -> PredictionResult {
         debug!("Running ML prediction (rule-based)");
-        
+
         // Use rule-based scoring (to be replaced with ONNX model in future)
         RuleBasedValidator::assess(features)
     }
-    
+
     /// Batch predict multiple packages
     #[instrument(skip(self, features_list), level = "debug")]
-    pub fn batch_predict(
-        &self,
-        features_list: &[PackageFeatures],
-    ) -> Vec<PredictionResult> {
-        debug!("Running batch prediction for {} packages", features_list.len());
-        
+    pub fn batch_predict(&self, features_list: &[PackageFeatures]) -> Vec<PredictionResult> {
+        debug!(
+            "Running batch prediction for {} packages",
+            features_list.len()
+        );
+
         features_list
             .iter()
             .map(|features| self.predict(features))
             .collect()
     }
-    
+
     /// Get model metadata
     pub fn model_info(&self) -> HashMap<String, String> {
         let mut info = HashMap::new();
@@ -159,7 +159,7 @@ impl Default for MlValidator {
 }
 
 /// Rule-based threat assessment
-/// 
+///
 /// Used as primary detection and fallback when ONNX model is not available
 pub struct RuleBasedValidator;
 
@@ -168,57 +168,53 @@ impl RuleBasedValidator {
     pub fn assess(features: &PackageFeatures) -> PredictionResult {
         let mut score = 0u8;
         let mut reasons = vec![];
-        
+
         // Check for suspicious patterns
         if features.entropy > 7.5 {
             score += 20;
             reasons.push("High entropy (possible obfuscation)");
         }
-        
+
         if features.eval_count > 0 {
             score += 25;
             reasons.push("Uses eval()");
         }
-        
+
         if features.network_calls > 5 {
             score += 15;
             reasons.push("Many network calls");
         }
-        
+
         if features.file_system_ops > 10 {
             score += 10;
             reasons.push("Many filesystem operations");
         }
-        
+
         if features.dynamic_imports > 3 {
             score += 10;
             reasons.push("Many dynamic imports");
         }
-        
+
         if features.obfuscation_indicators > 5 {
             score += 20;
             reasons.push("Obfuscation detected");
         }
-        
+
         // AST depth factor (higher depth = more complex = more risk)
         if features.ast_depth > 10 {
             score += 5;
             reasons.push("Deep AST nesting");
         }
-        
+
         // Cap at 100
         score = score.min(100);
-        
+
         let mut class_probs = HashMap::new();
         let threat_level = ThreatLevel::from_score(score);
         class_probs.insert(threat_level, 0.7);
         class_probs.insert(ThreatLevel::Safe, if score < 25 { 0.7 } else { 0.1 });
-        
-        PredictionResult::new(
-            score,
-            0.7,
-            class_probs,
-        )
+
+        PredictionResult::new(score, 0.7, class_probs)
     }
 }
 
@@ -241,7 +237,7 @@ mod tests {
         assert!(!ThreatLevel::Suspicious.should_block());
         assert!(ThreatLevel::Malicious.should_block());
     }
-    
+
     #[test]
     fn test_rule_based_assessment() {
         let features = PackageFeatures {
@@ -250,9 +246,9 @@ mod tests {
             network_calls: 10,
             ..Default::default()
         };
-        
+
         let result = RuleBasedValidator::assess(&features);
-        
+
         assert!(result.threat_score > 50);
         assert!(result.confidence > 0.0);
     }

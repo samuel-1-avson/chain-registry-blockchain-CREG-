@@ -17,15 +17,15 @@ pub struct Config {
     /// Node connection settings
     #[serde(default)]
     pub node: NodeConfig,
-    
+
     /// Default values for commands
     #[serde(default)]
     pub defaults: DefaultConfig,
-    
+
     /// Display preferences
     #[serde(default)]
     pub display: DisplayConfig,
-    
+
     /// IPFS configuration
     #[serde(default)]
     pub ipfs: IpfsConfig,
@@ -36,7 +36,7 @@ pub struct NodeConfig {
     /// Default node URL to connect to
     #[serde(default = "default_node_url")]
     pub url: String,
-    
+
     /// Timeout for API requests (seconds)
     #[serde(default = "default_timeout")]
     pub timeout: u64,
@@ -55,14 +55,14 @@ impl Default for NodeConfig {
 pub struct DefaultConfig {
     /// Default ecosystem (npm, pip, cargo, etc.)
     pub ecosystem: Option<String>,
-    
+
     /// Allow unverified packages by default
     #[serde(default)]
     pub allow_unverified: bool,
-    
+
     /// Default stake amount for publishers
     pub stake_amount: Option<String>,
-    
+
     /// Path to publisher key file
     pub publisher_key: Option<PathBuf>,
 }
@@ -72,11 +72,11 @@ pub struct DisplayConfig {
     /// Enable colored output
     #[serde(default = "default_true")]
     pub colors: bool,
-    
+
     /// Output format (text, json)
     #[serde(default = "default_format")]
     pub format: OutputFormat,
-    
+
     /// Show progress bars
     #[serde(default = "default_true")]
     pub progress: bool,
@@ -97,7 +97,7 @@ pub struct IpfsConfig {
     /// IPFS daemon URL
     #[serde(default = "default_ipfs_url")]
     pub url: String,
-    
+
     /// Timeout for IPFS operations (seconds)
     #[serde(default = "default_ipfs_timeout")]
     pub timeout: u64,
@@ -147,51 +147,52 @@ impl Config {
     /// Load configuration from file, with environment variable overrides
     pub fn load() -> Result<Self> {
         let config_path = Self::config_path()?;
-        
+
         let mut config = if config_path.exists() {
-            let content = std::fs::read_to_string(&config_path)
-                .with_context(|| format!("Failed to read config file: {}", config_path.display()))?;
-            toml::from_str(&content)
-                .with_context(|| format!("Failed to parse config file: {}", config_path.display()))?
+            let content = std::fs::read_to_string(&config_path).with_context(|| {
+                format!("Failed to read config file: {}", config_path.display())
+            })?;
+            toml::from_str(&content).with_context(|| {
+                format!("Failed to parse config file: {}", config_path.display())
+            })?
         } else {
             Config::default()
         };
-        
+
         // Apply environment variable overrides
         config.apply_env_overrides();
-        
+
         Ok(config)
     }
-    
+
     /// Create a default configuration file if it doesn't exist
     pub fn init() -> Result<PathBuf> {
         let config_path = Self::config_path()?;
-        
+
         if config_path.exists() {
             println!("Config file already exists at: {}", config_path.display());
             return Ok(config_path);
         }
-        
+
         // Ensure directory exists
         if let Some(parent) = config_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        
+
         let default_config = Config::default();
         let content = toml::to_string_pretty(&default_config)?;
         std::fs::write(&config_path, content)?;
-        
+
         println!("Created default config file at: {}", config_path.display());
         Ok(config_path)
     }
-    
+
     /// Get the path to the config file
     pub fn config_path() -> Result<PathBuf> {
-        let home = dirs::home_dir()
-            .context("Could not determine home directory")?;
+        let home = dirs::home_dir().context("Could not determine home directory")?;
         Ok(home.join(".creg").join("config.toml"))
     }
-    
+
     /// Apply environment variable overrides
     fn apply_env_overrides(&mut self) {
         if let Ok(url) = std::env::var("CREG_NODE_URL") {
@@ -207,7 +208,7 @@ impl Config {
             self.display.colors = false;
         }
     }
-    
+
     /// Get the effective node URL (CLI arg > env var > config file > default)
     pub fn node_url(&self, cli_override: Option<&str>) -> String {
         cli_override
@@ -215,7 +216,7 @@ impl Config {
             .or_else(|| std::env::var("CREG_NODE_URL").ok())
             .unwrap_or_else(|| self.node.url.clone())
     }
-    
+
     /// Get the effective IPFS URL
     pub fn ipfs_url(&self) -> String {
         std::env::var("CREG_IPFS_URL")
@@ -227,7 +228,7 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_default_config() {
         let config = Config::default();
@@ -236,7 +237,7 @@ mod tests {
         assert!(config.display.colors);
         assert!(config.display.progress);
     }
-    
+
     #[test]
     fn test_config_serialization() {
         let config = Config::default();

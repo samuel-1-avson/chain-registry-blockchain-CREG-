@@ -9,8 +9,7 @@ pub async fn run(node_url: Option<&str>, limit: usize) -> Result<()> {
     let api_base = node_url
         .map(String::from)
         .unwrap_or_else(|| {
-            std::env::var("CREG_NODE_URL")
-                .unwrap_or_else(|_| "http://localhost:8080".into())
+            std::env::var("CREG_NODE_URL").unwrap_or_else(|_| "http://localhost:8080".into())
         })
         .trim_end_matches('/')
         .to_string();
@@ -29,16 +28,33 @@ pub async fn run(node_url: Option<&str>, limit: usize) -> Result<()> {
     let tip = stats["tip_height"].as_u64().unwrap_or(0);
     let pkg_count = stats["package_count"].as_u64().unwrap_or(0);
 
-    println!("\n{} {} {}", "⛓".bold(), "Chain Registry Explorer".bold(), "⛓".bold());
-    println!("{} Height: {} | Verified Packages: {}\n", "→".cyan(), tip.to_string().yellow(), pkg_count.to_string().yellow());
+    println!(
+        "\n{} {} {}",
+        "⛓".bold(),
+        "Chain Registry Explorer".bold(),
+        "⛓".bold()
+    );
+    println!(
+        "{} Height: {} | Verified Packages: {}\n",
+        "→".cyan(),
+        tip.to_string().yellow(),
+        pkg_count.to_string().yellow()
+    );
 
-    println!("{:<8} {:<18} {:<10} {:<30}", "HEIGHT", "PROPOSER", "TXS", "CONTENT / EVENTS");
+    println!(
+        "{:<8} {:<18} {:<10} {:<30}",
+        "HEIGHT", "PROPOSER", "TXS", "CONTENT / EVENTS"
+    );
     println!("{}", "─".repeat(80).dimmed());
 
     // 2. Fetch blocks
     let start = tip.saturating_sub(limit as u64 - 1);
     for h in (start..=tip).rev() {
-        if let Ok(res) = client.get(format!("{}/v1/blocks/{}", api_base, h)).send().await {
+        if let Ok(res) = client
+            .get(format!("{}/v1/blocks/{}", api_base, h))
+            .send()
+            .await
+        {
             if let Ok(block) = res.json::<Value>().await {
                 render_block(&block);
             }
@@ -55,8 +71,13 @@ fn render_block(block: &Value) {
     let tx_count = txs.map(|v| v.len()).unwrap_or(0);
 
     let height_str = format!("#{}", height).white().bold();
-    
-    print!("{:<16} {:<18} {:<10} ", height_str, proposer.dimmed(), tx_count);
+
+    print!(
+        "{:<16} {:<18} {:<10} ",
+        height_str,
+        proposer.dimmed(),
+        tx_count
+    );
 
     if let Some(tx_list) = txs {
         if tx_list.is_empty() {
@@ -84,13 +105,23 @@ fn render_tx(tx: &Value) {
             let ver = tx["id"]["version"].as_str().unwrap_or("?");
             let canonical = format!("{}:{}@{}", eco, name, ver);
             let status = tx["status"].as_str().unwrap_or("?");
-            let color_status = if status == "Verified" { "Verified".green() } else { status.yellow() };
+            let color_status = if status == "Verified" {
+                "Verified".green()
+            } else {
+                status.yellow()
+            };
             print!("{} {} [{}]", "📦".cyan(), canonical.bold(), color_status);
         }
         "revoke" => {
             let canonical = tx["package_canonical"].as_str().unwrap_or("?");
             let reason = tx["reason"].as_str().unwrap_or("?");
-            print!("{} {} {} ({})", "⚡".red(), "REVOKED".red().bold(), canonical, reason.dimmed());
+            print!(
+                "{} {} {} ({})",
+                "⚡".red(),
+                "REVOKED".red().bold(),
+                canonical,
+                reason.dimmed()
+            );
         }
         _ => {
             print!("{} {}", "❓".dimmed(), tx_type.dimmed());

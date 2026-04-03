@@ -21,7 +21,7 @@ pub async fn static_handler(uri: Uri) -> impl IntoResponse {
     } else if path == "ui" {
         path = "index.html".to_string();
     }
-    
+
     // For general root requests bridging to the UI
     if path.is_empty() {
         path = "index.html".to_string();
@@ -31,22 +31,20 @@ pub async fn static_handler(uri: Uri) -> impl IntoResponse {
     match WebAssets::get(&path) {
         Some(content) => {
             let mime = from_path(&path).first_or_octet_stream();
-            (
-                [(header::CONTENT_TYPE, mime.as_ref())],
-                content.data,
-            ).into_response()
+            ([(header::CONTENT_TYPE, mime.as_ref())], content.data).into_response()
         }
         None => {
             // Fallback for React Router / SPA semantics: if an asset is not found,
             // we default back to the index.html so the client router takes over.
             if let Some(index) = WebAssets::get("index.html") {
                 let mime = from_path("index.html").first_or_octet_stream();
-                (
-                    [(header::CONTENT_TYPE, mime.as_ref())],
-                    index.data,
-                ).into_response()
+                ([(header::CONTENT_TYPE, mime.as_ref())], index.data).into_response()
             } else {
-                (StatusCode::NOT_FOUND, "404 Not Found. Make sure to build the explorer.").into_response()
+                (
+                    StatusCode::NOT_FOUND,
+                    "404 Not Found. Make sure to build the explorer.",
+                )
+                    .into_response()
             }
         }
     }

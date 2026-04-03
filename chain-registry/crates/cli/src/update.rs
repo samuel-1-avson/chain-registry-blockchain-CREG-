@@ -5,65 +5,76 @@ use anyhow::{Context, Result};
 use colored::Colorize;
 
 pub async fn run(node_url: Option<&str>, check_only: bool) -> Result<()> {
-    let base = node_url
-        .map(String::from)
-        .unwrap_or_else(|| std::env::var("CREG_NODE_URL")
-            .unwrap_or_else(|_| "http://localhost:8080".into()));
+    let base = node_url.map(String::from).unwrap_or_else(|| {
+        std::env::var("CREG_NODE_URL").unwrap_or_else(|_| "http://localhost:8080".into())
+    });
 
     let current_version = env!("CARGO_PKG_VERSION");
-    println!("{} Checking for creg updates (current: v{})...", "→".cyan(), current_version);
+    println!(
+        "{} Checking for creg updates (current: v{})...",
+        "→".cyan(),
+        current_version
+    );
 
     let releases_url = format!("{}/v1/releases/cli/latest", base.trim_end_matches('/'));
     let client = reqwest::Client::new();
 
-    let resp = client.get(&releases_url)
+    let resp = client
+        .get(&releases_url)
         .timeout(std::time::Duration::from_secs(10))
         .send()
         .await;
 
     match resp {
-        Ok(r) if r.status().is_success() => {
-            match r.json::<serde_json::Value>().await {
-                Ok(release) => {
-                    let latest = release.get("version")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("unknown");
-                    let download_url = release.get("download_url")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
+        Ok(r) if r.status().is_success() => match r.json::<serde_json::Value>().await {
+            Ok(release) => {
+                let latest = release
+                    .get("version")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+                let download_url = release
+                    .get("download_url")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
 
-                    if latest == current_version {
-                        println!("{} Already up to date (v{})", "✓".green(), current_version);
-                        return Ok(());
-                    }
-
-                    println!("{} New version available: v{}", "⬆".yellow().bold(), latest);
-                    println!("  Current: v{}", current_version);
-                    println!("  Latest:  v{}", latest);
-
-                    if check_only {
-                        println!("\n  Run: creg update  (without --check) to install");
-                        return Ok(());
-                    }
-
-                    if download_url.is_empty() {
-                        anyhow::bail!("No download URL in release record");
-                    }
-
-                    install_update(download_url, latest).await?;
+                if latest == current_version {
+                    println!("{} Already up to date (v{})", "✓".green(), current_version);
+                    return Ok(());
                 }
-                Err(_) => {
-                    println!("{} Could not parse release response", "⚠".yellow());
+
+                println!("{} New version available: v{}", "⬆".yellow().bold(), latest);
+                println!("  Current: v{}", current_version);
+                println!("  Latest:  v{}", latest);
+
+                if check_only {
+                    println!("\n  Run: creg update  (without --check) to install");
+                    return Ok(());
                 }
+
+                if download_url.is_empty() {
+                    anyhow::bail!("No download URL in release record");
+                }
+
+                install_update(download_url, latest).await?;
             }
-        }
+            Err(_) => {
+                println!("{} Could not parse release response", "⚠".yellow());
+            }
+        },
         Ok(r) if r.status() == 404 => {
             // Node does not host releases — fall back to GitHub releases API
-            println!("{} Node does not host releases. Checking GitHub...", "ℹ".blue());
+            println!(
+                "{} Node does not host releases. Checking GitHub...",
+                "ℹ".blue()
+            );
             check_github_releases(current_version, check_only).await?;
         }
         Ok(r) => {
-            println!("{} Could not check for updates: HTTP {}", "⚠".yellow(), r.status());
+            println!(
+                "{} Could not check for updates: HTTP {}",
+                "⚠".yellow(),
+                r.status()
+            );
         }
         Err(e) => {
             println!("{} Could not reach update server: {}", "⚠".yellow(), e);
@@ -91,7 +102,8 @@ async fn install_update(download_url: &str, version: &str) -> Result<()> {
     println!("{} Downloading creg v{}...", "→".cyan(), version);
 
     let client = reqwest::Client::new();
-    let resp = client.get(download_url)
+    let resp = client
+        .get(download_url)
         .timeout(std::time::Duration::from_secs(120))
         .send()
         .await
@@ -118,12 +130,11 @@ async fn install_update(download_url: &str, version: &str) -> Result<()> {
     pb.finish_with_message("Download complete");
 
     // Write to a temp path then replace the current executable
-    let current_exe = std::env::current_exe()
-        .context("Cannot determine current executable path")?;
+    let current_exe =
+        std::env::current_exe().context("Cannot determine current executable path")?;
     let tmp_path = current_exe.with_extension("update.tmp");
 
-    std::fs::write(&tmp_path, &bytes)
-        .context("Failed to write update binary")?;
+    std::fs::write(&tmp_path, &bytes).context("Failed to write update binary")?;
 
     // Make executable on Unix
     #[cfg(unix)]

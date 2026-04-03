@@ -1,26 +1,25 @@
 // crates/node/src/p2p.rs
 // Real decentralized P2P layer using libp2p with rate limiting.
 
+use anyhow::{Context, Result};
+use futures::StreamExt;
 use libp2p::{
-    gossipsub, kad, identify,
-    noise, tcp, yamux,
+    gossipsub, identify, kad, noise,
     swarm::{NetworkBehaviour, SwarmEvent},
-    Swarm, Multiaddr, PeerId,
+    tcp, yamux, Multiaddr, PeerId, Swarm,
 };
 use std::sync::Arc;
 use std::time::Duration;
-use anyhow::{Result, Context};
-use futures::StreamExt;
 use tokio::sync::mpsc;
 
-use crate::p2p_rate_limit::{P2PRateLimiter, P2PRateLimitConfig};
+use crate::p2p_rate_limit::{P2PRateLimitConfig, P2PRateLimiter};
 
 /// Combined P2P behaviour.
 #[derive(NetworkBehaviour)]
 pub struct Behaviour {
     pub gossipsub: gossipsub::Behaviour,
-    pub kademlia:  kad::Behaviour<kad::store::MemoryStore>,
-    pub identify:  identify::Behaviour,
+    pub kademlia: kad::Behaviour<kad::store::MemoryStore>,
+    pub identify: identify::Behaviour,
 }
 
 pub struct P2PNode {
@@ -84,7 +83,11 @@ impl P2PNode {
                     key.public(),
                 ));
 
-                Ok(Behaviour { gossipsub, kademlia, identify })
+                Ok(Behaviour {
+                    gossipsub,
+                    kademlia,
+                    identify,
+                })
             })?
             .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
             .build();
@@ -94,27 +97,44 @@ impl P2PNode {
 
         let rate_limiter = P2PRateLimiter::new(P2PRateLimitConfig::default());
 
-        Ok((Self { swarm, peer_id, receiver, rate_limiter }, P2PHandle { sender }))
+        Ok((
+            Self {
+                swarm,
+                peer_id,
+                receiver,
+                rate_limiter,
+            },
+            P2PHandle { sender },
+        ))
     }
 
-    pub async fn run(
-        mut self,
-        state: crate::SharedState,
-    ) -> Result<()> {
+    pub async fn run(mut self, state: crate::SharedState) -> Result<()> {
         let event_bus = {
-             let s = state.read().await;
-             Arc::clone(&s.event_bus)
+            let s = state.read().await;
+            Arc::clone(&s.event_bus)
         };
         let mut status_ticker = tokio::time::interval(Duration::from_secs(5));
         let votes_topic = gossipsub::IdentTopic::new("creg/v1/votes");
         let blocks_topic = gossipsub::IdentTopic::new("creg/v1/blocks");
         let submissions_topic = gossipsub::IdentTopic::new("creg/v1/submissions");
         let vrf_proofs_topic = gossipsub::IdentTopic::new("creg/v1/vrf-proofs");
-        
-        self.swarm.behaviour_mut().gossipsub.subscribe(&votes_topic)?;
-        self.swarm.behaviour_mut().gossipsub.subscribe(&blocks_topic)?;
-        self.swarm.behaviour_mut().gossipsub.subscribe(&submissions_topic)?;
-        self.swarm.behaviour_mut().gossipsub.subscribe(&vrf_proofs_topic)?;
+
+        self.swarm
+            .behaviour_mut()
+            .gossipsub
+            .subscribe(&votes_topic)?;
+        self.swarm
+            .behaviour_mut()
+            .gossipsub
+            .subscribe(&blocks_topic)?;
+        self.swarm
+            .behaviour_mut()
+            .gossipsub
+            .subscribe(&submissions_topic)?;
+        self.swarm
+            .behaviour_mut()
+            .gossipsub
+            .subscribe(&vrf_proofs_topic)?;
 
         loop {
             tokio::select! {
@@ -133,10 +153,10 @@ impl P2PNode {
                         message,
                     })) => {
                         tracing::debug!("Got Gossipsub message {} from {}", id, peer_id);
-                        
+
                         // Parse topic and check rate limits
                         let topic_str = message.topic.as_str();
-                        
+
                         // Apply rate limiting based on message type
                         let allowed = if topic_str.contains("votes") {
                             self.rate_limiter.check_vote(peer_id)
@@ -145,7 +165,7 @@ impl P2PNode {
                         } else {
                             self.rate_limiter.check_general(peer_id)
                         };
-                        
+
                         if !allowed {
                             tracing::warn!(
                                 "P2P Rate limit: Dropping message {} from {} on topic {}",
@@ -153,7 +173,7 @@ impl P2PNode {
                             );
                             continue;
                         }
-                        
+
                         // Forward message to the node's internal event bus
                         if topic_str.contains("submissions") {
                             if let Ok(common::GossipMessage::PublishRequest(req)) = serde_json::from_slice(&message.data) {
@@ -186,7 +206,7 @@ impl P2PNode {
                             continue;
                         }
 
-                        let kind = if topic_str.contains("votes") { crate::events::EventKind::ValidatorVoted } 
+                        let kind = if topic_str.contains("votes") { crate::events::EventKind::ValidatorVoted }
                                     else { crate::events::EventKind::BlockProduced };
                         crate::events::emit(&event_bus, crate::events::RegistryEvent {
                             kind,
@@ -249,11 +269,13 @@ impl P2PNode {
     pub fn is_responsible_for(&self, cid: &str) -> bool {
         let local_bytes = self.peer_id.to_bytes();
         let cid_bytes = cid.as_bytes(); // In production, use multihash of the CID
-        
+
         // Simple XOR distance simulation for sharding
         // If the first byte matches or is close, we take responsibility.
         // A threshold of 32 (1/8th of network) ensures 7-10 nodes store each shard.
-        if local_bytes.is_empty() || cid_bytes.is_empty() { return false; }
+        if local_bytes.is_empty() || cid_bytes.is_empty() {
+            return false;
+        }
         let distance = local_bytes[0] ^ cid_bytes[0];
         distance < 32
     }

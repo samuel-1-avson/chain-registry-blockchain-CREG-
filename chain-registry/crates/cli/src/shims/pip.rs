@@ -31,7 +31,10 @@ async fn run_verified_install(ecosystem: &str, args: &[String]) -> i32 {
     for pkg in &packages {
         match resolver::resolve(pkg, Some(ecosystem), None).await {
             Ok(v) if v.status.is_blocked() => {
-                eprintln!("\x1b[31m✗ BLOCKED\x1b[0m  {} — chain registry: REVOKED", pkg);
+                eprintln!(
+                    "\x1b[31m✗ BLOCKED\x1b[0m  {} — chain registry: REVOKED",
+                    pkg
+                );
                 return 1;
             }
             Ok(v) if !v.status.is_safe() => {
@@ -47,12 +50,15 @@ async fn run_verified_install(ecosystem: &str, args: &[String]) -> i32 {
 
 async fn run_real(pm: &str, args: &[String]) -> i32 {
     let args_str: Vec<&str> = args.iter().map(String::as_str).collect();
-    let real = match which::which_all(pm)
-        .ok()
-        .and_then(|mut it| { it.next(); it.next() })
-    {
+    let real = match which::which_all(pm).ok().and_then(|mut it| {
+        it.next();
+        it.next()
+    }) {
         Some(p) => p,
-        None    => { eprintln!("chain-registry: real {} not found", pm); return 127; }
+        None => {
+            eprintln!("chain-registry: real {} not found", pm);
+            return 127;
+        }
     };
 
     std::process::Command::new(real)

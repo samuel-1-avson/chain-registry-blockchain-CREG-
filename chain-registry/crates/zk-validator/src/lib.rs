@@ -1,19 +1,19 @@
 //! Zero-Knowledge Proof Validation for Chain Registry
-//! 
+//!
 //! This crate provides ZK-SNARK based validation for packages, allowing
 //! validators to verify package safety without re-executing the sandbox.
-//! 
+//!
 //! # Architecture
-//! 
+//!
 //! 1. **Circuit Definition**: Defines the R1CS constraints for package validation
 //! 2. **Proof Generation**: Creates ZK proofs locally (publisher side)
 //! 3. **Proof Verification**: Fast verification of proofs (validator side)
-//! 
+//!
 //! # Example
-//! 
+//!
 //! ```rust
 //! use zk_validator::{ZkValidator, PackageInputs};
-//! 
+//!
 //! let validator = ZkValidator::new()?;
 //! let inputs = PackageInputs::new(content_hash, manifest_hash, static_analysis_passed);
 //! let proof = validator.generate_proof(&inputs)?;
@@ -44,16 +44,16 @@ pub use slashing::*;
 pub enum ZkError {
     #[error("Circuit synthesis error: {0}")]
     CircuitError(#[from] SynthesisError),
-    
+
     #[error("Proof generation failed: {0}")]
     ProofGenerationError(String),
-    
+
     #[error("Proof verification failed: {0}")]
     VerificationError(String),
-    
+
     #[error("Serialization error: {0}")]
     SerializationError(String),
-    
+
     #[error("Invalid input: {0}")]
     InvalidInput(String),
 }
@@ -97,7 +97,7 @@ impl PackageInputs {
             complexity_score: 50,
         }
     }
-    
+
     /// Convert to public inputs for verification
     pub fn public_inputs(&self) -> Vec<Fr> {
         vec![
@@ -114,7 +114,7 @@ impl PackageInputs {
             Fr::from(if self.no_vulnerable_deps { 1u64 } else { 0 }),
         ]
     }
-    
+
     /// Convert to field elements for circuit
     pub fn to_field_elements(&self) -> Vec<Fr> {
         let mut inputs = self.public_inputs();
@@ -132,28 +132,28 @@ pub struct ZkValidator {
 
 impl ZkValidator {
     /// Initialize the ZK validator with generated keys
-    /// 
+    ///
     /// In production, keys should be loaded from trusted setup files.
     pub fn new() -> Result<Self, ZkError> {
         info!("Initializing ZK validator with Bn254 curve");
-        
+
         // Generate circuit for trusted setup
         let circuit = PackageValidationCircuit::default();
-        
+
         debug!("Generating proving and verifying keys...");
         let mut rng = rand::thread_rng();
-        let (proving_key, verifying_key) = 
+        let (proving_key, verifying_key) =
             Groth16::<Bn254>::circuit_specific_setup(circuit, &mut rng)
                 .map_err(|e| ZkError::ProofGenerationError(e.to_string()))?;
-        
+
         info!("ZK validator initialized successfully");
-        
+
         Ok(Self {
             proving_key: Arc::new(proving_key),
             verifying_key: Arc::new(verifying_key),
         })
     }
-    
+
     /// Load validator from existing keys
     pub fn from_keys(
         proving_key_bytes: &[u8],
@@ -161,86 +161,78 @@ impl ZkValidator {
     ) -> Result<Self, ZkError> {
         let proving_key = ZkProvingKey::deserialize_uncompressed(proving_key_bytes)
             .map_err(|e| ZkError::SerializationError(e.to_string()))?;
-        
+
         let verifying_key = ZkVerifyingKey::deserialize_uncompressed(verifying_key_bytes)
             .map_err(|e| ZkError::SerializationError(e.to_string()))?;
-        
+
         Ok(Self {
             proving_key: Arc::new(proving_key),
             verifying_key: Arc::new(verifying_key),
         })
     }
-    
+
     /// Generate a ZK proof for package validation
-    /// 
+    ///
     /// This is run by the publisher to prove their package is safe
     #[instrument(skip(self, inputs), level = "debug")]
     pub fn generate_proof(&self, inputs: &PackageInputs) -> Result<ZkProof, ZkError> {
         debug!("Generating ZK proof for package validation");
-        
+
         let circuit = PackageValidationCircuit::from_inputs(inputs)?;
-        
+
         let mut rng = rand::thread_rng();
-        let proof = Groth16::<Bn254>::prove(
-            &self.proving_key,
-            circuit,
-            &mut rng,
-        ).map_err(|e| ZkError::ProofGenerationError(e.to_string()))?;
-        
+        let proof = Groth16::<Bn254>::prove(&self.proving_key, circuit, &mut rng)
+            .map_err(|e| ZkError::ProofGenerationError(e.to_string()))?;
+
         info!("ZK proof generated successfully");
         Ok(proof)
     }
-    
+
     /// Verify a ZK proof
-    /// 
+    ///
     /// This is run by validators to quickly verify package safety
     #[instrument(skip(self, proof), level = "debug")]
-    pub fn verify_proof(
-        &self,
-        proof: &ZkProof,
-        public_inputs: &[Fr],
-    ) -> Result<bool, ZkError> {
+    pub fn verify_proof(&self, proof: &ZkProof, public_inputs: &[Fr]) -> Result<bool, ZkError> {
         debug!("Verifying ZK proof");
-        
-        let is_valid = Groth16::<Bn254>::verify(
-            &self.verifying_key,
-            public_inputs,
-            proof,
-        ).map_err(|e| ZkError::VerificationError(e.to_string()))?;
-        
+
+        let is_valid = Groth16::<Bn254>::verify(&self.verifying_key, public_inputs, proof)
+            .map_err(|e| ZkError::VerificationError(e.to_string()))?;
+
         if is_valid {
             debug!("ZK proof verified successfully");
         } else {
             debug!("ZK proof verification failed");
         }
-        
+
         Ok(is_valid)
     }
-    
+
     /// Serialize a proof to bytes
     pub fn serialize_proof(proof: &ZkProof) -> Result<Vec<u8>, ZkError> {
         let mut bytes = Vec::new();
-        proof.serialize_uncompressed(&mut bytes)
+        proof
+            .serialize_uncompressed(&mut bytes)
             .map_err(|e| ZkError::SerializationError(e.to_string()))?;
         Ok(bytes)
     }
-    
+
     /// Deserialize a proof from bytes
     pub fn deserialize_proof(bytes: &[u8]) -> Result<ZkProof, ZkError> {
         ZkProof::deserialize_uncompressed(bytes)
             .map_err(|e| ZkError::SerializationError(e.to_string()))
     }
-    
+
     /// Serialize verifying key to bytes
     pub fn serialize_vk(&self) -> Result<Vec<u8>, ZkError> {
         let mut bytes = Vec::new();
-        self.verifying_key.serialize_uncompressed(&mut bytes)
+        self.verifying_key
+            .serialize_uncompressed(&mut bytes)
             .map_err(|e| ZkError::SerializationError(e.to_string()))?;
         Ok(bytes)
     }
-    
+
     /// Batch verify multiple proofs (optimized)
-    /// 
+    ///
     /// This is significantly faster than individual verification
     pub fn batch_verify(
         &self,
@@ -248,12 +240,13 @@ impl ZkValidator {
         public_inputs: &[Vec<Fr>],
     ) -> Result<Vec<bool>, ZkError> {
         debug!("Batch verifying {} proofs", proofs.len());
-        
-        let results: Result<Vec<_>, _> = proofs.iter()
+
+        let results: Result<Vec<_>, _> = proofs
+            .iter()
             .zip(public_inputs.iter())
             .map(|(proof, inputs)| self.verify_proof(proof, inputs))
             .collect();
-        
+
         results
     }
 }
@@ -272,36 +265,38 @@ mod tests {
     fn test_zk_proof_lifecycle() {
         // Setup
         let validator = ZkValidator::new().unwrap();
-        
+
         // Create test inputs
         let inputs = PackageInputs::new(
-            [1u8; 32],  // content hash
-            [2u8; 32],  // manifest hash
-            95,          // high safety score
-            true,        // sandbox passed
+            [1u8; 32], // content hash
+            [2u8; 32], // manifest hash
+            95,        // high safety score
+            true,      // sandbox passed
         );
-        
+
         // Generate proof
         let proof = validator.generate_proof(&inputs).unwrap();
-        
+
         // Verify proof
         let public_inputs = inputs.public_inputs();
         let is_valid = validator.verify_proof(&proof, &public_inputs).unwrap();
-        
+
         assert!(is_valid, "Proof should be valid");
     }
-    
+
     #[test]
     fn test_serialization() {
         let validator = ZkValidator::new().unwrap();
         let inputs = PackageInputs::new([1u8; 32], [2u8; 32], 95, true);
-        
+
         let proof = validator.generate_proof(&inputs).unwrap();
         let serialized = ZkValidator::serialize_proof(&proof).unwrap();
         let deserialized = ZkValidator::deserialize_proof(&serialized).unwrap();
-        
+
         // Verify deserialized proof
-        let is_valid = validator.verify_proof(&deserialized, &inputs.public_inputs()).unwrap();
+        let is_valid = validator
+            .verify_proof(&deserialized, &inputs.public_inputs())
+            .unwrap();
         assert!(is_valid);
     }
 }

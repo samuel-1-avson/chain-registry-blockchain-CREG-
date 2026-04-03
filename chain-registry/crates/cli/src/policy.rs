@@ -44,15 +44,16 @@ pub struct PolicyFile {
     pub blocklist: Vec<String>,
 }
 
-fn default_true() -> bool { true }
+fn default_true() -> bool {
+    true
+}
 
 impl PolicyFile {
     /// Load from a TOML file path.
     pub fn load(path: &std::path::Path) -> Result<Self> {
         let raw = std::fs::read_to_string(path)
             .with_context(|| format!("Cannot read policy file: {}", path.display()))?;
-        toml::from_str(&raw)
-            .with_context(|| format!("Invalid policy TOML: {}", path.display()))
+        toml::from_str(&raw).with_context(|| format!("Invalid policy TOML: {}", path.display()))
     }
 
     /// Save to the default location: ~/.creg/policy.toml
@@ -61,8 +62,7 @@ impl PolicyFile {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let content = toml::to_string_pretty(self)
-            .context("Failed to serialize policy")?;
+        let content = toml::to_string_pretty(self).context("Failed to serialize policy")?;
         std::fs::write(&path, content)?;
         Ok(path)
     }
@@ -80,7 +80,10 @@ impl PolicyFile {
 
         // Allowlist
         if !self.allowlist.is_empty() {
-            let allowed = self.allowlist.iter().any(|a| canonical.contains(a.as_str()));
+            let allowed = self
+                .allowlist
+                .iter()
+                .any(|a| canonical.contains(a.as_str()));
             if !allowed {
                 violations.push(format!("Package '{}' is not in the allowlist", canonical));
             }
@@ -88,12 +91,18 @@ impl PolicyFile {
 
         // Verification requirement
         if self.require_verified && status != "verified" {
-            violations.push(format!("Package '{}' is not chain-verified (status: {})", canonical, status));
+            violations.push(format!(
+                "Package '{}' is not chain-verified (status: {})",
+                canonical, status
+            ));
         }
 
         // Publisher whitelist
         if !self.allowed_publishers.is_empty() {
-            let ok = self.allowed_publishers.iter().any(|p| publisher.starts_with(p.as_str()));
+            let ok = self
+                .allowed_publishers
+                .iter()
+                .any(|p| publisher.starts_with(p.as_str()));
             if !ok {
                 violations.push(format!(
                     "Publisher '{}...' is not in the allowed publishers list",
@@ -115,15 +124,10 @@ fn default_policy_path() -> Result<std::path::PathBuf> {
 
 // ─── Commands ────────────────────────────────────────────────────────────────
 
-pub async fn show(
-    pubkey:   Option<&str>,
-    node_url: Option<&str>,
-    json:     bool,
-) -> Result<()> {
-    let base = node_url
-        .map(String::from)
-        .unwrap_or_else(|| std::env::var("CREG_NODE_URL")
-            .unwrap_or_else(|_| "http://localhost:8080".into()));
+pub async fn show(pubkey: Option<&str>, node_url: Option<&str>, json: bool) -> Result<()> {
+    let base = node_url.map(String::from).unwrap_or_else(|| {
+        std::env::var("CREG_NODE_URL").unwrap_or_else(|_| "http://localhost:8080".into())
+    });
 
     // Show active local policy if it exists
     let policy_path = default_policy_path()?;
@@ -131,15 +135,33 @@ pub async fn show(
         let policy = PolicyFile::load(&policy_path)?;
         println!("{}", "Active policy:".bold());
         println!("  File: {}", policy_path.display().to_string().dimmed());
-        println!("  Desc: {}", if policy.description.is_empty() { "(none)" } else { &policy.description });
-        println!("  Require verified: {}", if policy.require_verified { "yes".green() } else { "no".red() });
+        println!(
+            "  Desc: {}",
+            if policy.description.is_empty() {
+                "(none)"
+            } else {
+                &policy.description
+            }
+        );
+        println!(
+            "  Require verified: {}",
+            if policy.require_verified {
+                "yes".green()
+            } else {
+                "no".red()
+            }
+        );
         println!("  Blocklist:  {} entries", policy.blocklist.len());
         println!("  Allowlist:  {} entries", policy.allowlist.len());
         println!("  Publishers: {} entries", policy.allowed_publishers.len());
         println!("  Min age:    {} days", policy.min_age_days);
         println!();
     } else {
-        println!("{} No local policy file found ({})", "ℹ".blue(), policy_path.display());
+        println!(
+            "{} No local policy file found ({})",
+            "ℹ".blue(),
+            policy_path.display()
+        );
         println!("  Run: creg policy apply <policy.toml> — to activate a policy");
         println!();
     }
@@ -167,8 +189,11 @@ pub async fn show(
                 }
             }
             _ => {
-                println!("{} Could not fetch publisher info for key {}...", "ℹ".blue(),
-                    &k[..k.len().min(12)]);
+                println!(
+                    "{} Could not fetch publisher info for key {}...",
+                    "ℹ".blue(),
+                    &k[..k.len().min(12)]
+                );
             }
         }
     }
@@ -178,30 +203,46 @@ pub async fn show(
 
 fn print_publisher_info(data: &serde_json::Value) {
     println!("{}", "Publisher record:".bold());
-    let pkgs = data.get("packages_submitted").and_then(|v| v.as_u64()).unwrap_or(0);
-    let stake = data.get("stake_amount").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let pkgs = data
+        .get("packages_submitted")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let stake = data
+        .get("stake_amount")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
     println!("  Packages submitted: {}", pkgs);
     println!("  Stake:              {} ETH", stake);
 }
 
-pub async fn apply(
-    policy_path: &std::path::Path,
-    dry_run:     bool,
-) -> Result<()> {
+pub async fn apply(policy_path: &std::path::Path, dry_run: bool) -> Result<()> {
     let policy = PolicyFile::load(policy_path)?;
 
     if dry_run {
         println!("{} Dry run — validating policy file only", "ℹ".blue());
-        println!("  Description:    {}", if policy.description.is_empty() { "(none)" } else { &policy.description });
+        println!(
+            "  Description:    {}",
+            if policy.description.is_empty() {
+                "(none)"
+            } else {
+                &policy.description
+            }
+        );
         println!("  Require verified: {}", policy.require_verified);
-        println!("  Blocklist ({} entries): {:?}", policy.blocklist.len(), &policy.blocklist[..policy.blocklist.len().min(3)]);
+        println!(
+            "  Blocklist ({} entries): {:?}",
+            policy.blocklist.len(),
+            &policy.blocklist[..policy.blocklist.len().min(3)]
+        );
         println!("  {} Policy is valid.", "✓".green());
         return Ok(());
     }
 
     let dest = policy.save_default()?;
     println!("{} Policy applied: {}", "✓".green(), dest.display());
-    println!("  All future `creg install` and `creg batch install` commands will enforce this policy.");
+    println!(
+        "  All future `creg install` and `creg batch install` commands will enforce this policy."
+    );
 
     Ok(())
 }
@@ -218,7 +259,9 @@ pub fn show_policy_init() -> Result<()> {
         blocklist: vec![],
     };
     let content = toml::to_string_pretty(&example)?;
-    println!("# creg policy template — save to policy.toml and run: creg policy apply policy.toml\n");
+    println!(
+        "# creg policy template — save to policy.toml and run: creg policy apply policy.toml\n"
+    );
     println!("{}", content);
     Ok(())
 }

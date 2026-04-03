@@ -3,11 +3,11 @@
 // Fetches package shards from multiple validators simultaneously.
 
 use anyhow::{Context, Result};
+use common::sha256_hex;
 use futures::future::join_all;
 use std::path::{Path, PathBuf};
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
-use common::sha256_hex;
 
 pub struct P2PDownloader {
     pub nodes: Vec<String>,
@@ -20,12 +20,20 @@ impl P2PDownloader {
 
     /// Download a package from the swarm in parallel.
     /// This is the core 'Swarm Speed' engine.
-    pub async fn download(&self, ipfs_cid: &str, expected_hash: &str, target_path: &Path) -> Result<()> {
+    pub async fn download(
+        &self,
+        ipfs_cid: &str,
+        expected_hash: &str,
+        target_path: &Path,
+    ) -> Result<()> {
         if self.nodes.is_empty() {
             anyhow::bail!("No P2P nodes available for download");
         }
 
-        tracing::info!("Starting parallel P2P download for {}... (Swarm Speed Enabled)", ipfs_cid);
+        tracing::info!(
+            "Starting parallel P2P download for {}... (Swarm Speed Enabled)",
+            ipfs_cid
+        );
 
         // In a real BitTorrent-style system, we'd fetch different 1MB chunks from different peers.
         // For this hardening phase, we simulate this by querying multiple validator gateways simultaneously
@@ -52,12 +60,16 @@ impl P2PDownloader {
             }
         }
 
-        let bytes = final_bytes.context("Failed to download or verify package from any swarm peer")?;
-        
+        let bytes =
+            final_bytes.context("Failed to download or verify package from any swarm peer")?;
+
         let mut file = File::create(target_path).await?;
         file.write_all(&bytes).await?;
-        
-        tracing::info!("Successfully downloaded and verified package from P2P swarm: {}", target_path.display());
+
+        tracing::info!(
+            "Successfully downloaded and verified package from P2P swarm: {}",
+            target_path.display()
+        );
         Ok(())
     }
 }

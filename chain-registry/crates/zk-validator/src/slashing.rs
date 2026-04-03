@@ -139,7 +139,7 @@ impl SlashingProofGenerator {
     pub fn new(config: ProofConfig) -> Self {
         Self { config }
     }
-    
+
     /// Generate a double-sign proof
     ///
     /// This proves that a validator signed two conflicting votes
@@ -152,24 +152,24 @@ impl SlashingProofGenerator {
             "Generating double-sign proof for validator: {}",
             evidence.validator_address
         );
-        
+
         // Step 1: Validate evidence
         self.validate_double_sign_evidence(evidence)?;
-        
+
         // Step 2: Prepare inputs for circuit
         let input_json = self.prepare_circuit_inputs(evidence)?;
-        
+
         // Step 3: Generate witness
         let witness = self.generate_witness(&input_json).await?;
-        
+
         // Step 4: Generate proof
         let proof = self.generate_groth16_proof(&witness).await?;
-        
+
         // Step 5: Compute nullifier
         let nullifier = self.compute_nullifier(&evidence.public_inputs);
-        
+
         tracing::info!("Proof generated successfully. Nullifier: {}", nullifier);
-        
+
         Ok(ZKSlashingProof {
             proof,
             public_inputs: vec![
@@ -185,37 +185,42 @@ impl SlashingProofGenerator {
             timestamp: current_timestamp(),
         })
     }
-    
+
     /// Validate that the evidence is coherent
     fn validate_double_sign_evidence(&self, evidence: &DoubleSignEvidence) -> Result<()> {
         // Check that votes are different
         if evidence.vote1_details.approved == evidence.vote2_details.approved {
             anyhow::bail!(
                 "Votes are not conflicting: both are {}",
-                if evidence.vote1_details.approved { "approve" } else { "reject" }
+                if evidence.vote1_details.approved {
+                    "approve"
+                } else {
+                    "reject"
+                }
             );
         }
-        
+
         // Check that signatures are valid (would need Ed25519 verification)
         // TODO: Implement Ed25519 signature verification
-        
+
         // Check that timestamps are close (same consensus round)
         let time_diff = if evidence.vote1_details.timestamp > evidence.vote2_details.timestamp {
             evidence.vote1_details.timestamp - evidence.vote2_details.timestamp
         } else {
             evidence.vote2_details.timestamp - evidence.vote1_details.timestamp
         };
-        
-        if time_diff > 300 { // 5 minutes
+
+        if time_diff > 300 {
+            // 5 minutes
             tracing::warn!(
                 "Votes are {} seconds apart - may not be double-signing",
                 time_diff
             );
         }
-        
+
         Ok(())
     }
-    
+
     /// Prepare inputs for the circom circuit
     fn prepare_circuit_inputs(&self, evidence: &DoubleSignEvidence) -> Result<String> {
         let inputs = serde_json::json!({
@@ -238,23 +243,23 @@ impl SlashingProofGenerator {
                 evidence.witness.signature2.s,
             ],
         });
-        
+
         Ok(inputs.to_string())
     }
-    
+
     /// Generate witness using circom's witness generator
     async fn generate_witness(&self, input_json: &str) -> Result<Vec<u8>> {
-        use tokio::process::Command;
         use tokio::fs;
-        
+        use tokio::process::Command;
+
         tracing::debug!("Generating witness...");
-        
+
         // Write inputs to temp file
         let input_path = "/tmp/zk_input.json";
         fs::write(input_path, input_json).await?;
-        
+
         let output_path = "/tmp/zk_witness.wtns";
-        
+
         // Run witness generator
         let status = Command::new(&self.config.witness_generator_path)
             .arg(input_path)
@@ -262,21 +267,21 @@ impl SlashingProofGenerator {
             .status()
             .await
             .context("Failed to run witness generator")?;
-        
+
         if !status.success() {
             anyhow::bail!("Witness generation failed");
         }
-        
+
         // Read witness
         let witness = fs::read(output_path).await?;
-        
+
         // Cleanup
         let _ = fs::remove_file(input_path).await;
         let _ = fs::remove_file(output_path).await;
-        
+
         Ok(witness)
     }
-    
+
     /// Generate Groth16 proof using snarkjs
     async fn generate_groth16_proof(&self, _witness: &[u8]) -> Result<Groth16Proof> {
         // In production, this would:
@@ -284,28 +289,22 @@ impl SlashingProofGenerator {
         // 2. Load the proving key
         // 3. Perform the proving computation
         // 4. Return the proof
-        
+
         // For now, return a placeholder
         tracing::warn!("Using placeholder proof - integrate with actual ZK library for production");
-        
+
         Ok(Groth16Proof {
-            a: [
-                "0".to_string(),
-                "0".to_string(),
-            ],
+            a: ["0".to_string(), "0".to_string()],
             b: [
                 ["0".to_string(), "0".to_string()],
                 ["0".to_string(), "0".to_string()],
             ],
-            c: [
-                "0".to_string(),
-                "0".to_string(),
-            ],
+            c: ["0".to_string(), "0".to_string()],
             protocol: "groth16".to_string(),
             curve: "bn128".to_string(),
         })
     }
-    
+
     /// Compute nullifier from public inputs
     fn compute_nullifier(&self, public_inputs: &DoubleSignPublicInputs) -> String {
         let data = format!(
@@ -316,11 +315,11 @@ impl SlashingProofGenerator {
             public_inputs.vote1_hash,
             public_inputs.vote2_hash
         );
-        
+
         let hash = Sha256::digest(data.as_bytes());
         hex::encode(hash)
     }
-    
+
     /// Export proof to JSON format for submission
     pub fn export_proof(&self, proof: &ZKSlashingProof) -> Result<String> {
         serde_json::to_string_pretty(proof).context("Failed to serialize proof")
@@ -355,11 +354,11 @@ impl DoubleSignMonitor {
             generator,
         }
     }
-    
+
     /// Record a vote and check for double-signing
     pub fn record_vote(&mut self, vote: VoteRecord) -> Option<DoubleSignEvidence> {
         let key = (vote.validator_id.clone(), vote.package_canonical.clone());
-        
+
         // Check for conflicting vote
         if let Some(existing_votes) = self.votes.get(&key) {
             for existing in existing_votes {
@@ -370,24 +369,24 @@ impl DoubleSignMonitor {
                         vote.validator_id,
                         vote.package_canonical
                     );
-                    
+
                     return Some(self.create_evidence(existing, &vote));
                 }
             }
         }
-        
+
         // Store the vote
         self.votes.entry(key).or_default().push(vote);
-        
+
         None
     }
-    
+
     /// Create evidence from two conflicting votes
     fn create_evidence(&self, vote1: &VoteRecord, vote2: &VoteRecord) -> DoubleSignEvidence {
         DoubleSignEvidence {
             public_inputs: DoubleSignPublicInputs {
                 validator_pubkey_x: vote1.pubkey.clone(), // Simplified
-                validator_pubkey_y: "0".to_string(), // Would be actual Y coordinate
+                validator_pubkey_y: "0".to_string(),      // Would be actual Y coordinate
                 package_hash: hex::encode(Sha256::digest(vote1.package_canonical.as_bytes())),
                 vote1_hash: hex::encode(Sha256::digest(format!(
                     "{}:{}:{}",
@@ -396,7 +395,7 @@ impl DoubleSignMonitor {
                 vote2_hash: hex::encode(Sha256::digest(format!(
                     "{}:{}:{}",
                     vote2.package_canonical, vote2.approved, vote2.timestamp
-                )))
+                ))),
             },
             witness: DoubleSignWitness {
                 validator_privkey: "HIDDEN".to_string(), // Not known by monitor
@@ -444,7 +443,7 @@ mod tests {
     #[test]
     fn test_compute_nullifier() {
         let generator = SlashingProofGenerator::new(ProofConfig::default());
-        
+
         let public_inputs = DoubleSignPublicInputs {
             validator_pubkey_x: "123".to_string(),
             validator_pubkey_y: "456".to_string(),
@@ -452,10 +451,10 @@ mod tests {
             vote1_hash: "def".to_string(),
             vote2_hash: "ghi".to_string(),
         };
-        
+
         let nullifier1 = generator.compute_nullifier(&public_inputs);
         let nullifier2 = generator.compute_nullifier(&public_inputs);
-        
+
         // Same inputs should produce same nullifier
         assert_eq!(nullifier1, nullifier2);
     }
@@ -464,7 +463,7 @@ mod tests {
     fn test_double_sign_monitor() {
         let generator = SlashingProofGenerator::new(ProofConfig::default());
         let mut monitor = DoubleSignMonitor::new(generator);
-        
+
         // First vote: approve
         let vote1 = VoteRecord {
             validator_id: "val1".to_string(),
@@ -475,10 +474,10 @@ mod tests {
             signature: "sig1".to_string(),
             pubkey: "pubkey1".to_string(),
         };
-        
+
         let result1 = monitor.record_vote(vote1);
         assert!(result1.is_none()); // No double-sign yet
-        
+
         // Second vote: reject (conflicting!)
         let vote2 = VoteRecord {
             validator_id: "val1".to_string(),
@@ -489,7 +488,7 @@ mod tests {
             signature: "sig2".to_string(),
             pubkey: "pubkey1".to_string(),
         };
-        
+
         let result2 = monitor.record_vote(vote2);
         assert!(result2.is_some()); // Double-sign detected!
     }

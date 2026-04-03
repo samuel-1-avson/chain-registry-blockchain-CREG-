@@ -1,8 +1,8 @@
 // crates/common/src/verdict.rs
 
-use serde::{Deserialize, Serialize};
-use chrono::{DateTime, Utc};
 use crate::PackageId;
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 
 /// The trust decision the CLI uses to allow, warn, or block an install.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19,16 +19,16 @@ pub struct TrustVerdict {
 pub enum VerdictStatus {
     /// Chain has a valid consensus record — install proceeds silently.
     Verified {
-        block_hash:   String,
+        block_hash: String,
         content_hash: String,
         /// IPFS CID of the verified tarball — used for P2P download.
-        ipfs_cid:     String,
-        findings:     Vec<crate::Finding>,
+        ipfs_cid: String,
+        findings: Vec<crate::Finding>,
     },
     /// Package exists but is not yet through consensus — warn the user.
     Unverified,
     /// Package was explicitly revoked — hard block.
-    Revoked { 
+    Revoked {
         reason: String,
         findings: Vec<crate::Finding>,
     },
@@ -58,10 +58,10 @@ impl VerdictStatus {
     /// ANSI colour code for the label (used in the CLI terminal output).
     pub fn ansi_color(&self) -> &'static str {
         match self {
-            VerdictStatus::Verified { .. } => "\x1b[32m",    // green
-            VerdictStatus::Unverified => "\x1b[33m",          // yellow
-            VerdictStatus::Revoked { .. } => "\x1b[31m",      // red
-            VerdictStatus::Unknown => "\x1b[33m",             // yellow
+            VerdictStatus::Verified { .. } => "\x1b[32m", // green
+            VerdictStatus::Unverified => "\x1b[33m",      // yellow
+            VerdictStatus::Revoked { .. } => "\x1b[31m",  // red
+            VerdictStatus::Unknown => "\x1b[33m",         // yellow
         }
     }
 }

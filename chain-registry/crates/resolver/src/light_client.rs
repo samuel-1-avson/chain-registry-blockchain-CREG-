@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Checkpoint {
     pub height: u64,
-    pub hash:   String,
+    pub hash: String,
 }
 
 impl Checkpoint {
@@ -31,7 +31,7 @@ impl Checkpoint {
     pub fn genesis() -> Self {
         Self {
             height: 0,
-            hash:   Block::genesis().hash(),
+            hash: Block::genesis().hash(),
         }
     }
 }
@@ -53,7 +53,7 @@ pub struct MerkleProof {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MerkleStep {
     pub sibling_hash: String,
-    pub is_right:     bool, // true = sibling is on the right side
+    pub is_right: bool, // true = sibling is on the right side
 }
 
 impl MerkleProof {
@@ -79,22 +79,27 @@ impl MerkleProof {
 /// Verify that a block header is self-consistent:
 /// - The hash of the header bytes equals the claimed block hash.
 /// - The height is monotonically increasing from the previous header.
-pub fn verify_header(header: &BlockHeader, expected_hash: &str, expected_height: u64) -> Result<()> {
-    let computed = sha256_hex(
-        &serde_json::to_vec(header).context("Failed to serialise header")?
-    );
+pub fn verify_header(
+    header: &BlockHeader,
+    expected_hash: &str,
+    expected_height: u64,
+) -> Result<()> {
+    let computed = sha256_hex(&serde_json::to_vec(header).context("Failed to serialise header")?);
 
     if computed != expected_hash {
         bail!(
             "Block header hash mismatch at height {}: expected {} got {}",
-            expected_height, &expected_hash[..12], &computed[..12]
+            expected_height,
+            &expected_hash[..12],
+            &computed[..12]
         );
     }
 
     if header.height != expected_height {
         bail!(
             "Block height mismatch: expected {} got {}",
-            expected_height, header.height
+            expected_height,
+            header.height
         );
     }
 
@@ -118,7 +123,8 @@ pub fn verify_header_chain(
     if first_header.height != checkpoint.height + 1 {
         bail!(
             "Chain gap: checkpoint height={} but first header height={}",
-            checkpoint.height, first_header.height
+            checkpoint.height,
+            first_header.height
         );
     }
     if first_header.prev_hash != checkpoint.hash {
@@ -171,7 +177,7 @@ pub struct LightClientResponse {
 /// Returns `true` if the package is genuinely verified on chain.
 pub async fn verify_package(
     canonical: &str,
-    node_url:  &str,
+    node_url: &str,
     checkpoint: &Checkpoint,
 ) -> Result<bool> {
     let url = format!(
@@ -228,11 +234,17 @@ pub async fn verify_package(
 pub fn build_merkle_proof(block: &Block, tx_index: usize) -> Result<MerkleProof> {
     let n = block.transactions.len();
     if tx_index >= n {
-        bail!("tx_index {} out of range (block has {} transactions)", tx_index, n);
+        bail!(
+            "tx_index {} out of range (block has {} transactions)",
+            tx_index,
+            n
+        );
     }
 
     // Compute all leaf hashes.
-    let leaves: Vec<String> = block.transactions.iter()
+    let leaves: Vec<String> = block
+        .transactions
+        .iter()
         .map(|tx| sha256_hex(&serde_json::to_vec(tx).unwrap_or_default()))
         .collect();
 
@@ -240,9 +252,9 @@ pub fn build_merkle_proof(block: &Block, tx_index: usize) -> Result<MerkleProof>
     let expected_root = block.header.merkle_root.clone();
 
     // Walk up the tree collecting sibling hashes.
-    let mut path   = Vec::new();
-    let mut idx    = tx_index;
-    let mut level  = leaves.clone();
+    let mut path = Vec::new();
+    let mut idx = tx_index;
+    let mut level = leaves.clone();
 
     while level.len() > 1 {
         // Pad to even length.
@@ -253,17 +265,22 @@ pub fn build_merkle_proof(block: &Block, tx_index: usize) -> Result<MerkleProof>
         let sibling_idx = if idx % 2 == 0 { idx + 1 } else { idx - 1 };
         path.push(MerkleStep {
             sibling_hash: level[sibling_idx].clone(),
-            is_right:     idx % 2 == 0,
+            is_right: idx % 2 == 0,
         });
 
         // Build next level.
-        level = level.chunks(2)
+        level = level
+            .chunks(2)
             .map(|pair| sha256_hex(format!("{}{}", pair[0], pair[1]).as_bytes()))
             .collect();
         idx /= 2;
     }
 
-    Ok(MerkleProof { tx_hash, path, expected_root })
+    Ok(MerkleProof {
+        tx_hash,
+        path,
+        expected_root,
+    })
 }
 
 #[cfg(test)]
@@ -272,31 +289,33 @@ mod tests {
 
     #[test]
     fn merkle_proof_verifies() {
-        use common::{Block, BlockHeader, Transaction, ChainRecord, PackageStatus, PackageId};
         use chrono::Utc;
+        use common::{Block, BlockHeader, ChainRecord, PackageId, PackageStatus, Transaction};
 
         // Build a block with 4 transactions.
-        let txs: Vec<Transaction> = (0..4).map(|i| {
-            Transaction::Publish(ChainRecord {
-                id:                   PackageId::new("npm", format!("pkg-{}", i), "1.0.0"),
-                content_hash:         sha256_hex(format!("pkg-{}", i).as_bytes()),
-                ipfs_cid:             format!("bafytest{}", i),
-                publisher_pubkey:     "pub".into(),
-                block_hash:           "0".repeat(64),
-                published_at:         Utc::now(),
-                validator_signatures: vec![],
-                status:               PackageStatus::Verified,
-                ..Default::default()
+        let txs: Vec<Transaction> = (0..4)
+            .map(|i| {
+                Transaction::Publish(ChainRecord {
+                    id: PackageId::new("npm", format!("pkg-{}", i), "1.0.0"),
+                    content_hash: sha256_hex(format!("pkg-{}", i).as_bytes()),
+                    ipfs_cid: format!("bafytest{}", i),
+                    publisher_pubkey: "pub".into(),
+                    block_hash: "0".repeat(64),
+                    published_at: Utc::now(),
+                    validator_signatures: vec![],
+                    status: PackageStatus::Verified,
+                    ..Default::default()
+                })
             })
-        }).collect();
+            .collect();
 
         let block = Block {
             header: BlockHeader {
-                height:             1,
-                prev_hash:          "0".repeat(64),
-                merkle_root:        common::merkle_root(&txs),
-                proposer_id:        "test".into(),
-                timestamp:          Utc::now(),
+                height: 1,
+                prev_hash: "0".repeat(64),
+                merkle_root: common::merkle_root(&txs),
+                proposer_id: "test".into(),
+                timestamp: Utc::now(),
                 validator_set_hash: "dev".into(),
                 vrf_output: None,
                 vrf_proof: None,

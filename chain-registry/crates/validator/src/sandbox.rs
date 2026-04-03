@@ -5,7 +5,7 @@
 // This module defines the interface and a simulation for development.
 
 use anyhow::Result;
-use common::{PackageManifest, Finding, FindingSeverity};
+use common::{Finding, FindingSeverity, PackageManifest};
 
 #[derive(Debug, Clone)]
 pub struct SandboxResult {
@@ -45,9 +45,9 @@ impl Default for SandboxConfig {
 }
 
 pub async fn run(
-    _pkg_id:       &common::PackageId,
+    _pkg_id: &common::PackageId,
     tarball_bytes: &[u8],
-    manifest:      &PackageManifest,
+    manifest: &PackageManifest,
 ) -> Result<SandboxResult> {
     let config = SandboxConfig::default();
 
@@ -57,14 +57,17 @@ pub async fn run(
 
     let tmp_dir = std::env::temp_dir().join(format!("creg-sandbox-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&tmp_dir)?;
-    
+
     let tarball_path = tmp_dir.join("package.tar.gz");
     std::fs::write(&tarball_path, tarball_bytes)?;
 
     tracing::info!("Launching nsjail sandbox for package behavioural analysis...");
 
     // ── Execute nsjail ────────────────────────────────────────────────────────
-    let nsjail_check = tokio::process::Command::new("nsjail").arg("--version").output().await;
+    let nsjail_check = tokio::process::Command::new("nsjail")
+        .arg("--version")
+        .output()
+        .await;
 
     if nsjail_check.is_err() {
         // Allow sandbox bypass in dev/CI mode to run without nsjail.
@@ -72,9 +75,9 @@ pub async fn run(
             tracing::warn!("nsjail not found — CREG_DEV_SANDBOX=true: returning simulated clean result (dev mode only)");
             let _ = std::fs::remove_dir_all(&tmp_dir);
             return Ok(SandboxResult {
-                findings:                vec![],
-                observed_network_hosts:  vec![],
-                observed_fs_writes:      vec![],
+                findings: vec![],
+                observed_network_hosts: vec![],
+                observed_fs_writes: vec![],
                 observed_process_spawns: vec![],
             });
         }
@@ -87,36 +90,53 @@ pub async fn run(
     // Select the install command based on the package ecosystem.
     let install_args: Vec<std::ffi::OsString> = match _pkg_id.ecosystem.as_str() {
         "npm" => vec![
-            "/usr/bin/node".into(), "/usr/lib/node_modules/npm/bin/npm-cli.js".into(),
-            "install".into(), tarball_path.as_os_str().to_owned(),
+            "/usr/bin/node".into(),
+            "/usr/lib/node_modules/npm/bin/npm-cli.js".into(),
+            "install".into(),
+            tarball_path.as_os_str().to_owned(),
         ],
         "cargo" => vec![
-            "/usr/bin/cargo".into(), "install".into(),
-            "--path".into(), tarball_path.as_os_str().to_owned(),
+            "/usr/bin/cargo".into(),
+            "install".into(),
+            "--path".into(),
+            tarball_path.as_os_str().to_owned(),
             "--no-default-features".into(),
         ],
         "rubygems" => vec![
-            "/usr/bin/gem".into(), "install".into(), tarball_path.as_os_str().to_owned(),
+            "/usr/bin/gem".into(),
+            "install".into(),
+            tarball_path.as_os_str().to_owned(),
         ],
         "maven" => vec![
-            "/usr/bin/mvn".into(), "install:install-file".into(),
-            "-Dfile".into(), tarball_path.as_os_str().to_owned(),
+            "/usr/bin/mvn".into(),
+            "install:install-file".into(),
+            "-Dfile".into(),
+            tarball_path.as_os_str().to_owned(),
         ],
         // Default to pip for pypi and unknown ecosystems.
         _ => vec![
-            "/usr/bin/python3".into(), "-m".into(), "pip".into(),
-            "install".into(), tarball_path.as_os_str().to_owned(),
+            "/usr/bin/python3".into(),
+            "-m".into(),
+            "pip".into(),
+            "install".into(),
+            tarball_path.as_os_str().to_owned(),
         ],
     };
 
     let output = tokio::process::Command::new("nsjail")
         .arg("-Mo")
-        .arg("--chroot").arg("/") // In production, this would be a minimal rootfs
-        .arg("--user").arg("99999")
-        .arg("--group").arg("99999")
-        .arg("--time_limit").arg(config.timeout_secs.to_string())
-        .arg("--max_cpus").arg("1")
-        .arg("--rlimit_as").arg(config.memory_mb.to_string())
+        .arg("--chroot")
+        .arg("/") // In production, this would be a minimal rootfs
+        .arg("--user")
+        .arg("99999")
+        .arg("--group")
+        .arg("99999")
+        .arg("--time_limit")
+        .arg(config.timeout_secs.to_string())
+        .arg("--max_cpus")
+        .arg("1")
+        .arg("--rlimit_as")
+        .arg(config.memory_mb.to_string())
         .arg("--")
         .args(&install_args)
         .output()
@@ -149,7 +169,7 @@ fn parse_nsjail_output(stderr: &[u8]) -> Result<Observations> {
     let mut fs_writes = Vec::new();
     let mut process_spawns = Vec::new();
 
-    // nsjail with -Mo (Audit mode) will log syscalls. 
+    // nsjail with -Mo (Audit mode) will log syscalls.
     // We regex for common patterns: connect(), open(O_WRONLY), execve().
     for line in stderr_str.lines() {
         if line.contains("connect(") {
@@ -164,7 +184,11 @@ fn parse_nsjail_output(stderr: &[u8]) -> Result<Observations> {
         }
     }
 
-    Ok(Observations { network_hosts, fs_writes, process_spawns })
+    Ok(Observations {
+        network_hosts,
+        fs_writes,
+        process_spawns,
+    })
 }
 
 /// Cross-check the observed behaviour against what the publisher declared.
@@ -175,12 +199,12 @@ fn check_against_manifest(obs: &Observations, manifest: &PackageManifest) -> Vec
     for host in &obs.network_hosts {
         if !manifest.allowed_network_hosts.iter().any(|h| h == host) {
             findings.push(Finding {
-                id:          "SB001".into(),
-                title:       "Undeclared network access".into(),
-                severity:    FindingSeverity::High,
+                id: "SB001".into(),
+                title: "Undeclared network access".into(),
+                severity: FindingSeverity::High,
                 description: format!("Undeclared network access to '{}'", host),
-                file:        "install-hook".into(),
-                line:        None,
+                file: "install-hook".into(),
+                line: None,
             });
         }
     }
@@ -189,12 +213,12 @@ fn check_against_manifest(obs: &Observations, manifest: &PackageManifest) -> Vec
     for path in &obs.fs_writes {
         if !manifest.allowed_fs_writes.iter().any(|p| p == path) {
             findings.push(Finding {
-                id:          "SB002".into(),
-                title:       "Undeclared filesystem write".into(),
-                severity:    FindingSeverity::High,
+                id: "SB002".into(),
+                title: "Undeclared filesystem write".into(),
+                severity: FindingSeverity::High,
                 description: format!("Undeclared filesystem write to '{}'", path),
-                file:        "install-hook".into(),
-                line:        None,
+                file: "install-hook".into(),
+                line: None,
             });
         }
     }
@@ -203,12 +227,12 @@ fn check_against_manifest(obs: &Observations, manifest: &PackageManifest) -> Vec
     for spawn in &obs.process_spawns {
         if !manifest.spawns_processes {
             findings.push(Finding {
-                id:          "SB003".into(),
-                title:       "Undeclared process spawn".into(),
-                severity:    FindingSeverity::Critical,
+                id: "SB003".into(),
+                title: "Undeclared process spawn".into(),
+                severity: FindingSeverity::Critical,
                 description: format!("Undeclared child process spawn: '{}'", spawn),
-                file:        "install-hook".into(),
-                line:        None,
+                file: "install-hook".into(),
+                line: None,
             });
         }
     }

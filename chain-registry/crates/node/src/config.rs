@@ -14,7 +14,9 @@ pub enum NodeMode {
 }
 
 impl Default for NodeMode {
-    fn default() -> Self { NodeMode::Pruned }
+    fn default() -> Self {
+        NodeMode::Pruned
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -85,16 +87,18 @@ impl NodeConfig {
             "light" => NodeMode::Light,
             _ => NodeMode::Pruned,
         };
-        
+
         let pruning = PruningConfig {
-            package_retention_days: env("CREG_PACKAGE_RETENTION_DAYS", "30").parse().unwrap_or(30),
+            package_retention_days: env("CREG_PACKAGE_RETENTION_DAYS", "30")
+                .parse()
+                .unwrap_or(30),
             keep_full_blocks: env("CREG_KEEP_FULL_BLOCKS", "false") == "true",
             prune_interval: env("CREG_PRUNE_INTERVAL", "1000").parse().unwrap_or(1000),
             max_db_size_gb: env("CREG_MAX_DB_SIZE_GB", "150").parse().unwrap_or(150),
         };
-        
+
         let max_peers = env("CREG_MAX_PEERS", "15").parse().unwrap_or(15);
-        
+
         Self {
             listen_addr: env("CREG_LISTEN", "0.0.0.0:8080"),
             data_dir: PathBuf::from(env("CREG_DATA_DIR", "./data")),
@@ -115,7 +119,10 @@ impl NodeConfig {
                 .map(String::from)
                 .collect(),
             eth_rpc_url: env("CREG_ETH_RPC", "http://127.0.0.1:8545"),
-            registry_addr: env("CREG_REGISTRY_ADDR", "0x0000000000000000000000000000000000000000"),
+            registry_addr: env(
+                "CREG_REGISTRY_ADDR",
+                "0x0000000000000000000000000000000000000000",
+            ),
             block_interval_secs: env("CREG_BLOCK_INTERVAL", "5").parse().unwrap_or(5),
             ipfs_url: env("CREG_IPFS_URL", "http://127.0.0.1:5001"),
             pg_url: env("CREG_PG_URL", ""),
@@ -149,9 +156,7 @@ impl NodeConfig {
                     "CREG_VALIDATOR_KEY must be 32 bytes (64 hex chars), got {} bytes",
                     bytes.len()
                 )),
-                Err(_) => errors.push(
-                    "CREG_VALIDATOR_KEY is not valid hex".into()
-                ),
+                Err(_) => errors.push("CREG_VALIDATOR_KEY is not valid hex".into()),
             }
         }
 

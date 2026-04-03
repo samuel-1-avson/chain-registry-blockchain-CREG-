@@ -3,12 +3,12 @@
 // Cache-first: checks the local sled DB, then hits the chain node.
 
 pub mod cache;
-pub mod downloader;
 mod chain_client;
+pub mod downloader;
 
 use anyhow::Result;
-use common::{PackageId, TrustVerdict, VerdictSource, VerdictStatus};
 use chrono::Utc;
+use common::{PackageId, TrustVerdict, VerdictSource, VerdictStatus};
 
 /// Resolve "name@version" or "name" in the given ecosystem.
 pub async fn resolve(
@@ -23,10 +23,7 @@ pub async fn resolve(
 }
 
 /// Resolve a fully-formed PackageId.
-pub async fn resolve_id(
-    id: &PackageId,
-    node_url: Option<&str>,
-) -> Result<TrustVerdict> {
+pub async fn resolve_id(id: &PackageId, node_url: Option<&str>) -> Result<TrustVerdict> {
     // ── 1. Check local TTL cache ──────────────────────────────────────────────
     if let Some(cached) = cache::get(id)? {
         tracing::debug!("cache hit for {}", id.canonical());
@@ -70,7 +67,10 @@ fn parse_pkg(raw: &str) -> (String, Option<String>) {
     if clean.starts_with('@') {
         let rest = &clean[1..];
         if let Some(idx) = rest.rfind('@') {
-            return (format!("@{}", &rest[..idx]), Some(rest[idx + 1..].to_string()));
+            return (
+                format!("@{}", &rest[..idx]),
+                Some(rest[idx + 1..].to_string()),
+            );
         }
         return (clean.to_string(), None);
     }
@@ -81,25 +81,23 @@ fn parse_pkg(raw: &str) -> (String, Option<String>) {
 }
 
 fn default_node_url() -> String {
-    std::env::var("CREG_NODE_URL")
-        .unwrap_or_else(|_| "https://registry.chain-pkg.io".into())
+    std::env::var("CREG_NODE_URL").unwrap_or_else(|_| "https://registry.chain-pkg.io".into())
 }
 
 pub mod light_client;
 
-use light_client::{Checkpoint, verify_package};
+use light_client::{verify_package, Checkpoint};
 
 /// Resolve a package using light-client SPV verification.
 /// Provides stronger guarantees than trusting the node's verdict directly,
 /// at the cost of one extra round-trip for the Merkle proof.
 pub async fn resolve_verified(
-    id:         &common::PackageId,
-    node_url:   Option<&str>,
+    id: &common::PackageId,
+    node_url: Option<&str>,
     checkpoint: Option<&Checkpoint>,
 ) -> anyhow::Result<common::TrustVerdict> {
-    let url       = node_url.map(String::from).unwrap_or_else(|| {
-        std::env::var("CREG_NODE_URL")
-            .unwrap_or_else(|_| "https://registry.chain-pkg.io".into())
+    let url = node_url.map(String::from).unwrap_or_else(|| {
+        std::env::var("CREG_NODE_URL").unwrap_or_else(|_| "https://registry.chain-pkg.io".into())
     });
     let cp = checkpoint.cloned().unwrap_or_else(Checkpoint::genesis);
 
@@ -109,16 +107,23 @@ pub async fn resolve_verified(
     // If verified, additionally validate via Merkle proof.
     if verdict.status.is_safe() {
         match verify_package(&id.canonical(), &url, &cp).await {
-            Ok(true)  => Ok(verdict),
+            Ok(true) => Ok(verdict),
             Ok(false) => {
-                tracing::warn!("Light-client proof failed for {} — downgrading to Unknown", id.canonical());
+                tracing::warn!(
+                    "Light-client proof failed for {} — downgrading to Unknown",
+                    id.canonical()
+                );
                 Ok(common::TrustVerdict {
                     status: common::VerdictStatus::Unknown,
                     ..verdict
                 })
             }
             Err(e) => {
-                tracing::warn!("Light-client proof error for {}: {} — using standard verdict", id.canonical(), e);
+                tracing::warn!(
+                    "Light-client proof error for {}: {} — using standard verdict",
+                    id.canonical(),
+                    e
+                );
                 Ok(verdict) // Fall back to standard verdict on proof error.
             }
         }

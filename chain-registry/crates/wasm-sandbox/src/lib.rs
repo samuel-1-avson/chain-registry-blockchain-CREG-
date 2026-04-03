@@ -20,19 +20,19 @@ pub use limits::ResourceLimits;
 pub enum SandboxError {
     #[error("WASM compilation error: {0}")]
     CompilationError(String),
-    
+
     #[error("WASM execution error: {0}")]
     ExecutionError(String),
-    
+
     #[error("Resource limit exceeded: {0}")]
     ResourceLimitExceeded(String),
-    
+
     #[error("Timeout after {0:?}")]
     Timeout(Duration),
-    
+
     #[error("Memory access error: {0}")]
     MemoryError(String),
-    
+
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
 }
@@ -67,7 +67,7 @@ impl SandboxConfig {
         self.memory_limit = bytes;
         self
     }
-    
+
     /// Set timeout
     pub fn with_timeout_secs(mut self, secs: u64) -> Self {
         self.timeout_secs = secs;
@@ -96,7 +96,7 @@ impl SandboxInput {
             tarball_bytes: vec![],
         }
     }
-    
+
     /// Set tarball bytes
     pub fn with_tarball(mut self, bytes: Vec<u8>) -> Self {
         self.tarball_bytes = bytes;
@@ -163,12 +163,12 @@ impl WasmSandbox {
     /// Create a new WASM sandbox
     pub fn new(config: SandboxConfig) -> Result<Self, SandboxError> {
         info!("Initializing WASM sandbox");
-        
+
         let engine = Engine::default();
-        
+
         Ok(Self { engine, config })
     }
-    
+
     /// Run a WASM module in the sandbox
     pub async fn run(
         &self,
@@ -176,32 +176,33 @@ impl WasmSandbox {
         _input: &SandboxInput,
     ) -> Result<SandboxResult, SandboxError> {
         debug!("Compiling WASM module");
-        
+
         // Compile module
         let module = Module::new(&self.engine, wasm_bytes)
             .map_err(|e| SandboxError::CompilationError(e.to_string()))?;
-        
+
         // Create store
         let mut store = Store::new(&self.engine, ());
-        
+
         // Instantiate module
         let instance = wasmtime::Instance::new(&mut store, &module, &[])
             .map_err(|e| SandboxError::ExecutionError(e.to_string()))?;
-        
+
         // Get the main function
         let main = instance
             .get_typed_func::<(), i32>(&mut store, "_start")
             .or_else(|_| instance.get_typed_func::<(), i32>(&mut store, "main"))
             .map_err(|e| SandboxError::ExecutionError(format!("No main function: {}", e)))?;
-        
+
         // Run with timeout
         let start_time = std::time::Instant::now();
-        
-        let exit_code = main.call(&mut store, ())
+
+        let exit_code = main
+            .call(&mut store, ())
             .map_err(|e| SandboxError::ExecutionError(e.to_string()))?;
-        
+
         let wall_time = start_time.elapsed();
-        
+
         Ok(SandboxResult {
             success: exit_code == 0,
             exit_code,
@@ -215,7 +216,7 @@ impl WasmSandbox {
             findings: vec![],
         })
     }
-    
+
     /// Run a validator script on a package
     pub async fn validate_package(
         &self,
@@ -236,7 +237,7 @@ mod tests {
         let config = SandboxConfig::default()
             .with_memory_limit(1024)
             .with_timeout_secs(10);
-        
+
         assert_eq!(config.memory_limit, 1024);
         assert_eq!(config.timeout_secs, 10);
     }
@@ -244,7 +245,7 @@ mod tests {
     #[test]
     fn test_sandbox_input() {
         let input = SandboxInput::new("test-pkg", "1.0.0", "npm");
-        
+
         assert_eq!(input.package_name, "test-pkg");
         assert_eq!(input.ecosystem, "npm");
     }

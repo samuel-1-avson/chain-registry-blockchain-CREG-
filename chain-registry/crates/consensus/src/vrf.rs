@@ -24,9 +24,7 @@ pub fn select_validators(
     }
 
     // Deterministic seed from block height + package id.
-    let seed = sha256_hex(
-        format!("{}:{}", block_height, package_canonical).as_bytes()
-    );
+    let seed = sha256_hex(format!("{}:{}", block_height, package_canonical).as_bytes());
 
     // Fisher-Yates shuffle seeded from the VRF output.
     let mut indices: Vec<usize> = (0..active_validators.len()).collect();
@@ -50,9 +48,10 @@ pub fn select_validators(
 /// Minimal VRF proof using deterministic Ed25519 signatures.
 /// Returns `(output_hex, proof_hex)` where output = SHA256(signature).
 pub fn prove(seed: &[u8], privkey_hex: &str) -> Result<(String, String)> {
-    use ed25519_dalek::{SigningKey, Signer};
+    use ed25519_dalek::{Signer, SigningKey};
     let key_bytes = hex::decode(privkey_hex.trim())?;
-    let key_arr: [u8; 32] = key_bytes.try_into()
+    let key_arr: [u8; 32] = key_bytes
+        .try_into()
         .map_err(|_| anyhow::anyhow!("Private key must be 32 bytes"))?;
     let sk = SigningKey::from_bytes(&key_arr);
     let sig = sk.sign(seed);
@@ -64,7 +63,7 @@ pub fn prove(seed: &[u8], privkey_hex: &str) -> Result<(String, String)> {
 /// Verify a VRF proof: checks that `proof` is a valid Ed25519 signature over `seed`
 /// by `pubkey_hex` and that `sha256(proof) == output_hex`.
 pub fn verify(seed: &[u8], pubkey_hex: &str, output_hex: &str, proof_hex: &str) -> Result<()> {
-    use ed25519_dalek::{VerifyingKey, Signature, Verifier};
+    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
     let pk_bytes = hex::decode(pubkey_hex)?;
     let vk = VerifyingKey::try_from(pk_bytes.as_slice())
         .map_err(|_| anyhow::anyhow!("Invalid Ed25519 public key"))?;
@@ -171,9 +170,24 @@ mod tests {
     #[test]
     fn proposer_selection_is_deterministic() {
         let validators = vec![
-            VrfValidator { id: "val_1".into(), pubkey: "aa".into(), vrf_output: None, vrf_proof: None },
-            VrfValidator { id: "val_2".into(), pubkey: "bb".into(), vrf_output: None, vrf_proof: None },
-            VrfValidator { id: "val_3".into(), pubkey: "cc".into(), vrf_output: None, vrf_proof: None },
+            VrfValidator {
+                id: "val_1".into(),
+                pubkey: "aa".into(),
+                vrf_output: None,
+                vrf_proof: None,
+            },
+            VrfValidator {
+                id: "val_2".into(),
+                pubkey: "bb".into(),
+                vrf_output: None,
+                vrf_proof: None,
+            },
+            VrfValidator {
+                id: "val_3".into(),
+                pubkey: "cc".into(),
+                vrf_output: None,
+                vrf_proof: None,
+            },
         ];
         let a = select_proposer(&validators, "seed1").unwrap();
         let b = select_proposer(&validators, "seed1").unwrap();
@@ -221,13 +235,15 @@ mod tests {
         let winner = select_proposer(&validators, std::str::from_utf8(seed).unwrap()).unwrap();
 
         // Compute expected winner manually.
-        let scores: Vec<(String, String)> = validators.iter()
+        let scores: Vec<(String, String)> = validators
+            .iter()
             .map(|v| {
                 let out = v.vrf_output.as_ref().unwrap();
                 (v.id.clone(), vrf_score(out).unwrap())
             })
             .collect();
-        let expected = scores.iter()
+        let expected = scores
+            .iter()
             .min_by(|a, b| a.1.cmp(&b.1))
             .map(|(id, _)| id.clone())
             .unwrap();

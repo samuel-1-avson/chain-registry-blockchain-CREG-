@@ -1,9 +1,9 @@
 // crates/consensus/src/validator_set.rs
 // Active validator set — tracks who can vote on a block.
 
-use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
 use common::sha256_hex;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValidatorInfo {
@@ -23,7 +23,9 @@ pub struct ValidatorSet {
 
 impl ValidatorSet {
     pub fn new() -> Self {
-        Self { validators: HashMap::new() }
+        Self {
+            validators: HashMap::new(),
+        }
     }
 
     pub fn add(&mut self, info: ValidatorInfo) {
@@ -37,7 +39,10 @@ impl ValidatorSet {
     }
 
     pub fn is_member(&self, id: &str) -> bool {
-        self.validators.get(id).map(|v| v.is_active).unwrap_or(false)
+        self.validators
+            .get(id)
+            .map(|v| v.is_active)
+            .unwrap_or(false)
     }
 
     pub fn len(&self) -> usize {
@@ -45,7 +50,8 @@ impl ValidatorSet {
     }
 
     pub fn active_ids(&self) -> Vec<String> {
-        self.validators.values()
+        self.validators
+            .values()
             .filter(|v| v.is_active)
             .map(|v| v.id.clone())
             .collect()

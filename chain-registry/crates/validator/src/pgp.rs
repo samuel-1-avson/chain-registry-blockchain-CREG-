@@ -3,11 +3,11 @@
 // Verifies a detached armored or binary PGP signature over the tarball bytes.
 
 use common::{Finding, FindingSeverity};
-use pgp::{Deserializable, SignedPublicKey, StandaloneSignature};
 use pgp::types::KeyTrait;
+use pgp::{Deserializable, SignedPublicKey, StandaloneSignature};
 
 pub struct PgpResult {
-    pub findings:    Vec<Finding>,
+    pub findings: Vec<Finding>,
     pub fingerprint: Option<String>,
 }
 
@@ -15,15 +15,14 @@ pub struct PgpResult {
 /// `signature_bytes`  — raw bytes of the detached sig (armored or binary)
 /// `public_key_bytes` — raw bytes of the signer's public key (armored or binary)
 pub fn verify_signature(
-    tarball:          &[u8],
-    signature_bytes:  &[u8],
+    tarball: &[u8],
+    signature_bytes: &[u8],
     public_key_bytes: &[u8],
 ) -> PgpResult {
     // Parse public key — try ASCII-armor first, fall back to binary DER.
-    let pubkey_result = SignedPublicKey::from_armor_single(
-        std::io::Cursor::new(public_key_bytes)
-    ).map(|(k, _)| k)
-    .or_else(|_| SignedPublicKey::from_bytes(std::io::Cursor::new(public_key_bytes)));
+    let pubkey_result = SignedPublicKey::from_armor_single(std::io::Cursor::new(public_key_bytes))
+        .map(|(k, _)| k)
+        .or_else(|_| SignedPublicKey::from_bytes(std::io::Cursor::new(public_key_bytes)));
 
     let pubkey = match pubkey_result {
         Ok(k) => k,
@@ -31,12 +30,12 @@ pub fn verify_signature(
             tracing::warn!("PGP: failed to parse public key: {}", e);
             return PgpResult {
                 findings: vec![Finding {
-                    id:          "PGP001".into(),
-                    title:       "Invalid PGP public key".into(),
-                    severity:    FindingSeverity::High,
+                    id: "PGP001".into(),
+                    title: "Invalid PGP public key".into(),
+                    severity: FindingSeverity::High,
                     description: format!("Could not parse publisher PGP public key: {}", e),
-                    file:        "pgp".into(),
-                    line:        None,
+                    file: "pgp".into(),
+                    line: None,
                 }],
                 fingerprint: None,
             };
@@ -44,10 +43,9 @@ pub fn verify_signature(
     };
 
     // Parse detached signature — try ASCII-armor first, fall back to binary.
-    let sig_result = StandaloneSignature::from_armor_single(
-        std::io::Cursor::new(signature_bytes)
-    ).map(|(s, _)| s)
-    .or_else(|_| StandaloneSignature::from_bytes(std::io::Cursor::new(signature_bytes)));
+    let sig_result = StandaloneSignature::from_armor_single(std::io::Cursor::new(signature_bytes))
+        .map(|(s, _)| s)
+        .or_else(|_| StandaloneSignature::from_bytes(std::io::Cursor::new(signature_bytes)));
 
     let sig = match sig_result {
         Ok(s) => s,
@@ -55,12 +53,12 @@ pub fn verify_signature(
             tracing::warn!("PGP: failed to parse detached signature: {}", e);
             return PgpResult {
                 findings: vec![Finding {
-                    id:          "PGP002".into(),
-                    title:       "Invalid PGP signature format".into(),
-                    severity:    FindingSeverity::High,
+                    id: "PGP002".into(),
+                    title: "Invalid PGP signature format".into(),
+                    severity: FindingSeverity::High,
                     description: format!("Could not parse PGP detached signature: {}", e),
-                    file:        "pgp".into(),
-                    line:        None,
+                    file: "pgp".into(),
+                    line: None,
                 }],
                 fingerprint: None,
             };
@@ -72,21 +70,24 @@ pub fn verify_signature(
     match sig.verify(&pubkey, tarball) {
         Ok(()) => {
             tracing::info!("PGP: signature verified — fp {}", &fingerprint[..16]);
-            PgpResult { findings: vec![], fingerprint: Some(fingerprint) }
+            PgpResult {
+                findings: vec![],
+                fingerprint: Some(fingerprint),
+            }
         }
         Err(e) => {
             tracing::warn!("PGP: invalid signature — fp {}: {}", &fingerprint[..16], e);
             PgpResult {
                 findings: vec![Finding {
-                    id:          "PGP003".into(),
-                    title:       "PGP signature verification failed".into(),
-                    severity:    FindingSeverity::Critical,
+                    id: "PGP003".into(),
+                    title: "PGP signature verification failed".into(),
+                    severity: FindingSeverity::Critical,
                     description: format!(
                         "Tarball signature does not match public key (fp {}): {}",
                         fingerprint, e
                     ),
-                    file:        "pgp".into(),
-                    line:        None,
+                    file: "pgp".into(),
+                    line: None,
                 }],
                 fingerprint: Some(fingerprint),
             }

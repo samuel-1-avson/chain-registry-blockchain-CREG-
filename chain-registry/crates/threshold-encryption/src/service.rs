@@ -93,7 +93,7 @@ impl DecryptionService {
         response_tx: mpsc::Sender<DecryptionResponse>,
     ) -> Result<Self, ThresholdError> {
         let te = ThresholdEncryption::new(config.threshold, config.total_shares)?;
-        
+
         Ok(Self {
             config,
             te,
@@ -103,17 +103,20 @@ impl DecryptionService {
             active_count: Arc::new(RwLock::new(0)),
         })
     }
-    
+
     /// Start the service loop
     pub async fn run(mut self) {
         info!(
             "Decryption service started for validator {}",
             self.config.validator_id
         );
-        
+
         while let Some(cmd) = self.request_rx.recv().await {
             match cmd {
-                DecryptionCommand::StoreShare { canonical, encrypted_share } => {
+                DecryptionCommand::StoreShare {
+                    canonical,
+                    encrypted_share,
+                } => {
                     if let Err(e) = self.store_share(&canonical, &encrypted_share).await {
                         error!("Failed to store share for {}: {}", canonical, e);
                     }
@@ -129,10 +132,10 @@ impl DecryptionService {
                 }
             }
         }
-        
+
         info!("Decryption service stopped");
     }
-    
+
     /// Store a decrypted key share
     async fn store_share(
         &self,
@@ -140,33 +143,33 @@ impl DecryptionService {
         encrypted_share: &[u8],
     ) -> Result<(), ThresholdError> {
         debug!("Storing share for package: {}", canonical);
-        
+
         // Decrypt the share using validator's key
         let share_bytes = self.decrypt_share(encrypted_share)?;
         let share = self.bytes_to_share(&share_bytes)?;
-        
+
         let mut shares = self.shares.write().await;
         shares.insert(canonical.to_string(), share);
-        
+
         info!("Stored share for package: {}", canonical);
         Ok(())
     }
-    
+
     /// Process a decryption request
     async fn process_request(&self, request: DecryptionRequest) -> Result<(), ThresholdError> {
         let canonical = request.canonical.clone();
-        
+
         info!(
             "Processing decryption request for {} from {}",
             canonical, request.requestor
         );
-        
+
         // Check if we have a share for this package
         let share = {
             let shares = self.shares.read().await;
             shares.get(&canonical).cloned()
         };
-        
+
         if let Some(share) = share {
             // Check concurrent limit
             {
@@ -176,35 +179,35 @@ impl DecryptionService {
                     return Ok(());
                 }
             }
-            
+
             // Increment active count
             {
                 let mut active = self.active_count.write().await;
                 *active += 1;
             }
-            
+
             // Create response
             let response = self.create_response(&request, &share).await;
-            
+
             // Send response
             if let Err(e) = self.response_tx.send(response).await {
                 error!("Failed to send decryption response: {}", e);
             }
-            
+
             // Decrement active count
             {
                 let mut active = self.active_count.write().await;
                 *active -= 1;
             }
-            
+
             info!("Sent decryption share for {}", canonical);
         } else {
             warn!("No share available for package: {}", canonical);
         }
-        
+
         Ok(())
     }
-    
+
     /// Create a decryption response
     async fn create_response(
         &self,
@@ -212,13 +215,13 @@ impl DecryptionService {
         share: &KeyShare,
     ) -> DecryptionResponse {
         let timestamp = current_timestamp();
-        
+
         // Encrypt share to requestor's public key
         let encrypted_share = self.encrypt_to_requestor(share, &request.requestor_pubkey);
-        
+
         // Create signature
         let signature = self.sign_response(&request.canonical, &encrypted_share, timestamp);
-        
+
         DecryptionResponse {
             validator_id: self.config.validator_id.clone(),
             canonical: request.canonical.clone(),
@@ -228,12 +231,12 @@ impl DecryptionService {
             signature,
         }
     }
-    
+
     /// Get service status
     async fn get_status(&self) -> ServiceStatus {
         let stored_shares = self.shares.read().await.len();
         let active_decryptions = *self.active_count.read().await;
-        
+
         ServiceStatus {
             validator_id: self.config.validator_id.clone(),
             stored_shares,
@@ -242,18 +245,20 @@ impl DecryptionService {
             is_ready: stored_shares > 0,
         }
     }
-    
+
     /// Decrypt an encrypted share using validator's private key
     fn decrypt_share(&self, encrypted: &[u8]) -> Result<Vec<u8>, ThresholdError> {
         use aes_gcm::{
             aead::{Aead, KeyInit},
             Aes256Gcm, Nonce,
         };
-        
+
         if encrypted.len() < 12 {
-            return Err(ThresholdError::DecryptionError("Encrypted data too short".to_string()));
+            return Err(ThresholdError::DecryptionError(
+                "Encrypted data too short".to_string(),
+            ));
         }
-        
+
         // Derive decryption key from validator's key
         let mut key = [0u8; 32];
         let mut hasher = sha2::Sha256::new();
@@ -261,39 +266,43 @@ impl DecryptionService {
         hasher.update(b"share-encryption-salt");
         let hash = hasher.finalize();
         key.copy_from_slice(&hash[..32]);
-        
+
         let cipher = Aes256Gcm::new_from_slice(&key)
             .map_err(|e| ThresholdError::DecryptionError(e.to_string()))?;
-        
+
         let nonce = Nonce::from_slice(&encrypted[..12]);
         let ciphertext = &encrypted[12..];
-        
+
         let plaintext = cipher
             .decrypt(nonce, ciphertext)
             .map_err(|e| ThresholdError::DecryptionError(e.to_string()))?;
-        
+
         Ok(plaintext)
     }
-    
+
     /// Convert bytes to KeyShare
     fn bytes_to_share(&self, bytes: &[u8]) -> Result<KeyShare, ThresholdError> {
         if bytes.len() < 6 {
-            return Err(ThresholdError::InvalidShare("Share bytes too short".to_string()));
+            return Err(ThresholdError::InvalidShare(
+                "Share bytes too short".to_string(),
+            ));
         }
-        
+
         let index = bytes[0];
         let value_len = u32::from_be_bytes([bytes[1], bytes[2], bytes[3], bytes[4]]) as usize;
-        
+
         if bytes.len() < 5 + value_len + 32 {
-            return Err(ThresholdError::InvalidShare("Invalid share format".to_string()));
+            return Err(ThresholdError::InvalidShare(
+                "Invalid share format".to_string(),
+            ));
         }
-        
+
         let value = bytes[5..5 + value_len].to_vec();
         let public_key = bytes[5 + value_len..5 + value_len + 32].to_vec();
-        
+
         Ok(KeyShare::new(index, value, public_key))
     }
-    
+
     /// Encrypt share to requestor's public key
     fn encrypt_to_requestor(&self, share: &KeyShare, requestor_pubkey: &[u8]) -> Vec<u8> {
         use aes_gcm::{
@@ -301,7 +310,7 @@ impl DecryptionService {
             Aes256Gcm, Nonce,
         };
         use rand::RngCore;
-        
+
         // Derive encryption key
         let mut key = [0u8; 32];
         let mut hasher = sha2::Sha256::new();
@@ -309,21 +318,23 @@ impl DecryptionService {
         hasher.update(&self.config.validator_pubkey);
         let hash = hasher.finalize();
         key.copy_from_slice(&hash[..32]);
-        
+
         let cipher = Aes256Gcm::new_from_slice(&key).expect("Valid key size");
-        
+
         let mut nonce_bytes = [0u8; 12];
         rand::thread_rng().fill_bytes(&mut nonce_bytes);
         let nonce = Nonce::from_slice(&nonce_bytes);
-        
+
         let plaintext = share.to_bytes();
-        let ciphertext = cipher.encrypt(nonce, plaintext.as_ref()).expect("Encryption success");
-        
+        let ciphertext = cipher
+            .encrypt(nonce, plaintext.as_ref())
+            .expect("Encryption success");
+
         let mut result = nonce_bytes.to_vec();
         result.extend_from_slice(&ciphertext);
         result
     }
-    
+
     /// Sign a response
     fn sign_response(&self, canonical: &str, encrypted_share: &[u8], timestamp: u64) -> Vec<u8> {
         // TODO: Implement proper Ed25519 signing
@@ -331,7 +342,7 @@ impl DecryptionService {
         let mut data = canonical.as_bytes().to_vec();
         data.extend_from_slice(encrypted_share);
         data.extend_from_slice(&timestamp.to_be_bytes());
-        
+
         // Hash and return
         use sha2::{Digest, Sha256};
         let hash = Sha256::digest(&data);
@@ -366,7 +377,7 @@ impl DecryptionClient {
             requestor_pubkey,
         }
     }
-    
+
     /// Request decryption of a package
     pub async fn request_decryption(
         &self,
@@ -381,25 +392,29 @@ impl DecryptionClient {
             signature: vec![], // TODO: Sign properly
             purpose: purpose.to_string(),
         };
-        
+
         // Send request
         self.request_tx
             .send(DecryptionCommand::ProcessRequest(request))
             .await
-            .map_err(|e| ThresholdError::IoError(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                e.to_string()
-            )))?;
-        
+            .map_err(|e| {
+                ThresholdError::IoError(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                ))
+            })?;
+
         // Collect responses (timeout after 60 seconds)
         let mut responses = Vec::new();
         let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(60);
-        
+
         while tokio::time::Instant::now() < deadline {
             match tokio::time::timeout(
                 tokio::time::Duration::from_millis(100),
-                self.response_rx.recv()
-            ).await {
+                self.response_rx.recv(),
+            )
+            .await
+            {
                 Ok(Some(response)) if response.canonical == canonical => {
                     responses.push(response);
                 }
@@ -407,10 +422,10 @@ impl DecryptionClient {
                 Err(_) => break,
             }
         }
-        
+
         Ok(responses)
     }
-    
+
     /// Decrypt collected shares to get package content
     pub fn reconstruct_package(
         &self,
@@ -421,43 +436,48 @@ impl DecryptionClient {
             aead::{Aead, KeyInit},
             Aes256Gcm, Nonce,
         };
-        
+
         // Decrypt each share
         let mut shares = Vec::new();
         for response in responses {
             let share = self.decrypt_response_share(response)?;
             shares.push(share);
         }
-        
+
         // Reconstruct encryption key using Shamir
         let te = ThresholdEncryption::new(3, 5)?; // TODO: Use correct params
         let key = te.reconstruct_key(&shares)?;
-        
+
         // Decrypt package
         if encrypted_package.len() < 12 {
-            return Err(ThresholdError::DecryptionError("Invalid package".to_string()));
+            return Err(ThresholdError::DecryptionError(
+                "Invalid package".to_string(),
+            ));
         }
-        
+
         let nonce = Nonce::from_slice(&encrypted_package[..12]);
         let ciphertext = &encrypted_package[12..];
-        
+
         let cipher = Aes256Gcm::new_from_slice(&key)
             .map_err(|e| ThresholdError::DecryptionError(e.to_string()))?;
-        
+
         let plaintext = cipher
             .decrypt(nonce, ciphertext)
             .map_err(|e| ThresholdError::DecryptionError(e.to_string()))?;
-        
+
         Ok(plaintext)
     }
-    
+
     /// Decrypt a response share
-    fn decrypt_response_share(&self, response: &DecryptionResponse) -> Result<crate::shamir::Share, ThresholdError> {
+    fn decrypt_response_share(
+        &self,
+        response: &DecryptionResponse,
+    ) -> Result<crate::shamir::Share, ThresholdError> {
         use aes_gcm::{
             aead::{Aead, KeyInit},
             Aes256Gcm, Nonce,
         };
-        
+
         // Derive decryption key
         let mut key = [0u8; 32];
         let mut hasher = sha2::Sha256::new();
@@ -465,38 +485,44 @@ impl DecryptionClient {
         hasher.update(&self.requestor_key);
         let hash = hasher.finalize();
         key.copy_from_slice(&hash[..32]);
-        
+
         let cipher = Aes256Gcm::new_from_slice(&key)
             .map_err(|e| ThresholdError::DecryptionError(e.to_string()))?;
-        
+
         let encrypted = &response.encrypted_share;
         if encrypted.len() < 12 {
             return Err(ThresholdError::DecryptionError("Invalid share".to_string()));
         }
-        
+
         let nonce = Nonce::from_slice(&encrypted[..12]);
         let ciphertext = &encrypted[12..];
-        
+
         let plaintext = cipher
             .decrypt(nonce, ciphertext)
             .map_err(|e| ThresholdError::DecryptionError(e.to_string()))?;
-        
+
         // Parse share
         let index = plaintext[0];
         let value = plaintext[1..].to_vec();
-        
+
         Ok(crate::shamir::Share::new(index, value))
     }
 }
 
 /// Create channels for service and client
 pub fn create_channels() -> (
-    (mpsc::Sender<DecryptionCommand>, mpsc::Receiver<DecryptionResponse>),
-    (mpsc::Sender<DecryptionResponse>, mpsc::Receiver<DecryptionCommand>),
+    (
+        mpsc::Sender<DecryptionCommand>,
+        mpsc::Receiver<DecryptionResponse>,
+    ),
+    (
+        mpsc::Sender<DecryptionResponse>,
+        mpsc::Receiver<DecryptionCommand>,
+    ),
 ) {
     let (cmd_tx, cmd_rx) = mpsc::channel(100);
     let (resp_tx, resp_rx) = mpsc::channel(100);
-    
+
     ((cmd_tx, resp_rx), (resp_tx, cmd_rx))
 }
 
@@ -516,10 +542,10 @@ mod tests {
     async fn test_service_status() {
         let config = ServiceConfig::default();
         let ((cmd_tx, _resp_rx), (resp_tx, cmd_rx)) = create_channels();
-        
+
         let service = DecryptionService::new(config, cmd_rx, resp_tx).unwrap();
         let status = service.get_status().await;
-        
+
         assert_eq!(status.stored_shares, 0);
         assert!(!status.is_ready);
     }

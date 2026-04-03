@@ -28,7 +28,10 @@ where
             Ok(v) => return Ok(v),
             Err(e) => {
                 if attempt < max_attempts {
-                    warn!("{}: attempt {}/{} failed ({}), retrying in {:?}", label, attempt, max_attempts, e, delay);
+                    warn!(
+                        "{}: attempt {}/{} failed ({}), retrying in {:?}",
+                        label, attempt, max_attempts, e, delay
+                    );
                     tokio::time::sleep(delay).await;
                     delay = (delay * 2).min(Duration::from_secs(30));
                 }

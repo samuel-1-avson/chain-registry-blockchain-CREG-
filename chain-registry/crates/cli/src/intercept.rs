@@ -5,11 +5,11 @@ use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
 const SHIM_TARGETS: &[(&str, &str)] = &[
-    ("npm",          "npm"),
-    ("pip",          "pip"),
-    ("pip3",         "pip"),
-    ("cargo",        "cargo-shim"),
-    ("gem",          "gem"),
+    ("npm", "npm"),
+    ("pip", "pip"),
+    ("pip3", "pip"),
+    ("cargo", "cargo-shim"),
+    ("gem", "gem"),
 ];
 
 /// Install shim binaries into `shim_dir` (defaults to ~/.local/bin).
@@ -40,7 +40,10 @@ pub fn setup_shims(shim_dir: Option<&Path>) -> Result<()> {
         println!("  ✓ Installed shim: {}", dest.display());
     }
 
-    println!("\nMake sure {} is at the start of your PATH:", dir.display());
+    println!(
+        "\nMake sure {} is at the start of your PATH:",
+        dir.display()
+    );
     println!("  export PATH=\"{}:$PATH\"", dir.display());
     Ok(())
 }

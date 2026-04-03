@@ -2,21 +2,18 @@
 // Builds and serves Merkle inclusion proofs for the light-client endpoint.
 // GET /v1/packages/:canonical/proof → LightClientResponse
 
+use crate::chain_store::ChainStore;
 use anyhow::{bail, Result};
 use common::{BlockHeader, PackageStatus, Transaction};
 use resolver::light_client::{build_merkle_proof, LightClientResponse};
-use crate::chain_store::ChainStore;
 
 /// Build a full light-client proof response for a given package canonical ID.
 /// Returns None if the package is not found or not verified.
-pub fn build_proof(
-    canonical: &str,
-    chain:     &ChainStore,
-) -> Result<Option<LightClientResponse>> {
+pub fn build_proof(canonical: &str, chain: &ChainStore) -> Result<Option<LightClientResponse>> {
     // Find the ChainRecord.
     let record = match chain.get_package(canonical)? {
         Some(r) => r,
-        None    => return Ok(None),
+        None => return Ok(None),
     };
 
     if !matches!(record.status, PackageStatus::Verified) {
@@ -27,20 +24,29 @@ pub fn build_proof(
     let block_hash = &record.block_hash;
     let block = match chain.get_block_by_hash(block_hash)? {
         Some(b) => b,
-        None    => {
-            tracing::warn!("Block {} not found for package {}", &block_hash[..12], canonical);
+        None => {
+            tracing::warn!(
+                "Block {} not found for package {}",
+                &block_hash[..12],
+                canonical
+            );
             return Ok(None);
         }
     };
 
     // Locate the transaction index within the block.
-    let tx_index = block.transactions.iter().position(|tx| {
-        matches!(tx, Transaction::Publish(r) if r.id.canonical() == canonical)
-    });
+    let tx_index = block
+        .transactions
+        .iter()
+        .position(|tx| matches!(tx, Transaction::Publish(r) if r.id.canonical() == canonical));
 
     let tx_index = match tx_index {
         Some(i) => i,
-        None    => bail!("Package {} not found in block {}", canonical, &block_hash[..12]),
+        None => bail!(
+            "Package {} not found in block {}",
+            canonical,
+            &block_hash[..12]
+        ),
     };
 
     // Build the Merkle proof.
@@ -59,8 +65,8 @@ pub fn build_proof(
     header_chain.push((block.header.clone(), block.hash()));
 
     Ok(Some(LightClientResponse {
-        status:       "verified".into(),
-        block_hash:   block.hash(),
+        status: "verified".into(),
+        block_hash: block.hash(),
         block_header: block.header,
         proof,
         header_chain,

@@ -50,25 +50,31 @@ impl MultisigSession {
 /// Initialize a new multisig session from a tarball.
 pub async fn init(
     tarball_path: &Path,
-    threshold:    usize,
-    node_url:     Option<&str>,
-    output:       &Path,
+    threshold: usize,
+    node_url: Option<&str>,
+    output: &Path,
 ) -> Result<()> {
-    let ipfs_url = std::env::var("CREG_IPFS_URL")
-        .unwrap_or_else(|_| "http://127.0.0.1:5001".into());
+    let ipfs_url =
+        std::env::var("CREG_IPFS_URL").unwrap_or_else(|_| "http://127.0.0.1:5001".into());
 
-    println!("{} Initializing multisig publish session (threshold: {}/N)...", "→".cyan(), threshold);
+    println!(
+        "{} Initializing multisig publish session (threshold: {}/N)...",
+        "→".cyan(),
+        threshold
+    );
 
-    let tarball_bytes = tokio::fs::read(tarball_path).await
+    let tarball_bytes = tokio::fs::read(tarball_path)
+        .await
         .context("Failed to read tarball")?;
     let content_hash = common::sha256_hex(&tarball_bytes);
 
     // Pin to IPFS
     println!("{} Uploading to IPFS...", "→".cyan());
     let add_url = format!("{}/api/v0/add", ipfs_url.trim_end_matches('/'));
-    let form = reqwest::multipart::Form::new()
-        .part("file", reqwest::multipart::Part::bytes(tarball_bytes)
-            .file_name("package.tgz"));
+    let form = reqwest::multipart::Form::new().part(
+        "file",
+        reqwest::multipart::Part::bytes(tarball_bytes).file_name("package.tgz"),
+    );
 
     let resp = reqwest::Client::new()
         .post(&add_url)
@@ -79,23 +85,27 @@ pub async fn init(
         .context("IPFS upload failed")?;
 
     #[derive(serde::Deserialize)]
-    struct IpfsResp { #[serde(rename = "Hash")] hash: String }
+    struct IpfsResp {
+        #[serde(rename = "Hash")]
+        hash: String,
+    }
     let ipfs_resp: IpfsResp = resp.json().await.context("IPFS response parse error")?;
     let ipfs_cid = ipfs_resp.hash;
 
     // Detect package identity
-    let name = tarball_path.file_stem()
+    let name = tarball_path
+        .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("package");
 
     let session = MultisigSession {
-        canonical:    format!("npm:{}@0.0.0", name),
+        canonical: format!("npm:{}@0.0.0", name),
         content_hash: content_hash.clone(),
-        ipfs_cid:     ipfs_cid.clone(),
+        ipfs_cid: ipfs_cid.clone(),
         threshold,
-        signatures:   vec![],
-        ecosystem:    "npm".into(),
-        version:      "0.0.0".into(),
+        signatures: vec![],
+        ecosystem: "npm".into(),
+        version: "0.0.0".into(),
     };
 
     session.save(output)?;
@@ -106,21 +116,23 @@ pub async fn init(
     println!("  IPFS CID:     {}", ipfs_cid);
     println!("  Threshold:    {}/N", threshold);
     println!("\n  Share {} with each co-signer.", output.display());
-    println!("  Each co-signer runs: creg multisig sign {}", output.display());
+    println!(
+        "  Each co-signer runs: creg multisig sign {}",
+        output.display()
+    );
 
     Ok(())
 }
 
 /// Add a co-signer's signature to the session.
 pub fn sign(session_path: &Path, privkey_hex: &str) -> Result<()> {
-    use ed25519_dalek::{SigningKey, Signer};
+    use ed25519_dalek::{Signer, SigningKey};
 
     let mut session = MultisigSession::load(session_path)?;
 
-    let privkey_bytes = hex::decode(privkey_hex.trim())
-        .context("Invalid private key hex")?;
-    let signing_key = SigningKey::try_from(privkey_bytes.as_slice())
-        .context("Invalid Ed25519 private key")?;
+    let privkey_bytes = hex::decode(privkey_hex.trim()).context("Invalid private key hex")?;
+    let signing_key =
+        SigningKey::try_from(privkey_bytes.as_slice()).context("Invalid Ed25519 private key")?;
     let pubkey = signing_key.verifying_key();
     let pubkey_hex = hex::encode(pubkey.as_bytes());
 
@@ -138,20 +150,35 @@ pub fn sign(session_path: &Path, privkey_hex: &str) -> Result<()> {
     session.signatures.push((pubkey_hex.clone(), sig_hex));
     session.save(session_path)?;
 
-    println!("{} Signature added ({}/{} collected):",
-        "✓".green(), session.signatures.len(), session.threshold);
+    println!(
+        "{} Signature added ({}/{} collected):",
+        "✓".green(),
+        session.signatures.len(),
+        session.threshold
+    );
     println!("  Signer: {}...", &pubkey_hex[..16]);
     if session.is_ready() {
-        println!("\n  {} Threshold reached! Run: creg multisig submit {}", "✓".green().bold(), session_path.display());
+        println!(
+            "\n  {} Threshold reached! Run: creg multisig submit {}",
+            "✓".green().bold(),
+            session_path.display()
+        );
     } else {
-        println!("  {} more signature(s) needed.", session.threshold - session.signatures.len());
+        println!(
+            "  {} more signature(s) needed.",
+            session.threshold - session.signatures.len()
+        );
     }
 
     Ok(())
 }
 
 /// Submit the package once M signatures are collected.
-pub async fn submit(session_path: &Path, manifest_path: Option<&Path>, node_url: Option<&str>) -> Result<()> {
+pub async fn submit(
+    session_path: &Path,
+    manifest_path: Option<&Path>,
+    node_url: Option<&str>,
+) -> Result<()> {
     let session = MultisigSession::load(session_path)?;
 
     if !session.is_ready() {
@@ -163,45 +190,54 @@ pub async fn submit(session_path: &Path, manifest_path: Option<&Path>, node_url:
         );
     }
 
-    let base = node_url
-        .map(String::from)
-        .unwrap_or_else(|| std::env::var("CREG_NODE_URL")
-            .unwrap_or_else(|_| "http://localhost:8080".into()));
+    let base = node_url.map(String::from).unwrap_or_else(|| {
+        std::env::var("CREG_NODE_URL").unwrap_or_else(|_| "http://localhost:8080".into())
+    });
 
-    println!("{} Submitting multisig package ({}/{} signatures)...",
-        "→".cyan(), session.signatures.len(), session.threshold);
+    println!(
+        "{} Submitting multisig package ({}/{} signatures)...",
+        "→".cyan(),
+        session.signatures.len(),
+        session.threshold
+    );
 
     // Build a publish request using the first signer as the primary publisher
     // and the new first-class multi-sig fields.
-    let (primary_pubkey, primary_sig) = session.signatures.first()
+    let (primary_pubkey, primary_sig) = session
+        .signatures
+        .first()
         .context("No signatures in session")?;
 
     let manifest: common::PackageManifest = match manifest_path {
         Some(p) => serde_json::from_str(&std::fs::read_to_string(p)?)?,
-        None    => common::PackageManifest::default(),
+        None => common::PackageManifest::default(),
     };
 
-    let (publisher_pubkeys, signatures): (Vec<String>, Vec<String>) = session.signatures.iter().cloned().unzip();
+    let (publisher_pubkeys, signatures): (Vec<String>, Vec<String>) =
+        session.signatures.iter().cloned().unzip();
 
     let request = common::PublishRequest {
         id: common::PackageId {
             ecosystem: session.ecosystem.clone(),
-            name:      session.canonical.split(':').nth(1)
-                           .and_then(|s| s.split('@').next())
-                           .unwrap_or("unknown")
-                           .to_string(),
-            version:   session.version.clone(),
+            name: session
+                .canonical
+                .split(':')
+                .nth(1)
+                .and_then(|s| s.split('@').next())
+                .unwrap_or("unknown")
+                .to_string(),
+            version: session.version.clone(),
         },
-        content_hash:       session.content_hash.clone(),
-        ipfs_cid:           session.ipfs_cid.clone(),
-        publisher_pubkey:   primary_pubkey.clone(),
-        signature:          primary_sig.clone(),
+        content_hash: session.content_hash.clone(),
+        ipfs_cid: session.ipfs_cid.clone(),
+        publisher_pubkey: primary_pubkey.clone(),
+        signature: primary_sig.clone(),
         manifest,
-        submitted_at:       chrono::Utc::now(),
-        shielded:           false,
-        key_bundle:         None,
-        pgp_signature:      None,
-        pgp_public_key:     None,
+        submitted_at: chrono::Utc::now(),
+        shielded: false,
+        key_bundle: None,
+        pgp_signature: None,
+        pgp_public_key: None,
         publisher_pubkeys,
         signatures,
         threshold: session.threshold,
@@ -218,8 +254,14 @@ pub async fn submit(session_path: &Path, manifest_path: Option<&Path>, node_url:
         .context("Failed to reach registry node")?;
 
     if resp.status().is_success() {
-        println!("{} Multisig package submitted successfully!", "✓".green().bold());
-        println!("  Run: creg status {} to track verification.", session.canonical);
+        println!(
+            "{} Multisig package submitted successfully!",
+            "✓".green().bold()
+        );
+        println!(
+            "  Run: creg status {} to track verification.",
+            session.canonical
+        );
     } else {
         let body = resp.text().await.unwrap_or_default();
         anyhow::bail!("Submission failed: {}", body);

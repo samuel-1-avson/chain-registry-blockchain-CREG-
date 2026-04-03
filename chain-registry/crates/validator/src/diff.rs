@@ -2,9 +2,9 @@
 // Security-focused version diffing.
 // detects "delta inflation" of permissions (e.g., version 1.0.1 adds network access).
 
-use common::{Finding, FindingSeverity};
 use crate::sandbox::SandboxResult;
 use common::PackageManifest;
+use common::{Finding, FindingSeverity};
 
 pub struct DiffResult {
     pub findings: Vec<Finding>,
@@ -15,9 +15,9 @@ pub struct DiffResult {
 /// Compare current findings and sandbox observations against the previous verified version.
 pub fn analyze(
     current_manifest: &PackageManifest,
-    current_sandbox:  &SandboxResult,
-    prev_manifest:    Option<&PackageManifest>,
-    _prev_sandbox:    Option<&SandboxResult>,
+    current_sandbox: &SandboxResult,
+    prev_manifest: Option<&PackageManifest>,
+    _prev_sandbox: Option<&SandboxResult>,
 ) -> DiffResult {
     let mut findings = Vec::new();
     let mut new_hosts = Vec::new();
@@ -29,12 +29,12 @@ pub fn analyze(
             if !prev.allowed_network_hosts.contains(host) {
                 new_hosts.push(host.clone());
                 findings.push(Finding {
-                    id:          "DF001".into(),
-                    title:       "New network host".into(),
-                    severity:    FindingSeverity::Medium,
+                    id: "DF001".into(),
+                    title: "New network host".into(),
+                    severity: FindingSeverity::Medium,
                     description: format!("New undeclared network host access: {}", host),
-                    file:        "manifest".into(),
-                    line:        None,
+                    file: "manifest".into(),
+                    line: None,
                 });
             }
         }
@@ -44,12 +44,12 @@ pub fn analyze(
             if !prev.allowed_fs_writes.contains(path) {
                 new_paths.push(path.clone());
                 findings.push(Finding {
-                    id:          "DF002".into(),
-                    title:       "New fs write path".into(),
-                    severity:    FindingSeverity::Medium,
+                    id: "DF002".into(),
+                    title: "New fs write path".into(),
+                    severity: FindingSeverity::Medium,
                     description: format!("New undeclared filesystem write path: {}", path),
-                    file:        "manifest".into(),
-                    line:        None,
+                    file: "manifest".into(),
+                    line: None,
                 });
             }
         }
@@ -57,12 +57,13 @@ pub fn analyze(
         // Detect change in child process spawning.
         if current_manifest.spawns_processes && !prev.spawns_processes {
             findings.push(Finding {
-                id:          "DF003".into(),
-                title:       "Permission escalation: process-spawn".into(),
-                severity:    FindingSeverity::High,
-                description: "Package now requests child process execution (previously disabled)".into(),
-                file:        "manifest".into(),
-                line:        None,
+                id: "DF003".into(),
+                title: "Permission escalation: process-spawn".into(),
+                severity: FindingSeverity::High,
+                description: "Package now requests child process execution (previously disabled)"
+                    .into(),
+                file: "manifest".into(),
+                line: None,
             });
         }
     }
@@ -81,5 +82,9 @@ pub fn analyze(
         }
     }
 
-    DiffResult { findings, new_hosts, new_paths }
+    DiffResult {
+        findings,
+        new_hosts,
+        new_paths,
+    }
 }

@@ -1,7 +1,7 @@
 // crates/common/src/package.rs
 
-use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum FindingSeverity {
@@ -36,7 +36,11 @@ pub struct PackageId {
 }
 
 impl PackageId {
-    pub fn new(ecosystem: impl Into<String>, name: impl Into<String>, version: impl Into<String>) -> Self {
+    pub fn new(
+        ecosystem: impl Into<String>,
+        name: impl Into<String>,
+        version: impl Into<String>,
+    ) -> Self {
         Self {
             ecosystem: ecosystem.into(),
             name: name.into(),
@@ -162,5 +166,7 @@ pub struct ValidatorSignature {
 pub enum ValidatorVote {
     #[default]
     Approve,
-    Reject { reason: String },
+    Reject {
+        reason: String,
+    },
 }

@@ -5,7 +5,7 @@ use colored::Colorize;
 
 pub fn print_error_with_help(error: &str) {
     eprintln!("\n{} {}", "✗ Error:".red().bold(), error);
-    
+
     // Parse error and provide contextual help
     if error.contains("connection refused") || error.contains("Cannot reach") {
         print_node_connection_help();
@@ -31,7 +31,10 @@ fn print_node_connection_help() {
     eprintln!("     {}", "creg doctor".cyan());
     eprintln!();
     eprintln!("  3. Use a public node (read-only):");
-    eprintln!("     {}", "export CREG_NODE_URL=https://node.creg.dev".cyan());
+    eprintln!(
+        "     {}",
+        "export CREG_NODE_URL=https://node.creg.dev".cyan()
+    );
     eprintln!();
     eprintln!("  4. Run the setup wizard:");
     eprintln!("     {}", "creg init".cyan());
@@ -68,7 +71,10 @@ fn print_stake_help() {
 fn print_ipfs_help() {
     eprintln!("\n{}", "IPFS Setup Required:".bold());
     eprintln!("  1. Install IPFS:");
-    eprintln!("     {}", "https://docs.ipfs.io/install/".cyan().underline());
+    eprintln!(
+        "     {}",
+        "https://docs.ipfs.io/install/".cyan().underline()
+    );
     eprintln!();
     eprintln!("  2. Start IPFS daemon:");
     eprintln!("     {}", "ipfs daemon".cyan());
@@ -80,7 +86,10 @@ fn print_ipfs_help() {
 fn print_docker_help() {
     eprintln!("\n{}", "Docker Required:".bold());
     eprintln!("  1. Install Docker:");
-    eprintln!("     {}", "https://docs.docker.com/get-docker/".cyan().underline());
+    eprintln!(
+        "     {}",
+        "https://docs.docker.com/get-docker/".cyan().underline()
+    );
     eprintln!();
     eprintln!("  2. Start Docker Desktop");
     eprintln!();
@@ -92,7 +101,10 @@ fn print_general_help() {
     eprintln!("\n{}", "Need help?".bold());
     eprintln!("  • Run the setup wizard: {}", "creg init".cyan());
     eprintln!("  • Check system health: {}", "creg doctor".cyan());
-    eprintln!("  • View documentation: {}", "https://docs.creg.dev".cyan().underline());
+    eprintln!(
+        "  • View documentation: {}",
+        "https://docs.creg.dev".cyan().underline()
+    );
     eprintln!("  • Get command help: {}", "creg --help".cyan());
 }
 
@@ -100,23 +112,20 @@ pub fn print_progress(operation: &str, current: usize, total: usize) {
     let width = 40;
     let filled = (current * width) / total;
     let empty = width - filled;
-    
-    let bar: String = format!(
-        "[{}{}]",
-        "█".repeat(filled),
-        "░".repeat(empty)
-    );
-    
+
+    let bar: String = format!("[{}{}]", "█".repeat(filled), "░".repeat(empty));
+
     let percent = (current * 100) / total;
-    
-    eprint!("\r  {} {} {}% ({}/{})", 
+
+    eprint!(
+        "\r  {} {} {}% ({}/{})",
         operation.dimmed(),
         bar.cyan(),
         percent,
         current,
         total
     );
-    
+
     if current == total {
         eprintln!(); // New line when complete
     }

@@ -26,16 +26,15 @@ impl std::str::FromStr for SbomFormat {
 }
 
 pub async fn run(
-    package:    &str,
-    ecosystem:  Option<&str>,
-    format:     SbomFormat,
-    output:     Option<&std::path::Path>,
-    node_url:   Option<&str>,
+    package: &str,
+    ecosystem: Option<&str>,
+    format: SbomFormat,
+    output: Option<&std::path::Path>,
+    node_url: Option<&str>,
 ) -> Result<()> {
-    let base = node_url
-        .map(String::from)
-        .unwrap_or_else(|| std::env::var("CREG_NODE_URL")
-            .unwrap_or_else(|_| "http://localhost:8080".into()));
+    let base = node_url.map(String::from).unwrap_or_else(|| {
+        std::env::var("CREG_NODE_URL").unwrap_or_else(|_| "http://localhost:8080".into())
+    });
 
     let canonical = if package.contains(':') {
         package.to_string()
@@ -49,7 +48,11 @@ pub async fn run(
         format!("{}:{}@{}", eco, name, ver)
     };
 
-    println!("{} Generating SBOM for {} ...", "→".cyan(), canonical.bold());
+    println!(
+        "{} Generating SBOM for {} ...",
+        "→".cyan(),
+        canonical.bold()
+    );
 
     let encoded = urlencoding::encode(&canonical);
     let url = format!("{}/v1/packages/{}", base.trim_end_matches('/'), encoded);
@@ -65,11 +68,13 @@ pub async fn run(
         anyhow::bail!("Package '{}' not found (HTTP {})", canonical, resp.status());
     }
 
-    let record: serde_json::Value = resp.json().await
+    let record: serde_json::Value = resp
+        .json()
+        .await
         .context("Failed to parse package record")?;
 
     let sbom_doc = match format {
-        SbomFormat::Spdx     => generate_spdx(&canonical, &record)?,
+        SbomFormat::Spdx => generate_spdx(&canonical, &record)?,
         SbomFormat::CycloneDx => generate_cyclonedx(&canonical, &record)?,
     };
 
@@ -87,16 +92,35 @@ pub async fn run(
 }
 
 fn generate_spdx(canonical: &str, record: &serde_json::Value) -> Result<serde_json::Value> {
-    let content_hash = record.get("content_hash").and_then(|v| v.as_str()).unwrap_or("");
-    let publisher    = record.get("publisher").and_then(|v| v.as_str()).unwrap_or("unknown");
-    let status       = record.get("status").and_then(|v| v.as_str()).unwrap_or("unknown");
-    let published_at = record.get("published_at").and_then(|v| v.as_str()).unwrap_or("");
-    let ipfs_cid     = record.get("ipfs_cid").and_then(|v| v.as_str()).unwrap_or("");
+    let content_hash = record
+        .get("content_hash")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let publisher = record
+        .get("publisher")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    let status = record
+        .get("status")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    let published_at = record
+        .get("published_at")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let ipfs_cid = record
+        .get("ipfs_cid")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
 
     // Parse canonical → name + version
     let (name, version) = parse_canonical(canonical);
 
-    let doc_namespace = format!("https://chain-registry.io/sbom/{}/{}", canonical, Utc::now().timestamp());
+    let doc_namespace = format!(
+        "https://chain-registry.io/sbom/{}/{}",
+        canonical,
+        Utc::now().timestamp()
+    );
 
     Ok(serde_json::json!({
         "spdxVersion": "SPDX-2.3",
@@ -155,11 +179,26 @@ fn generate_spdx(canonical: &str, record: &serde_json::Value) -> Result<serde_js
 }
 
 fn generate_cyclonedx(canonical: &str, record: &serde_json::Value) -> Result<serde_json::Value> {
-    let content_hash = record.get("content_hash").and_then(|v| v.as_str()).unwrap_or("");
-    let publisher    = record.get("publisher").and_then(|v| v.as_str()).unwrap_or("unknown");
-    let status       = record.get("status").and_then(|v| v.as_str()).unwrap_or("unknown");
-    let published_at = record.get("published_at").and_then(|v| v.as_str()).unwrap_or("");
-    let ipfs_cid     = record.get("ipfs_cid").and_then(|v| v.as_str()).unwrap_or("");
+    let content_hash = record
+        .get("content_hash")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let publisher = record
+        .get("publisher")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    let status = record
+        .get("status")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    let published_at = record
+        .get("published_at")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let ipfs_cid = record
+        .get("ipfs_cid")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
 
     let (name, version) = parse_canonical(canonical);
     let bom_ref = format!("pkg:chain-registry/{}/{}", name, version);
@@ -201,7 +240,10 @@ fn parse_canonical(canonical: &str) -> (String, String) {
     // canonical format: ecosystem:name@version
     let without_eco = canonical.split(':').nth(1).unwrap_or(canonical);
     if let Some(idx) = without_eco.rfind('@') {
-        (without_eco[..idx].to_string(), without_eco[idx + 1..].to_string())
+        (
+            without_eco[..idx].to_string(),
+            without_eco[idx + 1..].to_string(),
+        )
     } else {
         (without_eco.to_string(), "unknown".to_string())
     }

@@ -6,13 +6,11 @@ use colored::Colorize;
 use std::time::{Duration, Instant};
 
 pub async fn run(node_url: Option<&str>) -> Result<()> {
-    let node = node_url
-        .map(String::from)
-        .unwrap_or_else(|| std::env::var("CREG_NODE_URL")
-            .unwrap_or_else(|_| "http://localhost:8080".into()));
+    let node = node_url.map(String::from).unwrap_or_else(|| {
+        std::env::var("CREG_NODE_URL").unwrap_or_else(|_| "http://localhost:8080".into())
+    });
 
-    let ipfs = std::env::var("CREG_IPFS_URL")
-        .unwrap_or_else(|_| "http://127.0.0.1:5001".into());
+    let ipfs = std::env::var("CREG_IPFS_URL").unwrap_or_else(|_| "http://127.0.0.1:5001".into());
 
     println!("{}", "creg doctor — system health check".bold());
     println!("{}", "─".repeat(52).dimmed());
@@ -71,7 +69,10 @@ pub async fn run(node_url: Option<&str>) -> Result<()> {
     if all_ok {
         println!("{} All checks passed.", "✓".green().bold());
     } else {
-        println!("{} Some checks failed. See above for details.", "⚠".yellow().bold());
+        println!(
+            "{} Some checks failed. See above for details.",
+            "⚠".yellow().bold()
+        );
         std::process::exit(1);
     }
 
@@ -121,16 +122,14 @@ async fn check_chain_sync(node: &str) -> (bool, String) {
         .send()
         .await
     {
-        Ok(r) if r.status().is_success() => {
-            match r.json::<serde_json::Value>().await {
-                Ok(v) => {
-                    let height = v.get("tip_height").and_then(|h| h.as_u64()).unwrap_or(0);
-                    let pkgs = v.get("package_count").and_then(|p| p.as_u64()).unwrap_or(0);
-                    (true, format!("height={} packages={}", height, pkgs))
-                }
-                Err(_) => (false, "Could not parse chain stats response".into()),
+        Ok(r) if r.status().is_success() => match r.json::<serde_json::Value>().await {
+            Ok(v) => {
+                let height = v.get("tip_height").and_then(|h| h.as_u64()).unwrap_or(0);
+                let pkgs = v.get("package_count").and_then(|p| p.as_u64()).unwrap_or(0);
+                (true, format!("height={} packages={}", height, pkgs))
             }
-        }
+            Err(_) => (false, "Could not parse chain stats response".into()),
+        },
         _ => (false, "Could not reach chain stats endpoint".into()),
     }
 }
@@ -143,19 +142,21 @@ async fn check_ipfs(ipfs: &str) -> (bool, String) {
         .send()
         .await
     {
-        Ok(r) if r.status().is_success() => {
-            match r.json::<serde_json::Value>().await {
-                Ok(v) => {
-                    let id = v.get("ID")
-                        .and_then(|i| i.as_str())
-                        .unwrap_or("unknown");
-                    (true, format!("{} — peer {}", ipfs, &id[..id.len().min(12)]))
-                }
-                Err(_) => (true, format!("{} — reachable", ipfs)),
+        Ok(r) if r.status().is_success() => match r.json::<serde_json::Value>().await {
+            Ok(v) => {
+                let id = v.get("ID").and_then(|i| i.as_str()).unwrap_or("unknown");
+                (true, format!("{} — peer {}", ipfs, &id[..id.len().min(12)]))
             }
-        }
+            Err(_) => (true, format!("{} — reachable", ipfs)),
+        },
         Ok(r) => (false, format!("{} returned HTTP {}", ipfs, r.status())),
-        Err(e) => (false, format!("IPFS daemon not running at {} — start with 'ipfs daemon'. Error: {}", ipfs, e)),
+        Err(e) => (
+            false,
+            format!(
+                "IPFS daemon not running at {} — start with 'ipfs daemon'. Error: {}",
+                ipfs, e
+            ),
+        ),
     }
 }
 
@@ -166,7 +167,10 @@ fn check_publisher_key() -> (bool, String) {
         if p.exists() {
             return (true, format!("found at {}", path));
         }
-        return (false, format!("CREG_PUBLISHER_KEY set but file not found: {}", path));
+        return (
+            false,
+            format!("CREG_PUBLISHER_KEY set but file not found: {}", path),
+        );
     }
 
     // Config default: ~/.creg/publisher.key
@@ -185,7 +189,10 @@ fn check_publisher_key() -> (bool, String) {
 fn check_nsjail() -> (bool, String) {
     match which::which("nsjail") {
         Ok(p) => (true, format!("found at {}", p.display())),
-        Err(_) => (false, "nsjail not in PATH — sandbox will use WASM fallback".into()),
+        Err(_) => (
+            false,
+            "nsjail not in PATH — sandbox will use WASM fallback".into(),
+        ),
     }
 }
 
@@ -215,6 +222,12 @@ fn check_config_file() -> (bool, String) {
     if cfg_path.exists() {
         (true, format!("found at {}", cfg_path.display()))
     } else {
-        (false, format!("not found at {} — run: creg config init", cfg_path.display()))
+        (
+            false,
+            format!(
+                "not found at {} — run: creg config init",
+                cfg_path.display()
+            ),
+        )
     }
 }

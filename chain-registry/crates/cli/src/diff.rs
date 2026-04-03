@@ -9,30 +9,30 @@ use colored::Colorize;
 use std::collections::{BTreeMap, HashSet};
 use std::io::Read;
 
-pub async fn run(
-    pkg_a:    &str,
-    pkg_b:    &str,
-    node_url: Option<&str>,
-    json:     bool,
-) -> Result<()> {
-    let base = node_url
-        .map(String::from)
-        .unwrap_or_else(|| std::env::var("CREG_NODE_URL")
-            .unwrap_or_else(|_| "http://localhost:8080".into()));
+pub async fn run(pkg_a: &str, pkg_b: &str, node_url: Option<&str>, json: bool) -> Result<()> {
+    let base = node_url.map(String::from).unwrap_or_else(|| {
+        std::env::var("CREG_NODE_URL").unwrap_or_else(|_| "http://localhost:8080".into())
+    });
 
-    let ipfs_url = std::env::var("CREG_IPFS_URL")
-        .unwrap_or_else(|_| "http://127.0.0.1:5001".into());
+    let ipfs_url =
+        std::env::var("CREG_IPFS_URL").unwrap_or_else(|_| "http://127.0.0.1:5001".into());
 
-    println!("{} Fetching records for {} and {}", "→".cyan(), pkg_a.bold(), pkg_b.bold());
+    println!(
+        "{} Fetching records for {} and {}",
+        "→".cyan(),
+        pkg_a.bold(),
+        pkg_b.bold()
+    );
 
-    let (rec_a, rec_b) = tokio::try_join!(
-        fetch_record(pkg_a, &base),
-        fetch_record(pkg_b, &base),
-    )?;
+    let (rec_a, rec_b) = tokio::try_join!(fetch_record(pkg_a, &base), fetch_record(pkg_b, &base),)?;
 
-    let cid_a = rec_a.get("ipfs_cid").and_then(|v| v.as_str())
+    let cid_a = rec_a
+        .get("ipfs_cid")
+        .and_then(|v| v.as_str())
         .context("Package A has no IPFS CID")?;
-    let cid_b = rec_b.get("ipfs_cid").and_then(|v| v.as_str())
+    let cid_b = rec_b
+        .get("ipfs_cid")
+        .and_then(|v| v.as_str())
         .context("Package B has no IPFS CID")?;
 
     println!("{} Downloading tarballs from IPFS...", "→".cyan());
@@ -48,14 +48,17 @@ pub async fn run(
     let diff = compute_diff(&files_a, &files_b);
 
     if json {
-        println!("{}", serde_json::to_string_pretty(&serde_json::json!({
-            "a": pkg_a,
-            "b": pkg_b,
-            "added":   diff.added,
-            "removed": diff.removed,
-            "changed": diff.changed,
-            "security_concerns": diff.security_concerns,
-        }))?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "a": pkg_a,
+                "b": pkg_b,
+                "added":   diff.added,
+                "removed": diff.removed,
+                "changed": diff.changed,
+                "security_concerns": diff.security_concerns,
+            }))?
+        );
         return Ok(());
     }
 
@@ -64,8 +67,11 @@ pub async fn run(
 }
 
 async fn fetch_record(canonical: &str, base: &str) -> Result<serde_json::Value> {
-    let url = format!("{}/v1/packages/{}", base.trim_end_matches('/'),
-        urlencoding::encode(canonical));
+    let url = format!(
+        "{}/v1/packages/{}",
+        base.trim_end_matches('/'),
+        urlencoding::encode(canonical)
+    );
     let resp = reqwest::Client::new()
         .get(&url)
         .timeout(std::time::Duration::from_secs(10))
@@ -113,9 +119,9 @@ fn extract_files(tarball: &[u8]) -> Result<BTreeMap<String, Vec<u8>>> {
 
 #[derive(Debug)]
 struct DiffResult {
-    added:             Vec<String>,
-    removed:           Vec<String>,
-    changed:           Vec<String>,
+    added: Vec<String>,
+    removed: Vec<String>,
+    changed: Vec<String>,
     security_concerns: Vec<String>,
 }
 
@@ -130,7 +136,8 @@ fn compute_diff(
     let removed: Vec<String> = keys_a.difference(&keys_b).map(|s| (*s).clone()).collect();
     // intersection yields &&String; collect into owned Strings first, then filter
     let both: Vec<String> = keys_a.intersection(&keys_b).map(|s| (*s).clone()).collect();
-    let changed: Vec<String> = both.iter()
+    let changed: Vec<String> = both
+        .iter()
         .filter(|k| files_a.get(k.as_str()) != files_b.get(k.as_str()))
         .cloned()
         .collect();
@@ -161,9 +168,7 @@ fn compute_diff(
                     }
                 }
                 // Check for newly added executable bits (heuristic: .sh, no extension + shebang)
-                if path.ends_with(".sh") || (
-                    !path.contains('.') && text.starts_with("#!/")
-                ) {
+                if path.ends_with(".sh") || (!path.contains('.') && text.starts_with("#!/")) {
                     concerns.push(format!("{}: executable script (new/changed)", path));
                 }
             }
@@ -172,7 +177,12 @@ fn compute_diff(
     concerns.sort();
     concerns.dedup();
 
-    DiffResult { added, removed, changed, security_concerns: concerns }
+    DiffResult {
+        added,
+        removed,
+        changed,
+        security_concerns: concerns,
+    }
 }
 
 fn print_diff(diff: &DiffResult, pkg_a: &str, pkg_b: &str) {
@@ -200,7 +210,11 @@ fn print_diff(diff: &DiffResult, pkg_a: &str, pkg_b: &str) {
     }
 
     if !diff.changed.is_empty() {
-        println!("\n  {} Changed ({}):", "~".yellow().bold(), diff.changed.len());
+        println!(
+            "\n  {} Changed ({}):",
+            "~".yellow().bold(),
+            diff.changed.len()
+        );
         for f in &diff.changed {
             println!("    {} {}", "~".yellow(), f);
         }

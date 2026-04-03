@@ -16,14 +16,16 @@ pub async fn run(filter: Option<&str>, node_url: Option<&str>, ci_mode: bool) ->
         node_url
             .map(String::from)
             .unwrap_or_else(|| {
-                std::env::var("CREG_NODE_URL")
-                    .unwrap_or_else(|_| "http://localhost:8080".into())
+                std::env::var("CREG_NODE_URL").unwrap_or_else(|_| "http://localhost:8080".into())
             })
             .trim_end_matches('/')
     );
 
     if ci_mode {
-        println!("{} CI mode — watching for Critical security events (exits 1 on Critical)", "⚠".yellow().bold());
+        println!(
+            "{} CI mode — watching for Critical security events (exits 1 on Critical)",
+            "⚠".yellow().bold()
+        );
     }
     println!(
         "{} Connecting to event stream at {}",
@@ -56,7 +58,7 @@ pub async fn run(filter: Option<&str>, node_url: Option<&str>, ci_mode: bool) ->
         // Read chunks from the SSE stream.
         let chunk = match response.chunk().await {
             Ok(Some(c)) => c,
-            Ok(None)    => {
+            Ok(None) => {
                 println!("{} Stream closed by server.", "✗".red());
                 break;
             }
@@ -77,7 +79,10 @@ pub async fn run(filter: Option<&str>, node_url: Option<&str>, ci_mode: bool) ->
                 if should_display(&event, filter) {
                     render_event(&event);
                     if ci_mode && is_critical_event(&event) {
-                        eprintln!("{} Critical security event detected — exiting with code 1 (CI mode)", "✗".red().bold());
+                        eprintln!(
+                            "{} Critical security event detected — exiting with code 1 (CI mode)",
+                            "✗".red().bold()
+                        );
                         std::process::exit(1);
                     }
                 }
@@ -123,7 +128,9 @@ fn is_critical_event(event: &SseEvent) -> bool {
 
 fn should_display(event: &SseEvent, filter: Option<&str>) -> bool {
     let Some(f) = filter else { return true };
-    let canonical = event.data.get("canonical")
+    let canonical = event
+        .data
+        .get("canonical")
         .and_then(|v| v.as_str())
         .unwrap_or("");
 
@@ -135,21 +142,29 @@ fn should_display(event: &SseEvent, filter: Option<&str>) -> bool {
 }
 
 fn render_event(event: &SseEvent) {
-    let ts = event.data.get("ts")
+    let ts = event
+        .data
+        .get("ts")
         .and_then(|v| v.as_str())
         .map(|s| &s[11..19]) // HH:MM:SS
         .unwrap_or("?");
 
-    let canonical = event.data.get("canonical")
+    let canonical = event
+        .data
+        .get("canonical")
         .and_then(|v| v.as_str())
         .unwrap_or("");
 
     match event.kind.as_str() {
         "PackageVerified" => {
-            let block = event.data.get("block_hash")
+            let block = event
+                .data
+                .get("block_hash")
                 .and_then(|v| v.as_str())
                 .unwrap_or("?");
-            let validators = event.data.get("validator_count")
+            let validators = event
+                .data
+                .get("validator_count")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0);
             println!(
@@ -165,7 +180,9 @@ fn render_event(event: &SseEvent) {
         }
 
         "PackageSubmitted" => {
-            let publisher = event.data.get("publisher_pubkey")
+            let publisher = event
+                .data
+                .get("publisher_pubkey")
                 .and_then(|v| v.as_str())
                 .unwrap_or("?");
             println!(
@@ -178,7 +195,9 @@ fn render_event(event: &SseEvent) {
         }
 
         "PackageRejected" => {
-            let reason = event.data.get("reason")
+            let reason = event
+                .data
+                .get("reason")
                 .and_then(|v| v.as_str())
                 .unwrap_or("unknown reason");
             println!(
@@ -191,7 +210,9 @@ fn render_event(event: &SseEvent) {
         }
 
         "PackageRevoked" => {
-            let reason = event.data.get("reason")
+            let reason = event
+                .data
+                .get("reason")
                 .and_then(|v| v.as_str())
                 .unwrap_or("?");
             println!(
@@ -204,9 +225,21 @@ fn render_event(event: &SseEvent) {
         }
 
         "BlockProduced" => {
-            let height   = event.data.get("height").and_then(|v| v.as_u64()).unwrap_or(0);
-            let hash     = event.data.get("hash").and_then(|v| v.as_str()).unwrap_or("?");
-            let tx_count = event.data.get("tx_count").and_then(|v| v.as_u64()).unwrap_or(0);
+            let height = event
+                .data
+                .get("height")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let hash = event
+                .data
+                .get("hash")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
+            let tx_count = event
+                .data
+                .get("tx_count")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
             println!(
                 "{} {} {} {} {}",
                 ts.dimmed(),
@@ -218,9 +251,17 @@ fn render_event(event: &SseEvent) {
         }
 
         "ValidatorVoted" => {
-            let vid      = event.data.get("validator_id").and_then(|v| v.as_str()).unwrap_or("?");
-            let approved = event.data.get("approved").and_then(|v| v.as_bool()).unwrap_or(false);
-            let icon     = if approved { "✓".green() } else { "✗".red() };
+            let vid = event
+                .data
+                .get("validator_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
+            let approved = event
+                .data
+                .get("approved")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let icon = if approved { "✓".green() } else { "✗".red() };
             println!(
                 "{} {} {} {} {}",
                 ts.dimmed(),

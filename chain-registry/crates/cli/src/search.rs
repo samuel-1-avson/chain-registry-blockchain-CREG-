@@ -8,21 +8,20 @@ use serde::Deserialize;
 #[derive(Deserialize, Debug)]
 struct PackageRecord {
     canonical: String,
-    status:    Option<String>,
+    status: Option<String>,
     publisher: Option<String>,
     published_at: Option<String>,
 }
 
 pub async fn run(
-    query:    &str,
+    query: &str,
     ecosystem: Option<&str>,
-    node_url:  Option<&str>,
-    json:      bool,
+    node_url: Option<&str>,
+    json: bool,
 ) -> Result<()> {
-    let base = node_url
-        .map(String::from)
-        .unwrap_or_else(|| std::env::var("CREG_NODE_URL")
-            .unwrap_or_else(|_| "http://localhost:8080".into()));
+    let base = node_url.map(String::from).unwrap_or_else(|| {
+        std::env::var("CREG_NODE_URL").unwrap_or_else(|_| "http://localhost:8080".into())
+    });
 
     // Build query string
     let mut qp = format!("q={}", urlencoding::encode(query));
@@ -32,7 +31,8 @@ pub async fn run(
     let url = format!("{}/v1/packages/search?{}", base.trim_end_matches('/'), qp);
 
     let client = reqwest::Client::new();
-    let resp = client.get(&url)
+    let resp = client
+        .get(&url)
         .timeout(std::time::Duration::from_secs(10))
         .send()
         .await
@@ -48,7 +48,9 @@ pub async fn run(
         anyhow::bail!("Search failed: HTTP {}", resp.status());
     }
 
-    let records: Vec<serde_json::Value> = resp.json().await
+    let records: Vec<serde_json::Value> = resp
+        .json()
+        .await
         .context("Failed to parse search response")?;
 
     if json {
@@ -61,23 +63,29 @@ pub async fn run(
         return Ok(());
     }
 
-    println!("{} {} result(s) for '{}'", "→".cyan(), records.len(), query.bold());
+    println!(
+        "{} {} result(s) for '{}'",
+        "→".cyan(),
+        records.len(),
+        query.bold()
+    );
     println!("{}", "─".repeat(60).dimmed());
     print_records(&records);
     Ok(())
 }
 
 async fn search_via_pending_list(
-    query:     &str,
+    query: &str,
     ecosystem: Option<&str>,
-    base:      &str,
-    json:      bool,
+    base: &str,
+    json: bool,
 ) -> Result<()> {
     // Fetch pending pool list and chain stats, combine and filter.
     let client = reqwest::Client::new();
 
     let pending_url = format!("{}/v1/pending", base.trim_end_matches('/'));
-    let pending_resp = client.get(&pending_url)
+    let pending_resp = client
+        .get(&pending_url)
         .timeout(std::time::Duration::from_secs(10))
         .send()
         .await
@@ -107,12 +115,21 @@ async fn search_via_pending_list(
     }
 
     if results.is_empty() {
-        println!("{} No packages found matching '{}' (searched pending pool)", "ℹ".blue(), query);
+        println!(
+            "{} No packages found matching '{}' (searched pending pool)",
+            "ℹ".blue(),
+            query
+        );
         println!("  Tip: The node may not support full-text search. Results are from the pending pool only.");
         return Ok(());
     }
 
-    println!("{} {} result(s) for '{}' (pending pool)", "→".cyan(), results.len(), query.bold());
+    println!(
+        "{} {} result(s) for '{}' (pending pool)",
+        "→".cyan(),
+        results.len(),
+        query.bold()
+    );
     println!("{}", "─".repeat(60).dimmed());
     print_records(&results);
     Ok(())
@@ -132,23 +149,34 @@ fn matches_query(canonical: &str, query: &str, ecosystem: Option<&str>) -> bool 
 fn print_records(records: &[serde_json::Value]) {
     for r in records {
         let canonical = r.get("canonical").and_then(|v| v.as_str()).unwrap_or("?");
-        let status    = r.get("status").and_then(|v| v.as_str()).unwrap_or("unknown");
+        let status = r
+            .get("status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
         let publisher = r.get("publisher").and_then(|v| v.as_str()).unwrap_or("");
-        let published = r.get("published_at").and_then(|v| v.as_str())
+        let published = r
+            .get("published_at")
+            .and_then(|v| v.as_str())
             .map(|s| s.get(..10).unwrap_or(s))
             .unwrap_or("");
 
         let status_colored = match status {
             "verified" => status.green(),
-            "revoked"  => status.red(),
-            "pending"  => status.yellow(),
-            _          => status.dimmed(),
+            "revoked" => status.red(),
+            "pending" => status.yellow(),
+            _ => status.dimmed(),
         };
 
         if publisher.is_empty() {
-            println!("  {} [{}] {}", canonical.white().bold(), status_colored, published.dimmed());
+            println!(
+                "  {} [{}] {}",
+                canonical.white().bold(),
+                status_colored,
+                published.dimmed()
+            );
         } else {
-            println!("  {} [{}] {} by {}",
+            println!(
+                "  {} [{}] {} by {}",
                 canonical.white().bold(),
                 status_colored,
                 published.dimmed(),

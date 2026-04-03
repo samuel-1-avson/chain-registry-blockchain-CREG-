@@ -1,17 +1,14 @@
 // crates/node/src/block_producer.rs
 // Produces new blocks on a fixed interval by draining the finalized-tx channel.
 
+use crate::{finalized_tx, gossip::Gossip, NodeState};
+use chrono::Utc;
+use common::{merkle_root, Block, BlockHeader, Transaction};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{interval, Duration};
-use common::{Block, BlockHeader, Transaction, merkle_root};
-use chrono::Utc;
-use crate::{NodeState, finalized_tx, gossip::Gossip};
 
-pub async fn run(
-    state:  Arc<RwLock<NodeState>>,
-    rx:     finalized_tx::FinalizedTxReceiver,
-) {
+pub async fn run(state: Arc<RwLock<NodeState>>, rx: finalized_tx::FinalizedTxReceiver) {
     let block_interval = {
         let s = state.read().await;
         s.config.block_interval_secs
@@ -35,24 +32,29 @@ pub async fn run(
                 let bh = block.hash();
                 tracing::info!(
                     "Block {} produced at height {} ({} tx)",
-                    &bh[..bh.len().min(12)], block.header.height, block.transactions.len()
+                    &bh[..bh.len().min(12)],
+                    block.header.height,
+                    block.transactions.len()
                 );
                 {
                     let mut s = state.write().await;
                     s.publisher_index.apply_block(&block);
                 }
-                
+
                 // Announce block via P2P Gossipsub
                 let ann = crate::gossip::BlockAnnouncement {
-                    height:     block.header.height,
+                    height: block.header.height,
                     block_hash: block.hash(),
-                    proposer:   block.header.proposer_id.clone(),
+                    proposer: block.header.proposer_id.clone(),
                 };
                 let p2p_handle = state.read().await.p2p.clone();
-                let _ = p2p_handle.sender.send(crate::p2p::P2PCommand::Broadcast {
-                    topic: "creg/v1/blocks".into(),
-                    data: serde_json::to_vec(&ann).unwrap_or_default(),
-                }).await;
+                let _ = p2p_handle
+                    .sender
+                    .send(crate::p2p::P2PCommand::Broadcast {
+                        topic: "creg/v1/blocks".into(),
+                        data: serde_json::to_vec(&ann).unwrap_or_default(),
+                    })
+                    .await;
             }
             Err(e) => tracing::error!("Block production failed: {}", e),
         }
@@ -61,16 +63,19 @@ pub async fn run(
 
 async fn produce_block(
     state: Arc<RwLock<NodeState>>,
-    txs:   Vec<Transaction>,
+    txs: Vec<Transaction>,
 ) -> anyhow::Result<Block> {
     // ── Read-only snapshot of state needed for VRF selection ────────────────
     let (tip_height, prev_hash, node_id, privkey, our_pubkey, p2p) = {
         let s = state.read().await;
         let tip_height = s.chain.tip_height()?;
-        let prev_hash  = s.chain.tip_hash()?;
-        let node_id    = s.config.node_id.clone();
-        let privkey    = s.config.validator_privkey.clone();
-        let our_pubkey = s.validator_set.validators.iter()
+        let prev_hash = s.chain.tip_hash()?;
+        let node_id = s.config.node_id.clone();
+        let privkey = s.config.validator_privkey.clone();
+        let our_pubkey = s
+            .validator_set
+            .validators
+            .iter()
             .find(|v| v.id == node_id)
             .map(|v| v.pubkey.clone());
         let p2p = s.p2p.clone();
@@ -82,10 +87,14 @@ async fn produce_block(
     // Build active set, injecting any cached VRF proofs from peers.
     let mut active: Vec<consensus::vrf::VrfValidator> = {
         let s = state.read().await;
-        s.validator_set.validators.iter()
+        s.validator_set
+            .validators
+            .iter()
             .filter(|v| v.status == "online" || v.status == "self")
             .map(|v| {
-                let (vrf_output, vrf_proof) = s.vrf_proofs.get(&v.id)
+                let (vrf_output, vrf_proof) = s
+                    .vrf_proofs
+                    .get(&v.id)
                     .cloned()
                     .map(|(o, p)| (Some(o), Some(p)))
                     .unwrap_or((None, None));
@@ -118,15 +127,22 @@ async fn produce_block(
                 output: out.clone(),
                 proof: prf.clone(),
             };
-            let _ = p2p.sender.send(crate::p2p::P2PCommand::Broadcast {
-                topic: "creg/v1/vrf-proofs".into(),
-                data: serde_json::to_vec(&gossip_msg).unwrap_or_default(),
-            }).await;
+            let _ = p2p
+                .sender
+                .send(crate::p2p::P2PCommand::Broadcast {
+                    topic: "creg/v1/vrf-proofs".into(),
+                    data: serde_json::to_vec(&gossip_msg).unwrap_or_default(),
+                })
+                .await;
 
             let selected_proposer = consensus::vrf::select_proposer(&active, &epoch_seed)
                 .ok_or_else(|| anyhow::anyhow!("No active validators to select proposer"))?;
             if node_id != selected_proposer {
-                anyhow::bail!("Node {} is not the selected proposer for this epoch (expected {})", node_id, selected_proposer);
+                anyhow::bail!(
+                    "Node {} is not the selected proposer for this epoch (expected {})",
+                    node_id,
+                    selected_proposer
+                );
             }
             (Some(out), Some(prf))
         } else {
@@ -140,17 +156,20 @@ async fn produce_block(
     // ── Write the new block ────────────────────────────────────────────────
     let mut s = state.write().await;
     let header = BlockHeader {
-        height:             tip_height + 1,
+        height: tip_height + 1,
         prev_hash,
-        merkle_root:        merkle_root(&txs),
-        proposer_id:        node_id,
-        timestamp:          Utc::now(),
+        merkle_root: merkle_root(&txs),
+        proposer_id: node_id,
+        timestamp: Utc::now(),
         validator_set_hash: "dev".to_string(),
         vrf_output,
         vrf_proof,
     };
 
-    let block = Block { header, transactions: txs };
+    let block = Block {
+        header,
+        transactions: txs,
+    };
     s.chain.insert_block(&block)?;
     // Proofs are epoch-specific (seed = prev_hash); clear cache for next round.
     s.vrf_proofs.clear();

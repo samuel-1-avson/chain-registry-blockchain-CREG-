@@ -12,24 +12,24 @@
 // This module manages the per-package vote state that accumulates
 // incoming votes from peers. It is owned by the validator pipeline.
 
-use std::collections::HashMap;
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
 use common::{ValidatorSignature, ValidatorVote};
-use ethers_core::types::{Signature, Address};
+use ethers_core::types::{Address, Signature};
 use ethers_core::utils::keccak256;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// All votes received for a single package's PBFT round.
 #[derive(Debug, Clone)]
 pub struct PackageVoteState {
-    pub canonical:     String,
-    pub started_at:    DateTime<Utc>,
-    pub phase:         VotePhase,
+    pub canonical: String,
+    pub started_at: DateTime<Utc>,
+    pub phase: VotePhase,
 
     /// validator_id → PREPARE vote
     pub prepare_votes: HashMap<String, IncomingVote>,
     /// validator_id → COMMIT vote
-    pub commit_votes:  HashMap<String, IncomingVote>,
+    pub commit_votes: HashMap<String, IncomingVote>,
 
     /// How many validators were assigned to this package by VRF.
     pub assigned_count: usize,
@@ -47,12 +47,12 @@ pub enum VotePhase {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IncomingVote {
-    pub validator_id:  String,
-    pub validator_pubkey: String,  // Ethereum address (0x...)
-    pub approved:      bool,
+    pub validator_id: String,
+    pub validator_pubkey: String, // Ethereum address (0x...)
+    pub approved: bool,
     pub reject_reason: Option<String>,
-    pub signature:     String,     // ECDSA signature (hex)
-    pub received_at:   DateTime<Utc>,
+    pub signature: String, // ECDSA signature (hex)
+    pub received_at: DateTime<Utc>,
 }
 
 /// Result of signature verification
@@ -66,11 +66,11 @@ pub enum SignatureVerification {
 impl PackageVoteState {
     pub fn new(canonical: &str, assigned_count: usize) -> Self {
         Self {
-            canonical:     canonical.to_string(),
-            started_at:    Utc::now(),
-            phase:         VotePhase::Collecting,
+            canonical: canonical.to_string(),
+            started_at: Utc::now(),
+            phase: VotePhase::Collecting,
             prepare_votes: HashMap::new(),
-            commit_votes:  HashMap::new(),
+            commit_votes: HashMap::new(),
             assigned_count,
         }
     }
@@ -81,30 +81,27 @@ impl PackageVoteState {
     }
 
     /// Verify ECDSA signature for a vote.
-    /// 
+    ///
     /// The message being signed is: keccak256(canonical + approved + block_hash)
     /// where block_hash is the hash of the block being voted on.
-    /// 
+    ///
     /// # Arguments
     /// * `vote` - The incoming vote with signature
     /// * `block_hash` - The hash of the block being voted on
-    /// 
+    ///
     /// # Returns
     /// * `SignatureVerification::Valid` if signature is valid
     /// * `SignatureVerification::Invalid` if signature is invalid
     /// * `SignatureVerification::Malformed` if signature format is wrong
-    pub fn verify_signature(
-        &self,
-        vote: &IncomingVote,
-        block_hash: &str,
-    ) -> SignatureVerification {
+    pub fn verify_signature(&self, vote: &IncomingVote, block_hash: &str) -> SignatureVerification {
         // Decode the signature from hex
         let sig_bytes = match hex::decode(&vote.signature) {
             Ok(bytes) => bytes,
             Err(e) => {
-                return SignatureVerification::Malformed(
-                    format!("Failed to decode signature hex: {}", e)
-                );
+                return SignatureVerification::Malformed(format!(
+                    "Failed to decode signature hex: {}",
+                    e
+                ));
             }
         };
 
@@ -112,9 +109,10 @@ impl PackageVoteState {
         let signature = match Signature::try_from(sig_bytes.as_slice()) {
             Ok(sig) => sig,
             Err(e) => {
-                return SignatureVerification::Malformed(
-                    format!("Invalid signature format: {}", e)
-                );
+                return SignatureVerification::Malformed(format!(
+                    "Invalid signature format: {}",
+                    e
+                ));
             }
         };
 
@@ -123,17 +121,19 @@ impl PackageVoteState {
         let pubkey_bytes = match hex::decode(&pubkey_hex) {
             Ok(bytes) => bytes,
             Err(e) => {
-                return SignatureVerification::Malformed(
-                    format!("Failed to decode validator pubkey: {}", e)
-                );
+                return SignatureVerification::Malformed(format!(
+                    "Failed to decode validator pubkey: {}",
+                    e
+                ));
             }
         };
 
         // Validate address length (must be 20 bytes for Ethereum address)
         if pubkey_bytes.len() != 20 {
-            return SignatureVerification::Malformed(
-                format!("Invalid address length: expected 20 bytes, got {}", pubkey_bytes.len())
-            );
+            return SignatureVerification::Malformed(format!(
+                "Invalid address length: expected 20 bytes, got {}",
+                pubkey_bytes.len()
+            ));
         }
 
         // Build the message that was signed
@@ -145,9 +145,7 @@ impl PackageVoteState {
         let recovered_address = match signature.recover(message_hash) {
             Ok(addr) => addr,
             Err(e) => {
-                return SignatureVerification::Invalid(
-                    format!("Failed to recover signer: {}", e)
-                );
+                return SignatureVerification::Invalid(format!("Failed to recover signer: {}", e));
             }
         };
 
@@ -157,12 +155,10 @@ impl PackageVoteState {
         let expected_address = Address::from(address_bytes);
 
         if recovered_address != expected_address {
-            return SignatureVerification::Invalid(
-                format!(
-                    "Signature verification failed: recovered {} != expected {}",
-                    recovered_address, expected_address
-                )
-            );
+            return SignatureVerification::Invalid(format!(
+                "Signature verification failed: recovered {} != expected {}",
+                recovered_address, expected_address
+            ));
         }
 
         SignatureVerification::Valid
@@ -170,7 +166,7 @@ impl PackageVoteState {
 
     /// Record a PREPARE vote from a peer.
     /// Returns true if prepare quorum is now reached.
-    /// 
+    ///
     /// # Arguments
     /// * `vote` - The incoming PREPARE vote
     /// * `block_hash` - The hash of the block being voted on (for signature verification)
@@ -184,18 +180,20 @@ impl PackageVoteState {
         // Verify signature unless skipping (for testing)
         if !skip_verification {
             match self.verify_signature(&vote, block_hash) {
-                SignatureVerification::Valid => {},
+                SignatureVerification::Valid => {}
                 SignatureVerification::Invalid(reason) => {
                     tracing::warn!(
                         "[VoteAccum] Invalid PREPARE signature from {}: {}",
-                        vote.validator_id, reason
+                        vote.validator_id,
+                        reason
                     );
                     return Err(format!("Invalid signature: {}", reason));
                 }
                 SignatureVerification::Malformed(reason) => {
                     tracing::warn!(
                         "[VoteAccum] Malformed PREPARE signature from {}: {}",
-                        vote.validator_id, reason
+                        vote.validator_id,
+                        reason
                     );
                     return Err(format!("Malformed signature: {}", reason));
                 }
@@ -203,14 +201,14 @@ impl PackageVoteState {
         }
 
         self.prepare_votes.insert(vote.validator_id.clone(), vote);
-        
-        if self.prepare_votes.len() >= self.quorum()
-            && self.phase == VotePhase::Collecting
-        {
+
+        if self.prepare_votes.len() >= self.quorum() && self.phase == VotePhase::Collecting {
             self.phase = VotePhase::PrepareQuorumReached;
             tracing::info!(
                 "[VoteAccum] {} PREPARE quorum reached ({}/{})",
-                self.canonical, self.prepare_votes.len(), self.assigned_count
+                self.canonical,
+                self.prepare_votes.len(),
+                self.assigned_count
             );
             return Ok(true);
         }
@@ -219,7 +217,7 @@ impl PackageVoteState {
 
     /// Record a COMMIT vote from a peer.
     /// Returns the outcome if commit quorum is reached.
-    /// 
+    ///
     /// # Arguments
     /// * `vote` - The incoming COMMIT vote
     /// * `block_hash` - The hash of the block being voted on (for signature verification)
@@ -233,18 +231,20 @@ impl PackageVoteState {
         // Verify signature unless skipping (for testing)
         if !skip_verification {
             match self.verify_signature(&vote, block_hash) {
-                SignatureVerification::Valid => {},
+                SignatureVerification::Valid => {}
                 SignatureVerification::Invalid(reason) => {
                     tracing::warn!(
                         "[VoteAccum] Invalid COMMIT signature from {}: {}",
-                        vote.validator_id, reason
+                        vote.validator_id,
+                        reason
                     );
                     return Err(format!("Invalid signature: {}", reason));
                 }
                 SignatureVerification::Malformed(reason) => {
                     tracing::warn!(
                         "[VoteAccum] Malformed COMMIT signature from {}: {}",
-                        vote.validator_id, reason
+                        vote.validator_id,
+                        reason
                     );
                     return Err(format!("Malformed signature: {}", reason));
                 }
@@ -253,17 +253,19 @@ impl PackageVoteState {
 
         self.commit_votes.insert(vote.validator_id.clone(), vote);
 
-        let total_commits  = self.commit_votes.len();
-        let approvals      = self.commit_votes.values().filter(|v| v.approved).count();
-        let rejections     = self.commit_votes.values().filter(|v| !v.approved).count();
-        let quorum         = self.quorum();
+        let total_commits = self.commit_votes.len();
+        let approvals = self.commit_votes.values().filter(|v| v.approved).count();
+        let rejections = self.commit_votes.values().filter(|v| !v.approved).count();
+        let quorum = self.quorum();
 
         // Enough approvals → finalise.
         if approvals >= quorum {
             self.phase = VotePhase::Finalised;
             tracing::info!(
                 "[VoteAccum] {} FINALISED ({} approvals / {} commits)",
-                self.canonical, approvals, total_commits
+                self.canonical,
+                approvals,
+                total_commits
             );
             let sigs = self.build_validator_sigs(true);
             return Ok(Some(CommitOutcome::Verified(sigs)));
@@ -272,17 +274,23 @@ impl PackageVoteState {
         // Enough rejections that quorum can never be reached → fail.
         let max_possible_approvals = self.assigned_count - rejections;
         if max_possible_approvals < quorum {
-            let primary_reason = self.commit_votes.values()
+            let primary_reason = self
+                .commit_votes
+                .values()
                 .filter(|v| !v.approved)
                 .filter_map(|v| v.reject_reason.as_deref())
                 .next()
                 .unwrap_or("Consensus rejected")
                 .to_string();
 
-            self.phase = VotePhase::Failed { reason: primary_reason.clone() };
+            self.phase = VotePhase::Failed {
+                reason: primary_reason.clone(),
+            };
             tracing::warn!(
                 "[VoteAccum] {} FAILED (cannot reach quorum: {} approvals, {} rejections)",
-                self.canonical, approvals, rejections
+                self.canonical,
+                approvals,
+                rejections
             );
             return Ok(Some(CommitOutcome::Rejected(primary_reason)));
         }
@@ -292,13 +300,14 @@ impl PackageVoteState {
     }
 
     fn build_validator_sigs(&self, approvers_only: bool) -> Vec<ValidatorSignature> {
-        self.commit_votes.values()
+        self.commit_votes
+            .values()
             .filter(|v| !approvers_only || v.approved)
             .map(|v| ValidatorSignature {
-                validator_id:     v.validator_id.clone(),
+                validator_id: v.validator_id.clone(),
                 validator_pubkey: v.validator_pubkey.clone(),
-                signature:        v.signature.clone(),
-                vote:             if v.approved {
+                signature: v.signature.clone(),
+                vote: if v.approved {
                     ValidatorVote::Approve
                 } else {
                     ValidatorVote::Reject {
@@ -331,14 +340,17 @@ pub struct VoteAccumulator {
 
 impl VoteAccumulator {
     pub fn new() -> Self {
-        Self { rounds: HashMap::new() }
+        Self {
+            rounds: HashMap::new(),
+        }
     }
 
     /// Open a new PBFT round for a package.
     pub fn open_round(&mut self, canonical: &str, assigned_count: usize) {
         tracing::info!(
             "[VoteAccum] Opening round for {} ({} validators assigned)",
-            canonical, assigned_count
+            canonical,
+            assigned_count
         );
         self.rounds.insert(
             canonical.to_string(),
@@ -348,7 +360,7 @@ impl VoteAccumulator {
 
     /// Record an incoming vote (from a peer or from this node itself).
     /// Returns Some(outcome) if the round is decided.
-    /// 
+    ///
     /// # Arguments
     /// * `canonical` - Package canonical ID
     /// * `phase` - "prepare" or "commit"
@@ -361,14 +373,14 @@ impl VoteAccumulator {
     /// * `skip_verification` - Skip signature verification (testing only)
     pub fn record_vote(
         &mut self,
-        canonical:    &str,
-        phase:        &str,
+        canonical: &str,
+        phase: &str,
         validator_id: &str,
         validator_pubkey: &str,
-        approved:     bool,
+        approved: bool,
         reject_reason: Option<String>,
-        signature:    String,
-        block_hash:   &str,
+        signature: String,
+        block_hash: &str,
         skip_verification: bool,
     ) -> Result<Option<CommitOutcome>, String> {
         let vote = IncomingVote {
@@ -380,17 +392,16 @@ impl VoteAccumulator {
             received_at: Utc::now(),
         };
 
-        let state = self.rounds.get_mut(canonical)
+        let state = self
+            .rounds
+            .get_mut(canonical)
             .ok_or_else(|| format!("No active round for {}", canonical))?;
 
         match phase {
-            "prepare" => {
-                state.record_prepare(vote, block_hash, skip_verification)
-                    .map(|quorum| if quorum { None } else { None })
-            }
-            "commit" => {
-                state.record_commit(vote, block_hash, skip_verification)
-            }
+            "prepare" => state
+                .record_prepare(vote, block_hash, skip_verification)
+                .map(|quorum| if quorum { None } else { None }),
+            "commit" => state.record_commit(vote, block_hash, skip_verification),
             _ => {
                 tracing::warn!("Unknown vote phase: {}", phase);
                 Err(format!("Unknown vote phase: {}", phase))
@@ -401,9 +412,16 @@ impl VoteAccumulator {
     /// Expire rounds that have been open too long.
     /// Returns a list of timed-out canonicals so the pipeline can fail them.
     pub fn expire_timed_out(&mut self) -> Vec<String> {
-        let timed_out: Vec<_> = self.rounds.iter()
-            .filter(|(_, s)| s.is_timed_out()
-                && matches!(s.phase, VotePhase::Collecting | VotePhase::PrepareQuorumReached))
+        let timed_out: Vec<_> = self
+            .rounds
+            .iter()
+            .filter(|(_, s)| {
+                s.is_timed_out()
+                    && matches!(
+                        s.phase,
+                        VotePhase::Collecting | VotePhase::PrepareQuorumReached
+                    )
+            })
             .map(|(k, _)| k.clone())
             .collect();
 
@@ -437,12 +455,16 @@ mod tests {
 
     fn vote(validator_id: &str, validator_pubkey: &str, approved: bool) -> IncomingVote {
         IncomingVote {
-            validator_id:  validator_id.to_string(),
+            validator_id: validator_id.to_string(),
             validator_pubkey: validator_pubkey.to_string(),
             approved,
-            reject_reason: if approved { None } else { Some("bad code".into()) },
-            signature:     common::sha256_hex(validator_id.as_bytes()),
-            received_at:   Utc::now(),
+            reject_reason: if approved {
+                None
+            } else {
+                Some("bad code".into())
+            },
+            signature: common::sha256_hex(validator_id.as_bytes()),
+            received_at: Utc::now(),
         }
     }
 
@@ -460,15 +482,27 @@ mod tests {
 
         let block_hash = "0x1234abcd";
 
-        state.record_prepare(vote("v1", "0x1111", true), block_hash, true).unwrap();
-        state.record_prepare(vote("v2", "0x2222", true), block_hash, true).unwrap();
-        state.record_prepare(vote("v3", "0x3333", true), block_hash, true).unwrap();
+        state
+            .record_prepare(vote("v1", "0x1111", true), block_hash, true)
+            .unwrap();
+        state
+            .record_prepare(vote("v2", "0x2222", true), block_hash, true)
+            .unwrap();
+        state
+            .record_prepare(vote("v3", "0x3333", true), block_hash, true)
+            .unwrap();
 
         assert!(matches!(state.phase, VotePhase::PrepareQuorumReached));
 
-        state.record_commit(vote("v1", "0x1111", true), block_hash, true).unwrap();
-        state.record_commit(vote("v2", "0x2222", true), block_hash, true).unwrap();
-        let outcome = state.record_commit(vote("v3", "0x3333", true), block_hash, true).unwrap();
+        state
+            .record_commit(vote("v1", "0x1111", true), block_hash, true)
+            .unwrap();
+        state
+            .record_commit(vote("v2", "0x2222", true), block_hash, true)
+            .unwrap();
+        let outcome = state
+            .record_commit(vote("v3", "0x3333", true), block_hash, true)
+            .unwrap();
 
         assert!(matches!(outcome, Some(CommitOutcome::Verified(_))));
         assert!(matches!(state.phase, VotePhase::Finalised));
@@ -481,13 +515,25 @@ mod tests {
 
         let block_hash = "0x1234abcd";
 
-        state.record_prepare(vote("v1", "0x1111", false), block_hash, true).unwrap();
-        state.record_prepare(vote("v2", "0x2222", false), block_hash, true).unwrap();
-        state.record_prepare(vote("v3", "0x3333", false), block_hash, true).unwrap();
+        state
+            .record_prepare(vote("v1", "0x1111", false), block_hash, true)
+            .unwrap();
+        state
+            .record_prepare(vote("v2", "0x2222", false), block_hash, true)
+            .unwrap();
+        state
+            .record_prepare(vote("v3", "0x3333", false), block_hash, true)
+            .unwrap();
 
-        state.record_commit(vote("v1", "0x1111", false), block_hash, true).unwrap();
-        state.record_commit(vote("v2", "0x2222", false), block_hash, true).unwrap();
-        let outcome = state.record_commit(vote("v3", "0x3333", false), block_hash, true).unwrap();
+        state
+            .record_commit(vote("v1", "0x1111", false), block_hash, true)
+            .unwrap();
+        state
+            .record_commit(vote("v2", "0x2222", false), block_hash, true)
+            .unwrap();
+        let outcome = state
+            .record_commit(vote("v3", "0x3333", false), block_hash, true)
+            .unwrap();
 
         assert!(matches!(outcome, Some(CommitOutcome::Rejected(_))));
     }
@@ -505,7 +551,7 @@ mod tests {
     #[test]
     fn rejects_invalid_signature_format() {
         let state = PackageVoteState::new("npm:test@1.0.0", 4);
-        
+
         let bad_vote = IncomingVote {
             validator_id: "v1".to_string(),
             validator_pubkey: "0x1111".to_string(),
@@ -523,13 +569,13 @@ mod tests {
     fn signature_verification_with_real_crypto() {
         // This test verifies that our ECDSA verification logic works correctly
         // using a known-good signature pair.
-        
+
         // Test vector: known address and valid signature format
         // In production, validators would sign with their Ethereum private keys
         let canonical = "npm:test@1.0.0";
         let approved = true;
         let block_hash = "0x1234abcd5678";
-        
+
         // Create a properly formatted vote
         let state = PackageVoteState::new(canonical, 4);
         let vote = IncomingVote {
@@ -541,15 +587,18 @@ mod tests {
             signature: "a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567801".to_string(),
             received_at: Utc::now(),
         };
-        
+
         // This will fail signature recovery (random sig), but tests the code path
         let result = state.verify_signature(&vote, block_hash);
         // We expect Malformed or Invalid since we're using a random signature
         assert!(
-            matches!(result, SignatureVerification::Invalid(_) | SignatureVerification::Malformed(_)),
+            matches!(
+                result,
+                SignatureVerification::Invalid(_) | SignatureVerification::Malformed(_)
+            ),
             "Random signature should fail verification"
         );
-        
+
         // Test malformed signature (too short)
         let bad_vote = IncomingVote {
             validator_id: "test".to_string(),
@@ -560,9 +609,11 @@ mod tests {
             received_at: Utc::now(),
         };
         let bad_result = state.verify_signature(&bad_vote, block_hash);
-        assert!(matches!(bad_result, SignatureVerification::Malformed(_)),
-            "Too short signature should be malformed");
-        
+        assert!(
+            matches!(bad_result, SignatureVerification::Malformed(_)),
+            "Too short signature should be malformed"
+        );
+
         // Test invalid address length
         let bad_addr_vote = IncomingVote {
             validator_id: "test".to_string(),
@@ -573,7 +624,9 @@ mod tests {
             received_at: Utc::now(),
         };
         let bad_addr_result = state.verify_signature(&bad_addr_vote, block_hash);
-        assert!(matches!(bad_addr_result, SignatureVerification::Malformed(_)),
-            "Invalid address length should be malformed");
+        assert!(
+            matches!(bad_addr_result, SignatureVerification::Malformed(_)),
+            "Invalid address length should be malformed"
+        );
     }
 }

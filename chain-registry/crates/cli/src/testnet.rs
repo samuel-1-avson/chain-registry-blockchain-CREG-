@@ -24,10 +24,8 @@ impl Default for TestnetConfig {
             network: "testnet".to_string(),
             chain_id: 31337,
             rpc_url: "http://localhost:8545".to_string(),
-            token_contract: std::env::var("TESTNET_TOKEN_ADDR")
-                .unwrap_or_default(),
-            staking_contract: std::env::var("TESTNET_STAKING_ADDR")
-                .unwrap_or_default(),
+            token_contract: std::env::var("TESTNET_TOKEN_ADDR").unwrap_or_default(),
+            staking_contract: std::env::var("TESTNET_STAKING_ADDR").unwrap_or_default(),
             faucet_url: "http://localhost:8081".to_string(),
             node_url: "http://localhost:8080".to_string(),
         }
@@ -38,15 +36,19 @@ impl Default for TestnetConfig {
 pub async fn drip(address: &str, faucet_url: Option<&str>) -> Result<()> {
     let url = faucet_url.unwrap_or("http://localhost:8081");
     let client = reqwest::Client::new();
-    
+
     // Validate address
     if !address.starts_with("0x") || address.len() != 42 {
         bail!("Invalid Ethereum address format. Expected: 0x... (42 chars)");
     }
-    
-    println!("{} Requesting test tokens for {}", "💧".cyan(), address.cyan());
+
+    println!(
+        "{} Requesting test tokens for {}",
+        "💧".cyan(),
+        address.cyan()
+    );
     println!("  Faucet: {}", url);
-    
+
     let response = client
         .post(format!("{}/api/drip", url))
         .json(&serde_json::json!({
@@ -56,25 +58,28 @@ pub async fn drip(address: &str, faucet_url: Option<&str>) -> Result<()> {
         .send()
         .await
         .context("Failed to connect to faucet")?;
-    
+
     let status = response.status();
     let body: serde_json::Value = response.json().await?;
-    
+
     if status.is_success() && body["success"].as_bool().unwrap_or(false) {
         let amount = body["amount"].as_str().unwrap_or("1000");
         let tx_hash = body["tx_hash"].as_str().unwrap_or("unknown");
-        
+
         println!("\n{}", "✓ Test tokens received!".green().bold());
         println!("  Amount: {} tCREG", amount.yellow());
         println!("  Transaction: {}", tx_hash.dimmed());
-        println!("\n{} You can now stake tokens and use the testnet.", "💡".yellow());
+        println!(
+            "\n{} You can now stake tokens and use the testnet.",
+            "💡".yellow()
+        );
         println!("  Stake as publisher: creg testnet stake-publisher 0.01");
         println!("  Stake as validator: creg testnet stake-validator 0.1");
     } else {
         let message = body["message"].as_str().unwrap_or("Unknown error");
         bail!("Faucet request failed: {}", message);
     }
-    
+
     Ok(())
 }
 
@@ -82,15 +87,15 @@ pub async fn drip(address: &str, faucet_url: Option<&str>) -> Result<()> {
 pub async fn status(node_url: Option<&str>) -> Result<()> {
     let url = node_url.unwrap_or("http://localhost:8080");
     let client = reqwest::Client::new();
-    
+
     println!("{}", "Chain Registry Testnet Status".bold().underline());
     println!();
-    
+
     // Check node
     match client.get(format!("{}/health", url)).send().await {
         Ok(resp) if resp.status().is_success() => {
             println!("{} Node: {}", "●".green(), "Online".green());
-            
+
             // Try to get chain info
             if let Ok(info) = client.get(format!("{}/api/v1/chain", url)).send().await {
                 if let Ok(data) = info.json::<serde_json::Value>().await {
@@ -102,12 +107,12 @@ pub async fn status(node_url: Option<&str>) -> Result<()> {
         }
         _ => println!("{} Node: {}", "●".red(), "Offline".red()),
     }
-    
+
     // Check faucet
     match client.get("http://localhost:8081/health").send().await {
         Ok(resp) if resp.status().is_success() => {
             println!("{} Faucet: {}", "●".green(), "Online".green());
-            
+
             // Get faucet stats
             if let Ok(stats) = client.get("http://localhost:8081/api/stats").send().await {
                 if let Ok(data) = stats.json::<serde_json::Value>().await {
@@ -123,7 +128,7 @@ pub async fn status(node_url: Option<&str>) -> Result<()> {
         }
         _ => println!("{} Faucet: {}", "●".red(), "Offline".red()),
     }
-    
+
     // Check explorer
     match client.get("http://localhost:3000").send().await {
         Ok(resp) if resp.status().is_success() => {
@@ -131,36 +136,32 @@ pub async fn status(node_url: Option<&str>) -> Result<()> {
         }
         _ => println!("{} Explorer: {}", "●".red(), "Offline".red()),
     }
-    
+
     println!();
     println!("{}", "URLs:".bold());
     println!("  Node:    http://localhost:8080");
     println!("  Faucet:  http://localhost:8081");
     println!("  Explorer: http://localhost:3000");
-    
+
     Ok(())
 }
 
 /// Stake as publisher on testnet
-pub async fn stake_publisher(
-    amount_eth: f64,
-    key: &str,
-    rpc_url: Option<&str>,
-) -> Result<()> {
+pub async fn stake_publisher(amount_eth: f64, key: &str, rpc_url: Option<&str>) -> Result<()> {
     let rpc = rpc_url.unwrap_or("http://localhost:8545");
     let staking = std::env::var("TESTNET_STAKING_ADDR")
         .context("TESTNET_STAKING_ADDR not set. Run deploy-testnet.sh first.")?;
-    
+
     if amount_eth < 0.001 {
         bail!("Minimum publisher stake on testnet is 0.001 tCREG");
     }
-    
+
     let wei = (amount_eth * 1e18) as u128;
-    
+
     println!("{} Staking {} tCREG as publisher", "💰".cyan(), amount_eth);
     println!("  Contract: {}", staking.dimmed());
     println!("  Network:  {} (Testnet)", rpc.dimmed());
-    
+
     // First approve token spend
     println!("\n  Approving token spend...");
     let approve_status = std::process::Command::new("cast")
@@ -170,16 +171,18 @@ pub async fn stake_publisher(
             "approve(address,uint256)",
             &staking,
             &wei.to_string(),
-            "--private-key", key,
-            "--rpc-url", rpc,
+            "--private-key",
+            key,
+            "--rpc-url",
+            rpc,
         ])
         .status()
         .context("Failed to approve tokens. Is Foundry installed?")?;
-    
+
     if !approve_status.success() {
         bail!("Token approval failed");
     }
-    
+
     // Then stake
     println!("  Staking tokens...");
     let stake_status = std::process::Command::new("cast")
@@ -188,12 +191,14 @@ pub async fn stake_publisher(
             &staking,
             "stakeAsPublisher(uint256)",
             &wei.to_string(),
-            "--private-key", key,
-            "--rpc-url", rpc,
+            "--private-key",
+            key,
+            "--rpc-url",
+            rpc,
         ])
         .status()
         .context("Failed to stake tokens")?;
-    
+
     if stake_status.success() {
         println!("\n{}", "✓ Stake successful!".green().bold());
         println!("  You can now publish packages on the testnet.");
@@ -203,30 +208,26 @@ pub async fn stake_publisher(
     } else {
         bail!("Stake transaction failed");
     }
-    
+
     Ok(())
 }
 
 /// Stake as validator on testnet
-pub async fn stake_validator(
-    amount_eth: f64,
-    key: &str,
-    rpc_url: Option<&str>,
-) -> Result<()> {
+pub async fn stake_validator(amount_eth: f64, key: &str, rpc_url: Option<&str>) -> Result<()> {
     let rpc = rpc_url.unwrap_or("http://localhost:8545");
     let staking = std::env::var("TESTNET_STAKING_ADDR")
         .context("TESTNET_STAKING_ADDR not set. Run deploy-testnet.sh first.")?;
-    
+
     if amount_eth < 0.1 {
         bail!("Minimum validator stake on testnet is 0.1 tCREG");
     }
-    
+
     let wei = (amount_eth * 1e18) as u128;
-    
+
     println!("{} Staking {} tCREG as validator", "🔐".cyan(), amount_eth);
     println!("  Contract: {}", staking.dimmed());
     println!("  Network:  {} (Testnet)", rpc.dimmed());
-    
+
     // First approve token spend
     println!("\n  Approving token spend...");
     let approve_status = std::process::Command::new("cast")
@@ -236,16 +237,18 @@ pub async fn stake_validator(
             "approve(address,uint256)",
             &staking,
             &wei.to_string(),
-            "--private-key", key,
-            "--rpc-url", rpc,
+            "--private-key",
+            key,
+            "--rpc-url",
+            rpc,
         ])
         .status()
         .context("Failed to approve tokens")?;
-    
+
     if !approve_status.success() {
         bail!("Token approval failed");
     }
-    
+
     // Then apply as validator
     println!("  Applying as validator...");
     let stake_status = std::process::Command::new("cast")
@@ -254,12 +257,14 @@ pub async fn stake_validator(
             &staking,
             "applyToBeValidator(uint256)",
             &wei.to_string(),
-            "--private-key", key,
-            "--rpc-url", rpc,
+            "--private-key",
+            key,
+            "--rpc-url",
+            rpc,
         ])
         .status()
         .context("Failed to apply as validator")?;
-    
+
     if stake_status.success() {
         println!("\n{}", "✓ Validator application submitted!".green().bold());
         println!("  Your stake is pending activation by the operator.");
@@ -270,14 +275,14 @@ pub async fn stake_validator(
     } else {
         bail!("Validator application failed");
     }
-    
+
     Ok(())
 }
 
 /// Reset testnet (clear local data)
 pub fn reset(data_dir: Option<PathBuf>) -> Result<()> {
     let dir = data_dir.unwrap_or_else(|| PathBuf::from("./testnet-data"));
-    
+
     println!("{} Testnet Reset", "⚠️".yellow().bold());
     println!();
     println!("This will delete all local testnet data:");
@@ -286,7 +291,7 @@ pub fn reset(data_dir: Option<PathBuf>) -> Result<()> {
     println!("Docker volumes must be reset separately:");
     println!("  docker-compose -f testnet/docker-compose.testnet.yml down -v");
     println!();
-    
+
     // In a real implementation, we'd ask for confirmation here
     // For now, just show what would happen
     println!("{}", "To reset manually:".yellow());
@@ -294,13 +299,15 @@ pub fn reset(data_dir: Option<PathBuf>) -> Result<()> {
     println!("  2. Delete data directory: rm -rf {}", dir.display());
     println!("  3. Reset Docker volumes");
     println!("  4. Redeploy contracts: ./testnet/deploy-testnet.sh");
-    
+
     Ok(())
 }
 
 /// Show testnet documentation
 pub fn docs() {
-    println!("{}", r#"
+    println!(
+        "{}",
+        r#"
 ╔══════════════════════════════════════════════════════════════════════════╗
 ║                     Chain Registry Testnet Guide                         ║
 ╚══════════════════════════════════════════════════════════════════════════╝
@@ -382,5 +389,7 @@ TROUBLESHOOTING
 • Cannot stake: Ensure you have tCREG (not ETH) and have approved the staking contract
 
 For more help: https://github.com/your-org/chain-registry/docs/TESTNET.md
-"#.cyan());
+"#
+        .cyan()
+    );
 }

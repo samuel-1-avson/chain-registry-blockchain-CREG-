@@ -1,23 +1,21 @@
 // crates/node/src/grpc/server.rs
 // Implementation of the gRPC Services defined in node.proto.
 
-use tonic::{Request, Response, Status};
+use futures::Stream;
+use std::pin::Pin;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
-use std::pin::Pin;
-use futures::Stream;
+use tonic::{Request, Response, Status};
 
-use common::proto::{
-    registry_service_server::RegistryService,
-    watch_service_server::WatchService,
-    explorer_service_server::ExplorerService,
-};
-use common::proto::{
-    GetVersionRequest, GetVersionResponse, SubmitRequest, SubmitResponse,
-    WatchRequest, RegistryEvent as ProtoEvent, ChainStats as ProtoStats,
-    BlockRequest, BlockResponse, Empty
-};
 use crate::SharedState;
+use common::proto::{
+    explorer_service_server::ExplorerService, registry_service_server::RegistryService,
+    watch_service_server::WatchService,
+};
+use common::proto::{
+    BlockRequest, BlockResponse, ChainStats as ProtoStats, Empty, GetVersionRequest,
+    GetVersionResponse, RegistryEvent as ProtoEvent, SubmitRequest, SubmitResponse, WatchRequest,
+};
 
 pub struct MyRegistry {
     state: SharedState,
@@ -37,17 +35,18 @@ impl RegistryService for MyRegistry {
     ) -> Result<Response<GetVersionResponse>, Status> {
         let req = request.into_inner();
         let s = self.state.read().await;
-        
+
         match s.chain.get_latest_version(&req.ecosystem, &req.name) {
-            Ok(Some(record)) => {
-                Ok(Response::new(GetVersionResponse {
-                    found: true,
-                    version: record.id.version,
-                    content_hash: record.content_hash,
-                    status: format!("{:?}", record.status),
-                }))
-            }
-            Ok(None) => Ok(Response::new(GetVersionResponse { found: false, ..Default::default() })),
+            Ok(Some(record)) => Ok(Response::new(GetVersionResponse {
+                found: true,
+                version: record.id.version,
+                content_hash: record.content_hash,
+                status: format!("{:?}", record.status),
+            })),
+            Ok(None) => Ok(Response::new(GetVersionResponse {
+                found: false,
+                ..Default::default()
+            })),
             Err(e) => Err(Status::internal(e.to_string())),
         }
     }
@@ -86,16 +85,24 @@ impl RegistryService for MyRegistry {
                 let public_inputs = inputs.public_inputs();
                 match s.zk_validator.verify_proof(&proof, &public_inputs) {
                     Ok(true) => {
-                        tracing::info!("[ZK] Proof verified successfully for package: {}", req.name);
+                        tracing::info!(
+                            "[ZK] Proof verified successfully for package: {}",
+                            req.name
+                        );
                     }
                     _ => {
                         tracing::warn!("[ZK] Proof verification FAILED for package: {}", req.name);
-                        return Err(Status::permission_denied("Invalid ZK safety proof. Submission rejected."));
+                        return Err(Status::permission_denied(
+                            "Invalid ZK safety proof. Submission rejected.",
+                        ));
                     }
                 }
             }
             Err(e) => {
-                return Err(Status::invalid_argument(format!("Failed to deserialize ZK proof: {}", e)));
+                return Err(Status::invalid_argument(format!(
+                    "Failed to deserialize ZK proof: {}",
+                    e
+                )));
             }
         }
 
@@ -121,11 +128,17 @@ impl RegistryService for MyRegistry {
 
         {
             if let Err(e) = crate::api::verify_publish_sig(&publish_req) {
-                return Err(Status::permission_denied(format!("Invalid publisher signature: {}", e)));
+                return Err(Status::permission_denied(format!(
+                    "Invalid publisher signature: {}",
+                    e
+                )));
             }
             let mut state = self.state.write().await;
             state.pending_pool.insert(publish_req);
-            tracing::info!("[Consensus] Package {} added to pending pool via gRPC", req.name);
+            tracing::info!(
+                "[Consensus] Package {} added to pending pool via gRPC",
+                req.name
+            );
         }
 
         Ok(Response::new(SubmitResponse {
@@ -194,7 +207,7 @@ impl ExplorerService for MyExplorer {
     ) -> Result<Response<ProtoStats>, Status> {
         let s = self.state.read().await;
         let stats = s.chain.stats();
-        
+
         Ok(Response::new(ProtoStats {
             tip_height: stats.tip_height,
             tip_hash: stats.tip_hash,
@@ -209,16 +222,14 @@ impl ExplorerService for MyExplorer {
     ) -> Result<Response<BlockResponse>, Status> {
         let req = request.into_inner();
         let s = self.state.read().await;
-        
+
         match s.chain.get_block_by_height(req.height) {
-            Ok(Some(block)) => {
-                Ok(Response::new(BlockResponse {
-                    height: block.header.height,
-                    hash: block.hash(),
-                    prev_hash: block.header.prev_hash,
-                    merkle_root: block.header.merkle_root,
-                }))
-            }
+            Ok(Some(block)) => Ok(Response::new(BlockResponse {
+                height: block.header.height,
+                hash: block.hash(),
+                prev_hash: block.header.prev_hash,
+                merkle_root: block.header.merkle_root,
+            })),
             Ok(None) => Err(Status::not_found("Block not found")),
             Err(e) => Err(Status::internal(e.to_string())),
         }

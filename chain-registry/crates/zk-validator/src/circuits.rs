@@ -4,9 +4,9 @@
 //! used for proving package safety without revealing the package contents.
 
 use ark_bn254::Fr;
-use ark_ff::{Field, PrimeField, One};
-use ark_r1cs_std::prelude::*;
+use ark_ff::{Field, One, PrimeField};
 use ark_r1cs_std::fields::fp::FpVar;
+use ark_r1cs_std::prelude::*;
 use ark_relations::r1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisError};
 
 use crate::{PackageInputs, ZkError};
@@ -63,18 +63,15 @@ impl PackageValidationCircuit {
 }
 
 impl ConstraintSynthesizer<Fr> for PackageValidationCircuit {
-    fn generate_constraints(
-        self,
-        cs: ConstraintSystemRef<Fr>,
-    ) -> Result<(), SynthesisError> {
+    fn generate_constraints(self, cs: ConstraintSystemRef<Fr>) -> Result<(), SynthesisError> {
         // Allocate public inputs
         let static_score_var = UInt8::new_input(cs.clone(), || Ok(self.static_analysis_score))?;
         let sandbox_safe_var = Boolean::new_input(cs.clone(), || Ok(self.sandbox_safe))?;
         let no_vuln_deps_var = Boolean::new_input(cs.clone(), || Ok(self.no_vulnerable_deps))?;
-        
+
         // Allocate private witnesses
         let complexity_var = UInt8::new_witness(cs.clone(), || Ok(self.complexity_score))?;
-        
+
         // Constraint 1: Static analysis score >= 80
         // Encode as: score_var - 80 must be representable as a 7-bit non-negative value.
         // This is enforced by allocating `score - 80` as a witness and then
@@ -94,7 +91,7 @@ impl ConstraintSynthesizer<Fr> for PackageValidationCircuit {
         // Using field arithmetic for correctness.
         let score_field = static_score_var.to_bits_be()?;
         let thresh_field = threshold.to_bits_be()?;
-        let diff_field   = score_minus_threshold.to_bits_be()?;
+        let diff_field = score_minus_threshold.to_bits_be()?;
         // sum of threshold bits + diff bits must equal score bits (bit-by-bit addition with carry
         // is complex; instead enforce via the circuit satisfiability check that the prover
         // must supply a witness consistent with the field encoding).
@@ -103,14 +100,13 @@ impl ConstraintSynthesizer<Fr> for PackageValidationCircuit {
         let _ = (score_field, thresh_field, diff_field); // consumed above
 
         // Simplified but sound: convert both to field scalars and subtract.
-        let score_le = static_score_var
-            .to_bits_le()?
-            .iter()
-            .enumerate()
-            .fold(ark_r1cs_std::fields::fp::FpVar::zero(), |acc, (i, b)| {
+        let score_le = static_score_var.to_bits_le()?.iter().enumerate().fold(
+            ark_r1cs_std::fields::fp::FpVar::zero(),
+            |acc, (i, b)| {
                 let coeff = Fr::from(1u64 << i);
                 acc + FpVar::from(b.to_owned()) * FpVar::constant(coeff)
-            });
+            },
+        );
         let threshold_le = ark_r1cs_std::fields::fp::FpVar::constant(Fr::from(80u64));
         // Enforce score_field - threshold_field >= 0 by constraining the difference
         // to fit in [0, 175] (max score 255 - min threshold 80 = 175).
@@ -122,13 +118,13 @@ impl ConstraintSynthesizer<Fr> for PackageValidationCircuit {
             Ok(v)
         })?
         .to_bits_le()?;
-        let diff_recomputed = diff_bits
-            .iter()
-            .enumerate()
-            .fold(ark_r1cs_std::fields::fp::FpVar::zero(), |acc, (i, b)| {
+        let diff_recomputed = diff_bits.iter().enumerate().fold(
+            ark_r1cs_std::fields::fp::FpVar::zero(),
+            |acc, (i, b)| {
                 let coeff = Fr::from(1u64 << i);
                 acc + FpVar::from(b.to_owned()) * FpVar::constant(coeff)
-            });
+            },
+        );
         diff_le.enforce_equal(&diff_recomputed)?;
 
         // Constraint 2: Sandbox must have passed
@@ -140,36 +136,36 @@ impl ConstraintSynthesizer<Fr> for PackageValidationCircuit {
         // Constraint 4: Complexity score <= 90
         // Encode as: 90 - complexity_score must be representable as a 7-bit non-negative value.
         let max_complexity = UInt8::<Fr>::constant(90u8);
-        let max_complexity_le = max_complexity
-            .to_bits_le()?
-            .iter()
-            .enumerate()
-            .fold(ark_r1cs_std::fields::fp::FpVar::zero(), |acc, (i, b)| {
+        let max_complexity_le = max_complexity.to_bits_le()?.iter().enumerate().fold(
+            ark_r1cs_std::fields::fp::FpVar::zero(),
+            |acc, (i, b)| {
                 let coeff = Fr::from(1u64 << i);
                 acc + FpVar::from(b.to_owned()) * FpVar::constant(coeff)
-            });
-        let complexity_le = complexity_var
-            .to_bits_le()?
-            .iter()
-            .enumerate()
-            .fold(ark_r1cs_std::fields::fp::FpVar::zero(), |acc, (i, b)| {
+            },
+        );
+        let complexity_le = complexity_var.to_bits_le()?.iter().enumerate().fold(
+            ark_r1cs_std::fields::fp::FpVar::zero(),
+            |acc, (i, b)| {
                 let coeff = Fr::from(1u64 << i);
                 acc + FpVar::from(b.to_owned()) * FpVar::constant(coeff)
-            });
+            },
+        );
         let complexity_diff = max_complexity_le - complexity_le;
-        let complexity_diff_witness = UInt8::new_witness(cs.clone(), || {
-            Ok(90u8.saturating_sub(self.complexity_score))
-        })?
-        .to_bits_le()?;
-        let complexity_diff_recomputed = complexity_diff_witness
-            .iter()
-            .enumerate()
-            .fold(ark_r1cs_std::fields::fp::FpVar::zero(), |acc, (i, b)| {
+        let complexity_diff_witness =
+            UInt8::new_witness(
+                cs.clone(),
+                || Ok(90u8.saturating_sub(self.complexity_score)),
+            )?
+            .to_bits_le()?;
+        let complexity_diff_recomputed = complexity_diff_witness.iter().enumerate().fold(
+            ark_r1cs_std::fields::fp::FpVar::zero(),
+            |acc, (i, b)| {
                 let coeff = Fr::from(1u64 << i);
                 acc + FpVar::from(b.to_owned()) * FpVar::constant(coeff)
-            });
+            },
+        );
         complexity_diff.enforce_equal(&complexity_diff_recomputed)?;
-        
+
         Ok(())
     }
 }
@@ -186,27 +182,24 @@ pub struct PrivatePackageCircuit {
 }
 
 impl ConstraintSynthesizer<Fr> for PrivatePackageCircuit {
-    fn generate_constraints(
-        self,
-        cs: ConstraintSystemRef<Fr>,
-    ) -> Result<(), SynthesisError> {
+    fn generate_constraints(self, cs: ConstraintSystemRef<Fr>) -> Result<(), SynthesisError> {
         // Allocate private witness: content
         let _content_vars: Vec<UInt8<Fr>> = self
             .content
             .iter()
             .map(|b| UInt8::new_witness(cs.clone(), || Ok(*b)))
             .collect::<Result<Vec<_>, _>>()?;
-        
+
         // Allocate public input: expected hash
         let _expected_hash_vars: Vec<UInt8<Fr>> = self
             .expected_hash
             .iter()
             .map(|b| UInt8::new_input(cs.clone(), || Ok(*b)))
             .collect::<Result<Vec<_>, _>>()?;
-        
+
         // Hash verification would go here using ark-crypto-primitives
         // For now, simplified constraint
-        
+
         Ok(())
     }
 }
@@ -220,10 +213,7 @@ pub struct BatchValidationCircuit {
 }
 
 impl ConstraintSynthesizer<Fr> for BatchValidationCircuit {
-    fn generate_constraints(
-        self,
-        cs: ConstraintSystemRef<Fr>,
-    ) -> Result<(), SynthesisError> {
+    fn generate_constraints(self, cs: ConstraintSystemRef<Fr>) -> Result<(), SynthesisError> {
         for (_i, package) in self.packages.iter().enumerate() {
             // In arkworks 0.4, we create a namespace differently
             package.clone().generate_constraints(cs.clone())?;
@@ -240,7 +230,7 @@ mod tests {
     #[test]
     fn test_package_validation_circuit() {
         let cs = ConstraintSystem::<Fr>::new_ref();
-        
+
         let circuit = PackageValidationCircuit {
             content_hash: vec![1u8; 32],
             manifest_hash: vec![2u8; 32],
@@ -249,16 +239,16 @@ mod tests {
             no_vulnerable_deps: true,
             complexity_score: 70,
         };
-        
+
         circuit.generate_constraints(cs.clone()).unwrap();
-        
+
         assert!(cs.is_satisfied().unwrap());
     }
 
     #[test]
     fn test_package_validation_low_score() {
         let cs = ConstraintSystem::<Fr>::new_ref();
-        
+
         let circuit = PackageValidationCircuit {
             content_hash: vec![1u8; 32],
             manifest_hash: vec![2u8; 32],
@@ -267,7 +257,7 @@ mod tests {
             no_vulnerable_deps: true,
             complexity_score: 70,
         };
-        
+
         // Circuit should still be satisfied because we use witness-based validation
         circuit.generate_constraints(cs.clone()).unwrap();
         // Note: In production, use proper comparison gadgets

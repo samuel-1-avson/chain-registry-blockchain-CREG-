@@ -2,12 +2,12 @@
 // In-memory pending pool for packages that have been submitted but not yet
 // gone through PBFT consensus. Packages here are installable with --unverified.
 
+use chrono::{DateTime, Duration, Utc};
 use common::PublishRequest;
 use std::collections::HashMap;
-use chrono::{DateTime, Utc, Duration};
 
 pub struct PendingEntry {
-    pub request:     PublishRequest,
+    pub request: PublishRequest,
     pub received_at: DateTime<Utc>,
     /// How many times the validator pipeline has attempted this package.
     pub attempt_count: u32,
@@ -16,12 +16,14 @@ pub struct PendingEntry {
 }
 
 pub struct PendingPool {
-    entries: HashMap<String, PendingEntry>,  // canonical → entry
+    entries: HashMap<String, PendingEntry>, // canonical → entry
 }
 
 impl PendingPool {
     pub fn new() -> Self {
-        Self { entries: HashMap::new() }
+        Self {
+            entries: HashMap::new(),
+        }
     }
 
     /// Add a new submission.
@@ -48,12 +50,15 @@ impl PendingPool {
         }
 
         tracing::info!("[PendingPool] Inserting package: {}", key);
-        self.entries.insert(key, PendingEntry {
-            request,
-            received_at:   Utc::now(),
-            attempt_count: 0,
-            in_progress:   false,
-        });
+        self.entries.insert(
+            key,
+            PendingEntry {
+                request,
+                received_at: Utc::now(),
+                attempt_count: 0,
+                in_progress: false,
+            },
+        );
         true
     }
 
@@ -73,17 +78,23 @@ impl PendingPool {
     /// Returns entries ready for validation (not in progress, or stuck > 5 min).
     pub fn ready_for_validation(&mut self) -> Vec<PublishRequest> {
         let cutoff = Utc::now() - Duration::minutes(5);
-        let eligible: Vec<_> = self.entries.values_mut()
+        let eligible: Vec<_> = self
+            .entries
+            .values_mut()
             .filter(|e| !e.in_progress || e.received_at < cutoff)
             .collect();
-            
+
         if !eligible.is_empty() {
-            tracing::info!("[PendingPool] Found {} eligible packages for validation", eligible.len());
+            tracing::info!(
+                "[PendingPool] Found {} eligible packages for validation",
+                eligible.len()
+            );
         }
 
-        eligible.into_iter()
+        eligible
+            .into_iter()
             .map(|e| {
-                e.in_progress  = true;
+                e.in_progress = true;
                 e.attempt_count += 1;
                 e.request.clone()
             })

@@ -43,13 +43,13 @@ impl AccessPolicy {
         Self {
             requires_approval: true,
             max_package_size: 10 * 1024 * 1024, // 10MB
-            min_stake: 100_000, // 0.001 ETH in wei
+            min_stake: 100_000,                 // 0.001 ETH in wei
             allow_external_publishers: false,
             allowed_ecosystems: vec!["npm".to_string(), "pypi".to_string()],
             custom_rules: HashMap::new(),
         }
     }
-    
+
     /// Create a relaxed policy
     pub fn relaxed() -> Self {
         Self {
@@ -61,9 +61,14 @@ impl AccessPolicy {
             custom_rules: HashMap::new(),
         }
     }
-    
+
     /// Check if a package meets the policy requirements
-    pub fn validate_package(&self, size: u64, ecosystem: &str, publisher_stake: u64) -> Result<(), String> {
+    pub fn validate_package(
+        &self,
+        size: u64,
+        ecosystem: &str,
+        publisher_stake: u64,
+    ) -> Result<(), String> {
         // Check size
         if size > self.max_package_size {
             return Err(format!(
@@ -71,15 +76,17 @@ impl AccessPolicy {
                 size, self.max_package_size
             ));
         }
-        
+
         // Check ecosystem
-        if !self.allowed_ecosystems.is_empty() && !self.allowed_ecosystems.contains(&ecosystem.to_string()) {
+        if !self.allowed_ecosystems.is_empty()
+            && !self.allowed_ecosystems.contains(&ecosystem.to_string())
+        {
             return Err(format!(
                 "Ecosystem '{}' not allowed. Allowed: {:?}",
                 ecosystem, self.allowed_ecosystems
             ));
         }
-        
+
         // Check stake
         if publisher_stake < self.min_stake {
             return Err(format!(
@@ -87,10 +94,10 @@ impl AccessPolicy {
                 publisher_stake, self.min_stake
             ));
         }
-        
+
         Ok(())
     }
-    
+
     /// Add a custom rule
     pub fn with_custom_rule(mut self, key: &str, value: &str) -> Self {
         self.custom_rules.insert(key.to_string(), value.to_string());
@@ -171,19 +178,21 @@ impl Member {
             added_by,
         }
     }
-    
+
     /// Check if member has a permission
     pub fn has_permission(&self, permission: Permission) -> bool {
-        self.roles.iter().any(|role| role.has_permission(permission))
+        self.roles
+            .iter()
+            .any(|role| role.has_permission(permission))
     }
-    
+
     /// Add a role
     pub fn add_role(&mut self, role: Role) {
         if !self.roles.contains(&role) {
             self.roles.push(role);
         }
     }
-    
+
     /// Remove a role
     pub fn remove_role(&mut self, role: Role) {
         self.roles.retain(|r| r != &role);
@@ -197,16 +206,18 @@ mod tests {
     #[test]
     fn test_access_policy_validation() {
         let policy = AccessPolicy::strict();
-        
+
         // Too large
-        assert!(policy.validate_package(100 * 1024 * 1024, "npm", 200_000).is_err());
-        
+        assert!(policy
+            .validate_package(100 * 1024 * 1024, "npm", 200_000)
+            .is_err());
+
         // Wrong ecosystem
         assert!(policy.validate_package(1000, "cargo", 200_000).is_err());
-        
+
         // Insufficient stake
         assert!(policy.validate_package(1000, "npm", 50_000).is_err());
-        
+
         // Valid
         assert!(policy.validate_package(1000, "npm", 200_000).is_ok());
     }
@@ -215,10 +226,10 @@ mod tests {
     fn test_role_permissions() {
         assert!(Role::Admin.has_permission(Permission::Manage));
         assert!(Role::Admin.has_permission(Permission::Publish));
-        
+
         assert!(Role::Publisher.has_permission(Permission::Publish));
         assert!(!Role::Publisher.has_permission(Permission::Manage));
-        
+
         assert!(Role::Reader.has_permission(Permission::Decrypt));
         assert!(!Role::Reader.has_permission(Permission::Publish));
     }
@@ -230,7 +241,7 @@ mod tests {
             vec![Role::Publisher, Role::Reader],
             "admin".to_string(),
         );
-        
+
         assert!(member.has_permission(Permission::Publish));
         assert!(member.has_permission(Permission::Read));
         assert!(member.has_permission(Permission::Decrypt));

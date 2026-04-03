@@ -10,12 +10,6 @@
 // Uses a token-bucket algorithm per IP stored in a dashmap.
 // Expired buckets are periodically purged to prevent memory growth.
 
-use std::{
-    collections::HashMap,
-    net::IpAddr,
-    sync::{Arc, Mutex},
-    time::{Duration, Instant},
-};
 use axum::{
     body::Body,
     extract::ConnectInfo,
@@ -25,17 +19,23 @@ use axum::{
     Json,
 };
 use serde::Serialize;
+use std::{
+    collections::HashMap,
+    net::IpAddr,
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
 
 #[derive(Debug, Clone)]
 pub struct RateLimitConfig {
     /// Max requests per window for general endpoints.
-    pub general_limit:    u32,
+    pub general_limit: u32,
     /// Max submissions per window.
-    pub publish_limit:    u32,
+    pub publish_limit: u32,
     /// Max votes per window.
-    pub vote_limit:       u32,
+    pub vote_limit: u32,
     /// Sliding window duration.
-    pub window:           Duration,
+    pub window: Duration,
 }
 
 impl Default for RateLimitConfig {
@@ -43,8 +43,8 @@ impl Default for RateLimitConfig {
         Self {
             general_limit: 600,
             publish_limit: 10,
-            vote_limit:    60,
-            window:        Duration::from_secs(60),
+            vote_limit: 60,
+            window: Duration::from_secs(60),
         }
     }
 }
@@ -58,13 +58,15 @@ struct Bucket {
 
 impl Bucket {
     fn new() -> Self {
-        Self { timestamps: Vec::new() }
+        Self {
+            timestamps: Vec::new(),
+        }
     }
 
     /// Remove timestamps older than the window, then check count.
     fn is_allowed(&mut self, window: Duration, limit: u32) -> bool {
-        let now     = Instant::now();
-        let cutoff  = now - window;
+        let now = Instant::now();
+        let cutoff = now - window;
         self.timestamps.retain(|&t| t > cutoff);
         if self.timestamps.len() < limit as usize {
             self.timestamps.push(now);
@@ -89,10 +91,10 @@ fn lock_buckets<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<T> {
 /// Shared rate limit state (IP → bucket per endpoint class).
 #[derive(Clone)]
 pub struct RateLimiter {
-    general:  Arc<Mutex<HashMap<IpAddr, Bucket>>>,
-    publish:  Arc<Mutex<HashMap<IpAddr, Bucket>>>,
-    vote:     Arc<Mutex<HashMap<IpAddr, Bucket>>>,
-    config:   RateLimitConfig,
+    general: Arc<Mutex<HashMap<IpAddr, Bucket>>>,
+    publish: Arc<Mutex<HashMap<IpAddr, Bucket>>>,
+    vote: Arc<Mutex<HashMap<IpAddr, Bucket>>>,
+    config: RateLimitConfig,
 }
 
 impl RateLimiter {
@@ -100,14 +102,14 @@ impl RateLimiter {
         Self {
             general: Arc::new(Mutex::new(HashMap::new())),
             publish: Arc::new(Mutex::new(HashMap::new())),
-            vote:    Arc::new(Mutex::new(HashMap::new())),
+            vote: Arc::new(Mutex::new(HashMap::new())),
             config,
         }
     }
 
     fn check(&self, buckets: &Arc<Mutex<HashMap<IpAddr, Bucket>>>, ip: IpAddr, limit: u32) -> bool {
         let mut map = lock_buckets(buckets);
-        let bucket  = map.entry(ip).or_insert_with(Bucket::new);
+        let bucket = map.entry(ip).or_insert_with(Bucket::new);
         bucket.is_allowed(self.config.window, limit)
     }
 
@@ -125,7 +127,7 @@ impl RateLimiter {
 
     /// Purge expired entries from all buckets (call periodically).
     pub fn purge_expired(&self) {
-        let now    = Instant::now();
+        let now = Instant::now();
         let window = self.config.window;
         for buckets in [&self.general, &self.publish, &self.vote] {
             let mut map = lock_buckets(buckets);
@@ -139,15 +141,15 @@ impl RateLimiter {
 
 #[derive(Serialize)]
 struct RateLimitError {
-    error:       &'static str,
+    error: &'static str,
     retry_after: u64,
 }
 
 /// Axum middleware that applies rate limiting based on the request path.
 pub async fn rate_limit_middleware(
-    limiter:  axum::extract::Extension<RateLimiter>,
-    req:      Request<Body>,
-    next:     Next,
+    limiter: axum::extract::Extension<RateLimiter>,
+    req: Request<Body>,
+    next: Next,
 ) -> Response {
     // Extract client IP from the request.
     let ip: IpAddr = req
@@ -171,10 +173,11 @@ pub async fn rate_limit_middleware(
             StatusCode::TOO_MANY_REQUESTS,
             [("Retry-After", "60"), ("X-RateLimit-Window", "60")],
             Json(RateLimitError {
-                error:       "Rate limit exceeded",
+                error: "Rate limit exceeded",
                 retry_after: 60,
             }),
-        ).into_response();
+        )
+            .into_response();
     }
 
     next.run(req).await
@@ -216,7 +219,9 @@ mod tests {
             ..Default::default()
         });
         let ip = IpAddr::V4(Ipv4Addr::new(5, 6, 7, 8));
-        for _ in 0..3 { limiter.check_general(ip); }
+        for _ in 0..3 {
+            limiter.check_general(ip);
+        }
         assert!(!limiter.check_general(ip), "4th request should be blocked");
     }
 
@@ -231,7 +236,7 @@ mod tests {
 
         assert!(limiter.check_general(ip1));
         assert!(!limiter.check_general(ip1)); // ip1 exhausted
-        assert!(limiter.check_general(ip2));  // ip2 still fresh
+        assert!(limiter.check_general(ip2)); // ip2 still fresh
     }
 
     #[test]
@@ -244,7 +249,7 @@ mod tests {
         let ip = IpAddr::V4(Ipv4Addr::new(9, 9, 9, 9));
 
         assert!(limiter.check_publish(ip));
-        assert!(!limiter.check_publish(ip));  // publish exhausted
-        assert!(limiter.check_general(ip));   // general still has room
+        assert!(!limiter.check_publish(ip)); // publish exhausted
+        assert!(limiter.check_general(ip)); // general still has room
     }
 }

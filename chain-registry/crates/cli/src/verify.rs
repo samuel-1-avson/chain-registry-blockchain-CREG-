@@ -5,23 +5,22 @@
 use anyhow::Result;
 use colored::Colorize;
 use common::{PackageId, VerdictStatus};
-use resolver::light_client::{Checkpoint, verify_package};
+use resolver::light_client::{verify_package, Checkpoint};
 
 pub async fn run(
-    package:    &str,
-    ecosystem:  Option<&str>,
-    node_url:   Option<&str>,
+    package: &str,
+    ecosystem: Option<&str>,
+    node_url: Option<&str>,
     checkpoint: Option<&str>,
-    json_out:   bool,
+    json_out: bool,
 ) -> Result<()> {
     let (name, version) = parse_pkg(package);
     let eco = ecosystem.unwrap_or_else(|| detect_eco());
-    let id  = PackageId::new(eco, &name, version.as_deref().unwrap_or("latest"));
+    let id = PackageId::new(eco, &name, version.as_deref().unwrap_or("latest"));
 
-    let url = node_url
-        .map(String::from)
-        .unwrap_or_else(|| std::env::var("CREG_NODE_URL")
-            .unwrap_or_else(|_| "http://localhost:8080".into()));
+    let url = node_url.map(String::from).unwrap_or_else(|| {
+        std::env::var("CREG_NODE_URL").unwrap_or_else(|_| "http://localhost:8080".into())
+    });
 
     // Load checkpoint from file or use genesis.
     let cp = match checkpoint {
@@ -45,11 +44,14 @@ pub async fn run(
 
     if !verdict.status.is_safe() {
         if json_out {
-            println!("{}", serde_json::json!({
-                "canonical": id.canonical(),
-                "verified":  false,
-                "status":    format!("{:?}", verdict.status),
-            }));
+            println!(
+                "{}",
+                serde_json::json!({
+                    "canonical": id.canonical(),
+                    "verified":  false,
+                    "status":    format!("{:?}", verdict.status),
+                })
+            );
         } else {
             println!(
                 "\n  {} {} — status: {}",
@@ -69,11 +71,14 @@ pub async fn run(
     match verify_package(&id.canonical(), &url, &cp).await {
         Ok(true) => {
             if json_out {
-                println!("{}", serde_json::json!({
-                    "canonical": id.canonical(),
-                    "verified":  true,
-                    "proof":     "merkle-inclusion-verified",
-                }));
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "canonical": id.canonical(),
+                        "verified":  true,
+                        "proof":     "merkle-inclusion-verified",
+                    })
+                );
             } else {
                 println!(
                     "\r  {} {} — Merkle proof verified ✓     ",
@@ -108,7 +113,10 @@ pub async fn run(
                 "⚠".yellow(),
                 e.to_string().dimmed()
             );
-            println!("  {}", "Falling back to standard verdict (node trusted).".dimmed());
+            println!(
+                "  {}",
+                "Falling back to standard verdict (node trusted).".dimmed()
+            );
             println!(
                 "  {} {}",
                 "≈".yellow(),
@@ -125,21 +133,32 @@ fn parse_pkg(raw: &str) -> (String, Option<String>) {
     if raw.starts_with('@') {
         let rest = &raw[1..];
         if let Some(idx) = rest.rfind('@') {
-            return (format!("@{}", &rest[..idx]), Some(rest[idx+1..].to_string()));
+            return (
+                format!("@{}", &rest[..idx]),
+                Some(rest[idx + 1..].to_string()),
+            );
         }
         return (raw.to_string(), None);
     }
     match raw.rfind('@') {
-        Some(idx) => (raw[..idx].to_string(), Some(raw[idx+1..].to_string())),
-        None      => (raw.to_string(), None),
+        Some(idx) => (raw[..idx].to_string(), Some(raw[idx + 1..].to_string())),
+        None => (raw.to_string(), None),
     }
 }
 
 fn detect_eco() -> &'static str {
     let cwd = std::env::current_dir().unwrap_or_default();
-    if cwd.join("package.json").exists()    { return "npm"; }
-    if cwd.join("Cargo.toml").exists()      { return "cargo"; }
-    if cwd.join("requirements.txt").exists(){ return "pypi"; }
-    if cwd.join("Gemfile").exists()         { return "rubygems"; }
+    if cwd.join("package.json").exists() {
+        return "npm";
+    }
+    if cwd.join("Cargo.toml").exists() {
+        return "cargo";
+    }
+    if cwd.join("requirements.txt").exists() {
+        return "pypi";
+    }
+    if cwd.join("Gemfile").exists() {
+        return "rubygems";
+    }
     "npm"
 }

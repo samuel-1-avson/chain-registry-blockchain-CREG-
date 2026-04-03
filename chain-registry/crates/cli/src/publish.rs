@@ -2,13 +2,13 @@
 // `creg publish` — signs and submits a tarball to the registry pending pool.
 
 use anyhow::{bail, Context, Result};
-use common::{PackageId, PackageManifest, PublishRequest};
 use chrono::Utc;
-use zk_validator::{ZkValidator, PackageInputs};
 use common::proto::registry_service_client::RegistryServiceClient;
 use common::proto::SubmitRequest;
+use common::{PackageId, PackageManifest, PublishRequest};
+use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use std::path::Path;
-use indicatif::{ProgressBar, ProgressStyle, ProgressDrawTarget};
+use zk_validator::{PackageInputs, ZkValidator};
 
 pub async fn run(
     tarball_path: &Path,
@@ -31,19 +31,20 @@ pub async fn run(
     let ipfs_cid = pin_to_ipfs_with_progress(&tarball_bytes, &pb).await?;
     pb.finish_with_message("✓ Upload complete");
     println!("  IPFS CID: {}", ipfs_cid);
-    
+
     // ── 2.5. Optional Encryption (Shielding) ─────────────────────────────────
     let mut final_ipfs_cid = ipfs_cid.clone();
     let mut key_bundle = None;
-    
+
     if shield {
         println!("  Shielding package with AES-256-GCM...");
         let (encrypted_bytes, bundle) = encrypt_for_validators(&tarball_bytes)?;
-        
-        let pb_shield = create_progress_bar(encrypted_bytes.len() as u64, "Uploading encrypted shield");
+
+        let pb_shield =
+            create_progress_bar(encrypted_bytes.len() as u64, "Uploading encrypted shield");
         final_ipfs_cid = pin_to_ipfs_with_progress(&encrypted_bytes, &pb_shield).await?;
         pb_shield.finish_with_message("✓ Shield upload complete");
-        
+
         key_bundle = Some(bundle);
         println!("  Shielded CID: {}", final_ipfs_cid);
     }
@@ -62,12 +63,11 @@ pub async fn run(
     println!("  package:  {}", pkg_id.canonical());
 
     // ── 5. Sign: sig = Ed25519(privkey, canonical || content_hash) ───────────
-    let privkey_bytes = hex::decode(privkey_hex.trim())
-        .context("Invalid private key hex")?;
+    let privkey_bytes = hex::decode(privkey_hex.trim()).context("Invalid private key hex")?;
 
-    use ed25519_dalek::{SigningKey, Signer};
-    let signing_key = SigningKey::try_from(privkey_bytes.as_slice())
-        .context("Invalid Ed25519 private key")?;
+    use ed25519_dalek::{Signer, SigningKey};
+    let signing_key =
+        SigningKey::try_from(privkey_bytes.as_slice()).context("Invalid Ed25519 private key")?;
     let pubkey = signing_key.verifying_key();
 
     let msg = format!("{}{}", pkg_id.canonical(), content_hash);
@@ -125,12 +125,10 @@ pub async fn run(
     );
     pb_zk.set_message("Computing Groth16 SNARK...");
 
-    let validator = ZkValidator::new()
-        .context("Failed to initialize ZK validator")?;
+    let validator = ZkValidator::new().context("Failed to initialize ZK validator")?;
 
     let mut hash_bytes = [0u8; 32];
-    let hash_decoded = hex::decode(&content_hash)
-        .context("content_hash is not valid hex")?;
+    let hash_decoded = hex::decode(&content_hash).context("content_hash is not valid hex")?;
     if hash_decoded.len() == 32 {
         hash_bytes.copy_from_slice(&hash_decoded);
     } else {
@@ -138,11 +136,11 @@ pub async fn run(
     }
 
     // Compute manifest hash so the proof binds to the declared manifest.
-    let manifest_bytes = serde_json::to_vec(&request.manifest)
-        .context("Failed to serialize manifest")?;
+    let manifest_bytes =
+        serde_json::to_vec(&request.manifest).context("Failed to serialize manifest")?;
     let manifest_hash_hex = common::sha256_hex(&manifest_bytes);
-    let manifest_hash_decoded = hex::decode(&manifest_hash_hex)
-        .context("manifest hash is not valid hex")?;
+    let manifest_hash_decoded =
+        hex::decode(&manifest_hash_hex).context("manifest hash is not valid hex")?;
     let mut manifest_hash_bytes = [0u8; 32];
     if manifest_hash_decoded.len() == 32 {
         manifest_hash_bytes.copy_from_slice(&manifest_hash_decoded);
@@ -157,18 +155,25 @@ pub async fn run(
         false, // Sandbox result — determined by validators, not publisher
     );
 
-    let proof = validator.generate_proof(&zk_inputs)
+    let proof = validator
+        .generate_proof(&zk_inputs)
         .context("ZK proof generation failed")?;
-    let proof_bytes = ZkValidator::serialize_proof(&proof)
-        .context("ZK proof serialization failed")?;
+    let proof_bytes =
+        ZkValidator::serialize_proof(&proof).context("ZK proof serialization failed")?;
     pb_zk.finish_with_message("✓ ZK content-hash attestation generated");
 
     // ── 6. Submit via gRPC (Primary High-Speed Tunnel) ────────────────────────
-    let base_url = node_url.unwrap_or("localhost").trim_start_matches("http://").trim_start_matches("https://").split(':').next().unwrap_or("localhost");
+    let base_url = node_url
+        .unwrap_or("localhost")
+        .trim_start_matches("http://")
+        .trim_start_matches("https://")
+        .split(':')
+        .next()
+        .unwrap_or("localhost");
     let grpc_url = format!("http://{}:50051", base_url);
-    
+
     println!("  Submitting via gRPC to {} ...", grpc_url);
-    
+
     if let Ok(mut client) = RegistryServiceClient::connect(grpc_url).await {
         let grpc_req = SubmitRequest {
             ecosystem: pkg_id.ecosystem.clone(),
@@ -186,7 +191,7 @@ pub async fn run(
             signatures: signatures.clone(),
             threshold: if publisher_pubkeys.len() >= 2 { 2 } else { 1 },
         };
-        
+
         match client.submit_package(grpc_req).await {
             Ok(resp) => {
                 println!("\n  ✓ gRPC: {}", resp.into_inner().message);
@@ -201,32 +206,39 @@ pub async fn run(
     // ── 7. Fallback to REST (Legacy) ──────────────────────────────────────────
     let url = format!(
         "{}/v1/packages",
-        node_url.unwrap_or("https://registry.chain-pkg.io").trim_end_matches('/')
+        node_url
+            .unwrap_or("https://registry.chain-pkg.io")
+            .trim_end_matches('/')
     );
 
     let pb_submit = ProgressBar::with_draw_target(Some(0), ProgressDrawTarget::stderr());
-    pb_submit.set_style(ProgressStyle::default_spinner()
-        .template("{spinner:.green} {msg}")
-        .expect("Valid spinner template"));
+    pb_submit.set_style(
+        ProgressStyle::default_spinner()
+            .template("{spinner:.green} {msg}")
+            .expect("Valid spinner template"),
+    );
     pb_submit.set_message(format!("Submitting to {}", url));
-    
+
     let resp = reqwest::Client::new()
         .post(&url)
         .json(&request)
         .send()
         .await
         .context("Failed to reach registry node")?;
-    
+
     pb_submit.finish_and_clear();
 
     if resp.status().is_success() {
         println!("\n  ✓ Package submitted to pending pool.");
         println!("    It will be assigned to validator nodes via VRF and");
-        println!("    verified through PBFT consensus. Use `creg status {}` to check.", pkg_id.canonical());
+        println!(
+            "    verified through PBFT consensus. Use `creg status {}` to check.",
+            pkg_id.canonical()
+        );
     } else {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        
+
         // Provide user-friendly error messages
         let error_msg = match status.as_u16() {
             403 => format!("Insufficient stake. Run: creg stake --amount 0.01eth"),
@@ -237,7 +249,7 @@ pub async fn run(
             500..=599 => format!("Server error. Please try again later."),
             _ => format!("HTTP {}: {}", status, body),
         };
-        
+
         bail!("✗ Submission failed: {}", error_msg);
     }
 
@@ -260,20 +272,22 @@ fn create_progress_bar(total_bytes: u64, msg: &str) -> ProgressBar {
 /// Upload tarball bytes to IPFS with progress indication and return the CID.
 async fn pin_to_ipfs_with_progress(bytes: &[u8], pb: &ProgressBar) -> Result<String> {
     // Try CREG_IPFS_URL first, then fallback to localhost, then dev stub.
-    let ipfs_base = std::env::var("CREG_IPFS_URL")
-        .unwrap_or_else(|_| "http://127.0.0.1:5001".to_string());
+    let ipfs_base =
+        std::env::var("CREG_IPFS_URL").unwrap_or_else(|_| "http://127.0.0.1:5001".to_string());
     let add_url = format!("{}/api/v0/add", ipfs_base.trim_end_matches('/'));
 
     use reqwest::multipart;
-    
-    let form = multipart::Form::new()
-        .part("file", multipart::Part::bytes(bytes.to_vec()).file_name("package.tgz"));
+
+    let form = multipart::Form::new().part(
+        "file",
+        multipart::Part::bytes(bytes.to_vec()).file_name("package.tgz"),
+    );
 
     // We do not simulate progress here anymore. Instead, we let reqwest handle the actual network transfer.
     pb.set_style(
         indicatif::ProgressStyle::default_spinner()
             .template("{spinner:.green} {msg} {bytes}/{total_bytes}")
-            .expect("Valid progress bar template")
+            .expect("Valid progress bar template"),
     );
 
     let local = reqwest::Client::new()
@@ -287,7 +301,10 @@ async fn pin_to_ipfs_with_progress(bytes: &[u8], pb: &ProgressBar) -> Result<Str
     match local {
         Ok(resp) if resp.status().is_success() => {
             #[derive(serde::Deserialize)]
-            struct IpfsResponse { #[serde(rename = "Hash")] hash: String }
+            struct IpfsResponse {
+                #[serde(rename = "Hash")]
+                hash: String,
+            }
             let r: IpfsResponse = resp.json().await?;
             Ok(r.hash)
         }
@@ -297,7 +314,11 @@ async fn pin_to_ipfs_with_progress(bytes: &[u8], pb: &ProgressBar) -> Result<Str
             bail!("IPFS upload failed (HTTP {}): {}", status, body)
         }
         Err(e) => {
-            bail!("IPFS daemon not reachable at {}. Please start 'ipfs daemon'. Error: {}", ipfs_base, e)
+            bail!(
+                "IPFS daemon not reachable at {}. Please start 'ipfs daemon'. Error: {}",
+                ipfs_base,
+                e
+            )
         }
     }
 }
@@ -322,7 +343,10 @@ fn detect_package_id(tarball_bytes: &[u8]) -> Result<PackageId> {
             let mut content = String::new();
             entry.read_to_string(&mut content)?;
             #[derive(serde::Deserialize)]
-            struct PkgJson { name: String, version: String }
+            struct PkgJson {
+                name: String,
+                version: String,
+            }
             let p: PkgJson = serde_json::from_str(&content)?;
             return Ok(PackageId::new("npm", p.name, p.version));
         }
@@ -331,7 +355,7 @@ fn detect_package_id(tarball_bytes: &[u8]) -> Result<PackageId> {
             let mut content = String::new();
             entry.read_to_string(&mut content)?;
             // Very simple parse — a full implementation uses toml crate.
-            let name    = extract_toml_field(&content, "name").unwrap_or("unknown");
+            let name = extract_toml_field(&content, "name").unwrap_or("unknown");
             let version = extract_toml_field(&content, "version").unwrap_or("0.0.0");
             return Ok(PackageId::new("cargo", name, version));
         }
@@ -344,7 +368,7 @@ fn extract_toml_field<'a>(content: &'a str, field: &str) -> Option<&'a str> {
     let prefix = format!("{} = \"", field);
     let line = content.lines().find(|l| l.starts_with(&prefix))?;
     let start = prefix.len();
-    let end   = line[start..].find('"')? + start;
+    let end = line[start..].find('"')? + start;
     Some(&line[start..end])
 }
 
@@ -383,18 +407,27 @@ fn sign_with_pgp_if_configured(tarball: &[u8]) -> Result<(Option<String>, Option
 
     let status = std::process::Command::new("gpg")
         .args([
-            "--batch", "--yes", "--no-tty",
-            "--pinentry-mode", "loopback",
-            "--secret-keyring", key_path.to_str().unwrap_or(""),
-            "--detach-sign", "--armor",
-            "--output", sig_tmp.to_str().unwrap_or(""),
+            "--batch",
+            "--yes",
+            "--no-tty",
+            "--pinentry-mode",
+            "loopback",
+            "--secret-keyring",
+            key_path.to_str().unwrap_or(""),
+            "--detach-sign",
+            "--armor",
+            "--output",
+            sig_tmp.to_str().unwrap_or(""),
             tarball_tmp.to_str().unwrap_or(""),
         ])
         .status()
         .context("Failed to invoke gpg — ensure GnuPG is installed")?;
 
     if !status.success() {
-        anyhow::bail!("gpg exited with status {}. Check CREG_PGP_PRIVATE_KEY_PATH and gpg-agent.", status);
+        anyhow::bail!(
+            "gpg exited with status {}. Check CREG_PGP_PRIVATE_KEY_PATH and gpg-agent.",
+            status
+        );
     }
 
     let sig_armored = std::fs::read_to_string(&sig_tmp)
@@ -403,9 +436,12 @@ fn sign_with_pgp_if_configured(tarball: &[u8]) -> Result<(Option<String>, Option
     // Export the corresponding public key in armored form.
     let pubkey_output = std::process::Command::new("gpg")
         .args([
-            "--batch", "--no-tty",
-            "--export", "--armor",
-            "--secret-keyring", key_path.to_str().unwrap_or(""),
+            "--batch",
+            "--no-tty",
+            "--export",
+            "--armor",
+            "--secret-keyring",
+            key_path.to_str().unwrap_or(""),
         ])
         .output()
         .context("Failed to export GPG public key")?;
@@ -422,31 +458,35 @@ fn sign_with_pgp_if_configured(tarball: &[u8]) -> Result<(Option<String>, Option
 
 /// Encrypt the tarball for the validator set using AES-GCM-256 and ECIES.
 fn encrypt_for_validators(data: &[u8]) -> Result<(Vec<u8>, String)> {
-    use aes_gcm::{Aes256Gcm, Key, Nonce, aead::{Aead, KeyInit}};
-    use rand::{RngCore, thread_rng};
-    
+    use aes_gcm::{
+        aead::{Aead, KeyInit},
+        Aes256Gcm, Key, Nonce,
+    };
+    use rand::{thread_rng, RngCore};
+
     // 1. Generate ephemeral symmetric key
     let mut aes_key = [0u8; 32];
     thread_rng().fill_bytes(&mut aes_key);
     let key = Key::<Aes256Gcm>::from_slice(&aes_key);
     let cipher = Aes256Gcm::new(key);
-    
+
     // 2. Encrypt payload
     let mut nonce_bytes = [0u8; 12];
     thread_rng().fill_bytes(&mut nonce_bytes);
     let nonce = Nonce::from_slice(&nonce_bytes);
-    
-    let ciphertext = cipher.encrypt(nonce, data)
+
+    let ciphertext = cipher
+        .encrypt(nonce, data)
         .map_err(|e| anyhow::anyhow!("Encryption failed: {}", e))?;
-    
+
     // 3. Wrap key for validators (Demo: use a cluster-wide shared secret or ECIES)
     // For this implementation, we bundle the AES key + nonce.
     // In production, this entire string is encrypted with the Validator Set's Master PubKey.
     let bundle = format!("{}:{}", hex::encode(aes_key), hex::encode(nonce_bytes));
-    
+
     // Prepend nonce to ciphertext for easier retrieval
     let mut final_payload = nonce_bytes.to_vec();
     final_payload.extend(ciphertext);
-    
+
     Ok((final_payload, bundle))
 }

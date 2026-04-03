@@ -1,8 +1,8 @@
 // crates/validator/src/report.rs
 
-pub use common::{PackageId, Finding, FindingSeverity};
-use crate::static_analysis::StaticAnalysisResult;
 use crate::sandbox::SandboxResult;
+use crate::static_analysis::StaticAnalysisResult;
+pub use common::{Finding, FindingSeverity, PackageId};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,14 +56,23 @@ impl ValidationReport {
     /// True if any Critical or High findings were recorded.
     pub fn has_critical_findings(&self) -> bool {
         self.findings.iter().any(|f| {
-            matches!(f.severity, FindingSeverity::Critical | FindingSeverity::High)
+            matches!(
+                f.severity,
+                FindingSeverity::Critical | FindingSeverity::High
+            )
         })
     }
 
     /// Concise summary of all critical/high findings for the rejection reason.
     pub fn critical_finding_summary(&self) -> String {
-        self.findings.iter()
-            .filter(|f| matches!(f.severity, FindingSeverity::Critical | FindingSeverity::High))
+        self.findings
+            .iter()
+            .filter(|f| {
+                matches!(
+                    f.severity,
+                    FindingSeverity::Critical | FindingSeverity::High
+                )
+            })
             .map(|f| format!("[{}] {}", f.id, f.description))
             .collect::<Vec<_>>()
             .join("; ")

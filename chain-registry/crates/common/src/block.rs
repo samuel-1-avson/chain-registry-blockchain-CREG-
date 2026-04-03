@@ -1,8 +1,8 @@
 // crates/common/src/block.rs
 
-use serde::{Deserialize, Serialize};
-use chrono::{DateTime, Utc};
 use crate::{sha256_hex, ChainRecord};
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 
 /// A single block in the package registry blockchain.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -14,8 +14,8 @@ pub struct Block {
 impl Block {
     /// Compute the block hash over the serialized header.
     pub fn hash(&self) -> String {
-        let header_bytes = serde_json::to_vec(&self.header)
-            .expect("BlockHeader must be serializable");
+        let header_bytes =
+            serde_json::to_vec(&self.header).expect("BlockHeader must be serializable");
         sha256_hex(&header_bytes)
     }
 
@@ -85,9 +85,7 @@ pub enum Transaction {
         stake: u64,
     },
     /// A validator left the active set.
-    ValidatorLeave {
-        validator_id: String,
-    },
+    ValidatorLeave { validator_id: String },
     /// A publisher rotated their Ed25519 signing key.
     RotatePublisherKey {
         canonical_prefix: String,
@@ -105,8 +103,15 @@ pub fn merkle_root(txs: &[Transaction]) -> String {
     if txs.is_empty() {
         return sha256_hex(b"empty");
     }
-    let mut hashes: Vec<String> = txs.iter()
-        .map(|tx| sha256_hex(serde_json::to_vec(tx).expect("transaction must be serializable").as_slice()))
+    let mut hashes: Vec<String> = txs
+        .iter()
+        .map(|tx| {
+            sha256_hex(
+                serde_json::to_vec(tx)
+                    .expect("transaction must be serializable")
+                    .as_slice(),
+            )
+        })
         .collect();
 
     while hashes.len() > 1 {
@@ -114,7 +119,8 @@ pub fn merkle_root(txs: &[Transaction]) -> String {
             let last = hashes.last().expect("hashes is non-empty").clone();
             hashes.push(last);
         }
-        hashes = hashes.chunks(2)
+        hashes = hashes
+            .chunks(2)
             .map(|pair| sha256_hex(format!("{}{}", pair[0], pair[1]).as_bytes()))
             .collect();
     }

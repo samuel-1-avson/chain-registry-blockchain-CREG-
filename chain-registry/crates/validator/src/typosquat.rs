@@ -21,10 +21,10 @@ static DATASET: Lazy<TyposquatDataset> = Lazy::new(|| {
 /// Result of a typosquat check.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TyposquatMatch {
-    pub candidate:  String,   // the package being checked
-    pub target:     String,   // the popular package it resembles
-    pub distance:   usize,    // edit distance
-    pub ecosystem:  String,
+    pub candidate: String, // the package being checked
+    pub target: String,    // the popular package it resembles
+    pub distance: usize,   // edit distance
+    pub ecosystem: String,
 }
 
 fn normalise(name: &str) -> String {
@@ -53,13 +53,19 @@ pub fn check(name: &str, ecosystem: &str) -> Option<TyposquatMatch> {
 
         // Flag if within edit distance threshold.
         let min_len = normalised.len().min(pop_norm.len());
-        let threshold = if min_len < 5 { 0 } else if min_len < 8 { 1 } else { 2 };
+        let threshold = if min_len < 5 {
+            0
+        } else if min_len < 8 {
+            1
+        } else {
+            2
+        };
 
         if dist > 0 && dist <= threshold {
             return Some(TyposquatMatch {
                 candidate: name.to_string(),
-                target:    popular.clone(),
-                distance:  dist,
+                target: popular.clone(),
+                distance: dist,
                 ecosystem: ecosystem.to_string(),
             });
         }

@@ -20,23 +20,21 @@ use std::{collections::HashMap, path::Path};
 
 /// Summary counts from an audit run.
 pub struct AuditSummary {
-    pub verified:   usize,
+    pub verified: usize,
     pub unverified: usize,
-    pub revoked:    usize,
-    pub unknown:    usize,
-    pub total:      usize,
+    pub revoked: usize,
+    pub unknown: usize,
+    pub total: usize,
 }
 
 pub async fn run(
     ecosystem: Option<&str>,
-    node_url:  Option<&str>,
-    strict:    bool,
-    json_out:  bool,
+    node_url: Option<&str>,
+    strict: bool,
+    json_out: bool,
 ) -> Result<i32> {
     // Detect ecosystem from cwd if not specified.
-    let eco = ecosystem
-        .map(String::from)
-        .unwrap_or_else(detect_ecosystem);
+    let eco = ecosystem.map(String::from).unwrap_or_else(detect_ecosystem);
 
     if eco == "unknown" {
         anyhow::bail!(
@@ -47,11 +45,11 @@ pub async fn run(
     }
 
     let packages = match eco.as_str() {
-        "npm"      => read_npm_packages()?,
-        "cargo"    => read_cargo_packages()?,
-        "pypi"     => read_pip_packages()?,
+        "npm" => read_npm_packages()?,
+        "cargo" => read_cargo_packages()?,
+        "pypi" => read_pip_packages()?,
         "rubygems" => read_gem_packages()?,
-        other      => anyhow::bail!("Unsupported ecosystem: {}", other),
+        other => anyhow::bail!("Unsupported ecosystem: {}", other),
     };
 
     if packages.is_empty() {
@@ -73,13 +71,13 @@ pub async fn run(
     let mut handles = Vec::new();
 
     for pkg in packages {
-        let sem   = std::sync::Arc::clone(&semaphore);
-        let url   = node_url.map(String::from);
+        let sem = std::sync::Arc::clone(&semaphore);
+        let url = node_url.map(String::from);
         let eco_c = eco.clone();
 
         handles.push(tokio::spawn(async move {
             let _permit = sem.acquire().await.unwrap();
-            let id      = PackageId::new(&eco_c, &pkg.name, &pkg.version);
+            let id = PackageId::new(&eco_c, &pkg.name, &pkg.version);
             let verdict = resolver::resolve_id(&id, url.as_deref()).await;
             (pkg, verdict)
         }));
@@ -93,13 +91,11 @@ pub async fn run(
     }
 
     // Sort: revoked first, then unverified, then unknown, then verified.
-    results.sort_by_key(|(_, v)| {
-        match v {
-            Err(_)                                          => 0,
-            Ok(v) if v.status.is_blocked()                 => 1,
-            Ok(v) if !v.status.is_safe()                   => 2,
-            _                                               => 3,
-        }
+    results.sort_by_key(|(_, v)| match v {
+        Err(_) => 0,
+        Ok(v) if v.status.is_blocked() => 1,
+        Ok(v) if !v.status.is_safe() => 2,
+        _ => 3,
     });
 
     if json_out {
@@ -107,24 +103,41 @@ pub async fn run(
     }
 
     // ── Terminal report ───────────────────────────────────────────────────────
-    let mut summary = AuditSummary { verified: 0, unverified: 0, revoked: 0, unknown: 0, total: results.len() };
+    let mut summary = AuditSummary {
+        verified: 0,
+        unverified: 0,
+        revoked: 0,
+        unknown: 0,
+        total: results.len(),
+    };
 
     for (pkg, verdict) in &results {
         match verdict {
             Err(e) => {
                 summary.unknown += 1;
-                println!("  {} {:50} {}", "?".dimmed(), pkg.canonical(), e.to_string().dimmed());
+                println!(
+                    "  {} {:50} {}",
+                    "?".dimmed(),
+                    pkg.canonical(),
+                    e.to_string().dimmed()
+                );
             }
             Ok(v) => match &v.status {
                 VerdictStatus::Verified { findings, .. } => {
                     summary.verified += 1;
                     // Only print verified in verbose mode — keep output clean.
-                    if findings.iter().any(|f| matches!(f.severity, common::FindingSeverity::Critical | common::FindingSeverity::High)) {
+                    if findings.iter().any(|f| {
+                        matches!(
+                            f.severity,
+                            common::FindingSeverity::Critical | common::FindingSeverity::High
+                        )
+                    }) {
                         println!(
                             "  {} {:50} {}",
                             "⚠".yellow().bold(),
                             pkg.canonical().yellow().bold(),
-                            format!("VERIFIED but with severe findings! ({})", findings.len()).yellow()
+                            format!("VERIFIED but with severe findings! ({})", findings.len())
+                                .yellow()
                         );
                     }
                 }
@@ -155,7 +168,7 @@ pub async fn run(
                         "unknown to chain registry".dimmed()
                     );
                 }
-            }
+            },
         }
     }
 
@@ -167,25 +180,42 @@ pub async fn run(
         "▣".dimmed(),
         summary.verified.to_string().green(),
         summary.unverified.to_string().yellow(),
-        if summary.revoked > 0 { summary.revoked.to_string().red().bold() } else { summary.revoked.to_string().green() },
+        if summary.revoked > 0 {
+            summary.revoked.to_string().red().bold()
+        } else {
+            summary.revoked.to_string().green()
+        },
         summary.unknown.to_string().dimmed(),
     );
     println!("  {} total packages audited\n", summary.total);
 
     // ── Exit code ─────────────────────────────────────────────────────────────
     if summary.revoked > 0 {
-        println!("  {} {} revoked package(s) found — remove them immediately!", "✗".red().bold(), summary.revoked);
+        println!(
+            "  {} {} revoked package(s) found — remove them immediately!",
+            "✗".red().bold(),
+            summary.revoked
+        );
         return Ok(1);
     }
     if strict && (summary.unverified > 0 || summary.unknown > 0) {
-        println!("  {} {} unverified/unknown package(s) (--strict mode)", "⚠".yellow(), summary.unverified + summary.unknown);
+        println!(
+            "  {} {} unverified/unknown package(s) (--strict mode)",
+            "⚠".yellow(),
+            summary.unverified + summary.unknown
+        );
         return Ok(2);
     }
     println!("  {} No revoked packages found.", "✓".green().bold());
     Ok(0)
 }
 
-fn print_json_report(results: &[(InstalledPackage, Result<common::TrustVerdict, anyhow::Error>)]) -> Result<i32> {
+fn print_json_report(
+    results: &[(
+        InstalledPackage,
+        Result<common::TrustVerdict, anyhow::Error>,
+    )],
+) -> Result<i32> {
     let entries: Vec<_> = results.iter().map(|(pkg, verdict)| {
         serde_json::json!({
             "canonical": pkg.canonical(),
@@ -213,15 +243,16 @@ fn print_json_report(results: &[(InstalledPackage, Result<common::TrustVerdict, 
         })
     }).collect();
 
-    let revoked = entries.iter()
-        .filter(|e| e["status"] == "revoked")
-        .count();
+    let revoked = entries.iter().filter(|e| e["status"] == "revoked").count();
 
-    println!("{}", serde_json::to_string_pretty(&serde_json::json!({
-        "total": entries.len(),
-        "revoked": revoked,
-        "packages": entries,
-    }))?);
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&serde_json::json!({
+            "total": entries.len(),
+            "revoked": revoked,
+            "packages": entries,
+        }))?
+    );
 
     Ok(if revoked > 0 { 1 } else { 0 })
 }
@@ -230,9 +261,9 @@ fn print_json_report(results: &[(InstalledPackage, Result<common::TrustVerdict, 
 
 #[derive(Debug, Clone)]
 pub struct InstalledPackage {
-    pub name:    String,
+    pub name: String,
     pub version: String,
-    pub eco:     String,
+    pub eco: String,
 }
 
 impl InstalledPackage {
@@ -269,7 +300,11 @@ fn read_npm_packages() -> Result<Vec<InstalledPackage>> {
             }
             let name = path.trim_start_matches("node_modules/").to_string();
             if let Some(version) = entry.version {
-                result.push(InstalledPackage { name, version, eco: "npm".into() });
+                result.push(InstalledPackage {
+                    name,
+                    version,
+                    eco: "npm".into(),
+                });
             }
         }
     }
@@ -287,7 +322,7 @@ fn read_cargo_packages() -> Result<Vec<InstalledPackage>> {
 
     // Simple TOML-style parser for Cargo.lock [[package]] sections.
     let mut in_package = false;
-    let mut name    = String::new();
+    let mut name = String::new();
     let mut version = String::new();
 
     for line in content.lines() {
@@ -295,7 +330,9 @@ fn read_cargo_packages() -> Result<Vec<InstalledPackage>> {
         if line == "[[package]]" {
             if in_package && !name.is_empty() && !version.is_empty() {
                 result.push(InstalledPackage {
-                    name: name.clone(), version: version.clone(), eco: "cargo".into()
+                    name: name.clone(),
+                    version: version.clone(),
+                    eco: "cargo".into(),
                 });
             }
             in_package = true;
@@ -311,7 +348,11 @@ fn read_cargo_packages() -> Result<Vec<InstalledPackage>> {
     }
     // Flush last package.
     if in_package && !name.is_empty() && !version.is_empty() {
-        result.push(InstalledPackage { name, version, eco: "cargo".into() });
+        result.push(InstalledPackage {
+            name,
+            version,
+            eco: "cargo".into(),
+        });
     }
 
     Ok(result)
@@ -324,18 +365,24 @@ fn read_pip_packages() -> Result<Vec<InstalledPackage>> {
         let mut result = Vec::new();
         for line in content.lines() {
             let line = line.trim();
-            if line.is_empty() || line.starts_with('#') { continue; }
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
             // Handle "package==version", "package>=version", "package"
             let (name, version) = if let Some(pos) = line.find("==") {
-                (&line[..pos], &line[pos+2..])
+                (&line[..pos], &line[pos + 2..])
             } else if let Some(pos) = line.find(">=") {
-                (&line[..pos], &line[pos+2..])
+                (&line[..pos], &line[pos + 2..])
             } else {
                 (line, "latest")
             };
             result.push(InstalledPackage {
                 name: name.trim().to_string(),
-                version: version.split_whitespace().next().unwrap_or("latest").to_string(),
+                version: version
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("latest")
+                    .to_string(),
                 eco: "pypi".into(),
             });
         }
@@ -350,9 +397,9 @@ fn read_pip_packages() -> Result<Vec<InstalledPackage>> {
     for line in stdout.lines() {
         if let Some(pos) = line.find("==") {
             result.push(InstalledPackage {
-                name:    line[..pos].to_string(),
-                version: line[pos+2..].to_string(),
-                eco:     "pypi".into(),
+                name: line[..pos].to_string(),
+                version: line[pos + 2..].to_string(),
+                eco: "pypi".into(),
             });
         }
     }
@@ -376,9 +423,13 @@ fn read_gem_packages() -> Result<Vec<InstalledPackage>> {
             // 4-space indent = top-level gem entry "    name (version)"
             let entry = line.trim();
             if let Some(pos) = entry.find(" (") {
-                let name    = entry[..pos].to_string();
-                let version = entry[pos+2..].trim_end_matches(')').to_string();
-                result.push(InstalledPackage { name, version, eco: "rubygems".into() });
+                let name = entry[..pos].to_string();
+                let version = entry[pos + 2..].trim_end_matches(')').to_string();
+                result.push(InstalledPackage {
+                    name,
+                    version,
+                    eco: "rubygems".into(),
+                });
             }
         } else if line.is_empty() {
             in_gems = false;
@@ -390,27 +441,29 @@ fn read_gem_packages() -> Result<Vec<InstalledPackage>> {
 /// `creg audit --fix` — attempt to auto-remediate audit findings.
 /// For each revoked package: removes it from package.json/requirements.txt
 /// and suggests a replacement from chain-verified alternatives.
-pub async fn run_fix(
-    ecosystem: Option<&str>,
-    node_url:  Option<&str>,
-) -> Result<i32> {
+pub async fn run_fix(ecosystem: Option<&str>, node_url: Option<&str>) -> Result<i32> {
     let eco = ecosystem.map(String::from).unwrap_or_else(detect_ecosystem);
     let packages = match eco.as_str() {
-        "npm"      => read_npm_packages()?,
-        "cargo"    => read_cargo_packages()?,
-        "pypi"     => read_pip_packages()?,
+        "npm" => read_npm_packages()?,
+        "cargo" => read_cargo_packages()?,
+        "pypi" => read_pip_packages()?,
         "rubygems" => read_gem_packages()?,
-        other      => anyhow::bail!("Unsupported ecosystem: {}", other),
+        other => anyhow::bail!("Unsupported ecosystem: {}", other),
     };
 
-    println!("{} Running audit --fix for {} ({} packages)...", "→".cyan(), eco, packages.len());
+    println!(
+        "{} Running audit --fix for {} ({} packages)...",
+        "→".cyan(),
+        eco,
+        packages.len()
+    );
 
     let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(8));
     let mut handles = Vec::new();
 
     for pkg in packages {
-        let sem  = std::sync::Arc::clone(&semaphore);
-        let url  = node_url.map(String::from);
+        let sem = std::sync::Arc::clone(&semaphore);
+        let url = node_url.map(String::from);
         let eco_c = eco.clone();
         handles.push(tokio::spawn(async move {
             let _permit = sem.acquire().await.unwrap();
@@ -425,13 +478,21 @@ pub async fn run_fix(
         if let Ok((pkg, verdict)) = h.await {
             if let Ok(v) = verdict {
                 if let VerdictStatus::Revoked { reason, .. } = &v.status {
-                    println!("  {} {} is REVOKED ({})", "✗".red().bold(), pkg.canonical().red(), reason);
+                    println!(
+                        "  {} {} is REVOKED ({})",
+                        "✗".red().bold(),
+                        pkg.canonical().red(),
+                        reason
+                    );
                     // Try to find a non-revoked alternative by checking the chain
                     // for the same package name at a different version.
                     if let Ok(alt) = find_safe_alternative(&pkg, node_url).await {
                         println!("    {} Alternative: {}", "→".cyan(), alt.green());
                     } else {
-                        println!("    {} No safe alternative found automatically. Remove manually.", "⚠".yellow());
+                        println!(
+                            "    {} No safe alternative found automatically. Remove manually.",
+                            "⚠".yellow()
+                        );
                     }
                     fixed += 1;
                 }
@@ -440,22 +501,29 @@ pub async fn run_fix(
     }
 
     if fixed == 0 {
-        println!("{} No revoked packages found — nothing to fix.", "✓".green().bold());
+        println!(
+            "{} No revoked packages found — nothing to fix.",
+            "✓".green().bold()
+        );
         Ok(0)
     } else {
-        println!("\n{} {} revoked package(s) flagged. Update your manifest and re-run `creg audit`.", "⚠".yellow(), fixed);
+        println!(
+            "\n{} {} revoked package(s) flagged. Update your manifest and re-run `creg audit`.",
+            "⚠".yellow(),
+            fixed
+        );
         Ok(1)
     }
 }
 
 /// Try to find a chain-verified alternative version for a revoked package.
 async fn find_safe_alternative(pkg: &InstalledPackage, node_url: Option<&str>) -> Result<String> {
-    let base = node_url
-        .map(String::from)
-        .unwrap_or_else(|| std::env::var("CREG_NODE_URL")
-            .unwrap_or_else(|_| "http://localhost:8080".into()));
+    let base = node_url.map(String::from).unwrap_or_else(|| {
+        std::env::var("CREG_NODE_URL").unwrap_or_else(|_| "http://localhost:8080".into())
+    });
 
-    let search_url = format!("{}/v1/packages/search?q={}&ecosystem={}",
+    let search_url = format!(
+        "{}/v1/packages/search?q={}&ecosystem={}",
         base.trim_end_matches('/'),
         urlencoding::encode(&pkg.name),
         urlencoding::encode(&pkg.eco),
@@ -487,10 +555,14 @@ fn detect_ecosystem() -> String {
     if cwd.join("package-lock.json").exists() || cwd.join("package.json").exists() {
         return "npm".into();
     }
-    if cwd.join("Cargo.lock").exists() { return "cargo".into(); }
+    if cwd.join("Cargo.lock").exists() {
+        return "cargo".into();
+    }
     if cwd.join("requirements.txt").exists() || cwd.join("Pipfile.lock").exists() {
         return "pypi".into();
     }
-    if cwd.join("Gemfile.lock").exists() { return "rubygems".into(); }
+    if cwd.join("Gemfile.lock").exists() {
+        return "rubygems".into();
+    }
     "unknown".into()
 }

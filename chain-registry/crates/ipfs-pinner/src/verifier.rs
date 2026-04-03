@@ -28,7 +28,8 @@ pub trait Verifier: Send + Sync {
     async fn verify(&self, cid: &str) -> Result<VerificationResult>;
 
     /// Verify with a specific timeout
-    async fn verify_with_timeout(&self, cid: &str, timeout_secs: u64) -> Result<VerificationResult>;
+    async fn verify_with_timeout(&self, cid: &str, timeout_secs: u64)
+        -> Result<VerificationResult>;
 
     /// Batch verify multiple CIDs
     async fn verify_batch(&self, cids: &[String]) -> Vec<Result<VerificationResult>>;
@@ -79,7 +80,11 @@ impl Verifier for IpfsVerifier {
         self.verify_with_timeout(cid, 30).await
     }
 
-    async fn verify_with_timeout(&self, cid: &str, timeout_secs: u64) -> Result<VerificationResult> {
+    async fn verify_with_timeout(
+        &self,
+        cid: &str,
+        timeout_secs: u64,
+    ) -> Result<VerificationResult> {
         let start = std::time::Instant::now();
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -95,36 +100,42 @@ impl Verifier for IpfsVerifier {
         let response_time_ms = start.elapsed().as_millis() as u64;
 
         // Determine availability based on results
-        let (is_available, provider_count, error, content_size) = match (providers_result, fetch_result) {
-            (Ok(providers), Ok(size)) => {
-                tracing::debug!(
-                    "CID {} verified: {} providers, size: {} bytes",
-                    cid,
-                    providers.len(),
-                    size.unwrap_or(0)
-                );
-                (true, providers.len() as u32, None, size)
-            }
-            (Ok(providers), Err(e)) if !providers.is_empty() => {
-                // Providers exist but fetch failed - might be network issues
-                tracing::warn!(
-                    "CID {} has {} providers but fetch failed: {}",
-                    cid,
-                    providers.len(),
-                    e
-                );
-                (true, providers.len() as u32, None, None)
-            }
-            (Err(e1), Err(e2)) => {
-                let error_msg = format!("DHT: {}, Fetch: {}", e1, e2);
-                tracing::warn!("CID {} unavailable: {}", cid, error_msg);
-                (false, 0, Some(error_msg), None)
-            }
-            _ => {
-                tracing::warn!("CID {} verification inconclusive", cid);
-                (false, 0, Some("Verification inconclusive".to_string()), None)
-            }
-        };
+        let (is_available, provider_count, error, content_size) =
+            match (providers_result, fetch_result) {
+                (Ok(providers), Ok(size)) => {
+                    tracing::debug!(
+                        "CID {} verified: {} providers, size: {} bytes",
+                        cid,
+                        providers.len(),
+                        size.unwrap_or(0)
+                    );
+                    (true, providers.len() as u32, None, size)
+                }
+                (Ok(providers), Err(e)) if !providers.is_empty() => {
+                    // Providers exist but fetch failed - might be network issues
+                    tracing::warn!(
+                        "CID {} has {} providers but fetch failed: {}",
+                        cid,
+                        providers.len(),
+                        e
+                    );
+                    (true, providers.len() as u32, None, None)
+                }
+                (Err(e1), Err(e2)) => {
+                    let error_msg = format!("DHT: {}, Fetch: {}", e1, e2);
+                    tracing::warn!("CID {} unavailable: {}", cid, error_msg);
+                    (false, 0, Some(error_msg), None)
+                }
+                _ => {
+                    tracing::warn!("CID {} verification inconclusive", cid);
+                    (
+                        false,
+                        0,
+                        Some("Verification inconclusive".to_string()),
+                        None,
+                    )
+                }
+            };
 
         let proof_hash = Self::generate_proof_hash(cid, is_available, timestamp, provider_count);
 
@@ -153,7 +164,7 @@ impl IpfsVerifier {
     /// Find providers for a CID via DHT
     async fn find_providers(&self, cid: &str) -> Result<Vec<String>> {
         let url = self.api_url("/api/v0/dht/findprovs");
-        
+
         let response = self
             .client
             .post(&url)
@@ -189,7 +200,7 @@ impl IpfsVerifier {
     /// Check if content is available by attempting a lightweight fetch
     async fn check_content_available(&self, cid: &str, timeout_secs: u64) -> Result<Option<u64>> {
         let url = self.api_url("/api/v0/files/stat");
-        
+
         let response = self
             .client
             .post(&url)
@@ -261,7 +272,11 @@ impl Verifier for MockVerifier {
         })
     }
 
-    async fn verify_with_timeout(&self, cid: &str, _timeout_secs: u64) -> Result<VerificationResult> {
+    async fn verify_with_timeout(
+        &self,
+        cid: &str,
+        _timeout_secs: u64,
+    ) -> Result<VerificationResult> {
         self.verify(cid).await
     }
 
@@ -282,7 +297,7 @@ mod tests {
     async fn test_mock_verifier_succeeds() {
         let verifier = MockVerifier::always_succeeds();
         let result = verifier.verify("QmTest").await.unwrap();
-        
+
         assert!(result.is_available);
         assert_eq!(result.provider_count, 5);
         assert!(result.error.is_none());
@@ -292,7 +307,7 @@ mod tests {
     async fn test_mock_verifier_fails() {
         let verifier = MockVerifier::always_fails();
         let result = verifier.verify("QmTest").await.unwrap();
-        
+
         assert!(!result.is_available);
         assert!(result.error.is_some());
     }

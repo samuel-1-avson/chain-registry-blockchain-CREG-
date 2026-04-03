@@ -23,30 +23,30 @@ use std::collections::HashMap;
 use thiserror::Error;
 use tracing::{debug, info, warn};
 
-pub mod risk_model;
 pub mod claims;
+pub mod risk_model;
 
-pub use risk_model::{RiskModel, RiskFactor, PackageMetrics};
-pub use claims::{Claim, ClaimStatus, ClaimEvaluator};
+pub use claims::{Claim, ClaimEvaluator, ClaimStatus};
+pub use risk_model::{PackageMetrics, RiskFactor, RiskModel};
 
 /// Errors that can occur in insurance operations
 #[derive(Error, Debug)]
 pub enum InsuranceError {
     #[error("Invalid coverage amount: {0}")]
     InvalidCoverage(f64),
-    
+
     #[error("Invalid premium: {0}")]
     InvalidPremium(f64),
-    
+
     #[error("Policy not found: {0}")]
     PolicyNotFound(String),
-    
+
     #[error("Claim not valid: {0}")]
     InvalidClaim(String),
-    
+
     #[error("Risk calculation error: {0}")]
     RiskCalculationError(String),
-    
+
     #[error("Pool insolvent: {0}")]
     PoolInsolvent(String),
 }
@@ -98,12 +98,12 @@ impl Policy {
             risk_score,
         }
     }
-    
+
     /// Check if policy is expired
     pub fn is_expired(&self) -> bool {
         Utc::now() > self.expires_at
     }
-    
+
     /// Get remaining coverage period in days
     pub fn remaining_days(&self) -> i64 {
         let now = Utc::now();
@@ -113,16 +113,16 @@ impl Policy {
             (self.expires_at - now).num_days()
         }
     }
-    
+
     /// Calculate refund amount if canceled
     pub fn refund_amount(&self) -> f64 {
         if !self.active || self.is_expired() {
             return 0.0;
         }
-        
+
         let remaining = self.remaining_days();
         let total = (self.expires_at - self.created_at).num_days();
-        
+
         // Pro-rata refund minus 10% fee
         let refund = (self.premium * remaining as f64 / total as f64) * 0.9;
         refund
@@ -142,45 +142,45 @@ impl PremiumCalculator {
     pub fn new(risk_model: RiskModel) -> Self {
         Self {
             risk_model,
-            base_rate: 0.01, // 1% base rate
+            base_rate: 0.01,    // 1% base rate
             min_premium: 0.001, // 0.001 ETH min
-            max_premium: 10.0, // 10 ETH max
+            max_premium: 10.0,  // 10 ETH max
         }
     }
-    
+
     /// Set base rate
     pub fn with_base_rate(mut self, rate: f64) -> Self {
         self.base_rate = rate;
         self
     }
-    
+
     /// Calculate premium for a package
     pub fn calculate(&self, package: &str, coverage: f64) -> Result<f64, InsuranceError> {
         if coverage <= 0.0 {
             return Err(InsuranceError::InvalidCoverage(coverage));
         }
-        
+
         // Get risk score
         let risk_score = self.risk_model.calculate_score(package)?;
-        
+
         // Calculate base premium
         let base_premium = coverage * self.base_rate;
-        
+
         // Apply risk multiplier
         let risk_multiplier = 1.0 + (risk_score / 100.0);
         let premium = base_premium * risk_multiplier;
-        
+
         // Apply bounds
         let premium = premium.max(self.min_premium).min(self.max_premium);
-        
+
         debug!(
             "Premium calculated for {}: {} ETH (risk: {}, coverage: {})",
             package, premium, risk_score, coverage
         );
-        
+
         Ok(premium)
     }
-    
+
     /// Calculate premium with custom risk factors
     pub fn calculate_with_factors(
         &self,
@@ -189,14 +189,14 @@ impl PremiumCalculator {
         factors: &HashMap<String, f64>,
     ) -> Result<f64, InsuranceError> {
         let base = self.calculate(package, coverage)?;
-        
+
         // Apply custom factors
         let multiplier: f64 = factors.values().product();
         let adjusted = base * multiplier;
-        
+
         Ok(adjusted.min(self.max_premium))
     }
-    
+
     /// Batch calculate premiums
     pub fn batch_calculate(
         &self,
@@ -234,29 +234,30 @@ impl InsurancePool {
             min_solvency_ratio: 1.0, // 100%
         }
     }
-    
+
     /// Add policy to pool
     pub fn add_policy(&mut self, policy: Policy) -> Result<(), InsuranceError> {
         // Check solvency
         let new_coverage = self.total_coverage + policy.coverage_amount;
         let solvency = self.balance / new_coverage;
-        
+
         if solvency < self.min_solvency_ratio {
-            return Err(InsuranceError::PoolInsolvent(
-                format!("Solvency would be {:.2}%", solvency * 100.0)
-            ));
+            return Err(InsuranceError::PoolInsolvent(format!(
+                "Solvency would be {:.2}%",
+                solvency * 100.0
+            )));
         }
-        
+
         self.balance += policy.premium;
         self.total_coverage = new_coverage;
         let policy_id = policy.id.clone();
         self.policies.insert(policy_id.clone(), policy);
 
         info!("Policy {} added to pool", policy_id);
-        
+
         Ok(())
     }
-    
+
     /// Process a claim
     pub fn process_claim(
         &mut self,
@@ -265,35 +266,35 @@ impl InsurancePool {
     ) -> Result<f64, InsuranceError> {
         let payout = if approved {
             let amount = claim.amount;
-            
+
             if amount > self.balance {
                 return Err(InsuranceError::PoolInsolvent(
-                    "Insufficient funds for payout".to_string()
+                    "Insufficient funds for payout".to_string(),
                 ));
             }
-            
+
             self.balance -= amount;
             self.total_coverage -= amount;
-            
+
             info!("Claim {} approved: {} ETH payout", claim.id, amount);
             amount
         } else {
             0.0
         };
-        
+
         let mut claim = claim;
-        claim.status = if approved { 
-            ClaimStatus::Approved 
-        } else { 
-            ClaimStatus::Rejected 
+        claim.status = if approved {
+            ClaimStatus::Approved
+        } else {
+            ClaimStatus::Rejected
         };
         claim.resolved_at = Some(Utc::now());
-        
+
         self.claims.push(claim);
-        
+
         Ok(payout)
     }
-    
+
     /// Get pool health metrics
     pub fn health(&self) -> PoolHealth {
         let solvency = if self.total_coverage > 0.0 {
@@ -301,13 +302,13 @@ impl InsurancePool {
         } else {
             1.0
         };
-        
+
         let utilization = if self.balance > 0.0 {
             self.total_coverage / (self.balance * 3.0) // Assume 3x leverage max
         } else {
             0.0
         };
-        
+
         PoolHealth {
             balance: self.balance,
             total_coverage: self.total_coverage,
@@ -317,17 +318,20 @@ impl InsurancePool {
             total_claims: self.claims.len(),
         }
     }
-    
+
     /// Replenish pool
     pub fn replenish(&mut self, amount: f64) {
         self.balance += amount;
-        info!("Pool replenished: +{} ETH, new balance: {} ETH", amount, self.balance);
+        info!(
+            "Pool replenished: +{} ETH, new balance: {} ETH",
+            amount, self.balance
+        );
     }
-    
+
     /// Clean up expired policies
     pub fn cleanup_expired(&mut self) -> usize {
         let before = self.policies.len();
-        
+
         self.policies.retain(|_, policy| {
             if policy.is_expired() {
                 self.total_coverage -= policy.coverage_amount;
@@ -336,12 +340,12 @@ impl InsurancePool {
                 true
             }
         });
-        
+
         let removed = before - self.policies.len();
         if removed > 0 {
             info!("Cleaned up {} expired policies", removed);
         }
-        
+
         removed
     }
 }
@@ -362,7 +366,7 @@ impl PoolHealth {
     pub fn is_healthy(&self) -> bool {
         self.solvency_ratio >= 1.0 && self.utilization_rate <= 0.8
     }
-    
+
     /// Get risk level
     pub fn risk_level(&self) -> RiskLevel {
         if self.solvency_ratio < 0.8 || self.utilization_rate > 0.9 {
@@ -412,7 +416,7 @@ mod tests {
             365,
             50.0,
         );
-        
+
         assert_eq!(policy.coverage_amount, 10.0);
         assert_eq!(policy.premium, 0.1);
         assert!(policy.active);
@@ -423,9 +427,9 @@ mod tests {
     fn test_premium_calculation() {
         let risk_model = RiskModel::default();
         let calculator = PremiumCalculator::new(risk_model);
-        
+
         let premium = calculator.calculate("npm:express@4.18.2", 10.0).unwrap();
-        
+
         // Should be at least base rate
         assert!(premium >= 0.1); // 1% of 10 ETH
     }
@@ -433,7 +437,7 @@ mod tests {
     #[test]
     fn test_insurance_pool() {
         let mut pool = InsurancePool::new(1000.0);
-        
+
         let policy = Policy::new(
             "policy-1".to_string(),
             "user-1".to_string(),
@@ -443,9 +447,9 @@ mod tests {
             365,
             50.0,
         );
-        
+
         pool.add_policy(policy).unwrap();
-        
+
         let health = pool.health();
         assert_eq!(health.balance, 1001.0);
         assert_eq!(health.total_coverage, 100.0);
@@ -462,7 +466,7 @@ mod tests {
             active_policies: 10,
             total_claims: 2,
         };
-        
+
         assert_eq!(health.risk_level(), RiskLevel::Critical);
         assert!(!health.is_healthy());
     }

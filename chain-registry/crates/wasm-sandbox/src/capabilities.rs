@@ -17,9 +17,7 @@ impl Default for CapabilitySet {
         // Default: minimal capabilities
         caps.insert("stdio".to_string());
         caps.insert("clock".to_string());
-        Self {
-            capabilities: caps,
-        }
+        Self { capabilities: caps }
     }
 }
 
@@ -30,27 +28,27 @@ impl CapabilitySet {
             capabilities: HashSet::new(),
         }
     }
-    
+
     /// Add a capability
     pub fn add(&mut self, cap: &str) {
         self.capabilities.insert(cap.to_string());
     }
-    
+
     /// Remove a capability
     pub fn remove(&mut self, cap: &str) {
         self.capabilities.remove(cap);
     }
-    
+
     /// Check if has capability
     pub fn has(&self, cap: &str) -> bool {
         self.capabilities.contains(cap)
     }
-    
+
     /// Get all capabilities
     pub fn list(&self) -> Vec<&String> {
         self.capabilities.iter().collect()
     }
-    
+
     /// Create a standard validator capability set
     pub fn validator() -> Self {
         let mut caps = Self::empty();
@@ -60,7 +58,7 @@ impl CapabilitySet {
         caps.add("read-tarball");
         caps
     }
-    
+
     /// Create an unrestricted capability set (dangerous!)
     pub fn unrestricted() -> Self {
         let mut caps = Self::empty();

@@ -4,9 +4,9 @@
 // Using a tokio broadcast channel allows multiple consumers (e.g. a
 // websocket event stream) to observe finalised transactions.
 
+use common::Transaction;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
-use common::Transaction;
 
 /// Capacity of the finalized-tx channel.
 /// At 5-second block intervals with ~100 tx/block this is comfortable.
@@ -32,7 +32,7 @@ pub async fn drain(rx: &FinalizedTxReceiver) -> Vec<Transaction> {
     let mut txs = Vec::new();
     loop {
         match guard.try_recv() {
-            Ok(tx)                               => txs.push(tx),
+            Ok(tx) => txs.push(tx),
             Err(mpsc::error::TryRecvError::Empty) => break,
             Err(mpsc::error::TryRecvError::Disconnected) => break,
         }

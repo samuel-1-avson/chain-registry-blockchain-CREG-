@@ -7,18 +7,21 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
+use futures::StreamExt;
 use ratatui::{
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout, Rect, Alignment},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::Span,
-    widgets::{Block, Borders, List, ListItem, Paragraph, Row, Table, Clear, Wrap},
+    widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Row, Table, Wrap},
     Frame, Terminal,
 };
 use serde_json::Value;
-use std::{io, time::{Duration, Instant}};
+use std::{
+    io,
+    time::{Duration, Instant},
+};
 use tokio::sync::mpsc;
-use futures::StreamExt;
 
 // const API_BASE: &str = "http://localhost:8080";
 
@@ -86,14 +89,18 @@ impl App {
     async fn refresh_data(&mut self) -> Result<()> {
         let client = reqwest::Client::new();
         let api_base = &self.api_base;
-        
+
         // Stats
-        if let Ok(res) = client.get(format!("{}/v1/chain/stats", api_base)).send().await {
+        if let Ok(res) = client
+            .get(format!("{}/v1/chain/stats", api_base))
+            .send()
+            .await
+        {
             if let Ok(json) = res.json::<Value>().await {
                 self.stats = json;
             }
         }
-        
+
         // Nodes
         if let Ok(res) = client.get(format!("{}/v1/nodes", api_base)).send().await {
             if let Ok(json) = res.json::<Vec<Value>>().await {
@@ -105,7 +112,11 @@ impl App {
         let height = self.stats["tip_height"].as_u64().unwrap_or(0);
         let mut recent_blocks = Vec::new();
         for h in (height.saturating_sub(20)..=height).rev() {
-            if let Ok(res) = client.get(format!("{}/v1/blocks/{}", api_base, h)).send().await {
+            if let Ok(res) = client
+                .get(format!("{}/v1/blocks/{}", api_base, h))
+                .send()
+                .await
+            {
                 if let Ok(json) = res.json::<Value>().await {
                     recent_blocks.push(json);
                 }
@@ -114,7 +125,11 @@ impl App {
         self.blocks = recent_blocks;
 
         // Bridge
-        if let Ok(res) = client.get(format!("{}/v1/bridge/status", api_base)).send().await {
+        if let Ok(res) = client
+            .get(format!("{}/v1/bridge/status", api_base))
+            .send()
+            .await
+        {
             if let Ok(json) = res.json::<Value>().await {
                 self.bridge = json;
             }
@@ -137,7 +152,8 @@ impl App {
 
     fn next_validator(&mut self) {
         if !self.nodes.is_empty() {
-            self.selection.validator_index = (self.selection.validator_index + 1) % self.nodes.len();
+            self.selection.validator_index =
+                (self.selection.validator_index + 1) % self.nodes.len();
         }
     }
 
@@ -160,8 +176,7 @@ pub async fn run(node_url: Option<&str>) -> Result<()> {
     let api_base = node_url
         .map(String::from)
         .unwrap_or_else(|| {
-            std::env::var("CREG_NODE_URL")
-                .unwrap_or_else(|_| "http://localhost:8080".into())
+            std::env::var("CREG_NODE_URL").unwrap_or_else(|_| "http://localhost:8080".into())
         })
         .trim_end_matches('/')
         .to_string();
@@ -256,7 +271,9 @@ pub async fn run(node_url: Option<&str>) -> Result<()> {
         // Handle SSE messages
         while let Ok(msg) = rx.try_recv() {
             app.events.insert(0, msg);
-            if app.events.len() > 100 { app.events.pop(); }
+            if app.events.len() > 100 {
+                app.events.pop();
+            }
         }
     }
 
@@ -287,12 +304,13 @@ async fn listen_sse(tx: mpsc::Sender<String>, api_base: String) -> Result<()> {
             while let Some(end) = buffer.find("\n\n") {
                 let msg = buffer[..end].to_string();
                 buffer = buffer[end + 2..].to_string();
-                
+
                 for line in msg.lines() {
                     if let Some(data) = line.strip_prefix("data: ") {
                         if let Ok(v) = serde_json::from_str::<Value>(data) {
                             let kind = v["kind"].as_str().unwrap_or("Event");
-                            let payload = v["payload"].get("canonical")
+                            let payload = v["payload"]
+                                .get("canonical")
                                 .or_else(|| v["payload"].get("hash"))
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("");
@@ -314,7 +332,7 @@ fn ui(f: &mut Frame, app: &App) {
         ViewState::ValidatorDetail => draw_validator_detail(f, app),
         ViewState::BlockDetail => draw_block_detail(f, app),
     }
-    
+
     if app.show_help {
         draw_help_popup(f);
     }
@@ -336,11 +354,22 @@ fn draw_main_view(f: &mut Frame, app: &App) {
     let pkg_count = app.stats["package_count"].as_u64().unwrap_or(0);
     let header_text = format!(
         " CHAIN REGISTRY | Height: {} | Verified: {} | Nodes: {} | Status: ONLINE",
-        height, pkg_count, app.nodes.len()
+        height,
+        pkg_count,
+        app.nodes.len()
     );
     let header = Paragraph::new(header_text)
-        .block(Block::default().borders(Borders::ALL).title(" DASHBOARD ").border_style(Style::default().fg(Color::Cyan)))
-        .style(Style::default().fg(Color::White).add_modifier(Modifier::BOLD));
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" DASHBOARD ")
+                .border_style(Style::default().fg(Color::Cyan)),
+        )
+        .style(
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        );
     f.render_widget(header, chunks[0]);
 
     // Main content
@@ -350,46 +379,75 @@ fn draw_main_view(f: &mut Frame, app: &App) {
         .split(chunks[1]);
 
     // Blocks list with selection
-    let block_items: Vec<ListItem> = app.blocks.iter().enumerate()
+    let block_items: Vec<ListItem> = app
+        .blocks
+        .iter()
+        .enumerate()
         .map(|(i, b)| {
             let h = b["header"]["height"].as_u64().unwrap_or(0);
             // Use merkle_root as block fingerprint — API has no top-level hash field
-            let root = b["header"]["merkle_root"].as_str().unwrap_or("0000000000000000");
+            let root = b["header"]["merkle_root"]
+                .as_str()
+                .unwrap_or("0000000000000000");
             let hash_display = &root[..root.len().min(14)];
             let txs = b["transactions"].as_array().map(|v| v.len()).unwrap_or(0);
-            let tx_kinds: Vec<&str> = b["transactions"].as_array()
+            let tx_kinds: Vec<&str> = b["transactions"]
+                .as_array()
                 .map(|arr| arr.iter().filter_map(|t| t["type"].as_str()).collect())
                 .unwrap_or_default();
-            let content = format!("#{:<4}  {}..  ({} tx: {})", h, hash_display, txs,
-                if tx_kinds.is_empty() { "empty".to_string() } else { tx_kinds.join(", ") });
-            
+            let content = format!(
+                "#{:<4}  {}..  ({} tx: {})",
+                h,
+                hash_display,
+                txs,
+                if tx_kinds.is_empty() {
+                    "empty".to_string()
+                } else {
+                    tx_kinds.join(", ")
+                }
+            );
+
             let style = if i == app.selection.block_index {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD).add_modifier(Modifier::REVERSED)
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
+                    .add_modifier(Modifier::REVERSED)
             } else if h == 0 {
                 Style::default().fg(Color::DarkGray)
             } else {
                 Style::default().fg(Color::Gray)
             };
-            
+
             ListItem::new(content).style(style)
         })
         .collect();
-    
+
     let block_list = List::new(block_items)
-        .block(Block::default().borders(Borders::ALL).title(" RECENT BLOCKS (↑↓ to navigate, b for details) "))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" RECENT BLOCKS (↑↓ to navigate, b for details) "),
+        )
         .highlight_style(Style::default().add_modifier(Modifier::ITALIC))
         .highlight_symbol(">>");
     f.render_widget(block_list, body_chunks[0]);
 
     // Validator table with selection
-    let rows: Vec<Row> = app.nodes.iter().enumerate()
+    let rows: Vec<Row> = app
+        .nodes
+        .iter()
+        .enumerate()
         .map(|(i, n)| {
-            let id     = n["id"].as_str().unwrap_or("?");
-            let alias  = n["alias"].as_str().unwrap_or("");
-            let stake  = format!("{} CREG", n["stake"].as_u64().unwrap_or(0));
-            let rep    = format!("{}/100", n["reputation"].as_u64().unwrap_or(0));
+            let id = n["id"].as_str().unwrap_or("?");
+            let alias = n["alias"].as_str().unwrap_or("");
+            let stake = format!("{} CREG", n["stake"].as_u64().unwrap_or(0));
+            let rep = format!("{}/100", n["reputation"].as_u64().unwrap_or(0));
             let status = n["status"].as_str().unwrap_or("?");
-            let label  = if alias.is_empty() { id.to_string() } else { format!("{} ({})", id, alias) };
+            let label = if alias.is_empty() {
+                id.to_string()
+            } else {
+                format!("{} ({})", id, alias)
+            };
 
             let style = if i == app.selection.validator_index {
                 Style::default().add_modifier(Modifier::REVERSED)
@@ -401,72 +459,118 @@ fn draw_main_view(f: &mut Frame, app: &App) {
                 Span::styled(label, Style::default().fg(Color::Yellow)),
                 Span::raw(stake),
                 Span::raw(rep),
-                Span::styled(status, Style::default().fg(
-                    if status == "online" || status == "self" { Color::Green } else { Color::Red }
-                )),
-            ]).style(style)
+                Span::styled(
+                    status,
+                    Style::default().fg(if status == "online" || status == "self" {
+                        Color::Green
+                    } else {
+                        Color::Red
+                    }),
+                ),
+            ])
+            .style(style)
         })
         .collect();
 
-    let network_table = Table::new(rows, [
+    let network_table = Table::new(
+        rows,
+        [
             Constraint::Percentage(35),
             Constraint::Percentage(25),
             Constraint::Percentage(15),
             Constraint::Percentage(25),
-        ])
-        .block(Block::default().borders(Borders::ALL).title(" NETWORK HEALTH (←→ navigate, v for details) "))
-        .header(Row::new(vec!["Validator", "Stake", "Rep", "Status"]).style(Style::default().fg(Color::Gray)));
+        ],
+    )
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" NETWORK HEALTH (←→ navigate, v for details) "),
+    )
+    .header(
+        Row::new(vec!["Validator", "Stake", "Rep", "Status"])
+            .style(Style::default().fg(Color::Gray)),
+    );
     f.render_widget(network_table, body_chunks[1]);
 
     // Event feed — pre-populated with block history, SSE events appended live
     let mut feed: Vec<ListItem> = Vec::new();
-    let tip   = app.stats["tip_height"].as_u64().unwrap_or(0);
-    let pkgs  = app.stats["package_count"].as_u64().unwrap_or(0);
-    let blks  = app.stats["block_count"].as_u64().unwrap_or(0);
-    feed.push(ListItem::new(format!(
-        "[chain]  height={}  packages={}  blocks={}", tip, pkgs, blks
-    )).style(Style::default().fg(Color::Cyan)));
+    let tip = app.stats["tip_height"].as_u64().unwrap_or(0);
+    let pkgs = app.stats["package_count"].as_u64().unwrap_or(0);
+    let blks = app.stats["block_count"].as_u64().unwrap_or(0);
+    feed.push(
+        ListItem::new(format!(
+            "[chain]  height={}  packages={}  blocks={}",
+            tip, pkgs, blks
+        ))
+        .style(Style::default().fg(Color::Cyan)),
+    );
     for b in app.blocks.iter().take(8) {
         let h = b["header"]["height"].as_u64().unwrap_or(0);
         let txs = b["transactions"].as_array().map(|v| v.len()).unwrap_or(0);
-        let tx_kinds: Vec<&str> = b["transactions"].as_array()
+        let tx_kinds: Vec<&str> = b["transactions"]
+            .as_array()
             .map(|arr| arr.iter().filter_map(|t| t["type"].as_str()).collect())
             .unwrap_or_default();
-        let summary = if tx_kinds.is_empty() { "empty".to_string() } else { tx_kinds.join(", ") };
-        feed.push(ListItem::new(format!("[block#{:<3}]  {} tx — {}", h, txs, summary))
-            .style(Style::default().fg(Color::DarkGray)));
+        let summary = if tx_kinds.is_empty() {
+            "empty".to_string()
+        } else {
+            tx_kinds.join(", ")
+        };
+        feed.push(
+            ListItem::new(format!("[block#{:<3}]  {} tx — {}", h, txs, summary))
+                .style(Style::default().fg(Color::DarkGray)),
+        );
     }
     for e in app.events.iter() {
         feed.push(ListItem::new(e.clone()).style(Style::default().fg(Color::Green)));
     }
     let event_list = List::new(feed)
-        .block(Block::default().borders(Borders::ALL)
-            .title(" LIVE FEED  (h=help  r=refresh  q=quit) "))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" LIVE FEED  (h=help  r=refresh  q=quit) "),
+        )
         .style(Style::default().fg(Color::Gray));
     f.render_widget(event_list, chunks[2]);
 
     // L2 Settlement Health
-    let rollup_status = app.bridge["bridge_sync_status"].as_str().unwrap_or("Dev (Local Anvil)");
-    let state_root    = app.bridge["current_state_root"].as_str().unwrap_or("n/a");
-    let eth_block     = app.bridge["last_finalized_eth_block"].as_u64().unwrap_or(0);
+    let rollup_status = app.bridge["bridge_sync_status"]
+        .as_str()
+        .unwrap_or("Dev (Local Anvil)");
+    let state_root = app.bridge["current_state_root"].as_str().unwrap_or("n/a");
+    let eth_block = app.bridge["last_finalized_eth_block"].as_u64().unwrap_or(0);
     let verified_count = app.stats["package_count"].as_u64().unwrap_or(0);
     let estimated_savings = verified_count * 115_000;
     let root_display = if state_root.len() > 18 {
-        format!("{}..{}", &state_root[..8], &state_root[state_root.len()-6..])
+        format!(
+            "{}..{}",
+            &state_root[..8],
+            &state_root[state_root.len() - 6..]
+        )
     } else {
         state_root.to_string()
     };
 
     let l2_info = format!(
         " Rollup: {}  |  Root: {}  |  L1 Block: #{}  |  Gas Saved: ~{}k units",
-        rollup_status, root_display, eth_block, estimated_savings / 1000
+        rollup_status,
+        root_display,
+        eth_block,
+        estimated_savings / 1000
     );
 
-    let border_color = if rollup_status.contains("Scaled") { Color::Green } else { Color::Yellow };
+    let border_color = if rollup_status.contains("Scaled") {
+        Color::Green
+    } else {
+        Color::Yellow
+    };
     let l2_block = Paragraph::new(l2_info)
-        .block(Block::default().borders(Borders::ALL)
-            .title(" L2 SETTLEMENT HEALTH ")
-            .border_style(Style::default().fg(border_color)))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" L2 SETTLEMENT HEALTH ")
+                .border_style(Style::default().fg(border_color)),
+        )
         .style(Style::default().fg(Color::White))
         .alignment(Alignment::Left);
     f.render_widget(l2_block, chunks[3]);
@@ -474,13 +578,13 @@ fn draw_main_view(f: &mut Frame, app: &App) {
 
 fn draw_package_detail(f: &mut Frame, app: &App) {
     let area = centered_rect(80, 80, f.size());
-    
+
     let block = app.get_selected_block();
     let content = if let Some(b) = block {
         let height = b["header"]["height"].as_u64().unwrap_or(0);
         let hash = b["hash"].as_str().unwrap_or("?");
         let txs = b["transactions"].as_array().map(|v| v.len()).unwrap_or(0);
-        
+
         format!(
             "Block Details\n\n\
             Height: {}\n\
@@ -492,18 +596,22 @@ fn draw_package_detail(f: &mut Frame, app: &App) {
     } else {
         "No block selected\n\nPress ESC or q to return".to_string()
     };
-    
+
     let paragraph = Paragraph::new(content)
-        .block(Block::default().borders(Borders::ALL).title(" Block Detail "))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Block Detail "),
+        )
         .wrap(Wrap { trim: true });
-    
+
     f.render_widget(Clear, area);
     f.render_widget(paragraph, area);
 }
 
 fn draw_validator_detail(f: &mut Frame, app: &App) {
     let area = centered_rect(60, 60, f.size());
-    
+
     let validator = app.get_selected_validator();
     let content = if let Some(v) = validator {
         let id = v["id"].as_str().unwrap_or("?");
@@ -511,7 +619,7 @@ fn draw_validator_detail(f: &mut Frame, app: &App) {
         let reputation = v["reputation"].as_u64().unwrap_or(0);
         let status = v["status"].as_str().unwrap_or("?");
         let alias = v["alias"].as_str().unwrap_or("?");
-        
+
         format!(
             "Validator Details\n\n\
             ID:         {}\n\
@@ -525,11 +633,15 @@ fn draw_validator_detail(f: &mut Frame, app: &App) {
     } else {
         "No validator selected\n\nPress ESC or q to return".to_string()
     };
-    
+
     let paragraph = Paragraph::new(content)
-        .block(Block::default().borders(Borders::ALL).title(" Validator Detail "))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Validator Detail "),
+        )
         .wrap(Wrap { trim: true });
-    
+
     f.render_widget(Clear, area);
     f.render_widget(paragraph, area);
 }
@@ -541,7 +653,7 @@ fn draw_block_detail(f: &mut Frame, app: &App) {
 
 fn draw_help_popup(f: &mut Frame) {
     let area = centered_rect(70, 70, f.size());
-    
+
     let help_text = r#"Keyboard Shortcuts
 
 Navigation:
@@ -562,11 +674,11 @@ Actions:
 
 Press any key to close this help.
 "#;
-    
+
     let paragraph = Paragraph::new(help_text)
         .block(Block::default().borders(Borders::ALL).title(" Help "))
         .wrap(Wrap { trim: true });
-    
+
     f.render_widget(Clear, area);
     f.render_widget(paragraph, area);
 }

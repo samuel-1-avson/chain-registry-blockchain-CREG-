@@ -11,14 +11,13 @@ use axum::{
 use chrono::{DateTime, Utc};
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 use tower_http::cors::{Any, CorsLayer};
 use tracing::info;
-use sha2::{Sha256, Digest};
-
 
 /// Faucet configuration
 #[derive(Clone)]
@@ -43,7 +42,7 @@ impl FaucetConfig {
     fn from_env() -> Self {
         Self {
             drip_amount: env_u128("FAUCET_DRIP_AMOUNT", 1000_000_000_000_000_000_000), // 1000 tCREG
-            cooldown_secs: env_u64("FAUCET_COOLDOWN_SECS", 60), // 1 minute
+            cooldown_secs: env_u64("FAUCET_COOLDOWN_SECS", 60),                        // 1 minute
             ip_cooldown_secs: env_u64("FAUCET_IP_COOLDOWN_SECS", 60),
             max_balance: env_u128("FAUCET_MAX_BALANCE", 10000_000_000_000_000_000_000), // 10k tCREG
             rpc_url: env_string("FAUCET_RPC_URL", "http://anvil:8545"),
@@ -153,16 +152,19 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"))
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .init();
 
     let config = FaucetConfig::from_env();
-    
+
     info!("╔════════════════════════════════════════════════════════╗");
     info!("║        Chain Registry Testnet Faucet                   ║");
     info!("╚════════════════════════════════════════════════════════╝");
-    info!("  Drip amount: {} tCREG", config.drip_amount / 10_u128.pow(18));
+    info!(
+        "  Drip amount: {} tCREG",
+        config.drip_amount / 10_u128.pow(18)
+    );
     info!("  Cooldown: {} seconds", config.cooldown_secs);
     info!("  Token contract: {}", config.token_contract);
     info!("  RPC: {}", config.rpc_url);
@@ -189,7 +191,7 @@ async fn main() -> anyhow::Result<()> {
 
     let port = env_u16("FAUCET_PORT", 8081);
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    
+
     info!("Faucet listening on http://{}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -209,7 +211,7 @@ async fn handle_drip(
     Json(request): Json<DripRequest>,
 ) -> impl IntoResponse {
     let address = request.address.to_lowercase();
-    
+
     // Validate address format
     if !address.starts_with("0x") || address.len() != 42 {
         return (
@@ -255,12 +257,17 @@ async fn handle_drip(
 
     // In a real implementation, this would call the Ethereum RPC
     // For now, simulate success and return a mock tx hash
-    let data = format!("{}{}{}", address, chrono::Utc::now().timestamp(), std::process::id());
+    let data = format!(
+        "{}{}{}",
+        address,
+        chrono::Utc::now().timestamp(),
+        std::process::id()
+    );
     let result = Sha256::digest(data.as_bytes());
     let mock_tx_hash = format!("0x{}", hex::encode(&result[..32]));
 
     state.rate_limiter.record_request(&address, &client_ip);
-    
+
     // Update stats
     let mut stats = state.stats.lock().await;
     stats.total_drips += 1;
@@ -271,9 +278,10 @@ async fn handle_drip(
     stats.last_drip = Some(Utc::now());
     drop(stats);
 
-    info!("Dripped {} tCREG to {} (tx: {})", 
+    info!(
+        "Dripped {} tCREG to {} (tx: {})",
         state.config.drip_amount / 10_u128.pow(18),
-        address, 
+        address,
         mock_tx_hash
     );
 
@@ -281,7 +289,9 @@ async fn handle_drip(
         StatusCode::OK,
         JsonResponse(DripResponse {
             success: true,
-            message: "Tokens sent successfully! (Simulated - connect to real RPC for actual transfer)".to_string(),
+            message:
+                "Tokens sent successfully! (Simulated - connect to real RPC for actual transfer)"
+                    .to_string(),
             tx_hash: Some(mock_tx_hash),
             amount: Some(format!("{}", state.config.drip_amount / 10_u128.pow(18))),
         }),
@@ -307,7 +317,7 @@ async fn get_balance(
     // In a real implementation, query the Ethereum RPC
     // For now, return a mock balance
     let mock_balance = 1000_000_000_000_000_000_000u128; // 1000 tCREG
-    
+
     JsonResponse(serde_json::json!({
         "address": address,
         "balance": mock_balance.to_string(),

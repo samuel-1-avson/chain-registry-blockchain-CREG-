@@ -22,20 +22,24 @@ const LOCKFILE_NAME: &str = "pkg-lock.chain";
 /// A single audit receipt entry in the lockfile.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuditReceipt {
-    pub canonical:    String,
-    pub status:       String,
-    pub block_hash:   Option<String>,
+    pub canonical: String,
+    pub status: String,
+    pub block_hash: Option<String>,
     pub content_hash: Option<String>,
-    pub ts:           String,
+    pub ts: String,
     /// "chain" | "cache" | "unverified" | "revoked"
-    pub source:       String,
+    pub source: String,
 }
 
 impl AuditReceipt {
     #[allow(dead_code)]
     pub fn from_verdict(verdict: &TrustVerdict) -> Self {
         let (status, block_hash, content_hash) = match &verdict.status {
-            VerdictStatus::Verified { block_hash, content_hash, .. } => (
+            VerdictStatus::Verified {
+                block_hash,
+                content_hash,
+                ..
+            } => (
                 "verified",
                 Some(block_hash.clone()),
                 Some(content_hash.clone()),
@@ -51,12 +55,12 @@ impl AuditReceipt {
         };
 
         Self {
-            canonical:    verdict.package.canonical(),
-            status:       status.to_string(),
+            canonical: verdict.package.canonical(),
+            status: status.to_string(),
             block_hash,
             content_hash,
-            ts:           Utc::now().to_rfc3339(),
-            source:       source.to_string(),
+            ts: Utc::now().to_rfc3339(),
+            source: source.to_string(),
         }
     }
 }
@@ -67,12 +71,10 @@ impl AuditReceipt {
 pub fn write_receipt(project_dir: &Path, verdict: &TrustVerdict) -> Result<()> {
     let path = find_lockfile_path(project_dir);
     let receipt = AuditReceipt::from_verdict(verdict);
-    let line = serde_json::to_string(&receipt)
-        .context("Failed to serialise audit receipt")?;
+    let line = serde_json::to_string(&receipt).context("Failed to serialise audit receipt")?;
 
     let mut content = if path.exists() {
-        std::fs::read_to_string(&path)
-            .context("Failed to read existing lockfile")?
+        std::fs::read_to_string(&path).context("Failed to read existing lockfile")?
     } else {
         format!("# pkg-lock.chain — chain registry audit receipts\n# Do not edit manually. Commit this file alongside your lockfile.\n")
     };
@@ -81,8 +83,7 @@ pub fn write_receipt(project_dir: &Path, verdict: &TrustVerdict) -> Result<()> {
     if !content.contains(&format!("\"canonical\":\"{}\"", receipt.canonical)) {
         content.push_str(&line);
         content.push('\n');
-        std::fs::write(&path, &content)
-            .context("Failed to write lockfile")?;
+        std::fs::write(&path, &content).context("Failed to write lockfile")?;
     }
 
     Ok(())
@@ -117,8 +118,11 @@ fn find_lockfile_path(start: &Path) -> PathBuf {
     let mut dir = start.to_path_buf();
     loop {
         let markers = [
-            "package.json", "Cargo.toml", "requirements.txt",
-            "Gemfile", "pom.xml",
+            "package.json",
+            "Cargo.toml",
+            "requirements.txt",
+            "Gemfile",
+            "pom.xml",
         ];
         if markers.iter().any(|m| dir.join(m).exists()) {
             return dir.join(LOCKFILE_NAME);
@@ -145,14 +149,16 @@ pub fn print_lockfile(project_dir: &Path) -> Result<()> {
     println!("  {}", "─".repeat(85));
 
     for r in &receipts {
-        let block = r.block_hash.as_deref()
+        let block = r
+            .block_hash
+            .as_deref()
             .map(|h| &h[..std::cmp::min(12, h.len())])
             .unwrap_or("—");
         let status_colored = match r.status.as_str() {
-            "verified"   => format!("\x1b[32m{:<12}\x1b[0m", r.status),
-            "revoked"    => format!("\x1b[31m{:<12}\x1b[0m", r.status),
+            "verified" => format!("\x1b[32m{:<12}\x1b[0m", r.status),
+            "revoked" => format!("\x1b[31m{:<12}\x1b[0m", r.status),
             "unverified" => format!("\x1b[33m{:<12}\x1b[0m", r.status),
-            _            => format!("{:<12}", r.status),
+            _ => format!("{:<12}", r.status),
         };
         println!("  {:<55} {} {}", r.canonical, status_colored, block);
     }
@@ -172,40 +178,48 @@ pub async fn diff(project_dir: &Path, node_url: Option<&str>) -> Result<()> {
         return Ok(());
     }
 
-    let base = node_url
-        .map(String::from)
-        .unwrap_or_else(|| std::env::var("CREG_NODE_URL")
-            .unwrap_or_else(|_| "http://localhost:8080".into()));
+    let base = node_url.map(String::from).unwrap_or_else(|| {
+        std::env::var("CREG_NODE_URL").unwrap_or_else(|_| "http://localhost:8080".into())
+    });
 
-    println!("{} Diffing {} lockfile entries against chain...", "→".cyan(), receipts.len());
+    println!(
+        "{} Diffing {} lockfile entries against chain...",
+        "→".cyan(),
+        receipts.len()
+    );
 
     let client = reqwest::Client::new();
     let mut drifted = 0usize;
 
     for receipt in &receipts {
-        let url = format!("{}/v1/packages/{}", base.trim_end_matches('/'),
-            urlencoding::encode(&receipt.canonical));
+        let url = format!(
+            "{}/v1/packages/{}",
+            base.trim_end_matches('/'),
+            urlencoding::encode(&receipt.canonical)
+        );
 
-        let chain_status = match client.get(&url)
+        let chain_status = match client
+            .get(&url)
             .timeout(std::time::Duration::from_secs(5))
             .send()
             .await
         {
-            Ok(r) if r.status().is_success() => {
-                r.json::<serde_json::Value>().await
-                    .ok()
-                    .and_then(|v| v.get("status").and_then(|s| s.as_str()).map(String::from))
-                    .unwrap_or_else(|| "unknown".into())
-            }
+            Ok(r) if r.status().is_success() => r
+                .json::<serde_json::Value>()
+                .await
+                .ok()
+                .and_then(|v| v.get("status").and_then(|s| s.as_str()).map(String::from))
+                .unwrap_or_else(|| "unknown".into()),
             _ => "unreachable".into(),
         };
 
         let local_status = receipt.status.as_str();
         let chain_changed = chain_status != local_status && chain_status != "unreachable";
-        let now_revoked   = chain_status == "revoked" && local_status != "revoked";
+        let now_revoked = chain_status == "revoked" && local_status != "revoked";
 
         if now_revoked {
-            println!("  {} {} — {} locally, {} on chain",
+            println!(
+                "  {} {} — {} locally, {} on chain",
                 "⚠".red().bold(),
                 receipt.canonical.white().bold(),
                 local_status.green(),
@@ -213,7 +227,8 @@ pub async fn diff(project_dir: &Path, node_url: Option<&str>) -> Result<()> {
             );
             drifted += 1;
         } else if chain_changed {
-            println!("  {} {} — {} → {}",
+            println!(
+                "  {} {} — {} → {}",
                 "~".yellow(),
                 receipt.canonical,
                 local_status.dimmed(),
@@ -229,7 +244,11 @@ pub async fn diff(project_dir: &Path, node_url: Option<&str>) -> Result<()> {
     if drifted == 0 {
         println!("{} Lockfile is in sync with chain.", "✓".green().bold());
     } else {
-        println!("{} {} package(s) have drifted from the lockfile.", "⚠".yellow().bold(), drifted);
+        println!(
+            "{} {} package(s) have drifted from the lockfile.",
+            "⚠".yellow().bold(),
+            drifted
+        );
         println!("  Run: creg audit --fix  to remediate automatically.");
     }
 
@@ -239,33 +258,35 @@ pub async fn diff(project_dir: &Path, node_url: Option<&str>) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use common::{PackageId, TrustVerdict, VerdictSource, VerdictStatus};
     use chrono::Utc;
+    use common::{PackageId, TrustVerdict, VerdictSource, VerdictStatus};
     use tempfile::TempDir;
 
     fn make_verdict(name: &str, verified: bool) -> TrustVerdict {
         let id = PackageId::new("npm", name, "1.0.0");
         let status = if verified {
             VerdictStatus::Verified {
-                block_hash:   "a".repeat(64),
+                block_hash: "a".repeat(64),
                 content_hash: "b".repeat(64),
-                ipfs_cid:     String::new(),
-                findings:     vec![],
+                ipfs_cid: String::new(),
+                findings: vec![],
             }
         } else {
             VerdictStatus::Unverified
         };
         TrustVerdict {
-            package:     id,
+            package: id,
             status,
             resolved_at: Utc::now(),
-            source:      VerdictSource::Chain { node_url: "http://localhost".into() },
+            source: VerdictSource::Chain {
+                node_url: "http://localhost".into(),
+            },
         }
     }
 
     #[test]
     fn write_and_read_receipt() {
-        let dir  = TempDir::new().unwrap();
+        let dir = TempDir::new().unwrap();
         // Create a package.json so find_lockfile_path resolves here.
         std::fs::write(dir.path().join("package.json"), "{}").unwrap();
 

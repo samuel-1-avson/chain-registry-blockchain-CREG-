@@ -11,36 +11,36 @@
 // (epidemic broadcast), but for a registry with tens of nodes, full fan-out is fine.
 
 // anyhow::Result is unused in this module
+use common::Block;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use common::Block;
 
 /// Message sent to peers when we produce a PBFT vote.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VoteGossip {
-    pub block_hash:       String,
-    pub validator_id:     String,
+    pub block_hash: String,
+    pub validator_id: String,
     /// Hex-encoded Ed25519 public key of the voting validator.
     pub validator_pubkey: String,
-    pub phase:            String,      // "prepare" | "commit"
-    pub approved:         bool,
-    pub reject_reason:    Option<String>,
+    pub phase: String, // "prepare" | "commit"
+    pub approved: bool,
+    pub reject_reason: Option<String>,
     /// Hex-encoded Ed25519 signature of "<block_hash>:<approved>".
-    pub signature:        String,
+    pub signature: String,
 }
 
 /// Message sent to peers when we write a new block.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlockAnnouncement {
-    pub height:    u64,
+    pub height: u64,
     pub block_hash: String,
-    pub proposer:  String,
+    pub proposer: String,
 }
 
 pub struct Gossip {
-    client:     Client,
-    peer_urls:  Vec<String>,
+    client: Client,
+    peer_urls: Vec<String>,
 }
 
 impl Gossip {
@@ -57,16 +57,20 @@ impl Gossip {
     /// Broadcast a PBFT vote to all known peers concurrently.
     /// Failures are logged but do not propagate — a peer being down is expected.
     pub async fn broadcast_vote(&self, vote: &VoteGossip) {
-        let tasks: Vec<_> = self.peer_urls.iter().map(|url| {
-            let client = self.client.clone();
-            let url    = format!("{}/v1/consensus/vote", url.trim_end_matches('/'));
-            let body   = vote.clone();
-            tokio::spawn(async move {
-                if let Err(e) = client.post(&url).json(&body).send().await {
-                    tracing::debug!("Vote gossip to {} failed: {}", url, e);
-                }
+        let tasks: Vec<_> = self
+            .peer_urls
+            .iter()
+            .map(|url| {
+                let client = self.client.clone();
+                let url = format!("{}/v1/consensus/vote", url.trim_end_matches('/'));
+                let body = vote.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = client.post(&url).json(&body).send().await {
+                        tracing::debug!("Vote gossip to {} failed: {}", url, e);
+                    }
+                })
             })
-        }).collect();
+            .collect();
 
         futures::future::join_all(tasks).await;
     }
@@ -77,21 +81,25 @@ impl Gossip {
     /// Peers will fetch the full block via GET /v1/blocks/:height if they need it.
     pub async fn announce_block(&self, block: &Block) {
         let ann = BlockAnnouncement {
-            height:     block.header.height,
+            height: block.header.height,
             block_hash: block.hash(),
-            proposer:   block.header.proposer_id.clone(),
+            proposer: block.header.proposer_id.clone(),
         };
 
-        let tasks: Vec<_> = self.peer_urls.iter().map(|url| {
-            let client = self.client.clone();
-            let url    = format!("{}/v1/blocks/announce", url.trim_end_matches('/'));
-            let body   = ann.clone();
-            tokio::spawn(async move {
-                if let Err(e) = client.post(&url).json(&body).send().await {
-                    tracing::debug!("Block announce to {} failed: {}", url, e);
-                }
+        let tasks: Vec<_> = self
+            .peer_urls
+            .iter()
+            .map(|url| {
+                let client = self.client.clone();
+                let url = format!("{}/v1/blocks/announce", url.trim_end_matches('/'));
+                let body = ann.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = client.post(&url).json(&body).send().await {
+                        tracing::debug!("Block announce to {} failed: {}", url, e);
+                    }
+                })
             })
-        }).collect();
+            .collect();
 
         futures::future::join_all(tasks).await;
     }
@@ -118,7 +126,9 @@ impl Gossip {
     /// Fetch the chain tip height from the first reachable peer.
     pub async fn peer_tip_height(&self) -> Option<u64> {
         #[derive(Deserialize)]
-        struct Stats { tip_height: u64 }
+        struct Stats {
+            tip_height: u64,
+        }
 
         for url in &self.peer_urls {
             let full_url = format!("{}/v1/chain/stats", url.trim_end_matches('/'));

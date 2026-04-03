@@ -50,10 +50,7 @@ pub struct SyncWorker {
 
 impl SyncWorker {
     /// Create a new sync worker and ensure the PostgreSQL schema exists.
-    pub async fn new(
-        config: SyncConfig,
-        chain: ChainStoreHandle,
-    ) -> Result<Self> {
+    pub async fn new(config: SyncConfig, chain: ChainStoreHandle) -> Result<Self> {
         crate::validate_connection_string(&config.pg_url)?;
 
         let pool = PgPool::connect(&config.pg_url)
@@ -61,10 +58,16 @@ impl SyncWorker {
             .context("connect to PostgreSQL")?;
 
         // Bootstrap schema - execute statements individually for better error handling
-        Self::bootstrap_schema(&pool).await.context("bootstrap PG schema")?;
+        Self::bootstrap_schema(&pool)
+            .await
+            .context("bootstrap PG schema")?;
 
         info!("PostgreSQL sync worker connected");
-        Ok(Self { pool, chain, config })
+        Ok(Self {
+            pool,
+            chain,
+            config,
+        })
     }
 
     /// Execute schema initialization statements.
@@ -75,13 +78,17 @@ impl SyncWorker {
                 id              INT PRIMARY KEY DEFAULT 1,
                 last_height     BIGINT NOT NULL DEFAULT 0,
                 updated_at      TIMESTAMPTZ DEFAULT NOW()
-            )"
-        ).execute(pool).await?;
+            )",
+        )
+        .execute(pool)
+        .await?;
 
         sqlx::query(
             "INSERT INTO sync_state (id, last_height) VALUES (1, 0)
-             ON CONFLICT (id) DO NOTHING"
-        ).execute(pool).await?;
+             ON CONFLICT (id) DO NOTHING",
+        )
+        .execute(pool)
+        .await?;
 
         // packages table
         sqlx::query(
@@ -103,22 +110,31 @@ impl SyncWorker {
                 revocation_reason TEXT,
                 created_at       TIMESTAMPTZ DEFAULT NOW(),
                 updated_at       TIMESTAMPTZ DEFAULT NOW()
-            )"
-        ).execute(pool).await?;
+            )",
+        )
+        .execute(pool)
+        .await?;
 
         // Add revocation_reason column if missing (migration)
         sqlx::query("ALTER TABLE packages ADD COLUMN IF NOT EXISTS revocation_reason TEXT")
-            .execute(pool).await?;
+            .execute(pool)
+            .await?;
 
         // Create indexes
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_packages_ecosystem ON packages(ecosystem)")
-            .execute(pool).await?;
-        sqlx::query("CREATE INDEX IF NOT EXISTS idx_packages_publisher ON packages(publisher_pubkey)")
-            .execute(pool).await?;
+            .execute(pool)
+            .await?;
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_packages_publisher ON packages(publisher_pubkey)",
+        )
+        .execute(pool)
+        .await?;
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_packages_status ON packages(status)")
-            .execute(pool).await?;
+            .execute(pool)
+            .await?;
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_packages_name ON packages(name)")
-            .execute(pool).await?;
+            .execute(pool)
+            .await?;
 
         // validator_votes table
         sqlx::query(
@@ -133,13 +149,19 @@ impl SyncWorker {
                 signed_at        TIMESTAMPTZ NOT NULL,
                 created_at       TIMESTAMPTZ DEFAULT NOW(),
                 UNIQUE (canonical, validator_id)
-            )"
-        ).execute(pool).await?;
+            )",
+        )
+        .execute(pool)
+        .await?;
 
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_votes_canonical ON validator_votes(canonical)")
-            .execute(pool).await?;
-        sqlx::query("CREATE INDEX IF NOT EXISTS idx_votes_validator ON validator_votes(validator_id)")
-            .execute(pool).await?;
+            .execute(pool)
+            .await?;
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_votes_validator ON validator_votes(validator_id)",
+        )
+        .execute(pool)
+        .await?;
 
         // blocks table
         sqlx::query(
@@ -151,11 +173,14 @@ impl SyncWorker {
                 proposer_id      TEXT NOT NULL,
                 timestamp        TIMESTAMPTZ NOT NULL,
                 created_at       TIMESTAMPTZ DEFAULT NOW()
-            )"
-        ).execute(pool).await?;
+            )",
+        )
+        .execute(pool)
+        .await?;
 
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_blocks_hash ON blocks(hash)")
-            .execute(pool).await?;
+            .execute(pool)
+            .await?;
 
         // publisher_stats table
         sqlx::query(
@@ -168,8 +193,10 @@ impl SyncWorker {
                 first_seen_at    TIMESTAMPTZ,
                 first_seen_days  INT DEFAULT 0,
                 updated_at       TIMESTAMPTZ DEFAULT NOW()
-            )"
-        ).execute(pool).await?;
+            )",
+        )
+        .execute(pool)
+        .await?;
 
         Ok(())
     }
@@ -191,10 +218,11 @@ impl SyncWorker {
             chain.tip_height().context("read tip height")?
         };
 
-        let last_synced: i64 = sqlx::query_scalar("SELECT last_height FROM sync_state WHERE id = 1")
-            .fetch_one(&self.pool)
-            .await
-            .context("fetch sync cursor")?;
+        let last_synced: i64 =
+            sqlx::query_scalar("SELECT last_height FROM sync_state WHERE id = 1")
+                .fetch_one(&self.pool)
+                .await
+                .context("fetch sync cursor")?;
 
         let last_synced = last_synced as u64;
         if tip <= last_synced {
@@ -206,7 +234,8 @@ impl SyncWorker {
         for height in (last_synced + 1)..=tip {
             let block = {
                 let chain = self.chain.read().await;
-                chain.get_block_by_height(height)
+                chain
+                    .get_block_by_height(height)
                     .with_context(|| format!("read block {}", height))?
             };
 
@@ -215,11 +244,13 @@ impl SyncWorker {
                     .await
                     .with_context(|| format!("apply block {}", height))?;
 
-                sqlx::query("UPDATE sync_state SET last_height = $1, updated_at = NOW() WHERE id = 1")
-                    .bind(height as i64)
-                    .execute(&self.pool)
-                    .await
-                    .context("update sync cursor")?;
+                sqlx::query(
+                    "UPDATE sync_state SET last_height = $1, updated_at = NOW() WHERE id = 1",
+                )
+                .bind(height as i64)
+                .execute(&self.pool)
+                .await
+                .context("update sync cursor")?;
             } else {
                 warn!("Block {} missing during sync", height);
                 break;

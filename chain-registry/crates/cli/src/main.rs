@@ -1,42 +1,42 @@
 // crates/cli/src/main.rs
 // `creg` — the main CLI. Wraps the shim logic with a friendly interface.
 
-mod intercept;
-mod output;
-mod install;
-mod publish;
-mod keygen;
-mod stake;
-mod watch;
-mod blocks;
+mod advanced;
 mod audit;
-mod verify;
-mod lockfile;
+mod batch;
+mod blocks;
+mod config_file;
 mod dashboard;
 mod dashboard_enhanced;
-mod config_file;
-mod batch;
-mod advanced;
-mod retry;
-mod doctor;
-mod search;
-mod info;
-mod graph;
 mod diff;
-mod policy;
-mod sbom;
-mod update;
+mod doctor;
+mod graph;
+mod info;
+mod install;
+mod intercept;
+mod keygen;
+mod lockfile;
 mod multisig;
+mod output;
+mod policy;
+mod publish;
+mod retry;
+mod sbom;
+mod search;
+mod stake;
 mod testnet;
+mod update;
+mod verify;
+mod watch;
 // New UX modules
-mod wizard;
-mod error_help;
 mod dashboard_interactive;
+mod error_help;
 mod explorer_tui;
+mod wizard;
 
-use clap::{Parser, Subcommand, CommandFactory};
-use clap_complete::{generate, Shell};
 use anyhow::Result;
+use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::{generate, Shell};
 use colored::Colorize;
 use tracing_subscriber::EnvFilter;
 
@@ -353,9 +353,7 @@ enum ConfigCommands {
     /// Show current configuration
     Show,
     /// Get a specific configuration value
-    Get {
-        key: String,
-    },
+    Get { key: String },
 }
 
 #[derive(Subcommand)]
@@ -482,7 +480,11 @@ enum MultisigCommands {
         #[arg(short, long, default_value = "2")]
         threshold: usize,
         /// Output session file path
-        #[arg(short = 's', long = "session-out", default_value = ".creg-multisig.json")]
+        #[arg(
+            short = 's',
+            long = "session-out",
+            default_value = ".creg-multisig.json"
+        )]
         session_out: std::path::PathBuf,
     },
     /// Add your signature to a multisig session
@@ -562,24 +564,49 @@ async fn main() -> Result<()> {
     let json_out = matches!(cli.output, OutputFormat::Json);
 
     match cli.command {
-        Commands::Install { package, ecosystem, unverified } => {
+        Commands::Install {
+            package,
+            ecosystem,
+            unverified,
+        } => {
             let allow_unverified = unverified || cli.unverified;
-            install::run(&package, ecosystem.as_deref(), allow_unverified, cli.node_url.as_deref()).await?;
-        }
-        Commands::Status { package, ecosystem, json } => {
-            let verdict = resolver::resolve(
+            install::run(
                 &package,
                 ecosystem.as_deref(),
+                allow_unverified,
                 cli.node_url.as_deref(),
-            ).await?;
+            )
+            .await?;
+        }
+        Commands::Status {
+            package,
+            ecosystem,
+            json,
+        } => {
+            let verdict =
+                resolver::resolve(&package, ecosystem.as_deref(), cli.node_url.as_deref()).await?;
             if json || json_out {
                 println!("{}", serde_json::to_string_pretty(&verdict)?);
             } else {
                 output::print_verdict(&verdict);
             }
         }
-        Commands::Publish { tarball, manifest, key, extra_keys, shield } => {
-            publish::run(&tarball, manifest.as_deref(), &key, &extra_keys, cli.node_url.as_deref(), shield).await?;
+        Commands::Publish {
+            tarball,
+            manifest,
+            key,
+            extra_keys,
+            shield,
+        } => {
+            publish::run(
+                &tarball,
+                manifest.as_deref(),
+                &key,
+                &extra_keys,
+                cli.node_url.as_deref(),
+                shield,
+            )
+            .await?;
         }
         Commands::SetupShims { shim_dir } => {
             intercept::setup_shims(shim_dir.as_deref())?;
@@ -595,7 +622,11 @@ async fn main() -> Result<()> {
                 resolver::cache::print_entries()?;
             }
         }
-        Commands::Keygen { role, key_path, rotate } => {
+        Commands::Keygen {
+            role,
+            key_path,
+            rotate,
+        } => {
             if rotate {
                 keygen::rotate(key_path.as_deref(), &role)?;
             } else {
@@ -606,7 +637,9 @@ async fn main() -> Result<()> {
             let d = dir.unwrap_or_else(|| std::env::current_dir().unwrap());
             if clear {
                 let path = d.join("pkg-lock.chain");
-                if path.exists() { std::fs::remove_file(&path)?; }
+                if path.exists() {
+                    std::fs::remove_file(&path)?;
+                }
                 println!("pkg-lock.chain cleared.");
             } else if diff {
                 lockfile::diff(&d, cli.node_url.as_deref()).await?;
@@ -614,7 +647,12 @@ async fn main() -> Result<()> {
                 lockfile::print_lockfile(&d)?;
             }
         }
-        Commands::Audit { ecosystem, strict, json, fix } => {
+        Commands::Audit {
+            ecosystem,
+            strict,
+            json,
+            fix,
+        } => {
             if fix {
                 let code = audit::run_fix(ecosystem.as_deref(), cli.node_url.as_deref()).await?;
                 std::process::exit(code);
@@ -624,28 +662,58 @@ async fn main() -> Result<()> {
                     cli.node_url.as_deref(),
                     strict,
                     json || json_out,
-                ).await?;
+                )
+                .await?;
                 std::process::exit(code);
             }
         }
-        Commands::Verify { package, ecosystem, checkpoint, json } => {
+        Commands::Verify {
+            package,
+            ecosystem,
+            checkpoint,
+            json,
+        } => {
             verify::run(
                 &package,
                 ecosystem.as_deref(),
                 cli.node_url.as_deref(),
-                checkpoint.as_ref().and_then(|p: &std::path::PathBuf| p.to_str()),
+                checkpoint
+                    .as_ref()
+                    .and_then(|p: &std::path::PathBuf| p.to_str()),
                 json || json_out,
-            ).await?;
+            )
+            .await?;
         }
-        Commands::Watch { filter, node_url, ci } => {
+        Commands::Watch {
+            filter,
+            node_url,
+            ci,
+        } => {
             let url = node_url.or(cli.node_url);
             watch::run(filter.as_deref(), url.as_deref(), ci).await?;
         }
-        Commands::Stake { amount, role, staking_addr, rpc_url, key } => {
+        Commands::Stake {
+            amount,
+            role,
+            staking_addr,
+            rpc_url,
+            key,
+        } => {
             use stake::{parse_amount, StakeRole};
             let eth = parse_amount(&amount)?;
-            let r   = if role == "validator" { StakeRole::Validator } else { StakeRole::Publisher };
-            stake::run(eth, r, key.as_deref(), rpc_url.as_deref(), staking_addr.as_deref()).await?;
+            let r = if role == "validator" {
+                StakeRole::Validator
+            } else {
+                StakeRole::Publisher
+            };
+            stake::run(
+                eth,
+                r,
+                key.as_deref(),
+                rpc_url.as_deref(),
+                staking_addr.as_deref(),
+            )
+            .await?;
         }
         Commands::Dashboard => {
             dashboard::run(cli.node_url.as_deref()).await?;
@@ -661,176 +729,258 @@ async fn main() -> Result<()> {
             let name = cmd.get_name().to_string();
             generate(shell, &mut cmd, name, &mut std::io::stdout());
         }
-        Commands::Config { command } => {
-            match command {
-                ConfigCommands::Init => {
-                    config_file::Config::init()?;
-                }
-                ConfigCommands::Show => {
-                    let config = config_file::Config::load()?;
-                    println!("{}", toml::to_string_pretty(&config)?);
-                }
-                ConfigCommands::Get { key } => {
-                    let config = config_file::Config::load()?;
-                    let value = match key.as_str() {
-                        "node.url"     => config.node.url,
-                        "node.timeout" => config.node.timeout.to_string(),
-                        "ipfs.url"     => config.ipfs.url,
-                        "display.colors" => config.display.colors.to_string(),
-                        _ => {
-                            eprintln!("Unknown config key: {}", key);
+        Commands::Config { command } => match command {
+            ConfigCommands::Init => {
+                config_file::Config::init()?;
+            }
+            ConfigCommands::Show => {
+                let config = config_file::Config::load()?;
+                println!("{}", toml::to_string_pretty(&config)?);
+            }
+            ConfigCommands::Get { key } => {
+                let config = config_file::Config::load()?;
+                let value = match key.as_str() {
+                    "node.url" => config.node.url,
+                    "node.timeout" => config.node.timeout.to_string(),
+                    "ipfs.url" => config.ipfs.url,
+                    "display.colors" => config.display.colors.to_string(),
+                    _ => {
+                        eprintln!("Unknown config key: {}", key);
+                        std::process::exit(1);
+                    }
+                };
+                println!("{}", value);
+            }
+        },
+        Commands::Batch { command } => match command {
+            BatchCommands::Verify {
+                packages,
+                ecosystem,
+            } => {
+                batch::verify_packages(packages, ecosystem.as_deref(), cli.node_url.as_deref())
+                    .await;
+            }
+            BatchCommands::Install {
+                packages,
+                ecosystem,
+                unverified,
+            } => {
+                let allow_unverified = unverified || cli.unverified;
+                batch::install_batch(
+                    packages,
+                    ecosystem.as_deref(),
+                    allow_unverified,
+                    cli.node_url.as_deref(),
+                )
+                .await?;
+            }
+            BatchCommands::VerifyDeps { manifest } => {
+                batch::verify_dependencies(manifest.as_deref(), cli.node_url.as_deref()).await?;
+            }
+        },
+        Commands::Advanced { command } => match command {
+            AdvancedCommands::ZkProof {
+                tarball,
+                manifest,
+                proof_out,
+                verify,
+            } => {
+                if let Some(proof_path) = verify {
+                    let valid = advanced::verify_zk_proof_file(&proof_path, &tarball).await?;
+                    if json_out {
+                        println!("{}", serde_json::json!({ "valid": valid }));
+                    } else {
+                        if valid {
+                            println!("{} ZK proof is VALID", "✓".green().bold());
+                        } else {
+                            println!("{} ZK proof is INVALID", "✗".red().bold());
                             std::process::exit(1);
                         }
-                    };
-                    println!("{}", value);
-                }
-            }
-        }
-        Commands::Batch { command } => {
-            match command {
-                BatchCommands::Verify { packages, ecosystem } => {
-                    batch::verify_packages(packages, ecosystem.as_deref(), cli.node_url.as_deref()).await;
-                }
-                BatchCommands::Install { packages, ecosystem, unverified } => {
-                    let allow_unverified = unverified || cli.unverified;
-                    batch::install_batch(packages, ecosystem.as_deref(), allow_unverified, cli.node_url.as_deref()).await?;
-                }
-                BatchCommands::VerifyDeps { manifest } => {
-                    batch::verify_dependencies(manifest.as_deref(), cli.node_url.as_deref()).await?;
-                }
-            }
-        }
-        Commands::Advanced { command } => {
-            match command {
-                AdvancedCommands::ZkProof { tarball, manifest, proof_out, verify } => {
-                    if let Some(proof_path) = verify {
-                        let valid = advanced::verify_zk_proof_file(&proof_path, &tarball).await?;
-                        if json_out {
-                            println!("{}", serde_json::json!({ "valid": valid }));
-                        } else {
-                            if valid {
-                                println!("{} ZK proof is VALID", "✓".green().bold());
-                            } else {
-                                println!("{} ZK proof is INVALID", "✗".red().bold());
-                                std::process::exit(1);
-                            }
-                        }
-                    } else {
-                        let output_path = proof_out.unwrap_or_else(|| std::path::PathBuf::from("proof.bin"));
-                        advanced::generate_and_save_zk_proof(&tarball, manifest.as_ref(), &output_path).await?;
                     }
+                } else {
+                    let output_path =
+                        proof_out.unwrap_or_else(|| std::path::PathBuf::from("proof.bin"));
+                    advanced::generate_and_save_zk_proof(&tarball, manifest.as_ref(), &output_path)
+                        .await?;
                 }
-                AdvancedCommands::MlVerify { tarball, ecosystem, json } => {
-                    let result = advanced::ml_verify(&tarball, &ecosystem).await?;
-                    if json || json_out {
-                        println!("{}", serde_json::json!({
+            }
+            AdvancedCommands::MlVerify {
+                tarball,
+                ecosystem,
+                json,
+            } => {
+                let result = advanced::ml_verify(&tarball, &ecosystem).await?;
+                if json || json_out {
+                    println!(
+                        "{}",
+                        serde_json::json!({
                             "threat_score": result.threat_score,
                             "threat_level": format!("{:?}", result.threat_level),
                             "confidence":   result.confidence,
-                        }));
-                    } else {
-                        println!("ML Verification Result:");
-                        println!("  Threat Score: {}/100", result.threat_score);
-                        println!("  Threat Level: {:?}", result.threat_level);
-                        println!("  Confidence:   {:.2}%", result.confidence * 100.0);
-                        println!("  Description:  {}", result.threat_level.description());
-                    }
+                        })
+                    );
+                } else {
+                    println!("ML Verification Result:");
+                    println!("  Threat Score: {}/100", result.threat_score);
+                    println!("  Threat Level: {:?}", result.threat_level);
+                    println!("  Confidence:   {:.2}%", result.confidence * 100.0);
+                    println!("  Description:  {}", result.threat_level.description());
                 }
-                AdvancedCommands::WasmValidate { tarball, name, version, ecosystem } => {
-                    let result = advanced::wasm_validate(&tarball, &name, &version, &ecosystem).await?;
-                    if json_out {
-                        println!("{}", serde_json::json!({
+            }
+            AdvancedCommands::WasmValidate {
+                tarball,
+                name,
+                version,
+                ecosystem,
+            } => {
+                let result = advanced::wasm_validate(&tarball, &name, &version, &ecosystem).await?;
+                if json_out {
+                    println!(
+                        "{}",
+                        serde_json::json!({
                             "success":   result.success,
                             "exit_code": result.exit_code,
                             "findings":  result.findings.len(),
-                        }));
-                    } else {
-                        println!("WASM Validation Result:");
-                        println!("  Success:   {}", result.success);
-                        println!("  Exit Code: {}", result.exit_code);
-                        println!("  CPU Time:  {}ms", result.resource_usage.cpu_time_ms);
-                        if !result.findings.is_empty() {
-                            println!("  Findings:");
-                            for f in &result.findings {
-                                println!("    - [{:?}] {}", f.severity, f.description);
-                            }
+                        })
+                    );
+                } else {
+                    println!("WASM Validation Result:");
+                    println!("  Success:   {}", result.success);
+                    println!("  Exit Code: {}", result.exit_code);
+                    println!("  CPU Time:  {}ms", result.resource_usage.cpu_time_ms);
+                    if !result.findings.is_empty() {
+                        println!("  Findings:");
+                        for f in &result.findings {
+                            println!("    - [{:?}] {}", f.severity, f.description);
                         }
                     }
-                }
-                AdvancedCommands::FullValidate { tarball, name, version, ecosystem, zk, out_dir } => {
-                    println!("Running full advanced validation pipeline...");
-                    println!("\n[1/3] ML-based threat detection...");
-                    let ml_result = advanced::ml_verify(&tarball, &ecosystem).await?;
-                    println!("  Score: {}/100 ({:?})", ml_result.threat_score, ml_result.threat_level);
-
-                    println!("\n[2/3] WASM sandbox validation...");
-                    let wasm_result = advanced::wasm_validate(&tarball, &name, &version, &ecosystem).await?;
-                    println!("  Success: {} (Exit: {})", wasm_result.success, wasm_result.exit_code);
-
-                    if zk {
-                        println!("\n[3/3] ZK proof generation...");
-                        let proof = advanced::generate_zk_proof(&tarball, None).await?;
-                        println!("  Proof size: {} bytes", proof.len());
-                        if let Some(out_dir) = out_dir {
-                            let proof_path = out_dir.join("proof.bin");
-                            tokio::fs::write(&proof_path, &proof).await?;
-                            println!("  Proof saved to {:?}", proof_path);
-                        }
-                    }
-                    println!("\n{} Validation complete!", "✓".green().bold());
                 }
             }
-        }
+            AdvancedCommands::FullValidate {
+                tarball,
+                name,
+                version,
+                ecosystem,
+                zk,
+                out_dir,
+            } => {
+                println!("Running full advanced validation pipeline...");
+                println!("\n[1/3] ML-based threat detection...");
+                let ml_result = advanced::ml_verify(&tarball, &ecosystem).await?;
+                println!(
+                    "  Score: {}/100 ({:?})",
+                    ml_result.threat_score, ml_result.threat_level
+                );
+
+                println!("\n[2/3] WASM sandbox validation...");
+                let wasm_result =
+                    advanced::wasm_validate(&tarball, &name, &version, &ecosystem).await?;
+                println!(
+                    "  Success: {} (Exit: {})",
+                    wasm_result.success, wasm_result.exit_code
+                );
+
+                if zk {
+                    println!("\n[3/3] ZK proof generation...");
+                    let proof = advanced::generate_zk_proof(&tarball, None).await?;
+                    println!("  Proof size: {} bytes", proof.len());
+                    if let Some(out_dir) = out_dir {
+                        let proof_path = out_dir.join("proof.bin");
+                        tokio::fs::write(&proof_path, &proof).await?;
+                        println!("  Proof saved to {:?}", proof_path);
+                    }
+                }
+                println!("\n{} Validation complete!", "✓".green().bold());
+            }
+        },
 
         // ── New commands ──────────────────────────────────────────────────────
         Commands::Doctor => {
             doctor::run(cli.node_url.as_deref()).await?;
         }
         Commands::Search { query, ecosystem } => {
-            search::run(&query, ecosystem.as_deref(), cli.node_url.as_deref(), json_out).await?;
+            search::run(
+                &query,
+                ecosystem.as_deref(),
+                cli.node_url.as_deref(),
+                json_out,
+            )
+            .await?;
         }
         Commands::Info { package, ecosystem } => {
-            info::run(&package, ecosystem.as_deref(), cli.node_url.as_deref(), json_out).await?;
+            info::run(
+                &package,
+                ecosystem.as_deref(),
+                cli.node_url.as_deref(),
+                json_out,
+            )
+            .await?;
         }
-        Commands::Graph { package, ecosystem, depth } => {
-            graph::run(&package, ecosystem.as_deref(), depth, cli.node_url.as_deref(), json_out).await?;
+        Commands::Graph {
+            package,
+            ecosystem,
+            depth,
+        } => {
+            graph::run(
+                &package,
+                ecosystem.as_deref(),
+                depth,
+                cli.node_url.as_deref(),
+                json_out,
+            )
+            .await?;
         }
         Commands::Diff { pkg_a, pkg_b } => {
             diff::run(&pkg_a, &pkg_b, cli.node_url.as_deref(), json_out).await?;
         }
-        Commands::Policy { command } => {
-            match command {
-                PolicyCommands::Show { pubkey } => {
-                    policy::show(pubkey.as_deref(), cli.node_url.as_deref(), json_out).await?;
-                }
-                PolicyCommands::Apply { policy_file, dry_run } => {
-                    policy::apply(&policy_file, dry_run).await?;
-                }
-                PolicyCommands::Init => {
-                    policy::show_policy_init()?;
-                }
+        Commands::Policy { command } => match command {
+            PolicyCommands::Show { pubkey } => {
+                policy::show(pubkey.as_deref(), cli.node_url.as_deref(), json_out).await?;
             }
-        }
-        Commands::Sbom { package, ecosystem, format, save } => {
+            PolicyCommands::Apply {
+                policy_file,
+                dry_run,
+            } => {
+                policy::apply(&policy_file, dry_run).await?;
+            }
+            PolicyCommands::Init => {
+                policy::show_policy_init()?;
+            }
+        },
+        Commands::Sbom {
+            package,
+            ecosystem,
+            format,
+            save,
+        } => {
             let fmt: sbom::SbomFormat = format.parse()?;
-            sbom::run(&package, ecosystem.as_deref(), fmt, save.as_deref(), cli.node_url.as_deref()).await?;
+            sbom::run(
+                &package,
+                ecosystem.as_deref(),
+                fmt,
+                save.as_deref(),
+                cli.node_url.as_deref(),
+            )
+            .await?;
         }
         Commands::Update { check } => {
             update::run(cli.node_url.as_deref(), check).await?;
         }
-        Commands::Multisig { command } => {
-            match command {
-                MultisigCommands::Init { tarball, threshold, session_out } => {
-                    multisig::init(&tarball, threshold, cli.node_url.as_deref(), &session_out).await?;
-                }
-                MultisigCommands::Sign { session, key } => {
-                    multisig::sign(&session, &key)?;
-                }
-                MultisigCommands::Submit { session, manifest } => {
-                    multisig::submit(&session, manifest.as_deref(), cli.node_url.as_deref()).await?;
-                }
+        Commands::Multisig { command } => match command {
+            MultisigCommands::Init {
+                tarball,
+                threshold,
+                session_out,
+            } => {
+                multisig::init(&tarball, threshold, cli.node_url.as_deref(), &session_out).await?;
             }
-        }
+            MultisigCommands::Sign { session, key } => {
+                multisig::sign(&session, &key)?;
+            }
+            MultisigCommands::Submit { session, manifest } => {
+                multisig::submit(&session, manifest.as_deref(), cli.node_url.as_deref()).await?;
+            }
+        },
         Commands::Init => {
             wizard::run().await?;
         }
@@ -840,28 +990,37 @@ async fn main() -> Result<()> {
         Commands::Explorer => {
             explorer_tui::run(cli.node_url.as_deref()).await?;
         }
-        Commands::Testnet { command } => {
-            match command {
-                TestnetCommands::Drip { address, faucet_url } => {
-                    testnet::drip(&address, faucet_url.as_deref()).await?;
-                }
-                TestnetCommands::Status { node_url } => {
-                    testnet::status(node_url.as_deref()).await?;
-                }
-                TestnetCommands::StakePublisher { amount, key, rpc_url } => {
-                    testnet::stake_publisher(amount, &key, rpc_url.as_deref()).await?;
-                }
-                TestnetCommands::StakeValidator { amount, key, rpc_url } => {
-                    testnet::stake_validator(amount, &key, rpc_url.as_deref()).await?;
-                }
-                TestnetCommands::Docs => {
-                    testnet::docs();
-                }
-                TestnetCommands::Reset { data_dir } => {
-                    testnet::reset(data_dir)?;
-                }
+        Commands::Testnet { command } => match command {
+            TestnetCommands::Drip {
+                address,
+                faucet_url,
+            } => {
+                testnet::drip(&address, faucet_url.as_deref()).await?;
             }
-        }
+            TestnetCommands::Status { node_url } => {
+                testnet::status(node_url.as_deref()).await?;
+            }
+            TestnetCommands::StakePublisher {
+                amount,
+                key,
+                rpc_url,
+            } => {
+                testnet::stake_publisher(amount, &key, rpc_url.as_deref()).await?;
+            }
+            TestnetCommands::StakeValidator {
+                amount,
+                key,
+                rpc_url,
+            } => {
+                testnet::stake_validator(amount, &key, rpc_url.as_deref()).await?;
+            }
+            TestnetCommands::Docs => {
+                testnet::docs();
+            }
+            TestnetCommands::Reset { data_dir } => {
+                testnet::reset(data_dir)?;
+            }
+        },
     }
     Ok(())
 }

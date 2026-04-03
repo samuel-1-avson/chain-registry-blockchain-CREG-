@@ -63,33 +63,28 @@ pub struct MultiChainClient {
 impl MultiChainClient {
     /// Create new multi-chain client
     pub fn new(configs: Vec<ChainConfig>) -> Self {
-        let chains = configs
-            .into_iter()
-            .map(|c| (c.name.clone(), c))
-            .collect();
-        
+        let chains = configs.into_iter().map(|c| (c.name.clone(), c)).collect();
+
         Self { chains }
     }
-    
+
     /// Get chain config by name
     pub fn get_chain(&self, name: &str) -> Option<&ChainConfig> {
         self.chains.get(name)
     }
-    
+
     /// List all supported chains
     pub fn list_chains(&self) -> Vec<&String> {
         self.chains.keys().collect()
     }
-    
+
     /// Arbitrum configuration
     pub fn arbitrum() -> ChainConfig {
         ChainConfig {
             name: "arbitrum".to_string(),
             chain_id: 42161,
             layerzero_id: 110,
-            rpc_urls: vec![
-                "https://arb1.arbitrum.io/rpc".to_string(),
-            ],
+            rpc_urls: vec!["https://arb1.arbitrum.io/rpc".to_string()],
             explorer: "https://arbiscan.io".to_string(),
             contracts: ContractAddresses {
                 registry: "".to_string(),
@@ -98,16 +93,14 @@ impl MultiChainClient {
             },
         }
     }
-    
+
     /// Optimism configuration
     pub fn optimism() -> ChainConfig {
         ChainConfig {
             name: "optimism".to_string(),
             chain_id: 10,
             layerzero_id: 111,
-            rpc_urls: vec![
-                "https://mainnet.optimism.io".to_string(),
-            ],
+            rpc_urls: vec!["https://mainnet.optimism.io".to_string()],
             explorer: "https://optimistic.etherscan.io".to_string(),
             contracts: ContractAddresses {
                 registry: "".to_string(),
@@ -116,16 +109,14 @@ impl MultiChainClient {
             },
         }
     }
-    
+
     /// Polygon configuration
     pub fn polygon() -> ChainConfig {
         ChainConfig {
             name: "polygon".to_string(),
             chain_id: 137,
             layerzero_id: 109,
-            rpc_urls: vec![
-                "https://polygon-rpc.com".to_string(),
-            ],
+            rpc_urls: vec!["https://polygon-rpc.com".to_string()],
             explorer: "https://polygonscan.com".to_string(),
             contracts: ContractAddresses {
                 registry: "".to_string(),
@@ -153,7 +144,7 @@ mod tests {
             MultiChainClient::arbitrum(),
             MultiChainClient::optimism(),
         ]);
-        
+
         assert_eq!(client.list_chains().len(), 2);
         assert!(client.get_chain("arbitrum").is_some());
         assert!(client.get_chain("optimism").is_some());

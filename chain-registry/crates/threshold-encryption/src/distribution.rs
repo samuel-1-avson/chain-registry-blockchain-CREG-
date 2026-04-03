@@ -85,20 +85,20 @@ impl ShareDistributor {
     /// Create a new share distributor
     pub fn new(threshold: u8, total_shares: u8) -> Result<Self, ThresholdError> {
         let te = ThresholdEncryption::new(threshold, total_shares)?;
-        
+
         Ok(Self {
             te,
             validator_keys: HashMap::new(),
             distributed_shares: HashMap::new(),
         })
     }
-    
+
     /// Register a validator's public key
     pub fn register_validator(&mut self, validator_id: String, public_key: Vec<u8>) {
         debug!("Registering validator {} with public key", validator_id);
         self.validator_keys.insert(validator_id, public_key);
     }
-    
+
     /// Generate and distribute shares for a package
     pub fn distribute_shares(
         &mut self,
@@ -107,31 +107,34 @@ impl ShareDistributor {
         access_policy: &AccessPolicy,
     ) -> Result<Vec<DistributedShare>, ThresholdError> {
         info!("Distributing shares for package: {}", package_canonical);
-        
+
         // Generate shares
         let shares = self.te.generate_shares(encryption_key)?;
-        
+
         // Select validators to receive shares
         let selected_validators = self.select_validators(access_policy)?;
-        
+
         if selected_validators.len() < self.te.threshold as usize {
             return Err(ThresholdError::InvalidThreshold(
                 self.te.threshold,
-                selected_validators.len() as u8
+                selected_validators.len() as u8,
             ));
         }
-        
+
         // Encrypt and distribute shares
         let mut distributed = Vec::new();
-        for (i, (share, validator_id)) in shares.iter().zip(selected_validators.iter()).enumerate() {
-            let public_key = self.validator_keys.get(validator_id)
-                .ok_or_else(|| ThresholdError::InvalidShare(
-                    format!("No public key for validator {}", validator_id)
-                ))?;
-            
+        for (i, (share, validator_id)) in shares.iter().zip(selected_validators.iter()).enumerate()
+        {
+            let public_key = self.validator_keys.get(validator_id).ok_or_else(|| {
+                ThresholdError::InvalidShare(format!(
+                    "No public key for validator {}",
+                    validator_id
+                ))
+            })?;
+
             // Encrypt share to validator's public key
             let encrypted_share = self.encrypt_share(share, public_key)?;
-            
+
             let distributed_share = DistributedShare {
                 validator_id: validator_id.clone(),
                 encrypted_share,
@@ -139,52 +142,60 @@ impl ShareDistributor {
                 distributed_at: current_timestamp(),
                 confirmed: false,
             };
-            
+
             distributed.push(distributed_share);
         }
-        
+
         // Cache distributed shares
-        self.distributed_shares.insert(package_canonical.to_string(), distributed.clone());
-        
+        self.distributed_shares
+            .insert(package_canonical.to_string(), distributed.clone());
+
         info!(
             "Distributed {} shares for {} to validators: {:?}",
             distributed.len(),
             package_canonical,
             selected_validators
         );
-        
+
         Ok(distributed)
     }
-    
+
     /// Select validators to receive shares based on access policy
-    fn select_validators(&self, access_policy: &AccessPolicy) -> Result<Vec<String>, ThresholdError> {
+    fn select_validators(
+        &self,
+        access_policy: &AccessPolicy,
+    ) -> Result<Vec<String>, ThresholdError> {
         let all_validators: Vec<String> = self.validator_keys.keys().cloned().collect();
-        
+
         if all_validators.len() < self.te.total_shares as usize {
             return Err(ThresholdError::InvalidThreshold(
                 self.te.total_shares,
-                all_validators.len() as u8
+                all_validators.len() as u8,
             ));
         }
-        
+
         // For now, select first N validators deterministically
         // In production, use VRF-based selection for fairness
         let selected: Vec<String> = all_validators
             .into_iter()
             .take(self.te.total_shares as usize)
             .collect();
-        
+
         Ok(selected)
     }
-    
+
     /// Encrypt a share to a validator's public key
-    fn encrypt_share(&self, share: &KeyShare, public_key: &[u8]) -> Result<Vec<u8>, ThresholdError> {
+    fn encrypt_share(
+        &self,
+        share: &KeyShare,
+        public_key: &[u8],
+    ) -> Result<Vec<u8>, ThresholdError> {
         use aes_gcm::{
             aead::{Aead, KeyInit},
             Aes256Gcm, Nonce,
         };
         use rand::RngCore;
-        
+
         // Derive encryption key from validator's public key
         let mut key = [0u8; 32];
         let mut hasher = sha2::Sha256::new();
@@ -192,46 +203,53 @@ impl ShareDistributor {
         hasher.update(b"share-encryption-salt");
         let hash = hasher.finalize();
         key.copy_from_slice(&hash[..32]);
-        
+
         let cipher = Aes256Gcm::new_from_slice(&key)
             .map_err(|e| ThresholdError::EncryptionError(e.to_string()))?;
-        
+
         let mut nonce_bytes = [0u8; 12];
         rand::thread_rng().fill_bytes(&mut nonce_bytes);
         let nonce = Nonce::from_slice(&nonce_bytes);
-        
+
         let plaintext = share.to_bytes();
         let ciphertext = cipher
             .encrypt(nonce, plaintext.as_ref())
             .map_err(|e| ThresholdError::EncryptionError(e.to_string()))?;
-        
+
         // Prepend nonce to ciphertext
         let mut result = nonce_bytes.to_vec();
         result.extend_from_slice(&ciphertext);
-        
+
         Ok(result)
     }
-    
+
     /// Get distributed shares for a package
     pub fn get_shares(&self, package_canonical: &str) -> Option<&Vec<DistributedShare>> {
         self.distributed_shares.get(package_canonical)
     }
-    
+
     /// Mark a share as confirmed received
-    pub fn confirm_share(&mut self, package_canonical: &str, validator_id: &str) -> Result<(), ThresholdError> {
+    pub fn confirm_share(
+        &mut self,
+        package_canonical: &str,
+        validator_id: &str,
+    ) -> Result<(), ThresholdError> {
         if let Some(shares) = self.distributed_shares.get_mut(package_canonical) {
             for share in shares.iter_mut() {
                 if share.validator_id == validator_id {
                     share.confirmed = true;
-                    debug!("Confirmed share for {} from {}", package_canonical, validator_id);
+                    debug!(
+                        "Confirmed share for {} from {}",
+                        package_canonical, validator_id
+                    );
                     return Ok(());
                 }
             }
         }
-        
+
         Err(ThresholdError::InvalidShare("Share not found".to_string()))
     }
-    
+
     /// Check if enough shares are confirmed for decryption
     pub fn can_decrypt(&self, package_canonical: &str) -> bool {
         if let Some(shares) = self.distributed_shares.get(package_canonical) {
@@ -296,22 +314,29 @@ impl DecryptionCoordinator {
             partial_shares: HashMap::new(),
         }
     }
-    
+
     /// Submit a decryption request
     pub fn request_decryption(&mut self, request: DecryptionRequest) -> Result<(), ThresholdError> {
-        info!("Decryption request for {} from {}", request.canonical, request.requestor);
-        
+        info!(
+            "Decryption request for {} from {}",
+            request.canonical, request.requestor
+        );
+
         // Validate request
         if !self.validate_request(&request) {
-            return Err(ThresholdError::InvalidShare("Invalid decryption request".to_string()));
+            return Err(ThresholdError::InvalidShare(
+                "Invalid decryption request".to_string(),
+            ));
         }
-        
-        self.pending_requests.insert(request.canonical.clone(), request);
-        self.partial_shares.insert(request.canonical.clone(), Vec::new());
-        
+
+        self.pending_requests
+            .insert(request.canonical.clone(), request);
+        self.partial_shares
+            .insert(request.canonical.clone(), Vec::new());
+
         Ok(())
     }
-    
+
     /// Submit a partial decryption from a validator
     pub fn submit_partial(
         &mut self,
@@ -322,24 +347,26 @@ impl DecryptionCoordinator {
             "Received partial decryption for {} from validator {}",
             canonical, response.validator_id
         );
-        
+
         // Verify response signature
         if !self.verify_response(&response) {
-            return Err(ThresholdError::InvalidShare("Invalid response signature".to_string()));
+            return Err(ThresholdError::InvalidShare(
+                "Invalid response signature".to_string(),
+            ));
         }
-        
+
         if let Some(shares) = self.partial_shares.get_mut(canonical) {
             shares.push(response);
-            
+
             // Check if we have enough shares
             if shares.len() >= self.distributor.te.threshold as usize {
                 info!("Sufficient shares received for {}", canonical);
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Check if decryption is ready (enough shares collected)
     pub fn is_ready(&self, canonical: &str) -> bool {
         if let Some(shares) = self.partial_shares.get(canonical) {
@@ -348,27 +375,28 @@ impl DecryptionCoordinator {
             false
         }
     }
-    
+
     /// Get collected shares for reconstruction
     pub fn get_collected_shares(&self, canonical: &str) -> Option<&Vec<DecryptionResponse>> {
         self.partial_shares.get(canonical)
     }
-    
+
     /// Validate decryption request (check authorization)
     fn validate_request(&self, request: &DecryptionRequest) -> bool {
         // Check timestamp (request must be recent)
         let now = current_timestamp();
-        if now - request.timestamp > 3600 { // 1 hour expiry
+        if now - request.timestamp > 3600 {
+            // 1 hour expiry
             warn!("Decryption request expired");
             return false;
         }
-        
+
         // TODO: Check if requestor is authorized based on access policy
         // TODO: Verify request signature
-        
+
         true
     }
-    
+
     /// Verify validator's response signature
     fn verify_response(&self, response: &DecryptionResponse) -> bool {
         // TODO: Implement Ed25519 signature verification
@@ -419,7 +447,7 @@ mod tests {
             signature: vec![],
             purpose: "Testing".to_string(),
         };
-        
+
         assert_eq!(request.canonical, "npm:test@1.0.0");
     }
 }

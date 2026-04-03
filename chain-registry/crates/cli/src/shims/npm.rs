@@ -66,7 +66,10 @@ async fn run_verified_install(ecosystem: &str, args: &[String]) -> i32 {
                 eprintln!("\x1b[32m✓ VERIFIED\x1b[0m {}", pkg);
             }
             Err(e) => {
-                eprintln!("\x1b[33m⚠ CHAIN UNREACHABLE\x1b[0m ({}). Proceeding with original registry.", e);
+                eprintln!(
+                    "\x1b[33m⚠ CHAIN UNREACHABLE\x1b[0m ({}). Proceeding with original registry.",
+                    e
+                );
             }
         }
     }
@@ -77,7 +80,10 @@ async fn run_verified_install(ecosystem: &str, args: &[String]) -> i32 {
 async fn run_real_pm(pm: &str, args: &[String]) -> i32 {
     // Find the real npm — skip the first match (our shim).
     let real = match which::which_all(pm)
-        .map(|mut it| { it.next(); it.next() })
+        .map(|mut it| {
+            it.next();
+            it.next()
+        })
         .ok()
         .flatten()
     {

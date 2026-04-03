@@ -126,10 +126,7 @@ impl DeepScanner {
             return Ok(mock_result());
         }
 
-        debug!(
-            "Loading ONNX session from {}",
-            self.model_path.display()
-        );
+        debug!("Loading ONNX session from {}", self.model_path.display());
 
         let mut session = create_onnx_session(&self.model_path)?;
 
@@ -191,7 +188,9 @@ impl DeepScanner {
         }
 
         suspicious_files.sort_by(|a, b| {
-            b.probability.partial_cmp(&a.probability).unwrap_or(std::cmp::Ordering::Equal)
+            b.probability
+                .partial_cmp(&a.probability)
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
         suspicious_files.truncate(10);
 
@@ -200,7 +199,9 @@ impl DeepScanner {
 
         debug!(
             "Deep scan complete: prob={:.4}, classification={:?}, flagged_files={}",
-            max_prob, classification, suspicious_files.len()
+            max_prob,
+            classification,
+            suspicious_files.len()
         );
 
         Ok(DeepScanResult {
@@ -247,7 +248,12 @@ fn create_onnx_session(path: &Path) -> Result<ort::session::Session, MlError> {
     let session = ort::session::Session::builder()
         .map_err(|e| MlError::InferenceError(format!("Failed to create session builder: {e}")))?
         .commit_from_file(path)
-        .map_err(|e| MlError::InferenceError(format!("Failed to load ONNX model from {}: {e}", path.display())))?;
+        .map_err(|e| {
+            MlError::InferenceError(format!(
+                "Failed to load ONNX model from {}: {e}",
+                path.display()
+            ))
+        })?;
 
     Ok(session)
 }
@@ -269,8 +275,10 @@ fn run_inference(
 ) -> Result<f32, MlError> {
     let input_ids_tensor = ort::value::Tensor::<i64>::from_array(input_ids)
         .map_err(|e| MlError::InferenceError(format!("Failed to create input_ids tensor: {e}")))?;
-    let attention_mask_tensor = ort::value::Tensor::<i64>::from_array(attention_mask)
-        .map_err(|e| MlError::InferenceError(format!("Failed to create attention_mask tensor: {e}")))?;
+    let attention_mask_tensor =
+        ort::value::Tensor::<i64>::from_array(attention_mask).map_err(|e| {
+            MlError::InferenceError(format!("Failed to create attention_mask tensor: {e}"))
+        })?;
 
     let outputs = session
         .run(ort::inputs![
@@ -315,7 +323,10 @@ fn extract_source_files(tarball: &[u8]) -> Result<Vec<(String, String)>, std::io
         let mut entry = entry?;
         let path = entry.path()?.to_string_lossy().to_string();
         let mut content = String::new();
-        if entry.read_to_string(&mut content).is_ok() && !content.is_empty() && is_source_file(&path) {
+        if entry.read_to_string(&mut content).is_ok()
+            && !content.is_empty()
+            && is_source_file(&path)
+        {
             files.push((path, content));
         }
     }
@@ -351,14 +362,38 @@ mod tests {
 
     #[test]
     fn test_threat_classification_bounds() {
-        assert_eq!(ThreatClassification::from_probability(0.0), ThreatClassification::Safe);
-        assert_eq!(ThreatClassification::from_probability(0.29), ThreatClassification::Safe);
-        assert_eq!(ThreatClassification::from_probability(0.30), ThreatClassification::Suspicious);
-        assert_eq!(ThreatClassification::from_probability(0.59), ThreatClassification::Suspicious);
-        assert_eq!(ThreatClassification::from_probability(0.60), ThreatClassification::LikelyMalicious);
-        assert_eq!(ThreatClassification::from_probability(0.84), ThreatClassification::LikelyMalicious);
-        assert_eq!(ThreatClassification::from_probability(0.85), ThreatClassification::ConfirmedMalicious);
-        assert_eq!(ThreatClassification::from_probability(1.0), ThreatClassification::ConfirmedMalicious);
+        assert_eq!(
+            ThreatClassification::from_probability(0.0),
+            ThreatClassification::Safe
+        );
+        assert_eq!(
+            ThreatClassification::from_probability(0.29),
+            ThreatClassification::Safe
+        );
+        assert_eq!(
+            ThreatClassification::from_probability(0.30),
+            ThreatClassification::Suspicious
+        );
+        assert_eq!(
+            ThreatClassification::from_probability(0.59),
+            ThreatClassification::Suspicious
+        );
+        assert_eq!(
+            ThreatClassification::from_probability(0.60),
+            ThreatClassification::LikelyMalicious
+        );
+        assert_eq!(
+            ThreatClassification::from_probability(0.84),
+            ThreatClassification::LikelyMalicious
+        );
+        assert_eq!(
+            ThreatClassification::from_probability(0.85),
+            ThreatClassification::ConfirmedMalicious
+        );
+        assert_eq!(
+            ThreatClassification::from_probability(1.0),
+            ThreatClassification::ConfirmedMalicious
+        );
     }
 
     #[test]

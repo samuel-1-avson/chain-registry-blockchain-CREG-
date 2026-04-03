@@ -2,9 +2,9 @@
 // Core types shared across the entire chain-registry workspace.
 
 pub mod block;
+pub mod error;
 pub mod package;
 pub mod verdict;
-pub mod error;
 
 /// gRPC and Protobuf definitions (Generated Choice)
 pub mod proto {
@@ -12,13 +12,13 @@ pub mod proto {
 }
 
 pub use block::*;
+pub use error::*;
 pub use package::*;
 pub use verdict::*;
-pub use error::*;
 
 // ── Cryptographic helpers ─────────────────────────────────────────────────────
 
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 
 /// SHA-256 of any byte slice, returned as a 32-byte array.
 pub fn sha256(data: &[u8]) -> [u8; 32] {
@@ -34,14 +34,14 @@ pub fn sha256_hex(data: &[u8]) -> String {
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct Validator {
-    pub id:         String,
-    pub alias:      String,
+    pub id: String,
+    pub alias: String,
     /// Hex-encoded Ed25519 public key used to verify validator votes.
     #[serde(default)]
-    pub pubkey:     String,
-    pub stake:      u64,
+    pub pubkey: String,
+    pub stake: u64,
     pub reputation: u32,
-    pub status:     String, // "online", "self", "offline"
+    pub status: String, // "online", "self", "offline"
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default)]

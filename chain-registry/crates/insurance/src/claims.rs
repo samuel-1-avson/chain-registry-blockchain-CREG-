@@ -84,27 +84,27 @@ impl Claim {
             resolution_notes: None,
         }
     }
-    
+
     /// Approve claim
     pub fn approve(&mut self, resolver: &str, notes: Option<String>) {
         self.status = ClaimStatus::Approved;
         self.resolved_at = Some(Utc::now());
         self.resolver = Some(resolver.to_string());
         self.resolution_notes = notes;
-        
+
         info!("Claim {} approved by {}", self.id, resolver);
     }
-    
+
     /// Reject claim
     pub fn reject(&mut self, resolver: &str, notes: Option<String>) {
         self.status = ClaimStatus::Rejected;
         self.resolved_at = Some(Utc::now());
         self.resolver = Some(resolver.to_string());
         self.resolution_notes = notes;
-        
+
         warn!("Claim {} rejected by {}", self.id, resolver);
     }
-    
+
     /// Mark as paid
     pub fn mark_paid(&mut self) {
         if self.status == ClaimStatus::Approved {
@@ -112,12 +112,12 @@ impl Claim {
             info!("Claim {} marked as paid", self.id);
         }
     }
-    
+
     /// Get age of claim
     pub fn age_hours(&self) -> i64 {
         (Utc::now() - self.submitted_at).num_hours()
     }
-    
+
     /// Check if claim is pending review
     pub fn is_pending(&self) -> bool {
         matches!(self.status, ClaimStatus::Pending | ClaimStatus::UnderReview)
@@ -175,7 +175,7 @@ impl Evidence {
     pub fn score(&self) -> f64 {
         let type_weight = self.evidence_type.severity_weight();
         let severity_normalized = self.severity / 10.0;
-        
+
         type_weight * severity_normalized * 100.0
     }
 }
@@ -209,26 +209,25 @@ impl ClaimEvaluator {
             resolvers: Vec::new(),
         }
     }
-    
+
     /// Add resolver
     pub fn add_resolver(&mut self, resolver: String) {
         self.resolvers.push(resolver);
     }
-    
+
     /// Evaluate a claim
     pub fn evaluate(&self, claim: &Claim, evidence: &[Evidence]) -> EvaluationResult {
         // Calculate total evidence score
         let evidence_score: f64 = evidence.iter().map(|e| e.score()).sum();
-        
+
         // Check auto-approval criteria
-        if evidence_score >= self.min_evidence_score 
-            && claim.amount <= self.auto_approval_limit {
+        if evidence_score >= self.min_evidence_score && claim.amount <= self.auto_approval_limit {
             return EvaluationResult::AutoApprove {
                 score: evidence_score,
                 confidence: 0.95,
             };
         }
-        
+
         // Check if manual review needed
         if evidence_score >= self.min_evidence_score * 0.7 {
             return EvaluationResult::ManualReview {
@@ -236,31 +235,34 @@ impl ClaimEvaluator {
                 suggested_amount: claim.amount,
             };
         }
-        
+
         // Insufficient evidence
         EvaluationResult::Reject {
             reason: "Insufficient evidence".to_string(),
             score: evidence_score,
         }
     }
-    
+
     /// Get resolver for claim (round-robin)
     pub fn assign_resolver(&self, claim_id: &str) -> Option<&String> {
         if self.resolvers.is_empty() {
             return None;
         }
-        
+
         // Simple hash-based assignment
-        let hash = claim_id.bytes().fold(0u32, |acc, b| {
-            acc.wrapping_mul(31).wrapping_add(b as u32)
-        });
-        
+        let hash = claim_id
+            .bytes()
+            .fold(0u32, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u32));
+
         let index = (hash as usize) % self.resolvers.len();
         self.resolvers.get(index)
     }
-    
+
     /// Batch evaluate claims
-    pub fn batch_evaluate<'a>(&self, claims: &'a [(Claim, Vec<Evidence>)]) -> Vec<(&'a Claim, EvaluationResult)> {
+    pub fn batch_evaluate<'a>(
+        &self,
+        claims: &'a [(Claim, Vec<Evidence>)],
+    ) -> Vec<(&'a Claim, EvaluationResult)> {
         claims
             .iter()
             .map(|(claim, evidence)| (claim, self.evaluate(claim, evidence)))
@@ -272,20 +274,11 @@ impl ClaimEvaluator {
 #[derive(Debug, Clone)]
 pub enum EvaluationResult {
     /// Auto-approve claim
-    AutoApprove {
-        score: f64,
-        confidence: f64,
-    },
+    AutoApprove { score: f64, confidence: f64 },
     /// Send for manual review
-    ManualReview {
-        score: f64,
-        suggested_amount: f64,
-    },
+    ManualReview { score: f64, suggested_amount: f64 },
     /// Reject claim
-    Reject {
-        reason: String,
-        score: f64,
-    },
+    Reject { reason: String, score: f64 },
 }
 
 impl EvaluationResult {
@@ -293,7 +286,7 @@ impl EvaluationResult {
     pub fn should_approve(&self) -> bool {
         matches!(self, EvaluationResult::AutoApprove { .. })
     }
-    
+
     /// Get score if available
     pub fn score(&self) -> Option<f64> {
         match self {
@@ -302,15 +295,25 @@ impl EvaluationResult {
             EvaluationResult::Reject { score, .. } => Some(*score),
         }
     }
-    
+
     /// Get description
     pub fn description(&self) -> String {
         match self {
             EvaluationResult::AutoApprove { score, confidence } => {
-                format!("Auto-approve (score: {:.1}, confidence: {:.0}%)", score, confidence * 100.0)
+                format!(
+                    "Auto-approve (score: {:.1}, confidence: {:.0}%)",
+                    score,
+                    confidence * 100.0
+                )
             }
-            EvaluationResult::ManualReview { score, suggested_amount } => {
-                format!("Manual review (score: {:.1}, suggested: {} ETH)", score, suggested_amount)
+            EvaluationResult::ManualReview {
+                score,
+                suggested_amount,
+            } => {
+                format!(
+                    "Manual review (score: {:.1}, suggested: {} ETH)",
+                    score, suggested_amount
+                )
             }
             EvaluationResult::Reject { reason, score } => {
                 format!("Reject: {} (score: {:.1})", reason, score)
@@ -341,7 +344,7 @@ impl ClaimStats {
             self.approved_claims as f64 / decided as f64
         }
     }
-    
+
     /// Calculate average payout
     pub fn average_payout(&self) -> f64 {
         if self.paid_claims == 0 {
@@ -366,39 +369,39 @@ impl ClaimsManager {
             claims: Vec::new(),
         }
     }
-    
+
     /// Submit new claim
     pub fn submit_claim(&mut self, claim: Claim) -> Result<(), super::InsuranceError> {
         // Validate claim
         if claim.amount <= 0.0 {
             return Err(super::InsuranceError::InvalidClaim(
-                "Invalid claim amount".to_string()
+                "Invalid claim amount".to_string(),
             ));
         }
-        
+
         if claim.evidence.is_empty() {
             return Err(super::InsuranceError::InvalidClaim(
-                "No evidence provided".to_string()
+                "No evidence provided".to_string(),
             ));
         }
-        
+
         self.claims.push(claim);
-        
+
         Ok(())
     }
-    
+
     /// Get pending claims
     pub fn pending_claims(&self) -> Vec<&Claim> {
         self.claims.iter().filter(|c| c.is_pending()).collect()
     }
-    
+
     /// Get statistics
     pub fn stats(&self) -> ClaimStats {
         let mut stats = ClaimStats::default();
-        
+
         for claim in &self.claims {
             stats.total_claims += 1;
-            
+
             match claim.status {
                 ClaimStatus::Pending | ClaimStatus::UnderReview => {
                     stats.pending_claims += 1;
@@ -414,15 +417,15 @@ impl ClaimsManager {
                     stats.total_paid += claim.amount;
                 }
             }
-            
+
             if let Some(resolved) = claim.resolved_at {
                 let hours = (resolved - claim.submitted_at).num_hours() as f64;
-                stats.average_resolution_time_hours = 
-                    (stats.average_resolution_time_hours * (stats.total_claims - 1) as f64 + hours) 
-                    / stats.total_claims as f64;
+                stats.average_resolution_time_hours =
+                    (stats.average_resolution_time_hours * (stats.total_claims - 1) as f64 + hours)
+                        / stats.total_claims as f64;
             }
         }
-        
+
         stats
     }
 }
@@ -441,7 +444,7 @@ mod tests {
             "Security vulnerability found".to_string(),
             "https://example.com/evidence".to_string(),
         );
-        
+
         assert_eq!(claim.amount, 5.0);
         assert_eq!(claim.status, ClaimStatus::Pending);
         assert!(claim.is_pending());
@@ -457,9 +460,9 @@ mod tests {
             "Security vulnerability".to_string(),
             "evidence".to_string(),
         );
-        
+
         claim.approve("resolver-1", Some("Valid claim".to_string()));
-        
+
         assert_eq!(claim.status, ClaimStatus::Approved);
         assert_eq!(claim.resolver, Some("resolver-1".to_string()));
     }
@@ -473,7 +476,7 @@ mod tests {
             timestamp: Utc::now(),
             severity: 9.0,
         };
-        
+
         let score = evidence.score();
         assert!(score > 80.0); // CVE with high severity should score high
     }
@@ -481,7 +484,7 @@ mod tests {
     #[test]
     fn test_claim_evaluator() {
         let evaluator = ClaimEvaluator::default();
-        
+
         let claim = Claim::new(
             "claim-1".to_string(),
             "policy-1".to_string(),
@@ -490,19 +493,17 @@ mod tests {
             "Test".to_string(),
             "evidence".to_string(),
         );
-        
-        let evidence = vec![
-            Evidence {
-                evidence_type: EvidenceType::CveReport,
-                description: "CVE-2024-1234".to_string(),
-                source: "mitre.org".to_string(),
-                timestamp: Utc::now(),
-                severity: 8.0,
-            }
-        ];
-        
+
+        let evidence = vec![Evidence {
+            evidence_type: EvidenceType::CveReport,
+            description: "CVE-2024-1234".to_string(),
+            source: "mitre.org".to_string(),
+            timestamp: Utc::now(),
+            severity: 8.0,
+        }];
+
         let result = evaluator.evaluate(&claim, &evidence);
-        
+
         // Should suggest manual review or auto-approve depending on score
         assert!(result.score().is_some());
     }
@@ -518,7 +519,7 @@ mod tests {
             total_paid: 650.0,
             ..Default::default()
         };
-        
+
         assert_eq!(stats.approval_rate(), 0.777); // 70/90
         assert_eq!(stats.average_payout(), 10.0); // 650/65
     }

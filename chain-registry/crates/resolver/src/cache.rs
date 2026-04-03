@@ -42,7 +42,9 @@ pub fn get(id: &PackageId) -> Result<Option<TrustVerdict>> {
             }
             // Patch source to indicate this is a cache hit.
             let mut v = entry.verdict;
-            v.source = VerdictSource::Cache { expires_at: entry.expires_at };
+            v.source = VerdictSource::Cache {
+                expires_at: entry.expires_at,
+            };
             Ok(Some(v))
         }
     }
@@ -52,12 +54,15 @@ pub fn get(id: &PackageId) -> Result<Option<TrustVerdict>> {
 pub fn set(id: &PackageId, verdict: &TrustVerdict) -> Result<()> {
     let ttl = match &verdict.status {
         VerdictStatus::Verified { .. } => Duration::hours(24),
-        VerdictStatus::Revoked { .. }  => Duration::hours(48), // cache revocations longer
-        VerdictStatus::Unverified      => Duration::minutes(5),
-        VerdictStatus::Unknown         => Duration::minutes(5),
+        VerdictStatus::Revoked { .. } => Duration::hours(48), // cache revocations longer
+        VerdictStatus::Unverified => Duration::minutes(5),
+        VerdictStatus::Unknown => Duration::minutes(5),
     };
     let expires_at = Utc::now() + ttl;
-    let entry = CacheEntry { verdict: verdict.clone(), expires_at };
+    let entry = CacheEntry {
+        verdict: verdict.clone(),
+        expires_at,
+    };
     let bytes = serde_json::to_vec(&entry)?;
     db()?.insert(id.canonical().as_bytes(), bytes)?;
     Ok(())
