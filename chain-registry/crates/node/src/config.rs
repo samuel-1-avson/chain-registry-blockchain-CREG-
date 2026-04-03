@@ -3,6 +3,43 @@
 use std::path::PathBuf;
 use uuid::Uuid;
 
+#[derive(Debug, Clone)]
+pub enum NodeMode {
+    /// Full mode: Store everything (500GB+, 16GB RAM)
+    Full,
+    /// Pruned mode: Store last 30 days (200GB, 8GB RAM)
+    Pruned,
+    /// Light mode: Current state only (100GB, 4-8GB RAM)
+    Light,
+}
+
+impl Default for NodeMode {
+    fn default() -> Self { NodeMode::Pruned }
+}
+
+#[derive(Debug, Clone)]
+pub struct PruningConfig {
+    /// Keep packages for X days, then archive to IPFS
+    pub package_retention_days: u32,
+    /// Keep full block history or just headers
+    pub keep_full_blocks: bool,
+    /// Prune interval (every X blocks)
+    pub prune_interval: u64,
+    /// Max database size before forced pruning (GB)
+    pub max_db_size_gb: u32,
+}
+
+impl Default for PruningConfig {
+    fn default() -> Self {
+        Self {
+            package_retention_days: 30,
+            keep_full_blocks: false,
+            prune_interval: 1000,
+            max_db_size_gb: 150,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct NodeConfig {
     /// HTTP bind address for the REST API.
@@ -33,10 +70,31 @@ pub struct NodeConfig {
     pub pg_url: String,
     /// The set of active validators (JSON-encoded).
     pub validator_set: common::ValidatorSet,
+    /// Node operation mode (Full/Pruned/Light)
+    pub mode: NodeMode,
+    /// Pruning configuration
+    pub pruning: PruningConfig,
+    /// Max peers for low-bandwidth environments
+    pub max_peers: usize,
 }
 
 impl NodeConfig {
     pub fn from_env() -> Self {
+        let mode = match env("CREG_NODE_MODE", "pruned").as_str() {
+            "full" => NodeMode::Full,
+            "light" => NodeMode::Light,
+            _ => NodeMode::Pruned,
+        };
+        
+        let pruning = PruningConfig {
+            package_retention_days: env("CREG_PACKAGE_RETENTION_DAYS", "30").parse().unwrap_or(30),
+            keep_full_blocks: env("CREG_KEEP_FULL_BLOCKS", "false") == "true",
+            prune_interval: env("CREG_PRUNE_INTERVAL", "1000").parse().unwrap_or(1000),
+            max_db_size_gb: env("CREG_MAX_DB_SIZE_GB", "150").parse().unwrap_or(150),
+        };
+        
+        let max_peers = env("CREG_MAX_PEERS", "15").parse().unwrap_or(15);
+        
         Self {
             listen_addr: env("CREG_LISTEN", "0.0.0.0:8080"),
             data_dir: PathBuf::from(env("CREG_DATA_DIR", "./data")),
@@ -63,6 +121,9 @@ impl NodeConfig {
             pg_url: env("CREG_PG_URL", ""),
             validator_set: serde_json::from_str(&env("CREG_VALIDATOR_SET", "{\"validators\":[]}"))
                 .unwrap_or_else(|_| common::ValidatorSet::new(vec![])),
+            mode,
+            pruning,
+            max_peers,
         }
     }
 

@@ -1,11 +1,11 @@
 # Multi-stage build — produces a minimal runtime image (~80 MB).
-# Updated for Chain Registry v0.2.0 with Phases 1-3 features
+# Updated for Chain Registry v0.3.0 with TUI Explorer and Enhanced Web UI
 
 # ── Stage 1: Build Frontend ───────────────────────────────────────────────────
 FROM node:20-slim AS frontend-builder
 WORKDIR /explorer
 COPY explorer/package*.json ./
-RUN npm install
+RUN npm ci --silent
 COPY explorer/ ./
 RUN npm run build
 
@@ -32,6 +32,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libopenblas-dev \
     protobuf-compiler \
     libprotobuf-dev \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Rust toolchain manually (official rust images are Debian-based and too old for glibc)
@@ -70,6 +71,7 @@ COPY crates/cross-chain/Cargo.toml        crates/cross-chain/
 # Phase 3: Ecosystem crates
 COPY crates/insurance/Cargo.toml        crates/insurance/
 COPY crates/db-sync/Cargo.toml          crates/db-sync/
+COPY crates/ipfs-pinner/Cargo.toml      crates/ipfs-pinner/
 
 # Stub sources so Cargo can resolve dependencies before we copy real code.
 RUN mkdir -p crates/common/src     && echo "pub fn _stub() {}" > crates/common/src/lib.rs
@@ -91,6 +93,10 @@ RUN mkdir -p crates/cross-chain/src        && echo "pub fn _stub() {}" > crates/
 # Phase 3 stubs
 RUN mkdir -p crates/insurance/src        && echo "pub fn _stub() {}" > crates/insurance/src/lib.rs
 RUN mkdir -p crates/db-sync/src          && echo "pub fn _stub() {}" > crates/db-sync/src/lib.rs
+RUN mkdir -p crates/ipfs-pinner/src      && echo "pub fn _stub() {}" > crates/ipfs-pinner/src/lib.rs
+
+# Faucet stub
+RUN mkdir -p crates/faucet/src           && echo "fn main() {}"      > crates/faucet/src/main.rs
 
 # Pre-build dependencies (cached layer)
 RUN cargo build --release --package chain-registry-node 2>/dev/null || true
@@ -98,6 +104,9 @@ RUN cargo build --release --package chain-registry-node 2>/dev/null || true
 # Copy real source and build properly.
 COPY crates/ crates/
 COPY circuits/ circuits/
+COPY contracts/ contracts/
+COPY docker-compose*.yml ./
+COPY testnet/ testnet/
 
 # Touch files to ensure rebuild
 RUN touch crates/*/src/*.rs
@@ -105,8 +114,11 @@ RUN touch crates/*/src/*.rs
 # Build the node with all features
 RUN cargo build --release --package chain-registry-node
 
-# Build CLI tools
+# Build CLI tools (includes TUI explorer)
 RUN cargo build --release --package chain-registry-cli
+
+# Build Faucet service (testnet)
+RUN cargo build --release --package faucet
 
 # ── Stage 3: Runtime ──────────────────────────────────────────────────────────
 # Must match builder glibc version (Ubuntu 24.04 has glibc 2.39)
@@ -128,6 +140,7 @@ WORKDIR /app
 # Copy binaries
 COPY --from=builder /build/target/release/creg-node /app/creg-node
 COPY --from=builder /build/target/release/creg /app/creg
+COPY --from=builder /build/target/release/faucet /app/faucet
 
 # Copy WASM validators (for wasm-sandbox)
 COPY --from=builder /build/crates/cli/validators /app/validators

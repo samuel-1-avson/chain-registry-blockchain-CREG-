@@ -1,211 +1,278 @@
-#
-# Docker Deployment Script for Chain Registry v0.2.0 (Windows PowerShell)
+# Docker Deployment Script for Chain Registry v0.2.0
 # This script automates the deployment of the complete system with Phases 1-3
-#
 
-$ErrorActionPreference = "Stop"
+param(
+    [switch]$Help
+)
 
-# Colors for output
-$Red = "Red"
-$Green = "Green"
-$Yellow = "Yellow"
-$Cyan = "Cyan"
+if ($Help) {
+    Write-Host @"
+Docker Deployment Script for Chain Registry v0.2.0
+
+This script automates the deployment of the complete system.
+
+Usage:
+    .\deploy-docker.ps1
+
+The script will:
+    1. Check prerequisites (Docker, Docker Compose)
+    2. Set up environment (.env file)
+    3. Create necessary directories
+    4. Build Docker images
+    5. Start services
+    6. Wait for services to be ready
+    7. Verify deployment
+
+Press any key to continue or Ctrl+C to cancel...
+"@
+    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+}
 
 # Configuration
 $ComposeFile = "docker-compose.yml"
 $EnvFile = ".env"
 
-# Functions
-function Log-Info {
-    param([string]$Message)
-    Write-Host "[INFO] $Message" -ForegroundColor $Cyan
+# Colors
+$Red = "`e[31m"
+$Green = "`e[32m"
+$Yellow = "`e[33m"
+$Blue = "`e[34m"
+$NC = "`e[0m"
+
+# Logging functions
+function Write-Info($Message) {
+    Write-Host "$Blue[INFO]$NC $Message"
 }
 
-function Log-Success {
-    param([string]$Message)
-    Write-Host "[SUCCESS] $Message" -ForegroundColor $Green
+function Write-Success($Message) {
+    Write-Host "$Green[SUCCESS]$NC $Message"
 }
 
-function Log-Warning {
-    param([string]$Message)
-    Write-Host "[WARNING] $Message" -ForegroundColor $Yellow
+function Write-Warning($Message) {
+    Write-Host "$Yellow[WARNING]$NC $Message"
 }
 
-function Log-Error {
-    param([string]$Message)
-    Write-Host "[ERROR] $Message" -ForegroundColor $Red
+function Write-ErrorMsg($Message) {
+    Write-Host "$Red[ERROR]$NC $Message"
 }
 
 # Check prerequisites
-function Check-Prerequisites {
-    Log-Info "Checking prerequisites..."
+function Test-Prerequisites {
+    Write-Info "Checking prerequisites..."
     
-    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
-        Log-Error "Docker is not installed. Please install Docker first."
+    # Check Docker
+    try {
+        $null = docker --version 2>$null
+        if ($LASTEXITCODE -ne 0) { throw "Docker not found" }
+    } catch {
+        Write-ErrorMsg "Docker is not installed. Please install Docker first."
         exit 1
     }
     
-    if (-not (Get-Command docker-compose -ErrorAction SilentlyContinue)) {
-        Log-Error "Docker Compose is not installed. Please install Docker Compose first."
-        exit 1
+    # Check Docker Compose
+    $composeV2 = $false
+    try {
+        $null = docker compose version 2>$null
+        if ($LASTEXITCODE -eq 0) { $composeV2 = $true }
+    } catch {}
+    
+    if (-not $composeV2) {
+        try {
+            $null = docker-compose --version 2>$null
+            if ($LASTEXITCODE -ne 0) { throw "Docker Compose not found" }
+        } catch {
+            Write-ErrorMsg "Docker Compose is not installed. Please install Docker Compose first."
+            exit 1
+        }
     }
     
     # Check Docker is running
     try {
-        $null = docker info 2>&1
+        $null = docker info 2>$null
+        if ($LASTEXITCODE -ne 0) { throw "Docker not running" }
     } catch {
-        Log-Error "Docker daemon is not running. Please start Docker."
+        Write-ErrorMsg "Docker daemon is not running. Please start Docker."
         exit 1
     }
     
-    Log-Success "Prerequisites check passed"
+    Write-Success "Prerequisites check passed"
 }
 
 # Setup environment
-function Setup-Environment {
-    Log-Info "Setting up environment..."
+function Initialize-Environment {
+    Write-Info "Setting up environment..."
     
     if (-not (Test-Path $EnvFile)) {
-        Log-Info "Creating .env file from example..."
+        Write-Info "Creating .env file from example..."
         if (Test-Path ".env.example") {
             Copy-Item ".env.example" $EnvFile
+        } else {
+            Write-Warning ".env.example not found, creating empty .env"
+            "# Chain Registry Environment" | Out-File $EnvFile
         }
-        Log-Warning "Please edit $EnvFile with your configuration before continuing"
-        Log-Warning "At minimum, set NODE1_VALIDATOR_KEY, NODE2_VALIDATOR_KEY, NODE3_VALIDATOR_KEY"
-        Read-Host "Press Enter to continue after editing .env"
+        Write-Warning "Please edit $EnvFile with your configuration before continuing"
+        Write-Warning "At minimum, set NODE1_VALIDATOR_KEY, NODE2_VALIDATOR_KEY, NODE3_VALIDATOR_KEY"
+        Write-Host "Press Enter to continue after editing .env..."
+        $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
     }
     
-    Log-Success "Environment configured"
+    # Source the environment file
+    if (Test-Path $EnvFile) {
+        Get-Content $EnvFile | ForEach-Object {
+            if ($_ -match '^([^#][^=]*)=(.*)$') {
+                [Environment]::SetEnvironmentVariable($matches[1], $matches[2], "Process")
+            }
+        }
+    }
+    
+    Write-Success "Environment configured"
 }
 
 # Create necessary directories
-function Create-Directories {
-    Log-Info "Creating necessary directories..."
+function Initialize-Directories {
+    Write-Info "Creating necessary directories..."
     
-    New-Item -ItemType Directory -Force -Path "validators" | Out-Null
-    New-Item -ItemType Directory -Force -Path "circuits" | Out-Null
-    New-Item -ItemType Directory -Force -Path "models" | Out-Null
-    New-Item -ItemType Directory -Force -Path "data/node1" | Out-Null
-    New-Item -ItemType Directory -Force -Path "data/node2" | Out-Null
-    New-Item -ItemType Directory -Force -Path "data/node3" | Out-Null
+    @("validators", "circuits", "models", "data/node1", "data/node2", "data/node3") | ForEach-Object {
+        New-Item -ItemType Directory -Force -Path $_ | Out-Null
+    }
     
     # Create dummy WASM validator if none exists
     if (-not (Test-Path "validators/dummy.wasm")) {
-        Log-Info "Creating dummy WASM validator..."
-        "dummy content" | Out-File -FilePath "validators/dummy.wasm"
+        Write-Info "Creating dummy WASM validator..."
+        "dummy content" | Out-File -FilePath "validators/dummy.wasm" -NoNewline
     }
     
-    Log-Success "Directories created"
+    Write-Success "Directories created"
 }
 
 # Build and deploy
-function Build-And-Deploy {
-    Log-Info "Building Docker images..."
+function Build-AndDeploy {
+    Write-Info "Building Docker images..."
     
     docker-compose -f $ComposeFile build --parallel
+    if ($LASTEXITCODE -ne 0) {
+        Write-ErrorMsg "Docker build failed"
+        exit 1
+    }
     
-    Log-Success "Docker images built"
+    Write-Success "Docker images built"
     
-    Log-Info "Starting services..."
+    Write-Info "Starting services..."
     
     docker-compose -f $ComposeFile up -d
+    if ($LASTEXITCODE -ne 0) {
+        Write-ErrorMsg "Failed to start services"
+        exit 1
+    }
     
-    Log-Success "Services started"
+    Write-Success "Services started"
 }
 
 # Wait for services
-function Wait-For-Services {
-    Log-Info "Waiting for services to be ready..."
+function Wait-ForServices {
+    Write-Info "Waiting for services to be ready..."
     
     # Wait for Anvil
-    Log-Info "Waiting for Anvil (Ethereum local node)..."
-    $maxAttempts = 30
-    $attempts = 0
-    while ($attempts -lt $maxAttempts) {
+    Write-Info "Waiting for Anvil (Ethereum local node)..."
+    $anvilReady = $false
+    for ($i = 1; $i -le 30; $i++) {
         try {
-            $body = '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}'
-            $response = Invoke-RestMethod -Uri "http://localhost:8545" -Method Post -ContentType "application/json" -Body $body -ErrorAction SilentlyContinue
+            $response = Invoke-RestMethod -Uri "http://localhost:8545" -Method Post `
+                -Headers @{ "Content-Type" = "application/json" } `
+                -Body '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}' `
+                -TimeoutSec 2 -ErrorAction SilentlyContinue
             if ($response) {
-                Log-Success "Anvil is ready"
+                Write-Success "Anvil is ready"
+                $anvilReady = $true
                 break
             }
-        } catch {
-            # Continue waiting
-        }
+        } catch {}
         Start-Sleep -Seconds 1
-        $attempts++
+    }
+    if (-not $anvilReady) {
+        Write-Warning "Anvil may not be fully ready yet"
     }
     
     # Wait for IPFS
-    Log-Info "Waiting for IPFS..."
-    $attempts = 0
-    while ($attempts -lt $maxAttempts) {
+    Write-Info "Waiting for IPFS..."
+    $ipfsReady = $false
+    for ($i = 1; $i -le 30; $i++) {
         try {
-            $response = Invoke-RestMethod -Uri "http://localhost:5001/api/v0/id" -ErrorAction SilentlyContinue
+            $response = Invoke-RestMethod -Uri "http://localhost:5001/api/v0/id" -TimeoutSec 2 -ErrorAction SilentlyContinue
             if ($response) {
-                Log-Success "IPFS is ready"
+                Write-Success "IPFS is ready"
+                $ipfsReady = $true
                 break
             }
-        } catch {
-            # Continue waiting
-        }
+        } catch {}
         Start-Sleep -Seconds 1
-        $attempts++
+    }
+    if (-not $ipfsReady) {
+        Write-Warning "IPFS may not be fully ready yet"
     }
     
     # Wait for Node-1
-    Log-Info "Waiting for Chain Registry Node-1..."
-    $maxAttempts = 60
-    $attempts = 0
-    while ($attempts -lt $maxAttempts) {
+    Write-Info "Waiting for Chain Registry Node-1..."
+    $nodeReady = $false
+    for ($i = 1; $i -le 60; $i++) {
         try {
-            $response = Invoke-RestMethod -Uri "http://localhost:8080/v1/health" -ErrorAction SilentlyContinue
+            $response = Invoke-RestMethod -Uri "http://localhost:8080/v1/health" -TimeoutSec 2 -ErrorAction SilentlyContinue
             if ($response) {
-                Log-Success "Node-1 is ready"
+                Write-Success "Node-1 is ready"
+                $nodeReady = $true
                 break
             }
-        } catch {
-            # Continue waiting
-        }
+        } catch {}
         Start-Sleep -Seconds 1
-        $attempts++
+    }
+    if (-not $nodeReady) {
+        Write-Warning "Node-1 may not be fully ready yet"
     }
     
-    Log-Success "All services are ready"
+    Write-Success "All services initialization complete"
 }
 
 # Verify deployment
-function Verify-Deployment {
-    Log-Info "Verifying deployment..."
+function Test-Deployment {
+    Write-Info "Verifying deployment..."
     
     # Check all containers are running
-    $running = (docker-compose ps -q).Count
+    $running = (docker-compose ps -q | Measure-Object).Count
     $expected = 6  # ipfs, anvil, deploy-contracts, node-1, node-2, node-3
     
     if ($running -ge 5) {
-        Log-Success "All required containers are running ($running/6)"
+        Write-Success "All required containers are running ($running/$expected)"
     } else {
-        Log-Warning "Some containers may not be running ($running/6)"
+        Write-Warning "Some containers may not be running ($running/$expected)"
         docker-compose ps
     }
     
     # Test health endpoints
-    Log-Info "Testing health endpoints..."
+    Write-Info "Testing health endpoints..."
     
     try {
-        $health = Invoke-RestMethod -Uri "http://localhost:8080/v1/health"
+        $health = Invoke-RestMethod -Uri "http://localhost:8080/v1/health" -TimeoutSec 5 -ErrorAction SilentlyContinue
         if ($health -match "ok") {
-            Log-Success "Node-1 health check passed"
+            Write-Success "Node-1 health check passed"
         }
     } catch {
-        Log-Warning "Node-1 health check failed"
+        Write-Warning "Node-1 health check failed"
     }
     
-    Log-Success "Deployment verification complete"
+    # Check contract deployment
+    Write-Info "Checking contract deployment status..."
+    $deployLog = docker-compose logs deploy-contracts 2>&1
+    if ($deployLog -match "Contracts deployed") {
+        Write-Success "Contracts deployed successfully"
+    } else {
+        Write-Warning "Contract deployment status unclear - check logs with: docker-compose logs deploy-contracts"
+    }
+    
+    Write-Success "Deployment verification complete"
 }
 
 # Print status
-function Print-Status {
+function Show-Status {
     Write-Host ""
     Write-Host "=========================================="
     Write-Host "  Chain Registry Deployment Status"
@@ -226,14 +293,14 @@ function Print-Status {
     Write-Host ""
     
     Write-Host "Features Enabled:"
-    Write-Host "  ✅ Phase 1: ZK Validation"
-    Write-Host "  ✅ Phase 1: ML Threat Detection"
-    Write-Host "  ✅ Phase 1: WASM Sandboxing"
-    Write-Host "  ✅ Phase 2: Private Registries"
-    Write-Host "  ✅ Phase 2: Cross-Chain Support"
-    Write-Host "  ✅ Phase 3: CREG Token"
-    Write-Host "  ✅ Phase 3: Governance V2"
-    Write-Host "  ✅ Phase 3: Package Insurance"
+    Write-Host "  [x] Phase 1: ZK Validation"
+    Write-Host "  [x] Phase 1: ML Threat Detection"
+    Write-Host "  [x] Phase 1: WASM Sandboxing"
+    Write-Host "  [x] Phase 2: Private Registries"
+    Write-Host "  [x] Phase 2: Cross-Chain Support"
+    Write-Host "  [x] Phase 3: CREG Token"
+    Write-Host "  [x] Phase 3: Governance V2"
+    Write-Host "  [x] Phase 3: Package Insurance"
     Write-Host ""
     
     Write-Host "Commands:"
@@ -253,16 +320,32 @@ function Main {
     Write-Host "=========================================="
     Write-Host ""
     
-    Check-Prerequisites
-    Setup-Environment
-    Create-Directories
-    Build-And-Deploy
-    Wait-For-Services
-    Verify-Deployment
-    Print-Status
+    # Change to script directory
+    $scriptPath = Split-Path -Parent $MyInvocation.MyCommand.Path
+    if ($scriptPath) {
+        Set-Location (Join-Path $scriptPath "..")
+    }
     
-    Log-Success "Deployment complete!"
+    try {
+        Test-Prerequisites
+        Initialize-Environment
+        Initialize-Directories
+        Build-AndDeploy
+        Wait-ForServices
+        Test-Deployment
+        Show-Status
+        
+        Write-Success "Deployment complete!"
+    } catch {
+        Write-ErrorMsg "Deployment failed: $_"
+        exit 1
+    }
 }
 
-# Run main function
-Main
+# Handle interruption
+try {
+    Main
+} catch {
+    Write-ErrorMsg "Deployment interrupted"
+    exit 1
+}

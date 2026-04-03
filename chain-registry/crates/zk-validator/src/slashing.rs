@@ -5,6 +5,7 @@
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::path::Path;
 
 /// Types of slashing evidence
@@ -307,8 +308,6 @@ impl SlashingProofGenerator {
     
     /// Compute nullifier from public inputs
     fn compute_nullifier(&self, public_inputs: &DoubleSignPublicInputs) -> String {
-        use sha2::{Digest, Sha256};
-        
         let data = format!(
             "{}:{}:{}:{}:{}",
             public_inputs.validator_pubkey_x,
@@ -389,15 +388,15 @@ impl DoubleSignMonitor {
             public_inputs: DoubleSignPublicInputs {
                 validator_pubkey_x: vote1.pubkey.clone(), // Simplified
                 validator_pubkey_y: "0".to_string(), // Would be actual Y coordinate
-                package_hash: hex::encode(sha2::Sha256::digest(vote1.package_canonical.as_bytes())),
-                vote1_hash: hex::encode(sha2::Sha256::digest(format!(
+                package_hash: hex::encode(Sha256::digest(vote1.package_canonical.as_bytes())),
+                vote1_hash: hex::encode(Sha256::digest(format!(
                     "{}:{}:{}",
                     vote1.package_canonical, vote1.approved, vote1.timestamp
                 ))),
-                vote2_hash: hex::encode(sha2::Sha256::digest(format!(
+                vote2_hash: hex::encode(Sha256::digest(format!(
                     "{}:{}:{}",
                     vote2.package_canonical, vote2.approved, vote2.timestamp
-                ))),
+                )))
             },
             witness: DoubleSignWitness {
                 validator_privkey: "HIDDEN".to_string(), // Not known by monitor

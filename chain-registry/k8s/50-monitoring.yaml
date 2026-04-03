@@ -1,0 +1,122 @@
+# Prometheus ServiceMonitor for metrics collection
+# Requires prometheus-operator installed
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: creg-metrics
+  namespace: chain-registry
+  labels:
+    app.kubernetes.io/name: creg
+    app.kubernetes.io/component: monitoring
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: creg-validator
+  endpoints:
+    - port: metrics
+      interval: 30s
+      path: /metrics
+---
+# PrometheusRule for alerting
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: creg-alerts
+  namespace: chain-registry
+  labels:
+    app.kubernetes.io/name: creg
+    app.kubernetes.io/component: monitoring
+spec:
+  groups:
+    - name: chain-registry
+      rules:
+        - alert: CregNodeDown
+          expr: up{job="creg-metrics"} == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Chain Registry node is down"
+            description: "Validator {{ $labels.instance }} has been down for more than 5 minutes"
+        
+        - alert: CregHighBlockTime
+          expr: creg_block_time_seconds > 30
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High block time detected"
+            description: "Block time is {{ $value }}s, expected < 10s"
+        
+        - alert: CregValidatorJailed
+          expr: creg_validator_jailed == 1
+          for: 1m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Validator jailed"
+            description: "Validator {{ $labels.address }} has been jailed"
+        
+        - alert: CregLowPeerCount
+          expr: creg_p2p_peers < 3
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Low peer count"
+            description: "Node has only {{ $value }} peers"
+---
+# Grafana Dashboard ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: creg-grafana-dashboard
+  namespace: chain-registry
+  labels:
+    app.kubernetes.io/name: creg
+    grafana_dashboard: "1"
+data:
+  chain-registry.json: |
+    {
+      "dashboard": {
+        "title": "Chain Registry Overview",
+        "panels": [
+          {
+            "title": "Block Height",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "creg_block_height"
+              }
+            ]
+          },
+          {
+            "title": "Block Time",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "creg_block_time_seconds"
+              }
+            ]
+          },
+          {
+            "title": "Validator Count",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "creg_validator_count"
+              }
+            ]
+          },
+          {
+            "title": "Peer Count",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "creg_p2p_peers"
+              }
+            ]
+          }
+        ]
+      }
+    }

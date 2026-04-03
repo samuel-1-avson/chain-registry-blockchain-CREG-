@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: chain-registry
+  labels:
+    app.kubernetes.io/name: chain-registry
+    app.kubernetes.io/component: namespace

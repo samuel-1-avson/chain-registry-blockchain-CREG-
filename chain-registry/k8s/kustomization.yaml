@@ -1,0 +1,58 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: chain-registry
+
+resources:
+  # Core infrastructure
+  - 00-namespace.yaml
+  - 01-configmap.yaml
+  - 02-secrets.yaml
+  
+  # Data stores
+  - 10-postgres.yaml
+  - 11-ipfs.yaml
+  - 12-anvil.yaml
+  
+  # Application
+  - 20-validator.yaml
+  # Uncomment for additional validators:
+  # - 21-validators-2-5.yaml
+  
+  # Networking
+  - 30-api-gateway.yaml
+  # - 40-ingress.yaml  # Uncomment if you have ingress controller
+  
+  # Optional: Monitoring
+  # - 50-monitoring.yaml
+  
+  # Optional: Backups
+  # - 60-backup.yaml
+
+# Common labels applied to all resources
+commonLabels:
+  app.kubernetes.io/part-of: chain-registry
+  app.kubernetes.io/managed-by: kustomize
+
+# Image customization
+images:
+  - name: ghcr.io/chain-registry/chain-registry
+    newTag: latest
+    # Override with: kustomize edit set image ghcr.io/chain-registry/chain-registry=your-repo/chain-registry:v1.0.0
+
+# ConfigMap generator for additional config
+configMapGenerator:
+  - name: creg-extra-config
+    literals:
+      - LOG_LEVEL=info
+
+# Secret generator (use external secrets in production!)
+# secretGenerator:
+#   - name: creg-generated-secrets
+#     literals:
+#       - api-key=change-me
+
+# Patches for environment-specific customization
+patchesStrategicMerge:
+  # Add patches here for production/staging differences
+  # - patches/production-resources.yaml

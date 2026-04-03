@@ -1,51 +1,70 @@
-# Rust build output
-target/
-target[0-9]*/
-**/*.target/
+# Git
+.git
+.gitignore
+.gitattributes
 
-# Node.js dependencies — reinstalled inside Docker
-node_modules/
-explorer/node_modules/
-explorer/dist/
-
-# Git history
-.git/
-.github/
-
-# Environment & Secrets
-.env*
-*.key
-*.pem
-publisher.key
+# Documentation (not needed for build)
+*.md
+docs/
+BLOCKCHAIN_PROJECT_REPORT.md
+CHAIN_REGISTRY_GUIDE.md
+DEEP_DIVE_ARCHITECTURE_REPORT.md
+README.md
 
 # IDE
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
+
+# OS
 .DS_Store
 Thumbs.db
-*.swp
 
-# TUI & Logs
-*.log
-node_err.log
-publish_log.txt
-build_log.txt
-api-test.log
-check.log
-cli-check.log
-node-check*.log
+# Build artifacts (host side - will be rebuilt in container)
+target/
+**/*.rs.bk
+Cargo.lock.bak
 
-# Data and artifacts
-data/
-node*-data/
-validator*-data/
-ipfs-data/
-anvil_state.json
-dev-data/
-tmp/
-temp/
-secret-model/
-validators/
-*.tgz
-*.zip
+# Node modules (built in container)
+explorer/node_modules/
+explorer/dist/
+
+# Test files
+tests/
+**/*_test.rs
+**/*_tests.rs
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+
+# Local environment
+.env
+.env.local
+.env.*.local
+
+# Docker files (not needed in context)
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Scripts that aren't needed in build
+scripts/
+
+# Circuit build artifacts (will be rebuilt)
+circuits/*.r1cs
+circuits/*.wasm
+circuits/*.sym
+
+# Large data files
 *.tar.gz
+*.zip
+*.tar
+*.tgz
+
+# Logs
+*.log
+logs/

@@ -18,7 +18,6 @@ mod config_file;
 mod batch;
 mod advanced;
 mod retry;
-// New command modules
 mod doctor;
 mod search;
 mod info;
@@ -28,6 +27,12 @@ mod policy;
 mod sbom;
 mod update;
 mod multisig;
+mod testnet;
+// New UX modules
+mod wizard;
+mod error_help;
+mod dashboard_interactive;
+mod explorer_tui;
 
 use clap::{Parser, Subcommand, CommandFactory};
 use clap_complete::{generate, Shell};
@@ -324,6 +329,21 @@ enum Commands {
         #[command(subcommand)]
         command: MultisigCommands,
     },
+
+    /// Interactive setup wizard for new users
+    Init,
+
+    /// Interactive TUI dashboard with controls
+    DashboardInteractive,
+
+    /// Launch the full TUI blockchain explorer
+    Explorer,
+
+    /// Testnet commands (drip, stake, status)
+    Testnet {
+        #[command(subcommand)]
+        command: TestnetCommands,
+    },
 }
 
 #[derive(Subcommand)]
@@ -480,6 +500,54 @@ enum MultisigCommands {
         /// Optional manifest file
         #[arg(short, long)]
         manifest: Option<std::path::PathBuf>,
+    },
+}
+
+#[derive(Subcommand)]
+enum TestnetCommands {
+    /// Request test tokens from the faucet
+    Drip {
+        /// Ethereum address to receive tokens
+        address: String,
+        /// Faucet URL (default: http://localhost:8081)
+        #[arg(long)]
+        faucet_url: Option<String>,
+    },
+    /// Check testnet status
+    Status {
+        /// Node URL to check (default: http://localhost:8080)
+        #[arg(long)]
+        node_url: Option<String>,
+    },
+    /// Stake test tokens as a publisher
+    StakePublisher {
+        /// Amount to stake (minimum 0.001 tCREG)
+        amount: f64,
+        /// Private key for staking (hex, with 0x prefix)
+        #[arg(short, long)]
+        key: String,
+        /// RPC URL (default: http://localhost:8545)
+        #[arg(long)]
+        rpc_url: Option<String>,
+    },
+    /// Stake test tokens as a validator
+    StakeValidator {
+        /// Amount to stake (minimum 0.1 tCREG)
+        amount: f64,
+        /// Private key for staking (hex, with 0x prefix)
+        #[arg(short, long)]
+        key: String,
+        /// RPC URL (default: http://localhost:8545)
+        #[arg(long)]
+        rpc_url: Option<String>,
+    },
+    /// Show testnet documentation
+    Docs,
+    /// Show testnet reset instructions
+    Reset {
+        /// Data directory to clear
+        #[arg(short, long)]
+        data_dir: Option<std::path::PathBuf>,
     },
 }
 
@@ -760,6 +828,37 @@ async fn main() -> Result<()> {
                 }
                 MultisigCommands::Submit { session, manifest } => {
                     multisig::submit(&session, manifest.as_deref(), cli.node_url.as_deref()).await?;
+                }
+            }
+        }
+        Commands::Init => {
+            wizard::run().await?;
+        }
+        Commands::DashboardInteractive => {
+            dashboard_interactive::run(cli.node_url.as_deref()).await?;
+        }
+        Commands::Explorer => {
+            explorer_tui::run(cli.node_url.as_deref()).await?;
+        }
+        Commands::Testnet { command } => {
+            match command {
+                TestnetCommands::Drip { address, faucet_url } => {
+                    testnet::drip(&address, faucet_url.as_deref()).await?;
+                }
+                TestnetCommands::Status { node_url } => {
+                    testnet::status(node_url.as_deref()).await?;
+                }
+                TestnetCommands::StakePublisher { amount, key, rpc_url } => {
+                    testnet::stake_publisher(amount, &key, rpc_url.as_deref()).await?;
+                }
+                TestnetCommands::StakeValidator { amount, key, rpc_url } => {
+                    testnet::stake_validator(amount, &key, rpc_url.as_deref()).await?;
+                }
+                TestnetCommands::Docs => {
+                    testnet::docs();
+                }
+                TestnetCommands::Reset { data_dir } => {
+                    testnet::reset(data_dir)?;
                 }
             }
         }

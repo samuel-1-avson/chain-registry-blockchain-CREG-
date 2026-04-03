@@ -14,6 +14,7 @@ consensus = { path = "../consensus" }
 resolver  = { path = "../resolver" }
 zk-validator = { path = "../zk-validator" }
 db-sync   = { path = "../db-sync" }
+# threshold-encryption = { path = "../threshold-encryption" }  # TODO: Fix compilation errors
 
 tokio        = { workspace = true }
 serde        = { workspace = true }

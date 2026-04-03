@@ -24,7 +24,7 @@ alloy = { workspace = true }
 alloy-sol-types = { workspace = true }
 
 # Internal
-creg-common = { path = "../common" }
+common = { path = "../common" }
 
 [dev-dependencies]
 tokio-test = "0.4"

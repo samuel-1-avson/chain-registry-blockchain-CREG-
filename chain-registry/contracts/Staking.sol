@@ -29,12 +29,15 @@ contract Staking {
 
     // ── Constants ─────────────────────────────────────────────────────────────
 
-    /// Minimum CREG stake to publish a package (1 CREG).
-    uint256 public minPublisherStake = 1 * 10**18;
-    /// Minimum CREG stake to apply as a validator (100 CREG).
-    uint256 public minValidatorStake = 100 * 10**18;
-    /// Unbonding period before a validator can withdraw stake after leaving.
-    uint256 public constant UNBONDING_PERIOD = 7 days;
+    /// Minimum CREG stake to publish a package (0.1 CREG - ultra low barrier).
+    uint256 public minPublisherStake = 0.1 * 10**18;
+    /// Minimum CREG stake to apply as a validator (10 CREG - accessible to all).
+    uint256 public minValidatorStake = 10 * 10**18;
+    /// Minimum for light validators (5 CREG).
+    uint256 public minLightValidatorStake = 5 * 10**18;
+    /// Unbonding period - REMOVED for instant withdrawals.
+    /// Validators can withdraw immediately without waiting.
+    uint256 public constant UNBONDING_PERIOD = 0;
 
     // ── Storage ───────────────────────────────────────────────────────────────
 
@@ -170,24 +173,46 @@ contract Staking {
         emit ValidatorRejected(validator);
     }
 
-    /// @notice Active validator initiates exit. Stake enters a 7-day unbonding period.
-    function initiateUnbonding() external {
+    /// @notice Active validator initiates exit and withdraws stake immediately.
+    /// @dev INSTANT withdrawal - no unbonding period. Validators get their stake back immediately.
+    function initiateUnbondingAndWithdraw() external nonReentrant {
         ValidatorEntry storage v = validators[msg.sender];
         if (v.state != ValidatorState.Active) revert NotActive();
-        v.state       = ValidatorState.Unbonding;
-        v.unbondingAt = block.timestamp + UNBONDING_PERIOD;
+        
+        uint256 amount = v.stake;
+        v.stake = 0;
+        v.state = ValidatorState.Withdrawn;
+        v.unbondingAt = block.timestamp; // Record for audit purposes only
+        
+        // Instant transfer - no waiting period
+        require(cregToken.transfer(msg.sender, amount), "CREG transfer failed");
+        
         emit ValidatorLeft(msg.sender);
     }
 
-    /// @notice Withdraw staked CREG after the unbonding period has elapsed.
+    /// @notice Withdraw validator stake (alias for initiateUnbondingAndWithdraw for backward compatibility).
     function withdrawValidatorStake() external nonReentrant {
         ValidatorEntry storage v = validators[msg.sender];
-        if (v.state != ValidatorState.Unbonding) revert NotValidator();
-        if (block.timestamp < v.unbondingAt)
-            revert StillUnbonding(v.unbondingAt);
+        if (v.state != ValidatorState.Active && v.state != ValidatorState.Unbonding) revert NotValidator();
+        
         uint256 amount = v.stake;
-        v.stake       = 0;
-        v.state       = ValidatorState.Withdrawn;
+        v.stake = 0;
+        v.state = ValidatorState.Withdrawn;
+        
+        // Instant transfer - no waiting period ever
+        require(cregToken.transfer(msg.sender, amount), "CREG transfer failed");
+        
+        emit ValidatorLeft(msg.sender);
+    }
+
+    /// @notice Partial unstake - validators can withdraw any amount instantly.
+    /// @param amount Amount of CREG to unstake.
+    function partialUnstake(uint256 amount) external nonReentrant {
+        ValidatorEntry storage v = validators[msg.sender];
+        if (v.state != ValidatorState.Active) revert NotActive();
+        if (v.stake < amount + minValidatorStake) 
+            revert BelowMinStake(v.stake - amount, minValidatorStake);
+        v.stake -= amount;
         require(cregToken.transfer(msg.sender, amount), "CREG transfer failed");
     }
 
@@ -242,10 +267,10 @@ contract Staking {
         } else if (validators[account].stake >= amount) {
             validators[account].stake      -= amount;
             validators[account].slashCount += 1;
-            // Auto-eject validator after 3 slashes — begin unbonding for remaining stake.
+            // Auto-eject validator after 3 slashes — instant withdrawal of remaining stake.
             if (validators[account].slashCount >= 3) {
-                validators[account].state       = ValidatorState.Unbonding;
-                validators[account].unbondingAt = block.timestamp + UNBONDING_PERIOD;
+                validators[account].state       = ValidatorState.Withdrawn;
+                validators[account].unbondingAt = block.timestamp; // Record only
                 emit ValidatorLeft(account);
             }
         } else {
@@ -253,8 +278,8 @@ contract Staking {
             amount = publisherStakes[account] + validators[account].stake;
             publisherStakes[account]          = 0;
             validators[account].stake         = 0;
-            validators[account].state         = ValidatorState.Unbonding;
-            validators[account].unbondingAt   = block.timestamp + UNBONDING_PERIOD;
+            validators[account].state         = ValidatorState.Withdrawn;
+            validators[account].unbondingAt   = block.timestamp; // Record only
         }
 
         // Slashed CREG is not burned — it goes into the pool for honest validators.

@@ -1,0 +1,71 @@
+# Ingress for external HTTP access
+# Requires nginx-ingress or similar controller installed
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: creg-ingress
+  namespace: chain-registry
+  labels:
+    app.kubernetes.io/name: creg
+    app.kubernetes.io/component: ingress
+  annotations:
+    # nginx-ingress annotations
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    # cert-manager for TLS
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    # Rate limiting
+    nginx.ingress.kubernetes.io/limit-rps: "100"
+    nginx.ingress.kubernetes.io/limit-connections: "50"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - api.chain-registry.io
+        - ipfs.chain-registry.io
+      secretName: creg-tls-secret
+  rules:
+    - host: api.chain-registry.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: creg-api
+                port:
+                  number: 80
+    - host: ipfs.chain-registry.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ipfs
+                port:
+                  number: 8080
+---
+# Alternative: Simple ingress without TLS (development only)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: creg-ingress-dev
+  namespace: chain-registry
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: creg.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: creg-api
+                port:
+                  number: 80

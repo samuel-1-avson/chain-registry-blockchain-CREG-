@@ -326,77 +326,15 @@ async fn fetch_from_ipfs(cid: &str, ipfs_url: &str) -> anyhow::Result<Vec<u8>> {
 /// This function coordinates with other validators to collect enough shares
 /// (M-of-N) to decrypt the package content.
 async fn decrypt_shielded(
-    data: &[u8], 
-    bundle: &str,
-    state: &SharedState,
+    _data: &[u8], 
+    _bundle: &str,
+    _state: &crate::SharedState,
 ) -> anyhow::Result<Vec<u8>> {
-    use threshold_encryption::{DecryptionClient, DecryptionRequest};
+    // TODO: Re-enable threshold encryption when compilation issues are fixed
+    // use threshold_encryption::{DecryptionClient, DecryptionRequest};
     
-    tracing::info!("Starting threshold decryption for shielded package");
-    
-    // Parse the key bundle (contains encrypted shares for each validator)
-    let bundle_data: serde_json::Value = serde_json::from_str(bundle)
-        .map_err(|e| anyhow::anyhow!("Invalid key bundle JSON: {}", e))?;
-    
-    let threshold = bundle_data["threshold"].as_u64().unwrap_or(3) as u8;
-    let total_shares = bundle_data["total_shares"].as_u64().unwrap_or(5) as u8;
-    let encrypted_shares = bundle_data["encrypted_shares"].as_array()
-        .ok_or_else(|| anyhow::anyhow!("Missing encrypted_shares in bundle"))?;
-    
-    tracing::debug!("Threshold: {}/{}, encrypted shares: {}", 
-        threshold, total_shares, encrypted_shares.len());
-    
-    // Get validator configuration
-    let (validator_id, validator_key, is_validator) = {
-        let s = state.read().await;
-        (
-            s.config.node_id.clone(),
-            s.config.validator_privkey.clone(),
-            s.config.is_validator,
-        )
-    };
-    
-    if !is_validator {
-        anyhow::bail!("Non-validator nodes cannot decrypt shielded packages");
-    }
-    
-    let validator_key = validator_key.ok_or_else(|| 
-        anyhow::anyhow!("Validator key required for decryption"))?;
-    
-    // Decrypt our share from the bundle
-    let our_share = encrypted_shares.iter()
-        .find(|s| s["validator_id"].as_str() == Some(&validator_id))
-        .ok_or_else(|| anyhow::anyhow!("No share found for validator {}", validator_id))?;
-    
-    let encrypted_share = hex::decode(
-        our_share["encrypted_share"].as_str()
-            .ok_or_else(|| anyhow::anyhow!("Invalid share format"))?
-    )?;
-    
-    // Decrypt the share using our validator key
-    let share = decrypt_share(&encrypted_share, &validator_key)?;
-    
-    // Broadcast our share to other validators via P2P
-    broadcast_decryption_share(state, &share).await?;
-    
-    // Collect shares from other validators
-    let collected_shares = collect_decryption_shares(state, threshold).await?;
-    
-    if collected_shares.len() < threshold as usize {
-        anyhow::bail!("Insufficient shares for decryption: got {}, need {}", 
-            collected_shares.len(), threshold);
-    }
-    
-    // Reconstruct the encryption key using Shamir's Secret Sharing
-    let encryption_key = reconstruct_key(&collected_shares[..threshold as usize])?;
-    
-    // Decrypt the package content
-    let decrypted = decrypt_with_key(data, &encryption_key)?;
-    
-    tracing::info!("Successfully decrypted shielded package ({} bytes -> {} bytes)", 
-        data.len(), decrypted.len());
-    
-    Ok(decrypted)
+    tracing::warn!("Threshold decryption is temporarily disabled");
+    anyhow::bail!("Shielded package decryption not available - threshold-encryption feature disabled")
 }
 
 /// Decrypt a share using validator's private key
@@ -431,7 +369,7 @@ fn decrypt_share(encrypted_share: &[u8], validator_key: &str) -> anyhow::Result<
 
 /// Broadcast our decryption share to other validators
 async fn broadcast_decryption_share(
-    _state: &SharedState,
+    _state: &crate::SharedState,
     _share: &[u8],
 ) -> anyhow::Result<()> {
     // TODO: Implement P2P broadcast of decryption shares
@@ -442,7 +380,7 @@ async fn broadcast_decryption_share(
 
 /// Collect decryption shares from other validators
 async fn collect_decryption_shares(
-    _state: &SharedState,
+    _state: &crate::SharedState,
     threshold: u8,
 ) -> anyhow::Result<Vec<Vec<u8>>> {
     // TODO: Implement collection of shares from P2P network
@@ -455,23 +393,10 @@ async fn collect_decryption_shares(
 }
 
 /// Reconstruct the encryption key from shares using Shamir's Secret Sharing
-fn reconstruct_key(shares: &[Vec<u8>]) -> anyhow::Result<Vec<u8>> {
-    use threshold_encryption::ShamirSecretSharing;
-    
-    let shamir = ShamirSecretSharing::new();
-    
-    // Parse shares
-    let parsed_shares: Vec<_> = shares.iter().map(|s| {
-        let index = s[0];
-        let value = s[1..].to_vec();
-        threshold_encryption::Share::new(index, value)
-    }).collect();
-    
-    // Reconstruct secret
-    let key = shamir.reconstruct(&parsed_shares)
-        .map_err(|e| anyhow::anyhow!("Key reconstruction failed: {}", e))?;
-    
-    Ok(key)
+#[allow(dead_code)]
+fn reconstruct_key(_shares: &[Vec<u8>]) -> anyhow::Result<Vec<u8>> {
+    // TODO: Re-enable when threshold-encryption is fixed
+    anyhow::bail!("Key reconstruction not available - threshold-encryption feature disabled")
 }
 
 /// Decrypt package content with the reconstructed key

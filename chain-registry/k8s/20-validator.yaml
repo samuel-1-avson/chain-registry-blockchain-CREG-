@@ -1,0 +1,122 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: creg-validator-1
+  namespace: chain-registry
+  labels:
+    app.kubernetes.io/name: creg-validator
+    app.kubernetes.io/instance: validator-1
+    app.kubernetes.io/component: validator
+    app.kubernetes.io/part-of: chain-registry
+spec:
+  serviceName: creg-validator-1
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: creg-validator
+      app.kubernetes.io/instance: validator-1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: creg-validator
+        app.kubernetes.io/instance: validator-1
+        app.kubernetes.io/component: validator
+        app.kubernetes.io/part-of: chain-registry
+    spec:
+      containers:
+        - name: creg-node
+          image: ghcr.io/chain-registry/chain-registry:minimal
+          imagePullPolicy: IfNotPresent
+          command: ["/app/creg-node"]
+          args:
+            - "--data-dir=/data"
+            - "--api-addr=0.0.0.0:8080"
+            - "--validator-mode"
+          ports:
+            - containerPort: 8080
+              name: http
+              protocol: TCP
+            - containerPort: 50051
+              name: grpc
+              protocol: TCP
+            - containerPort: 9090
+              name: metrics
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: creg-config
+          env:
+            - name: CREG_VALIDATOR_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: creg-secrets
+                  key: NODE1_VALIDATOR_KEY
+          volumeMounts:
+            - name: creg-data
+              mountPath: /data
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "500m"
+            limits:
+              memory: "2Gi"
+              cpu: "2000m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 30
+  volumeClaimTemplates:
+    - metadata:
+        name: creg-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 20Gi
+        storageClassName: standard
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: creg-validator-1
+  namespace: chain-registry
+  labels:
+    app.kubernetes.io/name: creg-validator
+    app.kubernetes.io/instance: validator-1
+    app.kubernetes.io/component: validator
+spec:
+  type: ClusterIP
+  clusterIP: None  # Headless service for StatefulSet
+  selector:
+    app.kubernetes.io/name: creg-validator
+    app.kubernetes.io/instance: validator-1
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: http
+    - port: 50051
+      targetPort: 50051
+      name: grpc
+    - port: 9090
+      targetPort: 9090
+      name: metrics

@@ -14,6 +14,7 @@ members = [
     "crates/insurance",
     "crates/db-sync",
     "crates/ipfs-pinner",
+    "crates/faucet",
 ]
 resolver = "2"
 
@@ -54,8 +55,18 @@ ark-r1cs-std  = "0.4"
 # ML dependencies
 ort           = "2.0.0-rc.12"
 tract-onnx    = "0.21"
-tokenizers    = "0.15"
+tokenizers    = { version = "0.15", default-features = false }
 
 # WASM dependencies
 wasmtime      = { version = "18", features = ["async", "cranelift"] }
 wasmtime-wasi = "18"
+
+# Ethereum/EVM dependencies
+alloy         = { version = "0.6", features = ["full"] }
+alloy-sol-types = "0.6"
+
+# Web/HTTP dependencies
+axum          = "0.7"
+tower         = "0.4"
+tower-http    = { version = "0.5", features = ["cors", "fs"] }
+tracing-subscriber = "0.3"

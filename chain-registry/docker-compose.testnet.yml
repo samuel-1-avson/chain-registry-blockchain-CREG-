@@ -378,6 +378,42 @@ services:
     profiles:
       - cli
 
+  # ── TUI Explorer (terminal UI for testnet) ────────────────────────────────
+  # NEW v0.3.0: Interactive terminal-based blockchain explorer
+  # Usage: docker compose -f docker-compose.testnet.yml run --rm tui-explorer
+  tui-explorer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: creg-testnet-tui-explorer
+    entrypoint: ["/app/creg"]
+    command: ["explorer"]
+    environment:
+      CREG_NODE_URL: "http://node-1:8080"
+    stdin_open: true
+    tty: true
+    depends_on:
+      node-1:
+        condition: service_healthy
+    profiles:
+      - tui
+
+  # ── Enhanced Web Explorer (standalone) ────────────────────────────────────
+  # Optional: Serve the enhanced web explorer via nginx
+  # Usage: docker compose -f docker-compose.testnet.yml up -d web-explorer
+  web-explorer:
+    image: nginx:alpine
+    container_name: creg-testnet-web-explorer
+    ports:
+      - "8099:80"
+    volumes:
+      - ./explorer/dist:/usr/share/nginx/html:ro
+      - ./nginx-explorer.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - node-1
+    profiles:
+      - web-explorer
+
   # ── Stress Test service ─────────────────────────────────────────────────────
   stress-test:
     image: python:3.11-slim

@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CREG Testnet Faucet</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: #fff;
+            padding: 20px;
+        }
+        
+        .container {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 40px;
+            max-width: 500px;
+            width: 100%;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .logo {
+            font-size: 48px;
+            margin-bottom: 10px;
+        }
+        
+        .title {
+            font-size: 28px;
+            font-weight: 700;
+            background: linear-gradient(90deg, #00d4aa, #00a8e8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .subtitle {
+            color: #888;
+            margin-top: 8px;
+            font-size: 14px;
+        }
+        
+        .info-box {
+            background: rgba(0, 212, 170, 0.1);
+            border: 1px solid rgba(0, 212, 170, 0.3);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 24px;
+        }
+        
+        .info-box h3 {
+            color: #00d4aa;
+            font-size: 14px;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        .info-box p {
+            color: #aaa;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 14px;
+            color: #ccc;
+        }
+        
+        input[type="text"] {
+            width: 100%;
+            padding: 14px 16px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            color: #fff;
+            font-size: 15px;
+            transition: all 0.3s ease;
+        }
+        
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #00d4aa;
+            background: rgba(255, 255, 255, 0.08);
+        }
+        
+        input[type="text"]::placeholder {
+            color: #666;
+        }
+        
+        .btn {
+            width: 100%;
+            padding: 16px;
+            background: linear-gradient(90deg, #00d4aa, #00a8e8);
+            border: none;
+            border-radius: 10px;
+            color: #fff;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+        
+        .btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(0, 212, 170, 0.3);
+        }
+        
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        
+        .btn.loading {
+            pointer-events: none;
+        }
+        
+        .spinner {
+            width: 20px;
+            height: 20px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .message {
+            margin-top: 16px;
+            padding: 14px 16px;
+            border-radius: 10px;
+            font-size: 14px;
+            display: none;
+        }
+        
+        .message.success {
+            display: block;
+            background: rgba(0, 212, 170, 0.15);
+            border: 1px solid rgba(0, 212, 170, 0.3);
+            color: #00d4aa;
+        }
+        
+        .message.error {
+            display: block;
+            background: rgba(255, 71, 87, 0.15);
+            border: 1px solid rgba(255, 71, 87, 0.3);
+            color: #ff4757;
+        }
+        
+        .stats {
+            margin-top: 24px;
+            padding-top: 24px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 16px;
+        }
+        
+        .stat {
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 24px;
+            font-weight: 700;
+            color: #00d4aa;
+        }
+        
+        .stat-label {
+            font-size: 12px;
+            color: #888;
+            margin-top: 4px;
+        }
+        
+        .footer {
+            margin-top: 24px;
+            text-align: center;
+            font-size: 12px;
+            color: #666;
+        }
+        
+        .footer a {
+            color: #00a8e8;
+            text-decoration: none;
+        }
+        
+        .tx-link {
+            display: inline-block;
+            margin-top: 8px;
+            color: #00a8e8;
+            text-decoration: none;
+            font-size: 12px;
+        }
+        
+        .tx-link:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">💧</div>
+            <h1 class="title">CREG Testnet Faucet</h1>
+            <p class="subtitle">Get free test tokens for the Chain Registry testnet</p>
+        </div>
+        
+        <div class="info-box">
+            <h3>ℹ️ Testnet Information</h3>
+            <p>
+                • Receive 1000 tCREG per request<br>
+                • 1 minute cooldown between requests<br>
+                • Maximum balance: 10,000 tCREG<br>
+                • For testing purposes only
+            </p>
+        </div>
+        
+        <form id="faucetForm">
+            <div class="form-group">
+                <label for="address">Ethereum Address</label>
+                <input 
+                    type="text" 
+                    id="address" 
+                    placeholder="0x..."
+                    autocomplete="off"
+                    required
+                >
+            </div>
+            
+            <button type="submit" class="btn" id="submitBtn">
+                <span>Request Test Tokens</span>
+            </button>
+        </form>
+        
+        <div id="message" class="message"></div>
+        
+        <div class="stats">
+            <div class="stat">
+                <div class="stat-value" id="dripAmount">1000</div>
+                <div class="stat-label">tCREG per drip</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value" id="cooldown">60s</div>
+                <div class="stat-label">Cooldown</div>
+            </div>
+        </div>
+        
+        <div class="footer">
+            <p>Part of the <a href="#">Chain Registry</a> ecosystem</p>
+            <p style="margin-top: 8px;">Testnet Only • Not Real Value</p>
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('faucetForm');
+        const submitBtn = document.getElementById('submitBtn');
+        const messageEl = document.getElementById('message');
+        const addressInput = document.getElementById('address');
+
+        // Load stats on page load
+        async function loadStats() {
+            try {
+                const response = await fetch('/api/stats');
+                const data = await response.json();
+                document.getElementById('dripAmount').textContent = 
+                    (parseInt(data.drip_amount) / 1e18).toLocaleString();
+                document.getElementById('cooldown').textContent = 
+                    data.cooldown_seconds + 's';
+            } catch (e) {
+                console.error('Failed to load stats:', e);
+            }
+        }
+
+        loadStats();
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const address = addressInput.value.trim();
+            
+            // Basic validation
+            if (!address.match(/^0x[a-fA-F0-9]{40}$/)) {
+                showMessage('Please enter a valid Ethereum address (0x...)', 'error');
+                return;
+            }
+            
+            setLoading(true);
+            messageEl.className = 'message';
+            messageEl.style.display = 'none';
+            
+            try {
+                const response = await fetch('/api/drip', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        address: address,
+                        captcha: null
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    showMessage(
+                        `✅ Success! ${data.amount} tCREG sent to your address.`,
+                        'success',
+                        data.tx_hash
+                    );
+                    addressInput.value = '';
+                } else {
+                    showMessage(`❌ ${data.message}`, 'error');
+                }
+            } catch (error) {
+                showMessage(`❌ Network error: ${error.message}`, 'error');
+            } finally {
+                setLoading(false);
+            }
+        });
+
+        function setLoading(loading) {
+            submitBtn.disabled = loading;
+            if (loading) {
+                submitBtn.innerHTML = '<div class="spinner"></div><span>Processing...</span>';
+                submitBtn.classList.add('loading');
+            } else {
+                submitBtn.innerHTML = '<span>Request Test Tokens</span>';
+                submitBtn.classList.remove('loading');
+            }
+        }
+
+        function showMessage(text, type, txHash = null) {
+            messageEl.className = `message ${type}`;
+            messageEl.innerHTML = text;
+            
+            if (txHash) {
+                messageEl.innerHTML += `<br><a href="#" class="tx-link" onclick="alert('Transaction: ${txHash}'); return false;">View Transaction ↗</a>`;
+            }
+        }
+
+        // Auto-format address input
+        addressInput.addEventListener('input', (e) => {
+            let value = e.target.value;
+            if (value && !value.startsWith('0x') && value.match(/^[a-fA-F0-9]/)) {
+                e.target.value = '0x' + value;
+            }
+        });
+    </script>
+</body>
+</html>

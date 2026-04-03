@@ -1,0 +1,89 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: anvil
+  namespace: chain-registry
+  labels:
+    app.kubernetes.io/name: anvil
+    app.kubernetes.io/component: ethereum
+    app.kubernetes.io/part-of: chain-registry
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: anvil
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: anvil
+        app.kubernetes.io/component: ethereum
+        app.kubernetes.io/part-of: chain-registry
+    spec:
+      containers:
+        - name: anvil
+          image: ghcr.io/foundry-rs/foundry:latest
+          imagePullPolicy: IfNotPresent
+          command: ["anvil"]
+          args:
+            - "--fork-url"
+            - ""  # Empty for dev mode, or set real RPC
+            - "--chain-id"
+            - "31337"
+            - "--block-time"
+            - "12"
+            - "--accounts"
+            - "10"
+            - "--balance"
+            - "10000"
+            - "--host"
+            - "0.0.0.0"
+            - "--port"
+            - "8545"
+          ports:
+            - containerPort: 8545
+              name: rpc
+              protocol: TCP
+          env:
+            - name: ANVIL_FORK_URL
+              value: ""  # Set to fork from mainnet/testnet
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8545
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8545
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: anvil
+  namespace: chain-registry
+  labels:
+    app.kubernetes.io/name: anvil
+    app.kubernetes.io/component: ethereum
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: anvil
+  ports:
+    - port: 8545
+      targetPort: 8545
+      protocol: TCP
+      name: rpc

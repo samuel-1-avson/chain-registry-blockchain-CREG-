@@ -1,0 +1,48 @@
+# API Gateway Service - Exposes validator-1 to external traffic
+apiVersion: v1
+kind: Service
+metadata:
+  name: creg-api
+  namespace: chain-registry
+  labels:
+    app.kubernetes.io/name: creg-api
+    app.kubernetes.io/component: gateway
+    app.kubernetes.io/part-of: chain-registry
+spec:
+  type: LoadBalancer  # Change to NodePort if no LB available
+  selector:
+    app.kubernetes.io/name: creg-validator
+    app.kubernetes.io/instance: validator-1
+  ports:
+    - port: 80
+      targetPort: 8080
+      protocol: TCP
+      name: http
+    - port: 50051
+      targetPort: 50051
+      protocol: TCP
+      name: grpc
+---
+# Alternative: NodePort service for clusters without LoadBalancer
+apiVersion: v1
+kind: Service
+metadata:
+  name: creg-api-nodeport
+  namespace: chain-registry
+  labels:
+    app.kubernetes.io/name: creg-api
+    app.kubernetes.io/component: gateway
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: creg-validator
+    app.kubernetes.io/instance: validator-1
+  ports:
+    - port: 8080
+      targetPort: 8080
+      nodePort: 30080
+      name: http
+    - port: 50051
+      targetPort: 50051
+      nodePort: 30051
+      name: grpc

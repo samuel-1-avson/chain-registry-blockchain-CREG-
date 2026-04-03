@@ -1,0 +1,59 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: creg-config
+  namespace: chain-registry
+  labels:
+    app.kubernetes.io/name: creg
+    app.kubernetes.io/component: config
+data:
+  # Node Configuration
+  CREG_LOG_LEVEL: "info"
+  CREG_API_PORT: "8080"
+  CREG_GRPC_PORT: "50051"
+  CREG_METRICS_PORT: "9090"
+  CREG_DATA_DIR: "/data"
+  
+  # Network Configuration
+  CREG_NETWORK: "testnet"
+  CREG_CHAIN_ID: "creg-testnet-1"
+  CREG_BOOTSTRAP_NODES: ""
+  
+  # Validator Configuration
+  CREG_IS_VALIDATOR: "true"
+  CREG_SINGLE_VALIDATOR_MODE: "true"
+  CREG_DEV_SANDBOX: "true"
+  
+  # Consensus Configuration
+  CREG_CONSENSUS_TIMEOUT: "30s"
+  CREG_BLOCK_TIME: "5s"
+  
+  # Faucet Configuration (for testnet)
+  CREG_FAUCET_ENABLED: "true"
+  CREG_FAUCET_AMOUNT: "1000"
+  CREG_FAUCET_COOLDOWN: "3600"
+  
+  # IPFS Configuration
+  IPFS_SWARM_KEY: "/key/swarm/psk/1.0.0/\n/base16/\n6170706c65736f75726365736f7369676e69666963616e7462656172696e67"
+  IPFS_PROFILE: "server"
+  
+  # Database Configuration
+  DATABASE_URL: "postgres://creg:creg@postgres:5432/chain_registry"
+  
+  # Ethereum Configuration
+  ETH_RPC_URL: "http://anvil:8545"
+  ETH_CHAIN_ID: "31337"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-config
+  namespace: chain-registry
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/component: config
+data:
+  POSTGRES_DB: chain_registry
+  POSTGRES_USER: creg
+  # POSTGRES_PASSWORD is in secrets
+  PGDATA: /var/lib/postgresql/data/pgdata
