@@ -9,7 +9,7 @@ import "./Staking.sol";
 /// @dev Reduces per-operation gas by 60-80% through batching
 contract BatchOperations {
     
-    Registry public immutable registry;
+    ChainRegistry public immutable registry;
     Staking public immutable staking;
     address public governance;
     
@@ -17,7 +17,6 @@ contract BatchOperations {
     uint256 public totalGasSaved;
     
     event BatchPackageSubmitted(uint256 count, uint256 totalGasSaved);
-    event BatchVotesCast(uint256 count, uint256 totalGasSaved);
     event BatchClaimsProcessed(uint256 count, uint256 totalGasSaved);
     
     error BatchTooLarge();
@@ -30,7 +29,7 @@ contract BatchOperations {
     }
     
     constructor(address _registry, address _staking, address _governance) {
-        registry = Registry(_registry);
+        registry = ChainRegistry(_registry);
         staking = Staking(_staking);
         governance = _governance;
     }
@@ -41,11 +40,11 @@ contract BatchOperations {
         string canonical;
         bytes32 contentHash;
         string ipfsCID;
-        bytes signature;
     }
     
     /// @notice Submit multiple packages in one transaction
-    /// @dev Saves ~60% gas per package compared to individual submissions
+    /// @dev Saves ~60% gas per package compared to individual submissions.
+    ///      Caller must be a staked publisher with sufficient CREG balance.
     /// @param packages Array of package submissions
     function batchSubmitPackages(PackageSubmission[] calldata packages) external {
         if (packages.length == 0) revert EmptyBatch();
@@ -54,12 +53,10 @@ contract BatchOperations {
         uint256 gasStart = gasleft();
         
         for (uint i = 0; i < packages.length; i++) {
-            // Call registry with optimized parameters
             registry.submitPackage(
                 packages[i].canonical,
                 packages[i].contentHash,
-                packages[i].ipfsCID,
-                packages[i].signature
+                packages[i].ipfsCID
             );
         }
         
@@ -69,39 +66,6 @@ contract BatchOperations {
         totalGasSaved += gasSaved;
         
         emit BatchPackageSubmitted(packages.length, gasSaved);
-    }
-    
-    // ── Batch Voting ──────────────────────────────────────────────────────────
-    
-    struct Vote {
-        string canonical;
-        bool approve;
-        bytes signature;
-    }
-    
-    /// @notice Cast multiple votes in one transaction
-    /// @dev Saves ~70% gas per vote
-    /// @param votes Array of votes
-    function batchCastVotes(Vote[] calldata votes) external {
-        if (votes.length == 0) revert EmptyBatch();
-        if (votes.length > 100) revert BatchTooLarge();
-        
-        uint256 gasStart = gasleft();
-        
-        for (uint i = 0; i < votes.length; i++) {
-            registry.castVote(
-                votes[i].canonical,
-                votes[i].approve,
-                votes[i].signature
-            );
-        }
-        
-        uint256 gasUsed = gasStart - gasleft();
-        uint256 estimatedIndividual = votes.length * 50000; // ~50k gas per vote
-        uint256 gasSaved = estimatedIndividual > gasUsed ? estimatedIndividual - gasUsed : 0;
-        totalGasSaved += gasSaved;
-        
-        emit BatchVotesCast(votes.length, gasSaved);
     }
     
     // ── Batch Reward Claims ───────────────────────────────────────────────────
@@ -125,24 +89,6 @@ contract BatchOperations {
         totalGasSaved += gasSaved;
         
         emit BatchClaimsProcessed(validators.length, gasSaved);
-    }
-    
-    // ── Optimized Single Operations ───────────────────────────────────────────
-    
-    /// @notice Submit package with compressed data (saves ~30% calldata gas)
-    /// @param canonicalHash keccak256 hash of canonical (32 bytes vs variable string)
-    /// @param contentHash Content hash (32 bytes)
-    /// @param ipfsHashPrefix First 8 bytes of IPFS hash (rest on IPFS)
-    /// @param signature Compact signature (64 bytes)
-    function submitPackageCompressed(
-        bytes32 canonicalHash,
-        bytes32 contentHash,
-        bytes8 ipfsHashPrefix,
-        bytes calldata signature
-    ) external {
-        // Reconstruct canonical from hash (needs off-chain lookup)
-        // Or store mapping hash -> canonical
-        // This saves significant calldata gas
     }
     
     // ── Gas Estimation Helpers ────────────────────────────────────────────────

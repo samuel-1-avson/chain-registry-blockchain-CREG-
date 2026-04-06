@@ -16,6 +16,11 @@ include "circomlib/bitify.circom";
 /// - staticAnalysisScore: Public safety score (0-100)
 /// - sandboxPassed: Boolean (1 = passed)
 /// - noVulnerableDeps: Boolean (1 = no vulns)
+/// - minStaticScore: Configurable minimum static analysis threshold
+/// - maxComplexity: Configurable maximum complexity threshold
+/// - maxNetworkCalls: Configurable maximum network calls threshold
+/// - maxFileWrites: Configurable maximum file writes threshold
+/// - minOverallScore: Configurable minimum weighted overall score
 ///
 /// Private Inputs:
 /// - content: Actual package content (for hash verification)
@@ -31,6 +36,13 @@ template PackageValidator(maxContentSize) {
     signal input sandboxPassed;
     signal input noVulnerableDeps;
     
+    // Configurable thresholds (public inputs — set by governance)
+    signal input minStaticScore;      // e.g. 80
+    signal input maxComplexity;       // e.g. 90
+    signal input maxNetworkCalls;     // e.g. 5
+    signal input maxFileWrites;       // e.g. 10
+    signal input minOverallScore;     // e.g. 300 (weighted: staticScore*3 + complexity)
+    
     // Private inputs (witness)
     signal input content[maxContentSize];
     signal input complexityScore;
@@ -40,6 +52,18 @@ template PackageValidator(maxContentSize) {
     // Output
     signal output isValid;
     
+    // === Constraint: Validate threshold ranges ===
+    // Ensure governance can't set absurd thresholds
+    component minScoreRange = LessEqThan(8);
+    minScoreRange.in[0] <== minStaticScore;
+    minScoreRange.in[1] <== 100;
+    minScoreRange.out === 1;
+    
+    component maxComplexRange = GreaterEqThan(8);
+    maxComplexRange.in[0] <== maxComplexity;
+    maxComplexRange.in[1] <== 1;
+    maxComplexRange.out === 1;
+    
     // === Constraint 1: Verify content hash ===
     // Publisher proves they know content that hashes to contentHash
     component contentHasher = Poseidon(maxContentSize);
@@ -48,10 +72,10 @@ template PackageValidator(maxContentSize) {
     }
     contentHasher.out === contentHash;
     
-    // === Constraint 2: Static analysis score >= 80 ===
+    // === Constraint 2: Static analysis score >= minStaticScore ===
     component scoreCheck = GreaterEqThan(8);
     scoreCheck.in[0] <== staticAnalysisScore;
-    scoreCheck.in[1] <== 80;
+    scoreCheck.in[1] <== minStaticScore;
     scoreCheck.out === 1;
     
     // === Constraint 3: Sandbox must pass ===
@@ -60,34 +84,34 @@ template PackageValidator(maxContentSize) {
     // === Constraint 4: No vulnerable dependencies ===
     noVulnerableDeps === 1;
     
-    // === Constraint 5: Complexity score <= 90 ===
+    // === Constraint 5: Complexity score <= maxComplexity ===
     component complexityCheck = LessEqThan(8);
     complexityCheck.in[0] <== complexityScore;
-    complexityCheck.in[1] <== 90;
+    complexityCheck.in[1] <== maxComplexity;
     complexityCheck.out === 1;
     
-    // === Constraint 6: Limited network calls (<= 5) ===
+    // === Constraint 6: Limited network calls (<= maxNetworkCalls) ===
     component networkCheck = LessEqThan(8);
     networkCheck.in[0] <== networkCalls;
-    networkCheck.in[1] <== 5;
+    networkCheck.in[1] <== maxNetworkCalls;
     networkCheck.out === 1;
     
-    // === Constraint 7: Limited file writes (<= 10) ===
+    // === Constraint 7: Limited file writes (<= maxFileWrites) ===
     component fileCheck = LessEqThan(8);
     fileCheck.in[0] <== fileWrites;
-    fileCheck.in[1] <== 10;
+    fileCheck.in[1] <== maxFileWrites;
     fileCheck.out === 1;
     
     // === Constraint 8: Overall safety calculation ===
-    // SafetyScore = (staticAnalysisScore * 3 + complexityScore) / 4 >= 75
-    // To avoid division, we check: staticAnalysisScore * 3 + complexityScore >= 300
+    // SafetyScore = (staticAnalysisScore * 3 + complexityScore) / 4 >= threshold
+    // To avoid division, we check: staticAnalysisScore * 3 + complexityScore >= minOverallScore
     
     var weightedStatic = staticAnalysisScore * 3;
     signal totalScore <== weightedStatic + complexityScore;
     
     component overallCheck = GreaterEqThan(10);
     overallCheck.in[0] <== totalScore;
-    overallCheck.in[1] <== 300;
+    overallCheck.in[1] <== minOverallScore;
     overallCheck.out === 1;
     
     // Output is valid only if all checks pass
@@ -190,4 +214,7 @@ template ReputationWeightedValidator(numValidators) {
 
 // Main component instantiation
 // Usage: circom PackageValidator.circom --r1cs --wasm --sym -p bn128 -l ./circomlib
-component main {public [contentHash, manifestHash, staticAnalysisScore, sandboxPassed, noVulnerableDeps]} = PackageValidator(1024);
+// Thresholds are now public inputs: contentHash, manifestHash, staticAnalysisScore,
+// sandboxPassed, noVulnerableDeps, minStaticScore, maxComplexity, maxNetworkCalls,
+// maxFileWrites, minOverallScore
+component main {public [contentHash, manifestHash, staticAnalysisScore, sandboxPassed, noVulnerableDeps, minStaticScore, maxComplexity, maxNetworkCalls, maxFileWrites, minOverallScore]} = PackageValidator(1024);

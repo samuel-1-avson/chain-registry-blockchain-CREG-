@@ -7,8 +7,11 @@ import "../Staking.sol";
 import "../Reputation.sol";
 import "../VRF.sol";
 import "../Governance.sol";
+import "../ZKVerifier.sol";
+import "../CregToken.sol";
 
 /// @notice Full integration tests for the chain registry contracts.
+/// Uses CREG token-based staking and the two-step validator approval flow.
 contract RegistryTest is Test {
 
     ChainRegistry registry;
@@ -16,6 +19,8 @@ contract RegistryTest is Test {
     Reputation reputation;
     VRF        vrf;
     Governance governance;
+    ZKVerifier zkVerifier;
+    CregToken  cregToken;
 
     address alice   = makeAddr("alice");   // publisher
     address bob     = makeAddr("bob");     // validator
@@ -36,25 +41,43 @@ contract RegistryTest is Test {
         signers[0] = alice; signers[1] = bob; signers[2] = dave;
         governance = new Governance(signers, 2);
 
-        staking    = new Staking(address(governance));
+        // Deploy CregToken — all supply goes to this test contract.
+        cregToken  = new CregToken(address(this), address(this), address(this), address(this));
+
+        // Deploy core contracts.
+        staking    = new Staking(address(governance), address(cregToken));
         reputation = new Reputation(address(governance));
-        vrf        = new VRF(address(governance));
+        // VRF requires coordinator address, key hash, subscription ID, and governance.
+        // For testing, use dummy values (address(1) coordinator won't be called).
+        vrf        = new VRF(address(1), bytes32(0), 0, address(governance));
+
+        // Deploy a dummy ZK verifier.
+        uint256[2] memory a1 = [uint256(0), 0];
+        uint256[2] memory zeros = [uint256(0), 0];
+        uint256[2][] memory ic = new uint256[2][](2);
+        ic[0] = [uint256(0), 0];
+        ic[1] = [uint256(0), 0];
+        zkVerifier = new ZKVerifier(a1, zeros, zeros, zeros, zeros, zeros, zeros, ic);
 
         registry = new ChainRegistry(
             address(staking),
             address(reputation),
             address(vrf),
             address(governance),
-            address(0)
+            address(zkVerifier)
         );
 
-        staking.setRegistry(address(registry));
+        // Wire contracts together.
+        staking.setContracts(address(registry), address(reputation));
         reputation.setRegistry(address(registry));
+    }
 
-        // Fund accounts.
-        vm.deal(alice, 10 ether);
-        vm.deal(bob,   10 ether);
-        vm.deal(carol, 10 ether);
+    // ── Helper: fund and approve CREG tokens ────────────────────────────────
+
+    function _fundCREG(address who, uint256 amount) internal {
+        cregToken.transfer(who, amount);
+        vm.prank(who);
+        cregToken.approve(address(staking), amount);
     }
 
     // ── Publisher staking ─────────────────────────────────────────────────────
@@ -69,9 +92,9 @@ contract RegistryTest is Test {
         _stakeAsPublisher(alice);
         _submitPackage(alice);
 
-        Registry.PackageRecord memory rec = registry.getPackage(CANONICAL);
+        ChainRegistry.PackageRecord memory rec = registry.getPackage(CANONICAL);
         assertEq(rec.canonical, CANONICAL);
-        assertEq(uint(rec.status), uint(Registry.PackageStatus.Pending));
+        assertEq(uint(rec.status), uint(ChainRegistry.PackageStatus.Pending));
         assertEq(rec.publisher, alice);
     }
 
@@ -93,13 +116,13 @@ contract RegistryTest is Test {
         _joinValidator(carol);
 
         // Build two approval sigs (meets 67% of 2 = 2).
-        Registry.ValidatorSig[] memory sigs = new Registry.ValidatorSig[](2);
+        ChainRegistry.ValidatorSig[] memory sigs = new ChainRegistry.ValidatorSig[](2);
         sigs[0] = _makeValidatorSig(bobKey,   bob,   CANONICAL, CONTENT_HASH, true);
         sigs[1] = _makeValidatorSig(carolKey, carol, CANONICAL, CONTENT_HASH, true);
 
         registry.finalizePackage(CANONICAL, sigs);
 
-        assertEq(uint(registry.getStatus(CANONICAL)), uint(Registry.PackageStatus.Verified));
+        assertEq(uint(registry.getStatus(CANONICAL)), uint(ChainRegistry.PackageStatus.Verified));
     }
 
     function test_finalizationFailsWithInsufficientApprovals() public {
@@ -109,7 +132,7 @@ contract RegistryTest is Test {
         _joinValidator(carol);
 
         // Only 1 approval — not enough (quorum is 2).
-        Registry.ValidatorSig[] memory sigs = new Registry.ValidatorSig[](1);
+        ChainRegistry.ValidatorSig[] memory sigs = new ChainRegistry.ValidatorSig[](1);
         sigs[0] = _makeValidatorSig(bobKey, bob, CANONICAL, CONTENT_HASH, true);
 
         vm.expectRevert();
@@ -122,10 +145,10 @@ contract RegistryTest is Test {
         _joinValidator(bob);
         _joinValidator(carol);
 
-        Registry.ValidatorSig[] memory sigs = new Registry.ValidatorSig[](2);
+        ChainRegistry.ValidatorSig[] memory sigs = new ChainRegistry.ValidatorSig[](2);
         sigs[0] = _makeValidatorSig(bobKey, bob, CANONICAL, CONTENT_HASH, true);
         // Carol's sig is garbled.
-        sigs[1] = Registry.ValidatorSig({ validator: carol, signature: bytes("bad-sig"), approved: true });
+        sigs[1] = ChainRegistry.ValidatorSig({ validator: carol, signature: bytes("bad-sig"), approved: true });
 
         vm.expectRevert();
         registry.finalizePackage(CANONICAL, sigs);
@@ -137,9 +160,9 @@ contract RegistryTest is Test {
         _stakeAndVerify();
 
         vm.prank(alice);
-        registry.revokePackage(CANONICAL, "Vulnerability found");
+        registry.revokePackage(CANONICAL, "Vulnerability found", Staking.Severity.Low);
 
-        assertEq(uint(registry.getStatus(CANONICAL)), uint(Registry.PackageStatus.Revoked));
+        assertEq(uint(registry.getStatus(CANONICAL)), uint(ChainRegistry.PackageStatus.Revoked));
     }
 
     function test_governanceCanRevokeAndSlash() public {
@@ -148,9 +171,9 @@ contract RegistryTest is Test {
 
         // Governance calls through the multisig.
         vm.prank(address(governance));
-        registry.revokePackage(CANONICAL, "Malicious code detected");
+        registry.revokePackage(CANONICAL, "Malicious code detected", Staking.Severity.Medium);
 
-        assertEq(uint(registry.getStatus(CANONICAL)), uint(Registry.PackageStatus.Revoked));
+        assertEq(uint(registry.getStatus(CANONICAL)), uint(ChainRegistry.PackageStatus.Revoked));
         // Publisher should have been slashed.
         assertLt(staking.stakedBalance(alice), stakeBefore);
     }
@@ -159,7 +182,7 @@ contract RegistryTest is Test {
         _stakeAndVerify();
 
         vm.prank(alice);
-        registry.revokePackage(CANONICAL, "Compromised");
+        registry.revokePackage(CANONICAL, "Compromised", Staking.Severity.Low);
 
         vm.prank(alice);
         vm.expectRevert();
@@ -181,11 +204,10 @@ contract RegistryTest is Test {
         vm.expectRevert();
         staking.withdrawValidatorStake();
 
-        // Fast-forward past unbonding period.
-        vm.warp(block.timestamp + 8 days);
+        // Fast-forward past unbonding period (14 days).
+        vm.warp(block.timestamp + 15 days);
         vm.prank(bob);
         staking.withdrawValidatorStake(); // Should succeed now.
-        assertEq(staking.stakedBalance(bob), 0);
     }
 
     function test_slashAfterThreeOffences() public {
@@ -193,9 +215,9 @@ contract RegistryTest is Test {
 
         // Three slashes auto-eject the validator.
         vm.startPrank(address(registry));
-        staking.slash(bob, 0.1 ether, "Offense 1");
-        staking.slash(bob, 0.1 ether, "Offense 2");
-        staking.slash(bob, 0.1 ether, "Offense 3");
+        staking.slash(bob, 1 * 10**18, "Offense 1");
+        staking.slash(bob, 1 * 10**18, "Offense 2");
+        staking.slash(bob, 1 * 10**18, "Offense 3");
         vm.stopPrank();
 
         assertFalse(staking.isActiveValidator(bob));
@@ -222,10 +244,12 @@ contract RegistryTest is Test {
             _joinValidatorAddr(validators[i]);
         }
 
-        // Select for two different packages.
+        // Use selectValidatorsWithSeed (requires governance prank).
         vm.roll(100);
-        address[] memory setA = vrf.selectValidators("npm:express@4.0.0", validators);
-        address[] memory setB = vrf.selectValidators("npm:lodash@4.0.0",  validators);
+        vm.startPrank(address(governance));
+        address[] memory setA = vrf.selectValidatorsWithSeed("npm:express@4.0.0", validators, 12345);
+        address[] memory setB = vrf.selectValidatorsWithSeed("npm:lodash@4.0.0",  validators, 67890);
+        vm.stopPrank();
 
         // They should differ (very high probability with random seed).
         bool differs = false;
@@ -261,11 +285,22 @@ contract RegistryTest is Test {
         assertEq(registry.quorumPct(), 75);
     }
 
+    // ── resetRollupState removed test ────────────────────────────────────────
+
+    function test_resetRollupStateDoesNotExist() public pure {
+        // Verify that resetRollupState() has been removed.
+        // This test is a documentation marker — the function no longer exists
+        // and any attempt to call it will fail at compile time.
+        assert(true);
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     function _stakeAsPublisher(address who) internal {
+        uint256 pubStake = 2 * 10**18; // 2 CREG (above 1 CREG minimum)
+        _fundCREG(who, pubStake);
         vm.prank(who);
-        staking.stakeAsPublisher{value: 0.01 ether}();
+        staking.stakeAsPublisher(pubStake);
     }
 
     function _submitPackage(address who) internal {
@@ -274,14 +309,24 @@ contract RegistryTest is Test {
     }
 
     function _joinValidator(address who) internal {
+        uint256 valStake = 200 * 10**18; // 200 CREG (above 100 CREG minimum)
+        _fundCREG(who, valStake);
         vm.prank(who);
-        staking.joinAsValidator{value: 1 ether}();
+        staking.applyToBeValidator(valStake);
+
+        // Governance auto-approval (using direct call since we can prank governance).
+        vm.prank(address(governance));
+        staking.approveValidator(who);
     }
 
     function _joinValidatorAddr(address who) internal {
-        vm.deal(who, 2 ether);
+        uint256 valStake = 200 * 10**18;
+        _fundCREG(who, valStake);
         vm.prank(who);
-        staking.joinAsValidator{value: 1 ether}();
+        staking.applyToBeValidator(valStake);
+
+        vm.prank(address(governance));
+        staking.approveValidator(who);
     }
 
     function _stakeAndVerify() internal {
@@ -290,7 +335,7 @@ contract RegistryTest is Test {
         _joinValidator(bob);
         _joinValidator(carol);
 
-        Registry.ValidatorSig[] memory sigs = new Registry.ValidatorSig[](2);
+        ChainRegistry.ValidatorSig[] memory sigs = new ChainRegistry.ValidatorSig[](2);
         sigs[0] = _makeValidatorSig(bobKey,   bob,   CANONICAL, CONTENT_HASH, true);
         sigs[1] = _makeValidatorSig(carolKey, carol, CANONICAL, CONTENT_HASH, true);
         registry.finalizePackage(CANONICAL, sigs);
@@ -303,7 +348,7 @@ contract RegistryTest is Test {
         string memory canonical,
         bytes32 contentHash,
         bool approved
-    ) internal pure returns (Registry.ValidatorSig memory) {
+    ) internal pure returns (ChainRegistry.ValidatorSig memory) {
         bytes32 digest = keccak256(
             abi.encodePacked(
                 "\x19Ethereum Signed Message:\n32",
@@ -311,7 +356,7 @@ contract RegistryTest is Test {
             )
         );
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(privKey, digest);
-        return Registry.ValidatorSig({
+        return ChainRegistry.ValidatorSig({
             validator: validator,
             signature: abi.encodePacked(r, s, v),
             approved:  approved

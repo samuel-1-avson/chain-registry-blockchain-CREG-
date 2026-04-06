@@ -11,9 +11,15 @@ library ECDSA {
 }
 
 /// @title GovernanceV2
-/// @notice Token-based governance with quadratic voting and automated execution
-/// @dev Implements on-chain governance with delegation, voting power tracking,
-///      and automated parameter adjustments based on governance decisions.
+/// @notice FUTURE UPGRADE — Token-based governance with quadratic voting.
+/// @dev ⚠️  NOT YET ACTIVE. The current canonical governance is Governance.sol (M-of-N multisig).
+///      This contract will be activated via a governance proposal to migrate authority.
+///
+///      Features (when activated):
+///      - Quadratic voting to prevent plutocracy
+///      - Delegation support
+///      - Automated parameter adjustments
+///      - Gasless voting via EIP-712 signatures
 contract GovernanceV2 {
     
     // ── Structs ───────────────────────────────────────────────────────────────
@@ -181,8 +187,8 @@ contract GovernanceV2 {
     /// @param description Proposal description
     function propose(
         address target,
-        bytes calldata callData,
-        string calldata description
+        bytes memory callData,
+        string memory description
     ) public onlyProposer returns (uint256) {
         
         uint256 startBlock = block.number + params.votingDelay;

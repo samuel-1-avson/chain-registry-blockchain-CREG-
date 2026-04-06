@@ -49,6 +49,8 @@ tests/
 # Docker files (not needed in context)
 Dockerfile*
 docker-compose*.yml
+!docker-compose.yml
+!docker-compose.light.yml
 .dockerignore
 
 # Scripts that aren't needed in build

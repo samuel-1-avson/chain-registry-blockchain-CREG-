@@ -33,7 +33,7 @@ contract TestCregToken is ERC20, Ownable {
     constructor(
         string memory name,
         string memory symbol
-    ) ERC20(name, symbol) Ownable(msg.sender) {
+    ) ERC20(name, symbol) Ownable() {
         // Initial supply for testing: 10M tCREG
         _mint(msg.sender, 10_000_000 * 10**18);
     }

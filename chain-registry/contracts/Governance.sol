@@ -2,10 +2,14 @@
 pragma solidity ^0.8.24;
 
 /// @title Governance
-/// @notice M-of-N multisig governance for the chain registry.
-/// @dev Proposals are submitted, voted on by signers, and executed
+/// @notice CANONICAL governance contract — M-of-N multisig for the chain registry.
+/// @dev This is the ACTIVE governance contract used by Registry.sol and Staking.sol.
+///      Proposals are submitted, voted on by signers, and executed
 ///      automatically once the approval threshold is met.
 ///      This prevents any single entity from controlling the registry.
+///
+///      See GovernanceV2.sol for the planned token-based governance upgrade
+///      (quadratic voting, delegation, automated parameter adjustments).
 contract Governance {
     // ── Reentrancy Guard ─────────────────────────────────────────────────────
     bool private _locked;

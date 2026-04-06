@@ -1,4 +1,286 @@
 # =============================================================================
+# Chain Registry Workspace — Root .gitignore
+# SECURITY: Never commit private keys, seed phrases, or credentials
+# POLICY: Only source code and scripts are tracked.
+#         No docs, models, packages, libraries, or generated artifacts.
+# =============================================================================
+
+# =============================================================================
+# DOCUMENTATION — ALL .md files ignored
+# =============================================================================
+*.md
+
+# =============================================================================
+# DOCS DIRECTORY
+# =============================================================================
+docs/
+**/docs/
+
+# =============================================================================
+# ENVIRONMENT & SECRETS (CRITICAL — NEVER COMMIT)
+# =============================================================================
+.env
+.env.*
+*.env
+*.env.*
+secrets/
+**/secrets/
+*secret*
+!.gitignore
+
+# =============================================================================
+# KEYS & CREDENTIALS (CRITICAL)
+# =============================================================================
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt
+*.cer
+*.pub
+*.priv
+*password*
+*credential*
+*wallet*
+*mnemonic*
+*seed*
+private*
+privkey*
+publisher.key
+**/publisher.key
+
+# =============================================================================
+# VALIDATOR KEYS (CRITICAL)
+# =============================================================================
+validator-keys/
+**/validator-keys/
+validators/
+**/validators/
+
+# =============================================================================
+# KUBERNETES SECRETS
+# =============================================================================
+k8s/*secret*
+**/k8s/*secret*
+
+# =============================================================================
+# RUST BUILD ARTIFACTS & BINARIES
+# =============================================================================
+target/
+**/target/
+**/target[0-9]*/
+target-*/
+Cargo.lock
+**/Cargo.lock
+*.pdb
+*.exe
+creg
+creg-node
+creg-cli
+
+# =============================================================================
+# SMART CONTRACT BUILD ARTIFACTS
+# =============================================================================
+out/
+**/out/
+cache/
+**/cache/
+broadcast/
+**/broadcast/
+foundry.lock
+**/foundry.lock
+deployments/
+**/deployments/
+
+# =============================================================================
+# ZK CIRCUIT BUILD ARTIFACTS & KEYS
+# =============================================================================
+circuits/build/
+circuits/keys/
+**/circuits/build/
+**/circuits/keys/
+*.r1cs
+*.zkey
+*.ptau
+*.sym
+!circuits/*.circom
+!**/circuits/*.circom
+
+# =============================================================================
+# ML MODELS & TRAINING DATA
+# =============================================================================
+models/
+**/models/
+ml/
+secret-model/
+**/secret-model/
+*.pkl
+*.onnx
+*.pt
+*.pth
+*.bin
+*.h5
+*.safetensors
+
+# =============================================================================
+# DATA & STORAGE
+# =============================================================================
+data/
+**/data/
+node*-data/
+**/node*-data/
+validator*-data/
+**/validator*-data/
+ipfs-data/
+**/ipfs-data/
+postgres-data/
+**/postgres-data/
+anvil_state.json
+**/anvil_state.json
+dev-data/
+**/dev-data/
+tmp/
+**/tmp/
+temp/
+**/temp/
+*.db
+*.sqlite
+*.sqlite3
+
+# =============================================================================
+# LOGS
+# =============================================================================
+*.log
+*.log.*
+logs/
+**/logs/
+
+# =============================================================================
+# PACKAGE ARTIFACTS & TARBALLS
+# =============================================================================
+*.tgz
+*.tar.gz
+*.zip
+*.tar
+demo-v2/
+**/demo-v2/
+malicious-pkg/
+**/malicious-pkg/
+good-pkg-v1/
+good-pkg-v2/
+evil-pkg-v1/
+**/evil-pkg-v1/
+package/
+packages/
+dist/
+**/dist/
+stress-report-out/
+**/stress-report-out/
+
+# =============================================================================
+# NODE.JS / NPM (libraries)
+# =============================================================================
+node_modules/
+**/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+**/package-lock.json
+yarn.lock
+**/yarn.lock
+
+# =============================================================================
+# PYTHON (libraries)
+# =============================================================================
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# =============================================================================
+# IDE & EDITOR
+# =============================================================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+*.sublime-project
+*.sublime-workspace
+.project
+.classpath
+.settings/
+
+# =============================================================================
+# AI TOOL DIRECTORIES
+# =============================================================================
+.blackboxcli/
+.claude/
+.cursor/
+.gemini/
+.ai/
+.playwright-mcp/
+
+# =============================================================================
+# COVERAGE & TESTING
+# =============================================================================
+coverage/
+**/coverage/
+*.coverage
+htmlcov/
+.tox/
+.nox/
+.pytest_cache/
+
+# =============================================================================
+# DOCKER
+# =============================================================================
+docker-compose.override.yml
+
+# =============================================================================
+# MISCELLANEOUS
+# =============================================================================
+*.bak
+*.backup
+*.old
+*.orig
+*.rej
+*.patch
+
+# =============================================================================
+# TESTNET GENERATED ARTIFACTS
+# =============================================================================
+**/testnet/artifacts/
+**/config/*/deployment.json
+config/local/
+config/production/
+scripts/*.key
+scripts/*.json
+!scripts/*.py
+!scripts/*.ps1
+!scripts/*.sh
+# =============================================================================
 # Chain Registry - Git Ignore
 # SECURITY: Never commit private keys, seed phrases, or API credentials
 # =============================================================================
@@ -282,3 +564,4 @@ scripts/*.json
 !LICENSE
 !.gitignore
 !.github/
+.blackboxcli/

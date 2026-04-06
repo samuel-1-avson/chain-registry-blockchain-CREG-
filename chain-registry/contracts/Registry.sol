@@ -13,6 +13,15 @@ import "./ZKVerifier.sol";
 ///      and ZK proof validation for faster verification.
 contract ChainRegistry {
 
+    // ── Reentrancy Guard ─────────────────────────────────────────────────────
+    bool private _locked;
+    modifier nonReentrant() {
+        require(!_locked, "Reentrant call");
+        _locked = true;
+        _;
+        _locked = false;
+    }
+
     // ── Structs ───────────────────────────────────────────────────────────────
 
     enum PackageStatus { Unknown, Pending, Verified, Revoked }
@@ -167,6 +176,9 @@ contract ChainRegistry {
             ipfsCid:           ipfsCid,
             publisher:         msg.sender,
             publishedAt:       uint64(block.timestamp),
+            // Note: blockhash() only works for the 256 most recent blocks.
+            // Older packages will have blockHash = 0x0. This is acceptable
+            // as it serves as an inclusion record, not a randomness source.
             blockHash:         blockhash(block.number - 1),
             status:            PackageStatus.Pending,
             revocationReason:  "",
@@ -216,7 +228,7 @@ contract ChainRegistry {
             ipfsCid:           ipfsCid,
             publisher:         msg.sender,
             publishedAt:       uint64(block.timestamp),
-            blockHash:         blockhash(block.number - 1),
+            blockHash:         blockhash(block.number - 1), // See note in submitPackage()
             status:            PackageStatus.Verified,
             revocationReason:  "",
             validationMode:    ValidationMode.ZKProof,
@@ -272,13 +284,9 @@ contract ChainRegistry {
         emit BatchSubmitted(totalBatches, prevRoot, nextRoot, txCount, dataRoot);
     }
 
-    /// @notice Reset the rollup state for production transition (Alpha only)
-    /// @dev DANGER: Clears all current L2 history on L1. Use only before mainnet launch.
-    function resetRollupState() external onlyGovernance {
-        latestStateRoot = bytes32(0);
-        totalBatches = 0;
-        // batchRoots and batchDataRoots remain but are no longer reachable from totalBatches
-    }
+    // resetRollupState() has been REMOVED for security.
+    // It previously allowed governance to wipe all L2 history on L1.
+    // This is unacceptable in production — L2 state must be immutable once committed.
 
     // ── Consensus-facing ─────────────────────────────────────────────────────
 
@@ -451,7 +459,8 @@ contract ChainRegistry {
     }
     
     /// @notice Withdraw accumulated ZK validation fees
-    function withdrawFees(address payable to, uint256 amount) external onlyGovernance {
+    /// @dev Protected against reentrancy since it transfers ETH.
+    function withdrawFees(address payable to, uint256 amount) external onlyGovernance nonReentrant {
         require(address(this).balance >= amount, "Insufficient balance");
         to.transfer(amount);
     }

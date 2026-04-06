@@ -171,6 +171,7 @@ pub fn router(state: SharedState, event_bus: EventBus, limiter: RateLimiter) -> 
     Router::new()
         // Health & chain
         .route("/v1/health", get(health))
+        .route("/health", get(health))
         .route("/v1/chain/stats", get(chain_stats))
         .route("/v1/nodes", get(get_nodes))
         .route("/v1/p2p/status", get(p2p_status))

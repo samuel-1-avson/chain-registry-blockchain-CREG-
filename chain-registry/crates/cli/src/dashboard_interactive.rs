@@ -1,5 +1,5 @@
 // crates/cli/src/dashboard_interactive.rs
-// Interactive TUI dashboard with clickable actions
+// Interactive TUI dashboard with live data from node API
 
 use anyhow::Result;
 use crossterm::{
@@ -10,17 +10,43 @@ use ratatui::{
     backend::CrosstermBackend,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::{Line, Span, Text},
+    text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Row, Table, Tabs, Wrap},
     Frame, Terminal,
 };
-use std::{io, time::Duration};
+use serde_json::Value;
+use std::{io, time::{Duration, Instant}};
+
+const REFRESH_SECS: u64 = 3;
 
 pub enum MenuItem {
     Overview,
     Packages,
     Validator,
     Settings,
+}
+
+#[derive(Default)]
+struct LiveData {
+    tip_height: u64,
+    package_count: u64,
+    validator_count: usize,
+    total_stake: u64,
+    peer_count: usize,
+    bridge_status: String,
+    validators: Vec<ValidatorEntry>,
+    pending_packages: Vec<String>,
+    pending_count: u64,
+    connected: bool,
+    last_error: Option<String>,
+}
+
+struct ValidatorEntry {
+    id: String,
+    alias: String,
+    stake: u64,
+    reputation: u64,
+    status: String,
 }
 
 pub struct DashboardApp {
@@ -30,6 +56,7 @@ pub struct DashboardApp {
     pub show_stake_dialog: bool,
     pub show_publish_dialog: bool,
     pub quit: bool,
+    data: LiveData,
 }
 
 impl DashboardApp {
@@ -46,6 +73,7 @@ impl DashboardApp {
             show_stake_dialog: false,
             show_publish_dialog: false,
             quit: false,
+            data: LiveData::default(),
         }
     }
 
@@ -94,11 +122,22 @@ pub async fn run(node_url: Option<&str>) -> Result<()> {
         std::env::var("CREG_NODE_URL").unwrap_or_else(|_| "http://localhost:8080".into())
     });
 
-    let mut last_tick = std::time::Instant::now();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()?;
+
+    let mut last_tick = Instant::now();
+    let mut last_fetch = Instant::now() - Duration::from_secs(REFRESH_SECS + 1);
     let tick_rate = Duration::from_millis(250);
 
     loop {
-        terminal.draw(|f| ui(f, &mut app))?;
+        // Fetch live data periodically
+        if last_fetch.elapsed() >= Duration::from_secs(REFRESH_SECS) {
+            fetch_live_data(&client, &api_base, &mut app.data).await;
+            last_fetch = Instant::now();
+        }
+
+        terminal.draw(|f| ui(f, &app))?;
 
         let timeout = tick_rate
             .checked_sub(last_tick.elapsed())
@@ -113,8 +152,7 @@ pub async fn run(node_url: Option<&str>) -> Result<()> {
         }
 
         if last_tick.elapsed() >= tick_rate {
-            // Refresh data here
-            last_tick = std::time::Instant::now();
+            last_tick = Instant::now();
         }
 
         if app.quit {
@@ -126,7 +164,53 @@ pub async fn run(node_url: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-fn ui(f: &mut Frame, app: &mut DashboardApp) {
+async fn fetch_live_data(client: &reqwest::Client, api_base: &str, data: &mut LiveData) {
+    // Fetch chain stats
+    match client.get(format!("{}/v1/chain/stats", api_base)).send().await {
+        Ok(res) => match res.json::<Value>().await {
+            Ok(json) => {
+                data.tip_height = json["tip_height"].as_u64().unwrap_or(0);
+                data.package_count = json["package_count"].as_u64().unwrap_or(0);
+                data.validator_count = json["validator_count"].as_u64().unwrap_or(0) as usize;
+                data.total_stake = json["total_stake"].as_u64().unwrap_or(0);
+                data.peer_count = json["peer_count"].as_u64().unwrap_or(0) as usize;
+                data.bridge_status = json["bridge_status"].as_str().unwrap_or("Unknown").to_string();
+                data.connected = true;
+                data.last_error = None;
+            }
+            Err(e) => { data.last_error = Some(format!("Parse error: {}", e)); }
+        },
+        Err(e) => {
+            data.connected = false;
+            data.last_error = Some(format!("Connection error: {}", e));
+        }
+    }
+
+    // Fetch validators
+    if let Ok(res) = client.get(format!("{}/v1/nodes", api_base)).send().await {
+        if let Ok(json) = res.json::<Vec<Value>>().await {
+            data.validators = json.iter().map(|v| ValidatorEntry {
+                id: v["id"].as_str().unwrap_or("?").to_string(),
+                alias: v["alias"].as_str().unwrap_or("").to_string(),
+                stake: v["stake"].as_u64().unwrap_or(0),
+                reputation: v["reputation"].as_u64().unwrap_or(0),
+                status: v["status"].as_str().unwrap_or("unknown").to_string(),
+            }).collect();
+        }
+    }
+
+    // Fetch pending packages
+    if let Ok(res) = client.get(format!("{}/v1/pending", api_base)).send().await {
+        if let Ok(json) = res.json::<Value>().await {
+            data.pending_count = json["count"].as_u64().unwrap_or(0);
+            data.pending_packages = json["packages"].as_array()
+                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .unwrap_or_default();
+        }
+    }
+}
+
+fn ui(f: &mut Frame, app: &DashboardApp) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .margin(1)
@@ -144,11 +228,14 @@ fn ui(f: &mut Frame, app: &mut DashboardApp) {
         .map(|(_, title)| Line::from(title.as_str()))
         .collect();
 
+    let conn_indicator = if app.data.connected { "● CONNECTED" } else { "○ DISCONNECTED" };
+    let header_title = format!("Chain Registry Dashboard  [{}]", conn_indicator);
+
     let tabs = Tabs::new(titles)
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("Chain Registry Dashboard"),
+                .title(header_title),
         )
         .select(app.active_tab)
         .style(Style::default().fg(Color::White))
@@ -163,9 +250,9 @@ fn ui(f: &mut Frame, app: &mut DashboardApp) {
 
     // Main content based on tab
     match app.menu_items[app.active_tab].0 {
-        MenuItem::Overview => draw_overview_tab(f, chunks[1]),
-        MenuItem::Packages => draw_packages_tab(f, chunks[1]),
-        MenuItem::Validator => draw_validator_tab(f, chunks[1]),
+        MenuItem::Overview => draw_overview_tab(f, &app.data, chunks[1]),
+        MenuItem::Packages => draw_packages_tab(f, &app.data, chunks[1]),
+        MenuItem::Validator => draw_validator_tab(f, &app.data, chunks[1]),
         MenuItem::Settings => draw_settings_tab(f, chunks[1]),
     }
 
@@ -188,18 +275,20 @@ fn ui(f: &mut Frame, app: &mut DashboardApp) {
     }
 }
 
-fn draw_overview_tab(f: &mut Frame, area: Rect) {
+fn draw_overview_tab(f: &mut Frame, data: &LiveData, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(area);
 
-    // Left: Stats
+    let active = data.validators.iter().filter(|v| v.status == "online" || v.status == "self").count();
+    let total = data.validators.len();
+
     let stats_text = vec![
         Line::from(vec![
-            Span::raw("Blocks: "),
+            Span::raw("Block Height: "),
             Span::styled(
-                "15,234",
+                format!("{}", data.tip_height),
                 Style::default()
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
@@ -207,20 +296,27 @@ fn draw_overview_tab(f: &mut Frame, area: Rect) {
         ]),
         Line::from(vec![
             Span::raw("Packages: "),
-            Span::styled("1,892", Style::default().fg(Color::Cyan)),
+            Span::styled(format!("{}", data.package_count), Style::default().fg(Color::Cyan)),
         ]),
         Line::from(vec![
             Span::raw("Validators: "),
-            Span::styled("10/10", Style::default().fg(Color::Green)),
+            Span::styled(
+                format!("{}/{}", active, total),
+                Style::default().fg(if active == total && total > 0 { Color::Green } else { Color::Yellow }),
+            ),
+        ]),
+        Line::from(vec![
+            Span::raw("Total Stake: "),
+            Span::styled(format!("{} CREG", data.total_stake), Style::default().fg(Color::Cyan)),
+        ]),
+        Line::from(vec![
+            Span::raw("Peers: "),
+            Span::styled(format!("{}", data.peer_count), Style::default().fg(Color::Green)),
         ]),
         Line::from(""),
         Line::from(vec![
-            Span::raw("Network Status: "),
-            Span::styled("✓ Healthy", Style::default().fg(Color::Green)),
-        ]),
-        Line::from(vec![
-            Span::raw("Sync: "),
-            Span::styled("100%", Style::default().fg(Color::Green)),
+            Span::raw("Bridge: "),
+            Span::styled(&data.bridge_status, Style::default().fg(Color::Yellow)),
         ]),
     ];
 
@@ -233,93 +329,119 @@ fn draw_overview_tab(f: &mut Frame, area: Rect) {
         .wrap(Wrap { trim: true });
     f.render_widget(stats, chunks[0]);
 
-    // Right: Recent Activity
-    let activities = vec![
-        Line::from("• express@4.18.2 verified (2s ago)"),
-        Line::from("• Block #15234 proposed (5s ago)"),
-        Line::from("• lodash@4.17.21 verified (12s ago)"),
-        Line::from("• Validator node-7 voted (15s ago)"),
-    ];
+    // Right: Validator list
+    let val_items: Vec<ListItem> = data.validators.iter().map(|v| {
+        let icon = match v.status.as_str() {
+            "online" | "self" => "🟢",
+            _ => "🔴",
+        };
+        ListItem::new(format!("{} {} ({})  {} CREG  rep:{}", icon, v.id, v.alias, v.stake, v.reputation))
+    }).collect();
 
-    let activity = Paragraph::new(activities).block(
+    let val_list = List::new(if val_items.is_empty() {
+        vec![ListItem::new("Waiting for validator data...")]
+    } else {
+        val_items
+    }).block(
         Block::default()
             .borders(Borders::ALL)
-            .title("Recent Activity"),
+            .title(format!("Validators ({})", data.validators.len())),
     );
-    f.render_widget(activity, chunks[1]);
+    f.render_widget(val_list, chunks[1]);
 }
 
-fn draw_packages_tab(f: &mut Frame, area: Rect) {
-    let items: Vec<ListItem> = vec![
-        ListItem::new("✓ express@4.18.2    Verified    3/3 votes"),
-        ListItem::new("✓ lodash@4.17.21    Verified    3/3 votes"),
-        ListItem::new("⚠ axios@1.4.0       Pending     1/3 votes"),
-        ListItem::new("✗ malicious-pkg     Rejected    0/3 votes"),
-    ];
+fn draw_packages_tab(f: &mut Frame, data: &LiveData, area: Rect) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(0)])
+        .split(area);
+
+    let summary = Paragraph::new(format!(
+        "On-chain: {}  |  Pending: {}",
+        data.package_count, data.pending_count
+    ))
+    .block(Block::default().borders(Borders::ALL).title("Package Summary"))
+    .style(Style::default().fg(Color::Cyan));
+    f.render_widget(summary, chunks[0]);
+
+    let items: Vec<ListItem> = if data.pending_packages.is_empty() {
+        vec![ListItem::new("  No pending packages").style(Style::default().fg(Color::DarkGray))]
+    } else {
+        data.pending_packages.iter().map(|name| {
+            ListItem::new(format!("  ⏳ {}", name)).style(Style::default().fg(Color::Yellow))
+        }).collect()
+    };
 
     let packages = List::new(items)
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("Recent Packages"),
-        )
-        .highlight_style(Style::default().add_modifier(Modifier::BOLD))
-        .highlight_symbol("> ");
-
-    f.render_widget(packages, area);
+                .title("Pending Packages"),
+        );
+    f.render_widget(packages, chunks[1]);
 }
 
-fn draw_validator_tab(f: &mut Frame, area: Rect) {
+fn draw_validator_tab(f: &mut Frame, data: &LiveData, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(8), Constraint::Min(0)])
+        .constraints([Constraint::Length(5), Constraint::Min(0)])
         .split(area);
 
-    // Validator status
+    let active = data.validators.iter().filter(|v| v.status == "online" || v.status == "self").count();
+    let avg_rep = if data.validators.is_empty() { 0 } else {
+        data.validators.iter().map(|v| v.reputation).sum::<u64>() / data.validators.len() as u64
+    };
+
     let status_text = vec![
         Line::from(vec![
-            Span::raw("Status: "),
+            Span::raw("Active Validators: "),
             Span::styled(
-                "🟢 Active",
-                Style::default()
-                    .fg(Color::Green)
-                    .add_modifier(Modifier::BOLD),
+                format!("{}/{}", active, data.validators.len()),
+                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
             ),
         ]),
         Line::from(vec![
-            Span::raw("Stake: "),
-            Span::styled("50 CREG", Style::default().fg(Color::Cyan)),
-        ]),
-        Line::from(vec![
-            Span::raw("Rewards: "),
-            Span::styled("12.5 CREG", Style::default().fg(Color::Yellow)),
-        ]),
-        Line::from(vec![
-            Span::raw("Reputation: "),
-            Span::styled("98/100 ⭐⭐⭐⭐⭐", Style::default().fg(Color::Yellow)),
+            Span::raw("Average Reputation: "),
+            Span::styled(format!("{}/100", avg_rep), Style::default().fg(Color::Yellow)),
         ]),
     ];
 
     let status = Paragraph::new(status_text)
-        .block(Block::default().borders(Borders::ALL).title("My Validator"));
+        .block(Block::default().borders(Borders::ALL).title("Validator Network"));
     f.render_widget(status, chunks[0]);
 
-    // Performance table
-    let rows = vec![
-        Row::new(vec!["Packages Validated", "1,234"]),
-        Row::new(vec!["Correct Votes", "1,230 (99.7%)"]),
-        Row::new(vec!["Block Proposals", "45"]),
-        Row::new(vec!["Uptime", "99.9%"]),
-    ];
+    let rows: Vec<Row> = data.validators.iter().map(|v| {
+        let status_color = match v.status.as_str() {
+            "online" | "self" => Color::Green,
+            _ => Color::Red,
+        };
+        Row::new(vec![
+            v.id.clone(),
+            v.alias.clone(),
+            format!("{} CREG", v.stake),
+            format!("{}/100", v.reputation),
+            v.status.clone(),
+        ]).style(Style::default().fg(status_color))
+    }).collect();
 
     let table = Table::new(
         rows,
-        vec![Constraint::Percentage(50), Constraint::Percentage(50)],
+        vec![
+            Constraint::Percentage(20),
+            Constraint::Percentage(20),
+            Constraint::Percentage(20),
+            Constraint::Percentage(20),
+            Constraint::Percentage(20),
+        ],
+    )
+    .header(
+        Row::new(vec!["ID", "Alias", "Stake", "Reputation", "Status"])
+            .style(Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
     )
     .block(
         Block::default()
             .borders(Borders::ALL)
-            .title("Performance (30 days)"),
+            .title("All Validators"),
     )
     .column_spacing(1);
 
@@ -335,7 +457,25 @@ fn draw_settings_tab(f: &mut Frame, area: Rect) {
 fn draw_stake_dialog(f: &mut Frame) {
     let area = centered_rect(60, 40, f.size());
 
-    let dialog = Paragraph::new("Stake Dialog\n\nPress ESC to close")
+    let text = vec![
+        Line::from(""),
+        Line::from("  Use the CLI to stake tokens:"),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  $ creg stake --amount 100 --role publisher",
+            Style::default().fg(Color::Cyan),
+        )),
+        Line::from(Span::styled(
+            "  $ creg stake --amount 100 --role validator",
+            Style::default().fg(Color::Cyan),
+        )),
+        Line::from(""),
+        Line::from("  Or use the web explorer at http://localhost:3000"),
+        Line::from(""),
+        Line::from(Span::styled("  Press ESC to close", Style::default().fg(Color::DarkGray))),
+    ];
+
+    let dialog = Paragraph::new(text)
         .block(Block::default().borders(Borders::ALL).title("Stake CREG"));
 
     f.render_widget(Clear, area);
@@ -345,7 +485,21 @@ fn draw_stake_dialog(f: &mut Frame) {
 fn draw_publish_dialog(f: &mut Frame) {
     let area = centered_rect(60, 40, f.size());
 
-    let dialog = Paragraph::new("Publish Dialog\n\nPress ESC to close").block(
+    let text = vec![
+        Line::from(""),
+        Line::from("  Use the CLI to publish a package:"),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  $ creg publish --name my-pkg --version 1.0.0 ./pkg.tar.gz",
+            Style::default().fg(Color::Cyan),
+        )),
+        Line::from(""),
+        Line::from("  The package will appear in the Packages tab once submitted."),
+        Line::from(""),
+        Line::from(Span::styled("  Press ESC to close", Style::default().fg(Color::DarkGray))),
+    ];
+
+    let dialog = Paragraph::new(text).block(
         Block::default()
             .borders(Borders::ALL)
             .title("Publish Package"),

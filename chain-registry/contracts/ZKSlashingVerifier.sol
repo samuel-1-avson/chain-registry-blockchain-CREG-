@@ -52,7 +52,7 @@ contract ZKSlashingVerifier {
     mapping(bytes32 => bool) public usedNullifiers;
     
     /// @notice Verifying keys for each evidence type
-    mapping(EvidenceType => VerifyingKey) public verifyingKeys;
+    mapping(EvidenceType => VerifyingKey) internal verifyingKeys;
     
     /// @notice Number of public inputs expected for each type
     mapping(EvidenceType => uint256) public publicInputCounts;

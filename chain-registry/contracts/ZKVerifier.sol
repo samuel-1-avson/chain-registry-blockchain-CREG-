@@ -23,7 +23,7 @@ contract ZKVerifier {
         uint256[2][] ic; // IC coefficients for public inputs
     }
     
-    VerifyingKey public vk;
+    VerifyingKey internal vk;
     address public governance;
     
     // Events

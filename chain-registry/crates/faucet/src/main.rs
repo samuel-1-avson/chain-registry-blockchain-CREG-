@@ -1,6 +1,13 @@
 // crates/faucet/src/main.rs
-// Testnet Faucet Service - Distributes test tCREG tokens
+// Testnet Faucet Service - Distributes test tCREG tokens (REAL IMPLEMENTATION)
 
+use alloy::{
+    network::EthereumWallet,
+    primitives::{Address, U256},
+    providers::ProviderBuilder,
+    signers::local::PrivateKeySigner,
+    sol,
+};
 use axum::{
     extract::{Json, State},
     http::StatusCode,
@@ -11,13 +18,20 @@ use axum::{
 use chrono::{DateTime, Utc};
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 use tower_http::cors::{Any, CorsLayer};
-use tracing::info;
+use tracing::{info, error};
+
+sol!(
+    #[sol(rpc)]
+    interface IERC20 {
+        function transfer(address to, uint256 amount) external returns (bool);
+        function balanceOf(address owner) external view returns (uint256);
+    }
+);
 
 /// Faucet configuration
 #[derive(Clone)]
@@ -33,23 +47,30 @@ struct FaucetConfig {
     /// Ethereum RPC URL
     rpc_url: String,
     /// Faucet private key (must have tokens to distribute)
-    _faucet_key: String,
+    faucet_key: String,
     /// Test CREG token contract address
     token_contract: String,
+    /// Faucet Ethereum address
+    faucet_address: String,
 }
 
 impl FaucetConfig {
     fn from_env() -> Self {
+        let faucet_key = std::env::var("FAUCET_PRIVATE_KEY")
+            .expect("FAUCET_PRIVATE_KEY must be set");
+        let faucet_address = std::env::var("FAUCET_ADDRESS")
+            .expect("FAUCET_ADDRESS must be set");
+        
         Self {
             drip_amount: env_u128("FAUCET_DRIP_AMOUNT", 1000_000_000_000_000_000_000), // 1000 tCREG
             cooldown_secs: env_u64("FAUCET_COOLDOWN_SECS", 60),                        // 1 minute
             ip_cooldown_secs: env_u64("FAUCET_IP_COOLDOWN_SECS", 60),
             max_balance: env_u128("FAUCET_MAX_BALANCE", 10000_000_000_000_000_000_000), // 10k tCREG
-            rpc_url: env_string("FAUCET_RPC_URL", "http://anvil:8545"),
-            _faucet_key: std::env::var("FAUCET_PRIVATE_KEY")
-                .expect("FAUCET_PRIVATE_KEY must be set"),
+            rpc_url: env_string("FAUCET_RPC_URL", "http://localhost:8545"),
+            faucet_key,
             token_contract: std::env::var("FAUCET_TOKEN_CONTRACT")
                 .expect("FAUCET_TOKEN_CONTRACT must be set"),
+            faucet_address,
         }
     }
 }
@@ -141,12 +162,6 @@ struct DripResponse {
     amount: Option<String>,
 }
 
-/// Error response
-#[derive(Serialize)]
-struct ErrorResponse {
-    error: String,
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
@@ -159,7 +174,7 @@ async fn main() -> anyhow::Result<()> {
     let config = FaucetConfig::from_env();
 
     info!("╔════════════════════════════════════════════════════════╗");
-    info!("║        Chain Registry Testnet Faucet                   ║");
+    info!("║        Chain Registry Testnet Faucet (REAL)            ║");
     info!("╚════════════════════════════════════════════════════════╝");
     info!(
         "  Drip amount: {} tCREG",
@@ -168,6 +183,7 @@ async fn main() -> anyhow::Result<()> {
     info!("  Cooldown: {} seconds", config.cooldown_secs);
     info!("  Token contract: {}", config.token_contract);
     info!("  RPC: {}", config.rpc_url);
+    info!("  Faucet address: {}", config.faucet_address);
 
     let state = Arc::new(AppState {
         config,
@@ -203,6 +219,79 @@ async fn main() -> anyhow::Result<()> {
 /// HTML faucet page
 async fn index_page() -> impl IntoResponse {
     Html(include_str!("faucet.html"))
+}
+
+fn parse_address(value: &str, field_name: &str) -> Result<Address, String> {
+    value
+        .parse::<Address>()
+        .map_err(|e| format!("Invalid {}: {}", field_name, e))
+}
+
+async fn execute_transfer(config: &FaucetConfig, to_address: &str) -> Result<String, String> {
+    let signer: PrivateKeySigner = config
+        .faucet_key
+        .parse()
+        .map_err(|e| format!("Invalid faucet private key: {}", e))?;
+    let wallet = EthereumWallet::from(signer);
+    let provider = ProviderBuilder::new()
+        .with_recommended_fillers()
+        .wallet(wallet)
+        .on_http(
+            config
+                .rpc_url
+                .parse()
+                .map_err(|e| format!("Invalid faucet RPC URL: {}", e))?,
+        );
+
+    let token_address = parse_address(&config.token_contract, "token contract")?;
+    let recipient = parse_address(to_address, "recipient address")?;
+    let contract = IERC20::new(token_address, &provider);
+
+    let pending_tx = contract
+        .transfer(recipient, U256::from(config.drip_amount))
+        .send()
+        .await
+        .map_err(|e| format!("Transfer failed: {}", e))?;
+    let tx_hash = pending_tx.tx_hash().to_string();
+
+    pending_tx
+        .watch()
+        .await
+        .map_err(|e| format!("Transfer confirmation failed: {}", e))?;
+
+    Ok(tx_hash)
+}
+
+async fn get_real_balance(config: &FaucetConfig, address: &str) -> Result<u128, String> {
+    let signer: PrivateKeySigner = config
+        .faucet_key
+        .parse()
+        .map_err(|e| format!("Invalid faucet private key: {}", e))?;
+    let wallet = EthereumWallet::from(signer);
+    let provider = ProviderBuilder::new()
+        .with_recommended_fillers()
+        .wallet(wallet)
+        .on_http(
+            config
+                .rpc_url
+                .parse()
+                .map_err(|e| format!("Invalid faucet RPC URL: {}", e))?,
+        );
+
+    let token_address = parse_address(&config.token_contract, "token contract")?;
+    let holder = parse_address(address, "holder address")?;
+    let contract = IERC20::new(token_address, &provider);
+    let balance = contract
+        .balanceOf(holder)
+        .call()
+        .await
+        .map_err(|e| format!("Balance check failed: {}", e))?
+        ._0;
+
+    balance
+        .to_string()
+        .parse::<u128>()
+        .map_err(|e| format!("Failed to parse balance: {}", e))
 }
 
 /// Handle drip request
@@ -255,84 +344,142 @@ async fn handle_drip(
         );
     }
 
-    // In a real implementation, this would call the Ethereum RPC
-    // For now, simulate success and return a mock tx hash
-    let data = format!(
-        "{}{}{}",
-        address,
-        chrono::Utc::now().timestamp(),
-        std::process::id()
-    );
-    let result = Sha256::digest(data.as_bytes());
-    let mock_tx_hash = format!("0x{}", hex::encode(&result[..32]));
+    // Check current balance
+    match get_real_balance(&state.config, &address).await {
+        Ok(balance) => {
+            if balance >= state.config.max_balance {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    JsonResponse(DripResponse {
+                        success: false,
+                        message: format!(
+                            "Address already has maximum allowed balance ({} tCREG)",
+                            balance / 10_u128.pow(18)
+                        ),
+                        tx_hash: None,
+                        amount: None,
+                    }),
+                );
+            }
+        }
+        Err(e) => {
+            error!("Failed to check balance: {}", e);
+            // Continue anyway, the transfer will fail if there's a real issue
+        }
+    }
 
-    state.rate_limiter.record_request(&address, &client_ip);
+    // Execute real token transfer
+    match execute_transfer(&state.config, &address).await {
+        Ok(tx_hash) => {
+            state.rate_limiter.record_request(&address, &client_ip);
 
-    // Update stats
-    let mut stats = state.stats.lock().await;
-    stats.total_drips += 1;
-    stats.total_distributed = format!(
-        "{}",
-        (stats.total_drips as u128 * state.config.drip_amount) / 10_u128.pow(18)
-    );
-    stats.last_drip = Some(Utc::now());
-    drop(stats);
+            // Update stats
+            let mut stats = state.stats.lock().await;
+            stats.total_drips += 1;
+            stats.unique_addresses = state.rate_limiter.address_last_request.len();
+            stats.total_distributed = format!(
+                "{}",
+                (stats.total_drips as u128 * state.config.drip_amount) / 10_u128.pow(18)
+            );
+            stats.last_drip = Some(Utc::now());
+            drop(stats);
 
-    info!(
-        "Dripped {} tCREG to {} (tx: {})",
-        state.config.drip_amount / 10_u128.pow(18),
-        address,
-        mock_tx_hash
-    );
+            info!(
+                "Dripped {} tCREG to {} (tx: {})",
+                state.config.drip_amount / 10_u128.pow(18),
+                address,
+                tx_hash
+            );
 
-    (
-        StatusCode::OK,
-        JsonResponse(DripResponse {
-            success: true,
-            message:
-                "Tokens sent successfully! (Simulated - connect to real RPC for actual transfer)"
-                    .to_string(),
-            tx_hash: Some(mock_tx_hash),
-            amount: Some(format!("{}", state.config.drip_amount / 10_u128.pow(18))),
-        }),
-    )
+            (
+                StatusCode::OK,
+                JsonResponse(DripResponse {
+                    success: true,
+                    message: "Tokens sent successfully!".to_string(),
+                    tx_hash: Some(tx_hash),
+                    amount: Some(format!("{}", state.config.drip_amount / 10_u128.pow(18))),
+                }),
+            )
+        }
+        Err(e) => {
+            error!("Transfer failed: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                JsonResponse(DripResponse {
+                    success: false,
+                    message: format!("Transfer failed: {}", e),
+                    tx_hash: None,
+                    amount: None,
+                }),
+            )
+        }
+    }
 }
 
 /// Get faucet statistics
 async fn get_stats(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let stats = state.stats.lock().await;
+    
+    // Get real faucet balance
+    let faucet_balance = get_real_balance(&state.config, &state.config.faucet_address)
+        .await
+        .unwrap_or(0);
+    
     JsonResponse(serde_json::json!({
         "drip_amount": state.config.drip_amount.to_string(),
         "cooldown_seconds": state.config.cooldown_secs,
         "token_contract": state.config.token_contract,
+        "faucet_address": state.config.faucet_address,
+        "faucet_balance": faucet_balance.to_string(),
+        "faucet_balance_formatted": format!("{:.2}", faucet_balance as f64 / 10_f64.powi(18)),
         "stats": *stats,
     }))
 }
 
-/// Get balance for address (simulated)
+/// Get balance for address (REAL)
 async fn get_balance(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
     axum::extract::Path(address): axum::extract::Path<String>,
 ) -> impl IntoResponse {
-    // In a real implementation, query the Ethereum RPC
-    // For now, return a mock balance
-    let mock_balance = 1000_000_000_000_000_000_000u128; // 1000 tCREG
-
-    JsonResponse(serde_json::json!({
-        "address": address,
-        "balance": mock_balance.to_string(),
-        "balance_formatted": format!("{:.2}", mock_balance as f64 / 10_f64.powi(18)),
-        "note": "Simulated balance - connect to real RPC for actual values"
-    }))
+    match get_real_balance(&state.config, &address).await {
+        Ok(balance) => {
+            JsonResponse(serde_json::json!({
+                "address": address,
+                "balance": balance.to_string(),
+                "balance_formatted": format!("{:.2}", balance as f64 / 10_f64.powi(18)),
+            }))
+        }
+        Err(e) => {
+            JsonResponse(serde_json::json!({
+                "address": address,
+                "error": e,
+            }))
+        }
+    }
 }
 
 /// Health check
-async fn health_check() -> impl IntoResponse {
-    JsonResponse(serde_json::json!({
-        "status": "healthy",
-        "faucet": "online",
-        "mode": "simulated",
-    }))
+async fn health_check(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    match get_real_balance(&state.config, &state.config.faucet_address).await {
+        Ok(faucet_balance) => (
+            StatusCode::OK,
+            JsonResponse(serde_json::json!({
+                "status": "healthy",
+                "faucet": "online",
+                "mode": "real",
+                "faucet_balance": faucet_balance.to_string(),
+            })),
+        ),
+        Err(err) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            JsonResponse(serde_json::json!({
+                "status": "degraded",
+                "faucet": "offline",
+                "mode": "real",
+                "error": err,
+            })),
+        ),
+    }
 }
 
 // Helper functions

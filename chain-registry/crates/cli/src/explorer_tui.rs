@@ -288,8 +288,18 @@ pub async fn run(node_url: Option<&str>) -> Result<()> {
     let app_clone = app.clone();
     let api_base_clone = api_base.clone();
     tokio::spawn(async move {
-        data_fetcher_loop(app_clone, api_base_clone, data_tx).await;
+        data_fetcher_loop(app_clone, api_base_clone, data_tx.clone()).await;
     });
+
+    // Spawn SSE event listener
+    {
+        let app_sse = app.clone();
+        let api_sse = api_base.clone();
+        let tx_sse = app.read().await.data_tx.clone();
+        tokio::spawn(async move {
+            sse_event_listener(app_sse, api_sse, tx_sse).await;
+        });
+    };
 
     // Main loop
     let tick_rate = Duration::from_millis(TICK_RATE_MS);
@@ -382,6 +392,11 @@ async fn data_fetcher_loop(app: Arc<RwLock<App>>, api_base: String, tx: mpsc::Se
             // Fetch peers
             if let Ok(peers) = fetch_peers(&client, &api_base).await {
                 let _ = tx.send(DataUpdate::Peers(peers)).await;
+            }
+
+            // Fetch pending packages
+            if let Ok(packages) = fetch_pending_packages(&client, &api_base).await {
+                let _ = tx.send(DataUpdate::Packages(packages)).await;
             }
 
             last_stats_refresh = Instant::now();
@@ -489,6 +504,114 @@ async fn fetch_peers(client: &reqwest::Client, api_base: &str) -> Result<Vec<Str
                 .collect()
         })
         .unwrap_or_default())
+}
+
+async fn fetch_pending_packages(
+    client: &reqwest::Client,
+    api_base: &str,
+) -> Result<Vec<PackageInfo>> {
+    let res = client
+        .get(format!("{}/v1/pending", api_base))
+        .send()
+        .await?;
+    let json: Value = res.json().await?;
+
+    Ok(json["packages"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| {
+                    let name = v.as_str().unwrap_or_default().to_string();
+                    if name.is_empty() {
+                        return None;
+                    }
+                    Some(PackageInfo {
+                        name: name.clone(),
+                        ecosystem: "npm".to_string(),
+                        version: "pending".to_string(),
+                        status: "pending".to_string(),
+                        publisher: String::new(),
+                        verified_at: None,
+                        content_hash: String::new(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default())
+}
+
+async fn sse_event_listener(
+    _app: Arc<RwLock<App>>,
+    api_base: String,
+    tx: mpsc::Sender<DataUpdate>,
+) {
+    let client = reqwest::Client::new();
+    loop {
+        let res = match client
+            .get(format!("{}/v1/events", api_base))
+            .header("Accept", "text/event-stream")
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(_) => {
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                continue;
+            }
+        };
+
+        let mut stream = res.bytes_stream();
+        let mut buffer = String::new();
+
+        while let Some(chunk) = stream.next().await {
+            let chunk = match chunk {
+                Ok(c) => c,
+                Err(_) => break,
+            };
+
+            buffer.push_str(&String::from_utf8_lossy(&chunk));
+
+            // Process complete SSE messages (double newline delimited)
+            while let Some(pos) = buffer.find("\n\n") {
+                let message = buffer[..pos].to_string();
+                buffer = buffer[pos + 2..].to_string();
+
+                let mut event_type = String::from("Event");
+                let mut data = String::new();
+
+                for line in message.lines() {
+                    if let Some(t) = line.strip_prefix("event: ") {
+                        event_type = t.trim().to_string();
+                    } else if let Some(d) = line.strip_prefix("data: ") {
+                        data = d.trim().to_string();
+                    }
+                }
+
+                if !data.is_empty() {
+                    // Try to extract a human-readable summary from JSON data
+                    let summary = if let Ok(json) = serde_json::from_str::<Value>(&data) {
+                        json["message"]
+                            .as_str()
+                            .or(json["type"].as_str())
+                            .unwrap_or(&data)
+                            .to_string()
+                    } else {
+                        data
+                    };
+                    let _ = tx.send(DataUpdate::Event(event_type, summary)).await;
+                }
+            }
+        }
+
+        // Stream ended, retry after delay
+        let _ = tx
+            .send(DataUpdate::Event(
+                "System".to_string(),
+                "SSE connection lost, reconnecting...".to_string(),
+            ))
+            .await;
+        tokio::time::sleep(Duration::from_secs(3)).await;
+    }
 }
 
 fn apply_data_update(app: &mut App, update: DataUpdate) {
@@ -1445,24 +1568,186 @@ fn render_reputation_bar(reputation: u8) -> String {
 // ============================================================================
 
 fn draw_packages(f: &mut Frame, app: &App, area: Rect) {
-    // Placeholder - would fetch from API
-    let text = Paragraph::new("Package browser - Press 'r' to refresh data from API").block(
+    if app.packages.is_empty() {
+        let text = Paragraph::new("No packages found. Packages will appear here when published to the registry.")
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(format!(" PACKAGES ({} on-chain) ", app.stats.package_count))
+                    .border_style(Style::default().fg(Theme::PRIMARY)),
+            )
+            .style(Style::default().fg(Theme::TEXT_DIM));
+        f.render_widget(text, area);
+        return;
+    }
+
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
+        .split(area);
+
+    let items: Vec<ListItem> = app
+        .packages
+        .iter()
+        .enumerate()
+        .map(|(i, pkg)| {
+            let icon = match pkg.status.as_str() {
+                "verified" => "✓",
+                "pending" => "⏳",
+                "rejected" => "✗",
+                _ => "?",
+            };
+            let content = format!(
+                "{} {:<30} {:<12} {}",
+                icon, pkg.name, pkg.version, pkg.status
+            );
+            let style = if i == app.selected_package {
+                Style::default()
+                    .fg(Theme::HIGHLIGHT)
+                    .add_modifier(Modifier::BOLD)
+                    .add_modifier(Modifier::REVERSED)
+            } else {
+                let color = match pkg.status.as_str() {
+                    "verified" => Theme::SUCCESS,
+                    "pending" => Theme::WARNING,
+                    "rejected" => Theme::ERROR,
+                    _ => Theme::TEXT,
+                };
+                Style::default().fg(color)
+            };
+            ListItem::new(content).style(style)
+        })
+        .collect();
+
+    let list = List::new(items).block(
         Block::default()
             .borders(Borders::ALL)
-            .title(" PACKAGES ")
+            .title(format!(
+                " PACKAGES ({}) — j/k to navigate, Enter for details ",
+                app.packages.len()
+            ))
             .border_style(Style::default().fg(Theme::PRIMARY)),
     );
-    f.render_widget(text, area);
+    f.render_widget(list, chunks[0]);
+
+    // Package detail preview
+    match app.selected_package() {
+        Some(pkg) => {
+            let text = vec![
+                Line::from(vec![
+                    Span::styled("Name:       ", Style::default().fg(Theme::TEXT_DIM)),
+                    Span::styled(&pkg.name, Style::default().fg(Theme::PRIMARY).add_modifier(Modifier::BOLD)),
+                ]),
+                Line::from(vec![
+                    Span::styled("Version:    ", Style::default().fg(Theme::TEXT_DIM)),
+                    Span::raw(&pkg.version),
+                ]),
+                Line::from(vec![
+                    Span::styled("Ecosystem:  ", Style::default().fg(Theme::TEXT_DIM)),
+                    Span::raw(&pkg.ecosystem),
+                ]),
+                Line::from(vec![
+                    Span::styled("Status:     ", Style::default().fg(Theme::TEXT_DIM)),
+                    Span::styled(&pkg.status, Style::default().fg(match pkg.status.as_str() {
+                        "verified" => Theme::SUCCESS,
+                        "pending" => Theme::WARNING,
+                        _ => Theme::ERROR,
+                    })),
+                ]),
+                Line::from(vec![
+                    Span::styled("Publisher:  ", Style::default().fg(Theme::TEXT_DIM)),
+                    Span::raw(if pkg.publisher.len() > 16 {
+                        format!("{}...", &pkg.publisher[..16])
+                    } else {
+                        pkg.publisher.clone()
+                    }),
+                ]),
+                Line::from(vec![
+                    Span::styled("Hash:       ", Style::default().fg(Theme::TEXT_DIM)),
+                    Span::raw(if pkg.content_hash.len() > 20 {
+                        format!("{}...", &pkg.content_hash[..20])
+                    } else {
+                        pkg.content_hash.clone()
+                    }),
+                ]),
+            ];
+            let detail = Paragraph::new(text).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" PACKAGE PREVIEW ")
+                    .border_style(Style::default().fg(Theme::PRIMARY)),
+            );
+            f.render_widget(detail, chunks[1]);
+        }
+        None => {
+            let empty = Paragraph::new("Select a package to see details")
+                .style(Style::default().fg(Theme::TEXT_DIM))
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(" PACKAGE PREVIEW ")
+                        .border_style(Style::default().fg(Theme::PRIMARY)),
+                );
+            f.render_widget(empty, chunks[1]);
+        }
+    }
 }
 
-fn draw_package_detail(f: &mut Frame, _app: &App, area: Rect) {
-    let text = Paragraph::new("Package detail view - Select a package from the list").block(
+fn draw_package_detail(f: &mut Frame, app: &App, area: Rect) {
+    let pkg = match app.selected_package() {
+        Some(p) => p,
+        None => return,
+    };
+
+    let text = vec![
+        Line::from(vec![Span::styled(
+            "PACKAGE DETAILS\n",
+            Style::default()
+                .fg(Theme::PRIMARY)
+                .add_modifier(Modifier::BOLD),
+        )]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Name:         ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::styled(&pkg.name, Style::default().fg(Theme::TEXT).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from(vec![
+            Span::styled("Version:      ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::raw(&pkg.version),
+        ]),
+        Line::from(vec![
+            Span::styled("Ecosystem:    ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::raw(&pkg.ecosystem),
+        ]),
+        Line::from(vec![
+            Span::styled("Status:       ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::styled(&pkg.status, Style::default().fg(match pkg.status.as_str() {
+                "verified" => Theme::SUCCESS,
+                "pending" => Theme::WARNING,
+                _ => Theme::ERROR,
+            })),
+        ]),
+        Line::from(vec![
+            Span::styled("Publisher:    ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::raw(&pkg.publisher),
+        ]),
+        Line::from(vec![
+            Span::styled("Content Hash: ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::raw(&pkg.content_hash),
+        ]),
+        Line::from(vec![
+            Span::styled("Verified At:  ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::raw(pkg.verified_at.as_deref().unwrap_or("Not yet")),
+        ]),
+    ];
+
+    let paragraph = Paragraph::new(text).block(
         Block::default()
             .borders(Borders::ALL)
-            .title(" PACKAGE DETAILS ")
+            .title(" PACKAGE ")
             .border_style(Style::default().fg(Theme::PRIMARY)),
     );
-    f.render_widget(text, area);
+    f.render_widget(paragraph, area);
 }
 
 // ============================================================================

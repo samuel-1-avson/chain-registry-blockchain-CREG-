@@ -57,10 +57,10 @@ contract PackageInsurance {
     // ── Storage ───────────────────────────────────────────────────────────────
     
     /// Policy ID → Policy
-    mapping(uint256 => Policy) public policies;
+    mapping(uint256 => Policy) private _policies;
     
     /// Claim ID → Claim
-    mapping(uint256 => Claim) public claims;
+    mapping(uint256 => Claim) private _claims;
     
     /// Package key → policy IDs
     mapping(bytes32 => uint256[]) public packagePolicies;
@@ -218,7 +218,7 @@ contract PackageInsurance {
         policyCount++;
         policyId = policyCount;
         
-        policies[policyId] = Policy({
+        _policies[policyId] = Policy({
             id: policyId,
             insured: msg.sender,
             packageCanonical: packageCanonical,
@@ -249,7 +249,7 @@ contract PackageInsurance {
     /// @param coverageAmount Coverage amount
     /// @return Premium amount in CREG tokens
     function calculatePremium(
-        string calldata packageCanonical,
+        string memory packageCanonical,
         uint256 coverageAmount
     ) public view returns (uint256) {
         bytes32 packageKey = keccak256(bytes(packageCanonical));
@@ -290,7 +290,7 @@ contract PackageInsurance {
     
     /// @notice Cancel a policy and receive partial refund
     function cancelPolicy(uint256 policyId) external {
-        Policy storage p = policies[policyId];
+        Policy storage p = _policies[policyId];
         
         if (p.insured != msg.sender) revert NotPolicyOwner();
         if (!p.active) revert PolicyNotActive();
@@ -315,7 +315,7 @@ contract PackageInsurance {
     
     /// @notice Renew an expiring policy
     function renewPolicy(uint256 policyId) external {
-        Policy storage p = policies[policyId];
+        Policy storage p = _policies[policyId];
         
         if (p.insured != msg.sender) revert NotPolicyOwner();
         if (!p.active && block.timestamp > p.expiration + 30 days) {
@@ -357,7 +357,7 @@ contract PackageInsurance {
         string calldata reason,
         bytes calldata evidence
     ) external returns (uint256 claimId) {
-        Policy storage p = policies[policyId];
+        Policy storage p = _policies[policyId];
         
         if (!p.active) revert PolicyNotActive();
         if (block.timestamp > p.expiration + REVIEW_PERIOD) revert ClaimPeriodExpired();
@@ -372,7 +372,7 @@ contract PackageInsurance {
         claimCount++;
         claimId = claimCount;
         
-        claims[claimId] = Claim({
+        _claims[claimId] = Claim({
             id: claimId,
             policyId: policyId,
             claimant: msg.sender,
@@ -396,7 +396,7 @@ contract PackageInsurance {
         ClaimStatus status,
         uint256 payout
     ) external onlyResolver {
-        Claim storage c = claims[claimId];
+        Claim storage c = _claims[claimId];
         
         if (c.status != ClaimStatus.Pending && c.status != ClaimStatus.UnderReview) {
             revert ClaimNotFound();
@@ -408,7 +408,7 @@ contract PackageInsurance {
         
         if (status == ClaimStatus.Approved) {
             // Slash publisher stake
-            Policy storage p = policies[c.policyId];
+            Policy storage p = _policies[c.policyId];
             ChainRegistry.PackageRecord memory pkg = registry.getPackage(p.packageCanonical);
             
             uint256 slashAmount = min(payout, staking.stakedBalance(pkg.publisher));
@@ -432,7 +432,7 @@ contract PackageInsurance {
     
     /// @notice Update claim status to under review
     function setClaimUnderReview(uint256 claimId) external onlyResolver {
-        Claim storage c = claims[claimId];
+        Claim storage c = _claims[claimId];
         if (c.status != ClaimStatus.Pending) revert ClaimNotFound();
         c.status = ClaimStatus.UnderReview;
     }
@@ -485,12 +485,22 @@ contract PackageInsurance {
     }
     
     /// @notice Update coverage limits
-    function setCoverageLimits(uint256 min, uint256 max) external onlyGovernance {
-        minCoverage = min;
-        maxCoverage = max;
+    function setCoverageLimits(uint256 _min, uint256 _max) external onlyGovernance {
+        minCoverage = _min;
+        maxCoverage = _max;
     }
     
     // ── View Functions ────────────────────────────────────────────────────────
+    
+    /// @notice Get a policy by ID
+    function getPolicy(uint256 policyId) external view returns (Policy memory) {
+        return _policies[policyId];
+    }
+    
+    /// @notice Get a claim by ID
+    function getClaim(uint256 claimId) external view returns (Claim memory) {
+        return _claims[claimId];
+    }
     
     /// @notice Get all policies for a package
     function getPackagePolicies(bytes32 packageKey)
@@ -512,7 +522,7 @@ contract PackageInsurance {
     function hasActiveInsurance(bytes32 packageKey) external view returns (bool) {
         uint256[] storage ids = packagePolicies[packageKey];
         for (uint i = 0; i < ids.length; i++) {
-            if (policies[ids[i]].active) {
+            if (_policies[ids[i]].active) {
                 return true;
             }
         }
@@ -524,7 +534,7 @@ contract PackageInsurance {
         uint256 total = 0;
         uint256[] storage ids = packagePolicies[packageKey];
         for (uint i = 0; i < ids.length; i++) {
-            Policy storage p = policies[ids[i]];
+            Policy storage p = _policies[ids[i]];
             if (p.active) {
                 total += p.coverageAmount;
             }
@@ -553,7 +563,7 @@ contract PackageInsurance {
     
     /// @notice Get dependency count for a package (placeholder)
     /// @dev In production, integrate with analytics service
-    function getDependencyCount(string calldata packageCanonical)
+    function getDependencyCount(string memory packageCanonical)
         internal pure
         returns (uint256)
     {
