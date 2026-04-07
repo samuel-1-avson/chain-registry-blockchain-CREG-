@@ -114,7 +114,7 @@ async fn install_update(download_url: &str, version: &str) -> Result<()> {
     pb.set_style(
         ProgressStyle::default_bar()
             .template("{spinner:.green} [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})")
-            .expect("valid template")
+            .context("Invalid progress bar template")?
             .progress_chars("#>-"),
     );
 

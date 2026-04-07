@@ -135,9 +135,21 @@ contract CregToken {
     }
 
     function quadraticVotingPower(uint256 votes) public pure returns (uint256) {
-        // sqrt(votes) * 10**9 to keep precision (since votes has 18 decimals)
-        // Simplified mock for dev:
+        // Babylonian (Newton's method) integer square-root.
+        // Returns sqrt(votes) * 10**9 to preserve precision given 18-decimal token amounts.
         if (votes == 0) return 0;
-        return votes; // Just return linear for now to keep it simple
+        return _sqrt(votes) * 1e9;
+    }
+
+    /// @dev Babylonian integer sqrt.
+    function _sqrt(uint256 x) internal pure returns (uint256) {
+        if (x == 0) return 0;
+        uint256 z = (x + 1) / 2;
+        uint256 y = x;
+        while (z < y) {
+            y = z;
+            z = (x / z + z) / 2;
+        }
+        return y;
     }
 }

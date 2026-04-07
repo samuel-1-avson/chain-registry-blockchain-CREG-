@@ -40,6 +40,7 @@ pub async fn generate_zk_proof(
         allowed_fs_writes: vec![],
         spawns_processes: false,
         description: None,
+        allowed_process_spawns: vec![],
     };
     let static_result = validator::static_analysis::run(&tarball_bytes, &default_manifest)
         .await
@@ -293,6 +294,7 @@ pub async fn verify_zk_proof_file(proof_path: &PathBuf, tarball_path: &PathBuf) 
         allowed_fs_writes: vec![],
         spawns_processes: false,
         description: None,
+        allowed_process_spawns: vec![],
     };
     let static_result = validator::static_analysis::run(&tarball_bytes, &default_manifest)
         .await

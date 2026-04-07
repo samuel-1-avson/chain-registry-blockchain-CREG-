@@ -103,6 +103,13 @@ contract PackageInsurance {
     
     /// Minimum coverage per policy
     uint256 public minCoverage = 0.1 ether;
+
+    /// Maximum payout per single claim (prevents pool drain from one claim)
+    uint256 public maxPayoutPerClaim = 50 ether;
+
+    /// Maximum pool utilization ratio (bps).  New policies are blocked once
+    /// totalCoverage / poolBalance exceeds this ratio.  10000 = 100%.
+    uint256 public maxPoolUtilizationBps = 8000;
     
     /// Policy duration (1 year)
     uint256 public constant POLICY_DURATION = 365 days;
@@ -155,6 +162,8 @@ contract PackageInsurance {
     error AlreadyClaimed();
     error InvalidEvidence();
     error UnauthorizedResolver();
+    error PayoutExceedsMaxClaim();
+    error PoolUtilizationExceeded();
     
     // ── Modifiers ─────────────────────────────────────────────────────────────
     
@@ -213,6 +222,11 @@ contract PackageInsurance {
         
         poolBalance += premium;
         totalCoverage += coverageAmount;
+
+        // Enforce maximum pool utilization — prevent over-issuance
+        if (poolBalance > 0 && (totalCoverage * 10000) / poolBalance > maxPoolUtilizationBps) {
+            revert PoolUtilizationExceeded();
+        }
         
         // Create policy
         policyCount++;
@@ -407,6 +421,8 @@ contract PackageInsurance {
         c.resolver = msg.sender;
         
         if (status == ClaimStatus.Approved) {
+            // Enforce per-claim payout cap
+            if (payout > maxPayoutPerClaim) revert PayoutExceedsMaxClaim();
             // Slash publisher stake
             Policy storage p = _policies[c.policyId];
             ChainRegistry.PackageRecord memory pkg = registry.getPackage(p.packageCanonical);
@@ -489,6 +505,17 @@ contract PackageInsurance {
         minCoverage = _min;
         maxCoverage = _max;
     }
+
+    /// @notice Update max payout per claim
+    function setMaxPayoutPerClaim(uint256 _maxPayout) external onlyGovernance {
+        maxPayoutPerClaim = _maxPayout;
+    }
+
+    /// @notice Update max pool utilization
+    function setMaxPoolUtilization(uint256 _maxBps) external onlyGovernance {
+        require(_maxBps > 0 && _maxBps <= 10000, "Invalid bps");
+        maxPoolUtilizationBps = _maxBps;
+    }
     
     // ── View Functions ────────────────────────────────────────────────────────
     
@@ -561,14 +588,19 @@ contract PackageInsurance {
         return a < b ? a : b;
     }
     
-    /// @notice Get dependency count for a package (placeholder)
-    /// @dev In production, integrate with analytics service
+    /// @notice Get dependency count for a package from the on-chain Registry.
+    /// @dev Falls back to a default estimate (10) when the Registry does not
+    ///      yet expose a dependency-count API.
     function getDependencyCount(string memory packageCanonical)
-        internal pure
+        internal view
         returns (uint256)
     {
-        // Placeholder - would query on-chain or off-chain analytics
-        packageCanonical; // suppress warning
-        return 10; // Default assumption
+        // Attempt to read from the Registry.  If the call reverts (the
+        // function does not exist yet), fall back to a conservative default.
+        try registry.getDependentCount(packageCanonical) returns (uint256 count) {
+            return count;
+        } catch {
+            return 10; // conservative default until Registry exposes the API
+        }
     }
 }

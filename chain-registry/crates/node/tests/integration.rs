@@ -216,6 +216,7 @@ mod consensus_tests {
         ValidatorInfo {
             id: id.to_string(),
             pubkey: format!("pubkey-{}", id),
+            eth_address: None,
             stake: 1_000_000,
             reputation: 75,
             is_active: true,
@@ -229,6 +230,7 @@ mod consensus_tests {
             signature: common::sha256_hex(id.as_bytes()),
             vote,
             signed_at: Utc::now(),
+            ml_model_version: "test".to_string(),
         }
     }
 
@@ -308,8 +310,8 @@ mod consensus_tests {
     fn vrf_selection_is_deterministic_and_collision_free() {
         let validators: Vec<String> = (0..20).map(|i| format!("val_{}", i)).collect();
 
-        let a = consensus::vrf::select_validators(&validators, "npm:lodash@4.0.0", 42, 7).unwrap();
-        let b = consensus::vrf::select_validators(&validators, "npm:lodash@4.0.0", 42, 7).unwrap();
+        let a = consensus::vrf::select_validators(&validators, "npm:lodash@4.0.0", 42, 7, None).unwrap();
+        let b = consensus::vrf::select_validators(&validators, "npm:lodash@4.0.0", 42, 7, None).unwrap();
         assert_eq!(a, b, "VRF must be deterministic");
 
         let unique: std::collections::HashSet<_> = a.iter().collect();

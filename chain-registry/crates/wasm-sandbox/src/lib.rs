@@ -2,6 +2,10 @@
 //!
 //! This crate provides a secure, cross-platform sandbox for validating packages
 //! using WebAssembly.
+//!
+//! **⚠️ EXPERIMENTAL** — The WASI-based sandbox is not yet production-hardened.
+//! It should not be relied upon as a security boundary. Use nsjail-based
+//! sandboxing in production deployments. See the deep-dive analysis for details.
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -167,6 +171,14 @@ impl WasmSandbox {
         let engine = Engine::default();
 
         Ok(Self { engine, config })
+    }
+
+    /// Return a snapshot of the sandbox configuration as key-value pairs.
+    pub fn stats(&self) -> HashMap<&'static str, u64> {
+        let mut m = HashMap::new();
+        m.insert("memory_limit", self.config.memory_limit as u64);
+        m.insert("timeout_secs", self.config.timeout_secs);
+        m
     }
 
     /// Run a WASM module in the sandbox

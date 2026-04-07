@@ -11,6 +11,9 @@ pub struct AuditProof {
     pub signature: String,
     /// The public key of the AI auditor that produced this verdict.
     pub auditor_pubkey: String,
+    /// The verdict: "cleared" or "confirmed_malicious".
+    #[serde(default)]
+    pub verdict: String,
     /// Detailed rationales for the verdict.
     pub rationales: Vec<Rationale>,
 }
@@ -26,6 +29,8 @@ pub struct ValidationReport {
     pub package: PackageId,
     pub findings: Vec<Finding>,
     pub aaa_verdict: Option<AuditProof>,
+    /// Weighted ensemble score (0–100) from static analysis, ML, deep scan, and LLM.
+    pub ensemble_score: f64,
 }
 
 impl ValidationReport {
@@ -34,10 +39,12 @@ impl ValidationReport {
             package,
             findings: Vec::new(),
             aaa_verdict: None,
+            ensemble_score: 0.0,
         }
     }
 
     pub fn apply_static(&mut self, result: StaticAnalysisResult) {
+        self.ensemble_score = result.ensemble_score;
         self.findings.extend(result.findings);
     }
 

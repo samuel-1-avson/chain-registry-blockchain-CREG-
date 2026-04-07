@@ -131,7 +131,11 @@ async fn process_package(
             s.config.is_validator,
             s.config.node_id.clone(),
             s.config.validator_privkey.clone(),
-            prev.map(|r| req.manifest.clone()),
+            // NOTE: ChainRecord does not store the full PackageManifest, so we
+            // cannot retrieve the previous version's manifest for diff analysis.
+            // Pass None to signal "first publish or no manifest history available".
+            // TODO: Store manifests in ChainRecord to enable proper diff analysis.
+            None::<common::PackageManifest>,
         )
     };
 
@@ -159,11 +163,14 @@ async fn process_package(
             return;
         }
     } else {
-        tracing::warn!(
-            "[Consensus] Node is NOT a validator — skipping analysis for {}",
+        // Non-validator nodes should NOT cast votes — they observe consensus
+        // results from validators but do not participate in the vote.
+        tracing::info!(
+            "[Consensus] Node is NOT a validator — not participating in consensus for {}",
             canonical
         );
-        (ValidatorVote::Approve, None, Vec::new()) // Non-validators trust the consensus result.
+        cleanup(&state, &canonical).await;
+        return;
     };
 
     // ── Generate our own signature (validators only) ──────────────────────────
@@ -207,6 +214,7 @@ async fn process_package(
             signature: hex::encode(signature.to_bytes()),
             vote: vote.clone(),
             signed_at: Utc::now(),
+            ml_model_version: ml_validator::DeepScanner::default().model_version(),
         }
     };
 

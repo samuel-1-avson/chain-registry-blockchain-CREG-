@@ -3,7 +3,6 @@
 //! This module provides tokenization for code inputs to be fed into the ML model.
 
 use tokenizers::models::bpe::BPE;
-use tokenizers::pre_tokenizers::byte_level::ByteLevel;
 use tokenizers::{Result, Tokenizer};
 
 /// Code tokenizer for ML model input
@@ -15,12 +14,18 @@ pub struct CodeTokenizer {
 impl CodeTokenizer {
     /// Create a new code tokenizer
     pub fn new(max_length: usize) -> Result<Self> {
-        // Initialize with a simple BPE tokenizer
-        // In production, this would load a pre-trained tokenizer
-        let mut tokenizer = Tokenizer::new(BPE::default());
+        // Build a vocabulary of byte-fallback tokens.
+        // Maps <0x00>..<0xFF> → token IDs 1..=256, keeping 0 for padding.
+        let mut vocab = std::collections::HashMap::new();
+        for b in 0u8..=255u8 {
+            vocab.insert(format!("<0x{:02X}>", b), b as u32 + 1);
+        }
 
-        // Use byte-level pre-tokenization for code
-        tokenizer.with_pre_tokenizer(ByteLevel::default());
+        let bpe = BPE::builder()
+            .vocab_and_merges(vocab, vec![])
+            .byte_fallback(true)
+            .build()?;
+        let tokenizer = Tokenizer::new(bpe);
 
         Ok(Self {
             tokenizer,

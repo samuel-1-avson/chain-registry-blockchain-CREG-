@@ -752,6 +752,7 @@ async fn receive_vote(State(state): State<SharedState>, Json(vote): Json<VoteMes
             }
         },
         signed_at: chrono::Utc::now(),
+        ml_model_version: String::new(), // Populated by the originating validator
     };
 
     let key = vote.block_hash.clone();

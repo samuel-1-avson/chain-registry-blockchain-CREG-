@@ -121,7 +121,7 @@ pub async fn run(
     pb_zk.set_style(
         ProgressStyle::default_spinner()
             .template("{spinner:.green} {msg}")
-            .expect("Valid spinner template"),
+            .context("Invalid spinner template")?,
     );
     pb_zk.set_message("Computing Groth16 SNARK...");
 
@@ -215,7 +215,7 @@ pub async fn run(
     pb_submit.set_style(
         ProgressStyle::default_spinner()
             .template("{spinner:.green} {msg}")
-            .expect("Valid spinner template"),
+            .context("Invalid spinner template")?,
     );
     pb_submit.set_message(format!("Submitting to {}", url));
 

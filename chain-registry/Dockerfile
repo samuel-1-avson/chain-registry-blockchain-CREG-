@@ -116,7 +116,10 @@ RUN cargo build --release --package chain-registry-node || true
 COPY crates/ crates/
 COPY circuits/ circuits/
 COPY contracts/ contracts/
+COPY models/ models/
 COPY testnet/ testnet/
+COPY config/ config/
+COPY rules/ rules/
 COPY docker-compose*.yml ./
 
 # Touch files to ensure rebuild
@@ -139,11 +142,13 @@ FROM ubuntu:24.04 AS runtime
 # - ca-certificates & curl: for IPFS / Eth RPC communication
 # - libssl3: for crypto operations
 # - libopenblas0: for ML math operations
+# - strace: for Docker sandbox behavioral observation (syscall tracing)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
     libssl3 \
     libopenblas0 \
+    strace \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -158,6 +163,16 @@ COPY --from=builder /build/crates/cli/validators /app/validators
 
 # Copy circuits (for ZK validation)
 COPY --from=builder /build/circuits /app/circuits
+
+# Copy ML models (for deep scan). These are placeholder-size today;
+# replace with real ONNX weights when available.
+COPY --from=builder /build/models /app/models
+
+# Copy sandbox configuration (seccomp profiles, rootfs Dockerfiles)
+COPY --from=builder /build/config/sandbox /app/config/sandbox
+
+# Copy YARA rules for supply-chain threat detection
+COPY --from=builder /build/rules /app/rules
 
 # Non-root user for security.
 RUN useradd -r -s /bin/false creg

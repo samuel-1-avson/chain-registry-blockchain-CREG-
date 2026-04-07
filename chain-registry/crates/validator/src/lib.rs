@@ -10,6 +10,7 @@ pub mod reputation;
 pub mod sandbox;
 pub mod static_analysis;
 pub mod typosquat;
+pub mod wasm_sandbox;
 
 use anyhow::Result;
 use common::{Finding, PublishRequest, ValidatorVote};
@@ -76,21 +77,54 @@ pub async fn validate_package(
     }
 
     // ── Final decision combines all three stages ───────────────────────────────
-    let mut decision = final_decision(report.has_critical_findings(), false, rep.confidence_delta);
+    let sandbox_has_critical = sandbox_result
+        .findings
+        .iter()
+        .any(|f| matches!(f.severity, common::FindingSeverity::Critical));
+    let mut decision = final_decision(report.has_critical_findings(), sandbox_has_critical, rep.confidence_delta);
 
     // ── AAA (Automated AI Auditor) Stage ──────────────────────────────────────
-    // If the initial decision is a Reject, trigger the deep audit stage.
-    if decision.is_reject() {
+    // Only runs when CREG_AAA_ENABLED=true is explicitly set. The AAA auditor
+    // is an external service that may not be deployed — calling it unconditionally
+    // causes silent failures.
+    let aaa_enabled = std::env::var("CREG_AAA_ENABLED")
+        .map(|v| v == "true" || v == "1")
+        .unwrap_or(false);
+
+    if decision.is_reject() && aaa_enabled {
         tracing::info!("[{}] Triggering Automated AI Audit (AAA)...", canonical);
-        if let Ok(proof) = aaa_audit(&report, tarball).await {
-            report.aaa_verdict = Some(proof);
-            // Overrule the rejection if the AI proof is strong.
-            decision = FinalDecision::Approve { confidence: 85 };
-            tracing::info!(
-                "[{}] AAA cleared the package with a cryptographically-signed proof",
-                canonical
-            );
+        match aaa_audit(&report, tarball).await {
+            Ok(proof) => {
+                // Only overrule if the proof's verdict explicitly clears the package
+                // and the proof includes a valid signature.
+                if proof.verdict == "cleared" && !proof.signature.is_empty() {
+                    report.aaa_verdict = Some(proof);
+                    decision = FinalDecision::Approve { confidence: 85 };
+                    tracing::info!(
+                        "[{}] AAA cleared the package with a signed proof",
+                        canonical
+                    );
+                } else {
+                    tracing::warn!(
+                        "[{}] AAA returned verdict='{}' — rejection stands",
+                        canonical,
+                        proof.verdict
+                    );
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "[{}] AAA audit failed: {} — original rejection stands",
+                    canonical,
+                    e
+                );
+            }
         }
+    } else if decision.is_reject() {
+        tracing::debug!(
+            "[{}] AAA is not enabled (set CREG_AAA_ENABLED=true to activate)",
+            canonical
+        );
     }
 
     let vote = if decision.is_reject() {

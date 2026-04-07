@@ -8,6 +8,7 @@ use crate::{
     KeyShare, ThresholdEncryption, ThresholdError,
 };
 use serde::{Deserialize, Serialize};
+use sha2::Digest;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
@@ -380,7 +381,7 @@ impl DecryptionClient {
 
     /// Request decryption of a package
     pub async fn request_decryption(
-        &self,
+        &mut self,
         canonical: &str,
         purpose: &str,
     ) -> Result<Vec<DecryptionResponse>, ThresholdError> {
@@ -441,7 +442,7 @@ impl DecryptionClient {
         let mut shares = Vec::new();
         for response in responses {
             let share = self.decrypt_response_share(response)?;
-            shares.push(share);
+            shares.push(KeyShare::new(share.index, share.value, vec![]));
         }
 
         // Reconstruct encryption key using Shamir
@@ -481,7 +482,7 @@ impl DecryptionClient {
         // Derive decryption key
         let mut key = [0u8; 32];
         let mut hasher = sha2::Sha256::new();
-        hasher.update(&response.requestor_pubkey);
+        hasher.update(&self.requestor_pubkey);
         hasher.update(&self.requestor_key);
         let hash = hasher.finalize();
         key.copy_from_slice(&hash[..32]);

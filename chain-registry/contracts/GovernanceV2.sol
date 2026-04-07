@@ -22,6 +22,19 @@ library ECDSA {
 ///      - Gasless voting via EIP-712 signatures
 contract GovernanceV2 {
     
+    // ── Enums ─────────────────────────────────────────────────────────────────
+
+    enum ProposalState {
+        Pending,    // Waiting for voting to start
+        Active,     // Voting in progress
+        Canceled,   // Canceled by proposer/admin
+        Defeated,   // Failed (not enough votes or against > for)
+        Succeeded,  // Passed (for > against, quorum met)
+        Queued,     // Waiting for execution delay
+        Expired,    // Execution grace period passed
+        Executed    // Successfully executed
+    }
+
     // ── Structs ───────────────────────────────────────────────────────────────
     
     struct Proposal {
@@ -35,6 +48,7 @@ contract GovernanceV2 {
         uint256 abstainVotes;
         uint256 startBlock;
         uint256 endBlock;
+        uint256 votingEndTimestamp;    // Set when voting closes for time-based checks
         bool executed;
         bool canceled;
         mapping(address => Receipt) receipts;
@@ -335,12 +349,20 @@ contract GovernanceV2 {
         if (p.executed) revert InvalidProposal();
         if (p.canceled) revert InvalidProposal();
         if (block.number <= p.endBlock) revert VotingNotStarted(); // Still voting
+
+        // Snapshot the voting-end timestamp on first post-vote interaction
+        if (p.votingEndTimestamp == 0) {
+            p.votingEndTimestamp = block.timestamp;
+        }
+
         if (p.forVotes + p.againstVotes + p.abstainVotes < params.quorumVotes) {
             revert QuorumNotReached();
         }
         if (p.forVotes <= p.againstVotes) revert ProposalNotSucceeded();
-        if (block.timestamp < p.endBlock + EXECUTION_DELAY) revert VotingNotStarted();
-        if (block.timestamp > p.endBlock + EXECUTION_DELAY + EXECUTION_GRACE_PERIOD) {
+
+        // Time-based checks use votingEndTimestamp (not block.number)
+        if (block.timestamp < p.votingEndTimestamp + EXECUTION_DELAY) revert VotingNotStarted();
+        if (block.timestamp > p.votingEndTimestamp + EXECUTION_DELAY + EXECUTION_GRACE_PERIOD) {
             revert ProposalExpired();
         }
         
@@ -466,8 +488,12 @@ contract GovernanceV2 {
             return ProposalState.Defeated;
         }
         if (p.forVotes <= p.againstVotes) return ProposalState.Defeated;
-        if (block.timestamp <= p.endBlock + EXECUTION_DELAY) return ProposalState.Succeeded;
-        if (block.timestamp <= p.endBlock + EXECUTION_DELAY + EXECUTION_GRACE_PERIOD) {
+
+        // For view-only state, estimate the timelock using votingEndTimestamp
+        // if available, otherwise approximate with the current timestamp.
+        uint256 voteEndTs = p.votingEndTimestamp > 0 ? p.votingEndTimestamp : block.timestamp;
+        if (block.timestamp <= voteEndTs + EXECUTION_DELAY) return ProposalState.Succeeded;
+        if (block.timestamp <= voteEndTs + EXECUTION_DELAY + EXECUTION_GRACE_PERIOD) {
             return ProposalState.Queued;
         }
         return ProposalState.Expired;
@@ -511,16 +537,4 @@ contract GovernanceV2 {
     function max(uint256 a, uint256 b) internal pure returns (uint256) {
         return a > b ? a : b;
     }
-}
-
-/// @title Proposal State Enum
-enum ProposalState {
-    Pending,    // Waiting for voting to start
-    Active,     // Voting in progress
-    Canceled,   // Canceled by proposer/admin
-    Defeated,   // Failed (not enough votes or against > for)
-    Succeeded,  // Passed (for > against, quorum met)
-    Queued,     // Waiting for execution delay
-    Expired,    // Execution grace period passed
-    Executed    // Successfully executed
 }

@@ -53,6 +53,9 @@ pub struct IncomingVote {
     pub reject_reason: Option<String>,
     pub signature: String, // ECDSA signature (hex)
     pub received_at: DateTime<Utc>,
+    /// ML model version used by this validator for deep scan.
+    #[serde(default)]
+    pub ml_model_version: Option<String>,
 }
 
 /// Result of signature verification
@@ -315,6 +318,7 @@ impl PackageVoteState {
                     }
                 },
                 signed_at: v.received_at,
+                ml_model_version: v.ml_model_version.clone().unwrap_or_default(),
             })
             .collect()
     }
@@ -390,6 +394,7 @@ impl VoteAccumulator {
             reject_reason,
             signature,
             received_at: Utc::now(),
+            ml_model_version: None,
         };
 
         let state = self
@@ -465,6 +470,7 @@ mod tests {
             },
             signature: common::sha256_hex(validator_id.as_bytes()),
             received_at: Utc::now(),
+            ml_model_version: None,
         }
     }
 
@@ -559,6 +565,7 @@ mod tests {
             reject_reason: None,
             signature: "not_valid_hex!!!".to_string(),
             received_at: Utc::now(),
+            ml_model_version: None,
         };
 
         let result = state.verify_signature(&bad_vote, "0x1234");
@@ -586,6 +593,7 @@ mod tests {
             // Valid 65-byte ECDSA signature (r: 32 bytes, s: 32 bytes, v: 1 byte)
             signature: "a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567801".to_string(),
             received_at: Utc::now(),
+            ml_model_version: None,
         };
 
         // This will fail signature recovery (random sig), but tests the code path
@@ -607,6 +615,7 @@ mod tests {
             reject_reason: None,
             signature: "tooshort".to_string(),
             received_at: Utc::now(),
+            ml_model_version: None,
         };
         let bad_result = state.verify_signature(&bad_vote, block_hash);
         assert!(
@@ -622,6 +631,7 @@ mod tests {
             reject_reason: None,
             signature: "a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567801".to_string(),
             received_at: Utc::now(),
+            ml_model_version: None,
         };
         let bad_addr_result = state.verify_signature(&bad_addr_vote, block_hash);
         assert!(

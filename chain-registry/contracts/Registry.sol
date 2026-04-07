@@ -465,6 +465,21 @@ contract ChainRegistry {
         to.transfer(amount);
     }
 
+    // ── Dependency tracking ──────────────────────────────────────────────────
+
+    /// @notice dependentCount stores how many packages depend on the given key.
+    mapping(bytes32 => uint256) public dependentCounts;
+
+    /// @notice Record a dependency relationship (governance / cross-chain oracle).
+    function setDependentCount(string calldata canonical, uint256 count) external onlyGovernance {
+        dependentCounts[_key(canonical)] = count;
+    }
+
+    /// @notice Return the on-chain dependent count for a package.
+    function getDependentCount(string memory canonical) external view returns (uint256) {
+        return dependentCounts[keccak256(abi.encodePacked(canonical))];
+    }
+
     // ── Internal helpers ──────────────────────────────────────────────────────
 
     function _key(string calldata canonical) internal pure returns (bytes32) {
