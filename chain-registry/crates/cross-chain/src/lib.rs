@@ -25,7 +25,12 @@
 //! ```
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use tracing::warn;
+
+/// Environment variable prefix for overriding contract addresses per chain.
+/// Example: CREG_CHAIN_ARBITRUM_REGISTRY=0x1234...
+const ENV_PREFIX: &str = "CREG_CHAIN";
 
 /// Chain configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,11 +66,48 @@ pub struct MultiChainClient {
 }
 
 impl MultiChainClient {
-    /// Create new multi-chain client
+    /// Create new multi-chain client.
+    ///
+    /// Logs a warning for any chain whose contract addresses are empty.
+    /// In validator mode, consider calling [`validate_configs`] at startup
+    /// to reject configurations with missing addresses.
     pub fn new(configs: Vec<ChainConfig>) -> Self {
-        let chains = configs.into_iter().map(|c| (c.name.clone(), c)).collect();
+        let chains: HashMap<String, ChainConfig> =
+            configs.into_iter().map(|c| (c.name.clone(), c)).collect();
+
+        for (name, cfg) in &chains {
+            if cfg.contracts.registry.is_empty() {
+                warn!(
+                    "Cross-chain config for '{}': registry contract address is empty",
+                    name
+                );
+            }
+            if cfg.contracts.cross_chain.is_empty() {
+                warn!(
+                    "Cross-chain config for '{}': cross_chain contract address is empty",
+                    name
+                );
+            }
+        }
 
         Self { chains }
+    }
+
+    /// Validate that all configured chains have non-empty contract addresses.
+    ///
+    /// Returns a list of human-readable error strings. An empty vec means
+    /// all chains are properly configured.
+    pub fn validate_configs(&self) -> Vec<String> {
+        let mut errors = Vec::new();
+        for (name, cfg) in &self.chains {
+            if cfg.contracts.registry.is_empty() {
+                errors.push(format!("{}: registry address is empty", name));
+            }
+            if cfg.contracts.cross_chain.is_empty() {
+                errors.push(format!("{}: cross_chain address is empty", name));
+            }
+        }
+        errors
     }
 
     /// Get chain config by name
@@ -78,51 +120,182 @@ impl MultiChainClient {
         self.chains.keys().collect()
     }
 
-    /// Arbitrum configuration
+    /// Load a chain config from environment variables, falling back to built-in defaults.
+    ///
+    /// Environment variables checked (example for chain "arbitrum"):
+    ///   - `CREG_CHAIN_ARBITRUM_REGISTRY`
+    ///   - `CREG_CHAIN_ARBITRUM_CROSS_CHAIN`
+    ///   - `CREG_CHAIN_ARBITRUM_ZK_VERIFIER`
+    fn env_override(mut cfg: ChainConfig) -> ChainConfig {
+        let upper = cfg.name.to_uppercase();
+        if let Ok(v) = std::env::var(format!("{}_{}_REGISTRY", ENV_PREFIX, upper)) {
+            cfg.contracts.registry = v;
+        }
+        if let Ok(v) = std::env::var(format!("{}_{}_CROSS_CHAIN", ENV_PREFIX, upper)) {
+            cfg.contracts.cross_chain = v;
+        }
+        if let Ok(v) = std::env::var(format!("{}_{}_ZK_VERIFIER", ENV_PREFIX, upper)) {
+            cfg.contracts.zk_verifier = Some(v);
+        }
+        cfg
+    }
+
+    /// Arbitrum configuration (testnet / placeholder addresses — override via env).
     pub fn arbitrum() -> ChainConfig {
-        ChainConfig {
+        Self::env_override(ChainConfig {
             name: "arbitrum".to_string(),
             chain_id: 42161,
             layerzero_id: 110,
             rpc_urls: vec!["https://arb1.arbitrum.io/rpc".to_string()],
             explorer: "https://arbiscan.io".to_string(),
             contracts: ContractAddresses {
-                registry: "".to_string(),
-                cross_chain: "".to_string(),
+                registry: "0x0000000000000000000000000000000000000000".to_string(),
+                cross_chain: "0x0000000000000000000000000000000000000000".to_string(),
                 zk_verifier: None,
             },
-        }
+        })
     }
 
-    /// Optimism configuration
+    /// Optimism configuration (testnet / placeholder addresses — override via env).
     pub fn optimism() -> ChainConfig {
-        ChainConfig {
+        Self::env_override(ChainConfig {
             name: "optimism".to_string(),
             chain_id: 10,
             layerzero_id: 111,
             rpc_urls: vec!["https://mainnet.optimism.io".to_string()],
             explorer: "https://optimistic.etherscan.io".to_string(),
             contracts: ContractAddresses {
-                registry: "".to_string(),
-                cross_chain: "".to_string(),
+                registry: "0x0000000000000000000000000000000000000000".to_string(),
+                cross_chain: "0x0000000000000000000000000000000000000000".to_string(),
                 zk_verifier: None,
             },
-        }
+        })
     }
 
-    /// Polygon configuration
+    /// Polygon configuration (testnet / placeholder addresses — override via env).
     pub fn polygon() -> ChainConfig {
-        ChainConfig {
+        Self::env_override(ChainConfig {
             name: "polygon".to_string(),
             chain_id: 137,
             layerzero_id: 109,
             rpc_urls: vec!["https://polygon-rpc.com".to_string()],
             explorer: "https://polygonscan.com".to_string(),
             contracts: ContractAddresses {
-                registry: "".to_string(),
-                cross_chain: "".to_string(),
+                registry: "0x0000000000000000000000000000000000000000".to_string(),
+                cross_chain: "0x0000000000000000000000000000000000000000".to_string(),
                 zk_verifier: None,
             },
+        })
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Cross-chain message ordering & replay protection
+// ────────────────────────────────────────────────────────────────────────────
+
+/// A cross-chain verification message with a monotonic sequence number.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CrossChainMessage {
+    /// Globally unique message identifier.
+    pub id: String,
+    /// Source chain name (e.g. "arbitrum").
+    pub source_chain: String,
+    /// Destination chain name.
+    pub dest_chain: String,
+    /// Monotonically increasing per-source sequence number.
+    pub sequence: u64,
+    /// The payload — canonical package ID being synced.
+    pub canonical: String,
+    /// SHA-256 hash of the payload for integrity checking.
+    pub payload_hash: String,
+    /// Unix timestamp (seconds) when the message was created.
+    pub timestamp: u64,
+}
+
+/// Tracks per-chain sequence numbers and rejects duplicates / out-of-order
+/// messages.  Holds a sliding window of recently delivered message IDs for
+/// replay protection.
+pub struct MessageOrderer {
+    /// Next expected sequence number per source chain.
+    next_sequence: HashMap<String, u64>,
+    /// Messages that arrived ahead of sequence, keyed by (source, seq).
+    pending: HashMap<(String, u64), CrossChainMessage>,
+    /// Set of message IDs that have been delivered (replay protection).
+    delivered: HashSet<String>,
+    /// Outbound sequence counter per destination chain.
+    outbound_seq: HashMap<String, u64>,
+}
+
+impl MessageOrderer {
+    pub fn new() -> Self {
+        Self {
+            next_sequence: HashMap::new(),
+            pending: HashMap::new(),
+            delivered: HashSet::new(),
+            outbound_seq: HashMap::new(),
+        }
+    }
+
+    /// Assign the next outbound sequence number for `dest_chain` and return it.
+    pub fn next_outbound_seq(&mut self, dest_chain: &str) -> u64 {
+        let seq = self.outbound_seq.entry(dest_chain.to_string()).or_insert(0);
+        let current = *seq;
+        *seq += 1;
+        current
+    }
+
+    /// Ingest an incoming message.
+    ///
+    /// Returns a `Vec` of messages that are now deliverable in-order
+    /// (may be empty if the message is out-of-order and buffered, or a
+    /// duplicate/replay).
+    pub fn ingest(&mut self, msg: CrossChainMessage) -> Vec<CrossChainMessage> {
+        // Replay protection: reject already-delivered IDs.
+        if self.delivered.contains(&msg.id) {
+            warn!(
+                "Duplicate cross-chain message {} from {} (seq {})",
+                msg.id, msg.source_chain, msg.sequence
+            );
+            return Vec::new();
+        }
+
+        let expected = *self
+            .next_sequence
+            .entry(msg.source_chain.clone())
+            .or_insert(0);
+
+        if msg.sequence < expected {
+            // Already processed — silently drop.
+            return Vec::new();
+        }
+
+        // Buffer this message (even if it's the expected one — we'll drain below).
+        self.pending
+            .insert((msg.source_chain.clone(), msg.sequence), msg.clone());
+
+        // Drain as many consecutive messages as possible.
+        let source = msg.source_chain.clone();
+        let mut deliverable = Vec::new();
+        let mut seq = expected;
+        while let Some(m) = self.pending.remove(&(source.clone(), seq)) {
+            self.delivered.insert(m.id.clone());
+            deliverable.push(m);
+            seq += 1;
+        }
+        self.next_sequence.insert(source, seq);
+
+        deliverable
+    }
+
+    /// Number of out-of-order messages currently buffered.
+    pub fn pending_count(&self) -> usize {
+        self.pending.len()
+    }
+
+    /// Prune the delivered set to bound memory.  Call periodically.
+    pub fn prune_delivered(&mut self, max_entries: usize) {
+        if self.delivered.len() > max_entries {
+            self.delivered.clear();
         }
     }
 }
@@ -148,5 +321,88 @@ mod tests {
         assert_eq!(client.list_chains().len(), 2);
         assert!(client.get_chain("arbitrum").is_some());
         assert!(client.get_chain("optimism").is_some());
+    }
+
+    #[test]
+    fn test_validate_configs_reports_placeholder_addresses() {
+        let client = MultiChainClient::new(vec![
+            ChainConfig {
+                name: "test-chain".to_string(),
+                chain_id: 1,
+                layerzero_id: 1,
+                rpc_urls: vec![],
+                explorer: String::new(),
+                contracts: ContractAddresses {
+                    registry: "".to_string(),
+                    cross_chain: "0xabc".to_string(),
+                    zk_verifier: None,
+                },
+            },
+        ]);
+
+        let errors = client.validate_configs();
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].contains("registry"));
+    }
+
+    fn make_msg(source: &str, seq: u64) -> CrossChainMessage {
+        CrossChainMessage {
+            id: format!("{}-{}", source, seq),
+            source_chain: source.to_string(),
+            dest_chain: "local".to_string(),
+            sequence: seq,
+            canonical: format!("npm:pkg@{}", seq),
+            payload_hash: "abc".to_string(),
+            timestamp: 1000 + seq,
+        }
+    }
+
+    #[test]
+    fn test_in_order_delivery() {
+        let mut orderer = MessageOrderer::new();
+        let delivered = orderer.ingest(make_msg("arb", 0));
+        assert_eq!(delivered.len(), 1);
+        let delivered = orderer.ingest(make_msg("arb", 1));
+        assert_eq!(delivered.len(), 1);
+        assert_eq!(orderer.pending_count(), 0);
+    }
+
+    #[test]
+    fn test_out_of_order_buffering() {
+        let mut orderer = MessageOrderer::new();
+        // Send seq 2 first — should be buffered.
+        let delivered = orderer.ingest(make_msg("arb", 2));
+        assert!(delivered.is_empty());
+        assert_eq!(orderer.pending_count(), 1);
+
+        // Send seq 1 — still buffered.
+        let delivered = orderer.ingest(make_msg("arb", 1));
+        assert!(delivered.is_empty());
+        assert_eq!(orderer.pending_count(), 2);
+
+        // Send seq 0 — should drain all three.
+        let delivered = orderer.ingest(make_msg("arb", 0));
+        assert_eq!(delivered.len(), 3);
+        assert_eq!(delivered[0].sequence, 0);
+        assert_eq!(delivered[1].sequence, 1);
+        assert_eq!(delivered[2].sequence, 2);
+        assert_eq!(orderer.pending_count(), 0);
+    }
+
+    #[test]
+    fn test_replay_rejected() {
+        let mut orderer = MessageOrderer::new();
+        orderer.ingest(make_msg("arb", 0));
+        // Replay same message — should be rejected.
+        let delivered = orderer.ingest(make_msg("arb", 0));
+        assert!(delivered.is_empty());
+    }
+
+    #[test]
+    fn test_outbound_sequence() {
+        let mut orderer = MessageOrderer::new();
+        assert_eq!(orderer.next_outbound_seq("arb"), 0);
+        assert_eq!(orderer.next_outbound_seq("arb"), 1);
+        assert_eq!(orderer.next_outbound_seq("opt"), 0);
     }
 }

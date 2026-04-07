@@ -13,9 +13,20 @@ struct TyposquatDataset {
 }
 
 /// Compiled-in typosquat dataset (loaded from data/typosquat.json at build time).
+/// If the JSON is malformed, an empty dataset is used and a warning is logged at
+/// first access.
 static DATASET: Lazy<TyposquatDataset> = Lazy::new(|| {
     let json = include_str!("../data/typosquat.json");
-    serde_json::from_str(json).expect("typosquat.json must be valid JSON")
+    match serde_json::from_str(json) {
+        Ok(ds) => ds,
+        Err(e) => {
+            eprintln!("[WARN] typosquat.json parse failed ({}); typosquat detection disabled", e);
+            TyposquatDataset {
+                version: 0,
+                packages: HashMap::new(),
+            }
+        }
+    }
 });
 
 /// Result of a typosquat check.

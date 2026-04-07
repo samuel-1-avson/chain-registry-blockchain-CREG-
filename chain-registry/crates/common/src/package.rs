@@ -143,6 +143,10 @@ pub struct ChainRecord {
     /// Multi-sig: list of publisher pubkeys.
     #[serde(default)]
     pub publisher_pubkeys: Vec<String>,
+    /// Package manifest from the publisher (declared behaviors).
+    /// Stored at finalization so that future versions can diff against it.
+    #[serde(default)]
+    pub manifest: Option<PackageManifest>,
 }
 
 /// Current lifecycle state of a package on the chain.

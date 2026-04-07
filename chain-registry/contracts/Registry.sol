@@ -33,7 +33,8 @@ contract ChainRegistry {
         string  ipfsCid;           // IPFS CID of the tarball
         address publisher;
         uint64  publishedAt;       // Unix timestamp
-        bytes32 blockHash;         // Block hash that included this record
+        bytes32 blockHash;         // Block hash at inclusion time (best-effort; 0x0 after 256 blocks)
+        uint256 blockNumber;       // Block number — always available, unlike blockhash()
         PackageStatus status;
         string  revocationReason;
         ValidationMode validationMode;
@@ -177,9 +178,9 @@ contract ChainRegistry {
             publisher:         msg.sender,
             publishedAt:       uint64(block.timestamp),
             // Note: blockhash() only works for the 256 most recent blocks.
-            // Older packages will have blockHash = 0x0. This is acceptable
-            // as it serves as an inclusion record, not a randomness source.
+            // blockNumber is the reliable inclusion anchor; blockHash is best-effort.
             blockHash:         blockhash(block.number - 1),
+            blockNumber:       block.number,
             status:            PackageStatus.Pending,
             revocationReason:  "",
             validationMode:    ValidationMode.PBFT,
@@ -229,6 +230,7 @@ contract ChainRegistry {
             publisher:         msg.sender,
             publishedAt:       uint64(block.timestamp),
             blockHash:         blockhash(block.number - 1), // See note in submitPackage()
+            blockNumber:       block.number,
             status:            PackageStatus.Verified,
             revocationReason:  "",
             validationMode:    ValidationMode.ZKProof,
@@ -335,6 +337,7 @@ contract ChainRegistry {
 
         rec.status    = PackageStatus.Verified;
         rec.blockHash = blockhash(block.number - 1);
+        rec.blockNumber = block.number;
         rec.validationMode = ValidationMode.PBFT;
 
         emit PackageVerified(key, canonical, approvals);
@@ -367,6 +370,7 @@ contract ChainRegistry {
         rec.validationMode = ValidationMode.ZKProof;
         rec.zkProofHash = proofHash;
         rec.blockHash = blockhash(block.number - 1);
+        rec.blockNumber = block.number;
 
         // Store proof
         zkProofs[key] = ZKProofData({

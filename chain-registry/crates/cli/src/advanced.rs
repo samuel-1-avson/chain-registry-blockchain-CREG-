@@ -83,10 +83,10 @@ pub async fn generate_zk_proof(
                 .any(|f| matches!(f.severity, common::FindingSeverity::Critical)),
             Err(e) => {
                 warn!(
-                    "Sandbox unavailable, treating as safe for proof generation: {}",
+                    "Sandbox unavailable, treating as UNSAFE: {}",
                     e
                 );
-                true
+                false
             }
         };
     info!("Sandbox result: sandbox_safe={}", sandbox_safe);
@@ -121,10 +121,11 @@ pub async fn ml_verify(
 ) -> Result<ml_validator::PredictionResult> {
     info!("Running ML-based verification...");
 
-    // Read package content
-    let content = tokio::fs::read_to_string(tarball_path)
+    // Read package content (as bytes, then convert to lossy string for ML feature extraction)
+    let raw_bytes = tokio::fs::read(tarball_path)
         .await
         .context("Failed to read package")?;
+    let content = String::from_utf8_lossy(&raw_bytes).to_string();
 
     // Extract features
     let features =

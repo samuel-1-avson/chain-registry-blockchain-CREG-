@@ -1,5 +1,6 @@
 // crates/cli/src/main.rs
 // `creg` — the main CLI. Wraps the shim logic with a friendly interface.
+#![deny(clippy::unwrap_used)]
 
 mod advanced;
 mod audit;
@@ -20,6 +21,7 @@ mod multisig;
 mod output;
 mod policy;
 mod publish;
+mod recovery;
 mod retry;
 mod sbom;
 mod search;
@@ -104,15 +106,31 @@ enum Commands {
         /// Path to the package manifest TOML/JSON.
         #[arg(short, long)]
         manifest: Option<std::path::PathBuf>,
-        /// Publisher's Ed25519 private key file (hex-encoded).
-        #[arg(short, long, env = "CREG_PUBLISHER_KEY")]
-        key: String,
-        /// Additional Ed25519 private keys for 2-of-3 multi-sig publishing.
-        #[arg(long = "extra-key")]
-        extra_keys: Vec<String>,
+        /// Path to file containing publisher's Ed25519 private key (hex-encoded).
+        #[arg(short, long = "key-file", env = "CREG_KEY_FILE")]
+        key: std::path::PathBuf,
+        /// Paths to additional Ed25519 private key files for 2-of-3 multi-sig publishing.
+        #[arg(long = "extra-key-file")]
+        extra_keys: Vec<std::path::PathBuf>,
         /// Encrypt the package for the validator quorum (Shielded).
         #[arg(long)]
         shield: bool,
+        /// Offline signing: produce a signed JSON file instead of
+        /// submitting to the node.  Use `creg submit-signed <file>` later.
+        #[arg(long)]
+        offline: Option<std::path::PathBuf>,
+    },
+
+    /// Submit a pre-signed publish request (from `creg publish --offline`).
+    SubmitSigned {
+        /// Path to the signed JSON file produced by `creg publish --offline`.
+        signed_file: std::path::PathBuf,
+    },
+
+    /// Social recovery: split a key into Shamir guardian shares or reconstruct it.
+    Recovery {
+        #[command(subcommand)]
+        action: RecoveryAction,
     },
 
     /// Install the PATH shims so `npm`, `pip`, etc. go through chain-registry.
@@ -142,6 +160,13 @@ enum Commands {
         /// Rotate an existing key instead of generating a fresh one.
         #[arg(long)]
         rotate: bool,
+        /// Generate key from a BIP39 mnemonic phrase (12 or 24 words).
+        /// If not provided, generates a new random key.
+        #[arg(long)]
+        mnemonic: bool,
+        /// Restore key from an existing BIP39 mnemonic phrase.
+        #[arg(long)]
+        restore: bool,
     },
 
     /// Manage the local pkg-lock.chain file.
@@ -207,14 +232,14 @@ enum Commands {
         #[arg(short, long, default_value = "publisher")]
         role: String,
         /// Staking contract address (0x…).
-        #[arg(long)]
+        #[arg(long, env = "STAKING_CONTRACT_ADDR")]
         staking_addr: Option<String>,
         /// EVM RPC URL.
         #[arg(long)]
         rpc_url: Option<String>,
-        /// Deployer/caller private key (hex).
-        #[arg(long)]
-        key: Option<String>,
+        /// Path to file containing deployer/caller private key (hex).
+        #[arg(long = "key-file", env = "CREG_KEY_FILE")]
+        key: Option<std::path::PathBuf>,
     },
 
     /// Launch the interactive Premium TUI Dashboard.
@@ -491,9 +516,9 @@ enum MultisigCommands {
     Sign {
         /// Path to the multisig session file
         session: std::path::PathBuf,
-        /// Your Ed25519 private key (hex)
-        #[arg(short, long, env = "CREG_PUBLISHER_KEY")]
-        key: String,
+        /// Path to file containing your Ed25519 private key (hex)
+        #[arg(short, long = "key-file", env = "CREG_KEY_FILE")]
+        key: std::path::PathBuf,
     },
     /// Submit a completed multisig session to the chain
     Submit {
@@ -553,6 +578,34 @@ enum TestnetCommands {
     },
 }
 
+#[derive(Subcommand)]
+enum RecoveryAction {
+    /// Split a private key into Shamir guardian shares.
+    Split {
+        /// Path to the private key file to split.
+        #[arg(long)]
+        key: std::path::PathBuf,
+        /// Guardian names (comma-separated, e.g. "alice,bob,carol").
+        #[arg(long, value_delimiter = ',')]
+        guardians: Vec<String>,
+        /// Minimum number of shares needed to reconstruct (default: 2).
+        #[arg(long, default_value = "2")]
+        threshold: u8,
+        /// Directory to write share files into.
+        #[arg(long, default_value = "./recovery-shares")]
+        output_dir: std::path::PathBuf,
+    },
+    /// Reconstruct a private key from guardian shares.
+    Reconstruct {
+        /// Paths to share JSON files.
+        #[arg(required = true)]
+        shares: Vec<std::path::PathBuf>,
+        /// Output path for the reconstructed key.
+        #[arg(long, default_value = "./recovered-key.enc")]
+        output: std::path::PathBuf,
+    },
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -561,6 +614,15 @@ async fn main() -> Result<()> {
         .init();
 
     let cli = Cli::parse();
+
+    if let Err(e) = run(cli).await {
+        error_help::print_error_with_help(&e.to_string());
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
+async fn run(cli: Cli) -> Result<()> {
     let json_out = matches!(cli.output, OutputFormat::Json);
 
     match cli.command {
@@ -597,17 +659,57 @@ async fn main() -> Result<()> {
             key,
             extra_keys,
             shield,
+            offline,
         } => {
-            publish::run(
-                &tarball,
-                manifest.as_deref(),
-                &key,
-                &extra_keys,
-                cli.node_url.as_deref(),
-                shield,
-            )
-            .await?;
+            let key_content = std::fs::read_to_string(&key)
+                .with_context(|| format!("Cannot read key file: {}", key.display()))?;
+            let key_str = key_content.trim();
+            let extra_key_strs: Vec<String> = extra_keys
+                .iter()
+                .map(|p| {
+                    std::fs::read_to_string(p)
+                        .with_context(|| format!("Cannot read extra key file: {}", p.display()))
+                        .map(|s| s.trim().to_string())
+                })
+                .collect::<Result<_>>()?;
+            if let Some(output_path) = offline {
+                publish::sign_offline(
+                    &tarball,
+                    manifest.as_deref(),
+                    key_str,
+                    &extra_key_strs,
+                    shield,
+                    &output_path,
+                )
+                .await?;
+            } else {
+                publish::run(
+                    &tarball,
+                    manifest.as_deref(),
+                    key_str,
+                    &extra_key_strs,
+                    cli.node_url.as_deref(),
+                    shield,
+                )
+                .await?;
+            }
         }
+        Commands::SubmitSigned { signed_file } => {
+            publish::submit_signed(&signed_file, cli.node_url.as_deref()).await?;
+        }
+        Commands::Recovery { action } => match action {
+            RecoveryAction::Split {
+                key,
+                guardians,
+                threshold,
+                output_dir,
+            } => {
+                recovery::run_split(&key, &guardians, threshold, &output_dir)?;
+            }
+            RecoveryAction::Reconstruct { shares, output } => {
+                recovery::run_reconstruct(&shares, &output)?;
+            }
+        },
         Commands::SetupShims { shim_dir } => {
             intercept::setup_shims(shim_dir.as_deref())?;
         }
@@ -626,15 +728,21 @@ async fn main() -> Result<()> {
             role,
             key_path,
             rotate,
+            mnemonic,
+            restore,
         } => {
             if rotate {
                 keygen::rotate(key_path.as_deref(), &role)?;
+            } else if mnemonic {
+                keygen::run_with_mnemonic(key_path.as_deref(), &role, false)?;
+            } else if restore {
+                keygen::run_with_mnemonic(key_path.as_deref(), &role, true)?;
             } else {
                 keygen::run(key_path.as_deref(), &role)?;
             }
         }
         Commands::Lockfile { clear, dir, diff } => {
-            let d = dir.unwrap_or_else(|| std::env::current_dir().unwrap());
+            let d = dir.unwrap_or_else(|| std::env::current_dir().expect("cannot determine current directory"));
             if clear {
                 let path = d.join("pkg-lock.chain");
                 if path.exists() {
@@ -975,7 +1083,9 @@ async fn main() -> Result<()> {
                 multisig::init(&tarball, threshold, cli.node_url.as_deref(), &session_out).await?;
             }
             MultisigCommands::Sign { session, key } => {
-                multisig::sign(&session, &key)?;
+                let key_content = std::fs::read_to_string(&key)
+                    .with_context(|| format!("Cannot read key file: {}", key.display()))?;
+                multisig::sign(&session, key_content.trim())?;
             }
             MultisigCommands::Submit { session, manifest } => {
                 multisig::submit(&session, manifest.as_deref(), cli.node_url.as_deref()).await?;

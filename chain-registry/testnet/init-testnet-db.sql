@@ -130,3 +130,51 @@ COMMENT ON TABLE packages IS 'Published packages on the testnet';
 COMMENT ON TABLE validator_signatures IS 'Validator votes on packages';
 COMMENT ON TABLE chain_blocks IS 'Chain blocks for explorer';
 COMMENT ON TABLE faucet_drips IS 'Testnet faucet distribution log';
+
+-- =============================================================================
+-- Data Retention & Partitioning (T-12)
+-- =============================================================================
+
+-- Retention policy: clean up old faucet drips (keep 30 days)
+CREATE OR REPLACE FUNCTION cleanup_old_faucet_drips()
+RETURNS void AS $$
+BEGIN
+    DELETE FROM faucet_drips WHERE dripped_at < NOW() - INTERVAL '30 days';
+END;
+$$ LANGUAGE plpgsql;
+
+-- Retention policy: clean up old pending_tx that are resolved (keep 7 days)
+CREATE OR REPLACE FUNCTION cleanup_resolved_pending_tx()
+RETURNS void AS $$
+BEGIN
+    DELETE FROM pending_tx 
+    WHERE status IN ('included', 'failed') 
+      AND updated_at < NOW() - INTERVAL '7 days';
+END;
+$$ LANGUAGE plpgsql;
+
+-- Block archival: archive blocks older than 90 days to a separate table
+CREATE TABLE IF NOT EXISTS chain_blocks_archive (
+    LIKE chain_blocks INCLUDING ALL
+);
+
+CREATE OR REPLACE FUNCTION archive_old_blocks()
+RETURNS void AS $$
+BEGIN
+    INSERT INTO chain_blocks_archive 
+    SELECT * FROM chain_blocks 
+    WHERE created_at < NOW() - INTERVAL '90 days'
+    ON CONFLICT DO NOTHING;
+    
+    DELETE FROM chain_blocks 
+    WHERE created_at < NOW() - INTERVAL '90 days';
+END;
+$$ LANGUAGE plpgsql;
+
+-- Height-based index for efficient range queries on blocks
+CREATE INDEX IF NOT EXISTS idx_blocks_created_at ON chain_blocks(created_at);
+CREATE INDEX IF NOT EXISTS idx_faucet_retention ON faucet_drips(dripped_at);
+
+COMMENT ON FUNCTION cleanup_old_faucet_drips IS 'Run periodically: SELECT cleanup_old_faucet_drips()';
+COMMENT ON FUNCTION cleanup_resolved_pending_tx IS 'Run periodically: SELECT cleanup_resolved_pending_tx()';
+COMMENT ON FUNCTION archive_old_blocks IS 'Run weekly: SELECT archive_old_blocks()';

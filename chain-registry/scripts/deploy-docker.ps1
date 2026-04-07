@@ -1,4 +1,4 @@
-# Docker Deployment Script for Chain Registry v0.2.0
+# Docker Deployment Script for Chain Registry v0.3.0
 # This script automates the deployment of the complete system with Phases 1-3
 
 param(
@@ -7,7 +7,7 @@ param(
 
 if ($Help) {
     Write-Host @"
-Docker Deployment Script for Chain Registry v0.2.0
+Docker Deployment Script for Chain Registry v0.3.0
 
 This script automates the deployment of the complete system.
 
@@ -316,7 +316,7 @@ function Show-Status {
 function Main {
     Write-Host "=========================================="
     Write-Host "  Chain Registry Docker Deployment"
-    Write-Host "  Version: v0.2.0 (Phases 1-3)"
+    Write-Host "  Version: v0.3.0 (Phases 1-3)"
     Write-Host "=========================================="
     Write-Host ""
     

@@ -18,6 +18,7 @@ resources:
   - 20-validator.yaml
   # Uncomment for additional validators:
   # - 21-validators-2-5.yaml
+  # - 22-validators-6-10.yaml
   
   # Networking
   - 30-api-gateway.yaml
@@ -28,6 +29,9 @@ resources:
   
   # Optional: Backups
   # - 60-backup.yaml
+  
+  # Optional: Network partition testing (Phase 4)
+  # - 55-network-partition-test.yaml
 
 # Common labels applied to all resources
 commonLabels:

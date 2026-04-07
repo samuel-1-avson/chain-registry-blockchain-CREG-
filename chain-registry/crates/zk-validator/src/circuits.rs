@@ -73,33 +73,11 @@ impl ConstraintSynthesizer<Fr> for PackageValidationCircuit {
         let complexity_var = UInt8::new_witness(cs.clone(), || Ok(self.complexity_score))?;
 
         // Constraint 1: Static analysis score >= 80
-        // Encode as: score_var - 80 must be representable as a 7-bit non-negative value.
-        // This is enforced by allocating `score - 80` as a witness and then
-        // range-checking it (fits in [0, 127]), which prevents a malicious prover
-        // from claiming a passing score when the real score is below 80.
-        let threshold = UInt8::<Fr>::constant(80u8);
-        // Compute score - 80 as a field element (wraps if < 80, but range check catches it).
-        let score_minus_threshold = UInt8::new_witness(cs.clone(), || {
-            Ok(self.static_analysis_score.wrapping_sub(80))
-        })?;
-        // Enforce score_minus_threshold + 80 == static_score_var via bits addition.
-        // This pins score_minus_threshold to static_score_var - 80 arithmetically.
-        let recomputed = score_minus_threshold.xor(&threshold)?; // placeholder equality check
-        let _ = recomputed; // silence unused warning; full gadget below
-
-        // Enforce via field elements: static_score = threshold + (static_score - threshold)
-        // Using field arithmetic for correctness.
-        let score_field = static_score_var.to_bits_be()?;
-        let thresh_field = threshold.to_bits_be()?;
-        let diff_field = score_minus_threshold.to_bits_be()?;
-        // sum of threshold bits + diff bits must equal score bits (bit-by-bit addition with carry
-        // is complex; instead enforce via the circuit satisfiability check that the prover
-        // must supply a witness consistent with the field encoding).
-        // The key security property: score_minus_threshold is constrained to be < 128 via
-        // the UInt8 allocation (8-bit value ∈ [0, 255]), and the equality below pins it.
-        let _ = (score_field, thresh_field, diff_field); // consumed above
-
-        // Simplified but sound: convert both to field scalars and subtract.
+        // Strategy: compute `diff = score - 80` in the field and constrain `diff` to
+        // fit in a UInt8 (8-bit value in [0, 255]). If score < 80, the field
+        // subtraction wraps modulo p (producing a huge number) which cannot be
+        // represented as an 8-bit value, making the circuit unsatisfiable.
+        // Max valid diff = 255 - 80 = 175, which fits comfortably in 8 bits.
         let score_le = static_score_var.to_bits_le()?.iter().enumerate().fold(
             ark_r1cs_std::fields::fp::FpVar::zero(),
             |acc, (i, b)| {
@@ -246,20 +224,84 @@ mod tests {
     }
 
     #[test]
-    fn test_package_validation_low_score() {
+    fn test_package_validation_low_score_rejected() {
         let cs = ConstraintSystem::<Fr>::new_ref();
 
         let circuit = PackageValidationCircuit {
             content_hash: vec![1u8; 32],
             manifest_hash: vec![2u8; 32],
-            static_analysis_score: 50, // Below threshold
+            static_analysis_score: 50, // Below threshold of 80
             sandbox_safe: true,
             no_vulnerable_deps: true,
             complexity_score: 70,
         };
 
-        // Circuit should still be satisfied because we use witness-based validation
+        // Constraint generation succeeds (it just adds constraints)
         circuit.generate_constraints(cs.clone()).unwrap();
-        // Note: In production, use proper comparison gadgets
+        // But the constraint system must NOT be satisfied: score 50 < threshold 80
+        assert!(
+            !cs.is_satisfied().unwrap(),
+            "Circuit must reject static_analysis_score below threshold (50 < 80)"
+        );
+    }
+
+    #[test]
+    fn test_package_validation_boundary_score_80() {
+        let cs = ConstraintSystem::<Fr>::new_ref();
+
+        let circuit = PackageValidationCircuit {
+            content_hash: vec![1u8; 32],
+            manifest_hash: vec![2u8; 32],
+            static_analysis_score: 80, // Exactly at threshold
+            sandbox_safe: true,
+            no_vulnerable_deps: true,
+            complexity_score: 70,
+        };
+
+        circuit.generate_constraints(cs.clone()).unwrap();
+        assert!(
+            cs.is_satisfied().unwrap(),
+            "Circuit must accept static_analysis_score exactly at threshold (80)"
+        );
+    }
+
+    #[test]
+    fn test_package_validation_high_complexity_rejected() {
+        let cs = ConstraintSystem::<Fr>::new_ref();
+
+        let circuit = PackageValidationCircuit {
+            content_hash: vec![1u8; 32],
+            manifest_hash: vec![2u8; 32],
+            static_analysis_score: 95,
+            sandbox_safe: true,
+            no_vulnerable_deps: true,
+            complexity_score: 95, // Above max complexity of 90
+        };
+
+        circuit.generate_constraints(cs.clone()).unwrap();
+        assert!(
+            !cs.is_satisfied().unwrap(),
+            "Circuit must reject complexity_score above maximum (95 > 90)"
+        );
+    }
+
+    #[test]
+    fn test_package_validation_sandbox_failed_rejected() {
+        let cs = ConstraintSystem::<Fr>::new_ref();
+
+        let circuit = PackageValidationCircuit {
+            content_hash: vec![1u8; 32],
+            manifest_hash: vec![2u8; 32],
+            static_analysis_score: 95,
+            sandbox_safe: false, // Sandbox failed
+            no_vulnerable_deps: true,
+            complexity_score: 70,
+        };
+
+        circuit.generate_constraints(cs.clone()).unwrap();
+        assert!(
+            !cs.is_satisfied().unwrap(),
+            "Circuit must reject when sandbox_safe is false"
+        );
     }
 }

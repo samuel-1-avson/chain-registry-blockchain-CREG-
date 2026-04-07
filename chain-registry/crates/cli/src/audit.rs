@@ -76,7 +76,7 @@ pub async fn run(
         let eco_c = eco.clone();
 
         handles.push(tokio::spawn(async move {
-            let _permit = sem.acquire().await.unwrap();
+            let _permit = sem.acquire().await.expect("semaphore closed");
             let id = PackageId::new(&eco_c, &pkg.name, &pkg.version);
             let verdict = resolver::resolve_id(&id, url.as_deref()).await;
             (pkg, verdict)
@@ -318,41 +318,24 @@ fn read_cargo_packages() -> Result<Vec<InstalledPackage>> {
     }
 
     let content = std::fs::read_to_string(lockfile)?;
+
+    // Parse Cargo.lock as TOML (it's a valid TOML file)
+    let parsed: toml::Value = toml::from_str(&content)
+        .context("Failed to parse Cargo.lock as TOML")?;
+
     let mut result = Vec::new();
-
-    // Simple TOML-style parser for Cargo.lock [[package]] sections.
-    let mut in_package = false;
-    let mut name = String::new();
-    let mut version = String::new();
-
-    for line in content.lines() {
-        let line = line.trim();
-        if line == "[[package]]" {
-            if in_package && !name.is_empty() && !version.is_empty() {
+    if let Some(packages) = parsed.get("package").and_then(|v| v.as_array()) {
+        for pkg in packages {
+            let name = pkg.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let version = pkg.get("version").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            if !name.is_empty() && !version.is_empty() {
                 result.push(InstalledPackage {
-                    name: name.clone(),
-                    version: version.clone(),
+                    name,
+                    version,
                     eco: "cargo".into(),
                 });
             }
-            in_package = true;
-            name.clear();
-            version.clear();
-        } else if in_package {
-            if let Some(v) = line.strip_prefix("name = \"") {
-                name = v.trim_end_matches('"').to_string();
-            } else if let Some(v) = line.strip_prefix("version = \"") {
-                version = v.trim_end_matches('"').to_string();
-            }
         }
-    }
-    // Flush last package.
-    if in_package && !name.is_empty() && !version.is_empty() {
-        result.push(InstalledPackage {
-            name,
-            version,
-            eco: "cargo".into(),
-        });
     }
 
     Ok(result)
@@ -466,7 +449,7 @@ pub async fn run_fix(ecosystem: Option<&str>, node_url: Option<&str>) -> Result<
         let url = node_url.map(String::from);
         let eco_c = eco.clone();
         handles.push(tokio::spawn(async move {
-            let _permit = sem.acquire().await.unwrap();
+            let _permit = sem.acquire().await.expect("semaphore closed");
             let id = PackageId::new(&eco_c, &pkg.name, &pkg.version);
             let verdict = resolver::resolve_id(&id, url.as_deref()).await;
             (pkg, verdict)

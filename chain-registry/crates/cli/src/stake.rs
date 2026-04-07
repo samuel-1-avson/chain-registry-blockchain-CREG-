@@ -16,20 +16,26 @@ pub enum StakeRole {
 pub async fn run(
     amount_eth: f64,
     role: StakeRole,
-    privkey: Option<&str>,
+    key_path: Option<&std::path::Path>,
     rpc_url: Option<&str>,
     staking_addr: Option<&str>,
 ) -> Result<()> {
     let rpc = rpc_url.unwrap_or("http://127.0.0.1:8545");
-    let contract = staking_addr.unwrap_or("0x0000000000000000000000000000000000000000");
+    let contract = match staking_addr {
+        Some(addr) if !addr.is_empty() && addr != "0x0000000000000000000000000000000000000000" => addr.to_string(),
+        _ => match std::env::var("STAKING_CONTRACT_ADDR") {
+            Ok(addr) if !addr.is_empty() => addr,
+            _ => bail!("Staking contract address required. Set --staking-addr or STAKING_CONTRACT_ADDR env var."),
+        },
+    };
 
     if amount_eth <= 0.0 {
         bail!("Stake amount must be greater than 0");
     }
 
     let min_eth = match role {
-        StakeRole::Publisher => 0.01,
-        StakeRole::Validator => 1.0,
+        StakeRole::Publisher => 1.0,
+        StakeRole::Validator => 100.0,
     };
 
     if amount_eth < min_eth {
@@ -41,7 +47,8 @@ pub async fn run(
         );
     }
 
-    let wei: u128 = (amount_eth * 1e18) as u128;
+    // Use string-based decimal-to-wei conversion to avoid float precision loss
+    let wei = eth_to_wei_str(amount_eth);
     let fn_selector = match role {
         StakeRole::Publisher => "stakeAsPublisher()",
         StakeRole::Validator => "joinAsValidator()",
@@ -58,14 +65,18 @@ pub async fn run(
     println!("  Network:   {}", rpc);
     println!("  Function:  {}", fn_selector);
 
-    // If a private key was provided, attempt to send the transaction directly.
-    if let Some(key) = privkey {
+    // If a key file was provided, read the private key and send the transaction.
+    if let Some(kp) = key_path {
+        let key = std::fs::read_to_string(kp)
+            .with_context(|| format!("Cannot read key file: {}", kp.display()))?;
+        let key = key.trim();
+
         println!("\n  Sending transaction...");
         // Build and sign the transaction using cast (Foundry toolchain).
         let status = std::process::Command::new("cast")
             .args([
                 "send",
-                contract,
+                &contract,
                 &format!("0x{}", selector_hex),
                 "--value",
                 &format!("{}wei", wei),
@@ -94,7 +105,7 @@ pub async fn run(
         }
     } else {
         // No key — print the cast command for the user to run manually.
-        println!("\n  No private key provided. Run this command to stake:\n");
+        println!("\n  No key file provided. Run this command to stake:\n");
         println!("  cast send {} 0x{} \\", contract, selector_hex);
         println!("    --value {}wei \\", wei);
         println!("    --private-key $YOUR_PRIVATE_KEY \\");
@@ -102,6 +113,19 @@ pub async fn run(
     }
 
     Ok(())
+}
+
+/// Convert ETH amount to wei string without float precision loss.
+fn eth_to_wei_str(eth: f64) -> String {
+    let s = format!("{:.18}", eth);
+    let parts: Vec<&str> = s.split('.').collect();
+    let integer = parts[0];
+    let fraction = if parts.len() > 1 { parts[1] } else { "000000000000000000" };
+    let fraction = &format!("{:0<18}", fraction)[..18];
+    let combined = format!("{}{}", integer, fraction);
+    // Strip leading zeros but keep at least "0"
+    let trimmed = combined.trim_start_matches('0');
+    if trimmed.is_empty() { "0".to_string() } else { trimmed.to_string() }
 }
 
 /// Parse "0.01eth" / "1ETH" / "1000000000000000000wei" → f64 ETH.

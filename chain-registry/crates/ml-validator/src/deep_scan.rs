@@ -119,6 +119,55 @@ impl DeepScanner {
         }
     }
 
+    /// Check that the configured model file exists and is a valid size.
+    /// Call at application startup to fail fast if the model is missing.
+    ///
+    /// Returns `Ok(())` if the default pipeline (YARA + OSV) will be used
+    /// (i.e. `CREG_FORCE_ONNX` is not set).  When ONNX is forced, returns
+    /// an error if the model file is missing or suspiciously small.
+    pub fn validate_at_startup(&self) -> Result<(), MlError> {
+        if std::env::var("CREG_FORCE_ONNX").unwrap_or_default() != "true" {
+            // Default pipeline doesn't need the ONNX model — nothing to check.
+            tracing::info!(
+                "ML deep-scan: ONNX model not required (rule-based pipeline active)"
+            );
+            return Ok(());
+        }
+
+        if !self.model_path.exists() {
+            let msg = format!(
+                "ONNX model not found at '{}'. Set CREG_FORCE_ONNX=false or provide the model.",
+                self.model_path.display()
+            );
+            tracing::error!("{}", msg);
+            return Err(MlError::InferenceError(msg));
+        }
+
+        let meta = std::fs::metadata(&self.model_path).map_err(|e| {
+            MlError::InferenceError(format!(
+                "Cannot stat ONNX model at '{}': {e}",
+                self.model_path.display()
+            ))
+        })?;
+
+        if meta.len() < 1024 {
+            let msg = format!(
+                "ONNX model at '{}' is only {} bytes — likely a placeholder, not a trained model.",
+                self.model_path.display(),
+                meta.len()
+            );
+            tracing::warn!("{}", msg);
+            return Err(MlError::InferenceError(msg));
+        }
+
+        tracing::info!(
+            "ML deep-scan: ONNX model verified at '{}' ({} bytes)",
+            self.model_path.display(),
+            meta.len()
+        );
+        Ok(())
+    }
+
     /// Attach a tokenizer JSON path.
     pub fn with_tokenizer<P: AsRef<Path>>(mut self, path: P) -> Self {
         self.tokenizer_path = Some(path.as_ref().to_path_buf());

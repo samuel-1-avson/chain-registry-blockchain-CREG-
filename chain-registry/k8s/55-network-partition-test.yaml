@@ -1,0 +1,116 @@
+# Network partition testing for PBFT view-change recovery validation
+# Phase 4: Simulate network partitions to test consensus fault tolerance
+#
+# Usage:
+#   # Apply partition (isolate validators 8-10 from 1-7):
+#   kubectl apply -f k8s/55-network-partition-test.yaml
+#
+#   # Verify PBFT view-change recovery in logs:
+#   kubectl logs -n chain-registry -l app.kubernetes.io/component=validator --tail=100 | grep -i "view.change"
+#
+#   # Remove partition (restore full connectivity):
+#   kubectl delete -f k8s/55-network-partition-test.yaml
+#
+# Expected behavior:
+#   - Validators 1-7 (supermajority) continue producing blocks
+#   - Validators 8-10 (minority) detect leader loss, trigger view-change
+#   - After partition heals, minority catches up via block sync
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: creg-partition-test-isolate-minority
+  namespace: chain-registry
+  labels:
+    app.kubernetes.io/name: creg
+    app.kubernetes.io/component: test
+    test-scenario: network-partition
+spec:
+  # Apply to validators 8, 9, 10 (minority partition)
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/instance
+        operator: In
+        values: ["validator-8", "validator-9", "validator-10"]
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow traffic only from other minority partition members
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/instance
+                operator: In
+                values: ["validator-8", "validator-9", "validator-10"]
+    # Allow Prometheus scraping (so we can observe the partition)
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - port: 9090
+          protocol: TCP
+  egress:
+    # Allow traffic only to other minority partition members
+    - to:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/instance
+                operator: In
+                values: ["validator-8", "validator-9", "validator-10"]
+    # Allow DNS resolution
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+---
+# Prometheus alert rule for partition detection
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: creg-partition-test-alerts
+  namespace: chain-registry
+  labels:
+    app.kubernetes.io/name: creg
+    app.kubernetes.io/component: test
+    test-scenario: network-partition
+spec:
+  groups:
+    - name: partition-test
+      rules:
+        - alert: CregPartitionDetected
+          expr: |
+            count(creg_p2p_peers{namespace="chain-registry"} < 5) > 2
+          for: 1m
+          labels:
+            severity: info
+            test: partition
+          annotations:
+            summary: "Network partition detected (test scenario)"
+            description: "{{ $value }} validators have fewer than 5 peers — partition test in effect"
+        
+        - alert: CregViewChangeTriggered
+          expr: |
+            increase(creg_pbft_view_changes_total{namespace="chain-registry"}[5m]) > 0
+          for: 0s
+          labels:
+            severity: info
+            test: partition
+          annotations:
+            summary: "PBFT view-change triggered"
+            description: "Validator {{ $labels.instance }} triggered a view-change — expected during partition test"
+        
+        - alert: CregPartitionRecovery
+          expr: |
+            min(creg_p2p_peers{namespace="chain-registry"}) >= 7
+          for: 2m
+          labels:
+            severity: info
+            test: partition
+          annotations:
+            summary: "Network partition healed"
+            description: "All validators have re-established full connectivity"

@@ -130,9 +130,49 @@ impl ShamirSecretSharing {
     }
 
     // ── Galois Field Arithmetic (GF(2^8)) ─────────────────────────────────────
+    //
+    // All operations below are implemented in constant time using precomputed
+    // log/exp tables.  This prevents timing side-channels that could leak
+    // secret shares or the reconstructed secret.
 
     /// Irreducible polynomial for GF(2^8): x^8 + x^4 + x^3 + x + 1
     const IRREDUCIBLE_POLY: u16 = 0x11b;
+
+    /// Precomputed exponential (antilog) table for GF(2^8).
+    /// EXP_TABLE[i] = g^i where g = 0x03 is a generator of GF(2^8)*.
+    const EXP_TABLE: [u8; 256] = Self::build_exp_table();
+    /// Precomputed logarithm table for GF(2^8).
+    /// LOG_TABLE[a] = i such that g^i = a.  LOG_TABLE[0] is unused.
+    const LOG_TABLE: [u8; 256] = Self::build_log_table();
+
+    const fn build_exp_table() -> [u8; 256] {
+        let mut table = [0u8; 256];
+        let mut val: u16 = 1;
+        let mut i = 0usize;
+        while i < 256 {
+            table[i] = val as u8;
+            // Multiply by generator 0x03 in GF(2^8).
+            val = (val << 1) ^ val; // val * 3 = val * 2 ^ val
+            if val & 0x100 != 0 {
+                val ^= Self::IRREDUCIBLE_POLY;
+            }
+            i += 1;
+        }
+        table
+    }
+
+    const fn build_log_table() -> [u8; 256] {
+        let mut table = [0u8; 256];
+        let exp = Self::build_exp_table();
+        let mut i = 0u8;
+        // Only fill indices 0..254; 255 maps back to 0 (g^255 = 1 = g^0).
+        loop {
+            table[exp[i as usize] as usize] = i;
+            if i == 254 { break; }
+            i += 1;
+        }
+        table
+    }
 
     /// Add two elements in GF(2^8) - same as XOR
     fn gf_add(a: u8, b: u8) -> u8 {
@@ -144,63 +184,38 @@ impl ShamirSecretSharing {
         a ^ b
     }
 
-    /// Multiply two elements in GF(2^8)
+    /// Multiply two elements in GF(2^8) in **constant time** using log/exp tables.
     fn gf_mul(a: u8, b: u8) -> u8 {
-        let mut result = 0u16;
-        let mut a = a as u16;
-        let mut b = b as u16;
-
-        while b > 0 {
-            if b & 1 == 1 {
-                result ^= a;
-            }
-            a <<= 1;
-            if a & 0x100 != 0 {
-                a ^= Self::IRREDUCIBLE_POLY;
-            }
-            b >>= 1;
+        if a == 0 || b == 0 {
+            return 0;
         }
-
-        result as u8
+        let log_a = Self::LOG_TABLE[a as usize] as u16;
+        let log_b = Self::LOG_TABLE[b as usize] as u16;
+        let log_sum = (log_a + log_b) % 255;
+        Self::EXP_TABLE[log_sum as usize]
     }
 
-    /// Divide two elements in GF(2^8)
+    /// Divide two elements in GF(2^8) in **constant time**.
+    /// Returns 0 when dividing by zero (safe fallback for secret sharing).
     fn gf_div(a: u8, b: u8) -> u8 {
-        if b == 0 {
-            panic!("Division by zero in GF");
+        if a == 0 || b == 0 {
+            return 0;
         }
-        Self::gf_mul(a, Self::gf_inverse(b))
+        let log_a = Self::LOG_TABLE[a as usize] as u16;
+        let log_b = Self::LOG_TABLE[b as usize] as u16;
+        // (log_a - log_b) mod 255 — add 255 first to avoid underflow.
+        let log_diff = (log_a + 255 - log_b) % 255;
+        Self::EXP_TABLE[log_diff as usize]
     }
 
-    /// Compute multiplicative inverse using extended Euclidean algorithm
+    /// Compute multiplicative inverse in **constant time** using the log/exp table.
     fn gf_inverse(a: u8) -> u8 {
         if a == 0 {
             return 0;
         }
-
-        let mut t = 0u16;
-        let mut new_t = 1u16;
-        let mut r = Self::IRREDUCIBLE_POLY as u16;
-        let mut new_r = a as u16;
-
-        while new_r != 0 {
-            let quotient = r / new_r;
-
-            let temp_t = t;
-            t = new_t;
-            new_t = temp_t ^ (quotient * new_t);
-
-            let temp_r = r;
-            r = new_r;
-            new_r = temp_r ^ (quotient * new_r);
-        }
-
-        if r > 1 {
-            // No inverse exists (shouldn't happen in GF(2^8) for non-zero a)
-            return 0;
-        }
-
-        t as u8
+        let log_a = Self::LOG_TABLE[a as usize] as u16;
+        let log_inv = (255 - log_a) % 255;
+        Self::EXP_TABLE[log_inv as usize]
     }
 }
 

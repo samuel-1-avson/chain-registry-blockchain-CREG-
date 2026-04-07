@@ -13,7 +13,7 @@ fn main() {
     let exit_code = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-        .unwrap()
+        .expect("failed to build tokio runtime")
         .block_on(async {
             if passthrough {
                 // Not an install-type command — run real npm directly.

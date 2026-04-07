@@ -268,6 +268,19 @@ def compute_percentile(values: list[float], p: float) -> float:
     return s[f] + (s[c] - s[f]) * (k - f)
 
 
+async def discover_live_nodes(session, node_urls):
+    """Health-check pre-flight: only route to nodes that are actually alive."""
+    live = []
+    for url in node_urls:
+        try:
+            async with session.get(f"{url}/v1/health", timeout=aiohttp.ClientTimeout(total=3)) as resp:
+                if resp.status == 200:
+                    live.append(url)
+        except Exception:
+            pass
+    return live
+
+
 async def run_stress_test(args) -> StressReport:
     # Support both Docker network hostnames and localhost (for external testing)
     docker_mode = os.getenv("DOCKER_MODE", "false").lower() == "true"
@@ -293,10 +306,19 @@ async def run_stress_test(args) -> StressReport:
     results: list[PublishResult] = []
 
     async with aiohttp.ClientSession() as session:
+        # Discover live nodes before sending traffic
+        live_nodes = await discover_live_nodes(session, node_urls)
+        if not live_nodes:
+            print("ERROR: No live nodes found! Aborting stress test.")
+            print(f"  Checked URLs: {node_urls}")
+            report.end_time = datetime.utcnow().isoformat() + "Z"
+            return report
+        print(f"Discovered {len(live_nodes)}/{len(node_urls)} live nodes: {live_nodes}")
+
         # Start consumers
         consumers = [
             asyncio.create_task(consumer(
-                queue, session, node_urls, publisher_key, publisher_pubkey, results, args.timeout
+                queue, session, live_nodes, publisher_key, publisher_pubkey, results, args.timeout
             ))
             for _ in range(args.concurrency)
         ]

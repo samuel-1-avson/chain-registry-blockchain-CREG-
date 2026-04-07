@@ -147,7 +147,7 @@ mod tests {
 // Axum REST API — all HTTP endpoints for the chain registry node.
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -165,6 +165,15 @@ use crate::{
     SharedState,
 };
 
+/// Query parameters for GET /v1/packages
+#[derive(Deserialize)]
+struct ListPackagesParams {
+    offset: Option<usize>,
+    limit: Option<usize>,
+    ecosystem: Option<String>,
+    status: Option<String>,
+}
+
 // ─── Router ───────────────────────────────────────────────────────────────────
 
 pub fn router(state: SharedState, event_bus: EventBus, limiter: RateLimiter) -> Router {
@@ -178,7 +187,7 @@ pub fn router(state: SharedState, event_bus: EventBus, limiter: RateLimiter) -> 
         .route("/v1/bridge/status", get(bridge_status))
         // Packages
         .route("/v1/packages/:canonical", get(get_package))
-        .route("/v1/packages", post(submit_package))
+        .route("/v1/packages", get(list_packages).post(submit_package))
         .route("/v1/packages/:canonical/revoke", post(revoke_package))
         .route("/v1/packages/:canonical/proof", get(get_proof))
         // Blocks
@@ -283,6 +292,77 @@ async fn p2p_status(State(state): State<SharedState>) -> impl IntoResponse {
 async fn bridge_status(State(state): State<SharedState>) -> impl IntoResponse {
     let s = state.read().await;
     Json(s.bridge_status.clone())
+}
+
+// GET /v1/packages?offset=0&limit=50&ecosystem=npm&status=verified
+async fn list_packages(
+    State(state): State<SharedState>,
+    Query(params): Query<ListPackagesParams>,
+) -> Response {
+    let offset = params.offset.unwrap_or(0);
+    let limit = params.limit.unwrap_or(50).min(200);
+    let ecosystem = params.ecosystem.as_deref();
+    let status_filter = params.status.as_deref().and_then(|s| match s {
+        "verified" => Some(PackageStatus::Verified),
+        "pending" => Some(PackageStatus::Pending),
+        "revoked" => Some(PackageStatus::Revoked {
+            reason: String::new(),
+        }),
+        _ => None,
+    });
+
+    let s = state.read().await;
+    match s
+        .chain
+        .list_packages(offset, limit, ecosystem, status_filter.as_ref())
+    {
+        Ok((records, total)) => {
+            #[derive(Serialize)]
+            struct ListResp {
+                packages: Vec<PackageSummary>,
+                total: usize,
+                offset: usize,
+                limit: usize,
+            }
+
+            #[derive(Serialize)]
+            struct PackageSummary {
+                canonical: String,
+                ecosystem: String,
+                name: String,
+                version: String,
+                status: String,
+                publisher: String,
+                published_at: String,
+            }
+
+            let packages: Vec<PackageSummary> = records
+                .into_iter()
+                .map(|r| PackageSummary {
+                    canonical: r.id.canonical(),
+                    ecosystem: r.id.ecosystem.clone(),
+                    name: r.id.name.clone(),
+                    version: r.id.version.clone(),
+                    status: match &r.status {
+                        PackageStatus::Verified => "verified".into(),
+                        PackageStatus::Pending => "pending".into(),
+                        PackageStatus::Revoked { .. } => "revoked".into(),
+                    },
+                    publisher: r.publisher_pubkey.clone(),
+                    published_at: r.published_at.to_rfc3339(),
+                })
+                .collect();
+
+            Json(ListResp {
+                packages,
+                total,
+                offset,
+                limit,
+            })
+            .into_response()
+        }
+        Err(e) => server_err(format!("Failed to list packages: {}", e)),
+    }
 }
 
 // GET /v1/packages/:canonical
@@ -539,6 +619,10 @@ pub struct RotateKeyRequest {
     pub new_pubkey: String,
     pub sig_from_old: String,
     pub sig_from_new: String,
+    /// Monotonic nonce — must be strictly greater than the publisher's last
+    /// rotation nonce.  Prevents replay of old rotation requests.
+    #[serde(default)]
+    pub nonce: u64,
 }
 
 async fn rotate_publisher_key(
@@ -578,8 +662,48 @@ async fn rotate_publisher_key(
             .into_response();
     }
 
-    // 2. Replay protection: timestamp must be recent (enforced at block inclusion).
+    // 2. Replay protection: nonce must be strictly greater than the
+    //    publisher's last rotation nonce, and timestamp must be recent.
     let now = chrono::Utc::now();
+    {
+        let s = state.read().await;
+        let last_nonce = s
+            .chain
+            .publisher_rotation_nonce(&req.old_pubkey)
+            .unwrap_or(0);
+        if req.nonce <= last_nonce {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    error: format!(
+                        "Rotation nonce {} must be > last nonce {}. Replay rejected.",
+                        req.nonce, last_nonce
+                    ),
+                }),
+            )
+                .into_response();
+        }
+
+        // 2b. Time-lock: enforce a minimum cooldown between rotations to
+        //     prevent rapid unauthorized rotation attacks.
+        const ROTATION_COOLDOWN_SECS: i64 = 3600; // 1 hour
+        if let Some(last_time) = s.chain.publisher_last_rotation_time(&req.old_pubkey) {
+            let elapsed = now.signed_duration_since(last_time).num_seconds();
+            if elapsed < ROTATION_COOLDOWN_SECS {
+                let remaining = ROTATION_COOLDOWN_SECS - elapsed;
+                return (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    Json(ErrorResponse {
+                        error: format!(
+                            "Key rotation cooldown: {} seconds remaining. Last rotation was {}s ago (minimum {}s).",
+                            remaining, elapsed, ROTATION_COOLDOWN_SECS
+                        ),
+                    }),
+                )
+                    .into_response();
+            }
+        }
+    }
 
     // 3. Verify old_pubkey owns at least one package matching the prefix.
     let has_match = state
@@ -608,6 +732,7 @@ async fn rotate_publisher_key(
         sig_from_old: req.sig_from_old.clone(),
         sig_from_new: req.sig_from_new.clone(),
         timestamp: now,
+        nonce: req.nonce,
     };
 
     let s = state.read().await;

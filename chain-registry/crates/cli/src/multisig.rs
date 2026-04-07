@@ -92,20 +92,44 @@ pub async fn init(
     let ipfs_resp: IpfsResp = resp.json().await.context("IPFS response parse error")?;
     let ipfs_cid = ipfs_resp.hash;
 
-    // Detect package identity
-    let name = tarball_path
+    // Detect package identity from tarball name
+    let stem = tarball_path
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("package");
 
+    // Try to parse name@version pattern, e.g. "express-4.18.2" or "express@4.18.2"
+    let (name, version) = if let Some(at_pos) = stem.rfind('@') {
+        (&stem[..at_pos], &stem[at_pos + 1..])
+    } else if let Some(dash_pos) = stem.rfind('-').filter(|&p| {
+        stem[p + 1..].chars().next().map_or(false, |c| c.is_ascii_digit())
+    }) {
+        (&stem[..dash_pos], &stem[dash_pos + 1..])
+    } else {
+        (stem, "0.0.0")
+    };
+
+    // Infer ecosystem from extension or env var
+    let ecosystem = std::env::var("CREG_ECOSYSTEM").unwrap_or_else(|_| {
+        let ext = tarball_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        match ext {
+            "crate" => "cargo",
+            "whl" | "tar" => "pip",
+            "jar" => "maven",
+            "gem" => "gem",
+            _ => "npm",
+        }
+        .to_string()
+    });
+
     let session = MultisigSession {
-        canonical: format!("npm:{}@0.0.0", name),
+        canonical: format!("{}:{}@{}", ecosystem, name, version),
         content_hash: content_hash.clone(),
         ipfs_cid: ipfs_cid.clone(),
         threshold,
         signatures: vec![],
-        ecosystem: "npm".into(),
-        version: "0.0.0".into(),
+        ecosystem,
+        version: version.to_string(),
     };
 
     session.save(output)?;

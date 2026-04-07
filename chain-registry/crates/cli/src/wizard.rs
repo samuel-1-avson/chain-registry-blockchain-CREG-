@@ -72,13 +72,13 @@ pub async fn run() -> Result<()> {
         println!("{}", "─".repeat(40).dimmed());
 
         let stake_amount: f64 = Input::new()
-            .with_prompt("How much CREG would you like to stake? (minimum 10)")
-            .default(10.0)
+            .with_prompt("How much CREG would you like to stake? (minimum 100 for validator)")
+            .default(100.0)
             .validate_with(|input: &f64| {
-                if *input >= 10.0 {
+                if *input >= 100.0 {
                     Ok(())
                 } else {
-                    Err("Minimum stake is 10 CREG")
+                    Err("Minimum stake for validator is 100 CREG")
                 }
             })
             .interact()?;

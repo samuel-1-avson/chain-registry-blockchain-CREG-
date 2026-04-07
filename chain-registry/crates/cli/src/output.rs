@@ -1,23 +1,18 @@
+use colored::Colorize;
 use common::{TrustVerdict, VerdictSource, VerdictStatus};
 
 pub fn print_verdict(v: &TrustVerdict) {
-    let reset = "\x1b[0m";
-    let bold = "\x1b[1m";
-    let dim = "\x1b[2m";
-    let color = v.status.ansi_color();
     let label = v.status.label();
+    let canonical = v.package.canonical();
 
-    println!(
-        "\n  {} {}{}{} {}{}{}",
-        "▶",
-        color,
-        bold,
-        label,
-        reset,
-        dim,
-        v.package.canonical()
-    );
-    println!("  {}reset{}", dim, reset);
+    let colored_label = match &v.status {
+        VerdictStatus::Verified { .. } => label.green().bold().to_string(),
+        VerdictStatus::Revoked { .. } => label.red().bold().to_string(),
+        VerdictStatus::Unverified => label.yellow().bold().to_string(),
+        VerdictStatus::Unknown => label.dimmed().bold().to_string(),
+    };
+
+    println!("\n  {} {} {}", "▶", colored_label, canonical.dimmed());
 
     match &v.status {
         VerdictStatus::Verified {
@@ -29,29 +24,29 @@ pub fn print_verdict(v: &TrustVerdict) {
             if !block_hash.is_empty() {
                 println!(
                     "  {} block:   {}",
-                    dim,
+                    " ".dimmed(),
                     &block_hash[..std::cmp::min(16, block_hash.len())]
                 );
             }
             println!(
                 "  {} sha256:  {}",
-                dim,
+                " ".dimmed(),
                 &content_hash[..std::cmp::min(16, content_hash.len())]
             );
             print_findings(findings, &v.source);
         }
         VerdictStatus::Revoked { reason, findings } => {
-            println!("  {}reason:  {}{}", color, reason, reset);
+            println!("  {} {}", "reason:".red(), reason.red());
             print_findings(findings, &v.source);
         }
         VerdictStatus::Unverified => {
             println!(
-                "  {}Package is in the pending pool — consensus not yet complete.{}",
-                dim, reset
+                "  {}",
+                "Package is in the pending pool — consensus not yet complete.".dimmed()
             );
         }
         VerdictStatus::Unknown => {
-            println!("  {}Package not found in the chain registry.{}", dim, reset);
+            println!("  {}", "Package not found in the chain registry.".dimmed());
         }
     }
 }
@@ -61,26 +56,26 @@ fn print_findings(findings: &[common::Finding], source: &VerdictSource) {
         return;
     }
 
-    let reset = "\x1b[0m";
-    let dim = "\x1b[2m";
-    let bold = "\x1b[1m";
-
-    println!("  {}findings:{}", dim, reset);
+    println!("  {}", "findings:".dimmed());
     for f in findings {
-        let color = match f.severity {
-            common::FindingSeverity::Critical => "\x1b[31;1m", // Bright Red
-            common::FindingSeverity::High => "\x1b[31m",       // Red
-            common::FindingSeverity::Medium => "\x1b[33m",     // Yellow
-            common::FindingSeverity::Low => "\x1b[34m",        // Blue
+        let severity_str = format!("[{:?}]", f.severity);
+        let colored_severity = match f.severity {
+            common::FindingSeverity::Critical => severity_str.red().bold().to_string(),
+            common::FindingSeverity::High => severity_str.red().to_string(),
+            common::FindingSeverity::Medium => severity_str.yellow().to_string(),
+            common::FindingSeverity::Low => severity_str.blue().to_string(),
+        };
+        let bullet = match f.severity {
+            common::FindingSeverity::Critical => "●".red().bold().to_string(),
+            common::FindingSeverity::High => "●".red().to_string(),
+            common::FindingSeverity::Medium => "●".yellow().to_string(),
+            common::FindingSeverity::Low => "●".blue().to_string(),
         };
         println!(
-            "     {}●{} [{:?}] {}{}{} ({}:{})",
-            color,
-            reset,
-            f.severity,
-            bold,
-            f.title,
-            reset,
+            "     {} {} {} ({}:{})",
+            bullet,
+            colored_severity,
+            f.title.bold(),
             f.file,
             f.line.unwrap_or(0)
         );
@@ -92,5 +87,5 @@ fn print_findings(findings: &[common::Finding], source: &VerdictSource) {
         }
         VerdictSource::Chain { node_url } => format!("live node ({})", node_url),
     };
-    println!("  {}source:  {}{}\n", dim, source_label, reset);
+    println!("  {} {}\n", "source:".dimmed(), source_label.dimmed());
 }

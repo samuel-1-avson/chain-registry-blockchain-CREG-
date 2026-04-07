@@ -40,5 +40,5 @@ where
         }
     }
 
-    Err(last_err.unwrap())
+    Err(last_err.expect("at least one attempt must have been made"))
 }

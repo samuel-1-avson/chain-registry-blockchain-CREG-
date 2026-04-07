@@ -123,11 +123,27 @@ pub async fn predict_intent(code_snippet: &str) -> Result<u8> {
 }
 
 /// Full LLM intent prediction with explicit unavailability tracking.
-/// Supports two providers in a fallback chain:
-///   1. OpenRouter (cloud) — requires OPENROUTER_API_KEY
-///   2. Ollama (local) — requires CREG_OLLAMA_URL (e.g. http://localhost:11434)
+///
+/// **Opt-in by default**: LLM analysis is disabled unless `CREG_LLM_ENABLED=true`
+/// is set. This prevents accidental exfiltration of proprietary package source
+/// code to external cloud APIs.
+///
+/// Provider fallback chain (when enabled):
+///   1. Ollama (local) — preferred; requires `CREG_OLLAMA_URL` (default: http://localhost:11434)
+///   2. OpenRouter (cloud) — requires `OPENROUTER_API_KEY`
 /// If neither is available, returns Unavailable.
 pub async fn predict_intent_full(code_snippet: &str) -> Result<LlmResult> {
+    // Gate: LLM analysis must be explicitly opted into.
+    let enabled = std::env::var("CREG_LLM_ENABLED")
+        .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+        .unwrap_or(false);
+
+    if !enabled {
+        return Ok(LlmResult::Unavailable(
+            "LLM analysis disabled (set CREG_LLM_ENABLED=true to enable)".into(),
+        ));
+    }
+
     // Check cache first (before any rate limiting or network calls)
     let hash = content_hash(code_snippet);
     if let Ok(cache) = LLM_CACHE.lock() {
@@ -148,22 +164,7 @@ pub async fn predict_intent_full(code_snippet: &str) -> Result<LlmResult> {
     // Sanitize code via base64 encoding to prevent prompt injection
     let encoded_code = sanitize_for_prompt(code_snippet);
 
-    // ── Try OpenRouter first ──────────────────────────────────────────────
-    let openrouter_result = try_openrouter(&encoded_code).await;
-    match &openrouter_result {
-        Ok(LlmResult::Score(score)) => {
-            cache_score(hash, *score);
-            return openrouter_result;
-        }
-        Ok(LlmResult::Unavailable(reason)) => {
-            tracing::debug!("OpenRouter unavailable: {}; trying Ollama fallback", reason);
-        }
-        Err(e) => {
-            tracing::debug!("OpenRouter error: {}; trying Ollama fallback", e);
-        }
-    }
-
-    // ── Fallback: Try local Ollama ────────────────────────────────────────
+    // ── Try local Ollama first (preferred — no data leaves the machine) ───
     let ollama_result = try_ollama(&encoded_code).await;
     match &ollama_result {
         Ok(LlmResult::Score(score)) => {
@@ -171,16 +172,31 @@ pub async fn predict_intent_full(code_snippet: &str) -> Result<LlmResult> {
             return ollama_result;
         }
         Ok(LlmResult::Unavailable(reason)) => {
-            tracing::debug!("Ollama also unavailable: {}", reason);
+            tracing::debug!("Ollama unavailable: {}; trying OpenRouter fallback", reason);
         }
         Err(e) => {
-            tracing::debug!("Ollama error: {}", e);
+            tracing::debug!("Ollama error: {}; trying OpenRouter fallback", e);
+        }
+    }
+
+    // ── Fallback: Try OpenRouter cloud API ────────────────────────────────
+    let openrouter_result = try_openrouter(&encoded_code).await;
+    match &openrouter_result {
+        Ok(LlmResult::Score(score)) => {
+            cache_score(hash, *score);
+            return openrouter_result;
+        }
+        Ok(LlmResult::Unavailable(reason)) => {
+            tracing::debug!("OpenRouter also unavailable: {}", reason);
+        }
+        Err(e) => {
+            tracing::debug!("OpenRouter error: {}", e);
         }
     }
 
     // Both providers failed
     Ok(LlmResult::Unavailable(
-        "All LLM providers unavailable (OpenRouter + Ollama)".into(),
+        "All LLM providers unavailable (Ollama + OpenRouter)".into(),
     ))
 }
 

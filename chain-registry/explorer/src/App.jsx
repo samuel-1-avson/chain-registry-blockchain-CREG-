@@ -22,11 +22,15 @@ const localChain = {
   rpcUrls: { default: { http: [RPC_URL] } },
 }
 
-const ANVIL_TEST_ACCOUNTS = [
+// W8 fix: Only expose Anvil test accounts in development/testnet mode.
+// In production builds (VITE_NETWORK=mainnet), these are never shown.
+const IS_TESTNET = typeof __IS_TESTNET__ !== 'undefined' ? __IS_TESTNET__ : (import.meta.env.VITE_NETWORK || 'testnet') !== 'mainnet'
+
+const ANVIL_TEST_ACCOUNTS = IS_TESTNET ? [
   { label: 'Account #2', key: '0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a' },
   { label: 'Account #3', key: '0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6' },
   { label: 'Account #4', key: '0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a' },
-]
+] : []
 
 const ERC20_ABI = [
   { name: 'balanceOf', type: 'function', stateMutability: 'view',
@@ -70,6 +74,37 @@ const timeAgo = (timestamp) => {
 const truncateHash = (hash, start = 8, end = 8) => {
   if (!hash || hash.length <= start + end) return hash
   return `${hash.slice(0, start)}...${hash.slice(-end)}`
+}
+
+// ============================================
+// ERROR BOUNDARY
+// ============================================
+
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props)
+    this.state = { hasError: false, error: null }
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error }
+  }
+  componentDidCatch(error, info) {
+    console.error('Explorer error:', error, info)
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ padding: 40, textAlign: 'center', color: '#f87171', fontFamily: 'monospace' }}>
+          <h2>Something went wrong</h2>
+          <pre style={{ whiteSpace: 'pre-wrap', fontSize: 13 }}>{this.state.error?.message}</pre>
+          <button onClick={() => window.location.reload()} style={{ marginTop: 16, padding: '8px 24px', cursor: 'pointer' }}>
+            Reload
+          </button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
 }
 
 // ============================================
@@ -147,6 +182,7 @@ function App() {
   const [selectedBlock, setSelectedBlock] = useState(null)
   const [status, setStatus] = useState('connecting')
   const [isLoading, setIsLoading] = useState(true)
+  const [fetchError, setFetchError] = useState(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [isSearchFocused, setIsSearchFocused] = useState(false)
 
@@ -161,10 +197,21 @@ function App() {
   const [stakeResult, setStakeResult] = useState(null)
   const [stakeAmount, setStakeAmount] = useState('')
 
+  // EIP-6963: multi-provider wallet discovery (W10/I1 fix)
+  const [eip6963Providers, setEip6963Providers] = useState([])
+
   // Package state
   const [pendingPackages, setPendingPackages] = useState({ count: 0, packages: [] })
   const [packageQuery, setPackageQuery] = useState('')
   const [lookedUpPackage, setLookedUpPackage] = useState(null)
+  const [packageLookupLoading, setPackageLookupLoading] = useState(false)
+  const [packageList, setPackageList] = useState({ packages: [], total: 0 })
+  const [packageListOffset, setPackageListOffset] = useState(0)
+  const [showPublishForm, setShowPublishForm] = useState(false)
+  const [publishForm, setPublishForm] = useState({ ecosystem: 'npm', name: '', version: '', ipfs_cid: '', content_hash: '', publisher_pubkey: '', signature: '' })
+  const [publishStatus, setPublishStatus] = useState(null)
+  const [publisherProfile, setPublisherProfile] = useState(null)
+  const [publisherPackages, setPublisherPackages] = useState([])
 
   const sseRef = useRef(null)
   const searchInputRef = useRef(null)
@@ -211,13 +258,15 @@ function App() {
       } catch (e) { /* endpoint may not exist yet */ }
 
       setStatus('online')
+      setFetchError(null)
       setIsLoading(false)
     } catch (err) {
       console.error('Fetch error:', err)
+      setFetchError(err.message || 'Failed to connect to node')
       setStatus('offline')
       setIsLoading(false)
     }
-  }, [blocks.length])
+  }, [])
 
   // Initial fetch and polling
   useEffect(() => {
@@ -228,8 +277,13 @@ function App() {
 
   // SSE Event Stream
   useEffect(() => {
+    let retryCount = 0
+    const MAX_RETRIES = 10
+    let retryTimeout = null
+
     const initSSE = () => {
       const es = new EventSource(`${API_BASE}/v1/events`)
+      es.onopen = () => { retryCount = 0 }
       es.onmessage = (e) => {
         try {
           const ev = JSON.parse(e.data)
@@ -241,13 +295,33 @@ function App() {
       }
       es.onerror = () => {
         es.close()
-        setTimeout(initSSE, 3000)
+        if (retryCount < MAX_RETRIES) {
+          const delay = Math.min(1000 * Math.pow(2, retryCount), 30000)
+          retryCount++
+          retryTimeout = setTimeout(initSSE, delay)
+        }
       }
       sseRef.current = es
     }
 
     initSSE()
-    return () => sseRef.current?.close()
+    return () => {
+      sseRef.current?.close()
+      if (retryTimeout) clearTimeout(retryTimeout)
+    }
+  }, [])
+
+  // EIP-6963: Discover all injected wallet providers (W10 fix)
+  useEffect(() => {
+    const providers = []
+    const handler = (event) => {
+      providers.push(event.detail)
+      setEip6963Providers([...providers])
+    }
+    window.addEventListener('eip6963:announceProvider', handler)
+    // Request announcements from all injected providers
+    window.dispatchEvent(new Event('eip6963:requestProvider'))
+    return () => window.removeEventListener('eip6963:announceProvider', handler)
   }, [])
 
   // Keyboard shortcuts
@@ -283,11 +357,6 @@ function App() {
           } catch {
             setWalletBalance(rawBal)
           }
-          try {
-            setWalletBalance(formatUnits(BigInt(rawBal), 18))
-          } catch {
-            setWalletBalance(rawBal)
-          }
         }
       } catch (e) { /* faucet unreachable */ }
     }
@@ -307,6 +376,86 @@ function App() {
       setStakeResult(null)
     } catch (err) {
       alert('Invalid private key. Must be a valid 32-byte hex string.')
+    }
+  }, [])
+
+  const connectMetaMask = useCallback(async () => {
+    try {
+      if (!window.ethereum) {
+        alert('MetaMask not detected. Please install the MetaMask browser extension.')
+        return
+      }
+      const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' })
+      if (!accounts || accounts.length === 0) {
+        alert('No accounts returned from MetaMask.')
+        return
+      }
+      // Create a minimal account-like object compatible with viem's WalletClient.
+      const address = accounts[0]
+      setWalletAccount({ address, type: 'metamask' })
+      setShowWallet(false)
+      setDripResult(null)
+      setStakeResult(null)
+    } catch (err) {
+      alert('MetaMask connection failed: ' + (err.message || err))
+    }
+  }, [])
+
+  // EIP-6963: Connect via a discovered provider (W10/I1 fix)
+  const connectEip6963 = useCallback(async (providerDetail) => {
+    try {
+      const provider = providerDetail.provider
+      const accounts = await provider.request({ method: 'eth_requestAccounts' })
+      if (!accounts || accounts.length === 0) {
+        alert('No accounts returned from ' + (providerDetail.info?.name || 'wallet') + '.')
+        return
+      }
+      const address = accounts[0]
+      setWalletAccount({ address, type: 'eip6963', providerName: providerDetail.info?.name })
+      setShowWallet(false)
+      setDripResult(null)
+      setStakeResult(null)
+    } catch (err) {
+      alert('Wallet connection failed: ' + (err.message || err))
+    }
+  }, [])
+
+  // G4: WalletConnect v2 connection
+  const connectWalletConnect = useCallback(async () => {
+    try {
+      const { EthereumProvider } = await import('@walletconnect/ethereum-provider')
+      const projectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID
+      if (!projectId) {
+        alert('WalletConnect requires VITE_WALLETCONNECT_PROJECT_ID env var. Get one at https://cloud.walletconnect.com')
+        return
+      }
+      const provider = await EthereumProvider.init({
+        projectId,
+        chains: [localChain.id],
+        showQrModal: true,
+        metadata: {
+          name: 'Chain Registry Explorer',
+          description: 'Package registry blockchain explorer',
+          url: window.location.origin,
+          icons: [],
+        },
+      })
+      await provider.enable()
+      const accounts = provider.accounts
+      if (!accounts || accounts.length === 0) {
+        alert('No accounts returned from WalletConnect.')
+        return
+      }
+      setWalletAccount({ address: accounts[0], type: 'walletconnect' })
+      setShowWallet(false)
+      setDripResult(null)
+      setStakeResult(null)
+    } catch (err) {
+      if (err?.message?.includes('User rejected') || err?.code === 4001) {
+        // User closed the modal — not an error
+        return
+      }
+      alert('WalletConnect failed: ' + (err.message || err))
     }
   }, [])
 
@@ -396,6 +545,7 @@ function App() {
 
   const lookupPackage = useCallback(async () => {
     if (!packageQuery) return
+    setPackageLookupLoading(true)
     try {
       const res = await fetch(`${API_BASE}/v1/packages/${encodeURIComponent(packageQuery)}`)
       if (res.ok) {
@@ -404,7 +554,100 @@ function App() {
         setLookedUpPackage(null)
       }
     } catch { setLookedUpPackage(null) }
+    finally { setPackageLookupLoading(false) }
   }, [packageQuery])
+
+  const fetchPackageList = useCallback(async (offset = 0) => {
+    try {
+      const res = await fetch(`${API_BASE}/v1/packages?offset=${offset}&limit=20`)
+      if (res.ok) {
+        const data = await res.json()
+        setPackageList(data)
+        setPackageListOffset(offset)
+      }
+    } catch (e) { console.error('Failed to fetch package list:', e) }
+  }, [])
+
+  useEffect(() => {
+    if (view === 'packages') fetchPackageList(packageListOffset)
+  }, [view, fetchPackageList, packageListOffset])
+
+  const submitPublish = useCallback(async () => {
+    setPublishStatus(null)
+
+    // E-08: Validate inputs before submission
+    const { ecosystem, name, version, content_hash, ipfs_cid, publisher_pubkey, signature } = publishForm
+    if (!name || !name.trim()) {
+      setPublishStatus({ ok: false, msg: 'Package name is required' })
+      return
+    }
+    if (!version || !/^\d+\.\d+\.\d+/.test(version)) {
+      setPublishStatus({ ok: false, msg: 'Version must be valid semver (e.g. 1.0.0)' })
+      return
+    }
+    if (!content_hash || !/^[a-f0-9]{64}$/i.test(content_hash)) {
+      setPublishStatus({ ok: false, msg: 'Content hash must be a 64-char hex SHA-256' })
+      return
+    }
+    if (!ipfs_cid || !/^(Qm[a-zA-Z0-9]{44}|bafy[a-zA-Z0-9]+)$/.test(ipfs_cid)) {
+      setPublishStatus({ ok: false, msg: 'IPFS CID looks invalid (expected Qm... or bafy...)' })
+      return
+    }
+    if (!publisher_pubkey || !/^[a-f0-9]{64}$/i.test(publisher_pubkey)) {
+      setPublishStatus({ ok: false, msg: 'Publisher public key must be 64 hex chars' })
+      return
+    }
+    if (!signature || signature.length < 64) {
+      setPublishStatus({ ok: false, msg: 'Signature is required' })
+      return
+    }
+
+    try {
+      const body = {
+        id: { ecosystem: publishForm.ecosystem, name: publishForm.name, version: publishForm.version },
+        content_hash: publishForm.content_hash,
+        ipfs_cid: publishForm.ipfs_cid,
+        publisher_pubkey: publishForm.publisher_pubkey,
+        signature: publishForm.signature,
+        manifest: { description: '', allowed_network_hosts: [], allowed_fs_writes: [], spawns_processes: false, allowed_process_spawns: [] },
+      }
+      const res = await fetch(`${API_BASE}/v1/packages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'CregExplorer' },
+        body: JSON.stringify(body),
+      })
+      if (res.ok) {
+        setPublishStatus({ ok: true, msg: 'Package submitted for validation!' })
+        setShowPublishForm(false)
+        setPublishForm({ ecosystem: 'npm', name: '', version: '', ipfs_cid: '', content_hash: '', publisher_pubkey: '', signature: '' })
+        fetchPackageList(0)
+      } else {
+        const err = await res.json().catch(() => ({ error: res.statusText }))
+        setPublishStatus({ ok: false, msg: err.error || 'Submission failed' })
+      }
+    } catch (e) {
+      setPublishStatus({ ok: false, msg: e.message })
+    }
+  }, [publishForm, fetchPackageList])
+
+  const fetchPublisherProfile = useCallback(async (pubkey) => {
+    try {
+      const [profileRes, pkgsRes] = await Promise.all([
+        fetch(`${API_BASE}/v1/publishers/${encodeURIComponent(pubkey)}`),
+        fetch(`${API_BASE}/v1/packages?limit=50`),
+      ])
+      if (profileRes.ok) {
+        setPublisherProfile(await profileRes.json())
+      } else {
+        setPublisherProfile(null)
+      }
+      if (pkgsRes.ok) {
+        const data = await pkgsRes.json()
+        setPublisherPackages(data.packages.filter(p => p.publisher === pubkey))
+      }
+      setView('publisher')
+    } catch (e) { console.error('Publisher profile error:', e) }
+  }, [])
 
   // Derived state
   const totalStaked = useMemo(() => 
@@ -485,6 +728,15 @@ function App() {
             <SkeletonCard />
             <SkeletonCard />
           </>
+        ) : fetchError ? (
+          <div className="stat-card" style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '2rem' }}>
+            <div style={{ color: '#f87171', fontSize: '1.2rem', marginBottom: '0.5rem' }}>⚠ Connection Error</div>
+            <div style={{ color: '#888', fontSize: '0.9rem' }}>{fetchError}</div>
+            <button onClick={() => { setIsLoading(true); setFetchError(null); fetchData() }}
+              style={{ marginTop: '1rem', padding: '6px 16px', cursor: 'pointer', background: 'var(--primary)', color: '#fff', border: 'none', borderRadius: '6px' }}>
+              Retry
+            </button>
+          </div>
         ) : (
           <>
             <div className="stat-card highlight">
@@ -665,8 +917,8 @@ function App() {
             {/* Packages View */}
             {view === 'packages' && (
               <div style={{ padding: 'var(--space-4)' }}>
-                <div style={{ marginBottom: 'var(--space-4)' }}>
-                  <div className="search-box" style={{ maxWidth: '100%' }}>
+                <div style={{ marginBottom: 'var(--space-4)', display: 'flex', gap: 'var(--space-2)' }}>
+                  <div className="search-box" style={{ flex: 1 }}>
                     <span className="search-icon">📦</span>
                     <input
                       type="text"
@@ -677,7 +929,58 @@ function App() {
                       onKeyDown={(e) => e.key === 'Enter' && lookupPackage()}
                     />
                   </div>
+                  <button
+                    className={`nav-tab ${showPublishForm ? 'active' : ''}`}
+                    onClick={() => setShowPublishForm(!showPublishForm)}
+                    style={{ whiteSpace: 'nowrap' }}
+                  >
+                    ➕ Publish
+                  </button>
                 </div>
+
+                {/* Publish Form */}
+                {showPublishForm && (
+                  <div className="detail-panel" style={{ marginBottom: 'var(--space-4)' }}>
+                    <div className="detail-header">
+                      <span className="detail-title">Publish a Package</span>
+                      <button className="detail-close" onClick={() => setShowPublishForm(false)}>✕</button>
+                    </div>
+                    <div className="detail-content" style={{ display: 'grid', gap: 'var(--space-2)' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr 1fr', gap: 'var(--space-2)' }}>
+                        <select
+                          className="search-input"
+                          value={publishForm.ecosystem}
+                          onChange={e => setPublishForm(f => ({ ...f, ecosystem: e.target.value }))}
+                        >
+                          <option value="npm">npm</option>
+                          <option value="pypi">pypi</option>
+                          <option value="cargo">cargo</option>
+                          <option value="go">go</option>
+                        </select>
+                        <input className="search-input" placeholder="Package name" value={publishForm.name}
+                          onChange={e => setPublishForm(f => ({ ...f, name: e.target.value }))} />
+                        <input className="search-input" placeholder="Version (e.g. 1.0.0)" value={publishForm.version}
+                          onChange={e => setPublishForm(f => ({ ...f, version: e.target.value }))} />
+                      </div>
+                      <input className="search-input" placeholder="IPFS CID (bafy...)" value={publishForm.ipfs_cid}
+                        onChange={e => setPublishForm(f => ({ ...f, ipfs_cid: e.target.value }))} />
+                      <input className="search-input" placeholder="Content hash (SHA-256 hex)" value={publishForm.content_hash}
+                        onChange={e => setPublishForm(f => ({ ...f, content_hash: e.target.value }))} />
+                      <input className="search-input" placeholder="Publisher public key (hex)" value={publishForm.publisher_pubkey}
+                        onChange={e => setPublishForm(f => ({ ...f, publisher_pubkey: e.target.value }))} />
+                      <input className="search-input" placeholder="Ed25519 signature (hex)" value={publishForm.signature}
+                        onChange={e => setPublishForm(f => ({ ...f, signature: e.target.value }))} />
+                      <button className="nav-tab active" onClick={submitPublish} style={{ justifySelf: 'end', padding: '8px 24px' }}>
+                        Submit Package
+                      </button>
+                      {publishStatus && (
+                        <span className={`badge ${publishStatus.ok ? 'badge-success' : 'badge-error'}`}>
+                          {publishStatus.msg}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 {lookedUpPackage && (
                   <div className="detail-panel" style={{ marginBottom: 'var(--space-4)' }}>
@@ -693,7 +996,10 @@ function App() {
                         </div>
                         <div className="detail-row">
                           <span className="detail-label">Publisher</span>
-                          <span className="detail-value">{truncateHash(lookedUpPackage.publisher, 10, 6)}</span>
+                          <span className="detail-value" style={{ cursor: 'pointer', textDecoration: 'underline' }}
+                            onClick={() => fetchPublisherProfile(lookedUpPackage.publisher)}>
+                            {truncateHash(lookedUpPackage.publisher, 10, 6)}
+                          </span>
                         </div>
                         <div className="detail-row">
                           <span className="detail-label">Published</span>
@@ -716,6 +1022,58 @@ function App() {
                   </div>
                 )}
 
+                {/* On-chain Package List */}
+                {packageList.packages.length > 0 && (
+                  <div className="detail-section" style={{ marginBottom: 'var(--space-4)' }}>
+                    <div className="detail-section-title">On-chain Packages ({packageList.total} total)</div>
+                    <div className="table-container">
+                      <table className="data-table">
+                        <thead>
+                          <tr>
+                            <th>Package</th>
+                            <th>Version</th>
+                            <th>Status</th>
+                            <th>Publisher</th>
+                            <th>Published</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {packageList.packages.map((pkg, idx) => (
+                            <tr key={pkg.canonical || idx} className="animate-slide-in" style={{ animationDelay: `${idx * 0.03}s`, cursor: 'pointer' }}
+                              onClick={() => {
+                                setPackageQuery(pkg.canonical)
+                                // Lookup directly with the canonical name to avoid stale closure
+                                fetch(`${API_BASE}/v1/packages/${encodeURIComponent(pkg.canonical)}`)
+                                  .then(r => r.ok ? r.json() : null)
+                                  .then(data => setLookedUpPackage(data))
+                                  .catch(() => setLookedUpPackage(null))
+                              }}>
+                              <td style={{ fontWeight: 600 }}>{pkg.ecosystem}:{pkg.name}</td>
+                              <td>{pkg.version}</td>
+                              <td><StatusBadge status={pkg.status} /></td>
+                              <td>{truncateHash(pkg.publisher, 8, 4)}</td>
+                              <td>{timeAgo(pkg.published_at)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 'var(--space-2)' }}>
+                      <button className="nav-tab" disabled={packageListOffset === 0}
+                        onClick={() => fetchPackageList(Math.max(0, packageListOffset - 20))}>
+                        ← Previous
+                      </button>
+                      <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                        Showing {packageListOffset + 1}–{Math.min(packageListOffset + 20, packageList.total)} of {packageList.total}
+                      </span>
+                      <button className="nav-tab" disabled={packageListOffset + 20 >= packageList.total}
+                        onClick={() => fetchPackageList(packageListOffset + 20)}>
+                        Next →
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 <div className="detail-section">
                   <div className="detail-section-title">Pending Packages ({pendingPackages.count})</div>
                   {pendingPackages.packages?.length === 0 ? (
@@ -732,6 +1090,78 @@ function App() {
                           <span className="badge badge-warning badge-sm">Pending</span>
                         </div>
                       ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Publisher Profile View */}
+            {view === 'publisher' && publisherProfile && (
+              <div style={{ padding: 'var(--space-4)' }}>
+                <button className="nav-tab" onClick={() => setView('packages')} style={{ marginBottom: 'var(--space-3)' }}>
+                  ← Back to Packages
+                </button>
+                <div className="detail-panel" style={{ marginBottom: 'var(--space-4)' }}>
+                  <div className="detail-header">
+                    <span className="detail-title">👤 Publisher Profile</span>
+                  </div>
+                  <div className="detail-content">
+                    <div className="detail-section">
+                      <div className="detail-row">
+                        <span className="detail-label">Public Key</span>
+                        <CopyButton text={publisherProfile.pubkey} label="pubkey" />
+                      </div>
+                      <div className="detail-row">
+                        <span className="detail-label">Total Packages</span>
+                        <span className="detail-value">{publisherProfile.total_packages}</span>
+                      </div>
+                      <div className="detail-row">
+                        <span className="detail-label">Verified</span>
+                        <span className="badge badge-success">{publisherProfile.verified_count}</span>
+                      </div>
+                      <div className="detail-row">
+                        <span className="detail-label">Revoked</span>
+                        <span className={`badge ${publisherProfile.revoked_count > 0 ? 'badge-error' : 'badge-neutral'}`}>
+                          {publisherProfile.revoked_count}
+                        </span>
+                      </div>
+                      <div className="detail-row">
+                        <span className="detail-label">Stake</span>
+                        <span className="detail-value">{formatStake(publisherProfile.stake_wei || 0)}</span>
+                      </div>
+                      <div className="detail-row">
+                        <span className="detail-label">First Seen</span>
+                        <span className="detail-value">
+                          {publisherProfile.first_seen_at ? timeAgo(publisherProfile.first_seen_at) : 'N/A'}
+                          {publisherProfile.first_seen_days > 0 && ` (${publisherProfile.first_seen_days} days)`}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="detail-section">
+                  <div className="detail-section-title">Packages by this Publisher ({publisherPackages.length})</div>
+                  {publisherPackages.length === 0 ? (
+                    <EmptyState icon="📦" title="No packages found" description="This publisher has no on-chain packages matching the current list." />
+                  ) : (
+                    <div className="table-container">
+                      <table className="data-table">
+                        <thead>
+                          <tr><th>Package</th><th>Version</th><th>Status</th><th>Published</th></tr>
+                        </thead>
+                        <tbody>
+                          {publisherPackages.map((pkg, idx) => (
+                            <tr key={idx}>
+                              <td style={{ fontWeight: 600 }}>{pkg.ecosystem}:{pkg.name}</td>
+                              <td>{pkg.version}</td>
+                              <td><StatusBadge status={pkg.status} /></td>
+                              <td>{timeAgo(pkg.published_at)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
                   )}
                 </div>
@@ -875,7 +1305,7 @@ function App() {
                               {ev.event_type?.replace(/_/g, ' ')}
                             </div>
                             <div className="event-description">
-                              {ev.payload}
+                              {typeof ev.payload === 'object' ? JSON.stringify(ev.payload, null, 2) : ev.payload}
                             </div>
                           </div>
                           <span className="event-time">{timeAgo(ev.timestamp)}</span>
@@ -904,7 +1334,9 @@ function App() {
           <div 
             className="bridge-progress-fill" 
             style={{ 
-              width: bridgeStatus.bridge_sync_status === 'Synced' ? '100%' : '40%',
+              width: bridgeStatus.bridge_sync_status === 'Synced' ? '100%'
+                   : bridgeStatus.bridge_sync_progress ? `${Math.min(100, bridgeStatus.bridge_sync_progress)}%`
+                   : '10%',
               opacity: bridgeStatus.bridge_sync_status === 'Synced' ? 1 : 0.6
             }} 
           />
@@ -923,23 +1355,71 @@ function App() {
             {!walletAccount ? (
               <div className="wallet-panel-body">
                 <div className="wallet-section">
-                  <label className="wallet-label">Private Key (Testnet Only)</label>
-                  <input
-                    type="password"
-                    className="wallet-input"
-                    placeholder="0x..."
-                    value={walletKeyInput}
-                    onChange={(e) => setWalletKeyInput(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && walletKeyInput && connectWallet(walletKeyInput)}
-                  />
+                  <label className="wallet-label">Browser Wallet</label>
+                  {eip6963Providers.length > 0 ? (
+                    <div className="wallet-quick-accounts">
+                      {eip6963Providers.map((p, i) => (
+                        <button
+                          key={p.info?.uuid || i}
+                          className="wallet-action-btn wallet-action-primary"
+                          onClick={() => connectEip6963(p)}
+                          style={{ marginBottom: '8px', width: '100%', display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'center' }}
+                        >
+                          {p.info?.icon && <img src={p.info.icon} alt="" style={{ width: 20, height: 20 }} />}
+                          {p.info?.name || 'Unknown Wallet'}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <button
+                      className="wallet-action-btn wallet-action-primary"
+                      onClick={connectMetaMask}
+                      style={{ marginBottom: '12px', width: '100%' }}
+                    >
+                      🦊 Connect MetaMask
+                    </button>
+                  )}
+                </div>
+                <div className="wallet-section">
+                  <label className="wallet-label">WalletConnect (Mobile + Desktop)</label>
                   <button
                     className="wallet-action-btn wallet-action-primary"
-                    onClick={() => connectWallet(walletKeyInput)}
-                    disabled={!walletKeyInput}
+                    onClick={connectWalletConnect}
+                    style={{ marginBottom: '12px', width: '100%' }}
                   >
-                    Connect
+                    📱 Connect via WalletConnect
                   </button>
                 </div>
+                <div className="wallet-section">
+                  <label className="wallet-label">Private Key {IS_TESTNET ? '(Testnet Only)' : ''}</label>
+                  {!IS_TESTNET && (
+                    <div className="wallet-result warning">
+                      Direct private key input is disabled on mainnet. Use MetaMask or a hardware wallet.
+                    </div>
+                  )}
+                  {IS_TESTNET && (
+                    <>
+                      <input
+                        type="password"
+                        className="wallet-input"
+                        placeholder="0x..."
+                        autoComplete="off"
+                        spellCheck="false"
+                        value={walletKeyInput}
+                        onChange={(e) => setWalletKeyInput(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && walletKeyInput && connectWallet(walletKeyInput)}
+                      />
+                      <button
+                        className="wallet-action-btn wallet-action-primary"
+                        onClick={() => connectWallet(walletKeyInput)}
+                        disabled={!walletKeyInput}
+                      >
+                        Connect
+                      </button>
+                    </>
+                  )}
+                </div>
+                {ANVIL_TEST_ACCOUNTS.length > 0 && (
                 <div className="wallet-section">
                   <label className="wallet-label">Quick Connect (Anvil Test Accounts)</label>
                   <div className="wallet-quick-accounts">
@@ -954,6 +1434,7 @@ function App() {
                     ))}
                   </div>
                 </div>
+                )}
               </div>
             ) : (
               <div className="wallet-panel-body">
@@ -1037,4 +1518,12 @@ function App() {
   )
 }
 
-export default App
+function AppWithBoundary() {
+  return (
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
+  )
+}
+
+export default AppWithBoundary

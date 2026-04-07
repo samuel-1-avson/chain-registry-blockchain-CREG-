@@ -110,18 +110,18 @@ pub async fn run(
         Err(e) => {
             println!(
                 "\r  {} Proof unavailable — {}     ",
-                "⚠".yellow(),
+                "✗".red(),
                 e.to_string().dimmed()
             );
             println!(
                 "  {}",
-                "Falling back to standard verdict (node trusted).".dimmed()
+                "Cannot verify package without Merkle proof. Failing closed.".red()
             );
             println!(
-                "  {} {}",
-                "≈".yellow(),
-                format!("{} (unproven)", id.canonical()).yellow()
+                "  {}",
+                "Use --allow-unverified to accept unproven verdicts.".dimmed()
             );
+            anyhow::bail!("Merkle proof unavailable — cannot verify package integrity");
         }
     }
 

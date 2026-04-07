@@ -94,6 +94,10 @@ pub enum Transaction {
         sig_from_old: String,
         sig_from_new: String,
         timestamp: DateTime<Utc>,
+        /// Monotonic nonce — must be strictly greater than the last
+        /// rotation nonce for this publisher.  Prevents replay attacks.
+        #[serde(default)]
+        nonce: u64,
     },
 }
 
