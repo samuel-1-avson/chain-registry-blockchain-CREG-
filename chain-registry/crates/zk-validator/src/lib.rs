@@ -28,9 +28,10 @@ use ark_r1cs_std::prelude::*;
 use ark_relations::r1cs::SynthesisError;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_snark::SNARK;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use thiserror::Error;
-use tracing::{debug, info, instrument};
+use tracing::{debug, info, warn, instrument};
 
 pub mod circuits;
 pub mod constraints;
@@ -131,27 +132,96 @@ pub struct ZkValidator {
 }
 
 impl ZkValidator {
-    /// Initialize the ZK validator with generated keys
+    /// Default file names for trusted setup keys
+    const PROVING_KEY_FILE: &'static str = "proving_key.bin";
+    const VERIFYING_KEY_FILE: &'static str = "verifying_key.bin";
+
+    /// Initialize the ZK validator.
     ///
-    /// In production, keys should be loaded from trusted setup files.
+    /// Attempts to load keys from the `circuits/` directory (or `CREG_ZK_KEYS_DIR`).
+    /// If key files are not found, generates fresh keys and saves them for subsequent
+    /// runs. A warning is emitted because the generated keys are NOT from a trusted
+    /// ceremony — they are only suitable for development/testing.
     pub fn new() -> Result<Self, ZkError> {
-        info!("Initializing ZK validator with Bn254 curve");
+        let keys_dir = Self::keys_dir();
 
-        // Generate circuit for trusted setup
+        let pk_path = keys_dir.join(Self::PROVING_KEY_FILE);
+        let vk_path = keys_dir.join(Self::VERIFYING_KEY_FILE);
+
+        if pk_path.exists() && vk_path.exists() {
+            info!("Loading ZK keys from {}", keys_dir.display());
+            return Self::from_key_files(&pk_path, &vk_path);
+        }
+
+        warn!(
+            "ZK trusted setup key files not found in {} — generating ephemeral keys. \
+             These keys are NOT from a trusted ceremony and must not be used in production. \
+             Run `creg advanced zk-setup` to generate and persist proper keys.",
+            keys_dir.display()
+        );
+
         let circuit = PackageValidationCircuit::default();
-
-        debug!("Generating proving and verifying keys...");
         let mut rng = rand::thread_rng();
         let (proving_key, verifying_key) =
             Groth16::<Bn254>::circuit_specific_setup(circuit, &mut rng)
                 .map_err(|e| ZkError::ProofGenerationError(e.to_string()))?;
 
-        info!("ZK validator initialized successfully");
-
-        Ok(Self {
+        let validator = Self {
             proving_key: Arc::new(proving_key),
             verifying_key: Arc::new(verifying_key),
-        })
+        };
+
+        // Best-effort save so the next restart reuses the same keys.
+        if let Err(e) = validator.save_keys(&keys_dir) {
+            warn!("Could not persist generated ZK keys: {}", e);
+        }
+
+        info!("ZK validator initialized with generated keys");
+        Ok(validator)
+    }
+
+    /// Resolve the key directory from `CREG_ZK_KEYS_DIR` or default `./circuits`.
+    fn keys_dir() -> PathBuf {
+        std::env::var("CREG_ZK_KEYS_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("circuits"))
+    }
+
+    /// Load validator from key files on disk.
+    pub fn from_key_files(
+        proving_key_path: &Path,
+        verifying_key_path: &Path,
+    ) -> Result<Self, ZkError> {
+        let pk_bytes = std::fs::read(proving_key_path)
+            .map_err(|e| ZkError::SerializationError(format!("Read proving key: {}", e)))?;
+        let vk_bytes = std::fs::read(verifying_key_path)
+            .map_err(|e| ZkError::SerializationError(format!("Read verifying key: {}", e)))?;
+
+        Self::from_keys(&pk_bytes, &vk_bytes)
+    }
+
+    /// Save current keys to disk.
+    pub fn save_keys(&self, dir: &Path) -> Result<(), ZkError> {
+        std::fs::create_dir_all(dir)
+            .map_err(|e| ZkError::SerializationError(format!("Create key dir: {}", e)))?;
+
+        let mut pk_bytes = Vec::new();
+        self.proving_key
+            .serialize_uncompressed(&mut pk_bytes)
+            .map_err(|e| ZkError::SerializationError(e.to_string()))?;
+
+        let mut vk_bytes = Vec::new();
+        self.verifying_key
+            .serialize_uncompressed(&mut vk_bytes)
+            .map_err(|e| ZkError::SerializationError(e.to_string()))?;
+
+        std::fs::write(dir.join(Self::PROVING_KEY_FILE), &pk_bytes)
+            .map_err(|e| ZkError::SerializationError(format!("Write proving key: {}", e)))?;
+        std::fs::write(dir.join(Self::VERIFYING_KEY_FILE), &vk_bytes)
+            .map_err(|e| ZkError::SerializationError(format!("Write verifying key: {}", e)))?;
+
+        info!("ZK keys saved to {}", dir.display());
+        Ok(())
     }
 
     /// Load validator from existing keys

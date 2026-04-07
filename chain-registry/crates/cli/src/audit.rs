@@ -76,7 +76,7 @@ pub async fn run(
         let eco_c = eco.clone();
 
         handles.push(tokio::spawn(async move {
-            let _permit = sem.acquire().await.unwrap();
+            let _permit = sem.acquire().await.expect("semaphore closed");
             let id = PackageId::new(&eco_c, &pkg.name, &pkg.version);
             let verdict = resolver::resolve_id(&id, url.as_deref()).await;
             (pkg, verdict)
@@ -466,7 +466,7 @@ pub async fn run_fix(ecosystem: Option<&str>, node_url: Option<&str>) -> Result<
         let url = node_url.map(String::from);
         let eco_c = eco.clone();
         handles.push(tokio::spawn(async move {
-            let _permit = sem.acquire().await.unwrap();
+            let _permit = sem.acquire().await.expect("semaphore closed");
             let id = PackageId::new(&eco_c, &pkg.name, &pkg.version);
             let verdict = resolver::resolve_id(&id, url.as_deref()).await;
             (pkg, verdict)

@@ -131,11 +131,9 @@ async fn process_package(
             s.config.is_validator,
             s.config.node_id.clone(),
             s.config.validator_privkey.clone(),
-            // NOTE: ChainRecord does not store the full PackageManifest, so we
-            // cannot retrieve the previous version's manifest for diff analysis.
-            // Pass None to signal "first publish or no manifest history available".
-            // TODO: Store manifests in ChainRecord to enable proper diff analysis.
-            None::<common::PackageManifest>,
+            // Retrieve the previous version's manifest for diff analysis.
+            // Returns None for the first publish of a package.
+            prev.and_then(|r| r.manifest),
         )
     };
 
@@ -312,6 +310,7 @@ async fn process_package(
                 findings,
                 access_count: 0,
                 last_accessed: None,
+                manifest: Some(req.manifest.clone()),
                 ..Default::default()
             };
             Transaction::Publish(record)
@@ -361,22 +360,100 @@ async fn fetch_from_ipfs(cid: &str, ipfs_url: &str) -> anyhow::Result<Vec<u8>> {
     Ok(bytes)
 }
 
-/// Decrypt a shielded package using threshold decryption
+/// Decrypt a shielded package using threshold decryption.
 ///
-/// This function coordinates with other validators to collect enough shares
-/// (M-of-N) to decrypt the package content.
+/// Coordinates with other validators via gossipsub to collect enough key shares
+/// (M-of-N) to reconstruct the encryption key and decrypt the package content.
 async fn decrypt_shielded(
-    _data: &[u8],
-    _bundle: &str,
-    _state: &crate::SharedState,
+    data: &[u8],
+    bundle: &str,
+    state: &crate::SharedState,
 ) -> anyhow::Result<Vec<u8>> {
-    // TODO: Re-enable threshold encryption when compilation issues are fixed
-    // use threshold_encryption::{DecryptionClient, DecryptionRequest};
+    use threshold_encryption::{EncryptedPackage, ThresholdEncryption};
 
-    tracing::warn!("Threshold decryption is temporarily disabled");
-    anyhow::bail!(
-        "Shielded package decryption not available - threshold-encryption feature disabled"
-    )
+    let encrypted_pkg = EncryptedPackage::from_bytes(data)
+        .map_err(|e| anyhow::anyhow!("Failed to parse encrypted package: {}", e))?;
+
+    let threshold = encrypted_pkg.threshold;
+    let total_shares = encrypted_pkg.total_shares;
+
+    tracing::info!(
+        "Decrypting shielded package: threshold={}, total_shares={}",
+        threshold,
+        total_shares
+    );
+
+    // Step 1: Decrypt our own share using the validator's private key.
+    let (our_share, node_id, canonical) = {
+        let s = state.read().await;
+        let privkey = s
+            .config
+            .validator_privkey
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No validator private key for share decryption"))?;
+
+        let node_id = s.config.node_id.clone();
+
+        // Find our encrypted share by iterating the share map.
+        // The bundle string encodes which share index belongs to this validator.
+        // For now, try all shares and see which one decrypts successfully.
+        let te = ThresholdEncryption::new(threshold, total_shares)
+            .map_err(|e| anyhow::anyhow!("ThresholdEncryption init: {}", e))?;
+
+        let privkey_bytes = hex::decode(privkey)?;
+
+        let mut our_share = None;
+        for (&index, encrypted_share) in &encrypted_pkg.encrypted_shares {
+            match te.decrypt_share(encrypted_share, &privkey_bytes) {
+                Ok(share) => {
+                    tracing::debug!("Successfully decrypted share index {}", index);
+                    our_share = Some(share);
+                    break;
+                }
+                Err(_) => continue,
+            }
+        }
+
+        let share = our_share
+            .ok_or_else(|| anyhow::anyhow!("No encrypted share found for this validator"))?;
+
+        (share, node_id, bundle.to_string())
+    };
+
+    // Step 2: Broadcast our decrypted share to peers via gossipsub.
+    broadcast_decryption_share(state, &canonical, &our_share, &node_id).await?;
+
+    // Step 3: Store our own share locally.
+    {
+        let mut s = state.write().await;
+        s.decryption_shares
+            .entry(canonical.clone())
+            .or_insert_with(Vec::new)
+            .push(our_share.clone());
+    }
+
+    // Step 4: Wait for enough shares from other validators.
+    let shares = collect_decryption_shares(state, &canonical, threshold).await?;
+
+    // Step 5: Reconstruct the encryption key and decrypt the content.
+    let te = ThresholdEncryption::new(threshold, total_shares)
+        .map_err(|e| anyhow::anyhow!("ThresholdEncryption init: {}", e))?;
+
+    let plaintext = te
+        .decrypt_with_shares(&encrypted_pkg, &shares)
+        .map_err(|e| anyhow::anyhow!("Threshold decryption failed: {}", e))?;
+
+    // Clean up stored shares.
+    {
+        let mut s = state.write().await;
+        s.decryption_shares.remove(&canonical);
+    }
+
+    tracing::info!(
+        "Shielded package decrypted successfully: {} bytes",
+        plaintext.len()
+    );
+    Ok(plaintext)
 }
 
 /// Decrypt a share using validator's private key
@@ -413,36 +490,126 @@ fn decrypt_share(encrypted_share: &[u8], validator_key: &str) -> anyhow::Result<
     Ok(plaintext)
 }
 
-/// Broadcast our decryption share to other validators
+/// Broadcast our decryption share to other validators via gossipsub.
 async fn broadcast_decryption_share(
-    _state: &crate::SharedState,
-    _share: &[u8],
+    state: &crate::SharedState,
+    canonical: &str,
+    share: &threshold_encryption::KeyShare,
+    node_id: &str,
 ) -> anyhow::Result<()> {
-    // TODO: Implement P2P broadcast of decryption shares
-    // This would use the existing gossipsub network to share partial decryptions
-    tracing::debug!("Broadcasting decryption share to peers");
+    let share_value_hex = hex::encode(&share.value);
+
+    // Sign the share to prove authenticity.
+    let signature_hex = {
+        let s = state.read().await;
+        if let Some(privkey) = &s.config.validator_privkey {
+            use ed25519_dalek::{Signer, SigningKey};
+            let key_bytes = hex::decode(privkey)?;
+            let key_arr: [u8; 32] = key_bytes
+                .try_into()
+                .map_err(|_| anyhow::anyhow!("Validator key must be 32 bytes"))?;
+            let sk = SigningKey::from_bytes(&key_arr);
+            let msg = format!("decrypt:{}:{}:{}", canonical, share.index, share_value_hex);
+            hex::encode(sk.sign(msg.as_bytes()).to_bytes())
+        } else {
+            anyhow::bail!("No validator private key for signing decryption share");
+        }
+    };
+
+    let gossip_msg = crate::gossip::DecryptionShareGossip {
+        canonical: canonical.to_string(),
+        validator_id: node_id.to_string(),
+        share_index: share.index,
+        share_value: share_value_hex,
+        signature: signature_hex,
+    };
+
+    let p2p_handle = state.read().await.p2p.clone();
+    p2p_handle
+        .sender
+        .send(crate::p2p::P2PCommand::Broadcast {
+            topic: "creg/v1/decryption-shares".into(),
+            data: serde_json::to_vec(&gossip_msg)?,
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to broadcast decryption share: {}", e))?;
+
+    tracing::debug!("Broadcast decryption share index {} for {}", share.index, canonical);
     Ok(())
 }
 
-/// Collect decryption shares from other validators
+/// Collect decryption shares from other validators via the gossipsub network.
+///
+/// Polls the shared state's `decryption_shares` map until the required threshold
+/// is reached, or a timeout (30s) expires.
 async fn collect_decryption_shares(
-    _state: &crate::SharedState,
+    state: &crate::SharedState,
+    canonical: &str,
     threshold: u8,
-) -> anyhow::Result<Vec<Vec<u8>>> {
-    // TODO: Implement collection of shares from P2P network
-    // This would wait for enough validators to broadcast their shares
+) -> anyhow::Result<Vec<threshold_encryption::KeyShare>> {
+    let max_wait = Duration::from_secs(30);
+    let poll_interval = Duration::from_millis(500);
+    let start = std::time::Instant::now();
 
-    tracing::debug!("Collecting {} decryption shares from peers", threshold);
+    loop {
+        {
+            let s = state.read().await;
+            if let Some(shares) = s.decryption_shares.get(canonical) {
+                if shares.len() >= threshold as usize {
+                    tracing::info!(
+                        "Collected {}/{} decryption shares for {}",
+                        shares.len(),
+                        threshold,
+                        canonical
+                    );
+                    return Ok(shares.clone());
+                }
+                tracing::debug!(
+                    "Have {}/{} shares for {}, waiting...",
+                    shares.len(),
+                    threshold,
+                    canonical
+                );
+            }
+        }
 
-    // For now, return empty (actual implementation would wait for P2P messages)
-    Ok(vec![])
+        if start.elapsed() > max_wait {
+            anyhow::bail!(
+                "Timed out waiting for decryption shares: needed {}, canonical={}",
+                threshold,
+                canonical
+            );
+        }
+
+        tokio::time::sleep(poll_interval).await;
+    }
 }
 
 /// Reconstruct the encryption key from shares using Shamir's Secret Sharing
 #[allow(dead_code)]
-fn reconstruct_key(_shares: &[Vec<u8>]) -> anyhow::Result<Vec<u8>> {
-    // TODO: Re-enable when threshold-encryption is fixed
-    anyhow::bail!("Key reconstruction not available - threshold-encryption feature disabled")
+fn reconstruct_key(shares: &[threshold_encryption::KeyShare]) -> anyhow::Result<Vec<u8>> {
+    use threshold_encryption::ShamirSecretSharing;
+
+    if shares.is_empty() {
+        anyhow::bail!("No shares provided for key reconstruction");
+    }
+
+    let threshold = shares.len() as u8;
+    // total_shares doesn't matter for reconstruction, only threshold.
+    let sss = ShamirSecretSharing::new(threshold, threshold);
+    let shamir_shares: Vec<threshold_encryption::Share> = shares
+        .iter()
+        .map(|ks| threshold_encryption::Share {
+            index: ks.index,
+            value: ks.value.clone(),
+        })
+        .collect();
+
+    let secret = sss
+        .reconstruct_secret(&shamir_shares)
+        .map_err(|e| anyhow::anyhow!("Key reconstruction failed: {}", e))?;
+
+    Ok(secret)
 }
 
 /// Decrypt package content with the reconstructed key

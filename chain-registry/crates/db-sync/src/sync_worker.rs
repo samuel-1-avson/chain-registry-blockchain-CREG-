@@ -1,6 +1,7 @@
 //! Background sync worker: sled → PostgreSQL.
 
 use anyhow::{Context, Result};
+use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 use std::sync::Arc;
 use tokio::time::{interval, Duration};
@@ -29,6 +30,14 @@ pub struct SyncConfig {
     pub poll_interval: Duration,
     /// PostgreSQL connection URL.
     pub pg_url: String,
+    /// Maximum number of connections in the pool (default: 10).
+    pub pg_max_connections: u32,
+    /// Minimum number of idle connections to keep open (default: 2).
+    pub pg_min_connections: u32,
+    /// Timeout before an idle connection is reaped (default: 300 s).
+    pub pg_idle_timeout: Duration,
+    /// Maximum time to wait for a connection from the pool (default: 10 s).
+    pub pg_acquire_timeout: Duration,
 }
 
 impl Default for SyncConfig {
@@ -37,6 +46,10 @@ impl Default for SyncConfig {
             poll_interval: Duration::from_secs(1),
             pg_url: std::env::var("CREG_PG_URL")
                 .unwrap_or_else(|_| "postgres://localhost/chain_registry".into()),
+            pg_max_connections: 10,
+            pg_min_connections: 2,
+            pg_idle_timeout: Duration::from_secs(300),
+            pg_acquire_timeout: Duration::from_secs(10),
         }
     }
 }
@@ -53,7 +66,12 @@ impl SyncWorker {
     pub async fn new(config: SyncConfig, chain: ChainStoreHandle) -> Result<Self> {
         crate::validate_connection_string(&config.pg_url)?;
 
-        let pool = PgPool::connect(&config.pg_url)
+        let pool = PgPoolOptions::new()
+            .max_connections(config.pg_max_connections)
+            .min_connections(config.pg_min_connections)
+            .idle_timeout(config.pg_idle_timeout)
+            .acquire_timeout(config.pg_acquire_timeout)
+            .connect(&config.pg_url)
             .await
             .context("connect to PostgreSQL")?;
 

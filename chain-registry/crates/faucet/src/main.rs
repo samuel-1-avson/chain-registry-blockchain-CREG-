@@ -1,5 +1,6 @@
 // crates/faucet/src/main.rs
 // Testnet Faucet Service - Distributes test tCREG tokens (REAL IMPLEMENTATION)
+#![deny(clippy::unwrap_used)]
 
 use alloy::{
     network::EthereumWallet,
@@ -130,9 +131,24 @@ impl RateLimiter {
 struct AppState {
     config: FaucetConfig,
     rate_limiter: RateLimiter,
+    /// Active PoW challenges keyed by challenge string.
+    pow_challenges: DashMap<String, PowChallenge>,
     /// Faucet statistics
     stats: Mutex<FaucetStats>,
 }
+
+/// A proof-of-work challenge issued to clients.
+#[derive(Clone)]
+struct PowChallenge {
+    difficulty: u8,
+    created_at: Instant,
+}
+
+/// PoW difficulty — number of leading zero bits required in SHA-256(challenge || nonce).
+/// 20 bits ≈ 1M hashes ≈ ~1 second on a modern browser.
+const POW_DIFFICULTY: u8 = 20;
+/// Challenge validity window.
+const POW_TTL: Duration = Duration::from_secs(120);
 
 #[derive(Default, Serialize)]
 struct FaucetStats {
@@ -146,9 +162,18 @@ struct FaucetStats {
 #[derive(Deserialize)]
 struct DripRequest {
     address: String,
-    /// Optional: human verification token (future use)
-    #[allow(dead_code)]
-    captcha: Option<String>,
+    /// The PoW challenge string returned by /api/challenge.
+    challenge: Option<String>,
+    /// The nonce the client found such that SHA256(challenge||nonce) has N leading zero bits.
+    nonce: Option<String>,
+}
+
+/// PoW challenge response
+#[derive(Serialize)]
+struct ChallengeResponse {
+    challenge: String,
+    difficulty: u8,
+    ttl_secs: u64,
 }
 
 /// Drip response
@@ -188,6 +213,7 @@ async fn main() -> anyhow::Result<()> {
     let state = Arc::new(AppState {
         config,
         rate_limiter: RateLimiter::new(),
+        pow_challenges: DashMap::new(),
         stats: Mutex::new(FaucetStats::default()),
     });
 
@@ -198,6 +224,7 @@ async fn main() -> anyhow::Result<()> {
 
     let app = Router::new()
         .route("/", get(index_page))
+        .route("/api/challenge", get(get_challenge))
         .route("/api/drip", post(handle_drip))
         .route("/api/stats", get(get_stats))
         .route("/api/balance/:address", get(get_balance))
@@ -207,6 +234,30 @@ async fn main() -> anyhow::Result<()> {
 
     let port = env_u16("FAUCET_PORT", 8081);
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
+
+    // ── Optional TLS ──────────────────────────────────────────────────────────
+    #[cfg(feature = "tls")]
+    {
+        let tls_cert = std::env::var("FAUCET_TLS_CERT").ok();
+        let tls_key = std::env::var("FAUCET_TLS_KEY").ok();
+
+        if let (Some(cert_path), Some(key_path)) = (tls_cert, tls_key) {
+            use axum_server::tls_rustls::RustlsConfig;
+
+            let tls_config =
+                RustlsConfig::from_pem_file(&cert_path, &key_path)
+                    .await
+                    .expect("Failed to load TLS certificate/key");
+
+            info!("Faucet listening on https://{}", addr);
+
+            axum_server::bind_rustls(addr, tls_config)
+                .serve(app.into_make_service())
+                .await?;
+
+            return Ok(());
+        }
+    }
 
     info!("Faucet listening on http://{}", addr);
 
@@ -294,12 +345,130 @@ async fn get_real_balance(config: &FaucetConfig, address: &str) -> Result<u128, 
         .map_err(|e| format!("Failed to parse balance: {}", e))
 }
 
+/// Issue a proof-of-work challenge. Client must find a nonce such that
+/// SHA-256(challenge || nonce) has `difficulty` leading zero bits.
+async fn get_challenge(
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    use rand::RngCore;
+    let mut bytes = [0u8; 16];
+    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    let challenge = hex::encode(bytes);
+
+    // Prune expired challenges periodically.
+    state.pow_challenges.retain(|_, v| v.created_at.elapsed() < POW_TTL);
+
+    state.pow_challenges.insert(
+        challenge.clone(),
+        PowChallenge {
+            difficulty: POW_DIFFICULTY,
+            created_at: Instant::now(),
+        },
+    );
+
+    (
+        StatusCode::OK,
+        JsonResponse(ChallengeResponse {
+            challenge,
+            difficulty: POW_DIFFICULTY,
+            ttl_secs: POW_TTL.as_secs(),
+        }),
+    )
+}
+
+/// Verify proof-of-work: SHA-256(challenge || nonce) must have `difficulty` leading zero bits.
+fn verify_pow(challenge: &str, nonce: &str, difficulty: u8) -> bool {
+    use sha2::{Sha256, Digest};
+    let mut hasher = Sha256::new();
+    hasher.update(challenge.as_bytes());
+    hasher.update(nonce.as_bytes());
+    let hash = hasher.finalize();
+
+    // Count leading zero bits.
+    let mut leading_zeros = 0u8;
+    for byte in hash.iter() {
+        if *byte == 0 {
+            leading_zeros += 8;
+        } else {
+            leading_zeros += byte.leading_zeros() as u8;
+            break;
+        }
+        if leading_zeros >= difficulty {
+            break;
+        }
+    }
+    leading_zeros >= difficulty
+}
+
 /// Handle drip request
 async fn handle_drip(
     State(state): State<Arc<AppState>>,
     Json(request): Json<DripRequest>,
 ) -> impl IntoResponse {
     let address = request.address.to_lowercase();
+
+    // ── PoW validation ────────────────────────────────────────────────────────
+    let pow_enabled = std::env::var("FAUCET_POW_DISABLED").unwrap_or_default() != "true";
+    if pow_enabled {
+        let challenge = match &request.challenge {
+            Some(c) => c.clone(),
+            None => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    JsonResponse(DripResponse {
+                        success: false,
+                        message: "Missing proof-of-work challenge. Call GET /api/challenge first.".to_string(),
+                        tx_hash: None,
+                        amount: None,
+                    }),
+                );
+            }
+        };
+
+        let nonce = match &request.nonce {
+            Some(n) => n.clone(),
+            None => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    JsonResponse(DripResponse {
+                        success: false,
+                        message: "Missing proof-of-work nonce.".to_string(),
+                        tx_hash: None,
+                        amount: None,
+                    }),
+                );
+            }
+        };
+
+        // Look up and consume the challenge (single-use).
+        let pow_entry = state.pow_challenges.remove(&challenge);
+        match pow_entry {
+            Some((_, pc)) if pc.created_at.elapsed() < POW_TTL => {
+                if !verify_pow(&challenge, &nonce, pc.difficulty) {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        JsonResponse(DripResponse {
+                            success: false,
+                            message: "Invalid proof-of-work solution.".to_string(),
+                            tx_hash: None,
+                            amount: None,
+                        }),
+                    );
+                }
+            }
+            _ => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    JsonResponse(DripResponse {
+                        success: false,
+                        message: "Unknown or expired challenge. Request a new one.".to_string(),
+                        tx_hash: None,
+                        amount: None,
+                    }),
+                );
+            }
+        }
+    }
 
     // Validate address format
     if !address.starts_with("0x") || address.len() != 42 {

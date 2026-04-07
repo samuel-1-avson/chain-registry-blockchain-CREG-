@@ -1,5 +1,6 @@
 // crates/node/src/main.rs
 // Chain registry node — single binary that runs all subsystems.
+#![deny(clippy::unwrap_used)]
 
 mod api;
 mod block_producer;
@@ -49,6 +50,8 @@ pub struct NodeState {
     pub bridge_status: BridgeStatus,
     /// Cached VRF proofs from other validators: validator_id -> (output, proof)
     pub vrf_proofs: std::collections::HashMap<String, (String, String)>,
+    /// Decryption shares received from peers: canonical -> Vec<KeyShare>
+    pub decryption_shares: std::collections::HashMap<String, Vec<threshold_encryption::KeyShare>>,
 }
 
 #[derive(Serialize, Clone, Default)]
@@ -155,6 +158,7 @@ async fn main() -> Result<()> {
             ..BridgeStatus::default()
         },
         vrf_proofs: std::collections::HashMap::new(),
+        decryption_shares: std::collections::HashMap::new(),
     }));
 
     // Start P2P node in background
@@ -197,6 +201,14 @@ async fn main() -> Result<()> {
 
     tokio::spawn(sync::run(Arc::clone(&state)));
 
+    // ── ML model existence check (T6) ─────────────────────────────────────────
+    {
+        let scanner = ml_validator::deep_scan::DeepScanner::default();
+        if let Err(e) = scanner.validate_at_startup() {
+            tracing::warn!("ML model validation: {}", e);
+        }
+    }
+
     tokio::spawn(validator_pipeline::run(Arc::clone(&state), tx_sender));
 
     tokio::spawn(block_producer::run(Arc::clone(&state), tx_receiver));
@@ -233,6 +245,37 @@ async fn main() -> Result<()> {
     rate_limit::spawn_purge_task(limiter.clone());
 
     let app = api::router(Arc::clone(&state), event_bus, limiter);
+
+    // ── Optional TLS termination ──────────────────────────────────────────────
+    // Set CREG_TLS_CERT and CREG_TLS_KEY environment variables to enable HTTPS.
+    #[cfg(feature = "tls")]
+    {
+        let tls_cert = std::env::var("CREG_TLS_CERT").ok();
+        let tls_key = std::env::var("CREG_TLS_KEY").ok();
+
+        if let (Some(cert_path), Some(key_path)) = (tls_cert, tls_key) {
+            use axum_server::tls_rustls::RustlsConfig;
+
+            let tls_config =
+                RustlsConfig::from_pem_file(&cert_path, &key_path)
+                    .await
+                    .expect("Failed to load TLS certificate/key");
+
+            let addr: std::net::SocketAddr = config.listen_addr.parse()
+                .expect("listen_addr must be a valid socket address");
+
+            tracing::info!("REST API listening on https://{}", addr);
+
+            axum_server::bind_rustls(addr, tls_config)
+                .serve(app.into_make_service_with_connect_info::<std::net::SocketAddr>())
+                .await?;
+
+            tracing::info!("Node shut down cleanly.");
+            return Ok(());
+        }
+    }
+
+    // ── Plain HTTP (default) ──────────────────────────────────────────────────
     let listener = tokio::net::TcpListener::bind(&config.listen_addr).await?;
     tracing::info!("REST API listening on http://{}", config.listen_addr);
 

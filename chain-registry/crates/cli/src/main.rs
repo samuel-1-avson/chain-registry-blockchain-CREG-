@@ -1,5 +1,6 @@
 // crates/cli/src/main.rs
 // `creg` — the main CLI. Wraps the shim logic with a friendly interface.
+#![deny(clippy::unwrap_used)]
 
 mod advanced;
 mod audit;
@@ -634,7 +635,7 @@ async fn main() -> Result<()> {
             }
         }
         Commands::Lockfile { clear, dir, diff } => {
-            let d = dir.unwrap_or_else(|| std::env::current_dir().unwrap());
+            let d = dir.unwrap_or_else(|| std::env::current_dir().expect("cannot determine current directory"));
             if clear {
                 let path = d.join("pkg-lock.chain");
                 if path.exists() {

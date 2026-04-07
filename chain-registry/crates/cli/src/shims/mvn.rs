@@ -9,7 +9,7 @@ fn main() {
     let exit_code = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-        .unwrap()
+        .expect("failed to build tokio runtime")
         .block_on(async {
             let sub = args.get(1).map(String::as_str).unwrap_or("");
             // Only intercept lifecycle phases that pull dependencies.

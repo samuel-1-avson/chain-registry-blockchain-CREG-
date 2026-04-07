@@ -10,8 +10,8 @@
 use std::collections::HashMap;
 use std::time::Duration;
 use thiserror::Error;
-use tracing::{debug, info, instrument};
-use wasmtime::{Engine, Module, Store};
+use tracing::{debug, info, warn};
+use wasmtime::{Engine, Module, Store, StoreLimits, StoreLimitsBuilder};
 
 pub mod capabilities;
 pub mod limits;
@@ -163,12 +163,22 @@ pub struct WasmSandbox {
     config: SandboxConfig,
 }
 
+/// Store data carrying resource limits for wasmtime.
+struct SandboxState {
+    limits: StoreLimits,
+}
+
 impl WasmSandbox {
-    /// Create a new WASM sandbox
+    /// Create a new WASM sandbox with epoch interruption enabled.
     pub fn new(config: SandboxConfig) -> Result<Self, SandboxError> {
         info!("Initializing WASM sandbox");
 
-        let engine = Engine::default();
+        let mut engine_config = wasmtime::Config::new();
+        // Enable epoch-based interruption for enforcing timeouts.
+        engine_config.epoch_interruption(true);
+
+        let engine = Engine::new(&engine_config)
+            .map_err(|e| SandboxError::CompilationError(format!("Engine creation failed: {}", e)))?;
 
         Ok(Self { engine, config })
     }
@@ -181,7 +191,7 @@ impl WasmSandbox {
         m
     }
 
-    /// Run a WASM module in the sandbox
+    /// Run a WASM module in the sandbox with timeout and resource limits enforced.
     pub async fn run(
         &self,
         wasm_bytes: &[u8],
@@ -193,11 +203,45 @@ impl WasmSandbox {
         let module = Module::new(&self.engine, wasm_bytes)
             .map_err(|e| SandboxError::CompilationError(e.to_string()))?;
 
-        // Create store
-        let mut store = Store::new(&self.engine, ());
+        // Build store with resource limits
+        let limits = StoreLimitsBuilder::new()
+            .memory_size(self.config.memory_limit)
+            .build();
+
+        let mut store = Store::new(&self.engine, SandboxState { limits });
+        store.limiter(|state| &mut state.limits);
+
+        // Set epoch deadline — the module will trap after this many epoch ticks.
+        // We tick once per second, so deadline = timeout_secs.
+        let deadline = self.config.timeout_secs.max(1);
+        store.set_epoch_deadline(deadline);
+
+        // Spawn a background task that increments the engine epoch once per second.
+        // This drives the epoch-based timeout for the WASM execution.
+        let engine_clone = self.engine.clone();
+        let timeout_secs = self.config.timeout_secs;
+        let epoch_handle = tokio::spawn(async move {
+            for _ in 0..(timeout_secs + 1) {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                engine_clone.increment_epoch();
+            }
+        });
+
+        // Set up WASI context based on capabilities
+        let wasi_ctx = self.build_wasi_context();
+        let linker = wasmtime::Linker::new(&self.engine);
+
+        // Only add WASI imports if the module expects them (best-effort).
+        // Modules without WASI imports will work fine with an empty import set.
+        if let Ok(ctx) = wasi_ctx {
+            // wasmtime_wasi::add_to_linker is available; for now we provide
+            // an empty linker to avoid capability leakage. Modules that call
+            // WASI functions they aren't granted will trap with a link error.
+            let _ = ctx; // WASI context prepared but not yet wired (see below)
+        }
 
         // Instantiate module
-        let instance = wasmtime::Instance::new(&mut store, &module, &[])
+        let instance = linker.instantiate(&mut store, &module)
             .map_err(|e| SandboxError::ExecutionError(e.to_string()))?;
 
         // Get the main function
@@ -206,27 +250,71 @@ impl WasmSandbox {
             .or_else(|_| instance.get_typed_func::<(), i32>(&mut store, "main"))
             .map_err(|e| SandboxError::ExecutionError(format!("No main function: {}", e)))?;
 
-        // Run with timeout
+        // Execute with epoch-based timeout enforcement
         let start_time = std::time::Instant::now();
 
-        let exit_code = main
-            .call(&mut store, ())
-            .map_err(|e| SandboxError::ExecutionError(e.to_string()))?;
+        let call_result = main.call(&mut store, ());
+
+        // Cancel the epoch ticker
+        epoch_handle.abort();
 
         let wall_time = start_time.elapsed();
 
-        Ok(SandboxResult {
-            success: exit_code == 0,
-            exit_code,
-            stdout: String::new(),
-            stderr: String::new(),
-            resource_usage: ResourceUsage {
-                peak_memory: 0,
-                cpu_time_ms: wall_time.as_millis() as u64,
-                wall_time_ms: wall_time.as_millis() as u64,
-            },
-            findings: vec![],
-        })
+        match call_result {
+            Ok(exit_code) => Ok(SandboxResult {
+                success: exit_code == 0,
+                exit_code,
+                stdout: String::new(),
+                stderr: String::new(),
+                resource_usage: ResourceUsage {
+                    peak_memory: 0,
+                    cpu_time_ms: wall_time.as_millis() as u64,
+                    wall_time_ms: wall_time.as_millis() as u64,
+                },
+                findings: vec![],
+            }),
+            Err(e) => {
+                // Check if the trap was caused by epoch deadline (timeout)
+                let err_str = e.to_string();
+                if err_str.contains("epoch") || err_str.contains("interrupt") {
+                    warn!(
+                        "WASM execution timed out after {}s (limit: {}s)",
+                        wall_time.as_secs(),
+                        self.config.timeout_secs
+                    );
+                    Err(SandboxError::Timeout(Duration::from_secs(
+                        self.config.timeout_secs,
+                    )))
+                } else if err_str.contains("memory") {
+                    Err(SandboxError::ResourceLimitExceeded(format!(
+                        "Memory limit exceeded (limit: {} bytes): {}",
+                        self.config.memory_limit, err_str
+                    )))
+                } else {
+                    Err(SandboxError::ExecutionError(err_str))
+                }
+            }
+        }
+    }
+
+    /// Build a WASI context respecting the configured capabilities.
+    fn build_wasi_context(&self) -> Result<(), SandboxError> {
+        // Capability enforcement: only grant WASI features that match
+        // the configured CapabilitySet. Currently we provide no WASI
+        // imports at all (most restrictive), which means any WASM module
+        // that calls WASI functions will trap. This is intentional for
+        // untrusted code validation.
+        //
+        // Future: use wasmtime_wasi::WasiCtxBuilder to selectively
+        // enable stdio (if caps.has("stdio")), clock, random, and
+        // filesystem access based on the CapabilitySet.
+        if self.config.capabilities.has("network") {
+            warn!("Network capability requested but not yet supported in WASM sandbox");
+        }
+        if self.config.capabilities.has("filesystem-write") {
+            warn!("Filesystem write capability requested but not yet supported in WASM sandbox");
+        }
+        Ok(())
     }
 
     /// Run a validator script on a package

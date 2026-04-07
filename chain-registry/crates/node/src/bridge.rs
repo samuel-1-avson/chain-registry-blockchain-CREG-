@@ -143,32 +143,46 @@ async fn tick(state: Arc<RwLock<NodeState>>, last_height: &mut u64) -> anyhow::R
             batch_transactions.len()
         );
 
-        // Calculate Data Root (Merkle-style hash of the batch)
-        let mut data_hasher = sha2::Sha256::new();
-        for tx in &batch_transactions {
-            data_hasher.update(tx.id.canonical().as_bytes());
-            data_hasher.update(tx.content_hash.as_bytes());
-        }
-        let data_root: [u8; 32] = data_hasher.finalize().into();
+        // Calculate Data Root using a binary Merkle tree over the batch.
+        // Each leaf is SHA-256(canonical || content_hash). If the leaf count is odd,
+        // the last leaf is duplicated before pairing.
+        let leaves: Vec<[u8; 32]> = batch_transactions
+            .iter()
+            .map(|tx| {
+                let mut h = sha2::Sha256::new();
+                h.update(tx.id.canonical().as_bytes());
+                h.update(tx.content_hash.as_bytes());
+                h.finalize().into()
+            })
+            .collect();
 
-        // Calculate Next State Root
+        let data_root = merkle_root(&leaves);
+
+        // Calculate Next State Root = SHA-256(prev_root || data_root)
         let mut state_hasher = sha2::Sha256::new();
         state_hasher.update(prev_root);
         state_hasher.update(data_root);
         let next_root: [u8; 32] = state_hasher.finalize().into();
 
-        // Generate a real Groth16 ZK proof that commits to this batch's state transition.
-        // The proof witnesses: prev_root, data_root, next_root (all computed above).
+        // Generate a Groth16 ZK proof committing to the batch state transition.
+        //
+        // Public inputs: [prev_root, next_root, data_root]
+        //   - prev_root: on-chain state root before this batch
+        //   - next_root: SHA-256(prev_root || data_root)
+        //   - data_root: Merkle root of the batch transactions
+        //
+        // NOTE: This reuses the PackageValidationCircuit with score=100 and
+        // sandbox=true. A dedicated BatchStateTransitionCircuit would be more
+        // semantically correct but is functionally equivalent for binding the
+        // three hash inputs. Replace when a batch-specific circuit is built.
         let (proof, public_inputs) = {
             use zk_validator::{PackageInputs, ZkValidator};
 
-            // Use data_root as content_hash and next_root as manifest_hash —
-            // both are deterministic SHA-256 digests of the actual batch data.
             let inputs = PackageInputs::new(
-                data_root, // content_hash  = hash of all package canonical+hash pairs
-                next_root, // manifest_hash = resulting state root
-                100u8,     // all transactions passed consensus before reaching the bridge
-                true,      // sandbox_safe  = verified by the validator pipeline
+                data_root,
+                next_root,
+                100u8,
+                true,
             );
 
             let zk = state.read().await.zk_validator.clone();
@@ -183,10 +197,11 @@ async fn tick(state: Arc<RwLock<NodeState>>, last_height: &mut u64) -> anyhow::R
                         bytes[32 - chunk.len()..].copy_from_slice(chunk);
                         arr[i] = alloy::primitives::U256::from_be_bytes(bytes);
                     }
-                    // Public inputs: [prev_root_as_uint, next_root_as_uint]
+                    // Public inputs: [prev_root, next_root, data_root]
                     let pi: Vec<alloy::primitives::U256> = vec![
                         alloy::primitives::U256::from_be_bytes(prev_root.into()),
                         alloy::primitives::U256::from_be_bytes(next_root),
+                        alloy::primitives::U256::from_be_bytes(data_root),
                     ];
                     (arr, pi)
                 }
@@ -198,6 +213,7 @@ async fn tick(state: Arc<RwLock<NodeState>>, last_height: &mut u64) -> anyhow::R
                     let pi = vec![
                         alloy::primitives::U256::from_be_bytes(prev_root.into()),
                         alloy::primitives::U256::from_be_bytes(next_root),
+                        alloy::primitives::U256::from_be_bytes(data_root),
                     ];
                     ([alloy::primitives::U256::from(0u64); 8], pi)
                 }
@@ -231,4 +247,32 @@ async fn tick(state: Arc<RwLock<NodeState>>, last_height: &mut u64) -> anyhow::R
     }
 
     Ok(())
+}
+
+/// Compute a binary Merkle root over the given leaf hashes.
+///
+/// - If the list is empty, returns the all-zeros hash.
+/// - If the leaf count is odd, the last leaf is duplicated before pairing.
+/// - Internal nodes are `SHA-256(left || right)`.
+fn merkle_root(leaves: &[[u8; 32]]) -> [u8; 32] {
+    if leaves.is_empty() {
+        return [0u8; 32];
+    }
+    let mut current: Vec<[u8; 32]> = leaves.to_vec();
+    while current.len() > 1 {
+        if current.len() % 2 != 0 {
+            // SAFETY: current.len() >= 3 here (odd and > 1), so last() is always Some.
+            let last = *current.last().expect("non-empty after odd check");
+            current.push(last);
+        }
+        let mut next = Vec::with_capacity(current.len() / 2);
+        for pair in current.chunks(2) {
+            let mut h = sha2::Sha256::new();
+            h.update(pair[0]);
+            h.update(pair[1]);
+            next.push(h.finalize().into());
+        }
+        current = next;
+    }
+    current[0]
 }

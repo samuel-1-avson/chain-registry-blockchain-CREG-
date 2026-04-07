@@ -165,6 +165,13 @@ function App() {
   const [pendingPackages, setPendingPackages] = useState({ count: 0, packages: [] })
   const [packageQuery, setPackageQuery] = useState('')
   const [lookedUpPackage, setLookedUpPackage] = useState(null)
+  const [packageList, setPackageList] = useState({ packages: [], total: 0 })
+  const [packageListOffset, setPackageListOffset] = useState(0)
+  const [showPublishForm, setShowPublishForm] = useState(false)
+  const [publishForm, setPublishForm] = useState({ ecosystem: 'npm', name: '', version: '', ipfs_cid: '', content_hash: '', publisher_pubkey: '', signature: '' })
+  const [publishStatus, setPublishStatus] = useState(null)
+  const [publisherProfile, setPublisherProfile] = useState(null)
+  const [publisherPackages, setPublisherPackages] = useState([])
 
   const sseRef = useRef(null)
   const searchInputRef = useRef(null)
@@ -310,6 +317,28 @@ function App() {
     }
   }, [])
 
+  const connectMetaMask = useCallback(async () => {
+    try {
+      if (!window.ethereum) {
+        alert('MetaMask not detected. Please install the MetaMask browser extension.')
+        return
+      }
+      const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' })
+      if (!accounts || accounts.length === 0) {
+        alert('No accounts returned from MetaMask.')
+        return
+      }
+      // Create a minimal account-like object compatible with viem's WalletClient.
+      const address = accounts[0]
+      setWalletAccount({ address, type: 'metamask' })
+      setShowWallet(false)
+      setDripResult(null)
+      setStakeResult(null)
+    } catch (err) {
+      alert('MetaMask connection failed: ' + (err.message || err))
+    }
+  }, [])
+
   const disconnectWallet = useCallback(() => {
     setWalletAccount(null)
     setWalletBalance(null)
@@ -405,6 +434,70 @@ function App() {
       }
     } catch { setLookedUpPackage(null) }
   }, [packageQuery])
+
+  const fetchPackageList = useCallback(async (offset = 0) => {
+    try {
+      const res = await fetch(`${API_BASE}/v1/packages?offset=${offset}&limit=20`)
+      if (res.ok) {
+        const data = await res.json()
+        setPackageList(data)
+        setPackageListOffset(offset)
+      }
+    } catch (e) { console.error('Failed to fetch package list:', e) }
+  }, [])
+
+  useEffect(() => {
+    if (view === 'packages') fetchPackageList(packageListOffset)
+  }, [view, fetchPackageList]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const submitPublish = useCallback(async () => {
+    setPublishStatus(null)
+    try {
+      const body = {
+        id: { ecosystem: publishForm.ecosystem, name: publishForm.name, version: publishForm.version },
+        content_hash: publishForm.content_hash,
+        ipfs_cid: publishForm.ipfs_cid,
+        publisher_pubkey: publishForm.publisher_pubkey,
+        signature: publishForm.signature,
+        manifest: { description: '', allowed_network_hosts: [], allowed_fs_writes: [], spawns_processes: false, allowed_process_spawns: [] },
+      }
+      const res = await fetch(`${API_BASE}/v1/packages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (res.ok) {
+        setPublishStatus({ ok: true, msg: 'Package submitted for validation!' })
+        setShowPublishForm(false)
+        setPublishForm({ ecosystem: 'npm', name: '', version: '', ipfs_cid: '', content_hash: '', publisher_pubkey: '', signature: '' })
+        fetchPackageList(0)
+      } else {
+        const err = await res.json().catch(() => ({ error: res.statusText }))
+        setPublishStatus({ ok: false, msg: err.error || 'Submission failed' })
+      }
+    } catch (e) {
+      setPublishStatus({ ok: false, msg: e.message })
+    }
+  }, [publishForm, fetchPackageList])
+
+  const fetchPublisherProfile = useCallback(async (pubkey) => {
+    try {
+      const [profileRes, pkgsRes] = await Promise.all([
+        fetch(`${API_BASE}/v1/publishers/${encodeURIComponent(pubkey)}`),
+        fetch(`${API_BASE}/v1/packages?limit=50`),
+      ])
+      if (profileRes.ok) {
+        setPublisherProfile(await profileRes.json())
+      } else {
+        setPublisherProfile(null)
+      }
+      if (pkgsRes.ok) {
+        const data = await pkgsRes.json()
+        setPublisherPackages(data.packages.filter(p => p.publisher === pubkey))
+      }
+      setView('publisher')
+    } catch (e) { console.error('Publisher profile error:', e) }
+  }, [])
 
   // Derived state
   const totalStaked = useMemo(() => 
@@ -665,8 +758,8 @@ function App() {
             {/* Packages View */}
             {view === 'packages' && (
               <div style={{ padding: 'var(--space-4)' }}>
-                <div style={{ marginBottom: 'var(--space-4)' }}>
-                  <div className="search-box" style={{ maxWidth: '100%' }}>
+                <div style={{ marginBottom: 'var(--space-4)', display: 'flex', gap: 'var(--space-2)' }}>
+                  <div className="search-box" style={{ flex: 1 }}>
                     <span className="search-icon">📦</span>
                     <input
                       type="text"
@@ -677,7 +770,58 @@ function App() {
                       onKeyDown={(e) => e.key === 'Enter' && lookupPackage()}
                     />
                   </div>
+                  <button
+                    className={`nav-tab ${showPublishForm ? 'active' : ''}`}
+                    onClick={() => setShowPublishForm(!showPublishForm)}
+                    style={{ whiteSpace: 'nowrap' }}
+                  >
+                    ➕ Publish
+                  </button>
                 </div>
+
+                {/* Publish Form */}
+                {showPublishForm && (
+                  <div className="detail-panel" style={{ marginBottom: 'var(--space-4)' }}>
+                    <div className="detail-header">
+                      <span className="detail-title">Publish a Package</span>
+                      <button className="detail-close" onClick={() => setShowPublishForm(false)}>✕</button>
+                    </div>
+                    <div className="detail-content" style={{ display: 'grid', gap: 'var(--space-2)' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr 1fr', gap: 'var(--space-2)' }}>
+                        <select
+                          className="search-input"
+                          value={publishForm.ecosystem}
+                          onChange={e => setPublishForm(f => ({ ...f, ecosystem: e.target.value }))}
+                        >
+                          <option value="npm">npm</option>
+                          <option value="pypi">pypi</option>
+                          <option value="cargo">cargo</option>
+                          <option value="go">go</option>
+                        </select>
+                        <input className="search-input" placeholder="Package name" value={publishForm.name}
+                          onChange={e => setPublishForm(f => ({ ...f, name: e.target.value }))} />
+                        <input className="search-input" placeholder="Version (e.g. 1.0.0)" value={publishForm.version}
+                          onChange={e => setPublishForm(f => ({ ...f, version: e.target.value }))} />
+                      </div>
+                      <input className="search-input" placeholder="IPFS CID (bafy...)" value={publishForm.ipfs_cid}
+                        onChange={e => setPublishForm(f => ({ ...f, ipfs_cid: e.target.value }))} />
+                      <input className="search-input" placeholder="Content hash (SHA-256 hex)" value={publishForm.content_hash}
+                        onChange={e => setPublishForm(f => ({ ...f, content_hash: e.target.value }))} />
+                      <input className="search-input" placeholder="Publisher public key (hex)" value={publishForm.publisher_pubkey}
+                        onChange={e => setPublishForm(f => ({ ...f, publisher_pubkey: e.target.value }))} />
+                      <input className="search-input" placeholder="Ed25519 signature (hex)" value={publishForm.signature}
+                        onChange={e => setPublishForm(f => ({ ...f, signature: e.target.value }))} />
+                      <button className="nav-tab active" onClick={submitPublish} style={{ justifySelf: 'end', padding: '8px 24px' }}>
+                        Submit Package
+                      </button>
+                      {publishStatus && (
+                        <span className={`badge ${publishStatus.ok ? 'badge-success' : 'badge-error'}`}>
+                          {publishStatus.msg}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 {lookedUpPackage && (
                   <div className="detail-panel" style={{ marginBottom: 'var(--space-4)' }}>
@@ -693,7 +837,10 @@ function App() {
                         </div>
                         <div className="detail-row">
                           <span className="detail-label">Publisher</span>
-                          <span className="detail-value">{truncateHash(lookedUpPackage.publisher, 10, 6)}</span>
+                          <span className="detail-value" style={{ cursor: 'pointer', textDecoration: 'underline' }}
+                            onClick={() => fetchPublisherProfile(lookedUpPackage.publisher)}>
+                            {truncateHash(lookedUpPackage.publisher, 10, 6)}
+                          </span>
                         </div>
                         <div className="detail-row">
                           <span className="detail-label">Published</span>
@@ -716,6 +863,51 @@ function App() {
                   </div>
                 )}
 
+                {/* On-chain Package List */}
+                {packageList.packages.length > 0 && (
+                  <div className="detail-section" style={{ marginBottom: 'var(--space-4)' }}>
+                    <div className="detail-section-title">On-chain Packages ({packageList.total} total)</div>
+                    <div className="table-container">
+                      <table className="data-table">
+                        <thead>
+                          <tr>
+                            <th>Package</th>
+                            <th>Version</th>
+                            <th>Status</th>
+                            <th>Publisher</th>
+                            <th>Published</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {packageList.packages.map((pkg, idx) => (
+                            <tr key={idx} className="animate-slide-in" style={{ animationDelay: `${idx * 0.03}s`, cursor: 'pointer' }}
+                              onClick={() => { setPackageQuery(pkg.canonical); lookupPackage() }}>
+                              <td style={{ fontWeight: 600 }}>{pkg.ecosystem}:{pkg.name}</td>
+                              <td>{pkg.version}</td>
+                              <td><StatusBadge status={pkg.status} /></td>
+                              <td>{truncateHash(pkg.publisher, 8, 4)}</td>
+                              <td>{timeAgo(pkg.published_at)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 'var(--space-2)' }}>
+                      <button className="nav-tab" disabled={packageListOffset === 0}
+                        onClick={() => fetchPackageList(Math.max(0, packageListOffset - 20))}>
+                        ← Previous
+                      </button>
+                      <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                        Showing {packageListOffset + 1}–{Math.min(packageListOffset + 20, packageList.total)} of {packageList.total}
+                      </span>
+                      <button className="nav-tab" disabled={packageListOffset + 20 >= packageList.total}
+                        onClick={() => fetchPackageList(packageListOffset + 20)}>
+                        Next →
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 <div className="detail-section">
                   <div className="detail-section-title">Pending Packages ({pendingPackages.count})</div>
                   {pendingPackages.packages?.length === 0 ? (
@@ -732,6 +924,78 @@ function App() {
                           <span className="badge badge-warning badge-sm">Pending</span>
                         </div>
                       ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Publisher Profile View */}
+            {view === 'publisher' && publisherProfile && (
+              <div style={{ padding: 'var(--space-4)' }}>
+                <button className="nav-tab" onClick={() => setView('packages')} style={{ marginBottom: 'var(--space-3)' }}>
+                  ← Back to Packages
+                </button>
+                <div className="detail-panel" style={{ marginBottom: 'var(--space-4)' }}>
+                  <div className="detail-header">
+                    <span className="detail-title">👤 Publisher Profile</span>
+                  </div>
+                  <div className="detail-content">
+                    <div className="detail-section">
+                      <div className="detail-row">
+                        <span className="detail-label">Public Key</span>
+                        <CopyButton text={publisherProfile.pubkey} label="pubkey" />
+                      </div>
+                      <div className="detail-row">
+                        <span className="detail-label">Total Packages</span>
+                        <span className="detail-value">{publisherProfile.total_packages}</span>
+                      </div>
+                      <div className="detail-row">
+                        <span className="detail-label">Verified</span>
+                        <span className="badge badge-success">{publisherProfile.verified_count}</span>
+                      </div>
+                      <div className="detail-row">
+                        <span className="detail-label">Revoked</span>
+                        <span className={`badge ${publisherProfile.revoked_count > 0 ? 'badge-error' : 'badge-neutral'}`}>
+                          {publisherProfile.revoked_count}
+                        </span>
+                      </div>
+                      <div className="detail-row">
+                        <span className="detail-label">Stake</span>
+                        <span className="detail-value">{formatStake(publisherProfile.stake_wei || 0)}</span>
+                      </div>
+                      <div className="detail-row">
+                        <span className="detail-label">First Seen</span>
+                        <span className="detail-value">
+                          {publisherProfile.first_seen_at ? timeAgo(publisherProfile.first_seen_at) : 'N/A'}
+                          {publisherProfile.first_seen_days > 0 && ` (${publisherProfile.first_seen_days} days)`}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="detail-section">
+                  <div className="detail-section-title">Packages by this Publisher ({publisherPackages.length})</div>
+                  {publisherPackages.length === 0 ? (
+                    <EmptyState icon="📦" title="No packages found" description="This publisher has no on-chain packages matching the current list." />
+                  ) : (
+                    <div className="table-container">
+                      <table className="data-table">
+                        <thead>
+                          <tr><th>Package</th><th>Version</th><th>Status</th><th>Published</th></tr>
+                        </thead>
+                        <tbody>
+                          {publisherPackages.map((pkg, idx) => (
+                            <tr key={idx}>
+                              <td style={{ fontWeight: 600 }}>{pkg.ecosystem}:{pkg.name}</td>
+                              <td>{pkg.version}</td>
+                              <td><StatusBadge status={pkg.status} /></td>
+                              <td>{timeAgo(pkg.published_at)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
                   )}
                 </div>
@@ -922,6 +1186,16 @@ function App() {
 
             {!walletAccount ? (
               <div className="wallet-panel-body">
+                <div className="wallet-section">
+                  <label className="wallet-label">Browser Wallet</label>
+                  <button
+                    className="wallet-action-btn wallet-action-primary"
+                    onClick={connectMetaMask}
+                    style={{ marginBottom: '12px', width: '100%' }}
+                  >
+                    🦊 Connect MetaMask
+                  </button>
+                </div>
                 <div className="wallet-section">
                   <label className="wallet-label">Private Key (Testnet Only)</label>
                   <input

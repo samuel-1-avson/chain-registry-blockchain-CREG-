@@ -29,10 +29,12 @@ sha2         = { workspace = true }
 hex          = { workspace = true }
 reqwest      = { workspace = true }
 sled         = { workspace = true }
+rocksdb      = { workspace = true }
 ed25519-dalek = { workspace = true }
 rand         = { workspace = true }
 
 axum         = { version = "0.7", features = ["json", "ws"] }
+axum-server  = { version = "0.7", features = ["tls-rustls"], optional = true }
 tower        = { version = "0.4" }
 tower-http   = { version = "0.5", features = ["cors", "trace", "limit"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
@@ -49,3 +51,7 @@ prost        = { workspace = true }
 rust-embed   = "8.0"
 mime_guess   = "2.0"
 semver       = "1"
+
+[features]
+default = []
+tls = ["axum-server"]
