@@ -349,6 +349,53 @@ impl ChainStore {
         false
     }
 
+    /// Return the last-used rotation nonce for the given publisher pubkey.
+    /// Returns 0 if no rotation has been recorded.
+    pub fn publisher_rotation_nonce(&self, pubkey: &str) -> Option<u64> {
+        // Scan all blocks in reverse for the most recent RotatePublisherKey
+        // transaction matching this pubkey.  A dedicated CF would be more
+        // efficient at scale, but this is correct for now.
+        let tip = self.tip_height().ok()?;
+        for h in (0..=tip).rev() {
+            if let Ok(Some(block)) = self.get_block_by_height(h) {
+                for tx in &block.transactions {
+                    if let common::Transaction::RotatePublisherKey {
+                        old_pubkey,
+                        nonce,
+                        ..
+                    } = tx
+                    {
+                        if old_pubkey == pubkey {
+                            return Some(*nonce);
+                        }
+                    }
+                }
+            }
+        }
+        Some(0)
+    }
+
+    /// Return the timestamp of the most recent key rotation by this pubkey.
+    /// Used to enforce a cooldown period between rotations.
+    pub fn publisher_last_rotation_time(
+        &self,
+        pubkey: &str,
+    ) -> Option<chrono::DateTime<chrono::Utc>> {
+        let tip = self.tip_height().ok()?;
+        for h in (0..=tip).rev() {
+            if let Ok(Some(block)) = self.get_block_by_height(h) {
+                for tx in &block.transactions {
+                    if let common::Transaction::RotatePublisherKey { old_pubkey, .. } = tx {
+                        if old_pubkey == pubkey {
+                            return Some(block.timestamp);
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
     // ── Chain stats ───────────────────────────────────────────────────────────
 
     /// List packages with pagination and optional filters.

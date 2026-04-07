@@ -22,11 +22,15 @@ const localChain = {
   rpcUrls: { default: { http: [RPC_URL] } },
 }
 
-const ANVIL_TEST_ACCOUNTS = [
+// W8 fix: Only expose Anvil test accounts in development/testnet mode.
+// In production builds (VITE_NETWORK=mainnet), these are never shown.
+const IS_TESTNET = typeof __IS_TESTNET__ !== 'undefined' ? __IS_TESTNET__ : (import.meta.env.VITE_NETWORK || 'testnet') !== 'mainnet'
+
+const ANVIL_TEST_ACCOUNTS = IS_TESTNET ? [
   { label: 'Account #2', key: '0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a' },
   { label: 'Account #3', key: '0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6' },
   { label: 'Account #4', key: '0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a' },
-]
+] : []
 
 const ERC20_ABI = [
   { name: 'balanceOf', type: 'function', stateMutability: 'view',
@@ -70,6 +74,37 @@ const timeAgo = (timestamp) => {
 const truncateHash = (hash, start = 8, end = 8) => {
   if (!hash || hash.length <= start + end) return hash
   return `${hash.slice(0, start)}...${hash.slice(-end)}`
+}
+
+// ============================================
+// ERROR BOUNDARY
+// ============================================
+
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props)
+    this.state = { hasError: false, error: null }
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error }
+  }
+  componentDidCatch(error, info) {
+    console.error('Explorer error:', error, info)
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ padding: 40, textAlign: 'center', color: '#f87171', fontFamily: 'monospace' }}>
+          <h2>Something went wrong</h2>
+          <pre style={{ whiteSpace: 'pre-wrap', fontSize: 13 }}>{this.state.error?.message}</pre>
+          <button onClick={() => window.location.reload()} style={{ marginTop: 16, padding: '8px 24px', cursor: 'pointer' }}>
+            Reload
+          </button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
 }
 
 // ============================================
@@ -147,6 +182,7 @@ function App() {
   const [selectedBlock, setSelectedBlock] = useState(null)
   const [status, setStatus] = useState('connecting')
   const [isLoading, setIsLoading] = useState(true)
+  const [fetchError, setFetchError] = useState(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [isSearchFocused, setIsSearchFocused] = useState(false)
 
@@ -161,10 +197,14 @@ function App() {
   const [stakeResult, setStakeResult] = useState(null)
   const [stakeAmount, setStakeAmount] = useState('')
 
+  // EIP-6963: multi-provider wallet discovery (W10/I1 fix)
+  const [eip6963Providers, setEip6963Providers] = useState([])
+
   // Package state
   const [pendingPackages, setPendingPackages] = useState({ count: 0, packages: [] })
   const [packageQuery, setPackageQuery] = useState('')
   const [lookedUpPackage, setLookedUpPackage] = useState(null)
+  const [packageLookupLoading, setPackageLookupLoading] = useState(false)
   const [packageList, setPackageList] = useState({ packages: [], total: 0 })
   const [packageListOffset, setPackageListOffset] = useState(0)
   const [showPublishForm, setShowPublishForm] = useState(false)
@@ -218,13 +258,15 @@ function App() {
       } catch (e) { /* endpoint may not exist yet */ }
 
       setStatus('online')
+      setFetchError(null)
       setIsLoading(false)
     } catch (err) {
       console.error('Fetch error:', err)
+      setFetchError(err.message || 'Failed to connect to node')
       setStatus('offline')
       setIsLoading(false)
     }
-  }, [blocks.length])
+  }, [])
 
   // Initial fetch and polling
   useEffect(() => {
@@ -235,8 +277,13 @@ function App() {
 
   // SSE Event Stream
   useEffect(() => {
+    let retryCount = 0
+    const MAX_RETRIES = 10
+    let retryTimeout = null
+
     const initSSE = () => {
       const es = new EventSource(`${API_BASE}/v1/events`)
+      es.onopen = () => { retryCount = 0 }
       es.onmessage = (e) => {
         try {
           const ev = JSON.parse(e.data)
@@ -248,13 +295,33 @@ function App() {
       }
       es.onerror = () => {
         es.close()
-        setTimeout(initSSE, 3000)
+        if (retryCount < MAX_RETRIES) {
+          const delay = Math.min(1000 * Math.pow(2, retryCount), 30000)
+          retryCount++
+          retryTimeout = setTimeout(initSSE, delay)
+        }
       }
       sseRef.current = es
     }
 
     initSSE()
-    return () => sseRef.current?.close()
+    return () => {
+      sseRef.current?.close()
+      if (retryTimeout) clearTimeout(retryTimeout)
+    }
+  }, [])
+
+  // EIP-6963: Discover all injected wallet providers (W10 fix)
+  useEffect(() => {
+    const providers = []
+    const handler = (event) => {
+      providers.push(event.detail)
+      setEip6963Providers([...providers])
+    }
+    window.addEventListener('eip6963:announceProvider', handler)
+    // Request announcements from all injected providers
+    window.dispatchEvent(new Event('eip6963:requestProvider'))
+    return () => window.removeEventListener('eip6963:announceProvider', handler)
   }, [])
 
   // Keyboard shortcuts
@@ -285,11 +352,6 @@ function App() {
         if (res.ok) {
           const data = await res.json()
           const rawBal = data.balance || data.formatted || '0'
-          try {
-            setWalletBalance(formatUnits(BigInt(rawBal), 18))
-          } catch {
-            setWalletBalance(rawBal)
-          }
           try {
             setWalletBalance(formatUnits(BigInt(rawBal), 18))
           } catch {
@@ -336,6 +398,64 @@ function App() {
       setStakeResult(null)
     } catch (err) {
       alert('MetaMask connection failed: ' + (err.message || err))
+    }
+  }, [])
+
+  // EIP-6963: Connect via a discovered provider (W10/I1 fix)
+  const connectEip6963 = useCallback(async (providerDetail) => {
+    try {
+      const provider = providerDetail.provider
+      const accounts = await provider.request({ method: 'eth_requestAccounts' })
+      if (!accounts || accounts.length === 0) {
+        alert('No accounts returned from ' + (providerDetail.info?.name || 'wallet') + '.')
+        return
+      }
+      const address = accounts[0]
+      setWalletAccount({ address, type: 'eip6963', providerName: providerDetail.info?.name })
+      setShowWallet(false)
+      setDripResult(null)
+      setStakeResult(null)
+    } catch (err) {
+      alert('Wallet connection failed: ' + (err.message || err))
+    }
+  }, [])
+
+  // G4: WalletConnect v2 connection
+  const connectWalletConnect = useCallback(async () => {
+    try {
+      const { EthereumProvider } = await import('@walletconnect/ethereum-provider')
+      const projectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID
+      if (!projectId) {
+        alert('WalletConnect requires VITE_WALLETCONNECT_PROJECT_ID env var. Get one at https://cloud.walletconnect.com')
+        return
+      }
+      const provider = await EthereumProvider.init({
+        projectId,
+        chains: [localChain.id],
+        showQrModal: true,
+        metadata: {
+          name: 'Chain Registry Explorer',
+          description: 'Package registry blockchain explorer',
+          url: window.location.origin,
+          icons: [],
+        },
+      })
+      await provider.enable()
+      const accounts = provider.accounts
+      if (!accounts || accounts.length === 0) {
+        alert('No accounts returned from WalletConnect.')
+        return
+      }
+      setWalletAccount({ address: accounts[0], type: 'walletconnect' })
+      setShowWallet(false)
+      setDripResult(null)
+      setStakeResult(null)
+    } catch (err) {
+      if (err?.message?.includes('User rejected') || err?.code === 4001) {
+        // User closed the modal — not an error
+        return
+      }
+      alert('WalletConnect failed: ' + (err.message || err))
     }
   }, [])
 
@@ -425,6 +545,7 @@ function App() {
 
   const lookupPackage = useCallback(async () => {
     if (!packageQuery) return
+    setPackageLookupLoading(true)
     try {
       const res = await fetch(`${API_BASE}/v1/packages/${encodeURIComponent(packageQuery)}`)
       if (res.ok) {
@@ -433,6 +554,7 @@ function App() {
         setLookedUpPackage(null)
       }
     } catch { setLookedUpPackage(null) }
+    finally { setPackageLookupLoading(false) }
   }, [packageQuery])
 
   const fetchPackageList = useCallback(async (offset = 0) => {
@@ -448,10 +570,38 @@ function App() {
 
   useEffect(() => {
     if (view === 'packages') fetchPackageList(packageListOffset)
-  }, [view, fetchPackageList]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [view, fetchPackageList, packageListOffset])
 
   const submitPublish = useCallback(async () => {
     setPublishStatus(null)
+
+    // E-08: Validate inputs before submission
+    const { ecosystem, name, version, content_hash, ipfs_cid, publisher_pubkey, signature } = publishForm
+    if (!name || !name.trim()) {
+      setPublishStatus({ ok: false, msg: 'Package name is required' })
+      return
+    }
+    if (!version || !/^\d+\.\d+\.\d+/.test(version)) {
+      setPublishStatus({ ok: false, msg: 'Version must be valid semver (e.g. 1.0.0)' })
+      return
+    }
+    if (!content_hash || !/^[a-f0-9]{64}$/i.test(content_hash)) {
+      setPublishStatus({ ok: false, msg: 'Content hash must be a 64-char hex SHA-256' })
+      return
+    }
+    if (!ipfs_cid || !/^(Qm[a-zA-Z0-9]{44}|bafy[a-zA-Z0-9]+)$/.test(ipfs_cid)) {
+      setPublishStatus({ ok: false, msg: 'IPFS CID looks invalid (expected Qm... or bafy...)' })
+      return
+    }
+    if (!publisher_pubkey || !/^[a-f0-9]{64}$/i.test(publisher_pubkey)) {
+      setPublishStatus({ ok: false, msg: 'Publisher public key must be 64 hex chars' })
+      return
+    }
+    if (!signature || signature.length < 64) {
+      setPublishStatus({ ok: false, msg: 'Signature is required' })
+      return
+    }
+
     try {
       const body = {
         id: { ecosystem: publishForm.ecosystem, name: publishForm.name, version: publishForm.version },
@@ -463,7 +613,7 @@ function App() {
       }
       const res = await fetch(`${API_BASE}/v1/packages`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'CregExplorer' },
         body: JSON.stringify(body),
       })
       if (res.ok) {
@@ -578,6 +728,15 @@ function App() {
             <SkeletonCard />
             <SkeletonCard />
           </>
+        ) : fetchError ? (
+          <div className="stat-card" style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '2rem' }}>
+            <div style={{ color: '#f87171', fontSize: '1.2rem', marginBottom: '0.5rem' }}>⚠ Connection Error</div>
+            <div style={{ color: '#888', fontSize: '0.9rem' }}>{fetchError}</div>
+            <button onClick={() => { setIsLoading(true); setFetchError(null); fetchData() }}
+              style={{ marginTop: '1rem', padding: '6px 16px', cursor: 'pointer', background: 'var(--primary)', color: '#fff', border: 'none', borderRadius: '6px' }}>
+              Retry
+            </button>
+          </div>
         ) : (
           <>
             <div className="stat-card highlight">
@@ -880,8 +1039,15 @@ function App() {
                         </thead>
                         <tbody>
                           {packageList.packages.map((pkg, idx) => (
-                            <tr key={idx} className="animate-slide-in" style={{ animationDelay: `${idx * 0.03}s`, cursor: 'pointer' }}
-                              onClick={() => { setPackageQuery(pkg.canonical); lookupPackage() }}>
+                            <tr key={pkg.canonical || idx} className="animate-slide-in" style={{ animationDelay: `${idx * 0.03}s`, cursor: 'pointer' }}
+                              onClick={() => {
+                                setPackageQuery(pkg.canonical)
+                                // Lookup directly with the canonical name to avoid stale closure
+                                fetch(`${API_BASE}/v1/packages/${encodeURIComponent(pkg.canonical)}`)
+                                  .then(r => r.ok ? r.json() : null)
+                                  .then(data => setLookedUpPackage(data))
+                                  .catch(() => setLookedUpPackage(null))
+                              }}>
                               <td style={{ fontWeight: 600 }}>{pkg.ecosystem}:{pkg.name}</td>
                               <td>{pkg.version}</td>
                               <td><StatusBadge status={pkg.status} /></td>
@@ -1139,7 +1305,7 @@ function App() {
                               {ev.event_type?.replace(/_/g, ' ')}
                             </div>
                             <div className="event-description">
-                              {ev.payload}
+                              {typeof ev.payload === 'object' ? JSON.stringify(ev.payload, null, 2) : ev.payload}
                             </div>
                           </div>
                           <span className="event-time">{timeAgo(ev.timestamp)}</span>
@@ -1168,7 +1334,9 @@ function App() {
           <div 
             className="bridge-progress-fill" 
             style={{ 
-              width: bridgeStatus.bridge_sync_status === 'Synced' ? '100%' : '40%',
+              width: bridgeStatus.bridge_sync_status === 'Synced' ? '100%'
+                   : bridgeStatus.bridge_sync_progress ? `${Math.min(100, bridgeStatus.bridge_sync_progress)}%`
+                   : '10%',
               opacity: bridgeStatus.bridge_sync_status === 'Synced' ? 1 : 0.6
             }} 
           />
@@ -1188,32 +1356,70 @@ function App() {
               <div className="wallet-panel-body">
                 <div className="wallet-section">
                   <label className="wallet-label">Browser Wallet</label>
+                  {eip6963Providers.length > 0 ? (
+                    <div className="wallet-quick-accounts">
+                      {eip6963Providers.map((p, i) => (
+                        <button
+                          key={p.info?.uuid || i}
+                          className="wallet-action-btn wallet-action-primary"
+                          onClick={() => connectEip6963(p)}
+                          style={{ marginBottom: '8px', width: '100%', display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'center' }}
+                        >
+                          {p.info?.icon && <img src={p.info.icon} alt="" style={{ width: 20, height: 20 }} />}
+                          {p.info?.name || 'Unknown Wallet'}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <button
+                      className="wallet-action-btn wallet-action-primary"
+                      onClick={connectMetaMask}
+                      style={{ marginBottom: '12px', width: '100%' }}
+                    >
+                      🦊 Connect MetaMask
+                    </button>
+                  )}
+                </div>
+                <div className="wallet-section">
+                  <label className="wallet-label">WalletConnect (Mobile + Desktop)</label>
                   <button
                     className="wallet-action-btn wallet-action-primary"
-                    onClick={connectMetaMask}
+                    onClick={connectWalletConnect}
                     style={{ marginBottom: '12px', width: '100%' }}
                   >
-                    🦊 Connect MetaMask
+                    📱 Connect via WalletConnect
                   </button>
                 </div>
                 <div className="wallet-section">
-                  <label className="wallet-label">Private Key (Testnet Only)</label>
-                  <input
-                    type="password"
-                    className="wallet-input"
-                    placeholder="0x..."
-                    value={walletKeyInput}
-                    onChange={(e) => setWalletKeyInput(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && walletKeyInput && connectWallet(walletKeyInput)}
-                  />
-                  <button
-                    className="wallet-action-btn wallet-action-primary"
-                    onClick={() => connectWallet(walletKeyInput)}
-                    disabled={!walletKeyInput}
-                  >
-                    Connect
-                  </button>
+                  <label className="wallet-label">Private Key {IS_TESTNET ? '(Testnet Only)' : ''}</label>
+                  {!IS_TESTNET && (
+                    <div className="wallet-result warning">
+                      Direct private key input is disabled on mainnet. Use MetaMask or a hardware wallet.
+                    </div>
+                  )}
+                  {IS_TESTNET && (
+                    <>
+                      <input
+                        type="password"
+                        className="wallet-input"
+                        placeholder="0x..."
+                        autoComplete="off"
+                        spellCheck="false"
+                        value={walletKeyInput}
+                        onChange={(e) => setWalletKeyInput(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && walletKeyInput && connectWallet(walletKeyInput)}
+                      />
+                      <button
+                        className="wallet-action-btn wallet-action-primary"
+                        onClick={() => connectWallet(walletKeyInput)}
+                        disabled={!walletKeyInput}
+                      >
+                        Connect
+                      </button>
+                    </>
+                  )}
                 </div>
+                {ANVIL_TEST_ACCOUNTS.length > 0 && (
                 <div className="wallet-section">
                   <label className="wallet-label">Quick Connect (Anvil Test Accounts)</label>
                   <div className="wallet-quick-accounts">
@@ -1228,6 +1434,7 @@ function App() {
                     ))}
                   </div>
                 </div>
+                )}
               </div>
             ) : (
               <div className="wallet-panel-body">
@@ -1311,4 +1518,12 @@ function App() {
   )
 }
 
-export default App
+function AppWithBoundary() {
+  return (
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
+  )
+}
+
+export default AppWithBoundary

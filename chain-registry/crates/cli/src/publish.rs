@@ -479,14 +479,189 @@ fn encrypt_for_validators(data: &[u8]) -> Result<(Vec<u8>, String)> {
         .encrypt(nonce, data)
         .map_err(|e| anyhow::anyhow!("Encryption failed: {}", e))?;
 
-    // 3. Wrap key for validators (Demo: use a cluster-wide shared secret or ECIES)
-    // For this implementation, we bundle the AES key + nonce.
-    // In production, this entire string is encrypted with the Validator Set's Master PubKey.
-    let bundle = format!("{}:{}", hex::encode(aes_key), hex::encode(nonce_bytes));
+    // 3. Encrypt the key bundle with the validator set's X25519 public key (ECIES)
+    let raw_bundle = format!("{}:{}", hex::encode(aes_key), hex::encode(nonce_bytes));
+
+    let bundle = {
+        // Try to read the validator set's X25519 public key from env
+        match std::env::var("CREG_VALIDATOR_PUBKEY_X25519") {
+            Ok(pubkey_hex) => {
+                use x25519_dalek::{PublicKey, EphemeralSecret};
+                use sha2::{Sha256, Digest};
+
+                let pubkey_bytes: [u8; 32] = hex::decode(&pubkey_hex)
+                    .context("Invalid CREG_VALIDATOR_PUBKEY_X25519 hex")?
+                    .try_into()
+                    .map_err(|_| anyhow::anyhow!("X25519 pubkey must be 32 bytes"))?;
+                let their_public = PublicKey::from(pubkey_bytes);
+
+                // ECIES: ephemeral X25519 key exchange → derive AES key → encrypt bundle
+                let ephemeral_secret = EphemeralSecret::random_from_rng(thread_rng());
+                let ephemeral_public = x25519_dalek::PublicKey::from(&ephemeral_secret);
+                let shared_secret = ephemeral_secret.diffie_hellman(&their_public);
+
+                // KDF: SHA-256(shared_secret)
+                let wrap_key_bytes = Sha256::digest(shared_secret.as_bytes());
+                let wrap_key = Key::<Aes256Gcm>::from_slice(&wrap_key_bytes);
+                let wrap_cipher = Aes256Gcm::new(wrap_key);
+
+                let mut wrap_nonce_bytes = [0u8; 12];
+                thread_rng().fill_bytes(&mut wrap_nonce_bytes);
+                let wrap_nonce = Nonce::from_slice(&wrap_nonce_bytes);
+
+                let encrypted_bundle = wrap_cipher
+                    .encrypt(wrap_nonce, raw_bundle.as_bytes())
+                    .map_err(|e| anyhow::anyhow!("Bundle encryption failed: {}", e))?;
+
+                // Format: ephemeral_pubkey_hex:wrap_nonce_hex:encrypted_bundle_hex
+                format!(
+                    "ecies:{}:{}:{}",
+                    hex::encode(ephemeral_public.as_bytes()),
+                    hex::encode(wrap_nonce_bytes),
+                    hex::encode(encrypted_bundle)
+                )
+            }
+            Err(_) => {
+                eprintln!("  {} CREG_VALIDATOR_PUBKEY_X25519 not set — key bundle is plaintext (dev mode only)", "⚠".to_string());
+                format!("plain:{}", raw_bundle)
+            }
+        }
+    };
 
     // Prepend nonce to ciphertext for easier retrieval
     let mut final_payload = nonce_bytes.to_vec();
     final_payload.extend(ciphertext);
 
     Ok((final_payload, bundle))
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Offline signing (I3 improvement)
+// ────────────────────────────────────────────────────────────────────────────
+
+/// Produce a signed publish request and write it to a JSON file on disk
+/// instead of submitting it to the node.  The file can later be submitted
+/// from a network-connected machine with `creg submit-signed <file>`.
+pub async fn sign_offline(
+    tarball_path: &Path,
+    manifest_path: Option<&Path>,
+    privkey_hex: &str,
+    extra_privkeys: &[String],
+    shield: bool,
+    output_path: &Path,
+) -> Result<()> {
+    use ed25519_dalek::{Signer, SigningKey};
+
+    // 1. Read and hash the tarball
+    let tarball_bytes = std::fs::read(tarball_path)
+        .with_context(|| format!("Cannot read tarball: {}", tarball_path.display()))?;
+    let content_hash = common::sha256_hex(&tarball_bytes);
+
+    // 2. Pin to IPFS (IPFS must still be available)
+    let ipfs_cid = pin_to_ipfs(&tarball_bytes).await?;
+    let mut final_ipfs_cid = ipfs_cid.clone();
+    let mut key_bundle = None;
+
+    if shield {
+        let (encrypted_bytes, bundle) = encrypt_for_validators(&tarball_bytes)?;
+        final_ipfs_cid = pin_to_ipfs(&encrypted_bytes).await?;
+        key_bundle = Some(bundle);
+    }
+
+    // 3. Load manifest
+    let manifest: PackageManifest = match manifest_path {
+        Some(p) => serde_json::from_str(&std::fs::read_to_string(p)?)?,
+        None => PackageManifest::default(),
+    };
+
+    // 4. Detect package identity
+    let pkg_id = detect_package_id(&tarball_bytes)?;
+
+    // 5. Sign with Ed25519
+    let privkey_bytes = hex::decode(privkey_hex.trim()).context("Invalid private key hex")?;
+    let signing_key = SigningKey::try_from(privkey_bytes.as_slice())
+        .context("Invalid Ed25519 private key")?;
+    let pubkey = signing_key.verifying_key();
+
+    let msg = format!("{}{}", pkg_id.canonical(), content_hash);
+    let signature = signing_key.sign(msg.as_bytes());
+
+    let mut publisher_pubkeys = vec![hex::encode(pubkey.as_bytes())];
+    let mut signatures = vec![hex::encode(signature.to_bytes())];
+
+    for key_hex in extra_privkeys {
+        let key_bytes = hex::decode(key_hex.trim())?;
+        let sk = SigningKey::try_from(key_bytes.as_slice())?;
+        let pk = sk.verifying_key();
+        let sig = sk.sign(msg.as_bytes());
+        publisher_pubkeys.push(hex::encode(pk.as_bytes()));
+        signatures.push(hex::encode(sig.to_bytes()));
+    }
+
+    let (pgp_signature, pgp_public_key) = sign_with_pgp_if_configured(&tarball_bytes)?;
+
+    let request = PublishRequest {
+        id: pkg_id.clone(),
+        content_hash,
+        ipfs_cid: final_ipfs_cid,
+        publisher_pubkey: publisher_pubkeys[0].clone(),
+        signature: signatures[0].clone(),
+        manifest,
+        submitted_at: Utc::now(),
+        shielded: shield,
+        key_bundle,
+        pgp_signature,
+        pgp_public_key,
+        publisher_pubkeys: publisher_pubkeys.clone(),
+        signatures: signatures.clone(),
+        threshold: if publisher_pubkeys.len() >= 2 { 2 } else { 1 },
+        ..Default::default()
+    };
+
+    // 6. Write to file
+    let json = serde_json::to_string_pretty(&request)
+        .context("Failed to serialize publish request")?;
+    std::fs::write(output_path, &json)
+        .with_context(|| format!("Cannot write to {}", output_path.display()))?;
+
+    println!("  ✓ Signed publish request written to {}", output_path.display());
+    println!("    Package: {}", pkg_id.canonical());
+    println!("    Pubkey:  {}", publisher_pubkeys[0]);
+    println!();
+    println!("  Submit from a networked machine with:");
+    println!("    creg submit-signed {}", output_path.display());
+
+    Ok(())
+}
+
+/// Submit a previously signed publish request from a JSON file.
+pub async fn submit_signed(signed_file: &Path, node_url: Option<&str>) -> Result<()> {
+    let json = std::fs::read_to_string(signed_file)
+        .with_context(|| format!("Cannot read signed file: {}", signed_file.display()))?;
+    let request: PublishRequest = serde_json::from_str(&json)
+        .context("Invalid signed publish request JSON")?;
+
+    println!("  Submitting offline-signed package: {}", request.id.canonical());
+
+    let url = format!(
+        "{}/v1/packages",
+        node_url.unwrap_or("https://registry.chain-pkg.io").trim_end_matches('/')
+    );
+
+    let resp = reqwest::Client::new()
+        .post(&url)
+        .json(&request)
+        .send()
+        .await
+        .context("Failed to reach registry node")?;
+
+    if resp.status().is_success() {
+        println!("  ✓ Package submitted to pending pool from offline signature.");
+    } else {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        bail!("✗ Submission failed: HTTP {}: {}", status, body);
+    }
+
+    Ok(())
 }

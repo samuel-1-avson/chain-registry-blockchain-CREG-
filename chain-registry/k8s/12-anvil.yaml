@@ -25,27 +25,25 @@ spec:
           imagePullPolicy: IfNotPresent
           command: ["anvil"]
           args:
-            - "--fork-url"
-            - ""  # Empty for dev mode, or set real RPC
-            - "--chain-id"
-            - "31337"
-            - "--block-time"
-            - "12"
-            - "--accounts"
-            - "10"
-            - "--balance"
-            - "10000"
             - "--host"
             - "0.0.0.0"
             - "--port"
             - "8545"
+            - "--chain-id"
+            - "31337"
+            - "--block-time"
+            - "1"
+            - "--accounts"
+            - "10"
+            - "--balance"
+            - "10000"
           ports:
             - containerPort: 8545
               name: rpc
               protocol: TCP
           env:
-            - name: ANVIL_FORK_URL
-              value: ""  # Set to fork from mainnet/testnet
+            - name: ANVIL_IP_ADDR
+              value: "0.0.0.0"
           resources:
             requests:
               memory: "512Mi"

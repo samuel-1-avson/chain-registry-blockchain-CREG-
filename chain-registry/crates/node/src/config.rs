@@ -60,6 +60,11 @@ pub struct NodeConfig {
     pub node_id: String,
     /// This node's Ed25519 private key (hex). Used to sign validator votes.
     pub validator_privkey: Option<String>,
+    /// Separate secp256k1 private key for Ethereum bridge operations.
+    /// If unset, falls back to `validator_privkey` (legacy single-key mode).
+    /// Setting a dedicated bridge key reduces blast radius: compromise of
+    /// one key does not affect the other. (I4 improvement)
+    pub bridge_privkey: Option<String>,
     /// Whether this node is a validator (votes on packages).
     pub is_validator: bool,
     /// Peer node URLs for gossip and consensus message forwarding.
@@ -104,6 +109,7 @@ impl NodeConfig {
             data_dir: PathBuf::from(env("CREG_DATA_DIR", "./data")),
             node_id: env("CREG_NODE_ID", &Uuid::new_v4().to_string()),
             validator_privkey: std::env::var("CREG_VALIDATOR_KEY").ok(),
+            bridge_privkey: std::env::var("CREG_BRIDGE_KEY").ok(),
             is_validator: env("CREG_IS_VALIDATOR", "false") == "true",
             peers: std::env::var("CREG_PEERS")
                 .unwrap_or_default()
@@ -157,6 +163,18 @@ impl NodeConfig {
                     bytes.len()
                 )),
                 Err(_) => errors.push("CREG_VALIDATOR_KEY is not valid hex".into()),
+            }
+        }
+
+        // Validate the dedicated bridge key if set (I4).
+        if let Some(key) = &self.bridge_privkey {
+            match hex::decode(key) {
+                Ok(bytes) if bytes.len() == 32 => {}
+                Ok(bytes) => errors.push(format!(
+                    "CREG_BRIDGE_KEY must be 32 bytes (64 hex chars), got {} bytes",
+                    bytes.len()
+                )),
+                Err(_) => errors.push("CREG_BRIDGE_KEY is not valid hex".into()),
             }
         }
 

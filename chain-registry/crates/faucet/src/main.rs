@@ -10,8 +10,8 @@ use alloy::{
     sol,
 };
 use axum::{
-    extract::{Json, State},
-    http::StatusCode,
+    extract::{ConnectInfo, Json, State},
+    http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse, Json as JsonResponse},
     routing::{get, post},
     Router,
@@ -232,7 +232,7 @@ async fn main() -> anyhow::Result<()> {
         .layer(cors)
         .with_state(state);
 
-    let port = env_u16("FAUCET_PORT", 8081);
+    let port = env_u16("FAUCET_PORT", 8082);
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
 
     // ── Optional TLS ──────────────────────────────────────────────────────────
@@ -262,7 +262,7 @@ async fn main() -> anyhow::Result<()> {
     info!("Faucet listening on http://{}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await?;
 
     Ok(())
 }
@@ -403,6 +403,8 @@ fn verify_pow(challenge: &str, nonce: &str, difficulty: u8) -> bool {
 /// Handle drip request
 async fn handle_drip(
     State(state): State<Arc<AppState>>,
+    ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     Json(request): Json<DripRequest>,
 ) -> impl IntoResponse {
     let address = request.address.to_lowercase();
@@ -483,8 +485,19 @@ async fn handle_drip(
         );
     }
 
-    // Get client IP (in production, extract from headers)
-    let client_ip = "0.0.0.0".to_string();
+    // Extract client IP from X-Forwarded-For / X-Real-IP headers, fallback to socket peer
+    let client_ip = headers
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.split(',').next())
+        .map(|s| s.trim().to_string())
+        .or_else(|| {
+            headers
+                .get("x-real-ip")
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.trim().to_string())
+        })
+        .unwrap_or_else(|| peer_addr.ip().to_string());
 
     // Check rate limits
     let cooldown = Duration::from_secs(state.config.cooldown_secs);

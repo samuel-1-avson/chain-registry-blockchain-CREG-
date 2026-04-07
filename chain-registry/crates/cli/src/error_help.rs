@@ -55,14 +55,14 @@ fn print_key_help() {
 
 fn print_stake_help() {
     eprintln!("\n{}", "Staking Information:".bold());
-    eprintln!("  • Publisher minimum: 0.1 CREG");
-    eprintln!("  • Validator minimum: 10 CREG");
+    eprintln!("  • Publisher minimum: 1 CREG");
+    eprintln!("  • Validator minimum: 100 CREG");
     eprintln!();
     eprintln!("  1. Stake as publisher:");
-    eprintln!("     {}", "creg stake 0.1".cyan());
+    eprintln!("     {}", "creg stake 1 --key-file /path/to/key".cyan());
     eprintln!();
     eprintln!("  2. Stake as validator:");
-    eprintln!("     {}", "creg stake 10 validator --key $KEY".cyan());
+    eprintln!("     {}", "creg stake 100 --role validator --key-file /path/to/key".cyan());
     eprintln!();
     eprintln!("  3. Check your balance:");
     eprintln!("     {}", "cast balance $ADDRESS --rpc-url $RPC".cyan());

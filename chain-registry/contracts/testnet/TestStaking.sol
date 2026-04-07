@@ -35,7 +35,7 @@ contract TestStaking {
     /// @notice Staking parameters (relaxed for testnet)
     uint256 public minPublisherStake = 0.001 ether; // 0.001 tCREG (was 0.1)
     uint256 public minValidatorStake = 0.1 ether;   // 0.1 tCREG (was 10)
-    uint256 public unbondingPeriod = 0;             // INSTANT - no waiting period
+    uint256 public unbondingPeriod = 300;              // 5 minutes for testnet (mainnet: 14 days)
     
     /// @notice Mappings
     mapping(address => ValidatorEntry) public validators;
@@ -46,6 +46,9 @@ contract TestStaking {
     /// @notice Operator can perform admin actions
     address public operator;
     
+    /// @notice Slash pool - accumulates slashed tokens for redistribution
+    uint256 public slashPool;
+    
     /// @notice Events
     event PublisherStaked(address indexed publisher, uint256 amount);
     event PublisherUnstaked(address indexed publisher, uint256 amount);
@@ -54,6 +57,7 @@ contract TestStaking {
     event ValidatorExited(address indexed validator);
     event ValidatorWithdrawn(address indexed validator, uint256 amount);
     event Slashed(address indexed validator, uint256 amount);
+    event SlashPoolDistributed(uint256 totalDistributed, uint256 recipientCount);
     
     modifier onlyOperator() {
         require(msg.sender == operator, "Not operator");
@@ -153,41 +157,37 @@ contract TestStaking {
     }
     
     /**
-     * @notice Exit validator role and withdraw stake INSTANTLY (no waiting)
+     * @notice Exit validator role and begin unbonding period
      */
     function exitValidator() external {
         ValidatorEntry storage v = validators[msg.sender];
         require(v.state == ValidatorState.Active, "Not active validator");
         
-        uint256 amount = v.stake;
-        v.stake = 0;
-        v.state = ValidatorState.None;
-        v.unbondingAt = block.timestamp; // Record for audit only
-        
-        // INSTANT transfer - no waiting period
-        cregToken.transfer(msg.sender, amount);
+        v.state = ValidatorState.Exiting;
+        v.unbondingAt = block.timestamp + unbondingPeriod;
         
         emit ValidatorExited(msg.sender);
-        emit ValidatorWithdrawn(msg.sender, amount);
     }
     
     /**
-     * @notice Withdraw validator stake immediately (no unbonding period)
+     * @notice Withdraw validator stake after unbonding period completes
      */
     function withdrawValidatorStake() external {
         ValidatorEntry storage v = validators[msg.sender];
         require(
-            v.state == ValidatorState.Active || 
             v.state == ValidatorState.Exiting || 
             v.state == ValidatorState.Slashed,
-            "No stake to withdraw"
+            "Not in exiting or slashed state"
+        );
+        require(
+            block.timestamp >= v.unbondingAt,
+            "Unbonding period not complete"
         );
         
         uint256 amount = v.stake;
         v.stake = 0;
         v.state = ValidatorState.None;
         
-        // INSTANT - no waiting ever
         cregToken.transfer(msg.sender, amount);
         
         emit ValidatorWithdrawn(msg.sender, amount);
@@ -227,7 +227,7 @@ contract TestStaking {
     // ============ Admin Functions ============
     
     /**
-     * @notice Slash a validator (remove portion of stake)
+     * @notice Slash a validator (remove portion of stake, add to slash pool)
      */
     function slash(address validator, uint256 amount) external onlyOperator {
         ValidatorEntry storage v = validators[validator];
@@ -238,12 +238,45 @@ contract TestStaking {
         
         if (v.slashCount >= 3) {
             v.state = ValidatorState.Slashed;
+            v.unbondingAt = block.timestamp + unbondingPeriod;
         }
         
-        // Burn slashed tokens
-        cregToken.burn(amount);
+        // Accumulate to slash pool for redistribution (mainnet parity)
+        slashPool += amount;
         
         emit Slashed(validator, amount);
+    }
+    
+    /**
+     * @notice Distribute accumulated slash pool to active validators
+     * @dev Mirrors mainnet Staking.sol distributeSlashPool logic
+     */
+    function distributeSlashPool() external onlyOperator {
+        require(slashPool > 0, "No slashed funds to distribute");
+        
+        // Count active validators
+        uint256 activeCount = 0;
+        for (uint i = 0; i < validatorList.length; i++) {
+            if (validators[validatorList[i]].state == ValidatorState.Active) {
+                activeCount++;
+            }
+        }
+        require(activeCount > 0, "No active validators");
+        
+        uint256 sharePerValidator = slashPool / activeCount;
+        uint256 distributed = 0;
+        
+        for (uint i = 0; i < validatorList.length; i++) {
+            if (validators[validatorList[i]].state == ValidatorState.Active) {
+                validators[validatorList[i]].stake += sharePerValidator;
+                distributed += sharePerValidator;
+            }
+        }
+        
+        // Any dust remains in the pool for next distribution
+        slashPool -= distributed;
+        
+        emit SlashPoolDistributed(distributed, activeCount);
     }
     
     /**

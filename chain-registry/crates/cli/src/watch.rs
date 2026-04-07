@@ -41,49 +41,83 @@ pub async fn run(filter: Option<&str>, node_url: Option<&str>, ci_mode: bool) ->
         .timeout(std::time::Duration::from_secs(300))
         .build()?;
 
-    let mut response = client
-        .get(&url)
-        .header("Accept", "text/event-stream")
-        .send()
-        .await
-        .context("Failed to connect to event stream")?;
+    let mut retry_count = 0u32;
+    let max_retries = 10u32;
 
-    if !response.status().is_success() {
-        anyhow::bail!("Server returned {}", response.status());
-    }
-
-    let mut buffer = String::new();
-
-    loop {
-        // Read chunks from the SSE stream.
-        let chunk = match response.chunk().await {
-            Ok(Some(c)) => c,
-            Ok(None) => {
-                println!("{} Stream closed by server.", "✗".red());
-                break;
+    'reconnect: loop {
+        let mut response = match client
+            .get(&url)
+            .header("Accept", "text/event-stream")
+            .send()
+            .await
+        {
+            Ok(r) if r.status().is_success() => {
+                retry_count = 0;
+                r
+            }
+            Ok(r) => {
+                eprintln!("{} Server returned {}", "✗".red(), r.status());
+                if retry_count >= max_retries { break; }
+                let delay = std::cmp::min(1u64 << retry_count, 30);
+                retry_count += 1;
+                eprintln!("{} Reconnecting in {}s... ({}/{})", "↻".yellow(), delay, retry_count, max_retries);
+                tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+                continue 'reconnect;
             }
             Err(e) => {
-                println!("{} Stream error: {}", "✗".red(), e);
-                break;
+                eprintln!("{} Connection failed: {}", "✗".red(), e);
+                if retry_count >= max_retries { break; }
+                let delay = std::cmp::min(1u64 << retry_count, 30);
+                retry_count += 1;
+                eprintln!("{} Reconnecting in {}s... ({}/{})", "↻".yellow(), delay, retry_count, max_retries);
+                tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+                continue 'reconnect;
             }
         };
 
-        buffer.push_str(&String::from_utf8_lossy(&chunk));
+        let mut buffer = String::new();
 
-        // SSE messages are separated by double newlines.
-        while let Some(end) = buffer.find("\n\n") {
-            let message = buffer[..end].to_string();
-            buffer = buffer[end + 2..].to_string();
+        loop {
+            // Read chunks from the SSE stream.
+            let chunk = match response.chunk().await {
+                Ok(Some(c)) => c,
+                Ok(None) => {
+                    eprintln!("{} Stream closed by server.", "⚠".yellow());
+                    if retry_count >= max_retries { break 'reconnect; }
+                    let delay = std::cmp::min(1u64 << retry_count, 30);
+                    retry_count += 1;
+                    eprintln!("{} Reconnecting in {}s... ({}/{})", "↻".yellow(), delay, retry_count, max_retries);
+                    tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+                    continue 'reconnect;
+                }
+                Err(e) => {
+                    eprintln!("{} Stream error: {}", "✗".red(), e);
+                    if retry_count >= max_retries { break 'reconnect; }
+                    let delay = std::cmp::min(1u64 << retry_count, 30);
+                    retry_count += 1;
+                    eprintln!("{} Reconnecting in {}s... ({}/{})", "↻".yellow(), delay, retry_count, max_retries);
+                    tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+                    continue 'reconnect;
+                }
+            };
 
-            if let Some(event) = parse_sse(&message) {
-                if should_display(&event, filter) {
-                    render_event(&event);
-                    if ci_mode && is_critical_event(&event) {
-                        eprintln!(
-                            "{} Critical security event detected — exiting with code 1 (CI mode)",
-                            "✗".red().bold()
-                        );
-                        std::process::exit(1);
+            buffer.push_str(&String::from_utf8_lossy(&chunk));
+
+            // SSE messages are separated by double newlines.
+            while let Some(end) = buffer.find("\n\n") {
+                let message = buffer[..end].to_string();
+                buffer = buffer[end + 2..].to_string();
+
+                if let Some(event) = parse_sse(&message) {
+                    if should_display(&event, filter) {
+                        render_event(&event);
+                        if ci_mode && is_critical_event(&event) {
+                            eprintln!(
+                                "{} Critical security event detected — exiting with code 1 (CI mode)",
+                                "✗".red().bold()
+                            );
+                            std::process::exit(1);
+                        }
                     }
                 }
             }

@@ -1,5 +1,10 @@
 // crates/cli/src/install.rs
 // Resolves trust verdict, then either proceeds or blocks the install.
+//
+// TODO(C-19): Use retry::with_retry for network calls for resilience
+// TODO(C-21): Call lockfile::write_receipt after successful install to record trust verdict
+// TODO(C-22): Call policy::evaluate() to check org-level policy before install
+// TODO(C-23): Load config_file settings and pass through to control behavior
 
 use crate::output;
 use anyhow::{bail, Result};
@@ -174,24 +179,43 @@ pub async fn run(
 
 /// Calls the real package manager (the one on PATH *after* our shim dir).
 fn delegate_to_real_pm(ecosystem: &str, raw_package: &str) -> Result<()> {
-    let real_bin = which::which_all(match ecosystem {
+    let pm_name = match ecosystem {
         "npm" => "npm",
         "pypi" => "pip",
         "cargo" => "cargo",
         "rubygems" => "gem",
+        "maven" => "mvn",
         _ => bail!("Unknown ecosystem: {}", ecosystem),
-    })?
-    // Skip the first hit — that's our own shim.
-    .nth(1)
-    .ok_or_else(|| anyhow::anyhow!("Real package manager not found in PATH"))?;
+    };
 
-    let args: Vec<&str> = match ecosystem {
+    // Find the real package manager binary, skipping our own shim.
+    // We compare canonical paths to filter out our shim directory.
+    let shim_dir = dirs::home_dir()
+        .unwrap_or_default()
+        .join(".local")
+        .join("bin");
+    let real_bin = which::which_all(pm_name)?
+        .find(|p| {
+            // Skip binaries in our shim directory
+            p.parent().map_or(true, |parent| {
+                parent.canonicalize().ok() != shim_dir.canonicalize().ok()
+            })
+        })
+        .ok_or_else(|| anyhow::anyhow!("Real '{}' not found in PATH (only our shim exists)", pm_name))?;
+
+    let mut args: Vec<&str> = match ecosystem {
         "npm" => vec!["install", raw_package],
         "pypi" => vec!["install", raw_package],
         "cargo" => vec!["add", raw_package],
         "rubygems" => vec!["install", raw_package],
+        "maven" => vec!["dependency:resolve"],
         _ => unreachable!(),
     };
+
+    // Pass through any extra args from CREG_PM_ARGS env var
+    let extra_args = std::env::var("CREG_PM_ARGS").unwrap_or_default();
+    let extra: Vec<&str> = extra_args.split_whitespace().collect();
+    args.extend(&extra);
 
     let status = std::process::Command::new(&real_bin).args(&args).status()?;
 

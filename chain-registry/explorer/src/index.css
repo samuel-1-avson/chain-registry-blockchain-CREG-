@@ -1,7 +1,6 @@
 /* Chain Registry Explorer - Minimal & Intuitive Design */
 /* Design Principles: Clean, Readable, Accessible, Beautiful */
-
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+/* Google Fonts loaded via index.html <link> — no duplicate @import needed */
 
 :root {
   /* Core Colors - Minimal Palette */

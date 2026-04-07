@@ -35,6 +35,8 @@ x-node-base: &node-base
     - ./circuits:/app/circuits:ro
     - ./validators:/app/validators:ro
     - ./models:/app/models:ro
+    - /var/run/docker.sock:/var/run/docker.sock:ro
+    - ./testnet/certs:/app/certs:ro
   environment: &node-env
     CREG_DATA_DIR: "/data"
     CREG_IS_VALIDATOR: "true"
@@ -42,13 +44,15 @@ x-node-base: &node-base
     CREG_IPFS_URL: "http://ipfs:5001"
     CREG_BLOCK_INTERVAL: "2"
     CREG_SINGLE_VALIDATOR_MODE: "${CREG_SINGLE_VALIDATOR_MODE:-false}"
-    CREG_DEV_SANDBOX: "${CREG_DEV_SANDBOX:-true}"
+    CREG_DEV_SANDBOX: "${CREG_DEV_SANDBOX:-false}"
     CREG_ZK_ENABLED: "true"
     CREG_ML_ENABLED: "true"
     CREG_ML_MODEL_PATH: "/app/models"
     CREG_WASM_ENABLED: "true"
     CREG_WASM_VALIDATORS_PATH: "/app/validators"
     CREG_REGISTRY_ADDR: "${TESTNET_REGISTRY_ADDR:-0x0165878A594ca255338adfa4d48449f69242Eb8F}"
+    CREG_TLS_CERT: "${CREG_TLS_CERT:-/app/certs/server.crt}"
+    CREG_TLS_KEY: "${CREG_TLS_KEY:-/app/certs/server.key}"
     RUST_LOG: "info,chain_registry_node=debug,consensus=debug"
   healthcheck:
     test: ["CMD", "curl", "-f", "http://localhost:8080/v1/health"]
@@ -513,3 +517,30 @@ volumes:
   node-8-data:
   node-9-data:
   node-10-data:
+
+# Docker secrets for validator keys (alternative to .env injection)
+# Usage: docker compose --env-file .env.testnet -f docker-compose.testnet.yml up -d
+# For secrets-based deployment:
+#   1. Create individual key files: echo "KEY_HEX" > validator-keys/node-1.key
+#   2. Use `docker secret create` for Swarm mode, or file-based secrets below
+secrets:
+  node1-validator-key:
+    file: ./validator-keys/validator-1.env
+  node2-validator-key:
+    file: ./validator-keys/validator-2.env
+  node3-validator-key:
+    file: ./validator-keys/validator-3.env
+  node4-validator-key:
+    file: ./validator-keys/validator-4.env
+  node5-validator-key:
+    file: ./validator-keys/validator-5.env
+  node6-validator-key:
+    file: ./validator-keys/validator-6.env
+  node7-validator-key:
+    file: ./validator-keys/validator-7.env
+  node8-validator-key:
+    file: ./validator-keys/validator-8.env
+  node9-validator-key:
+    file: ./validator-keys/validator-9.env
+  node10-validator-key:
+    file: ./validator-keys/validator-10.env

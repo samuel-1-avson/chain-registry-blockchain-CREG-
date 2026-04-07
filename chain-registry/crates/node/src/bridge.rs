@@ -90,7 +90,8 @@ async fn tick(state: Arc<RwLock<NodeState>>, last_height: &mut u64) -> anyhow::R
         (
             s.config.eth_rpc_url.clone(),
             s.config.registry_addr.clone(),
-            s.config.validator_privkey.clone(),
+            // I4: prefer dedicated CREG_BRIDGE_KEY, fall back to validator key
+            s.config.bridge_privkey.clone().or_else(|| s.config.validator_privkey.clone()),
             s.chain.tip_height()?,
         )
     };

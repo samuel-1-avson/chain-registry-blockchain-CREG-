@@ -31,6 +31,7 @@ struct App {
     bridge_status: Value,
     error: Option<String>,
     last_tick: Instant,
+    client: reqwest::Client,
 }
 
 impl App {
@@ -43,11 +44,16 @@ impl App {
             bridge_status: serde_json::json!({ "bridge_sync_status": "Starting...", "current_state_root": "0x0" }),
             error: None,
             last_tick: Instant::now(),
+            client: reqwest::Client::builder()
+                .timeout(Duration::from_secs(10))
+                .pool_max_idle_per_host(4)
+                .build()
+                .unwrap_or_default(),
         }
     }
 
     async fn refresh_data(&mut self, api_base: &str) -> Result<()> {
-        let client = reqwest::Client::new();
+        let client = &self.client;
 
         // Stats
         if let Ok(res) = client
@@ -67,21 +73,34 @@ impl App {
             }
         }
 
-        // Blocks (fetch recent ones)
+        // Blocks (batch fetch recent ones via range endpoint, fallback to individual)
         let height = self.stats["tip_height"].as_u64().unwrap_or(0);
-        let mut recent_blocks = Vec::new();
-        for h in (height.saturating_sub(10)..=height).rev() {
-            if let Ok(res) = client
-                .get(format!("{}/v1/blocks/{}", api_base, h))
-                .send()
-                .await
-            {
-                if let Ok(json) = res.json::<Value>().await {
-                    recent_blocks.push(json);
+        let start = height.saturating_sub(10);
+        let batch_url = format!("{}/v1/blocks?from={}&to={}", api_base, start, height);
+        let batch_ok = if let Ok(res) = client.get(&batch_url).send().await {
+            if let Ok(json) = res.json::<Vec<Value>>().await {
+                self.blocks = json;
+                true
+            } else { false }
+        } else { false };
+
+        // Fallback to individual requests if batch endpoint not available
+        if !batch_ok {
+            let mut recent_blocks = Vec::new();
+            let futs: Vec<_> = (start..=height)
+                .rev()
+                .map(|h| client.get(format!("{}/v1/blocks/{}", api_base, h)).send())
+                .collect();
+            let results = futures::future::join_all(futs).await;
+            for res in results {
+                if let Ok(r) = res {
+                    if let Ok(json) = r.json::<Value>().await {
+                        recent_blocks.push(json);
+                    }
                 }
             }
+            self.blocks = recent_blocks;
         }
-        self.blocks = recent_blocks;
 
         // Bridge Status
         if let Ok(res) = client

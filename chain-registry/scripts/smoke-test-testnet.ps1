@@ -148,7 +148,30 @@ if ([string]::IsNullOrWhiteSpace($recipient)) {
 Write-Host "Executing faucet drip to $recipient..." -ForegroundColor Cyan
 $beforeBalance = Get-Erc20Balance -Address $recipient -TokenAddress $tokenAddress -ComposeArgs $composeArgs
 
-$dripBody = @{ address = $recipient } | ConvertTo-Json -Compress
+# Solve PoW challenge before drip (N-02 fix)
+Write-Host "  Fetching PoW challenge..." -ForegroundColor Gray
+$challengeResponse = Invoke-RestMethod -Uri "http://127.0.0.1:8082/api/challenge" -Method Get
+$challenge = $challengeResponse.challenge
+$difficulty = $challengeResponse.difficulty
+
+Write-Host "  Solving PoW (difficulty=$difficulty)..." -ForegroundColor Gray
+$nonce = 0
+while ($true) {
+    $testStr = "$challenge$nonce"
+    $hashBytes = [System.Security.Cryptography.SHA256]::Create().ComputeHash(
+        [System.Text.Encoding]::UTF8.GetBytes($testStr)
+    )
+    $hashHex = ($hashBytes | ForEach-Object { $_.ToString("x2") }) -join ""
+    $leadingZeros = 0
+    foreach ($c in $hashHex.ToCharArray()) {
+        if ($c -eq '0') { $leadingZeros++ } else { break }
+    }
+    if ($leadingZeros -ge $difficulty) { break }
+    $nonce++
+}
+Write-Host "  PoW solved (nonce=$nonce)" -ForegroundColor Gray
+
+$dripBody = @{ address = $recipient; challenge = $challenge; nonce = "$nonce" } | ConvertTo-Json -Compress
 $dripResponse = Invoke-RestMethod -Uri "http://127.0.0.1:8082/api/drip" -Method Post -ContentType "application/json" -Body $dripBody
 
 if (-not $dripResponse.success) {

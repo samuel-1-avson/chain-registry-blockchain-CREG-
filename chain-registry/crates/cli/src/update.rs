@@ -3,6 +3,7 @@
 
 use anyhow::{Context, Result};
 use colored::Colorize;
+use sha2::{Digest, Sha256};
 
 pub async fn run(node_url: Option<&str>, check_only: bool) -> Result<()> {
     let base = node_url.map(String::from).unwrap_or_else(|| {
@@ -55,7 +56,12 @@ pub async fn run(node_url: Option<&str>, check_only: bool) -> Result<()> {
                     anyhow::bail!("No download URL in release record");
                 }
 
-                install_update(download_url, latest).await?;
+                let expected_checksum = release
+                    .get("sha256")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+
+                install_update(download_url, latest, expected_checksum.as_deref()).await?;
             }
             Err(_) => {
                 println!("{} Could not parse release response", "⚠".yellow());
@@ -96,7 +102,7 @@ async fn check_github_releases(current_version: &str, check_only: bool) -> Resul
     Ok(())
 }
 
-async fn install_update(download_url: &str, version: &str) -> Result<()> {
+async fn install_update(download_url: &str, version: &str, expected_sha256: Option<&str>) -> Result<()> {
     use indicatif::{ProgressBar, ProgressStyle};
 
     println!("{} Downloading creg v{}...", "→".cyan(), version);
@@ -128,6 +134,24 @@ async fn install_update(download_url: &str, version: &str) -> Result<()> {
         bytes.extend_from_slice(&chunk);
     }
     pb.finish_with_message("Download complete");
+
+    // Verify SHA-256 checksum if the release provided one
+    let actual_hash = hex::encode(Sha256::digest(&bytes));
+    match expected_sha256 {
+        Some(expected) => {
+            if actual_hash != expected.to_lowercase() {
+                anyhow::bail!(
+                    "Checksum mismatch!\n  Expected: {}\n  Actual:   {}\nDownload may be corrupted or tampered with. Aborting.",
+                    expected, actual_hash
+                );
+            }
+            println!("  {} SHA-256 checksum verified: {}", "✓".green(), &actual_hash[..16]);
+        }
+        None => {
+            println!("  {} No checksum in release metadata — skipping verification", "⚠".yellow());
+            println!("    SHA-256: {}", actual_hash);
+        }
+    }
 
     // Write to a temp path then replace the current executable
     let current_exe =

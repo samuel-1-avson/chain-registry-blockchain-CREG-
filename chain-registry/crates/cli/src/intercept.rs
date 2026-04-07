@@ -10,6 +10,7 @@ const SHIM_TARGETS: &[(&str, &str)] = &[
     ("pip3", "pip"),
     ("cargo", "cargo-shim"),
     ("gem", "gem"),
+    ("mvn", "mvn"),
 ];
 
 /// Install shim binaries into `shim_dir` (defaults to ~/.local/bin).
@@ -22,10 +23,19 @@ pub fn setup_shims(shim_dir: Option<&Path>) -> Result<()> {
         .with_context(|| format!("Cannot create shim dir: {}", dir.display()))?;
 
     let current_exe = std::env::current_exe()?;
+    let exe_dir = current_exe.parent().unwrap_or(Path::new("."));
 
-    for (shim_name, _bin_name) in SHIM_TARGETS {
+    for (shim_name, bin_name) in SHIM_TARGETS {
+        // Look for the compiled shim binary next to the creg binary
+        let shim_binary = exe_dir.join(bin_name);
+        let source = if shim_binary.exists() {
+            &shim_binary
+        } else {
+            // Fallback: use the creg binary itself (it dispatches on argv[0])
+            &current_exe
+        };
         let dest = dir.join(shim_name);
-        std::fs::copy(&current_exe, &dest)
+        std::fs::copy(source, &dest)
             .with_context(|| format!("Failed to copy shim to {}", dest.display()))?;
 
         // Mark executable on Unix.
