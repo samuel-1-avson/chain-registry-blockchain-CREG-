@@ -20,6 +20,7 @@ docs/
 # =============================================================================
 .env
 .env.*
+!.env.example
 .env.backup.*
 *.env
 secrets/
@@ -45,12 +46,17 @@ secrets/
 private*
 privkey*
 publisher.key
+*.jks
+*.keystore
+*.asc
 
 # =============================================================================
 # VALIDATOR KEYS (CRITICAL)
 # =============================================================================
 validator-keys/
 validators/
+generated-keys/
+testnet-keys/
 
 # =============================================================================
 # KUBERNETES SECRETS
@@ -86,6 +92,7 @@ remappings.txt
 # =============================================================================
 circuits/build/
 circuits/keys/
+circuits/*.bin
 *.r1cs
 *.zkey
 *.ptau
@@ -96,15 +103,14 @@ circuits/keys/
 # ML MODELS & TRAINING DATA
 # =============================================================================
 models/
-ml/training/
 secret-model/
 *.pkl
 *.onnx
 *.pt
 *.pth
-*.bin
 *.h5
 *.safetensors
+datasets/
 
 # =============================================================================
 # DATA & STORAGE
@@ -120,6 +126,7 @@ secret-model/
 *.db
 *.sqlite
 *.sqlite3
+*.leveldb
 anvil_state.json
 
 # =============================================================================
@@ -156,6 +163,8 @@ yarn-debug.log*
 yarn-error.log*
 package-lock.json
 yarn.lock
+.npm/
+.yarn/
 
 # =============================================================================
 # PYTHON (libraries)
@@ -168,6 +177,7 @@ __pycache__/
 .Python
 env/
 venv/
+.venv/
 ENV/
 develop-eggs/
 downloads/
@@ -182,6 +192,8 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+.mypy_cache/
+.ruff_cache/
 
 # =============================================================================
 # IDE & EDITOR
@@ -193,6 +205,7 @@ wheels/
 *~
 .DS_Store
 Thumbs.db
+Desktop.ini
 *.sublime-project
 *.sublime-workspace
 
@@ -205,6 +218,7 @@ Thumbs.db
 .gemini/
 .ai/
 .playwright-mcp/
+.copilot/
 
 # =============================================================================
 # COVERAGE & TESTING
@@ -216,6 +230,7 @@ htmlcov/
 .tox/
 .nox/
 .pytest_cache/
+lcov.info
 
 # =============================================================================
 # DOCKER
@@ -231,6 +246,10 @@ docker-compose.override.yml
 *.orig
 *.rej
 *.patch
+*.tmp
+*.swn
+*.pid
+core.*
 
 # =============================================================================
 # TESTNET GENERATED ARTIFACTS
@@ -239,6 +258,8 @@ testnet/artifacts/
 config/*/deployment.json
 config/local/
 config/production/
+!config/example/
+!config/template/
 scripts/*.key
 scripts/*.json
 !scripts/*.py

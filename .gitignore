@@ -6,9 +6,10 @@
 # =============================================================================
 
 # =============================================================================
-# DOCUMENTATION — ALL .md files ignored
+# DOCUMENTATION — ALL .md files ignored (allow README.md)
 # =============================================================================
 *.md
+!README.md
 
 # =============================================================================
 # DOCS DIRECTORY
@@ -21,8 +22,8 @@ docs/
 # =============================================================================
 .env
 .env.*
+!.env.example
 *.env
-*.env.*
 secrets/
 **/secrets/
 *secret*
@@ -32,7 +33,9 @@ secrets/
 # KEYS & CREDENTIALS (CRITICAL)
 # =============================================================================
 *.key
+**/*.key
 *.pem
+**/*.pem
 *.p12
 *.pfx
 *.crt
@@ -48,6 +51,9 @@ private*
 privkey*
 publisher.key
 **/publisher.key
+*.jks
+*.keystore
+*.asc
 
 # =============================================================================
 # VALIDATOR KEYS (CRITICAL)
@@ -56,6 +62,8 @@ validator-keys/
 **/validator-keys/
 validators/
 **/validators/
+generated-keys/
+testnet-keys/
 
 # =============================================================================
 # KUBERNETES SECRETS
@@ -111,16 +119,16 @@ circuits/keys/
 # =============================================================================
 models/
 **/models/
-ml/
 secret-model/
 **/secret-model/
 *.pkl
 *.onnx
 *.pt
 *.pth
-*.bin
 *.h5
 *.safetensors
+datasets/
+**/datasets/
 
 # =============================================================================
 # DATA & STORAGE
@@ -146,6 +154,7 @@ temp/
 *.db
 *.sqlite
 *.sqlite3
+*.leveldb
 
 # =============================================================================
 # LOGS
@@ -176,6 +185,7 @@ dist/
 **/dist/
 stress-report-out/
 **/stress-report-out/
+build/
 
 # =============================================================================
 # NODE.JS / NPM (libraries)
@@ -189,6 +199,8 @@ package-lock.json
 **/package-lock.json
 yarn.lock
 **/yarn.lock
+.npm/
+.yarn/
 
 # =============================================================================
 # PYTHON (libraries)
@@ -201,6 +213,7 @@ __pycache__/
 .Python
 env/
 venv/
+.venv/
 ENV/
 develop-eggs/
 downloads/
@@ -215,6 +228,8 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+.mypy_cache/
+.ruff_cache/
 
 # =============================================================================
 # IDE & EDITOR
@@ -226,6 +241,7 @@ wheels/
 *~
 .DS_Store
 Thumbs.db
+Desktop.ini
 *.sublime-project
 *.sublime-workspace
 .project
@@ -241,6 +257,7 @@ Thumbs.db
 .gemini/
 .ai/
 .playwright-mcp/
+.copilot/
 
 # =============================================================================
 # COVERAGE & TESTING
@@ -252,6 +269,7 @@ htmlcov/
 .tox/
 .nox/
 .pytest_cache/
+lcov.info
 
 # =============================================================================
 # DOCKER
@@ -267,6 +285,11 @@ docker-compose.override.yml
 *.orig
 *.rej
 *.patch
+*.tmp
+*.swn
+*.pid
+*.seed
+core.*
 
 # =============================================================================
 # TESTNET GENERATED ARTIFACTS
@@ -275,293 +298,24 @@ docker-compose.override.yml
 **/config/*/deployment.json
 config/local/
 config/production/
-scripts/*.key
-scripts/*.json
-!scripts/*.py
-!scripts/*.ps1
-!scripts/*.sh
-# =============================================================================
-# Chain Registry - Git Ignore
-# SECURITY: Never commit private keys, seed phrases, or API credentials
-# =============================================================================
-
-# =============================================================================
-# DOCUMENTATION (Only README.md and CHAIN_REGISTRY_GUIDE.md are kept)
-# =============================================================================
-*.md
-!README.md
-!CHAIN_REGISTRY_GUIDE.md
-!chain-registry/README.md
-
-# =============================================================================
-# ENVIRONMENT & SECRETS (CRITICAL - NEVER COMMIT)
-# =============================================================================
-.env
-.env.*
-!.env.example
-*.env
-secrets/
-**secrets/
-*secret*
-*password*
-*credential*
-*.key
-**/*.key
-*.pem
-**/*.pem
-*.p12
-*.pfx
-*.crt
-*.cer
-*wallet*
-*mnemonic*
-*seed*
-private*
-privkey*
-
-# =============================================================================
-# VALIDATOR KEYS (CRITICAL - NEVER COMMIT)
-# =============================================================================
-validator*
-**/validator*
-!**/validator*/README*
-!**/validator*/.gitkeep
-publisher.key
-testnet-keys/
-generated-keys/
-
-# =============================================================================
-# SMART CONTRACTS - DO NOT INCLUDE COMPiled artifacts
-# =============================================================================
-# Note: Source contracts are in the repo, but build artifacts are ignored
-out/
-**/out/
-cache/
-**/cache/
-foundry.lock
-**/foundry.lock
-deployments/local/
-deployments/anvil/
-broadcast/
-**/broadcast/
-
-# =============================================================================
-# DATA & STORAGE
-# =============================================================================
-data/
-**/data/
-node*-data/
-**/node*-data/
-validator*-data/
-**/validator*-data/
-ipfs-data/
-**/ipfs-data/
-postgres-data/
-**/postgres-data/
-anvil_state.json
-**/anvil_state.json
-dev-data/
-/dev-data/
-tmp/
-**/tmp/
-temp/
-**/temp/
-*.db
-*.sqlite
-*.sqlite3
-
-# =============================================================================
-# RUST BUILD ARTIFACTS
-# =============================================================================
-target/
-**/target/
-**/*.target/
-target[0-9]*/
-Cargo.lock
-**/*.pdb
-**/*.exe
-*.exe
-creg
-creg-node
-creg-cli
-
-# =============================================================================
-# ZK CIRCUIT BUILD ARTIFACTS
-# =============================================================================
-circuits/build/
-circuits/keys/
-circuits/*.r1cs
-circuits/*.wasm
-circuits/*.sym
-circuits/*.zkey
-circuits/*.ptau
-!circuits/*.circom
-!circuits/*.sh
-!circuits/README.md
-
-# =============================================================================
-# ML MODELS & TRAINING DATA (Large files)
-# =============================================================================
-models/
-**/models/
-*.pkl
-**/*.pkl
-*.onnx
-**/*.onnx
-*.pt
-**/*.pt
-*.pth
-**/*.pth
-train_cache/
-datasets/
-**/datasets/
-secret-model/
-**/secret-model/
-
-# =============================================================================
-# LOGS
-# =============================================================================
-*.log
-**/*.log
-*.log.*
-logs/
-**/logs/
-node_err.log
-publish_log.txt
-build_log.txt
-api-test.log
-check.log
-cli-check.log
-node-check*.log
-
-# =============================================================================
-# PACKAGE ARTIFACTS
-# =============================================================================
-*.tgz
-*.tar.gz
-*.zip
-demo-v2/
-malicious-pkg/
-good-pkg-v1/
-good-pkg-v2/
-evil-pkg-v1/
-package/
-packages/
-dist/
-build/
-
-# =============================================================================
-# NODE.JS / NPM
-# =============================================================================
-node_modules/
-**/node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-package-lock.json
-yarn.lock
-
-# =============================================================================
-# PYTHON
-# =============================================================================
-__pycache__/
-**/__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-env/
-venv/
-ENV/
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-
-# =============================================================================
-# IDE & EDITOR
-# =============================================================================
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-.DS_Store
-Thumbs.db
-*.sublime-project
-*.sublime-workspace
-.project
-.classpath
-.settings/
-
-# =============================================================================
-# COVERAGE & TESTING
-# =============================================================================
-coverage/
-**/coverage/
-*.coverage
-htmlcov/
-.tox/
-.nox/
-.pytest_cache/
-
-# =============================================================================
-# DOCKER
-# =============================================================================
-.dockerignore
-Dockerfile.*
-!Dockerfile
-docker-compose.override.yml
-
-# =============================================================================
-# MISCELLANEOUS
-# =============================================================================
-*.bak
-*.backup
-*.old
-*.orig
-*.rej
-*.patch
-
-# =============================================================================
-# PROJECT SPECIFIC - NEVER COMMIT THESE
-# =============================================================================
-.gemini/
-.claude/
-.cursor/
-.ai/
-
-# Config files that might contain real values
-config/*/deployment.json
-config/local/
-config/production/
 !config/example/
 !config/template/
-
-# Testnet specific - regenerated by scripts
 scripts/*.key
 scripts/*.json
 !scripts/*.py
 !scripts/*.ps1
 !scripts/*.sh
+
+# =============================================================================
+# PLAYGROUND & DEMO PAYLOADS
+# =============================================================================
+playground/
+**/playground/
 
 # =============================================================================
 # ALLOW THESE (Must come after ignores)
 # =============================================================================
-!README.md
-!CONTRIBUTING.md
-!LICENSE
-!.gitignore
 !.github/
-.blackboxcli/
+!.dockerignore
+!.gitmodules
+!.env.example

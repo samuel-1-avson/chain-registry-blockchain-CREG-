@@ -1,0 +1,16 @@
+# Dockerfile for deploying testnet contracts
+FROM ghcr.io/foundry-rs/foundry:latest
+
+WORKDIR /contracts
+
+# Copy contract source files
+COPY contracts/testnet ./testnet
+COPY contracts/Staking.sol ./
+
+# Install OpenZeppelin
+RUN forge install OpenZeppelin/openzeppelin-contracts --no-commit || true
+
+# Set environment
+ENV FOUNDRY_PROFILE=default
+
+ENTRYPOINT ["/bin/sh", "-c"]
