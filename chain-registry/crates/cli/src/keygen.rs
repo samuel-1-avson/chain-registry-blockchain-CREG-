@@ -225,7 +225,7 @@ pub fn run_with_mnemonic(output_path: Option<&Path>, role: &str, restore: bool) 
     // SLIP-0010: derive Ed25519 master key from BIP39 seed
     let seed = mnemonic.to_seed("");
     type HmacSha512 = Hmac<Sha512>;
-    let mut mac = HmacSha512::new_from_slice(b"ed25519 seed")
+    let mut mac = <HmacSha512 as Mac>::new_from_slice(b"ed25519 seed")
         .expect("HMAC can take key of any size");
     mac.update(&seed);
     let result = mac.finalize().into_bytes();
@@ -271,7 +271,7 @@ pub fn run_with_mnemonic(output_path: Option<&Path>, role: &str, restore: bool) 
         println!();
         println!("  {} WRITE DOWN YOUR MNEMONIC — this is your backup!", "⚠".yellow().bold());
         println!("  ┌──────────────────────────────────────────────────────┐");
-        let words: Vec<&str> = mnemonic.word_iter().collect();
+        let words: Vec<&str> = mnemonic.words().collect();
         for (i, chunk) in words.chunks(4).enumerate() {
             let line: Vec<String> = chunk
                 .iter()

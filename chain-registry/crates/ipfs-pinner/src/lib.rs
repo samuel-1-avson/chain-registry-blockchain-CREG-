@@ -9,6 +9,7 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -51,7 +52,7 @@ impl Default for PinningConfig {
             eth_rpc: "http://localhost:8545".to_string(),
             contract_address: "0x0000000000000000000000000000000000000000".to_string(),
             operator_key: String::new(),
-            min_stake: 1000e18 as u128, // 1000 CREG
+            min_stake: 1_000_000_000_000_000_000_000, // 1000 CREG
             auto_register: false,
             verification_interval: 3600, // 1 hour
             max_pins: 10000,
@@ -288,31 +289,16 @@ impl PinningManager {
     }
 
     async fn load_existing_pins(&self) -> Result<()> {
-        // Query contract for existing pins
-        let cids = self.contract.get_pinner_cids().await?;
+        let cid_hashes = self.contract.get_pinner_cids().await?;
 
-        for cid_hash in cids {
-            let cid = bytes32_to_cid(&cid_hash)?;
-            let pin_info = self.contract.get_pin_info(cid_hash).await?;
-
-            let pin = PinInfo {
-                cid: cid.clone(),
-                size: pin_info.size,
-                pinned_at: DateTime::from_timestamp(pin_info.pinned_at as i64, 0)
-                    .unwrap_or_else(|| Utc::now()),
-                last_verified: pin_info
-                    .last_verified
-                    .map(|t| DateTime::from_timestamp(t as i64, 0).unwrap_or_else(|| Utc::now())),
-                access_count: pin_info.access_count,
-                is_active: pin_info.is_active,
-                local_path: None,
-            };
-
-            let mut pins = self.pins.write().await;
-            pins.insert(cid, pin);
+        if !cid_hashes.is_empty() {
+            warn!(
+                "Skipping {} on-chain pin(s): PinningRewards stores CID hashes only, so full CID strings cannot be reconstructed for IPFS operations",
+                cid_hashes.len()
+            );
         }
 
-        info!("Loaded {} existing pins from contract", cids.len());
+        info!("Loaded 0 existing pins from contract state");
         Ok(())
     }
 
@@ -364,23 +350,23 @@ impl PinningManager {
 
 /// Convert CID string to bytes32
 fn cid_to_bytes32(cid: &str) -> Result<[u8; 32]> {
-    // In production, this would use proper CID encoding
-    // For now, we hash the CID string
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-
-    let mut hasher = DefaultHasher::new();
-    cid.hash(&mut hasher);
-    let hash = hasher.finish();
-
-    let mut result = [0u8; 32];
-    result[0..8].copy_from_slice(&hash.to_le_bytes());
-    Ok(result)
+    let digest = Sha256::digest(cid.as_bytes());
+    Ok(digest.into())
 }
 
-/// Convert bytes32 to CID string (best effort)
-fn bytes32_to_cid(_bytes: &[u8; 32]) -> Result<String> {
-    // In production, this would use proper CID decoding
-    // For now, return a placeholder
-    Ok("QmPlaceholder".to_string())
+#[cfg(test)]
+mod tests {
+    use super::cid_to_bytes32;
+
+    #[test]
+    fn cid_hashing_is_stable_and_uses_all_32_bytes() {
+        let hash1 = cid_to_bytes32("QmTestCid").expect("hash should succeed");
+        let hash2 = cid_to_bytes32("QmTestCid").expect("hash should succeed");
+        let hash3 = cid_to_bytes32("QmDifferentCid").expect("hash should succeed");
+
+        assert_eq!(hash1, hash2);
+        assert_ne!(hash1, hash3);
+        assert_ne!(hash1, [0u8; 32]);
+        assert_ne!(&hash1[8..], &[0u8; 24]);
+    }
 }

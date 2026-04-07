@@ -89,12 +89,13 @@ impl IpfsApiPinner {
 impl IpfsPinner for IpfsApiPinner {
     async fn pin(&self, cid: &str) -> Result<()> {
         tracing::info!("Pinning CID: {}", cid);
+        let recursive = self.config.recursive.to_string();
 
         let url = self.api_url("/api/v0/pin/add");
         let response = self
             .client
             .post(&url)
-            .query(&[("arg", cid), ("recursive", "true")])
+            .query(&[("arg", cid), ("recursive", recursive.as_str())])
             .send()
             .await
             .context("Failed to send pin request")?;
@@ -110,12 +111,13 @@ impl IpfsPinner for IpfsApiPinner {
 
     async fn unpin(&self, cid: &str) -> Result<()> {
         tracing::info!("Unpinning CID: {}", cid);
+        let recursive = self.config.recursive.to_string();
 
         let url = self.api_url("/api/v0/pin/rm");
         let response = self
             .client
             .post(&url)
-            .query(&[("arg", cid), ("recursive", "true")])
+            .query(&[("arg", cid), ("recursive", recursive.as_str())])
             .send()
             .await
             .context("Failed to send unpin request")?;

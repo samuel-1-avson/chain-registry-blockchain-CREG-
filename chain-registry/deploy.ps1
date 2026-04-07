@@ -241,6 +241,40 @@ function Wait-ForEndpoint {
     return $false
 }
 
+function Import-DeployedContractManifest {
+    if ($Mode -ne "testnet") {
+        return $false
+    }
+
+    $manifestPath = Join-Path $ProjectRoot "contracts\deployments\latest.json"
+    if (-not (Test-Path $manifestPath)) {
+        Write-Warn "Deployment manifest not found at $manifestPath"
+        return $false
+    }
+
+    try {
+        $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
+    } catch {
+        Write-Warn "Failed to parse deployment manifest: $($_.Exception.Message)"
+        return $false
+    }
+
+    if (-not $manifest.cregToken -or -not $manifest.staking -or -not $manifest.registry) {
+        Write-Warn "Deployment manifest is missing required contract addresses"
+        return $false
+    }
+
+    $env:TESTNET_TOKEN_ADDR = [string]$manifest.cregToken
+    $env:TESTNET_STAKING_ADDR = [string]$manifest.staking
+    $env:TESTNET_REGISTRY_ADDR = [string]$manifest.registry
+
+    Write-OK "Loaded deployed contract addresses from manifest"
+    Write-Info "Token:    $($env:TESTNET_TOKEN_ADDR)"
+    Write-Info "Staking:  $($env:TESTNET_STAKING_ADDR)"
+    Write-Info "Registry: $($env:TESTNET_REGISTRY_ADDR)"
+    return $true
+}
+
 # ─── Status Command ──────────────────────────────────────────────────────────
 if ($Status) {
     Write-Banner
@@ -274,8 +308,7 @@ if ($Status) {
         @{ Name = "Node API";     Url = "http://localhost:8080/v1/health" },
         @{ Name = "Faucet";       Url = "http://localhost:8082/health" },
         @{ Name = "Explorer";     Url = "http://localhost:3000" },
-        @{ Name = "Anvil RPC";    Url = "http://localhost:8545"; Method = "POST"; Body = '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}' },
-        @{ Name = "IPFS API";     Url = "http://localhost:5001/api/v0/version"; Method = "POST" }
+        @{ Name = "Anvil RPC";    Url = "http://localhost:8545"; Method = "POST"; Body = '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}' }
     )
     foreach ($ep in $endpoints) {
         try {
@@ -286,6 +319,17 @@ if ($Status) {
         } catch {
             Write-Fail "$($ep.Name.PadRight(15)) → $($ep.Url)"
         }
+    }
+
+    try {
+        $ipfsVersion = docker exec creg-testnet-ipfs ipfs version 2>$null
+        if ($LASTEXITCODE -eq 0 -and $ipfsVersion) {
+            Write-OK "IPFS API         → docker exec creg-testnet-ipfs ipfs version"
+        } else {
+            Write-Fail "IPFS API         → docker exec creg-testnet-ipfs ipfs version"
+        }
+    } catch {
+        Write-Fail "IPFS API         → docker exec creg-testnet-ipfs ipfs version"
     }
 
     # Chain stats
@@ -599,20 +643,29 @@ if ($SkipContracts) {
     Write-Step "5.1" "Deploying contracts via Foundry"
 
     if ($Mode -eq "testnet") {
-        Invoke-Compose @("up", "deploy-contracts") | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            Write-Warn "Contract deployment returned non-zero exit code."
-            Write-Info "This may be OK if contracts were already deployed."
-            Write-Info "Check logs: docker logs creg-testnet-deploy"
-        } else {
-            Write-OK "Contracts deployed successfully"
+        $manifestPath = Join-Path $ProjectRoot "contracts\deployments\latest.json"
+        if (Test-Path $manifestPath) {
+            Remove-Item $manifestPath -Force
         }
+
+        $deployExitCode = Invoke-Compose @("run", "--rm", "--no-deps", "deploy-contracts")
+        Write-Step "5.2" "Loading deployed contract manifest"
+        if (-not (Import-DeployedContractManifest)) {
+            Write-Fail "Contract deployment did not produce a valid manifest."
+            exit 1
+        }
+
+        if ($deployExitCode -ne 0) {
+            Write-Warn "Contract deploy command returned a non-zero status, but a fresh manifest was produced. Continuing with deployed addresses."
+        }
+
+        Write-OK "Contracts deployed successfully"
     } else {
         Write-Info "Dev mode: contracts deployed as part of compose startup"
         Write-OK "Skipped (dev mode)"
     }
 
-    Write-Step "5.2" "Contract verification"
+    Write-Step "5.3" "Contract verification"
     try {
         $chainId = Invoke-RestMethod -Uri "http://localhost:8545" -Method POST `
             -ContentType "application/json" `
@@ -630,7 +683,7 @@ Write-Section "Step 6: Validator Nodes ($Nodes node(s))"
 if ($Mode -eq "testnet") {
     # Start nodes in batches to avoid overwhelming the system
     Write-Step "6.1" "Starting node-1 (bootstrap seed)"
-    Invoke-Compose @("up", "-d", "node-1") | Out-Null
+    Invoke-Compose @("up", "-d", "--no-deps", "node-1") | Out-Null
     $node1Ready = Wait-ForEndpoint -Name "Node 1" -Url "http://localhost:8080/v1/health" -TimeoutSecs 120
     if (-not $node1Ready) {
         Write-Fail "Node 1 failed to start. This is the bootstrap node — other nodes depend on it."
@@ -648,7 +701,8 @@ if ($Mode -eq "testnet") {
         for ($i = 2; $i -le $Nodes; $i++) {
             $nodeNames += "node-$i"
         }
-        Invoke-Compose @("up", "-d") + $nodeNames | Out-Null
+        $nodeStartArgs = @("up", "-d", "--no-deps") + $nodeNames
+        Invoke-Compose $nodeStartArgs | Out-Null
         Write-Info "Waiting for nodes to sync..."
         Start-Sleep -Seconds 10
 
@@ -681,7 +735,7 @@ if ($Mode -eq "testnet") {
     }
 } else {
     Write-Step "6.1" "Starting single validator node"
-    Invoke-Compose @("up", "-d", "node-1") | Out-Null
+    Invoke-Compose @("up", "-d", "--no-deps", "node-1") | Out-Null
     $node1Ready = Wait-ForEndpoint -Name "Node 1" -Url "http://localhost:8080/v1/health" -TimeoutSecs 120
     if (-not $node1Ready) {
         Write-Fail "Node failed to start."
@@ -694,7 +748,7 @@ Write-Section "Step 7: Ancillary Services"
 
 if ($Mode -eq "testnet") {
     Write-Step "7.1" "Starting Faucet"
-    Invoke-Compose @("up", "-d", "faucet") | Out-Null
+    Invoke-Compose @("up", "-d", "--no-deps", "faucet") | Out-Null
     $faucetReady = Wait-ForEndpoint -Name "Faucet" -Url "http://localhost:8082/health" -TimeoutSecs 30
     if (-not $faucetReady) {
         Write-Warn "Faucet not ready — token distribution won't work"
@@ -702,17 +756,17 @@ if ($Mode -eq "testnet") {
     }
 
     Write-Step "7.2" "Starting Web Explorer"
-    Invoke-Compose @("up", "-d", "web-explorer") | Out-Null
+    Invoke-Compose @("up", "-d", "--no-deps", "web-explorer") | Out-Null
     $explorerReady = Wait-ForEndpoint -Name "Explorer" -Url "http://localhost:3000" -TimeoutSecs 30
     if (-not $explorerReady) {
         Write-Warn "Explorer not ready — web UI won't be accessible"
     }
 } else {
     Write-Step "7.1" "Starting Faucet (dev mode)"
-    Invoke-Compose @("up", "-d", "faucet") | Out-Null
+    Invoke-Compose @("up", "-d", "--no-deps", "faucet") | Out-Null
 
     Write-Step "7.2" "Starting Explorer"
-    Invoke-Compose @("up", "-d", "web-explorer") | Out-Null
+    Invoke-Compose @("up", "-d", "--no-deps", "web-explorer") | Out-Null
 }
 
 # ─── Step 8: Health Verification & Smoke Tests ──────────────────────────────
@@ -805,7 +859,7 @@ Write-Host "  docker compose -f $ComposeFile logs -f" -ForegroundColor White
 Write-Host ""
 if ($Mode -eq "testnet") {
     Write-Host "  # Get test tokens" -ForegroundColor DarkGray
-    Write-Host '  Invoke-RestMethod -Uri "http://localhost:8082/drip" -Method POST -ContentType "application/json" -Body ''{"address":"0x..."}''' -ForegroundColor White
+    Write-Host '  Invoke-RestMethod -Uri "http://localhost:8082/api/drip" -Method POST -ContentType "application/json" -Body ''{"address":"0x..."}''' -ForegroundColor White
     Write-Host ""
     Write-Host "  # Run stress test" -ForegroundColor DarkGray
     Write-Host "  docker compose --env-file .env.testnet -f $ComposeFile --profile stress-test up stress-test" -ForegroundColor White
