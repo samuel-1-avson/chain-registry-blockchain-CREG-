@@ -166,8 +166,7 @@ docker compose run --rm cli creg <command>
 | `creg stake 100 --role validator` | Stake 100 CREG to apply as validator |
 | `creg setup-shims` | Install npm/pip/cargo/gem/mvn path intercepts |
 | `creg remove-shims` | Uninstall path intercepts |
-| `creg dashboard-interactive` | Launch interactive TUI dashboard |
-| `creg explorer` | Launch TUI blockchain explorer |
+| `creg console` | Launch the validator console (single terminal UI) |
 | `creg blocks --limit 20` | Show recent 20 blocks |
 | `creg watch --filter packages` | Stream real-time package events |
 | `creg doctor` | Check system prerequisites (nsjail, IPFS, node connectivity) |

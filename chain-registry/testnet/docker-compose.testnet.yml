@@ -254,7 +254,7 @@ services:
     restart: unless-stopped
 
   # ============================================================================
-  # TUI Explorer (optional - run interactively)
+  # Validator Console (optional - run interactively)
   # ============================================================================
   tui-explorer:
     build:
@@ -271,9 +271,9 @@ services:
     tty: true
     command: >
       sh -c "
-        echo 'Starting TUI Explorer...' &&
+        echo 'Starting validator console...' &&
         sleep 5 &&
-        creg explorer
+        creg console
       "
 
 volumes:

@@ -148,7 +148,7 @@ mod tests {
 
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{StatusCode, Uri},
     response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
@@ -182,6 +182,7 @@ pub fn router(state: SharedState, event_bus: EventBus, limiter: RateLimiter) -> 
         .route("/v1/health", get(health))
         .route("/health", get(health))
         .route("/v1/chain/stats", get(chain_stats))
+        .route("/v1/runtime/config", get(runtime_config))
         .route("/v1/nodes", get(get_nodes))
         .route("/v1/p2p/status", get(p2p_status))
         .route("/v1/bridge/status", get(bridge_status))
@@ -220,13 +221,21 @@ pub fn router(state: SharedState, event_bus: EventBus, limiter: RateLimiter) -> 
                 async move { events::ws_handler(ws, axum::extract::State(bus)).await }
             }),
         )
-        .fallback(crate::explorer::static_handler)
+        .fallback(api_fallback)
         .layer(TraceLayer::new_for_http())
         .layer(RequestBodyLimitLayer::new(50 * 1024 * 1024))
         .layer(axum::middleware::from_fn(rate_limit_middleware))
         .layer(axum::extract::Extension(limiter))
         .layer(CorsLayer::permissive())
         .with_state(state)
+}
+
+async fn api_fallback(uri: Uri) -> Response {
+    if uri.path().starts_with("/v1/") || uri.path() == "/metrics" || uri.path() == "/health" {
+        return not_found(format!("No route for {}", uri.path()));
+    }
+
+    crate::explorer::static_handler(uri).await.into_response()
 }
 
 // ─── Response helpers ─────────────────────────────────────────────────────────
@@ -264,6 +273,33 @@ async fn health() -> impl IntoResponse {
 async fn chain_stats(State(state): State<SharedState>) -> impl IntoResponse {
     let s = state.read().await;
     Json(s.chain.stats())
+}
+
+#[derive(Serialize)]
+struct RuntimeConfigResponse {
+    is_testnet: bool,
+    registry_address: Option<String>,
+    token_contract: Option<String>,
+    staking_contract: Option<String>,
+}
+
+fn non_zero_address(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("0x0000000000000000000000000000000000000000") {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+async fn runtime_config(State(state): State<SharedState>) -> impl IntoResponse {
+    let s = state.read().await;
+    Json(RuntimeConfigResponse {
+        is_testnet: s.config.is_testnet,
+        registry_address: non_zero_address(&s.config.registry_addr),
+        token_contract: non_zero_address(&s.config.token_addr),
+        staking_contract: non_zero_address(&s.config.staking_addr),
+    })
 }
 
 // GET /v1/nodes

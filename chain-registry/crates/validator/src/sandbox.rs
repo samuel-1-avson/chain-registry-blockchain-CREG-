@@ -16,6 +16,26 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+async fn command_ready(program: &str, args: &[&str]) -> bool {
+    match tokio::process::Command::new(program).args(args).output().await {
+        Ok(output) if output.status.success() => true,
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            tracing::warn!(
+                "Sandbox engine '{}' unavailable: exit={} stderr={}",
+                program,
+                output.status,
+                stderr.trim()
+            );
+            false
+        }
+        Err(err) => {
+            tracing::debug!("Sandbox engine '{}' not found: {}", program, err);
+            false
+        }
+    }
+}
+
 // ── Public Types ────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -146,12 +166,7 @@ pub async fn run(
     tracing::info!("Starting sandbox engine detection for {} ...", _pkg_id);
 
     // ── Engine 1: nsjail ──────────────────────────────────────────────────────
-    let nsjail_check = tokio::process::Command::new("nsjail")
-        .arg("--version")
-        .output()
-        .await;
-
-    if nsjail_check.is_ok() {
+    if command_ready("nsjail", &["--version"]).await {
         tracing::info!("nsjail detected — using primary sandbox engine");
         let result = run_nsjail_sandbox(&tarball_path, _pkg_id, &config, manifest, start_time).await;
         let _ = std::fs::remove_dir_all(&tmp_dir);
@@ -188,12 +203,7 @@ pub async fn run(
     }
 
     // ── Engine 2: gVisor (runsc) ──────────────────────────────────────────────
-    let gvisor_check = tokio::process::Command::new("runsc")
-        .arg("--version")
-        .output()
-        .await;
-
-    if gvisor_check.is_ok() {
+    if command_ready("runsc", &["--version"]).await {
         tracing::info!("gVisor (runsc) detected — using userspace syscall sandbox");
         let result = run_gvisor_sandbox(&tarball_path, _pkg_id, &config, manifest, start_time).await;
         let _ = std::fs::remove_dir_all(&tmp_dir);
@@ -203,12 +213,7 @@ pub async fn run(
     }
 
     // ── Engine 3: Docker ──────────────────────────────────────────────────────
-    let docker_check = tokio::process::Command::new("docker")
-        .arg("version")
-        .output()
-        .await;
-
-    if docker_check.is_ok() {
+    if command_ready("docker", &["version", "--format", "{{.Server.Version}}"]).await {
         tracing::warn!("Falling back to Docker containment (reduced isolation)");
         let docker_result = run_docker_sandbox(&tarball_path, _pkg_id, &config, start_time).await;
         let _ = std::fs::remove_dir_all(&tmp_dir);

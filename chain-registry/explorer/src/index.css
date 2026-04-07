@@ -434,6 +434,9 @@ body::before {
   color: var(--text-primary);
   background: var(--surface-hover);
 }
+.validator-row-active td {
+  background: rgba(99, 102, 241, 0.12);
+}
 
 .nav-tab.active {
   color: var(--text-primary);

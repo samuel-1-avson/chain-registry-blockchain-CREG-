@@ -222,8 +222,14 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
         None
     };
 
-    match ml_validator::deep_scan(tarball_bytes, pkg_info) {
-        Ok(deep) => {
+    let deep_scan_result = {
+        let tarball_bytes = tarball_bytes.to_vec();
+        let pkg_info = pkg_info.clone();
+        tokio::task::spawn_blocking(move || ml_validator::deep_scan(&tarball_bytes, pkg_info)).await
+    };
+
+    match deep_scan_result {
+        Ok(Ok(deep)) => {
             // If deep scan ran in mock/degraded mode, emit a visible warning finding
             // so validators and the network are aware ML coverage is not active.
             if deep.is_mock {
@@ -285,7 +291,7 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
                 _ => {}
             }
         }
-        Err(e) => {
+        Ok(Err(e)) => {
             tracing::warn!(
                 "Deep scan failed: {}; continuing with static analysis only",
                 e
@@ -297,6 +303,24 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
                 severity: FindingSeverity::Medium,
                 description: format!(
                     "Multi-layer scan failed: {}. YARA/OSV/ThreatIntel detection was not performed. \
+                     Package was analyzed with static rules only.",
+                    e
+                ),
+                file: "deep_scan".into(),
+                line: None,
+            });
+        }
+        Err(e) => {
+            tracing::warn!(
+                "Deep scan task failed: {}; continuing with static analysis only",
+                e
+            );
+            findings.push(Finding {
+                id: "ML001".into(),
+                title: "ML Deep Scan: Unavailable".into(),
+                severity: FindingSeverity::Medium,
+                description: format!(
+                    "Multi-layer scan task failed: {}. YARA/OSV/ThreatIntel detection was not performed. \
                      Package was analyzed with static rules only.",
                     e
                 ),

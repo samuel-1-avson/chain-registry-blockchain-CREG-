@@ -17,6 +17,7 @@ mod metrics;
 mod p2p;
 mod p2p_rate_limit;
 mod pending_pool;
+mod pidlock;
 mod proof;
 mod publisher_index;
 mod rate_limit;
@@ -98,6 +99,17 @@ async fn main() -> Result<()> {
             anyhow::bail!("Cannot start validator node due to configuration errors. Fix the above and restart.");
         }
     }
+
+    // ── Single-node enforcement (mainnet only) ────────────────────────────────
+    // On mainnet, acquire a PID lock in the data directory to prevent multiple
+    // nodes from running on the same machine. Testnet skips this entirely.
+    let _pid_lock = if config.is_testnet {
+        tracing::info!("  mode:        testnet (multi-node allowed)");
+        None
+    } else {
+        tracing::info!("  mode:        mainnet (single node enforced)");
+        Some(pidlock::PidLock::acquire(&config.data_dir)?)
+    };
 
     tracing::info!("╔══════════════════════════════════════╗");
     tracing::info!(
@@ -287,6 +299,9 @@ async fn main() -> Result<()> {
     )
     .with_graceful_shutdown(shutdown_signal())
     .await?;
+
+    // Release the PID lock explicitly before logging clean shutdown.
+    drop(_pid_lock);
 
     tracing::info!("Node shut down cleanly.");
     Ok(())

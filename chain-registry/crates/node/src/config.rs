@@ -56,6 +56,10 @@ pub struct NodeConfig {
     pub eth_rpc_url: String,
     /// Registry contract address on Ethereum.
     pub registry_addr: String,
+    /// Test token contract address used by wallet and faucet flows.
+    pub token_addr: String,
+    /// Staking contract address used by publisher and validator staking.
+    pub staking_addr: String,
     /// Unique ID for this node (hex-encoded public key in production).
     pub node_id: String,
     /// This node's Ed25519 private key (hex). Used to sign validator votes.
@@ -83,6 +87,9 @@ pub struct NodeConfig {
     pub pruning: PruningConfig,
     /// Max peers for low-bandwidth environments
     pub max_peers: usize,
+    /// Testnet mode: allows multiple nodes per machine.
+    /// Mainnet (false) enforces a single node per data directory via PID lock.
+    pub is_testnet: bool,
 }
 
 impl NodeConfig {
@@ -129,6 +136,14 @@ impl NodeConfig {
                 "CREG_REGISTRY_ADDR",
                 "0x0000000000000000000000000000000000000000",
             ),
+            token_addr: env(
+                "CREG_TOKEN_ADDR",
+                "0x0000000000000000000000000000000000000000",
+            ),
+            staking_addr: env(
+                "CREG_STAKING_ADDR",
+                "0x0000000000000000000000000000000000000000",
+            ),
             block_interval_secs: env("CREG_BLOCK_INTERVAL", "5").parse().unwrap_or(5),
             ipfs_url: env("CREG_IPFS_URL", "http://127.0.0.1:5001"),
             pg_url: env("CREG_PG_URL", ""),
@@ -137,6 +152,7 @@ impl NodeConfig {
             mode,
             pruning,
             max_peers,
+            is_testnet: env("CREG_TESTNET", "false") == "true",
         }
     }
 

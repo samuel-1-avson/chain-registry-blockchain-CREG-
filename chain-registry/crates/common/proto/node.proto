@@ -57,6 +57,8 @@ message SubmitRequest {
     repeated string publisher_pubkeys = 11;
     repeated string signatures = 12;
     uint32 threshold = 13;
+    string manifest_json = 14;
+    string manifest_hash = 15;
 }
 
 message SubmitResponse {

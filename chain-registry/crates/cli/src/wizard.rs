@@ -137,7 +137,7 @@ pub async fn run() -> Result<()> {
 
     if setup_validator {
         println!("\n🔐 Validator commands:");
-        println!("   creg dashboard       # Monitor your node");
+        println!("   creg console         # Open the validator console");
         println!("   creg validator stats # View performance");
         println!("   creg stake 50        # Add more stake");
         println!("   docker-compose logs -f  # View logs");
@@ -301,7 +301,7 @@ async fn start_node(mode: &str) -> Result<()> {
 
     if status.success() {
         println!("  {} Node started successfully!", "✓".green());
-        println!("\n  Monitoring: creg dashboard");
+        println!("\n  Monitoring: creg console");
         println!("  Logs: docker-compose -f {} logs -f", compose_file);
     } else {
         bail!("Failed to start node. Check docker installation.");

@@ -23,6 +23,7 @@ x-web-explorer-image: &web-explorer-image
 
 x-node-base: &node-base
   <<: *app-image
+  user: "0:0"
   restart: unless-stopped
   depends_on:
     ipfs:
@@ -35,13 +36,16 @@ x-node-base: &node-base
     - ./circuits:/app/circuits:ro
     - ./validators:/app/validators:ro
     - ./models:/app/models:ro
-    - /var/run/docker.sock:/var/run/docker.sock:ro
+    - /var/run/docker.sock:/var/run/docker.sock
     - ./testnet/certs:/app/certs:ro
   environment: &node-env
+    CREG_TESTNET: "true"
     CREG_DATA_DIR: "/data"
     CREG_IS_VALIDATOR: "true"
     CREG_ETH_RPC: "http://anvil:8545"
     CREG_IPFS_URL: "http://ipfs:5001"
+    CREG_TOKEN_ADDR: "${TESTNET_TOKEN_ADDR:-0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9}"
+    CREG_STAKING_ADDR: "${TESTNET_STAKING_ADDR:-0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9}"
     CREG_BLOCK_INTERVAL: "2"
     CREG_SINGLE_VALIDATOR_MODE: "${CREG_SINGLE_VALIDATOR_MODE:-false}"
     CREG_DEV_SANDBOX: "${CREG_DEV_SANDBOX:-false}"
@@ -430,6 +434,7 @@ services:
       FAUCET_COOLDOWN_SECS: "${FAUCET_COOLDOWN_SECS:-60}"
       FAUCET_IP_COOLDOWN_SECS: "${FAUCET_IP_COOLDOWN_SECS:-60}"
       FAUCET_MAX_BALANCE: "${FAUCET_MAX_BALANCE:-10000000000000000000000}"
+      FAUCET_POW_DISABLED: "true"
       RUST_LOG: "info"
     ports:
       - "8082:8082"

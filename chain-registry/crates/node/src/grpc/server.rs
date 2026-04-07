@@ -56,6 +56,39 @@ impl RegistryService for MyRegistry {
         request: Request<SubmitRequest>,
     ) -> Result<Response<SubmitResponse>, Status> {
         let req = request.into_inner();
+
+        let manifest = if req.manifest_json.trim().is_empty() {
+            common::PackageManifest::default()
+        } else {
+            serde_json::from_str::<common::PackageManifest>(&req.manifest_json).map_err(|e| {
+                Status::invalid_argument(format!("Invalid manifest payload: {}", e))
+            })?
+        };
+
+        let mut content_hash_bytes = [0u8; 32];
+        if let Ok(hash_vec) = hex::decode(&req.content_hash) {
+            if hash_vec.len() == 32 {
+                content_hash_bytes.copy_from_slice(&hash_vec);
+            }
+        }
+
+        let mut manifest_hash_bytes = [0u8; 32];
+        let manifest_hash_hex = if req.manifest_hash.trim().is_empty() {
+            common::sha256_hex(
+                &serde_json::to_vec(&manifest)
+                    .map_err(|e| Status::internal(format!("Serialize manifest: {}", e)))?,
+            )
+        } else {
+            req.manifest_hash.clone()
+        };
+
+        let manifest_hash_vec = hex::decode(&manifest_hash_hex)
+            .map_err(|e| Status::invalid_argument(format!("Invalid manifest hash hex: {}", e)))?;
+        if manifest_hash_vec.len() != 32 {
+            return Err(Status::invalid_argument("Manifest hash must be 32 bytes"));
+        }
+        manifest_hash_bytes.copy_from_slice(&manifest_hash_vec);
+
         let s = self.state.read().await;
 
         // ── 1. ZK-Proof Verification (L2 Safety Hardening) ────────────────────
@@ -65,16 +98,9 @@ impl RegistryService for MyRegistry {
 
         // Build Public Inputs for the ZK Circuit
         // Note: In production, we'd also verify the content_hash matches the proof.
-        let mut content_hash_bytes = [0u8; 32];
-        if let Ok(hash_vec) = hex::decode(&req.content_hash) {
-            if hash_vec.len() == 32 {
-                content_hash_bytes.copy_from_slice(&hash_vec);
-            }
-        }
-
         let inputs = zk_validator::PackageInputs::new(
             content_hash_bytes,
-            [0u8; 32], // Sub-manifest hash (omitted for alpha simplicity)
+            manifest_hash_bytes,
             req.static_analysis_score as u8,
             req.sandbox_safe,
         );
@@ -114,7 +140,7 @@ impl RegistryService for MyRegistry {
             ipfs_cid: req.ipfs_cid,
             publisher_pubkey: req.publisher_pubkey,
             signature: req.signature,
-            manifest: common::PackageManifest::default(),
+            manifest,
             submitted_at: chrono::Utc::now(),
             shielded: false,
             key_bundle: None,
