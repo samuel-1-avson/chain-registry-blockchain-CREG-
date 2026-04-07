@@ -1,0 +1,138 @@
+# Optimized Dockerfile with network resilience
+# Use this if the standard Dockerfile has network issues
+
+# Multi-stage build with network optimizations
+FROM node:20-slim AS frontend-builder
+WORKDIR /explorer
+COPY explorer/package*.json ./
+
+# Use npm ci with retry
+RUN npm ci --silent --maxsockets=1 || \
+    (sleep 5 && npm ci --silent --maxsockets=1) || \
+    (sleep 10 && npm ci --silent --maxsockets=1)
+
+COPY explorer/ ./
+RUN npm run build
+
+# Stage 2: Rust Backend with network resilience
+FROM ubuntu:24.04 AS builder
+
+# Install dependencies with retry
+RUN apt-get update || apt-get update || apt-get update && \
+    apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    pkg-config \
+    libssl-dev \
+    build-essential \
+    clang \
+    llvm \
+    libclang-dev \
+    cmake \
+    libopenblas-dev \
+    protobuf-compiler \
+    libprotobuf-dev \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Rust with retry
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.90.0 || \
+    (sleep 5 && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.90.0)
+
+ENV PATH="/root/.cargo/bin:$PATH"
+
+# Configure cargo for network resilience
+RUN mkdir -p ~/.cargo && \
+    echo '[net]' > ~/.cargo/config.toml && \
+    echo 'retry = 3' >> ~/.cargo/config.toml && \
+    echo 'git-fetch-with-cli = true' >> ~/.cargo/config.toml && \
+    echo '' >> ~/.cargo/config.toml && \
+    echo '[registries.crates-io]' >> ~/.cargo/config.toml && \
+    echo 'protocol = "sparse"' >> ~/.cargo/config.toml
+
+WORKDIR /build
+
+# Copy frontend build
+COPY --from=frontend-builder /explorer/dist /build/explorer/dist
+
+# Copy dependency files
+COPY Cargo.toml Cargo.lock ./
+COPY crates/*/Cargo.toml crates/*/
+
+# Build-script inputs required for dependency caching
+COPY crates/common/build.rs     crates/common/
+COPY crates/common/proto/       crates/common/proto/
+
+# Create stubs for dependency caching
+RUN for dir in crates/*/; do \
+    mkdir -p "${dir}src" && \
+    echo "pub fn _stub() {}" > "${dir}src/lib.rs" || true; \
+    done
+
+# Pre-build dependencies with retry
+RUN cargo fetch || \
+    (sleep 5 && cargo fetch) || \
+    (sleep 10 && cargo fetch)
+
+RUN cargo build --release --package chain-registry-node 2>/dev/null || true
+
+# Copy real source
+COPY crates/ crates/
+COPY circuits/ circuits/
+COPY contracts/ contracts/
+COPY models/ models/
+COPY config/ config/
+COPY rules/ rules/
+COPY testnet/ testnet/
+COPY docker-compose*.yml ./
+
+# Touch to force rebuild
+RUN touch crates/*/src/*.rs
+
+# Build with retry
+RUN cargo build --release --package chain-registry-node || \
+    (sleep 5 && cargo build --release --package chain-registry-node) || \
+    (sleep 10 && cargo build --release --package chain-registry-node)
+
+RUN cargo build --release --package chain-registry-cli || \
+    (sleep 5 && cargo build --release --package chain-registry-cli) || \
+    (sleep 10 && cargo build --release --package chain-registry-cli)
+
+RUN cargo build --release --package faucet || \
+    (sleep 5 && cargo build --release --package faucet) || \
+    (sleep 10 && cargo build --release --package faucet)
+
+# Stage 3: Runtime
+FROM ubuntu:24.04 AS runtime
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    libssl3 \
+    libopenblas0 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY --from=builder /build/target/release/creg-node /app/creg-node
+COPY --from=builder /build/target/release/creg /app/creg
+COPY --from=builder /build/target/release/faucet /app/faucet
+COPY --from=builder /build/crates/cli/validators /app/validators
+COPY --from=builder /build/circuits /app/circuits
+COPY --from=builder /build/models /app/models
+COPY --from=builder /build/config/sandbox /app/config/sandbox
+COPY --from=builder /build/rules /app/rules
+
+RUN useradd -r -s /bin/false creg && \
+    mkdir -p /data && \
+    chown creg:creg /data
+USER creg
+
+VOLUME ["/data"]
+EXPOSE 8080 50051
+
+HEALTHCHECK --interval=20s --timeout=10s --retries=3 \
+  CMD curl -f http://localhost:8080/v1/health || exit 1
+
+ENTRYPOINT ["/app/creg-node"]

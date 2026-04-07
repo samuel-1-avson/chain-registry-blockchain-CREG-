@@ -1,0 +1,118 @@
+# Multi-stage build optimized for Windows Docker Desktop
+# Uses pre-built Rust toolchain to avoid network issues
+
+# ── Stage 1: Build Frontend ───────────────────────────────────────────────────
+FROM node:20-slim AS frontend-builder
+WORKDIR /explorer
+COPY explorer/package*.json ./
+RUN npm ci --silent
+COPY explorer/ ./
+RUN npm run build
+
+# ── Stage 2: Build Rust Backend ───────────────────────────────────────────────
+# Use Rust official image which has toolchain pre-installed
+FROM rust:1.90-bookworm AS builder
+
+# Install native dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    pkg-config \
+    libssl-dev \
+    build-essential \
+    clang \
+    llvm \
+    libclang-dev \
+    cmake \
+    libopenblas-dev \
+    protobuf-compiler \
+    libprotobuf-dev \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+
+# Copy the built frontend
+COPY --from=frontend-builder /explorer/dist /build/explorer/dist
+
+# Copy Cargo files for dependency caching
+COPY Cargo.toml Cargo.lock ./
+COPY crates/*/Cargo.toml crates/*/
+
+# Build-script inputs required for dependency caching
+COPY crates/common/build.rs     crates/common/
+COPY crates/common/proto/       crates/common/proto/
+
+# Create stub files for dependency resolution
+RUN mkdir -p crates/common/src && echo "pub fn _stub() {}" > crates/common/src/lib.rs && \
+    mkdir -p crates/cli/src && echo "fn main() {}" > crates/cli/src/main.rs && \
+    mkdir -p crates/resolver/src && echo "pub fn _stub() {}" > crates/resolver/src/lib.rs && \
+    mkdir -p crates/validator/src && echo "pub fn _stub() {}" > crates/validator/src/lib.rs && \
+    mkdir -p crates/consensus/src && echo "pub fn _stub() {}" > crates/consensus/src/lib.rs && \
+    mkdir -p crates/node/src && echo "fn main() {}" > crates/node/src/main.rs && \
+    mkdir -p crates/zk-validator/src && echo "pub fn _stub() {}" > crates/zk-validator/src/lib.rs && \
+    mkdir -p crates/ml-validator/src && echo "pub fn _stub() {}" > crates/ml-validator/src/lib.rs && \
+    mkdir -p crates/wasm-sandbox/src && echo "pub fn _stub() {}" > crates/wasm-sandbox/src/lib.rs && \
+    mkdir -p crates/threshold-encryption/src && echo "pub fn _stub() {}" > crates/threshold-encryption/src/lib.rs && \
+    mkdir -p crates/cross-chain/src && echo "pub fn _stub() {}" > crates/cross-chain/src/lib.rs && \
+    mkdir -p crates/insurance/src && echo "pub fn _stub() {}" > crates/insurance/src/lib.rs && \
+    mkdir -p crates/db-sync/src && echo "pub fn _stub() {}" > crates/db-sync/src/lib.rs && \
+    mkdir -p crates/ipfs-pinner/src && echo "pub fn _stub() {}" > crates/ipfs-pinner/src/lib.rs && \
+    mkdir -p crates/faucet/src && echo "fn main() {}" > crates/faucet/src/main.rs
+
+# Pre-build dependencies (cached layer)
+RUN cargo build --release --package chain-registry-node 2>/dev/null || true
+
+# Copy real source code
+COPY crates/ crates/
+COPY circuits/ circuits/
+COPY contracts/ contracts/
+COPY models/ models/
+COPY config/ config/
+COPY rules/ rules/
+COPY testnet/ testnet/
+
+# Touch files to ensure rebuild
+RUN touch crates/*/src/*.rs
+
+# Build the actual binaries
+RUN cargo build --release --package chain-registry-node && \
+    cargo build --release --package chain-registry-cli && \
+    cargo build --release --package faucet
+
+# ── Stage 3: Runtime ──────────────────────────────────────────────────────────
+FROM debian:bookworm-slim AS runtime
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    libssl3 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy binaries from builder
+COPY --from=builder /build/target/release/creg-node /app/creg-node
+COPY --from=builder /build/target/release/creg /app/creg
+COPY --from=builder /build/target/release/faucet /app/faucet
+
+# Copy WASM validators and circuits
+COPY --from=builder /build/crates/cli/validators /app/validators 2>/dev/null || true
+COPY --from=builder /build/circuits /app/circuits 2>/dev/null || true
+COPY --from=builder /build/models /app/models 2>/dev/null || true
+COPY --from=builder /build/config/sandbox /app/config/sandbox 2>/dev/null || true
+COPY --from=builder /build/rules /app/rules 2>/dev/null || true
+
+# Create non-root user
+RUN useradd -r -s /bin/false creg && \
+    mkdir -p /data && \
+    chown creg:creg /data
+
+USER creg
+
+VOLUME ["/data"]
+EXPOSE 8080 50051
+
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+  CMD curl -f http://localhost:8080/v1/health || exit 1
+
+ENTRYPOINT ["/app/creg-node"]
