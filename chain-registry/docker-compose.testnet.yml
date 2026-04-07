@@ -125,21 +125,21 @@ services:
     depends_on:
       anvil:
         condition: service_healthy
+    entrypoint: ["/bin/sh", "-lc"]
     volumes:
       - ./:/workspace
     working_dir: /workspace
-    command: |
-      sh -c "
+    command:
+      - >-
         echo 'Waiting for Anvil...' &&
         sleep 3 &&
         mkdir -p contracts/deployments testnet/artifacts &&
-        forge build &&
+        forge build --via-ir &&
         echo 'Deploying contracts...' &&
-        forge script contracts/script/Deploy.s.sol:DeployChainRegistry --rpc-url http://anvil:8545 --broadcast -vvvv
-      "
+        forge script contracts/script/Deploy.s.sol:DeployChainRegistry --rpc-url http://anvil:8545 --broadcast --via-ir -vvvv
     environment:
       - DEPLOYER_KEY=${DEPLOYER_KEY:-0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80}
-      - DEPLOYMENT_MANIFEST_PATH=contracts/deployments/latest.json
+      - DEPLOYMENT_MANIFEST_PATH=contracts/deployments/latest.json  
 
   # ── PostgreSQL Mirror (optional but recommended for testnet) ─────────────────
   postgres:

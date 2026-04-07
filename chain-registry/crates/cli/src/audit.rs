@@ -12,7 +12,7 @@
 //                  1 if any packages are revoked,
 //                  2 if any packages are unverified/unknown (use --strict).
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use colored::Colorize;
 use common::{PackageId, VerdictStatus};
 use serde::Deserialize;

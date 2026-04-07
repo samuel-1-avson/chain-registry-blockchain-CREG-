@@ -36,7 +36,7 @@ mod error_help;
 mod explorer_tui;
 mod wizard;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{generate, Shell};
 use colored::Colorize;

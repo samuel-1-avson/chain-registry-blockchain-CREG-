@@ -14,6 +14,8 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
 chrono = { workspace = true }
+sha2 = { workspace = true }
+async-trait = "0.1"
 
 # IPFS
 ipfs-api = "0.17"
