@@ -52,7 +52,7 @@ contract ZKSlashingVerifier {
     mapping(bytes32 => bool) public usedNullifiers;
     
     /// @notice Verifying keys for each evidence type
-    mapping(EvidenceType => VerifyingKey) public verifyingKeys;
+    mapping(EvidenceType => VerifyingKey) internal verifyingKeys;
     
     /// @notice Number of public inputs expected for each type
     mapping(EvidenceType => uint256) public publicInputCounts;
@@ -247,7 +247,7 @@ contract ZKSlashingVerifier {
     // ============ Internal Functions ============
     
     /**
-     * @notice Internal proof verification using pairing check
+     * @notice Internal proof verification using BN254 precompile pairing check
      * @param evidenceType Type of evidence
      * @param proof Groth16 proof
      * @param inputs Public inputs
@@ -262,50 +262,118 @@ contract ZKSlashingVerifier {
         
         // Check that vk is set
         if (vk.ic.length == 0) return false;
-        
-        // Compute linear combination of inputs with IC
-        uint256[2] memory vk_x = [uint256(0), uint256(0)];
-        
+        require(inputs.length + 1 == vk.ic.length, "Invalid input length");
+
+        // 1) Compute the linear combination:  vk_x = vk.ic[0] + sum(inputs[i] * vk.ic[i+1])
+        uint256[2] memory vk_x;
+        vk_x[0] = vk.ic[0][0];
+        vk_x[1] = vk.ic[0][1];
+
         for (uint256 i = 0; i < inputs.length; i++) {
-            // vk_x = vk_x + inputs[i] * vk.ic[i + 1]
-            vk_x = _addG1(
-                vk_x,
-                _scalarMulG1(vk.ic[i + 1], inputs[i])
-            );
+            uint256[2] memory s = _ecMul(vk.ic[i + 1], inputs[i]);
+            vk_x = _ecAdd(vk_x, s);
         }
-        
-        // Add first IC element
-        vk_x = _addG1(vk_x, vk.ic[0]);
-        
-        // Pairing check: e(A, B) * e(-vk_x, gamma) * e(-vk.alpha, delta) = 1
-        // Simplified: just check e(proof.A, proof.B) == e(vk_x, vk.gamma2)
-        
-        // NOTE: This is a simplified placeholder.
-        // In production, use the full pairing check with a library like
-        // https://github.com/iden3/snarkjs/blob/master/smart_contracts/verifier_groth16.sol
-        
-        // For now, return true if vk is set (placeholder)
-        return vk.ic.length > 0;
+
+        // 2) Build the pairing input for the BN256Pairing precompile (0x08).
+        //    We need to check:
+        //      e(-A, B) · e(vk.alpha1, vk.beta2) · e(vk_x, vk.gamma2) · e(C, vk.delta2) == 1
+        //    which is equivalent to:
+        //      e(A, B) == e(vk.alpha1, vk.beta2) · e(vk_x, vk.gamma2) · e(C, vk.delta2)
+        //
+        //    We negate proof.a (the first G1 point).
+        uint256[2] memory negA = _negateG1(proof.a);
+
+        // Encode 4 pairing pairs: each pair is (G1_x, G1_y, G2_x_im, G2_x_re, G2_y_im, G2_y_re)
+        // = 4 * 6 = 24 uint256 words
+        uint256[24] memory input;
+
+        // Pair 1: (-A, B)
+        input[0]  = negA[0];
+        input[1]  = negA[1];
+        input[2]  = proof.b[0][0];
+        input[3]  = proof.b[0][1];
+        input[4]  = proof.b[1][0];
+        input[5]  = proof.b[1][1];
+
+        // Pair 2: (alpha1, beta2)
+        input[6]  = vk.alpha1[0];
+        input[7]  = vk.alpha1[1];
+        input[8]  = vk.beta2[0][0];
+        input[9]  = vk.beta2[0][1];
+        input[10] = vk.beta2[1][0];
+        input[11] = vk.beta2[1][1];
+
+        // Pair 3: (vk_x, gamma2)
+        input[12] = vk_x[0];
+        input[13] = vk_x[1];
+        input[14] = vk.gamma2[0][0];
+        input[15] = vk.gamma2[0][1];
+        input[16] = vk.gamma2[1][0];
+        input[17] = vk.gamma2[1][1];
+
+        // Pair 4: (C, delta2)
+        input[18] = proof.c[0];
+        input[19] = proof.c[1];
+        input[20] = vk.delta2[0][0];
+        input[21] = vk.delta2[0][1];
+        input[22] = vk.delta2[1][0];
+        input[23] = vk.delta2[1][1];
+
+        uint256[1] memory out;
+        bool success;
+        // solhint-disable-next-line no-inline-assembly
+        assembly {
+            // precompile 0x08 = bn256Pairing
+            // input:  24 * 32 = 768 bytes
+            // output: 32 bytes (0 or 1)
+            success := staticcall(gas(), 0x08, input, 768, out, 32)
+        }
+        return success && out[0] == 1;
     }
     
-    // ============ Helper Functions ============
-    
-    /// @notice Add two G1 points
-    function _addG1(
+    // ============ BN254 Precompile Helpers ============
+
+    /// @notice Negate a G1 point (reflects y over the BN254 field prime)
+    function _negateG1(uint256[2] memory p) internal pure returns (uint256[2] memory) {
+        // BN254 field prime
+        uint256 q = 21888242871839275222246405745257275088696311157297823662689037894645226208583;
+        if (p[0] == 0 && p[1] == 0) return p;
+        return [p[0], q - (p[1] % q)];
+    }
+
+    /// @notice BN254 G1 point addition via precompile 0x06
+    function _ecAdd(
         uint256[2] memory p1,
         uint256[2] memory p2
-    ) internal pure returns (uint256[2] memory) {
-        // Placeholder: would use BN128 curve operations
-        return [p1[0] + p2[0], p1[1] + p2[1]];
+    ) internal view returns (uint256[2] memory r) {
+        uint256[4] memory input;
+        input[0] = p1[0];
+        input[1] = p1[1];
+        input[2] = p2[0];
+        input[3] = p2[1];
+        bool success;
+        // solhint-disable-next-line no-inline-assembly
+        assembly {
+            success := staticcall(gas(), 0x06, input, 128, r, 64)
+        }
+        require(success, "ecAdd failed");
     }
-    
-    /// @notice Multiply G1 point by scalar
-    function _scalarMulG1(
+
+    /// @notice BN254 G1 scalar multiplication via precompile 0x07
+    function _ecMul(
         uint256[2] memory p,
         uint256 s
-    ) internal pure returns (uint256[2] memory) {
-        // Placeholder: would use BN128 curve operations
-        return [p[0] * s, p[1] * s];
+    ) internal view returns (uint256[2] memory r) {
+        uint256[3] memory input;
+        input[0] = p[0];
+        input[1] = p[1];
+        input[2] = s;
+        bool success;
+        // solhint-disable-next-line no-inline-assembly
+        assembly {
+            success := staticcall(gas(), 0x07, input, 96, r, 64)
+        }
+        require(success, "ecMul failed");
     }
     
     // ============ Batch Verification ============

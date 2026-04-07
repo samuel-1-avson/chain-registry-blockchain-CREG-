@@ -1,52 +1,68 @@
 # =============================================================================
-# Chain Registry Node - Git Ignore
-# SECURITY: Never commit private keys, seed phrases, or API credentials
+# Chain Registry Node — Inner Project .gitignore
+# SECURITY: Never commit private keys, seed phrases, or credentials
+# POLICY: Only source code and scripts are tracked.
+#         No docs, models, packages, libraries, or generated artifacts.
 # =============================================================================
 
 # =============================================================================
-# DOCUMENTATION (Only README.md is kept)
+# DOCUMENTATION — ALL .md files ignored
 # =============================================================================
 *.md
-!README.md
 
 # =============================================================================
-# ENVIRONMENT & SECRETS (CRITICAL - NEVER COMMIT)
+# DOCS DIRECTORY
+# =============================================================================
+docs/
+
+# =============================================================================
+# ENVIRONMENT & SECRETS (CRITICAL — NEVER COMMIT)
 # =============================================================================
 .env
 .env.*
-!.env.example
-.env.local
-.env.production
-.env.staging
+.env.backup.*
+*.env
 secrets/
 *secret*
-*password*
-*credential*
+!.gitignore
+
+# =============================================================================
+# KEYS & CREDENTIALS (CRITICAL)
+# =============================================================================
 *.key
 *.pem
 *.p12
 *.pfx
-private*
-privkey*
-
-# =============================================================================
-# VALIDATOR KEYS (CRITICAL - NEVER COMMIT)
-# =============================================================================
-validator*
-!validator*/README*
-!validator*/.gitkeep
-publisher.key
-testnet-keys/
-generated-keys/
+*.crt
+*.cer
 *.pub
 *.priv
+*password*
+*credential*
+*wallet*
+*mnemonic*
+*seed*
+private*
+privkey*
+publisher.key
 
 # =============================================================================
-# SMART CONTRACT BUILD ARTIFACTS
+# VALIDATOR KEYS (CRITICAL)
+# =============================================================================
+validator-keys/
+validators/
+
+# =============================================================================
+# KUBERNETES SECRETS
+# =============================================================================
+k8s/*secret*
+
+# =============================================================================
+# RUST BUILD ARTIFACTS & BINARIES
 # =============================================================================
 /target/
 /target[0-9]*/
-**/*.target/
+/target-*/
 Cargo.lock
 *.pdb
 *.exe
@@ -54,35 +70,41 @@ creg
 creg-node
 creg-cli
 
-# Solidity build artifacts
+# =============================================================================
+# SMART CONTRACT BUILD / SOLIDITY ARTIFACTS
+# =============================================================================
 contracts/out/
 contracts/cache/
 contracts/broadcast/
 contracts/foundry.lock
-contracts/remappings.txt
-deployments/local/
-deployments/anvil/
+contracts/deployments/
+foundry.lock
+remappings.txt
 
 # =============================================================================
-# ZK CIRCUIT ARTIFACTS (Large files, can be regenerated)
+# ZK CIRCUIT BUILD ARTIFACTS & KEYS
 # =============================================================================
 circuits/build/
 circuits/keys/
-circuits/*.r1cs
-circuits/*.wasm
-circuits/*.sym
-circuits/*.zkey
-circuits/*.ptau
+*.r1cs
+*.zkey
+*.ptau
+*.sym
+!circuits/*.circom
 
 # =============================================================================
-# ML MODELS (Large files)
+# ML MODELS & TRAINING DATA
 # =============================================================================
-ml/models/
-ml/training/chain-registry/
-ml/training/*.pkl
-ml/training/*.onnx
-ml/training/*.pt
-ml/training/*.pth
+models/
+ml/training/
+secret-model/
+*.pkl
+*.onnx
+*.pt
+*.pth
+*.bin
+*.h5
+*.safetensors
 
 # =============================================================================
 # DATA & STORAGE
@@ -104,21 +126,16 @@ anvil_state.json
 # LOGS
 # =============================================================================
 *.log
+*.log.*
 logs/
-node_err.log
-publish_log.txt
-build_log.txt
-api-test.log
-check.log
-cli-check.log
-node-check*.log
 
 # =============================================================================
-# PACKAGE ARTIFACTS
+# PACKAGE ARTIFACTS & TARBALLS
 # =============================================================================
 *.tgz
 *.tar.gz
 *.zip
+*.tar
 demo-v2/
 malicious-pkg/
 good-pkg-v1/
@@ -126,11 +143,14 @@ good-pkg-v2/
 evil-pkg-v1/
 package/
 packages/
+dist/
+stress-report-out/
 
 # =============================================================================
-# NODE.JS / NPM
+# NODE.JS / NPM (libraries)
 # =============================================================================
 node_modules/
+**/node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -138,9 +158,10 @@ package-lock.json
 yarn.lock
 
 # =============================================================================
-# PYTHON
+# PYTHON (libraries)
 # =============================================================================
 __pycache__/
+**/__pycache__/
 *.py[cod]
 *$py.class
 *.so
@@ -148,9 +169,7 @@ __pycache__/
 env/
 venv/
 ENV/
-build/
 develop-eggs/
-dist/
 downloads/
 eggs/
 .eggs/
@@ -174,11 +193,24 @@ wheels/
 *~
 .DS_Store
 Thumbs.db
+*.sublime-project
+*.sublime-workspace
+
+# =============================================================================
+# AI TOOL DIRECTORIES
+# =============================================================================
+.blackboxcli/
+.claude/
+.cursor/
+.gemini/
+.ai/
+.playwright-mcp/
 
 # =============================================================================
 # COVERAGE & TESTING
 # =============================================================================
 coverage/
+**/coverage/
 *.coverage
 htmlcov/
 .tox/
@@ -186,25 +218,34 @@ htmlcov/
 .pytest_cache/
 
 # =============================================================================
-# PROJECT SPECIFIC
+# DOCKER
 # =============================================================================
-.gemini/
-.claude/
-.cursor/
+docker-compose.override.yml
 
-# Config files with real values
+# =============================================================================
+# MISCELLANEOUS
+# =============================================================================
+*.bak
+*.backup
+*.old
+*.orig
+*.rej
+*.patch
+
+# =============================================================================
+# TESTNET GENERATED ARTIFACTS
+# =============================================================================
+testnet/artifacts/
 config/*/deployment.json
 config/local/
 config/production/
-
-# Generated testnet files
 scripts/*.key
 scripts/*.json
+!scripts/*.py
+!scripts/*.ps1
+!scripts/*.sh
 
 # =============================================================================
-# ALLOW THESE
+# PLAYGROUND (demo test payloads)
 # =============================================================================
-!README.md
-!CONTRIBUTING.md
-!LICENSE
-!.gitignore
+playground/

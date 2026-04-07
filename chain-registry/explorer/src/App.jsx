@@ -1,9 +1,47 @@
-// Chain Registry Explorer - Minimal & Intuitive Design
-// Features: Clean UI, Real-time updates, Search, Animations, Detail views
+// Chain Registry Explorer - Full Operator Interface
+// Features: Explorer, Packages, Wallet, Staking, Faucet, Real-time updates
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { createPublicClient, createWalletClient, http, parseUnits, formatUnits } from 'viem'
+import { privateKeyToAccount } from 'viem/accounts'
 
-const API_BASE = 'http://127.0.0.1:8080'
+// ============================================
+// CONFIGURATION
+// ============================================
+
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8080'
+const FAUCET_BASE = import.meta.env.VITE_FAUCET_BASE || 'http://127.0.0.1:8082'
+const RPC_URL = import.meta.env.VITE_RPC_URL || 'http://127.0.0.1:8545'
+const CREG_TOKEN_ADDR = import.meta.env.VITE_CREG_TOKEN || null
+const STAKING_ADDR = import.meta.env.VITE_STAKING_ADDR || null
+
+const localChain = {
+  id: 31337,
+  name: 'Anvil Local',
+  nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+  rpcUrls: { default: { http: [RPC_URL] } },
+}
+
+const ANVIL_TEST_ACCOUNTS = [
+  { label: 'Account #2', key: '0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a' },
+  { label: 'Account #3', key: '0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6' },
+  { label: 'Account #4', key: '0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a' },
+]
+
+const ERC20_ABI = [
+  { name: 'balanceOf', type: 'function', stateMutability: 'view',
+    inputs: [{ name: 'account', type: 'address' }], outputs: [{ name: '', type: 'uint256' }] },
+  { name: 'approve', type: 'function', stateMutability: 'nonpayable',
+    inputs: [{ name: 'spender', type: 'address' }, { name: 'amount', type: 'uint256' }],
+    outputs: [{ name: '', type: 'bool' }] },
+]
+
+const STAKING_ABI = [
+  { name: 'stakeAsPublisher', type: 'function', stateMutability: 'nonpayable',
+    inputs: [{ name: 'amount', type: 'uint256' }], outputs: [] },
+  { name: 'applyToBeValidator', type: 'function', stateMutability: 'nonpayable',
+    inputs: [{ name: 'amount', type: 'uint256' }], outputs: [] },
+]
 
 // ============================================
 // UTILITY FUNCTIONS
@@ -111,7 +149,23 @@ function App() {
   const [isLoading, setIsLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const [isSearchFocused, setIsSearchFocused] = useState(false)
-  
+
+  // Wallet state
+  const [showWallet, setShowWallet] = useState(false)
+  const [walletAccount, setWalletAccount] = useState(null)
+  const [walletBalance, setWalletBalance] = useState(null)
+  const [walletKeyInput, setWalletKeyInput] = useState('')
+  const [dripLoading, setDripLoading] = useState(false)
+  const [dripResult, setDripResult] = useState(null)
+  const [stakeLoading, setStakeLoading] = useState(false)
+  const [stakeResult, setStakeResult] = useState(null)
+  const [stakeAmount, setStakeAmount] = useState('')
+
+  // Package state
+  const [pendingPackages, setPendingPackages] = useState({ count: 0, packages: [] })
+  const [packageQuery, setPackageQuery] = useState('')
+  const [lookedUpPackage, setLookedUpPackage] = useState(null)
+
   const sseRef = useRef(null)
   const searchInputRef = useRef(null)
 
@@ -149,7 +203,13 @@ function App() {
       if (nodesRes.ok) setNodes(await nodesRes.json())
       if (p2pRes.ok) setP2pStatus(await p2pRes.json())
       if (bridgeRes.ok) setBridgeStatus(await bridgeRes.json())
-      
+
+      // Fetch pending packages
+      try {
+        const pendingRes = await fetch(`${API_BASE}/v1/pending`)
+        if (pendingRes.ok) setPendingPackages(await pendingRes.json())
+      } catch (e) { /* endpoint may not exist yet */ }
+
       setStatus('online')
       setIsLoading(false)
     } catch (err) {
@@ -209,6 +269,143 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [isSearchFocused])
 
+  // Wallet balance refresh
+  useEffect(() => {
+    if (!walletAccount) return
+    const refreshBalance = async () => {
+      try {
+        const res = await fetch(`${FAUCET_BASE}/api/balance/${walletAccount.address}`)
+        if (res.ok) {
+          const data = await res.json()
+          const rawBal = data.balance || data.formatted || '0'
+          try {
+            setWalletBalance(formatUnits(BigInt(rawBal), 18))
+          } catch {
+            setWalletBalance(rawBal)
+          }
+          try {
+            setWalletBalance(formatUnits(BigInt(rawBal), 18))
+          } catch {
+            setWalletBalance(rawBal)
+          }
+        }
+      } catch (e) { /* faucet unreachable */ }
+    }
+    refreshBalance()
+    const timer = setInterval(refreshBalance, 10000)
+    return () => clearInterval(timer)
+  }, [walletAccount])
+
+  const connectWallet = useCallback(async (privateKey) => {
+    try {
+      const key = privateKey.startsWith('0x') ? privateKey : `0x${privateKey}`
+      const account = privateKeyToAccount(key)
+      setWalletAccount(account)
+      setWalletKeyInput('')
+      setShowWallet(false)
+      setDripResult(null)
+      setStakeResult(null)
+    } catch (err) {
+      alert('Invalid private key. Must be a valid 32-byte hex string.')
+    }
+  }, [])
+
+  const disconnectWallet = useCallback(() => {
+    setWalletAccount(null)
+    setWalletBalance(null)
+    setDripResult(null)
+    setStakeResult(null)
+    setStakeAmount('')
+  }, [])
+
+  const requestDrip = useCallback(async () => {
+    if (!walletAccount) return
+    setDripLoading(true)
+    setDripResult(null)
+    try {
+      const res = await fetch(`${FAUCET_BASE}/api/drip`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address: walletAccount.address }),
+      })
+      const data = await res.json()
+      setDripResult(data)
+    } catch (err) {
+      setDripResult({ success: false, message: err.message })
+    } finally {
+      setDripLoading(false)
+    }
+  }, [walletAccount])
+
+  const doStake = useCallback(async (role) => {
+    if (!walletAccount || !stakeAmount) return
+    if (!CREG_TOKEN_ADDR || !STAKING_ADDR) {
+      setStakeResult({ success: false, message: 'Contract addresses not configured. Set VITE_CREG_TOKEN and VITE_STAKING_ADDR env vars.' })
+      return
+    }
+    setStakeLoading(true)
+    setStakeResult(null)
+    try {
+      const wc = createWalletClient({
+        account: walletAccount,
+        chain: localChain,
+        transport: http(RPC_URL),
+      })
+      const pc = createPublicClient({ chain: localChain, transport: http(RPC_URL) })
+      const amountWei = parseUnits(stakeAmount, 18)
+
+      if (role === 'publisher') {
+        const approveTx = await wc.writeContract({
+          address: CREG_TOKEN_ADDR,
+          abi: ERC20_ABI,
+          functionName: 'approve',
+          args: [STAKING_ADDR, amountWei],
+        })
+        await pc.waitForTransactionReceipt({ hash: approveTx })
+        const stakeTx = await wc.writeContract({
+          address: STAKING_ADDR,
+          abi: STAKING_ABI,
+          functionName: 'stakeAsPublisher',
+          args: [amountWei],
+        })
+        await pc.waitForTransactionReceipt({ hash: stakeTx })
+        setStakeResult({ success: true, message: `Staked ${stakeAmount} tCREG as publisher`, tx: stakeTx })
+      } else {
+        const approveTx = await wc.writeContract({
+          address: CREG_TOKEN_ADDR,
+          abi: ERC20_ABI,
+          functionName: 'approve',
+          args: [STAKING_ADDR, amountWei],
+        })
+        await pc.waitForTransactionReceipt({ hash: approveTx })
+        const stakeTx = await wc.writeContract({
+          address: STAKING_ADDR,
+          abi: STAKING_ABI,
+          functionName: 'applyToBeValidator',
+          args: [amountWei],
+        })
+        await pc.waitForTransactionReceipt({ hash: stakeTx })
+        setStakeResult({ success: true, message: `Applied as validator with ${stakeAmount} tCREG`, tx: stakeTx })
+      }
+    } catch (err) {
+      setStakeResult({ success: false, message: err.message })
+    } finally {
+      setStakeLoading(false)
+    }
+  }, [walletAccount, stakeAmount])
+
+  const lookupPackage = useCallback(async () => {
+    if (!packageQuery) return
+    try {
+      const res = await fetch(`${API_BASE}/v1/packages/${encodeURIComponent(packageQuery)}`)
+      if (res.ok) {
+        setLookedUpPackage(await res.json())
+      } else {
+        setLookedUpPackage(null)
+      }
+    } catch { setLookedUpPackage(null) }
+  }, [packageQuery])
+
   // Derived state
   const totalStaked = useMemo(() => 
     nodes.reduce((acc, n) => acc + (n.stake || 0), 0),
@@ -258,11 +455,24 @@ function App() {
           </div>
         </div>
         
-        <div className="connection-status">
-          <div className={`status-dot ${status}`} />
-          <span style={{ color: status === 'online' ? 'var(--accent-success)' : 'var(--accent-error)' }}>
-            {status === 'online' ? 'Connected' : 'Disconnected'}
-          </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+          {walletAccount ? (
+            <button className="wallet-btn wallet-btn-connected" onClick={() => setShowWallet(!showWallet)}>
+              <span className="wallet-dot connected" />
+              {walletAccount.address.slice(0, 6)}...{walletAccount.address.slice(-4)}
+              {walletBalance && <span className="wallet-bal">{walletBalance} tCREG</span>}
+            </button>
+          ) : (
+            <button className="wallet-btn" onClick={() => setShowWallet(!showWallet)}>
+              🔑 Connect Wallet
+            </button>
+          )}
+          <div className="connection-status">
+            <div className={`status-dot ${status}`} />
+            <span style={{ color: status === 'online' ? 'var(--accent-success)' : 'var(--accent-error)' }}>
+              {status === 'online' ? 'Connected' : 'Disconnected'}
+            </span>
+          </div>
         </div>
       </header>
 
@@ -317,6 +527,7 @@ function App() {
         {[
           { id: 'blocks', label: 'Blocks', icon: '⛓' },
           { id: 'validators', label: 'Validators', icon: '⚡' },
+          { id: 'packages', label: 'Packages', icon: '📦' },
           { id: 'p2p', label: 'Network', icon: '🌐' },
         ].map(tab => (
           <button
@@ -339,6 +550,7 @@ function App() {
             <div className="panel-title">
               {view === 'blocks' && 'Recent Blocks'}
               {view === 'validators' && 'Validator Set'}
+              {view === 'packages' && `Packages (${stats.package_count} on-chain)`}
               {view === 'p2p' && 'Network Status'}
             </div>
             {view === 'blocks' && (
@@ -447,6 +659,82 @@ function App() {
                     )}
                   </tbody>
                 </table>
+              </div>
+            )}
+
+            {/* Packages View */}
+            {view === 'packages' && (
+              <div style={{ padding: 'var(--space-4)' }}>
+                <div style={{ marginBottom: 'var(--space-4)' }}>
+                  <div className="search-box" style={{ maxWidth: '100%' }}>
+                    <span className="search-icon">📦</span>
+                    <input
+                      type="text"
+                      className="search-input"
+                      placeholder="Lookup package by canonical name... (press Enter)"
+                      value={packageQuery}
+                      onChange={(e) => setPackageQuery(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && lookupPackage()}
+                    />
+                  </div>
+                </div>
+
+                {lookedUpPackage && (
+                  <div className="detail-panel" style={{ marginBottom: 'var(--space-4)' }}>
+                    <div className="detail-header">
+                      <span className="detail-title">📦 {lookedUpPackage.canonical}</span>
+                      <button className="detail-close" onClick={() => setLookedUpPackage(null)}>✕</button>
+                    </div>
+                    <div className="detail-content">
+                      <div className="detail-section">
+                        <div className="detail-row">
+                          <span className="detail-label">Status</span>
+                          <StatusBadge status={lookedUpPackage.status} />
+                        </div>
+                        <div className="detail-row">
+                          <span className="detail-label">Publisher</span>
+                          <span className="detail-value">{truncateHash(lookedUpPackage.publisher, 10, 6)}</span>
+                        </div>
+                        <div className="detail-row">
+                          <span className="detail-label">Published</span>
+                          <span className="detail-value">{timeAgo(lookedUpPackage.published_at)}</span>
+                        </div>
+                        {lookedUpPackage.ipfs_cid && (
+                          <div className="detail-row">
+                            <span className="detail-label">IPFS CID</span>
+                            <CopyButton text={lookedUpPackage.ipfs_cid} label="cid" />
+                          </div>
+                        )}
+                        {lookedUpPackage.content_hash && (
+                          <div className="detail-row">
+                            <span className="detail-label">Content Hash</span>
+                            <CopyButton text={lookedUpPackage.content_hash} label="hash" />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="detail-section">
+                  <div className="detail-section-title">Pending Packages ({pendingPackages.count})</div>
+                  {pendingPackages.packages?.length === 0 ? (
+                    <EmptyState
+                      icon="📦"
+                      title="No pending packages"
+                      description="Packages awaiting verification will appear here"
+                    />
+                  ) : (
+                    <div className="peer-list">
+                      {pendingPackages.packages?.map((pkg, idx) => (
+                        <div key={idx} className="peer-item animate-slide-in" style={{ animationDelay: `${idx * 0.05}s` }}>
+                          <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{pkg}</span>
+                          <span className="badge badge-warning badge-sm">Pending</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
@@ -602,8 +890,8 @@ function App() {
         </div>
       </div>
 
-      {/* Bridge HUD */}
-      <div className="bridge-hud">
+      {/* Bridge HUD - Inline */}
+      <div className="bridge-hud-inline">
         <div className="bridge-header">
           <span className="bridge-icon">🌉</span>
           <div className="bridge-info">
@@ -622,6 +910,129 @@ function App() {
           />
         </div>
       </div>
+
+      {/* Wallet Panel */}
+      {showWallet && (
+        <div className="wallet-overlay" onClick={() => setShowWallet(false)}>
+          <div className="wallet-panel" onClick={(e) => e.stopPropagation()}>
+            <div className="wallet-panel-header">
+              <span className="wallet-panel-title">🔑 Testnet Wallet</span>
+              <button className="detail-close" onClick={() => setShowWallet(false)}>✕</button>
+            </div>
+
+            {!walletAccount ? (
+              <div className="wallet-panel-body">
+                <div className="wallet-section">
+                  <label className="wallet-label">Private Key (Testnet Only)</label>
+                  <input
+                    type="password"
+                    className="wallet-input"
+                    placeholder="0x..."
+                    value={walletKeyInput}
+                    onChange={(e) => setWalletKeyInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && walletKeyInput && connectWallet(walletKeyInput)}
+                  />
+                  <button
+                    className="wallet-action-btn wallet-action-primary"
+                    onClick={() => connectWallet(walletKeyInput)}
+                    disabled={!walletKeyInput}
+                  >
+                    Connect
+                  </button>
+                </div>
+                <div className="wallet-section">
+                  <label className="wallet-label">Quick Connect (Anvil Test Accounts)</label>
+                  <div className="wallet-quick-accounts">
+                    {ANVIL_TEST_ACCOUNTS.map((acc, i) => (
+                      <button
+                        key={i}
+                        className="wallet-action-btn wallet-action-secondary"
+                        onClick={() => connectWallet(acc.key)}
+                      >
+                        {acc.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="wallet-panel-body">
+                <div className="wallet-section">
+                  <label className="wallet-label">Connected Address</label>
+                  <div className="wallet-address">
+                    <CopyButton text={walletAccount.address} label="address" />
+                  </div>
+                  <div className="wallet-balance-display">
+                    <span className="wallet-balance-value">{walletBalance || '...'}</span>
+                    <span className="wallet-balance-label">tCREG</span>
+                  </div>
+                </div>
+
+                <div className="wallet-section">
+                  <label className="wallet-label">🚰 Faucet</label>
+                  <button
+                    className="wallet-action-btn wallet-action-primary"
+                    onClick={requestDrip}
+                    disabled={dripLoading}
+                  >
+                    {dripLoading ? 'Requesting...' : 'Request 1,000 tCREG'}
+                  </button>
+                  {dripResult && (
+                    <div className={`wallet-result ${dripResult.success ? 'success' : 'error'}`}>
+                      {dripResult.message}
+                      {dripResult.tx_hash && <div className="wallet-tx">Tx: {truncateHash(dripResult.tx_hash, 10, 6)}</div>}
+                    </div>
+                  )}
+                </div>
+
+                <div className="wallet-section">
+                  <label className="wallet-label">⚡ Stake Tokens</label>
+                  <input
+                    type="number"
+                    className="wallet-input"
+                    placeholder="Amount (e.g. 100)"
+                    value={stakeAmount}
+                    onChange={(e) => setStakeAmount(e.target.value)}
+                  />
+                  <div className="wallet-stake-buttons">
+                    <button
+                      className="wallet-action-btn wallet-action-primary"
+                      onClick={() => doStake('publisher')}
+                      disabled={stakeLoading || !stakeAmount}
+                    >
+                      {stakeLoading ? 'Staking...' : 'Stake as Publisher'}
+                    </button>
+                    <button
+                      className="wallet-action-btn wallet-action-secondary"
+                      onClick={() => doStake('validator')}
+                      disabled={stakeLoading || !stakeAmount}
+                    >
+                      {stakeLoading ? 'Staking...' : 'Apply as Validator'}
+                    </button>
+                  </div>
+                  {!CREG_TOKEN_ADDR && (
+                    <div className="wallet-result warning">
+                      Contract addresses not configured. Set VITE_CREG_TOKEN and VITE_STAKING_ADDR environment variables.
+                    </div>
+                  )}
+                  {stakeResult && (
+                    <div className={`wallet-result ${stakeResult.success ? 'success' : 'error'}`}>
+                      {stakeResult.message}
+                      {stakeResult.tx && <div className="wallet-tx">Tx: {truncateHash(stakeResult.tx, 10, 6)}</div>}
+                    </div>
+                  )}
+                </div>
+
+                <div className="wallet-section">
+                  <button className="wallet-action-btn wallet-action-danger" onClick={disconnectWallet}>
+                    Disconnect
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

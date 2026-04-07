@@ -10,11 +10,12 @@ path = "src/main.rs"
 [dependencies]
 common    = { path = "../common" }
 validator = { path = "../validator" }
+ml-validator = { path = "../ml-validator" }
 consensus = { path = "../consensus" }
 resolver  = { path = "../resolver" }
 zk-validator = { path = "../zk-validator" }
 db-sync   = { path = "../db-sync" }
-# threshold-encryption = { path = "../threshold-encryption" }  # TODO: Fix compilation errors
+threshold-encryption = { path = "../threshold-encryption" }
 
 tokio        = { workspace = true }
 serde        = { workspace = true }

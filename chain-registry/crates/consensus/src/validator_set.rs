@@ -8,7 +8,13 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValidatorInfo {
     pub id: String,
+    /// Ed25519 public key (hex-encoded) — used for VRF proofs and block signing.
     pub pubkey: String,
+    /// Ethereum-style address (0x-prefixed, 20-byte hex) derived from the
+    /// validator's secp256k1/ECDSA key.  Used for cross-referencing on-chain
+    /// contract votes and slashing evidence.  `None` for legacy validators
+    /// that have not yet registered an ECDSA key.
+    pub eth_address: Option<String>,
     /// Staked tokens — slashed on bad behaviour.
     pub stake: u64,
     /// Reputation score 0–100. Starts at 50 for new validators.

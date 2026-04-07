@@ -21,6 +21,7 @@ tree-sitter-rust = "0.20"
 
 # Cryptographic hash for feature hashing
 sha2 = "0.10"
+hex = "0.4"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 
 # Statistics
@@ -38,6 +39,12 @@ futures = "0.3"
 # Archive extraction for tarball scanning
 flate2 = "1"
 tar = "0.4"
+
+# YARA-X for pattern-based malware detection (replaces custom ONNX training)
+yara-x = "1.14"
+
+# HTTP client for OSV vulnerability database lookups
+reqwest = { workspace = true, features = ["blocking", "json"] }
 
 # Error handling
 thiserror = "1.0"

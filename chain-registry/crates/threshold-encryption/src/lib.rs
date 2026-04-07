@@ -125,7 +125,7 @@ impl KeyShare {
 }
 
 /// Encrypted package with metadata
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EncryptedPackage {
     /// Encrypted content (AES-256-GCM)
     pub ciphertext: Vec<u8>,

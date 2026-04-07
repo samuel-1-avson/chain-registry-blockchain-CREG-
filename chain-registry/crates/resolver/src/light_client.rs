@@ -259,7 +259,7 @@ pub fn build_merkle_proof(block: &Block, tx_index: usize) -> Result<MerkleProof>
     while level.len() > 1 {
         // Pad to even length.
         if level.len() % 2 != 0 {
-            level.push(level.last().unwrap().clone());
+            level.push(level.last().ok_or_else(|| anyhow::anyhow!("Empty merkle level during proof construction"))?.clone());
         }
 
         let sibling_idx = if idx % 2 == 0 { idx + 1 } else { idx - 1 };

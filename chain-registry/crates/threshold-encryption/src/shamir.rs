@@ -15,6 +15,13 @@ pub struct Share {
     pub value: Vec<u8>,
 }
 
+impl Share {
+    /// Create a new share.
+    pub fn new(index: u8, value: Vec<u8>) -> Self {
+        Self { index, value }
+    }
+}
+
 /// Shamir Secret Sharing implementation
 pub struct ShamirSecretSharing {
     threshold: u8,

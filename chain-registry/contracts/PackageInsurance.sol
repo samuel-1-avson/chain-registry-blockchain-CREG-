@@ -57,10 +57,10 @@ contract PackageInsurance {
     // ── Storage ───────────────────────────────────────────────────────────────
     
     /// Policy ID → Policy
-    mapping(uint256 => Policy) public policies;
+    mapping(uint256 => Policy) private _policies;
     
     /// Claim ID → Claim
-    mapping(uint256 => Claim) public claims;
+    mapping(uint256 => Claim) private _claims;
     
     /// Package key → policy IDs
     mapping(bytes32 => uint256[]) public packagePolicies;
@@ -103,6 +103,13 @@ contract PackageInsurance {
     
     /// Minimum coverage per policy
     uint256 public minCoverage = 0.1 ether;
+
+    /// Maximum payout per single claim (prevents pool drain from one claim)
+    uint256 public maxPayoutPerClaim = 50 ether;
+
+    /// Maximum pool utilization ratio (bps).  New policies are blocked once
+    /// totalCoverage / poolBalance exceeds this ratio.  10000 = 100%.
+    uint256 public maxPoolUtilizationBps = 8000;
     
     /// Policy duration (1 year)
     uint256 public constant POLICY_DURATION = 365 days;
@@ -155,6 +162,8 @@ contract PackageInsurance {
     error AlreadyClaimed();
     error InvalidEvidence();
     error UnauthorizedResolver();
+    error PayoutExceedsMaxClaim();
+    error PoolUtilizationExceeded();
     
     // ── Modifiers ─────────────────────────────────────────────────────────────
     
@@ -213,12 +222,17 @@ contract PackageInsurance {
         
         poolBalance += premium;
         totalCoverage += coverageAmount;
+
+        // Enforce maximum pool utilization — prevent over-issuance
+        if (poolBalance > 0 && (totalCoverage * 10000) / poolBalance > maxPoolUtilizationBps) {
+            revert PoolUtilizationExceeded();
+        }
         
         // Create policy
         policyCount++;
         policyId = policyCount;
         
-        policies[policyId] = Policy({
+        _policies[policyId] = Policy({
             id: policyId,
             insured: msg.sender,
             packageCanonical: packageCanonical,
@@ -249,7 +263,7 @@ contract PackageInsurance {
     /// @param coverageAmount Coverage amount
     /// @return Premium amount in CREG tokens
     function calculatePremium(
-        string calldata packageCanonical,
+        string memory packageCanonical,
         uint256 coverageAmount
     ) public view returns (uint256) {
         bytes32 packageKey = keccak256(bytes(packageCanonical));
@@ -290,7 +304,7 @@ contract PackageInsurance {
     
     /// @notice Cancel a policy and receive partial refund
     function cancelPolicy(uint256 policyId) external {
-        Policy storage p = policies[policyId];
+        Policy storage p = _policies[policyId];
         
         if (p.insured != msg.sender) revert NotPolicyOwner();
         if (!p.active) revert PolicyNotActive();
@@ -315,7 +329,7 @@ contract PackageInsurance {
     
     /// @notice Renew an expiring policy
     function renewPolicy(uint256 policyId) external {
-        Policy storage p = policies[policyId];
+        Policy storage p = _policies[policyId];
         
         if (p.insured != msg.sender) revert NotPolicyOwner();
         if (!p.active && block.timestamp > p.expiration + 30 days) {
@@ -357,7 +371,7 @@ contract PackageInsurance {
         string calldata reason,
         bytes calldata evidence
     ) external returns (uint256 claimId) {
-        Policy storage p = policies[policyId];
+        Policy storage p = _policies[policyId];
         
         if (!p.active) revert PolicyNotActive();
         if (block.timestamp > p.expiration + REVIEW_PERIOD) revert ClaimPeriodExpired();
@@ -372,7 +386,7 @@ contract PackageInsurance {
         claimCount++;
         claimId = claimCount;
         
-        claims[claimId] = Claim({
+        _claims[claimId] = Claim({
             id: claimId,
             policyId: policyId,
             claimant: msg.sender,
@@ -396,7 +410,7 @@ contract PackageInsurance {
         ClaimStatus status,
         uint256 payout
     ) external onlyResolver {
-        Claim storage c = claims[claimId];
+        Claim storage c = _claims[claimId];
         
         if (c.status != ClaimStatus.Pending && c.status != ClaimStatus.UnderReview) {
             revert ClaimNotFound();
@@ -407,8 +421,10 @@ contract PackageInsurance {
         c.resolver = msg.sender;
         
         if (status == ClaimStatus.Approved) {
+            // Enforce per-claim payout cap
+            if (payout > maxPayoutPerClaim) revert PayoutExceedsMaxClaim();
             // Slash publisher stake
-            Policy storage p = policies[c.policyId];
+            Policy storage p = _policies[c.policyId];
             ChainRegistry.PackageRecord memory pkg = registry.getPackage(p.packageCanonical);
             
             uint256 slashAmount = min(payout, staking.stakedBalance(pkg.publisher));
@@ -432,7 +448,7 @@ contract PackageInsurance {
     
     /// @notice Update claim status to under review
     function setClaimUnderReview(uint256 claimId) external onlyResolver {
-        Claim storage c = claims[claimId];
+        Claim storage c = _claims[claimId];
         if (c.status != ClaimStatus.Pending) revert ClaimNotFound();
         c.status = ClaimStatus.UnderReview;
     }
@@ -485,12 +501,33 @@ contract PackageInsurance {
     }
     
     /// @notice Update coverage limits
-    function setCoverageLimits(uint256 min, uint256 max) external onlyGovernance {
-        minCoverage = min;
-        maxCoverage = max;
+    function setCoverageLimits(uint256 _min, uint256 _max) external onlyGovernance {
+        minCoverage = _min;
+        maxCoverage = _max;
+    }
+
+    /// @notice Update max payout per claim
+    function setMaxPayoutPerClaim(uint256 _maxPayout) external onlyGovernance {
+        maxPayoutPerClaim = _maxPayout;
+    }
+
+    /// @notice Update max pool utilization
+    function setMaxPoolUtilization(uint256 _maxBps) external onlyGovernance {
+        require(_maxBps > 0 && _maxBps <= 10000, "Invalid bps");
+        maxPoolUtilizationBps = _maxBps;
     }
     
     // ── View Functions ────────────────────────────────────────────────────────
+    
+    /// @notice Get a policy by ID
+    function getPolicy(uint256 policyId) external view returns (Policy memory) {
+        return _policies[policyId];
+    }
+    
+    /// @notice Get a claim by ID
+    function getClaim(uint256 claimId) external view returns (Claim memory) {
+        return _claims[claimId];
+    }
     
     /// @notice Get all policies for a package
     function getPackagePolicies(bytes32 packageKey)
@@ -512,7 +549,7 @@ contract PackageInsurance {
     function hasActiveInsurance(bytes32 packageKey) external view returns (bool) {
         uint256[] storage ids = packagePolicies[packageKey];
         for (uint i = 0; i < ids.length; i++) {
-            if (policies[ids[i]].active) {
+            if (_policies[ids[i]].active) {
                 return true;
             }
         }
@@ -524,7 +561,7 @@ contract PackageInsurance {
         uint256 total = 0;
         uint256[] storage ids = packagePolicies[packageKey];
         for (uint i = 0; i < ids.length; i++) {
-            Policy storage p = policies[ids[i]];
+            Policy storage p = _policies[ids[i]];
             if (p.active) {
                 total += p.coverageAmount;
             }
@@ -551,14 +588,19 @@ contract PackageInsurance {
         return a < b ? a : b;
     }
     
-    /// @notice Get dependency count for a package (placeholder)
-    /// @dev In production, integrate with analytics service
-    function getDependencyCount(string calldata packageCanonical)
-        internal pure
+    /// @notice Get dependency count for a package from the on-chain Registry.
+    /// @dev Falls back to a default estimate (10) when the Registry does not
+    ///      yet expose a dependency-count API.
+    function getDependencyCount(string memory packageCanonical)
+        internal view
         returns (uint256)
     {
-        // Placeholder - would query on-chain or off-chain analytics
-        packageCanonical; // suppress warning
-        return 10; // Default assumption
+        // Attempt to read from the Registry.  If the call reverts (the
+        // function does not exist yet), fall back to a conservative default.
+        try registry.getDependentCount(packageCanonical) returns (uint256 count) {
+            return count;
+        } catch {
+            return 10; // conservative default until Registry exposes the API
+        }
     }
 }

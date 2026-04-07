@@ -2,10 +2,14 @@
 pragma solidity ^0.8.24;
 
 /// @title Governance
-/// @notice M-of-N multisig governance for the chain registry.
-/// @dev Proposals are submitted, voted on by signers, and executed
+/// @notice CANONICAL governance contract — M-of-N multisig for the chain registry.
+/// @dev This is the ACTIVE governance contract used by Registry.sol and Staking.sol.
+///      Proposals are submitted, voted on by signers, and executed
 ///      automatically once the approval threshold is met.
 ///      This prevents any single entity from controlling the registry.
+///
+///      See GovernanceV2.sol for the planned token-based governance upgrade
+///      (quadratic voting, delegation, automated parameter adjustments).
 contract Governance {
     // ── Reentrancy Guard ─────────────────────────────────────────────────────
     bool private _locked;
@@ -49,6 +53,16 @@ contract Governance {
     SystemStatus public systemStatus;
     uint256 public pausedAt;
     string public pauseReason;
+
+    /// @notice Minimum number of signers that must co-sign an emergency pause.
+    uint256 public constant PAUSE_THRESHOLD = 2;
+
+    /// @notice Cooldown period between pauses (prevents griefing).
+    uint256 public constant PAUSE_COOLDOWN = 7 days;
+
+    /// @notice Tracks co-signers for a pending pause request.
+    mapping(bytes32 => mapping(address => bool)) public pauseCoSigners;
+    mapping(bytes32 => uint256) public pauseCoSignCount;
 
     // ── Events ────────────────────────────────────────────────────────────────
 
@@ -107,20 +121,35 @@ contract Governance {
 
     // ── Emergency Pause ────────────────────────────────────────────────────────
 
-    /// @notice Emergency pause the entire system.
-    /// @dev Can be triggered by any signer in case of critical vulnerability.
-    ///      Requires m-of-n consensus to unpause.
+    /// @notice Co-sign an emergency pause request.
+    /// @dev Requires at least PAUSE_THRESHOLD (2) distinct signers to co-sign
+    ///      the same reason hash before the pause takes effect.
+    ///      Enforces a 7-day cooldown between successive pauses.
     /// @param reason Human-readable reason for the pause
     function emergencyPause(string calldata reason) external {
         if (!isSigner[msg.sender]) revert NotSigner();
         if (bytes(reason).length == 0) revert InvalidPauseReason();
         if (systemStatus == SystemStatus.Paused) revert SystemPaused();
 
-        systemStatus = SystemStatus.Paused;
-        pausedAt = block.timestamp;
-        pauseReason = reason;
+        // Enforce cooldown since last pause
+        require(
+            block.timestamp >= pausedAt + PAUSE_COOLDOWN,
+            "Pause cooldown active"
+        );
 
-        emit EmergencyPaused(msg.sender, reason, block.timestamp);
+        bytes32 reasonHash = keccak256(bytes(reason));
+
+        require(!pauseCoSigners[reasonHash][msg.sender], "Already co-signed");
+        pauseCoSigners[reasonHash][msg.sender] = true;
+        pauseCoSignCount[reasonHash]++;
+
+        if (pauseCoSignCount[reasonHash] >= PAUSE_THRESHOLD) {
+            systemStatus = SystemStatus.Paused;
+            pausedAt = block.timestamp;
+            pauseReason = reason;
+
+            emit EmergencyPaused(msg.sender, reason, block.timestamp);
+        }
     }
 
     /// @notice Unpause the system.

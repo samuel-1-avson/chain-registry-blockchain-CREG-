@@ -9,7 +9,10 @@ RUN npm ci --silent
 COPY explorer/ ./
 RUN npm run build
 
-# ── Stage 2: Build Rust Backend ───────────────────────────────────────────────
+# ── Stage 2: Rust Toolchain ──────────────────────────────────────────────────
+FROM rust:1.90-slim-bookworm AS rust-toolchain
+
+# ── Stage 3: Build Rust Backend ───────────────────────────────────────────────
 # Ubuntu 24.04 is required because ort (ONNX Runtime) 2.0.0-rc.12 prebuilt binaries
 # link against glibc 2.38+ symbols (__isoc23_strtoll etc.) not present in Debian 12.
 FROM ubuntu:24.04 AS builder
@@ -35,12 +38,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Rust toolchain manually (official rust images are Debian-based and too old for glibc)
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.90.0 \
-    && . "$HOME/.cargo/env" \
-    && cargo --version \
-    && rustc --version
-ENV PATH="/root/.cargo/bin:$PATH"
+# Reuse the official Rust 1.90 toolchain while keeping the Ubuntu 24.04 builder.
+COPY --from=rust-toolchain /usr/local/cargo /usr/local/cargo
+COPY --from=rust-toolchain /usr/local/rustup /usr/local/rustup
+ENV CARGO_HOME=/usr/local/cargo
+ENV RUSTUP_HOME=/usr/local/rustup
+ENV PATH="/usr/local/cargo/bin:$PATH"
+ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
+
+RUN cargo --version && rustc --version
 
 WORKDIR /build
 
@@ -58,6 +64,11 @@ COPY crates/resolver/Cargo.toml crates/resolver/
 COPY crates/validator/Cargo.toml crates/validator/
 COPY crates/consensus/Cargo.toml crates/consensus/
 COPY crates/node/Cargo.toml     crates/node/
+COPY crates/faucet/Cargo.toml   crates/faucet/
+
+# Build-script inputs required for dependency caching.
+COPY crates/common/build.rs     crates/common/
+COPY crates/common/proto/       crates/common/proto/
 
 # Phase 1: Advanced Validation crates
 COPY crates/zk-validator/Cargo.toml     crates/zk-validator/
@@ -99,14 +110,17 @@ RUN mkdir -p crates/ipfs-pinner/src      && echo "pub fn _stub() {}" > crates/ip
 RUN mkdir -p crates/faucet/src           && echo "fn main() {}"      > crates/faucet/src/main.rs
 
 # Pre-build dependencies (cached layer)
-RUN cargo build --release --package chain-registry-node 2>/dev/null || true
+RUN cargo build --release --package chain-registry-node || true
 
 # Copy real source and build properly.
 COPY crates/ crates/
 COPY circuits/ circuits/
 COPY contracts/ contracts/
-COPY docker-compose*.yml ./
+COPY models/ models/
 COPY testnet/ testnet/
+COPY config/ config/
+COPY rules/ rules/
+COPY docker-compose*.yml ./
 
 # Touch files to ensure rebuild
 RUN touch crates/*/src/*.rs
@@ -128,11 +142,13 @@ FROM ubuntu:24.04 AS runtime
 # - ca-certificates & curl: for IPFS / Eth RPC communication
 # - libssl3: for crypto operations
 # - libopenblas0: for ML math operations
+# - strace: for Docker sandbox behavioral observation (syscall tracing)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
     libssl3 \
     libopenblas0 \
+    strace \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -147,6 +163,16 @@ COPY --from=builder /build/crates/cli/validators /app/validators
 
 # Copy circuits (for ZK validation)
 COPY --from=builder /build/circuits /app/circuits
+
+# Copy ML models (for deep scan). These are placeholder-size today;
+# replace with real ONNX weights when available.
+COPY --from=builder /build/models /app/models
+
+# Copy sandbox configuration (seccomp profiles, rootfs Dockerfiles)
+COPY --from=builder /build/config/sandbox /app/config/sandbox
+
+# Copy YARA rules for supply-chain threat detection
+COPY --from=builder /build/rules /app/rules
 
 # Non-root user for security.
 RUN useradd -r -s /bin/false creg

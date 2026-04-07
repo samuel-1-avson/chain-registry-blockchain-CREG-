@@ -39,7 +39,7 @@ contract DeployChainRegistry is Script {
 
         governance = new Governance(signers, threshold);
         reputation = new Reputation(address(governance));
-        vrf        = new VRF(address(governance));
+        vrf        = new VRF(address(1), bytes32(0), 0, address(governance));
 
         // CregToken must be deployed before Staking — Staking holds a reference to it.
         // All 42M max supply tokens go to deployer for local dev; adjust for production.
@@ -82,6 +82,7 @@ contract DeployChainRegistry is Script {
         console.log("Staking:   ", address(staking));
         console.log("Reputation:", address(reputation));
         console.log("VRF:       ", address(vrf));
+        console.log("ZKVerifier:", address(zkVerifier));
         console.log("Registry:  ", address(registry));
         console.log("Appeal:    ", address(appeal));
         console.log("CregToken: ", address(cregToken));
@@ -102,6 +103,8 @@ contract DeployChainRegistry is Script {
     }
 
     function _writeManifest(address deployer) internal {
+        string memory canonicalPath = "contracts/deployments/latest.json";
+        string memory testnetPath = "testnet/artifacts/testnet-contracts.json";
         string memory m = string.concat(
             '{\n',
             '  "deployer":   "', vm.toString(deployer),           '",\n',
@@ -109,6 +112,7 @@ contract DeployChainRegistry is Script {
             '  "staking":    "', vm.toString(address(staking)),    '",\n',
             '  "reputation": "', vm.toString(address(reputation)), '",\n',
             '  "vrf":        "', vm.toString(address(vrf)),        '",\n',
+            '  "zkVerifier": "', vm.toString(address(zkVerifier)), '",\n',
             '  "registry":   "', vm.toString(address(registry)),   '",\n',
             '  "appeal":     "', vm.toString(address(appeal)),     '",\n',
             '  "cregToken":  "', vm.toString(address(cregToken)),  '",\n',
@@ -116,8 +120,27 @@ contract DeployChainRegistry is Script {
             '  "deployedAt": "', vm.toString(block.timestamp),     '"\n',
             '}'
         );
+
+        try vm.envString("DEPLOYMENT_MANIFEST_PATH") returns (string memory configuredPath) {
+            if (bytes(configuredPath).length > 0) {
+                canonicalPath = configuredPath;
+            }
+        } catch {}
+
         try vm.createDir("contracts/deployments", true) {} catch {}
-        vm.writeFile("contracts/deployments/latest.json", m);
-        console.log("Manifest: contracts/deployments/latest.json");
+        try vm.createDir("testnet/artifacts", true) {} catch {}
+
+        _tryWriteManifest(canonicalPath, m);
+        if (keccak256(bytes(testnetPath)) != keccak256(bytes(canonicalPath))) {
+            _tryWriteManifest(testnetPath, m);
+        }
+    }
+
+    function _tryWriteManifest(string memory outputPath, string memory manifest) internal {
+        try vm.writeFile(outputPath, manifest) {
+            console.log("Manifest:", outputPath);
+        } catch {
+            console.log("Manifest write skipped:", outputPath);
+        }
     }
 }

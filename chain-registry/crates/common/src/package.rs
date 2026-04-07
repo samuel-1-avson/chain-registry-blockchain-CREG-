@@ -71,6 +71,11 @@ pub struct PackageManifest {
     pub allowed_fs_writes: Vec<String>,
     /// Whether the package spawns child processes.
     pub spawns_processes: bool,
+    /// Fine-grained process spawn allowlist — binary names or full paths.
+    /// Only checked when `spawns_processes` is true.  If empty and
+    /// `spawns_processes` is true, all spawns are permitted (backwards compat).
+    #[serde(default)]
+    pub allowed_process_spawns: Vec<String>,
     /// Free-text description for human reviewers.
     pub description: Option<String>,
 }
@@ -160,6 +165,10 @@ pub struct ValidatorSignature {
     pub signature: String,
     pub vote: ValidatorVote,
     pub signed_at: DateTime<Utc>,
+    /// ML model version used for deep scan (e.g., "codebert-v0.1.0" or "degraded-no-model").
+    /// Allows consensus to verify validators used compatible model versions.
+    #[serde(default)]
+    pub ml_model_version: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]

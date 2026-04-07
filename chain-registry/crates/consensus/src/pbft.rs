@@ -7,6 +7,18 @@ use crate::ValidatorSet;
 use anyhow::{bail, Result};
 use common::{Block, ValidatorSignature, ValidatorVote};
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
+
+/// Maximum time a round can stay in any single phase before it is considered
+/// timed-out.  A real deployment would make this configurable.
+const ROUND_PHASE_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Maximum number of view-change retries before a round is abandoned.
+const MAX_VIEW_CHANGES: u32 = 3;
+
+/// Age after which a terminal (Finalised / Failed) round is eligible for
+/// garbage collection.
+const STALE_ROUND_TTL: Duration = Duration::from_secs(120);
 
 /// Current phase of a PBFT round for a given block proposal.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,16 +39,29 @@ pub struct PbftRound {
     /// validator_id → their COMMIT message signature
     pub commit_sigs: HashMap<String, ValidatorSignature>,
     pub validator_set: ValidatorSet,
+    /// Wall-clock time the current phase was entered.
+    pub phase_entered_at: Instant,
+    /// Monotonically increasing view number (incremented on view-change).
+    pub view_number: u32,
+    /// How many view-changes have occurred for this round.
+    pub view_change_count: u32,
+    /// When the round was first created (for stale-round GC).
+    pub created_at: Instant,
 }
 
 impl PbftRound {
     pub fn new(block: Block, validator_set: ValidatorSet) -> Self {
+        let now = Instant::now();
         Self {
             block,
             phase: PbftPhase::PrePrepare,
             prepare_sigs: HashMap::new(),
             commit_sigs: HashMap::new(),
             validator_set,
+            phase_entered_at: now,
+            view_number: 0,
+            view_change_count: 0,
+            created_at: now,
         }
     }
 
@@ -114,6 +139,7 @@ impl PbftRound {
             proposer_id
         );
         self.phase = PbftPhase::Prepare;
+        self.phase_entered_at = Instant::now();
         Ok(block_hash)
     }
 
@@ -135,6 +161,7 @@ impl PbftRound {
 
         if self.prepare_sigs.len() >= self.quorum() {
             self.phase = PbftPhase::Commit;
+            self.phase_entered_at = Instant::now();
             tracing::info!("[PBFT] PREPARE quorum reached — moving to COMMIT");
             return Ok(true); // caller should now broadcast COMMIT
         }
@@ -189,6 +216,47 @@ impl PbftRound {
     pub fn finalised_signatures(&self) -> Vec<ValidatorSignature> {
         self.commit_sigs.values().cloned().collect()
     }
+
+    /// Returns `true` when the current (non-terminal) phase has exceeded
+    /// `ROUND_PHASE_TIMEOUT`.
+    pub fn is_phase_timed_out(&self) -> bool {
+        match self.phase {
+            PbftPhase::Finalised | PbftPhase::Failed => false,
+            _ => self.phase_entered_at.elapsed() > ROUND_PHASE_TIMEOUT,
+        }
+    }
+
+    /// Attempt a view-change: increment the view number, reset PREPARE/COMMIT
+    /// state, and return to PrePrepare so a new proposer can drive the round.
+    ///
+    /// Returns `Err` if MAX_VIEW_CHANGES have already been exhausted, in which
+    /// case the round should be abandoned.
+    pub fn trigger_view_change(&mut self) -> Result<u32> {
+        if self.view_change_count >= MAX_VIEW_CHANGES {
+            self.phase = PbftPhase::Failed;
+            bail!(
+                "View-change limit ({}) exhausted — round abandoned",
+                MAX_VIEW_CHANGES
+            );
+        }
+        self.view_change_count += 1;
+        self.view_number += 1;
+        self.prepare_sigs.clear();
+        self.commit_sigs.clear();
+        self.phase = PbftPhase::PrePrepare;
+        self.phase_entered_at = Instant::now();
+        tracing::warn!(
+            "[PBFT] VIEW-CHANGE #{} (view={})",
+            self.view_change_count,
+            self.view_number
+        );
+        Ok(self.view_number)
+    }
+
+    /// Whether this round is in a terminal state (Finalised or Failed).
+    pub fn is_terminal(&self) -> bool {
+        matches!(self.phase, PbftPhase::Finalised | PbftPhase::Failed)
+    }
 }
 
 /// Top-level engine managing multiple concurrent PBFT rounds (one per pending block).
@@ -238,5 +306,64 @@ impl PbftEngine {
             .get(block_hash)
             .map(|r| r.finalised_signatures())
             .unwrap_or_default()
+    }
+
+    /// Check all active rounds for phase timeouts and trigger view-changes
+    /// where needed.  Rounds that exhaust their view-change budget are moved
+    /// to `Failed`.
+    ///
+    /// Returns the list of block hashes that had a view-change triggered.
+    pub fn timeout_rounds(&mut self) -> Vec<String> {
+        let timed_out: Vec<String> = self
+            .rounds
+            .iter()
+            .filter(|(_, r)| r.is_phase_timed_out())
+            .map(|(h, _)| h.clone())
+            .collect();
+
+        let mut changed = Vec::new();
+        for hash in timed_out {
+            if let Some(round) = self.rounds.get_mut(&hash) {
+                match round.trigger_view_change() {
+                    Ok(view) => {
+                        tracing::warn!(
+                            "[PBFT] Timeout on block {} — triggered view-change to view {}",
+                            &hash[..12],
+                            view
+                        );
+                        changed.push(hash);
+                    }
+                    Err(e) => {
+                        tracing::error!("[PBFT] Round {} abandoned: {}", &hash[..12], e);
+                    }
+                }
+            }
+        }
+        changed
+    }
+
+    /// Remove rounds that have been in a terminal state (Finalised / Failed)
+    /// for longer than `STALE_ROUND_TTL`.  Returns the number of rounds
+    /// removed.
+    pub fn cleanup_stale_rounds(&mut self) -> usize {
+        let stale: Vec<String> = self
+            .rounds
+            .iter()
+            .filter(|(_, r)| r.is_terminal() && r.created_at.elapsed() > STALE_ROUND_TTL)
+            .map(|(h, _)| h.clone())
+            .collect();
+        let count = stale.len();
+        for hash in stale {
+            self.rounds.remove(&hash);
+        }
+        if count > 0 {
+            tracing::info!("[PBFT] Cleaned up {} stale rounds", count);
+        }
+        count
+    }
+
+    /// Number of currently-tracked rounds (for metrics / observability).
+    pub fn active_round_count(&self) -> usize {
+        self.rounds.len()
     }
 }

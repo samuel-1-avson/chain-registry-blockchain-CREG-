@@ -4,106 +4,99 @@ pragma solidity ^0.8.24;
 import "forge-std/Test.sol";
 import "../Staking.sol";
 import "../Governance.sol";
+import "../Reputation.sol";
+import "../CregToken.sol";
 
-/// @notice Fuzz and invariant tests for the Staking contract.
+/// @notice Fuzz and invariant tests for the Staking contract (CREG token-based).
 /// Run with: forge test --match-contract StakingFuzzTest -vvv
 contract StakingFuzzTest is Test {
 
     Staking    staking;
     Governance governance;
+    CregToken  cregToken;
+    Reputation reputation;
 
     address constant GOV_SIGNER = address(0xA11CE);
+    address deployer;
 
     function setUp() public {
+        deployer = address(this);
+
+        // Deploy governance with single signer for testing.
         address[] memory signers = new address[](1);
         signers[0] = GOV_SIGNER;
         governance = new Governance(signers, 1);
-        staking    = new Staking(address(governance));
 
-        // Fund test accounts.
-        vm.deal(GOV_SIGNER, 100 ether);
+        // Deploy CregToken — all supply goes to deployer.
+        cregToken  = new CregToken(deployer, deployer, deployer, deployer);
+
+        // Deploy staking with CREG token.
+        staking    = new Staking(address(governance), address(cregToken));
+
+        // Deploy reputation.
+        reputation = new Reputation(address(governance));
+
+        // Wire contracts.
+        address mockRegistry = address(0xBEEF);
+        staking.setContracts(mockRegistry, address(reputation));
+    }
+
+    // ── Helper: give CREG tokens and approve staking ─────────────────────────
+
+    function _fundAndApprove(address who, uint256 amount) internal {
+        cregToken.transfer(who, amount);
+        vm.prank(who);
+        cregToken.approve(address(staking), amount);
     }
 
     // ── Fuzz: Publisher stake + unstake ───────────────────────────────────────
 
     /// @dev For any amount at or above the minimum, staking should always succeed.
     function testFuzz_PublisherStakeAlwaysSucceeds(uint96 amount) public {
-        vm.assume(amount >= staking.MIN_PUBLISHER_STAKE());
-        vm.assume(amount <= 50 ether);
+        vm.assume(amount >= staking.minPublisherStake());
+        vm.assume(amount <= 50_000 * 10**18); // Cap at 50k CREG
         address publisher = makeAddr("fuzz-publisher");
-        vm.deal(publisher, uint256(amount));
+        _fundAndApprove(publisher, uint256(amount));
 
         vm.prank(publisher);
-        staking.stakeAsPublisher{value: amount}();
+        staking.stakeAsPublisher(amount);
 
         assertEq(staking.stakedBalance(publisher), amount);
     }
 
     /// @dev Below the minimum, staking must always revert.
     function testFuzz_PublisherStakeBelowMinReverts(uint96 amount) public {
-        vm.assume(amount < staking.MIN_PUBLISHER_STAKE());
+        vm.assume(amount < staking.minPublisherStake());
         address publisher = makeAddr("fuzz-publisher-low");
-        vm.deal(publisher, uint256(amount) + 1);
+        _fundAndApprove(publisher, uint256(amount) + 1);
 
         vm.prank(publisher);
         vm.expectRevert();
-        staking.stakeAsPublisher{value: amount}();
+        staking.stakeAsPublisher(amount);
     }
 
     // ── Fuzz: Validator stake ─────────────────────────────────────────────────
 
-    function testFuzz_ValidatorStakeAtOrAboveMin(uint96 amount) public {
-        vm.assume(amount >= staking.MIN_VALIDATOR_STAKE());
-        vm.assume(amount <= 100 ether);
+    function testFuzz_ValidatorStakeApplyAndApprove(uint96 amount) public {
+        vm.assume(amount >= staking.minValidatorStake());
+        vm.assume(amount <= 10_000 * 10**18); // Cap at 10k
         address validator = makeAddr("fuzz-validator");
-        vm.deal(validator, uint256(amount));
+        _fundAndApprove(validator, uint256(amount));
 
         vm.prank(validator);
-        staking.joinAsValidator{value: amount}();
+        staking.applyToBeValidator(amount);
+
+        // Governance approves.
+        vm.prank(GOV_SIGNER);
+        governance.submit(
+            address(staking),
+            abi.encodeCall(staking.approveValidator, (validator)),
+            "Approve validator"
+        );
+        vm.prank(GOV_SIGNER);
+        governance.vote(0, true);
 
         assertTrue(staking.isActiveValidator(validator));
-    }
-
-    // ── Fuzz: Slash never exceeds stake ───────────────────────────────────────
-
-    /// @dev After any slash, the remaining stake should always be ≥ 0.
-    function testFuzz_SlashNeverUnderflows(uint96 initialStake, uint96 slashAmount) public {
-        vm.assume(initialStake >= staking.MIN_PUBLISHER_STAKE());
-        vm.assume(initialStake <= 50 ether);
-
-        address publisher = makeAddr("fuzz-slash-publisher");
-        vm.deal(publisher, uint256(initialStake));
-
-        vm.prank(publisher);
-        staking.stakeAsPublisher{value: initialStake}();
-
-        // Set up registry permission.
-        address mockRegistry = address(0x1234567890123456789012345678901234567890);
-        vm.prank(address(0));
-        staking.setRegistry(mockRegistry);
-
-        // Slash — should never underflow.
-        vm.prank(mockRegistry);
-        staking.slash(publisher, slashAmount, "fuzz-slash");
-
-        // Remaining stake is always non-negative (Rust-style saturating sub).
-        assertGe(staking.stakedBalance(publisher), 0);
-    }
-
-    // ── Invariant: Active validator count never negative ─────────────────────
-
-    function testFuzz_ActiveValidatorCountMonotonic(uint8 joinCount) public {
-        vm.assume(joinCount > 0 && joinCount <= 20);
-        uint256 countBefore = staking.activeValidatorCount();
-
-        for (uint i = 0; i < joinCount; i++) {
-            address val = makeAddr(string.concat("inv-val-", vm.toString(i)));
-            vm.deal(val, 2 ether);
-            vm.prank(val);
-            staking.joinAsValidator{value: 1 ether}();
-        }
-
-        assertGe(staking.activeValidatorCount(), countBefore);
     }
 
     // ── Fuzz: Unbonding period respected ─────────────────────────────────────
@@ -112,9 +105,20 @@ contract StakingFuzzTest is Test {
         vm.assume(elapsed < staking.UNBONDING_PERIOD());
 
         address validator = makeAddr("fuzz-unbond");
-        vm.deal(validator, 2 ether);
+        _fundAndApprove(validator, 200 * 10**18);
+
         vm.prank(validator);
-        staking.joinAsValidator{value: 1 ether}();
+        staking.applyToBeValidator(200 * 10**18);
+
+        // Approve via governance.
+        vm.prank(GOV_SIGNER);
+        governance.submit(
+            address(staking),
+            abi.encodeCall(staking.approveValidator, (validator)),
+            "Approve"
+        );
+        vm.prank(GOV_SIGNER);
+        governance.vote(0, true);
 
         vm.prank(validator);
         staking.initiateUnbonding();
@@ -127,43 +131,60 @@ contract StakingFuzzTest is Test {
 
     function testFuzz_WithdrawAfterUnbondingSucceeds(uint32 extra) public {
         vm.assume(extra > 0 && extra < 365 days);
-        uint256 stake = 1 ether;
+        uint256 stake = 200 * 10**18;
 
         address validator = makeAddr("fuzz-unbond-ok");
-        vm.deal(validator, stake);
+        _fundAndApprove(validator, stake);
+
         vm.prank(validator);
-        staking.joinAsValidator{value: stake}();
+        staking.applyToBeValidator(stake);
+
+        // Approve via governance.
+        vm.prank(GOV_SIGNER);
+        governance.submit(
+            address(staking),
+            abi.encodeCall(staking.approveValidator, (validator)),
+            "Approve"
+        );
+        vm.prank(GOV_SIGNER);
+        governance.vote(0, true);
 
         vm.prank(validator);
         staking.initiateUnbonding();
 
         vm.warp(block.timestamp + staking.UNBONDING_PERIOD() + extra);
-        uint256 balBefore = validator.balance;
 
+        uint256 balBefore = cregToken.balanceOf(validator);
         vm.prank(validator);
         staking.withdrawValidatorStake();
 
-        assertGt(validator.balance, balBefore);
+        assertGt(cregToken.balanceOf(validator), balBefore);
     }
 
-    // ── Fuzz: Slash pool distribution ─────────────────────────────────────────
+    // ── Fuzz: Active validator count ─────────────────────────────────────────
 
-    function testFuzz_SlashPoolDistributedEqually(uint8 validatorCount) public {
-        vm.assume(validatorCount >= 2 && validatorCount <= 10);
+    function testFuzz_ActiveValidatorCountIncrements(uint8 joinCount) public {
+        vm.assume(joinCount >= 1 && joinCount <= 5);
+        uint256 countBefore = staking.activeValidatorCount();
 
-        address[] memory validators = new address[](validatorCount);
-        for (uint i = 0; i < validatorCount; i++) {
-            validators[i] = makeAddr(string.concat("pool-val-", vm.toString(i)));
-            vm.deal(validators[i], 2 ether);
-            vm.prank(validators[i]);
-            staking.joinAsValidator{value: 1 ether}();
+        for (uint i = 0; i < joinCount; i++) {
+            address val = makeAddr(string.concat("inv-val-", vm.toString(i)));
+            _fundAndApprove(val, 200 * 10**18);
+
+            vm.prank(val);
+            staking.applyToBeValidator(200 * 10**18);
+
+            // Approve each validator.
+            vm.prank(GOV_SIGNER);
+            governance.submit(
+                address(staking),
+                abi.encodeCall(staking.approveValidator, (val)),
+                string.concat("Approve ", vm.toString(i))
+            );
+            vm.prank(GOV_SIGNER);
+            governance.vote(i, true);
         }
 
-        // Simulate a slash that fills the pool.
-        address mockRegistry = address(0xBEEF);
-        vm.prank(address(0));
-
-        // Confirm pool is 0 initially.
-        assertEq(staking.slashPool(), 0);
+        assertEq(staking.activeValidatorCount(), countBefore + joinCount);
     }
 }

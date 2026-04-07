@@ -171,6 +171,7 @@ pub fn router(state: SharedState, event_bus: EventBus, limiter: RateLimiter) -> 
     Router::new()
         // Health & chain
         .route("/v1/health", get(health))
+        .route("/health", get(health))
         .route("/v1/chain/stats", get(chain_stats))
         .route("/v1/nodes", get(get_nodes))
         .route("/v1/p2p/status", get(p2p_status))
@@ -751,6 +752,7 @@ async fn receive_vote(State(state): State<SharedState>, Json(vote): Json<VoteMes
             }
         },
         signed_at: chrono::Utc::now(),
+        ml_model_version: String::new(), // Populated by the originating validator
     };
 
     let key = vote.block_hash.clone();

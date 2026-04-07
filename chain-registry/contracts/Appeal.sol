@@ -33,6 +33,8 @@ contract Appeal {
         uint256   rejectVotes;
         string    publisherStatement; // Publisher's justification
         mapping(address => bool) voted;
+        mapping(address => bool) votedApprove;  // true = voted approve
+        address[] voters;                        // all voters for reward distribution
     }
 
     // ── Storage ───────────────────────────────────────────────────────────────
@@ -58,6 +60,10 @@ contract Appeal {
 
     /// Appeal bond (must be ≥ this to discourage frivolous appeals).
     uint256 public constant MIN_APPEAL_BOND = 0.1 ether;
+
+    /// Bond a panelist must post when casting a vote.
+    /// Correct voters receive their bond back + a share of incorrect voters' bonds.
+    uint256 public constant PANELIST_VOTE_BOND = 0.01 ether;
 
     /// How long an appeal stays open before it expires.
     uint256 public constant APPEAL_WINDOW = 7 days;
@@ -118,9 +124,10 @@ contract Appeal {
 
     // ── Panel voting ──────────────────────────────────────────────────────────
 
-    /// @notice A panelist votes on an appeal.
-    function vote(uint256 id, bool approve) external {
+    /// @notice A panelist votes on an appeal.  Must post PANELIST_VOTE_BOND.
+    function vote(uint256 id, bool approve) external payable {
         if (!isPanelist[msg.sender]) revert NotPanelist();
+        require(msg.value >= PANELIST_VOTE_BOND, "Must post panelist vote bond");
 
         AppealRecord storage rec = _appeals[id];
         if (rec.status != AppealStatus.Pending) revert AppealNotPending();
@@ -129,6 +136,9 @@ contract Appeal {
         if (rec.voted[msg.sender]) revert AlreadyVoted();
 
         rec.voted[msg.sender] = true;
+        rec.votedApprove[msg.sender] = approve;
+        rec.voters.push(msg.sender);
+
         if (approve) { rec.approveVotes++; }
         else         { rec.rejectVotes++;  }
 
@@ -211,12 +221,12 @@ contract Appeal {
         AppealRecord storage rec = _appeals[id];
         rec.status = AppealStatus.Approved;
 
-        // Return bond to publisher.
+        // Return appeal bond to publisher.
         payable(rec.publisher).transfer(rec.bond);
 
-        // Reward panelists who voted correctly (approve side).
-        // In a full implementation, track per-panelist votes and reward
-        // only those who voted with the majority.
+        // Distribute panelist bonds: return correct voters' bonds + split
+        // incorrect voters' bonds among correct voters.
+        _distributePanelistBonds(rec, true);
 
         emit AppealApproved(id, rec.canonical);
     }
@@ -225,10 +235,42 @@ contract Appeal {
         AppealRecord storage rec = _appeals[id];
         rec.status = AppealStatus.Rejected;
 
-        // Slash the bond — add to staking slash pool.
+        // Slash the appeal bond — add to staking slash pool.
         staking.slash(rec.publisher, rec.bond, "Failed appeal");
 
+        // Distribute panelist bonds.
+        _distributePanelistBonds(rec, false);
+
         emit AppealRejected(id, rec.canonical);
+    }
+
+    /// @dev Refund correct panelists (bond + share of losers' bonds).
+    ///      "Correct" means you voted with the winning side.
+    function _distributePanelistBonds(
+        AppealRecord storage rec,
+        bool outcomeApproved
+    ) internal {
+        uint256 correctCount;
+        uint256 incorrectPool;
+
+        for (uint256 i = 0; i < rec.voters.length; i++) {
+            address v = rec.voters[i];
+            if (rec.votedApprove[v] == outcomeApproved) {
+                correctCount++;
+            } else {
+                incorrectPool += PANELIST_VOTE_BOND;
+            }
+        }
+
+        // Refund correct voters + split incorrect pool equally.
+        uint256 reward = correctCount > 0 ? incorrectPool / correctCount : 0;
+        for (uint256 i = 0; i < rec.voters.length; i++) {
+            address v = rec.voters[i];
+            if (rec.votedApprove[v] == outcomeApproved) {
+                payable(v).transfer(PANELIST_VOTE_BOND + reward);
+            }
+            // Incorrect voters' bonds stay in the contract (already accounted for).
+        }
     }
 
     // ── Governance ────────────────────────────────────────────────────────────

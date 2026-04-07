@@ -9,18 +9,20 @@
 #
 # Usage:
 #   1. Generate keys: python scripts/generate-testnet-keys.py --nodes 10
-#   2. Deploy:        docker compose -f docker-compose.testnet.yml up -d --build
+#   2. Deploy:        docker compose --env-file .env.testnet -f docker-compose.testnet.yml up -d --build
 #   3. Monitor:       docker compose -f docker-compose.testnet.yml logs -f
 #
 # IMPORTANT: In production, each validator runs on separate hardware.
 # This compose file is for testnet / CI / load-testing only.
 
-version: "3.9"
+x-app-image: &app-image
+  image: chain-registry-app:latest
+
+x-web-explorer-image: &web-explorer-image
+  image: chain-registry-web-explorer:latest
 
 x-node-base: &node-base
-  build:
-    context: .
-    dockerfile: Dockerfile
+  <<: *app-image
   restart: unless-stopped
   depends_on:
     ipfs:
@@ -39,22 +41,14 @@ x-node-base: &node-base
     CREG_ETH_RPC: "http://anvil:8545"
     CREG_IPFS_URL: "http://ipfs:5001"
     CREG_BLOCK_INTERVAL: "2"
-    CREG_SINGLE_VALIDATOR_MODE: "false"
-    CREG_DEV_SANDBOX: "true"
+    CREG_SINGLE_VALIDATOR_MODE: "${CREG_SINGLE_VALIDATOR_MODE:-false}"
+    CREG_DEV_SANDBOX: "${CREG_DEV_SANDBOX:-true}"
     CREG_ZK_ENABLED: "true"
-    CREG_ZK_VERIFIER_ADDR: "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707"
     CREG_ML_ENABLED: "true"
     CREG_ML_MODEL_PATH: "/app/models"
     CREG_WASM_ENABLED: "true"
     CREG_WASM_VALIDATORS_PATH: "/app/validators"
-    CREG_REGISTRY_ADDR: "0x5FbDB2315678afecb367f032d93F642f64180aa3"
-    CREG_STAKING_ADDR: "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512"
-    CREG_REPUTATION_ADDR: "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
-    CREG_VRF_ADDR: "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"
-    CREG_GOVERNANCE_ADDR: "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9"
-    CREG_CREG_TOKEN_ADDR: "0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6"
-    CREG_GOVERNANCE_V2_ADDR: "0x8A791620dd6260079BF849Dc5567aDC3F2FdC318"
-    CREG_INSURANCE_ADDR: "0x610178dA211FEF7D417bC0e6FeD39F05609AD788"
+    CREG_REGISTRY_ADDR: "${TESTNET_REGISTRY_ADDR:-0x0165878A594ca255338adfa4d48449f69242Eb8F}"
     RUST_LOG: "info,chain_registry_node=debug,consensus=debug"
   healthcheck:
     test: ["CMD", "curl", "-f", "http://localhost:8080/v1/health"]
@@ -63,6 +57,29 @@ x-node-base: &node-base
     retries: 5
 
 services:
+
+  # ── Shared Runtime Images ───────────────────────────────────────────────────
+  # Build once, then reuse for every node/faucet/containerized CLI service.
+  app-image:
+    <<: *app-image
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["true"]
+    profiles:
+      - build
+
+  web-explorer-image:
+    <<: *web-explorer-image
+    build:
+      context: ./explorer
+      dockerfile: Dockerfile
+      args:
+        VITE_CREG_TOKEN: ${TESTNET_TOKEN_ADDR}
+        VITE_STAKING_ADDR: ${TESTNET_STAKING_ADDR}
+    command: ["true"]
+    profiles:
+      - build
 
   # ── Shared IPFS ─────────────────────────────────────────────────────────────
   ipfs:
@@ -105,24 +122,24 @@ services:
       anvil:
         condition: service_healthy
     volumes:
-      - ./contracts:/contracts
-      - ./config:/config
-    working_dir: /contracts
+      - ./:/workspace
+    working_dir: /workspace
     command: |
       sh -c "
         echo 'Waiting for Anvil...' &&
         sleep 3 &&
+        mkdir -p contracts/deployments testnet/artifacts &&
         forge build &&
         echo 'Deploying contracts...' &&
-        forge script script/Deploy.s.sol --rpc-url http://anvil:8545 --broadcast -vvvv
+        forge script contracts/script/Deploy.s.sol:DeployChainRegistry --rpc-url http://anvil:8545 --broadcast -vvvv
       "
     environment:
-      - RPC_URL=http://anvil:8545
-      - DEPLOYER_KEY=${DEPLOYER_KEY}
+      - DEPLOYER_KEY=${DEPLOYER_KEY:-0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80}
+      - DEPLOYMENT_MANIFEST_PATH=contracts/deployments/latest.json
 
   # ── PostgreSQL Mirror (optional but recommended for testnet) ─────────────────
   postgres:
-    image: postgres:16-alpine
+    image: postgres:15-alpine
     container_name: creg-testnet-postgres
     environment:
       - POSTGRES_USER=${POSTGRES_USER:-creg}
@@ -168,7 +185,7 @@ services:
     <<: *node-base
     container_name: creg-testnet-node-2
     ports:
-      - "8082:8080"
+      - "8182:8080"
       - "50052:50051"
       - "9002:9000"
     volumes:
@@ -190,7 +207,7 @@ services:
     <<: *node-base
     container_name: creg-testnet-node-3
     ports:
-      - "8083:8080"
+      - "8183:8080"
       - "50053:50051"
       - "9003:9000"
     volumes:
@@ -212,7 +229,7 @@ services:
     <<: *node-base
     container_name: creg-testnet-node-4
     ports:
-      - "8084:8080"
+      - "8184:8080"
       - "50054:50051"
       - "9004:9000"
     volumes:
@@ -234,7 +251,7 @@ services:
     <<: *node-base
     container_name: creg-testnet-node-5
     ports:
-      - "8085:8080"
+      - "8185:8080"
       - "50055:50051"
       - "9005:9000"
     volumes:
@@ -256,7 +273,7 @@ services:
     <<: *node-base
     container_name: creg-testnet-node-6
     ports:
-      - "8086:8080"
+      - "8186:8080"
       - "50056:50051"
       - "9006:9000"
     volumes:
@@ -278,7 +295,7 @@ services:
     <<: *node-base
     container_name: creg-testnet-node-7
     ports:
-      - "8087:8080"
+      - "8187:8080"
       - "50057:50051"
       - "9007:9000"
     volumes:
@@ -300,7 +317,7 @@ services:
     <<: *node-base
     container_name: creg-testnet-node-8
     ports:
-      - "8088:8080"
+      - "8188:8080"
       - "50058:50051"
       - "9008:9000"
     volumes:
@@ -322,7 +339,7 @@ services:
     <<: *node-base
     container_name: creg-testnet-node-9
     ports:
-      - "8089:8080"
+      - "8189:8080"
       - "50059:50051"
       - "9009:9000"
     volumes:
@@ -344,7 +361,7 @@ services:
     <<: *node-base
     container_name: creg-testnet-node-10
     ports:
-      - "8090:8080"
+      - "8190:8080"
       - "50060:50051"
       - "9010:9000"
     volumes:
@@ -364,9 +381,7 @@ services:
 
   # ── CLI helper service ──────────────────────────────────────────────────────
   cli:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    <<: *app-image
     container_name: creg-testnet-cli
     entrypoint: ["/app/creg"]
     command: ["--help"]
@@ -382,9 +397,7 @@ services:
   # NEW v0.3.0: Interactive terminal-based blockchain explorer
   # Usage: docker compose -f docker-compose.testnet.yml run --rm tui-explorer
   tui-explorer:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    <<: *app-image
     container_name: creg-testnet-tui-explorer
     entrypoint: ["/app/creg"]
     command: ["explorer"]
@@ -398,21 +411,49 @@ services:
     profiles:
       - tui
 
+  # ── Faucet Service ─────────────────────────────────────────────────────────
+  faucet:
+    <<: *app-image
+    container_name: creg-testnet-faucet
+    entrypoint: ["/app/faucet"]
+    environment:
+      FAUCET_PORT: "${FAUCET_PORT:-8082}"
+      FAUCET_RPC_URL: "http://anvil:8545"
+      FAUCET_PRIVATE_KEY: "${FAUCET_PRIVATE_KEY:-0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d}"
+      FAUCET_ADDRESS: "${FAUCET_ADDRESS:-0x70997970C51812dc3A010C7d01b50e0d17dc79C8}"
+      FAUCET_TOKEN_CONTRACT: "${TESTNET_TOKEN_ADDR:-0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9}"
+      FAUCET_DRIP_AMOUNT: "${FAUCET_DRIP_AMOUNT:-1000000000000000000000}"
+      FAUCET_COOLDOWN_SECS: "${FAUCET_COOLDOWN_SECS:-60}"
+      FAUCET_IP_COOLDOWN_SECS: "${FAUCET_IP_COOLDOWN_SECS:-60}"
+      FAUCET_MAX_BALANCE: "${FAUCET_MAX_BALANCE:-10000000000000000000000}"
+      RUST_LOG: "info"
+    ports:
+      - "8082:8082"
+    depends_on:
+      anvil:
+        condition: service_healthy
+      deploy-contracts:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   # ── Enhanced Web Explorer (standalone) ────────────────────────────────────
-  # Optional: Serve the enhanced web explorer via nginx
-  # Usage: docker compose -f docker-compose.testnet.yml up -d web-explorer
   web-explorer:
-    image: nginx:alpine
+    <<: *web-explorer-image
     container_name: creg-testnet-web-explorer
     ports:
-      - "8099:80"
-    volumes:
-      - ./explorer/dist:/usr/share/nginx/html:ro
-      - ./nginx-explorer.conf:/etc/nginx/conf.d/default.conf:ro
+      - "3000:80"
     depends_on:
-      - node-1
-    profiles:
-      - web-explorer
+      node-1:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # ── Stress Test service ─────────────────────────────────────────────────────
   stress-test:

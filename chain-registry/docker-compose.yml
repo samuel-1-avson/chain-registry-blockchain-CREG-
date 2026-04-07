@@ -118,6 +118,15 @@ services:
       # NEVER set this on a production validator — it disables behavioural analysis.
       CREG_DEV_SANDBOX: "true"
 
+      # ── Sandbox Configuration ────────────────────────────────────────────
+      # Paths to seccomp profiles and rootfs images used by the sandbox engines.
+      # These are only used when CREG_DEV_SANDBOX is "false" (production mode).
+      CREG_SANDBOX_NSJAIL_CONFIG:  "/app/config/sandbox/nsjail-seccomp.cfg"
+      CREG_SANDBOX_DOCKER_SECCOMP: "/app/config/sandbox/docker-seccomp.json"
+      CREG_SANDBOX_ROOTFS_DIR:     "/app/config/sandbox/rootfs"
+      CREG_SANDBOX_TIMEOUT:        "120"
+      CREG_SANDBOX_MEMORY_MB:      "512"
+
       # ── Phase 0: Core Contracts ──────────────────────────────────────────
       CREG_REGISTRY_ADDR:   "0x5FbDB2315678afecb367f032d93F642f64180aa3"
       CREG_STAKING_ADDR:    "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512"
@@ -170,6 +179,7 @@ services:
       - node-data:/data
       - ./circuits:/app/circuits:ro
       - ./validators:/app/validators:ro
+      - ./config/sandbox:/app/config/sandbox:ro
     depends_on:
       ipfs:
         condition: service_healthy

@@ -8,6 +8,8 @@ import "../Staking.sol";
 import "../Reputation.sol";
 import "../VRF.sol";
 import "../Governance.sol";
+import "../ZKVerifier.sol";
+import "../CregToken.sol";
 
 contract AppealTest is Test {
 
@@ -15,8 +17,10 @@ contract AppealTest is Test {
     ChainRegistry registry;
     Staking       staking;
     Reputation    reputation;
-    VRF        vrf;
-    Governance governance;
+    VRF           vrf;
+    Governance    governance;
+    ZKVerifier    zkVerifier;
+    CregToken     cregToken;
 
     address publisher = makeAddr("publisher");
     address panelist1 = makeAddr("panelist1");
@@ -31,17 +35,29 @@ contract AppealTest is Test {
         signers[0] = govSigner;
         governance = new Governance(signers, 1);
 
-        staking    = new Staking(address(governance));
+        // Deploy CregToken — all supply to this test contract.
+        cregToken  = new CregToken(address(this), address(this), address(this), address(this));
+
+        staking    = new Staking(address(governance), address(cregToken));
         reputation = new Reputation(address(governance));
-        vrf        = new VRF(address(governance));
+        vrf        = new VRF(address(1), bytes32(0), 0, address(governance));
+
+        // Deploy a dummy ZK verifier.
+        uint256[2] memory zeros = [uint256(0), 0];
+        uint256[2][] memory ic = new uint256[2][](2);
+        ic[0] = [uint256(0), 0];
+        ic[1] = [uint256(0), 0];
+        zkVerifier = new ZKVerifier(zeros, zeros, zeros, zeros, zeros, zeros, zeros, ic);
+
         registry   = new ChainRegistry(
-            address(staking), 
-            address(reputation), 
-            address(vrf), 
+            address(staking),
+            address(reputation),
+            address(vrf),
             address(governance),
-            address(0)
+            address(zkVerifier)
         );
-        staking.setRegistry(address(registry));
+
+        staking.setContracts(address(registry), address(reputation));
         reputation.setRegistry(address(registry));
 
         appeal = new Appeal(address(registry), address(staking), address(reputation), address(governance));
@@ -89,13 +105,16 @@ contract AppealTest is Test {
     }
 
     function test_PanelRejectionSlashesBond() public {
-        // Publisher must stake first to be slashable.
+        // Publisher must stake CREG first to be slashable.
+        uint256 stakeAmount = 10 * 10**18; // 10 CREG
+        cregToken.transfer(publisher, stakeAmount);
         vm.prank(publisher);
-        staking.stakeAsPublisher{value: 1 ether}();
+        cregToken.approve(address(staking), stakeAmount);
+        vm.prank(publisher);
+        staking.stakeAsPublisher(stakeAmount);
 
         vm.prank(publisher);
         uint256 id = appeal.appeal{value: 0.1 ether}(CANONICAL, "Trying my luck");
-        uint256 balBefore = publisher.balance;
 
         vm.prank(panelist1); appeal.vote(id, false);
         vm.prank(panelist2); appeal.vote(id, false);

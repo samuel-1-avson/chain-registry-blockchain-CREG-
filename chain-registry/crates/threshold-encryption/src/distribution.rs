@@ -5,6 +5,7 @@
 
 use crate::{KeyShare, ThresholdEncryption, ThresholdError};
 use serde::{Deserialize, Serialize};
+use sha2::Digest;
 use std::collections::HashMap;
 use tracing::{debug, info, warn};
 
@@ -330,7 +331,7 @@ impl DecryptionCoordinator {
         }
 
         self.pending_requests
-            .insert(request.canonical.clone(), request);
+            .insert(request.canonical.clone(), request.clone());
         self.partial_shares
             .insert(request.canonical.clone(), Vec::new());
 

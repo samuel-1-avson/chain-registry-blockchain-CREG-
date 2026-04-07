@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 /// Testnet configuration
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TestnetConfig {
     pub network: String,
@@ -26,7 +27,7 @@ impl Default for TestnetConfig {
             rpc_url: "http://localhost:8545".to_string(),
             token_contract: std::env::var("TESTNET_TOKEN_ADDR").unwrap_or_default(),
             staking_contract: std::env::var("TESTNET_STAKING_ADDR").unwrap_or_default(),
-            faucet_url: "http://localhost:8081".to_string(),
+            faucet_url: "http://localhost:8082".to_string(),
             node_url: "http://localhost:8080".to_string(),
         }
     }
@@ -34,7 +35,7 @@ impl Default for TestnetConfig {
 
 /// Request test tokens from faucet
 pub async fn drip(address: &str, faucet_url: Option<&str>) -> Result<()> {
-    let url = faucet_url.unwrap_or("http://localhost:8081");
+    let url = faucet_url.unwrap_or("http://localhost:8082");
     let client = reqwest::Client::new();
 
     // Validate address
@@ -73,8 +74,8 @@ pub async fn drip(address: &str, faucet_url: Option<&str>) -> Result<()> {
             "\n{} You can now stake tokens and use the testnet.",
             "💡".yellow()
         );
-        println!("  Stake as publisher: creg testnet stake-publisher 0.01");
-        println!("  Stake as validator: creg testnet stake-validator 0.1");
+        println!("  Stake as publisher: creg testnet stake-publisher 1");
+        println!("  Stake as validator: creg testnet stake-validator 100");
     } else {
         let message = body["message"].as_str().unwrap_or("Unknown error");
         bail!("Faucet request failed: {}", message);
@@ -92,14 +93,18 @@ pub async fn status(node_url: Option<&str>) -> Result<()> {
     println!();
 
     // Check node
-    match client.get(format!("{}/health", url)).send().await {
+    match client.get(format!("{}/v1/health", url)).send().await {
         Ok(resp) if resp.status().is_success() => {
             println!("{} Node: {}", "●".green(), "Online".green());
 
             // Try to get chain info
-            if let Ok(info) = client.get(format!("{}/api/v1/chain", url)).send().await {
+            if let Ok(info) = client
+                .get(format!("{}/v1/chain/stats", url))
+                .send()
+                .await
+            {
                 if let Ok(data) = info.json::<serde_json::Value>().await {
-                    if let Some(tip) = data["tip"].as_u64() {
+                    if let Some(tip) = data["tip_height"].as_u64() {
                         println!("  Chain tip: {}", tip.to_string().cyan());
                     }
                 }
@@ -109,12 +114,12 @@ pub async fn status(node_url: Option<&str>) -> Result<()> {
     }
 
     // Check faucet
-    match client.get("http://localhost:8081/health").send().await {
+    match client.get("http://localhost:8082/health").send().await {
         Ok(resp) if resp.status().is_success() => {
             println!("{} Faucet: {}", "●".green(), "Online".green());
 
             // Get faucet stats
-            if let Ok(stats) = client.get("http://localhost:8081/api/stats").send().await {
+            if let Ok(stats) = client.get("http://localhost:8082/api/stats").send().await {
                 if let Ok(data) = stats.json::<serde_json::Value>().await {
                     if let Some(amount) = data["drip_amount"].as_str() {
                         let amt = amount.parse::<u128>().unwrap_or(0) / 10u128.pow(18);
@@ -140,7 +145,7 @@ pub async fn status(node_url: Option<&str>) -> Result<()> {
     println!();
     println!("{}", "URLs:".bold());
     println!("  Node:    http://localhost:8080");
-    println!("  Faucet:  http://localhost:8081");
+    println!("  Faucet:  http://localhost:8082");
     println!("  Explorer: http://localhost:3000");
 
     Ok(())
@@ -150,10 +155,10 @@ pub async fn status(node_url: Option<&str>) -> Result<()> {
 pub async fn stake_publisher(amount_eth: f64, key: &str, rpc_url: Option<&str>) -> Result<()> {
     let rpc = rpc_url.unwrap_or("http://localhost:8545");
     let staking = std::env::var("TESTNET_STAKING_ADDR")
-        .context("TESTNET_STAKING_ADDR not set. Run deploy-testnet.sh first.")?;
+        .context("TESTNET_STAKING_ADDR not set. Run scripts/start-testnet.ps1 first.")?;
 
-    if amount_eth < 0.001 {
-        bail!("Minimum publisher stake on testnet is 0.001 tCREG");
+    if amount_eth < 1.0 {
+        bail!("Minimum publisher stake on testnet is 1 tCREG");
     }
 
     let wei = (amount_eth * 1e18) as u128;
@@ -216,10 +221,10 @@ pub async fn stake_publisher(amount_eth: f64, key: &str, rpc_url: Option<&str>) 
 pub async fn stake_validator(amount_eth: f64, key: &str, rpc_url: Option<&str>) -> Result<()> {
     let rpc = rpc_url.unwrap_or("http://localhost:8545");
     let staking = std::env::var("TESTNET_STAKING_ADDR")
-        .context("TESTNET_STAKING_ADDR not set. Run deploy-testnet.sh first.")?;
+        .context("TESTNET_STAKING_ADDR not set. Run scripts/start-testnet.ps1 first.")?;
 
-    if amount_eth < 0.1 {
-        bail!("Minimum validator stake on testnet is 0.1 tCREG");
+    if amount_eth < 100.0 {
+        bail!("Minimum validator stake on testnet is 100 tCREG");
     }
 
     let wei = (amount_eth * 1e18) as u128;
@@ -289,7 +294,7 @@ pub fn reset(data_dir: Option<PathBuf>) -> Result<()> {
     println!("  - {}", dir.display());
     println!();
     println!("Docker volumes must be reset separately:");
-    println!("  docker-compose -f testnet/docker-compose.testnet.yml down -v");
+    println!("  docker compose --env-file .env.testnet -f docker-compose.testnet.yml down -v");
     println!();
 
     // In a real implementation, we'd ask for confirmation here
@@ -298,7 +303,7 @@ pub fn reset(data_dir: Option<PathBuf>) -> Result<()> {
     println!("  1. Stop all testnet services");
     println!("  2. Delete data directory: rm -rf {}", dir.display());
     println!("  3. Reset Docker volumes");
-    println!("  4. Redeploy contracts: ./testnet/deploy-testnet.sh");
+    println!("  4. Redeploy contracts: .\\scripts\\start-testnet.ps1");
 
     Ok(())
 }
@@ -315,29 +320,29 @@ pub fn docs() {
 QUICK START
 ───────────
 1. Start the testnet:
-   docker-compose -f testnet/docker-compose.testnet.yml up -d
+    .\\scripts\\start-testnet.ps1
 
 2. Deploy contracts (first time only):
-   ./testnet/deploy-testnet.sh
+    Included in the startup script
 
 3. Get test tokens:
    creg testnet drip 0xYourAddress
 
 4. Stake and participate:
-   creg testnet stake-publisher 0.01 --key 0xYourPrivateKey
-   creg testnet stake-validator 0.1 --key 0xYourPrivateKey
+    creg testnet stake-publisher 1 --key 0xYourPrivateKey
+    creg testnet stake-validator 100 --key 0xYourPrivateKey
 
 FAUCET
 ──────
 The faucet distributes 1000 tCREG per request with a 1-minute cooldown.
-Web UI: http://localhost:8081
+Web UI: http://localhost:8082
 API:    POST /api/drip { "address": "0x..." }
 
 STAKING REQUIREMENTS (Testnet)
 ──────────────────────────────
-• Publisher: 0.001 tCREG (vs 0.1 on mainnet)
-• Validator: 0.1 tCREG (vs 10 on mainnet)
-• Unbonding: 5 minutes (vs 7 days on mainnet)
+• Publisher: 1 tCREG
+• Validator: 100 tCREG
+• Unbonding: 14 days
 
 USEFUL COMMANDS
 ───────────────
@@ -350,7 +355,7 @@ USEFUL COMMANDS
     --rpc-url http://localhost:8545
 
 # Stake tokens directly with cast
-  cast send $TESTNET_STAKING_ADDR "stakeAsPublisher(uint256)" 1000000000000000 \
+    cast send $TESTNET_STAKING_ADDR "stakeAsPublisher(uint256)" 1000000000000000000 \
     --private-key 0xYourKey --rpc-url http://localhost:8545
 
 # View contract information
@@ -369,17 +374,16 @@ RESET TESTNET
 ─────────────
 To completely reset the testnet:
 
-  docker-compose -f testnet/docker-compose.testnet.yml down -v
+    docker compose --env-file .env.testnet -f docker-compose.testnet.yml down -v
   rm -rf testnet/artifacts
-  ./testnet/deploy-testnet.sh
+    .\\scripts\\start-testnet.ps1
 
 DIFFERENCES FROM MAINNET
 ────────────────────────
 • Uses test tCREG tokens with no real value
-• Relaxed staking requirements
+• Production-like staking thresholds for validator lifecycle testing
 • Fast block times (2 seconds)
-• Instant (5 min) unbonding period
-• Unlimited faucet minting
+• Local faucet funding for testing
 • Local Ethereum (Anvil) instead of real network
 
 TROUBLESHOOTING

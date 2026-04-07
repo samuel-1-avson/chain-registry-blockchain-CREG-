@@ -5,15 +5,21 @@
 use anyhow::Result;
 use common::sha256_hex;
 
-/// Uses a deterministic VRF seed (block height + package canonical ID)
-/// to select N validators from the active set without repetition.
-/// A real deployment would use a cryptographic VRF (e.g. ECVRF),
-/// but SHA-256-based selection is sufficient for this implementation.
+/// Uses a deterministic VRF seed to select N validators from the active set
+/// without repetition.
+///
+/// When a `vrf_output` is provided (the hex-encoded SHA-256 of the proposer's
+/// Ed25519 VRF signature), it is used as the shuffle seed — making the
+/// selection unpredictable without the proposer's private key.
+///
+/// Falls back to SHA-256 of public data only when no VRF output is available
+/// (dev / bootstrap mode).
 pub fn select_validators(
     active_validators: &[String],
     package_canonical: &str,
     block_height: u64,
     n: usize,
+    vrf_output: Option<&str>,
 ) -> Result<Vec<String>> {
     if active_validators.len() < n {
         anyhow::bail!(
@@ -23,8 +29,13 @@ pub fn select_validators(
         );
     }
 
-    // Deterministic seed from block height + package id.
-    let seed = sha256_hex(format!("{}:{}", block_height, package_canonical).as_bytes());
+    // Use VRF output when available; otherwise fall back to deterministic hash.
+    let seed = match vrf_output {
+        Some(output) => sha256_hex(
+            format!("{}:{}:{}", output, block_height, package_canonical).as_bytes(),
+        ),
+        None => sha256_hex(format!("{}:{}", block_height, package_canonical).as_bytes()),
+    };
 
     // Fisher-Yates shuffle seeded from the VRF output.
     let mut indices: Vec<usize> = (0..active_validators.len()).collect();
@@ -132,25 +143,33 @@ mod tests {
     #[test]
     fn selection_is_deterministic() {
         let validators: Vec<String> = (0..10).map(|i| format!("val_{}", i)).collect();
-        let a = select_validators(&validators, "npm:express@4.0.0", 100, 5).unwrap();
-        let b = select_validators(&validators, "npm:express@4.0.0", 100, 5).unwrap();
+        let a = select_validators(&validators, "npm:express@4.0.0", 100, 5, None).unwrap();
+        let b = select_validators(&validators, "npm:express@4.0.0", 100, 5, None).unwrap();
         assert_eq!(a, b);
     }
 
     #[test]
     fn different_packages_get_different_sets() {
         let validators: Vec<String> = (0..20).map(|i| format!("val_{}", i)).collect();
-        let a = select_validators(&validators, "npm:express@4.0.0", 100, 5).unwrap();
-        let b = select_validators(&validators, "npm:lodash@4.0.0", 100, 5).unwrap();
+        let a = select_validators(&validators, "npm:express@4.0.0", 100, 5, None).unwrap();
+        let b = select_validators(&validators, "npm:lodash@4.0.0", 100, 5, None).unwrap();
         assert_ne!(a, b);
     }
 
     #[test]
     fn no_duplicate_selections() {
         let validators: Vec<String> = (0..10).map(|i| format!("val_{}", i)).collect();
-        let selected = select_validators(&validators, "npm:test@1.0.0", 42, 7).unwrap();
+        let selected = select_validators(&validators, "npm:test@1.0.0", 42, 7, None).unwrap();
         let unique: std::collections::HashSet<_> = selected.iter().collect();
         assert_eq!(unique.len(), selected.len());
+    }
+
+    #[test]
+    fn vrf_output_changes_selection() {
+        let validators: Vec<String> = (0..20).map(|i| format!("val_{}", i)).collect();
+        let a = select_validators(&validators, "npm:express@4.0.0", 100, 5, None).unwrap();
+        let b = select_validators(&validators, "npm:express@4.0.0", 100, 5, Some("abcdef1234567890")).unwrap();
+        assert_ne!(a, b, "VRF output should change the selection");
     }
 
     #[test]
@@ -207,7 +226,7 @@ mod tests {
         rng.fill_bytes(&mut bytes);
         let sk3 = SigningKey::from_bytes(&bytes);
 
-        let (out1, _prf1) = prove(seed, &hex::encode(sk1.to_bytes())).unwrap();
+        let (out1, prf1) = prove(seed, &hex::encode(sk1.to_bytes())).unwrap();
         let (out2, prf2) = prove(seed, &hex::encode(sk2.to_bytes())).unwrap();
         let (out3, prf3) = prove(seed, &hex::encode(sk3.to_bytes())).unwrap();
 

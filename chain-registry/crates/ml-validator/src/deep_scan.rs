@@ -1,17 +1,26 @@
-//! Deep Learning Malware Scanner
+//! Multi-Layer Malware Detection Pipeline
 //!
-//! This module provides semantic code understanding via a fine-tuned CodeBERT
-//! model exported to ONNX. It runs inference through the `ort` crate and
-//! returns a structured result including malicious probability and attention
-//! weights highlighting suspicious code regions.
+//! Replaces the old custom-ONNX approach with three production-ready layers
+//! that require **zero training data**:
+//!
+//! 1. **YARA-X scanning** — community-maintained malware rules (VirusTotal).
+//! 2. **OSV.dev lookups** — Google's open vulnerability database.
+//! 3. **Content-hash threat intel** — SHA-256 matching against known-bad hashes.
+//!
+//! The legacy ONNX path is still available via `CREG_FORCE_ONNX=true` if a
+//! real trained model exists, but the default pipeline no longer needs one.
 
 use ndarray::Array2;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
+use std::time::Duration;
 use tracing::{debug, warn};
 
 use crate::tokenizer::CodeTokenizer;
+
+/// Maximum wall-clock time allowed for a single deep-scan inference pass.
+const SCAN_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Errors that can occur during deep scanning.
 #[derive(Debug, thiserror::Error)]
@@ -95,6 +104,8 @@ pub struct DeepScanner {
     model_path: std::path::PathBuf,
     tokenizer_path: Option<std::path::PathBuf>,
     max_length: usize,
+    /// Optional package info for OSV lookups.
+    package_info: Option<crate::osv_client::PackageInfo>,
 }
 
 impl DeepScanner {
@@ -104,6 +115,7 @@ impl DeepScanner {
             model_path: model_path.as_ref().to_path_buf(),
             tokenizer_path: None,
             max_length: 512,
+            package_info: None,
         }
     }
 
@@ -113,20 +125,125 @@ impl DeepScanner {
         self
     }
 
-    /// Run the deep scan over a raw tarball byte slice.
-    ///
-    /// If the ONNX model is missing, returns a **mock result** so the
-    /// validator pipeline never hard-fails due to missing ML artifacts.
+    /// Attach package metadata for OSV vulnerability lookups.
+    pub fn with_package_info(mut self, info: crate::osv_client::PackageInfo) -> Self {
+        self.package_info = Some(info);
+        self
+    }
+
+    /// Return the model version string for inclusion in vote messages.
+    pub fn model_version(&self) -> String {
+        if std::env::var("CREG_FORCE_ONNX").unwrap_or_default() == "true"
+            && self.model_path.exists()
+        {
+            let size = std::fs::metadata(&self.model_path)
+                .map(|m| m.len())
+                .unwrap_or(0);
+            if size >= 1024 {
+                return "codebert-v0.1.0".to_string();
+            }
+        }
+        "creg-detect-v1.0.0".to_string()
+    }
+
+    /// Run the multi-layer scan (default) or legacy ONNX scan.
     pub fn scan(&self, tarball_bytes: &[u8]) -> Result<DeepScanResult, MlError> {
+        // Legacy ONNX path — only used when explicitly forced AND a real model exists.
+        if std::env::var("CREG_FORCE_ONNX").unwrap_or_default() == "true" {
+            return self.scan_onnx(tarball_bytes);
+        }
+
+        // ── Multi-Layer Pipeline ──────────────────────────────────────
+        let files = match extract_source_files(tarball_bytes) {
+            Ok(f) => f,
+            Err(_) => {
+                // If tarball extraction fails, return mock rather than error.
+                // This makes the pipeline resilient to corrupt/empty tarballs.
+                return Ok(mock_result());
+            }
+        };
+
+        if files.is_empty() {
+            return Ok(mock_result());
+        }
+
+        // Layer 1: YARA pattern matching.
+        let yara_matches = crate::yara_scanner::scan_files(&files);
+        let yara_prob = crate::yara_scanner::matches_to_probability(&yara_matches);
+
+        // Layer 2: OSV vulnerability lookup (optional).
+        let osv_prob = if let Some(ref info) = self.package_info {
+            let osv_result = crate::osv_client::query(info);
+            crate::osv_client::vulns_to_probability(&osv_result)
+        } else {
+            0.0
+        };
+
+        // Layer 3: Content-hash threat intelligence.
+        let threat_result = crate::threat_intel::check(tarball_bytes, &files);
+        let hash_prob = threat_result.to_probability();
+
+        // ── Combine scores: take the max of all three layers ─────────
+        // A single confident layer is enough to flag a package.  This
+        // avoids the averaging-dilution problem where one critical hit
+        // gets watered down by two clean layers.
+        let combined = yara_prob.max(osv_prob).max(hash_prob);
+
+        // Build suspicious files list from YARA matches.
+        let mut suspicious_files: Vec<SuspiciousFile> = yara_matches
+            .iter()
+            .map(|m| SuspiciousFile {
+                path: m.matched_file.clone(),
+                probability: match m.threat_level {
+                    5 => 0.95,
+                    4 => 0.80,
+                    3 => 0.55,
+                    2 => 0.35,
+                    _ => 0.15,
+                },
+                snippet: format!("YARA rule '{}': {}", m.rule_name, m.description),
+            })
+            .collect();
+
+        suspicious_files.sort_by(|a, b| {
+            b.probability
+                .partial_cmp(&a.probability)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        suspicious_files.truncate(10);
+
+        let classification = ThreatClassification::from_probability(combined);
+        let confidence = if combined > 0.01 {
+            (0.5 + (combined - 0.5).abs()).min(1.0)
+        } else {
+            0.5 // Moderate confidence in a clean result.
+        };
+
+        debug!(
+            "Multi-layer scan: yara={:.4} osv={:.4} hash={:.4} combined={:.4} class={:?}",
+            yara_prob, osv_prob, hash_prob, combined, classification
+        );
+
+        Ok(DeepScanResult {
+            malicious_probability: combined,
+            confidence,
+            classification,
+            attention_regions: None,
+            suspicious_files,
+            model_version: "creg-detect-v1.0.0".to_string(),
+            is_mock: false,
+        })
+    }
+
+    /// Legacy ONNX-based scan. Only called when `CREG_FORCE_ONNX=true`.
+    fn scan_onnx(&self, tarball_bytes: &[u8]) -> Result<DeepScanResult, MlError> {
         if !self.model_path.exists() {
             warn!(
-                "ONNX model not found at '{}'; returning mock deep-scan result",
+                "ONNX model not found at '{}'; returning degraded deep-scan result",
                 self.model_path.display()
             );
             return Ok(mock_result());
         }
-
-        debug!("Loading ONNX session from {}", self.model_path.display());
 
         let mut session = create_onnx_session(&self.model_path)?;
 
@@ -225,20 +342,77 @@ impl Default for DeepScanner {
 /// Convenience free function that uses the default scanner.
 ///
 /// Called from the validator pipeline after the light-weight `score()`
-/// (rule-based) check.
-pub fn deep_scan(tarball_bytes: &[u8]) -> Result<DeepScanResult, MlError> {
-    DeepScanner::default().scan(tarball_bytes)
+/// (rule-based) check.  Wraps the scan in a timeout to prevent hung
+/// sessions from blocking the validator pipeline.
+///
+/// `package_info` is optional — when provided, OSV vulnerability lookups
+/// are enabled.
+pub fn deep_scan(
+    tarball_bytes: &[u8],
+    package_info: Option<crate::osv_client::PackageInfo>,
+) -> Result<DeepScanResult, MlError> {
+    let mut scanner = DeepScanner::default();
+    scanner.package_info = package_info;
+
+    // If we are inside a tokio runtime, use a timeout.  Otherwise fall
+    // back to a synchronous call (e.g. in unit tests).
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        let bytes = tarball_bytes.to_vec();
+        let model_path = scanner.model_path.clone();
+        let tokenizer_path = scanner.tokenizer_path.clone();
+        let max_length = scanner.max_length;
+        let pkg_info = scanner.package_info.clone();
+
+        match handle.block_on(async move {
+            tokio::time::timeout(SCAN_TIMEOUT, tokio::task::spawn_blocking(move || {
+                let s = DeepScanner {
+                    model_path,
+                    tokenizer_path,
+                    max_length,
+                    package_info: pkg_info,
+                };
+                s.scan(&bytes)
+            }))
+            .await
+        }) {
+            Ok(Ok(result)) => result,
+            Ok(Err(e)) => Err(MlError::InferenceError(format!("Scan task panicked: {e}"))),
+            Err(_) => {
+                warn!("Deep-scan inference timed out after {}s", SCAN_TIMEOUT.as_secs());
+                Ok(timeout_result())
+            }
+        }
+    } else {
+        scanner.scan(tarball_bytes)
+    }
 }
 
-/// Produce a reasonable mock result when no model is available.
+/// Produce a degraded result when no model is available or the model is a
+/// placeholder. Carries `is_mock = true` so that the validator pipeline
+/// emits a visible ML001 warning finding.
 fn mock_result() -> DeepScanResult {
+    warn!("ML deep-scan running in DEGRADED mode — no trained ONNX model loaded. Security coverage is limited to rule-based analysis only.");
     DeepScanResult {
-        malicious_probability: 0.15,
-        confidence: 0.70,
+        malicious_probability: 0.0, // Don't return fake 0.15 — be honest: no data
+        confidence: 0.0,            // Zero confidence — no inference was performed
         classification: ThreatClassification::Safe,
         attention_regions: None,
         suspicious_files: Vec::new(),
-        model_version: "mock-v0.1.0".to_string(),
+        model_version: "degraded-no-model".to_string(),
+        is_mock: true,
+    }
+}
+
+/// Produce a degraded result when ONNX inference timed out.
+fn timeout_result() -> DeepScanResult {
+    warn!("ML deep-scan timed out — inference did not complete within {}s.", SCAN_TIMEOUT.as_secs());
+    DeepScanResult {
+        malicious_probability: 0.0,
+        confidence: 0.0,
+        classification: ThreatClassification::Safe,
+        attention_regions: None,
+        suspicious_files: Vec::new(),
+        model_version: "degraded-timeout".to_string(),
         is_mock: true,
     }
 }
@@ -350,14 +524,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_mock_result_when_model_missing() {
+    fn test_mock_result_when_no_source_files() {
+        // With the multi-layer pipeline, passing invalid tarball data
+        // returns a mock result because extract_source_files yields no files.
         let scanner = DeepScanner::new("/nonexistent/path/model.onnx");
         let result = scanner.scan(b"dummy tarball bytes").unwrap();
 
+        // Invalid tarball → no files extracted → mock result.
         assert!(result.is_mock);
         assert_eq!(result.classification, ThreatClassification::Safe);
-        assert!(result.malicious_probability < 0.30);
-        assert!(result.suspicious_files.is_empty());
+        assert_eq!(result.malicious_probability, 0.0);
+    }
+
+    #[test]
+    fn test_onnx_fallback_mock_when_model_missing() {
+        // Legacy ONNX path should mock when model does not exist.
+        std::env::set_var("CREG_FORCE_ONNX", "true");
+        let scanner = DeepScanner::new("/nonexistent/path/model.onnx");
+        let result = scanner.scan(b"dummy tarball bytes").unwrap();
+        std::env::remove_var("CREG_FORCE_ONNX");
+
+        assert!(result.is_mock);
+        assert_eq!(result.classification, ThreatClassification::Safe);
+        assert!(result.model_version.starts_with("degraded"));
     }
 
     #[test]

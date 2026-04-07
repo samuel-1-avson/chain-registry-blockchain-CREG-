@@ -13,6 +13,7 @@ thiserror  = { workspace = true }
 tracing    = { workspace = true }
 chrono     = { workspace = true }
 hex        = { workspace = true }
+sha2       = { workspace = true }
 reqwest      = { version = "0.11", features = ["json", "multipart"] }
 uuid         = { version = "1.0", features = ["v4"] }
 static_assertions = "1.1"
@@ -26,4 +27,5 @@ wasmtime-wasi = { workspace = true }
 tempfile   = "3"
 cap-std    = "3"
 ml-validator = { path = "../ml-validator" }
+base64       = "0.22"
 

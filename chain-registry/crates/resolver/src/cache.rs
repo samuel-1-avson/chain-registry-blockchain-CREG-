@@ -18,7 +18,7 @@ fn db() -> Result<&'static Db> {
             .join("verdict-cache");
         sled::open(path).expect("Failed to open verdict cache")
     });
-    Ok(DB.get().unwrap())
+    Ok(DB.get().ok_or_else(|| anyhow::anyhow!("Verdict cache not initialized"))?)
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
