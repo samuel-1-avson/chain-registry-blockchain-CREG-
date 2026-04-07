@@ -185,6 +185,7 @@ async fn main() -> Result<()> {
         let sync_config = db_sync::sync_worker::SyncConfig {
             poll_interval: std::time::Duration::from_secs(1),
             pg_url: config.pg_url.clone(),
+            ..Default::default()
         };
         let chain_proxy: db_sync::sync_worker::ChainStoreHandle =
             Arc::new(tokio::sync::RwLock::new(chain_for_sync));

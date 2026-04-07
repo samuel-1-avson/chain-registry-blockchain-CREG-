@@ -68,7 +68,7 @@ services:
     <<: *app-image
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: ${CREG_DOCKERFILE:-Dockerfile}
     command: ["true"]
     profiles:
       - build

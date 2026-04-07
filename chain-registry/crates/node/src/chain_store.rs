@@ -387,7 +387,7 @@ impl ChainStore {
                 for tx in &block.transactions {
                     if let common::Transaction::RotatePublisherKey { old_pubkey, .. } = tx {
                         if old_pubkey == pubkey {
-                            return Some(block.timestamp);
+                            return Some(block.header.timestamp);
                         }
                     }
                 }

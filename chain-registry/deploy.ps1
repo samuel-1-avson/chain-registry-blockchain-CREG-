@@ -125,6 +125,7 @@ $DockerfileMap = @{
     "optimized" = "Dockerfile.optimized"
 }
 $SelectedDockerfile = $DockerfileMap[$Dockerfile]
+$env:CREG_DOCKERFILE = $SelectedDockerfile
 
 # ─── Terminal Colors ──────────────────────────────────────────────────────────
 function Write-Banner {
