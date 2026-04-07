@@ -1,8 +1,7 @@
 # Run Validator Node Script for Windows
-# This script properly sets up the environment and runs the validator
+# This script properly sets up the environment and runs the single validator
 
 param(
-    [int]$ValidatorNumber = 1,
     [switch]$Help
 )
 
@@ -14,18 +13,18 @@ Usage:
     .\run-validator.ps1 [OPTIONS]
 
 Options:
-    -ValidatorNumber <n>  Which validator to run (1, 2, or 3). Default: 1
     -Help                 Show this help
 
 Examples:
-    .\run-validator.ps1              # Run validator 1
-    .\run-validator.ps1 -ValidatorNumber 2  # Run validator 2
+    .\run-validator.ps1              # Run the validator
 "@
     exit 0
 }
 
+$ValidatorNumber = 1
+
 Write-Host "========================================"
-Write-Host "Chain Registry - Validator $ValidatorNumber Starter"
+Write-Host "Chain Registry - Validator Starter"
 Write-Host "========================================"
 Write-Host ""
 

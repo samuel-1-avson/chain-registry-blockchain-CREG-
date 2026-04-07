@@ -1,19 +1,15 @@
 # docker-compose.testnet.yml
-# Spins up a 10-validator Chain Registry testnet for Phase 1 validation.
+# Spins up a single-validator Chain Registry testnet for Phase 1 validation.
 #
 # Architecture:
 #   - 1 shared IPFS node
 #   - 1 shared Anvil (local Ethereum L1)
-#   - 10 validator nodes (node-1 through node-10)
-#   - Each validator has its own data volume and distinct ports
+#   - 1 validator node (node-1)
 #
 # Usage:
-#   1. Generate keys: python scripts/generate-testnet-keys.py --nodes 10
+#   1. Generate keys: .\scripts\generate-testnet-keys.ps1 -Nodes 1
 #   2. Deploy:        docker compose --env-file .env.testnet -f docker-compose.testnet.yml up -d --build
 #   3. Monitor:       docker compose -f docker-compose.testnet.yml logs -f
-#
-# IMPORTANT: In production, each validator runs on separate hardware.
-# This compose file is for testnet / CI / load-testing only.
 
 x-app-image: &app-image
   image: chain-registry-app:latest
@@ -47,7 +43,7 @@ x-node-base: &node-base
     CREG_TOKEN_ADDR: "${TESTNET_TOKEN_ADDR:-0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9}"
     CREG_STAKING_ADDR: "${TESTNET_STAKING_ADDR:-0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9}"
     CREG_BLOCK_INTERVAL: "2"
-    CREG_SINGLE_VALIDATOR_MODE: "${CREG_SINGLE_VALIDATOR_MODE:-false}"
+    CREG_SINGLE_VALIDATOR_MODE: "true"
     CREG_DEV_SANDBOX: "${CREG_DEV_SANDBOX:-false}"
     CREG_ZK_ENABLED: "true"
     CREG_ML_ENABLED: "true"
@@ -164,8 +160,8 @@ services:
       timeout: 3s
       retries: 5
 
-  # ── Validator Nodes 1–10 ────────────────────────────────────────────────────
-  # node-1 is the bootstrap seed for the other 9 nodes.
+  # ── Validator Nodes ──────────────────────────────────────────────────────────
+  # Single validator node for testnet.
 
   node-1:
     <<: *node-base
@@ -186,204 +182,6 @@ services:
       CREG_LISTEN: "0.0.0.0:8080"
       CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/9000"
       CREG_P2P_SEEDS: ""
-      CREG_VALIDATOR_SET: "${VALIDATOR_SET_JSON}"
-      CREG_PG_URL: "${CREG_PG_URL:-postgres://${POSTGRES_USER:-creg}:${POSTGRES_PASSWORD:-creg}@postgres:5432/${POSTGRES_DB:-chain_registry}}"
-
-  node-2:
-    <<: *node-base
-    container_name: creg-testnet-node-2
-    ports:
-      - "8182:8080"
-      - "50052:50051"
-      - "9002:9000"
-    volumes:
-      - node-2-data:/data
-      - ./circuits:/app/circuits:ro
-      - ./validators:/app/validators:ro
-      - ./models:/app/models:ro
-    environment:
-      <<: *node-env
-      CREG_NODE_ID: "node-2"
-      CREG_VALIDATOR_KEY: "${NODE2_VALIDATOR_KEY}"
-      CREG_LISTEN: "0.0.0.0:8080"
-      CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/9000"
-      CREG_P2P_SEEDS: "/dns4/node-1/tcp/9000"
-      CREG_VALIDATOR_SET: "${VALIDATOR_SET_JSON}"
-      CREG_PG_URL: "${CREG_PG_URL:-postgres://${POSTGRES_USER:-creg}:${POSTGRES_PASSWORD:-creg}@postgres:5432/${POSTGRES_DB:-chain_registry}}"
-
-  node-3:
-    <<: *node-base
-    container_name: creg-testnet-node-3
-    ports:
-      - "8183:8080"
-      - "50053:50051"
-      - "9003:9000"
-    volumes:
-      - node-3-data:/data
-      - ./circuits:/app/circuits:ro
-      - ./validators:/app/validators:ro
-      - ./models:/app/models:ro
-    environment:
-      <<: *node-env
-      CREG_NODE_ID: "node-3"
-      CREG_VALIDATOR_KEY: "${NODE3_VALIDATOR_KEY}"
-      CREG_LISTEN: "0.0.0.0:8080"
-      CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/9000"
-      CREG_P2P_SEEDS: "/dns4/node-1/tcp/9000"
-      CREG_VALIDATOR_SET: "${VALIDATOR_SET_JSON}"
-      CREG_PG_URL: "${CREG_PG_URL:-postgres://${POSTGRES_USER:-creg}:${POSTGRES_PASSWORD:-creg}@postgres:5432/${POSTGRES_DB:-chain_registry}}"
-
-  node-4:
-    <<: *node-base
-    container_name: creg-testnet-node-4
-    ports:
-      - "8184:8080"
-      - "50054:50051"
-      - "9004:9000"
-    volumes:
-      - node-4-data:/data
-      - ./circuits:/app/circuits:ro
-      - ./validators:/app/validators:ro
-      - ./models:/app/models:ro
-    environment:
-      <<: *node-env
-      CREG_NODE_ID: "node-4"
-      CREG_VALIDATOR_KEY: "${NODE4_VALIDATOR_KEY}"
-      CREG_LISTEN: "0.0.0.0:8080"
-      CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/9000"
-      CREG_P2P_SEEDS: "/dns4/node-1/tcp/9000"
-      CREG_VALIDATOR_SET: "${VALIDATOR_SET_JSON}"
-      CREG_PG_URL: "${CREG_PG_URL:-postgres://${POSTGRES_USER:-creg}:${POSTGRES_PASSWORD:-creg}@postgres:5432/${POSTGRES_DB:-chain_registry}}"
-
-  node-5:
-    <<: *node-base
-    container_name: creg-testnet-node-5
-    ports:
-      - "8185:8080"
-      - "50055:50051"
-      - "9005:9000"
-    volumes:
-      - node-5-data:/data
-      - ./circuits:/app/circuits:ro
-      - ./validators:/app/validators:ro
-      - ./models:/app/models:ro
-    environment:
-      <<: *node-env
-      CREG_NODE_ID: "node-5"
-      CREG_VALIDATOR_KEY: "${NODE5_VALIDATOR_KEY}"
-      CREG_LISTEN: "0.0.0.0:8080"
-      CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/9000"
-      CREG_P2P_SEEDS: "/dns4/node-1/tcp/9000"
-      CREG_VALIDATOR_SET: "${VALIDATOR_SET_JSON}"
-      CREG_PG_URL: "${CREG_PG_URL:-postgres://${POSTGRES_USER:-creg}:${POSTGRES_PASSWORD:-creg}@postgres:5432/${POSTGRES_DB:-chain_registry}}"
-
-  node-6:
-    <<: *node-base
-    container_name: creg-testnet-node-6
-    ports:
-      - "8186:8080"
-      - "50056:50051"
-      - "9006:9000"
-    volumes:
-      - node-6-data:/data
-      - ./circuits:/app/circuits:ro
-      - ./validators:/app/validators:ro
-      - ./models:/app/models:ro
-    environment:
-      <<: *node-env
-      CREG_NODE_ID: "node-6"
-      CREG_VALIDATOR_KEY: "${NODE6_VALIDATOR_KEY}"
-      CREG_LISTEN: "0.0.0.0:8080"
-      CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/9000"
-      CREG_P2P_SEEDS: "/dns4/node-1/tcp/9000"
-      CREG_VALIDATOR_SET: "${VALIDATOR_SET_JSON}"
-      CREG_PG_URL: "${CREG_PG_URL:-postgres://${POSTGRES_USER:-creg}:${POSTGRES_PASSWORD:-creg}@postgres:5432/${POSTGRES_DB:-chain_registry}}"
-
-  node-7:
-    <<: *node-base
-    container_name: creg-testnet-node-7
-    ports:
-      - "8187:8080"
-      - "50057:50051"
-      - "9007:9000"
-    volumes:
-      - node-7-data:/data
-      - ./circuits:/app/circuits:ro
-      - ./validators:/app/validators:ro
-      - ./models:/app/models:ro
-    environment:
-      <<: *node-env
-      CREG_NODE_ID: "node-7"
-      CREG_VALIDATOR_KEY: "${NODE7_VALIDATOR_KEY}"
-      CREG_LISTEN: "0.0.0.0:8080"
-      CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/9000"
-      CREG_P2P_SEEDS: "/dns4/node-1/tcp/9000"
-      CREG_VALIDATOR_SET: "${VALIDATOR_SET_JSON}"
-      CREG_PG_URL: "${CREG_PG_URL:-postgres://${POSTGRES_USER:-creg}:${POSTGRES_PASSWORD:-creg}@postgres:5432/${POSTGRES_DB:-chain_registry}}"
-
-  node-8:
-    <<: *node-base
-    container_name: creg-testnet-node-8
-    ports:
-      - "8188:8080"
-      - "50058:50051"
-      - "9008:9000"
-    volumes:
-      - node-8-data:/data
-      - ./circuits:/app/circuits:ro
-      - ./validators:/app/validators:ro
-      - ./models:/app/models:ro
-    environment:
-      <<: *node-env
-      CREG_NODE_ID: "node-8"
-      CREG_VALIDATOR_KEY: "${NODE8_VALIDATOR_KEY}"
-      CREG_LISTEN: "0.0.0.0:8080"
-      CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/9000"
-      CREG_P2P_SEEDS: "/dns4/node-1/tcp/9000"
-      CREG_VALIDATOR_SET: "${VALIDATOR_SET_JSON}"
-      CREG_PG_URL: "${CREG_PG_URL:-postgres://${POSTGRES_USER:-creg}:${POSTGRES_PASSWORD:-creg}@postgres:5432/${POSTGRES_DB:-chain_registry}}"
-
-  node-9:
-    <<: *node-base
-    container_name: creg-testnet-node-9
-    ports:
-      - "8189:8080"
-      - "50059:50051"
-      - "9009:9000"
-    volumes:
-      - node-9-data:/data
-      - ./circuits:/app/circuits:ro
-      - ./validators:/app/validators:ro
-      - ./models:/app/models:ro
-    environment:
-      <<: *node-env
-      CREG_NODE_ID: "node-9"
-      CREG_VALIDATOR_KEY: "${NODE9_VALIDATOR_KEY}"
-      CREG_LISTEN: "0.0.0.0:8080"
-      CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/9000"
-      CREG_P2P_SEEDS: "/dns4/node-1/tcp/9000"
-      CREG_VALIDATOR_SET: "${VALIDATOR_SET_JSON}"
-      CREG_PG_URL: "${CREG_PG_URL:-postgres://${POSTGRES_USER:-creg}:${POSTGRES_PASSWORD:-creg}@postgres:5432/${POSTGRES_DB:-chain_registry}}"
-
-  node-10:
-    <<: *node-base
-    container_name: creg-testnet-node-10
-    ports:
-      - "8190:8080"
-      - "50060:50051"
-      - "9010:9000"
-    volumes:
-      - node-10-data:/data
-      - ./circuits:/app/circuits:ro
-      - ./validators:/app/validators:ro
-      - ./models:/app/models:ro
-    environment:
-      <<: *node-env
-      CREG_NODE_ID: "node-10"
-      CREG_VALIDATOR_KEY: "${NODE10_VALIDATOR_KEY}"
-      CREG_LISTEN: "0.0.0.0:8080"
-      CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/9000"
-      CREG_P2P_SEEDS: "/dns4/node-1/tcp/9000"
       CREG_VALIDATOR_SET: "${VALIDATOR_SET_JSON}"
       CREG_PG_URL: "${CREG_PG_URL:-postgres://${POSTGRES_USER:-creg}:${POSTGRES_PASSWORD:-creg}@postgres:5432/${POSTGRES_DB:-chain_registry}}"
 
@@ -480,28 +278,10 @@ services:
     command: |
       sh -c "
         pip install aiohttp pynacl &&
-        python stress-test.py --nodes 10 --packages 50 --concurrency 5 --timeout 120
+        python stress-test.py --nodes 1 --packages 50 --concurrency 5 --timeout 120
       "
     depends_on:
       node-1:
-        condition: service_healthy
-      node-2:
-        condition: service_healthy
-      node-3:
-        condition: service_healthy
-      node-4:
-        condition: service_healthy
-      node-5:
-        condition: service_healthy
-      node-6:
-        condition: service_healthy
-      node-7:
-        condition: service_healthy
-      node-8:
-        condition: service_healthy
-      node-9:
-        condition: service_healthy
-      node-10:
         condition: service_healthy
       ipfs:
         condition: service_started
@@ -513,15 +293,6 @@ volumes:
   anvil-data:
   postgres-data:
   node-1-data:
-  node-2-data:
-  node-3-data:
-  node-4-data:
-  node-5-data:
-  node-6-data:
-  node-7-data:
-  node-8-data:
-  node-9-data:
-  node-10-data:
 
 # Docker secrets for validator keys (alternative to .env injection)
 # Usage: docker compose --env-file .env.testnet -f docker-compose.testnet.yml up -d
@@ -531,21 +302,3 @@ volumes:
 secrets:
   node1-validator-key:
     file: ./validator-keys/validator-1.env
-  node2-validator-key:
-    file: ./validator-keys/validator-2.env
-  node3-validator-key:
-    file: ./validator-keys/validator-3.env
-  node4-validator-key:
-    file: ./validator-keys/validator-4.env
-  node5-validator-key:
-    file: ./validator-keys/validator-5.env
-  node6-validator-key:
-    file: ./validator-keys/validator-6.env
-  node7-validator-key:
-    file: ./validator-keys/validator-7.env
-  node8-validator-key:
-    file: ./validator-keys/validator-8.env
-  node9-validator-key:
-    file: ./validator-keys/validator-9.env
-  node10-validator-key:
-    file: ./validator-keys/validator-10.env

@@ -1,19 +1,7 @@
 #!/bin/bash
 # Validator Key Generation Script for Chain Registry
-# 
-# IMPORTANT ARCHITECTURE NOTE:
-# ============================
-# In PRODUCTION: Each validator MUST run on a separate PC
-#   - One validator per physical/virtual machine
-#   - Each with its own unique network identity
-#   - For decentralization and security
 #
-# In TESTING: You CAN run multiple validators on one PC
-#   - This script helps set up multiple test validators
-#   - Each validator gets its own key and data directory
-#   - Useful for testing consensus locally
-#
-# This script is for TESTNET TESTING ONLY
+# Generates the validator key for Chain Registry testnet.
 
 set -e
 
@@ -30,7 +18,7 @@ KEYS_DIR="$PROJECT_ROOT/validator-keys"
 ENV_FILE="$PROJECT_ROOT/.env"
 
 # Number of validators to generate
-NUM_VALIDATORS=${1:-3}
+NUM_VALIDATORS=${1:-1}
 
 print_header() {
     echo -e "${BLUE}╔════════════════════════════════════════════════════════════╗${NC}"

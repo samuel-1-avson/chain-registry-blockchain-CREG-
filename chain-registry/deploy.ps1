@@ -16,12 +16,12 @@
       9. Summary dashboard
 
 .PARAMETER Mode
-    Deployment mode: "testnet" (10 validators, faucet, explorer) or
+    Deployment mode: "testnet" (single validator, faucet, explorer) or
     "mainnet" (single-validator production, no faucet).
     Default: testnet
 
 .PARAMETER Nodes
-    Number of validator nodes to start (1-10). Default: 10 for testnet, 1 for mainnet.
+    Number of validator nodes to start. Default: 1.
 
 .PARAMETER Dockerfile
     Which Dockerfile to use: "default", "minimal", "optimized".
@@ -46,16 +46,12 @@
     Tear down and delete all volumes (DESTRUCTIVE — removes all chain data).
 
 .EXAMPLE
-    # Deploy 10-validator testnet (recommended first run)
+    # Deploy single-validator testnet (recommended first run)
     .\deploy.ps1
 
 .EXAMPLE
     # Deploy testnet with fast build
     .\deploy.ps1 -Mode testnet -Dockerfile minimal
-
-.EXAMPLE
-    # Deploy with 3 validators only
-    .\deploy.ps1 -Mode testnet -Nodes 3
 
 .EXAMPLE
     # Skip build, just restart nodes
@@ -78,7 +74,7 @@ param(
     [ValidateSet("testnet", "mainnet")]
     [string]$Mode = "testnet",
 
-    [ValidateRange(1, 10)]
+    [ValidateRange(1, 1)]
     [int]$Nodes = 0,
 
     [ValidateSet("default", "minimal", "optimized")]
@@ -108,7 +104,7 @@ Set-Location $ProjectRoot
 
 # Default node count based on mode
 if ($Nodes -eq 0) {
-    $Nodes = if ($Mode -eq "testnet") { 10 } else { 1 }
+    $Nodes = 1
 }
 
 # Compose files
@@ -369,7 +365,7 @@ if ($Down -or $Reset) {
         Write-Step "2/2" "Removing volumes and data..."
         Invoke-Compose @("down", "-v", "--remove-orphans") | Out-Null
         # Clean local data directories
-        @("data/node-1", "data/node-2", "data/node-3", "data/node1", "data/node2", "data/node3") | ForEach-Object {
+        @("data/node-1", "data/node1") | ForEach-Object {
             if (Test-Path $_) { Remove-Item -Recurse -Force $_ }
         }
         Write-OK "Volumes and data removed"
@@ -681,57 +677,17 @@ if ($SkipContracts) {
 Write-Section "Step 6: Validator Nodes ($Nodes node(s))"
 
 if ($Mode -eq "testnet") {
-    # Start nodes in batches to avoid overwhelming the system
-    Write-Step "6.1" "Starting node-1 (bootstrap seed)"
+    Write-Step "6.1" "Starting node-1 (single validator)"
     Invoke-Compose @("up", "-d", "--no-deps", "node-1") | Out-Null
     $node1Ready = Wait-ForEndpoint -Name "Node 1" -Url "http://localhost:8080/v1/health" -TimeoutSecs 120
     if (-not $node1Ready) {
-        Write-Fail "Node 1 failed to start. This is the bootstrap node — other nodes depend on it."
+        Write-Fail "Node 1 failed to start."
         Write-Info "Check logs: docker logs creg-testnet-node-1"
         Write-Info "Common issues:"
         Write-Info "  - Missing CREG_VALIDATOR_KEY in .env.testnet"
         Write-Info "  - Anvil not reachable"
         Write-Info "  - Build failure (binary not in image)"
         exit 1
-    }
-
-    if ($Nodes -gt 1) {
-        Write-Step "6.2" "Starting nodes 2-$Nodes"
-        $nodeNames = @()
-        for ($i = 2; $i -le $Nodes; $i++) {
-            $nodeNames += "node-$i"
-        }
-        $nodeStartArgs = @("up", "-d", "--no-deps") + $nodeNames
-        Invoke-Compose $nodeStartArgs | Out-Null
-        Write-Info "Waiting for nodes to sync..."
-        Start-Sleep -Seconds 10
-
-        # Check each node
-        $healthyNodes = 1  # node-1 already verified
-        for ($i = 2; $i -le $Nodes; $i++) {
-            $port = 8080 + ($i - 1) * 100 + 2  # 8182, 8183, ...
-            # The testnet compose maps node-2 → 8182, node-3 → 8183, etc.
-            $nodePort = switch ($i) {
-                2 { 8182 } 3 { 8183 } 4 { 8184 } 5 { 8185 }
-                6 { 8186 } 7 { 8187 } 8 { 8188 } 9 { 8189 } 10 { 8190 }
-            }
-            try {
-                $null = Invoke-RestMethod -Uri "http://localhost:${nodePort}/v1/health" -TimeoutSec 5 -ErrorAction Stop
-                $healthyNodes++
-            } catch {
-                Write-Warn "Node $i (port $nodePort) not yet healthy"
-            }
-        }
-        Write-OK "$healthyNodes/$Nodes nodes healthy"
-
-        # Calculate quorum
-        $quorum = [math]::Floor(2 * $Nodes / 3) + 1
-        if ($healthyNodes -ge $quorum) {
-            Write-OK "Quorum reached: $healthyNodes ≥ $quorum (⌊2×$Nodes/3⌋+1)"
-        } else {
-            Write-Warn "Quorum NOT reached: $healthyNodes < $quorum. Consensus will stall."
-            Write-Info "Wait a few minutes and re-check with: .\deploy.ps1 -Status"
-        }
     }
 } else {
     Write-Step "6.1" "Starting single validator node"

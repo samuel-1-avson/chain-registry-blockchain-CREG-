@@ -11,7 +11,7 @@
     .\scripts\generate-testnet-keys.ps1 -Nodes 10 -Output .env.testnet
 #>
 param(
-    [int]$Nodes = 10,
+    [int]$Nodes = 1,
     [string]$Output = ".env.testnet",
     [string]$ConfigDir = "config"
 )

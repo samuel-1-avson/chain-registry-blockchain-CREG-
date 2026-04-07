@@ -1,21 +1,9 @@
 # Validator Key Generation Script for Chain Registry (PowerShell)
 #
-# IMPORTANT ARCHITECTURE NOTE:
-# ============================
-# In PRODUCTION: Each validator MUST run on a separate PC
-#   - One validator per physical/virtual machine
-#   - Each with its own unique network identity
-#   - For decentralization and security
-#
-# In TESTING: You CAN run multiple validators on one PC
-#   - This script helps set up multiple test validators
-#   - Each validator gets its own key and data directory
-#   - Useful for testing consensus locally
-#
-# This script is for TESTNET TESTING ONLY
+# This script generates the validator key for Chain Registry testnet.
 
 param(
-    [int]$NumValidators = 3,
+    [int]$NumValidators = 1,
     [switch]$Help
 )
 
@@ -27,15 +15,11 @@ Usage:
     .\generate-validator-keys.ps1 [OPTIONS]
 
 Options:
-    -NumValidators <n>  Number of validators to generate (default: 3)
+    -NumValidators <n>  Number of validators to generate (default: 1)
     -Help               Show this help
 
 Examples:
-    .\generate-validator-keys.ps1                    # Generate 3 validators
-    .\generate-validator-keys.ps1 -NumValidators 5   # Generate 5 validators
-
-Note: This script is for TESTNET TESTING ONLY.
-In production, run ONE validator per PC.
+    .\generate-validator-keys.ps1                    # Generate 1 validator
 "@
     exit 0
 }
