@@ -2,12 +2,7 @@
 # Chain Registry Testnet Setup Script
 # Master script to prepare the system for testnet deployment
 #
-# IMPORTANT ARCHITECTURE NOTE:
-# ============================
-# In PRODUCTION: Each validator MUST run on a separate PC
-# In TESTING: You CAN run multiple validators on one PC (this script does that)
-#
-# This script automates the remaining 20% of setup needed for testnet readiness.
+# This script sets up a single-validator testnet deployment.
 
 set -e
 
@@ -109,11 +104,11 @@ setup_validator_keys() {
         fi
     fi
     
-    log_info "Generating 3 validator keys for testing..."
+    log_info "Generating 1 validator key..."
     
     # Run key generation script
     if [ -f "$PROJECT_ROOT/scripts/generate-validator-keys.sh" ]; then
-        bash "$PROJECT_ROOT/scripts/generate-validator-keys.sh" 3
+        bash "$PROJECT_ROOT/scripts/generate-validator-keys.sh" 1
     else
         log_error "Key generation script not found"
         exit 1
@@ -181,11 +176,11 @@ deploy_contracts() {
 
 # Start validators
 start_validators() {
-    log_step "5" "Starting Validators (TEST MODE: Multiple on One PC)"
+    log_step "5" "Starting Validator"
     
     cd "$PROJECT_ROOT"
     
-    log_info "Starting Validator 1 (Primary)..."
+    log_info "Starting Validator 1..."
     docker-compose up -d node
     
     # Wait for validator 1
@@ -198,17 +193,7 @@ start_validators() {
         sleep 2
     done
     
-    # Start additional validators if configs exist
-    for i in 2 3; do
-        local compose_file="$PROJECT_ROOT/validator-keys/validator-$i-docker-compose.yml"
-        if [ -f "$compose_file" ]; then
-            log_info "Starting Validator $i..."
-            docker-compose -f "$compose_file" up -d
-            sleep 5
-        fi
-    done
-    
-    log_success "Validators started"
+    log_success "Validator started"
 }
 
 # Run integration tests
@@ -237,9 +222,7 @@ print_status() {
     echo -e "${GREEN}✓ Testnet setup is complete!${NC}"
     echo ""
     echo "Access Points:"
-    echo "  Validator 1 API:  http://localhost:8080"
-    echo "  Validator 2 API:  http://localhost:8081 (if running)"
-    echo "  Validator 3 API:  http://localhost:8082 (if running)"
+    echo "  Validator API:    http://localhost:8080"
     echo "  IPFS API:         http://localhost:5001"
     echo "  IPFS Gateway:     http://localhost:8081"
     echo "  Ethereum RPC:     http://localhost:8545"
@@ -252,11 +235,8 @@ print_status() {
     echo ""
     echo "Next Steps:"
     echo "  1. Test package publishing with: cargo run --bin creg -- publish"
-    echo "  2. Monitor validators: docker-compose logs -f"
+    echo "  2. Monitor validator: docker-compose logs -f"
     echo "  3. Access explorer: http://localhost:8080/ui/"
-    echo ""
-    echo -e "${YELLOW}REMINDER:${NC} This is a TESTING setup with multiple validators on one PC."
-    echo "For production, run ONE validator per PC only."
     echo ""
     echo "For more information, see:"
     echo "  - VALIDATOR_ARCHITECTURE.md"

@@ -7,7 +7,7 @@ Generates Ed25519 validator keys for the Chain Registry testnet and produces:
   - config/validator-set.json : The CREG_VALIDATOR_SET value
 
 Usage:
-  python scripts/generate-testnet-keys.py --nodes 10 --output .env.testnet
+  python scripts/generate-testnet-keys.py --nodes 1 --output .env.testnet
 """
 
 import argparse
@@ -83,8 +83,8 @@ def main():
         description="Generate validator keys for Chain Registry testnet"
     )
     parser.add_argument(
-        "--nodes", type=int, default=10,
-        help="Number of validator nodes to generate (default: 10)"
+        "--nodes", type=int, default=1,
+        help="Number of validator nodes to generate (default: 1)"
     )
     parser.add_argument(
         "--output", type=str, default=".env.testnet",
@@ -150,7 +150,7 @@ def main():
     print("  2. Deploy testnet:")
     print("     docker compose -f docker-compose.testnet.yml --env-file .env.testnet up -d --build")
     print("  3. Run stress test:")
-    print("     python scripts/stress-test.py --nodes 10 --packages 1000")
+    print("     python scripts/stress-test.py --nodes 1 --packages 1000")
 
 
 if __name__ == "__main__":

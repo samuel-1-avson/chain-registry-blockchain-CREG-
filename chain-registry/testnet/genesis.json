@@ -3,7 +3,7 @@
   "network": "testnet",
   "genesis_time": "2026-04-01T00:00:00Z",
   "description": "Chain Registry Testnet Genesis Configuration",
-  "architecture_note": "TESTING: Multiple validators on one PC is OK. PRODUCTION: One validator per PC ONLY.",
+  "architecture_note": "Single validator testnet configuration. One validator per deployment.",
   
   "initial_validators": [
     {
@@ -14,24 +14,6 @@
       "commission": 5,
       "is_bootnode": true,
       "multiaddr": "/ip4/127.0.0.1/tcp/9000"
-    },
-    {
-      "id": "node-2",
-      "alias": "Secondary Validator",
-      "stake": 100000000000000000000,
-      "reputation": 100,
-      "commission": 5,
-      "is_bootnode": false,
-      "multiaddr": "/ip4/127.0.0.1/tcp/9001"
-    },
-    {
-      "id": "node-3",
-      "alias": "Tertiary Validator",
-      "stake": 100000000000000000000,
-      "reputation": 100,
-      "commission": 5,
-      "is_bootnode": false,
-      "multiaddr": "/ip4/127.0.0.1/tcp/9002"
     }
   ],
   
@@ -61,7 +43,7 @@
     "slash_penalty_low": 2,
     "slash_penalty_medium": 10,
     "slash_penalty_critical": 30,
-    "max_validators": 10
+    "max_validators": 1
   },
   
   "economic_params": {
