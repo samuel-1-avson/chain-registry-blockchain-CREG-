@@ -69,7 +69,6 @@ k8s/*secret*
 /target/
 /target[0-9]*/
 /target-*/
-Cargo.lock
 *.pdb
 *.exe
 creg

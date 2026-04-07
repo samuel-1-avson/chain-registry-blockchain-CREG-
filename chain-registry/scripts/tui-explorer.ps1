@@ -17,7 +17,7 @@ $ComposeFile = switch ($Mode) {
         Write-Host ""
         Write-Host "Modes:"
         Write-Host "  dev      - Single validator development setup (default)"
-        Write-Host "  testnet  - 10-validator testnet"
+        Write-Host "  testnet  - Single-validator testnet bootstrap host"
         Write-Host "  light    - Resource-constrained light node"
         exit 1
     }

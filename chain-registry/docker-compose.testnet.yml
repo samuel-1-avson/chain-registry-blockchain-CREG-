@@ -10,6 +10,9 @@
 #   1. Generate keys: .\scripts\generate-testnet-keys.ps1 -Nodes 1
 #   2. Deploy:        docker compose --env-file .env.testnet -f docker-compose.testnet.yml up -d --build
 #   3. Monitor:       docker compose -f docker-compose.testnet.yml logs -f
+#
+# For one-node-per-computer testnets, run the shared services from this file on
+# the bootstrap machine and use docker-compose.validator.yml on each validator host.
 
 x-app-image: &app-image
   image: chain-registry-app:latest
@@ -38,8 +41,8 @@ x-node-base: &node-base
     CREG_TESTNET: "true"
     CREG_DATA_DIR: "/data"
     CREG_IS_VALIDATOR: "true"
-    CREG_ETH_RPC: "http://anvil:8545"
-    CREG_IPFS_URL: "http://ipfs:5001"
+    CREG_ETH_RPC: "${CREG_ETH_RPC:-http://anvil:8545}"
+    CREG_IPFS_URL: "${CREG_IPFS_URL:-http://ipfs:5001}"
     CREG_TOKEN_ADDR: "${TESTNET_TOKEN_ADDR:-0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9}"
     CREG_STAKING_ADDR: "${TESTNET_STAKING_ADDR:-0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9}"
     CREG_BLOCK_INTERVAL: "2"
@@ -160,8 +163,8 @@ services:
       timeout: 3s
       retries: 5
 
-  # ── Validator Nodes ──────────────────────────────────────────────────────────
-  # Single validator node for testnet.
+  # ── Validator Node ───────────────────────────────────────────────────────────
+  # Single validator node for this Docker host.
 
   node-1:
     <<: *node-base
@@ -181,7 +184,7 @@ services:
       CREG_VALIDATOR_KEY: "${NODE1_VALIDATOR_KEY}"
       CREG_LISTEN: "0.0.0.0:8080"
       CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/9000"
-      CREG_P2P_SEEDS: ""
+      CREG_P2P_SEEDS: "${CREG_P2P_SEEDS:-}"
       CREG_VALIDATOR_SET: "${VALIDATOR_SET_JSON}"
       CREG_PG_URL: "${CREG_PG_URL:-postgres://${POSTGRES_USER:-creg}:${POSTGRES_PASSWORD:-creg}@postgres:5432/${POSTGRES_DB:-chain_registry}}"
 
@@ -224,7 +227,7 @@ services:
     entrypoint: ["/app/faucet"]
     environment:
       FAUCET_PORT: "${FAUCET_PORT:-8082}"
-      FAUCET_RPC_URL: "http://anvil:8545"
+      FAUCET_RPC_URL: "${FAUCET_RPC_URL:-http://anvil:8545}"
       FAUCET_PRIVATE_KEY: "${FAUCET_PRIVATE_KEY:-0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d}"
       FAUCET_ADDRESS: "${FAUCET_ADDRESS:-0x70997970C51812dc3A010C7d01b50e0d17dc79C8}"
       FAUCET_TOKEN_CONTRACT: "${TESTNET_TOKEN_ADDR:-0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9}"

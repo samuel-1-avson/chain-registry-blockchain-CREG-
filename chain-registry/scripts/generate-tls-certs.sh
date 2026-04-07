@@ -26,7 +26,8 @@ openssl req -new -key "$CERT_DIR/server.key" \
   -out "$CERT_DIR/server.csr" \
   -subj "/C=US/ST=Test/L=Test/O=ChainRegistry/CN=$CN"
 
-# Create SAN extension file for multi-host support
+# Create SAN extension file for the single-validator Docker host and the
+# validator-host compose variant.
 cat > "$CERT_DIR/san.ext" <<EOF
 authorityKeyIdentifier=keyid,issuer
 basicConstraints=CA:FALSE
@@ -38,15 +39,8 @@ DNS.1 = $CN
 DNS.2 = localhost
 DNS.3 = *.creg-testnet.local
 DNS.4 = creg-testnet-node-1
-DNS.5 = creg-testnet-node-2
-DNS.6 = creg-testnet-node-3
-DNS.7 = creg-testnet-node-4
-DNS.8 = creg-testnet-node-5
-DNS.9 = creg-testnet-node-6
-DNS.10 = creg-testnet-node-7
-DNS.11 = creg-testnet-node-8
-DNS.12 = creg-testnet-node-9
-DNS.13 = creg-testnet-node-10
+DNS.5 = creg-validator
+DNS.6 = creg-node
 IP.1 = 127.0.0.1
 IP.2 = 0.0.0.0
 EOF

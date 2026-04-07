@@ -6,6 +6,8 @@ Generates Ed25519 validator keys for the Chain Registry testnet and produces:
   - .env.testnet         : Docker Compose environment variables
   - config/validator-set.json : The CREG_VALIDATOR_SET value
 
+The local Docker bootstrap flow runs one validator node on this machine.
+
 Usage:
   python scripts/generate-testnet-keys.py --nodes 1 --output .env.testnet
 """
@@ -84,7 +86,7 @@ def main():
     )
     parser.add_argument(
         "--nodes", type=int, default=1,
-        help="Number of validator nodes to generate (default: 1)"
+        help="Number of validator node definitions to generate (default: 1)"
     )
     parser.add_argument(
         "--output", type=str, default=".env.testnet",
@@ -98,13 +100,13 @@ def main():
 
     backends = _try_ed25519_backends()
     print(f"Using Ed25519 backend: {backends[0][0]}")
-    print(f"Generating {args.nodes} validator nodes...\n")
+    print(f"Generating validator definitions for {args.nodes} node(s)...\n")
 
     os.makedirs(args.config_dir, exist_ok=True)
 
     env_lines = [
         "# Chain Registry Testnet Environment",
-        f"# Generated for {args.nodes} validators",
+        f"# Generated for {args.nodes} validator node(s)",
         "",
         "CREG_ETH_RPC=http://localhost:8545",
         "CREG_IPFS_URL=http://localhost:5001",
@@ -147,7 +149,7 @@ def main():
 
     print("\nNext steps:")
     print(f"  1. Review {output_path}")
-    print("  2. Deploy testnet:")
+    print("  2. Deploy the bootstrap host (single validator on this machine):")
     print("     docker compose -f docker-compose.testnet.yml --env-file .env.testnet up -d --build")
     print("  3. Run stress test:")
     print("     python scripts/stress-test.py --nodes 1 --packages 1000")

@@ -31,6 +31,7 @@ Press any key to continue or Ctrl+C to cancel...
 # Configuration
 $ComposeFile = "docker-compose.yml"
 $EnvFile = ".env"
+$Script:UseDockerComposeV2 = $true
 
 # Colors
 $Red = "`e[31m"
@@ -54,6 +55,19 @@ function Write-Warning($Message) {
 
 function Write-ErrorMsg($Message) {
     Write-Host "$Red[ERROR]$NC $Message"
+}
+
+function Invoke-Compose {
+    param(
+        [Parameter(ValueFromRemainingArguments = $true)]
+        [string[]]$Args
+    )
+
+    if ($Script:UseDockerComposeV2) {
+        & docker compose -f $ComposeFile @Args
+    } else {
+        & docker-compose -f $ComposeFile @Args
+    }
 }
 
 # Check prerequisites
@@ -80,6 +94,7 @@ function Test-Prerequisites {
         try {
             $null = docker-compose --version 2>$null
             if ($LASTEXITCODE -ne 0) { throw "Docker Compose not found" }
+            $Script:UseDockerComposeV2 = $false
         } catch {
             Write-ErrorMsg "Docker Compose is not installed. Please install Docker Compose first."
             exit 1
@@ -111,7 +126,7 @@ function Initialize-Environment {
             "# Chain Registry Environment" | Out-File $EnvFile
         }
         Write-Warning "Please edit $EnvFile with your configuration before continuing"
-        Write-Warning "At minimum, set NODE1_VALIDATOR_KEY, NODE2_VALIDATOR_KEY, NODE3_VALIDATOR_KEY"
+        Write-Warning "At minimum, set NODE1_VALIDATOR_KEY"
         Write-Host "Press Enter to continue after editing .env..."
         $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
     }
@@ -132,7 +147,7 @@ function Initialize-Environment {
 function Initialize-Directories {
     Write-Info "Creating necessary directories..."
     
-    @("validators", "circuits", "models", "data/node1", "data/node2", "data/node3") | ForEach-Object {
+    @("validators", "circuits", "models", "data/node1") | ForEach-Object {
         New-Item -ItemType Directory -Force -Path $_ | Out-Null
     }
     
@@ -149,7 +164,7 @@ function Initialize-Directories {
 function Build-AndDeploy {
     Write-Info "Building Docker images..."
     
-    docker-compose -f $ComposeFile build --parallel
+    Invoke-Compose build --parallel
     if ($LASTEXITCODE -ne 0) {
         Write-ErrorMsg "Docker build failed"
         exit 1
@@ -159,7 +174,7 @@ function Build-AndDeploy {
     
     Write-Info "Starting services..."
     
-    docker-compose -f $ComposeFile up -d
+    Invoke-Compose up -d
     if ($LASTEXITCODE -ne 0) {
         Write-ErrorMsg "Failed to start services"
         exit 1
@@ -237,14 +252,14 @@ function Test-Deployment {
     Write-Info "Verifying deployment..."
     
     # Check all containers are running
-    $running = (docker-compose ps -q | Measure-Object).Count
-    $expected = 6  # ipfs, anvil, deploy-contracts, node-1, node-2, node-3
+    $running = (Invoke-Compose ps -q | Measure-Object).Count
+    $expected = 4  # ipfs, anvil, deploy-contracts, node
     
-    if ($running -ge 5) {
+    if ($running -ge $expected) {
         Write-Success "All required containers are running ($running/$expected)"
     } else {
         Write-Warning "Some containers may not be running ($running/$expected)"
-        docker-compose ps
+        Invoke-Compose ps
     }
     
     # Test health endpoints
@@ -261,11 +276,11 @@ function Test-Deployment {
     
     # Check contract deployment
     Write-Info "Checking contract deployment status..."
-    $deployLog = docker-compose logs deploy-contracts 2>&1
-    if ($deployLog -match "Contracts deployed") {
+    $deployStatus = Invoke-Compose ps --all deploy-contracts 2>&1
+    if ($deployStatus -match "exited \(0\)" -or $deployStatus -match "running") {
         Write-Success "Contracts deployed successfully"
     } else {
-        Write-Warning "Contract deployment status unclear - check logs with: docker-compose logs deploy-contracts"
+        Write-Warning "Contract deployment status unclear - check logs with: docker compose -f $ComposeFile logs deploy-contracts"
     }
     
     Write-Success "Deployment verification complete"
@@ -280,16 +295,16 @@ function Show-Status {
     Write-Host ""
     
     Write-Host "Services:"
-    docker-compose ps
+    Invoke-Compose ps
     
     Write-Host ""
     Write-Host "Access URLs:"
-    Write-Host "  - Node 1 API:     http://localhost:8080"
-    Write-Host "  - Node 2 API:     http://localhost:8082"
-    Write-Host "  - Node 3 API:     http://localhost:8083"
+    Write-Host "  - Node API:       http://localhost:8080"
+    Write-Host "  - Explorer UI:    http://localhost:8080/ui/"
     Write-Host "  - IPFS API:       http://localhost:5001"
     Write-Host "  - IPFS Gateway:   http://localhost:8081"
     Write-Host "  - Ethereum RPC:   http://localhost:8545"
+    Write-Host "  - Faucet:         http://localhost:8082 (start with --profile testnet)"
     Write-Host ""
     
     Write-Host "Features Enabled:"
@@ -304,9 +319,9 @@ function Show-Status {
     Write-Host ""
     
     Write-Host "Commands:"
-    Write-Host "  View logs:        docker-compose logs -f"
-    Write-Host "  Stop services:    docker-compose down"
-    Write-Host "  CLI tool:         docker-compose run --rm cli --help"
+    Write-Host "  View logs:        docker compose -f $ComposeFile logs -f"
+    Write-Host "  Stop services:    docker compose -f $ComposeFile down"
+    Write-Host "  CLI tool:         docker compose -f $ComposeFile run --rm cli --help"
     Write-Host ""
     
     Write-Host "=========================================="

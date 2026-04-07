@@ -91,34 +91,6 @@ services:
       - faucet
       - testnet
 
-  # ── Minimal Node (PRE-BUILT - No ML) ───────────────────────────────────────
-  node-minimal:
-    image: ghcr.io/${GITHUB_REPOSITORY_OWNER:-chain-registry}/chain-registry:minimal
-    container_name: creg-node-minimal
-    pull_policy: always
-    environment:
-      CREG_NODE_ID: "node-minimal"
-      CREG_IS_VALIDATOR: "true"
-      CREG_VALIDATOR_KEY: "${NODE1_VALIDATOR_KEY}"
-      CREG_LISTEN: "0.0.0.0:8080"
-      CREG_DATA_DIR: "/data"
-      CREG_ETH_RPC: "http://anvil:8545"
-      CREG_SINGLE_VALIDATOR_MODE: "true"
-      CREG_DEV_SANDBOX: "true"
-      CREG_ML_ENABLED: "false"
-      CREG_ZK_ENABLED: "false"
-      RUST_LOG: "info"
-    ports:
-      - "8080:8080"
-    volumes:
-      - node-data:/data
-    depends_on:
-      - ipfs
-      - anvil
-    profiles:
-      - minimal
-    restart: unless-stopped
-
 volumes:
   ipfs-data:
   anvil-data:

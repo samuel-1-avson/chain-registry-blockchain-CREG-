@@ -5,7 +5,7 @@
 FROM node:20-slim AS frontend-builder
 WORKDIR /explorer
 COPY explorer/package*.json ./
-RUN npm ci --silent
+RUN if [ -f package-lock.json ]; then npm ci --silent; else npm install --silent --no-fund --no-audit; fi
 COPY explorer/ ./
 RUN npm run build
 
@@ -28,6 +28,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libprotobuf-dev \
     git \
     && rm -rf /var/lib/apt/lists/*
+
+ENV CARGO_HOME=/usr/local/cargo
+ENV RUSTUP_HOME=/usr/local/rustup
+ENV PATH="/usr/local/cargo/bin:$PATH"
+ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
+
+RUN mkdir -p "$CARGO_HOME" && \
+    printf '[net]\nretry = 3\ngit-fetch-with-cli = true\n\n[registries.crates-io]\nprotocol = "sparse"\n' > "$CARGO_HOME/config.toml"
 
 WORKDIR /build
 
@@ -60,6 +68,7 @@ RUN mkdir -p crates/common/src && echo "pub fn _stub() {}" > crates/common/src/l
     mkdir -p crates/faucet/src && echo "fn main() {}" > crates/faucet/src/main.rs
 
 # Pre-build dependencies (cached layer)
+RUN cargo fetch || (sleep 5 && cargo fetch) || (sleep 10 && cargo fetch)
 RUN cargo build --release --package chain-registry-node 2>/dev/null || true
 
 # Copy real source code
@@ -96,11 +105,11 @@ COPY --from=builder /build/target/release/creg /app/creg
 COPY --from=builder /build/target/release/faucet /app/faucet
 
 # Copy WASM validators and circuits
-COPY --from=builder /build/crates/cli/validators /app/validators 2>/dev/null || true
-COPY --from=builder /build/circuits /app/circuits 2>/dev/null || true
-COPY --from=builder /build/models /app/models 2>/dev/null || true
-COPY --from=builder /build/config/sandbox /app/config/sandbox 2>/dev/null || true
-COPY --from=builder /build/rules /app/rules 2>/dev/null || true
+COPY --from=builder /build/crates/cli/validators /app/validators
+COPY --from=builder /build/circuits /app/circuits
+COPY --from=builder /build/models /app/models
+COPY --from=builder /build/config/sandbox /app/config/sandbox
+COPY --from=builder /build/rules /app/rules
 
 # Create non-root user
 RUN useradd -r -s /bin/false creg && \

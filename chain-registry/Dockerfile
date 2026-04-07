@@ -5,7 +5,7 @@
 FROM node:20-slim AS frontend-builder
 WORKDIR /explorer
 COPY explorer/package*.json ./
-RUN npm ci --silent
+RUN if [ -f package-lock.json ]; then npm ci --silent; else npm install --silent --no-fund --no-audit; fi
 COPY explorer/ ./
 RUN npm run build
 
@@ -45,6 +45,9 @@ ENV CARGO_HOME=/usr/local/cargo
 ENV RUSTUP_HOME=/usr/local/rustup
 ENV PATH="/usr/local/cargo/bin:$PATH"
 ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
+
+RUN mkdir -p "$CARGO_HOME" && \
+  printf '[net]\nretry = 3\ngit-fetch-with-cli = true\n\n[registries.crates-io]\nprotocol = "sparse"\n' > "$CARGO_HOME/config.toml"
 
 RUN cargo --version && rustc --version
 
@@ -108,6 +111,10 @@ RUN mkdir -p crates/ipfs-pinner/src      && echo "pub fn _stub() {}" > crates/ip
 
 # Faucet stub
 RUN mkdir -p crates/faucet/src           && echo "fn main() {}"      > crates/faucet/src/main.rs
+
+# Pre-fetch dependencies with retries so transient registry DNS issues do not
+# fail the image build early.
+RUN cargo fetch || (sleep 5 && cargo fetch) || (sleep 10 && cargo fetch)
 
 # Pre-build dependencies (cached layer)
 RUN cargo build --release --package chain-registry-node || true

@@ -16,6 +16,7 @@ NC='\033[0m' # No Color
 # Configuration
 COMPOSE_FILE="docker-compose.yml"
 ENV_FILE=".env"
+COMPOSE_CMD=(docker compose)
 
 # Functions
 log_info() {
@@ -34,6 +35,10 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+compose() {
+    "${COMPOSE_CMD[@]}" -f "$COMPOSE_FILE" "$@"
+}
+
 # Check prerequisites
 check_prerequisites() {
     log_info "Checking prerequisites..."
@@ -43,7 +48,11 @@ check_prerequisites() {
         exit 1
     fi
     
-    if ! command -v docker-compose &> /dev/null; then
+    if docker compose version &> /dev/null; then
+        COMPOSE_CMD=(docker compose)
+    elif command -v docker-compose &> /dev/null; then
+        COMPOSE_CMD=(docker-compose)
+    else
         log_error "Docker Compose is not installed. Please install Docker Compose first."
         exit 1
     fi
@@ -65,7 +74,7 @@ setup_environment() {
         log_info "Creating .env file from example..."
         cp .env.example "$ENV_FILE"
         log_warning "Please edit $ENV_FILE with your configuration before continuing"
-        log_warning "At minimum, set NODE1_VALIDATOR_KEY, NODE2_VALIDATOR_KEY, NODE3_VALIDATOR_KEY"
+        log_warning "At minimum, set NODE1_VALIDATOR_KEY"
         read -p "Press Enter to continue after editing .env..."
     fi
     
@@ -85,8 +94,6 @@ create_directories() {
     mkdir -p circuits
     mkdir -p models
     mkdir -p data/node1
-    mkdir -p data/node2
-    mkdir -p data/node3
     
     # Create dummy WASM validator if none exists
     if [ ! -f "validators/dummy.wasm" ]; then
@@ -101,13 +108,13 @@ create_directories() {
 build_and_deploy() {
     log_info "Building Docker images..."
     
-    docker-compose -f "$COMPOSE_FILE" build --parallel
+    compose build --parallel
     
     log_success "Docker images built"
     
     log_info "Starting services..."
     
-    docker-compose -f "$COMPOSE_FILE" up -d
+    compose up -d
     
     log_success "Services started"
 }
@@ -156,14 +163,14 @@ verify_deployment() {
     log_info "Verifying deployment..."
     
     # Check all containers are running
-    RUNNING=$(docker-compose ps -q | wc -l)
-    EXPECTED=6  # ipfs, anvil, deploy-contracts, node-1, node-2, node-3
+    RUNNING=$(compose ps -q | wc -l)
+    EXPECTED=4  # ipfs, anvil, deploy-contracts, node
     
-    if [ "$RUNNING" -ge 5 ]; then
-        log_success "All required containers are running ($RUNNING/6)"
+    if [ "$RUNNING" -ge "$EXPECTED" ]; then
+        log_success "All required containers are running ($RUNNING/$EXPECTED)"
     else
-        log_warning "Some containers may not be running ($RUNNING/6)"
-        docker-compose ps
+        log_warning "Some containers may not be running ($RUNNING/$EXPECTED)"
+        compose ps
     fi
     
     # Test health endpoints
@@ -177,10 +184,10 @@ verify_deployment() {
     
     # Check contract deployment
     log_info "Checking contract deployment status..."
-    if docker-compose logs deploy-contracts | grep -q "Contracts deployed"; then
+    if compose ps --all deploy-contracts | grep -Eq 'exited \(0\)|running'; then
         log_success "Contracts deployed successfully"
     else
-        log_warning "Contract deployment status unclear - check logs with: docker-compose logs deploy-contracts"
+        log_warning "Contract deployment status unclear - check logs with: docker compose -f $COMPOSE_FILE logs deploy-contracts"
     fi
     
     log_success "Deployment verification complete"
@@ -195,16 +202,16 @@ print_status() {
     echo ""
     
     echo "Services:"
-    docker-compose ps
+    compose ps
     
     echo ""
     echo "Access URLs:"
-    echo "  - Node 1 API:     http://localhost:8080"
-    echo "  - Node 2 API:     http://localhost:8082"
-    echo "  - Node 3 API:     http://localhost:8083"
+    echo "  - Node API:       http://localhost:8080"
+    echo "  - Explorer UI:    http://localhost:8080/ui/"
     echo "  - IPFS API:       http://localhost:5001"
     echo "  - IPFS Gateway:   http://localhost:8081"
     echo "  - Ethereum RPC:   http://localhost:8545"
+    echo "  - Faucet:         http://localhost:8082 (start with --profile testnet)"
     echo ""
     
     echo "Features Enabled:"
@@ -219,9 +226,9 @@ print_status() {
     echo ""
     
     echo "Commands:"
-    echo "  View logs:        docker-compose logs -f"
-    echo "  Stop services:    docker-compose down"
-    echo "  CLI tool:         docker-compose run --rm cli --help"
+    echo "  View logs:        docker compose -f $COMPOSE_FILE logs -f"
+    echo "  Stop services:    docker compose -f $COMPOSE_FILE down"
+    echo "  CLI tool:         docker compose -f $COMPOSE_FILE run --rm cli --help"
     echo ""
     
     echo "=========================================="

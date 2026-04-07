@@ -6,10 +6,15 @@ FROM node:20-slim AS frontend-builder
 WORKDIR /explorer
 COPY explorer/package*.json ./
 
-# Use npm ci with retry
-RUN npm ci --silent --maxsockets=1 || \
-    (sleep 5 && npm ci --silent --maxsockets=1) || \
-    (sleep 10 && npm ci --silent --maxsockets=1)
+# Prefer lockfile-based installs, but fall back to npm install when the repo
+# does not include explorer/package-lock.json.
+RUN if [ -f package-lock.json ]; then \
+            npm ci --silent --maxsockets=1 || \
+            (sleep 5 && npm ci --silent --maxsockets=1) || \
+            (sleep 10 && npm ci --silent --maxsockets=1); \
+        else \
+            npm install --silent --no-fund --no-audit --maxsockets=1; \
+        fi
 
 COPY explorer/ ./
 RUN npm run build

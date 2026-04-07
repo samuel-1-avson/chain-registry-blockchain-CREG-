@@ -23,7 +23,7 @@ case "$MODE" in
     echo ""
     echo "Modes:"
     echo "  dev      - Single validator development setup (default)"
-    echo "  testnet  - 10-validator testnet"
+    echo "  testnet  - Single-validator testnet bootstrap host"
     echo "  light    - Resource-constrained light node"
     exit 1
     ;;

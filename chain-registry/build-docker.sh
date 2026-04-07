@@ -12,6 +12,12 @@ NC='\033[0m' # No Color
 echo -e "${GREEN}Chain Registry Docker Build Script${NC}"
 echo "===================================="
 
+COMPOSE_CMD=(docker compose)
+
+compose() {
+    "${COMPOSE_CMD[@]}" "$@"
+}
+
 # Function to build with retry
 build_with_retry() {
     local max_attempts=3
@@ -19,8 +25,8 @@ build_with_retry() {
     
     while [ $attempt -le $max_attempts ]; do
         echo -e "${YELLOW}Build attempt $attempt of $max_attempts...${NC}"
-        
-        if docker-compose build --progress=plain "$@"; then
+
+        if compose build --progress=plain "$@"; then
             echo -e "${GREEN}Build successful!${NC}"
             return 0
         fi
@@ -40,7 +46,11 @@ if ! command -v docker &> /dev/null; then
     exit 1
 fi
 
-if ! command -v docker-compose &> /dev/null; then
+if docker compose version &> /dev/null; then
+    COMPOSE_CMD=(docker compose)
+elif command -v docker-compose &> /dev/null; then
+    COMPOSE_CMD=(docker-compose)
+else
     echo -e "${RED}Error: docker-compose is not installed${NC}"
     exit 1
 fi
@@ -105,7 +115,7 @@ docker pull postgres:15-alpine || true
 docker pull nginx:alpine || true
 
 # Build command
-BUILD_CMD="docker-compose $PROFILE build"
+BUILD_CMD="${COMPOSE_CMD[*]} $PROFILE build"
 
 if [ -n "$NO_CACHE" ]; then
     BUILD_CMD="$BUILD_CMD --no-cache"
@@ -128,9 +138,9 @@ if build_with_retry $PROFILE $NO_CACHE $SERVICE; then
     echo -e "${GREEN}====================================${NC}"
     echo ""
     echo "Next steps:"
-    echo "  1. Start services: docker-compose up -d"
-    echo "  2. Check status: docker-compose ps"
-    echo "  3. View logs: docker-compose logs -f"
+    echo "  1. Start services: docker compose up -d"
+    echo "  2. Check status: docker compose ps"
+    echo "  3. View logs: docker compose logs -f"
     echo ""
     exit 0
 else

@@ -78,8 +78,6 @@ target/
 **/target/
 **/target[0-9]*/
 target-*/
-Cargo.lock
-**/Cargo.lock
 *.pdb
 *.exe
 creg

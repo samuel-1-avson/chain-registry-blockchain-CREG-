@@ -381,7 +381,7 @@ def print_report(report: StressReport) -> None:
 def main():
     global args
     parser = argparse.ArgumentParser(description="Chain Registry testnet stress test")
-    parser.add_argument("--nodes", type=int, default=10, help="Number of validator nodes")
+    parser.add_argument("--nodes", type=int, default=1, help="Number of validator nodes expected in the testnet")
     parser.add_argument("--packages", type=int, default=1000, help="Total packages to publish")
     parser.add_argument("--concurrency", type=int, default=20, help="Concurrent publish tasks")
     parser.add_argument("--timeout", type=float, default=60.0, help="Max seconds to wait for verification")

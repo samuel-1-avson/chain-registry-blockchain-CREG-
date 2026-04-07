@@ -44,6 +44,7 @@ $NC = "`e[0m"
 $script:TestsPassed = 0
 $script:TestsFailed = 0
 $script:TestsWarned = 0
+$script:UseDockerComposeV2 = $true
 
 # Logging functions
 function Write-Info($Message) {
@@ -63,6 +64,19 @@ function Write-Error($Message) {
 function Write-Warn($Message) {
     Write-Host "$Yellow[WARN]$NC $Message"
     $script:TestsWarned++
+}
+
+function Invoke-Compose {
+    param(
+        [Parameter(ValueFromRemainingArguments = $true)]
+        [string[]]$Args
+    )
+
+    if ($script:UseDockerComposeV2) {
+        & docker compose @Args
+    } else {
+        & docker-compose @Args
+    }
 }
 
 # Test 1: Check Docker is installed
@@ -90,6 +104,7 @@ function Test-ComposeInstalled {
     $composeV2 = docker compose version 2>$null
     if ($LASTEXITCODE -eq 0 -and $composeV2) {
         Write-Success "Docker Compose v2 installed: $composeV2"
+        $script:UseDockerComposeV2 = $true
         return
     }
     
@@ -98,6 +113,7 @@ function Test-ComposeInstalled {
         $composeVersion = docker-compose --version 2>$null
         if ($LASTEXITCODE -eq 0 -and $composeVersion) {
             Write-Success "Docker Compose v1 installed: $composeVersion"
+            $script:UseDockerComposeV2 = $false
         } else {
             Write-Error "Docker Compose not installed"
             exit 1
@@ -112,7 +128,7 @@ function Test-ComposeInstalled {
 function Test-DockerDaemon {
     Write-Info "Testing Docker daemon..."
     try {
-        $dockerInfo = docker info 2>$null
+        $null = docker info 2>$null
         if ($LASTEXITCODE -eq 0) {
             Write-Success "Docker daemon is running"
         } else {
@@ -129,7 +145,7 @@ function Test-DockerDaemon {
 function Test-ComposeValid {
     Write-Info "Validating docker-compose.yml..."
     try {
-        $null = docker-compose config 2>$null
+        $null = Invoke-Compose config 2>$null
         if ($LASTEXITCODE -eq 0) {
             Write-Success "docker-compose.yml is valid"
         } else {
@@ -144,7 +160,7 @@ function Test-ComposeValid {
 function Test-PrebuiltValid {
     Write-Info "Validating docker-compose.prebuilt.yml..."
     try {
-        $null = docker-compose -f docker-compose.prebuilt.yml config 2>$null
+        $null = Invoke-Compose -f docker-compose.prebuilt.yml config 2>$null
         if ($LASTEXITCODE -eq 0) {
             Write-Success "docker-compose.prebuilt.yml is valid"
         } else {
@@ -152,6 +168,41 @@ function Test-PrebuiltValid {
         }
     } catch {
         Write-Error "docker-compose.prebuilt.yml has errors"
+    }
+}
+
+# Test 5b: Validate docker-compose.testnet.yml
+function Test-TestnetValid {
+    Write-Info "Validating docker-compose.testnet.yml..."
+    try {
+        $null = Invoke-Compose --env-file .env.testnet -f docker-compose.testnet.yml config 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Success "docker-compose.testnet.yml is valid"
+        } else {
+            Write-Error "docker-compose.testnet.yml has errors"
+        }
+    } catch {
+        Write-Error "docker-compose.testnet.yml has errors"
+    }
+}
+
+# Test 5c: Validate docker-compose.validator.yml
+function Test-ValidatorComposeValid {
+    Write-Info "Validating docker-compose.validator.yml..."
+    try {
+        $env:CREG_VALIDATOR_KEY = '0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+        $env:CREG_ETH_RPC = 'http://127.0.0.1:8545'
+        $env:CREG_IPFS_URL = 'http://127.0.0.1:5001'
+        $null = Invoke-Compose -f docker-compose.validator.yml config 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Success "docker-compose.validator.yml is valid"
+        } else {
+            Write-Error "docker-compose.validator.yml has errors"
+        }
+    } catch {
+        Write-Error "docker-compose.validator.yml has errors"
+    } finally {
+        Remove-Item Env:CREG_VALIDATOR_KEY,Env:CREG_ETH_RPC,Env:CREG_IPFS_URL -ErrorAction SilentlyContinue
     }
 }
 
@@ -184,7 +235,7 @@ function Test-BuildMinimal {
             }
             
             # Test running
-            $versionCheck = docker run --rm creg-test:minimal --version 2>&1
+            $null = docker run --rm creg-test:minimal --version 2>&1
             if ($LASTEXITCODE -eq 0) {
                 Write-Success "Minimal image runs successfully"
             } else {
@@ -211,7 +262,7 @@ function Test-BuildMinimal {
 function Test-PrebuiltDryRun {
     Write-Info "Testing pre-built compose (dry run)..."
     try {
-        $null = docker-compose -f docker-compose.prebuilt.yml up --dry-run 2>$null
+        $null = Invoke-Compose -f docker-compose.prebuilt.yml up --dry-run 2>$null
         if ($LASTEXITCODE -eq 0) {
             Write-Success "Pre-built compose configuration is valid"
         } else {
@@ -229,8 +280,11 @@ function Test-RequiredFiles {
     $requiredFiles = @(
         "Dockerfile",
         "Dockerfile.minimal",
+        "docker-compose.testnet.yml",
+        "docker-compose.validator.yml",
         "docker-compose.yml",
         "docker-compose.prebuilt.yml",
+        "Cargo.lock",
         "Cargo.toml"
     )
     
@@ -248,15 +302,55 @@ function Test-ContextSize {
     Write-Info "Testing Docker build context size..."
     
     try {
-        # Calculate directory size
-        $size = (Get-ChildItem -Recurse -ErrorAction SilentlyContinue | 
-                 Measure-Object -Property Length -Sum).Sum
+        $contextPaths = @(
+            'Cargo.toml',
+            'Cargo.lock',
+            'Dockerfile',
+            'Dockerfile.minimal',
+            'Dockerfile.optimized',
+            'Dockerfile.windows',
+            'docker-compose.yml',
+            'docker-compose.prebuilt.yml',
+            'docker-compose.testnet.yml',
+            'docker-compose.validator.yml',
+            'crates',
+            'explorer',
+            'circuits',
+            'contracts',
+            'models',
+            'config',
+            'rules',
+            'testnet'
+        )
+
+        $size = 0
+        foreach ($path in $contextPaths) {
+            if (-not (Test-Path $path)) {
+                continue
+            }
+
+            $item = Get-Item $path -ErrorAction SilentlyContinue
+            if (-not $item) {
+                continue
+            }
+
+            if ($item.PSIsContainer) {
+                $pathSize = (Get-ChildItem $path -File -Recurse -ErrorAction SilentlyContinue |
+                    Measure-Object -Property Length -Sum).Sum
+                if ($pathSize) {
+                    $size += $pathSize
+                }
+            } else {
+                $size += $item.Length
+            }
+        }
+
         $sizeMB = [math]::Round($size / 1MB, 2)
         
         if ($sizeMB -lt 500) {
-            Write-Success "Build context is reasonable: ${sizeMB}MB"
+            Write-Success "Build context estimate is reasonable: ${sizeMB}MB"
         } else {
-            Write-Warn "Build context is large: ${sizeMB}MB (check .dockerignore)"
+            Write-Warn "Build context estimate is large: ${sizeMB}MB (check .dockerignore)"
         }
     } catch {
         Write-Warn "Could not calculate build context size"
@@ -339,7 +433,10 @@ $Blue╚════════════════════════
 "@
     
     # Change to script directory
-    $scriptPath = Split-Path -Parent $MyInvocation.MyCommand.Path
+    $scriptPath = $null
+    if ($MyInvocation.MyCommand.Path) {
+        $scriptPath = Split-Path -Parent $MyInvocation.MyCommand.Path
+    }
     if ($scriptPath) {
         Set-Location $scriptPath
     }
@@ -352,6 +449,8 @@ $Blue╚════════════════════════
     Test-DockerIgnore
     Test-ComposeValid
     Test-PrebuiltValid
+    Test-TestnetValid
+    Test-ValidatorComposeValid
     Test-ContextSize
     Test-CommonIssues
     Test-PrebuiltDryRun
@@ -384,8 +483,8 @@ $Blue╚════════════════════════
         Write-Host "$Green✓ All critical tests passed! Docker setup looks good.$NC"
         Write-Host ""
         Write-Host "Next steps:"
-        Write-Host "  1. docker-compose -f docker-compose.prebuilt.yml up -d"
-        Write-Host "  2. Or: docker build -f Dockerfile.minimal -t creg:minimal ."
+        Write-Host "  1. docker compose --env-file .env.testnet -f docker-compose.testnet.yml up -d --build"
+        Write-Host "  2. Or: docker compose --env-file validator.env -f docker-compose.validator.yml up -d --build"
         exit 0
     } else {
         Write-Host "$Red✗ Some tests failed. Please review the errors above.$NC"

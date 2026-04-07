@@ -136,48 +136,57 @@ create_validator_configs() {
         # Calculate gRPC port (50051 + i - 1)
         GRPC_PORT=$((50051 + i - 1))
         
-        cat > "$CONFIG_FILE" << EOF
+                cat > "$CONFIG_FILE" << EOF
 # Validator $i Docker Compose
 # Generated automatically - DO NOT EDIT MANUALLY
+# Run this file on exactly one validator host.
 
 version: "3.9"
 
 services:
-  node-$i:
-    build:
-      context: ..
-      dockerfile: Dockerfile.minimal
-    container_name: creg-validator-$i
-    environment:
-      CREG_NODE_ID: "node-$i"
-      CREG_IS_VALIDATOR: "true"
-      CREG_VALIDATOR_KEY: "\${NODE${i}_VALIDATOR_KEY}"
-      CREG_LISTEN: "0.0.0.0:$API_PORT"
-      CREG_API_PORT: "$API_PORT"
-      CREG_GRPC_PORT: "$GRPC_PORT"
-      CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/$P2P_PORT"
-      CREG_DATA_DIR: "/data"
-      CREG_SINGLE_VALIDATOR_MODE: "false"
-      CREG_DEV_SANDBOX: "true"
-      CREG_ETH_RPC: "http://anvil:8545"
-      RUST_LOG: "info,chain_registry_node=debug"
-    ports:
-      - "$API_PORT:$API_PORT"
-      - "$GRPC_PORT:$GRPC_PORT"
-      - "$P2P_PORT:$P2P_PORT"
-    volumes:
-      - ../data/node-$i:/data
-    networks:
-      - creg-network
-    depends_on:
-      - anvil
-      - ipfs
-    restart: unless-stopped
-
-networks:
-  creg-network:
-    external: true
-    name: chain-registry_creg-network
+    node-$i:
+        build:
+            context: ..
+            dockerfile: \${CREG_DOCKERFILE:-Dockerfile}
+        container_name: creg-validator-$i
+        environment:
+            CREG_NODE_ID: "node-$i"
+            CREG_IS_VALIDATOR: "true"
+            CREG_VALIDATOR_KEY: "\${NODE${i}_VALIDATOR_KEY}"
+            CREG_LISTEN: "0.0.0.0:8080"
+            CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/9000"
+            CREG_DATA_DIR: "/data"
+            CREG_SINGLE_VALIDATOR_MODE: "\${CREG_SINGLE_VALIDATOR_MODE:-false}"
+            CREG_DEV_SANDBOX: "\${CREG_DEV_SANDBOX:-false}"
+            CREG_ETH_RPC: "\${CREG_ETH_RPC:?set CREG_ETH_RPC to the shared Anvil RPC URL}"
+            CREG_IPFS_URL: "\${CREG_IPFS_URL:?set CREG_IPFS_URL to the shared IPFS API URL}"
+            CREG_PG_URL: "\${CREG_PG_URL:-}"
+            CREG_P2P_SEEDS: "\${CREG_P2P_SEEDS:-}"
+            CREG_VALIDATOR_SET: "\${VALIDATOR_SET_JSON:-}"
+            CREG_TOKEN_ADDR: "\${TESTNET_TOKEN_ADDR:-0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9}"
+            CREG_STAKING_ADDR: "\${TESTNET_STAKING_ADDR:-0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9}"
+            CREG_REGISTRY_ADDR: "\${TESTNET_REGISTRY_ADDR:-0x0165878A594ca255338adfa4d48449f69242Eb8F}"
+            CREG_ZK_ENABLED: "\${CREG_ZK_ENABLED:-true}"
+            CREG_ML_ENABLED: "\${CREG_ML_ENABLED:-true}"
+            CREG_ML_MODEL_PATH: "/app/models"
+            CREG_WASM_ENABLED: "\${CREG_WASM_ENABLED:-true}"
+            CREG_WASM_VALIDATORS_PATH: "/app/validators"
+            CREG_TLS_CERT: "\${CREG_TLS_CERT:-/app/certs/server.crt}"
+            CREG_TLS_KEY: "\${CREG_TLS_KEY:-/app/certs/server.key}"
+            RUST_LOG: "info,chain_registry_node=debug"
+        ports:
+            - "$API_PORT:8080"
+            - "$GRPC_PORT:50051"
+            - "$P2P_PORT:9000"
+        volumes:
+            - ../data/node-$i:/data
+            - ../circuits:/app/circuits:ro
+            - ../validators:/app/validators:ro
+            - ../models:/app/models:ro
+            - ../config/sandbox:/app/config/sandbox:ro
+            - ../testnet/certs:/app/certs:ro
+            - /var/run/docker.sock:/var/run/docker.sock
+        restart: unless-stopped
 EOF
         
         echo -e "${GREEN}[OK]${NC} Validator $i: Config created (API: $API_PORT, P2P: $P2P_PORT)"
@@ -196,11 +205,12 @@ print_summary() {
     echo -e "  ${GREEN}•${NC} $KEYS_DIR/validator-{1..$NUM_VALIDATORS}-docker-compose.yml"
     echo ""
     echo -e "Next steps:"
-    echo -e "  1. Review ${YELLOW}.env${NC} file"
-    echo -e "  2. Start infrastructure: ${YELLOW}docker-compose up -d anvil ipfs${NC}"
-    echo -e "  3. Start validator 1:   ${YELLOW}docker-compose up -d node${NC}"
+    echo -e "  1. Start shared services on the bootstrap host: ${YELLOW}docker compose --env-file .env.testnet -f docker-compose.testnet.yml up -d ipfs postgres anvil deploy-contracts faucet web-explorer${NC}"
+    echo -e "  2. Copy ${YELLOW}validator-1.env${NC} and ${YELLOW}validator-1-docker-compose.yml${NC} to validator host 1"
+    echo -e "  3. Set ${YELLOW}CREG_ETH_RPC${NC}, ${YELLOW}CREG_IPFS_URL${NC}, ${YELLOW}CREG_PG_URL${NC}, and ${YELLOW}CREG_P2P_SEEDS${NC} in that env file"
+    echo -e "  4. Start validator 1: ${YELLOW}docker compose --env-file validator-keys/validator-1.env -f validator-keys/validator-1-docker-compose.yml up -d --build${NC}"
     if [ $NUM_VALIDATORS -gt 1 ]; then
-        echo -e "  4. Start other validators using their compose files"
+        echo -e "  5. Start other validators using their generated env + compose pairs"
     fi
     echo ""
     echo -e "${YELLOW}REMINDER:${NC} This multi-validator setup is for TESTING ONLY"

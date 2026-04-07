@@ -1,7 +1,7 @@
 # Docker build script with retry logic and network optimizations (PowerShell version)
 
 param(
-    [string]$Profile,
+    [string]$BuildPreset,
     [switch]$NoCache,
     [string]$Service,
     [switch]$Help
@@ -16,14 +16,14 @@ Usage:
     .\build-docker.ps1 [OPTIONS]
 
 Options:
-    -Profile <name>     Use specific profile (testnet, faucet, etc.)
+    -BuildPreset <name> Use specific profile (testnet, faucet, etc.)
     -NoCache            Build without cache
     -Service <name>     Build specific service only
     -Help               Show this help
 
 Examples:
     .\build-docker.ps1                           # Build default services
-    .\build-docker.ps1 -Profile testnet          # Build with testnet profile
+    .\build-docker.ps1 -BuildPreset testnet      # Build with testnet profile
     .\build-docker.ps1 -NoCache                  # Clean build
     .\build-docker.ps1 -Service node             # Build only node service
 "@
@@ -39,6 +39,21 @@ $NC = "`e[0m"
 Write-Host "$Green Chain Registry Docker Build Script $NC"
 Write-Host "===================================="
 
+$script:UseDockerComposeV2 = $true
+
+function Invoke-Compose {
+    param(
+        [Parameter(ValueFromRemainingArguments = $true)]
+        [string[]]$Args
+    )
+
+    if ($script:UseDockerComposeV2) {
+        & docker compose @Args
+    } else {
+        & docker-compose @Args
+    }
+}
+
 # Function to build with retry
 function Build-WithRetry {
     param(
@@ -50,13 +65,8 @@ function Build-WithRetry {
     
     while ($attempt -le $maxAttempts) {
         Write-Host "$Yellow Build attempt $attempt of $maxAttempts...$NC"
-        
-        $buildCmd = "docker-compose build --progress=plain"
-        if ($BuildArgs) {
-            $buildCmd += " $BuildArgs"
-        }
-        
-        Invoke-Expression $buildCmd
+
+        Invoke-Compose build --progress=plain @BuildArgs
         if ($LASTEXITCODE -eq 0) {
             Write-Host "$Green Build successful!$NC"
             return $true
@@ -97,10 +107,14 @@ if (-not $composeV2 -and -not (Test-CommandExists "docker-compose")) {
     exit 1
 }
 
+if (-not $composeV2) {
+    $script:UseDockerComposeV2 = $false
+}
+
 # Show build info
 Write-Host ""
 Write-Host "Build Configuration:"
-Write-Host "  Profile: $(if ($Profile) { $Profile } else { 'default' })"
+Write-Host "  Profile: $(if ($BuildPreset) { $BuildPreset } else { 'default' })"
 Write-Host "  No Cache: $NoCache"
 Write-Host "  Service: $(if ($Service) { $Service } else { 'all' })"
 Write-Host ""
@@ -117,8 +131,8 @@ docker pull nginx:alpine 2>$null
 # Build command arguments
 $buildArgs = @()
 
-if ($Profile) {
-    $buildArgs += "--profile $Profile"
+if ($BuildPreset) {
+    $buildArgs += "--profile $BuildPreset"
 }
 
 if ($NoCache) {
@@ -131,7 +145,7 @@ if ($Service) {
 
 Write-Host ""
 Write-Host "$Yellow Starting build...$NC"
-Write-Host "Command: docker-compose build $buildArgs"
+Write-Host "Command: $(if ($script:UseDockerComposeV2) { 'docker compose' } else { 'docker-compose' }) build $buildArgs"
 Write-Host ""
 
 # Run build with retry
@@ -144,9 +158,9 @@ if ($buildSuccess) {
     Write-Host "$Green ====================================$NC"
     Write-Host ""
     Write-Host "Next steps:"
-    Write-Host "  1. Start services: docker-compose up -d"
-    Write-Host "  2. Check status: docker-compose ps"
-    Write-Host "  3. View logs: docker-compose logs -f"
+    Write-Host "  1. Start services: docker compose up -d"
+    Write-Host "  2. Check status: docker compose ps"
+    Write-Host "  3. View logs: docker compose logs -f"
     Write-Host ""
     exit 0
 } else {

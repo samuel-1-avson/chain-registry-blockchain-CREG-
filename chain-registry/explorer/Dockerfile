@@ -19,7 +19,7 @@ ENV VITE_NETWORK=$VITE_NETWORK
 
 # Copy package files
 COPY package*.json ./
-RUN npm ci
+RUN if [ -f package-lock.json ]; then npm ci; else npm install --no-fund --no-audit; fi
 
 # Copy source
 COPY . .

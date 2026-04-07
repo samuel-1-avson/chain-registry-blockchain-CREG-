@@ -4,11 +4,12 @@
     Generates Ed25519 validator keys for the Chain Registry testnet on Windows.
 
 .DESCRIPTION
-    Produces .env.testnet and config/validator-set.json for a multi-validator testnet.
+    Produces .env.testnet and config/validator-set.json for the testnet validator set.
+    The local Docker bootstrap flow runs one validator node on this machine.
     Requires the .NET System.Security.Cryptography assembly (built into Windows).
 
 .EXAMPLE
-    .\scripts\generate-testnet-keys.ps1 -Nodes 10 -Output .env.testnet
+    .\scripts\generate-testnet-keys.ps1 -Nodes 1 -Output .env.testnet
 #>
 param(
     [int]$Nodes = 1,
@@ -59,13 +60,13 @@ public class Sodium {
     }
 }
 
-Write-Host "Generating $Nodes validator nodes..." -ForegroundColor Cyan
+Write-Host "Generating validator definitions for $Nodes node(s)..." -ForegroundColor Cyan
 
 New-Item -ItemType Directory -Force -Path $ConfigDir | Out-Null
 
 $envLines = @(
     "# Chain Registry Testnet Environment"
-    "# Generated for $Nodes validators"
+    "# Generated for $Nodes validator node(s)"
     ""
     "CREG_ETH_RPC=http://localhost:8545"
     "CREG_IPFS_URL=http://localhost:5001"
@@ -129,7 +130,7 @@ if (-not $hasSodium) {
 
 Write-Host "`nNext steps:" -ForegroundColor Cyan
 Write-Host "  1. Review $Output"
-Write-Host "  2. Deploy testnet:"
+Write-Host "  2. Deploy the bootstrap host (single validator on this machine):"
 Write-Host "     docker compose -f docker-compose.testnet.yml --env-file $Output up -d --build"
 Write-Host "  3. Run stress test:"
 Write-Host "     python scripts/stress-test.py --nodes $Nodes --packages 1000"
