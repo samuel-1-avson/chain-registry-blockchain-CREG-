@@ -403,36 +403,25 @@ pub fn deep_scan(
     let mut scanner = DeepScanner::default();
     scanner.package_info = package_info;
 
-    // If we are inside a tokio runtime, use a timeout.  Otherwise fall
-    // back to a synchronous call (e.g. in unit tests).
-    if let Ok(handle) = tokio::runtime::Handle::try_current() {
-        let bytes = tarball_bytes.to_vec();
-        let model_path = scanner.model_path.clone();
-        let tokenizer_path = scanner.tokenizer_path.clone();
-        let max_length = scanner.max_length;
-        let pkg_info = scanner.package_info.clone();
+    let bytes = tarball_bytes.to_vec();
+    let (result_tx, result_rx) = std::sync::mpsc::sync_channel(1);
 
-        match handle.block_on(async move {
-            tokio::time::timeout(SCAN_TIMEOUT, tokio::task::spawn_blocking(move || {
-                let s = DeepScanner {
-                    model_path,
-                    tokenizer_path,
-                    max_length,
-                    package_info: pkg_info,
-                };
-                s.scan(&bytes)
-            }))
-            .await
-        }) {
-            Ok(Ok(result)) => result,
-            Ok(Err(e)) => Err(MlError::InferenceError(format!("Scan task panicked: {e}"))),
-            Err(_) => {
-                warn!("Deep-scan inference timed out after {}s", SCAN_TIMEOUT.as_secs());
-                Ok(timeout_result())
-            }
+    std::thread::Builder::new()
+        .name("creg-deep-scan".to_string())
+        .spawn(move || {
+            let _ = result_tx.send(scanner.scan(&bytes));
+        })
+        .map_err(|e| MlError::InferenceError(format!("Failed to spawn deep-scan worker: {e}")))?;
+
+    match result_rx.recv_timeout(SCAN_TIMEOUT) {
+        Ok(result) => result,
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            warn!("Deep-scan inference timed out after {}s", SCAN_TIMEOUT.as_secs());
+            Ok(timeout_result())
         }
-    } else {
-        scanner.scan(tarball_bytes)
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(MlError::InferenceError(
+            "Deep-scan worker exited before returning a result".into(),
+        )),
     }
 }
 

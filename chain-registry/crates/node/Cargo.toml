@@ -40,6 +40,7 @@ tower-http   = { version = "0.5", features = ["cors", "trace", "limit"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 flate2       = "1"
 tar          = "0.4"
+libc         = "0.2"
 urlencoding  = { workspace = true }
 thiserror    = { workspace = true }
 futures      = { workspace = true }

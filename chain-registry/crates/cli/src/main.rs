@@ -7,8 +7,6 @@ mod audit;
 mod batch;
 mod blocks;
 mod config_file;
-mod dashboard;
-mod dashboard_enhanced;
 mod diff;
 mod doctor;
 mod graph;
@@ -31,7 +29,6 @@ mod update;
 mod verify;
 mod watch;
 // New UX modules
-mod dashboard_interactive;
 mod error_help;
 mod explorer_tui;
 mod wizard;
@@ -242,11 +239,18 @@ enum Commands {
         key: Option<std::path::PathBuf>,
     },
 
-    /// Launch the interactive Premium TUI Dashboard.
-    Dashboard,
-
-    /// Launch the enhanced interactive TUI Dashboard (with more features).
-    DashboardEnhanced,
+    /// Launch the validator console.
+    ///
+    /// This is the single supported terminal UI. Legacy commands remain as
+    /// hidden aliases for compatibility during the consolidation:
+    /// `dashboard`, `dashboard-enhanced`, `dashboard-interactive`, `explorer`.
+    #[command(
+        alias = "dashboard",
+        alias = "dashboard-enhanced",
+        alias = "dashboard-interactive",
+        alias = "explorer"
+    )]
+    Console,
 
     /// Non-interactive chain explorer.
     Blocks {
@@ -357,12 +361,6 @@ enum Commands {
 
     /// Interactive setup wizard for new users
     Init,
-
-    /// Interactive TUI dashboard with controls
-    DashboardInteractive,
-
-    /// Launch the full TUI blockchain explorer
-    Explorer,
 
     /// Testnet commands (drip, stake, status)
     Testnet {
@@ -823,11 +821,8 @@ async fn run(cli: Cli) -> Result<()> {
             )
             .await?;
         }
-        Commands::Dashboard => {
-            dashboard::run(cli.node_url.as_deref()).await?;
-        }
-        Commands::DashboardEnhanced => {
-            dashboard_enhanced::run(cli.node_url.as_deref()).await?;
+        Commands::Console => {
+            explorer_tui::run(cli.node_url.as_deref()).await?;
         }
         Commands::Blocks { limit } => {
             blocks::run(cli.node_url.as_deref(), limit).await?;
@@ -1093,12 +1088,6 @@ async fn run(cli: Cli) -> Result<()> {
         },
         Commands::Init => {
             wizard::run().await?;
-        }
-        Commands::DashboardInteractive => {
-            dashboard_interactive::run(cli.node_url.as_deref()).await?;
-        }
-        Commands::Explorer => {
-            explorer_tui::run(cli.node_url.as_deref()).await?;
         }
         Commands::Testnet { command } => match command {
             TestnetCommands::Drip {

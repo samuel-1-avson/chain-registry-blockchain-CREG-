@@ -187,12 +187,17 @@ pub async fn run(
             publisher_pubkey: publisher_pubkeys[0].clone(),
             signature: signatures[0].clone(),
             zk_proof: proof_bytes,
-            // Scores are set to 0 — validator nodes will evaluate these.
-            static_analysis_score: 0,
-            sandbox_safe: false,
+            // The publisher-side proof attests to the same public inputs used
+            // during proof generation. Validators still run the real 3-stage
+            // pipeline after admission and do not trust these placeholder values.
+            static_analysis_score: zk_inputs.static_analysis_score as u32,
+            sandbox_safe: zk_inputs.sandbox_safe,
             publisher_pubkeys: publisher_pubkeys.clone(),
             signatures: signatures.clone(),
             threshold: if publisher_pubkeys.len() >= 2 { 2 } else { 1 },
+            manifest_json: serde_json::to_string(&request.manifest)
+                .context("Failed to serialize manifest for gRPC submission")?,
+            manifest_hash: manifest_hash_hex,
         };
 
         match client.submit_package(grpc_req).await {

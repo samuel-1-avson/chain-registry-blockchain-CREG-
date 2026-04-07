@@ -1,19 +1,20 @@
-// Chain Registry Explorer - Full Operator Interface
-// Features: Explorer, Packages, Wallet, Staking, Faucet, Real-time updates
+// Chain Registry Explorer - Public Surface
+// Features: Blocks, validators, packages, wallet, staking, publish, real-time updates
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import { createPublicClient, createWalletClient, http, parseUnits, formatUnits } from 'viem'
+import { createPublicClient, createWalletClient, custom, http, isAddress, parseUnits, formatUnits } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 
 // ============================================
 // CONFIGURATION
 // ============================================
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8080'
-const FAUCET_BASE = import.meta.env.VITE_FAUCET_BASE || 'http://127.0.0.1:8082'
-const RPC_URL = import.meta.env.VITE_RPC_URL || 'http://127.0.0.1:8545'
-const CREG_TOKEN_ADDR = import.meta.env.VITE_CREG_TOKEN || null
-const STAKING_ADDR = import.meta.env.VITE_STAKING_ADDR || null
+const API_BASE = import.meta.env.VITE_API_BASE || ''
+const FAUCET_BASE = import.meta.env.VITE_FAUCET_BASE || ''
+const RPC_URL = import.meta.env.VITE_RPC_URL || (typeof window !== 'undefined' ? `${window.location.origin}/rpc` : 'http://127.0.0.1:8545')
+const BUILD_CREG_TOKEN_ADDR = import.meta.env.VITE_CREG_TOKEN || null
+const BUILD_STAKING_ADDR = import.meta.env.VITE_STAKING_ADDR || null
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 
 const localChain = {
   id: 31337,
@@ -22,15 +23,7 @@ const localChain = {
   rpcUrls: { default: { http: [RPC_URL] } },
 }
 
-// W8 fix: Only expose Anvil test accounts in development/testnet mode.
-// In production builds (VITE_NETWORK=mainnet), these are never shown.
 const IS_TESTNET = typeof __IS_TESTNET__ !== 'undefined' ? __IS_TESTNET__ : (import.meta.env.VITE_NETWORK || 'testnet') !== 'mainnet'
-
-const ANVIL_TEST_ACCOUNTS = IS_TESTNET ? [
-  { label: 'Account #2', key: '0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a' },
-  { label: 'Account #3', key: '0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6' },
-  { label: 'Account #4', key: '0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a' },
-] : []
 
 const ERC20_ABI = [
   { name: 'balanceOf', type: 'function', stateMutability: 'view',
@@ -74,6 +67,49 @@ const timeAgo = (timestamp) => {
 const truncateHash = (hash, start = 8, end = 8) => {
   if (!hash || hash.length <= start + end) return hash
   return `${hash.slice(0, start)}...${hash.slice(-end)}`
+}
+
+const normalizeContractAddress = (value) => {
+  if (!value) return null
+  return value.toLowerCase() === ZERO_ADDRESS ? null : value
+}
+
+const normalizeWalletAddress = (value) => {
+  if (!value || typeof value !== 'string') return null
+  const parts = value.split(':')
+  const candidate = parts[parts.length - 1]
+  return isAddress(candidate) ? candidate : null
+}
+
+const hasLeadingZeroBits = (bytes, difficulty) => {
+  const fullBytes = Math.floor(difficulty / 8)
+  const extraBits = difficulty % 8
+
+  for (let index = 0; index < fullBytes; index += 1) {
+    if (bytes[index] !== 0) return false
+  }
+
+  if (extraBits === 0) return true
+  return (bytes[fullBytes] >> (8 - extraBits)) === 0
+}
+
+const solvePowChallenge = async (challenge, difficulty) => {
+  const encoder = new TextEncoder()
+
+  for (let attempt = 0; ; attempt += 1) {
+    const nonce = attempt.toString(16)
+    const payload = encoder.encode(`${challenge}${nonce}`)
+    const digestBuffer = await crypto.subtle.digest('SHA-256', payload)
+    const digestBytes = new Uint8Array(digestBuffer)
+
+    if (hasLeadingZeroBits(digestBytes, difficulty)) {
+      return nonce
+    }
+
+    if (attempt > 0 && attempt % 1024 === 0) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+  }
 }
 
 // ============================================
@@ -180,6 +216,7 @@ function App() {
   })
   const [events, setEvents] = useState([])
   const [selectedBlock, setSelectedBlock] = useState(null)
+  const [selectedValidator, setSelectedValidator] = useState(null)
   const [status, setStatus] = useState('connecting')
   const [isLoading, setIsLoading] = useState(true)
   const [fetchError, setFetchError] = useState(null)
@@ -187,8 +224,8 @@ function App() {
   const [isSearchFocused, setIsSearchFocused] = useState(false)
 
   // Wallet state
-  const [showWallet, setShowWallet] = useState(false)
   const [walletAccount, setWalletAccount] = useState(null)
+  const [walletProvider, setWalletProvider] = useState(null)
   const [walletBalance, setWalletBalance] = useState(null)
   const [walletKeyInput, setWalletKeyInput] = useState('')
   const [dripLoading, setDripLoading] = useState(false)
@@ -196,6 +233,12 @@ function App() {
   const [stakeLoading, setStakeLoading] = useState(false)
   const [stakeResult, setStakeResult] = useState(null)
   const [stakeAmount, setStakeAmount] = useState('')
+  const [runtimeConfig, setRuntimeConfig] = useState({
+    tokenContract: normalizeContractAddress(BUILD_CREG_TOKEN_ADDR),
+    stakingContract: normalizeContractAddress(BUILD_STAKING_ADDR),
+    registryAddress: null,
+    isTestnet: IS_TESTNET,
+  })
 
   // EIP-6963: multi-provider wallet discovery (W10/I1 fix)
   const [eip6963Providers, setEip6963Providers] = useState([])
@@ -216,14 +259,25 @@ function App() {
   const sseRef = useRef(null)
   const searchInputRef = useRef(null)
 
+  const tokenContractAddress = useMemo(
+    () => normalizeContractAddress(runtimeConfig.tokenContract) || normalizeContractAddress(BUILD_CREG_TOKEN_ADDR),
+    [runtimeConfig.tokenContract]
+  )
+
+  const stakingContractAddress = useMemo(
+    () => normalizeContractAddress(runtimeConfig.stakingContract) || normalizeContractAddress(BUILD_STAKING_ADDR),
+    [runtimeConfig.stakingContract]
+  )
+
   // Fetch data
   const fetchData = useCallback(async () => {
     try {
-      const [statsRes, nodesRes, p2pRes, bridgeRes] = await Promise.all([
+      const [statsRes, nodesRes, p2pRes, bridgeRes, runtimeRes] = await Promise.all([
         fetch(`${API_BASE}/v1/chain/stats`),
         fetch(`${API_BASE}/v1/nodes`),
         fetch(`${API_BASE}/v1/p2p/status`),
-        fetch(`${API_BASE}/v1/bridge/status`)
+        fetch(`${API_BASE}/v1/bridge/status`),
+        fetch(`${API_BASE}/v1/runtime/config`).catch(() => null)
       ])
       
       if (statsRes.ok) {
@@ -250,6 +304,24 @@ function App() {
       if (nodesRes.ok) setNodes(await nodesRes.json())
       if (p2pRes.ok) setP2pStatus(await p2pRes.json())
       if (bridgeRes.ok) setBridgeStatus(await bridgeRes.json())
+      if (runtimeRes?.ok) {
+        const runtimeContentType = runtimeRes.headers.get('content-type') || ''
+        if (runtimeContentType.includes('application/json')) {
+          try {
+            const runtimeData = await runtimeRes.json()
+            setRuntimeConfig({
+              tokenContract: normalizeContractAddress(runtimeData.token_contract),
+              stakingContract: normalizeContractAddress(runtimeData.staking_contract),
+              registryAddress: normalizeContractAddress(runtimeData.registry_address),
+              isTestnet: runtimeData.is_testnet !== false,
+            })
+          } catch (runtimeError) {
+            console.warn('Ignoring invalid runtime config payload:', runtimeError)
+          }
+        } else {
+          console.warn('Ignoring non-JSON runtime config response')
+        }
+      }
 
       // Fetch pending packages
       try {
@@ -343,35 +415,101 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [isSearchFocused])
 
-  // Wallet balance refresh
+  const refreshWalletBalance = useCallback(async () => {
+    if (!walletAccount) return
+
+    try {
+      if (tokenContractAddress) {
+        const publicClient = createPublicClient({ chain: localChain, transport: http(RPC_URL) })
+        const rawBalance = await publicClient.readContract({
+          address: tokenContractAddress,
+          abi: ERC20_ABI,
+          functionName: 'balanceOf',
+          args: [walletAccount.address],
+        })
+        setWalletBalance(formatUnits(rawBalance, 18))
+        return
+      }
+
+      const res = await fetch(`${FAUCET_BASE}/api/balance/${walletAccount.address}`)
+      if (res.ok) {
+        const data = await res.json()
+        const rawBal = data.balance || data.formatted || '0'
+        try {
+          setWalletBalance(formatUnits(BigInt(rawBal), 18))
+        } catch {
+          setWalletBalance(rawBal)
+        }
+      }
+    } catch (e) {
+      console.error('Failed to refresh wallet balance:', e)
+    }
+  }, [walletAccount, tokenContractAddress])
+
   useEffect(() => {
     if (!walletAccount) return
-    const refreshBalance = async () => {
-      try {
-        const res = await fetch(`${FAUCET_BASE}/api/balance/${walletAccount.address}`)
-        if (res.ok) {
-          const data = await res.json()
-          const rawBal = data.balance || data.formatted || '0'
-          try {
-            setWalletBalance(formatUnits(BigInt(rawBal), 18))
-          } catch {
-            setWalletBalance(rawBal)
-          }
-        }
-      } catch (e) { /* faucet unreachable */ }
-    }
-    refreshBalance()
-    const timer = setInterval(refreshBalance, 10000)
+    refreshWalletBalance()
+    const timer = setInterval(refreshWalletBalance, 10000)
     return () => clearInterval(timer)
-  }, [walletAccount])
+  }, [walletAccount, refreshWalletBalance])
+
+  const ensureWalletChain = useCallback(async (provider) => {
+    if (!provider?.request) return
+
+    const targetChainId = `0x${localChain.id.toString(16)}`
+    const currentChainId = await provider.request({ method: 'eth_chainId' })
+    if (currentChainId === targetChainId) return
+
+    try {
+      await provider.request({
+        method: 'wallet_switchEthereumChain',
+        params: [{ chainId: targetChainId }],
+      })
+    } catch (switchError) {
+      if (switchError?.code !== 4902 && !`${switchError?.message || ''}`.includes('Unrecognized chain')) {
+        throw switchError
+      }
+
+      await provider.request({
+        method: 'wallet_addEthereumChain',
+        params: [{
+          chainId: targetChainId,
+          chainName: localChain.name,
+          nativeCurrency: localChain.nativeCurrency,
+          rpcUrls: [RPC_URL],
+          blockExplorerUrls: [window.location.origin],
+        }],
+      })
+    }
+  }, [])
+
+  const connectExternalProvider = useCallback(async (provider, type, providerName) => {
+    if (!provider?.request) {
+      alert('Wallet provider unavailable.')
+      return
+    }
+
+    await ensureWalletChain(provider)
+    const accounts = await provider.request({ method: 'eth_requestAccounts' })
+    const address = normalizeWalletAddress(accounts?.[0])
+
+    if (!address) {
+      throw new Error(`No usable account returned from ${providerName || 'wallet provider'}.`)
+    }
+
+    setWalletProvider(provider)
+    setWalletAccount({ address, type, providerName })
+    setDripResult(null)
+    setStakeResult(null)
+  }, [ensureWalletChain])
 
   const connectWallet = useCallback(async (privateKey) => {
     try {
       const key = privateKey.startsWith('0x') ? privateKey : `0x${privateKey}`
       const account = privateKeyToAccount(key)
-      setWalletAccount(account)
+      setWalletProvider(null)
+      setWalletAccount({ address: account.address, type: 'local', providerName: 'Private Key', account })
       setWalletKeyInput('')
-      setShowWallet(false)
       setDripResult(null)
       setStakeResult(null)
     } catch (err) {
@@ -385,40 +523,20 @@ function App() {
         alert('MetaMask not detected. Please install the MetaMask browser extension.')
         return
       }
-      const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' })
-      if (!accounts || accounts.length === 0) {
-        alert('No accounts returned from MetaMask.')
-        return
-      }
-      // Create a minimal account-like object compatible with viem's WalletClient.
-      const address = accounts[0]
-      setWalletAccount({ address, type: 'metamask' })
-      setShowWallet(false)
-      setDripResult(null)
-      setStakeResult(null)
+      await connectExternalProvider(window.ethereum, 'metamask', 'MetaMask')
     } catch (err) {
       alert('MetaMask connection failed: ' + (err.message || err))
     }
-  }, [])
+  }, [connectExternalProvider])
 
   // EIP-6963: Connect via a discovered provider (W10/I1 fix)
   const connectEip6963 = useCallback(async (providerDetail) => {
     try {
-      const provider = providerDetail.provider
-      const accounts = await provider.request({ method: 'eth_requestAccounts' })
-      if (!accounts || accounts.length === 0) {
-        alert('No accounts returned from ' + (providerDetail.info?.name || 'wallet') + '.')
-        return
-      }
-      const address = accounts[0]
-      setWalletAccount({ address, type: 'eip6963', providerName: providerDetail.info?.name })
-      setShowWallet(false)
-      setDripResult(null)
-      setStakeResult(null)
+      await connectExternalProvider(providerDetail.provider, 'eip6963', providerDetail.info?.name || 'Wallet')
     } catch (err) {
       alert('Wallet connection failed: ' + (err.message || err))
     }
-  }, [])
+  }, [connectExternalProvider])
 
   // G4: WalletConnect v2 connection
   const connectWalletConnect = useCallback(async () => {
@@ -432,6 +550,7 @@ function App() {
       const provider = await EthereumProvider.init({
         projectId,
         chains: [localChain.id],
+        rpcMap: { [localChain.id]: RPC_URL },
         showQrModal: true,
         metadata: {
           name: 'Chain Registry Explorer',
@@ -441,13 +560,13 @@ function App() {
         },
       })
       await provider.enable()
-      const accounts = provider.accounts
-      if (!accounts || accounts.length === 0) {
+      const address = normalizeWalletAddress(provider.accounts?.[0])
+      if (!address) {
         alert('No accounts returned from WalletConnect.')
         return
       }
-      setWalletAccount({ address: accounts[0], type: 'walletconnect' })
-      setShowWallet(false)
+      setWalletProvider(provider)
+      setWalletAccount({ address, type: 'walletconnect', providerName: 'WalletConnect' })
       setDripResult(null)
       setStakeResult(null)
     } catch (err) {
@@ -460,88 +579,140 @@ function App() {
   }, [])
 
   const disconnectWallet = useCallback(() => {
+    if (walletProvider?.disconnect) {
+      Promise.resolve(walletProvider.disconnect()).catch(() => {})
+    }
+    setWalletProvider(null)
     setWalletAccount(null)
     setWalletBalance(null)
     setDripResult(null)
     setStakeResult(null)
     setStakeAmount('')
-  }, [])
+  }, [walletProvider])
+
+  useEffect(() => {
+    if (!walletProvider?.on) return undefined
+
+    const handleAccountsChanged = (accounts) => {
+      const nextAddress = normalizeWalletAddress(accounts?.[0])
+      if (!nextAddress) {
+        disconnectWallet()
+        return
+      }
+      setWalletAccount((current) => current ? { ...current, address: nextAddress } : current)
+    }
+
+    const handleDisconnect = () => disconnectWallet()
+
+    walletProvider.on('accountsChanged', handleAccountsChanged)
+    walletProvider.on('disconnect', handleDisconnect)
+
+    return () => {
+      walletProvider.removeListener?.('accountsChanged', handleAccountsChanged)
+      walletProvider.removeListener?.('disconnect', handleDisconnect)
+    }
+  }, [walletProvider, disconnectWallet])
 
   const requestDrip = useCallback(async () => {
     if (!walletAccount) return
     setDripLoading(true)
     setDripResult(null)
     try {
-      const res = await fetch(`${FAUCET_BASE}/api/drip`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ address: walletAccount.address }),
-      })
-      const data = await res.json()
+      const dripRequest = async (payload) => {
+        const res = await fetch(`${FAUCET_BASE}/api/drip`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+        const data = await res.json().catch(() => ({ success: false, message: res.statusText }))
+        return { res, data }
+      }
+
+      let { res, data } = await dripRequest({ address: walletAccount.address })
+
+      if (!res.ok && /proof-of-work challenge|proof-of-work nonce|unknown or expired challenge/i.test(data?.message || '')) {
+        setDripResult({ success: false, message: 'Faucet challenge issued. Solving proof-of-work…' })
+        const challengeRes = await fetch(`${FAUCET_BASE}/api/challenge`)
+        const challengeData = await challengeRes.json()
+        const nonce = await solvePowChallenge(challengeData.challenge, challengeData.difficulty)
+        ;({ res, data } = await dripRequest({
+          address: walletAccount.address,
+          challenge: challengeData.challenge,
+          nonce,
+        }))
+      }
+
       setDripResult(data)
+      if (res.ok) {
+        await refreshWalletBalance()
+      }
     } catch (err) {
       setDripResult({ success: false, message: err.message })
     } finally {
       setDripLoading(false)
     }
-  }, [walletAccount])
+  }, [walletAccount, refreshWalletBalance])
 
   const doStake = useCallback(async (role) => {
     if (!walletAccount || !stakeAmount) return
-    if (!CREG_TOKEN_ADDR || !STAKING_ADDR) {
-      setStakeResult({ success: false, message: 'Contract addresses not configured. Set VITE_CREG_TOKEN and VITE_STAKING_ADDR env vars.' })
+    if (!tokenContractAddress || !stakingContractAddress) {
+      setStakeResult({ success: false, message: 'Live contract addresses are unavailable. Wait for runtime config from the node or rebuild with testnet addresses.' })
       return
     }
     setStakeLoading(true)
     setStakeResult(null)
     try {
-      const wc = createWalletClient({
-        account: walletAccount,
-        chain: localChain,
-        transport: http(RPC_URL),
-      })
-      const pc = createPublicClient({ chain: localChain, transport: http(RPC_URL) })
+      const walletClient = walletProvider
+        ? createWalletClient({ chain: localChain, transport: custom(walletProvider) })
+        : createWalletClient({ chain: localChain, transport: http(RPC_URL) })
+      const publicClient = createPublicClient({ chain: localChain, transport: http(RPC_URL) })
       const amountWei = parseUnits(stakeAmount, 18)
+      const walletSigner = walletAccount.account || walletAccount.address
 
       if (role === 'publisher') {
-        const approveTx = await wc.writeContract({
-          address: CREG_TOKEN_ADDR,
+        const approveTx = await walletClient.writeContract({
+          account: walletSigner,
+          address: tokenContractAddress,
           abi: ERC20_ABI,
           functionName: 'approve',
-          args: [STAKING_ADDR, amountWei],
+          args: [stakingContractAddress, amountWei],
         })
-        await pc.waitForTransactionReceipt({ hash: approveTx })
-        const stakeTx = await wc.writeContract({
-          address: STAKING_ADDR,
+        await publicClient.waitForTransactionReceipt({ hash: approveTx })
+        const stakeTx = await walletClient.writeContract({
+          account: walletSigner,
+          address: stakingContractAddress,
           abi: STAKING_ABI,
           functionName: 'stakeAsPublisher',
           args: [amountWei],
         })
-        await pc.waitForTransactionReceipt({ hash: stakeTx })
+        await publicClient.waitForTransactionReceipt({ hash: stakeTx })
         setStakeResult({ success: true, message: `Staked ${stakeAmount} tCREG as publisher`, tx: stakeTx })
       } else {
-        const approveTx = await wc.writeContract({
-          address: CREG_TOKEN_ADDR,
+        const approveTx = await walletClient.writeContract({
+          account: walletSigner,
+          address: tokenContractAddress,
           abi: ERC20_ABI,
           functionName: 'approve',
-          args: [STAKING_ADDR, amountWei],
+          args: [stakingContractAddress, amountWei],
         })
-        await pc.waitForTransactionReceipt({ hash: approveTx })
-        const stakeTx = await wc.writeContract({
-          address: STAKING_ADDR,
+        await publicClient.waitForTransactionReceipt({ hash: approveTx })
+        const stakeTx = await walletClient.writeContract({
+          account: walletSigner,
+          address: stakingContractAddress,
           abi: STAKING_ABI,
           functionName: 'applyToBeValidator',
           args: [amountWei],
         })
-        await pc.waitForTransactionReceipt({ hash: stakeTx })
+        await publicClient.waitForTransactionReceipt({ hash: stakeTx })
         setStakeResult({ success: true, message: `Applied as validator with ${stakeAmount} tCREG`, tx: stakeTx })
       }
+      await refreshWalletBalance()
     } catch (err) {
       setStakeResult({ success: false, message: err.message })
     } finally {
       setStakeLoading(false)
     }
-  }, [walletAccount, stakeAmount])
+  }, [walletAccount, walletProvider, stakeAmount, tokenContractAddress, stakingContractAddress, refreshWalletBalance])
 
   const lookupPackage = useCallback(async () => {
     if (!packageQuery) return
@@ -694,19 +865,19 @@ function App() {
           <div className="logo-icon">⛓</div>
           <div className="logo-text">
             <span className="logo-title">Chain Registry</span>
-            <span className="logo-subtitle">Blockchain Explorer</span>
+            <span className="logo-subtitle">Public Explorer + Validator Surface</span>
           </div>
         </div>
         
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
           {walletAccount ? (
-            <button className="wallet-btn wallet-btn-connected" onClick={() => setShowWallet(!showWallet)}>
+            <button className="wallet-btn wallet-btn-connected" onClick={() => { setView('wallet'); setSelectedBlock(null); setSelectedValidator(null) }}>
               <span className="wallet-dot connected" />
               {walletAccount.address.slice(0, 6)}...{walletAccount.address.slice(-4)}
               {walletBalance && <span className="wallet-bal">{walletBalance} tCREG</span>}
             </button>
           ) : (
-            <button className="wallet-btn" onClick={() => setShowWallet(!showWallet)}>
+            <button className="wallet-btn" onClick={() => { setView('wallet'); setSelectedBlock(null); setSelectedValidator(null) }}>
               🔑 Connect Wallet
             </button>
           )}
@@ -780,12 +951,13 @@ function App() {
           { id: 'blocks', label: 'Blocks', icon: '⛓' },
           { id: 'validators', label: 'Validators', icon: '⚡' },
           { id: 'packages', label: 'Packages', icon: '📦' },
+          { id: 'wallet', label: 'Wallet', icon: '🔑' },
           { id: 'p2p', label: 'Network', icon: '🌐' },
         ].map(tab => (
           <button
             key={tab.id}
             className={`nav-tab ${view === tab.id ? 'active' : ''}`}
-            onClick={() => { setView(tab.id); setSelectedBlock(null) }}
+            onClick={() => { setView(tab.id); setSelectedBlock(null); setSelectedValidator(null) }}
           >
             <span className="nav-tab-icon">{tab.icon}</span>
             {tab.label}
@@ -803,6 +975,7 @@ function App() {
               {view === 'blocks' && 'Recent Blocks'}
               {view === 'validators' && 'Validator Set'}
               {view === 'packages' && `Packages (${stats.package_count} on-chain)`}
+              {view === 'wallet' && 'Wallet, Faucet, Stake'}
               {view === 'p2p' && 'Network Status'}
             </div>
             {view === 'blocks' && (
@@ -889,7 +1062,15 @@ function App() {
                       </tr>
                     ) : (
                       nodes.map((node, idx) => (
-                        <tr key={node.id} style={{ animationDelay: `${idx * 0.05}s` }} className="animate-fade-in">
+                        <tr
+                          key={node.id}
+                          style={{ animationDelay: `${idx * 0.05}s`, cursor: 'pointer' }}
+                          className={`animate-fade-in ${selectedValidator?.id === node.id ? 'validator-row-active' : ''}`}
+                          onClick={() => {
+                            setSelectedValidator(node)
+                            setSelectedBlock(null)
+                          }}
+                        >
                           <td>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                               <span style={{ fontWeight: 600 }}>{node.id}</span>
@@ -1096,6 +1277,175 @@ function App() {
               </div>
             )}
 
+            {/* Wallet View */}
+            {view === 'wallet' && (
+              <div style={{ padding: 'var(--space-4)' }}>
+                <div className="detail-section" style={{ marginBottom: 'var(--space-4)' }}>
+                  <div className="detail-section-title">Explorer Wallet</div>
+                  <div style={{ color: 'var(--text-secondary)', marginBottom: 'var(--space-3)' }}>
+                    Connect a wallet, request testnet tokens, and stake directly from the browser.
+                  </div>
+                </div>
+
+                <div className="detail-section" style={{ marginBottom: 'var(--space-4)' }}>
+                  <div className="detail-section-title">Live Runtime Config</div>
+                  <div className="detail-row">
+                    <span className="detail-label">Network Mode</span>
+                    <span className="detail-value">{runtimeConfig.isTestnet ? 'Testnet' : 'Mainnet'}</span>
+                  </div>
+                  <div className="detail-row">
+                    <span className="detail-label">Registry</span>
+                    {runtimeConfig.registryAddress ? (
+                      <CopyButton text={runtimeConfig.registryAddress} label="registry address" />
+                    ) : (
+                      <span className="detail-value">Unavailable</span>
+                    )}
+                  </div>
+                  <div className="detail-row">
+                    <span className="detail-label">Token Contract</span>
+                    {tokenContractAddress ? (
+                      <CopyButton text={tokenContractAddress} label="token address" />
+                    ) : (
+                      <span className="detail-value">Unavailable</span>
+                    )}
+                  </div>
+                  <div className="detail-row">
+                    <span className="detail-label">Staking Contract</span>
+                    {stakingContractAddress ? (
+                      <CopyButton text={stakingContractAddress} label="staking address" />
+                    ) : (
+                      <span className="detail-value">Unavailable</span>
+                    )}
+                  </div>
+                </div>
+
+                {!walletAccount ? (
+                  <div className="wallet-panel-body" style={{ padding: 0 }}>
+                    <div className="wallet-section">
+                      <label className="wallet-label">Browser Wallet</label>
+                      {eip6963Providers.length > 0 ? (
+                        <div className="wallet-quick-accounts">
+                          {eip6963Providers.map((p, i) => (
+                            <button
+                              key={p.info?.uuid || i}
+                              className="wallet-action-btn wallet-action-primary"
+                              onClick={() => connectEip6963(p)}
+                              style={{ marginBottom: '8px', width: '100%', display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'center' }}
+                            >
+                              {p.info?.icon && <img src={p.info.icon} alt="" style={{ width: 20, height: 20 }} />}
+                              {p.info?.name || 'Unknown Wallet'}
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <button className="wallet-action-btn wallet-action-primary" onClick={connectMetaMask} style={{ marginBottom: '12px', width: '100%' }}>
+                          🦊 Connect MetaMask
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="wallet-section">
+                      <label className="wallet-label">WalletConnect</label>
+                      <button className="wallet-action-btn wallet-action-primary" onClick={connectWalletConnect} style={{ marginBottom: '12px', width: '100%' }}>
+                        📱 Connect via WalletConnect
+                      </button>
+                    </div>
+
+                    <div className="wallet-section">
+                      <label className="wallet-label">Private Key {IS_TESTNET ? '(Testnet Only)' : ''}</label>
+                      {!IS_TESTNET && (
+                        <div className="wallet-result warning">
+                          Direct private key input is disabled on mainnet. Use MetaMask or a hardware wallet.
+                        </div>
+                      )}
+                      {IS_TESTNET && (
+                        <>
+                          <input
+                            type="password"
+                            className="wallet-input"
+                            placeholder="0x..."
+                            autoComplete="off"
+                            spellCheck="false"
+                            value={walletKeyInput}
+                            onChange={(e) => setWalletKeyInput(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && walletKeyInput && connectWallet(walletKeyInput)}
+                          />
+                          <button className="wallet-action-btn wallet-action-primary" onClick={() => connectWallet(walletKeyInput)} disabled={!walletKeyInput}>
+                            Connect
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="wallet-panel-body" style={{ padding: 0 }}>
+                    <div className="wallet-section">
+                      <label className="wallet-label">Connected Address</label>
+                      <div className="wallet-address">
+                        <CopyButton text={walletAccount.address} label="address" />
+                      </div>
+                      <div className="wallet-balance-display">
+                        <span className="wallet-balance-value">{walletBalance || '...'}</span>
+                        <span className="wallet-balance-label">tCREG</span>
+                      </div>
+                      <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginTop: '8px' }}>
+                        Provider: {walletAccount.providerName || walletAccount.type}
+                      </div>
+                    </div>
+
+                    <div className="wallet-section">
+                      <label className="wallet-label">🚰 Faucet</label>
+                      <button className="wallet-action-btn wallet-action-primary" onClick={requestDrip} disabled={dripLoading}>
+                        {dripLoading ? 'Requesting...' : 'Request 1,000 tCREG'}
+                      </button>
+                      {dripResult && (
+                        <div className={`wallet-result ${dripResult.success ? 'success' : 'error'}`}>
+                          {dripResult.message}
+                          {dripResult.tx_hash && <div className="wallet-tx">Tx: {truncateHash(dripResult.tx_hash, 10, 6)}</div>}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="wallet-section">
+                      <label className="wallet-label">⚡ Stake Tokens</label>
+                      <input
+                        type="number"
+                        className="wallet-input"
+                        placeholder="Amount (e.g. 100)"
+                        value={stakeAmount}
+                        onChange={(e) => setStakeAmount(e.target.value)}
+                      />
+                      <div className="wallet-stake-buttons">
+                        <button className="wallet-action-btn wallet-action-primary" onClick={() => doStake('publisher')} disabled={stakeLoading || !stakeAmount}>
+                          {stakeLoading ? 'Staking...' : 'Stake as Publisher'}
+                        </button>
+                        <button className="wallet-action-btn wallet-action-secondary" onClick={() => doStake('validator')} disabled={stakeLoading || !stakeAmount}>
+                          {stakeLoading ? 'Staking...' : 'Apply as Validator'}
+                        </button>
+                      </div>
+                      {(!tokenContractAddress || !stakingContractAddress) && (
+                        <div className="wallet-result warning">
+                          Live staking contracts are not yet available from the running node.
+                        </div>
+                      )}
+                      {stakeResult && (
+                        <div className={`wallet-result ${stakeResult.success ? 'success' : 'error'}`}>
+                          {stakeResult.message}
+                          {stakeResult.tx && <div className="wallet-tx">Tx: {truncateHash(stakeResult.tx, 10, 6)}</div>}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="wallet-section">
+                      <button className="wallet-action-btn wallet-action-danger" onClick={disconnectWallet}>
+                        Disconnect
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Publisher Profile View */}
             {view === 'publisher' && publisherProfile && (
               <div style={{ padding: 'var(--space-4)' }}>
@@ -1208,7 +1558,55 @@ function App() {
 
         {/* Right Panel - Details or Events */}
         <div className="panel animate-fade-in">
-          {selectedBlock ? (
+          {selectedValidator ? (
+            <div className="detail-panel">
+              <div className="detail-header">
+                <span className="detail-title">Validator Details</span>
+                <button className="detail-close" onClick={() => setSelectedValidator(null)}>✕</button>
+              </div>
+
+              <div className="detail-content">
+                <div className="detail-section">
+                  <div className="detail-section-title">Identity</div>
+                  <div className="detail-row">
+                    <span className="detail-label">Validator ID</span>
+                    <span className="detail-value">{selectedValidator.id}</span>
+                  </div>
+                  {selectedValidator.alias && (
+                    <div className="detail-row">
+                      <span className="detail-label">Alias</span>
+                      <span className="detail-value">{selectedValidator.alias}</span>
+                    </div>
+                  )}
+                  <div className="detail-row">
+                    <span className="detail-label">Status</span>
+                    <StatusBadge status={selectedValidator.status} />
+                  </div>
+                </div>
+
+                <div className="detail-section">
+                  <div className="detail-section-title">Performance</div>
+                  <div className="detail-row">
+                    <span className="detail-label">Stake</span>
+                    <span className="detail-value">{formatStake(selectedValidator.stake || 0)}</span>
+                  </div>
+                  <div className="detail-row">
+                    <span className="detail-label">Reputation</span>
+                    <span className="detail-value">{selectedValidator.reputation || 0}/100</span>
+                  </div>
+                </div>
+
+                <div className="detail-section">
+                  <div className="detail-section-title">Operator Actions</div>
+                  <div style={{ color: 'var(--text-secondary)', lineHeight: 1.7 }}>
+                    Connect a wallet in the Wallet tab to apply as a validator or add stake.<br />
+                    Use the Packages tab to inspect pending work and publish package metadata.<br />
+                    Use the Network tab to inspect peer connectivity and bridge sync.
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : selectedBlock ? (
             /* Block Detail View */
             <div className="detail-panel">
               <div className="detail-header">
@@ -1336,184 +1734,12 @@ function App() {
             style={{ 
               width: bridgeStatus.bridge_sync_status === 'Synced' ? '100%'
                    : bridgeStatus.bridge_sync_progress ? `${Math.min(100, bridgeStatus.bridge_sync_progress)}%`
-                   : '10%',
+                   : '0%',
               opacity: bridgeStatus.bridge_sync_status === 'Synced' ? 1 : 0.6
             }} 
           />
         </div>
       </div>
-
-      {/* Wallet Panel */}
-      {showWallet && (
-        <div className="wallet-overlay" onClick={() => setShowWallet(false)}>
-          <div className="wallet-panel" onClick={(e) => e.stopPropagation()}>
-            <div className="wallet-panel-header">
-              <span className="wallet-panel-title">🔑 Testnet Wallet</span>
-              <button className="detail-close" onClick={() => setShowWallet(false)}>✕</button>
-            </div>
-
-            {!walletAccount ? (
-              <div className="wallet-panel-body">
-                <div className="wallet-section">
-                  <label className="wallet-label">Browser Wallet</label>
-                  {eip6963Providers.length > 0 ? (
-                    <div className="wallet-quick-accounts">
-                      {eip6963Providers.map((p, i) => (
-                        <button
-                          key={p.info?.uuid || i}
-                          className="wallet-action-btn wallet-action-primary"
-                          onClick={() => connectEip6963(p)}
-                          style={{ marginBottom: '8px', width: '100%', display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'center' }}
-                        >
-                          {p.info?.icon && <img src={p.info.icon} alt="" style={{ width: 20, height: 20 }} />}
-                          {p.info?.name || 'Unknown Wallet'}
-                        </button>
-                      ))}
-                    </div>
-                  ) : (
-                    <button
-                      className="wallet-action-btn wallet-action-primary"
-                      onClick={connectMetaMask}
-                      style={{ marginBottom: '12px', width: '100%' }}
-                    >
-                      🦊 Connect MetaMask
-                    </button>
-                  )}
-                </div>
-                <div className="wallet-section">
-                  <label className="wallet-label">WalletConnect (Mobile + Desktop)</label>
-                  <button
-                    className="wallet-action-btn wallet-action-primary"
-                    onClick={connectWalletConnect}
-                    style={{ marginBottom: '12px', width: '100%' }}
-                  >
-                    📱 Connect via WalletConnect
-                  </button>
-                </div>
-                <div className="wallet-section">
-                  <label className="wallet-label">Private Key {IS_TESTNET ? '(Testnet Only)' : ''}</label>
-                  {!IS_TESTNET && (
-                    <div className="wallet-result warning">
-                      Direct private key input is disabled on mainnet. Use MetaMask or a hardware wallet.
-                    </div>
-                  )}
-                  {IS_TESTNET && (
-                    <>
-                      <input
-                        type="password"
-                        className="wallet-input"
-                        placeholder="0x..."
-                        autoComplete="off"
-                        spellCheck="false"
-                        value={walletKeyInput}
-                        onChange={(e) => setWalletKeyInput(e.target.value)}
-                        onKeyDown={(e) => e.key === 'Enter' && walletKeyInput && connectWallet(walletKeyInput)}
-                      />
-                      <button
-                        className="wallet-action-btn wallet-action-primary"
-                        onClick={() => connectWallet(walletKeyInput)}
-                        disabled={!walletKeyInput}
-                      >
-                        Connect
-                      </button>
-                    </>
-                  )}
-                </div>
-                {ANVIL_TEST_ACCOUNTS.length > 0 && (
-                <div className="wallet-section">
-                  <label className="wallet-label">Quick Connect (Anvil Test Accounts)</label>
-                  <div className="wallet-quick-accounts">
-                    {ANVIL_TEST_ACCOUNTS.map((acc, i) => (
-                      <button
-                        key={i}
-                        className="wallet-action-btn wallet-action-secondary"
-                        onClick={() => connectWallet(acc.key)}
-                      >
-                        {acc.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                )}
-              </div>
-            ) : (
-              <div className="wallet-panel-body">
-                <div className="wallet-section">
-                  <label className="wallet-label">Connected Address</label>
-                  <div className="wallet-address">
-                    <CopyButton text={walletAccount.address} label="address" />
-                  </div>
-                  <div className="wallet-balance-display">
-                    <span className="wallet-balance-value">{walletBalance || '...'}</span>
-                    <span className="wallet-balance-label">tCREG</span>
-                  </div>
-                </div>
-
-                <div className="wallet-section">
-                  <label className="wallet-label">🚰 Faucet</label>
-                  <button
-                    className="wallet-action-btn wallet-action-primary"
-                    onClick={requestDrip}
-                    disabled={dripLoading}
-                  >
-                    {dripLoading ? 'Requesting...' : 'Request 1,000 tCREG'}
-                  </button>
-                  {dripResult && (
-                    <div className={`wallet-result ${dripResult.success ? 'success' : 'error'}`}>
-                      {dripResult.message}
-                      {dripResult.tx_hash && <div className="wallet-tx">Tx: {truncateHash(dripResult.tx_hash, 10, 6)}</div>}
-                    </div>
-                  )}
-                </div>
-
-                <div className="wallet-section">
-                  <label className="wallet-label">⚡ Stake Tokens</label>
-                  <input
-                    type="number"
-                    className="wallet-input"
-                    placeholder="Amount (e.g. 100)"
-                    value={stakeAmount}
-                    onChange={(e) => setStakeAmount(e.target.value)}
-                  />
-                  <div className="wallet-stake-buttons">
-                    <button
-                      className="wallet-action-btn wallet-action-primary"
-                      onClick={() => doStake('publisher')}
-                      disabled={stakeLoading || !stakeAmount}
-                    >
-                      {stakeLoading ? 'Staking...' : 'Stake as Publisher'}
-                    </button>
-                    <button
-                      className="wallet-action-btn wallet-action-secondary"
-                      onClick={() => doStake('validator')}
-                      disabled={stakeLoading || !stakeAmount}
-                    >
-                      {stakeLoading ? 'Staking...' : 'Apply as Validator'}
-                    </button>
-                  </div>
-                  {!CREG_TOKEN_ADDR && (
-                    <div className="wallet-result warning">
-                      Contract addresses not configured. Set VITE_CREG_TOKEN and VITE_STAKING_ADDR environment variables.
-                    </div>
-                  )}
-                  {stakeResult && (
-                    <div className={`wallet-result ${stakeResult.success ? 'success' : 'error'}`}>
-                      {stakeResult.message}
-                      {stakeResult.tx && <div className="wallet-tx">Tx: {truncateHash(stakeResult.tx, 10, 6)}</div>}
-                    </div>
-                  )}
-                </div>
-
-                <div className="wallet-section">
-                  <button className="wallet-action-btn wallet-action-danger" onClick={disconnectWallet}>
-                    Disconnect
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   )
 }

@@ -1,9 +1,9 @@
 // crates/cli/src/explorer_tui.rs
-// Chain Registry TUI Explorer — A beautiful terminal blockchain explorer
+// Chain Registry Console — the single supported terminal operator surface.
 //
 // Features:
 // - Real-time blockchain data from node API
-// - Multiple views: Overview, Blocks, Validators, Packages, Network, Mempool
+// - Multiple views: Overview, Blocks, Validators, Packages, Network, Mempool, Operator
 // - Live SSE event streaming
 // - Interactive navigation with vim-style keybindings
 // - Beautiful UI with gradients, borders, and animations
@@ -148,6 +148,7 @@ enum View {
     Network,
     Mempool,
     Events,
+    Operator,
     Help,
 }
 
@@ -695,6 +696,9 @@ async fn handle_key(app: &mut App, key: KeyCode) -> bool {
         KeyCode::Char('5') => app.current_view = View::Network,
         KeyCode::Char('6') => app.current_view = View::Mempool,
         KeyCode::Char('7') => app.current_view = View::Events,
+        KeyCode::Char('8') | KeyCode::Char('o') | KeyCode::Char('O') => {
+            app.current_view = View::Operator
+        }
         _ => {}
     }
 
@@ -856,7 +860,7 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
 
     // Title with logo-like styling
     let title = format!(
-        " ⛓ CHAIN REGISTRY EXPLORER  |  Height: #{}  |  {} Packages  |  {} Peers ",
+        " ⛓ CHAIN REGISTRY CONSOLE   |  Height: #{}  |  {} Packages  |  {} Peers ",
         app.stats.tip_height,
         format_number(app.stats.package_count),
         app.stats.peer_count
@@ -916,17 +920,19 @@ fn draw_main_content(f: &mut Frame, app: &App, area: Rect) {
         View::Network => draw_network(f, app, area),
         View::Mempool => draw_mempool(f, app, area),
         View::Events => draw_events(f, app, area),
+        View::Operator => draw_operator(f, app, area),
         View::Help => draw_help(f, app, area),
     }
 }
 
 fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
     let text = match app.current_view {
-        View::Overview => " [←/↑/↓/→ or h/j/k/l] Navigate | [Enter/d] Detail | [1-7] Views | [/] Search | [?] Help | [q] Quit ",
+        View::Overview => " [←/↑/↓/→ or h/j/k/l] Navigate | [Enter/d] Detail | [1-8] Views | [o] Operator | [/] Search | [?] Help | [q] Quit ",
         View::Blocks => " [j/k] Navigate blocks | [Enter/d] Block detail | [b] Back | [?] Help | [q] Quit ",
         View::Validators => " [j/k] Navigate | [Enter/d] Validator detail | [b] Back | [?] Help | [q] Quit ",
         View::Packages => " [j/k] Navigate | [Enter/d] Package detail | [b] Back | [?] Help | [q] Quit ",
         View::Events => " [j/k] Scroll | [b] Back | [?] Help | [q] Quit ",
+        View::Operator => " [1-8/o] Switch views | [q] Quit | Browser explorer at http://localhost:3000 ",
         View::BlockDetail | View::ValidatorDetail | View::PackageDetail => " [Esc/q/b] Back | [?] Help ",
         View::Help => " [Any key] Return ",
         _ => " [←→↑↓] Navigate | [?] Help | [q] Quit ",
@@ -1879,13 +1885,75 @@ fn draw_events(f: &mut Frame, app: &App, area: Rect) {
 }
 
 // ============================================================================
+// VIEW: OPERATOR
+// ============================================================================
+
+fn draw_operator(f: &mut Frame, app: &App, area: Rect) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(7),
+            Constraint::Length(8),
+            Constraint::Min(12),
+        ])
+        .split(area);
+
+    let active_validators = app
+        .validators
+        .iter()
+        .filter(|v| v.is_active || v.status == "online" || v.status == "self")
+        .count();
+
+    let summary = Paragraph::new(vec![
+        Line::from(format!("Mode: validator console")),
+        Line::from(format!("Validators online: {}/{}", active_validators, app.validators.len())),
+        Line::from(format!("Connected peers: {}", app.peer_ids.len())),
+        Line::from(format!("Bridge status: {}", app.stats.bridge_status)),
+    ])
+    .block(Block::default().borders(Borders::ALL).title(" Operator Summary "))
+    .style(Style::default().fg(Theme::TEXT))
+    .wrap(Wrap { trim: true });
+    f.render_widget(summary, chunks[0]);
+
+    let commands = Paragraph::new(vec![
+        Line::from("Browser explorer:  http://localhost:3000"),
+        Line::from("Node health:        creg testnet status --node-url http://localhost:8080"),
+        Line::from("Publish package:    creg publish <tarball>.tar.gz --key-file <publisher.key> --node-url http://localhost:8080"),
+        Line::from("Stake validator:    creg testnet stake-validator --key 0x<private-key> 100"),
+        Line::from("Stake publisher:    creg testnet stake-publisher --key 0x<private-key> 100"),
+    ])
+    .block(Block::default().borders(Borders::ALL).title(" Operator Commands "))
+    .style(Style::default().fg(Theme::TEXT))
+    .wrap(Wrap { trim: true });
+    f.render_widget(commands, chunks[1]);
+
+    let workflow = Paragraph::new(vec![
+        Line::from("This console is the operator surface for validator monitoring."),
+        Line::from("Use it to inspect blocks, validator health, packages, peers, and live events."),
+        Line::from(""),
+        Line::from("Recommended workflow:"),
+        Line::from("  1. Keep `creg console` open during validator operation."),
+        Line::from("  2. Use the browser explorer for wallet connect, faucet, and staking UX."),
+        Line::from("  3. Use `creg watch` in a second terminal for focused event streams."),
+        Line::from(""),
+        Line::from("View shortcuts:"),
+        Line::from("  1 Overview   2 Blocks   3 Validators   4 Packages"),
+        Line::from("  5 Network    6 Mempool  7 Events       8 Operator"),
+    ])
+    .block(Block::default().borders(Borders::ALL).title(" Operator Workflow "))
+    .style(Style::default().fg(Theme::TEXT))
+    .wrap(Wrap { trim: true });
+    f.render_widget(workflow, chunks[2]);
+}
+
+// ============================================================================
 // VIEW: HELP
 // ============================================================================
 
 fn draw_help(f: &mut Frame, _app: &App, area: Rect) {
     let text = r#"
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║                    CHAIN REGISTRY TUI EXPLORER - HELP                         ║
+║                      CHAIN REGISTRY CONSOLE - HELP                            ║
 ╠══════════════════════════════════════════════════════════════════════════════╣
 ║                                                                              ║
 ║  NAVIGATION                                                                  ║
@@ -1894,7 +1962,7 @@ fn draw_help(f: &mut Frame, _app: &App, area: Rect) {
 ║    ↑/↓ or j/k     Navigate lists                                             ║
 ║    Enter or d     Open detail view                                           ║
 ║    Esc or b       Go back                                                    ║
-║    q              Quit explorer                                              ║
+║    q              Quit console                                               ║
 ║                                                                              ║
 ║  VIEW SHORTCUTS                                                              ║
 ║  ─────────────                                                               ║
@@ -1905,6 +1973,7 @@ fn draw_help(f: &mut Frame, _app: &App, area: Rect) {
 ║    5              Network status                                             ║
 ║    6              Mempool view                                               ║
 ║    7              Events log                                                 ║
+║    8 / o          Operator view                                              ║
 ║    ? or h         Toggle this help                                           ║
 ║                                                                              ║
 ║  SEARCH & FILTER                                                             ║
