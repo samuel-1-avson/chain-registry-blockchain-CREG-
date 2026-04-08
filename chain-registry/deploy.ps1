@@ -818,7 +818,8 @@ if ($Mode -eq "testnet") {
     Write-Host '  Invoke-RestMethod -Uri "http://localhost:8082/api/drip" -Method POST -ContentType "application/json" -Body ''{"address":"0x..."}''' -ForegroundColor White
     Write-Host ""
     Write-Host "  # Run stress test" -ForegroundColor DarkGray
-    Write-Host "  docker compose --env-file .env.testnet -f $ComposeFile --profile stress-test up stress-test" -ForegroundColor White
+    Write-Host "  docker compose --env-file .env.testnet -f $ComposeFile --profile stress-test build stress-test" -ForegroundColor White
+    Write-Host "  docker compose --env-file .env.testnet -f $ComposeFile --profile stress-test run --rm --no-deps stress-test --packages 1000" -ForegroundColor White
     Write-Host ""
 }
 Write-Host "  # Tear down" -ForegroundColor DarkGray

@@ -235,7 +235,7 @@ contract Governance {
 
     // ── Internal ──────────────────────────────────────────────────────────────
 
-    function _execute(uint256 id) internal nonReentrant {
+    function _execute(uint256 id) internal {
         Proposal storage p = _proposals[id];
         p.status     = ProposalStatus.Executed;
         p.executedAt = block.timestamp;

@@ -58,6 +58,7 @@ docker-compose*.yml
 
 # Scripts that aren't needed in build
 scripts/
+!scripts/stress-test-requirements.txt
 
 # Circuit build artifacts (will be rebuilt)
 circuits/*.r1cs

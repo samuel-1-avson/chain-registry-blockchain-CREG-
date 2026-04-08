@@ -252,6 +252,22 @@ impl App {
         self.packages.get(self.selected_package)
     }
 
+    fn displayed_validator_count(&self) -> usize {
+        if self.validators.is_empty() {
+            self.stats.validator_count
+        } else {
+            self.validators.len()
+        }
+    }
+
+    fn displayed_total_stake(&self) -> u64 {
+        if self.stats.total_stake > 0 || self.validators.is_empty() {
+            self.stats.total_stake
+        } else {
+            self.validators.iter().map(|validator| validator.stake).sum()
+        }
+    }
+
     fn push_event(&mut self, event_type: String, message: String) {
         self.events
             .push_front((Instant::now(), event_type, message));
@@ -635,6 +651,8 @@ fn apply_data_update(app: &mut App, update: DataUpdate) {
         }
         DataUpdate::Validators(vals) => {
             app.validators = vals;
+            app.stats.validator_count = app.validators.len();
+            app.stats.total_stake = app.validators.iter().map(|validator| validator.stake).sum();
         }
         DataUpdate::Packages(pkgs) => {
             app.packages = pkgs;
@@ -880,7 +898,10 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(header, chunks[0]);
 
     // Status indicator
-    let status_color = if app.stats.validator_count > 0 {
+    let validator_count = app.displayed_validator_count();
+    let total_stake = app.displayed_total_stake();
+
+    let status_color = if validator_count > 0 {
         Theme::SUCCESS
     } else {
         Theme::WARNING
@@ -888,8 +909,8 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
 
     let status_text = format!(
         " ● {} Validators  |  Total Stake: {} CREG  |  Bridge: {} ",
-        app.stats.validator_count,
-        format_number(app.stats.total_stake),
+        validator_count,
+        format_number(total_stake),
         if app.stats.bridge_status.len() > 15 {
             format!("{}..", &app.stats.bridge_status[..15])
         } else {
@@ -950,6 +971,9 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
 // ============================================================================
 
 fn draw_overview(f: &mut Frame, app: &App, area: Rect) {
+    let validator_count = app.displayed_validator_count();
+    let total_stake = app.displayed_total_stake();
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -987,14 +1011,14 @@ fn draw_overview(f: &mut Frame, app: &App, area: Rect) {
     draw_stat_card(
         f,
         "VALIDATORS",
-        &app.stats.validator_count.to_string(),
+        &validator_count.to_string(),
         Theme::ACCENT,
         stats_chunks[2],
     );
     draw_stat_card(
         f,
         "TOTAL STAKE",
-        &format!("{} CREG", format_number(app.stats.total_stake)),
+        &format!("{} CREG", format_number(total_stake)),
         Theme::WARNING,
         stats_chunks[3],
     );

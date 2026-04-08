@@ -2,8 +2,8 @@
 
 > A decentralized, Byzantine Fault Tolerant package distribution network that replaces single-authority trust in package managers with cryptographic consensus.
 
-[![Testnet](https://img.shields.io/badge/testnet-v0.3.0-blue)](chain-registry/DEEP_DIVE_ANALYSIS.md)
-[![Validators](https://img.shields.io/badge/validators-3-green)](chain-registry/docs/TESTNET_RUNBOOK.md)
+[![Testnet](https://img.shields.io/badge/testnet-v0.3.0-blue)](chain-registry/CURRENT_STATUS.md)
+[![Validators](https://img.shields.io/badge/validators-1-green)](chain-registry/CURRENT_STATUS.md)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 ---
@@ -43,7 +43,9 @@ Consensus requires `⌊2n/3⌋ + 1` validators to approve. Results are anchored 
 
 ### Current Status
 
-**Testnet v0.3.0** — a working 3-validator testnet is running. The CLI (`creg`) is functional for publish/install/audit workflows. A web explorer and TUI explorer are available. The system is **not yet production-hardened** — see [`DEEP_DIVE_ANALYSIS.md`](chain-registry/DEEP_DIVE_ANALYSIS.md) for the full issue registry.
+**Testnet v0.3.0** currently runs in a **single-validator-per-host** mode. The local Docker and bootstrap testnet flows now start one validator node on this machine, while additional validators use the separate validator-host compose file on other computers. The CLI (`creg`), web explorer, TUI explorer, and single-validator Docker stack are all active parts of the current deployment story.
+
+For the live operational snapshot of what is improved, verified, and still open, see [chain-registry/CURRENT_STATUS.md](chain-registry/CURRENT_STATUS.md).
 
 ---
 
@@ -52,7 +54,7 @@ Consensus requires `⌊2n/3⌋ + 1` validators to approve. Results are anchored 
 ### Prerequisites
 
 - Docker 24+ and Docker Compose v2
-- 8 GB RAM (16 GB recommended for testnet with 3 validators)
+- 8 GB RAM (12+ GB recommended for local Docker builds)
 - 20 GB disk space
 
 ### Single-Validator Dev Setup
@@ -73,7 +75,7 @@ Once you see `Node started — listening on :8080`, the registry is ready.
 **Health check:**
 ```bash
 curl http://localhost:8080/v1/health
-# → {"status":"ok","tip_height":1}
+# → {"status":"ok","version":"0.1.0"}
 ```
 
 **Web Explorer:** Open `http://localhost:8080/ui/` in your browser.
@@ -88,13 +90,20 @@ docker compose run --rm tui-explorer
 docker compose run --rm cli creg status npm:lodash@4.17.21
 ```
 
-### Three-Validator Testnet
+### Bootstrap Testnet (Single Validator On This Host)
 
 ```bash
-docker compose -f docker-compose.testnet.yml up -d
+python scripts/generate-testnet-keys.py --nodes 1 --output .env.testnet
+docker compose --env-file .env.testnet -f docker-compose.testnet.yml up -d --build
 ```
 
-This starts 3 validators, IPFS, Anvil, PostgreSQL (for indexing), a faucet, and the web explorer. Consensus requires 3/3 approvals (BFT threshold: 2 Byzantine faults tolerated with 7+ validators).
+This starts the bootstrap-host services: `node-1`, IPFS, Anvil, PostgreSQL, faucet, and the web explorer.
+
+To add more validators, run one validator per additional computer:
+
+```bash
+docker compose --env-file validator.env -f docker-compose.validator.yml up -d --build
+```
 
 ### Stopping
 

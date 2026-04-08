@@ -4,13 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CREG Testnet Faucet</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💧</text></svg>">
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
@@ -21,212 +18,135 @@
             color: #fff;
             padding: 20px;
         }
-        
+
         .container {
-            background: rgba(255, 255, 255, 0.05);
+            background: rgba(255,255,255,0.05);
             backdrop-filter: blur(10px);
             border-radius: 20px;
             padding: 40px;
-            max-width: 500px;
+            max-width: 540px;
             width: 100%;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255,255,255,0.1);
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
         }
-        
-        .header {
-            text-align: center;
-            margin-bottom: 30px;
-        }
-        
-        .logo {
-            font-size: 48px;
-            margin-bottom: 10px;
-        }
-        
+
+        .header { text-align: center; margin-bottom: 30px; }
+        .logo { font-size: 48px; margin-bottom: 10px; }
         .title {
-            font-size: 28px;
-            font-weight: 700;
+            font-size: 28px; font-weight: 700;
             background: linear-gradient(90deg, #00d4aa, #00a8e8);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
         }
-        
-        .subtitle {
-            color: #888;
-            margin-top: 8px;
-            font-size: 14px;
-        }
-        
+        .subtitle { color: #888; margin-top: 8px; font-size: 14px; }
+
         .info-box {
-            background: rgba(0, 212, 170, 0.1);
-            border: 1px solid rgba(0, 212, 170, 0.3);
-            border-radius: 12px;
-            padding: 16px;
-            margin-bottom: 24px;
+            background: rgba(0,212,170,0.1); border: 1px solid rgba(0,212,170,0.3);
+            border-radius: 12px; padding: 16px; margin-bottom: 24px;
         }
-        
-        .info-box h3 {
-            color: #00d4aa;
-            font-size: 14px;
-            margin-bottom: 8px;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-        
-        .info-box p {
-            color: #aaa;
-            font-size: 13px;
-            line-height: 1.5;
-        }
-        
-        .form-group {
-            margin-bottom: 20px;
-        }
-        
-        label {
-            display: block;
-            margin-bottom: 8px;
-            font-size: 14px;
-            color: #ccc;
-        }
-        
+        .info-box h3 { color: #00d4aa; font-size: 14px; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+        .info-box p  { color: #aaa; font-size: 13px; line-height: 1.5; }
+
+        .form-group { margin-bottom: 20px; }
+        label { display: block; margin-bottom: 8px; font-size: 14px; color: #ccc; }
+
         input[type="text"] {
-            width: 100%;
-            padding: 14px 16px;
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 10px;
-            color: #fff;
-            font-size: 15px;
-            transition: all 0.3s ease;
+            width: 100%; padding: 14px 16px;
+            background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 10px; color: #fff; font-size: 15px; transition: all 0.3s ease;
         }
-        
-        input[type="text"]:focus {
-            outline: none;
-            border-color: #00d4aa;
-            background: rgba(255, 255, 255, 0.08);
-        }
-        
-        input[type="text"]::placeholder {
-            color: #666;
-        }
-        
+        input[type="text"]:focus { outline: none; border-color: #00d4aa; background: rgba(255,255,255,0.08); }
+        input[type="text"]::placeholder { color: #666; }
+        input[type="text"]:read-only { opacity: 0.6; }
+
         .btn {
-            width: 100%;
-            padding: 16px;
+            width: 100%; padding: 16px;
             background: linear-gradient(90deg, #00d4aa, #00a8e8);
-            border: none;
-            border-radius: 10px;
-            color: #fff;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
+            border: none; border-radius: 10px; color: #fff;
+            font-size: 16px; font-weight: 600; cursor: pointer;
             transition: all 0.3s ease;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
+            display: flex; align-items: center; justify-content: center; gap: 8px;
         }
-        
-        .btn:hover:not(:disabled) {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 30px rgba(0, 212, 170, 0.3);
+        .btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 10px 30px rgba(0,212,170,0.3); }
+        .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+        .btn.loading { pointer-events: none; }
+
+        .btn-secondary {
+            background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);
+            padding: 12px 16px; font-size: 14px;
         }
-        
-        .btn:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-        }
-        
-        .btn.loading {
-            pointer-events: none;
-        }
-        
+        .btn-secondary:hover:not(:disabled) { background: rgba(255,255,255,0.15); box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
+
+        .btn-row { display: flex; gap: 10px; margin-bottom: 16px; }
+        .btn-row .btn-secondary { flex: 1; margin-bottom: 0; }
+
         .spinner {
-            width: 20px;
-            height: 20px;
-            border: 2px solid rgba(255, 255, 255, 0.3);
-            border-top-color: #fff;
-            border-radius: 50%;
-            animation: spin 0.8s linear infinite;
+            width: 20px; height: 20px;
+            border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff;
+            border-radius: 50%; animation: spin 0.8s linear infinite;
         }
-        
-        @keyframes spin {
-            to { transform: rotate(360deg); }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .message { margin-top: 16px; padding: 14px 16px; border-radius: 10px; font-size: 14px; display: none; }
+        .message.success { display: block; background: rgba(0,212,170,0.15); border: 1px solid rgba(0,212,170,0.3); color: #00d4aa; }
+        .message.error   { display: block; background: rgba(255,71,87,0.15);  border: 1px solid rgba(255,71,87,0.3);  color: #ff4757; }
+
+        .balance-display {
+            text-align: center; padding: 16px; margin-bottom: 20px;
+            background: rgba(255,255,255,0.04); border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.08); display: none;
         }
-        
-        .message {
-            margin-top: 16px;
-            padding: 14px 16px;
-            border-radius: 10px;
-            font-size: 14px;
-            display: none;
+        .balance-display.visible { display: block; }
+        .balance-value { font-size: 28px; font-weight: 700; color: #00d4aa; }
+        .balance-label { font-size: 13px; color: #888; margin-top: 4px; }
+
+        .wallet-status {
+            display: flex; align-items: center; gap: 8px; margin-bottom: 12px;
+            padding: 10px 14px; background: rgba(0,168,232,0.1);
+            border: 1px solid rgba(0,168,232,0.25); border-radius: 10px;
+            font-size: 13px; color: #00a8e8;
         }
-        
-        .message.success {
-            display: block;
-            background: rgba(0, 212, 170, 0.15);
-            border: 1px solid rgba(0, 212, 170, 0.3);
-            color: #00d4aa;
+        .wallet-status .disconnect {
+            margin-left: auto; cursor: pointer; opacity: 0.7;
+            background: none; border: none; color: #ff4757; font-size: 13px;
         }
-        
-        .message.error {
-            display: block;
-            background: rgba(255, 71, 87, 0.15);
-            border: 1px solid rgba(255, 71, 87, 0.3);
-            color: #ff4757;
-        }
-        
+        .wallet-status .disconnect:hover { opacity: 1; }
+
         .stats {
-            margin-top: 24px;
-            padding-top: 24px;
-            border-top: 1px solid rgba(255, 255, 255, 0.1);
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 16px;
+            margin-top: 24px; padding-top: 24px;
+            border-top: 1px solid rgba(255,255,255,0.1);
+            display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px;
         }
-        
-        .stat {
-            text-align: center;
+        .stat { text-align: center; }
+        .stat-value { font-size: 24px; font-weight: 700; color: #00d4aa; }
+        .stat-label { font-size: 12px; color: #888; margin-top: 4px; }
+
+        .network-info {
+            margin-top: 20px; padding: 16px;
+            background: rgba(255,255,255,0.04); border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.08);
         }
-        
-        .stat-value {
-            font-size: 24px;
-            font-weight: 700;
-            color: #00d4aa;
+        .network-info h4 { color: #ccc; font-size: 13px; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+        .network-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; font-size: 12px; }
+        .network-row .label { color: #888; }
+        .network-row .value {
+            color: #bbb; font-family: 'SF Mono','Fira Code',monospace; font-size: 11px;
+            max-width: 260px; overflow: hidden; text-overflow: ellipsis; cursor: pointer;
         }
-        
-        .stat-label {
-            font-size: 12px;
-            color: #888;
-            margin-top: 4px;
+        .network-row .value:hover { color: #00d4aa; }
+
+        .next-steps {
+            margin-top: 20px; padding: 16px;
+            background: rgba(0,168,232,0.08); border: 1px solid rgba(0,168,232,0.2);
+            border-radius: 12px;
         }
-        
-        .footer {
-            margin-top: 24px;
-            text-align: center;
-            font-size: 12px;
-            color: #666;
-        }
-        
-        .footer a {
-            color: #00a8e8;
-            text-decoration: none;
-        }
-        
-        .tx-link {
-            display: inline-block;
-            margin-top: 8px;
-            color: #00a8e8;
-            text-decoration: none;
-            font-size: 12px;
-        }
-        
-        .tx-link:hover {
-            text-decoration: underline;
-        }
+        .next-steps h4 { color: #00a8e8; font-size: 13px; margin-bottom: 8px; }
+        .next-steps ol { padding-left: 18px; color: #aaa; font-size: 13px; line-height: 1.8; }
+        .next-steps a { color: #00d4aa; text-decoration: none; }
+        .next-steps a:hover { text-decoration: underline; }
+
+        .footer { margin-top: 24px; text-align: center; font-size: 12px; color: #666; }
+        .footer a { color: #00a8e8; text-decoration: none; }
+        .tx-link { display: inline-block; margin-top: 8px; color: #00a8e8; text-decoration: none; font-size: 12px; word-break: break-all; }
     </style>
 </head>
 <body>
@@ -236,36 +156,48 @@
             <h1 class="title">CREG Testnet Faucet</h1>
             <p class="subtitle">Get free test tokens for the Chain Registry testnet</p>
         </div>
-        
+
         <div class="info-box">
             <h3>ℹ️ Testnet Information</h3>
             <p>
-                • Receive 1000 tCREG per request<br>
-                • 1 minute cooldown between requests<br>
-                • Maximum balance: 10,000 tCREG<br>
+                • Receive <span id="dripAmountInfo">1000</span> tCREG per request<br>
+                • <span id="cooldownInfo">60</span>s cooldown between requests<br>
+                • Maximum balance: <span id="maxBalanceInfo">10,000</span> tCREG<br>
                 • For testing purposes only
             </p>
         </div>
-        
-        <form id="faucetForm">
-            <div class="form-group">
-                <label for="address">Ethereum Address</label>
-                <input 
-                    type="text" 
-                    id="address" 
-                    placeholder="0x..."
-                    autocomplete="off"
-                    required
-                >
+
+        <!-- Wallet connect (optional — auto-fills address) -->
+        <div id="walletSection">
+            <div id="walletStatus" class="wallet-status" style="display:none">
+                <span>🔗</span>
+                <span id="walletAddr"></span>
+                <button class="disconnect" onclick="disconnectWallet()">✕ Disconnect</button>
             </div>
-            
+            <div id="walletButtons" class="btn-row">
+                <button class="btn btn-secondary" onclick="connectMetaMask()">🦊 MetaMask</button>
+                <button class="btn btn-secondary" onclick="connectManual()">⌨️ Paste Address</button>
+            </div>
+        </div>
+
+        <!-- Balance display -->
+        <div id="balanceDisplay" class="balance-display">
+            <div class="balance-value" id="balanceValue">0</div>
+            <div class="balance-label">tCREG balance</div>
+        </div>
+
+        <form id="faucetForm">
+            <div class="form-group" id="addressGroup" style="display:none">
+                <label for="address">Ethereum Address</label>
+                <input type="text" id="address" placeholder="0x..." autocomplete="off" required>
+            </div>
             <button type="submit" class="btn" id="submitBtn">
                 <span>Request Test Tokens</span>
             </button>
         </form>
-        
+
         <div id="message" class="message"></div>
-        
+
         <div class="stats">
             <div class="stat">
                 <div class="stat-value" id="dripAmount">1000</div>
@@ -275,11 +207,50 @@
                 <div class="stat-value" id="cooldown">60s</div>
                 <div class="stat-label">Cooldown</div>
             </div>
+            <div class="stat">
+                <div class="stat-value" id="totalDrips">0</div>
+                <div class="stat-label">Total Drips</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value" id="faucetBalance">—</div>
+                <div class="stat-label">Faucet Reserve</div>
+            </div>
         </div>
-        
+
+        <!-- Network configuration -->
+        <div class="network-info" id="networkInfo">
+            <h4>🔗 Network Configuration</h4>
+            <div class="network-row">
+                <span class="label">Chain ID</span>
+                <span class="value" id="chainId" onclick="copyText(this)">31337</span>
+            </div>
+            <div class="network-row">
+                <span class="label">RPC URL</span>
+                <span class="value" id="rpcUrl" onclick="copyText(this)">—</span>
+            </div>
+            <div class="network-row">
+                <span class="label">Token Contract</span>
+                <span class="value" id="tokenContract" onclick="copyText(this)">—</span>
+            </div>
+            <div class="network-row">
+                <span class="label">Currency</span>
+                <span class="value">tCREG (ERC-20)</span>
+            </div>
+        </div>
+
+        <!-- Next steps -->
+        <div class="next-steps">
+            <h4>🚀 Next Steps</h4>
+            <ol>
+                <li>Get your test tokens above</li>
+                <li>Open the <a href="/" id="explorerLink" target="_blank">Chain Registry Explorer</a></li>
+                <li>Connect your wallet and stake as a publisher or validator</li>
+            </ol>
+        </div>
+
         <div class="footer">
             <p>Part of the <a href="#">Chain Registry</a> ecosystem</p>
-            <p style="margin-top: 8px;">Testnet Only • Not Real Value</p>
+            <p style="margin-top: 8px;">Testnet Only &bull; Not Real Value</p>
         </div>
     </div>
 
@@ -288,68 +259,160 @@
         const submitBtn = document.getElementById('submitBtn');
         const messageEl = document.getElementById('message');
         const addressInput = document.getElementById('address');
+        const addressGroup = document.getElementById('addressGroup');
+        const walletButtons = document.getElementById('walletButtons');
+        const walletStatusEl = document.getElementById('walletStatus');
+        const balanceDisplay = document.getElementById('balanceDisplay');
 
-        // Load stats on page load
+        let connectedAddress = null;
+
+        // ── Wallet connection (optional — auto-fills address) ─────
+
+        async function connectMetaMask() {
+            if (!window.ethereum) {
+                showMessage('MetaMask not detected. Install the MetaMask extension, or click "Paste Address" to enter manually.', 'error');
+                return;
+            }
+            try {
+                const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+                const addr = accounts && accounts[0];
+                if (!addr) { showMessage('No account returned from MetaMask.', 'error'); return; }
+
+                const targetChainId = '0x7a69'; // 31337
+                try {
+                    await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: targetChainId }] });
+                } catch (switchErr) {
+                    if (switchErr.code === 4902 || (switchErr.message || '').includes('Unrecognized')) {
+                        const rpc = document.getElementById('rpcUrl').textContent;
+                        await window.ethereum.request({
+                            method: 'wallet_addEthereumChain',
+                            params: [{
+                                chainId: targetChainId,
+                                chainName: 'CREG Testnet (Anvil)',
+                                nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+                                rpcUrls: [rpc || 'http://127.0.0.1:8545'],
+                            }],
+                        });
+                    }
+                }
+
+                setConnected(addr);
+            } catch (err) {
+                showMessage('MetaMask connection failed: ' + (err.message || err), 'error');
+            }
+        }
+
+        function connectManual() {
+            walletButtons.style.display = 'none';
+            addressGroup.style.display = 'block';
+            addressInput.focus();
+        }
+
+        function disconnectWallet() {
+            connectedAddress = null;
+            walletStatusEl.style.display = 'none';
+            walletButtons.style.display = 'flex';
+            addressGroup.style.display = 'none';
+            addressInput.value = '';
+            addressInput.readOnly = false;
+            balanceDisplay.classList.remove('visible');
+        }
+
+        function setConnected(addr) {
+            connectedAddress = addr;
+            document.getElementById('walletAddr').textContent = addr.slice(0, 6) + '...' + addr.slice(-4);
+            walletStatusEl.style.display = 'flex';
+            walletButtons.style.display = 'none';
+            addressGroup.style.display = 'none';
+            addressInput.value = addr;
+            addressInput.readOnly = true;
+            fetchBalance(addr);
+        }
+
+        async function fetchBalance(addr) {
+            try {
+                const res = await fetch('/api/balance/' + addr);
+                if (res.ok) {
+                    const data = await res.json();
+                    balanceDisplay.classList.add('visible');
+                    document.getElementById('balanceValue').textContent =
+                        parseFloat(data.balance_formatted || '0').toLocaleString(undefined, { maximumFractionDigits: 2 });
+                }
+            } catch (e) { console.error('Balance fetch failed:', e); }
+        }
+
+        // ── Stats and network info ────────────────────────────────
+
         async function loadStats() {
             try {
                 const response = await fetch('/api/stats');
                 const data = await response.json();
-                document.getElementById('dripAmount').textContent = 
-                    (parseInt(data.drip_amount) / 1e18).toLocaleString();
-                document.getElementById('cooldown').textContent = 
-                    data.cooldown_seconds + 's';
-            } catch (e) {
-                console.error('Failed to load stats:', e);
-            }
+                const drip = parseInt(data.drip_amount) / 1e18;
+                document.getElementById('dripAmount').textContent = drip.toLocaleString();
+                document.getElementById('dripAmountInfo').textContent = drip.toLocaleString();
+                document.getElementById('cooldown').textContent = data.cooldown_seconds + 's';
+                document.getElementById('cooldownInfo').textContent = data.cooldown_seconds;
+                if (data.stats) document.getElementById('totalDrips').textContent = data.stats.total_drips || 0;
+                if (data.faucet_balance_formatted) {
+                    document.getElementById('faucetBalance').textContent =
+                        parseFloat(data.faucet_balance_formatted).toLocaleString(undefined, { maximumFractionDigits: 0 });
+                }
+                if (data.token_contract) document.getElementById('tokenContract').textContent = data.token_contract;
+            } catch (e) { console.error('Failed to load stats:', e); }
+        }
+
+        async function loadNetworkInfo() {
+            try {
+                const res = await fetch('/api/network');
+                if (!res.ok) return;
+                const info = await res.json();
+                if (info.chain_id) document.getElementById('chainId').textContent = info.chain_id;
+                if (info.rpc_url) document.getElementById('rpcUrl').textContent = info.rpc_url;
+                if (info.token_contract) document.getElementById('tokenContract').textContent = info.token_contract;
+                if (info.explorer_url) {
+                    const link = document.getElementById('explorerLink');
+                    link.href = info.explorer_url;
+                }
+            } catch (e) { /* /api/network may not exist yet */ }
         }
 
         loadStats();
+        loadNetworkInfo();
+
+        // ── Form submission ───────────────────────────────────────
 
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
-            
-            const address = addressInput.value.trim();
-            
-            // Basic validation
+            const address = connectedAddress || addressInput.value.trim();
             if (!address.match(/^0x[a-fA-F0-9]{40}$/)) {
-                showMessage('Please enter a valid Ethereum address (0x...)', 'error');
+                showMessage('Please enter a valid Ethereum address (0x followed by 40 hex characters).', 'error');
                 return;
             }
-            
             setLoading(true);
             messageEl.className = 'message';
             messageEl.style.display = 'none';
-            
             try {
                 const response = await fetch('/api/drip', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        address: address,
-                        captcha: null
-                    })
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ address: address })
                 });
-                
                 const data = await response.json();
-                
                 if (data.success) {
-                    showMessage(
-                        `✅ Success! ${data.amount} tCREG sent to your address.`,
-                        'success',
-                        data.tx_hash
-                    );
-                    addressInput.value = '';
+                    showMessage('✅ Success! ' + (data.amount || '1000') + ' tCREG sent to your address.', 'success', data.tx_hash);
+                    fetchBalance(address);
+                    loadStats();
                 } else {
-                    showMessage(`❌ ${data.message}`, 'error');
+                    showMessage('❌ ' + data.message, 'error');
                 }
             } catch (error) {
-                showMessage(`❌ Network error: ${error.message}`, 'error');
+                showMessage('❌ Network error: ' + error.message, 'error');
             } finally {
                 setLoading(false);
             }
         });
+
+        // ── Helpers ───────────────────────────────────────────────
 
         function setLoading(loading) {
             submitBtn.disabled = loading;
@@ -362,21 +425,33 @@
             }
         }
 
-        function showMessage(text, type, txHash = null) {
-            messageEl.className = `message ${type}`;
+        function showMessage(text, type, txHash) {
+            messageEl.className = 'message ' + type;
             messageEl.innerHTML = text;
-            
-            if (txHash) {
-                messageEl.innerHTML += `<br><a href="#" class="tx-link" onclick="alert('Transaction: ${txHash}'); return false;">View Transaction ↗</a>`;
+            if (txHash) messageEl.innerHTML += '<br><span class="tx-link">Tx: ' + txHash + '</span>';
+        }
+
+        function copyText(el) {
+            var text = el.textContent;
+            if (text && text !== '—') {
+                navigator.clipboard.writeText(text).then(function() {
+                    var original = el.textContent;
+                    el.textContent = 'Copied!';
+                    setTimeout(function() { el.textContent = original; }, 1500);
+                });
             }
         }
 
-        // Auto-format address input
-        addressInput.addEventListener('input', (e) => {
-            let value = e.target.value;
+        addressInput.addEventListener('input', function(e) {
+            var value = e.target.value;
             if (value && !value.startsWith('0x') && value.match(/^[a-fA-F0-9]/)) {
                 e.target.value = '0x' + value;
             }
+        });
+
+        addressInput.addEventListener('change', function(e) {
+            var addr = e.target.value.trim();
+            if (addr.match(/^0x[a-fA-F0-9]{40}$/)) fetchBalance(addr);
         });
     </script>
 </body>

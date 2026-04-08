@@ -56,6 +56,8 @@ pub struct NodeConfig {
     pub eth_rpc_url: String,
     /// Registry contract address on Ethereum.
     pub registry_addr: String,
+    /// Governance contract address used to execute privileged registry actions.
+    pub governance_addr: String,
     /// Test token contract address used by wallet and faucet flows.
     pub token_addr: String,
     /// Staking contract address used by publisher and validator staking.
@@ -136,6 +138,10 @@ impl NodeConfig {
                 "CREG_REGISTRY_ADDR",
                 "0x0000000000000000000000000000000000000000",
             ),
+            governance_addr: env(
+                "CREG_GOVERNANCE_ADDR",
+                "0x0000000000000000000000000000000000000000",
+            ),
             token_addr: env(
                 "CREG_TOKEN_ADDR",
                 "0x0000000000000000000000000000000000000000",
@@ -199,6 +205,16 @@ impl NodeConfig {
             errors.push(
                 "CREG_REGISTRY_ADDR is the zero address. \
                  Deploy Registry.sol and set CREG_REGISTRY_ADDR for Ethereum bridging."
+                    .into(),
+            );
+        }
+
+        if self.bridge_privkey.is_some()
+            && self.governance_addr == "0x0000000000000000000000000000000000000000"
+        {
+            errors.push(
+                "CREG_GOVERNANCE_ADDR is the zero address. \
+                 Set CREG_GOVERNANCE_ADDR so the bridge can execute rollup settlement via Governance.sol."
                     .into(),
             );
         }

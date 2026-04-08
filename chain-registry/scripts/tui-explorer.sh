@@ -6,17 +6,27 @@ set -e
 
 MODE="${1:-dev}"
 COMPOSE_FILE="docker-compose.yml"
+NODE_SERVICE="node"
+NODE_CONTAINER="creg-node"
+COMPOSE_ARGS=()
 
-# Determine which compose file to use
+# Determine which compose file and node container to use
 case "$MODE" in
   dev|single)
     COMPOSE_FILE="docker-compose.yml"
+    NODE_SERVICE="node"
+    NODE_CONTAINER="creg-node"
     ;;
   testnet)
     COMPOSE_FILE="docker-compose.testnet.yml"
+    NODE_SERVICE="node-1"
+    NODE_CONTAINER="creg-testnet-node-1"
+    COMPOSE_ARGS+=(--env-file .env.testnet)
     ;;
   light)
     COMPOSE_FILE="docker-compose.light.yml"
+    NODE_SERVICE="node-light"
+    NODE_CONTAINER="creg-node-light"
     ;;
   *)
     echo "Usage: $0 [dev|testnet|light]"
@@ -28,6 +38,10 @@ case "$MODE" in
     exit 1
     ;;
 esac
+
+compose() {
+  docker compose "${COMPOSE_ARGS[@]}" -f "$COMPOSE_FILE" "$@"
+}
 
 echo "🚀 Launching Chain Registry TUI Explorer..."
 echo "   Mode: $MODE"
@@ -42,9 +56,14 @@ fi
 
 # Ensure the node is running
 echo "🔍 Checking if node is running..."
-if ! docker compose -f "$COMPOSE_FILE" ps | grep -q "creg-node"; then
+if ! docker ps --filter "name=^/${NODE_CONTAINER}$" --format '{{.Names}}' | grep -q .; then
     echo "⚠️  Node is not running. Starting it first..."
-    docker compose -f "$COMPOSE_FILE" up -d
+  if [ "$MODE" = "testnet" ]; then
+    compose up -d ipfs anvil postgres
+    compose up -d --no-deps node-1 faucet web-explorer
+  else
+    compose up -d "$NODE_SERVICE"
+  fi
     
     # Wait for node to be healthy
     echo "⏳ Waiting for node to be ready..."
@@ -66,8 +85,10 @@ echo "🖥️  Starting TUI Explorer..."
 echo "   Press '?' for help, 'q' to quit"
 echo ""
 
-# Run with TTY allocation
-docker compose -f "$COMPOSE_FILE" run --rm tui-explorer
+if ! docker exec -it "$NODE_CONTAINER" /app/creg console --node-url http://127.0.0.1:8080; then
+  echo "⚠️  Direct console attach failed, falling back to one-shot TUI container..."
+  compose run --rm --no-deps tui-explorer
+fi
 
 echo ""
 echo "👋 TUI Explorer closed"

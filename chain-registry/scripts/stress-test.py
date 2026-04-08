@@ -16,6 +16,7 @@ Output:
 
 import argparse
 import asyncio
+import contextlib
 import hashlib
 import io
 import json
@@ -64,6 +65,76 @@ class StressReport:
     throughput_pkgs_per_sec: float = 0.0
     start_time: str = ""
     end_time: str = ""
+
+
+@dataclass
+class ProgressTracker:
+    total_packages: int
+    started_at: float = field(default_factory=time.time)
+    started: int = 0
+    accepted: int = 0
+    completed: int = 0
+    verified: int = 0
+    failed: int = 0
+    timed_out: int = 0
+    in_flight: int = 0
+    _lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
+
+    async def package_started(self) -> None:
+        async with self._lock:
+            self.started += 1
+            self.in_flight += 1
+
+    async def package_accepted(self) -> None:
+        async with self._lock:
+            self.accepted += 1
+
+    async def package_finished(self, result: PublishResult) -> None:
+        async with self._lock:
+            self.completed += 1
+            self.in_flight = max(0, self.in_flight - 1)
+            if result.verified_at:
+                self.verified += 1
+            elif result.error:
+                if "Timeout" in result.error:
+                    self.timed_out += 1
+                else:
+                    self.failed += 1
+
+    async def snapshot(self) -> dict[str, float | int]:
+        async with self._lock:
+            return {
+                "total_packages": self.total_packages,
+                "started_at": self.started_at,
+                "started": self.started,
+                "accepted": self.accepted,
+                "completed": self.completed,
+                "verified": self.verified,
+                "failed": self.failed,
+                "timed_out": self.timed_out,
+                "in_flight": self.in_flight,
+            }
+
+
+async def report_progress(progress: ProgressTracker, interval: float) -> None:
+    if interval <= 0:
+        return
+
+    while True:
+        await asyncio.sleep(interval)
+        snapshot = await progress.snapshot()
+        elapsed = max(time.time() - snapshot["started_at"], 0.001)
+        completion_rate = snapshot["completed"] / elapsed
+        print(
+            "[progress] "
+            f"completed {snapshot['completed']}/{snapshot['total_packages']} | "
+            f"accepted {snapshot['accepted']} | "
+            f"verified {snapshot['verified']} | "
+            f"failed {snapshot['failed']} | "
+            f"timed out {snapshot['timed_out']} | "
+            f"in flight {snapshot['in_flight']} | "
+            f"{completion_rate:.2f} completed/s"
+        )
 
 
 def create_dummy_tarball(name: str, version: str) -> bytes:
@@ -228,6 +299,7 @@ async def consumer(
     publisher_pubkey: str,
     results: list,
     max_wait: float,
+    progress: ProgressTracker,
 ) -> None:
     """Consume packages from the queue, upload to IPFS, submit, and verify."""
     while True:
@@ -238,6 +310,8 @@ async def consumer(
 
         canonical, content_hash, tarball = item
         node_url = random.choice(node_urls)
+        await progress.package_started()
+        result: Optional[PublishResult] = None
 
         try:
             ipfs_cid = await ipfs_upload(session, tarball)
@@ -246,15 +320,18 @@ async def consumer(
                 canonical, content_hash, ipfs_cid
             )
             if result.accepted_at:
+                await progress.package_accepted()
                 await wait_for_verification(session, node_url, canonical, result, max_wait)
-            results.append(result)
         except Exception as e:
-            results.append(PublishResult(
+            result = PublishResult(
                 canonical=canonical,
                 submitted_at=time.time(),
                 error=str(e),
-            ))
+            )
         finally:
+            if result is not None:
+                results.append(result)
+                await progress.package_finished(result)
             queue.task_done()
 
 
@@ -304,6 +381,8 @@ async def run_stress_test(args) -> StressReport:
 
     queue: asyncio.Queue = asyncio.Queue(maxsize=args.concurrency * 2)
     results: list[PublishResult] = []
+    progress = ProgressTracker(total_packages=args.packages)
+    progress_task: Optional[asyncio.Task] = None
 
     async with aiohttp.ClientSession() as session:
         # Discover live nodes before sending traffic
@@ -315,10 +394,13 @@ async def run_stress_test(args) -> StressReport:
             return report
         print(f"Discovered {len(live_nodes)}/{len(node_urls)} live nodes: {live_nodes}")
 
+        progress_task = asyncio.create_task(report_progress(progress, args.progress_interval))
+
         # Start consumers
         consumers = [
             asyncio.create_task(consumer(
-                queue, session, live_nodes, publisher_key, publisher_pubkey, results, args.timeout
+                queue, session, live_nodes, publisher_key, publisher_pubkey, results, args.timeout,
+                progress
             ))
             for _ in range(args.concurrency)
         ]
@@ -331,6 +413,11 @@ async def run_stress_test(args) -> StressReport:
             await queue.put(None)
 
         await asyncio.gather(*consumers)
+
+        if progress_task is not None:
+            progress_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await progress_task
 
     report.end_time = datetime.utcnow().isoformat() + "Z"
     report.results = [asdict(r) for r in results]
@@ -385,11 +472,15 @@ def main():
     parser.add_argument("--packages", type=int, default=1000, help="Total packages to publish")
     parser.add_argument("--concurrency", type=int, default=20, help="Concurrent publish tasks")
     parser.add_argument("--timeout", type=float, default=60.0, help="Max seconds to wait for verification")
+    parser.add_argument("--progress-interval", type=float, default=5.0, help="Seconds between progress updates")
     parser.add_argument("--output", type=str, default="stress-test-report.json", help="JSON report path")
     args = parser.parse_args()
 
     print(f"Starting stress test: {args.packages} packages across {args.nodes} nodes")
-    print(f"Concurrency: {args.concurrency}, Verification timeout: {args.timeout}s\n")
+    print(
+        f"Concurrency: {args.concurrency}, Verification timeout: {args.timeout}s, "
+        f"Progress updates: every {args.progress_interval}s\n"
+    )
 
     report = asyncio.run(run_stress_test(args))
     print_report(report)

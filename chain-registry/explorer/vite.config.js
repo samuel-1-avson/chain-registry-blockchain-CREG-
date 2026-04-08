@@ -13,7 +13,6 @@ export default defineConfig({
     host: true,
     proxy: {
       '/v1': 'http://127.0.0.1:8080',
-      '/api': 'http://127.0.0.1:8082',
       '/rpc': {
         target: 'http://127.0.0.1:8545',
         changeOrigin: true,

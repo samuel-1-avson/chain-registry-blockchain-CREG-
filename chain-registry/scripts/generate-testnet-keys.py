@@ -108,9 +108,14 @@ def main():
         "# Chain Registry Testnet Environment",
         f"# Generated for {args.nodes} validator node(s)",
         "",
+        "# Host-facing endpoints for commands run outside Docker",
         "CREG_ETH_RPC=http://localhost:8545",
         "CREG_IPFS_URL=http://localhost:5001",
-        "CREG_PG_URL=postgres://${POSTGRES_USER:-creg}:${POSTGRES_PASSWORD:-creg}@localhost:5432/${POSTGRES_DB:-chain_registry}",
+        "",
+        "# Docker-internal endpoints for containers inside docker-compose.testnet.yml",
+        "CREG_DOCKER_ETH_RPC=http://anvil:8545",
+        "CREG_DOCKER_IPFS_URL=http://ipfs:5001",
+        "CREG_PG_URL=postgres://${POSTGRES_USER:-creg}:${POSTGRES_PASSWORD:-creg}@postgres:5432/${POSTGRES_DB:-chain_registry}",
         "",
     ]
 

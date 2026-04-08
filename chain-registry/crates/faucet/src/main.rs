@@ -228,6 +228,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/drip", post(handle_drip))
         .route("/api/stats", get(get_stats))
         .route("/api/balance/:address", get(get_balance))
+        .route("/api/network", get(get_network_info))
         .route("/health", get(health_check))
         .layer(cors)
         .with_state(state);
@@ -638,6 +639,38 @@ async fn get_balance(
             }))
         }
     }
+}
+
+/// Network configuration info for wallet setup and next-step guidance
+async fn get_network_info(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let explorer_url = env_string("FAUCET_EXPLORER_URL", "http://localhost:3000");
+    let rpc_url = env_string("FAUCET_PUBLIC_RPC_URL", "http://localhost:8545");
+    let chain_id = env_u64("FAUCET_CHAIN_ID", 31337);
+
+    JsonResponse(serde_json::json!({
+        "chain_id": chain_id,
+        "rpc_url": rpc_url,
+        "token_contract": state.config.token_contract,
+        "explorer_url": explorer_url,
+        "chain_name": "CREG Testnet (Anvil)",
+        "currency": "tCREG",
+    }))
+}
+
+/// Network configuration info for wallet setup and next-step guidance
+async fn get_network_info(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let explorer_url = env_string("FAUCET_EXPLORER_URL", "http://localhost:3000");
+    let rpc_url = env_string("FAUCET_PUBLIC_RPC_URL", "http://localhost:8545");
+    let chain_id = env_u64("FAUCET_CHAIN_ID", 31337);
+
+    JsonResponse(serde_json::json!({
+        "chain_id": chain_id,
+        "rpc_url": rpc_url,
+        "token_contract": state.config.token_contract,
+        "explorer_url": explorer_url,
+        "chain_name": "CREG Testnet (Anvil)",
+        "currency": "tCREG",
+    }))
 }
 
 /// Health check

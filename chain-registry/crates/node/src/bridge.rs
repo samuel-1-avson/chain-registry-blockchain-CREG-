@@ -8,6 +8,7 @@ use alloy::{
     signers::local::PrivateKeySigner,
     sol,
 };
+use alloy::sol_types::SolCall;
 use common::{PackageStatus, Transaction};
 use sha2::Digest;
 use std::sync::Arc;
@@ -33,6 +34,19 @@ sol!(
             uint256[8] calldata proof,
             uint256[] calldata publicInputs
         ) external;
+    }
+
+    #[sol(rpc)]
+    interface IGovernance {
+        function proposalCount() external view returns (uint256 _0);
+
+        function submit(
+            address target,
+            bytes calldata callData,
+            string calldata description
+        ) external returns (uint256 id);
+
+        function vote(uint256 id, bool approve) external;
     }
 );
 
@@ -85,13 +99,13 @@ pub async fn run(state: Arc<RwLock<NodeState>>) {
 }
 
 async fn tick(state: Arc<RwLock<NodeState>>, last_height: &mut u64) -> anyhow::Result<()> {
-    let (rpc_url, registry_addr, priv_key_opt, current_tip) = {
+    let (rpc_url, registry_addr, governance_addr, priv_key_opt, current_tip) = {
         let s = state.read().await;
         (
             s.config.eth_rpc_url.clone(),
             s.config.registry_addr.clone(),
-            // I4: prefer dedicated CREG_BRIDGE_KEY, fall back to validator key
-            s.config.bridge_privkey.clone().or_else(|| s.config.validator_privkey.clone()),
+            s.config.governance_addr.clone(),
+            s.config.bridge_privkey.clone(),
             s.chain.tip_height()?,
         )
     };
@@ -102,8 +116,20 @@ async fn tick(state: Arc<RwLock<NodeState>>, last_height: &mut u64) -> anyhow::R
 
     let priv_key = match priv_key_opt {
         Some(k) => k,
-        None => return Ok(()), // Only validators with keys can bridge (or specifically authorized bridge nodes)
+        None => {
+            let mut s = state.write().await;
+            s.bridge_status.bridge_sync_status =
+                "Bridge disabled: CREG_BRIDGE_KEY not configured".into();
+            return Ok(());
+        }
     };
+
+    if governance_addr == "0x0000000000000000000000000000000000000000" {
+        let mut s = state.write().await;
+        s.bridge_status.bridge_sync_status =
+            "Bridge disabled: CREG_GOVERNANCE_ADDR not configured".into();
+        return Ok(());
+    }
 
     // ── Setup Ethereum Provider ───────────────────────────────────────────────
     let signer: PrivateKeySigner = priv_key.parse()?;
@@ -115,10 +141,12 @@ async fn tick(state: Arc<RwLock<NodeState>>, last_height: &mut u64) -> anyhow::R
 
     let contract_addr = registry_addr.parse()?;
     let contract = IRegistry::new(contract_addr, &provider);
+    let governance_contract = IGovernance::new(governance_addr.parse()?, &provider);
 
     // ── Rollup Batching ──────────────────────────────────────────────────────
     let mut batch_transactions = Vec::new();
     let prev_root = contract.latestStateRoot().call().await?._0;
+    let mut new_last_height = *last_height;
 
     for h in (*last_height + 1)..=current_tip {
         let block = {
@@ -135,115 +163,149 @@ async fn tick(state: Arc<RwLock<NodeState>>, last_height: &mut u64) -> anyhow::R
                 }
             }
         }
-        *last_height = h;
+        new_last_height = h;
     }
 
-    if !batch_transactions.is_empty() {
-        tracing::info!(
-            "Preparing L2 Rollup Batch with {} transactions",
-            batch_transactions.len()
+    if batch_transactions.is_empty() {
+        *last_height = new_last_height;
+        return Ok(());
+    }
+
+    tracing::info!(
+        "Preparing L2 Rollup Batch with {} transactions",
+        batch_transactions.len()
+    );
+
+    // Calculate Data Root using a binary Merkle tree over the batch.
+    // Each leaf is SHA-256(canonical || content_hash). If the leaf count is odd,
+    // the last leaf is duplicated before pairing.
+    let leaves: Vec<[u8; 32]> = batch_transactions
+        .iter()
+        .map(|tx| {
+            let mut h = sha2::Sha256::new();
+            h.update(tx.id.canonical().as_bytes());
+            h.update(tx.content_hash.as_bytes());
+            h.finalize().into()
+        })
+        .collect();
+
+    let data_root = merkle_root(&leaves);
+
+    // Calculate Next State Root = SHA-256(prev_root || data_root)
+    let mut state_hasher = sha2::Sha256::new();
+    state_hasher.update(prev_root);
+    state_hasher.update(data_root);
+    let next_root: [u8; 32] = state_hasher.finalize().into();
+
+    // Generate a Groth16 ZK proof committing to the batch state transition.
+    //
+    // Public inputs: [prev_root, next_root, data_root]
+    //   - prev_root: on-chain state root before this batch
+    //   - next_root: SHA-256(prev_root || data_root)
+    //   - data_root: Merkle root of the batch transactions
+    //
+    // NOTE: This reuses the PackageValidationCircuit with score=100 and
+    // sandbox=true. A dedicated BatchStateTransitionCircuit would be more
+    // semantically correct but is functionally equivalent for binding the
+    // three hash inputs. Replace when a batch-specific circuit is built.
+    let (proof, public_inputs) = {
+        use zk_validator::{PackageInputs, ZkValidator};
+
+        let inputs = PackageInputs::new(
+            data_root,
+            next_root,
+            100u8,
+            true,
         );
 
-        // Calculate Data Root using a binary Merkle tree over the batch.
-        // Each leaf is SHA-256(canonical || content_hash). If the leaf count is odd,
-        // the last leaf is duplicated before pairing.
-        let leaves: Vec<[u8; 32]> = batch_transactions
-            .iter()
-            .map(|tx| {
-                let mut h = sha2::Sha256::new();
-                h.update(tx.id.canonical().as_bytes());
-                h.update(tx.content_hash.as_bytes());
-                h.finalize().into()
-            })
-            .collect();
-
-        let data_root = merkle_root(&leaves);
-
-        // Calculate Next State Root = SHA-256(prev_root || data_root)
-        let mut state_hasher = sha2::Sha256::new();
-        state_hasher.update(prev_root);
-        state_hasher.update(data_root);
-        let next_root: [u8; 32] = state_hasher.finalize().into();
-
-        // Generate a Groth16 ZK proof committing to the batch state transition.
-        //
-        // Public inputs: [prev_root, next_root, data_root]
-        //   - prev_root: on-chain state root before this batch
-        //   - next_root: SHA-256(prev_root || data_root)
-        //   - data_root: Merkle root of the batch transactions
-        //
-        // NOTE: This reuses the PackageValidationCircuit with score=100 and
-        // sandbox=true. A dedicated BatchStateTransitionCircuit would be more
-        // semantically correct but is functionally equivalent for binding the
-        // three hash inputs. Replace when a batch-specific circuit is built.
-        let (proof, public_inputs) = {
-            use zk_validator::{PackageInputs, ZkValidator};
-
-            let inputs = PackageInputs::new(
-                data_root,
-                next_root,
-                100u8,
-                true,
-            );
-
-            let zk = state.read().await.zk_validator.clone();
-            match zk.generate_proof(&inputs) {
-                Ok(p) => {
-                    // Unpack Groth16 proof elements into the 8 U256s the ZKVerifier expects:
-                    // [Ax, Ay, Bx1, Bx2, By1, By2, Cx, Cy]
-                    let serialized = ZkValidator::serialize_proof(&p).unwrap_or_default();
-                    let mut arr = [alloy::primitives::U256::from(0u64); 8];
-                    for (i, chunk) in serialized.chunks(32).enumerate().take(8) {
-                        let mut bytes = [0u8; 32];
-                        bytes[32 - chunk.len()..].copy_from_slice(chunk);
-                        arr[i] = alloy::primitives::U256::from_be_bytes(bytes);
-                    }
-                    // Public inputs: [prev_root, next_root, data_root]
-                    let pi: Vec<alloy::primitives::U256> = vec![
-                        alloy::primitives::U256::from_be_bytes(prev_root.into()),
-                        alloy::primitives::U256::from_be_bytes(next_root),
-                        alloy::primitives::U256::from_be_bytes(data_root),
-                    ];
-                    (arr, pi)
+        let zk = state.read().await.zk_validator.clone();
+        match zk.generate_proof(&inputs) {
+            Ok(p) => {
+                // Unpack Groth16 proof elements into the 8 U256s the ZKVerifier expects:
+                // [Ax, Ay, Bx1, Bx2, By1, By2, Cx, Cy]
+                let serialized = ZkValidator::serialize_proof(&p).unwrap_or_default();
+                let mut arr = [alloy::primitives::U256::from(0u64); 8];
+                for (i, chunk) in serialized.chunks(32).enumerate().take(8) {
+                    let mut bytes = [0u8; 32];
+                    bytes[32 - chunk.len()..].copy_from_slice(chunk);
+                    arr[i] = alloy::primitives::U256::from_be_bytes(bytes);
                 }
-                Err(e) => {
-                    tracing::warn!(
-                        "ZK proof generation failed, submitting empty commitment: {}",
-                        e
-                    );
-                    let pi = vec![
-                        alloy::primitives::U256::from_be_bytes(prev_root.into()),
-                        alloy::primitives::U256::from_be_bytes(next_root),
-                        alloy::primitives::U256::from_be_bytes(data_root),
-                    ];
-                    ([alloy::primitives::U256::from(0u64); 8], pi)
-                }
+                // Public inputs: [prev_root, next_root, data_root]
+                let pi: Vec<alloy::primitives::U256> = vec![
+                    alloy::primitives::U256::from_be_bytes(prev_root.into()),
+                    alloy::primitives::U256::from_be_bytes(next_root),
+                    alloy::primitives::U256::from_be_bytes(data_root),
+                ];
+                (arr, pi)
             }
-        };
+            Err(e) => {
+                tracing::warn!(
+                    "ZK proof generation failed, submitting empty commitment: {}",
+                    e
+                );
+                let pi = vec![
+                    alloy::primitives::U256::from_be_bytes(prev_root.into()),
+                    alloy::primitives::U256::from_be_bytes(next_root),
+                    alloy::primitives::U256::from_be_bytes(data_root),
+                ];
+                ([alloy::primitives::U256::from(0u64); 8], pi)
+            }
+        }
+    };
 
-        let call = contract.submitRollupBatch(
-            prev_root.into(),
-            next_root.into(),
-            alloy::primitives::U256::from(batch_transactions.len()),
-            data_root.into(),
-            proof,
-            public_inputs,
-        );
+    let proposal_id = governance_contract.proposalCount().call().await?._0;
+    let call_data = IRegistry::submitRollupBatchCall {
+        prevRoot: prev_root.into(),
+        nextRoot: next_root.into(),
+        txCount: alloy::primitives::U256::from(batch_transactions.len()),
+        dataRoot: data_root.into(),
+        proof,
+        publicInputs: public_inputs,
+    }
+    .abi_encode();
 
-        if let Err(e) = call.send().await {
-            tracing::error!("Failed to submit Rollup Batch to L1: {}", e);
-            let mut s = state.write().await;
-            s.bridge_status.bridge_sync_status = format!("Rollup Error: {}", e);
-        } else {
+    let submit_result: anyhow::Result<()> = async {
+        governance_contract
+            .submit(
+                contract_addr,
+                call_data.into(),
+                format!("Submit rollup batch {}", proposal_id),
+            )
+            .send()
+            .await?
+            .watch()
+            .await?;
+
+        governance_contract
+            .vote(proposal_id, true)
+            .send()
+            .await?
+            .watch()
+            .await?;
+
+        Ok(())
+    }
+    .await;
+
+    match submit_result {
+        Ok(()) => {
             tracing::info!(
-                "Successfully settled Rollup Batch on L1. New State Root: 0x{}",
+                "Successfully settled Rollup Batch on L1 via governance proposal {}. New State Root: 0x{}",
+                proposal_id,
                 hex::encode(next_root)
             );
             let eth_block = provider.get_block_number().await.unwrap_or(0);
+            *last_height = new_last_height;
             let mut s = state.write().await;
             s.bridge_status.bridge_sync_status = "L2 Scaled".into();
             s.bridge_status.last_finalized_eth_block = eth_block;
             s.bridge_status.current_state_root = format!("0x{}", hex::encode(next_root));
+        }
+        Err(e) => {
+            tracing::error!("Failed to submit Rollup Batch to L1 via governance: {}", e);
+            let mut s = state.write().await;
+            s.bridge_status.bridge_sync_status = format!("Rollup Error: {}", e);
+            return Err(e);
         }
     }
 

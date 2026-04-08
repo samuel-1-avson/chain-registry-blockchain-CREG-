@@ -10,6 +10,7 @@ import "../Registry.sol";
 import "../Appeal.sol";
 import "../ZKVerifier.sol";
 import "../CregToken.sol";
+import "../testnet/DevZKVerifier.sol";
 
 /// @notice Deploys the full chain-registry contract suite.
 /// @dev forge script contracts/script/Deploy.s.sol --rpc-url $RPC_URL --broadcast --verify -vvvv
@@ -21,7 +22,7 @@ contract DeployChainRegistry is Script {
     VRF           public vrf;
     ChainRegistry public registry;
     Appeal        public appeal;
-    ZKVerifier    public zkVerifier;
+    address       public zkVerifier;
     CregToken     public cregToken;
 
     function run() external {
@@ -45,29 +46,23 @@ contract DeployChainRegistry is Script {
         // All 42M max supply tokens go to deployer for local dev; adjust for production.
         cregToken = new CregToken(deployer, deployer, deployer, deployer);
 
+        // Fund the faucet (Anvil account #1) with 20M tCREG so drip works immediately.
+        address faucetAddr = vm.envOr("FAUCET_ADDRESS", address(0x70997970C51812dc3A010C7d01b50e0d17dc79C8));
+        cregToken.transfer(faucetAddr, 20_000_000 ether);
+
         // Staking now requires the CregToken address for CREG-based staking.
         staking    = new Staking(address(governance), address(cregToken));
 
-        // Phase 1: ZK Verifier setup (Dummy IC for dev)
-        uint256[2] memory a1 = [uint256(0), 0];
-        uint256[2] memory b2x = [uint256(0), 0];
-        uint256[2] memory b2y = [uint256(0), 0];
-        uint256[2] memory g2x = [uint256(0), 0];
-        uint256[2] memory g2y = [uint256(0), 0];
-        uint256[2] memory d2x = [uint256(0), 0];
-        uint256[2] memory d2y = [uint256(0), 0];
-        uint256[2][] memory ic = new uint256[2][](2);
-        ic[0] = [uint256(0), 0];
-        ic[1] = [uint256(0), 0];
-
-        zkVerifier = new ZKVerifier(a1, b2x, b2y, g2x, g2y, d2x, d2y, ic);
+        // Local Anvil deployments use a permissive verifier so the bridge path
+        // can exercise rollup settlement without a production Groth16 key set.
+        zkVerifier = address(new DevZKVerifier());
 
         registry   = new ChainRegistry(
             address(staking),
             address(reputation),
             address(vrf),
             address(governance),
-            address(zkVerifier)
+            zkVerifier
         );
 
         appeal = new Appeal(address(registry), address(staking), address(reputation), address(governance));
@@ -82,7 +77,7 @@ contract DeployChainRegistry is Script {
         console.log("Staking:   ", address(staking));
         console.log("Reputation:", address(reputation));
         console.log("VRF:       ", address(vrf));
-        console.log("ZKVerifier:", address(zkVerifier));
+        console.log("ZKVerifier:", zkVerifier);
         console.log("Registry:  ", address(registry));
         console.log("Appeal:    ", address(appeal));
         console.log("CregToken: ", address(cregToken));
@@ -112,7 +107,7 @@ contract DeployChainRegistry is Script {
             '  "staking":    "', vm.toString(address(staking)),    '",\n',
             '  "reputation": "', vm.toString(address(reputation)), '",\n',
             '  "vrf":        "', vm.toString(address(vrf)),        '",\n',
-            '  "zkVerifier": "', vm.toString(address(zkVerifier)), '",\n',
+            '  "zkVerifier": "', vm.toString(zkVerifier), '",\n',
             '  "registry":   "', vm.toString(address(registry)),   '",\n',
             '  "appeal":     "', vm.toString(address(appeal)),     '",\n',
             '  "cregToken":  "', vm.toString(address(cregToken)),  '",\n',

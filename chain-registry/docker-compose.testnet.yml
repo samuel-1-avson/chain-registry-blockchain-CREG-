@@ -41,8 +41,8 @@ x-node-base: &node-base
     CREG_TESTNET: "true"
     CREG_DATA_DIR: "/data"
     CREG_IS_VALIDATOR: "true"
-    CREG_ETH_RPC: "${CREG_ETH_RPC:-http://anvil:8545}"
-    CREG_IPFS_URL: "${CREG_IPFS_URL:-http://ipfs:5001}"
+    CREG_ETH_RPC: "${CREG_DOCKER_ETH_RPC:-http://anvil:8545}"
+    CREG_IPFS_URL: "${CREG_DOCKER_IPFS_URL:-http://ipfs:5001}"
     CREG_TOKEN_ADDR: "${TESTNET_TOKEN_ADDR:-0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9}"
     CREG_STAKING_ADDR: "${TESTNET_STAKING_ADDR:-0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9}"
     CREG_BLOCK_INTERVAL: "2"
@@ -54,6 +54,7 @@ x-node-base: &node-base
     CREG_WASM_ENABLED: "true"
     CREG_WASM_VALIDATORS_PATH: "/app/validators"
     CREG_REGISTRY_ADDR: "${TESTNET_REGISTRY_ADDR:-0x0165878A594ca255338adfa4d48449f69242Eb8F}"
+    CREG_GOVERNANCE_ADDR: "${TESTNET_GOVERNANCE_ADDR:-0x5FbDB2315678afecb367f032d93F642f64180aa3}"
     CREG_TLS_CERT: "${CREG_TLS_CERT:-/app/certs/server.crt}"
     CREG_TLS_KEY: "${CREG_TLS_KEY:-/app/certs/server.key}"
     RUST_LOG: "info,chain_registry_node=debug,consensus=debug"
@@ -98,7 +99,7 @@ services:
       - "8081:8080"
     volumes:
       - ipfs-data:/data/ipfs
-      - ./scripts/ipfs-cors.sh:/container-init.d/ipfs-cors.sh:ro
+      - ./scripts/ipfs-cors-container.sh:/container-init.d/ipfs-cors.sh:ro
     command: ["daemon", "--init", "--init-profile=server", "--routing=dhtclient"]
     environment:
       - IPFS_PROFILE=server
@@ -178,10 +179,13 @@ services:
       - ./circuits:/app/circuits:ro
       - ./validators:/app/validators:ro
       - ./models:/app/models:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./testnet/certs:/app/certs:ro
     environment:
       <<: *node-env
       CREG_NODE_ID: "node-1"
       CREG_VALIDATOR_KEY: "${NODE1_VALIDATOR_KEY}"
+      CREG_BRIDGE_KEY: "${CREG_BRIDGE_KEY:-0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80}"
       CREG_LISTEN: "0.0.0.0:8080"
       CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/9000"
       CREG_P2P_SEEDS: "${CREG_P2P_SEEDS:-}"
@@ -236,6 +240,9 @@ services:
       FAUCET_IP_COOLDOWN_SECS: "${FAUCET_IP_COOLDOWN_SECS:-60}"
       FAUCET_MAX_BALANCE: "${FAUCET_MAX_BALANCE:-10000000000000000000000}"
       FAUCET_POW_DISABLED: "true"
+      FAUCET_EXPLORER_URL: "http://localhost:3000"
+      FAUCET_PUBLIC_RPC_URL: "http://localhost:8545"
+      FAUCET_CHAIN_ID: "31337"
       RUST_LOG: "info"
     ports:
       - "8082:8082"
@@ -267,7 +274,10 @@ services:
 
   # ── Stress Test service ─────────────────────────────────────────────────────
   stress-test:
-    image: python:3.11-slim
+    image: chain-registry-stress-test:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.stress-test
     container_name: creg-stress-test
     working_dir: /app
     volumes:
@@ -278,11 +288,15 @@ services:
       CREG_IPFS_URL: "http://ipfs:5001"
     env_file:
       - .env.testnet
-    command: |
-      sh -c "
-        pip install aiohttp pynacl &&
-        python stress-test.py --nodes 1 --packages 50 --concurrency 5 --timeout 120
-      "
+    command:
+      - --nodes
+      - "1"
+      - --packages
+      - "50"
+      - --concurrency
+      - "5"
+      - --timeout
+      - "120"
     depends_on:
       node-1:
         condition: service_healthy

@@ -270,9 +270,32 @@ async fn health() -> impl IntoResponse {
     }))
 }
 
+#[derive(Serialize)]
+struct ChainStatsResponse {
+    #[serde(flatten)]
+    chain: crate::chain_store::ChainStats,
+    validator_count: usize,
+    total_stake: u64,
+    peer_count: usize,
+    bridge_status: String,
+    l1_block: u64,
+}
+
 async fn chain_stats(State(state): State<SharedState>) -> impl IntoResponse {
     let s = state.read().await;
-    Json(s.chain.stats())
+    let validators = &s.validator_set.validators;
+    Json(ChainStatsResponse {
+        chain: s.chain.stats(),
+        validator_count: validators.len(),
+        total_stake: validators.iter().map(|validator| validator.stake).sum(),
+        peer_count: s.p2p_status.peers.len(),
+        bridge_status: if s.bridge_status.bridge_sync_status.trim().is_empty() {
+            "Unknown".to_string()
+        } else {
+            s.bridge_status.bridge_sync_status.clone()
+        },
+        l1_block: s.bridge_status.last_finalized_eth_block,
+    })
 }
 
 #[derive(Serialize)]

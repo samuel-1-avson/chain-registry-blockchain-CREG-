@@ -10,7 +10,6 @@ import { privateKeyToAccount } from 'viem/accounts'
 // ============================================
 
 const API_BASE = import.meta.env.VITE_API_BASE || ''
-const FAUCET_BASE = import.meta.env.VITE_FAUCET_BASE || ''
 const RPC_URL = import.meta.env.VITE_RPC_URL || (typeof window !== 'undefined' ? `${window.location.origin}/rpc` : 'http://127.0.0.1:8545')
 const BUILD_CREG_TOKEN_ADDR = import.meta.env.VITE_CREG_TOKEN || null
 const BUILD_STAKING_ADDR = import.meta.env.VITE_STAKING_ADDR || null
@@ -79,37 +78,6 @@ const normalizeWalletAddress = (value) => {
   const parts = value.split(':')
   const candidate = parts[parts.length - 1]
   return isAddress(candidate) ? candidate : null
-}
-
-const hasLeadingZeroBits = (bytes, difficulty) => {
-  const fullBytes = Math.floor(difficulty / 8)
-  const extraBits = difficulty % 8
-
-  for (let index = 0; index < fullBytes; index += 1) {
-    if (bytes[index] !== 0) return false
-  }
-
-  if (extraBits === 0) return true
-  return (bytes[fullBytes] >> (8 - extraBits)) === 0
-}
-
-const solvePowChallenge = async (challenge, difficulty) => {
-  const encoder = new TextEncoder()
-
-  for (let attempt = 0; ; attempt += 1) {
-    const nonce = attempt.toString(16)
-    const payload = encoder.encode(`${challenge}${nonce}`)
-    const digestBuffer = await crypto.subtle.digest('SHA-256', payload)
-    const digestBytes = new Uint8Array(digestBuffer)
-
-    if (hasLeadingZeroBits(digestBytes, difficulty)) {
-      return nonce
-    }
-
-    if (attempt > 0 && attempt % 1024 === 0) {
-      await new Promise((resolve) => setTimeout(resolve, 0))
-    }
-  }
 }
 
 // ============================================
@@ -228,8 +196,6 @@ function App() {
   const [walletProvider, setWalletProvider] = useState(null)
   const [walletBalance, setWalletBalance] = useState(null)
   const [walletKeyInput, setWalletKeyInput] = useState('')
-  const [dripLoading, setDripLoading] = useState(false)
-  const [dripResult, setDripResult] = useState(null)
   const [stakeLoading, setStakeLoading] = useState(false)
   const [stakeResult, setStakeResult] = useState(null)
   const [stakeAmount, setStakeAmount] = useState('')
@@ -428,18 +394,8 @@ function App() {
           args: [walletAccount.address],
         })
         setWalletBalance(formatUnits(rawBalance, 18))
-        return
-      }
-
-      const res = await fetch(`${FAUCET_BASE}/api/balance/${walletAccount.address}`)
-      if (res.ok) {
-        const data = await res.json()
-        const rawBal = data.balance || data.formatted || '0'
-        try {
-          setWalletBalance(formatUnits(BigInt(rawBal), 18))
-        } catch {
-          setWalletBalance(rawBal)
-        }
+      } else {
+        setWalletBalance('0')
       }
     } catch (e) {
       console.error('Failed to refresh wallet balance:', e)
@@ -499,7 +455,6 @@ function App() {
 
     setWalletProvider(provider)
     setWalletAccount({ address, type, providerName })
-    setDripResult(null)
     setStakeResult(null)
   }, [ensureWalletChain])
 
@@ -510,7 +465,6 @@ function App() {
       setWalletProvider(null)
       setWalletAccount({ address: account.address, type: 'local', providerName: 'Private Key', account })
       setWalletKeyInput('')
-      setDripResult(null)
       setStakeResult(null)
     } catch (err) {
       alert('Invalid private key. Must be a valid 32-byte hex string.')
@@ -567,7 +521,6 @@ function App() {
       }
       setWalletProvider(provider)
       setWalletAccount({ address, type: 'walletconnect', providerName: 'WalletConnect' })
-      setDripResult(null)
       setStakeResult(null)
     } catch (err) {
       if (err?.message?.includes('User rejected') || err?.code === 4001) {
@@ -585,7 +538,6 @@ function App() {
     setWalletProvider(null)
     setWalletAccount(null)
     setWalletBalance(null)
-    setDripResult(null)
     setStakeResult(null)
     setStakeAmount('')
   }, [walletProvider])
@@ -612,46 +564,6 @@ function App() {
       walletProvider.removeListener?.('disconnect', handleDisconnect)
     }
   }, [walletProvider, disconnectWallet])
-
-  const requestDrip = useCallback(async () => {
-    if (!walletAccount) return
-    setDripLoading(true)
-    setDripResult(null)
-    try {
-      const dripRequest = async (payload) => {
-        const res = await fetch(`${FAUCET_BASE}/api/drip`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        })
-        const data = await res.json().catch(() => ({ success: false, message: res.statusText }))
-        return { res, data }
-      }
-
-      let { res, data } = await dripRequest({ address: walletAccount.address })
-
-      if (!res.ok && /proof-of-work challenge|proof-of-work nonce|unknown or expired challenge/i.test(data?.message || '')) {
-        setDripResult({ success: false, message: 'Faucet challenge issued. Solving proof-of-work…' })
-        const challengeRes = await fetch(`${FAUCET_BASE}/api/challenge`)
-        const challengeData = await challengeRes.json()
-        const nonce = await solvePowChallenge(challengeData.challenge, challengeData.difficulty)
-        ;({ res, data } = await dripRequest({
-          address: walletAccount.address,
-          challenge: challengeData.challenge,
-          nonce,
-        }))
-      }
-
-      setDripResult(data)
-      if (res.ok) {
-        await refreshWalletBalance()
-      }
-    } catch (err) {
-      setDripResult({ success: false, message: err.message })
-    } finally {
-      setDripLoading(false)
-    }
-  }, [walletAccount, refreshWalletBalance])
 
   const doStake = useCallback(async (role) => {
     if (!walletAccount || !stakeAmount) return
@@ -1393,48 +1305,71 @@ function App() {
                       </div>
                     </div>
 
-                    <div className="wallet-section">
-                      <label className="wallet-label">🚰 Faucet</label>
-                      <button className="wallet-action-btn wallet-action-primary" onClick={requestDrip} disabled={dripLoading}>
-                        {dripLoading ? 'Requesting...' : 'Request 1,000 tCREG'}
-                      </button>
-                      {dripResult && (
-                        <div className={`wallet-result ${dripResult.success ? 'success' : 'error'}`}>
-                          {dripResult.message}
-                          {dripResult.tx_hash && <div className="wallet-tx">Tx: {truncateHash(dripResult.tx_hash, 10, 6)}</div>}
+                    {walletBalance !== null && parseFloat(walletBalance) === 0 ? (
+                      <div className="wallet-section">
+                        <div className="wallet-result warning" style={{ margin: 0 }}>
+                          <div style={{ fontWeight: 600, marginBottom: '6px' }}>⚠️ Your wallet has no tCREG tokens</div>
+                          <div style={{ marginBottom: '8px' }}>Visit the Faucet to get free test tokens before you can stake.</div>
+                          <a
+                            href={`http://${window.location.hostname}:8082`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="wallet-action-btn wallet-action-primary"
+                            style={{ textDecoration: 'none', textAlign: 'center', display: 'block', marginBottom: '8px' }}
+                          >
+                            💧 Open Faucet
+                          </a>
+                          <button className="wallet-action-btn wallet-action-secondary" onClick={refreshWalletBalance} style={{ width: '100%' }}>
+                            🔄 Refresh Balance
+                          </button>
                         </div>
-                      )}
-                    </div>
-
-                    <div className="wallet-section">
-                      <label className="wallet-label">⚡ Stake Tokens</label>
-                      <input
-                        type="number"
-                        className="wallet-input"
-                        placeholder="Amount (e.g. 100)"
-                        value={stakeAmount}
-                        onChange={(e) => setStakeAmount(e.target.value)}
-                      />
-                      <div className="wallet-stake-buttons">
-                        <button className="wallet-action-btn wallet-action-primary" onClick={() => doStake('publisher')} disabled={stakeLoading || !stakeAmount}>
-                          {stakeLoading ? 'Staking...' : 'Stake as Publisher'}
-                        </button>
-                        <button className="wallet-action-btn wallet-action-secondary" onClick={() => doStake('validator')} disabled={stakeLoading || !stakeAmount}>
-                          {stakeLoading ? 'Staking...' : 'Apply as Validator'}
-                        </button>
                       </div>
-                      {(!tokenContractAddress || !stakingContractAddress) && (
-                        <div className="wallet-result warning">
-                          Live staking contracts are not yet available from the running node.
+                    ) : (
+                      <>
+                        <div className="wallet-section">
+                          <label className="wallet-label">📦 Publisher Staking</label>
+                          <div style={{ color: 'var(--text-secondary)', fontSize: '0.82rem', marginBottom: '8px' }}>
+                            Minimum stake: 1 tCREG. Allows you to publish packages.
+                          </div>
+                          <input
+                            type="number"
+                            className="wallet-input"
+                            placeholder="Amount (e.g. 10)"
+                            value={stakeAmount}
+                            onChange={(e) => setStakeAmount(e.target.value)}
+                          />
+                          <button className="wallet-action-btn wallet-action-primary" onClick={() => doStake('publisher')} disabled={stakeLoading || !stakeAmount} style={{ width: '100%', marginTop: '8px' }}>
+                            {stakeLoading ? 'Staking...' : 'Stake as Publisher'}
+                          </button>
                         </div>
-                      )}
-                      {stakeResult && (
-                        <div className={`wallet-result ${stakeResult.success ? 'success' : 'error'}`}>
-                          {stakeResult.message}
-                          {stakeResult.tx && <div className="wallet-tx">Tx: {truncateHash(stakeResult.tx, 10, 6)}</div>}
+
+                        <div className="wallet-section">
+                          <label className="wallet-label">🛡️ Validator Application</label>
+                          <div style={{ color: 'var(--text-secondary)', fontSize: '0.82rem', marginBottom: '8px' }}>
+                            Minimum stake: 100 tCREG. Requires governance approval after application.
+                          </div>
+                          <button className="wallet-action-btn wallet-action-secondary" onClick={() => { if (!stakeAmount) setStakeAmount('100'); doStake('validator'); }} disabled={stakeLoading || !stakeAmount} style={{ width: '100%' }}>
+                            {stakeLoading ? 'Applying...' : 'Apply as Validator'}
+                          </button>
                         </div>
-                      )}
-                    </div>
+
+                        {(!tokenContractAddress || !stakingContractAddress) && (
+                          <div className="wallet-section">
+                            <div className="wallet-result warning">
+                              Live staking contracts are not yet available from the running node.
+                            </div>
+                          </div>
+                        )}
+                        {stakeResult && (
+                          <div className="wallet-section">
+                            <div className={`wallet-result ${stakeResult.success ? 'success' : 'error'}`}>
+                              {stakeResult.message}
+                              {stakeResult.tx && <div className="wallet-tx">Tx: {truncateHash(stakeResult.tx, 10, 6)}</div>}
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    )}
 
                     <div className="wallet-section">
                       <button className="wallet-action-btn wallet-action-danger" onClick={disconnectWallet}>

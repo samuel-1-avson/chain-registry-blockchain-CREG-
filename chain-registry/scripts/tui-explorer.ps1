@@ -6,12 +6,34 @@ param(
     [string]$Mode = "dev"
 )
 
-# Determine which compose file to use
-$ComposeFile = switch ($Mode) {
-    "dev" { "docker-compose.yml" }
-    "single" { "docker-compose.yml" }
-    "testnet" { "docker-compose.testnet.yml" }
-    "light" { "docker-compose.light.yml" }
+# Determine which compose file and node container to use
+$ComposeFile = $null
+$NodeService = $null
+$NodeContainer = $null
+$ComposeExtraArgs = @()
+
+switch ($Mode) {
+    "dev" {
+        $ComposeFile = "docker-compose.yml"
+        $NodeService = "node"
+        $NodeContainer = "creg-node"
+    }
+    "single" {
+        $ComposeFile = "docker-compose.yml"
+        $NodeService = "node"
+        $NodeContainer = "creg-node"
+    }
+    "testnet" {
+        $ComposeFile = "docker-compose.testnet.yml"
+        $NodeService = "node-1"
+        $NodeContainer = "creg-testnet-node-1"
+        $ComposeExtraArgs = @("--env-file", ".env.testnet")
+    }
+    "light" {
+        $ComposeFile = "docker-compose.light.yml"
+        $NodeService = "node-light"
+        $NodeContainer = "creg-node-light"
+    }
     default { 
         Write-Host "Usage: .\tui-explorer.ps1 [dev|testnet|light]"
         Write-Host ""
@@ -21,6 +43,11 @@ $ComposeFile = switch ($Mode) {
         Write-Host "  light    - Resource-constrained light node"
         exit 1
     }
+}
+
+function Invoke-Compose {
+    param([string[]]$Args)
+    & docker compose @ComposeExtraArgs -f $ComposeFile @Args
 }
 
 Write-Host "`u{1F680} Launching Chain Registry TUI Explorer..."
@@ -45,11 +72,16 @@ if ($scriptPath) {
 
 # Ensure the node is running
 Write-Host "`u{1F50D} Checking if node is running..."
-$nodeRunning = docker-compose -f $ComposeFile ps | Select-String "creg-node"
+$nodeRunning = docker ps --filter "name=^/${NodeContainer}$" --format "{{.Names}}"
 
 if (-not $nodeRunning) {
     Write-Host "`u{26A0}  Node is not running. Starting it first..."
-    docker-compose -f $ComposeFile up -d
+    if ($Mode -eq "testnet") {
+        Invoke-Compose @("up", "-d", "ipfs", "anvil", "postgres")
+        Invoke-Compose @("up", "-d", "--no-deps", "node-1", "faucet", "web-explorer")
+    } else {
+        Invoke-Compose @("up", "-d", $NodeService)
+    }
     
     # Wait for node to be healthy
     Write-Host "`u{23F3} Waiting for node to be ready..."
@@ -80,8 +112,12 @@ Write-Host "`u{1F5A5}  Starting TUI Explorer..."
 Write-Host "   Press '?' for help, 'q' to quit"
 Write-Host ""
 
-# Run with TTY allocation
-docker-compose -f $ComposeFile run --rm tui-explorer
+try {
+    docker exec -it $NodeContainer /app/creg console --node-url http://127.0.0.1:8080
+} catch {
+    Write-Warning "Direct console attach failed, falling back to one-shot TUI container..."
+    Invoke-Compose @("run", "--rm", "--no-deps", "tui-explorer")
+}
 
 Write-Host ""
 Write-Host "`u{1F44B} TUI Explorer closed"
