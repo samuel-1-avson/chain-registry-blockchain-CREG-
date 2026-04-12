@@ -40,17 +40,45 @@ impl Default for GossipConfig {
     }
 }
 
+/// Domain-separation tag for the canonical consensus vote message format.
+/// Bumping the version invalidates any cached signatures from older validators.
+pub const VOTE_MESSAGE_DOMAIN: &str = "creg-vote-v1";
+
+/// Canonical message that a validator signs when casting a PBFT vote.
+///
+/// Binds the package canonical, the exact tarball content hash, the verdict,
+/// and the validator's Ed25519 public key so that:
+///   (a) signatures cannot be replayed across package versions,
+///   (b) signatures cannot be replayed across approve/reject flips,
+///   (c) a signature cannot be relabelled to come from a different validator.
+pub fn canonical_vote_message(
+    canonical: &str,
+    content_hash: &str,
+    approved: bool,
+    validator_pubkey: &str,
+) -> String {
+    format!(
+        "{}|{}|{}|{}|{}",
+        VOTE_MESSAGE_DOMAIN, canonical, content_hash, approved, validator_pubkey
+    )
+}
+
 /// Message sent to peers when we produce a PBFT vote.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VoteGossip {
+    /// Consensus subject (canonical package ID at vote time, block hash at seal time).
     pub block_hash: String,
+    /// SHA-256 of the tarball bytes — bound into the signature to prevent
+    /// cross-version replay. Serde default keeps wire-format backward compat.
+    #[serde(default)]
+    pub content_hash: String,
     pub validator_id: String,
     /// Hex-encoded Ed25519 public key of the voting validator.
     pub validator_pubkey: String,
     pub phase: String, // "prepare" | "commit"
     pub approved: bool,
     pub reject_reason: Option<String>,
-    /// Hex-encoded Ed25519 signature of "<block_hash>:<approved>".
+    /// Hex-encoded Ed25519 signature of `canonical_vote_message(...)`.
     pub signature: String,
 }
 

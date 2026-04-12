@@ -28,4 +28,5 @@ tempfile   = "3"
 cap-std    = "3"
 ml-validator = { path = "../ml-validator" }
 base64       = "0.22"
+ed25519-dalek = { workspace = true }
 

@@ -61,8 +61,34 @@ contract Governance {
     uint256 public constant PAUSE_COOLDOWN = 7 days;
 
     /// @notice Tracks co-signers for a pending pause request.
+    /// @dev LEGACY: kept for storage-layout compatibility. The new pause flow
+    ///      uses a single open request (see `openPauseRequest` / `confirmPauseRequest`)
+    ///      to prevent reason-hash griefing where a malicious signer spammed
+    ///      many distinct reason strings to splinter honest co-signers across
+    ///      buckets and block the 2-of-N threshold.
     mapping(bytes32 => mapping(address => bool)) public pauseCoSigners;
     mapping(bytes32 => uint256) public pauseCoSignCount;
+
+    /// @notice Maximum lifetime of an open pause request before it expires and
+    ///         can be replaced. Short enough that a stale request cannot block
+    ///         a legitimate pause response for too long, long enough that real
+    ///         co-signers have time to review and confirm.
+    uint256 public constant PAUSE_REQUEST_TTL = 1 days;
+
+    struct OpenPauseRequest {
+        uint256 openedAt;
+        uint256 nonce;           // incremented every open; makes coSigners per-request
+        address opener;
+        string  reason;
+        uint256 coSignCount;
+    }
+    /// @dev Only one pause request may be open at a time.
+    OpenPauseRequest internal _openPauseRequest;
+
+    /// @dev (nonce, signer) → confirmed? Keyed on the per-request nonce so
+    ///      resetting the request cannot leak a stale confirmation into the
+    ///      next one.
+    mapping(uint256 => mapping(address => bool)) internal _pauseRequestCoSigners;
 
     // ── Events ────────────────────────────────────────────────────────────────
 
@@ -75,6 +101,9 @@ contract Governance {
     event ThresholdUpdated (uint256 newThreshold);
     event EmergencyPaused  (address indexed triggeredBy, string reason, uint256 timestamp);
     event EmergencyUnpaused(address indexed triggeredBy, uint256 timestamp);
+    event PauseRequestOpened   (address indexed opener, string reason, uint256 openedAt);
+    event PauseRequestConfirmed(address indexed signer, uint256 coSignCount);
+    event PauseRequestExpired  (address indexed expiredBy, uint256 openedAt);
 
     // ── Errors ────────────────────────────────────────────────────────────────
 
@@ -121,35 +150,138 @@ contract Governance {
 
     // ── Emergency Pause ────────────────────────────────────────────────────────
 
-    /// @notice Co-sign an emergency pause request.
-    /// @dev Requires at least PAUSE_THRESHOLD (2) distinct signers to co-sign
-    ///      the same reason hash before the pause takes effect.
-    ///      Enforces a 7-day cooldown between successive pauses.
-    /// @param reason Human-readable reason for the pause
+    /// @notice Open a new emergency pause request.
+    /// @dev Only one request can be open at a time. A malicious signer cannot
+    ///      splinter co-signers across distinct reason hashes because subsequent
+    ///      signers confirm the single open request rather than replaying a
+    ///      reason string. Expired requests can be replaced.
+    function openPauseRequest(string calldata reason) external {
+        if (!isSigner[msg.sender]) revert NotSigner();
+        if (bytes(reason).length == 0) revert InvalidPauseReason();
+        if (systemStatus == SystemStatus.Paused) revert SystemPaused();
+        require(
+            block.timestamp >= pausedAt + PAUSE_COOLDOWN,
+            "Pause cooldown active"
+        );
+        require(
+            _openPauseRequest.openedAt == 0
+                || block.timestamp >= _openPauseRequest.openedAt + PAUSE_REQUEST_TTL,
+            "a pause request is already open"
+        );
+
+        _resetOpenPauseRequest();
+        _openPauseRequest.openedAt    = block.timestamp;
+        _openPauseRequest.nonce      += 1;
+        _openPauseRequest.opener      = msg.sender;
+        _openPauseRequest.reason      = reason;
+        _openPauseRequest.coSignCount = 1;
+        _pauseRequestCoSigners[_openPauseRequest.nonce][msg.sender] = true;
+
+        emit PauseRequestOpened(msg.sender, reason, block.timestamp);
+
+        if (PAUSE_THRESHOLD == 1) {
+            _applyPause(msg.sender);
+        }
+    }
+
+    /// @notice Confirm the currently-open pause request.
+    /// @dev Any signer other than the opener may call this. The second
+    ///      confirmation triggers the pause. Reason string is not re-checked —
+    ///      confirming a request by ID (there's only ever one open) removes the
+    ///      reason-hash griefing vector entirely.
+    function confirmPauseRequest() external {
+        if (!isSigner[msg.sender]) revert NotSigner();
+        if (systemStatus == SystemStatus.Paused) revert SystemPaused();
+        require(_openPauseRequest.openedAt != 0, "no open pause request");
+        require(
+            block.timestamp < _openPauseRequest.openedAt + PAUSE_REQUEST_TTL,
+            "open pause request has expired"
+        );
+        require(
+            !_pauseRequestCoSigners[_openPauseRequest.nonce][msg.sender],
+            "already confirmed"
+        );
+
+        _pauseRequestCoSigners[_openPauseRequest.nonce][msg.sender] = true;
+        _openPauseRequest.coSignCount++;
+
+        emit PauseRequestConfirmed(msg.sender, _openPauseRequest.coSignCount);
+
+        if (_openPauseRequest.coSignCount >= PAUSE_THRESHOLD) {
+            _applyPause(msg.sender);
+        }
+    }
+
+    /// @notice Expire a stale open pause request so a new one can be opened.
+    /// @dev Anyone can call; idempotent. Emits an event for auditability.
+    function expirePauseRequest() external {
+        require(_openPauseRequest.openedAt != 0, "no open pause request");
+        require(
+            block.timestamp >= _openPauseRequest.openedAt + PAUSE_REQUEST_TTL,
+            "open pause request has not expired"
+        );
+        uint256 openedAt = _openPauseRequest.openedAt;
+        _resetOpenPauseRequest();
+        emit PauseRequestExpired(msg.sender, openedAt);
+    }
+
+    /// @notice Legacy reason-hash pause flow. Retained so existing governance
+    ///         scripts keep working; inlines the new open-request path.
     function emergencyPause(string calldata reason) external {
         if (!isSigner[msg.sender]) revert NotSigner();
         if (bytes(reason).length == 0) revert InvalidPauseReason();
         if (systemStatus == SystemStatus.Paused) revert SystemPaused();
-
-        // Enforce cooldown since last pause
         require(
             block.timestamp >= pausedAt + PAUSE_COOLDOWN,
             "Pause cooldown active"
         );
 
-        bytes32 reasonHash = keccak256(bytes(reason));
+        bool noOpenRequest =
+            _openPauseRequest.openedAt == 0
+            || block.timestamp >= _openPauseRequest.openedAt + PAUSE_REQUEST_TTL;
 
-        require(!pauseCoSigners[reasonHash][msg.sender], "Already co-signed");
-        pauseCoSigners[reasonHash][msg.sender] = true;
-        pauseCoSignCount[reasonHash]++;
-
-        if (pauseCoSignCount[reasonHash] >= PAUSE_THRESHOLD) {
-            systemStatus = SystemStatus.Paused;
-            pausedAt = block.timestamp;
-            pauseReason = reason;
-
-            emit EmergencyPaused(msg.sender, reason, block.timestamp);
+        if (noOpenRequest) {
+            _resetOpenPauseRequest();
+            _openPauseRequest.openedAt    = block.timestamp;
+            _openPauseRequest.nonce      += 1;
+            _openPauseRequest.opener      = msg.sender;
+            _openPauseRequest.reason      = reason;
+            _openPauseRequest.coSignCount = 1;
+            _pauseRequestCoSigners[_openPauseRequest.nonce][msg.sender] = true;
+            emit PauseRequestOpened(msg.sender, reason, block.timestamp);
+            if (PAUSE_THRESHOLD == 1) {
+                _applyPause(msg.sender);
+            }
+        } else {
+            require(
+                !_pauseRequestCoSigners[_openPauseRequest.nonce][msg.sender],
+                "already confirmed"
+            );
+            _pauseRequestCoSigners[_openPauseRequest.nonce][msg.sender] = true;
+            _openPauseRequest.coSignCount++;
+            emit PauseRequestConfirmed(msg.sender, _openPauseRequest.coSignCount);
+            if (_openPauseRequest.coSignCount >= PAUSE_THRESHOLD) {
+                _applyPause(msg.sender);
+            }
         }
+    }
+
+    function _applyPause(address triggeredBy) internal {
+        systemStatus = SystemStatus.Paused;
+        pausedAt     = block.timestamp;
+        pauseReason  = _openPauseRequest.reason;
+        _resetOpenPauseRequest();
+        emit EmergencyPaused(triggeredBy, pauseReason, block.timestamp);
+    }
+
+    function _resetOpenPauseRequest() internal {
+        // Clear the top-level scalar fields. `nonce` is intentionally preserved
+        // (and incremented on the next open) so that stale co-signer entries
+        // from an expired request cannot collide with the new one.
+        delete _openPauseRequest.openedAt;
+        delete _openPauseRequest.opener;
+        delete _openPauseRequest.reason;
+        delete _openPauseRequest.coSignCount;
     }
 
     /// @notice Unpause the system.

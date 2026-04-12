@@ -30,24 +30,59 @@ pub async fn assess_publisher(
         publisher_pubkey
     );
 
-    match reqwest::Client::builder()
+    let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(4))
-        .build()?
-        .get(&url)
-        .send()
-        .await
-    {
-        Ok(resp) if resp.status().is_success() => {
-            let body: PublisherRecord = resp.json().await?;
-            Ok(build_assessment(publisher_pubkey, &body))
+        .build()?;
+
+    // Retry up to two times for transient network failures. On HTTP 404 we
+    // assume a legitimately unknown publisher; on other errors we default to
+    // a *negative* delta so that a brand-new or opaque attacker account does
+    // not receive the same treatment as a trusted long-running publisher.
+    const MAX_ATTEMPTS: u32 = 3;
+    let mut last_error: Option<String> = None;
+    for attempt in 1..=MAX_ATTEMPTS {
+        match client.get(&url).send().await {
+            Ok(resp) if resp.status().is_success() => match resp.json::<PublisherRecord>().await {
+                Ok(body) => return Ok(build_assessment(publisher_pubkey, &body)),
+                Err(e) => last_error = Some(format!("decode failed: {}", e)),
+            },
+            Ok(resp) if resp.status() == reqwest::StatusCode::NOT_FOUND => {
+                // Publisher has no record yet — treat as first-time with light penalty.
+                return Ok(ReputationAssessment {
+                    confidence_delta: -10,
+                    publisher_pubkey: publisher_pubkey.to_string(),
+                    notes: vec!["Publisher not found on chain — first-time publisher (-10)".into()],
+                });
+            }
+            Ok(resp) => {
+                last_error = Some(format!("HTTP {}", resp.status()));
+            }
+            Err(e) => {
+                last_error = Some(format!("transport error: {}", e));
+            }
         }
-        // If the node is unreachable or publisher is unknown, treat as neutral.
-        _ => Ok(ReputationAssessment {
-            confidence_delta: 0,
-            publisher_pubkey: publisher_pubkey.to_string(),
-            notes: vec!["Publisher reputation unknown — treating as neutral".into()],
-        }),
+        if attempt < MAX_ATTEMPTS {
+            tokio::time::sleep(std::time::Duration::from_millis(200 * attempt as u64)).await;
+        }
     }
+
+    // All retries exhausted — fail *pessimistically* rather than neutrally so
+    // that a brief outage cannot turn unknown attackers into trusted publishers.
+    let reason = last_error.unwrap_or_else(|| "unknown".into());
+    tracing::warn!(
+        "Reputation lookup for {} failed after {} attempts: {}",
+        publisher_pubkey,
+        MAX_ATTEMPTS,
+        reason
+    );
+    Ok(ReputationAssessment {
+        confidence_delta: -25,
+        publisher_pubkey: publisher_pubkey.to_string(),
+        notes: vec![format!(
+            "Reputation service unreachable ({}) — treating as untrusted (-25)",
+            reason
+        )],
+    })
 }
 
 /// Publisher record as returned by the chain node REST API.

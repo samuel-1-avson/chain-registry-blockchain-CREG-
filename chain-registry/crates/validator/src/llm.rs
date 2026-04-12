@@ -109,14 +109,16 @@ pub enum LlmResult {
 /// Analyzes an obfuscated code snippet and returns a malicious intent score (0-100).
 /// A score >= 80 indicates highly probable malicious intent.
 ///
-/// Returns `LlmResult::Unavailable` instead of silently returning 0 when the LLM
-/// cannot be reached, so the caller can emit appropriate degraded-mode findings.
-pub async fn predict_intent(code_snippet: &str) -> Result<u8> {
+/// Returns `Ok(None)` when the LLM is unavailable (disabled, no API key,
+/// network error, rate-limited). Callers must treat `None` as "could not
+/// verify" rather than as a clean verdict — a silent `0` would let obfuscated
+/// malicious code slip through when the LLM happens to be offline.
+pub async fn predict_intent(code_snippet: &str) -> Result<Option<u8>> {
     match predict_intent_full(code_snippet).await {
-        Ok(LlmResult::Score(s)) => Ok(s),
+        Ok(LlmResult::Score(s)) => Ok(Some(s)),
         Ok(LlmResult::Unavailable(reason)) => {
             tracing::warn!("LLM unavailable: {}", reason);
-            Ok(0)
+            Ok(None)
         }
         Err(e) => Err(e),
     }

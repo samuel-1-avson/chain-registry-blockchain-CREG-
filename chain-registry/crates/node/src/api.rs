@@ -153,7 +153,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use common::{PackageStatus, PublishRequest};
+use common::{PackageStatus, PublishRequest, ValidatorIdentity};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tower_http::{cors::CorsLayer, limit::RequestBodyLimitLayer, trace::TraceLayer};
@@ -162,6 +162,7 @@ use crate::events;
 use crate::{
     events::{sse_handler, EventBus},
     rate_limit::{rate_limit_middleware, RateLimiter},
+    normalized_validator_key, validator_registration_status_text, ValidatorRegistrationStatus,
     SharedState,
 };
 
@@ -183,6 +184,8 @@ pub fn router(state: SharedState, event_bus: EventBus, limiter: RateLimiter) -> 
         .route("/health", get(health))
         .route("/v1/chain/stats", get(chain_stats))
         .route("/v1/runtime/config", get(runtime_config))
+        .route("/v1/validators/register", post(register_validator_identity))
+        .route("/v1/validators/registrations", get(list_validator_registrations))
         .route("/v1/nodes", get(get_nodes))
         .route("/v1/p2p/status", get(p2p_status))
         .route("/v1/bridge/status", get(bridge_status))
@@ -304,6 +307,16 @@ struct RuntimeConfigResponse {
     registry_address: Option<String>,
     token_contract: Option<String>,
     staking_contract: Option<String>,
+    validator_registration_mode: String,
+    validator_registration_note: String,
+}
+
+#[derive(Deserialize)]
+struct RegisterValidatorIdentityRequest {
+    evm_address: String,
+    node_id: String,
+    ed25519_pubkey: String,
+    alias: Option<String>,
 }
 
 fn non_zero_address(value: &str) -> Option<String> {
@@ -322,7 +335,137 @@ async fn runtime_config(State(state): State<SharedState>) -> impl IntoResponse {
         registry_address: non_zero_address(&s.config.registry_addr),
         token_contract: non_zero_address(&s.config.token_addr),
         staking_contract: non_zero_address(&s.config.staking_addr),
+        validator_registration_mode: "staking-plus-identity-sync".to_string(),
+        validator_registration_note: "Stake on-chain, register your validator EVM address, node ID, and Ed25519 pubkey with /v1/validators/register, wait for governance approval, and the node sync loop will admit active validators into consensus automatically.".to_string(),
     })
+}
+
+fn validate_evm_address(value: &str) -> Result<String, String> {
+    value
+        .trim()
+        .parse::<alloy::primitives::Address>()
+        .map(|address| address.to_string().to_ascii_lowercase())
+        .map_err(|_| "EVM address must be a valid 0x-prefixed address".to_string())
+}
+
+fn validate_node_id(value: &str) -> Result<String, String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        Err("node_id is required".to_string())
+    } else {
+        Ok(trimmed.to_string())
+    }
+}
+
+fn validate_ed25519_pubkey(value: &str) -> Result<String, String> {
+    let trimmed = value.trim().trim_start_matches("0x").to_ascii_lowercase();
+    match hex::decode(&trimmed) {
+        Ok(bytes) if bytes.len() == 32 => Ok(trimmed),
+        Ok(bytes) => Err(format!(
+            "Ed25519 pubkey must be 32 bytes (64 hex chars), got {} bytes",
+            bytes.len()
+        )),
+        Err(_) => Err("Ed25519 pubkey must be valid hex".to_string()),
+    }
+}
+
+async fn register_validator_identity(
+    State(state): State<SharedState>,
+    Json(request): Json<RegisterValidatorIdentityRequest>,
+) -> Response {
+    let evm_address = match validate_evm_address(&request.evm_address) {
+        Ok(value) => value,
+        Err(error) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse { error }),
+            )
+                .into_response();
+        }
+    };
+
+    let node_id = match validate_node_id(&request.node_id) {
+        Ok(value) => value,
+        Err(error) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse { error }),
+            )
+                .into_response();
+        }
+    };
+
+    let ed25519_pubkey = match validate_ed25519_pubkey(&request.ed25519_pubkey) {
+        Ok(value) => value,
+        Err(error) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse { error }),
+            )
+                .into_response();
+        }
+    };
+
+    let normalized_key = normalized_validator_key(&evm_address);
+    let alias = request
+        .alias
+        .unwrap_or_else(|| node_id.clone())
+        .trim()
+        .to_string();
+
+    let mut s = state.write().await;
+
+    if s.validator_registrations.iter().any(|(key, registration)| {
+        *key != normalized_key
+            && (registration.identity.node_id == node_id
+                || registration.identity.ed25519_pubkey == ed25519_pubkey)
+    }) {
+        return (
+            StatusCode::CONFLICT,
+            Json(ErrorResponse {
+                error: "node_id or Ed25519 pubkey is already registered to another wallet".to_string(),
+            }),
+        )
+            .into_response();
+    }
+
+    let identity = ValidatorIdentity {
+        evm_address,
+        node_id,
+        ed25519_pubkey,
+    }
+    .normalized();
+
+    let mut registration = s
+        .validator_registrations
+        .remove(&normalized_key)
+        .unwrap_or_else(|| ValidatorRegistrationStatus {
+            reputation: 100,
+            ..ValidatorRegistrationStatus::default()
+        });
+
+    registration.alias = alias;
+    registration.identity = identity;
+    registration.registered_with_node = true;
+    registration.status = validator_registration_status_text(&registration);
+
+    let response = registration.clone();
+    s.validator_registrations
+        .insert(normalized_key, registration);
+
+    (StatusCode::ACCEPTED, Json(response)).into_response()
+}
+
+async fn list_validator_registrations(State(state): State<SharedState>) -> impl IntoResponse {
+    let s = state.read().await;
+    let mut registrations: Vec<ValidatorRegistrationStatus> =
+        s.validator_registrations.values().cloned().collect();
+    registrations.sort_by(|left, right| {
+        left.alias
+            .cmp(&right.alias)
+            .then(left.identity.node_id.cmp(&right.identity.node_id))
+    });
+    Json(registrations)
 }
 
 // GET /v1/nodes
@@ -809,11 +952,15 @@ async fn rotate_publisher_key(
 // POST /v1/consensus/vote
 #[derive(Deserialize, Serialize)]
 pub struct VoteMessage {
-    /// The canonical package ID or block hash this vote is for.
+    /// The canonical package ID (at vote time) or block hash (at seal time).
     pub block_hash: String,
+    /// SHA-256 of the tarball bytes — bound into the signed message to prevent
+    /// cross-version replay. Defaults to empty for backwards compatibility.
+    #[serde(default)]
+    pub content_hash: String,
     pub validator_id: String,
     pub phase: String,
-    /// Hex-encoded Ed25519 signature of "<block_hash>:<approved>" by the validator.
+    /// Hex-encoded Ed25519 signature of `gossip::canonical_vote_message(...)`.
     pub signature: String,
     /// Hex-encoded Ed25519 public key of the voting validator.
     pub validator_pubkey: String,
@@ -907,11 +1054,16 @@ async fn receive_vote(State(state): State<SharedState>, Json(vote): Json<VoteMes
             }
         };
 
-        // The signed message must match what validator_pipeline.rs produces:
-        // "<canonical>-<content_hash>"  (for package consensus votes)
-        // We sign "block_hash:approved" for vote messages.
-        let msg = format!("{}:{}", vote.block_hash, vote.approved);
-        if let Err(_) = vk.verify(msg.as_bytes(), &sig) {
+        // Canonical domain-separated vote message — must match exactly what
+        // validator_pipeline.rs::gossip_sig produces via
+        // gossip::canonical_vote_message.
+        let msg = crate::gossip::canonical_vote_message(
+            &vote.block_hash,
+            &vote.content_hash,
+            vote.approved,
+            &vote.validator_pubkey,
+        );
+        if vk.verify(msg.as_bytes(), &sig).is_err() {
             return (
                 StatusCode::UNAUTHORIZED,
                 Json(ErrorResponse {

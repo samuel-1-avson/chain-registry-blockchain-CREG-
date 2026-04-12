@@ -13,6 +13,8 @@
 // of package verification transactions, linear sync is perfectly adequate.
 
 use crate::NodeState;
+use common::{Transaction, ValidatorSet, ValidatorVote};
+use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{interval, Duration};
@@ -118,6 +120,23 @@ async fn sync_once(state: Arc<RwLock<NodeState>>) -> anyhow::Result<()> {
             break;
         }
 
+        // Verify that every Publish transaction carries a PBFT quorum of valid
+        // signatures against the current validator set. Without this check a
+        // malicious peer could serve a syntactically-valid block whose payload
+        // never reached consensus. (ISSUE-018)
+        let validator_set = {
+            let s = state.read().await;
+            s.validator_set.clone()
+        };
+        if let Err(e) = verify_block_signatures(&block, &validator_set) {
+            tracing::error!(
+                "Block {} failed signature verification: {} — halting sync",
+                height,
+                e
+            );
+            break;
+        }
+
         prev_hash = block.hash();
 
         // Insert and index the block.
@@ -128,6 +147,116 @@ async fn sync_once(state: Arc<RwLock<NodeState>>) -> anyhow::Result<()> {
         }
 
         tracing::info!("Synced block {} ({})", height, &prev_hash[..12]);
+    }
+
+    Ok(())
+}
+
+/// Verify PBFT consensus signatures on every Publish transaction in a block.
+///
+/// Each `ChainRecord` in the block must carry at least `⌊2n/3⌋ + 1` valid
+/// Ed25519 signatures from validators currently in the active set, where each
+/// signature is over the canonical on-chain message `"<canonical>-<content_hash>"`
+/// (the format produced by `validator_pipeline::sign`).
+///
+/// Notes and limitations:
+///   * Uses the *current* validator set. Historical validator-set tracking is
+///     a follow-up enhancement (ISSUE-050 in the roadmap). A node syncing
+///     across a validator-set transition may legitimately see signatures from
+///     validators not in the current set — those are simply ignored.
+///   * Non-Publish transactions (Revoke, Slash, ValidatorJoin/Leave,
+///     RotatePublisherKey) are intentionally not verified here; they are
+///     governance-originated and validated at the state-transition layer.
+///   * Single-validator deployments still require the one validator's signature.
+fn verify_block_signatures(
+    block: &common::Block,
+    validator_set: &ValidatorSet,
+) -> anyhow::Result<()> {
+    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+
+    // Genesis has no signatures by design.
+    if block.header.height == 0 {
+        return Ok(());
+    }
+
+    let n = validator_set.validators.len();
+    if n == 0 {
+        anyhow::bail!("cannot verify block: local validator set is empty");
+    }
+    let quorum = (2 * n / 3) + 1;
+
+    // Build a pubkey → validator_id lookup once so per-signature verification
+    // is O(1) instead of O(n).
+    let known: std::collections::HashMap<String, &common::Validator> = validator_set
+        .validators
+        .iter()
+        .map(|v| (v.pubkey.to_ascii_lowercase(), v))
+        .collect();
+
+    for (tx_idx, tx) in block.transactions.iter().enumerate() {
+        let record = match tx {
+            Transaction::Publish(r) => r,
+            _ => continue,
+        };
+        let canonical = record.id.canonical();
+        let message = format!("{}-{}", canonical, record.content_hash);
+        let msg_bytes = message.as_bytes();
+
+        let mut approvals = 0usize;
+        let mut seen = HashSet::new();
+
+        for sig in &record.validator_signatures {
+            if !matches!(sig.vote, ValidatorVote::Approve) {
+                continue;
+            }
+
+            let pubkey_key = sig.validator_pubkey.to_ascii_lowercase();
+            if !known.contains_key(&pubkey_key) {
+                tracing::debug!(
+                    "sync: tx {} carries signature from unknown validator pubkey {} — ignored",
+                    tx_idx,
+                    pubkey_key
+                );
+                continue;
+            }
+            if !seen.insert(pubkey_key.clone()) {
+                // Duplicate signature from the same validator — count only once.
+                continue;
+            }
+
+            let pubkey_bytes = match hex::decode(&sig.validator_pubkey) {
+                Ok(b) => b,
+                Err(_) => continue,
+            };
+            let vk = match VerifyingKey::try_from(pubkey_bytes.as_slice()) {
+                Ok(k) => k,
+                Err(_) => continue,
+            };
+            let sig_bytes = match hex::decode(&sig.signature) {
+                Ok(b) => b,
+                Err(_) => continue,
+            };
+            let ed_sig = match Signature::try_from(sig_bytes.as_slice()) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+
+            if vk.verify(msg_bytes, &ed_sig).is_ok() {
+                approvals += 1;
+            }
+        }
+
+        if approvals < quorum {
+            anyhow::bail!(
+                "tx {} ({}): only {} valid signatures, need {} ({}/{} validators)",
+                tx_idx,
+                canonical,
+                approvals,
+                quorum,
+                approvals,
+                n
+            );
+        }
     }
 
     Ok(())

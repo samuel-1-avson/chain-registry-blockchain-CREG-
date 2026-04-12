@@ -344,51 +344,128 @@ impl ThresholdEncryption {
         Ok(key)
     }
 
-    /// Encrypt a share with a validator's public key
+    /// Encrypt a share with a validator's public key using ECIES over secp256k1.
+    ///
+    /// Wire format:
+    ///   `[ index (1B) | eph_pubkey_compressed (33B) | nonce (12B) | ciphertext+tag ]`
+    ///
+    /// - Ephemeral secp256k1 keypair is generated per-share, so the same
+    ///   plaintext encrypted twice produces two completely different outputs.
+    /// - ECDH with the validator's pubkey produces a 32-byte shared secret.
+    /// - The AES-256-GCM key is `SHA256("creg-ecies-v1" || shared_secret_x)`.
+    /// - The share index is bound as additional-authenticated-data so that a
+    ///   malicious peer cannot relabel a share to a different Lagrange slot.
+    /// - AES-GCM's built-in authentication tag detects any tampering, which
+    ///   was impossible under the previous unauthenticated XOR cipher.
     fn encrypt_share(
         &self,
         share: &KeyShare,
         validator_key: &[u8],
     ) -> Result<Vec<u8>, ThresholdError> {
-        // Simplified: XOR with hash of validator key
-        // In production, use proper ECIES or similar
-        let key_hash = Self::compute_hash(validator_key);
-        let mut encrypted = Vec::with_capacity(share.value.len());
+        use aes_gcm::{aead::Payload, Aes256Gcm, KeyInit, Nonce};
+        use k256::{
+            ecdh::diffie_hellman, elliptic_curve::sec1::ToEncodedPoint, PublicKey, SecretKey,
+        };
 
-        for (i, byte) in share.value.iter().enumerate() {
-            encrypted.push(byte ^ key_hash[i % 32]);
-        }
+        let validator_pubkey = PublicKey::from_sec1_bytes(validator_key).map_err(|e| {
+            ThresholdError::EncryptionError(format!("invalid validator pubkey: {}", e))
+        })?;
 
-        // Prepend share index
-        let mut result = vec![share.index];
-        result.extend(encrypted);
+        let mut rng = rand::thread_rng();
+        let ephemeral_secret = SecretKey::random(&mut rng);
+        let ephemeral_public = ephemeral_secret.public_key();
+        let ephemeral_pub_bytes = ephemeral_public.to_encoded_point(true);
+        let ephemeral_pub_bytes = ephemeral_pub_bytes.as_bytes();
+        debug_assert_eq!(ephemeral_pub_bytes.len(), 33);
 
-        Ok(result)
+        let shared = diffie_hellman(
+            ephemeral_secret.to_nonzero_scalar(),
+            validator_pubkey.as_affine(),
+        );
+        let aes_key = {
+            let mut hasher = Sha256::new();
+            hasher.update(b"creg-ecies-v1");
+            hasher.update(shared.raw_secret_bytes());
+            hasher.finalize()
+        };
+
+        let cipher = Aes256Gcm::new(&aes_key);
+        let mut nonce_bytes = [0u8; 12];
+        rng.fill_bytes(&mut nonce_bytes);
+        let nonce = Nonce::from_slice(&nonce_bytes);
+
+        let aad = [share.index];
+        let ciphertext = cipher
+            .encrypt(
+                nonce,
+                Payload {
+                    msg: &share.value,
+                    aad: &aad,
+                },
+            )
+            .map_err(|e| ThresholdError::EncryptionError(format!("AES-GCM encrypt: {}", e)))?;
+
+        let mut out = Vec::with_capacity(1 + 33 + 12 + ciphertext.len());
+        out.push(share.index);
+        out.extend_from_slice(ephemeral_pub_bytes);
+        out.extend_from_slice(&nonce_bytes);
+        out.extend_from_slice(&ciphertext);
+        Ok(out)
     }
 
-    /// Decrypt a share with validator's private key
+    /// Decrypt a share with the validator's secp256k1 secret key.
     pub fn decrypt_share(
         &self,
         encrypted_share: &[u8],
         validator_private_key: &[u8],
     ) -> Result<KeyShare, ThresholdError> {
-        if encrypted_share.len() < 2 {
-            return Err(ThresholdError::InvalidShare("Too short".to_string()));
+        use aes_gcm::{aead::Payload, Aes256Gcm, KeyInit, Nonce};
+        use k256::{ecdh::diffie_hellman, PublicKey, SecretKey};
+
+        // Minimum: 1 index + 33 eph pubkey + 12 nonce + 16 tag = 62 bytes.
+        if encrypted_share.len() < 62 {
+            return Err(ThresholdError::InvalidShare(
+                "encrypted share too short for ECIES format".to_string(),
+            ));
         }
 
         let index = encrypted_share[0];
-        let encrypted_value = &encrypted_share[1..];
+        let eph_pub_bytes = &encrypted_share[1..34];
+        let nonce_bytes = &encrypted_share[34..46];
+        let ciphertext = &encrypted_share[46..];
 
-        // Decrypt
-        let key_hash = Self::compute_hash(validator_private_key);
-        let mut value = Vec::with_capacity(encrypted_value.len());
+        let ephemeral_public = PublicKey::from_sec1_bytes(eph_pub_bytes).map_err(|e| {
+            ThresholdError::DecryptionError(format!("invalid ephemeral pubkey: {}", e))
+        })?;
+        let our_secret = SecretKey::from_slice(validator_private_key).map_err(|e| {
+            ThresholdError::DecryptionError(format!("invalid validator private key: {}", e))
+        })?;
 
-        for (i, byte) in encrypted_value.iter().enumerate() {
-            value.push(byte ^ key_hash[i % 32]);
-        }
+        let shared = diffie_hellman(
+            our_secret.to_nonzero_scalar(),
+            ephemeral_public.as_affine(),
+        );
+        let aes_key = {
+            let mut hasher = Sha256::new();
+            hasher.update(b"creg-ecies-v1");
+            hasher.update(shared.raw_secret_bytes());
+            hasher.finalize()
+        };
+
+        let cipher = Aes256Gcm::new(&aes_key);
+        let nonce = Nonce::from_slice(nonce_bytes);
+        let aad = [index];
+        let value = cipher
+            .decrypt(
+                nonce,
+                Payload {
+                    msg: ciphertext,
+                    aad: &aad,
+                },
+            )
+            .map_err(|e| ThresholdError::DecryptionError(format!("AES-GCM decrypt: {}", e)))?;
 
         let public_key = Self::derive_public_key(&value);
-
         Ok(KeyShare::new(index, value, public_key))
     }
 
@@ -426,29 +503,51 @@ impl ThresholdEncryption {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use k256::elliptic_curve::sec1::ToEncodedPoint;
+    use k256::SecretKey;
+
+    /// Generate (pubkey_bytes_compressed_sec1, privkey_bytes_32) pairs for the
+    /// ECIES-based share encryption.
+    fn gen_validator_keypairs(n: usize) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+        let mut rng = rand::thread_rng();
+        let mut pubs = Vec::with_capacity(n);
+        let mut secs = Vec::with_capacity(n);
+        for _ in 0..n {
+            let sk = SecretKey::random(&mut rng);
+            let pk_bytes = sk.public_key().to_encoded_point(true).as_bytes().to_vec();
+            let sk_bytes = sk.to_bytes().to_vec();
+            pubs.push(pk_bytes);
+            secs.push(sk_bytes);
+        }
+        (pubs, secs)
+    }
 
     #[test]
     fn test_threshold_encryption_lifecycle() {
         // Create 3-of-5 threshold encryption
         let te = ThresholdEncryption::new(3, 5).unwrap();
 
-        // Generate validator keys
-        let validator_keys: Vec<Vec<u8>> = (0..5).map(|i| vec![i as u8; 32]).collect();
+        // Generate real secp256k1 validator keypairs
+        let (validator_pubs, validator_secs) = gen_validator_keypairs(5);
 
         // Encrypt package
         let content = b"Secret package content";
-        let encrypted = te.encrypt_package(content, &validator_keys).unwrap();
+        let encrypted = te.encrypt_package(content, &validator_pubs).unwrap();
 
         // Verify encrypted package structure
         assert_eq!(encrypted.threshold, 3);
         assert_eq!(encrypted.total_shares, 5);
         assert_eq!(encrypted.encrypted_shares.len(), 5);
 
-        // Decrypt shares (simulate validators)
+        // Decrypt shares (simulate validators). `encrypted_shares` is a HashMap
+        // keyed by 1-based share index, so we need to pair each entry with the
+        // correct validator secret — the ith generated share went to the ith
+        // validator, and `share.index == i + 1`.
         let mut shares = Vec::new();
-        for (i, (_, encrypted_share)) in encrypted.encrypted_shares.iter().enumerate() {
+        for (idx, encrypted_share) in encrypted.encrypted_shares.iter() {
+            let validator_idx = (*idx as usize) - 1;
             let share = te
-                .decrypt_share(encrypted_share, &validator_keys[i])
+                .decrypt_share(encrypted_share, &validator_secs[validator_idx])
                 .unwrap();
             shares.push(share);
         }
@@ -462,16 +561,17 @@ mod tests {
     fn test_insufficient_shares() {
         let te = ThresholdEncryption::new(3, 5).unwrap();
 
-        let validator_keys: Vec<Vec<u8>> = (0..5).map(|i| vec![i as u8; 32]).collect();
+        let (validator_pubs, validator_secs) = gen_validator_keypairs(5);
 
         let content = b"test";
-        let encrypted = te.encrypt_package(content, &validator_keys).unwrap();
+        let encrypted = te.encrypt_package(content, &validator_pubs).unwrap();
 
-        // Generate some shares
+        // Generate only 2 shares
         let mut shares = Vec::new();
-        for (i, (_, encrypted_share)) in encrypted.encrypted_shares.iter().enumerate().take(2) {
+        for (idx, encrypted_share) in encrypted.encrypted_shares.iter().take(2) {
+            let validator_idx = (*idx as usize) - 1;
             let share = te
-                .decrypt_share(encrypted_share, &validator_keys[i])
+                .decrypt_share(encrypted_share, &validator_secs[validator_idx])
                 .unwrap();
             shares.push(share);
         }
@@ -482,6 +582,24 @@ mod tests {
             result,
             Err(ThresholdError::InsufficientShares(2, 3))
         ));
+    }
+
+    #[test]
+    fn test_share_tamper_detection() {
+        // A tampered ciphertext must fail authentication.
+        let te = ThresholdEncryption::new(2, 3).unwrap();
+        let (validator_pubs, validator_secs) = gen_validator_keypairs(3);
+        let encrypted = te.encrypt_package(b"content", &validator_pubs).unwrap();
+
+        let (idx, share_bytes) = encrypted.encrypted_shares.iter().next().unwrap();
+        let mut tampered = share_bytes.clone();
+        // Flip a byte in the ciphertext region (skip index + eph_pub + nonce).
+        let last = tampered.len() - 1;
+        tampered[last] ^= 0x01;
+
+        let validator_idx = (*idx as usize) - 1;
+        let result = te.decrypt_share(&tampered, &validator_secs[validator_idx]);
+        assert!(result.is_err(), "tampered share must fail AEAD auth");
     }
 
     #[test]

@@ -175,17 +175,24 @@ pub async fn run(
         return Ok(result);
     }
 
-    // ── Dev bypass (debug builds only) ────────────────────────────────────────
-    #[cfg(debug_assertions)]
+    // ── Dev bypass (operator opt-in via CREG_DEV_SANDBOX=true) ────────────────
+    // Works in release builds too so that the docker-compose dev profile can
+    // run the release image without a real sandbox engine installed. Never
+    // enable this on mainnet validators — it completely skips behavioural
+    // analysis and raises a High-severity finding on every package.
     if std::env::var("CREG_DEV_SANDBOX").as_deref() == Ok("true") {
-        tracing::warn!("nsjail not found — CREG_DEV_SANDBOX=true in debug build: returning empty result (dev mode only)");
+        tracing::warn!(
+            "CREG_DEV_SANDBOX=true — behavioural analysis is SKIPPED for {}. \
+             This is for local development only; NEVER set this flag on a mainnet validator.",
+            _pkg_id
+        );
         let _ = std::fs::remove_dir_all(&tmp_dir);
         return Ok(SandboxResult {
             findings: vec![Finding {
                 id: "SB012".into(),
                 title: "Dev sandbox bypass active".into(),
-                severity: FindingSeverity::Medium,
-                description: "CREG_DEV_SANDBOX=true: Behavioural analysis was skipped (debug build only).".into(),
+                severity: FindingSeverity::High,
+                description: "CREG_DEV_SANDBOX=true: Behavioural analysis was skipped. Operator opted in to an unsafe local-development bypass.".into(),
                 file: "sandbox-engine".into(),
                 line: None,
             }],
@@ -285,29 +292,24 @@ pub async fn run(
         }
     }
 
-    // ── Engine 5: No sandbox — CRITICAL ───────────────────────────────────────
-    tracing::error!("No sandboxing available (nsjail, gVisor, Docker, WASM). Validation will proceed with a CRITICAL degraded-sandbox finding.");
+    // ── No sandbox — FAIL CLOSED ──────────────────────────────────────────────
+    // No engine is available and the operator did not explicitly opt in via
+    // CREG_DEV_SANDBOX=true. Refusing to produce a SandboxResult causes the
+    // validator pipeline to propagate the error and abstain from voting,
+    // which is the correct safety posture for mainnet.
     let _ = std::fs::remove_dir_all(&tmp_dir);
-    Ok(SandboxResult {
-        findings: vec![Finding {
-            id: "SB011".into(),
-            title: "No sandbox available".into(),
-            severity: FindingSeverity::Critical,
-            description: "No sandboxing engine (nsjail, gVisor, Docker, WASM) is available. Behavioural analysis was SKIPPED. This validation should be treated as incomplete.".into(),
-            file: "sandbox-engine".into(),
-            line: None,
-        }],
-        observed_network_hosts: vec![],
-        observed_fs_writes: vec![],
-        observed_process_spawns: vec![],
-        metrics: SandboxMetrics {
-            engine_used: "none".into(),
-            wall_time_ms: start_time.elapsed().as_millis() as u64,
-            exit_code: -1,
-            observations_count: 0,
-            findings_count: 1,
-        },
-    })
+    tracing::error!(
+        "No sandboxing engine available (nsjail, gVisor, Docker, WASM) and \
+         CREG_DEV_SANDBOX is not set. Refusing to validate {} — the validator \
+         will abstain from this round. Install nsjail or set CREG_DEV_SANDBOX=true \
+         on non-mainnet deployments.",
+        _pkg_id
+    );
+    anyhow::bail!(
+        "no sandbox engine available for {} and CREG_DEV_SANDBOX is not set; \
+         refusing to vote without behavioural analysis",
+        _pkg_id
+    )
 }
 
 fn cache_result(key: &str, result: &SandboxResult) {

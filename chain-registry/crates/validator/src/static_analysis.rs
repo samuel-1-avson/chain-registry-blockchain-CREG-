@@ -119,8 +119,8 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
         }
 
         if has_high_entropy {
-            if let Ok(score) = crate::llm::predict_intent(&content).await {
-                if score >= 80 {
+            match crate::llm::predict_intent(&content).await {
+                Ok(Some(score)) if score >= 80 => {
                     findings.push(Finding {
                         id: "SA011".into(),
                         title: "AI-Verified Malicious Intent".into(),
@@ -129,7 +129,8 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
                         file: path.clone(),
                         line: None,
                     });
-                } else if score >= 50 {
+                }
+                Ok(Some(score)) if score >= 50 => {
                     findings.push(Finding {
                         id: "SA011".into(),
                         title: "AI-Suspicious Obfuscation".into(),
@@ -138,6 +139,26 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
                         file: path.clone(),
                         line: None,
                     });
+                }
+                Ok(Some(_)) => {
+                    // Score below 50 — LLM ran and considered it benign; no finding.
+                }
+                Ok(None) => {
+                    // LLM unavailable — emit a visible degraded-mode finding so
+                    // consensus can see that obfuscated code was NOT semantically
+                    // verified. Treated as High (not Critical) because static
+                    // analysis still flagged SA009 on the same file.
+                    findings.push(Finding {
+                        id: "SA012".into(),
+                        title: "LLM unavailable for obfuscated code".into(),
+                        severity: FindingSeverity::High,
+                        description: "High-entropy code was flagged but the LLM semantic analyser was unavailable. Treating as unverified.".into(),
+                        file: path.clone(),
+                        line: None,
+                    });
+                }
+                Err(e) => {
+                    tracing::warn!("LLM predict_intent failed: {}", e);
                 }
             }
         }

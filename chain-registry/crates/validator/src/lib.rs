@@ -95,21 +95,34 @@ pub async fn validate_package(
         tracing::info!("[{}] Triggering Automated AI Audit (AAA)...", canonical);
         match aaa_audit(&report, tarball).await {
             Ok(proof) => {
-                // Only overrule if the proof's verdict explicitly clears the package
-                // and the proof includes a valid signature.
-                if proof.verdict == "cleared" && !proof.signature.is_empty() {
-                    report.aaa_verdict = Some(proof);
-                    decision = FinalDecision::Approve { confidence: 85 };
-                    tracing::info!(
-                        "[{}] AAA cleared the package with a signed proof",
-                        canonical
-                    );
-                } else {
-                    tracing::warn!(
-                        "[{}] AAA returned verdict='{}' — rejection stands",
-                        canonical,
-                        proof.verdict
-                    );
+                // Cryptographically verify the AAA proof before honouring it.
+                // Operator must pin the trusted auditor pubkey via CREG_AAA_PUBKEY.
+                // The signed message binds canonical || content_hash || verdict
+                // so a leaked "cleared" signature cannot be replayed against a
+                // different package or version.
+                match verify_aaa_proof(&proof, &canonical, &req.content_hash) {
+                    Ok(()) if proof.verdict == "cleared" => {
+                        report.aaa_verdict = Some(proof);
+                        decision = FinalDecision::Approve { confidence: 85 };
+                        tracing::info!(
+                            "[{}] AAA cleared the package with a signed proof",
+                            canonical
+                        );
+                    }
+                    Ok(()) => {
+                        tracing::warn!(
+                            "[{}] AAA returned verdict='{}' — rejection stands",
+                            canonical,
+                            proof.verdict
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "[{}] AAA proof verification failed: {} — rejection stands",
+                            canonical,
+                            e
+                        );
+                    }
                 }
             }
             Err(e) => {
@@ -153,6 +166,54 @@ pub async fn validate_package(
         pgp_fingerprint,
         findings: report.findings,
     })
+}
+
+/// Domain tag for the AAA signature format. Bumping this invalidates all
+/// previously-issued auditor signatures.
+const AAA_MESSAGE_DOMAIN: &str = "creg-aaa-v1";
+
+/// Verify an AAA proof against the pinned auditor public key (env
+/// `CREG_AAA_PUBKEY`, hex-encoded Ed25519). Binds the signature to the
+/// canonical package id, the content hash, and the verdict so it cannot be
+/// replayed across packages or versions.
+fn verify_aaa_proof(proof: &AuditProof, canonical: &str, content_hash: &str) -> Result<()> {
+    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+
+    let pinned_pubkey = std::env::var("CREG_AAA_PUBKEY")
+        .map_err(|_| anyhow::anyhow!("CREG_AAA_PUBKEY is not set — cannot verify AAA proof"))?;
+
+    if proof.signature.is_empty() {
+        anyhow::bail!("AAA proof has an empty signature");
+    }
+    if proof.auditor_pubkey.is_empty() {
+        anyhow::bail!("AAA proof has an empty auditor_pubkey");
+    }
+    if !proof.auditor_pubkey.eq_ignore_ascii_case(pinned_pubkey.trim()) {
+        anyhow::bail!(
+            "AAA auditor_pubkey does not match pinned CREG_AAA_PUBKEY (got {}, expected {})",
+            proof.auditor_pubkey,
+            pinned_pubkey
+        );
+    }
+
+    let pubkey_bytes = hex::decode(proof.auditor_pubkey.trim())
+        .map_err(|e| anyhow::anyhow!("auditor_pubkey is not valid hex: {}", e))?;
+    let vk = VerifyingKey::try_from(pubkey_bytes.as_slice())
+        .map_err(|e| anyhow::anyhow!("auditor_pubkey is not a valid Ed25519 key: {}", e))?;
+
+    let sig_bytes = hex::decode(&proof.signature)
+        .map_err(|e| anyhow::anyhow!("signature is not valid hex: {}", e))?;
+    let sig = Signature::try_from(sig_bytes.as_slice())
+        .map_err(|e| anyhow::anyhow!("signature is not a valid Ed25519 signature: {}", e))?;
+
+    let msg = format!(
+        "{}|{}|{}|{}",
+        AAA_MESSAGE_DOMAIN, canonical, content_hash, proof.verdict
+    );
+    vk.verify(msg.as_bytes(), &sig)
+        .map_err(|e| anyhow::anyhow!("AAA signature verification failed: {}", e))?;
+
+    Ok(())
 }
 
 /// Deep Audit call to an external AI Auditor provider.

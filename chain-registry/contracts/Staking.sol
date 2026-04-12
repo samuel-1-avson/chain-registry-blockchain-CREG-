@@ -20,6 +20,11 @@ contract Staking {
         _locked = false;
     }
 
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Ownable: caller is not the owner");
+        _;
+    }
+
     // ── Enums ────────────────────────────────────────────────────────────────
 
     /// Full lifecycle of a validator.
@@ -62,6 +67,7 @@ contract Staking {
 
     /// The CREG token contract — all staking uses this token.
     CregToken public cregToken;
+    address public owner;
 
     mapping(address => uint256)        public publisherStakes;
     mapping(address => ValidatorEntry) public validators;
@@ -70,6 +76,16 @@ contract Staking {
     address    public registry;    // Only Registry can trigger slashing
     address    public governance;
     uint256    public slashPool;   // Accumulated slashed CREG (distributed to honest validators)
+
+    // ── Slash-pool epoch (pull-based distribution) ────────────────────────────
+    // `distributeSlashPool` iterates the full validator list and can exceed the
+    // block gas limit with a few hundred validators. The epoch pattern snapshots
+    // the pool and lets each validator pull their share, bounding worst-case gas
+    // per transaction to O(1). See `commitSlashPoolEpoch` / `claimSlashPoolShare`.
+    uint256 public slashPoolEpoch;
+    uint256 public slashPoolEpochAmount;
+    uint256 public slashPoolEpochTotalWeight;
+    mapping(uint256 => mapping(address => bool)) public slashPoolClaimed;
 
     address[] private _validatorList;
 
@@ -85,6 +101,8 @@ contract Staking {
     event ValidatorLeft          (address indexed validator);
     event Slashed                (address indexed account, uint256 amount, string reason);
     event SlashPoolDistributed   (uint256 amount, uint256 validatorCount);
+    event SlashPoolEpochCommitted(uint256 indexed epoch, uint256 amount, uint256 totalWeight);
+    event SlashPoolShareClaimed  (uint256 indexed epoch, address indexed validator, uint256 amount);
 
     // ── Errors ────────────────────────────────────────────────────────────────
 
@@ -105,13 +123,14 @@ contract Staking {
     /// @param _governance Address that can approve/reject validators and distribute slash pool.
     /// @param _cregToken  Address of the deployed CregToken contract.
     constructor(address _governance, address _cregToken) {
+        owner = msg.sender;
         governance = _governance;
         cregToken  = CregToken(_cregToken);
     }
 
     // ── Initializer ───────────────────────────────────────────────────────────
 
-    function setContracts(address _registry, address _reputation) external {
+    function setContracts(address _registry, address _reputation) external onlyOwner {
         require(registry == address(0), "Already set");
         registry   = _registry;
         reputation = Reputation(_reputation);
@@ -122,12 +141,22 @@ contract Staking {
     /// @notice Stake CREG as a publisher. Must approve this contract first.
     /// @param amount Amount of CREG (in token units, 18 decimals) to stake.
     function stakeAsPublisher(uint256 amount) external {
-        if (amount < minPublisherStake)
-            revert BelowMinStake(amount, minPublisherStake);
-        if (!cregToken.transferFrom(msg.sender, address(this), amount))
-            revert TransferFailed();
-        publisherStakes[msg.sender] += amount;
-        emit PublisherStaked(msg.sender, amount);
+        _stakeAsPublisher(msg.sender, amount);
+    }
+
+    /// @notice Stake CREG as a publisher using a signed permit so a relayer can
+    ///         sponsor the transaction without a separate user-paid approval step.
+    /// @dev The permit is attempted first, but a pre-existing allowance is also accepted.
+    function stakeAsPublisherWithPermit(
+        address publisher,
+        uint256 amount,
+        uint256 deadline,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) external {
+        try cregToken.permit(publisher, address(this), amount, deadline, v, r, s) {} catch {}
+        _stakeAsPublisher(publisher, amount);
     }
 
     /// @notice Withdraw publisher stake. Only allowed if no active packages depend on it.
@@ -152,7 +181,35 @@ contract Staking {
     ///         Ejected validators must wait RESTAKE_COOLDOWN before re-applying.
     /// @param amount Amount of CREG to stake (must be >= minValidatorStake).
     function applyToBeValidator(uint256 amount) external {
-        ValidatorEntry storage v = validators[msg.sender];
+        _applyToBeValidator(msg.sender, amount);
+    }
+
+    /// @notice Apply to become a validator using a signed permit so a relayer can
+    ///         sponsor the transaction without a separate approval transaction.
+    /// @dev The permit is attempted first, but a pre-existing allowance is also accepted.
+    function applyToBeValidatorWithPermit(
+        address validator,
+        uint256 amount,
+        uint256 deadline,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) external {
+        try cregToken.permit(validator, address(this), amount, deadline, v, r, s) {} catch {}
+        _applyToBeValidator(validator, amount);
+    }
+
+    function _stakeAsPublisher(address publisher, uint256 amount) internal {
+        if (amount < minPublisherStake)
+            revert BelowMinStake(amount, minPublisherStake);
+        if (!cregToken.transferFrom(publisher, address(this), amount))
+            revert TransferFailed();
+        publisherStakes[publisher] += amount;
+        emit PublisherStaked(publisher, amount);
+    }
+
+    function _applyToBeValidator(address validator, uint256 amount) internal {
+        ValidatorEntry storage v = validators[validator];
         if (v.state == ValidatorState.Pending || v.state == ValidatorState.Active)
             revert AlreadyApplied();
 
@@ -163,18 +220,18 @@ contract Staking {
         if (amount < minValidatorStake)
             revert BelowMinStake(amount, minValidatorStake);
 
-        if (!cregToken.transferFrom(msg.sender, address(this), amount))
+        if (!cregToken.transferFrom(validator, address(this), amount))
             revert TransferFailed();
 
-        validators[msg.sender] = ValidatorEntry({
+        validators[validator] = ValidatorEntry({
             stake:       amount,
             state:       ValidatorState.Pending,
             unbondingAt: 0,
             slashCount:  0,
             ejectedAt:   0
         });
-        _validatorList.push(msg.sender);
-        emit ValidatorApplied(msg.sender, amount);
+        _validatorList.push(validator);
+        emit ValidatorApplied(validator, amount);
     }
 
     /// @notice Step 2a: Governance approves a pending validator application.
@@ -355,6 +412,65 @@ contract Staking {
         }
 
         emit SlashPoolDistributed(poolToDistribute, activeCount);
+    }
+
+    /// @notice Snapshot the current slash pool into a new distribution epoch.
+    /// @dev Iterates the validator list once to sum reputation weights (cheap,
+    ///      no storage writes to stakes). Validators then pull their share via
+    ///      `claimSlashPoolShare()`, bounding worst-case per-tx gas to O(1) and
+    ///      eliminating the gas-exhaustion risk of `distributeSlashPool` at
+    ///      large validator counts.
+    function commitSlashPoolEpoch() external {
+        if (msg.sender != governance) revert NotAuthorized();
+        require(slashPoolEpochAmount == 0, "previous epoch not fully claimed");
+        require(slashPool > 0, "slash pool is empty");
+
+        uint256 totalWeight;
+        for (uint i = 0; i < _validatorList.length; i++) {
+            address val = _validatorList[i];
+            if (validators[val].state == ValidatorState.Active) {
+                totalWeight += uint256(reputation.scoreOf(val));
+            }
+        }
+        require(totalWeight > 0, "No reputation weight");
+
+        slashPoolEpoch++;
+        slashPoolEpochAmount = slashPool;
+        slashPoolEpochTotalWeight = totalWeight;
+        slashPool = 0;
+
+        emit SlashPoolEpochCommitted(slashPoolEpoch, slashPoolEpochAmount, totalWeight);
+    }
+
+    /// @notice Claim the caller's share of the current slash-pool epoch.
+    /// @dev Pull pattern — each validator pays their own gas, worst-case O(1).
+    function claimSlashPoolShare() external nonReentrant {
+        uint256 epoch = slashPoolEpoch;
+        require(epoch > 0, "no epoch committed");
+        require(slashPoolEpochAmount > 0, "epoch already drained");
+        require(!slashPoolClaimed[epoch][msg.sender], "already claimed");
+        require(validators[msg.sender].state == ValidatorState.Active, "not an active validator");
+
+        uint256 score = uint256(reputation.scoreOf(msg.sender));
+        require(score > 0, "no reputation weight");
+
+        uint256 share = (slashPoolEpochAmount * score) / slashPoolEpochTotalWeight;
+        require(share > 0, "share rounds to zero");
+
+        slashPoolClaimed[epoch][msg.sender] = true;
+        validators[msg.sender].stake += share;
+
+        // Drain the snapshot so it can be re-committed later. We subtract the
+        // claimed amount rather than zeroing so that later claimants can still
+        // draw from the same epoch; the epoch becomes re-committable only when
+        // `slashPoolEpochAmount` returns to zero via claims or rounding dust.
+        if (share >= slashPoolEpochAmount) {
+            slashPoolEpochAmount = 0;
+        } else {
+            slashPoolEpochAmount -= share;
+        }
+
+        emit SlashPoolShareClaimed(epoch, msg.sender, share);
     }
 
     // ── Governance ────────────────────────────────────────────────────────────

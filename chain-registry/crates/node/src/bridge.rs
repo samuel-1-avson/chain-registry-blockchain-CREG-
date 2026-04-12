@@ -239,16 +239,20 @@ async fn tick(state: Arc<RwLock<NodeState>>, last_height: &mut u64) -> anyhow::R
                 (arr, pi)
             }
             Err(e) => {
-                tracing::warn!(
-                    "ZK proof generation failed, submitting empty commitment: {}",
+                // Fail closed. Never submit a rollup batch without a real proof —
+                // an all-zero placeholder would be accepted if the on-chain verifier
+                // is ever loosened. Operators must fix the prover before the bridge
+                // can make forward progress. Tracked as ISSUE-001.
+                tracing::error!(
+                    "ZK proof generation failed for batch (prev_root={}, next_root={}): {}. Refusing to submit batch.",
+                    hex::encode(prev_root),
+                    hex::encode(next_root),
                     e
                 );
-                let pi = vec![
-                    alloy::primitives::U256::from_be_bytes(prev_root.into()),
-                    alloy::primitives::U256::from_be_bytes(next_root),
-                    alloy::primitives::U256::from_be_bytes(data_root),
-                ];
-                ([alloy::primitives::U256::from(0u64); 8], pi)
+                anyhow::bail!(
+                    "refusing to submit rollup batch without a valid ZK proof: {}",
+                    e
+                );
             }
         }
     };
