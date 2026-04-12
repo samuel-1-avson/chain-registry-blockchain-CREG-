@@ -45,6 +45,7 @@ urlencoding  = { workspace = true }
 thiserror    = { workspace = true }
 futures      = { workspace = true }
 aes-gcm      = "0.10"
+x25519-dalek = { version = "2", features = ["static_secrets"] }
 libp2p       = { version = "0.53", features = ["tcp", "dns", "websocket", "noise", "yamux", "kad", "gossipsub", "identify", "macros", "tokio"] }
 alloy        = { version = "0.1", features = ["full"] }
 tonic        = { workspace = true, features = ["transport"] }

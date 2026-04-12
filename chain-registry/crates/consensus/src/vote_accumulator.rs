@@ -1,5 +1,5 @@
 // crates/consensus/src/vote_accumulator.rs
-// Cross-node PBFT vote accumulator with ECDSA signature verification.
+// Cross-node PBFT vote accumulator with Ed25519 signature verification.
 //
 // In the single-node dev path the pipeline validates and immediately writes
 // a block. In a real multi-validator network each validator node:
@@ -11,13 +11,43 @@
 //
 // This module manages the per-package vote state that accumulates
 // incoming votes from peers. It is owned by the validator pipeline.
+//
+// **Signature scheme**: Ed25519 over the canonical PBFT vote message
+// `"creg-vote-v1|<canonical>|<content_hash>|<approved>|<validator_pubkey>"`.
+// This matches the format used by the REST `/v1/consensus/vote` endpoint and
+// the libp2p gossip vote broadcaster (see `gossip::canonical_vote_message`
+// in the node crate). Prior to ISSUE-009 this module used ECDSA/secp256k1
+// over 20-byte Ethereum addresses, which was inconsistent with the rest of
+// the codebase — validators' Ed25519 keys are what is actually registered
+// with the validator set.
 
 use chrono::{DateTime, Utc};
 use common::{ValidatorSignature, ValidatorVote};
-use ethers_core::types::{Address, Signature};
-use ethers_core::utils::keccak256;
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+/// Domain-separation tag for the canonical consensus vote message. Must be
+/// kept in sync with `node/src/gossip.rs::VOTE_MESSAGE_DOMAIN`.
+pub const VOTE_MESSAGE_DOMAIN: &str = "creg-vote-v1";
+
+/// Build the canonical message that a validator must sign when casting a PBFT
+/// vote. Binds the package canonical, tarball content hash, verdict, and the
+/// validator's Ed25519 public key so that:
+///   (a) signatures cannot be replayed across package versions,
+///   (b) signatures cannot be replayed across approve/reject flips,
+///   (c) a signature cannot be relabelled to come from a different validator.
+pub fn canonical_vote_message(
+    canonical: &str,
+    content_hash: &str,
+    approved: bool,
+    validator_pubkey: &str,
+) -> String {
+    format!(
+        "{}|{}|{}|{}|{}",
+        VOTE_MESSAGE_DOMAIN, canonical, content_hash, approved, validator_pubkey
+    )
+}
 
 /// All votes received for a single package's PBFT round.
 #[derive(Debug, Clone)]
@@ -48,10 +78,16 @@ pub enum VotePhase {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IncomingVote {
     pub validator_id: String,
-    pub validator_pubkey: String, // Ethereum address (0x...)
+    /// Hex-encoded 32-byte Ed25519 public key of the voting validator.
+    pub validator_pubkey: String,
+    /// SHA-256 of the tarball bytes — bound into the signed message to
+    /// prevent cross-version / cross-package replay.
+    #[serde(default)]
+    pub content_hash: String,
     pub approved: bool,
     pub reject_reason: Option<String>,
-    pub signature: String, // ECDSA signature (hex)
+    /// Hex-encoded 64-byte Ed25519 signature of `canonical_vote_message(...)`.
+    pub signature: String,
     pub received_at: DateTime<Utc>,
     /// ML model version used by this validator for deep scan.
     #[serde(default)]
@@ -83,21 +119,20 @@ impl PackageVoteState {
         (2 * self.assigned_count / 3) + 1
     }
 
-    /// Verify ECDSA signature for a vote.
+    /// Verify the Ed25519 signature of a vote against the canonical PBFT
+    /// vote message `canonical_vote_message(canonical, content_hash,
+    /// approved, validator_pubkey)`.
     ///
-    /// The message being signed is: keccak256(canonical + approved + block_hash)
-    /// where block_hash is the hash of the block being voted on.
-    ///
-    /// # Arguments
-    /// * `vote` - The incoming vote with signature
-    /// * `block_hash` - The hash of the block being voted on
-    ///
-    /// # Returns
-    /// * `SignatureVerification::Valid` if signature is valid
-    /// * `SignatureVerification::Invalid` if signature is invalid
-    /// * `SignatureVerification::Malformed` if signature format is wrong
-    pub fn verify_signature(&self, vote: &IncomingVote, block_hash: &str) -> SignatureVerification {
-        // Decode the signature from hex
+    /// The `_block_hash` argument is currently unused — the canonical
+    /// consensus subject is the package canonical + content hash, not the
+    /// block hash, so signatures can be verified before the finalised block
+    /// is even built. Kept in the signature for backward compatibility with
+    /// call sites that still pass it through.
+    pub fn verify_signature(
+        &self,
+        vote: &IncomingVote,
+        _block_hash: &str,
+    ) -> SignatureVerification {
         let sig_bytes = match hex::decode(&vote.signature) {
             Ok(bytes) => bytes,
             Err(e) => {
@@ -107,21 +142,18 @@ impl PackageVoteState {
                 ));
             }
         };
-
-        // Parse the signature
         let signature = match Signature::try_from(sig_bytes.as_slice()) {
             Ok(sig) => sig,
             Err(e) => {
                 return SignatureVerification::Malformed(format!(
-                    "Invalid signature format: {}",
+                    "Invalid Ed25519 signature format: {}",
                     e
                 ));
             }
         };
 
-        // Decode the validator's public key (Ethereum address)
-        let pubkey_hex = vote.validator_pubkey.replace("0x", "");
-        let pubkey_bytes = match hex::decode(&pubkey_hex) {
+        let pubkey_hex = vote.validator_pubkey.trim_start_matches("0x");
+        let pubkey_bytes = match hex::decode(pubkey_hex) {
             Ok(bytes) => bytes,
             Err(e) => {
                 return SignatureVerification::Malformed(format!(
@@ -130,37 +162,33 @@ impl PackageVoteState {
                 ));
             }
         };
-
-        // Validate address length (must be 20 bytes for Ethereum address)
-        if pubkey_bytes.len() != 20 {
+        if pubkey_bytes.len() != 32 {
             return SignatureVerification::Malformed(format!(
-                "Invalid address length: expected 20 bytes, got {}",
+                "Invalid Ed25519 pubkey length: expected 32 bytes, got {}",
                 pubkey_bytes.len()
             ));
         }
-
-        // Build the message that was signed
-        // Format: keccak256(canonical || approved || block_hash)
-        let message = format!("{}:{}:{}", self.canonical, vote.approved, block_hash);
-        let message_hash = keccak256(message.as_bytes());
-
-        // Recover the signer's address from the signature
-        let recovered_address = match signature.recover(message_hash) {
-            Ok(addr) => addr,
+        let verifying_key = match VerifyingKey::try_from(pubkey_bytes.as_slice()) {
+            Ok(k) => k,
             Err(e) => {
-                return SignatureVerification::Invalid(format!("Failed to recover signer: {}", e));
+                return SignatureVerification::Malformed(format!(
+                    "Invalid Ed25519 public key: {}",
+                    e
+                ));
             }
         };
 
-        // Convert pubkey bytes to Address
-        let mut address_bytes = [0u8; 20];
-        address_bytes.copy_from_slice(&pubkey_bytes);
-        let expected_address = Address::from(address_bytes);
+        let message = canonical_vote_message(
+            &self.canonical,
+            &vote.content_hash,
+            vote.approved,
+            &vote.validator_pubkey,
+        );
 
-        if recovered_address != expected_address {
+        if let Err(e) = verifying_key.verify(message.as_bytes(), &signature) {
             return SignatureVerification::Invalid(format!(
-                "Signature verification failed: recovered {} != expected {}",
-                recovered_address, expected_address
+                "Ed25519 verification failed: {}",
+                e
             ));
         }
 
@@ -369,18 +397,21 @@ impl VoteAccumulator {
     /// * `canonical` - Package canonical ID
     /// * `phase` - "prepare" or "commit"
     /// * `validator_id` - Validator node ID
-    /// * `validator_pubkey` - Validator's Ethereum address
+    /// * `validator_pubkey` - Validator's hex-encoded Ed25519 public key (32 bytes)
+    /// * `content_hash` - SHA-256 of the tarball bytes (bound into the signature)
     /// * `approved` - Whether validator approves the package
     /// * `reject_reason` - Reason for rejection (if rejected)
-    /// * `signature` - ECDSA signature
-    /// * `block_hash` - Hash of block being voted on
+    /// * `signature` - Hex-encoded Ed25519 signature over `canonical_vote_message(...)`
+    /// * `block_hash` - Hash of block being voted on (plumbed through for auditing)
     /// * `skip_verification` - Skip signature verification (testing only)
+    #[allow(clippy::too_many_arguments)]
     pub fn record_vote(
         &mut self,
         canonical: &str,
         phase: &str,
         validator_id: &str,
         validator_pubkey: &str,
+        content_hash: &str,
         approved: bool,
         reject_reason: Option<String>,
         signature: String,
@@ -390,6 +421,7 @@ impl VoteAccumulator {
         let vote = IncomingVote {
             validator_id: validator_id.to_string(),
             validator_pubkey: validator_pubkey.to_string(),
+            content_hash: content_hash.to_string(),
             approved,
             reject_reason,
             signature,
@@ -457,18 +489,43 @@ impl VoteAccumulator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ed25519_dalek::{Signer, SigningKey};
+    use rand::RngCore;
 
-    fn vote(validator_id: &str, validator_pubkey: &str, approved: bool) -> IncomingVote {
+    fn fresh_keypair() -> (SigningKey, String) {
+        let mut rng = rand::rngs::OsRng;
+        let mut seed = [0u8; 32];
+        rng.fill_bytes(&mut seed);
+        let sk = SigningKey::from_bytes(&seed);
+        let pub_hex = hex::encode(sk.verifying_key().as_bytes());
+        (sk, pub_hex)
+    }
+
+    fn sign_vote(
+        sk: &SigningKey,
+        pub_hex: &str,
+        canonical: &str,
+        content_hash: &str,
+        approved: bool,
+    ) -> String {
+        let msg = canonical_vote_message(canonical, content_hash, approved, pub_hex);
+        hex::encode(sk.sign(msg.as_bytes()).to_bytes())
+    }
+
+    /// Build a plaintext (unsigned) vote with a fake signature — useful when
+    /// the test calls `record_prepare/record_commit` with `skip_verification = true`.
+    fn unsigned_vote(validator_id: &str, validator_pubkey: &str, approved: bool) -> IncomingVote {
         IncomingVote {
             validator_id: validator_id.to_string(),
             validator_pubkey: validator_pubkey.to_string(),
+            content_hash: "00".repeat(32),
             approved,
             reject_reason: if approved {
                 None
             } else {
                 Some("bad code".into())
             },
-            signature: common::sha256_hex(validator_id.as_bytes()),
+            signature: "00".repeat(64),
             received_at: Utc::now(),
             ml_model_version: None,
         }
@@ -485,29 +542,28 @@ mod tests {
     fn finalises_with_quorum_approvals() {
         let mut state = PackageVoteState::new("npm:test@1.0.0", 4);
         // quorum = 3
-
         let block_hash = "0x1234abcd";
 
-        state
-            .record_prepare(vote("v1", "0x1111", true), block_hash, true)
-            .unwrap();
-        state
-            .record_prepare(vote("v2", "0x2222", true), block_hash, true)
-            .unwrap();
-        state
-            .record_prepare(vote("v3", "0x3333", true), block_hash, true)
-            .unwrap();
-
+        for id in &["v1", "v2", "v3"] {
+            let pub_hex = format!("{:0>64}", id);
+            state
+                .record_prepare(unsigned_vote(id, &pub_hex, true), block_hash, true)
+                .unwrap();
+        }
         assert!(matches!(state.phase, VotePhase::PrepareQuorumReached));
 
-        state
-            .record_commit(vote("v1", "0x1111", true), block_hash, true)
-            .unwrap();
-        state
-            .record_commit(vote("v2", "0x2222", true), block_hash, true)
-            .unwrap();
+        for id in &["v1", "v2"] {
+            let pub_hex = format!("{:0>64}", id);
+            state
+                .record_commit(unsigned_vote(id, &pub_hex, true), block_hash, true)
+                .unwrap();
+        }
         let outcome = state
-            .record_commit(vote("v3", "0x3333", true), block_hash, true)
+            .record_commit(
+                unsigned_vote("v3", &format!("{:0>64}", "v3"), true),
+                block_hash,
+                true,
+            )
             .unwrap();
 
         assert!(matches!(outcome, Some(CommitOutcome::Verified(_))));
@@ -517,28 +573,27 @@ mod tests {
     #[test]
     fn fails_when_rejections_make_quorum_impossible() {
         let mut state = PackageVoteState::new("npm:bad@1.0.0", 4);
-        // quorum = 3, so 2 rejections make it impossible
-
         let block_hash = "0x1234abcd";
 
-        state
-            .record_prepare(vote("v1", "0x1111", false), block_hash, true)
-            .unwrap();
-        state
-            .record_prepare(vote("v2", "0x2222", false), block_hash, true)
-            .unwrap();
-        state
-            .record_prepare(vote("v3", "0x3333", false), block_hash, true)
-            .unwrap();
+        for id in &["v1", "v2", "v3"] {
+            let pub_hex = format!("{:0>64}", id);
+            state
+                .record_prepare(unsigned_vote(id, &pub_hex, false), block_hash, true)
+                .unwrap();
+        }
 
-        state
-            .record_commit(vote("v1", "0x1111", false), block_hash, true)
-            .unwrap();
-        state
-            .record_commit(vote("v2", "0x2222", false), block_hash, true)
-            .unwrap();
+        for id in &["v1", "v2"] {
+            let pub_hex = format!("{:0>64}", id);
+            state
+                .record_commit(unsigned_vote(id, &pub_hex, false), block_hash, true)
+                .unwrap();
+        }
         let outcome = state
-            .record_commit(vote("v3", "0x3333", false), block_hash, true)
+            .record_commit(
+                unsigned_vote("v3", &format!("{:0>64}", "v3"), false),
+                block_hash,
+                true,
+            )
             .unwrap();
 
         assert!(matches!(outcome, Some(CommitOutcome::Rejected(_))));
@@ -557,13 +612,15 @@ mod tests {
     #[test]
     fn rejects_invalid_signature_format() {
         let state = PackageVoteState::new("npm:test@1.0.0", 4);
+        let (_, pub_hex) = fresh_keypair();
 
         let bad_vote = IncomingVote {
             validator_id: "v1".to_string(),
-            validator_pubkey: "0x1111".to_string(),
+            validator_pubkey: pub_hex,
+            content_hash: "abcd".into(),
             approved: true,
             reject_reason: None,
-            signature: "not_valid_hex!!!".to_string(),
+            signature: "not_valid_hex!!!".into(),
             received_at: Utc::now(),
             ml_model_version: None,
         };
@@ -573,70 +630,101 @@ mod tests {
     }
 
     #[test]
-    fn signature_verification_with_real_crypto() {
-        // This test verifies that our ECDSA verification logic works correctly
-        // using a known-good signature pair.
-
-        // Test vector: known address and valid signature format
-        // In production, validators would sign with their Ethereum private keys
-        let canonical = "npm:test@1.0.0";
-        let approved = true;
-        let block_hash = "0x1234abcd5678";
-
-        // Create a properly formatted vote
+    fn ed25519_signature_roundtrip() {
+        // A valid Ed25519 signature over the canonical vote message must pass.
+        let canonical = "npm:widget@1.2.3";
+        let content_hash = "deadbeef".repeat(8);
         let state = PackageVoteState::new(canonical, 4);
+        let (sk, pub_hex) = fresh_keypair();
+
         let vote = IncomingVote {
-            validator_id: "test_validator".to_string(),
-            validator_pubkey: "0x1111111111111111111111111111111111111111".to_string(),
-            approved,
+            validator_id: "v1".into(),
+            validator_pubkey: pub_hex.clone(),
+            content_hash: content_hash.clone(),
+            approved: true,
             reject_reason: None,
-            // Valid 65-byte ECDSA signature (r: 32 bytes, s: 32 bytes, v: 1 byte)
-            signature: "a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567801".to_string(),
+            signature: sign_vote(&sk, &pub_hex, canonical, &content_hash, true),
             received_at: Utc::now(),
             ml_model_version: None,
         };
 
-        // This will fail signature recovery (random sig), but tests the code path
-        let result = state.verify_signature(&vote, block_hash);
-        // We expect Malformed or Invalid since we're using a random signature
-        assert!(
-            matches!(
-                result,
-                SignatureVerification::Invalid(_) | SignatureVerification::Malformed(_)
-            ),
-            "Random signature should fail verification"
+        assert_eq!(
+            state.verify_signature(&vote, "unused"),
+            SignatureVerification::Valid
         );
+    }
 
-        // Test malformed signature (too short)
+    #[test]
+    fn ed25519_wrong_content_hash_fails() {
+        // Flipping the content hash after signing must invalidate the signature.
+        let canonical = "npm:widget@1.2.3";
+        let signed_hash = "aa".repeat(32);
+        let actual_hash = "bb".repeat(32);
+        let state = PackageVoteState::new(canonical, 4);
+        let (sk, pub_hex) = fresh_keypair();
+
+        let mut vote = IncomingVote {
+            validator_id: "v1".into(),
+            validator_pubkey: pub_hex.clone(),
+            content_hash: signed_hash.clone(),
+            approved: true,
+            reject_reason: None,
+            signature: sign_vote(&sk, &pub_hex, canonical, &signed_hash, true),
+            received_at: Utc::now(),
+            ml_model_version: None,
+        };
+        vote.content_hash = actual_hash;
+
+        assert!(matches!(
+            state.verify_signature(&vote, "unused"),
+            SignatureVerification::Invalid(_)
+        ));
+    }
+
+    #[test]
+    fn ed25519_pubkey_substitution_fails() {
+        // A signature signed by validator A cannot be relabelled to come from
+        // validator B. The pubkey is bound into the signed message.
+        let canonical = "npm:widget@1.2.3";
+        let content_hash = "cd".repeat(32);
+        let state = PackageVoteState::new(canonical, 4);
+        let (sk_a, pub_a) = fresh_keypair();
+        let (_, pub_b) = fresh_keypair();
+
+        let mut vote = IncomingVote {
+            validator_id: "v1".into(),
+            validator_pubkey: pub_a.clone(),
+            content_hash: content_hash.clone(),
+            approved: true,
+            reject_reason: None,
+            signature: sign_vote(&sk_a, &pub_a, canonical, &content_hash, true),
+            received_at: Utc::now(),
+            ml_model_version: None,
+        };
+        // Attacker swaps the pubkey to B while keeping A's signature.
+        vote.validator_pubkey = pub_b;
+
+        assert!(matches!(
+            state.verify_signature(&vote, "unused"),
+            SignatureVerification::Invalid(_)
+        ));
+    }
+
+    #[test]
+    fn ed25519_wrong_length_pubkey_malformed() {
+        let state = PackageVoteState::new("npm:test@1.0.0", 4);
         let bad_vote = IncomingVote {
-            validator_id: "test".to_string(),
-            validator_pubkey: "0x1111111111111111111111111111111111111111".to_string(),
+            validator_id: "v1".into(),
+            validator_pubkey: "abcd".into(), // 2 bytes, not 32
+            content_hash: "00".repeat(32),
             approved: true,
             reject_reason: None,
-            signature: "tooshort".to_string(),
+            signature: "00".repeat(64),
             received_at: Utc::now(),
             ml_model_version: None,
         };
-        let bad_result = state.verify_signature(&bad_vote, block_hash);
-        assert!(
-            matches!(bad_result, SignatureVerification::Malformed(_)),
-            "Too short signature should be malformed"
-        );
 
-        // Test invalid address length
-        let bad_addr_vote = IncomingVote {
-            validator_id: "test".to_string(),
-            validator_pubkey: "0x1234".to_string(), // Too short
-            approved: true,
-            reject_reason: None,
-            signature: "a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567801".to_string(),
-            received_at: Utc::now(),
-            ml_model_version: None,
-        };
-        let bad_addr_result = state.verify_signature(&bad_addr_vote, block_hash);
-        assert!(
-            matches!(bad_addr_result, SignatureVerification::Malformed(_)),
-            "Invalid address length should be malformed"
-        );
+        let result = state.verify_signature(&bad_vote, "unused");
+        assert!(matches!(result, SignatureVerification::Malformed(_)));
     }
 }
