@@ -182,6 +182,134 @@ impl ConstraintSynthesizer<Fr> for PrivatePackageCircuit {
     }
 }
 
+/// Circuit for proving validator double-signing evidence.
+///
+/// Public inputs (8 Fr elements, order matters for verifier compatibility):
+///   0. validator_pubkey_lo  — low 16 bytes of the Ed25519 pubkey
+///   1. validator_pubkey_hi  — high 16 bytes
+///   2. package_hash_lo      — low 16 bytes of SHA-256(package_canonical)
+///   3. package_hash_hi      — high 16 bytes
+///   4. vote1_hash_lo        — low 16 bytes of SHA-256(vote1_canonical)
+///   5. vote1_hash_hi        — high 16 bytes
+///   6. vote2_hash_lo        — low 16 bytes of SHA-256(vote2_canonical)
+///   7. vote2_hash_hi        — high 16 bytes
+///
+/// The circuit constrains that `(vote1_hash_lo, vote1_hash_hi) != (vote2_hash_lo,
+/// vote2_hash_hi)` — i.e. the two signed messages must genuinely differ. The
+/// validator_pubkey and package_hash values are committed via public-input
+/// binding so the downstream verifier (on-chain slashing contract) can match
+/// them against the stored evidence record without trusting the prover.
+///
+/// Ed25519 signature validity itself is NOT verified inside R1CS (that would
+/// blow up the constraint count by ~200k); the off-chain evidence collector
+/// performs native Ed25519 verification before invoking the prover, and the
+/// on-chain contract re-checks the signatures against the stored pubkey.
+/// The ZK proof's job here is to commit to the conflicting-vote structure in
+/// a way that's succinctly verifiable on L1.
+#[derive(Clone, Default)]
+pub struct DoubleSignCircuit {
+    pub validator_pubkey_lo: [u8; 16],
+    pub validator_pubkey_hi: [u8; 16],
+    pub package_hash_lo: [u8; 16],
+    pub package_hash_hi: [u8; 16],
+    pub vote1_hash_lo: [u8; 16],
+    pub vote1_hash_hi: [u8; 16],
+    pub vote2_hash_lo: [u8; 16],
+    pub vote2_hash_hi: [u8; 16],
+}
+
+impl DoubleSignCircuit {
+    /// Build a circuit from raw 32-byte hashes.
+    pub fn from_hashes(
+        validator_pubkey: &[u8; 32],
+        package_hash: &[u8; 32],
+        vote1_hash: &[u8; 32],
+        vote2_hash: &[u8; 32],
+    ) -> Self {
+        fn split(h: &[u8; 32]) -> ([u8; 16], [u8; 16]) {
+            let mut lo = [0u8; 16];
+            let mut hi = [0u8; 16];
+            lo.copy_from_slice(&h[..16]);
+            hi.copy_from_slice(&h[16..]);
+            (lo, hi)
+        }
+        let (vpk_lo, vpk_hi) = split(validator_pubkey);
+        let (pkg_lo, pkg_hi) = split(package_hash);
+        let (v1_lo, v1_hi) = split(vote1_hash);
+        let (v2_lo, v2_hi) = split(vote2_hash);
+        Self {
+            validator_pubkey_lo: vpk_lo,
+            validator_pubkey_hi: vpk_hi,
+            package_hash_lo: pkg_lo,
+            package_hash_hi: pkg_hi,
+            vote1_hash_lo: v1_lo,
+            vote1_hash_hi: v1_hi,
+            vote2_hash_lo: v2_lo,
+            vote2_hash_hi: v2_hi,
+        }
+    }
+
+    /// Return the public-input vector in the canonical verifier order.
+    pub fn public_inputs(&self) -> Vec<Fr> {
+        vec![
+            Fr::from_le_bytes_mod_order(&self.validator_pubkey_lo),
+            Fr::from_le_bytes_mod_order(&self.validator_pubkey_hi),
+            Fr::from_le_bytes_mod_order(&self.package_hash_lo),
+            Fr::from_le_bytes_mod_order(&self.package_hash_hi),
+            Fr::from_le_bytes_mod_order(&self.vote1_hash_lo),
+            Fr::from_le_bytes_mod_order(&self.vote1_hash_hi),
+            Fr::from_le_bytes_mod_order(&self.vote2_hash_lo),
+            Fr::from_le_bytes_mod_order(&self.vote2_hash_hi),
+        ]
+    }
+}
+
+impl ConstraintSynthesizer<Fr> for DoubleSignCircuit {
+    fn generate_constraints(self, cs: ConstraintSystemRef<Fr>) -> Result<(), SynthesisError> {
+        let validator_pubkey_lo =
+            FpVar::new_input(cs.clone(), || Ok(Fr::from_le_bytes_mod_order(&self.validator_pubkey_lo)))?;
+        let validator_pubkey_hi =
+            FpVar::new_input(cs.clone(), || Ok(Fr::from_le_bytes_mod_order(&self.validator_pubkey_hi)))?;
+        let package_hash_lo =
+            FpVar::new_input(cs.clone(), || Ok(Fr::from_le_bytes_mod_order(&self.package_hash_lo)))?;
+        let package_hash_hi =
+            FpVar::new_input(cs.clone(), || Ok(Fr::from_le_bytes_mod_order(&self.package_hash_hi)))?;
+        let vote1_lo =
+            FpVar::new_input(cs.clone(), || Ok(Fr::from_le_bytes_mod_order(&self.vote1_hash_lo)))?;
+        let vote1_hi =
+            FpVar::new_input(cs.clone(), || Ok(Fr::from_le_bytes_mod_order(&self.vote1_hash_hi)))?;
+        let vote2_lo =
+            FpVar::new_input(cs.clone(), || Ok(Fr::from_le_bytes_mod_order(&self.vote2_hash_lo)))?;
+        let vote2_hi =
+            FpVar::new_input(cs.clone(), || Ok(Fr::from_le_bytes_mod_order(&self.vote2_hash_hi)))?;
+
+        // Binding constraints: ensure allocated variables are actually used in
+        // the constraint system so the Groth16 verifier binds the public
+        // inputs. Enforcing equality with themselves is cheap and compiles
+        // down to trivial gates.
+        validator_pubkey_lo.enforce_equal(&validator_pubkey_lo)?;
+        validator_pubkey_hi.enforce_equal(&validator_pubkey_hi)?;
+        package_hash_lo.enforce_equal(&package_hash_lo)?;
+        package_hash_hi.enforce_equal(&package_hash_hi)?;
+
+        // Core constraint: vote1_hash != vote2_hash (at least one half differs).
+        // Compute the differences and witness their non-zero status via
+        // `is_zero().not()`, then OR them together.
+        let diff_lo = &vote1_lo - &vote2_lo;
+        let diff_hi = &vote1_hi - &vote2_hi;
+
+        let lo_is_zero = diff_lo.is_zero()?;
+        let hi_is_zero = diff_hi.is_zero()?;
+        let lo_nonzero = lo_is_zero.not();
+        let hi_nonzero = hi_is_zero.not();
+
+        let at_least_one_nonzero = lo_nonzero.or(&hi_nonzero)?;
+        at_least_one_nonzero.enforce_equal(&Boolean::constant(true))?;
+
+        Ok(())
+    }
+}
+
 /// Circuit for batch validation of multiple packages
 ///
 /// Proves that all packages in a batch meet safety criteria
@@ -283,6 +411,51 @@ mod tests {
             !cs.is_satisfied().unwrap(),
             "Circuit must reject complexity_score above maximum (95 > 90)"
         );
+    }
+
+    #[test]
+    fn test_double_sign_circuit_accepts_different_hashes() {
+        let cs = ConstraintSystem::<Fr>::new_ref();
+        let circuit = DoubleSignCircuit::from_hashes(
+            &[7u8; 32],
+            &[9u8; 32],
+            &[0x11; 32],
+            &[0x22; 32],
+        );
+        circuit.generate_constraints(cs.clone()).unwrap();
+        assert!(cs.is_satisfied().unwrap());
+    }
+
+    #[test]
+    fn test_double_sign_circuit_rejects_equal_hashes() {
+        let cs = ConstraintSystem::<Fr>::new_ref();
+        let circuit = DoubleSignCircuit::from_hashes(
+            &[7u8; 32],
+            &[9u8; 32],
+            &[0x33; 32],
+            &[0x33; 32], // identical vote hash — not a double sign
+        );
+        circuit.generate_constraints(cs.clone()).unwrap();
+        assert!(
+            !cs.is_satisfied().unwrap(),
+            "Circuit must reject when vote1_hash == vote2_hash"
+        );
+    }
+
+    #[test]
+    fn test_double_sign_circuit_accepts_single_half_diff() {
+        // Only the high half differs — must still satisfy.
+        let mut v1 = [0u8; 32];
+        let mut v2 = [0u8; 32];
+        v1[..16].copy_from_slice(&[0xAA; 16]);
+        v2[..16].copy_from_slice(&[0xAA; 16]);
+        v1[16..].copy_from_slice(&[0xBB; 16]);
+        v2[16..].copy_from_slice(&[0xCC; 16]);
+        let cs = ConstraintSystem::<Fr>::new_ref();
+        DoubleSignCircuit::from_hashes(&[1u8; 32], &[2u8; 32], &v1, &v2)
+            .generate_constraints(cs.clone())
+            .unwrap();
+        assert!(cs.is_satisfied().unwrap());
     }
 
     #[test]

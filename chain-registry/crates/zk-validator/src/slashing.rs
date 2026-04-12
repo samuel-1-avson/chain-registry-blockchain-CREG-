@@ -4,9 +4,17 @@
 //! slashing evidence, specifically for double-signing detection.
 
 use anyhow::{Context, Result};
+use ark_bn254::{Bn254, Fr};
+use ark_ff::PrimeField;
+use ark_groth16::{Groth16, ProvingKey, VerifyingKey};
+use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
+use ark_snark::SNARK;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock};
+
+use crate::circuits::DoubleSignCircuit;
 
 /// Types of slashing evidence
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -105,28 +113,96 @@ pub struct ZKSlashingProof {
     pub timestamp: u64,
 }
 
-/// Configuration for proof generation
+/// Configuration for the double-sign proving system.
 #[derive(Debug, Clone)]
 pub struct ProofConfig {
-    /// Path to circom circuit
-    pub circuit_path: String,
-    /// Path to proving key
-    pub proving_key_path: String,
-    /// Path to witness generator
-    pub witness_generator_path: String,
-    /// Whether to use GPU acceleration
-    pub use_gpu: bool,
+    /// Directory used to persist/load the trusted-setup keys.
+    pub keys_dir: PathBuf,
 }
 
 impl Default for ProofConfig {
     fn default() -> Self {
-        Self {
-            circuit_path: "circuits/DoubleSignProof.circom".to_string(),
-            proving_key_path: "circuits/DoubleSignProof_final.zkey".to_string(),
-            witness_generator_path: "circuits/DoubleSignProof_js/DoubleSignProof".to_string(),
-            use_gpu: false,
-        }
+        let keys_dir = std::env::var("CREG_ZK_KEYS_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("circuits"));
+        Self { keys_dir }
     }
+}
+
+const PROVING_KEY_FILE: &str = "double_sign_pk.bin";
+const VERIFYING_KEY_FILE: &str = "double_sign_vk.bin";
+
+/// Shared proving/verifying key pair. The first caller to hit a live validator
+/// triggers a ~3-second trusted setup for the double-sign circuit; subsequent
+/// invocations reuse the cached `Arc`.
+static DOUBLE_SIGN_KEYS: OnceLock<Arc<(ProvingKey<Bn254>, VerifyingKey<Bn254>)>> = OnceLock::new();
+
+fn load_or_generate_keys(
+    keys_dir: &Path,
+) -> Result<Arc<(ProvingKey<Bn254>, VerifyingKey<Bn254>)>> {
+    if let Some(existing) = DOUBLE_SIGN_KEYS.get() {
+        return Ok(existing.clone());
+    }
+
+    let pk_path = keys_dir.join(PROVING_KEY_FILE);
+    let vk_path = keys_dir.join(VERIFYING_KEY_FILE);
+
+    let keys = if pk_path.exists() && vk_path.exists() {
+        tracing::info!("Loading double-sign ZK keys from {}", keys_dir.display());
+        let pk_bytes = std::fs::read(&pk_path).context("read double-sign proving key")?;
+        let vk_bytes = std::fs::read(&vk_path).context("read double-sign verifying key")?;
+        let pk = ProvingKey::<Bn254>::deserialize_uncompressed(pk_bytes.as_slice())
+            .context("deserialize double-sign proving key")?;
+        let vk = VerifyingKey::<Bn254>::deserialize_uncompressed(vk_bytes.as_slice())
+            .context("deserialize double-sign verifying key")?;
+        (pk, vk)
+    } else {
+        tracing::warn!(
+            "Double-sign ZK keys not found in {} — running ephemeral trusted \
+             setup. These keys are NOT production-grade; regenerate via a \
+             proper multi-party ceremony before mainnet.",
+            keys_dir.display()
+        );
+        let circuit = DoubleSignCircuit::default();
+        let mut rng = rand::thread_rng();
+        let (pk, vk) = Groth16::<Bn254>::circuit_specific_setup(circuit, &mut rng)
+            .context("double-sign circuit setup failed")?;
+
+        if let Err(e) = std::fs::create_dir_all(keys_dir) {
+            tracing::warn!("Could not create ZK key dir: {}", e);
+        } else {
+            let mut pk_bytes = Vec::new();
+            let mut vk_bytes = Vec::new();
+            if let Err(e) = pk.serialize_uncompressed(&mut pk_bytes) {
+                tracing::warn!("Failed to serialize double-sign proving key: {}", e);
+            } else if let Err(e) = std::fs::write(&pk_path, &pk_bytes) {
+                tracing::warn!("Failed to persist double-sign proving key: {}", e);
+            }
+            if let Err(e) = vk.serialize_uncompressed(&mut vk_bytes) {
+                tracing::warn!("Failed to serialize double-sign verifying key: {}", e);
+            } else if let Err(e) = std::fs::write(&vk_path, &vk_bytes) {
+                tracing::warn!("Failed to persist double-sign verifying key: {}", e);
+            }
+        }
+        (pk, vk)
+    };
+
+    let arc = Arc::new(keys);
+    Ok(DOUBLE_SIGN_KEYS.get_or_init(|| arc.clone()).clone())
+}
+
+fn hex32(s: &str) -> Result<[u8; 32]> {
+    let bytes = hex::decode(s.trim_start_matches("0x")).context("hex decode")?;
+    if bytes.len() != 32 {
+        anyhow::bail!("expected 32-byte hex, got {} bytes", bytes.len());
+    }
+    let mut out = [0u8; 32];
+    out.copy_from_slice(&bytes);
+    Ok(out)
+}
+
+fn fr_to_decimal(f: &Fr) -> String {
+    f.into_bigint().to_string()
 }
 
 /// ZK Proof generator for slashing evidence
@@ -153,37 +229,97 @@ impl SlashingProofGenerator {
             evidence.validator_address
         );
 
-        // Step 1: Validate evidence
         self.validate_double_sign_evidence(evidence)?;
 
-        // Step 2: Prepare inputs for circuit
-        let input_json = self.prepare_circuit_inputs(evidence)?;
+        let circuit = self.circuit_from_evidence(evidence)?;
+        let proof = self.prove(circuit.clone()).await?;
+        let public_inputs = circuit.public_inputs();
 
-        // Step 3: Generate witness
-        let witness = self.generate_witness(&input_json).await?;
+        // Sanity-check the freshly-generated proof against its own VK before
+        // returning it — a failing self-verify means the circuit and witness
+        // are mutually inconsistent and we should not publish this evidence.
+        let keys = load_or_generate_keys(&self.config.keys_dir)?;
+        let ok = Groth16::<Bn254>::verify(&keys.1, &public_inputs, &proof)
+            .map_err(|e| anyhow::anyhow!("groth16 self-verify failed: {}", e))?;
+        if !ok {
+            anyhow::bail!("generated double-sign proof failed self-verification");
+        }
 
-        // Step 4: Generate proof
-        let proof = self.generate_groth16_proof(&witness).await?;
+        let groth = groth16_to_display(&proof);
+        let public_inputs_decimal: Vec<String> =
+            public_inputs.iter().map(fr_to_decimal).collect();
 
-        // Step 5: Compute nullifier
         let nullifier = self.compute_nullifier(&evidence.public_inputs);
 
-        tracing::info!("Proof generated successfully. Nullifier: {}", nullifier);
+        tracing::info!(
+            "Double-sign proof generated successfully. Nullifier: {}",
+            nullifier
+        );
 
         Ok(ZKSlashingProof {
-            proof,
-            public_inputs: vec![
-                evidence.public_inputs.validator_pubkey_x.clone(),
-                evidence.public_inputs.validator_pubkey_y.clone(),
-                evidence.public_inputs.package_hash.clone(),
-                evidence.public_inputs.vote1_hash.clone(),
-                evidence.public_inputs.vote2_hash.clone(),
-            ],
+            proof: groth,
+            public_inputs: public_inputs_decimal,
             evidence_type: EvidenceType::DoubleSign,
             offender: evidence.validator_address.clone(),
             nullifier,
             timestamp: current_timestamp(),
         })
+    }
+
+    fn circuit_from_evidence(&self, evidence: &DoubleSignEvidence) -> Result<DoubleSignCircuit> {
+        // The existing evidence struct uses hex strings for hashes and a split
+        // X/Y pubkey representation (legacy from the circom circuit that
+        // modelled Ed25519 as an affine point). We collapse validator_pubkey
+        // down to a 32-byte hex string by hashing X||Y when Y is non-empty,
+        // else treating X as the full 32-byte key.
+        let validator_pubkey = parse_validator_pubkey(
+            &evidence.public_inputs.validator_pubkey_x,
+            &evidence.public_inputs.validator_pubkey_y,
+        )?;
+        let package_hash = hex32(&evidence.public_inputs.package_hash)
+            .context("invalid package_hash in evidence")?;
+        let vote1_hash = hex32(&evidence.public_inputs.vote1_hash)
+            .context("invalid vote1_hash in evidence")?;
+        let vote2_hash = hex32(&evidence.public_inputs.vote2_hash)
+            .context("invalid vote2_hash in evidence")?;
+
+        if vote1_hash == vote2_hash {
+            anyhow::bail!("vote1_hash == vote2_hash: not a double-sign");
+        }
+
+        Ok(DoubleSignCircuit::from_hashes(
+            &validator_pubkey,
+            &package_hash,
+            &vote1_hash,
+            &vote2_hash,
+        ))
+    }
+
+    async fn prove(&self, circuit: DoubleSignCircuit) -> Result<ark_groth16::Proof<Bn254>> {
+        let keys_dir = self.config.keys_dir.clone();
+        tokio::task::spawn_blocking(move || -> Result<ark_groth16::Proof<Bn254>> {
+            let keys = load_or_generate_keys(&keys_dir)?;
+            let mut rng = rand::thread_rng();
+            Groth16::<Bn254>::prove(&keys.0, circuit, &mut rng)
+                .map_err(|e| anyhow::anyhow!("groth16 prove failed: {}", e))
+        })
+        .await
+        .context("groth16 proving task panicked")?
+    }
+
+    /// Verify a slashing proof against the shared verifying key.
+    pub fn verify_slashing_proof(&self, proof: &ZKSlashingProof) -> Result<bool> {
+        let keys = load_or_generate_keys(&self.config.keys_dir)?;
+
+        let public_inputs: Vec<Fr> = proof
+            .public_inputs
+            .iter()
+            .map(|s| parse_fr_decimal(s))
+            .collect::<Result<_>>()?;
+
+        let groth = display_to_groth16(&proof.proof)?;
+        Groth16::<Bn254>::verify(&keys.1, &public_inputs, &groth)
+            .map_err(|e| anyhow::anyhow!("groth16 verify: {}", e))
     }
 
     /// Validate that the evidence is coherent
@@ -221,90 +357,6 @@ impl SlashingProofGenerator {
         Ok(())
     }
 
-    /// Prepare inputs for the circom circuit
-    fn prepare_circuit_inputs(&self, evidence: &DoubleSignEvidence) -> Result<String> {
-        let inputs = serde_json::json!({
-            "validatorPubkey": [
-                evidence.public_inputs.validator_pubkey_x,
-                evidence.public_inputs.validator_pubkey_y,
-            ],
-            "packageHash": evidence.public_inputs.package_hash,
-            "vote1Hash": evidence.public_inputs.vote1_hash,
-            "vote2Hash": evidence.public_inputs.vote2_hash,
-            "validatorPrivkey": evidence.witness.validator_privkey,
-            "signature1": [
-                evidence.witness.signature1.r_x,
-                evidence.witness.signature1.r_y,
-                evidence.witness.signature1.s,
-            ],
-            "signature2": [
-                evidence.witness.signature2.r_x,
-                evidence.witness.signature2.r_y,
-                evidence.witness.signature2.s,
-            ],
-        });
-
-        Ok(inputs.to_string())
-    }
-
-    /// Generate witness using circom's witness generator
-    async fn generate_witness(&self, input_json: &str) -> Result<Vec<u8>> {
-        use tokio::fs;
-        use tokio::process::Command;
-
-        tracing::debug!("Generating witness...");
-
-        // Write inputs to temp file
-        let input_path = "/tmp/zk_input.json";
-        fs::write(input_path, input_json).await?;
-
-        let output_path = "/tmp/zk_witness.wtns";
-
-        // Run witness generator
-        let status = Command::new(&self.config.witness_generator_path)
-            .arg(input_path)
-            .arg(output_path)
-            .status()
-            .await
-            .context("Failed to run witness generator")?;
-
-        if !status.success() {
-            anyhow::bail!("Witness generation failed");
-        }
-
-        // Read witness
-        let witness = fs::read(output_path).await?;
-
-        // Cleanup
-        let _ = fs::remove_file(input_path).await;
-        let _ = fs::remove_file(output_path).await;
-
-        Ok(witness)
-    }
-
-    /// Generate Groth16 proof using snarkjs
-    async fn generate_groth16_proof(&self, _witness: &[u8]) -> Result<Groth16Proof> {
-        // In production, this would:
-        // 1. Use snarkjs or a Rust library (like ark-groth16) to generate proof
-        // 2. Load the proving key
-        // 3. Perform the proving computation
-        // 4. Return the proof
-
-        // For now, return a placeholder
-        tracing::warn!("Using placeholder proof - integrate with actual ZK library for production");
-
-        Ok(Groth16Proof {
-            a: ["0".to_string(), "0".to_string()],
-            b: [
-                ["0".to_string(), "0".to_string()],
-                ["0".to_string(), "0".to_string()],
-            ],
-            c: ["0".to_string(), "0".to_string()],
-            protocol: "groth16".to_string(),
-            curve: "bn128".to_string(),
-        })
-    }
-
     /// Compute nullifier from public inputs
     fn compute_nullifier(&self, public_inputs: &DoubleSignPublicInputs) -> String {
         let data = format!(
@@ -330,7 +382,9 @@ impl SlashingProofGenerator {
 pub struct DoubleSignMonitor {
     /// Known votes by validator: (validator_id, package) -> Vec<Vote>
     votes: std::collections::HashMap<(String, String), Vec<VoteRecord>>,
-    /// Proof generator
+    /// Proof generator retained so external callers can fetch a prover without
+    /// constructing a second instance; not used directly by the monitor itself.
+    #[allow(dead_code)]
     generator: SlashingProofGenerator,
 }
 
@@ -428,6 +482,94 @@ impl DoubleSignMonitor {
     }
 }
 
+/// Collapse the legacy (X, Y) Ed25519 pubkey representation used in
+/// `DoubleSignPublicInputs` into a single 32-byte key. When Y is empty / "0",
+/// X is assumed to already encode the full Ed25519 compressed pubkey; when
+/// both are present, we hash X||Y to derive a stable 32-byte commitment that
+/// binds the proof to both components.
+fn parse_validator_pubkey(x: &str, y: &str) -> Result<[u8; 32]> {
+    let y_trim = y.trim_start_matches("0x");
+    let x_trim = x.trim_start_matches("0x");
+
+    if y_trim.is_empty() || y_trim == "0" {
+        let bytes = hex::decode(x_trim).context("decode validator pubkey X")?;
+        if bytes.len() == 32 {
+            let mut out = [0u8; 32];
+            out.copy_from_slice(&bytes);
+            return Ok(out);
+        }
+        let mut h = Sha256::new();
+        h.update(&bytes);
+        let d = h.finalize();
+        let mut out = [0u8; 32];
+        out.copy_from_slice(&d);
+        return Ok(out);
+    }
+
+    let mut h = Sha256::new();
+    h.update(hex::decode(x_trim).unwrap_or_else(|_| x.as_bytes().to_vec()));
+    h.update(hex::decode(y_trim).unwrap_or_else(|_| y.as_bytes().to_vec()));
+    let d = h.finalize();
+    let mut out = [0u8; 32];
+    out.copy_from_slice(&d);
+    Ok(out)
+}
+
+/// Parse a decimal-encoded Fr element (matches `fr_to_decimal`).
+fn parse_fr_decimal(s: &str) -> Result<Fr> {
+    use std::str::FromStr;
+    Fr::from_str(s).map_err(|_| anyhow::anyhow!("invalid Fr decimal: {}", s))
+}
+
+/// Convert an arkworks Groth16 proof into the string-based `Groth16Proof`
+/// display struct. Each G1/G2 coordinate is rendered as a base-10 integer in
+/// the Fr/Fq field (not little-endian hex) so on-chain Solidity verifiers can
+/// consume it via `uint256` literals.
+fn groth16_to_display(proof: &ark_groth16::Proof<Bn254>) -> Groth16Proof {
+    use ark_bn254::{G1Affine, G2Affine};
+    let a: G1Affine = proof.a;
+    let b: G2Affine = proof.b;
+    let c: G1Affine = proof.c;
+
+    let a_x = a.x.into_bigint().to_string();
+    let a_y = a.y.into_bigint().to_string();
+    let b_x_c0 = b.x.c0.into_bigint().to_string();
+    let b_x_c1 = b.x.c1.into_bigint().to_string();
+    let b_y_c0 = b.y.c0.into_bigint().to_string();
+    let b_y_c1 = b.y.c1.into_bigint().to_string();
+    let c_x = c.x.into_bigint().to_string();
+    let c_y = c.y.into_bigint().to_string();
+
+    Groth16Proof {
+        a: [a_x, a_y],
+        b: [[b_x_c0, b_x_c1], [b_y_c0, b_y_c1]],
+        c: [c_x, c_y],
+        protocol: "groth16".to_string(),
+        curve: "bn254".to_string(),
+    }
+}
+
+/// Inverse of `groth16_to_display` — reconstructs an arkworks proof from the
+/// decimal-string representation. Used by `verify_slashing_proof` on the
+/// validator side.
+fn display_to_groth16(p: &Groth16Proof) -> Result<ark_groth16::Proof<Bn254>> {
+    use ark_bn254::{Fq, Fq2, G1Affine, G2Affine};
+
+    fn parse_fq(s: &str) -> Result<Fq> {
+        use std::str::FromStr;
+        Fq::from_str(s).map_err(|_| anyhow::anyhow!("invalid Fq decimal: {}", s))
+    }
+
+    let a = G1Affine::new_unchecked(parse_fq(&p.a[0])?, parse_fq(&p.a[1])?);
+    let b = G2Affine::new_unchecked(
+        Fq2::new(parse_fq(&p.b[0][0])?, parse_fq(&p.b[0][1])?),
+        Fq2::new(parse_fq(&p.b[1][0])?, parse_fq(&p.b[1][1])?),
+    );
+    let c = G1Affine::new_unchecked(parse_fq(&p.c[0])?, parse_fq(&p.c[1])?);
+
+    Ok(ark_groth16::Proof { a, b, c })
+}
+
 /// Get current timestamp
 fn current_timestamp() -> u64 {
     std::time::SystemTime::now()
@@ -491,5 +633,109 @@ mod tests {
 
         let result2 = monitor.record_vote(vote2);
         assert!(result2.is_some()); // Double-sign detected!
+    }
+
+    fn sample_evidence(vote1_hash: &str, vote2_hash: &str) -> DoubleSignEvidence {
+        DoubleSignEvidence {
+            public_inputs: DoubleSignPublicInputs {
+                validator_pubkey_x: hex::encode([0xAAu8; 32]),
+                validator_pubkey_y: "0".to_string(),
+                package_hash: hex::encode([0x11u8; 32]),
+                vote1_hash: vote1_hash.to_string(),
+                vote2_hash: vote2_hash.to_string(),
+            },
+            witness: DoubleSignWitness {
+                validator_privkey: "HIDDEN".to_string(),
+                signature1: Signature {
+                    r_x: "0".to_string(),
+                    r_y: "0".to_string(),
+                    s: "sig1".to_string(),
+                },
+                signature2: Signature {
+                    r_x: "0".to_string(),
+                    r_y: "0".to_string(),
+                    s: "sig2".to_string(),
+                },
+            },
+            validator_address: "0xvalidator1".to_string(),
+            package_canonical: "npm:pkg@1.0.0".to_string(),
+            vote1_details: VoteDetails {
+                approved: true,
+                timestamp: 1_700_000_000,
+                block_height: 42,
+                signature_hex: "sig1".to_string(),
+            },
+            vote2_details: VoteDetails {
+                approved: false,
+                timestamp: 1_700_000_030,
+                block_height: 42,
+                signature_hex: "sig2".to_string(),
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn test_generate_and_verify_double_sign_proof() {
+        let tmp = std::env::temp_dir().join(format!(
+            "creg-zk-slash-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let generator = SlashingProofGenerator::new(ProofConfig {
+            keys_dir: tmp.clone(),
+        });
+
+        let evidence = sample_evidence(
+            &hex::encode([0xCCu8; 32]),
+            &hex::encode([0xDDu8; 32]),
+        );
+
+        let proof = generator
+            .generate_double_sign_proof(&evidence)
+            .await
+            .expect("proof generation must succeed");
+
+        assert_eq!(proof.proof.protocol, "groth16");
+        assert_eq!(proof.proof.curve, "bn254");
+        assert_eq!(proof.public_inputs.len(), 8);
+        assert_ne!(proof.proof.a[0], "0");
+
+        let ok = generator
+            .verify_slashing_proof(&proof)
+            .expect("verify must not error");
+        assert!(ok, "proof must verify against its own vk");
+
+        // A proof whose public inputs get tampered with should fail to verify.
+        let mut tampered = proof.clone();
+        tampered.public_inputs[6] = "1".to_string(); // flip vote2_hash_lo
+        let bad = generator
+            .verify_slashing_proof(&tampered)
+            .expect("verify should execute");
+        assert!(!bad, "tampered public inputs must fail verification");
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[tokio::test]
+    async fn test_rejects_equal_vote_hashes() {
+        let tmp = std::env::temp_dir().join(format!(
+            "creg-zk-slash-equal-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let generator = SlashingProofGenerator::new(ProofConfig {
+            keys_dir: tmp.clone(),
+        });
+
+        let same = hex::encode([0x77u8; 32]);
+        let evidence = sample_evidence(&same, &same);
+        let err = generator
+            .generate_double_sign_proof(&evidence)
+            .await
+            .expect_err("equal vote hashes must be rejected");
+        let msg = format!("{err:#}");
+        assert!(msg.contains("vote1_hash == vote2_hash"), "msg: {msg}");
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }
