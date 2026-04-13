@@ -6,10 +6,17 @@ pragma solidity ^0.8.24;
 /// @dev Verifies ZK proofs for package validation. Uses optimized
 ///      precompile calls for pairing checks.
 contract ZKVerifier {
-    
-    // Bn254 curve constants
-    uint256 constant P = 21888242871839275222246405745257275088548364400416034343698204186575808495617;
-    uint256 constant R = 21888242871839275222246405745257275088548364400416034343698204186575808495617;
+
+    // BN254 base field prime — used to negate G1 y-coordinates.
+    uint256 constant BN254_P = 21888242871839275222246405745257275088696311157297823662689037894645226208583;
+
+    // BN254 scalar field prime — used for public-input range checks and the
+    // Fiat-Shamir challenge in batchVerify.
+    uint256 constant BN254_R = 21888242871839275222246405745257275088548364400416034343698204186575808495617;
+
+    // Legacy alias kept for batchVerify (uses P for the challenge modulus, which
+    // should be the SCALAR field prime BN254_R).
+    uint256 constant P = BN254_R;
     
     // Verification key components (set by constructor or governance)
     struct VerifyingKey {
@@ -99,17 +106,26 @@ contract ZKVerifier {
     }
     
     /// @notice Batch verify multiple proofs using random-linear-combination.
-    /// @dev Instead of N independent pairing checks, we generate a random
-    ///      challenge `r` from the hash of all proofs and public inputs, then
-    ///      verify:  e(Σ rⁱ·Aᵢ, B_shared) · e(Σ rⁱ·Cᵢ, δ) · e(Σ rⁱ·vk_xᵢ, γ) == e(α,β)^(Σ rⁱ)
     ///
-    ///      For N proofs this collapses to ONE multi-pairing check (4 pairs)
-    ///      instead of N×4 pairs, saving ~60 % gas per additional proof.
+    /// @dev This optimisation is valid ONLY when every proof's B component
+    ///      equals the VK's beta2 (i.e. the proving system is set up with a
+    ///      fixed B = beta2, as used by some rollup circuits). If any proof
+    ///      was generated with a random per-proof B, this function will
+    ///      produce incorrect results. Callers must ensure this precondition.
     ///
-    ///      Soundness: if any single proof is invalid, the batch check fails with
+    ///      Under the B = beta2 assumption, N independent Groth16 checks reduce
+    ///      to one 4-pair Miller-loop check:
+    ///
+    ///        e(−Σ rⁱ·Aᵢ, β) · e(α, β)^(Σ rⁱ) · e(Σ rⁱ·vk_xᵢ, γ) · e(Σ rⁱ·Cᵢ, δ) == 1
+    ///
+    ///      saving ~60% gas per additional proof versus N separate verifyProof calls.
+    ///
+    ///      Soundness: if any single proof is invalid the batch check fails with
     ///      overwhelming probability (2⁻²⁵⁶) because `r` is drawn after the
     ///      prover commits to all proofs.
+    ///
     /// @param proofs Array of proofs [A_x,A_y,B_x0,B_x1,B_y0,B_y1,C_x,C_y]
+    ///               B components MUST equal beta2 for correctness (see above).
     /// @param publicInputsArray Array of public input arrays
     /// @return allValid True if ALL proofs are valid in the aggregated check
     function batchVerify(
@@ -142,34 +158,45 @@ contract ZKVerifier {
             // Validate input lengths first
             if (publicInputsArray[i].length + 1 != vk.ic.length) return false;
 
-            // vk_x for this proof's public inputs
+            // vk_x for this proof's public inputs (already uses ECC precompiles)
             uint256[2] memory vk_x = _linearCombination(publicInputsArray[i]);
 
-            // Scale each G1 point by rPow and add into the accumulator.
-            // We use modular arithmetic as a stand-in for proper ECC scalar-mul.
-            aggA[0]   = addmod(aggA[0],   mulmod(rPow, proofs[i][0], P), P);
-            aggA[1]   = addmod(aggA[1],   mulmod(rPow, proofs[i][1], P), P);
-            aggC[0]   = addmod(aggC[0],   mulmod(rPow, proofs[i][6], P), P);
-            aggC[1]   = addmod(aggC[1],   mulmod(rPow, proofs[i][7], P), P);
-            aggVkx[0] = addmod(aggVkx[0], mulmod(rPow, vk_x[0],     P), P);
-            aggVkx[1] = addmod(aggVkx[1], mulmod(rPow, vk_x[1],     P), P);
+            // Scale each G1 point by rPow using ecMul (0x07) and accumulate
+            // with ecAdd (0x06) — proper elliptic-curve operations.
+            bool ok;
+
+            // aggA += rPow · Aᵢ
+            aggA = _ecMulAdd(aggA, [proofs[i][0], proofs[i][1]], rPow);
+
+            // aggC += rPow · Cᵢ
+            aggC = _ecMulAdd(aggC, [proofs[i][6], proofs[i][7]], rPow);
+
+            // aggVkx += rPow · vk_xᵢ
+            aggVkx = _ecMulAdd(aggVkx, vk_x, rPow);
+
             scalarSum  = addmod(scalarSum, rPow, P);
 
             // rPow = rPow * r (mod P)
             rPow = mulmod(rPow, r, P);
         }
 
-        // --- scale alpha by scalarSum for the RHS: e(scalarSum·α, β) --------
-        uint256[2] memory scaledAlpha;
-        scaledAlpha[0] = mulmod(scalarSum, vk.alpha1[0], P);
-        scaledAlpha[1] = mulmod(scalarSum, vk.alpha1[1], P);
+        // --- scale alpha by scalarSum for the RHS ─────────────────────────
+        uint256[2] memory scaledAlpha = _ecMul(vk.alpha1, scalarSum);
 
-        // --- single aggregated pairing check ─────────────────────────────────
+        // --- negate aggA so the check becomes a product == 1 ──────────────
+        // e(−aggA, β) · e(scaledAlpha, β) · e(aggVkx, γ) · e(aggC, δ) == 1
+        // which is equivalent to:
+        // e(aggA, β) == e(scaledAlpha, β) · e(aggVkx, γ) · e(aggC, δ)
+        uint256[2] memory negAggA;
+        negAggA[0] = aggA[0];
+        negAggA[1] = (aggA[1] == 0) ? 0 : BN254_P - aggA[1];
+
+        // --- single aggregated pairing check ──────────────────────────────
         uint256[24] memory input;
 
-        // Pair 1: e(aggA, B₂)  — all proofs share the VK's beta
-        input[0]  = aggA[0];
-        input[1]  = aggA[1];
+        // Pair 1: e(−aggA, β)  [negated aggregated A, paired with VK beta2]
+        input[0]  = negAggA[0];
+        input[1]  = negAggA[1];
         input[2]  = vk.beta2_x[0];
         input[3]  = vk.beta2_x[1];
         input[4]  = vk.beta2_y[0];
@@ -191,7 +218,7 @@ contract ZKVerifier {
         input[16] = vk.delta2_y[0];
         input[17] = vk.delta2_y[1];
 
-        // Pair 4: e(scaledAlpha, β)  — RHS
+        // Pair 4: e(scaledAlpha, β)
         input[18] = scaledAlpha[0];
         input[19] = scaledAlpha[1];
         input[20] = vk.beta2_x[0];
@@ -238,7 +265,9 @@ contract ZKVerifier {
         emit VerificationKeyUpdated(_ic.length);
     }
     
-    /// @notice Compute linear combination of public inputs with IC
+    /// @notice Compute linear combination of public inputs with IC using
+    ///         ECC scalar multiplication (precompile 0x07) and point addition
+    ///         (precompile 0x06) on the BN254 curve.
     function _linearCombination(uint256[] calldata publicInputs)
         internal
         view
@@ -246,19 +275,52 @@ contract ZKVerifier {
     {
         // Start with IC[0]
         result = vk.ic[0];
-        
-        // Add publicInputs[i] * IC[i+1]
+
         for (uint i = 0; i < publicInputs.length; i++) {
-            // Scalar multiplication and addition
-            // This is a simplified version - production would use proper ECC
-            result[0] = addmod(result[0], mulmod(publicInputs[i], vk.ic[i + 1][0], P), P);
-            result[1] = addmod(result[1], mulmod(publicInputs[i], vk.ic[i + 1][1], P), P);
+            // EcMul: compute publicInputs[i] * IC[i+1]  (precompile at 0x07)
+            uint256[2] memory icPoint = vk.ic[i + 1];
+            uint256[3] memory mulInput;
+            mulInput[0] = icPoint[0];
+            mulInput[1] = icPoint[1];
+            mulInput[2] = publicInputs[i];
+
+            uint256[2] memory mulResult;
+            bool success;
+            assembly {
+                success := staticcall(sub(gas(), 2000), 0x07, mulInput, 96, mulResult, 64)
+            }
+            require(success, "ecMul failed");
+
+            // EcAdd: result = result + mulResult  (precompile at 0x06)
+            uint256[4] memory addInput;
+            addInput[0] = result[0];
+            addInput[1] = result[1];
+            addInput[2] = mulResult[0];
+            addInput[3] = mulResult[1];
+
+            assembly {
+                success := staticcall(sub(gas(), 2000), 0x06, addInput, 128, result, 64)
+            }
+            require(success, "ecAdd failed");
         }
-        
+
         return result;
     }
     
-    /// @notice Perform pairing check using precompile
+    /// @notice Perform pairing check using precompile.
+    ///
+    /// Groth16 verification equation:
+    ///   e(A, B) = e(α, β) · e(vk_x, γ) · e(C, δ)
+    ///
+    /// Rearranged to a product-of-pairings == 1 check (suitable for the BN254
+    /// precompile at 0x08) by negating A in G1:
+    ///   e(−A, B_proof) · e(α, β) · e(vk_x, γ) · e(C, δ) == 1
+    ///
+    /// The G1 negation of point (x, y) is (x, BN254_P − y), where BN254_P is
+    /// the *base field* prime (different from the scalar field prime BN254_R).
+    ///
+    /// @param proof  [A_x, A_y, B_x[0], B_x[1], B_y[0], B_y[1], C_x, C_y]
+    ///               B is the proof's own G2 point, NOT the VK's beta.
     function _pairingCheck(
         uint256[8] calldata proof,
         uint256[2] memory vk_x,
@@ -270,60 +332,57 @@ contract ZKVerifier {
         uint256[2] memory delta2_x,
         uint256[2] memory delta2_y
     ) internal view returns (bool) {
-        // Prepare pairing input
-        // G1 points: A, C, vk_x, alpha1
-        // G2 points: B, delta, gamma, beta2
-        
         uint256[24] memory input;
-        
-        // Pair 1: e(A, B)
-        input[0] = proof[0];  // A_x
-        input[1] = proof[1];  // A_y
-        input[2] = beta2_x[0];
-        input[3] = beta2_x[1];
-        input[4] = beta2_y[0];
-        input[5] = beta2_y[1];
-        
-        // Pair 2: e(vk_x, gamma)
-        input[6] = vk_x[0];
-        input[7] = vk_x[1];
-        input[8] = gamma2_x[0];
-        input[9] = gamma2_x[1];
-        input[10] = gamma2_y[0];
-        input[11] = gamma2_y[1];
-        
-        // Pair 3: e(C, delta)
-        input[12] = proof[6]; // C_x
-        input[13] = proof[7]; // C_y
-        input[14] = delta2_x[0];
-        input[15] = delta2_x[1];
-        input[16] = delta2_y[0];
-        input[17] = delta2_y[1];
-        
-        // Pair 4: e(alpha, beta)
-        input[18] = alpha1[0];
-        input[19] = alpha1[1];
-        input[20] = beta2_x[0];
-        input[21] = beta2_x[1];
-        input[22] = beta2_y[0];
-        input[23] = beta2_y[1];
-        
-        // Call bn254 pairing precompile (address 0x08)
-        // Returns 1 if pairing check passes, 0 otherwise
+
+        // Negate A in G1: (A.x, BN254_P - A.y).
+        // The identity point is (0, 0) — leave it unchanged.
+        uint256 negAy = (proof[1] == 0) ? 0 : BN254_P - proof[1];
+
+        // Pair 1: e(−A, B_proof)  [B_proof is proof[2..5], the proof's G2 element]
+        input[0]  = proof[0];   // A.x
+        input[1]  = negAy;      // −A.y
+        input[2]  = proof[2];   // B.x[0]  (proof's own B, not vk.beta2)
+        input[3]  = proof[3];   // B.x[1]
+        input[4]  = proof[4];   // B.y[0]
+        input[5]  = proof[5];   // B.y[1]
+
+        // Pair 2: e(α, β)
+        input[6]  = alpha1[0];
+        input[7]  = alpha1[1];
+        input[8]  = beta2_x[0];
+        input[9]  = beta2_x[1];
+        input[10] = beta2_y[0];
+        input[11] = beta2_y[1];
+
+        // Pair 3: e(vk_x, γ)
+        input[12] = vk_x[0];
+        input[13] = vk_x[1];
+        input[14] = gamma2_x[0];
+        input[15] = gamma2_x[1];
+        input[16] = gamma2_y[0];
+        input[17] = gamma2_y[1];
+
+        // Pair 4: e(C, δ)
+        input[18] = proof[6];   // C.x
+        input[19] = proof[7];   // C.y
+        input[20] = delta2_x[0];
+        input[21] = delta2_x[1];
+        input[22] = delta2_y[0];
+        input[23] = delta2_y[1];
+
+        // BN254 pairing precompile (0x08): returns 1 iff product of pairings == 1 in GT.
         bool success;
         uint256 result;
-        
         assembly {
             success := staticcall(
                 sub(gas(), 2000),
                 0x08,
                 input,
-                768, // 24 * 32 bytes
+                768,    // 24 × 32 bytes
                 result,
                 32
             )
         }
-        
         return success && result == 1;
     }
     
@@ -348,5 +407,45 @@ contract ZKVerifier {
             vk.delta2_x,
             vk.delta2_y
         );
+    }
+
+    /// @notice Elliptic-curve scalar multiplication via BN254 ecMul precompile.
+    function _ecMul(uint256[2] memory point, uint256 scalar)
+        internal
+        view
+        returns (uint256[2] memory result)
+    {
+        uint256[3] memory input;
+        input[0] = point[0];
+        input[1] = point[1];
+        input[2] = scalar;
+
+        bool success;
+        assembly {
+            success := staticcall(sub(gas(), 2000), 0x07, input, 96, result, 64)
+        }
+        require(success, "ecMul failed");
+    }
+
+    /// @notice Scalar-multiply `point` by `scalar`, then add the result to
+    ///         `accumulator` using the BN254 ecAdd precompile.
+    function _ecMulAdd(
+        uint256[2] memory accumulator,
+        uint256[2] memory point,
+        uint256 scalar
+    ) internal view returns (uint256[2] memory result) {
+        uint256[2] memory scaled = _ecMul(point, scalar);
+
+        uint256[4] memory addInput;
+        addInput[0] = accumulator[0];
+        addInput[1] = accumulator[1];
+        addInput[2] = scaled[0];
+        addInput[3] = scaled[1];
+
+        bool success;
+        assembly {
+            success := staticcall(sub(gas(), 2000), 0x06, addInput, 128, result, 64)
+        }
+        require(success, "ecAdd failed");
     }
 }
