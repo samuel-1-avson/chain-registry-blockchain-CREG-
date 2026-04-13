@@ -4,6 +4,7 @@
 use crate::{finalized_tx, gossip::Gossip, NodeState};
 use chrono::Utc;
 use common::{merkle_root, Block, BlockHeader, Transaction};
+use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{interval, Duration};
@@ -66,7 +67,7 @@ async fn produce_block(
     txs: Vec<Transaction>,
 ) -> anyhow::Result<Block> {
     // ── Read-only snapshot of state needed for VRF selection ────────────────
-    let (tip_height, prev_hash, node_id, privkey, our_pubkey, p2p) = {
+    let (tip_height, prev_hash, node_id, privkey, our_pubkey, p2p, validator_set_hash) = {
         let s = state.read().await;
         let tip_height = s.chain.tip_height()?;
         let prev_hash = s.chain.tip_hash()?;
@@ -79,7 +80,25 @@ async fn produce_block(
             .find(|v| v.id == node_id)
             .map(|v| v.pubkey.clone());
         let p2p = s.p2p.clone();
-        (tip_height, prev_hash, node_id, privkey, our_pubkey, p2p)
+
+        // Compute a deterministic hash of the validator set so light clients
+        // and bridge code can detect membership changes between blocks.
+        // Input: sorted validator IDs concatenated with NUL separators.
+        let mut sorted_ids: Vec<&str> = s
+            .validator_set
+            .validators
+            .iter()
+            .map(|v| v.id.as_str())
+            .collect();
+        sorted_ids.sort_unstable();
+        let mut hasher = Sha256::new();
+        for id in &sorted_ids {
+            hasher.update(id.as_bytes());
+            hasher.update(b"\0");
+        }
+        let validator_set_hash = hex::encode(hasher.finalize());
+
+        (tip_height, prev_hash, node_id, privkey, our_pubkey, p2p, validator_set_hash)
     };
 
     let epoch_seed = prev_hash.clone();
@@ -161,7 +180,7 @@ async fn produce_block(
         merkle_root: merkle_root(&txs),
         proposer_id: node_id,
         timestamp: Utc::now(),
-        validator_set_hash: "dev".to_string(),
+        validator_set_hash,
         vrf_output,
         vrf_proof,
     };
