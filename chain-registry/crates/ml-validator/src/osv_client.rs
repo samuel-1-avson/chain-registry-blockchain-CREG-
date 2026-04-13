@@ -129,8 +129,8 @@ pub fn query(info: &PackageInfo) -> OsvResult {
         info.ecosystem, info.name, info.version
     );
 
-    // Cache lookup.
-    if let Ok(cache) = OSV_CACHE.lock() {
+    // Cache lookup — `mut` required because LruCache::get updates LRU order.
+    if let Ok(mut cache) = OSV_CACHE.lock() {
         if let Some(cached) = cache.get(&cache_key) {
             debug!("OSV cache hit for {}", cache_key);
             return cached.clone();
@@ -212,7 +212,9 @@ pub fn query(info: &PackageInfo) -> OsvResult {
         }
     };
 
-    // Cache the result. LRU automatically evicts the oldest entry at capacity.
+    // Cache the result — LRU automatically evicts the least-recently-used
+    // entry at capacity, avoiding the thundering-herd caused by clearing
+    // the whole HashMap at once.
     if let Ok(mut cache) = OSV_CACHE.lock() {
         cache.put(cache_key, result.clone());
     }
