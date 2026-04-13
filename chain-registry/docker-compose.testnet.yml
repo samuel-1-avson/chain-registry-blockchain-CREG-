@@ -43,8 +43,8 @@ x-node-base: &node-base
     CREG_IS_VALIDATOR: "true"
     CREG_ETH_RPC: "${CREG_DOCKER_ETH_RPC:-http://anvil:8545}"
     CREG_IPFS_URL: "${CREG_DOCKER_IPFS_URL:-http://ipfs:5001}"
-    CREG_TOKEN_ADDR: "${TESTNET_TOKEN_ADDR:-0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9}"
-    CREG_STAKING_ADDR: "${TESTNET_STAKING_ADDR:-0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9}"
+    CREG_TOKEN_ADDR: "${TESTNET_TOKEN_ADDR:-}"
+    CREG_STAKING_ADDR: "${TESTNET_STAKING_ADDR:-}"
     CREG_BLOCK_INTERVAL: "2"
     CREG_SINGLE_VALIDATOR_MODE: "true"
     CREG_DEV_SANDBOX: "${CREG_DEV_SANDBOX:-false}"
@@ -53,8 +53,8 @@ x-node-base: &node-base
     CREG_ML_MODEL_PATH: "/app/models"
     CREG_WASM_ENABLED: "true"
     CREG_WASM_VALIDATORS_PATH: "/app/validators"
-    CREG_REGISTRY_ADDR: "${TESTNET_REGISTRY_ADDR:-0x0165878A594ca255338adfa4d48449f69242Eb8F}"
-    CREG_GOVERNANCE_ADDR: "${TESTNET_GOVERNANCE_ADDR:-0x5FbDB2315678afecb367f032d93F642f64180aa3}"
+    CREG_REGISTRY_ADDR: "${TESTNET_REGISTRY_ADDR:-}"
+    CREG_GOVERNANCE_ADDR: "${TESTNET_GOVERNANCE_ADDR:-}"
     CREG_TLS_CERT: "${CREG_TLS_CERT:-/app/certs/server.crt}"
     CREG_TLS_KEY: "${CREG_TLS_KEY:-/app/certs/server.key}"
     RUST_LOG: "info,chain_registry_node=debug,consensus=debug"
@@ -83,8 +83,9 @@ services:
       context: ./explorer
       dockerfile: Dockerfile
       args:
-        VITE_CREG_TOKEN: ${TESTNET_TOKEN_ADDR}
-        VITE_STAKING_ADDR: ${TESTNET_STAKING_ADDR}
+        VITE_CREG_TOKEN: ${TESTNET_TOKEN_ADDR:-}
+        VITE_STAKING_ADDR: ${TESTNET_STAKING_ADDR:-}
+        VITE_DEV_MODE: ${VITE_DEV_MODE:-true}
     command: ["true"]
     profiles:
       - build
@@ -143,6 +144,8 @@ services:
         forge script contracts/script/Deploy.s.sol:DeployChainRegistry --rpc-url http://anvil:8545 --broadcast --via-ir -vvvv
     environment:
       - DEPLOYER_KEY=${DEPLOYER_KEY:-0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80}
+      - CREG_BRIDGE_KEY=${CREG_BRIDGE_KEY:-0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a}
+      - TESTNET_MODE=true
       - DEPLOYMENT_MANIFEST_PATH=contracts/deployments/latest.json  
 
   # ── PostgreSQL Mirror (optional but recommended for testnet) ─────────────────
@@ -185,7 +188,7 @@ services:
       <<: *node-env
       CREG_NODE_ID: "node-1"
       CREG_VALIDATOR_KEY: "${NODE1_VALIDATOR_KEY}"
-      CREG_BRIDGE_KEY: "${CREG_BRIDGE_KEY:-0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80}"
+      CREG_BRIDGE_KEY: "${CREG_BRIDGE_KEY:-0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a}"
       CREG_LISTEN: "0.0.0.0:8080"
       CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/9000"
       CREG_P2P_SEEDS: "${CREG_P2P_SEEDS:-}"
@@ -234,11 +237,13 @@ services:
       FAUCET_RPC_URL: "${FAUCET_RPC_URL:-http://anvil:8545}"
       FAUCET_PRIVATE_KEY: "${FAUCET_PRIVATE_KEY:-0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d}"
       FAUCET_ADDRESS: "${FAUCET_ADDRESS:-0x70997970C51812dc3A010C7d01b50e0d17dc79C8}"
-      FAUCET_TOKEN_CONTRACT: "${TESTNET_TOKEN_ADDR:-0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9}"
+      FAUCET_TOKEN_CONTRACT: "${TESTNET_TOKEN_ADDR:-}"
       FAUCET_DRIP_AMOUNT: "${FAUCET_DRIP_AMOUNT:-1000000000000000000000}"
+      FAUCET_NATIVE_DRIP_AMOUNT: "${FAUCET_NATIVE_DRIP_AMOUNT:-100000000000000000}"
       FAUCET_COOLDOWN_SECS: "${FAUCET_COOLDOWN_SECS:-60}"
       FAUCET_IP_COOLDOWN_SECS: "${FAUCET_IP_COOLDOWN_SECS:-60}"
       FAUCET_MAX_BALANCE: "${FAUCET_MAX_BALANCE:-10000000000000000000000}"
+      FAUCET_NATIVE_MAX_BALANCE: "${FAUCET_NATIVE_MAX_BALANCE:-1000000000000000000}"
       FAUCET_POW_DISABLED: "true"
       FAUCET_EXPLORER_URL: "http://localhost:3000"
       FAUCET_PUBLIC_RPC_URL: "http://localhost:8545"
@@ -257,6 +262,32 @@ services:
       timeout: 5s
       retries: 5
 
+  # ── Sponsored Transaction Relayer ─────────────────────────────────────────
+  relayer:
+    <<: *app-image
+    container_name: creg-testnet-relayer
+    entrypoint: ["/app/creg-relayer"]
+    environment:
+      RELAYER_PORT: "${RELAYER_PORT:-8083}"
+      RELAYER_RPC_URL: "${RELAYER_RPC_URL:-http://anvil:8545}"
+      RELAYER_PRIVATE_KEY: "${RELAYER_PRIVATE_KEY:-0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80}"
+      RELAYER_POLICY_PATH: "/app/config/relayer-policy.example.json"
+      TESTNET_TOKEN_ADDR: "${TESTNET_TOKEN_ADDR:-}"
+      TESTNET_STAKING_ADDR: "${TESTNET_STAKING_ADDR:-}"
+      RUST_LOG: "info"
+    ports:
+      - "8083:8083"
+    depends_on:
+      anvil:
+        condition: service_healthy
+      deploy-contracts:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   # ── Enhanced Web Explorer (standalone) ────────────────────────────────────
   web-explorer:
     <<: *web-explorer-image
@@ -265,6 +296,8 @@ services:
       - "3000:80"
     depends_on:
       node-1:
+        condition: service_healthy
+      relayer:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost/"]

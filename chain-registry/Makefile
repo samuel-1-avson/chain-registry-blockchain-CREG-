@@ -1,6 +1,9 @@
 # Makefile — chain-registry dev commands
 
-.PHONY: build test lint clean node cluster contracts deploy-local fmt check
+.PHONY: build test lint clean node cluster contracts deploy-local fmt check testnet testnet-smoke testnet-no-explorer testnet-stop testnet-reset testnet-logs
+
+POWERSHELL ?= pwsh
+TESTNET_COMPOSE = docker compose --project-directory . --env-file .env.testnet -f docker-compose.testnet.yml
 
 # ── Rust ──────────────────────────────────────────────────────────────────────
 
@@ -40,6 +43,30 @@ cluster:
 
 cluster-down:
 	docker compose down -v
+
+## Start the bootstrap testnet (GNU make convenience wrapper around ./testnet.ps1)
+testnet:
+	$(POWERSHELL) -NoProfile -ExecutionPolicy Bypass -File testnet.ps1
+
+## Start the bootstrap testnet and run the smoke checks at the end
+testnet-smoke:
+	$(POWERSHELL) -NoProfile -ExecutionPolicy Bypass -File testnet.ps1 -RunSmokeTests
+
+## Start the bootstrap testnet without the standalone web explorer
+testnet-no-explorer:
+	$(POWERSHELL) -NoProfile -ExecutionPolicy Bypass -File testnet.ps1 -SkipExplorer
+
+## Stop the bootstrap testnet services without deleting volumes
+testnet-stop:
+	$(TESTNET_COMPOSE) down --remove-orphans
+
+## Stop the bootstrap testnet and delete volumes for a clean reset
+testnet-reset:
+	$(TESTNET_COMPOSE) down -v --remove-orphans
+
+## Tail bootstrap testnet logs
+testnet-logs:
+	$(TESTNET_COMPOSE) logs -f
 
 # ── CLI shims ─────────────────────────────────────────────────────────────────
 

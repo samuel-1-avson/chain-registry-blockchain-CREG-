@@ -53,6 +53,9 @@ anyhow = { workspace = true }
 # Logging
 tracing = { workspace = true }
 
+# LRU cache for OSV query results
+lru = "0.12"
+
 # Parallel processing
 rayon = "1.7"
 

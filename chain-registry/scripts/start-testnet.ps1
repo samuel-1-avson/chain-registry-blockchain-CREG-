@@ -23,6 +23,63 @@ function Get-DotEnvValue {
     return $null
 }
 
+function Ensure-TestnetEnvFile {
+    param(
+        [string]$RepoRoot,
+        [string]$EnvFile
+    )
+
+    if (Test-Path $EnvFile) {
+        return
+    }
+
+    Write-Host ".env.testnet not found. Generating a bootstrap testnet environment..." -ForegroundColor Yellow
+    $generator = Join-Path $RepoRoot "scripts\generate-testnet-keys.ps1"
+    & $generator -Nodes 1 -Output $EnvFile
+
+    if (-not (Test-Path $EnvFile)) {
+        throw "failed to generate $EnvFile"
+    }
+}
+
+function Assert-RequiredEnvValues {
+    param(
+        [string]$Path,
+        [string[]]$Keys
+    )
+
+    $missing = @()
+    foreach ($key in $Keys) {
+        $value = Get-DotEnvValue -Path $Path -Key $key
+        if ([string]::IsNullOrWhiteSpace($value)) {
+            $missing += $key
+        }
+    }
+
+    if ($missing.Count -gt 0) {
+        throw "Missing required entries in ${Path}: $($missing -join ', '). Re-run scripts/generate-testnet-keys.ps1 or update the file manually."
+    }
+}
+
+function Clear-ComposeEnvOverrides {
+    param(
+        [string[]]$Keys
+    )
+
+    $cleared = @()
+    foreach ($key in $Keys) {
+        $envPath = "Env:$key"
+        if (Test-Path $envPath) {
+            Remove-Item $envPath -ErrorAction SilentlyContinue
+            $cleared += $key
+        }
+    }
+
+    if ($cleared.Count -gt 0) {
+        Write-Host "Cleared host environment overrides that would shadow .env.testnet: $($cleared -join ', ')" -ForegroundColor Yellow
+    }
+}
+
 function Fund-TestnetFaucet {
     param(
         [string]$EnvFile,
@@ -80,8 +137,7 @@ $composeArgs = @("--project-directory", $repoRoot, "--env-file", $envFile, "-f",
 $bootstrapServices = @(
     "ipfs",
     "postgres",
-    "anvil",
-    "deploy-contracts"
+    "anvil"
 )
 
 $buildServices = @(
@@ -100,6 +156,26 @@ if (-not $SkipExplorer) {
 
 Set-Location $repoRoot
 
+Ensure-TestnetEnvFile -RepoRoot $repoRoot -EnvFile $envFile
+Assert-RequiredEnvValues -Path $envFile -Keys @(
+    "NODE1_VALIDATOR_KEY",
+    "VALIDATOR_SET_JSON",
+    "DEPLOYER_KEY",
+    "CREG_BRIDGE_KEY",
+    "FAUCET_ADDRESS",
+    "FAUCET_INITIAL_BALANCE"
+)
+Clear-ComposeEnvOverrides -Keys @(
+    "TESTNET_TOKEN_ADDR",
+    "TESTNET_STAKING_ADDR",
+    "TESTNET_REGISTRY_ADDR",
+    "TESTNET_GOVERNANCE_ADDR",
+    "TESTNET_ZK_VERIFIER_ADDR",
+    "TESTNET_VALIDATOR_REWARDS_ADDR",
+    "TESTNET_VALIDATOR_REWARDS_TREASURY",
+    "FAUCET_TOKEN_CONTRACT"
+)
+
 if (-not $SkipCleanup) {
     Write-Host "Removing stale testnet containers..." -ForegroundColor Cyan
     $staleContainers = @(
@@ -114,19 +190,25 @@ if (-not $SkipCleanup) {
 Write-Host "Starting Chain Registry testnet with .env.testnet" -ForegroundColor Cyan
 docker compose @composeArgs up -d --build @bootstrapServices
 
+Write-Host "Deploying contracts..." -ForegroundColor Cyan
+docker compose @composeArgs up --build deploy-contracts
+
+if ($LASTEXITCODE -ne 0) {
+    throw "deploy-contracts failed; not starting runtime services"
+}
+
 if (-not $SkipDeploySync) {
-    Write-Host "Deploying contracts..." -ForegroundColor Cyan
-    docker compose @composeArgs run --rm --entrypoint sh deploy-contracts -c "echo 'Waiting for Anvil...' && sleep 3 && mkdir -p contracts/deployments testnet/artifacts && forge build && echo 'Deploying contracts...' && forge script contracts/script/Deploy.s.sol:DeployChainRegistry --rpc-url http://anvil:8545 --broadcast -vvvv"
-
-    if ($LASTEXITCODE -ne 0) {
-        throw "deploy-contracts failed; not starting runtime services"
-    }
-
     & (Join-Path $PSScriptRoot "sync-testnet-artifacts.ps1")
     Fund-TestnetFaucet -EnvFile $envFile -ComposeArgs $composeArgs
-} else {
-    docker compose @composeArgs run --rm --entrypoint sh deploy-contracts -c "echo 'Waiting for Anvil...' && sleep 3 && mkdir -p contracts/deployments testnet/artifacts && forge build && echo 'Deploying contracts...' && forge script contracts/script/Deploy.s.sol:DeployChainRegistry --rpc-url http://anvil:8545 --broadcast -vvvv"
 }
+
+Assert-RequiredEnvValues -Path $envFile -Keys @(
+    "TESTNET_TOKEN_ADDR",
+    "TESTNET_STAKING_ADDR",
+    "TESTNET_REGISTRY_ADDR",
+    "TESTNET_GOVERNANCE_ADDR",
+    "FAUCET_TOKEN_CONTRACT"
+)
 
 Write-Host "Building shared runtime images..." -ForegroundColor Cyan
 docker compose @composeArgs build @buildServices

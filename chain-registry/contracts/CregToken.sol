@@ -90,6 +90,12 @@ contract CregToken {
         _mint(to, value);
     }
 
+    function transferOwnership(address newOwner) external onlyOwner {
+        require(newOwner != address(0), "Ownable: new owner is the zero address");
+        emit OwnershipTransferred(owner, newOwner);
+        owner = newOwner;
+    }
+
     function permit(
         address _owner,
         address spender,

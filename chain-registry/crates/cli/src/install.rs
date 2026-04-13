@@ -2,7 +2,6 @@
 // Resolves trust verdict, then either proceeds or blocks the install.
 //
 // TODO(C-19): Use retry::with_retry for network calls for resilience
-// TODO(C-21): Call lockfile::write_receipt after successful install to record trust verdict
 // TODO(C-22): Call policy::evaluate() to check org-level policy before install
 // TODO(C-23): Load config_file settings and pass through to control behavior
 
@@ -120,6 +119,16 @@ pub async fn run(
     }
 
     // ── 4. Swarm Download (Decentralised Distribution) ───────────────────────
+    // Write audit receipt to the lockfile (C-21).
+    let cwd = std::env::current_dir().unwrap_or_default();
+    if let Err(e) = crate::lockfile::write_receipt(&cwd, &verdict) {
+        eprintln!(
+            "{} Failed to write audit receipt: {}",
+            "⚠".yellow(),
+            e
+        );
+    }
+
     let mut local_tarball: Option<std::path::PathBuf> = None;
     match &verdict.status {
         VerdictStatus::Verified {

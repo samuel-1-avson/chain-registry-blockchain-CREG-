@@ -78,6 +78,14 @@ if ($manifest.PSObject.Properties.Name.Contains("zkVerifier")) {
     Set-Or-AddEnvValue -Lines $envLines -Key "TESTNET_ZK_VERIFIER_ADDR" -Value $manifest.zkVerifier
 }
 
+if ($manifest.PSObject.Properties.Name.Contains("validatorRewards")) {
+    Set-Or-AddEnvValue -Lines $envLines -Key "TESTNET_VALIDATOR_REWARDS_ADDR" -Value $manifest.validatorRewards
+}
+
+if ($manifest.PSObject.Properties.Name.Contains("validatorRewardsTreasury")) {
+    Set-Or-AddEnvValue -Lines $envLines -Key "TESTNET_VALIDATOR_REWARDS_TREASURY" -Value $manifest.validatorRewardsTreasury
+}
+
 $envFilePath = Join-Path (Get-Location) $EnvPath
 $artifactEnvFilePath = Join-Path (Get-Location) $ArtifactEnvPath
 $artifactJsonFilePath = Join-Path (Get-Location) $ArtifactJsonPath
@@ -101,6 +109,14 @@ $artifactEnv = @(
 
 if ($manifest.PSObject.Properties.Name.Contains("zkVerifier")) {
     $artifactEnv += "TESTNET_ZK_VERIFIER_ADDR=$($manifest.zkVerifier)"
+}
+
+if ($manifest.PSObject.Properties.Name.Contains("validatorRewards")) {
+    $artifactEnv += "TESTNET_VALIDATOR_REWARDS_ADDR=$($manifest.validatorRewards)"
+}
+
+if ($manifest.PSObject.Properties.Name.Contains("validatorRewardsTreasury")) {
+    $artifactEnv += "TESTNET_VALIDATOR_REWARDS_TREASURY=$($manifest.validatorRewardsTreasury)"
 }
 
 [System.IO.Directory]::CreateDirectory((Split-Path -Parent $artifactEnvFilePath)) | Out-Null
@@ -127,6 +143,14 @@ $artifactJson = [ordered]@{
 
 if ($manifest.PSObject.Properties.Name.Contains("zkVerifier")) {
     $artifactJson.contracts["ZKVerifier"] = [ordered]@{ address = $manifest.zkVerifier }
+}
+
+if ($manifest.PSObject.Properties.Name.Contains("validatorRewards")) {
+    $artifactJson.contracts["ValidatorRewards"] = [ordered]@{ address = $manifest.validatorRewards }
+}
+
+if ($manifest.PSObject.Properties.Name.Contains("validatorRewardsTreasury")) {
+    $artifactJson["validatorRewardsTreasury"] = $manifest.validatorRewardsTreasury
 }
 
 [System.IO.Directory]::CreateDirectory((Split-Path -Parent $artifactJsonFilePath)) | Out-Null

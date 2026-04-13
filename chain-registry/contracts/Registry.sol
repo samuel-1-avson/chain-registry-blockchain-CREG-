@@ -286,10 +286,6 @@ contract ChainRegistry {
         emit BatchSubmitted(totalBatches, prevRoot, nextRoot, txCount, dataRoot);
     }
 
-    // resetRollupState() has been REMOVED for security.
-    // It previously allowed governance to wipe all L2 history on L1.
-    // This is unacceptable in production — L2 state must be immutable once committed.
-
     // ── Consensus-facing ─────────────────────────────────────────────────────
 
     /// @notice Finalize a package after PBFT consensus.
@@ -466,7 +462,8 @@ contract ChainRegistry {
     /// @dev Protected against reentrancy since it transfers ETH.
     function withdrawFees(address payable to, uint256 amount) external onlyGovernance nonReentrant {
         require(address(this).balance >= amount, "Insufficient balance");
-        to.transfer(amount);
+        (bool success,) = to.call{value: amount}("");
+        require(success, "ETH transfer failed");
     }
 
     // ── Dependency tracking ──────────────────────────────────────────────────

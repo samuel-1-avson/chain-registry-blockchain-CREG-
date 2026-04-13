@@ -24,15 +24,147 @@ mod rate_limit;
 mod sync;
 mod validator_pipeline;
 
+use alloy::{
+    providers::{Provider, ProviderBuilder},
+    sol,
+};
 use anyhow::Result;
+use chrono::Utc;
+use common::ValidatorIdentity;
 use serde::Serialize;
-use std::sync::Arc;
-use tokio::sync::RwLock;
+use std::{collections::HashMap, sync::Arc};
+use tokio::{
+    sync::RwLock,
+    time::{interval, sleep, Duration},
+};
 use tracing_subscriber::EnvFilter;
 
 use events::{new_event_bus, EventBus};
 use finalized_tx::{FinalizedTxReceiver, FinalizedTxSender};
 use publisher_index::PublisherIndex;
+
+sol!(
+    #[sol(rpc)]
+    interface IStakingRead {
+        function validators(address)
+            external
+            view
+            returns (
+                uint256 stake,
+                uint8 state,
+                uint256 unbondingAt,
+                uint256 slashCount,
+                uint256 ejectedAt
+            );
+    }
+);
+
+#[derive(Serialize, Clone, Debug, Default)]
+pub struct ValidatorRegistrationStatus {
+    pub alias: String,
+    pub identity: ValidatorIdentity,
+    pub registered_with_node: bool,
+    pub applied_on_chain: bool,
+    pub governance_approved: bool,
+    pub admitted_to_consensus: bool,
+    pub active: bool,
+    pub staking_state: String,
+    pub status: String,
+    pub stake: u64,
+    pub reputation: u32,
+    pub last_error: Option<String>,
+    pub last_synced_at: Option<String>,
+}
+
+pub fn normalized_validator_key(evm_address: &str) -> String {
+    evm_address.trim().to_ascii_lowercase()
+}
+
+pub fn validator_registration_status_text(registration: &ValidatorRegistrationStatus) -> String {
+    if registration.active {
+        "active".to_string()
+    } else if registration.admitted_to_consensus {
+        "admitted-to-consensus".to_string()
+    } else if registration.governance_approved {
+        "governance-approved".to_string()
+    } else if registration.applied_on_chain {
+        "applied-on-chain".to_string()
+    } else if registration.registered_with_node {
+        "identity-registered".to_string()
+    } else {
+        "unregistered".to_string()
+    }
+}
+
+fn staking_state_label(state: u8) -> &'static str {
+    match state {
+        0 => "none",
+        1 => "pending",
+        2 => "active",
+        3 => "unbonding",
+        4 => "withdrawn",
+        5 => "rejected",
+        _ => "unknown",
+    }
+}
+
+fn upsert_registered_validator(
+    validator_set: &mut common::ValidatorSet,
+    registration: &ValidatorRegistrationStatus,
+) {
+    let identity = registration.identity.normalized();
+    if !identity.is_complete() {
+        return;
+    }
+
+    let alias = if registration.alias.trim().is_empty() {
+        identity.node_id.clone()
+    } else {
+        registration.alias.trim().to_string()
+    };
+
+    if let Some(existing) = validator_set
+        .validators
+        .iter_mut()
+        .find(|validator| {
+            validator.id == identity.node_id || validator.pubkey == identity.ed25519_pubkey
+        })
+    {
+        existing.id = identity.node_id;
+        existing.alias = alias;
+        existing.pubkey = identity.ed25519_pubkey;
+        existing.stake = registration.stake;
+        existing.reputation = registration.reputation.max(existing.reputation).max(100);
+        if existing.status != "self" {
+            existing.status = "online".to_string();
+        }
+        return;
+    }
+
+    validator_set.validators.push(common::Validator {
+        id: identity.node_id,
+        alias,
+        pubkey: identity.ed25519_pubkey,
+        stake: registration.stake,
+        reputation: registration.reputation.max(100),
+        status: "online".to_string(),
+    });
+}
+
+fn remove_registered_validator(
+    validator_set: &mut common::ValidatorSet,
+    identity: &ValidatorIdentity,
+) {
+    let identity = identity.normalized();
+    validator_set.validators.retain(|validator| {
+        validator.id != identity.node_id && validator.pubkey != identity.ed25519_pubkey
+    });
+}
+
+fn wei_to_creg_u64(value: alloy::primitives::U256) -> u64 {
+    let whole_creg = value / alloy::primitives::U256::from(1_000_000_000_000_000_000u128);
+    whole_creg.to_string().parse::<u64>().unwrap_or(u64::MAX)
+}
 
 /// Shared mutable state passed to every subsystem via Arc<RwLock<_>>.
 pub struct NodeState {
@@ -53,6 +185,8 @@ pub struct NodeState {
     pub vrf_proofs: std::collections::HashMap<String, (String, String)>,
     /// Decryption shares received from peers: canonical -> Vec<KeyShare>
     pub decryption_shares: std::collections::HashMap<String, Vec<threshold_encryption::KeyShare>>,
+    /// Validator registrations keyed by canonical EVM address.
+    pub validator_registrations: HashMap<String, ValidatorRegistrationStatus>,
 }
 
 #[derive(Serialize, Clone, Default)]
@@ -70,6 +204,90 @@ pub struct BridgeStatus {
 }
 
 pub type SharedState = Arc<RwLock<NodeState>>;
+
+async fn fetch_contract_code(
+    client: &reqwest::Client,
+    rpc_url: &str,
+    address: &str,
+) -> Result<String> {
+    let response: serde_json::Value = client
+        .post(rpc_url)
+        .json(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "eth_getCode",
+            "params": [address, "latest"],
+            "id": 1,
+        }))
+        .send()
+        .await?
+        .json()
+        .await?;
+
+    if let Some(error) = response.get("error") {
+        anyhow::bail!("eth_getCode failed for {}: {}", address, error);
+    }
+
+    response
+        .get("result")
+        .and_then(|value| value.as_str())
+        .map(|value| value.to_string())
+        .ok_or_else(|| anyhow::anyhow!("missing eth_getCode result for {}", address))
+}
+
+async fn validate_contract_addresses(config: &config::NodeConfig) -> Result<()> {
+    let contracts = [
+        ("CREG_REGISTRY_ADDR", config.registry_addr.as_str()),
+        ("CREG_GOVERNANCE_ADDR", config.governance_addr.as_str()),
+        ("CREG_TOKEN_ADDR", config.token_addr.as_str()),
+        ("CREG_STAKING_ADDR", config.staking_addr.as_str()),
+    ];
+
+    let configured_contracts: Vec<_> = contracts
+        .into_iter()
+        .filter(|(_, address)| {
+            let trimmed = address.trim();
+            !trimmed.is_empty()
+                && !trimmed.eq_ignore_ascii_case("0x0000000000000000000000000000000000000000")
+        })
+        .collect();
+
+    if configured_contracts.is_empty() {
+        return Ok(());
+    }
+
+    let client = reqwest::Client::new();
+    for attempt in 1..=10 {
+        let mut errors = Vec::new();
+        for (name, address) in &configured_contracts {
+            match fetch_contract_code(&client, &config.eth_rpc_url, address).await {
+                Ok(code) if code != "0x" && code != "0x0" => {}
+                Ok(_) => errors.push(format!("{}={} has no deployed bytecode", name, address)),
+                Err(error) => errors.push(format!("{}={} validation failed: {}", name, address, error)),
+            }
+        }
+
+        if errors.is_empty() {
+            return Ok(());
+        }
+
+        if attempt == 10 {
+            anyhow::bail!(
+                "Configured contract address validation failed against {}: {}",
+                config.eth_rpc_url,
+                errors.join("; ")
+            );
+        }
+
+        tracing::warn!(
+            "Contract validation attempt {}/10 failed: {}. Retrying...",
+            attempt,
+            errors.join("; ")
+        );
+        sleep(Duration::from_secs(2)).await;
+    }
+
+    Ok(())
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -99,6 +317,8 @@ async fn main() -> Result<()> {
             anyhow::bail!("Cannot start validator node due to configuration errors. Fix the above and restart.");
         }
     }
+
+    validate_contract_addresses(&config).await?;
 
     // ── Single-node enforcement (mainnet only) ────────────────────────────────
     // On mainnet, acquire a PID lock in the data directory to prevent multiple
@@ -171,6 +391,7 @@ async fn main() -> Result<()> {
         },
         vrf_proofs: std::collections::HashMap::new(),
         decryption_shares: std::collections::HashMap::new(),
+        validator_registrations: HashMap::new(),
     }));
 
     // Start P2P node in background
@@ -227,6 +448,8 @@ async fn main() -> Result<()> {
     tokio::spawn(block_producer::run(Arc::clone(&state), tx_receiver));
 
     tokio::spawn(bridge::run(Arc::clone(&state)));
+
+    tokio::spawn(sync_validator_registrations(Arc::clone(&state)));
 
     // ── Start gRPC Server (Industrial Speed) ──────────────────────────────────
     let grpc_state = Arc::clone(&state);
@@ -304,6 +527,95 @@ async fn main() -> Result<()> {
     drop(_pid_lock);
 
     tracing::info!("Node shut down cleanly.");
+    Ok(())
+}
+
+async fn sync_validator_registrations(state: SharedState) {
+    let mut ticker = interval(Duration::from_secs(5));
+    loop {
+        ticker.tick().await;
+        if let Err(error) = sync_validator_registrations_once(&state).await {
+            tracing::warn!("validator registration sync failed: {}", error);
+        }
+    }
+}
+
+async fn sync_validator_registrations_once(state: &SharedState) -> Result<()> {
+    let (rpc_url, staking_addr, registrations) = {
+        let state_guard = state.read().await;
+        (
+            state_guard.config.eth_rpc_url.clone(),
+            state_guard.config.staking_addr.clone(),
+            state_guard
+                .validator_registrations
+                .iter()
+                .map(|(key, registration)| (key.clone(), registration.clone()))
+                .collect::<Vec<_>>(),
+        )
+    };
+
+    if registrations.is_empty()
+        || staking_addr.trim().is_empty()
+        || staking_addr.eq_ignore_ascii_case("0x0000000000000000000000000000000000000000")
+    {
+        return Ok(());
+    }
+
+    let provider = ProviderBuilder::new().on_http(rpc_url.parse()?);
+    let staking = IStakingRead::new(staking_addr.parse()?, &provider);
+    let mut updates = Vec::with_capacity(registrations.len());
+
+    for (key, registration) in registrations {
+        let identity = registration.identity.normalized();
+        let update = match identity.evm_address.parse() {
+            Ok(address) => match staking.validators(address).call().await {
+                Ok(result) => Ok((wei_to_creg_u64(result.stake), result.state)),
+                Err(error) => Err(format!("staking lookup failed: {}", error)),
+            },
+            Err(error) => Err(format!("invalid EVM address: {}", error)),
+        };
+        updates.push((key, update));
+    }
+
+    let mut state_guard = state.write().await;
+    for (key, update) in updates {
+        let Some(mut registration) = state_guard.validator_registrations.remove(&key) else {
+            continue;
+        };
+
+        registration.registered_with_node = true;
+        registration.last_synced_at = Some(Utc::now().to_rfc3339());
+
+        match update {
+            Ok((stake, staking_state)) => {
+                registration.last_error = None;
+                registration.stake = stake;
+                registration.applied_on_chain = staking_state != 0;
+                registration.governance_approved = matches!(staking_state, 2 | 3 | 4);
+                registration.staking_state = staking_state_label(staking_state).to_string();
+
+                let should_admit = staking_state == 2 && registration.identity.normalized().is_complete();
+                if should_admit {
+                    upsert_registered_validator(&mut state_guard.validator_set, &registration);
+                    registration.admitted_to_consensus = true;
+                    registration.active = true;
+                } else {
+                    if registration.admitted_to_consensus {
+                        remove_registered_validator(&mut state_guard.validator_set, &registration.identity);
+                    }
+                    registration.admitted_to_consensus = false;
+                    registration.active = false;
+                }
+            }
+            Err(error) => {
+                registration.last_error = Some(error);
+            }
+        }
+
+        registration.status = validator_registration_status_text(&registration);
+        state_guard.validator_registrations.insert(key, registration);
+    }
+
     Ok(())
 }
 

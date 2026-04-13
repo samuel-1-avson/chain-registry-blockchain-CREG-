@@ -31,6 +31,20 @@ use std::collections::HashMap;
 /// kept in sync with `node/src/gossip.rs::VOTE_MESSAGE_DOMAIN`.
 pub const VOTE_MESSAGE_DOMAIN: &str = "creg-vote-v1";
 
+/// Prefix for ML model versions that indicate degraded analysis. Votes from
+/// validators running degraded models are stored for transparency but excluded
+/// from quorum calculation to prevent unverified approvals.
+const DEGRADED_MODEL_PREFIX: &str = "degraded";
+
+/// Returns true if the vote's ML model version indicates degraded analysis
+/// (missing model, timeout, etc.). Such votes should not count toward quorum.
+fn is_degraded_model(vote: &IncomingVote) -> bool {
+    vote.ml_model_version
+        .as_deref()
+        .map(|v| v.starts_with(DEGRADED_MODEL_PREFIX))
+        .unwrap_or(false)
+}
+
 /// Build the canonical message that a validator must sign when casting a PBFT
 /// vote. Binds the package canonical, tarball content hash, verdict, and the
 /// validator's Ed25519 public key so that:
@@ -231,9 +245,15 @@ impl PackageVoteState {
             }
         }
 
-        self.prepare_votes.insert(vote.validator_id.clone(), vote);
+        self.prepare_votes.insert(vote.validator_id.clone(), vote.clone());
 
-        if self.prepare_votes.len() >= self.quorum() && self.phase == VotePhase::Collecting {
+        // Votes from validators running degraded ML models are stored for
+        // transparency but excluded from quorum calculation.
+        let effective_count = self.prepare_votes.values()
+            .filter(|v| !is_degraded_model(v))
+            .count();
+
+        if effective_count >= self.quorum() && self.phase == VotePhase::Collecting {
             self.phase = VotePhase::PrepareQuorumReached;
             tracing::info!(
                 "[VoteAccum] {} PREPARE quorum reached ({}/{})",
@@ -282,11 +302,15 @@ impl PackageVoteState {
             }
         }
 
-        self.commit_votes.insert(vote.validator_id.clone(), vote);
+        self.commit_votes.insert(vote.validator_id.clone(), vote.clone());
 
-        let total_commits = self.commit_votes.len();
-        let approvals = self.commit_votes.values().filter(|v| v.approved).count();
-        let rejections = self.commit_votes.values().filter(|v| !v.approved).count();
+        // Exclude degraded-model validators from quorum count.
+        let non_degraded: Vec<&IncomingVote> = self.commit_votes.values()
+            .filter(|v| !is_degraded_model(v))
+            .collect();
+        let total_commits = non_degraded.len();
+        let approvals = non_degraded.iter().filter(|v| v.approved).count();
+        let rejections = non_degraded.iter().filter(|v| !v.approved).count();
         let quorum = self.quorum();
 
         // Enough approvals → finalise.

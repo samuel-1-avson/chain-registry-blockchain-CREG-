@@ -284,8 +284,30 @@ enum Commands {
         command: AdvancedCommands,
     },
 
-    /// Check system prerequisites (node, IPFS, key, nsjail, gpg).
-    Doctor,
+    /// Check system prerequisites or run end-to-end local testnet checks.
+    Doctor {
+        /// Run the local bootstrap testnet checks (node, contracts, faucet, explorer, IPFS, Anvil).
+        #[arg(long)]
+        testnet: bool,
+        /// Faucet base URL for `--testnet` checks.
+        #[arg(long, env = "CREG_FAUCET_URL")]
+        faucet_url: Option<String>,
+        /// Ethereum RPC URL for `--testnet` checks.
+        #[arg(long, env = "CREG_ETH_RPC")]
+        eth_rpc_url: Option<String>,
+        /// Explorer base URL for `--testnet` checks.
+        #[arg(long, env = "CREG_EXPLORER_URL")]
+        explorer_url: Option<String>,
+        /// Skip the explorer HTTP probe in `--testnet` mode.
+        #[arg(long)]
+        skip_explorer: bool,
+        /// Skip the faucet drip probe in `--testnet` mode.
+        #[arg(long)]
+        skip_drip: bool,
+        /// Recipient address for the faucet drip probe. Defaults to a random throwaway address.
+        #[arg(long)]
+        recipient: Option<String>,
+    },
 
     /// Search for packages in the chain registry.
     Search {
@@ -998,8 +1020,27 @@ async fn run(cli: Cli) -> Result<()> {
         },
 
         // ── New commands ──────────────────────────────────────────────────────
-        Commands::Doctor => {
-            doctor::run(cli.node_url.as_deref()).await?;
+        Commands::Doctor {
+            testnet,
+            faucet_url,
+            eth_rpc_url,
+            explorer_url,
+            skip_explorer,
+            skip_drip,
+            recipient,
+        } => {
+            doctor::run(doctor::DoctorOptions {
+                node_url: cli.node_url.as_deref(),
+                json: json_out,
+                testnet,
+                faucet_url: faucet_url.as_deref(),
+                eth_rpc_url: eth_rpc_url.as_deref(),
+                explorer_url: explorer_url.as_deref(),
+                skip_explorer,
+                skip_drip,
+                recipient: recipient.as_deref(),
+            })
+            .await?;
         }
         Commands::Search { query, ecosystem } => {
             search::run(

@@ -80,6 +80,9 @@ pub enum ThreatClassification {
     Suspicious,
     LikelyMalicious,
     ConfirmedMalicious,
+    /// Inference did not complete (timeout, missing model, etc.).
+    /// Validators should treat this as an abstention rather than approval.
+    Degraded,
 }
 
 impl ThreatClassification {
@@ -96,6 +99,11 @@ impl ThreatClassification {
     /// Whether this classification should contribute a blocking finding.
     pub fn should_block(&self) -> bool {
         matches!(self, ThreatClassification::ConfirmedMalicious)
+    }
+
+    /// Whether the validator should abstain from voting due to degraded analysis.
+    pub fn should_abstain(&self) -> bool {
+        matches!(self, ThreatClassification::Degraded)
     }
 }
 
@@ -433,7 +441,7 @@ fn mock_result() -> DeepScanResult {
     DeepScanResult {
         malicious_probability: 0.0, // Don't return fake 0.15 — be honest: no data
         confidence: 0.0,            // Zero confidence — no inference was performed
-        classification: ThreatClassification::Safe,
+        classification: ThreatClassification::Degraded,
         attention_regions: None,
         suspicious_files: Vec::new(),
         model_version: "degraded-no-model".to_string(),
@@ -447,7 +455,7 @@ fn timeout_result() -> DeepScanResult {
     DeepScanResult {
         malicious_probability: 0.0,
         confidence: 0.0,
-        classification: ThreatClassification::Safe,
+        classification: ThreatClassification::Degraded,
         attention_regions: None,
         suspicious_files: Vec::new(),
         model_version: "degraded-timeout".to_string(),
@@ -570,7 +578,7 @@ mod tests {
 
         // Invalid tarball → no files extracted → mock result.
         assert!(result.is_mock);
-        assert_eq!(result.classification, ThreatClassification::Safe);
+        assert_eq!(result.classification, ThreatClassification::Degraded);
         assert_eq!(result.malicious_probability, 0.0);
     }
 
@@ -583,7 +591,7 @@ mod tests {
         std::env::remove_var("CREG_FORCE_ONNX");
 
         assert!(result.is_mock);
-        assert_eq!(result.classification, ThreatClassification::Safe);
+        assert_eq!(result.classification, ThreatClassification::Degraded);
         assert!(result.model_version.starts_with("degraded"));
     }
 
@@ -629,6 +637,10 @@ mod tests {
         assert!(!ThreatClassification::LikelyMalicious.should_block());
         assert!(!ThreatClassification::Suspicious.should_block());
         assert!(!ThreatClassification::Safe.should_block());
+        assert!(!ThreatClassification::Degraded.should_block());
+        // Degraded should cause abstention, not blocking
+        assert!(ThreatClassification::Degraded.should_abstain());
+        assert!(!ThreatClassification::Safe.should_abstain());
     }
 
     #[test]

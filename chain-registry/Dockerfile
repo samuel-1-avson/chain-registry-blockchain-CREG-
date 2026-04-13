@@ -1,5 +1,14 @@
 # Multi-stage build — produces a minimal runtime image (~80 MB).
 # Updated for Chain Registry v0.3.0 with TUI Explorer and Enhanced Web UI
+#
+# Build profiles (controlled via --build-arg PROFILE=):
+#   full      — (default) All features including ML/AI/ZK/WASM
+#   minimal   — Fast build without ML/AI features
+#
+# For flaky networks pass --build-arg NETWORK_RETRIES=3
+
+ARG PROFILE=full
+ARG NETWORK_RETRIES=1
 
 # ── Stage 1: Build Frontend ───────────────────────────────────────────────────
 FROM node:20-slim AS frontend-builder
@@ -47,7 +56,7 @@ ENV PATH="/usr/local/cargo/bin:$PATH"
 ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 
 RUN mkdir -p "$CARGO_HOME" && \
-  printf '[net]\nretry = 3\ngit-fetch-with-cli = true\n\n[registries.crates-io]\nprotocol = "sparse"\n' > "$CARGO_HOME/config.toml"
+  printf '[net]\nretry = 10\ngit-fetch-with-cli = true\n\n[http]\nmultiplexing = false\ntimeout = 600\n\n[registries.crates-io]\nprotocol = "sparse"\n' > "$CARGO_HOME/config.toml"
 
 RUN cargo --version && rustc --version
 
@@ -68,6 +77,7 @@ COPY crates/validator/Cargo.toml crates/validator/
 COPY crates/consensus/Cargo.toml crates/consensus/
 COPY crates/node/Cargo.toml     crates/node/
 COPY crates/faucet/Cargo.toml   crates/faucet/
+COPY crates/relayer/Cargo.toml  crates/relayer/
 
 # Build-script inputs required for dependency caching.
 COPY crates/common/build.rs     crates/common/
@@ -94,6 +104,7 @@ RUN mkdir -p crates/resolver/src   && echo "pub fn _stub() {}" > crates/resolver
 RUN mkdir -p crates/validator/src  && echo "pub fn _stub() {}" > crates/validator/src/lib.rs
 RUN mkdir -p crates/consensus/src  && echo "pub fn _stub() {}" > crates/consensus/src/lib.rs
 RUN mkdir -p crates/node/src       && echo "fn main() {}"      > crates/node/src/main.rs
+RUN mkdir -p crates/relayer/src    && echo "fn main() {}"      > crates/relayer/src/main.rs
 
 # Phase 1 stubs
 RUN mkdir -p crates/zk-validator/src     && echo "pub fn _stub() {}" > crates/zk-validator/src/lib.rs
@@ -141,6 +152,9 @@ RUN cargo build --release --package chain-registry-cli
 # Build Faucet service (testnet)
 RUN cargo build --release --package faucet
 
+# Build Relayer service (sponsored testnet transactions)
+RUN cargo build --release --package chain-registry-relayer
+
 # ── Stage 3: Runtime ──────────────────────────────────────────────────────────
 # Must match builder glibc version (Ubuntu 24.04 has glibc 2.39)
 FROM ubuntu:24.04 AS runtime
@@ -165,6 +179,7 @@ WORKDIR /app
 COPY --from=builder /build/target/release/creg-node /app/creg-node
 COPY --from=builder /build/target/release/creg /app/creg
 COPY --from=builder /build/target/release/faucet /app/faucet
+COPY --from=builder /build/target/release/creg-relayer /app/creg-relayer
 
 # Copy WASM validators (for wasm-sandbox)
 COPY --from=builder /build/crates/cli/validators /app/validators
@@ -176,8 +191,8 @@ COPY --from=builder /build/circuits /app/circuits
 # replace with real ONNX weights when available.
 COPY --from=builder /build/models /app/models
 
-# Copy sandbox configuration (seccomp profiles, rootfs Dockerfiles)
-COPY --from=builder /build/config/sandbox /app/config/sandbox
+# Copy runtime configuration, including sandbox profiles and relayer policy examples
+COPY --from=builder /build/config /app/config
 
 # Copy YARA rules for supply-chain threat detection
 COPY --from=builder /build/rules /app/rules

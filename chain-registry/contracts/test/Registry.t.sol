@@ -10,6 +10,14 @@ import "../Governance.sol";
 import "../ZKVerifier.sol";
 import "../CregToken.sol";
 
+contract FeeReceiver {
+    event Received(uint256 amount);
+
+    receive() external payable {
+        emit Received(msg.value);
+    }
+}
+
 /// @notice Full integration tests for the chain registry contracts.
 /// Uses CREG token-based staking and the two-step validator approval flow.
 contract RegistryTest is Test {
@@ -23,8 +31,8 @@ contract RegistryTest is Test {
     CregToken  cregToken;
 
     address alice   = makeAddr("alice");   // publisher
-    address bob     = makeAddr("bob");     // validator
-    address carol   = makeAddr("carol");   // validator
+    address bob;                            // validator
+    address carol;                          // validator
     address dave    = makeAddr("dave");    // governance signer
 
     uint256 aliceKey  = uint256(keccak256("alice-key"));
@@ -36,6 +44,9 @@ contract RegistryTest is Test {
     string constant IPFS_CID = "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi";
 
     function setUp() public {
+        bob = vm.addr(bobKey);
+        carol = vm.addr(carolKey);
+
         // Deploy governance with 2-of-3 multisig.
         address[] memory signers = new address[](3);
         signers[0] = alice; signers[1] = bob; signers[2] = dave;
@@ -139,6 +150,21 @@ contract RegistryTest is Test {
         registry.finalizePackage(CANONICAL, sigs);
     }
 
+    function test_withdrawFeesUsesCallForContractRecipients() public {
+        FeeReceiver receiver = new FeeReceiver();
+        vm.deal(address(registry), 1 ether);
+
+        vm.prank(address(governance));
+        registry.withdrawFees(payable(address(receiver)), 0.25 ether);
+
+        assertEq(address(receiver).balance, 0.25 ether);
+    }
+
+    function test_tokenOwnershipCanTransferToGovernance() public {
+        cregToken.transferOwnership(address(governance));
+        assertEq(cregToken.owner(), address(governance));
+    }
+
     function test_invalidSignatureReverts() public {
         _stakeAsPublisher(alice);
         _submitPackage(alice);
@@ -230,8 +256,10 @@ contract RegistryTest is Test {
     }
 
     function test_approvalIncreasesReputation() public {
-        vm.prank(address(registry));
+        vm.startPrank(address(registry));
         reputation.recordApproval(bob);
+        reputation.recordApproval(bob);
+        vm.stopPrank();
         assertGt(reputation.scoreOf(bob), 50);
     }
 

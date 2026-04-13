@@ -5,7 +5,8 @@
 use alloy::{
     network::EthereumWallet,
     primitives::{Address, U256},
-    providers::ProviderBuilder,
+    providers::{Provider, ProviderBuilder},
+    rpc::types::TransactionRequest,
     signers::local::PrivateKeySigner,
     sol,
 };
@@ -16,8 +17,8 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use chrono::{DateTime, Utc};
 use dashmap::DashMap;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -39,12 +40,16 @@ sol!(
 struct FaucetConfig {
     /// Amount to distribute per request (in wei/tCREG smallest unit)
     drip_amount: u128,
+    /// Amount of native ETH/testnet ETH to distribute per request (wei)
+    native_drip_amount: u128,
     /// Cooldown between requests per address
     cooldown_secs: u64,
     /// Cooldown between requests per IP
     ip_cooldown_secs: u64,
     /// Maximum balance a single address can have (prevent hoarding)
     max_balance: u128,
+    /// Maximum native balance a single address can have before gas drip stops
+    native_max_balance: u128,
     /// Ethereum RPC URL
     rpc_url: String,
     /// Faucet private key (must have tokens to distribute)
@@ -64,9 +69,11 @@ impl FaucetConfig {
         
         Self {
             drip_amount: env_u128("FAUCET_DRIP_AMOUNT", 1000_000_000_000_000_000_000), // 1000 tCREG
+            native_drip_amount: env_u128("FAUCET_NATIVE_DRIP_AMOUNT", 100_000_000_000_000_000), // 0.1 ETH
             cooldown_secs: env_u64("FAUCET_COOLDOWN_SECS", 60),                        // 1 minute
             ip_cooldown_secs: env_u64("FAUCET_IP_COOLDOWN_SECS", 60),
             max_balance: env_u128("FAUCET_MAX_BALANCE", 10000_000_000_000_000_000_000), // 10k tCREG
+            native_max_balance: env_u128("FAUCET_NATIVE_MAX_BALANCE", 1_000_000_000_000_000_000), // 1 ETH
             rpc_url: env_string("FAUCET_RPC_URL", "http://localhost:8545"),
             faucet_key,
             token_contract: std::env::var("FAUCET_TOKEN_CONTRACT")
@@ -84,6 +91,11 @@ struct RateLimiter {
     ip_last_request: DashMap<String, Instant>,
 }
 
+struct CooldownRejection {
+    message: String,
+    retry_after_seconds: u64,
+}
+
 impl RateLimiter {
     fn new() -> Self {
         Self {
@@ -92,29 +104,38 @@ impl RateLimiter {
         }
     }
 
-    fn check_address(&self, address: &str, cooldown: Duration) -> Result<(), String> {
-        if let Some(last) = self.address_last_request.get(address) {
+    fn check_address(&self, address: &str, cooldown: Duration) -> Result<(), CooldownRejection> {
+        let normalized = address.to_lowercase();
+        if let Some(last) = self.address_last_request.get(&normalized) {
             let elapsed = last.elapsed();
             if elapsed < cooldown {
                 let remaining = cooldown - elapsed;
-                return Err(format!(
-                    "Please wait {} seconds before requesting again",
-                    remaining.as_secs()
-                ));
+                let retry_after_seconds = remaining.as_secs().max(1);
+                return Err(CooldownRejection {
+                    message: format!(
+                        "Please wait {} seconds before requesting again",
+                        retry_after_seconds
+                    ),
+                    retry_after_seconds,
+                });
             }
         }
         Ok(())
     }
 
-    fn check_ip(&self, ip: &str, cooldown: Duration) -> Result<(), String> {
+    fn check_ip(&self, ip: &str, cooldown: Duration) -> Result<(), CooldownRejection> {
         if let Some(last) = self.ip_last_request.get(ip) {
             let elapsed = last.elapsed();
             if elapsed < cooldown {
                 let remaining = cooldown - elapsed;
-                return Err(format!(
-                    "IP rate limit: wait {} seconds",
-                    remaining.as_secs()
-                ));
+                let retry_after_seconds = remaining.as_secs().max(1);
+                return Err(CooldownRejection {
+                    message: format!(
+                        "IP rate limit: wait {} seconds",
+                        retry_after_seconds
+                    ),
+                    retry_after_seconds,
+                });
             }
         }
         Ok(())
@@ -154,6 +175,7 @@ const POW_TTL: Duration = Duration::from_secs(120);
 struct FaucetStats {
     total_drips: u64,
     total_distributed: String,
+    total_native_distributed: String,
     unique_addresses: usize,
     last_drip: Option<DateTime<Utc>>,
 }
@@ -185,6 +207,35 @@ struct DripResponse {
     tx_hash: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     amount: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    retry_after_seconds: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cooldown_seconds: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    token_tx_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    native_tx_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    token_amount: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    native_amount: Option<String>,
+}
+
+impl DripResponse {
+    fn error(message: impl Into<String>) -> Self {
+        Self {
+            success: false,
+            message: message.into(),
+            tx_hash: None,
+            amount: None,
+            retry_after_seconds: None,
+            cooldown_seconds: None,
+            token_tx_hash: None,
+            native_tx_hash: None,
+            token_amount: None,
+            native_amount: None,
+        }
+    }
 }
 
 #[tokio::main]
@@ -205,6 +256,12 @@ async fn main() -> anyhow::Result<()> {
         "  Drip amount: {} tCREG",
         config.drip_amount / 10_u128.pow(18)
     );
+    if config.native_drip_amount > 0 {
+        info!(
+            "  Gas drip amount: {:.4} ETH",
+            config.native_drip_amount as f64 / 10_f64.powi(18)
+        );
+    }
     info!("  Cooldown: {} seconds", config.cooldown_secs);
     info!("  Token contract: {}", config.token_contract);
     info!("  RPC: {}", config.rpc_url);
@@ -224,6 +281,7 @@ async fn main() -> anyhow::Result<()> {
 
     let app = Router::new()
         .route("/", get(index_page))
+        .route("/favicon.ico", get(favicon))
         .route("/api/challenge", get(get_challenge))
         .route("/api/drip", post(handle_drip))
         .route("/api/stats", get(get_stats))
@@ -273,13 +331,21 @@ async fn index_page() -> impl IntoResponse {
     Html(include_str!("faucet.html"))
 }
 
+/// Small inline favicon so browsers do not fall back to a missing default asset.
+async fn favicon() -> impl IntoResponse {
+    (
+        [(axum::http::header::CONTENT_TYPE, "image/svg+xml")],
+        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💧</text></svg>",
+    )
+}
+
 fn parse_address(value: &str, field_name: &str) -> Result<Address, String> {
     value
         .parse::<Address>()
         .map_err(|e| format!("Invalid {}: {}", field_name, e))
 }
 
-async fn execute_transfer(config: &FaucetConfig, to_address: &str) -> Result<String, String> {
+async fn execute_token_transfer(config: &FaucetConfig, to_address: &str) -> Result<String, String> {
     let signer: PrivateKeySigner = config
         .faucet_key
         .parse()
@@ -314,7 +380,7 @@ async fn execute_transfer(config: &FaucetConfig, to_address: &str) -> Result<Str
     Ok(tx_hash)
 }
 
-async fn get_real_balance(config: &FaucetConfig, address: &str) -> Result<u128, String> {
+async fn execute_native_transfer(config: &FaucetConfig, to_address: &str) -> Result<String, String> {
     let signer: PrivateKeySigner = config
         .faucet_key
         .parse()
@@ -330,20 +396,91 @@ async fn get_real_balance(config: &FaucetConfig, address: &str) -> Result<u128, 
                 .map_err(|e| format!("Invalid faucet RPC URL: {}", e))?,
         );
 
-    let token_address = parse_address(&config.token_contract, "token contract")?;
+    let recipient = parse_address(to_address, "recipient address")?;
+    let tx = TransactionRequest::default()
+        .to(recipient)
+        .value(U256::from(config.native_drip_amount));
+
+    let pending_tx = provider
+        .send_transaction(tx)
+        .await
+        .map_err(|e| format!("Native ETH transfer failed: {}", e))?;
+    let tx_hash = pending_tx.tx_hash().to_string();
+
+    pending_tx
+        .watch()
+        .await
+        .map_err(|e| format!("Native ETH confirmation failed: {}", e))?;
+
+    Ok(tx_hash)
+}
+
+async fn get_token_balance(config: &FaucetConfig, address: &str) -> Result<u128, String> {
     let holder = parse_address(address, "holder address")?;
-    let contract = IERC20::new(token_address, &provider);
-    let balance = contract
-        .balanceOf(holder)
-        .call()
+    let holder_hex = holder.to_string().trim_start_matches("0x").to_ascii_lowercase();
+    let call_data = format!("0x70a08231{:0>64}", holder_hex);
+
+    let response: serde_json::Value = reqwest::Client::new()
+        .post(&config.rpc_url)
+        .json(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "eth_call",
+            "params": [
+                {
+                    "to": config.token_contract,
+                    "data": call_data,
+                },
+                "latest"
+            ],
+            "id": 1
+        }))
+        .send()
         .await
         .map_err(|e| format!("Balance check failed: {}", e))?
-        ._0;
+        .json()
+        .await
+        .map_err(|e| format!("Balance response decode failed: {}", e))?;
 
-    balance
-        .to_string()
-        .parse::<u128>()
+    if let Some(err) = response.get("error") {
+        return Err(format!("Balance check failed: {}", err));
+    }
+
+    let result = response
+        .get("result")
+        .and_then(|value| value.as_str())
+        .ok_or_else(|| "Balance check failed: missing result".to_string())?;
+
+    u128::from_str_radix(result.trim_start_matches("0x"), 16)
         .map_err(|e| format!("Failed to parse balance: {}", e))
+}
+
+async fn get_native_balance(config: &FaucetConfig, address: &str) -> Result<u128, String> {
+    let response: serde_json::Value = reqwest::Client::new()
+        .post(&config.rpc_url)
+        .json(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "eth_getBalance",
+            "params": [address, "latest"],
+            "id": 1
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("Native balance check failed: {}", e))?
+        .json()
+        .await
+        .map_err(|e| format!("Native balance response decode failed: {}", e))?;
+
+    if let Some(err) = response.get("error") {
+        return Err(format!("Native balance check failed: {}", err));
+    }
+
+    let result = response
+        .get("result")
+        .and_then(|value| value.as_str())
+        .ok_or_else(|| "Native balance check failed: missing result".to_string())?;
+
+    u128::from_str_radix(result.trim_start_matches("0x"), 16)
+        .map_err(|e| format!("Failed to parse native balance: {}", e))
 }
 
 /// Issue a proof-of-work challenge. Client must find a nonce such that
@@ -418,12 +555,7 @@ async fn handle_drip(
             None => {
                 return (
                     StatusCode::BAD_REQUEST,
-                    JsonResponse(DripResponse {
-                        success: false,
-                        message: "Missing proof-of-work challenge. Call GET /api/challenge first.".to_string(),
-                        tx_hash: None,
-                        amount: None,
-                    }),
+                    JsonResponse(DripResponse::error("Missing proof-of-work challenge. Call GET /api/challenge first.")),
                 );
             }
         };
@@ -433,12 +565,7 @@ async fn handle_drip(
             None => {
                 return (
                     StatusCode::BAD_REQUEST,
-                    JsonResponse(DripResponse {
-                        success: false,
-                        message: "Missing proof-of-work nonce.".to_string(),
-                        tx_hash: None,
-                        amount: None,
-                    }),
+                    JsonResponse(DripResponse::error("Missing proof-of-work nonce.")),
                 );
             }
         };
@@ -450,24 +577,14 @@ async fn handle_drip(
                 if !verify_pow(&challenge, &nonce, pc.difficulty) {
                     return (
                         StatusCode::BAD_REQUEST,
-                        JsonResponse(DripResponse {
-                            success: false,
-                            message: "Invalid proof-of-work solution.".to_string(),
-                            tx_hash: None,
-                            amount: None,
-                        }),
+                        JsonResponse(DripResponse::error("Invalid proof-of-work solution.")),
                     );
                 }
             }
             _ => {
                 return (
                     StatusCode::BAD_REQUEST,
-                    JsonResponse(DripResponse {
-                        success: false,
-                        message: "Unknown or expired challenge. Request a new one.".to_string(),
-                        tx_hash: None,
-                        amount: None,
-                    }),
+                    JsonResponse(DripResponse::error("Unknown or expired challenge. Request a new one.")),
                 );
             }
         }
@@ -477,12 +594,7 @@ async fn handle_drip(
     if !address.starts_with("0x") || address.len() != 42 {
         return (
             StatusCode::BAD_REQUEST,
-            JsonResponse(DripResponse {
-                success: false,
-                message: "Invalid Ethereum address format".to_string(),
-                tx_hash: None,
-                amount: None,
-            }),
+            JsonResponse(DripResponse::error("Invalid Ethereum address format")),
         );
     }
 
@@ -502,101 +614,191 @@ async fn handle_drip(
 
     // Check rate limits
     let cooldown = Duration::from_secs(state.config.cooldown_secs);
-    if let Err(msg) = state.rate_limiter.check_address(&address, cooldown) {
+    if let Err(rejection) = state.rate_limiter.check_address(&address, cooldown) {
         return (
             StatusCode::TOO_MANY_REQUESTS,
             JsonResponse(DripResponse {
-                success: false,
-                message: msg,
-                tx_hash: None,
-                amount: None,
+                retry_after_seconds: Some(rejection.retry_after_seconds),
+                cooldown_seconds: Some(state.config.cooldown_secs),
+                ..DripResponse::error(rejection.message)
             }),
         );
     }
 
     let ip_cooldown = Duration::from_secs(state.config.ip_cooldown_secs);
-    if let Err(msg) = state.rate_limiter.check_ip(&client_ip, ip_cooldown) {
+    if let Err(rejection) = state.rate_limiter.check_ip(&client_ip, ip_cooldown) {
         return (
             StatusCode::TOO_MANY_REQUESTS,
             JsonResponse(DripResponse {
-                success: false,
-                message: msg,
-                tx_hash: None,
-                amount: None,
+                retry_after_seconds: Some(rejection.retry_after_seconds),
+                cooldown_seconds: Some(state.config.ip_cooldown_secs),
+                ..DripResponse::error(rejection.message)
             }),
         );
     }
 
-    // Check current balance
-    match get_real_balance(&state.config, &address).await {
-        Ok(balance) => {
-            if balance >= state.config.max_balance {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    JsonResponse(DripResponse {
-                        success: false,
-                        message: format!(
-                            "Address already has maximum allowed balance ({} tCREG)",
-                            balance / 10_u128.pow(18)
-                        ),
-                        tx_hash: None,
-                        amount: None,
-                    }),
-                );
-            }
+    let token_balance = get_token_balance(&state.config, &address).await.ok();
+    let native_balance = if state.config.native_drip_amount > 0 {
+        get_native_balance(&state.config, &address).await.ok()
+    } else {
+        None
+    };
+
+    let should_send_token = match token_balance {
+        Some(balance) => balance < state.config.max_balance,
+        None => true,
+    };
+    let should_send_native = if state.config.native_drip_amount == 0 {
+        false
+    } else {
+        match native_balance {
+            Some(balance) => balance < state.config.native_max_balance,
+            None => true,
         }
-        Err(e) => {
-            error!("Failed to check balance: {}", e);
-            // Continue anyway, the transfer will fail if there's a real issue
+    };
+
+    if !should_send_token && !should_send_native {
+        let token_msg = token_balance
+            .map(|balance| format!("{} tCREG", balance / 10_u128.pow(18)))
+            .unwrap_or_else(|| "sufficient tCREG".to_string());
+        let native_msg = native_balance
+            .map(|balance| format!("{:.4} ETH", balance as f64 / 10_f64.powi(18)))
+            .unwrap_or_else(|| "sufficient testnet ETH".to_string());
+        return (
+            StatusCode::BAD_REQUEST,
+            JsonResponse(DripResponse {
+                success: false,
+                message: format!(
+                    "Address already has enough test funds for now ({}, {}).",
+                    token_msg,
+                    native_msg
+                ),
+                tx_hash: None,
+                amount: None,
+                retry_after_seconds: None,
+                cooldown_seconds: None,
+                token_tx_hash: None,
+                native_tx_hash: None,
+                token_amount: None,
+                native_amount: None,
+            }),
+        );
+    }
+
+    let mut token_tx_hash = None;
+    let mut native_tx_hash = None;
+    let mut parts = Vec::new();
+    let mut failures = Vec::new();
+
+    if should_send_native {
+        match execute_native_transfer(&state.config, &address).await {
+            Ok(tx_hash) => {
+                parts.push(format!(
+                    "{:.4} ETH for gas",
+                    state.config.native_drip_amount as f64 / 10_f64.powi(18)
+                ));
+                native_tx_hash = Some(tx_hash);
+            }
+            Err(err) => {
+                error!("Native gas drip failed: {}", err);
+                failures.push(format!("native ETH: {}", err));
+            }
         }
     }
 
-    // Execute real token transfer
-    match execute_transfer(&state.config, &address).await {
-        Ok(tx_hash) => {
+    if should_send_token {
+        match execute_token_transfer(&state.config, &address).await {
+            Ok(tx_hash) => {
+                parts.push(format!("{} tCREG", state.config.drip_amount / 10_u128.pow(18)));
+                token_tx_hash = Some(tx_hash);
+            }
+            Err(err) => {
+                error!("Token drip failed: {}", err);
+                failures.push(format!("tCREG: {}", err));
+            }
+        }
+    }
+
+    if token_tx_hash.is_some() || native_tx_hash.is_some() {
             state.rate_limiter.record_request(&address, &client_ip);
 
             // Update stats
             let mut stats = state.stats.lock().await;
             stats.total_drips += 1;
             stats.unique_addresses = state.rate_limiter.address_last_request.len();
-            stats.total_distributed = format!(
-                "{}",
-                (stats.total_drips as u128 * state.config.drip_amount) / 10_u128.pow(18)
-            );
+            let current_token_total = stats.total_distributed.parse::<u128>().unwrap_or_default();
+            let current_native_total = stats.total_native_distributed.parse::<u128>().unwrap_or_default();
+            stats.total_distributed = (current_token_total
+                + if token_tx_hash.is_some() { state.config.drip_amount } else { 0 })
+                .to_string();
+            stats.total_native_distributed = (current_native_total
+                + if native_tx_hash.is_some() { state.config.native_drip_amount } else { 0 })
+                .to_string();
             stats.last_drip = Some(Utc::now());
             drop(stats);
 
             info!(
-                "Dripped {} tCREG to {} (tx: {})",
-                state.config.drip_amount / 10_u128.pow(18),
+                "Dripped {} to {}{}{}",
+                parts.join(" + "),
                 address,
-                tx_hash
+                token_tx_hash
+                    .as_ref()
+                    .map(|tx| format!(" (token tx: {})", tx))
+                    .unwrap_or_default(),
+                native_tx_hash
+                    .as_ref()
+                    .map(|tx| format!(" (gas tx: {})", tx))
+                    .unwrap_or_default()
             );
 
             (
                 StatusCode::OK,
                 JsonResponse(DripResponse {
                     success: true,
-                    message: "Tokens sent successfully!".to_string(),
-                    tx_hash: Some(tx_hash),
-                    amount: Some(format!("{}", state.config.drip_amount / 10_u128.pow(18))),
+                    message: if failures.is_empty() {
+                        format!("Sent {}.", parts.join(" + "))
+                    } else {
+                        format!("Sent {}. Partial issue: {}", parts.join(" + "), failures.join("; "))
+                    },
+                    tx_hash: token_tx_hash.clone().or_else(|| native_tx_hash.clone()),
+                    amount: Some(parts.join(" + ")),
+                    retry_after_seconds: None,
+                    cooldown_seconds: Some(state.config.cooldown_secs),
+                    token_tx_hash,
+                    native_tx_hash,
+                    token_amount: if should_send_token {
+                        Some(format!("{}", state.config.drip_amount / 10_u128.pow(18)))
+                    } else {
+                        None
+                    },
+                    native_amount: if should_send_native {
+                        Some(format!("{:.4}", state.config.native_drip_amount as f64 / 10_f64.powi(18)))
+                    } else {
+                        None
+                    },
                 }),
             )
-        }
-        Err(e) => {
-            error!("Transfer failed: {}", e);
+        } else {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 JsonResponse(DripResponse {
                     success: false,
-                    message: format!("Transfer failed: {}", e),
+                    message: if failures.is_empty() {
+                        "Faucet transfer failed for an unknown reason.".to_string()
+                    } else {
+                        format!("Faucet transfer failed: {}", failures.join("; "))
+                    },
                     tx_hash: None,
                     amount: None,
+                    retry_after_seconds: None,
+                    cooldown_seconds: None,
+                    token_tx_hash: None,
+                    native_tx_hash: None,
+                    token_amount: None,
+                    native_amount: None,
                 }),
             )
         }
-    }
 }
 
 /// Get faucet statistics
@@ -604,17 +806,25 @@ async fn get_stats(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let stats = state.stats.lock().await;
     
     // Get real faucet balance
-    let faucet_balance = get_real_balance(&state.config, &state.config.faucet_address)
+    let faucet_balance = get_token_balance(&state.config, &state.config.faucet_address)
+        .await
+        .unwrap_or(0);
+    let faucet_native_balance = get_native_balance(&state.config, &state.config.faucet_address)
         .await
         .unwrap_or(0);
     
     JsonResponse(serde_json::json!({
         "drip_amount": state.config.drip_amount.to_string(),
+        "native_drip_amount": state.config.native_drip_amount.to_string(),
         "cooldown_seconds": state.config.cooldown_secs,
+        "max_balance": state.config.max_balance.to_string(),
+        "native_max_balance": state.config.native_max_balance.to_string(),
         "token_contract": state.config.token_contract,
         "faucet_address": state.config.faucet_address,
         "faucet_balance": faucet_balance.to_string(),
         "faucet_balance_formatted": format!("{:.2}", faucet_balance as f64 / 10_f64.powi(18)),
+        "faucet_native_balance": faucet_native_balance.to_string(),
+        "faucet_native_balance_formatted": format!("{:.4}", faucet_native_balance as f64 / 10_f64.powi(18)),
         "stats": *stats,
     }))
 }
@@ -624,18 +834,29 @@ async fn get_balance(
     State(state): State<Arc<AppState>>,
     axum::extract::Path(address): axum::extract::Path<String>,
 ) -> impl IntoResponse {
-    match get_real_balance(&state.config, &address).await {
-        Ok(balance) => {
+    let token_balance = get_token_balance(&state.config, &address).await;
+    let native_balance = get_native_balance(&state.config, &address).await;
+
+    match (token_balance, native_balance) {
+        (Ok(balance), Ok(native)) => {
             JsonResponse(serde_json::json!({
                 "address": address,
                 "balance": balance.to_string(),
                 "balance_formatted": format!("{:.2}", balance as f64 / 10_f64.powi(18)),
+                "token_balance": balance.to_string(),
+                "token_balance_formatted": format!("{:.2}", balance as f64 / 10_f64.powi(18)),
+                "native_balance": native.to_string(),
+                "native_balance_formatted": format!("{:.4}", native as f64 / 10_f64.powi(18)),
             }))
         }
-        Err(e) => {
+        (token_result, native_result) => {
             JsonResponse(serde_json::json!({
                 "address": address,
-                "error": e,
+                "error": format!(
+                    "token={}, native={}",
+                    token_result.err().unwrap_or_else(|| "ok".to_string()),
+                    native_result.err().unwrap_or_else(|| "ok".to_string())
+                ),
             }))
         }
     }
@@ -653,45 +874,40 @@ async fn get_network_info(State(state): State<Arc<AppState>>) -> impl IntoRespon
         "token_contract": state.config.token_contract,
         "explorer_url": explorer_url,
         "chain_name": "CREG Testnet (Anvil)",
-        "currency": "tCREG",
-    }))
-}
-
-/// Network configuration info for wallet setup and next-step guidance
-async fn get_network_info(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let explorer_url = env_string("FAUCET_EXPLORER_URL", "http://localhost:3000");
-    let rpc_url = env_string("FAUCET_PUBLIC_RPC_URL", "http://localhost:8545");
-    let chain_id = env_u64("FAUCET_CHAIN_ID", 31337);
-
-    JsonResponse(serde_json::json!({
-        "chain_id": chain_id,
-        "rpc_url": rpc_url,
-        "token_contract": state.config.token_contract,
-        "explorer_url": explorer_url,
-        "chain_name": "CREG Testnet (Anvil)",
-        "currency": "tCREG",
+        "currency": "ETH",
+        "token_symbol": "tCREG",
+        "native_currency_symbol": "ETH",
+        "gas_note": "Gas on EVM testnets is paid in the native testnet ETH for that chain, not in ERC-20 tokens.",
     }))
 }
 
 /// Health check
 async fn health_check(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    match get_real_balance(&state.config, &state.config.faucet_address).await {
-        Ok(faucet_balance) => (
+    match (
+        get_token_balance(&state.config, &state.config.faucet_address).await,
+        get_native_balance(&state.config, &state.config.faucet_address).await,
+    ) {
+        (Ok(faucet_balance), Ok(faucet_native_balance)) => (
             StatusCode::OK,
             JsonResponse(serde_json::json!({
                 "status": "healthy",
                 "faucet": "online",
                 "mode": "real",
                 "faucet_balance": faucet_balance.to_string(),
+                "faucet_native_balance": faucet_native_balance.to_string(),
             })),
         ),
-        Err(err) => (
+        (token_result, native_result) => (
             StatusCode::SERVICE_UNAVAILABLE,
             JsonResponse(serde_json::json!({
                 "status": "degraded",
                 "faucet": "offline",
                 "mode": "real",
-                "error": err,
+                "error": format!(
+                    "token={}, native={}",
+                    token_result.err().unwrap_or_else(|| "ok".to_string()),
+                    native_result.err().unwrap_or_else(|| "ok".to_string())
+                ),
             })),
         ),
     }

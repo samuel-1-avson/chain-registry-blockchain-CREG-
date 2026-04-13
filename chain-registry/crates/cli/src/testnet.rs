@@ -1,6 +1,7 @@
 // crates/cli/src/testnet.rs
 // Testnet utilities and commands
 
+use crate::doctor;
 use anyhow::{bail, Context, Result};
 use colored::Colorize;
 use serde::{Deserialize, Serialize};
@@ -35,8 +36,9 @@ impl Default for TestnetConfig {
 
 /// Request test tokens from faucet
 pub async fn drip(address: &str, faucet_url: Option<&str>) -> Result<()> {
-    let url = faucet_url.unwrap_or("http://localhost:8082");
-    let client = reqwest::Client::new();
+    let url = faucet_url
+        .map(str::to_string)
+        .unwrap_or_else(doctor::default_faucet_url);
 
     // Validate address
     if !address.starts_with("0x") || address.len() != 42 {
@@ -50,36 +52,28 @@ pub async fn drip(address: &str, faucet_url: Option<&str>) -> Result<()> {
     );
     println!("  Faucet: {}", url);
 
-    let response = client
-        .post(format!("{}/api/drip", url))
-        .json(&serde_json::json!({
-            "address": address,
-            "captcha": null
-        }))
-        .send()
+    let outcome = doctor::faucet_drip_probe(&url, Some(address))
         .await
-        .context("Failed to connect to faucet")?;
+        .with_context(|| format!("Failed to request test tokens from {}", url))?;
 
-    let status = response.status();
-    let body: serde_json::Value = response.json().await?;
-
-    if status.is_success() && body["success"].as_bool().unwrap_or(false) {
-        let amount = body["amount"].as_str().unwrap_or("1000");
-        let tx_hash = body["tx_hash"].as_str().unwrap_or("unknown");
-
-        println!("\n{}", "✓ Test tokens received!".green().bold());
-        println!("  Amount: {} tCREG", amount.yellow());
-        println!("  Transaction: {}", tx_hash.dimmed());
-        println!(
-            "\n{} You can now stake tokens and use the testnet.",
-            "💡".yellow()
-        );
-        println!("  Stake as publisher: creg testnet stake-publisher 1");
-        println!("  Stake as validator: creg testnet stake-validator 100");
-    } else {
-        let message = body["message"].as_str().unwrap_or("Unknown error");
-        bail!("Faucet request failed: {}", message);
+    println!("\n{} Test tokens received!", "✓".green().bold());
+    if let Some(amount) = &outcome.amount {
+        println!("  Amount: {}", amount.yellow());
     }
+    if let Some(tx_hash) = &outcome.tx_hash {
+        println!("  Transaction: {}", tx_hash.dimmed());
+    }
+    println!(
+        "  Balance delta: {} -> {}",
+        outcome.balance_before.to_string().dimmed(),
+        outcome.balance_after.to_string().green()
+    );
+    println!(
+        "\n{} You can now stake tokens and use the testnet.",
+        "💡".yellow()
+    );
+    println!("  Stake as publisher: creg testnet stake-publisher 1 --key 0x...");
+    println!("  Stake as validator: creg testnet stake-validator 100 --key 0x...");
 
     Ok(())
 }
@@ -328,6 +322,9 @@ QUICK START
 3. Get test tokens:
    creg testnet drip 0xYourAddress
 
+    The CLI automatically fetches a PoW challenge, solves it, and submits the
+    correct faucet request payload for the current testnet faucet.
+
 4. Stake and participate:
     creg testnet stake-publisher 1 --key 0xYourPrivateKey
     creg testnet stake-validator 100 --key 0xYourPrivateKey
@@ -336,7 +333,7 @@ FAUCET
 ──────
 The faucet distributes 1000 tCREG per request with a 1-minute cooldown.
 Web UI: http://localhost:8082
-API:    POST /api/drip { "address": "0x..." }
+CLI:    creg testnet drip 0xYourAddress
 
 STAKING REQUIREMENTS (Testnet)
 ──────────────────────────────

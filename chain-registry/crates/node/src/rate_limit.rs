@@ -3,8 +3,8 @@
 // In-memory sliding-window rate limiter for the REST API.
 //
 // Limits per remote IP address:
-//   - Package submissions (POST /v1/packages):  10 per 60 seconds
-//   - General API requests:                    120 per 60 seconds
+//   - Package submissions (POST /v1/packages):   10 per 60 seconds
+//   - General API requests:                    3000 per 60 seconds
 //   - Validator vote submissions:               60 per 60 seconds
 //
 // Uses a token-bucket algorithm per IP stored in a dashmap.
@@ -41,7 +41,11 @@ pub struct RateLimitConfig {
 impl Default for RateLimitConfig {
     fn default() -> Self {
         Self {
-            general_limit: 600,
+            // The explorer polls several read-only endpoints concurrently and may
+            // be opened in multiple tabs during local testnet use. Keep mutating
+            // routes tight, but give the general read surface enough headroom to
+            // avoid throttling the first-party UI and local tooling.
+            general_limit: 3000,
             publish_limit: 10,
             vote_limit: 60,
             window: Duration::from_secs(60),

@@ -11,7 +11,7 @@ pub mod forced_inclusion;
 
 // anyhow::Result is unused here
 // common imports are handled within submodules
-pub use pbft::PbftEngine;
+pub use pbft::{PbftConfig, PbftEngine};
 pub use validator_set::ValidatorSet;
 
 pub mod vote_accumulator;

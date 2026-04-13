@@ -41,6 +41,14 @@ contract StakingFuzzTest is Test {
         staking.setContracts(mockRegistry, address(reputation));
     }
 
+    function test_onlyOwnerCanSetContracts() public {
+        Staking freshStaking = new Staking(address(governance), address(cregToken));
+
+        vm.prank(makeAddr("attacker"));
+        vm.expectRevert("Ownable: caller is not the owner");
+        freshStaking.setContracts(address(0xBEEF), address(reputation));
+    }
+
     // ── Helper: give CREG tokens and approve staking ─────────────────────────
 
     function _fundAndApprove(address who, uint256 amount) internal {

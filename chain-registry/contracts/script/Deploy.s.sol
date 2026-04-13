@@ -10,6 +10,7 @@ import "../Registry.sol";
 import "../Appeal.sol";
 import "../ZKVerifier.sol";
 import "../CregToken.sol";
+import "../ValidatorRewards.sol";
 import "../testnet/DevZKVerifier.sol";
 
 /// @notice Deploys the full chain-registry contract suite.
@@ -24,11 +25,13 @@ contract DeployChainRegistry is Script {
     Appeal        public appeal;
     address       public zkVerifier;
     CregToken     public cregToken;
+    ValidatorRewards public validatorRewards;
 
     function run() external {
         uint256 deployerKey = vm.envUint("DEPLOYER_KEY");
         address deployer    = vm.addr(deployerKey);
-        address[] memory signers   = _parseSigners(deployer);
+        bool testnetMode = vm.envOr("TESTNET_MODE", false) || vm.envOr("CREG_TESTNET", false);
+        address[] memory signers   = _parseSigners(deployer, testnetMode);
         uint256          threshold = vm.envOr("GOVERNANCE_THRESHOLD", uint256(1));
 
         console.log("=== Chain Registry Deployment ===");
@@ -52,9 +55,17 @@ contract DeployChainRegistry is Script {
 
         // Staking now requires the CregToken address for CREG-based staking.
         staking    = new Staking(address(governance), address(cregToken));
+        validatorRewards = new ValidatorRewards(
+            address(staking),
+            address(cregToken),
+            address(governance),
+            deployer
+        );
 
         // Local Anvil deployments use a permissive verifier so the bridge path
         // can exercise rollup settlement without a production Groth16 key set.
+        require(testnetMode, "DevZKVerifier requires TESTNET_MODE=true");
+        require(block.chainid == 31337, "DevZKVerifier only allowed on Anvil chain 31337");
         zkVerifier = address(new DevZKVerifier());
 
         registry   = new ChainRegistry(
@@ -70,6 +81,8 @@ contract DeployChainRegistry is Script {
         // Wire contracts together — setContracts replaces the old setRegistry.
         staking.setContracts(address(registry), address(reputation));
         reputation.setRegistry(address(registry));
+        cregToken.approve(address(validatorRewards), type(uint256).max);
+        cregToken.transferOwnership(address(governance));
 
         vm.stopBroadcast();
 
@@ -81,17 +94,31 @@ contract DeployChainRegistry is Script {
         console.log("Registry:  ", address(registry));
         console.log("Appeal:    ", address(appeal));
         console.log("CregToken: ", address(cregToken));
+        console.log("ValRewards:", address(validatorRewards));
 
         _writeManifest(deployer);
         console.log("=== Deployment complete ===");
     }
 
-    function _parseSigners(address deployer) internal view returns (address[] memory) {
+    function _parseSigners(address deployer, bool testnetMode) internal view returns (address[] memory) {
         try vm.envString("GENESIS_SIGNERS") returns (string memory raw) {
             if (bytes(raw).length > 0) {
                 return vm.parseJsonAddressArray(raw, "$");
             }
         } catch {}
+
+        if (testnetMode) {
+            try vm.envUint("CREG_BRIDGE_KEY") returns (uint256 bridgeKey) {
+                address bridgeSigner = vm.addr(bridgeKey);
+                if (bridgeSigner != deployer) {
+                    address[] memory s = new address[](2);
+                    s[0] = deployer;
+                    s[1] = bridgeSigner;
+                    return s;
+                }
+            } catch {}
+        }
+
         address[] memory s = new address[](1);
         s[0] = deployer;
         return s;
@@ -111,6 +138,8 @@ contract DeployChainRegistry is Script {
             '  "registry":   "', vm.toString(address(registry)),   '",\n',
             '  "appeal":     "', vm.toString(address(appeal)),     '",\n',
             '  "cregToken":  "', vm.toString(address(cregToken)),  '",\n',
+            '  "validatorRewards": "', vm.toString(address(validatorRewards)), '",\n',
+            '  "validatorRewardsTreasury": "', vm.toString(deployer), '",\n',
             '  "chainId":    "', vm.toString(block.chainid),       '",\n',
             '  "deployedAt": "', vm.toString(block.timestamp),     '"\n',
             '}'

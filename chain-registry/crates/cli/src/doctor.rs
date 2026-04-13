@@ -1,82 +1,573 @@
 // crates/cli/src/doctor.rs
-// `creg doctor` — checks all system prerequisites and reports their status.
+// `creg doctor` — checks local prerequisites and can probe the full bootstrap testnet.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use colored::Colorize;
+use rand::RngCore;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::time::{Duration, Instant};
 
-pub async fn run(node_url: Option<&str>) -> Result<()> {
-    let node = node_url.map(String::from).unwrap_or_else(|| {
-        std::env::var("CREG_NODE_URL").unwrap_or_else(|_| "http://localhost:8080".into())
+pub struct DoctorOptions<'a> {
+    pub node_url: Option<&'a str>,
+    pub json: bool,
+    pub testnet: bool,
+    pub faucet_url: Option<&'a str>,
+    pub eth_rpc_url: Option<&'a str>,
+    pub explorer_url: Option<&'a str>,
+    pub skip_explorer: bool,
+    pub skip_drip: bool,
+    pub recipient: Option<&'a str>,
+}
+
+#[derive(Serialize)]
+struct DoctorReport {
+    mode: &'static str,
+    ok: bool,
+    node_url: String,
+    ipfs_url: String,
+    faucet_url: Option<String>,
+    eth_rpc_url: Option<String>,
+    explorer_url: Option<String>,
+    checks: Vec<DoctorCheck>,
+}
+
+#[derive(Serialize)]
+struct DoctorCheck {
+    name: String,
+    required: bool,
+    status: &'static str,
+    message: String,
+}
+
+impl DoctorCheck {
+    fn pass(name: impl Into<String>, required: bool, message: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            required,
+            status: "pass",
+            message: message.into(),
+        }
+    }
+
+    fn fail(name: impl Into<String>, required: bool, message: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            required,
+            status: "fail",
+            message: message.into(),
+        }
+    }
+
+    fn skipped(name: impl Into<String>, required: bool, message: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            required,
+            status: "skipped",
+            message: message.into(),
+        }
+    }
+
+    fn is_failure(&self) -> bool {
+        self.required && self.status == "fail"
+    }
+}
+
+#[derive(Deserialize)]
+struct NodeHealthResponse {
+    status: String,
+    version: Option<String>,
+}
+
+#[allow(dead_code)]
+#[derive(Deserialize)]
+struct ChainStatsResponse {
+    tip_height: Option<u64>,
+    block_count: Option<u64>,
+    package_count: Option<u64>,
+    validator_count: Option<u64>,
+    total_stake: Option<u64>,
+    peer_count: Option<u64>,
+    bridge_status: Option<String>,
+    l1_block: Option<u64>,
+}
+
+#[derive(Deserialize)]
+struct RuntimeConfigResponse {
+    is_testnet: bool,
+    registry_address: Option<String>,
+    token_contract: Option<String>,
+    staking_contract: Option<String>,
+    validator_registration_mode: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct FaucetHealthResponse {
+    status: String,
+    mode: Option<String>,
+    faucet_balance: Option<String>,
+}
+
+#[allow(dead_code)]
+#[derive(Deserialize)]
+struct FaucetNetworkResponse {
+    chain_id: u64,
+    rpc_url: String,
+    token_contract: String,
+    explorer_url: String,
+}
+
+#[derive(Deserialize)]
+struct FaucetChallengeResponse {
+    challenge: String,
+    difficulty: u8,
+}
+
+#[derive(Deserialize)]
+struct FaucetDripResponse {
+    success: bool,
+    message: String,
+    tx_hash: Option<String>,
+    amount: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct FaucetBalanceResponse {
+    balance: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct FaucetDripOutcome {
+    pub recipient: String,
+    pub amount: Option<String>,
+    pub tx_hash: Option<String>,
+    pub balance_before: u128,
+    pub balance_after: u128,
+}
+
+pub async fn run(options: DoctorOptions<'_>) -> Result<()> {
+    if options.testnet {
+        run_testnet(options).await
+    } else {
+        run_basic(options).await
+    }
+}
+
+async fn run_basic(options: DoctorOptions<'_>) -> Result<()> {
+    let node = resolve_node_url(options.node_url);
+    let ipfs = resolve_ipfs_url();
+
+    let mut checks = Vec::new();
+
+    let (node_ok, node_msg) = check_node(&node).await;
+    checks.push(if node_ok {
+        DoctorCheck::pass("Chain node", true, node_msg)
+    } else {
+        DoctorCheck::fail("Chain node", true, node_msg)
     });
 
-    let ipfs = std::env::var("CREG_IPFS_URL").unwrap_or_else(|_| "http://127.0.0.1:5001".into());
-
-    println!("{}", "creg doctor — system health check".bold());
-    println!("{}", "─".repeat(52).dimmed());
-
-    let mut all_ok = true;
-
-    // 1. Node connectivity
-    print_check("Chain node", "");
-    let (node_ok, node_msg) = check_node(&node).await;
-    print_result(node_ok, &node_msg);
-    all_ok &= node_ok;
-
-    // 2. Node sync status
-    print_check("Chain sync", "");
     let (sync_ok, sync_msg) = check_chain_sync(&node).await;
-    print_result(sync_ok, &sync_msg);
-    // not blocking — just informational
-    let _ = sync_ok;
+    checks.push(if sync_ok {
+        DoctorCheck::pass("Chain sync", false, sync_msg)
+    } else {
+        DoctorCheck::fail("Chain sync", false, sync_msg)
+    });
 
-    // 3. IPFS daemon
-    print_check("IPFS daemon", "");
     let (ipfs_ok, ipfs_msg) = check_ipfs(&ipfs).await;
-    print_result(ipfs_ok, &ipfs_msg);
-    all_ok &= ipfs_ok;
+    checks.push(if ipfs_ok {
+        DoctorCheck::pass("IPFS daemon", true, ipfs_msg)
+    } else {
+        DoctorCheck::fail("IPFS daemon", true, ipfs_msg)
+    });
 
-    // 4. Publisher key
-    print_check("Publisher key", "");
     let (key_ok, key_msg) = check_publisher_key();
-    print_result(key_ok, &key_msg);
+    checks.push(if key_ok {
+        DoctorCheck::pass("Publisher key", false, key_msg)
+    } else {
+        DoctorCheck::fail("Publisher key", false, key_msg)
+    });
 
-    // 5. nsjail (optional)
-    print_check("nsjail sandbox", "(optional)");
     let (nsjail_ok, nsjail_msg) = check_nsjail();
-    print_result(nsjail_ok, &nsjail_msg);
+    checks.push(if nsjail_ok {
+        DoctorCheck::pass("nsjail sandbox", false, nsjail_msg)
+    } else {
+        DoctorCheck::fail("nsjail sandbox", false, nsjail_msg)
+    });
 
-    // 6. gpg (optional)
-    print_check("GnuPG", "(optional)");
     let (gpg_ok, gpg_msg) = check_gpg();
-    print_result(gpg_ok, &gpg_msg);
+    checks.push(if gpg_ok {
+        DoctorCheck::pass("GnuPG", false, gpg_msg)
+    } else {
+        DoctorCheck::fail("GnuPG", false, gpg_msg)
+    });
 
-    // 7. creg config file
-    print_check("Config file", "");
     let (cfg_ok, cfg_msg) = check_config_file();
-    print_result(cfg_ok, &cfg_msg);
+    checks.push(if cfg_ok {
+        DoctorCheck::pass("Config file", false, cfg_msg)
+    } else {
+        DoctorCheck::fail("Config file", false, cfg_msg)
+    });
 
-    // 8. Dev sandbox override
-    print_check("Dev sandbox bypass", "");
     let dev_sandbox = std::env::var("CREG_DEV_SANDBOX").as_deref() == Ok("true");
-    if dev_sandbox {
-        print_result(false, "CREG_DEV_SANDBOX=true — nsjail bypassed (dev only!)");
+    checks.push(if dev_sandbox {
+        DoctorCheck::fail(
+            "Dev sandbox bypass",
+            false,
+            "CREG_DEV_SANDBOX=true — nsjail bypassed (dev only!)",
+        )
     } else {
-        print_result(true, "not set (production mode)");
+        DoctorCheck::pass("Dev sandbox bypass", false, "not set (production mode)")
+    });
+
+    let report = DoctorReport {
+        mode: "basic",
+        ok: !checks.iter().any(DoctorCheck::is_failure),
+        node_url: node,
+        ipfs_url: ipfs,
+        faucet_url: None,
+        eth_rpc_url: None,
+        explorer_url: None,
+        checks,
+    };
+
+    finish_report("creg doctor — system health check", report, options.json)
+}
+
+async fn run_testnet(options: DoctorOptions<'_>) -> Result<()> {
+    let node = resolve_node_url(options.node_url);
+    let ipfs = resolve_ipfs_url();
+    let faucet = options
+        .faucet_url
+        .map(str::to_string)
+        .or_else(|| std::env::var("CREG_FAUCET_URL").ok())
+        .unwrap_or_else(|| "http://127.0.0.1:8082".to_string());
+    let eth_rpc = options
+        .eth_rpc_url
+        .map(str::to_string)
+        .or_else(|| std::env::var("CREG_ETH_RPC").ok())
+        .unwrap_or_else(|| "http://127.0.0.1:8545".to_string());
+    let explorer = options
+        .explorer_url
+        .map(str::to_string)
+        .or_else(|| std::env::var("CREG_EXPLORER_URL").ok())
+        .unwrap_or_else(|| "http://127.0.0.1:3000".to_string());
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()?;
+
+    let mut checks = Vec::new();
+
+    let node_health_url = format!("{}/v1/health", node.trim_end_matches('/'));
+    let node_health = match get_json::<NodeHealthResponse>(&client, &node_health_url).await {
+        Ok(health) if health.status.eq_ignore_ascii_case("ok") => {
+            let version = health
+                .version
+                .clone()
+                .unwrap_or_else(|| "unknown".to_string());
+            checks.push(DoctorCheck::pass(
+                "Node health",
+                true,
+                format!("{} — status=ok version={}", node, version),
+            ));
+            Some(health)
+        }
+        Ok(health) => {
+            checks.push(DoctorCheck::fail(
+                "Node health",
+                true,
+                format!("{} returned status={}.", node, health.status),
+            ));
+            Some(health)
+        }
+        Err(error) => {
+            checks.push(DoctorCheck::fail(
+                "Node health",
+                true,
+                format!("Could not reach {}: {}", node, error),
+            ));
+            None
+        }
+    };
+
+    let chain_stats_url = format!("{}/v1/chain/stats", node.trim_end_matches('/'));
+    let chain_stats = match get_json::<ChainStatsResponse>(&client, &chain_stats_url).await {
+        Ok(stats) => {
+            let validator_count = stats.validator_count.unwrap_or(0);
+            let ok = stats.tip_height.is_some() && validator_count > 0;
+            let message = format!(
+                "tip_height={} block_count={} validator_count={} total_stake={} peer_count={} packages={} bridge_status={} l1_block={}",
+                stats.tip_height.unwrap_or(0),
+                stats.block_count.unwrap_or(0),
+                validator_count,
+                stats.total_stake.unwrap_or(0),
+                stats.peer_count.unwrap_or(0),
+                stats.package_count.unwrap_or(0),
+                stats.bridge_status.clone().unwrap_or_else(|| "unknown".to_string()),
+                stats.l1_block.unwrap_or(0)
+            );
+            checks.push(if ok {
+                DoctorCheck::pass("Chain stats", true, message)
+            } else {
+                DoctorCheck::fail("Chain stats", true, message)
+            });
+            Some(stats)
+        }
+        Err(error) => {
+            checks.push(DoctorCheck::fail(
+                "Chain stats",
+                true,
+                format!("Could not read chain stats: {}", error),
+            ));
+            None
+        }
+    };
+
+    let runtime_config_url = format!("{}/v1/runtime/config", node.trim_end_matches('/'));
+    let runtime_config = match get_json::<RuntimeConfigResponse>(&client, &runtime_config_url).await {
+        Ok(config) => {
+            let token = config.token_contract.clone().unwrap_or_default();
+            let staking = config.staking_contract.clone().unwrap_or_default();
+            let registry = config.registry_address.clone().unwrap_or_default();
+            let ok = config.is_testnet
+                && !is_zero_like_address(&token)
+                && !is_zero_like_address(&staking)
+                && !is_zero_like_address(&registry);
+            let message = format!(
+                "is_testnet={} token={} staking={} registry={} mode={}",
+                config.is_testnet,
+                display_address(&token),
+                display_address(&staking),
+                display_address(&registry),
+                config
+                    .validator_registration_mode
+                    .clone()
+                    .unwrap_or_else(|| "unknown".to_string())
+            );
+            checks.push(if ok {
+                DoctorCheck::pass("Runtime config", true, message)
+            } else {
+                DoctorCheck::fail("Runtime config", true, message)
+            });
+            Some(config)
+        }
+        Err(error) => {
+            checks.push(DoctorCheck::fail(
+                "Runtime config",
+                true,
+                format!("Could not read runtime config: {}", error),
+            ));
+            None
+        }
+    };
+
+    let eth_chain_id = match rpc_hex_u64(&client, &eth_rpc, "eth_chainId", serde_json::json!([])).await {
+        Ok(chain_id) => {
+            let block_number = rpc_hex_u64(&client, &eth_rpc, "eth_blockNumber", serde_json::json!([]))
+                .await
+                .unwrap_or(0);
+            checks.push(DoctorCheck::pass(
+                "Ethereum RPC",
+                true,
+                format!("{} — chain_id={} block={}", eth_rpc, chain_id, block_number),
+            ));
+            Some(chain_id)
+        }
+        Err(error) => {
+            checks.push(DoctorCheck::fail(
+                "Ethereum RPC",
+                true,
+                format!("Could not query {}: {}", eth_rpc, error),
+            ));
+            None
+        }
+    };
+
+    if let Some(config) = &runtime_config {
+        let mut contract_failures = Vec::new();
+        for (label, address) in [
+            ("token", config.token_contract.as_deref()),
+            ("staking", config.staking_contract.as_deref()),
+            ("registry", config.registry_address.as_deref()),
+        ] {
+            let Some(address) = address else {
+                contract_failures.push(format!("{}=missing", label));
+                continue;
+            };
+            if is_zero_like_address(address) {
+                contract_failures.push(format!("{}=zero-address", label));
+                continue;
+            }
+            match rpc_get_code(&client, &eth_rpc, address).await {
+                Ok(code) if code != "0x" && code != "0x0" => {}
+                Ok(_) => contract_failures.push(format!("{}={} has no bytecode", label, address)),
+                Err(error) => contract_failures.push(format!("{}={} lookup failed: {}", label, address, error)),
+            }
+        }
+
+        checks.push(if contract_failures.is_empty() {
+            DoctorCheck::pass("Contract bytecode", true, "token/staking/registry bytecode present")
+        } else {
+            DoctorCheck::fail("Contract bytecode", true, contract_failures.join("; "))
+        });
+    } else {
+        checks.push(DoctorCheck::fail(
+            "Contract bytecode",
+            true,
+            "Skipped because runtime config did not load",
+        ));
     }
 
-    println!("{}", "─".repeat(52).dimmed());
-    if all_ok {
-        println!("{} All checks passed.", "✓".green().bold());
-    } else {
-        println!(
-            "{} Some checks failed. See above for details.",
-            "⚠".yellow().bold()
+    let faucet_health_url = format!("{}/health", faucet.trim_end_matches('/'));
+    let faucet_health = match get_json::<FaucetHealthResponse>(&client, &faucet_health_url).await {
+        Ok(health) => {
+            let ok = health.status.eq_ignore_ascii_case("healthy");
+            let message = format!(
+                "status={} mode={} faucet_balance={}",
+                health.status,
+                health.mode.clone().unwrap_or_else(|| "unknown".to_string()),
+                health.faucet_balance.clone().unwrap_or_else(|| "unknown".to_string())
+            );
+            checks.push(if ok {
+                DoctorCheck::pass("Faucet health", true, message)
+            } else {
+                DoctorCheck::fail("Faucet health", true, message)
+            });
+            Some(health)
+        }
+        Err(error) => {
+            checks.push(DoctorCheck::fail(
+                "Faucet health",
+                true,
+                format!("Could not reach {}: {}", faucet, error),
+            ));
+            None
+        }
+    };
+
+    let faucet_network_url = format!("{}/api/network", faucet.trim_end_matches('/'));
+    let faucet_network = match get_json::<FaucetNetworkResponse>(&client, &faucet_network_url).await {
+        Ok(network) => {
+            let message = format!(
+                "chain_id={} rpc_url={} token={} explorer={}",
+                network.chain_id,
+                network.rpc_url,
+                display_address(&network.token_contract),
+                network.explorer_url
+            );
+            checks.push(DoctorCheck::pass("Faucet network", true, message));
+            Some(network)
+        }
+        Err(error) => {
+            checks.push(DoctorCheck::fail(
+                "Faucet network",
+                true,
+                format!("Could not read faucet network config: {}", error),
+            ));
+            None
+        }
+    };
+
+    if let (Some(network), Some(chain_id), Some(config)) = (&faucet_network, eth_chain_id, &runtime_config) {
+        let token_matches = normalize_address(config.token_contract.as_deref().unwrap_or_default())
+            == normalize_address(&network.token_contract);
+        let chain_matches = network.chain_id == chain_id;
+        let ok = token_matches && chain_matches;
+        let message = format!(
+            "faucet_token={} node_token={} faucet_chain_id={} rpc_chain_id={}",
+            display_address(&network.token_contract),
+            display_address(config.token_contract.as_deref().unwrap_or_default()),
+            network.chain_id,
+            chain_id
         );
-        std::process::exit(1);
+        checks.push(if ok {
+            DoctorCheck::pass("Address consistency", true, message)
+        } else {
+            DoctorCheck::fail("Address consistency", true, message)
+        });
+    } else {
+        checks.push(DoctorCheck::fail(
+            "Address consistency",
+            true,
+            "Could not compare faucet and runtime addresses because a prerequisite check failed",
+        ));
     }
 
-    Ok(())
+    let (ipfs_ok, ipfs_msg) = check_ipfs(&ipfs).await;
+    checks.push(if ipfs_ok {
+        DoctorCheck::pass("IPFS daemon", true, ipfs_msg)
+    } else {
+        DoctorCheck::fail("IPFS daemon", true, ipfs_msg)
+    });
+
+    if options.skip_explorer {
+        checks.push(DoctorCheck::skipped(
+            "Explorer",
+            false,
+            "Skipped by --skip-explorer",
+        ));
+    } else {
+        let explorer_url = explorer.trim_end_matches('/').to_string();
+        match client.get(&explorer_url).send().await {
+            Ok(response) if response.status().is_success() => checks.push(DoctorCheck::pass(
+                "Explorer",
+                true,
+                format!("{} — HTTP {}", explorer_url, response.status()),
+            )),
+            Ok(response) => checks.push(DoctorCheck::fail(
+                "Explorer",
+                true,
+                format!("{} returned HTTP {}", explorer_url, response.status()),
+            )),
+            Err(error) => checks.push(DoctorCheck::fail(
+                "Explorer",
+                true,
+                format!("Could not reach {}: {}", explorer_url, error),
+            )),
+        }
+    }
+
+    if options.skip_drip {
+        checks.push(DoctorCheck::skipped(
+            "Faucet drip probe",
+            false,
+            "Skipped by --skip-drip",
+        ));
+    } else {
+        let recipient = options
+            .recipient
+            .map(str::to_string)
+            .unwrap_or_else(random_ethereum_address);
+        match run_faucet_drip_probe(&client, &faucet, &recipient).await {
+            Ok(outcome) => checks.push(DoctorCheck::pass(
+                "Faucet drip probe",
+                true,
+                format_drip_outcome(&outcome),
+            )),
+            Err(error) => checks.push(DoctorCheck::fail(
+                "Faucet drip probe",
+                true,
+                format!("{}", error),
+            )),
+        }
+    }
+
+    let report = DoctorReport {
+        mode: "testnet",
+        ok: !checks.iter().any(DoctorCheck::is_failure),
+        node_url: node,
+        ipfs_url: ipfs,
+        faucet_url: Some(faucet),
+        eth_rpc_url: Some(eth_rpc),
+        explorer_url: if options.skip_explorer { None } else { Some(explorer) },
+        checks,
+    };
+
+    let _ = node_health;
+    let _ = chain_stats;
+    let _ = faucet_health;
+
+    finish_report("creg doctor — testnet end-to-end check", report, options.json)
 }
 
 fn print_check(label: &str, note: &str) {
@@ -87,11 +578,270 @@ fn print_check(label: &str, note: &str) {
     }
 }
 
-fn print_result(ok: bool, msg: &str) {
-    if ok {
-        println!("{} {}", "✓".green(), msg);
+fn print_result(status: &str, msg: &str) {
+    match status {
+        "pass" => println!("{} {}", "✓".green(), msg),
+        "skipped" => println!("{} {}", "•".yellow(), msg.yellow()),
+        _ => println!("{} {}", "✗".red(), msg.red()),
+    }
+}
+
+fn finish_report(title: &str, report: DoctorReport, json: bool) -> Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
-        println!("{} {}", "✗".red(), msg.red());
+        println!("{}", title.bold());
+        println!("{}", "─".repeat(52).dimmed());
+        for check in &report.checks {
+            let note = if check.required { "" } else { "(optional)" };
+            print_check(&check.name, note);
+            print_result(check.status, &check.message);
+        }
+        println!("{}", "─".repeat(52).dimmed());
+        if report.ok {
+            println!("{} All checks passed.", "✓".green().bold());
+        } else {
+            println!(
+                "{} Some required checks failed. See above for details.",
+                "⚠".yellow().bold()
+            );
+        }
+    }
+
+    if !report.ok {
+        std::process::exit(1);
+    }
+
+    Ok(())
+}
+
+fn resolve_node_url(node_url: Option<&str>) -> String {
+    node_url.map(String::from).unwrap_or_else(|| {
+        std::env::var("CREG_NODE_URL").unwrap_or_else(|_| "http://localhost:8080".into())
+    })
+}
+
+fn resolve_ipfs_url() -> String {
+    std::env::var("CREG_IPFS_URL").unwrap_or_else(|_| "http://127.0.0.1:5001".into())
+}
+
+fn is_zero_like_address(value: &str) -> bool {
+    let trimmed = value.trim();
+    trimmed.is_empty() || trimmed.eq_ignore_ascii_case("0x0000000000000000000000000000000000000000")
+}
+
+fn normalize_address(value: &str) -> String {
+    value.trim().to_ascii_lowercase()
+}
+
+fn display_address(value: &str) -> String {
+    if is_zero_like_address(value) {
+        "<unset>".to_string()
+    } else {
+        value.to_string()
+    }
+}
+
+async fn get_json<T: DeserializeOwned>(client: &reqwest::Client, url: &str) -> Result<T> {
+    client
+        .get(url)
+        .send()
+        .await
+        .with_context(|| format!("GET {} failed", url))?
+        .error_for_status()
+        .with_context(|| format!("GET {} returned an error status", url))?
+        .json::<T>()
+        .await
+        .with_context(|| format!("Could not decode JSON from {}", url))
+}
+
+async fn rpc_hex_u64(
+    client: &reqwest::Client,
+    rpc_url: &str,
+    method: &str,
+    params: serde_json::Value,
+) -> Result<u64> {
+    let value = rpc_call(client, rpc_url, method, params).await?;
+    let hex_value = value
+        .as_str()
+        .with_context(|| format!("{} did not return a hex string", method))?;
+    u64::from_str_radix(hex_value.trim_start_matches("0x"), 16)
+        .with_context(|| format!("Could not parse {} response: {}", method, hex_value))
+}
+
+async fn rpc_get_code(client: &reqwest::Client, rpc_url: &str, address: &str) -> Result<String> {
+    let value = rpc_call(
+        client,
+        rpc_url,
+        "eth_getCode",
+        serde_json::json!([address, "latest"]),
+    )
+    .await?;
+    value
+        .as_str()
+        .map(str::to_string)
+        .context("eth_getCode did not return a string")
+}
+
+async fn rpc_call(
+    client: &reqwest::Client,
+    rpc_url: &str,
+    method: &str,
+    params: serde_json::Value,
+) -> Result<serde_json::Value> {
+    let response = client
+        .post(rpc_url)
+        .json(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": params,
+            "id": 1,
+        }))
+        .send()
+        .await
+        .with_context(|| format!("RPC {} call to {} failed", method, rpc_url))?
+        .error_for_status()
+        .with_context(|| format!("RPC {} call to {} returned an error status", method, rpc_url))?
+        .json::<serde_json::Value>()
+        .await
+        .with_context(|| format!("Could not decode RPC {} response", method))?;
+
+    if let Some(error) = response.get("error") {
+        anyhow::bail!("RPC {} returned error: {}", method, error);
+    }
+
+    response
+        .get("result")
+        .cloned()
+        .context("RPC response missing result field")
+}
+
+fn random_ethereum_address() -> String {
+    let mut bytes = [0u8; 20];
+    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    if bytes.iter().all(|byte| *byte == 0) {
+        bytes[0] = 1;
+    }
+    format!("0x{}", hex::encode(bytes))
+}
+
+pub fn default_faucet_url() -> String {
+    std::env::var("CREG_FAUCET_URL").unwrap_or_else(|_| "http://127.0.0.1:8082".to_string())
+}
+
+pub async fn faucet_drip_probe(
+    faucet_url: &str,
+    recipient: Option<&str>,
+) -> Result<FaucetDripOutcome> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()?;
+    let recipient = recipient
+        .map(str::to_string)
+        .unwrap_or_else(random_ethereum_address);
+    run_faucet_drip_probe(&client, faucet_url, &recipient).await
+}
+
+pub fn format_drip_outcome(outcome: &FaucetDripOutcome) -> String {
+    format!(
+        "recipient={} amount={} tx_hash={} balance_before={} balance_after={}",
+        outcome.recipient,
+        outcome.amount.clone().unwrap_or_else(|| "unknown".to_string()),
+        outcome.tx_hash.clone().unwrap_or_else(|| "unknown".to_string()),
+        outcome.balance_before,
+        outcome.balance_after
+    )
+}
+
+async fn run_faucet_drip_probe(
+    client: &reqwest::Client,
+    faucet_url: &str,
+    recipient: &str,
+) -> Result<FaucetDripOutcome> {
+    let before = faucet_balance(client, faucet_url, recipient).await.unwrap_or(0);
+    let challenge: FaucetChallengeResponse = get_json(
+        client,
+        &format!("{}/api/challenge", faucet_url.trim_end_matches('/')),
+    )
+    .await?;
+    let nonce = solve_pow(&challenge.challenge, challenge.difficulty);
+
+    let response = client
+        .post(format!("{}/api/drip", faucet_url.trim_end_matches('/')))
+        .json(&serde_json::json!({
+            "address": recipient,
+            "challenge": challenge.challenge,
+            "nonce": nonce,
+        }))
+        .send()
+        .await
+        .context("Faucet drip request failed")?
+        .json::<FaucetDripResponse>()
+        .await
+        .context("Could not decode faucet drip response")?;
+
+    if !response.success {
+        anyhow::bail!("faucet drip failed for {}: {}", recipient, response.message);
+    }
+
+    let after = faucet_balance(client, faucet_url, recipient).await?;
+    if after <= before {
+        anyhow::bail!(
+            "faucet drip did not increase balance for {} (before={}, after={})",
+            recipient,
+            before,
+            after
+        );
+    }
+
+    Ok(FaucetDripOutcome {
+        recipient: recipient.to_string(),
+        amount: response.amount,
+        tx_hash: response.tx_hash,
+        balance_before: before,
+        balance_after: after,
+    })
+}
+
+async fn faucet_balance(client: &reqwest::Client, faucet_url: &str, address: &str) -> Result<u128> {
+    let response: FaucetBalanceResponse = get_json(
+        client,
+        &format!("{}/api/balance/{}", faucet_url.trim_end_matches('/'), address),
+    )
+    .await?;
+    response
+        .balance
+        .parse::<u128>()
+        .with_context(|| format!("Could not parse faucet balance for {}", address))
+}
+
+fn solve_pow(challenge: &str, difficulty: u8) -> String {
+    let mut nonce = 0u64;
+    loop {
+        let nonce_str = nonce.to_string();
+        let mut hasher = Sha256::new();
+        hasher.update(challenge.as_bytes());
+        hasher.update(nonce_str.as_bytes());
+        let hash = hasher.finalize();
+
+        let mut leading_zeros = 0u8;
+        for byte in hash {
+            if byte == 0 {
+                leading_zeros += 8;
+            } else {
+                leading_zeros += byte.leading_zeros() as u8;
+                break;
+            }
+            if leading_zeros >= difficulty {
+                break;
+            }
+        }
+
+        if leading_zeros >= difficulty {
+            return nonce_str;
+        }
+
+        nonce = nonce.saturating_add(1);
     }
 }
 

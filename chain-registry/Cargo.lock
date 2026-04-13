@@ -2666,7 +2666,30 @@ dependencies = [
  "urlencoding",
  "uuid 1.22.0",
  "validator",
+ "x25519-dalek",
  "zk-validator",
+]
+
+[[package]]
+name = "chain-registry-relayer"
+version = "0.1.0"
+dependencies = [
+ "alloy 0.6.4",
+ "anyhow",
+ "axum",
+ "chrono",
+ "dashmap 5.5.3",
+ "hex",
+ "k256",
+ "reqwest 0.11.27",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower 0.4.13",
+ "tower-http 0.5.2",
+ "tracing",
+ "tracing-subscriber 0.3.23",
+ "uuid 1.22.0",
 ]
 
 [[package]]
@@ -2904,9 +2927,7 @@ dependencies = [
  "chrono",
  "common",
  "ed25519-dalek",
- "ethers-core",
  "hex",
- "k256",
  "rand 0.8.5",
  "serde",
  "serde_json",
@@ -7048,6 +7069,7 @@ dependencies = [
  "flate2",
  "futures",
  "hex",
+ "lru",
  "ndarray",
  "ort",
  "rayon",
@@ -11611,6 +11633,7 @@ dependencies = [
  "cap-std 3.4.5",
  "chrono",
  "common",
+ "ed25519-dalek",
  "flate2",
  "hex",
  "ml-validator",

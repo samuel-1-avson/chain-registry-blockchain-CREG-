@@ -65,7 +65,8 @@ RUN mkdir -p crates/common/src && echo "pub fn _stub() {}" > crates/common/src/l
     mkdir -p crates/insurance/src && echo "pub fn _stub() {}" > crates/insurance/src/lib.rs && \
     mkdir -p crates/db-sync/src && echo "pub fn _stub() {}" > crates/db-sync/src/lib.rs && \
     mkdir -p crates/ipfs-pinner/src && echo "pub fn _stub() {}" > crates/ipfs-pinner/src/lib.rs && \
-    mkdir -p crates/faucet/src && echo "fn main() {}" > crates/faucet/src/main.rs
+    mkdir -p crates/faucet/src && echo "fn main() {}" > crates/faucet/src/main.rs && \
+    mkdir -p crates/relayer/src && echo "fn main() {}" > crates/relayer/src/main.rs
 
 # Pre-build dependencies (cached layer)
 RUN cargo fetch || (sleep 5 && cargo fetch) || (sleep 10 && cargo fetch)
@@ -86,7 +87,8 @@ RUN touch crates/*/src/*.rs
 # Build the actual binaries
 RUN cargo build --release --package chain-registry-node && \
     cargo build --release --package chain-registry-cli && \
-    cargo build --release --package faucet
+    cargo build --release --package faucet && \
+    cargo build --release --package chain-registry-relayer
 
 # ── Stage 3: Runtime ──────────────────────────────────────────────────────────
 FROM debian:bookworm-slim AS runtime
@@ -103,12 +105,13 @@ WORKDIR /app
 COPY --from=builder /build/target/release/creg-node /app/creg-node
 COPY --from=builder /build/target/release/creg /app/creg
 COPY --from=builder /build/target/release/faucet /app/faucet
+COPY --from=builder /build/target/release/creg-relayer /app/creg-relayer
 
 # Copy WASM validators and circuits
 COPY --from=builder /build/crates/cli/validators /app/validators
 COPY --from=builder /build/circuits /app/circuits
 COPY --from=builder /build/models /app/models
-COPY --from=builder /build/config/sandbox /app/config/sandbox
+COPY --from=builder /build/config /app/config
 COPY --from=builder /build/rules /app/rules
 
 # Create non-root user

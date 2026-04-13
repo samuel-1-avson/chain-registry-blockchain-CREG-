@@ -7,7 +7,7 @@
 //! Results are cached in-process to avoid redundant lookups.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::num::NonZeroUsize;
 use std::sync::Mutex;
 use std::time::Duration;
 use tracing::{debug, warn};
@@ -21,9 +21,13 @@ const OSV_TIMEOUT: Duration = Duration::from_secs(10);
 /// Maximum cache entries to prevent unbounded memory growth.
 const MAX_CACHE_SIZE: usize = 5000;
 
-/// In-process cache: `"ecosystem:name@version"` → `OsvResult`.
-static OSV_CACHE: std::sync::LazyLock<Mutex<HashMap<String, OsvResult>>> =
-    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+/// In-process LRU cache: `"ecosystem:name@version"` → `OsvResult`.
+/// Evicts the least-recently-used entry when capacity is reached, avoiding
+/// the thundering-herd that occurs when the entire cache is cleared at once.
+static OSV_CACHE: std::sync::LazyLock<Mutex<lru::LruCache<String, OsvResult>>> =
+    std::sync::LazyLock::new(|| {
+        Mutex::new(lru::LruCache::new(NonZeroUsize::new(MAX_CACHE_SIZE).unwrap()))
+    });
 
 /// Information about a package to query against OSV.
 #[derive(Debug, Clone)]
@@ -208,12 +212,9 @@ pub fn query(info: &PackageInfo) -> OsvResult {
         }
     };
 
-    // Cache the result.
+    // Cache the result. LRU automatically evicts the oldest entry at capacity.
     if let Ok(mut cache) = OSV_CACHE.lock() {
-        if cache.len() >= MAX_CACHE_SIZE {
-            cache.clear(); // Simple eviction: clear all when full.
-        }
-        cache.insert(cache_key, result.clone());
+        cache.put(cache_key, result.clone());
     }
 
     result

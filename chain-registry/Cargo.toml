@@ -15,6 +15,7 @@ members = [
     "crates/db-sync",
     "crates/ipfs-pinner",
     "crates/faucet",
+    "crates/relayer",
 ]
 resolver = "2"
 

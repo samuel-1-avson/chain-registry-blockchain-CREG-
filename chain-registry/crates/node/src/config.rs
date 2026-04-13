@@ -167,6 +167,12 @@ impl NodeConfig {
     pub fn validate(&self) -> Vec<String> {
         let mut errors = Vec::new();
 
+        let is_zero_like = |value: &str| {
+            let trimmed = value.trim();
+            trimmed.is_empty()
+                || trimmed.eq_ignore_ascii_case("0x0000000000000000000000000000000000000000")
+        };
+
         // A validator node must have a signing key.
         if self.is_validator && self.validator_privkey.is_none() {
             errors.push(
@@ -201,7 +207,7 @@ impl NodeConfig {
         }
 
         // Warn if using the null registry address (bridge will not work).
-        if self.registry_addr == "0x0000000000000000000000000000000000000000" {
+        if is_zero_like(&self.registry_addr) {
             errors.push(
                 "CREG_REGISTRY_ADDR is the zero address. \
                  Deploy Registry.sol and set CREG_REGISTRY_ADDR for Ethereum bridging."
@@ -209,12 +215,24 @@ impl NodeConfig {
             );
         }
 
-        if self.bridge_privkey.is_some()
-            && self.governance_addr == "0x0000000000000000000000000000000000000000"
-        {
+        if self.bridge_privkey.is_some() && is_zero_like(&self.governance_addr) {
             errors.push(
                 "CREG_GOVERNANCE_ADDR is the zero address. \
                  Set CREG_GOVERNANCE_ADDR so the bridge can execute rollup settlement via Governance.sol."
+                    .into(),
+            );
+        }
+
+        if is_zero_like(&self.token_addr) {
+            errors.push(
+                "CREG_TOKEN_ADDR is not set. Wallet balances, faucet wiring, and staking UI will be unavailable until testnet artifacts are synced."
+                    .into(),
+            );
+        }
+
+        if is_zero_like(&self.staking_addr) {
+            errors.push(
+                "CREG_STAKING_ADDR is not set. Validator and publisher staking flows will be unavailable until testnet artifacts are synced."
                     .into(),
             );
         }

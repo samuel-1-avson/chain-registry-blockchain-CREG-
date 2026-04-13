@@ -32,6 +32,32 @@ pub fn sha256_hex(data: &[u8]) -> String {
     hex::encode(sha256(data))
 }
 
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+pub struct ValidatorIdentity {
+    #[serde(default, alias = "address")]
+    pub evm_address: String,
+    #[serde(default, alias = "id")]
+    pub node_id: String,
+    #[serde(default, alias = "pubkey")]
+    pub ed25519_pubkey: String,
+}
+
+impl ValidatorIdentity {
+    pub fn normalized(&self) -> Self {
+        Self {
+            evm_address: self.evm_address.trim().to_ascii_lowercase(),
+            node_id: self.node_id.trim().to_string(),
+            ed25519_pubkey: self.ed25519_pubkey.trim().to_ascii_lowercase(),
+        }
+    }
+
+    pub fn is_complete(&self) -> bool {
+        !self.evm_address.trim().is_empty()
+            && !self.node_id.trim().is_empty()
+            && !self.ed25519_pubkey.trim().is_empty()
+    }
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct Validator {
     pub id: String,

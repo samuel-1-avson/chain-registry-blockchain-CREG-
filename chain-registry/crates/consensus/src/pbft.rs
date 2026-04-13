@@ -9,16 +9,50 @@ use common::{Block, ValidatorSignature, ValidatorVote};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-/// Maximum time a round can stay in any single phase before it is considered
-/// timed-out.  A real deployment would make this configurable.
-const ROUND_PHASE_TIMEOUT: Duration = Duration::from_secs(30);
+/// Default maximum time a round can stay in any single phase before it is
+/// considered timed-out. Overridden via `CREG_PBFT_TIMEOUT` env var.
+const DEFAULT_ROUND_PHASE_TIMEOUT_SECS: u64 = 30;
 
-/// Maximum number of view-change retries before a round is abandoned.
-const MAX_VIEW_CHANGES: u32 = 3;
+/// Default maximum number of view-change retries before a round is abandoned.
+/// Overridden via `CREG_PBFT_MAX_VIEW_CHANGES` env var.
+const DEFAULT_MAX_VIEW_CHANGES: u32 = 3;
 
-/// Age after which a terminal (Finalised / Failed) round is eligible for
-/// garbage collection.
-const STALE_ROUND_TTL: Duration = Duration::from_secs(120);
+/// Default age after which a terminal (Finalised / Failed) round is eligible
+/// for garbage collection. Overridden via `CREG_PBFT_STALE_TTL` env var.
+const DEFAULT_STALE_ROUND_TTL_SECS: u64 = 120;
+
+/// Configuration for PBFT consensus parameters.
+/// All values have sensible defaults and can be overridden via environment
+/// variables at startup.
+#[derive(Debug, Clone)]
+pub struct PbftConfig {
+    pub round_phase_timeout: Duration,
+    pub max_view_changes: u32,
+    pub stale_round_ttl: Duration,
+}
+
+impl Default for PbftConfig {
+    fn default() -> Self {
+        Self {
+            round_phase_timeout: Duration::from_secs(
+                std::env::var("CREG_PBFT_TIMEOUT")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(DEFAULT_ROUND_PHASE_TIMEOUT_SECS),
+            ),
+            max_view_changes: std::env::var("CREG_PBFT_MAX_VIEW_CHANGES")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(DEFAULT_MAX_VIEW_CHANGES),
+            stale_round_ttl: Duration::from_secs(
+                std::env::var("CREG_PBFT_STALE_TTL")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(DEFAULT_STALE_ROUND_TTL_SECS),
+            ),
+        }
+    }
+}
 
 /// Current phase of a PBFT round for a given block proposal.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,10 +81,16 @@ pub struct PbftRound {
     pub view_change_count: u32,
     /// When the round was first created (for stale-round GC).
     pub created_at: Instant,
+    /// Runtime configuration for timeouts and view-change limits.
+    pub config: PbftConfig,
 }
 
 impl PbftRound {
     pub fn new(block: Block, validator_set: ValidatorSet) -> Self {
+        Self::with_config(block, validator_set, PbftConfig::default())
+    }
+
+    pub fn with_config(block: Block, validator_set: ValidatorSet, config: PbftConfig) -> Self {
         let now = Instant::now();
         Self {
             block,
@@ -62,6 +102,7 @@ impl PbftRound {
             view_number: 0,
             view_change_count: 0,
             created_at: now,
+            config,
         }
     }
 
@@ -218,25 +259,25 @@ impl PbftRound {
     }
 
     /// Returns `true` when the current (non-terminal) phase has exceeded
-    /// `ROUND_PHASE_TIMEOUT`.
+    /// the configured round phase timeout.
     pub fn is_phase_timed_out(&self) -> bool {
         match self.phase {
             PbftPhase::Finalised | PbftPhase::Failed => false,
-            _ => self.phase_entered_at.elapsed() > ROUND_PHASE_TIMEOUT,
+            _ => self.phase_entered_at.elapsed() > self.config.round_phase_timeout,
         }
     }
 
     /// Attempt a view-change: increment the view number, reset PREPARE/COMMIT
     /// state, and return to PrePrepare so a new proposer can drive the round.
     ///
-    /// Returns `Err` if MAX_VIEW_CHANGES have already been exhausted, in which
-    /// case the round should be abandoned.
+    /// Returns `Err` if the configured max view-changes have already been exhausted,
+    /// in which case the round should be abandoned.
     pub fn trigger_view_change(&mut self) -> Result<u32> {
-        if self.view_change_count >= MAX_VIEW_CHANGES {
+        if self.view_change_count >= self.config.max_view_changes {
             self.phase = PbftPhase::Failed;
             bail!(
                 "View-change limit ({}) exhausted — round abandoned",
-                MAX_VIEW_CHANGES
+                self.config.max_view_changes
             );
         }
         self.view_change_count += 1;
@@ -262,18 +303,27 @@ impl PbftRound {
 /// Top-level engine managing multiple concurrent PBFT rounds (one per pending block).
 pub struct PbftEngine {
     rounds: HashMap<String, PbftRound>, // block_hash → round
+    config: PbftConfig,
 }
 
 impl PbftEngine {
     pub fn new() -> Self {
         Self {
             rounds: HashMap::new(),
+            config: PbftConfig::default(),
+        }
+    }
+
+    pub fn with_config(config: PbftConfig) -> Self {
+        Self {
+            rounds: HashMap::new(),
+            config,
         }
     }
 
     pub fn start_round(&mut self, block: Block, vs: ValidatorSet) -> Result<String> {
         let hash = block.hash();
-        let mut round = PbftRound::new(block, vs);
+        let mut round = PbftRound::with_config(block, vs, self.config.clone());
         let proposer = round.block.header.proposer_id.clone();
         round.pre_prepare(&proposer)?;
         self.rounds.insert(hash.clone(), round);
@@ -343,13 +393,14 @@ impl PbftEngine {
     }
 
     /// Remove rounds that have been in a terminal state (Finalised / Failed)
-    /// for longer than `STALE_ROUND_TTL`.  Returns the number of rounds
-    /// removed.
+    /// for longer than the configured stale round TTL. Returns the number of
+    /// rounds removed.
     pub fn cleanup_stale_rounds(&mut self) -> usize {
+        let ttl = self.config.stale_round_ttl;
         let stale: Vec<String> = self
             .rounds
             .iter()
-            .filter(|(_, r)| r.is_terminal() && r.created_at.elapsed() > STALE_ROUND_TTL)
+            .filter(|(_, r)| r.is_terminal() && r.created_at.elapsed() > ttl)
             .map(|(h, _)| h.clone())
             .collect();
         let count = stale.len();
