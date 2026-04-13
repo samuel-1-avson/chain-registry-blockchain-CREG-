@@ -67,6 +67,11 @@ contract CrossChainRegistry {
     
     /// This chain's ID
     uint16 public immutable thisChainId;
+
+    /// Validator set for cross-chain signature verification
+    mapping(address => bool) public isValidator;
+    address[] public validators;
+    uint256 public validatorThreshold;
     
     // ── Events ────────────────────────────────────────────────────────────────
     
@@ -96,6 +101,7 @@ contract CrossChainRegistry {
     error InvalidMessage();
     error MessageAlreadyProcessed(bytes32 messageHash);
     error VerificationFailed(string reason);
+    error InsufficientSignatures(uint256 provided, uint256 required);
     
     // ── Modifiers ─────────────────────────────────────────────────────────────
     
@@ -167,6 +173,29 @@ contract CrossChainRegistry {
     function setMessageBridge(address _messageBridge) external onlyGovernance {
         messageBridge = _messageBridge;
     }
+
+    /// @notice Set the validator set and threshold for cross-chain signature verification
+    function setValidatorSet(
+        address[] calldata _validators,
+        uint256 _threshold
+    ) external onlyGovernance {
+        require(_validators.length > 0, "Empty validator set");
+        require(_threshold > 0 && _threshold <= _validators.length, "Invalid threshold");
+
+        // Clear old validator set
+        for (uint i = 0; i < validators.length; i++) {
+            isValidator[validators[i]] = false;
+        }
+        delete validators;
+
+        // Set new validator set
+        for (uint i = 0; i < _validators.length; i++) {
+            require(!isValidator[_validators[i]], "Duplicate validator");
+            isValidator[_validators[i]] = true;
+            validators.push(_validators[i]);
+        }
+        validatorThreshold = _threshold;
+    }
     
     // ── Cross-Chain Messaging ─────────────────────────────────────────────────
     
@@ -174,21 +203,26 @@ contract CrossChainRegistry {
     /// @param dstChainId Destination chain ID
     /// @param packageKey Package identifier
     /// @param canonical Package canonical name
+    /// @param validatorSignatures ECDSA signatures from ≥ validatorThreshold validators
+    ///        over keccak256("\x19Ethereum Signed Message:\n32" || _messageBodyHash(message))
+    ///        where the body hash covers all message fields except `signature`.
+    ///        Callers should collect signatures off-chain before invoking this function.
     function sendVerification(
         uint16 dstChainId,
         bytes32 packageKey,
-        string calldata canonical
+        string calldata canonical,
+        bytes[] calldata validatorSignatures
     ) external payable {
         if (!chains[dstChainId].isActive) revert ChainNotSupported(dstChainId);
-        
+
         // Get package info from local registry
         ChainRegistry.PackageRecord memory pkg = localRegistry.getPackage(canonical);
-        
+
         if (pkg.status != ChainRegistry.PackageStatus.Verified) {
             revert VerificationFailed("Package not verified locally");
         }
-        
-        // Create message
+
+        // Build the unsigned message body first.
         uint256 nonce = chainNonces[dstChainId]++;
         CrossChainMessage memory message = CrossChainMessage({
             srcChainId: thisChainId,
@@ -198,36 +232,52 @@ contract CrossChainRegistry {
             publisher: pkg.publisher,
             status: uint8(pkg.status),
             timestamp: block.timestamp,
-            signature: "" // Would be signed by validators
+            signature: "" // filled below after signature verification
         });
-        
+
+        // Require threshold validator signatures over the message body hash.
+        // This prevents any single caller from injecting unilateral cross-chain
+        // state changes — the source validator set must co-sign before sending.
+        _verifyThresholdSignatures(_messageBodyHash(message), validatorSignatures);
+
+        // Attach the serialized signatures as the message's source-chain proof.
+        message.signature = abi.encode(validatorSignatures);
+
         // Encode and send via bridge
         bytes memory encodedMessage = encodeMessage(message);
         _sendCrossChainMessage(dstChainId, encodedMessage);
-        
+
         emit MessageSent(dstChainId, packageKey, nonce);
     }
     
     /// @notice Receive verification from another chain
     /// @param srcChainId Source chain ID
     /// @param encodedMessage Encoded CrossChainMessage
+    /// @param signatures ECDSA signatures from validators over keccak256(encodedMessage)
     function receiveVerification(
         uint16 srcChainId,
-        bytes calldata encodedMessage
+        bytes calldata encodedMessage,
+        bytes[] calldata signatures
     ) external onlyBridge {
         if (!chains[srcChainId].isActive) revert ChainNotSupported(srcChainId);
-        
+
         CrossChainMessage memory message = decodeMessage(encodedMessage);
-        
+
         // Verify message integrity
         if (message.srcChainId != srcChainId) revert InvalidMessage();
         if (message.dstChainId != thisChainId) revert InvalidMessage();
-        
+
         // Prevent replay attacks
         bytes32 messageHash = keccak256(encodedMessage);
         if (processedMessages[messageHash]) revert MessageAlreadyProcessed(messageHash);
+
+        // Always verify threshold signatures — never allow zero-threshold bypass.
+        // Signatures are verified over the message body hash (all fields except
+        // the embedded signature), matching the commitment sendVerification used.
+        _verifyThresholdSignatures(_messageBodyHash(message), signatures);
+
         processedMessages[messageHash] = true;
-        
+
         // Store cross-chain verification
         bytes32 packageKey = keccak256(abi.encodePacked(message.canonical));
         crossChainPackages[packageKey] = VerifiedPackage({
@@ -238,7 +288,7 @@ contract CrossChainRegistry {
             verifiedAt: block.timestamp,
             isCrossChain: true
         });
-        
+
         emit MessageReceived(srcChainId, packageKey, chainNonces[srcChainId]);
         emit CrossChainVerification(packageKey, srcChainId, message.canonical);
     }
@@ -246,12 +296,12 @@ contract CrossChainRegistry {
     /// @notice Batch receive multiple verifications
     function batchReceiveVerifications(
         uint16 srcChainId,
-        bytes[] calldata encodedMessages
+        bytes[] calldata encodedMessages,
+        bytes[][] calldata signatures
     ) external onlyBridge {
+        require(encodedMessages.length == signatures.length, "Length mismatch");
         for (uint i = 0; i < encodedMessages.length; i++) {
-            // Process each message
-            // Note: In production, handle partial failures
-            try this.receiveVerification(srcChainId, encodedMessages[i]) {
+            try this.receiveVerification(srcChainId, encodedMessages[i], signatures[i]) {
                 // Success
             } catch {
                 // Log failure but continue
@@ -333,21 +383,78 @@ contract CrossChainRegistry {
         });
     }
     
+    /// @notice Compute a canonical hash of a CrossChainMessage body, excluding
+    ///         the `signature` field, so both sender and receiver agree on what
+    ///         was signed without the circularity of signing the signature itself.
+    function _messageBodyHash(CrossChainMessage memory message)
+        internal pure
+        returns (bytes32)
+    {
+        return keccak256(abi.encode(
+            message.srcChainId,
+            message.dstChainId,
+            message.packageHash,
+            message.canonical,
+            message.publisher,
+            message.status,
+            message.timestamp
+        ));
+    }
+
+    /// @notice Verify that at least `validatorThreshold` distinct validators
+    ///         from the registered set have signed `bodyHash`.
+    /// @dev Reverts with VerificationFailed if the validator set is not configured,
+    ///      or with InsufficientSignatures if valid sig count is below threshold.
+    function _verifyThresholdSignatures(
+        bytes32 bodyHash,
+        bytes[] calldata sigs
+    ) internal view {
+        if (validatorThreshold == 0 || validators.length == 0) {
+            revert VerificationFailed("Validator set not configured");
+        }
+
+        bytes32 ethHash = keccak256(
+            abi.encodePacked("\x19Ethereum Signed Message:\n32", bodyHash)
+        );
+        uint256 validSigs = 0;
+        address[] memory seen = new address[](sigs.length);
+        uint256 seenCount = 0;
+
+        for (uint i = 0; i < sigs.length; i++) {
+            if (sigs[i].length != 65) continue;
+
+            bytes32 r_val; bytes32 s_val; uint8 v_val;
+            bytes calldata sig = sigs[i];
+            assembly {
+                r_val := calldataload(sig.offset)
+                s_val := calldataload(add(sig.offset, 32))
+                v_val := byte(0, calldataload(add(sig.offset, 64)))
+            }
+            if (v_val < 27) v_val += 27;
+
+            address signer = ecrecover(ethHash, v_val, r_val, s_val);
+            if (signer == address(0) || !isValidator[signer]) continue;
+
+            // Deduplicate: each validator counts once.
+            bool duplicate = false;
+            for (uint j = 0; j < seenCount; j++) {
+                if (seen[j] == signer) { duplicate = true; break; }
+            }
+            if (duplicate) continue;
+
+            seen[seenCount++] = signer;
+            validSigs++;
+        }
+
+        if (validSigs < validatorThreshold) {
+            revert InsufficientSignatures(validSigs, validatorThreshold);
+        }
+    }
+
     /// @notice Send message via bridge adapter
     function _sendCrossChainMessage(uint16 dstChainId, bytes memory message) internal {
-        // This would call the specific bridge (LayerZero, Axelar, etc.)
-        // Implementation depends on the bridge adapter
-
-        // For now, this is a placeholder
-        (bool success, ) = messageBridge.call(
-            abi.encodeWithSelector(
-                bytes4(keccak256("send(uint16,bytes)")),
-                dstChainId,
-                message
-            )
-        );
-
-        require(success, "Bridge call failed");
+        require(messageBridge != address(0), "Bridge not configured");
+        IMessageBridge(messageBridge).send{value: msg.value}(dstChainId, message);
     }
     }
 
@@ -419,9 +526,13 @@ contract LayerZeroAdapter is IMessageBridge {
         bytes calldata payload
     ) external {
         require(msg.sender == endpoint, "Only endpoint");
-        
-        // Forward to registry
-        CrossChainRegistry(registry).receiveVerification(srcChainId, payload);
+
+        // Decode payload: first portion is encodedMessage, remainder is signatures
+        (bytes memory encodedMessage, bytes[] memory signatures) =
+            abi.decode(payload, (bytes, bytes[]));
+
+        // Forward to registry with signatures
+        CrossChainRegistry(registry).receiveVerification(srcChainId, encodedMessage, signatures);
     }
 }
 
@@ -474,12 +585,16 @@ contract AxelarAdapter is IMessageBridge {
     ) external {
         // Verify called by Axelar gateway
         require(msg.sender == gateway, "Only gateway");
-        
+
+        // Decode payload: first portion is encodedMessage, remainder is signatures
+        (bytes memory encodedMessage, bytes[] memory signatures) =
+            abi.decode(payload, (bytes, bytes[]));
+
         // Convert chain name to chain ID
         uint16 srcChainId = _chainNameToId(sourceChain);
-        
-        // Forward to registry
-        CrossChainRegistry(registry).receiveVerification(srcChainId, payload);
+
+        // Forward to registry with signatures
+        CrossChainRegistry(registry).receiveVerification(srcChainId, encodedMessage, signatures);
     }
     
     /// @notice Set chain name for a chain ID
