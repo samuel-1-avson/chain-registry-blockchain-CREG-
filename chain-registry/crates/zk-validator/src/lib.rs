@@ -33,11 +33,13 @@ use std::sync::Arc;
 use thiserror::Error;
 use tracing::{debug, info, warn, instrument};
 
+pub mod batch;
 pub mod circuits;
 pub mod constraints;
 pub mod slashing;
 
-pub use circuits::PackageValidationCircuit;
+pub use batch::{BatchInputs, BatchStateTransitionValidator};
+pub use circuits::{BatchStateTransitionCircuit, PackageValidationCircuit};
 pub use slashing::*;
 
 /// Errors that can occur during ZK validation

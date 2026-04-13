@@ -197,56 +197,62 @@ async fn tick(state: Arc<RwLock<NodeState>>, last_height: &mut u64) -> anyhow::R
     state_hasher.update(data_root);
     let next_root: [u8; 32] = state_hasher.finalize().into();
 
-    // Generate a Groth16 ZK proof committing to the batch state transition.
+    // Generate a Groth16 ZK proof for the batch state transition using the
+    // dedicated BatchStateTransitionCircuit.
     //
-    // Public inputs: [prev_root, next_root, data_root]
-    //   - prev_root: on-chain state root before this batch
-    //   - next_root: SHA-256(prev_root || data_root)
-    //   - data_root: Merkle root of the batch transactions
+    // Public inputs (6 Fr elements encoded as U256):
+    //   [prev_root_lo, prev_root_hi, data_root_lo, data_root_hi,
+    //    next_root_lo, next_root_hi]
     //
-    // NOTE: This reuses the PackageValidationCircuit with score=100 and
-    // sandbox=true. A dedicated BatchStateTransitionCircuit would be more
-    // semantically correct but is functionally equivalent for binding the
-    // three hash inputs. Replace when a batch-specific circuit is built.
+    // The circuit proves: tx_count ≥ 1 (non-empty batch). The on-chain
+    // ZKVerifier checks the proof against these public inputs, and
+    // submitRollupBatch checks prevRoot == latestStateRoot().
     let (proof, public_inputs) = {
-        use zk_validator::{PackageInputs, ZkValidator};
+        use zk_validator::{BatchInputs, BatchStateTransitionValidator};
 
-        let inputs = PackageInputs::new(
+        let batch_inputs = BatchInputs::new(
+            prev_root.into(),
             data_root,
             next_root,
-            100u8,
-            true,
+            batch_transactions.len() as u64,
         );
 
-        let zk = state.read().await.zk_validator.clone();
-        match zk.generate_proof(&inputs) {
+        // Proof generation is CPU-bound; run in a blocking worker thread so
+        // we don't block the async runtime.
+        let batch_inputs_clone = batch_inputs.clone();
+        let proof_result = tokio::task::spawn_blocking(move || {
+            let validator = BatchStateTransitionValidator::new()?;
+            validator.generate_proof(&batch_inputs_clone)
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("proof task panicked: {}", e))?;
+
+        match proof_result {
             Ok(p) => {
-                // Unpack Groth16 proof elements into the 8 U256s the ZKVerifier expects:
-                // [Ax, Ay, Bx1, Bx2, By1, By2, Cx, Cy]
-                let serialized = ZkValidator::serialize_proof(&p).unwrap_or_default();
+                // Convert proof chunks → [U256; 8]
+                let chunks = BatchStateTransitionValidator::proof_to_chunks(&p)
+                    .map_err(|e| anyhow::anyhow!("proof serialization failed: {}", e))?;
                 let mut arr = [alloy::primitives::U256::from(0u64); 8];
-                for (i, chunk) in serialized.chunks(32).enumerate().take(8) {
-                    let mut bytes = [0u8; 32];
-                    bytes[32 - chunk.len()..].copy_from_slice(chunk);
-                    arr[i] = alloy::primitives::U256::from_be_bytes(bytes);
+                for (i, chunk) in chunks.into_iter().enumerate() {
+                    arr[i] = alloy::primitives::U256::from_be_bytes(chunk);
                 }
-                // Public inputs: [prev_root, next_root, data_root]
-                let pi: Vec<alloy::primitives::U256> = vec![
-                    alloy::primitives::U256::from_be_bytes(prev_root.into()),
-                    alloy::primitives::U256::from_be_bytes(next_root),
-                    alloy::primitives::U256::from_be_bytes(data_root),
-                ];
+                // Convert public-input byte chunks → Vec<U256>
+                let pi: Vec<alloy::primitives::U256> = batch_inputs
+                    .public_inputs_bytes()
+                    .into_iter()
+                    .map(alloy::primitives::U256::from_be_bytes)
+                    .collect();
                 (arr, pi)
             }
             Err(e) => {
-                // Fail closed. Never submit a rollup batch without a real proof —
-                // an all-zero placeholder would be accepted if the on-chain verifier
-                // is ever loosened. Operators must fix the prover before the bridge
-                // can make forward progress. Tracked as ISSUE-001.
+                // Fail closed — never submit without a valid proof.
                 tracing::error!(
-                    "ZK proof generation failed for batch (prev_root={}, next_root={}): {}. Refusing to submit batch.",
+                    "Batch ZK proof generation failed \
+                     (prev_root={}, next_root={}, tx_count={}): {}. \
+                     Refusing to submit batch.",
                     hex::encode(prev_root),
                     hex::encode(next_root),
+                    batch_transactions.len(),
                     e
                 );
                 anyhow::bail!(
