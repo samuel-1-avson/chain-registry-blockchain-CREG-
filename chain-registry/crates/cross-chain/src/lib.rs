@@ -25,7 +25,7 @@
 //! ```
 
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use tracing::warn;
 
 /// Environment variable prefix for overriding contract addresses per chain.
@@ -222,6 +222,11 @@ pub struct MessageOrderer {
     pending: HashMap<(String, u64), CrossChainMessage>,
     /// Set of message IDs that have been delivered (replay protection).
     delivered: HashSet<String>,
+    /// Insertion-order queue used by `prune_delivered` to evict only the
+    /// *oldest* message IDs, not the entire set.  Without this, pruning
+    /// clears all replay protection and previously-delivered IDs can be
+    /// replayed.
+    delivered_order: VecDeque<String>,
     /// Outbound sequence counter per destination chain.
     outbound_seq: HashMap<String, u64>,
 }
@@ -232,6 +237,7 @@ impl MessageOrderer {
             next_sequence: HashMap::new(),
             pending: HashMap::new(),
             delivered: HashSet::new(),
+            delivered_order: VecDeque::new(),
             outbound_seq: HashMap::new(),
         }
     }
@@ -279,6 +285,7 @@ impl MessageOrderer {
         let mut seq = expected;
         while let Some(m) = self.pending.remove(&(source.clone(), seq)) {
             self.delivered.insert(m.id.clone());
+            self.delivered_order.push_back(m.id.clone());
             deliverable.push(m);
             seq += 1;
         }
@@ -293,9 +300,20 @@ impl MessageOrderer {
     }
 
     /// Prune the delivered set to bound memory.  Call periodically.
+    ///
+    /// Evicts the *oldest* delivered IDs first (FIFO order), retaining the
+    /// most-recently delivered entries for replay protection.  Previously
+    /// the entire set was cleared at once, which would allow any message
+    /// delivered before the prune to be replayed.
     pub fn prune_delivered(&mut self, max_entries: usize) {
-        if self.delivered.len() > max_entries {
-            self.delivered.clear();
+        while self.delivered.len() > max_entries {
+            if let Some(oldest) = self.delivered_order.pop_front() {
+                self.delivered.remove(&oldest);
+            } else {
+                // Queue and set are out of sync — clear both defensively.
+                self.delivered.clear();
+                break;
+            }
         }
     }
 }
