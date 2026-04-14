@@ -36,6 +36,10 @@ contract SlashingEvidence {
         bool     accepted;
         uint256  confirmVotes;
         uint256  rejectVotes;
+        /// Timestamp at which confirmQuorum was first reached.
+        /// Zero until quorum is reached.  Execution is gated behind
+        /// MIN_EXECUTE_DELAY to prevent flash-governance attacks.
+        uint256  quorumReachedAt;
         mapping(address => bool) voted;
     }
 
@@ -55,13 +59,18 @@ contract SlashingEvidence {
     uint256 public confirmQuorum = 3;
     /// Evidence voting window.
     uint256 public constant EVIDENCE_WINDOW = 3 days;
+    /// Minimum delay between quorum being reached and execution.
+    /// Prevents a rapid coalition (or flash-loan governance) from slashing
+    /// a validator before honest nodes can review and veto the evidence.
+    uint256 public constant MIN_EXECUTE_DELAY = 1 days;
 
     // ── Events ────────────────────────────────────────────────────────────────
 
-    event EvidenceSubmitted(uint256 indexed id, address offender, uint8 evidenceType);
-    event EvidenceVoted    (uint256 indexed id, address voter, bool confirmed);
-    event EvidenceAccepted (uint256 indexed id, address offender, uint256 slashAmount);
-    event EvidenceRejected (uint256 indexed id);
+    event EvidenceSubmitted  (uint256 indexed id, address offender, uint8 evidenceType);
+    event EvidenceVoted      (uint256 indexed id, address voter, bool confirmed);
+    event EvidenceQuorumReached(uint256 indexed id, uint256 executeAfter);
+    event EvidenceAccepted   (uint256 indexed id, address offender, uint256 slashAmount);
+    event EvidenceRejected   (uint256 indexed id);
 
     // ── Errors ────────────────────────────────────────────────────────────────
 
@@ -70,6 +79,8 @@ contract SlashingEvidence {
     error AlreadyVoted();
     error EvidenceWindowExpired();
     error InvalidProof();
+    error QuorumNotReached();
+    error DelayNotElapsed(uint256 executeAfter);
 
     // ── Constructor ───────────────────────────────────────────────────────────
 
@@ -141,15 +152,38 @@ contract SlashingEvidence {
 
         emit EvidenceVoted(id, msg.sender, confirm);
 
-        // Auto-execute when quorum is reached.
-        if (rec.confirmVotes >= confirmQuorum) {
-            _acceptEvidence(id);
+        // Record when quorum is first reached — execution is deferred by
+        // MIN_EXECUTE_DELAY to give honest validators time to review.
+        if (rec.confirmVotes >= confirmQuorum && rec.quorumReachedAt == 0) {
+            rec.quorumReachedAt = block.timestamp;
+            emit EvidenceQuorumReached(id, block.timestamp + MIN_EXECUTE_DELAY);
         } else {
             // If enough rejections that quorum can't be reached, reject immediately.
             uint256 activeCount = staking.activeValidatorCount();
             if (activeCount - rec.rejectVotes < confirmQuorum) {
                 _rejectEvidence(id);
             }
+        }
+    }
+
+    /// @notice Execute a quorum-approved evidence record after MIN_EXECUTE_DELAY.
+    /// @dev Callable by anyone once the delay has elapsed — the delay window gives
+    ///      honest validators time to review and, if needed, add rejections before
+    ///      the irreversible slash fires.
+    function executeEvidence(uint256 id) external {
+        EvidenceRecord storage rec = _evidence[id];
+        if (rec.resolved)           revert AlreadyResolved();
+        if (rec.quorumReachedAt == 0) revert QuorumNotReached();
+        uint256 executeAfter = rec.quorumReachedAt + MIN_EXECUTE_DELAY;
+        if (block.timestamp < executeAfter) revert DelayNotElapsed(executeAfter);
+
+        // Re-check quorum is still valid (additional rejections may have
+        // accumulated during the delay window).
+        uint256 activeCount = staking.activeValidatorCount();
+        if (activeCount - rec.rejectVotes < confirmQuorum) {
+            _rejectEvidence(id);
+        } else {
+            _acceptEvidence(id);
         }
     }
 

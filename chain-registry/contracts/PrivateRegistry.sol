@@ -402,6 +402,11 @@ contract PrivateRegistry {
 
         if (pkg.orgId != orgId) revert("Package not in organization");
         if (pkg.status != PackageStatus.Approved) revert("Package not approved");
+        // Block decryption while a key rotation is pending — the existing shares
+        // were encrypted under a validator set that no longer matches, so
+        // Shamir reconstruction would include a removed validator's share.
+        if (pendingKeyRotation[orgId][packageKey])
+            revert("Key rotation pending: call rotatePackageKeyShares first");
         if (pkg.hasApproved[msg.sender]) revert AlreadyApproved(packageKey, msg.sender);
 
         // Share must be exactly 32-byte value + 65-byte ECDSA signature.

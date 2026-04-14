@@ -323,9 +323,14 @@ contract Staking {
         if (msg.sender != registry && msg.sender != governance)
             revert NotAuthorized();
 
-        uint256 balance = publisherStakes[account] > 0
-            ? publisherStakes[account]
-            : validators[account].stake;
+        // For active validators prefer their validator stake as the base so
+        // severity percentages are applied to the stake at risk, not the
+        // unrelated publisher stake.
+        bool _isActiveVal = validators[account].state == ValidatorState.Active
+                            && validators[account].stake > 0;
+        uint256 balance = _isActiveVal
+            ? validators[account].stake
+            : publisherStakes[account];
 
         uint256 amount;
         if      (severity == Severity.Low)      amount = balance * SLASH_LOW_PCT      / 100;
@@ -345,28 +350,39 @@ contract Staking {
         _executeSlash(account, amount, reason);
     }
 
+    /// @dev Slash `amount` CREG from `account`.
+    ///
+    /// Priority order:
+    ///   1. Active validator stake — so slashCount is always incremented and the
+    ///      auto-eject mechanic applies to misbehaving validators, even when they
+    ///      also hold publisher stake.
+    ///   2. Publisher stake — used when there is no active validator stake.
+    ///   3. Total wipeout — when neither balance alone covers `amount`.
     function _executeSlash(address account, uint256 amount, string calldata reason) internal {
-        if (publisherStakes[account] >= amount) {
-            publisherStakes[account] -= amount;
-        } else if (validators[account].stake >= amount) {
+        bool _isActiveVal = validators[account].state == ValidatorState.Active
+                            && validators[account].stake > 0;
+
+        if (_isActiveVal && validators[account].stake >= amount) {
+            // Case 1: active validator — deduct from validator stake and track slashes.
             validators[account].stake      -= amount;
             validators[account].slashCount += 1;
-            // Auto-eject validator after MAX_SLASH_COUNT slashes.
-            // Remaining stake enters unbonding; ejected validator must wait
-            // RESTAKE_COOLDOWN before re-applying.
+            // Auto-eject after MAX_SLASH_COUNT slashes.
             if (validators[account].slashCount >= MAX_SLASH_COUNT) {
-                validators[account].state     = ValidatorState.Unbonding;
+                validators[account].state      = ValidatorState.Unbonding;
                 validators[account].unbondingAt = block.timestamp;
                 validators[account].ejectedAt  = block.timestamp;
                 emit ValidatorLeft(account);
             }
+        } else if (!_isActiveVal && publisherStakes[account] >= amount) {
+            // Case 2: publisher-only account — deduct from publisher stake.
+            publisherStakes[account] -= amount;
         } else {
-            // Slash everything they have left.
+            // Case 3: slash everything the account has left (both pools combined).
             amount = publisherStakes[account] + validators[account].stake;
-            publisherStakes[account]          = 0;
-            validators[account].stake         = 0;
-            validators[account].state         = ValidatorState.Withdrawn;
-            validators[account].ejectedAt     = block.timestamp;
+            publisherStakes[account]        = 0;
+            validators[account].stake       = 0;
+            validators[account].state       = ValidatorState.Withdrawn;
+            validators[account].ejectedAt   = block.timestamp;
         }
 
         // Slashed CREG is not burned — it goes into the pool for honest validators.

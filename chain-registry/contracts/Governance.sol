@@ -390,8 +390,23 @@ contract Governance {
 
     function removeSigner(address signer) external {
         require(msg.sender == address(this), "Only via governance proposal");
+        require(isSigner[signer], "Not a signer");
         require(signers.length - 1 >= threshold, "Would break threshold");
+
+        // Clear the mapping entry.
         isSigner[signer] = false;
+
+        // Remove from the signers array using swap-and-pop (O(1), order not guaranteed).
+        // Without this, signers.length stays inflated, breaking threshold arithmetic
+        // and signerCount() for any future signers added or threshold changes.
+        for (uint256 i = 0; i < signers.length; i++) {
+            if (signers[i] == signer) {
+                signers[i] = signers[signers.length - 1];
+                signers.pop();
+                break;
+            }
+        }
+
         emit SignerRemoved(signer);
     }
 
