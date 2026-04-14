@@ -219,10 +219,69 @@ impl P2PNode {
                             continue;
                         }
 
-                        let kind = if topic_str.contains("votes") { crate::events::EventKind::ValidatorVoted }
-                                    else { crate::events::EventKind::BlockProduced };
+                        // Votes: validate the application-level Ed25519 signature
+                        // before emitting an event. libp2p gossipsub has already
+                        // propagated this message to mesh peers (p2p-layer signing
+                        // is enforced by ValidationMode::Strict, but that only
+                        // authenticates the relaying node's identity, not the vote
+                        // content). Proper prevention of invalid-vote propagation
+                        // requires the deferred-validation API
+                        // (report_message_validation_result), which would require a
+                        // refactor of the event loop. This check at least prevents
+                        // invalid votes from being recorded in our local state or
+                        // event bus.
+                        if topic_str.contains("votes") {
+                            match serde_json::from_slice::<crate::gossip::VoteGossip>(&message.data) {
+                                Ok(vote) => {
+                                    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+                                    let valid = (|| -> Option<()> {
+                                        let pk_bytes = hex::decode(&vote.validator_pubkey).ok()?;
+                                        let vk = VerifyingKey::try_from(pk_bytes.as_slice()).ok()?;
+                                        let sig_bytes = hex::decode(&vote.signature).ok()?;
+                                        let sig = Signature::try_from(sig_bytes.as_slice()).ok()?;
+                                        let msg = crate::gossip::canonical_vote_message(
+                                            &vote.block_hash,
+                                            &vote.content_hash,
+                                            vote.approved,
+                                            &vote.validator_pubkey,
+                                        );
+                                        vk.verify(msg.as_bytes(), &sig).ok()?;
+                                        Some(())
+                                    })().is_some();
+
+                                    if !valid {
+                                        tracing::warn!(
+                                            validator_id = %vote.validator_id,
+                                            peer = %peer_id,
+                                            "P2P: dropping gossip vote with invalid signature"
+                                        );
+                                        continue;
+                                    }
+
+                                    crate::events::emit(&event_bus, crate::events::RegistryEvent {
+                                        kind: crate::events::EventKind::ValidatorVoted,
+                                        ts: chrono::Utc::now().to_rfc3339(),
+                                        payload: serde_json::json!({
+                                            "validator_id": vote.validator_id,
+                                            "block_hash": vote.block_hash,
+                                            "approved": vote.approved,
+                                        }),
+                                    });
+                                }
+                                Err(e) => {
+                                    tracing::warn!(
+                                        peer = %peer_id,
+                                        error = %e,
+                                        "P2P: dropping malformed gossip vote"
+                                    );
+                                }
+                            }
+                            continue;
+                        }
+
+                        // Non-vote gossip messages (block announcements, etc.)
                         crate::events::emit(&event_bus, crate::events::RegistryEvent {
-                            kind,
+                            kind: crate::events::EventKind::BlockProduced,
                             ts: chrono::Utc::now().to_rfc3339(),
                             payload: serde_json::json!({ "p2p_message": String::from_utf8_lossy(&message.data).to_string() }),
                         });
