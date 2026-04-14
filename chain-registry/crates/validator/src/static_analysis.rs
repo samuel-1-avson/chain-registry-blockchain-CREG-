@@ -158,7 +158,25 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
                     });
                 }
                 Err(e) => {
-                    tracing::warn!("LLM predict_intent failed: {}", e);
+                    // Treat LLM errors the same as unavailability: emit a
+                    // degraded-mode finding so consensus can see that this
+                    // high-entropy file was NOT semantically verified.
+                    // Silently scoring it 0 (benign) here would allow
+                    // obfuscated malware to pass whenever the LLM endpoint
+                    // is slow, rate-limited, or misconfigured.
+                    tracing::warn!(error = %e, "LLM predict_intent failed — treating high-entropy file as unverified");
+                    findings.push(Finding {
+                        id: "SA012".into(),
+                        title: "LLM error for obfuscated code".into(),
+                        severity: FindingSeverity::High,
+                        description: format!(
+                            "High-entropy code was flagged but the LLM semantic analyser returned an error: {}. \
+                             Treating as unverified.",
+                            e
+                        ),
+                        file: path.clone(),
+                        line: None,
+                    });
                 }
             }
         }
