@@ -7,7 +7,13 @@ use std::time::Instant;
 
 /// After this many blocks without inclusion, a submitted transaction
 /// becomes "forced" — proposers who omit it are flagged for GRIEFING.
-const FORCED_INCLUSION_BLOCK_DELAY: u64 = 5;
+/// Overridable via `CREG_FORCED_INCLUSION_DELAY` environment variable.
+fn forced_inclusion_block_delay() -> u64 {
+    std::env::var("CREG_FORCED_INCLUSION_DELAY")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(5)
+}
 
 /// A submitted transaction awaiting inclusion in a block.
 #[derive(Debug, Clone)]
@@ -62,7 +68,7 @@ impl ForcedInclusionTracker {
     pub fn forced_transactions(&self, current_height: u64) -> Vec<&PendingTransaction> {
         self.pending
             .values()
-            .filter(|tx| current_height.saturating_sub(tx.submitted_at_height) >= FORCED_INCLUSION_BLOCK_DELAY)
+            .filter(|tx| current_height.saturating_sub(tx.submitted_at_height) >= forced_inclusion_block_delay())
             .collect()
     }
 

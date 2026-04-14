@@ -181,26 +181,37 @@ pub fn final_decision(
     }
 
     // No critical findings — use reputation to decide.
-    // Scale: delta < -50 → reject; -50 to 0 → warn (approve with flag);
-    //        0 to +100 → approve with increasing confidence.
-    match reputation_delta {
-        i32::MIN..=-50 => FinalDecision::Reject {
+    // Thresholds overridable via env vars so operators can tune trust sensitivity
+    // without recompiling. Defaults: reject < -50, warn -50..0, approve >= 0.
+    let reject_threshold: i32 = std::env::var("CREG_REP_REJECT_THRESHOLD")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(-50);
+    let warn_threshold: i32 = std::env::var("CREG_REP_WARN_THRESHOLD")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+
+    if reputation_delta < reject_threshold {
+        FinalDecision::Reject {
             reason: format!(
-                "Publisher reputation score {} falls below trust threshold",
-                reputation_delta
+                "Publisher reputation score {} falls below trust threshold ({})",
+                reputation_delta, reject_threshold
             ),
             confidence: 70,
-        },
-        -49..=-1 => FinalDecision::ApproveWithWarning {
+        }
+    } else if reputation_delta < warn_threshold {
+        FinalDecision::ApproveWithWarning {
             warning: format!(
                 "Publisher reputation is low (delta {}). Monitor this package.",
                 reputation_delta
             ),
             confidence: (50 + reputation_delta).max(10) as u8,
-        },
-        0..=i32::MAX => FinalDecision::Approve {
+        }
+    } else {
+        FinalDecision::Approve {
             confidence: (60 + reputation_delta / 2).min(100) as u8,
-        },
+        }
     }
 }
 

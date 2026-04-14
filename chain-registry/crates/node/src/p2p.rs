@@ -338,17 +338,39 @@ impl P2PNode {
 
     /// Determines if this node is among the 'N' closest nodes to a CID.
     /// This is the core of our 'Masterless Sharding' for 500MB+ packages.
+    ///
+    /// Uses a Kademlia-style XOR distance over 8 bytes of the peer ID vs the
+    /// SHA-256 of the CID.  The single-byte XOR used previously was biased
+    /// (only 256 distinct distances) and collapsed entirely for small networks
+    /// where collisions are common.
     pub fn is_responsible_for(&self, cid: &str) -> bool {
-        let local_bytes = self.peer_id.to_bytes();
-        let cid_bytes = cid.as_bytes(); // In production, use multihash of the CID
+        use sha2::{Digest, Sha256};
 
-        // Simple XOR distance simulation for sharding
-        // If the first byte matches or is close, we take responsibility.
-        // A threshold of 32 (1/8th of network) ensures 7-10 nodes store each shard.
-        if local_bytes.is_empty() || cid_bytes.is_empty() {
+        let local_bytes = self.peer_id.to_bytes();
+        if local_bytes.len() < 8 {
             return false;
         }
-        let distance = local_bytes[0] ^ cid_bytes[0];
-        distance < 32
+
+        // Hash the CID to get a uniformly distributed key.
+        let cid_hash = Sha256::digest(cid.as_bytes());
+
+        // XOR-distance over the first 8 bytes, interpreted as a big-endian u64.
+        // This gives 2^64 distinct distance values, matching Kademlia semantics.
+        let mut local_arr = [0u8; 8];
+        local_arr.copy_from_slice(&local_bytes[..8]);
+        let mut cid_arr = [0u8; 8];
+        cid_arr.copy_from_slice(&cid_hash[..8]);
+
+        let distance = u64::from_be_bytes(local_arr) ^ u64::from_be_bytes(cid_arr);
+
+        // Threshold: u64::MAX / 8 ≈ top-12.5% of the keyspace → ~7-10 nodes
+        // in a 64-node network. Overridable via `CREG_SHARD_THRESHOLD_PCT` (1-100).
+        let pct: u64 = std::env::var("CREG_SHARD_THRESHOLD_PCT")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(12)
+            .clamp(1, 100);
+        let threshold = u64::MAX / 100 * pct;
+        distance < threshold
     }
 }
