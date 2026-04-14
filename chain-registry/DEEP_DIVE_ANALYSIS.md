@@ -1,13 +1,13 @@
 # Chain Registry — Deep Dive Technical Analysis
 
 > **Version:** 0.3.0-testnet &nbsp;|&nbsp; **Analysis Date:** 2026-04-12 &nbsp;|&nbsp; **Analyzer:** Claude Opus 4.6
-> **Last Remediation Update:** 2026-04-13
+> **Last Remediation Update:** 2026-04-14
 
 ---
 
 ## Remediation Status (2026-04-14)
 
-**All 22 Critical/High findings are now fixed on `main`.** Additional medium/low findings addressed this session.
+**All Critical/High findings are now fixed on `main`.** Session 4 closed 11 additional medium/low findings.
 
 ### Priority 1 — Security Fixes
 
@@ -44,6 +44,17 @@
 | ISSUE-024 — validator_set_hash hardcoded | ✅ Fixed | SHA-256 of sorted validator IDs replaces `"dev"` literal (`ef6552a`) |
 | ISSUE-034 — cross-chain replay after prune | ✅ Fixed | `VecDeque` FIFO eviction retains recent IDs; full-clear removed (`c94eb54`) |
 | ISSUE-036 — legacy validator auth bypass | ✅ Fixed | Empty-pubkey validators now rejected before signature check (`e8e6089`) |
+| ISSUE-028 — slash priority (publisher vs validator) | ✅ Fixed | `_executeSlash` deducts validator stake first; `slashSeverity` uses validator stake as base; `slashCount` incremented; 4 forge tests (`952608b`) |
+| ISSUE-029 — key rotation unenforced on decryption | ✅ Fixed | `submitDecryptionShare` reverts when `pendingKeyRotation` flag is set (`952608b`) |
+| ISSUE-030 — SlashingEvidence auto-execute on quorum | ✅ Fixed | Two-step model: `quorumReachedAt` timestamp + 1-day `MIN_EXECUTE_DELAY` + `executeEvidence()` function (`952608b`) |
+| ISSUE-031 — `removeSigner` array leak | ✅ Fixed | Swap-and-pop purges signer from `signers[]`; threshold guard added; `signerCount()` correct; 5 forge tests (`952608b`) |
+| ISSUE-039 — `_prev_sandbox` always ignored | ✅ Fixed | `analyze()` now compares runtime observations (DF005–DF007) across versions (`af13cd4`) |
+| ISSUE-025 — P2P rate limit after deserialization | ✅ Fixed | 1 MiB message size cap added before `serde_json::from_slice` (`e9c5198`) |
+| ISSUE-026 — LLM Err branch scores 0 | ✅ Fixed | `Err(e)` branch emits SA012 High finding same as `Ok(None)` (`d1955e3`) |
+| ISSUE-035 — LLM prompt injection via base64 | ✅ Fixed | Anti-injection meta-rule in system prompt; missing-score field → `Unavailable` not `Score(0)` (`d1955e3`) |
+| ISSUE-032 — VRF Fisher-Yates modulo bias | ✅ Fixed | `StdRng::from_seed` + `SliceRandom::shuffle` replaces hand-rolled biased shuffle (`a3f58f0`) |
+| ISSUE-040 — threat-intel DB starts empty | ✅ Fixed | `bootstrap_threats.json` embedded; merged at startup; missing-DB upgraded to WARN; size threshold warning (`af13cd4`) |
+| ISSUE-042 — ephemeral ZK keys on production | ✅ Fixed | `CREG_PRODUCTION=true` guard panics at startup if key files missing; all 3 ZK loaders patched (`3fd5942`) |
 
 ### Priority 3 — Performance & Scalability
 
