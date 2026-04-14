@@ -137,7 +137,21 @@ contract ZKVerifier {
         require(n > 0, "Empty batch");
 
         // --- derive random challenge r from Fiat-Shamir hash ----------------
-        bytes32 seed = keccak256(abi.encode(proofs, publicInputsArray, block.number));
+        // Include multiple entropy sources to prevent a validator from biasing
+        // the challenge by choosing block.number alone:
+        //   - block.prevrandao: RANDAO reveal (PoS, EIP-4399), unpredictable by
+        //     the submitter one block before submission.
+        //   - blockhash(block.number - 1): previous block hash, fixed by the time
+        //     this tx is included.
+        //   - msg.sender: prevents cross-account challenge reuse in the same block.
+        bytes32 seed = keccak256(abi.encode(
+            proofs,
+            publicInputsArray,
+            block.number,
+            block.prevrandao,
+            blockhash(block.number - 1),
+            msg.sender
+        ));
         uint256 r = uint256(seed) % P;
         // r must be non-zero; re-hash once if it is (astronomically unlikely).
         if (r == 0) r = uint256(keccak256(abi.encode(seed))) % P;

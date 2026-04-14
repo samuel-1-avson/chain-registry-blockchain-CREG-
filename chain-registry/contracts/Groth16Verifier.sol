@@ -88,6 +88,10 @@ contract Groth16Verifier {
                 mstore(add(mIn, 32), y)
                 mstore(add(mIn, 64), s)
 
+                // sub(gas(), 2000): reserves 2 000 gas as a caller stipend before
+                // forwarding to precompile 0x07 (ecMul).  The 2 000-gas reserve is
+                // the historical idiom from EIP-1014; revisit if the ecMul precompile
+                // cost is repriced in a future hard-fork (currently 6 000 gas, EIP-1108).
                 success := staticcall(sub(gas(), 2000), 7, mIn, 96, mIn, 64)
 
                 if iszero(success) {
