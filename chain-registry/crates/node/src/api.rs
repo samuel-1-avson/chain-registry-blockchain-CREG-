@@ -991,7 +991,22 @@ async fn receive_vote(State(state): State<SharedState>, Json(vote): Json<VoteMes
             )
                 .into_response();
         };
-        if !validator.pubkey.is_empty() && vote.validator_pubkey != validator.pubkey {
+        // Every validator must have a registered pubkey — reject if missing,
+        // because an empty pubkey would allow unauthenticated vote submission.
+        if validator.pubkey.is_empty() {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(ErrorResponse {
+                    error: format!(
+                        "Validator {} has no registered public key; \
+                         vote authentication impossible",
+                        vote.validator_id
+                    ),
+                }),
+            )
+                .into_response();
+        }
+        if vote.validator_pubkey != validator.pubkey {
             return (
                 StatusCode::FORBIDDEN,
                 Json(ErrorResponse {
