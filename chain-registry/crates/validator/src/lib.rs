@@ -1,6 +1,15 @@
 // crates/validator/src/lib.rs
-// Mechanical consensus validator — runs all three stages concurrently
-// and returns a signed vote to the consensus engine.
+// Mechanical consensus validator — runs all pipeline stages and returns a
+// signed vote to the consensus engine.
+//
+// Pipeline stages (in order):
+//   Stage 1 — Static Analysis    (static_analysis.rs)
+//   Stage 2 — Behavioral Sandbox (sandbox.rs)
+//   Stage 3 — Differential Diff  (diff.rs)
+//   Stage 4 — LLM-Assisted Review(llm.rs)  ← deep semantic scan
+//   Stage 5 — PGP Verification   (pgp.rs)
+//   Stage 6 — Publisher Reputation(reputation.rs)
+//   [AAA]   — External AI Auditor (opt-in, post-rejection only)
 
 pub mod diff;
 pub mod llm;
@@ -24,10 +33,7 @@ pub struct ValidationResult {
     pub findings: Vec<Finding>,
 }
 
-/// Run all three validator stages concurrently and produce a vote.
-/// Stage 1: static AST analysis
-/// Stage 2: sandbox behavioral analysis
-/// Stage 3: publisher reputation assessment
+/// Run all validator pipeline stages and produce a signed vote.
 ///
 /// `prev_manifest` — manifest from the previous verified version of this
 /// package, used by the diff stage to detect permission escalation.
@@ -43,12 +49,12 @@ pub async fn validate_package(
     prev_sandbox: Option<&sandbox::SandboxResult>,
 ) -> Result<ValidationResult> {
     let canonical = req.id.canonical();
-    tracing::info!("Starting 3-stage validation for {}", canonical);
+    tracing::info!("Starting validator pipeline for {}", canonical);
 
     let node_url =
         std::env::var("CREG_NODE_URL").unwrap_or_else(|_| "http://127.0.0.1:8080".into());
 
-    // ── All three stages run concurrently ─────────────────────────────────────
+    // ── Stage 1 (static) + Stage 6 (reputation) run concurrently ────────────
     let (static_result, rep_result) = tokio::join!(
         static_analysis::run(tarball, &req.manifest),
         assess_publisher(&req.publisher_pubkey, &node_url),
@@ -57,6 +63,7 @@ pub async fn validate_package(
     let mut report = ValidationReport::new(req.id.clone());
     report.apply_static(static_result?);
 
+    // ── Stage 2 — Behavioral Sandbox ─────────────────────────────────────────
     let sandbox_result = sandbox::run(&req.id, tarball, &req.manifest).await?;
     report.apply_sandbox(sandbox_result.clone());
 
@@ -64,14 +71,39 @@ pub async fn validate_package(
     // case where the same node processes consecutive versions of a package.
     sandbox::store_result(&canonical, &sandbox_result);
 
-    // ── Differential Analysis ────────────────────────────────────────────────
+    // ── Stage 3 — Differential Analysis ──────────────────────────────────────
     // prev_sandbox supplies the previous version's runtime observations so that
     // DF005 (new network host), DF006 (new fs write), and DF007 (new process
     // spawn) can fire. Without it these three findings are silently skipped.
     let diff_result = diff::analyze(&req.manifest, &sandbox_result, prev_manifest, prev_sandbox);
     report.apply_diff(diff_result);
 
-    // ── Web-of-Trust PGP Verification ────────────────────────────────────────
+    // ── Stage 4 — LLM-Assisted Review ────────────────────────────────────────
+    // Performs deep semantic analysis: Shannon entropy scanning across all files,
+    // per-file LLM analysis of high-risk and high-entropy content, and a holistic
+    // package summary with an overall maliciousness score and risk tier.
+    //
+    // When CREG_LLM_ENABLED=true the review runs using the configured provider
+    // chain (Anthropic → OpenAI → OpenRouter → Ollama). When disabled, the stage
+    // returns a degraded result that still carries entropy data.
+    //
+    // LLM findings are integrated into the report via apply_llm():
+    //   - Per-file findings (LLM001, LLM002, …) with severity and description
+    //   - A summary finding (LLM000) when score ≥ 60
+    //   - Entropy alerts (LLM-ENT) for high-entropy files
+    //   - A skip notice (LLM-SKIP) when the stage is disabled
+    tracing::info!("[{}] Stage 4 — LLM-assisted review", canonical);
+    let llm_review = llm::review_package(
+        tarball,
+        &req.id,
+        &req.manifest,
+        &report.findings,
+        &req.content_hash,
+    )
+    .await;
+    report.apply_llm(llm_review);
+
+    // ── Stage 5 — Web-of-Trust PGP Verification ──────────────────────────────
     let mut pgp_fingerprint = None;
     if let (Some(sig_hex), Some(pubk_hex)) = (&req.pgp_signature, &req.pgp_public_key) {
         if let (Ok(sig_bytes), Ok(pubk_bytes)) = (hex::decode(sig_hex), hex::decode(pubk_hex)) {
