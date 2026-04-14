@@ -174,6 +174,19 @@ impl P2PNode {
                             continue;
                         }
 
+                        // Reject oversized messages before deserializing to prevent
+                        // OOM attacks: rate limiting is per-message-count, not per-byte,
+                        // so without this a single 100 MB gossip message passes the
+                        // rate limiter but exhausts the node's heap during JSON parsing.
+                        const MAX_MESSAGE_BYTES: usize = 1024 * 1024; // 1 MiB
+                        if message.data.len() > MAX_MESSAGE_BYTES {
+                            tracing::warn!(
+                                "P2P: Dropping oversized message {} from {} ({} bytes > {} limit)",
+                                id, peer_id, message.data.len(), MAX_MESSAGE_BYTES
+                            );
+                            continue;
+                        }
+
                         // Forward message to the node's internal event bus
                         if topic_str.contains("submissions") {
                             if let Ok(common::GossipMessage::PublishRequest(req)) = serde_json::from_slice(&message.data) {
