@@ -5,9 +5,9 @@
 
 ---
 
-## Remediation Status (2026-04-13)
+## Remediation Status (2026-04-14)
 
-**All 22 Critical/High findings are now fixed on `main`.** The full P2–P4 improvement roadmap has also been completed.
+**All 22 Critical/High findings are now fixed on `main`.** Additional medium/low findings addressed this session.
 
 ### Priority 1 — Security Fixes
 
@@ -38,13 +38,18 @@
 | ISSUE-020 — Deep-scan timeout returns `Safe` | ✅ Fixed | Added `Degraded` variant; `timeout_result()` / `mock_result()` return it |
 | ml_model_version enforcement | ✅ Fixed | Degraded-model votes excluded from quorum in `vote_accumulator.rs` |
 | CLI lockfile receipt (TODO C-21) | ✅ Fixed | `lockfile::write_receipt()` called after trust decision in `install.rs` |
-| ISSUE-012 — WASM sandbox hardening | ✅ Fixed | 9 WASI stub functions wired; doc updated to remove "not a security boundary" |
+| ISSUE-012 — WASM sandbox hardening | ✅ Fixed | 18 WASI stubs wired; proc_exit uses `anyhow::bail` sentinel (not `std::process::exit`); borrow-checked peak-memory measurement (`de5c6b5`) |
+| ISSUE-020 (batch circuit) — bridge ZK proof | ✅ Fixed | `BatchStateTransitionCircuit` + `BatchStateTransitionValidator`; 10 tests; `OnceLock` key caching; `bridge.rs` plumbed (`e44d7e2`) |
+| ISSUE-023 — typosquat.json silent failure | ✅ Fixed | `eprintln!` → `tracing::error!`; empty-packages check added (`9bbf4dc`) |
+| ISSUE-024 — validator_set_hash hardcoded | ✅ Fixed | SHA-256 of sorted validator IDs replaces `"dev"` literal (`ef6552a`) |
+| ISSUE-034 — cross-chain replay after prune | ✅ Fixed | `VecDeque` FIFO eviction retains recent IDs; full-clear removed (`c94eb54`) |
+| ISSUE-036 — legacy validator auth bypass | ✅ Fixed | Empty-pubkey validators now rejected before signature check (`e8e6089`) |
 
 ### Priority 3 — Performance & Scalability
 
 | P3 item | Status | Notes |
 | --- | --- | --- |
-| ISSUE-033 — OSV cache thundering herd | ✅ Fixed | Replaced `HashMap` with `lru::LruCache` (eviction instead of full clear) |
+| ISSUE-033 — OSV cache thundering herd | ✅ Fixed | `lru::LruCache` + corrected `mut` on `MutexGuard` bindings so `get` updates LRU order (`0740b8f`) |
 | ISSUE-044 — PBFT hardcoded timeouts | ✅ Fixed | `PbftConfig` struct; env-var overrides (`CREG_PBFT_TIMEOUT` etc.) |
 | ISSUE-043 — `.unwrap()` in hot paths | ✅ Verified | Hot paths (block_producer, bridge, api, grpc) already clean |
 
