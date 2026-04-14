@@ -4,6 +4,7 @@
 
 use anyhow::Result;
 use common::sha256_hex;
+use rand::{rngs::StdRng, seq::SliceRandom, SeedableRng};
 
 /// Uses a deterministic VRF seed to select N validators from the active set
 /// without repetition.
@@ -37,16 +38,16 @@ pub fn select_validators(
         None => sha256_hex(format!("{}:{}", block_height, package_canonical).as_bytes()),
     };
 
-    // Fisher-Yates shuffle seeded from the VRF output.
+    // Bias-free Fisher-Yates shuffle using a CSPRNG seeded from the VRF output.
+    // The hand-rolled modulo approach used previously introduced statistical
+    // bias for validator sets larger than 256 (byte range 0–255 < slot range).
     let mut indices: Vec<usize> = (0..active_validators.len()).collect();
     let seed_bytes = hex::decode(&seed)?;
-
-    for i in (1..indices.len()).rev() {
-        // Derive a position from successive bytes of the seed.
-        let byte_idx = i % seed_bytes.len();
-        let j = (seed_bytes[byte_idx] as usize + i) % (i + 1);
-        indices.swap(i, j);
-    }
+    let seed_arr: [u8; 32] = seed_bytes
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("VRF seed must be exactly 32 bytes (SHA-256 output)"))?;
+    let mut rng = StdRng::from_seed(seed_arr);
+    indices.shuffle(&mut rng);
 
     let selected = indices[..n]
         .iter()
