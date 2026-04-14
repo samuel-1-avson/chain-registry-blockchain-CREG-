@@ -123,6 +123,29 @@ impl Default for SandboxConfig {
 static RESULT_CACHE: std::sync::LazyLock<std::sync::Mutex<HashMap<String, SandboxResult>>> =
     std::sync::LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
 
+/// Canonical-keyed store for the most-recent sandbox result per package.
+/// Used by the diff analysis stage to compare current vs. previous version
+/// runtime behavior. Keyed by the package canonical (e.g. `npm:express@4.18.2`).
+/// Populated by `store_result` after each successful sandbox run; looked up by
+/// `get_result` before the next version of the same package is processed.
+static CANONICAL_STORE: std::sync::LazyLock<std::sync::Mutex<HashMap<String, SandboxResult>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
+
+/// Persist a sandbox result by canonical for use by the diff stage when the
+/// next version of the same package is processed.
+pub fn store_result(canonical: &str, result: &SandboxResult) {
+    if let Ok(mut store) = CANONICAL_STORE.lock() {
+        store.insert(canonical.to_string(), result.clone());
+    }
+}
+
+/// Retrieve a previously stored sandbox result by canonical.
+/// Returns `None` if this is the first time the package has been processed
+/// on this node, or if the node was restarted since the last run.
+pub fn get_result(canonical: &str) -> Option<SandboxResult> {
+    CANONICAL_STORE.lock().ok()?.get(canonical).cloned()
+}
+
 // ── Cache key helper ────────────────────────────────────────────────────────
 
 fn compute_cache_key(tarball_bytes: &[u8], ecosystem: &str, config: &SandboxConfig) -> String {

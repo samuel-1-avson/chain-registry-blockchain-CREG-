@@ -28,11 +28,19 @@ pub struct ValidationResult {
 /// Stage 1: static AST analysis
 /// Stage 2: sandbox behavioral analysis
 /// Stage 3: publisher reputation assessment
+///
+/// `prev_manifest` — manifest from the previous verified version of this
+/// package, used by the diff stage to detect permission escalation.
+///
+/// `prev_sandbox` — sandbox result from the previous verified version, used
+/// by the diff stage to detect runtime behavioral changes (DF005–DF007).
+/// Pass `None` for the first publish of a package.
 pub async fn validate_package(
     req: &PublishRequest,
     tarball: &[u8],
     _privkey: &str,
     prev_manifest: Option<&common::PackageManifest>,
+    prev_sandbox: Option<&sandbox::SandboxResult>,
 ) -> Result<ValidationResult> {
     let canonical = req.id.canonical();
     tracing::info!("Starting 3-stage validation for {}", canonical);
@@ -52,8 +60,15 @@ pub async fn validate_package(
     let sandbox_result = sandbox::run(&req.id, tarball, &req.manifest).await?;
     report.apply_sandbox(sandbox_result.clone());
 
+    // Persist result for the next version's diff stage. This covers the common
+    // case where the same node processes consecutive versions of a package.
+    sandbox::store_result(&canonical, &sandbox_result);
+
     // ── Differential Analysis ────────────────────────────────────────────────
-    let diff_result = diff::analyze(&req.manifest, &sandbox_result, prev_manifest, None);
+    // prev_sandbox supplies the previous version's runtime observations so that
+    // DF005 (new network host), DF006 (new fs write), and DF007 (new process
+    // spawn) can fire. Without it these three findings are silently skipped.
+    let diff_result = diff::analyze(&req.manifest, &sandbox_result, prev_manifest, prev_sandbox);
     report.apply_diff(diff_result);
 
     // ── Web-of-Trust PGP Verification ────────────────────────────────────────
@@ -70,10 +85,37 @@ pub async fn validate_package(
         confidence_delta: 0,
         publisher_pubkey: req.publisher_pubkey.clone(),
         notes: vec!["Reputation check unreachable — neutral".into()],
+        revoked_pgp_fps: vec![],
     });
 
     for note in &rep.notes {
         tracing::debug!("[{}] rep: {}", canonical, note);
+    }
+
+    // ── PGP key revocation check ──────────────────────────────────────────────
+    // A publisher may have revoked their PGP key after it was compromised.
+    // The revocation list is stored on-chain in the publisher's reputation record
+    // and checked here after the signature has been cryptographically verified.
+    // A revoked-key signature is treated as Critical even if the crypto is valid.
+    if let Some(fp) = &pgp_fingerprint {
+        if rep.revoked_pgp_fps.iter().any(|r| r.eq_ignore_ascii_case(fp)) {
+            tracing::warn!(
+                "[{}] PGP fingerprint {} is in publisher's revocation list",
+                canonical, &fp[..fp.len().min(16)]
+            );
+            report.findings.push(Finding {
+                id: "PGP004".into(),
+                title: "Revoked PGP key used for signing".into(),
+                severity: common::FindingSeverity::Critical,
+                description: format!(
+                    "Package was signed with PGP key {} which the publisher has declared revoked. \
+                     This key may have been compromised. Reject until re-signed with a valid key.",
+                    fp
+                ),
+                file: "pgp".into(),
+                line: None,
+            });
+        }
     }
 
     // ── Final decision combines all three stages ───────────────────────────────
@@ -93,7 +135,7 @@ pub async fn validate_package(
 
     if decision.is_reject() && aaa_enabled {
         tracing::info!("[{}] Triggering Automated AI Audit (AAA)...", canonical);
-        match aaa_audit(&report, tarball).await {
+        match aaa_audit(&report, req).await {
             Ok(proof) => {
                 // Cryptographically verify the AAA proof before honouring it.
                 // Operator must pin the trusted auditor pubkey via CREG_AAA_PUBKEY.
@@ -217,28 +259,58 @@ fn verify_aaa_proof(proof: &AuditProof, canonical: &str, content_hash: &str) -> 
 }
 
 /// Deep Audit call to an external AI Auditor provider.
-async fn aaa_audit(report: &ValidationReport, tarball: &[u8]) -> Result<AuditProof> {
+///
+/// Sends a structured audit envelope (findings + metadata) rather than the
+/// full tarball. This prevents leaking proprietary package contents to a
+/// third-party service. If the auditor needs the tarball for re-analysis,
+/// it can fetch it directly from IPFS using the provided CID.
+async fn aaa_audit(report: &ValidationReport, req: &PublishRequest) -> Result<AuditProof> {
     let auditor_url = std::env::var("AAA_AUDITOR_URL")
         .unwrap_or_else(|_| "http://ai-auditor-central.service.cluster.local/v1/audit".into());
 
     tracing::info!("Dispatching Deep Audit to {}", auditor_url);
 
+    /// Structured audit envelope — does NOT include the raw tarball.
+    /// The auditor may independently fetch the tarball from IPFS via `ipfs_cid`
+    /// if it needs to re-run its own analysis.
     #[derive(serde::Serialize)]
     struct AuditReq<'a> {
         package: &'a common::PackageId,
         findings: &'a [Finding],
-        tarball_hex: String,
+        /// SHA-256 of the tarball — auditor can verify integrity before fetching.
+        content_hash: &'a str,
+        /// IPFS CID — auditor fetches the tarball from here if needed.
+        ipfs_cid: &'a str,
+        /// Summary stats for the auditor to triage without fetching the tarball.
+        finding_counts: FindingCounts,
     }
 
-    let req = AuditReq {
+    #[derive(serde::Serialize)]
+    struct FindingCounts {
+        critical: usize,
+        high: usize,
+        medium: usize,
+        low: usize,
+    }
+
+    let counts = FindingCounts {
+        critical: report.findings.iter().filter(|f| matches!(f.severity, common::FindingSeverity::Critical)).count(),
+        high:     report.findings.iter().filter(|f| matches!(f.severity, common::FindingSeverity::High)).count(),
+        medium:   report.findings.iter().filter(|f| matches!(f.severity, common::FindingSeverity::Medium)).count(),
+        low:      report.findings.iter().filter(|f| matches!(f.severity, common::FindingSeverity::Low)).count(),
+    };
+
+    let audit_req = AuditReq {
         package: &report.package,
         findings: &report.findings,
-        tarball_hex: hex::encode(tarball),
+        content_hash: &req.content_hash,
+        ipfs_cid: &req.ipfs_cid,
+        finding_counts: counts,
     };
 
     let resp = reqwest::Client::new()
         .post(&auditor_url)
-        .json(&req)
+        .json(&audit_req)
         .send()
         .await?;
 

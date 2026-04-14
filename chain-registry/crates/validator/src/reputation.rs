@@ -16,6 +16,11 @@ pub struct ReputationAssessment {
     pub confidence_delta: i32,
     pub publisher_pubkey: String,
     pub notes: Vec<String>,
+    /// PGP key fingerprints (hex) that the publisher has declared revoked.
+    /// The PGP stage checks the signing key's fingerprint against this list
+    /// and emits a Critical PGP004 finding if the key was revoked.
+    #[serde(default)]
+    pub revoked_pgp_fps: Vec<String>,
 }
 
 /// Query the reputation of a publisher from the chain node.
@@ -52,6 +57,7 @@ pub async fn assess_publisher(
                     confidence_delta: -10,
                     publisher_pubkey: publisher_pubkey.to_string(),
                     notes: vec!["Publisher not found on chain — first-time publisher (-10)".into()],
+                    revoked_pgp_fps: vec![],
                 });
             }
             Ok(resp) => {
@@ -82,6 +88,7 @@ pub async fn assess_publisher(
             "Reputation service unreachable ({}) — treating as untrusted (-25)",
             reason
         )],
+        revoked_pgp_fps: vec![],
     })
 }
 
@@ -93,11 +100,16 @@ struct PublisherRecord {
     revoked_count: u32,
     stake_wei: u64,
     first_seen_days: u32,
+    /// PGP fingerprints (hex) that the publisher has declared revoked.
+    /// Absent from older API versions — defaults to empty.
+    #[serde(default)]
+    revoked_pgp_fps: Vec<String>,
 }
 
 fn build_assessment(pubkey: &str, rec: &PublisherRecord) -> ReputationAssessment {
     let mut delta: i32 = 0;
     let mut notes = Vec::new();
+    let revoked_pgp_fps = rec.revoked_pgp_fps.clone();
 
     // ── Revocation penalty ────────────────────────────────────────────────────
     if rec.revoked_count > 0 {
@@ -158,6 +170,7 @@ fn build_assessment(pubkey: &str, rec: &PublisherRecord) -> ReputationAssessment
         confidence_delta: delta,
         publisher_pubkey: pubkey.to_string(),
         notes,
+        revoked_pgp_fps,
     }
 }
 
@@ -272,6 +285,7 @@ mod tests {
             revoked_count: 3,
             stake_wei: 0,
             first_seen_days: 30,
+            revoked_pgp_fps: vec![],
         };
         let assessment = build_assessment("pubkey", &rec);
         assert!(assessment.confidence_delta < -50);

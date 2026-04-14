@@ -30,21 +30,53 @@ struct Pattern {
     id: String,
     description: String,
     severity: FindingSeverity,
-    /// Simple substring match for now; extend to regex or AST checks.
+    /// Simple substring match. Extend to regex or AST checks via CREG_PATTERNS_FILE.
     needle: String,
+    /// Optional ecosystem filter (e.g. `"npm"`, `"pypi"`, `"cargo"`).
+    /// When `None` the pattern applies to all ecosystems.
+    #[serde(default)]
+    ecosystem: Option<String>,
 }
 
 /// Built-in default patterns; used when no external file is configured.
+/// Patterns are ecosystem-aware: `ecosystem: None` applies to every package,
+/// while a specific ecosystem string restricts the pattern to that registry.
 fn default_patterns() -> Vec<Pattern> {
     vec![
-        Pattern { id: "SA001".into(), description: "Dynamic eval() of external or user-controlled data".into(), severity: FindingSeverity::Critical, needle: "eval(".into() },
-        Pattern { id: "SA002".into(), description: "Obfuscated base64 string decode at runtime".into(), severity: FindingSeverity::High, needle: "Buffer.from(".into() },
-        Pattern { id: "SA003".into(), description: "exec() / execSync() shell execution".into(), severity: FindingSeverity::Critical, needle: "execSync(".into() },
-        Pattern { id: "SA004".into(), description: "Spawns child processes (child_process.spawn)".into(), severity: FindingSeverity::Medium, needle: "child_process".into() },
-        Pattern { id: "SA005".into(), description: "Reads environment variables (potential credential harvesting)".into(), severity: FindingSeverity::Low, needle: "process.env".into() },
-        Pattern { id: "SA006".into(), description: "Raw HTTP request in install/postinstall hook".into(), severity: FindingSeverity::High, needle: "require('http')".into() },
-        Pattern { id: "SA007".into(), description: "Writes to home directory or system paths".into(), severity: FindingSeverity::High, needle: "os.homedir()".into() },
-        Pattern { id: "SA008".into(), description: "Crypto miner indicators".into(), severity: FindingSeverity::Critical, needle: "CryptoNight".into() },
+        // ── npm / Node.js ─────────────────────────────────────────────────────
+        Pattern { id: "SA001".into(), description: "Dynamic eval() of external or user-controlled data".into(), severity: FindingSeverity::Critical, needle: "eval(".into(), ecosystem: Some("npm".into()) },
+        Pattern { id: "SA002".into(), description: "Obfuscated base64 string decode at runtime".into(), severity: FindingSeverity::High, needle: "Buffer.from(".into(), ecosystem: Some("npm".into()) },
+        Pattern { id: "SA003".into(), description: "exec() / execSync() shell execution".into(), severity: FindingSeverity::Critical, needle: "execSync(".into(), ecosystem: Some("npm".into()) },
+        Pattern { id: "SA004".into(), description: "Spawns child processes (child_process.spawn)".into(), severity: FindingSeverity::Medium, needle: "child_process".into(), ecosystem: Some("npm".into()) },
+        Pattern { id: "SA005".into(), description: "Reads environment variables (potential credential harvesting)".into(), severity: FindingSeverity::Low, needle: "process.env".into(), ecosystem: Some("npm".into()) },
+        Pattern { id: "SA006".into(), description: "Raw HTTP request in install/postinstall hook".into(), severity: FindingSeverity::High, needle: "require('http')".into(), ecosystem: Some("npm".into()) },
+        Pattern { id: "SA007".into(), description: "Writes to home directory or system paths".into(), severity: FindingSeverity::High, needle: "os.homedir()".into(), ecosystem: Some("npm".into()) },
+        Pattern { id: "SA008".into(), description: "Crypto miner indicators".into(), severity: FindingSeverity::Critical, needle: "CryptoNight".into(), ecosystem: None },
+
+        // ── Python / PyPI ─────────────────────────────────────────────────────
+        Pattern { id: "SA020".into(), description: "os.system() shell execution".into(), severity: FindingSeverity::Critical, needle: "os.system(".into(), ecosystem: Some("pypi".into()) },
+        Pattern { id: "SA021".into(), description: "subprocess.Popen() shell execution".into(), severity: FindingSeverity::High, needle: "subprocess.Popen(".into(), ecosystem: Some("pypi".into()) },
+        Pattern { id: "SA022".into(), description: "eval() in Python code".into(), severity: FindingSeverity::Critical, needle: "eval(".into(), ecosystem: Some("pypi".into()) },
+        Pattern { id: "SA023".into(), description: "exec() built-in usage".into(), severity: FindingSeverity::High, needle: "exec(".into(), ecosystem: Some("pypi".into()) },
+        Pattern { id: "SA024".into(), description: "Dynamic __import__ call".into(), severity: FindingSeverity::High, needle: "__import__(".into(), ecosystem: Some("pypi".into()) },
+        Pattern { id: "SA025".into(), description: "urllib.request or urllib2 HTTP outbound".into(), severity: FindingSeverity::Medium, needle: "urllib.request".into(), ecosystem: Some("pypi".into()) },
+        Pattern { id: "SA026".into(), description: "socket.connect() raw TCP".into(), severity: FindingSeverity::Medium, needle: "socket.connect(".into(), ecosystem: Some("pypi".into()) },
+        Pattern { id: "SA027".into(), description: "os.environ credential access".into(), severity: FindingSeverity::Low, needle: "os.environ".into(), ecosystem: Some("pypi".into()) },
+
+        // ── Rust / crates.io ──────────────────────────────────────────────────
+        Pattern { id: "SA030".into(), description: "std::process::Command shell execution".into(), severity: FindingSeverity::Medium, needle: "std::process::Command".into(), ecosystem: Some("cargo".into()) },
+        Pattern { id: "SA031".into(), description: "std::fs::write to suspicious path".into(), severity: FindingSeverity::Medium, needle: "std::fs::write".into(), ecosystem: Some("cargo".into()) },
+        Pattern { id: "SA032".into(), description: "unsafe block — may bypass memory safety".into(), severity: FindingSeverity::Low, needle: "unsafe {".into(), ecosystem: Some("cargo".into()) },
+
+        // ── Shell scripts (any ecosystem) ─────────────────────────────────────
+        Pattern { id: "SA040".into(), description: "curl pipe to bash — remote code execution".into(), severity: FindingSeverity::Critical, needle: "curl ".into(), ecosystem: None },
+        Pattern { id: "SA041".into(), description: "wget pipe to shell — remote code execution".into(), severity: FindingSeverity::Critical, needle: "wget ".into(), ecosystem: None },
+        Pattern { id: "SA042".into(), description: "base64 decode then execute shell pattern".into(), severity: FindingSeverity::High, needle: "base64 -d".into(), ecosystem: None },
+
+        // ── Cross-ecosystem indicators ────────────────────────────────────────
+        Pattern { id: "SA050".into(), description: "Crypto miner stratum protocol connection".into(), severity: FindingSeverity::Critical, needle: "stratum+tcp://".into(), ecosystem: None },
+        Pattern { id: "SA051".into(), description: "Reverse shell netcat pattern".into(), severity: FindingSeverity::Critical, needle: "nc -e".into(), ecosystem: None },
+        Pattern { id: "SA052".into(), description: "Python eval-based reverse shell".into(), severity: FindingSeverity::Critical, needle: "pty.spawn".into(), ecosystem: None },
     ]
 }
 
@@ -76,13 +108,26 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
     // Extract files from the tarball (tar.gz).
     let files = extract_text_files(tarball_bytes)?;
 
+    // Determine identity and ecosystem once for pattern filtering, typosquat,
+    // and OSV lookups. Falls back to empty strings when no manifest is found
+    // (patterns with `ecosystem: None` still apply; ecosystem-specific patterns
+    // are skipped).
+    let (pkg_name, pkg_version, ecosystem) = extract_package_identity(&files);
+
     for (path, content) in &files {
-        // Only analyse JS/TS/Python/Rust/Ruby source files.
+        // Only analyse source files; skip binaries, images, lock files, etc.
         if !is_source_file(path) {
             continue;
         }
 
         for pat in patterns() {
+            // Skip patterns scoped to a different ecosystem.
+            if let Some(ref pat_eco) = pat.ecosystem {
+                if !pat_eco.eq_ignore_ascii_case(&ecosystem) {
+                    continue;
+                }
+            }
+
             if content.contains(&pat.needle[..]) {
                 // Cross-check against the publisher's declared manifest.
                 if is_excused_by_manifest(pat, manifest) {
@@ -183,8 +228,7 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
     }
 
     // Check for typosquatting using Levenshtein distance against all popular packages.
-    // Extract the package name from package.json / Cargo.toml / setup.py for the check.
-    let (pkg_name, pkg_version, ecosystem) = extract_package_identity(&files);
+    // pkg_name / pkg_version / ecosystem were extracted at the top of run().
     if !pkg_name.is_empty() {
         if let Some(finding) = check_typosquatting_real(&pkg_name, &ecosystem) {
             findings.push(finding);
@@ -379,10 +423,29 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
 }
 
 /// Checks whether a finding is covered by the publisher's declared manifest.
+///
+/// When a package legitimately declares a capability (e.g. `allowed_network_hosts`
+/// for an HTTP client), the corresponding finding is suppressed so that
+/// legitimate packages are not penalised for declared, expected behaviour.
+/// Patterns whose IDs are not listed here are never excused regardless of the
+/// manifest (e.g. `eval()` execution, `execSync()` shell injection).
 fn is_excused_by_manifest(pat: &Pattern, manifest: &PackageManifest) -> bool {
     match pat.id.as_str() {
-        "SA004" => manifest.spawns_processes, // declared it spawns processes
-        "SA001" | "SA003" => false,           // eval/exec never excused
+        // eval() and exec-family are never excused — no legitimate package needs them.
+        "SA001" | "SA003" | "SA022" | "SA023" => false,
+
+        // Child-process spawning: excused only when explicitly declared.
+        "SA004" | "SA030" => manifest.spawns_processes,
+
+        // Network access: excused when at least one allowed host is declared.
+        "SA006" | "SA025" | "SA026" => !manifest.allowed_network_hosts.is_empty(),
+
+        // Home/system directory writes: excused when at least one write path is declared.
+        "SA007" | "SA031" => !manifest.allowed_fs_writes.is_empty(),
+
+        // Env-var reads are low-severity and commonly needed; excuse if spawns_processes
+        // is true (a common pattern: spawn a subprocess with env vars forwarded).
+        // The crypto miner needle (SA008/SA050/SA051/SA052) is never excused.
         _ => false,
     }
 }

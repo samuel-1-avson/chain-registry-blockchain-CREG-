@@ -120,13 +120,14 @@ async fn process_package(
         return;
     }
 
-    let (is_validator, node_id, privkey_opt, prev_manifest) = {
+    let (is_validator, node_id, privkey_opt, prev_manifest, prev_canonical) = {
         let s = state.read().await;
         let prev = s
             .chain
             .get_latest_version(&req.id.ecosystem, &req.id.name)
             .ok()
             .flatten();
+        let prev_can = prev.as_ref().map(|r| r.id.canonical());
         (
             s.config.is_validator,
             s.config.node_id.clone(),
@@ -134,8 +135,16 @@ async fn process_package(
             // Retrieve the previous version's manifest for diff analysis.
             // Returns None for the first publish of a package.
             prev.and_then(|r| r.manifest),
+            prev_can,
         )
     };
+
+    // Look up the previous version's sandbox result for runtime diff analysis
+    // (DF005–DF007). Returns None on first publish or if this node did not
+    // process the previous version in the current process lifetime.
+    let prev_sandbox = prev_canonical
+        .as_deref()
+        .and_then(validator::sandbox::get_result);
 
     let (vote, pgp_fingerprint, findings) = if is_validator {
         if let Some(privkey) = privkey_opt.as_ref() {
@@ -143,7 +152,13 @@ async fn process_package(
                 "[Consensus] Node is a validator — running full analysis for {}",
                 canonical
             );
-            match validator::validate_package(&req, &tarball, privkey, prev_manifest.as_ref()).await
+            match validator::validate_package(
+                &req,
+                &tarball,
+                privkey,
+                prev_manifest.as_ref(),
+                prev_sandbox.as_ref(),
+            ).await
             {
                 Ok(res) => (res.vote, res.pgp_fingerprint, res.findings),
                 Err(e) => {
@@ -513,200 +528,16 @@ fn parse_key_bundle(bundle: &str) -> anyhow::Result<([u8; 32], [u8; 12])> {
     )
 }
 
-/// Decrypt a share using validator's private key
-///
-/// Reserved for a future M-of-N threshold-encryption path that runs alongside
-/// the simpler ECIES flow in `decrypt_shielded`. Not currently called.
-#[allow(dead_code)]
-fn decrypt_share(encrypted_share: &[u8], validator_key: &str) -> anyhow::Result<Vec<u8>> {
-    use aes_gcm::{
-        aead::{Aead, KeyInit},
-        Aes256Gcm,
-    };
-    use sha2::{Digest, Sha256};
-
-    // Derive decryption key from validator key
-    let key_bytes = hex::decode(validator_key)?;
-    let mut key = [0u8; 32];
-    let mut hasher = Sha256::new();
-    hasher.update(&key_bytes);
-    hasher.update(b"share-encryption-salt");
-    key.copy_from_slice(&hasher.finalize()[..32]);
-
-    let cipher =
-        Aes256Gcm::new_from_slice(&key).map_err(|e| anyhow::anyhow!("Invalid key: {}", e))?;
-
-    // Extract nonce and ciphertext
-    if encrypted_share.len() < 12 {
-        anyhow::bail!("Encrypted share too short");
-    }
-
-    let nonce = aes_gcm::Nonce::from_slice(&encrypted_share[..12]);
-    let ciphertext = &encrypted_share[12..];
-
-    let plaintext = cipher
-        .decrypt(nonce, ciphertext)
-        .map_err(|e| anyhow::anyhow!("Share decryption failed: {}", e))?;
-
-    Ok(plaintext)
-}
-
-/// Broadcast our decryption share to other validators via gossipsub.
-///
-/// Reserved for a future threshold-encryption decryption path; not currently
-/// reachable from `decrypt_shielded`, which uses a simpler X25519 ECIES flow.
-#[allow(dead_code)]
-async fn broadcast_decryption_share(
-    state: &crate::SharedState,
-    canonical: &str,
-    share: &threshold_encryption::KeyShare,
-    node_id: &str,
-) -> anyhow::Result<()> {
-    let share_value_hex = hex::encode(&share.value);
-
-    // Sign the share to prove authenticity.
-    let signature_hex = {
-        let s = state.read().await;
-        if let Some(privkey) = &s.config.validator_privkey {
-            use ed25519_dalek::{Signer, SigningKey};
-            let key_bytes = hex::decode(privkey)?;
-            let key_arr: [u8; 32] = key_bytes
-                .try_into()
-                .map_err(|_| anyhow::anyhow!("Validator key must be 32 bytes"))?;
-            let sk = SigningKey::from_bytes(&key_arr);
-            let msg = format!("decrypt:{}:{}:{}", canonical, share.index, share_value_hex);
-            hex::encode(sk.sign(msg.as_bytes()).to_bytes())
-        } else {
-            anyhow::bail!("No validator private key for signing decryption share");
-        }
-    };
-
-    let gossip_msg = crate::gossip::DecryptionShareGossip {
-        canonical: canonical.to_string(),
-        validator_id: node_id.to_string(),
-        share_index: share.index,
-        share_value: share_value_hex,
-        signature: signature_hex,
-    };
-
-    let p2p_handle = state.read().await.p2p.clone();
-    p2p_handle
-        .sender
-        .send(crate::p2p::P2PCommand::Broadcast {
-            topic: "creg/v1/decryption-shares".into(),
-            data: serde_json::to_vec(&gossip_msg)?,
-        })
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to broadcast decryption share: {}", e))?;
-
-    tracing::debug!("Broadcast decryption share index {} for {}", share.index, canonical);
-    Ok(())
-}
-
-/// Collect decryption shares from other validators via the gossipsub network.
-///
-/// Polls the shared state's `decryption_shares` map until the required threshold
-/// is reached, or a timeout (30s) expires.
-///
-/// Reserved for a future threshold-encryption decryption path; not currently
-/// reachable from `decrypt_shielded`.
-#[allow(dead_code)]
-async fn collect_decryption_shares(
-    state: &crate::SharedState,
-    canonical: &str,
-    threshold: u8,
-) -> anyhow::Result<Vec<threshold_encryption::KeyShare>> {
-    let max_wait = Duration::from_secs(30);
-    let poll_interval = Duration::from_millis(500);
-    let start = std::time::Instant::now();
-
-    loop {
-        {
-            let s = state.read().await;
-            if let Some(shares) = s.decryption_shares.get(canonical) {
-                if shares.len() >= threshold as usize {
-                    tracing::info!(
-                        "Collected {}/{} decryption shares for {}",
-                        shares.len(),
-                        threshold,
-                        canonical
-                    );
-                    return Ok(shares.clone());
-                }
-                tracing::debug!(
-                    "Have {}/{} shares for {}, waiting...",
-                    shares.len(),
-                    threshold,
-                    canonical
-                );
-            }
-        }
-
-        if start.elapsed() > max_wait {
-            anyhow::bail!(
-                "Timed out waiting for decryption shares: needed {}, canonical={}",
-                threshold,
-                canonical
-            );
-        }
-
-        tokio::time::sleep(poll_interval).await;
-    }
-}
-
-/// Reconstruct the encryption key from shares using Shamir's Secret Sharing
-#[allow(dead_code)]
-fn reconstruct_key(shares: &[threshold_encryption::KeyShare]) -> anyhow::Result<Vec<u8>> {
-    use threshold_encryption::ShamirSecretSharing;
-
-    if shares.is_empty() {
-        anyhow::bail!("No shares provided for key reconstruction");
-    }
-
-    let threshold = shares.len() as u8;
-    // total_shares doesn't matter for reconstruction, only threshold.
-    let sss = ShamirSecretSharing::new(threshold, threshold);
-    let shamir_shares: Vec<threshold_encryption::Share> = shares
-        .iter()
-        .map(|ks| threshold_encryption::Share {
-            index: ks.index,
-            value: ks.value.clone(),
-        })
-        .collect();
-
-    let secret = sss
-        .reconstruct_secret(&shamir_shares)
-        .map_err(|e| anyhow::anyhow!("Key reconstruction failed: {}", e))?;
-
-    Ok(secret)
-}
-
-/// Decrypt package content with the reconstructed key.
-///
-/// Reserved for the future threshold-encryption decryption path.
-#[allow(dead_code)]
-fn decrypt_with_key(data: &[u8], key: &[u8]) -> anyhow::Result<Vec<u8>> {
-    use aes_gcm::{
-        aead::{Aead, KeyInit},
-        Aes256Gcm,
-    };
-
-    if data.len() < 12 {
-        anyhow::bail!("Encrypted data too short");
-    }
-
-    let cipher =
-        Aes256Gcm::new_from_slice(key).map_err(|e| anyhow::anyhow!("Invalid key: {}", e))?;
-
-    let nonce = aes_gcm::Nonce::from_slice(&data[..12]);
-    let ciphertext = &data[12..];
-
-    let plaintext = cipher
-        .decrypt(nonce, ciphertext)
-        .map_err(|e| anyhow::anyhow!("Package decryption failed: {}", e))?;
-
-    Ok(plaintext)
-}
+// Note: The Shamir secret-sharing threshold-decryption path (decrypt_share,
+// broadcast_decryption_share, collect_decryption_shares, reconstruct_key,
+// decrypt_with_key) has been removed. Shielded packages now use single-node
+// X25519 ECIES decryption via decrypt_shielded/parse_key_bundle. A future
+// upgrade to t-of-n threshold decryption would require:
+//   1. A share-collection gossip phase before validation begins.
+//   2. Integration with crates/threshold-encryption/src/lib.rs.
+//   3. A new on-chain share-distribution ceremony at package submission time.
+// Until that work is done, operators should treat the single-node X25519 key
+// as the trust boundary for shielded package confidentiality.
 
 #[cfg(test)]
 mod shielded_tests {
