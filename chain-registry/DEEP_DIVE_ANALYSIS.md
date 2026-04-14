@@ -55,6 +55,13 @@
 | ISSUE-032 — VRF Fisher-Yates modulo bias | ✅ Fixed | `StdRng::from_seed` + `SliceRandom::shuffle` replaces hand-rolled biased shuffle (`a3f58f0`) |
 | ISSUE-040 — threat-intel DB starts empty | ✅ Fixed | `bootstrap_threats.json` embedded; merged at startup; missing-DB upgraded to WARN; size threshold warning (`af13cd4`) |
 | ISSUE-042 — ephemeral ZK keys on production | ✅ Fixed | `CREG_PRODUCTION=true` guard panics at startup if key files missing; all 3 ZK loaders patched (`3fd5942`) |
+| ISSUE-037 — gossip vote re-broadcast before validation | ✅ Fixed | Ed25519 signature verified in P2P handler before emitting event; invalid votes dropped with WARN (`d064c55`) |
+| ISSUE-047 — hardcoded forced-inclusion delay | ✅ Fixed | `CREG_FORCED_INCLUSION_DELAY` env var added; defaults to 5 (`28b1e34`) |
+| ISSUE-048 — sharding XOR uses first byte only | ✅ Fixed | 8-byte Kademlia XOR over SHA-256(CID); threshold via `CREG_SHARD_THRESHOLD_PCT` (`28b1e34`) |
+| ISSUE-050 — hardcoded reputation thresholds | ✅ Fixed | `CREG_REP_REJECT_THRESHOLD` / `CREG_REP_WARN_THRESHOLD` env vars; defaults −50/0 (`28b1e34`) |
+| ISSUE-049 — Fiat-Shamir uses block.number only | ✅ Fixed | Added `block.prevrandao`, `blockhash(block.number-1)`, `msg.sender` to challenge seed (`03b64c0`) |
+| ISSUE-045 — precompile gas subtraction undocumented | ✅ Fixed | Comment added explaining 2 000-gas stipend and EIP-1108 reference (`03b64c0`) |
+| ISSUE-046 — blockhash 256-block window | ✅ Documented | Registry.sol already has inline comment; `blockNumber` is authoritative anchor |
 
 ### Priority 3 — Performance & Scalability
 
