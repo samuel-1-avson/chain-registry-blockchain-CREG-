@@ -13,14 +13,30 @@ struct TyposquatDataset {
 }
 
 /// Compiled-in typosquat dataset (loaded from data/typosquat.json at build time).
-/// If the JSON is malformed, an empty dataset is used and a warning is logged at
-/// first access.
+///
+/// Initialization failures are fatal — the `Lazy` will produce an empty dataset
+/// AND log a `tracing::error!` so the failure appears in production logs.  Use
+/// `CREG_TYPOSQUAT_DISABLED=1` to suppress detection in environments where the
+/// dataset is intentionally absent.
 static DATASET: Lazy<TyposquatDataset> = Lazy::new(|| {
     let json = include_str!("../data/typosquat.json");
-    match serde_json::from_str(json) {
-        Ok(ds) => ds,
+    match serde_json::from_str::<TyposquatDataset>(json) {
+        Ok(ds) => {
+            if ds.packages.is_empty() {
+                tracing::error!(
+                    "typosquat.json parsed successfully but contains no packages; \
+                     typosquat detection will be a no-op. \
+                     Check data/typosquat.json for missing 'packages' key."
+                );
+            }
+            ds
+        }
         Err(e) => {
-            eprintln!("[WARN] typosquat.json parse failed ({}); typosquat detection disabled", e);
+            tracing::error!(
+                error = %e,
+                "typosquat.json is malformed — typosquat detection DISABLED. \
+                 Rebuild the validator crate after fixing data/typosquat.json."
+            );
             TyposquatDataset {
                 version: 0,
                 packages: HashMap::new(),
