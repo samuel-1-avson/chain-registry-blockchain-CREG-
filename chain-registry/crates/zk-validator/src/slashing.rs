@@ -157,10 +157,20 @@ fn load_or_generate_keys(
             .context("deserialize double-sign verifying key")?;
         (pk, vk)
     } else {
+        if std::env::var("CREG_PRODUCTION").map(|v| v == "1" || v.eq_ignore_ascii_case("true")).unwrap_or(false) {
+            panic!(
+                "PRODUCTION GUARD: Double-sign ZK keys not found in '{}'. \
+                 Refusing to generate ephemeral keys on a production node. \
+                 Run `creg advanced zk-setup`, or set CREG_ZK_KEYS_DIR correctly.",
+                keys_dir.display()
+            );
+        }
+
         tracing::warn!(
             "Double-sign ZK keys not found in {} — running ephemeral trusted \
              setup. These keys are NOT production-grade; regenerate via a \
-             proper multi-party ceremony before mainnet.",
+             proper multi-party ceremony before mainnet. \
+             Set CREG_PRODUCTION=true to make this a hard error.",
             keys_dir.display()
         );
         let circuit = DoubleSignCircuit::default();

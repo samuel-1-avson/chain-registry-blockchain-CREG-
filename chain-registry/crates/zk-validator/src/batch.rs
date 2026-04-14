@@ -217,10 +217,20 @@ fn load_or_generate_keys() -> Result<Arc<(ProvingKey<Bn254>, VerifyingKey<Bn254>
             .map_err(|e| ZkError::SerializationError(e.to_string()))?;
         (pk, vk)
     } else {
+        if std::env::var("CREG_PRODUCTION").map(|v| v == "1" || v.eq_ignore_ascii_case("true")).unwrap_or(false) {
+            panic!(
+                "PRODUCTION GUARD: Batch ZK key files not found in '{}'. \
+                 Refusing to generate ephemeral keys on a production node. \
+                 Run `creg advanced zk-setup`, or set CREG_ZK_KEYS_DIR correctly.",
+                dir.display()
+            );
+        }
+
         warn!(
             "Batch ZK key files not found in {} — generating ephemeral keys. \
              These keys are NOT from a trusted ceremony and must not be used in \
-             production. Run `creg advanced zk-setup` to generate proper keys.",
+             production. Set CREG_PRODUCTION=true to make this a hard error. \
+             Run `creg advanced zk-setup` to generate proper keys.",
             dir.display()
         );
 

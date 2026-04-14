@@ -155,9 +155,25 @@ impl ZkValidator {
             return Self::from_key_files(&pk_path, &vk_path);
         }
 
+        // Production guard: refuse to proceed with ephemeral keys when the
+        // CREG_PRODUCTION env var is set. A missing key directory in production
+        // indicates a deployment error; silently falling back to ephemeral keys
+        // would invalidate all existing ZK proofs and open the door to proof
+        // forgery (since the new ephemeral key is unknown to the network).
+        if std::env::var("CREG_PRODUCTION").map(|v| v == "1" || v.eq_ignore_ascii_case("true")).unwrap_or(false) {
+            panic!(
+                "PRODUCTION GUARD: ZK trusted setup key files not found in '{}'. \
+                 Refusing to generate ephemeral keys on a production node. \
+                 Run `creg advanced zk-setup` to generate certified keys, or \
+                 set CREG_ZK_KEYS_DIR to the correct key directory.",
+                keys_dir.display()
+            );
+        }
+
         warn!(
             "ZK trusted setup key files not found in {} — generating ephemeral keys. \
              These keys are NOT from a trusted ceremony and must not be used in production. \
+             Set CREG_PRODUCTION=true to make this a hard error. \
              Run `creg advanced zk-setup` to generate and persist proper keys.",
             keys_dir.display()
         );
