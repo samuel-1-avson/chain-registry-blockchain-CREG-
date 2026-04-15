@@ -219,6 +219,79 @@ impl P2PNode {
                             continue;
                         }
 
+                        // ── View-change certificates ───────────────────────────
+                        // A validator broadcasts a ViewChange message when its local
+                        // round times out.  We verify the Ed25519 signature and
+                        // accumulate the certificate.  A view-change is only logged
+                        // as ready once ⌊n/3⌋+1 certificates are seen for the same
+                        // (block_hash, new_view) pair — preventing a single Byzantine
+                        // node from forcing a view-change unilaterally.
+                        if topic_str.contains("view-change") {
+                            if let Ok(common::GossipMessage::ViewChange { block_hash, new_view, validator_id, signature }) = serde_json::from_slice(&message.data) {
+                                // Verify Ed25519 signature: message = "{block_hash}:view_change:{new_view}"
+                                let msg = format!("{}:view_change:{}", block_hash, new_view);
+                                let sig_valid: bool = (|| -> Option<bool> {
+                                    // Look up the validator's pubkey from the set
+                                    let s = state.try_read().ok()?;
+                                    let pubkey_hex = s.validator_set.validators
+                                        .iter()
+                                        .find(|v| v.id == validator_id)
+                                        .map(|v| v.pubkey.clone())?;
+                                    let pk_bytes = hex::decode(&pubkey_hex).ok()?;
+                                    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+                                    let vk = VerifyingKey::try_from(pk_bytes.as_slice()).ok()?;
+                                    let sig_bytes = hex::decode(&signature).ok()?;
+                                    let sig = Signature::try_from(sig_bytes.as_slice()).ok()?;
+                                    vk.verify(msg.as_bytes(), &sig).ok()?;
+                                    Some(true)
+                                })().unwrap_or(false);
+
+                                if !sig_valid {
+                                    tracing::warn!(
+                                        validator_id = %validator_id,
+                                        peer = %peer_id,
+                                        "P2P: dropping ViewChange with invalid signature"
+                                    );
+                                    continue;
+                                }
+
+                                let mut s = state.write().await;
+                                let n = s.validator_set.validators.len();
+                                let threshold = n / 3 + 1;
+
+                                let count = {
+                                    let by_view = s.view_change_certs
+                                        .entry(block_hash.clone())
+                                        .or_default()
+                                        .entry(new_view)
+                                        .or_default();
+                                    by_view.insert(validator_id.clone());
+                                    by_view.len()
+                                };
+
+                                tracing::debug!(
+                                    block_hash = %&block_hash[..block_hash.len().min(12)],
+                                    new_view,
+                                    validator_id = %validator_id,
+                                    count,
+                                    threshold,
+                                    "ViewChange certificate received"
+                                );
+
+                                if count >= threshold {
+                                    tracing::warn!(
+                                        block_hash = %&block_hash[..block_hash.len().min(12)],
+                                        new_view,
+                                        count,
+                                        threshold,
+                                        "[PBFT] ViewChange quorum reached — view-change to view {} is authorised",
+                                        new_view
+                                    );
+                                }
+                            }
+                            continue;
+                        }
+
                         // Votes: validate the application-level Ed25519 signature
                         // before emitting an event. libp2p gossipsub has already
                         // propagated this message to mesh peers (p2p-layer signing

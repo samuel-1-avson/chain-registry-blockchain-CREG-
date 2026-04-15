@@ -187,6 +187,13 @@ pub struct NodeState {
     pub decryption_shares: std::collections::HashMap<String, Vec<threshold_encryption::KeyShare>>,
     /// Validator registrations keyed by canonical EVM address.
     pub validator_registrations: HashMap<String, ValidatorRegistrationStatus>,
+    /// View-change certificates accumulated from peers.
+    /// Outer key: block_hash. Middle key: proposed new_view number.
+    /// Inner set: validator IDs that have sent a certificate for this (block, view).
+    ///
+    /// A view-change is only applied once ⌊n/3⌋+1 certificates are received,
+    /// preventing a single Byzantine node from forcing a view-change.
+    pub view_change_certs: HashMap<String, HashMap<u32, std::collections::HashSet<String>>>,
 }
 
 #[derive(Serialize, Clone, Default)]
@@ -392,6 +399,7 @@ async fn main() -> Result<()> {
         vrf_proofs: std::collections::HashMap::new(),
         decryption_shares: std::collections::HashMap::new(),
         validator_registrations: HashMap::new(),
+        view_change_certs: HashMap::new(),
     }));
 
     // Start P2P node in background

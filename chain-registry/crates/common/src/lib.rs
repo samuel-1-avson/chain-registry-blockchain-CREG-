@@ -91,4 +91,19 @@ pub enum GossipMessage {
         output: String,
         proof: String,
     },
+    /// A validator's view-change certificate, broadcast when a PBFT round
+    /// times out.  Peers accumulate these and only execute the view-change
+    /// locally once they have seen ⌊n/3⌋+1 certificates for the same
+    /// (block_hash, new_view) pair, preventing a single Byzantine node from
+    /// forcing a view-change.
+    ViewChange {
+        /// Hex-encoded hash of the block this round is for.
+        block_hash: String,
+        /// The new view number being proposed.
+        new_view: u32,
+        /// ID of the validator requesting the view-change.
+        validator_id: String,
+        /// Ed25519 signature over `"{block_hash}:view_change:{new_view}"`.
+        signature: String,
+    },
 }

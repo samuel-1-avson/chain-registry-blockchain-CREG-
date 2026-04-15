@@ -249,9 +249,35 @@ impl PackageVoteState {
 
         // Votes from validators running degraded ML models are stored for
         // transparency but excluded from quorum calculation.
+        let total_votes = self.prepare_votes.len();
         let effective_count = self.prepare_votes.values()
             .filter(|v| !is_degraded_model(v))
             .count();
+        let degraded_count = total_votes - effective_count;
+
+        // Warn when the degraded-validator ratio exceeds the configured threshold.
+        // If too many validators lack a trained model, quorum may become unreachable.
+        let warn_ratio: f64 = std::env::var("CREG_DEGRADED_VALIDATOR_WARN_RATIO")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0.5);
+        if self.assigned_count > 0
+            && (degraded_count as f64 / self.assigned_count as f64) > warn_ratio
+        {
+            tracing::warn!(
+                "[VoteAccum] {} DEGRADED QUORUM RISK: {}/{} assigned validators are running \
+                 degraded ML models ({:.0}% > {:.0}% warn threshold). Effective quorum requires \
+                 {} non-degraded votes but only {} available so far. \
+                 Deploy a trained model or lower CREG_DEGRADED_VALIDATOR_WARN_RATIO to suppress.",
+                self.canonical,
+                degraded_count,
+                self.assigned_count,
+                100.0 * degraded_count as f64 / self.assigned_count as f64,
+                100.0 * warn_ratio,
+                self.quorum(),
+                effective_count,
+            );
+        }
 
         if effective_count >= self.quorum() && self.phase == VotePhase::Collecting {
             self.phase = VotePhase::PrepareQuorumReached;
@@ -308,6 +334,23 @@ impl PackageVoteState {
         let non_degraded: Vec<&IncomingVote> = self.commit_votes.values()
             .filter(|v| !is_degraded_model(v))
             .collect();
+        let degraded_commit_count = self.commit_votes.len() - non_degraded.len();
+        let warn_ratio: f64 = std::env::var("CREG_DEGRADED_VALIDATOR_WARN_RATIO")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0.5);
+        if self.assigned_count > 0
+            && (degraded_commit_count as f64 / self.assigned_count as f64) > warn_ratio
+        {
+            tracing::warn!(
+                "[VoteAccum] {} COMMIT DEGRADED QUORUM RISK: {}/{} commit votes from \
+                 degraded-model validators. Non-degraded commit votes: {}.",
+                self.canonical,
+                degraded_commit_count,
+                self.assigned_count,
+                non_degraded.len(),
+            );
+        }
         let total_commits = non_degraded.len();
         let approvals = non_degraded.iter().filter(|v| v.approved).count();
         let rejections = non_degraded.iter().filter(|v| !v.approved).count();

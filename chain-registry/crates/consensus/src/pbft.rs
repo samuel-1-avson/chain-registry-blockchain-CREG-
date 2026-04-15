@@ -6,7 +6,7 @@
 use crate::ValidatorSet;
 use anyhow::{bail, Result};
 use common::{Block, ValidatorSignature, ValidatorVote};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 /// Default maximum time a round can stay in any single phase before it is
@@ -64,6 +64,16 @@ pub enum PbftPhase {
     Failed,
 }
 
+/// A view-change signal returned by `timeout_rounds()` so the block producer
+/// or P2P layer can broadcast the certificate to peers.
+#[derive(Debug, Clone)]
+pub struct ViewChangeSignal {
+    /// Hash of the block whose round timed out.
+    pub block_hash: String,
+    /// The new view number after the increment.
+    pub new_view: u32,
+}
+
 /// State of a single PBFT consensus round.
 pub struct PbftRound {
     pub block: Block,
@@ -83,6 +93,10 @@ pub struct PbftRound {
     pub created_at: Instant,
     /// Runtime configuration for timeouts and view-change limits.
     pub config: PbftConfig,
+    /// view_number → set of validator IDs that sent a ViewChange certificate
+    /// for that view.  A view-change is only executed once ⌊n/3⌋+1 certificates
+    /// have been received, preventing a single Byzantine node from forcing it.
+    pub view_change_votes: HashMap<u32, HashSet<String>>,
 }
 
 impl PbftRound {
@@ -103,6 +117,7 @@ impl PbftRound {
             view_change_count: 0,
             created_at: now,
             config,
+            view_change_votes: HashMap::new(),
         }
     }
 
@@ -267,6 +282,44 @@ impl PbftRound {
         }
     }
 
+    /// Record a view-change certificate received from a peer validator.
+    ///
+    /// The view-change is **only executed locally** once ⌊n/3⌋+1 certificates
+    /// have been received for the same `(block_hash, new_view)` pair.  This
+    /// prevents a single Byzantine node from forcing a view-change unilaterally.
+    ///
+    /// Returns `Ok(true)` when the threshold is reached and the view-change
+    /// was applied, `Ok(false)` when more votes are still needed.
+    pub fn record_view_change(&mut self, validator_id: &str, new_view: u32) -> Result<bool> {
+        // Byzantine-fault threshold for forcing a view-change: ⌊n/3⌋+1
+        // (the smallest set that is guaranteed to contain at least one honest node).
+        let n = self.validator_set.len();
+        let threshold = n / 3 + 1;
+
+        let votes = self
+            .view_change_votes
+            .entry(new_view)
+            .or_default();
+        votes.insert(validator_id.to_string());
+
+        let count = votes.len();
+        tracing::debug!(
+            "[PBFT] ViewChange cert for view={} from {} ({}/{} needed)",
+            new_view, validator_id, count, threshold
+        );
+
+        if count >= threshold && self.view_number < new_view {
+            tracing::warn!(
+                "[PBFT] ViewChange quorum reached ({}/{}) for view={} — executing view-change",
+                count, threshold, new_view
+            );
+            self.trigger_view_change()?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
     /// Attempt a view-change: increment the view number, reset PREPARE/COMMIT
     /// state, and return to PrePrepare so a new proposer can drive the round.
     ///
@@ -362,8 +415,12 @@ impl PbftEngine {
     /// where needed.  Rounds that exhaust their view-change budget are moved
     /// to `Failed`.
     ///
-    /// Returns the list of block hashes that had a view-change triggered.
-    pub fn timeout_rounds(&mut self) -> Vec<String> {
+    /// Returns `ViewChangeSignal` structs for every round that had a
+    /// view-change triggered.  The caller should broadcast a
+    /// `GossipMessage::ViewChange` for each signal so that peers can
+    /// accumulate certificates and apply the view-change once they reach
+    /// their own ⌊n/3⌋+1 threshold.
+    pub fn timeout_rounds(&mut self) -> Vec<ViewChangeSignal> {
         let timed_out: Vec<String> = self
             .rounds
             .iter()
@@ -371,17 +428,20 @@ impl PbftEngine {
             .map(|(h, _)| h.clone())
             .collect();
 
-        let mut changed = Vec::new();
+        let mut signals = Vec::new();
         for hash in timed_out {
             if let Some(round) = self.rounds.get_mut(&hash) {
                 match round.trigger_view_change() {
-                    Ok(view) => {
+                    Ok(new_view) => {
                         tracing::warn!(
                             "[PBFT] Timeout on block {} — triggered view-change to view {}",
                             &hash[..12],
-                            view
+                            new_view
                         );
-                        changed.push(hash);
+                        signals.push(ViewChangeSignal {
+                            block_hash: hash,
+                            new_view,
+                        });
                     }
                     Err(e) => {
                         tracing::error!("[PBFT] Round {} abandoned: {}", &hash[..12], e);
@@ -389,7 +449,22 @@ impl PbftEngine {
                 }
             }
         }
-        changed
+        signals
+    }
+
+    /// Record a view-change certificate received from a peer for the given block.
+    /// Forwards to the matching `PbftRound::record_view_change()`.
+    pub fn receive_view_change(
+        &mut self,
+        block_hash: &str,
+        validator_id: &str,
+        new_view: u32,
+    ) -> Result<bool> {
+        let round = self
+            .rounds
+            .get_mut(block_hash)
+            .ok_or_else(|| anyhow::anyhow!("No active round for block {}", block_hash))?;
+        round.record_view_change(validator_id, new_view)
     }
 
     /// Remove rounds that have been in a terminal state (Finalised / Failed)

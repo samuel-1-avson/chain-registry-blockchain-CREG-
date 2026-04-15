@@ -106,7 +106,25 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
     let mut findings = Vec::new();
 
     // Extract files from the tarball (tar.gz).
-    let files = extract_text_files(tarball_bytes)?;
+    // Oversized files are not scanned but produce an SA013 finding so the
+    // limitation is visible in the report and consensus logs.
+    let (files, oversized_paths) = extract_text_files(tarball_bytes)?;
+    for path in oversized_paths {
+        findings.push(Finding {
+            id: "SA013".into(),
+            title: "File too large for static analysis".into(),
+            severity: FindingSeverity::Medium,
+            description: format!(
+                "'{}' exceeds the static analysis file size limit ({:.0} MiB). \
+                 The file was not pattern-scanned or entropy-checked. \
+                 Increase CREG_STATIC_MAX_FILE_BYTES or investigate manually.",
+                path,
+                max_file_bytes() as f64 / (1024.0 * 1024.0)
+            ),
+            file: path.clone(),
+            line: None,
+        });
+    }
 
     // Determine identity and ecosystem once for pattern filtering, typosquat,
     // and OSV lookups. Falls back to empty strings when no manifest is found
@@ -308,7 +326,8 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
     let deep_scan_result = {
         let tarball_bytes = tarball_bytes.to_vec();
         let pkg_info = pkg_info.clone();
-        tokio::task::spawn_blocking(move || ml_validator::deep_scan(&tarball_bytes, pkg_info)).await
+        let eco = ecosystem.clone();
+        tokio::task::spawn_blocking(move || ml_validator::deep_scan(&tarball_bytes, pkg_info, &eco)).await
     };
 
     match deep_scan_result {
@@ -526,7 +545,30 @@ fn is_source_file(path: &str) -> bool {
         .unwrap_or("");
     matches!(
         ext,
-        "js" | "ts" | "mjs" | "cjs" | "py" | "rb" | "rs" | "java"
+        // JavaScript / TypeScript
+        "js" | "ts" | "mjs" | "cjs" | "jsx" | "tsx"
+        // Python
+        | "py" | "pyw"
+        // Ruby
+        | "rb"
+        // Rust
+        | "rs"
+        // JVM
+        | "java" | "kt" | "groovy" | "scala"
+        // Shell scripts — critical: postinstall hooks are often .sh
+        | "sh" | "bash" | "zsh" | "fish" | "ksh"
+        // Web / server-side
+        | "php" | "php5" | "phtml"
+        // Go
+        | "go"
+        // C / C++ — native add-ons common in npm packages
+        | "c" | "cpp" | "cc" | "cxx" | "h" | "hpp"
+        // Swift / Objective-C
+        | "swift" | "m"
+        // Lua
+        | "lua"
+        // PowerShell — relevant for Windows packages
+        | "ps1" | "psm1"
     )
 }
 
@@ -540,20 +582,50 @@ fn find_line_number(content: &str, needle: &str) -> Option<usize> {
     })
 }
 
-fn extract_text_files(tarball: &[u8]) -> Result<Vec<(String, String)>> {
+/// Maximum bytes read from a single source file.
+/// Configurable via `CREG_STATIC_MAX_FILE_BYTES` (default: 5 MiB).
+/// Files exceeding this limit are skipped with an SA013 finding so the
+/// limitation is visible in the report — silently dropping them would let
+/// attackers hide malicious code past the size threshold.
+fn max_file_bytes() -> u64 {
+    std::env::var("CREG_STATIC_MAX_FILE_BYTES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(5 * 1024 * 1024) // 5 MiB
+}
+
+/// Returns `(readable_files, oversized_paths)`.
+/// `oversized_paths` are paths whose size exceeds `max_file_bytes()`.
+/// Callers emit SA013 findings for each oversized path.
+fn extract_text_files(tarball: &[u8]) -> Result<(Vec<(String, String)>, Vec<String>)> {
     use std::io::Read;
+    let limit = max_file_bytes();
     let gz = flate2::read::GzDecoder::new(tarball);
     let mut archive = tar::Archive::new(gz);
     let mut files = Vec::new();
+    let mut oversized = Vec::new();
     for entry in archive.entries()? {
         let mut entry = entry?;
         let path = entry.path()?.to_string_lossy().to_string();
+        // Check declared size from tar header before reading. A malicious
+        // tarball may lie about size, so we also enforce the limit during read.
+        let declared_size = entry.header().size().unwrap_or(0);
+        if declared_size > limit {
+            oversized.push(path);
+            continue;
+        }
+        // Read with a hard byte cap to guard against tarballs that under-report size.
         let mut content = String::new();
-        if entry.read_to_string(&mut content).is_ok() && !content.is_empty() {
-            files.push((path, content));
+        let mut limited = entry.take(limit + 1);
+        if limited.read_to_string(&mut content).is_ok() && !content.is_empty() {
+            if content.len() as u64 > limit {
+                oversized.push(path);
+            } else {
+                files.push((path, content));
+            }
         }
     }
-    Ok(files)
+    Ok((files, oversized))
 }
 
 use crate::typosquat;

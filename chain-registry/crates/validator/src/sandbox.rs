@@ -150,11 +150,21 @@ pub fn get_result(canonical: &str) -> Option<SandboxResult> {
 
 fn compute_cache_key(tarball_bytes: &[u8], ecosystem: &str, config: &SandboxConfig) -> String {
     use sha2::{Digest, Sha256};
+    // NetworkMode discriminant is included so that results run under different
+    // network policies (e.g. ManifestOnly vs Isolated) are never conflated.
+    // A package that probes for internet access behaves differently when egress
+    // is blocked — caching across modes would silently drop those findings.
+    let network_mode_byte: u8 = match config.network_mode {
+        NetworkMode::Isolated => 0,
+        NetworkMode::ManifestOnly => 1,
+        NetworkMode::Full => 2,
+    };
     let mut hasher = Sha256::new();
     hasher.update(tarball_bytes);
     hasher.update(ecosystem.as_bytes());
     hasher.update(config.timeout_secs.to_le_bytes());
     hasher.update(config.memory_mb.to_le_bytes());
+    hasher.update([network_mode_byte]);
     hex::encode(hasher.finalize())
 }
 
@@ -335,12 +345,31 @@ pub async fn run(
     )
 }
 
+/// Maximum number of entries in RESULT_CACHE.
+/// Configurable via `CREG_SANDBOX_CACHE_SIZE` (default: 1000).
+fn sandbox_cache_max() -> usize {
+    std::env::var("CREG_SANDBOX_CACHE_SIZE")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1000)
+}
+
 fn cache_result(key: &str, result: &SandboxResult) {
     if let Ok(mut cache) = RESULT_CACHE.lock() {
-        // Cap cache size to prevent unbounded memory growth.
-        if cache.len() < 1024 {
-            cache.insert(key.to_string(), result.clone());
+        let max = sandbox_cache_max();
+        if cache.len() >= max {
+            // Bounded eviction: clear the entire cache when the cap is reached.
+            // This prevents unbounded memory growth while keeping the
+            // implementation dependency-free (a full LRU would require the
+            // `lru` crate). The configurable CREG_SANDBOX_CACHE_SIZE lets
+            // operators tune the trade-off between memory and cache hit rate.
+            cache.clear();
+            tracing::debug!(
+                "Sandbox RESULT_CACHE evicted (reached {} entries cap; tune via CREG_SANDBOX_CACHE_SIZE)",
+                max
+            );
         }
+        cache.insert(key.to_string(), result.clone());
     }
 }
 

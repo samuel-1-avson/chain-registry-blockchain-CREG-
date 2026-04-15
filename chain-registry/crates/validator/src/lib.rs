@@ -54,6 +54,11 @@ pub async fn validate_package(
     let node_url =
         std::env::var("CREG_NODE_URL").unwrap_or_else(|_| "http://127.0.0.1:8080".into());
 
+    // Refresh the typosquat dataset from CREG_TYPOSQUAT_URL if configured and
+    // the TTL has expired.  Failures are non-fatal; the compile-time baseline
+    // is always available as a fallback.
+    typosquat::maybe_refresh().await;
+
     // ── Stage 1 (static) + Stage 6 (reputation) run concurrently ────────────
     let (static_result, rep_result) = tokio::join!(
         static_analysis::run(tarball, &req.manifest),

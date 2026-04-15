@@ -742,11 +742,12 @@ sequenceDiagram
 
 ### ISSUE-V007: In-Process Sandbox Cache Not Bounded
 
-- **Severity**: High
+- **Severity**: High  **Status: ✅ Fixed**
 - **File**: `crates/validator/src/sandbox.rs:122`
 - **Description**: `RESULT_CACHE` is a `LazyLock<Mutex<HashMap<String, SandboxResult>>>` with no size limit. In a long-running validator node processing thousands of packages, this cache grows without bound and is never evicted.
 - **Impact**: Memory exhaustion over time. For large packages with many unique tarballs, each cache entry holds a `SandboxResult` with potentially large `Vec<String>` observation lists.
 - **Recommended Fix**: Replace the `HashMap` with an LRU cache bounded by entry count or total memory. Use `lru::LruCache` (already in the dependency tree) with a configurable size via `CREG_SANDBOX_CACHE_SIZE` (default 1000).
+- **Fix Applied**: `cache_result()` helper evicts the entire cache when `len() >= CREG_SANDBOX_CACHE_SIZE` (default 1000). Configurable via env var.
 
 ---
 
@@ -756,41 +757,45 @@ sequenceDiagram
 
 ### ISSUE-V008: Typosquat Dataset Is Static at Compile Time
 
-- **Severity**: Medium
+- **Severity**: Medium  **Status: ✅ Fixed**
 - **File**: `crates/validator/src/typosquat.rs:22`
 - **Description**: `include_str!("../data/typosquat.json")` embeds the typosquat dataset at compile time. New popular packages added to npm or PyPI after the last build are not in the detection set. The dataset has no versioning or update mechanism at runtime.
 - **Impact**: New popular packages (which are the most valuable typosquat targets) are unprotected until the validator binary is rebuilt and redeployed.
 - **Recommended Fix**: Add a `CREG_TYPOSQUAT_URL` env var that points to a periodically updated dataset URL. At startup, attempt to download the latest dataset and merge with the compiled-in baseline. Fall back to compiled-in dataset on failure.
+- **Fix Applied**: `maybe_refresh()` fetches from `CREG_TYPOSQUAT_URL` with a 1-hour TTL, merges into the runtime dataset (new packages added, compile-time entries never removed), and falls back to baseline on failure. Called at the start of every `validate_package()` run.
 
 ---
 
 ### ISSUE-V009: ML Deep Scan Has No Ecosystem-Level Filtering
 
-- **Severity**: Medium
+- **Severity**: Medium  **Status: ✅ Fixed**
 - **File**: `crates/ml-validator/src/deep_scan.rs:556`
 - **Description**: `is_source_file()` accepts `.js`, `.ts`, `.mjs`, `.cjs`, `.py`, `.rb`, `.rs`, `.java`. It does not filter by ecosystem — a Rust package (crates.io) will have its Python helper scripts scanned, potentially generating false positives from legitimate Python tooling.
 - **Impact**: False positive findings reduce validator confidence in the ML layer and may cause border-line packages to be rejected incorrectly.
 - **Recommended Fix**: Pass the `ecosystem` from the `PackageId` through to `extract_source_files()` and filter file extensions accordingly (e.g., for `npm` only scan `.js/.ts/.mjs/.cjs`).
+- **Fix Applied**: `is_source_file()` renamed to `is_source_file_for_ecosystem(path, ecosystem)` with per-ecosystem extension maps. `DeepScanner` gains an `ecosystem: String` field. `deep_scan()` public function accepts `ecosystem: &str`. `static_analysis.rs` passes `ecosystem` through. Both `scan()` and `scan_onnx()` use the ecosystem-filtered file list.
 
 ---
 
 ### ISSUE-V010: No Per-File Size Limit in Static Analysis Text Extraction
 
-- **Severity**: Medium
+- **Severity**: Medium  **Status: ✅ Fixed**
 - **File**: `crates/validator/src/static_analysis.rs` (`extract_text_files`)
 - **Description**: The function reads each file from the tarball into memory without a per-file size cap. A tarball containing a 200 MB minified JavaScript file will attempt to read the entire file into a `String` during pattern scanning.
 - **Impact**: OOM crash in the validator process when processing pathological packages. A single maliciously crafted submission could denial-of-service a validator node.
 - **Recommended Fix**: Add a `MAX_FILE_SIZE: usize = 5 * 1024 * 1024` (5 MiB) constant. Skip files exceeding this limit with a Medium finding `SA013: "File too large for static analysis"` so the limitation is visible in the report.
+- **Fix Applied**: `extract_text_files()` checks declared size via `entry.header().size()` and caps reads via `entry.take(limit + 1)`. Oversized files are collected and emitted as SA013 findings with the configurable `CREG_STATIC_MAX_FILE_BYTES` limit (default 5 MiB).
 
 ---
 
 ### ISSUE-V011: Degraded ML Votes Reduce Effective Quorum Without Notification
 
-- **Severity**: Medium
+- **Severity**: Medium  **Status: ✅ Fixed**
 - **File**: `crates/consensus/src/vote_accumulator.rs:252`
 - **Description**: When validators with degraded ML models (`model_version` starts with `"degraded"`) cast votes, they are excluded from quorum count. In a network where many validators run without a trained model, the effective quorum could require waiting for the small minority of non-degraded validators. There is no timeout or notification for this condition.
 - **Impact**: In a network where most validators run in degraded mode, quorum may never be reached, causing all packages to time out rather than be processed.
 - **Recommended Fix**: Track the count of degraded validators in `VoteAccumulator`. If the ratio of degraded validators exceeds 50%, emit a `tracing::warn!` and consider falling back to a degraded-inclusive quorum calculation after a configurable timeout.
+- **Fix Applied**: After each `record_prepare()` and `record_commit()` call, the accumulator calculates `degraded_count / assigned_count`. If it exceeds `CREG_DEGRADED_VALIDATOR_WARN_RATIO` (default 0.5), a structured `tracing::warn!` is emitted with counts and a call to action.
 
 ---
 
@@ -810,31 +815,34 @@ sequenceDiagram
 
 ### ISSUE-V013: Sandbox Result Cache Ignores NetworkMode
 
-- **Severity**: Low
+- **Severity**: Low  **Status: ✅ Fixed**
 - **File**: `crates/validator/src/sandbox.rs:127`
 - **Description**: `compute_cache_key()` includes `tarball_hash`, `ecosystem`, `timeout_secs`, and `memory_mb` but not `network_mode`. A result cached under `NetworkMode::ManifestOnly` could be returned when the caller requests `NetworkMode::Isolated`.
 - **Impact**: A package could receive a cached result from a less-restrictive sandbox run, missing behavioral findings that only appear when certain egress attempts fail (e.g., the package checks for internet connectivity and behaves differently when offline).
 - **Recommended Fix**: Add `network_mode` (as a discriminant byte) to the hash input.
+- **Fix Applied**: `compute_cache_key()` hashes a discriminant byte for `Isolated → 0`, `ManifestOnly → 1`, `Full → 2`. All three variants are matched exhaustively.
 
 ---
 
 ### ISSUE-V014: Shannon Entropy Threshold Is Hardcoded
 
-- **Severity**: Low
+- **Severity**: Low  **Status: ✅ Fixed**
 - **File**: `crates/validator/src/static_analysis.rs` (entropy check)
 - **Description**: The entropy threshold of 4.5 bits/byte is hardcoded. Different file types have naturally different entropy distributions — compiled binaries or data files legitimately exceed this threshold. No entropy is computed per file type.
 - **Impact**: Binary data files bundled with legitimate packages (e.g., WASM modules, embedded fonts) generate spurious SA009/SA011 high-entropy findings that escalate to the LLM unnecessarily.
 - **Recommended Fix**: (1) Skip entropy checks for known binary extensions (`.wasm`, `.png`, `.ico`, `.ttf`). (2) Make the threshold configurable via `CREG_ENTROPY_THRESHOLD` env var.
+- **Fix Applied**: `entropy_threshold()` reads `CREG_ENTROPY_THRESHOLD` env var (default 5.5). `is_source_file()` extended to 30+ extensions including shell scripts, PHP, Go, C/C++, Swift, Lua, PowerShell, ensuring binary files are naturally excluded by the source-file gate.
 
 ---
 
 ### ISSUE-V015: PBFT View-Change Has No Gossiped Certificate
 
-- **Severity**: Low
+- **Severity**: Low  **Status: ✅ Fixed**
 - **File**: `crates/consensus/src/pbft.rs`
 - **Description**: View-change (triggered when a phase timeout occurs) increments `view_number` and resets phase to `PrePrepare` locally. However, there is no gossiped view-change certificate — other validators do not receive notification that a view-change has occurred.
 - **Impact**: In a real multi-validator deployment, validators may diverge on their current view number. The primary selected in the new view may differ per node, leading to a stuck round where no node advances.
 - **Recommended Fix**: Implement a `VIEW-CHANGE` message type in the gossip layer. Broadcast when a timeout occurs. The new primary begins PRE-PREPARE only after collecting `⌊2n/3⌋ + 1` VIEW-CHANGE messages.
+- **Fix Applied**: `GossipMessage::ViewChange { block_hash, new_view, validator_id, signature }` added to `common/src/lib.rs`. `PbftRound` gains `view_change_votes: HashMap<u32, HashSet<String>>` and `record_view_change()` which applies the view-change only after ⌊n/3⌋+1 certificates are received. `timeout_rounds()` returns `Vec<ViewChangeSignal>` for the caller to broadcast. P2P layer (`p2p.rs`) handles `view-change` topic: verifies Ed25519 signature, accumulates in `NodeState::view_change_certs`, logs warning when quorum is reached.
 
 ---
 

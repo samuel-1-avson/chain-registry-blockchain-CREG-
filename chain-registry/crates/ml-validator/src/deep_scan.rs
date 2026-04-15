@@ -114,6 +114,11 @@ pub struct DeepScanner {
     max_length: usize,
     /// Optional package info for OSV lookups.
     package_info: Option<crate::osv_client::PackageInfo>,
+    /// Ecosystem of the package being scanned (e.g. "npm", "pypi", "cargo").
+    /// Used to restrict which file extensions are analysed, preventing
+    /// cross-ecosystem false positives (e.g. Python helper scripts inside a
+    /// Rust crate being scanned as JavaScript).
+    pub ecosystem: String,
 }
 
 impl DeepScanner {
@@ -124,6 +129,7 @@ impl DeepScanner {
             tokenizer_path: None,
             max_length: 512,
             package_info: None,
+            ecosystem: String::new(),
         }
     }
 
@@ -211,7 +217,7 @@ impl DeepScanner {
         }
 
         // ── Multi-Layer Pipeline ──────────────────────────────────────
-        let files = match extract_source_files(tarball_bytes) {
+        let files = match extract_source_files(tarball_bytes, &self.ecosystem) {
             Ok(f) => f,
             Err(_) => {
                 // If tarball extraction fails, return mock rather than error.
@@ -304,8 +310,8 @@ impl DeepScanner {
 
         let mut session = create_onnx_session(&self.model_path)?;
 
-        // Extract source files from the tarball.
-        let files = extract_source_files(tarball_bytes)
+        // Extract source files from the tarball, filtered to the package ecosystem.
+        let files = extract_source_files(tarball_bytes, &self.ecosystem)
             .map_err(|e| MlError::ExtractionError(e.to_string()))?;
 
         if files.is_empty() {
@@ -404,12 +410,18 @@ impl Default for DeepScanner {
 ///
 /// `package_info` is optional — when provided, OSV vulnerability lookups
 /// are enabled.
+///
+/// `ecosystem` (e.g. `"npm"`, `"pypi"`, `"cargo"`) filters which source
+/// file extensions are extracted and scored, preventing cross-ecosystem
+/// false-positives.
 pub fn deep_scan(
     tarball_bytes: &[u8],
     package_info: Option<crate::osv_client::PackageInfo>,
+    ecosystem: &str,
 ) -> Result<DeepScanResult, MlError> {
     let mut scanner = DeepScanner::default();
     scanner.package_info = package_info;
+    scanner.ecosystem = ecosystem.to_string();
 
     let bytes = tarball_bytes.to_vec();
     let (result_tx, result_rx) = std::sync::mpsc::sync_channel(1);
@@ -533,8 +545,14 @@ fn run_inference(
     Ok(prob)
 }
 
-/// Extract text source files from a tar.gz byte slice.
-fn extract_source_files(tarball: &[u8]) -> Result<Vec<(String, String)>, std::io::Error> {
+/// Extract text source files from a tar.gz byte slice, filtered to extensions
+/// appropriate for the given ecosystem. Passing an empty or unknown ecosystem
+/// falls back to a broad cross-ecosystem set.
+///
+/// Filtering by ecosystem prevents false positives: a Rust crate that ships
+/// Python helper scripts should not have those scripts scanned with the
+/// JavaScript/Python ruleset and vice-versa.
+fn extract_source_files(tarball: &[u8], ecosystem: &str) -> Result<Vec<(String, String)>, std::io::Error> {
     use std::io::Read;
     let gz = flate2::read::GzDecoder::new(tarball);
     let mut archive = tar::Archive::new(gz);
@@ -545,7 +563,7 @@ fn extract_source_files(tarball: &[u8]) -> Result<Vec<(String, String)>, std::io
         let mut content = String::new();
         if entry.read_to_string(&mut content).is_ok()
             && !content.is_empty()
-            && is_source_file(&path)
+            && is_source_file_for_ecosystem(&path, ecosystem)
         {
             files.push((path, content));
         }
@@ -553,16 +571,29 @@ fn extract_source_files(tarball: &[u8]) -> Result<Vec<(String, String)>, std::io
     Ok(files)
 }
 
-/// Check whether a path is a supported source file.
-fn is_source_file(path: &str) -> bool {
+/// Check whether a file path is a source file relevant to the given ecosystem.
+/// Falls back to a broad allowlist when the ecosystem is unknown.
+fn is_source_file_for_ecosystem(path: &str, ecosystem: &str) -> bool {
     let ext = std::path::Path::new(path)
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("");
-    matches!(
-        ext,
-        "js" | "ts" | "mjs" | "cjs" | "py" | "rb" | "rs" | "java"
-    )
+
+    match ecosystem.to_ascii_lowercase().trim() {
+        "npm" => matches!(ext, "js" | "ts" | "mjs" | "cjs" | "jsx" | "tsx" | "sh" | "bash"),
+        "pypi" => matches!(ext, "py" | "pyw" | "sh" | "bash"),
+        "cargo" => matches!(ext, "rs" | "sh" | "bash" | "toml"),
+        "rubygems" | "gem" => matches!(ext, "rb" | "sh" | "bash"),
+        "maven" | "gradle" => matches!(ext, "java" | "kt" | "groovy" | "scala" | "sh"),
+        "nuget" => matches!(ext, "cs" | "vb" | "fs" | "ps1" | "psm1"),
+        "go" | "goproxy" => matches!(ext, "go" | "sh" | "bash"),
+        // Broad fallback for unknown ecosystems — covers all common scripting languages
+        _ => matches!(
+            ext,
+            "js" | "ts" | "mjs" | "cjs" | "py" | "rb" | "rs" | "java"
+            | "go" | "sh" | "bash" | "php" | "kt" | "swift" | "c" | "cpp"
+        ),
+    }
 }
 
 #[cfg(test)]
