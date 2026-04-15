@@ -336,18 +336,34 @@ impl DecryptionService {
         result
     }
 
-    /// Sign a response
+    /// Sign a decryption share response with the validator's Ed25519 key.
+    ///
+    /// Message layout: `canonical_bytes || encrypted_share || timestamp_be_8bytes`
+    /// Recipients can verify using the validator's registered `validator_pubkey`.
     fn sign_response(&self, canonical: &str, encrypted_share: &[u8], timestamp: u64) -> Vec<u8> {
-        // TODO: Implement proper Ed25519 signing
-        // For now, return a placeholder
-        let mut data = canonical.as_bytes().to_vec();
-        data.extend_from_slice(encrypted_share);
-        data.extend_from_slice(&timestamp.to_be_bytes());
+        use ed25519_dalek::{Signer, SigningKey};
 
-        // Hash and return
-        use sha2::{Digest, Sha256};
-        let hash = Sha256::digest(&data);
-        hash.to_vec()
+        // Build signing key from the 32-byte validator private key.
+        if self.config.validator_key.len() != 32 {
+            warn!(
+                "Validator key is {} bytes (expected 32); response will carry an empty signature",
+                self.config.validator_key.len()
+            );
+            return vec![];
+        }
+
+        let key_bytes: [u8; 32] = self.config.validator_key[..32]
+            .try_into()
+            .expect("length checked above");
+        let signing_key = SigningKey::from_bytes(&key_bytes);
+
+        // Construct the message to sign.
+        let mut msg = canonical.as_bytes().to_vec();
+        msg.extend_from_slice(encrypted_share);
+        msg.extend_from_slice(&timestamp.to_be_bytes());
+
+        let signature = signing_key.sign(&msg);
+        signature.to_bytes().to_vec()
     }
 }
 
@@ -379,18 +395,45 @@ impl DecryptionClient {
         }
     }
 
-    /// Request decryption of a package
+    /// Request decryption of a package.
+    ///
+    /// The request is signed with the requestor's Ed25519 key so validators can
+    /// authenticate the requestor before releasing a decryption share.
+    /// Message layout: `canonical_bytes || purpose_bytes || timestamp_be_8bytes`
     pub async fn request_decryption(
         &mut self,
         canonical: &str,
         purpose: &str,
     ) -> Result<Vec<DecryptionResponse>, ThresholdError> {
+        use ed25519_dalek::{Signer, SigningKey};
+
+        let timestamp = current_timestamp();
+
+        // Derive requestor identity (hex-encoded public key) and sign the request.
+        let (requestor_id, signature) = if self.requestor_key.len() == 32 {
+            let key_bytes: [u8; 32] = self.requestor_key[..32]
+                .try_into()
+                .expect("length checked above");
+            let signing_key = SigningKey::from_bytes(&key_bytes);
+            let pubkey_hex = hex::encode(signing_key.verifying_key().as_bytes());
+
+            let mut msg = canonical.as_bytes().to_vec();
+            msg.extend_from_slice(purpose.as_bytes());
+            msg.extend_from_slice(&timestamp.to_be_bytes());
+            let sig = signing_key.sign(&msg);
+
+            (pubkey_hex, sig.to_bytes().to_vec())
+        } else {
+            warn!("Requestor key is not 32 bytes — sending unsigned decryption request");
+            (hex::encode(&self.requestor_pubkey), vec![])
+        };
+
         let request = DecryptionRequest {
             canonical: canonical.to_string(),
-            requestor: "client".to_string(), // TODO: Use actual identity
+            requestor: requestor_id,
             requestor_pubkey: self.requestor_pubkey.clone(),
-            timestamp: current_timestamp(),
-            signature: vec![], // TODO: Sign properly
+            timestamp,
+            signature,
             purpose: purpose.to_string(),
         };
 
