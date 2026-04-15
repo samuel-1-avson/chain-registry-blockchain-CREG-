@@ -149,7 +149,29 @@ enum View {
     Mempool,
     Events,
     Operator,
+    Consensus,
     Help,
+}
+
+/// Live PBFT round snapshot fetched from the node or derived from stats.
+#[derive(Debug, Clone)]
+struct ConsensusState {
+    /// Current round number (typically tip_height + 1)
+    round: u64,
+    /// Current PBFT phase: "PRE-PREPARE", "PREPARE", "COMMIT", "FINALIZED"
+    phase: String,
+    /// Proposer pubkey (truncated) for this round
+    proposer: String,
+    /// Number of PREPARE votes collected so far
+    prepare_votes: usize,
+    /// Number of COMMIT votes collected so far
+    commit_votes: usize,
+    /// Quorum threshold (2f+1)
+    quorum: usize,
+    /// Total validator set size
+    total_validators: usize,
+    /// When this snapshot was fetched
+    fetched_at: Instant,
 }
 
 #[derive(Debug)]
@@ -186,6 +208,18 @@ struct App {
     last_refresh: Instant,
     tick_count: u64,
 
+    // Consensus
+    /// Latest PBFT round snapshot.
+    consensus_state: Option<ConsensusState>,
+
+    // Connection health
+    /// True while the SSE stream is connected and delivering events.
+    node_connected: bool,
+    /// Wall-clock time the last SSE event was received.
+    last_event_at: Instant,
+    /// Seconds until the next reconnect attempt (shown in disconnect banner).
+    reconnect_in: u64,
+
     // Sparkline data for TPS visualization
     tps_history: VecDeque<u64>,
 }
@@ -200,6 +234,12 @@ enum DataUpdate {
     MempoolTx(MempoolTx),
     Peers(Vec<String>),
     Error(String),
+    /// SSE stream (re-)connected successfully.
+    NodeConnected,
+    /// SSE stream dropped; UI should show disconnect banner.
+    NodeDisconnected { retry_in_secs: u64 },
+    /// Live PBFT round snapshot.
+    Consensus(ConsensusState),
 }
 
 impl App {
@@ -236,6 +276,10 @@ impl App {
             data_tx,
             last_refresh: Instant::now(),
             tick_count: 0,
+            consensus_state: None,
+            node_connected: false,
+            last_event_at: Instant::now(),
+            reconnect_in: 0,
             tps_history: VecDeque::with_capacity(60),
         }
     }
@@ -416,6 +460,11 @@ async fn data_fetcher_loop(app: Arc<RwLock<App>>, api_base: String, tx: mpsc::Se
                 let _ = tx.send(DataUpdate::Packages(packages)).await;
             }
 
+            // Fetch consensus state (best-effort — node may not expose this endpoint)
+            if let Ok(cs) = fetch_consensus_state(&client, &api_base).await {
+                let _ = tx.send(DataUpdate::Consensus(cs)).await;
+            }
+
             last_stats_refresh = Instant::now();
         }
 
@@ -557,12 +606,76 @@ async fn fetch_pending_packages(
         .unwrap_or_default())
 }
 
+/// Fetch PBFT consensus round state.
+/// Tries `/v1/consensus/state`; if that returns an error or is not implemented,
+/// derives a best-effort snapshot from `/v1/chain/stats` and `/v1/validators`.
+async fn fetch_consensus_state(
+    client: &reqwest::Client,
+    api_base: &str,
+) -> Result<ConsensusState> {
+    // Try the dedicated endpoint first.
+    if let Ok(res) = client
+        .get(format!("{}/v1/consensus/state", api_base))
+        .send()
+        .await
+    {
+        if res.status().is_success() {
+            if let Ok(json) = res.json::<Value>().await {
+                let total = json["total_validators"].as_u64().unwrap_or(0) as usize;
+                return Ok(ConsensusState {
+                    round: json["round"].as_u64().unwrap_or(0),
+                    phase: json["phase"]
+                        .as_str()
+                        .unwrap_or("UNKNOWN")
+                        .to_uppercase(),
+                    proposer: json["proposer"]
+                        .as_str()
+                        .unwrap_or("unknown")
+                        .chars()
+                        .take(16)
+                        .collect::<String>()
+                        + "…",
+                    prepare_votes: json["prepare_votes"].as_u64().unwrap_or(0) as usize,
+                    commit_votes: json["commit_votes"].as_u64().unwrap_or(0) as usize,
+                    quorum: total * 2 / 3 + 1,
+                    total_validators: total,
+                    fetched_at: Instant::now(),
+                });
+            }
+        }
+    }
+
+    // Fallback: derive from stats endpoint.
+    let stats_res = client
+        .get(format!("{}/v1/chain/stats", api_base))
+        .send()
+        .await?;
+    let json: Value = stats_res.json().await?;
+
+    let tip = json["tip_height"].as_u64().unwrap_or(0);
+    let total = json["validator_count"].as_u64().unwrap_or(0) as usize;
+    let quorum = if total > 0 { total * 2 / 3 + 1 } else { 1 };
+
+    Ok(ConsensusState {
+        round: tip.saturating_add(1),
+        phase: "PREPARE".to_string(), // best-effort — no real phase data
+        proposer: "(VRF-selected)".to_string(),
+        prepare_votes: 0,
+        commit_votes: 0,
+        quorum,
+        total_validators: total,
+        fetched_at: Instant::now(),
+    })
+}
+
 async fn sse_event_listener(
     _app: Arc<RwLock<App>>,
     api_base: String,
     tx: mpsc::Sender<DataUpdate>,
 ) {
+    const RETRY_SECS: u64 = 5;
     let client = reqwest::Client::new();
+
     loop {
         let res = match client
             .get(format!("{}/v1/events", api_base))
@@ -572,10 +685,19 @@ async fn sse_event_listener(
         {
             Ok(r) => r,
             Err(_) => {
-                tokio::time::sleep(Duration::from_secs(5)).await;
+                // Connection refused / DNS failure — node is unreachable.
+                let _ = tx
+                    .send(DataUpdate::NodeDisconnected {
+                        retry_in_secs: RETRY_SECS,
+                    })
+                    .await;
+                tokio::time::sleep(Duration::from_secs(RETRY_SECS)).await;
                 continue;
             }
         };
+
+        // Successfully opened the stream — mark as connected.
+        let _ = tx.send(DataUpdate::NodeConnected).await;
 
         let mut stream = res.bytes_stream();
         let mut buffer = String::new();
@@ -620,14 +742,13 @@ async fn sse_event_listener(
             }
         }
 
-        // Stream ended, retry after delay
+        // Stream closed — notify UI and schedule reconnect.
         let _ = tx
-            .send(DataUpdate::Event(
-                "System".to_string(),
-                "SSE connection lost, reconnecting...".to_string(),
-            ))
+            .send(DataUpdate::NodeDisconnected {
+                retry_in_secs: RETRY_SECS,
+            })
             .await;
-        tokio::time::sleep(Duration::from_secs(3)).await;
+        tokio::time::sleep(Duration::from_secs(RETRY_SECS)).await;
     }
 }
 
@@ -667,6 +788,18 @@ fn apply_data_update(app: &mut App, update: DataUpdate) {
             app.peer_ids = peers;
         }
         DataUpdate::Error(_) => {}
+        DataUpdate::NodeConnected => {
+            app.node_connected = true;
+            app.last_event_at = Instant::now();
+            app.reconnect_in = 0;
+        }
+        DataUpdate::NodeDisconnected { retry_in_secs } => {
+            app.node_connected = false;
+            app.reconnect_in = retry_in_secs;
+        }
+        DataUpdate::Consensus(state) => {
+            app.consensus_state = Some(state);
+        }
     }
 }
 
@@ -716,6 +849,9 @@ async fn handle_key(app: &mut App, key: KeyCode) -> bool {
         KeyCode::Char('7') => app.current_view = View::Events,
         KeyCode::Char('8') | KeyCode::Char('o') | KeyCode::Char('O') => {
             app.current_view = View::Operator
+        }
+        KeyCode::Char('9') | KeyCode::Char('c') | KeyCode::Char('C') => {
+            app.current_view = View::Consensus
         }
         _ => {}
     }
@@ -868,6 +1004,144 @@ fn draw_ui(f: &mut Frame, app: &App) {
     if app.is_searching {
         draw_search_popup(f, app);
     }
+
+    if !app.node_connected {
+        draw_disconnect_banner(f, app);
+    }
+}
+
+fn draw_consensus(f: &mut Frame, app: &App, area: Rect) {
+    let block = Block::default()
+        .title(" ⚙  PBFT Consensus Round ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Theme::PRIMARY));
+
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    match &app.consensus_state {
+        None => {
+            let msg = Paragraph::new("Fetching consensus state…")
+                .style(Style::default().fg(Theme::TEXT_DIM))
+                .alignment(Alignment::Center);
+            f.render_widget(msg, inner);
+        }
+        Some(cs) => {
+            // Phase colour
+            let phase_color = match cs.phase.as_str() {
+                "PRE-PREPARE" => Color::Cyan,
+                "PREPARE"     => Color::Yellow,
+                "COMMIT"      => Color::Green,
+                "FINALIZED"   => Color::LightGreen,
+                _             => Color::Gray,
+            };
+
+            // Quorum gauge for PREPARE votes
+            let prepare_pct = if cs.quorum > 0 {
+                (cs.prepare_votes as f64 / cs.quorum as f64 * 100.0).min(100.0) as u16
+            } else { 0 };
+            let commit_pct = if cs.quorum > 0 {
+                (cs.commit_votes as f64 / cs.quorum as f64 * 100.0).min(100.0) as u16
+            } else { 0 };
+
+            let age_secs = cs.fetched_at.elapsed().as_secs();
+
+            // Pre-compute display strings so we don't reference temporaries.
+            let round_str    = format!("#{}", cs.round);
+            let val_str      = format!("{}", cs.total_validators);
+            let quorum_str   = format!("{}", cs.quorum);
+            let prepare_str  = format!("{}/{} ({}%)", cs.prepare_votes, cs.quorum, prepare_pct);
+            let commit_str   = format!("{}/{} ({}%)", cs.commit_votes, cs.quorum, commit_pct);
+            let age_str      = format!("{}s ago", age_secs);
+
+            let rows = vec![
+                Row::new(vec!["Round",         round_str.as_str()])
+                    .style(Style::default().fg(Theme::TEXT)),
+                Row::new(vec!["Phase",          cs.phase.as_str()])
+                    .style(Style::default().fg(phase_color).add_modifier(Modifier::BOLD)),
+                Row::new(vec!["Proposer",       cs.proposer.as_str()])
+                    .style(Style::default().fg(Theme::ACCENT)),
+                Row::new(vec!["Validators",     val_str.as_str()])
+                    .style(Style::default().fg(Theme::TEXT)),
+                Row::new(vec!["Quorum (2f+1)",  quorum_str.as_str()])
+                    .style(Style::default().fg(Theme::TEXT)),
+                Row::new(vec!["PREPARE votes",  prepare_str.as_str()])
+                    .style(Style::default().fg(if prepare_pct >= 100 { Color::Green } else { Color::Yellow })),
+                Row::new(vec!["COMMIT votes",   commit_str.as_str()])
+                    .style(Style::default().fg(if commit_pct >= 100 { Color::Green } else { Color::Yellow })),
+                Row::new(vec!["Snapshot age",   age_str.as_str()])
+                    .style(Style::default().fg(Theme::TEXT_DIM)),
+            ];
+
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(rows.len() as u16 + 2),
+                    Constraint::Length(3),
+                    Constraint::Length(3),
+                    Constraint::Min(0),
+                ])
+                .split(inner);
+
+            let table = Table::new(
+                rows,
+                [Constraint::Percentage(35), Constraint::Percentage(65)],
+            )
+            .block(Block::default().borders(Borders::NONE))
+            .header(
+                Row::new(vec!["Field", "Value"])
+                    .style(Style::default().fg(Theme::TEXT_DIM).add_modifier(Modifier::BOLD)),
+            );
+            f.render_widget(table, chunks[0]);
+
+            // PREPARE progress bar
+            let prepare_gauge = Gauge::default()
+                .block(Block::default().title(" PREPARE votes ").borders(Borders::ALL))
+                .gauge_style(Style::default().fg(Color::Yellow))
+                .percent(prepare_pct);
+            f.render_widget(prepare_gauge, chunks[1]);
+
+            // COMMIT progress bar
+            let commit_gauge = Gauge::default()
+                .block(Block::default().title(" COMMIT votes ").borders(Borders::ALL))
+                .gauge_style(Style::default().fg(Color::Green))
+                .percent(commit_pct);
+            f.render_widget(commit_gauge, chunks[2]);
+        }
+    }
+}
+
+fn draw_disconnect_banner(f: &mut Frame, app: &App) {
+    let area = f.size();
+    // Center a 3-row × 50-col banner at the top of the screen.
+    let width: u16 = 54.min(area.width);
+    let x = area.x + area.width.saturating_sub(width) / 2;
+    let banner_area = Rect { x, y: area.y, width, height: 3 };
+
+    let msg = if app.reconnect_in > 0 {
+        format!(
+            " ⚠  NODE DISCONNECTED — reconnecting in {}s ",
+            app.reconnect_in
+        )
+    } else {
+        " ⚠  NODE DISCONNECTED — reconnecting… ".to_string()
+    };
+
+    f.render_widget(Clear, banner_area);
+    let banner = Paragraph::new(msg)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Red)),
+        )
+        .style(
+            Style::default()
+                .fg(Color::White)
+                .bg(Color::Red)
+                .add_modifier(Modifier::BOLD),
+        )
+        .alignment(Alignment::Center);
+    f.render_widget(banner, banner_area);
 }
 
 fn draw_header(f: &mut Frame, app: &App, area: Rect) {
@@ -942,6 +1216,7 @@ fn draw_main_content(f: &mut Frame, app: &App, area: Rect) {
         View::Mempool => draw_mempool(f, app, area),
         View::Events => draw_events(f, app, area),
         View::Operator => draw_operator(f, app, area),
+        View::Consensus => draw_consensus(f, app, area),
         View::Help => draw_help(f, app, area),
     }
 }
@@ -954,6 +1229,7 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
         View::Packages => " [j/k] Navigate | [Enter/d] Package detail | [b] Back | [?] Help | [q] Quit ",
         View::Events => " [j/k] Scroll | [b] Back | [?] Help | [q] Quit ",
         View::Operator => " [1-8/o] Switch views | [q] Quit | Browser explorer at http://localhost:3000 ",
+        View::Consensus => " [9/c] Consensus | [r] Refresh | [q] Quit ",
         View::BlockDetail | View::ValidatorDetail | View::PackageDetail => " [Esc/q/b] Back | [?] Help ",
         View::Help => " [Any key] Return ",
         _ => " [←→↑↓] Navigate | [?] Help | [q] Quit ",

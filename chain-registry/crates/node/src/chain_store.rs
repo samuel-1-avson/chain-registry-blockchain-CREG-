@@ -224,6 +224,29 @@ impl ChainStore {
         }
     }
 
+    /// Return up to `limit` blocks in descending height order starting from
+    /// `tip_height - offset`.  Used for paginated API responses.
+    pub fn list_blocks(&self, offset: u64, limit: u64) -> Result<Vec<Block>> {
+        let tip = self.tip_height()?;
+        if tip == 0 {
+            return Ok(vec![]);
+        }
+        let start_height = tip.saturating_sub(offset);
+        let mut blocks = Vec::with_capacity(limit as usize);
+        let mut height = start_height;
+        while blocks.len() < limit as usize {
+            match self.get_block_by_height(height)? {
+                Some(b) => blocks.push(b),
+                None => break,
+            }
+            if height == 0 {
+                break;
+            }
+            height -= 1;
+        }
+        Ok(blocks)
+    }
+
     pub fn tip_height(&self) -> Result<u64> {
         let cf = self
             .db

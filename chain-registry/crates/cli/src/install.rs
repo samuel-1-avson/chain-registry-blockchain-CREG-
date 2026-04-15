@@ -1,15 +1,16 @@
 // crates/cli/src/install.rs
 // Resolves trust verdict, then either proceeds or blocks the install.
 //
-// TODO(C-19): Use retry::with_retry for network calls for resilience
 // TODO(C-22): Call policy::evaluate() to check org-level policy before install
 // TODO(C-23): Load config_file settings and pass through to control behavior
 
 use crate::output;
+use crate::retry;
 use anyhow::{bail, Result};
 use colored::Colorize;
 use common::{PackageId, VerdictStatus};
 use dialoguer::Confirm;
+use std::time::Duration;
 
 pub async fn run(
     raw_package: &str,
@@ -25,9 +26,15 @@ pub async fn run(
 
     let pkg_id = PackageId::new(&ecosystem, &name, version.as_deref().unwrap_or("latest"));
 
-    // ── 2. Query the chain (cache-first, then live node) ─────────────────────
+    // ── 2. Query the chain (cache-first, then live node) — with retry ────────
     println!("{} Resolving {} ...", "→".cyan(), pkg_id.canonical().bold());
-    let verdict = resolver::resolve_id(&pkg_id, node_url).await?;
+    let verdict = retry::with_retry(
+        "resolve package",
+        3,
+        Duration::from_millis(500),
+        || resolver::resolve_id(&pkg_id, node_url),
+    )
+    .await?;
 
     // ── 3. Trust decision ─────────────────────────────────────────────────────
     match &verdict.status {
@@ -149,16 +156,31 @@ pub async fn run(
             let temp_file =
                 std::env::temp_dir().join(format!("{}.tgz", pkg_id.name.replace('/', "_")));
 
-            match downloader
-                .download(ipfs_cid, content_hash, &temp_file)
-                .await
+            let ipfs_cid_owned = ipfs_cid.clone();
+            let content_hash_owned = content_hash.clone();
+            let temp_file_owned = temp_file.clone();
+            match retry::with_retry(
+                "P2P download",
+                3,
+                Duration::from_millis(500),
+                || {
+                    let dl = resolver::downloader::P2PDownloader::new(
+                        vec![node_url.unwrap_or("http://localhost:8080").to_string()],
+                    );
+                    let cid = ipfs_cid_owned.clone();
+                    let hash = content_hash_owned.clone();
+                    let path = temp_file_owned.clone();
+                    async move { dl.download(&cid, &hash, &path).await }
+                },
+            )
+            .await
             {
                 Ok(_) => {
                     local_tarball = Some(temp_file);
                 }
                 Err(e) => {
                     bail!(
-                        "{} P2P download failed for verified package '{}': {}. \
+                        "{} P2P download failed for verified package '{}' after 3 attempts: {}. \
                          Refusing to fall back to unverified original registry.",
                         "X".red(),
                         pkg_id.canonical(),

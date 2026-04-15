@@ -5,11 +5,20 @@
 //   1. creg multisig init <tarball>       → writes a .creg-multisig.json session file
 //   2. creg multisig sign <session.json>  → co-signer adds their signature
 //   3. creg multisig submit <session.json>→ once M sigs collected, submits to chain
+//
+// INTEGRITY: Each session file carries an HMAC-SHA256 over its stable fields.
+// Key = CREG_SESSION_HMAC_KEY env var if set, otherwise the content_hash itself
+// (self-MAC).  Detects accidental corruption and basic tampering when the file
+// is passed between co-signers.
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use colored::Colorize;
+use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
+use sha2::Sha256;
 use std::path::Path;
+
+type HmacSha256 = Hmac<Sha256>;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct MultisigSession {
@@ -27,21 +36,70 @@ pub struct MultisigSession {
     pub ecosystem: String,
     /// Package version
     pub version: String,
+    /// HMAC-SHA256 over the stable session fields (hex).
+    /// Key = CREG_SESSION_HMAC_KEY env var, or the content_hash if unset.
+    #[serde(default)]
+    pub mac: String,
 }
 
 impl MultisigSession {
+    /// Compute the HMAC over stable fields:
+    ///   `canonical || content_hash || ipfs_cid || threshold || ecosystem || version`
+    fn compute_mac(&self) -> String {
+        let key = std::env::var("CREG_SESSION_HMAC_KEY")
+            .unwrap_or_else(|_| self.content_hash.clone());
+        let msg = format!(
+            "{}{}{}{}{}{}",
+            self.canonical,
+            self.content_hash,
+            self.ipfs_cid,
+            self.threshold,
+            self.ecosystem,
+            self.version,
+        );
+        let mut mac = HmacSha256::new_from_slice(key.as_bytes())
+            .expect("HMAC accepts any key length");
+        mac.update(msg.as_bytes());
+        hex::encode(mac.finalize().into_bytes())
+    }
+
     pub fn is_ready(&self) -> bool {
         self.signatures.len() >= self.threshold
     }
 
+    /// Load and verify the session file's MAC.
     pub fn load(path: &Path) -> Result<Self> {
         let raw = std::fs::read_to_string(path)
             .with_context(|| format!("Cannot read session file: {}", path.display()))?;
-        serde_json::from_str(&raw).context("Invalid multisig session file")
+        let session: Self = serde_json::from_str(&raw).context("Invalid multisig session file")?;
+
+        // Verify integrity if a MAC is present.
+        if !session.mac.is_empty() {
+            let expected = session.compute_mac();
+            if session.mac != expected {
+                bail!(
+                    "Session file MAC mismatch — file may have been tampered with.\n  \
+                     Expected: {}\n  Got:      {}",
+                    &expected[..16],
+                    &session.mac[..16.min(session.mac.len())]
+                );
+            }
+        } else {
+            eprintln!(
+                "{} Session file has no integrity MAC. Consider re-creating it with \
+                 the current version of creg.",
+                "⚠".yellow()
+            );
+        }
+
+        Ok(session)
     }
 
+    /// Serialize to JSON, embedding a fresh MAC over the stable fields.
     pub fn save(&self, path: &Path) -> Result<()> {
-        let content = serde_json::to_string_pretty(self)?;
+        let mut with_mac = self.clone();
+        with_mac.mac = with_mac.compute_mac();
+        let content = serde_json::to_string_pretty(&with_mac)?;
         std::fs::write(path, content)
             .with_context(|| format!("Cannot write session file: {}", path.display()))
     }
@@ -130,6 +188,7 @@ pub async fn init(
         signatures: vec![],
         ecosystem,
         version: version.to_string(),
+        mac: String::new(), // computed and embedded by save()
     };
 
     session.save(output)?;

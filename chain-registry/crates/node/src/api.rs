@@ -195,6 +195,7 @@ pub fn router(state: SharedState, event_bus: EventBus, limiter: RateLimiter) -> 
         .route("/v1/packages/:canonical/revoke", post(revoke_package))
         .route("/v1/packages/:canonical/proof", get(get_proof))
         // Blocks
+        .route("/v1/blocks", get(list_blocks_paginated))
         .route("/v1/blocks/:height", get(get_block_by_height))
         .route("/v1/blocks/hash/:hash", get(get_block_by_hash))
         .route("/v1/blocks/announce", post(receive_block_announcement))
@@ -485,9 +486,40 @@ async fn get_nodes(State(state): State<SharedState>) -> impl IntoResponse {
 }
 
 // GET /v1/p2p/status
-async fn p2p_status(State(state): State<SharedState>) -> impl IntoResponse {
+//
+// Returns full peer topology when the `X-Operator-Key` header matches the
+// node's configured operator pubkey (set via CREG_OPERATOR_PUBKEY env var).
+// Public callers receive only aggregate counts to prevent network topology
+// disclosure, which could aid targeted DDoS attacks on specific validators.
+async fn p2p_status(
+    State(state): State<SharedState>,
+    headers: axum::http::HeaderMap,
+) -> impl IntoResponse {
     let s = state.read().await;
-    Json(s.p2p_status.clone())
+
+    // Operator key header allows full peer list exposure (e.g. for monitoring).
+    let operator_pubkey = std::env::var("CREG_OPERATOR_PUBKEY").unwrap_or_default();
+    let caller_key = headers
+        .get("X-Operator-Key")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    let is_operator = !operator_pubkey.is_empty() && caller_key == operator_pubkey;
+
+    if is_operator {
+        // Full topology for authenticated operators.
+        Json(serde_json::json!({
+            "peer_count": s.p2p_status.peers.len(),
+            "peers": s.p2p_status.peers,
+            "protocols": s.p2p_status.protocols,
+        }))
+    } else {
+        // Aggregate-only for public callers.
+        Json(serde_json::json!({
+            "peer_count": s.p2p_status.peers.len(),
+            "protocols": s.p2p_status.protocols,
+        }))
+    }
 }
 
 // GET /v1/bridge/status
@@ -703,9 +735,17 @@ async fn submit_package(
 }
 
 // POST /v1/packages/:canonical/revoke
+//
+// Security: the caller MUST be either a registered validator or the original
+// publisher of the package.  They prove their identity by signing the message
+// `"{canonical}:revoke:{reason}"` with their Ed25519 key.
 #[derive(Deserialize)]
 struct RevokeReq {
     reason: String,
+    /// Hex-encoded Ed25519 public key of the revoker.
+    revoker_pubkey: String,
+    /// Hex-encoded Ed25519 signature of `"{canonical}:revoke:{reason}"`.
+    signature: String,
 }
 
 async fn revoke_package(
@@ -713,30 +753,104 @@ async fn revoke_package(
     Path(canonical): Path<String>,
     Json(req): Json<RevokeReq>,
 ) -> Response {
+    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+
     let canonical = urlencoding::decode(&canonical)
         .unwrap_or_default()
         .to_string();
+
+    // ── 1. Verify Ed25519 signature ───────────────────────────────────────────
+    let sig_msg = format!("{}:revoke:{}", canonical, req.reason);
+    let sig_valid: Result<(), _> = (|| {
+        let pk_bytes = hex::decode(&req.revoker_pubkey)
+            .map_err(|_| anyhow::anyhow!("revoker_pubkey is not valid hex"))?;
+        let vk = VerifyingKey::try_from(pk_bytes.as_slice())
+            .map_err(|_| anyhow::anyhow!("revoker_pubkey is not a valid Ed25519 key"))?;
+        let sig_bytes = hex::decode(&req.signature)
+            .map_err(|_| anyhow::anyhow!("signature is not valid hex"))?;
+        let sig = Signature::try_from(sig_bytes.as_slice())
+            .map_err(|_| anyhow::anyhow!("signature is not a valid Ed25519 signature"))?;
+        vk.verify(sig_msg.as_bytes(), &sig)
+            .map_err(|_| anyhow::anyhow!("Signature verification failed"))
+    })();
+
+    if let Err(e) = sig_valid {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorResponse {
+                error: format!("Invalid revocation signature: {}", e),
+            }),
+        )
+            .into_response();
+    }
+
     let s = state.read().await;
 
+    // ── 2. Authorisation: revoker must be the original publisher or a validator ─
+    let is_authorised = {
+        // Check if revoker is a registered validator.
+        let is_validator = s
+            .validator_set
+            .validators
+            .iter()
+            .any(|v| v.pubkey == req.revoker_pubkey);
+
+        // Check if revoker is the original publisher of this package.
+        let is_publisher = s
+            .chain
+            .get_package(&canonical)
+            .ok()
+            .flatten()
+            .map(|r| r.publisher_pubkey == req.revoker_pubkey)
+            .unwrap_or(false);
+
+        is_validator || is_publisher
+    };
+
+    if !is_authorised {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ErrorResponse {
+                error: format!(
+                    "Revoker pubkey {} is not a registered validator or the original publisher of {}",
+                    &req.revoker_pubkey[..req.revoker_pubkey.len().min(16)],
+                    canonical
+                ),
+            }),
+        )
+            .into_response();
+    }
+
+    // ── 3. Queue the revocation transaction ───────────────────────────────────
     match s.chain.get_package(&canonical) {
         Ok(Some(record)) => {
             let tx = common::Transaction::Revoke {
                 package_canonical: canonical.clone(),
                 reason: req.reason.clone(),
-                revoked_by: "api-request".into(),
+                revoked_by: req.revoker_pubkey.clone(),
                 evidence_hash: record.content_hash.clone(),
             };
-            // Send directly to finalized-tx channel so the block producer picks it up.
             if s.tx_sender.send(tx).await.is_err() {
                 return server_err("Finalized-tx channel closed".to_string());
             }
+            tracing::info!(
+                canonical = %canonical,
+                revoker = %&req.revoker_pubkey[..req.revoker_pubkey.len().min(16)],
+                reason = %req.reason,
+                "Package revocation queued"
+            );
             events::emit(
                 &s.event_bus,
-                events::RegistryEvent::package_revoked(&canonical, &req.reason, "api-request"),
+                events::RegistryEvent::package_revoked(
+                    &canonical,
+                    &req.reason,
+                    &req.revoker_pubkey,
+                ),
             );
             Json(serde_json::json!({
                 "status": "queued",
-                "message": "Revocation will be included in the next block"
+                "message": "Revocation will be included in the next block",
+                "revoked_by": req.revoker_pubkey,
             }))
             .into_response()
         }
@@ -782,17 +896,132 @@ async fn get_block_by_hash(State(state): State<SharedState>, Path(hash): Path<St
     }
 }
 
+// GET /v1/blocks?offset=0&limit=20
+//
+// Returns blocks in descending height order (newest first).
+// offset counts from the chain tip (offset=0 → tip, offset=1 → tip-1, …).
+// limit is capped at 100 to prevent large response payloads.
+// Response includes X-Total-Height for UI pagination.
+#[derive(Deserialize)]
+struct ListBlocksParams {
+    offset: Option<u64>,
+    limit: Option<u64>,
+}
+
+async fn list_blocks_paginated(
+    State(state): State<SharedState>,
+    Query(params): Query<ListBlocksParams>,
+) -> Response {
+    let offset = params.offset.unwrap_or(0);
+    let limit = params.limit.unwrap_or(20).min(100);
+
+    let s = state.read().await;
+    let tip = match s.chain.tip_height() {
+        Ok(h) => h,
+        Err(e) => return server_err(format!("Failed to read tip height: {}", e)),
+    };
+
+    match s.chain.list_blocks(offset, limit) {
+        Ok(blocks) => {
+            let mut resp = axum::http::Response::builder()
+                .status(StatusCode::OK)
+                .header("Content-Type", "application/json")
+                .header("X-Total-Height", tip.to_string())
+                .header("X-Offset", offset.to_string())
+                .header("X-Limit", limit.to_string());
+
+            let body = serde_json::json!({
+                "blocks": blocks,
+                "tip_height": tip,
+                "offset": offset,
+                "limit": limit,
+            });
+
+            resp.body(axum::body::Body::from(
+                serde_json::to_vec(&body).unwrap_or_default(),
+            ))
+            .unwrap_or_else(|_| server_err("Response build error".into()))
+        }
+        Err(e) => server_err(format!("Failed to list blocks: {}", e)),
+    }
+}
+
 // POST /v1/blocks/announce
+//
+// The proposer proves identity by signing `"{block_hash}:{height}"` with their
+// Ed25519 key.  The key must belong to a registered validator.  This prevents
+// anonymous nodes from injecting fake block announcements.
+#[derive(Deserialize)]
+struct BlockAnnounceReq {
+    /// Height of the announced block.
+    height: u64,
+    /// Hex-encoded SHA-256 block hash.
+    block_hash: String,
+    /// Validator ID of the proposer.
+    proposer: String,
+    /// Hex-encoded Ed25519 public key of the proposer.
+    proposer_pubkey: String,
+    /// Hex-encoded Ed25519 signature of `"{block_hash}:{height}"`.
+    signature: String,
+}
+
 async fn receive_block_announcement(
-    State(_state): State<SharedState>,
-    Json(ann): Json<crate::gossip::BlockAnnouncement>,
+    State(state): State<SharedState>,
+    Json(ann): Json<BlockAnnounceReq>,
 ) -> impl IntoResponse {
+    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+
+    // ── 1. Verify Ed25519 signature ───────────────────────────────────────────
+    let sig_msg = format!("{}:{}", ann.block_hash, ann.height);
+    let sig_valid: Result<(), _> = (|| {
+        let pk_bytes = hex::decode(&ann.proposer_pubkey)
+            .map_err(|_| anyhow::anyhow!("proposer_pubkey is not valid hex"))?;
+        let vk = VerifyingKey::try_from(pk_bytes.as_slice())
+            .map_err(|_| anyhow::anyhow!("proposer_pubkey is not a valid Ed25519 key"))?;
+        let sig_bytes = hex::decode(&ann.signature)
+            .map_err(|_| anyhow::anyhow!("signature is not valid hex"))?;
+        let sig = Signature::try_from(sig_bytes.as_slice())
+            .map_err(|_| anyhow::anyhow!("signature is not a valid Ed25519 signature"))?;
+        vk.verify(sig_msg.as_bytes(), &sig)
+            .map_err(|_| anyhow::anyhow!("Signature verification failed"))
+    })();
+
+    if let Err(e) = sig_valid {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({ "error": format!("Invalid proposer signature: {}", e) })),
+        )
+            .into_response();
+    }
+
+    // ── 2. Proposer must be a registered validator ────────────────────────────
+    let s = state.read().await;
+    let is_validator = s
+        .validator_set
+        .validators
+        .iter()
+        .any(|v| v.pubkey == ann.proposer_pubkey);
+
+    if !is_validator {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "error": format!(
+                    "Proposer pubkey {} is not a registered validator",
+                    &ann.proposer_pubkey[..ann.proposer_pubkey.len().min(16)]
+                )
+            })),
+        )
+            .into_response();
+    }
+
     tracing::debug!(
-        "Block announcement: height={} hash={}",
-        ann.height,
-        &ann.block_hash[..std::cmp::min(12, ann.block_hash.len())]
+        proposer = %ann.proposer,
+        height = ann.height,
+        hash = %&ann.block_hash[..ann.block_hash.len().min(12)],
+        "Block announcement accepted"
     );
-    Json(serde_json::json!({ "status": "noted" }))
+    Json(serde_json::json!({ "status": "noted" })).into_response()
 }
 
 // GET /v1/publishers/:pubkey

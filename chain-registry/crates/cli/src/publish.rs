@@ -8,6 +8,7 @@ use common::proto::SubmitRequest;
 use common::{PackageId, PackageManifest, PublishRequest};
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use std::path::Path;
+use std::time::Duration;
 use zk_validator::{PackageInputs, ZkValidator};
 
 pub async fn run(
@@ -120,10 +121,12 @@ pub async fn run(
     let pb_zk = ProgressBar::with_draw_target(Some(0), ProgressDrawTarget::stderr());
     pb_zk.set_style(
         ProgressStyle::default_spinner()
-            .template("{spinner:.green} {msg}")
+            .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
+            .template("{spinner:.cyan} {msg} [{elapsed}]")
             .context("Invalid spinner template")?,
     );
-    pb_zk.set_message("Computing Groth16 SNARK...");
+    pb_zk.set_message("Computing Groth16 SNARK…");
+    pb_zk.enable_steady_tick(Duration::from_millis(80));
 
     let validator = ZkValidator::new().context("Failed to initialize ZK validator")?;
 
@@ -163,7 +166,11 @@ pub async fn run(
         .context("ZK proof generation failed")?;
     let proof_bytes =
         ZkValidator::serialize_proof(&proof).context("ZK proof serialization failed")?;
-    pb_zk.finish_with_message("✓ ZK content-hash attestation generated");
+    let zk_elapsed = pb_zk.elapsed();
+    pb_zk.finish_with_message(format!(
+        "✓ ZK content-hash attestation generated ({:.1}s)",
+        zk_elapsed.as_secs_f32()
+    ));
 
     // ── 6. Submit via gRPC (Primary High-Speed Tunnel) ────────────────────────
     let base_url = node_url
@@ -227,12 +234,26 @@ pub async fn run(
     );
     pb_submit.set_message(format!("Submitting to {}", url));
 
-    let resp = reqwest::Client::new()
-        .post(&url)
-        .json(&request)
-        .send()
-        .await
-        .context("Failed to reach registry node")?;
+    let request_clone = request.clone();
+    let url_clone = url.clone();
+    let resp = crate::retry::with_retry(
+        "submit package",
+        3,
+        Duration::from_millis(500),
+        move || {
+            let req = request_clone.clone();
+            let u = url_clone.clone();
+            async move {
+                reqwest::Client::new()
+                    .post(&u)
+                    .json(&req)
+                    .send()
+                    .await
+                    .context("Failed to reach registry node")
+            }
+        },
+    )
+    .await?;
 
     pb_submit.finish_and_clear();
 
@@ -298,11 +319,31 @@ async fn pin_to_ipfs_with_progress(bytes: &[u8], pb: &ProgressBar) -> Result<Str
             .expect("Valid progress bar template"),
     );
 
-    let local = reqwest::Client::new()
-        .post(&add_url)
-        .multipart(form)
-        .send()
-        .await;
+    let bytes_owned = bytes.to_vec();
+    let add_url_owned = add_url.clone();
+    let ipfs_base_owned = ipfs_base.clone();
+    let local = crate::retry::with_retry(
+        "IPFS upload",
+        3,
+        Duration::from_millis(500),
+        move || {
+            use reqwest::multipart as mp;
+            let form = mp::Form::new().part(
+                "file",
+                mp::Part::bytes(bytes_owned.clone()).file_name("package.tgz"),
+            );
+            let url = add_url_owned.clone();
+            async move {
+                reqwest::Client::new()
+                    .post(&url)
+                    .multipart(form)
+                    .send()
+                    .await
+                    .map_err(|e| anyhow::anyhow!("IPFS daemon not reachable: {}", e))
+            }
+        },
+    )
+    .await;
 
     pb.set_position(bytes.len() as u64);
 
@@ -323,8 +364,9 @@ async fn pin_to_ipfs_with_progress(bytes: &[u8], pb: &ProgressBar) -> Result<Str
         }
         Err(e) => {
             bail!(
-                "IPFS daemon not reachable at {}. Please start 'ipfs daemon'. Error: {}",
-                ipfs_base,
+                "IPFS daemon not reachable at {} after 3 attempts. \
+                 Please start 'ipfs daemon'. Error: {}",
+                ipfs_base_owned,
                 e
             )
         }
@@ -656,12 +698,26 @@ pub async fn submit_signed(signed_file: &Path, node_url: Option<&str>) -> Result
         node_url.unwrap_or("https://registry.chain-pkg.io").trim_end_matches('/')
     );
 
-    let resp = reqwest::Client::new()
-        .post(&url)
-        .json(&request)
-        .send()
-        .await
-        .context("Failed to reach registry node")?;
+    let request_clone2 = request.clone();
+    let url_clone2 = url.clone();
+    let resp = crate::retry::with_retry(
+        "submit signed package",
+        3,
+        Duration::from_millis(500),
+        move || {
+            let req = request_clone2.clone();
+            let u = url_clone2.clone();
+            async move {
+                reqwest::Client::new()
+                    .post(&u)
+                    .json(&req)
+                    .send()
+                    .await
+                    .context("Failed to reach registry node")
+            }
+        },
+    )
+    .await?;
 
     if resp.status().is_success() {
         println!("  ✓ Package submitted to pending pool from offline signature.");

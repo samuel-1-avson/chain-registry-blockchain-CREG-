@@ -15,7 +15,10 @@ const BUILD_STAKING_ADDR = import.meta.env.VITE_STAKING_ADDR || null
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 const DEFAULT_VALIDATOR_REGISTRATION_MODE = 'staking-plus-identity-sync'
 const DEFAULT_VALIDATOR_REGISTRATION_NOTE = 'Stake on-chain, register your validator EVM address, node ID, and Ed25519 pubkey with /v1/validators/register, wait for governance approval, and the node sync loop will admit active validators into consensus automatically.'
-const PRIVATE_KEY_WALLET_ENABLED = import.meta.env.DEV || import.meta.env.VITE_DEV_MODE === 'true'
+// Private key input is only enabled in Vite dev mode (import.meta.env.DEV).
+// VITE_DEV_MODE is intentionally NOT checked here — env vars are baked into the
+// production bundle and a misconfigured server could expose this to end users.
+const PRIVATE_KEY_WALLET_ENABLED = import.meta.env.DEV === true
 const DEFAULT_NETWORK_PROFILE_ID = import.meta.env.VITE_DEFAULT_NETWORK_PROFILE || 'anvil'
 
 const buildChainConfig = (id, name, rpcUrl, nativeCurrency = { name: 'Ether', symbol: 'ETH', decimals: 18 }) => ({
@@ -298,6 +301,12 @@ function App() {
   const [stakeLoading, setStakeLoading] = useState(false)
   const [sponsoredStakeLoading, setSponsoredStakeLoading] = useState(false)
   const [stakeResult, setStakeResult] = useState(null)
+  const [stakeTxHistory, setStakeTxHistory] = useState(() => {
+    try {
+      const raw = window.localStorage.getItem('creg.stakeTxHistory')
+      return raw ? JSON.parse(raw) : []
+    } catch { return [] }
+  })
   const [stakeAmount, setStakeAmount] = useState('')
   const [validatorRegistrations, setValidatorRegistrations] = useState([])
   const [validatorIdentityForm, setValidatorIdentityForm] = useState({ alias: '', nodeId: '', ed25519Pubkey: '' })
@@ -325,8 +334,14 @@ function App() {
   const [showPublishForm, setShowPublishForm] = useState(false)
   const [publishForm, setPublishForm] = useState({ ecosystem: 'npm', name: '', version: '', ipfs_cid: '', content_hash: '', publisher_pubkey: '', signature: '' })
   const [publishStatus, setPublishStatus] = useState(null)
+  const [publishErrors, setPublishErrors] = useState({})
   const [publisherProfile, setPublisherProfile] = useState(null)
   const [publisherPackages, setPublisherPackages] = useState([])
+
+  // SSE connection health (WEB-H02)
+  const [sseConnected, setSseConnected] = useState(false)
+  const [sseReconnectIn, setSseReconnectIn] = useState(0)
+  const sseReconnectTimerRef = useRef(null)
 
   const browserHost = typeof window !== 'undefined' && window.location.hostname ? window.location.hostname : '127.0.0.1'
   const explorerOrigin = typeof window !== 'undefined' ? window.location.origin : 'http://127.0.0.1:3000'
@@ -513,6 +528,24 @@ function App() {
     return await response.json()
   }, [])
 
+  // Record a successful staking tx into localStorage history (WEB-M02).
+  const recordStakeTx = useCallback((type, amount, txHash) => {
+    const entry = {
+      type,           // e.g. 'publisher' | 'validator' | 'sponsored'
+      amount,
+      txHash: txHash || null,
+      network: activeNetworkProfileId,
+      at: new Date().toISOString(),
+    }
+    setStakeTxHistory(prev => {
+      const next = [entry, ...prev].slice(0, 50) // keep last 50
+      try {
+        window.localStorage.setItem('creg.stakeTxHistory', JSON.stringify(next))
+      } catch { /* storage full — ignore */ }
+      return next
+    })
+  }, [activeNetworkProfileId])
+
   const refreshRecentBlocks = useCallback(async (tipHeight) => {
     const currentBlocks = blocksRef.current
     const currentTopHeight = currentBlocks[0]?.header?.height
@@ -662,15 +695,32 @@ function App() {
     }
   }, [fetchData])
 
-  // SSE Event Stream
+  // SSE Event Stream (WEB-H02: reconnect logic + connection banner)
   useEffect(() => {
     let retryCount = 0
-    const MAX_RETRIES = 10
+    const MAX_RETRIES = 20
     let retryTimeout = null
+    let countdownInterval = null
+
+    const startCountdown = (delaySecs) => {
+      setSseReconnectIn(delaySecs)
+      if (countdownInterval) clearInterval(countdownInterval)
+      countdownInterval = setInterval(() => {
+        setSseReconnectIn(prev => {
+          if (prev <= 1) { clearInterval(countdownInterval); return 0 }
+          return prev - 1
+        })
+      }, 1000)
+    }
 
     const initSSE = () => {
       const es = new EventSource(`${API_BASE}/v1/events`)
-      es.onopen = () => { retryCount = 0 }
+      es.onopen = () => {
+        retryCount = 0
+        setSseConnected(true)
+        setSseReconnectIn(0)
+        if (countdownInterval) clearInterval(countdownInterval)
+      }
       es.onmessage = (e) => {
         try {
           const ev = JSON.parse(e.data)
@@ -682,10 +732,12 @@ function App() {
       }
       es.onerror = () => {
         es.close()
+        setSseConnected(false)
         if (retryCount < MAX_RETRIES) {
-          const delay = Math.min(1000 * Math.pow(2, retryCount), 30000)
+          const delaySecs = Math.min(Math.pow(2, retryCount), 30)
           retryCount++
-          retryTimeout = setTimeout(initSSE, delay)
+          startCountdown(delaySecs)
+          retryTimeout = setTimeout(initSSE, delaySecs * 1000)
         }
       }
       sseRef.current = es
@@ -695,6 +747,7 @@ function App() {
     return () => {
       sseRef.current?.close()
       if (retryTimeout) clearTimeout(retryTimeout)
+      if (countdownInterval) clearInterval(countdownInterval)
     }
   }, [])
 
@@ -884,7 +937,7 @@ function App() {
 
   const connectWallet = useCallback(async (privateKey) => {
     if (!PRIVATE_KEY_WALLET_ENABLED) {
-      alert('Direct private key input is disabled in this build. Use MetaMask, WalletConnect, or enable VITE_DEV_MODE for test builds.')
+      alert('Direct private key input is only available in local dev mode. Use MetaMask or WalletConnect instead.')
       return
     }
     try {
@@ -1004,6 +1057,7 @@ function App() {
           ? `Sponsored publisher stake confirmed for ${requestedAmount} tCREG.`
           : `Sponsored validator application confirmed for ${requestedAmount} tCREG.`
         setStakeResult({ success: true, message: payload.message || confirmedMessage, tx: txHash })
+        recordStakeTx(`sponsored-${role}`, requestedAmount, txHash)
         await refreshWalletBalance()
         await fetchData()
         return
@@ -1016,7 +1070,7 @@ function App() {
 
       await new Promise((resolve) => window.setTimeout(resolve, 2000))
     }
-  }, [directRelayerUrl, refreshWalletBalance, fetchData])
+  }, [directRelayerUrl, refreshWalletBalance, fetchData, recordStakeTx])
 
   const fundConnectedWallet = useCallback(async () => {
     if (!walletAccount?.address) return
@@ -1142,6 +1196,7 @@ function App() {
         })
         await publicClient.waitForTransactionReceipt({ hash: stakeTx })
         setStakeResult({ success: true, message: `Staked ${requestedAmount} tCREG as publisher`, tx: stakeTx })
+        recordStakeTx('publisher', requestedAmount, stakeTx)
       } else {
         const approveTx = await walletClient.writeContract({
           account: walletSigner,
@@ -1163,6 +1218,7 @@ function App() {
           ? 'Waiting for governance approval and sync admission.'
           : 'Next step: register this wallet to a validator node identity below so the node can admit you after approval.'
         setStakeResult({ success: true, message: `Applied on-chain as validator with ${requestedAmount} tCREG. ${nextStepMessage}`, tx: stakeTx })
+        recordStakeTx('validator', requestedAmount, stakeTx)
       }
       await refreshWalletBalance()
       await fetchData()
@@ -1171,7 +1227,7 @@ function App() {
     } finally {
       setStakeLoading(false)
     }
-  }, [walletAccount, walletProvider, stakeAmount, tokenContractAddress, stakingContractAddress, refreshWalletBalance, walletValidatorRegistration, fetchData, walletNativeBalance, activeChain, activeRpcUrl, activeNetworkProfile])
+  }, [walletAccount, walletProvider, stakeAmount, tokenContractAddress, stakingContractAddress, refreshWalletBalance, walletValidatorRegistration, fetchData, walletNativeBalance, activeChain, activeRpcUrl, activeNetworkProfile, recordStakeTx])
 
   const doSponsoredStake = useCallback(async (role, amountOverride = null) => {
     const requestedAmount = amountOverride || stakeAmount
@@ -1372,32 +1428,28 @@ function App() {
   const submitPublish = useCallback(async () => {
     setPublishStatus(null)
 
-    // E-08: Validate inputs before submission
-    const { ecosystem, name, version, content_hash, ipfs_cid, publisher_pubkey, signature } = publishForm
-    if (!name || !name.trim()) {
-      setPublishStatus({ ok: false, msg: 'Package name is required' })
+    // Build a per-field error map so the UI can highlight each invalid input.
+    const { name, version, content_hash, ipfs_cid, publisher_pubkey, signature } = publishForm
+    const errs = {}
+    if (!name || !name.trim())
+      errs.name = 'Package name is required'
+    if (!version || !/^\d+\.\d+(\.\d+)?/.test(version))
+      errs.version = 'Must be valid semver (e.g. 1.0.0)'
+    if (!content_hash || !/^[a-f0-9]{64}$/i.test(content_hash))
+      errs.content_hash = '64-char hex SHA-256 required'
+    if (!ipfs_cid || !/^(Qm[a-zA-Z0-9]{44}|bafy[a-zA-Z0-9]+)$/.test(ipfs_cid))
+      errs.ipfs_cid = 'Expected Qm… (v0) or bafy… (v1) CID'
+    if (!publisher_pubkey || !/^[a-f0-9]{64}$/i.test(publisher_pubkey))
+      errs.publisher_pubkey = 'Ed25519 pubkey must be 64 hex chars'
+    if (!signature || !/^[a-f0-9]{128}$/i.test(signature))
+      errs.signature = 'Ed25519 signature must be 128 hex chars'
+
+    if (Object.keys(errs).length > 0) {
+      setPublishErrors(errs)
+      setPublishStatus({ ok: false, msg: 'Please fix the highlighted fields' })
       return
     }
-    if (!version || !/^\d+\.\d+\.\d+/.test(version)) {
-      setPublishStatus({ ok: false, msg: 'Version must be valid semver (e.g. 1.0.0)' })
-      return
-    }
-    if (!content_hash || !/^[a-f0-9]{64}$/i.test(content_hash)) {
-      setPublishStatus({ ok: false, msg: 'Content hash must be a 64-char hex SHA-256' })
-      return
-    }
-    if (!ipfs_cid || !/^(Qm[a-zA-Z0-9]{44}|bafy[a-zA-Z0-9]+)$/.test(ipfs_cid)) {
-      setPublishStatus({ ok: false, msg: 'IPFS CID looks invalid (expected Qm... or bafy...)' })
-      return
-    }
-    if (!publisher_pubkey || !/^[a-f0-9]{64}$/i.test(publisher_pubkey)) {
-      setPublishStatus({ ok: false, msg: 'Publisher public key must be 64 hex chars' })
-      return
-    }
-    if (!signature || signature.length < 64) {
-      setPublishStatus({ ok: false, msg: 'Signature is required' })
-      return
-    }
+    setPublishErrors({})
 
     try {
       const body = {
@@ -1415,6 +1467,7 @@ function App() {
       })
       if (res.ok) {
         setPublishStatus({ ok: true, msg: 'Package submitted for validation!' })
+        setPublishErrors({})
         setShowPublishForm(false)
         setPublishForm({ ecosystem: 'npm', name: '', version: '', ipfs_cid: '', content_hash: '', publisher_pubkey: '', signature: '' })
         fetchPackageList(0)
@@ -1425,7 +1478,7 @@ function App() {
     } catch (e) {
       setPublishStatus({ ok: false, msg: e.message })
     }
-  }, [publishForm, fetchPackageList])
+  }, [publishForm, fetchPackageList, setPublishErrors])
 
   const fetchPublisherProfile = useCallback(async (pubkey) => {
     try {
@@ -1515,6 +1568,26 @@ function App() {
           </div>
         </div>
       </header>
+
+      {/* SSE Reconnect Banner (WEB-H02) */}
+      {!sseConnected && (
+        <div style={{
+          background: '#7f1d1d',
+          borderBottom: '1px solid #ef4444',
+          color: '#fca5a5',
+          padding: '6px 16px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          fontSize: '0.85rem',
+          fontWeight: 500,
+        }}>
+          <span style={{ color: '#ef4444', fontSize: '1rem' }}>⚠</span>
+          {sseReconnectIn > 0
+            ? `Live event stream disconnected — reconnecting in ${sseReconnectIn}s…`
+            : 'Live event stream disconnected — reconnecting…'}
+        </div>
+      )}
 
       {/* Stats Grid */}
       <div className="stats-grid stagger-children">
@@ -1705,12 +1778,19 @@ function App() {
                           </td>
                           <td className="mono">{formatStake(node.stake || 0)}</td>
                           <td>
-                            <div className="rep-bar">
-                              <div className="rep-track">
-                                <div className="rep-fill" style={{ width: `${node.reputation || 0}%` }} />
-                              </div>
-                              <span className="rep-value">{node.reputation || 0}</span>
-                            </div>
+                            {(() => {
+                              const rep = node.reputation || 0
+                              const color = rep >= 80 ? '#22c55e' : rep >= 60 ? '#eab308' : rep >= 40 ? '#f97316' : '#ef4444'
+                              const label = rep >= 80 ? 'High' : rep >= 60 ? 'Good' : rep >= 40 ? 'Fair' : 'Low'
+                              return (
+                                <div className="rep-bar" title={`Reputation: ${rep}/100 (${label})`}>
+                                  <div className="rep-track">
+                                    <div className="rep-fill" style={{ width: `${rep}%`, background: color }} />
+                                  </div>
+                                  <span className="rep-value" style={{ color }}>{rep}</span>
+                                </div>
+                              )
+                            })()}
                           </td>
                           <td><StatusBadge status={node.status} /></td>
                         </tr>
@@ -1753,6 +1833,7 @@ function App() {
                       <button className="detail-close" onClick={() => setShowPublishForm(false)}>✕</button>
                     </div>
                     <div className="detail-content" style={{ display: 'grid', gap: 'var(--space-2)' }}>
+                      {/* Ecosystem / Name / Version row */}
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr 1fr', gap: 'var(--space-2)' }}>
                         <select
                           className="search-input"
@@ -1764,19 +1845,71 @@ function App() {
                           <option value="cargo">cargo</option>
                           <option value="go">go</option>
                         </select>
-                        <input className="search-input" placeholder="Package name" value={publishForm.name}
-                          onChange={e => setPublishForm(f => ({ ...f, name: e.target.value }))} />
-                        <input className="search-input" placeholder="Version (e.g. 1.0.0)" value={publishForm.version}
-                          onChange={e => setPublishForm(f => ({ ...f, version: e.target.value }))} />
+                        <div>
+                          <input
+                            className="search-input"
+                            placeholder="Package name"
+                            value={publishForm.name}
+                            style={publishErrors.name ? { borderColor: '#ef4444', outlineColor: '#ef4444' } : {}}
+                            onChange={e => { setPublishForm(f => ({ ...f, name: e.target.value })); setPublishErrors(ev => ({ ...ev, name: null })) }}
+                          />
+                          {publishErrors.name && <p style={{ color: '#ef4444', fontSize: '0.75rem', margin: '2px 0 0' }}>{publishErrors.name}</p>}
+                        </div>
+                        <div>
+                          <input
+                            className="search-input"
+                            placeholder="Version (e.g. 1.0.0)"
+                            value={publishForm.version}
+                            style={publishErrors.version ? { borderColor: '#ef4444', outlineColor: '#ef4444' } : {}}
+                            onChange={e => { setPublishForm(f => ({ ...f, version: e.target.value })); setPublishErrors(ev => ({ ...ev, version: null })) }}
+                          />
+                          {publishErrors.version && <p style={{ color: '#ef4444', fontSize: '0.75rem', margin: '2px 0 0' }}>{publishErrors.version}</p>}
+                        </div>
                       </div>
-                      <input className="search-input" placeholder="IPFS CID (bafy...)" value={publishForm.ipfs_cid}
-                        onChange={e => setPublishForm(f => ({ ...f, ipfs_cid: e.target.value }))} />
-                      <input className="search-input" placeholder="Content hash (SHA-256 hex)" value={publishForm.content_hash}
-                        onChange={e => setPublishForm(f => ({ ...f, content_hash: e.target.value }))} />
-                      <input className="search-input" placeholder="Publisher public key (hex)" value={publishForm.publisher_pubkey}
-                        onChange={e => setPublishForm(f => ({ ...f, publisher_pubkey: e.target.value }))} />
-                      <input className="search-input" placeholder="Ed25519 signature (hex)" value={publishForm.signature}
-                        onChange={e => setPublishForm(f => ({ ...f, signature: e.target.value }))} />
+                      {/* IPFS CID */}
+                      <div>
+                        <input
+                          className="search-input"
+                          placeholder="IPFS CID (bafy… or Qm…)"
+                          value={publishForm.ipfs_cid}
+                          style={publishErrors.ipfs_cid ? { borderColor: '#ef4444', outlineColor: '#ef4444' } : {}}
+                          onChange={e => { setPublishForm(f => ({ ...f, ipfs_cid: e.target.value })); setPublishErrors(ev => ({ ...ev, ipfs_cid: null })) }}
+                        />
+                        {publishErrors.ipfs_cid && <p style={{ color: '#ef4444', fontSize: '0.75rem', margin: '2px 0 0' }}>{publishErrors.ipfs_cid}</p>}
+                      </div>
+                      {/* Content hash */}
+                      <div>
+                        <input
+                          className="search-input"
+                          placeholder="Content hash (SHA-256, 64 hex chars)"
+                          value={publishForm.content_hash}
+                          style={publishErrors.content_hash ? { borderColor: '#ef4444', outlineColor: '#ef4444' } : {}}
+                          onChange={e => { setPublishForm(f => ({ ...f, content_hash: e.target.value })); setPublishErrors(ev => ({ ...ev, content_hash: null })) }}
+                        />
+                        {publishErrors.content_hash && <p style={{ color: '#ef4444', fontSize: '0.75rem', margin: '2px 0 0' }}>{publishErrors.content_hash}</p>}
+                      </div>
+                      {/* Publisher pubkey */}
+                      <div>
+                        <input
+                          className="search-input"
+                          placeholder="Publisher public key (64 hex chars)"
+                          value={publishForm.publisher_pubkey}
+                          style={publishErrors.publisher_pubkey ? { borderColor: '#ef4444', outlineColor: '#ef4444' } : {}}
+                          onChange={e => { setPublishForm(f => ({ ...f, publisher_pubkey: e.target.value })); setPublishErrors(ev => ({ ...ev, publisher_pubkey: null })) }}
+                        />
+                        {publishErrors.publisher_pubkey && <p style={{ color: '#ef4444', fontSize: '0.75rem', margin: '2px 0 0' }}>{publishErrors.publisher_pubkey}</p>}
+                      </div>
+                      {/* Signature */}
+                      <div>
+                        <input
+                          className="search-input"
+                          placeholder="Ed25519 signature (128 hex chars)"
+                          value={publishForm.signature}
+                          style={publishErrors.signature ? { borderColor: '#ef4444', outlineColor: '#ef4444' } : {}}
+                          onChange={e => { setPublishForm(f => ({ ...f, signature: e.target.value })); setPublishErrors(ev => ({ ...ev, signature: null })) }}
+                        />
+                        {publishErrors.signature && <p style={{ color: '#ef4444', fontSize: '0.75rem', margin: '2px 0 0' }}>{publishErrors.signature}</p>}
+                      </div>
                       <button className="nav-tab active" onClick={submitPublish} style={{ justifySelf: 'end', padding: '8px 24px' }}>
                         Submit Package
                       </button>
@@ -2441,6 +2574,44 @@ function App() {
                             </div>
                           </div>
                         )}
+
+                        {/* Recent Transactions (WEB-M02: persisted to localStorage) */}
+                        {stakeTxHistory.length > 0 && (
+                          <div className="wallet-section">
+                            <div className="wallet-section-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <span>Recent Transactions</span>
+                              <button
+                                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '0.75rem' }}
+                                onClick={() => {
+                                  setStakeTxHistory([])
+                                  try { window.localStorage.removeItem('creg.stakeTxHistory') } catch {}
+                                }}
+                              >
+                                Clear
+                              </button>
+                            </div>
+                            {stakeTxHistory.slice(0, 10).map((entry, i) => (
+                              <div key={i} className="wallet-result" style={{ marginBottom: '4px', fontSize: '0.8rem', padding: '6px 10px' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                  <span style={{ color: 'var(--accent-success)', textTransform: 'capitalize' }}>
+                                    {entry.type} · {entry.amount} tCREG
+                                  </span>
+                                  <span style={{ color: 'var(--text-muted)' }}>{timeAgo(entry.at)}</span>
+                                </div>
+                                {entry.txHash && (
+                                  <div className="wallet-tx" style={{ marginTop: '2px' }}>
+                                    Tx: {truncateHash(entry.txHash, 10, 6)}
+                                  </div>
+                                )}
+                                {entry.network && entry.network !== activeNetworkProfileId && (
+                                  <div style={{ color: 'var(--text-muted)', fontSize: '0.72rem' }}>
+                                    Network: {entry.network}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </>
                     )}
 
@@ -2600,7 +2771,16 @@ function App() {
                   </div>
                   <div className="detail-row">
                     <span className="detail-label">Reputation</span>
-                    <span className="detail-value">{selectedValidator.reputation || 0}/100</span>
+                    {(() => {
+                      const rep = selectedValidator.reputation || 0
+                      const color = rep >= 80 ? '#22c55e' : rep >= 60 ? '#eab308' : rep >= 40 ? '#f97316' : '#ef4444'
+                      const band = rep >= 80 ? 'High' : rep >= 60 ? 'Good' : rep >= 40 ? 'Fair' : 'Low'
+                      return (
+                        <span className="detail-value" style={{ color }} title={`${band} reputation`}>
+                          {rep}/100 <span style={{ fontSize: '0.75rem', opacity: 0.8 }}>({band})</span>
+                        </span>
+                      )
+                    })()}
                   </div>
                 </div>
 
