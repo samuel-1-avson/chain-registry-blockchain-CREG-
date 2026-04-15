@@ -19,13 +19,15 @@ use axum::{
 };
 use dashmap::DashMap;
 use chrono::{DateTime, Utc};
+use metrics::{counter, gauge};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
+use tokio_postgres::NoTls;
 use tower_http::cors::{Any, CorsLayer};
-use tracing::{info, error};
+use tracing::{info, warn, error};
 
 sol!(
     #[sol(rpc)]
@@ -148,10 +150,154 @@ impl RateLimiter {
     }
 }
 
+// ── Postgres-backed persistent rate limiter ───────────────────────────────────
+//
+// Falls back to in-memory behaviour if the Postgres connection is unavailable
+// so the faucet still starts when `FAUCET_PG_URL` is not set.
+
+/// Thin wrapper that persists cooldown timestamps to a Postgres table and uses
+/// the in-memory `RateLimiter` as a fast local cache.  On restart the Postgres
+/// table is the source of truth, preventing cooldown bypass via container restart.
+struct PersistentRateLimiter {
+    memory: RateLimiter,
+    pg: Option<Arc<tokio_postgres::Client>>,
+}
+
+impl PersistentRateLimiter {
+    /// Connect to Postgres (if `pg_url` is non-empty) and ensure the schema
+    /// exists.  Returns an instance that degrades gracefully to in-memory-only
+    /// if Postgres is unreachable.
+    async fn new(pg_url: &str) -> Self {
+        let pg = if pg_url.is_empty() {
+            info!("FAUCET_PG_URL not set — rate-limiter running in-memory only (cooldowns reset on restart)");
+            None
+        } else {
+            match tokio_postgres::connect(pg_url, NoTls).await {
+                Ok((client, connection)) => {
+                    // Drive the connection on a background task.
+                    tokio::spawn(async move {
+                        if let Err(e) = connection.await {
+                            error!("Postgres rate-limiter connection error: {}", e);
+                        }
+                    });
+
+                    // Create table if it does not exist.
+                    let create = client
+                        .execute(
+                            "CREATE TABLE IF NOT EXISTS faucet_rate_limits (\
+                              key TEXT PRIMARY KEY, \
+                              last_request_unix BIGINT NOT NULL\
+                            )",
+                            &[],
+                        )
+                        .await;
+
+                    match create {
+                        Ok(_) => {
+                            info!("Postgres rate-limiter table ready");
+                            Some(Arc::new(client))
+                        }
+                        Err(e) => {
+                            warn!("Could not create faucet_rate_limits table: {} — falling back to in-memory", e);
+                            None
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!("Could not connect to Postgres for rate-limiter: {} — falling back to in-memory", e);
+                    None
+                }
+            }
+        };
+
+        Self {
+            memory: RateLimiter::new(),
+            pg,
+        }
+    }
+
+    /// Check cooldown: consult in-memory first; if not found, query Postgres.
+    async fn check_address(&self, address: &str, cooldown: Duration) -> Result<(), CooldownRejection> {
+        // Fast path — in-memory cache hit.
+        if let Err(r) = self.memory.check_address(address, cooldown) {
+            return Err(r);
+        }
+        // Slow path — Postgres source of truth (catches post-restart attempts).
+        if let Some(pg) = &self.pg {
+            let key = format!("addr:{}", address.to_lowercase());
+            if let Ok(rows) = pg.query("SELECT last_request_unix FROM faucet_rate_limits WHERE key=$1", &[&key]).await {
+                if let Some(row) = rows.first() {
+                    let last_unix: i64 = row.get(0);
+                    let now_unix = chrono::Utc::now().timestamp();
+                    let elapsed_secs = (now_unix - last_unix).max(0) as u64;
+                    let cooldown_secs = cooldown.as_secs();
+                    if elapsed_secs < cooldown_secs {
+                        let remaining = cooldown_secs - elapsed_secs;
+                        return Err(CooldownRejection {
+                            message: format!("Please wait {} seconds before requesting again", remaining),
+                            retry_after_seconds: remaining,
+                        });
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn check_ip(&self, ip: &str, cooldown: Duration) -> Result<(), CooldownRejection> {
+        if let Err(r) = self.memory.check_ip(ip, cooldown) {
+            return Err(r);
+        }
+        if let Some(pg) = &self.pg {
+            let key = format!("ip:{}", ip);
+            if let Ok(rows) = pg.query("SELECT last_request_unix FROM faucet_rate_limits WHERE key=$1", &[&key]).await {
+                if let Some(row) = rows.first() {
+                    let last_unix: i64 = row.get(0);
+                    let now_unix = chrono::Utc::now().timestamp();
+                    let elapsed_secs = (now_unix - last_unix).max(0) as u64;
+                    let cooldown_secs = cooldown.as_secs();
+                    if elapsed_secs < cooldown_secs {
+                        let remaining = cooldown_secs - elapsed_secs;
+                        return Err(CooldownRejection {
+                            message: format!("IP rate limit: wait {} seconds", remaining),
+                            retry_after_seconds: remaining,
+                        });
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn record_request(&self, address: &str, ip: &str) {
+        // Update in-memory cache.
+        self.memory.record_request(address, ip);
+        // Persist to Postgres.
+        if let Some(pg) = &self.pg {
+            let now_unix = chrono::Utc::now().timestamp();
+            let addr_key = format!("addr:{}", address.to_lowercase());
+            let ip_key = format!("ip:{}", ip);
+            let upsert = "INSERT INTO faucet_rate_limits (key, last_request_unix) \
+                          VALUES ($1, $2) \
+                          ON CONFLICT (key) DO UPDATE SET last_request_unix = EXCLUDED.last_request_unix";
+            if let Err(e) = pg.execute(upsert, &[&addr_key, &now_unix]).await {
+                warn!("Rate-limiter Postgres write failed (addr): {}", e);
+            }
+            if let Err(e) = pg.execute(upsert, &[&ip_key, &now_unix]).await {
+                warn!("Rate-limiter Postgres write failed (ip): {}", e);
+            }
+        }
+    }
+
+    fn address_count(&self) -> usize {
+        self.memory.address_last_request.len()
+    }
+}
+
 /// Application state
 struct AppState {
     config: FaucetConfig,
-    rate_limiter: RateLimiter,
+    rate_limiter: PersistentRateLimiter,
     /// Active PoW challenges keyed by challenge string.
     pow_challenges: DashMap<String, PowChallenge>,
     /// Faucet statistics
@@ -267,9 +413,38 @@ async fn main() -> anyhow::Result<()> {
     info!("  RPC: {}", config.rpc_url);
     info!("  Faucet address: {}", config.faucet_address);
 
+    // ── Pre-flight balance check ──────────────────────────────────────────────
+    // Warn loudly at startup if the faucet wallet has no tokens.  This catches
+    // the common case where Anvil was restarted (losing on-chain state) without
+    // re-running deploy-contracts + sync-testnet-artifacts.
+    match get_token_balance(&config, &config.faucet_address).await {
+        Ok(0) => {
+            error!("╔═══════════════════════════════════════════════════════════╗");
+            error!("║  FAUCET BALANCE IS ZERO — drip requests WILL FAIL         ║");
+            error!("║  Fix: run scripts/start-testnet.ps1 (or Fund-TestnetFaucet)║");
+            error!("║  to redeploy contracts and refund this wallet.            ║");
+            error!("╚═══════════════════════════════════════════════════════════╝");
+        }
+        Ok(bal) => {
+            info!(
+                "  Faucet token balance: {:.2} tCREG — ready to drip",
+                bal as f64 / 1e18
+            );
+        }
+        Err(e) => {
+            warn!(
+                "Could not read faucet token balance at startup (RPC may not be ready yet): {}",
+                e
+            );
+        }
+    }
+
+    let pg_url = env_string("FAUCET_PG_URL", "");
+    let rate_limiter = PersistentRateLimiter::new(&pg_url).await;
+
     let state = Arc::new(AppState {
         config,
-        rate_limiter: RateLimiter::new(),
+        rate_limiter,
         pow_challenges: DashMap::new(),
         stats: Mutex::new(FaucetStats::default()),
     });
@@ -278,6 +453,22 @@ async fn main() -> anyhow::Result<()> {
         .allow_origin(Any)
         .allow_methods(Any)
         .allow_headers(Any);
+
+    // ── Prometheus metrics recorder ───────────────────────────────────────────
+    let prometheus_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
+        .install_recorder()
+        .expect("failed to install Prometheus metrics recorder");
+
+    // Pre-declare metric descriptions so they appear in /metrics even before
+    // the first drip.
+    metrics::describe_counter!("faucet_drips_total", "Total number of successful drip operations");
+    metrics::describe_counter!("faucet_token_drips_total", "Successful tCREG token drips");
+    metrics::describe_counter!("faucet_native_drips_total", "Successful native ETH gas drips");
+    metrics::describe_counter!("faucet_failures_total", "Failed drip attempts");
+    metrics::describe_counter!("faucet_rate_limited_total", "Requests rejected by rate limiter");
+    metrics::describe_counter!("faucet_pow_failures_total", "Requests rejected due to invalid PoW");
+    metrics::describe_gauge!("faucet_token_balance", "Current faucet tCREG token balance (raw wei)");
+    metrics::describe_gauge!("faucet_native_balance", "Current faucet native ETH balance (raw wei)");
 
     let app = Router::new()
         .route("/", get(index_page))
@@ -288,6 +479,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/balance/:address", get(get_balance))
         .route("/api/network", get(get_network_info))
         .route("/health", get(health_check))
+        .route("/metrics", get(move || {
+            let handle = prometheus_handle.clone();
+            async move { handle.render() }
+        }))
         .layer(cors)
         .with_state(state);
 
@@ -319,6 +514,25 @@ async fn main() -> anyhow::Result<()> {
     }
 
     info!("Faucet listening on http://{}", addr);
+
+    // ── Background balance gauge updater ─────────────────────────────────────
+    // Refreshes the Prometheus balance gauges every 30 seconds so Grafana always
+    // shows an up-to-date faucet wallet balance without waiting for a drip.
+    {
+        let bg_config = state.config.clone();
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(Duration::from_secs(30));
+            loop {
+                ticker.tick().await;
+                if let Ok(bal) = get_token_balance(&bg_config, &bg_config.faucet_address).await {
+                    gauge!("faucet_token_balance").set(bal as f64);
+                }
+                if let Ok(bal) = get_native_balance(&bg_config, &bg_config.faucet_address).await {
+                    gauge!("faucet_native_balance").set(bal as f64);
+                }
+            }
+        });
+    }
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await?;
@@ -575,6 +789,7 @@ async fn handle_drip(
         match pow_entry {
             Some((_, pc)) if pc.created_at.elapsed() < POW_TTL => {
                 if !verify_pow(&challenge, &nonce, pc.difficulty) {
+                    counter!("faucet_pow_failures_total", "reason" => "invalid_solution").increment(1);
                     return (
                         StatusCode::BAD_REQUEST,
                         JsonResponse(DripResponse::error("Invalid proof-of-work solution.")),
@@ -582,6 +797,7 @@ async fn handle_drip(
                 }
             }
             _ => {
+                counter!("faucet_pow_failures_total", "reason" => "expired_or_unknown").increment(1);
                 return (
                     StatusCode::BAD_REQUEST,
                     JsonResponse(DripResponse::error("Unknown or expired challenge. Request a new one.")),
@@ -614,7 +830,8 @@ async fn handle_drip(
 
     // Check rate limits
     let cooldown = Duration::from_secs(state.config.cooldown_secs);
-    if let Err(rejection) = state.rate_limiter.check_address(&address, cooldown) {
+    if let Err(rejection) = state.rate_limiter.check_address(&address, cooldown).await {
+        counter!("faucet_rate_limited_total", "reason" => "address").increment(1);
         return (
             StatusCode::TOO_MANY_REQUESTS,
             JsonResponse(DripResponse {
@@ -626,7 +843,8 @@ async fn handle_drip(
     }
 
     let ip_cooldown = Duration::from_secs(state.config.ip_cooldown_secs);
-    if let Err(rejection) = state.rate_limiter.check_ip(&client_ip, ip_cooldown) {
+    if let Err(rejection) = state.rate_limiter.check_ip(&client_ip, ip_cooldown).await {
+        counter!("faucet_rate_limited_total", "reason" => "ip").increment(1);
         return (
             StatusCode::TOO_MANY_REQUESTS,
             JsonResponse(DripResponse {
@@ -698,10 +916,12 @@ async fn handle_drip(
                     state.config.native_drip_amount as f64 / 10_f64.powi(18)
                 ));
                 native_tx_hash = Some(tx_hash);
+                counter!("faucet_native_drips_total").increment(1);
             }
             Err(err) => {
                 error!("Native gas drip failed: {}", err);
                 failures.push(format!("native ETH: {}", err));
+                counter!("faucet_failures_total", "kind" => "native").increment(1);
             }
         }
     }
@@ -711,21 +931,24 @@ async fn handle_drip(
             Ok(tx_hash) => {
                 parts.push(format!("{} tCREG", state.config.drip_amount / 10_u128.pow(18)));
                 token_tx_hash = Some(tx_hash);
+                counter!("faucet_token_drips_total").increment(1);
             }
             Err(err) => {
                 error!("Token drip failed: {}", err);
                 failures.push(format!("tCREG: {}", err));
+                counter!("faucet_failures_total", "kind" => "token").increment(1);
             }
         }
     }
 
     if token_tx_hash.is_some() || native_tx_hash.is_some() {
-            state.rate_limiter.record_request(&address, &client_ip);
+            state.rate_limiter.record_request(&address, &client_ip).await;
+            counter!("faucet_drips_total").increment(1);
 
             // Update stats
             let mut stats = state.stats.lock().await;
             stats.total_drips += 1;
-            stats.unique_addresses = state.rate_limiter.address_last_request.len();
+            stats.unique_addresses = state.rate_limiter.address_count();
             let current_token_total = stats.total_distributed.parse::<u128>().unwrap_or_default();
             let current_native_total = stats.total_native_distributed.parse::<u128>().unwrap_or_default();
             stats.total_distributed = (current_token_total

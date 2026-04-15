@@ -80,6 +80,46 @@ function Clear-ComposeEnvOverrides {
     }
 }
 
+function Assert-TlsCerts {
+    param(
+        [string]$RepoRoot
+    )
+
+    $certsDir = Join-Path $RepoRoot "testnet\certs"
+    $serverCrt = Join-Path $certsDir "server.crt"
+    $serverKey = Join-Path $certsDir "server.key"
+
+    if ((Test-Path $serverCrt) -and (Test-Path $serverKey)) {
+        Write-Host "TLS certificates found: $certsDir" -ForegroundColor Green
+        return
+    }
+
+    Write-Host "" -ForegroundColor Yellow
+    Write-Host "WARNING: TLS certificates not found in testnet/certs/" -ForegroundColor Yellow
+    Write-Host "  The node API will be served over plain HTTP." -ForegroundColor Yellow
+    Write-Host "  For a public testnet, generate certs first:" -ForegroundColor Yellow
+    Write-Host "    bash scripts/generate-tls-certs.sh" -ForegroundColor Yellow
+    Write-Host "" -ForegroundColor Yellow
+
+    # On Windows we can use PowerShell/certreq to generate a self-signed cert
+    # as a fallback when openssl is not available.
+    if (Get-Command openssl -ErrorAction SilentlyContinue) {
+        Write-Host "openssl found — generating self-signed TLS certs automatically..." -ForegroundColor Cyan
+        $genScript = Join-Path $RepoRoot "scripts\generate-tls-certs.sh"
+        if (Test-Path $genScript) {
+            bash $genScript $certsDir
+            if ((Test-Path $serverCrt) -and (Test-Path $serverKey)) {
+                Write-Host "TLS certificates generated successfully." -ForegroundColor Green
+            } else {
+                Write-Host "openssl ran but certs were not created. Continuing without TLS." -ForegroundColor Yellow
+            }
+        }
+    } else {
+        Write-Host "  openssl not found. Install Git Bash or WSL to auto-generate certs." -ForegroundColor Yellow
+        Write-Host "  Continuing without TLS (HTTP only)." -ForegroundColor Yellow
+    }
+}
+
 function Fund-TestnetFaucet {
     param(
         [string]$EnvFile,
@@ -157,13 +197,16 @@ if (-not $SkipExplorer) {
 Set-Location $repoRoot
 
 Ensure-TestnetEnvFile -RepoRoot $repoRoot -EnvFile $envFile
+Assert-TlsCerts -RepoRoot $repoRoot
 Assert-RequiredEnvValues -Path $envFile -Keys @(
     "NODE1_VALIDATOR_KEY",
     "VALIDATOR_SET_JSON",
     "DEPLOYER_KEY",
     "CREG_BRIDGE_KEY",
+    "FAUCET_PRIVATE_KEY",
     "FAUCET_ADDRESS",
-    "FAUCET_INITIAL_BALANCE"
+    "FAUCET_INITIAL_BALANCE",
+    "RELAYER_PRIVATE_KEY"
 )
 Clear-ComposeEnvOverrides -Keys @(
     "TESTNET_TOKEN_ADDR",

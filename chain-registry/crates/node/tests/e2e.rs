@@ -4,14 +4,22 @@
 
 use chrono::Utc;
 use common::{PackageId, PackageManifest, PublishRequest};
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 use tokio::{sync::RwLock, time::timeout};
 
 /// Helper: start a full node on a random port, return the base URL.
 async fn start_test_node() -> (String, tokio::task::JoinHandle<()>) {
     use node::{
-        api, chain_store::ChainStore, config::NodeConfig, events::new_event_bus, finalized_tx,
-        gossip::Gossip, pending_pool::PendingPool, publisher_index::PublisherIndex, NodeState,
+        api,
+        chain_store::ChainStore,
+        config::NodeConfig,
+        events::new_event_bus,
+        finalized_tx,
+        p2p::{P2PCommand, P2PHandle},
+        pending_pool::PendingPool,
+        publisher_index::PublisherIndex,
+        rate_limit::{RateLimitConfig, RateLimiter},
+        BridgeStatus, NodeState, P2PStatus,
     };
 
     let dir = tempfile::TempDir::new().expect("tempdir");
@@ -26,33 +34,53 @@ async fn start_test_node() -> (String, tokio::task::JoinHandle<()>) {
         peers: vec![],
         block_interval_secs: 1,
         ipfs_url: "http://127.0.0.1:5001".into(),
+        ..NodeConfig::default()
     };
 
     let event_bus = new_event_bus();
+    let (tx_s, tx_r) = finalized_tx::channel();
+
+    // Create a no-op P2P handle (the real P2P stack requires a live network).
+    let (p2p_sender, _p2p_rx) = tokio::sync::mpsc::channel::<P2PCommand>(1);
+    let p2p = P2PHandle { sender: p2p_sender };
+
+    // ZkValidator generates ephemeral keys when none are found on disk.
+    let zk_validator = std::sync::Arc::new(
+        zk_validator::ZkValidator::new().expect("ZkValidator init for e2e tests"),
+    );
+
     let state: Arc<RwLock<NodeState>> = Arc::new(RwLock::new(NodeState {
         chain,
         pending_pool: PendingPool::new(),
         publisher_index: PublisherIndex::new(),
+        validator_set: common::ValidatorSet::default(),
+        votes: std::collections::HashMap::new(),
         config: config.clone(),
         event_bus: Arc::clone(&event_bus),
+        p2p,
+        zk_validator,
+        tx_sender: tx_s.clone(),
+        p2p_status: P2PStatus::default(),
+        bridge_status: BridgeStatus::default(),
+        vrf_proofs: std::collections::HashMap::new(),
+        decryption_shares: std::collections::HashMap::new(),
+        validator_registrations: std::collections::HashMap::new(),
+        view_change_certs: std::collections::HashMap::new(),
     }));
 
-    let (tx_s, tx_r) = finalized_tx::channel();
-    let gossip = Arc::new(Gossip::new(vec![], "e2e-node".into()));
+    let limiter = RateLimiter::new(RateLimitConfig::default());
 
-    let app = api::router(Arc::clone(&state), event_bus);
+    let app = api::router(Arc::clone(&state), event_bus, limiter);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let url = format!("http://{}", addr);
 
     let state_bp = Arc::clone(&state);
     let state_vp = Arc::clone(&state);
-    let gossip_bp = Arc::clone(&gossip);
-    let gossip_vp = Arc::clone(&gossip);
 
     let handle = tokio::spawn(async move {
-        tokio::spawn(node::block_producer::run(state_bp, tx_r, gossip_bp));
-        tokio::spawn(node::validator_pipeline::run(state_vp, tx_s, gossip_vp));
+        tokio::spawn(node::block_producer::run(state_bp, tx_r));
+        tokio::spawn(node::validator_pipeline::run(state_vp, tx_s));
         axum::serve(listener, app).await.unwrap();
     });
 

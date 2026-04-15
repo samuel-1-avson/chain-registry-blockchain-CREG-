@@ -21,6 +21,7 @@ mod pidlock;
 mod proof;
 mod publisher_index;
 mod rate_limit;
+mod state;
 mod sync;
 mod validator_pipeline;
 
@@ -31,7 +32,6 @@ use alloy::{
 use anyhow::Result;
 use chrono::Utc;
 use common::ValidatorIdentity;
-use serde::Serialize;
 use std::{collections::HashMap, sync::Arc};
 use tokio::{
     sync::RwLock,
@@ -42,6 +42,10 @@ use tracing_subscriber::EnvFilter;
 use events::{new_event_bus, EventBus};
 use finalized_tx::{FinalizedTxReceiver, FinalizedTxSender};
 use publisher_index::PublisherIndex;
+use state::{
+    BridgeStatus, NodeState, P2PStatus, SharedState, ValidatorRegistrationStatus,
+    normalized_validator_key, validator_registration_status_text,
+};
 
 sol!(
     #[sol(rpc)]
@@ -58,43 +62,6 @@ sol!(
             );
     }
 );
-
-#[derive(Serialize, Clone, Debug, Default)]
-pub struct ValidatorRegistrationStatus {
-    pub alias: String,
-    pub identity: ValidatorIdentity,
-    pub registered_with_node: bool,
-    pub applied_on_chain: bool,
-    pub governance_approved: bool,
-    pub admitted_to_consensus: bool,
-    pub active: bool,
-    pub staking_state: String,
-    pub status: String,
-    pub stake: u64,
-    pub reputation: u32,
-    pub last_error: Option<String>,
-    pub last_synced_at: Option<String>,
-}
-
-pub fn normalized_validator_key(evm_address: &str) -> String {
-    evm_address.trim().to_ascii_lowercase()
-}
-
-pub fn validator_registration_status_text(registration: &ValidatorRegistrationStatus) -> String {
-    if registration.active {
-        "active".to_string()
-    } else if registration.admitted_to_consensus {
-        "admitted-to-consensus".to_string()
-    } else if registration.governance_approved {
-        "governance-approved".to_string()
-    } else if registration.applied_on_chain {
-        "applied-on-chain".to_string()
-    } else if registration.registered_with_node {
-        "identity-registered".to_string()
-    } else {
-        "unregistered".to_string()
-    }
-}
 
 fn staking_state_label(state: u8) -> &'static str {
     match state {
@@ -165,52 +132,6 @@ fn wei_to_creg_u64(value: alloy::primitives::U256) -> u64 {
     let whole_creg = value / alloy::primitives::U256::from(1_000_000_000_000_000_000u128);
     whole_creg.to_string().parse::<u64>().unwrap_or(u64::MAX)
 }
-
-/// Shared mutable state passed to every subsystem via Arc<RwLock<_>>.
-pub struct NodeState {
-    pub chain: chain_store::ChainStore,
-    pub pending_pool: pending_pool::PendingPool,
-    pub publisher_index: PublisherIndex,
-    pub validator_set: common::ValidatorSet,
-    pub votes: std::collections::HashMap<String, Vec<common::ValidatorSignature>>, // block_hash/canonical -> sigs
-    pub config: config::NodeConfig,
-    pub event_bus: EventBus,
-    pub p2p: p2p::P2PHandle,
-    pub zk_validator: Arc<zk_validator::ZkValidator>,
-    pub tx_sender: FinalizedTxSender,
-    // Live metrics for Explorer
-    pub p2p_status: P2PStatus,
-    pub bridge_status: BridgeStatus,
-    /// Cached VRF proofs from other validators: validator_id -> (output, proof)
-    pub vrf_proofs: std::collections::HashMap<String, (String, String)>,
-    /// Decryption shares received from peers: canonical -> Vec<KeyShare>
-    pub decryption_shares: std::collections::HashMap<String, Vec<threshold_encryption::KeyShare>>,
-    /// Validator registrations keyed by canonical EVM address.
-    pub validator_registrations: HashMap<String, ValidatorRegistrationStatus>,
-    /// View-change certificates accumulated from peers.
-    /// Outer key: block_hash. Middle key: proposed new_view number.
-    /// Inner set: validator IDs that have sent a certificate for this (block, view).
-    ///
-    /// A view-change is only applied once ⌊n/3⌋+1 certificates are received,
-    /// preventing a single Byzantine node from forcing a view-change.
-    pub view_change_certs: HashMap<String, HashMap<u32, std::collections::HashSet<String>>>,
-}
-
-#[derive(Serialize, Clone, Default)]
-pub struct P2PStatus {
-    pub peers: Vec<String>,
-    pub protocols: Vec<String>,
-}
-
-#[derive(Serialize, Clone, Default)]
-pub struct BridgeStatus {
-    pub last_finalized_eth_block: u64,
-    pub registry_address: String,
-    pub bridge_sync_status: String,
-    pub current_state_root: String,
-}
-
-pub type SharedState = Arc<RwLock<NodeState>>;
 
 async fn fetch_contract_code(
     client: &reqwest::Client,

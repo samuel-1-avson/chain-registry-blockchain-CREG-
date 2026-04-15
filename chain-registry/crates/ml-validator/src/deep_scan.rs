@@ -596,6 +596,14 @@ fn is_source_file_for_ecosystem(path: &str, ecosystem: &str) -> bool {
     }
 }
 
+/// Check whether a file path looks like executable source code.
+/// Uses the broad multi-ecosystem fallback; equivalent to
+/// `is_source_file_for_ecosystem(path, "")`.
+#[cfg(test)]
+fn is_source_file(path: &str) -> bool {
+    is_source_file_for_ecosystem(path, "")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

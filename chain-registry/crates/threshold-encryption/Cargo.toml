@@ -22,6 +22,9 @@ pbkdf2 = "0.12"
 k256 = { version = "0.13", features = ["ecdh", "schnorr"] }
 elliptic-curve = "0.13"
 
+# Ed25519 for signing decryption share responses
+ed25519-dalek = { workspace = true }
+
 # Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }

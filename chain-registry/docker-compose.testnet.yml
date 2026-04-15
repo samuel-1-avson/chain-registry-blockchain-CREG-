@@ -143,10 +143,12 @@ services:
         echo 'Deploying contracts...' &&
         forge script contracts/script/Deploy.s.sol:DeployChainRegistry --rpc-url http://anvil:8545 --broadcast --via-ir -vvvv
     environment:
-      - DEPLOYER_KEY=${DEPLOYER_KEY:-0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80}
-      - CREG_BRIDGE_KEY=${CREG_BRIDGE_KEY:-0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a}
+      # Keys MUST be set in .env.testnet — no hardcoded fallbacks for security.
+      # Run scripts/generate-testnet-keys.ps1 to create .env.testnet from scratch.
+      - DEPLOYER_KEY=${DEPLOYER_KEY:?DEPLOYER_KEY must be set in .env.testnet}
+      - CREG_BRIDGE_KEY=${CREG_BRIDGE_KEY:?CREG_BRIDGE_KEY must be set in .env.testnet}
       - TESTNET_MODE=true
-      - DEPLOYMENT_MANIFEST_PATH=contracts/deployments/latest.json  
+      - DEPLOYMENT_MANIFEST_PATH=contracts/deployments/latest.json
 
   # ── PostgreSQL Mirror (optional but recommended for testnet) ─────────────────
   postgres:
@@ -188,7 +190,7 @@ services:
       <<: *node-env
       CREG_NODE_ID: "node-1"
       CREG_VALIDATOR_KEY: "${NODE1_VALIDATOR_KEY}"
-      CREG_BRIDGE_KEY: "${CREG_BRIDGE_KEY:-0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a}"
+      CREG_BRIDGE_KEY: "${CREG_BRIDGE_KEY:?CREG_BRIDGE_KEY must be set in .env.testnet}"
       CREG_LISTEN: "0.0.0.0:8080"
       CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/9000"
       CREG_P2P_SEEDS: "${CREG_P2P_SEEDS:-}"
@@ -235,8 +237,9 @@ services:
     environment:
       FAUCET_PORT: "${FAUCET_PORT:-8082}"
       FAUCET_RPC_URL: "${FAUCET_RPC_URL:-http://anvil:8545}"
-      FAUCET_PRIVATE_KEY: "${FAUCET_PRIVATE_KEY:-0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d}"
-      FAUCET_ADDRESS: "${FAUCET_ADDRESS:-0x70997970C51812dc3A010C7d01b50e0d17dc79C8}"
+      # Key MUST be set in .env.testnet — no hardcoded fallback.
+      FAUCET_PRIVATE_KEY: "${FAUCET_PRIVATE_KEY:?FAUCET_PRIVATE_KEY must be set in .env.testnet}"
+      FAUCET_ADDRESS: "${FAUCET_ADDRESS:?FAUCET_ADDRESS must be set in .env.testnet}"
       FAUCET_TOKEN_CONTRACT: "${TESTNET_TOKEN_ADDR:-}"
       FAUCET_DRIP_AMOUNT: "${FAUCET_DRIP_AMOUNT:-1000000000000000000000}"
       FAUCET_NATIVE_DRIP_AMOUNT: "${FAUCET_NATIVE_DRIP_AMOUNT:-100000000000000000}"
@@ -244,10 +247,14 @@ services:
       FAUCET_IP_COOLDOWN_SECS: "${FAUCET_IP_COOLDOWN_SECS:-60}"
       FAUCET_MAX_BALANCE: "${FAUCET_MAX_BALANCE:-10000000000000000000000}"
       FAUCET_NATIVE_MAX_BALANCE: "${FAUCET_NATIVE_MAX_BALANCE:-1000000000000000000}"
-      FAUCET_POW_DISABLED: "true"
+      # PoW defaults to ENABLED. Set FAUCET_POW_DISABLED=true in .env.testnet only
+      # for internal testing where the browser PoW friction is unwanted.
+      FAUCET_POW_DISABLED: "${FAUCET_POW_DISABLED:-false}"
       FAUCET_EXPLORER_URL: "http://localhost:3000"
       FAUCET_PUBLIC_RPC_URL: "http://localhost:8545"
       FAUCET_CHAIN_ID: "31337"
+      # Postgres connection for persistent rate-limit state (survives container restarts).
+      FAUCET_PG_URL: "${CREG_PG_URL:-postgres://creg:creg@postgres:5432/chain_registry}"
       RUST_LOG: "info"
     ports:
       - "8082:8082"
@@ -256,6 +263,8 @@ services:
         condition: service_healthy
       deploy-contracts:
         condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
       interval: 10s
@@ -270,7 +279,9 @@ services:
     environment:
       RELAYER_PORT: "${RELAYER_PORT:-8083}"
       RELAYER_RPC_URL: "${RELAYER_RPC_URL:-http://anvil:8545}"
-      RELAYER_PRIVATE_KEY: "${RELAYER_PRIVATE_KEY:-0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80}"
+      # Key MUST be set in .env.testnet — must NOT share the deployer key to
+      # avoid nonce collisions during contract re-deployment.
+      RELAYER_PRIVATE_KEY: "${RELAYER_PRIVATE_KEY:?RELAYER_PRIVATE_KEY must be set in .env.testnet}"
       RELAYER_POLICY_PATH: "/app/config/relayer-policy.example.json"
       TESTNET_TOKEN_ADDR: "${TESTNET_TOKEN_ADDR:-}"
       TESTNET_STAKING_ADDR: "${TESTNET_STAKING_ADDR:-}"

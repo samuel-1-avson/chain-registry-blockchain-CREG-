@@ -43,7 +43,7 @@
     "slash_penalty_low": 2,
     "slash_penalty_medium": 10,
     "slash_penalty_critical": 30,
-    "max_validators": 1
+    "max_validators": 10
   },
   
   "economic_params": {
@@ -86,7 +86,7 @@
       "p2p_port": 9000
     },
     "faucet": {
-      "port": 8081,
+      "port": 8082,
       "drip_amount": "1000000000000000000000",
       "cooldown_seconds": 60
     }

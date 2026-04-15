@@ -3,6 +3,10 @@ name    = "chain-registry-node"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "node"
+path = "src/lib.rs"
+
 [[bin]]
 name = "creg-node"
 path = "src/main.rs"
@@ -53,6 +57,9 @@ prost        = { workspace = true }
 rust-embed   = "8.0"
 mime_guess   = "2.0"
 semver       = "1"
+
+[dev-dependencies]
+tempfile = "3"
 
 [features]
 default = []
