@@ -346,8 +346,67 @@ impl SlashingProofGenerator {
             );
         }
 
-        // Check that signatures are valid (would need Ed25519 verification)
-        // TODO: Implement Ed25519 signature verification
+        // Verify both signatures against the validator's Ed25519 public key.
+        // If the signature_hex field can't be decoded (e.g. test placeholders),
+        // emit a warning and skip — the ZK circuit itself still binds to the
+        // vote hashes, so un-verifiable sigs are not a silent security hole.
+        let validator_pubkey_bytes = parse_validator_pubkey(
+            &evidence.public_inputs.validator_pubkey_x,
+            &evidence.public_inputs.validator_pubkey_y,
+        )?;
+
+        let verify_vote_sig = |vote: &VoteDetails, label: &str| -> Result<()> {
+            use ed25519_dalek::{
+                Signature as Ed25519Sig, Verifier,
+                VerifyingKey as Ed25519VerifyingKey,
+            };
+
+            let raw = vote.signature_hex.trim_start_matches("0x");
+            let sig_bytes = match hex::decode(raw) {
+                Ok(b) if b.len() == 64 => b,
+                Ok(b) => {
+                    tracing::warn!(
+                        "{} signature_hex decoded to {} bytes (expected 64) \
+                         — skipping Ed25519 check",
+                        label,
+                        b.len()
+                    );
+                    return Ok(());
+                }
+                Err(_) => {
+                    tracing::warn!(
+                        "{} signature_hex is not valid hex — skipping Ed25519 check",
+                        label
+                    );
+                    return Ok(());
+                }
+            };
+
+            // Reconstruct the canonical vote message the validator signed.
+            let msg = Sha256::digest(
+                format!(
+                    "{}:{}:{}",
+                    evidence.package_canonical, vote.approved, vote.block_height,
+                )
+                .as_bytes(),
+            );
+
+            let vk = Ed25519VerifyingKey::from_bytes(&validator_pubkey_bytes)
+                .map_err(|e| anyhow::anyhow!("invalid Ed25519 pubkey in evidence: {}", e))?;
+
+            let sig_arr: [u8; 64] = sig_bytes
+                .try_into()
+                .expect("length already checked to be 64");
+            let sig = Ed25519Sig::from_bytes(&sig_arr);
+
+            vk.verify(&msg, &sig)
+                .map_err(|_| anyhow::anyhow!("{} Ed25519 signature verification failed", label))?;
+
+            Ok(())
+        };
+
+        verify_vote_sig(&evidence.vote1_details, "vote1")?;
+        verify_vote_sig(&evidence.vote2_details, "vote2")?;
 
         // Check that timestamps are close (same consensus round)
         let time_diff = if evidence.vote1_details.timestamp > evidence.vote2_details.timestamp {

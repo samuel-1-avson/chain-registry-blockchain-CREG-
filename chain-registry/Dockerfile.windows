@@ -80,6 +80,7 @@ COPY models/ models/
 COPY config/ config/
 COPY rules/ rules/
 COPY testnet/ testnet/
+COPY validators/ validators/
 
 # Touch files to ensure rebuild
 RUN touch crates/*/src/*.rs
@@ -108,7 +109,7 @@ COPY --from=builder /build/target/release/faucet /app/faucet
 COPY --from=builder /build/target/release/creg-relayer /app/creg-relayer
 
 # Copy WASM validators and circuits
-COPY --from=builder /build/crates/cli/validators /app/validators
+COPY --from=builder /build/validators /app/validators
 COPY --from=builder /build/circuits /app/circuits
 COPY --from=builder /build/models /app/models
 COPY --from=builder /build/config /app/config

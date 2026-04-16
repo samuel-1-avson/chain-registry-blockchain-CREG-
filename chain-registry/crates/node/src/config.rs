@@ -182,9 +182,10 @@ impl NodeConfig {
             );
         }
 
-        // Validate the key is proper hex if set.
+        // Validate the key is proper hex if set (strip optional 0x prefix).
         if let Some(key) = &self.validator_privkey {
-            match hex::decode(key) {
+            let raw = key.strip_prefix("0x").unwrap_or(key.as_str());
+            match hex::decode(raw) {
                 Ok(bytes) if bytes.len() == 32 => {}
                 Ok(bytes) => errors.push(format!(
                     "CREG_VALIDATOR_KEY must be 32 bytes (64 hex chars), got {} bytes",
@@ -194,9 +195,10 @@ impl NodeConfig {
             }
         }
 
-        // Validate the dedicated bridge key if set (I4).
+        // Validate the dedicated bridge key if set (I4). Strip optional 0x prefix.
         if let Some(key) = &self.bridge_privkey {
-            match hex::decode(key) {
+            let raw = key.strip_prefix("0x").unwrap_or(key.as_str());
+            match hex::decode(raw) {
                 Ok(bytes) if bytes.len() == 32 => {}
                 Ok(bytes) => errors.push(format!(
                     "CREG_BRIDGE_KEY must be 32 bytes (64 hex chars), got {} bytes",

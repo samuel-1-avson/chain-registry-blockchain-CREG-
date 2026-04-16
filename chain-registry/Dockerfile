@@ -138,6 +138,7 @@ COPY models/ models/
 COPY testnet/ testnet/
 COPY config/ config/
 COPY rules/ rules/
+COPY validators/ validators/
 COPY docker-compose*.yml ./
 
 # Touch files to ensure rebuild
@@ -167,7 +168,7 @@ FROM ubuntu:24.04 AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
-  docker.io \
+    docker.io \
     libssl3 \
     libopenblas0 \
     strace \
@@ -182,7 +183,7 @@ COPY --from=builder /build/target/release/faucet /app/faucet
 COPY --from=builder /build/target/release/creg-relayer /app/creg-relayer
 
 # Copy WASM validators (for wasm-sandbox)
-COPY --from=builder /build/crates/cli/validators /app/validators
+COPY --from=builder /build/validators /app/validators
 
 # Copy circuits (for ZK validation)
 COPY --from=builder /build/circuits /app/circuits

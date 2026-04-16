@@ -22,6 +22,7 @@ use chrono::{DateTime, Utc};
 use metrics::{counter, gauge};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
@@ -302,6 +303,8 @@ struct AppState {
     pow_challenges: DashMap<String, PowChallenge>,
     /// Faucet statistics
     stats: Mutex<FaucetStats>,
+    /// Operator pause flag — set via POST /admin/pause, cleared via POST /admin/resume.
+    is_paused: Arc<AtomicBool>,
 }
 
 /// A proof-of-work challenge issued to clients.
@@ -317,11 +320,21 @@ const POW_DIFFICULTY: u8 = 20;
 /// Challenge validity window.
 const POW_TTL: Duration = Duration::from_secs(120);
 
+/// Serialize a u128 as a JSON string so large amounts survive the JavaScript
+/// 53-bit Number precision limit without truncation.
+fn serialize_u128_as_string<S: serde::Serializer>(val: &u128, s: S) -> Result<S::Ok, S::Error> {
+    s.serialize_str(&val.to_string())
+}
+
 #[derive(Default, Serialize)]
 struct FaucetStats {
     total_drips: u64,
-    total_distributed: String,
-    total_native_distributed: String,
+    /// Total tCREG distributed in wei (serialised as string for JS compatibility).
+    #[serde(serialize_with = "serialize_u128_as_string")]
+    total_distributed: u128,
+    /// Total native ETH distributed in wei (serialised as string).
+    #[serde(serialize_with = "serialize_u128_as_string")]
+    total_native_distributed: u128,
     unique_addresses: usize,
     last_drip: Option<DateTime<Utc>>,
 }
@@ -447,6 +460,7 @@ async fn main() -> anyhow::Result<()> {
         rate_limiter,
         pow_challenges: DashMap::new(),
         stats: Mutex::new(FaucetStats::default()),
+        is_paused: Arc::new(AtomicBool::new(false)),
     });
 
     let cors = CorsLayer::new()
@@ -470,6 +484,10 @@ async fn main() -> anyhow::Result<()> {
     metrics::describe_gauge!("faucet_token_balance", "Current faucet tCREG token balance (raw wei)");
     metrics::describe_gauge!("faucet_native_balance", "Current faucet native ETH balance (raw wei)");
 
+    // Clone config for the background balance gauge task before `state` is
+    // moved into the axum router.
+    let bg_config = state.config.clone();
+
     let app = Router::new()
         .route("/", get(index_page))
         .route("/favicon.ico", get(favicon))
@@ -483,6 +501,10 @@ async fn main() -> anyhow::Result<()> {
             let handle = prometheus_handle.clone();
             async move { handle.render() }
         }))
+        // ── Operator admin endpoints (require FAUCET_ADMIN_TOKEN) ─────────────
+        .route("/admin/pause", post(admin_pause))
+        .route("/admin/resume", post(admin_resume))
+        .route("/admin/status", get(admin_status))
         .layer(cors)
         .with_state(state);
 
@@ -519,7 +541,6 @@ async fn main() -> anyhow::Result<()> {
     // Refreshes the Prometheus balance gauges every 30 seconds so Grafana always
     // shows an up-to-date faucet wallet balance without waiting for a drip.
     {
-        let bg_config = state.config.clone();
         tokio::spawn(async move {
             let mut ticker = tokio::time::interval(Duration::from_secs(30));
             loop {
@@ -631,41 +652,25 @@ async fn execute_native_transfer(config: &FaucetConfig, to_address: &str) -> Res
 
 async fn get_token_balance(config: &FaucetConfig, address: &str) -> Result<u128, String> {
     let holder = parse_address(address, "holder address")?;
-    let holder_hex = holder.to_string().trim_start_matches("0x").to_ascii_lowercase();
-    let call_data = format!("0x70a08231{:0>64}", holder_hex);
+    let token_addr = parse_address(&config.token_contract, "token contract")?;
 
-    let response: serde_json::Value = reqwest::Client::new()
-        .post(&config.rpc_url)
-        .json(&serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "eth_call",
-            "params": [
-                {
-                    "to": config.token_contract,
-                    "data": call_data,
-                },
-                "latest"
-            ],
-            "id": 1
-        }))
-        .send()
+    // Read-only provider — no wallet or nonce management needed for view calls.
+    let provider = ProviderBuilder::new().on_http(
+        config
+            .rpc_url
+            .parse()
+            .map_err(|e| format!("Invalid RPC URL for balance check: {e}"))?,
+    );
+
+    let token = IERC20::new(token_addr, provider);
+    let ret = token
+        .balanceOf(holder)
+        .call()
         .await
-        .map_err(|e| format!("Balance check failed: {}", e))?
-        .json()
-        .await
-        .map_err(|e| format!("Balance response decode failed: {}", e))?;
+        .map_err(|e| format!("balanceOf({address}) call failed: {e}"))?;
 
-    if let Some(err) = response.get("error") {
-        return Err(format!("Balance check failed: {}", err));
-    }
-
-    let result = response
-        .get("result")
-        .and_then(|value| value.as_str())
-        .ok_or_else(|| "Balance check failed: missing result".to_string())?;
-
-    u128::from_str_radix(result.trim_start_matches("0x"), 16)
-        .map_err(|e| format!("Failed to parse balance: {}", e))
+    // Realistic token supplies (≤ 10^26 wei) fit well within u128 (≤ 3.4 × 10^38).
+    Ok(ret._0.to::<u128>())
 }
 
 async fn get_native_balance(config: &FaucetConfig, address: &str) -> Result<u128, String> {
@@ -759,6 +764,16 @@ async fn handle_drip(
     headers: HeaderMap,
     Json(request): Json<DripRequest>,
 ) -> impl IntoResponse {
+    // ── Operator pause check ──────────────────────────────────────────────────
+    if state.is_paused.load(Ordering::Relaxed) {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            JsonResponse(DripResponse::error(
+                "Faucet is temporarily paused by the operator. Please try again later.",
+            )),
+        );
+    }
+
     let address = request.address.to_lowercase();
 
     // ── PoW validation ────────────────────────────────────────────────────────
@@ -949,14 +964,12 @@ async fn handle_drip(
             let mut stats = state.stats.lock().await;
             stats.total_drips += 1;
             stats.unique_addresses = state.rate_limiter.address_count();
-            let current_token_total = stats.total_distributed.parse::<u128>().unwrap_or_default();
-            let current_native_total = stats.total_native_distributed.parse::<u128>().unwrap_or_default();
-            stats.total_distributed = (current_token_total
-                + if token_tx_hash.is_some() { state.config.drip_amount } else { 0 })
-                .to_string();
-            stats.total_native_distributed = (current_native_total
-                + if native_tx_hash.is_some() { state.config.native_drip_amount } else { 0 })
-                .to_string();
+            if token_tx_hash.is_some() {
+                stats.total_distributed = stats.total_distributed.saturating_add(state.config.drip_amount);
+            }
+            if native_tx_hash.is_some() {
+                stats.total_native_distributed = stats.total_native_distributed.saturating_add(state.config.native_drip_amount);
+            }
             stats.last_drip = Some(Utc::now());
             drop(stats);
 
@@ -1134,6 +1147,89 @@ async fn health_check(State(state): State<Arc<AppState>>) -> impl IntoResponse {
             })),
         ),
     }
+}
+
+// ── Admin endpoints ───────────────────────────────────────────────────────────
+
+/// Verify the `Authorization: Bearer <token>` header against `FAUCET_ADMIN_TOKEN`.
+/// Returns `Err((status, json))` when authentication fails so handlers can
+/// `return err` immediately.
+fn check_admin_auth(
+    headers: &HeaderMap,
+) -> Result<(), (StatusCode, axum::response::Json<serde_json::Value>)> {
+    let token = std::env::var("FAUCET_ADMIN_TOKEN").unwrap_or_default();
+    if token.is_empty() {
+        return Err((
+            StatusCode::FORBIDDEN,
+            axum::response::Json(serde_json::json!({
+                "error": "Admin endpoints disabled — set FAUCET_ADMIN_TOKEN to enable them"
+            })),
+        ));
+    }
+    let provided = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if provided != format!("Bearer {}", token) {
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            axum::response::Json(serde_json::json!({"error": "Unauthorized"})),
+        ));
+    }
+    Ok(())
+}
+
+/// `POST /admin/pause` — stop accepting new drip requests.
+async fn admin_pause(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if let Err(e) = check_admin_auth(&headers) {
+        return e;
+    }
+    state.is_paused.store(true, Ordering::Relaxed);
+    warn!("Faucet PAUSED by operator request");
+    (
+        StatusCode::OK,
+        axum::response::Json(serde_json::json!({"status": "paused"})),
+    )
+}
+
+/// `POST /admin/resume` — re-enable drip requests after a pause.
+async fn admin_resume(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if let Err(e) = check_admin_auth(&headers) {
+        return e;
+    }
+    state.is_paused.store(false, Ordering::Relaxed);
+    info!("Faucet RESUMED by operator request");
+    (
+        StatusCode::OK,
+        axum::response::Json(serde_json::json!({"status": "running"})),
+    )
+}
+
+/// `GET /admin/status` — live operational snapshot (address count, pause state, stats).
+async fn admin_status(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if let Err(e) = check_admin_auth(&headers) {
+        return e;
+    }
+    let stats = state.stats.lock().await;
+    (
+        StatusCode::OK,
+        axum::response::Json(serde_json::json!({
+            "is_paused": state.is_paused.load(Ordering::Relaxed),
+            "address_count": state.rate_limiter.address_count(),
+            "total_drips": stats.total_drips,
+            "total_distributed_wei": stats.total_distributed.to_string(),
+            "total_native_distributed_wei": stats.total_native_distributed.to_string(),
+        })),
+    )
 }
 
 // Helper functions

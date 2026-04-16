@@ -14,6 +14,9 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use tracing::{debug, error, info, warn};
 
+// hex encoding used when deriving the requestor identity from a public key
+use hex;
+
 /// Service configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServiceConfig {
@@ -377,6 +380,10 @@ pub struct DecryptionClient {
     requestor_key: Vec<u8>,
     /// Requestor's public key
     requestor_pubkey: Vec<u8>,
+    /// Threshold M — minimum shares needed for reconstruction
+    threshold: u8,
+    /// Total shares N
+    total_shares: u8,
 }
 
 impl DecryptionClient {
@@ -392,7 +399,16 @@ impl DecryptionClient {
             response_rx,
             requestor_key,
             requestor_pubkey,
+            threshold: 3,
+            total_shares: 5,
         }
+    }
+
+    /// Override the default threshold parameters (must match the service's config).
+    pub fn with_params(mut self, threshold: u8, total_shares: u8) -> Self {
+        self.threshold = threshold;
+        self.total_shares = total_shares;
+        self
     }
 
     /// Request decryption of a package.
@@ -488,8 +504,8 @@ impl DecryptionClient {
             shares.push(KeyShare::new(share.index, share.value, vec![]));
         }
 
-        // Reconstruct encryption key using Shamir
-        let te = ThresholdEncryption::new(3, 5)?; // TODO: Use correct params
+        // Reconstruct encryption key using Shamir with the configured threshold params.
+        let te = ThresholdEncryption::new(self.threshold, self.total_shares)?;
         let key = te.reconstruct_key(&shares)?;
 
         // Decrypt package

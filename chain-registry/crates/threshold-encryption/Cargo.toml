@@ -25,6 +25,9 @@ elliptic-curve = "0.13"
 # Ed25519 for signing decryption share responses
 ed25519-dalek = { workspace = true }
 
+# Hex encoding (DecryptionClient/DecryptionService identity derivation)
+hex = { workspace = true }
+
 # Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }

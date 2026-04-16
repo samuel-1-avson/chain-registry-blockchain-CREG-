@@ -1,9 +1,15 @@
 # Makefile — chain-registry dev commands
 
-.PHONY: build test lint clean node cluster contracts deploy-local fmt check testnet testnet-smoke testnet-no-explorer testnet-stop testnet-reset testnet-logs
+.PHONY: build test lint clean node cluster contracts deploy-local fmt check \
+        testnet testnet-smoke testnet-no-explorer testnet-stop testnet-reset testnet-logs \
+        up up-dev up-testnet down down-testnet logs-testnet
 
 POWERSHELL ?= pwsh
-TESTNET_COMPOSE = docker compose --project-directory . --env-file .env.testnet -f docker-compose.testnet.yml
+# Run testnet compose in a clean env so shell-level overrides don't win over .env.testnet.
+# docker-compose (standalone) is used instead of "docker compose" (plugin) because the
+# plugin requires additional Windows-specific env vars that env -i would strip.
+DOCKER_COMPOSE_CMD := $(shell command -v docker-compose 2>/dev/null || echo docker-compose)
+TESTNET_COMPOSE = env -i PATH="$(PATH)" HOME="$(HOME)" USERPROFILE="$(USERPROFILE)" APPDATA="$(APPDATA)" LOCALAPPDATA="$(LOCALAPPDATA)" PROGRAMFILES="$(PROGRAMFILES)" $(DOCKER_COMPOSE_CMD) --project-directory . --env-file .env.testnet -f docker-compose.testnet.yml
 
 # ── Rust ──────────────────────────────────────────────────────────────────────
 
@@ -42,6 +48,47 @@ cluster:
 	docker compose up --build
 
 cluster-down:
+	docker compose down -v
+
+# ── Docker testnet (single command) ───────────────────────────────────────────
+
+## Build + start the full testnet (blockchain + faucet + web explorer)
+## Usage: make up
+up: up-testnet
+
+## Start dev cluster (main docker-compose.yml, no env-file needed)
+up-dev:
+	docker compose up -d --build
+
+## Start full testnet with blockchain, faucet, relayer, web explorer
+## Equivalent to the manual: docker compose --env-file .env.testnet -f docker-compose.testnet.yml up -d --build
+up-testnet:
+	$(TESTNET_COMPOSE) up -d --build
+	@echo ""
+	@echo "Testnet is starting. Services will be ready in ~60s."
+	@echo "  Node API:     http://localhost:8080/v1/health"
+	@echo "  Faucet:       http://localhost:8082/health"
+	@echo "  Relayer:      http://localhost:8083/health"
+	@echo "  Web Explorer: http://localhost:3000"
+	@echo "  Anvil RPC:    http://localhost:8545"
+	@echo "  PostgreSQL:   localhost:5432"
+	@echo ""
+	@echo "Tail logs with: make logs-testnet"
+
+## Stop testnet without removing volumes (data preserved)
+down-testnet:
+	$(TESTNET_COMPOSE) down --remove-orphans
+
+## Stop testnet AND delete all volumes (clean reset)
+reset-testnet:
+	$(TESTNET_COMPOSE) down -v --remove-orphans
+
+## Tail all testnet service logs
+logs-testnet:
+	$(TESTNET_COMPOSE) logs -f
+
+## Stop dev cluster
+down:
 	docker compose down -v
 
 ## Start the bootstrap testnet (GNU make convenience wrapper around ./testnet.ps1)

@@ -94,7 +94,8 @@ services:
       # ── Identity ────────────────────────────────────────────────────────
       CREG_NODE_ID:         "node-1"
       CREG_IS_VALIDATOR:    "true"
-      CREG_VALIDATOR_KEY:   "${NODE1_VALIDATOR_KEY}"
+      # Fallback: Anvil dev key from .env.testnet — never use in production
+      CREG_VALIDATOR_KEY:   "${NODE1_VALIDATOR_KEY:-848019e3bdb66143723dd68e60e62c03b8d42e010d70638691eb2631b3637691}"
 
       # ── Network ─────────────────────────────────────────────────────────
       CREG_LISTEN:          "0.0.0.0:8080"
@@ -265,6 +266,7 @@ services:
       FAUCET_DRIP_AMOUNT: "1000000000000000000000"
       FAUCET_COOLDOWN_SECS: "60"
       FAUCET_POW_DISABLED: "true"
+      FAUCET_ADMIN_TOKEN: "${FAUCET_ADMIN_TOKEN:-dev-admin-secret}"
       RUST_LOG: "info"
     ports:
       - "8082:8082"

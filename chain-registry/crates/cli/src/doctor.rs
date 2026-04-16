@@ -418,6 +418,27 @@ async fn run_testnet(options: DoctorOptions<'_>) -> Result<()> {
         ));
     }
 
+    // TX-014: CREG_TESTNET flag check — running multiple nodes on the same machine
+    // requires PID-lock to be disabled via CREG_TESTNET=true (docker compose sets this).
+    {
+        let creg_testnet = std::env::var("CREG_TESTNET").as_deref() == Ok("true");
+        checks.push(if creg_testnet {
+            DoctorCheck::pass(
+                "CREG_TESTNET flag",
+                false,
+                "CREG_TESTNET=true — PID lock disabled, multiple nodes can share this machine",
+            )
+        } else {
+            DoctorCheck::fail(
+                "CREG_TESTNET flag",
+                false,
+                "CREG_TESTNET not set — starting two nodes on the same machine will fail with a \
+                 PID lock error. Set CREG_TESTNET=true or use docker compose (which sets it \
+                 automatically).",
+            )
+        });
+    }
+
     let faucet_health_url = format!("{}/health", faucet.trim_end_matches('/'));
     let faucet_health = match get_json::<FaucetHealthResponse>(&client, &faucet_health_url).await {
         Ok(health) => {

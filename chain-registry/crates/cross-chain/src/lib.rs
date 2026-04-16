@@ -32,6 +32,14 @@ use tracing::warn;
 /// Example: CREG_CHAIN_ARBITRUM_REGISTRY=0x1234...
 const ENV_PREFIX: &str = "CREG_CHAIN";
 
+/// The Ethereum null address used as a placeholder in unconfigured chains.
+const NULL_ADDRESS: &str = "0x0000000000000000000000000000000000000000";
+
+/// Returns `true` if `addr` is non-empty and not the null address.
+fn is_real_address(addr: &str) -> bool {
+    !addr.is_empty() && addr != NULL_ADDRESS
+}
+
 /// Chain configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChainConfig {
@@ -76,16 +84,22 @@ impl MultiChainClient {
             configs.into_iter().map(|c| (c.name.clone(), c)).collect();
 
         for (name, cfg) in &chains {
-            if cfg.contracts.registry.is_empty() {
+            if !is_real_address(&cfg.contracts.registry) {
                 warn!(
-                    "Cross-chain config for '{}': registry contract address is empty",
-                    name
+                    "Cross-chain config for '{}': registry contract address is not set \
+                     (got {:?}). Override via CREG_CHAIN_{}_REGISTRY env var.",
+                    name,
+                    cfg.contracts.registry,
+                    name.to_uppercase()
                 );
             }
-            if cfg.contracts.cross_chain.is_empty() {
+            if !is_real_address(&cfg.contracts.cross_chain) {
                 warn!(
-                    "Cross-chain config for '{}': cross_chain contract address is empty",
-                    name
+                    "Cross-chain config for '{}': cross_chain contract address is not set \
+                     (got {:?}). Override via CREG_CHAIN_{}_CROSS_CHAIN env var.",
+                    name,
+                    cfg.contracts.cross_chain,
+                    name.to_uppercase()
                 );
             }
         }
@@ -93,21 +107,50 @@ impl MultiChainClient {
         Self { chains }
     }
 
-    /// Validate that all configured chains have non-empty contract addresses.
+    /// Validate that all configured chains have real (non-zero, non-empty) contract
+    /// addresses.
     ///
-    /// Returns a list of human-readable error strings. An empty vec means
-    /// all chains are properly configured.
+    /// Returns a list of human-readable error strings. An empty vec means all chains
+    /// are properly configured and ready for on-chain operations.
+    ///
+    /// # Example
+    /// ```
+    /// # use cross_chain::MultiChainClient;
+    /// let client = MultiChainClient::new(vec![MultiChainClient::arbitrum()]);
+    /// let errors = client.validate_configs();
+    /// // Arbitrum uses placeholder zero-addresses by default — errors will be non-empty
+    /// // until real addresses are provided via CREG_CHAIN_ARBITRUM_REGISTRY etc.
+    /// assert!(!errors.is_empty());
+    /// ```
     pub fn validate_configs(&self) -> Vec<String> {
         let mut errors = Vec::new();
         for (name, cfg) in &self.chains {
-            if cfg.contracts.registry.is_empty() {
-                errors.push(format!("{}: registry address is empty", name));
+            if !is_real_address(&cfg.contracts.registry) {
+                errors.push(format!(
+                    "{}: registry address is not configured (got {:?}). \
+                     Set CREG_CHAIN_{}_REGISTRY to a real contract address.",
+                    name,
+                    cfg.contracts.registry,
+                    name.to_uppercase()
+                ));
             }
-            if cfg.contracts.cross_chain.is_empty() {
-                errors.push(format!("{}: cross_chain address is empty", name));
+            if !is_real_address(&cfg.contracts.cross_chain) {
+                errors.push(format!(
+                    "{}: cross_chain address is not configured (got {:?}). \
+                     Set CREG_CHAIN_{}_CROSS_CHAIN to a real contract address.",
+                    name,
+                    cfg.contracts.cross_chain,
+                    name.to_uppercase()
+                ));
             }
         }
         errors
+    }
+
+    /// Returns `true` only if every configured chain has real, non-zero contract
+    /// addresses. Use this as a pre-flight guard before making any on-chain calls.
+    pub fn is_operational(&self) -> bool {
+        self.validate_configs().is_empty()
     }
 
     /// Get chain config by name
@@ -343,24 +386,75 @@ mod tests {
 
     #[test]
     fn test_validate_configs_reports_placeholder_addresses() {
-        let client = MultiChainClient::new(vec![
-            ChainConfig {
-                name: "test-chain".to_string(),
-                chain_id: 1,
-                layerzero_id: 1,
-                rpc_urls: vec![],
-                explorer: String::new(),
-                contracts: ContractAddresses {
-                    registry: "".to_string(),
-                    cross_chain: "0xabc".to_string(),
-                    zk_verifier: None,
-                },
+        // Empty string → not configured
+        let client = MultiChainClient::new(vec![ChainConfig {
+            name: "test-chain".to_string(),
+            chain_id: 1,
+            layerzero_id: 1,
+            rpc_urls: vec![],
+            explorer: String::new(),
+            contracts: ContractAddresses {
+                registry: "".to_string(),
+                cross_chain: "0xabc".to_string(),
+                zk_verifier: None,
             },
-        ]);
-
+        }]);
         let errors = client.validate_configs();
         assert_eq!(errors.len(), 1);
         assert!(errors[0].contains("registry"));
+
+        // Zero address → also not configured
+        let client2 = MultiChainClient::new(vec![ChainConfig {
+            name: "zero-chain".to_string(),
+            chain_id: 2,
+            layerzero_id: 2,
+            rpc_urls: vec![],
+            explorer: String::new(),
+            contracts: ContractAddresses {
+                registry: NULL_ADDRESS.to_string(),
+                cross_chain: NULL_ADDRESS.to_string(),
+                zk_verifier: None,
+            },
+        }]);
+        let errors2 = client2.validate_configs();
+        assert_eq!(errors2.len(), 2, "both zero addresses should be flagged");
+        assert!(!client2.is_operational());
+
+        // Real addresses → no errors
+        let client3 = MultiChainClient::new(vec![ChainConfig {
+            name: "real-chain".to_string(),
+            chain_id: 3,
+            layerzero_id: 3,
+            rpc_urls: vec![],
+            explorer: String::new(),
+            contracts: ContractAddresses {
+                registry: "0xCAfEcAfEcafECaFECaFecaFecaFECafECAFECAFE".to_string(),
+                cross_chain: "0xDeADbeefdEAdbeefdEadbEEFdeadbeEFdEaDbeeF".to_string(),
+                zk_verifier: None,
+            },
+        }]);
+        assert!(client3.validate_configs().is_empty());
+        assert!(client3.is_operational());
+    }
+
+    #[test]
+    fn test_default_l2_chains_are_not_operational() {
+        // The built-in chain configs use zero-address placeholders that must be
+        // overridden via env vars before any on-chain operations can proceed.
+        let client = MultiChainClient::new(vec![
+            MultiChainClient::arbitrum(),
+            MultiChainClient::optimism(),
+            MultiChainClient::polygon(),
+        ]);
+        let errors = client.validate_configs();
+        assert!(
+            !errors.is_empty(),
+            "default chain configs must report missing addresses"
+        );
+        assert!(
+            !client.is_operational(),
+            "default chain configs must not be considered operational"
+        );
     }
 
     fn make_msg(source: &str, seq: u64) -> CrossChainMessage {

@@ -14,15 +14,27 @@
 # For one-node-per-computer testnets, run the shared services from this file on
 # the bootstrap machine and use docker-compose.validator.yml on each validator host.
 
+# When both `image:` and `build:` are specified Docker builds the image and tags
+# it with the given name — so every service sharing this anchor builds once and
+# subsequent `docker compose up` runs use the cached image.
 x-app-image: &app-image
   image: chain-registry-app:latest
+  build:
+    context: .
+    dockerfile: ${CREG_DOCKERFILE:-Dockerfile}
 
 x-web-explorer-image: &web-explorer-image
   image: chain-registry-web-explorer:latest
+  build:
+    context: ./explorer
+    dockerfile: Dockerfile
+    args:
+      VITE_CREG_TOKEN: ${TESTNET_TOKEN_ADDR:-}
+      VITE_STAKING_ADDR: ${TESTNET_STAKING_ADDR:-}
+      VITE_DEV_MODE: ${VITE_DEV_MODE:-true}
 
 x-node-base: &node-base
   <<: *app-image
-  user: "0:0"
   restart: unless-stopped
   depends_on:
     ipfs:
@@ -55,8 +67,11 @@ x-node-base: &node-base
     CREG_WASM_VALIDATORS_PATH: "/app/validators"
     CREG_REGISTRY_ADDR: "${TESTNET_REGISTRY_ADDR:-}"
     CREG_GOVERNANCE_ADDR: "${TESTNET_GOVERNANCE_ADDR:-}"
-    CREG_TLS_CERT: "${CREG_TLS_CERT:-/app/certs/server.crt}"
-    CREG_TLS_KEY: "${CREG_TLS_KEY:-/app/certs/server.key}"
+    # TLS is opt-in: leave blank to run plain HTTP (default for local testnet).
+    # To enable, generate certs with scripts/generate-tls-certs.sh and set:
+    #   CREG_TLS_CERT=/app/certs/server.crt  CREG_TLS_KEY=/app/certs/server.key
+    CREG_TLS_CERT: "${CREG_TLS_CERT:-}"
+    CREG_TLS_KEY: "${CREG_TLS_KEY:-}"
     RUST_LOG: "info,chain_registry_node=debug,consensus=debug"
   healthcheck:
     test: ["CMD", "curl", "-f", "http://localhost:8080/v1/health"]
@@ -108,7 +123,7 @@ services:
 
   # ── Shared Anvil (local Ethereum) ───────────────────────────────────────────
   anvil:
-    image: ghcr.io/foundry-rs/foundry:latest
+    image: ghcr.io/foundry-rs/foundry:stable
     container_name: creg-testnet-anvil
     entrypoint: ["anvil", "--host", "0.0.0.0", "--chain-id", "31337", "--block-time", "1", "--accounts", "10"]
     ports:
@@ -125,7 +140,7 @@ services:
 
   # ── Contract Deployer ───────────────────────────────────────────────────────
   deploy-contracts:
-    image: ghcr.io/foundry-rs/foundry:latest
+    image: ghcr.io/foundry-rs/foundry:stable
     container_name: creg-testnet-deploy
     depends_on:
       anvil:
@@ -135,20 +150,33 @@ services:
       - ./:/workspace
     working_dir: /workspace
     command:
-      - >-
-        echo 'Waiting for Anvil...' &&
-        sleep 3 &&
-        mkdir -p contracts/deployments testnet/artifacts &&
-        forge build --via-ir &&
-        echo 'Deploying contracts...' &&
-        forge script contracts/script/Deploy.s.sol:DeployChainRegistry --rpc-url http://anvil:8545 --broadcast --via-ir -vvvv
+      - |
+        set -e
+        echo 'Waiting for Anvil...'
+        sleep 3
+        mkdir -p contracts/deployments testnet/artifacts
+        # Idempotency check: governance is always at this deterministic address (CREATE from
+        # deployer 0xf39F... at nonce 0). If it already has code, the chain was already set
+        # up in a previous run — skip re-deployment so we don't create duplicates.
+        GOVERNANCE_CODE=$$(cast code 0x5FbDB2315678afecb367f032d93F642f64180aa3 --rpc-url http://anvil:8545 2>/dev/null || true)
+        if echo "$$GOVERNANCE_CODE" | grep -qE '^0x.{4,}'; then
+          echo 'Contracts already deployed at expected addresses — skipping forge script.'
+          exit 0
+        fi
+        forge build
+        echo 'Deploying contracts...'
+        forge script contracts/script/Deploy.s.sol:DeployChainRegistry \
+          --rpc-url http://anvil:8545 \
+          --broadcast \
+          -vvvv
     environment:
-      # Keys MUST be set in .env.testnet — no hardcoded fallbacks for security.
-      # Run scripts/generate-testnet-keys.ps1 to create .env.testnet from scratch.
-      - DEPLOYER_KEY=${DEPLOYER_KEY:?DEPLOYER_KEY must be set in .env.testnet}
-      - CREG_BRIDGE_KEY=${CREG_BRIDGE_KEY:?CREG_BRIDGE_KEY must be set in .env.testnet}
-      - TESTNET_MODE=true
-      - DEPLOYMENT_MANIFEST_PATH=contracts/deployments/latest.json
+      # Deployer and bridge keys MUST be set in .env.testnet.
+      DEPLOYER_KEY: "${DEPLOYER_KEY:?DEPLOYER_KEY must be set in .env.testnet}"
+      CREG_BRIDGE_KEY: "${CREG_BRIDGE_KEY:?CREG_BRIDGE_KEY must be set in .env.testnet}"
+      FAUCET_ADDRESS: "${FAUCET_ADDRESS:-0x70997970C51812dc3A010C7d01b50e0d17dc79C8}"
+      TESTNET_MODE: "true"
+      DEPLOYMENT_MANIFEST_PATH: "contracts/deployments/latest.json"
+      FOUNDRY_DISABLE_NIGHTLY_WARNING: "1"
 
   # ── PostgreSQL Mirror (optional but recommended for testnet) ─────────────────
   postgres:
@@ -162,9 +190,10 @@ services:
       - "5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      - ./testnet/init-testnet-db.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U creg"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-creg} -d ${POSTGRES_DB:-chain_registry}"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -186,6 +215,16 @@ services:
       - ./models:/app/models:ro
       - /var/run/docker.sock:/var/run/docker.sock
       - ./testnet/certs:/app/certs:ro
+    # Override depends_on to add postgres (node uses CREG_PG_URL for indexing).
+    depends_on:
+      ipfs:
+        condition: service_started
+      anvil:
+        condition: service_healthy
+      deploy-contracts:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
     environment:
       <<: *node-env
       CREG_NODE_ID: "node-1"
@@ -255,6 +294,8 @@ services:
       FAUCET_CHAIN_ID: "31337"
       # Postgres connection for persistent rate-limit state (survives container restarts).
       FAUCET_PG_URL: "${CREG_PG_URL:-postgres://creg:creg@postgres:5432/chain_registry}"
+      # Admin API token — change in production (TX-017: pause/resume/status endpoints)
+      FAUCET_ADMIN_TOKEN: "${FAUCET_ADMIN_TOKEN:-testnet-admin-secret}"
       RUST_LOG: "info"
     ports:
       - "8082:8082"
@@ -309,7 +350,7 @@ services:
       node-1:
         condition: service_healthy
       relayer:
-        condition: service_healthy
+        condition: service_started
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost/"]
       interval: 10s
