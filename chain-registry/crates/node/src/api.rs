@@ -54,12 +54,15 @@ pub fn router(state: SharedState, event_bus: EventBus, limiter: RateLimiter) -> 
         .route("/v1/blocks/:height", get(get_block_by_height))
         .route("/v1/blocks/hash/:hash", get(get_block_by_hash))
         .route("/v1/blocks/announce", post(receive_block_announcement))
+        // Transactions
+        .route("/v1/transactions/:canonical", get(get_transaction))
         // Publishers
         .route("/v1/publishers/:pubkey", get(get_publisher))
         // Pending pool
         .route("/v1/pending", get(list_pending))
         // Consensus
         .route("/v1/consensus/vote", post(receive_vote))
+        .route("/v1/consensus/state", get(consensus_state))
         .route("/v1/publishers/rotate-key", post(rotate_publisher_key))
         // Appeals & AAA
         .route("/v1/appeals/:id/audit", post(submit_audit))
@@ -369,9 +372,13 @@ async fn p2p_status(
             "protocols": s.p2p_status.protocols,
         }))
     } else {
-        // Aggregate-only for public callers.
+        // Aggregate-only for public callers — include an empty `peers` array
+        // so clients (web explorer) that access `p2pStatus.peers.length` don't
+        // crash with "Cannot read properties of undefined".
+        let empty_peers: Vec<String> = vec![];
         Json(serde_json::json!({
             "peer_count": s.p2p_status.peers.len(),
+            "peers": empty_peers,
             "protocols": s.p2p_status.protocols,
         }))
     }
@@ -728,6 +735,17 @@ async fn get_proof(State(state): State<SharedState>, Path(canonical): Path<Strin
     }
 }
 
+/// Serialize a Block to JSON with a top-level `hash` field injected.
+/// `Block` only stores `header` + `transactions`; the hash is computed on-the-fly
+/// via `block.hash()`.  Clients (explorer, TUI) expect a `hash` field in the response.
+fn block_to_json(b: &common::Block) -> serde_json::Value {
+    let mut v = serde_json::to_value(b).unwrap_or_default();
+    if let serde_json::Value::Object(ref mut map) = v {
+        map.insert("hash".into(), serde_json::Value::String(b.hash()));
+    }
+    v
+}
+
 // GET /v1/blocks/:height
 async fn get_block_by_height(
     State(state): State<SharedState>,
@@ -735,7 +753,7 @@ async fn get_block_by_height(
 ) -> Response {
     let s = state.read().await;
     match s.chain.get_block_by_height(height) {
-        Ok(Some(b)) => Json(b).into_response(),
+        Ok(Some(b)) => Json(block_to_json(&b)).into_response(),
         Ok(None) => not_found(format!("No block at height {}", height)),
         Err(e) => server_err(e.to_string()),
     }
@@ -745,7 +763,7 @@ async fn get_block_by_height(
 async fn get_block_by_hash(State(state): State<SharedState>, Path(hash): Path<String>) -> Response {
     let s = state.read().await;
     match s.chain.get_block_by_hash(&hash) {
-        Ok(Some(b)) => Json(b).into_response(),
+        Ok(Some(b)) => Json(block_to_json(&b)).into_response(),
         Ok(None) => not_found(format!("No block with hash {}", hash)),
         Err(e) => server_err(e.to_string()),
     }
@@ -785,8 +803,10 @@ async fn list_blocks_paginated(
                 .header("X-Offset", offset.to_string())
                 .header("X-Limit", limit.to_string());
 
+            let blocks_with_hash: Vec<serde_json::Value> =
+                blocks.iter().map(|b| block_to_json(b)).collect();
             let body = serde_json::json!({
-                "blocks": blocks,
+                "blocks": blocks_with_hash,
                 "tip_height": tip,
                 "offset": offset,
                 "limit": limit,
@@ -799,6 +819,55 @@ async fn list_blocks_paginated(
         }
         Err(e) => server_err(format!("Failed to list blocks: {}", e)),
     }
+}
+
+// GET /v1/transactions/:canonical
+//
+// Searches on-chain blocks for a transaction matching the given canonical ID
+// (e.g., "npm/express@4.18.0").  Returns the transaction plus the block height
+// and hash it was included in.  Scans the most recent 200 blocks.
+async fn get_transaction(
+    State(state): State<SharedState>,
+    Path(canonical): Path<String>,
+) -> Response {
+    let canonical = urlencoding::decode(&canonical)
+        .unwrap_or_default()
+        .to_string();
+    let s = state.read().await;
+
+    // Scan recent blocks for a matching transaction.
+    let blocks = match s.chain.list_blocks(0, 200) {
+        Ok(b) => b,
+        Err(e) => return server_err(format!("Failed to read blocks: {}", e)),
+    };
+
+    for block in &blocks {
+        for tx in &block.transactions {
+            let tx_canonical = match tx {
+                common::Transaction::Publish(record) => record.id.canonical(),
+                common::Transaction::Revoke {
+                    package_canonical, ..
+                } => package_canonical.clone(),
+                common::Transaction::Slash { validator_id, .. } => validator_id.clone(),
+                common::Transaction::ValidatorJoin { validator_id, .. } => validator_id.clone(),
+                common::Transaction::ValidatorLeave { validator_id } => validator_id.clone(),
+                common::Transaction::RotatePublisherKey {
+                    canonical_prefix, ..
+                } => canonical_prefix.clone(),
+            };
+
+            if tx_canonical == canonical {
+                return Json(serde_json::json!({
+                    "transaction": tx,
+                    "block_height": block.header.height,
+                    "block_hash": block.hash(),
+                }))
+                .into_response();
+            }
+        }
+    }
+
+    not_found(format!("Transaction not found: {}", canonical))
 }
 
 // POST /v1/blocks/announce
@@ -1031,6 +1100,68 @@ async fn rotate_publisher_key(
         "message": "Key rotation will be included in the next block"
     }))
     .into_response()
+}
+
+// GET /v1/consensus/state
+//
+// Returns a lightweight snapshot of the current PBFT consensus activity
+// derived from the accumulated vote map and active validator set.  The TUI
+// and web explorer use this to draw the PBFT gauge / consensus panel.
+async fn consensus_state(State(state): State<SharedState>) -> impl IntoResponse {
+    let s = state.read().await;
+
+    let total_validators = s.validator_set.validators.len();
+    // Standard BFT quorum: ⌊2n/3⌋ + 1
+    let quorum = if total_validators == 0 {
+        1
+    } else {
+        (2 * total_validators / 3) + 1
+    };
+
+    #[derive(Serialize)]
+    struct RoundSummary {
+        block_hash: String,
+        vote_count: usize,
+        approvals: usize,
+        rejections: usize,
+        phase: &'static str,
+    }
+
+    let mut active_rounds: Vec<RoundSummary> = s
+        .votes
+        .iter()
+        .map(|(block_hash, sigs)| {
+            let approvals = sigs
+                .iter()
+                .filter(|sig| matches!(sig.vote, common::ValidatorVote::Approve))
+                .count();
+            let rejections = sigs.len() - approvals;
+            let phase = if approvals >= quorum {
+                "quorum-reached"
+            } else {
+                "collecting-votes"
+            };
+            RoundSummary {
+                block_hash: block_hash.clone(),
+                vote_count: sigs.len(),
+                approvals,
+                rejections,
+                phase,
+            }
+        })
+        .collect();
+
+    // Sort descending by vote count so the most active round is first.
+    active_rounds.sort_by(|a, b| b.vote_count.cmp(&a.vote_count));
+    // Cap to the 10 most active rounds to keep the response bounded.
+    active_rounds.truncate(10);
+
+    Json(serde_json::json!({
+        "total_validators": total_validators,
+        "quorum": quorum,
+        "active_rounds": active_rounds,
+        "pending_count": s.pending_pool.len(),
+    }))
 }
 
 // POST /v1/consensus/vote

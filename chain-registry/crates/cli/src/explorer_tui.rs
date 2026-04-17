@@ -232,6 +232,7 @@ enum DataUpdate {
     Packages(Vec<PackageInfo>),
     Event(String, String), // (type, message)
     MempoolTx(MempoolTx),
+    MempoolSnapshot(Vec<MempoolTx>),
     Peers(Vec<String>),
     Error(String),
     /// SSE stream (re-)connected successfully.
@@ -460,6 +461,11 @@ async fn data_fetcher_loop(app: Arc<RwLock<App>>, api_base: String, tx: mpsc::Se
                 let _ = tx.send(DataUpdate::Packages(packages)).await;
             }
 
+            // Fetch mempool (pending pool entries for the Mempool view)
+            if let Ok(mempool) = fetch_mempool(&client, &api_base).await {
+                let _ = tx.send(DataUpdate::MempoolSnapshot(mempool)).await;
+            }
+
             // Fetch consensus state (best-effort — node may not expose this endpoint)
             if let Ok(cs) = fetch_consensus_state(&client, &api_base).await {
                 let _ = tx.send(DataUpdate::Consensus(cs)).await;
@@ -572,38 +578,136 @@ async fn fetch_peers(client: &reqwest::Client, api_base: &str) -> Result<Vec<Str
         .unwrap_or_default())
 }
 
+/// Fetch packages from both the verified list and the pending pool, merge them.
+///
+/// `/v1/packages?limit=50` returns full package objects for finalized packages.
+/// `/v1/pending` returns a bare list of canonical IDs still in the mempool.
+/// We show verified packages first (richest data), then pending ones.
 async fn fetch_pending_packages(
     client: &reqwest::Client,
     api_base: &str,
 ) -> Result<Vec<PackageInfo>> {
+    let mut packages: Vec<PackageInfo> = Vec::new();
+
+    // 1. Finalized/verified packages — full objects from the chain store.
+    if let Ok(res) = client
+        .get(format!("{}/v1/packages?limit=50", api_base))
+        .send()
+        .await
+    {
+        if let Ok(json) = res.json::<Value>().await {
+            if let Some(arr) = json["packages"].as_array() {
+                for v in arr {
+                    let canonical = v["canonical"].as_str().unwrap_or_default();
+                    if canonical.is_empty() {
+                        continue;
+                    }
+                    // canonical is e.g. "npm/express@4.18.0"
+                    let parts: Vec<&str> = canonical.splitn(2, '/').collect();
+                    let ecosystem = parts.first().copied().unwrap_or("?").to_string();
+                    let name_ver = parts.get(1).copied().unwrap_or(canonical);
+                    let (pkg_name, version) = if let Some(pos) = name_ver.rfind('@') {
+                        (&name_ver[..pos], &name_ver[pos + 1..])
+                    } else {
+                        (name_ver, "?")
+                    };
+                    packages.push(PackageInfo {
+                        name: pkg_name.to_string(),
+                        ecosystem,
+                        version: version.to_string(),
+                        status: v["status"].as_str().unwrap_or("verified").to_string(),
+                        publisher: v["publisher_pubkey"]
+                            .as_str()
+                            .unwrap_or("")
+                            .chars()
+                            .take(16)
+                            .collect(),
+                        verified_at: v["verified_at"].as_str().map(|s| s.to_string()),
+                        content_hash: v["content_hash"].as_str().unwrap_or("").to_string(),
+                    });
+                }
+            }
+        }
+    }
+
+    // 2. Pending pool — bare canonical ID strings not yet in the chain store.
+    if let Ok(res) = client
+        .get(format!("{}/v1/pending", api_base))
+        .send()
+        .await
+    {
+        if let Ok(json) = res.json::<Value>().await {
+            if let Some(arr) = json["packages"].as_array() {
+                for v in arr {
+                    let canonical = v.as_str().unwrap_or_default().to_string();
+                    if canonical.is_empty() {
+                        continue;
+                    }
+                    // Skip if already present from the verified list.
+                    if packages.iter().any(|p| {
+                        format!("{}/{}@{}", p.ecosystem, p.name, p.version) == canonical
+                    }) {
+                        continue;
+                    }
+                    let parts: Vec<&str> = canonical.splitn(2, '/').collect();
+                    let ecosystem = parts.first().copied().unwrap_or("?").to_string();
+                    let name_ver = parts.get(1).copied().unwrap_or(&canonical);
+                    let (pkg_name, version) = if let Some(pos) = name_ver.rfind('@') {
+                        (&name_ver[..pos], &name_ver[pos + 1..])
+                    } else {
+                        (name_ver, "?")
+                    };
+                    packages.push(PackageInfo {
+                        name: pkg_name.to_string(),
+                        ecosystem,
+                        version: version.to_string(),
+                        status: "pending".to_string(),
+                        publisher: String::new(),
+                        verified_at: None,
+                        content_hash: String::new(),
+                    });
+                }
+            }
+        }
+    }
+
+    Ok(packages)
+}
+
+/// Fetch pending-pool entries for the Mempool view.
+///
+/// Calls `/v1/pending` which returns `{count, packages: ["npm/foo@1.0", …]}`.
+/// Each canonical string is parsed into a `MempoolTx` for display.
+async fn fetch_mempool(
+    client: &reqwest::Client,
+    api_base: &str,
+) -> Result<Vec<MempoolTx>> {
     let res = client
         .get(format!("{}/v1/pending", api_base))
         .send()
         .await?;
     let json: Value = res.json().await?;
 
-    Ok(json["packages"]
-        .as_array()
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| {
-                    let name = v.as_str().unwrap_or_default().to_string();
-                    if name.is_empty() {
-                        return None;
-                    }
-                    Some(PackageInfo {
-                        name: name.clone(),
-                        ecosystem: "npm".to_string(),
-                        version: "pending".to_string(),
-                        status: "pending".to_string(),
-                        publisher: String::new(),
-                        verified_at: None,
-                        content_hash: String::new(),
-                    })
-                })
-                .collect()
-        })
-        .unwrap_or_default())
+    let mut txs = Vec::new();
+    if let Some(arr) = json["packages"].as_array() {
+        let now = Instant::now();
+        for v in arr {
+            let canonical = v.as_str().unwrap_or_default();
+            if canonical.is_empty() {
+                continue;
+            }
+            // Parse "npm/express@4.18.0" → ecosystem + name + version
+            let (ecosystem, rest) = canonical.split_once('/').unwrap_or(("unknown", canonical));
+            let (_name, _version) = rest.rsplit_once('@').unwrap_or((rest, "?"));
+            txs.push(MempoolTx {
+                id: canonical.to_string(),
+                tx_type: format!("publish({})", ecosystem),
+                size: canonical.len(), // approximate — no real size available
+                timestamp: now,
+            });
+        }
+    }
+    Ok(txs)
 }
 
 /// Fetch PBFT consensus round state.
@@ -783,6 +887,9 @@ fn apply_data_update(app: &mut App, update: DataUpdate) {
         }
         DataUpdate::MempoolTx(tx) => {
             app.mempool.push(tx);
+        }
+        DataUpdate::MempoolSnapshot(txs) => {
+            app.mempool = txs;
         }
         DataUpdate::Peers(peers) => {
             app.peer_ids = peers;
@@ -1416,21 +1523,40 @@ fn draw_blocks(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_blocks_list(f: &mut Frame, app: &App, area: Rect, compact: bool) {
+    let query = app.search_query.to_ascii_lowercase();
     let title = if compact {
         " RECENT BLOCKS "
-    } else {
+    } else if query.is_empty() {
         " BLOCKS (j/k to navigate, Enter for details) "
+    } else {
+        " BLOCKS (filtered) "
     };
 
     let items: Vec<ListItem> = app
         .blocks
         .iter()
         .enumerate()
+        .filter(|(_i, block)| {
+            if query.is_empty() {
+                return true;
+            }
+            let height_str = block.height.to_string();
+            height_str.contains(&query)
+                || block.hash.to_ascii_lowercase().contains(&query)
+                || block.merkle_root.to_ascii_lowercase().contains(&query)
+                || block.proposer.to_ascii_lowercase().contains(&query)
+        })
         .map(|(i, block)| {
-            let hash_short = if block.merkle_root.len() >= 16 {
-                format!("{}..", &block.merkle_root[..16])
+            let hash_short = if block.hash.len() >= 16 {
+                format!("{}..", &block.hash[..16])
+            } else if block.hash.is_empty() {
+                if block.merkle_root.len() >= 16 {
+                    format!("{}..", &block.merkle_root[..16])
+                } else {
+                    block.merkle_root.clone()
+                }
             } else {
-                block.merkle_root.clone()
+                block.hash.clone()
             };
 
             let content = if compact {
@@ -1498,6 +1624,10 @@ fn draw_block_preview(f: &mut Frame, app: &App, area: Rect) {
             ),
         ]),
         Line::from(vec![
+            Span::styled("Block Hash:  ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::raw(&block.hash),
+        ]),
+        Line::from(vec![
             Span::styled("Merkle Root: ", Style::default().fg(Theme::TEXT_DIM)),
             Span::raw(&block.merkle_root),
         ]),
@@ -1551,6 +1681,10 @@ fn draw_block_detail(f: &mut Frame, app: &App, area: Rect) {
             ),
         ]),
         Line::from(""),
+        Line::from(vec![
+            Span::styled("Block Hash:  ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::raw(&block.hash),
+        ]),
         Line::from(vec![
             Span::styled("Merkle Root: ", Style::default().fg(Theme::TEXT_DIM)),
             Span::raw(&block.merkle_root),
@@ -1633,10 +1767,19 @@ fn draw_validators(f: &mut Frame, app: &App, area: Rect) {
         .split(area);
 
     // Validators table
+    let query = app.search_query.to_ascii_lowercase();
     let rows: Vec<Row> = app
         .validators
         .iter()
         .enumerate()
+        .filter(|(_i, v)| {
+            if query.is_empty() {
+                return true;
+            }
+            v.id.to_ascii_lowercase().contains(&query)
+                || v.alias.to_ascii_lowercase().contains(&query)
+                || v.status.to_ascii_lowercase().contains(&query)
+        })
         .map(|(i, v)| {
             let status_color = match v.status.as_str() {
                 "online" | "self" => Theme::SUCCESS,
@@ -1892,10 +2035,21 @@ fn draw_packages(f: &mut Frame, app: &App, area: Rect) {
         .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
         .split(area);
 
+    let query = app.search_query.to_ascii_lowercase();
     let items: Vec<ListItem> = app
         .packages
         .iter()
         .enumerate()
+        .filter(|(_i, pkg)| {
+            if query.is_empty() {
+                return true;
+            }
+            pkg.name.to_ascii_lowercase().contains(&query)
+                || pkg.ecosystem.to_ascii_lowercase().contains(&query)
+                || pkg.version.to_ascii_lowercase().contains(&query)
+                || pkg.publisher.to_ascii_lowercase().contains(&query)
+                || pkg.status.to_ascii_lowercase().contains(&query)
+        })
         .map(|(i, pkg)| {
             let icon = match pkg.status.as_str() {
                 "verified" => "✓",
@@ -1925,13 +2079,22 @@ fn draw_packages(f: &mut Frame, app: &App, area: Rect) {
         })
         .collect();
 
+    let pkg_title = if query.is_empty() {
+        format!(
+            " PACKAGES ({}) — j/k to navigate, Enter for details ",
+            app.packages.len()
+        )
+    } else {
+        format!(
+            " PACKAGES (filtered: {}/{}) ",
+            items.len(),
+            app.packages.len()
+        )
+    };
     let list = List::new(items).block(
         Block::default()
             .borders(Borders::ALL)
-            .title(format!(
-                " PACKAGES ({}) — j/k to navigate, Enter for details ",
-                app.packages.len()
-            ))
+            .title(pkg_title)
             .border_style(Style::default().fg(Theme::PRIMARY)),
     );
     f.render_widget(list, chunks[0]);
@@ -2121,19 +2284,92 @@ fn draw_network(f: &mut Frame, app: &App, area: Rect) {
 // ============================================================================
 
 fn draw_mempool(f: &mut Frame, app: &App, area: Rect) {
-    let text = format!(
-        "Mempool Transactions: {}\n\nPending transactions waiting to be included in blocks.",
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(0)])
+        .split(area);
+
+    // Header with count
+    let header_text = format!(
+        " {} pending transactions waiting for validator consensus",
         app.mempool.len()
     );
+    let header = Paragraph::new(header_text)
+        .style(Style::default().fg(Theme::TEXT))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" MEMPOOL ")
+                .border_style(Style::default().fg(Theme::WARNING)),
+        );
+    f.render_widget(header, chunks[0]);
 
-    let paragraph = Paragraph::new(text).block(
+    if app.mempool.is_empty() {
+        let empty = Paragraph::new("  No pending transactions — mempool is empty")
+            .style(Style::default().fg(Theme::TEXT_DIM))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Theme::BORDER)),
+            );
+        f.render_widget(empty, chunks[1]);
+        return;
+    }
+
+    // Table of mempool entries
+    let header_cells = ["#", "Canonical ID", "Type", "Age"]
+        .iter()
+        .map(|h| Cell::from(*h).style(Style::default().fg(Theme::PRIMARY).add_modifier(Modifier::BOLD)));
+    let table_header = Row::new(header_cells).height(1);
+
+    let rows: Vec<Row> = app
+        .mempool
+        .iter()
+        .enumerate()
+        .map(|(i, tx)| {
+            let age_secs = tx.timestamp.elapsed().as_secs();
+            let age_str = if age_secs < 60 {
+                format!("{}s", age_secs)
+            } else if age_secs < 3600 {
+                format!("{}m {}s", age_secs / 60, age_secs % 60)
+            } else {
+                format!("{}h {}m", age_secs / 3600, (age_secs % 3600) / 60)
+            };
+
+            let style = if i % 2 == 0 {
+                Style::default().fg(Theme::TEXT)
+            } else {
+                Style::default().fg(Theme::TEXT_DIM)
+            };
+
+            Row::new(vec![
+                Cell::from(format!("{}", i + 1)),
+                Cell::from(tx.id.clone()),
+                Cell::from(tx.tx_type.clone()),
+                Cell::from(age_str),
+            ])
+            .style(style)
+        })
+        .collect();
+
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Length(4),
+            Constraint::Min(30),
+            Constraint::Length(16),
+            Constraint::Length(10),
+        ],
+    )
+    .header(table_header)
+    .block(
         Block::default()
             .borders(Borders::ALL)
-            .title(" MEMPOOL ")
-            .border_style(Style::default().fg(Theme::WARNING)),
+            .title(" Pending Transactions ")
+            .border_style(Style::default().fg(Theme::BORDER)),
     );
 
-    f.render_widget(paragraph, area);
+    f.render_widget(table, chunks[1]);
 }
 
 // ============================================================================

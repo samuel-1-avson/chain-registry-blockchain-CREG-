@@ -32,6 +32,9 @@ x-web-explorer-image: &web-explorer-image
       VITE_CREG_TOKEN: ${TESTNET_TOKEN_ADDR:-}
       VITE_STAKING_ADDR: ${TESTNET_STAKING_ADDR:-}
       VITE_DEV_MODE: ${VITE_DEV_MODE:-true}
+      # Leave VITE_API_BASE empty so the SPA uses the same origin (port 3000).
+      # nginx proxies /v1/* → node-1:8080 so no CORS issues arise.
+      VITE_API_BASE: ""
 
 x-node-base: &node-base
   <<: *app-image
@@ -101,6 +104,7 @@ services:
         VITE_CREG_TOKEN: ${TESTNET_TOKEN_ADDR:-}
         VITE_STAKING_ADDR: ${TESTNET_STAKING_ADDR:-}
         VITE_DEV_MODE: ${VITE_DEV_MODE:-true}
+        VITE_API_BASE: ""
     command: ["true"]
     profiles:
       - build

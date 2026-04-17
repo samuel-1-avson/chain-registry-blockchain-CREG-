@@ -36,8 +36,8 @@ const PUBLIC_TESTNET_PROFILES = {
     description: 'Public Ethereum app and contract testnet.',
     purpose: 'Application and contract testing',
     chainId: 11155111,
-    rpcUrl: import.meta.env.VITE_SEPOLIA_RPC_URL || 'https://rpc.sepolia.dev',
-    faucetUrl: import.meta.env.VITE_SEPOLIA_FAUCET_URL || 'https://faucet.sepolia.dev/',
+    rpcUrl: import.meta.env.VITE_SEPOLIA_RPC_URL || 'https://ethereum-sepolia-rpc.publicnode.com',
+    faucetUrl: import.meta.env.VITE_SEPOLIA_FAUCET_URL || 'https://sepolia-faucet.pk910.de/',
     blockExplorerUrl: import.meta.env.VITE_SEPOLIA_BLOCK_EXPLORER_URL || 'https://sepolia.etherscan.io',
     tokenContract: import.meta.env.VITE_SEPOLIA_CREG_TOKEN || null,
     stakingContract: import.meta.env.VITE_SEPOLIA_STAKING_ADDR || null,
@@ -54,7 +54,7 @@ const PUBLIC_TESTNET_PROFILES = {
     purpose: 'Validator, staking, and protocol-upgrade testing',
     chainId: 560048,
     rpcUrl: import.meta.env.VITE_HOODI_RPC_URL || 'https://rpc.hoodi.ethpandaops.io',
-    faucetUrl: import.meta.env.VITE_HOODI_FAUCET_URL || 'https://faucet.hoodi.ethpandaops.io/',
+    faucetUrl: import.meta.env.VITE_HOODI_FAUCET_URL || 'https://hoodi-faucet.pk910.de/',
     blockExplorerUrl: import.meta.env.VITE_HOODI_BLOCK_EXPLORER_URL || 'https://hoodi.etherscan.io',
     tokenContract: import.meta.env.VITE_HOODI_CREG_TOKEN || null,
     stakingContract: import.meta.env.VITE_HOODI_STAKING_ADDR || null,
@@ -133,6 +133,29 @@ const timeAgo = (timestamp) => {
 const truncateHash = (hash, start = 8, end = 8) => {
   if (!hash || hash.length <= start + end) return hash
   return `${hash.slice(0, start)}...${hash.slice(-end)}`
+}
+
+/**
+ * Mine a proof-of-work nonce: find a value such that
+ * SHA-256(challenge + nonce) has `difficulty` leading zero bits.
+ * Uses the Web Crypto API for fast hashing.
+ */
+const minePoW = async (challenge, difficulty) => {
+  const encoder = new TextEncoder()
+  for (let nonce = 0; nonce < 0x7FFFFFFF; nonce++) {
+    const nonceStr = nonce.toString()
+    const data = encoder.encode(challenge + nonceStr)
+    const hashBuf = await crypto.subtle.digest('SHA-256', data)
+    const hash = new Uint8Array(hashBuf)
+    let leadingZeros = 0
+    for (const byte of hash) {
+      if (byte === 0) { leadingZeros += 8 }
+      else { leadingZeros += Math.clz32(byte) - 24; break }
+      if (leadingZeros >= difficulty) break
+    }
+    if (leadingZeros >= difficulty) return nonceStr
+  }
+  throw new Error('PoW mining exhausted — could not find a valid nonce.')
 }
 
 const normalizeContractAddress = (value) => {
@@ -288,6 +311,8 @@ function App() {
   const [walletProvider, setWalletProvider] = useState(null)
   const [walletBalance, setWalletBalance] = useState(null)
   const [walletNativeBalance, setWalletNativeBalance] = useState(null)
+  const [walletRpcOffline, setWalletRpcOffline] = useState(false)
+  const walletBalanceFailuresRef = useRef(0)
   const [walletFundingLoading, setWalletFundingLoading] = useState(false)
   const [walletFundingResult, setWalletFundingResult] = useState(null)
   const [walletFundingCooldownSecs, setWalletFundingCooldownSecs] = useState(0)
@@ -331,6 +356,7 @@ function App() {
   const [packageLookupLoading, setPackageLookupLoading] = useState(false)
   const [packageList, setPackageList] = useState({ packages: [], total: 0 })
   const [packageListOffset, setPackageListOffset] = useState(0)
+  const [packageFilterText, setPackageFilterText] = useState('')
   const [showPublishForm, setShowPublishForm] = useState(false)
   const [publishForm, setPublishForm] = useState({ ecosystem: 'npm', name: '', version: '', ipfs_cid: '', content_hash: '', publisher_pubkey: '', signature: '' })
   const [publishStatus, setPublishStatus] = useState(null)
@@ -366,7 +392,8 @@ function App() {
       chain: buildChainConfig(31337, 'Anvil Local', directRpcUrl),
       rpcUrl: directRpcUrl,
       faucetUrl: directFaucetUrl,
-      faucetApiUrl: `${directFaucetUrl}/api/drip`,
+      faucetApiBase: `${API_BASE}/api`,
+      faucetApiUrl: `${API_BASE}/api/drip`,
       blockExplorerUrl: explorerOrigin,
       tokenContract: BUILD_CREG_TOKEN_ADDR,
       stakingContract: BUILD_STAKING_ADDR,
@@ -645,7 +672,7 @@ function App() {
         }
       }
 
-      // Fetch pending packages
+      // Fetch pending packages (mempool)
       try {
         const pendingRes = await fetch(`${API_BASE}/v1/pending`)
         if (pendingRes.status === 429) {
@@ -658,6 +685,16 @@ function App() {
         }
         /* endpoint may not exist yet */
       }
+
+      // Fetch finalized/verified packages so they stay visible after leaving
+      // the pending pool (packages disappear from /v1/pending once committed).
+      try {
+        const pkgRes = await fetch(`${API_BASE}/v1/packages?offset=0&limit=20`)
+        if (pkgRes.ok) {
+          const pkgData = await pkgRes.json()
+          setPackageList(pkgData)
+        }
+      } catch (e) { /* non-fatal */ }
 
       setStatus('online')
       setFetchError(null)
@@ -802,16 +839,38 @@ function App() {
       } else {
         setWalletBalance('0')
       }
+      walletBalanceFailuresRef.current = 0
+      setWalletRpcOffline(false)
     } catch (e) {
-      console.error('Failed to refresh wallet balance:', e)
+      walletBalanceFailuresRef.current += 1
+      if (walletBalanceFailuresRef.current === 1) {
+        console.warn(`Wallet balance refresh failed (RPC ${activeRpcUrl}): ${e.shortMessage || e.message || e}`)
+      }
+      if (walletBalanceFailuresRef.current >= 3) setWalletRpcOffline(true)
     }
   }, [walletAccount, tokenContractAddress, activeChain, activeRpcUrl])
 
   useEffect(() => {
-    if (!walletAccount) return
-    refreshWalletBalance()
-    const timer = setInterval(refreshWalletBalance, 10000)
-    return () => clearInterval(timer)
+    walletBalanceFailuresRef.current = 0
+    setWalletRpcOffline(false)
+  }, [activeRpcUrl, walletAccount?.address])
+
+  useEffect(() => {
+    if (!walletAccount) return undefined
+    let cancelled = false
+    let timer = null
+    const tick = async () => {
+      if (cancelled) return
+      await refreshWalletBalance()
+      if (cancelled) return
+      const delay = walletBalanceFailuresRef.current >= 3 ? 60000 : 10000
+      timer = setTimeout(tick, delay)
+    }
+    tick()
+    return () => {
+      cancelled = true
+      if (timer) clearTimeout(timer)
+    }
   }, [walletAccount, refreshWalletBalance])
 
   useEffect(() => {
@@ -876,26 +935,47 @@ function App() {
     const currentChainId = await provider.request({ method: 'eth_chainId' })
     if (currentChainId === targetChainId) return
 
+    const addParams = {
+      chainId: targetChainId,
+      chainName: profile.chain.name,
+      nativeCurrency: profile.chain.nativeCurrency,
+      rpcUrls: [profile.rpcUrl],
+      blockExplorerUrls: profile.blockExplorerUrl ? [profile.blockExplorerUrl] : [],
+    }
+
+    // Anvil (31337) is typically preconfigured in MetaMask as "Localhost 8545" or similar
+    // user-custom. Try switch first; fall back to add only on 4902.
+    // Public testnets (Sepolia, Hoodi, etc.) are often NOT in MetaMask — add-first is
+    // idempotent (switches if already present) and avoids the noisy 4902 pre-fallback.
+    const addFirst = profile.id !== 'anvil'
+
+    const doSwitch = () => provider.request({
+      method: 'wallet_switchEthereumChain',
+      params: [{ chainId: targetChainId }],
+    })
+    const doAdd = () => provider.request({
+      method: 'wallet_addEthereumChain',
+      params: [addParams],
+    })
+
+    if (addFirst) {
+      try {
+        await doAdd()
+      } catch (addError) {
+        // Some wallets require an explicit switch after add; retry via switch.
+        if (addError?.code === 4001) throw addError // user rejected
+        await doSwitch()
+      }
+      return
+    }
+
     try {
-      await provider.request({
-        method: 'wallet_switchEthereumChain',
-        params: [{ chainId: targetChainId }],
-      })
+      await doSwitch()
     } catch (switchError) {
       if (switchError?.code !== 4902 && !`${switchError?.message || ''}`.includes('Unrecognized chain')) {
         throw switchError
       }
-
-      await provider.request({
-        method: 'wallet_addEthereumChain',
-        params: [{
-          chainId: targetChainId,
-          chainName: profile.chain.name,
-          nativeCurrency: profile.chain.nativeCurrency,
-          rpcUrls: [profile.rpcUrl],
-          blockExplorerUrls: [profile.blockExplorerUrl],
-        }],
-      })
+      await doAdd()
     }
   }, [activeNetworkProfile])
 
@@ -1099,10 +1179,33 @@ function App() {
         throw new Error(`No faucet URL is configured for ${activeNetworkProfile.label}.`)
       }
 
+      // Attempt PoW challenge flow: request a challenge, mine, then drip.
+      // If the faucet has PoW disabled it will accept a bare {address} too,
+      // but we always try the challenge path first for correctness.
+      const faucetBase = activeNetworkProfile.faucetApiBase || activeNetworkProfile.faucetApiUrl.replace(/\/drip$/, '')
+      let challenge = null
+      let nonce = null
+      try {
+        const challengeRes = await fetch(`${faucetBase}/challenge`)
+        if (challengeRes.ok) {
+          const challengeData = await challengeRes.json()
+          challenge = challengeData.challenge
+          nonce = await minePoW(challenge, challengeData.difficulty)
+        }
+      } catch (_) {
+        // Challenge endpoint unavailable — proceed without PoW
+      }
+
+      const dripBody = { address: walletAccount.address }
+      if (challenge && nonce) {
+        dripBody.challenge = challenge
+        dripBody.nonce = nonce
+      }
+
       const response = await fetch(activeNetworkProfile.faucetApiUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ address: walletAccount.address }),
+        body: JSON.stringify(dripBody),
       })
       const payload = await response.json().catch(() => null)
       const retryAfterHeader = Number(response.headers.get('Retry-After') || 0)
@@ -1638,7 +1741,7 @@ function App() {
                 <div className="stat-icon">🌐</div>
                 <span className="stat-label">Peers</span>
               </div>
-              <div className="stat-value">{p2pStatus.peers.length}</div>
+              <div className="stat-value">{(p2pStatus.peers || []).length}</div>
             </div>
           </>
         )}
@@ -1963,9 +2066,19 @@ function App() {
                 )}
 
                 {/* On-chain Package List */}
-                {packageList.packages.length > 0 && (
+                {(packageList.packages || []).length > 0 && (
                   <div className="detail-section" style={{ marginBottom: 'var(--space-4)' }}>
                     <div className="detail-section-title">On-chain Packages ({packageList.total} total)</div>
+                    <div className="search-box" style={{ marginBottom: 'var(--space-2)' }}>
+                      <span className="search-icon">🔍</span>
+                      <input
+                        type="text"
+                        className="search-input"
+                        placeholder="Filter packages by name, ecosystem, status..."
+                        value={packageFilterText}
+                        onChange={(e) => setPackageFilterText(e.target.value)}
+                      />
+                    </div>
                     <div className="table-container">
                       <table className="data-table">
                         <thead>
@@ -1978,7 +2091,15 @@ function App() {
                           </tr>
                         </thead>
                         <tbody>
-                          {packageList.packages.map((pkg, idx) => (
+                          {(packageList.packages || []).filter(pkg => {
+                            if (!packageFilterText) return true
+                            const q = packageFilterText.toLowerCase()
+                            return (pkg.canonical || '').toLowerCase().includes(q)
+                              || (pkg.name || '').toLowerCase().includes(q)
+                              || (pkg.ecosystem || '').toLowerCase().includes(q)
+                              || (pkg.status || '').toLowerCase().includes(q)
+                              || (pkg.publisher || '').toLowerCase().includes(q)
+                          }).map((pkg, idx) => (
                             <tr key={pkg.canonical || idx} className="animate-slide-in" style={{ animationDelay: `${idx * 0.03}s`, cursor: 'pointer' }}
                               onClick={() => {
                                 setPackageQuery(pkg.canonical)
@@ -2038,589 +2159,325 @@ function App() {
 
             {/* Wallet View */}
             {view === 'wallet' && (
-              <div style={{ padding: 'var(--space-4)' }}>
-                <div className="detail-panel" style={{ marginBottom: 'var(--space-4)' }}>
-                  <div className="detail-header">
-                    <span className="detail-title">🚀 Testnet Quickstart</span>
-                  </div>
-                  <div className="detail-content">
-                    <div className="quickstart-grid">
-                      <div className="quickstart-card">
-                        <div className="detail-section-title">Wallet Network Profiles</div>
-                        <div className="quickstart-note">
-                          Registry data in this explorer still comes from your local Chain Registry node. This selector changes the wallet chain, RPC, faucet, and contract target used by wallet actions.
-                        </div>
-                        <div style={{ display: 'grid', gap: '10px' }}>
-                          {Object.values(networkProfiles).map((profile) => {
-                            const isActive = activeNetworkProfile.id === profile.id
-                            return (
-                              <button
-                                key={profile.id}
-                                type="button"
-                                className="wallet-action-btn"
-                                onClick={() => selectNetworkProfile(profile.id)}
-                                style={{
-                                  marginBottom: 0,
-                                  textAlign: 'left',
-                                  background: isActive ? 'rgba(99, 102, 241, 0.12)' : 'var(--surface)',
-                                  borderColor: isActive ? 'rgba(99, 102, 241, 0.4)' : 'var(--border)',
-                                  color: 'var(--text-primary)',
-                                }}
-                              >
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', marginBottom: '6px' }}>
-                                  <span style={{ fontWeight: 700 }}>{profile.label}</span>
-                                  <span style={{
-                                    fontSize: '0.72rem',
-                                    textTransform: 'uppercase',
-                                    letterSpacing: '0.08em',
-                                    color: isActive ? '#a5b4fc' : 'var(--text-tertiary)',
-                                  }}>
-                                    {isActive ? 'Active' : profile.directFunding ? 'Direct Faucet' : 'External Faucet'}
-                                  </span>
-                                </div>
-                                <div className="wallet-tx">Chain ID: {profile.chain.id}</div>
-                                <div style={{ color: 'var(--text-secondary)', fontSize: '0.82rem', marginTop: '4px' }}>{profile.description}</div>
-                                <div style={{ color: 'var(--text-tertiary)', fontSize: '0.76rem', marginTop: '4px' }}>Best for: {profile.purpose}</div>
-                              </button>
-                            )
-                          })}
-                        </div>
-                        <div className="wallet-result warning" style={{ margin: 0 }}>
-                          {activeFundingHelp}
-                        </div>
-                      </div>
+              <div style={{ padding: 'var(--space-4)', maxWidth: 640, margin: '0 auto' }}>
 
-                      <div className="quickstart-card">
-                        <div className="detail-section-title">Connection Surfaces</div>
-                        <div className="quickstart-note">
-                          MetaMask and WalletConnect are prompted to add or switch to the selected wallet network automatically when you connect.
-                        </div>
-                        <div className="quickstart-field">
-                          <span className="quickstart-label">Explorer</span>
-                          <div className="quickstart-inline">
-                            <span className="quickstart-value mono">{explorerOrigin}</span>
-                            <div className="quickstart-action-row">
-                              <a className="wallet-inline-action wallet-inline-link" href={explorerOrigin} target="_blank" rel="noopener noreferrer">Open</a>
-                              <CopyTextButton text={explorerOrigin} label="explorer url" />
-                            </div>
-                          </div>
-                        </div>
-                        <div className="quickstart-field">
-                          <span className="quickstart-label">Node API</span>
-                          <div className="quickstart-inline">
-                            <span className="quickstart-value mono">{directNodeUrl}</span>
-                            <CopyTextButton text={directNodeUrl} label="node api url" />
-                          </div>
-                        </div>
-                        <div className="quickstart-field">
-                          <span className="quickstart-label">Wallet Network</span>
-                          <div className="quickstart-inline">
-                            <span className="quickstart-value mono">{activeNetworkProfile.label}</span>
-                            <span style={{ color: 'var(--text-tertiary)', fontSize: '0.82rem' }}>{activeNetworkProfile.purpose}</span>
-                          </div>
-                        </div>
-                        <div className="quickstart-field">
-                          <span className="quickstart-label">Faucet</span>
-                          <div className="quickstart-inline">
-                            <span className="quickstart-value mono">{activeFaucetUrl}</span>
-                            <div className="quickstart-action-row">
-                              <a className="wallet-inline-action wallet-inline-link" href={activeFaucetUrl} target="_blank" rel="noopener noreferrer">Open</a>
-                              <CopyTextButton text={activeFaucetUrl} label="faucet url" />
-                            </div>
-                          </div>
-                        </div>
-                        <div className="quickstart-field">
-                          <span className="quickstart-label">Sponsored Relayer</span>
-                          <div className="quickstart-inline">
-                            <span className="quickstart-value mono">{directRelayerUrl}</span>
-                            <div className="quickstart-action-row">
-                              <a className="wallet-inline-action wallet-inline-link" href={`${directRelayerUrl}/v1/relayer/policy`} target="_blank" rel="noopener noreferrer">Policy</a>
-                              <CopyTextButton text={directRelayerUrl} label="relayer url" />
-                            </div>
-                          </div>
-                        </div>
-                        <div className="quickstart-field">
-                          <span className="quickstart-label">Wallet RPC URL</span>
-                          <div className="quickstart-inline">
-                            <span className="quickstart-value mono">{activeRpcUrl}</span>
-                            <CopyTextButton text={activeRpcUrl} label="rpc url" />
-                          </div>
-                        </div>
-                        <div className="quickstart-field">
-                          <span className="quickstart-label">Chain ID</span>
-                          <div className="quickstart-inline">
-                            <span className="quickstart-value mono">{activeChain.id}</span>
-                            <CopyTextButton text={String(activeChain.id)} label="chain id" />
-                          </div>
-                        </div>
-                        <div className="quickstart-field">
-                          <span className="quickstart-label">Wallet Explorer</span>
-                          <div className="quickstart-inline">
-                            <span className="quickstart-value mono">{activeNetworkProfile.blockExplorerUrl}</span>
-                            <div className="quickstart-action-row">
-                              <a className="wallet-inline-action wallet-inline-link" href={activeNetworkProfile.blockExplorerUrl} target="_blank" rel="noopener noreferrer">Open</a>
-                              <CopyTextButton text={activeNetworkProfile.blockExplorerUrl} label="wallet block explorer url" />
-                            </div>
-                          </div>
-                        </div>
+                {/* ── Network Selector (compact inline) ─────────────────── */}
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+                  {Object.values(networkProfiles).map((profile) => (
+                    <button
+                      key={profile.id}
+                      type="button"
+                      onClick={() => selectNetworkProfile(profile.id)}
+                      style={{
+                        flex: 1,
+                        padding: '10px 12px',
+                        borderRadius: '10px',
+                        border: `1.5px solid ${activeNetworkProfile.id === profile.id ? 'rgba(99,102,241,0.5)' : 'var(--border)'}`,
+                        background: activeNetworkProfile.id === profile.id ? 'rgba(99,102,241,0.1)' : 'var(--surface)',
+                        color: 'var(--text-primary)',
+                        cursor: 'pointer',
+                        textAlign: 'center',
+                        fontSize: '0.85rem',
+                        fontWeight: activeNetworkProfile.id === profile.id ? 600 : 400,
+                      }}
+                    >
+                      {profile.shortLabel}
+                      <div style={{ fontSize: '0.7rem', color: 'var(--text-tertiary)', marginTop: '2px' }}>
+                        {profile.chain.id}
                       </div>
-
-                      <div className="quickstart-card">
-                        <div className="detail-section-title">Publisher Path</div>
-                        <div className="quickstart-steps">
-                          <div className="quickstart-step">1. Connect a wallet to {activeNetworkProfile.label}.</div>
-                          <div className="quickstart-step">2. {activeNetworkProfile.directFunding ? 'Use the faucet to get free tCREG and native testnet ETH for gas.' : `Use a ${activeNetworkProfile.shortLabel} faucet to get native testnet ETH for gas.`}</div>
-                          <div className="quickstart-step">3. {activeProfileHasContracts ? 'Stake at least 1 tCREG as a publisher.' : `Configure Chain Registry deployment addresses for ${activeNetworkProfile.shortLabel} before using direct publisher staking from this explorer.`}</div>
-                          <div className="quickstart-step">4. {activeProfileHasContracts ? 'Switch to the packages surface and submit a package.' : 'If you only need local registry testing, switch back to the Local Anvil profile.'}</div>
-                        </div>
-                        <div className="quickstart-actions-stack">
-                          <button
-                            className="wallet-action-btn wallet-action-primary"
-                            onClick={walletAccount ? fundConnectedWallet : () => window.open(activeFaucetUrl, '_blank', 'noopener,noreferrer')}
-                            disabled={walletAccount ? (walletFundingLoading || walletFundingCooldownActive) : false}
-                            style={{ textDecoration: 'none', textAlign: 'center' }}
-                          >
-                            {walletAccount ? walletFundingButtonLabel : '💧 Open Faucet'}
-                          </button>
-                          <button className="wallet-action-btn wallet-action-secondary" onClick={() => setView('packages')}>
-                            📦 Open Packages Surface
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="quickstart-card">
-                        <div className="detail-section-title">Validator Path</div>
-                        <div className="quickstart-steps">
-                          <div className="quickstart-step">1. {activeNetworkProfile.id === 'anvil' ? 'Start the validator node and make sure it appears in the validator list.' : `Use ${activeNetworkProfile.label} when you want a public Ethereum validator or staking-style testnet.`}</div>
-                          <div className="quickstart-step">2. {activeNetworkProfile.directFunding ? 'Connect the validator wallet and fund it from the faucet with both tCREG and native testnet ETH.' : `Fund the wallet with native ${activeChain.nativeCurrency.symbol} from a public ${activeNetworkProfile.shortLabel} faucet.`}</div>
-                          <div className="quickstart-step">3. {activeProfileHasContracts ? 'Apply with 100 tCREG, then wait for governance approval.' : `Configure VITE_${activeNetworkProfile.shortLabel.toUpperCase()}_* deployment addresses before using validator staking from this explorer.`}</div>
-                          <div className="quickstart-step">4. {activeNetworkProfile.id === 'anvil' ? 'Use a detected node identity below or paste the node ID and Ed25519 pubkey manually.' : 'Public profiles currently switch the wallet and funding surfaces; the validator identity tools below still refer to the local registry node.'}</div>
-                          <div className="quickstart-step">5. {activeNetworkProfile.id === 'anvil' ? 'Register the wallet-to-node binding and wait for the sync loop to show active.' : 'Use Hoodi for public validator/staking rehearsals and Sepolia for general app testing.'}</div>
-                        </div>
-                        <div className="wallet-result warning" style={{ margin: '0 0 12px 0' }}>
-                          {activeValidatorRegistrationNote}
-                        </div>
-                        <div className="quickstart-code-block">
-                          <div className="detail-section-title">PowerShell local registry status check</div>
-                          <pre>{validatorStatusCommand}</pre>
-                          <CopyTextButton text={validatorStatusCommand} label="validator status powershell command">Copy Command</CopyTextButton>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+                    </button>
+                  ))}
                 </div>
+                {activeNetworkProfile.id !== 'anvil' && (
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 'var(--space-4)' }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        try { window.localStorage.removeItem('creg.walletNetworkProfile') } catch (_) { /* ignore */ }
+                        selectNetworkProfile('anvil')
+                      }}
+                      style={{
+                        background: 'transparent', border: 'none', padding: '2px 0',
+                        color: 'var(--text-tertiary)', fontSize: '0.75rem',
+                        cursor: 'pointer', textDecoration: 'underline',
+                      }}
+                    >
+                      Reset to Local Anvil
+                    </button>
+                  </div>
+                )}
 
-                <div className="detail-section" style={{ marginBottom: 'var(--space-4)' }}>
-                  <div className="detail-section-title">Explorer Wallet</div>
-                  <div style={{ color: 'var(--text-secondary)', marginBottom: 'var(--space-3)' }}>
-                    Connect a wallet and stake directly from the browser. You need both tCREG for app operations and native testnet ETH for gas, and the wallet profile above controls which Ethereum testnet the wallet targets.
-                  </div>
-                </div>
-
-                <div className="detail-section" style={{ marginBottom: 'var(--space-4)' }}>
-                  <div className="detail-section-title">Wallet Target Config</div>
-                  <div className="detail-row">
-                    <span className="detail-label">Wallet Profile</span>
-                    <span className="detail-value">{activeNetworkProfile.label}</span>
-                  </div>
-                  <div className="detail-row">
-                    <span className="detail-label">Funding Mode</span>
-                    <span className="detail-value">{activeNetworkProfile.directFunding ? 'Direct in-app faucet' : 'External public faucet'}</span>
-                  </div>
-                  <div className="detail-row">
-                    <span className="detail-label">Sponsored Relayer</span>
-                    <span className="detail-value">{activeRelayerChainPolicy ? 'Available' : 'Unavailable'}</span>
-                  </div>
-                  <div className="detail-row">
-                    <span className="detail-label">Registry</span>
-                    {activeRegistryAddress ? (
-                      <CopyButton text={activeRegistryAddress} label="registry address" />
-                    ) : (
-                      <span className="detail-value">Unavailable</span>
-                    )}
-                  </div>
-                  <div className="detail-row">
-                    <span className="detail-label">Token Contract</span>
-                    {tokenContractAddress ? (
-                      <CopyButton text={tokenContractAddress} label="token address" />
-                    ) : (
-                      <span className="detail-value">Unavailable</span>
-                    )}
-                  </div>
-                  <div className="detail-row">
-                    <span className="detail-label">Staking Contract</span>
-                    {stakingContractAddress ? (
-                      <CopyButton text={stakingContractAddress} label="staking address" />
-                    ) : (
-                      <span className="detail-value">Unavailable</span>
-                    )}
-                  </div>
-                  <div className="detail-row">
-                    <span className="detail-label">Validator Admission</span>
-                    <span className="detail-value">{activeValidatorRegistrationMode}</span>
-                  </div>
-                  <div className="detail-row">
-                    <span className="detail-label">Wallet RPC</span>
-                    <span className="detail-value mono">{activeRpcUrl}</span>
-                  </div>
-                </div>
-
+                {/* ── Not Connected: Connect Wallet ─────────────────────── */}
                 {!walletAccount ? (
-                  <div className="wallet-panel-body" style={{ padding: 0 }}>
-                    <div className="wallet-section">
-                      <label className="wallet-label">Browser Wallet</label>
+                  <div className="detail-panel">
+                    <div className="detail-header">
+                      <span className="detail-title">Connect Wallet</span>
+                    </div>
+                    <div className="detail-content" style={{ display: 'grid', gap: '10px' }}>
                       {eip6963Providers.length > 0 ? (
-                        <div className="wallet-quick-accounts">
-                          {eip6963Providers.map((p, i) => (
-                            <button
-                              key={p.info?.uuid || i}
-                              className="wallet-action-btn wallet-action-primary"
-                              onClick={() => connectEip6963(p)}
-                              style={{ marginBottom: '8px', width: '100%', display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'center' }}
-                            >
-                              {p.info?.icon && <img src={p.info.icon} alt="" style={{ width: 20, height: 20 }} />}
-                              {p.info?.name || 'Unknown Wallet'}
-                            </button>
-                          ))}
-                        </div>
+                        eip6963Providers.map((p, i) => (
+                          <button
+                            key={p.info?.uuid || i}
+                            className="wallet-action-btn wallet-action-primary"
+                            onClick={() => connectEip6963(p)}
+                            style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'center' }}
+                          >
+                            {p.info?.icon && <img src={p.info.icon} alt="" style={{ width: 20, height: 20 }} />}
+                            {p.info?.name || 'Wallet'}
+                          </button>
+                        ))
                       ) : (
-                        <button className="wallet-action-btn wallet-action-primary" onClick={connectMetaMask} style={{ marginBottom: '12px', width: '100%' }}>
-                          🦊 Connect MetaMask
+                        <button className="wallet-action-btn wallet-action-primary" onClick={connectMetaMask} style={{ width: '100%' }}>
+                          Connect MetaMask
                         </button>
                       )}
-                    </div>
-
-                    <div className="wallet-section">
-                      <label className="wallet-label">WalletConnect</label>
-                      <button className="wallet-action-btn wallet-action-primary" onClick={connectWalletConnect} style={{ marginBottom: '12px', width: '100%' }}>
-                        📱 Connect via WalletConnect
+                      <button className="wallet-action-btn wallet-action-secondary" onClick={connectWalletConnect} style={{ width: '100%' }}>
+                        WalletConnect
                       </button>
+                      {PRIVATE_KEY_WALLET_ENABLED && (
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <input
+                            type="password"
+                            className="wallet-input"
+                            placeholder="Private key (dev only)"
+                            autoComplete="off"
+                            spellCheck="false"
+                            value={walletKeyInput}
+                            onChange={(e) => setWalletKeyInput(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && walletKeyInput && connectWallet(walletKeyInput)}
+                            style={{ flex: 1, marginBottom: 0 }}
+                          />
+                          <button className="wallet-action-btn wallet-action-primary" onClick={() => connectWallet(walletKeyInput)} disabled={!walletKeyInput} style={{ whiteSpace: 'nowrap' }}>
+                            Connect
+                          </button>
+                        </div>
+                      )}
+                      <div style={{ color: 'var(--text-tertiary)', fontSize: '0.8rem', textAlign: 'center' }}>
+                        Connects to {activeNetworkProfile.label} (Chain {activeChain.id})
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    {/* ── Connected: Account & Balances ──────────────────── */}
+                    <div className="detail-panel" style={{ marginBottom: 'var(--space-3)' }}>
+                      <div className="detail-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span className="detail-title">
+                          <CopyButton text={walletAccount.address} label="address" />
+                        </span>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>
+                          {walletAccount.providerName || walletAccount.type} · {activeNetworkProfile.shortLabel}
+                        </span>
+                      </div>
+                      <div className="detail-content">
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+                          <div className="wallet-balance-display">
+                            <span className="wallet-balance-value">{walletBalance || '...'}</span>
+                            <span className="wallet-balance-label">tCREG</span>
+                          </div>
+                          <div className="wallet-balance-display" style={{ background: 'rgba(14,165,233,0.08)', border: '1px solid rgba(14,165,233,0.24)' }}>
+                            <span className="wallet-balance-value">{walletNativeBalance || '...'}</span>
+                            <span className="wallet-balance-label">ETH Gas</span>
+                          </div>
+                        </div>
+                        {walletRpcOffline && (
+                          <div style={{
+                            padding: '8px 10px', marginBottom: '10px', borderRadius: '8px',
+                            background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.25)',
+                            color: '#f87171', fontSize: '0.78rem', lineHeight: 1.4,
+                          }}>
+                            RPC unreachable at {activeRpcUrl}. Balances may be stale. Polling backed off to 60s.
+                          </div>
+                        )}
+                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                          <button className="wallet-inline-action" onClick={refreshWalletBalance}>Refresh</button>
+                          <button className="wallet-inline-action" onClick={() => setView('packages')}>Packages</button>
+                          <button className="wallet-inline-action" onClick={() => setView('validators')}>Validators</button>
+                          <button className="wallet-inline-action" onClick={disconnectWallet} style={{ marginLeft: 'auto', color: '#f87171' }}>Disconnect</button>
+                        </div>
+                      </div>
                     </div>
 
-                    {PRIVATE_KEY_WALLET_ENABLED ? (
-                      <div className="wallet-section">
-                        <label className="wallet-label">Private Key {IS_TESTNET ? '(Dev/Testnet Only)' : '(Dev Build Only)'}</label>
-                        {!IS_TESTNET && (
-                          <div className="wallet-result warning">
-                            This build allows raw private key input for development only. Do not use it with production funds.
+                    {/* ── Faucet Funding ─────────────────────────────────── */}
+                    <div className="detail-panel" style={{ marginBottom: 'var(--space-3)' }}>
+                      <div className="detail-header">
+                        <span className="detail-title">Faucet</span>
+                      </div>
+                      <div className="detail-content">
+                        {(walletNativeBalance !== null && parseFloat(walletNativeBalance) === 0) && (
+                          <div style={{ color: '#fbbf24', fontSize: '0.82rem', marginBottom: '10px' }}>
+                            Your wallet has no ETH for gas. Fund it before staking or publishing.
+                          </div>
+                        )}
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <button
+                            className="wallet-action-btn wallet-action-primary"
+                            onClick={fundConnectedWallet}
+                            disabled={walletFundingLoading || walletFundingCooldownActive}
+                            style={{ flex: 1 }}
+                          >
+                            {walletFundingButtonLabel}
+                          </button>
+                          <a
+                            className="wallet-action-btn wallet-action-secondary"
+                            href={activeFaucetUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{ textDecoration: 'none', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                          >
+                            Open Faucet
+                          </a>
+                        </div>
+                        {walletFundingResult && (
+                          <div className={`wallet-result ${walletFundingResult.success ? 'success' : 'error'}`} style={{ marginTop: '10px' }}>
+                            {walletFundingResult.message}
+                            {walletFundingResult.tokenTxHash && <div className="wallet-tx">Token: {truncateHash(walletFundingResult.tokenTxHash, 10, 6)}</div>}
+                            {walletFundingResult.nativeTxHash && <div className="wallet-tx">Gas: {truncateHash(walletFundingResult.nativeTxHash, 10, 6)}</div>}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* ── Staking ────────────────────────────────────────── */}
+                    <div className="detail-panel" style={{ marginBottom: 'var(--space-3)' }}>
+                      <div className="detail-header">
+                        <span className="detail-title">Staking</span>
+                      </div>
+                      <div className="detail-content">
+                        {(!tokenContractAddress || !stakingContractAddress) && (
+                          <div className="wallet-result warning" style={{ marginBottom: '10px' }}>
+                            {activeNetworkProfile.id === 'anvil'
+                              ? 'Contract addresses are loading from the node...'
+                              : `Configure VITE_${activeNetworkProfile.shortLabel.toUpperCase()}_* env vars to enable staking.`}
                           </div>
                         )}
                         <input
-                          type="password"
+                          type="number"
                           className="wallet-input"
-                          placeholder="0x..."
-                          autoComplete="off"
-                          spellCheck="false"
-                          value={walletKeyInput}
-                          onChange={(e) => setWalletKeyInput(e.target.value)}
-                          onKeyDown={(e) => e.key === 'Enter' && walletKeyInput && connectWallet(walletKeyInput)}
+                          placeholder="Amount in tCREG"
+                          value={stakeAmount}
+                          onChange={(e) => setStakeAmount(e.target.value)}
+                          style={{ marginBottom: '10px' }}
                         />
-                        <button className="wallet-action-btn wallet-action-primary" onClick={() => connectWallet(walletKeyInput)} disabled={!walletKeyInput}>
-                          Connect
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="wallet-section">
-                        <label className="wallet-label">Private Key Wallet</label>
-                        <div className="wallet-result warning">
-                          Direct private key input is disabled in this build. Use MetaMask or WalletConnect.
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="wallet-panel-body" style={{ padding: 0 }}>
-                    <div className="wallet-section">
-                      <label className="wallet-label">Connected Address</label>
-                      <div className="wallet-address">
-                        <CopyButton text={walletAccount.address} label="address" />
-                      </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
-                        <div className="wallet-balance-display">
-                          <span className="wallet-balance-value">{walletBalance || '...'}</span>
-                          <span className="wallet-balance-label">tCREG</span>
-                        </div>
-                        <div className="wallet-balance-display" style={{ background: 'rgba(14, 165, 233, 0.08)', border: '1px solid rgba(14, 165, 233, 0.24)' }}>
-                          <span className="wallet-balance-value">{walletNativeBalance || '...'}</span>
-                          <span className="wallet-balance-label">ETH Gas</span>
-                        </div>
-                      </div>
-                      <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginTop: '8px' }}>
-                        Provider: {walletAccount.providerName || walletAccount.type} · Target profile: {activeNetworkProfile.shortLabel}
-                      </div>
-                      <div className="wallet-inline-actions" style={{ marginTop: '12px' }}>
-                        <button className="wallet-inline-action" onClick={fundConnectedWallet} disabled={walletFundingLoading || walletFundingCooldownActive}>
-                          {walletFundingButtonLabel}
-                        </button>
-                        <a className="wallet-inline-action wallet-inline-link" href={activeFaucetUrl} target="_blank" rel="noopener noreferrer">Open Faucet</a>
-                        <button className="wallet-inline-action" onClick={refreshWalletBalance}>Refresh Balances</button>
-                        <button className="wallet-inline-action" onClick={() => setView('packages')}>Open Packages</button>
-                        <button className="wallet-inline-action" onClick={() => setView('validators')}>View Validators</button>
-                      </div>
-                      {walletFundingResult && (
-                        <div className={`wallet-result ${walletFundingResult.success ? 'success' : 'error'}`}>
-                          {walletFundingResult.message}
-                          {walletFundingResult.tokenTxHash && <div className="wallet-tx">Token Tx: {truncateHash(walletFundingResult.tokenTxHash, 10, 6)}</div>}
-                          {walletFundingResult.nativeTxHash && <div className="wallet-tx">Gas Tx: {truncateHash(walletFundingResult.nativeTxHash, 10, 6)}</div>}
-                        </div>
-                      )}
-                    </div>
-
-                    {walletNativeBalance !== null && parseFloat(walletNativeBalance) === 0 && (
-                      <div className="wallet-section">
-                        <div className="wallet-result warning" style={{ margin: 0 }}>
-                          <div style={{ fontWeight: 600, marginBottom: '6px' }}>⛽ Your wallet has no native ETH for gas</div>
-                          <div style={{ marginBottom: '8px' }}>On EVM testnets, gas fees are paid in the chain&apos;s native testnet ETH, not in tCREG. Use the faucet to fund gas before approving, staking, or registering.</div>
-                          <button className="wallet-action-btn wallet-action-primary" onClick={fundConnectedWallet} disabled={walletFundingLoading || walletFundingCooldownActive} style={{ width: '100%', marginBottom: '8px' }}>
-                            {walletFundingButtonLabel}
-                          </button>
-                          <button className="wallet-action-btn wallet-action-secondary" onClick={refreshWalletBalance} style={{ width: '100%' }}>
-                            🔄 Refresh Balances
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="wallet-section">
-                      <label className="wallet-label">🧭 Validator Lifecycle</label>
-                      <div style={{ color: 'var(--text-secondary)', fontSize: '0.82rem', marginBottom: '8px' }}>
-                        Link this wallet to a validator node by registering its node ID and Ed25519 pubkey. The node will auto-admit the validator after governance approval on the staking contract.
-                      </div>
-                      {walletValidatorRegistration ? (
-                        <div className={`wallet-result ${walletValidatorRegistration.active ? 'success' : 'warning'}`} style={{ marginBottom: '8px' }}>
-                          <div style={{ fontWeight: 600, marginBottom: '4px' }}>Current status: {walletValidatorRegistration.status}</div>
-                          <div>On-chain state: {walletValidatorRegistration.staking_state || 'none'}</div>
-                          {walletValidatorRegistration.last_synced_at && <div className="wallet-tx">Last synced: {timeAgo(walletValidatorRegistration.last_synced_at)}</div>}
-                        </div>
-                      ) : (
-                        <div className="wallet-result warning" style={{ marginBottom: '8px' }}>
-                          No validator identity is registered for this wallet yet.
-                        </div>
-                      )}
-
-                      <div className="detail-section-title">Detected Node Identities</div>
-                      {detectedValidatorNodes.length === 0 ? (
-                        <div className="wallet-result warning" style={{ margin: '0 0 8px 0' }}>
-                          No live validator nodes are currently advertised by the explorer. Start a node first, then come back here to bind the wallet to it.
-                        </div>
-                      ) : (
-                        <div className="quickstart-node-list">
-                          {detectedValidatorNodes.map((node) => (
-                            <div key={node.id} className="quickstart-node-card">
-                              <div>
-                                <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                                  <span>{node.alias || node.id}</span>
-                                  <StatusBadge status={node.status || 'online'} />
-                                </div>
-                                <div className="wallet-tx">Node ID: {node.id}</div>
-                                <div className="wallet-tx">Ed25519: {truncateHash(node.pubkey, 18, 12)}</div>
-                              </div>
-                              <div className="wallet-inline-actions">
-                                <CopyTextButton text={node.id} label="node id">Copy ID</CopyTextButton>
-                                <CopyTextButton text={node.pubkey} label="ed25519 pubkey">Copy Pubkey</CopyTextButton>
-                                <button className="wallet-inline-action" onClick={() => adoptNodeIdentity(node)}>Use This Node</button>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-
-                      <input
-                        type="text"
-                        className="wallet-input"
-                        placeholder="Alias (optional, e.g. Validator-NYC-1)"
-                        value={validatorIdentityForm.alias}
-                        onChange={(e) => setValidatorIdentityForm((current) => ({ ...current, alias: e.target.value }))}
-                        style={{ marginBottom: '8px' }}
-                      />
-                      <input
-                        type="text"
-                        className="wallet-input"
-                        placeholder="Node ID (e.g. node-2)"
-                        value={validatorIdentityForm.nodeId}
-                        onChange={(e) => setValidatorIdentityForm((current) => ({ ...current, nodeId: e.target.value }))}
-                        style={{ marginBottom: '8px' }}
-                      />
-                      <input
-                        type="text"
-                        className="wallet-input"
-                        placeholder="Ed25519 pubkey (64 hex chars)"
-                        value={validatorIdentityForm.ed25519Pubkey}
-                        onChange={(e) => setValidatorIdentityForm((current) => ({ ...current, ed25519Pubkey: e.target.value }))}
-                        spellCheck="false"
-                        style={{ marginBottom: '8px' }}
-                      />
-                      <button className="wallet-action-btn wallet-action-primary" onClick={registerValidatorIdentity} disabled={validatorRegistrationLoading || !validatorIdentityForm.nodeId || !validatorIdentityForm.ed25519Pubkey} style={{ width: '100%', marginBottom: '8px' }}>
-                        {validatorRegistrationLoading ? 'Saving Identity...' : walletValidatorRegistration ? 'Update Validator Identity' : 'Register Validator Identity'}
-                      </button>
-
-                      {validatorRegistrationResult && (
-                        <div className={`wallet-result ${validatorRegistrationResult.success ? 'success' : 'error'}`} style={{ marginBottom: '8px' }}>
-                          {validatorRegistrationResult.message}
-                        </div>
-                      )}
-
-                      <div className="quickstart-code-block" style={{ marginBottom: '12px' }}>
-                        <div className="detail-section-title">PowerShell registration command</div>
-                        <pre>{validatorRegistrationCommand}</pre>
-                        <CopyTextButton text={validatorRegistrationCommand} label="validator registration powershell command">Copy Command</CopyTextButton>
-                      </div>
-
-                      <div style={{ display: 'grid', gap: '8px' }}>
-                        {validatorLifecycle.map((step) => (
-                          <div key={step.key} style={{
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                            padding: '10px 12px',
-                            borderRadius: '10px',
-                            background: step.complete ? 'rgba(16, 185, 129, 0.12)' : 'rgba(148, 163, 184, 0.12)',
-                            border: `1px solid ${step.complete ? 'rgba(16, 185, 129, 0.3)' : 'rgba(148, 163, 184, 0.2)'}`,
-                          }}>
-                            <span style={{ fontSize: '0.9rem' }}>{step.complete ? '✓' : '○'} {step.label}</span>
-                            <span style={{
-                              fontSize: '0.75rem',
-                              textTransform: 'uppercase',
-                              letterSpacing: '0.08em',
-                              color: step.complete ? '#34d399' : 'var(--text-secondary)',
-                            }}>
-                              {step.complete ? 'done' : 'waiting'}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-
-                      {walletValidatorRegistration?.last_error && (
-                        <div className="wallet-result error" style={{ marginTop: '8px' }}>
-                          Sync error: {walletValidatorRegistration.last_error}
-                        </div>
-                      )}
-                    </div>
-
-                    {walletBalance !== null && parseFloat(walletBalance) === 0 ? (
-                      <div className="wallet-section">
-                        <div className="wallet-result warning" style={{ margin: 0 }}>
-                          <div style={{ fontWeight: 600, marginBottom: '6px' }}>⚠️ Your wallet has no tCREG tokens</div>
-                          <div style={{ marginBottom: '8px' }}>Visit the Faucet to get free tCREG for operations and native testnet ETH for gas before you can stake.</div>
-                          <button className="wallet-action-btn wallet-action-primary" onClick={fundConnectedWallet} disabled={walletFundingLoading || walletFundingCooldownActive} style={{ width: '100%', marginBottom: '8px' }}>
-                            {walletFundingButtonLabel}
-                          </button>
-                          <button className="wallet-action-btn wallet-action-secondary" onClick={refreshWalletBalance} style={{ width: '100%' }}>
-                            🔄 Refresh Balances
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <>
-                        <div className="wallet-section">
-                          <label className="wallet-label">📦 Publisher Staking</label>
-                          <div style={{ color: 'var(--text-secondary)', fontSize: '0.82rem', marginBottom: '8px' }}>
-                            Minimum stake: 1 tCREG. Allows you to publish packages.
-                          </div>
-                          <div className="wallet-result warning" style={{ marginBottom: '8px' }}>
-                            {activeRelayerHelp}
-                          </div>
-                          <input
-                            type="number"
-                            className="wallet-input"
-                            placeholder="Amount (e.g. 10)"
-                            value={stakeAmount}
-                            onChange={(e) => setStakeAmount(e.target.value)}
-                          />
-                          <button className="wallet-action-btn wallet-action-primary" onClick={() => doStake('publisher')} disabled={stakeLoading || !stakeAmount} style={{ width: '100%', marginTop: '8px' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '8px' }}>
+                          <button
+                            className="wallet-action-btn wallet-action-primary"
+                            onClick={() => doStake('publisher')}
+                            disabled={stakeLoading || !stakeAmount}
+                            style={{ width: '100%' }}
+                          >
                             {stakeLoading ? 'Staking...' : 'Stake as Publisher'}
                           </button>
-                          <button className="wallet-action-btn wallet-action-secondary" onClick={() => doSponsoredStake('publisher')} disabled={sponsoredStakeLoading || !stakeAmount || !activeSponsoredPublisherPolicy} style={{ width: '100%', marginTop: '8px' }}>
-                            {sponsoredStakeLoading ? 'Requesting Sponsorship...' : 'Sponsored Stake (No Gas)'}
-                          </button>
-                          <button className="wallet-action-btn wallet-action-secondary" onClick={() => setView('packages')} style={{ width: '100%' }}>
-                            Open Packages After Staking
-                          </button>
-                        </div>
-
-                        <div className="wallet-section">
-                          <label className="wallet-label">🛡️ Validator Application</label>
-                          <div style={{ color: 'var(--text-secondary)', fontSize: '0.82rem', marginBottom: '8px' }}>
-                            Minimum stake: 100 tCREG. Requires governance approval after application, then the node sync loop admits the validator into consensus.
-                          </div>
-                          <div className="wallet-result warning" style={{ marginBottom: '8px' }}>
-                            {activeValidatorRegistrationNote}
-                          </div>
-                          <div className="wallet-result warning" style={{ marginBottom: '8px' }}>
-                            {activeRelayerHelp}
-                          </div>
-                          <button className="wallet-action-btn wallet-action-secondary" onClick={() => doStake('validator', stakeAmount || '100')} disabled={stakeLoading} style={{ width: '100%', marginBottom: '8px' }}>
+                          <button
+                            className="wallet-action-btn wallet-action-secondary"
+                            onClick={() => doStake('validator', stakeAmount || '100')}
+                            disabled={stakeLoading}
+                            style={{ width: '100%' }}
+                          >
                             {stakeLoading ? 'Applying...' : 'Apply as Validator'}
                           </button>
-                          <button className="wallet-action-btn wallet-action-secondary" onClick={() => doSponsoredStake('validator', stakeAmount || '100')} disabled={sponsoredStakeLoading || !activeSponsoredValidatorPolicy} style={{ width: '100%' }}>
-                            {sponsoredStakeLoading ? 'Requesting Sponsorship...' : 'Sponsored Validator Apply'}
-                          </button>
                         </div>
-
-                        {(!tokenContractAddress || !stakingContractAddress) && (
-                          <div className="wallet-section">
-                            <div className="wallet-result warning">
-                              {activeNetworkProfile.id === 'anvil'
-                                ? 'Live staking contracts are not yet available from the running node.'
-                                : `No Chain Registry staking deployment is configured for ${activeNetworkProfile.label} yet. Set the relevant VITE_${activeNetworkProfile.shortLabel.toUpperCase()}_* env vars to enable direct staking on this public profile.`}
-                            </div>
+                        {(activeSponsoredPublisherPolicy || activeSponsoredValidatorPolicy) && (
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                            <button
+                              className="wallet-action-btn wallet-action-secondary"
+                              onClick={() => doSponsoredStake('publisher')}
+                              disabled={sponsoredStakeLoading || !stakeAmount || !activeSponsoredPublisherPolicy}
+                              style={{ width: '100%', fontSize: '0.8rem' }}
+                            >
+                              Sponsored Publisher
+                            </button>
+                            <button
+                              className="wallet-action-btn wallet-action-secondary"
+                              onClick={() => doSponsoredStake('validator', stakeAmount || '100')}
+                              disabled={sponsoredStakeLoading || !activeSponsoredValidatorPolicy}
+                              style={{ width: '100%', fontSize: '0.8rem' }}
+                            >
+                              Sponsored Validator
+                            </button>
                           </div>
                         )}
                         {stakeResult && (
-                          <div className="wallet-section">
-                            <div className={`wallet-result ${stakeResult.success ? 'success' : 'error'}`}>
-                              {stakeResult.message}
-                              {stakeResult.tx && <div className="wallet-tx">Tx: {truncateHash(stakeResult.tx, 10, 6)}</div>}
-                            </div>
+                          <div className={`wallet-result ${stakeResult.success ? 'success' : 'error'}`} style={{ marginTop: '10px' }}>
+                            {stakeResult.message}
+                            {stakeResult.tx && <div className="wallet-tx">Tx: {truncateHash(stakeResult.tx, 10, 6)}</div>}
                           </div>
                         )}
+                      </div>
+                    </div>
 
-                        {/* Recent Transactions (WEB-M02: persisted to localStorage) */}
-                        {stakeTxHistory.length > 0 && (
-                          <div className="wallet-section">
-                            <div className="wallet-section-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                              <span>Recent Transactions</span>
-                              <button
-                                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '0.75rem' }}
-                                onClick={() => {
-                                  setStakeTxHistory([])
-                                  try { window.localStorage.removeItem('creg.stakeTxHistory') } catch {}
-                                }}
-                              >
-                                Clear
-                              </button>
-                            </div>
-                            {stakeTxHistory.slice(0, 10).map((entry, i) => (
-                              <div key={i} className="wallet-result" style={{ marginBottom: '4px', fontSize: '0.8rem', padding: '6px 10px' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                  <span style={{ color: 'var(--accent-success)', textTransform: 'capitalize' }}>
-                                    {entry.type} · {entry.amount} tCREG
-                                  </span>
-                                  <span style={{ color: 'var(--text-muted)' }}>{timeAgo(entry.at)}</span>
+                    {/* ── Validator Identity (collapsible) ──────────────── */}
+                    <details className="detail-panel" style={{ marginBottom: 'var(--space-3)' }}>
+                      <summary className="detail-header" style={{ cursor: 'pointer', userSelect: 'none' }}>
+                        <span className="detail-title">Validator Identity</span>
+                        {walletValidatorRegistration && (
+                          <span className={`badge badge-${walletValidatorRegistration.active ? 'success' : 'warning'}`} style={{ marginLeft: '8px' }}>
+                            {walletValidatorRegistration.active ? 'active' : walletValidatorRegistration.status || 'pending'}
+                          </span>
+                        )}
+                      </summary>
+                      <div className="detail-content">
+                        {detectedValidatorNodes.length > 0 && (
+                          <div style={{ marginBottom: '12px' }}>
+                            <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '6px' }}>Detected nodes:</div>
+                            {detectedValidatorNodes.map((node) => (
+                              <div key={node.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', borderRadius: '8px', background: 'var(--surface)', marginBottom: '4px' }}>
+                                <div>
+                                  <span style={{ fontWeight: 600, fontSize: '0.85rem' }}>{node.alias || node.id}</span>
+                                  <StatusBadge status={node.status || 'online'} />
                                 </div>
-                                {entry.txHash && (
-                                  <div className="wallet-tx" style={{ marginTop: '2px' }}>
-                                    Tx: {truncateHash(entry.txHash, 10, 6)}
-                                  </div>
-                                )}
-                                {entry.network && entry.network !== activeNetworkProfileId && (
-                                  <div style={{ color: 'var(--text-muted)', fontSize: '0.72rem' }}>
-                                    Network: {entry.network}
-                                  </div>
-                                )}
+                                <button className="wallet-inline-action" onClick={() => adoptNodeIdentity(node)}>Use</button>
                               </div>
                             ))}
                           </div>
                         )}
-                      </>
-                    )}
+                        <input type="text" className="wallet-input" placeholder="Node ID (e.g. node-2)" value={validatorIdentityForm.nodeId} onChange={(e) => setValidatorIdentityForm((c) => ({ ...c, nodeId: e.target.value }))} style={{ marginBottom: '6px' }} />
+                        <input type="text" className="wallet-input" placeholder="Ed25519 pubkey (64 hex)" value={validatorIdentityForm.ed25519Pubkey} onChange={(e) => setValidatorIdentityForm((c) => ({ ...c, ed25519Pubkey: e.target.value }))} spellCheck="false" style={{ marginBottom: '6px' }} />
+                        <input type="text" className="wallet-input" placeholder="Alias (optional)" value={validatorIdentityForm.alias} onChange={(e) => setValidatorIdentityForm((c) => ({ ...c, alias: e.target.value }))} style={{ marginBottom: '10px' }} />
+                        <button className="wallet-action-btn wallet-action-primary" onClick={registerValidatorIdentity} disabled={validatorRegistrationLoading || !validatorIdentityForm.nodeId || !validatorIdentityForm.ed25519Pubkey} style={{ width: '100%' }}>
+                          {validatorRegistrationLoading ? 'Saving...' : walletValidatorRegistration ? 'Update Identity' : 'Register Identity'}
+                        </button>
+                        {validatorRegistrationResult && (
+                          <div className={`wallet-result ${validatorRegistrationResult.success ? 'success' : 'error'}`} style={{ marginTop: '8px' }}>
+                            {validatorRegistrationResult.message}
+                          </div>
+                        )}
+                        {walletValidatorRegistration && (
+                          <div style={{ display: 'grid', gap: '4px', marginTop: '12px' }}>
+                            {validatorLifecycle.map((step) => (
+                              <div key={step.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 10px', borderRadius: '8px', background: step.complete ? 'rgba(16,185,129,0.1)' : 'rgba(148,163,184,0.08)', fontSize: '0.82rem' }}>
+                                <span>{step.complete ? '✓' : '○'} {step.label}</span>
+                                <span style={{ fontSize: '0.7rem', color: step.complete ? '#34d399' : 'var(--text-tertiary)', textTransform: 'uppercase' }}>{step.complete ? 'done' : 'waiting'}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </details>
 
-                    <div className="wallet-section">
-                      <button className="wallet-action-btn wallet-action-danger" onClick={disconnectWallet}>
-                        Disconnect
-                      </button>
-                    </div>
-                  </div>
+                    {/* ── Transaction History (compact) ──────────────────── */}
+                    {stakeTxHistory.length > 0 && (
+                      <div className="detail-panel">
+                        <div className="detail-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span className="detail-title">Recent Transactions</span>
+                          <button
+                            style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '0.75rem' }}
+                            onClick={() => { setStakeTxHistory([]); try { window.localStorage.removeItem('creg.stakeTxHistory') } catch {} }}
+                          >
+                            Clear
+                          </button>
+                        </div>
+                        <div className="detail-content" style={{ display: 'grid', gap: '4px' }}>
+                          {stakeTxHistory.slice(0, 5).map((entry, i) => (
+                            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
+                              <span style={{ textTransform: 'capitalize' }}>{entry.type} {entry.amount} tCREG</span>
+                              <span style={{ color: 'var(--text-muted)' }}>{timeAgo(entry.at)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             )}
@@ -2701,8 +2558,8 @@ function App() {
             {view === 'p2p' && (
               <div style={{ padding: 'var(--space-4)' }}>
                 <div className="detail-section">
-                  <div className="detail-section-title">Connected Peers ({p2pStatus.peers.length})</div>
-                  {p2pStatus.peers.length === 0 ? (
+                  <div className="detail-section-title">Connected Peers ({(p2pStatus.peers || []).length})</div>
+                  {(p2pStatus.peers || []).length === 0 ? (
                     <EmptyState 
                       icon="🌐" 
                       title="No peers connected" 
@@ -2710,7 +2567,7 @@ function App() {
                     />
                   ) : (
                     <div className="peer-list">
-                      {p2pStatus.peers.map((peer, idx) => (
+                      {(p2pStatus.peers || []).map((peer, idx) => (
                         <div key={idx} className="peer-item animate-slide-in" style={{ animationDelay: `${idx * 0.05}s` }}>
                           <span className="peer-id">{truncateHash(peer, 20, 8)}</span>
                           <span className="badge badge-success badge-sm">Connected</span>

@@ -420,6 +420,26 @@
         loadStats();
         loadNetworkInfo();
 
+        // ── PoW Mining (SHA-256 via Web Crypto) ──────────────────
+
+        async function minePoW(challenge, difficulty) {
+            var encoder = new TextEncoder();
+            for (var nonce = 0; nonce < 0x7FFFFFFF; nonce++) {
+                var nonceStr = nonce.toString();
+                var data = encoder.encode(challenge + nonceStr);
+                var hashBuf = await crypto.subtle.digest('SHA-256', data);
+                var hash = new Uint8Array(hashBuf);
+                var leadingZeros = 0;
+                for (var i = 0; i < hash.length; i++) {
+                    if (hash[i] === 0) { leadingZeros += 8; }
+                    else { leadingZeros += Math.clz32(hash[i]) - 24; break; }
+                    if (leadingZeros >= difficulty) break;
+                }
+                if (leadingZeros >= difficulty) return nonceStr;
+            }
+            throw new Error('PoW mining exhausted.');
+        }
+
         // ── Form submission ───────────────────────────────────────
 
         form.addEventListener('submit', async (e) => {
@@ -433,10 +453,24 @@
             messageEl.className = 'message';
             messageEl.style.display = 'none';
             try {
+                // Attempt PoW challenge flow
+                var dripBody = { address: address };
+                try {
+                    var challengeRes = await fetch('/api/challenge');
+                    if (challengeRes.ok) {
+                        var challengeData = await challengeRes.json();
+                        submitBtn.innerHTML = '<div class="spinner"></div><span>Mining proof-of-work...</span>';
+                        var nonce = await minePoW(challengeData.challenge, challengeData.difficulty);
+                        dripBody.challenge = challengeData.challenge;
+                        dripBody.nonce = nonce;
+                        submitBtn.innerHTML = '<div class="spinner"></div><span>Sending tokens...</span>';
+                    }
+                } catch (_) { /* PoW unavailable, proceed without */ }
+
                 const response = await fetch('/api/drip', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ address: address })
+                    body: JSON.stringify(dripBody)
                 });
                 const data = await response.json();
                 if (data.success) {
