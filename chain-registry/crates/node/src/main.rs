@@ -15,6 +15,7 @@ mod finalized_tx;
 mod gossip;
 mod grpc;
 mod metrics;
+mod openapi;
 mod p2p;
 mod p2p_rate_limit;
 mod pending_pool;

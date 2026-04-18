@@ -7,6 +7,7 @@
 pub mod api;
 pub mod block_producer;
 pub mod chain_store;
+pub mod openapi;
 pub mod config;
 pub mod consensus_admission;
 pub mod events;

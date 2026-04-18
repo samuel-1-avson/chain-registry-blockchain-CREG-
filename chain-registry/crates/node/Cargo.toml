@@ -11,6 +11,10 @@ path = "src/lib.rs"
 name = "creg-node"
 path = "src/main.rs"
 
+[[bin]]
+name = "dump-openapi"
+path = "src/bin/dump_openapi.rs"
+
 [dependencies]
 common    = { path = "../common" }
 validator = { path = "../validator" }
@@ -57,6 +61,12 @@ prost        = { workspace = true }
 rust-embed   = "8.0"
 mime_guess   = "2.0"
 semver       = "1"
+
+# OpenAPI schema + Swagger UI.
+# utoipa 4 is compatible with axum 0.7; utoipa-swagger-ui 7 exposes the
+# `axum` feature that lets us mount Swagger directly onto our Router.
+utoipa             = { version = "4", features = ["axum_extras", "chrono"] }
+utoipa-swagger-ui  = { version = "7", features = ["axum"] }
 
 [dev-dependencies]
 tempfile = "3"

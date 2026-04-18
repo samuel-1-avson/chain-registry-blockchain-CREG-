@@ -8,7 +8,7 @@ use axum::{
     routing::{delete, get, post},
     Json, Router,
 };
-use common::{PackageStatus, PublishRequest, ValidatorIdentity};
+use common::{PackageStatus, PublishRequest, Transaction, ValidatorIdentity};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tower_http::{cors::CorsLayer, limit::RequestBodyLimitLayer, trace::TraceLayer};
@@ -18,10 +18,13 @@ use crate::consensus_admission::{
 };
 use crate::{
     events::{self, sse_handler, EventBus},
+    openapi::ApiDoc,
     rate_limit::{rate_limit_middleware, RateLimiter},
     normalized_validator_key, validator_registration_status_text, ValidatorRegistrationStatus,
     SharedState,
 };
+use utoipa::OpenApi;
+use utoipa_swagger_ui::SwaggerUi;
 
 /// Query parameters for GET /v1/packages
 #[derive(Deserialize)]
@@ -69,6 +72,11 @@ pub fn router(
         .route("/v1/transactions/:canonical", get(get_transaction))
         // Publishers
         .route("/v1/publishers/:pubkey", get(get_publisher))
+        // Addresses
+        .route("/v1/addresses/:address", get(get_address))
+        .route("/v1/addresses/:address/transactions", get(get_address_transactions))
+        // Validator detail
+        .route("/v1/validators/:address", get(get_validator_profile))
         // Pending pool
         .route("/v1/pending", get(list_pending))
         // Consensus
@@ -81,6 +89,10 @@ pub fn router(
         .route("/v1/publishers/rotate-key", post(rotate_publisher_key))
         // Appeals & AAA
         .route("/v1/appeals/:id/audit", post(submit_audit))
+        // OpenAPI spec + Swagger UI. The JSON is what the explorer's
+        // `npm run gen-types` consumes; Swagger UI is a humans-only browser.
+        .route("/v1/openapi.json", get(openapi_spec))
+        .merge(SwaggerUi::new("/api-docs").url("/v1/openapi.json", ApiDoc::openapi()))
         // Observability
         .route("/metrics", get(prometheus_metrics))
         // Event streaming - SSE & Websockets
@@ -188,6 +200,12 @@ fn server_err(msg: impl Into<String>) -> Response {
 }
 
 // ─── Handlers ────────────────────────────────────────────────────────────────
+
+/// Serve the generated OpenAPI schema as JSON. Explorer codegen fetches this
+/// at build time to keep TypeScript types in sync with Rust responses.
+async fn openapi_spec() -> impl IntoResponse {
+    Json(ApiDoc::openapi())
+}
 
 async fn health() -> impl IntoResponse {
     Json(serde_json::json!({
@@ -882,22 +900,24 @@ async fn get_block_by_hash(State(state): State<SharedState>, Path(hash): Path<St
 }
 
 // GET /v1/blocks?offset=0&limit=20
+//     /v1/blocks?before_height=H&limit=20  — cursor: heights < H
+//     /v1/blocks?after_height=H&limit=20   — cursor: heights > H
 //
 // Returns blocks in descending height order (newest first).
-// offset counts from the chain tip (offset=0 → tip, offset=1 → tip-1, …).
 // limit is capped at 100 to prevent large response payloads.
 // Response includes X-Total-Height for UI pagination.
 #[derive(Deserialize)]
 struct ListBlocksParams {
     offset: Option<u64>,
     limit: Option<u64>,
+    before_height: Option<u64>,
+    after_height: Option<u64>,
 }
 
 async fn list_blocks_paginated(
     State(state): State<SharedState>,
     Query(params): Query<ListBlocksParams>,
 ) -> Response {
-    let offset = params.offset.unwrap_or(0);
     let limit = params.limit.unwrap_or(20).min(100);
 
     let s = state.read().await;
@@ -906,9 +926,34 @@ async fn list_blocks_paginated(
         Err(e) => return server_err(format!("Failed to read tip height: {}", e)),
     };
 
+    // Cursor mode takes precedence over offset.
+    let (offset, next_before, next_after) = if let Some(before) = params.before_height {
+        // Blocks strictly below `before`, newest first → start at before-1.
+        let start = before.saturating_sub(1);
+        let computed_offset = tip.saturating_sub(start);
+        let next_before = start.saturating_sub(limit.saturating_sub(1));
+        (computed_offset, Some(next_before), None)
+    } else if let Some(after) = params.after_height {
+        // Blocks strictly above `after`, newest first → tip down to after+1.
+        if after >= tip {
+            (0, None, Some(after))
+        } else {
+            let window_top = tip.min(after.saturating_add(limit));
+            let computed_offset = tip.saturating_sub(window_top);
+            (computed_offset, None, Some(window_top))
+        }
+    } else {
+        (params.offset.unwrap_or(0), None, None)
+    };
+
     match s.chain.list_blocks(offset, limit) {
         Ok(blocks) => {
-            let mut resp = axum::http::Response::builder()
+            let mut next_before_height = next_before;
+            if next_before_height.is_none() && params.before_height.is_some() {
+                next_before_height = blocks.last().map(|b| b.header.height);
+            }
+
+            let builder = axum::http::Response::builder()
                 .status(StatusCode::OK)
                 .header("Content-Type", "application/json")
                 .header("X-Total-Height", tip.to_string())
@@ -922,9 +967,11 @@ async fn list_blocks_paginated(
                 "tip_height": tip,
                 "offset": offset,
                 "limit": limit,
+                "next_before_height": next_before_height,
+                "next_after_height": next_after,
             });
 
-            resp.body(axum::body::Body::from(
+            builder.body(axum::body::Body::from(
                 serde_json::to_vec(&body).unwrap_or_default(),
             ))
             .unwrap_or_else(|_| server_err("Response build error"))
@@ -1067,6 +1114,252 @@ async fn get_publisher(State(state): State<SharedState>, Path(pubkey): Path<Stri
         Some(stats) => Json(stats.clone()).into_response(),
         None => not_found(format!("Publisher not found: {}", pubkey)),
     }
+}
+
+// ─── Address endpoints ────────────────────────────────────────────────────────
+//
+// EVM addresses surface in multiple places: as validator evm_address, as block
+// proposer_id, and as revoker_by in Revoke txs.  These handlers aggregate
+// across those for per-address profile and transaction-history views.
+
+const ADDRESS_DEFAULT_SCAN_BLOCKS: u64 = 500;
+const ADDRESS_MAX_SCAN_BLOCKS: u64 = 5000;
+
+fn is_evm_address_like(s: &str) -> bool {
+    let stripped = s.strip_prefix("0x").unwrap_or(s);
+    stripped.len() == 40 && stripped.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+fn tx_kind_label(tx: &Transaction) -> &'static str {
+    match tx {
+        Transaction::Publish(_) => "publish",
+        Transaction::Revoke { .. } => "revoke",
+        Transaction::Slash { .. } => "slash",
+        Transaction::ValidatorJoin { .. } => "validator-join",
+        Transaction::ValidatorLeave { .. } => "validator-leave",
+        Transaction::RotatePublisherKey { .. } => "rotate-key",
+    }
+}
+
+fn tx_canonical(tx: &Transaction) -> Option<String> {
+    match tx {
+        Transaction::Publish(rec) => Some(rec.id.canonical()),
+        Transaction::Revoke { package_canonical, .. } => Some(package_canonical.clone()),
+        Transaction::RotatePublisherKey { canonical_prefix, .. } => Some(canonical_prefix.clone()),
+        _ => None,
+    }
+}
+
+/// True if the given tx references `addr` (case-insensitive) in any role.
+fn tx_touches_address(tx: &Transaction, addr: &str) -> bool {
+    match tx {
+        Transaction::Revoke { revoked_by, .. } => revoked_by.to_ascii_lowercase() == addr,
+        Transaction::Slash { validator_id, .. } => validator_id.to_ascii_lowercase() == addr,
+        Transaction::ValidatorJoin { validator_id, .. } => {
+            validator_id.to_ascii_lowercase() == addr
+        }
+        Transaction::ValidatorLeave { validator_id } => validator_id.to_ascii_lowercase() == addr,
+        // Publish / RotatePublisherKey use ed25519 pubkeys, not EVM addresses — skip here.
+        _ => false,
+    }
+}
+
+// GET /v1/addresses/:address
+async fn get_address(State(state): State<SharedState>, Path(address): Path<String>) -> Response {
+    if !is_evm_address_like(&address) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: format!("Not a valid EVM address: {}", address),
+            }),
+        )
+            .into_response();
+    }
+    let normalized = address.to_ascii_lowercase();
+    let s = state.read().await;
+
+    let registration = s
+        .validator_registrations
+        .get(&normalized)
+        .cloned()
+        .map(|r| serde_json::to_value(&r).unwrap_or(serde_json::Value::Null));
+
+    let active = s
+        .validator_set
+        .validators
+        .iter()
+        .find(|v| v.id.to_ascii_lowercase() == normalized)
+        .cloned();
+
+    let scan = ADDRESS_DEFAULT_SCAN_BLOCKS;
+    let blocks = s.chain.list_blocks(0, scan).unwrap_or_default();
+    let scanned_blocks = blocks.len() as u64;
+
+    let mut blocks_proposed = 0u32;
+    let mut tx_count = 0u32;
+    for b in &blocks {
+        if b.header.proposer_id.to_ascii_lowercase() == normalized {
+            blocks_proposed += 1;
+        }
+        for tx in &b.transactions {
+            if tx_touches_address(tx, &normalized) {
+                tx_count += 1;
+            }
+        }
+    }
+
+    Json(serde_json::json!({
+        "address": normalized,
+        "is_validator": registration.is_some(),
+        "is_active_validator": active.is_some(),
+        "validator": registration,
+        "active_status": active.as_ref().map(|v| v.status.clone()),
+        "stake": active.as_ref().map(|v| v.stake.to_string()),
+        "reputation": active.as_ref().map(|v| v.reputation),
+        "blocks_proposed": blocks_proposed,
+        "tx_count": tx_count,
+        "scanned_blocks": scanned_blocks,
+    }))
+    .into_response()
+}
+
+// GET /v1/addresses/:address/transactions
+#[derive(Deserialize)]
+struct AddressTxParams {
+    limit: Option<usize>,
+    scan: Option<u64>,
+}
+
+async fn get_address_transactions(
+    State(state): State<SharedState>,
+    Path(address): Path<String>,
+    Query(params): Query<AddressTxParams>,
+) -> Response {
+    if !is_evm_address_like(&address) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: format!("Not a valid EVM address: {}", address),
+            }),
+        )
+            .into_response();
+    }
+    let normalized = address.to_ascii_lowercase();
+    let limit = params.limit.unwrap_or(50).min(500);
+    let scan = params
+        .scan
+        .unwrap_or(ADDRESS_DEFAULT_SCAN_BLOCKS)
+        .min(ADDRESS_MAX_SCAN_BLOCKS);
+
+    let s = state.read().await;
+    let blocks = s.chain.list_blocks(0, scan).unwrap_or_default();
+    let scanned_blocks = blocks.len() as u64;
+
+    let mut results: Vec<serde_json::Value> = Vec::new();
+    for b in &blocks {
+        let block_hash = b.hash();
+        let ts = b.header.timestamp.to_rfc3339();
+        let proposer_match = b.header.proposer_id.to_ascii_lowercase() == normalized;
+        if proposer_match {
+            results.push(serde_json::json!({
+                "block_height": b.header.height,
+                "block_hash": block_hash,
+                "tx_index": 0,
+                "kind": "propose",
+                "canonical": serde_json::Value::Null,
+                "timestamp": ts,
+            }));
+        }
+        for (idx, tx) in b.transactions.iter().enumerate() {
+            if tx_touches_address(tx, &normalized) {
+                results.push(serde_json::json!({
+                    "block_height": b.header.height,
+                    "block_hash": block_hash,
+                    "tx_index": idx,
+                    "kind": tx_kind_label(tx),
+                    "canonical": tx_canonical(tx),
+                    "timestamp": ts,
+                }));
+            }
+        }
+        if results.len() >= limit {
+            break;
+        }
+    }
+    results.truncate(limit);
+
+    Json(serde_json::json!({
+        "address": normalized,
+        "transactions": results,
+        "scanned_blocks": scanned_blocks,
+        "total": results.len(),
+    }))
+    .into_response()
+}
+
+// GET /v1/validators/:address
+async fn get_validator_profile(
+    State(state): State<SharedState>,
+    Path(address): Path<String>,
+) -> Response {
+    if !is_evm_address_like(&address) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: format!("Not a valid EVM address: {}", address),
+            }),
+        )
+            .into_response();
+    }
+    let normalized = address.to_ascii_lowercase();
+    let s = state.read().await;
+
+    let registration = s.validator_registrations.get(&normalized).cloned();
+    let active = s
+        .validator_set
+        .validators
+        .iter()
+        .find(|v| v.id.to_ascii_lowercase() == normalized)
+        .cloned();
+
+    if registration.is_none() && active.is_none() {
+        return not_found(format!("Validator not found: {}", address));
+    }
+
+    let (stake, reputation, status, in_active_set) = match active.as_ref() {
+        Some(v) => (v.stake.to_string(), v.reputation, v.status.clone(), true),
+        None => (
+            registration
+                .as_ref()
+                .map(|r| r.stake.to_string())
+                .unwrap_or_default(),
+            registration.as_ref().map(|r| r.reputation).unwrap_or(0),
+            registration
+                .as_ref()
+                .map(|r| r.status.clone())
+                .unwrap_or_else(|| "unknown".to_string()),
+            false,
+        ),
+    };
+
+    let blocks = s.chain.list_blocks(0, 500).unwrap_or_default();
+    let recent_proposals: Vec<serde_json::Value> = blocks
+        .iter()
+        .filter(|b| b.header.proposer_id.to_ascii_lowercase() == normalized)
+        .take(25)
+        .map(|b| block_to_json(b))
+        .collect();
+
+    Json(serde_json::json!({
+        "address": normalized,
+        "registration": registration,
+        "in_active_set": in_active_set,
+        "stake": stake,
+        "reputation": reputation,
+        "status": status,
+        "recent_proposals": recent_proposals,
+    }))
+    .into_response()
 }
 
 // GET /v1/pending
@@ -1237,28 +1530,55 @@ async fn consensus_state(State(state): State<SharedState>) -> impl IntoResponse 
         approvals: usize,
         rejections: usize,
         phase: &'static str,
+        /// Validator IDs that have cast a vote in this round.
+        voters: Vec<String>,
+        /// Subset of voters that cast Approve.
+        approvers: Vec<String>,
+        /// Subset of voters that cast Reject (with reason attached).
+        rejecters: Vec<String>,
+        /// Milliseconds since the earliest vote in this round (round age).
+        age_ms: i64,
     }
 
+    let now = chrono::Utc::now();
     let mut active_rounds: Vec<RoundSummary> = s
         .votes
         .iter()
         .map(|(block_hash, sigs)| {
-            let approvals = sigs
-                .iter()
-                .filter(|sig| matches!(sig.vote, common::ValidatorVote::Approve))
-                .count();
-            let rejections = sigs.len() - approvals;
+            let mut approvers = Vec::new();
+            let mut rejecters = Vec::new();
+            let mut voters = Vec::with_capacity(sigs.len());
+            for sig in sigs {
+                voters.push(sig.validator_id.clone());
+                match sig.vote {
+                    common::ValidatorVote::Approve => approvers.push(sig.validator_id.clone()),
+                    common::ValidatorVote::Reject { .. } => rejecters.push(sig.validator_id.clone()),
+                }
+            }
+            let approvals = approvers.len();
+            let rejections = rejecters.len();
             let phase = if approvals >= quorum {
                 "quorum-reached"
+            } else if rejections > 0 {
+                "contested"
             } else {
                 "collecting-votes"
             };
+            let age_ms = sigs
+                .iter()
+                .map(|s| (now - s.signed_at).num_milliseconds())
+                .max()
+                .unwrap_or(0);
             RoundSummary {
                 block_hash: block_hash.clone(),
                 vote_count: sigs.len(),
                 approvals,
                 rejections,
                 phase,
+                voters,
+                approvers,
+                rejecters,
+                age_ms,
             }
         })
         .collect();
@@ -1268,11 +1588,33 @@ async fn consensus_state(State(state): State<SharedState>) -> impl IntoResponse 
     // Cap to the 10 most active rounds to keep the response bounded.
     active_rounds.truncate(10);
 
+    #[derive(Serialize)]
+    struct ValidatorSnapshot {
+        id: String,
+        alias: String,
+        stake: u64,
+        reputation: u32,
+        status: String,
+    }
+    let validators: Vec<ValidatorSnapshot> = s
+        .validator_set
+        .validators
+        .iter()
+        .map(|v| ValidatorSnapshot {
+            id: v.id.clone(),
+            alias: v.alias.clone(),
+            stake: v.stake,
+            reputation: v.reputation,
+            status: v.status.clone(),
+        })
+        .collect();
+
     Json(serde_json::json!({
         "total_validators": total_validators,
         "quorum": quorum,
         "active_rounds": active_rounds,
         "pending_count": s.pending_pool.len(),
+        "validators": validators,
     }))
 }
 
