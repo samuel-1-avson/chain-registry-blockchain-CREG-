@@ -5,7 +5,7 @@ use axum::{
     extract::{Path, Query, State},
     http::{StatusCode, Uri},
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{delete, get, post},
     Json, Router,
 };
 use common::{PackageStatus, PublishRequest, ValidatorIdentity};
@@ -13,9 +13,11 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tower_http::{cors::CorsLayer, limit::RequestBodyLimitLayer, trace::TraceLayer};
 
-use crate::events;
+use crate::consensus_admission::{
+    accept_peer_attestation, AdmissionAttestation, AttestationStore,
+};
 use crate::{
-    events::{sse_handler, EventBus},
+    events::{self, sse_handler, EventBus},
     rate_limit::{rate_limit_middleware, RateLimiter},
     normalized_validator_key, validator_registration_status_text, ValidatorRegistrationStatus,
     SharedState,
@@ -32,7 +34,12 @@ struct ListPackagesParams {
 
 // ─── Router ───────────────────────────────────────────────────────────────────
 
-pub fn router(state: SharedState, event_bus: EventBus, limiter: RateLimiter) -> Router {
+pub fn router(
+    state: SharedState,
+    event_bus: EventBus,
+    limiter: RateLimiter,
+    admission_store: Arc<AttestationStore>,
+) -> Router {
     Router::new()
         // Health & chain
         .route("/v1/health", get(health))
@@ -41,6 +48,10 @@ pub fn router(state: SharedState, event_bus: EventBus, limiter: RateLimiter) -> 
         .route("/v1/runtime/config", get(runtime_config))
         .route("/v1/validators/register", post(register_validator_identity))
         .route("/v1/validators/registrations", get(list_validator_registrations))
+        .route(
+            "/v1/validators/registrations/:evm_address",
+            delete(delete_validator_registration),
+        )
         .route("/v1/nodes", get(get_nodes))
         .route("/v1/p2p/status", get(p2p_status))
         .route("/v1/bridge/status", get(bridge_status))
@@ -63,6 +74,10 @@ pub fn router(state: SharedState, event_bus: EventBus, limiter: RateLimiter) -> 
         // Consensus
         .route("/v1/consensus/vote", post(receive_vote))
         .route("/v1/consensus/state", get(consensus_state))
+        .route(
+            "/v1/consensus/admission-attestation",
+            post(receive_admission_attestation),
+        )
         .route("/v1/publishers/rotate-key", post(rotate_publisher_key))
         // Appeals & AAA
         .route("/v1/appeals/:id/audit", post(submit_audit))
@@ -88,8 +103,57 @@ pub fn router(state: SharedState, event_bus: EventBus, limiter: RateLimiter) -> 
         .layer(RequestBodyLimitLayer::new(50 * 1024 * 1024))
         .layer(axum::middleware::from_fn(rate_limit_middleware))
         .layer(axum::extract::Extension(limiter))
+        .layer(axum::extract::Extension(admission_store))
         .layer(CorsLayer::permissive())
         .with_state(state)
+}
+
+async fn receive_admission_attestation(
+    State(state): State<SharedState>,
+    axum::extract::Extension(store): axum::extract::Extension<Arc<AttestationStore>>,
+    Json(att): Json<AdmissionAttestation>,
+) -> Response {
+    // Look up chain_id + staking_addr fresh so config changes are picked up.
+    let (rpc_url, staking_addr_s) = {
+        let s = state.read().await;
+        (s.config.eth_rpc_url.clone(), s.config.staking_addr.clone())
+    };
+    if staking_addr_s.trim().is_empty()
+        || staking_addr_s.eq_ignore_ascii_case("0x0000000000000000000000000000000000000000")
+    {
+        return bad_request("admission path disabled: staking address unconfigured");
+    }
+
+    let staking_addr = match staking_addr_s.parse::<alloy::primitives::Address>() {
+        Ok(a) => a,
+        Err(e) => return bad_request(format!("invalid staking address: {e}")),
+    };
+
+    let chain_id = {
+        use alloy::providers::Provider;
+        let provider = alloy::providers::ProviderBuilder::new().on_http(match rpc_url.parse() {
+            Ok(u) => u,
+            Err(e) => return bad_request(format!("invalid rpc url: {e}")),
+        });
+        match provider.get_chain_id().await {
+            Ok(id) => id,
+            Err(e) => return server_err(format!("chain_id lookup failed: {e}")),
+        }
+    };
+
+    match accept_peer_attestation(&store, chain_id, staking_addr, att).await {
+        Ok(fresh) => Json(serde_json::json!({ "accepted": true, "new": fresh }))
+            .into_response(),
+        Err(e) => bad_request(format!("rejected: {e}")),
+    }
+}
+
+fn bad_request(msg: impl Into<String>) -> Response {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(ErrorResponse { error: msg.into() }),
+    )
+        .into_response()
 }
 
 async fn api_fallback(uri: Uri) -> Response {
@@ -313,6 +377,54 @@ async fn register_validator_identity(
         .insert(normalized_key, registration);
 
     (StatusCode::ACCEPTED, Json(response)).into_response()
+}
+
+/// DELETE /v1/validators/registrations/:evm_address
+///
+/// Removes a stale validator-identity registration from this node's in-memory
+/// table so the bound (node_id, ed25519_pubkey) pair is free to be reclaimed.
+/// Useful when a different wallet previously claimed the same node_id and the
+/// registration loop has not yet re-synced from on-chain state.
+async fn delete_validator_registration(
+    State(state): State<SharedState>,
+    Path(evm_address): Path<String>,
+) -> Response {
+    let address = match validate_evm_address(&evm_address) {
+        Ok(v) => v,
+        Err(error) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse { error }),
+            )
+                .into_response();
+        }
+    };
+    let key = normalized_validator_key(&address);
+
+    let mut s = state.write().await;
+    match s.validator_registrations.remove(&key) {
+        Some(removed) => {
+            // Evict the validator from the in-memory validator set so the
+            // delete is immediately visible to `/v1/nodes` consumers.
+            let identity = removed.identity.normalized();
+            s.validator_set.validators.retain(|v| {
+                v.id != identity.node_id && v.pubkey != identity.ed25519_pubkey
+            });
+            Json(serde_json::json!({
+                "removed": true,
+                "evm_address": address,
+                "node_id": removed.identity.node_id,
+            }))
+            .into_response()
+        }
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: format!("no registration found for {address}"),
+            }),
+        )
+            .into_response(),
+    }
 }
 
 async fn list_validator_registrations(State(state): State<SharedState>) -> impl IntoResponse {

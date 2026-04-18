@@ -63,12 +63,12 @@ contract SlashPriorityTest is Test {
     // ── ISSUE-028: dual-role validator slash priority ─────────────────────────
 
     // Helper: read validator stake from the tuple returned by the public mapping getter.
-    // Tuple: (uint256 stake, ValidatorState state, uint256 unbondingAt, uint256 slashCount, uint256 ejectedAt)
+    // Tuple: (uint256 stake, ValidatorState state, uint256 unbondingAt, uint256 slashCount, uint256 ejectedAt, uint256 appliedAt)
     function _valStake(address who) internal view returns (uint256 s) {
-        (s,,,, ) = staking.validators(who);
+        (s,,,,,) = staking.validators(who);
     }
     function _valSlashCount(address who) internal view returns (uint256 c) {
-        (,,, c,) = staking.validators(who);
+        (,,, c,,) = staking.validators(who);
     }
 
     /// For an active validator, validator stake is slashed first (not publisher).

@@ -150,7 +150,65 @@ enum View {
     Events,
     Operator,
     Consensus,
+    Faucet,
     Help,
+}
+
+/// State of the Faucet pane's drip flow.
+#[derive(Debug, Clone)]
+enum FaucetStatus {
+    /// No active request.
+    Idle,
+    /// PoW being solved and drip request in-flight.
+    Working { started_at: Instant, message: String },
+    /// Drip completed; show success for a few seconds.
+    Success { tx_hash: String, amount: String, at: Instant },
+    /// Drip failed.
+    Failed { error: String, at: Instant },
+}
+
+#[derive(Debug, Clone)]
+struct FaucetView {
+    /// Base URL of the faucet service (e.g. http://localhost:8082).
+    base: String,
+    /// Address being edited or submitted.
+    address_input: String,
+    /// Whether the address input field has focus (insert mode).
+    editing: bool,
+    /// Current drip status.
+    status: FaucetStatus,
+    /// Last fetched token balance (raw wei-style string from the faucet).
+    last_balance: Option<String>,
+    /// Last fetched native (ETH) balance (raw wei).
+    last_native_balance: Option<String>,
+    /// Pre-formatted decimal tCREG balance from the faucet (e.g. "1000.00").
+    last_balance_fmt: Option<String>,
+    /// Pre-formatted decimal ETH balance from the faucet (e.g. "10000.0000").
+    last_native_balance_fmt: Option<String>,
+    /// Faucet /health: "online" | "offline" | "unknown"
+    health: String,
+    /// Faucet's own tCREG reserve (so operators know if it can still drip).
+    faucet_token_reserve: Option<String>,
+    /// Chain info from /api/network.
+    network: Option<crate::faucet_client::NetworkInfo>,
+}
+
+impl FaucetView {
+    fn new(base: String) -> Self {
+        Self {
+            base,
+            address_input: String::new(),
+            editing: false,
+            status: FaucetStatus::Idle,
+            last_balance: None,
+            last_native_balance: None,
+            last_balance_fmt: None,
+            last_native_balance_fmt: None,
+            health: "unknown".into(),
+            faucet_token_reserve: None,
+            network: None,
+        }
+    }
 }
 
 /// Live PBFT round snapshot fetched from the node or derived from stats.
@@ -222,6 +280,9 @@ struct App {
 
     // Sparkline data for TPS visualization
     tps_history: VecDeque<u64>,
+
+    // Faucet pane state
+    faucet: FaucetView,
 }
 
 #[derive(Debug)]
@@ -241,6 +302,25 @@ enum DataUpdate {
     NodeDisconnected { retry_in_secs: u64 },
     /// Live PBFT round snapshot.
     Consensus(ConsensusState),
+    /// Faucet health/reserve snapshot.
+    FaucetHealth { healthy: bool, token_reserve: Option<String> },
+    /// Faucet network info (chain id, RPC URL, etc.).
+    FaucetNetwork(crate::faucet_client::NetworkInfo),
+    /// Faucet balance lookup result for the current input address.
+    /// `token`/`native` are raw wei; `token_fmt`/`native_fmt` are pre-formatted
+    /// decimals from the faucet (preferred for display).
+    FaucetBalance {
+        token: Option<String>,
+        native: Option<String>,
+        token_fmt: Option<String>,
+        native_fmt: Option<String>,
+    },
+    /// Drip operation ended.
+    FaucetDripResult(Result<(String, String), String>),
+    /// Drip operation progress message (e.g. "solving PoW", "submitting…").
+    FaucetDripProgress(String),
+    /// A generic faucet-pane error (balance fetch, etc.). Renders as FaucetStatus::Failed.
+    FaucetError(String),
 }
 
 impl App {
@@ -282,6 +362,15 @@ impl App {
             last_event_at: Instant::now(),
             reconnect_in: 0,
             tps_history: VecDeque::with_capacity(60),
+            faucet: FaucetView::new(
+                std::env::var("CREG_FAUCET_URL")
+                    // Use 127.0.0.1 over "localhost" to avoid Windows IPv4/IPv6
+                    // dual-stack flakiness (reqwest can hit `::1` and get ECONNRESET
+                    // while curl's Happy Eyeballs masks it).
+                    .unwrap_or_else(|_| "http://127.0.0.1:8082".into())
+                    .trim_end_matches('/')
+                    .to_string(),
+            ),
         }
     }
 
@@ -428,6 +517,8 @@ async fn data_fetcher_loop(app: Arc<RwLock<App>>, api_base: String, tx: mpsc::Se
     let client = reqwest::Client::new();
     let mut last_stats_refresh = Instant::now();
     let mut last_block_height: u64 = 0;
+    let faucet_base = app.read().await.faucet.base.clone();
+    let mut faucet_network_fetched = false;
 
     loop {
         // Fetch stats periodically
@@ -469,6 +560,24 @@ async fn data_fetcher_loop(app: Arc<RwLock<App>>, api_base: String, tx: mpsc::Se
             // Fetch consensus state (best-effort — node may not expose this endpoint)
             if let Ok(cs) = fetch_consensus_state(&client, &api_base).await {
                 let _ = tx.send(DataUpdate::Consensus(cs)).await;
+            }
+
+            // Poll faucet health (best-effort; faucet may be offline).
+            if let Some((healthy, reserve)) = fetch_faucet_health(&client, &faucet_base).await {
+                let _ = tx
+                    .send(DataUpdate::FaucetHealth {
+                        healthy,
+                        token_reserve: reserve,
+                    })
+                    .await;
+            }
+
+            // Fetch the network info once; it's static per session.
+            if !faucet_network_fetched {
+                if let Ok(info) = crate::faucet_client::get_network(&client, &faucet_base).await {
+                    let _ = tx.send(DataUpdate::FaucetNetwork(info)).await;
+                    faucet_network_fetched = true;
+                }
             }
 
             last_stats_refresh = Instant::now();
@@ -907,6 +1016,74 @@ fn apply_data_update(app: &mut App, update: DataUpdate) {
         DataUpdate::Consensus(state) => {
             app.consensus_state = Some(state);
         }
+        DataUpdate::FaucetHealth { healthy, token_reserve } => {
+            app.faucet.health = if healthy { "online" } else { "offline" }.into();
+            app.faucet.faucet_token_reserve = token_reserve;
+        }
+        DataUpdate::FaucetNetwork(info) => {
+            app.faucet.network = Some(info);
+        }
+        DataUpdate::FaucetBalance { token, native, token_fmt, native_fmt } => {
+            let had_data = token.is_some() || native.is_some()
+                || token_fmt.is_some() || native_fmt.is_some();
+            app.faucet.last_balance = token.clone();
+            app.faucet.last_native_balance = native.clone();
+            app.faucet.last_balance_fmt = token_fmt.clone();
+            app.faucet.last_native_balance_fmt = native_fmt.clone();
+            // Prefer the pre-formatted decimal strings for display so the
+            // Status line matches what the web explorer shows (no 18-decimal
+            // wei blob). Fall back to format_wei() on the raw value if the
+            // faucet omitted the formatted field.
+            let display_t = token_fmt
+                .clone()
+                .or_else(|| token.as_deref().map(format_wei))
+                .unwrap_or_else(|| "?".into());
+            let display_n = native_fmt
+                .clone()
+                .or_else(|| native.as_deref().map(format_wei))
+                .unwrap_or_else(|| "?".into());
+            if matches!(app.faucet.status, FaucetStatus::Working { .. }) {
+                app.faucet.status = if had_data {
+                    FaucetStatus::Success {
+                        tx_hash: "(balance fetched)".into(),
+                        amount: format!("tCREG={} / ETH={}", display_t, display_n),
+                        at: Instant::now(),
+                    }
+                } else {
+                    FaucetStatus::Failed {
+                        error: "faucet returned empty balance response".into(),
+                        at: Instant::now(),
+                    }
+                };
+            }
+        }
+        DataUpdate::FaucetError(error) => {
+            app.faucet.status = FaucetStatus::Failed { error, at: Instant::now() };
+        }
+        DataUpdate::FaucetDripProgress(msg) => {
+            if matches!(app.faucet.status, FaucetStatus::Working { .. }) {
+                if let FaucetStatus::Working { started_at, .. } = app.faucet.status {
+                    app.faucet.status = FaucetStatus::Working { started_at, message: msg };
+                }
+            } else {
+                app.faucet.status = FaucetStatus::Working {
+                    started_at: Instant::now(),
+                    message: msg,
+                };
+            }
+        }
+        DataUpdate::FaucetDripResult(result) => match result {
+            Ok((tx_hash, amount)) => {
+                app.faucet.status = FaucetStatus::Success {
+                    tx_hash,
+                    amount,
+                    at: Instant::now(),
+                };
+            }
+            Err(error) => {
+                app.faucet.status = FaucetStatus::Failed { error, at: Instant::now() };
+            }
+        },
     }
 }
 
@@ -923,6 +1100,24 @@ async fn handle_key(app: &mut App, key: KeyCode) -> bool {
             KeyCode::Char(c) => app.search_query.push(c),
             KeyCode::Backspace => {
                 app.search_query.pop();
+            }
+            _ => {}
+        }
+        return false;
+    }
+
+    // Faucet address input takes precedence over global shortcuts.
+    if app.current_view == View::Faucet && app.faucet.editing {
+        match key {
+            KeyCode::Esc => app.faucet.editing = false,
+            KeyCode::Enter => app.faucet.editing = false,
+            KeyCode::Backspace => {
+                app.faucet.address_input.pop();
+            }
+            KeyCode::Char(c) => {
+                if app.faucet.address_input.len() < 64 {
+                    app.faucet.address_input.push(c);
+                }
             }
             _ => {}
         }
@@ -959,6 +1154,9 @@ async fn handle_key(app: &mut App, key: KeyCode) -> bool {
         }
         KeyCode::Char('9') | KeyCode::Char('c') | KeyCode::Char('C') => {
             app.current_view = View::Consensus
+        }
+        KeyCode::Char('0') | KeyCode::Char('F') => {
+            app.current_view = View::Faucet;
         }
         _ => {}
     }
@@ -1039,6 +1237,76 @@ async fn handle_key(app: &mut App, key: KeyCode) -> bool {
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('b') => {
                 app.current_view = app.previous_view.unwrap_or(View::Overview);
                 app.previous_view = None;
+            }
+            _ => {}
+        },
+        View::Faucet => match key {
+            KeyCode::Char('e') | KeyCode::Char('E') | KeyCode::Char('i') => {
+                app.faucet.editing = true;
+            }
+            KeyCode::Char('a') | KeyCode::Char('A') => {
+                app.faucet.address_input.clear();
+                app.faucet.editing = true;
+            }
+            KeyCode::Char('b') | KeyCode::Char('B') => {
+                let addr = app.faucet.address_input.trim().to_string();
+                if !crate::faucet_client::is_valid_evm_address(&addr) {
+                    app.faucet.status = FaucetStatus::Failed {
+                        error: "Enter a valid 0x… address first (press 'e' to edit).".into(),
+                        at: Instant::now(),
+                    };
+                } else {
+                    app.faucet.status = FaucetStatus::Working {
+                        started_at: Instant::now(),
+                        message: "Fetching balance…".into(),
+                    };
+                    let tx = app.data_tx.clone();
+                    let base = app.faucet.base.clone();
+                    tokio::spawn(async move {
+                        let client = reqwest::Client::new();
+                        match crate::faucet_client::get_balance(&client, &base, &addr).await {
+                            Ok(bal) => {
+                                let _ = tx
+                                    .send(DataUpdate::FaucetBalance {
+                                        token: bal.balance,
+                                        native: bal.native_balance,
+                                        token_fmt: bal.balance_formatted,
+                                        native_fmt: bal.native_balance_formatted,
+                                    })
+                                    .await;
+                            }
+                            Err(e) => {
+                                let _ = tx
+                                    .send(DataUpdate::FaucetError(format!(
+                                        "balance fetch failed: {}",
+                                        e
+                                    )))
+                                    .await;
+                            }
+                        }
+                    });
+                }
+            }
+            KeyCode::Char('d') | KeyCode::Char('D') | KeyCode::Enter => {
+                let addr = app.faucet.address_input.trim().to_string();
+                if !crate::faucet_client::is_valid_evm_address(&addr) {
+                    app.faucet.status = FaucetStatus::Failed {
+                        error: "Enter a valid 0x… address first (press 'e' to edit).".into(),
+                        at: Instant::now(),
+                    };
+                } else if matches!(app.faucet.status, FaucetStatus::Working { .. }) {
+                    // Already running — ignore
+                } else {
+                    app.faucet.status = FaucetStatus::Working {
+                        started_at: Instant::now(),
+                        message: "Requesting PoW challenge…".into(),
+                    };
+                    let tx = app.data_tx.clone();
+                    let base = app.faucet.base.clone();
+                    tokio::spawn(async move {
+                        run_faucet_drip(tx, base, addr).await;
+                    });
+                }
             }
             _ => {}
         },
@@ -1324,6 +1592,7 @@ fn draw_main_content(f: &mut Frame, app: &App, area: Rect) {
         View::Events => draw_events(f, app, area),
         View::Operator => draw_operator(f, app, area),
         View::Consensus => draw_consensus(f, app, area),
+        View::Faucet => draw_faucet(f, app, area),
         View::Help => draw_help(f, app, area),
     }
 }
@@ -1337,6 +1606,7 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
         View::Events => " [j/k] Scroll | [b] Back | [?] Help | [q] Quit ",
         View::Operator => " [1-8/o] Switch views | [q] Quit | Browser explorer at http://localhost:3000 ",
         View::Consensus => " [9/c] Consensus | [r] Refresh | [q] Quit ",
+        View::Faucet => " [e] Edit address | [d/Enter] Drip | [b] Balance | [a] Clear | [Esc] Stop editing | [q] Quit ",
         View::BlockDetail | View::ValidatorDetail | View::PackageDetail => " [Esc/q/b] Back | [?] Help ",
         View::Help => " [Any key] Return ",
         _ => " [←→↑↓] Navigate | [?] Help | [q] Quit ",
@@ -2598,5 +2868,336 @@ fn format_timestamp(ts: &str) -> String {
         ts[..19].to_string()
     } else {
         ts.to_string()
+    }
+}
+
+// ============================================================================
+// FAUCET PANE
+// ============================================================================
+
+/// Poll the faucet /health endpoint. Returns (healthy, token_reserve_str) or None.
+async fn fetch_faucet_health(
+    client: &reqwest::Client,
+    base: &str,
+) -> Option<(bool, Option<String>)> {
+    let url = format!("{}/health", base.trim_end_matches('/'));
+    let res = client
+        .get(&url)
+        .timeout(Duration::from_secs(2))
+        .send()
+        .await
+        .ok()?;
+    if !res.status().is_success() {
+        return Some((false, None));
+    }
+    let json: Value = res.json().await.ok()?;
+    let healthy = json["status"].as_str() == Some("healthy")
+        && json["faucet"].as_str() == Some("online");
+    let reserve = json["faucet_balance"]
+        .as_str()
+        .map(|s| s.to_string());
+    Some((healthy, reserve))
+}
+
+/// Drive the full PoW-guarded drip flow: fetch challenge → solve PoW → POST drip.
+/// Emits progress messages and a final `FaucetDripResult` over `tx`.
+async fn run_faucet_drip(tx: mpsc::Sender<DataUpdate>, base: String, address: String) {
+    let client = reqwest::Client::new();
+
+    let _ = tx
+        .send(DataUpdate::FaucetDripProgress(
+            "Requesting PoW challenge…".into(),
+        ))
+        .await;
+
+    let challenge = match crate::faucet_client::get_challenge(&client, &base).await {
+        Ok(c) => c,
+        Err(e) => {
+            let _ = tx
+                .send(DataUpdate::FaucetDripResult(Err(format!(
+                    "challenge failed: {}",
+                    e
+                ))))
+                .await;
+            return;
+        }
+    };
+
+    let _ = tx
+        .send(DataUpdate::FaucetDripProgress(format!(
+            "Solving PoW (difficulty={})…",
+            challenge.difficulty
+        )))
+        .await;
+
+    // Hashing is CPU-bound; keep it off the async runtime thread.
+    let challenge_for_task = challenge.challenge.clone();
+    let difficulty = challenge.difficulty;
+    let nonce = match tokio::task::spawn_blocking(move || {
+        crate::faucet_client::solve_pow(&challenge_for_task, difficulty)
+    })
+    .await
+    {
+        Ok(n) => n,
+        Err(e) => {
+            let _ = tx
+                .send(DataUpdate::FaucetDripResult(Err(format!(
+                    "PoW solver crashed: {}",
+                    e
+                ))))
+                .await;
+            return;
+        }
+    };
+
+    let _ = tx
+        .send(DataUpdate::FaucetDripProgress(
+            "Submitting drip request…".into(),
+        ))
+        .await;
+
+    match crate::faucet_client::drip(&client, &base, &address, &challenge.challenge, &nonce).await {
+        Ok(resp) if resp.success => {
+            let tx_hash = resp.tx_hash.unwrap_or_else(|| "(none)".into());
+            let amount = resp.amount.unwrap_or_else(|| "(unknown)".into());
+            let _ = tx
+                .send(DataUpdate::FaucetDripResult(Ok((tx_hash, amount))))
+                .await;
+
+            // Follow up with a balance refresh so the user sees the drip land.
+            if let Ok(bal) = crate::faucet_client::get_balance(&client, &base, &address).await {
+                let _ = tx
+                    .send(DataUpdate::FaucetBalance {
+                        token: bal.balance,
+                        native: bal.native_balance,
+                        token_fmt: bal.balance_formatted,
+                        native_fmt: bal.native_balance_formatted,
+                    })
+                    .await;
+            }
+        }
+        Ok(resp) => {
+            let _ = tx
+                .send(DataUpdate::FaucetDripResult(Err(resp
+                    .error
+                    .unwrap_or_else(|| "drip rejected".into()))))
+                .await;
+        }
+        Err(e) => {
+            let _ = tx
+                .send(DataUpdate::FaucetDripResult(Err(format!(
+                    "drip call failed: {}",
+                    e
+                ))))
+                .await;
+        }
+    }
+}
+
+fn draw_faucet(f: &mut Frame, app: &App, area: Rect) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3), // title
+            Constraint::Length(5), // network / health
+            Constraint::Length(3), // address input
+            Constraint::Length(4), // balance
+            Constraint::Min(5),    // status / help
+        ])
+        .split(area);
+
+    // Title
+    let title = Paragraph::new(Line::from(vec![
+        Span::styled("⛲ Testnet Faucet", Style::default()
+            .fg(Theme::ACCENT)
+            .add_modifier(Modifier::BOLD)),
+        Span::raw("   "),
+        Span::styled(
+            format!("[{}]", app.faucet.health),
+            Style::default().fg(if app.faucet.health == "online" {
+                Theme::SUCCESS
+            } else {
+                Theme::WARNING
+            }),
+        ),
+    ]))
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Theme::BORDER)),
+    )
+    .alignment(Alignment::Center);
+    f.render_widget(title, chunks[0]);
+
+    // Network
+    let mut net_lines: Vec<Line> = Vec::new();
+    net_lines.push(Line::from(vec![
+        Span::styled("Endpoint:  ", Style::default().fg(Theme::TEXT_DIM)),
+        Span::styled(app.faucet.base.clone(), Style::default().fg(Theme::HIGHLIGHT)),
+    ]));
+    if let Some(net) = &app.faucet.network {
+        net_lines.push(Line::from(vec![
+            Span::styled("Chain:     ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::styled(
+                format!("{} (id {})", net.chain_name, net.chain_id),
+                Style::default().fg(Theme::TEXT),
+            ),
+        ]));
+        net_lines.push(Line::from(vec![
+            Span::styled("RPC:       ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::styled(net.rpc_url.clone(), Style::default().fg(Theme::TEXT)),
+        ]));
+    }
+    if let Some(reserve) = &app.faucet.faucet_token_reserve {
+        net_lines.push(Line::from(vec![
+            Span::styled("Reserve:   ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::styled(
+                format_wei(reserve),
+                Style::default().fg(Theme::PRIMARY),
+            ),
+            Span::styled(" tCREG", Style::default().fg(Theme::TEXT_DIM)),
+        ]));
+    }
+    let net_widget = Paragraph::new(net_lines).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Network ")
+            .border_style(Style::default().fg(Theme::BORDER)),
+    );
+    f.render_widget(net_widget, chunks[1]);
+
+    // Address input
+    let input_style = if app.faucet.editing {
+        Style::default().fg(Theme::HIGHLIGHT).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Theme::TEXT)
+    };
+    let display = if app.faucet.address_input.is_empty() {
+        if app.faucet.editing {
+            "▊".to_string()
+        } else {
+            "(press 'e' to edit)".to_string()
+        }
+    } else if app.faucet.editing {
+        format!("{}▊", app.faucet.address_input)
+    } else {
+        app.faucet.address_input.clone()
+    };
+    let input_title = if app.faucet.editing {
+        " Recipient address (INSERT — Esc to stop) "
+    } else {
+        " Recipient address "
+    };
+    let input_border = if app.faucet.editing {
+        Theme::HIGHLIGHT
+    } else {
+        Theme::BORDER
+    };
+    let input_widget = Paragraph::new(Line::from(Span::styled(display, input_style)))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(input_title)
+                .border_style(Style::default().fg(input_border)),
+        );
+    f.render_widget(input_widget, chunks[2]);
+
+    // Balance. Prefer the faucet's pre-formatted decimal strings so the TUI
+    // matches the web explorer (e.g. "1000.00" instead of "1000000000000000000000").
+    // Fall back to format_wei() on the raw value only if the formatted field is
+    // missing from the response.
+    let token_display = app
+        .faucet
+        .last_balance_fmt
+        .clone()
+        .or_else(|| app.faucet.last_balance.as_deref().map(format_wei));
+    let native_display = app
+        .faucet
+        .last_native_balance_fmt
+        .clone()
+        .or_else(|| app.faucet.last_native_balance.as_deref().map(format_wei));
+    let mut bal_lines: Vec<Line> = Vec::new();
+    match (&token_display, &native_display) {
+        (Some(t), Some(n)) => {
+            bal_lines.push(Line::from(vec![
+                Span::styled("tCREG:  ", Style::default().fg(Theme::TEXT_DIM)),
+                Span::styled(t.clone(), Style::default().fg(Theme::SUCCESS)),
+            ]));
+            bal_lines.push(Line::from(vec![
+                Span::styled("ETH:    ", Style::default().fg(Theme::TEXT_DIM)),
+                Span::styled(n.clone(), Style::default().fg(Theme::SECONDARY)),
+            ]));
+        }
+        _ => {
+            bal_lines.push(Line::from(Span::styled(
+                "Press 'b' to fetch balance for the entered address.",
+                Style::default().fg(Theme::TEXT_DIM),
+            )));
+        }
+    }
+    let bal_widget = Paragraph::new(bal_lines).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Balance ")
+            .border_style(Style::default().fg(Theme::BORDER)),
+    );
+    f.render_widget(bal_widget, chunks[3]);
+
+    // Status
+    let (status_text, status_color) = match &app.faucet.status {
+        FaucetStatus::Idle => (
+            "Idle. Enter a recipient address and press [d] to drip.".to_string(),
+            Theme::TEXT_DIM,
+        ),
+        FaucetStatus::Working { started_at, message } => (
+            format!("⏳ {} ({}s elapsed)", message, started_at.elapsed().as_secs()),
+            Theme::WARNING,
+        ),
+        FaucetStatus::Success { tx_hash, amount, at } => (
+            format!(
+                "✓ Drip succeeded ({}s ago)\n  amount: {}\n  tx:     {}",
+                at.elapsed().as_secs(),
+                amount,
+                tx_hash
+            ),
+            Theme::SUCCESS,
+        ),
+        FaucetStatus::Failed { error, at } => (
+            format!("✗ Failed ({}s ago): {}", at.elapsed().as_secs(), error),
+            Theme::ERROR,
+        ),
+    };
+    let status_widget = Paragraph::new(status_text)
+        .wrap(Wrap { trim: false })
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Status ")
+                .border_style(Style::default().fg(status_color)),
+        )
+        .style(Style::default().fg(status_color));
+    f.render_widget(status_widget, chunks[4]);
+}
+
+/// Convert a wei-denominated integer string to a human-friendly 18-decimal token
+/// amount with 2 decimal places of precision. Non-integer input is returned verbatim.
+fn format_wei(raw: &str) -> String {
+    let trimmed = raw.trim();
+    let digits: String = trimmed.chars().filter(|c| c.is_ascii_digit()).collect();
+    if digits.is_empty() {
+        return trimmed.to_string();
+    }
+    if digits.len() <= 18 {
+        let padded = format!("{:0>18}", digits);
+        let whole = "0";
+        let frac = &padded[padded.len().saturating_sub(18)..];
+        let frac_short = &frac[..frac.len().min(2)];
+        format!("{}.{}", whole, frac_short)
+    } else {
+        let split = digits.len() - 18;
+        let whole = &digits[..split];
+        let frac = &digits[split..];
+        let frac_short = &frac[..frac.len().min(2)];
+        format!("{}.{}", whole, frac_short)
     }
 }

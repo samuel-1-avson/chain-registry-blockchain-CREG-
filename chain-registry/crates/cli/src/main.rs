@@ -31,6 +31,7 @@ mod watch;
 // New UX modules
 mod error_help;
 mod explorer_tui;
+mod faucet_client;
 mod wizard;
 
 use anyhow::{Context, Result};

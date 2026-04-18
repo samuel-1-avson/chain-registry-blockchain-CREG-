@@ -61,7 +61,7 @@ contract StakingPermitTest is Test {
         vm.prank(relayer);
         staking.applyToBeValidatorWithPermit(validator, amount, deadline, v, r, s);
 
-        (uint256 stake, Staking.ValidatorState state,,,) = staking.validators(validator);
+        (uint256 stake, Staking.ValidatorState state,,,,) = staking.validators(validator);
         assertEq(stake, amount);
         assertEq(uint8(state), uint8(Staking.ValidatorState.Pending));
         assertEq(cregToken.balanceOf(validator), 500 ether - amount);

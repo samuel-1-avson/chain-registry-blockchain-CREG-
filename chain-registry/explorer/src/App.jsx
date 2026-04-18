@@ -80,7 +80,50 @@ const STAKING_ABI = [
     inputs: [{ name: 'amount', type: 'uint256' }], outputs: [] },
   { name: 'applyToBeValidator', type: 'function', stateMutability: 'nonpayable',
     inputs: [{ name: 'amount', type: 'uint256' }], outputs: [] },
+  { name: 'publisherStakes', type: 'function', stateMutability: 'view',
+    inputs: [{ name: '', type: 'address' }], outputs: [{ name: '', type: 'uint256' }] },
+  { name: 'validators', type: 'function', stateMutability: 'view',
+    inputs: [{ name: '', type: 'address' }],
+    outputs: [
+      { name: 'stake', type: 'uint256' },
+      { name: 'state', type: 'uint8' },
+      { name: 'unbondingAt', type: 'uint256' },
+      { name: 'slashCount', type: 'uint256' },
+      { name: 'ejectedAt', type: 'uint256' },
+      { name: 'appliedAt', type: 'uint256' },
+    ] },
 ]
+
+const VALIDATOR_STATE_LABEL = {
+  0: 'None',
+  1: 'Pending',
+  2: 'Active',
+  3: 'Unbonding',
+  4: 'Withdrawn',
+  5: 'Rejected',
+  6: 'Expired',
+}
+
+const translateStakeRevert = (err) => {
+  const raw = err?.shortMessage || err?.details || err?.message || String(err || '')
+  const low = raw.toLowerCase()
+  if (low.includes('alreadyapplied')) {
+    return 'You already have a pending or active validator application on this wallet. Withdraw or wait for governance first.'
+  }
+  if (low.includes('belowminstake')) {
+    return 'The entered amount is below the protocol minimum for this role.'
+  }
+  if (low.includes('restakecooldownactive')) {
+    return 'This wallet is in the re-stake cooldown window after a previous ejection. Try again after the cooldown ends.'
+  }
+  if (low.includes('transferfailed') || low.includes('erc20: insufficient')) {
+    return 'Token transfer failed — check that your tCREG balance covers the amount.'
+  }
+  if (low.includes('user rejected') || err?.code === 4001) {
+    return 'Transaction rejected in wallet.'
+  }
+  return raw
+}
 
 const PERMIT_TYPED_DATA_TYPES = {
   Permit: [
@@ -168,6 +211,32 @@ const normalizeWalletAddress = (value) => {
   const parts = value.split(':')
   const candidate = parts[parts.length - 1]
   return isAddress(candidate) ? candidate : null
+}
+
+const WALLET_SESSION_KEY = 'creg.walletSession'
+
+const readWalletSession = () => {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = window.localStorage.getItem(WALLET_SESSION_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+const writeWalletSession = (session) => {
+  try {
+    if (session) {
+      window.localStorage.setItem(WALLET_SESSION_KEY, JSON.stringify(session))
+    } else {
+      window.localStorage.removeItem(WALLET_SESSION_KEY)
+    }
+  } catch {
+    /* ignore quota / privacy-mode errors */
+  }
 }
 
 // ============================================
@@ -326,6 +395,9 @@ function App() {
   const [stakeLoading, setStakeLoading] = useState(false)
   const [sponsoredStakeLoading, setSponsoredStakeLoading] = useState(false)
   const [stakeResult, setStakeResult] = useState(null)
+  const [onChainPublisherStake, setOnChainPublisherStake] = useState(null)
+  const [onChainValidatorStake, setOnChainValidatorStake] = useState(null)
+  const [onChainValidatorState, setOnChainValidatorState] = useState(null)
   const [stakeTxHistory, setStakeTxHistory] = useState(() => {
     try {
       const raw = window.localStorage.getItem('creg.stakeTxHistory')
@@ -503,12 +575,27 @@ function App() {
 
   const validatorLifecycle = useMemo(() => {
     const registration = walletValidatorRegistration
+    const state = registration?.staking_state
+    const expired = state === 'expired'
+    const admitted = Boolean(registration?.admitted_to_consensus)
+    const active = Boolean(registration?.active)
     return [
       { key: 'registered', label: 'Identity registered with node', complete: Boolean(registration?.registered_with_node) },
       { key: 'applied', label: 'Applied on-chain', complete: Boolean(registration?.applied_on_chain) },
-      { key: 'approved', label: 'Governance approved', complete: Boolean(registration?.governance_approved) },
-      { key: 'admitted', label: 'Admitted to consensus', complete: Boolean(registration?.admitted_to_consensus) },
-      { key: 'active', label: 'Active', complete: Boolean(registration?.active) },
+      {
+        key: 'consensus',
+        // Labelled from the applicant's perspective: the mechanical-consensus
+        // admission pathway has replaced governance-bot approval. Until the
+        // signer set reaches ≥ 2/3, this step reads as "awaiting consensus."
+        label: expired
+          ? 'Expired before reaching consensus'
+          : (admitted || active)
+            ? 'Admitted by validator consensus'
+            : 'Awaiting validator consensus (≥ 2/3 of active set)',
+        complete: admitted || active,
+        error: expired,
+      },
+      { key: 'active', label: 'Active', complete: active },
     ]
   }, [walletValidatorRegistration])
 
@@ -839,6 +926,32 @@ function App() {
       } else {
         setWalletBalance('0')
       }
+
+      if (stakingContractAddress) {
+        try {
+          const [pubRaw, valRaw] = await Promise.all([
+            publicClient.readContract({
+              address: stakingContractAddress,
+              abi: STAKING_ABI,
+              functionName: 'publisherStakes',
+              args: [walletAccount.address],
+            }),
+            publicClient.readContract({
+              address: stakingContractAddress,
+              abi: STAKING_ABI,
+              functionName: 'validators',
+              args: [walletAccount.address],
+            }),
+          ])
+          setOnChainPublisherStake(formatUnits(pubRaw, 18))
+          const valStake = valRaw?.[0] ?? valRaw?.stake ?? 0n
+          const valState = Number(valRaw?.[1] ?? valRaw?.state ?? 0)
+          setOnChainValidatorStake(formatUnits(valStake, 18))
+          setOnChainValidatorState(valState)
+        } catch {
+          /* ignore — contract may not exist on this chain */
+        }
+      }
       walletBalanceFailuresRef.current = 0
       setWalletRpcOffline(false)
     } catch (e) {
@@ -848,7 +961,7 @@ function App() {
       }
       if (walletBalanceFailuresRef.current >= 3) setWalletRpcOffline(true)
     }
-  }, [walletAccount, tokenContractAddress, activeChain, activeRpcUrl])
+  }, [walletAccount, tokenContractAddress, stakingContractAddress, activeChain, activeRpcUrl])
 
   useEffect(() => {
     walletBalanceFailuresRef.current = 0
@@ -996,7 +1109,7 @@ function App() {
     }
   }, [networkProfiles, walletProvider, ensureWalletChain])
 
-  const connectExternalProvider = useCallback(async (provider, type, providerName) => {
+  const connectExternalProvider = useCallback(async (provider, type, providerName, persistMeta = null) => {
     if (!provider?.request) {
       alert('Wallet provider unavailable.')
       return
@@ -1013,6 +1126,7 @@ function App() {
     setWalletProvider(provider)
     setWalletAccount({ address, type, providerName })
     setStakeResult(null)
+    writeWalletSession({ type, providerName, rdns: persistMeta?.rdns || null })
   }, [ensureWalletChain])
 
   const connectWallet = useCallback(async (privateKey) => {
@@ -1048,7 +1162,12 @@ function App() {
   // EIP-6963: Connect via a discovered provider (W10/I1 fix)
   const connectEip6963 = useCallback(async (providerDetail) => {
     try {
-      await connectExternalProvider(providerDetail.provider, 'eip6963', providerDetail.info?.name || 'Wallet')
+      await connectExternalProvider(
+        providerDetail.provider,
+        'eip6963',
+        providerDetail.info?.name || 'Wallet',
+        { rdns: providerDetail.info?.rdns || null },
+      )
     } catch (err) {
       alert('Wallet connection failed: ' + (err.message || err))
     }
@@ -1084,6 +1203,7 @@ function App() {
       setWalletProvider(provider)
       setWalletAccount({ address, type: 'walletconnect', providerName: 'WalletConnect' })
       setStakeResult(null)
+      writeWalletSession({ type: 'walletconnect', providerName: 'WalletConnect', rdns: null })
     } catch (err) {
       if (err?.message?.includes('User rejected') || err?.code === 4001) {
         // User closed the modal — not an error
@@ -1097,6 +1217,7 @@ function App() {
     if (walletProvider?.disconnect) {
       Promise.resolve(walletProvider.disconnect()).catch(() => {})
     }
+    writeWalletSession(null)
     setWalletProvider(null)
     setWalletAccount(null)
     setWalletBalance(null)
@@ -1237,6 +1358,77 @@ function App() {
     }
   }, [walletAccount?.address, activeNetworkProfile, activeFaucetUrl, refreshWalletBalance, walletFundingCooldownActive, walletFundingCooldownSecs])
 
+  // Restore a previously connected wallet across page refreshes.
+  // For injected providers we only call eth_accounts (silent — no popup); if the wallet
+  // has already authorized this origin, we reattach without asking the user again.
+  const walletRestoreAttemptedRef = useRef(false)
+  useEffect(() => {
+    if (walletRestoreAttemptedRef.current) return
+    if (walletAccount) return
+    const session = readWalletSession()
+    if (!session?.type) return
+
+    let cancelled = false
+
+    const attachInjected = async (provider, type, providerName) => {
+      try {
+        const accounts = await provider.request({ method: 'eth_accounts' })
+        const address = normalizeWalletAddress(accounts?.[0])
+        if (!address || cancelled) return
+        setWalletProvider(provider)
+        setWalletAccount({ address, type, providerName })
+      } catch {
+        /* silent */
+      }
+    }
+
+    const restoreWalletConnect = async () => {
+      try {
+        const { EthereumProvider } = await import('@walletconnect/ethereum-provider')
+        const projectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID
+        if (!projectId) return
+        const provider = await EthereumProvider.init({
+          projectId,
+          chains: [activeChain.id],
+          rpcMap: { [activeChain.id]: activeRpcUrl },
+          showQrModal: false,
+          metadata: {
+            name: 'Chain Registry Explorer',
+            description: 'Package registry blockchain explorer',
+            url: window.location.origin,
+            icons: [],
+          },
+        })
+        if (!provider.session) return
+        const address = normalizeWalletAddress(provider.accounts?.[0])
+        if (!address || cancelled) return
+        setWalletProvider(provider)
+        setWalletAccount({ address, type: 'walletconnect', providerName: 'WalletConnect' })
+      } catch {
+        /* silent */
+      }
+    }
+
+    if (session.type === 'walletconnect') {
+      walletRestoreAttemptedRef.current = true
+      restoreWalletConnect()
+    } else if (session.type === 'metamask' && window.ethereum) {
+      walletRestoreAttemptedRef.current = true
+      attachInjected(window.ethereum, 'metamask', session.providerName || 'MetaMask')
+    } else if (session.type === 'eip6963') {
+      const match = eip6963Providers.find((p) => p.info?.rdns === session.rdns)
+      if (match) {
+        walletRestoreAttemptedRef.current = true
+        attachInjected(match.provider, 'eip6963', session.providerName || match.info?.name || 'Wallet')
+      }
+      // Otherwise wait for the provider to be announced (effect re-runs on eip6963Providers change).
+    }
+
+    return () => {
+      cancelled = true
+    }
+  }, [walletAccount, eip6963Providers, activeChain.id, activeRpcUrl])
+
   useEffect(() => {
     if (!walletProvider?.on) return undefined
 
@@ -1260,6 +1452,33 @@ function App() {
     }
   }, [walletProvider, disconnectWallet])
 
+  const confirmRepeatStake = useCallback((role, requestedAmount) => {
+    if (role === 'publisher') {
+      const current = parseFloat(onChainPublisherStake || '0')
+      if (current > 0) {
+        return window.confirm(
+          `You already have ${current} tCREG staked as a publisher on this wallet.\n\n` +
+          `Staking ${requestedAmount} more will ADD to your stake, not replace it. ` +
+          `New total would be ${current + parseFloat(requestedAmount || '0')} tCREG.\n\n` +
+          `Continue?`
+        )
+      }
+      return true
+    }
+    // validator role
+    if (onChainValidatorState === 1 || onChainValidatorState === 2 || onChainValidatorState === 3) {
+      const label = VALIDATOR_STATE_LABEL[onChainValidatorState] || 'Active'
+      const current = parseFloat(onChainValidatorStake || '0')
+      window.alert(
+        `You already have a ${label.toLowerCase()} validator record on this wallet with ` +
+        `${current} tCREG staked. A new application cannot be submitted until you unbond ` +
+        `and withdraw, or until governance rejects the current one.`
+      )
+      return false
+    }
+    return true
+  }, [onChainPublisherStake, onChainValidatorStake, onChainValidatorState])
+
   const doStake = useCallback(async (role, amountOverride = null) => {
     const requestedAmount = amountOverride || stakeAmount
     if (!walletAccount || !requestedAmount) return
@@ -1271,6 +1490,7 @@ function App() {
       setStakeResult({ success: false, message: activeNetworkProfile.id === 'anvil' ? 'Live contract addresses are unavailable. Wait for runtime config from the node or rebuild with testnet addresses.' : `No Chain Registry deployment is configured for ${activeNetworkProfile.label} yet. Set the relevant VITE_${activeNetworkProfile.shortLabel.toUpperCase()}_* contract env vars before using direct staking on this public profile.` })
       return
     }
+    if (!confirmRepeatStake(role, requestedAmount)) return
     setStakeLoading(true)
     setStakeResult(null)
     try {
@@ -1326,11 +1546,11 @@ function App() {
       await refreshWalletBalance()
       await fetchData()
     } catch (err) {
-      setStakeResult({ success: false, message: err.message })
+      setStakeResult({ success: false, message: translateStakeRevert(err) })
     } finally {
       setStakeLoading(false)
     }
-  }, [walletAccount, walletProvider, stakeAmount, tokenContractAddress, stakingContractAddress, refreshWalletBalance, walletValidatorRegistration, fetchData, walletNativeBalance, activeChain, activeRpcUrl, activeNetworkProfile, recordStakeTx])
+  }, [walletAccount, walletProvider, stakeAmount, tokenContractAddress, stakingContractAddress, refreshWalletBalance, walletValidatorRegistration, fetchData, walletNativeBalance, activeChain, activeRpcUrl, activeNetworkProfile, recordStakeTx, confirmRepeatStake])
 
   const doSponsoredStake = useCallback(async (role, amountOverride = null) => {
     const requestedAmount = amountOverride || stakeAmount
@@ -1339,6 +1559,7 @@ function App() {
       setStakeResult({ success: false, message: activeNetworkProfile.id === 'anvil' ? 'Live contract addresses are unavailable. Wait for runtime config from the node or rebuild with testnet addresses.' : `No Chain Registry deployment is configured for ${activeNetworkProfile.label} yet. Set the relevant VITE_${activeNetworkProfile.shortLabel.toUpperCase()}_* contract env vars before using direct staking on this public profile.` })
       return
     }
+    if (!confirmRepeatStake(role, requestedAmount)) return
 
     const activePolicy = role === 'publisher' ? activeSponsoredPublisherPolicy : activeSponsoredValidatorPolicy
     if (!activePolicy) {
@@ -1357,6 +1578,18 @@ function App() {
       const walletClient = createSigningWalletClient()
       const walletSigner = walletAccount.account || walletAccount.address
       const amountWei = parseUnits(requestedAmount, 18)
+
+      const balancePublicClient = createPublicClient({ chain: activeChain, transport: http(activeRpcUrl) })
+      const onChainBalance = await balancePublicClient.readContract({
+        address: tokenContractAddress,
+        abi: ERC20_ABI,
+        functionName: 'balanceOf',
+        args: [walletAccount.address],
+      })
+      if (onChainBalance < amountWei) {
+        const have = formatUnits(onChainBalance, 18)
+        throw new Error(`Insufficient tCREG balance. You have ${have} tCREG but need ${requestedAmount}. Use the faucet to mint test tokens first.`)
+      }
 
       const quoteResponse = await fetch(`${directRelayerUrl}/v1/relayer/quote`, {
         method: 'POST',
@@ -1440,11 +1673,11 @@ function App() {
         await fetchData()
       }
     } catch (err) {
-      setStakeResult({ success: false, message: err.message || `Sponsored ${role} action failed.` })
+      setStakeResult({ success: false, message: translateStakeRevert(err) || `Sponsored ${role} action failed.` })
     } finally {
       setSponsoredStakeLoading(false)
     }
-  }, [walletAccount, walletProvider, stakeAmount, tokenContractAddress, stakingContractAddress, activeNetworkProfile, activeSponsoredPublisherPolicy, activeSponsoredValidatorPolicy, relayerPolicyError, activeChain, directRelayerUrl, createSigningWalletClient, ensureWalletChain, pollSponsoredRequest, refreshWalletBalance, fetchData])
+  }, [walletAccount, walletProvider, stakeAmount, tokenContractAddress, stakingContractAddress, activeNetworkProfile, activeSponsoredPublisherPolicy, activeSponsoredValidatorPolicy, relayerPolicyError, activeChain, directRelayerUrl, createSigningWalletClient, ensureWalletChain, pollSponsoredRequest, refreshWalletBalance, fetchData, confirmRepeatStake])
 
   const registerValidatorIdentity = useCallback(async () => {
     if (!walletAccount?.address) return
@@ -2351,6 +2584,26 @@ function App() {
                               : `Configure VITE_${activeNetworkProfile.shortLabel.toUpperCase()}_* env vars to enable staking.`}
                           </div>
                         )}
+                        {(onChainPublisherStake !== null || onChainValidatorState !== null) && (
+                          <div style={{
+                            padding: '8px 10px', marginBottom: '10px', borderRadius: '8px',
+                            background: 'rgba(148,163,184,0.08)', border: '1px solid rgba(148,163,184,0.2)',
+                            fontSize: '0.78rem', lineHeight: 1.5, color: 'var(--color-text-muted)',
+                          }}>
+                            <div>
+                              <strong style={{ color: 'var(--color-text)' }}>Publisher stake:</strong>{' '}
+                              {parseFloat(onChainPublisherStake || '0') > 0
+                                ? `${onChainPublisherStake} tCREG`
+                                : 'none'}
+                            </div>
+                            <div>
+                              <strong style={{ color: 'var(--color-text)' }}>Validator status:</strong>{' '}
+                              {onChainValidatorState && onChainValidatorState !== 0
+                                ? `${VALIDATOR_STATE_LABEL[onChainValidatorState] || 'Unknown'} (${onChainValidatorStake || '0'} tCREG)`
+                                : 'none'}
+                            </div>
+                          </div>
+                        )}
                         <input
                           type="number"
                           className="wallet-input"
@@ -2363,7 +2616,7 @@ function App() {
                           <button
                             className="wallet-action-btn wallet-action-primary"
                             onClick={() => doStake('publisher')}
-                            disabled={stakeLoading || !stakeAmount}
+                            disabled={stakeLoading || sponsoredStakeLoading || !stakeAmount}
                             style={{ width: '100%' }}
                           >
                             {stakeLoading ? 'Staking...' : 'Stake as Publisher'}
@@ -2371,8 +2624,9 @@ function App() {
                           <button
                             className="wallet-action-btn wallet-action-secondary"
                             onClick={() => doStake('validator', stakeAmount || '100')}
-                            disabled={stakeLoading}
+                            disabled={stakeLoading || sponsoredStakeLoading || (onChainValidatorState === 1 || onChainValidatorState === 2 || onChainValidatorState === 3)}
                             style={{ width: '100%' }}
+                            title={(onChainValidatorState === 1 || onChainValidatorState === 2 || onChainValidatorState === 3) ? 'This wallet already has an active validator record' : undefined}
                           >
                             {stakeLoading ? 'Applying...' : 'Apply as Validator'}
                           </button>
@@ -2382,7 +2636,7 @@ function App() {
                             <button
                               className="wallet-action-btn wallet-action-secondary"
                               onClick={() => doSponsoredStake('publisher')}
-                              disabled={sponsoredStakeLoading || !stakeAmount || !activeSponsoredPublisherPolicy}
+                              disabled={stakeLoading || sponsoredStakeLoading || !stakeAmount || !activeSponsoredPublisherPolicy}
                               style={{ width: '100%', fontSize: '0.8rem' }}
                             >
                               Sponsored Publisher
@@ -2390,8 +2644,9 @@ function App() {
                             <button
                               className="wallet-action-btn wallet-action-secondary"
                               onClick={() => doSponsoredStake('validator', stakeAmount || '100')}
-                              disabled={sponsoredStakeLoading || !activeSponsoredValidatorPolicy}
+                              disabled={stakeLoading || sponsoredStakeLoading || !activeSponsoredValidatorPolicy || (onChainValidatorState === 1 || onChainValidatorState === 2 || onChainValidatorState === 3)}
                               style={{ width: '100%', fontSize: '0.8rem' }}
+                              title={(onChainValidatorState === 1 || onChainValidatorState === 2 || onChainValidatorState === 3) ? 'This wallet already has an active validator record' : undefined}
                             >
                               Sponsored Validator
                             </button>
@@ -2444,12 +2699,22 @@ function App() {
                         )}
                         {walletValidatorRegistration && (
                           <div style={{ display: 'grid', gap: '4px', marginTop: '12px' }}>
-                            {validatorLifecycle.map((step) => (
-                              <div key={step.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 10px', borderRadius: '8px', background: step.complete ? 'rgba(16,185,129,0.1)' : 'rgba(148,163,184,0.08)', fontSize: '0.82rem' }}>
-                                <span>{step.complete ? '✓' : '○'} {step.label}</span>
-                                <span style={{ fontSize: '0.7rem', color: step.complete ? '#34d399' : 'var(--text-tertiary)', textTransform: 'uppercase' }}>{step.complete ? 'done' : 'waiting'}</span>
-                              </div>
-                            ))}
+                            {validatorLifecycle.map((step) => {
+                              const bg = step.error
+                                ? 'rgba(239,68,68,0.12)'
+                                : step.complete
+                                  ? 'rgba(16,185,129,0.1)'
+                                  : 'rgba(148,163,184,0.08)'
+                              const markColor = step.error ? '#f87171' : step.complete ? '#34d399' : 'var(--text-tertiary)'
+                              const markGlyph = step.error ? '✕' : step.complete ? '✓' : '○'
+                              const badge = step.error ? 'expired' : step.complete ? 'done' : 'waiting'
+                              return (
+                                <div key={step.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 10px', borderRadius: '8px', background: bg, fontSize: '0.82rem' }}>
+                                  <span>{markGlyph} {step.label}</span>
+                                  <span style={{ fontSize: '0.7rem', color: markColor, textTransform: 'uppercase' }}>{badge}</span>
+                                </div>
+                              )
+                            })}
                           </div>
                         )}
                       </div>

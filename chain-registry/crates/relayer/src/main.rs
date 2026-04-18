@@ -723,22 +723,23 @@ async fn sponsor_request(
     let tx_hash = match send_sponsored_transaction(&state, &prepared, &permit_signature).await {
         Ok(hash) => hash,
         Err(err) => {
+            let (status_code, friendly) = classify_send_error(&err);
             update_status(
                 &state,
                 &request_id,
                 "failed",
-                &format!("Relayer send failed: {}", err),
+                &format!("Relayer send failed: {}", friendly),
                 None,
                 None,
             );
             return (
-                StatusCode::BAD_GATEWAY,
+                status_code,
                 Json(SponsorResponse {
                     success: false,
                     request_id,
                     status: "failed".to_string(),
                     tx_hash: None,
-                    message: err,
+                    message: friendly,
                 }),
             )
                 .into_response();
@@ -1493,6 +1494,41 @@ fn parse_u64(value: &str, field_name: &str) -> Result<u64, String> {
     value
         .parse::<u64>()
         .map_err(|e| format!("Invalid {}: {}", field_name, e))
+}
+
+fn classify_send_error(err: &str) -> (StatusCode, String) {
+    let lower = err.to_lowercase();
+    let revert_reason = extract_revert_reason(err);
+    if lower.contains("erc20: insufficient balance") {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Insufficient tCREG balance to stake the requested amount. Visit the faucet to mint testnet tokens first.".to_string(),
+        );
+    }
+    if lower.contains("erc20: insufficient allowance")
+        || lower.contains("erc20permit: invalid signature")
+        || lower.contains("permit:")
+    {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("Permit could not be applied on-chain: {}", revert_reason.unwrap_or_else(|| err.to_string())),
+        );
+    }
+    if lower.contains("execution reverted") {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("On-chain transaction reverted: {}", revert_reason.unwrap_or_else(|| err.to_string())),
+        );
+    }
+    (StatusCode::BAD_GATEWAY, err.to_string())
+}
+
+fn extract_revert_reason(err: &str) -> Option<String> {
+    let marker = "execution reverted: ";
+    let start = err.find(marker)? + marker.len();
+    let tail = &err[start..];
+    let end = tail.find(", data:").unwrap_or(tail.len());
+    Some(tail[..end].trim().to_string())
 }
 
 fn parse_hex_u64(value: &str) -> Result<u64, String> {

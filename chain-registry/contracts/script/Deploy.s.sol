@@ -17,6 +17,8 @@ import "../testnet/DevZKVerifier.sol";
 /// @dev forge script contracts/script/Deploy.s.sol --rpc-url $RPC_URL --broadcast --verify -vvvv
 contract DeployChainRegistry is Script {
 
+    uint256 internal constant GENESIS_VALIDATOR_STAKE = 1000 ether;
+
     Governance    public governance;
     Staking       public staking;
     Reputation    public reputation;
@@ -50,8 +52,11 @@ contract DeployChainRegistry is Script {
         cregToken = new CregToken(deployer, deployer, deployer, deployer);
 
         // Fund the faucet (Anvil account #1) with 20M tCREG so drip works immediately.
+        // Reserve GENESIS_VALIDATOR_STAKE on the deployer so _seedFirstValidator can
+        // stake the bridge signer without an out-of-balance revert.
         address faucetAddr = vm.envOr("FAUCET_ADDRESS", address(0x70997970C51812dc3A010C7d01b50e0d17dc79C8));
-        cregToken.transfer(faucetAddr, 20_000_000 ether);
+        uint256 faucetAmount = 20_000_000 ether - (testnetMode ? GENESIS_VALIDATOR_STAKE : 0);
+        cregToken.transfer(faucetAddr, faucetAmount);
 
         // Staking now requires the CregToken address for CREG-based staking.
         staking    = new Staking(address(governance), address(cregToken));
@@ -85,6 +90,10 @@ contract DeployChainRegistry is Script {
         cregToken.transferOwnership(address(governance));
 
         vm.stopBroadcast();
+
+        if (testnetMode) {
+            _seedFirstValidator(deployerKey, deployer);
+        }
 
         console.log("Governance:", address(governance));
         console.log("Staking:   ", address(staking));
@@ -122,6 +131,54 @@ contract DeployChainRegistry is Script {
         address[] memory s = new address[](1);
         s[0] = deployer;
         return s;
+    }
+
+    /// @notice Stakes and admits the bridge signer as the first validator so that
+    ///         consensus-based admission has a non-empty active set to bootstrap from.
+    /// @dev    Without this, a fresh testnet chain has zero active validators, and
+    ///         approveByConsensus requires >=2/3 of the active set to sign, which is
+    ///         unreachable. We use the emergency governance path here (threshold=1 on
+    ///         testnet auto-executes on first vote) and leave the path enabled so ops
+    ///         can recover if the seeded validator ever goes offline. Skipped if the
+    ///         bridge signer is unset or equals the deployer.
+    function _seedFirstValidator(uint256 deployerKey, address deployer) internal {
+        uint256 bridgeKey;
+        try vm.envUint("CREG_BRIDGE_KEY") returns (uint256 k) {
+            bridgeKey = k;
+        } catch {
+            console.log("Seed skipped: CREG_BRIDGE_KEY unset");
+            return;
+        }
+        address bridgeSigner = vm.addr(bridgeKey);
+        if (bridgeSigner == deployer) {
+            console.log("Seed skipped: bridge signer equals deployer");
+            return;
+        }
+
+        vm.startBroadcast(deployerKey);
+        cregToken.transfer(bridgeSigner, GENESIS_VALIDATOR_STAKE);
+        vm.stopBroadcast();
+
+        vm.startBroadcast(bridgeKey);
+        cregToken.approve(address(staking), GENESIS_VALIDATOR_STAKE);
+        staking.applyToBeValidator(GENESIS_VALIDATOR_STAKE);
+        vm.stopBroadcast();
+
+        vm.startBroadcast(deployerKey);
+        bytes memory cd = abi.encodeWithSelector(
+            Staking.approveValidator.selector,
+            bridgeSigner
+        );
+        uint256 proposalId = governance.submit(
+            address(staking),
+            cd,
+            "genesis: seed first validator via emergency governance"
+        );
+        governance.vote(proposalId, true);
+        vm.stopBroadcast();
+
+        console.log("Genesis validator seeded:", bridgeSigner);
+        console.log("Stake (tCREG):           ", GENESIS_VALIDATOR_STAKE / 1 ether);
     }
 
     function _writeManifest(address deployer) internal {

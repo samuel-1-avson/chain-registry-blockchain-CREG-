@@ -28,7 +28,7 @@ contract Staking {
     // ── Enums ────────────────────────────────────────────────────────────────
 
     /// Full lifecycle of a validator.
-    enum ValidatorState { None, Pending, Active, Unbonding, Withdrawn, Rejected }
+    enum ValidatorState { None, Pending, Active, Unbonding, Withdrawn, Rejected, Expired }
 
     /// Slashing severity levels.
     enum Severity { Low, Medium, Critical }
@@ -55,6 +55,15 @@ contract Staking {
     /// Slash percentage for Critical severity.
     uint256 public constant SLASH_CRITICAL_PCT = 30;
 
+    /// Rule-set version embedded in every consensus admission signature.
+    /// Bumping this invalidates prior signatures — use only when the admission
+    /// predicate (the off-chain rules every validator signs against) changes.
+    uint256 public constant RULE_SET_VERSION = 1;
+
+    /// Pending applications expire after this window if quorum is not reached.
+    /// Stake is refunded to the applicant on expiry.
+    uint256 public constant APPLICATION_TIMEOUT = 7 days;
+
     // ── Storage ───────────────────────────────────────────────────────────────
 
     struct ValidatorEntry {
@@ -63,6 +72,7 @@ contract Staking {
         uint256        unbondingAt;  // Timestamp when unbonding was initiated
         uint256        slashCount;
         uint256        ejectedAt;    // Timestamp of slash-eject (for restake cooldown)
+        uint256        appliedAt;    // Timestamp of application — used for APPLICATION_TIMEOUT
     }
 
     /// The CREG token contract — all staking uses this token.
@@ -76,6 +86,17 @@ contract Staking {
     address    public registry;    // Only Registry can trigger slashing
     address    public governance;
     uint256    public slashPool;   // Accumulated slashed CREG (distributed to honest validators)
+
+    /// EIP-712 domain separator for validator-admission attestations, set once at deploy.
+    bytes32 public immutable DOMAIN_SEPARATOR;
+
+    /// (applicant, nonce) → used. Prevents replay of a consensus-admission bundle.
+    mapping(address => mapping(uint256 => bool)) public consensusNonceUsed;
+
+    /// When `false`, the legacy `approveValidator(...)` / `rejectValidator(...)` path is
+    /// permanently disabled and admission is gated exclusively by `approveByConsensus`.
+    /// Governance can flip this off; it cannot be flipped back on.
+    bool public emergencyGovernanceEnabled;
 
     // ── Slash-pool epoch (pull-based distribution) ────────────────────────────
     // `distributeSlashPool` iterates the full validator list and can exceed the
@@ -95,10 +116,13 @@ contract Staking {
     event PublisherUnstaked      (address indexed publisher, uint256 amount);
     event ValidatorApplied       (address indexed validator, uint256 stake);
     event ValidatorApproved      (address indexed validator);
+    event ValidatorApprovedByConsensus(address indexed validator, uint256 nonce, uint256 signerCount);
+    event ValidatorApplicationExpired (address indexed validator, uint256 refunded);
     event ValidatorRejected      (address indexed validator);
     event ValidatorUnbonding     (address indexed validator, uint256 unbondingAt);
     event ValidatorWithdrawn     (address indexed validator, uint256 amount);
     event ValidatorLeft          (address indexed validator);
+    event EmergencyGovernanceDisabled();
     event Slashed                (address indexed account, uint256 amount, string reason);
     event SlashPoolDistributed   (uint256 amount, uint256 validatorCount);
     event SlashPoolEpochCommitted(uint256 indexed epoch, uint256 amount, uint256 totalWeight);
@@ -117,6 +141,15 @@ contract Staking {
     error InsufficientStake  ();
     error TransferFailed     ();
     error RestakeCooldownActive(uint256 availableAt);
+    error ApplicationExpired        ();
+    error ApplicationNotYetExpired  (uint256 expiresAt);
+    error DuplicateOrUnsortedSigner ();
+    error InvalidSignerLength       ();
+    error NotAnActiveSigner         (address signer);
+    error InvalidSignature          (address signer);
+    error NonceAlreadyUsed          ();
+    error InsufficientQuorum        (uint256 signerCount, uint256 required);
+    error EmergencyPathDisabled     ();
 
     // ── Constructor ───────────────────────────────────────────────────────────
 
@@ -126,6 +159,14 @@ contract Staking {
         owner = msg.sender;
         governance = _governance;
         cregToken  = CregToken(_cregToken);
+        emergencyGovernanceEnabled = true;
+        DOMAIN_SEPARATOR = keccak256(abi.encode(
+            keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
+            keccak256(bytes("Chain Registry Validator Admission")),
+            keccak256(bytes("1")),
+            block.chainid,
+            address(this)
+        ));
     }
 
     // ── Initializer ───────────────────────────────────────────────────────────
@@ -228,15 +269,19 @@ contract Staking {
             state:       ValidatorState.Pending,
             unbondingAt: 0,
             slashCount:  0,
-            ejectedAt:   0
+            ejectedAt:   0,
+            appliedAt:   block.timestamp
         });
         _validatorList.push(validator);
         emit ValidatorApplied(validator, amount);
     }
 
-    /// @notice Step 2a: Governance approves a pending validator application.
-    ///         The validator becomes Active and can now vote in consensus.
+    /// @notice Legacy emergency path: Governance approves a pending validator.
+    /// @dev   Only callable while `emergencyGovernanceEnabled` is true. Intended as a
+    ///        circuit-breaker for bricked-chain recovery. Admission under normal
+    ///        operation happens through `approveByConsensus`.
     function approveValidator(address validator) external {
+        if (!emergencyGovernanceEnabled) revert EmergencyPathDisabled();
         if (msg.sender != governance) revert NotAuthorized();
         ValidatorEntry storage v = validators[validator];
         if (v.state != ValidatorState.Pending) revert NotPending();
@@ -244,9 +289,10 @@ contract Staking {
         emit ValidatorApproved(validator);
     }
 
-    /// @notice Step 2b: Governance rejects a pending validator application.
-    ///         The applicant's full CREG stake is returned immediately.
+    /// @notice Legacy emergency path: Governance rejects a pending validator.
+    /// @dev   See {approveValidator} for the rationale behind retaining this path.
     function rejectValidator(address validator) external nonReentrant {
+        if (!emergencyGovernanceEnabled) revert EmergencyPathDisabled();
         if (msg.sender != governance) revert NotAuthorized();
         ValidatorEntry storage v = validators[validator];
         if (v.state != ValidatorState.Pending) revert NotPending();
@@ -256,6 +302,125 @@ contract Staking {
         if (!cregToken.transfer(validator, amount))
             revert TransferFailed();
         emit ValidatorRejected(validator);
+    }
+
+    /// @notice Permanently disables the emergency governance path. One-way toggle.
+    /// @dev   Once called, only `approveByConsensus` can admit validators.
+    function disableEmergencyGovernance() external {
+        if (msg.sender != governance) revert NotAuthorized();
+        if (!emergencyGovernanceEnabled) revert EmergencyPathDisabled();
+        emergencyGovernanceEnabled = false;
+        emit EmergencyGovernanceDisabled();
+    }
+
+    // ── Consensus-based admission (mechanical consensus) ─────────────────────
+    //
+    // A pending applicant is admitted when ≥ 2/3 of the current active validator
+    // set has signed an EIP-712 admission attestation. No single key can approve
+    // or block admission on its own. The predicate that every node evaluates
+    // before signing (stake met, identity registered, cooldown elapsed, etc.) is
+    // enforced off-chain and versioned via RULE_SET_VERSION.
+    //
+    // Invariants verified on-chain:
+    //   • Applicant is currently Pending and not expired.
+    //   • Every signer is currently Active.
+    //   • No duplicate signers (enforced by requiring strictly ascending addresses).
+    //   • Every signature recovers to its declared signer over the EIP-712 digest.
+    //   • signerCount * 3 >= activeValidatorCount * 2  (≥ 2/3 quorum).
+    //   • Nonce hasn't been used for this applicant.
+    //
+    // Signers must be sorted strictly ascending. Anyone may submit the bundle
+    // (the caller identity is irrelevant to the outcome).
+
+    function consensusMessageHash(
+        address applicant,
+        uint256 stake,
+        uint256 nonce
+    ) public view returns (bytes32) {
+        bytes32 structHash = keccak256(abi.encode(
+            keccak256("ValidatorAdmission(address applicant,uint256 stake,uint256 nonce,uint256 ruleSetVersion)"),
+            applicant,
+            stake,
+            nonce,
+            RULE_SET_VERSION
+        ));
+        return keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash));
+    }
+
+    function approveByConsensus(
+        address applicant,
+        uint256 nonce,
+        address[] calldata signers,
+        bytes[]   calldata sigs
+    ) external {
+        ValidatorEntry storage v = validators[applicant];
+        if (v.state != ValidatorState.Pending) revert NotPending();
+        if (v.stake < minValidatorStake) revert BelowMinStake(v.stake, minValidatorStake);
+        if (block.timestamp >= v.appliedAt + APPLICATION_TIMEOUT) revert ApplicationExpired();
+        if (consensusNonceUsed[applicant][nonce]) revert NonceAlreadyUsed();
+        if (signers.length == 0 || signers.length != sigs.length) revert InvalidSignerLength();
+
+        bytes32 digest = consensusMessageHash(applicant, v.stake, nonce);
+
+        // Enforce strictly ascending order → no duplicates, O(n) verification.
+        address prev = address(0);
+        for (uint256 i = 0; i < signers.length; i++) {
+            address signer = signers[i];
+            if (signer <= prev) revert DuplicateOrUnsortedSigner();
+            if (validators[signer].state != ValidatorState.Active) revert NotAnActiveSigner(signer);
+            if (_recoverSigner(digest, sigs[i]) != signer) revert InvalidSignature(signer);
+            prev = signer;
+        }
+
+        uint256 activeCount = _countActive();
+        // Require strictly ≥ 2/3 (not just > 1/2). Using 3*signers >= 2*active avoids fractions.
+        if (signers.length * 3 < activeCount * 2) {
+            uint256 required = (activeCount * 2 + 2) / 3; // ceil(2*active/3)
+            revert InsufficientQuorum(signers.length, required);
+        }
+
+        consensusNonceUsed[applicant][nonce] = true;
+        v.state = ValidatorState.Active;
+        emit ValidatorApprovedByConsensus(applicant, nonce, signers.length);
+    }
+
+    /// @notice Refund a Pending application whose timeout has elapsed without quorum.
+    /// @dev   Permissionless — anyone may call once the timeout window has passed.
+    function expireApplication(address applicant) external nonReentrant {
+        ValidatorEntry storage v = validators[applicant];
+        if (v.state != ValidatorState.Pending) revert NotPending();
+        uint256 expiresAt = v.appliedAt + APPLICATION_TIMEOUT;
+        if (block.timestamp < expiresAt) revert ApplicationNotYetExpired(expiresAt);
+
+        uint256 amount = v.stake;
+        v.stake = 0;
+        v.state = ValidatorState.Expired;
+        if (!cregToken.transfer(applicant, amount)) revert TransferFailed();
+        emit ValidatorApplicationExpired(applicant, amount);
+    }
+
+    function _recoverSigner(bytes32 digest, bytes memory sig) internal pure returns (address) {
+        if (sig.length != 65) return address(0);
+        bytes32 r;
+        bytes32 s;
+        uint8   v;
+        assembly {
+            r := mload(add(sig, 32))
+            s := mload(add(sig, 64))
+            v := byte(0, mload(add(sig, 96)))
+        }
+        if (v < 27) v += 27;
+        // Reject high-s signatures (EIP-2 malleability).
+        if (uint256(s) > 0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0) {
+            return address(0);
+        }
+        return ecrecover(digest, v, r, s);
+    }
+
+    function _countActive() internal view returns (uint256 count) {
+        for (uint256 i = 0; i < _validatorList.length; i++) {
+            if (validators[_validatorList[i]].state == ValidatorState.Active) count++;
+        }
     }
 
     /// @notice Initiate unbonding. Stake is locked for UNBONDING_PERIOD before withdrawal.

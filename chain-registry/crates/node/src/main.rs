@@ -7,6 +7,7 @@ mod block_producer;
 mod bridge;
 mod chain_store;
 mod config;
+mod consensus_admission;
 mod db_sync_proxy;
 mod events;
 mod explorer;
@@ -58,7 +59,8 @@ sol!(
                 uint8 state,
                 uint256 unbondingAt,
                 uint256 slashCount,
-                uint256 ejectedAt
+                uint256 ejectedAt,
+                uint256 appliedAt
             );
     }
 );
@@ -71,6 +73,7 @@ fn staking_state_label(state: u8) -> &'static str {
         3 => "unbonding",
         4 => "withdrawn",
         5 => "rejected",
+        6 => "expired",
         _ => "unknown",
     }
 }
@@ -380,6 +383,12 @@ async fn main() -> Result<()> {
 
     tokio::spawn(sync_validator_registrations(Arc::clone(&state)));
 
+    let admission_store = consensus_admission::AttestationStore::new();
+    tokio::spawn(consensus_admission::run(
+        Arc::clone(&state),
+        Arc::clone(&admission_store),
+    ));
+
     // ── Start gRPC Server (Industrial Speed) ──────────────────────────────────
     let grpc_state = Arc::clone(&state);
     tokio::spawn(async move {
@@ -409,7 +418,12 @@ async fn main() -> Result<()> {
     let limiter = rate_limit::RateLimiter::new(Default::default());
     rate_limit::spawn_purge_task(limiter.clone());
 
-    let app = api::router(Arc::clone(&state), event_bus, limiter);
+    let app = api::router(
+        Arc::clone(&state),
+        event_bus,
+        limiter,
+        Arc::clone(&admission_store),
+    );
 
     // ── Optional TLS termination ──────────────────────────────────────────────
     // Set CREG_TLS_CERT and CREG_TLS_KEY environment variables to enable HTTPS.
