@@ -12,9 +12,13 @@ const NAV = [
   { to: '/packages', label: 'Packages' },
   { to: '/consensus', label: 'Consensus' },
   { to: '/bridge', label: 'Bridge' },
-  { to: '/network', label: 'Network' },
   { to: '/events', label: 'Events' },
-  { to: '/wallet', label: 'Wallet' },
+  { to: '/network', label: 'Network' },
+  { to: '/metrics', label: 'Metrics' },
+  { to: '/governance', label: 'Governance' },
+  { to: '/richlist', label: 'Rich List' },
+  { to: '/reorgs', label: 'Reorgs' },
+  { to: '/proof', label: 'Proof' },
 ]
 
 const navLinkStyle = ({ isActive }) => ({

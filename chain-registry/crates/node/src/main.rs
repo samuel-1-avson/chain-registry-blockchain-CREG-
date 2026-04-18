@@ -325,6 +325,7 @@ async fn main() -> Result<()> {
         decryption_shares: std::collections::HashMap::new(),
         validator_registrations: HashMap::new(),
         view_change_certs: HashMap::new(),
+        reorgs: Vec::new(),
     }));
 
     // Start P2P node in background

@@ -48,21 +48,24 @@ const REFRESH_INTERVAL_SECS: u64 = 3;
 const MAX_EVENTS: usize = 200;
 const MAX_BLOCKS: usize = 100;
 
+use std::sync::atomic::{AtomicBool, Ordering};
+static IS_LIGHT_THEME: AtomicBool = AtomicBool::new(false);
+
 // Color palette for a cohesive, beautiful look
 struct Theme;
 impl Theme {
-    const PRIMARY: Color = Color::Cyan;
-    const SECONDARY: Color = Color::Blue;
-    const SUCCESS: Color = Color::Green;
-    const WARNING: Color = Color::Yellow;
-    const ERROR: Color = Color::Red;
-    const ACCENT: Color = Color::Magenta;
-    const TEXT: Color = Color::White;
-    const TEXT_DIM: Color = Color::Gray;
-    const TEXT_DARK: Color = Color::DarkGray;
-    const BG: Color = Color::Black;
-    const BORDER: Color = Color::DarkGray;
-    const HIGHLIGHT: Color = Color::LightCyan;
+    fn primary() -> Color { if IS_LIGHT_THEME.load(Ordering::Relaxed) { Color::Blue } else { Color::Cyan } }
+    fn secondary() -> Color { if IS_LIGHT_THEME.load(Ordering::Relaxed) { Color::DarkBlue } else { Color::Blue } }
+    fn success() -> Color { if IS_LIGHT_THEME.load(Ordering::Relaxed) { Color::DarkGreen } else { Color::Green } }
+    fn warning() -> Color { if IS_LIGHT_THEME.load(Ordering::Relaxed) { Color::Rgb(150, 100, 0) } else { Color::Yellow } }
+    fn error() -> Color { if IS_LIGHT_THEME.load(Ordering::Relaxed) { Color::DarkRed } else { Color::Red } }
+    fn accent() -> Color { if IS_LIGHT_THEME.load(Ordering::Relaxed) { Color::Magenta } else { Color::Magenta } }
+    fn text() -> Color { if IS_LIGHT_THEME.load(Ordering::Relaxed) { Color::Black } else { Color::White } }
+    fn text_dim() -> Color { if IS_LIGHT_THEME.load(Ordering::Relaxed) { Color::DarkGray } else { Color::Gray } }
+    fn text_dark() -> Color { if IS_LIGHT_THEME.load(Ordering::Relaxed) { Color::Gray } else { Color::DarkGray } }
+    fn bg() -> Color { if IS_LIGHT_THEME.load(Ordering::Relaxed) { Color::Rgb(240, 240, 240) } else { Color::Black } }
+    fn border() -> Color { if IS_LIGHT_THEME.load(Ordering::Relaxed) { Color::Gray } else { Color::DarkGray } }
+    fn highlight() -> Color { if IS_LIGHT_THEME.load(Ordering::Relaxed) { Color::Rgb(200, 220, 255) } else { Color::LightCyan } }
 }
 
 // ============================================================================
@@ -283,6 +286,9 @@ struct App {
 
     // Faucet pane state
     faucet: FaucetView,
+    bridge_anchors: Vec<serde_json::Value>,
+    metrics_history: Vec<serde_json::Value>,
+    search_results: Vec<serde_json::Value>,
 }
 
 #[derive(Debug)]
@@ -1158,6 +1164,11 @@ async fn handle_key(app: &mut App, key: KeyCode) -> bool {
         KeyCode::Char('0') | KeyCode::Char('F') => {
             app.current_view = View::Faucet;
         }
+        KeyCode::Char('t') | KeyCode::Char('T') => {
+            let current = IS_LIGHT_THEME.load(Ordering::Relaxed);
+            IS_LIGHT_THEME.store(!current, Ordering::Relaxed);
+            return false;
+        }
         _ => {}
     }
 
@@ -1318,6 +1329,55 @@ async fn handle_key(app: &mut App, key: KeyCode) -> bool {
 
 fn handle_mouse(app: &mut App, mouse: crossterm::event::MouseEvent) {
     match mouse.kind {
+        match mouse.kind {
+        MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
+            let row = mouse.row;
+            if row == 2 || row == 3 || row == 4 { // Approximate header area
+                match mouse.column {
+                    0..=12 => app.current_view = View::Overview,
+                    13..=23 => app.current_view = View::Blocks,
+                    24..=38 => app.current_view = View::Validators,
+                    39..=51 => app.current_view = View::Packages,
+                    52..=63 => app.current_view = View::Network,
+                    64..=75 => app.current_view = View::Mempool,
+                    76..=86 => app.current_view = View::Events,
+                    87..=99 => app.current_view = View::Operator,
+                    100..=113 => app.current_view = View::Consensus,
+                    114..=124 => app.current_view = View::Faucet,
+                    125..=136 => { app.current_view = View::Overview; app.is_searching = true; },
+                    137..=145 => app.current_view = View::Bridge,
+                    146..=160 => app.current_view = View::Metrics,
+                    _ => {}
+                }
+            } else if row >= 6 {
+                // Approximate row selection based on current view
+                let index = (row - 6) as usize;
+                match app.current_view {
+                    View::Blocks | View::Overview => {
+                        if index < app.blocks.len() {
+                            app.selected_block = index;
+                            app.previous_view = Some(app.current_view);
+                            app.current_view = View::BlockDetail;
+                        }
+                    }
+                    View::Validators => {
+                        if index < app.validators.len() {
+                            app.selected_validator = index;
+                            app.previous_view = Some(app.current_view);
+                            app.current_view = View::ValidatorDetail;
+                        }
+                    }
+                    View::Packages => {
+                        if index < app.packages.len() {
+                            app.selected_package = index;
+                            app.previous_view = Some(app.current_view);
+                            app.current_view = View::PackageDetail;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        },
         MouseEventKind::ScrollDown => match app.current_view {
             View::Blocks | View::Overview => {
                 if app.selected_block < app.blocks.len().saturating_sub(1) {
@@ -1389,7 +1449,7 @@ fn draw_consensus(f: &mut Frame, app: &App, area: Rect) {
     let block = Block::default()
         .title(" ⚙  PBFT Consensus Round ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Theme::PRIMARY));
+        .border_style(Style::default().fg(Theme::primary()));
 
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -1397,7 +1457,7 @@ fn draw_consensus(f: &mut Frame, app: &App, area: Rect) {
     match &app.consensus_state {
         None => {
             let msg = Paragraph::new("Fetching consensus state…")
-                .style(Style::default().fg(Theme::TEXT_DIM))
+                .style(Style::default().fg(Theme::text_dim()))
                 .alignment(Alignment::Center);
             f.render_widget(msg, inner);
         }
@@ -1431,21 +1491,21 @@ fn draw_consensus(f: &mut Frame, app: &App, area: Rect) {
 
             let rows = vec![
                 Row::new(vec!["Round",         round_str.as_str()])
-                    .style(Style::default().fg(Theme::TEXT)),
+                    .style(Style::default().fg(Theme::text())),
                 Row::new(vec!["Phase",          cs.phase.as_str()])
                     .style(Style::default().fg(phase_color).add_modifier(Modifier::BOLD)),
                 Row::new(vec!["Proposer",       cs.proposer.as_str()])
-                    .style(Style::default().fg(Theme::ACCENT)),
+                    .style(Style::default().fg(Theme::accent())),
                 Row::new(vec!["Validators",     val_str.as_str()])
-                    .style(Style::default().fg(Theme::TEXT)),
+                    .style(Style::default().fg(Theme::text())),
                 Row::new(vec!["Quorum (2f+1)",  quorum_str.as_str()])
-                    .style(Style::default().fg(Theme::TEXT)),
+                    .style(Style::default().fg(Theme::text())),
                 Row::new(vec!["PREPARE votes",  prepare_str.as_str()])
                     .style(Style::default().fg(if prepare_pct >= 100 { Color::Green } else { Color::Yellow })),
                 Row::new(vec!["COMMIT votes",   commit_str.as_str()])
                     .style(Style::default().fg(if commit_pct >= 100 { Color::Green } else { Color::Yellow })),
                 Row::new(vec!["Snapshot age",   age_str.as_str()])
-                    .style(Style::default().fg(Theme::TEXT_DIM)),
+                    .style(Style::default().fg(Theme::text_dim())),
             ];
 
             let chunks = Layout::default()
@@ -1465,7 +1525,7 @@ fn draw_consensus(f: &mut Frame, app: &App, area: Rect) {
             .block(Block::default().borders(Borders::NONE))
             .header(
                 Row::new(vec!["Field", "Value"])
-                    .style(Style::default().fg(Theme::TEXT_DIM).add_modifier(Modifier::BOLD)),
+                    .style(Style::default().fg(Theme::text_dim()).add_modifier(Modifier::BOLD)),
             );
             f.render_widget(table, chunks[0]);
 
@@ -1537,11 +1597,11 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Theme::PRIMARY)),
+                .border_style(Style::default().fg(Theme::primary())),
         )
         .style(
             Style::default()
-                .fg(Theme::TEXT)
+                .fg(Theme::text())
                 .add_modifier(Modifier::BOLD),
         );
     f.render_widget(header, chunks[0]);
@@ -1551,9 +1611,9 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
     let total_stake = app.displayed_total_stake();
 
     let status_color = if validator_count > 0 {
-        Theme::SUCCESS
+        Theme::success()
     } else {
-        Theme::WARNING
+        Theme::warning()
     };
 
     let status_text = format!(
@@ -1573,7 +1633,7 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(status_color)),
         )
-        .style(Style::default().fg(Theme::TEXT))
+        .style(Style::default().fg(Theme::text()))
         .alignment(Alignment::Right);
     f.render_widget(status, chunks[1]);
 }
@@ -1593,6 +1653,10 @@ fn draw_main_content(f: &mut Frame, app: &App, area: Rect) {
         View::Operator => draw_operator(f, app, area),
         View::Consensus => draw_consensus(f, app, area),
         View::Faucet => draw_faucet(f, app, area),
+                View::Search => draw_search(f, app, area),
+        View::AddressDetail => draw_address(f, app, area),
+        View::Bridge => draw_bridge(f, app, area),
+        View::Metrics => draw_metrics(f, app, area),
         View::Help => draw_help(f, app, area),
     }
 }
@@ -1614,7 +1678,7 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
 
     let footer = Paragraph::new(text)
         .block(Block::default().borders(Borders::ALL))
-        .style(Style::default().fg(Theme::TEXT_DIM))
+        .style(Style::default().fg(Theme::text_dim()))
         .alignment(Alignment::Center);
     f.render_widget(footer, area);
 }
@@ -1651,28 +1715,28 @@ fn draw_overview(f: &mut Frame, app: &App, area: Rect) {
         f,
         "BLOCK HEIGHT",
         &format!("#{}", app.stats.tip_height),
-        Theme::PRIMARY,
+        Theme::primary(),
         stats_chunks[0],
     );
     draw_stat_card(
         f,
         "PACKAGES",
         &format_number(app.stats.package_count),
-        Theme::SUCCESS,
+        Theme::success(),
         stats_chunks[1],
     );
     draw_stat_card(
         f,
         "VALIDATORS",
         &validator_count.to_string(),
-        Theme::ACCENT,
+        Theme::accent(),
         stats_chunks[2],
     );
     draw_stat_card(
         f,
         "TOTAL STAKE",
         &format!("{} CREG", format_number(total_stake)),
-        Theme::WARNING,
+        Theme::warning(),
         stats_chunks[3],
     );
 
@@ -1707,7 +1771,7 @@ fn draw_stat_card(f: &mut Frame, label: &str, value: &str, color: Color, area: R
     f.render_widget(block, area);
 
     let text = vec![
-        Line::from(Span::styled(label, Style::default().fg(Theme::TEXT_DIM))),
+        Line::from(Span::styled(label, Style::default().fg(Theme::text_dim()))),
         Line::from(""),
         Line::from(Span::styled(
             value,
@@ -1731,11 +1795,11 @@ fn draw_tps_sparkline(f: &mut Frame, app: &App, area: Rect) {
             Block::default()
                 .borders(Borders::ALL)
                 .title(" TRANSACTIONS PER BLOCK ")
-                .border_style(Style::default().fg(Theme::SECONDARY)),
+                .border_style(Style::default().fg(Theme::secondary())),
         )
         .data(&data)
         .max(max)
-        .style(Style::default().fg(Theme::SUCCESS));
+        .style(Style::default().fg(Theme::success()));
 
     f.render_widget(sparkline, area);
 }
@@ -1756,11 +1820,11 @@ fn draw_event_feed(f: &mut Frame, app: &App, area: Rect) {
             };
 
             let color = match event_type.as_str() {
-                "Block" => Theme::SUCCESS,
-                "Package" => Theme::PRIMARY,
-                "Validator" => Theme::ACCENT,
-                "Slash" => Theme::ERROR,
-                _ => Theme::TEXT_DIM,
+                "Block" => Theme::success(),
+                "Package" => Theme::primary(),
+                "Validator" => Theme::accent(),
+                "Slash" => Theme::error(),
+                _ => Theme::text_dim(),
             };
 
             let content = format!("[{:>3}] {:<10} {}", time_str, event_type, msg);
@@ -1772,7 +1836,7 @@ fn draw_event_feed(f: &mut Frame, app: &App, area: Rect) {
         Block::default()
             .borders(Borders::ALL)
             .title(" LIVE EVENTS ")
-            .border_style(Style::default().fg(Theme::SUCCESS)),
+            .border_style(Style::default().fg(Theme::success())),
     );
 
     f.render_widget(list, area);
@@ -1848,11 +1912,11 @@ fn draw_blocks_list(f: &mut Frame, app: &App, area: Rect, compact: bool) {
 
             let style = if i == app.selected_block {
                 Style::default()
-                    .fg(Theme::HIGHLIGHT)
+                    .fg(Theme::highlight())
                     .add_modifier(Modifier::BOLD)
                     .add_modifier(Modifier::REVERSED)
             } else {
-                Style::default().fg(Theme::TEXT)
+                Style::default().fg(Theme::text())
             };
 
             ListItem::new(content).style(style)
@@ -1863,7 +1927,7 @@ fn draw_blocks_list(f: &mut Frame, app: &App, area: Rect, compact: bool) {
         Block::default()
             .borders(Borders::ALL)
             .title(title)
-            .border_style(Style::default().fg(Theme::PRIMARY)),
+            .border_style(Style::default().fg(Theme::primary())),
     );
 
     f.render_widget(list, area);
@@ -1885,35 +1949,35 @@ fn draw_block_preview(f: &mut Frame, app: &App, area: Rect) {
 
     let text = vec![
         Line::from(vec![
-            Span::styled("Height: ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::styled("Height: ", Style::default().fg(Theme::text_dim())),
             Span::styled(
                 format!("#{}", block.height),
                 Style::default()
-                    .fg(Theme::PRIMARY)
+                    .fg(Theme::primary())
                     .add_modifier(Modifier::BOLD),
             ),
         ]),
         Line::from(vec![
-            Span::styled("Block Hash:  ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::styled("Block Hash:  ", Style::default().fg(Theme::text_dim())),
             Span::raw(&block.hash),
         ]),
         Line::from(vec![
-            Span::styled("Merkle Root: ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::styled("Merkle Root: ", Style::default().fg(Theme::text_dim())),
             Span::raw(&block.merkle_root),
         ]),
         Line::from(vec![
-            Span::styled("Proposer: ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::styled("Proposer: ", Style::default().fg(Theme::text_dim())),
             Span::raw(&block.proposer),
         ]),
         Line::from(vec![
-            Span::styled("Transactions: ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::styled("Transactions: ", Style::default().fg(Theme::text_dim())),
             Span::styled(
                 block.tx_count.to_string(),
-                Style::default().fg(Theme::SUCCESS),
+                Style::default().fg(Theme::success()),
             ),
         ]),
         Line::from(vec![
-            Span::styled("Timestamp: ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::styled("Timestamp: ", Style::default().fg(Theme::text_dim())),
             Span::raw(format_timestamp(&block.timestamp)),
         ]),
     ];
@@ -1922,7 +1986,7 @@ fn draw_block_preview(f: &mut Frame, app: &App, area: Rect) {
         Block::default()
             .borders(Borders::ALL)
             .title(" BLOCK PREVIEW ")
-            .border_style(Style::default().fg(Theme::PRIMARY)),
+            .border_style(Style::default().fg(Theme::primary())),
     );
 
     f.render_widget(paragraph, area);
@@ -1942,36 +2006,36 @@ fn draw_block_detail(f: &mut Frame, app: &App, area: Rect) {
     // Block header info
     let header_text = vec![
         Line::from(vec![
-            Span::styled("Block #", Style::default().fg(Theme::TEXT_DIM)),
+            Span::styled("Block #", Style::default().fg(Theme::text_dim())),
             Span::styled(
                 block.height.to_string(),
                 Style::default()
-                    .fg(Theme::PRIMARY)
+                    .fg(Theme::primary())
                     .add_modifier(Modifier::BOLD),
             ),
         ]),
         Line::from(""),
         Line::from(vec![
-            Span::styled("Block Hash:  ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::styled("Block Hash:  ", Style::default().fg(Theme::text_dim())),
             Span::raw(&block.hash),
         ]),
         Line::from(vec![
-            Span::styled("Merkle Root: ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::styled("Merkle Root: ", Style::default().fg(Theme::text_dim())),
             Span::raw(&block.merkle_root),
         ]),
         Line::from(vec![
-            Span::styled("Proposer:    ", Style::default().fg(Theme::TEXT_DIM)),
-            Span::styled(&block.proposer, Style::default().fg(Theme::ACCENT)),
+            Span::styled("Proposer:    ", Style::default().fg(Theme::text_dim())),
+            Span::styled(&block.proposer, Style::default().fg(Theme::accent())),
         ]),
         Line::from(vec![
-            Span::styled("Timestamp:   ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::styled("Timestamp:   ", Style::default().fg(Theme::text_dim())),
             Span::raw(format_timestamp(&block.timestamp)),
         ]),
         Line::from(vec![
-            Span::styled("Transactions:", Style::default().fg(Theme::TEXT_DIM)),
+            Span::styled("Transactions:", Style::default().fg(Theme::text_dim())),
             Span::styled(
                 block.tx_count.to_string(),
-                Style::default().fg(Theme::SUCCESS),
+                Style::default().fg(Theme::success()),
             ),
         ]),
     ];
@@ -1980,7 +2044,7 @@ fn draw_block_detail(f: &mut Frame, app: &App, area: Rect) {
         Block::default()
             .borders(Borders::ALL)
             .title(" BLOCK HEADER ")
-            .border_style(Style::default().fg(Theme::PRIMARY)),
+            .border_style(Style::default().fg(Theme::primary())),
     );
     f.render_widget(header, chunks[0]);
 
@@ -1990,11 +2054,11 @@ fn draw_block_detail(f: &mut Frame, app: &App, area: Rect) {
         .iter()
         .map(|tx| {
             Row::new(vec![
-                Cell::from(tx.tx_type.clone()).style(Style::default().fg(Theme::PRIMARY)),
+                Cell::from(tx.tx_type.clone()).style(Style::default().fg(Theme::primary())),
                 Cell::from(tx.package_name.clone().unwrap_or_default()),
                 Cell::from(tx.package_version.clone().unwrap_or_default()),
                 Cell::from(tx.publisher.clone().unwrap_or_default()),
-                Cell::from(tx.status.clone()).style(Style::default().fg(Theme::SUCCESS)),
+                Cell::from(tx.status.clone()).style(Style::default().fg(Theme::success())),
             ])
         })
         .collect();
@@ -2012,7 +2076,7 @@ fn draw_block_detail(f: &mut Frame, app: &App, area: Rect) {
     .header(
         Row::new(vec!["Type", "Package", "Version", "Publisher", "Status"]).style(
             Style::default()
-                .fg(Theme::TEXT_DIM)
+                .fg(Theme::text_dim())
                 .add_modifier(Modifier::BOLD),
         ),
     )
@@ -2020,7 +2084,7 @@ fn draw_block_detail(f: &mut Frame, app: &App, area: Rect) {
         Block::default()
             .borders(Borders::ALL)
             .title(format!(" TRANSACTIONS ({}) ", block.tx_count))
-            .border_style(Style::default().fg(Theme::SECONDARY)),
+            .border_style(Style::default().fg(Theme::secondary())),
     );
 
     f.render_widget(table, chunks[1]);
@@ -2052,9 +2116,9 @@ fn draw_validators(f: &mut Frame, app: &App, area: Rect) {
         })
         .map(|(i, v)| {
             let status_color = match v.status.as_str() {
-                "online" | "self" => Theme::SUCCESS,
-                "pending" => Theme::WARNING,
-                _ => Theme::ERROR,
+                "online" | "self" => Theme::success(),
+                "pending" => Theme::warning(),
+                _ => Theme::error(),
             };
 
             let style = if i == app.selected_validator {
@@ -2091,7 +2155,7 @@ fn draw_validators(f: &mut Frame, app: &App, area: Rect) {
     .header(
         Row::new(vec!["Validator", "Stake", "Reputation", "Status"]).style(
             Style::default()
-                .fg(Theme::TEXT_DIM)
+                .fg(Theme::text_dim())
                 .add_modifier(Modifier::BOLD),
         ),
     )
@@ -2099,7 +2163,7 @@ fn draw_validators(f: &mut Frame, app: &App, area: Rect) {
         Block::default()
             .borders(Borders::ALL)
             .title(" VALIDATORS (j/k to navigate, Enter for details) ")
-            .border_style(Style::default().fg(Theme::ACCENT)),
+            .border_style(Style::default().fg(Theme::accent())),
     );
 
     f.render_widget(table, chunks[0]);
@@ -2115,8 +2179,8 @@ fn draw_validators_preview(f: &mut Frame, app: &App, area: Rect) {
         .take(10)
         .map(|v| {
             let status_color = match v.status.as_str() {
-                "online" | "self" => Theme::SUCCESS,
-                _ => Theme::TEXT_DIM,
+                "online" | "self" => Theme::success(),
+                _ => Theme::text_dim(),
             };
 
             Row::new(vec![
@@ -2136,13 +2200,13 @@ fn draw_validators_preview(f: &mut Frame, app: &App, area: Rect) {
         ],
     )
     .header(
-        Row::new(vec!["Validator", "Stake(k)", "Rep"]).style(Style::default().fg(Theme::TEXT_DIM)),
+        Row::new(vec!["Validator", "Stake(k)", "Rep"]).style(Style::default().fg(Theme::text_dim())),
     )
     .block(
         Block::default()
             .borders(Borders::ALL)
             .title(" TOP VALIDATORS ")
-            .border_style(Style::default().fg(Theme::ACCENT)),
+            .border_style(Style::default().fg(Theme::accent())),
     );
 
     f.render_widget(table, area);
@@ -2162,24 +2226,24 @@ fn draw_validator_stats(f: &mut Frame, app: &App, area: Rect) {
 
     let text = vec![
         Line::from(vec![
-            Span::styled("Total: ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::styled("Total: ", Style::default().fg(Theme::text_dim())),
             Span::styled(
                 app.validators.len().to_string(),
-                Style::default().fg(Theme::TEXT),
+                Style::default().fg(Theme::text()),
             ),
         ]),
         Line::from(vec![
-            Span::styled("Active: ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::styled("Active: ", Style::default().fg(Theme::text_dim())),
             Span::styled(
                 active_count.to_string(),
-                Style::default().fg(Theme::SUCCESS),
+                Style::default().fg(Theme::success()),
             ),
         ]),
         Line::from(vec![
-            Span::styled("Avg Rep: ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::styled("Avg Rep: ", Style::default().fg(Theme::text_dim())),
             Span::styled(
                 format!("{}/100", avg_reputation),
-                Style::default().fg(Theme::WARNING),
+                Style::default().fg(Theme::warning()),
             ),
         ]),
     ];
@@ -2188,7 +2252,7 @@ fn draw_validator_stats(f: &mut Frame, app: &App, area: Rect) {
         Block::default()
             .borders(Borders::ALL)
             .title(" STATS ")
-            .border_style(Style::default().fg(Theme::ACCENT)),
+            .border_style(Style::default().fg(Theme::accent())),
     );
 
     f.render_widget(stats, area);
@@ -2201,65 +2265,65 @@ fn draw_validator_detail(f: &mut Frame, app: &App, area: Rect) {
     };
 
     let status_color = match validator.status.as_str() {
-        "online" | "self" => Theme::SUCCESS,
-        "pending" => Theme::WARNING,
-        _ => Theme::ERROR,
+        "online" | "self" => Theme::success(),
+        "pending" => Theme::warning(),
+        _ => Theme::error(),
     };
 
     let text = vec![
         Line::from(vec![Span::styled(
             "VALIDATOR DETAILS\n",
             Style::default()
-                .fg(Theme::ACCENT)
+                .fg(Theme::accent())
                 .add_modifier(Modifier::BOLD),
         )]),
         Line::from(""),
         Line::from(vec![
-            Span::styled("ID:          ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::styled("ID:          ", Style::default().fg(Theme::text_dim())),
             Span::styled(
                 &validator.id,
                 Style::default()
-                    .fg(Theme::TEXT)
+                    .fg(Theme::text())
                     .add_modifier(Modifier::BOLD),
             ),
         ]),
         Line::from(vec![
-            Span::styled("Alias:       ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::styled("Alias:       ", Style::default().fg(Theme::text_dim())),
             Span::raw(&validator.alias),
         ]),
         Line::from(vec![
-            Span::styled("Public Key:  ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::styled("Public Key:  ", Style::default().fg(Theme::text_dim())),
             Span::raw(format!(
                 "{}..",
                 &validator.pub_key[..validator.pub_key.len().min(40)]
             )),
         ]),
         Line::from(vec![
-            Span::styled("Stake:       ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::styled("Stake:       ", Style::default().fg(Theme::text_dim())),
             Span::styled(
                 format!("{} CREG", format_number(validator.stake)),
-                Style::default().fg(Theme::SUCCESS),
+                Style::default().fg(Theme::success()),
             ),
         ]),
         Line::from(vec![
-            Span::styled("Reputation:  ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::styled("Reputation:  ", Style::default().fg(Theme::text_dim())),
             Span::styled(
                 format!("{}/100", validator.reputation),
-                Style::default().fg(Theme::WARNING),
+                Style::default().fg(Theme::warning()),
             ),
         ]),
         Line::from(vec![
-            Span::styled("Status:      ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::styled("Status:      ", Style::default().fg(Theme::text_dim())),
             Span::styled(&validator.status, Style::default().fg(status_color)),
         ]),
         Line::from(vec![
-            Span::styled("Active:      ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::styled("Active:      ", Style::default().fg(Theme::text_dim())),
             Span::styled(
                 if validator.is_active { "Yes" } else { "No" },
                 Style::default().fg(if validator.is_active {
-                    Theme::SUCCESS
+                    Theme::success()
                 } else {
-                    Theme::ERROR
+                    Theme::error()
                 }),
             ),
         ]),
@@ -2269,7 +2333,7 @@ fn draw_validator_detail(f: &mut Frame, app: &App, area: Rect) {
         Block::default()
             .borders(Borders::ALL)
             .title(" VALIDATOR ")
-            .border_style(Style::default().fg(Theme::ACCENT)),
+            .border_style(Style::default().fg(Theme::accent())),
     );
 
     f.render_widget(paragraph, area);
@@ -2293,9 +2357,9 @@ fn draw_packages(f: &mut Frame, app: &App, area: Rect) {
                 Block::default()
                     .borders(Borders::ALL)
                     .title(format!(" PACKAGES ({} on-chain) ", app.stats.package_count))
-                    .border_style(Style::default().fg(Theme::PRIMARY)),
+                    .border_style(Style::default().fg(Theme::primary())),
             )
-            .style(Style::default().fg(Theme::TEXT_DIM));
+            .style(Style::default().fg(Theme::text_dim()));
         f.render_widget(text, area);
         return;
     }
@@ -2333,15 +2397,15 @@ fn draw_packages(f: &mut Frame, app: &App, area: Rect) {
             );
             let style = if i == app.selected_package {
                 Style::default()
-                    .fg(Theme::HIGHLIGHT)
+                    .fg(Theme::highlight())
                     .add_modifier(Modifier::BOLD)
                     .add_modifier(Modifier::REVERSED)
             } else {
                 let color = match pkg.status.as_str() {
-                    "verified" => Theme::SUCCESS,
-                    "pending" => Theme::WARNING,
-                    "rejected" => Theme::ERROR,
-                    _ => Theme::TEXT,
+                    "verified" => Theme::success(),
+                    "pending" => Theme::warning(),
+                    "rejected" => Theme::error(),
+                    _ => Theme::text(),
                 };
                 Style::default().fg(color)
             };
@@ -2365,7 +2429,7 @@ fn draw_packages(f: &mut Frame, app: &App, area: Rect) {
         Block::default()
             .borders(Borders::ALL)
             .title(pkg_title)
-            .border_style(Style::default().fg(Theme::PRIMARY)),
+            .border_style(Style::default().fg(Theme::primary())),
     );
     f.render_widget(list, chunks[0]);
 
@@ -2374,27 +2438,27 @@ fn draw_packages(f: &mut Frame, app: &App, area: Rect) {
         Some(pkg) => {
             let text = vec![
                 Line::from(vec![
-                    Span::styled("Name:       ", Style::default().fg(Theme::TEXT_DIM)),
-                    Span::styled(&pkg.name, Style::default().fg(Theme::PRIMARY).add_modifier(Modifier::BOLD)),
+                    Span::styled("Name:       ", Style::default().fg(Theme::text_dim())),
+                    Span::styled(&pkg.name, Style::default().fg(Theme::primary()).add_modifier(Modifier::BOLD)),
                 ]),
                 Line::from(vec![
-                    Span::styled("Version:    ", Style::default().fg(Theme::TEXT_DIM)),
+                    Span::styled("Version:    ", Style::default().fg(Theme::text_dim())),
                     Span::raw(&pkg.version),
                 ]),
                 Line::from(vec![
-                    Span::styled("Ecosystem:  ", Style::default().fg(Theme::TEXT_DIM)),
+                    Span::styled("Ecosystem:  ", Style::default().fg(Theme::text_dim())),
                     Span::raw(&pkg.ecosystem),
                 ]),
                 Line::from(vec![
-                    Span::styled("Status:     ", Style::default().fg(Theme::TEXT_DIM)),
+                    Span::styled("Status:     ", Style::default().fg(Theme::text_dim())),
                     Span::styled(&pkg.status, Style::default().fg(match pkg.status.as_str() {
-                        "verified" => Theme::SUCCESS,
-                        "pending" => Theme::WARNING,
-                        _ => Theme::ERROR,
+                        "verified" => Theme::success(),
+                        "pending" => Theme::warning(),
+                        _ => Theme::error(),
                     })),
                 ]),
                 Line::from(vec![
-                    Span::styled("Publisher:  ", Style::default().fg(Theme::TEXT_DIM)),
+                    Span::styled("Publisher:  ", Style::default().fg(Theme::text_dim())),
                     Span::raw(if pkg.publisher.len() > 16 {
                         format!("{}...", &pkg.publisher[..16])
                     } else {
@@ -2402,7 +2466,7 @@ fn draw_packages(f: &mut Frame, app: &App, area: Rect) {
                     }),
                 ]),
                 Line::from(vec![
-                    Span::styled("Hash:       ", Style::default().fg(Theme::TEXT_DIM)),
+                    Span::styled("Hash:       ", Style::default().fg(Theme::text_dim())),
                     Span::raw(if pkg.content_hash.len() > 20 {
                         format!("{}...", &pkg.content_hash[..20])
                     } else {
@@ -2414,18 +2478,18 @@ fn draw_packages(f: &mut Frame, app: &App, area: Rect) {
                 Block::default()
                     .borders(Borders::ALL)
                     .title(" PACKAGE PREVIEW ")
-                    .border_style(Style::default().fg(Theme::PRIMARY)),
+                    .border_style(Style::default().fg(Theme::primary())),
             );
             f.render_widget(detail, chunks[1]);
         }
         None => {
             let empty = Paragraph::new("Select a package to see details")
-                .style(Style::default().fg(Theme::TEXT_DIM))
+                .style(Style::default().fg(Theme::text_dim()))
                 .block(
                     Block::default()
                         .borders(Borders::ALL)
                         .title(" PACKAGE PREVIEW ")
-                        .border_style(Style::default().fg(Theme::PRIMARY)),
+                        .border_style(Style::default().fg(Theme::primary())),
                 );
             f.render_widget(empty, chunks[1]);
         }
@@ -2442,40 +2506,40 @@ fn draw_package_detail(f: &mut Frame, app: &App, area: Rect) {
         Line::from(vec![Span::styled(
             "PACKAGE DETAILS\n",
             Style::default()
-                .fg(Theme::PRIMARY)
+                .fg(Theme::primary())
                 .add_modifier(Modifier::BOLD),
         )]),
         Line::from(""),
         Line::from(vec![
-            Span::styled("Name:         ", Style::default().fg(Theme::TEXT_DIM)),
-            Span::styled(&pkg.name, Style::default().fg(Theme::TEXT).add_modifier(Modifier::BOLD)),
+            Span::styled("Name:         ", Style::default().fg(Theme::text_dim())),
+            Span::styled(&pkg.name, Style::default().fg(Theme::text()).add_modifier(Modifier::BOLD)),
         ]),
         Line::from(vec![
-            Span::styled("Version:      ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::styled("Version:      ", Style::default().fg(Theme::text_dim())),
             Span::raw(&pkg.version),
         ]),
         Line::from(vec![
-            Span::styled("Ecosystem:    ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::styled("Ecosystem:    ", Style::default().fg(Theme::text_dim())),
             Span::raw(&pkg.ecosystem),
         ]),
         Line::from(vec![
-            Span::styled("Status:       ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::styled("Status:       ", Style::default().fg(Theme::text_dim())),
             Span::styled(&pkg.status, Style::default().fg(match pkg.status.as_str() {
-                "verified" => Theme::SUCCESS,
-                "pending" => Theme::WARNING,
-                _ => Theme::ERROR,
+                "verified" => Theme::success(),
+                "pending" => Theme::warning(),
+                _ => Theme::error(),
             })),
         ]),
         Line::from(vec![
-            Span::styled("Publisher:    ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::styled("Publisher:    ", Style::default().fg(Theme::text_dim())),
             Span::raw(&pkg.publisher),
         ]),
         Line::from(vec![
-            Span::styled("Content Hash: ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::styled("Content Hash: ", Style::default().fg(Theme::text_dim())),
             Span::raw(&pkg.content_hash),
         ]),
         Line::from(vec![
-            Span::styled("Verified At:  ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::styled("Verified At:  ", Style::default().fg(Theme::text_dim())),
             Span::raw(pkg.verified_at.as_deref().unwrap_or("Not yet")),
         ]),
     ];
@@ -2484,7 +2548,7 @@ fn draw_package_detail(f: &mut Frame, app: &App, area: Rect) {
         Block::default()
             .borders(Borders::ALL)
             .title(" PACKAGE ")
-            .border_style(Style::default().fg(Theme::PRIMARY)),
+            .border_style(Style::default().fg(Theme::primary())),
     );
     f.render_widget(paragraph, area);
 }
@@ -2502,24 +2566,24 @@ fn draw_network(f: &mut Frame, app: &App, area: Rect) {
     // Network stats
     let stats_text = vec![
         Line::from(vec![
-            Span::styled("Connected Peers: ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::styled("Connected Peers: ", Style::default().fg(Theme::text_dim())),
             Span::styled(
                 app.stats.peer_count.to_string(),
-                Style::default().fg(Theme::SUCCESS),
+                Style::default().fg(Theme::success()),
             ),
         ]),
         Line::from(vec![
-            Span::styled("Bridge Status:   ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::styled("Bridge Status:   ", Style::default().fg(Theme::text_dim())),
             Span::styled(
                 &app.stats.bridge_status,
-                Style::default().fg(Theme::PRIMARY),
+                Style::default().fg(Theme::primary()),
             ),
         ]),
         Line::from(vec![
-            Span::styled("L1 Block:        ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::styled("L1 Block:        ", Style::default().fg(Theme::text_dim())),
             Span::styled(
                 format!("#{}", app.stats.l1_block),
-                Style::default().fg(Theme::WARNING),
+                Style::default().fg(Theme::warning()),
             ),
         ]),
     ];
@@ -2528,7 +2592,7 @@ fn draw_network(f: &mut Frame, app: &App, area: Rect) {
         Block::default()
             .borders(Borders::ALL)
             .title(" NETWORK STATUS ")
-            .border_style(Style::default().fg(Theme::SECONDARY)),
+            .border_style(Style::default().fg(Theme::secondary())),
     );
     f.render_widget(stats, chunks[0]);
 
@@ -2536,14 +2600,14 @@ fn draw_network(f: &mut Frame, app: &App, area: Rect) {
     let peers: Vec<ListItem> = app
         .peer_ids
         .iter()
-        .map(|p| ListItem::new(format!("● {}", p)).style(Style::default().fg(Theme::SUCCESS)))
+        .map(|p| ListItem::new(format!("● {}", p)).style(Style::default().fg(Theme::success())))
         .collect();
 
     let peer_list = List::new(peers).block(
         Block::default()
             .borders(Borders::ALL)
             .title(" CONNECTED PEERS ")
-            .border_style(Style::default().fg(Theme::SECONDARY)),
+            .border_style(Style::default().fg(Theme::secondary())),
     );
 
     f.render_widget(peer_list, chunks[1]);
@@ -2565,22 +2629,22 @@ fn draw_mempool(f: &mut Frame, app: &App, area: Rect) {
         app.mempool.len()
     );
     let header = Paragraph::new(header_text)
-        .style(Style::default().fg(Theme::TEXT))
+        .style(Style::default().fg(Theme::text()))
         .block(
             Block::default()
                 .borders(Borders::ALL)
                 .title(" MEMPOOL ")
-                .border_style(Style::default().fg(Theme::WARNING)),
+                .border_style(Style::default().fg(Theme::warning())),
         );
     f.render_widget(header, chunks[0]);
 
     if app.mempool.is_empty() {
         let empty = Paragraph::new("  No pending transactions — mempool is empty")
-            .style(Style::default().fg(Theme::TEXT_DIM))
+            .style(Style::default().fg(Theme::text_dim()))
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Theme::BORDER)),
+                    .border_style(Style::default().fg(Theme::border())),
             );
         f.render_widget(empty, chunks[1]);
         return;
@@ -2589,7 +2653,7 @@ fn draw_mempool(f: &mut Frame, app: &App, area: Rect) {
     // Table of mempool entries
     let header_cells = ["#", "Canonical ID", "Type", "Age"]
         .iter()
-        .map(|h| Cell::from(*h).style(Style::default().fg(Theme::PRIMARY).add_modifier(Modifier::BOLD)));
+        .map(|h| Cell::from(*h).style(Style::default().fg(Theme::primary()).add_modifier(Modifier::BOLD)));
     let table_header = Row::new(header_cells).height(1);
 
     let rows: Vec<Row> = app
@@ -2607,9 +2671,9 @@ fn draw_mempool(f: &mut Frame, app: &App, area: Rect) {
             };
 
             let style = if i % 2 == 0 {
-                Style::default().fg(Theme::TEXT)
+                Style::default().fg(Theme::text())
             } else {
-                Style::default().fg(Theme::TEXT_DIM)
+                Style::default().fg(Theme::text_dim())
             };
 
             Row::new(vec![
@@ -2636,7 +2700,7 @@ fn draw_mempool(f: &mut Frame, app: &App, area: Rect) {
         Block::default()
             .borders(Borders::ALL)
             .title(" Pending Transactions ")
-            .border_style(Style::default().fg(Theme::BORDER)),
+            .border_style(Style::default().fg(Theme::border())),
     );
 
     f.render_widget(table, chunks[1]);
@@ -2662,11 +2726,11 @@ fn draw_events(f: &mut Frame, app: &App, area: Rect) {
             };
 
             let color = match event_type.as_str() {
-                "Block" => Theme::SUCCESS,
-                "Package" => Theme::PRIMARY,
-                "Validator" => Theme::ACCENT,
-                "Slash" => Theme::ERROR,
-                _ => Theme::TEXT_DIM,
+                "Block" => Theme::success(),
+                "Package" => Theme::primary(),
+                "Validator" => Theme::accent(),
+                "Slash" => Theme::error(),
+                _ => Theme::text_dim(),
             };
 
             let style = if i == app.selected_event {
@@ -2684,7 +2748,7 @@ fn draw_events(f: &mut Frame, app: &App, area: Rect) {
         Block::default()
             .borders(Borders::ALL)
             .title(format!(" EVENT LOG ({}) ", app.events.len()))
-            .border_style(Style::default().fg(Theme::SUCCESS)),
+            .border_style(Style::default().fg(Theme::success())),
     );
 
     f.render_widget(list, area);
@@ -2717,7 +2781,7 @@ fn draw_operator(f: &mut Frame, app: &App, area: Rect) {
         Line::from(format!("Bridge status: {}", app.stats.bridge_status)),
     ])
     .block(Block::default().borders(Borders::ALL).title(" Operator Summary "))
-    .style(Style::default().fg(Theme::TEXT))
+    .style(Style::default().fg(Theme::text()))
     .wrap(Wrap { trim: true });
     f.render_widget(summary, chunks[0]);
 
@@ -2729,7 +2793,7 @@ fn draw_operator(f: &mut Frame, app: &App, area: Rect) {
         Line::from("Stake publisher:    creg testnet stake-publisher --key 0x<private-key> 100"),
     ])
     .block(Block::default().borders(Borders::ALL).title(" Operator Commands "))
-    .style(Style::default().fg(Theme::TEXT))
+    .style(Style::default().fg(Theme::text()))
     .wrap(Wrap { trim: true });
     f.render_widget(commands, chunks[1]);
 
@@ -2747,7 +2811,7 @@ fn draw_operator(f: &mut Frame, app: &App, area: Rect) {
         Line::from("  5 Network    6 Mempool  7 Events       8 Operator"),
     ])
     .block(Block::default().borders(Borders::ALL).title(" Operator Workflow "))
-    .style(Style::default().fg(Theme::TEXT))
+    .style(Style::default().fg(Theme::text()))
     .wrap(Wrap { trim: true });
     f.render_widget(workflow, chunks[2]);
 }
@@ -2800,7 +2864,7 @@ fn draw_help(f: &mut Frame, _app: &App, area: Rect) {
 
     let help = Paragraph::new(text)
         .block(Block::default())
-        .style(Style::default().fg(Theme::PRIMARY));
+        .style(Style::default().fg(Theme::primary()));
 
     f.render_widget(help, area);
 }
@@ -2815,11 +2879,11 @@ fn draw_search_popup(f: &mut Frame, app: &App) {
     let block = Block::default()
         .borders(Borders::ALL)
         .title(" SEARCH ")
-        .border_style(Style::default().fg(Theme::ACCENT));
+        .border_style(Style::default().fg(Theme::accent()));
 
     let text = Paragraph::new(format!("Query: {}", app.search_query))
         .block(block)
-        .style(Style::default().fg(Theme::TEXT));
+        .style(Style::default().fg(Theme::text()));
 
     f.render_widget(Clear, area);
     f.render_widget(text, area);
@@ -3009,22 +3073,22 @@ fn draw_faucet(f: &mut Frame, app: &App, area: Rect) {
     // Title
     let title = Paragraph::new(Line::from(vec![
         Span::styled("⛲ Testnet Faucet", Style::default()
-            .fg(Theme::ACCENT)
+            .fg(Theme::accent())
             .add_modifier(Modifier::BOLD)),
         Span::raw("   "),
         Span::styled(
             format!("[{}]", app.faucet.health),
             Style::default().fg(if app.faucet.health == "online" {
-                Theme::SUCCESS
+                Theme::success()
             } else {
-                Theme::WARNING
+                Theme::warning()
             }),
         ),
     ]))
     .block(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Theme::BORDER)),
+            .border_style(Style::default().fg(Theme::border())),
     )
     .alignment(Alignment::Center);
     f.render_widget(title, chunks[0]);
@@ -3032,45 +3096,45 @@ fn draw_faucet(f: &mut Frame, app: &App, area: Rect) {
     // Network
     let mut net_lines: Vec<Line> = Vec::new();
     net_lines.push(Line::from(vec![
-        Span::styled("Endpoint:  ", Style::default().fg(Theme::TEXT_DIM)),
-        Span::styled(app.faucet.base.clone(), Style::default().fg(Theme::HIGHLIGHT)),
+        Span::styled("Endpoint:  ", Style::default().fg(Theme::text_dim())),
+        Span::styled(app.faucet.base.clone(), Style::default().fg(Theme::highlight())),
     ]));
     if let Some(net) = &app.faucet.network {
         net_lines.push(Line::from(vec![
-            Span::styled("Chain:     ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::styled("Chain:     ", Style::default().fg(Theme::text_dim())),
             Span::styled(
                 format!("{} (id {})", net.chain_name, net.chain_id),
-                Style::default().fg(Theme::TEXT),
+                Style::default().fg(Theme::text()),
             ),
         ]));
         net_lines.push(Line::from(vec![
-            Span::styled("RPC:       ", Style::default().fg(Theme::TEXT_DIM)),
-            Span::styled(net.rpc_url.clone(), Style::default().fg(Theme::TEXT)),
+            Span::styled("RPC:       ", Style::default().fg(Theme::text_dim())),
+            Span::styled(net.rpc_url.clone(), Style::default().fg(Theme::text())),
         ]));
     }
     if let Some(reserve) = &app.faucet.faucet_token_reserve {
         net_lines.push(Line::from(vec![
-            Span::styled("Reserve:   ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::styled("Reserve:   ", Style::default().fg(Theme::text_dim())),
             Span::styled(
                 format_wei(reserve),
-                Style::default().fg(Theme::PRIMARY),
+                Style::default().fg(Theme::primary()),
             ),
-            Span::styled(" tCREG", Style::default().fg(Theme::TEXT_DIM)),
+            Span::styled(" tCREG", Style::default().fg(Theme::text_dim())),
         ]));
     }
     let net_widget = Paragraph::new(net_lines).block(
         Block::default()
             .borders(Borders::ALL)
             .title(" Network ")
-            .border_style(Style::default().fg(Theme::BORDER)),
+            .border_style(Style::default().fg(Theme::border())),
     );
     f.render_widget(net_widget, chunks[1]);
 
     // Address input
     let input_style = if app.faucet.editing {
-        Style::default().fg(Theme::HIGHLIGHT).add_modifier(Modifier::BOLD)
+        Style::default().fg(Theme::highlight()).add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(Theme::TEXT)
+        Style::default().fg(Theme::text())
     };
     let display = if app.faucet.address_input.is_empty() {
         if app.faucet.editing {
@@ -3089,9 +3153,9 @@ fn draw_faucet(f: &mut Frame, app: &App, area: Rect) {
         " Recipient address "
     };
     let input_border = if app.faucet.editing {
-        Theme::HIGHLIGHT
+        Theme::highlight()
     } else {
-        Theme::BORDER
+        Theme::border()
     };
     let input_widget = Paragraph::new(Line::from(Span::styled(display, input_style)))
         .block(
@@ -3120,18 +3184,18 @@ fn draw_faucet(f: &mut Frame, app: &App, area: Rect) {
     match (&token_display, &native_display) {
         (Some(t), Some(n)) => {
             bal_lines.push(Line::from(vec![
-                Span::styled("tCREG:  ", Style::default().fg(Theme::TEXT_DIM)),
-                Span::styled(t.clone(), Style::default().fg(Theme::SUCCESS)),
+                Span::styled("tCREG:  ", Style::default().fg(Theme::text_dim())),
+                Span::styled(t.clone(), Style::default().fg(Theme::success())),
             ]));
             bal_lines.push(Line::from(vec![
-                Span::styled("ETH:    ", Style::default().fg(Theme::TEXT_DIM)),
-                Span::styled(n.clone(), Style::default().fg(Theme::SECONDARY)),
+                Span::styled("ETH:    ", Style::default().fg(Theme::text_dim())),
+                Span::styled(n.clone(), Style::default().fg(Theme::secondary())),
             ]));
         }
         _ => {
             bal_lines.push(Line::from(Span::styled(
                 "Press 'b' to fetch balance for the entered address.",
-                Style::default().fg(Theme::TEXT_DIM),
+                Style::default().fg(Theme::text_dim()),
             )));
         }
     }
@@ -3139,7 +3203,7 @@ fn draw_faucet(f: &mut Frame, app: &App, area: Rect) {
         Block::default()
             .borders(Borders::ALL)
             .title(" Balance ")
-            .border_style(Style::default().fg(Theme::BORDER)),
+            .border_style(Style::default().fg(Theme::border())),
     );
     f.render_widget(bal_widget, chunks[3]);
 
@@ -3147,11 +3211,11 @@ fn draw_faucet(f: &mut Frame, app: &App, area: Rect) {
     let (status_text, status_color) = match &app.faucet.status {
         FaucetStatus::Idle => (
             "Idle. Enter a recipient address and press [d] to drip.".to_string(),
-            Theme::TEXT_DIM,
+            Theme::text_dim(),
         ),
         FaucetStatus::Working { started_at, message } => (
             format!("⏳ {} ({}s elapsed)", message, started_at.elapsed().as_secs()),
-            Theme::WARNING,
+            Theme::warning(),
         ),
         FaucetStatus::Success { tx_hash, amount, at } => (
             format!(
@@ -3160,11 +3224,11 @@ fn draw_faucet(f: &mut Frame, app: &App, area: Rect) {
                 amount,
                 tx_hash
             ),
-            Theme::SUCCESS,
+            Theme::success(),
         ),
         FaucetStatus::Failed { error, at } => (
             format!("✗ Failed ({}s ago): {}", at.elapsed().as_secs(), error),
-            Theme::ERROR,
+            Theme::error(),
         ),
     };
     let status_widget = Paragraph::new(status_text)
@@ -3200,4 +3264,74 @@ fn format_wei(raw: &str) -> String {
         let frac_short = &frac[..frac.len().min(2)];
         format!("{}.{}", whole, frac_short)
     }
+}
+
+// ============================================================================
+// SPRINT 4 TUI PARITY EXTENSIONS
+// ============================================================================
+
+fn draw_search(f: &mut Frame, app: &App, area: Rect) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" SEARCH (Type / to start, Enter to execute) ")
+        .border_style(Style::default().fg(Theme::accent()));
+
+    let query_display = format!("Query: {}", app.search_query);
+    let mut text_lines = vec![
+        Line::from(vec![
+            Span::styled("Press / to enter search, type query, hit enter (mocked).", Style::default().fg(Theme::text_dim())),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled(&query_display, Style::default().fg(Theme::highlight()))),
+        Line::from(""),
+        Line::from(Span::styled(format!("Found {} results (Not hooked up to node api yet in TUI)", app.search_results.len()), Style::default().fg(Theme::text()))),
+    ];
+
+    let paragraph = Paragraph::new(text_lines)
+        .block(block)
+        .alignment(Alignment::Left);
+    f.render_widget(paragraph, area);
+}
+
+fn draw_address(f: &mut Frame, app: &App, area: Rect) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" ADDRESS DETAIL ")
+        .border_style(Style::default().fg(Theme::accent()));
+    let text = Paragraph::new("Address details will appear here. Navigate via Search.")
+        .block(block)
+        .style(Style::default().fg(Theme::text_dim()));
+    f.render_widget(text, area);
+}
+
+fn draw_bridge(f: &mut Frame, app: &App, area: Rect) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" L1 BRIDGE ANCHORS ")
+        .border_style(Style::default().fg(Theme::primary()));
+    let text = vec![
+        Line::from(format!("Bridge Status: {}", app.stats.bridge_status)),
+        Line::from(format!("Latest L1 Block: {}", app.stats.l1_block)),
+        Line::from(format!("Anchor count in memory: {}", app.bridge_anchors.len())),
+    ];
+    let paragraph = Paragraph::new(text)
+        .block(block)
+        .style(Style::default().fg(Theme::text()));
+    f.render_widget(paragraph, area);
+}
+
+fn draw_metrics(f: &mut Frame, app: &App, area: Rect) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" CHAIN METRICS ")
+        .border_style(Style::default().fg(Theme::success()));
+        
+    let text = vec![
+        Line::from(Span::styled("Live metrics tracking coming in Sprint 5", Style::default().fg(Theme::text_dim()))),
+        Line::from(format!("TPS History length: {}", app.tps_history.len())),
+        Line::from(format!("Metric Accumulations: {}", app.metrics_history.len())),
+    ];
+    let paragraph = Paragraph::new(text)
+        .block(block);
+    f.render_widget(paragraph, area);
 }

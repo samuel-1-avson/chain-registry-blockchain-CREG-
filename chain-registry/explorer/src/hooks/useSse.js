@@ -52,6 +52,37 @@ export function useSse({ path = '/v1/events', onEvent, eventTypes = null, enable
       if (cancelled) return
       const url = joinUrl(API_BASE, path)
       setState(SSE_STATE.Connecting)
+
+      // Try WebSocket first if it's the main events endpoint
+      if (path === '/v1/events') {
+        const wsUrl = url.replace(/^http/, 'ws').replace(/\/v1\/events$/, '/v1/ws')
+        try {
+          const ws = new WebSocket(wsUrl)
+          ws.onopen = () => {
+            if (cancelled) return ws.close()
+            attempt = 0
+            setReconnectAttempt(0)
+            setState(SSE_STATE.Live)
+            setLastEventAt(Date.now())
+          }
+          ws.onmessage = (evt) => handlePayload(evt.data, 'message')
+          ws.onerror = () => {}
+          ws.onclose = () => {
+            if (cancelled) return
+            setState(SSE_STATE.Error)
+            attempt += 1
+            setReconnectAttempt(attempt)
+            const delay = Math.min(30_000, 500 * 2 ** Math.min(attempt, 6))
+            reconnectTimer = setTimeout(connect, delay)
+          }
+          es = { close: () => ws.close() }
+          return
+        } catch (e) {
+          console.warn('WebSocket failed, falling back to SSE')
+        }
+      }
+
+      // Fallback to SSE
       es = new EventSource(url)
       es.onopen = () => {
         if (cancelled) return

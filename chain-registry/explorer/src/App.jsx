@@ -26,6 +26,11 @@ import EventsFeed from './pages/EventsFeed.jsx'
 import Network from './pages/Network.jsx'
 import Bridge from './pages/Bridge.jsx'
 import Search from './pages/Search.jsx'
+import Governance from './pages/Governance.jsx'
+import Metrics from './pages/Metrics.jsx'
+import ProofVerifier from './pages/ProofVerifier.jsx'
+import RichList from './pages/RichList.jsx'
+import Reorgs from './pages/Reorgs.jsx'
 import About from './pages/About.jsx'
 import NotFound from './pages/NotFound.jsx'
 import LegacyApp from './LegacyApp.jsx'
@@ -114,6 +119,11 @@ function ExplorerShell() {
             <Route path="/events" element={<EventsFeed events={events} />} />
             <Route path="/network" element={<Network />} />
             <Route path="/bridge" element={<Bridge />} />
+            <Route path="/governance" element={<Governance />} />
+            <Route path="/metrics" element={<Metrics />} />
+            <Route path="/proof" element={<ProofVerifier />} />
+            <Route path="/richlist" element={<RichList />} />
+            <Route path="/reorgs" element={<Reorgs />} />
             <Route path="/search" element={<Search />} />
             <Route path="/about" element={<About />} />
             <Route path="*" element={<NotFound />} />

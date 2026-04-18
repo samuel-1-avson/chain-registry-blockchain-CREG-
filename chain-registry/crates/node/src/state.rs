@@ -75,6 +75,15 @@ pub struct BridgeStatus {
     pub current_state_root: String,
 }
 
+#[derive(Serialize, Clone, Debug)]
+pub struct ReorgEvent {
+    pub id: String,
+    pub timestamp: String,
+    pub depth: u64,
+    pub abandoned_blocks: Vec<String>,
+    pub new_tip: String,
+}
+
 // ─── NodeState ─────────────────────────────────────────────────────────────────
 
 /// Shared mutable state passed to every subsystem via `Arc<RwLock<_>>`.
@@ -106,6 +115,8 @@ pub struct NodeState {
     /// A view-change is applied once ⌊n/3⌋+1 certificates are received,
     /// preventing a single Byzantine node from forcing a view-change.
     pub view_change_certs: HashMap<String, HashMap<u32, std::collections::HashSet<String>>>,
+    /// History of reorg events.
+    pub reorgs: Vec<ReorgEvent>,
 }
 
 pub type SharedState = Arc<RwLock<NodeState>>;

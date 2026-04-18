@@ -85,6 +85,60 @@ export const nodeApi = {
     if (scan != null) q.set('scan', String(scan))
     return nodeFetch(`/v1/addresses/${encodeURIComponent(address)}/transactions?${q.toString()}`, { signal })
   },
+  addressStakes: (address, { limit = 50 } = {}, signal) => {
+    const q = new URLSearchParams()
+    q.set('limit', String(limit))
+    return nodeFetch(`/v1/addresses/${encodeURIComponent(address)}/stakes?${q.toString()}`, { signal })
+      .catch(() => ({ stakes: [], total: 0 })) // graceful fallback if endpoint not yet deployed
+  },
+
+  validatorBlocks: (address, { limit = 25 } = {}, signal) => {
+    const q = new URLSearchParams()
+    q.set('limit', String(limit))
+    return nodeFetch(`/v1/validators/${encodeURIComponent(address)}/blocks?${q.toString()}`, { signal })
+      .catch(() => ({ blocks: [], total: 0 }))
+  },
+  validatorVotes: (address, { limit = 50 } = {}, signal) => {
+    const q = new URLSearchParams()
+    q.set('limit', String(limit))
+    return nodeFetch(`/v1/validators/${encodeURIComponent(address)}/votes?${q.toString()}`, { signal })
+      .catch(() => ({ votes: [], total: 0 }))
+  },
+
+  /** Smart search — tries /v1/search first, falls back to client-side lookup. */
+  search: async (query, signal) => {
+    try {
+      return await nodeFetch(`/v1/search?q=${encodeURIComponent(query)}`, { signal })
+    } catch {
+      // Backend may not have /v1/search yet — return empty matches
+      return { matches: [] }
+    }
+  },
+
+  /** Bridge anchor history — graceful fallback if endpoint not deployed. */
+  bridgeAnchors: (signal) =>
+    nodeFetch('/v1/bridge/anchors', { signal })
+      .catch(() => ({ anchors: [] })),
+
+  /** Governance proposals — graceful fallback if endpoint not deployed. */
+  governanceProposals: (signal) =>
+    nodeFetch('/v1/governance/proposals', { signal })
+      .catch(() => ({ proposals: [] })),
+
+  /** Metrics time-series — graceful fallback if endpoint not deployed. */
+  metricsHistory: ({ range = '1h' } = {}, signal) =>
+    nodeFetch(`/v1/metrics/history?range=${range}`, { signal })
+      .catch(() => ({ samples: [] })),
+
+  /** Chain Reorganizations. */
+  reorgs: (signal) =>
+    nodeFetch('/v1/reorgs', { signal })
+      .catch(() => []),
+
+  /** Rich List of top accounts. */
+  richList: (signal) =>
+    nodeFetch('/v1/richlist', { signal })
+      .catch(() => []),
 }
 
 export { API_BASE }

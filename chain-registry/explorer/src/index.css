@@ -101,6 +101,20 @@ body {
   font-family: var(--font-mono);
 }
 
+/* Accessibility Focus States - WCAG AA */
+*:focus-visible {
+  outline: 2px solid var(--accent-primary-light);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+input:focus, button:focus, select:focus {
+  outline: none; /* Rely on focus-visible or custom component focus styles */
+}
+input:focus-visible, button:focus-visible, select:focus-visible {
+  outline: 2px solid var(--accent-primary-light);
+  outline-offset: 2px;
+}
+
 /* Subtle background gradient */
 body::before {
   content: '';

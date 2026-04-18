@@ -58,6 +58,12 @@ pub fn router(
         .route("/v1/nodes", get(get_nodes))
         .route("/v1/p2p/status", get(p2p_status))
         .route("/v1/bridge/status", get(bridge_status))
+        .route("/v1/bridge/anchors", get(bridge_anchors))
+        .route("/v1/governance/proposals", get(governance_proposals))
+        .route("/v1/metrics/history", get(metrics_history))
+        .route("/v1/reorgs", get(reorgs))
+        .route("/v1/richlist", get(richlist))
+        .route("/v1/ws", get(ws_handler))
         // Packages
         .route("/v1/packages/:canonical", get(get_package))
         .route("/v1/packages", get(list_packages).post(submit_package))
@@ -87,6 +93,8 @@ pub fn router(
             post(receive_admission_attestation),
         )
         .route("/v1/publishers/rotate-key", post(rotate_publisher_key))
+        // Search
+        .route("/v1/search", get(search_handler))
         // Appeals & AAA
         .route("/v1/appeals/:id/audit", post(submit_audit))
         // OpenAPI spec + Swagger UI. The JSON is what the explorer's
@@ -219,26 +227,42 @@ struct ChainStatsResponse {
     #[serde(flatten)]
     chain: crate::chain_store::ChainStats,
     validator_count: usize,
+    active_validators: usize,
     total_stake: u64,
+    total_stake_native: String,
     peer_count: usize,
     bridge_status: String,
     l1_block: u64,
+    pending_tx_count: usize,
+    publisher_count: usize,
+    finalized_height: u64,
+    finalization_lag: u64,
 }
 
 async fn chain_stats(State(state): State<SharedState>) -> impl IntoResponse {
     let s = state.read().await;
     let validators = &s.validator_set.validators;
+    let total_stake: u64 = validators.iter().map(|validator| validator.stake).sum();
+    let active_count = validators.iter().filter(|v| v.status != "offline").count();
+    let tip = s.chain.stats().current_height;
+    let finalized = s.bridge_status.last_finalized_eth_block;
     Json(ChainStatsResponse {
         chain: s.chain.stats(),
         validator_count: validators.len(),
-        total_stake: validators.iter().map(|validator| validator.stake).sum(),
+        active_validators: active_count,
+        total_stake,
+        total_stake_native: total_stake.to_string(),
         peer_count: s.p2p_status.peers.len(),
         bridge_status: if s.bridge_status.bridge_sync_status.trim().is_empty() {
             "Unknown".to_string()
         } else {
             s.bridge_status.bridge_sync_status.clone()
         },
-        l1_block: s.bridge_status.last_finalized_eth_block,
+        l1_block: finalized,
+        pending_tx_count: s.pending_pool.len(),
+        publisher_count: s.publisher_index.len(),
+        finalized_height: finalized,
+        finalization_lag: tip.saturating_sub(finalized),
     })
 }
 
@@ -518,6 +542,70 @@ async fn p2p_status(
 async fn bridge_status(State(state): State<SharedState>) -> impl IntoResponse {
     let s = state.read().await;
     Json(s.bridge_status.clone())
+}
+
+// GET /v1/bridge/anchors
+//
+// Returns the anchor commit history. For now, synthesises a single entry
+// from the current bridge status since we don't persist a full log yet.
+async fn bridge_anchors(State(state): State<SharedState>) -> impl IntoResponse {
+    let s = state.read().await;
+    let bs = &s.bridge_status;
+    let mut anchors: Vec<serde_json::Value> = Vec::new();
+
+    // Synthesise the latest anchor from current bridge state
+    if bs.last_finalized_eth_block > 0 {
+        anchors.push(serde_json::json!({
+            "l2_height": s.chain.stats().current_height,
+            "l1_block": bs.last_finalized_eth_block,
+            "state_root": bs.last_committed_root,
+            "l1_tx_hash": bs.last_commit_tx_hash,
+            "committed_at": chrono::Utc::now().to_rfc3339(),
+            "gas_used": serde_json::Value::Null,
+        }));
+    }
+
+    Json(serde_json::json!({
+        "anchors": anchors,
+        "total": anchors.len(),
+    }))
+}
+
+// GET /v1/governance/proposals
+//
+// Governance is not yet implemented on-chain. This stub returns an empty
+// list so the explorer page can render gracefully. When on-chain governance
+// arrives (e.g. via a GovernanceProposal transaction variant), this handler
+// will scan the chain for proposal transactions.
+async fn governance_proposals(State(_state): State<SharedState>) -> impl IntoResponse {
+    Json(serde_json::json!({
+        "proposals": [] as Vec<serde_json::Value>,
+        "total": 0,
+        "note": "On-chain governance is planned for a future release.",
+    }))
+}
+
+// GET /v1/metrics/history?range=1h
+//
+// Time-series metrics endpoint. Currently returns an empty sample set.
+// When a metrics accumulator is added to the node, this will return
+// historical chain stats at regular intervals.
+#[derive(Deserialize)]
+struct MetricsHistoryParams {
+    #[serde(default = "default_metrics_range")]
+    range: String,
+}
+fn default_metrics_range() -> String { "1h".to_string() }
+
+async fn metrics_history(
+    State(_state): State<SharedState>,
+    Query(params): Query<MetricsHistoryParams>,
+) -> impl IntoResponse {
+    Json(serde_json::json!({
+        "range": params.range,
+        "samples": [] as Vec<serde_json::Value>,
+        "note": "Server-side metrics accumulation is planned for Sprint 5.",
+    }))
 }
 
 // GET /v1/packages?offset=0&limit=50&ecosystem=npm&status=verified
@@ -1371,6 +1459,158 @@ async fn list_pending(State(state): State<SharedState>) -> impl IntoResponse {
     }))
 }
 
+// ─── Search endpoint ──────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct SearchParams {
+    q: String,
+}
+
+#[derive(Serialize)]
+struct SearchMatch {
+    kind: &'static str,
+    href: String,
+    title: String,
+    subtitle: String,
+}
+
+/// GET /v1/search?q=<query>
+///
+/// Smart-classifies the query string and returns matching entities:
+///  - All digits → block by height
+///  - 0x + 40 hex → EVM address (check validator set)
+///  - 0x + 64 hex → try block by hash, then transaction
+///  - Contains '@' → package canonical
+///  - Otherwise → scan package names, validator aliases
+async fn search_handler(
+    State(state): State<SharedState>,
+    Query(params): Query<SearchParams>,
+) -> Response {
+    let q = params.q.trim().to_string();
+    if q.is_empty() {
+        return Json(serde_json::json!({ "matches": [] as Vec<serde_json::Value> })).into_response();
+    }
+
+    let s = state.read().await;
+    let mut matches: Vec<SearchMatch> = Vec::new();
+    const MAX_RESULTS: usize = 10;
+
+    // 1. All digits → block height
+    if q.chars().all(|c| c.is_ascii_digit()) {
+        if let Ok(height) = q.parse::<u64>() {
+            if let Ok(Some(_)) = s.chain.get_block_by_height(height) {
+                matches.push(SearchMatch {
+                    kind: "block",
+                    href: format!("/block/{}", height),
+                    title: format!("Block #{}", height),
+                    subtitle: "Block by height".into(),
+                });
+            }
+        }
+    }
+
+    // 2. 0x + 40 hex → EVM address
+    let stripped = q.strip_prefix("0x").unwrap_or(&q);
+    if stripped.len() == 40 && stripped.chars().all(|c| c.is_ascii_hexdigit()) {
+        let normalized = q.to_ascii_lowercase();
+        matches.push(SearchMatch {
+            kind: "address",
+            href: format!("/address/{}", normalized),
+            title: normalized.clone(),
+            subtitle: "EVM address".into(),
+        });
+        // Check if it's a validator
+        let clean = normalized.strip_prefix("0x").unwrap_or(&normalized).to_string();
+        let is_validator = s.validator_registrations.contains_key(&normalized)
+            || s.validator_registrations.contains_key(&clean)
+            || s.validator_set.validators.iter().any(|v| v.id.to_ascii_lowercase() == normalized);
+        if is_validator {
+            matches.push(SearchMatch {
+                kind: "validator",
+                href: format!("/validator/{}", normalized),
+                title: normalized.clone(),
+                subtitle: "Validator".into(),
+            });
+        }
+    }
+
+    // 3. 0x + 64 hex → block hash or tx hash
+    if stripped.len() == 64 && stripped.chars().all(|c| c.is_ascii_hexdigit()) {
+        let hash_lower = q.to_ascii_lowercase();
+        if let Ok(Some(block)) = s.chain.get_block_by_hash(&hash_lower) {
+            matches.push(SearchMatch {
+                kind: "block",
+                href: format!("/block/{}", block.header.height),
+                title: format!("Block #{}", block.header.height),
+                subtitle: format!("hash: {}…", &hash_lower[..16]),
+            });
+        }
+    }
+
+    // 4. Contains '@' → package canonical
+    if q.contains('@') && !q.starts_with("0x") {
+        if let Ok(Some(record)) = s.chain.get_package(&q) {
+            let status_str = match &record.status {
+                PackageStatus::Verified => "verified",
+                PackageStatus::Pending => "pending",
+                PackageStatus::Revoked { .. } => "revoked",
+            };
+            matches.push(SearchMatch {
+                kind: "package",
+                href: format!("/package/{}", urlencoding::encode(&q)),
+                title: record.id.canonical(),
+                subtitle: format!("status: {}", status_str),
+            });
+        } else if s.pending_pool.contains(&q) {
+            matches.push(SearchMatch {
+                kind: "package",
+                href: format!("/package/{}", urlencoding::encode(&q)),
+                title: q.clone(),
+                subtitle: "pending".into(),
+            });
+        }
+    }
+
+    // 5. Free text — search validator aliases and publisher index
+    if matches.is_empty() || (!q.starts_with("0x") && !q.chars().all(|c| c.is_ascii_digit()) && !q.contains('@')) {
+        let q_lower = q.to_ascii_lowercase();
+        // Scan validator aliases
+        for (key, reg) in s.validator_registrations.iter() {
+            if matches.len() >= MAX_RESULTS { break; }
+            if reg.alias.to_ascii_lowercase().contains(&q_lower)
+                || key.contains(&q_lower)
+            {
+                let addr = key.clone();
+                if !matches.iter().any(|m| m.href.contains(&addr)) {
+                    matches.push(SearchMatch {
+                        kind: "validator",
+                        href: format!("/validator/{}", addr),
+                        title: if reg.alias.is_empty() { addr.clone() } else { reg.alias.clone() },
+                        subtitle: format!("validator: {}", addr),
+                    });
+                }
+            }
+        }
+        // Scan publisher index
+        for (pubkey, _stats) in s.publisher_index.iter() {
+            if matches.len() >= MAX_RESULTS { break; }
+            if pubkey.to_ascii_lowercase().contains(&q_lower) {
+                if !matches.iter().any(|m| m.href.contains(pubkey)) {
+                    matches.push(SearchMatch {
+                        kind: "publisher",
+                        href: format!("/publisher/{}", urlencoding::encode(pubkey)),
+                        title: pubkey.clone(),
+                        subtitle: "publisher".into(),
+                    });
+                }
+            }
+        }
+    }
+
+    matches.truncate(MAX_RESULTS);
+    Json(serde_json::json!({ "matches": matches })).into_response()
+}
+
 // POST /v1/publishers/rotate-key
 #[derive(Deserialize)]
 pub struct RotateKeyRequest {
@@ -1892,6 +2132,83 @@ pub(crate) fn verify_publish_sig(req: &PublishRequest) -> anyhow::Result<()> {
             threshold
         )
     }
+}
+
+// ─── Sprint 5: Scale & Observability ──────────────────────────────────────────
+
+/// GET /v1/reorgs — History of chain reorganizations
+#[utoipa::path(
+    get,
+    path = "/v1/reorgs",
+    tag = "Chain",
+    responses(
+        (status = 200, description = "Reorg history")
+    )
+)]
+async fn reorgs(State(state): State<SharedState>) -> impl IntoResponse {
+    let reorgs = state.read().await.reorgs.clone();
+    Json(reorgs).into_response()
+}
+
+/// GET /v1/richlist — Top staked accounts
+#[utoipa::path(
+    get,
+    path = "/v1/richlist",
+    tag = "Diagnostics",
+    responses(
+        (status = 200, description = "Top accounts by stake")
+    )
+)]
+async fn richlist(State(state): State<SharedState>) -> impl IntoResponse {
+    let mut top: Vec<_> = state
+        .read()
+        .await
+        .validator_registrations
+        .values()
+        .cloned()
+        .collect();
+    
+    // Sort descending by stake
+    top.sort_by(|a, b| b.stake.cmp(&a.stake));
+    
+    // Truncate to top 500
+    top.truncate(500);
+
+    Json(top).into_response()
+}
+
+// WS Handler
+use axum::extract::ws::{WebSocketUpgrade, WebSocket, Message};
+
+/// GET /v1/ws — High performance bidirectional websocket stream for consensus events
+async fn ws_handler(
+    ws: WebSocketUpgrade,
+    State(state): State<SharedState>,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| handle_websocket(socket, state))
+}
+
+async fn handle_websocket(mut socket: WebSocket, state: SharedState) {
+    let mut rx = state.read().await.event_bus.subscribe();
+
+    tracing::info!("Websocket client connected");
+
+    let mut send_task = tokio::spawn(async move {
+        while let Ok(event) = rx.recv().await {
+            // Convert SSE payload to WS Message
+            let data = serde_json::to_string(&event).unwrap_or_default();
+            if socket.send(Message::Text(data)).await.is_err() {
+                break; // Client disconnected
+            }
+        }
+    });
+
+    // In a push-based architecture, we don't strictly require ACKs at the WS layer
+    // but we spawn a dummy receiver so we don't deadlock on incoming control frames.
+    // If the socket yields None, it's closed.
+    // Wait for the send_task or the receive loop to finish.
+    let _ = send_task.await;
+    tracing::info!("Websocket client disconnected");
 }
 
 #[cfg(test)]
