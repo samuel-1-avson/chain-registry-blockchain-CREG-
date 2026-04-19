@@ -17,10 +17,6 @@ chrono = { workspace = true }
 sha2 = { workspace = true }
 async-trait = "0.1"
 
-# IPFS
-ipfs-api = "0.17"
-ipfs-api-backend-hyper = { version = "0.6", features = ["with-send-sync"] }
-
 # Ethereum/Contracts
 alloy = { workspace = true }
 alloy-sol-types = { workspace = true }

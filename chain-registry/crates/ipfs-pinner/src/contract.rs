@@ -152,17 +152,15 @@ impl PinningRewardsClient {
             .context("Invalid pinning operator private key")
     }
 
+    /// Build a signed Alloy provider. Centralises wallet + RPC construction
+    /// that was previously duplicated in every trait method.
+    fn build_provider(&self) -> Result<impl alloy::providers::Provider + Clone> {
+        let provider = self.build_provider()?;
+        Ok(provider)
+    }
+
     async fn approve_creg(&self, amount: u128) -> Result<()> {
-        let signer = self.parse_operator_signer()?;
-        let wallet = EthereumWallet::from(signer);
-        let provider = ProviderBuilder::new()
-            .with_recommended_fillers()
-            .wallet(wallet)
-            .on_http(
-                self.rpc_url
-                    .parse()
-                    .context("Invalid pinning Ethereum RPC URL")?,
-            );
+        let provider = self.build_provider()?;
 
         let contract_address = self.parse_contract_address()?;
         let contract = IPinningRewards::new(contract_address, &provider);
@@ -192,17 +190,8 @@ impl PinningRewardsClient {
 #[async_trait]
 impl PinningContract for PinningRewardsClient {
     async fn is_registered(&self) -> Result<bool> {
-        let signer = self.parse_operator_signer()?;
-        let operator = signer.address();
-        let wallet = EthereumWallet::from(signer);
-        let provider = ProviderBuilder::new()
-            .with_recommended_fillers()
-            .wallet(wallet)
-            .on_http(
-                self.rpc_url
-                    .parse()
-                    .context("Invalid pinning Ethereum RPC URL")?,
-            );
+        let provider = self.build_provider()?;
+        let operator = self.parse_operator_signer()?.address();
 
         let contract = IPinningRewards::new(self.parse_contract_address()?, &provider);
         let pinner = contract
@@ -216,17 +205,7 @@ impl PinningContract for PinningRewardsClient {
 
     async fn register_pinner(&self, stake: u128) -> Result<()> {
         self.approve_creg(stake).await?;
-
-        let signer = self.parse_operator_signer()?;
-        let wallet = EthereumWallet::from(signer);
-        let provider = ProviderBuilder::new()
-            .with_recommended_fillers()
-            .wallet(wallet)
-            .on_http(
-                self.rpc_url
-                    .parse()
-                    .context("Invalid pinning Ethereum RPC URL")?,
-            );
+        let provider = self.build_provider()?;
 
         let contract = IPinningRewards::new(self.parse_contract_address()?, &provider);
         let pending_tx = contract
@@ -244,16 +223,7 @@ impl PinningContract for PinningRewardsClient {
     }
 
     async fn unregister_pinner(&self) -> Result<()> {
-        let signer = self.parse_operator_signer()?;
-        let wallet = EthereumWallet::from(signer);
-        let provider = ProviderBuilder::new()
-            .with_recommended_fillers()
-            .wallet(wallet)
-            .on_http(
-                self.rpc_url
-                    .parse()
-                    .context("Invalid pinning Ethereum RPC URL")?,
-            );
+        let provider = self.build_provider()?;
 
         let contract = IPinningRewards::new(self.parse_contract_address()?, &provider);
         let pending_tx = contract
@@ -271,16 +241,7 @@ impl PinningContract for PinningRewardsClient {
     }
 
     async fn register_pin(&self, cid: [u8; 32], size: u64) -> Result<()> {
-        let signer = self.parse_operator_signer()?;
-        let wallet = EthereumWallet::from(signer);
-        let provider = ProviderBuilder::new()
-            .with_recommended_fillers()
-            .wallet(wallet)
-            .on_http(
-                self.rpc_url
-                    .parse()
-                    .context("Invalid pinning Ethereum RPC URL")?,
-            );
+        let provider = self.build_provider()?;
 
         let contract = IPinningRewards::new(self.parse_contract_address()?, &provider);
         let pending_tx = contract
@@ -298,16 +259,7 @@ impl PinningContract for PinningRewardsClient {
     }
 
     async fn unregister_pin(&self, cid: [u8; 32]) -> Result<()> {
-        let signer = self.parse_operator_signer()?;
-        let wallet = EthereumWallet::from(signer);
-        let provider = ProviderBuilder::new()
-            .with_recommended_fillers()
-            .wallet(wallet)
-            .on_http(
-                self.rpc_url
-                    .parse()
-                    .context("Invalid pinning Ethereum RPC URL")?,
-            );
+        let provider = self.build_provider()?;
 
         let contract = IPinningRewards::new(self.parse_contract_address()?, &provider);
         let pending_tx = contract
@@ -330,17 +282,8 @@ impl PinningContract for PinningRewardsClient {
         success: bool,
         proof_hash: [u8; 32],
     ) -> Result<()> {
-        let signer = self.parse_operator_signer()?;
-        let operator = signer.address();
-        let wallet = EthereumWallet::from(signer);
-        let provider = ProviderBuilder::new()
-            .with_recommended_fillers()
-            .wallet(wallet)
-            .on_http(
-                self.rpc_url
-                    .parse()
-                    .context("Invalid pinning Ethereum RPC URL")?,
-            );
+        let provider = self.build_provider()?;
+        let operator = self.parse_operator_signer()?.address();
 
         let contract = IPinningRewards::new(self.parse_contract_address()?, &provider);
         let pending_tx = contract
@@ -358,17 +301,8 @@ impl PinningContract for PinningRewardsClient {
     }
 
     async fn calculate_rewards(&self) -> Result<u128> {
-        let signer = self.parse_operator_signer()?;
-        let operator = signer.address();
-        let wallet = EthereumWallet::from(signer);
-        let provider = ProviderBuilder::new()
-            .with_recommended_fillers()
-            .wallet(wallet)
-            .on_http(
-                self.rpc_url
-                    .parse()
-                    .context("Invalid pinning Ethereum RPC URL")?,
-            );
+        let provider = self.build_provider()?;
+        let operator = self.parse_operator_signer()?.address();
 
         let contract = IPinningRewards::new(self.parse_contract_address()?, &provider);
         let rewards = contract
@@ -386,17 +320,7 @@ impl PinningContract for PinningRewardsClient {
         if pending_rewards == 0 {
             return Ok(0);
         }
-
-        let signer = self.parse_operator_signer()?;
-        let wallet = EthereumWallet::from(signer);
-        let provider = ProviderBuilder::new()
-            .with_recommended_fillers()
-            .wallet(wallet)
-            .on_http(
-                self.rpc_url
-                    .parse()
-                    .context("Invalid pinning Ethereum RPC URL")?,
-            );
+        let provider = self.build_provider()?;
 
         let contract = IPinningRewards::new(self.parse_contract_address()?, &provider);
         let pending_tx = contract
@@ -414,16 +338,7 @@ impl PinningContract for PinningRewardsClient {
     }
 
     async fn get_pinner_info(&self, pinner: String) -> Result<ContractPinnerInfo> {
-        let signer = self.parse_operator_signer()?;
-        let wallet = EthereumWallet::from(signer);
-        let provider = ProviderBuilder::new()
-            .with_recommended_fillers()
-            .wallet(wallet)
-            .on_http(
-                self.rpc_url
-                    .parse()
-                    .context("Invalid pinning Ethereum RPC URL")?,
-            );
+        let provider = self.build_provider()?;
 
         let contract = IPinningRewards::new(self.parse_contract_address()?, &provider);
         let pinner_address = pinner
@@ -453,16 +368,7 @@ impl PinningContract for PinningRewardsClient {
     }
 
     async fn get_pin_info(&self, cid: [u8; 32]) -> Result<ContractPinInfo> {
-        let signer = self.parse_operator_signer()?;
-        let wallet = EthereumWallet::from(signer);
-        let provider = ProviderBuilder::new()
-            .with_recommended_fillers()
-            .wallet(wallet)
-            .on_http(
-                self.rpc_url
-                    .parse()
-                    .context("Invalid pinning Ethereum RPC URL")?,
-            );
+        let provider = self.build_provider()?;
 
         let contract = IPinningRewards::new(self.parse_contract_address()?, &provider);
         let info = contract
@@ -487,17 +393,8 @@ impl PinningContract for PinningRewardsClient {
     }
 
     async fn get_pinner_cids(&self) -> Result<Vec<[u8; 32]>> {
-        let signer = self.parse_operator_signer()?;
-        let operator = signer.address();
-        let wallet = EthereumWallet::from(signer);
-        let provider = ProviderBuilder::new()
-            .with_recommended_fillers()
-            .wallet(wallet)
-            .on_http(
-                self.rpc_url
-                    .parse()
-                    .context("Invalid pinning Ethereum RPC URL")?,
-            );
+        let provider = self.build_provider()?;
+        let operator = self.parse_operator_signer()?.address();
 
         let contract = IPinningRewards::new(self.parse_contract_address()?, &provider);
         let cid_hashes = contract
@@ -511,16 +408,7 @@ impl PinningContract for PinningRewardsClient {
     }
 
     async fn get_cid_pinners(&self, cid: [u8; 32]) -> Result<Vec<String>> {
-        let signer = self.parse_operator_signer()?;
-        let wallet = EthereumWallet::from(signer);
-        let provider = ProviderBuilder::new()
-            .with_recommended_fillers()
-            .wallet(wallet)
-            .on_http(
-                self.rpc_url
-                    .parse()
-                    .context("Invalid pinning Ethereum RPC URL")?,
-            );
+        let provider = self.build_provider()?;
 
         let contract = IPinningRewards::new(self.parse_contract_address()?, &provider);
         let pinners = contract
@@ -535,17 +423,7 @@ impl PinningContract for PinningRewardsClient {
 
     async fn fund_rewards_pool(&self, amount: u128) -> Result<()> {
         self.approve_creg(amount).await?;
-
-        let signer = self.parse_operator_signer()?;
-        let wallet = EthereumWallet::from(signer);
-        let provider = ProviderBuilder::new()
-            .with_recommended_fillers()
-            .wallet(wallet)
-            .on_http(
-                self.rpc_url
-                    .parse()
-                    .context("Invalid pinning Ethereum RPC URL")?,
-            );
+        let provider = self.build_provider()?;
 
         let contract = IPinningRewards::new(self.parse_contract_address()?, &provider);
         let pending_tx = contract
@@ -563,16 +441,7 @@ impl PinningContract for PinningRewardsClient {
     }
 
     async fn get_rewards_pool(&self) -> Result<u128> {
-        let signer = self.parse_operator_signer()?;
-        let wallet = EthereumWallet::from(signer);
-        let provider = ProviderBuilder::new()
-            .with_recommended_fillers()
-            .wallet(wallet)
-            .on_http(
-                self.rpc_url
-                    .parse()
-                    .context("Invalid pinning Ethereum RPC URL")?,
-            );
+        let provider = self.build_provider()?;
 
         let contract = IPinningRewards::new(self.parse_contract_address()?, &provider);
         let rewards_pool = contract

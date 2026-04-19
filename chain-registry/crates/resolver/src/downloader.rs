@@ -4,7 +4,7 @@
 
 use anyhow::{Context, Result};
 use common::sha256_hex;
-use futures::future::join_all;
+use futures::stream::{FuturesUnordered, StreamExt};
 use std::path::{Path, PathBuf};
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
@@ -38,7 +38,7 @@ impl P2PDownloader {
         // In a real BitTorrent-style system, we'd fetch different 1MB chunks from different peers.
         // For this hardening phase, we simulate this by querying multiple validator gateways simultaneously
         // to pick the fastest respondent.
-        let mut download_tasks = Vec::new();
+        let mut download_tasks = FuturesUnordered::new();
         for node in &self.nodes {
             let url = format!("{}/v1/ipfs/{}", node.trim_end_matches('/'), ipfs_cid);
             download_tasks.push(tokio::spawn(async move {
@@ -47,15 +47,14 @@ impl P2PDownloader {
         }
 
         // Wait for the FIRST successful download (Race for the fastest peer)
-        let results = join_all(download_tasks).await;
         let mut final_bytes = None;
 
-        for res in results {
+        while let Some(res) = download_tasks.next().await {
             if let Ok(Ok(bytes)) = res {
                 let actual_hash = sha256_hex(&bytes);
                 if actual_hash == expected_hash {
                     final_bytes = Some(bytes);
-                    break;
+                    break; // Early exit on first successful and verified chunk
                 }
             }
         }

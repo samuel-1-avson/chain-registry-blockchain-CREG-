@@ -307,11 +307,6 @@ async fn pin_to_ipfs_with_progress(bytes: &[u8], pb: &ProgressBar) -> Result<Str
 
     use reqwest::multipart;
 
-    let form = multipart::Form::new().part(
-        "file",
-        multipart::Part::bytes(bytes.to_vec()).file_name("package.tgz"),
-    );
-
     // We do not simulate progress here anymore. Instead, we let reqwest handle the actual network transfer.
     pb.set_style(
         indicatif::ProgressStyle::default_spinner()

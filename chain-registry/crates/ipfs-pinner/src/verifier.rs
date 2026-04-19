@@ -150,10 +150,32 @@ impl Verifier for IpfsVerifier {
     }
 
     async fn verify_batch(&self, cids: &[String]) -> Vec<Result<VerificationResult>> {
-        let mut results = Vec::with_capacity(cids.len());
+        // Run verifications concurrently with bounded parallelism.
+        const MAX_CONCURRENT: usize = 32;
 
-        for cid in cids {
-            results.push(self.verify(cid).await);
+        let mut results = Vec::with_capacity(cids.len());
+        for chunk in cids.chunks(MAX_CONCURRENT) {
+            let mut set = tokio::task::JoinSet::new();
+
+            for cid in chunk {
+                let cid = cid.clone();
+                let client = self.client.clone();
+                let api_url = self.ipfs_api_url.clone();
+                set.spawn(async move {
+                    let verifier = IpfsVerifier {
+                        ipfs_api_url: api_url,
+                        client,
+                    };
+                    verifier.verify(&cid).await
+                });
+            }
+
+            while let Some(join_result) = set.join_next().await {
+                match join_result {
+                    Ok(result) => results.push(result),
+                    Err(e) => results.push(Err(anyhow::anyhow!("Verification task panicked: {}", e))),
+                }
+            }
         }
 
         results

@@ -145,16 +145,22 @@ impl IpfsPinner for IpfsApiPinner {
             return Ok(false);
         }
 
-        let text = response.text().await?;
-        Ok(text.contains(cid))
+        // Parse JSON response and check for exact CID match in the Keys map.
+        // The /pin/ls response is: {"Keys": {"<cid>": {"Type": "..."}}}
+        let data: serde_json::Value = response.json().await
+            .unwrap_or(serde_json::Value::Null);
+        Ok(data.get("Keys")
+            .and_then(|k| k.as_object())
+            .map(|keys| keys.contains_key(cid))
+            .unwrap_or(false))
     }
 
     async fn get_size(&self, cid: &str) -> Result<u64> {
-        let url = self.api_url("/api/v0/files/stat");
+        let url = self.api_url("/api/v0/object/stat");
         let response = self
             .client
             .post(&url)
-            .query(&[("arg", format!("/ipfs/{}", cid))])
+            .query(&[("arg", cid)])
             .send()
             .await
             .context("Failed to stat CID")?;
@@ -231,6 +237,8 @@ impl MockPinner {
 impl IpfsPinner for MockPinner {
     async fn pin(&self, cid: &str) -> Result<()> {
         tracing::debug!("Mock pin: {}", cid);
+        let mut pins = self.pins.write().await;
+        pins.entry(cid.to_string()).or_insert_with(Vec::new);
         Ok(())
     }
 

@@ -239,6 +239,20 @@ impl NodeConfig {
             );
         }
 
+        // Validate IPFS URL is a parseable HTTP endpoint.
+        if self.ipfs_url.is_empty() {
+            errors.push(
+                "CREG_IPFS_URL is empty. Set it to the IPFS API endpoint \
+                 (e.g. http://127.0.0.1:5001) for package pinning and validation."
+                    .into(),
+            );
+        } else if !self.ipfs_url.starts_with("http://") && !self.ipfs_url.starts_with("https://") {
+            errors.push(format!(
+                "CREG_IPFS_URL ({}) must start with http:// or https://",
+                self.ipfs_url
+            ));
+        }
+
         // Block interval sanity check.
         if self.block_interval_secs == 0 {
             errors.push("CREG_BLOCK_INTERVAL must be > 0 seconds".into());

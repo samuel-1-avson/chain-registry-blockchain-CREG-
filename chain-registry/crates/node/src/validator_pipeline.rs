@@ -370,15 +370,51 @@ async fn cleanup(state: &Arc<RwLock<NodeState>>, canonical: &str) {
     s.pending_pool.remove(canonical);
 }
 
+/// Maximum IPFS payload size (512 MB). Packages larger than this are rejected
+/// to prevent OOM attacks via malicious CIDs.
+const MAX_IPFS_PAYLOAD_BYTES: u64 = 512 * 1024 * 1024;
+
+/// Timeout for IPFS fetch operations (5 minutes).
+const IPFS_FETCH_TIMEOUT_SECS: u64 = 300;
+
 async fn fetch_from_ipfs(cid: &str, ipfs_url: &str) -> anyhow::Result<Vec<u8>> {
     let url = format!("{}/api/v0/cat?arg={}", ipfs_url.trim_end_matches('/'), cid);
-    let bytes = reqwest::Client::new()
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(IPFS_FETCH_TIMEOUT_SECS))
+        .build()
+        .map_err(|e| anyhow::anyhow!("Failed to build IPFS HTTP client: {}", e))?;
+
+    let response = client
         .post(&url)
         .send()
-        .await?
-        .bytes()
-        .await?
-        .to_vec();
+        .await
+        .map_err(|e| anyhow::anyhow!("IPFS fetch failed for CID {}: {}", cid, e))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        anyhow::bail!("IPFS returned HTTP {} for CID {}: {}", status, cid, body);
+    }
+
+    // Guard against oversized payloads before buffering into memory.
+    if let Some(len) = response.content_length() {
+        if len > MAX_IPFS_PAYLOAD_BYTES {
+            anyhow::bail!(
+                "IPFS content for CID {} is too large: {} bytes (max {})",
+                cid, len, MAX_IPFS_PAYLOAD_BYTES
+            );
+        }
+    }
+
+    let bytes = response.bytes().await?.to_vec();
+
+    if bytes.len() as u64 > MAX_IPFS_PAYLOAD_BYTES {
+        anyhow::bail!(
+            "IPFS content for CID {} exceeded max size after download: {} bytes (max {})",
+            cid, bytes.len(), MAX_IPFS_PAYLOAD_BYTES
+        );
+    }
+
     Ok(bytes)
 }
 

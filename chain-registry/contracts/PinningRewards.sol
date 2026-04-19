@@ -275,11 +275,11 @@ contract PinningRewards is AccessControl, ReentrancyGuard {
             Pin storage pin = pins[cids[i]];
             if (!pin.isActive) continue;
             
-            // Base reward: size * time * rate
-            uint256 sizeGB = pin.size / 1e9; // Convert to GB
+            // Base reward: size (bytes) * time (days) * rate per GB per day / 1e9
             uint256 daysPinned = timeDelta / 1 days;
             
-            uint256 baseReward = sizeGB * daysPinned * rewardPerGBPerDay;
+            // Multiply first to prevent truncation of sub-GB packages
+            uint256 baseReward = (pin.size * daysPinned * rewardPerGBPerDay) / 1e9;
             
             // Popularity bonus
             if (pin.accessCount > 1000) {

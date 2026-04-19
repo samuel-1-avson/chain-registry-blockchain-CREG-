@@ -43,6 +43,8 @@ pub struct PinningConfig {
     pub verification_interval: u64,
     /// Max pins to track per node
     pub max_pins: usize,
+    /// Path to persist CID map state (e.g., /data/pinner_state.json)
+    pub db_path: Option<String>,
 }
 
 impl Default for PinningConfig {
@@ -56,6 +58,7 @@ impl Default for PinningConfig {
             auto_register: false,
             verification_interval: 3600, // 1 hour
             max_pins: 10000,
+            db_path: None,
         }
     }
 }
@@ -146,13 +149,14 @@ impl PinningManager {
         let pins = Arc::clone(&self.pins);
         let verifier = Arc::clone(&self.verifier);
         let contract = Arc::clone(&self.contract);
+        let stats = Arc::clone(&self.stats);
         let interval = self.config.verification_interval;
 
         tokio::spawn(async move {
             let mut ticker = tokio::time::interval(tokio::time::Duration::from_secs(interval));
             loop {
                 ticker.tick().await;
-                if let Err(e) = Self::run_verification(&pins, &verifier, &contract).await {
+                if let Err(e) = Self::run_verification(&pins, &verifier, &contract, &stats).await {
                     warn!("Verification error: {}", e);
                 }
             }
@@ -219,6 +223,7 @@ impl PinningManager {
             stats.total_pins += 1;
             stats.total_size += size;
         }
+        self.save_state(&None).await;
 
         info!("Successfully pinned {} ({} bytes)", cid, size);
         Ok(())
@@ -242,6 +247,7 @@ impl PinningManager {
                 pin.is_active = false;
             }
         }
+        self.save_state(&None).await;
 
         info!("Successfully unpinned {}", cid);
         Ok(())
@@ -289,23 +295,60 @@ impl PinningManager {
     }
 
     async fn load_existing_pins(&self) -> Result<()> {
-        let cid_hashes = self.contract.get_pinner_cids().await?;
+        let cid_hashes = self.contract.get_pinner_cids().await.unwrap_or_default();
 
         if !cid_hashes.is_empty() {
             warn!(
-                "Skipping {} on-chain pin(s): PinningRewards stores CID hashes only, so full CID strings cannot be reconstructed for IPFS operations",
+                "PinningRewards stores {} CID hashes. Reconstruction requires local state.",
                 cid_hashes.len()
             );
         }
 
-        info!("Loaded 0 existing pins from contract state");
+        if let Some(path) = &self.config.db_path {
+            if let Ok(data) = tokio::fs::read(path).await {
+                if let Ok(saved_pins) = serde_json::from_slice::<HashMap<String, PinInfo>>(&data) {
+                    let mut pins = self.pins.write().await;
+                    let mut stats = self.stats.write().await;
+                    
+                    for (cid, info) in saved_pins {
+                        pins.insert(cid.clone(), info.clone());
+                        stats.total_pins += 1;
+                        stats.total_size += info.size;
+                    }
+                    info!("Loaded {} existing pins from state file", pins.len());
+                    return Ok(());
+                }
+            }
+        }
+
+        info!("Loaded 0 existing pins (no state file found)");
         Ok(())
+    }
+
+    /// Flush in-memory pins to disk
+    async fn save_state(&self, current_pins: &Option<HashMap<String, PinInfo>>) {
+        if let Some(path) = &self.config.db_path {
+            let data = match current_pins {
+                Some(p) => serde_json::to_vec_pretty(p),
+                None => {
+                    let pins = self.pins.read().await;
+                    serde_json::to_vec_pretty(&*pins)
+                }
+            };
+            
+            if let Ok(json) = data {
+                if let Err(e) = tokio::fs::write(path, json).await {
+                    warn!("Failed to persist pinner state to {}: {}", path, e);
+                }
+            }
+        }
     }
 
     async fn run_verification(
         pins: &Arc<RwLock<HashMap<String, PinInfo>>>,
         verifier: &Arc<dyn Verifier>,
         contract: &Arc<dyn PinningContract>,
+        stats: &Arc<RwLock<PinnerStats>>,
     ) -> Result<()> {
         let pins_to_verify: Vec<String> = {
             let pins = pins.read().await;
@@ -314,6 +357,12 @@ impl PinningManager {
                 .map(|p| p.cid.clone())
                 .collect()
         };
+
+        if pins_to_verify.is_empty() {
+            return Ok(());
+        }
+
+        info!("Running verification for {} pinned CIDs", pins_to_verify.len());
 
         for cid in pins_to_verify {
             match verifier.verify(&cid).await {
@@ -330,16 +379,24 @@ impl PinningManager {
                         warn!("Failed to submit verification for {}: {}", cid, e);
                     }
 
-                    // Update local state
-                    if success {
-                        let mut pins = pins.write().await;
-                        if let Some(pin) = pins.get_mut(&cid) {
-                            pin.last_verified = Some(Utc::now());
+                    // Update local pin state and stats
+                    {
+                        let mut stats = stats.write().await;
+                        if success {
+                            stats.successful_verifications += 1;
+                            let mut pins = pins.write().await;
+                            if let Some(pin) = pins.get_mut(&cid) {
+                                pin.last_verified = Some(Utc::now());
+                            }
+                        } else {
+                            stats.failed_verifications += 1;
                         }
                     }
                 }
                 Err(e) => {
                     warn!("Verification failed for {}: {}", cid, e);
+                    let mut stats = stats.write().await;
+                    stats.failed_verifications += 1;
                 }
             }
         }

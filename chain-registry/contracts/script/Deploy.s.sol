@@ -11,6 +11,7 @@ import "../Appeal.sol";
 import "../ZKVerifier.sol";
 import "../CregToken.sol";
 import "../ValidatorRewards.sol";
+import "../PinningRewards.sol";
 import "../testnet/DevZKVerifier.sol";
 
 /// @notice Deploys the full chain-registry contract suite.
@@ -28,6 +29,7 @@ contract DeployChainRegistry is Script {
     address       public zkVerifier;
     CregToken     public cregToken;
     ValidatorRewards public validatorRewards;
+    PinningRewards public pinningRewards;
 
     function run() external {
         uint256 deployerKey = vm.envUint("DEPLOYER_KEY");
@@ -66,6 +68,7 @@ contract DeployChainRegistry is Script {
             address(governance),
             deployer
         );
+        pinningRewards = new PinningRewards(address(cregToken));
 
         // Local Anvil deployments use a permissive verifier so the bridge path
         // can exercise rollup settlement without a production Groth16 key set.
@@ -104,6 +107,7 @@ contract DeployChainRegistry is Script {
         console.log("Appeal:    ", address(appeal));
         console.log("CregToken: ", address(cregToken));
         console.log("ValRewards:", address(validatorRewards));
+        console.log("PinRewards:", address(pinningRewards));
 
         _writeManifest(deployer);
         console.log("=== Deployment complete ===");
@@ -196,6 +200,7 @@ contract DeployChainRegistry is Script {
             '  "appeal":     "', vm.toString(address(appeal)),     '",\n',
             '  "cregToken":  "', vm.toString(address(cregToken)),  '",\n',
             '  "validatorRewards": "', vm.toString(address(validatorRewards)), '",\n',
+            '  "pinningRewards": "', vm.toString(address(pinningRewards)), '",\n',
             '  "validatorRewardsTreasury": "', vm.toString(deployer), '",\n',
             '  "chainId":    "', vm.toString(block.chainid),       '",\n',
             '  "deployedAt": "', vm.toString(block.timestamp),     '"\n',
