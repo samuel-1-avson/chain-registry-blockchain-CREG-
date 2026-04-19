@@ -13,7 +13,7 @@ ARG NETWORK_RETRIES=1
 # ── Stage 1: Build Frontend ───────────────────────────────────────────────────
 FROM node:20-slim AS frontend-builder
 WORKDIR /explorer
-COPY explorer/package*.json ./
+COPY explorer/package*.json explorer/.npmrc* ./
 RUN if [ -f package-lock.json ]; then npm ci --silent; else npm install --silent --no-fund --no-audit; fi
 COPY explorer/ ./
 RUN npm run build

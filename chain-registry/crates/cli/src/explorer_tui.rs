@@ -55,10 +55,10 @@ static IS_LIGHT_THEME: AtomicBool = AtomicBool::new(false);
 struct Theme;
 impl Theme {
     fn primary() -> Color { if IS_LIGHT_THEME.load(Ordering::Relaxed) { Color::Blue } else { Color::Cyan } }
-    fn secondary() -> Color { if IS_LIGHT_THEME.load(Ordering::Relaxed) { Color::DarkBlue } else { Color::Blue } }
-    fn success() -> Color { if IS_LIGHT_THEME.load(Ordering::Relaxed) { Color::DarkGreen } else { Color::Green } }
+    fn secondary() -> Color { if IS_LIGHT_THEME.load(Ordering::Relaxed) { Color::Rgb(0, 0, 139) } else { Color::Blue } }
+    fn success() -> Color { if IS_LIGHT_THEME.load(Ordering::Relaxed) { Color::Rgb(0, 100, 0) } else { Color::Green } }
     fn warning() -> Color { if IS_LIGHT_THEME.load(Ordering::Relaxed) { Color::Rgb(150, 100, 0) } else { Color::Yellow } }
-    fn error() -> Color { if IS_LIGHT_THEME.load(Ordering::Relaxed) { Color::DarkRed } else { Color::Red } }
+    fn error() -> Color { if IS_LIGHT_THEME.load(Ordering::Relaxed) { Color::Rgb(139, 0, 0) } else { Color::Red } }
     fn accent() -> Color { if IS_LIGHT_THEME.load(Ordering::Relaxed) { Color::Magenta } else { Color::Magenta } }
     fn text() -> Color { if IS_LIGHT_THEME.load(Ordering::Relaxed) { Color::Black } else { Color::White } }
     fn text_dim() -> Color { if IS_LIGHT_THEME.load(Ordering::Relaxed) { Color::DarkGray } else { Color::Gray } }
@@ -155,6 +155,10 @@ enum View {
     Consensus,
     Faucet,
     Help,
+    Bridge,
+    Metrics,
+    Search,
+    AddressDetail,
 }
 
 /// State of the Faucet pane's drip flow.
@@ -377,6 +381,9 @@ impl App {
                     .trim_end_matches('/')
                     .to_string(),
             ),
+            bridge_anchors: Vec::new(),
+            metrics_history: Vec::new(),
+            search_results: Vec::new(),
         }
     }
 
@@ -1329,7 +1336,6 @@ async fn handle_key(app: &mut App, key: KeyCode) -> bool {
 
 fn handle_mouse(app: &mut App, mouse: crossterm::event::MouseEvent) {
     match mouse.kind {
-        match mouse.kind {
         MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
             let row = mouse.row;
             if row == 2 || row == 3 || row == 4 { // Approximate header area

@@ -7,12 +7,16 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "gen-types": "node scripts/gen-types.mjs"
+    "gen-types": "node scripts/gen-types.mjs",
+    "test:e2e": "playwright test",
+    "test:e2e:install": "playwright install --with-deps chromium",
+    "test:lighthouse": "lhci autorun"
   },
   "dependencies": {
     "@walletconnect/ethereum-provider": "2.11.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
+    "react-is": "^19.2.4",
     "react-router-dom": "^6.30.3",
     "recharts": "^3.8.1",
     "viem": "^2.21.0"
@@ -20,6 +24,10 @@
   "devDependencies": {
     "@vitejs/plugin-react": "^6.0.1",
     "openapi-typescript": "^7",
-    "vite": "^8.0.3"
+    "vite": "^8.0.3",
+    "vite-plugin-pwa": "^1.2.0",
+    "workbox-window": "^7.4.0",
+    "@playwright/test": "^1.49.0",
+    "@lhci/cli": "^0.14.0"
   }
 }

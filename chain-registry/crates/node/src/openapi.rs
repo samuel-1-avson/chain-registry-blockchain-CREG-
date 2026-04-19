@@ -494,6 +494,199 @@ pub mod paths {
         ),
     )]
     pub async fn get_validator_profile() {}
+
+    /// Register the caller's validator identity (EVM address ↔ ed25519 pubkey ↔ node id).
+    /// Stores locally and — if the caller is the operator — submits to L1 registry via bridge.
+    #[utoipa::path(
+        post,
+        path = "/v1/validators/register",
+        tag = "validators",
+        request_body(content = Object, description = "alias, evm_address, node_id, ed25519_pubkey"),
+        responses(
+            (status = 200, body = ValidatorRegistration),
+            (status = 400, body = ApiError),
+        ),
+    )]
+    pub async fn register_validator_identity() {}
+
+    /// P2P topology — peer list, role, and connection health.
+    #[utoipa::path(
+        get,
+        path = "/v1/p2p/status",
+        tag = "network",
+        responses((status = 200, body = Object)),
+    )]
+    pub async fn p2p_status() {}
+
+    /// Recent L1 anchor commits — chain-id, L1 block, Merkle root, L1 tx hash.
+    #[utoipa::path(
+        get,
+        path = "/v1/bridge/anchors",
+        tag = "bridge",
+        params(("limit" = Option<usize>, Query, description = "Max anchors (default 50, max 500)")),
+        responses((status = 200, body = [Object])),
+    )]
+    pub async fn bridge_anchors() {}
+
+    /// Governance proposal list mirrored from Governance.sol via the bridge.
+    #[utoipa::path(
+        get,
+        path = "/v1/governance/proposals",
+        tag = "governance",
+        responses((status = 200, body = [Object])),
+    )]
+    pub async fn governance_proposals() {}
+
+    /// Rolling metrics time-series — TPS, block time, validator count, stake, pending depth.
+    #[utoipa::path(
+        get,
+        path = "/v1/metrics/history",
+        tag = "system",
+        params(
+            ("series" = Option<String>, Query, description = "Comma-separated series names"),
+            ("window" = Option<String>, Query, description = "Lookback window (e.g. 1h, 24h)"),
+        ),
+        responses((status = 200, body = Object)),
+    )]
+    pub async fn metrics_history() {}
+
+    /// Detected reorgs — height, old/new tip, depth, timestamp.
+    #[utoipa::path(
+        get,
+        path = "/v1/reorgs",
+        tag = "system",
+        responses((status = 200, body = [Object])),
+    )]
+    pub async fn reorgs() {}
+
+    /// Top addresses by staked / native balance.
+    #[utoipa::path(
+        get,
+        path = "/v1/richlist",
+        tag = "addresses",
+        params(("limit" = Option<usize>, Query, description = "Max entries (default 50, max 500)")),
+        responses((status = 200, body = [Object])),
+    )]
+    pub async fn richlist() {}
+
+    /// Submit a new package for inclusion — enters the pending pool and the validator pipeline.
+    #[utoipa::path(
+        post,
+        path = "/v1/packages",
+        tag = "packages",
+        request_body(content = Object, description = "PublishRequest: canonical, ipfs_cid, payload_hash, publisher, signature"),
+        responses(
+            (status = 200, body = Object),
+            (status = 400, body = ApiError),
+        ),
+    )]
+    pub async fn submit_package() {}
+
+    /// Revoke an existing package (operator / publisher only).
+    #[utoipa::path(
+        post,
+        path = "/v1/packages/{canonical}/revoke",
+        tag = "packages",
+        params(("canonical" = String, Path, description = "Package canonical id")),
+        request_body(content = Object, description = "{ reason: String, signature: String }"),
+        responses(
+            (status = 200, body = Object),
+            (status = 400, body = ApiError),
+        ),
+        security(("OperatorKey" = [])),
+    )]
+    pub async fn revoke_package() {}
+
+    /// Merkle proof for a package, verifiable against the current chain tip header.
+    #[utoipa::path(
+        get,
+        path = "/v1/packages/{canonical}/proof",
+        tag = "packages",
+        params(("canonical" = String, Path, description = "Package canonical id")),
+        responses(
+            (status = 200, body = Object),
+            (status = 404, body = ApiError),
+        ),
+    )]
+    pub async fn get_proof() {}
+
+    /// Gossip endpoint — accept a freshly-signed block from a peer.
+    #[utoipa::path(
+        post,
+        path = "/v1/blocks/announce",
+        tag = "blocks",
+        request_body(content = Object, description = "Signed block payload"),
+        responses(
+            (status = 200, body = Object),
+            (status = 400, body = ApiError),
+        ),
+    )]
+    pub async fn receive_block_announcement() {}
+
+    /// Publisher profile — package count, reputation, key rotation history.
+    #[utoipa::path(
+        get,
+        path = "/v1/publishers/{pubkey}",
+        tag = "addresses",
+        params(("pubkey" = String, Path, description = "Publisher public key or canonical id")),
+        responses(
+            (status = 200, body = Object),
+            (status = 404, body = ApiError),
+        ),
+    )]
+    pub async fn get_publisher() {}
+
+    /// Consensus vote intake — PBFT PREPARE/COMMIT vote from a validator.
+    #[utoipa::path(
+        post,
+        path = "/v1/consensus/vote",
+        tag = "consensus",
+        request_body(content = Object, description = "SignedVote: block_hash, phase, voter, signature"),
+        responses(
+            (status = 200, body = Object),
+            (status = 400, body = ApiError),
+        ),
+    )]
+    pub async fn receive_vote() {}
+
+    /// Rotate a publisher signing key — requires a signed rotation request from the old key.
+    #[utoipa::path(
+        post,
+        path = "/v1/publishers/rotate-key",
+        tag = "addresses",
+        request_body(content = Object, description = "{ old_pubkey, new_pubkey, signature }"),
+        responses(
+            (status = 200, body = Object),
+            (status = 400, body = ApiError),
+        ),
+    )]
+    pub async fn rotate_publisher_key() {}
+
+    /// Global smart search — classifies `q` as block height / hash / EVM address /
+    /// package canonical / publisher and returns candidate matches.
+    #[utoipa::path(
+        get,
+        path = "/v1/search",
+        tag = "system",
+        params(("q" = String, Query, description = "Query string (height, hash, address, canonical, or prefix)")),
+        responses((status = 200, body = Object)),
+    )]
+    pub async fn search_handler() {}
+
+    /// Submit an audit decision against a pending appeal (operator only).
+    #[utoipa::path(
+        post,
+        path = "/v1/appeals/{id}/audit",
+        tag = "system",
+        params(("id" = String, Path, description = "Appeal id")),
+        request_body(content = Object, description = "{ verdict, notes, signature }"),
+        responses(
+            (status = 200, body = Object),
+            (status = 400, body = ApiError),
+        ),
+        security(("OperatorKey" = [])),
+    )]
+    pub async fn submit_audit() {}
 }
 
 // ─── Security schemes ─────────────────────────────────────────────────────────
@@ -528,15 +721,16 @@ impl Modify for SecurityAddon {
         (url = "/", description = "Current host"),
     ),
     tags(
-        (name = "system",       description = "Health and runtime configuration"),
-        (name = "blocks",       description = "Block list, lookup by height or hash"),
+        (name = "system",       description = "Health, runtime configuration, search, metrics, reorgs, appeals"),
+        (name = "blocks",       description = "Block list, lookup by height or hash, gossip intake"),
         (name = "transactions", description = "Transaction lookup and pending pool"),
-        (name = "packages",     description = "Package publish records"),
-        (name = "validators",   description = "Validator identity registrations"),
-        (name = "consensus",    description = "PBFT round state"),
+        (name = "packages",     description = "Package publish records, proofs, revocation"),
+        (name = "validators",   description = "Validator identity registrations and profiles"),
+        (name = "consensus",    description = "PBFT round state and vote intake"),
         (name = "network",      description = "Peer set and P2P topology"),
-        (name = "bridge",       description = "L1 bridge anchor status"),
-        (name = "addresses",    description = "Per-address profiles and activity"),
+        (name = "bridge",       description = "L1 bridge anchor status and commit feed"),
+        (name = "addresses",    description = "Per-address profiles, activity, publishers, rich list"),
+        (name = "governance",   description = "On-chain governance proposals and votes"),
     ),
     paths(
         paths::health,
@@ -556,6 +750,22 @@ impl Modify for SecurityAddon {
         paths::get_address,
         paths::get_address_transactions,
         paths::get_validator_profile,
+        paths::register_validator_identity,
+        paths::p2p_status,
+        paths::bridge_anchors,
+        paths::governance_proposals,
+        paths::metrics_history,
+        paths::reorgs,
+        paths::richlist,
+        paths::submit_package,
+        paths::revoke_package,
+        paths::get_proof,
+        paths::receive_block_announcement,
+        paths::get_publisher,
+        paths::receive_vote,
+        paths::rotate_publisher_key,
+        paths::search_handler,
+        paths::submit_audit,
     ),
     components(schemas(
         ApiError,

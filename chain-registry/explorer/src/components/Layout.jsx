@@ -19,6 +19,7 @@ const NAV = [
   { to: '/richlist', label: 'Rich List' },
   { to: '/reorgs', label: 'Reorgs' },
   { to: '/proof', label: 'Proof' },
+  { to: '/legacy', label: 'Wallet' },
 ]
 
 const navLinkStyle = ({ isActive }) => ({

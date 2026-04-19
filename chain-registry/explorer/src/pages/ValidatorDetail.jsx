@@ -215,7 +215,7 @@ export default function ValidatorDetail() {
 
       {/* ── Recent proposals ── */}
       <section className="ce-card" style={{ padding: 0, overflow: 'hidden' }}>
-        <header style={{ padding: 'var(--space-3) var(--space-4)', borderBottom: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+        <header style={{ padding: 'var(--space-3) var(--space-4)', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
           <h2 style={{ margin: 0, fontSize: 14 }}>Recent proposals</h2>
           <span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>{proposals.length}</span>
         </header>

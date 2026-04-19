@@ -63,7 +63,6 @@ pub fn router(
         .route("/v1/metrics/history", get(metrics_history))
         .route("/v1/reorgs", get(reorgs))
         .route("/v1/richlist", get(richlist))
-        .route("/v1/ws", get(ws_handler))
         // Packages
         .route("/v1/packages/:canonical", get(get_package))
         .route("/v1/packages", get(list_packages).post(submit_package))
@@ -97,9 +96,8 @@ pub fn router(
         .route("/v1/search", get(search_handler))
         // Appeals & AAA
         .route("/v1/appeals/:id/audit", post(submit_audit))
-        // OpenAPI spec + Swagger UI. The JSON is what the explorer's
-        // `npm run gen-types` consumes; Swagger UI is a humans-only browser.
-        .route("/v1/openapi.json", get(openapi_spec))
+        // OpenAPI spec + Swagger UI. SwaggerUi serves both /api-docs (HTML)
+        // and /v1/openapi.json (the JSON the explorer's `gen-types` consumes).
         .merge(SwaggerUi::new("/api-docs").url("/v1/openapi.json", ApiDoc::openapi()))
         // Observability
         .route("/metrics", get(prometheus_metrics))
@@ -209,12 +207,6 @@ fn server_err(msg: impl Into<String>) -> Response {
 
 // ─── Handlers ────────────────────────────────────────────────────────────────
 
-/// Serve the generated OpenAPI schema as JSON. Explorer codegen fetches this
-/// at build time to keep TypeScript types in sync with Rust responses.
-async fn openapi_spec() -> impl IntoResponse {
-    Json(ApiDoc::openapi())
-}
-
 async fn health() -> impl IntoResponse {
     Json(serde_json::json!({
         "status":  "ok",
@@ -244,7 +236,7 @@ async fn chain_stats(State(state): State<SharedState>) -> impl IntoResponse {
     let validators = &s.validator_set.validators;
     let total_stake: u64 = validators.iter().map(|validator| validator.stake).sum();
     let active_count = validators.iter().filter(|v| v.status != "offline").count();
-    let tip = s.chain.stats().current_height;
+    let tip = s.chain.stats().tip_height;
     let finalized = s.bridge_status.last_finalized_eth_block;
     Json(ChainStatsResponse {
         chain: s.chain.stats(),
@@ -260,7 +252,7 @@ async fn chain_stats(State(state): State<SharedState>) -> impl IntoResponse {
         },
         l1_block: finalized,
         pending_tx_count: s.pending_pool.len(),
-        publisher_count: s.publisher_index.len(),
+        publisher_count: s.publisher_index.publisher_count(),
         finalized_height: finalized,
         finalization_lag: tip.saturating_sub(finalized),
     })
@@ -556,10 +548,10 @@ async fn bridge_anchors(State(state): State<SharedState>) -> impl IntoResponse {
     // Synthesise the latest anchor from current bridge state
     if bs.last_finalized_eth_block > 0 {
         anchors.push(serde_json::json!({
-            "l2_height": s.chain.stats().current_height,
+            "l2_height": s.chain.stats().tip_height,
             "l1_block": bs.last_finalized_eth_block,
-            "state_root": bs.last_committed_root,
-            "l1_tx_hash": bs.last_commit_tx_hash,
+            "state_root": bs.current_state_root,
+            "l1_tx_hash": serde_json::Value::Null,
             "committed_at": chrono::Utc::now().to_rfc3339(),
             "gas_used": serde_json::Value::Null,
         }));
@@ -579,7 +571,7 @@ async fn bridge_anchors(State(state): State<SharedState>) -> impl IntoResponse {
 // will scan the chain for proposal transactions.
 async fn governance_proposals(State(_state): State<SharedState>) -> impl IntoResponse {
     Json(serde_json::json!({
-        "proposals": [] as Vec<serde_json::Value>,
+        "proposals": Vec::<serde_json::Value>::new(),
         "total": 0,
         "note": "On-chain governance is planned for a future release.",
     }))
@@ -603,7 +595,7 @@ async fn metrics_history(
 ) -> impl IntoResponse {
     Json(serde_json::json!({
         "range": params.range,
-        "samples": [] as Vec<serde_json::Value>,
+        "samples": Vec::<serde_json::Value>::new(),
         "note": "Server-side metrics accumulation is planned for Sprint 5.",
     }))
 }
@@ -1488,7 +1480,7 @@ async fn search_handler(
 ) -> Response {
     let q = params.q.trim().to_string();
     if q.is_empty() {
-        return Json(serde_json::json!({ "matches": [] as Vec<serde_json::Value> })).into_response();
+        return Json(serde_json::json!({ "matches": Vec::<serde_json::Value>::new() })).into_response();
     }
 
     let s = state.read().await;
@@ -1592,8 +1584,9 @@ async fn search_handler(
             }
         }
         // Scan publisher index
-        for (pubkey, _stats) in s.publisher_index.iter() {
+        for stats in s.publisher_index.all_stats() {
             if matches.len() >= MAX_RESULTS { break; }
+            let pubkey = &stats.pubkey;
             if pubkey.to_ascii_lowercase().contains(&q_lower) {
                 if !matches.iter().any(|m| m.href.contains(pubkey)) {
                     matches.push(SearchMatch {

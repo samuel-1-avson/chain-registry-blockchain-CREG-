@@ -182,7 +182,7 @@ export default function AddressPage() {
 
       {/* ── Activity table ── */}
       <section className="ce-card" style={{ padding: 0, overflow: 'hidden' }}>
-        <header style={{ padding: 'var(--space-3) var(--space-4)', borderBottom: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+        <header style={{ padding: 'var(--space-3) var(--space-4)', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
           <h2 style={{ margin: 0, fontSize: 14 }}>Activity</h2>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <ActivityFilter active={kindFilter} onChange={setKindFilter} />

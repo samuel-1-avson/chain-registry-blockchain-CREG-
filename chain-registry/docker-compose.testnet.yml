@@ -127,7 +127,7 @@ services:
 
   # ── Shared Anvil (local Ethereum) ───────────────────────────────────────────
   anvil:
-    image: ghcr.io/foundry-rs/foundry:stable
+    image: ghcr.io/foundry-rs/foundry:v0.3.0
     container_name: creg-testnet-anvil
     entrypoint: ["anvil", "--host", "0.0.0.0", "--chain-id", "31337", "--block-time", "1", "--accounts", "10"]
     ports:
@@ -144,7 +144,7 @@ services:
 
   # ── Contract Deployer ───────────────────────────────────────────────────────
   deploy-contracts:
-    image: ghcr.io/foundry-rs/foundry:stable
+    image: ghcr.io/foundry-rs/foundry:v0.3.0
     container_name: creg-testnet-deploy
     depends_on:
       anvil:
@@ -181,6 +181,7 @@ services:
       TESTNET_MODE: "true"
       DEPLOYMENT_MANIFEST_PATH: "contracts/deployments/latest.json"
       FOUNDRY_DISABLE_NIGHTLY_WARNING: "1"
+      ETHERSCAN_API_KEY: "dummy"
 
   # ── PostgreSQL Mirror (optional but recommended for testnet) ─────────────────
   postgres:

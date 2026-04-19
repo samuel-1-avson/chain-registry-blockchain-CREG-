@@ -123,8 +123,8 @@ function PhasePipeline({ current }) {
           <div key={it.phase} style={{
             padding: '8px 10px',
             borderRadius: 6,
-            background: reached ? 'var(--accent-primary-dim)' : 'var(--surface)',
-            border: `1px solid ${active ? 'var(--accent-primary)' : 'var(--border-subtle)'}`,
+            background: reached ? 'var(--border-accent)' : 'var(--surface)',
+            border: `1px solid ${active ? 'var(--accent-primary)' : 'var(--border)'}`,
             color: reached ? 'var(--text-primary)' : 'var(--text-tertiary)',
             fontSize: 12,
             textAlign: 'center',
@@ -181,7 +181,7 @@ function Legend() {
     { color: 'var(--accent-success)', label: 'approved' },
     { color: 'var(--accent-error)',   label: 'rejected' },
     { color: 'var(--accent-warning)', label: 'voted' },
-    { color: 'var(--border-subtle)',  label: 'pending' },
+    { color: 'var(--border)',         label: 'pending' },
   ]
   return (
     <div style={{ display: 'flex', gap: 10, fontSize: 10, color: 'var(--text-tertiary)' }}>
@@ -202,7 +202,7 @@ function VoterTile({ validator, state }) {
       ? 'var(--accent-error)'
       : state === 'voted'
         ? 'var(--accent-warning)'
-        : 'var(--border-subtle)'
+        : 'var(--border)'
   const textColor = state === 'pending' ? 'var(--text-tertiary)' : 'var(--text-primary)'
   return (
     <Link

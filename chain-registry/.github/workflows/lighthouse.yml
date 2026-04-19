@@ -1,0 +1,52 @@
+name: Explorer Lighthouse
+
+on:
+  pull_request:
+    paths:
+      - 'chain-registry/explorer/**'
+      - '.github/workflows/lighthouse.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'chain-registry/explorer/**'
+  workflow_dispatch:
+
+jobs:
+  lighthouse:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: chain-registry/explorer
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci --no-fund --no-audit
+
+      - name: Build production bundle
+        run: npm run build
+        env:
+          VITE_NETWORK: testnet
+
+      - name: Start preview server
+        run: npx vite preview --host 127.0.0.1 --port 3000 &
+        shell: bash
+
+      - name: Wait for server
+        run: npx wait-on http://127.0.0.1:3000/ --timeout 30000
+
+      - name: Run Lighthouse CI
+        run: npx @lhci/cli@0.14.x autorun
+
+      - name: Upload Lighthouse report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lighthouse-report
+          path: chain-registry/explorer/.lighthouseci
+          retention-days: 14

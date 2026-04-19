@@ -1,9 +1,69 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { VitePWA } from 'vite-plugin-pwa'
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    VitePWA({
+      registerType: 'autoUpdate',
+      injectRegister: 'auto',
+      includeAssets: ['pwa-icon.svg'],
+      manifest: {
+        name: 'Chain Registry Explorer',
+        short_name: 'CRegExplorer',
+        description: 'Block explorer for the Chain Registry L1 — blocks, validators, packages, bridge, governance.',
+        theme_color: '#0a0b0f',
+        background_color: '#0a0b0f',
+        display: 'standalone',
+        start_url: '/',
+        scope: '/',
+        icons: [
+          { src: 'pwa-icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any maskable' },
+        ],
+      },
+      workbox: {
+        globPatterns: ['**/*.{js,css,html,svg,woff2}'],
+        navigateFallback: '/index.html',
+        navigateFallbackDenylist: [/^\/v1\//, /^\/rpc\//, /^\/api-docs/],
+        runtimeCaching: [
+          {
+            urlPattern: /^https?:\/\/[^/]+\/v1\/chain\/stats$/,
+            handler: 'StaleWhileRevalidate',
+            options: {
+              cacheName: 'api-chain-stats',
+              expiration: { maxEntries: 4, maxAgeSeconds: 60 },
+            },
+          },
+          {
+            urlPattern: /^https?:\/\/[^/]+\/v1\/blocks(\?.*)?$/,
+            handler: 'StaleWhileRevalidate',
+            options: {
+              cacheName: 'api-blocks-list',
+              expiration: { maxEntries: 20, maxAgeSeconds: 300 },
+            },
+          },
+          {
+            urlPattern: /^https?:\/\/[^/]+\/v1\/blocks\/\d+$/,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'api-block-detail',
+              expiration: { maxEntries: 200, maxAgeSeconds: 86400 },
+            },
+          },
+          {
+            urlPattern: /^https:\/\/fonts\.(googleapis|gstatic)\.com\/.*/,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'google-fonts',
+              expiration: { maxEntries: 20, maxAgeSeconds: 31536000 },
+            },
+          },
+        ],
+      },
+    }),
+  ],
   define: {
     // Tree-shake Anvil test accounts out of mainnet builds
     '__IS_TESTNET__': JSON.stringify((process.env.VITE_NETWORK || 'testnet') !== 'mainnet'),

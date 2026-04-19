@@ -15,9 +15,9 @@ ENV VITE_CREG_TOKEN=$VITE_CREG_TOKEN
 ENV VITE_STAKING_ADDR=$VITE_STAKING_ADDR
 ENV VITE_NETWORK=$VITE_NETWORK
 
-# Copy package files
-COPY package*.json ./
-RUN if [ -f package-lock.json ]; then npm ci; else npm install --no-fund --no-audit; fi
+# Copy package files + .npmrc (legacy-peer-deps config)
+COPY package*.json .npmrc* ./
+RUN if [ -f package-lock.json ]; then npm ci --no-fund --no-audit; else npm install --no-fund --no-audit; fi
 
 # Copy source
 COPY . .
