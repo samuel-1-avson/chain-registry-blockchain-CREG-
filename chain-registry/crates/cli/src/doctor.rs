@@ -250,7 +250,7 @@ async fn run_testnet(options: DoctorOptions<'_>) -> Result<()> {
         .explorer_url
         .map(str::to_string)
         .or_else(|| std::env::var("CREG_EXPLORER_URL").ok())
-        .unwrap_or_else(|| "http://127.0.0.1:3000".to_string());
+        .unwrap_or_else(|| "http://127.0.0.1:3007".to_string());
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))

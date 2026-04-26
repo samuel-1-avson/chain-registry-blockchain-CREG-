@@ -3,7 +3,7 @@
   "network": "testnet",
   "genesis_time": "2026-04-01T00:00:00Z",
   "description": "Chain Registry Testnet Genesis Configuration",
-  "architecture_note": "Single validator testnet configuration. One validator per deployment.",
+  "architecture_note": "Permissionless testnet — bootstrap host runs node-1; additional validators join via docker-compose.validator.yml. Block-time and stake parameters mirror the chain-spec template at testnet/chain-spec.example.json.",
   
   "initial_validators": [
     {
@@ -43,7 +43,7 @@
     "slash_penalty_low": 2,
     "slash_penalty_medium": 10,
     "slash_penalty_critical": 30,
-    "max_validators": 10
+    "max_validators": 50
   },
   
   "economic_params": {

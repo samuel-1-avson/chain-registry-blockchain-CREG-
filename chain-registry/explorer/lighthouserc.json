@@ -2,11 +2,11 @@
   "ci": {
     "collect": {
       "url": [
-        "http://localhost:3000/",
-        "http://localhost:3000/blocks",
-        "http://localhost:3000/validators",
-        "http://localhost:3000/packages",
-        "http://localhost:3000/about"
+        "http://localhost:3007/",
+        "http://localhost:3007/blocks",
+        "http://localhost:3007/validators",
+        "http://localhost:3007/packages",
+        "http://localhost:3007/about"
       ],
       "numberOfRuns": 1,
       "settings": {

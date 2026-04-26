@@ -69,9 +69,9 @@ up-testnet:
 	@echo "  Node API:     http://localhost:8080/v1/health"
 	@echo "  Faucet:       http://localhost:8082/health"
 	@echo "  Relayer:      http://localhost:8083/health"
-	@echo "  Web Explorer: http://localhost:3000"
+	@echo "  Web Explorer: http://localhost:3007"
 	@echo "  Anvil RPC:    http://localhost:8545"
-	@echo "  PostgreSQL:   localhost:5432"
+	@echo "  PostgreSQL:   localhost:5437"
 	@echo ""
 	@echo "Tail logs with: make logs-testnet"
 

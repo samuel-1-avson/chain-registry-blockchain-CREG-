@@ -6,6 +6,7 @@ mod advanced;
 mod audit;
 mod batch;
 mod blocks;
+mod chain_spec;
 mod config_file;
 mod diff;
 mod doctor;
@@ -389,6 +390,12 @@ enum Commands {
     Testnet {
         #[command(subcommand)]
         command: TestnetCommands,
+    },
+
+    /// Chain spec operations
+    ChainSpec {
+        #[command(subcommand)]
+        command: chain_spec::ChainSpecCommands,
     },
 }
 
@@ -1130,6 +1137,9 @@ async fn run(cli: Cli) -> Result<()> {
         },
         Commands::Init => {
             wizard::run().await?;
+        }
+        Commands::ChainSpec { command } => {
+            chain_spec::run(command).await?;
         }
         Commands::Testnet { command } => match command {
             TestnetCommands::Drip {

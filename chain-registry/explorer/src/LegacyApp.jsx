@@ -442,7 +442,7 @@ function App() {
   const sseReconnectTimerRef = useRef(null)
 
   const browserHost = typeof window !== 'undefined' && window.location.hostname ? window.location.hostname : '127.0.0.1'
-  const explorerOrigin = typeof window !== 'undefined' ? window.location.origin : 'http://127.0.0.1:3000'
+  const explorerOrigin = typeof window !== 'undefined' ? window.location.origin : 'http://127.0.0.1:3007'
   const directNodeUrl = `http://${browserHost}:8080`
   const directFaucetUrl = `http://${browserHost}:8082`
   const directRpcUrl = `http://${browserHost}:8545`

@@ -32,7 +32,7 @@ x-web-explorer-image: &web-explorer-image
       VITE_CREG_TOKEN: ${TESTNET_TOKEN_ADDR:-}
       VITE_STAKING_ADDR: ${TESTNET_STAKING_ADDR:-}
       VITE_DEV_MODE: ${VITE_DEV_MODE:-true}
-      # Leave VITE_API_BASE empty so the SPA uses the same origin (port 3000).
+      # Leave VITE_API_BASE empty so the SPA uses the same origin (port 3007).
       # nginx proxies /v1/* → node-1:8080 so no CORS issues arise.
       VITE_API_BASE: ""
 
@@ -192,7 +192,7 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-creg}
       - POSTGRES_DB=${POSTGRES_DB:-chain_registry}
     ports:
-      - "5432:5432"
+      - "5437:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./testnet/init-testnet-db.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
@@ -215,8 +215,8 @@ services:
           - node
     ports:
       - "8080:8080"
-      - "50051:50051"
-      - "9000:9000"
+      - "50057:50051"
+      - "9007:9000"
     volumes:
       - node-1-data:/data
       - ./circuits:/app/circuits:ro
@@ -298,7 +298,7 @@ services:
       # PoW defaults to ENABLED. Set FAUCET_POW_DISABLED=true in .env.testnet only
       # for internal testing where the browser PoW friction is unwanted.
       FAUCET_POW_DISABLED: "${FAUCET_POW_DISABLED:-false}"
-      FAUCET_EXPLORER_URL: "http://localhost:3000"
+      FAUCET_EXPLORER_URL: "http://localhost:3007"
       FAUCET_PUBLIC_RPC_URL: "http://localhost:8545"
       FAUCET_CHAIN_ID: "31337"
       # Postgres connection for persistent rate-limit state (survives container restarts).
@@ -354,7 +354,7 @@ services:
     <<: *web-explorer-image
     container_name: creg-testnet-web-explorer
     ports:
-      - "3000:80"
+      - "3007:80"
     depends_on:
       node-1:
         condition: service_healthy

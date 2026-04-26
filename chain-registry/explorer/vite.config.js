@@ -69,7 +69,7 @@ export default defineConfig({
     '__IS_TESTNET__': JSON.stringify((process.env.VITE_NETWORK || 'testnet') !== 'mainnet'),
   },
   server: {
-    port: 3000,
+    port: 3007,
     host: true,
     proxy: {
       '/v1': 'http://127.0.0.1:8080',

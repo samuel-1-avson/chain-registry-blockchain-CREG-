@@ -303,7 +303,7 @@ if ($Status) {
     $endpoints = @(
         @{ Name = "Node API";     Url = "http://localhost:8080/v1/health" },
         @{ Name = "Faucet";       Url = "http://localhost:8082/health" },
-        @{ Name = "Explorer";     Url = "http://localhost:3000" },
+        @{ Name = "Explorer";     Url = "http://localhost:3007" },
         @{ Name = "Anvil RPC";    Url = "http://localhost:8545"; Method = "POST"; Body = '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}' }
     )
     foreach ($ep in $endpoints) {
@@ -427,7 +427,7 @@ $requiredPorts = @(
     @{ Port = 8080; Name = "Node API" },
     @{ Port = 8545; Name = "Anvil RPC" },
     @{ Port = 5432; Name = "PostgreSQL" },
-    @{ Port = 3000; Name = "Explorer" }
+    @{ Port = 3007; Name = "Explorer" }
 )
 if ($Mode -eq "testnet") {
     $requiredPorts += @{ Port = 8082; Name = "Faucet" }
@@ -713,7 +713,7 @@ if ($Mode -eq "testnet") {
 
     Write-Step "7.2" "Starting Web Explorer"
     Invoke-Compose @("up", "-d", "--no-deps", "web-explorer") | Out-Null
-    $explorerReady = Wait-ForEndpoint -Name "Explorer" -Url "http://localhost:3000" -TimeoutSecs 30
+    $explorerReady = Wait-ForEndpoint -Name "Explorer" -Url "http://localhost:3007" -TimeoutSecs 30
     if (-not $explorerReady) {
         Write-Warn "Explorer not ready — web UI won't be accessible"
     }
@@ -798,7 +798,7 @@ if ($Mode -eq "testnet") {
     Write-Host "http://localhost:8082" -ForegroundColor White
 }
 Write-Host "  Web Explorer:  " -NoNewline -ForegroundColor DarkGray
-Write-Host "http://localhost:3000" -ForegroundColor White
+Write-Host "http://localhost:3007" -ForegroundColor White
 Write-Host "  Anvil RPC:     " -NoNewline -ForegroundColor DarkGray
 Write-Host "http://localhost:8545" -ForegroundColor White
 Write-Host "  Prometheus:    " -NoNewline -ForegroundColor DarkGray

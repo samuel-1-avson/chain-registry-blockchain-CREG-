@@ -1,0 +1,228 @@
+# Sepolia Testnet Deployment Pipeline
+# Deploys contracts, updates chain-spec, signs it, and commits artifacts.
+#
+# Usage:
+#   1. Go to Actions → Sepolia Deploy
+#   2. Click "Run workflow"
+#   3. Enter deployer private key (with leading 0x) and Infura RPC URL
+#   4. Workflow deploys, signs, commits, and optionally publishes
+
+name: Sepolia Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      deployer_key:
+        description: 'Deployer private key (0x...)'
+        required: true
+        type: string
+      sepolia_rpc:
+        description: 'Sepolia RPC URL (e.g. https://sepolia.infura.io/v3/...)'
+        required: true
+        type: string
+      etherscan_key:
+        description: 'Etherscan API key (optional, for verification)'
+        required: false
+        type: string
+      verify:
+        description: 'Verify contracts on Etherscan'
+        required: false
+        type: boolean
+        default: false
+      publish_spec:
+        description: 'Publish signed chain-spec to GitHub Pages'
+        required: false
+        type: boolean
+        default: false
+      governance_threshold:
+        description: 'Governance threshold (default: 1)'
+        required: false
+        type: string
+        default: '1'
+
+env:
+  FOUNDRY_PROFILE: default
+
+jobs:
+  # ============================================================================
+  # Deploy contracts to Sepolia
+  # ============================================================================
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly
+
+      - name: Cache Foundry build
+        uses: actions/cache@v4
+        with:
+          path: |
+            contracts/cache
+            contracts/out
+          key: foundry-${{ hashFiles('contracts/**/*.sol') }}
+
+      - name: Deploy to Sepolia
+        id: deploy
+        env:
+          SEPOLIA_RPC_URL: ${{ github.event.inputs.sepolia_rpc }}
+          DEPLOYER_KEY: ${{ github.event.inputs.deployer_key }}
+          CREG_BRIDGE_KEY: ${{ github.event.inputs.deployer_key }}
+          GOVERNANCE_THRESHOLD: ${{ github.event.inputs.governance_threshold }}
+        run: |
+          forge script contracts/script/DeploySepolia.s.sol:DeploySepolia \
+            --rpc-url "$SEPOLIA_RPC_URL" \
+            --private-key "$DEPLOYER_KEY" \
+            --broadcast \
+            --chain-id 11155111 \
+            -vvv
+
+      - name: Verify on Etherscan (optional)
+        if: github.event.inputs.verify == 'true' && github.event.inputs.etherscan_key != ''
+        env:
+          SEPOLIA_RPC_URL: ${{ github.event.inputs.sepolia_rpc }}
+          DEPLOYER_KEY: ${{ github.event.inputs.deployer_key }}
+          ETHERSCAN_API_KEY: ${{ github.event.inputs.etherscan_key }}
+        run: |
+          forge script contracts/script/DeploySepolia.s.sol:DeploySepolia \
+            --rpc-url "$SEPOLIA_RPC_URL" \
+            --private-key "$DEPLOYER_KEY" \
+            --verify \
+            --etherscan-api-key "$ETHERSCAN_API_KEY" \
+            --chain-id 11155111 \
+            --resume \
+            -vvv
+        continue-on-error: true
+
+      # ============================================================================
+      # Sign chain spec
+      # ============================================================================
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build signing tools
+        run: cargo build --examples --package common
+
+      - name: Patch chain-spec with deployed addresses
+        run: |
+          MANIFEST="contracts/deployments/sepolia-latest.json"
+          SPEC="testnet/chain-spec.sepolia.json"
+
+          # Extract addresses using jq
+          GOV=$(jq -r '.governance' "$MANIFEST")
+          REG=$(jq -r '.registry' "$MANIFEST")
+          STK=$(jq -r '.staking' "$MANIFEST")
+          REP=$(jq -r '.reputation' "$MANIFEST")
+          VRF=$(jq -r '.vrf' "$MANIFEST")
+          ZK=$(jq -r '.zkVerifier' "$MANIFEST")
+          APP=$(jq -r '.appeal' "$MANIFEST")
+          TOK=$(jq -r '.cregToken' "$MANIFEST")
+          VAL=$(jq -r '.validatorRewards' "$MANIFEST")
+          PIN=$(jq -r '.pinningRewards' "$MANIFEST")
+
+          # Patch spec
+          jq --arg gov "$GOV" --arg reg "$REG" --arg stk "$STK" \
+             --arg rep "$REP" --arg vrf "$VRF" --arg zk "$ZK" \
+             --arg app "$APP" --arg tok "$TOK" --arg val "$VAL" --arg pin "$PIN" \
+             '.contracts.governance = $gov |
+              .contracts.registry = $reg |
+              .contracts.staking = $stk |
+              .contracts.reputation = $rep |
+              .contracts.vrf = $vrf |
+              .contracts.zk_verifier = $zk |
+              .contracts.appeal = $app |
+              .contracts.creg_token = $tok |
+              .contracts.validator_rewards = $val |
+              .contracts.pinning_rewards = $pin |
+              .genesis_time = now | todate' \
+             "$SPEC" > "${SPEC}.tmp" && mv "${SPEC}.tmp" "$SPEC"
+
+      - name: Compute genesis hash
+        id: genesis
+        run: |
+          HASH=$(cargo run --example compute_genesis_hash --package common -- testnet/chain-spec.sepolia.json)
+          echo "hash=$HASH" >> "$GITHUB_OUTPUT"
+          jq --arg hash "$HASH" '.genesis_hash = $hash' testnet/chain-spec.sepolia.json > tmp.json && mv tmp.json testnet/chain-spec.sepolia.json
+
+      - name: Sign chain spec
+        env:
+          SPEC_SIGNING_KEY: "9d91e9e0d82a02b7be8c40a522d899eea9eeffad244323be3e568973211f3a6d"
+        run: |
+          SIG=$(cargo run --example sign_chain_spec --package common -- testnet/chain-spec.sepolia.json "$SPEC_SIGNING_KEY")
+          echo "$SIG" > testnet/chain-spec.sepolia.json.sig
+
+      - name: Verify signature
+        run: |
+          cargo run --example verify_chain_spec --package common \
+            -- testnet/chain-spec.sepolia.json \
+            "$(cat testnet/chain-spec.sepolia.json.sig)"
+
+      # ============================================================================
+      # Commit deployment artifacts
+      # ============================================================================
+      - name: Commit artifacts
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add contracts/deployments/sepolia-latest.json
+          git add testnet/chain-spec.sepolia.json
+          git add testnet/chain-spec.sepolia.json.sig
+          git commit -m "chore: Sepolia deployment + signed chain-spec
+
+          Deployer: $(jq -r '.deployer' contracts/deployments/sepolia-latest.json)
+          Genesis Hash: $(jq -r '.genesis_hash' testnet/chain-spec.sepolia.json)
+          Block: $(jq -r '.deployedAt' contracts/deployments/sepolia-latest.json)" || true
+          git push
+
+      # ============================================================================
+      # Publish to GitHub Pages (optional)
+      # ============================================================================
+      - name: Prepare Pages artifact
+        if: github.event.inputs.publish_spec == 'true'
+        run: |
+          mkdir -p _spec
+          cp testnet/chain-spec.sepolia.json _spec/chain-spec.json
+          cp testnet/chain-spec.sepolia.json.sig _spec/chain-spec.json.sig
+
+      - name: Upload Pages artifact
+        if: github.event.inputs.publish_spec == 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _spec
+
+      - name: Deploy to GitHub Pages
+        if: github.event.inputs.publish_spec == 'true'
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Summary
+        run: |
+          echo "## ✅ Sepolia Deployment Complete" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Contract | Address |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|----------|---------|" >> "$GITHUB_STEP_SUMMARY"
+          jq -r 'to_entries | .[] | select(.key | test("^(governance|registry|staking|reputation|vrf|zkVerifier|appeal|cregToken|validatorRewards|pinningRewards)$")) | "| \(.key) | `\(.value)` |"' contracts/deployments/sepolia-latest.json >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Genesis Hash:** \`$(jq -r '.genesis_hash' testnet/chain-spec.sepolia.json)\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Spec URL:** \`https://<your-org>.github.io/<your-repo>/chain-spec.json\`" >> "$GITHUB_STEP_SUMMARY"

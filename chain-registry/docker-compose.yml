@@ -235,7 +235,7 @@ services:
     image: nginx:alpine
     container_name: creg-web-explorer
     ports:
-      - "3000:80"
+      - "3007:80"
     volumes:
       - ./explorer/dist:/usr/share/nginx/html:ro
       - ./nginx-explorer.conf:/etc/nginx/conf.d/default.conf:ro

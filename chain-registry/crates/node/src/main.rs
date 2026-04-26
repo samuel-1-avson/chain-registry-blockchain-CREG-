@@ -26,6 +26,10 @@ mod rate_limit;
 mod state;
 mod sync;
 mod validator_pipeline;
+// Phase-1 scaffold for chain-derived validator set. Compiled and tested but
+// not yet wired into runtime — see docs/VALIDATOR_SET_SYNC_DESIGN.md.
+mod chain_spec_boot;
+mod validator_set_sync;
 
 use alloy::{
     providers::{Provider, ProviderBuilder},
@@ -137,6 +141,62 @@ fn wei_to_creg_u64(value: alloy::primitives::U256) -> u64 {
     whole_creg.to_string().parse::<u64>().unwrap_or(u64::MAX)
 }
 
+/// Verify the L1 RPC reports the chain ID we expect. Operators set
+/// `CREG_EXPECTED_L1_CHAIN_ID` to e.g. `11155111` (Sepolia) or `1` (mainnet)
+/// to guard against silently joining the wrong settlement chain — a very easy
+/// misconfiguration when copying contract addresses between environments.
+///
+/// Skipped when the env var is unset, so local Anvil dev keeps working.
+async fn validate_l1_chain_id(rpc_url: &str, expected_from_spec: Option<u64>) -> Result<()> {
+    let expected = if let Some(spec_id) = expected_from_spec {
+        spec_id
+    } else {
+        match std::env::var("CREG_EXPECTED_L1_CHAIN_ID") {
+            Ok(v) if !v.trim().is_empty() => v.trim().parse().map_err(|_| {
+                anyhow::anyhow!(
+                    "CREG_EXPECTED_L1_CHAIN_ID must be a positive integer (got {:?})",
+                    v
+                )
+            })?,
+            _ => return Ok(()),
+        }
+    };
+
+    let client = reqwest::Client::new();
+    let response: serde_json::Value = client
+        .post(rpc_url)
+        .json(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "eth_chainId",
+            "params": [],
+            "id": 1,
+        }))
+        .send()
+        .await?
+        .json()
+        .await?;
+
+    let raw = response
+        .get("result")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("eth_chainId returned no result from {}", rpc_url))?;
+    let observed = u64::from_str_radix(raw.trim_start_matches("0x"), 16)
+        .map_err(|_| anyhow::anyhow!("eth_chainId returned non-hex value {:?}", raw))?;
+
+    if observed != expected {
+        anyhow::bail!(
+            "L1 chain id mismatch — CREG_ETH_RPC ({}) reports chain id {} but \
+             CREG_EXPECTED_L1_CHAIN_ID is {}. Refusing to start; this would \
+             settle bridge transactions on the wrong network.",
+            rpc_url,
+            observed,
+            expected
+        );
+    }
+    tracing::info!("  L1 chain id: {} (verified)", observed);
+    Ok(())
+}
+
 async fn fetch_contract_code(
     client: &reqwest::Client,
     rpc_url: &str,
@@ -230,7 +290,105 @@ async fn main() -> Result<()> {
         .with_target(true)
         .init();
 
-    let config = config::NodeConfig::from_env();
+    let mut config = config::NodeConfig::from_env();
+
+    // ── Chain Spec Boot Validation ──────────────────────────────────────────────
+    // Replaces the "read N envs and pray" model with a single fetched, signed,
+    // validated chain spec. See docs/CHAIN_SPEC_DESIGN.md.
+
+    let spec_url = std::env::var("CREG_CHAIN_SPEC_URL").ok();
+    let spec_offline = std::env::var("CREG_CHAIN_SPEC_OFFLINE").unwrap_or_default() == "true";
+    let pinned_genesis_hash = std::env::var("CREG_GENESIS_HASH").ok();
+    let pinned_chain_id = std::env::var("CREG_CHAIN_ID").ok();
+
+    let chain_spec = match chain_spec_boot::resolve_chain_spec(
+        spec_url.as_deref(),
+        &config.data_dir,
+        spec_offline,
+    ).await {
+        Ok(spec) => {
+            tracing::info!(
+                "Chain spec resolved: {} (version {})",
+                spec.chain_id,
+                spec.spec_version
+            );
+            Some(spec)
+        }
+        Err(e) if spec_url.is_none() => {
+            tracing::warn!(
+                "CREG_CHAIN_SPEC_URL not set; falling back to legacy env-based config: {}",
+                e
+            );
+            None
+        }
+        Err(e) => {
+            anyhow::bail!("Failed to resolve chain spec: {}", e);
+        }
+    };
+
+    // If we have a spec, run the full 8-step validation.
+    if let Some(spec) = &chain_spec {
+        // Step 2: Verify signature (pinned pubkey from binary build)
+        let pinned_pubkey = option_env!("CREG_SPEC_SIGNING_PUBKEY")
+            .unwrap_or("0000000000000000000000000000000000000000000000000000000000000000");
+
+        if pinned_pubkey.chars().all(|c| c == '0') {
+            tracing::warn!(
+                "CREG_SPEC_SIGNING_PUBKEY is not set — skipping spec signature verification (dev build)"
+            );
+        } else {
+            let sig = chain_spec_boot::fetch_spec_signature(&spec.signing.detached_signature_url)
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to fetch spec signature: {}", e))?;
+            spec.verify_signature(&sig, pinned_pubkey)
+                .map_err(|e| anyhow::anyhow!("Spec signature invalid: {}", e))?;
+            tracing::info!("Spec signature verified");
+        }
+
+        // Step 3: Schema validation (spec_version)
+        if spec.spec_version != common::CURRENT_SPEC_VERSION {
+            anyhow::bail!(
+                "Unknown spec_version={}. This binary supports version {} only.",
+                spec.spec_version,
+                common::CURRENT_SPEC_VERSION
+            );
+        }
+
+        // Step 4: Pinning checks
+        if let Some(expected) = &pinned_chain_id {
+            if &spec.chain_id != expected {
+                anyhow::bail!(
+                    "chain_id mismatch — CREG_CHAIN_ID={} but spec says {}. Refusing to start.",
+                    expected,
+                    spec.chain_id
+                );
+            }
+        }
+
+        let computed_genesis_hash = spec
+            .compute_genesis_hash()
+            .map_err(|e| anyhow::anyhow!("Failed to compute genesis hash: {}", e))?;
+        if let Some(expected) = &pinned_genesis_hash {
+            if &computed_genesis_hash != expected {
+                anyhow::bail!(
+                    "genesis_hash mismatch — CREG_GENESIS_HASH={} but spec computes {}. Refusing to start.",
+                    expected,
+                    computed_genesis_hash
+                );
+            }
+        }
+        tracing::info!("Computed genesis hash: {}", computed_genesis_hash);
+
+        // Step 5: L1 connectivity probe (already exists; now driven by spec)
+        validate_l1_chain_id(&config.eth_rpc_url, Some(spec.l1.chain_id)).await?;
+
+        // Step 6: Contract bytecode probe (warn-only on testnet)
+        // We run this after applying the spec so config has the right addresses.
+        // Step 8 is applied below after legacy validation.
+    } else {
+        // Legacy path: use env vars only
+        validate_l1_chain_id(&config.eth_rpc_url, None).await?;
+    }
 
     // ── Validate configuration early — fail fast with clear messages ──────────
     let config_errors = config.validate();
@@ -239,15 +397,30 @@ async fn main() -> Result<()> {
         for err in &config_errors {
             tracing::warn!("  ✗ {}", err);
         }
-        // Non-fatal for warnings (e.g. zero registry addr), but validator key
-        // absence on a validator node is a hard stop.
         let hard_errors: Vec<_> = config_errors
             .iter()
-            .filter(|e| e.contains("CREG_VALIDATOR_KEY"))
+            .filter(|e| {
+                e.contains("CREG_VALIDATOR_KEY")
+                    || e.contains("CREG_BRIDGE_KEY")
+                    || e.contains("CREG_VALIDATOR_SET entry")
+            })
             .collect();
         if !hard_errors.is_empty() {
-            anyhow::bail!("Cannot start validator node due to configuration errors. Fix the above and restart.");
+            anyhow::bail!("Cannot start node due to configuration errors. Fix the above and restart.");
         }
+    }
+
+    // Genesis-hash pin (legacy path). Always log the computed hash so operators can grab it
+    // for their chain spec; if CREG_GENESIS_HASH is set, also enforce match.
+    match config.validate_genesis_hash() {
+        Ok(hash) => tracing::info!("  genesis hash: 0x{}", hash),
+        Err(msg) => anyhow::bail!(msg),
+    }
+
+    // Apply chain spec to config (Step 8) AFTER legacy validation so env overrides win.
+    if let Some(spec) = &chain_spec {
+        config.apply_chain_spec(spec);
+        tracing::info!("Chain spec applied to runtime config");
     }
 
     validate_contract_addresses(&config).await?;
@@ -390,6 +563,32 @@ async fn main() -> Result<()> {
         Arc::clone(&state),
         Arc::clone(&admission_store),
     ));
+
+    // ── Validator set sync (Phase 1: shadow mode) ───────────────────────────────
+    {
+        let sync_config = validator_set_sync::SyncConfig {
+            eth_rpc_url: config.eth_rpc_url.clone(),
+            staking_addr: config.staking_addr.parse().unwrap_or_else(|_| {
+                tracing::warn!("Invalid staking address; validator set sync disabled");
+                alloy::primitives::Address::ZERO
+            }),
+            finality_lag_blocks: if config.is_testnet { 0 } else { 6 },
+            poll_interval_secs: 30,
+            start_block: None,
+        };
+        if sync_config.staking_addr != alloy::primitives::Address::ZERO {
+            let sync_state = Arc::clone(&state);
+            tokio::spawn(async move {
+                if let Err(e) = validator_set_sync::run(
+                    sync_config,
+                    validator_set_sync::SyncMode::Shadow,
+                    sync_state,
+                ).await {
+                    tracing::error!("Validator set sync worker crashed: {}", e);
+                }
+            });
+        }
+    }
 
     // ── Start gRPC Server (Industrial Speed) ──────────────────────────────────
     let grpc_state = Arc::clone(&state);

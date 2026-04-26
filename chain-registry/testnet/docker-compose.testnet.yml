@@ -1,1 +1,188 @@
-# Chain Registry Testnet# Complete local testnet environment for development and testing# # Usage:#   docker-compose -f docker-compose.testnet.yml up -d#   docker-compose -f docker-compose.testnet.yml logs -f## Services:#   - anvil: Local Ethereum testnet (pre-funded accounts)#   - ipfs: IPFS node for package storage#   - postgres: PostgreSQL for chain data#   - creg-node: Chain Registry node (testnet mode)#   - faucet: Test token faucet service#   - explorer: Web-based block explorerversion: "3.8"services:  # ============================================================================  # Local Ethereum Testnet (Anvil)  # ============================================================================  anvil:    image: ghcr.io/foundry-rs/foundry:latest    container_name: creg-testnet-anvil    command: >      anvil       --fork-url ${ANVIL_FORK_URL:-}      --block-time 2      --accounts 20      --balance 10000      --chain-id 31337      --host 0.0.0.0      --state /data/anvil-state.json    ports:      - "8545:8545"    volumes:      - anvil-data:/data    networks:      - creg-testnet    healthcheck:      test: ["CMD", "cast", "block-number", "--rpc-url", "http://localhost:8545"]      interval: 5s      timeout: 5s      retries: 5    restart: unless-stopped  # ============================================================================  # IPFS Node  # ============================================================================  ipfs:    image: ipfs/kubo:latest    container_name: creg-testnet-ipfs    volumes:      - ipfs-data:/data/ipfs    ports:      - "5001:5001"      - "4001:4001"      - "8080:8080"    networks:      - creg-testnet    command: >      daemon --migrate=true --enable-gc    healthcheck:      test: ["CMD-SHELL", "ipfs id || exit 1"]      interval: 5s      timeout: 5s      retries: 10      start_period: 10s    restart: unless-stopped  # ============================================================================  # PostgreSQL Database  # ============================================================================  postgres:    image: postgres:15-alpine    container_name: creg-testnet-postgres    environment:      POSTGRES_USER: creg      POSTGRES_PASSWORD: testnet_password      POSTGRES_DB: creg_testnet    volumes:      - postgres-data:/var/lib/postgresql/data      - ./init-testnet-db.sql:/docker-entrypoint-initdb.d/init.sql    ports:      - "5432:5432"    networks:      - creg-testnet    healthcheck:      test: ["CMD-SHELL", "pg_isready -U creg -d creg_testnet"]      interval: 5s      timeout: 5s      retries: 5    restart: unless-stopped  # ============================================================================  # Contract Deployer (one-time setup)  # ============================================================================  deploy-contracts:    build:      context: ..      dockerfile: testnet/Dockerfile.deploy    container_name: creg-testnet-deployer    volumes:      - contract-artifacts:/artifacts    environment:      - RPC_URL=http://anvil:8545      - DEPLOYER_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80    networks:      - creg-testnet    depends_on:      anvil:        condition: service_healthy    profiles:      - setup    command: >      sh -c "        echo 'Deploying Test CREG Token...' &&        forge create contracts/testnet/TestCregToken.sol:TestCregToken           --rpc-url http://anvil:8545           --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80          --constructor-args 'Test CREG Token' 'tCREG'          --json > /artifacts/token.json &&                TOKEN_ADDR=\$(cat /artifacts/token.json | grep -o '\"deployedTo\":\"[^\"]*\"' | cut -d'\"' -f4) &&        echo \"Token deployed at: $$TOKEN_ADDR\" &&                echo 'Deploying Test Staking Contract...' &&        forge create contracts/testnet/TestStaking.sol:TestStaking \          --rpc-url http://anvil:8545 \          --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \          --constructor-args $$TOKEN_ADDR \          --json > /artifacts/staking.json &&                STAKING_ADDR=\$(cat /artifacts/staking.json | grep -o '\"deployedTo\":\"[^\"]*\"' | cut -d'\"' -f4) &&        echo \"Staking deployed at: $$STAKING_ADDR\" &&                echo 'Deploying Pinning Rewards Contract...' &&        forge create contracts/PinningRewards.sol:PinningRewards \          --rpc-url http://anvil:8545 \          --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \          --constructor-args $$TOKEN_ADDR \          --json > /artifacts/pinning_rewards.json &&                  PINNING_REWARDS_ADDR=\$(cat /artifacts/pinning_rewards.json | grep -o '\"deployedTo\":\"[^\"]*\"' | cut -d'\"' -f4) &&        echo \"PinningRewards deployed at: $$PINNING_REWARDS_ADDR\" &&        echo 'Setting up faucet allowance...' &&        cast send $$TOKEN_ADDR 'setFaucet(address)' 0x70997970C51812dc3A010C7d01b50e0d17dc79C8 \          --rpc-url http://anvil:8545 \          --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 &&                echo 'Minting tokens to faucet...' &&        cast send $$TOKEN_ADDR 'mint(address,uint256)' 0x70997970C51812dc3A010C7d01b50e0d17dc79C8 1000000000000000000000000 \          --rpc-url http://anvil:8545 \          --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 &&                echo '{\"token\":\"'$$TOKEN_ADDR'\",\"staking\":\"'$$STAKING_ADDR'\",\"pinning_rewards\":\"'$$PINNING_REWARDS_ADDR'\"}' > /artifacts/contracts.json &&        echo 'Deployment complete!'      "  # ============================================================================  # Chain Registry Node (Testnet)  # ============================================================================  creg-node:    build:      context: ..      dockerfile: Dockerfile    container_name: creg-testnet-node    environment:      # Testnet mode      CREG_TESTNET: "true"            # Node configuration      CREG_LISTEN: "0.0.0.0:8080"      CREG_DATA_DIR: "/data"      CREG_NODE_ID: "testnet-node-1"            # Validator configuration (optional - set CREG_IS_VALIDATOR=true to enable)      CREG_IS_VALIDATOR: "${CREG_IS_VALIDATOR:-false}"      CREG_VALIDATOR_KEY: "${CREG_VALIDATOR_KEY:-}"            # Ethereum connection      CREG_ETH_RPC: "http://anvil:8545"      CREG_REGISTRY_ADDR: "${TESTNET_REGISTRY_ADDR:-0x0000000000000000000000000000000000000000}"            # Database      CREG_PG_URL: "postgresql://creg:testnet_password@postgres:5432/creg_testnet"            # IPFS      CREG_IPFS_URL: "http://ipfs:5001"            # P2P      CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/4001"      CREG_P2P_SEEDS: ""            # Block production      CREG_BLOCK_INTERVAL: "2"            # Logging      RUST_LOG: "info"    volumes:      - creg-node-data:/data      - contract-artifacts:/contracts:ro    ports:      - "8080:8080"      - "4001:4001"    networks:      - creg-testnet    depends_on:      anvil:        condition: service_healthy      postgres:        condition: service_healthy      ipfs:        condition: service_healthy    restart: unless-stopped    healthcheck:      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]      interval: 10s      timeout: 5s      retries: 3  # ============================================================================  # Test Token Faucet  # ============================================================================  faucet:    build:      context: ..      dockerfile: testnet/Dockerfile.faucet    container_name: creg-testnet-faucet    environment:      FAUCET_PORT: "8081"      FAUCET_RPC_URL: "http://anvil:8545"      FAUCET_PRIVATE_KEY: "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"      FAUCET_TOKEN_CONTRACT: "${TESTNET_TOKEN_ADDR:-0x0000000000000000000000000000000000000000}"      FAUCET_DRIP_AMOUNT: "1000000000000000000000"      FAUCET_COOLDOWN_SECS: "60"      FAUCET_IP_COOLDOWN_SECS: "60"      RUST_LOG: "info"    ports:      - "8081:8081"    networks:      - creg-testnet    depends_on:      - anvil    restart: unless-stopped    healthcheck:      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]      interval: 10s      timeout: 5s      retries: 3  # ============================================================================  # Block Explorer (Web)  # ============================================================================  explorer:    build:      context: ../explorer      dockerfile: Dockerfile    container_name: creg-testnet-explorer    environment:      - VITE_NODE_URL=http://localhost:8080      - VITE_IS_TESTNET=true    ports:      - "3000:80"    networks:      - creg-testnet    depends_on:      - creg-node    restart: unless-stopped  # ============================================================================  # Validator Console (optional - run interactively)  # ============================================================================  tui-explorer:    build:      context: ..      dockerfile: Dockerfile    container_name: creg-testnet-tui    environment:      - CREG_NODE_URL=http://creg-node:8080    profiles:      - tui    networks:      - creg-testnet    stdin_open: true    tty: true    command: >      sh -c "        echo 'Starting validator console...' &&        sleep 5 &&        creg console      "volumes:  anvil-data:  ipfs-data:  postgres-data:  creg-node-data:  contract-artifacts:networks:  creg-testnet:    driver: bridge    ipam:      config:        - subnet: 172.25.0.0/16
+# Chain Registry Testnet
+# Complete local testnet environment for development and testing
+#
+# Usage:
+#   docker compose -f docker-compose.testnet.yml up -d
+#   docker compose -f docker-compose.testnet.yml logs -f
+#
+# Services:
+#   - anvil: Local Ethereum testnet (pre-funded accounts)
+#   - ipfs: IPFS node for package storage
+#   - postgres: PostgreSQL for chain data
+#   - creg-node: Chain Registry node (testnet mode)
+#   - faucet: Test token faucet service
+#   - explorer: Web-based block explorer
+
+version: "3.8"
+
+services:
+  # ============================================================================
+  # Local Ethereum Testnet (Anvil)
+  # ============================================================================
+  anvil:
+    image: ghcr.io/foundry-rs/foundry:latest
+    container_name: creg-testnet-anvil
+    command: >
+      anvil
+      --fork-url ${ANVIL_FORK_URL:-}
+      --block-time 2
+      --accounts 20
+      --balance 10000
+      --chain-id 31337
+      --host 0.0.0.0
+      --state /data/anvil-state.json
+    ports:
+      - "8545:8545"
+    volumes:
+      - anvil-data:/data
+    networks:
+      - creg-testnet
+    healthcheck:
+      test: ["CMD", "cast", "block-number", "--rpc-url", "http://localhost:8545"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ============================================================================
+  # IPFS Node
+  # ============================================================================
+  ipfs:
+    image: ipfs/kubo:latest
+    container_name: creg-testnet-ipfs
+    volumes:
+      - ipfs-data:/data/ipfs
+    ports:
+      - "5001:5001"
+      - "4001:4001"
+      - "8080:8080"
+    networks:
+      - creg-testnet
+    command: >
+      daemon --migrate=true --enable-gc
+    healthcheck:
+      test: ["CMD-SHELL", "ipfs id || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  # ============================================================================
+  # PostgreSQL Database
+  # ============================================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: creg-testnet-postgres
+    environment:
+      POSTGRES_USER: creg
+      POSTGRES_PASSWORD: creg_testnet
+      POSTGRES_DB: chain_registry
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./init-testnet-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+    networks:
+      - creg-testnet
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U creg -d chain_registry"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ============================================================================
+  # Chain Registry Node
+  # ============================================================================
+  creg-node:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        PROFILE: minimal
+    container_name: creg-testnet-node
+    environment:
+      CREG_CHAIN_ID: creg-testnet-1
+      CREG_EXPECTED_L1_CHAIN_ID: "31337"
+      CREG_ETH_RPC: http://anvil:8545
+      CREG_IS_VALIDATOR: "true"
+      CREG_VALIDATOR_KEY: "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+      CREG_NODE_ID: validator-1
+      CREG_LISTEN: 0.0.0.0:8080
+      CREG_DATA_DIR: /data
+      CREG_BLOCK_INTERVAL: "5"
+      CREG_DEV_SANDBOX: "false"
+      CREG_PG_URL: postgres://creg:creg_testnet@postgres:5432/chain_registry
+      CREG_IPFS_URL: http://ipfs:5001
+      CREG_P2P_LISTEN: /ip4/0.0.0.0/tcp/9000
+      RUST_LOG: info
+    ports:
+      - "8080:8080"
+      - "9000:9000"
+      - "50051:50051"
+    volumes:
+      - creg-data:/data
+    networks:
+      - creg-testnet
+    depends_on:
+      anvil:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      ipfs:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ============================================================================
+  # Faucet Service
+  # ============================================================================
+  faucet:
+    build:
+      context: ..
+      dockerfile: testnet/Dockerfile.faucet
+    container_name: creg-testnet-faucet
+    environment:
+      FAUCET_RPC_URL: http://anvil:8545
+      FAUCET_PRIVATE_KEY: "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
+      FAUCET_TOKEN_ADDRESS: "${FAUCET_TOKEN_ADDRESS:-}"
+      FAUCET_PORT: "8081"
+      FAUCET_RATE_LIMIT: "60"
+    ports:
+      - "8081:8081"
+    networks:
+      - creg-testnet
+    depends_on:
+      - anvil
+    restart: unless-stopped
+
+  # ============================================================================
+  # Block Explorer
+  # ============================================================================
+  explorer:
+    build:
+      context: ../explorer
+      dockerfile: Dockerfile
+    container_name: creg-testnet-explorer
+    environment:
+      REACT_APP_API_URL: http://localhost:8080
+      REACT_APP_WS_URL: ws://localhost:8080
+      REACT_APP_CHAIN_ID: creg-testnet-1
+      REACT_APP_CHAIN_NAME: "Chain Registry Testnet"
+    ports:
+      - "3000:80"
+    networks:
+      - creg-testnet
+    depends_on:
+      - creg-node
+    restart: unless-stopped
+
+networks:
+  creg-testnet:
+    driver: bridge
+
+volumes:
+  anvil-data:
+  ipfs-data:
+  postgres-data:
+  creg-data:

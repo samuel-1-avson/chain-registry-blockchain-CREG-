@@ -1100,7 +1100,7 @@ async fn get_balance(
 
 /// Network configuration info for wallet setup and next-step guidance
 async fn get_network_info(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let explorer_url = env_string("FAUCET_EXPLORER_URL", "http://localhost:3000");
+    let explorer_url = env_string("FAUCET_EXPLORER_URL", "http://localhost:3007");
     let rpc_url = env_string("FAUCET_PUBLIC_RPC_URL", "http://localhost:8545");
     let chain_id = env_u64("FAUCET_CHAIN_ID", 31337);
 
