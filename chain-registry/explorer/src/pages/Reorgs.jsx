@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import { nodeApi } from '../api/node.js'
+import { getEndpointStatus, nodeApi } from '../api/node.js'
 import { SkeletonCard } from '../components/Skeleton.jsx'
-import { ErrorState } from '../components/ErrorState.jsx'
+import { EmptyState, EndpointStatusNotice, ErrorState } from '../components/ErrorState.jsx'
 import { Link } from 'react-router-dom'
 import { timeAgo } from '../utils/format.js'
 
@@ -9,12 +9,14 @@ export default function Reorgs() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [reorgs, setReorgs] = useState([])
+  const [endpointStatus, setEndpointStatus] = useState(null)
 
   useEffect(() => {
     const controller = new AbortController()
     nodeApi.reorgs(controller.signal)
       .then((data) => {
-        setReorgs(data || [])
+        setEndpointStatus(getEndpointStatus(data))
+        setReorgs(Array.isArray(data) ? data : [])
         setLoading(false)
       })
       .catch((err) => {
@@ -40,10 +42,18 @@ export default function Reorgs() {
           <span className="panel-subtitle">Total forks detected: {reorgs.length}</span>
         </div>
         <div className="panel-content">
-          {reorgs.length === 0 ? (
-            <div style={{ padding: 'var(--space-6)', textAlign: 'center', color: 'var(--text-secondary)' }}>
-               No chain reorganizations detected on this node yet.
+          {endpointStatus && (
+            <div style={{ marginBottom: 'var(--space-4)' }}>
+              <EndpointStatusNotice status={endpointStatus} title="Reorg history unavailable" />
             </div>
+          )}
+          {reorgs.length === 0 ? (
+            <EmptyState
+              title={endpointStatus ? 'Reorg history unavailable' : 'No chain reorganizations detected'}
+              description={endpointStatus
+                ? 'This node does not expose reorganization history yet, so past fork events cannot be listed here.'
+                : 'No chain reorganizations detected on this node yet.'}
+            />
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
               {reorgs.map((e, idx) => (

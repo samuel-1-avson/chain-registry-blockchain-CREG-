@@ -1,5 +1,6 @@
 // crates/node/src/config.rs
 
+use axum::http::{HeaderValue, Method};
 use std::path::PathBuf;
 use uuid::Uuid;
 
@@ -39,6 +40,109 @@ impl Default for PruningConfig {
             prune_interval: 1000,
             max_db_size_gb: 150,
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CorsConfig {
+    pub allowed_origins: Vec<String>,
+    pub allowed_methods: Vec<String>,
+    pub allow_credentials: bool,
+}
+
+impl Default for CorsConfig {
+    fn default() -> Self {
+        Self {
+            allowed_origins: Vec::new(),
+            allowed_methods: default_cors_methods(),
+            allow_credentials: false,
+        }
+    }
+}
+
+impl CorsConfig {
+    pub fn from_env() -> Self {
+        Self::from_env_values(
+            &std::env::var("CREG_CORS_ALLOWED_ORIGINS").unwrap_or_default(),
+            &std::env::var("CREG_CORS_ALLOWED_METHODS")
+                .unwrap_or_else(|_| default_cors_methods().join(",")),
+            env("CREG_CORS_ALLOW_CREDENTIALS", "false") == "true",
+        )
+    }
+
+    fn from_env_values(origins_raw: &str, methods_raw: &str, allow_credentials: bool) -> Self {
+        let allowed_origins = parse_csv(origins_raw)
+            .into_iter()
+            .map(|origin| normalize_cors_origin(&origin))
+            .collect();
+
+        let allowed_methods = {
+            let parsed = parse_csv(methods_raw)
+                .into_iter()
+                .map(|method| method.to_ascii_uppercase())
+                .collect::<Vec<_>>();
+            if parsed.is_empty() {
+                default_cors_methods()
+            } else {
+                parsed
+            }
+        };
+
+        Self {
+            allowed_origins,
+            allowed_methods,
+            allow_credentials,
+        }
+    }
+
+    pub fn validate(&self) -> Vec<String> {
+        let mut errors = Vec::new();
+
+        let has_wildcard = self.allowed_origins.iter().any(|origin| origin == "*");
+        if has_wildcard && self.allowed_origins.len() > 1 {
+            errors.push(
+                "CREG_CORS_ALLOWED_ORIGINS cannot combine `*` with explicit origins.".into(),
+            );
+        }
+
+        if self.allow_credentials && self.allowed_origins.is_empty() {
+            errors.push(
+                "CREG_CORS_ALLOW_CREDENTIALS=true requires at least one explicit origin in CREG_CORS_ALLOWED_ORIGINS.".into(),
+            );
+        }
+
+        if self.allow_credentials && has_wildcard {
+            errors.push(
+                "CREG_CORS_ALLOW_CREDENTIALS=true cannot be used with wildcard CREG_CORS_ALLOWED_ORIGINS=*; configure explicit origins instead.".into(),
+            );
+        }
+
+        for origin in &self.allowed_origins {
+            if origin == "*" {
+                continue;
+            }
+            if !origin.starts_with("http://") && !origin.starts_with("https://") {
+                errors.push(format!(
+                    "CORS origin `{}` must start with http:// or https://",
+                    origin
+                ));
+                continue;
+            }
+            if HeaderValue::from_str(origin).is_err() {
+                errors.push(format!("CORS origin `{}` is not a valid header value", origin));
+            }
+        }
+
+        for method in &self.allowed_methods {
+            if Method::from_bytes(method.as_bytes()).is_err() {
+                errors.push(format!(
+                    "CORS method `{}` is not a valid HTTP method",
+                    method
+                ));
+            }
+        }
+
+        errors
     }
 }
 
@@ -93,6 +197,8 @@ pub struct NodeConfig {
     pub pruning: PruningConfig,
     /// Max peers for low-bandwidth environments
     pub max_peers: usize,
+    /// Browser CORS policy for the REST API.
+    pub cors: CorsConfig,
     /// Testnet mode: allows multiple nodes per machine.
     /// Mainnet (false) enforces a single node per data directory via PID lock.
     pub is_testnet: bool,
@@ -163,6 +269,7 @@ impl NodeConfig {
             mode,
             pruning,
             max_peers,
+            cors: CorsConfig::from_env(),
             is_testnet: env("CREG_TESTNET", "false") == "true",
         }
     }
@@ -257,6 +364,8 @@ impl NodeConfig {
                 self.ipfs_url
             ));
         }
+
+        errors.extend(self.cors.validate());
 
         // Block interval sanity check.
         if self.block_interval_secs == 0 {
@@ -402,6 +511,32 @@ impl NodeConfig {
     }
 }
 
+fn default_cors_methods() -> Vec<String> {
+    vec!["GET", "POST", "DELETE", "OPTIONS"]
+        .into_iter()
+        .map(str::to_string)
+        .collect()
+}
+
+fn parse_csv(raw: &str) -> Vec<String> {
+    let mut values = Vec::new();
+    for value in raw.split(',').map(str::trim).filter(|value| !value.is_empty()) {
+        if !values.iter().any(|existing| existing == value) {
+            values.push(value.to_string());
+        }
+    }
+    values
+}
+
+fn normalize_cors_origin(origin: &str) -> String {
+    let trimmed = origin.trim();
+    if trimmed == "*" {
+        return "*".to_string();
+    }
+
+    trimmed.trim_end_matches('/').to_string()
+}
+
 fn env(key: &str, default: &str) -> String {
     std::env::var(key).unwrap_or_else(|_| default.to_string())
 }
@@ -434,6 +569,7 @@ mod tests {
             mode: NodeMode::Pruned,
             pruning: PruningConfig::default(),
             max_peers: 15,
+            cors: CorsConfig::default(),
             is_testnet: true,
         }
     }
@@ -443,6 +579,7 @@ mod tests {
             id: id.into(),
             alias: id.into(),
             pubkey: pubkey.into(),
+            eth_address: String::new(),
             stake: 100,
             reputation: 100,
             status: "online".into(),
@@ -613,5 +750,54 @@ mod tests {
             .expect_err("mismatch must error");
         assert!(err.contains("genesis hash mismatch"));
         assert!(err.contains(&bogus));
+    }
+
+    #[test]
+    fn cors_defaults_are_safe() {
+        let cfg = base_config();
+        assert!(cfg.cors.allowed_origins.is_empty());
+        assert!(!cfg.cors.allow_credentials);
+        assert_eq!(
+            cfg.cors.allowed_methods,
+            vec!["GET", "POST", "DELETE", "OPTIONS"]
+        );
+        assert!(cfg.cors.validate().is_empty());
+    }
+
+    #[test]
+    fn cors_rejects_wildcard_with_credentials() {
+        let mut cfg = base_config();
+        cfg.cors = CorsConfig {
+            allowed_origins: vec!["*".into()],
+            allowed_methods: default_cors_methods(),
+            allow_credentials: true,
+        };
+
+        let errors = cfg.validate();
+        assert!(
+            errors.iter().any(|error| error.contains("cannot be used with wildcard")),
+            "expected wildcard+credentials validation error, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn cors_from_env_values_normalizes_origins_and_methods() {
+        let cors = CorsConfig::from_env_values(
+            " https://explorer.example.com/ , http://localhost:4173 ",
+            "get,post,options",
+            true,
+        );
+
+        assert_eq!(
+            cors.allowed_origins,
+            vec![
+                "https://explorer.example.com".to_string(),
+                "http://localhost:4173".to_string()
+            ]
+        );
+        assert_eq!(cors.allowed_methods, vec!["GET", "POST", "OPTIONS"]);
+        assert!(cors.allow_credentials);
+        assert!(cors.validate().is_empty());
     }
 }

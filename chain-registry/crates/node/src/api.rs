@@ -2,22 +2,28 @@
 // Axum REST API — all HTTP endpoints for the chain registry node.
 
 use axum::{
-    extract::{Path, Query, State},
-    http::{StatusCode, Uri},
+    extract::{Extension, Path, Query, State},
+    http::{header, HeaderValue, Method, StatusCode, Uri},
     response::{IntoResponse, Response},
     routing::{delete, get, post},
     Json, Router,
 };
+use alloy::{
+    primitives::Address,
+    providers::ProviderBuilder,
+    sol,
+};
 use common::{PackageStatus, PublishRequest, Transaction, ValidatorIdentity};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tower_http::{cors::CorsLayer, limit::RequestBodyLimitLayer, trace::TraceLayer};
+use tower_http::{cors::{Any, CorsLayer}, limit::RequestBodyLimitLayer, trace::TraceLayer};
 
 use crate::consensus_admission::{
     accept_peer_attestation, AdmissionAttestation, AttestationStore,
 };
 use crate::{
     events::{self, sse_handler, EventBus},
+    finalized_tx::FinalizedTxSender,
     openapi::ApiDoc,
     rate_limit::{rate_limit_middleware, RateLimiter},
     normalized_validator_key, validator_registration_status_text, ValidatorRegistrationStatus,
@@ -35,6 +41,99 @@ struct ListPackagesParams {
     status: Option<String>,
 }
 
+sol!(
+    #[sol(rpc)]
+    interface IPublisherStakingRead {
+        function stakedBalance(address publisher) external view returns (uint256);
+    }
+);
+
+#[derive(Debug)]
+pub(crate) enum PublisherAdmissionError {
+    InvalidAddress(String),
+    Unstaked(String),
+    Unavailable(String),
+}
+
+impl std::fmt::Display for PublisherAdmissionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidAddress(msg) | Self::Unstaked(msg) | Self::Unavailable(msg) => {
+                write!(f, "{}", msg)
+            }
+        }
+    }
+}
+
+fn parse_publisher_address(publisher_address: &str) -> Result<Address, PublisherAdmissionError> {
+    let normalized = common::canonical_publisher_address(publisher_address);
+    if normalized.is_empty() {
+        return Err(PublisherAdmissionError::InvalidAddress(
+            "Publisher EVM address is required for runtime admission".into(),
+        ));
+    }
+
+    normalized.parse::<Address>().map_err(|_| {
+        PublisherAdmissionError::InvalidAddress(
+            "Publisher EVM address must be a valid 0x-prefixed address".into(),
+        )
+    })
+}
+
+pub(crate) async fn ensure_publisher_staked(
+    state: &SharedState,
+    publisher_address: &str,
+) -> Result<(), PublisherAdmissionError> {
+    let publisher = parse_publisher_address(publisher_address)?;
+    let (rpc_url, staking_addr_s) = {
+        let s = state.read().await;
+        (s.config.eth_rpc_url.clone(), s.config.staking_addr.clone())
+    };
+
+    if rpc_url.trim().is_empty() {
+        return Err(PublisherAdmissionError::Unavailable(
+            "Publisher stake enforcement unavailable: CREG_ETH_RPC is not configured".into(),
+        ));
+    }
+    if staking_addr_s.trim().is_empty()
+        || staking_addr_s.eq_ignore_ascii_case("0x0000000000000000000000000000000000000000")
+    {
+        return Err(PublisherAdmissionError::Unavailable(
+            "Publisher stake enforcement unavailable: CREG_STAKING_ADDR is not configured"
+                .into(),
+        ));
+    }
+
+    let staking_addr = staking_addr_s.parse::<Address>().map_err(|_| {
+        PublisherAdmissionError::Unavailable(
+            "Publisher stake enforcement unavailable: CREG_STAKING_ADDR is invalid".into(),
+        )
+    })?;
+
+    let provider = ProviderBuilder::new()
+        .on_http(rpc_url.parse().map_err(|_| {
+            PublisherAdmissionError::Unavailable(
+                "Publisher stake enforcement unavailable: CREG_ETH_RPC is invalid".into(),
+            )
+        })?);
+    let staking = IPublisherStakingRead::new(staking_addr, &provider);
+    let staked = staking.stakedBalance(publisher).call().await.map_err(|error| {
+        PublisherAdmissionError::Unavailable(format!(
+            "Publisher stake lookup failed: {}",
+            error
+        ))
+    })?._0;
+
+    if staked == alloy::primitives::U256::ZERO {
+        return Err(PublisherAdmissionError::Unstaked(format!(
+            "Publisher {} has no on-chain stake and cannot publish",
+            common::canonical_publisher_address(publisher_address)
+        )));
+    }
+
+    Ok(())
+}
+
 // ─── Router ───────────────────────────────────────────────────────────────────
 
 pub fn router(
@@ -42,6 +141,9 @@ pub fn router(
     event_bus: EventBus,
     limiter: RateLimiter,
     admission_store: Arc<AttestationStore>,
+    cors_config: crate::config::CorsConfig,
+    tx_sender: FinalizedTxSender,
+    p2p_handle: crate::p2p::P2PHandle,
 ) -> Router {
     Router::new()
         // Health & chain
@@ -122,8 +224,40 @@ pub fn router(
         .layer(axum::middleware::from_fn(rate_limit_middleware))
         .layer(axum::extract::Extension(limiter))
         .layer(axum::extract::Extension(admission_store))
-        .layer(CorsLayer::permissive())
+        .layer(axum::extract::Extension(tx_sender))
+        .layer(axum::extract::Extension(p2p_handle))
+        .layer(build_cors_layer(&cors_config))
         .with_state(state)
+}
+
+fn build_cors_layer(cors_config: &crate::config::CorsConfig) -> CorsLayer {
+    let methods: Vec<Method> = cors_config
+        .allowed_methods
+        .iter()
+        .map(|method| Method::from_bytes(method.as_bytes()).expect("validated CORS method"))
+        .collect();
+
+    let layer = CorsLayer::new()
+        .allow_methods(methods)
+        .allow_headers([
+            header::ACCEPT,
+            header::AUTHORIZATION,
+            header::CONTENT_TYPE,
+            header::ORIGIN,
+        ])
+        .allow_credentials(cors_config.allow_credentials);
+
+    match cors_config.allowed_origins.as_slice() {
+        [] => layer,
+        [origin] if origin == "*" => layer.allow_origin(Any),
+        origins => {
+            let values: Vec<HeaderValue> = origins
+                .iter()
+                .map(|origin| HeaderValue::from_str(origin).expect("validated CORS origin"))
+                .collect();
+            layer.allow_origin(values)
+        }
+    }
 }
 
 async fn receive_admission_attestation(
@@ -207,10 +341,12 @@ fn server_err(msg: impl Into<String>) -> Response {
 
 // ─── Handlers ────────────────────────────────────────────────────────────────
 
-async fn health() -> impl IntoResponse {
+async fn health(State(state): State<SharedState>) -> impl IntoResponse {
+    let s = state.read().await;
     Json(serde_json::json!({
         "status":  "ok",
-        "version": env!("CARGO_PKG_VERSION")
+        "version": env!("CARGO_PKG_VERSION"),
+        "validator_set_sync": s.validator_set_sync.clone(),
     }))
 }
 
@@ -229,6 +365,9 @@ struct ChainStatsResponse {
     publisher_count: usize,
     finalized_height: u64,
     finalization_lag: u64,
+    validator_set_source: String,
+    validator_set_sync_state: String,
+    validator_set_last_finalized_source_block: Option<u64>,
 }
 
 async fn chain_stats(State(state): State<SharedState>) -> impl IntoResponse {
@@ -255,6 +394,11 @@ async fn chain_stats(State(state): State<SharedState>) -> impl IntoResponse {
         publisher_count: s.publisher_index.publisher_count(),
         finalized_height: finalized,
         finalization_lag: tip.saturating_sub(finalized),
+        validator_set_source: s.validator_set_sync.mode.clone(),
+        validator_set_sync_state: s.validator_set_sync.state.clone(),
+        validator_set_last_finalized_source_block: s
+            .validator_set_sync
+            .last_finalized_source_block,
     })
 }
 
@@ -264,8 +408,14 @@ struct RuntimeConfigResponse {
     registry_address: Option<String>,
     token_contract: Option<String>,
     staking_contract: Option<String>,
+    cors_allowed_origins: Vec<String>,
+    cors_allowed_methods: Vec<String>,
+    cors_allow_credentials: bool,
     validator_registration_mode: String,
     validator_registration_note: String,
+    validator_set_source: String,
+    validator_set_sync_state: String,
+    validator_set_last_finalized_source_block: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -292,8 +442,16 @@ async fn runtime_config(State(state): State<SharedState>) -> impl IntoResponse {
         registry_address: non_zero_address(&s.config.registry_addr),
         token_contract: non_zero_address(&s.config.token_addr),
         staking_contract: non_zero_address(&s.config.staking_addr),
+        cors_allowed_origins: s.config.cors.allowed_origins.clone(),
+        cors_allowed_methods: s.config.cors.allowed_methods.clone(),
+        cors_allow_credentials: s.config.cors.allow_credentials,
         validator_registration_mode: "staking-plus-identity-sync".to_string(),
-        validator_registration_note: "Stake on-chain, register your validator EVM address, node ID, and Ed25519 pubkey with /v1/validators/register, wait for governance approval, and the node sync loop will admit active validators into consensus automatically.".to_string(),
+        validator_registration_note: "Stake on-chain, register your validator EVM address, node ID, and Ed25519 pubkey with /v1/validators/register, then wait for the chain-synced validator-set worker to observe your active membership before you participate in consensus.".to_string(),
+        validator_set_source: s.validator_set_sync.mode.clone(),
+        validator_set_sync_state: s.validator_set_sync.state.clone(),
+        validator_set_last_finalized_source_block: s
+            .validator_set_sync
+            .last_finalized_source_block,
     })
 }
 
@@ -442,7 +600,9 @@ async fn delete_validator_registration(
             // delete is immediately visible to `/v1/nodes` consumers.
             let identity = removed.identity.normalized();
             s.validator_set.validators.retain(|v| {
-                v.id != identity.node_id && v.pubkey != identity.ed25519_pubkey
+                v.id != identity.node_id
+                    && v.pubkey != identity.ed25519_pubkey
+                    && !v.eth_address.eq_ignore_ascii_case(&identity.evm_address)
             });
             Json(serde_json::json!({
                 "removed": true,
@@ -727,6 +887,7 @@ async fn get_package(State(state): State<SharedState>, Path(canonical): Path<Str
 // POST /v1/packages
 async fn submit_package(
     State(state): State<SharedState>,
+    Extension(p2p_handle): Extension<crate::p2p::P2PHandle>,
     Json(request): Json<PublishRequest>,
 ) -> Response {
     let canonical = request.id.canonical();
@@ -742,58 +903,66 @@ async fn submit_package(
             .into_response();
     }
 
-    let mut s = state.write().await;
+    if let Err(e) = ensure_publisher_staked(&state, &request.publisher_address).await {
+        let status = match e {
+            PublisherAdmissionError::InvalidAddress(_) => StatusCode::BAD_REQUEST,
+            PublisherAdmissionError::Unstaked(_) => StatusCode::FORBIDDEN,
+            PublisherAdmissionError::Unavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
+        };
+        return (status, Json(ErrorResponse { error: e.to_string() })).into_response();
+    }
 
-    // Reject if already verified/revoked.
-    if let Ok(Some(rec)) = s.chain.get_package(&canonical) {
-        if matches!(rec.status, PackageStatus::Verified) {
+    let gossip_req = common::GossipMessage::PublishRequest(request.clone());
+    let pending_count = {
+        let mut s = state.write().await;
+
+        // Reject if already verified/revoked.
+        if let Ok(Some(rec)) = s.chain.get_package(&canonical) {
+            if matches!(rec.status, PackageStatus::Verified) {
+                return (
+                    StatusCode::CONFLICT,
+                    Json(ErrorResponse {
+                        error: format!("{} is already verified on chain", canonical),
+                    }),
+                )
+                    .into_response();
+            }
+            if matches!(rec.status, PackageStatus::Revoked { .. }) {
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(ErrorResponse {
+                        error: format!("{} is revoked and cannot be resubmitted", canonical),
+                    }),
+                )
+                    .into_response();
+            }
+        }
+
+        if !s.pending_pool.insert(request) {
             return (
                 StatusCode::CONFLICT,
                 Json(ErrorResponse {
-                    error: format!("{} is already verified on chain", canonical),
+                    error: format!(
+                        "{} is already pending with the same content hash",
+                        canonical
+                    ),
                 }),
             )
                 .into_response();
         }
-        if matches!(rec.status, PackageStatus::Revoked { .. }) {
-            return (
-                StatusCode::FORBIDDEN,
-                Json(ErrorResponse {
-                    error: format!("{} is revoked and cannot be resubmitted", canonical),
-                }),
-            )
-                .into_response();
-        }
-    }
+
+        s.pending_pool.len()
+    };
 
     // ── 3. Broadcast to P2P network ───────────────────────────────────────────
-    let gossip_req = common::GossipMessage::PublishRequest(request.clone());
-    let _ = s
-        .p2p
+    let _ = p2p_handle
         .sender
         .send(crate::p2p::P2PCommand::Broadcast {
             topic: "creg/v1/submissions".into(),
             data: serde_json::to_vec(&gossip_req).unwrap_or_default(),
         })
         .await;
-
-    if !s.pending_pool.insert(request) {
-        return (
-            StatusCode::CONFLICT,
-            Json(ErrorResponse {
-                error: format!(
-                    "{} is already pending with the same content hash",
-                    canonical
-                ),
-            }),
-        )
-            .into_response();
-    }
-    tracing::info!(
-        "{} added to pending pool ({} pending)",
-        canonical,
-        s.pending_pool.len()
-    );
+    tracing::info!("{} added to pending pool ({} pending)", canonical, pending_count);
 
     (
         StatusCode::ACCEPTED,
@@ -822,6 +991,7 @@ struct RevokeReq {
 
 async fn revoke_package(
     State(state): State<SharedState>,
+    Extension(tx_sender): Extension<FinalizedTxSender>,
     Path(canonical): Path<String>,
     Json(req): Json<RevokeReq>,
 ) -> Response {
@@ -856,27 +1026,28 @@ async fn revoke_package(
             .into_response();
     }
 
-    let s = state.read().await;
+    let (is_authorised, package_record, event_bus) = {
+        let s = state.read().await;
 
-    // ── 2. Authorisation: revoker must be the original publisher or a validator ─
-    let is_authorised = {
-        // Check if revoker is a registered validator.
         let is_validator = s
             .validator_set
             .validators
             .iter()
             .any(|v| v.pubkey == req.revoker_pubkey);
-
-        // Check if revoker is the original publisher of this package.
-        let is_publisher = s
-            .chain
-            .get_package(&canonical)
-            .ok()
-            .flatten()
+        let package_record = match s.chain.get_package(&canonical) {
+            Ok(record) => record,
+            Err(e) => return server_err(e.to_string()),
+        };
+        let is_publisher = package_record
+            .as_ref()
             .map(|r| r.publisher_pubkey == req.revoker_pubkey)
             .unwrap_or(false);
 
-        is_validator || is_publisher
+        (
+            is_validator || is_publisher,
+            package_record,
+            s.event_bus.clone(),
+        )
     };
 
     if !is_authorised {
@@ -894,15 +1065,15 @@ async fn revoke_package(
     }
 
     // ── 3. Queue the revocation transaction ───────────────────────────────────
-    match s.chain.get_package(&canonical) {
-        Ok(Some(record)) => {
+    match package_record {
+        Some(record) => {
             let tx = common::Transaction::Revoke {
                 package_canonical: canonical.clone(),
                 reason: req.reason.clone(),
                 revoked_by: req.revoker_pubkey.clone(),
                 evidence_hash: record.content_hash.clone(),
             };
-            if s.tx_sender.send(tx).await.is_err() {
+            if tx_sender.send(tx).await.is_err() {
                 return server_err("Finalized-tx channel closed".to_string());
             }
             tracing::info!(
@@ -912,7 +1083,7 @@ async fn revoke_package(
                 "Package revocation queued"
             );
             events::emit(
-                &s.event_bus,
+                &event_bus,
                 events::RegistryEvent::package_revoked(
                     &canonical,
                     &req.reason,
@@ -926,8 +1097,7 @@ async fn revoke_package(
             }))
             .into_response()
         }
-        Ok(None) => not_found(format!("Package not found: {}", canonical)),
-        Err(e) => server_err(e.to_string()),
+        None => not_found(format!("Package not found: {}", canonical)),
     }
 }
 
@@ -1268,7 +1438,7 @@ async fn get_address(State(state): State<SharedState>, Path(address): Path<Strin
         .validator_set
         .validators
         .iter()
-        .find(|v| v.id.to_ascii_lowercase() == normalized)
+        .find(|v| v.eth_address.eq_ignore_ascii_case(&normalized))
         .cloned();
 
     let scan = ADDRESS_DEFAULT_SCAN_BLOCKS;
@@ -1399,7 +1569,7 @@ async fn get_validator_profile(
         .validator_set
         .validators
         .iter()
-        .find(|v| v.id.to_ascii_lowercase() == normalized)
+        .find(|v| v.eth_address.eq_ignore_ascii_case(&normalized))
         .cloned();
 
     if registration.is_none() && active.is_none() {
@@ -1515,7 +1685,11 @@ async fn search_handler(
         let clean = normalized.strip_prefix("0x").unwrap_or(&normalized).to_string();
         let is_validator = s.validator_registrations.contains_key(&normalized)
             || s.validator_registrations.contains_key(&clean)
-            || s.validator_set.validators.iter().any(|v| v.id.to_ascii_lowercase() == normalized);
+            || s
+                .validator_set
+                .validators
+                .iter()
+                .any(|v| v.eth_address.eq_ignore_ascii_case(&normalized));
         if is_validator {
             matches.push(SearchMatch {
                 kind: "validator",
@@ -1620,6 +1794,7 @@ pub struct RotateKeyRequest {
 
 async fn rotate_publisher_key(
     State(state): State<SharedState>,
+    Extension(tx_sender): Extension<FinalizedTxSender>,
     Json(req): Json<RotateKeyRequest>,
 ) -> Response {
     use ed25519_dalek::{Signature, Verifier, VerifyingKey};
@@ -1728,8 +1903,7 @@ async fn rotate_publisher_key(
         nonce: req.nonce,
     };
 
-    let s = state.read().await;
-    if s.tx_sender.send(tx).await.is_err() {
+    if tx_sender.send(tx).await.is_err() {
         return server_err("Finalized-tx channel closed".to_string());
     }
 
@@ -1866,6 +2040,9 @@ pub struct VoteMessage {
     pub signature: String,
     /// Hex-encoded Ed25519 public key of the voting validator.
     pub validator_pubkey: String,
+    /// ML model version used by this validator during deep scan.
+    #[serde(default)]
+    pub ml_model_version: String,
     pub approved: bool,
     pub reject_reason: Option<String>,
 }
@@ -2005,7 +2182,7 @@ async fn receive_vote(State(state): State<SharedState>, Json(vote): Json<VoteMes
             }
         },
         signed_at: chrono::Utc::now(),
-        ml_model_version: String::new(), // Populated by the originating validator
+        ml_model_version: vote.ml_model_version.clone(),
     };
 
     let key = vote.block_hash.clone();
@@ -2066,7 +2243,11 @@ async fn prometheus_metrics(State(state): State<SharedState>) -> impl IntoRespon
 pub(crate) fn verify_publish_sig(req: &PublishRequest) -> anyhow::Result<()> {
     use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 
-    let msg = format!("{}{}", req.id.canonical(), req.content_hash);
+    if req.publisher_address.trim().is_empty() {
+        anyhow::bail!("Publisher EVM address is required for runtime admission");
+    }
+
+    let msg = common::publish_signature_message(&req.id, &req.content_hash, &req.publisher_address);
 
     // Single-signature fallback.
     if req.publisher_pubkeys.is_empty() {
@@ -2207,14 +2388,78 @@ async fn handle_websocket(mut socket: WebSocket, state: SharedState) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use common::{PackageId, PackageManifest};
+    use crate::{
+        consensus_admission::AttestationStore,
+        events::new_event_bus,
+        p2p::P2PHandle,
+        pending_pool::PendingPool,
+        publisher_index::PublisherIndex,
+        rate_limit::{RateLimitConfig, RateLimiter},
+        BridgeStatus, P2PStatus,
+    };
+    use axum::{
+        body::{to_bytes, Body},
+        http::{Request, StatusCode},
+        routing::post,
+        Json,
+        Router,
+    };
+    use common::{ChainRecord, PackageId, PackageManifest, PackageStatus};
+    use common::proto::{registry_service_server::RegistryService, SubmitRequest};
     use ed25519_dalek::{Signer, SigningKey};
     use rand::rngs::OsRng;
+    use serde_json::Value;
+    use std::{collections::HashMap, sync::Arc};
+    use tempfile::TempDir;
+    use tokio::{net::TcpListener, sync::{mpsc, RwLock}};
+    use tonic::{Code, Request as GrpcRequest};
+    use tower::ServiceExt;
 
     fn make_keypair() -> (SigningKey, String) {
         let sk = SigningKey::generate(&mut OsRng);
         let pk = hex::encode(sk.verifying_key().as_bytes());
         (sk, pk)
+    }
+
+    fn validator(id: &str, pubkey: &str) -> common::Validator {
+        common::Validator {
+            id: id.into(),
+            alias: id.into(),
+            pubkey: pubkey.into(),
+            eth_address: String::new(),
+            stake: 100,
+            reputation: 100,
+            status: "online".into(),
+        }
+    }
+
+    fn make_vote_message(
+        canonical: &str,
+        content_hash: &str,
+        validator_id: &str,
+        signing_key: &SigningKey,
+        validator_pubkey: &str,
+        ml_model_version: &str,
+        approved: bool,
+    ) -> VoteMessage {
+        let message = crate::gossip::canonical_vote_message(
+            canonical,
+            content_hash,
+            approved,
+            validator_pubkey,
+        );
+
+        VoteMessage {
+            block_hash: canonical.into(),
+            content_hash: content_hash.into(),
+            validator_id: validator_id.into(),
+            phase: "commit".into(),
+            signature: hex::encode(signing_key.sign(message.as_bytes()).to_bytes()),
+            validator_pubkey: validator_pubkey.into(),
+            ml_model_version: ml_model_version.into(),
+            approved,
+            reject_reason: None,
+        }
     }
 
     fn make_request_with_sigs(
@@ -2226,6 +2471,7 @@ mod tests {
             id: PackageId::new("npm", "test", "1.0.0"),
             content_hash: common::sha256_hex(b"test"),
             ipfs_cid: "bafytest".into(),
+            publisher_address: "0x1111111111111111111111111111111111111111".into(),
             publisher_pubkey: publisher_pubkeys.first().cloned().unwrap_or_default(),
             signature: signatures.first().cloned().unwrap_or_default(),
             manifest: PackageManifest::default(),
@@ -2240,11 +2486,120 @@ mod tests {
         }
     }
 
+    fn make_signed_request(publisher_address: &str) -> PublishRequest {
+        let (sk, pk) = make_keypair();
+        let mut req = make_request_with_sigs(vec![], vec![], 0);
+        req.publisher_address = publisher_address.into();
+        let msg = common::publish_signature_message(&req.id, &req.content_hash, &req.publisher_address);
+        let sig = sk.sign(msg.as_bytes());
+        req.publisher_pubkey = pk;
+        req.signature = hex::encode(sig.to_bytes());
+        req
+    }
+
+    async fn spawn_mock_staking_rpc(staked_balance: u64) -> String {
+        async fn handle_rpc(
+            Json(payload): Json<Value>,
+            staked_result: String,
+        ) -> Json<Value> {
+            Json(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": payload.get("id").cloned().unwrap_or_else(|| serde_json::json!(1)),
+                "result": staked_result,
+            }))
+        }
+
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let staked_result = format!("0x{:064x}", staked_balance);
+        let app = Router::new().route(
+            "/",
+            post({
+                let staked_result = staked_result.clone();
+                move |payload| handle_rpc(payload, staked_result.clone())
+            }),
+        );
+
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        format!("http://{}", addr)
+    }
+
+    async fn make_test_state(
+        staked_balance: u64,
+    ) -> anyhow::Result<(
+        SharedState,
+        TempDir,
+        P2PHandle,
+        FinalizedTxSender,
+        crate::finalized_tx::FinalizedTxReceiver,
+    )> {
+        let rpc_url = spawn_mock_staking_rpc(staked_balance).await;
+        let tempdir = tempfile::tempdir()?;
+        let chain = crate::chain_store::ChainStore::open(tempdir.path())?;
+        let event_bus = new_event_bus();
+        let (p2p_sender, _p2p_receiver) = mpsc::channel(4);
+        let p2p_handle = P2PHandle { sender: p2p_sender };
+        let (tx_sender, tx_receiver) = crate::finalized_tx::channel();
+
+        let state = Arc::new(RwLock::new(crate::NodeState {
+            chain,
+            pending_pool: PendingPool::new(),
+            publisher_index: PublisherIndex::new(),
+            validator_set_bootstrap: common::ValidatorSet::default(),
+            validator_set: common::ValidatorSet::default(),
+            votes: HashMap::new(),
+            config: crate::config::NodeConfig {
+                data_dir: tempdir.path().to_path_buf(),
+                eth_rpc_url: rpc_url,
+                staking_addr: "0x1000000000000000000000000000000000000001".into(),
+                ..Default::default()
+            },
+            event_bus,
+            zk_validator: Arc::new(zk_validator::ZkValidator::default()),
+            p2p_status: P2PStatus::default(),
+            bridge_status: BridgeStatus::default(),
+            vrf_proofs: HashMap::new(),
+            decryption_shares: HashMap::new(),
+            validator_registrations: HashMap::new(),
+            validator_set_sync: crate::state::ValidatorSetSyncStatus::default(),
+            view_change_certs: HashMap::new(),
+            reorgs: Vec::new(),
+        }));
+
+        Ok((state, tempdir, p2p_handle, tx_sender, tx_receiver))
+    }
+
+    fn make_submit_request(req: &PublishRequest) -> SubmitRequest {
+        let manifest_json = serde_json::to_string(&req.manifest).unwrap();
+        let manifest_hash = common::sha256_hex(manifest_json.as_bytes());
+        SubmitRequest {
+            ecosystem: req.id.ecosystem.clone(),
+            name: req.id.name.clone(),
+            version: req.id.version.clone(),
+            content_hash: req.content_hash.clone(),
+            ipfs_cid: req.ipfs_cid.clone(),
+            publisher_address: req.publisher_address.clone(),
+            publisher_pubkey: req.publisher_pubkey.clone(),
+            signature: req.signature.clone(),
+            publisher_attestation_proof: vec![1u8],
+            claimed_static_analysis_score: 0,
+            claimed_sandbox_safe: false,
+            publisher_pubkeys: req.publisher_pubkeys.clone(),
+            signatures: req.signatures.clone(),
+            threshold: req.threshold as u32,
+            manifest_json,
+            manifest_hash,
+        }
+    }
+
     #[test]
     fn single_sig_verifies() {
         let (sk, pk) = make_keypair();
         let req = make_request_with_sigs(vec![], vec![], 0);
-        let msg = format!("{}{}", req.id.canonical(), req.content_hash);
+        let msg = common::publish_signature_message(&req.id, &req.content_hash, &req.publisher_address);
         let sig = sk.sign(msg.as_bytes());
 
         let req = PublishRequest {
@@ -2272,15 +2627,17 @@ mod tests {
         let (sk2, pk2) = make_keypair();
         let (sk3, pk3) = make_keypair();
 
-        let msg = format!(
-            "{}{}",
-            PackageId::new("npm", "test", "1.0.0").canonical(),
-            common::sha256_hex(b"test")
+        let publisher_address = "0x1111111111111111111111111111111111111111";
+
+        let msg = common::publish_signature_message(
+            &PackageId::new("npm", "test", "1.0.0"),
+            &common::sha256_hex(b"test"),
+            publisher_address,
         );
         let sig1 = sk1.sign(msg.as_bytes());
         let sig2 = sk2.sign(msg.as_bytes());
 
-        let req = make_request_with_sigs(
+        let mut req = make_request_with_sigs(
             vec![pk1.clone(), pk2.clone(), pk3.clone()],
             vec![
                 hex::encode(sig1.to_bytes()),
@@ -2289,6 +2646,7 @@ mod tests {
             ],
             2,
         );
+        req.publisher_address = publisher_address.into();
         assert!(verify_publish_sig(&req).is_ok());
     }
 
@@ -2298,18 +2656,21 @@ mod tests {
         let (_sk2, pk2) = make_keypair();
         let (_sk3, pk3) = make_keypair();
 
-        let msg = format!(
-            "{}{}",
-            PackageId::new("npm", "test", "1.0.0").canonical(),
-            common::sha256_hex(b"test")
+        let publisher_address = "0x1111111111111111111111111111111111111111";
+
+        let msg = common::publish_signature_message(
+            &PackageId::new("npm", "test", "1.0.0"),
+            &common::sha256_hex(b"test"),
+            publisher_address,
         );
         let sig1 = sk1.sign(msg.as_bytes());
 
-        let req = make_request_with_sigs(
+        let mut req = make_request_with_sigs(
             vec![pk1.clone(), pk2.clone(), pk3.clone()],
             vec![hex::encode(sig1.to_bytes()), String::new(), String::new()],
             2,
         );
+        req.publisher_address = publisher_address.into();
         assert!(verify_publish_sig(&req).is_err());
     }
 
@@ -2319,16 +2680,18 @@ mod tests {
         let (sk2, pk2) = make_keypair();
         let (sk3, pk3) = make_keypair();
 
-        let msg = format!(
-            "{}{}",
-            PackageId::new("npm", "test", "1.0.0").canonical(),
-            common::sha256_hex(b"test")
+        let publisher_address = "0x1111111111111111111111111111111111111111";
+
+        let msg = common::publish_signature_message(
+            &PackageId::new("npm", "test", "1.0.0"),
+            &common::sha256_hex(b"test"),
+            publisher_address,
         );
         let sig1 = sk1.sign(msg.as_bytes());
         let sig2 = sk2.sign(msg.as_bytes());
         let sig3 = sk3.sign(msg.as_bytes());
 
-        let req = make_request_with_sigs(
+        let mut req = make_request_with_sigs(
             vec![pk1.clone(), pk2.clone(), pk3.clone()],
             vec![
                 hex::encode(sig1.to_bytes()),
@@ -2337,6 +2700,7 @@ mod tests {
             ],
             3,
         );
+        req.publisher_address = publisher_address.into();
         assert!(verify_publish_sig(&req).is_ok());
     }
 
@@ -2344,5 +2708,289 @@ mod tests {
     fn multisig_rejects_mismatched_counts() {
         let req = make_request_with_sigs(vec!["aa".into(), "bb".into()], vec!["cc".into()], 2);
         assert!(verify_publish_sig(&req).is_err());
+    }
+
+    #[tokio::test]
+    async fn rest_submit_package_rejects_unstaked_publishers() -> anyhow::Result<()> {
+        let (state, _tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
+        let event_bus = {
+            let s = state.read().await;
+            s.event_bus.clone()
+        };
+        let app = router(
+            state.clone(),
+            event_bus,
+            RateLimiter::new(RateLimitConfig::default()),
+            AttestationStore::new(),
+            crate::config::CorsConfig::default(),
+            tx_sender,
+            p2p_handle,
+        );
+        let request = make_signed_request("0x1111111111111111111111111111111111111111");
+        let canonical = request.id.canonical();
+
+        let response = app
+            .oneshot(
+                Request::post("/v1/packages")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&request)?))?,
+            )
+            .await?;
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        let body = to_bytes(response.into_body(), usize::MAX).await?;
+        let body_text = String::from_utf8(body.to_vec())?;
+        assert!(body_text.contains("has no on-chain stake"));
+        assert!(!state.read().await.pending_pool.contains(&canonical));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn rest_revoke_package_queues_transaction_via_router_sender() -> anyhow::Result<()> {
+        let (state, _tempdir, p2p_handle, tx_sender, mut tx_receiver) = make_test_state(0).await?;
+        let (signing_key, publisher_pubkey) = make_keypair();
+        let record = ChainRecord {
+            id: PackageId::new("npm", "test", "1.0.0"),
+            content_hash: common::sha256_hex(b"revocation-payload"),
+            ipfs_cid: "bafyrevoketest".into(),
+            publisher_pubkey: publisher_pubkey.clone(),
+            block_hash: "0xabc123".into(),
+            published_at: chrono::Utc::now(),
+            status: PackageStatus::Verified,
+            ..ChainRecord::default()
+        };
+        let canonical = record.id.canonical();
+        {
+            let s = state.read().await;
+            s.chain.save_package(&record)?;
+        }
+
+        let reason = "malware detected".to_string();
+        let signature = hex::encode(
+            signing_key
+                .sign(format!("{}:revoke:{}", canonical, reason).as_bytes())
+                .to_bytes(),
+        );
+        let event_bus = {
+            let s = state.read().await;
+            s.event_bus.clone()
+        };
+        let app = router(
+            state.clone(),
+            event_bus,
+            RateLimiter::new(RateLimitConfig::default()),
+            AttestationStore::new(),
+            crate::config::CorsConfig::default(),
+            tx_sender,
+            p2p_handle,
+        );
+
+        let response = app
+            .oneshot(
+                Request::post(format!(
+                    "/v1/packages/{}/revoke",
+                    urlencoding::encode(&canonical)
+                ))
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(&serde_json::json!({
+                    "reason": reason.clone(),
+                    "revoker_pubkey": publisher_pubkey.clone(),
+                    "signature": signature,
+                }))?))?,
+            )
+            .await?;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let queued_tx = tx_receiver
+            .lock()
+            .await
+            .recv()
+            .await
+            .expect("revoke transaction should be queued");
+        match queued_tx {
+            Transaction::Revoke {
+                package_canonical,
+                reason: queued_reason,
+                revoked_by,
+                evidence_hash,
+            } => {
+                assert_eq!(package_canonical, canonical);
+                assert_eq!(queued_reason, reason);
+                assert_eq!(revoked_by, publisher_pubkey);
+                assert_eq!(evidence_hash, record.content_hash);
+            }
+            other => panic!("expected revoke transaction, got {:?}", other),
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn grpc_submit_package_rejects_unstaked_publishers() -> anyhow::Result<()> {
+        let (state, _tempdir, _p2p_handle, _tx_sender, _tx_receiver) = make_test_state(0).await?;
+        let service = crate::grpc::server::MyRegistry::new(state.clone());
+        let publish_req = make_signed_request("0x1111111111111111111111111111111111111111");
+        let canonical = publish_req.id.canonical();
+        let result = service
+            .submit_package(GrpcRequest::new(make_submit_request(&publish_req)))
+            .await;
+
+        let status = result.expect_err("unstaked publishers must be rejected");
+        assert_eq!(status.code(), Code::PermissionDenied);
+        assert!(status.message().contains("has no on-chain stake"));
+        assert!(!state.read().await.pending_pool.contains(&canonical));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn rest_receive_vote_preserves_ml_model_version() -> anyhow::Result<()> {
+        let (state, _tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
+        let (signing_key, validator_pubkey) = make_keypair();
+        let canonical = "npm:test@1.0.0";
+        let content_hash = common::sha256_hex(b"vote-payload");
+        let ml_model_version = "degraded-no-model";
+
+        {
+            let mut s = state.write().await;
+            s.validator_set = common::ValidatorSet::new(vec![validator("node-1", &validator_pubkey)]);
+        }
+
+        let event_bus = {
+            let s = state.read().await;
+            s.event_bus.clone()
+        };
+        let app = router(
+            state.clone(),
+            event_bus,
+            RateLimiter::new(RateLimitConfig::default()),
+            AttestationStore::new(),
+            crate::config::CorsConfig::default(),
+            tx_sender,
+            p2p_handle,
+        );
+
+        let vote = make_vote_message(
+            canonical,
+            &content_hash,
+            "node-1",
+            &signing_key,
+            &validator_pubkey,
+            ml_model_version,
+            true,
+        );
+
+        let response = app
+            .oneshot(
+                Request::post("/v1/consensus/vote")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&vote)?))?,
+            )
+            .await?;
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let s = state.read().await;
+        let stored = s
+            .votes
+            .get(canonical)
+            .and_then(|votes| votes.first())
+            .expect("vote should be stored");
+        assert_eq!(stored.ml_model_version, ml_model_version);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn cors_defaults_block_cross_origin_preflight() -> anyhow::Result<()> {
+        let (state, _tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
+        let event_bus = {
+            let s = state.read().await;
+            s.event_bus.clone()
+        };
+        let app = router(
+            state,
+            event_bus,
+            RateLimiter::new(RateLimitConfig::default()),
+            AttestationStore::new(),
+            crate::config::CorsConfig::default(),
+            tx_sender,
+            p2p_handle,
+        );
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::OPTIONS)
+                    .uri("/v1/packages")
+                    .header(header::ORIGIN, "http://localhost:4173")
+                    .header(header::ACCESS_CONTROL_REQUEST_METHOD, "POST")
+                    .header(header::ACCESS_CONTROL_REQUEST_HEADERS, "content-type")
+                    .body(Body::empty())?,
+            )
+            .await?;
+
+        assert!(
+            response
+                .headers()
+                .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+                .is_none(),
+            "default policy should not emit allow-origin for cross-origin requests"
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn cors_allows_configured_origin_and_credentials() -> anyhow::Result<()> {
+        let (state, _tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
+        let event_bus = {
+            let s = state.read().await;
+            s.event_bus.clone()
+        };
+        let cors = crate::config::CorsConfig {
+            allowed_origins: vec!["http://localhost:4173".into()],
+            allowed_methods: vec!["GET".into(), "POST".into(), "DELETE".into(), "OPTIONS".into()],
+            allow_credentials: true,
+        };
+        let app = router(
+            state,
+            event_bus,
+            RateLimiter::new(RateLimitConfig::default()),
+            AttestationStore::new(),
+            cors,
+            tx_sender,
+            p2p_handle,
+        );
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::OPTIONS)
+                    .uri("/v1/packages")
+                    .header(header::ORIGIN, "http://localhost:4173")
+                    .header(header::ACCESS_CONTROL_REQUEST_METHOD, "POST")
+                    .header(header::ACCESS_CONTROL_REQUEST_HEADERS, "content-type")
+                    .body(Body::empty())?,
+            )
+            .await?;
+
+        assert_eq!(
+            response
+                .headers()
+                .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+                .and_then(|value| value.to_str().ok()),
+            Some("http://localhost:4173")
+        );
+        assert_eq!(
+            response
+                .headers()
+                .get(header::ACCESS_CONTROL_ALLOW_CREDENTIALS)
+                .and_then(|value| value.to_str().ok()),
+            Some("true")
+        );
+
+        Ok(())
     }
 }

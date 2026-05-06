@@ -16,9 +16,12 @@ pub async fn run(
     manifest_path: Option<&Path>,
     privkey_hex: &str,
     extra_privkeys: &[String],
+    publisher_address: &str,
     node_url: Option<&str>,
     shield: bool,
 ) -> Result<()> {
+    let publisher_address = canonicalize_publisher_address(publisher_address)?;
+
     // ── 1. Read and hash the tarball ─────────────────────────────────────────
     let tarball_bytes = std::fs::read(tarball_path)
         .with_context(|| format!("Cannot read tarball: {}", tarball_path.display()))?;
@@ -63,7 +66,7 @@ pub async fn run(
     let pkg_id = detect_package_id(&tarball_bytes)?;
     println!("  package:  {}", pkg_id.canonical());
 
-    // ── 5. Sign: sig = Ed25519(privkey, canonical || content_hash) ───────────
+    // ── 5. Sign: sig = Ed25519(privkey, canonical || content_hash || publisher_address) ─────
     let privkey_bytes = hex::decode(privkey_hex.trim()).context("Invalid private key hex")?;
 
     use ed25519_dalek::{Signer, SigningKey};
@@ -71,7 +74,7 @@ pub async fn run(
         SigningKey::try_from(privkey_bytes.as_slice()).context("Invalid Ed25519 private key")?;
     let pubkey = signing_key.verifying_key();
 
-    let msg = format!("{}{}", pkg_id.canonical(), content_hash);
+    let msg = common::publish_signature_message(&pkg_id, &content_hash, &publisher_address);
     let signature = signing_key.sign(msg.as_bytes());
 
     let mut publisher_pubkeys = vec![hex::encode(pubkey.as_bytes())];
@@ -97,6 +100,7 @@ pub async fn run(
         id: pkg_id.clone(),
         content_hash: content_hash.clone(),
         ipfs_cid: final_ipfs_cid.clone(),
+        publisher_address: publisher_address.clone(),
         publisher_pubkey: publisher_pubkeys[0].clone(),
         signature: signatures[0].clone(),
         manifest,
@@ -111,13 +115,10 @@ pub async fn run(
         ..Default::default()
     };
 
-    // ── 5.5. Generate ZK Content-Hash Proof (publisher-side attestation) ──────
-    // Note: The publisher generates a ZK proof that they know the pre-image of
-    // the content hash. Validation scores (static analysis, sandbox) are set
-    // by the validator nodes during consensus — NOT by the publisher.
-    // These public inputs are initialized to zero/false here; validators will
-    // generate their own proofs with real scores after running the 3-stage pipeline.
-    println!("  Generating ZK content-hash attestation...");
+    // ── 5.5. Generate publisher admission attestation ────────────────────────
+    // This proof binds the submitted content/manifest hashes plus publisher-
+    // claimed analysis values. It does NOT replace validator-side analysis.
+    println!("  Generating publisher admission attestation...");
     let pb_zk = ProgressBar::with_draw_target(Some(0), ProgressDrawTarget::stderr());
     pb_zk.set_style(
         ProgressStyle::default_spinner()
@@ -149,11 +150,10 @@ pub async fn run(
         manifest_hash_bytes.copy_from_slice(&manifest_hash_decoded);
     }
 
-    // Publisher-side inputs use passing values so the circuit constraints are
-    // satisfiable and a valid proof can be generated.  Validator nodes will
-    // independently evaluate the real static-analysis / sandbox scores before
-    // accepting the package — the publisher proof only attests to the content
-    // and manifest hashes.
+    // Publisher-side inputs use claimed passing values so the circuit
+    // constraints are satisfiable and a valid attestation can be generated.
+    // Validator nodes independently evaluate the real analysis results; they
+    // do not trust these claimed values as an authoritative safety verdict.
     let zk_inputs = PackageInputs::new(
         hash_bytes,
         manifest_hash_bytes,
@@ -168,7 +168,7 @@ pub async fn run(
         ZkValidator::serialize_proof(&proof).context("ZK proof serialization failed")?;
     let zk_elapsed = pb_zk.elapsed();
     pb_zk.finish_with_message(format!(
-        "✓ ZK content-hash attestation generated ({:.1}s)",
+        "✓ Publisher admission attestation generated ({:.1}s)",
         zk_elapsed.as_secs_f32()
     ));
 
@@ -191,14 +191,15 @@ pub async fn run(
             version: pkg_id.version.clone(),
             content_hash: content_hash.clone(),
             ipfs_cid: final_ipfs_cid,
+            publisher_address: publisher_address.clone(),
             publisher_pubkey: publisher_pubkeys[0].clone(),
             signature: signatures[0].clone(),
-            zk_proof: proof_bytes,
-            // The publisher-side proof attests to the same public inputs used
-            // during proof generation. Validators still run the real 3-stage
-            // pipeline after admission and do not trust these placeholder values.
-            static_analysis_score: zk_inputs.static_analysis_score as u32,
-            sandbox_safe: zk_inputs.sandbox_safe,
+            publisher_attestation_proof: proof_bytes,
+            // These fields are publisher claims carried inside the admission
+            // attestation. Validators still run the real pipeline after
+            // admission and do not treat these values as authoritative.
+            claimed_static_analysis_score: zk_inputs.static_analysis_score as u32,
+            claimed_sandbox_safe: zk_inputs.sandbox_safe,
             publisher_pubkeys: publisher_pubkeys.clone(),
             signatures: signatures.clone(),
             threshold: if publisher_pubkeys.len() >= 2 { 2 } else { 1 },
@@ -592,10 +593,13 @@ pub async fn sign_offline(
     manifest_path: Option<&Path>,
     privkey_hex: &str,
     extra_privkeys: &[String],
+    publisher_address: &str,
     shield: bool,
     output_path: &Path,
 ) -> Result<()> {
     use ed25519_dalek::{Signer, SigningKey};
+
+    let publisher_address = canonicalize_publisher_address(publisher_address)?;
 
     // 1. Read and hash the tarball
     let tarball_bytes = std::fs::read(tarball_path)
@@ -628,7 +632,7 @@ pub async fn sign_offline(
         .context("Invalid Ed25519 private key")?;
     let pubkey = signing_key.verifying_key();
 
-    let msg = format!("{}{}", pkg_id.canonical(), content_hash);
+    let msg = common::publish_signature_message(&pkg_id, &content_hash, &publisher_address);
     let signature = signing_key.sign(msg.as_bytes());
 
     let mut publisher_pubkeys = vec![hex::encode(pubkey.as_bytes())];
@@ -649,6 +653,7 @@ pub async fn sign_offline(
         id: pkg_id.clone(),
         content_hash,
         ipfs_cid: final_ipfs_cid,
+        publisher_address: publisher_address.clone(),
         publisher_pubkey: publisher_pubkeys[0].clone(),
         signature: signatures[0].clone(),
         manifest,
@@ -671,6 +676,7 @@ pub async fn sign_offline(
 
     println!("  ✓ Signed publish request written to {}", output_path.display());
     println!("    Package: {}", pkg_id.canonical());
+    println!("    Address: {}", publisher_address);
     println!("    Pubkey:  {}", publisher_pubkeys[0]);
     println!();
     println!("  Submit from a networked machine with:");
@@ -683,8 +689,10 @@ pub async fn sign_offline(
 pub async fn submit_signed(signed_file: &Path, node_url: Option<&str>) -> Result<()> {
     let json = std::fs::read_to_string(signed_file)
         .with_context(|| format!("Cannot read signed file: {}", signed_file.display()))?;
-    let request: PublishRequest = serde_json::from_str(&json)
+    let mut request: PublishRequest = serde_json::from_str(&json)
         .context("Invalid signed publish request JSON")?;
+
+    request.publisher_address = canonicalize_publisher_address(&request.publisher_address)?;
 
     println!("  Submitting offline-signed package: {}", request.id.canonical());
 
@@ -723,4 +731,11 @@ pub async fn submit_signed(signed_file: &Path, node_url: Option<&str>) -> Result
     }
 
     Ok(())
+}
+
+pub(crate) fn canonicalize_publisher_address(publisher_address: &str) -> Result<String> {
+    if !crate::faucet_client::is_valid_evm_address(publisher_address) {
+        bail!("Publisher EVM address must be a valid 0x-prefixed address")
+    }
+    Ok(common::canonical_publisher_address(publisher_address))
 }

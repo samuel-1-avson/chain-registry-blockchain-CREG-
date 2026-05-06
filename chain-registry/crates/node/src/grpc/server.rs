@@ -65,22 +65,27 @@ impl RegistryService for MyRegistry {
             })?
         };
 
-        let mut content_hash_bytes = [0u8; 32];
-        if let Ok(hash_vec) = hex::decode(&req.content_hash) {
-            if hash_vec.len() == 32 {
-                content_hash_bytes.copy_from_slice(&hash_vec);
-            }
+        let content_hash_vec = hex::decode(&req.content_hash)
+            .map_err(|e| Status::invalid_argument(format!("Invalid content hash hex: {}", e)))?;
+        if content_hash_vec.len() != 32 {
+            return Err(Status::invalid_argument("Content hash must be 32 bytes"));
         }
+        let mut content_hash_bytes = [0u8; 32];
+        content_hash_bytes.copy_from_slice(&content_hash_vec);
 
         let mut manifest_hash_bytes = [0u8; 32];
-        let manifest_hash_hex = if req.manifest_hash.trim().is_empty() {
-            common::sha256_hex(
-                &serde_json::to_vec(&manifest)
-                    .map_err(|e| Status::internal(format!("Serialize manifest: {}", e)))?,
-            )
-        } else {
-            req.manifest_hash.clone()
-        };
+        let derived_manifest_hash_hex = common::sha256_hex(
+            &serde_json::to_vec(&manifest)
+                .map_err(|e| Status::internal(format!("Serialize manifest: {}", e)))?,
+        );
+        if !req.manifest_hash.trim().is_empty()
+            && !req.manifest_hash.eq_ignore_ascii_case(&derived_manifest_hash_hex)
+        {
+            return Err(Status::invalid_argument(
+                "manifest_hash does not match manifest_json",
+            ));
+        }
+        let manifest_hash_hex = derived_manifest_hash_hex;
 
         let manifest_hash_vec = hex::decode(&manifest_hash_hex)
             .map_err(|e| Status::invalid_argument(format!("Invalid manifest hash hex: {}", e)))?;
@@ -89,76 +94,99 @@ impl RegistryService for MyRegistry {
         }
         manifest_hash_bytes.copy_from_slice(&manifest_hash_vec);
 
-        let s = self.state.read().await;
-
-        // ── 1. ZK-Proof Verification (L2 Safety Hardening) ────────────────────
-        if req.zk_proof.is_empty() {
-            return Err(Status::unauthenticated("Missing mandatory ZK safety proof"));
-        }
-
-        // Build Public Inputs for the ZK Circuit
-        // Note: In production, we'd also verify the content_hash matches the proof.
-        let inputs = zk_validator::PackageInputs::new(
-            content_hash_bytes,
-            manifest_hash_bytes,
-            req.static_analysis_score as u8,
-            req.sandbox_safe,
-        );
-
-        // Deserialize and Verify the Proof
-        match zk_validator::ZkValidator::deserialize_proof(&req.zk_proof) {
-            Ok(proof) => {
-                let public_inputs = inputs.public_inputs();
-                match s.zk_validator.verify_proof(&proof, &public_inputs) {
-                    Ok(true) => {
-                        tracing::info!(
-                            "[ZK] Proof verified successfully for package: {}",
-                            req.name
-                        );
-                    }
-                    _ => {
-                        tracing::warn!("[ZK] Proof verification FAILED for package: {}", req.name);
-                        return Err(Status::permission_denied(
-                            "Invalid ZK safety proof. Submission rejected.",
-                        ));
-                    }
-                }
-            }
-            Err(e) => {
-                return Err(Status::invalid_argument(format!(
-                    "Failed to deserialize ZK proof: {}",
-                    e
-                )));
-            }
-        }
-
-        // ── 2. Add to Pending Pool ──────────────────────────────────────────
         let pkg_id = common::PackageId::new(&req.ecosystem, &req.name, &req.version);
         let publish_req = common::PublishRequest {
             id: pkg_id,
-            content_hash: req.content_hash,
-            ipfs_cid: req.ipfs_cid,
-            publisher_pubkey: req.publisher_pubkey,
-            signature: req.signature,
+            content_hash: req.content_hash.clone(),
+            ipfs_cid: req.ipfs_cid.clone(),
+            publisher_address: common::canonical_publisher_address(&req.publisher_address),
+            publisher_pubkey: req.publisher_pubkey.clone(),
+            signature: req.signature.clone(),
             manifest,
             submitted_at: chrono::Utc::now(),
             shielded: false,
             key_bundle: None,
             pgp_signature: None,
             pgp_public_key: None,
-            publisher_pubkeys: req.publisher_pubkeys,
-            signatures: req.signatures,
+            publisher_pubkeys: req.publisher_pubkeys.clone(),
+            signatures: req.signatures.clone(),
             threshold: req.threshold as usize,
             ..Default::default()
         };
 
-        {
-            if let Err(e) = crate::api::verify_publish_sig(&publish_req) {
-                return Err(Status::permission_denied(format!(
-                    "Invalid publisher signature: {}",
+        if let Err(e) = crate::api::verify_publish_sig(&publish_req) {
+            return Err(Status::permission_denied(format!(
+                "Invalid publisher signature: {}",
+                e
+            )));
+        }
+
+        match crate::api::ensure_publisher_staked(&self.state, &publish_req.publisher_address).await {
+            Ok(()) => {}
+            Err(crate::api::PublisherAdmissionError::InvalidAddress(msg)) => {
+                return Err(Status::invalid_argument(msg));
+            }
+            Err(crate::api::PublisherAdmissionError::Unstaked(msg)) => {
+                return Err(Status::permission_denied(msg));
+            }
+            Err(crate::api::PublisherAdmissionError::Unavailable(msg)) => {
+                return Err(Status::unavailable(msg));
+            }
+        }
+
+        let zk_validator = {
+            let s = self.state.read().await;
+            s.zk_validator.clone()
+        };
+
+        // ── 1. Publisher Attestation Verification (Admission Consistency) ─────
+        if req.publisher_attestation_proof.is_empty() {
+            return Err(Status::invalid_argument(
+                "Missing publisher admission attestation proof",
+            ));
+        }
+
+        // Build the claimed public inputs exactly as submitted by the publisher.
+        // This attestation does not replace validator-side safety analysis.
+        let inputs = zk_validator::PackageInputs::new(
+            content_hash_bytes,
+            manifest_hash_bytes,
+            req.claimed_static_analysis_score as u8,
+            req.claimed_sandbox_safe,
+        );
+
+        // Deserialize and verify the publisher attestation over the claimed inputs.
+        match zk_validator::ZkValidator::deserialize_proof(&req.publisher_attestation_proof) {
+            Ok(proof) => {
+                let public_inputs = inputs.public_inputs();
+                match zk_validator.verify_proof(&proof, &public_inputs) {
+                    Ok(true) => {
+                        tracing::info!(
+                            "[ZK] Publisher admission attestation verified for package: {}",
+                            req.name
+                        );
+                    }
+                    _ => {
+                        tracing::warn!(
+                            "[ZK] Publisher admission attestation FAILED for package: {}",
+                            req.name
+                        );
+                        return Err(Status::permission_denied(
+                            "Invalid publisher admission attestation. Submission rejected.",
+                        ));
+                    }
+                }
+            }
+            Err(e) => {
+                return Err(Status::invalid_argument(format!(
+                    "Failed to deserialize publisher admission attestation: {}",
                     e
                 )));
             }
+        }
+
+        // ── 2. Add to Pending Pool ──────────────────────────────────────────
+        {
             let mut state = self.state.write().await;
             state.pending_pool.insert(publish_req);
             tracing::info!(
@@ -169,7 +197,9 @@ impl RegistryService for MyRegistry {
 
         Ok(Response::new(SubmitResponse {
             accepted: true,
-            message: "Package verified by ZK-SNARK and accepted into pending pool".into(),
+            message:
+                "Publisher admission attestation verified; package accepted into pending pool for validator review"
+                    .into(),
         }))
     }
 }

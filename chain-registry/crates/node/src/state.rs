@@ -14,8 +14,6 @@ use crate::{
     chain_store::ChainStore,
     config::NodeConfig,
     events::EventBus,
-    finalized_tx::FinalizedTxSender,
-    p2p::P2PHandle,
     pending_pool::PendingPool,
     publisher_index::PublisherIndex,
 };
@@ -75,6 +73,19 @@ pub struct BridgeStatus {
     pub current_state_root: String,
 }
 
+#[derive(Serialize, Clone, Debug, Default)]
+pub struct ValidatorSetSyncStatus {
+    pub enabled: bool,
+    pub mode: String,
+    pub state: String,
+    pub last_finalized_source_block: Option<u64>,
+    pub cursor_block: Option<u64>,
+    pub cursor_log_index: Option<u32>,
+    pub cursor_block_hash: Option<String>,
+    pub last_poll_at: Option<String>,
+    pub last_error: Option<String>,
+}
+
 #[derive(Serialize, Clone, Debug)]
 pub struct ReorgEvent {
     pub id: String,
@@ -91,14 +102,13 @@ pub struct NodeState {
     pub chain: ChainStore,
     pub pending_pool: PendingPool,
     pub publisher_index: PublisherIndex,
+    pub validator_set_bootstrap: common::ValidatorSet,
     pub validator_set: common::ValidatorSet,
     /// Accumulated validator votes per block hash / package canonical.
     pub votes: HashMap<String, Vec<common::ValidatorSignature>>,
     pub config: NodeConfig,
     pub event_bus: EventBus,
-    pub p2p: P2PHandle,
     pub zk_validator: Arc<zk_validator::ZkValidator>,
-    pub tx_sender: FinalizedTxSender,
     // Live metrics for the Explorer UI
     pub p2p_status: P2PStatus,
     pub bridge_status: BridgeStatus,
@@ -108,6 +118,7 @@ pub struct NodeState {
     pub decryption_shares: HashMap<String, Vec<threshold_encryption::KeyShare>>,
     /// Validator registrations keyed by canonical EVM address.
     pub validator_registrations: HashMap<String, ValidatorRegistrationStatus>,
+    pub validator_set_sync: ValidatorSetSyncStatus,
     /// View-change certificates accumulated from peers.
     /// Outer key: block_hash. Middle key: proposed new_view number.
     /// Inner set: validator IDs that have sent a certificate for this (block, view).

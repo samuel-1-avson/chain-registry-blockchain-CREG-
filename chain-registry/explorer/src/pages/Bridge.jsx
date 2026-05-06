@@ -1,11 +1,11 @@
 import React, { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { nodeApi } from '../api/node.js'
+import { getEndpointStatus, nodeApi } from '../api/node.js'
 import { usePolling } from '../hooks/usePolling.js'
 import { Hash } from '../components/Hash.jsx'
 import { TimeAgo } from '../components/TimeAgo.jsx'
 import { SkeletonCard, SkeletonRow } from '../components/Skeleton.jsx'
-import { ErrorState, EmptyState } from '../components/ErrorState.jsx'
+import { EndpointStatusNotice, ErrorState, EmptyState } from '../components/ErrorState.jsx'
 import { StatusBadge } from '../components/StatusBadge.jsx'
 import { ShareButton } from '../components/ShareButton.jsx'
 import { Sparkline } from '../hooks/useSparkline.jsx'
@@ -126,6 +126,7 @@ export default function Bridge() {
 
   const s = data || {}
   const anchorList = anchors.data?.anchors || (Array.isArray(anchors.data) ? anchors.data : [])
+  const anchorStatus = getEndpointStatus(anchors.data)
 
   return (
     <div style={{ display: 'grid', gap: 'var(--space-6)' }}>
@@ -161,12 +162,22 @@ export default function Bridge() {
           </span>
         </header>
 
+        {anchorStatus && (
+          <div style={{ marginBottom: 'var(--space-4)' }}>
+            <EndpointStatusNotice status={anchorStatus} title="Anchor history unavailable" />
+          </div>
+        )}
+
         {anchors.loading && !anchorList.length ? (
           <SkeletonCard lines={6} />
+        ) : anchors.error && !anchorList.length ? (
+          <ErrorState error={anchors.error} onRetry={anchors.refetch} title="Could not load bridge anchor history" />
         ) : anchorList.length === 0 ? (
           <EmptyState
-            title="No anchor history"
-            description="The bridge hasn't committed any state to L1 yet, or the /v1/bridge/anchors endpoint is not available. The latest status is shown above."
+            title={anchorStatus ? 'Anchor history unavailable' : 'No anchor history'}
+            description={anchorStatus
+              ? 'The latest bridge status is still shown above, but historical L1 anchor entries cannot be listed until this node exposes the anchor-history endpoint.'
+              : "The bridge hasn't committed any state to L1 yet."}
           />
         ) : (
           <div style={{ paddingLeft: 4 }}>

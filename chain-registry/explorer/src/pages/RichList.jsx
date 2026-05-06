@@ -1,19 +1,21 @@
 import { useEffect, useState } from 'react'
-import { nodeApi } from '../api/node.js'
+import { getEndpointStatus, nodeApi } from '../api/node.js'
 import { SkeletonCard } from '../components/Skeleton.jsx'
-import { ErrorState } from '../components/ErrorState.jsx'
+import { EmptyState, EndpointStatusNotice, ErrorState } from '../components/ErrorState.jsx'
 import { Hash } from '../components/Hash.jsx'
 
 export default function RichList() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [accounts, setAccounts] = useState([])
+  const [endpointStatus, setEndpointStatus] = useState(null)
 
   useEffect(() => {
     const controller = new AbortController()
     nodeApi.richList(controller.signal)
       .then((data) => {
-        setAccounts(data || [])
+        setEndpointStatus(getEndpointStatus(data))
+        setAccounts(Array.isArray(data) ? data : [])
         setLoading(false)
       })
       .catch((err) => {
@@ -29,8 +31,18 @@ export default function RichList() {
   if (error) return <ErrorState error={error} />
   if (accounts.length === 0) {
     return (
-      <div className="panel" style={{ padding: 'var(--space-6)', textAlign: 'center' }}>
-        <p style={{ color: 'var(--text-secondary)' }}>No staked accounts discovered yet.</p>
+      <div className="panel" style={{ padding: 'var(--space-6)' }}>
+        {endpointStatus && (
+          <div style={{ marginBottom: 'var(--space-4)' }}>
+            <EndpointStatusNotice status={endpointStatus} title="Rich list unavailable" />
+          </div>
+        )}
+        <EmptyState
+          title={endpointStatus ? 'Rich list unavailable' : 'No staked accounts discovered'}
+          description={endpointStatus
+            ? 'This node does not expose rich-list data yet, so stake rankings cannot be rendered here.'
+            : 'No staked accounts discovered yet.'}
+        />
       </div>
     )
   }
@@ -49,6 +61,11 @@ export default function RichList() {
           <span className="panel-subtitle">Top Accounts by Stake ({accounts.length})</span>
         </div>
         <div className="panel-content" style={{ overflowX: 'auto' }}>
+          {endpointStatus && (
+            <div style={{ marginBottom: 'var(--space-4)' }}>
+              <EndpointStatusNotice status={endpointStatus} title="Rich list unavailable" />
+            </div>
+          )}
           <table className="ce-table">
             <thead>
               <tr>

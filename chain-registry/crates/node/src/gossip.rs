@@ -75,6 +75,9 @@ pub struct VoteGossip {
     pub validator_id: String,
     /// Hex-encoded Ed25519 public key of the voting validator.
     pub validator_pubkey: String,
+    /// ML model version used by the validator during deep scan.
+    #[serde(default)]
+    pub ml_model_version: String,
     pub phase: String, // "prepare" | "commit"
     pub approved: bool,
     pub reject_reason: Option<String>,

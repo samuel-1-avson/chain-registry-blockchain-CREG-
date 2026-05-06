@@ -1,113 +1,74 @@
 # ZK Circuits for Chain Registry
 
-This directory contains zero-knowledge circuits for the Chain Registry protocol.
+This directory contains the Circom circuits currently tracked in this workspace
+for Chain Registry proof experiments.
 
-## Circuits
+## Current Circuits
 
 ### DoubleSignProof.circom
 
-Proves that a validator signed two conflicting votes for the same package.
+Proof of conflicting validator votes for the same package.
 
-**Public Inputs:**
-- `validatorPubkey[2]`: Ed25519 public key (x, y coordinates)
-- `packageHash`: Poseidon hash of package canonical
-- `vote1Hash`: Hash of first vote (approve)
-- `vote2Hash`: Hash of second vote (reject)
+- Public inputs: validator public key, package hash, first vote hash, second vote hash
+- Private witness: signature data for both votes
+- Intended use: double-sign evidence and slashing workflows
 
-**Private Inputs:**
-- `validatorPrivkey`: Private key (kept secret!)
-- `signature1[3]`: EdDSA signature (R_x, R_y, S)
-- `signature2[3]`: EdDSA signature (R_x, R_y, S)
+### PackageValidator.circom
 
-**Constraints:**
-1. Both signatures are valid under the public key
-2. The votes are different (one approve, one reject)
-3. Both votes are for the same package
+Proof that a package satisfies published safety thresholds without revealing the
+full package contents.
 
-## Building
+- Public inputs: `contentHash`, `manifestHash`, `staticAnalysisScore`, `sandboxPassed`, `noVulnerableDeps`, plus the configured threshold values
+- Private witness: package content array and internal safety metrics such as complexity, network calls, and file writes
+- Intended use: publisher admission attestation experiments
 
-### Prerequisites
+## Directory Layout
 
-1. Install Circom:
-```bash
-curl --proto '=https' --tlsv1.2 https://sh.rustup.rs -sSf | sh
-git clone https://github.com/iden3/circom.git
-cd circom
-cargo build --release
-cargo install --path circom
-```
+| Path | Purpose |
+|---|---|
+| `DoubleSignProof.circom` | Double-sign evidence circuit |
+| `PackageValidator.circom` | Package safety / publisher-attestation circuit |
+| `build_circuit.sh` | Supported local build helper |
+| `package.json` / `package-lock.json` | Node dependencies for circuit tooling |
+| `build/` | Generated build artifacts |
+| `keys/` | Generated proving and verification keys |
 
-2. Install snarkjs:
-```bash
-npm install -g snarkjs
-```
+`node_modules/` is dependency output and should not be treated as part of the
+public circuit interface.
 
-3. Install dependencies:
+## Build
+
+Prerequisites:
+
+1. Circom 2.1+
+2. Node.js and npm
+3. `snarkjs`
+
+Install dependencies and run the build helper:
+
 ```bash
 npm install
-```
-
-### Build Circuit
-
-```bash
-chmod +x build_circuit.sh
 ./build_circuit.sh
 ```
 
-This will:
-1. Compile the circuit to R1CS
-2. Run trusted setup (powers of tau)
-3. Generate proving and verification keys
-4. Export Solidity verifier contract
+The build helper is the supported path for local development in this workspace.
+It compiles the configured circuit, generates R1CS/WASM artifacts, and writes
+proof material into `build/` and `keys/`.
 
-## Testing
+## Manual Proof Workflow
 
-```bash
-# Generate test proof
-cd build/DoubleSignProof_js
-node generate_witness.js DoubleSignProof.wasm input.json witness.wtns
+After building, the general proof flow is:
 
-# Create proof
-snarkjs groth16 prove ../../keys/DoubleSignProof_final.zkey witness.wtns proof.json public.json
+1. generate a witness from the compiled WASM
+2. create a Groth16 proof with `snarkjs`
+3. verify the proof against the generated verification key
 
-# Verify proof
-snarkjs groth16 verify ../../keys/verification_key.json public.json proof.json
-```
-
-## Circuit Constraints
-
-| Component | Constraints |
-|-----------|-------------|
-| EdDSA Verify (2x) | ~20,000 |
-| Hash Comparison | ~100 |
-| Range Checks | ~500 |
-| **Total** | **~20,600** |
-
-## Gas Costs
-
-| Operation | Gas |
-|-----------|-----|
-| Proof Verification | ~200,000 |
-| Submit Evidence (incl. verification) | ~250,000 |
-
-## Security
-
-- **Soundness**: Invalid proofs rejected with overwhelming probability
-- **Zero-Knowledge**: Private inputs not revealed
-- **Non-Replay**: Nullifier system prevents double-spending proofs
-
-## Files
-
-- `DoubleSignProof.circom` - Main circuit definition
-- `ed25519_verify.circom` - EdDSA signature verification gadget
-- `poseidon_hasher.circom` - Poseidon hash function
-- `build/` - Build artifacts (R1CS, WASM, witness gen)
-- `keys/` - Proving and verification keys
+The exact file names under `build/` and `keys/` depend on which circuit you
+compiled.
 
 ## References
 
 - [Circom Documentation](https://docs.circom.io/)
 - [Circomlib](https://github.com/iden3/circomlib)
 - [Groth16 Paper](https://eprint.iacr.org/2016/260)
-- [EdDSA Signatures](https://ed25519.cr.yp.to/)
 - [Poseidon Hash](https://eprint.iacr.org/2019/458)

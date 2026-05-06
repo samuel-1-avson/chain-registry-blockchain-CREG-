@@ -14,6 +14,86 @@ use tokio::sync::mpsc;
 
 use crate::p2p_rate_limit::{P2PRateLimitConfig, P2PRateLimiter};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum VoteValidationError {
+    Malformed,
+    UnknownValidator,
+    MissingValidatorPubkey,
+    ValidatorPubkeyMismatch,
+    InvalidValidatorPubkeyHex,
+    InvalidValidatorPubkey,
+    InvalidSignatureHex,
+    InvalidSignatureFormat,
+    SignatureVerificationFailed,
+}
+
+fn validate_vote_gossip_message(
+    message: &[u8],
+    validator_set: &common::ValidatorSet,
+) -> Result<crate::gossip::VoteGossip, VoteValidationError> {
+    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+
+    let vote = serde_json::from_slice::<crate::gossip::VoteGossip>(message)
+        .map_err(|_| VoteValidationError::Malformed)?;
+
+    let validator = validator_set
+        .validators
+        .iter()
+        .find(|validator| validator.id == vote.validator_id)
+        .ok_or(VoteValidationError::UnknownValidator)?;
+
+    if validator.pubkey.is_empty() {
+        return Err(VoteValidationError::MissingValidatorPubkey);
+    }
+
+    if vote.validator_pubkey != validator.pubkey {
+        return Err(VoteValidationError::ValidatorPubkeyMismatch);
+    }
+
+    let pubkey_bytes =
+        hex::decode(&vote.validator_pubkey).map_err(|_| VoteValidationError::InvalidValidatorPubkeyHex)?;
+    let verifying_key = VerifyingKey::try_from(pubkey_bytes.as_slice())
+        .map_err(|_| VoteValidationError::InvalidValidatorPubkey)?;
+
+    let signature_bytes =
+        hex::decode(&vote.signature).map_err(|_| VoteValidationError::InvalidSignatureHex)?;
+    let signature = Signature::try_from(signature_bytes.as_slice())
+        .map_err(|_| VoteValidationError::InvalidSignatureFormat)?;
+
+    let message = crate::gossip::canonical_vote_message(
+        &vote.block_hash,
+        &vote.content_hash,
+        vote.approved,
+        &vote.validator_pubkey,
+    );
+
+    verifying_key
+        .verify(message.as_bytes(), &signature)
+        .map_err(|_| VoteValidationError::SignatureVerificationFailed)?;
+
+    Ok(vote)
+}
+
+fn report_validation_result(
+    swarm: &mut Swarm<Behaviour>,
+    message_id: &gossipsub::MessageId,
+    propagation_source: &PeerId,
+    acceptance: gossipsub::MessageAcceptance,
+) {
+    if let Err(error) = swarm
+        .behaviour_mut()
+        .gossipsub
+        .report_message_validation_result(message_id, propagation_source, acceptance)
+    {
+        tracing::warn!(
+            message_id = %message_id,
+            peer = %propagation_source,
+            error = %error,
+            "P2P: failed to report gossipsub message validation result"
+        );
+    }
+}
+
 /// Combined P2P behaviour.
 #[derive(NetworkBehaviour)]
 pub struct Behaviour {
@@ -62,6 +142,7 @@ impl P2PNode {
 
                 let gossipsub_config = gossipsub::ConfigBuilder::default()
                     .heartbeat_interval(Duration::from_secs(10))
+                    .validate_messages()
                     .validation_mode(gossipsub::ValidationMode::Strict)
                     .message_id_fn(message_id_fn)
                     .build()
@@ -167,6 +248,12 @@ impl P2PNode {
                         };
 
                         if !allowed {
+                            report_validation_result(
+                                &mut self.swarm,
+                                &id,
+                                &peer_id,
+                                gossipsub::MessageAcceptance::Ignore,
+                            );
                             tracing::warn!(
                                 "P2P Rate limit: Dropping message {} from {} on topic {}",
                                 id, peer_id, topic_str
@@ -180,11 +267,26 @@ impl P2PNode {
                         // rate limiter but exhausts the node's heap during JSON parsing.
                         const MAX_MESSAGE_BYTES: usize = 1024 * 1024; // 1 MiB
                         if message.data.len() > MAX_MESSAGE_BYTES {
+                            report_validation_result(
+                                &mut self.swarm,
+                                &id,
+                                &peer_id,
+                                gossipsub::MessageAcceptance::Ignore,
+                            );
                             tracing::warn!(
                                 "P2P: Dropping oversized message {} from {} ({} bytes > {} limit)",
                                 id, peer_id, message.data.len(), MAX_MESSAGE_BYTES
                             );
                             continue;
+                        }
+
+                        if !topic_str.contains("votes") {
+                            report_validation_result(
+                                &mut self.swarm,
+                                &id,
+                                &peer_id,
+                                gossipsub::MessageAcceptance::Accept,
+                            );
                         }
 
                         // Forward message to the node's internal event bus
@@ -292,44 +394,24 @@ impl P2PNode {
                             continue;
                         }
 
-                        // Votes: validate the application-level Ed25519 signature
-                        // before emitting an event. libp2p gossipsub has already
-                        // propagated this message to mesh peers (p2p-layer signing
-                        // is enforced by ValidationMode::Strict, but that only
-                        // authenticates the relaying node's identity, not the vote
-                        // content). Proper prevention of invalid-vote propagation
-                        // requires the deferred-validation API
-                        // (report_message_validation_result), which would require a
-                        // refactor of the event loop. This check at least prevents
-                        // invalid votes from being recorded in our local state or
-                        // event bus.
+                        // Votes: gate propagation on application-level validation.
+                        // gossipsub strict mode authenticates the relaying peer, but
+                        // vote authenticity depends on the validator-set identity and
+                        // Ed25519 signature inside the payload.
                         if topic_str.contains("votes") {
-                            match serde_json::from_slice::<crate::gossip::VoteGossip>(&message.data) {
-                                Ok(vote) => {
-                                    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
-                                    let valid = (|| -> Option<()> {
-                                        let pk_bytes = hex::decode(&vote.validator_pubkey).ok()?;
-                                        let vk = VerifyingKey::try_from(pk_bytes.as_slice()).ok()?;
-                                        let sig_bytes = hex::decode(&vote.signature).ok()?;
-                                        let sig = Signature::try_from(sig_bytes.as_slice()).ok()?;
-                                        let msg = crate::gossip::canonical_vote_message(
-                                            &vote.block_hash,
-                                            &vote.content_hash,
-                                            vote.approved,
-                                            &vote.validator_pubkey,
-                                        );
-                                        vk.verify(msg.as_bytes(), &sig).ok()?;
-                                        Some(())
-                                    })().is_some();
+                            let validation = {
+                                let s = state.read().await;
+                                validate_vote_gossip_message(&message.data, &s.validator_set)
+                            };
 
-                                    if !valid {
-                                        tracing::warn!(
-                                            validator_id = %vote.validator_id,
-                                            peer = %peer_id,
-                                            "P2P: dropping gossip vote with invalid signature"
-                                        );
-                                        continue;
-                                    }
+                            match validation {
+                                Ok(vote) => {
+                                    report_validation_result(
+                                        &mut self.swarm,
+                                        &id,
+                                        &peer_id,
+                                        gossipsub::MessageAcceptance::Accept,
+                                    );
 
                                     crate::events::emit(&event_bus, crate::events::RegistryEvent {
                                         kind: crate::events::EventKind::ValidatorVoted,
@@ -341,11 +423,17 @@ impl P2PNode {
                                         }),
                                     });
                                 }
-                                Err(e) => {
+                                Err(error) => {
+                                    report_validation_result(
+                                        &mut self.swarm,
+                                        &id,
+                                        &peer_id,
+                                        gossipsub::MessageAcceptance::Reject,
+                                    );
                                     tracing::warn!(
                                         peer = %peer_id,
-                                        error = %e,
-                                        "P2P: dropping malformed gossip vote"
+                                        reason = ?error,
+                                        "P2P: rejecting gossip vote before mesh propagation"
                                     );
                                 }
                             }
@@ -445,5 +533,96 @@ impl P2PNode {
             .clamp(1, 100);
         let threshold = u64::MAX / 100 * pct;
         distance < threshold
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ed25519_dalek::{Signer, SigningKey};
+
+    fn validator(id: &str, signing_key: &SigningKey) -> common::Validator {
+        common::Validator {
+            id: id.into(),
+            alias: id.into(),
+            pubkey: hex::encode(signing_key.verifying_key().as_bytes()),
+            eth_address: String::new(),
+            stake: 100,
+            reputation: 100,
+            status: "online".into(),
+        }
+    }
+
+    fn signed_vote(
+        validator_id: &str,
+        signing_key: &SigningKey,
+        validator_pubkey: String,
+    ) -> crate::gossip::VoteGossip {
+        let message = crate::gossip::canonical_vote_message(
+            "npm/pkg@1.0.0",
+            "deadbeef",
+            true,
+            &validator_pubkey,
+        );
+
+        crate::gossip::VoteGossip {
+            block_hash: "npm/pkg@1.0.0".into(),
+            content_hash: "deadbeef".into(),
+            validator_id: validator_id.into(),
+            validator_pubkey,
+            ml_model_version: "creg-detect-v1.0.0".into(),
+            phase: "commit".into(),
+            approved: true,
+            reject_reason: None,
+            signature: hex::encode(signing_key.sign(message.as_bytes()).to_bytes()),
+        }
+    }
+
+    #[test]
+    fn validate_vote_gossip_accepts_known_validator() {
+        let signing_key = SigningKey::from_bytes(&[7u8; 32]);
+        let validator_set = common::ValidatorSet::new(vec![validator("node-1", &signing_key)]);
+        let vote = signed_vote(
+            "node-1",
+            &signing_key,
+            hex::encode(signing_key.verifying_key().as_bytes()),
+        );
+
+        let result = validate_vote_gossip_message(
+            &serde_json::to_vec(&vote).unwrap(),
+            &validator_set,
+        )
+        .unwrap();
+
+        assert_eq!(result.validator_id, "node-1");
+    }
+
+    #[test]
+    fn validate_vote_gossip_rejects_malformed_payload() {
+        let validator_set = common::ValidatorSet::default();
+
+        let error = validate_vote_gossip_message(br#"not-json"#, &validator_set).unwrap_err();
+
+        assert_eq!(error, VoteValidationError::Malformed);
+    }
+
+    #[test]
+    fn validate_vote_gossip_rejects_invalid_signature() {
+        let validator_key = SigningKey::from_bytes(&[7u8; 32]);
+        let attacker_key = SigningKey::from_bytes(&[8u8; 32]);
+        let validator_set = common::ValidatorSet::new(vec![validator("node-1", &validator_key)]);
+        let vote = signed_vote(
+            "node-1",
+            &attacker_key,
+            hex::encode(validator_key.verifying_key().as_bytes()),
+        );
+
+        let error = validate_vote_gossip_message(
+            &serde_json::to_vec(&vote).unwrap(),
+            &validator_set,
+        )
+        .unwrap_err();
+
+        assert_eq!(error, VoteValidationError::SignatureVerificationFailed);
     }
 }

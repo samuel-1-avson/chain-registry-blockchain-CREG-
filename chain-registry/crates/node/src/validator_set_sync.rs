@@ -41,6 +41,7 @@ use alloy::{
     sol,
     sol_types::SolEvent,
 };
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 // ─── Contract event ABIs ─────────────────────────────────────────────────────
@@ -283,8 +284,7 @@ pub enum SyncMode {
     /// Drift between chain-derived and file-derived sets is exposed via
     /// `SyncWorker::observed_addresses()` for telemetry.
     Shadow,
-    /// Apply deltas to the active set. Reserved for Phase 2; not yet wired.
-    #[allow(dead_code)]
+    /// Apply the chain-derived membership view to the active validator set.
     ChainAuthoritative,
 }
 
@@ -294,6 +294,8 @@ pub enum SyncMode {
 pub struct WorkerState {
     /// Highest `(block_height, log_index)` we've consumed. None on first run.
     pub cursor: Option<(u64, u32)>,
+    /// Hash of the cursor block at the time we processed it.
+    pub cursor_block_hash: Option<String>,
     /// Addresses the chain says are *currently* in the active validator set.
     /// In shadow mode this is the chain-derived view; we never mutate the
     /// actual `ValidatorSet`.
@@ -336,10 +338,252 @@ pub fn apply_delta(state: &mut WorkerState, delta: &ValidatorSetDelta) {
 
 // ─── Async polling worker ────────────────────────────────────────────────────
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use crate::NodeState;
+use crate::{normalized_validator_key, validator_registration_status_text, NodeState};
+
+fn active_status_for(node_id: &str, validator_id: &str) -> String {
+    if validator_id == node_id {
+        "self".to_string()
+    } else {
+        "online".to_string()
+    }
+}
+
+fn validator_from_registration(
+    registration: &crate::ValidatorRegistrationStatus,
+    fallback_stake: u64,
+    node_id: &str,
+) -> Option<common::Validator> {
+    let identity = registration.identity.normalized();
+    if !identity.is_complete() {
+        return None;
+    }
+
+    let alias = if registration.alias.trim().is_empty() {
+        identity.node_id.clone()
+    } else {
+        registration.alias.trim().to_string()
+    };
+
+    Some(common::Validator {
+        id: identity.node_id.clone(),
+        alias,
+        pubkey: identity.ed25519_pubkey.clone(),
+        eth_address: identity.evm_address.clone(),
+        stake: registration.stake.max(fallback_stake),
+        reputation: registration.reputation.max(100),
+        status: active_status_for(node_id, &identity.node_id),
+    })
+}
+
+async fn update_sync_status<F>(state: &Arc<RwLock<NodeState>>, update: F)
+where
+    F: FnOnce(&mut crate::state::ValidatorSetSyncStatus),
+{
+    let mut s = state.write().await;
+    update(&mut s.validator_set_sync);
+}
+
+async fn seed_worker_state_from_bootstrap(state: &Arc<RwLock<NodeState>>) -> WorkerState {
+    let s = state.read().await;
+    let observed_active = s
+        .validator_set_bootstrap
+        .validators
+        .iter()
+        .filter_map(|validator| {
+            let addr = normalized_validator_key(&validator.eth_address);
+            if addr.is_empty() {
+                return None;
+            }
+            let status = validator.status.trim().to_ascii_lowercase();
+            if matches!(status.as_str(), "pending" | "jailed" | "offline") {
+                None
+            } else {
+                Some(addr)
+            }
+        })
+        .collect();
+
+    WorkerState {
+        cursor: None,
+        cursor_block_hash: None,
+        observed_active,
+    }
+}
+
+async fn reconcile_state_from_worker(
+    state: Arc<RwLock<NodeState>>,
+    worker_state: &WorkerState,
+) -> anyhow::Result<()> {
+    let mut s = state.write().await;
+    let node_id = s.config.node_id.clone();
+    let active_addresses = worker_state.observed_active.clone();
+
+    let current_by_addr: HashMap<String, common::Validator> = s
+        .validator_set
+        .validators
+        .iter()
+        .filter_map(|validator| {
+            let addr = normalized_validator_key(&validator.eth_address);
+            if addr.is_empty() {
+                None
+            } else {
+                Some((addr, validator.clone()))
+            }
+        })
+        .collect();
+
+    let bootstrap_by_addr: HashMap<String, common::Validator> = s
+        .validator_set_bootstrap
+        .validators
+        .iter()
+        .filter_map(|validator| {
+            let addr = normalized_validator_key(&validator.eth_address);
+            if addr.is_empty() {
+                None
+            } else {
+                Some((addr, validator.clone()))
+            }
+        })
+        .collect();
+
+    let mut next_validators = Vec::new();
+    let mut sorted_active: Vec<String> = active_addresses.iter().cloned().collect();
+    sorted_active.sort();
+
+    for addr in sorted_active {
+        let mut validator = current_by_addr
+            .get(&addr)
+            .cloned()
+            .or_else(|| bootstrap_by_addr.get(&addr).cloned())
+            .or_else(|| {
+                s.validator_registrations
+                    .get(&addr)
+                    .and_then(|registration| {
+                        validator_from_registration(registration, 0, &node_id)
+                    })
+            });
+
+        if let Some(existing) = validator.as_mut() {
+            if let Some(registration) = s.validator_registrations.get(&addr) {
+                if let Some(from_registration) =
+                    validator_from_registration(registration, existing.stake, &node_id)
+                {
+                    existing.id = from_registration.id;
+                    existing.alias = from_registration.alias;
+                    existing.pubkey = from_registration.pubkey;
+                    existing.stake = existing.stake.max(from_registration.stake);
+                    existing.reputation = existing.reputation.max(from_registration.reputation);
+                }
+            }
+            existing.eth_address = addr.clone();
+            existing.status = active_status_for(&node_id, &existing.id);
+            if existing.alias.trim().is_empty() {
+                existing.alias = existing.id.clone();
+            }
+            next_validators.push(existing.clone());
+        } else {
+            tracing::warn!(
+                target: "validator_set_sync",
+                "active validator {} has no registered node metadata; skipping admission until identity is registered",
+                addr
+            );
+        }
+    }
+
+    s.validator_set.validators = next_validators;
+
+    for registration in s.validator_registrations.values_mut() {
+        let key = normalized_validator_key(&registration.identity.evm_address);
+        let is_active = !key.is_empty() && active_addresses.contains(&key);
+        registration.admitted_to_consensus = is_active;
+        registration.active = is_active;
+        registration.status = validator_registration_status_text(registration);
+    }
+
+    Ok(())
+}
+
+fn cursor_reorged(worker_state: &WorkerState, current_hash: &str) -> bool {
+    worker_state
+        .cursor_block_hash
+        .as_ref()
+        .map(|saved| !saved.eq_ignore_ascii_case(current_hash))
+        .unwrap_or(false)
+}
+
+async fn fetch_block_hash(
+    client: &reqwest::Client,
+    rpc_url: &str,
+    block_number: u64,
+) -> anyhow::Result<String> {
+    let resp: serde_json::Value = client
+        .post(rpc_url)
+        .json(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "eth_getBlockByNumber",
+            "params": [format!("0x{:x}", block_number), false],
+            "id": 1,
+        }))
+        .send()
+        .await?
+        .json()
+        .await?;
+
+    resp["result"]["hash"]
+        .as_str()
+        .map(|hash| hash.to_string())
+        .ok_or_else(|| anyhow::anyhow!("eth_getBlockByNumber returned no block hash"))
+}
+
+async fn rebuild_worker_state(
+    client: &reqwest::Client,
+    config: &SyncConfig,
+    state: &Arc<RwLock<NodeState>>,
+    safe_block: u64,
+) -> anyhow::Result<WorkerState> {
+    let mut worker_state = seed_worker_state_from_bootstrap(state).await;
+
+    if let Some(start_block) = config.start_block {
+        worker_state.cursor = Some((start_block, u32::MAX));
+        worker_state.cursor_block_hash = Some(
+            fetch_block_hash(client, &config.eth_rpc_url, start_block).await?,
+        );
+    }
+
+    let from_block = match worker_state.cursor {
+        Some((height, _)) => height.saturating_add(1),
+        None => safe_block.saturating_sub(1000),
+    };
+
+    if from_block <= safe_block {
+        let mut deltas = fetch_deltas(
+            client,
+            &config.eth_rpc_url,
+            &config.staking_addr,
+            from_block,
+            safe_block,
+        )
+        .await?;
+        deltas.sort_by_key(|delta| (delta.block_height, delta.log_index));
+        for delta in deltas {
+            apply_delta(&mut worker_state, &delta);
+        }
+    }
+
+    if let Some((height, _)) = worker_state.cursor {
+        worker_state.cursor_block_hash = Some(fetch_block_hash(
+            client,
+            &config.eth_rpc_url,
+            height,
+        )
+        .await?);
+    }
+
+    Ok(worker_state)
+}
 
 /// Run the validator-set sync worker.
 ///
@@ -350,30 +594,104 @@ pub async fn run(
     mode: SyncMode,
     state: Arc<RwLock<NodeState>>,
 ) -> anyhow::Result<()> {
-    let mut worker_state = load_cursor(&state).await.unwrap_or_default();
+    let client = reqwest::Client::new();
+    let mut worker_state = match load_cursor(&state).await {
+        Some(saved) => saved,
+        None => rebuild_worker_state(
+            &client,
+            &config,
+            &state,
+            config.start_block.unwrap_or(0),
+        )
+        .await?,
+    };
+    if worker_state.observed_active.is_empty() {
+        worker_state.observed_active = seed_worker_state_from_bootstrap(&state).await.observed_active;
+    }
+    if worker_state.cursor.is_none() {
+        if let Some(start_block) = config.start_block {
+            worker_state.cursor = Some((start_block, u32::MAX));
+            worker_state.cursor_block_hash = Some(
+                fetch_block_hash(&client, &config.eth_rpc_url, start_block).await?,
+            );
+        }
+    }
+    if matches!(mode, SyncMode::ChainAuthoritative) {
+        reconcile_state_from_worker(Arc::clone(&state), &worker_state).await?;
+    }
+    save_cursor(&state, &worker_state).await?;
     let mut interval = tokio::time::interval(
         std::time::Duration::from_secs(config.poll_interval_secs)
     );
 
-    let client = reqwest::Client::new();
-
     loop {
         interval.tick().await;
+        update_sync_status(&state, |status| {
+            status.enabled = true;
+            status.last_poll_at = Some(Utc::now().to_rfc3339());
+            if status.state != "reorg-replaying" {
+                status.state = "syncing".to_string();
+            }
+        }).await;
 
         let latest_block = match fetch_latest_block(&client, &config.eth_rpc_url).await {
             Ok(b) => b,
             Err(e) => {
+                update_sync_status(&state, |status| {
+                    status.state = "degraded".to_string();
+                    status.last_error = Some(e.to_string());
+                }).await;
                 tracing::warn!("validator_set_sync: failed to fetch latest block: {}", e);
                 continue;
             }
         };
 
         let safe_block = latest_block.saturating_sub(config.finality_lag_blocks);
+        update_sync_status(&state, |status| {
+            status.last_finalized_source_block = Some(safe_block);
+        }).await;
+
+        if let Some((cursor_block, _)) = worker_state.cursor {
+            if let Ok(current_hash) = fetch_block_hash(&client, &config.eth_rpc_url, cursor_block).await {
+                if cursor_reorged(&worker_state, &current_hash) {
+                    update_sync_status(&state, |status| {
+                        status.state = "reorg-replaying".to_string();
+                        status.last_error = None;
+                    }).await;
+                    tracing::warn!(
+                        target: "validator_set_sync",
+                        cursor_block,
+                        saved_hash = worker_state.cursor_block_hash.as_deref().unwrap_or("<none>"),
+                        current_hash = current_hash,
+                        "validator-set sync detected an L1 reorg; rebuilding authoritative view"
+                    );
+                    worker_state = rebuild_worker_state(&client, &config, &state, safe_block).await?;
+                    if matches!(mode, SyncMode::ChainAuthoritative) {
+                        reconcile_state_from_worker(Arc::clone(&state), &worker_state).await?;
+                    }
+                    save_cursor(&state, &worker_state).await?;
+                } else if worker_state.cursor_block_hash.is_none() {
+                    worker_state.cursor_block_hash = Some(current_hash);
+                    save_cursor(&state, &worker_state).await?;
+                }
+            }
+        }
+
         let from_block = worker_state.cursor.map(|(h, _)| h + 1).unwrap_or_else(|| {
-            config.start_block.unwrap_or(safe_block.saturating_sub(1000))
+            config
+                .start_block
+                .map(|height| height.saturating_add(1))
+                .unwrap_or_else(|| safe_block.saturating_sub(1000))
         });
 
         if from_block > safe_block {
+            update_sync_status(&state, |status| {
+                status.state = "synced".to_string();
+                status.cursor_block = worker_state.cursor.map(|(height, _)| height);
+                status.cursor_log_index = worker_state.cursor.map(|(_, idx)| idx);
+                status.cursor_block_hash = worker_state.cursor_block_hash.clone();
+                status.last_error = None;
+            }).await;
             continue;
         }
 
@@ -384,7 +702,8 @@ pub async fn run(
             from_block,
             safe_block,
         ).await {
-            Ok(deltas) => {
+            Ok(mut deltas) => {
+                deltas.sort_by_key(|delta| (delta.block_height, delta.log_index));
                 for delta in deltas {
                     match mode {
                         SyncMode::Shadow => {
@@ -397,17 +716,38 @@ pub async fn run(
                         }
                         SyncMode::ChainAuthoritative => {
                             apply_delta(&mut worker_state, &delta);
-                            if let Err(e) = apply_delta_to_state(Arc::clone(&state), &delta).await {
+                            if let Err(e) =
+                                reconcile_state_from_worker(Arc::clone(&state), &worker_state).await
+                            {
                                 tracing::error!("Failed to apply delta to state: {}", e);
                             }
                         }
                     }
                 }
+                if let Some((height, _)) = worker_state.cursor {
+                    worker_state.cursor_block_hash = Some(fetch_block_hash(
+                        &client,
+                        &config.eth_rpc_url,
+                        height,
+                    )
+                    .await?);
+                }
                 if let Err(e) = save_cursor(&state, &worker_state).await {
                     tracing::warn!("Failed to save validator set sync cursor: {}", e);
                 }
+                update_sync_status(&state, |status| {
+                    status.state = "synced".to_string();
+                    status.cursor_block = worker_state.cursor.map(|(height, _)| height);
+                    status.cursor_log_index = worker_state.cursor.map(|(_, idx)| idx);
+                    status.cursor_block_hash = worker_state.cursor_block_hash.clone();
+                    status.last_error = None;
+                }).await;
             }
             Err(e) => {
+                update_sync_status(&state, |status| {
+                    status.state = "degraded".to_string();
+                    status.last_error = Some(e.to_string());
+                }).await;
                 tracing::warn!("validator_set_sync: failed to fetch deltas: {}", e);
             }
         }
@@ -518,38 +858,6 @@ async fn fetch_deltas(
     Ok(deltas)
 }
 
-async fn apply_delta_to_state(
-    state: Arc<RwLock<NodeState>>,
-    delta: &ValidatorSetDelta,
-) -> anyhow::Result<()> {
-    let mut s = state.write().await;
-    match &delta.kind {
-        DeltaKind::Add { .. } => {
-            // TODO: fetch validator metadata (id, pubkey, stake) from staking contract
-            // For now, just log the event.
-            tracing::info!(
-                "Validator {} added to active set (block {})",
-                delta.addr,
-                delta.block_height
-            );
-        }
-        DeltaKind::Remove | DeltaKind::Unbond { .. } => {
-            s.validator_set.validators.retain(|v| {
-                // Match by eth_address if available, otherwise skip
-                // TODO: Validator struct needs eth_address field
-                true
-            });
-            tracing::info!(
-                "Validator {} removed from active set (block {})",
-                delta.addr,
-                delta.block_height
-            );
-        }
-        _ => {}
-    }
-    Ok(())
-}
-
 // ── Cursor persistence (sidecar JSON file) ───────────────────────────────────
 
 fn cursor_path(data_dir: &std::path::Path) -> std::path::PathBuf {
@@ -591,6 +899,18 @@ mod tests {
     use super::*;
     use alloy::primitives::LogData;
     use alloy::sol_types::SolEvent;
+    use crate::{
+        chain_store::ChainStore,
+        config::NodeConfig,
+        events::new_event_bus,
+        pending_pool::PendingPool,
+        publisher_index::PublisherIndex,
+        BridgeStatus,
+        P2PStatus,
+    };
+    use std::{collections::HashMap, sync::Arc};
+    use tempfile::TempDir;
+    use tokio::sync::RwLock;
 
     fn b256_zero() -> B256 {
         B256::ZERO
@@ -637,7 +957,7 @@ mod tests {
             nonce: U256::from(1u64),
             signerCount: U256::from(7u64),
         };
-        let (topics, data) = make_log(&ev, validator, 200, 1);
+        let (topics, data) = encode(&ev);
         let log = LogView {
             topics: &topics,
             data: &data,
@@ -658,7 +978,7 @@ mod tests {
             validator,
             unbondingAt: U256::from(1_700_000_000u64),
         };
-        let (topics, data) = make_log(&ev, validator, 300, 2);
+        let (topics, data) = encode(&ev);
         let log = LogView {
             topics: &topics,
             data: &data,
@@ -838,9 +1158,138 @@ mod tests {
         assert_eq!(d, back);
     }
 
-    // Silence unused-import warnings on Bytes (used only by sol! macros at compile time).
-    #[allow(dead_code)]
-    fn _silence_bytes_warning() -> Bytes {
-        Bytes::new()
+    fn validator(id: &str, pubkey: &str, eth_address: &str) -> common::Validator {
+        common::Validator {
+            id: id.into(),
+            alias: id.into(),
+            pubkey: pubkey.into(),
+            eth_address: eth_address.into(),
+            stake: 100,
+            reputation: 100,
+            status: "online".into(),
+        }
     }
+
+    async fn make_test_state(
+        bootstrap: common::ValidatorSet,
+    ) -> anyhow::Result<(Arc<RwLock<NodeState>>, TempDir)> {
+        let tempdir = tempfile::tempdir()?;
+        let chain = ChainStore::open(tempdir.path())?;
+        let event_bus = new_event_bus();
+
+        let state = Arc::new(RwLock::new(NodeState {
+            chain,
+            pending_pool: PendingPool::new(),
+            publisher_index: PublisherIndex::new(),
+            validator_set_bootstrap: bootstrap.clone(),
+            validator_set: bootstrap,
+            votes: HashMap::new(),
+            config: NodeConfig {
+                data_dir: tempdir.path().to_path_buf(),
+                node_id: "node-2".into(),
+                ..Default::default()
+            },
+            event_bus,
+            zk_validator: Arc::new(zk_validator::ZkValidator::default()),
+            p2p_status: P2PStatus::default(),
+            bridge_status: BridgeStatus::default(),
+            vrf_proofs: HashMap::new(),
+            decryption_shares: HashMap::new(),
+            validator_registrations: HashMap::new(),
+            validator_set_sync: crate::state::ValidatorSetSyncStatus {
+                enabled: true,
+                mode: "chain-authoritative".into(),
+                state: "starting".into(),
+                ..Default::default()
+            },
+            view_change_certs: HashMap::new(),
+            reorgs: Vec::new(),
+        }));
+
+        Ok((state, tempdir))
+    }
+
+    #[tokio::test]
+    async fn reconcile_authoritative_view_replaces_bootstrap_membership() {
+        let bootstrap = common::ValidatorSet::new(vec![validator(
+            "node-1",
+            &"11".repeat(32),
+            "0x1111111111111111111111111111111111111111",
+        )]);
+        let (state, _tempdir) = make_test_state(bootstrap).await.unwrap();
+
+        {
+            let mut s = state.write().await;
+            s.validator_registrations.insert(
+                "0x2222222222222222222222222222222222222222".into(),
+                crate::ValidatorRegistrationStatus {
+                    alias: "node-2".into(),
+                    identity: common::ValidatorIdentity {
+                        evm_address: "0x2222222222222222222222222222222222222222".into(),
+                        node_id: "node-2".into(),
+                        ed25519_pubkey: "22".repeat(32),
+                    },
+                    stake: 250,
+                    reputation: 100,
+                    ..Default::default()
+                },
+            );
+        }
+
+        let worker_state = WorkerState {
+            cursor: Some((12, 0)),
+            cursor_block_hash: Some("0xabc".into()),
+            observed_active: ["0x2222222222222222222222222222222222222222".into()]
+                .into_iter()
+                .collect(),
+        };
+
+        reconcile_state_from_worker(Arc::clone(&state), &worker_state)
+            .await
+            .unwrap();
+
+        let s = state.read().await;
+        assert_eq!(s.validator_set.validators.len(), 1);
+        let validator = &s.validator_set.validators[0];
+        assert_eq!(validator.id, "node-2");
+        assert_eq!(validator.eth_address, "0x2222222222222222222222222222222222222222");
+        assert_eq!(validator.status, "self");
+        let registration = s
+            .validator_registrations
+            .get("0x2222222222222222222222222222222222222222")
+            .unwrap();
+        assert!(registration.active);
+        assert!(registration.admitted_to_consensus);
+    }
+
+    #[tokio::test]
+    async fn cursor_roundtrip_persists_block_hash() {
+        let (state, _tempdir) = make_test_state(common::ValidatorSet::default())
+            .await
+            .unwrap();
+        let worker_state = WorkerState {
+            cursor: Some((42, 7)),
+            cursor_block_hash: Some("0xdeadbeef".into()),
+            observed_active: ["0xaaaa".into()].into_iter().collect(),
+        };
+
+        save_cursor(&state, &worker_state).await.unwrap();
+        let loaded = load_cursor(&state).await.unwrap();
+
+        assert_eq!(loaded.cursor, Some((42, 7)));
+        assert_eq!(loaded.cursor_block_hash.as_deref(), Some("0xdeadbeef"));
+        assert!(loaded.observed_active.contains("0xaaaa"));
+    }
+
+    #[test]
+    fn cursor_hash_mismatch_flags_reorg() {
+        let worker_state = WorkerState {
+            cursor: Some((7, u32::MAX)),
+            cursor_block_hash: Some("0x1111".into()),
+            observed_active: HashSet::new(),
+        };
+        assert!(cursor_reorged(&worker_state, "0x2222"));
+        assert!(!cursor_reorged(&worker_state, "0x1111"));
+    }
+
 }

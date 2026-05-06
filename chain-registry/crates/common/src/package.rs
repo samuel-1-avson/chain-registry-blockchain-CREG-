@@ -54,6 +54,28 @@ impl PackageId {
     }
 }
 
+pub fn canonical_publisher_address(publisher_address: &str) -> String {
+    let trimmed = publisher_address.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let stripped = trimmed.strip_prefix("0x").unwrap_or(trimmed);
+    format!("0x{}", stripped.to_ascii_lowercase())
+}
+
+pub fn publish_signature_message(
+    id: &PackageId,
+    content_hash: &str,
+    publisher_address: &str,
+) -> String {
+    format!(
+        "{}{}{}",
+        id.canonical(),
+        content_hash,
+        canonical_publisher_address(publisher_address)
+    )
+}
+
 impl std::fmt::Display for PackageId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.canonical())
@@ -88,9 +110,13 @@ pub struct PublishRequest {
     pub content_hash: String,
     /// IPFS CID where the tarball is already pinned.
     pub ipfs_cid: String,
+    /// Publisher's staked EVM address (0x-prefixed). Bound into the Ed25519
+    /// publish signature so runtime admission can enforce on-chain stake.
+    #[serde(default)]
+    pub publisher_address: String,
     /// Publisher's Ed25519 public key (hex-encoded).
     pub publisher_pubkey: String,
-    /// Ed25519 signature over canonical(id) + content_hash.
+    /// Ed25519 signature over canonical(id) + content_hash + publisher_address.
     pub signature: String,
     pub manifest: PackageManifest,
     pub submitted_at: DateTime<Utc>,

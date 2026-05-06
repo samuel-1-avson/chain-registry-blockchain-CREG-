@@ -28,6 +28,9 @@ pub struct MultisigSession {
     pub content_hash: String,
     /// IPFS CID
     pub ipfs_cid: String,
+    /// Publisher EVM address with active on-chain stake.
+    #[serde(default)]
+    pub publisher_address: String,
     /// Minimum signatures required
     pub threshold: usize,
     /// Collected signatures: (pubkey_hex, signature_hex)
@@ -49,10 +52,11 @@ impl MultisigSession {
         let key = std::env::var("CREG_SESSION_HMAC_KEY")
             .unwrap_or_else(|_| self.content_hash.clone());
         let msg = format!(
-            "{}{}{}{}{}{}",
+            "{}{}{}{}{}{}{}",
             self.canonical,
             self.content_hash,
             self.ipfs_cid,
+            self.publisher_address,
             self.threshold,
             self.ecosystem,
             self.version,
@@ -105,13 +109,27 @@ impl MultisigSession {
     }
 }
 
+fn package_id_from_session(session: &MultisigSession) -> Result<common::PackageId> {
+    let (ecosystem, rest) = session
+        .canonical
+        .split_once(':')
+        .context("Invalid multisig session canonical package id")?;
+    let (name, version) = rest
+        .rsplit_once('@')
+        .context("Invalid multisig session canonical package version")?;
+    Ok(common::PackageId::new(ecosystem, name, version))
+}
+
 /// Initialize a new multisig session from a tarball.
 pub async fn init(
     tarball_path: &Path,
     threshold: usize,
+    publisher_address: &str,
     node_url: Option<&str>,
     output: &Path,
 ) -> Result<()> {
+    let publisher_address = crate::publish::canonicalize_publisher_address(publisher_address)?;
+
     let ipfs_url =
         std::env::var("CREG_IPFS_URL").unwrap_or_else(|_| "http://127.0.0.1:5001".into());
 
@@ -184,6 +202,7 @@ pub async fn init(
         canonical: format!("{}:{}@{}", ecosystem, name, version),
         content_hash: content_hash.clone(),
         ipfs_cid: ipfs_cid.clone(),
+        publisher_address: publisher_address.clone(),
         threshold,
         signatures: vec![],
         ecosystem,
@@ -197,6 +216,7 @@ pub async fn init(
     println!("  File:         {}", output.display());
     println!("  Content hash: {}", &content_hash[..16]);
     println!("  IPFS CID:     {}", ipfs_cid);
+    println!("  Address:      {}", publisher_address);
     println!("  Threshold:    {}/N", threshold);
     println!("\n  Share {} with each co-signer.", output.display());
     println!(
@@ -225,8 +245,19 @@ pub fn sign(session_path: &Path, privkey_hex: &str) -> Result<()> {
         return Ok(());
     }
 
-    // Sign: message = canonical || content_hash  (same as single-sig publish)
-    let msg = format!("{}{}", session.canonical, session.content_hash);
+    if session.publisher_address.trim().is_empty() {
+        bail!(
+            "Multisig session is missing publisher_address. Re-create it with --publisher-address."
+        );
+    }
+
+    // Sign: message = canonical || content_hash || publisher_address
+    let package_id = package_id_from_session(&session)?;
+    let msg = common::publish_signature_message(
+        &package_id,
+        &session.content_hash,
+        &session.publisher_address,
+    );
     let signature = signing_key.sign(msg.as_bytes());
     let sig_hex = hex::encode(signature.to_bytes());
 
@@ -298,21 +329,13 @@ pub async fn submit(
 
     let (publisher_pubkeys, signatures): (Vec<String>, Vec<String>) =
         session.signatures.iter().cloned().unzip();
+    let package_id = package_id_from_session(&session)?;
 
     let request = common::PublishRequest {
-        id: common::PackageId {
-            ecosystem: session.ecosystem.clone(),
-            name: session
-                .canonical
-                .split(':')
-                .nth(1)
-                .and_then(|s| s.split('@').next())
-                .unwrap_or("unknown")
-                .to_string(),
-            version: session.version.clone(),
-        },
+        id: package_id,
         content_hash: session.content_hash.clone(),
         ipfs_cid: session.ipfs_cid.clone(),
+        publisher_address: session.publisher_address.clone(),
         publisher_pubkey: primary_pubkey.clone(),
         signature: primary_sig.clone(),
         manifest,
@@ -351,4 +374,69 @@ pub async fn submit(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ed25519_dalek::{Signature, SigningKey, Verifier};
+    use rand::rngs::OsRng;
+
+    fn scoped_session() -> MultisigSession {
+        MultisigSession {
+            canonical: "npm:@scope/pkg@1.2.3".into(),
+            content_hash: common::sha256_hex(b"scoped-package"),
+            ipfs_cid: "bafytestscopedpkg".into(),
+            publisher_address: "0x1111111111111111111111111111111111111111".into(),
+            threshold: 2,
+            signatures: Vec::new(),
+            ecosystem: "npm".into(),
+            version: "1.2.3".into(),
+            mac: String::new(),
+        }
+    }
+
+    #[test]
+    fn package_id_from_session_preserves_scoped_package_names() {
+        let package_id = package_id_from_session(&scoped_session()).expect("valid scoped session");
+
+        assert_eq!(package_id.ecosystem, "npm");
+        assert_eq!(package_id.name, "@scope/pkg");
+        assert_eq!(package_id.version, "1.2.3");
+        assert_eq!(package_id.canonical(), "npm:@scope/pkg@1.2.3");
+    }
+
+    #[test]
+    fn sign_uses_scoped_package_canonical_message() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let session_path = dir.path().join("session.json");
+        let session = scoped_session();
+        session.save(&session_path).expect("save session");
+
+        let signing_key = SigningKey::generate(&mut OsRng);
+        let privkey_hex = hex::encode(signing_key.to_bytes());
+
+        sign(&session_path, &privkey_hex).expect("sign session");
+
+        let signed = MultisigSession::load(&session_path).expect("load signed session");
+        assert_eq!(signed.signatures.len(), 1);
+
+        let package_id = package_id_from_session(&signed).expect("parse scoped package id");
+        let message = common::publish_signature_message(
+            &package_id,
+            &signed.content_hash,
+            &signed.publisher_address,
+        );
+        let signature_hex = &signed.signatures[0].1;
+        let signature_bytes: [u8; 64] = hex::decode(signature_hex)
+            .expect("signature hex")
+            .try_into()
+            .expect("ed25519 signature length");
+        let signature = Signature::from_bytes(&signature_bytes);
+
+        signing_key
+            .verifying_key()
+            .verify(message.as_bytes(), &signature)
+            .expect("signature must verify against scoped canonical payload");
+    }
 }

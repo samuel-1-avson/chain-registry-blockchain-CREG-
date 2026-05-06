@@ -10,7 +10,9 @@ service RegistryService {
     // Fast lookup of the latest verified version of a package.
     rpc GetLatestVersion(GetVersionRequest) returns (GetVersionResponse);
     
-    // Submit a signed package for verification (Masterless Submission).
+    // Submit a signed package for pending validation.
+    // The attestation fields below are publisher claims checked for consistency
+    // during admission; they do not replace validator-side analysis.
     rpc SubmitPackage(SubmitRequest) returns (SubmitResponse);
 }
 
@@ -48,12 +50,15 @@ message SubmitRequest {
     string version = 3;
     string content_hash = 4;
     string ipfs_cid = 5;
+    string publisher_address = 16;
     string publisher_pubkey = 6;
     string signature = 7;
-    // ZK-SNARK Fields (L2 Settlement)
-    bytes zk_proof = 8;
-    uint32 static_analysis_score = 9;
-    bool sandbox_safe = 10;
+    // Publisher-generated admission attestation fields.
+    // These bind the claimed content/manifest hashes and claimed analysis
+    // values. Validator nodes still run the authoritative safety pipeline.
+    bytes publisher_attestation_proof = 8;
+    uint32 claimed_static_analysis_score = 9;
+    bool claimed_sandbox_safe = 10;
     repeated string publisher_pubkeys = 11;
     repeated string signatures = 12;
     uint32 threshold = 13;

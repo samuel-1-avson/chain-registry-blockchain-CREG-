@@ -219,6 +219,7 @@ impl ChainSpec {
                 id: v.id.clone(),
                 alias: v.alias.clone(),
                 pubkey: v.pubkey.clone(),
+                eth_address: v.eth_address.clone(),
                 stake: v.stake,
                 reputation: v.reputation,
                 status: v.status.clone(),

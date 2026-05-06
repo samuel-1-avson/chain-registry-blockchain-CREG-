@@ -1,11 +1,11 @@
 import React, { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { nodeApi } from '../api/node.js'
+import { getEndpointStatus, nodeApi } from '../api/node.js'
 import { usePolling } from '../hooks/usePolling.js'
 import { Hash } from '../components/Hash.jsx'
 import { TimeAgo } from '../components/TimeAgo.jsx'
 import { SkeletonCard, SkeletonRow } from '../components/Skeleton.jsx'
-import { ErrorState, EmptyState } from '../components/ErrorState.jsx'
+import { EndpointStatusNotice, ErrorState, EmptyState } from '../components/ErrorState.jsx'
 import { StatusBadge } from '../components/StatusBadge.jsx'
 import { ShareButton } from '../components/ShareButton.jsx'
 import { formatNumber, formatWei } from '../utils/format.js'
@@ -129,6 +129,7 @@ export default function Governance() {
     if (typeFilter === 'all') return list
     return list.filter((p) => (p.type || 'other').toLowerCase() === typeFilter)
   }, [data, typeFilter])
+  const proposalStatus = getEndpointStatus(data)
 
   // Aggregate stats
   const all = data?.proposals || (Array.isArray(data) ? data : [])
@@ -181,12 +182,15 @@ export default function Governance() {
       </div>
 
       {/* Content */}
+      {proposalStatus && <EndpointStatusNotice status={proposalStatus} title="Governance proposals unavailable" />}
       {error && !all.length && <ErrorState error={error} onRetry={refetch} title="Could not load governance proposals" />}
       {loading && !all.length && <SkeletonCard lines={8} />}
       {!loading && proposals.length === 0 && (
         <EmptyState
-          title="No proposals"
-          description={typeFilter !== 'all'
+          title={proposalStatus ? 'Governance proposals unavailable' : 'No proposals'}
+          description={proposalStatus
+            ? 'This node does not expose governance proposal data yet. The page stays available, but proposals cannot be listed until that endpoint is deployed.'
+            : typeFilter !== 'all'
             ? `No "${typeFilter}" proposals found. Try another filter.`
             : 'No governance activity yet. Proposals are created by validators through on-chain transactions.'}
         />

@@ -102,12 +102,15 @@ fn upsert_registered_validator(
         .validators
         .iter_mut()
         .find(|validator| {
-            validator.id == identity.node_id || validator.pubkey == identity.ed25519_pubkey
+            validator.id == identity.node_id
+                || validator.pubkey == identity.ed25519_pubkey
+                || validator.eth_address == identity.evm_address
         })
     {
         existing.id = identity.node_id;
         existing.alias = alias;
         existing.pubkey = identity.ed25519_pubkey;
+        existing.eth_address = identity.evm_address;
         existing.stake = registration.stake;
         existing.reputation = registration.reputation.max(existing.reputation).max(100);
         if existing.status != "self" {
@@ -120,6 +123,7 @@ fn upsert_registered_validator(
         id: identity.node_id,
         alias,
         pubkey: identity.ed25519_pubkey,
+        eth_address: identity.evm_address,
         stake: registration.stake,
         reputation: registration.reputation.max(100),
         status: "online".to_string(),
@@ -132,7 +136,9 @@ fn remove_registered_validator(
 ) {
     let identity = identity.normalized();
     validator_set.validators.retain(|validator| {
-        validator.id != identity.node_id && validator.pubkey != identity.ed25519_pubkey
+        validator.id != identity.node_id
+            && validator.pubkey != identity.ed25519_pubkey
+            && validator.eth_address != identity.evm_address
     });
 }
 
@@ -482,13 +488,12 @@ async fn main() -> Result<()> {
         chain,
         pending_pool: pending_pool::PendingPool::new(),
         publisher_index,
+        validator_set_bootstrap: config.validator_set.clone(),
         validator_set: config.validator_set.clone(),
         votes: std::collections::HashMap::new(),
         config: config.clone(),
         event_bus: Arc::clone(&event_bus),
-        p2p: p2p_handle.clone(),
         zk_validator: Arc::new(zk_validator::ZkValidator::default()),
-        tx_sender: tx_sender.clone(),
         p2p_status: P2PStatus::default(),
         bridge_status: BridgeStatus {
             registry_address: config.registry_addr.clone(),
@@ -497,6 +502,12 @@ async fn main() -> Result<()> {
         vrf_proofs: std::collections::HashMap::new(),
         decryption_shares: std::collections::HashMap::new(),
         validator_registrations: HashMap::new(),
+        validator_set_sync: crate::state::ValidatorSetSyncStatus {
+            enabled: false,
+            mode: "static".to_string(),
+            state: "disabled".to_string(),
+            ..Default::default()
+        },
         view_change_certs: HashMap::new(),
         reorgs: Vec::new(),
     }));
@@ -550,9 +561,17 @@ async fn main() -> Result<()> {
         }
     }
 
-    tokio::spawn(validator_pipeline::run(Arc::clone(&state), tx_sender));
+    tokio::spawn(validator_pipeline::run(
+        Arc::clone(&state),
+        tx_sender.clone(),
+        p2p_handle.clone(),
+    ));
 
-    tokio::spawn(block_producer::run(Arc::clone(&state), tx_receiver));
+    tokio::spawn(block_producer::run(
+        Arc::clone(&state),
+        tx_receiver,
+        p2p_handle.clone(),
+    ));
 
     tokio::spawn(bridge::run(Arc::clone(&state)));
 
@@ -564,8 +583,11 @@ async fn main() -> Result<()> {
         Arc::clone(&admission_store),
     ));
 
-    // ── Validator set sync (Phase 1: shadow mode) ───────────────────────────────
+    // ── Validator set sync (chain-authoritative with static bootstrap) ──────
     {
+        let start_block = chain_spec
+            .as_ref()
+            .map(|spec| spec.validator_set.epoch_block_height);
         let sync_config = validator_set_sync::SyncConfig {
             eth_rpc_url: config.eth_rpc_url.clone(),
             staking_addr: config.staking_addr.parse().unwrap_or_else(|_| {
@@ -574,14 +596,41 @@ async fn main() -> Result<()> {
             }),
             finality_lag_blocks: if config.is_testnet { 0 } else { 6 },
             poll_interval_secs: 30,
-            start_block: None,
+            start_block,
         };
+        {
+            let mut state_guard = state.write().await;
+            state_guard.validator_set_sync.enabled =
+                sync_config.staking_addr != alloy::primitives::Address::ZERO;
+            state_guard.validator_set_sync.mode = if state_guard.validator_set_sync.enabled {
+                "chain-authoritative".to_string()
+            } else {
+                "static".to_string()
+            };
+            state_guard.validator_set_sync.state = if state_guard.validator_set_sync.enabled {
+                "starting".to_string()
+            } else {
+                "disabled".to_string()
+            };
+            if !state_guard.validator_set_sync.enabled {
+                state_guard.validator_set_sync.last_error = Some(
+                    "validator-set sync disabled: staking contract address is invalid"
+                        .to_string(),
+                );
+            }
+        }
         if sync_config.staking_addr != alloy::primitives::Address::ZERO {
+            tracing::info!(
+                start_block = ?sync_config.start_block,
+                finality_lag_blocks = sync_config.finality_lag_blocks,
+                poll_interval_secs = sync_config.poll_interval_secs,
+                "Validator set source: chain-authoritative"
+            );
             let sync_state = Arc::clone(&state);
             tokio::spawn(async move {
                 if let Err(e) = validator_set_sync::run(
                     sync_config,
-                    validator_set_sync::SyncMode::Shadow,
+                    validator_set_sync::SyncMode::ChainAuthoritative,
                     sync_state,
                 ).await {
                     tracing::error!("Validator set sync worker crashed: {}", e);
@@ -624,6 +673,9 @@ async fn main() -> Result<()> {
         event_bus,
         limiter,
         Arc::clone(&admission_store),
+        config.cors.clone(),
+        tx_sender.clone(),
+        p2p_handle,
     );
 
     // ── Optional TLS termination ──────────────────────────────────────────────
@@ -738,18 +790,14 @@ async fn sync_validator_registrations_once(state: &SharedState) -> Result<()> {
                 registration.governance_approved = matches!(staking_state, 2 | 3 | 4);
                 registration.staking_state = staking_state_label(staking_state).to_string();
 
-                let should_admit = staking_state == 2 && registration.identity.normalized().is_complete();
-                if should_admit {
-                    upsert_registered_validator(&mut state_guard.validator_set, &registration);
-                    registration.admitted_to_consensus = true;
-                    registration.active = true;
-                } else {
-                    if registration.admitted_to_consensus {
-                        remove_registered_validator(&mut state_guard.validator_set, &registration.identity);
-                    }
-                    registration.admitted_to_consensus = false;
-                    registration.active = false;
-                }
+                let identity = registration.identity.normalized();
+                let should_admit = staking_state == 2
+                    && identity.is_complete()
+                    && state_guard.validator_set.validators.iter().any(|validator| {
+                        validator.eth_address.eq_ignore_ascii_case(&identity.evm_address)
+                    });
+                registration.admitted_to_consensus = should_admit;
+                registration.active = should_admit;
             }
             Err(error) => {
                 registration.last_error = Some(error);

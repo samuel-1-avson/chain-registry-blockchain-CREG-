@@ -2,7 +2,7 @@
 
 > A decentralized, Byzantine-Fault-Tolerant package distribution network that replaces single-authority trust in npm/PyPI/Cargo with cryptographic consensus from a staked validator set.
 
-[![Testnet](https://img.shields.io/badge/testnet-v0.3.0-blue)](chain-registry/CURRENT_STATUS.md)
+[![Testnet](https://img.shields.io/badge/testnet-v0.3.0-blue)](chain-registry/docs/CURRENT_STATUS.md)
 [![Validators](https://img.shields.io/badge/validators-1%20(dev)%20%7C%2010%20(k8s)-green)](chain-registry/k8s/)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey)](#license)
 [![Rust](https://img.shields.io/badge/rust-1.90-orange)](chain-registry/Cargo.toml)
@@ -14,9 +14,9 @@
 
 **The problem.** Modern software supply chain attacks — `event-stream`, SolarWinds, XZ Utils, the 2024 `ua-parser-js` compromise — all exploit the same weakness: the single-authority trust model of package registries like npm, PyPI, Maven, and RubyGems. One compromised maintainer, one stolen API token, or one unreviewed merge is enough to ship malicious code to millions of downstream consumers.
 
-**The solution.** Chain Registry replaces single-authority trust with a **decentralized Byzantine-Fault-Tolerant validator network** that independently analyzes every package before it is considered `Verified`. Each package passes through a three-stage validation pipeline — static analysis, behavioral sandbox, ML deep scan — and only becomes installable once a `⌊2n/3⌋+1` PBFT quorum of economically-staked validators has signed an `Approve` vote. Packages are content-addressed in IPFS, the chain is persisted in Sled, and final state roots are anchored to Ethereum L1 via a Groth16 rollup bridge.
+**The solution.** Chain Registry replaces single-authority trust with a **decentralized Byzantine-Fault-Tolerant validator network** that independently analyzes every package before it is considered `Verified`. Each package passes through a three-stage validation pipeline — static analysis, behavioral sandbox, ML deep scan — and only becomes installable once a `⌊2n/3⌋+1` PBFT quorum of economically-staked validators has signed an `Approve` vote. Packages are content-addressed in IPFS, the chain is persisted in RocksDB, and final state roots are anchored to Ethereum L1 via a Groth16 rollup bridge.
 
-**Current status.** The project is in **testnet v0.3.0**. The full publish → validate → consensus → block → L1 anchor pipeline is wired end-to-end in the single-validator Docker compose profile. A 10-validator Kustomize deployment is available under [`chain-registry/k8s/`](chain-registry/k8s/). A public testnet, a CLI with 27 commands, a React web explorer, a Ratatui terminal explorer, a faucet, a relayer paymaster, and a full Prometheus/Grafana observability stack are shipped. Production hardening is gated on the 8 Critical and 15 High findings documented in [`DEEP_DIVE_ANALYSIS.md`](chain-registry/DEEP_DIVE_ANALYSIS.md).
+**Current status.** The project is in **testnet v0.3.0**. The full publish → validate → consensus → block → L1 anchor pipeline is wired end-to-end in the single-validator Docker compose profile, and the multi-host bootstrap/validator testnet flow is tracked in [`chain-registry/docs/CURRENT_STATUS.md`](chain-registry/docs/CURRENT_STATUS.md). Kustomize manifests are available under [`chain-registry/k8s/`](chain-registry/k8s/). The repo currently ships a CLI with 27 commands, a React web explorer, a Ratatui terminal explorer, a faucet, a relayer paymaster, and a Prometheus/Grafana observability stack. The current technical audit and open risk picture live in [`chain-registry/docs/DEEP_DIVE_ANALYSIS.md`](chain-registry/docs/DEEP_DIVE_ANALYSIS.md) and [`REMEDIATION_BACKLOG.md`](REMEDIATION_BACKLOG.md).
 
 ---
 
@@ -58,8 +58,8 @@ docker compose --profile tui run --rm tui-explorer
 
 ```bash
 docker compose --profile cli run --rm cli keygen --out /data/publisher.key
-docker compose --profile cli run --rm cli stake --amount 1000
-docker compose --profile cli run --rm cli publish ./my-pkg-1.0.0.tgz --key /data/publisher.key
+# Stake the publisher EVM address before publishing; unstaked publishers are rejected.
+docker compose --profile cli run --rm cli publish ./my-pkg-1.0.0.tgz --key-file /data/publisher.key --publisher-address 0xYourPublisherAddress
 ```
 
 ---
@@ -73,7 +73,7 @@ graph LR
     NODE --> PIPE[3-Stage Pipeline]
     PIPE --> PBFT[PBFT Consensus]
     PBFT --> BP[Block Producer]
-    BP --> SLED[(Sled)]
+    BP --> ROCKS[(RocksDB)]
     BP --> BR[Bridge]
     BR --> L1[Ethereum L1]
     NODE --> WEB[Web Explorer]
@@ -83,7 +83,7 @@ graph LR
 
 | Layer | Technology |
 |---|---|
-| **Validator runtime** | Rust 1.90 · Tokio · axum · tonic · libp2p · Sled |
+| **Validator runtime** | Rust 1.90 · Tokio · axum · tonic · libp2p |
 | **Consensus** | Custom PBFT · Ed25519-based VRF · Gossipsub broadcast |
 | **Validation Stage 1** | Static analysis (entropy, YARA-X, Levenshtein typosquat, diff) |
 | **Validation Stage 2** | Sandbox waterfall: nsjail → gVisor → Docker → WASM |
@@ -91,9 +91,9 @@ graph LR
 | **ZK layer** | arkworks Groth16 · BN254 · snarkJS verifier contract |
 | **Smart contracts** | Solidity 0.8.24 · Foundry · 17 contracts |
 | **Content addressing** | IPFS Kubo v0.27 |
-| **Storage** | Sled (embedded) + PostgreSQL (indexer via db-sync) |
+| **Storage** | RocksDB (embedded) + PostgreSQL (indexer via db-sync) |
 | **Bridge** | alloy 0.6 → Ethereum / Arbitrum / Optimism / Polygon |
-| **Web UI** | React 18 · Vite · Viem · MetaMask / WalletConnect |
+| **Web UI** | React 19 · Vite · Viem · MetaMask / WalletConnect |
 | **Terminal UI** | Ratatui |
 | **Observability** | Prometheus · Alertmanager · Grafana |
 | **Orchestration** | Docker Compose (dev) · Kustomize (prod) |
@@ -149,20 +149,21 @@ creg stake --amount 1000 --role publisher
 
 ```bash
 creg publish ./my-pkg-1.0.0.tgz \
-  --key ~/.creg/publisher.key \
+  --key-file ~/.creg/publisher.key \
+  --publisher-address 0xYourPublisherAddress \
   --ecosystem npm
 ```
 
-The CLI hashes the tarball, pins it to IPFS, constructs a `PublishRequest`, signs it with Ed25519, attaches a Groth16 content-hash attestation, and POSTs to the node over gRPC (with REST fallback).
+The CLI hashes the tarball, pins it to IPFS, constructs a `PublishRequest`, signs the canonical package id, content hash, and canonical `publisher_address`, and submits the request over gRPC with REST fallback. Runtime admission now rejects unstaked publishers before the package reaches the pending pool.
 
 ### Multisig variant (M-of-N publishers)
 
 ```bash
 # Coordinator:
-creg multisig init my-pkg-1.0.0.tgz --threshold 2 --pubkeys keyA,keyB,keyC
+creg multisig init my-pkg-1.0.0.tgz --threshold 2 --publisher-address 0xYourPublisherAddress
 
 # Each co-signer runs:
-creg multisig sign --session .creg-multisig.json --key ~/keyA.key
+creg multisig sign --session .creg-multisig.json --key-file ~/keyA.key
 
 # Once threshold met, any co-signer runs:
 creg multisig submit --session .creg-multisig.json
@@ -171,10 +172,10 @@ creg multisig submit --session .creg-multisig.json
 ### Shielded variant (encrypted tarball)
 
 ```bash
-creg publish ./my-pkg-1.0.0.tgz --shielded --key ~/.creg/publisher.key
+creg publish ./my-pkg-1.0.0.tgz --shield --key-file ~/.creg/publisher.key --publisher-address 0xYourPublisherAddress
 ```
 
-The tarball is encrypted with a per-package AES-256-GCM key; the key is threshold-encrypted to the validator set. **Note:** shielded decryption is currently tracked as [ISSUE-010](chain-registry/DEEP_DIVE_ANALYSIS.md#42-high-severity) — use only for testing.
+The tarball is encrypted with a per-package AES-256-GCM key; the key is threshold-encrypted to the validator set. **Note:** shielded decryption is still tracked as an open issue in [`chain-registry/docs/DEEP_DIVE_ANALYSIS.md`](chain-registry/docs/DEEP_DIVE_ANALYSIS.md) and should be treated as experimental.
 
 ---
 
@@ -186,7 +187,7 @@ The tarball is encrypted with a per-package AES-256-GCM key; the key is threshol
 | `CREG_IS_VALIDATOR` | Enable validator role | `true` |
 | `CREG_VALIDATOR_KEY` | Hex-encoded Ed25519 secret key | `ed25519:...` |
 | `CREG_LISTEN` | REST API listen address | `0.0.0.0:8080` |
-| `CREG_DATA_DIR` | Sled data directory | `/data` |
+| `CREG_DATA_DIR` | RocksDB data directory | `/data` |
 | `CREG_P2P_LISTEN` | libp2p listen multiaddr | `/ip4/0.0.0.0/tcp/9000` |
 | `CREG_P2P_SEEDS` | Seed peers | `/ip4/1.2.3.4/tcp/9000/p2p/<peer-id>` |
 | `CREG_ETH_RPC` | Ethereum RPC endpoint | `https://mainnet.infura.io/...` |
@@ -252,7 +253,7 @@ creg stake --amount 10000 --role validator --address 0xYourEthAddress
 | **PrivateRegistry.sol** | Enterprise M-of-N decrypted registries (⚠ ISSUE-004) | **Active** |
 | **CrossChainRegistry.sol** | Multi-chain verification receipts (⚠ ISSUE-005/006) | **Planned** |
 
-See [`DEEP_DIVE_ANALYSIS.md`](chain-registry/DEEP_DIVE_ANALYSIS.md#33-smart-contract-system) for contract-level findings.
+See [`chain-registry/docs/DEEP_DIVE_ANALYSIS.md`](chain-registry/docs/DEEP_DIVE_ANALYSIS.md) for contract-level findings.
 
 ---
 
@@ -343,19 +344,25 @@ make testnet-smoke    # full E2E diagnostic via `creg doctor --testnet`
 1. Fork the repository and create a feature branch.
 2. Run `cargo fmt` and `cargo clippy --workspace --all-targets -- -D warnings` before committing.
 3. Add tests — unit tests for `crates/*`, Foundry tests for `contracts/`.
-4. Reference any issue IDs from [`DEEP_DIVE_ANALYSIS.md`](chain-registry/DEEP_DIVE_ANALYSIS.md) in your PR description.
+4. Reference any issue IDs from [`chain-registry/docs/DEEP_DIVE_ANALYSIS.md`](chain-registry/docs/DEEP_DIVE_ANALYSIS.md) or [`REMEDIATION_BACKLOG.md`](REMEDIATION_BACKLOG.md) in your PR description.
 5. CI runs `cargo test`, `forge test`, and explorer tests; all must pass.
 
 ### Documentation
 
-- [`chain-registry/DEEP_DIVE_ANALYSIS.md`](chain-registry/DEEP_DIVE_ANALYSIS.md) — full technical and security audit
+- [`COMPREHENSIVE_CODEBASE_ANALYSIS.md`](COMPREHENSIVE_CODEBASE_ANALYSIS.md) — historical repository-wide audit snapshot
+- [`chain-registry/docs/DEEP_DIVE_ANALYSIS.md`](chain-registry/docs/DEEP_DIVE_ANALYSIS.md) — live deep technical analysis in the nested repo
+- [`REMEDIATION_BACKLOG.md`](REMEDIATION_BACKLOG.md) — prioritized remediation work and implementation status
+- [`DOCUMENTATION_RATIONALIZATION_PLAN.md`](DOCUMENTATION_RATIONALIZATION_PLAN.md) — current documentation cleanup map
 - [`chain-registry/docs/SYSTEM_DEEP_DIVE.md`](chain-registry/docs/SYSTEM_DEEP_DIVE.md) — architecture overview
-- [`chain-registry/docs/VALIDATOR_DEEP_DIVE.md`](chain-registry/docs/VALIDATOR_DEEP_DIVE.md) — validator operations guide
-- [`chain-registry/docs/TESTNET_DEEP_DIVE.md`](chain-registry/docs/TESTNET_DEEP_DIVE.md) — testnet setup and E2E testing
-- [`chain-registry/docs/WALLET_DEEP_DIVE.md`](chain-registry/docs/WALLET_DEEP_DIVE.md) — wallet integration
+- [`chain-registry/docs/EXPLORER_DEEP_DIVE.md`](chain-registry/docs/EXPLORER_DEEP_DIVE.md) — canonical explorer and user-surface analysis
+- [`chain-registry/docs/API_COOKBOOK.md`](chain-registry/docs/API_COOKBOOK.md) — live REST API curl examples
+- [`chain-registry/docs/JOIN_TESTNET.md`](chain-registry/docs/JOIN_TESTNET.md) — validator onboarding guide
+- [`chain-registry/docs/TESTNET_DEEP_DIVE.md`](chain-registry/docs/TESTNET_DEEP_DIVE.md) — testnet architecture and E2E snapshot
+- [`chain-registry/docs/VALIDATOR_DEEP_DIVE.md`](chain-registry/docs/VALIDATOR_DEEP_DIVE.md) — historical validator-system analysis snapshot
+- [`chain-registry/docs/WALLET_DEEP_DIVE.md`](chain-registry/docs/WALLET_DEEP_DIVE.md) — historical wallet-architecture analysis snapshot
 - [`chain-registry/docs/RELAYER_PAYMASTER_DESIGN.md`](chain-registry/docs/RELAYER_PAYMASTER_DESIGN.md) — sponsored transaction design
-- [`chain-registry/CURRENT_STATUS.md`](chain-registry/CURRENT_STATUS.md) — current development snapshot
-- [`chain-registry/TODO.md`](chain-registry/TODO.md) — active backlog
+- [`chain-registry/docs/CURRENT_STATUS.md`](chain-registry/docs/CURRENT_STATUS.md) — current development snapshot
+- [`chain-registry/docs/PROJECT_DOCUMENTATION.md`](chain-registry/docs/PROJECT_DOCUMENTATION.md) — nested-repo documentation hub
 
 ---
 

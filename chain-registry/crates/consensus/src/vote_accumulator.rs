@@ -482,6 +482,7 @@ impl VoteAccumulator {
         approved: bool,
         reject_reason: Option<String>,
         signature: String,
+        ml_model_version: Option<String>,
         block_hash: &str,
         skip_verification: bool,
     ) -> Result<Option<CommitOutcome>, String> {
@@ -493,7 +494,7 @@ impl VoteAccumulator {
             reject_reason,
             signature,
             received_at: Utc::now(),
-            ml_model_version: None,
+            ml_model_version,
         };
 
         let state = self
@@ -793,5 +794,54 @@ mod tests {
 
         let result = state.verify_signature(&bad_vote, "unused");
         assert!(matches!(result, SignatureVerification::Malformed(_)));
+    }
+
+    #[test]
+    fn degraded_votes_are_excluded_from_prepare_and_commit_quorum() {
+        let mut state = PackageVoteState::new("npm:test@1.0.0", 4);
+        let block_hash = "0x1234abcd";
+
+        let mut vote = unsigned_vote("v1", &format!("{:0>64}", "v1"), true);
+        vote.ml_model_version = Some("creg-detect-v1.0.0".into());
+        assert!(!state.record_prepare(vote, block_hash, true).unwrap());
+
+        let mut vote = unsigned_vote("v2", &format!("{:0>64}", "v2"), true);
+        vote.ml_model_version = Some("creg-detect-v1.0.0".into());
+        assert!(!state.record_prepare(vote, block_hash, true).unwrap());
+
+        let mut vote = unsigned_vote("v3", &format!("{:0>64}", "v3"), true);
+        vote.ml_model_version = Some("degraded-no-model".into());
+        assert!(
+            !state.record_prepare(vote, block_hash, true).unwrap(),
+            "degraded prepare votes must not satisfy quorum"
+        );
+        assert!(matches!(state.phase, VotePhase::Collecting));
+
+        let mut vote = unsigned_vote("v4", &format!("{:0>64}", "v4"), true);
+        vote.ml_model_version = Some("creg-detect-v1.0.0".into());
+        assert!(state.record_prepare(vote, block_hash, true).unwrap());
+        assert!(matches!(state.phase, VotePhase::PrepareQuorumReached));
+
+        let mut vote = unsigned_vote("v1", &format!("{:0>64}", "v1"), true);
+        vote.ml_model_version = Some("creg-detect-v1.0.0".into());
+        assert!(state.record_commit(vote, block_hash, true).unwrap().is_none());
+
+        let mut vote = unsigned_vote("v2", &format!("{:0>64}", "v2"), true);
+        vote.ml_model_version = Some("creg-detect-v1.0.0".into());
+        assert!(state.record_commit(vote, block_hash, true).unwrap().is_none());
+
+        let mut vote = unsigned_vote("v3", &format!("{:0>64}", "v3"), true);
+        vote.ml_model_version = Some("degraded-no-model".into());
+        assert!(
+            state.record_commit(vote, block_hash, true).unwrap().is_none(),
+            "degraded commit votes must not satisfy quorum"
+        );
+
+        let mut vote = unsigned_vote("v4", &format!("{:0>64}", "v4"), true);
+        vote.ml_model_version = Some("creg-detect-v1.0.0".into());
+        let outcome = state.record_commit(vote, block_hash, true).unwrap();
+
+        assert!(matches!(outcome, Some(CommitOutcome::Verified(_))));
+        assert!(matches!(state.phase, VotePhase::Finalised));
     }
 }

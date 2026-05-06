@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react'
 import { Link, useSearchParams, useNavigate } from 'react-router-dom'
-import { nodeApi, ApiError } from '../api/node.js'
+import { getEndpointStatus, nodeApi } from '../api/node.js'
 import { classifySearch, isHash32, isEvmAddress, isBlockHeight, isPackageCanonical } from '../utils/format.js'
 import { Hash } from '../components/Hash.jsx'
 import { StatusBadge } from '../components/StatusBadge.jsx'
-import { EmptyState } from '../components/ErrorState.jsx'
+import { EmptyState, EndpointStatusNotice, NoticeState } from '../components/ErrorState.jsx'
 import { SkeletonCard } from '../components/Skeleton.jsx'
 
 const KIND_ICON = {
@@ -38,25 +38,32 @@ export default function Search() {
   const [matches, setMatches] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+  const [searchStatus, setSearchStatus] = useState(null)
   const [selected, setSelected] = useState(0)
 
   useEffect(() => {
     if (!q.trim()) {
       setMatches([])
+      setError(null)
+      setSearchStatus(null)
       return
     }
     let cancelled = false
     const controller = new AbortController()
     setLoading(true)
     setError(null)
+    setSearchStatus(null)
     setSelected(0)
 
     const doSearch = async () => {
       const found = []
+      let nextStatus = null
+      let serverError = null
 
       // 1. Try server-side search
       try {
         const serverResult = await nodeApi.search(q, controller.signal)
+        nextStatus = getEndpointStatus(serverResult)
         if (serverResult?.matches?.length > 0) {
           found.push(...serverResult.matches.map((m) => ({
             kind: m.kind,
@@ -66,7 +73,9 @@ export default function Search() {
             data: m,
           })))
         }
-      } catch { /* server search not available, fall through */ }
+      } catch (err) {
+        if (!controller.signal.aborted) serverError = err
+      }
 
       // 2. Client-side fallback — try multiple lookups
       const cls = classifySearch(q)
@@ -120,6 +129,8 @@ export default function Search() {
       }
 
       if (!cancelled) {
+        setSearchStatus(nextStatus)
+        setError(serverError)
         setMatches(found)
         setLoading(false)
       }
@@ -128,6 +139,7 @@ export default function Search() {
     doSearch().catch((e) => {
       if (!cancelled) {
         setError(e)
+        setSearchStatus(null)
         setLoading(false)
       }
     })
@@ -166,7 +178,14 @@ export default function Search() {
       </p>
 
       {loading && <SkeletonCard lines={4} />}
-      {error && <p style={{ color: 'var(--accent-error)' }}>Lookup error: {error.message}</p>}
+      {searchStatus && <EndpointStatusNotice status={searchStatus} title="Search index unavailable" />}
+      {error && (
+        <NoticeState
+          title="Search service degraded"
+          variant="error"
+          description={`Server-side search returned an error. Direct block, address, validator, and package lookups are still shown below when available. ${error.message}`}
+        />
+      )}
 
       {!loading && matches.length === 0 ? (
         <EmptyState

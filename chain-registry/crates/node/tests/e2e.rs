@@ -12,6 +12,7 @@ async fn start_test_node() -> (String, tokio::task::JoinHandle<()>) {
     use node::{
         api,
         chain_store::ChainStore,
+        consensus_admission::AttestationStore,
         config::NodeConfig,
         events::new_event_bus,
         finalized_tx,
@@ -53,24 +54,33 @@ async fn start_test_node() -> (String, tokio::task::JoinHandle<()>) {
         chain,
         pending_pool: PendingPool::new(),
         publisher_index: PublisherIndex::new(),
+        validator_set_bootstrap: common::ValidatorSet::default(),
         validator_set: common::ValidatorSet::default(),
         votes: std::collections::HashMap::new(),
         config: config.clone(),
         event_bus: Arc::clone(&event_bus),
-        p2p,
         zk_validator,
-        tx_sender: tx_s.clone(),
         p2p_status: P2PStatus::default(),
         bridge_status: BridgeStatus::default(),
         vrf_proofs: std::collections::HashMap::new(),
         decryption_shares: std::collections::HashMap::new(),
         validator_registrations: std::collections::HashMap::new(),
+        validator_set_sync: node::state::ValidatorSetSyncStatus::default(),
         view_change_certs: std::collections::HashMap::new(),
+        reorgs: Vec::new(),
     }));
 
     let limiter = RateLimiter::new(RateLimitConfig::default());
 
-    let app = api::router(Arc::clone(&state), event_bus, limiter);
+    let app = api::router(
+        Arc::clone(&state),
+        event_bus,
+        limiter,
+        AttestationStore::new(),
+        config.cors.clone(),
+        tx_s.clone(),
+        p2p.clone(),
+    );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let url = format!("http://{}", addr);
@@ -79,8 +89,8 @@ async fn start_test_node() -> (String, tokio::task::JoinHandle<()>) {
     let state_vp = Arc::clone(&state);
 
     let handle = tokio::spawn(async move {
-        tokio::spawn(node::block_producer::run(state_bp, tx_r));
-        tokio::spawn(node::validator_pipeline::run(state_vp, tx_s));
+        tokio::spawn(node::block_producer::run(state_bp, tx_r, p2p.clone()));
+        tokio::spawn(node::validator_pipeline::run(state_vp, tx_s, p2p));
         axum::serve(listener, app).await.unwrap();
     });
 

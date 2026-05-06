@@ -67,6 +67,9 @@ pub struct Validator {
     /// Hex-encoded Ed25519 public key used to verify validator votes.
     #[serde(default)]
     pub pubkey: String,
+    /// Canonical 0x-prefixed EVM address used as the on-chain membership key.
+    #[serde(default)]
+    pub eth_address: String,
     pub stake: u64,
     pub reputation: u32,
     pub status: String, // "online", "self", "offline"

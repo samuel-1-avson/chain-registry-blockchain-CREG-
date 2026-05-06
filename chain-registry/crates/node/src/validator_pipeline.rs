@@ -2,33 +2,103 @@
 // Drives packages from pending pool through VRF → 3-stage validation →
 // PBFT consensus → writes finalised Transaction to the channel.
 
-use crate::{finalized_tx::FinalizedTxSender, gossip::Gossip, NodeState};
+use crate::{finalized_tx::FinalizedTxSender, NodeState};
 use chrono::Utc;
 use common::{
-    ChainRecord, Finding, FindingSeverity, PackageStatus, PublishRequest, Transaction,
-    ValidatorVote,
+    ChainRecord, PackageStatus, PublishRequest, Transaction, ValidatorVote,
 };
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 use tokio::sync::RwLock;
 use tokio::time::{interval, Duration};
 
 const POLL_INTERVAL_SECS: u64 = 1;
 const VOTE_TIMEOUT_SECS: u64 = 10; // Reduced from 30s for faster consensus
+const DEGRADED_MODEL_PREFIX: &str = "degraded";
 
-pub async fn run(state: Arc<RwLock<NodeState>>, tx_out: FinalizedTxSender) {
+#[derive(Debug, Clone)]
+enum ConsensusOutcome {
+    Verified(Vec<common::ValidatorSignature>),
+    Rejected { reason: String },
+}
+
+fn aggregate_consensus_outcome(
+    signatures: &[common::ValidatorSignature],
+    assigned_count: usize,
+) -> Option<ConsensusOutcome> {
+    let quorum_size = (assigned_count * 2 / 3) + 1;
+    let mut seen_indices = HashMap::new();
+    let mut unique_votes = Vec::new();
+
+    for sig in signatures {
+        let unique_key = if sig.validator_pubkey.is_empty() {
+            format!("id:{}", sig.validator_id.to_ascii_lowercase())
+        } else {
+            format!("pubkey:{}", sig.validator_pubkey.to_ascii_lowercase())
+        };
+        if let Some(index) = seen_indices.get(&unique_key).copied() {
+            unique_votes[index] = sig.clone();
+        } else {
+            seen_indices.insert(unique_key, unique_votes.len());
+            unique_votes.push(sig.clone());
+        }
+    }
+
+    let effective_votes: Vec<_> = unique_votes
+        .into_iter()
+        .filter(|sig| !sig.ml_model_version.starts_with(DEGRADED_MODEL_PREFIX))
+        .collect();
+
+    let approvals: Vec<_> = effective_votes
+        .iter()
+        .filter(|sig| matches!(sig.vote, ValidatorVote::Approve))
+        .cloned()
+        .collect();
+    let rejections: Vec<_> = effective_votes
+        .iter()
+        .filter_map(|sig| match &sig.vote {
+            ValidatorVote::Approve => None,
+            ValidatorVote::Reject { reason } => Some(reason.clone()),
+        })
+        .collect();
+
+    if approvals.len() >= quorum_size {
+        return Some(ConsensusOutcome::Verified(approvals));
+    }
+
+    let max_possible_approvals = assigned_count.saturating_sub(rejections.len());
+    if max_possible_approvals < quorum_size {
+        return Some(ConsensusOutcome::Rejected {
+            reason: rejections
+                .into_iter()
+                .next()
+                .unwrap_or_else(|| "Consensus rejected".to_string()),
+        });
+    }
+
+    None
+}
+
+pub async fn run(
+    state: Arc<RwLock<NodeState>>,
+    tx_out: FinalizedTxSender,
+    p2p_handle: crate::p2p::P2PHandle,
+) {
     let mut ticker = interval(Duration::from_secs(POLL_INTERVAL_SECS));
     tracing::info!("Validator pipeline started");
 
     loop {
         ticker.tick().await;
-        // tracing::debug!("Validator heartbeat"); // Keep it quiet for production but useful for debug
-        if let Err(e) = tick(Arc::clone(&state), &tx_out).await {
+        if let Err(e) = tick(Arc::clone(&state), &tx_out, p2p_handle.clone()).await {
             tracing::error!("Validator pipeline error: {}", e);
         }
     }
 }
 
-async fn tick(state: Arc<RwLock<NodeState>>, tx_out: &FinalizedTxSender) -> anyhow::Result<()> {
+async fn tick(
+    state: Arc<RwLock<NodeState>>,
+    tx_out: &FinalizedTxSender,
+    p2p_handle: crate::p2p::P2PHandle,
+) -> anyhow::Result<()> {
     let pending: Vec<PublishRequest> = {
         let mut s = state.write().await;
         s.pending_pool.ready_for_validation()
@@ -44,8 +114,9 @@ async fn tick(state: Arc<RwLock<NodeState>>, tx_out: &FinalizedTxSender) -> anyh
         .map(|req| {
             let state = Arc::clone(&state);
             let sender = tx_out.clone();
+            let p2p_handle = p2p_handle.clone();
             tokio::spawn(async move {
-                process_package(state, req, sender).await;
+                process_package(state, req, sender, p2p_handle).await;
             })
         })
         .collect();
@@ -62,6 +133,7 @@ async fn process_package(
     state: Arc<RwLock<NodeState>>,
     req: PublishRequest,
     tx_out: FinalizedTxSender,
+    p2p_handle: crate::p2p::P2PHandle,
 ) {
     let canonical = req.id.canonical();
     tracing::info!("Processing {}", canonical);
@@ -271,13 +343,13 @@ async fn process_package(
         content_hash: req.content_hash.clone(),
         validator_id: node_id.clone(),
         validator_pubkey: our_sig.validator_pubkey.clone(),
+        ml_model_version: our_sig.ml_model_version.clone(),
         phase: "commit".into(),
         approved,
         reject_reason,
         signature: gossip_sig,
     };
 
-    let p2p_handle = state.read().await.p2p.clone();
     let _ = p2p_handle
         .sender
         .send(crate::p2p::P2PCommand::Broadcast {
@@ -286,12 +358,12 @@ async fn process_package(
         })
         .await;
 
-    // ── WAIT FOR QUORUM ───────────────────────────────────────────────────────
-    let quorum_size = {
+    // ── WAIT FOR QUORUM OUTCOME ───────────────────────────────────────────────
+    let assigned_validator_count = {
         let s = state.read().await;
-        (s.validator_set.validators.len() * 2 / 3) + 1
+        s.validator_set.validators.len()
     };
-    let mut final_sigs = Vec::new();
+    let mut consensus_outcome = None;
 
     // Wait for quorum with shorter timeout for faster consensus
     let max_iterations = VOTE_TIMEOUT_SECS * 2; // 0.5s per iteration
@@ -299,8 +371,8 @@ async fn process_package(
         {
             let sr = state.read().await;
             if let Some(sigs) = sr.votes.get(&canonical) {
-                if sigs.len() >= quorum_size {
-                    final_sigs = sigs.clone();
+                if let Some(outcome) = aggregate_consensus_outcome(sigs, assigned_validator_count) {
+                    consensus_outcome = Some(outcome);
                     break;
                 }
             }
@@ -308,14 +380,32 @@ async fn process_package(
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
     }
 
-    if final_sigs.is_empty() {
+    let Some(consensus_outcome) = consensus_outcome else {
         tracing::error!("Consensus timeout for package {}", canonical);
         return;
+    };
+
+    match (&vote, &consensus_outcome) {
+        (ValidatorVote::Approve, ConsensusOutcome::Rejected { reason }) => {
+            tracing::warn!(
+                "{} local validator approved, but consensus rejected: {}",
+                canonical,
+                reason
+            );
+        }
+        (ValidatorVote::Reject { reason }, ConsensusOutcome::Verified(_)) => {
+            tracing::warn!(
+                "{} local validator rejected ({}), but consensus verified",
+                canonical,
+                reason
+            );
+        }
+        _ => {}
     }
 
     // ── Write finalised transaction ───────────────────────────────────────────
-    let tx = match &vote {
-        ValidatorVote::Approve => {
+    let (tx, outcome_label) = match consensus_outcome {
+        ConsensusOutcome::Verified(final_sigs) => {
             let record = ChainRecord {
                 id: req.id.clone(),
                 content_hash: req.content_hash.clone(),
@@ -335,14 +425,17 @@ async fn process_package(
                 manifest: Some(req.manifest.clone()),
                 ..Default::default()
             };
-            Transaction::Publish(record)
+            (Transaction::Publish(record), "VERIFIED")
         }
-        ValidatorVote::Reject { reason } => common::Transaction::Revoke {
-            package_canonical: canonical.clone(),
-            reason: reason.clone(),
-            revoked_by: node_id.clone(),
-            evidence_hash: "".into(),
-        },
+        ConsensusOutcome::Rejected { reason } => (
+            common::Transaction::Revoke {
+                package_canonical: canonical.clone(),
+                reason,
+                revoked_by: node_id.clone(),
+                evidence_hash: "".into(),
+            },
+            "REJECTED",
+        ),
     };
 
     if tx_out.send(tx).await.is_err() {
@@ -351,15 +444,7 @@ async fn process_package(
             canonical
         );
     } else {
-        tracing::info!(
-            "{} → {}",
-            canonical,
-            if matches!(vote, ValidatorVote::Approve) {
-                "VERIFIED"
-            } else {
-                "REJECTED"
-            }
-        );
+        tracing::info!("{} → {}", canonical, outcome_label);
     }
 
     cleanup(&state, &canonical).await;
@@ -368,6 +453,110 @@ async fn process_package(
 async fn cleanup(state: &Arc<RwLock<NodeState>>, canonical: &str) {
     let mut s = state.write().await;
     s.pending_pool.remove(canonical);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{aggregate_consensus_outcome, ConsensusOutcome};
+    use chrono::Utc;
+    use common::{ValidatorSignature, ValidatorVote};
+
+    fn sig(id: &str, vote: ValidatorVote, model_version: &str) -> ValidatorSignature {
+        ValidatorSignature {
+            validator_id: id.to_string(),
+            validator_pubkey: format!("{}-pubkey", id),
+            signature: format!("{}-sig", id),
+            vote,
+            signed_at: Utc::now(),
+            ml_model_version: model_version.to_string(),
+        }
+    }
+
+    #[test]
+    fn aggregates_to_verified_from_approval_quorum() {
+        let outcome = aggregate_consensus_outcome(
+            &[
+                sig("v1", ValidatorVote::Approve, "creg-detect-v1.0.0"),
+                sig("v2", ValidatorVote::Approve, "creg-detect-v1.0.0"),
+                sig("v3", ValidatorVote::Approve, "creg-detect-v1.0.0"),
+                sig(
+                    "v4",
+                    ValidatorVote::Reject {
+                        reason: "malicious".to_string(),
+                    },
+                    "creg-detect-v1.0.0",
+                ),
+            ],
+            4,
+        );
+
+        match outcome {
+            Some(ConsensusOutcome::Verified(sigs)) => assert_eq!(sigs.len(), 3),
+            other => panic!("expected verified quorum, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn aggregates_to_rejected_when_quorum_is_impossible() {
+        let outcome = aggregate_consensus_outcome(
+            &[
+                sig(
+                    "v1",
+                    ValidatorVote::Reject {
+                        reason: "malicious".to_string(),
+                    },
+                    "creg-detect-v1.0.0",
+                ),
+                sig(
+                    "v2",
+                    ValidatorVote::Reject {
+                        reason: "backdoor".to_string(),
+                    },
+                    "creg-detect-v1.0.0",
+                ),
+            ],
+            3,
+        );
+
+        match outcome {
+            Some(ConsensusOutcome::Rejected { reason }) => assert_eq!(reason, "malicious"),
+            other => panic!("expected rejection quorum failure, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn duplicate_votes_do_not_count_twice() {
+        let outcome = aggregate_consensus_outcome(
+            &[
+                sig("v1", ValidatorVote::Approve, "creg-detect-v1.0.0"),
+                sig("v1", ValidatorVote::Approve, "creg-detect-v1.0.0"),
+                sig("v2", ValidatorVote::Approve, "creg-detect-v1.0.0"),
+            ],
+            3,
+        );
+
+        assert!(
+            outcome.is_none(),
+            "duplicate validator votes must not satisfy quorum"
+        );
+    }
+
+    #[test]
+    fn degraded_votes_are_excluded_from_quorum() {
+        let outcome = aggregate_consensus_outcome(
+            &[
+                sig("v1", ValidatorVote::Approve, "degraded-no-model"),
+                sig("v2", ValidatorVote::Approve, "creg-detect-v1.0.0"),
+                sig("v3", ValidatorVote::Approve, "creg-detect-v1.0.0"),
+            ],
+            4,
+        );
+
+        assert!(
+            outcome.is_none(),
+            "degraded validator votes must not satisfy quorum"
+        );
+    }
 }
 
 /// Maximum IPFS payload size (512 MB). Packages larger than this are rejected

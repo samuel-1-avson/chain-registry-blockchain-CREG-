@@ -114,6 +114,9 @@ enum Commands {
         /// Encrypt the package for the validator quorum (Shielded).
         #[arg(long)]
         shield: bool,
+        /// Publisher EVM address with active on-chain stake.
+        #[arg(long, env = "CREG_PUBLISHER_ADDRESS")]
+        publisher_address: String,
         /// Offline signing: produce a signed JSON file instead of
         /// submitting to the node.  Use `creg submit-signed <file>` later.
         #[arg(long)]
@@ -539,6 +542,9 @@ enum MultisigCommands {
             default_value = ".creg-multisig.json"
         )]
         session_out: std::path::PathBuf,
+        /// Publisher EVM address with active on-chain stake.
+        #[arg(long, env = "CREG_PUBLISHER_ADDRESS")]
+        publisher_address: String,
     },
     /// Add your signature to a multisig session
     Sign {
@@ -687,6 +693,7 @@ async fn run(cli: Cli) -> Result<()> {
             key,
             extra_keys,
             shield,
+            publisher_address,
             offline,
         } => {
             let key_content = std::fs::read_to_string(&key)
@@ -706,6 +713,7 @@ async fn run(cli: Cli) -> Result<()> {
                     manifest.as_deref(),
                     key_str,
                     &extra_key_strs,
+                    &publisher_address,
                     shield,
                     &output_path,
                 )
@@ -716,6 +724,7 @@ async fn run(cli: Cli) -> Result<()> {
                     manifest.as_deref(),
                     key_str,
                     &extra_key_strs,
+                    &publisher_address,
                     cli.node_url.as_deref(),
                     shield,
                 )
@@ -1123,8 +1132,16 @@ async fn run(cli: Cli) -> Result<()> {
                 tarball,
                 threshold,
                 session_out,
+                publisher_address,
             } => {
-                multisig::init(&tarball, threshold, cli.node_url.as_deref(), &session_out).await?;
+                multisig::init(
+                    &tarball,
+                    threshold,
+                    &publisher_address,
+                    cli.node_url.as_deref(),
+                    &session_out,
+                )
+                .await?;
             }
             MultisigCommands::Sign { session, key } => {
                 let key_content = std::fs::read_to_string(&key)

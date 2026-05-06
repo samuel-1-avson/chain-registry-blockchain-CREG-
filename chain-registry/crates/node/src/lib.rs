@@ -36,5 +36,6 @@ mod sync;
 // `crate::SharedState`, etc. — they must live at the lib root.
 pub use state::{
     BridgeStatus, NodeState, P2PStatus, SharedState, ValidatorRegistrationStatus,
+    ValidatorSetSyncStatus,
     normalized_validator_key, validator_registration_status_text,
 };
