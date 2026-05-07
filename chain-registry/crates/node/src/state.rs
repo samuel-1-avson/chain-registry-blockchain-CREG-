@@ -3,8 +3,12 @@
 // that the library target (lib.rs) and binary target (main.rs) can both
 // include it, enabling integration tests to construct and inspect the state.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{hash_map::Entry, HashMap},
+    sync::Arc,
+};
 
+use chrono::{DateTime, Utc};
 use serde::Serialize;
 use tokio::sync::RwLock;
 
@@ -13,7 +17,6 @@ use common::ValidatorIdentity;
 use crate::{
     chain_store::ChainStore,
     config::NodeConfig,
-    events::EventBus,
     pending_pool::PendingPool,
     publisher_index::PublisherIndex,
 };
@@ -95,6 +98,79 @@ pub struct ReorgEvent {
     pub new_tip: String,
 }
 
+#[derive(Clone, Debug)]
+pub struct PackageRound {
+    pub subject: String,
+    pub first_vote_at: DateTime<Utc>,
+    pub last_vote_at: DateTime<Utc>,
+    signatures: Vec<common::ValidatorSignature>,
+}
+
+impl PackageRound {
+    pub fn from_vote(subject: impl Into<String>, vote: common::ValidatorSignature) -> Self {
+        let mut round = Self {
+            subject: subject.into(),
+            first_vote_at: Utc::now(),
+            last_vote_at: Utc::now(),
+            signatures: vec![vote],
+        };
+        round.refresh_timestamps();
+        round
+    }
+
+    pub fn record_vote(&mut self, vote: common::ValidatorSignature) {
+        let unique_key = package_round_vote_key(&vote);
+        if let Some(existing) = self
+            .signatures
+            .iter_mut()
+            .find(|existing| package_round_vote_key(existing) == unique_key)
+        {
+            *existing = vote;
+        } else {
+            self.signatures.push(vote);
+        }
+        self.refresh_timestamps();
+    }
+
+    pub fn signatures(&self) -> &[common::ValidatorSignature] {
+        &self.signatures
+    }
+
+    pub fn vote_count(&self) -> usize {
+        self.signatures.len()
+    }
+
+    fn refresh_timestamps(&mut self) {
+        let Some(first_vote_at) = self
+            .signatures
+            .iter()
+            .map(|signature| signature.signed_at.clone())
+            .min()
+        else {
+            let now = Utc::now();
+            self.first_vote_at = now;
+            self.last_vote_at = now;
+            return;
+        };
+
+        self.first_vote_at = first_vote_at;
+        self.last_vote_at = self
+            .signatures
+            .iter()
+            .map(|signature| signature.signed_at.clone())
+            .max()
+            .unwrap_or_else(Utc::now);
+    }
+}
+
+fn package_round_vote_key(signature: &common::ValidatorSignature) -> String {
+    if signature.validator_pubkey.is_empty() {
+        format!("id:{}", signature.validator_id.to_ascii_lowercase())
+    } else {
+        format!("pubkey:{}", signature.validator_pubkey.to_ascii_lowercase())
+    }
+}
+
 // ─── NodeState ─────────────────────────────────────────────────────────────────
 
 /// Shared mutable state passed to every subsystem via `Arc<RwLock<_>>`.
@@ -104,11 +180,9 @@ pub struct NodeState {
     pub publisher_index: PublisherIndex,
     pub validator_set_bootstrap: common::ValidatorSet,
     pub validator_set: common::ValidatorSet,
-    /// Accumulated validator votes per block hash / package canonical.
-    pub votes: HashMap<String, Vec<common::ValidatorSignature>>,
+    /// Live package-consensus rounds keyed by the current consensus subject.
+    pub package_rounds: HashMap<String, PackageRound>,
     pub config: NodeConfig,
-    pub event_bus: EventBus,
-    pub zk_validator: Arc<zk_validator::ZkValidator>,
     // Live metrics for the Explorer UI
     pub p2p_status: P2PStatus,
     pub bridge_status: BridgeStatus,
@@ -130,4 +204,73 @@ pub struct NodeState {
     pub reorgs: Vec<ReorgEvent>,
 }
 
+impl NodeState {
+    pub fn record_package_vote(
+        &mut self,
+        subject: impl Into<String>,
+        vote: common::ValidatorSignature,
+    ) {
+        let subject = subject.into();
+        match self.package_rounds.entry(subject.clone()) {
+            Entry::Occupied(mut entry) => entry.get_mut().record_vote(vote),
+            Entry::Vacant(entry) => {
+                entry.insert(PackageRound::from_vote(subject, vote));
+            }
+        }
+    }
+
+    pub fn package_round(&self, subject: &str) -> Option<&PackageRound> {
+        self.package_rounds.get(subject)
+    }
+
+    pub fn clear_package_round(&mut self, subject: &str) {
+        self.package_rounds.remove(subject);
+    }
+}
+
 pub type SharedState = Arc<RwLock<NodeState>>;
+
+#[cfg(test)]
+mod tests {
+    use super::PackageRound;
+    use chrono::Utc;
+    use common::{AnalysisBundleRefs, ValidatorSignature, ValidatorVote};
+
+    fn sig(id: &str, vote: ValidatorVote, model_version: &str) -> ValidatorSignature {
+        ValidatorSignature {
+            validator_id: id.to_string(),
+            validator_pubkey: format!("{}-pubkey", id),
+            signature: format!("{}-sig", id),
+            vote,
+            signed_at: Utc::now(),
+            ml_model_version: model_version.to_string(),
+            analysis_bundles: AnalysisBundleRefs::default(),
+            evidence_digest: String::new(),
+            deterministic_risk: common::DeterministicRiskSummary::default(),
+        }
+    }
+
+    #[test]
+    fn package_round_replaces_duplicate_validator_votes() {
+        let mut round = PackageRound::from_vote(
+            "npm:test@1.0.0",
+            sig("validator-1", ValidatorVote::Approve, "creg-detect-v1.0.0"),
+        );
+
+        round.record_vote(sig(
+            "validator-1",
+            ValidatorVote::Reject {
+                reason: "malicious".to_string(),
+            },
+            "creg-detect-v2.0.0",
+        ));
+
+        assert_eq!(round.subject, "npm:test@1.0.0");
+        assert_eq!(round.vote_count(), 1);
+        assert_eq!(round.signatures()[0].ml_model_version, "creg-detect-v2.0.0");
+        assert!(matches!(
+            round.signatures()[0].vote,
+            ValidatorVote::Reject { .. }
+        ));
+    }
+}

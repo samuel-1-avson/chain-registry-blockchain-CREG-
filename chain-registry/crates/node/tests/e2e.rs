@@ -45,11 +45,6 @@ async fn start_test_node() -> (String, tokio::task::JoinHandle<()>) {
     let (p2p_sender, _p2p_rx) = tokio::sync::mpsc::channel::<P2PCommand>(1);
     let p2p = P2PHandle { sender: p2p_sender };
 
-    // ZkValidator generates ephemeral keys when none are found on disk.
-    let zk_validator = std::sync::Arc::new(
-        zk_validator::ZkValidator::new().expect("ZkValidator init for e2e tests"),
-    );
-
     let state: Arc<RwLock<NodeState>> = Arc::new(RwLock::new(NodeState {
         chain,
         pending_pool: PendingPool::new(),
@@ -58,8 +53,6 @@ async fn start_test_node() -> (String, tokio::task::JoinHandle<()>) {
         validator_set: common::ValidatorSet::default(),
         votes: std::collections::HashMap::new(),
         config: config.clone(),
-        event_bus: Arc::clone(&event_bus),
-        zk_validator,
         p2p_status: P2PStatus::default(),
         bridge_status: BridgeStatus::default(),
         vrf_proofs: std::collections::HashMap::new(),

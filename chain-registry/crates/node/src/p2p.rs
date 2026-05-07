@@ -1,18 +1,25 @@
 // crates/node/src/p2p.rs
 // Real decentralized P2P layer using libp2p with rate limiting.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use futures::StreamExt;
 use libp2p::{
     gossipsub, identify, kad, noise,
     swarm::{NetworkBehaviour, SwarmEvent},
     tcp, yamux, Multiaddr, PeerId, Swarm,
 };
-use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
 use crate::p2p_rate_limit::{P2PRateLimitConfig, P2PRateLimiter};
+
+fn gossipsub_heartbeat_interval() -> Duration {
+    if cfg!(test) {
+        Duration::from_millis(250)
+    } else {
+        Duration::from_secs(10)
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum VoteValidationError {
@@ -61,7 +68,7 @@ fn validate_vote_gossip_message(
         .map_err(|_| VoteValidationError::InvalidSignatureFormat)?;
 
     let message = crate::gossip::canonical_vote_message(
-        &vote.block_hash,
+        &vote.consensus_subject,
         &vote.content_hash,
         vote.approved,
         &vote.validator_pubkey,
@@ -72,6 +79,34 @@ fn validate_vote_gossip_message(
         .map_err(|_| VoteValidationError::SignatureVerificationFailed)?;
 
     Ok(vote)
+}
+
+fn vote_gossip_to_signature(vote: &crate::gossip::VoteGossip) -> common::ValidatorSignature {
+    common::ValidatorSignature {
+        validator_id: vote.validator_id.clone(),
+        validator_pubkey: vote.validator_pubkey.clone(),
+        signature: vote.signature.clone(),
+        vote: if vote.approved {
+            common::ValidatorVote::Approve
+        } else {
+            common::ValidatorVote::Reject {
+                reason: vote.reject_reason.clone().unwrap_or_default(),
+            }
+        },
+        signed_at: chrono::Utc::now(),
+        ml_model_version: vote.ml_model_version.clone(),
+        analysis_bundles: vote.analysis_bundles.clone(),
+        evidence_digest: vote.evidence_digest.clone(),
+        deterministic_risk: vote.deterministic_risk.clone(),
+    }
+}
+
+async fn record_validated_vote_gossip(
+    state: &crate::SharedState,
+    vote: &crate::gossip::VoteGossip,
+) {
+    let mut state = state.write().await;
+    state.record_package_vote(vote.consensus_subject.clone(), vote_gossip_to_signature(vote));
 }
 
 fn report_validation_result(
@@ -141,7 +176,7 @@ impl P2PNode {
                 };
 
                 let gossipsub_config = gossipsub::ConfigBuilder::default()
-                    .heartbeat_interval(Duration::from_secs(10))
+                    .heartbeat_interval(gossipsub_heartbeat_interval())
                     .validate_messages()
                     .validation_mode(gossipsub::ValidationMode::Strict)
                     .message_id_fn(message_id_fn)
@@ -189,11 +224,11 @@ impl P2PNode {
         ))
     }
 
-    pub async fn run(mut self, state: crate::SharedState) -> Result<()> {
-        let event_bus = {
-            let s = state.read().await;
-            Arc::clone(&s.event_bus)
-        };
+    pub async fn run(
+        mut self,
+        state: crate::SharedState,
+        event_bus: crate::events::EventBus,
+    ) -> Result<()> {
         let mut status_ticker = tokio::time::interval(Duration::from_secs(5));
         let votes_topic = gossipsub::IdentTopic::new("creg/v1/votes");
         let blocks_topic = gossipsub::IdentTopic::new("creg/v1/blocks");
@@ -413,12 +448,14 @@ impl P2PNode {
                                         gossipsub::MessageAcceptance::Accept,
                                     );
 
+                                    record_validated_vote_gossip(&state, &vote).await;
+
                                     crate::events::emit(&event_bus, crate::events::RegistryEvent {
                                         kind: crate::events::EventKind::ValidatorVoted,
                                         ts: chrono::Utc::now().to_rfc3339(),
                                         payload: serde_json::json!({
                                             "validator_id": vote.validator_id,
-                                            "block_hash": vote.block_hash,
+                                            "consensus_subject": vote.consensus_subject,
                                             "approved": vote.approved,
                                         }),
                                     });
@@ -540,6 +577,8 @@ impl P2PNode {
 mod tests {
     use super::*;
     use ed25519_dalek::{Signer, SigningKey};
+    use std::{collections::HashMap, sync::Arc};
+    use tokio::sync::RwLock;
 
     fn validator(id: &str, signing_key: &SigningKey) -> common::Validator {
         common::Validator {
@@ -566,16 +605,47 @@ mod tests {
         );
 
         crate::gossip::VoteGossip {
-            block_hash: "npm/pkg@1.0.0".into(),
+            consensus_subject: "npm/pkg@1.0.0".into(),
             content_hash: "deadbeef".into(),
             validator_id: validator_id.into(),
             validator_pubkey,
             ml_model_version: "creg-detect-v1.0.0".into(),
+            analysis_bundles: common::AnalysisBundleRefs::default(),
+            evidence_digest: String::new(),
+            deterministic_risk: common::DeterministicRiskSummary::default(),
             phase: "commit".into(),
             approved: true,
             reject_reason: None,
             signature: hex::encode(signing_key.sign(message.as_bytes()).to_bytes()),
         }
+    }
+
+    async fn make_test_state(
+        validator_set: common::ValidatorSet,
+    ) -> anyhow::Result<crate::SharedState> {
+        let tempdir = tempfile::tempdir()?;
+        let chain = crate::chain_store::ChainStore::open(tempdir.path())?;
+
+        Ok(Arc::new(RwLock::new(crate::NodeState {
+            chain,
+            pending_pool: crate::pending_pool::PendingPool::new(),
+            publisher_index: crate::publisher_index::PublisherIndex::new(),
+            validator_set_bootstrap: validator_set.clone(),
+            validator_set,
+            package_rounds: HashMap::new(),
+            config: crate::config::NodeConfig {
+                data_dir: tempdir.keep(),
+                ..Default::default()
+            },
+            p2p_status: crate::P2PStatus::default(),
+            bridge_status: crate::BridgeStatus::default(),
+            vrf_proofs: HashMap::new(),
+            decryption_shares: HashMap::new(),
+            validator_registrations: HashMap::new(),
+            validator_set_sync: crate::state::ValidatorSetSyncStatus::default(),
+            view_change_certs: HashMap::new(),
+            reorgs: Vec::new(),
+        })))
     }
 
     #[test]
@@ -624,5 +694,107 @@ mod tests {
         .unwrap_err();
 
         assert_eq!(error, VoteValidationError::SignatureVerificationFailed);
+    }
+
+    #[tokio::test]
+    async fn validated_gossip_vote_updates_package_round_state() -> anyhow::Result<()> {
+        let signing_key = SigningKey::from_bytes(&[7u8; 32]);
+        let validator_set = common::ValidatorSet::new(vec![validator("node-1", &signing_key)]);
+        let vote = signed_vote(
+            "node-1",
+            &signing_key,
+            hex::encode(signing_key.verifying_key().as_bytes()),
+        );
+        let state = make_test_state(validator_set).await?;
+
+        record_validated_vote_gossip(&state, &vote).await;
+
+        let state = state.read().await;
+        let round = state
+            .package_round(&vote.consensus_subject)
+            .expect("validated gossip vote should update package round state");
+
+        assert_eq!(round.vote_count(), 1);
+        assert_eq!(round.signatures()[0].validator_id, "node-1");
+        assert_eq!(round.signatures()[0].ml_model_version, "creg-detect-v1.0.0");
+
+        Ok(())
+    }
+
+    fn reserve_listen_addr() -> String {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0))
+            .expect("should reserve a loopback port for the p2p test");
+        let port = listener
+            .local_addr()
+            .expect("reserved listener should have a local address")
+            .port();
+        drop(listener);
+        format!("/ip4/127.0.0.1/tcp/{}", port)
+    }
+
+    #[tokio::test]
+    async fn gossipsub_vote_broadcast_updates_peer_round_state() -> anyhow::Result<()> {
+        let signing_key = SigningKey::from_bytes(&[7u8; 32]);
+        let validator_set = common::ValidatorSet::new(vec![validator("node-1", &signing_key)]);
+        let vote = signed_vote(
+            "node-1",
+            &signing_key,
+            hex::encode(signing_key.verifying_key().as_bytes()),
+        );
+
+        let listen_addr_a = reserve_listen_addr();
+        let listen_addr_b = reserve_listen_addr();
+        let (node_a, handle_a) = P2PNode::new(&listen_addr_a)?;
+        let (node_b, _handle_b) = P2PNode::new(&listen_addr_b)?;
+        let state_a = make_test_state(validator_set.clone()).await?;
+        let state_b = make_test_state(validator_set).await?;
+        let event_bus_a = crate::events::new_event_bus();
+        let event_bus_b = crate::events::new_event_bus();
+
+        let task_a = tokio::spawn(node_a.run(state_a, event_bus_a));
+        let task_b = tokio::spawn(node_b.run(state_b.clone(), event_bus_b));
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        handle_a
+            .sender
+            .send(P2PCommand::Dial {
+                addr: listen_addr_b.parse()?,
+            })
+            .await?;
+
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        handle_a
+            .sender
+            .send(P2PCommand::Broadcast {
+                topic: "creg/v1/votes".into(),
+                data: serde_json::to_vec(&vote)?,
+            })
+            .await?;
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let maybe_round = {
+                    let state = state_b.read().await;
+                    state.package_round(&vote.consensus_subject).cloned()
+                };
+
+                if let Some(round) = maybe_round {
+                    assert_eq!(round.vote_count(), 1);
+                    assert_eq!(round.signatures()[0].validator_id, "node-1");
+                    break;
+                }
+
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .expect("gossipsub vote should reach the peer within the timeout");
+
+        task_a.abort();
+        task_b.abort();
+        let _ = task_a.await;
+        let _ = task_b.await;
+
+        Ok(())
     }
 }

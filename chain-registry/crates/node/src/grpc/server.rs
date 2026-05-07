@@ -2,12 +2,12 @@
 // Implementation of the gRPC Services defined in node.proto.
 
 use futures::Stream;
-use std::pin::Pin;
+use std::{pin::Pin, sync::Arc};
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
 use tonic::{Request, Response, Status};
 
-use crate::SharedState;
+use crate::{events::EventBus, SharedState};
 use common::proto::{
     explorer_service_server::ExplorerService, registry_service_server::RegistryService,
     watch_service_server::WatchService,
@@ -19,11 +19,15 @@ use common::proto::{
 
 pub struct MyRegistry {
     state: SharedState,
+    zk_validator: Arc<zk_validator::ZkValidator>,
 }
 
 impl MyRegistry {
-    pub fn new(state: SharedState) -> Self {
-        Self { state }
+    pub fn new(state: SharedState, zk_validator: Arc<zk_validator::ZkValidator>) -> Self {
+        Self {
+            state,
+            zk_validator,
+        }
     }
 }
 
@@ -134,11 +138,6 @@ impl RegistryService for MyRegistry {
             }
         }
 
-        let zk_validator = {
-            let s = self.state.read().await;
-            s.zk_validator.clone()
-        };
-
         // ── 1. Publisher Attestation Verification (Admission Consistency) ─────
         if req.publisher_attestation_proof.is_empty() {
             return Err(Status::invalid_argument(
@@ -159,7 +158,7 @@ impl RegistryService for MyRegistry {
         match zk_validator::ZkValidator::deserialize_proof(&req.publisher_attestation_proof) {
             Ok(proof) => {
                 let public_inputs = inputs.public_inputs();
-                match zk_validator.verify_proof(&proof, &public_inputs) {
+                match self.zk_validator.verify_proof(&proof, &public_inputs) {
                     Ok(true) => {
                         tracing::info!(
                             "[ZK] Publisher admission attestation verified for package: {}",
@@ -205,12 +204,12 @@ impl RegistryService for MyRegistry {
 }
 
 pub struct MyWatcher {
-    state: SharedState,
+    event_bus: EventBus,
 }
 
 impl MyWatcher {
-    pub fn new(state: SharedState) -> Self {
-        Self { state }
+    pub fn new(event_bus: EventBus) -> Self {
+        Self { event_bus }
     }
 }
 
@@ -222,12 +221,7 @@ impl WatchService for MyWatcher {
         &self,
         _request: Request<WatchRequest>,
     ) -> Result<Response<Self::StreamEventsStream>, Status> {
-        let bus = {
-            let s = self.state.read().await;
-            s.event_bus.clone()
-        };
-
-        let rx = bus.subscribe();
+        let rx = self.event_bus.subscribe();
         let stream = BroadcastStream::new(rx).map(|res| {
             match res {
                 Ok(event) => {
@@ -289,5 +283,46 @@ impl ExplorerService for MyExplorer {
             Ok(None) => Err(Status::not_found("Block not found")),
             Err(e) => Err(Status::internal(e.to_string())),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MyWatcher;
+    use crate::events::{emit, new_event_bus, RegistryEvent};
+    use common::proto::{watch_service_server::WatchService, WatchRequest};
+    use tokio_stream::StreamExt;
+    use tonic::Request;
+
+    #[tokio::test]
+    async fn my_watcher_streams_from_injected_event_bus() -> anyhow::Result<()> {
+        let event_bus = new_event_bus();
+        let watcher = MyWatcher::new(event_bus.clone());
+        let response = watcher
+            .stream_events(Request::new(WatchRequest {
+                filter: "all".into(),
+            }))
+            .await?;
+
+        emit(
+            &event_bus,
+            RegistryEvent::package_revoked(
+                "npm:test@1.0.0",
+                "malware detected",
+                "pubkey-123",
+            ),
+        );
+
+        let mut stream = response.into_inner();
+        let event = stream
+            .next()
+            .await
+            .expect("watch stream should yield an event")?;
+
+        assert_eq!(event.kind, "PackageRevoked");
+        assert!(event.payload_json.contains("malware detected"));
+        assert!(event.payload_json.contains("pubkey-123"));
+
+        Ok(())
     }
 }

@@ -231,6 +231,9 @@ mod consensus_tests {
             vote,
             signed_at: Utc::now(),
             ml_model_version: "test".to_string(),
+            analysis_bundles: common::AnalysisBundleRefs::default(),
+            evidence_digest: String::new(),
+            deterministic_risk: common::DeterministicRiskSummary::default(),
         }
     }
 

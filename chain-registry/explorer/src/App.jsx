@@ -1,10 +1,10 @@
 // New router-driven explorer shell.
 // Owns the shared SSE feed and renders page components via react-router.
-// The legacy wallet / publisher experience continues to live at /legacy until
-// Sprint 3 pages take over those flows.
+// Legacy wallet/publish logic is embedded behind route-owned pages until the
+// remaining UI logic is fully extracted.
 
 import React, { useCallback, useMemo, useRef, useState } from 'react'
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route } from 'react-router-dom'
 
 import { Layout } from './components/Layout.jsx'
 import { useChainStats } from './hooks/useStats.js'
@@ -33,7 +33,9 @@ import RichList from './pages/RichList.jsx'
 import Reorgs from './pages/Reorgs.jsx'
 import About from './pages/About.jsx'
 import NotFound from './pages/NotFound.jsx'
-import LegacyApp from './LegacyApp.jsx'
+import WalletPage from './pages/WalletPage.jsx'
+import PublisherDashboard from './pages/PublisherDashboard.jsx'
+import PublisherProfile from './pages/PublisherProfile.jsx'
 
 const EVENT_BUFFER_CAP = 500
 
@@ -94,12 +96,6 @@ function ExplorerShell() {
 
   return (
     <Routes>
-      {/* Legacy wallet + publisher experience runs outside the new Layout
-          so the current full UI keeps working until Sprint 3 rebuilds it. */}
-      <Route path="/legacy/*" element={<LegacyApp />} />
-      <Route path="/wallet" element={<Navigate to="/legacy" replace />} />
-      <Route path="/publisher" element={<Navigate to="/legacy" replace />} />
-
       <Route path="*" element={
         <Layout {...layoutProps}>
           <Routes>
@@ -113,7 +109,9 @@ function ExplorerShell() {
             <Route path="/validators" element={<ValidatorList />} />
             <Route path="/packages" element={<PackageList />} />
             <Route path="/package/:id" element={<PackageDetail />} />
-            <Route path="/publisher/:pubkey" element={<AddressPage />} />
+            <Route path="/wallet" element={<WalletPage />} />
+            <Route path="/publisher" element={<PublisherDashboard />} />
+            <Route path="/publisher/:pubkey" element={<PublisherProfile />} />
             <Route path="/pending" element={<Pending />} />
             <Route path="/consensus" element={<Consensus />} />
             <Route path="/events" element={<EventsFeed events={events} />} />

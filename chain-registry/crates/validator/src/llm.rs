@@ -31,6 +31,16 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Instant;
 
+mod cache;
+mod context;
+mod escalation;
+mod reviewer;
+
+use cache::SemanticCache;
+use context::EvidencePacketBuilder;
+use escalation::LlmEscalationGate;
+use reviewer::StructuredReviewer;
+
 // ── Caches and rate-limiter ──────────────────────────────────────────────────
 
 /// Cache for single-snippet scores (used by predict_intent / static_analysis).
@@ -1064,43 +1074,27 @@ pub async fn predict_intent(code_snippet: &str) -> Result<Option<u8>> {
 
 /// Full implementation of single-snippet scoring with caching + rate limiting.
 pub async fn predict_intent_full(code_snippet: &str) -> Result<LlmResult> {
-    let enabled = std::env::var("CREG_LLM_ENABLED")
-        .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
-        .unwrap_or(false);
-
-    if !enabled {
-        return Ok(LlmResult::Unavailable(
-            "LLM analysis disabled (set CREG_LLM_ENABLED=true to enable)".into(),
-        ));
+    if let Err(reason) = LlmEscalationGate::ensure_snippet_enabled() {
+        return Ok(LlmResult::Unavailable(reason));
     }
 
-    let hash = content_hash(code_snippet);
-    if let Ok(cache) = LLM_CACHE.lock() {
-        if let Some(&cached) = cache.get(&hash) {
-            tracing::debug!("LLM snippet cache hit {:016x}", hash);
-            return Ok(LlmResult::Score(cached));
-        }
+    let hash = SemanticCache::snippet_hash(code_snippet);
+    if let Some(cached) = SemanticCache::get_snippet(hash) {
+        tracing::debug!("LLM snippet cache hit {:016x}", hash);
+        return Ok(LlmResult::Score(cached));
     }
 
-    if let Ok(mut limiter) = RATE_LIMITER.lock() {
-        if let Err(reason) = limiter.check() {
-            tracing::warn!("{}", reason);
-            return Ok(LlmResult::Unavailable(reason));
-        }
+    if let Err(reason) = LlmEscalationGate::reserve_snippet_call() {
+        tracing::warn!("{}", reason);
+        return Ok(LlmResult::Unavailable(reason));
     }
 
-    let encoded = sanitize_for_prompt(code_snippet);
-    let messages = build_messages(&encoded);
-
-    match call_llm(&messages, 50).await {
-        Ok((resp, _model)) => {
-            let result = parse_llm_response(&resp)?;
-            if let LlmResult::Score(s) = &result {
-                cache_score(hash, *s);
-            }
-            Ok(result)
-        }
-        Err(e) => Ok(LlmResult::Unavailable(format!("All providers failed: {}", e))),
+    let result = StructuredReviewer::review_snippet(code_snippet).await?;
+    if let LlmResult::Score(score) = result {
+        SemanticCache::put_snippet(hash, score);
+        Ok(LlmResult::Score(score))
+    } else {
+        Ok(result)
     }
 }
 
@@ -1126,230 +1120,53 @@ pub async fn review_package(
     prior_findings: &[Finding],
     content_hash_str: &str,
 ) -> LlmReview {
-    let t0 = Instant::now();
+    let packet = EvidencePacketBuilder::build(tarball, prior_findings);
 
-    // Always scan entropy — this runs even when LLM is disabled.
-    let files = extract_tarball(tarball);
-    let entropy_alerts = scan_entropy(&files);
-
-    if !entropy_alerts.is_empty() {
+    if !packet.entropy_alerts.is_empty() {
         tracing::info!(
             "[{}] Entropy scan: {} files above threshold ({:.2} bits/byte)",
             pkg_id.canonical(),
-            entropy_alerts.len(),
+            packet.entropy_alerts.len(),
             entropy_threshold_file(),
         );
     }
 
     // Check review cache (keyed by content_hash so identical tarballs skip re-analysis)
-    if let Ok(cache) = REVIEW_CACHE.lock() {
-        if let Some(cached) = cache.get(content_hash_str) {
-            tracing::debug!("[{}] LLM review cache hit", pkg_id.canonical());
-            return cached.clone();
-        }
+    if let Some(cached) = SemanticCache::get_review(content_hash_str) {
+        tracing::debug!("[{}] LLM review cache hit", pkg_id.canonical());
+        return cached;
     }
 
-    let enabled = std::env::var("CREG_LLM_ENABLED")
-        .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
-        .unwrap_or(false);
-
-    if !enabled {
-        let reason =
-            "CREG_LLM_ENABLED is not set — LLM stage skipped. Set CREG_LLM_ENABLED=true \
-             and configure at least one provider key (ANTHROPIC_API_KEY, OPENAI_API_KEY, \
-             OPENROUTER_API_KEY, or CREG_OLLAMA_URL) to enable deep LLM analysis."
-                .to_string();
-        tracing::debug!("[{}] {}", pkg_id.canonical(), reason);
-        return LlmReview::degraded(reason, entropy_alerts);
+    if let Err(review) = LlmEscalationGate::ensure_package_enabled(packet.entropy_alerts.clone()) {
+        tracing::debug!(
+            "[{}] {}",
+            pkg_id.canonical(),
+            review.degraded_reason.as_deref().unwrap_or("LLM stage skipped")
+        );
+        return review;
     }
 
-    // Rate limit check
-    if let Ok(mut limiter) = RATE_LIMITER.lock() {
-        if let Err(reason) = limiter.check() {
-            tracing::warn!("[{}] {}", pkg_id.canonical(), reason);
-            return LlmReview::degraded(reason, entropy_alerts);
-        }
+    if let Err(review) = LlmEscalationGate::reserve_package_call(packet.entropy_alerts.clone()) {
+        tracing::warn!(
+            "[{}] {}",
+            pkg_id.canonical(),
+            review.degraded_reason.as_deref().unwrap_or("LLM stage skipped")
+        );
+        return review;
     }
 
     tracing::info!(
         "[{}] Stage 4 — LLM review starting ({} files, {} entropy alerts, {} prior findings)",
         pkg_id.canonical(),
-        files.len(),
-        entropy_alerts.len(),
+        packet.file_count,
+        packet.entropy_alerts.len(),
         prior_findings.len(),
     );
 
-    // Select files for per-file analysis
-    let selected = select_files_for_analysis(
-        &files,
-        prior_findings,
-        max_files_to_analyse(),
-    );
-
-    // ── Per-file analysis ──────────────────────────────────────────────────
-    let mut file_analyses: Vec<FileAnalysis> = Vec::new();
-    let mut all_findings: Vec<Finding> = Vec::new();
-    let mut model_used = String::new();
-    let mut finding_counter = 0usize;
-
-    for (path, data, entropy) in &selected {
-        // Convert bytes to UTF-8, skipping binary content
-        let content = match std::str::from_utf8(data) {
-            Ok(s) => sanitize_content(s, max_file_chars()),
-            Err(_) => {
-                tracing::debug!(
-                    "[{}] Skipping binary file {} for LLM analysis (entropy {:.2})",
-                    pkg_id.canonical(), path, entropy
-                );
-                continue;
-            }
-        };
-
-        if content.trim().is_empty() {
-            continue;
-        }
-
-        let prior_for_file: Vec<&Finding> = prior_findings
-            .iter()
-            .filter(|f| f.file == *path)
-            .collect();
-
-        let messages = build_file_analysis_messages(
-            pkg_id,
-            path,
-            &content,
-            *entropy,
-            &prior_for_file,
-            is_high_risk_path(path),
-        );
-
-        match call_llm(&messages, 1500).await {
-            Ok((resp, model)) => {
-                if model_used.is_empty() {
-                    model_used = model.clone();
-                }
-                let fa = parse_file_analysis(path, &resp, &model, pkg_id);
-
-                // Promote file findings to the report
-                for (title, severity, description) in &fa.findings {
-                    finding_counter += 1;
-                    all_findings.push(Finding {
-                        id: format!("LLM{:03}", finding_counter),
-                        title: title.clone(),
-                        severity: severity.clone(),
-                        description: description.clone(),
-                        file: path.clone(),
-                        line: None,
-                    });
-                }
-
-                file_analyses.push(fa);
-            }
-            Err(e) => {
-                tracing::warn!(
-                    "[{}] LLM file analysis failed for {}: {}",
-                    pkg_id.canonical(), path, e
-                );
-                // Emit a degraded finding so consensus can see which files were not reviewed
-                finding_counter += 1;
-                all_findings.push(Finding {
-                    id: format!("LLM{:03}", finding_counter),
-                    title: "LLM file analysis unavailable".into(),
-                    severity: FindingSeverity::Low,
-                    description: format!(
-                        "LLM analysis of {} could not be completed ({}). \
-                         File was flagged by static/entropy analysis but not semantically verified.",
-                        path, e
-                    ),
-                    file: path.clone(),
-                    line: None,
-                });
-            }
-        }
-    }
-
-    // ── Package summary ────────────────────────────────────────────────────
-    let top_file_score = file_analyses.iter().map(|fa| fa.file_score).max().unwrap_or(0);
-
-    // Mark entropy alerts that were analysed
-    let analysed_paths: std::collections::HashSet<&str> =
-        file_analyses.iter().map(|fa| fa.path.as_str()).collect();
-    let entropy_alerts: Vec<EntropyAlert> = entropy_alerts
-        .into_iter()
-        .map(|mut a| {
-            a.llm_analysed = analysed_paths.contains(a.path.as_str());
-            a
-        })
-        .collect();
-
-    let summary_messages = build_summary_messages(
-        pkg_id,
-        manifest,
-        &entropy_alerts,
-        &file_analyses,
-        prior_findings,
-        top_file_score,
-    );
-
-    let (maliciousness_score, package_summary, injection_patterns, final_model) =
-        match call_llm(&summary_messages, 2000).await {
-            Ok((resp, model)) => {
-                let m = if model_used.is_empty() { model.clone() } else { model_used.clone() };
-                let (score, summary, patterns) = parse_summary(&resp, &model, pkg_id);
-                (score, summary, patterns, m)
-            }
-            Err(e) => {
-                tracing::warn!(
-                    "[{}] LLM package summary failed: {}",
-                    pkg_id.canonical(), e
-                );
-                (
-                    top_file_score,
-                    format!(
-                        "LLM summary unavailable ({}). Per-file scores: max={}. \
-                         Manual review recommended.",
-                        e, top_file_score
-                    ),
-                    Vec::new(),
-                    model_used,
-                )
-            }
-        };
-
-    let risk_tier = RiskTier::from_score(maliciousness_score);
-    let duration_ms = t0.elapsed().as_millis() as u64;
-
-    tracing::info!(
-        "[{}] Stage 4 complete in {}ms — score={} tier={} model={} findings={} entropy_alerts={}",
-        pkg_id.canonical(),
-        duration_ms,
-        maliciousness_score,
-        risk_tier,
-        final_model,
-        all_findings.len(),
-        entropy_alerts.len(),
-    );
-
-    let review = LlmReview {
-        maliciousness_score,
-        risk_tier,
-        package_summary,
-        findings: all_findings,
-        high_entropy_files: entropy_alerts,
-        injection_patterns,
-        model_used: final_model,
-        analysis_duration_ms: duration_ms,
-        degraded: false,
-        degraded_reason: None,
-    };
+    let review = StructuredReviewer::review_package(pkg_id, manifest, prior_findings, packet).await;
 
     // Store in review cache
-    if let Ok(mut cache) = REVIEW_CACHE.lock() {
-        if cache.len() > 5_000 {
-            cache.clear();
-        }
-        cache.insert(content_hash_str.to_string(), review.clone());
-    }
+    SemanticCache::put_review(content_hash_str, &review);
 
     review
 }

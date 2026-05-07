@@ -354,9 +354,9 @@ const StatusBadge = ({ status, type = 'neutral' }) => {
 // MAIN APP
 // ============================================
 
-function App() {
+function App({ initialView = 'blocks', initialShowPublishForm = false, embedded = false }) {
   // State
-  const [view, setView] = useState('blocks')
+  const [view, setView] = useState(initialView)
   const [stats, setStats] = useState({ tip_height: 0, package_count: 0, tip_hash: '' })
   const [blocks, setBlocks] = useState([])
   const [nodes, setNodes] = useState([])
@@ -429,7 +429,7 @@ function App() {
   const [packageList, setPackageList] = useState({ packages: [], total: 0 })
   const [packageListOffset, setPackageListOffset] = useState(0)
   const [packageFilterText, setPackageFilterText] = useState('')
-  const [showPublishForm, setShowPublishForm] = useState(false)
+  const [showPublishForm, setShowPublishForm] = useState(Boolean(initialShowPublishForm))
   const [publishForm, setPublishForm] = useState({ ecosystem: 'npm', name: '', version: '', ipfs_cid: '', content_hash: '', publisher_pubkey: '', signature: '' })
   const [publishStatus, setPublishStatus] = useState(null)
   const [publishErrors, setPublishErrors] = useState({})
@@ -1875,6 +1875,7 @@ function App() {
   return (
     <div className="app-container">
       {/* Header */}
+      {!embedded && (
       <header className="header">
         <div className="logo">
           <div className="logo-icon">⛓</div>
@@ -1904,9 +1905,10 @@ function App() {
           </div>
         </div>
       </header>
+      )}
 
       {/* SSE Reconnect Banner (WEB-H02) */}
-      {!sseConnected && (
+      {!embedded && !sseConnected && (
         <div style={{
           background: '#7f1d1d',
           borderBottom: '1px solid #ef4444',
@@ -1926,6 +1928,7 @@ function App() {
       )}
 
       {/* Stats Grid */}
+      {!embedded && (
       <div className="stats-grid stagger-children">
         {isLoading ? (
           <>
@@ -1979,8 +1982,10 @@ function App() {
           </>
         )}
       </div>
+      )}
 
       {/* Navigation Tabs */}
+      {!embedded && (
       <nav className="nav-tabs">
         {[
           { id: 'blocks', label: 'Blocks', icon: '⛓' },
@@ -1999,9 +2004,10 @@ function App() {
           </button>
         ))}
       </nav>
+      )}
 
       {/* Main Content */}
-      <div className="content-grid">
+      <div className="content-grid" style={embedded ? { gridTemplateColumns: 'minmax(0, 1fr)' } : undefined}>
         {/* Left Panel */}
         <div className="panel animate-fade-in">
           {/* Search Bar */}
@@ -2011,6 +2017,7 @@ function App() {
               {view === 'validators' && 'Validator Set'}
               {view === 'packages' && `Packages (${stats.package_count} on-chain)`}
               {view === 'wallet' && 'Wallet & Stake'}
+              {view === 'publisher' && 'Publisher Profile'}
               {view === 'p2p' && 'Network Status'}
             </div>
             {view === 'blocks' && (
@@ -2858,206 +2865,207 @@ function App() {
         </div>
 
         {/* Right Panel - Details or Events */}
-        <div className="panel animate-fade-in">
-          {selectedValidator ? (
-            <div className="detail-panel">
-              <div className="detail-header">
-                <span className="detail-title">Validator Details</span>
-                <button className="detail-close" onClick={() => setSelectedValidator(null)}>✕</button>
-              </div>
+        {!embedded && (
+          <div className="panel animate-fade-in">
+            {selectedValidator ? (
+              <div className="detail-panel">
+                <div className="detail-header">
+                  <span className="detail-title">Validator Details</span>
+                  <button className="detail-close" onClick={() => setSelectedValidator(null)}>✕</button>
+                </div>
 
-              <div className="detail-content">
-                <div className="detail-section">
-                  <div className="detail-section-title">Identity</div>
-                  <div className="detail-row">
-                    <span className="detail-label">Validator ID</span>
-                    <span className="detail-value">{selectedValidator.id}</span>
-                  </div>
-                  {selectedValidator.alias && (
+                <div className="detail-content">
+                  <div className="detail-section">
                     <div className="detail-row">
-                      <span className="detail-label">Alias</span>
-                      <span className="detail-value">{selectedValidator.alias}</span>
+                      <span className="detail-label">Validator ID</span>
+                      <span className="detail-value">{selectedValidator.id}</span>
+                    </div>
+                    {selectedValidator.alias && (
+                      <div className="detail-row">
+                        <span className="detail-label">Alias</span>
+                        <span className="detail-value">{selectedValidator.alias}</span>
+                      </div>
+                    )}
+                    <div className="detail-row">
+                      <span className="detail-label">Status</span>
+                      <StatusBadge status={selectedValidator.status} />
+                    </div>
+                  </div>
+
+                  <div className="detail-section">
+                    <div className="detail-section-title">Performance</div>
+                    <div className="detail-row">
+                      <span className="detail-label">Stake</span>
+                      <span className="detail-value">{formatStake(selectedValidator.stake || 0)}</span>
+                    </div>
+                    <div className="detail-row">
+                      <span className="detail-label">Reputation</span>
+                      {(() => {
+                        const rep = selectedValidator.reputation || 0
+                        const color = rep >= 80 ? '#22c55e' : rep >= 60 ? '#eab308' : rep >= 40 ? '#f97316' : '#ef4444'
+                        const band = rep >= 80 ? 'High' : rep >= 60 ? 'Good' : rep >= 40 ? 'Fair' : 'Low'
+                        return (
+                          <span className="detail-value" style={{ color }} title={`${band} reputation`}>
+                            {rep}/100 <span style={{ fontSize: '0.75rem', opacity: 0.8 }}>({band})</span>
+                          </span>
+                        )
+                      })()}
+                    </div>
+                  </div>
+
+                  <div className="detail-section">
+                    <div className="detail-section-title">Operator Actions</div>
+                    <div style={{ color: 'var(--text-secondary)', lineHeight: 1.7 }}>
+                      Connect a wallet in the Wallet tab to apply as a validator or add stake.<br />
+                      Use the Packages tab to inspect pending work and publish package metadata.<br />
+                      Use the Network tab to inspect peer connectivity and bridge sync.
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : selectedBlock ? (
+              <div className="detail-panel">
+                <div className="detail-header">
+                  <span className="detail-title">Block Details</span>
+                  <button className="detail-close" onClick={() => setSelectedBlock(null)}>✕</button>
+                </div>
+
+                <div className="detail-content">
+                  <div className="detail-section">
+                    <div className="detail-section-title">Overview</div>
+                    <div className="detail-row">
+                      <span className="detail-label">Height</span>
+                      <span className="detail-value">#{selectedBlock.header?.height?.toLocaleString()}</span>
+                    </div>
+                    <div className="detail-row">
+                      <span className="detail-label">Timestamp</span>
+                      <span className="detail-value">{timeAgo(selectedBlock.header?.timestamp)}</span>
+                    </div>
+                    <div className="detail-row">
+                      <span className="detail-label">Proposer</span>
+                      <span className="detail-value">{selectedBlock.header?.proposer_id}</span>
+                    </div>
+                    <div className="detail-row">
+                      <span className="detail-label">Transactions</span>
+                      <span className="detail-value">{selectedBlock.transactions?.length || 0}</span>
+                    </div>
+                  </div>
+
+                  <div className="detail-section">
+                    <div className="detail-section-title">Hashes</div>
+                    <div className="detail-row">
+                      <span className="detail-label">Block Hash</span>
+                      <CopyButton text={selectedBlock.hash} label="hash" />
+                    </div>
+                    <div className="detail-row">
+                      <span className="detail-label">Merkle Root</span>
+                      <CopyButton text={selectedBlock.header?.merkle_root} label="root" />
+                    </div>
+                  </div>
+
+                  {selectedBlock.transactions?.length > 0 && (
+                    <div className="detail-section">
+                      <div className="detail-section-title">Transactions</div>
+                      {selectedBlock.transactions.map((tx, i) => (
+                        <div key={i} className="tx-card">
+                          <div className="tx-header">
+                            <span className={`badge badge-${tx.type === 'publish' ? 'primary' : 'neutral'}`}>
+                              {tx.type}
+                            </span>
+                            <span className="tx-id">{truncateHash(tx.id?.canonical || tx.id, 12, 4)}</span>
+                          </div>
+                          {tx.id?.name && (
+                            <div className="tx-body">
+                              <div className="tx-package">
+                                {tx.id.name}
+                                <span className="tx-package-version"> v{tx.id.version}</span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ))}
                     </div>
                   )}
-                  <div className="detail-row">
-                    <span className="detail-label">Status</span>
-                    <StatusBadge status={selectedValidator.status} />
-                  </div>
-                </div>
-
-                <div className="detail-section">
-                  <div className="detail-section-title">Performance</div>
-                  <div className="detail-row">
-                    <span className="detail-label">Stake</span>
-                    <span className="detail-value">{formatStake(selectedValidator.stake || 0)}</span>
-                  </div>
-                  <div className="detail-row">
-                    <span className="detail-label">Reputation</span>
-                    {(() => {
-                      const rep = selectedValidator.reputation || 0
-                      const color = rep >= 80 ? '#22c55e' : rep >= 60 ? '#eab308' : rep >= 40 ? '#f97316' : '#ef4444'
-                      const band = rep >= 80 ? 'High' : rep >= 60 ? 'Good' : rep >= 40 ? 'Fair' : 'Low'
-                      return (
-                        <span className="detail-value" style={{ color }} title={`${band} reputation`}>
-                          {rep}/100 <span style={{ fontSize: '0.75rem', opacity: 0.8 }}>({band})</span>
-                        </span>
-                      )
-                    })()}
-                  </div>
-                </div>
-
-                <div className="detail-section">
-                  <div className="detail-section-title">Operator Actions</div>
-                  <div style={{ color: 'var(--text-secondary)', lineHeight: 1.7 }}>
-                    Connect a wallet in the Wallet tab to apply as a validator or add stake.<br />
-                    Use the Packages tab to inspect pending work and publish package metadata.<br />
-                    Use the Network tab to inspect peer connectivity and bridge sync.
-                  </div>
                 </div>
               </div>
-            </div>
-          ) : selectedBlock ? (
-            /* Block Detail View */
-            <div className="detail-panel">
-              <div className="detail-header">
-                <span className="detail-title">Block Details</span>
-                <button className="detail-close" onClick={() => setSelectedBlock(null)}>✕</button>
-              </div>
-              
-              <div className="detail-content">
-                <div className="detail-section">
-                  <div className="detail-section-title">Overview</div>
-                  <div className="detail-row">
-                    <span className="detail-label">Height</span>
-                    <span className="detail-value">#{selectedBlock.header?.height?.toLocaleString()}</span>
-                  </div>
-                  <div className="detail-row">
-                    <span className="detail-label">Timestamp</span>
-                    <span className="detail-value">{timeAgo(selectedBlock.header?.timestamp)}</span>
-                  </div>
-                  <div className="detail-row">
-                    <span className="detail-label">Proposer</span>
-                    <span className="detail-value">{selectedBlock.header?.proposer_id}</span>
-                  </div>
-                  <div className="detail-row">
-                    <span className="detail-label">Transactions</span>
-                    <span className="detail-value">{selectedBlock.transactions?.length || 0}</span>
+            ) : (
+              <>
+                <div className="panel-header">
+                  <div className="panel-title">
+                    <span>📡</span>
+                    Live Events
+                    <span className="panel-subtitle">({events.length})</span>
                   </div>
                 </div>
-
-                <div className="detail-section">
-                  <div className="detail-section-title">Hashes</div>
-                  <div className="detail-row">
-                    <span className="detail-label">Block Hash</span>
-                    <CopyButton text={selectedBlock.hash} label="hash" />
-                  </div>
-                  <div className="detail-row">
-                    <span className="detail-label">Merkle Root</span>
-                    <CopyButton text={selectedBlock.header?.merkle_root} label="root" />
-                  </div>
-                </div>
-
-                {selectedBlock.transactions?.length > 0 && (
-                  <div className="detail-section">
-                    <div className="detail-section-title">Transactions</div>
-                    {selectedBlock.transactions.map((tx, i) => (
-                      <div key={i} className="tx-card">
-                        <div className="tx-header">
-                          <span className={`badge badge-${tx.type === 'publish' ? 'primary' : 'neutral'}`}>
-                            {tx.type}
-                          </span>
-                          <span className="tx-id">{truncateHash(tx.id?.canonical || tx.id, 12, 4)}</span>
-                        </div>
-                        {tx.id?.name && (
-                          <div className="tx-body">
-                            <div className="tx-package">
-                              {tx.id.name}
-                              <span className="tx-package-version"> v{tx.id.version}</span>
+                <div className="panel-content">
+                  <div className="list-container" style={{ maxHeight: '650px' }}>
+                    {events.length === 0 ? (
+                      <EmptyState
+                        icon="📡"
+                        title="No events yet"
+                        description="Events will appear here in real-time"
+                      />
+                    ) : (
+                      events.map((ev, idx) => {
+                        const eventType = getEventType(ev.event_type)
+                        return (
+                          <div key={idx} className="event-item animate-slide-in" style={{ animationDelay: `${idx * 0.03}s` }}>
+                            <div className={`event-icon ${eventType}`}>
+                              {getEventIcon(eventType)}
                             </div>
+                            <div className="event-content">
+                              <div className="event-title">
+                                {ev.event_type?.replace(/_/g, ' ')}
+                              </div>
+                              <div className="event-description">
+                                {typeof ev.payload === 'object' ? JSON.stringify(ev.payload, null, 2) : ev.payload}
+                              </div>
+                            </div>
+                            <span className="event-time">{timeAgo(ev.timestamp)}</span>
                           </div>
-                        )}
-                      </div>
-                    ))}
+                        )
+                      })
+                    )}
                   </div>
-                )}
-              </div>
-            </div>
-          ) : (
-            /* Events Feed */
-            <>
-              <div className="panel-header">
-                <div className="panel-title">
-                  <span>📡</span>
-                  Live Events
-                  <span className="panel-subtitle">({events.length})</span>
                 </div>
-              </div>
-              <div className="panel-content">
-                <div className="list-container" style={{ maxHeight: '650px' }}>
-                  {events.length === 0 ? (
-                    <EmptyState 
-                      icon="📡" 
-                      title="No events yet" 
-                      description="Events will appear here in real-time"
-                    />
-                  ) : (
-                    events.map((ev, idx) => {
-                      const eventType = getEventType(ev.event_type)
-                      return (
-                        <div key={idx} className="event-item animate-slide-in" style={{ animationDelay: `${idx * 0.03}s` }}>
-                          <div className={`event-icon ${eventType}`}>
-                            {getEventIcon(eventType)}
-                          </div>
-                          <div className="event-content">
-                            <div className="event-title">
-                              {ev.event_type?.replace(/_/g, ' ')}
-                            </div>
-                            <div className="event-description">
-                              {typeof ev.payload === 'object' ? JSON.stringify(ev.payload, null, 2) : ev.payload}
-                            </div>
-                          </div>
-                          <span className="event-time">{timeAgo(ev.timestamp)}</span>
-                        </div>
-                      )
-                    })
-                  )}
-                </div>
-              </div>
-            </>
-          )}
-        </div>
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Bridge HUD - Inline */}
-      <div className="bridge-hud-inline">
-        <div className="bridge-header">
-          <span className="bridge-icon">🌉</span>
-          <div className="bridge-info">
-            <div className="bridge-title">Ethereum Bridge</div>
-            <div className="bridge-status">{bridgeStatus.bridge_sync_status}</div>
+      {!embedded && (
+        <div className="bridge-hud-inline">
+          <div className="bridge-header">
+            <span className="bridge-icon">🌉</span>
+            <div className="bridge-info">
+              <div className="bridge-title">Ethereum Bridge</div>
+              <div className="bridge-status">{bridgeStatus.bridge_sync_status}</div>
+            </div>
+            <span className="bridge-block">L1: #{bridgeStatus.last_finalized_eth_block}</span>
           </div>
-          <span className="bridge-block">L1: #{bridgeStatus.last_finalized_eth_block}</span>
+          <div className="bridge-progress">
+            <div
+              className="bridge-progress-fill"
+              style={{
+                width: bridgeStatus.bridge_sync_status === 'Synced' ? '100%'
+                  : bridgeStatus.bridge_sync_progress ? `${Math.min(100, bridgeStatus.bridge_sync_progress)}%`
+                  : '0%',
+                opacity: bridgeStatus.bridge_sync_status === 'Synced' ? 1 : 0.6,
+              }}
+            />
+          </div>
         </div>
-        <div className="bridge-progress">
-          <div 
-            className="bridge-progress-fill" 
-            style={{ 
-              width: bridgeStatus.bridge_sync_status === 'Synced' ? '100%'
-                   : bridgeStatus.bridge_sync_progress ? `${Math.min(100, bridgeStatus.bridge_sync_progress)}%`
-                   : '0%',
-              opacity: bridgeStatus.bridge_sync_status === 'Synced' ? 1 : 0.6
-            }} 
-          />
-        </div>
-      </div>
+      )}
     </div>
   )
 }
 
-function AppWithBoundary() {
+function AppWithBoundary(props) {
   return (
     <ErrorBoundary>
-      <App />
+      <App {...props} />
     </ErrorBoundary>
   )
 }

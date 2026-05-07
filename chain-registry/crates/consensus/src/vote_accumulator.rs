@@ -414,6 +414,9 @@ impl PackageVoteState {
                 },
                 signed_at: v.received_at,
                 ml_model_version: v.ml_model_version.clone().unwrap_or_default(),
+                analysis_bundles: common::AnalysisBundleRefs::default(),
+                evidence_digest: String::new(),
+                deterministic_risk: common::DeterministicRiskSummary::default(),
             })
             .collect()
     }

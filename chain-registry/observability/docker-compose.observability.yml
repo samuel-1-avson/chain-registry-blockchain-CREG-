@@ -4,9 +4,61 @@
 #   docker compose -f docker-compose.yml \
 #                  -f observability/docker-compose.observability.yml up
 
-version: "3.9"
-
 services:
+
+  loki:
+    image: grafana/loki:3.0.0
+    container_name: creg-loki
+    command:
+      - "-config.file=/etc/loki/config.yml"
+    volumes:
+      - ./observability/loki-config.yml:/etc/loki/config.yml:ro
+      - loki-data:/loki
+    ports:
+      - "3100:3100"
+    restart: unless-stopped
+    networks:
+      - default
+
+  promtail:
+    image: grafana/promtail:3.0.0
+    container_name: creg-promtail
+    command:
+      - "-config.file=/etc/promtail/config.yml"
+    volumes:
+      - ./observability/promtail-config.yml:/etc/promtail/config.yml:ro
+      - promtail-positions:/var/lib/promtail
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+  tempo:
+    image: grafana/tempo:2.5.0
+    container_name: creg-tempo
+    command:
+      - "-config.file=/etc/tempo.yml"
+    volumes:
+      - ./observability/tempo.yml:/etc/tempo.yml:ro
+      - tempo-data:/tmp/tempo
+    ports:
+      - "3200:3200"
+    restart: unless-stopped
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.101.0
+    container_name: creg-otel-collector
+    command:
+      - "--config=/etc/otel-collector-config.yml"
+    volumes:
+      - ./observability/otel-collector-config.yml:/etc/otel-collector-config.yml:ro
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+      - "8888:8888"
+    depends_on:
+      - tempo
+    restart: unless-stopped
 
   prometheus:
     image: prom/prometheus:v2.51.0
@@ -40,6 +92,8 @@ services:
       - "3001:3000"
     depends_on:
       - prometheus
+      - loki
+      - tempo
     restart: unless-stopped
 
   alertmanager:
@@ -54,5 +108,8 @@ services:
     restart: unless-stopped
 
 volumes:
+  loki-data:
+  promtail-positions:
   prometheus-data:
   grafana-data:
+  tempo-data:

@@ -14,7 +14,7 @@ ARG NETWORK_RETRIES=1
 FROM node:20-slim AS frontend-builder
 WORKDIR /explorer
 COPY explorer/package*.json explorer/.npmrc* ./
-RUN if [ -f package-lock.json ]; then npm ci --silent; else npm install --silent --no-fund --no-audit; fi
+RUN if [ -f package-lock.json ]; then npm ci --no-fund --no-audit || npm ci --no-fund --no-audit; else npm install --no-fund --no-audit || npm install --no-fund --no-audit; fi
 COPY explorer/ ./
 RUN npm run build
 
@@ -128,7 +128,7 @@ RUN mkdir -p crates/faucet/src           && echo "fn main() {}"      > crates/fa
 RUN cargo fetch || (sleep 5 && cargo fetch) || (sleep 10 && cargo fetch)
 
 # Pre-build dependencies (cached layer)
-RUN cargo build --release --package chain-registry-node || true
+RUN cargo build --release --package chain-registry-node --bin creg-node --bin creg-indexer || true
 
 # Copy real source and build properly.
 COPY crates/ crates/
@@ -144,8 +144,8 @@ COPY docker-compose*.yml ./
 # Touch files to ensure rebuild
 RUN touch crates/*/src/*.rs
 
-# Build the node with all features
-RUN cargo build --release --package chain-registry-node
+# Build the node binaries with all features
+RUN cargo build --release --package chain-registry-node --bin creg-node --bin creg-indexer
 
 # Build CLI tools (includes TUI explorer)
 RUN cargo build --release --package chain-registry-cli
@@ -178,6 +178,7 @@ WORKDIR /app
 
 # Copy binaries
 COPY --from=builder /build/target/release/creg-node /app/creg-node
+COPY --from=builder /build/target/release/creg-indexer /app/creg-indexer
 COPY --from=builder /build/target/release/creg /app/creg
 COPY --from=builder /build/target/release/faucet /app/faucet
 COPY --from=builder /build/target/release/creg-relayer /app/creg-relayer
@@ -204,7 +205,7 @@ RUN mkdir -p /data && chown creg:creg /data
 USER creg
 
 VOLUME ["/data"]
-EXPOSE 8080 50051
+EXPOSE 8080 8084 50051
 
 HEALTHCHECK --interval=20s --timeout=10s --retries=3 \
   CMD curl -f http://localhost:8080/v1/health || exit 1

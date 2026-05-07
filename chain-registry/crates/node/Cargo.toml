@@ -15,6 +15,10 @@ path = "src/main.rs"
 name = "dump-openapi"
 path = "src/bin/dump_openapi.rs"
 
+[[bin]]
+name = "creg-indexer"
+path = "src/bin/creg_indexer.rs"
+
 [dependencies]
 common    = { path = "../common" }
 validator = { path = "../validator" }

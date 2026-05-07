@@ -218,7 +218,7 @@ async fn process_package(
         .as_deref()
         .and_then(validator::sandbox::get_result);
 
-    let (vote, pgp_fingerprint, findings) = if is_validator {
+    let (vote, pgp_fingerprint, findings, analysis_bundles, evidence_digest, deterministic_risk) = if is_validator {
         if let Some(privkey) = privkey_opt.as_ref() {
             tracing::info!(
                 "[Consensus] Node is a validator — running full analysis for {}",
@@ -232,7 +232,18 @@ async fn process_package(
                 prev_sandbox.as_ref(),
             ).await
             {
-                Ok(res) => (res.vote, res.pgp_fingerprint, res.findings),
+                Ok(res) => {
+                    let evidence_digest = res.deterministic_risk.evidence_digest.clone();
+                    let deterministic_risk = res.deterministic_risk.to_common_summary();
+                    (
+                        res.vote,
+                        res.pgp_fingerprint,
+                        res.findings,
+                        res.analysis_bundles.to_refs(),
+                        evidence_digest,
+                        deterministic_risk,
+                    )
+                }
                 Err(e) => {
                     tracing::error!("Validation error for {}: {}", canonical, e);
                     cleanup(&state, &canonical).await;
@@ -300,16 +311,16 @@ async fn process_package(
             vote: vote.clone(),
             signed_at: Utc::now(),
             ml_model_version: ml_validator::DeepScanner::default().model_version(),
+            analysis_bundles: analysis_bundles.clone(),
+            evidence_digest: evidence_digest.clone(),
+            deterministic_risk: deterministic_risk.clone(),
         }
     };
 
     // Store our own vote locally
     {
         let mut sw = state.write().await;
-        sw.votes
-            .entry(canonical.clone())
-            .or_insert_with(Vec::new)
-            .push(our_sig.clone());
+        sw.record_package_vote(canonical.clone(), our_sig.clone());
     }
 
     // Gossip our vote to peers via P2P Gossipsub
@@ -339,11 +350,14 @@ async fn process_package(
     };
 
     let gossip_vote = crate::gossip::VoteGossip {
-        block_hash: canonical.clone(),
+        consensus_subject: canonical.clone(),
         content_hash: req.content_hash.clone(),
         validator_id: node_id.clone(),
         validator_pubkey: our_sig.validator_pubkey.clone(),
         ml_model_version: our_sig.ml_model_version.clone(),
+        analysis_bundles: analysis_bundles.clone(),
+        evidence_digest: evidence_digest.clone(),
+        deterministic_risk: deterministic_risk.clone(),
         phase: "commit".into(),
         approved,
         reject_reason,
@@ -370,8 +384,10 @@ async fn process_package(
     for _ in 0..max_iterations {
         {
             let sr = state.read().await;
-            if let Some(sigs) = sr.votes.get(&canonical) {
-                if let Some(outcome) = aggregate_consensus_outcome(sigs, assigned_validator_count) {
+            if let Some(round) = sr.package_round(&canonical) {
+                if let Some(outcome) =
+                    aggregate_consensus_outcome(round.signatures(), assigned_validator_count)
+                {
                     consensus_outcome = Some(outcome);
                     break;
                 }
@@ -420,6 +436,9 @@ async fn process_package(
                 key_bundle: req.key_bundle.clone(),
                 pgp_fingerprint,
                 findings,
+                analysis_bundles,
+                evidence_digest,
+                deterministic_risk,
                 access_count: 0,
                 last_accessed: None,
                 manifest: Some(req.manifest.clone()),
@@ -432,7 +451,7 @@ async fn process_package(
                 package_canonical: canonical.clone(),
                 reason,
                 revoked_by: node_id.clone(),
-                evidence_hash: "".into(),
+                evidence_hash: evidence_digest,
             },
             "REJECTED",
         ),
@@ -453,6 +472,7 @@ async fn process_package(
 async fn cleanup(state: &Arc<RwLock<NodeState>>, canonical: &str) {
     let mut s = state.write().await;
     s.pending_pool.remove(canonical);
+    s.clear_package_round(canonical);
 }
 
 #[cfg(test)]
@@ -469,6 +489,9 @@ mod tests {
             vote,
             signed_at: Utc::now(),
             ml_model_version: model_version.to_string(),
+            analysis_bundles: common::AnalysisBundleRefs::default(),
+            evidence_digest: String::new(),
+            deterministic_risk: common::DeterministicRiskSummary::default(),
         }
     }
 

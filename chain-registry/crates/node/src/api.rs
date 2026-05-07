@@ -145,6 +145,9 @@ pub fn router(
     tx_sender: FinalizedTxSender,
     p2p_handle: crate::p2p::P2PHandle,
 ) -> Router {
+    let sse_bus = Arc::clone(&event_bus);
+    let ws_bus = Arc::clone(&event_bus);
+
     Router::new()
         // Health & chain
         .route("/v1/health", get(health))
@@ -207,14 +210,14 @@ pub fn router(
         .route(
             "/v1/events",
             get({
-                let bus = Arc::clone(&event_bus);
+                let bus = Arc::clone(&sse_bus);
                 move |_: ()| async move { sse_handler(axum::extract::State(bus)).await }
             }),
         )
         .route(
             "/v1/ws",
             get(move |ws| {
-                let bus = Arc::clone(&event_bus);
+                let bus = Arc::clone(&ws_bus);
                 async move { events::ws_handler(ws, axum::extract::State(bus)).await }
             }),
         )
@@ -224,6 +227,7 @@ pub fn router(
         .layer(axum::middleware::from_fn(rate_limit_middleware))
         .layer(axum::extract::Extension(limiter))
         .layer(axum::extract::Extension(admission_store))
+        .layer(axum::extract::Extension(event_bus))
         .layer(axum::extract::Extension(tx_sender))
         .layer(axum::extract::Extension(p2p_handle))
         .layer(build_cors_layer(&cors_config))
@@ -800,6 +804,9 @@ async fn list_packages(
                 status: String,
                 publisher: String,
                 published_at: String,
+                analysis_bundles: common::AnalysisBundleRefs,
+                evidence_digest: String,
+                deterministic_risk: common::DeterministicRiskSummary,
             }
 
             let packages: Vec<PackageSummary> = records
@@ -816,6 +823,9 @@ async fn list_packages(
                     },
                     publisher: r.publisher_pubkey.clone(),
                     published_at: r.published_at.to_rfc3339(),
+                    analysis_bundles: r.analysis_bundles.clone(),
+                    evidence_digest: r.evidence_digest.clone(),
+                    deterministic_risk: r.deterministic_risk.clone(),
                 })
                 .collect();
 
@@ -850,6 +860,9 @@ async fn get_package(State(state): State<SharedState>, Path(canonical): Path<Str
             publisher: Option<String>,
             published_at: Option<String>,
             revocation_reason: Option<String>,
+            analysis_bundles: Option<common::AnalysisBundleRefs>,
+            evidence_digest: Option<String>,
+            deterministic_risk: Option<common::DeterministicRiskSummary>,
         }
         let resp = PackageResp {
             canonical: record.id.canonical(),
@@ -868,6 +881,9 @@ async fn get_package(State(state): State<SharedState>, Path(canonical): Path<Str
             } else {
                 None
             },
+            analysis_bundles: Some(record.analysis_bundles.clone()),
+            evidence_digest: Some(record.evidence_digest.clone()),
+            deterministic_risk: Some(record.deterministic_risk.clone()),
         };
         return Json(resp).into_response();
     }
@@ -876,7 +892,10 @@ async fn get_package(State(state): State<SharedState>, Path(canonical): Path<Str
     if s.pending_pool.contains(&canonical) {
         return Json(serde_json::json!({
             "canonical": canonical,
-            "status": "pending"
+            "status": "pending",
+            "analysis_bundles": serde_json::Value::Null,
+            "evidence_digest": serde_json::Value::Null,
+            "deterministic_risk": serde_json::Value::Null
         }))
         .into_response();
     }
@@ -991,6 +1010,7 @@ struct RevokeReq {
 
 async fn revoke_package(
     State(state): State<SharedState>,
+    Extension(event_bus): Extension<EventBus>,
     Extension(tx_sender): Extension<FinalizedTxSender>,
     Path(canonical): Path<String>,
     Json(req): Json<RevokeReq>,
@@ -1026,7 +1046,7 @@ async fn revoke_package(
             .into_response();
     }
 
-    let (is_authorised, package_record, event_bus) = {
+    let (is_authorised, package_record) = {
         let s = state.read().await;
 
         let is_validator = s
@@ -1043,11 +1063,7 @@ async fn revoke_package(
             .map(|r| r.publisher_pubkey == req.revoker_pubkey)
             .unwrap_or(false);
 
-        (
-            is_validator || is_publisher,
-            package_record,
-            s.event_bus.clone(),
-        )
+        (is_validator || is_publisher, package_record)
     };
 
     if !is_authorised {
@@ -1931,8 +1947,19 @@ async fn consensus_state(State(state): State<SharedState>) -> impl IntoResponse 
     };
 
     #[derive(Serialize)]
+    struct VoteSummary {
+        validator_id: String,
+        decision: &'static str,
+        reject_reason: Option<String>,
+        ml_model_version: String,
+        analysis_bundles: common::AnalysisBundleRefs,
+        evidence_digest: String,
+        deterministic_risk: common::DeterministicRiskSummary,
+    }
+
+    #[derive(Serialize)]
     struct RoundSummary {
-        block_hash: String,
+        consensus_subject: String,
         vote_count: usize,
         approvals: usize,
         rejections: usize,
@@ -1943,24 +1970,41 @@ async fn consensus_state(State(state): State<SharedState>) -> impl IntoResponse 
         approvers: Vec<String>,
         /// Subset of voters that cast Reject (with reason attached).
         rejecters: Vec<String>,
+        votes: Vec<VoteSummary>,
         /// Milliseconds since the earliest vote in this round (round age).
         age_ms: i64,
     }
 
     let now = chrono::Utc::now();
     let mut active_rounds: Vec<RoundSummary> = s
-        .votes
+        .package_rounds
         .iter()
-        .map(|(block_hash, sigs)| {
+        .map(|(consensus_subject, round)| {
             let mut approvers = Vec::new();
             let mut rejecters = Vec::new();
-            let mut voters = Vec::with_capacity(sigs.len());
-            for sig in sigs {
+            let mut voters = Vec::with_capacity(round.vote_count());
+            let mut votes = Vec::with_capacity(round.vote_count());
+            for sig in round.signatures() {
                 voters.push(sig.validator_id.clone());
-                match sig.vote {
-                    common::ValidatorVote::Approve => approvers.push(sig.validator_id.clone()),
-                    common::ValidatorVote::Reject { .. } => rejecters.push(sig.validator_id.clone()),
-                }
+                let (decision, reject_reason) = match &sig.vote {
+                    common::ValidatorVote::Approve => {
+                        approvers.push(sig.validator_id.clone());
+                        ("approve", None)
+                    }
+                    common::ValidatorVote::Reject { reason } => {
+                        rejecters.push(sig.validator_id.clone());
+                        ("reject", Some(reason.clone()))
+                    }
+                };
+                votes.push(VoteSummary {
+                    validator_id: sig.validator_id.clone(),
+                    decision,
+                    reject_reason,
+                    ml_model_version: sig.ml_model_version.clone(),
+                    analysis_bundles: sig.analysis_bundles.clone(),
+                    evidence_digest: sig.evidence_digest.clone(),
+                    deterministic_risk: sig.deterministic_risk.clone(),
+                });
             }
             let approvals = approvers.len();
             let rejections = rejecters.len();
@@ -1971,20 +2015,21 @@ async fn consensus_state(State(state): State<SharedState>) -> impl IntoResponse 
             } else {
                 "collecting-votes"
             };
-            let age_ms = sigs
-                .iter()
-                .map(|s| (now - s.signed_at).num_milliseconds())
-                .max()
-                .unwrap_or(0);
+            let age_ms = now
+                .signed_duration_since(round.first_vote_at.clone())
+                .num_milliseconds();
+            votes.sort_by(|left, right| left.validator_id.cmp(&right.validator_id));
+
             RoundSummary {
-                block_hash: block_hash.clone(),
-                vote_count: sigs.len(),
+                consensus_subject: consensus_subject.clone(),
+                vote_count: round.vote_count(),
                 approvals,
                 rejections,
                 phase,
                 voters,
                 approvers,
                 rejecters,
+                votes,
                 age_ms,
             }
         })
@@ -1992,6 +2037,7 @@ async fn consensus_state(State(state): State<SharedState>) -> impl IntoResponse 
 
     // Sort descending by vote count so the most active round is first.
     active_rounds.sort_by(|a, b| b.vote_count.cmp(&a.vote_count));
+
     // Cap to the 10 most active rounds to keep the response bounded.
     active_rounds.truncate(10);
 
@@ -2028,8 +2074,11 @@ async fn consensus_state(State(state): State<SharedState>) -> impl IntoResponse 
 // POST /v1/consensus/vote
 #[derive(Deserialize, Serialize)]
 pub struct VoteMessage {
-    /// The canonical package ID (at vote time) or block hash (at seal time).
-    pub block_hash: String,
+    /// Package-consensus subject identifier.
+    ///
+    /// Deserializes legacy `block_hash` payloads during the field rename.
+    #[serde(alias = "block_hash")]
+    pub consensus_subject: String,
     /// SHA-256 of the tarball bytes — bound into the signed message to prevent
     /// cross-version replay. Defaults to empty for backwards compatibility.
     #[serde(default)]
@@ -2043,11 +2092,24 @@ pub struct VoteMessage {
     /// ML model version used by this validator during deep scan.
     #[serde(default)]
     pub ml_model_version: String,
+    /// Versioned analysis bundles active for this vote.
+    #[serde(default)]
+    pub analysis_bundles: common::AnalysisBundleRefs,
+    /// Digest over deterministic evidence considered by the voting validator.
+    #[serde(default)]
+    pub evidence_digest: String,
+    /// Compact deterministic risk summary captured when the vote was formed.
+    #[serde(default)]
+    pub deterministic_risk: common::DeterministicRiskSummary,
     pub approved: bool,
     pub reject_reason: Option<String>,
 }
 
-async fn receive_vote(State(state): State<SharedState>, Json(vote): Json<VoteMessage>) -> Response {
+async fn receive_vote(
+    State(state): State<SharedState>,
+    Extension(event_bus): Extension<EventBus>,
+    Json(vote): Json<VoteMessage>,
+) -> Response {
     // ── Authenticate: verify the vote is from a known validator ──────────────
     {
         use ed25519_dalek::{Signature, Verifier, VerifyingKey};
@@ -2152,7 +2214,7 @@ async fn receive_vote(State(state): State<SharedState>, Json(vote): Json<VoteMes
         // validator_pipeline.rs::gossip_sig produces via
         // gossip::canonical_vote_message.
         let msg = crate::gossip::canonical_vote_message(
-            &vote.block_hash,
+            &vote.consensus_subject,
             &vote.content_hash,
             vote.approved,
             &vote.validator_pubkey,
@@ -2183,14 +2245,20 @@ async fn receive_vote(State(state): State<SharedState>, Json(vote): Json<VoteMes
         },
         signed_at: chrono::Utc::now(),
         ml_model_version: vote.ml_model_version.clone(),
+        analysis_bundles: vote.analysis_bundles.clone(),
+        evidence_digest: vote.evidence_digest.clone(),
+        deterministic_risk: vote.deterministic_risk.clone(),
     };
 
-    let key = vote.block_hash.clone();
-    s.votes.entry(key).or_insert_with(Vec::new).push(sig);
+    s.record_package_vote(vote.consensus_subject.clone(), sig);
 
     events::emit(
-        &s.event_bus,
-        events::RegistryEvent::validator_voted(&vote.validator_id, &vote.block_hash, vote.approved),
+        &event_bus,
+        events::RegistryEvent::validator_voted(
+            &vote.validator_id,
+            &vote.consensus_subject,
+            vote.approved,
+        ),
     );
 
     Json(serde_json::json!({ "status": "accepted" })).into_response()
@@ -2351,40 +2419,6 @@ async fn richlist(State(state): State<SharedState>) -> impl IntoResponse {
     Json(top).into_response()
 }
 
-// WS Handler
-use axum::extract::ws::{WebSocketUpgrade, WebSocket, Message};
-
-/// GET /v1/ws — High performance bidirectional websocket stream for consensus events
-async fn ws_handler(
-    ws: WebSocketUpgrade,
-    State(state): State<SharedState>,
-) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_websocket(socket, state))
-}
-
-async fn handle_websocket(mut socket: WebSocket, state: SharedState) {
-    let mut rx = state.read().await.event_bus.subscribe();
-
-    tracing::info!("Websocket client connected");
-
-    let mut send_task = tokio::spawn(async move {
-        while let Ok(event) = rx.recv().await {
-            // Convert SSE payload to WS Message
-            let data = serde_json::to_string(&event).unwrap_or_default();
-            if socket.send(Message::Text(data)).await.is_err() {
-                break; // Client disconnected
-            }
-        }
-    });
-
-    // In a push-based architecture, we don't strictly require ACKs at the WS layer
-    // but we spawn a dummy receiver so we don't deadlock on incoming control frames.
-    // If the socket yields None, it's closed.
-    // Wait for the send_task or the receive loop to finish.
-    let _ = send_task.await;
-    tracing::info!("Websocket client disconnected");
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2450,15 +2484,47 @@ mod tests {
         );
 
         VoteMessage {
-            block_hash: canonical.into(),
+            consensus_subject: canonical.into(),
             content_hash: content_hash.into(),
             validator_id: validator_id.into(),
             phase: "commit".into(),
             signature: hex::encode(signing_key.sign(message.as_bytes()).to_bytes()),
             validator_pubkey: validator_pubkey.into(),
             ml_model_version: ml_model_version.into(),
+            analysis_bundles: common::AnalysisBundleRefs::default(),
+            evidence_digest: String::new(),
+            deterministic_risk: common::DeterministicRiskSummary::default(),
             approved,
             reject_reason: None,
+        }
+    }
+
+    fn test_analysis_bundles() -> common::AnalysisBundleRefs {
+        common::AnalysisBundleRefs {
+            policy_bundle_id: "policy-v1".into(),
+            feature_schema_id: "features-v2".into(),
+            expert_bundle_id: "experts-v3".into(),
+            embedding_model_id: "embed-v1".into(),
+            index_epoch: "2026-05-07".into(),
+            threshold_profile_id: "thresholds-v1".into(),
+            llm_prompt_profile_id: "prompt-v2".into(),
+        }
+    }
+
+    fn test_deterministic_risk() -> common::DeterministicRiskSummary {
+        common::DeterministicRiskSummary {
+            score: 67,
+            deterministic_score: 67,
+            advisory_score: 18,
+            band: "elevated".into(),
+            disposition: "review".into(),
+            deterministic_findings: 2,
+            advisory_findings: 1,
+            critical_findings: 0,
+            high_findings: 1,
+            medium_findings: 1,
+            low_findings: 0,
+            reasons: vec!["[SA001] Suspicious install script".into()],
         }
     }
 
@@ -2539,7 +2605,6 @@ mod tests {
         let rpc_url = spawn_mock_staking_rpc(staked_balance).await;
         let tempdir = tempfile::tempdir()?;
         let chain = crate::chain_store::ChainStore::open(tempdir.path())?;
-        let event_bus = new_event_bus();
         let (p2p_sender, _p2p_receiver) = mpsc::channel(4);
         let p2p_handle = P2PHandle { sender: p2p_sender };
         let (tx_sender, tx_receiver) = crate::finalized_tx::channel();
@@ -2550,15 +2615,13 @@ mod tests {
             publisher_index: PublisherIndex::new(),
             validator_set_bootstrap: common::ValidatorSet::default(),
             validator_set: common::ValidatorSet::default(),
-            votes: HashMap::new(),
+            package_rounds: HashMap::new(),
             config: crate::config::NodeConfig {
                 data_dir: tempdir.path().to_path_buf(),
                 eth_rpc_url: rpc_url,
                 staking_addr: "0x1000000000000000000000000000000000000001".into(),
                 ..Default::default()
             },
-            event_bus,
-            zk_validator: Arc::new(zk_validator::ZkValidator::default()),
             p2p_status: P2PStatus::default(),
             bridge_status: BridgeStatus::default(),
             vrf_proofs: HashMap::new(),
@@ -2625,7 +2688,7 @@ mod tests {
     fn multisig_2_of_3_verifies() {
         let (sk1, pk1) = make_keypair();
         let (sk2, pk2) = make_keypair();
-        let (sk3, pk3) = make_keypair();
+        let (_sk3, pk3) = make_keypair();
 
         let publisher_address = "0x1111111111111111111111111111111111111111";
 
@@ -2713,10 +2776,7 @@ mod tests {
     #[tokio::test]
     async fn rest_submit_package_rejects_unstaked_publishers() -> anyhow::Result<()> {
         let (state, _tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
-        let event_bus = {
-            let s = state.read().await;
-            s.event_bus.clone()
-        };
+        let event_bus = new_event_bus();
         let app = router(
             state.clone(),
             event_bus,
@@ -2748,7 +2808,7 @@ mod tests {
 
     #[tokio::test]
     async fn rest_revoke_package_queues_transaction_via_router_sender() -> anyhow::Result<()> {
-        let (state, _tempdir, p2p_handle, tx_sender, mut tx_receiver) = make_test_state(0).await?;
+        let (state, _tempdir, p2p_handle, tx_sender, tx_receiver) = make_test_state(0).await?;
         let (signing_key, publisher_pubkey) = make_keypair();
         let record = ChainRecord {
             id: PackageId::new("npm", "test", "1.0.0"),
@@ -2772,10 +2832,7 @@ mod tests {
                 .sign(format!("{}:revoke:{}", canonical, reason).as_bytes())
                 .to_bytes(),
         );
-        let event_bus = {
-            let s = state.read().await;
-            s.event_bus.clone()
-        };
+        let event_bus = new_event_bus();
         let app = router(
             state.clone(),
             event_bus,
@@ -2829,7 +2886,10 @@ mod tests {
     #[tokio::test]
     async fn grpc_submit_package_rejects_unstaked_publishers() -> anyhow::Result<()> {
         let (state, _tempdir, _p2p_handle, _tx_sender, _tx_receiver) = make_test_state(0).await?;
-        let service = crate::grpc::server::MyRegistry::new(state.clone());
+        let service = crate::grpc::server::MyRegistry::new(
+            state.clone(),
+            Arc::new(zk_validator::ZkValidator::default()),
+        );
         let publish_req = make_signed_request("0x1111111111111111111111111111111111111111");
         let canonical = publish_req.id.canonical();
         let result = service
@@ -2857,10 +2917,7 @@ mod tests {
             s.validator_set = common::ValidatorSet::new(vec![validator("node-1", &validator_pubkey)]);
         }
 
-        let event_bus = {
-            let s = state.read().await;
-            s.event_bus.clone()
-        };
+        let event_bus = new_event_bus();
         let app = router(
             state.clone(),
             event_bus,
@@ -2893,9 +2950,8 @@ mod tests {
 
         let s = state.read().await;
         let stored = s
-            .votes
-            .get(canonical)
-            .and_then(|votes| votes.first())
+            .package_round(canonical)
+            .and_then(|round| round.signatures().first())
             .expect("vote should be stored");
         assert_eq!(stored.ml_model_version, ml_model_version);
 
@@ -2903,12 +2959,189 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn rest_receive_vote_replaces_duplicate_validator_entry_in_round() -> anyhow::Result<()> {
+        let (state, _tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
+        let (signing_key, validator_pubkey) = make_keypair();
+        let canonical = "npm:test@1.0.0";
+        let content_hash = common::sha256_hex(b"vote-payload");
+
+        {
+            let mut s = state.write().await;
+            s.validator_set = common::ValidatorSet::new(vec![validator("node-1", &validator_pubkey)]);
+        }
+
+        let event_bus = new_event_bus();
+        let app = router(
+            state.clone(),
+            event_bus,
+            RateLimiter::new(RateLimitConfig::default()),
+            AttestationStore::new(),
+            crate::config::CorsConfig::default(),
+            tx_sender,
+            p2p_handle,
+        );
+
+        let approve_vote = make_vote_message(
+            canonical,
+            &content_hash,
+            "node-1",
+            &signing_key,
+            &validator_pubkey,
+            "creg-detect-v1.0.0",
+            true,
+        );
+        let mut reject_vote = make_vote_message(
+            canonical,
+            &content_hash,
+            "node-1",
+            &signing_key,
+            &validator_pubkey,
+            "creg-detect-v2.0.0",
+            false,
+        );
+        reject_vote.reject_reason = Some("malicious".to_string());
+
+        for vote in [approve_vote, reject_vote] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::post("/v1/consensus/vote")
+                        .header("content-type", "application/json")
+                        .body(Body::from(serde_json::to_vec(&vote)?))?,
+                )
+                .await?;
+
+            assert_eq!(response.status(), StatusCode::OK);
+        }
+
+        let s = state.read().await;
+        let round = s.package_round(canonical).expect("round should exist");
+        assert_eq!(round.vote_count(), 1);
+        let stored = round.signatures().first().expect("vote should be stored");
+        assert_eq!(stored.ml_model_version, "creg-detect-v2.0.0");
+        assert!(matches!(
+            &stored.vote,
+            common::ValidatorVote::Reject { reason } if reason == "malicious"
+        ));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn consensus_state_exposes_vote_metadata() -> anyhow::Result<()> {
+        let (state, _tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
+        let (_signing_key, validator_pubkey) = make_keypair();
+        let bundles = test_analysis_bundles();
+        let deterministic_risk = test_deterministic_risk();
+        let canonical = "npm:test@1.0.0";
+
+        {
+            let mut s = state.write().await;
+            s.validator_set = common::ValidatorSet::new(vec![validator("node-1", &validator_pubkey)]);
+            s.record_package_vote(
+                canonical,
+                common::ValidatorSignature {
+                    validator_id: "node-1".into(),
+                    validator_pubkey,
+                    signature: "vote-sig".into(),
+                    vote: common::ValidatorVote::Approve,
+                    signed_at: chrono::Utc::now(),
+                    ml_model_version: "creg-detect-v1.0.0".into(),
+                    analysis_bundles: bundles.clone(),
+                    evidence_digest: "evidence-digest-1".into(),
+                    deterministic_risk: deterministic_risk.clone(),
+                },
+            );
+        }
+
+        let event_bus = new_event_bus();
+        let app = router(
+            state,
+            event_bus,
+            RateLimiter::new(RateLimitConfig::default()),
+            AttestationStore::new(),
+            crate::config::CorsConfig::default(),
+            tx_sender,
+            p2p_handle,
+        );
+
+        let response = app
+            .oneshot(Request::get("/v1/consensus/state").body(Body::empty())?)
+            .await?;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await?;
+        let body_json: serde_json::Value = serde_json::from_slice(&body)?;
+        let round = &body_json["active_rounds"][0];
+
+        assert_eq!(round["consensus_subject"], canonical);
+        assert_eq!(round["votes"][0]["analysis_bundles"]["policy_bundle_id"], bundles.policy_bundle_id);
+        assert_eq!(round["votes"][0]["evidence_digest"], "evidence-digest-1");
+        assert_eq!(round["votes"][0]["deterministic_risk"]["disposition"], deterministic_risk.disposition);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn get_package_exposes_deterministic_risk_and_bundle_metadata() -> anyhow::Result<()> {
+        let (state, _tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
+        let (_signing_key, publisher_pubkey) = make_keypair();
+        let bundles = test_analysis_bundles();
+        let deterministic_risk = test_deterministic_risk();
+        let record = ChainRecord {
+            id: PackageId::new("npm", "test", "1.0.0"),
+            content_hash: common::sha256_hex(b"package-detail"),
+            ipfs_cid: "bafydetailmetadata".into(),
+            publisher_pubkey,
+            block_hash: "0xabc123".into(),
+            published_at: chrono::Utc::now(),
+            status: PackageStatus::Verified,
+            analysis_bundles: bundles.clone(),
+            evidence_digest: "detail-evidence-digest".into(),
+            deterministic_risk: deterministic_risk.clone(),
+            ..ChainRecord::default()
+        };
+        let canonical = record.id.canonical();
+
+        {
+            let s = state.read().await;
+            s.chain.save_package(&record)?;
+        }
+
+        let event_bus = new_event_bus();
+        let app = router(
+            state,
+            event_bus,
+            RateLimiter::new(RateLimitConfig::default()),
+            AttestationStore::new(),
+            crate::config::CorsConfig::default(),
+            tx_sender,
+            p2p_handle,
+        );
+
+        let response = app
+            .oneshot(
+                Request::get(format!("/v1/packages/{}", urlencoding::encode(&canonical)))
+                    .body(Body::empty())?,
+            )
+            .await?;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await?;
+        let body_json: serde_json::Value = serde_json::from_slice(&body)?;
+
+        assert_eq!(body_json["analysis_bundles"]["policy_bundle_id"], bundles.policy_bundle_id);
+        assert_eq!(body_json["evidence_digest"], "detail-evidence-digest");
+        assert_eq!(body_json["deterministic_risk"]["band"], deterministic_risk.band);
+        assert_eq!(body_json["deterministic_risk"]["disposition"], deterministic_risk.disposition);
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn cors_defaults_block_cross_origin_preflight() -> anyhow::Result<()> {
         let (state, _tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
-        let event_bus = {
-            let s = state.read().await;
-            s.event_bus.clone()
-        };
+        let event_bus = new_event_bus();
         let app = router(
             state,
             event_bus,
@@ -2945,10 +3178,7 @@ mod tests {
     #[tokio::test]
     async fn cors_allows_configured_origin_and_credentials() -> anyhow::Result<()> {
         let (state, _tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
-        let event_bus = {
-            let s = state.read().await;
-            s.event_bus.clone()
-        };
+        let event_bus = new_event_bus();
         let cors = crate::config::CorsConfig {
             allowed_origins: vec!["http://localhost:4173".into()],
             allowed_methods: vec!["GET".into(), "POST".into(), "DELETE".into(), "OPTIONS".into()],

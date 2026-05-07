@@ -147,6 +147,36 @@ pub struct PackageSummary {
     pub status: String,
     pub publisher: String,
     pub published_at: String,
+    pub analysis_bundles: AnalysisBundleRefs,
+    pub evidence_digest: String,
+    pub deterministic_risk: DeterministicRiskSummary,
+}
+
+#[derive(serde::Serialize, ToSchema)]
+pub struct AnalysisBundleRefs {
+    pub policy_bundle_id: String,
+    pub feature_schema_id: String,
+    pub expert_bundle_id: String,
+    pub embedding_model_id: String,
+    pub index_epoch: String,
+    pub threshold_profile_id: String,
+    pub llm_prompt_profile_id: String,
+}
+
+#[derive(serde::Serialize, ToSchema)]
+pub struct DeterministicRiskSummary {
+    pub score: u8,
+    pub deterministic_score: u8,
+    pub advisory_score: u8,
+    pub band: String,
+    pub disposition: String,
+    pub deterministic_findings: usize,
+    pub advisory_findings: usize,
+    pub critical_findings: usize,
+    pub high_findings: usize,
+    pub medium_findings: usize,
+    pub low_findings: usize,
+    pub reasons: Vec<String>,
 }
 
 #[derive(serde::Serialize, ToSchema)]
@@ -167,6 +197,9 @@ pub struct PackageDetail {
     pub publisher: Option<String>,
     pub published_at: Option<String>,
     pub revocation_reason: Option<String>,
+    pub analysis_bundles: Option<AnalysisBundleRefs>,
+    pub evidence_digest: Option<String>,
+    pub deterministic_risk: Option<DeterministicRiskSummary>,
 }
 
 #[derive(serde::Serialize, ToSchema)]
@@ -203,8 +236,19 @@ pub struct BridgeStatus {
 }
 
 #[derive(serde::Serialize, ToSchema)]
+pub struct ConsensusVote {
+    pub validator_id: String,
+    pub decision: String,
+    pub reject_reason: Option<String>,
+    pub ml_model_version: String,
+    pub analysis_bundles: AnalysisBundleRefs,
+    pub evidence_digest: String,
+    pub deterministic_risk: DeterministicRiskSummary,
+}
+
+#[derive(serde::Serialize, ToSchema)]
 pub struct ConsensusRound {
-    pub block_hash: String,
+    pub consensus_subject: String,
     pub vote_count: usize,
     pub approvals: usize,
     pub rejections: usize,
@@ -213,6 +257,7 @@ pub struct ConsensusRound {
     pub voters: Vec<String>,
     pub approvers: Vec<String>,
     pub rejecters: Vec<String>,
+    pub votes: Vec<ConsensusVote>,
     /// Milliseconds since the earliest vote in this round.
     pub age_ms: i64,
 }
@@ -641,7 +686,7 @@ pub mod paths {
         post,
         path = "/v1/consensus/vote",
         tag = "consensus",
-        request_body(content = Object, description = "SignedVote: block_hash, phase, voter, signature"),
+        request_body(content = Object, description = "SignedVote: consensus_subject, phase, voter, signature"),
         responses(
             (status = 200, body = Object),
             (status = 400, body = ApiError),
@@ -779,12 +824,15 @@ impl Modify for SecurityAddon {
         TransactionSummary,
         TransactionDetail,
         PackageSummary,
+        AnalysisBundleRefs,
+        DeterministicRiskSummary,
         PackageList,
         PackageDetail,
         Pending,
         PendingList,
         NodeEntry,
         BridgeStatus,
+        ConsensusVote,
         ConsensusRound,
         ConsensusValidator,
         ConsensusState,

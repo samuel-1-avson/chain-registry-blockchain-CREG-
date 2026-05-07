@@ -45,7 +45,7 @@ use tokio::{
 };
 use tracing_subscriber::EnvFilter;
 
-use events::{new_event_bus, EventBus};
+use events::new_event_bus;
 use finalized_tx::{FinalizedTxReceiver, FinalizedTxSender};
 use publisher_index::PublisherIndex;
 use state::{
@@ -482,6 +482,7 @@ async fn main() -> Result<()> {
     // ── Finalized-tx channel (created before state so API can send to it) ───────
     let (tx_sender, tx_receiver): (FinalizedTxSender, FinalizedTxReceiver) =
         finalized_tx::channel();
+    let zk_validator = Arc::new(zk_validator::ZkValidator::default());
 
     // ── Shared state ──────────────────────────────────────────────────────────
     let state: SharedState = Arc::new(RwLock::new(NodeState {
@@ -490,10 +491,8 @@ async fn main() -> Result<()> {
         publisher_index,
         validator_set_bootstrap: config.validator_set.clone(),
         validator_set: config.validator_set.clone(),
-        votes: std::collections::HashMap::new(),
+        package_rounds: std::collections::HashMap::new(),
         config: config.clone(),
-        event_bus: Arc::clone(&event_bus),
-        zk_validator: Arc::new(zk_validator::ZkValidator::default()),
         p2p_status: P2PStatus::default(),
         bridge_status: BridgeStatus {
             registry_address: config.registry_addr.clone(),
@@ -526,28 +525,37 @@ async fn main() -> Result<()> {
         }
     });
 
-    tokio::spawn(p2p_node.run(Arc::clone(&state)));
+    tokio::spawn(p2p_node.run(Arc::clone(&state), Arc::clone(&event_bus)));
 
     // ── Spawn background tasks ────────────────────────────────────────────────
     tracing::info!("Starting subsystems...");
 
-    // PostgreSQL sync worker (sled → PostgreSQL ETL)
+    // PostgreSQL sync worker (chain store → PostgreSQL ETL)
+    // Default to the dedicated `creg-indexer` service so validators do not
+    // own both the consensus path and the explorer mirror path in the same
+    // process. Set CREG_PG_SYNC_IN_PROCESS=true to restore the legacy mode.
     if !config.pg_url.is_empty() {
-        let sync_config = db_sync::sync_worker::SyncConfig {
-            poll_interval: std::time::Duration::from_secs(1),
-            pg_url: config.pg_url.clone(),
-            ..Default::default()
-        };
-        let chain_proxy: db_sync::sync_worker::ChainStoreHandle =
-            Arc::new(tokio::sync::RwLock::new(chain_for_sync));
-        match db_sync::SyncWorker::new(sync_config, chain_proxy).await {
-            Ok(worker) => {
-                tokio::spawn(worker.run());
-                tracing::info!("PostgreSQL sync worker started");
+        if std::env::var("CREG_PG_SYNC_IN_PROCESS").ok().as_deref() == Some("true") {
+            let sync_config = db_sync::sync_worker::SyncConfig {
+                poll_interval: std::time::Duration::from_secs(1),
+                pg_url: config.pg_url.clone(),
+                ..Default::default()
+            };
+            let chain_proxy: db_sync::sync_worker::ChainStoreHandle =
+                Arc::new(tokio::sync::RwLock::new(chain_for_sync));
+            match db_sync::SyncWorker::new(sync_config, chain_proxy).await {
+                Ok(worker) => {
+                    tokio::spawn(worker.run());
+                    tracing::info!("Legacy in-process PostgreSQL sync worker started");
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to start PostgreSQL sync worker: {}", e);
+                }
             }
-            Err(e) => {
-                tracing::warn!("Failed to start PostgreSQL sync worker: {}", e);
-            }
+        } else {
+            tracing::info!(
+                "Skipping in-process PostgreSQL sync worker; run the dedicated creg-indexer service or set CREG_PG_SYNC_IN_PROCESS=true for legacy mode"
+            );
         }
     }
 
@@ -641,12 +649,13 @@ async fn main() -> Result<()> {
 
     // ── Start gRPC Server (Industrial Speed) ──────────────────────────────────
     let grpc_state = Arc::clone(&state);
+    let watcher_bus = Arc::clone(&event_bus);
     tokio::spawn(async move {
         let addr = "0.0.0.0:50051"
             .parse()
             .expect("gRPC bind address must be valid");
-        let registry = grpc::MyRegistry::new(Arc::clone(&grpc_state));
-        let watcher = grpc::MyWatcher::new(Arc::clone(&grpc_state));
+        let registry = grpc::MyRegistry::new(Arc::clone(&grpc_state), Arc::clone(&zk_validator));
+        let watcher = grpc::MyWatcher::new(watcher_bus);
         let explorer = grpc::MyExplorer::new(Arc::clone(&grpc_state));
 
         tracing::info!("gRPC API listening on {}", addr);

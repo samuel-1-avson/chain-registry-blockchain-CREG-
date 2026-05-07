@@ -139,6 +139,54 @@ pub struct PublishRequest {
     pub signatures: Vec<String>,
 }
 
+/// Shared references to the analysis bundles active when a validator formed a verdict.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct AnalysisBundleRefs {
+    #[serde(default)]
+    pub policy_bundle_id: String,
+    #[serde(default)]
+    pub feature_schema_id: String,
+    #[serde(default)]
+    pub expert_bundle_id: String,
+    #[serde(default)]
+    pub embedding_model_id: String,
+    #[serde(default)]
+    pub index_epoch: String,
+    #[serde(default)]
+    pub threshold_profile_id: String,
+    #[serde(default)]
+    pub llm_prompt_profile_id: String,
+}
+
+/// Compact deterministic risk data exposed on finalized records and validator votes.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct DeterministicRiskSummary {
+    #[serde(default)]
+    pub score: u8,
+    #[serde(default)]
+    pub deterministic_score: u8,
+    #[serde(default)]
+    pub advisory_score: u8,
+    #[serde(default)]
+    pub band: String,
+    #[serde(default)]
+    pub disposition: String,
+    #[serde(default)]
+    pub deterministic_findings: usize,
+    #[serde(default)]
+    pub advisory_findings: usize,
+    #[serde(default)]
+    pub critical_findings: usize,
+    #[serde(default)]
+    pub high_findings: usize,
+    #[serde(default)]
+    pub medium_findings: usize,
+    #[serde(default)]
+    pub low_findings: usize,
+    #[serde(default)]
+    pub reasons: Vec<String>,
+}
+
 /// A single entry in the on-chain package index.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ChainRecord {
@@ -160,6 +208,15 @@ pub struct ChainRecord {
     pub pgp_fingerprint: Option<String>,
     /// Security validation findings (Sandbox, Static, Diff).
     pub findings: Vec<Finding>,
+    /// Versioned policy and feature bundles used while producing this record.
+    #[serde(default)]
+    pub analysis_bundles: AnalysisBundleRefs,
+    /// Digest over deterministic evidence that shaped the final decision.
+    #[serde(default)]
+    pub evidence_digest: String,
+    /// Compact deterministic risk summary captured when the record was finalized.
+    #[serde(default)]
+    pub deterministic_risk: DeterministicRiskSummary,
     /// Real-time access metrics (Kind Enhancement)
     pub access_count: u32,
     pub last_accessed: Option<DateTime<Utc>>,
@@ -199,6 +256,15 @@ pub struct ValidatorSignature {
     /// Allows consensus to verify validators used compatible model versions.
     #[serde(default)]
     pub ml_model_version: String,
+    /// Versioned analysis bundles active when this vote was produced.
+    #[serde(default)]
+    pub analysis_bundles: AnalysisBundleRefs,
+    /// Digest over deterministic evidence considered by the voting validator.
+    #[serde(default)]
+    pub evidence_digest: String,
+    /// Compact deterministic risk summary captured when this vote was formed.
+    #[serde(default)]
+    pub deterministic_risk: DeterministicRiskSummary,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]

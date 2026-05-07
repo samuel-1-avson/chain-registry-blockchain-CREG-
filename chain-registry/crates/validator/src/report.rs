@@ -1,8 +1,10 @@
 // crates/validator/src/report.rs
 
+use crate::bundle::AnalysisBundleSet;
 use crate::llm::{LlmReview, RiskTier};
+use crate::risk::RiskSummary;
 use crate::sandbox::SandboxResult;
-use crate::static_analysis::StaticAnalysisResult;
+use crate::static_analysis::{EvidenceGroup, StaticAnalysisResult};
 pub use common::{Finding, FindingSeverity, PackageId};
 use serde::{Deserialize, Serialize};
 
@@ -30,11 +32,18 @@ pub struct ValidationReport {
     pub package: PackageId,
     pub findings: Vec<Finding>,
     pub aaa_verdict: Option<AuditProof>,
+    pub analysis_bundles: AnalysisBundleSet,
+    pub static_evidence_groups: Vec<EvidenceGroup>,
+    /// Deterministic score (0-100) from non-advisory stages.
+    pub deterministic_score: f64,
+    /// Advisory score (0-100) from semantic review stages.
+    pub advisory_score: f64,
     /// Weighted ensemble score (0–100) from static analysis, ML, deep scan, and LLM.
     pub ensemble_score: f64,
     /// Full output from the LLM-assisted review stage (Stage 4).
     /// `None` when the LLM stage has not yet run.
     pub llm_review: Option<LlmReview>,
+    pub deterministic_risk: Option<RiskSummary>,
 }
 
 impl ValidationReport {
@@ -43,25 +52,45 @@ impl ValidationReport {
             package,
             findings: Vec::new(),
             aaa_verdict: None,
+            analysis_bundles: AnalysisBundleSet::current(),
+            static_evidence_groups: Vec::new(),
+            deterministic_score: 0.0,
+            advisory_score: 0.0,
             ensemble_score: 0.0,
             llm_review: None,
+            deterministic_risk: None,
         }
     }
 
     pub fn apply_static(&mut self, result: StaticAnalysisResult) {
+        self.static_evidence_groups = result.evidence_groups;
+        self.deterministic_score = result.deterministic_score;
+        self.advisory_score = result.advisory_score;
         self.ensemble_score = result.ensemble_score;
         self.findings.extend(result.findings);
     }
 
     pub fn apply_sandbox(&mut self, result: SandboxResult) {
+        self.deterministic_score = self
+            .deterministic_score
+            .max(max_deterministic_finding_score(&result.findings));
+        self.ensemble_score = self.ensemble_score.max(self.deterministic_score);
         self.findings.extend(result.findings);
     }
 
     pub fn apply_diff(&mut self, result: crate::diff::DiffResult) {
+        self.deterministic_score = self
+            .deterministic_score
+            .max(max_deterministic_finding_score(&result.findings));
+        self.ensemble_score = self.ensemble_score.max(self.deterministic_score);
         self.findings.extend(result.findings);
     }
 
     pub fn apply_pgp(&mut self, result: crate::pgp::PgpResult) {
+        self.deterministic_score = self
+            .deterministic_score
+            .max(max_deterministic_finding_score(&result.findings));
+        self.ensemble_score = self.ensemble_score.max(self.deterministic_score);
         self.findings.extend(result.findings);
     }
 
@@ -75,9 +104,9 @@ impl ValidationReport {
     ///   the ensemble score is unchanged.
     pub fn apply_llm(&mut self, review: LlmReview) {
         if !review.degraded {
-            // Blend LLM score into ensemble
+            self.advisory_score = self.advisory_score.max(review.maliciousness_score as f64);
             self.ensemble_score =
-                self.ensemble_score * 0.6 + (review.maliciousness_score as f64) * 0.4;
+                self.deterministic_score * 0.6 + self.advisory_score * 0.4;
 
             // Emit a summary finding when the LLM flagged the package
             if review.maliciousness_score >= 60 || review.risk_tier == RiskTier::LikelyMalicious
@@ -177,6 +206,10 @@ impl ValidationReport {
         self.llm_review = Some(review);
     }
 
+    pub fn record_deterministic_risk(&mut self, summary: RiskSummary) {
+        self.deterministic_risk = Some(summary);
+    }
+
     /// True if any Critical or High findings were recorded.
     pub fn has_critical_findings(&self) -> bool {
         self.findings.iter().any(|f| {
@@ -201,4 +234,17 @@ impl ValidationReport {
             .collect::<Vec<_>>()
             .join("; ")
     }
+}
+
+fn max_deterministic_finding_score(findings: &[Finding]) -> f64 {
+    findings
+        .iter()
+        .filter(|finding| !finding.id.starts_with("LLM") && !matches!(finding.id.as_str(), "SA011" | "SA012"))
+        .map(|finding| match finding.severity {
+            FindingSeverity::Critical => 100.0,
+            FindingSeverity::High => 75.0,
+            FindingSeverity::Medium => 50.0,
+            FindingSeverity::Low => 25.0,
+        })
+        .fold(0.0, f64::max)
 }

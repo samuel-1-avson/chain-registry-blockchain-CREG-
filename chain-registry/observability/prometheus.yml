@@ -21,10 +21,23 @@ scrape_configs:
           - "node-1:8080"
           - "node-2:8080"
           - "node-3:8080"
+          - "observer:8080"
         labels:
           cluster: chain-registry
     metrics_path: /metrics
     scrape_interval: 10s
+
+  # ── Observability services ────────────────────────────────────────────────
+  - job_name: observability
+    static_configs:
+      - targets:
+          - "otel-collector:8888"
+          - "loki:3100"
+          - "tempo:3200"
+        labels:
+          cluster: chain-registry
+    metrics_path: /metrics
+    scrape_interval: 15s
 
   # ── IPFS node ─────────────────────────────────────────────────────────────
   - job_name: ipfs

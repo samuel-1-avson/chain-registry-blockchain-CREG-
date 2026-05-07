@@ -17,8 +17,28 @@ fn entropy_threshold() -> f64 {
         .unwrap_or(5.5)
 }
 
-pub struct StaticAnalysisResult {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum EvidenceDeterminism {
+    Deterministic,
+    Advisory,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct EvidenceGroup {
+    pub id: String,
+    pub label: String,
+    pub determinism: EvidenceDeterminism,
+    pub score: f64,
     pub findings: Vec<Finding>,
+}
+
+pub struct StaticAnalysisResult {
+    pub evidence_groups: Vec<EvidenceGroup>,
+    pub findings: Vec<Finding>,
+    /// Deterministic score (0-100) derived from static, rule-based ML, and deep scan evidence.
+    pub deterministic_score: f64,
+    /// Advisory score (0-100) derived from snippet-level semantic analysis.
+    pub advisory_score: f64,
     /// Weighted ensemble score (0–100) combining all analysis signals.
     /// Higher = more dangerous.
     pub ensemble_score: f64,
@@ -103,14 +123,17 @@ fn patterns() -> &'static Vec<Pattern> {
 }
 
 pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<StaticAnalysisResult> {
-    let mut findings = Vec::new();
+    let mut deterministic_findings = Vec::new();
+    let mut snippet_llm_findings = Vec::new();
+    let mut rule_ml_findings = Vec::new();
+    let mut deep_scan_findings = Vec::new();
 
     // Extract files from the tarball (tar.gz).
     // Oversized files are not scanned but produce an SA013 finding so the
     // limitation is visible in the report and consensus logs.
     let (files, oversized_paths) = extract_text_files(tarball_bytes)?;
     for path in oversized_paths {
-        findings.push(Finding {
+        deterministic_findings.push(Finding {
             id: "SA013".into(),
             title: "File too large for static analysis".into(),
             severity: FindingSeverity::Medium,
@@ -152,7 +175,7 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
                     continue;
                 }
 
-                findings.push(Finding {
+                deterministic_findings.push(Finding {
                     id: pat.id.to_string(),
                     title: pat.description.to_string(),
                     severity: pat.severity,
@@ -169,7 +192,7 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
         for (line_num, line) in content.lines().enumerate() {
             if shannon_entropy(line) > threshold && line.len() > 80 {
                 has_high_entropy = true;
-                findings.push(Finding {
+                deterministic_findings.push(Finding {
                     id: "SA009".into(),
                     title: "High-entropy string detected".into(),
                     severity: FindingSeverity::High,
@@ -184,7 +207,7 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
         if has_high_entropy {
             match crate::llm::predict_intent(&content).await {
                 Ok(Some(score)) if score >= 80 => {
-                    findings.push(Finding {
+                    snippet_llm_findings.push(Finding {
                         id: "SA011".into(),
                         title: "AI-Verified Malicious Intent".into(),
                         severity: FindingSeverity::Critical,
@@ -194,7 +217,7 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
                     });
                 }
                 Ok(Some(score)) if score >= 50 => {
-                    findings.push(Finding {
+                    snippet_llm_findings.push(Finding {
                         id: "SA011".into(),
                         title: "AI-Suspicious Obfuscation".into(),
                         severity: FindingSeverity::Medium,
@@ -211,7 +234,7 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
                     // consensus can see that obfuscated code was NOT semantically
                     // verified. Treated as High (not Critical) because static
                     // analysis still flagged SA009 on the same file.
-                    findings.push(Finding {
+                    snippet_llm_findings.push(Finding {
                         id: "SA012".into(),
                         title: "LLM unavailable for obfuscated code".into(),
                         severity: FindingSeverity::High,
@@ -228,7 +251,7 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
                     // obfuscated malware to pass whenever the LLM endpoint
                     // is slow, rate-limited, or misconfigured.
                     tracing::warn!(error = %e, "LLM predict_intent failed — treating high-entropy file as unverified");
-                    findings.push(Finding {
+                    snippet_llm_findings.push(Finding {
                         id: "SA012".into(),
                         title: "LLM error for obfuscated code".into(),
                         severity: FindingSeverity::High,
@@ -249,7 +272,7 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
     // pkg_name / pkg_version / ecosystem were extracted at the top of run().
     if !pkg_name.is_empty() {
         if let Some(finding) = check_typosquatting_real(&pkg_name, &ecosystem) {
-            findings.push(finding);
+            deterministic_findings.push(finding);
         }
     }
 
@@ -274,7 +297,7 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
             Ok(features) => {
                 let prediction = ml_validator::MlValidator::new().predict(&features);
                 if prediction.threat_score >= 76 {
-                    findings.push(Finding {
+                    rule_ml_findings.push(Finding {
                         id: "ML002".into(),
                         title: "Rule-Based ML: Malicious Threat Score".into(),
                         severity: FindingSeverity::High,
@@ -290,7 +313,7 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
                         line: None,
                     });
                 } else if prediction.threat_score >= 51 {
-                    findings.push(Finding {
+                    rule_ml_findings.push(Finding {
                         id: "ML003".into(),
                         title: "Rule-Based ML: Suspicious Threat Score".into(),
                         severity: FindingSeverity::Medium,
@@ -335,7 +358,7 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
             // If deep scan ran in mock/degraded mode, emit a visible warning finding
             // so validators and the network are aware ML coverage is not active.
             if deep.is_mock {
-                findings.push(Finding {
+                deep_scan_findings.push(Finding {
                     id: "ML001".into(),
                     title: "ML Deep Scan: Degraded Mode".into(),
                     severity: FindingSeverity::Medium,
@@ -352,7 +375,7 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
             let prob = deep.malicious_probability;
             match deep.classification {
                 ml_validator::ThreatClassification::ConfirmedMalicious => {
-                    findings.push(Finding {
+                    deep_scan_findings.push(Finding {
                         id: "DS003".into(),
                         title: "AI Deep Scan: Confirmed Malicious".into(),
                         severity: FindingSeverity::Critical,
@@ -365,7 +388,7 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
                     });
                 }
                 ml_validator::ThreatClassification::LikelyMalicious => {
-                    findings.push(Finding {
+                    deep_scan_findings.push(Finding {
                         id: "DS002".into(),
                         title: "AI Deep Scan: Likely Malicious".into(),
                         severity: FindingSeverity::High,
@@ -378,7 +401,7 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
                     });
                 }
                 ml_validator::ThreatClassification::Suspicious => {
-                    findings.push(Finding {
+                    deep_scan_findings.push(Finding {
                         id: "DS001".into(),
                         title: "AI Deep Scan: Suspicious".into(),
                         severity: FindingSeverity::Medium,
@@ -399,7 +422,7 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
                 e
             );
             // Emit a finding so the network knows ML was not available
-            findings.push(Finding {
+            deep_scan_findings.push(Finding {
                 id: "ML001".into(),
                 title: "ML Deep Scan: Unavailable".into(),
                 severity: FindingSeverity::Medium,
@@ -417,7 +440,7 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
                 "Deep scan task failed: {}; continuing with static analysis only",
                 e
             );
-            findings.push(Finding {
+            deep_scan_findings.push(Finding {
                 id: "ML001".into(),
                 title: "ML Deep Scan: Unavailable".into(),
                 severity: FindingSeverity::Medium,
@@ -432,13 +455,51 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
         }
     }
 
-    // ── Ensemble Scoring ─────────────────────────────────────────────────────
-    // Combine rule-based, deep-scan, and LLM signals into a single weighted
-    // score. Weights: static patterns 30%, rule-based ML 25%, deep scan 30%,
-    // LLM 15%. Each component is normalised to 0–100.
-    let ensemble_score = compute_ensemble_score(&findings);
+    let evidence_groups = [
+        build_evidence_group(
+            "static-patterns",
+            "Static pattern and manifest evidence",
+            EvidenceDeterminism::Deterministic,
+            deterministic_findings,
+        ),
+        build_evidence_group(
+            "snippet-llm",
+            "Snippet-level semantic review",
+            EvidenceDeterminism::Advisory,
+            snippet_llm_findings,
+        ),
+        build_evidence_group(
+            "rule-ml",
+            "Rule-based ML scoring",
+            EvidenceDeterminism::Deterministic,
+            rule_ml_findings,
+        ),
+        build_evidence_group(
+            "deep-scan",
+            "Deep scan threat classification",
+            EvidenceDeterminism::Deterministic,
+            deep_scan_findings,
+        ),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
 
-    Ok(StaticAnalysisResult { findings, ensemble_score })
+    let deterministic_score = compute_deterministic_score(&evidence_groups);
+    let advisory_score = compute_advisory_score(&evidence_groups);
+    let ensemble_score = compute_ensemble_score(deterministic_score, advisory_score);
+    let findings = evidence_groups
+        .iter()
+        .flat_map(|group| group.findings.clone())
+        .collect();
+
+    Ok(StaticAnalysisResult {
+        evidence_groups,
+        findings,
+        deterministic_score,
+        advisory_score,
+        ensemble_score,
+    })
 }
 
 /// Checks whether a finding is covered by the publisher's declared manifest.
@@ -469,57 +530,103 @@ fn is_excused_by_manifest(pat: &Pattern, manifest: &PackageManifest) -> bool {
     }
 }
 
-/// Compute weighted ensemble score (0–100) from findings.
-/// Components:
-///   - Static pattern findings (SA*): 30%  → max severity maps to 100
-///   - Rule-based ML (ML002/ML003):   25%  → threat_score extracted from description
-///   - Deep scan (DS001-DS003):        30%  → probability mapped to 0-100
-///   - LLM (SA011):                    15%  → score extracted from description
-fn compute_ensemble_score(findings: &[Finding]) -> f64 {
-    let mut static_score: f64 = 0.0;
-    let mut ml_rule_score: f64 = 0.0;
-    let mut deep_score: f64 = 0.0;
-    let mut llm_score: f64 = 0.0;
-
-    for f in findings {
-        match f.id.as_str() {
-            // Static pattern findings — score by severity
-            id if id.starts_with("SA") && id != "SA009" && id != "SA011" => {
-                let sev = match f.severity {
-                    FindingSeverity::Critical => 100.0,
-                    FindingSeverity::High => 75.0,
-                    FindingSeverity::Medium => 50.0,
-                    FindingSeverity::Low => 25.0,
-                };
-                if sev > static_score { static_score = sev; }
-            }
-            // Rule-based ML score
-            "ML002" => ml_rule_score = 85.0,
-            "ML003" => {
-                if ml_rule_score < 60.0 { ml_rule_score = 60.0; }
-            }
-            // Deep scan score
-            "DS003" => deep_score = 100.0,
-            "DS002" => {
-                if deep_score < 75.0 { deep_score = 75.0; }
-            }
-            "DS001" => {
-                if deep_score < 50.0 { deep_score = 50.0; }
-            }
-            // LLM score
-            "SA011" => {
-                let sev = match f.severity {
-                    FindingSeverity::Critical => 90.0,
-                    _ => 60.0,
-                };
-                if sev > llm_score { llm_score = sev; }
-            }
-            _ => {}
-        }
+fn build_evidence_group(
+    id: &str,
+    label: &str,
+    determinism: EvidenceDeterminism,
+    findings: Vec<Finding>,
+) -> Option<EvidenceGroup> {
+    if findings.is_empty() {
+        return None;
     }
 
-    let score = static_score * 0.30 + ml_rule_score * 0.25 + deep_score * 0.30 + llm_score * 0.15;
-    score.min(100.0)
+    Some(EvidenceGroup {
+        id: id.to_string(),
+        label: label.to_string(),
+        determinism,
+        score: group_score(id, &findings),
+        findings,
+    })
+}
+
+fn group_score(id: &str, findings: &[Finding]) -> f64 {
+    match id {
+        "static-patterns" => findings
+            .iter()
+            .filter(|finding| finding.id != "SA011" && finding.id != "SA012")
+            .map(|finding| severity_score(finding.severity))
+            .fold(0.0, f64::max),
+        "rule-ml" => {
+            if findings.iter().any(|finding| finding.id == "ML002") {
+                85.0
+            } else if findings.iter().any(|finding| finding.id == "ML003") {
+                60.0
+            } else {
+                0.0
+            }
+        }
+        "deep-scan" => {
+            if findings.iter().any(|finding| finding.id == "DS003") {
+                100.0
+            } else if findings.iter().any(|finding| finding.id == "DS002") {
+                75.0
+            } else if findings.iter().any(|finding| finding.id == "DS001") {
+                50.0
+            } else if findings.iter().any(|finding| finding.id == "ML001") {
+                40.0
+            } else {
+                0.0
+            }
+        }
+        "snippet-llm" => findings
+            .iter()
+            .map(|finding| match finding.id.as_str() {
+                "SA011" if finding.severity == FindingSeverity::Critical => 90.0,
+                "SA011" => 60.0,
+                "SA012" => 55.0,
+                _ => 0.0,
+            })
+            .fold(0.0, f64::max),
+        _ => 0.0,
+    }
+}
+
+fn compute_deterministic_score(groups: &[EvidenceGroup]) -> f64 {
+    let static_score = score_for_group(groups, "static-patterns");
+    let rule_ml_score = score_for_group(groups, "rule-ml");
+    let deep_score = score_for_group(groups, "deep-scan");
+
+    let weighted = static_score * 0.30 + rule_ml_score * 0.25 + deep_score * 0.30;
+    if weighted == 0.0 {
+        0.0
+    } else {
+        (weighted / 0.85).min(100.0)
+    }
+}
+
+fn compute_advisory_score(groups: &[EvidenceGroup]) -> f64 {
+    score_for_group(groups, "snippet-llm")
+}
+
+fn compute_ensemble_score(deterministic_score: f64, advisory_score: f64) -> f64 {
+    (deterministic_score * 0.85 + advisory_score * 0.15).min(100.0)
+}
+
+fn score_for_group(groups: &[EvidenceGroup], id: &str) -> f64 {
+    groups
+        .iter()
+        .find(|group| group.id == id)
+        .map(|group| group.score)
+        .unwrap_or(0.0)
+}
+
+fn severity_score(severity: FindingSeverity) -> f64 {
+    match severity {
+        FindingSeverity::Critical => 100.0,
+        FindingSeverity::High => 75.0,
+        FindingSeverity::Medium => 50.0,
+        FindingSeverity::Low => 25.0,
+    }
 }
 
 /// Shannon entropy of a string — high values indicate obfuscation.
@@ -605,7 +712,7 @@ fn extract_text_files(tarball: &[u8]) -> Result<(Vec<(String, String)>, Vec<Stri
     let mut files = Vec::new();
     let mut oversized = Vec::new();
     for entry in archive.entries()? {
-        let mut entry = entry?;
+        let entry = entry?;
         let path = entry.path()?.to_string_lossy().to_string();
         // Check declared size from tar header before reading. A malicious
         // tarball may lie about size, so we also enforce the limit during read.

@@ -902,7 +902,6 @@ mod tests {
     use crate::{
         chain_store::ChainStore,
         config::NodeConfig,
-        events::new_event_bus,
         pending_pool::PendingPool,
         publisher_index::PublisherIndex,
         BridgeStatus,
@@ -1175,7 +1174,6 @@ mod tests {
     ) -> anyhow::Result<(Arc<RwLock<NodeState>>, TempDir)> {
         let tempdir = tempfile::tempdir()?;
         let chain = ChainStore::open(tempdir.path())?;
-        let event_bus = new_event_bus();
 
         let state = Arc::new(RwLock::new(NodeState {
             chain,
@@ -1183,14 +1181,12 @@ mod tests {
             publisher_index: PublisherIndex::new(),
             validator_set_bootstrap: bootstrap.clone(),
             validator_set: bootstrap,
-            votes: HashMap::new(),
+            package_rounds: HashMap::new(),
             config: NodeConfig {
                 data_dir: tempdir.path().to_path_buf(),
                 node_id: "node-2".into(),
                 ..Default::default()
             },
-            event_bus,
-            zk_validator: Arc::new(zk_validator::ZkValidator::default()),
             p2p_status: P2PStatus::default(),
             bridge_status: BridgeStatus::default(),
             vrf_proofs: HashMap::new(),

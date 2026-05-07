@@ -66,8 +66,11 @@ pub fn canonical_vote_message(
 /// Message sent to peers when we produce a PBFT vote.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VoteGossip {
-    /// Consensus subject (canonical package ID at vote time, block hash at seal time).
-    pub block_hash: String,
+    /// Package-consensus subject identifier.
+    ///
+    /// Deserializes legacy `block_hash` payloads during the field rename.
+    #[serde(alias = "block_hash")]
+    pub consensus_subject: String,
     /// SHA-256 of the tarball bytes — bound into the signature to prevent
     /// cross-version replay. Serde default keeps wire-format backward compat.
     #[serde(default)]
@@ -78,6 +81,15 @@ pub struct VoteGossip {
     /// ML model version used by the validator during deep scan.
     #[serde(default)]
     pub ml_model_version: String,
+    /// Versioned analysis bundles active for this vote.
+    #[serde(default)]
+    pub analysis_bundles: common::AnalysisBundleRefs,
+    /// Digest over deterministic evidence considered by the sender.
+    #[serde(default)]
+    pub evidence_digest: String,
+    /// Compact deterministic risk summary captured when the vote was formed.
+    #[serde(default)]
+    pub deterministic_risk: common::DeterministicRiskSummary,
     pub phase: String, // "prepare" | "commit"
     pub approved: bool,
     pub reject_reason: Option<String>,

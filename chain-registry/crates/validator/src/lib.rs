@@ -11,11 +11,13 @@
 //   Stage 6 — Publisher Reputation(reputation.rs)
 //   [AAA]   — External AI Auditor (opt-in, post-rejection only)
 
+pub mod bundle;
 pub mod diff;
 pub mod llm;
 pub mod pgp;
 pub mod report;
 pub mod reputation;
+pub mod risk;
 pub mod sandbox;
 pub mod static_analysis;
 pub mod typosquat;
@@ -24,13 +26,15 @@ pub mod wasm_sandbox;
 use anyhow::Result;
 use common::{Finding, PublishRequest, ValidatorVote};
 use report::{AuditProof, ValidationReport};
-use reputation::{assess_publisher, final_decision, FinalDecision};
+use reputation::{assess_publisher, FinalDecision};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ValidationResult {
     pub vote: ValidatorVote,
     pub pgp_fingerprint: Option<String>,
     pub findings: Vec<Finding>,
+    pub analysis_bundles: bundle::AnalysisBundleSet,
+    pub deterministic_risk: risk::RiskSummary,
 }
 
 /// Run all validator pipeline stages and produce a signed vote.
@@ -155,12 +159,29 @@ pub async fn validate_package(
         }
     }
 
-    // ── Final decision combines all three stages ───────────────────────────────
-    let sandbox_has_critical = sandbox_result
-        .findings
-        .iter()
-        .any(|f| matches!(f.severity, common::FindingSeverity::Critical));
-    let mut decision = final_decision(report.has_critical_findings(), sandbox_has_critical, rep.confidence_delta);
+    // ── Deterministic risk aggregation ───────────────────────────────────────
+    let risk_aggregator = risk::RiskAggregator::default();
+    let deterministic_risk = risk_aggregator.summarize(
+        &req.id,
+        &report.findings,
+        report.deterministic_score,
+        report.advisory_score,
+        report.ensemble_score,
+        report.llm_review.as_ref(),
+        &report.analysis_bundles,
+        &rep,
+    );
+    tracing::info!(
+        "[{}] Deterministic risk {} score={} disposition={} digest={}",
+        canonical,
+        deterministic_risk.band,
+        deterministic_risk.score,
+        deterministic_risk.disposition,
+        &deterministic_risk.evidence_digest[..deterministic_risk.evidence_digest.len().min(12)]
+    );
+    report.record_deterministic_risk(deterministic_risk.clone());
+
+    let mut decision = risk_aggregator.decide(&deterministic_risk);
 
     // ── AAA (Automated AI Auditor) Stage ──────────────────────────────────────
     // Only runs when CREG_AAA_ENABLED=true is explicitly set. The AAA auditor
@@ -244,6 +265,8 @@ pub async fn validate_package(
         vote,
         pgp_fingerprint,
         findings: report.findings,
+        analysis_bundles: report.analysis_bundles,
+        deterministic_risk,
     })
 }
 

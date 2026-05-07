@@ -58,6 +58,24 @@ impl ChainStore {
         Ok(store)
     }
 
+    pub fn open_read_only(data_dir: &Path) -> Result<Self> {
+        let db_path = data_dir.join("chain.rocksdb");
+        if !db_path.exists() {
+            anyhow::bail!(
+                "Chain database not found at {}. Start a node with CREG_DATA_DIR={} first.",
+                db_path.display(),
+                data_dir.display()
+            );
+        }
+
+        let opts = Options::default();
+        let cfs = vec![CF_BLOCKS_BY_HASH, CF_BLOCKS_BY_HEIGHT, CF_PACKAGES];
+        let db = DB::open_cf_for_read_only(&opts, &db_path, cfs, false)
+            .context("Failed to open RocksDB in read-only mode")?;
+
+        Ok(Self { db: Arc::new(db) })
+    }
+
     /// Migrate data from a legacy sled database into this RocksDB store.
     /// Call once at startup if the sled directory still exists.
     pub fn migrate_from_sled(&self, sled_dir: &Path) -> Result<u64> {
