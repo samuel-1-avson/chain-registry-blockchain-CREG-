@@ -77,6 +77,76 @@ function Get-Erc20Balance {
     throw "unexpected ERC20 balance output: $line"
 }
 
+function Solve-PowChallenge {
+    param(
+        [string]$Challenge,
+        [int]$Difficulty
+    )
+
+    if (-not ("ChainRegistry.PowSolver" -as [type])) {
+        Add-Type -TypeDefinition @"
+using System;
+using System.Security.Cryptography;
+using System.Text;
+
+namespace ChainRegistry {
+    public static class PowSolver {
+        public static long Solve(string challenge, int difficulty) {
+            using var sha = SHA256.Create();
+            var prefix = Encoding.UTF8.GetBytes(challenge);
+            var buffer = new byte[prefix.Length + 32];
+            Buffer.BlockCopy(prefix, 0, buffer, 0, prefix.Length);
+
+            for (long nonce = 0; nonce < long.MaxValue; nonce++) {
+                var nonceBytes = Encoding.UTF8.GetBytes(nonce.ToString());
+                Buffer.BlockCopy(nonceBytes, 0, buffer, prefix.Length, nonceBytes.Length);
+                var hash = sha.ComputeHash(buffer, 0, prefix.Length + nonceBytes.Length);
+                if (HasLeadingZeroBits(hash, difficulty)) {
+                    return nonce;
+                }
+            }
+
+            throw new InvalidOperationException("Unable to solve faucet PoW challenge.");
+        }
+
+        private static bool HasLeadingZeroBits(byte[] hash, int difficulty) {
+            var leadingZeros = 0;
+            foreach (var b in hash) {
+                if (b == 0) {
+                    leadingZeros += 8;
+                } else {
+                    leadingZeros += CountLeadingZeroBits(b);
+                    break;
+                }
+
+                if (leadingZeros >= difficulty) {
+                    break;
+                }
+            }
+
+            return leadingZeros >= difficulty;
+        }
+
+        private static int CountLeadingZeroBits(byte value) {
+            var count = 0;
+            for (var mask = 0x80; mask > 0; mask >>= 1) {
+                if ((value & mask) == 0) {
+                    count++;
+                } else {
+                    break;
+                }
+            }
+
+            return count;
+        }
+    }
+}
+"@
+    }
+
+    return [ChainRegistry.PowSolver]::Solve($Challenge, $Difficulty)
+}
+
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $envFile = Join-Path $repoRoot ".env.testnet"
 $composeFile = Join-Path $repoRoot "docker-compose.testnet.yml"
@@ -137,7 +207,7 @@ $ipfsIdentity = ($ipfsIdOutput | Select-Object -Last 1).Trim()
 
 if (-not $SkipExplorer) {
     Write-Host "Checking explorer..." -ForegroundColor Cyan
-    $explorerResponse = Wait-ForHttpEndpoint -Uri "http://127.0.0.1:3000" -Description "Explorer endpoint"
+    $explorerResponse = Wait-ForHttpEndpoint -Uri "http://127.0.0.1:3007" -Description "Explorer endpoint"
 }
 
 $recipient = $RecipientAddress
@@ -155,20 +225,7 @@ $challenge = $challengeResponse.challenge
 $difficulty = $challengeResponse.difficulty
 
 Write-Host "  Solving PoW (difficulty=$difficulty)..." -ForegroundColor Gray
-$nonce = 0
-while ($true) {
-    $testStr = "$challenge$nonce"
-    $hashBytes = [System.Security.Cryptography.SHA256]::Create().ComputeHash(
-        [System.Text.Encoding]::UTF8.GetBytes($testStr)
-    )
-    $hashHex = ($hashBytes | ForEach-Object { $_.ToString("x2") }) -join ""
-    $leadingZeros = 0
-    foreach ($c in $hashHex.ToCharArray()) {
-        if ($c -eq '0') { $leadingZeros++ } else { break }
-    }
-    if ($leadingZeros -ge $difficulty) { break }
-    $nonce++
-}
+$nonce = Solve-PowChallenge -Challenge $challenge -Difficulty $difficulty
 Write-Host "  PoW solved (nonce=$nonce)" -ForegroundColor Gray
 
 $dripBody = @{ address = $recipient; challenge = $challenge; nonce = "$nonce" } | ConvertTo-Json -Compress

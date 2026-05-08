@@ -126,6 +126,7 @@ impl RiskAggregator {
             .filter(|finding| is_deterministic_finding(finding.id.as_str()))
             .collect();
         let advisory_findings = findings.len().saturating_sub(deterministic.len());
+        let allow_testnet_dev_sandbox_bypass = allow_testnet_dev_sandbox_bypass();
 
         let critical_findings = deterministic
             .iter()
@@ -150,7 +151,14 @@ impl RiskAggregator {
 
         let mut score = i32::from(deterministic_score);
         score += (critical_findings as i32) * 25;
-        score += (high_findings as i32) * 15;
+        score += deterministic
+            .iter()
+            .filter(|finding| {
+                finding.severity == FindingSeverity::High
+                    && !is_non_blocking_testnet_dev_bypass(finding, allow_testnet_dev_sandbox_bypass)
+            })
+            .count() as i32
+            * 15;
         score += (medium_findings as i32) * 5;
         score += low_findings as i32;
 
@@ -242,6 +250,23 @@ fn env_u8(key: &str, default: u8) -> u8 {
         .ok()
         .and_then(|value| value.parse::<u8>().ok())
         .unwrap_or(default)
+}
+
+fn env_truthy(key: &str) -> bool {
+    std::env::var(key)
+        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+}
+
+fn allow_testnet_dev_sandbox_bypass() -> bool {
+    env_truthy("CREG_TESTNET") && !env_truthy("CREG_PRODUCTION")
+}
+
+fn is_non_blocking_testnet_dev_bypass(
+    finding: &Finding,
+    allow_testnet_dev_sandbox_bypass: bool,
+) -> bool {
+    allow_testnet_dev_sandbox_bypass && finding.id == "SB012"
 }
 
 fn is_deterministic_finding(id: &str) -> bool {
@@ -421,6 +446,40 @@ mod tests {
             &reputation(-40),
         );
 
+        assert_eq!(summary.disposition, RiskDisposition::Review);
+    }
+
+    #[test]
+    fn testnet_dev_sandbox_bypass_requires_review_not_block() {
+        let _env_lock = std::sync::Mutex::new(()).lock().unwrap();
+        let old_testnet = std::env::var("CREG_TESTNET").ok();
+        let old_production = std::env::var("CREG_PRODUCTION").ok();
+
+        std::env::set_var("CREG_TESTNET", "true");
+        std::env::remove_var("CREG_PRODUCTION");
+
+        let aggregator = RiskAggregator::default();
+        let summary = aggregator.summarize(
+            &PackageId::new("npm", "pkg", "1.0.0"),
+            &[finding("SB012", FindingSeverity::High)],
+            75.0,
+            0.0,
+            75.0,
+            None,
+            &AnalysisBundleSet::default(),
+            &reputation(0),
+        );
+
+        match old_testnet {
+            Some(value) => std::env::set_var("CREG_TESTNET", value),
+            None => std::env::remove_var("CREG_TESTNET"),
+        }
+        match old_production {
+            Some(value) => std::env::set_var("CREG_PRODUCTION", value),
+            None => std::env::remove_var("CREG_PRODUCTION"),
+        }
+
+        assert!(!summary.deterministic_block);
         assert_eq!(summary.disposition, RiskDisposition::Review);
     }
 }

@@ -145,13 +145,16 @@ function Fund-TestnetFaucet {
     }
 
     Write-Host "Funding faucet wallet..." -ForegroundColor Cyan
-    $balanceOutput = docker compose @ComposeArgs run --rm --entrypoint sh deploy-contracts -c "cast call '$tokenAddress' 'balanceOf(address)(uint256)' '$faucetAddress' --rpc-url http://anvil:8545"
+    $balanceOutput = docker compose @ComposeArgs exec -T -e FOUNDRY_DISABLE_NIGHTLY_WARNING=1 anvil cast call $tokenAddress "balanceOf(address)(uint256)" $faucetAddress --rpc-url http://127.0.0.1:8545
 
     if ($LASTEXITCODE -ne 0) {
         throw "failed to read faucet balance"
     }
 
     $currentBalanceRaw = ($balanceOutput | Select-Object -Last 1).Trim()
+    if ($currentBalanceRaw -match "^([0-9]+)") {
+        $currentBalanceRaw = $matches[1]
+    }
     $currentBalance = [System.Numerics.BigInteger]::Parse($currentBalanceRaw)
     $targetBalance = [System.Numerics.BigInteger]::Parse($targetBalanceRaw)
 
@@ -161,7 +164,7 @@ function Fund-TestnetFaucet {
     }
 
     $topUpAmount = $targetBalance - $currentBalance
-    docker compose @ComposeArgs run --rm --entrypoint sh deploy-contracts -c "cast send '$tokenAddress' 'transfer(address,uint256)' '$faucetAddress' '$topUpAmount' --private-key '$deployerKey' --rpc-url http://anvil:8545"
+    docker compose @ComposeArgs exec -T -e FOUNDRY_DISABLE_NIGHTLY_WARNING=1 anvil cast send $tokenAddress "transfer(address,uint256)" $faucetAddress $topUpAmount --private-key $deployerKey --rpc-url http://127.0.0.1:8545
 
     if ($LASTEXITCODE -ne 0) {
         throw "failed to fund faucet wallet"
@@ -271,7 +274,7 @@ Write-Host ""
 Write-Host "Endpoints:" -ForegroundColor Green
 Write-Host "  Node API:      http://localhost:8080"
 Write-Host "  Faucet:        http://localhost:8082"
-Write-Host "  Explorer:      http://localhost:3000"
+Write-Host "  Explorer:      http://localhost:3007"
 Write-Host "  IPFS API:      http://localhost:5001"
 Write-Host "  IPFS Gateway:  http://localhost:8081"
 

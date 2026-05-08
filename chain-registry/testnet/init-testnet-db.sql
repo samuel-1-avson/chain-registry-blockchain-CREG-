@@ -11,10 +11,17 @@ CREATE TABLE IF NOT EXISTS packages (
     name TEXT NOT NULL,
     version TEXT NOT NULL,
     ecosystem TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'verified',
+    content_hash TEXT NOT NULL DEFAULT '',
     ipfs_cid TEXT NOT NULL,
     publisher_pubkey TEXT NOT NULL,
     block_hash TEXT NOT NULL,
     published_at TIMESTAMPTZ NOT NULL,
+    shielded BOOLEAN DEFAULT FALSE,
+    findings JSONB DEFAULT '[]',
+    access_count INTEGER DEFAULT 0,
+    last_accessed TIMESTAMPTZ,
+    revocation_reason TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -23,6 +30,7 @@ CREATE TABLE IF NOT EXISTS packages (
 CREATE INDEX IF NOT EXISTS idx_packages_canonical ON packages(canonical);
 CREATE INDEX IF NOT EXISTS idx_packages_name ON packages(name);
 CREATE INDEX IF NOT EXISTS idx_packages_publisher ON packages(publisher_pubkey);
+CREATE INDEX IF NOT EXISTS idx_packages_status ON packages(status);
 CREATE INDEX IF NOT EXISTS idx_packages_published_at ON packages(published_at);
 
 -- Validator signatures/votes

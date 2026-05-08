@@ -35,6 +35,20 @@ CREATE TABLE IF NOT EXISTS packages (
     updated_at       TIMESTAMPTZ DEFAULT NOW()
 );
 
+ALTER TABLE packages ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'verified';
+ALTER TABLE packages ADD COLUMN IF NOT EXISTS content_hash TEXT NOT NULL DEFAULT '';
+ALTER TABLE packages ADD COLUMN IF NOT EXISTS shielded BOOLEAN DEFAULT FALSE;
+ALTER TABLE packages ADD COLUMN IF NOT EXISTS findings JSONB DEFAULT '[]';
+ALTER TABLE packages ADD COLUMN IF NOT EXISTS access_count INT DEFAULT 0;
+ALTER TABLE packages ADD COLUMN IF NOT EXISTS last_accessed TIMESTAMPTZ;
+ALTER TABLE packages ADD COLUMN IF NOT EXISTS revocation_reason TEXT;
+
+UPDATE packages SET status = 'verified' WHERE status IS NULL;
+UPDATE packages SET content_hash = '' WHERE content_hash IS NULL;
+UPDATE packages SET shielded = FALSE WHERE shielded IS NULL;
+UPDATE packages SET findings = '[]'::jsonb WHERE findings IS NULL;
+UPDATE packages SET access_count = 0 WHERE access_count IS NULL;
+
 CREATE INDEX IF NOT EXISTS idx_packages_ecosystem ON packages(ecosystem);
 CREATE INDEX IF NOT EXISTS idx_packages_publisher  ON packages(publisher_pubkey);
 CREATE INDEX IF NOT EXISTS idx_packages_status     ON packages(status);

@@ -76,10 +76,12 @@ $envLines = @(
     "CREG_DOCKER_ETH_RPC=http://anvil:8545"
     "CREG_DOCKER_IPFS_URL=http://ipfs:5001"
     "CREG_PG_URL=postgres://creg:creg@postgres:5432/chain_registry"
+    "CREG_DEV_SANDBOX=true"
     ""
     "# Default Anvil deployment and faucet accounts"
     "DEPLOYER_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
     "CREG_BRIDGE_KEY=0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
+    "GENESIS_VALIDATOR_EVM_ADDRESS=0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
     "FAUCET_PRIVATE_KEY=0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
     "FAUCET_ADDRESS=0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
     "FAUCET_INITIAL_BALANCE=10000000000000000000000"
@@ -108,6 +110,7 @@ for ($i = 1; $i -le $Nodes; $i++) {
         id = $nodeId
         alias = "Validator-$i"
         pubkey = $pub
+        eth_address = if ($i -eq 1) { "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC" } else { $null }
         stake = 100
         reputation = 100
         status = "online"

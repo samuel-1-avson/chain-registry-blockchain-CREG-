@@ -4,10 +4,14 @@
 # Usage: .\test-publish.ps1 [-Version 1.0.1]
 
 param(
-    [string]$Version = "1.0.0"
+    [string]$Version = "1.0.0",
+    [string]$PublisherAddress
 )
 
 $ErrorActionPreference = "Stop"
+
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$envFile = Join-Path $repoRoot ".env.testnet"
 
 $NODE_API  = "http://localhost:8080"
 $IPFS_API  = "http://localhost:5001"
@@ -17,10 +21,56 @@ $PKG_VER   = $Version
 $CANONICAL = $ECOSYSTEM + ":" + $PKG_NAME + "@" + $PKG_VER
 $WORK_DIR  = Join-Path $env:TEMP "creg-test"
 
+function Get-DotEnvValue {
+    param(
+        [string]$Path,
+        [string]$Key
+    )
+
+    $prefix = "$Key="
+    foreach ($line in [System.IO.File]::ReadAllLines($Path)) {
+        if ($line.StartsWith($prefix)) {
+            return $line.Substring($prefix.Length).Trim()
+        }
+    }
+
+    return $null
+}
+
+function Canonicalize-PublisherAddress {
+    param([string]$Address)
+
+    $trimmed = $Address.Trim()
+    if (-not $trimmed.StartsWith("0x")) {
+        $trimmed = "0x$trimmed"
+    }
+
+    return $trimmed.ToLowerInvariant()
+}
+
 function Banner { param($msg) Write-Host "" ; Write-Host "==> $msg" -ForegroundColor Cyan }
 function OK     { param($msg) Write-Host "    [OK] $msg" -ForegroundColor Green }
 function FAIL   { param($msg) Write-Host "    [FAIL] $msg" -ForegroundColor Red ; exit 1 }
 function ToHex  { param([byte[]]$b) ($b | ForEach-Object { $_.ToString("x2") }) -join "" }
+
+if (-not (Test-Path $envFile)) {
+    FAIL "Missing .env.testnet. Run testnet.ps1 first."
+}
+
+$publisherSigningKey = Get-DotEnvValue -Path $envFile -Key "TESTNET_PUBLISHER_KEY"
+if ([string]::IsNullOrWhiteSpace($publisherSigningKey)) {
+    FAIL "Missing TESTNET_PUBLISHER_KEY in .env.testnet"
+}
+
+if ([string]::IsNullOrWhiteSpace($PublisherAddress)) {
+    $PublisherAddress = Get-DotEnvValue -Path $envFile -Key "FAUCET_ADDRESS"
+}
+
+if ([string]::IsNullOrWhiteSpace($PublisherAddress)) {
+    FAIL "No publisher address provided and FAUCET_ADDRESS is missing in .env.testnet"
+}
+
+$PublisherAddress = Canonicalize-PublisherAddress -Address $PublisherAddress
 
 # -------------------------------------------------------------------
 Banner "Checking prerequisites"
@@ -45,11 +95,17 @@ New-Item -ItemType Directory -Force -Path $WORK_DIR | Out-Null
 $pkgDir = Join-Path $WORK_DIR "hello-creg"
 New-Item -ItemType Directory -Force -Path $pkgDir | Out-Null
 
-$pkgJson = '{"name":"hello-creg","version":"1.0.0","description":"Chain Registry test","main":"index.js","license":"MIT"}'
+$pkgJson = @{
+    name = "hello-creg"
+    version = $PKG_VER
+    description = "Chain Registry test"
+    main = "index.js"
+    license = "MIT"
+} | ConvertTo-Json -Compress
 [System.IO.File]::WriteAllText((Join-Path $pkgDir "package.json"), $pkgJson)
 [System.IO.File]::WriteAllText((Join-Path $pkgDir "index.js"), "module.exports=function(){return 'Hello Chain Registry!';};")
 
-$tarball = Join-Path $WORK_DIR "hello-creg-1.0.0.tgz"
+$tarball = Join-Path $WORK_DIR ("hello-creg-" + $PKG_VER + ".tgz")
 
 # Use Windows System32 tar (bsdtar) - avoids Git Bash tar misreading Windows paths
 $tarExe = Join-Path $env:windir "System32\tar.exe"
@@ -101,7 +157,7 @@ if (-not $ipfsCid) { FAIL ("IPFS returned no CID. Response: " + $ipfsRaw) }
 OK ("IPFS CID: " + $ipfsCid)
 
 # -------------------------------------------------------------------
-Banner "Generating Ed25519 keypair and signing"
+Banner "Signing with canonical testnet publisher key"
 
 $pyScript = Join-Path $WORK_DIR "sign.py"
 
@@ -112,9 +168,11 @@ $pyLines = @(
     "from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat, PrivateFormat, NoEncryption",
     "canonical    = sys.argv[1]",
     "content_hash = sys.argv[2]",
-    "priv = Ed25519PrivateKey.generate()",
+    "publisher_address = sys.argv[3].strip().lower()",
+    "priv_hex = sys.argv[4].strip()",
+    "priv = Ed25519PrivateKey.from_private_bytes(bytes.fromhex(priv_hex))",
     "pub  = priv.public_key()",
-    "msg  = (canonical + content_hash).encode()",
+    "msg  = (canonical + content_hash + publisher_address).encode()",
     "sig  = priv.sign(msg)",
     "priv_bytes = priv.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption())",
     "pub_bytes  = pub.public_bytes(Encoding.Raw, PublicFormat.Raw)",
@@ -145,7 +203,7 @@ if ("$testOut" -match "ModuleNotFoundError|No module") {
     & $pythonCmd -m pip install cryptography -q 2>&1 | Out-Null
 }
 
-$pyOut = & $pythonCmd $pyScript $CANONICAL $contentHash 2>&1
+$pyOut = & $pythonCmd $pyScript $CANONICAL $contentHash $PublisherAddress $publisherSigningKey 2>&1
 
 $pubkeyHex = $null
 $sigHex    = $null
@@ -166,6 +224,7 @@ if (-not $pubkeyHex -or -not $sigHex) {
 
 OK ("Publisher pubkey: " + $pubkeyHex.Substring(0,16) + "...")
 OK ("Signature:        " + $sigHex.Substring(0,16) + "...")
+OK ("Publisher address: " + $PublisherAddress)
 
 # -------------------------------------------------------------------
 Banner "Building PublishRequest"
@@ -180,6 +239,7 @@ $publishReq = [ordered]@{
     }
     content_hash     = $contentHash
     ipfs_cid         = $ipfsCid
+    publisher_address = $PublisherAddress
     publisher_pubkey = $pubkeyHex
     signature        = $sigHex
     manifest         = [ordered]@{
@@ -258,6 +318,7 @@ try {
 
 # -------------------------------------------------------------------
 $state = @{
+    publisher_address = $PublisherAddress
     pubkey       = $pubkeyHex
     privkey      = $privHex
     canonical    = $CANONICAL
@@ -268,7 +329,7 @@ $state | ConvertTo-Json | Set-Content (Join-Path $WORK_DIR "state.json") -Encodi
 
 Write-Host ""
 Write-Host ("  State saved : " + $WORK_DIR + "\state.json") -ForegroundColor Gray
-Write-Host "  Explorer    : http://localhost:3000"           -ForegroundColor Gray
+Write-Host "  Explorer    : http://localhost:3007"           -ForegroundColor Gray
 Write-Host "  Run test-revoke.ps1 to revoke this package."  -ForegroundColor Cyan
 Write-Host ""
 Write-Host "PUBLISH TEST PASSED" -ForegroundColor Green

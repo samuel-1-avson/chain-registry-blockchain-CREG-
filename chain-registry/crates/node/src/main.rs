@@ -514,12 +514,38 @@ async fn main() -> Result<()> {
     // Start P2P node in background
     let p2p_handle_for_seeds = p2p_handle.clone();
     let seeds = config.p2p_seeds.clone();
+    let state_for_seed_redial = Arc::clone(&state);
     tokio::spawn(async move {
+        let mut dialable_seeds = Vec::<libp2p::Multiaddr>::new();
         for seed in seeds {
-            if let Ok(addr) = seed.parse() {
+            match seed.parse() {
+                Ok(addr) => dialable_seeds.push(addr),
+                Err(error) => {
+                    tracing::warn!(seed = %seed, error = %error, "Ignoring invalid P2P seed multiaddr");
+                }
+            }
+        }
+
+        if dialable_seeds.is_empty() {
+            return;
+        }
+
+        let mut seed_redial = interval(Duration::from_secs(10));
+        loop {
+            seed_redial.tick().await;
+
+            let has_peers = {
+                let state_guard = state_for_seed_redial.read().await;
+                !state_guard.p2p_status.peers.is_empty()
+            };
+            if has_peers {
+                continue;
+            }
+
+            for addr in &dialable_seeds {
                 let _ = p2p_handle_for_seeds
                     .sender
-                    .send(p2p::P2PCommand::Dial { addr })
+                    .send(p2p::P2PCommand::Dial { addr: addr.clone() })
                     .await;
             }
         }

@@ -1,16 +1,18 @@
 # docker-compose.testnet.yml
 # Spins up a single-validator Chain Registry testnet for Phase 1 validation.
-#
+# 
 # Architecture:
 #   - 1 shared IPFS node
 #   - 1 shared Anvil (local Ethereum L1)
 #   - 1 validator node (node-1)
-#
+# 
 # Usage:
 #   1. Generate keys: .\scripts\generate-testnet-keys.ps1 -Nodes 1
 #   2. Deploy:        docker compose --env-file .env.testnet -f docker-compose.testnet.yml up -d --build
 #   3. Monitor:       docker compose -f docker-compose.testnet.yml logs -f
-#
+
+name: creg-testnet
+
 # For one-node-per-computer testnets, run the shared services from this file on
 # the bootstrap machine and use docker-compose.validator.yml on each validator host.
 
@@ -62,7 +64,7 @@ x-node-base: &node-base
     CREG_STAKING_ADDR: "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707"
     CREG_BLOCK_INTERVAL: "2"
     CREG_SINGLE_VALIDATOR_MODE: "true"
-    CREG_DEV_SANDBOX: "${CREG_DEV_SANDBOX:-false}"
+    CREG_DEV_SANDBOX: "${CREG_DEV_SANDBOX:-true}"
     CREG_ZK_ENABLED: "true"
     CREG_ML_ENABLED: "true"
     CREG_ML_MODEL_PATH: "/app/models"
