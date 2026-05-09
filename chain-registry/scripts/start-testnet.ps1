@@ -145,16 +145,35 @@ function Fund-TestnetFaucet {
     }
 
     Write-Host "Funding faucet wallet..." -ForegroundColor Cyan
-    $balanceOutput = docker compose @ComposeArgs exec -T -e FOUNDRY_DISABLE_NIGHTLY_WARNING=1 anvil cast call $tokenAddress "balanceOf(address)(uint256)" $faucetAddress --rpc-url http://127.0.0.1:8545
+    $balanceOutput = docker compose @ComposeArgs exec -T -e FOUNDRY_DISABLE_NIGHTLY_WARNING=1 anvil cast call $tokenAddress "balanceOf(address)(uint256)" $faucetAddress --rpc-url http://127.0.0.1:8545 2>&1
 
     if ($LASTEXITCODE -ne 0) {
         throw "failed to read faucet balance"
     }
 
-    $currentBalanceRaw = ($balanceOutput | Select-Object -Last 1).Trim()
-    if ($currentBalanceRaw -match "^([0-9]+)") {
-        $currentBalanceRaw = $matches[1]
+    # docker compose exec may return decorated multi-line output.
+    # Extract the first integer-looking token from any line.
+    $currentBalanceRaw = "0"
+    $allLines = ($balanceOutput | Out-String).Trim()
+    foreach ($line in $allLines -split "`n") {
+        $cleaned = $line.Trim()
+        # Match a bare integer (e.g. "1000000000000000000000")
+        if ($cleaned -match "^(\d{1,78})$") {
+            $currentBalanceRaw = $matches[1]
+            break
+        }
+        # Match cast-style bracketed output (e.g. "[1000000000000000000000]")
+        if ($cleaned -match "\[(\d+)\]") {
+            $currentBalanceRaw = $matches[1]
+            break
+        }
+        # Match an integer at the start of a line with possible trailing text
+        if ($cleaned -match "^(\d{1,78})\b") {
+            $currentBalanceRaw = $matches[1]
+            break
+        }
     }
+
     $currentBalance = [System.Numerics.BigInteger]::Parse($currentBalanceRaw)
     $targetBalance = [System.Numerics.BigInteger]::Parse($targetBalanceRaw)
 

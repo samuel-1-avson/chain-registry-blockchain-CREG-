@@ -9,6 +9,9 @@ use serde::{Deserialize, Serialize};
 pub struct Block {
     pub header: BlockHeader,
     pub transactions: Vec<Transaction>,
+    /// Ed25519 signatures from PBFT Commit phase over the block hash.
+    #[serde(default)]
+    pub pbft_signatures: Vec<BlockSignature>,
 }
 
 impl Block {
@@ -35,6 +38,7 @@ impl Block {
                 vrf_proof: None,
             },
             transactions: vec![],
+            pbft_signatures: vec![],
         }
     }
 }
@@ -57,6 +61,16 @@ pub struct BlockHeader {
     /// VRF proof (hex signature) proving the proposer's legitimacy.
     #[serde(default)]
     pub vrf_proof: Option<String>,
+}
+
+/// A signature from a validator explicitly voting for a block in PBFT.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BlockSignature {
+    pub validator_id: String,
+    /// Hex-encoded Ed25519 public key.
+    pub pubkey: String,
+    /// Hex-encoded Ed25519 signature over the block hash.
+    pub signature: String,
 }
 
 /// Every action recorded on the chain is a Transaction.

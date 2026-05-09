@@ -296,7 +296,7 @@ async fn main() -> Result<()> {
         .with_target(true)
         .init();
 
-    let mut config = config::NodeConfig::from_env();
+    let mut config = config::NodeConfig::load().await;
 
     // ── Chain Spec Boot Validation ──────────────────────────────────────────────
     // Replaces the "read N envs and pray" model with a single fetched, signed,
@@ -509,6 +509,7 @@ async fn main() -> Result<()> {
         },
         view_change_certs: HashMap::new(),
         reorgs: Vec::new(),
+        pbft_engine: crate::state::PbftEngine::new(),
     }));
 
     // Start P2P node in background
@@ -650,6 +651,11 @@ async fn main() -> Result<()> {
                 state_guard.validator_set_sync.last_error = Some(
                     "validator-set sync disabled: staking contract address is invalid"
                         .to_string(),
+                );
+                tracing::warn!(
+                    "CRITICAL: Validator set sync is disabled (static mode). \
+                     This node will not participate in decentralized on-chain admission and \
+                     is isolated from the public network."
                 );
             }
         }

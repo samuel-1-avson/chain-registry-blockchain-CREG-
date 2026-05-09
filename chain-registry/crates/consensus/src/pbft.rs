@@ -5,7 +5,7 @@
 
 use crate::ValidatorSet;
 use anyhow::{bail, Result};
-use common::{Block, ValidatorSignature, ValidatorVote};
+use common::{Block, BlockSignature};
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
@@ -79,9 +79,9 @@ pub struct PbftRound {
     pub block: Block,
     pub phase: PbftPhase,
     /// validator_id → their PREPARE message signature
-    pub prepare_sigs: HashMap<String, ValidatorSignature>,
+    pub prepare_sigs: HashMap<String, BlockSignature>,
     /// validator_id → their COMMIT message signature
-    pub commit_sigs: HashMap<String, ValidatorSignature>,
+    pub commit_sigs: HashMap<String, BlockSignature>,
     pub validator_set: ValidatorSet,
     /// Wall-clock time the current phase was entered.
     pub phase_entered_at: Instant,
@@ -201,7 +201,7 @@ impl PbftRound {
 
     // ── Phase 2: PREPARE ─────────────────────────────────────────────────────
     /// A validator casts its PREPARE vote (approve or reject) over the block hash.
-    pub fn receive_prepare(&mut self, validator_id: &str, sig: ValidatorSignature) -> Result<bool> {
+    pub fn receive_prepare(&mut self, validator_id: &str, sig: BlockSignature) -> Result<bool> {
         if self.phase != PbftPhase::Prepare {
             bail!("Not in PREPARE phase");
         }
@@ -227,7 +227,7 @@ impl PbftRound {
     // ── Phase 3: COMMIT ──────────────────────────────────────────────────────
     /// A validator sends its COMMIT signature. Once quorum is reached the
     /// block is finalised and can be written to the chain.
-    pub fn receive_commit(&mut self, validator_id: &str, sig: ValidatorSignature) -> Result<bool> {
+    pub fn receive_commit(&mut self, validator_id: &str, sig: BlockSignature) -> Result<bool> {
         if self.phase != PbftPhase::Commit {
             bail!("Not in COMMIT phase");
         }
@@ -239,12 +239,7 @@ impl PbftRound {
         );
 
         if self.commit_sigs.len() >= self.quorum() {
-            // Check if enough commits are approvals (not rejections).
-            let approvals = self
-                .commit_sigs
-                .values()
-                .filter(|s| s.vote == ValidatorVote::Approve)
-                .count();
+            let approvals = self.commit_sigs.len();
 
             if approvals >= self.quorum() {
                 self.phase = PbftPhase::Finalised;
@@ -269,7 +264,7 @@ impl PbftRound {
     }
 
     /// Returns the finalised signatures to embed in the ChainRecord.
-    pub fn finalised_signatures(&self) -> Vec<ValidatorSignature> {
+    pub fn finalised_signatures(&self) -> Vec<BlockSignature> {
         self.commit_sigs.values().cloned().collect()
     }
 
@@ -387,7 +382,7 @@ impl PbftEngine {
         &mut self,
         block_hash: &str,
         vid: &str,
-        sig: ValidatorSignature,
+        sig: BlockSignature,
     ) -> Result<bool> {
         let round = self
             .rounds
@@ -396,7 +391,7 @@ impl PbftEngine {
         round.receive_prepare(vid, sig)
     }
 
-    pub fn commit(&mut self, block_hash: &str, vid: &str, sig: ValidatorSignature) -> Result<bool> {
+    pub fn commit(&mut self, block_hash: &str, vid: &str, sig: BlockSignature) -> Result<bool> {
         let round = self
             .rounds
             .get_mut(block_hash)
@@ -404,11 +399,22 @@ impl PbftEngine {
         round.receive_commit(vid, sig)
     }
 
-    pub fn finalised_sigs(&self, block_hash: &str) -> Vec<ValidatorSignature> {
+    pub fn finalised_sigs(&self, block_hash: &str) -> Vec<BlockSignature> {
         self.rounds
             .get(block_hash)
             .map(|r| r.finalised_signatures())
             .unwrap_or_default()
+    }
+
+    pub fn get_finalised_block(&self, block_hash: &str) -> Option<Block> {
+        let round = self.rounds.get(block_hash)?;
+        if round.phase == PbftPhase::Finalised {
+            let mut final_block = round.block.clone();
+            final_block.pbft_signatures = round.finalised_signatures();
+            Some(final_block)
+        } else {
+            None
+        }
     }
 
     /// Check all active rounds for phase timeouts and trigger view-changes

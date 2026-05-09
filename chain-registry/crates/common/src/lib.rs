@@ -111,4 +111,17 @@ pub enum GossipMessage {
         /// Ed25519 signature over `"{block_hash}:view_change:{new_view}"`.
         signature: String,
     },
+    PbftPrePrepare {
+        block: Block,
+    },
+    PbftPrepare {
+        block_hash: String,
+        validator_id: String,
+        signature: String,
+    },
+    PbftCommit {
+        block_hash: String,
+        validator_id: String,
+        signature: String,
+    },
 }

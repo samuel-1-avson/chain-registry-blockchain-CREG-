@@ -1,0 +1,67 @@
+# docker-compose.ingress.yml
+# Adds Traefik API Gateway to the testnet stack for TLS termination and routing.
+# 
+# Usage:
+#   docker compose \
+#     --env-file .env.testnet \
+#     -f docker-compose.testnet.yml \
+#     -f docker-compose.ingress.yml \
+#     up -d
+
+services:
+  traefik:
+    image: traefik:v2.10
+    container_name: creg-testnet-traefik
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      # Auto-redirect HTTP to HTTPS
+      - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
+      # Let's Encrypt configuration (enabled via env vars)
+      - "--certificatesresolvers.myresolver.acme.tlschallenge=true"
+      - "--certificatesresolvers.myresolver.acme.email=${CREG_ACME_EMAIL:-admin@example.com}"
+      - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "443:443"
+      # Traefik dashboard (for local debug only, do not expose in production)
+      - "8080:8080"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "./testnet/letsencrypt:/letsencrypt"
+    restart: unless-stopped
+
+  node-1:
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.node.rule=Host(`${CREG_DOMAIN:-localhost}`)"
+      - "traefik.http.routers.node.entrypoints=websecure"
+      - "traefik.http.routers.node.tls.certresolver=myresolver"
+      - "traefik.http.services.node.loadbalancer.server.port=8080"
+      
+      # gRPC routing (uses the same domain, differentiated by protocol if possible, or a different path/domain)
+      - "traefik.http.routers.nodegrpc.rule=Host(`grpc.${CREG_DOMAIN:-localhost}`)"
+      - "traefik.http.routers.nodegrpc.entrypoints=websecure"
+      - "traefik.http.routers.nodegrpc.tls.certresolver=myresolver"
+      - "traefik.http.services.nodegrpc.loadbalancer.server.port=50051"
+      - "traefik.http.services.nodegrpc.loadbalancer.server.scheme=h2c"
+
+  web-explorer:
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.explorer.rule=Host(`explorer.${CREG_DOMAIN:-localhost}`)"
+      - "traefik.http.routers.explorer.entrypoints=websecure"
+      - "traefik.http.routers.explorer.tls.certresolver=myresolver"
+      - "traefik.http.services.explorer.loadbalancer.server.port=80"
+
+  faucet:
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.faucet.rule=Host(`faucet.${CREG_DOMAIN:-localhost}`)"
+      - "traefik.http.routers.faucet.entrypoints=websecure"
+      - "traefik.http.routers.faucet.tls.certresolver=myresolver"
+      - "traefik.http.services.faucet.loadbalancer.server.port=8082"

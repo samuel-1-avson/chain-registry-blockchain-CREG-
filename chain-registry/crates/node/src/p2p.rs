@@ -477,12 +477,98 @@ impl P2PNode {
                             continue;
                         }
 
-                        // Non-vote gossip messages (block announcements, etc.)
-                        crate::events::emit(&event_bus, crate::events::RegistryEvent {
-                            kind: crate::events::EventKind::BlockProduced,
-                            ts: chrono::Utc::now().to_rfc3339(),
-                            payload: serde_json::json!({ "p2p_message": String::from_utf8_lossy(&message.data).to_string() }),
-                        });
+                        // ── PBFT Block Consensus ───────────────────────────────────────────────
+                        if topic_str.contains("blocks") {
+                            if let Ok(msg) = serde_json::from_slice::<common::GossipMessage>(&message.data) {
+                                match msg {
+                                    common::GossipMessage::PbftPrePrepare { block } => {
+                                        let mut s = state.write().await;
+                                        let vs = s.validator_set.clone();
+                                        if let Err(e) = s.pbft_engine.start_round(block.clone(), vs.into()) {
+                                            tracing::warn!("Failed to start PBFT round: {}", e);
+                                        } else {
+                                            // Sign the block and broadcast PREPARE
+                                            if let Some(our_id) = s.config.node_id.clone().into() {
+                                                if let Some(our_privkey_hex) = &s.config.validator_privkey {
+                                                    let bh = block.hash();
+                                                    if let Ok(pk_bytes) = hex::decode(our_privkey_hex) {
+                                                        if let Ok(sk) = ed25519_dalek::SigningKey::try_from(pk_bytes.as_slice()) {
+                                                            use ed25519_dalek::Signer;
+                                                            let signature = hex::encode(sk.sign(bh.as_bytes()).to_bytes());
+                                                            let pubkey = hex::encode(sk.verifying_key().as_bytes());
+                                                            
+                                                            let sig_obj = common::BlockSignature { validator_id: our_id.clone(), pubkey: pubkey.clone(), signature: signature.clone() };
+                                                            let _ = s.pbft_engine.prepare(&bh, &our_id, sig_obj);
+
+                                                            let prep_msg = common::GossipMessage::PbftPrepare { block_hash: bh, validator_id: our_id, signature };
+                                                            if let Ok(data) = serde_json::to_vec(&prep_msg) {
+                                                                let topic = libp2p::gossipsub::IdentTopic::new("creg/v1/blocks");
+                                                                let _ = self.swarm.behaviour_mut().gossipsub.publish(topic, data);
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    common::GossipMessage::PbftPrepare { block_hash, validator_id, signature } => {
+                                        // Validate signature (simplified, could be moved to validate_pbft_message)
+                                        let pubkey_hex = {
+                                            let s = state.read().await;
+                                            s.validator_set.validators.iter().find(|v| v.id == validator_id).map(|v| v.pubkey.clone()).unwrap_or_default()
+                                        };
+                                        let mut s = state.write().await;
+                                        let sig = common::BlockSignature { validator_id: validator_id.clone(), pubkey: pubkey_hex, signature: signature.clone() };
+                                        if let Ok(true) = s.pbft_engine.prepare(&block_hash, &validator_id, sig) {
+                                            // Broadcast PbftCommit
+                                            if let Some(our_id) = s.config.node_id.clone().into() {
+                                                if let Some(our_privkey_hex) = &s.config.validator_privkey {
+                                                    if let Ok(pk_bytes) = hex::decode(our_privkey_hex) {
+                                                        if let Ok(sk) = ed25519_dalek::SigningKey::try_from(pk_bytes.as_slice()) {
+                                                            use ed25519_dalek::Signer;
+                                                            let commit_sig = hex::encode(sk.sign(block_hash.as_bytes()).to_bytes());
+                                                            let pubkey = hex::encode(sk.verifying_key().as_bytes());
+                                                            
+                                                            let sig_obj = common::BlockSignature { validator_id: our_id.clone(), pubkey: pubkey.clone(), signature: commit_sig.clone() };
+                                                            let _ = s.pbft_engine.commit(&block_hash, &our_id, sig_obj);
+
+                                                            let commit_msg = common::GossipMessage::PbftCommit { block_hash: block_hash.clone(), validator_id: our_id, signature: commit_sig };
+                                                            if let Ok(data) = serde_json::to_vec(&commit_msg) {
+                                                                let topic = libp2p::gossipsub::IdentTopic::new("creg/v1/blocks");
+                                                                let _ = self.swarm.behaviour_mut().gossipsub.publish(topic, data);
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    common::GossipMessage::PbftCommit { block_hash, validator_id, signature } => {
+                                        let pubkey_hex = {
+                                            let s = state.read().await;
+                                            s.validator_set.validators.iter().find(|v| v.id == validator_id).map(|v| v.pubkey.clone()).unwrap_or_default()
+                                        };
+                                        let mut s = state.write().await;
+                                        let sig = common::BlockSignature { validator_id: validator_id.clone(), pubkey: pubkey_hex, signature };
+                                        if let Ok(true) = s.pbft_engine.commit(&block_hash, &validator_id, sig) {
+                                            // Finalized!
+                                            tracing::info!("[PBFT] Block {} finalised by quorum", &block_hash[..12]);
+                                            if let Some(final_block) = s.pbft_engine.get_finalised_block(&block_hash) {
+                                                let _ = s.chain.insert_block(&final_block);
+                                                s.publisher_index.apply_block(&final_block);
+                                            }
+                                        }
+                                    }
+                                    _ => {
+                                        crate::events::emit(&event_bus, crate::events::RegistryEvent {
+                                            kind: crate::events::EventKind::BlockProduced,
+                                            ts: chrono::Utc::now().to_rfc3339(),
+                                            payload: serde_json::json!({ "p2p_message": String::from_utf8_lossy(&message.data).to_string() }),
+                                        });
+                                    }
+                                }
+                            }
+                        }
                     }
                     SwarmEvent::NewListenAddr { address, .. } => {
                         tracing::info!("P2P node listening on {}", address);

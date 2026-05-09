@@ -92,3 +92,20 @@ impl ValidatorSet {
         sha256_hex(ids.join(",").as_bytes())
     }
 }
+
+impl From<common::ValidatorSet> for ValidatorSet {
+    fn from(common_vs: common::ValidatorSet) -> Self {
+        let mut vs = Self::new();
+        for v in common_vs.validators {
+            vs.add(ValidatorInfo {
+                id: v.id.clone(),
+                pubkey: v.pubkey.clone(),
+                eth_address: Some(v.eth_address.clone()),
+                stake: v.stake,
+                reputation: v.reputation.try_into().unwrap_or(100),
+                is_active: v.status == "online" || v.status == "self",
+            });
+        }
+        vs
+    }
+}

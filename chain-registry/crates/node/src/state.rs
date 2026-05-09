@@ -21,6 +21,8 @@ use crate::{
     publisher_index::PublisherIndex,
 };
 
+pub use consensus::pbft::PbftEngine;
+
 // ─── Validator registration ───────────────────────────────────────────────────
 
 #[derive(Serialize, Clone, Debug, Default)]
@@ -200,8 +202,9 @@ pub struct NodeState {
     /// A view-change is applied once ⌊n/3⌋+1 certificates are received,
     /// preventing a single Byzantine node from forcing a view-change.
     pub view_change_certs: HashMap<String, HashMap<u32, std::collections::HashSet<String>>>,
-    /// History of reorg events.
     pub reorgs: Vec<ReorgEvent>,
+    /// The PBFT consensus engine managing block finalization.
+    pub pbft_engine: PbftEngine,
 }
 
 impl NodeState {

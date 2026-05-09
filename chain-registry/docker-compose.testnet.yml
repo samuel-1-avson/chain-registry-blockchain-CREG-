@@ -64,7 +64,7 @@ x-node-base: &node-base
     CREG_STAKING_ADDR: "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707"
     CREG_BLOCK_INTERVAL: "2"
     CREG_SINGLE_VALIDATOR_MODE: "true"
-    CREG_DEV_SANDBOX: "${CREG_DEV_SANDBOX:-true}"
+    CREG_DEV_SANDBOX: "false"
     CREG_ZK_ENABLED: "true"
     CREG_ML_ENABLED: "true"
     CREG_ML_MODEL_PATH: "/app/models"
@@ -107,6 +107,17 @@ services:
         VITE_STAKING_ADDR: ${TESTNET_STAKING_ADDR:-}
         VITE_DEV_MODE: ${VITE_DEV_MODE:-true}
         VITE_API_BASE: ""
+    command: ["true"]
+    profiles:
+      - build
+
+  secure-node-image:
+    image: chain-registry-node-secure:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.secure
+    depends_on:
+      - app-image
     command: ["true"]
     profiles:
       - build
@@ -210,7 +221,9 @@ services:
 
   node-1:
     <<: *node-base
+    image: chain-registry-node-secure:latest
     container_name: creg-testnet-node-1
+    privileged: true # Required for nsjail kernel namespaces
     networks:
       default:
         aliases:
@@ -218,7 +231,7 @@ services:
     ports:
       - "8080:8080"
       - "50057:50051"
-      - "9007:9000"
+      - "9000:9000"
     volumes:
       - node-1-data:/data
       - ./circuits:/app/circuits:ro
@@ -239,8 +252,11 @@ services:
     environment:
       <<: *node-env
       CREG_NODE_ID: "node-1"
+      # Validator/Bridge keys will be fetched from Vault, but keeping env overrides for fallback
       CREG_VALIDATOR_KEY: "${NODE1_VALIDATOR_KEY}"
       CREG_BRIDGE_KEY: "${CREG_BRIDGE_KEY:?CREG_BRIDGE_KEY must be set in .env.testnet}"
+      CREG_VAULT_ADDR: "http://vault:8200"
+      CREG_VAULT_TOKEN: "root"
       CREG_LISTEN: "0.0.0.0:8080"
       CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/9000"
       CREG_P2P_SEEDS: "${CREG_P2P_SEEDS:-}"
@@ -400,6 +416,43 @@ services:
         condition: service_started
     profiles:
       - stress-test
+
+  # ── HashiCorp Vault (Key Management) ────────────────────────────────────────
+  vault:
+    image: hashicorp/vault:1.15
+    container_name: creg-testnet-vault
+    ports:
+      - "8200:8200"
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: "root"
+      VAULT_DEV_LISTEN_ADDRESS: "0.0.0.0:8200"
+    restart: unless-stopped
+    command: ["server", "-dev"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8200/v1/sys/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Vault Initializer (Testnet only) ────────────────────────────────────────
+  vault-init:
+    image: hashicorp/vault:1.15
+    container_name: creg-testnet-vault-init
+    depends_on:
+      vault:
+        condition: service_healthy
+    environment:
+      VAULT_ADDR: "http://vault:8200"
+      VAULT_TOKEN: "root"
+    command: >
+      sh -c '
+      vault kv put secret/creg/validator 
+      validator_key="${NODE1_VALIDATOR_KEY}" 
+      bridge_key="${CREG_BRIDGE_KEY}" &&
+      echo "Vault initialized successfully."
+      '
+    profiles:
+      - default
 
 volumes:
   ipfs-data:

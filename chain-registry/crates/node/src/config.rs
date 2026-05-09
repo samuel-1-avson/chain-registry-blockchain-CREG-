@@ -205,7 +205,7 @@ pub struct NodeConfig {
 }
 
 impl NodeConfig {
-    pub fn from_env() -> Self {
+    pub async fn load() -> Self {
         let mode = match env("CREG_NODE_MODE", "pruned").as_str() {
             "full" => NodeMode::Full,
             "light" => NodeMode::Light,
@@ -223,7 +223,7 @@ impl NodeConfig {
 
         let max_peers = env("CREG_MAX_PEERS", "15").parse().unwrap_or(15);
 
-        Self {
+        let mut config = Self {
             chain_id: env("CREG_CHAIN_ID", ""),
             listen_addr: env("CREG_LISTEN", "0.0.0.0:8080"),
             data_dir: PathBuf::from(env("CREG_DATA_DIR", "./data")),
@@ -271,7 +271,29 @@ impl NodeConfig {
             max_peers,
             cors: CorsConfig::from_env(),
             is_testnet: env("CREG_TESTNET", "false") == "true",
+        };
+
+        if let Ok(vault_addr) = std::env::var("CREG_VAULT_ADDR") {
+            if let Ok(vault_token) = std::env::var("CREG_VAULT_TOKEN") {
+                if let Ok(client) = reqwest::Client::builder().build() {
+                    let url = format!("{}/v1/secret/data/creg/validator", vault_addr.trim_end_matches('/'));
+                    if let Ok(resp) = client.get(&url).header("X-Vault-Token", vault_token).send().await {
+                        if let Ok(json) = resp.json::<serde_json::Value>().await {
+                            if let Some(data) = json.get("data").and_then(|d| d.get("data")) {
+                                if let Some(vk) = data.get("validator_key").and_then(|v| v.as_str()) {
+                                    config.validator_privkey = Some(vk.to_string());
+                                }
+                                if let Some(bk) = data.get("bridge_key").and_then(|v| v.as_str()) {
+                                    config.bridge_privkey = Some(bk.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
+
+        config
     }
 
     /// Validate the configuration and return a list of human-readable errors.

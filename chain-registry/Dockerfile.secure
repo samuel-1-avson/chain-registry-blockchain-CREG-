@@ -1,0 +1,44 @@
+# Dockerfile.secure
+# Adds nsjail and rootfs generation to the standard chain-registry node image.
+# This enables CREG_DEV_SANDBOX=false in production deployments.
+
+FROM ubuntu:24.04 AS nsjail-builder
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    bison \
+    flex \
+    libprotobuf-dev \
+    protobuf-compiler \
+    libnl-route-3-dev \
+    git \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /nsjail
+# Use a specific release or recent commit for stability
+RUN git clone https://github.com/google/nsjail.git . && \
+    make -j$(nproc)
+
+FROM chain-registry-app:latest AS secure-node
+
+USER root
+# Install runtime dependencies for nsjail and minimal tools
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libprotobuf32t64 \
+    libnl-route-3-200 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=nsjail-builder /nsjail/nsjail /usr/bin/nsjail
+
+# Create basic rootfs directories for nsjail
+RUN mkdir -p /app/config/sandbox/rootfs/npm \
+             /app/config/sandbox/rootfs/cargo \
+             /app/config/sandbox/rootfs/python
+
+# Make sure the creg user owns the app directory
+RUN chown -R creg:creg /app
+
+USER creg
+
+# Override entrypoint if needed, but defaults from base are fine
+ENTRYPOINT ["/app/creg-node"]

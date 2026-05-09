@@ -605,8 +605,15 @@ pub async fn run(
         )
         .await?,
     };
-    if worker_state.observed_active.is_empty() {
-        worker_state.observed_active = seed_worker_state_from_bootstrap(&state).await.observed_active;
+    // Always merge bootstrap validators into observed_active. Without this,
+    // a restart with a persisted cursor that contains only 1 address (e.g. the
+    // on-chain genesis validator) would permanently lose the other bootstrap
+    // validators from the active set, collapsing the quorum.
+    {
+        let bootstrap = seed_worker_state_from_bootstrap(&state).await;
+        for addr in bootstrap.observed_active {
+            worker_state.observed_active.insert(addr);
+        }
     }
     if worker_state.cursor.is_none() {
         if let Some(start_block) = config.start_block {

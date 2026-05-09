@@ -36,27 +36,19 @@ pub async fn run(
             Ok(block) => {
                 let bh = block.hash();
                 tracing::info!(
-                    "Block {} produced at height {} ({} tx)",
+                    "[PBFT] Proposer created block {} at height {} ({} tx) — starting round",
                     &bh[..bh.len().min(12)],
                     block.header.height,
                     block.transactions.len()
                 );
-                {
-                    let mut s = state.write().await;
-                    s.publisher_index.apply_block(&block);
-                }
-
-                // Announce block via P2P Gossipsub
-                let ann = crate::gossip::BlockAnnouncement {
-                    height: block.header.height,
-                    block_hash: block.hash(),
-                    proposer: block.header.proposer_id.clone(),
-                };
+                
+                // Broadcast PbftPrePrepare to start the consensus round
+                let msg = common::GossipMessage::PbftPrePrepare { block };
                 let _ = p2p_handle
                     .sender
                     .send(crate::p2p::P2PCommand::Broadcast {
                         topic: "creg/v1/blocks".into(),
-                        data: serde_json::to_vec(&ann).unwrap_or_default(),
+                        data: serde_json::to_vec(&msg).unwrap_or_default(),
                     })
                     .await;
             }
@@ -191,8 +183,13 @@ async fn produce_block(
     let block = Block {
         header,
         transactions: txs,
+        pbft_signatures: vec![],
     };
-    s.chain.insert_block(&block)?;
+    
+    // Instead of inserting immediately, start the PBFT round
+    let vs = s.validator_set.clone();
+    s.pbft_engine.start_round(block.clone(), vs.into())?;
+    
     // Proofs are epoch-specific (seed = prev_hash); clear cache for next round.
     s.vrf_proofs.clear();
     Ok(block)

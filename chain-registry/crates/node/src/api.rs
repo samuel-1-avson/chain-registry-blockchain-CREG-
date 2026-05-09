@@ -358,6 +358,7 @@ async fn health(State(state): State<SharedState>) -> impl IntoResponse {
 struct ChainStatsResponse {
     #[serde(flatten)]
     chain: crate::chain_store::ChainStats,
+    genesis_hash: Option<String>,
     validator_count: usize,
     active_validators: usize,
     total_stake: u64,
@@ -381,8 +382,13 @@ async fn chain_stats(State(state): State<SharedState>) -> impl IntoResponse {
     let active_count = validators.iter().filter(|v| v.status != "offline").count();
     let tip = s.chain.stats().tip_height;
     let finalized = s.bridge_status.last_finalized_eth_block;
+    let genesis_hash = s.chain.get_block_by_height(0)
+        .ok()
+        .flatten()
+        .map(|b| b.hash());
     Json(ChainStatsResponse {
         chain: s.chain.stats(),
+        genesis_hash,
         validator_count: validators.len(),
         active_validators: active_count,
         total_stake,
@@ -408,6 +414,11 @@ async fn chain_stats(State(state): State<SharedState>) -> impl IntoResponse {
 
 #[derive(Serialize)]
 struct RuntimeConfigResponse {
+    version: String,
+    build: String,
+    chain_id: String,
+    network: String,
+    profile: String,
     is_testnet: bool,
     registry_address: Option<String>,
     token_contract: Option<String>,
@@ -441,7 +452,18 @@ fn non_zero_address(value: &str) -> Option<String> {
 
 async fn runtime_config(State(state): State<SharedState>) -> impl IntoResponse {
     let s = state.read().await;
+    let chain_id = if s.config.chain_id.is_empty() {
+        if s.config.is_testnet { "creg-testnet-1".to_string() } else { "creg-mainnet-1".to_string() }
+    } else {
+        s.config.chain_id.clone()
+    };
+    let network = if s.config.is_testnet { "testnet" } else { "mainnet" };
     Json(RuntimeConfigResponse {
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        build: format!("v{}", env!("CARGO_PKG_VERSION")),
+        chain_id,
+        network: network.to_string(),
+        profile: network.to_string(),
         is_testnet: s.config.is_testnet,
         registry_address: non_zero_address(&s.config.registry_addr),
         token_contract: non_zero_address(&s.config.token_addr),
@@ -1131,13 +1153,18 @@ async fn get_proof(State(state): State<SharedState>, Path(canonical): Path<Strin
     }
 }
 
-/// Serialize a Block to JSON with a top-level `hash` field injected.
+/// Serialize a Block to JSON with top-level `hash` and `finalized` fields injected.
 /// `Block` only stores `header` + `transactions`; the hash is computed on-the-fly
 /// via `block.hash()`.  Clients (explorer, TUI) expect a `hash` field in the response.
+///
+/// Every block returned from the chain store is, by definition, finalized —
+/// it was either the genesis block or survived PBFT consensus. We inject
+/// `finalized: true` so the UI never labels stored blocks as "Pending".
 fn block_to_json(b: &common::Block) -> serde_json::Value {
     let mut v = serde_json::to_value(b).unwrap_or_default();
     if let serde_json::Value::Object(ref mut map) = v {
         map.insert("hash".into(), serde_json::Value::String(b.hash()));
+        map.insert("finalized".into(), serde_json::Value::Bool(true));
     }
     v
 }

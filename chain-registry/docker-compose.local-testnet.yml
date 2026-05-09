@@ -27,7 +27,7 @@ x-web-explorer-image: &web-explorer-image
       VITE_API_BASE: ""
 
 x-local-validator-set: &local-validator-set >-
-  {"validators":[{"id":"node-1","alias":"validator-1","pubkey":"808704b7245921ce7fa3d923bccd0cc30cea91885bc639e92ba4e4c20fcfe6bd","eth_address":"${LOCAL_GENESIS_VALIDATOR_EVM_ADDRESS:-0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC}","stake":100,"reputation":100,"status":"online"},{"id":"node-2","alias":"validator-2","pubkey":"c01ac0cf441e6fb2532273322d703afd55b2b418319958b1799014a83bff7a40","stake":100,"reputation":100,"status":"online"},{"id":"node-3","alias":"validator-3","pubkey":"712651f450ba05b63898b99ef5f7ba45632e8e2527f7f715cd671ec4024cc51e","stake":100,"reputation":100,"status":"online"}]}
+  {"validators":[{"id":"node-1","alias":"validator-1","pubkey":"808704b7245921ce7fa3d923bccd0cc30cea91885bc639e92ba4e4c20fcfe6bd","eth_address":"${LOCAL_GENESIS_VALIDATOR_EVM_ADDRESS:-0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC}","stake":100,"reputation":100,"status":"online"},{"id":"node-2","alias":"validator-2","pubkey":"c01ac0cf441e6fb2532273322d703afd55b2b418319958b1799014a83bff7a40","eth_address":"0x90F79bf6EB2c4f870365E785982E1f101E93b906","stake":100,"reputation":100,"status":"online"},{"id":"node-3","alias":"validator-3","pubkey":"712651f450ba05b63898b99ef5f7ba45632e8e2527f7f715cd671ec4024cc51e","eth_address":"0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65","stake":100,"reputation":100,"status":"online"}]}
 
 x-postgres-url: &postgres-url postgres://${POSTGRES_USER:-creg}:${POSTGRES_PASSWORD:-creg}@postgres:5432/${POSTGRES_DB:-chain_registry}
 
@@ -53,7 +53,7 @@ x-node-base: &node-base
     CREG_DATA_DIR: "/data"
     CREG_LISTEN: "0.0.0.0:8080"
     CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/9000"
-    CREG_P2P_SEEDS: ""
+    CREG_P2P_SEEDS: "/dns4/node-2/tcp/9000,/dns4/node-3/tcp/9000"
     CREG_ETH_RPC: "http://anvil:8545"
     CREG_IPFS_URL: "http://ipfs:5001"
     CREG_BLOCK_INTERVAL: "${CREG_BLOCK_INTERVAL:-2}"
