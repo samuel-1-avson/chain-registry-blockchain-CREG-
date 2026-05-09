@@ -32,6 +32,12 @@ contract SimpleTokenDeploy {
         require(msg.sender == owner || msg.sender == faucet, "Not authorized");
         _mint(to, amount);
     }
+
+    /// @notice Public minting for testnet users (limited to 1000 CREG per call)
+    function publicMint(uint256 amount) external {
+        require(amount <= 1000 * 10**18, "Amount too high for testnet faucet");
+        _mint(msg.sender, amount);
+    }
     
     function setFaucet(address _faucet) external {
         require(msg.sender == owner, "Not owner");
@@ -113,6 +119,7 @@ contract DeployScript is Script {
         address deployer = vm.addr(deployerPrivateKey);
         
         vm.startBroadcast(deployerPrivateKey);
+        console.log("Deploying to Chain ID:", block.chainid);
         
         // Deploy token
         SimpleTokenDeploy token = new SimpleTokenDeploy();

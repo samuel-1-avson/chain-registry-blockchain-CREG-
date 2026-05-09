@@ -431,6 +431,8 @@ struct RuntimeConfigResponse {
     validator_set_source: String,
     validator_set_sync_state: String,
     validator_set_last_finalized_source_block: Option<u64>,
+    node_id: String,
+    validator_pubkey: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -478,6 +480,16 @@ async fn runtime_config(State(state): State<SharedState>) -> impl IntoResponse {
         validator_set_last_finalized_source_block: s
             .validator_set_sync
             .last_finalized_source_block,
+        node_id: s.config.node_id.clone(),
+        validator_pubkey: s.config.validator_privkey.as_ref().and_then(|pk| {
+            let raw = pk.strip_prefix("0x").unwrap_or(pk.as_str());
+            if let Ok(bytes) = hex::decode(raw) {
+                if let Ok(sk) = ed25519_dalek::SigningKey::try_from(bytes.as_slice()) {
+                    return Some(hex::encode(sk.verifying_key().as_bytes()));
+                }
+            }
+            None
+        }),
     })
 }
 

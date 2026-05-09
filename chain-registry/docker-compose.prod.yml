@@ -1,0 +1,96 @@
+# docker-compose.prod.yml
+# Production-entry configuration for a single Primary Validator node.
+# This node acts as the Genesis Seed for the Chain Registry P2P network.
+
+name: creg-prod
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: creg-prod-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-creg}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-creg}
+      POSTGRES_DB: ${POSTGRES_DB:-chain_registry}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-creg} -d ${POSTGRES_DB:-chain_registry}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  ipfs:
+    image: ipfs/kubo:v0.27.0
+    container_name: creg-prod-ipfs
+    ports:
+      - "4001:4001"
+      - "5001:5001"
+      - "8081:8080"
+    volumes:
+      - ipfs-data:/data/ipfs
+    command: ["daemon", "--init", "--init-profile=server", "--routing=dhtclient"]
+    restart: unless-stopped
+
+  node:
+    image: chain-registry-app:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: creg-prod-node
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ipfs:
+        condition: service_started
+    ports:
+      - "8080:8080"  # API
+      - "9000:9000"  # P2P Port (Open this on your router/firewall!)
+      - "50051:50051" # gRPC
+    volumes:
+      - node-data:/data
+      - ./config:/app/config:ro
+    environment:
+      CREG_CHAIN_ID: "creg-mainnet-beta"
+      CREG_TESTNET: "false" # This is our actual P2P network
+      CREG_DATA_DIR: "/data"
+      CREG_LISTEN: "0.0.0.0:8080"
+      CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/9000"
+      CREG_ETH_RPC: "${SEPOLIA_RPC_URL}" # Use the real Sepolia RPC
+      CREG_IPFS_URL: "http://ipfs:5001"
+      CREG_SINGLE_VALIDATOR_MODE: "true" # ALLOWS PROGRESS WITH ONE NODE
+      CREG_REGISTRY_ADDR: "${VITE_SEPOLIA_REGISTRY_ADDR}"
+      CREG_TOKEN_ADDR: "${VITE_SEPOLIA_CREG_TOKEN}"
+      CREG_STAKING_ADDR: "${VITE_SEPOLIA_STAKING_ADDR}"
+      CREG_VALIDATOR_KEY: "${NODE1_VALIDATOR_KEY}"
+      CREG_CORS_ALLOWED_ORIGINS: "http://localhost:3007" # ALLOW EXPLORER TO TALK TO NODE
+      RUST_LOG: info
+
+  web-explorer:
+    image: chain-registry-web-explorer:latest
+    build:
+      context: ./explorer
+      dockerfile: Dockerfile
+      args:
+        VITE_SEPOLIA_CREG_TOKEN: ${VITE_SEPOLIA_CREG_TOKEN}
+        VITE_SEPOLIA_STAKING_ADDR: ${VITE_SEPOLIA_STAKING_ADDR}
+        VITE_SEPOLIA_REGISTRY_ADDR: ${VITE_SEPOLIA_REGISTRY_ADDR}
+        VITE_DEFAULT_NETWORK_PROFILE: "sepolia"
+        VITE_API_BASE: "http://localhost:8080"
+    container_name: creg-prod-explorer
+    ports:
+      - "3007:80"
+    environment:
+      VITE_API_BASE: "http://localhost:8080" # Connects to the local node
+    depends_on:
+      node:
+        condition: service_started
+
+volumes:
+  postgres-data:
+  ipfs-data:
+  node-data:

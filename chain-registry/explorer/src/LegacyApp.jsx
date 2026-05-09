@@ -19,9 +19,9 @@ const DEFAULT_VALIDATOR_REGISTRATION_NOTE = 'Stake on-chain, register your valid
 // VITE_DEV_MODE is intentionally NOT checked here — env vars are baked into the
 // production bundle and a misconfigured server could expose this to end users.
 const PRIVATE_KEY_WALLET_ENABLED = import.meta.env.DEV === true
-const DEFAULT_NETWORK_PROFILE_ID = import.meta.env.VITE_DEFAULT_NETWORK_PROFILE || 'anvil'
+const DEFAULT_NETWORK_PROFILE_ID = import.meta.env.VITE_DEFAULT_NETWORK_PROFILE || 'sepolia'
 
-const buildChainConfig = (id, name, rpcUrl, nativeCurrency = { name: 'Ether', symbol: 'ETH', decimals: 18 }) => ({
+const buildChainConfig = (id, name, rpcUrl, nativeCurrency = { name: 'CREG', symbol: 'CREG', decimals: 18 }) => ({
   id,
   name,
   nativeCurrency,
@@ -29,12 +29,12 @@ const buildChainConfig = (id, name, rpcUrl, nativeCurrency = { name: 'Ether', sy
 })
 
 const PUBLIC_TESTNET_PROFILES = {
-  sepolia: {
+    sepolia: {
     id: 'sepolia',
     label: 'Ethereum Sepolia',
     shortLabel: 'Sepolia',
     description: 'Public Ethereum app and contract testnet.',
-    purpose: 'Application and contract testing',
+    purpose: 'Public Testnet Testing',
     chainId: 11155111,
     rpcUrl: import.meta.env.VITE_SEPOLIA_RPC_URL || 'https://ethereum-sepolia-rpc.publicnode.com',
     faucetUrl: import.meta.env.VITE_SEPOLIA_FAUCET_URL || 'https://sepolia-faucet.pk910.de/',
@@ -43,8 +43,8 @@ const PUBLIC_TESTNET_PROFILES = {
     stakingContract: import.meta.env.VITE_SEPOLIA_STAKING_ADDR || null,
     registryAddress: import.meta.env.VITE_SEPOLIA_REGISTRY_ADDR || null,
     validatorRegistrationMode: 'public-testnet',
-    validatorRegistrationNote: 'Sepolia is the recommended public Ethereum testnet for app and contract testing. Configure VITE_SEPOLIA_* contract addresses before using staking or publishing from this explorer on Sepolia.',
-    directFunding: false,
+    validatorRegistrationNote: 'Sepolia is the primary public testnet for Chain Registry. Deploy contracts to Sepolia to enable full staking and publishing functionality.',
+    directFunding: true,
   },
   hoodi: {
     id: 'hoodi',
@@ -73,6 +73,8 @@ const ERC20_ABI = [
   { name: 'approve', type: 'function', stateMutability: 'nonpayable',
     inputs: [{ name: 'spender', type: 'address' }, { name: 'amount', type: 'uint256' }],
     outputs: [{ name: '', type: 'bool' }] },
+  { name: 'publicMint', type: 'function', stateMutability: 'nonpayable',
+    inputs: [{ name: 'amount', type: 'uint256' }], outputs: [] },
 ]
 
 const STAKING_ABI = [
@@ -461,7 +463,7 @@ function App({ initialView = 'blocks', initialShowPublishForm = false, embedded 
       shortLabel: 'Anvil',
       description: 'Fast local development chain with direct in-app faucet funding.',
       purpose: 'Fast local iteration',
-      chain: buildChainConfig(31337, 'Anvil Local', directRpcUrl),
+      chain: buildChainConfig(31337, 'Anvil Local', directRpcUrl, { name: 'CREG', symbol: 'CREG', decimals: 18 }),
       rpcUrl: directRpcUrl,
       faucetUrl: directFaucetUrl,
       faucetApiBase: `${API_BASE}/api`,
@@ -535,10 +537,12 @@ function App({ initialView = 'blocks', initialShowPublishForm = false, embedded 
     : activeNetworkProfile.validatorRegistrationNote
 
   const activeProfileHasContracts = Boolean(tokenContractAddress && stakingContractAddress)
-  const activeFundingActionLabel = activeNetworkProfile.directFunding ? '💧 Fund Wallet' : `💧 Open ${activeNetworkProfile.shortLabel} Faucet`
-  const activeFundingHelp = activeNetworkProfile.directFunding
-    ? 'The local faucet can fund the connected address directly from the explorer.'
-    : `${activeNetworkProfile.label} uses external public faucets. The explorer can switch your wallet network cleanly, but public faucets still require opening the faucet site for manual completion.`
+  const activeFundingActionLabel = activeNetworkProfile.id === 'sepolia' ? '💧 Mint Test CREG' : activeNetworkProfile.directFunding ? '💧 Fund Wallet' : `💧 Open ${activeNetworkProfile.shortLabel} Faucet`
+  const activeFundingHelp = activeNetworkProfile.id === 'sepolia'
+    ? 'You can mint test CREG tokens directly on Sepolia using the button above. For ETH gas, use the external faucet button.'
+    : activeNetworkProfile.directFunding
+      ? 'The local faucet can fund the connected address directly from the explorer.'
+      : `${activeNetworkProfile.label} uses external public faucets. The explorer can switch your wallet network cleanly, but public faucets still require opening the faucet site for manual completion.`
   const walletFundingCooldownActive = activeNetworkProfile.directFunding && walletFundingCooldownSecs > 0
   const walletFundingButtonLabel = walletFundingLoading
     ? 'Funding...'
@@ -1001,6 +1005,29 @@ function App({ initialView = 'blocks', initialShowPublishForm = false, embedded 
     setWalletFundingCooldownSecs(0)
   }, [walletAccount?.address, activeNetworkProfileId])
 
+  // Auto-detect local node identity
+  useEffect(() => {
+      const detectNode = async () => {
+          try {
+              const resp = await fetch('/v1/runtime/config');
+              if (resp.ok) {
+                  const config = await resp.json();
+                  if (config.node_id) {
+                      setValidatorIdentityForm(current => ({
+                        ...current,
+                        nodeId: current.nodeId || config.node_id,
+                        ed25519Pubkey: current.ed25519Pubkey || config.validator_pubkey || '',
+                        alias: current.alias || 'Local Genesis Node'
+                      }));
+                  }
+              }
+          } catch (e) {
+              console.log("Local node identity not yet available via API:", e.message);
+          }
+      };
+      detectNode();
+  }, [setValidatorIdentityForm]);
+
   const refreshRelayerPolicy = useCallback(async () => {
     try {
       const response = await fetch(`${directRelayerUrl}/v1/relayer/policy`)
@@ -1085,6 +1112,10 @@ function App({ initialView = 'blocks', initialShowPublishForm = false, embedded 
     try {
       await doSwitch()
     } catch (switchError) {
+      const isMismatch = `${switchError?.message || ''}`.includes('nativeCurrency.symbol does not match')
+      if (isMismatch) {
+        throw new Error(`MetaMask symbol mismatch for ${profile.label}. Please remove the existing network from MetaMask settings and reconnect to allow the explorer to configure it correctly with the ${profile.chain.nativeCurrency.symbol} symbol.`)
+      }
       if (switchError?.code !== 4902 && !`${switchError?.message || ''}`.includes('Unrecognized chain')) {
         throw switchError
       }
@@ -1288,7 +1319,7 @@ function App({ initialView = 'blocks', initialShowPublishForm = false, embedded 
     setWalletFundingResult(null)
 
     try {
-      if (!activeNetworkProfile.directFunding || !activeNetworkProfile.faucetApiUrl) {
+      if (!activeNetworkProfile.directFunding || (!activeNetworkProfile.faucetApiUrl && activeNetworkProfile.id !== 'sepolia')) {
         if (activeFaucetUrl) {
           window.open(activeFaucetUrl, '_blank', 'noopener,noreferrer')
           setWalletFundingResult({
@@ -1298,6 +1329,31 @@ function App({ initialView = 'blocks', initialShowPublishForm = false, embedded 
           return
         }
         throw new Error(`No faucet URL is configured for ${activeNetworkProfile.label}.`)
+      }
+
+      if (activeNetworkProfile.id === 'sepolia') {
+        // Direct minting on Sepolia via publicMint function
+        if (!tokenContractAddress) {
+          throw new Error('Sepolia tCREG token address not configured. Please deploy contracts to Sepolia first.')
+        }
+        const walletClient = createSigningWalletClient()
+        const amountToMint = parseUnits('1000', 18) // Default 1000 CREG
+        const mintTx = await walletClient.writeContract({
+          account: walletAccount.address,
+          address: tokenContractAddress,
+          abi: ERC20_ABI,
+          functionName: 'publicMint',
+          args: [amountToMint],
+        })
+        const publicClient = createPublicClient({ chain: activeChain, transport: http(activeRpcUrl) })
+        await publicClient.waitForTransactionReceipt({ hash: mintTx })
+        setWalletFundingResult({
+          success: true,
+          message: '1,000 tCREG minted successfully on Sepolia!',
+          tokenTxHash: mintTx,
+        })
+        await refreshWalletBalance()
+        return
       }
 
       // Attempt PoW challenge flow: request a challenge, mine, then drip.
@@ -1483,7 +1539,7 @@ function App({ initialView = 'blocks', initialShowPublishForm = false, embedded 
     const requestedAmount = amountOverride || stakeAmount
     if (!walletAccount || !requestedAmount) return
     if (walletNativeBalance !== null && parseFloat(walletNativeBalance) <= 0) {
-      setStakeResult({ success: false, message: `This wallet has no ${activeChain.nativeCurrency.symbol} for gas. Use the faucet to get native testnet ETH before sending transactions.` })
+      setStakeResult({ success: false, message: `This wallet has no ${activeChain.nativeCurrency.symbol} for gas. Use the faucet to get testnet ${activeChain.nativeCurrency.symbol} before sending transactions.` })
       return
     }
     if (!tokenContractAddress || !stakingContractAddress) {

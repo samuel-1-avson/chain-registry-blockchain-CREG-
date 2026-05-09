@@ -651,6 +651,10 @@ async fn sponsor_request(
     let on_chain_nonce = match fetch_token_nonce(&state, prepared.token_contract, prepared.owner).await {
         Ok(value) => value,
         Err(err) => {
+            error!(
+                "Failed to fetch token nonce for sponsor request. Token: {}, Owner: {}. Error: {}",
+                prepared.token_contract, prepared.owner, err
+            );
             return (
                 StatusCode::BAD_GATEWAY,
                 Json(SponsorResponse {
@@ -658,7 +662,7 @@ async fn sponsor_request(
                     request_id: String::new(),
                     status: "failed".to_string(),
                     tx_hash: None,
-                    message: err,
+                    message: format!("Relayer failed to reach blockchain node: {}", err),
                 }),
             )
                 .into_response();
@@ -1395,7 +1399,11 @@ async fn fetch_token_nonce(
         .call()
         .await
         .map(|response| response._0)
-        .map_err(|e| format!("Failed to read token permit nonce: {}", e))
+        .map_err(|e| {
+            let msg = format!("Failed to read token permit nonce from {}: {}", token_contract, e);
+            error!("{}", msg);
+            msg
+        })
 }
 
 async fn rpc_call<T: for<'de> Deserialize<'de>>(

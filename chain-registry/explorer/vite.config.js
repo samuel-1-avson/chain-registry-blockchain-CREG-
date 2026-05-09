@@ -72,6 +72,11 @@ export default defineConfig({
     port: 3007,
     host: true,
     proxy: {
+      '/v1/relayer': {
+        target: 'http://127.0.0.1:8083',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/v1\/relayer/, '/v1/relayer')
+      },
       '/v1': 'http://127.0.0.1:8080',
       '/api-docs': 'http://127.0.0.1:8080',
       '/rpc': {
