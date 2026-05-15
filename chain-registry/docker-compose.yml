@@ -30,6 +30,9 @@ services:
     command: ["daemon", "--init", "--init-profile=server", "--routing=dhtclient"]
     environment:
       - IPFS_PROFILE=server
+    sysctls:
+      - net.core.rmem_max=2500000
+      - net.core.wmem_max=2500000
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "ipfs", "id"]

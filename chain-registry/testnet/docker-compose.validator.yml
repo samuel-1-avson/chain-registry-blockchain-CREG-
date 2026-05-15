@@ -67,6 +67,9 @@ services:
     environment:
       IPFS_PROFILE: server
       IPFS_SWARM_KEY: /key/swarm
+    sysctls:
+      - net.core.rmem_max=2500000
+      - net.core.wmem_max=2500000
     command: >
       daemon --migrate=true --enable-gc
     profiles:

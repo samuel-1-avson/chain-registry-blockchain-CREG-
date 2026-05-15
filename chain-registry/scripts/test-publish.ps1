@@ -5,16 +5,24 @@
 
 param(
     [string]$Version = "1.0.0",
-    [string]$PublisherAddress
+    [string]$PublisherAddress,
+    [string]$PublisherSigningKey,
+    [string]$EnvFile,
+    [string]$NodeApi = "http://localhost:8080",
+    [string]$IpfsApi = "http://localhost:5001"
 )
 
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$envFile = Join-Path $repoRoot ".env.testnet"
+$envFile = if ([string]::IsNullOrWhiteSpace($EnvFile)) {
+    Join-Path $repoRoot ".env.testnet"
+} else {
+    $EnvFile
+}
 
-$NODE_API  = "http://localhost:8080"
-$IPFS_API  = "http://localhost:5001"
+$NODE_API  = $NodeApi
+$IPFS_API  = $IpfsApi
 $ECOSYSTEM = "npm"
 $PKG_NAME  = "hello-creg"
 $PKG_VER   = $Version
@@ -53,21 +61,29 @@ function OK     { param($msg) Write-Host "    [OK] $msg" -ForegroundColor Green 
 function FAIL   { param($msg) Write-Host "    [FAIL] $msg" -ForegroundColor Red ; exit 1 }
 function ToHex  { param([byte[]]$b) ($b | ForEach-Object { $_.ToString("x2") }) -join "" }
 
-if (-not (Test-Path $envFile)) {
-    FAIL "Missing .env.testnet. Run testnet.ps1 first."
-}
+$publisherSigningKey = $PublisherSigningKey
 
-$publisherSigningKey = Get-DotEnvValue -Path $envFile -Key "TESTNET_PUBLISHER_KEY"
 if ([string]::IsNullOrWhiteSpace($publisherSigningKey)) {
-    FAIL "Missing TESTNET_PUBLISHER_KEY in .env.testnet"
+    if (-not (Test-Path $envFile)) {
+        FAIL "Missing env file at $envFile. Provide -PublisherSigningKey or create the env file first."
+    }
+
+    $publisherSigningKey = Get-DotEnvValue -Path $envFile -Key "TESTNET_PUBLISHER_KEY"
+    if ([string]::IsNullOrWhiteSpace($publisherSigningKey)) {
+        FAIL "Missing TESTNET_PUBLISHER_KEY in $envFile"
+    }
 }
 
 if ([string]::IsNullOrWhiteSpace($PublisherAddress)) {
+    if (-not (Test-Path $envFile)) {
+        FAIL "No publisher address provided and env file $envFile does not exist"
+    }
+
     $PublisherAddress = Get-DotEnvValue -Path $envFile -Key "FAUCET_ADDRESS"
 }
 
 if ([string]::IsNullOrWhiteSpace($PublisherAddress)) {
-    FAIL "No publisher address provided and FAUCET_ADDRESS is missing in .env.testnet"
+    FAIL "No publisher address provided and FAUCET_ADDRESS is missing in $envFile"
 }
 
 $PublisherAddress = Canonicalize-PublisherAddress -Address $PublisherAddress
@@ -187,7 +203,7 @@ $pythonCmd = $null
 foreach ($cmd in @("python", "python3", "py")) {
     try {
         $ver = & $cmd --version 2>&1
-        if ("$ver" -match "Python") { $pythonCmd = $cmd ; break }
+        if ("$ver".Trim() -match "^Python\s+\d") { $pythonCmd = $cmd ; break }
     } catch {}
 }
 
@@ -313,7 +329,7 @@ try {
     Write-Host ""
     OK "Package is on-chain"
 } catch {
-    Write-Host "    Package not yet indexed - check Explorer at http://localhost:3000" -ForegroundColor Yellow
+    Write-Host "    Package not yet indexed - check Explorer at http://localhost:3007" -ForegroundColor Yellow
 }
 
 # -------------------------------------------------------------------

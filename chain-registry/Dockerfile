@@ -202,6 +202,7 @@ COPY --from=builder /build/rules /app/rules
 # Non-root user for security.
 RUN useradd -r -s /bin/false creg
 RUN mkdir -p /data && chown creg:creg /data
+RUN chown -R creg:creg /app/circuits
 USER creg
 
 VOLUME ["/data"]

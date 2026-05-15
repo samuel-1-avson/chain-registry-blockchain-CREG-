@@ -32,6 +32,7 @@ services:
       - "8081:8080"
     volumes:
       - ipfs-data:/data/ipfs
+      - ./scripts/ipfs-cors.sh:/container-init.d/ipfs-cors.sh:ro
     command: ["daemon", "--init", "--init-profile=server", "--routing=dhtclient"]
     restart: unless-stopped
 
@@ -67,8 +68,45 @@ services:
       CREG_TOKEN_ADDR: "${VITE_SEPOLIA_CREG_TOKEN}"
       CREG_STAKING_ADDR: "${VITE_SEPOLIA_STAKING_ADDR}"
       CREG_VALIDATOR_KEY: "${NODE1_VALIDATOR_KEY}"
+      CREG_NODE_ID: "${CREG_NODE_ID:-node-1}"
+      CREG_IS_VALIDATOR: "${CREG_IS_VALIDATOR:-true}"
+      CREG_FAUCET_URL: "http://faucet:8082"
       CREG_CORS_ALLOWED_ORIGINS: "http://localhost:3007" # ALLOW EXPLORER TO TALK TO NODE
       RUST_LOG: info
+
+  faucet:
+    image: chain-registry-app:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: creg-prod-faucet
+    entrypoint: ["/app/faucet"]
+    environment:
+      FAUCET_PORT: "8082"
+      FAUCET_RPC_URL: "${SEPOLIA_RPC_URL}"
+      FAUCET_PRIVATE_KEY: "${FAUCET_PRIVATE_KEY}"
+      FAUCET_ADDRESS: "${FAUCET_ADDRESS}"
+      FAUCET_TOKEN_CONTRACT: "${VITE_SEPOLIA_CREG_TOKEN}"
+      FAUCET_DRIP_AMOUNT: "1000000000000000000000"
+      FAUCET_NATIVE_DRIP_AMOUNT: "0"
+      FAUCET_POW_DISABLED: "true"
+      FAUCET_EXPLORER_URL: "http://localhost:3007"
+      FAUCET_CHAIN_ID: "11155111"
+      FAUCET_PG_URL: "postgres://${POSTGRES_USER:-creg}:${POSTGRES_PASSWORD:-creg}@postgres:5432/${POSTGRES_DB:-chain_registry}?sslmode=disable"
+      RUST_LOG: info
+    ports:
+      - "8082:8082"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - faucet-data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
 
   web-explorer:
     image: chain-registry-web-explorer:latest
@@ -94,3 +132,4 @@ volumes:
   postgres-data:
   ipfs-data:
   node-data:
+  faucet-data:

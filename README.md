@@ -46,7 +46,7 @@ curl http://localhost:8080/v1/health
 **Open the web explorer.**
 
 - Embedded UI: <http://localhost:8080/ui/>
-- Standalone nginx (optional): `docker compose --profile web-explorer up -d` → <http://localhost:3000>
+- Standalone nginx (optional): `docker compose --profile web-explorer up -d` → <http://localhost:3007>
 
 **Launch the terminal explorer.**
 

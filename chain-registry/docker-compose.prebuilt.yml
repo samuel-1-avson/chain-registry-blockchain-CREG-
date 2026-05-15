@@ -21,6 +21,9 @@ services:
     volumes:
       - ipfs-data:/data/ipfs
     command: ["daemon", "--init", "--init-profile=server"]
+    sysctls:
+      - net.core.rmem_max=2500000
+      - net.core.wmem_max=2500000
     restart: unless-stopped
 
   # ── Anvil (local Ethereum) ──────────────────────────────────────────────────

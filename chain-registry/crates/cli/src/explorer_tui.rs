@@ -239,6 +239,12 @@ struct ConsensusState {
     fetched_at: Instant,
 }
 
+#[derive(Debug, Clone)]
+struct RuntimeIdentity {
+    node_id: String,
+    validator_pubkey: Option<String>,
+}
+
 #[derive(Debug)]
 struct App {
     // Navigation
@@ -260,6 +266,7 @@ struct App {
     events: VecDeque<(Instant, String, String)>, // (timestamp, type, message)
     mempool: Vec<MempoolTx>,
     peer_ids: Vec<String>,
+    runtime_identity: Option<RuntimeIdentity>,
 
     // UI State
     show_help: bool,
@@ -305,6 +312,7 @@ enum DataUpdate {
     MempoolTx(MempoolTx),
     MempoolSnapshot(Vec<MempoolTx>),
     Peers(Vec<String>),
+    RuntimeIdentity(RuntimeIdentity),
     Error(String),
     /// SSE stream (re-)connected successfully.
     NodeConnected,
@@ -359,6 +367,7 @@ impl App {
             events: VecDeque::with_capacity(MAX_EVENTS),
             mempool: Vec::new(),
             peer_ids: Vec::new(),
+            runtime_identity: None,
             show_help: false,
             search_query: String::new(),
             is_searching: false,
@@ -374,10 +383,8 @@ impl App {
             tps_history: VecDeque::with_capacity(60),
             faucet: FaucetView::new(
                 std::env::var("CREG_FAUCET_URL")
-                    // Use 127.0.0.1 over "localhost" to avoid Windows IPv4/IPv6
-                    // dual-stack flakiness (reqwest can hit `::1` and get ECONNRESET
-                    // while curl's Happy Eyeballs masks it).
-                    .unwrap_or_else(|_| "http://127.0.0.1:8082".into())
+                    // Use internal service name "faucet" for container-to-container comms.
+                    .unwrap_or_else(|_| "http://faucet:8082".into())
                     .trim_end_matches('/')
                     .to_string(),
             ),
@@ -532,8 +539,17 @@ async fn data_fetcher_loop(app: Arc<RwLock<App>>, api_base: String, tx: mpsc::Se
     let mut last_block_height: u64 = 0;
     let faucet_base = app.read().await.faucet.base.clone();
     let mut faucet_network_fetched = false;
+    let mut runtime_config_fetched = false;
 
     loop {
+        // Fetch runtime config once at startup
+        if !runtime_config_fetched {
+            if let Ok(identity) = fetch_runtime_config(&client, &api_base).await {
+                let _ = tx.send(DataUpdate::RuntimeIdentity(identity)).await;
+                runtime_config_fetched = true;
+            }
+        }
+
         // Fetch stats periodically
         if last_stats_refresh.elapsed() >= Duration::from_secs(REFRESH_INTERVAL_SECS) {
             if let Ok(stats) = fetch_stats(&client, &api_base).await {
@@ -835,6 +851,19 @@ async fn fetch_mempool(
 /// Fetch PBFT consensus round state.
 /// Tries `/v1/consensus/state`; if that returns an error or is not implemented,
 /// derives a best-effort snapshot from `/v1/chain/stats` and `/v1/validators`.
+async fn fetch_runtime_config(client: &reqwest::Client, api_base: &str) -> Result<RuntimeIdentity> {
+    let res = client
+        .get(format!("{}/v1/runtime/config", api_base))
+        .send()
+        .await?;
+    let json: Value = res.json().await?;
+
+    Ok(RuntimeIdentity {
+        node_id: json["node_id"].as_str().unwrap_or("unknown").to_string(),
+        validator_pubkey: json["validator_pubkey"].as_str().map(|s| s.to_string()),
+    })
+}
+
 async fn fetch_consensus_state(
     client: &reqwest::Client,
     api_base: &str,
@@ -1097,6 +1126,9 @@ fn apply_data_update(app: &mut App, update: DataUpdate) {
                 app.faucet.status = FaucetStatus::Failed { error, at: Instant::now() };
             }
         },
+        DataUpdate::RuntimeIdentity(identity) => {
+            app.runtime_identity = Some(identity);
+        }
     }
 }
 
@@ -2769,8 +2801,9 @@ fn draw_operator(f: &mut Frame, app: &App, area: Rect) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(7),
+            Constraint::Length(6), // Identity block
             Constraint::Length(8),
-            Constraint::Min(12),
+            Constraint::Min(6),
         ])
         .split(area);
 
@@ -2791,35 +2824,50 @@ fn draw_operator(f: &mut Frame, app: &App, area: Rect) {
     .wrap(Wrap { trim: true });
     f.render_widget(summary, chunks[0]);
 
+    // Identity block
+    let mut identity_lines = Vec::new();
+    if let Some(id) = &app.runtime_identity {
+        identity_lines.push(Line::from(vec![
+            Span::styled("Node ID:   ", Style::default().fg(Theme::text_dim())),
+            Span::styled(&id.node_id, Style::default().fg(Theme::primary()).add_modifier(Modifier::BOLD)),
+        ]));
+        identity_lines.push(Line::from(vec![
+            Span::styled("Ed25519:   ", Style::default().fg(Theme::text_dim())),
+            Span::styled(id.validator_pubkey.as_deref().unwrap_or("not configured"), Style::default().fg(Theme::accent())),
+        ]));
+        identity_lines.push(Line::from(vec![
+            Span::styled("Action:    ", Style::default().fg(Theme::text_dim())),
+            Span::raw("Copy these values to the Web Explorer to register your identity."),
+        ]));
+    } else {
+        identity_lines.push(Line::from(Span::styled("Fetching local node identity...", Style::default().fg(Theme::text_dim()))));
+    }
+
+    let identity = Paragraph::new(identity_lines)
+        .block(Block::default().borders(Borders::ALL).title(" Detected Validator Identity ").border_style(Style::default().fg(Theme::primary())))
+        .style(Style::default().fg(Theme::text()));
+    f.render_widget(identity, chunks[1]);
+
     let commands = Paragraph::new(vec![
-        Line::from("Browser explorer:  http://localhost:3000"),
+        Line::from("Browser explorer:  http://localhost:3007"),
         Line::from("Node health:        creg testnet status --node-url http://localhost:8080"),
-        Line::from("Publish package:    creg publish <tarball>.tar.gz --key-file <publisher.key> --node-url http://localhost:8080"),
+        Line::from("Register ID:        creg testnet register-validator --node-id <id> --pubkey <key>"),
         Line::from("Stake validator:    creg testnet stake-validator --key 0x<private-key> 100"),
         Line::from("Stake publisher:    creg testnet stake-publisher --key 0x<private-key> 100"),
     ])
     .block(Block::default().borders(Borders::ALL).title(" Operator Commands "))
     .style(Style::default().fg(Theme::text()))
     .wrap(Wrap { trim: true });
-    f.render_widget(commands, chunks[1]);
+    f.render_widget(commands, chunks[2]);
 
     let workflow = Paragraph::new(vec![
         Line::from("This console is the operator surface for validator monitoring."),
         Line::from("Use it to inspect blocks, validator health, packages, peers, and live events."),
-        Line::from(""),
-        Line::from("Recommended workflow:"),
-        Line::from("  1. Keep `creg console` open during validator operation."),
-        Line::from("  2. Use the browser explorer for wallet connect, faucet, and staking UX."),
-        Line::from("  3. Use `creg watch` in a second terminal for focused event streams."),
-        Line::from(""),
-        Line::from("View shortcuts:"),
-        Line::from("  1 Overview   2 Blocks   3 Validators   4 Packages"),
-        Line::from("  5 Network    6 Mempool  7 Events       8 Operator"),
     ])
     .block(Block::default().borders(Borders::ALL).title(" Operator Workflow "))
     .style(Style::default().fg(Theme::text()))
     .wrap(Wrap { trim: true });
-    f.render_widget(workflow, chunks[2]);
+    f.render_widget(workflow, chunks[3]);
 }
 
 // ============================================================================

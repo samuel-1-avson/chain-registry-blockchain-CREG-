@@ -64,7 +64,7 @@ x-node-base: &node-base
     CREG_STAKING_ADDR: "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707"
     CREG_BLOCK_INTERVAL: "2"
     CREG_SINGLE_VALIDATOR_MODE: "true"
-    CREG_DEV_SANDBOX: "false"
+    CREG_DEV_SANDBOX: "${CREG_DEV_SANDBOX:-true}"
     CREG_ZK_ENABLED: "true"
     CREG_ML_ENABLED: "true"
     CREG_ML_MODEL_PATH: "/app/models"
@@ -136,6 +136,9 @@ services:
     command: ["daemon", "--init", "--init-profile=server", "--routing=dhtclient"]
     environment:
       - IPFS_PROFILE=server
+    sysctls:
+      - net.core.rmem_max=2500000
+      - net.core.wmem_max=2500000
     restart: unless-stopped
 
   # ── Shared Anvil (local Ethereum) ───────────────────────────────────────────

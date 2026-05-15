@@ -108,6 +108,23 @@ fn vrf_score(output_hex: &str) -> Result<String> {
     Ok(sha256_hex(&bytes))
 }
 
+/// Select the proposer deterministically from public validator metadata only.
+///
+/// This is stable across nodes even when VRF proofs arrive at different times.
+pub fn select_proposer_deterministic(
+    validators: &[VrfValidator],
+    epoch_seed: &str,
+) -> Option<String> {
+    validators
+        .iter()
+        .map(|v| {
+            let score = sha256_hex(format!("{}:{}", v.pubkey, epoch_seed).as_bytes());
+            (v.id.clone(), score)
+        })
+        .min_by(|a, b| a.1.cmp(&b.1))
+        .map(|(id, _)| id)
+}
+
 /// Select the block proposer from the active set using VRF proofs.
 ///
 /// * If a validator provides a `vrf_output` + `vrf_proof`, the proof is verified
@@ -116,16 +133,30 @@ fn vrf_score(output_hex: &str) -> Result<String> {
 ///   compatibility / dev mode.
 /// * The validator with the lowest score is chosen.
 pub fn select_proposer(validators: &[VrfValidator], epoch_seed: &str) -> Option<String> {
+    let use_vrf_scores = !validators.is_empty()
+        && validators.iter().all(|v| {
+            if let (Some(ref output), Some(ref proof)) = (&v.vrf_output, &v.vrf_proof) {
+                verify(epoch_seed.as_bytes(), &v.pubkey, output, proof).is_ok()
+            } else {
+                false
+            }
+        });
+
+    if !use_vrf_scores {
+        return select_proposer_deterministic(validators, epoch_seed);
+    }
+
     validators
         .iter()
         .filter_map(|v| {
-            if let (Some(ref output), Some(ref proof)) = (&v.vrf_output, &v.vrf_proof) {
-                match verify(epoch_seed.as_bytes(), &v.pubkey, output, proof) {
-                    Ok(()) => match vrf_score(output) {
+            if use_vrf_scores {
+                if let Some(ref output) = v.vrf_output {
+                    match vrf_score(output) {
                         Ok(score) => Some((v.id.clone(), score)),
                         Err(_) => None,
-                    },
-                    Err(_) => None,
+                    }
+                } else {
+                    None
                 }
             } else {
                 let score = sha256_hex(format!("{}:{}", v.pubkey, epoch_seed).as_bytes());
@@ -215,6 +246,94 @@ mod tests {
     }
 
     #[test]
+    fn proposer_selection_falls_back_when_proofs_are_partial() {
+        let baseline = vec![
+            VrfValidator {
+                id: "val_1".into(),
+                pubkey: "aa".into(),
+                vrf_output: None,
+                vrf_proof: None,
+            },
+            VrfValidator {
+                id: "val_2".into(),
+                pubkey: "bb".into(),
+                vrf_output: None,
+                vrf_proof: None,
+            },
+            VrfValidator {
+                id: "val_3".into(),
+                pubkey: "cc".into(),
+                vrf_output: None,
+                vrf_proof: None,
+            },
+        ];
+
+        let partial = vec![
+            VrfValidator {
+                id: "val_1".into(),
+                pubkey: "aa".into(),
+                vrf_output: Some("00".into()),
+                vrf_proof: Some("00".into()),
+            },
+            VrfValidator {
+                id: "val_2".into(),
+                pubkey: "bb".into(),
+                vrf_output: None,
+                vrf_proof: None,
+            },
+            VrfValidator {
+                id: "val_3".into(),
+                pubkey: "cc".into(),
+                vrf_output: None,
+                vrf_proof: None,
+            },
+        ];
+
+        assert_eq!(
+            select_proposer(&baseline, "seed1"),
+            select_proposer(&partial, "seed1")
+        );
+    }
+
+    #[test]
+    fn deterministic_proposer_selection_ignores_proofs() {
+        let baseline = vec![
+            VrfValidator {
+                id: "val_1".into(),
+                pubkey: "aa".into(),
+                vrf_output: None,
+                vrf_proof: None,
+            },
+            VrfValidator {
+                id: "val_2".into(),
+                pubkey: "bb".into(),
+                vrf_output: None,
+                vrf_proof: None,
+            },
+        ];
+
+        let with_proofs = vec![
+            VrfValidator {
+                id: "val_1".into(),
+                pubkey: "aa".into(),
+                vrf_output: Some("00".into()),
+                vrf_proof: Some("00".into()),
+            },
+            VrfValidator {
+                id: "val_2".into(),
+                pubkey: "bb".into(),
+                vrf_output: Some("11".into()),
+                vrf_proof: Some("11".into()),
+            },
+        ];
+
+        assert_eq!(
+            select_proposer_deterministic(&baseline, "seed1"),
+            select_proposer_deterministic(&with_proofs, "seed1")
+        );
+    }
+
+    #[test]
     fn vrf_proposer_selects_lowest_output() {
         use rand::RngCore;
         let mut rng = rand::thread_rng();
@@ -282,7 +401,7 @@ mod tests {
         rng.fill_bytes(&mut bytes);
         let sk2 = SigningKey::from_bytes(&bytes);
 
-        let (out1, prf1) = prove(seed, &hex::encode(sk1.to_bytes())).unwrap();
+        let (out1, _prf1) = prove(seed, &hex::encode(sk1.to_bytes())).unwrap();
         let (_out2, _prf2) = prove(seed, &hex::encode(sk2.to_bytes())).unwrap();
 
         // Corrupt the proof for val_1.

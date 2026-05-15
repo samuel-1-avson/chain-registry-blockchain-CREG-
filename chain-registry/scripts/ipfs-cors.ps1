@@ -9,6 +9,11 @@ $OriginsJson = "[" + ($Origins -join ",") + "]"
 Write-Host "Setting up IPFS CORS..."
 Write-Host "  Allowed origins: $CorsOrigin"
 
+ipfs config profile apply lowpower
+if ($LASTEXITCODE -ne 0) {
+    Write-Warning "Failed to apply lowpower profile (this is expected if IPFS is not running or if it's already set)"
+}
+
 ipfs config --json API.HTTPHeaders.Access-Control-Allow-Origin $OriginsJson
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Failed to set Access-Control-Allow-Origin"

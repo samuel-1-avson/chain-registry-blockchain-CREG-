@@ -363,6 +363,8 @@ struct DripResponse {
     success: bool,
     message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     tx_hash: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     amount: Option<String>,
@@ -382,9 +384,11 @@ struct DripResponse {
 
 impl DripResponse {
     fn error(message: impl Into<String>) -> Self {
+        let msg = message.into();
         Self {
             success: false,
-            message: message.into(),
+            message: msg.clone(),
+            error: Some(msg),
             tx_hash: None,
             amount: None,
             retry_after_seconds: None,
@@ -707,6 +711,7 @@ async fn get_native_balance(config: &FaucetConfig, address: &str) -> Result<u128
 async fn get_challenge(
     State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
+    info!(">>> get_challenge request received");
     use rand::RngCore;
     let mut bytes = [0u8; 16];
     rand::rngs::OsRng.fill_bytes(&mut bytes);
@@ -906,6 +911,7 @@ async fn handle_drip(
                     token_msg,
                     native_msg
                 ),
+                error: None,
                 tx_hash: None,
                 amount: None,
                 retry_after_seconds: None,
@@ -996,6 +1002,7 @@ async fn handle_drip(
                     } else {
                         format!("Sent {}. Partial issue: {}", parts.join(" + "), failures.join("; "))
                     },
+                    error: None,
                     tx_hash: token_tx_hash.clone().or_else(|| native_tx_hash.clone()),
                     amount: Some(parts.join(" + ")),
                     retry_after_seconds: None,
@@ -1024,6 +1031,11 @@ async fn handle_drip(
                     } else {
                         format!("Faucet transfer failed: {}", failures.join("; "))
                     },
+                    error: Some(if failures.is_empty() {
+                        "unknown_error".to_string()
+                    } else {
+                        failures.join("; ")
+                    }),
                     tx_hash: None,
                     amount: None,
                     retry_after_seconds: None,
@@ -1070,6 +1082,7 @@ async fn get_balance(
     State(state): State<Arc<AppState>>,
     axum::extract::Path(address): axum::extract::Path<String>,
 ) -> impl IntoResponse {
+    info!(">>> get_balance request for address: {}", address);
     let token_balance = get_token_balance(&state.config, &address).await;
     let native_balance = get_native_balance(&state.config, &address).await;
 

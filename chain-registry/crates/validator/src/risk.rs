@@ -356,6 +356,9 @@ fn build_evidence_digest(
 mod tests {
     use super::*;
 
+    static ENV_LOCK: std::sync::LazyLock<std::sync::Mutex<()>> =
+        std::sync::LazyLock::new(|| std::sync::Mutex::new(()));
+
     fn finding(id: &str, severity: FindingSeverity) -> Finding {
         Finding {
             id: id.to_string(),
@@ -451,7 +454,7 @@ mod tests {
 
     #[test]
     fn testnet_dev_sandbox_bypass_requires_review_not_block() {
-        let _env_lock = std::sync::Mutex::new(()).lock().unwrap();
+        let _env_lock = ENV_LOCK.lock().unwrap();
         let old_testnet = std::env::var("CREG_TESTNET").ok();
         let old_production = std::env::var("CREG_PRODUCTION").ok();
 

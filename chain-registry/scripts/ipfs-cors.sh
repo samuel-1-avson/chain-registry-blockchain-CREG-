@@ -8,6 +8,7 @@ CORS_ORIGIN="${IPFS_CORS_ORIGIN:-http://localhost:3000,http://localhost:8080,htt
 
 echo "Setting up IPFS CORS..."
 echo "  Allowed origins: $CORS_ORIGIN"
+ipfs config profile apply lowpower
 ipfs config --json API.HTTPHeaders.Access-Control-Allow-Origin "[\"$(echo "$CORS_ORIGIN" | sed 's/,/","/g')\"]"
 ipfs config --json API.HTTPHeaders.Access-Control-Allow-Methods '["PUT", "POST", "GET"]'
 echo "CORS set!"

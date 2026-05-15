@@ -149,7 +149,7 @@ async fn produce_block(
                 })
                 .await;
 
-            let selected_proposer = consensus::vrf::select_proposer(&active, &epoch_seed)
+            let selected_proposer = consensus::vrf::select_proposer_deterministic(&active, &epoch_seed)
                 .ok_or_else(|| anyhow::anyhow!("No active validators to select proposer"))?;
             if node_id != selected_proposer {
                 anyhow::bail!(
