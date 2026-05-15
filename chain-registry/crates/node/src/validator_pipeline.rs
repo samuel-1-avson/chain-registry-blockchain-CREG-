@@ -16,12 +16,12 @@ const VOTE_TIMEOUT_SECS: u64 = 10; // Reduced from 30s for faster consensus
 const DEGRADED_MODEL_PREFIX: &str = "degraded";
 
 #[derive(Debug, Clone)]
-enum ConsensusOutcome {
+pub(crate) enum ConsensusOutcome {
     Verified(Vec<common::ValidatorSignature>),
     Rejected { reason: String },
 }
 
-fn aggregate_consensus_outcome(
+pub(crate) fn aggregate_consensus_outcome(
     signatures: &[common::ValidatorSignature],
     assigned_count: usize,
 ) -> Option<ConsensusOutcome> {
@@ -299,14 +299,23 @@ async fn process_package(
             }
         };
         let signing_key = SigningKey::from_bytes(&key_arr);
+        let validator_pubkey = hex::encode(signing_key.verifying_key().as_bytes());
+        let approved = matches!(vote, ValidatorVote::Approve);
 
-        // Sign canonical || content_hash to bind the verdict to this exact version.
-        let msg = format!("{}-{}", canonical, req.content_hash);
+        // Use the same domain-separated message format for both local records
+        // and gossiped votes so synced blocks can verify every validator vote
+        // against one canonical payload.
+        let msg = crate::gossip::canonical_vote_message(
+            &canonical,
+            &req.content_hash,
+            approved,
+            &validator_pubkey,
+        );
         let signature = signing_key.sign(msg.as_bytes());
 
         common::ValidatorSignature {
             validator_id: node_id.clone(),
-            validator_pubkey: hex::encode(signing_key.verifying_key().as_bytes()),
+            validator_pubkey,
             signature: hex::encode(signature.to_bytes()),
             vote: vote.clone(),
             signed_at: Utc::now(),

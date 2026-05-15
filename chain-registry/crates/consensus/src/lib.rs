@@ -1,6 +1,9 @@
 // crates/consensus/src/lib.rs
 // Practical Byzantine Fault Tolerance (PBFT) consensus engine.
-// A block is finalised when ≥ ⌊(2n/3)⌋ + 1 validators sign it.
+// A block is finalised when it reaches a PBFT quorum. Validator sets smaller
+// than four use the standard ≥ ⌊(2n/3)⌋ + 1 threshold by default. Local/dev
+// three-validator clusters can explicitly opt into a 2-of-3 majority via
+// `CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM=true`.
 // This implementation covers the three PBFT phases:
 //   PRE-PREPARE → PREPARE → COMMIT
 

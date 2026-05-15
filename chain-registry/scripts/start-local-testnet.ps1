@@ -65,6 +65,7 @@ function Ensure-LocalTestnetEnvFile {
         DEPLOYER_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
         CREG_BRIDGE_KEY = "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
         CREG_DEV_SANDBOX = "true"
+        CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM = "true"
         FAUCET_PRIVATE_KEY = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
         FAUCET_ADDRESS = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
         RELAYER_PRIVATE_KEY = "0x2a871d0798f97d79848a013d4936a73bf4cc922c325d5dc0003f279c7aa26f8f"
@@ -86,6 +87,7 @@ function Ensure-LocalTestnetEnvFile {
     }
 
     Set-Or-AddEnvValue -Lines $lines -Key "CREG_DEV_SANDBOX" -Value "true"
+    Set-Or-AddEnvValue -Lines $lines -Key "CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM" -Value "true"
 
     [System.IO.File]::WriteAllLines($EnvFile, $lines)
 }
@@ -161,6 +163,7 @@ Clear-ComposeEnvOverrides -Keys @(
     "NODE3_VALIDATOR_KEY",
     "DEPLOYER_KEY",
     "CREG_DEV_SANDBOX",
+    "CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM",
     "CREG_BRIDGE_KEY",
     "FAUCET_PRIVATE_KEY",
     "FAUCET_ADDRESS",

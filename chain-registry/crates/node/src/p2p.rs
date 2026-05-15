@@ -731,6 +731,7 @@ mod tests {
             validator_set_sync: crate::state::ValidatorSetSyncStatus::default(),
             view_change_certs: HashMap::new(),
             reorgs: Vec::new(),
+            pbft_engine: crate::state::PbftEngine::new(),
         })))
     }
 

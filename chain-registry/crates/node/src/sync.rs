@@ -156,8 +156,8 @@ async fn sync_once(state: Arc<RwLock<NodeState>>) -> anyhow::Result<()> {
 ///
 /// Each `ChainRecord` in the block must carry at least `⌊2n/3⌋ + 1` valid
 /// Ed25519 signatures from validators currently in the active set, where each
-/// signature is over the canonical on-chain message `"<canonical>-<content_hash>"`
-/// (the format produced by `validator_pipeline::sign`).
+/// signature is over the domain-separated payload produced by
+/// `crate::gossip::canonical_vote_message(...)`.
 ///
 /// Notes and limitations:
 ///   * Uses the *current* validator set. Historical validator-set tracking is
@@ -199,8 +199,6 @@ fn verify_block_signatures(
             _ => continue,
         };
         let canonical = record.id.canonical();
-        let message = format!("{}-{}", canonical, record.content_hash);
-        let msg_bytes = message.as_bytes();
 
         let mut approvals = 0usize;
         let mut seen = HashSet::new();
@@ -241,7 +239,14 @@ fn verify_block_signatures(
                 Err(_) => continue,
             };
 
-            if vk.verify(msg_bytes, &ed_sig).is_ok() {
+            let message = crate::gossip::canonical_vote_message(
+                &canonical,
+                &record.content_hash,
+                matches!(sig.vote, ValidatorVote::Approve),
+                &sig.validator_pubkey,
+            );
+
+            if vk.verify(message.as_bytes(), &ed_sig).is_ok() {
                 approvals += 1;
             }
         }
@@ -260,4 +265,196 @@ fn verify_block_signatures(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::verify_block_signatures;
+    use crate::validator_pipeline::{aggregate_consensus_outcome, ConsensusOutcome};
+    use chrono::Utc;
+    use common::{
+        merkle_root, AnalysisBundleRefs, Block, BlockHeader, ChainRecord,
+        DeterministicRiskSummary, PackageId, PackageStatus, Transaction, Validator,
+        ValidatorSet, ValidatorSignature, ValidatorVote,
+    };
+    use ed25519_dalek::{Signer, SigningKey};
+
+    #[derive(Clone, Copy)]
+    enum VotePayloadFormat {
+        Canonical,
+        Legacy,
+    }
+
+    fn validator(id: &str, signing_key: &SigningKey) -> Validator {
+        Validator {
+            id: id.into(),
+            alias: id.into(),
+            pubkey: hex::encode(signing_key.verifying_key().as_bytes()),
+            eth_address: String::new(),
+            stake: 100,
+            reputation: 100,
+            status: "online".into(),
+        }
+    }
+
+    fn signed_approval(
+        validator_id: &str,
+        signing_key: &SigningKey,
+        canonical: &str,
+        content_hash: &str,
+        format: VotePayloadFormat,
+    ) -> ValidatorSignature {
+        let validator_pubkey = hex::encode(signing_key.verifying_key().as_bytes());
+        let message = match format {
+            VotePayloadFormat::Canonical => crate::gossip::canonical_vote_message(
+                canonical,
+                content_hash,
+                true,
+                &validator_pubkey,
+            ),
+            VotePayloadFormat::Legacy => format!("{}-{}", canonical, content_hash),
+        };
+
+        ValidatorSignature {
+            validator_id: validator_id.into(),
+            validator_pubkey,
+            signature: hex::encode(signing_key.sign(message.as_bytes()).to_bytes()),
+            vote: ValidatorVote::Approve,
+            signed_at: Utc::now(),
+            ml_model_version: "creg-detect-v1.0.0".into(),
+            analysis_bundles: AnalysisBundleRefs::default(),
+            evidence_digest: String::new(),
+            deterministic_risk: DeterministicRiskSummary::default(),
+        }
+    }
+
+    fn publish_block(record: ChainRecord) -> Block {
+        let tx = Transaction::Publish(record);
+
+        Block {
+            header: BlockHeader {
+                height: 1,
+                prev_hash: Block::genesis().hash(),
+                merkle_root: merkle_root(std::slice::from_ref(&tx)),
+                proposer_id: "node-1".into(),
+                timestamp: Utc::now(),
+                validator_set_hash: "dev".into(),
+                vrf_output: None,
+                vrf_proof: None,
+            },
+            transactions: vec![tx],
+            pbft_signatures: vec![],
+        }
+    }
+
+    fn publish_record(
+        package_id: &PackageId,
+        content_hash: &str,
+        validator_signatures: Vec<ValidatorSignature>,
+    ) -> ChainRecord {
+        ChainRecord {
+            id: package_id.clone(),
+            content_hash: content_hash.into(),
+            ipfs_cid: "bafytestcid".into(),
+            publisher_pubkey: "publisher-pubkey".into(),
+            block_hash: String::new(),
+            published_at: Utc::now(),
+            validator_signatures,
+            status: PackageStatus::Verified,
+            shielded: false,
+            key_bundle: None,
+            pgp_fingerprint: None,
+            findings: vec![],
+            analysis_bundles: AnalysisBundleRefs::default(),
+            evidence_digest: String::new(),
+            deterministic_risk: DeterministicRiskSummary::default(),
+            access_count: 0,
+            last_accessed: None,
+            threshold: 0,
+            publisher_pubkeys: vec![],
+            manifest: None,
+        }
+    }
+
+    #[test]
+    fn aggregated_votes_pass_sync_only_with_canonical_payload() {
+        let package_id = PackageId::new("npm", "pkg", "1.0.0");
+        let canonical = package_id.canonical();
+        let content_hash = common::sha256_hex(b"vote-sync-regression");
+
+        let signing_keys = [
+            ("node-1", SigningKey::from_bytes(&[7u8; 32])),
+            ("node-2", SigningKey::from_bytes(&[8u8; 32])),
+            ("node-3", SigningKey::from_bytes(&[9u8; 32])),
+        ];
+        let validator_set = ValidatorSet::new(
+            signing_keys
+                .iter()
+                .map(|(id, key)| validator(id, key))
+                .collect(),
+        );
+
+        let canonical_votes: Vec<_> = signing_keys
+            .iter()
+            .map(|(id, key)| {
+                signed_approval(
+                    id,
+                    key,
+                    &canonical,
+                    &content_hash,
+                    VotePayloadFormat::Canonical,
+                )
+            })
+            .collect();
+        let canonical_outcome = aggregate_consensus_outcome(
+            &canonical_votes,
+            validator_set.validators.len(),
+        )
+        .expect("three canonical approvals should satisfy aggregation quorum");
+        let ConsensusOutcome::Verified(canonical_signatures) = canonical_outcome else {
+            panic!("expected verified aggregation outcome for canonical votes");
+        };
+
+        let canonical_block = publish_block(publish_record(
+            &package_id,
+            &content_hash,
+            canonical_signatures,
+        ));
+        verify_block_signatures(&canonical_block, &validator_set)
+            .expect("follower sync should accept canonical aggregated votes");
+
+        let legacy_votes: Vec<_> = signing_keys
+            .iter()
+            .map(|(id, key)| {
+                signed_approval(
+                    id,
+                    key,
+                    &canonical,
+                    &content_hash,
+                    VotePayloadFormat::Legacy,
+                )
+            })
+            .collect();
+        let legacy_outcome = aggregate_consensus_outcome(
+            &legacy_votes,
+            validator_set.validators.len(),
+        )
+        .expect("three legacy approvals still satisfy vote aggregation quorum");
+        let ConsensusOutcome::Verified(legacy_signatures) = legacy_outcome else {
+            panic!("expected verified aggregation outcome for legacy votes");
+        };
+
+        let legacy_block = publish_block(publish_record(
+            &package_id,
+            &content_hash,
+            legacy_signatures,
+        ));
+        let error = verify_block_signatures(&legacy_block, &validator_set)
+            .expect_err("follower sync must reject the legacy vote payload format");
+
+        assert!(
+            error.to_string().contains("only 0 valid signatures, need 3"),
+            "unexpected sync failure: {error}"
+        );
+    }
 }

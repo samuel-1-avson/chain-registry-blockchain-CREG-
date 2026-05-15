@@ -21,6 +21,11 @@ const DEFAULT_MAX_VIEW_CHANGES: u32 = 3;
 /// for garbage collection. Overridden via `CREG_PBFT_STALE_TTL` env var.
 const DEFAULT_STALE_ROUND_TTL_SECS: u64 = 120;
 
+/// Whether three-validator clusters may use a simple-majority quorum instead
+/// of strict PBFT quorum. Disabled by default and intended for explicit local
+/// bootstrap opt-in only.
+const DEFAULT_ALLOW_SMALL_CLUSTER_QUORUM: bool = false;
+
 /// Configuration for PBFT consensus parameters.
 /// All values have sensible defaults and can be overridden via environment
 /// variables at startup.
@@ -29,6 +34,7 @@ pub struct PbftConfig {
     pub round_phase_timeout: Duration,
     pub max_view_changes: u32,
     pub stale_round_ttl: Duration,
+    pub allow_small_cluster_quorum: bool,
 }
 
 impl Default for PbftConfig {
@@ -50,8 +56,23 @@ impl Default for PbftConfig {
                     .and_then(|v| v.parse().ok())
                     .unwrap_or(DEFAULT_STALE_ROUND_TTL_SECS),
             ),
+            allow_small_cluster_quorum: env_flag(
+                "CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM",
+                DEFAULT_ALLOW_SMALL_CLUSTER_QUORUM,
+            ),
         }
     }
+}
+
+fn env_flag(name: &str, default: bool) -> bool {
+    std::env::var(name)
+        .ok()
+        .map(|value| match value.trim().to_ascii_lowercase().as_str() {
+            "1" | "true" | "yes" | "on" => true,
+            "0" | "false" | "no" | "off" => false,
+            _ => default,
+        })
+        .unwrap_or(default)
 }
 
 /// Current phase of a PBFT round for a given block proposal.
@@ -121,10 +142,16 @@ impl PbftRound {
         }
     }
 
-    /// Quorum threshold: ⌊(2n/3)⌋ + 1
+    /// Quorum threshold.
+    ///
+    /// PBFT requires unanimity in a three-validator set to preserve the usual
+    /// Byzantine tolerance guarantees. Local bootstrap can opt into a 2-of-3
+    /// majority via `CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM=true`.
     pub fn quorum(&self) -> usize {
-        let n = self.validator_set.len();
-        (2 * n / 3) + 1
+        quorum_threshold(
+            self.validator_set.len(),
+            self.config.allow_small_cluster_quorum,
+        )
     }
 
     // ── Phase 1: PRE-PREPARE ─────────────────────────────────────────────────
@@ -350,6 +377,14 @@ pub struct PbftEngine {
     config: PbftConfig,
 }
 
+fn quorum_threshold(validator_count: usize, allow_small_cluster_quorum: bool) -> usize {
+    match validator_count {
+        0 => 0,
+        3 if allow_small_cluster_quorum => 2,
+        n => (2 * n / 3) + 1,
+    }
+}
+
 impl PbftEngine {
     pub fn new() -> Self {
         Self {
@@ -493,5 +528,27 @@ impl PbftEngine {
     /// Number of currently-tracked rounds (for metrics / observability).
     pub fn active_round_count(&self) -> usize {
         self.rounds.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::quorum_threshold;
+
+    #[test]
+    fn small_cluster_quorum_is_explicitly_gated() {
+        assert_eq!(quorum_threshold(0, false), 0);
+        assert_eq!(quorum_threshold(1, false), 1);
+        assert_eq!(quorum_threshold(2, false), 2);
+        assert_eq!(quorum_threshold(3, false), 3);
+        assert_eq!(quorum_threshold(3, true), 2);
+    }
+
+    #[test]
+    fn larger_validator_sets_use_pbft_quorum_regardless_of_flag() {
+        assert_eq!(quorum_threshold(4, false), 3);
+        assert_eq!(quorum_threshold(4, true), 3);
+        assert_eq!(quorum_threshold(5, false), 4);
+        assert_eq!(quorum_threshold(7, true), 5);
     }
 }
