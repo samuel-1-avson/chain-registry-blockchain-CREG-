@@ -494,9 +494,10 @@ impl P2PNode {
                                                     if let Ok(pk_bytes) = hex::decode(our_privkey_hex) {
                                                         if let Ok(sk) = ed25519_dalek::SigningKey::try_from(pk_bytes.as_slice()) {
                                                             use ed25519_dalek::Signer;
-                                                            let signature = hex::encode(sk.sign(bh.as_bytes()).to_bytes());
+                                                            let message = consensus::pbft::pbft_signature_message("prepare", &bh);
+                                                            let signature = hex::encode(sk.sign(message.as_bytes()).to_bytes());
                                                             let pubkey = hex::encode(sk.verifying_key().as_bytes());
-                                                            
+
                                                             let sig_obj = common::BlockSignature { validator_id: our_id.clone(), pubkey: pubkey.clone(), signature: signature.clone() };
                                                             let _ = s.pbft_engine.prepare(&bh, &our_id, sig_obj);
 
@@ -526,9 +527,10 @@ impl P2PNode {
                                                     if let Ok(pk_bytes) = hex::decode(our_privkey_hex) {
                                                         if let Ok(sk) = ed25519_dalek::SigningKey::try_from(pk_bytes.as_slice()) {
                                                             use ed25519_dalek::Signer;
-                                                            let commit_sig = hex::encode(sk.sign(block_hash.as_bytes()).to_bytes());
+                                                            let message = consensus::pbft::pbft_signature_message("commit", &block_hash);
+                                                            let commit_sig = hex::encode(sk.sign(message.as_bytes()).to_bytes());
                                                             let pubkey = hex::encode(sk.verifying_key().as_bytes());
-                                                            
+
                                                             let sig_obj = common::BlockSignature { validator_id: our_id.clone(), pubkey: pubkey.clone(), signature: commit_sig.clone() };
                                                             let _ = s.pbft_engine.commit(&block_hash, &our_id, sig_obj);
 

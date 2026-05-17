@@ -6,6 +6,7 @@
 use crate::ValidatorSet;
 use anyhow::{bail, Result};
 use common::{Block, BlockSignature};
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
@@ -25,6 +26,13 @@ const DEFAULT_STALE_ROUND_TTL_SECS: u64 = 120;
 /// of strict PBFT quorum. Disabled by default and intended for explicit local
 /// bootstrap opt-in only.
 const DEFAULT_ALLOW_SMALL_CLUSTER_QUORUM: bool = false;
+
+const PBFT_SIGNATURE_DOMAIN: &str = "creg-pbft-v1";
+
+/// Canonical message signed by validators during PBFT block consensus.
+pub fn pbft_signature_message(phase: &str, block_hash: &str) -> String {
+    format!("{}:{}:{}", PBFT_SIGNATURE_DOMAIN, phase, block_hash)
+}
 
 /// Configuration for PBFT consensus parameters.
 /// All values have sensible defaults and can be overridden via environment
@@ -200,8 +208,9 @@ impl PbftRound {
                 vrf_proof: None,
             })
             .collect();
-        let selected = crate::vrf::select_proposer_deterministic(&active, &self.block.header.prev_hash)
-            .ok_or_else(|| anyhow::anyhow!("No active validators to select proposer"))?;
+        let selected =
+            crate::vrf::select_proposer_deterministic(&active, &self.block.header.prev_hash)
+                .ok_or_else(|| anyhow::anyhow!("No active validators to select proposer"))?;
         if &selected != proposer_id {
             bail!(
                 "Proposer {} is not the selected proposer for this epoch (expected {})",
@@ -228,9 +237,7 @@ impl PbftRound {
         if self.phase != PbftPhase::Prepare {
             bail!("Not in PREPARE phase");
         }
-        if !self.validator_set.is_member(validator_id) {
-            bail!("Validator {} is not in the active set", validator_id);
-        }
+        self.verify_block_signature("prepare", validator_id, &sig)?;
         self.prepare_sigs.insert(validator_id.to_string(), sig);
         tracing::debug!(
             "[PBFT] PREPARE: {}/{} votes",
@@ -254,6 +261,7 @@ impl PbftRound {
         if self.phase != PbftPhase::Commit {
             bail!("Not in COMMIT phase");
         }
+        self.verify_block_signature("commit", validator_id, &sig)?;
         self.commit_sigs.insert(validator_id.to_string(), sig);
         tracing::debug!(
             "[PBFT] COMMIT: {}/{} votes",
@@ -286,6 +294,81 @@ impl PbftRound {
         Ok(false)
     }
 
+    fn verify_block_signature(
+        &self,
+        phase: &str,
+        validator_id: &str,
+        sig: &BlockSignature,
+    ) -> Result<()> {
+        if sig.validator_id != validator_id {
+            bail!(
+                "PBFT {} signature validator mismatch: envelope={} signature={}",
+                phase,
+                validator_id,
+                sig.validator_id
+            );
+        }
+
+        let validator = self
+            .validator_set
+            .validators
+            .get(validator_id)
+            .ok_or_else(|| {
+                anyhow::anyhow!("Validator {} is not in the validator set", validator_id)
+            })?;
+        if !validator.is_active {
+            bail!("Validator {} is not active", validator_id);
+        }
+
+        let expected_pubkey = validator
+            .pubkey
+            .trim_start_matches("0x")
+            .to_ascii_lowercase();
+        let supplied_pubkey = sig.pubkey.trim_start_matches("0x").to_ascii_lowercase();
+        if supplied_pubkey != expected_pubkey {
+            bail!(
+                "PBFT {} signature pubkey mismatch for validator {}",
+                phase,
+                validator_id
+            );
+        }
+
+        let pubkey_bytes = hex::decode(&expected_pubkey).map_err(|e| {
+            anyhow::anyhow!("Invalid validator pubkey hex for {}: {}", validator_id, e)
+        })?;
+        let verifying_key = VerifyingKey::try_from(pubkey_bytes.as_slice())
+            .map_err(|e| anyhow::anyhow!("Invalid validator pubkey for {}: {}", validator_id, e))?;
+
+        let signature_bytes = hex::decode(sig.signature.trim_start_matches("0x")).map_err(|e| {
+            anyhow::anyhow!(
+                "Invalid PBFT {} signature hex from {}: {}",
+                phase,
+                validator_id,
+                e
+            )
+        })?;
+        let signature = Signature::try_from(signature_bytes.as_slice()).map_err(|e| {
+            anyhow::anyhow!(
+                "Invalid PBFT {} signature from {}: {}",
+                phase,
+                validator_id,
+                e
+            )
+        })?;
+
+        let message = pbft_signature_message(phase, &self.block.hash());
+        verifying_key
+            .verify(message.as_bytes(), &signature)
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "Invalid PBFT {} signature from {}: {}",
+                    phase,
+                    validator_id,
+                    e
+                )
+            })
+    }
+
     /// Returns the finalised signatures to embed in the ChainRecord.
     pub fn finalised_signatures(&self) -> Vec<BlockSignature> {
         self.commit_sigs.values().cloned().collect()
@@ -314,22 +397,24 @@ impl PbftRound {
         let n = self.validator_set.len();
         let threshold = n / 3 + 1;
 
-        let votes = self
-            .view_change_votes
-            .entry(new_view)
-            .or_default();
+        let votes = self.view_change_votes.entry(new_view).or_default();
         votes.insert(validator_id.to_string());
 
         let count = votes.len();
         tracing::debug!(
             "[PBFT] ViewChange cert for view={} from {} ({}/{} needed)",
-            new_view, validator_id, count, threshold
+            new_view,
+            validator_id,
+            count,
+            threshold
         );
 
         if count >= threshold && self.view_number < new_view {
             tracing::warn!(
                 "[PBFT] ViewChange quorum reached ({}/{}) for view={} — executing view-change",
-                count, threshold, new_view
+                count,
+                threshold,
+                new_view
             );
             self.trigger_view_change()?;
             Ok(true)
@@ -409,12 +494,7 @@ impl PbftEngine {
         Ok(hash)
     }
 
-    pub fn prepare(
-        &mut self,
-        block_hash: &str,
-        vid: &str,
-        sig: BlockSignature,
-    ) -> Result<bool> {
+    pub fn prepare(&mut self, block_hash: &str, vid: &str, sig: BlockSignature) -> Result<bool> {
         let round = self
             .rounds
             .get_mut(block_hash)
@@ -533,7 +613,45 @@ impl PbftEngine {
 
 #[cfg(test)]
 mod tests {
-    use super::quorum_threshold;
+    use super::{pbft_signature_message, quorum_threshold, PbftPhase, PbftRound};
+    use crate::validator_set::{ValidatorInfo, ValidatorSet};
+    use common::{Block, BlockSignature};
+    use ed25519_dalek::{Signer, SigningKey};
+
+    fn validator_set(id: &str, signing_key: &SigningKey) -> ValidatorSet {
+        let mut set = ValidatorSet::new();
+        set.add(ValidatorInfo {
+            id: id.into(),
+            pubkey: hex::encode(signing_key.verifying_key().as_bytes()),
+            eth_address: None,
+            stake: 100,
+            reputation: 100,
+            is_active: true,
+        });
+        set
+    }
+
+    fn test_block(proposer_id: &str) -> Block {
+        let mut block = Block::genesis();
+        block.header.height = 1;
+        block.header.prev_hash = "11".repeat(32);
+        block.header.proposer_id = proposer_id.into();
+        block
+    }
+
+    fn signed_block_vote(
+        validator_id: &str,
+        signing_key: &SigningKey,
+        phase: &str,
+        block_hash: &str,
+    ) -> BlockSignature {
+        let message = pbft_signature_message(phase, block_hash);
+        BlockSignature {
+            validator_id: validator_id.into(),
+            pubkey: hex::encode(signing_key.verifying_key().as_bytes()),
+            signature: hex::encode(signing_key.sign(message.as_bytes()).to_bytes()),
+        }
+    }
 
     #[test]
     fn small_cluster_quorum_is_explicitly_gated() {
@@ -550,5 +668,70 @@ mod tests {
         assert_eq!(quorum_threshold(4, true), 3);
         assert_eq!(quorum_threshold(5, false), 4);
         assert_eq!(quorum_threshold(7, true), 5);
+    }
+
+    #[test]
+    fn prepare_requires_valid_phase_bound_signature() {
+        let signing_key = SigningKey::from_bytes(&[7u8; 32]);
+        let block = test_block("node-1");
+        let block_hash = block.hash();
+        let mut round = PbftRound::new(block, validator_set("node-1", &signing_key));
+
+        round.pre_prepare("node-1").unwrap();
+        let sig = signed_block_vote("node-1", &signing_key, "prepare", &block_hash);
+
+        assert!(round.receive_prepare("node-1", sig).unwrap());
+        assert_eq!(round.phase, PbftPhase::Commit);
+    }
+
+    #[test]
+    fn prepare_rejects_forged_signature() {
+        let signing_key = SigningKey::from_bytes(&[7u8; 32]);
+        let attacker_key = SigningKey::from_bytes(&[8u8; 32]);
+        let block = test_block("node-1");
+        let block_hash = block.hash();
+        let mut round = PbftRound::new(block, validator_set("node-1", &signing_key));
+
+        round.pre_prepare("node-1").unwrap();
+        let mut sig = signed_block_vote("node-1", &attacker_key, "prepare", &block_hash);
+        sig.pubkey = hex::encode(signing_key.verifying_key().as_bytes());
+
+        assert!(round.receive_prepare("node-1", sig).is_err());
+        assert!(round.prepare_sigs.is_empty());
+        assert_eq!(round.phase, PbftPhase::Prepare);
+    }
+
+    #[test]
+    fn commit_requires_active_member_signature() {
+        let signing_key = SigningKey::from_bytes(&[7u8; 32]);
+        let outsider_key = SigningKey::from_bytes(&[9u8; 32]);
+        let block = test_block("node-1");
+        let block_hash = block.hash();
+        let mut round = PbftRound::new(block, validator_set("node-1", &signing_key));
+
+        round.pre_prepare("node-1").unwrap();
+        let prepare = signed_block_vote("node-1", &signing_key, "prepare", &block_hash);
+        assert!(round.receive_prepare("node-1", prepare).unwrap());
+
+        let outsider = signed_block_vote("node-2", &outsider_key, "commit", &block_hash);
+        assert!(round.receive_commit("node-2", outsider).is_err());
+        assert!(round.commit_sigs.is_empty());
+        assert_eq!(round.phase, PbftPhase::Commit);
+    }
+
+    #[test]
+    fn commit_rejects_prepare_signature_replay() {
+        let signing_key = SigningKey::from_bytes(&[7u8; 32]);
+        let block = test_block("node-1");
+        let block_hash = block.hash();
+        let mut round = PbftRound::new(block, validator_set("node-1", &signing_key));
+
+        round.pre_prepare("node-1").unwrap();
+        let prepare = signed_block_vote("node-1", &signing_key, "prepare", &block_hash);
+        assert!(round.receive_prepare("node-1", prepare.clone()).unwrap());
+
+        assert!(round.receive_commit("node-1", prepare).is_err());
+        assert!(round.commit_sigs.is_empty());
+        assert_eq!(round.phase, PbftPhase::Commit);
     }
 }
