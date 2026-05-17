@@ -2661,6 +2661,7 @@ dependencies = [
  "flate2",
  "futures",
  "hex",
+ "k256",
  "libc",
  "libp2p",
  "mime_guess",

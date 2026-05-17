@@ -541,12 +541,13 @@ pub mod paths {
     pub async fn get_validator_profile() {}
 
     /// Register the caller's validator identity (EVM address ↔ ed25519 pubkey ↔ node id).
-    /// Stores locally and — if the caller is the operator — submits to L1 registry via bridge.
+    /// Requires an Ethereum personal-sign signature from the EVM address and
+    /// an Ed25519 signature from the validator key over the same binding message.
     #[utoipa::path(
         post,
         path = "/v1/validators/register",
         tag = "validators",
-        request_body(content = Object, description = "alias, evm_address, node_id, ed25519_pubkey"),
+        request_body(content = Object, description = "alias, evm_address, node_id, ed25519_pubkey, nonce, evm_signature, ed25519_signature"),
         responses(
             (status = 200, body = ValidatorRegistration),
             (status = 400, body = ApiError),

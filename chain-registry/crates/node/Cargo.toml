@@ -60,6 +60,7 @@ aes-gcm      = "0.10"
 x25519-dalek = { version = "2", features = ["static_secrets"] }
 libp2p       = { version = "0.53", features = ["tcp", "dns", "websocket", "noise", "yamux", "kad", "gossipsub", "identify", "macros", "tokio"] }
 alloy        = { version = "0.1", features = ["full"] }
+k256        = { version = "0.13", features = ["ecdsa"] }
 tonic        = { workspace = true, features = ["transport"] }
 prost        = { workspace = true }
 rust-embed   = "8.0"

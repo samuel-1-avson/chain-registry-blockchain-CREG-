@@ -9,11 +9,12 @@ use axum::{
     Json, Router,
 };
 use alloy::{
-    primitives::Address,
+    primitives::{keccak256, Address},
     providers::ProviderBuilder,
     sol,
 };
 use common::{PackageStatus, PublishRequest, Transaction, ValidatorIdentity};
+use k256::ecdsa::{RecoveryId, Signature as K256Signature, VerifyingKey as K256VerifyingKey};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tower_http::{cors::{Any, CorsLayer}, limit::RequestBodyLimitLayer, trace::TraceLayer};
@@ -440,6 +441,9 @@ struct RegisterValidatorIdentityRequest {
     evm_address: String,
     node_id: String,
     ed25519_pubkey: String,
+    nonce: String,
+    evm_signature: String,
+    ed25519_signature: String,
     alias: Option<String>,
 }
 
@@ -522,6 +526,138 @@ fn validate_ed25519_pubkey(value: &str) -> Result<String, String> {
     }
 }
 
+fn validate_registration_nonce(value: &str) -> Result<String, String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        Err("nonce is required".to_string())
+    } else if trimmed.len() > 128 {
+        Err("nonce must be 128 characters or fewer".to_string())
+    } else {
+        Ok(trimmed.to_string())
+    }
+}
+
+fn node_chain_id(config: &crate::config::NodeConfig) -> String {
+    if !config.chain_id.trim().is_empty() {
+        config.chain_id.clone()
+    } else if config.is_testnet {
+        "creg-testnet-1".to_string()
+    } else {
+        "creg-mainnet-1".to_string()
+    }
+}
+
+fn validator_identity_registration_message(
+    chain_id: &str,
+    evm_address: &str,
+    node_id: &str,
+    ed25519_pubkey: &str,
+    nonce: &str,
+) -> String {
+    format!(
+        "creg-validator-identity-v1\nchain_id:{chain_id}\nevm_address:{evm_address}\nnode_id:{node_id}\ned25519_pubkey:{ed25519_pubkey}\nnonce:{nonce}"
+    )
+}
+
+fn parse_ecdsa_signature_bytes(signature_hex: &str) -> Result<[u8; 65], String> {
+    let normalized = signature_hex.trim().trim_start_matches("0x");
+    let decoded = hex::decode(normalized)
+        .map_err(|_| "EVM signature must be valid hex".to_string())?;
+    if decoded.len() != 65 {
+        return Err(format!(
+            "EVM signature must be 65 bytes (130 hex chars), got {} bytes",
+            decoded.len()
+        ));
+    }
+    let mut bytes = [0u8; 65];
+    bytes.copy_from_slice(&decoded);
+    Ok(bytes)
+}
+
+fn normalize_recovery_id(v: u8) -> Result<RecoveryId, String> {
+    let normalized = match v {
+        0 | 1 => v,
+        27 | 28 => v - 27,
+        _ => return Err(format!("Unsupported EVM signature recovery id: {v}")),
+    };
+    RecoveryId::from_byte(normalized)
+        .ok_or_else(|| format!("Invalid EVM signature recovery id: {normalized}"))
+}
+
+fn ethereum_personal_message_digest(message: &str) -> alloy::primitives::B256 {
+    let prefix = format!("\x19Ethereum Signed Message:\n{}", message.as_bytes().len());
+    let mut bytes = Vec::with_capacity(prefix.len() + message.len());
+    bytes.extend_from_slice(prefix.as_bytes());
+    bytes.extend_from_slice(message.as_bytes());
+    keccak256(bytes)
+}
+
+fn recover_evm_personal_signer(message: &str, signature_hex: &str) -> Result<String, String> {
+    let digest = ethereum_personal_message_digest(message);
+    let bytes = parse_ecdsa_signature_bytes(signature_hex)?;
+    let recovery_id = normalize_recovery_id(bytes[64])?;
+    let signature = K256Signature::try_from(&bytes[..64])
+        .map_err(|error| format!("Invalid EVM signature: {error}"))?;
+    let verifying_key =
+        K256VerifyingKey::recover_from_prehash(digest.as_slice(), &signature, recovery_id)
+            .map_err(|error| format!("Failed to recover EVM signer: {error}"))?;
+    let uncompressed = verifying_key.to_encoded_point(false);
+    let pubkey = uncompressed.as_bytes();
+    let hashed = keccak256(&pubkey[1..]);
+    Ok(Address::from_slice(&hashed.as_slice()[12..])
+        .to_string()
+        .to_ascii_lowercase())
+}
+
+fn verify_ed25519_identity_signature(
+    message: &str,
+    ed25519_pubkey: &str,
+    signature_hex: &str,
+) -> Result<(), String> {
+    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+
+    let pubkey_bytes =
+        hex::decode(ed25519_pubkey).map_err(|_| "Ed25519 pubkey must be valid hex".to_string())?;
+    let verifying_key = VerifyingKey::try_from(pubkey_bytes.as_slice())
+        .map_err(|error| format!("Invalid Ed25519 pubkey: {error}"))?;
+
+    let signature_bytes = hex::decode(signature_hex.trim().trim_start_matches("0x"))
+        .map_err(|_| "Ed25519 identity signature must be valid hex".to_string())?;
+    let signature = Signature::try_from(signature_bytes.as_slice())
+        .map_err(|error| format!("Invalid Ed25519 identity signature: {error}"))?;
+
+    verifying_key
+        .verify(message.as_bytes(), &signature)
+        .map_err(|error| format!("Invalid Ed25519 identity signature: {error}"))
+}
+
+fn verify_validator_identity_proofs(
+    chain_id: &str,
+    evm_address: &str,
+    node_id: &str,
+    ed25519_pubkey: &str,
+    nonce: &str,
+    evm_signature: &str,
+    ed25519_signature: &str,
+) -> Result<(), String> {
+    let message = validator_identity_registration_message(
+        chain_id,
+        evm_address,
+        node_id,
+        ed25519_pubkey,
+        nonce,
+    );
+
+    let recovered = recover_evm_personal_signer(&message, evm_signature)?;
+    if recovered != evm_address {
+        return Err(format!(
+            "EVM signature recovered {recovered}, expected {evm_address}"
+        ));
+    }
+
+    verify_ed25519_identity_signature(&message, ed25519_pubkey, ed25519_signature)
+}
+
 async fn register_validator_identity(
     State(state): State<SharedState>,
     Json(request): Json<RegisterValidatorIdentityRequest>,
@@ -558,6 +694,38 @@ async fn register_validator_identity(
                 .into_response();
         }
     };
+
+    let nonce = match validate_registration_nonce(&request.nonce) {
+        Ok(value) => value,
+        Err(error) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse { error }),
+            )
+                .into_response();
+        }
+    };
+
+    let chain_id = {
+        let s = state.read().await;
+        node_chain_id(&s.config)
+    };
+
+    if let Err(error) = verify_validator_identity_proofs(
+        &chain_id,
+        &evm_address,
+        &node_id,
+        &ed25519_pubkey,
+        &nonce,
+        &request.evm_signature,
+        &request.ed25519_signature,
+    ) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorResponse { error }),
+        )
+            .into_response();
+    }
 
     let normalized_key = normalized_validator_key(&evm_address);
     let alias = request
@@ -2480,6 +2648,7 @@ mod tests {
     use common::{ChainRecord, PackageId, PackageManifest, PackageStatus};
     use common::proto::{registry_service_server::RegistryService, SubmitRequest};
     use ed25519_dalek::{Signer, SigningKey};
+    use k256::ecdsa::SigningKey as K256SigningKey;
     use rand::rngs::OsRng;
     use serde_json::Value;
     use std::{collections::HashMap, sync::Arc};
@@ -2492,6 +2661,54 @@ mod tests {
         let sk = SigningKey::generate(&mut OsRng);
         let pk = hex::encode(sk.verifying_key().as_bytes());
         (sk, pk)
+    }
+
+    fn make_evm_keypair() -> (K256SigningKey, String) {
+        let signing_key = K256SigningKey::random(&mut OsRng);
+        let uncompressed = signing_key.verifying_key().to_encoded_point(false);
+        let hashed = keccak256(&uncompressed.as_bytes()[1..]);
+        let address = Address::from_slice(&hashed.as_slice()[12..])
+            .to_string()
+            .to_ascii_lowercase();
+        (signing_key, address)
+    }
+
+    fn sign_evm_personal_message(signing_key: &K256SigningKey, message: &str) -> String {
+        let digest = ethereum_personal_message_digest(message);
+        let (signature, recovery_id) = signing_key
+            .sign_prehash_recoverable(digest.as_slice())
+            .expect("test EVM signature should be produced");
+        let mut bytes = [0u8; 65];
+        bytes[..64].copy_from_slice(&signature.to_bytes());
+        bytes[64] = recovery_id.to_byte() + 27;
+        hex::encode(bytes)
+    }
+
+    fn identity_proof_request(
+        chain_id: &str,
+        evm_signing_key: &K256SigningKey,
+        evm_address: &str,
+        ed25519_signing_key: &SigningKey,
+        ed25519_pubkey: &str,
+    ) -> serde_json::Value {
+        let node_id = "node-1";
+        let nonce = "registration-test-nonce";
+        let message = validator_identity_registration_message(
+            chain_id,
+            evm_address,
+            node_id,
+            ed25519_pubkey,
+            nonce,
+        );
+        serde_json::json!({
+            "evm_address": evm_address,
+            "node_id": node_id,
+            "ed25519_pubkey": ed25519_pubkey,
+            "nonce": nonce,
+            "evm_signature": sign_evm_personal_message(evm_signing_key, &message),
+            "ed25519_signature": hex::encode(ed25519_signing_key.sign(message.as_bytes()).to_bytes()),
+            "alias": "Node One",
+        })
     }
 
     fn validator(id: &str, pubkey: &str) -> common::Validator {
@@ -2811,6 +3028,138 @@ mod tests {
     fn multisig_rejects_mismatched_counts() {
         let req = make_request_with_sigs(vec!["aa".into(), "bb".into()], vec!["cc".into()], 2);
         assert!(verify_publish_sig(&req).is_err());
+    }
+
+    #[test]
+    fn validator_identity_registration_accepts_dual_ownership_proofs() {
+        let (evm_key, evm_address) = make_evm_keypair();
+        let (ed_key, ed_pubkey) = make_keypair();
+        let message = validator_identity_registration_message(
+            "creg-testnet-1",
+            &evm_address,
+            "node-1",
+            &ed_pubkey,
+            "nonce-1",
+        );
+        let evm_signature = sign_evm_personal_message(&evm_key, &message);
+        let ed25519_signature = hex::encode(ed_key.sign(message.as_bytes()).to_bytes());
+
+        assert!(verify_validator_identity_proofs(
+            "creg-testnet-1",
+            &evm_address,
+            "node-1",
+            &ed_pubkey,
+            "nonce-1",
+            &evm_signature,
+            &ed25519_signature,
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn validator_identity_registration_rejects_wrong_evm_signer() {
+        let (_evm_key, evm_address) = make_evm_keypair();
+        let (attacker_key, _) = make_evm_keypair();
+        let (ed_key, ed_pubkey) = make_keypair();
+        let message = validator_identity_registration_message(
+            "creg-testnet-1",
+            &evm_address,
+            "node-1",
+            &ed_pubkey,
+            "nonce-1",
+        );
+        let evm_signature = sign_evm_personal_message(&attacker_key, &message);
+        let ed25519_signature = hex::encode(ed_key.sign(message.as_bytes()).to_bytes());
+
+        assert!(verify_validator_identity_proofs(
+            "creg-testnet-1",
+            &evm_address,
+            "node-1",
+            &ed_pubkey,
+            "nonce-1",
+            &evm_signature,
+            &ed25519_signature,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn validator_identity_registration_rejects_wrong_ed25519_signer() {
+        let (evm_key, evm_address) = make_evm_keypair();
+        let (_ed_key, ed_pubkey) = make_keypair();
+        let (attacker_ed_key, _) = make_keypair();
+        let message = validator_identity_registration_message(
+            "creg-testnet-1",
+            &evm_address,
+            "node-1",
+            &ed_pubkey,
+            "nonce-1",
+        );
+        let evm_signature = sign_evm_personal_message(&evm_key, &message);
+        let ed25519_signature = hex::encode(attacker_ed_key.sign(message.as_bytes()).to_bytes());
+
+        assert!(verify_validator_identity_proofs(
+            "creg-testnet-1",
+            &evm_address,
+            "node-1",
+            &ed_pubkey,
+            "nonce-1",
+            &evm_signature,
+            &ed25519_signature,
+        )
+        .is_err());
+    }
+
+    #[tokio::test]
+    async fn rest_register_validator_identity_requires_ownership_proofs() -> anyhow::Result<()> {
+        let (state, _tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
+        let chain_id = {
+            let s = state.read().await;
+            node_chain_id(&s.config)
+        };
+        let (evm_key, evm_address) = make_evm_keypair();
+        let (ed_key, ed_pubkey) = make_keypair();
+        let event_bus = new_event_bus();
+        let app = router(
+            state.clone(),
+            event_bus,
+            RateLimiter::new(RateLimitConfig::default()),
+            AttestationStore::new(),
+            crate::config::CorsConfig::default(),
+            tx_sender,
+            p2p_handle,
+        );
+
+        let valid_request =
+            identity_proof_request(&chain_id, &evm_key, &evm_address, &ed_key, &ed_pubkey);
+        let response = app
+            .clone()
+            .oneshot(
+                Request::post("/v1/validators/register")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&valid_request)?))?,
+            )
+            .await?;
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        assert!(state
+            .read()
+            .await
+            .validator_registrations
+            .contains_key(&evm_address));
+
+        let (attacker_key, _) = make_evm_keypair();
+        let invalid_request =
+            identity_proof_request(&chain_id, &attacker_key, &evm_address, &ed_key, &ed_pubkey);
+        let response = app
+            .oneshot(
+                Request::post("/v1/validators/register")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&invalid_request)?))?,
+            )
+            .await?;
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        Ok(())
     }
 
     #[tokio::test]
