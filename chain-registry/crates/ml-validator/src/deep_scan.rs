@@ -18,6 +18,7 @@ use std::time::Duration;
 use tracing::{debug, warn};
 
 use crate::tokenizer::CodeTokenizer;
+use crate::yara_scanner::YaraMatch;
 
 /// Maximum wall-clock time allowed for a single deep-scan inference pass.
 const SCAN_TIMEOUT: Duration = Duration::from_secs(30);
@@ -105,6 +106,18 @@ impl ThreatClassification {
     pub fn should_abstain(&self) -> bool {
         matches!(self, ThreatClassification::Degraded)
     }
+}
+
+/// Extract source files from a tarball and scan them with the active YARA rules.
+/// This is used by the node's pre-mempool admission gate before a package enters
+/// consensus.
+pub fn scan_tarball_with_yara(
+    tarball_bytes: &[u8],
+    ecosystem: &str,
+) -> Result<Vec<YaraMatch>, MlError> {
+    let files = extract_source_files(tarball_bytes, ecosystem)
+        .map_err(|e| MlError::ExtractionError(e.to_string()))?;
+    Ok(crate::yara_scanner::scan_files(&files))
 }
 
 /// Deep-scan configuration.

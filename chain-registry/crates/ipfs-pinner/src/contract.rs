@@ -50,6 +50,21 @@ sol!(
     }
 );
 
+macro_rules! build_provider {
+    ($client:expr) => {{
+        let signer = $client.parse_operator_signer()?;
+        let wallet = EthereumWallet::from(signer);
+        ProviderBuilder::new()
+            .with_recommended_fillers()
+            .wallet(wallet)
+            .on_http(
+                $client.rpc_url.parse().with_context(|| {
+                    format!("Invalid pinning rewards RPC URL: {}", $client.rpc_url)
+                })?,
+            )
+    }};
+}
+
 /// Information about a pin from the contract
 #[derive(Debug, Clone)]
 pub struct ContractPinInfo {
@@ -141,9 +156,12 @@ impl PinningRewardsClient {
     }
 
     fn parse_contract_address(&self) -> Result<Address> {
-        self.contract_address
-            .parse::<Address>()
-            .with_context(|| format!("Invalid PinningRewards contract address: {}", self.contract_address))
+        self.contract_address.parse::<Address>().with_context(|| {
+            format!(
+                "Invalid PinningRewards contract address: {}",
+                self.contract_address
+            )
+        })
     }
 
     fn parse_operator_signer(&self) -> Result<PrivateKeySigner> {
@@ -152,15 +170,8 @@ impl PinningRewardsClient {
             .context("Invalid pinning operator private key")
     }
 
-    /// Build a signed Alloy provider. Centralises wallet + RPC construction
-    /// that was previously duplicated in every trait method.
-    fn build_provider(&self) -> Result<impl alloy::providers::Provider + Clone> {
-        let provider = self.build_provider()?;
-        Ok(provider)
-    }
-
     async fn approve_creg(&self, amount: u128) -> Result<()> {
-        let provider = self.build_provider()?;
+        let provider = build_provider!(self);
 
         let contract_address = self.parse_contract_address()?;
         let contract = IPinningRewards::new(contract_address, &provider);
@@ -190,7 +201,7 @@ impl PinningRewardsClient {
 #[async_trait]
 impl PinningContract for PinningRewardsClient {
     async fn is_registered(&self) -> Result<bool> {
-        let provider = self.build_provider()?;
+        let provider = build_provider!(self);
         let operator = self.parse_operator_signer()?.address();
 
         let contract = IPinningRewards::new(self.parse_contract_address()?, &provider);
@@ -205,7 +216,7 @@ impl PinningContract for PinningRewardsClient {
 
     async fn register_pinner(&self, stake: u128) -> Result<()> {
         self.approve_creg(stake).await?;
-        let provider = self.build_provider()?;
+        let provider = build_provider!(self);
 
         let contract = IPinningRewards::new(self.parse_contract_address()?, &provider);
         let pending_tx = contract
@@ -223,7 +234,7 @@ impl PinningContract for PinningRewardsClient {
     }
 
     async fn unregister_pinner(&self) -> Result<()> {
-        let provider = self.build_provider()?;
+        let provider = build_provider!(self);
 
         let contract = IPinningRewards::new(self.parse_contract_address()?, &provider);
         let pending_tx = contract
@@ -241,7 +252,7 @@ impl PinningContract for PinningRewardsClient {
     }
 
     async fn register_pin(&self, cid: [u8; 32], size: u64) -> Result<()> {
-        let provider = self.build_provider()?;
+        let provider = build_provider!(self);
 
         let contract = IPinningRewards::new(self.parse_contract_address()?, &provider);
         let pending_tx = contract
@@ -259,7 +270,7 @@ impl PinningContract for PinningRewardsClient {
     }
 
     async fn unregister_pin(&self, cid: [u8; 32]) -> Result<()> {
-        let provider = self.build_provider()?;
+        let provider = build_provider!(self);
 
         let contract = IPinningRewards::new(self.parse_contract_address()?, &provider);
         let pending_tx = contract
@@ -282,7 +293,7 @@ impl PinningContract for PinningRewardsClient {
         success: bool,
         proof_hash: [u8; 32],
     ) -> Result<()> {
-        let provider = self.build_provider()?;
+        let provider = build_provider!(self);
         let operator = self.parse_operator_signer()?.address();
 
         let contract = IPinningRewards::new(self.parse_contract_address()?, &provider);
@@ -301,7 +312,7 @@ impl PinningContract for PinningRewardsClient {
     }
 
     async fn calculate_rewards(&self) -> Result<u128> {
-        let provider = self.build_provider()?;
+        let provider = build_provider!(self);
         let operator = self.parse_operator_signer()?.address();
 
         let contract = IPinningRewards::new(self.parse_contract_address()?, &provider);
@@ -320,7 +331,7 @@ impl PinningContract for PinningRewardsClient {
         if pending_rewards == 0 {
             return Ok(0);
         }
-        let provider = self.build_provider()?;
+        let provider = build_provider!(self);
 
         let contract = IPinningRewards::new(self.parse_contract_address()?, &provider);
         let pending_tx = contract
@@ -338,7 +349,7 @@ impl PinningContract for PinningRewardsClient {
     }
 
     async fn get_pinner_info(&self, pinner: String) -> Result<ContractPinnerInfo> {
-        let provider = self.build_provider()?;
+        let provider = build_provider!(self);
 
         let contract = IPinningRewards::new(self.parse_contract_address()?, &provider);
         let pinner_address = pinner
@@ -368,7 +379,7 @@ impl PinningContract for PinningRewardsClient {
     }
 
     async fn get_pin_info(&self, cid: [u8; 32]) -> Result<ContractPinInfo> {
-        let provider = self.build_provider()?;
+        let provider = build_provider!(self);
 
         let contract = IPinningRewards::new(self.parse_contract_address()?, &provider);
         let info = contract
@@ -384,16 +395,19 @@ impl PinningContract for PinningRewardsClient {
             last_verified: {
                 let timestamp = u64::try_from(info.lastVerified)
                     .context("Last verified timestamp exceeds u64")?;
-                if timestamp == 0 { None } else { Some(timestamp) }
+                if timestamp == 0 {
+                    None
+                } else {
+                    Some(timestamp)
+                }
             },
-            access_count: u64::try_from(info.accessCount)
-                .context("Access count exceeds u64")?,
+            access_count: u64::try_from(info.accessCount).context("Access count exceeds u64")?,
             is_active: info.isActive,
         })
     }
 
     async fn get_pinner_cids(&self) -> Result<Vec<[u8; 32]>> {
-        let provider = self.build_provider()?;
+        let provider = build_provider!(self);
         let operator = self.parse_operator_signer()?.address();
 
         let contract = IPinningRewards::new(self.parse_contract_address()?, &provider);
@@ -408,7 +422,7 @@ impl PinningContract for PinningRewardsClient {
     }
 
     async fn get_cid_pinners(&self, cid: [u8; 32]) -> Result<Vec<String>> {
-        let provider = self.build_provider()?;
+        let provider = build_provider!(self);
 
         let contract = IPinningRewards::new(self.parse_contract_address()?, &provider);
         let pinners = contract
@@ -418,12 +432,15 @@ impl PinningContract for PinningRewardsClient {
             .context("Failed to fetch CID pinners")?
             ._0;
 
-        Ok(pinners.into_iter().map(|address| address.to_string()).collect())
+        Ok(pinners
+            .into_iter()
+            .map(|address| address.to_string())
+            .collect())
     }
 
     async fn fund_rewards_pool(&self, amount: u128) -> Result<()> {
         self.approve_creg(amount).await?;
-        let provider = self.build_provider()?;
+        let provider = build_provider!(self);
 
         let contract = IPinningRewards::new(self.parse_contract_address()?, &provider);
         let pending_tx = contract
@@ -441,7 +458,7 @@ impl PinningContract for PinningRewardsClient {
     }
 
     async fn get_rewards_pool(&self) -> Result<u128> {
-        let provider = self.build_provider()?;
+        let provider = build_provider!(self);
 
         let contract = IPinningRewards::new(self.parse_contract_address()?, &provider);
         let rewards_pool = contract

@@ -341,10 +341,26 @@ impl P2PNode {
                         // Forward message to the node's internal event bus
                         if topic_str.contains("submissions") {
                             if let Ok(common::GossipMessage::PublishRequest(req)) = serde_json::from_slice(&message.data) {
-                                let mut s = state.write().await;
-                                if !s.pending_pool.contains(&req.id.canonical()) {
-                                    s.pending_pool.insert(req.clone());
-                                    tracing::info!("Received {} via gossip", req.id.canonical());
+                                let canonical = req.id.canonical();
+                                let ipfs_url = {
+                                    let s = state.read().await;
+                                    s.config.ipfs_url.clone()
+                                };
+                                match crate::admission_scan::run_pre_mempool_yara_gate(&req, &ipfs_url).await {
+                                    Ok(()) => {
+                                        let mut s = state.write().await;
+                                        if !s.pending_pool.contains(&canonical) {
+                                            s.pending_pool.insert(req.clone());
+                                            tracing::info!("Received {} via gossip", canonical);
+                                        }
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!(
+                                            "P2P: dropping submission {} before mempool: {}",
+                                            canonical,
+                                            e
+                                        );
+                                    }
                                 }
                             }
                             continue;

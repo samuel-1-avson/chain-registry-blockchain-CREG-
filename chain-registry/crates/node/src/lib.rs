@@ -4,6 +4,7 @@
 // up a real in-process node and drive the full publish → verify lifecycle.
 
 // ── Public modules (used directly by integration tests) ──────────────────────
+pub mod admission_scan;
 pub mod api;
 pub mod block_producer;
 pub mod chain_store;

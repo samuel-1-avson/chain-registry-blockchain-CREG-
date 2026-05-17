@@ -2,6 +2,7 @@
 // Chain registry node — single binary that runs all subsystems.
 #![deny(clippy::unwrap_used)]
 
+mod admission_scan;
 mod api;
 mod block_producer;
 mod bridge;

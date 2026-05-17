@@ -91,6 +91,14 @@ fn get_rules() -> Option<&'static yara_x::Rules> {
     COMPILED_RULES.get_or_init(compile_rules).as_ref()
 }
 
+/// Whether a non-empty YARA rule bundle was loaded successfully.
+///
+/// Public-testnet admission uses this as a fail-closed guard before packages
+/// enter the pending pool.
+pub fn rules_available() -> bool {
+    get_rules().is_some()
+}
+
 /// Scan extracted source files with YARA rules.
 ///
 /// `files` is a list of `(relative_path, content)` pairs extracted from a

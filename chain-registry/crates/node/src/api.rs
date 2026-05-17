@@ -1138,6 +1138,36 @@ async fn submit_package(
             .into_response();
     }
 
+    let ipfs_url = {
+        let s = state.read().await;
+        s.config.ipfs_url.clone()
+    };
+    if let Err(e) = crate::admission_scan::run_pre_mempool_yara_gate(&request, &ipfs_url).await {
+        tracing::warn!("Pre-mempool YARA gate rejected {}: {}", canonical, e);
+        let message = e.to_string();
+        let status = match &e {
+            crate::admission_scan::AdmissionScanError::Rejected { .. }
+            | crate::admission_scan::AdmissionScanError::ContentHashMismatch { .. } => {
+                StatusCode::BAD_REQUEST
+            }
+            crate::admission_scan::AdmissionScanError::PayloadTooLarge { .. } => {
+                StatusCode::PAYLOAD_TOO_LARGE
+            }
+            crate::admission_scan::AdmissionScanError::RulesUnavailable
+            | crate::admission_scan::AdmissionScanError::IpfsFetch { .. }
+            | crate::admission_scan::AdmissionScanError::ExtractionFailed { .. } => {
+                StatusCode::SERVICE_UNAVAILABLE
+            }
+        };
+        return (
+            status,
+            Json(ErrorResponse {
+                error: format!("Pre-mempool YARA admission failed: {}", message),
+            }),
+        )
+            .into_response();
+    }
+
     let gossip_req = common::GossipMessage::PublishRequest(request.clone());
     let pending_count = {
         let mut s = state.write().await;
