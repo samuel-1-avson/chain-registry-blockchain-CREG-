@@ -18,6 +18,21 @@ contract FeeReceiver {
     }
 }
 
+contract MockZKVerifier {
+    bool public valid = true;
+
+    function setValid(bool _valid) external {
+        valid = _valid;
+    }
+
+    function verifyProof(
+        uint256[8] calldata,
+        uint256[] calldata
+    ) external view returns (bool) {
+        return valid;
+    }
+}
+
 /// @notice Full integration tests for the chain registry contracts.
 /// Uses CREG token-based staking and the two-step validator approval flow.
 contract RegistryTest is Test {
@@ -178,6 +193,63 @@ contract RegistryTest is Test {
 
         vm.expectRevert();
         registry.finalizePackage(CANONICAL, sigs);
+    }
+
+    // ── ZK package binding ─────────────────────────────────────────────────
+
+    function test_submitPackageWithZKProofRequiresPackageBoundInputs() public {
+        _stakeAsPublisher(alice);
+        ChainRegistry zkRegistry = _deployRegistryWithMockZK();
+        uint256[8] memory proof;
+        uint256[] memory wrongInputs = _zkInputs("npm:other@1.0.0", CONTENT_HASH, IPFS_CID);
+
+        vm.prank(alice);
+        vm.expectRevert(ChainRegistry.InvalidZKPublicInputs.selector);
+        zkRegistry.submitPackageWithZKProof{value: zkRegistry.zkValidationFee()}(
+            CANONICAL,
+            CONTENT_HASH,
+            IPFS_CID,
+            proof,
+            wrongInputs
+        );
+    }
+
+    function test_submitPackageWithZKProofAcceptsPackageBoundInputs() public {
+        _stakeAsPublisher(alice);
+        ChainRegistry zkRegistry = _deployRegistryWithMockZK();
+        uint256[8] memory proof;
+        uint256[] memory inputs = _zkInputs(CANONICAL, CONTENT_HASH, IPFS_CID);
+
+        vm.prank(alice);
+        zkRegistry.submitPackageWithZKProof{value: zkRegistry.zkValidationFee()}(
+            CANONICAL,
+            CONTENT_HASH,
+            IPFS_CID,
+            proof,
+            inputs
+        );
+
+        assertEq(uint(zkRegistry.getStatus(CANONICAL)), uint(ChainRegistry.PackageStatus.Verified));
+        ChainRegistry.PackageRecord memory rec = zkRegistry.getPackage(CANONICAL);
+        assertEq(uint(rec.validationMode), uint(ChainRegistry.ValidationMode.ZKProof));
+    }
+
+    function test_verifyZKProofForPendingPackageRequiresStoredPackageBinding() public {
+        _stakeAsPublisher(alice);
+        ChainRegistry zkRegistry = _deployRegistryWithMockZK();
+        uint256[8] memory proof;
+        uint256[] memory wrongInputs = _zkInputs(CANONICAL, bytes32(uint256(123)), IPFS_CID);
+
+        vm.prank(alice);
+        zkRegistry.submitPackage(CANONICAL, CONTENT_HASH, IPFS_CID);
+
+        vm.expectRevert(ChainRegistry.InvalidZKPublicInputs.selector);
+        zkRegistry.verifyZKProof(CANONICAL, proof, wrongInputs);
+
+        uint256[] memory inputs = _zkInputs(CANONICAL, CONTENT_HASH, IPFS_CID);
+        zkRegistry.verifyZKProof(CANONICAL, proof, inputs);
+
+        assertEq(uint(zkRegistry.getStatus(CANONICAL)), uint(ChainRegistry.PackageStatus.Verified));
     }
 
     // ── Revocation ────────────────────────────────────────────────────────────
@@ -367,6 +439,31 @@ contract RegistryTest is Test {
         sigs[0] = _makeValidatorSig(bobKey,   bob,   CANONICAL, CONTENT_HASH, true);
         sigs[1] = _makeValidatorSig(carolKey, carol, CANONICAL, CONTENT_HASH, true);
         registry.finalizePackage(CANONICAL, sigs);
+    }
+
+    function _deployRegistryWithMockZK() internal returns (ChainRegistry) {
+        MockZKVerifier mockVerifier = new MockZKVerifier();
+        return new ChainRegistry(
+            address(staking),
+            address(reputation),
+            address(vrf),
+            address(governance),
+            address(mockVerifier)
+        );
+    }
+
+    function _zkInputs(
+        string memory canonical,
+        bytes32 contentHash,
+        string memory ipfsCid
+    ) internal pure returns (uint256[] memory inputs) {
+        bytes32 bindingHash = keccak256(
+            abi.encode("creg-zk-package-v1", canonical, contentHash, ipfsCid)
+        );
+        uint256 binding = uint256(bindingHash);
+        inputs = new uint256[](2);
+        inputs[0] = binding >> 128;
+        inputs[1] = binding & uint256(type(uint128).max);
     }
 
     /// Produce a real ECDSA signature from a validator private key.

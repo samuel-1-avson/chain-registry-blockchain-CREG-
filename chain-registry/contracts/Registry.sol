@@ -13,6 +13,11 @@ import "./ZKVerifier.sol";
 ///      and ZK proof validation for faster verification.
 contract ChainRegistry {
 
+    // ── ZK public-input binding ──────────────────────────────────────────────
+
+    string private constant PACKAGE_ZK_BINDING_DOMAIN = "creg-zk-package-v1";
+    uint256 private constant UINT128_MASK = type(uint128).max;
+
     // ── Reentrancy Guard ─────────────────────────────────────────────────────
     bool private _locked;
     modifier nonReentrant() {
@@ -113,6 +118,7 @@ contract ChainRegistry {
     error InsufficientQuorum(uint got, uint required);
     error InvalidSignature(address validator);
     error InvalidZKProof();
+    error InvalidZKPublicInputs();
     error NotGovernance();
     error NotPublisher();
     error ZKDisabled();
@@ -215,6 +221,11 @@ contract ChainRegistry {
 
         // Publisher must have staked tokens
         require(staking.stakedBalance(msg.sender) > 0, "Publisher must stake first");
+
+        // Bind the proof's public inputs to this exact package tuple. The first
+        // two public inputs are the high/low 128-bit limbs of the package binding
+        // hash, keeping each limb inside the BN254 scalar field.
+        _assertPackageProofBinding(canonical, contentHash, ipfsCid, publicInputs);
         
         // Verify ZK proof on-chain
         bool proofValid = zkVerifier.verifyProof(proof, publicInputs);
@@ -356,6 +367,8 @@ contract ChainRegistry {
         if (rec.status == PackageStatus.Revoked) revert AlreadyRevoked(canonical);
         if (!zkValidationEnabled) revert ZKDisabled();
 
+        _assertPackageProofBinding(canonical, rec.contentHash, rec.ipfsCid, publicInputs);
+
         // Verify ZK proof
         bool proofValid = zkVerifier.verifyProof(proof, publicInputs);
         if (!proofValid) revert InvalidZKProof();
@@ -436,6 +449,16 @@ contract ChainRegistry {
         return zkProofs[_key(canonical)];
     }
 
+    /// @notice Return the required first two public inputs for package ZK proofs.
+    /// @dev Circuits must expose and constrain these values as public signals at indexes 0 and 1.
+    function packageZKBindingInputs(
+        string calldata canonical,
+        bytes32 contentHash,
+        string calldata ipfsCid
+    ) external pure returns (uint256 bindingHigh, uint256 bindingLow) {
+        return _packageZKBindingInputs(canonical, contentHash, ipfsCid);
+    }
+
     // ── Governance ────────────────────────────────────────────────────────────
 
     function setGovernance(address newGov) external onlyGovernance {
@@ -496,6 +519,35 @@ contract ChainRegistry {
                 keccak256(abi.encodePacked(canonical, contentHash))
             )
         );
+    }
+
+    function _assertPackageProofBinding(
+        string memory canonical,
+        bytes32 contentHash,
+        string memory ipfsCid,
+        uint256[] calldata publicInputs
+    ) internal pure {
+        if (publicInputs.length < 2) revert InvalidZKPublicInputs();
+
+        (uint256 bindingHigh, uint256 bindingLow) =
+            _packageZKBindingInputs(canonical, contentHash, ipfsCid);
+
+        if (publicInputs[0] != bindingHigh || publicInputs[1] != bindingLow) {
+            revert InvalidZKPublicInputs();
+        }
+    }
+
+    function _packageZKBindingInputs(
+        string memory canonical,
+        bytes32 contentHash,
+        string memory ipfsCid
+    ) internal pure returns (uint256 bindingHigh, uint256 bindingLow) {
+        bytes32 bindingHash = keccak256(
+            abi.encode(PACKAGE_ZK_BINDING_DOMAIN, canonical, contentHash, ipfsCid)
+        );
+        uint256 binding = uint256(bindingHash);
+        bindingHigh = binding >> 128;
+        bindingLow = binding & UINT128_MASK;
     }
 
     function _recoverSigner(bytes32 digest, bytes memory sig)
