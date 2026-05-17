@@ -55,4 +55,6 @@ jobs:
           ./scripts/validate-consensus-evidence.sh
 
       - name: Run focused vote consensus tests
-        run: cargo test --locked -p common -p consensus vote_accumulator --lib
+        run: |
+          cargo test --locked -p consensus evidence_votes --lib
+          cargo test --locked -p common -p consensus vote_accumulator --lib

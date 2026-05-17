@@ -7,6 +7,7 @@
 // This implementation covers the three PBFT phases:
 //   PRE-PREPARE → PREPARE → COMMIT
 
+pub mod evidence_votes;
 pub mod forced_inclusion;
 pub mod pbft;
 pub mod validator_set;
@@ -14,6 +15,7 @@ pub mod vrf;
 
 // anyhow::Result is unused here
 // common imports are handled within submodules
+pub use evidence_votes::{aggregate_evidence_votes, EvidenceVoteOutcome};
 pub use pbft::{PbftConfig, PbftEngine, ViewChangeSignal};
 pub use validator_set::ValidatorSet;
 

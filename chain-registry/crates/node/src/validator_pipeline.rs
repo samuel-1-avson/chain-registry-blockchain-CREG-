@@ -5,88 +5,13 @@
 use crate::{finalized_tx::FinalizedTxSender, NodeState};
 use chrono::Utc;
 use common::{ChainRecord, PackageStatus, PublishRequest, Transaction, ValidatorVote};
-use std::{collections::HashMap, sync::Arc};
+use consensus::{aggregate_evidence_votes, EvidenceVoteOutcome};
+use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{interval, Duration};
 
 const POLL_INTERVAL_SECS: u64 = 1;
 const VOTE_TIMEOUT_SECS: u64 = 10; // Reduced from 30s for faster consensus
-
-fn consensus_profile_key(sig: &common::ValidatorSignature) -> Option<String> {
-    if !common::is_consensus_grade_vote(
-        &sig.ml_model_version,
-        &sig.analysis_bundles,
-        &sig.evidence_digest,
-    ) {
-        return None;
-    }
-    Some(format!(
-        "{}:{}",
-        common::scanner_profile_digest(&sig.ml_model_version, &sig.analysis_bundles),
-        sig.evidence_digest
-    ))
-}
-
-#[derive(Debug, Clone)]
-pub(crate) enum ConsensusOutcome {
-    Verified(Vec<common::ValidatorSignature>),
-    Rejected { reason: String },
-}
-
-pub(crate) fn aggregate_consensus_outcome(
-    signatures: &[common::ValidatorSignature],
-    assigned_count: usize,
-) -> Option<ConsensusOutcome> {
-    let quorum_size = (assigned_count * 2 / 3) + 1;
-    let mut seen_indices = HashMap::new();
-    let mut unique_votes = Vec::new();
-
-    for sig in signatures {
-        let unique_key = if sig.validator_pubkey.is_empty() {
-            format!("id:{}", sig.validator_id.to_ascii_lowercase())
-        } else {
-            format!("pubkey:{}", sig.validator_pubkey.to_ascii_lowercase())
-        };
-        if let Some(index) = seen_indices.get(&unique_key).copied() {
-            unique_votes[index] = sig.clone();
-        } else {
-            seen_indices.insert(unique_key, unique_votes.len());
-            unique_votes.push(sig.clone());
-        }
-    }
-
-    let mut approvals_by_profile: HashMap<String, Vec<common::ValidatorSignature>> = HashMap::new();
-    let mut rejections = Vec::new();
-
-    for sig in unique_votes {
-        let Some(profile_key) = consensus_profile_key(&sig) else {
-            continue;
-        };
-
-        match &sig.vote {
-            ValidatorVote::Approve => {
-                let approvals = approvals_by_profile.entry(profile_key).or_default();
-                approvals.push(sig.clone());
-                if approvals.len() >= quorum_size {
-                    return Some(ConsensusOutcome::Verified(approvals.clone()));
-                }
-            }
-            ValidatorVote::Reject { reason } => rejections.push(reason.clone()),
-        }
-    }
-
-    let max_possible_approvals = assigned_count.saturating_sub(rejections.len());
-    if max_possible_approvals < quorum_size {
-        return Some(ConsensusOutcome::Rejected {
-            reason: rejections
-                .into_iter()
-                .next()
-                .unwrap_or_else(|| "Consensus rejected".to_string()),
-        });
-    }
-
-    None
-}
 
 pub async fn run(
     state: Arc<RwLock<NodeState>>,
@@ -416,7 +341,7 @@ async fn process_package(
             let sr = state.read().await;
             if let Some(round) = sr.package_round(&canonical) {
                 if let Some(outcome) =
-                    aggregate_consensus_outcome(round.signatures(), assigned_validator_count)
+                    aggregate_evidence_votes(round.signatures(), assigned_validator_count)
                 {
                     consensus_outcome = Some(outcome);
                     break;
@@ -432,14 +357,14 @@ async fn process_package(
     };
 
     match (&vote, &consensus_outcome) {
-        (ValidatorVote::Approve, ConsensusOutcome::Rejected { reason }) => {
+        (ValidatorVote::Approve, EvidenceVoteOutcome::Rejected { reason }) => {
             tracing::warn!(
                 "{} local validator approved, but consensus rejected: {}",
                 canonical,
                 reason
             );
         }
-        (ValidatorVote::Reject { reason }, ConsensusOutcome::Verified(_)) => {
+        (ValidatorVote::Reject { reason }, EvidenceVoteOutcome::Verified(_)) => {
             tracing::warn!(
                 "{} local validator rejected ({}), but consensus verified",
                 canonical,
@@ -451,7 +376,7 @@ async fn process_package(
 
     // ── Write finalised transaction ───────────────────────────────────────────
     let (tx, outcome_label) = match consensus_outcome {
-        ConsensusOutcome::Verified(final_sigs) => {
+        EvidenceVoteOutcome::Verified(final_sigs) => {
             let record = ChainRecord {
                 id: req.id.clone(),
                 content_hash: req.content_hash.clone(),
@@ -476,7 +401,7 @@ async fn process_package(
             };
             (Transaction::Publish(record), "VERIFIED")
         }
-        ConsensusOutcome::Rejected { reason } => (
+        EvidenceVoteOutcome::Rejected { reason } => (
             common::Transaction::Revoke {
                 package_canonical: canonical.clone(),
                 reason,
@@ -503,122 +428,6 @@ async fn cleanup(state: &Arc<RwLock<NodeState>>, canonical: &str) {
     let mut s = state.write().await;
     s.pending_pool.remove(canonical);
     s.clear_package_round(canonical);
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{aggregate_consensus_outcome, ConsensusOutcome};
-    use chrono::Utc;
-    use common::{ValidatorSignature, ValidatorVote};
-
-    fn sig(id: &str, vote: ValidatorVote, model_version: &str) -> ValidatorSignature {
-        let analysis_bundles = common::AnalysisBundleRefs {
-            policy_bundle_id: "policy-v1".into(),
-            feature_schema_id: "features-v1".into(),
-            expert_bundle_id: "experts-v1".into(),
-            embedding_model_id: "embeddings-v1".into(),
-            index_epoch: "index-epoch-1".into(),
-            threshold_profile_id: "thresholds-v1".into(),
-            llm_prompt_profile_id: "llm-prompt-v1".into(),
-        };
-        ValidatorSignature {
-            validator_id: id.to_string(),
-            validator_pubkey: format!("{}-pubkey", id),
-            signature: format!("{}-sig", id),
-            vote,
-            signed_at: Utc::now(),
-            ml_model_version: model_version.to_string(),
-            analysis_bundles,
-            evidence_digest: common::sha256_hex(b"pipeline-test-evidence"),
-            deterministic_risk: common::DeterministicRiskSummary::default(),
-        }
-    }
-
-    #[test]
-    fn aggregates_to_verified_from_approval_quorum() {
-        let outcome = aggregate_consensus_outcome(
-            &[
-                sig("v1", ValidatorVote::Approve, "creg-detect-v1.0.0"),
-                sig("v2", ValidatorVote::Approve, "creg-detect-v1.0.0"),
-                sig("v3", ValidatorVote::Approve, "creg-detect-v1.0.0"),
-                sig(
-                    "v4",
-                    ValidatorVote::Reject {
-                        reason: "malicious".to_string(),
-                    },
-                    "creg-detect-v1.0.0",
-                ),
-            ],
-            4,
-        );
-
-        match outcome {
-            Some(ConsensusOutcome::Verified(sigs)) => assert_eq!(sigs.len(), 3),
-            other => panic!("expected verified quorum, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn aggregates_to_rejected_when_quorum_is_impossible() {
-        let outcome = aggregate_consensus_outcome(
-            &[
-                sig(
-                    "v1",
-                    ValidatorVote::Reject {
-                        reason: "malicious".to_string(),
-                    },
-                    "creg-detect-v1.0.0",
-                ),
-                sig(
-                    "v2",
-                    ValidatorVote::Reject {
-                        reason: "backdoor".to_string(),
-                    },
-                    "creg-detect-v1.0.0",
-                ),
-            ],
-            3,
-        );
-
-        match outcome {
-            Some(ConsensusOutcome::Rejected { reason }) => assert_eq!(reason, "malicious"),
-            other => panic!("expected rejection quorum failure, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn duplicate_votes_do_not_count_twice() {
-        let outcome = aggregate_consensus_outcome(
-            &[
-                sig("v1", ValidatorVote::Approve, "creg-detect-v1.0.0"),
-                sig("v1", ValidatorVote::Approve, "creg-detect-v1.0.0"),
-                sig("v2", ValidatorVote::Approve, "creg-detect-v1.0.0"),
-            ],
-            3,
-        );
-
-        assert!(
-            outcome.is_none(),
-            "duplicate validator votes must not satisfy quorum"
-        );
-    }
-
-    #[test]
-    fn degraded_votes_are_excluded_from_quorum() {
-        let outcome = aggregate_consensus_outcome(
-            &[
-                sig("v1", ValidatorVote::Approve, "degraded-no-model"),
-                sig("v2", ValidatorVote::Approve, "creg-detect-v1.0.0"),
-                sig("v3", ValidatorVote::Approve, "creg-detect-v1.0.0"),
-            ],
-            4,
-        );
-
-        assert!(
-            outcome.is_none(),
-            "degraded validator votes must not satisfy quorum"
-        );
-    }
 }
 
 /// Maximum IPFS payload size (512 MB). Packages larger than this are rejected

@@ -290,13 +290,13 @@ fn verify_block_signatures(
 #[cfg(test)]
 mod tests {
     use super::verify_block_signatures;
-    use crate::validator_pipeline::{aggregate_consensus_outcome, ConsensusOutcome};
     use chrono::Utc;
     use common::{
         merkle_root, AnalysisBundleRefs, Block, BlockHeader, ChainRecord, DeterministicRiskSummary,
         PackageId, PackageStatus, Transaction, Validator, ValidatorSet, ValidatorSignature,
         ValidatorVote,
     };
+    use consensus::{aggregate_evidence_votes, EvidenceVoteOutcome};
     use ed25519_dalek::{Signer, SigningKey};
 
     #[derive(Clone, Copy)]
@@ -441,9 +441,9 @@ mod tests {
             })
             .collect();
         let canonical_outcome =
-            aggregate_consensus_outcome(&canonical_votes, validator_set.validators.len())
+            aggregate_evidence_votes(&canonical_votes, validator_set.validators.len())
                 .expect("three canonical approvals should satisfy aggregation quorum");
-        let ConsensusOutcome::Verified(canonical_signatures) = canonical_outcome else {
+        let EvidenceVoteOutcome::Verified(canonical_signatures) = canonical_outcome else {
             panic!("expected verified aggregation outcome for canonical votes");
         };
 
@@ -468,9 +468,9 @@ mod tests {
             })
             .collect();
         let legacy_outcome =
-            aggregate_consensus_outcome(&legacy_votes, validator_set.validators.len())
+            aggregate_evidence_votes(&legacy_votes, validator_set.validators.len())
                 .expect("three legacy approvals still satisfy vote aggregation quorum");
-        let ConsensusOutcome::Verified(legacy_signatures) = legacy_outcome else {
+        let EvidenceVoteOutcome::Verified(legacy_signatures) = legacy_outcome else {
             panic!("expected verified aggregation outcome for legacy votes");
         };
 
