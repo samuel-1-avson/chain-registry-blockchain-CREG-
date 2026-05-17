@@ -52,6 +52,80 @@ jobs:
         env:
           CREG_NODE_URL: "http://127.0.0.1:19999"  # unreachable → tests use fallback path
 
+  # Release assurance smoke
+  release-assurance-smoke:
+    name: Release assurance smoke
+    runs-on: ubuntu-latest
+    outputs:
+      full_gate: ${{ steps.changes.outputs.full_gate }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate release assurance inventory
+        run: python -m json.tool config/release-assurance/toolchain-inventory.json >/dev/null
+
+      - name: Validate release assurance scripts
+        run: |
+          bash -n scripts/ddc-verify.sh
+          bash -n scripts/release-assurance.sh
+          bash scripts/ddc-verify.sh --help >/dev/null
+          bash scripts/release-assurance.sh --help >/dev/null
+
+      - name: Decide whether full release assurance is needed
+        id: changes
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch --no-tags origin "${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
+            changed="$(git diff --name-only "origin/${{ github.base_ref }}...HEAD")"
+          elif [ -n "${{ github.event.before }}" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            changed="$(git diff --name-only "${{ github.event.before }}" "${{ github.sha }}")"
+          else
+            changed="$(git ls-files)"
+          fi
+
+          printf '%s\n' "$changed"
+          if printf '%s\n' "$changed" | grep -Eq '^(Cargo.toml|Cargo.lock|crates/|build.rs|Dockerfile|scripts/release-assurance\.sh|config/release-assurance/)'; then
+            echo "full_gate=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "full_gate=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  release-assurance:
+    name: Release assurance
+    runs-on: ubuntu-latest
+    needs: [rust, release-assurance-smoke]
+    if: needs.release-assurance-smoke.outputs.full_gate == 'true'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install release build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libssl-dev build-essential clang llvm libclang-dev \
+            cmake libopenblas-dev protobuf-compiler libprotobuf-dev
+
+      - name: Set deterministic timestamp
+        run: echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> "$GITHUB_ENV"
+
+      - name: Verify reproducible release binaries
+        run: bash ./scripts/release-assurance.sh
+
+      - name: Upload release assurance evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assurance
+          path: artifacts/release-assurance
+
   # ── Solidity contracts ─────────────────────────────────────────────────────
   contracts:
     name: Solidity (Foundry)
@@ -90,7 +164,12 @@ jobs:
   docker:
     name: Docker build
     runs-on: ubuntu-latest
-    needs: [rust]
+    needs: [rust, release-assurance-smoke, release-assurance]
+    if: |
+      always() &&
+      needs.rust.result == 'success' &&
+      needs.release-assurance-smoke.result == 'success' &&
+      (needs.release-assurance-smoke.outputs.full_gate != 'true' || needs.release-assurance.result == 'success')
 
     steps:
       - uses: actions/checkout@v4

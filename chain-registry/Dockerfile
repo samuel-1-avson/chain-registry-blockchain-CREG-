@@ -54,6 +54,10 @@ ENV CARGO_HOME=/usr/local/cargo
 ENV RUSTUP_HOME=/usr/local/rustup
 ENV PATH="/usr/local/cargo/bin:$PATH"
 ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
+ARG SOURCE_DATE_EPOCH
+ENV SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}
+ENV CARGO_INCREMENTAL=0
+ENV RUSTFLAGS="--remap-path-prefix=/build=/src"
 
 RUN mkdir -p "$CARGO_HOME" && \
   printf '[net]\nretry = 10\ngit-fetch-with-cli = true\n\n[http]\nmultiplexing = false\ntimeout = 600\n\n[registries.crates-io]\nprotocol = "sparse"\n' > "$CARGO_HOME/config.toml"
@@ -125,10 +129,10 @@ RUN mkdir -p crates/faucet/src           && echo "fn main() {}"      > crates/fa
 
 # Pre-fetch dependencies with retries so transient registry DNS issues do not
 # fail the image build early.
-RUN cargo fetch || (sleep 5 && cargo fetch) || (sleep 10 && cargo fetch)
+RUN cargo fetch --locked || (sleep 5 && cargo fetch --locked) || (sleep 10 && cargo fetch --locked)
 
 # Pre-build dependencies (cached layer)
-RUN cargo build --release --package chain-registry-node --bin creg-node --bin creg-indexer || true
+RUN cargo build --release --locked --package chain-registry-node --bin creg-node --bin creg-indexer || true
 
 # Copy real source and build properly.
 COPY crates/ crates/
@@ -145,16 +149,16 @@ COPY docker-compose*.yml ./
 RUN touch crates/*/src/*.rs
 
 # Build the node binaries with all features
-RUN cargo build --release --package chain-registry-node --bin creg-node --bin creg-indexer
+RUN cargo build --release --locked --package chain-registry-node --bin creg-node --bin creg-indexer
 
 # Build CLI tools (includes TUI explorer)
-RUN cargo build --release --package chain-registry-cli
+RUN cargo build --release --locked --package chain-registry-cli
 
 # Build Faucet service (testnet)
-RUN cargo build --release --package faucet
+RUN cargo build --release --locked --package faucet
 
 # Build Relayer service (sponsored testnet transactions)
-RUN cargo build --release --package chain-registry-relayer
+RUN cargo build --release --locked --package chain-registry-relayer
 
 # ── Stage 3: Runtime ──────────────────────────────────────────────────────────
 # Must match builder glibc version (Ubuntu 24.04 has glibc 2.39)

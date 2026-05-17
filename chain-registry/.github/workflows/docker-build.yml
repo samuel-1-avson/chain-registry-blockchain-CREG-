@@ -66,6 +66,9 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable={{is_default_branch}}
             type=raw,value=${{ github.event.inputs.image_tag }},enable=${{ github.event_name == 'workflow_dispatch' }}
+
+      - name: Set deterministic timestamp
+        run: echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> "$GITHUB_ENV"
       
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
@@ -78,8 +81,11 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64,linux/arm64
+          provenance: mode=max
+          sbom: true
           build-args: |
             BUILDKIT_INLINE_CACHE=1
+            SOURCE_DATE_EPOCH=${{ env.SOURCE_DATE_EPOCH }}
 
   # ============================================================================
   # Build Minimal Image (Fast, No ML/AI)
@@ -116,6 +122,9 @@ jobs:
             type=ref,event=pr
             type=semver,pattern={{version}}
             type=raw,value=minimal,enable={{is_default_branch}}
+
+      - name: Set deterministic timestamp
+        run: echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> "$GITHUB_ENV"
       
       - name: Build and push minimal image
         uses: docker/build-push-action@v5
@@ -128,6 +137,10 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64
+          provenance: mode=max
+          sbom: true
+          build-args: |
+            SOURCE_DATE_EPOCH=${{ env.SOURCE_DATE_EPOCH }}
 
   # ============================================================================
   # Security Scanning

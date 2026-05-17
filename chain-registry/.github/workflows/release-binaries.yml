@@ -50,24 +50,25 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Build node binary
-        run: cargo build --release --package chain-registry-node
+      - name: Set deterministic timestamp
+        run: echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> "$GITHUB_ENV"
 
-      - name: Build CLI binary
-        run: cargo build --release --package chain-registry-cli
-
-      - name: Strip binaries
-        run: |
-          strip target/release/creg-node
-          strip target/release/creg
+      - name: Verify reproducible release binaries
+        run: bash ./scripts/release-assurance.sh --out-dir artifacts/release-assurance-linux
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: linux-amd64
           path: |
-            target/release/creg-node
-            target/release/creg
+            artifacts/release-assurance-linux/binaries/creg-node
+            artifacts/release-assurance-linux/binaries/creg
+
+      - name: Upload release assurance evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assurance-linux
+          path: artifacts/release-assurance-linux
 
   # ============================================================================
   # Build Windows x86_64 binary
@@ -171,6 +172,12 @@ jobs:
           name: linux-amd64
           path: dist/linux-amd64
 
+      - name: Download Linux assurance evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: release-assurance-linux
+          path: dist/release-assurance-linux
+
       - name: Download Windows artifacts
         uses: actions/download-artifact@v4
         with:
@@ -194,6 +201,9 @@ jobs:
           # macOS
           tar -czf release/chain-registry-${{ github.ref_name || github.event.inputs.tag }}-macos-amd64.tar.gz \
             -C dist/macos-amd64 creg-node creg
+          # Release-assurance evidence
+          tar -czf release/chain-registry-${{ github.ref_name || github.event.inputs.tag }}-release-assurance-linux.tar.gz \
+            -C dist/release-assurance-linux .
 
       - name: Create Release
         uses: softprops/action-gh-release@v1

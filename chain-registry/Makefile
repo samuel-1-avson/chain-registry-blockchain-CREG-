@@ -2,7 +2,7 @@
 
 .PHONY: build test lint clean node cluster contracts deploy-local fmt check \
         testnet testnet-smoke testnet-no-explorer testnet-stop testnet-reset testnet-logs \
-        up up-dev up-testnet down down-testnet logs-testnet
+        up up-dev up-testnet down down-testnet logs-testnet release-assurance ddc-verify
 
 POWERSHELL ?= pwsh
 # Run testnet compose in a clean env so shell-level overrides don't win over .env.testnet.
@@ -27,6 +27,14 @@ fmt:
 
 check:
 	cargo check --workspace
+
+## Rebuild release binaries twice and emit release-assurance evidence.
+release-assurance:
+	bash ./scripts/release-assurance.sh
+
+## Run DDC for an explicitly configured compiler/codegen target.
+ddc-verify:
+	bash ./scripts/ddc-verify.sh
 
 clean:
 	cargo clean
