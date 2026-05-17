@@ -12,6 +12,7 @@ pub struct Challenge {
     pub challenge: String,
     pub difficulty: u8,
     #[serde(default)]
+    #[allow(dead_code)]
     pub ttl_secs: u64,
 }
 
@@ -22,10 +23,12 @@ pub struct NetworkInfo {
     #[serde(default)]
     pub chain_name: String,
     #[serde(default)]
+    #[allow(dead_code)]
     pub native_currency_symbol: String,
     #[serde(default)]
     pub rpc_url: String,
     #[serde(default)]
+    #[allow(dead_code)]
     pub token_contract: Option<String>,
 }
 
@@ -51,6 +54,7 @@ pub struct BalanceResponse {
     #[serde(default)]
     pub native_balance_formatted: Option<String>,
     #[serde(default)]
+    #[allow(dead_code)]
     pub error: Option<String>,
 }
 

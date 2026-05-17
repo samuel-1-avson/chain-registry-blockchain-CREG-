@@ -159,6 +159,9 @@ if ($current -notlike '*{dir}*') {{ \
 
 fn print_path_instructions(dir: &Path) {
     #[cfg(windows)]
+    let _ = dir;
+
+    #[cfg(windows)]
     println!(
         "  Restart your terminal (or open a new one) for PATH changes to take effect."
     );

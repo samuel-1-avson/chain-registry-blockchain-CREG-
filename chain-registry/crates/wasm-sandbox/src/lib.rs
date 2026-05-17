@@ -442,26 +442,6 @@ impl WasmSandbox {
         }
     }
 
-    /// Build a WASI context respecting the configured capabilities.
-    fn build_wasi_context(&self) -> Result<(), SandboxError> {
-        // Capability enforcement: only grant WASI features that match
-        // the configured CapabilitySet. Currently we provide no WASI
-        // imports at all (most restrictive), which means any WASM module
-        // that calls WASI functions will trap. This is intentional for
-        // untrusted code validation.
-        //
-        // Future: use wasmtime_wasi::WasiCtxBuilder to selectively
-        // enable stdio (if caps.has("stdio")), clock, random, and
-        // filesystem access based on the CapabilitySet.
-        if self.config.capabilities.has("network") {
-            warn!("Network capability requested but not yet supported in WASM sandbox");
-        }
-        if self.config.capabilities.has("filesystem-write") {
-            warn!("Filesystem write capability requested but not yet supported in WASM sandbox");
-        }
-        Ok(())
-    }
-
     /// Run a validator script on a package
     pub async fn validate_package(
         &self,

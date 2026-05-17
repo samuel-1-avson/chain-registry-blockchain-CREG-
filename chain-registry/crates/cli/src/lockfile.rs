@@ -12,7 +12,6 @@
 
 use anyhow::{Context, Result};
 use chrono::Utc;
-use colored::Colorize;
 use common::{TrustVerdict, VerdictSource, VerdictStatus};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};

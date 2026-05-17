@@ -19,7 +19,6 @@
 use std::{path::PathBuf, sync::{Arc, OnceLock}};
 
 use ark_bn254::{Bn254, Fr};
-use ark_ff::PrimeField;
 use ark_groth16::{Groth16, ProvingKey, VerifyingKey};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_snark::SNARK;

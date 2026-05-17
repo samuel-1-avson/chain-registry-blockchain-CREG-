@@ -3,7 +3,7 @@
 
 use anyhow::{bail, Result};
 use colored::Colorize;
-use dialoguer::{Confirm, Input, MultiSelect, Select};
+use dialoguer::{Confirm, Input, Select};
 use std::path::PathBuf;
 
 pub async fn run() -> Result<()> {

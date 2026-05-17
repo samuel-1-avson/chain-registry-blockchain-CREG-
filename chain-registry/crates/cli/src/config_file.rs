@@ -210,6 +210,7 @@ impl Config {
     }
 
     /// Get the effective node URL (CLI arg > env var > config file > default)
+    #[allow(dead_code)]
     pub fn node_url(&self, cli_override: Option<&str>) -> String {
         cli_override
             .map(String::from)
@@ -218,6 +219,7 @@ impl Config {
     }
 
     /// Get the effective IPFS URL
+    #[allow(dead_code)]
     pub fn ipfs_url(&self) -> String {
         std::env::var("CREG_IPFS_URL")
             .ok()

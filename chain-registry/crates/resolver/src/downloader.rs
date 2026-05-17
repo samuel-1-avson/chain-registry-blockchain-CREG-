@@ -5,7 +5,7 @@
 use anyhow::{Context, Result};
 use common::sha256_hex;
 use futures::stream::{FuturesUnordered, StreamExt};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 

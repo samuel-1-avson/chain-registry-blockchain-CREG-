@@ -21,10 +21,8 @@
 //! ```
 
 use ark_bn254::{Bn254, Fr};
-use ark_ec::pairing::Pairing;
 use ark_ff::PrimeField;
 use ark_groth16::{Groth16, Proof, ProvingKey, VerifyingKey};
-use ark_r1cs_std::prelude::*;
 use ark_relations::r1cs::SynthesisError;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_snark::SNARK;

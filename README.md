@@ -3,7 +3,8 @@
 > A decentralized, Byzantine-Fault-Tolerant package distribution network that replaces single-authority trust in npm/PyPI/Cargo with cryptographic consensus from a staked validator set.
 
 [![Testnet](https://img.shields.io/badge/testnet-v0.3.0-blue)](chain-registry/docs/CURRENT_STATUS.md)
-[![Validators](https://img.shields.io/badge/validators-1%20(dev)%20%7C%2010%20(k8s)-green)](chain-registry/k8s/)
+[![Local%20Cluster](https://img.shields.io/badge/local%20cluster-3%20validators%20validated-green)](chain-registry/docs/CURRENT_STATUS.md)
+[![Kubernetes](https://img.shields.io/badge/k8s-manifests%20available-blue)](chain-registry/k8s/)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey)](#license)
 [![Rust](https://img.shields.io/badge/rust-1.90-orange)](chain-registry/Cargo.toml)
 [![Solidity](https://img.shields.io/badge/solidity-0.8.24-purple)](chain-registry/contracts/)
@@ -16,7 +17,7 @@
 
 **The solution.** Chain Registry replaces single-authority trust with a **decentralized Byzantine-Fault-Tolerant validator network** that independently analyzes every package before it is considered `Verified`. Each package passes through a three-stage validation pipeline — static analysis, behavioral sandbox, ML deep scan — and only becomes installable once a `⌊2n/3⌋+1` PBFT quorum of economically-staked validators has signed an `Approve` vote. Packages are content-addressed in IPFS, the chain is persisted in RocksDB, and final state roots are anchored to Ethereum L1 via a Groth16 rollup bridge.
 
-**Current status.** The project is in **testnet v0.3.0**. The full publish → validate → consensus → block → L1 anchor pipeline is wired end-to-end in the single-validator Docker compose profile, and the multi-host bootstrap/validator testnet flow is tracked in [`chain-registry/docs/CURRENT_STATUS.md`](chain-registry/docs/CURRENT_STATUS.md). Kustomize manifests are available under [`chain-registry/k8s/`](chain-registry/k8s/). The repo currently ships a CLI with 27 commands, a React web explorer, a Ratatui terminal explorer, a faucet, a relayer paymaster, and a Prometheus/Grafana observability stack. The current technical audit and open risk picture live in [`chain-registry/docs/DEEP_DIVE_ANALYSIS.md`](chain-registry/docs/DEEP_DIVE_ANALYSIS.md) and [`REMEDIATION_BACKLOG.md`](REMEDIATION_BACKLOG.md).
+**Current status.** The most recently revalidated path is the **local distributed three-validator bootstrap** driven by [`chain-registry/local-testnet.ps1`](chain-registry/local-testnet.ps1) and [`chain-registry/docker-compose.local-testnet.yml`](chain-registry/docker-compose.local-testnet.yml). That path now proves a cluster can advance beyond genesis with a non-zero active validator set and a non-zero P2P mesh. The single-validator Docker profile remains useful for inner-loop development, while multi-host and Sepolia-facing work is tracked separately in [`chain-registry/docs/CURRENT_STATUS.md`](chain-registry/docs/CURRENT_STATUS.md) and [`TESTNET_READINESS_REPORT.md`](TESTNET_READINESS_REPORT.md). Kustomize manifests are available under [`chain-registry/k8s/`](chain-registry/k8s/). The repo currently ships a CLI with 27 commands, a React web explorer, a Ratatui terminal explorer, a faucet, a relayer paymaster, and a Prometheus/Grafana observability stack. The current technical audit and open risk picture live in [`chain-registry/docs/DEEP_DIVE_ANALYSIS.md`](chain-registry/docs/DEEP_DIVE_ANALYSIS.md), [`COMPREHENSIVE_CODEBASE_ANALYSIS.md`](COMPREHENSIVE_CODEBASE_ANALYSIS.md), and [`REMEDIATION_BACKLOG.md`](REMEDIATION_BACKLOG.md).
 
 ---
 
@@ -25,42 +26,33 @@
 **Prerequisites.**
 
 - Docker Desktop (or docker-engine + compose v2)
-- ~8 GB RAM available to Docker
-- Ports `8080`, `4001`, `5001`, `8081`, `8545`, `9000`, `50051` free
+- PowerShell for the repo-validated local bootstrap wrapper
+- Enough free resources for a three-validator local stack
 
-**Bring up the dev cluster.**
+**Recommended: validated local distributed bootstrap.**
+
+```powershell
+cd chain-registry
+./local-testnet.ps1 -RunSmokeTests
+```
+
+This wrapper drives the canonical local stack in [`chain-registry/docker-compose.local-testnet.yml`](chain-registry/docker-compose.local-testnet.yml), deploys local contracts, starts three validators plus observer/indexer/faucet/relayer, and runs the smoke flow in [`chain-registry/scripts/smoke-test-local-testnet.ps1`](chain-registry/scripts/smoke-test-local-testnet.ps1).
+
+**Fast inner loop: single-validator development cluster.**
 
 ```bash
 cd chain-registry
-cp .env.example .env          # set NODE1_VALIDATOR_KEY (creg keygen)
-docker compose up -d          # starts IPFS + Anvil + contract deployer + validator node
-```
-
-**Check health.**
-
-```bash
+cp .env.example .env
+docker compose up -d
 curl http://localhost:8080/v1/health
-# → {"status":"ok","tip_height":42,"peers":0,"bridge":"synced"}
 ```
 
-**Open the web explorer.**
+**Optional UI and CLI surfaces.**
 
 - Embedded UI: <http://localhost:8080/ui/>
-- Standalone nginx (optional): `docker compose --profile web-explorer up -d` → <http://localhost:3007>
-
-**Launch the terminal explorer.**
-
-```bash
-docker compose --profile tui run --rm tui-explorer
-```
-
-**Publish your first package.**
-
-```bash
-docker compose --profile cli run --rm cli keygen --out /data/publisher.key
-# Stake the publisher EVM address before publishing; unstaked publishers are rejected.
-docker compose --profile cli run --rm cli publish ./my-pkg-1.0.0.tgz --key-file /data/publisher.key --publisher-address 0xYourPublisherAddress
-```
+- Standalone explorer: `docker compose --profile web-explorer up -d` → <http://localhost:3007>
+- Terminal explorer: `docker compose --profile tui run --rm tui-explorer`
+- Publisher workflow: `docker compose --profile cli run --rm cli publish ...`
 
 ---
 
@@ -82,7 +74,7 @@ graph LR
 ```
 
 | Layer | Technology |
-|---|---|
+| --- | --- |
 | **Validator runtime** | Rust 1.90 · Tokio · axum · tonic · libp2p |
 | **Consensus** | Custom PBFT · Ed25519-based VRF · Gossipsub broadcast |
 | **Validation Stage 1** | Static analysis (entropy, YARA-X, Levenshtein typosquat, diff) |
@@ -105,7 +97,7 @@ graph LR
 The `creg` CLI ships **27 commands**. The most-used subset:
 
 | Command | Description |
-|---|---|
+| --- | --- |
 | `creg keygen` | Generate an Ed25519 keypair with BIP-39 mnemonic |
 | `creg stake --amount N` | Stake CREG tokens as publisher or validator |
 | `creg publish <tarball>` | Sign, pin to IPFS, and submit a package to the pending pool |
@@ -182,7 +174,7 @@ The tarball is encrypted with a per-package AES-256-GCM key; the key is threshol
 ## Running a Validator Node
 
 | Env var | Description | Example |
-|---|---|---|
+| --- | --- | --- |
 | `CREG_NODE_ID` | Node identifier | `node-1` |
 | `CREG_IS_VALIDATOR` | Enable validator role | `true` |
 | `CREG_VALIDATOR_KEY` | Hex-encoded Ed25519 secret key | `ed25519:...` |
@@ -233,7 +225,7 @@ creg stake --amount 10000 --role validator --address 0xYourEthAddress
 ## Smart Contracts
 
 | Contract | Purpose | Status |
-|---|---|---|
+| --- | --- | --- |
 | **Registry.sol** | Core package index; PBFT finalization + ZK verification | **Active** |
 | **Staking.sol** | Publisher & validator stake management, slashing | **Active** |
 | **Governance.sol** | M-of-N multisig + emergency pause | **Active** |
@@ -304,7 +296,7 @@ filter = "info,chain_registry_node=debug,zk_validator=debug"
 ### Key env vars (deployment)
 
 | Var | Purpose |
-|---|---|
+| --- | --- |
 | `CREG_TESTNET_MODE` | Enable multi-node testnet allowances |
 | `CREG_TLS_CERT` / `CREG_TLS_KEY` | Enable HTTPS on the REST API (feature `tls`) |
 | `CREG_PG_URL` | Enable PostgreSQL indexer sync |
@@ -349,10 +341,12 @@ make testnet-smoke    # full E2E diagnostic via `creg doctor --testnet`
 
 ### Documentation
 
+- [`chain-registry/docs/CURRENT_STATUS.md`](chain-registry/docs/CURRENT_STATUS.md) — live repo-aligned operational status and verified workflows
+- [`TESTNET_READINESS_REPORT.md`](TESTNET_READINESS_REPORT.md) — public testnet readiness gates and launch tracks
+- [`chain-registry/DELIVERABLES_INDEX.md`](chain-registry/DELIVERABLES_INDEX.md) — current artifact and deliverable map
 - [`COMPREHENSIVE_CODEBASE_ANALYSIS.md`](COMPREHENSIVE_CODEBASE_ANALYSIS.md) — historical repository-wide audit snapshot
 - [`chain-registry/docs/DEEP_DIVE_ANALYSIS.md`](chain-registry/docs/DEEP_DIVE_ANALYSIS.md) — live deep technical analysis in the nested repo
 - [`REMEDIATION_BACKLOG.md`](REMEDIATION_BACKLOG.md) — prioritized remediation work and implementation status
-- [`DOCUMENTATION_RATIONALIZATION_PLAN.md`](DOCUMENTATION_RATIONALIZATION_PLAN.md) — current documentation cleanup map
 - [`chain-registry/docs/SYSTEM_DEEP_DIVE.md`](chain-registry/docs/SYSTEM_DEEP_DIVE.md) — architecture overview
 - [`chain-registry/docs/EXPLORER_DEEP_DIVE.md`](chain-registry/docs/EXPLORER_DEEP_DIVE.md) — canonical explorer and user-surface analysis
 - [`chain-registry/docs/API_COOKBOOK.md`](chain-registry/docs/API_COOKBOOK.md) — live REST API curl examples
@@ -361,7 +355,6 @@ make testnet-smoke    # full E2E diagnostic via `creg doctor --testnet`
 - [`chain-registry/docs/VALIDATOR_DEEP_DIVE.md`](chain-registry/docs/VALIDATOR_DEEP_DIVE.md) — historical validator-system analysis snapshot
 - [`chain-registry/docs/WALLET_DEEP_DIVE.md`](chain-registry/docs/WALLET_DEEP_DIVE.md) — historical wallet-architecture analysis snapshot
 - [`chain-registry/docs/RELAYER_PAYMASTER_DESIGN.md`](chain-registry/docs/RELAYER_PAYMASTER_DESIGN.md) — sponsored transaction design
-- [`chain-registry/docs/CURRENT_STATUS.md`](chain-registry/docs/CURRENT_STATUS.md) — current development snapshot
 - [`chain-registry/docs/PROJECT_DOCUMENTATION.md`](chain-registry/docs/PROJECT_DOCUMENTATION.md) — nested-repo documentation hub
 
 ---

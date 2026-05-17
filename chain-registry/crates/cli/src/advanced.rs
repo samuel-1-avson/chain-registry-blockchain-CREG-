@@ -216,6 +216,7 @@ pub async fn wasm_validate(
 }
 
 /// Batch ML verification for multiple packages
+#[allow(dead_code)]
 pub async fn batch_ml_verify(
     packages: &[(String, PathBuf)],
     ecosystem: &str,

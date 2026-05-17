@@ -7,7 +7,7 @@
 //   creg watch --filter verified    — only verified packages
 //   creg watch --filter pkg:express — only events for a specific package
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use colored::Colorize;
 
 pub async fn run(filter: Option<&str>, node_url: Option<&str>, ci_mode: bool) -> Result<()> {

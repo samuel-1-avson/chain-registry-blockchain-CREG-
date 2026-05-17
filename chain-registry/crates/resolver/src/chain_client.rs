@@ -4,7 +4,7 @@
 use anyhow::{Context, Result};
 use chrono::Utc;
 use common::proto::registry_service_client::RegistryServiceClient;
-use common::proto::{GetVersionRequest, GetVersionResponse};
+use common::proto::GetVersionRequest;
 use common::{PackageId, TrustVerdict, VerdictSource, VerdictStatus};
 
 /// Resolve a verdict using the best available protocol (gRPC -> REST).

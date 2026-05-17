@@ -306,8 +306,6 @@ async fn pin_to_ipfs_with_progress(bytes: &[u8], pb: &ProgressBar) -> Result<Str
         std::env::var("CREG_IPFS_URL").unwrap_or_else(|_| "http://127.0.0.1:5001".to_string());
     let add_url = format!("{}/api/v0/add", ipfs_base.trim_end_matches('/'));
 
-    use reqwest::multipart;
-
     // We do not simulate progress here anymore. Instead, we let reqwest handle the actual network transfer.
     pb.set_style(
         indicatif::ProgressStyle::default_spinner()

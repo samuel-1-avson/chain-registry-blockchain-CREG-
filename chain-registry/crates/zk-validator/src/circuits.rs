@@ -4,7 +4,7 @@
 //! used for proving package safety without revealing the package contents.
 
 use ark_bn254::Fr;
-use ark_ff::{Field, One, PrimeField};
+use ark_ff::{One, PrimeField};
 use ark_r1cs_std::fields::fp::FpVar;
 use ark_r1cs_std::prelude::*;
 use ark_relations::r1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisError};

@@ -3,15 +3,6 @@
 
 use anyhow::{Context, Result};
 use colored::Colorize;
-use serde::Deserialize;
-
-#[derive(Deserialize, Debug)]
-struct PackageRecord {
-    canonical: String,
-    status: Option<String>,
-    publisher: Option<String>,
-    published_at: Option<String>,
-}
 
 pub async fn run(
     query: &str,

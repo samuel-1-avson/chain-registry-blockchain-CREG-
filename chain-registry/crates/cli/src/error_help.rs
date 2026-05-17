@@ -108,6 +108,7 @@ fn print_general_help() {
     eprintln!("  • Get command help: {}", "creg --help".cyan());
 }
 
+#[allow(dead_code)]
 pub fn print_progress(operation: &str, current: usize, total: usize) {
     let width = 40;
     let filled = (current * width) / total;
@@ -131,14 +132,17 @@ pub fn print_progress(operation: &str, current: usize, total: usize) {
     }
 }
 
+#[allow(dead_code)]
 pub fn print_success(message: &str) {
     println!("  {} {}", "✓".green().bold(), message);
 }
 
+#[allow(dead_code)]
 pub fn print_warning(message: &str) {
     println!("  {} {}", "⚠".yellow().bold(), message);
 }
 
+#[allow(dead_code)]
 pub fn print_info(message: &str) {
     println!("  {} {}", "→".blue(), message.dimmed());
 }

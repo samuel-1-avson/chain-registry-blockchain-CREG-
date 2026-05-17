@@ -20,13 +20,12 @@ use crossterm::{
 use futures::StreamExt;
 use ratatui::{
     backend::CrosstermBackend,
-    layout::{Alignment, Constraint, Direction, Layout, Margin, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    symbols,
-    text::{Line, Span, Text},
+    text::{Line, Span},
     widgets::{
-        Block, Borders, Cell, Clear, Gauge, LineGauge, List, ListItem, Paragraph, Row, Scrollbar,
-        ScrollbarOrientation, ScrollbarState, Sparkline, Table, Tabs, Wrap,
+        Block, Borders, Cell, Clear, Gauge, List, ListItem, Paragraph, Row, Sparkline, Table,
+        Wrap,
     },
     Frame, Terminal,
 };
@@ -62,8 +61,6 @@ impl Theme {
     fn accent() -> Color { if IS_LIGHT_THEME.load(Ordering::Relaxed) { Color::Magenta } else { Color::Magenta } }
     fn text() -> Color { if IS_LIGHT_THEME.load(Ordering::Relaxed) { Color::Black } else { Color::White } }
     fn text_dim() -> Color { if IS_LIGHT_THEME.load(Ordering::Relaxed) { Color::DarkGray } else { Color::Gray } }
-    fn text_dark() -> Color { if IS_LIGHT_THEME.load(Ordering::Relaxed) { Color::Gray } else { Color::DarkGray } }
-    fn bg() -> Color { if IS_LIGHT_THEME.load(Ordering::Relaxed) { Color::Rgb(240, 240, 240) } else { Color::Black } }
     fn border() -> Color { if IS_LIGHT_THEME.load(Ordering::Relaxed) { Color::Gray } else { Color::DarkGray } }
     fn highlight() -> Color { if IS_LIGHT_THEME.load(Ordering::Relaxed) { Color::Rgb(200, 220, 255) } else { Color::LightCyan } }
 }
@@ -85,7 +82,7 @@ struct BlockInfo {
 
 #[derive(Debug, Clone)]
 struct TransactionInfo {
-    id: String,
+    _id: String,
     tx_type: String,
     package_name: Option<String>,
     package_version: Option<String>,
@@ -119,7 +116,7 @@ struct PackageInfo {
 struct NetworkStats {
     tip_height: u64,
     package_count: u64,
-    block_count: u64,
+    _block_count: u64,
     validator_count: usize,
     total_stake: u64,
     peer_count: usize,
@@ -131,7 +128,7 @@ struct NetworkStats {
 struct MempoolTx {
     id: String,
     tx_type: String,
-    size: usize,
+    _size: usize,
     timestamp: Instant,
 }
 
@@ -157,8 +154,6 @@ enum View {
     Help,
     Bridge,
     Metrics,
-    Search,
-    AddressDetail,
 }
 
 /// State of the Faucet pane's drip flow.
@@ -256,7 +251,7 @@ struct App {
     selected_validator: usize,
     selected_package: usize,
     selected_event: usize,
-    selected_tab: usize,
+    _selected_tab: usize,
 
     // Data
     stats: NetworkStats,
@@ -269,15 +264,15 @@ struct App {
     runtime_identity: Option<RuntimeIdentity>,
 
     // UI State
-    show_help: bool,
+    _show_help: bool,
     search_query: String,
     is_searching: bool,
-    scroll_offset: usize,
+    _scroll_offset: usize,
 
     // Async
-    api_base: String,
+    _api_base: String,
     data_tx: mpsc::Sender<DataUpdate>,
-    last_refresh: Instant,
+    _last_refresh: Instant,
     tick_count: u64,
 
     // Consensus
@@ -299,7 +294,6 @@ struct App {
     faucet: FaucetView,
     bridge_anchors: Vec<serde_json::Value>,
     metrics_history: Vec<serde_json::Value>,
-    search_results: Vec<serde_json::Value>,
 }
 
 #[derive(Debug)]
@@ -309,11 +303,9 @@ enum DataUpdate {
     Validators(Vec<ValidatorInfo>),
     Packages(Vec<PackageInfo>),
     Event(String, String), // (type, message)
-    MempoolTx(MempoolTx),
     MempoolSnapshot(Vec<MempoolTx>),
     Peers(Vec<String>),
     RuntimeIdentity(RuntimeIdentity),
-    Error(String),
     /// SSE stream (re-)connected successfully.
     NodeConnected,
     /// SSE stream dropped; UI should show disconnect banner.
@@ -350,11 +342,11 @@ impl App {
             selected_validator: 0,
             selected_package: 0,
             selected_event: 0,
-            selected_tab: 0,
+            _selected_tab: 0,
             stats: NetworkStats {
                 tip_height: 0,
                 package_count: 0,
-                block_count: 0,
+                _block_count: 0,
                 validator_count: 0,
                 total_stake: 0,
                 peer_count: 0,
@@ -368,13 +360,13 @@ impl App {
             mempool: Vec::new(),
             peer_ids: Vec::new(),
             runtime_identity: None,
-            show_help: false,
+            _show_help: false,
             search_query: String::new(),
             is_searching: false,
-            scroll_offset: 0,
-            api_base,
+            _scroll_offset: 0,
+            _api_base: api_base,
             data_tx,
-            last_refresh: Instant::now(),
+            _last_refresh: Instant::now(),
             tick_count: 0,
             consensus_state: None,
             node_connected: false,
@@ -390,7 +382,6 @@ impl App {
             ),
             bridge_anchors: Vec::new(),
             metrics_history: Vec::new(),
-            search_results: Vec::new(),
         }
     }
 
@@ -626,7 +617,7 @@ async fn fetch_stats(client: &reqwest::Client, api_base: &str) -> Result<Network
     Ok(NetworkStats {
         tip_height: json["tip_height"].as_u64().unwrap_or(0),
         package_count: json["package_count"].as_u64().unwrap_or(0),
-        block_count: json["block_count"].as_u64().unwrap_or(0),
+        _block_count: json["block_count"].as_u64().unwrap_or(0),
         validator_count: json["validator_count"].as_u64().unwrap_or(0) as usize,
         total_stake: json["total_stake"].as_u64().unwrap_or(0),
         peer_count: json["peer_count"].as_u64().unwrap_or(0) as usize,
@@ -651,7 +642,7 @@ async fn fetch_block(client: &reqwest::Client, api_base: &str, height: u64) -> R
         .map(|arr| {
             arr.iter()
                 .map(|t| TransactionInfo {
-                    id: t["id"]["canonical"]
+                    _id: t["id"]["canonical"]
                         .as_str()
                         .unwrap_or("unknown")
                         .to_string(),
@@ -840,7 +831,7 @@ async fn fetch_mempool(
             txs.push(MempoolTx {
                 id: canonical.to_string(),
                 tx_type: format!("publish({})", ecosystem),
-                size: canonical.len(), // approximate — no real size available
+                _size: canonical.len(), // approximate — no real size available
                 timestamp: now,
             });
         }
@@ -1036,16 +1027,12 @@ fn apply_data_update(app: &mut App, update: DataUpdate) {
         DataUpdate::Event(event_type, message) => {
             app.push_event(event_type, message);
         }
-        DataUpdate::MempoolTx(tx) => {
-            app.mempool.push(tx);
-        }
         DataUpdate::MempoolSnapshot(txs) => {
             app.mempool = txs;
         }
         DataUpdate::Peers(peers) => {
             app.peer_ids = peers;
         }
-        DataUpdate::Error(_) => {}
         DataUpdate::NodeConnected => {
             app.node_connected = true;
             app.last_event_at = Instant::now();
@@ -1691,8 +1678,6 @@ fn draw_main_content(f: &mut Frame, app: &App, area: Rect) {
         View::Operator => draw_operator(f, app, area),
         View::Consensus => draw_consensus(f, app, area),
         View::Faucet => draw_faucet(f, app, area),
-                View::Search => draw_search(f, app, area),
-        View::AddressDetail => draw_address(f, app, area),
         View::Bridge => draw_bridge(f, app, area),
         View::Metrics => draw_metrics(f, app, area),
         View::Help => draw_help(f, app, area),
@@ -3318,44 +3303,6 @@ fn format_wei(raw: &str) -> String {
         let frac_short = &frac[..frac.len().min(2)];
         format!("{}.{}", whole, frac_short)
     }
-}
-
-// ============================================================================
-// SPRINT 4 TUI PARITY EXTENSIONS
-// ============================================================================
-
-fn draw_search(f: &mut Frame, app: &App, area: Rect) {
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(" SEARCH (Type / to start, Enter to execute) ")
-        .border_style(Style::default().fg(Theme::accent()));
-
-    let query_display = format!("Query: {}", app.search_query);
-    let mut text_lines = vec![
-        Line::from(vec![
-            Span::styled("Press / to enter search, type query, hit enter (mocked).", Style::default().fg(Theme::text_dim())),
-        ]),
-        Line::from(""),
-        Line::from(Span::styled(&query_display, Style::default().fg(Theme::highlight()))),
-        Line::from(""),
-        Line::from(Span::styled(format!("Found {} results (Not hooked up to node api yet in TUI)", app.search_results.len()), Style::default().fg(Theme::text()))),
-    ];
-
-    let paragraph = Paragraph::new(text_lines)
-        .block(block)
-        .alignment(Alignment::Left);
-    f.render_widget(paragraph, area);
-}
-
-fn draw_address(f: &mut Frame, app: &App, area: Rect) {
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(" ADDRESS DETAIL ")
-        .border_style(Style::default().fg(Theme::accent()));
-    let text = Paragraph::new("Address details will appear here. Navigate via Search.")
-        .block(block)
-        .style(Style::default().fg(Theme::text_dim()));
-    f.render_widget(text, area);
 }
 
 fn draw_bridge(f: &mut Frame, app: &App, area: Rect) {

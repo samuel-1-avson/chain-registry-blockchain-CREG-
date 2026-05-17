@@ -1,7 +1,7 @@
 // crates/cli/src/graph.rs
 // `creg graph <package>` — ASCII/TUI dependency tree with risk scores per node.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use colored::Colorize;
 use std::collections::{HashMap, HashSet};
 

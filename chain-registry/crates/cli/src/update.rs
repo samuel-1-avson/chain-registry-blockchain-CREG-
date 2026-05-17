@@ -125,9 +125,8 @@ async fn install_update(download_url: &str, version: &str, expected_sha256: Opti
     );
 
     let mut bytes = Vec::new();
-    let mut stream = resp;
     use futures::StreamExt;
-    let mut byte_stream = stream.bytes_stream();
+    let mut byte_stream = resp.bytes_stream();
     while let Some(chunk) = byte_stream.next().await {
         let chunk = chunk.context("Error reading update stream")?;
         pb.inc(chunk.len() as u64);

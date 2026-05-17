@@ -125,7 +125,7 @@ pub async fn init(
     tarball_path: &Path,
     threshold: usize,
     publisher_address: &str,
-    node_url: Option<&str>,
+    _node_url: Option<&str>,
     output: &Path,
 ) -> Result<()> {
     let publisher_address = crate::publish::canonicalize_publisher_address(publisher_address)?;

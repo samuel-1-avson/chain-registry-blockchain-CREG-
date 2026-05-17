@@ -39,16 +39,13 @@ pub fn split(
 ) -> Result<Vec<Share>> {
     let secret = hex::decode(privkey_hex.trim())
         .context("Invalid private key hex for splitting")?;
-    let n = guardians.len() as u8;
+    let n = u8::try_from(guardians.len()).context("Max 255 guardians supported")?;
 
     if threshold < 2 {
         bail!("Threshold must be at least 2");
     }
     if threshold > n {
         bail!("Threshold ({}) cannot exceed number of guardians ({})", threshold, n);
-    }
-    if n > 255 {
-        bail!("Max 255 guardians supported");
     }
 
     let mut shares: Vec<Vec<u8>> = (0..n).map(|_| Vec::with_capacity(secret.len())).collect();

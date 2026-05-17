@@ -136,7 +136,7 @@ impl FeatureExtractor {
 
     /// Extract features from JavaScript/TypeScript code
     pub fn extract_js_features(code: &str) -> Result<PackageFeatures, FeatureError> {
-        use tree_sitter::{Node, Parser};
+        use tree_sitter::Parser;
 
         let mut parser = Parser::new();
         parser
@@ -200,7 +200,7 @@ impl FeatureExtractor {
 
     /// Extract features from Python code
     pub fn extract_python_features(code: &str) -> Result<PackageFeatures, FeatureError> {
-        use tree_sitter::{Node, Parser};
+        use tree_sitter::Parser;
 
         let mut parser = Parser::new();
         parser
@@ -250,7 +250,7 @@ impl FeatureExtractor {
 
     /// Extract features from Rust code
     pub fn extract_rust_features(code: &str) -> Result<PackageFeatures, FeatureError> {
-        use tree_sitter::{Node, Parser};
+        use tree_sitter::Parser;
 
         let mut parser = Parser::new();
         parser
