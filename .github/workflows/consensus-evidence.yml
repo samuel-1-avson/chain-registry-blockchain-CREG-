@@ -1,0 +1,58 @@
+name: Consensus Evidence
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - ".github/workflows/consensus-evidence.yml"
+      - "chain-registry/config/consensus-evidence/**"
+      - "chain-registry/scripts/validate-consensus-evidence.sh"
+      - "chain-registry/crates/common/src/package.rs"
+      - "chain-registry/crates/consensus/src/vote_accumulator.rs"
+      - "chain-registry/crates/node/src/api.rs"
+      - "chain-registry/crates/node/src/gossip.rs"
+      - "chain-registry/crates/node/src/p2p.rs"
+      - "chain-registry/crates/node/src/sync.rs"
+      - "chain-registry/crates/node/src/validator_pipeline.rs"
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/consensus-evidence.yml"
+      - "chain-registry/config/consensus-evidence/**"
+      - "chain-registry/scripts/validate-consensus-evidence.sh"
+      - "chain-registry/crates/common/src/package.rs"
+      - "chain-registry/crates/consensus/src/vote_accumulator.rs"
+      - "chain-registry/crates/node/src/api.rs"
+      - "chain-registry/crates/node/src/gossip.rs"
+      - "chain-registry/crates/node/src/p2p.rs"
+      - "chain-registry/crates/node/src/sync.rs"
+      - "chain-registry/crates/node/src/validator_pipeline.rs"
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: chain-registry
+
+jobs:
+  consensus-evidence:
+    name: Validate evidence-bound votes
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Validate scanner profile and evidence fixtures
+        run: |
+          bash -n scripts/validate-consensus-evidence.sh
+          node scripts/validate-consensus-evidence.mjs --help
+          ./scripts/validate-consensus-evidence.sh --help
+          ./scripts/validate-consensus-evidence.sh
+
+      - name: Run focused vote consensus tests
+        run: cargo test --locked -p common -p consensus vote_accumulator --lib
