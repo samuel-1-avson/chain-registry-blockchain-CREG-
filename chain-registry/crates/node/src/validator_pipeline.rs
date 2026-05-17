@@ -4,16 +4,28 @@
 
 use crate::{finalized_tx::FinalizedTxSender, NodeState};
 use chrono::Utc;
-use common::{
-    ChainRecord, PackageStatus, PublishRequest, Transaction, ValidatorVote,
-};
+use common::{ChainRecord, PackageStatus, PublishRequest, Transaction, ValidatorVote};
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::RwLock;
 use tokio::time::{interval, Duration};
 
 const POLL_INTERVAL_SECS: u64 = 1;
 const VOTE_TIMEOUT_SECS: u64 = 10; // Reduced from 30s for faster consensus
-const DEGRADED_MODEL_PREFIX: &str = "degraded";
+
+fn consensus_profile_key(sig: &common::ValidatorSignature) -> Option<String> {
+    if !common::is_consensus_grade_vote(
+        &sig.ml_model_version,
+        &sig.analysis_bundles,
+        &sig.evidence_digest,
+    ) {
+        return None;
+    }
+    Some(format!(
+        "{}:{}",
+        common::scanner_profile_digest(&sig.ml_model_version, &sig.analysis_bundles),
+        sig.evidence_digest
+    ))
+}
 
 #[derive(Debug, Clone)]
 pub(crate) enum ConsensusOutcome {
@@ -43,26 +55,24 @@ pub(crate) fn aggregate_consensus_outcome(
         }
     }
 
-    let effective_votes: Vec<_> = unique_votes
-        .into_iter()
-        .filter(|sig| !sig.ml_model_version.starts_with(DEGRADED_MODEL_PREFIX))
-        .collect();
+    let mut approvals_by_profile: HashMap<String, Vec<common::ValidatorSignature>> = HashMap::new();
+    let mut rejections = Vec::new();
 
-    let approvals: Vec<_> = effective_votes
-        .iter()
-        .filter(|sig| matches!(sig.vote, ValidatorVote::Approve))
-        .cloned()
-        .collect();
-    let rejections: Vec<_> = effective_votes
-        .iter()
-        .filter_map(|sig| match &sig.vote {
-            ValidatorVote::Approve => None,
-            ValidatorVote::Reject { reason } => Some(reason.clone()),
-        })
-        .collect();
+    for sig in unique_votes {
+        let Some(profile_key) = consensus_profile_key(&sig) else {
+            continue;
+        };
 
-    if approvals.len() >= quorum_size {
-        return Some(ConsensusOutcome::Verified(approvals));
+        match &sig.vote {
+            ValidatorVote::Approve => {
+                let approvals = approvals_by_profile.entry(profile_key).or_default();
+                approvals.push(sig.clone());
+                if approvals.len() >= quorum_size {
+                    return Some(ConsensusOutcome::Verified(approvals.clone()));
+                }
+            }
+            ValidatorVote::Reject { reason } => rejections.push(reason.clone()),
+        }
     }
 
     let max_possible_approvals = assigned_count.saturating_sub(rejections.len());
@@ -218,56 +228,58 @@ async fn process_package(
         .as_deref()
         .and_then(validator::sandbox::get_result);
 
-    let (vote, pgp_fingerprint, findings, analysis_bundles, evidence_digest, deterministic_risk) = if is_validator {
-        if let Some(privkey) = privkey_opt.as_ref() {
-            tracing::info!(
-                "[Consensus] Node is a validator — running full analysis for {}",
-                canonical
-            );
-            match validator::validate_package(
-                &req,
-                &tarball,
-                privkey,
-                prev_manifest.as_ref(),
-                prev_sandbox.as_ref(),
-            ).await
-            {
-                Ok(res) => {
-                    let evidence_digest = res.deterministic_risk.evidence_digest.clone();
-                    let deterministic_risk = res.deterministic_risk.to_common_summary();
-                    (
-                        res.vote,
-                        res.pgp_fingerprint,
-                        res.findings,
-                        res.analysis_bundles.to_refs(),
-                        evidence_digest,
-                        deterministic_risk,
-                    )
+    let (vote, pgp_fingerprint, findings, analysis_bundles, evidence_digest, deterministic_risk) =
+        if is_validator {
+            if let Some(privkey) = privkey_opt.as_ref() {
+                tracing::info!(
+                    "[Consensus] Node is a validator — running full analysis for {}",
+                    canonical
+                );
+                match validator::validate_package(
+                    &req,
+                    &tarball,
+                    privkey,
+                    prev_manifest.as_ref(),
+                    prev_sandbox.as_ref(),
+                )
+                .await
+                {
+                    Ok(res) => {
+                        let evidence_digest = res.deterministic_risk.evidence_digest.clone();
+                        let deterministic_risk = res.deterministic_risk.to_common_summary();
+                        (
+                            res.vote,
+                            res.pgp_fingerprint,
+                            res.findings,
+                            res.analysis_bundles.to_refs(),
+                            evidence_digest,
+                            deterministic_risk,
+                        )
+                    }
+                    Err(e) => {
+                        tracing::error!("Validation error for {}: {}", canonical, e);
+                        cleanup(&state, &canonical).await;
+                        return;
+                    }
                 }
-                Err(e) => {
-                    tracing::error!("Validation error for {}: {}", canonical, e);
-                    cleanup(&state, &canonical).await;
-                    return;
-                }
+            } else {
+                tracing::error!(
+                    "[Consensus] Validator node missing private key — cannot analyze {}",
+                    canonical
+                );
+                cleanup(&state, &canonical).await;
+                return;
             }
         } else {
-            tracing::error!(
-                "[Consensus] Validator node missing private key — cannot analyze {}",
+            // Non-validator nodes should NOT cast votes — they observe consensus
+            // results from validators but do not participate in the vote.
+            tracing::info!(
+                "[Consensus] Node is NOT a validator — not participating in consensus for {}",
                 canonical
             );
             cleanup(&state, &canonical).await;
             return;
-        }
-    } else {
-        // Non-validator nodes should NOT cast votes — they observe consensus
-        // results from validators but do not participate in the vote.
-        tracing::info!(
-            "[Consensus] Node is NOT a validator — not participating in consensus for {}",
-            canonical
-        );
-        cleanup(&state, &canonical).await;
-        return;
-    };
+        };
 
     // ── Generate our own signature (validators only) ──────────────────────────
     // Non-validators skipped consensus steps already; guard here defensively.
@@ -301,6 +313,9 @@ async fn process_package(
         let signing_key = SigningKey::from_bytes(&key_arr);
         let validator_pubkey = hex::encode(signing_key.verifying_key().as_bytes());
         let approved = matches!(vote, ValidatorVote::Approve);
+        let ml_model_version = ml_validator::DeepScanner::default().model_version();
+        let scanner_profile_digest =
+            common::scanner_profile_digest(&ml_model_version, &analysis_bundles);
 
         // Use the same domain-separated message format for both local records
         // and gossiped votes so synced blocks can verify every validator vote
@@ -310,6 +325,8 @@ async fn process_package(
             &req.content_hash,
             approved,
             &validator_pubkey,
+            &scanner_profile_digest,
+            &evidence_digest,
         );
         let signature = signing_key.sign(msg.as_bytes());
 
@@ -319,7 +336,7 @@ async fn process_package(
             signature: hex::encode(signature.to_bytes()),
             vote: vote.clone(),
             signed_at: Utc::now(),
-            ml_model_version: ml_validator::DeepScanner::default().model_version(),
+            ml_model_version,
             analysis_bundles: analysis_bundles.clone(),
             evidence_digest: evidence_digest.clone(),
             deterministic_risk: deterministic_risk.clone(),
@@ -346,11 +363,15 @@ async fn process_package(
         let key_bytes = hex::decode(privkey_str).unwrap_or_default();
         if let Ok(key_arr) = key_bytes.try_into() as Result<[u8; 32], _> {
             let sk = SigningKey::from_bytes(&key_arr);
+            let scanner_profile_digest =
+                common::scanner_profile_digest(&our_sig.ml_model_version, &analysis_bundles);
             let msg = crate::gossip::canonical_vote_message(
                 &canonical,
                 &req.content_hash,
                 approved,
                 &our_sig.validator_pubkey,
+                &scanner_profile_digest,
+                &evidence_digest,
             );
             hex::encode(sk.sign(msg.as_bytes()).to_bytes())
         } else {
@@ -491,6 +512,15 @@ mod tests {
     use common::{ValidatorSignature, ValidatorVote};
 
     fn sig(id: &str, vote: ValidatorVote, model_version: &str) -> ValidatorSignature {
+        let analysis_bundles = common::AnalysisBundleRefs {
+            policy_bundle_id: "policy-v1".into(),
+            feature_schema_id: "features-v1".into(),
+            expert_bundle_id: "experts-v1".into(),
+            embedding_model_id: "embeddings-v1".into(),
+            index_epoch: "index-epoch-1".into(),
+            threshold_profile_id: "thresholds-v1".into(),
+            llm_prompt_profile_id: "llm-prompt-v1".into(),
+        };
         ValidatorSignature {
             validator_id: id.to_string(),
             validator_pubkey: format!("{}-pubkey", id),
@@ -498,8 +528,8 @@ mod tests {
             vote,
             signed_at: Utc::now(),
             ml_model_version: model_version.to_string(),
-            analysis_bundles: common::AnalysisBundleRefs::default(),
-            evidence_digest: String::new(),
+            analysis_bundles,
+            evidence_digest: common::sha256_hex(b"pipeline-test-evidence"),
             deterministic_risk: common::DeterministicRiskSummary::default(),
         }
     }
@@ -622,7 +652,9 @@ async fn fetch_from_ipfs(cid: &str, ipfs_url: &str) -> anyhow::Result<Vec<u8>> {
         if len > MAX_IPFS_PAYLOAD_BYTES {
             anyhow::bail!(
                 "IPFS content for CID {} is too large: {} bytes (max {})",
-                cid, len, MAX_IPFS_PAYLOAD_BYTES
+                cid,
+                len,
+                MAX_IPFS_PAYLOAD_BYTES
             );
         }
     }
@@ -632,7 +664,9 @@ async fn fetch_from_ipfs(cid: &str, ipfs_url: &str) -> anyhow::Result<Vec<u8>> {
     if bytes.len() as u64 > MAX_IPFS_PAYLOAD_BYTES {
         anyhow::bail!(
             "IPFS content for CID {} exceeded max size after download: {} bytes (max {})",
-            cid, bytes.len(), MAX_IPFS_PAYLOAD_BYTES
+            cid,
+            bytes.len(),
+            MAX_IPFS_PAYLOAD_BYTES
         );
     }
 
@@ -682,9 +716,7 @@ async fn decrypt_shielded(
     // disagrees, that is a tampering signal — reject.
     let prefixed = &data[..12];
     if prefixed != aes_nonce.as_slice() {
-        anyhow::bail!(
-            "shielded tarball nonce prefix does not match authenticated bundle nonce"
-        );
+        anyhow::bail!("shielded tarball nonce prefix does not match authenticated bundle nonce");
     }
     let ciphertext = &data[12..];
 

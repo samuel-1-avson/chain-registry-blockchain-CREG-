@@ -42,24 +42,34 @@ impl Default for GossipConfig {
 
 /// Domain-separation tag for the canonical consensus vote message format.
 /// Bumping the version invalidates any cached signatures from older validators.
-pub const VOTE_MESSAGE_DOMAIN: &str = "creg-vote-v1";
+pub const VOTE_MESSAGE_DOMAIN: &str = "creg-vote-v2";
 
 /// Canonical message that a validator signs when casting a PBFT vote.
 ///
 /// Binds the package canonical, the exact tarball content hash, the verdict,
-/// and the validator's Ed25519 public key so that:
+/// the validator's Ed25519 public key, the scanner profile digest, and the
+/// deterministic evidence digest so that:
 ///   (a) signatures cannot be replayed across package versions,
 ///   (b) signatures cannot be replayed across approve/reject flips,
-///   (c) a signature cannot be relabelled to come from a different validator.
+///   (c) a signature cannot be relabelled to come from a different validator,
+///   (d) a vote cannot be stripped of the scanner/evidence profile it used.
 pub fn canonical_vote_message(
     canonical: &str,
     content_hash: &str,
     approved: bool,
     validator_pubkey: &str,
+    scanner_profile_digest: &str,
+    evidence_digest: &str,
 ) -> String {
     format!(
-        "{}|{}|{}|{}|{}",
-        VOTE_MESSAGE_DOMAIN, canonical, content_hash, approved, validator_pubkey
+        "{}|{}|{}|{}|{}|{}|{}",
+        VOTE_MESSAGE_DOMAIN,
+        canonical,
+        content_hash,
+        approved,
+        validator_pubkey,
+        scanner_profile_digest,
+        evidence_digest
     )
 }
 
@@ -94,6 +104,7 @@ pub struct VoteGossip {
     pub approved: bool,
     pub reject_reason: Option<String>,
     /// Hex-encoded Ed25519 signature of `canonical_vote_message(...)`.
+    /// The signed payload includes the scanner profile and evidence digest.
     pub signature: String,
 }
 
@@ -161,7 +172,10 @@ impl Gossip {
         // A production implementation would pair each entry with an Instant.
         if seen.len() > 10_000 {
             seen.clear();
-            tracing::debug!("Evicted gossip dedup cache ({} TTL)", self.config.message_ttl_secs);
+            tracing::debug!(
+                "Evicted gossip dedup cache ({} TTL)",
+                self.config.message_ttl_secs
+            );
         }
     }
 

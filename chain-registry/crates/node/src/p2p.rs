@@ -29,6 +29,7 @@ enum VoteValidationError {
     ValidatorPubkeyMismatch,
     InvalidValidatorPubkeyHex,
     InvalidValidatorPubkey,
+    MissingConsensusEvidence,
     InvalidSignatureHex,
     InvalidSignatureFormat,
     SignatureVerificationFailed,
@@ -57,8 +58,16 @@ fn validate_vote_gossip_message(
         return Err(VoteValidationError::ValidatorPubkeyMismatch);
     }
 
-    let pubkey_bytes =
-        hex::decode(&vote.validator_pubkey).map_err(|_| VoteValidationError::InvalidValidatorPubkeyHex)?;
+    if !common::is_consensus_grade_vote(
+        &vote.ml_model_version,
+        &vote.analysis_bundles,
+        &vote.evidence_digest,
+    ) {
+        return Err(VoteValidationError::MissingConsensusEvidence);
+    }
+
+    let pubkey_bytes = hex::decode(&vote.validator_pubkey)
+        .map_err(|_| VoteValidationError::InvalidValidatorPubkeyHex)?;
     let verifying_key = VerifyingKey::try_from(pubkey_bytes.as_slice())
         .map_err(|_| VoteValidationError::InvalidValidatorPubkey)?;
 
@@ -72,6 +81,8 @@ fn validate_vote_gossip_message(
         &vote.content_hash,
         vote.approved,
         &vote.validator_pubkey,
+        &common::scanner_profile_digest(&vote.ml_model_version, &vote.analysis_bundles),
+        &vote.evidence_digest,
     );
 
     verifying_key
@@ -106,7 +117,10 @@ async fn record_validated_vote_gossip(
     vote: &crate::gossip::VoteGossip,
 ) {
     let mut state = state.write().await;
-    state.record_package_vote(vote.consensus_subject.clone(), vote_gossip_to_signature(vote));
+    state.record_package_vote(
+        vote.consensus_subject.clone(),
+        vote_gossip_to_signature(vote),
+    );
 }
 
 fn report_validation_result(
@@ -685,11 +699,24 @@ mod tests {
         signing_key: &SigningKey,
         validator_pubkey: String,
     ) -> crate::gossip::VoteGossip {
+        let analysis_bundles = common::AnalysisBundleRefs {
+            policy_bundle_id: "policy-v1".into(),
+            feature_schema_id: "features-v1".into(),
+            expert_bundle_id: "experts-v1".into(),
+            embedding_model_id: "embeddings-v1".into(),
+            index_epoch: "index-epoch-1".into(),
+            threshold_profile_id: "thresholds-v1".into(),
+            llm_prompt_profile_id: "llm-prompt-v1".into(),
+        };
+        let evidence_digest = common::sha256_hex(b"p2p-test-evidence");
+        let ml_model_version = "creg-detect-v1.0.0".to_string();
         let message = crate::gossip::canonical_vote_message(
             "npm/pkg@1.0.0",
             "deadbeef",
             true,
             &validator_pubkey,
+            &common::scanner_profile_digest(&ml_model_version, &analysis_bundles),
+            &evidence_digest,
         );
 
         crate::gossip::VoteGossip {
@@ -697,9 +724,9 @@ mod tests {
             content_hash: "deadbeef".into(),
             validator_id: validator_id.into(),
             validator_pubkey,
-            ml_model_version: "creg-detect-v1.0.0".into(),
-            analysis_bundles: common::AnalysisBundleRefs::default(),
-            evidence_digest: String::new(),
+            ml_model_version,
+            analysis_bundles,
+            evidence_digest,
             deterministic_risk: common::DeterministicRiskSummary::default(),
             phase: "commit".into(),
             approved: true,
@@ -747,11 +774,9 @@ mod tests {
             hex::encode(signing_key.verifying_key().as_bytes()),
         );
 
-        let result = validate_vote_gossip_message(
-            &serde_json::to_vec(&vote).unwrap(),
-            &validator_set,
-        )
-        .unwrap();
+        let result =
+            validate_vote_gossip_message(&serde_json::to_vec(&vote).unwrap(), &validator_set)
+                .unwrap();
 
         assert_eq!(result.validator_id, "node-1");
     }
@@ -776,11 +801,9 @@ mod tests {
             hex::encode(validator_key.verifying_key().as_bytes()),
         );
 
-        let error = validate_vote_gossip_message(
-            &serde_json::to_vec(&vote).unwrap(),
-            &validator_set,
-        )
-        .unwrap_err();
+        let error =
+            validate_vote_gossip_message(&serde_json::to_vec(&vote).unwrap(), &validator_set)
+                .unwrap_err();
 
         assert_eq!(error, VoteValidationError::SignatureVerificationFailed);
     }

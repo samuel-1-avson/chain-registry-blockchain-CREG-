@@ -64,39 +64,185 @@ struct Pattern {
 fn default_patterns() -> Vec<Pattern> {
     vec![
         // ── npm / Node.js ─────────────────────────────────────────────────────
-        Pattern { id: "SA001".into(), description: "Dynamic eval() of external or user-controlled data".into(), severity: FindingSeverity::Critical, needle: "eval(".into(), ecosystem: Some("npm".into()) },
-        Pattern { id: "SA002".into(), description: "Obfuscated base64 string decode at runtime".into(), severity: FindingSeverity::High, needle: "Buffer.from(".into(), ecosystem: Some("npm".into()) },
-        Pattern { id: "SA003".into(), description: "exec() / execSync() shell execution".into(), severity: FindingSeverity::Critical, needle: "execSync(".into(), ecosystem: Some("npm".into()) },
-        Pattern { id: "SA004".into(), description: "Spawns child processes (child_process.spawn)".into(), severity: FindingSeverity::Medium, needle: "child_process".into(), ecosystem: Some("npm".into()) },
-        Pattern { id: "SA005".into(), description: "Reads environment variables (potential credential harvesting)".into(), severity: FindingSeverity::Low, needle: "process.env".into(), ecosystem: Some("npm".into()) },
-        Pattern { id: "SA006".into(), description: "Raw HTTP request in install/postinstall hook".into(), severity: FindingSeverity::High, needle: "require('http')".into(), ecosystem: Some("npm".into()) },
-        Pattern { id: "SA007".into(), description: "Writes to home directory or system paths".into(), severity: FindingSeverity::High, needle: "os.homedir()".into(), ecosystem: Some("npm".into()) },
-        Pattern { id: "SA008".into(), description: "Crypto miner indicators".into(), severity: FindingSeverity::Critical, needle: "CryptoNight".into(), ecosystem: None },
-
+        Pattern {
+            id: "SA001".into(),
+            description: "Dynamic eval() of external or user-controlled data".into(),
+            severity: FindingSeverity::Critical,
+            needle: "eval(".into(),
+            ecosystem: Some("npm".into()),
+        },
+        Pattern {
+            id: "SA002".into(),
+            description: "Obfuscated base64 string decode at runtime".into(),
+            severity: FindingSeverity::High,
+            needle: "Buffer.from(".into(),
+            ecosystem: Some("npm".into()),
+        },
+        Pattern {
+            id: "SA003".into(),
+            description: "exec() / execSync() shell execution".into(),
+            severity: FindingSeverity::Critical,
+            needle: "execSync(".into(),
+            ecosystem: Some("npm".into()),
+        },
+        Pattern {
+            id: "SA004".into(),
+            description: "Spawns child processes (child_process.spawn)".into(),
+            severity: FindingSeverity::Medium,
+            needle: "child_process".into(),
+            ecosystem: Some("npm".into()),
+        },
+        Pattern {
+            id: "SA005".into(),
+            description: "Reads environment variables (potential credential harvesting)".into(),
+            severity: FindingSeverity::Low,
+            needle: "process.env".into(),
+            ecosystem: Some("npm".into()),
+        },
+        Pattern {
+            id: "SA006".into(),
+            description: "Raw HTTP request in install/postinstall hook".into(),
+            severity: FindingSeverity::High,
+            needle: "require('http')".into(),
+            ecosystem: Some("npm".into()),
+        },
+        Pattern {
+            id: "SA007".into(),
+            description: "Writes to home directory or system paths".into(),
+            severity: FindingSeverity::High,
+            needle: "os.homedir()".into(),
+            ecosystem: Some("npm".into()),
+        },
+        Pattern {
+            id: "SA008".into(),
+            description: "Crypto miner indicators".into(),
+            severity: FindingSeverity::Critical,
+            needle: "CryptoNight".into(),
+            ecosystem: None,
+        },
         // ── Python / PyPI ─────────────────────────────────────────────────────
-        Pattern { id: "SA020".into(), description: "os.system() shell execution".into(), severity: FindingSeverity::Critical, needle: "os.system(".into(), ecosystem: Some("pypi".into()) },
-        Pattern { id: "SA021".into(), description: "subprocess.Popen() shell execution".into(), severity: FindingSeverity::High, needle: "subprocess.Popen(".into(), ecosystem: Some("pypi".into()) },
-        Pattern { id: "SA022".into(), description: "eval() in Python code".into(), severity: FindingSeverity::Critical, needle: "eval(".into(), ecosystem: Some("pypi".into()) },
-        Pattern { id: "SA023".into(), description: "exec() built-in usage".into(), severity: FindingSeverity::High, needle: "exec(".into(), ecosystem: Some("pypi".into()) },
-        Pattern { id: "SA024".into(), description: "Dynamic __import__ call".into(), severity: FindingSeverity::High, needle: "__import__(".into(), ecosystem: Some("pypi".into()) },
-        Pattern { id: "SA025".into(), description: "urllib.request or urllib2 HTTP outbound".into(), severity: FindingSeverity::Medium, needle: "urllib.request".into(), ecosystem: Some("pypi".into()) },
-        Pattern { id: "SA026".into(), description: "socket.connect() raw TCP".into(), severity: FindingSeverity::Medium, needle: "socket.connect(".into(), ecosystem: Some("pypi".into()) },
-        Pattern { id: "SA027".into(), description: "os.environ credential access".into(), severity: FindingSeverity::Low, needle: "os.environ".into(), ecosystem: Some("pypi".into()) },
-
+        Pattern {
+            id: "SA020".into(),
+            description: "os.system() shell execution".into(),
+            severity: FindingSeverity::Critical,
+            needle: "os.system(".into(),
+            ecosystem: Some("pypi".into()),
+        },
+        Pattern {
+            id: "SA021".into(),
+            description: "subprocess.Popen() shell execution".into(),
+            severity: FindingSeverity::High,
+            needle: "subprocess.Popen(".into(),
+            ecosystem: Some("pypi".into()),
+        },
+        Pattern {
+            id: "SA022".into(),
+            description: "eval() in Python code".into(),
+            severity: FindingSeverity::Critical,
+            needle: "eval(".into(),
+            ecosystem: Some("pypi".into()),
+        },
+        Pattern {
+            id: "SA023".into(),
+            description: "exec() built-in usage".into(),
+            severity: FindingSeverity::High,
+            needle: "exec(".into(),
+            ecosystem: Some("pypi".into()),
+        },
+        Pattern {
+            id: "SA024".into(),
+            description: "Dynamic __import__ call".into(),
+            severity: FindingSeverity::High,
+            needle: "__import__(".into(),
+            ecosystem: Some("pypi".into()),
+        },
+        Pattern {
+            id: "SA025".into(),
+            description: "urllib.request or urllib2 HTTP outbound".into(),
+            severity: FindingSeverity::Medium,
+            needle: "urllib.request".into(),
+            ecosystem: Some("pypi".into()),
+        },
+        Pattern {
+            id: "SA026".into(),
+            description: "socket.connect() raw TCP".into(),
+            severity: FindingSeverity::Medium,
+            needle: "socket.connect(".into(),
+            ecosystem: Some("pypi".into()),
+        },
+        Pattern {
+            id: "SA027".into(),
+            description: "os.environ credential access".into(),
+            severity: FindingSeverity::Low,
+            needle: "os.environ".into(),
+            ecosystem: Some("pypi".into()),
+        },
         // ── Rust / crates.io ──────────────────────────────────────────────────
-        Pattern { id: "SA030".into(), description: "std::process::Command shell execution".into(), severity: FindingSeverity::Medium, needle: "std::process::Command".into(), ecosystem: Some("cargo".into()) },
-        Pattern { id: "SA031".into(), description: "std::fs::write to suspicious path".into(), severity: FindingSeverity::Medium, needle: "std::fs::write".into(), ecosystem: Some("cargo".into()) },
-        Pattern { id: "SA032".into(), description: "unsafe block — may bypass memory safety".into(), severity: FindingSeverity::Low, needle: "unsafe {".into(), ecosystem: Some("cargo".into()) },
-
+        Pattern {
+            id: "SA030".into(),
+            description: "std::process::Command shell execution".into(),
+            severity: FindingSeverity::Medium,
+            needle: "std::process::Command".into(),
+            ecosystem: Some("cargo".into()),
+        },
+        Pattern {
+            id: "SA031".into(),
+            description: "std::fs::write to suspicious path".into(),
+            severity: FindingSeverity::Medium,
+            needle: "std::fs::write".into(),
+            ecosystem: Some("cargo".into()),
+        },
+        Pattern {
+            id: "SA032".into(),
+            description: "unsafe block — may bypass memory safety".into(),
+            severity: FindingSeverity::Low,
+            needle: "unsafe {".into(),
+            ecosystem: Some("cargo".into()),
+        },
         // ── Shell scripts (any ecosystem) ─────────────────────────────────────
-        Pattern { id: "SA040".into(), description: "curl pipe to bash — remote code execution".into(), severity: FindingSeverity::Critical, needle: "curl ".into(), ecosystem: None },
-        Pattern { id: "SA041".into(), description: "wget pipe to shell — remote code execution".into(), severity: FindingSeverity::Critical, needle: "wget ".into(), ecosystem: None },
-        Pattern { id: "SA042".into(), description: "base64 decode then execute shell pattern".into(), severity: FindingSeverity::High, needle: "base64 -d".into(), ecosystem: None },
-
+        Pattern {
+            id: "SA040".into(),
+            description: "curl pipe to bash — remote code execution".into(),
+            severity: FindingSeverity::Critical,
+            needle: "curl ".into(),
+            ecosystem: None,
+        },
+        Pattern {
+            id: "SA041".into(),
+            description: "wget pipe to shell — remote code execution".into(),
+            severity: FindingSeverity::Critical,
+            needle: "wget ".into(),
+            ecosystem: None,
+        },
+        Pattern {
+            id: "SA042".into(),
+            description: "base64 decode then execute shell pattern".into(),
+            severity: FindingSeverity::High,
+            needle: "base64 -d".into(),
+            ecosystem: None,
+        },
         // ── Cross-ecosystem indicators ────────────────────────────────────────
-        Pattern { id: "SA050".into(), description: "Crypto miner stratum protocol connection".into(), severity: FindingSeverity::Critical, needle: "stratum+tcp://".into(), ecosystem: None },
-        Pattern { id: "SA051".into(), description: "Reverse shell netcat pattern".into(), severity: FindingSeverity::Critical, needle: "nc -e".into(), ecosystem: None },
-        Pattern { id: "SA052".into(), description: "Python eval-based reverse shell".into(), severity: FindingSeverity::Critical, needle: "pty.spawn".into(), ecosystem: None },
+        Pattern {
+            id: "SA050".into(),
+            description: "Crypto miner stratum protocol connection".into(),
+            severity: FindingSeverity::Critical,
+            needle: "stratum+tcp://".into(),
+            ecosystem: None,
+        },
+        Pattern {
+            id: "SA051".into(),
+            description: "Reverse shell netcat pattern".into(),
+            severity: FindingSeverity::Critical,
+            needle: "nc -e".into(),
+            ecosystem: None,
+        },
+        Pattern {
+            id: "SA052".into(),
+            description: "Python eval-based reverse shell".into(),
+            severity: FindingSeverity::Critical,
+            needle: "pty.spawn".into(),
+            ecosystem: None,
+        },
     ]
 }
 
@@ -113,9 +259,17 @@ fn patterns() -> &'static Vec<Pattern> {
                         tracing::info!("Loaded {} patterns from {}", custom.len(), path);
                         return custom;
                     }
-                    Err(e) => tracing::warn!("Failed to parse patterns file {}: {}; using defaults", path, e),
+                    Err(e) => tracing::warn!(
+                        "Failed to parse patterns file {}: {}; using defaults",
+                        path,
+                        e
+                    ),
                 },
-                Err(e) => tracing::warn!("Failed to read patterns file {}: {}; using defaults", path, e),
+                Err(e) => tracing::warn!(
+                    "Failed to read patterns file {}: {}; using defaults",
+                    path,
+                    e
+                ),
             }
         }
         default_patterns()
@@ -153,7 +307,7 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
     // and OSV lookups. Falls back to empty strings when no manifest is found
     // (patterns with `ecosystem: None` still apply; ecosystem-specific patterns
     // are skipped).
-    let (pkg_name, pkg_version, ecosystem) = extract_package_identity(&files);
+    let (pkg_name, _pkg_version, ecosystem) = extract_package_identity(&files);
 
     for (path, content) in &files {
         // Only analyse source files; skip binaries, images, lock files, etc.
@@ -332,25 +486,19 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
         }
     }
 
-    // ── Multi-Layer Malware Scan (YARA + OSV + Threat Intel) ───────────────
-    // Runs the 3-layer detection pipeline: YARA pattern matching, OSV
-    // vulnerability database lookup, and content-hash threat intelligence.
-    // When CREG_FORCE_ONNX=true, falls back to the legacy ONNX path.
-    let pkg_info = if !pkg_name.is_empty() {
-        Some(ml_validator::osv_client::PackageInfo {
-            name: pkg_name.clone(),
-            version: pkg_version.clone(),
-            ecosystem: ecosystem.clone(),
-        })
-    } else {
-        None
-    };
+    // ── Deterministic Malware Scan (YARA + Threat Intel) ───────────────────
+    // Consensus validation must not depend on live external services. OSV.dev
+    // lookups remain available to off-chain/advisory tooling, but validators
+    // pass `None` here so package votes depend only on local, pinned scanner
+    // artifacts captured in `analysis_bundles`.
+    let pkg_info = None;
 
     let deep_scan_result = {
         let tarball_bytes = tarball_bytes.to_vec();
         let pkg_info = pkg_info.clone();
         let eco = ecosystem.clone();
-        tokio::task::spawn_blocking(move || ml_validator::deep_scan(&tarball_bytes, pkg_info, &eco)).await
+        tokio::task::spawn_blocking(move || ml_validator::deep_scan(&tarball_bytes, pkg_info, &eco))
+            .await
     };
 
     match deep_scan_result {

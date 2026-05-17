@@ -158,6 +158,57 @@ pub struct AnalysisBundleRefs {
     pub llm_prompt_profile_id: String,
 }
 
+impl AnalysisBundleRefs {
+    /// True when the vote names every deterministic scanner artifact needed
+    /// to reproduce its consensus decision.
+    pub fn is_consensus_complete(&self) -> bool {
+        [
+            self.policy_bundle_id.as_str(),
+            self.feature_schema_id.as_str(),
+            self.expert_bundle_id.as_str(),
+            self.embedding_model_id.as_str(),
+            self.index_epoch.as_str(),
+            self.threshold_profile_id.as_str(),
+            self.llm_prompt_profile_id.as_str(),
+        ]
+        .iter()
+        .all(|value| !value.trim().is_empty())
+    }
+
+    /// Stable, domain-separated digest of the scanner/profile references.
+    pub fn scanner_profile_digest(&self, scanner_version: &str) -> String {
+        let input = format!(
+            "creg-scanner-profile-v1|scanner={}|policy={}|features={}|experts={}|embedding={}|index={}|thresholds={}|llm_prompt={}",
+            scanner_version.trim(),
+            self.policy_bundle_id.trim(),
+            self.feature_schema_id.trim(),
+            self.expert_bundle_id.trim(),
+            self.embedding_model_id.trim(),
+            self.index_epoch.trim(),
+            self.threshold_profile_id.trim(),
+            self.llm_prompt_profile_id.trim(),
+        );
+        crate::sha256_hex(input.as_bytes())
+    }
+}
+
+pub fn scanner_profile_digest(
+    scanner_version: &str,
+    analysis_bundles: &AnalysisBundleRefs,
+) -> String {
+    analysis_bundles.scanner_profile_digest(scanner_version)
+}
+
+pub fn is_consensus_grade_vote(
+    scanner_version: &str,
+    analysis_bundles: &AnalysisBundleRefs,
+    evidence_digest: &str,
+) -> bool {
+    !scanner_version.trim().starts_with("degraded")
+        && analysis_bundles.is_consensus_complete()
+        && !evidence_digest.trim().is_empty()
+}
+
 /// Compact deterministic risk data exposed on finalized records and validator votes.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct DeterministicRiskSummary {

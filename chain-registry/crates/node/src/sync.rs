@@ -14,7 +14,7 @@
 
 use crate::NodeState;
 use common::{Transaction, ValidatorSet, ValidatorVote};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{interval, Duration};
@@ -200,11 +200,23 @@ fn verify_block_signatures(
         };
         let canonical = record.id.canonical();
 
-        let mut approvals = 0usize;
+        let mut approval_groups: HashMap<String, usize> = HashMap::new();
         let mut seen = HashSet::new();
 
         for sig in &record.validator_signatures {
             if !matches!(sig.vote, ValidatorVote::Approve) {
+                continue;
+            }
+            if !common::is_consensus_grade_vote(
+                &sig.ml_model_version,
+                &sig.analysis_bundles,
+                &sig.evidence_digest,
+            ) {
+                tracing::debug!(
+                    "sync: tx {} carries consensus-ineligible signature from {} — ignored",
+                    tx_idx,
+                    sig.validator_id
+                );
                 continue;
             }
 
@@ -244,13 +256,21 @@ fn verify_block_signatures(
                 &record.content_hash,
                 matches!(sig.vote, ValidatorVote::Approve),
                 &sig.validator_pubkey,
+                &common::scanner_profile_digest(&sig.ml_model_version, &sig.analysis_bundles),
+                &sig.evidence_digest,
             );
 
             if vk.verify(message.as_bytes(), &ed_sig).is_ok() {
-                approvals += 1;
+                let profile_key = format!(
+                    "{}:{}",
+                    common::scanner_profile_digest(&sig.ml_model_version, &sig.analysis_bundles),
+                    sig.evidence_digest
+                );
+                *approval_groups.entry(profile_key).or_default() += 1;
             }
         }
 
+        let approvals = approval_groups.values().copied().max().unwrap_or(0);
         if approvals < quorum {
             anyhow::bail!(
                 "tx {} ({}): only {} valid signatures, need {} ({}/{} validators)",
@@ -273,9 +293,9 @@ mod tests {
     use crate::validator_pipeline::{aggregate_consensus_outcome, ConsensusOutcome};
     use chrono::Utc;
     use common::{
-        merkle_root, AnalysisBundleRefs, Block, BlockHeader, ChainRecord,
-        DeterministicRiskSummary, PackageId, PackageStatus, Transaction, Validator,
-        ValidatorSet, ValidatorSignature, ValidatorVote,
+        merkle_root, AnalysisBundleRefs, Block, BlockHeader, ChainRecord, DeterministicRiskSummary,
+        PackageId, PackageStatus, Transaction, Validator, ValidatorSet, ValidatorSignature,
+        ValidatorVote,
     };
     use ed25519_dalek::{Signer, SigningKey};
 
@@ -305,12 +325,26 @@ mod tests {
         format: VotePayloadFormat,
     ) -> ValidatorSignature {
         let validator_pubkey = hex::encode(signing_key.verifying_key().as_bytes());
+        let analysis_bundles = AnalysisBundleRefs {
+            policy_bundle_id: "policy-v1".into(),
+            feature_schema_id: "features-v1".into(),
+            expert_bundle_id: "experts-v1".into(),
+            embedding_model_id: "embeddings-v1".into(),
+            index_epoch: "index-epoch-1".into(),
+            threshold_profile_id: "thresholds-v1".into(),
+            llm_prompt_profile_id: "llm-prompt-v1".into(),
+        };
+        let evidence_digest =
+            common::sha256_hex(format!("{canonical}:{content_hash}:sync-test-evidence").as_bytes());
+        let ml_model_version = "creg-detect-v1.0.0".to_string();
         let message = match format {
             VotePayloadFormat::Canonical => crate::gossip::canonical_vote_message(
                 canonical,
                 content_hash,
                 true,
                 &validator_pubkey,
+                &common::scanner_profile_digest(&ml_model_version, &analysis_bundles),
+                &evidence_digest,
             ),
             VotePayloadFormat::Legacy => format!("{}-{}", canonical, content_hash),
         };
@@ -321,9 +355,9 @@ mod tests {
             signature: hex::encode(signing_key.sign(message.as_bytes()).to_bytes()),
             vote: ValidatorVote::Approve,
             signed_at: Utc::now(),
-            ml_model_version: "creg-detect-v1.0.0".into(),
-            analysis_bundles: AnalysisBundleRefs::default(),
-            evidence_digest: String::new(),
+            ml_model_version,
+            analysis_bundles,
+            evidence_digest,
             deterministic_risk: DeterministicRiskSummary::default(),
         }
     }
@@ -406,11 +440,9 @@ mod tests {
                 )
             })
             .collect();
-        let canonical_outcome = aggregate_consensus_outcome(
-            &canonical_votes,
-            validator_set.validators.len(),
-        )
-        .expect("three canonical approvals should satisfy aggregation quorum");
+        let canonical_outcome =
+            aggregate_consensus_outcome(&canonical_votes, validator_set.validators.len())
+                .expect("three canonical approvals should satisfy aggregation quorum");
         let ConsensusOutcome::Verified(canonical_signatures) = canonical_outcome else {
             panic!("expected verified aggregation outcome for canonical votes");
         };
@@ -435,11 +467,9 @@ mod tests {
                 )
             })
             .collect();
-        let legacy_outcome = aggregate_consensus_outcome(
-            &legacy_votes,
-            validator_set.validators.len(),
-        )
-        .expect("three legacy approvals still satisfy vote aggregation quorum");
+        let legacy_outcome =
+            aggregate_consensus_outcome(&legacy_votes, validator_set.validators.len())
+                .expect("three legacy approvals still satisfy vote aggregation quorum");
         let ConsensusOutcome::Verified(legacy_signatures) = legacy_outcome else {
             panic!("expected verified aggregation outcome for legacy votes");
         };
@@ -453,7 +483,9 @@ mod tests {
             .expect_err("follower sync must reject the legacy vote payload format");
 
         assert!(
-            error.to_string().contains("only 0 valid signatures, need 3"),
+            error
+                .to_string()
+                .contains("only 0 valid signatures, need 3"),
             "unexpected sync failure: {error}"
         );
     }

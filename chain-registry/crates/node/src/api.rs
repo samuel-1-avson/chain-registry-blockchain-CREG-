@@ -1,6 +1,11 @@
 // crates/node/src/api.rs
 // Axum REST API — all HTTP endpoints for the chain registry node.
 
+use alloy::{
+    primitives::{keccak256, Address},
+    providers::ProviderBuilder,
+    sol,
+};
 use axum::{
     extract::{Extension, Path, Query, State},
     http::{header, HeaderValue, Method, StatusCode, Uri},
@@ -8,27 +13,24 @@ use axum::{
     routing::{delete, get, post},
     Json, Router,
 };
-use alloy::{
-    primitives::{keccak256, Address},
-    providers::ProviderBuilder,
-    sol,
-};
 use common::{PackageStatus, PublishRequest, Transaction, ValidatorIdentity};
 use k256::ecdsa::{RecoveryId, Signature as K256Signature, VerifyingKey as K256VerifyingKey};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tower_http::{cors::{Any, CorsLayer}, limit::RequestBodyLimitLayer, trace::TraceLayer};
-
-use crate::consensus_admission::{
-    accept_peer_attestation, AdmissionAttestation, AttestationStore,
+use tower_http::{
+    cors::{Any, CorsLayer},
+    limit::RequestBodyLimitLayer,
+    trace::TraceLayer,
 };
+
+use crate::consensus_admission::{accept_peer_attestation, AdmissionAttestation, AttestationStore};
 use crate::{
     events::{self, sse_handler, EventBus},
     finalized_tx::FinalizedTxSender,
+    normalized_validator_key,
     openapi::ApiDoc,
     rate_limit::{rate_limit_middleware, RateLimiter},
-    normalized_validator_key, validator_registration_status_text, ValidatorRegistrationStatus,
-    SharedState,
+    validator_registration_status_text, SharedState, ValidatorRegistrationStatus,
 };
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
@@ -100,8 +102,7 @@ pub(crate) async fn ensure_publisher_staked(
         || staking_addr_s.eq_ignore_ascii_case("0x0000000000000000000000000000000000000000")
     {
         return Err(PublisherAdmissionError::Unavailable(
-            "Publisher stake enforcement unavailable: CREG_STAKING_ADDR is not configured"
-                .into(),
+            "Publisher stake enforcement unavailable: CREG_STAKING_ADDR is not configured".into(),
         ));
     }
 
@@ -111,19 +112,23 @@ pub(crate) async fn ensure_publisher_staked(
         )
     })?;
 
-    let provider = ProviderBuilder::new()
-        .on_http(rpc_url.parse().map_err(|_| {
-            PublisherAdmissionError::Unavailable(
-                "Publisher stake enforcement unavailable: CREG_ETH_RPC is invalid".into(),
-            )
-        })?);
+    let provider = ProviderBuilder::new().on_http(rpc_url.parse().map_err(|_| {
+        PublisherAdmissionError::Unavailable(
+            "Publisher stake enforcement unavailable: CREG_ETH_RPC is invalid".into(),
+        )
+    })?);
     let staking = IPublisherStakingRead::new(staking_addr, &provider);
-    let staked = staking.stakedBalance(publisher).call().await.map_err(|error| {
-        PublisherAdmissionError::Unavailable(format!(
-            "Publisher stake lookup failed: {}",
-            error
-        ))
-    })?._0;
+    let staked = staking
+        .stakedBalance(publisher)
+        .call()
+        .await
+        .map_err(|error| {
+            PublisherAdmissionError::Unavailable(format!(
+                "Publisher stake lookup failed: {}",
+                error
+            ))
+        })?
+        ._0;
 
     if staked == alloy::primitives::U256::ZERO {
         return Err(PublisherAdmissionError::Unstaked(format!(
@@ -156,7 +161,10 @@ pub fn router(
         .route("/v1/chain/stats", get(chain_stats))
         .route("/v1/runtime/config", get(runtime_config))
         .route("/v1/validators/register", post(register_validator_identity))
-        .route("/v1/validators/registrations", get(list_validator_registrations))
+        .route(
+            "/v1/validators/registrations",
+            get(list_validator_registrations),
+        )
         .route(
             "/v1/validators/registrations/:evm_address",
             delete(delete_validator_registration),
@@ -185,7 +193,10 @@ pub fn router(
         .route("/v1/publishers/:pubkey", get(get_publisher))
         // Addresses
         .route("/v1/addresses/:address", get(get_address))
-        .route("/v1/addresses/:address/transactions", get(get_address_transactions))
+        .route(
+            "/v1/addresses/:address/transactions",
+            get(get_address_transactions),
+        )
         // Validator detail
         .route("/v1/validators/:address", get(get_validator_profile))
         // Pending pool
@@ -299,8 +310,7 @@ async fn receive_admission_attestation(
     };
 
     match accept_peer_attestation(&store, chain_id, staking_addr, att).await {
-        Ok(fresh) => Json(serde_json::json!({ "accepted": true, "new": fresh }))
-            .into_response(),
+        Ok(fresh) => Json(serde_json::json!({ "accepted": true, "new": fresh })).into_response(),
         Err(e) => bad_request(format!("rejected: {e}")),
     }
 }
@@ -383,7 +393,9 @@ async fn chain_stats(State(state): State<SharedState>) -> impl IntoResponse {
     let active_count = validators.iter().filter(|v| v.status != "offline").count();
     let tip = s.chain.stats().tip_height;
     let finalized = s.bridge_status.last_finalized_eth_block;
-    let genesis_hash = s.chain.get_block_by_height(0)
+    let genesis_hash = s
+        .chain
+        .get_block_by_height(0)
         .ok()
         .flatten()
         .map(|b| b.hash());
@@ -407,9 +419,7 @@ async fn chain_stats(State(state): State<SharedState>) -> impl IntoResponse {
         finalization_lag: tip.saturating_sub(finalized),
         validator_set_source: s.validator_set_sync.mode.clone(),
         validator_set_sync_state: s.validator_set_sync.state.clone(),
-        validator_set_last_finalized_source_block: s
-            .validator_set_sync
-            .last_finalized_source_block,
+        validator_set_last_finalized_source_block: s.validator_set_sync.last_finalized_source_block,
     })
 }
 
@@ -449,7 +459,9 @@ struct RegisterValidatorIdentityRequest {
 
 fn non_zero_address(value: &str) -> Option<String> {
     let trimmed = value.trim();
-    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("0x0000000000000000000000000000000000000000") {
+    if trimmed.is_empty()
+        || trimmed.eq_ignore_ascii_case("0x0000000000000000000000000000000000000000")
+    {
         None
     } else {
         Some(trimmed.to_string())
@@ -459,11 +471,19 @@ fn non_zero_address(value: &str) -> Option<String> {
 async fn runtime_config(State(state): State<SharedState>) -> impl IntoResponse {
     let s = state.read().await;
     let chain_id = if s.config.chain_id.is_empty() {
-        if s.config.is_testnet { "creg-testnet-1".to_string() } else { "creg-mainnet-1".to_string() }
+        if s.config.is_testnet {
+            "creg-testnet-1".to_string()
+        } else {
+            "creg-mainnet-1".to_string()
+        }
     } else {
         s.config.chain_id.clone()
     };
-    let network = if s.config.is_testnet { "testnet" } else { "mainnet" };
+    let network = if s.config.is_testnet {
+        "testnet"
+    } else {
+        "mainnet"
+    };
     Json(RuntimeConfigResponse {
         version: env!("CARGO_PKG_VERSION").to_string(),
         build: format!("v{}", env!("CARGO_PKG_VERSION")),
@@ -561,8 +581,8 @@ fn validator_identity_registration_message(
 
 fn parse_ecdsa_signature_bytes(signature_hex: &str) -> Result<[u8; 65], String> {
     let normalized = signature_hex.trim().trim_start_matches("0x");
-    let decoded = hex::decode(normalized)
-        .map_err(|_| "EVM signature must be valid hex".to_string())?;
+    let decoded =
+        hex::decode(normalized).map_err(|_| "EVM signature must be valid hex".to_string())?;
     if decoded.len() != 65 {
         return Err(format!(
             "EVM signature must be 65 bytes (130 hex chars), got {} bytes",
@@ -665,44 +685,28 @@ async fn register_validator_identity(
     let evm_address = match validate_evm_address(&request.evm_address) {
         Ok(value) => value,
         Err(error) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(ErrorResponse { error }),
-            )
-                .into_response();
+            return (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })).into_response();
         }
     };
 
     let node_id = match validate_node_id(&request.node_id) {
         Ok(value) => value,
         Err(error) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(ErrorResponse { error }),
-            )
-                .into_response();
+            return (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })).into_response();
         }
     };
 
     let ed25519_pubkey = match validate_ed25519_pubkey(&request.ed25519_pubkey) {
         Ok(value) => value,
         Err(error) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(ErrorResponse { error }),
-            )
-                .into_response();
+            return (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })).into_response();
         }
     };
 
     let nonce = match validate_registration_nonce(&request.nonce) {
         Ok(value) => value,
         Err(error) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(ErrorResponse { error }),
-            )
-                .into_response();
+            return (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })).into_response();
         }
     };
 
@@ -720,11 +724,7 @@ async fn register_validator_identity(
         &request.evm_signature,
         &request.ed25519_signature,
     ) {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(ErrorResponse { error }),
-        )
-            .into_response();
+        return (StatusCode::UNAUTHORIZED, Json(ErrorResponse { error })).into_response();
     }
 
     let normalized_key = normalized_validator_key(&evm_address);
@@ -744,7 +744,8 @@ async fn register_validator_identity(
         return (
             StatusCode::CONFLICT,
             Json(ErrorResponse {
-                error: "node_id or Ed25519 pubkey is already registered to another wallet".to_string(),
+                error: "node_id or Ed25519 pubkey is already registered to another wallet"
+                    .to_string(),
             }),
         )
             .into_response();
@@ -790,11 +791,7 @@ async fn delete_validator_registration(
     let address = match validate_evm_address(&evm_address) {
         Ok(v) => v,
         Err(error) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(ErrorResponse { error }),
-            )
-                .into_response();
+            return (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })).into_response();
         }
     };
     let key = normalized_validator_key(&address);
@@ -953,7 +950,9 @@ struct MetricsHistoryParams {
     #[serde(default = "default_metrics_range")]
     range: String,
 }
-fn default_metrics_range() -> String { "1h".to_string() }
+fn default_metrics_range() -> String {
+    "1h".to_string()
+}
 
 async fn metrics_history(
     State(_state): State<SharedState>,
@@ -1130,7 +1129,13 @@ async fn submit_package(
             PublisherAdmissionError::Unstaked(_) => StatusCode::FORBIDDEN,
             PublisherAdmissionError::Unavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
         };
-        return (status, Json(ErrorResponse { error: e.to_string() })).into_response();
+        return (
+            status,
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
+        )
+            .into_response();
     }
 
     let gossip_req = common::GossipMessage::PublishRequest(request.clone());
@@ -1183,7 +1188,11 @@ async fn submit_package(
             data: serde_json::to_vec(&gossip_req).unwrap_or_default(),
         })
         .await;
-    tracing::info!("{} added to pending pool ({} pending)", canonical, pending_count);
+    tracing::info!(
+        "{} added to pending pool ({} pending)",
+        canonical,
+        pending_count
+    );
 
     (
         StatusCode::ACCEPTED,
@@ -1444,10 +1453,11 @@ async fn list_blocks_paginated(
                 "next_after_height": next_after,
             });
 
-            builder.body(axum::body::Body::from(
-                serde_json::to_vec(&body).unwrap_or_default(),
-            ))
-            .unwrap_or_else(|_| server_err("Response build error"))
+            builder
+                .body(axum::body::Body::from(
+                    serde_json::to_vec(&body).unwrap_or_default(),
+                ))
+                .unwrap_or_else(|_| server_err("Response build error"))
         }
         Err(e) => server_err(format!("Failed to list blocks: {}", e)),
     }
@@ -1617,8 +1627,12 @@ fn tx_kind_label(tx: &Transaction) -> &'static str {
 fn tx_canonical(tx: &Transaction) -> Option<String> {
     match tx {
         Transaction::Publish(rec) => Some(rec.id.canonical()),
-        Transaction::Revoke { package_canonical, .. } => Some(package_canonical.clone()),
-        Transaction::RotatePublisherKey { canonical_prefix, .. } => Some(canonical_prefix.clone()),
+        Transaction::Revoke {
+            package_canonical, ..
+        } => Some(package_canonical.clone()),
+        Transaction::RotatePublisherKey {
+            canonical_prefix, ..
+        } => Some(canonical_prefix.clone()),
         _ => None,
     }
 }
@@ -1873,7 +1887,8 @@ async fn search_handler(
 ) -> Response {
     let q = params.q.trim().to_string();
     if q.is_empty() {
-        return Json(serde_json::json!({ "matches": Vec::<serde_json::Value>::new() })).into_response();
+        return Json(serde_json::json!({ "matches": Vec::<serde_json::Value>::new() }))
+            .into_response();
     }
 
     let s = state.read().await;
@@ -1905,11 +1920,13 @@ async fn search_handler(
             subtitle: "EVM address".into(),
         });
         // Check if it's a validator
-        let clean = normalized.strip_prefix("0x").unwrap_or(&normalized).to_string();
+        let clean = normalized
+            .strip_prefix("0x")
+            .unwrap_or(&normalized)
+            .to_string();
         let is_validator = s.validator_registrations.contains_key(&normalized)
             || s.validator_registrations.contains_key(&clean)
-            || s
-                .validator_set
+            || s.validator_set
                 .validators
                 .iter()
                 .any(|v| v.eth_address.eq_ignore_ascii_case(&normalized));
@@ -1961,20 +1978,26 @@ async fn search_handler(
     }
 
     // 5. Free text — search validator aliases and publisher index
-    if matches.is_empty() || (!q.starts_with("0x") && !q.chars().all(|c| c.is_ascii_digit()) && !q.contains('@')) {
+    if matches.is_empty()
+        || (!q.starts_with("0x") && !q.chars().all(|c| c.is_ascii_digit()) && !q.contains('@'))
+    {
         let q_lower = q.to_ascii_lowercase();
         // Scan validator aliases
         for (key, reg) in s.validator_registrations.iter() {
-            if matches.len() >= MAX_RESULTS { break; }
-            if reg.alias.to_ascii_lowercase().contains(&q_lower)
-                || key.contains(&q_lower)
-            {
+            if matches.len() >= MAX_RESULTS {
+                break;
+            }
+            if reg.alias.to_ascii_lowercase().contains(&q_lower) || key.contains(&q_lower) {
                 let addr = key.clone();
                 if !matches.iter().any(|m| m.href.contains(&addr)) {
                     matches.push(SearchMatch {
                         kind: "validator",
                         href: format!("/validator/{}", addr),
-                        title: if reg.alias.is_empty() { addr.clone() } else { reg.alias.clone() },
+                        title: if reg.alias.is_empty() {
+                            addr.clone()
+                        } else {
+                            reg.alias.clone()
+                        },
                         subtitle: format!("validator: {}", addr),
                     });
                 }
@@ -1982,7 +2005,9 @@ async fn search_handler(
         }
         // Scan publisher index
         for stats in s.publisher_index.all_stats() {
-            if matches.len() >= MAX_RESULTS { break; }
+            if matches.len() >= MAX_RESULTS {
+                break;
+            }
             let pubkey = &stats.pubkey;
             if pubkey.to_ascii_lowercase().contains(&q_lower) {
                 if !matches.iter().any(|m| m.href.contains(pubkey)) {
@@ -2367,6 +2392,21 @@ async fn receive_vote(
                 .into_response();
         }
 
+        if !common::is_consensus_grade_vote(
+            &vote.ml_model_version,
+            &vote.analysis_bundles,
+            &vote.evidence_digest,
+        ) {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    error: "Vote is missing consensus-grade scanner profile or evidence digest"
+                        .into(),
+                }),
+            )
+                .into_response();
+        }
+
         // 2. Verify the Ed25519 signature.
         let pubkey_bytes = match hex::decode(&vote.validator_pubkey) {
             Ok(b) => b,
@@ -2425,6 +2465,8 @@ async fn receive_vote(
             &vote.content_hash,
             vote.approved,
             &vote.validator_pubkey,
+            &common::scanner_profile_digest(&vote.ml_model_version, &vote.analysis_bundles),
+            &vote.evidence_digest,
         );
         if vk.verify(msg.as_bytes(), &sig).is_err() {
             return (
@@ -2616,10 +2658,10 @@ async fn richlist(State(state): State<SharedState>) -> impl IntoResponse {
         .values()
         .cloned()
         .collect();
-    
+
     // Sort descending by stake
     top.sort_by(|a, b| b.stake.cmp(&a.stake));
-    
+
     // Truncate to top 500
     top.truncate(500);
 
@@ -2642,18 +2684,20 @@ mod tests {
         body::{to_bytes, Body},
         http::{Request, StatusCode},
         routing::post,
-        Json,
-        Router,
+        Json, Router,
     };
-    use common::{ChainRecord, PackageId, PackageManifest, PackageStatus};
     use common::proto::{registry_service_server::RegistryService, SubmitRequest};
+    use common::{ChainRecord, PackageId, PackageManifest, PackageStatus};
     use ed25519_dalek::{Signer, SigningKey};
     use k256::ecdsa::SigningKey as K256SigningKey;
     use rand::rngs::OsRng;
     use serde_json::Value;
     use std::{collections::HashMap, sync::Arc};
     use tempfile::TempDir;
-    use tokio::{net::TcpListener, sync::{mpsc, RwLock}};
+    use tokio::{
+        net::TcpListener,
+        sync::{mpsc, RwLock},
+    };
     use tonic::{Code, Request as GrpcRequest};
     use tower::ServiceExt;
 
@@ -2732,11 +2776,17 @@ mod tests {
         ml_model_version: &str,
         approved: bool,
     ) -> VoteMessage {
+        let analysis_bundles = test_analysis_bundles();
+        let evidence_digest = common::sha256_hex(
+            format!("{canonical}:{content_hash}:{validator_id}:{ml_model_version}").as_bytes(),
+        );
         let message = crate::gossip::canonical_vote_message(
             canonical,
             content_hash,
             approved,
             validator_pubkey,
+            &common::scanner_profile_digest(ml_model_version, &analysis_bundles),
+            &evidence_digest,
         );
 
         VoteMessage {
@@ -2747,8 +2797,8 @@ mod tests {
             signature: hex::encode(signing_key.sign(message.as_bytes()).to_bytes()),
             validator_pubkey: validator_pubkey.into(),
             ml_model_version: ml_model_version.into(),
-            analysis_bundles: common::AnalysisBundleRefs::default(),
-            evidence_digest: String::new(),
+            analysis_bundles,
+            evidence_digest,
             deterministic_risk: common::DeterministicRiskSummary::default(),
             approved,
             reject_reason: None,
@@ -2812,7 +2862,8 @@ mod tests {
         let (sk, pk) = make_keypair();
         let mut req = make_request_with_sigs(vec![], vec![], 0);
         req.publisher_address = publisher_address.into();
-        let msg = common::publish_signature_message(&req.id, &req.content_hash, &req.publisher_address);
+        let msg =
+            common::publish_signature_message(&req.id, &req.content_hash, &req.publisher_address);
         let sig = sk.sign(msg.as_bytes());
         req.publisher_pubkey = pk;
         req.signature = hex::encode(sig.to_bytes());
@@ -2820,10 +2871,7 @@ mod tests {
     }
 
     async fn spawn_mock_staking_rpc(staked_balance: u64) -> String {
-        async fn handle_rpc(
-            Json(payload): Json<Value>,
-            staked_result: String,
-        ) -> Json<Value> {
+        async fn handle_rpc(Json(payload): Json<Value>, staked_result: String) -> Json<Value> {
             Json(serde_json::json!({
                 "jsonrpc": "2.0",
                 "id": payload.get("id").cloned().unwrap_or_else(|| serde_json::json!(1)),
@@ -2919,7 +2967,8 @@ mod tests {
     fn single_sig_verifies() {
         let (sk, pk) = make_keypair();
         let req = make_request_with_sigs(vec![], vec![], 0);
-        let msg = common::publish_signature_message(&req.id, &req.content_hash, &req.publisher_address);
+        let msg =
+            common::publish_signature_message(&req.id, &req.content_hash, &req.publisher_address);
         let sig = sk.sign(msg.as_bytes());
 
         let req = PublishRequest {
@@ -3299,11 +3348,12 @@ mod tests {
         let (signing_key, validator_pubkey) = make_keypair();
         let canonical = "npm:test@1.0.0";
         let content_hash = common::sha256_hex(b"vote-payload");
-        let ml_model_version = "degraded-no-model";
+        let ml_model_version = "creg-detect-v2.0.0";
 
         {
             let mut s = state.write().await;
-            s.validator_set = common::ValidatorSet::new(vec![validator("node-1", &validator_pubkey)]);
+            s.validator_set =
+                common::ValidatorSet::new(vec![validator("node-1", &validator_pubkey)]);
         }
 
         let event_bus = new_event_bus();
@@ -3348,6 +3398,54 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn rest_receive_vote_rejects_degraded_scanner_profile() -> anyhow::Result<()> {
+        let (state, _tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
+        let (signing_key, validator_pubkey) = make_keypair();
+        let canonical = "npm:test@1.0.0";
+        let content_hash = common::sha256_hex(b"vote-payload");
+
+        {
+            let mut s = state.write().await;
+            s.validator_set =
+                common::ValidatorSet::new(vec![validator("node-1", &validator_pubkey)]);
+        }
+
+        let event_bus = new_event_bus();
+        let app = router(
+            state.clone(),
+            event_bus,
+            RateLimiter::new(RateLimitConfig::default()),
+            AttestationStore::new(),
+            crate::config::CorsConfig::default(),
+            tx_sender,
+            p2p_handle,
+        );
+
+        let vote = make_vote_message(
+            canonical,
+            &content_hash,
+            "node-1",
+            &signing_key,
+            &validator_pubkey,
+            "degraded-no-model",
+            true,
+        );
+
+        let response = app
+            .oneshot(
+                Request::post("/v1/consensus/vote")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&vote)?))?,
+            )
+            .await?;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(state.read().await.package_round(canonical).is_none());
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn rest_receive_vote_replaces_duplicate_validator_entry_in_round() -> anyhow::Result<()> {
         let (state, _tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
         let (signing_key, validator_pubkey) = make_keypair();
@@ -3356,7 +3454,8 @@ mod tests {
 
         {
             let mut s = state.write().await;
-            s.validator_set = common::ValidatorSet::new(vec![validator("node-1", &validator_pubkey)]);
+            s.validator_set =
+                common::ValidatorSet::new(vec![validator("node-1", &validator_pubkey)]);
         }
 
         let event_bus = new_event_bus();
@@ -3426,7 +3525,8 @@ mod tests {
 
         {
             let mut s = state.write().await;
-            s.validator_set = common::ValidatorSet::new(vec![validator("node-1", &validator_pubkey)]);
+            s.validator_set =
+                common::ValidatorSet::new(vec![validator("node-1", &validator_pubkey)]);
             s.record_package_vote(
                 canonical,
                 common::ValidatorSignature {
@@ -3464,9 +3564,15 @@ mod tests {
         let round = &body_json["active_rounds"][0];
 
         assert_eq!(round["consensus_subject"], canonical);
-        assert_eq!(round["votes"][0]["analysis_bundles"]["policy_bundle_id"], bundles.policy_bundle_id);
+        assert_eq!(
+            round["votes"][0]["analysis_bundles"]["policy_bundle_id"],
+            bundles.policy_bundle_id
+        );
         assert_eq!(round["votes"][0]["evidence_digest"], "evidence-digest-1");
-        assert_eq!(round["votes"][0]["deterministic_risk"]["disposition"], deterministic_risk.disposition);
+        assert_eq!(
+            round["votes"][0]["deterministic_risk"]["disposition"],
+            deterministic_risk.disposition
+        );
 
         Ok(())
     }
@@ -3519,10 +3625,19 @@ mod tests {
         let body = to_bytes(response.into_body(), usize::MAX).await?;
         let body_json: serde_json::Value = serde_json::from_slice(&body)?;
 
-        assert_eq!(body_json["analysis_bundles"]["policy_bundle_id"], bundles.policy_bundle_id);
+        assert_eq!(
+            body_json["analysis_bundles"]["policy_bundle_id"],
+            bundles.policy_bundle_id
+        );
         assert_eq!(body_json["evidence_digest"], "detail-evidence-digest");
-        assert_eq!(body_json["deterministic_risk"]["band"], deterministic_risk.band);
-        assert_eq!(body_json["deterministic_risk"]["disposition"], deterministic_risk.disposition);
+        assert_eq!(
+            body_json["deterministic_risk"]["band"],
+            deterministic_risk.band
+        );
+        assert_eq!(
+            body_json["deterministic_risk"]["disposition"],
+            deterministic_risk.disposition
+        );
 
         Ok(())
     }
@@ -3570,7 +3685,12 @@ mod tests {
         let event_bus = new_event_bus();
         let cors = crate::config::CorsConfig {
             allowed_origins: vec!["http://localhost:4173".into()],
-            allowed_methods: vec!["GET".into(), "POST".into(), "DELETE".into(), "OPTIONS".into()],
+            allowed_methods: vec![
+                "GET".into(),
+                "POST".into(),
+                "DELETE".into(),
+                "OPTIONS".into(),
+            ],
             allow_credentials: true,
         };
         let app = router(

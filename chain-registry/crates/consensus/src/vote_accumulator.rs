@@ -13,7 +13,7 @@
 // incoming votes from peers. It is owned by the validator pipeline.
 //
 // **Signature scheme**: Ed25519 over the canonical PBFT vote message
-// `"creg-vote-v1|<canonical>|<content_hash>|<approved>|<validator_pubkey>"`.
+// `"creg-vote-v2|<canonical>|<content_hash>|<approved>|<validator_pubkey>|<scanner_profile_digest>|<evidence_digest>"`.
 // This matches the format used by the REST `/v1/consensus/vote` endpoint and
 // the libp2p gossip vote broadcaster (see `gossip::canonical_vote_message`
 // in the node crate). Prior to ISSUE-009 this module used ECDSA/secp256k1
@@ -29,20 +29,16 @@ use std::collections::HashMap;
 
 /// Domain-separation tag for the canonical consensus vote message. Must be
 /// kept in sync with `node/src/gossip.rs::VOTE_MESSAGE_DOMAIN`.
-pub const VOTE_MESSAGE_DOMAIN: &str = "creg-vote-v1";
+pub const VOTE_MESSAGE_DOMAIN: &str = "creg-vote-v2";
 
-/// Prefix for ML model versions that indicate degraded analysis. Votes from
-/// validators running degraded models are stored for transparency but excluded
-/// from quorum calculation to prevent unverified approvals.
-const DEGRADED_MODEL_PREFIX: &str = "degraded";
-
-/// Returns true if the vote's ML model version indicates degraded analysis
-/// (missing model, timeout, etc.). Such votes should not count toward quorum.
-fn is_degraded_model(vote: &IncomingVote) -> bool {
-    vote.ml_model_version
-        .as_deref()
-        .map(|v| v.starts_with(DEGRADED_MODEL_PREFIX))
-        .unwrap_or(false)
+/// Returns true when a vote carries enough deterministic scanner/evidence
+/// metadata to count toward quorum.
+fn is_consensus_grade(vote: &IncomingVote) -> bool {
+    common::is_consensus_grade_vote(
+        vote.ml_model_version.as_deref().unwrap_or_default(),
+        &vote.analysis_bundles,
+        &vote.evidence_digest,
+    )
 }
 
 /// Build the canonical message that a validator must sign when casting a PBFT
@@ -56,10 +52,18 @@ pub fn canonical_vote_message(
     content_hash: &str,
     approved: bool,
     validator_pubkey: &str,
+    scanner_profile_digest: &str,
+    evidence_digest: &str,
 ) -> String {
     format!(
-        "{}|{}|{}|{}|{}",
-        VOTE_MESSAGE_DOMAIN, canonical, content_hash, approved, validator_pubkey
+        "{}|{}|{}|{}|{}|{}|{}",
+        VOTE_MESSAGE_DOMAIN,
+        canonical,
+        content_hash,
+        approved,
+        validator_pubkey,
+        scanner_profile_digest,
+        evidence_digest
     )
 }
 
@@ -106,6 +110,12 @@ pub struct IncomingVote {
     /// ML model version used by this validator for deep scan.
     #[serde(default)]
     pub ml_model_version: Option<String>,
+    /// Versioned scanner/profile artifacts used by this validator.
+    #[serde(default)]
+    pub analysis_bundles: common::AnalysisBundleRefs,
+    /// Digest over deterministic evidence considered by this validator.
+    #[serde(default)]
+    pub evidence_digest: String,
 }
 
 /// Result of signature verification
@@ -197,13 +207,15 @@ impl PackageVoteState {
             &vote.content_hash,
             vote.approved,
             &vote.validator_pubkey,
+            &common::scanner_profile_digest(
+                vote.ml_model_version.as_deref().unwrap_or_default(),
+                &vote.analysis_bundles,
+            ),
+            &vote.evidence_digest,
         );
 
         if let Err(e) = verifying_key.verify(message.as_bytes(), &signature) {
-            return SignatureVerification::Invalid(format!(
-                "Ed25519 verification failed: {}",
-                e
-            ));
+            return SignatureVerification::Invalid(format!("Ed25519 verification failed: {}", e));
         }
 
         SignatureVerification::Valid
@@ -245,15 +257,18 @@ impl PackageVoteState {
             }
         }
 
-        self.prepare_votes.insert(vote.validator_id.clone(), vote.clone());
+        self.prepare_votes
+            .insert(vote.validator_id.clone(), vote.clone());
 
-        // Votes from validators running degraded ML models are stored for
-        // transparency but excluded from quorum calculation.
+        // Votes without consensus-grade scanner/evidence metadata are stored
+        // for transparency but excluded from quorum calculation.
         let total_votes = self.prepare_votes.len();
-        let effective_count = self.prepare_votes.values()
-            .filter(|v| !is_degraded_model(v))
+        let effective_count = self
+            .prepare_votes
+            .values()
+            .filter(|v| is_consensus_grade(v))
             .count();
-        let degraded_count = total_votes - effective_count;
+        let excluded_count = total_votes - effective_count;
 
         // Warn when the degraded-validator ratio exceeds the configured threshold.
         // If too many validators lack a trained model, quorum may become unreachable.
@@ -262,17 +277,17 @@ impl PackageVoteState {
             .and_then(|v| v.parse().ok())
             .unwrap_or(0.5);
         if self.assigned_count > 0
-            && (degraded_count as f64 / self.assigned_count as f64) > warn_ratio
+            && (excluded_count as f64 / self.assigned_count as f64) > warn_ratio
         {
             tracing::warn!(
-                "[VoteAccum] {} DEGRADED QUORUM RISK: {}/{} assigned validators are running \
-                 degraded ML models ({:.0}% > {:.0}% warn threshold). Effective quorum requires \
+                "[VoteAccum] {} CONSENSUS METADATA QUORUM RISK: {}/{} assigned validators sent \
+                 votes without consensus-grade scanner/evidence metadata ({:.0}% > {:.0}% warn threshold). Effective quorum requires \
                  {} non-degraded votes but only {} available so far. \
-                 Deploy a trained model or lower CREG_DEGRADED_VALIDATOR_WARN_RATIO to suppress.",
+                 Deploy a pinned scanner profile/evidence bundle or lower CREG_DEGRADED_VALIDATOR_WARN_RATIO to suppress.",
                 self.canonical,
-                degraded_count,
+                excluded_count,
                 self.assigned_count,
-                100.0 * degraded_count as f64 / self.assigned_count as f64,
+                100.0 * excluded_count as f64 / self.assigned_count as f64,
                 100.0 * warn_ratio,
                 self.quorum(),
                 effective_count,
@@ -328,11 +343,14 @@ impl PackageVoteState {
             }
         }
 
-        self.commit_votes.insert(vote.validator_id.clone(), vote.clone());
+        self.commit_votes
+            .insert(vote.validator_id.clone(), vote.clone());
 
-        // Exclude degraded-model validators from quorum count.
-        let non_degraded: Vec<&IncomingVote> = self.commit_votes.values()
-            .filter(|v| !is_degraded_model(v))
+        // Exclude votes without consensus-grade scanner/evidence metadata.
+        let non_degraded: Vec<&IncomingVote> = self
+            .commit_votes
+            .values()
+            .filter(|v| is_consensus_grade(v))
             .collect();
         let degraded_commit_count = self.commit_votes.len() - non_degraded.len();
         let warn_ratio: f64 = std::env::var("CREG_DEGRADED_VALIDATOR_WARN_RATIO")
@@ -414,8 +432,8 @@ impl PackageVoteState {
                 },
                 signed_at: v.received_at,
                 ml_model_version: v.ml_model_version.clone().unwrap_or_default(),
-                analysis_bundles: common::AnalysisBundleRefs::default(),
-                evidence_digest: String::new(),
+                analysis_bundles: v.analysis_bundles.clone(),
+                evidence_digest: v.evidence_digest.clone(),
                 deterministic_risk: common::DeterministicRiskSummary::default(),
             })
             .collect()
@@ -486,6 +504,8 @@ impl VoteAccumulator {
         reject_reason: Option<String>,
         signature: String,
         ml_model_version: Option<String>,
+        analysis_bundles: common::AnalysisBundleRefs,
+        evidence_digest: String,
         block_hash: &str,
         skip_verification: bool,
     ) -> Result<Option<CommitOutcome>, String> {
@@ -498,6 +518,8 @@ impl VoteAccumulator {
             signature,
             received_at: Utc::now(),
             ml_model_version,
+            analysis_bundles,
+            evidence_digest,
         };
 
         let state = self
@@ -572,6 +594,22 @@ mod tests {
         (sk, pub_hex)
     }
 
+    fn test_analysis_bundles() -> common::AnalysisBundleRefs {
+        common::AnalysisBundleRefs {
+            policy_bundle_id: "policy-v1".into(),
+            feature_schema_id: "features-v1".into(),
+            expert_bundle_id: "experts-v1".into(),
+            embedding_model_id: "embeddings-v1".into(),
+            index_epoch: "index-epoch-1".into(),
+            threshold_profile_id: "thresholds-v1".into(),
+            llm_prompt_profile_id: "llm-prompt-v1".into(),
+        }
+    }
+
+    fn test_evidence_digest(canonical: &str, content_hash: &str) -> String {
+        common::sha256_hex(format!("{canonical}:{content_hash}:consensus-test").as_bytes())
+    }
+
     fn sign_vote(
         sk: &SigningKey,
         pub_hex: &str,
@@ -579,17 +617,28 @@ mod tests {
         content_hash: &str,
         approved: bool,
     ) -> String {
-        let msg = canonical_vote_message(canonical, content_hash, approved, pub_hex);
+        let analysis_bundles = test_analysis_bundles();
+        let model_version = "creg-detect-v1.0.0";
+        let evidence_digest = test_evidence_digest(canonical, content_hash);
+        let msg = canonical_vote_message(
+            canonical,
+            content_hash,
+            approved,
+            pub_hex,
+            &common::scanner_profile_digest(model_version, &analysis_bundles),
+            &evidence_digest,
+        );
         hex::encode(sk.sign(msg.as_bytes()).to_bytes())
     }
 
     /// Build a plaintext (unsigned) vote with a fake signature — useful when
     /// the test calls `record_prepare/record_commit` with `skip_verification = true`.
     fn unsigned_vote(validator_id: &str, validator_pubkey: &str, approved: bool) -> IncomingVote {
+        let content_hash = "00".repeat(32);
         IncomingVote {
             validator_id: validator_id.to_string(),
             validator_pubkey: validator_pubkey.to_string(),
-            content_hash: "00".repeat(32),
+            content_hash: content_hash.clone(),
             approved,
             reject_reason: if approved {
                 None
@@ -598,7 +647,9 @@ mod tests {
             },
             signature: "00".repeat(64),
             received_at: Utc::now(),
-            ml_model_version: None,
+            ml_model_version: Some("creg-detect-v1.0.0".into()),
+            analysis_bundles: test_analysis_bundles(),
+            evidence_digest: test_evidence_digest("npm:test@1.0.0", &content_hash),
         }
     }
 
@@ -694,6 +745,8 @@ mod tests {
             signature: "not_valid_hex!!!".into(),
             received_at: Utc::now(),
             ml_model_version: None,
+            analysis_bundles: test_analysis_bundles(),
+            evidence_digest: test_evidence_digest("npm:test@1.0.0", "abcd"),
         };
 
         let result = state.verify_signature(&bad_vote, "0x1234");
@@ -716,7 +769,9 @@ mod tests {
             reject_reason: None,
             signature: sign_vote(&sk, &pub_hex, canonical, &content_hash, true),
             received_at: Utc::now(),
-            ml_model_version: None,
+            ml_model_version: Some("creg-detect-v1.0.0".into()),
+            analysis_bundles: test_analysis_bundles(),
+            evidence_digest: test_evidence_digest(canonical, &content_hash),
         };
 
         assert_eq!(
@@ -742,7 +797,9 @@ mod tests {
             reject_reason: None,
             signature: sign_vote(&sk, &pub_hex, canonical, &signed_hash, true),
             received_at: Utc::now(),
-            ml_model_version: None,
+            ml_model_version: Some("creg-detect-v1.0.0".into()),
+            analysis_bundles: test_analysis_bundles(),
+            evidence_digest: test_evidence_digest(canonical, &signed_hash),
         };
         vote.content_hash = actual_hash;
 
@@ -770,7 +827,9 @@ mod tests {
             reject_reason: None,
             signature: sign_vote(&sk_a, &pub_a, canonical, &content_hash, true),
             received_at: Utc::now(),
-            ml_model_version: None,
+            ml_model_version: Some("creg-detect-v1.0.0".into()),
+            analysis_bundles: test_analysis_bundles(),
+            evidence_digest: test_evidence_digest(canonical, &content_hash),
         };
         // Attacker swaps the pubkey to B while keeping A's signature.
         vote.validator_pubkey = pub_b;
@@ -793,6 +852,8 @@ mod tests {
             signature: "00".repeat(64),
             received_at: Utc::now(),
             ml_model_version: None,
+            analysis_bundles: test_analysis_bundles(),
+            evidence_digest: test_evidence_digest("npm:test@1.0.0", &"00".repeat(32)),
         };
 
         let result = state.verify_signature(&bad_vote, "unused");
@@ -827,16 +888,25 @@ mod tests {
 
         let mut vote = unsigned_vote("v1", &format!("{:0>64}", "v1"), true);
         vote.ml_model_version = Some("creg-detect-v1.0.0".into());
-        assert!(state.record_commit(vote, block_hash, true).unwrap().is_none());
+        assert!(state
+            .record_commit(vote, block_hash, true)
+            .unwrap()
+            .is_none());
 
         let mut vote = unsigned_vote("v2", &format!("{:0>64}", "v2"), true);
         vote.ml_model_version = Some("creg-detect-v1.0.0".into());
-        assert!(state.record_commit(vote, block_hash, true).unwrap().is_none());
+        assert!(state
+            .record_commit(vote, block_hash, true)
+            .unwrap()
+            .is_none());
 
         let mut vote = unsigned_vote("v3", &format!("{:0>64}", "v3"), true);
         vote.ml_model_version = Some("degraded-no-model".into());
         assert!(
-            state.record_commit(vote, block_hash, true).unwrap().is_none(),
+            state
+                .record_commit(vote, block_hash, true)
+                .unwrap()
+                .is_none(),
             "degraded commit votes must not satisfy quorum"
         );
 
