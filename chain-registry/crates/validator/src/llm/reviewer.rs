@@ -13,7 +13,10 @@ impl StructuredReviewer {
 
         match super::call_llm(&messages, 50).await {
             Ok((resp, _model)) => super::parse_llm_response(&resp),
-            Err(error) => Ok(LlmResult::Unavailable(format!("All providers failed: {}", error))),
+            Err(error) => Ok(LlmResult::Unavailable(format!(
+                "All providers failed: {}",
+                error
+            ))),
         }
     }
 
@@ -50,7 +53,8 @@ impl StructuredReviewer {
                     if model_used.is_empty() {
                         model_used = model.clone();
                     }
-                    let analysis = super::parse_file_analysis(&selected.path, &resp, &model, pkg_id);
+                    let analysis =
+                        super::parse_file_analysis(&selected.path, &resp, &model, pkg_id);
 
                     for (title, severity, description) in &analysis.findings {
                         finding_counter += 1;
@@ -141,8 +145,7 @@ impl StructuredReviewer {
                         format!(
                             "LLM summary unavailable ({}). Per-file scores: max={}. \
                              Manual review recommended.",
-                            error,
-                            top_file_score
+                            error, top_file_score
                         ),
                         Vec::new(),
                         model_used,

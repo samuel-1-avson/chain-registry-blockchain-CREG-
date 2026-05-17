@@ -43,8 +43,7 @@ impl ChainStore {
             ColumnFamilyDescriptor::new(CF_PACKAGES, cf_opts),
         ];
 
-        let db =
-            DB::open_cf_descriptors(&opts, &db_path, cfs).context("Failed to open RocksDB")?;
+        let db = DB::open_cf_descriptors(&opts, &db_path, cfs).context("Failed to open RocksDB")?;
 
         let store = Self { db: Arc::new(db) };
 
@@ -116,10 +115,7 @@ impl ChainStore {
 
         // Migrate packages
         if let Ok(tree) = sled_db.open_tree("packages") {
-            let cf = self
-                .db
-                .cf_handle(CF_PACKAGES)
-                .context("cf packages")?;
+            let cf = self.db.cf_handle(CF_PACKAGES).context("cf packages")?;
             for item in tree.iter() {
                 let (k, v) = item?;
                 self.db.put_cf(&cf, &k, &v)?;
@@ -146,10 +142,7 @@ impl ChainStore {
             .db
             .cf_handle(CF_BLOCKS_BY_HEIGHT)
             .context("cf blocks_by_height")?;
-        let cf_pkg = self
-            .db
-            .cf_handle(CF_PACKAGES)
-            .context("cf packages")?;
+        let cf_pkg = self.db.cf_handle(CF_PACKAGES).context("cf packages")?;
 
         // Use a WriteBatch for atomicity.
         let mut batch = rocksdb::WriteBatch::default();
@@ -401,9 +394,7 @@ impl ChainStore {
             if let Ok(Some(block)) = self.get_block_by_height(h) {
                 for tx in &block.transactions {
                     if let common::Transaction::RotatePublisherKey {
-                        old_pubkey,
-                        nonce,
-                        ..
+                        old_pubkey, nonce, ..
                     } = tx
                     {
                         if old_pubkey == pubkey {
@@ -460,10 +451,7 @@ impl ChainStore {
                         .prefix_iterator_cf(&cf, format!("{}:", eco).as_bytes()),
                 )
             } else {
-                Box::new(
-                    self.db
-                        .iterator_cf(&cf, rocksdb::IteratorMode::Start),
-                )
+                Box::new(self.db.iterator_cf(&cf, rocksdb::IteratorMode::Start))
             };
 
         for item in iter_box {

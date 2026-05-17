@@ -12,8 +12,8 @@ async fn start_test_node() -> (String, tokio::task::JoinHandle<()>) {
     use node::{
         api,
         chain_store::ChainStore,
-        consensus_admission::AttestationStore,
         config::NodeConfig,
+        consensus_admission::AttestationStore,
         events::new_event_bus,
         finalized_tx,
         p2p::{P2PCommand, P2PHandle},

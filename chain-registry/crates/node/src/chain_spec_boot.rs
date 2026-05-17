@@ -32,11 +32,7 @@ pub async fn resolve_chain_spec(
                     return Ok(spec);
                 }
                 Err(e) => {
-                    tracing::warn!(
-                        "Failed to fetch chain spec from {}: {}",
-                        url,
-                        e
-                    );
+                    tracing::warn!("Failed to fetch chain spec from {}: {}", url, e);
                 }
             }
         }
@@ -122,6 +118,9 @@ mod tests {
     fn test_cache_path_construction() {
         let dir = std::path::PathBuf::from("/tmp/creg");
         let path = dir.join("chain-spec.cached.json");
-        assert_eq!(path, std::path::PathBuf::from("/tmp/creg/chain-spec.cached.json"));
+        assert_eq!(
+            path,
+            std::path::PathBuf::from("/tmp/creg/chain-spec.cached.json")
+        );
     }
 }

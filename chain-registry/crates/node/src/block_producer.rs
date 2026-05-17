@@ -41,7 +41,7 @@ pub async fn run(
                     block.header.height,
                     block.transactions.len()
                 );
-                
+
                 // Broadcast PbftPrePrepare to start the consensus round
                 let msg = common::GossipMessage::PbftPrePrepare { block };
                 let _ = p2p_handle
@@ -93,7 +93,14 @@ async fn produce_block(
         }
         let validator_set_hash = hex::encode(hasher.finalize());
 
-        (tip_height, prev_hash, node_id, privkey, our_pubkey, validator_set_hash)
+        (
+            tip_height,
+            prev_hash,
+            node_id,
+            privkey,
+            our_pubkey,
+            validator_set_hash,
+        )
     };
 
     let epoch_seed = prev_hash.clone();
@@ -149,8 +156,9 @@ async fn produce_block(
                 })
                 .await;
 
-            let selected_proposer = consensus::vrf::select_proposer_deterministic(&active, &epoch_seed)
-                .ok_or_else(|| anyhow::anyhow!("No active validators to select proposer"))?;
+            let selected_proposer =
+                consensus::vrf::select_proposer_deterministic(&active, &epoch_seed)
+                    .ok_or_else(|| anyhow::anyhow!("No active validators to select proposer"))?;
             if node_id != selected_proposer {
                 anyhow::bail!(
                     "Node {} is not the selected proposer for this epoch (expected {})",
@@ -185,11 +193,11 @@ async fn produce_block(
         transactions: txs,
         pbft_signatures: vec![],
     };
-    
+
     // Instead of inserting immediately, start the PBFT round
     let vs = s.validator_set.clone();
     s.pbft_engine.start_round(block.clone(), vs.into())?;
-    
+
     // Proofs are epoch-specific (seed = prev_hash); clear cache for next round.
     s.vrf_proofs.clear();
     Ok(block)

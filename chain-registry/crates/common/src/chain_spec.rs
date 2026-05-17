@@ -160,13 +160,25 @@ impl ChainSpec {
             genesis_time: &self.genesis_time,
             consensus_params: &self.consensus_params,
             feature_flags: &self.feature_flags,
-            l1: L1HashPayload { chain_id: self.l1.chain_id },
+            l1: L1HashPayload {
+                chain_id: self.l1.chain_id,
+            },
             contracts: &self.contracts,
             validator_set: ValidatorSetHashPayload {
                 version: self.validator_set.version,
-                validators: self.validator_set.validators.iter().map(|v| {
-                    (v.id.clone(), v.pubkey.clone(), v.eth_address.clone(), v.stake)
-                }).collect(),
+                validators: self
+                    .validator_set
+                    .validators
+                    .iter()
+                    .map(|v| {
+                        (
+                            v.id.clone(),
+                            v.pubkey.clone(),
+                            v.eth_address.clone(),
+                            v.stake,
+                        )
+                    })
+                    .collect(),
             },
         };
 
@@ -196,7 +208,11 @@ impl ChainSpec {
                 .map_err(|_| anyhow::anyhow!("signature must be 64 bytes"))?,
         );
 
-        let message = format!("{}|{}", SPEC_SIGNATURE_DOMAIN, self.canonical_json_for_signing()?);
+        let message = format!(
+            "{}|{}",
+            SPEC_SIGNATURE_DOMAIN,
+            self.canonical_json_for_signing()?
+        );
 
         pubkey
             .verify(message.as_bytes(), &signature)
@@ -206,7 +222,8 @@ impl ChainSpec {
     /// Return a JCS-canonicalized JSON string of the full spec (for signing).
     fn canonical_json_for_signing(&self) -> anyhow::Result<String> {
         let bytes = to_jcs_canonical_json(self)?;
-        String::from_utf8(bytes).map_err(|e| anyhow::anyhow!("JCS output is not valid UTF-8: {}", e))
+        String::from_utf8(bytes)
+            .map_err(|e| anyhow::anyhow!("JCS output is not valid UTF-8: {}", e))
     }
 
     /// Convert the spec's validator set to the runtime `common::ValidatorSet`.
@@ -351,7 +368,8 @@ mod tests {
             network: Network::Testnet,
             phase: Phase::Alpha,
             genesis_time: "2026-05-01T00:00:00Z".into(),
-            genesis_hash: "0x0000000000000000000000000000000000000000000000000000000000000000".into(),
+            genesis_hash: "0x0000000000000000000000000000000000000000000000000000000000000000"
+                .into(),
             consensus_params: ConsensusParams {
                 block_time_seconds: 5,
                 vote_timeout_ms: 10000,
@@ -381,15 +399,22 @@ mod tests {
             },
             contracts: {
                 let mut m = BTreeMap::new();
-                m.insert("registry".into(), "0xD8a5a9b31c3C0232E196d518E89Fd8bF83AcAd43".into());
-                m.insert("staking".into(), "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707".into());
+                m.insert(
+                    "registry".into(),
+                    "0xD8a5a9b31c3C0232E196d518E89Fd8bF83AcAd43".into(),
+                );
+                m.insert(
+                    "staking".into(),
+                    "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707".into(),
+                );
                 m
             },
             bootnodes: vec![Bootnode {
                 id: "bootnode-1".into(),
                 operator: "core-team".into(),
                 region: "eu-central".into(),
-                multiaddr: "/dns4/bootnode-1.creg-testnet.example/tcp/9000/p2p/12D3KooWREPLACEME".into(),
+                multiaddr: "/dns4/bootnode-1.creg-testnet.example/tcp/9000/p2p/12D3KooWREPLACEME"
+                    .into(),
             }],
             validator_set: ValidatorSetSpec {
                 version: 1,
@@ -398,7 +423,8 @@ mod tests {
                 validators: vec![ValidatorSpecEntry {
                     id: "core-1".into(),
                     alias: "Core Validator 1".into(),
-                    pubkey: "0000000000000000000000000000000000000000000000000000000000000001".into(),
+                    pubkey: "0000000000000000000000000000000000000000000000000000000000000001"
+                        .into(),
                     eth_address: "0x0000000000000000000000000000000000000001".into(),
                     stake: 100,
                     reputation: 100,
@@ -415,8 +441,10 @@ mod tests {
             support: Support::default(),
             signing: Signing {
                 signature_algorithm: "ed25519".into(),
-                signing_key_pubkey_hex: "0000000000000000000000000000000000000000000000000000000000000000".into(),
-                detached_signature_url: "https://testnet.creg-testnet.example/chain-spec.json.sig".into(),
+                signing_key_pubkey_hex:
+                    "0000000000000000000000000000000000000000000000000000000000000000".into(),
+                detached_signature_url: "https://testnet.creg-testnet.example/chain-spec.json.sig"
+                    .into(),
             },
         }
     }

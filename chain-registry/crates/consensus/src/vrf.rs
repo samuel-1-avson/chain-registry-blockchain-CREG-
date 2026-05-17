@@ -32,9 +32,9 @@ pub fn select_validators(
 
     // Use VRF output when available; otherwise fall back to deterministic hash.
     let seed = match vrf_output {
-        Some(output) => sha256_hex(
-            format!("{}:{}:{}", output, block_height, package_canonical).as_bytes(),
-        ),
+        Some(output) => {
+            sha256_hex(format!("{}:{}:{}", output, block_height, package_canonical).as_bytes())
+        }
         None => sha256_hex(format!("{}:{}", block_height, package_canonical).as_bytes()),
     };
 
@@ -200,7 +200,14 @@ mod tests {
     fn vrf_output_changes_selection() {
         let validators: Vec<String> = (0..20).map(|i| format!("val_{}", i)).collect();
         let a = select_validators(&validators, "npm:express@4.0.0", 100, 5, None).unwrap();
-        let b = select_validators(&validators, "npm:express@4.0.0", 100, 5, Some("abcdef1234567890")).unwrap();
+        let b = select_validators(
+            &validators,
+            "npm:express@4.0.0",
+            100,
+            5,
+            Some("abcdef1234567890"),
+        )
+        .unwrap();
         assert_ne!(a, b, "VRF output should change the selection");
     }
 

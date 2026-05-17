@@ -2,13 +2,13 @@
 // Monitors PBFT consensus and finalizes records on the Ethereum Registry contract.
 
 use crate::NodeState;
+use alloy::sol_types::SolCall;
 use alloy::{
     network::EthereumWallet,
     providers::{Provider, ProviderBuilder},
     signers::local::PrivateKeySigner,
     sol,
 };
-use alloy::sol_types::SolCall;
 use common::{PackageStatus, Transaction};
 use sha2::Digest;
 use std::sync::Arc;

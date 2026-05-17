@@ -69,10 +69,12 @@ pub struct RiskSummary {
 
 impl RiskSummary {
     pub fn primary_reason(&self) -> String {
-        self.reasons
-            .first()
-            .cloned()
-            .unwrap_or_else(|| format!("Deterministic risk band '{}' (score {})", self.band, self.score))
+        self.reasons.first().cloned().unwrap_or_else(|| {
+            format!(
+                "Deterministic risk band '{}' (score {})",
+                self.band, self.score
+            )
+        })
     }
 
     pub fn to_common_summary(&self) -> DeterministicRiskSummary {
@@ -155,7 +157,10 @@ impl RiskAggregator {
             .iter()
             .filter(|finding| {
                 finding.severity == FindingSeverity::High
-                    && !is_non_blocking_testnet_dev_bypass(finding, allow_testnet_dev_sandbox_bypass)
+                    && !is_non_blocking_testnet_dev_bypass(
+                        finding,
+                        allow_testnet_dev_sandbox_bypass,
+                    )
             })
             .count() as i32
             * 15;
@@ -171,8 +176,8 @@ impl RiskAggregator {
         let score = score.clamp(0, 100) as u8;
         let deterministic_block = critical_findings > 0 || score >= self.block_threshold;
         let llm_review_used = llm_review.is_some_and(|review| !review.degraded);
-        let llm_review_recommended =
-            !llm_review_used && deterministic_score.max(advisory_score) >= self.llm_review_threshold;
+        let llm_review_recommended = !llm_review_used
+            && deterministic_score.max(advisory_score) >= self.llm_review_threshold;
 
         let advisory_review = advisory_score >= self.review_threshold;
 

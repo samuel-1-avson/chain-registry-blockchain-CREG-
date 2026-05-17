@@ -17,7 +17,11 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 async fn command_ready(program: &str, args: &[&str]) -> bool {
-    match tokio::process::Command::new(program).args(args).output().await {
+    match tokio::process::Command::new(program)
+        .args(args)
+        .output()
+        .await
+    {
         Ok(output) if output.status.success() => true,
         Ok(output) => {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -97,23 +101,15 @@ impl Default for SandboxConfig {
             .ok()
             .and_then(|p| p.parent().map(|d| d.to_path_buf()));
 
-        let config_base = exe_dir
-            .clone()
-            .map(|d| d.join("config").join("sandbox"));
+        let config_base = exe_dir.clone().map(|d| d.join("config").join("sandbox"));
 
         Self {
             timeout_secs: 120,
             memory_mb: 512,
             network_mode: NetworkMode::ManifestOnly,
-            nsjail_config_path: config_base
-                .as_ref()
-                .map(|d| d.join("nsjail-seccomp.cfg")),
-            docker_seccomp_path: config_base
-                .as_ref()
-                .map(|d| d.join("docker-seccomp.json")),
-            rootfs_base_dir: config_base
-                .as_ref()
-                .map(|d| d.join("rootfs")),
+            nsjail_config_path: config_base.as_ref().map(|d| d.join("nsjail-seccomp.cfg")),
+            docker_seccomp_path: config_base.as_ref().map(|d| d.join("docker-seccomp.json")),
+            rootfs_base_dir: config_base.as_ref().map(|d| d.join("rootfs")),
             tarball_hash: None,
         }
     }
@@ -201,7 +197,8 @@ pub async fn run(
     // ── Engine 1: nsjail ──────────────────────────────────────────────────────
     if command_ready("nsjail", &["--version"]).await {
         tracing::info!("nsjail detected — using primary sandbox engine");
-        let result = run_nsjail_sandbox(&tarball_path, _pkg_id, &config, manifest, start_time).await;
+        let result =
+            run_nsjail_sandbox(&tarball_path, _pkg_id, &config, manifest, start_time).await;
         let _ = std::fs::remove_dir_all(&tmp_dir);
         let result = result?;
         cache_result(&cache_key, &result);
@@ -245,7 +242,8 @@ pub async fn run(
     // ── Engine 2: gVisor (runsc) ──────────────────────────────────────────────
     if command_ready("runsc", &["--version"]).await {
         tracing::info!("gVisor (runsc) detected — using userspace syscall sandbox");
-        let result = run_gvisor_sandbox(&tarball_path, _pkg_id, &config, manifest, start_time).await;
+        let result =
+            run_gvisor_sandbox(&tarball_path, _pkg_id, &config, manifest, start_time).await;
         let _ = std::fs::remove_dir_all(&tmp_dir);
         let result = result?;
         cache_result(&cache_key, &result);
@@ -268,7 +266,8 @@ pub async fn run(
                     file: "sandbox-engine".into(),
                     line: None,
                 });
-                let observations_count = obs.network_hosts.len() + obs.fs_writes.len() + obs.process_spawns.len();
+                let observations_count =
+                    obs.network_hosts.len() + obs.fs_writes.len() + obs.process_spawns.len();
                 let result = SandboxResult {
                     metrics: SandboxMetrics {
                         engine_used: "docker".into(),
@@ -295,8 +294,7 @@ pub async fn run(
     // ── Engine 4: WASM/WASI ───────────────────────────────────────────────────
     // Cross-platform fallback — more secure than "no sandbox" but limited to
     // packages that include WASM payloads or can be executed via WASI.
-    let is_wasm_candidate = _pkg_id.name.ends_with("-wasm")
-        || tarball_contains_wasm(tarball_bytes);
+    let is_wasm_candidate = _pkg_id.name.ends_with("-wasm") || tarball_contains_wasm(tarball_bytes);
 
     if is_wasm_candidate {
         tracing::info!("Attempting WASM/WASI sandbox for {} ...", _pkg_id);
@@ -320,7 +318,11 @@ pub async fn run(
                 return Ok(result);
             }
             Err(e) => {
-                tracing::warn!("WASM sandbox failed for {}: {} — continuing to degraded mode", _pkg_id, e);
+                tracing::warn!(
+                    "WASM sandbox failed for {}: {} — continuing to degraded mode",
+                    _pkg_id,
+                    e
+                );
             }
         }
     }
@@ -432,9 +434,15 @@ fn nsjail_install_args(ecosystem: &str, tarball_path: &Path) -> Vec<std::ffi::Os
 fn docker_ecosystem_config(ecosystem: &str) -> (&'static str, &'static str) {
     match ecosystem {
         "npm" => ("node:20-slim", "npm install /pkg/package.tar.gz"),
-        "cargo" => ("rust:1-slim", "cargo install --path /pkg/package.tar.gz --no-default-features"),
+        "cargo" => (
+            "rust:1-slim",
+            "cargo install --path /pkg/package.tar.gz --no-default-features",
+        ),
         "rubygems" => ("ruby:3-slim", "gem install /pkg/package.tar.gz"),
-        "maven" => ("maven:3-eclipse-temurin-21", "mvn install:install-file -Dfile /pkg/package.tar.gz"),
+        "maven" => (
+            "maven:3-eclipse-temurin-21",
+            "mvn install:install-file -Dfile /pkg/package.tar.gz",
+        ),
         _ => ("python:3-slim", "pip install /pkg/package.tar.gz"),
     }
 }
@@ -443,17 +451,20 @@ fn docker_ecosystem_config(ecosystem: &str) -> (&'static str, &'static str) {
 fn resolve_rootfs(config: &SandboxConfig, ecosystem: &str) -> String {
     if let Some(ref base) = config.rootfs_base_dir {
         let eco_dir = match ecosystem {
-            "npm"      => "npm",
-            "cargo"    => "cargo",
+            "npm" => "npm",
+            "cargo" => "cargo",
             "rubygems" => "rubygems",
-            "maven"    => "maven",
-            _          => "pip",
+            "maven" => "maven",
+            _ => "pip",
         };
         let rootfs_path = base.join(eco_dir);
         if rootfs_path.is_dir() {
             return rootfs_path.to_string_lossy().into_owned();
         }
-        tracing::warn!("Rootfs not found at {} — falling back to /", rootfs_path.display());
+        tracing::warn!(
+            "Rootfs not found at {} — falling back to /",
+            rootfs_path.display()
+        );
     }
     "/".to_string()
 }
@@ -479,7 +490,10 @@ async fn run_nsjail_sandbox(
             cmd.arg("--config").arg(cfg_path);
             tracing::info!("nsjail: Using seccomp config from {}", cfg_path.display());
         } else {
-            tracing::warn!("nsjail: Seccomp config not found at {} — running without explicit policy", cfg_path.display());
+            tracing::warn!(
+                "nsjail: Seccomp config not found at {} — running without explicit policy",
+                cfg_path.display()
+            );
         }
     }
 
@@ -487,13 +501,20 @@ async fn run_nsjail_sandbox(
     // nsjail writes structured log to the specified fd; we capture via stderr.
     cmd.arg("--log_fd").arg("2");
 
-    cmd.arg("--chroot").arg(&chroot_path)
-        .arg("--user").arg("99999")
-        .arg("--group").arg("99999")
-        .arg("--time_limit").arg(config.timeout_secs.to_string())
-        .arg("--max_cpus").arg("1")
-        .arg("--rlimit_as").arg(config.memory_mb.to_string())
-        .arg("--").args(&install_args);
+    cmd.arg("--chroot")
+        .arg(&chroot_path)
+        .arg("--user")
+        .arg("99999")
+        .arg("--group")
+        .arg("99999")
+        .arg("--time_limit")
+        .arg(config.timeout_secs.to_string())
+        .arg("--max_cpus")
+        .arg("1")
+        .arg("--rlimit_as")
+        .arg(config.memory_mb.to_string())
+        .arg("--")
+        .args(&install_args);
 
     let output = cmd.output().await?;
 
@@ -536,13 +557,18 @@ async fn run_gvisor_sandbox(
         .arg("--runtime=runsc")
         .arg("--network=none")
         .arg("--read-only")
-        .arg("--tmpfs").arg("/tmp:size=256m")
-        .arg("--memory").arg(format!("{}m", config.memory_mb))
-        .arg("--cpus").arg("1")
+        .arg("--tmpfs")
+        .arg("/tmp:size=256m")
+        .arg("--memory")
+        .arg(format!("{}m", config.memory_mb))
+        .arg("--cpus")
+        .arg("1")
         .arg("-v")
         .arg(format!("{}:/pkg/package.tar.gz:ro", tarball_path.display()))
         .arg(docker_image)
-        .arg("sh").arg("-c").arg(install_cmd)
+        .arg("sh")
+        .arg("-c")
+        .arg(install_cmd)
         .output();
 
     let output = tokio::time::timeout(
@@ -608,16 +634,23 @@ async fn run_docker_sandbox(
         .arg("--rm")
         .arg("--network=none")
         .arg("--read-only")
-        .arg("--tmpfs").arg("/tmp:size=256m")
-        .arg("--memory").arg(format!("{}m", config.memory_mb))
-        .arg("--cpus").arg("1");
+        .arg("--tmpfs")
+        .arg("/tmp:size=256m")
+        .arg("--memory")
+        .arg(format!("{}m", config.memory_mb))
+        .arg("--cpus")
+        .arg("1");
 
     // M1: Apply Docker seccomp profile if available.
     if let Some(ref seccomp_path) = config.docker_seccomp_path {
         if seccomp_path.is_file() {
-            docker_cmd.arg("--security-opt")
+            docker_cmd
+                .arg("--security-opt")
                 .arg(format!("seccomp={}", seccomp_path.display()));
-            tracing::info!("Docker: Using seccomp profile from {}", seccomp_path.display());
+            tracing::info!(
+                "Docker: Using seccomp profile from {}",
+                seccomp_path.display()
+            );
         }
     }
 
@@ -625,7 +658,9 @@ async fn run_docker_sandbox(
         .arg("-v")
         .arg(format!("{}:/pkg/package.tar.gz:ro", tarball_path.display()))
         .arg(docker_image)
-        .arg("sh").arg("-c").arg(&strace_wrapper);
+        .arg("sh")
+        .arg("-c")
+        .arg(&strace_wrapper);
 
     let docker_future = docker_cmd.output();
 
@@ -715,7 +750,9 @@ fn parse_nsjail_output(stderr: &[u8]) -> Result<Observations> {
         }
 
         // ── Filesystem writes ─────────────────────────────────────────────
-        if line.contains("open(") && (line.contains("O_WRONLY") || line.contains("O_RDWR") || line.contains("O_CREAT")) {
+        if line.contains("open(")
+            && (line.contains("O_WRONLY") || line.contains("O_RDWR") || line.contains("O_CREAT"))
+        {
             if let Some(start) = line.find('"') {
                 let rest = &line[start + 1..];
                 if let Some(end) = rest.find('"') {
@@ -847,9 +884,7 @@ fn parse_strace_output(stderr: &[u8]) -> Result<Observations> {
         }
 
         // strace execve (successful)
-        if (line.starts_with("execve(") || line.contains("] execve("))
-            && line.contains("= 0")
-        {
+        if (line.starts_with("execve(") || line.contains("] execve(")) && line.contains("= 0") {
             if let Some(start) = line.find('"') {
                 let rest = &line[start + 1..];
                 if let Some(end) = rest.find('"') {
@@ -879,10 +914,10 @@ fn check_against_manifest(obs: &Observations, manifest: &PackageManifest) -> Vec
 
     // Undeclared network access — subdomain matching.
     for host in &obs.network_hosts {
-        let allowed = manifest.allowed_network_hosts.iter().any(|declared| {
-            host == declared
-                || host.ends_with(&format!(".{}", declared))
-        });
+        let allowed = manifest
+            .allowed_network_hosts
+            .iter()
+            .any(|declared| host == declared || host.ends_with(&format!(".{}", declared)));
         if !allowed {
             findings.push(Finding {
                 id: "SB001".into(),
@@ -923,10 +958,10 @@ fn check_against_manifest(obs: &Observations, manifest: &PackageManifest) -> Vec
                     .file_name()
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_default();
-                let allowed = manifest.allowed_process_spawns.iter().any(|declared| {
-                    spawn == declared
-                        || binary_name == *declared
-                });
+                let allowed = manifest
+                    .allowed_process_spawns
+                    .iter()
+                    .any(|declared| spawn == declared || binary_name == *declared);
                 if !allowed {
                     findings.push(Finding {
                         id: "SB004".into(),
@@ -981,7 +1016,11 @@ pub async fn run_multiphase(
 
     // Phase 1: Install with declared network access
     let phase1 = run(pkg_id, tarball_bytes, &phase1_manifest).await?;
-    if phase1.findings.iter().any(|f| matches!(f.severity, FindingSeverity::Critical)) {
+    if phase1
+        .findings
+        .iter()
+        .any(|f| matches!(f.severity, FindingSeverity::Critical))
+    {
         return Ok(phase1);
     }
 

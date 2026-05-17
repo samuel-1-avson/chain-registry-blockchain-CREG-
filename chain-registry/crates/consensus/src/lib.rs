@@ -7,10 +7,10 @@
 // This implementation covers the three PBFT phases:
 //   PRE-PREPARE → PREPARE → COMMIT
 
+pub mod forced_inclusion;
 pub mod pbft;
 pub mod validator_set;
 pub mod vrf;
-pub mod forced_inclusion;
 
 // anyhow::Result is unused here
 // common imports are handled within submodules

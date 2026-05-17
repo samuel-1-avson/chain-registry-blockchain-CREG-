@@ -105,11 +105,11 @@ impl ValidationReport {
     pub fn apply_llm(&mut self, review: LlmReview) {
         if !review.degraded {
             self.advisory_score = self.advisory_score.max(review.maliciousness_score as f64);
-            self.ensemble_score =
-                self.deterministic_score * 0.6 + self.advisory_score * 0.4;
+            self.ensemble_score = self.deterministic_score * 0.6 + self.advisory_score * 0.4;
 
             // Emit a summary finding when the LLM flagged the package
-            if review.maliciousness_score >= 60 || review.risk_tier == RiskTier::LikelyMalicious
+            if review.maliciousness_score >= 60
+                || review.risk_tier == RiskTier::LikelyMalicious
                 || review.risk_tier == RiskTier::ConfirmedMalicious
             {
                 let severity = if review.maliciousness_score >= 80 {
@@ -239,7 +239,9 @@ impl ValidationReport {
 fn max_deterministic_finding_score(findings: &[Finding]) -> f64 {
     findings
         .iter()
-        .filter(|finding| !finding.id.starts_with("LLM") && !matches!(finding.id.as_str(), "SA011" | "SA012"))
+        .filter(|finding| {
+            !finding.id.starts_with("LLM") && !matches!(finding.id.as_str(), "SA011" | "SA012")
+        })
         .map(|finding| match finding.severity {
             FindingSeverity::Critical => 100.0,
             FindingSeverity::High => 75.0,

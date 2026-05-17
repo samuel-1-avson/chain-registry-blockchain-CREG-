@@ -7,12 +7,12 @@
 pub mod api;
 pub mod block_producer;
 pub mod chain_store;
-pub mod openapi;
 pub mod config;
 pub mod consensus_admission;
 pub mod events;
 pub mod finalized_tx;
 pub mod gossip;
+pub mod openapi;
 pub mod p2p;
 pub mod pending_pool;
 pub mod publisher_index;
@@ -35,7 +35,6 @@ mod sync;
 // api.rs, block_producer.rs, etc. reference these as `crate::NodeState`,
 // `crate::SharedState`, etc. — they must live at the lib root.
 pub use state::{
-    BridgeStatus, NodeState, P2PStatus, SharedState, ValidatorRegistrationStatus,
-    ValidatorSetSyncStatus,
-    normalized_validator_key, validator_registration_status_text,
+    normalized_validator_key, validator_registration_status_text, BridgeStatus, NodeState,
+    P2PStatus, SharedState, ValidatorRegistrationStatus, ValidatorSetSyncStatus,
 };

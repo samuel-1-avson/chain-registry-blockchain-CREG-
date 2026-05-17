@@ -19,7 +19,9 @@ impl LlmEscalationGate {
         }
     }
 
-    pub(super) fn ensure_package_enabled(entropy_alerts: Vec<EntropyAlert>) -> Result<(), LlmReview> {
+    pub(super) fn ensure_package_enabled(
+        entropy_alerts: Vec<EntropyAlert>,
+    ) -> Result<(), LlmReview> {
         if llm_enabled() {
             Ok(())
         } else {

@@ -139,10 +139,15 @@ pub async fn validate_package(
     // and checked here after the signature has been cryptographically verified.
     // A revoked-key signature is treated as Critical even if the crypto is valid.
     if let Some(fp) = &pgp_fingerprint {
-        if rep.revoked_pgp_fps.iter().any(|r| r.eq_ignore_ascii_case(fp)) {
+        if rep
+            .revoked_pgp_fps
+            .iter()
+            .any(|r| r.eq_ignore_ascii_case(fp))
+        {
             tracing::warn!(
                 "[{}] PGP fingerprint {} is in publisher's revocation list",
-                canonical, &fp[..fp.len().min(16)]
+                canonical,
+                &fp[..fp.len().min(16)]
             );
             report.findings.push(Finding {
                 id: "PGP004".into(),
@@ -290,7 +295,10 @@ fn verify_aaa_proof(proof: &AuditProof, canonical: &str, content_hash: &str) -> 
     if proof.auditor_pubkey.is_empty() {
         anyhow::bail!("AAA proof has an empty auditor_pubkey");
     }
-    if !proof.auditor_pubkey.eq_ignore_ascii_case(pinned_pubkey.trim()) {
+    if !proof
+        .auditor_pubkey
+        .eq_ignore_ascii_case(pinned_pubkey.trim())
+    {
         anyhow::bail!(
             "AAA auditor_pubkey does not match pinned CREG_AAA_PUBKEY (got {}, expected {})",
             proof.auditor_pubkey,
@@ -354,10 +362,26 @@ async fn aaa_audit(report: &ValidationReport, req: &PublishRequest) -> Result<Au
     }
 
     let counts = FindingCounts {
-        critical: report.findings.iter().filter(|f| matches!(f.severity, common::FindingSeverity::Critical)).count(),
-        high:     report.findings.iter().filter(|f| matches!(f.severity, common::FindingSeverity::High)).count(),
-        medium:   report.findings.iter().filter(|f| matches!(f.severity, common::FindingSeverity::Medium)).count(),
-        low:      report.findings.iter().filter(|f| matches!(f.severity, common::FindingSeverity::Low)).count(),
+        critical: report
+            .findings
+            .iter()
+            .filter(|f| matches!(f.severity, common::FindingSeverity::Critical))
+            .count(),
+        high: report
+            .findings
+            .iter()
+            .filter(|f| matches!(f.severity, common::FindingSeverity::High))
+            .count(),
+        medium: report
+            .findings
+            .iter()
+            .filter(|f| matches!(f.severity, common::FindingSeverity::Medium))
+            .count(),
+        low: report
+            .findings
+            .iter()
+            .filter(|f| matches!(f.severity, common::FindingSeverity::Low))
+            .count(),
     };
 
     let audit_req = AuditReq {

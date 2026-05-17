@@ -329,8 +329,7 @@ fn provider_order() -> Vec<Provider> {
 }
 
 fn anthropic_model() -> String {
-    std::env::var("CREG_ANTHROPIC_MODEL")
-        .unwrap_or_else(|_| "claude-sonnet-4-6".to_string())
+    std::env::var("CREG_ANTHROPIC_MODEL").unwrap_or_else(|_| "claude-sonnet-4-6".to_string())
 }
 
 fn openai_model() -> String {
@@ -338,8 +337,7 @@ fn openai_model() -> String {
 }
 
 fn openrouter_model() -> String {
-    std::env::var("CREG_LLM_MODEL")
-        .unwrap_or_else(|_| "anthropic/claude-sonnet-4-6".to_string())
+    std::env::var("CREG_LLM_MODEL").unwrap_or_else(|_| "anthropic/claude-sonnet-4-6".to_string())
 }
 
 fn openrouter_api_url() -> String {
@@ -436,16 +434,17 @@ async fn try_anthropic(
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        anyhow::bail!("Anthropic HTTP {}: {}", status, &text[..text.len().min(200)]);
+        anyhow::bail!(
+            "Anthropic HTTP {}: {}",
+            status,
+            &text[..text.len().min(200)]
+        );
     }
 
     let raw: serde_json::Value = resp.json().await?;
     // Anthropic response: {"content": [{"type": "text", "text": "..."}], ...}
     // Normalise to OpenAI-compatible shape for uniform parsing downstream.
-    let text_content = raw["content"][0]["text"]
-        .as_str()
-        .unwrap_or("")
-        .to_string();
+    let text_content = raw["content"][0]["text"].as_str().unwrap_or("").to_string();
     let normalised = json!({
         "choices": [{"message": {"content": text_content}}],
         "model": model
@@ -523,7 +522,11 @@ async fn try_openrouter_provider(
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        anyhow::bail!("OpenRouter HTTP {}: {}", status, &text[..text.len().min(200)]);
+        anyhow::bail!(
+            "OpenRouter HTTP {}: {}",
+            status,
+            &text[..text.len().min(200)]
+        );
     }
 
     let raw: serde_json::Value = resp.json().await?;
@@ -560,10 +563,7 @@ async fn try_ollama_provider(
 
     let raw: serde_json::Value = resp.json().await?;
     // Ollama: {"message": {"content": "..."}}
-    let text_content = raw["message"]["content"]
-        .as_str()
-        .unwrap_or("")
-        .to_string();
+    let text_content = raw["message"]["content"].as_str().unwrap_or("").to_string();
     let normalised = json!({
         "choices": [{"message": {"content": text_content}}],
         "model": model
@@ -585,8 +585,12 @@ fn parse_json_content(content: &str) -> Result<serde_json::Value> {
         .replace("```", "")
         .trim()
         .to_string();
-    serde_json::from_str(&cleaned)
-        .with_context(|| format!("LLM returned non-JSON: {}", &cleaned[..cleaned.len().min(300)]))
+    serde_json::from_str(&cleaned).with_context(|| {
+        format!(
+            "LLM returned non-JSON: {}",
+            &cleaned[..cleaned.len().min(300)]
+        )
+    })
 }
 
 // ── Entropy Scanning ─────────────────────────────────────────────────────────
@@ -616,16 +620,15 @@ fn extract_tarball(tarball: &[u8]) -> HashMap<String, Vec<u8>> {
 /// Returns true for files that are likely source code (text files).
 fn is_text_file(path: &str) -> bool {
     let text_exts = [
-        "js", "ts", "jsx", "tsx", "mjs", "cjs",
-        "py", "rb", "php", "go", "rs", "java", "kt",
-        "sh", "bash", "zsh", "fish",
-        "json", "toml", "yaml", "yml", "xml", "html", "md",
-        "txt", "cfg", "ini", "env",
-        "c", "cpp", "h", "hpp",
+        "js", "ts", "jsx", "tsx", "mjs", "cjs", "py", "rb", "php", "go", "rs", "java", "kt", "sh",
+        "bash", "zsh", "fish", "json", "toml", "yaml", "yml", "xml", "html", "md", "txt", "cfg",
+        "ini", "env", "c", "cpp", "h", "hpp",
     ];
     let lower = path.to_lowercase();
-    text_exts.iter().any(|ext| lower.ends_with(&format!(".{}", ext)))
-        || !lower.contains('.')  // extensionless scripts
+    text_exts
+        .iter()
+        .any(|ext| lower.ends_with(&format!(".{}", ext)))
+        || !lower.contains('.') // extensionless scripts
 }
 
 /// Returns true for high-risk files regardless of extension.
@@ -657,7 +660,11 @@ fn scan_entropy(files: &HashMap<String, Vec<u8>>) -> Vec<EntropyAlert> {
         })
         .filter(|a| a.entropy >= threshold)
         .collect();
-    alerts.sort_by(|a, b| b.entropy.partial_cmp(&a.entropy).unwrap_or(std::cmp::Ordering::Equal));
+    alerts.sort_by(|a, b| {
+        b.entropy
+            .partial_cmp(&a.entropy)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     alerts
 }
 
@@ -831,7 +838,12 @@ fn build_summary_messages(
         entropy_alerts
             .iter()
             .take(5)
-            .map(|a| format!("{} (entropy {:.2}, {} bytes)", a.path, a.entropy, a.size_bytes))
+            .map(|a| {
+                format!(
+                    "{} (entropy {:.2}, {} bytes)",
+                    a.path, a.entropy, a.size_bytes
+                )
+            })
             .collect::<Vec<_>>()
             .join("\n")
     };
@@ -849,7 +861,11 @@ fn build_summary_messages(
                 "File: {} (score {})\n{}",
                 fa.path,
                 fa.file_score,
-                if findings_str.is_empty() { "  (clean)".into() } else { findings_str }
+                if findings_str.is_empty() {
+                    "  (clean)".into()
+                } else {
+                    findings_str
+                }
             )
         })
         .collect::<Vec<_>>()
@@ -939,9 +955,15 @@ fn parse_file_analysis(
     let Ok(parsed) = parse_json_content(content) else {
         tracing::warn!(
             "LLM ({}) returned unparseable file analysis for {}: {}",
-            model, path, &content[..content.len().min(200)]
+            model,
+            path,
+            &content[..content.len().min(200)]
         );
-        return FileAnalysis { path: path.to_string(), file_score: 0, findings: Vec::new() };
+        return FileAnalysis {
+            path: path.to_string(),
+            file_score: 0,
+            findings: Vec::new(),
+        };
     };
 
     let file_score = parsed["file_score"].as_u64().unwrap_or(0).min(100) as u8;
@@ -956,16 +978,25 @@ fn parse_file_analysis(
                 findings.push((title, severity, description));
             }
             // Limit to 10 findings per file
-            if i >= 9 { break; }
+            if i >= 9 {
+                break;
+            }
         }
     }
 
     tracing::debug!(
         "[{}] LLM file analysis {}: score={} findings={}",
-        pkg_id.canonical(), path, file_score, findings.len()
+        pkg_id.canonical(),
+        path,
+        file_score,
+        findings.len()
     );
 
-    FileAnalysis { path: path.to_string(), file_score, findings }
+    FileAnalysis {
+        path: path.to_string(),
+        file_score,
+        findings,
+    }
 }
 
 /// Parse the holistic summary response.
@@ -978,9 +1009,15 @@ fn parse_summary(
     let Ok(parsed) = parse_json_content(content) else {
         tracing::warn!(
             "LLM ({}) returned unparseable summary for {}: {}",
-            model, pkg_id.canonical(), &content[..content.len().min(200)]
+            model,
+            pkg_id.canonical(),
+            &content[..content.len().min(200)]
         );
-        return (0, "LLM summary unavailable (parse error).".into(), Vec::new());
+        return (
+            0,
+            "LLM summary unavailable (parse error).".into(),
+            Vec::new(),
+        );
     };
 
     let score = parsed["maliciousness_score"].as_u64().unwrap_or(0).min(100) as u8;
@@ -1040,9 +1077,14 @@ fn parse_llm_response(raw_resp: &serde_json::Value) -> Result<LlmResult> {
     let parsed: serde_json::Value = match serde_json::from_str(clean_json) {
         Ok(v) => v,
         Err(e) => {
-            tracing::warn!("Failed to parse LLM response as JSON: {} — raw: {}", e, clean_json);
+            tracing::warn!(
+                "Failed to parse LLM response as JSON: {} — raw: {}",
+                e,
+                clean_json
+            );
             return Ok(LlmResult::Unavailable(format!(
-                "LLM returned unparseable response: {}", e
+                "LLM returned unparseable response: {}",
+                e
             )));
         }
     };
@@ -1141,7 +1183,10 @@ pub async fn review_package(
         tracing::debug!(
             "[{}] {}",
             pkg_id.canonical(),
-            review.degraded_reason.as_deref().unwrap_or("LLM stage skipped")
+            review
+                .degraded_reason
+                .as_deref()
+                .unwrap_or("LLM stage skipped")
         );
         return review;
     }
@@ -1150,7 +1195,10 @@ pub async fn review_package(
         tracing::warn!(
             "[{}] {}",
             pkg_id.canonical(),
-            review.degraded_reason.as_deref().unwrap_or("LLM stage skipped")
+            review
+                .degraded_reason
+                .as_deref()
+                .unwrap_or("LLM stage skipped")
         );
         return review;
     }

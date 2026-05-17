@@ -49,8 +49,8 @@ use events::new_event_bus;
 use finalized_tx::{FinalizedTxReceiver, FinalizedTxSender};
 use publisher_index::PublisherIndex;
 use state::{
-    BridgeStatus, NodeState, P2PStatus, SharedState, ValidatorRegistrationStatus,
-    normalized_validator_key, validator_registration_status_text,
+    normalized_validator_key, validator_registration_status_text, BridgeStatus, NodeState,
+    P2PStatus, SharedState, ValidatorRegistrationStatus,
 };
 
 sol!(
@@ -98,15 +98,11 @@ fn upsert_registered_validator(
         registration.alias.trim().to_string()
     };
 
-    if let Some(existing) = validator_set
-        .validators
-        .iter_mut()
-        .find(|validator| {
-            validator.id == identity.node_id
-                || validator.pubkey == identity.ed25519_pubkey
-                || validator.eth_address == identity.evm_address
-        })
-    {
+    if let Some(existing) = validator_set.validators.iter_mut().find(|validator| {
+        validator.id == identity.node_id
+            || validator.pubkey == identity.ed25519_pubkey
+            || validator.eth_address == identity.evm_address
+    }) {
         existing.id = identity.node_id;
         existing.alias = alias;
         existing.pubkey = identity.ed25519_pubkey;
@@ -260,7 +256,9 @@ async fn validate_contract_addresses(config: &config::NodeConfig) -> Result<()> 
             match fetch_contract_code(&client, &config.eth_rpc_url, address).await {
                 Ok(code) if code != "0x" && code != "0x0" => {}
                 Ok(_) => errors.push(format!("{}={} has no deployed bytecode", name, address)),
-                Err(error) => errors.push(format!("{}={} validation failed: {}", name, address, error)),
+                Err(error) => {
+                    errors.push(format!("{}={} validation failed: {}", name, address, error))
+                }
             }
         }
 
@@ -311,7 +309,9 @@ async fn main() -> Result<()> {
         spec_url.as_deref(),
         &config.data_dir,
         spec_offline,
-    ).await {
+    )
+    .await
+    {
         Ok(spec) => {
             tracing::info!(
                 "Chain spec resolved: {} (version {})",
@@ -412,7 +412,9 @@ async fn main() -> Result<()> {
             })
             .collect();
         if !hard_errors.is_empty() {
-            anyhow::bail!("Cannot start node due to configuration errors. Fix the above and restart.");
+            anyhow::bail!(
+                "Cannot start node due to configuration errors. Fix the above and restart."
+            );
         }
     }
 
@@ -649,8 +651,7 @@ async fn main() -> Result<()> {
             };
             if !state_guard.validator_set_sync.enabled {
                 state_guard.validator_set_sync.last_error = Some(
-                    "validator-set sync disabled: staking contract address is invalid"
-                        .to_string(),
+                    "validator-set sync disabled: staking contract address is invalid".to_string(),
                 );
                 tracing::warn!(
                     "CRITICAL: Validator set sync is disabled (static mode). \
@@ -672,7 +673,9 @@ async fn main() -> Result<()> {
                     sync_config,
                     validator_set_sync::SyncMode::ChainAuthoritative,
                     sync_state,
-                ).await {
+                )
+                .await
+                {
                     tracing::error!("Validator set sync worker crashed: {}", e);
                 }
             });
@@ -729,12 +732,13 @@ async fn main() -> Result<()> {
         if let (Some(cert_path), Some(key_path)) = (tls_cert, tls_key) {
             use axum_server::tls_rustls::RustlsConfig;
 
-            let tls_config =
-                RustlsConfig::from_pem_file(&cert_path, &key_path)
-                    .await
-                    .expect("Failed to load TLS certificate/key");
+            let tls_config = RustlsConfig::from_pem_file(&cert_path, &key_path)
+                .await
+                .expect("Failed to load TLS certificate/key");
 
-            let addr: std::net::SocketAddr = config.listen_addr.parse()
+            let addr: std::net::SocketAddr = config
+                .listen_addr
+                .parse()
                 .expect("listen_addr must be a valid socket address");
 
             tracing::info!("REST API listening on https://{}", addr);
@@ -834,9 +838,15 @@ async fn sync_validator_registrations_once(state: &SharedState) -> Result<()> {
                 let identity = registration.identity.normalized();
                 let should_admit = staking_state == 2
                     && identity.is_complete()
-                    && state_guard.validator_set.validators.iter().any(|validator| {
-                        validator.eth_address.eq_ignore_ascii_case(&identity.evm_address)
-                    });
+                    && state_guard
+                        .validator_set
+                        .validators
+                        .iter()
+                        .any(|validator| {
+                            validator
+                                .eth_address
+                                .eq_ignore_ascii_case(&identity.evm_address)
+                        });
                 registration.admitted_to_consensus = should_admit;
                 registration.active = should_admit;
             }
@@ -846,7 +856,9 @@ async fn sync_validator_registrations_once(state: &SharedState) -> Result<()> {
         }
 
         registration.status = validator_registration_status_text(&registration);
-        state_guard.validator_registrations.insert(key, registration);
+        state_guard
+            .validator_registrations
+            .insert(key, registration);
     }
 
     Ok(())

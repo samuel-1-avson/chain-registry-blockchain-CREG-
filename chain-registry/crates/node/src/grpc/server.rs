@@ -64,9 +64,8 @@ impl RegistryService for MyRegistry {
         let manifest = if req.manifest_json.trim().is_empty() {
             common::PackageManifest::default()
         } else {
-            serde_json::from_str::<common::PackageManifest>(&req.manifest_json).map_err(|e| {
-                Status::invalid_argument(format!("Invalid manifest payload: {}", e))
-            })?
+            serde_json::from_str::<common::PackageManifest>(&req.manifest_json)
+                .map_err(|e| Status::invalid_argument(format!("Invalid manifest payload: {}", e)))?
         };
 
         let content_hash_vec = hex::decode(&req.content_hash)
@@ -83,7 +82,9 @@ impl RegistryService for MyRegistry {
                 .map_err(|e| Status::internal(format!("Serialize manifest: {}", e)))?,
         );
         if !req.manifest_hash.trim().is_empty()
-            && !req.manifest_hash.eq_ignore_ascii_case(&derived_manifest_hash_hex)
+            && !req
+                .manifest_hash
+                .eq_ignore_ascii_case(&derived_manifest_hash_hex)
         {
             return Err(Status::invalid_argument(
                 "manifest_hash does not match manifest_json",
@@ -125,7 +126,8 @@ impl RegistryService for MyRegistry {
             )));
         }
 
-        match crate::api::ensure_publisher_staked(&self.state, &publish_req.publisher_address).await {
+        match crate::api::ensure_publisher_staked(&self.state, &publish_req.publisher_address).await
+        {
             Ok(()) => {}
             Err(crate::api::PublisherAdmissionError::InvalidAddress(msg)) => {
                 return Err(Status::invalid_argument(msg));
@@ -306,11 +308,7 @@ mod tests {
 
         emit(
             &event_bus,
-            RegistryEvent::package_revoked(
-                "npm:test@1.0.0",
-                "malware detected",
-                "pubkey-123",
-            ),
+            RegistryEvent::package_revoked("npm:test@1.0.0", "malware detected", "pubkey-123"),
         );
 
         let mut stream = response.into_inner();

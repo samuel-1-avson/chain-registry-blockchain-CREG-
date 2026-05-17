@@ -15,9 +15,7 @@ use tokio::sync::RwLock;
 use common::ValidatorIdentity;
 
 use crate::{
-    chain_store::ChainStore,
-    config::NodeConfig,
-    pending_pool::PendingPool,
+    chain_store::ChainStore, config::NodeConfig, pending_pool::PendingPool,
     publisher_index::PublisherIndex,
 };
 

@@ -618,7 +618,9 @@ mod tests {
         .await
         .expect("sign");
 
-        assert!(att.signer.eq_ignore_ascii_case(&format!("0x{:040x}", signer_addr)));
+        assert!(att
+            .signer
+            .eq_ignore_ascii_case(&format!("0x{:040x}", signer_addr)));
         assert!(verify_attestation(&att, 31337, staking).unwrap());
 
         // Flipping the chain_id must break recovery — the digest changes.
@@ -649,7 +651,10 @@ mod tests {
         .unwrap();
 
         assert!(store.insert(att.clone()).await);
-        assert!(!store.insert(att.clone()).await, "second insert must be no-op");
+        assert!(
+            !store.insert(att.clone()).await,
+            "second insert must be no-op"
+        );
 
         let snap = store.snapshot(&att.key()).await;
         assert_eq!(snap.len(), 1);

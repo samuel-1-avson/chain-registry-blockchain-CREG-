@@ -53,7 +53,8 @@ async fn main() -> Result<()> {
         .unwrap_or_else(|_| "/data".to_string());
     let pg_url = std::env::var("CREG_PG_URL")
         .context("CREG_PG_URL must be set for the dedicated indexer service")?;
-    let listen_addr = std::env::var("CREG_INDEXER_LISTEN").unwrap_or_else(|_| "0.0.0.0:8084".to_string());
+    let listen_addr =
+        std::env::var("CREG_INDEXER_LISTEN").unwrap_or_else(|_| "0.0.0.0:8084".to_string());
     let poll_interval_secs = std::env::var("CREG_INDEXER_POLL_INTERVAL_SECS")
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
@@ -105,7 +106,11 @@ async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
 fn redact_pg_url(value: &str) -> String {
     if let Some((prefix, _)) = value.rsplit_once('@') {
         if let Some((scheme, _)) = prefix.split_once("://") {
-            return format!("{}://***@{}", scheme, value.split('@').nth(1).unwrap_or("redacted"));
+            return format!(
+                "{}://***@{}",
+                scheme,
+                value.split('@').nth(1).unwrap_or("redacted")
+            );
         }
     }
     "redacted".to_string()

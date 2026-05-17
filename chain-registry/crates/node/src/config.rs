@@ -100,9 +100,8 @@ impl CorsConfig {
 
         let has_wildcard = self.allowed_origins.iter().any(|origin| origin == "*");
         if has_wildcard && self.allowed_origins.len() > 1 {
-            errors.push(
-                "CREG_CORS_ALLOWED_ORIGINS cannot combine `*` with explicit origins.".into(),
-            );
+            errors
+                .push("CREG_CORS_ALLOWED_ORIGINS cannot combine `*` with explicit origins.".into());
         }
 
         if self.allow_credentials && self.allowed_origins.is_empty() {
@@ -129,7 +128,10 @@ impl CorsConfig {
                 continue;
             }
             if HeaderValue::from_str(origin).is_err() {
-                errors.push(format!("CORS origin `{}` is not a valid header value", origin));
+                errors.push(format!(
+                    "CORS origin `{}` is not a valid header value",
+                    origin
+                ));
             }
         }
 
@@ -276,11 +278,20 @@ impl NodeConfig {
         if let Ok(vault_addr) = std::env::var("CREG_VAULT_ADDR") {
             if let Ok(vault_token) = std::env::var("CREG_VAULT_TOKEN") {
                 if let Ok(client) = reqwest::Client::builder().build() {
-                    let url = format!("{}/v1/secret/data/creg/validator", vault_addr.trim_end_matches('/'));
-                    if let Ok(resp) = client.get(&url).header("X-Vault-Token", vault_token).send().await {
+                    let url = format!(
+                        "{}/v1/secret/data/creg/validator",
+                        vault_addr.trim_end_matches('/')
+                    );
+                    if let Ok(resp) = client
+                        .get(&url)
+                        .header("X-Vault-Token", vault_token)
+                        .send()
+                        .await
+                    {
                         if let Ok(json) = resp.json::<serde_json::Value>().await {
                             if let Some(data) = json.get("data").and_then(|d| d.get("data")) {
-                                if let Some(vk) = data.get("validator_key").and_then(|v| v.as_str()) {
+                                if let Some(vk) = data.get("validator_key").and_then(|v| v.as_str())
+                                {
                                     config.validator_privkey = Some(vk.to_string());
                                 }
                                 if let Some(bk) = data.get("bridge_key").and_then(|v| v.as_str()) {
@@ -399,9 +410,7 @@ impl NodeConfig {
         // for that validator and skew the active count. Reject at boot.
         for v in &self.validator_set.validators {
             let trimmed = v.pubkey.trim().trim_start_matches("0x");
-            if trimmed.is_empty()
-                || trimmed.chars().all(|c| c == '0')
-            {
+            if trimmed.is_empty() || trimmed.chars().all(|c| c == '0') {
                 errors.push(format!(
                     "CREG_VALIDATOR_SET entry id='{}' has empty/zero pubkey — \
                      this validator could never be verified by peers. Fix the validator-set \
@@ -454,7 +463,13 @@ impl NodeConfig {
             buf.push('|');
             buf.push_str(v.id.trim());
             buf.push(':');
-            buf.push_str(v.pubkey.trim().trim_start_matches("0x").to_lowercase().as_str());
+            buf.push_str(
+                v.pubkey
+                    .trim()
+                    .trim_start_matches("0x")
+                    .to_lowercase()
+                    .as_str(),
+            );
         }
         common::sha256_hex(buf.as_bytes())
     }
@@ -463,10 +478,7 @@ impl NodeConfig {
     /// `None` (or an empty/whitespace value) skips the check. Case-insensitive,
     /// `0x` prefix optional. Always returns the computed hash so callers can
     /// log it.
-    pub fn validate_genesis_hash_value(
-        &self,
-        expected: Option<&str>,
-    ) -> Result<String, String> {
+    pub fn validate_genesis_hash_value(&self, expected: Option<&str>) -> Result<String, String> {
         let computed = self.compute_network_identity_hash();
         let expected = match expected.map(str::trim).filter(|s| !s.is_empty()) {
             Some(v) => v,
@@ -542,7 +554,11 @@ fn default_cors_methods() -> Vec<String> {
 
 fn parse_csv(raw: &str) -> Vec<String> {
     let mut values = Vec::new();
-    for value in raw.split(',').map(str::trim).filter(|value| !value.is_empty()) {
+    for value in raw
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
         if !values.iter().any(|existing| existing == value) {
             values.push(value.to_string());
         }
@@ -614,7 +630,9 @@ mod tests {
         cfg.validator_set = common::ValidatorSet::new(vec![validator("node-1", "")]);
         let errors = cfg.validate();
         assert!(
-            errors.iter().any(|e| e.contains("node-1") && e.contains("empty/zero pubkey")),
+            errors
+                .iter()
+                .any(|e| e.contains("node-1") && e.contains("empty/zero pubkey")),
             "expected empty-pubkey error, got: {:?}",
             errors
         );
@@ -629,7 +647,9 @@ mod tests {
         )]);
         let errors = cfg.validate();
         assert!(
-            errors.iter().any(|e| e.contains("node-zero") && e.contains("empty/zero pubkey")),
+            errors
+                .iter()
+                .any(|e| e.contains("node-zero") && e.contains("empty/zero pubkey")),
             "expected zero-pubkey error, got: {:?}",
             errors
         );
@@ -641,7 +661,9 @@ mod tests {
         cfg.validator_set = common::ValidatorSet::new(vec![validator("node-short", "deadbeef")]);
         let errors = cfg.validate();
         assert!(
-            errors.iter().any(|e| e.contains("node-short") && e.contains("32 bytes")),
+            errors
+                .iter()
+                .any(|e| e.contains("node-short") && e.contains("32 bytes")),
             "expected length error, got: {:?}",
             errors
         );
@@ -728,11 +750,9 @@ mod tests {
     #[test]
     fn identity_hash_changes_when_validator_pubkey_changes() {
         let mut cfg = base_config();
-        cfg.validator_set =
-            common::ValidatorSet::new(vec![validator("node-1", &pk("11"))]);
+        cfg.validator_set = common::ValidatorSet::new(vec![validator("node-1", &pk("11"))]);
         let h1 = cfg.compute_network_identity_hash();
-        cfg.validator_set =
-            common::ValidatorSet::new(vec![validator("node-1", &pk("22"))]);
+        cfg.validator_set = common::ValidatorSet::new(vec![validator("node-1", &pk("22"))]);
         let h2 = cfg.compute_network_identity_hash();
         assert_ne!(h1, h2);
     }
@@ -797,7 +817,9 @@ mod tests {
 
         let errors = cfg.validate();
         assert!(
-            errors.iter().any(|error| error.contains("cannot be used with wildcard")),
+            errors
+                .iter()
+                .any(|error| error.contains("cannot be used with wildcard")),
             "expected wildcard+credentials validation error, got: {:?}",
             errors
         );

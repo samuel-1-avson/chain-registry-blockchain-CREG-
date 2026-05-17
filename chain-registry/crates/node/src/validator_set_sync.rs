@@ -90,7 +90,10 @@ pub enum DeltaKind {
     /// Active set membership change: applicant was approved on-chain.
     /// Stake (in wei, decimal-string to keep U256 precision) and the EIP-712
     /// attestation count come from the event itself.
-    Add { stake_wei: String, signer_count: Option<u32> },
+    Add {
+        stake_wei: String,
+        signer_count: Option<u32>,
+    },
     /// `applyAsValidator` only — applicant exists but is *not* yet active.
     /// In shadow mode we simply log this; in chain-authoritative mode it
     /// would populate a `pending_applicants` map for the UI.
@@ -151,7 +154,10 @@ pub fn decode(log: LogView<'_>) -> Result<Option<ValidatorSetDelta>, DecodeError
 
     if topic0 == IStakingEvents::ValidatorApplied::SIGNATURE_HASH {
         let ev = IStakingEvents::ValidatorApplied::decode_log_data(
-            &alloy::primitives::LogData::new_unchecked(log.topics.to_vec(), log.data.to_vec().into()),
+            &alloy::primitives::LogData::new_unchecked(
+                log.topics.to_vec(),
+                log.data.to_vec().into(),
+            ),
             true,
         )
         .map_err(|e| DecodeError::Sol(e.to_string()))?;
@@ -161,7 +167,10 @@ pub fn decode(log: LogView<'_>) -> Result<Option<ValidatorSetDelta>, DecodeError
         };
     } else if topic0 == IStakingEvents::ValidatorApproved::SIGNATURE_HASH {
         let ev = IStakingEvents::ValidatorApproved::decode_log_data(
-            &alloy::primitives::LogData::new_unchecked(log.topics.to_vec(), log.data.to_vec().into()),
+            &alloy::primitives::LogData::new_unchecked(
+                log.topics.to_vec(),
+                log.data.to_vec().into(),
+            ),
             true,
         )
         .map_err(|e| DecodeError::Sol(e.to_string()))?;
@@ -172,7 +181,10 @@ pub fn decode(log: LogView<'_>) -> Result<Option<ValidatorSetDelta>, DecodeError
         };
     } else if topic0 == IStakingEvents::ValidatorApprovedByConsensus::SIGNATURE_HASH {
         let ev = IStakingEvents::ValidatorApprovedByConsensus::decode_log_data(
-            &alloy::primitives::LogData::new_unchecked(log.topics.to_vec(), log.data.to_vec().into()),
+            &alloy::primitives::LogData::new_unchecked(
+                log.topics.to_vec(),
+                log.data.to_vec().into(),
+            ),
             true,
         )
         .map_err(|e| DecodeError::Sol(e.to_string()))?;
@@ -183,7 +195,10 @@ pub fn decode(log: LogView<'_>) -> Result<Option<ValidatorSetDelta>, DecodeError
         };
     } else if topic0 == IStakingEvents::ValidatorRejected::SIGNATURE_HASH {
         let ev = IStakingEvents::ValidatorRejected::decode_log_data(
-            &alloy::primitives::LogData::new_unchecked(log.topics.to_vec(), log.data.to_vec().into()),
+            &alloy::primitives::LogData::new_unchecked(
+                log.topics.to_vec(),
+                log.data.to_vec().into(),
+            ),
             true,
         )
         .map_err(|e| DecodeError::Sol(e.to_string()))?;
@@ -191,7 +206,10 @@ pub fn decode(log: LogView<'_>) -> Result<Option<ValidatorSetDelta>, DecodeError
         kind = DeltaKind::DropApplicant;
     } else if topic0 == IStakingEvents::ValidatorApplicationExpired::SIGNATURE_HASH {
         let ev = IStakingEvents::ValidatorApplicationExpired::decode_log_data(
-            &alloy::primitives::LogData::new_unchecked(log.topics.to_vec(), log.data.to_vec().into()),
+            &alloy::primitives::LogData::new_unchecked(
+                log.topics.to_vec(),
+                log.data.to_vec().into(),
+            ),
             true,
         )
         .map_err(|e| DecodeError::Sol(e.to_string()))?;
@@ -199,7 +217,10 @@ pub fn decode(log: LogView<'_>) -> Result<Option<ValidatorSetDelta>, DecodeError
         kind = DeltaKind::DropApplicant;
     } else if topic0 == IStakingEvents::ValidatorUnbonding::SIGNATURE_HASH {
         let ev = IStakingEvents::ValidatorUnbonding::decode_log_data(
-            &alloy::primitives::LogData::new_unchecked(log.topics.to_vec(), log.data.to_vec().into()),
+            &alloy::primitives::LogData::new_unchecked(
+                log.topics.to_vec(),
+                log.data.to_vec().into(),
+            ),
             true,
         )
         .map_err(|e| DecodeError::Sol(e.to_string()))?;
@@ -209,7 +230,10 @@ pub fn decode(log: LogView<'_>) -> Result<Option<ValidatorSetDelta>, DecodeError
         };
     } else if topic0 == IStakingEvents::ValidatorWithdrawn::SIGNATURE_HASH {
         let ev = IStakingEvents::ValidatorWithdrawn::decode_log_data(
-            &alloy::primitives::LogData::new_unchecked(log.topics.to_vec(), log.data.to_vec().into()),
+            &alloy::primitives::LogData::new_unchecked(
+                log.topics.to_vec(),
+                log.data.to_vec().into(),
+            ),
             true,
         )
         .map_err(|e| DecodeError::Sol(e.to_string()))?;
@@ -217,7 +241,10 @@ pub fn decode(log: LogView<'_>) -> Result<Option<ValidatorSetDelta>, DecodeError
         kind = DeltaKind::Remove;
     } else if topic0 == IStakingEvents::ValidatorLeft::SIGNATURE_HASH {
         let ev = IStakingEvents::ValidatorLeft::decode_log_data(
-            &alloy::primitives::LogData::new_unchecked(log.topics.to_vec(), log.data.to_vec().into()),
+            &alloy::primitives::LogData::new_unchecked(
+                log.topics.to_vec(),
+                log.data.to_vec().into(),
+            ),
             true,
         )
         .map_err(|e| DecodeError::Sol(e.to_string()))?;
@@ -225,7 +252,10 @@ pub fn decode(log: LogView<'_>) -> Result<Option<ValidatorSetDelta>, DecodeError
         kind = DeltaKind::Remove;
     } else if topic0 == IStakingEvents::Slashed::SIGNATURE_HASH {
         let ev = IStakingEvents::Slashed::decode_log_data(
-            &alloy::primitives::LogData::new_unchecked(log.topics.to_vec(), log.data.to_vec().into()),
+            &alloy::primitives::LogData::new_unchecked(
+                log.topics.to_vec(),
+                log.data.to_vec().into(),
+            ),
             true,
         )
         .map_err(|e| DecodeError::Sol(e.to_string()))?;
@@ -338,10 +368,10 @@ pub fn apply_delta(state: &mut WorkerState, delta: &ValidatorSetDelta) {
 
 // ─── Async polling worker ────────────────────────────────────────────────────
 
+use crate::{normalized_validator_key, validator_registration_status_text, NodeState};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use crate::{normalized_validator_key, validator_registration_status_text, NodeState};
 
 fn active_status_for(node_id: &str, validator_id: &str) -> String {
     if validator_id == node_id {
@@ -461,9 +491,7 @@ async fn reconcile_state_from_worker(
             .or_else(|| {
                 s.validator_registrations
                     .get(&addr)
-                    .and_then(|registration| {
-                        validator_from_registration(registration, 0, &node_id)
-                    })
+                    .and_then(|registration| validator_from_registration(registration, 0, &node_id))
             });
 
         if let Some(existing) = validator.as_mut() {
@@ -548,9 +576,8 @@ async fn rebuild_worker_state(
 
     if let Some(start_block) = config.start_block {
         worker_state.cursor = Some((start_block, u32::MAX));
-        worker_state.cursor_block_hash = Some(
-            fetch_block_hash(client, &config.eth_rpc_url, start_block).await?,
-        );
+        worker_state.cursor_block_hash =
+            Some(fetch_block_hash(client, &config.eth_rpc_url, start_block).await?);
     }
 
     let from_block = match worker_state.cursor {
@@ -574,12 +601,8 @@ async fn rebuild_worker_state(
     }
 
     if let Some((height, _)) = worker_state.cursor {
-        worker_state.cursor_block_hash = Some(fetch_block_hash(
-            client,
-            &config.eth_rpc_url,
-            height,
-        )
-        .await?);
+        worker_state.cursor_block_hash =
+            Some(fetch_block_hash(client, &config.eth_rpc_url, height).await?);
     }
 
     Ok(worker_state)
@@ -597,13 +620,9 @@ pub async fn run(
     let client = reqwest::Client::new();
     let mut worker_state = match load_cursor(&state).await {
         Some(saved) => saved,
-        None => rebuild_worker_state(
-            &client,
-            &config,
-            &state,
-            config.start_block.unwrap_or(0),
-        )
-        .await?,
+        None => {
+            rebuild_worker_state(&client, &config, &state, config.start_block.unwrap_or(0)).await?
+        }
     };
     // Always merge bootstrap validators into observed_active. Without this,
     // a restart with a persisted cursor that contains only 1 address (e.g. the
@@ -618,18 +637,16 @@ pub async fn run(
     if worker_state.cursor.is_none() {
         if let Some(start_block) = config.start_block {
             worker_state.cursor = Some((start_block, u32::MAX));
-            worker_state.cursor_block_hash = Some(
-                fetch_block_hash(&client, &config.eth_rpc_url, start_block).await?,
-            );
+            worker_state.cursor_block_hash =
+                Some(fetch_block_hash(&client, &config.eth_rpc_url, start_block).await?);
         }
     }
     if matches!(mode, SyncMode::ChainAuthoritative) {
         reconcile_state_from_worker(Arc::clone(&state), &worker_state).await?;
     }
     save_cursor(&state, &worker_state).await?;
-    let mut interval = tokio::time::interval(
-        std::time::Duration::from_secs(config.poll_interval_secs)
-    );
+    let mut interval =
+        tokio::time::interval(std::time::Duration::from_secs(config.poll_interval_secs));
 
     loop {
         interval.tick().await;
@@ -639,7 +656,8 @@ pub async fn run(
             if status.state != "reorg-replaying" {
                 status.state = "syncing".to_string();
             }
-        }).await;
+        })
+        .await;
 
         let latest_block = match fetch_latest_block(&client, &config.eth_rpc_url).await {
             Ok(b) => b,
@@ -647,7 +665,8 @@ pub async fn run(
                 update_sync_status(&state, |status| {
                     status.state = "degraded".to_string();
                     status.last_error = Some(e.to_string());
-                }).await;
+                })
+                .await;
                 tracing::warn!("validator_set_sync: failed to fetch latest block: {}", e);
                 continue;
             }
@@ -656,15 +675,19 @@ pub async fn run(
         let safe_block = latest_block.saturating_sub(config.finality_lag_blocks);
         update_sync_status(&state, |status| {
             status.last_finalized_source_block = Some(safe_block);
-        }).await;
+        })
+        .await;
 
         if let Some((cursor_block, _)) = worker_state.cursor {
-            if let Ok(current_hash) = fetch_block_hash(&client, &config.eth_rpc_url, cursor_block).await {
+            if let Ok(current_hash) =
+                fetch_block_hash(&client, &config.eth_rpc_url, cursor_block).await
+            {
                 if cursor_reorged(&worker_state, &current_hash) {
                     update_sync_status(&state, |status| {
                         status.state = "reorg-replaying".to_string();
                         status.last_error = None;
-                    }).await;
+                    })
+                    .await;
                     tracing::warn!(
                         target: "validator_set_sync",
                         cursor_block,
@@ -672,7 +695,8 @@ pub async fn run(
                         current_hash = current_hash,
                         "validator-set sync detected an L1 reorg; rebuilding authoritative view"
                     );
-                    worker_state = rebuild_worker_state(&client, &config, &state, safe_block).await?;
+                    worker_state =
+                        rebuild_worker_state(&client, &config, &state, safe_block).await?;
                     if matches!(mode, SyncMode::ChainAuthoritative) {
                         reconcile_state_from_worker(Arc::clone(&state), &worker_state).await?;
                     }
@@ -698,7 +722,8 @@ pub async fn run(
                 status.cursor_log_index = worker_state.cursor.map(|(_, idx)| idx);
                 status.cursor_block_hash = worker_state.cursor_block_hash.clone();
                 status.last_error = None;
-            }).await;
+            })
+            .await;
             continue;
         }
 
@@ -708,7 +733,9 @@ pub async fn run(
             &config.staking_addr,
             from_block,
             safe_block,
-        ).await {
+        )
+        .await
+        {
             Ok(mut deltas) => {
                 deltas.sort_by_key(|delta| (delta.block_height, delta.log_index));
                 for delta in deltas {
@@ -732,12 +759,8 @@ pub async fn run(
                     }
                 }
                 if let Some((height, _)) = worker_state.cursor {
-                    worker_state.cursor_block_hash = Some(fetch_block_hash(
-                        &client,
-                        &config.eth_rpc_url,
-                        height,
-                    )
-                    .await?);
+                    worker_state.cursor_block_hash =
+                        Some(fetch_block_hash(&client, &config.eth_rpc_url, height).await?);
                 }
                 if let Err(e) = save_cursor(&state, &worker_state).await {
                     tracing::warn!("Failed to save validator set sync cursor: {}", e);
@@ -748,13 +771,15 @@ pub async fn run(
                     status.cursor_log_index = worker_state.cursor.map(|(_, idx)| idx);
                     status.cursor_block_hash = worker_state.cursor_block_hash.clone();
                     status.last_error = None;
-                }).await;
+                })
+                .await;
             }
             Err(e) => {
                 update_sync_status(&state, |status| {
                     status.state = "degraded".to_string();
                     status.last_error = Some(e.to_string());
-                }).await;
+                })
+                .await;
                 tracing::warn!("validator_set_sync: failed to fetch deltas: {}", e);
             }
         }
@@ -790,15 +815,42 @@ async fn fetch_deltas(
     to_block: u64,
 ) -> anyhow::Result<Vec<ValidatorSetDelta>> {
     let topics = vec![
-        format!("0x{}", hex::encode(IStakingEvents::ValidatorApplied::SIGNATURE_HASH.0)),
-        format!("0x{}", hex::encode(IStakingEvents::ValidatorApproved::SIGNATURE_HASH.0)),
-        format!("0x{}", hex::encode(IStakingEvents::ValidatorApprovedByConsensus::SIGNATURE_HASH.0)),
-        format!("0x{}", hex::encode(IStakingEvents::ValidatorRejected::SIGNATURE_HASH.0)),
-        format!("0x{}", hex::encode(IStakingEvents::ValidatorApplicationExpired::SIGNATURE_HASH.0)),
-        format!("0x{}", hex::encode(IStakingEvents::ValidatorUnbonding::SIGNATURE_HASH.0)),
-        format!("0x{}", hex::encode(IStakingEvents::ValidatorWithdrawn::SIGNATURE_HASH.0)),
-        format!("0x{}", hex::encode(IStakingEvents::ValidatorLeft::SIGNATURE_HASH.0)),
-        format!("0x{}", hex::encode(IStakingEvents::Slashed::SIGNATURE_HASH.0)),
+        format!(
+            "0x{}",
+            hex::encode(IStakingEvents::ValidatorApplied::SIGNATURE_HASH.0)
+        ),
+        format!(
+            "0x{}",
+            hex::encode(IStakingEvents::ValidatorApproved::SIGNATURE_HASH.0)
+        ),
+        format!(
+            "0x{}",
+            hex::encode(IStakingEvents::ValidatorApprovedByConsensus::SIGNATURE_HASH.0)
+        ),
+        format!(
+            "0x{}",
+            hex::encode(IStakingEvents::ValidatorRejected::SIGNATURE_HASH.0)
+        ),
+        format!(
+            "0x{}",
+            hex::encode(IStakingEvents::ValidatorApplicationExpired::SIGNATURE_HASH.0)
+        ),
+        format!(
+            "0x{}",
+            hex::encode(IStakingEvents::ValidatorUnbonding::SIGNATURE_HASH.0)
+        ),
+        format!(
+            "0x{}",
+            hex::encode(IStakingEvents::ValidatorWithdrawn::SIGNATURE_HASH.0)
+        ),
+        format!(
+            "0x{}",
+            hex::encode(IStakingEvents::ValidatorLeft::SIGNATURE_HASH.0)
+        ),
+        format!(
+            "0x{}",
+            hex::encode(IStakingEvents::Slashed::SIGNATURE_HASH.0)
+        ),
     ];
 
     let resp: serde_json::Value = client
@@ -834,13 +886,21 @@ async fn fetch_deltas(
         let data_hex = log["data"].as_str().unwrap_or("0x");
         let data = hex::decode(data_hex.trim_start_matches("0x")).unwrap_or_default();
         let block_number = u64::from_str_radix(
-            log["blockNumber"].as_str().unwrap_or("0x0").trim_start_matches("0x"),
+            log["blockNumber"]
+                .as_str()
+                .unwrap_or("0x0")
+                .trim_start_matches("0x"),
             16,
-        ).unwrap_or(0);
+        )
+        .unwrap_or(0);
         let log_index = u32::from_str_radix(
-            log["logIndex"].as_str().unwrap_or("0x0").trim_start_matches("0x"),
+            log["logIndex"]
+                .as_str()
+                .unwrap_or("0x0")
+                .trim_start_matches("0x"),
             16,
-        ).unwrap_or(0);
+        )
+        .unwrap_or(0);
         let tx_hash = log["transactionHash"]
             .as_str()
             .unwrap_or("0x0000000000000000000000000000000000000000000000000000000000000000")
@@ -904,16 +964,12 @@ async fn save_cursor(
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+    use crate::{
+        chain_store::ChainStore, config::NodeConfig, pending_pool::PendingPool,
+        publisher_index::PublisherIndex, BridgeStatus, P2PStatus,
+    };
     use alloy::primitives::LogData;
     use alloy::sol_types::SolEvent;
-    use crate::{
-        chain_store::ChainStore,
-        config::NodeConfig,
-        pending_pool::PendingPool,
-        publisher_index::PublisherIndex,
-        BridgeStatus,
-        P2PStatus,
-    };
     use std::{collections::HashMap, sync::Arc};
     use tempfile::TempDir;
     use tokio::sync::RwLock;
@@ -972,7 +1028,13 @@ mod tests {
             tx_hash: b256_zero(),
         };
         let delta = decode(log).unwrap().unwrap();
-        assert!(matches!(delta.kind, DeltaKind::Add { signer_count: Some(7), .. }));
+        assert!(matches!(
+            delta.kind,
+            DeltaKind::Add {
+                signer_count: Some(7),
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -994,7 +1056,12 @@ mod tests {
         };
         let delta = decode(log).unwrap().unwrap();
         assert!(
-            matches!(delta.kind, DeltaKind::Unbond { unbonding_at: 1_700_000_000 }),
+            matches!(
+                delta.kind,
+                DeltaKind::Unbond {
+                    unbonding_at: 1_700_000_000
+                }
+            ),
             "got {:?}",
             delta.kind
         );
@@ -1255,7 +1322,10 @@ mod tests {
         assert_eq!(s.validator_set.validators.len(), 1);
         let validator = &s.validator_set.validators[0];
         assert_eq!(validator.id, "node-2");
-        assert_eq!(validator.eth_address, "0x2222222222222222222222222222222222222222");
+        assert_eq!(
+            validator.eth_address,
+            "0x2222222222222222222222222222222222222222"
+        );
         assert_eq!(validator.status, "self");
         let registration = s
             .validator_registrations
@@ -1294,5 +1364,4 @@ mod tests {
         assert!(cursor_reorged(&worker_state, "0x2222"));
         assert!(!cursor_reorged(&worker_state, "0x1111"));
     }
-
 }

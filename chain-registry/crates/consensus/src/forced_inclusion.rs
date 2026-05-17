@@ -49,11 +49,13 @@ impl ForcedInclusionTracker {
 
     /// Record a new transaction that should eventually be included.
     pub fn submit(&mut self, tx_hash: String, current_height: u64) {
-        self.pending.entry(tx_hash.clone()).or_insert(PendingTransaction {
-            tx_hash,
-            submitted_at_height: current_height,
-            submitted_at: Instant::now(),
-        });
+        self.pending
+            .entry(tx_hash.clone())
+            .or_insert(PendingTransaction {
+                tx_hash,
+                submitted_at_height: current_height,
+                submitted_at: Instant::now(),
+            });
     }
 
     /// Mark transactions as included after a block is finalised.
@@ -68,7 +70,10 @@ impl ForcedInclusionTracker {
     pub fn forced_transactions(&self, current_height: u64) -> Vec<&PendingTransaction> {
         self.pending
             .values()
-            .filter(|tx| current_height.saturating_sub(tx.submitted_at_height) >= forced_inclusion_block_delay())
+            .filter(|tx| {
+                current_height.saturating_sub(tx.submitted_at_height)
+                    >= forced_inclusion_block_delay()
+            })
             .collect()
     }
 
@@ -85,8 +90,7 @@ impl ForcedInclusionTracker {
             return None;
         }
 
-        let included_set: std::collections::HashSet<&String> =
-            included_tx_hashes.iter().collect();
+        let included_set: std::collections::HashSet<&String> = included_tx_hashes.iter().collect();
 
         let omitted: Vec<String> = forced
             .iter()

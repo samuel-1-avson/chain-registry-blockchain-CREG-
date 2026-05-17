@@ -1,7 +1,7 @@
-use anyhow::{Result, Context};
-use wasmtime::{Config, Engine, Store};
+use crate::sandbox::{NetworkMode, SandboxConfig, SandboxResult};
+use anyhow::{Context, Result};
 use common::{Finding, FindingSeverity, PackageManifest};
-use crate::sandbox::{SandboxResult, SandboxConfig, NetworkMode};
+use wasmtime::{Config, Engine, Store};
 
 /// Cross-platform fallback sandbox using wasmtime.
 /// Executes package payload within a WebAssembly sandbox.
@@ -39,18 +39,22 @@ pub async fn run_in_wasm(
 
     if !is_wasm_compatible {
         tracing::warn!("[WASM] Package does not appear to be a WASM payload. Aborting.");
-        return Err(anyhow::anyhow!("Validation failed: payload not WASM compatible"));
+        return Err(anyhow::anyhow!(
+            "Validation failed: payload not WASM compatible"
+        ));
     }
 
     tracing::info!("[WASM] Instance initialized and executed securely in WASM context.");
 
     findings.push(Finding {
-        id:          "SB005".into(),
-        title:       "WASM Execution Succeeded".into(),
-        severity:    FindingSeverity::Low,
-        description: "Package was securely executed within WebAssembly strict architecture boundaries.".into(),
-        file:        "wasm_sandbox".into(),
-        line:        None,
+        id: "SB005".into(),
+        title: "WASM Execution Succeeded".into(),
+        severity: FindingSeverity::Low,
+        description:
+            "Package was securely executed within WebAssembly strict architecture boundaries."
+                .into(),
+        file: "wasm_sandbox".into(),
+        line: None,
     });
 
     Ok(SandboxResult {
