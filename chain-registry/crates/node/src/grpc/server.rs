@@ -17,6 +17,42 @@ use common::proto::{
     GetVersionResponse, RegistryEvent as ProtoEvent, SubmitRequest, SubmitResponse, WatchRequest,
 };
 
+fn admission_status(error: crate::package_admission::AdmissionError) -> Status {
+    use crate::package_admission::{AdmissionError, PublisherAdmissionError};
+
+    let message = error.to_string();
+    match error {
+        AdmissionError::InvalidPackageId(_)
+        | AdmissionError::Scanner(
+            crate::admission_scan::AdmissionScanError::Rejected { .. }
+            | crate::admission_scan::AdmissionScanError::ContentHashMismatch { .. },
+        )
+        | AdmissionError::Publisher(PublisherAdmissionError::InvalidAddress(_)) => {
+            Status::invalid_argument(message)
+        }
+        AdmissionError::InvalidPublisherSignature(_) => Status::permission_denied(message),
+        AdmissionError::Publisher(PublisherAdmissionError::Unstaked(_)) => {
+            Status::permission_denied(message)
+        }
+        AdmissionError::Publisher(PublisherAdmissionError::Unavailable(_))
+        | AdmissionError::Scanner(crate::admission_scan::AdmissionScanError::IpfsFetch {
+            ..
+        }) => Status::unavailable(message),
+        AdmissionError::Scanner(crate::admission_scan::AdmissionScanError::PayloadTooLarge {
+            ..
+        }) => Status::resource_exhausted(message),
+        AdmissionError::Scanner(
+            crate::admission_scan::AdmissionScanError::RulesUnavailable
+            | crate::admission_scan::AdmissionScanError::ExtractionFailed { .. },
+        )
+        | AdmissionError::Revoked(_) => Status::failed_precondition(message),
+        AdmissionError::AlreadyVerified(_) | AdmissionError::AlreadyPending(_) => {
+            Status::already_exists(message)
+        }
+        AdmissionError::Storage(_) => Status::internal(message),
+    }
+}
+
 pub struct MyRegistry {
     state: SharedState,
     zk_validator: Arc<zk_validator::ZkValidator>,
@@ -119,26 +155,9 @@ impl RegistryService for MyRegistry {
             ..Default::default()
         };
 
-        if let Err(e) = crate::api::verify_publish_sig(&publish_req) {
-            return Err(Status::permission_denied(format!(
-                "Invalid publisher signature: {}",
-                e
-            )));
-        }
-
-        match crate::api::ensure_publisher_staked(&self.state, &publish_req.publisher_address).await
-        {
-            Ok(()) => {}
-            Err(crate::api::PublisherAdmissionError::InvalidAddress(msg)) => {
-                return Err(Status::invalid_argument(msg));
-            }
-            Err(crate::api::PublisherAdmissionError::Unstaked(msg)) => {
-                return Err(Status::permission_denied(msg));
-            }
-            Err(crate::api::PublisherAdmissionError::Unavailable(msg)) => {
-                return Err(Status::unavailable(msg));
-            }
-        }
+        crate::package_admission::verify_publish_auth(&self.state, &publish_req)
+            .await
+            .map_err(admission_status)?;
 
         // ── 1. Publisher Attestation Verification (Admission Consistency) ─────
         if req.publisher_attestation_proof.is_empty() {
@@ -186,21 +205,23 @@ impl RegistryService for MyRegistry {
             }
         }
 
-        // ── 2. Add to Pending Pool ──────────────────────────────────────────
-        {
-            let mut state = self.state.write().await;
-            state.pending_pool.insert(publish_req);
-            tracing::info!(
-                "[Consensus] Package {} added to pending pool via gRPC",
-                req.name
-            );
-        }
+        let receipt = crate::package_admission::admit_publish_request(
+            &self.state,
+            publish_req,
+            crate::package_admission::AdmissionOptions {
+                surface: crate::package_admission::AdmissionSurface::Grpc,
+                verify_publisher_auth: false,
+            },
+        )
+        .await
+        .map_err(admission_status)?;
 
         Ok(Response::new(SubmitResponse {
             accepted: true,
-            message:
-                "Publisher admission attestation verified; package accepted into pending pool for validator review"
-                    .into(),
+            message: format!(
+                "Publisher admission attestation verified; {} accepted into pending pool for validator review ({} pending)",
+                receipt.canonical, receipt.pending_count
+            ),
         }))
     }
 }

