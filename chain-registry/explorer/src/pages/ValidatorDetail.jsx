@@ -67,37 +67,35 @@ export default function ValidatorDetail() {
     deps: [address],
   })
 
+  const p = profile.data || {}
+  const reg = p.registration || null
+  const proposals = p.recent_proposals || []
+  const allTxs = txs.data?.transactions || []
+
+  // Keep hook order stable even when the page switches to an early error state.
+  const slashEvents = useMemo(() => allTxs.filter((t) => t.kind === 'slash'), [allTxs])
+  const proposalSparkData = useMemo(() => {
+    if (proposals.length < 2) return []
+
+    const heightBucketSize = 100
+    const buckets = {}
+    for (const b of proposals) {
+      const bucket = Math.floor((b.height || b.header?.height || 0) / heightBucketSize)
+      buckets[bucket] = (buckets[bucket] || 0) + 1
+    }
+
+    return Object.entries(buckets).map(([k, count]) => ({
+      name: `Bucket ${k}`,
+      value: count,
+    }))
+  }, [proposals])
+
   if (!valid) {
     return <EmptyState title="Invalid address" description={`"${addr}" is not a valid EVM address.`} />
   }
   if (profile.error && !profile.data) {
     return <ErrorState error={profile.error} onRetry={profile.refetch} title="Validator not found" />
   }
-
-  const p = profile.data || {}
-  const reg = p.registration || null
-  const proposals = p.recent_proposals || []
-  const allTxs = txs.data?.transactions || []
-
-  // Compute slashing events
-  const slashEvents = useMemo(() => allTxs.filter((t) => t.kind === 'slash'), [allTxs])
-  // Compute proposal sparkline (blocks per day)
-  const proposalSparkData = useMemo(() => {
-    if (proposals.length < 2) return []
-    // Group proposals into daily buckets based on block height ranges
-    const heightBucketSize = 100 // ~100 blocks per bucket
-    const buckets = {}
-    for (const b of proposals) {
-      const bucket = Math.floor((b.height || b.header?.height || 0) / heightBucketSize)
-      buckets[bucket] = (buckets[bucket] || 0) + 1
-    }
-    
-    // Transform into recharts format
-    return Object.entries(buckets).map(([k, count]) => ({
-      name: `Bucket ${k}`,
-      value: count,
-    }))
-  }, [proposals])
 
   // Estimate uptime from proposals vs total blocks
   const totalScanned = txs.data?.scanned_blocks || 0

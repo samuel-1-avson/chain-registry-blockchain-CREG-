@@ -38,6 +38,83 @@ use std::{
 };
 use tokio::sync::{mpsc, RwLock};
 
+#[derive(Clone, Copy)]
+enum ApiRouteScope {
+    Public,
+    Operator,
+    Validator,
+}
+
+fn operator_api_key() -> Option<String> {
+    std::env::var("CREG_OPERATOR_API_KEY")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn is_legacy_fallback_status(status: reqwest::StatusCode) -> bool {
+    matches!(status.as_u16(), 404 | 405 | 501)
+}
+
+fn scoped_get(client: &reqwest::Client, url: String, scope: ApiRouteScope) -> reqwest::RequestBuilder {
+    let request = client.get(url);
+    match scope {
+        ApiRouteScope::Operator => match operator_api_key() {
+            Some(api_key) => request.header("X-Operator-Key", api_key),
+            None => request,
+        },
+        ApiRouteScope::Public | ApiRouteScope::Validator => request,
+    }
+}
+
+async fn get_json_with_fallback(
+    client: &reqwest::Client,
+    grouped_url: String,
+    legacy_url: Option<String>,
+    scope: ApiRouteScope,
+) -> Result<Value> {
+    let grouped = scoped_get(client, grouped_url, scope).send().await?;
+    if grouped.status().is_success() {
+        return Ok(grouped.json().await?);
+    }
+
+    if let Some(legacy_url) = legacy_url {
+        if is_legacy_fallback_status(grouped.status()) {
+            let legacy = scoped_get(client, legacy_url, scope).send().await?;
+            return Ok(legacy.error_for_status()?.json().await?);
+        }
+    }
+
+    Ok(grouped.error_for_status()?.json().await?)
+}
+
+async fn open_stream_with_fallback(
+    client: &reqwest::Client,
+    grouped_url: String,
+    legacy_url: Option<String>,
+    scope: ApiRouteScope,
+) -> Result<reqwest::Response> {
+    let grouped = scoped_get(client, grouped_url, scope)
+        .header("Accept", "text/event-stream")
+        .send()
+        .await?;
+    if grouped.status().is_success() {
+        return Ok(grouped);
+    }
+
+    if let Some(legacy_url) = legacy_url {
+        if is_legacy_fallback_status(grouped.status()) {
+            let legacy = scoped_get(client, legacy_url, scope)
+                .header("Accept", "text/event-stream")
+                .send()
+                .await?;
+            return Ok(legacy.error_for_status()?);
+        }
+    }
+
+    Ok(grouped.error_for_status()?)
+}
+
 // ============================================================================
 // CONSTANTS & STYLING
 // ============================================================================
@@ -608,11 +685,13 @@ async fn data_fetcher_loop(app: Arc<RwLock<App>>, api_base: String, tx: mpsc::Se
 }
 
 async fn fetch_stats(client: &reqwest::Client, api_base: &str) -> Result<NetworkStats> {
-    let res = client
-        .get(format!("{}/v1/chain/stats", api_base))
-        .send()
-        .await?;
-    let json: Value = res.json().await?;
+    let json = get_json_with_fallback(
+        client,
+        format!("{}/v1/public/chain/stats", api_base),
+        Some(format!("{}/v1/chain/stats", api_base)),
+        ApiRouteScope::Public,
+    )
+    .await?;
 
     Ok(NetworkStats {
         tip_height: json["tip_height"].as_u64().unwrap_or(0),
@@ -630,11 +709,13 @@ async fn fetch_stats(client: &reqwest::Client, api_base: &str) -> Result<Network
 }
 
 async fn fetch_block(client: &reqwest::Client, api_base: &str, height: u64) -> Result<BlockInfo> {
-    let res = client
-        .get(format!("{}/v1/blocks/{}", api_base, height))
-        .send()
-        .await?;
-    let json: Value = res.json().await?;
+    let json = get_json_with_fallback(
+        client,
+        format!("{}/v1/public/blocks/{}", api_base, height),
+        Some(format!("{}/v1/blocks/{}", api_base, height)),
+        ApiRouteScope::Public,
+    )
+    .await?;
 
     let header = &json["header"];
     let txs: Vec<TransactionInfo> = json["transactions"]
@@ -673,10 +754,16 @@ async fn fetch_block(client: &reqwest::Client, api_base: &str, height: u64) -> R
 }
 
 async fn fetch_validators(client: &reqwest::Client, api_base: &str) -> Result<Vec<ValidatorInfo>> {
-    let res = client.get(format!("{}/v1/nodes", api_base)).send().await?;
-    let json: Vec<Value> = res.json().await?;
+    let json = get_json_with_fallback(
+        client,
+        format!("{}/v1/operator/nodes", api_base),
+        Some(format!("{}/v1/nodes", api_base)),
+        ApiRouteScope::Operator,
+    )
+    .await?;
+    let validators = json.as_array().cloned().unwrap_or_default();
 
-    Ok(json
+    Ok(validators
         .iter()
         .map(|v| ValidatorInfo {
             id: v["id"].as_str().unwrap_or("unknown").to_string(),
@@ -691,11 +778,13 @@ async fn fetch_validators(client: &reqwest::Client, api_base: &str) -> Result<Ve
 }
 
 async fn fetch_peers(client: &reqwest::Client, api_base: &str) -> Result<Vec<String>> {
-    let res = client
-        .get(format!("{}/v1/p2p/status", api_base))
-        .send()
-        .await?;
-    let json: Value = res.json().await?;
+    let json = get_json_with_fallback(
+        client,
+        format!("{}/v1/operator/p2p/status", api_base),
+        Some(format!("{}/v1/p2p/status", api_base)),
+        ApiRouteScope::Operator,
+    )
+    .await?;
 
     Ok(json["peers"]
         .as_array()
@@ -719,12 +808,13 @@ async fn fetch_pending_packages(
     let mut packages: Vec<PackageInfo> = Vec::new();
 
     // 1. Finalized/verified packages — full objects from the chain store.
-    if let Ok(res) = client
-        .get(format!("{}/v1/packages?limit=50", api_base))
-        .send()
-        .await
-    {
-        if let Ok(json) = res.json::<Value>().await {
+    if let Ok(json) = get_json_with_fallback(
+        client,
+        format!("{}/v1/public/packages?limit=50", api_base),
+        Some(format!("{}/v1/packages?limit=50", api_base)),
+        ApiRouteScope::Public,
+    )
+    .await {
             if let Some(arr) = json["packages"].as_array() {
                 for v in arr {
                     let canonical = v["canonical"].as_str().unwrap_or_default();
@@ -756,16 +846,16 @@ async fn fetch_pending_packages(
                     });
                 }
             }
-        }
     }
 
     // 2. Pending pool — bare canonical ID strings not yet in the chain store.
-    if let Ok(res) = client
-        .get(format!("{}/v1/pending", api_base))
-        .send()
-        .await
-    {
-        if let Ok(json) = res.json::<Value>().await {
+    if let Ok(json) = get_json_with_fallback(
+        client,
+        format!("{}/v1/operator/pending", api_base),
+        Some(format!("{}/v1/pending", api_base)),
+        ApiRouteScope::Operator,
+    )
+    .await {
             if let Some(arr) = json["packages"].as_array() {
                 for v in arr {
                     let canonical = v.as_str().unwrap_or_default().to_string();
@@ -797,7 +887,6 @@ async fn fetch_pending_packages(
                     });
                 }
             }
-        }
     }
 
     Ok(packages)
@@ -811,11 +900,13 @@ async fn fetch_mempool(
     client: &reqwest::Client,
     api_base: &str,
 ) -> Result<Vec<MempoolTx>> {
-    let res = client
-        .get(format!("{}/v1/pending", api_base))
-        .send()
-        .await?;
-    let json: Value = res.json().await?;
+    let json = get_json_with_fallback(
+        client,
+        format!("{}/v1/operator/pending", api_base),
+        Some(format!("{}/v1/pending", api_base)),
+        ApiRouteScope::Operator,
+    )
+    .await?;
 
     let mut txs = Vec::new();
     if let Some(arr) = json["packages"].as_array() {
@@ -843,11 +934,13 @@ async fn fetch_mempool(
 /// Tries `/v1/consensus/state`; if that returns an error or is not implemented,
 /// derives a best-effort snapshot from `/v1/chain/stats` and `/v1/validators`.
 async fn fetch_runtime_config(client: &reqwest::Client, api_base: &str) -> Result<RuntimeIdentity> {
-    let res = client
-        .get(format!("{}/v1/runtime/config", api_base))
-        .send()
-        .await?;
-    let json: Value = res.json().await?;
+    let json = get_json_with_fallback(
+        client,
+        format!("{}/v1/operator/runtime/config", api_base),
+        Some(format!("{}/v1/runtime/config", api_base)),
+        ApiRouteScope::Operator,
+    )
+    .await?;
 
     Ok(RuntimeIdentity {
         node_id: json["node_id"].as_str().unwrap_or("unknown").to_string(),
@@ -860,13 +953,13 @@ async fn fetch_consensus_state(
     api_base: &str,
 ) -> Result<ConsensusState> {
     // Try the dedicated endpoint first.
-    if let Ok(res) = client
-        .get(format!("{}/v1/consensus/state", api_base))
-        .send()
-        .await
-    {
-        if res.status().is_success() {
-            if let Ok(json) = res.json::<Value>().await {
+    if let Ok(json) = get_json_with_fallback(
+        client,
+        format!("{}/v1/validator/consensus/state", api_base),
+        Some(format!("{}/v1/consensus/state", api_base)),
+        ApiRouteScope::Validator,
+    )
+    .await {
                 let total = json["total_validators"].as_u64().unwrap_or(0) as usize;
                 return Ok(ConsensusState {
                     round: json["round"].as_u64().unwrap_or(0),
@@ -887,16 +980,16 @@ async fn fetch_consensus_state(
                     total_validators: total,
                     fetched_at: Instant::now(),
                 });
-            }
-        }
     }
 
     // Fallback: derive from stats endpoint.
-    let stats_res = client
-        .get(format!("{}/v1/chain/stats", api_base))
-        .send()
-        .await?;
-    let json: Value = stats_res.json().await?;
+    let json = get_json_with_fallback(
+        client,
+        format!("{}/v1/public/chain/stats", api_base),
+        Some(format!("{}/v1/chain/stats", api_base)),
+        ApiRouteScope::Public,
+    )
+    .await?;
 
     let tip = json["tip_height"].as_u64().unwrap_or(0);
     let total = json["validator_count"].as_u64().unwrap_or(0) as usize;
@@ -923,12 +1016,13 @@ async fn sse_event_listener(
     let client = reqwest::Client::new();
 
     loop {
-        let res = match client
-            .get(format!("{}/v1/events", api_base))
-            .header("Accept", "text/event-stream")
-            .send()
-            .await
-        {
+        let res = match open_stream_with_fallback(
+            &client,
+            format!("{}/v1/public/events", api_base),
+            Some(format!("{}/v1/events", api_base)),
+            ApiRouteScope::Public,
+        )
+        .await {
             Ok(r) => r,
             Err(_) => {
                 // Connection refused / DNS failure — node is unreachable.
@@ -1691,7 +1785,7 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
         View::Validators => " [j/k] Navigate | [Enter/d] Validator detail | [b] Back | [?] Help | [q] Quit ",
         View::Packages => " [j/k] Navigate | [Enter/d] Package detail | [b] Back | [?] Help | [q] Quit ",
         View::Events => " [j/k] Scroll | [b] Back | [?] Help | [q] Quit ",
-        View::Operator => " [1-8/o] Switch views | [q] Quit | Browser explorer at http://localhost:3000 ",
+        View::Operator => " [1-8/o] Switch views | [q] Quit | Browser explorer at http://localhost:3007 ",
         View::Consensus => " [9/c] Consensus | [r] Refresh | [q] Quit ",
         View::Faucet => " [e] Edit address | [d/Enter] Drip | [b] Balance | [a] Clear | [Esc] Stop editing | [q] Quit ",
         View::BlockDetail | View::ValidatorDetail | View::PackageDetail => " [Esc/q/b] Back | [?] Help ",

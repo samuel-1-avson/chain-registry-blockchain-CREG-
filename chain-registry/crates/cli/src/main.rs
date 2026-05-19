@@ -59,6 +59,10 @@ struct Cli {
     #[arg(long, global = true, env = "CREG_NODE_URL")]
     node_url: Option<String>,
 
+    /// gRPC endpoint for package submission. Overrides automatic host:50051 inference.
+    #[arg(long, global = true, env = "CREG_GRPC_URL")]
+    grpc_url: Option<String>,
+
     /// Disable colored output.
     #[arg(long, global = true)]
     no_color: bool,
@@ -726,6 +730,7 @@ async fn run(cli: Cli) -> Result<()> {
                     &extra_key_strs,
                     &publisher_address,
                     cli.node_url.as_deref(),
+                    cli.grpc_url.as_deref(),
                     shield,
                 )
                 .await?;

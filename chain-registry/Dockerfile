@@ -52,8 +52,12 @@ COPY --from=rust-toolchain /usr/local/cargo /usr/local/cargo
 COPY --from=rust-toolchain /usr/local/rustup /usr/local/rustup
 ENV CARGO_HOME=/usr/local/cargo
 ENV RUSTUP_HOME=/usr/local/rustup
+ENV LIBCLANG_PATH=/usr/lib/llvm-18/lib
+ENV LLVM_CONFIG_PATH=/usr/bin/llvm-config-18
+ENV CLANG_PATH=/usr/bin/clang-18
 ENV PATH="/usr/local/cargo/bin:$PATH"
 ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
+ENV CARGO_BUILD_JOBS=1
 ARG SOURCE_DATE_EPOCH
 ENV SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}
 ENV CARGO_INCREMENTAL=0
@@ -131,8 +135,8 @@ RUN mkdir -p crates/faucet/src           && echo "fn main() {}"      > crates/fa
 # fail the image build early.
 RUN cargo fetch --locked || (sleep 5 && cargo fetch --locked) || (sleep 10 && cargo fetch --locked)
 
-# Pre-build dependencies (cached layer)
-RUN cargo build --release --locked --package chain-registry-node --bin creg-node --bin creg-indexer || true
+# Avoid a speculative workspace prebuild here. The stub-source phase can leave
+# unusable target artifacts for librocksdb-sys before the real sources land.
 
 # Copy real source and build properly.
 COPY crates/ crates/
@@ -148,8 +152,10 @@ COPY docker-compose*.yml ./
 # Touch files to ensure rebuild
 RUN touch crates/*/src/*.rs
 
-# Build the node binaries with all features
-RUN cargo build --release --locked --package chain-registry-node --bin creg-node --bin creg-indexer
+# Build the node binaries with all features.
+# Avoid passing debug-only clang flags through bindgen here; librocksdb-sys
+# treats the extra arg as a libclang parse failure during the real build.
+RUN RUST_BACKTRACE=1 cargo build -vv --release --locked --package chain-registry-node --bin creg-node --bin creg-indexer
 
 # Build CLI tools (includes TUI explorer)
 RUN cargo build --release --locked --package chain-registry-cli

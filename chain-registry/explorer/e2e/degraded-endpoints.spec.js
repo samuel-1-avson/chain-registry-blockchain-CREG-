@@ -10,6 +10,7 @@ async function mockNodeApi(page, overrides = {}) {
     }
 
     switch (url.pathname) {
+      case '/v1/public/chain/stats':
       case '/v1/chain/stats':
         return fulfillJson(route, {
           current_height: 42,
@@ -20,6 +21,7 @@ async function mockNodeApi(page, overrides = {}) {
           publisher_count: 2,
           finalization_lag: 0,
         })
+      case '/v1/public/bridge/status':
       case '/v1/bridge/status':
         return fulfillJson(route, {
           healthy: true,
@@ -31,9 +33,14 @@ async function mockNodeApi(page, overrides = {}) {
           l1_chain_id: 11155111,
           commit_interval: '5m',
         })
+      case '/v1/public/governance/proposals':
       case '/v1/governance/proposals':
         return fulfillJson(route, { proposals: [] })
+      case '/v1/operator/pending':
+      case '/v1/pending':
+        return fulfillJson(route, { count: 0, packages: [] })
       case '/v1/search':
+      case '/v1/public/search':
         return fulfillJson(route, { matches: [] })
       default:
         return route.fulfill({
@@ -68,7 +75,7 @@ function fulfill(route, response) {
 test.describe('Degraded endpoint states', () => {
   test('bridge page distinguishes unavailable anchor history from empty data', async ({ page }) => {
     await mockNodeApi(page, {
-      '/v1/bridge/anchors': { status: 404, contentType: 'text/plain', body: 'not found' },
+      '/v1/public/bridge/anchors': { status: 404, contentType: 'text/plain', body: 'not found' },
     })
 
     await page.goto('/bridge')
@@ -80,6 +87,7 @@ test.describe('Degraded endpoint states', () => {
 
   test('governance page distinguishes unavailable proposals endpoint from no activity', async ({ page }) => {
     await mockNodeApi(page, {
+      '/v1/public/governance/proposals': { status: 404, contentType: 'text/plain', body: 'not found' },
       '/v1/governance/proposals': { status: 404, contentType: 'text/plain', body: 'not found' },
     })
 
@@ -93,6 +101,7 @@ test.describe('Degraded endpoint states', () => {
     const address = '0x0000000000000000000000000000000000000000'
 
     await mockNodeApi(page, {
+      '/v1/public/search': { status: 404, contentType: 'text/plain', body: 'not found' },
       '/v1/search': { status: 404, contentType: 'text/plain', body: 'not found' },
     })
 
@@ -100,5 +109,57 @@ test.describe('Degraded endpoint states', () => {
 
     await expect(page.getByText(/search index unavailable/i)).toBeVisible()
     await expect(page.getByRole('link', { name: address })).toBeVisible()
+  })
+
+  test('pending page accepts grouped operator payloads with canonical-only package entries', async ({ page }) => {
+    await mockNodeApi(page, {
+      '/v1/operator/pending': {
+        body: { count: 1, packages: ['npm/left-pad@1.0.0'] },
+      },
+    })
+
+    await page.goto('/pending')
+
+    await expect(page.getByText('npm/left-pad@1.0.0')).toBeVisible()
+  })
+
+  test('proof page reads grouped LightClientResponse fields', async ({ page }) => {
+    const canonical = 'npm/express@4.18.0'
+    const encodedCanonical = encodeURIComponent(canonical)
+
+    await mockNodeApi(page, {
+      [`/v1/public/packages/${encodedCanonical}/proof`]: {
+        body: {
+          status: 'verified',
+          block_hash: `0x${'a'.repeat(64)}`,
+          block_header: {
+            height: 42,
+            prev_hash: `0x${'b'.repeat(64)}`,
+            merkle_root: 'c'.repeat(64),
+            proposer_id: 'validator-1',
+            timestamp: '2026-05-18T00:00:00Z',
+            validator_set_hash: 'd'.repeat(64),
+            vrf_output: null,
+            vrf_proof: null,
+          },
+          proof: {
+            tx_hash: 'e'.repeat(64),
+            expected_root: 'c'.repeat(64),
+            path: [
+              { sibling_hash: 'f'.repeat(64), is_right: true },
+            ],
+          },
+          header_chain: [],
+        },
+      },
+    })
+
+    await page.goto('/proof')
+    await page.getByPlaceholder(/Package canonical/i).fill(canonical)
+    await page.getByRole('button', { name: /Fetch proof/i }).click()
+
+    await expect(page.getByText('Proof data')).toBeVisible()
+    await expect(page.getByRole('link', { name: '#42', exact: true })).toBeVisible()
+    await expect(page.getByText(/Proof path \(1 nodes\)/i)).toBeVisible()
   })
 })

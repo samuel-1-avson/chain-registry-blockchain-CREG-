@@ -13,6 +13,7 @@
 
 use anyhow::{bail, Context, Result};
 use common::{sha256_hex, Block, BlockHeader};
+use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 
 // ── Checkpoint ────────────────────────────────────────────────────────────────
@@ -76,6 +77,10 @@ impl MerkleProof {
 
 // ── Block header verification ─────────────────────────────────────────────────
 
+fn hash_prefix(value: &str) -> &str {
+    &value[..value.len().min(12)]
+}
+
 /// Verify that a block header is self-consistent:
 /// - The hash of the header bytes equals the claimed block hash.
 /// - The height is monotonically increasing from the previous header.
@@ -90,8 +95,8 @@ pub fn verify_header(
         bail!(
             "Block header hash mismatch at height {}: expected {} got {}",
             expected_height,
-            &expected_hash[..12],
-            &computed[..12]
+            hash_prefix(expected_hash),
+            hash_prefix(&computed)
         );
     }
 
@@ -119,20 +124,14 @@ pub fn verify_header_chain(
     }
 
     // The first header must chain back to the checkpoint.
-    let (first_header, _first_hash) = &headers[0];
-    if first_header.height != checkpoint.height + 1 {
-        bail!(
-            "Chain gap: checkpoint height={} but first header height={}",
-            checkpoint.height,
-            first_header.height
-        );
-    }
+    let (first_header, first_hash) = &headers[0];
+    verify_header(first_header, first_hash, checkpoint.height + 1)?;
     if first_header.prev_hash != checkpoint.hash {
         bail!(
             "Chain break at height {}: expected prev={} got={}",
             first_header.height,
-            &checkpoint.hash[..12],
-            &first_header.prev_hash[..12]
+            hash_prefix(&checkpoint.hash),
+            hash_prefix(&first_header.prev_hash)
         );
     }
 
@@ -147,8 +146,8 @@ pub fn verify_header_chain(
             bail!(
                 "Chain break at height {}: expected prev={} got={}",
                 next_header.height,
-                &prev_hash[..12],
-                &next_header.prev_hash[..12]
+                hash_prefix(prev_hash),
+                hash_prefix(&next_header.prev_hash)
             );
         }
     }
@@ -180,19 +179,39 @@ pub async fn verify_package(
     node_url: &str,
     checkpoint: &Checkpoint,
 ) -> Result<bool> {
-    let url = format!(
+    let encoded = urlencoding::encode(canonical);
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(8))
+        .build()?;
+
+    let grouped_url = format!(
+        "{}/v1/public/packages/{}/proof",
+        node_url.trim_end_matches('/'),
+        encoded
+    );
+    let legacy_url = format!(
         "{}/v1/packages/{}/proof",
         node_url.trim_end_matches('/'),
-        urlencoding::encode(canonical)
+        encoded
     );
 
-    let resp: LightClientResponse = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(8))
-        .build()?
-        .get(&url)
+    let response = client
+        .get(&grouped_url)
         .send()
         .await
-        .context("Failed to reach chain node for light-client proof")?
+        .context("Failed to reach chain node for light-client proof")?;
+
+    let response = if matches!(response.status(), StatusCode::NOT_FOUND | StatusCode::METHOD_NOT_ALLOWED | StatusCode::NOT_IMPLEMENTED) {
+        client
+            .get(&legacy_url)
+            .send()
+            .await
+            .context("Failed to reach legacy light-client proof endpoint")?
+    } else {
+        response
+    };
+
+    let resp: LightClientResponse = response
         .error_for_status()
         .context("Node returned an error for light-client proof")?
         .json()
@@ -213,13 +232,45 @@ pub async fn verify_package(
         bail!("Merkle root mismatch in block header for {}", canonical);
     }
 
-    // 3. Verify the header chain from our checkpoint to the package block.
-    verify_header_chain(&resp.header_chain, checkpoint)?;
+    // 3. Verify the proof block itself and bind it to the verified header chain.
+    verify_header(&resp.block_header, &resp.block_hash, resp.block_header.height)?;
+
+    let relevant_headers: Vec<(BlockHeader, String)> = resp
+        .header_chain
+        .iter()
+        .filter(|(header, _)| header.height > checkpoint.height)
+        .cloned()
+        .collect();
+
+    if resp.block_header.height > checkpoint.height && relevant_headers.is_empty() {
+        bail!(
+            "Header chain for {} omitted the terminal block after checkpoint {}",
+            canonical,
+            checkpoint.height
+        );
+    }
+
+    if let Some((terminal_header, terminal_hash)) = relevant_headers.last() {
+        if terminal_hash != &resp.block_hash || terminal_header.height != resp.block_header.height {
+            bail!(
+                "Header chain terminal entry does not match proof block for {}",
+                canonical
+            );
+        }
+        verify_header_chain(&relevant_headers, checkpoint)?;
+    } else if resp.block_header.height != checkpoint.height || resp.block_hash != checkpoint.hash {
+        bail!(
+            "Checkpoint {} does not match proof block {} for {}",
+            checkpoint.height,
+            resp.block_header.height,
+            canonical
+        );
+    }
 
     tracing::info!(
         "Light-client verification passed for {} (block {})",
         canonical,
-        &resp.block_hash[..12]
+        hash_prefix(&resp.block_hash)
     );
 
     Ok(true)
@@ -321,6 +372,7 @@ mod tests {
                 vrf_proof: None,
             },
             transactions: txs,
+            pbft_signatures: vec![],
         };
 
         // Build and verify a proof for tx index 2.
@@ -338,6 +390,48 @@ mod tests {
         let genesis = Checkpoint::genesis();
         // An empty chain (nothing after checkpoint) is trivially valid.
         verify_header_chain(&[], &genesis).unwrap();
+    }
+
+    #[test]
+    fn header_chain_verifies_single_header() {
+        use chrono::Utc;
+
+        let genesis = Checkpoint::genesis();
+        let block = Block {
+            header: BlockHeader {
+                height: 1,
+                prev_hash: genesis.hash.clone(),
+                merkle_root: sha256_hex(b"leaf"),
+                proposer_id: "validator-1".into(),
+                timestamp: Utc::now(),
+                validator_set_hash: "dev".into(),
+                vrf_output: None,
+                vrf_proof: None,
+            },
+            transactions: vec![],
+            pbft_signatures: vec![],
+        };
+
+        verify_header_chain(&[(block.header.clone(), block.hash())], &genesis).unwrap();
+    }
+
+    #[test]
+    fn header_chain_rejects_tampered_first_hash() {
+        use chrono::Utc;
+
+        let genesis = Checkpoint::genesis();
+        let header = BlockHeader {
+            height: 1,
+            prev_hash: genesis.hash.clone(),
+            merkle_root: sha256_hex(b"leaf"),
+            proposer_id: "validator-1".into(),
+            timestamp: Utc::now(),
+            validator_set_hash: "dev".into(),
+            vrf_output: None,
+            vrf_proof: None,
+        };
+
+        assert!(verify_header_chain(&[(header, "bad-hash".into())], &genesis).is_err());
     }
 
     #[test]

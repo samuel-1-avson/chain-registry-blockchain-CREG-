@@ -42,6 +42,8 @@ export function ErrorState({ error, onRetry, title = 'Something went wrong' }) {
 }
 
 export function EmptyState({ title = 'Nothing here yet', description, action }) {
+  const descriptionStyle = { margin: '0 auto', maxWidth: 520, fontSize: 13 }
+
   return (
     <div style={{
       padding: 'var(--space-10) var(--space-6)',
@@ -51,7 +53,9 @@ export function EmptyState({ title = 'Nothing here yet', description, action }) 
       borderRadius: 'var(--radius-lg)',
     }}>
       <div style={{ fontSize: 14, color: 'var(--text-primary)', fontWeight: 600, marginBottom: 'var(--space-2)' }}>{title}</div>
-      {description && <p style={{ margin: '0 auto', maxWidth: 520, fontSize: 13 }}>{description}</p>}
+      {description && (typeof description === 'string'
+        ? <p style={descriptionStyle}>{description}</p>
+        : <div style={descriptionStyle}>{description}</div>)}
       {action && <div style={{ marginTop: 'var(--space-4)' }}>{action}</div>}
     </div>
   )

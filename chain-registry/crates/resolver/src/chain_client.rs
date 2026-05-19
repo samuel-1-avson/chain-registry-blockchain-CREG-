@@ -61,20 +61,45 @@ pub async fn fetch_verdict(id: &PackageId, node_url: &str) -> Result<TrustVerdic
 }
 
 async fn fetch_verdict_rest(id: &PackageId, node_url: &str) -> Result<TrustVerdict> {
-    let url = format!(
+    let canonical = id.canonical();
+    let encoded_canonical = urlencoding::encode(&canonical).into_owned();
+    let grouped_url = format!(
+        "{}/v1/public/packages/{}",
+        node_url.trim_end_matches('/'),
+        encoded_canonical
+    );
+    let legacy_url = format!(
         "{}/v1/packages/{}",
         node_url.trim_end_matches('/'),
-        urlencoding::encode(&id.canonical())
+        encoded_canonical
     );
 
-    let resp = reqwest::Client::builder()
+    let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
-        .build()?
-        .get(&url)
+        .build()?;
+
+    let resp = client
+        .get(&grouped_url)
         .header("Accept", "application/json")
         .send()
         .await
         .with_context(|| format!("Failed to reach chain node at {}", node_url))?;
+
+    let resp = if matches!(
+        resp.status(),
+        reqwest::StatusCode::NOT_FOUND
+            | reqwest::StatusCode::METHOD_NOT_ALLOWED
+            | reqwest::StatusCode::NOT_IMPLEMENTED
+    ) {
+        client
+            .get(&legacy_url)
+            .header("Accept", "application/json")
+            .send()
+            .await
+            .with_context(|| format!("Failed to reach legacy package endpoint at {}", node_url))?
+    } else {
+        resp
+    };
 
     if resp.status() == reqwest::StatusCode::NOT_FOUND {
         return Ok(TrustVerdict {

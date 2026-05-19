@@ -24,6 +24,10 @@ Thumbs.db
 
 # Build artifacts (host side - will be rebuilt in container)
 target/
+target-copilot-*/
+target-json-rpc/
+target-node-auth/
+target-node-check/
 **/*.rs.bk
 Cargo.lock.bak
 
@@ -59,6 +63,30 @@ docker-compose*.yml
 # Scripts that aren't needed in build
 scripts/
 !scripts/stress-test-requirements.txt
+
+# Runtime/testnet state not required for image builds
+broadcast/
+cache/
+data/
+node-1-data/
+observability/
+playground/
+tmp/
+validator-keys/
+
+# Nested generated contract/testnet artifacts not needed for Rust image builds
+contracts/build*.log
+contracts/deployments/
+contracts/out/
+contracts/test/
+testnet/artifacts/
+testnet/soak-test/
+
+# Local/demo assets not copied by the Dockerfile
+demo-v2/
+malicious-pkg/
+ml/
+secret-model/
 
 # Circuit build artifacts (will be rebuilt)
 circuits/*.r1cs

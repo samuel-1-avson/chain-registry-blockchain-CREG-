@@ -28,8 +28,8 @@ export default function PackageDetail() {
         <Row k="Version"   v={p.version || '—'} />
         <Row k="Publisher" v={<Hash value={p.publisher} kind="publisher" full />} />
         <Row k="IPFS cid"  v={p.ipfs_cid ? <Hash value={p.ipfs_cid} full /> : '—'} />
-        <Row k="Payload hash" v={p.payload_hash ? <Hash value={p.payload_hash} full /> : '—'} />
-        <Row k="Block"     v={p.block_height} />
+        <Row k="Content hash" v={p.content_hash ? <Hash value={p.content_hash} full /> : '—'} />
+        <Row k="Block hash" v={p.block_hash ? <Hash value={p.block_hash} kind="block-hash" full /> : '—'} />
         {p.validation && <Row k="Validation" v={<code style={{ fontSize: 11 }}>{JSON.stringify(p.validation)}</code>} />}
       </section>
       <details className="ce-card">

@@ -18,6 +18,7 @@ pub async fn run(
     extra_privkeys: &[String],
     publisher_address: &str,
     node_url: Option<&str>,
+    grpc_url: Option<&str>,
     shield: bool,
 ) -> Result<()> {
     let publisher_address = canonicalize_publisher_address(publisher_address)?;
@@ -173,18 +174,11 @@ pub async fn run(
     ));
 
     // ── 6. Submit via gRPC (Primary High-Speed Tunnel) ────────────────────────
-    let base_url = node_url
-        .unwrap_or("localhost")
-        .trim_start_matches("http://")
-        .trim_start_matches("https://")
-        .split(':')
-        .next()
-        .unwrap_or("localhost");
-    let grpc_url = format!("http://{}:50051", base_url);
+    let grpc_url = resolve_grpc_url(node_url, grpc_url);
 
     println!("  Submitting via gRPC to {} ...", grpc_url);
 
-    if let Ok(mut client) = RegistryServiceClient::connect(grpc_url).await {
+    if let Ok(mut client) = RegistryServiceClient::connect(grpc_url.clone()).await {
         let grpc_req = SubmitRequest {
             ecosystem: pkg_id.ecosystem.clone(),
             name: pkg_id.name.clone(),
@@ -221,10 +215,8 @@ pub async fn run(
 
     // ── 7. Fallback to REST (Legacy) ──────────────────────────────────────────
     let url = format!(
-        "{}/v1/packages",
-        node_url
-            .unwrap_or("https://registry.chain-pkg.io")
-            .trim_end_matches('/')
+        "{}",
+        publisher_packages_url(node_url)
     );
 
     let pb_submit = ProgressBar::with_draw_target(Some(0), ProgressDrawTarget::stderr());
@@ -695,8 +687,8 @@ pub async fn submit_signed(signed_file: &Path, node_url: Option<&str>) -> Result
     println!("  Submitting offline-signed package: {}", request.id.canonical());
 
     let url = format!(
-        "{}/v1/packages",
-        node_url.unwrap_or("https://registry.chain-pkg.io").trim_end_matches('/')
+        "{}",
+        publisher_packages_url(node_url)
     );
 
     let request_clone2 = request.clone();
@@ -736,4 +728,62 @@ pub(crate) fn canonicalize_publisher_address(publisher_address: &str) -> Result<
         bail!("Publisher EVM address must be a valid 0x-prefixed address")
     }
     Ok(common::canonical_publisher_address(publisher_address))
+}
+
+fn publisher_packages_url(node_url: Option<&str>) -> String {
+    format!(
+        "{}/v1/publisher/packages",
+        node_url.unwrap_or("https://registry.chain-pkg.io").trim_end_matches('/')
+    )
+}
+
+fn resolve_grpc_url(node_url: Option<&str>, grpc_url: Option<&str>) -> String {
+    if let Some(explicit) = grpc_url.map(str::trim).filter(|value| !value.is_empty()) {
+        if explicit.contains("://") {
+            return explicit.to_string();
+        }
+        return format!("http://{}", explicit);
+    }
+
+    let host = node_url
+        .unwrap_or("http://localhost:8080")
+        .trim()
+        .trim_start_matches("http://")
+        .trim_start_matches("https://")
+        .split('/')
+        .next()
+        .unwrap_or("localhost:8080")
+        .split(':')
+        .next()
+        .unwrap_or("localhost");
+    format!("http://{}:50051", host)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{publisher_packages_url, resolve_grpc_url};
+
+    #[test]
+    fn publish_rest_fallback_uses_grouped_publisher_route() {
+        assert_eq!(
+            publisher_packages_url(Some("http://localhost:8080/")),
+            "http://localhost:8080/v1/publisher/packages"
+        );
+    }
+
+    #[test]
+    fn grpc_url_prefers_explicit_value() {
+        assert_eq!(
+            resolve_grpc_url(Some("http://localhost:8080"), Some("grpc.internal:9000")),
+            "http://grpc.internal:9000"
+        );
+    }
+
+    #[test]
+    fn grpc_url_derives_from_node_host_when_unset() {
+        assert_eq!(
+            resolve_grpc_url(Some("https://registry.example.com:8443"), None),
+            "http://registry.example.com:50051"
+        );
+    }
 }

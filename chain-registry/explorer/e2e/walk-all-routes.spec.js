@@ -1,5 +1,7 @@
 import { test, expect } from '@playwright/test'
 
+const EXPECT_PWA_ASSETS = process.env.E2E_EXPECT_PWA_ASSETS === '1'
+
 // Routes defined by explorer/src/App.jsx. Each entry is walked headlessly; we
 // assert the shell renders, the route title/nav element shows, and no console
 // error fires. Detail routes use a sentinel id so the page exercises its
@@ -71,15 +73,17 @@ test.describe('Explorer headless walk', () => {
     await expect(page).toHaveURL(/\/(block\/42|search)/)
   })
 
-  test('Wallet nav link is present and routes to /legacy', async ({ page }) => {
+  test('Wallet nav link is present and routes to /wallet', async ({ page }) => {
     await page.goto('/')
     const walletLink = page.locator('a:has-text("Wallet")').first()
     await expect(walletLink).toBeVisible()
     await walletLink.click()
-    await expect(page).toHaveURL(/\/legacy/)
+    await expect(page).toHaveURL(/\/wallet/)
   })
 
   test('PWA manifest + service worker are served', async ({ request }) => {
+    test.skip(!EXPECT_PWA_ASSETS, 'PWA asset assertions require preview/build output rather than the Vite dev server.')
+
     const manifest = await request.get('/manifest.webmanifest')
     expect(manifest.status()).toBe(200)
     const json = await manifest.json()

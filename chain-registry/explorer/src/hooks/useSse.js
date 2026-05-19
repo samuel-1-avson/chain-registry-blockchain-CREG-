@@ -18,11 +18,11 @@ const joinUrl = (base, path) => {
 }
 
 /**
- * Subscribe to /v1/events (or a custom SSE endpoint) with exponential reconnect.
+ * Subscribe to /v1/public/events (or a custom SSE endpoint) with exponential reconnect.
  * onEvent receives the parsed JSON payload (or raw string if not JSON).
  * Returns { state, lastEventAt, reconnectAttempt }.
  */
-export function useSse({ path = '/v1/events', onEvent, eventTypes = null, enabled = true } = {}) {
+export function useSse({ path = '/v1/public/events', onEvent, eventTypes = null, enabled = true } = {}) {
   const [state, setState] = useState(enabled ? SSE_STATE.Connecting : SSE_STATE.Idle)
   const [lastEventAt, setLastEventAt] = useState(null)
   const [reconnectAttempt, setReconnectAttempt] = useState(0)
@@ -53,9 +53,9 @@ export function useSse({ path = '/v1/events', onEvent, eventTypes = null, enable
       const url = joinUrl(API_BASE, path)
       setState(SSE_STATE.Connecting)
 
-      // Try WebSocket first if it's the main events endpoint
-      if (path === '/v1/events') {
-        const wsUrl = url.replace(/^http/, 'ws').replace(/\/v1\/events$/, '/v1/ws')
+      // Try WebSocket first if it's the main events endpoint.
+      if (path === '/v1/public/events') {
+        const wsUrl = url.replace(/^http/, 'ws').replace(/\/v1\/public\/events$/, '/v1/public/ws')
         try {
           const ws = new WebSocket(wsUrl)
           ws.onopen = () => {

@@ -17,7 +17,7 @@
 
 **The solution.** Chain Registry replaces single-authority trust with a **decentralized Byzantine-Fault-Tolerant validator network** that independently analyzes every package before it is considered `Verified`. Each package passes through a three-stage validation pipeline — static analysis, behavioral sandbox, ML deep scan — and only becomes installable once a `⌊2n/3⌋+1` PBFT quorum of economically-staked validators has signed an `Approve` vote. Packages are content-addressed in IPFS, the chain is persisted in RocksDB, and final state roots are anchored to Ethereum L1 via a Groth16 rollup bridge.
 
-**Current status.** The most recently revalidated path is the **local distributed three-validator bootstrap** driven by [`chain-registry/local-testnet.ps1`](chain-registry/local-testnet.ps1) and [`chain-registry/docker-compose.local-testnet.yml`](chain-registry/docker-compose.local-testnet.yml). That path now proves a cluster can advance beyond genesis with a non-zero active validator set and a non-zero P2P mesh. The single-validator Docker profile remains useful for inner-loop development, while multi-host and Sepolia-facing work is tracked separately in [`chain-registry/docs/CURRENT_STATUS.md`](chain-registry/docs/CURRENT_STATUS.md) and [`TESTNET_READINESS_REPORT.md`](TESTNET_READINESS_REPORT.md). Kustomize manifests are available under [`chain-registry/k8s/`](chain-registry/k8s/). The repo currently ships a CLI with 27 commands, a React web explorer, a Ratatui terminal explorer, a faucet, a relayer paymaster, and a Prometheus/Grafana observability stack. The current technical audit and open risk picture live in [`chain-registry/docs/DEEP_DIVE_ANALYSIS.md`](chain-registry/docs/DEEP_DIVE_ANALYSIS.md), [`COMPREHENSIVE_CODEBASE_ANALYSIS.md`](COMPREHENSIVE_CODEBASE_ANALYSIS.md), and [`REMEDIATION_BACKLOG.md`](REMEDIATION_BACKLOG.md).
+**Current status.** The most recently revalidated path is the **local distributed three-validator bootstrap** driven by [`chain-registry/local-testnet.ps1`](chain-registry/local-testnet.ps1) and [`chain-registry/docker-compose.local-testnet.yml`](chain-registry/docker-compose.local-testnet.yml). That path now proves a cluster can advance beyond genesis with a non-zero active validator set and a non-zero P2P mesh. The single-validator Docker profile remains useful for inner-loop development, while multi-host and Sepolia-facing work is tracked in [`chain-registry/docs/CURRENT_STATUS.md`](chain-registry/docs/CURRENT_STATUS.md) and the active master readiness roadmap in [`chain-registry/docs/MASTER_PROJECT_READINESS_AND_CLIENT_AUDIT_2026-05-18.md`](chain-registry/docs/MASTER_PROJECT_READINESS_AND_CLIENT_AUDIT_2026-05-18.md). Kustomize manifests are available under [`chain-registry/k8s/`](chain-registry/k8s/). The repo currently ships a CLI with 27 commands, a React web explorer, a Ratatui terminal explorer, a faucet, a relayer paymaster, and a Prometheus/Grafana observability stack. The current technical audit lives in [`chain-registry/docs/DEEP_DIVE_ANALYSIS.md`](chain-registry/docs/DEEP_DIVE_ANALYSIS.md), with older audit snapshots archived under [`chain-registry/docs/archive/COMPREHENSIVE_CODEBASE_ANALYSIS.md`](chain-registry/docs/archive/COMPREHENSIVE_CODEBASE_ANALYSIS.md) and [`chain-registry/docs/archive/REMEDIATION_BACKLOG.md`](chain-registry/docs/archive/REMEDIATION_BACKLOG.md).
 
 ---
 
@@ -336,17 +336,19 @@ make testnet-smoke    # full E2E diagnostic via `creg doctor --testnet`
 1. Fork the repository and create a feature branch.
 2. Run `cargo fmt` and `cargo clippy --workspace --all-targets -- -D warnings` before committing.
 3. Add tests — unit tests for `crates/*`, Foundry tests for `contracts/`.
-4. Reference any issue IDs from [`chain-registry/docs/DEEP_DIVE_ANALYSIS.md`](chain-registry/docs/DEEP_DIVE_ANALYSIS.md) or [`REMEDIATION_BACKLOG.md`](REMEDIATION_BACKLOG.md) in your PR description.
+4. Reference any issue IDs from [`chain-registry/docs/DEEP_DIVE_ANALYSIS.md`](chain-registry/docs/DEEP_DIVE_ANALYSIS.md), [`chain-registry/docs/MASTER_PROJECT_READINESS_AND_CLIENT_AUDIT_2026-05-18.md`](chain-registry/docs/MASTER_PROJECT_READINESS_AND_CLIENT_AUDIT_2026-05-18.md), or [`chain-registry/docs/archive/REMEDIATION_BACKLOG.md`](chain-registry/docs/archive/REMEDIATION_BACKLOG.md) in your PR description.
 5. CI runs `cargo test`, `forge test`, and explorer tests; all must pass.
 
 ### Documentation
 
 - [`chain-registry/docs/CURRENT_STATUS.md`](chain-registry/docs/CURRENT_STATUS.md) — live repo-aligned operational status and verified workflows
-- [`TESTNET_READINESS_REPORT.md`](TESTNET_READINESS_REPORT.md) — public testnet readiness gates and launch tracks
+- [`chain-registry/docs/MASTER_PROJECT_READINESS_AND_CLIENT_AUDIT_2026-05-18.md`](chain-registry/docs/MASTER_PROJECT_READINESS_AND_CLIENT_AUDIT_2026-05-18.md) — active readiness roadmap and client audit
 - [`chain-registry/DELIVERABLES_INDEX.md`](chain-registry/DELIVERABLES_INDEX.md) — current artifact and deliverable map
-- [`COMPREHENSIVE_CODEBASE_ANALYSIS.md`](COMPREHENSIVE_CODEBASE_ANALYSIS.md) — historical repository-wide audit snapshot
 - [`chain-registry/docs/DEEP_DIVE_ANALYSIS.md`](chain-registry/docs/DEEP_DIVE_ANALYSIS.md) — live deep technical analysis in the nested repo
-- [`REMEDIATION_BACKLOG.md`](REMEDIATION_BACKLOG.md) — prioritized remediation work and implementation status
+- [`chain-registry/docs/archive/TESTNET_READINESS_REPORT.md`](chain-registry/docs/archive/TESTNET_READINESS_REPORT.md) — archived public testnet readiness snapshot
+- [`chain-registry/docs/archive/COMPREHENSIVE_CODEBASE_ANALYSIS.md`](chain-registry/docs/archive/COMPREHENSIVE_CODEBASE_ANALYSIS.md) — archived repository-wide audit snapshot
+- [`chain-registry/docs/archive/REMEDIATION_BACKLOG.md`](chain-registry/docs/archive/REMEDIATION_BACKLOG.md) — archived remediation backlog and implementation history
+- [`chain-registry/docs/archive/IMPLEMENTATION_PLAN.md`](chain-registry/docs/archive/IMPLEMENTATION_PLAN.md) — archived implementation roadmap and sequencing plan
 - [`chain-registry/docs/SYSTEM_DEEP_DIVE.md`](chain-registry/docs/SYSTEM_DEEP_DIVE.md) — architecture overview
 - [`chain-registry/docs/EXPLORER_DEEP_DIVE.md`](chain-registry/docs/EXPLORER_DEEP_DIVE.md) — canonical explorer and user-surface analysis
 - [`chain-registry/docs/API_COOKBOOK.md`](chain-registry/docs/API_COOKBOOK.md) — live REST API curl examples

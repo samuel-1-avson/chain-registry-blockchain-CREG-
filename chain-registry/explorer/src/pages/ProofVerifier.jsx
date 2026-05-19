@@ -13,7 +13,7 @@ import { ShareButton } from '../components/ShareButton.jsx'
  *
  * Allows users to:
  * 1. Enter a package canonical (or paste a proof JSON).
- * 2. Fetch the proof from /v1/packages/:canonical/proof.
+ * 2. Fetch the proof from /v1/public/packages/:canonical/proof.
  * 3. Verify the inclusion proof client-side against the chain's Merkle root.
  * 4. Display the proof path with visual node indicators.
  */
@@ -29,6 +29,7 @@ export default function ProofVerifier() {
   )
 
   const activeProof = pastedProof || proof.data
+  const normalizedProof = useMemo(() => normalizeProofResponse(activeProof), [activeProof])
 
   const handleFetch = (e) => {
     e.preventDefault()
@@ -51,10 +52,9 @@ export default function ProofVerifier() {
     }
   }
 
-  const handleVerify = () => {
-    if (!activeProof) return
-    // Client-side verification: recompute hashes up the Merkle path
-    const result = verifyMerkleProof(activeProof)
+  const handleVerify = async () => {
+    if (!normalizedProof) return
+    const result = await verifyMerkleProof(normalizedProof)
     setVerifyResult(result)
   }
 
@@ -98,7 +98,7 @@ export default function ProofVerifier() {
         <textarea
           rows={5}
           onChange={handlePaste}
-          placeholder='Paste a proof JSON here: { "root": "0x…", "path": [ … ], "leaf": "…" }'
+          placeholder='Paste a proof JSON here: { "block_hash": "…", "block_header": { ... }, "proof": { "tx_hash": "…", "expected_root": "…", "path": [ { "sibling_hash": "…", "is_right": true } ] } }'
           style={{
             width: '100%', padding: '8px 12px', resize: 'vertical',
             background: 'var(--bg-elevated)', color: 'var(--text-primary)',
@@ -118,7 +118,7 @@ export default function ProofVerifier() {
       )}
 
       {/* Proof display */}
-      {activeProof && (
+      {activeProof && normalizedProof && (
         <section className="ce-card" style={{ display: 'grid', gap: 'var(--space-4)' }}>
           <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <h2 style={{ margin: 0, fontSize: 15 }}>Proof data</h2>
@@ -129,40 +129,40 @@ export default function ProofVerifier() {
 
           {/* Proof fields */}
           <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
-            {activeProof.root && <Row k="Merkle root" v={<Hash value={activeProof.root} full showCopy />} />}
-            {activeProof.leaf && <Row k="Leaf hash" v={<Hash value={activeProof.leaf} full showCopy />} />}
-            {activeProof.canonical && <Row k="Canonical" v={activeProof.canonical} />}
-            {activeProof.block_height != null && (
+            {normalizedProof.merkleRoot && <Row k="Merkle root" v={<Hash value={normalizedProof.merkleRoot} full showCopy />} />}
+            {normalizedProof.leafHash && <Row k="Leaf hash" v={<Hash value={normalizedProof.leafHash} full showCopy />} />}
+            {normalizedProof.blockHash && <Row k="Block hash" v={<Hash value={normalizedProof.blockHash} kind="block-hash" full showCopy />} />}
+            {normalizedProof.canonical && <Row k="Canonical" v={normalizedProof.canonical} />}
+            {normalizedProof.blockHeight != null && (
               <Row k="Block" v={
-                <Link to={`/block/${activeProof.block_height}`} style={{ color: 'var(--accent-primary-light)' }}>
-                  #{activeProof.block_height}
+                <Link to={`/block/${normalizedProof.blockHeight}`} style={{ color: 'var(--accent-primary-light)' }}>
+                  #{normalizedProof.blockHeight}
                 </Link>
               } />
             )}
           </div>
 
           {/* Proof path visualization */}
-          {activeProof.path && Array.isArray(activeProof.path) && (
+          {normalizedProof.path.length > 0 && (
             <div>
               <div style={{ fontSize: 11, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>
-                Proof path ({activeProof.path.length} nodes)
+                Proof path ({normalizedProof.path.length} nodes)
               </div>
               <div style={{ display: 'grid', gap: 6 }}>
-                {activeProof.path.map((node, i) => {
-                  const hash = typeof node === 'string' ? node : node.hash
-                  const dir = typeof node === 'object' ? node.direction : null
+                {normalizedProof.path.map((node, i) => {
+                  const dir = node.is_right ? 'right' : 'left'
                   return (
                     <div key={i} style={{
                       display: 'flex', alignItems: 'center', gap: 8,
                       padding: '6px 10px', background: 'var(--bg-elevated)',
                       borderRadius: 'var(--radius-sm)',
-                      borderLeft: `3px solid ${i === 0 ? 'var(--accent-success)' : i === activeProof.path.length - 1 ? 'var(--accent-primary-light)' : 'var(--border)'}`,
+                      borderLeft: `3px solid ${i === 0 ? 'var(--accent-success)' : i === normalizedProof.path.length - 1 ? 'var(--accent-primary-light)' : 'var(--border)'}`,
                     }}>
                       <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)', minWidth: 24 }}>{i}</span>
                       {dir && <StatusBadge variant="muted">{dir}</StatusBadge>}
-                      <Hash value={hash} start={12} end={10} showCopy />
+                      <Hash value={node.sibling_hash} start={12} end={10} showCopy />
                       {i === 0 && <span style={{ fontSize: 9, color: 'var(--accent-success)' }}>leaf</span>}
-                      {i === activeProof.path.length - 1 && <span style={{ fontSize: 9, color: 'var(--accent-primary-light)' }}>root</span>}
+                      {i === normalizedProof.path.length - 1 && <span style={{ fontSize: 9, color: 'var(--accent-primary-light)' }}>root</span>}
                     </div>
                   )
                 })}
@@ -223,8 +223,8 @@ export default function ProofVerifier() {
             <ol style={{ margin: 0, paddingLeft: 20, display: 'grid', gap: 4 }}>
               <li>Enter a package canonical (e.g., <code>npm/express@4.18.0</code>) above</li>
               <li>The verifier fetches the Merkle proof from the node</li>
-              <li>Recompute hashes along the proof path to verify the leaf reaches the root</li>
-              <li>Compare the recomputed root against the on-chain state root</li>
+              <li>Recompute hashes along the proof path using each <code>proof.path[].is_right</code> direction bit</li>
+              <li>Compare the recomputed root against <code>proof.expected_root</code> and <code>block_header.merkle_root</code></li>
             </ol>
             <p style={{ margin: 0, color: 'var(--text-tertiary)', fontSize: 11 }}>
               This verification can be performed by any light client without downloading the full chain.
@@ -237,29 +237,93 @@ export default function ProofVerifier() {
 }
 
 /**
- * Client-side Merkle proof verification.
- * Using Web Crypto API to hash path nodes with SHA-256.
+ * Normalize the node's LightClientResponse into a UI-friendly proof shape.
  */
-function verifyMerkleProof(proof) {
-  if (!proof) return { valid: false, message: 'No proof data' }
-  if (!proof.root) return { valid: false, message: 'Proof missing root hash' }
-  if (!proof.path || proof.path.length === 0) return { valid: false, message: 'Proof missing path' }
-  if (!proof.leaf) return { valid: false, message: 'Proof missing leaf hash' }
+function normalizeProofResponse(proofResponse) {
+  if (!proofResponse) return null
 
-  // Basic structural validation — full cryptographic verification would
-  // require async SHA-256 + the exact hash concatenation scheme from the node.
-  // For now we validate structure and report as "structurally valid".
+  if (proofResponse.proof && proofResponse.block_header) {
+    return {
+      canonical: proofResponse.canonical,
+      blockHash: proofResponse.block_hash,
+      blockHeight: proofResponse.block_header.height,
+      blockMerkleRoot: proofResponse.block_header.merkle_root,
+      merkleRoot: proofResponse.proof.expected_root,
+      leafHash: proofResponse.proof.tx_hash,
+      path: Array.isArray(proofResponse.proof.path) ? proofResponse.proof.path : [],
+    }
+  }
+
+  return {
+    canonical: proofResponse.canonical,
+    blockHash: proofResponse.block_hash,
+    blockHeight: proofResponse.block_height,
+    blockMerkleRoot: proofResponse.block_merkle_root,
+    merkleRoot: proofResponse.root || proofResponse.merkle_root || proofResponse.expected_root,
+    leafHash: proofResponse.leaf || proofResponse.tx_hash,
+    path: Array.isArray(proofResponse.path)
+      ? proofResponse.path.map((step) => {
+          if (typeof step === 'string') return { sibling_hash: step, is_right: null }
+          return {
+            sibling_hash: step.sibling_hash || step.hash,
+            is_right: typeof step.is_right === 'boolean'
+              ? step.is_right
+              : step.direction === 'right'
+                ? true
+                : step.direction === 'left'
+                  ? false
+                  : null,
+          }
+        })
+      : [],
+  }
+}
+
+async function sha256Hex(input) {
+  const bytes = new TextEncoder().encode(input)
+  const digest = await crypto.subtle.digest('SHA-256', bytes)
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+async function verifyMerkleProof(proof) {
+  if (!proof) return { valid: false, message: 'No proof data' }
+  if (!proof.merkleRoot) return { valid: false, message: 'Proof missing expected Merkle root' }
+  if (!proof.path || proof.path.length === 0) return { valid: false, message: 'Proof missing path' }
+  if (!proof.leafHash) return { valid: false, message: 'Proof missing leaf hash' }
+
   const pathValid = proof.path.every((node) => {
-    const hash = typeof node === 'string' ? node : node?.hash
-    return typeof hash === 'string' && hash.length >= 32
+    return typeof node?.sibling_hash === 'string' && node.sibling_hash.length >= 32
   })
 
   if (!pathValid) return { valid: false, message: 'One or more path nodes have invalid hash format' }
 
+  const directionValid = proof.path.every((node) => typeof node?.is_right === 'boolean')
+  if (!directionValid) {
+    return { valid: false, message: 'Proof path is missing LightClientResponse direction bits (proof.path[].is_right)' }
+  }
+
+  if (proof.blockMerkleRoot && proof.blockMerkleRoot !== proof.merkleRoot) {
+    return { valid: false, message: 'Proof root does not match the block header Merkle root' }
+  }
+
+  let current = proof.leafHash
+  for (const step of proof.path) {
+    current = step.is_right
+      ? await sha256Hex(`${current}${step.sibling_hash}`)
+      : await sha256Hex(`${step.sibling_hash}${current}`)
+  }
+
+  if (current !== proof.merkleRoot) {
+    return {
+      valid: false,
+      message: `Recomputed root ${current.slice(0, 16)}… did not match expected root ${proof.merkleRoot.slice(0, 16)}…`,
+    }
+  }
+
   return {
     valid: true,
-    message: `Structurally valid proof with ${proof.path.length} path nodes. Root: ${proof.root.slice(0, 16)}…`
-      + (proof.block_height != null ? ` · anchored at block #${proof.block_height}` : ''),
+    message: `Merkle proof verified across ${proof.path.length} path nodes. Root: ${proof.merkleRoot.slice(0, 16)}…`
+      + (proof.blockHeight != null ? ` · anchored at block #${proof.blockHeight}` : ''),
   }
 }
 

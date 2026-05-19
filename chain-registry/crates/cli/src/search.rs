@@ -19,7 +19,7 @@ pub async fn run(
     if let Some(eco) = ecosystem {
         qp.push_str(&format!("&ecosystem={}", urlencoding::encode(eco)));
     }
-    let url = format!("{}/v1/packages/search?{}", base.trim_end_matches('/'), qp);
+    let url = build_search_url(&base, &qp);
 
     let client = reqwest::Client::new();
     let resp = client
@@ -30,7 +30,7 @@ pub async fn run(
         .context("Failed to reach registry node")?;
 
     if resp.status() == 404 {
-        // Node doesn't implement /v1/packages/search — fall back to listing all
+        // Node doesn't implement /v1/search — fall back to listing all
         // packages and filtering client-side.
         return search_via_pending_list(query, ecosystem, &base, json).await;
     }
@@ -39,10 +39,11 @@ pub async fn run(
         anyhow::bail!("Search failed: HTTP {}", resp.status());
     }
 
-    let records: Vec<serde_json::Value> = resp
+    let body: serde_json::Value = resp
         .json()
         .await
         .context("Failed to parse search response")?;
+    let records = extract_records(&body);
 
     if json {
         println!("{}", serde_json::to_string_pretty(&records)?);
@@ -65,6 +66,10 @@ pub async fn run(
     Ok(())
 }
 
+fn build_search_url(base: &str, query_params: &str) -> String {
+    format!("{}/v1/search?{}", base.trim_end_matches('/'), query_params)
+}
+
 async fn search_via_pending_list(
     query: &str,
     ecosystem: Option<&str>,
@@ -74,13 +79,24 @@ async fn search_via_pending_list(
     // Fetch pending pool list and chain stats, combine and filter.
     let client = reqwest::Client::new();
 
-    let pending_url = format!("{}/v1/pending", base.trim_end_matches('/'));
+    let pending_url = format!("{}/v1/operator/pending", base.trim_end_matches('/'));
     let pending_resp = client
         .get(&pending_url)
         .timeout(std::time::Duration::from_secs(10))
         .send()
         .await
         .context("Failed to reach pending pool endpoint")?;
+
+    let pending_resp = if matches!(pending_resp.status().as_u16(), 401 | 403 | 404 | 405 | 501) {
+        client
+            .get(format!("{}/v1/pending", base.trim_end_matches('/')))
+            .timeout(std::time::Duration::from_secs(10))
+            .send()
+            .await
+            .context("Failed to reach legacy pending pool endpoint")?
+    } else {
+        pending_resp
+    };
 
     let mut results: Vec<serde_json::Value> = Vec::new();
 
@@ -132,9 +148,17 @@ fn matches_query(canonical: &str, query: &str, ecosystem: Option<&str>) -> bool 
         return false;
     }
     if let Some(eco) = ecosystem {
-        return canonical.starts_with(&format!("{}:", eco));
+        return canonical.starts_with(&format!("{}/", eco));
     }
     true
+}
+
+fn extract_records(body: &serde_json::Value) -> Vec<serde_json::Value> {
+    body.get("matches")
+        .and_then(|matches| matches.as_array())
+        .cloned()
+        .or_else(|| body.as_array().cloned())
+        .unwrap_or_default()
 }
 
 fn print_records(records: &[serde_json::Value]) {
@@ -174,5 +198,48 @@ fn print_records(records: &[serde_json::Value]) {
                 format!("{}...", &publisher[..publisher.len().min(12)]).dimmed()
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{build_search_url, extract_records, matches_query};
+
+    #[test]
+    fn build_search_url_uses_grouped_route() {
+        assert_eq!(
+            build_search_url("http://localhost:8080/", "q=express"),
+            "http://localhost:8080/v1/search?q=express"
+        );
+    }
+
+    #[test]
+    fn extract_records_reads_grouped_search_payload() {
+        let body = serde_json::json!({
+            "matches": [
+                { "canonical": "npm/express@4.18.0", "status": "verified" }
+            ]
+        });
+
+        let records = extract_records(&body);
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0]["canonical"], "npm/express@4.18.0");
+    }
+
+    #[test]
+    fn extract_records_supports_legacy_array_payloads() {
+        let body = serde_json::json!([
+            { "canonical": "cargo/serde@1.0.0", "status": "verified" }
+        ]);
+
+        let records = extract_records(&body);
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0]["canonical"], "cargo/serde@1.0.0");
+    }
+
+    #[test]
+    fn matches_query_uses_slash_ecosystem_prefix() {
+        assert!(matches_query("npm/express@4.18.0", "express", Some("npm")));
+        assert!(!matches_query("cargo/serde@1.0.0", "serde", Some("npm")));
     }
 }

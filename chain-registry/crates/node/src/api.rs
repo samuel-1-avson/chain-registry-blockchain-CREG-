@@ -3,8 +3,10 @@
 
 use alloy::primitives::{keccak256, Address};
 use axum::{
+    body::Body,
     extract::{Extension, Path, Query, State},
-    http::{header, HeaderValue, Method, StatusCode, Uri},
+    http::{header, HeaderName, HeaderValue, Method, Request, StatusCode, Uri},
+    middleware::Next,
     response::{IntoResponse, Response},
     routing::{delete, get, post},
     Json, Router,
@@ -153,6 +155,7 @@ fn operator_routes() -> Router<SharedState> {
         .route("/v1/operator/metrics/history", get(metrics_history))
         .route("/v1/operator/api-boundaries", get(api_boundaries))
         .route("/metrics", get(prometheus_metrics))
+        .layer(axum::middleware::from_fn(private_api_acl_middleware))
 }
 
 fn internal_routes() -> Router<SharedState> {
@@ -166,6 +169,7 @@ fn internal_routes() -> Router<SharedState> {
             post(receive_admission_attestation),
         )
         .route("/v1/internal/appeals/:id/audit", post(submit_audit))
+        .layer(axum::middleware::from_fn(private_api_acl_middleware))
 }
 
 fn legacy_routes(sse_bus: EventBus, ws_bus: EventBus) -> Router<SharedState> {
@@ -265,8 +269,8 @@ enum ApiRouteSecurity {
     PublisherSignatureStakeAdmission,
     ValidatorIdentityProof,
     ValidatorSignatureSetMembership,
-    OperatorPrivateNetwork,
-    InternalNodeOnly,
+    OperatorApiKeyAcl,
+    InternalApiKeyAcl,
     LegacyMixed,
 }
 
@@ -306,14 +310,14 @@ const API_ROUTE_BOUNDARIES: &[ApiRouteBoundary] = &[
     ApiRouteBoundary {
         path: "/v1/operator/*",
         category: ApiRouteCategory::Operator,
-        security: ApiRouteSecurity::OperatorPrivateNetwork,
-        note: "Operational status and diagnostics; deploy behind private operator access.",
+        security: ApiRouteSecurity::OperatorApiKeyAcl,
+        note: "Operational status and diagnostics; requires X-Operator-Key or Authorization bearer ACL.",
     },
     ApiRouteBoundary {
         path: "/v1/internal/*",
         category: ApiRouteCategory::Internal,
-        security: ApiRouteSecurity::InternalNodeOnly,
-        note: "Node-to-node or local integration paths; not intended for public exposure.",
+        security: ApiRouteSecurity::InternalApiKeyAcl,
+        note: "Node-to-node or local integration paths; requires X-Operator-Key or Authorization bearer ACL.",
     },
     ApiRouteBoundary {
         path: "/v1/packages, /v1/blocks, /v1/validators, /v1/consensus",
@@ -337,6 +341,7 @@ fn build_cors_layer(cors_config: &crate::config::CorsConfig) -> CorsLayer {
             header::AUTHORIZATION,
             header::CONTENT_TYPE,
             header::ORIGIN,
+            HeaderName::from_static("x-operator-key"),
         ])
         .allow_credentials(cors_config.allow_credentials);
 
@@ -431,6 +436,79 @@ fn server_err(msg: impl Into<String>) -> Response {
         .into_response()
 }
 
+const OPERATOR_API_KEY_ENV: &str = "CREG_OPERATOR_API_KEY";
+const OPERATOR_PUBKEY_ENV: &str = "CREG_OPERATOR_PUBKEY";
+const OPERATOR_KEY_HEADER: &str = "x-operator-key";
+
+async fn private_api_acl_middleware(req: Request<Body>, next: Next) -> Response {
+    let Some(secret) = configured_operator_secret() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorResponse {
+                error: format!(
+                    "private API is locked; set {OPERATOR_API_KEY_ENV} before exposing operator or internal routes"
+                ),
+            }),
+        )
+            .into_response();
+    };
+
+    if private_api_authorized(req.headers(), &secret) {
+        return next.run(req).await;
+    }
+
+    let mut response = (
+        StatusCode::UNAUTHORIZED,
+        Json(ErrorResponse {
+            error: "private API credentials are missing or invalid".to_string(),
+        }),
+    )
+        .into_response();
+    response.headers_mut().insert(
+        header::WWW_AUTHENTICATE,
+        HeaderValue::from_static("Bearer realm=\"chain-registry-private-api\""),
+    );
+    response
+}
+
+fn configured_operator_secret() -> Option<String> {
+    std::env::var(OPERATOR_API_KEY_ENV)
+        .ok()
+        .or_else(|| std::env::var(OPERATOR_PUBKEY_ENV).ok())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn private_api_authorized(headers: &axum::http::HeaderMap, secret: &str) -> bool {
+    let header_match = headers
+        .get(OPERATOR_KEY_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| constant_time_eq(value.trim(), secret))
+        .unwrap_or(false);
+    let bearer_match = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .map(|value| constant_time_eq(value.trim(), secret))
+        .unwrap_or(false);
+
+    header_match || bearer_match
+}
+
+fn constant_time_eq(left: &str, right: &str) -> bool {
+    let left = left.as_bytes();
+    let right = right.as_bytes();
+    if left.len() != right.len() {
+        return false;
+    }
+
+    let mut diff = 0u8;
+    for (a, b) in left.iter().zip(right.iter()) {
+        diff |= a ^ b;
+    }
+    diff == 0
+}
+
 // ─── Handlers ────────────────────────────────────────────────────────────────
 
 async fn health(State(state): State<SharedState>) -> impl IntoResponse {
@@ -453,6 +531,12 @@ async fn api_boundaries() -> impl IntoResponse {
             "internal": "/v1/internal"
         },
         "legacy_aliases": "enabled",
+        "private_route_auth": {
+            "environment": OPERATOR_API_KEY_ENV,
+            "compatibility_environment": OPERATOR_PUBKEY_ENV,
+            "accepted_headers": ["X-Operator-Key", "Authorization: Bearer <token>"],
+            "fail_closed": true
+        },
         "routes": API_ROUTE_BOUNDARIES
     }))
 }
@@ -2705,10 +2789,44 @@ mod tests {
     use tempfile::TempDir;
     use tokio::{
         net::TcpListener,
-        sync::{mpsc, RwLock},
+        sync::{mpsc, Mutex, RwLock},
     };
     use tonic::{Code, Request as GrpcRequest};
     use tower::ServiceExt;
+
+    static API_ENV_LOCK: std::sync::OnceLock<Mutex<()>> = std::sync::OnceLock::new();
+
+    fn api_env_lock() -> &'static Mutex<()> {
+        API_ENV_LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    struct EnvRestore {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvRestore {
+        fn set(key: &'static str, value: impl AsRef<str>) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value.as_ref());
+            Self { key, previous }
+        }
+
+        fn remove(key: &'static str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::remove_var(key);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvRestore {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
 
     fn make_keypair() -> (SigningKey, String) {
         let sk = SigningKey::generate(&mut OsRng);
@@ -3221,6 +3339,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn grouped_validator_register_alias_requires_ownership_proofs() -> anyhow::Result<()> {
+        let (state, _tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
+        let chain_id = {
+            let s = state.read().await;
+            node_chain_id(&s.config)
+        };
+        let (evm_key, evm_address) = make_evm_keypair();
+        let (ed_key, ed_pubkey) = make_keypair();
+        let event_bus = new_event_bus();
+        let app = router(
+            state.clone(),
+            event_bus,
+            RateLimiter::new(RateLimitConfig::default()),
+            AttestationStore::new(),
+            crate::config::CorsConfig::default(),
+            tx_sender,
+            p2p_handle,
+        );
+
+        let (attacker_key, _) = make_evm_keypair();
+        let invalid_request =
+            identity_proof_request(&chain_id, &attacker_key, &evm_address, &ed_key, &ed_pubkey);
+        let response = app
+            .clone()
+            .oneshot(
+                Request::post("/v1/validator/register")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&invalid_request)?))?,
+            )
+            .await?;
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert!(!state
+            .read()
+            .await
+            .validator_registrations
+            .contains_key(&evm_address));
+
+        let valid_request =
+            identity_proof_request(&chain_id, &evm_key, &evm_address, &ed_key, &ed_pubkey);
+        let response = app
+            .oneshot(
+                Request::post("/v1/validator/register")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&valid_request)?))?,
+            )
+            .await?;
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        assert!(state
+            .read()
+            .await
+            .validator_registrations
+            .contains_key(&evm_address));
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn rest_submit_package_rejects_unstaked_publishers() -> anyhow::Result<()> {
         let (state, _tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
         let event_bus = new_event_bus();
@@ -3239,6 +3414,39 @@ mod tests {
         let response = app
             .oneshot(
                 Request::post("/v1/packages")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&request)?))?,
+            )
+            .await?;
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        let body = to_bytes(response.into_body(), usize::MAX).await?;
+        let body_text = String::from_utf8(body.to_vec())?;
+        assert!(body_text.contains("has no on-chain stake"));
+        assert!(!state.read().await.pending_pool.contains(&canonical));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn grouped_publisher_packages_alias_uses_admission() -> anyhow::Result<()> {
+        let (state, _tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
+        let event_bus = new_event_bus();
+        let app = router(
+            state.clone(),
+            event_bus,
+            RateLimiter::new(RateLimitConfig::default()),
+            AttestationStore::new(),
+            crate::config::CorsConfig::default(),
+            tx_sender,
+            p2p_handle,
+        );
+        let request = make_signed_request("0x1111111111111111111111111111111111111111");
+        let canonical = request.id.canonical();
+
+        let response = app
+            .oneshot(
+                Request::post("/v1/publisher/packages")
                     .header("content-type", "application/json")
                     .body(Body::from(serde_json::to_vec(&request)?))?,
             )
@@ -3291,6 +3499,9 @@ mod tests {
 
     #[tokio::test]
     async fn rest_router_mounts_grouped_api_boundary_routes() -> anyhow::Result<()> {
+        let _env_lock = api_env_lock().lock().await;
+        let _api_key = EnvRestore::set(OPERATOR_API_KEY_ENV, "grouped-boundary-secret");
+        let _operator_pubkey = EnvRestore::remove(OPERATOR_PUBKEY_ENV);
         let (state, _tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
         let event_bus = new_event_bus();
         let app = router(
@@ -3310,7 +3521,11 @@ mod tests {
         assert_eq!(public_health.status(), StatusCode::OK);
 
         let response = app
-            .oneshot(Request::get("/v1/operator/api-boundaries").body(Body::empty())?)
+            .oneshot(
+                Request::get("/v1/operator/api-boundaries")
+                    .header(OPERATOR_KEY_HEADER, "grouped-boundary-secret")
+                    .body(Body::empty())?,
+            )
             .await?;
 
         assert_eq!(response.status(), StatusCode::OK);
@@ -3322,10 +3537,117 @@ mod tests {
             "/v1/publisher"
         );
         assert_eq!(body_json["legacy_aliases"], "enabled");
+        assert_eq!(body_json["private_route_auth"]["fail_closed"], true);
         assert!(body_json["routes"]
             .as_array()
             .map(|routes| routes.iter().any(|route| route["path"] == "/v1/internal/*"))
             .unwrap_or(false));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn private_api_acl_fails_closed_without_operator_secret() -> anyhow::Result<()> {
+        let _env_lock = api_env_lock().lock().await;
+        let _api_key = EnvRestore::remove(OPERATOR_API_KEY_ENV);
+        let _operator_pubkey = EnvRestore::remove(OPERATOR_PUBKEY_ENV);
+        let (state, _tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
+        let event_bus = new_event_bus();
+        let app = router(
+            state,
+            event_bus,
+            RateLimiter::new(RateLimitConfig::default()),
+            AttestationStore::new(),
+            crate::config::CorsConfig::default(),
+            tx_sender,
+            p2p_handle,
+        );
+
+        let response = app
+            .oneshot(
+                Request::get("/v1/operator/api-boundaries")
+                    .header(OPERATOR_KEY_HEADER, "anything")
+                    .body(Body::empty())?,
+            )
+            .await?;
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = to_bytes(response.into_body(), usize::MAX).await?;
+        let body_text = String::from_utf8(body.to_vec())?;
+        assert!(body_text.contains(OPERATOR_API_KEY_ENV));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn private_api_acl_protects_operator_and_internal_routes() -> anyhow::Result<()> {
+        let _env_lock = api_env_lock().lock().await;
+        let _api_key = EnvRestore::set(OPERATOR_API_KEY_ENV, "private-route-secret");
+        let _operator_pubkey = EnvRestore::remove(OPERATOR_PUBKEY_ENV);
+        let (state, _tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
+        let event_bus = new_event_bus();
+        let app = router(
+            state,
+            event_bus,
+            RateLimiter::new(RateLimitConfig::default()),
+            AttestationStore::new(),
+            crate::config::CorsConfig::default(),
+            tx_sender,
+            p2p_handle,
+        );
+
+        let missing_operator_auth = app
+            .clone()
+            .oneshot(Request::get("/v1/operator/pending").body(Body::empty())?)
+            .await?;
+        assert_eq!(missing_operator_auth.status(), StatusCode::UNAUTHORIZED);
+
+        let wrong_operator_auth = app
+            .clone()
+            .oneshot(
+                Request::get("/v1/operator/pending")
+                    .header(OPERATOR_KEY_HEADER, "wrong-secret")
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(wrong_operator_auth.status(), StatusCode::UNAUTHORIZED);
+
+        let authorized_operator = app
+            .clone()
+            .oneshot(
+                Request::get("/v1/operator/pending")
+                    .header(OPERATOR_KEY_HEADER, "private-route-secret")
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(authorized_operator.status(), StatusCode::OK);
+
+        let missing_internal_auth = app
+            .clone()
+            .oneshot(
+                Request::post("/v1/internal/blocks/announce")
+                    .header("content-type", "application/json")
+                    .body(Body::from("{}"))?,
+            )
+            .await?;
+        assert_eq!(missing_internal_auth.status(), StatusCode::UNAUTHORIZED);
+
+        let authorized_internal_reaches_handler = app
+            .oneshot(
+                Request::post("/v1/internal/blocks/announce")
+                    .header(header::AUTHORIZATION, "Bearer private-route-secret")
+                    .header("content-type", "application/json")
+                    .body(Body::from("{}"))?,
+            )
+            .await?;
+        assert_ne!(
+            authorized_internal_reaches_handler.status(),
+            StatusCode::UNAUTHORIZED
+        );
+        assert_ne!(
+            authorized_internal_reaches_handler.status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
 
         Ok(())
     }
