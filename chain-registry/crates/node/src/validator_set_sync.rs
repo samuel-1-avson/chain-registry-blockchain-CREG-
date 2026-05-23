@@ -1274,6 +1274,7 @@ mod tests {
             },
             view_change_certs: HashMap::new(),
             reorgs: Vec::new(),
+            pbft_engine: crate::state::PbftEngine::new(),
         }));
 
         Ok((state, tempdir))

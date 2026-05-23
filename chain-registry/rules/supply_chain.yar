@@ -466,3 +466,33 @@ rule EncodedPayloadLoader : obfuscation {
     condition:
         any of ($fetch*) and any of ($decode*) and any of ($exec*)
 }
+
+// ─── Dynamic / Obfuscated Property & Builtins Lookup ──────────────────────
+
+rule DynamicPropertyLookup : obfuscation {
+    meta:
+        description = "Detects dynamic property lookup on global objects used to evade static analysis"
+        threat_level = 4
+        category = "obfuscation"
+    strings:
+        // Match things like globalThis['ev' + 'al'] or window["ev" + "al"]
+        $lookup1 = /(globalThis|window|global|frames|self|parent|top)\[\s*['"][a-zA-Z0-9_\-\.\/]+['"]\s*(\+|\.concat\()\s*['"][a-zA-Z0-9_\-\.\/]+['"]/ nocase
+        // Or using dynamic variables or concat on global
+        $lookup2 = /(globalThis|window|global)\[\s*[^\]]+(\+|concat)[^\]]+\]/ nocase
+    condition:
+        any of them
+}
+
+rule PythonDynamicBuiltins : obfuscation {
+    meta:
+        description = "Detects Python dynamic builtin resolution to bypass static analysis"
+        threat_level = 4
+        category = "obfuscation"
+    strings:
+        $p1 = "getattr(__builtins__" nocase
+        $p2 = "__builtins__.__dict__" nocase
+        $p3 = "eval(compile(" nocase
+    condition:
+        any of them
+}
+

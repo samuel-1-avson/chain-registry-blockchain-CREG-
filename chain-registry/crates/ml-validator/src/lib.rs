@@ -26,9 +26,6 @@ use tracing::{debug, instrument};
 pub mod features;
 pub use features::{FeatureExtractor, PackageFeatures};
 
-pub mod tokenizer;
-pub use tokenizer::CodeTokenizer;
-
 pub mod deep_scan;
 pub use deep_scan::{
     deep_scan, DeepScanResult, DeepScanner, MlError, SuspiciousFile, ThreatClassification,

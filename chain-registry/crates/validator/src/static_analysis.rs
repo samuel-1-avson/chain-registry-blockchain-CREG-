@@ -358,6 +358,24 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
             }
         }
 
+        // Character escape density check (SA014)
+        for (line_num, line) in content.lines().enumerate() {
+            if let Some((_count, escape_bytes)) = check_escape_density(line) {
+                if line.len() > 0 && (escape_bytes as f64) / (line.len() as f64) >= 0.15 {
+                    deterministic_findings.push(Finding {
+                        id: "SA014".into(),
+                        title: "High character escape density".into(),
+                        severity: FindingSeverity::High,
+                        description: "Line contains high density of hex, unicode, or octal escape sequences, indicating possible code obfuscation.".into(),
+                        file: path.clone(),
+                        line: Some(line_num + 1),
+                    });
+                    break; // Flag once per file
+                }
+            }
+        }
+
+
         if has_high_entropy {
             match crate::llm::predict_intent(&content).await {
                 Ok(Some(score)) if score >= 80 => {
@@ -793,6 +811,73 @@ fn shannon_entropy(s: &str) -> f64 {
         .sum()
 }
 
+/// Helper to scan a line for hex/unicode/octal character escape density.
+/// Returns Option<(escape_count, escape_bytes)> if escape_count >= 8.
+fn check_escape_density(line: &str) -> Option<(usize, usize)> {
+    let mut count = 0;
+    let mut escape_bytes = 0;
+    let bytes = line.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' && i + 1 < bytes.len() {
+            let next = bytes[i + 1];
+            if next == b'x' {
+                // Hex escape: \xHH
+                if i + 3 < bytes.len() 
+                    && bytes[i + 2].is_ascii_hexdigit() 
+                    && bytes[i + 3].is_ascii_hexdigit() 
+                {
+                    count += 1;
+                    escape_bytes += 4;
+                    i += 4;
+                    continue;
+                }
+            } else if next == b'u' {
+                // Unicode escape: \uHHHH or \u{H...}
+                if i + 5 < bytes.len() 
+                    && bytes[i + 2..i + 6].iter().all(|&b| b.is_ascii_hexdigit()) 
+                {
+                    count += 1;
+                    escape_bytes += 6;
+                    i += 6;
+                    continue;
+                } else if i + 3 < bytes.len() && bytes[i + 2] == b'{' {
+                    let mut j = i + 3;
+                    while j < bytes.len() && bytes[j] != b'}' && bytes[j].is_ascii_hexdigit() {
+                        j += 1;
+                    }
+                    if j < bytes.len() && bytes[j] == b'}' && j > i + 3 {
+                        count += 1;
+                        escape_bytes += j + 1 - i;
+                        i = j + 1;
+                        continue;
+                    }
+                }
+            } else if next >= b'0' && next <= b'7' {
+                // Octal escape: \\[0-7]{1,3}
+                let mut len = 1;
+                if i + 2 < bytes.len() && bytes[i + 2] >= b'0' && bytes[i + 2] <= b'7' {
+                    len += 1;
+                    if i + 3 < bytes.len() && bytes[i + 3] >= b'0' && bytes[i + 3] <= b'7' {
+                        len += 1;
+                    }
+                }
+                count += 1;
+                escape_bytes += 1 + len;
+                i += 1 + len;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    if count >= 8 {
+        Some((count, escape_bytes))
+    } else {
+        None
+    }
+}
+
+
 fn is_source_file(path: &str) -> bool {
     let ext = std::path::Path::new(path)
         .extension()
@@ -981,3 +1066,78 @@ pub fn check_typosquatting_real(package_name: &str, ecosystem: &str) -> Option<F
         line: None,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_check_escape_density_none() {
+        assert!(check_escape_density("hello world").is_none());
+        assert!(check_escape_density("\\x41\\x42\\x43\\x44\\x45\\x46\\x47").is_none()); // 7 escapes (needs >= 8)
+    }
+
+    #[test]
+    fn test_check_escape_density_hex() {
+        // 8 escapes: \x41\x42\x43\x44\x45\x46\x47\x48
+        // count: 8, escape_bytes: 8 * 4 = 32. Line length: 32. Ratio: 1.0 (>= 15%)
+        let line = "\\x41\\x42\\x43\\x44\\x45\\x46\\x47\\x48";
+        let res = check_escape_density(line);
+        assert!(res.is_some());
+        let (count, escape_bytes) = res.unwrap();
+        assert_eq!(count, 8);
+        assert_eq!(escape_bytes, 32);
+    }
+
+    #[test]
+    fn test_check_escape_density_unicode() {
+        // 8 unicode escapes \u0041 (length 6)
+        // \u0041\u0042\u0043\u0044\u0045\u0046\u0047\u0048
+        let line = "\\u0041\\u0042\\u0043\\u0044\\u0045\\u0046\\u0047\\u0048";
+        let res = check_escape_density(line);
+        assert!(res.is_some());
+        let (count, escape_bytes) = res.unwrap();
+        assert_eq!(count, 8);
+        assert_eq!(escape_bytes, 48);
+
+        // Unicode dynamic format \u{41}
+        let line2 = "\\u{41}\\u{42}\\u{43}\\u{44}\\u{45}\\u{46}\\u{47}\\u{48}";
+        let res2 = check_escape_density(line2);
+        assert!(res2.is_some());
+        let (count2, escape_bytes2) = res2.unwrap();
+        assert_eq!(count2, 8);
+        assert_eq!(escape_bytes2, 48); // 8 escapes * 6 bytes each = 48
+    }
+
+    #[test]
+    fn test_check_escape_density_octal() {
+        // 8 octal escapes \101
+        let line = "\\101\\102\\103\\104\\105\\106\\107\\110";
+        let res = check_escape_density(line);
+        assert!(res.is_some());
+        let (count, escape_bytes) = res.unwrap();
+        assert_eq!(count, 8);
+        assert_eq!(escape_bytes, 32);
+    }
+
+    #[test]
+    fn test_check_escape_density_ratio() {
+        // 8 escapes: \x41 (4 bytes each) -> 32 bytes of escape
+        // Let's add extra padding text. If we have 32 bytes of escapes, and the line has length 220,
+        // 32 / 220 = 14.5% (below 15%). It shouldn't trigger finding, but check_escape_density returns Some((8, 32))
+        // because check_escape_density only checks the count.
+        // The ratio check itself is done inside run().
+        let escapes = "\\x41\\x42\\x43\\x44\\x45\\x46\\x47\\x48";
+        let padding = "a".repeat(200);
+        let line = format!("{}{}", escapes, padding);
+        let res = check_escape_density(&line);
+        assert!(res.is_some());
+        let (count, escape_bytes) = res.unwrap();
+        assert_eq!(count, 8);
+        assert_eq!(escape_bytes, 32);
+
+        let ratio = (escape_bytes as f64) / (line.len() as f64);
+        assert!(ratio < 0.15); // Below 15%, so run() won't add SA014 finding.
+    }
+}
+

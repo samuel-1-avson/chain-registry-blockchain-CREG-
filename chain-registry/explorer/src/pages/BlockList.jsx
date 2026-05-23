@@ -51,7 +51,7 @@ export default function BlockList() {
     const oldest = blocks[blocks.length - 1]
     if (!oldest) { setParams({}); return }
     // Go to blocks after the current window
-    const firstHeight = blocks[0]?.height || blocks[0]?.header?.height
+    const firstHeight = blocks[0]?.height
     if (firstHeight != null && tipHeight != null && firstHeight >= tipHeight) {
       // Already at tip — clear params
       setParams({})
@@ -68,7 +68,7 @@ export default function BlockList() {
   const goOlder = useCallback(() => {
     const oldest = blocks[blocks.length - 1]
     if (!oldest) return
-    const h = oldest.height ?? oldest.header?.height
+    const h = oldest.height
     if (h != null) {
       setParams({ before: String(h) }, { replace: true })
       setAutoFollow(false)
@@ -135,7 +135,7 @@ export default function BlockList() {
               {loading && !blocks.length
                 ? Array.from({ length: 10 }).map((_, i) => <SkeletonRow key={i} cells={6} />)
                 : blocks.map((b) => {
-                  const h = b.height ?? b.header?.height
+                  const h = b.height
                   const isFinalized = b.finalized ?? false
                   return (
                     <tr key={h ?? b.hash}>
@@ -143,14 +143,14 @@ export default function BlockList() {
                         <Link to={`/block/${h}`} style={{ color: 'var(--accent-primary-light)', textDecoration: 'none' }}>#{h}</Link>
                       </td>
                       <td><Hash value={b.hash} kind="block-hash" start={8} end={6} /></td>
-                      <td style={{ color: 'var(--text-secondary)' }}>{b.tx_count ?? b.transactions?.length ?? 0}</td>
-                      <td><Hash value={b.producer || b.header?.proposer_id} kind="validator" start={6} end={4} /></td>
+                      <td style={{ color: 'var(--text-secondary)' }}>{b.tx_count ?? 0}</td>
+                      <td><Hash value={b.producer} kind="validator" start={6} end={4} /></td>
                       <td>
                         <StatusBadge variant={isFinalized ? 'success' : 'info'}>
                           {isFinalized ? 'Finalized' : 'Pending'}
                         </StatusBadge>
                       </td>
-                      <td><TimeAgo timestamp={b.timestamp_ms ?? b.timestamp ?? b.header?.timestamp} /></td>
+                      <td><TimeAgo timestamp={b.timestamp} /></td>
                     </tr>
                   )
                 })}

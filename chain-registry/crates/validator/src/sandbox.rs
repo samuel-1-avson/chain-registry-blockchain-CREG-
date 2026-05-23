@@ -12,7 +12,8 @@
 
 use anyhow::Result;
 use common::{Finding, FindingSeverity, PackageManifest};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -164,6 +165,27 @@ fn compute_cache_key(tarball_bytes: &[u8], ecosystem: &str, config: &SandboxConf
     hex::encode(hasher.finalize())
 }
 
+async fn resolve_manifest_domains(hosts: &[String]) -> HashSet<String> {
+    let mut resolved = HashSet::new();
+    for host in hosts {
+        if host.parse::<IpAddr>().is_ok() {
+            resolved.insert(host.clone());
+            continue;
+        }
+        if let Ok(addrs) = tokio::net::lookup_host(format!("{}:443", host)).await {
+            for addr in addrs {
+                resolved.insert(addr.ip().to_string());
+            }
+        }
+        if let Ok(addrs) = tokio::net::lookup_host(format!("{}:80", host)).await {
+            for addr in addrs {
+                resolved.insert(addr.ip().to_string());
+            }
+        }
+    }
+    resolved
+}
+
 // ── Main Entry Point ────────────────────────────────────────────────────────
 
 pub async fn run(
@@ -194,11 +216,14 @@ pub async fn run(
 
     tracing::info!("Starting sandbox engine detection for {} ...", _pkg_id);
 
+    // Pre-resolve allowed network hosts to IP addresses asynchronously
+    let resolved_ips = resolve_manifest_domains(&manifest.allowed_network_hosts).await;
+
     // ── Engine 1: nsjail ──────────────────────────────────────────────────────
     if command_ready("nsjail", &["--version"]).await {
         tracing::info!("nsjail detected — using primary sandbox engine");
         let result =
-            run_nsjail_sandbox(&tarball_path, _pkg_id, &config, manifest, start_time).await;
+            run_nsjail_sandbox(&tarball_path, _pkg_id, &config, manifest, &resolved_ips, start_time).await;
         let _ = std::fs::remove_dir_all(&tmp_dir);
         let result = result?;
         cache_result(&cache_key, &result);
@@ -243,7 +268,7 @@ pub async fn run(
     if command_ready("runsc", &["--version"]).await {
         tracing::info!("gVisor (runsc) detected — using userspace syscall sandbox");
         let result =
-            run_gvisor_sandbox(&tarball_path, _pkg_id, &config, manifest, start_time).await;
+            run_gvisor_sandbox(&tarball_path, _pkg_id, &config, manifest, &resolved_ips, start_time).await;
         let _ = std::fs::remove_dir_all(&tmp_dir);
         let result = result?;
         cache_result(&cache_key, &result);
@@ -257,7 +282,7 @@ pub async fn run(
         let _ = std::fs::remove_dir_all(&tmp_dir);
         return match docker_result {
             Ok(obs) => {
-                let mut findings = check_against_manifest(&obs, manifest);
+                let mut findings = check_against_manifest(&obs, manifest, &resolved_ips);
                 findings.push(Finding {
                     id: "SB010".into(),
                     title: "Degraded sandbox isolation".into(),
@@ -395,39 +420,33 @@ fn tarball_contains_wasm(tarball_bytes: &[u8]) -> bool {
 
 /// Select ecosystem-specific install commands for nsjail.
 fn nsjail_install_args(ecosystem: &str, tarball_path: &Path) -> Vec<std::ffi::OsString> {
-    match ecosystem {
-        "npm" => vec![
-            "/usr/bin/node".into(),
-            "/usr/lib/node_modules/npm/bin/npm-cli.js".into(),
-            "install".into(),
-            tarball_path.as_os_str().to_owned(),
-        ],
-        "cargo" => vec![
-            "/usr/bin/cargo".into(),
-            "install".into(),
-            "--path".into(),
-            tarball_path.as_os_str().to_owned(),
-            "--no-default-features".into(),
-        ],
-        "rubygems" => vec![
-            "/usr/bin/gem".into(),
-            "install".into(),
-            tarball_path.as_os_str().to_owned(),
-        ],
-        "maven" => vec![
-            "/usr/bin/mvn".into(),
-            "install:install-file".into(),
-            "-Dfile".into(),
-            tarball_path.as_os_str().to_owned(),
-        ],
-        _ => vec![
-            "/usr/bin/python3".into(),
-            "-m".into(),
-            "pip".into(),
-            "install".into(),
-            tarball_path.as_os_str().to_owned(),
-        ],
-    }
+    let cmd_str = match ecosystem {
+        "npm" => format!(
+            "/usr/bin/node /usr/lib/node_modules/npm/bin/npm-cli.js install {} >/dev/null 2>&1",
+            tarball_path.to_string_lossy()
+        ),
+        "cargo" => format!(
+            "/usr/bin/cargo install --path {} --no-default-features >/dev/null 2>&1",
+            tarball_path.to_string_lossy()
+        ),
+        "rubygems" => format!(
+            "/usr/bin/gem install {} >/dev/null 2>&1",
+            tarball_path.to_string_lossy()
+        ),
+        "maven" => format!(
+            "/usr/bin/mvn install:install-file -Dfile={} >/dev/null 2>&1",
+            tarball_path.to_string_lossy()
+        ),
+        _ => format!(
+            "/usr/bin/python3 -m pip install {} >/dev/null 2>&1",
+            tarball_path.to_string_lossy()
+        ),
+    };
+    vec![
+        "/bin/sh".into(),
+        "-c".into(),
+        cmd_str.into(),
+    ]
 }
 
 /// Select ecosystem-specific Docker image and install command.
@@ -476,6 +495,7 @@ async fn run_nsjail_sandbox(
     pkg_id: &common::PackageId,
     config: &SandboxConfig,
     manifest: &PackageManifest,
+    resolved_ips: &HashSet<String>,
     start_time: Instant,
 ) -> Result<SandboxResult> {
     let install_args = nsjail_install_args(&pkg_id.ecosystem, tarball_path);
@@ -519,7 +539,7 @@ async fn run_nsjail_sandbox(
     let output = cmd.output().await?;
 
     let observations = parse_nsjail_output(&output.stderr)?;
-    let findings = check_against_manifest(&observations, manifest);
+    let findings = check_against_manifest(&observations, manifest, resolved_ips);
     let observations_count = observations.network_hosts.len()
         + observations.fs_writes.len()
         + observations.process_spawns.len();
@@ -546,9 +566,11 @@ async fn run_gvisor_sandbox(
     pkg_id: &common::PackageId,
     config: &SandboxConfig,
     manifest: &PackageManifest,
+    resolved_ips: &HashSet<String>,
     start_time: Instant,
 ) -> Result<SandboxResult> {
     let (docker_image, install_cmd) = docker_ecosystem_config(&pkg_id.ecosystem);
+    let install_cmd_redirected = format!("{} >/dev/null 2>&1", install_cmd);
 
     // gVisor runs as a Docker runtime, so we use `docker run --runtime=runsc`.
     let docker_future = tokio::process::Command::new("docker")
@@ -568,7 +590,7 @@ async fn run_gvisor_sandbox(
         .arg(docker_image)
         .arg("sh")
         .arg("-c")
-        .arg(install_cmd)
+        .arg(&install_cmd_redirected)
         .output();
 
     let output = tokio::time::timeout(
@@ -581,7 +603,7 @@ async fn run_gvisor_sandbox(
 
     // gVisor stderr is similar to Docker's — parse with the Docker parser.
     let observations = parse_docker_output(&output.stderr)?;
-    let mut findings = check_against_manifest(&observations, manifest);
+    let mut findings = check_against_manifest(&observations, manifest, resolved_ips);
     findings.push(Finding {
         id: "SB013".into(),
         title: "gVisor sandbox used".into(),
@@ -623,7 +645,7 @@ async fn run_docker_sandbox(
     // M2: Wrap the install command with strace to capture successful writes
     // and process spawns that the error-based parser would miss.
     let strace_wrapper = format!(
-        "strace -f -e trace=network,write,openat,execve -o /tmp/strace.log sh -c '{}' 2>&1; \
+        "strace -f -e trace=network,write,openat,execve -o /tmp/strace.log sh -c '{} >/dev/null 2>&1' 2>&1; \
          cat /tmp/strace.log >&2",
         install_cmd
     );
@@ -711,20 +733,51 @@ fn merge_observations(primary: &mut Observations, additional: Observations) {
 
 // ── Log Parsers ─────────────────────────────────────────────────────────────
 
+fn sanitize_control_characters(s: &str) -> String {
+    s.chars()
+        .map(|c| {
+            if c.is_ascii_control() && c != '\n' && c != '\r' && c != '\t' {
+                '?'
+            } else {
+                c
+            }
+        })
+        .collect()
+}
+
 /// Parse nsjail stderr/audit logs to extract observed system calls.
 /// nsjail in `-Mo` (audit/monitor mode) logs seccomp events in the format:
 ///   `[SECCOMP] connect(fd, addr={sa_family=AF_INET, addr=93.184.216.34, port=443}, ...)`
 ///   `[SECCOMP] open("/etc/passwd", O_RDONLY|O_CLOEXEC)`
 ///   `[SECCOMP] execve("/bin/sh", ["/bin/sh", "-c", "curl ..."])`
 fn parse_nsjail_output(stderr: &[u8]) -> Result<Observations> {
-    let stderr_str = String::from_utf8_lossy(stderr);
+    let raw_str = String::from_utf8_lossy(stderr);
+    let stderr_str = sanitize_control_characters(&raw_str);
     let mut network_hosts = Vec::new();
     let mut fs_writes = Vec::new();
     let mut process_spawns = Vec::new();
 
+    const MAX_OBSERVED_NET_HOSTS: usize = 500;
+    const MAX_OBSERVED_FS_WRITES: usize = 1000;
+    const MAX_OBSERVED_SPAWNS: usize = 500;
+    let mut limit_warned = false;
+
     for line in stderr_str.lines() {
+        if network_hosts.len() >= MAX_OBSERVED_NET_HOSTS
+            || fs_writes.len() >= MAX_OBSERVED_FS_WRITES
+            || process_spawns.len() >= MAX_OBSERVED_SPAWNS
+        {
+            if !limit_warned {
+                tracing::warn!("Sandbox observations limit reached; truncating remaining output to prevent DoS.");
+                limit_warned = true;
+            }
+        }
+
         // ── Network connections ────────────────────────────────────────────
         if line.contains("connect(") {
+            if network_hosts.len() >= MAX_OBSERVED_NET_HOSTS {
+                continue;
+            }
             if let Some(addr_start) = line.find("addr=") {
                 let rest = &line[addr_start + 5..];
                 let addr: String = rest
@@ -753,6 +806,9 @@ fn parse_nsjail_output(stderr: &[u8]) -> Result<Observations> {
         if line.contains("open(")
             && (line.contains("O_WRONLY") || line.contains("O_RDWR") || line.contains("O_CREAT"))
         {
+            if fs_writes.len() >= MAX_OBSERVED_FS_WRITES {
+                continue;
+            }
             if let Some(start) = line.find('"') {
                 let rest = &line[start + 1..];
                 if let Some(end) = rest.find('"') {
@@ -768,6 +824,9 @@ fn parse_nsjail_output(stderr: &[u8]) -> Result<Observations> {
 
         // ── Process spawns ────────────────────────────────────────────────
         if line.contains("execve(") {
+            if process_spawns.len() >= MAX_OBSERVED_SPAWNS {
+                continue;
+            }
             if let Some(start) = line.find('"') {
                 let rest = &line[start + 1..];
                 if let Some(end) = rest.find('"') {
@@ -792,12 +851,28 @@ fn parse_nsjail_output(stderr: &[u8]) -> Result<Observations> {
 
 /// Parse Docker container stderr to extract behavioural observations.
 fn parse_docker_output(stderr: &[u8]) -> Result<Observations> {
-    let stderr_str = String::from_utf8_lossy(stderr);
+    let raw_str = String::from_utf8_lossy(stderr);
+    let stderr_str = sanitize_control_characters(&raw_str);
     let mut network_hosts = Vec::new();
     let mut fs_writes = Vec::new();
     let mut process_spawns = Vec::new();
 
+    const MAX_OBSERVED_NET_HOSTS: usize = 500;
+    const MAX_OBSERVED_FS_WRITES: usize = 1000;
+    const MAX_OBSERVED_SPAWNS: usize = 500;
+    let mut limit_warned = false;
+
     for line in stderr_str.lines() {
+        if network_hosts.len() >= MAX_OBSERVED_NET_HOSTS
+            || fs_writes.len() >= MAX_OBSERVED_FS_WRITES
+            || process_spawns.len() >= MAX_OBSERVED_SPAWNS
+        {
+            if !limit_warned {
+                tracing::warn!("Sandbox observations limit reached; truncating remaining output to prevent DoS.");
+                limit_warned = true;
+            }
+        }
+
         let lower = line.to_lowercase();
 
         if lower.contains("econnrefused")
@@ -806,30 +881,36 @@ fn parse_docker_output(stderr: &[u8]) -> Result<Observations> {
             || lower.contains("dns resolution")
             || lower.contains("network is unreachable")
         {
-            if let Some(idx) = lower.find("enotfound ") {
-                let rest = &line[idx + 10..];
-                let host: String = rest.chars().take_while(|c| !c.is_whitespace()).collect();
-                if !host.is_empty() {
-                    network_hosts.push(host);
-                    continue;
+            if network_hosts.len() < MAX_OBSERVED_NET_HOSTS {
+                if let Some(idx) = lower.find("enotfound ") {
+                    let rest = &line[idx + 10..];
+                    let host: String = rest.chars().take_while(|c| !c.is_whitespace()).collect();
+                    if !host.is_empty() {
+                        network_hosts.push(host);
+                        continue;
+                    }
                 }
+                network_hosts.push(format!("network-attempt-detected (raw: {})", line.trim()));
             }
-            network_hosts.push(format!("network-attempt-detected (raw: {})", line.trim()));
         }
 
         if lower.contains("erofs") || lower.contains("read-only file system") {
-            if let Some(start) = line.find('\'') {
-                let rest = &line[start + 1..];
-                if let Some(end) = rest.find('\'') {
-                    fs_writes.push(rest[..end].to_string());
-                    continue;
+            if fs_writes.len() < MAX_OBSERVED_FS_WRITES {
+                if let Some(start) = line.find('\'') {
+                    let rest = &line[start + 1..];
+                    if let Some(end) = rest.find('\'') {
+                        fs_writes.push(rest[..end].to_string());
+                        continue;
+                    }
                 }
+                fs_writes.push(format!("write-attempted (raw: {})", line.trim()));
             }
-            fs_writes.push(format!("write-attempted (raw: {})", line.trim()));
         }
 
         if lower.contains("spawn") || lower.contains("child_process") || lower.contains("exec(") {
-            process_spawns.push(format!("process-spawn-detected (raw: {})", line.trim()));
+            if process_spawns.len() < MAX_OBSERVED_SPAWNS {
+                process_spawns.push(format!("process-spawn-detected (raw: {})", line.trim()));
+            }
         }
     }
 
@@ -847,20 +928,38 @@ fn parse_docker_output(stderr: &[u8]) -> Result<Observations> {
 ///   `openat(AT_FDCWD, "/tmp/foo", O_WRONLY|O_CREAT|O_TRUNC, 0644) = 3`
 ///   `execve("/bin/sh", ["sh", "-c", "..."], ...) = 0`
 fn parse_strace_output(stderr: &[u8]) -> Result<Observations> {
-    let stderr_str = String::from_utf8_lossy(stderr);
+    let raw_str = String::from_utf8_lossy(stderr);
+    let stderr_str = sanitize_control_characters(&raw_str);
     let mut network_hosts = Vec::new();
     let mut fs_writes = Vec::new();
     let mut process_spawns = Vec::new();
 
+    const MAX_OBSERVED_NET_HOSTS: usize = 500;
+    const MAX_OBSERVED_FS_WRITES: usize = 1000;
+    const MAX_OBSERVED_SPAWNS: usize = 500;
+    let mut limit_warned = false;
+
     for line in stderr_str.lines() {
+        if network_hosts.len() >= MAX_OBSERVED_NET_HOSTS
+            || fs_writes.len() >= MAX_OBSERVED_FS_WRITES
+            || process_spawns.len() >= MAX_OBSERVED_SPAWNS
+        {
+            if !limit_warned {
+                tracing::warn!("Sandbox observations limit reached; truncating remaining output to prevent DoS.");
+                limit_warned = true;
+            }
+        }
+
         // strace connect: extract IP from inet_addr("x.x.x.x")
         if line.starts_with("connect(") || line.contains("] connect(") {
-            if let Some(start) = line.find("inet_addr(\"") {
-                let rest = &line[start + 11..];
-                if let Some(end) = rest.find('"') {
-                    let ip = &rest[..end];
-                    if !ip.is_empty() {
-                        network_hosts.push(ip.to_string());
+            if network_hosts.len() < MAX_OBSERVED_NET_HOSTS {
+                if let Some(start) = line.find("inet_addr(\"") {
+                    let rest = &line[start + 11..];
+                    if let Some(end) = rest.find('"') {
+                        let ip = &rest[..end];
+                        if !ip.is_empty() {
+                            network_hosts.push(ip.to_string());
+                        }
                     }
                 }
             }
@@ -872,12 +971,14 @@ fn parse_strace_output(stderr: &[u8]) -> Result<Observations> {
             && !line.ends_with("= -1 EROFS")
             && !line.ends_with("= -1 EACCES")
         {
-            if let Some(start) = line.find('"') {
-                let rest = &line[start + 1..];
-                if let Some(end) = rest.find('"') {
-                    let path = &rest[..end];
-                    if !path.is_empty() {
-                        fs_writes.push(path.to_string());
+            if fs_writes.len() < MAX_OBSERVED_FS_WRITES {
+                if let Some(start) = line.find('"') {
+                    let rest = &line[start + 1..];
+                    if let Some(end) = rest.find('"') {
+                        let path = &rest[..end];
+                        if !path.is_empty() {
+                            fs_writes.push(path.to_string());
+                        }
                     }
                 }
             }
@@ -885,12 +986,14 @@ fn parse_strace_output(stderr: &[u8]) -> Result<Observations> {
 
         // strace execve (successful)
         if (line.starts_with("execve(") || line.contains("] execve(")) && line.contains("= 0") {
-            if let Some(start) = line.find('"') {
-                let rest = &line[start + 1..];
-                if let Some(end) = rest.find('"') {
-                    let binary = &rest[..end];
-                    if !binary.is_empty() {
-                        process_spawns.push(binary.to_string());
+            if process_spawns.len() < MAX_OBSERVED_SPAWNS {
+                if let Some(start) = line.find('"') {
+                    let rest = &line[start + 1..];
+                    if let Some(end) = rest.find('"') {
+                        let binary = &rest[..end];
+                        if !binary.is_empty() {
+                            process_spawns.push(binary.to_string());
+                        }
                     }
                 }
             }
@@ -909,15 +1012,24 @@ fn parse_strace_output(stderr: &[u8]) -> Result<Observations> {
 
 /// Cross-check the observed behaviour against what the publisher declared.
 /// H2: Supports `allowed_process_spawns` allowlist for fine-grained process control.
-fn check_against_manifest(obs: &Observations, manifest: &PackageManifest) -> Vec<Finding> {
+fn check_against_manifest(
+    obs: &Observations,
+    manifest: &PackageManifest,
+    resolved_ips: &HashSet<String>,
+) -> Vec<Finding> {
     let mut findings = Vec::new();
 
-    // Undeclared network access — subdomain matching.
+    // Undeclared network access — subdomain/IP matching.
     for host in &obs.network_hosts {
-        let allowed = manifest
-            .allowed_network_hosts
-            .iter()
-            .any(|declared| host == declared || host.ends_with(&format!(".{}", declared)));
+        let is_ip = host.parse::<IpAddr>().is_ok();
+        let allowed = if is_ip {
+            resolved_ips.contains(host)
+        } else {
+            manifest
+                .allowed_network_hosts
+                .iter()
+                .any(|declared| host == declared || host.ends_with(&format!(".{}", declared)))
+        };
         if !allowed {
             findings.push(Finding {
                 id: "SB001".into(),
@@ -1051,4 +1163,45 @@ pub async fn run_multiphase(
     }
 
     Ok(combined)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sanitize_control_characters() {
+        let input = "hello\x00world\x1b[31mred\r\nnewline";
+        let sanitized = sanitize_control_characters(input);
+        assert_eq!(sanitized, "hello?world?[31mred\r\nnewline");
+    }
+
+    #[tokio::test]
+    async fn test_resolve_manifest_domains() {
+        // Test with raw IPs
+        let hosts = vec!["127.0.0.1".to_string(), "8.8.8.8".to_string()];
+        let resolved = resolve_manifest_domains(&hosts).await;
+        assert!(resolved.contains("127.0.0.1"));
+        assert!(resolved.contains("8.8.8.8"));
+
+        // Test with localhost (should resolve to 127.0.0.1)
+        let local_hosts = vec!["localhost".to_string()];
+        let resolved_local = resolve_manifest_domains(&local_hosts).await;
+        assert!(resolved_local.contains("127.0.0.1") || resolved_local.contains("::1"));
+    }
+
+    #[test]
+    fn test_observation_limit_and_truncation() {
+        // Generate a large mock stderr with many connect calls
+        let mut mock_stderr = Vec::new();
+        for i in 0..600 {
+            mock_stderr.extend_from_slice(
+                format!("[SECCOMP] connect(fd, addr={{sa_family=AF_INET, addr=1.1.1.{}, port=443}})\n", i).as_bytes()
+            );
+        }
+
+        let obs = parse_nsjail_output(&mock_stderr).unwrap();
+        // Limit is 500
+        assert_eq!(obs.network_hosts.len(), 500);
+    }
 }

@@ -25,7 +25,7 @@ export default function BlockDetail() {
   )
 
   // Keyboard shortcuts: ← prev, → next
-  const height = data?.height ?? data?.number
+  const height = data?.height
   const canPrev = height != null && height > 0
   const canNext = height != null && (tipHeight == null || height < tipHeight)
 
@@ -51,12 +51,12 @@ export default function BlockDetail() {
   if (!data) return <EmptyState title="Block not found" description={`No block matches "${id}".`} />
 
   const b = data
-  const timestamp = b.timestamp_ms ?? b.timestamp ?? b.header?.timestamp
-  const txs = b.transactions || b.txs || []
-  const votes = b.votes || b.approvals || []
+  const timestamp = b.timestamp
+  const txs = b.transactions || []
+  const votes = b.votes || []
   const isFinalized = b.finalized ?? false
   const quorum = b.quorum ?? 0
-  const sizeBytes = b.size_bytes ?? b.header?.size_bytes
+  const sizeBytes = b.size_bytes
 
   return (
     <div style={{ display: 'grid', gap: 'var(--space-6)' }}>
@@ -80,11 +80,11 @@ export default function BlockDetail() {
       {/* ── Block fields ── */}
       <section className="ce-card" style={{ display: 'grid', gap: 'var(--space-3)' }}>
         <Row k="Hash"         v={<Hash value={b.hash} full showCopy />} />
-        <Row k="Previous"     v={<Hash value={b.prev_hash || b.previous_hash || b.header?.prev_hash} kind="block-hash" full />} />
+        <Row k="Previous"     v={<Hash value={b.prev_hash} kind="block-hash" full />} />
         <Row k="Timestamp"    v={<>{timestamp} <span style={{ color: 'var(--text-tertiary)', marginLeft: 8 }}><TimeAgo timestamp={timestamp} /></span></>} />
         <Row k="Producer"     v={
-          <Link to={`/validator/${(b.producer || b.header?.proposer_id || '')}`} style={{ textDecoration: 'none' }}>
-            <Hash value={b.producer || b.header?.proposer_id} kind="validator" full />
+          <Link to={`/validator/${(b.producer || '')}`} style={{ textDecoration: 'none' }}>
+            <Hash value={b.producer} kind="validator" full />
           </Link>
         } />
         <Row k="Tx count"     v={txs.length} />
@@ -130,7 +130,7 @@ export default function BlockDetail() {
             <div style={{ fontSize: 11, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>Signers</div>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
               {votes.map((v, i) => {
-                const signer = typeof v === 'string' ? v : (v.validator_id || v.signer || v.voter || '')
+                const signer = typeof v === 'string' ? v : (v.validator_id || '')
                 return (
                   <Link key={i} to={`/validator/${signer}`} style={{ textDecoration: 'none' }}>
                     <span style={{
@@ -168,7 +168,7 @@ export default function BlockDetail() {
               </thead>
               <tbody>
                 {txs.map((t, i) => {
-                  const canonical = t.canonical || t.package_canonical
+                  const canonical = t.canonical
                   const txStatus = t.status || (isFinalized ? 'finalized' : 'included')
                   return (
                     <tr key={canonical || t.hash || i}>
@@ -182,7 +182,7 @@ export default function BlockDetail() {
                           <Hash value={t.hash} kind="tx" full />
                         )}
                       </td>
-                      <td><Hash value={t.publisher || t.revoked_by || t.validator_id} kind="publisher" start={6} end={4} /></td>
+                      <td><Hash value={t.publisher} kind="publisher" start={6} end={4} /></td>
                       <td>
                         <StatusBadge variant={txStatus === 'finalized' ? 'success' : txStatus === 'revoked' ? 'error' : 'info'}>
                           {txStatus}

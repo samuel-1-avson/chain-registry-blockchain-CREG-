@@ -100,6 +100,7 @@ mod chain_store_tests {
                 vrf_proof: None,
             },
             transactions: vec![],
+            pbft_signatures: vec![],
         };
         let hash = block.hash();
         store.insert_block(&block).unwrap();
@@ -138,6 +139,7 @@ mod chain_store_tests {
                 vrf_proof: None,
             },
             transactions: vec![tx],
+            pbft_signatures: vec![],
         };
         store.insert_block(&block).unwrap();
 
@@ -176,6 +178,7 @@ mod chain_store_tests {
                 vrf_proof: None,
             },
             transactions: vec![pub_tx],
+            pbft_signatures: vec![],
         };
         store.insert_block(&block1).unwrap();
 
@@ -198,6 +201,7 @@ mod chain_store_tests {
                 vrf_proof: None,
             },
             transactions: vec![revoke_tx],
+            pbft_signatures: vec![],
         };
         store.insert_block(&block2).unwrap();
 
@@ -209,7 +213,7 @@ mod chain_store_tests {
 #[cfg(test)]
 mod consensus_tests {
     use chrono::Utc;
-    use common::{Block, BlockHeader, Transaction, ValidatorSignature, ValidatorVote};
+    use common::{Block, BlockHeader, BlockSignature, Transaction, ValidatorSignature, ValidatorVote};
     use consensus::{validator_set::ValidatorInfo, PbftEngine, ValidatorSet};
 
     fn make_validator(id: &str) -> ValidatorInfo {
@@ -237,6 +241,14 @@ mod consensus_tests {
         }
     }
 
+    fn make_block_sig(id: &str) -> BlockSignature {
+        BlockSignature {
+            validator_id: id.to_string(),
+            pubkey: format!("pubkey-{}", id),
+            signature: common::sha256_hex(id.as_bytes()),
+        }
+    }
+
     fn make_block(height: u64, prev: &str) -> Block {
         Block {
             header: BlockHeader {
@@ -250,6 +262,7 @@ mod consensus_tests {
                 vrf_proof: None,
             },
             transactions: vec![],
+            pbft_signatures: vec![],
         }
     }
 
@@ -267,14 +280,14 @@ mod consensus_tests {
 
         // Send 3 PREPARE votes.
         for i in 1..=3 {
-            let sig = make_sig(&format!("val-{}", i), ValidatorVote::Approve);
+            let sig = make_block_sig(&format!("val-{}", i));
             let _ = engine.prepare(&hash, &format!("val-{}", i), sig).unwrap();
         }
 
         // Send 3 COMMIT votes — should finalise.
         let mut finalised = false;
         for i in 1..=3 {
-            let sig = make_sig(&format!("val-{}", i), ValidatorVote::Approve);
+            let sig = make_block_sig(&format!("val-{}", i));
             finalised = engine.commit(&hash, &format!("val-{}", i), sig).unwrap();
         }
         assert!(finalised, "Block should be finalised after quorum");
@@ -292,13 +305,13 @@ mod consensus_tests {
         let hash = engine.start_round(block, vs).unwrap();
 
         for i in 1..=3 {
-            let sig = make_sig(&format!("val-{}", i), ValidatorVote::Approve);
+            let sig = make_block_sig(&format!("val-{}", i));
             let _ = engine.prepare(&hash, &format!("val-{}", i), sig).unwrap();
         }
 
         // Only 2 COMMIT votes — quorum not met.
         for i in 1..=2 {
-            let sig = make_sig(&format!("val-{}", i), ValidatorVote::Approve);
+            let sig = make_block_sig(&format!("val-{}", i));
             let _ = engine.commit(&hash, &format!("val-{}", i), sig).unwrap();
         }
 

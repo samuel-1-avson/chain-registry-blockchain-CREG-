@@ -158,7 +158,7 @@ export default function PublisherProfile() {
                         </td>
                         <td style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>{item.version || '—'}</td>
                         <td><StatusBadge variant={variantForStatus(item.status)}>{item.status || 'unknown'}</StatusBadge></td>
-                        <td><TimeAgo timestamp={item.timestamp_ms ?? item.timestamp ?? item.published_at} /></td>
+                        <td><TimeAgo timestamp={item.timestamp} /></td>
                       </tr>
                     )
                   })}

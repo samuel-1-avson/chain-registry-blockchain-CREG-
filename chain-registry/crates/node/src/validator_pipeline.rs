@@ -353,6 +353,7 @@ async fn process_package(
 
     let Some(consensus_outcome) = consensus_outcome else {
         tracing::error!("Consensus timeout for package {}", canonical);
+        cleanup(&state, &canonical).await;
         return;
     };
 

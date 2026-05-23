@@ -213,9 +213,9 @@ export default function Dashboard({ recentEvents = [] }) {
                       <Link to={`/block/${b.height}`} style={{ color: 'var(--accent-primary-light)', textDecoration: 'none' }}>#{b.height}</Link>
                     </td>
                     <td><Hash value={b.hash} kind="block-hash" start={6} end={6} /></td>
-                    <td style={{ color: 'var(--text-secondary)' }}>{b.tx_count ?? b.transactions?.length ?? 0}</td>
-                    <td><Hash value={b.producer || b.header?.proposer_id} kind="validator" start={6} end={4} /></td>
-                    <td><TimeAgo timestamp={b.timestamp_ms ?? b.timestamp ?? b.header?.timestamp} /></td>
+                    <td style={{ color: 'var(--text-secondary)' }}>{b.tx_count ?? 0}</td>
+                    <td><Hash value={b.producer} kind="validator" start={6} end={4} /></td>
+                    <td><TimeAgo timestamp={b.timestamp} /></td>
                   </tr>
                 ))}
               </tbody>
@@ -241,7 +241,7 @@ export default function Dashboard({ recentEvents = [] }) {
                   <li key={i} style={{ fontSize: 12, padding: '8px 10px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                       <StatusBadge variant="info">{ev.type || ev.kind || 'event'}</StatusBadge>
-                      <TimeAgo timestamp={ev.ts || ev.timestamp_ms || Date.now()} />
+                      <TimeAgo timestamp={ev.ts || Date.now()} />
                     </div>
                     {ev.height != null && (
                       <div style={{ marginTop: 4, color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontSize: 11 }}>

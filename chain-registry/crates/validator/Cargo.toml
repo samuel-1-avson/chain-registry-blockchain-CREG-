@@ -29,4 +29,6 @@ cap-std    = "3"
 ml-validator = { path = "../ml-validator" }
 base64       = "0.22"
 ed25519-dalek = { workspace = true }
+wasm_sandbox_crate = { package = "wasm-sandbox", path = "../wasm-sandbox" }
+
 

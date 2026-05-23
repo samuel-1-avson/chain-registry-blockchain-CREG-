@@ -155,7 +155,7 @@ RUN touch crates/*/src/*.rs
 # Build the node binaries with all features.
 # Avoid passing debug-only clang flags through bindgen here; librocksdb-sys
 # treats the extra arg as a libclang parse failure during the real build.
-RUN RUST_BACKTRACE=1 cargo build -vv --release --locked --package chain-registry-node --bin creg-node --bin creg-indexer
+RUN CARGO_BUILD_JOBS=2 RUST_BACKTRACE=1 cargo build -vv --release --locked --package chain-registry-node --bin creg-node --bin creg-indexer
 
 # Build CLI tools (includes TUI explorer)
 RUN cargo build --release --locked --package chain-registry-cli

@@ -10,14 +10,12 @@
 //! The legacy ONNX path is still available via `CREG_FORCE_ONNX=true` if a
 //! real trained model exists, but the default pipeline no longer needs one.
 
-use ndarray::Array2;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;
 use tracing::{debug, warn};
 
-use crate::tokenizer::CodeTokenizer;
 use crate::yara_scanner::YaraMatch;
 
 /// Maximum wall-clock time allowed for a single deep-scan inference pass.
@@ -122,9 +120,9 @@ pub fn scan_tarball_with_yara(
 
 /// Deep-scan configuration.
 pub struct DeepScanner {
-    model_path: std::path::PathBuf,
-    tokenizer_path: Option<std::path::PathBuf>,
-    max_length: usize,
+    _model_path: std::path::PathBuf,
+    _tokenizer_path: Option<std::path::PathBuf>,
+    _max_length: usize,
     /// Optional package info for OSV lookups.
     package_info: Option<crate::osv_client::PackageInfo>,
     /// Ecosystem of the package being scanned (e.g. "npm", "pypi", "cargo").
@@ -138,9 +136,9 @@ impl DeepScanner {
     /// Create a new scanner pointing at the given ONNX model.
     pub fn new<P: AsRef<Path>>(model_path: P) -> Self {
         Self {
-            model_path: model_path.as_ref().to_path_buf(),
-            tokenizer_path: None,
-            max_length: 512,
+            _model_path: model_path.as_ref().to_path_buf(),
+            _tokenizer_path: None,
+            _max_length: 512,
             package_info: None,
             ecosystem: String::new(),
         }
@@ -153,51 +151,20 @@ impl DeepScanner {
     /// (i.e. `CREG_FORCE_ONNX` is not set).  When ONNX is forced, returns
     /// an error if the model file is missing or suspiciously small.
     pub fn validate_at_startup(&self) -> Result<(), MlError> {
-        if std::env::var("CREG_FORCE_ONNX").unwrap_or_default() != "true" {
-            // Default pipeline doesn't need the ONNX model — nothing to check.
-            tracing::info!(
-                "ML deep-scan: ONNX model not required (rule-based pipeline active)"
+        if std::env::var("CREG_FORCE_ONNX").unwrap_or_default() == "true" {
+            tracing::warn!(
+                "CREG_FORCE_ONNX=true is DEPRECATED and ignored. The legacy ONNX path has been retired. Defaulting to the YARA-X rule-based scanning waterfall."
             );
-            return Ok(());
         }
-
-        if !self.model_path.exists() {
-            let msg = format!(
-                "ONNX model not found at '{}'. Set CREG_FORCE_ONNX=false or provide the model.",
-                self.model_path.display()
-            );
-            tracing::error!("{}", msg);
-            return Err(MlError::InferenceError(msg));
-        }
-
-        let meta = std::fs::metadata(&self.model_path).map_err(|e| {
-            MlError::InferenceError(format!(
-                "Cannot stat ONNX model at '{}': {e}",
-                self.model_path.display()
-            ))
-        })?;
-
-        if meta.len() < 1024 {
-            let msg = format!(
-                "ONNX model at '{}' is only {} bytes — likely a placeholder, not a trained model.",
-                self.model_path.display(),
-                meta.len()
-            );
-            tracing::warn!("{}", msg);
-            return Err(MlError::InferenceError(msg));
-        }
-
         tracing::info!(
-            "ML deep-scan: ONNX model verified at '{}' ({} bytes)",
-            self.model_path.display(),
-            meta.len()
+            "ML deep-scan: ONNX model not required (rule-based YARA-X pipeline active)"
         );
         Ok(())
     }
 
     /// Attach a tokenizer JSON path.
     pub fn with_tokenizer<P: AsRef<Path>>(mut self, path: P) -> Self {
-        self.tokenizer_path = Some(path.as_ref().to_path_buf());
+        self._tokenizer_path = Some(path.as_ref().to_path_buf());
         self
     }
 
@@ -209,24 +176,15 @@ impl DeepScanner {
 
     /// Return the model version string for inclusion in vote messages.
     pub fn model_version(&self) -> String {
-        if std::env::var("CREG_FORCE_ONNX").unwrap_or_default() == "true"
-            && self.model_path.exists()
-        {
-            let size = std::fs::metadata(&self.model_path)
-                .map(|m| m.len())
-                .unwrap_or(0);
-            if size >= 1024 {
-                return "codebert-v0.1.0".to_string();
-            }
-        }
         "creg-detect-v1.0.0".to_string()
     }
 
-    /// Run the multi-layer scan (default) or legacy ONNX scan.
+    /// Run the multi-layer scan (default).
     pub fn scan(&self, tarball_bytes: &[u8]) -> Result<DeepScanResult, MlError> {
-        // Legacy ONNX path — only used when explicitly forced AND a real model exists.
         if std::env::var("CREG_FORCE_ONNX").unwrap_or_default() == "true" {
-            return self.scan_onnx(tarball_bytes);
+            tracing::warn!(
+                "CREG_FORCE_ONNX=true is DEPRECATED and ignored. Legacy ONNX scan is retired. Running YARA-X multi-layer scan."
+            );
         }
 
         // ── Multi-Layer Pipeline ──────────────────────────────────────
@@ -311,102 +269,7 @@ impl DeepScanner {
         })
     }
 
-    /// Legacy ONNX-based scan. Only called when `CREG_FORCE_ONNX=true`.
-    fn scan_onnx(&self, tarball_bytes: &[u8]) -> Result<DeepScanResult, MlError> {
-        if !self.model_path.exists() {
-            warn!(
-                "ONNX model not found at '{}'; returning degraded deep-scan result",
-                self.model_path.display()
-            );
-            return Ok(mock_result());
-        }
 
-        let mut session = create_onnx_session(&self.model_path)?;
-
-        // Extract source files from the tarball, filtered to the package ecosystem.
-        let files = extract_source_files(tarball_bytes, &self.ecosystem)
-            .map_err(|e| MlError::ExtractionError(e.to_string()))?;
-
-        if files.is_empty() {
-            return Ok(mock_result());
-        }
-
-        // Load tokenizer — prefer the explicit path, otherwise fall back to a
-        // default BPE tokenizer (which will work for shape validation but
-        // produce nonsense vocabulary IDs if no real tokenizer.json is present).
-        let tokenizer = if let Some(ref path) = self.tokenizer_path {
-            CodeTokenizer::from_file(path, self.max_length)
-                .map_err(|e| MlError::TokenizerError(e.to_string()))?
-        } else {
-            CodeTokenizer::new(self.max_length)
-                .map_err(|e| MlError::TokenizerError(e.to_string()))?
-        };
-
-        let mut suspicious_files = Vec::new();
-        let mut max_prob = 0.0f32;
-
-        for (path, content) in &files {
-            // Truncate very long files to avoid excessive memory use.
-            let snippet = if content.len() > self.max_length * 4 {
-                &content[..self.max_length * 4]
-            } else {
-                content
-            };
-
-            let (ids, mask) = tokenizer
-                .encode_with_attention(snippet)
-                .map_err(|e| MlError::TokenizerError(e.to_string()))?;
-
-            let ids_i64: Vec<i64> = ids.iter().map(|&id| id as i64).collect();
-            let mask_i64: Vec<i64> = mask.iter().map(|&m| m as i64).collect();
-
-            let input_ids = Array2::from_shape_vec((1, ids_i64.len()), ids_i64)
-                .map_err(|e| MlError::InferenceError(e.to_string()))?;
-            let attention_mask = Array2::from_shape_vec((1, mask_i64.len()), mask_i64)
-                .map_err(|e| MlError::InferenceError(e.to_string()))?;
-
-            let prob = run_inference(&mut session, input_ids, attention_mask)?;
-
-            if prob > 0.30 {
-                suspicious_files.push(SuspiciousFile {
-                    path: path.clone(),
-                    probability: prob,
-                    snippet: snippet.chars().take(200).collect(),
-                });
-            }
-
-            if prob > max_prob {
-                max_prob = prob;
-            }
-        }
-
-        suspicious_files.sort_by(|a, b| {
-            b.probability
-                .partial_cmp(&a.probability)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-        suspicious_files.truncate(10);
-
-        let classification = ThreatClassification::from_probability(max_prob);
-        let confidence = (0.5 + (max_prob - 0.5).abs()).min(1.0);
-
-        debug!(
-            "Deep scan complete: prob={:.4}, classification={:?}, flagged_files={}",
-            max_prob,
-            classification,
-            suspicious_files.len()
-        );
-
-        Ok(DeepScanResult {
-            malicious_probability: max_prob,
-            confidence,
-            classification,
-            attention_regions: None, // TODO: extract from ONNX attention outputs
-            suspicious_files,
-            model_version: "codebert-v0.1.0".to_string(),
-            is_mock: false,
-        })
-    }
 }
 
 impl Default for DeepScanner {
@@ -488,75 +351,7 @@ fn timeout_result() -> DeepScanResult {
     }
 }
 
-/// Create an ONNX Runtime session from a file path.
-fn create_onnx_session(path: &Path) -> Result<ort::session::Session, MlError> {
-    let session = ort::session::Session::builder()
-        .map_err(|e| MlError::InferenceError(format!("Failed to create session builder: {e}")))?
-        .commit_from_file(path)
-        .map_err(|e| {
-            MlError::InferenceError(format!(
-                "Failed to load ONNX model from {}: {e}",
-                path.display()
-            ))
-        })?;
 
-    Ok(session)
-}
-
-/// Softmax over a slice of logits.
-fn softmax(logits: &[f32]) -> Vec<f32> {
-    let max = logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-    let exps: Vec<f32> = logits.iter().map(|&x| (x - max).exp()).collect();
-    let sum: f32 = exps.iter().sum();
-    exps.iter().map(|&x| x / sum).collect()
-}
-
-/// Run a single forward pass through the ONNX session and return the
-/// scalar probability of the malicious class.
-fn run_inference(
-    session: &mut ort::session::Session,
-    input_ids: Array2<i64>,
-    attention_mask: Array2<i64>,
-) -> Result<f32, MlError> {
-    let input_ids_tensor = ort::value::Tensor::<i64>::from_array(input_ids)
-        .map_err(|e| MlError::InferenceError(format!("Failed to create input_ids tensor: {e}")))?;
-    let attention_mask_tensor =
-        ort::value::Tensor::<i64>::from_array(attention_mask).map_err(|e| {
-            MlError::InferenceError(format!("Failed to create attention_mask tensor: {e}"))
-        })?;
-
-    let outputs = session
-        .run(ort::inputs![
-            "input_ids" => input_ids_tensor,
-            "attention_mask" => attention_mask_tensor
-        ])
-        .map_err(|e| MlError::InferenceError(format!("ONNX inference failed: {e}")))?;
-
-    let output_value = &outputs["logits"];
-
-    let array_view = output_value
-        .try_extract_array::<f32>()
-        .map_err(|e| MlError::InferenceError(format!("Failed to extract output array: {e}")))?;
-
-    let shape = array_view.shape();
-    if shape.len() != 2 || shape[0] != 1 {
-        return Err(MlError::InferenceError(format!(
-            "Unexpected ONNX output shape: expected [1, N], got {:?}",
-            shape
-        )));
-    }
-
-    let logits: Vec<f32> = array_view.iter().cloned().collect();
-    let prob = if logits.len() == 1 {
-        // Treat single output as probability directly.
-        logits[0]
-    } else {
-        let probs = softmax(&logits);
-        probs.get(1).copied().unwrap_or(0.0)
-    };
-
-    Ok(prob)
-}
 
 /// Extract text source files from a tar.gz byte slice, filtered to extensions
 /// appropriate for the given ecosystem. Passing an empty or unknown ecosystem
@@ -636,7 +431,7 @@ mod tests {
 
     #[test]
     fn test_onnx_fallback_mock_when_model_missing() {
-        // Legacy ONNX path should mock when model does not exist.
+        // CREG_FORCE_ONNX is deprecated and ignored, so scanning invalid tarball yields mock result.
         std::env::set_var("CREG_FORCE_ONNX", "true");
         let scanner = DeepScanner::new("/nonexistent/path/model.onnx");
         let result = scanner.scan(b"dummy tarball bytes").unwrap();
@@ -693,15 +488,6 @@ mod tests {
         // Degraded should cause abstention, not blocking
         assert!(ThreatClassification::Degraded.should_abstain());
         assert!(!ThreatClassification::Safe.should_abstain());
-    }
-
-    #[test]
-    fn test_softmax() {
-        let probs = softmax(&[1.0, 2.0, 3.0]);
-        let sum: f32 = probs.iter().sum();
-        assert!((sum - 1.0).abs() < 1e-5);
-        assert!(probs[2] > probs[1]);
-        assert!(probs[1] > probs[0]);
     }
 
     #[test]

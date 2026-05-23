@@ -154,7 +154,6 @@ fn operator_routes() -> Router<SharedState> {
         .route("/v1/operator/pending", get(list_pending))
         .route("/v1/operator/metrics/history", get(metrics_history))
         .route("/v1/operator/api-boundaries", get(api_boundaries))
-        .route("/metrics", get(prometheus_metrics))
         .layer(axum::middleware::from_fn(private_api_acl_middleware))
 }
 
@@ -173,14 +172,18 @@ fn internal_routes() -> Router<SharedState> {
 }
 
 fn legacy_routes(sse_bus: EventBus, ws_bus: EventBus) -> Router<SharedState> {
+    legacy_public_routes(sse_bus, ws_bus).merge(legacy_private_routes())
+}
+
+fn legacy_public_routes(sse_bus: EventBus, ws_bus: EventBus) -> Router<SharedState> {
     Router::new()
         // Health & chain
         .route("/v1/health", get(health))
         .route("/health", get(health))
+        .route("/metrics", get(prometheus_metrics))
         .route("/rpc", post(crate::json_rpc::handle))
         .route("/jsonrpc", post(crate::json_rpc::handle))
         .route("/v1/chain/stats", get(chain_stats))
-        .route("/v1/runtime/config", get(runtime_config))
         .route("/v1/validators/register", post(register_validator_identity))
         .route(
             "/v1/validators/registrations",
@@ -190,12 +193,9 @@ fn legacy_routes(sse_bus: EventBus, ws_bus: EventBus) -> Router<SharedState> {
             "/v1/validators/registrations/:evm_address",
             delete(delete_validator_registration),
         )
-        .route("/v1/nodes", get(get_nodes))
-        .route("/v1/p2p/status", get(p2p_status))
         .route("/v1/bridge/status", get(bridge_status))
         .route("/v1/bridge/anchors", get(bridge_anchors))
         .route("/v1/governance/proposals", get(governance_proposals))
-        .route("/v1/metrics/history", get(metrics_history))
         .route("/v1/reorgs", get(reorgs))
         .route("/v1/richlist", get(richlist))
         // Packages
@@ -207,7 +207,6 @@ fn legacy_routes(sse_bus: EventBus, ws_bus: EventBus) -> Router<SharedState> {
         .route("/v1/blocks", get(list_blocks_paginated))
         .route("/v1/blocks/:height", get(get_block_by_height))
         .route("/v1/blocks/hash/:hash", get(get_block_by_hash))
-        .route("/v1/blocks/announce", post(receive_block_announcement))
         // Transactions
         .route("/v1/transactions/:canonical", get(get_transaction))
         // Publishers
@@ -220,20 +219,12 @@ fn legacy_routes(sse_bus: EventBus, ws_bus: EventBus) -> Router<SharedState> {
         )
         // Validator detail
         .route("/v1/validators/:address", get(get_validator_profile))
-        // Pending pool
-        .route("/v1/pending", get(list_pending))
         // Consensus
         .route("/v1/consensus/vote", post(receive_vote))
         .route("/v1/consensus/state", get(consensus_state))
-        .route(
-            "/v1/consensus/admission-attestation",
-            post(receive_admission_attestation),
-        )
         .route("/v1/publishers/rotate-key", post(rotate_publisher_key))
         // Search
         .route("/v1/search", get(search_handler))
-        // Appeals & AAA
-        .route("/v1/appeals/:id/audit", post(submit_audit))
         // Event streaming - SSE & Websockets
         .route(
             "/v1/events",
@@ -249,6 +240,22 @@ fn legacy_routes(sse_bus: EventBus, ws_bus: EventBus) -> Router<SharedState> {
                 async move { events::ws_handler(ws, axum::extract::State(bus)).await }
             }),
         )
+}
+
+fn legacy_private_routes() -> Router<SharedState> {
+    Router::new()
+        .route("/v1/runtime/config", get(runtime_config))
+        .route("/v1/nodes", get(get_nodes))
+        .route("/v1/p2p/status", get(p2p_status))
+        .route("/v1/metrics/history", get(metrics_history))
+        .route("/v1/pending", get(list_pending))
+        .route("/v1/blocks/announce", post(receive_block_announcement))
+        .route(
+            "/v1/consensus/admission-attestation",
+            post(receive_admission_attestation),
+        )
+        .route("/v1/appeals/:id/audit", post(submit_audit))
+        .layer(axum::middleware::from_fn(private_api_acl_middleware))
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -1331,6 +1338,7 @@ async fn submit_package(
 
 fn rest_admission_error(error: crate::package_admission::AdmissionError) -> Response {
     use crate::package_admission::{AdmissionError, PublisherAdmissionError};
+    tracing::error!("E2E DEBUG: Admission rejected: {:?}", error);
 
     let status = match &error {
         AdmissionError::InvalidPackageId(_)

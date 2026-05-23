@@ -109,7 +109,7 @@ export default function Search() {
         // Try transaction
         try {
           const tx = await nodeApi.transaction(cls.value, controller.signal)
-          if (tx) found.push({ kind: 'tx', title: tx.transaction?.canonical || tx.canonical || cls.value, subtitle: `block: ${tx.block_height ?? '?'}`, href: `/tx/${encodeURIComponent(cls.value)}`, data: tx })
+          if (tx) found.push({ kind: 'tx', title: tx.canonical || cls.value, subtitle: `block: ${tx.block_height ?? '?'}`, href: `/tx/${encodeURIComponent(cls.value)}`, data: tx })
         } catch { /* not a tx */ }
       }
 
@@ -147,115 +147,115 @@ export default function Search() {
     return () => { cancelled = true; controller.abort() }
   }, [q])
 
-  // Keyboard navigation
-  const onKeyDown = useCallback((e) => {
-    if (e.key === 'ArrowDown') { e.preventDefault(); setSelected((s) => Math.min(s + 1, matches.length - 1)) }
-    if (e.key === 'ArrowUp') { e.preventDefault(); setSelected((s) => Math.max(s - 1, 0)) }
-    if (e.key === 'Enter' && matches[selected]) { nav(matches[selected].href) }
-  }, [matches, selected, nav])
+// Keyboard navigation
+const onKeyDown = useCallback((e) => {
+  if (e.key === 'ArrowDown') { e.preventDefault(); setSelected((s) => Math.min(s + 1, matches.length - 1)) }
+  if (e.key === 'ArrowUp') { e.preventDefault(); setSelected((s) => Math.max(s - 1, 0)) }
+  if (e.key === 'Enter' && matches[selected]) { nav(matches[selected].href) }
+}, [matches, selected, nav])
 
-  useEffect(() => {
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onKeyDown])
+useEffect(() => {
+  window.addEventListener('keydown', onKeyDown)
+  return () => window.removeEventListener('keydown', onKeyDown)
+}, [onKeyDown])
 
-  // Group results by kind
-  const grouped = useMemo(() => {
-    const groups = {}
-    for (const m of matches) {
-      if (!groups[m.kind]) groups[m.kind] = []
-      groups[m.kind].push(m)
-    }
-    return groups
-  }, [matches])
+// Group results by kind
+const grouped = useMemo(() => {
+  const groups = {}
+  for (const m of matches) {
+    if (!groups[m.kind]) groups[m.kind] = []
+    groups[m.kind].push(m)
+  }
+  return groups
+}, [matches])
 
-  return (
-    <div style={{ display: 'grid', gap: 'var(--space-4)' }}>
-      <h1 style={{ margin: 0, fontSize: 20 }}>Search results</h1>
-      <p style={{ color: 'var(--text-tertiary)', fontSize: 13, margin: 0 }}>
-        Query: <code style={{ fontFamily: 'var(--font-mono)', background: 'var(--surface)', padding: '2px 6px', borderRadius: 4 }}>{q}</code>
-        {matches.length > 0 && <span style={{ marginLeft: 12 }}>{matches.length} result{matches.length !== 1 ? 's' : ''}</span>}
-      </p>
+return (
+  <div style={{ display: 'grid', gap: 'var(--space-4)' }}>
+    <h1 style={{ margin: 0, fontSize: 20 }}>Search results</h1>
+    <p style={{ color: 'var(--text-tertiary)', fontSize: 13, margin: 0 }}>
+      Query: <code style={{ fontFamily: 'var(--font-mono)', background: 'var(--surface)', padding: '2px 6px', borderRadius: 4 }}>{q}</code>
+      {matches.length > 0 && <span style={{ marginLeft: 12 }}>{matches.length} result{matches.length !== 1 ? 's' : ''}</span>}
+    </p>
 
-      {loading && <SkeletonCard lines={4} />}
-      {searchStatus && <EndpointStatusNotice status={searchStatus} title="Search index unavailable" />}
-      {error && (
-        <NoticeState
-          title="Search service degraded"
-          variant="error"
-          description={`Server-side search returned an error. Direct block, address, validator, and package lookups are still shown below when available. ${error.message}`}
-        />
-      )}
+    {loading && <SkeletonCard lines={4} />}
+    {searchStatus && <EndpointStatusNotice status={searchStatus} title="Search index unavailable" />}
+    {error && (
+      <NoticeState
+        title="Search service degraded"
+        variant="error"
+        description={`Server-side search returned an error. Direct block, address, validator, and package lookups are still shown below when available. ${error.message}`}
+      />
+    )}
 
-      {!loading && matches.length === 0 ? (
-        <EmptyState
-          title="No matches"
-          description={
-            <div style={{ display: 'grid', gap: 8, fontSize: 13, marginTop: 8 }}>
-              <p>Try searching for:</p>
-              <ul style={{ margin: 0, paddingLeft: 20, display: 'grid', gap: 4, color: 'var(--text-secondary)' }}>
-                <li>A <strong>block height</strong> — e.g. <code>42</code></li>
-                <li>An <strong>EVM address</strong> — e.g. <code>0x1234…abcd</code></li>
-                <li>A <strong>block or tx hash</strong> — e.g. <code>0xabcdef…</code> (64 hex)</li>
-                <li>A <strong>package</strong> — e.g. <code>npm/express@4.18.0</code></li>
+    {!loading && matches.length === 0 ? (
+      <EmptyState
+        title="No matches"
+        description={
+          <div style={{ display: 'grid', gap: 8, fontSize: 13, marginTop: 8 }}>
+            <p>Try searching for:</p>
+            <ul style={{ margin: 0, paddingLeft: 20, display: 'grid', gap: 4, color: 'var(--text-secondary)' }}>
+              <li>A <strong>block height</strong> — e.g. <code>42</code></li>
+              <li>An <strong>EVM address</strong> — e.g. <code>0x1234…abcd</code></li>
+              <li>A <strong>block or tx hash</strong> — e.g. <code>0xabcdef…</code> (64 hex)</li>
+              <li>A <strong>package</strong> — e.g. <code>npm/express@4.18.0</code></li>
+            </ul>
+          </div>
+        }
+      />
+    ) : (
+      <div style={{ display: 'grid', gap: 'var(--space-4)' }}>
+        {Object.entries(grouped).map(([kind, items]) => (
+          <div key={kind}>
+            <div style={{ fontSize: 11, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
+              {KIND_ICON[kind] || '•'} {kind}s ({items.length})
+            </div>
+            <div className="ce-card" style={{ padding: 0, overflow: 'hidden' }}>
+              <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+                {items.map((m, i) => {
+                  const globalIdx = matches.indexOf(m)
+                  const isSelected = globalIdx === selected
+                  return (
+                    <li key={i}>
+                      <Link
+                        to={m.href}
+                        style={{
+                          display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
+                          padding: 'var(--space-3) var(--space-4)',
+                          borderBottom: '1px solid var(--border)',
+                          textDecoration: 'none',
+                          background: isSelected ? 'var(--surface-hover)' : 'transparent',
+                          transition: 'background var(--transition-fast)',
+                        }}
+                        onMouseEnter={() => setSelected(globalIdx)}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                          <span style={{ fontSize: 16 }}>{KIND_ICON[m.kind] || '•'}</span>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ color: 'var(--accent-primary-light)', fontFamily: 'var(--font-mono)', fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {m.title}
+                            </div>
+                            {m.subtitle && (
+                              <div style={{ color: 'var(--text-tertiary)', fontSize: 11, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {m.subtitle}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        <StatusBadge variant={KIND_COLOR[m.kind] || 'muted'}>{m.kind}</StatusBadge>
+                      </Link>
+                    </li>
+                  )
+                })}
               </ul>
             </div>
-          }
-        />
-      ) : (
-        <div style={{ display: 'grid', gap: 'var(--space-4)' }}>
-          {Object.entries(grouped).map(([kind, items]) => (
-            <div key={kind}>
-              <div style={{ fontSize: 11, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
-                {KIND_ICON[kind] || '•'} {kind}s ({items.length})
-              </div>
-              <div className="ce-card" style={{ padding: 0, overflow: 'hidden' }}>
-                <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
-                  {items.map((m, i) => {
-                    const globalIdx = matches.indexOf(m)
-                    const isSelected = globalIdx === selected
-                    return (
-                      <li key={i}>
-                        <Link
-                          to={m.href}
-                          style={{
-                            display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
-                            padding: 'var(--space-3) var(--space-4)',
-                            borderBottom: '1px solid var(--border)',
-                            textDecoration: 'none',
-                            background: isSelected ? 'var(--surface-hover)' : 'transparent',
-                            transition: 'background var(--transition-fast)',
-                          }}
-                          onMouseEnter={() => setSelected(globalIdx)}
-                        >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-                            <span style={{ fontSize: 16 }}>{KIND_ICON[m.kind] || '•'}</span>
-                            <div style={{ minWidth: 0 }}>
-                              <div style={{ color: 'var(--accent-primary-light)', fontFamily: 'var(--font-mono)', fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                {m.title}
-                              </div>
-                              {m.subtitle && (
-                                <div style={{ color: 'var(--text-tertiary)', fontSize: 11, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                  {m.subtitle}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                          <StatusBadge variant={KIND_COLOR[m.kind] || 'muted'}>{m.kind}</StatusBadge>
-                        </Link>
-                      </li>
-                    )
-                  })}
-                </ul>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+          </div>
+        ))}
+      </div>
+    )}
 
-      <p style={{ color: 'var(--text-tertiary)', fontSize: 11, marginTop: 'var(--space-4)' }}>
-        Tip: Use ↑↓ arrow keys to navigate results, Enter to open.
-      </p>
-    </div>
-  )
+    <p style={{ color: 'var(--text-tertiary)', fontSize: 11, marginTop: 'var(--space-4)' }}>
+      Tip: Use ↑↓ arrow keys to navigate results, Enter to open.
+    </p>
+  </div>
+)
 }

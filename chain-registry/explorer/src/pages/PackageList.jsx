@@ -52,7 +52,7 @@ export default function PackageList() {
                   </td>
                   <td style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>{p.version || '—'}</td>
                   <td><Hash value={p.publisher} kind="publisher" start={6} end={4} /></td>
-                  <td><TimeAgo timestamp={p.timestamp_ms ?? p.timestamp ?? p.published_at} /></td>
+                  <td><TimeAgo timestamp={p.timestamp} /></td>
                 </tr>
               ))}
           </tbody>

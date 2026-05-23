@@ -6,6 +6,78 @@ use chrono::Utc;
 use common::{PackageId, PackageManifest, PublishRequest};
 use std::{sync::Arc, time::Duration};
 use tokio::{sync::RwLock, time::timeout};
+use axum::{routing::post, Json, Router};
+use axum::http::StatusCode;
+use serde_json::Value;
+use tokio::net::TcpListener;
+
+fn make_tarball(path: &str, content: &str) -> Vec<u8> {
+    let mut tar_bytes = Vec::new();
+    {
+        let encoder = flate2::write::GzEncoder::new(&mut tar_bytes, flate2::Compression::default());
+        let mut archive = tar::Builder::new(encoder);
+        let mut header = tar::Header::new_gnu();
+        header.set_size(content.as_bytes().len() as u64);
+        header.set_mode(0o644);
+        header.set_cksum();
+        archive.append_data(&mut header, path, content.as_bytes()).unwrap();
+        archive.finish().unwrap();
+        archive.into_inner().unwrap().finish().unwrap();
+    }
+    tar_bytes
+}
+
+async fn spawn_mock_staking_rpc(staked_balance: u64) -> String {
+    async fn handle_rpc(Json(payload): Json<Value>, staked_result: String) -> Json<Value> {
+        Json(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": payload.get("id").cloned().unwrap_or_else(|| serde_json::json!(1)),
+            "result": staked_result,
+        }))
+    }
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let staked_result = format!("0x{:064x}", staked_balance);
+    let app = Router::new().route(
+        "/",
+        post({
+            let staked_result = staked_result.clone();
+            move |payload| handle_rpc(payload, staked_result.clone())
+        }),
+    );
+
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    format!("http://{}", addr)
+}
+
+async fn spawn_mock_ipfs(payload: Vec<u8>, status: StatusCode) -> String {
+    async fn handle_ipfs(
+        payload: Vec<u8>,
+        status: StatusCode,
+    ) -> impl axum::response::IntoResponse {
+        (status, payload)
+    }
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let app = Router::new().route(
+        "/api/v0/cat",
+        post({
+            let payload = payload.clone();
+            move || handle_ipfs(payload.clone(), status)
+        }),
+    );
+
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    format!("http://{}", addr)
+}
 
 /// Helper: start a full node on a random port, return the base URL.
 async fn start_test_node() -> (String, tokio::task::JoinHandle<()>) {
@@ -26,6 +98,14 @@ async fn start_test_node() -> (String, tokio::task::JoinHandle<()>) {
     let dir = tempfile::TempDir::new().expect("tempdir");
     let chain = ChainStore::open(dir.path()).expect("chain store");
 
+    let payload = make_tarball("index.js", "console.log('hello world');");
+    let ipfs_url = spawn_mock_ipfs(payload, StatusCode::OK).await;
+    let rpc_url = spawn_mock_staking_rpc(1000).await;
+
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
+    let rules_dir = std::path::PathBuf::from(manifest_dir).join("../../rules");
+    std::env::set_var("CREG_YARA_RULES_DIR", rules_dir.to_str().unwrap());
+
     let config = NodeConfig {
         listen_addr: "127.0.0.1:0".into(), // OS assigns a port
         data_dir: dir.path().to_path_buf(),
@@ -34,7 +114,9 @@ async fn start_test_node() -> (String, tokio::task::JoinHandle<()>) {
         is_validator: true,
         peers: vec![],
         block_interval_secs: 1,
-        ipfs_url: "http://127.0.0.1:5001".into(),
+        ipfs_url,
+        eth_rpc_url: rpc_url,
+        staking_addr: "0x1000000000000000000000000000000000000001".into(),
         ..NodeConfig::default()
     };
 
@@ -51,7 +133,7 @@ async fn start_test_node() -> (String, tokio::task::JoinHandle<()>) {
         publisher_index: PublisherIndex::new(),
         validator_set_bootstrap: common::ValidatorSet::default(),
         validator_set: common::ValidatorSet::default(),
-        votes: std::collections::HashMap::new(),
+        package_rounds: std::collections::HashMap::new(),
         config: config.clone(),
         p2p_status: P2PStatus::default(),
         bridge_status: BridgeStatus::default(),
@@ -61,6 +143,7 @@ async fn start_test_node() -> (String, tokio::task::JoinHandle<()>) {
         validator_set_sync: node::state::ValidatorSetSyncStatus::default(),
         view_change_certs: std::collections::HashMap::new(),
         reorgs: Vec::new(),
+        pbft_engine: node::state::PbftEngine::new(),
     }));
 
     let limiter = RateLimiter::new(RateLimitConfig::default());
@@ -101,14 +184,18 @@ fn make_request(ecosystem: &str, name: &str, version: &str) -> PublishRequest {
     let signing_key = SigningKey::generate(&mut OsRng);
     let pubkey_hex = hex::encode(signing_key.verifying_key().as_bytes());
     let id = PackageId::new(ecosystem, name, version);
-    let content_hash = common::sha256_hex(b"test-tarball-bytes");
-    let msg = format!("{}{}", id.canonical(), content_hash);
+
+    let payload = make_tarball("index.js", "console.log('hello world');");
+    let content_hash = common::sha256_hex(&payload);
+    let publisher_address = "0x1111111111111111111111111111111111111111".to_string();
+    let msg = common::publish_signature_message(&id, &content_hash, &publisher_address);
     let sig = signing_key.sign(msg.as_bytes());
 
     PublishRequest {
         id,
         content_hash,
         ipfs_cid: format!("bafyDev{}", &common::sha256_hex(b"dev")[..32]),
+        publisher_address,
         publisher_pubkey: pubkey_hex,
         signature: hex::encode(sig.to_bytes()),
         manifest: PackageManifest::default(),
@@ -320,4 +407,60 @@ async fn e2e_prometheus_metrics_endpoint() {
         body.contains("creg_pending_pool_size"),
         "Metrics should include pending pool size"
     );
+}
+
+#[tokio::test]
+async fn e2e_legacy_private_api_acl_protection() {
+    // 1. Unset operator keys to verify 503 behavior
+    std::env::remove_var("CREG_OPERATOR_API_KEY");
+    std::env::remove_var("CREG_OPERATOR_PUBKEY");
+
+    let (url, _handle) = start_test_node().await;
+
+    // A public route should still be accessible.
+    let resp = reqwest::get(format!("{}/v1/health", url)).await.unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    // Private route should be locked/unavailable.
+    let resp = reqwest::get(format!("{}/v1/runtime/config", url)).await.unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
+
+    // 2. Set operator key to verify authorization gate
+    let secret_key = "test-operator-secret-999";
+    std::env::set_var("CREG_OPERATOR_API_KEY", secret_key);
+
+    // Request without headers -> 401 Unauthorized
+    let resp = reqwest::get(format!("{}/v1/runtime/config", url)).await.unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+    // Request with incorrect x-operator-key header -> 401 Unauthorized
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(format!("{}/v1/runtime/config", url))
+        .header("x-operator-key", "wrong-secret")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+    // Request with correct x-operator-key header -> 200 OK
+    let resp = client
+        .get(format!("{}/v1/runtime/config", url))
+        .header("x-operator-key", secret_key)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    // Request with correct Bearer token -> 200 OK
+    let resp = client
+        .get(format!("{}/v1/runtime/config", url))
+        .bearer_auth(secret_key)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    // Cleanup
+    std::env::remove_var("CREG_OPERATOR_API_KEY");
 }

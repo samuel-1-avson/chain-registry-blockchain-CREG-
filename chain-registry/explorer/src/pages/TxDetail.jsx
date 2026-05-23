@@ -130,11 +130,11 @@ export default function TxDetail() {
       {/* ── Core fields ── */}
       <section className="ce-card" style={{ display: 'grid', gap: 'var(--space-3)' }}>
         <Row k="Canonical"  v={t.canonical || canonical} mono />
-        <Row k="Version"    v={t.version || (t.id?.version)} />
+        <Row k="Version"    v={t.version} />
         <Row k="Publisher"  v={
-          t.publisher || t.publisher_pubkey ? (
-            <Link to={`/publisher/${encodeURIComponent(t.publisher || t.publisher_pubkey)}`} style={{ textDecoration: 'none' }}>
-              <Hash value={t.publisher || t.publisher_pubkey} kind="publisher" full />
+          t.publisher ? (
+            <Link to={`/publisher/${encodeURIComponent(t.publisher)}`} style={{ textDecoration: 'none' }}>
+              <Hash value={t.publisher} kind="publisher" full />
             </Link>
           ) : '—'
         } />
@@ -147,10 +147,10 @@ export default function TxDetail() {
             </span>
           ) : 'pending'
         } />
-        <Row k="Included at" v={t.included_at ? <TimeAgo timestamp={t.included_at} /> : t.published_at ? <TimeAgo timestamp={t.published_at} /> : '—'} />
+        <Row k="Included at" v={t.included_at ? <TimeAgo timestamp={t.included_at} /> : '—'} />
         <Row k="IPFS cid"   v={t.ipfs_cid ? <Hash value={t.ipfs_cid} full showCopy /> : '—'} />
-        <Row k="Payload hash" v={t.payload_hash || t.content_hash ? <Hash value={t.payload_hash || t.content_hash} full showCopy /> : '—'} />
-        {t.ecosystem && <Row k="Ecosystem" v={t.ecosystem || t.id?.ecosystem} />}
+        <Row k="Payload hash" v={t.payload_hash ? <Hash value={t.payload_hash} full showCopy /> : '—'} />
+        {t.ecosystem && <Row k="Ecosystem" v={t.ecosystem} />}
       </section>
 
       {/* ── Validation report ── */}

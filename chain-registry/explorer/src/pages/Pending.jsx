@@ -10,8 +10,7 @@ import { StatusBadge } from '../components/StatusBadge.jsx'
 
 export default function Pending() {
   const { data, error, loading, refetch } = usePolling((s) => nodeApi.pending(s), { intervalMs: 3000 })
-  const rawItems = data?.packages || data?.pending || data?.items || (Array.isArray(data) ? data : [])
-  const items = rawItems.map((item) => (typeof item === 'string' ? { canonical: item } : item))
+  const items = data?.packages || []
 
   if (error && !items.length) return <ErrorState error={error} onRetry={refetch} title="Could not load mempool" />
 
@@ -47,7 +46,7 @@ export default function Pending() {
                       )}
                     </td>
                     <td><Hash value={t.publisher} kind="publisher" start={6} end={4} /></td>
-                    <td>{t.received_at || t.timestamp_ms || t.timestamp ? <TimeAgo timestamp={t.received_at || t.timestamp_ms || t.timestamp} /> : '—'}</td>
+                    <td>{t.received_at ? <TimeAgo timestamp={t.received_at} /> : '—'}</td>
                     <td><StatusBadge variant="warning">{t.stage || 'pending'}</StatusBadge></td>
                   </tr>
                 ))}

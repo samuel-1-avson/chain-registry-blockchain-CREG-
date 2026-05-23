@@ -6,12 +6,6 @@ authors = ["Chain Registry Team"]
 description = "Machine learning-based threat detection for package validation"
 
 [dependencies]
-# ONNX Runtime for inference
-ort = { workspace = true, features = ["ndarray"] }
-ndarray = { version = "0.17", features = ["rayon"] }
-
-# Tokenization for code
-tokenizers = { workspace = true, default-features = false, features = ["onig"] }
 
 # Feature extraction
 tree-sitter = "0.20"

@@ -223,7 +223,7 @@ function EventRow({ event: ev, showJson }) {
             </Link>
           )}
         </div>
-        <TimeAgo timestamp={ev.ts || ev.timestamp_ms || Date.now()} />
+        <TimeAgo timestamp={ev.ts || Date.now()} />
       </div>
 
       {showJson && (

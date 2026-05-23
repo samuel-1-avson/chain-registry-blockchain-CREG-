@@ -80,7 +80,7 @@ export default function ValidatorDetail() {
     const heightBucketSize = 100
     const buckets = {}
     for (const b of proposals) {
-      const bucket = Math.floor((b.height || b.header?.height || 0) / heightBucketSize)
+      const bucket = Math.floor((b.height || 0) / heightBucketSize)
       buckets[bucket] = (buckets[bucket] || 0) + 1
     }
 
@@ -201,7 +201,7 @@ export default function ValidatorDetail() {
                     <td style={{ fontFamily: 'var(--font-mono)' }}>
                       <Link to={`/block/${ev.block_height}`} style={{ color: 'var(--accent-primary-light)', textDecoration: 'none' }}>#{ev.block_height}</Link>
                     </td>
-                    <td style={{ color: 'var(--accent-error)', fontSize: 12 }}>{ev.canonical || 'slashed'}</td>
+                    <td style={{ color: 'var(--accent-error)', fontSize: 12 }}>{ev.canonical}</td>
                     <td><TimeAgo timestamp={ev.timestamp} /></td>
                   </tr>
                 ))}
@@ -232,13 +232,13 @@ export default function ValidatorDetail() {
               : proposals.length === 0
                 ? <tr><td colSpan={4} style={{ padding: 'var(--space-6)', textAlign: 'center', color: 'var(--text-tertiary)' }}>No recent proposals in the scan window.</td></tr>
                 : proposals.map((b) => (
-                  <tr key={b.height ?? b.hash ?? b.header?.height}>
+                  <tr key={b.height}>
                     <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
-                      <Link to={`/block/${b.height || b.header?.height}`} style={{ color: 'var(--accent-primary-light)', textDecoration: 'none' }}>#{b.height || b.header?.height}</Link>
+                      <Link to={`/block/${b.height}`} style={{ color: 'var(--accent-primary-light)', textDecoration: 'none' }}>#{b.height}</Link>
                     </td>
                     <td><Hash value={b.hash} kind="block-hash" start={8} end={6} /></td>
                     <td style={{ color: 'var(--text-secondary)' }}>{b.transactions?.length ?? b.tx_count ?? 0}</td>
-                    <td><TimeAgo timestamp={b.header?.timestamp || b.timestamp_ms || b.timestamp} /></td>
+                    <td><TimeAgo timestamp={b.timestamp} /></td>
                   </tr>
                 ))}
           </tbody>
