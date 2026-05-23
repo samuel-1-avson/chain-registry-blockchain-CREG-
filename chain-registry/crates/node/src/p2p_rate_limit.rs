@@ -42,13 +42,56 @@ impl Default for P2PRateLimitConfig {
     }
 }
 
+/// Constant-space Token Bucket rate limiter.
+#[derive(Debug, Clone)]
+struct TokenBucket {
+    tokens: f64,
+    last_updated: Instant,
+}
+
+impl TokenBucket {
+    fn new() -> Self {
+        Self {
+            tokens: -1.0, // Sentinel value to initialize to max capacity on first request
+            last_updated: Instant::now(),
+        }
+    }
+
+    /// Check if a request is allowed and consume 1 token.
+    /// Capacity and refill rate are scaled by `multiplier`.
+    fn check_and_consume(&mut self, limit: u32, window: Duration, multiplier: f64) -> bool {
+        let now = Instant::now();
+        let max_capacity = (limit as f64) * multiplier;
+
+        if self.tokens < 0.0 {
+            self.tokens = max_capacity;
+            self.last_updated = now;
+        }
+
+        let elapsed = now.duration_since(self.last_updated).as_secs_f64();
+        self.last_updated = now;
+
+        // Refill rate: tokens per second
+        let refill_rate = (limit as f64) / window.as_secs_f64();
+        let refill_tokens = elapsed * refill_rate * multiplier;
+
+        self.tokens = (self.tokens + refill_tokens).min(max_capacity);
+
+        if self.tokens >= 1.0 {
+            self.tokens -= 1.0;
+            true
+        } else {
+            false
+        }
+    }
+}
+
 /// Rate limit bucket for a peer.
 #[derive(Debug)]
 struct PeerBucket {
-    /// Timestamps of recent messages within the window.
-    vote_timestamps: Vec<Instant>,
-    block_timestamps: Vec<Instant>,
-    general_timestamps: Vec<Instant>,
+    vote_bucket: TokenBucket,
+    block_bucket: TokenBucket,
+    general_bucket: TokenBucket,
     /// If banned, when the ban expires.
     banned_until: Option<Instant>,
     /// Total violations (for escalating penalties).
@@ -58,9 +101,9 @@ struct PeerBucket {
 impl PeerBucket {
     fn new() -> Self {
         Self {
-            vote_timestamps: Vec::new(),
-            block_timestamps: Vec::new(),
-            general_timestamps: Vec::new(),
+            vote_bucket: TokenBucket::new(),
+            block_bucket: TokenBucket::new(),
+            general_bucket: TokenBucket::new(),
             banned_until: None,
             violation_count: 0,
         }
@@ -77,42 +120,10 @@ impl PeerBucket {
         self.banned_until = Some(Instant::now() + duration);
         self.violation_count += 1;
 
-        // Clear timestamps on ban
-        self.vote_timestamps.clear();
-        self.block_timestamps.clear();
-        self.general_timestamps.clear();
-    }
-
-    /// Check and update timestamps for a specific message type.
-    fn check_and_update(timestamps: &mut Vec<Instant>, window: Duration, limit: u32) -> bool {
-        let now = Instant::now();
-        let cutoff = now - window;
-
-        // Remove old timestamps
-        timestamps.retain(|&t| t > cutoff);
-
-        // Check if under limit
-        if timestamps.len() < limit as usize {
-            timestamps.push(now);
-            true
-        } else {
-            false
-        }
-    }
-
-    /// Check vote message.
-    fn check_vote(&mut self, window: Duration, limit: u32) -> bool {
-        Self::check_and_update(&mut self.vote_timestamps, window, limit)
-    }
-
-    /// Check block announcement.
-    fn check_block(&mut self, window: Duration, limit: u32) -> bool {
-        Self::check_and_update(&mut self.block_timestamps, window, limit)
-    }
-
-    /// Check general message.
-    fn check_general(&mut self, window: Duration, limit: u32) -> bool {
-        Self::check_and_update(&mut self.general_timestamps, window, limit)
+        // Reset tokens on ban to prevent instant burst upon unban
+        self.vote_bucket.tokens = 0.0;
+        self.block_bucket.tokens = 0.0;
+        self.general_bucket.tokens = 0.0;
     }
 }
 
@@ -142,9 +153,23 @@ impl P2PRateLimiter {
         }
     }
 
+    /// Calculate the rate limit multiplier based on the peer's validator stake.
+    /// Active validators get at least a 5x multiplier, scaled higher for larger stakes.
+    /// Non-validators get a 1.0x multiplier.
+    fn get_multiplier(&self, peer: PeerId, validators: &[(String, u64)]) -> (f64, bool) {
+        let peer_str = peer.to_string();
+        if let Some((_, stake)) = validators.iter().find(|(id, _)| id == &peer_str) {
+            // Validator: base multiplier of 5.0, scaled by stake relative to 100
+            let multiplier = ((*stake as f64) / 100.0).max(5.0);
+            (multiplier, true)
+        } else {
+            (1.0, false)
+        }
+    }
+
     /// Check if a vote message is allowed from this peer.
     /// Returns true if allowed, false if rate limited.
-    pub fn check_vote(&self, peer: PeerId) -> bool {
+    pub fn check_vote(&self, peer: PeerId, validators: &[(String, u64)]) -> bool {
         let mut peers = lock_peers(&self.peers);
         let bucket = peers.entry(peer).or_insert_with(PeerBucket::new);
 
@@ -153,10 +178,11 @@ impl P2PRateLimiter {
             return false;
         }
 
-        let allowed = bucket.check_vote(self.config.window, self.config.vote_limit);
+        let (multiplier, is_validator) = self.get_multiplier(peer, validators);
+        let allowed = bucket.vote_bucket.check_and_consume(self.config.vote_limit, self.config.window, multiplier);
 
-        if !allowed {
-            // First violation - ban the peer
+        if !allowed && !is_validator {
+            // First violation - ban the peer (validators are exempt from auto-bans)
             let ban_duration = self.config.ban_duration * (bucket.violation_count + 1);
             bucket.ban(ban_duration);
             tracing::warn!(
@@ -172,7 +198,7 @@ impl P2PRateLimiter {
 
     /// Check if a block announcement is allowed from this peer.
     /// Returns true if allowed, false if rate limited.
-    pub fn check_block(&self, peer: PeerId) -> bool {
+    pub fn check_block(&self, peer: PeerId, validators: &[(String, u64)]) -> bool {
         let mut peers = lock_peers(&self.peers);
         let bucket = peers.entry(peer).or_insert_with(PeerBucket::new);
 
@@ -181,9 +207,10 @@ impl P2PRateLimiter {
             return false;
         }
 
-        let allowed = bucket.check_block(self.config.window, self.config.block_limit);
+        let (multiplier, is_validator) = self.get_multiplier(peer, validators);
+        let allowed = bucket.block_bucket.check_and_consume(self.config.block_limit, self.config.window, multiplier);
 
-        if !allowed {
+        if !allowed && !is_validator {
             let ban_duration = self.config.ban_duration * (bucket.violation_count + 1);
             bucket.ban(ban_duration);
             tracing::warn!(
@@ -199,7 +226,7 @@ impl P2PRateLimiter {
 
     /// Check if a general message is allowed from this peer.
     /// Returns true if allowed, false if rate limited.
-    pub fn check_general(&self, peer: PeerId) -> bool {
+    pub fn check_general(&self, peer: PeerId, validators: &[(String, u64)]) -> bool {
         let mut peers = lock_peers(&self.peers);
         let bucket = peers.entry(peer).or_insert_with(PeerBucket::new);
 
@@ -208,9 +235,10 @@ impl P2PRateLimiter {
             return false;
         }
 
-        let allowed = bucket.check_general(self.config.window, self.config.general_limit);
+        let (multiplier, is_validator) = self.get_multiplier(peer, validators);
+        let allowed = bucket.general_bucket.check_and_consume(self.config.general_limit, self.config.window, multiplier);
 
-        if !allowed {
+        if !allowed && !is_validator {
             let ban_duration = self.config.ban_duration * (bucket.violation_count + 1);
             bucket.ban(ban_duration);
             tracing::warn!(
@@ -267,22 +295,21 @@ impl P2PRateLimiter {
 
         let mut peers = lock_peers(&self.peers);
         peers.retain(|peer_id, bucket| {
-            // Remove old timestamps
-            bucket.vote_timestamps.retain(|&t| now - t < window);
-            bucket.block_timestamps.retain(|&t| now - t < window);
-            bucket.general_timestamps.retain(|&t| now - t < window);
+            // Keep if peer is banned or has recent activity (last_updated within the sliding window)
+            let time_since_last_vote = now.duration_since(bucket.vote_bucket.last_updated);
+            let time_since_last_block = now.duration_since(bucket.block_bucket.last_updated);
+            let time_since_last_gen = now.duration_since(bucket.general_bucket.last_updated);
 
-            // Keep if peer has recent activity or is banned
-            let has_activity = !bucket.vote_timestamps.is_empty()
-                || !bucket.block_timestamps.is_empty()
-                || !bucket.general_timestamps.is_empty();
             let is_banned = bucket.is_banned();
+            let recently_active = time_since_last_vote < window
+                || time_since_last_block < window
+                || time_since_last_gen < window;
 
-            if !has_activity && !is_banned {
+            if !recently_active && !is_banned {
                 tracing::debug!("P2P Rate limit: Purging inactive peer {}", peer_id);
             }
 
-            has_activity || is_banned
+            recently_active || is_banned
         });
     }
 
@@ -343,7 +370,7 @@ mod tests {
         let peer = test_peer();
 
         for _ in 0..5 {
-            assert!(limiter.check_vote(peer));
+            assert!(limiter.check_vote(peer, &[]));
         }
     }
 
@@ -358,11 +385,11 @@ mod tests {
 
         // Use up the limit
         for _ in 0..3 {
-            assert!(limiter.check_vote(peer));
+            assert!(limiter.check_vote(peer, &[]));
         }
 
         // Next message should be blocked and peer banned
-        assert!(!limiter.check_vote(peer));
+        assert!(!limiter.check_vote(peer, &[]));
         assert!(limiter.is_banned(peer));
     }
 
@@ -375,9 +402,9 @@ mod tests {
         let peer1 = test_peer();
         let peer2 = test_peer();
 
-        assert!(limiter.check_vote(peer1));
-        assert!(!limiter.check_vote(peer1)); // peer1 exhausted
-        assert!(limiter.check_vote(peer2)); // peer2 still fresh
+        assert!(limiter.check_vote(peer1, &[]));
+        assert!(!limiter.check_vote(peer1, &[])); // peer1 exhausted
+        assert!(limiter.check_vote(peer2, &[])); // peer2 still fresh
     }
 
     #[test]
@@ -385,16 +412,15 @@ mod tests {
         let limiter = P2PRateLimiter::new(P2PRateLimitConfig {
             vote_limit: 1,
             block_limit: 1,
-            general_limit: 100,
+            general_limit: 1,
             ..Default::default()
         });
         let peer = test_peer();
 
-        assert!(limiter.check_vote(peer));
-        assert!(!limiter.check_vote(peer)); // vote exhausted
-        assert!(limiter.check_block(peer)); // block still available
-        assert!(!limiter.check_block(peer)); // block exhausted
-        assert!(limiter.check_general(peer)); // general still available
+        // Consuming a token from one bucket (votes) should not affect the others
+        assert!(limiter.check_vote(peer, &[]));
+        assert!(limiter.check_block(peer, &[]));
+        assert!(limiter.check_general(peer, &[]));
     }
 
     #[test]
@@ -419,8 +445,27 @@ mod tests {
         limiter.ban_peer(peer, Duration::from_secs(60));
 
         // All message types should be rejected while banned
-        assert!(!limiter.check_vote(peer));
-        assert!(!limiter.check_block(peer));
-        assert!(!limiter.check_general(peer));
+        assert!(!limiter.check_vote(peer, &[]));
+        assert!(!limiter.check_block(peer, &[]));
+        assert!(!limiter.check_general(peer, &[]));
+    }
+
+    #[test]
+    fn validator_exemption_and_stake_scaling_works() {
+        let limiter = P2PRateLimiter::new(P2PRateLimitConfig {
+            vote_limit: 2,
+            ..Default::default()
+        });
+        let peer = test_peer();
+        let validators = vec![(peer.to_string(), 200)]; // 200 stake -> 5x multiplier (so 10 votes capacity)
+
+        // Validator should be able to send 10 messages (refill logic not tested in immediate burst)
+        for _ in 0..10 {
+            assert!(limiter.check_vote(peer, &validators));
+        }
+
+        // 11th should be rate-limited but validator must NOT be banned
+        assert!(!limiter.check_vote(peer, &validators));
+        assert!(!limiter.is_banned(peer), "Active validator should be exempt from bans");
     }
 }

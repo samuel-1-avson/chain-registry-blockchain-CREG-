@@ -287,13 +287,25 @@ impl P2PNode {
                         // Parse topic and check rate limits
                         let topic_str = message.topic.as_str();
 
+                        // Retrieve active validators and their stakes
+                        let active_validators: Vec<(String, u64)> = {
+                            if let Ok(s) = state.try_read() {
+                                s.validator_set.validators
+                                    .iter()
+                                    .map(|v| (v.id.clone(), v.stake))
+                                    .collect()
+                            } else {
+                                vec![]
+                            }
+                        };
+
                         // Apply rate limiting based on message type
                         let allowed = if topic_str.contains("votes") {
-                            self.rate_limiter.check_vote(peer_id)
+                            self.rate_limiter.check_vote(peer_id, &active_validators)
                         } else if topic_str.contains("blocks") {
-                            self.rate_limiter.check_block(peer_id)
+                            self.rate_limiter.check_block(peer_id, &active_validators)
                         } else {
-                            self.rate_limiter.check_general(peer_id)
+                            self.rate_limiter.check_general(peer_id, &active_validators)
                         };
 
                         if !allowed {
