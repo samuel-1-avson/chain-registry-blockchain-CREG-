@@ -215,47 +215,64 @@ mod consensus_tests {
     use chrono::Utc;
     use common::{Block, BlockHeader, BlockSignature, Transaction, ValidatorSignature, ValidatorVote};
     use consensus::{validator_set::ValidatorInfo, PbftEngine, ValidatorSet};
+    use ed25519_dalek::{Signer, SigningKey};
+    use rand::rngs::OsRng;
 
-    fn make_validator(id: &str) -> ValidatorInfo {
-        ValidatorInfo {
-            id: id.to_string(),
-            pubkey: format!("pubkey-{}", id),
-            eth_address: None,
-            stake: 1_000_000,
-            reputation: 75,
-            is_active: true,
+    struct TestValidator {
+        id: String,
+        signing_key: SigningKey,
+        pubkey_hex: String,
+    }
+
+    impl TestValidator {
+        fn new(id: &str) -> Self {
+            let signing_key = SigningKey::generate(&mut OsRng);
+            let pubkey_hex = hex::encode(signing_key.verifying_key().as_bytes());
+            Self {
+                id: id.to_string(),
+                signing_key,
+                pubkey_hex,
+            }
+        }
+
+        fn to_validator_info(&self) -> ValidatorInfo {
+            ValidatorInfo {
+                id: self.id.clone(),
+                pubkey: self.pubkey_hex.clone(),
+                eth_address: None,
+                stake: 1_000_000,
+                reputation: 75,
+                is_active: true,
+            }
+        }
+
+        fn to_vrf_validator(&self) -> consensus::vrf::VrfValidator {
+            consensus::vrf::VrfValidator {
+                id: self.id.clone(),
+                pubkey: self.pubkey_hex.clone(),
+                vrf_output: None,
+                vrf_proof: None,
+            }
+        }
+
+        fn sign_vote(&self, phase: &str, block_hash: &str) -> BlockSignature {
+            let message = consensus::pbft::pbft_signature_message(phase, block_hash);
+            let signature = self.signing_key.sign(message.as_bytes());
+            BlockSignature {
+                validator_id: self.id.clone(),
+                pubkey: self.pubkey_hex.clone(),
+                signature: hex::encode(signature.to_bytes()),
+            }
         }
     }
 
-    fn make_sig(id: &str, vote: ValidatorVote) -> ValidatorSignature {
-        ValidatorSignature {
-            validator_id: id.to_string(),
-            validator_pubkey: format!("pubkey-{}", id),
-            signature: common::sha256_hex(id.as_bytes()),
-            vote,
-            signed_at: Utc::now(),
-            ml_model_version: "test".to_string(),
-            analysis_bundles: common::AnalysisBundleRefs::default(),
-            evidence_digest: String::new(),
-            deterministic_risk: common::DeterministicRiskSummary::default(),
-        }
-    }
-
-    fn make_block_sig(id: &str) -> BlockSignature {
-        BlockSignature {
-            validator_id: id.to_string(),
-            pubkey: format!("pubkey-{}", id),
-            signature: common::sha256_hex(id.as_bytes()),
-        }
-    }
-
-    fn make_block(height: u64, prev: &str) -> Block {
+    fn make_block(height: u64, prev: &str, proposer_id: &str) -> Block {
         Block {
             header: BlockHeader {
                 height,
                 prev_hash: prev.to_string(),
                 merkle_root: "root".into(),
-                proposer_id: "val-1".into(),
+                proposer_id: proposer_id.to_string(),
                 timestamp: Utc::now(),
                 validator_set_hash: "dev".into(),
                 vrf_output: None,
@@ -270,25 +287,36 @@ mod consensus_tests {
     fn pbft_finalises_with_quorum() {
         let mut engine = PbftEngine::new();
         let mut vs = ValidatorSet::new();
-        // 4 validators → quorum = (2*4/3)+1 = 3
+        let mut validators = Vec::new();
+
         for i in 1..=4 {
-            vs.add(make_validator(&format!("val-{}", i)));
+            let v = TestValidator::new(&format!("val-{}", i));
+            vs.add(v.to_validator_info());
+            validators.push(v);
         }
 
-        let block = make_block(1, &"0".repeat(64));
+        let active: Vec<consensus::vrf::VrfValidator> = validators
+            .iter()
+            .map(|v| v.to_vrf_validator())
+            .collect();
+        
+        let proposer_id = consensus::vrf::select_proposer_deterministic(&active, &"0".repeat(64))
+            .expect("selected proposer");
+
+        let block = make_block(1, &"0".repeat(64), &proposer_id);
         let hash = engine.start_round(block, vs).unwrap();
 
         // Send 3 PREPARE votes.
-        for i in 1..=3 {
-            let sig = make_block_sig(&format!("val-{}", i));
-            let _ = engine.prepare(&hash, &format!("val-{}", i), sig).unwrap();
+        for i in 0..3 {
+            let sig = validators[i].sign_vote("prepare", &hash);
+            let _ = engine.prepare(&hash, &validators[i].id, sig).unwrap();
         }
 
         // Send 3 COMMIT votes — should finalise.
         let mut finalised = false;
-        for i in 1..=3 {
-            let sig = make_block_sig(&format!("val-{}", i));
-            finalised = engine.commit(&hash, &format!("val-{}", i), sig).unwrap();
+        for i in 0..3 {
+            let sig = validators[i].sign_vote("commit", &hash);
+            finalised = engine.commit(&hash, &validators[i].id, sig).unwrap();
         }
         assert!(finalised, "Block should be finalised after quorum");
     }
@@ -297,22 +325,35 @@ mod consensus_tests {
     fn pbft_fails_without_quorum() {
         let mut engine = PbftEngine::new();
         let mut vs = ValidatorSet::new();
+        let mut validators = Vec::new();
+
         for i in 1..=4 {
-            vs.add(make_validator(&format!("val-{}", i)));
+            let v = TestValidator::new(&format!("val-{}", i));
+            vs.add(v.to_validator_info());
+            validators.push(v);
         }
 
-        let block = make_block(1, &"0".repeat(64));
+        let active: Vec<consensus::vrf::VrfValidator> = validators
+            .iter()
+            .map(|v| v.to_vrf_validator())
+            .collect();
+        
+        let proposer_id = consensus::vrf::select_proposer_deterministic(&active, &"0".repeat(64))
+            .expect("selected proposer");
+
+        let block = make_block(1, &"0".repeat(64), &proposer_id);
         let hash = engine.start_round(block, vs).unwrap();
 
-        for i in 1..=3 {
-            let sig = make_block_sig(&format!("val-{}", i));
-            let _ = engine.prepare(&hash, &format!("val-{}", i), sig).unwrap();
+        // Send 3 PREPARE votes.
+        for i in 0..3 {
+            let sig = validators[i].sign_vote("prepare", &hash);
+            let _ = engine.prepare(&hash, &validators[i].id, sig).unwrap();
         }
 
         // Only 2 COMMIT votes — quorum not met.
-        for i in 1..=2 {
-            let sig = make_block_sig(&format!("val-{}", i));
-            let _ = engine.commit(&hash, &format!("val-{}", i), sig).unwrap();
+        for i in 0..2 {
+            let sig = validators[i].sign_vote("commit", &hash);
+            let _ = engine.commit(&hash, &validators[i].id, sig).unwrap();
         }
 
         let sigs = engine.finalised_sigs(&hash);

@@ -81,6 +81,9 @@ async fn spawn_mock_ipfs(payload: Vec<u8>, status: StatusCode) -> String {
 
 /// Helper: start a full node on a random port, return the base URL.
 async fn start_test_node() -> (String, tokio::task::JoinHandle<()>) {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter("error,node=debug,ml_validator=debug")
+        .try_init();
     use node::{
         api,
         chain_store::ChainStore,
@@ -105,12 +108,24 @@ async fn start_test_node() -> (String, tokio::task::JoinHandle<()>) {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
     let rules_dir = std::path::PathBuf::from(manifest_dir).join("../../rules");
     std::env::set_var("CREG_YARA_RULES_DIR", rules_dir.to_str().unwrap());
+    std::env::set_var("CREG_DEV_SANDBOX", "true");
+    std::env::set_var("CREG_TESTNET", "true");
+
+    // Generate a validator key pair up front so we can register the node in the
+    // validator set (consensus requires assigned_count >= 1 for quorum).
+    let validator_signing_key = {
+        use ed25519_dalek::SigningKey;
+        use rand::rngs::OsRng;
+        SigningKey::generate(&mut OsRng)
+    };
+    let validator_privkey_hex = hex::encode(validator_signing_key.to_bytes());
+    let validator_pubkey_hex = hex::encode(validator_signing_key.verifying_key().as_bytes());
 
     let config = NodeConfig {
         listen_addr: "127.0.0.1:0".into(), // OS assigns a port
         data_dir: dir.path().to_path_buf(),
         node_id: "e2e-node".into(),
-        validator_privkey: None,
+        validator_privkey: Some(validator_privkey_hex),
         is_validator: true,
         peers: vec![],
         block_interval_secs: 1,
@@ -127,12 +142,24 @@ async fn start_test_node() -> (String, tokio::task::JoinHandle<()>) {
     let (p2p_sender, _p2p_rx) = tokio::sync::mpsc::channel::<P2PCommand>(1);
     let p2p = P2PHandle { sender: p2p_sender };
 
+    // Build a single-validator set so consensus can reach 1-of-1 quorum.
+    let test_validator = common::Validator {
+        id: "e2e-node".into(),
+        alias: "E2E Test Validator".into(),
+        pubkey: validator_pubkey_hex,
+        eth_address: "0x1111111111111111111111111111111111111111".into(),
+        stake: 1000,
+        reputation: 100,
+        status: "online".into(),
+    };
+    let validator_set = common::ValidatorSet::new(vec![test_validator]);
+
     let state: Arc<RwLock<NodeState>> = Arc::new(RwLock::new(NodeState {
         chain,
         pending_pool: PendingPool::new(),
         publisher_index: PublisherIndex::new(),
         validator_set_bootstrap: common::ValidatorSet::default(),
-        validator_set: common::ValidatorSet::default(),
+        validator_set,
         package_rounds: std::collections::HashMap::new(),
         config: config.clone(),
         p2p_status: P2PStatus::default(),
@@ -160,6 +187,7 @@ async fn start_test_node() -> (String, tokio::task::JoinHandle<()>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let url = format!("http://{}", addr);
+    std::env::set_var("CREG_NODE_URL", &url);
 
     let state_bp = Arc::clone(&state);
     let state_vp = Arc::clone(&state);
@@ -324,19 +352,26 @@ async fn e2e_chain_stats_increase_after_verification() {
         .await
         .unwrap();
 
-    // Wait for a block to be produced.
-    tokio::time::sleep(Duration::from_secs(4)).await;
-
-    let after: serde_json::Value = reqwest::get(format!("{}/v1/chain/stats", url))
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    let height_after = after["tip_height"].as_u64().unwrap_or(0);
+    // Wait for a block to be produced (poll for up to 10 seconds).
+    let height_increased = timeout(Duration::from_secs(10), async {
+        loop {
+            tokio::time::sleep(Duration::from_millis(250)).await;
+            let after: serde_json::Value = reqwest::get(format!("{}/v1/chain/stats", url))
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            let height_after = after["tip_height"].as_u64().unwrap_or(0);
+            if height_after > height_before {
+                return true;
+            }
+        }
+    })
+    .await;
 
     assert!(
-        height_after > height_before,
+        height_increased.is_ok(),
         "Chain height should increase after verification"
     );
 }

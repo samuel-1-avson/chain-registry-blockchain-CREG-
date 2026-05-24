@@ -13,8 +13,10 @@
 
 use anyhow::{bail, Context, Result};
 use common::{sha256_hex, Block, BlockHeader};
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 // ── Checkpoint ────────────────────────────────────────────────────────────────
 
@@ -73,6 +75,105 @@ impl MerkleProof {
 
         current == self.expected_root
     }
+}
+
+/// Compute a deterministic hash of the active validator set matching node's block_producer logic.
+pub fn compute_validator_set_hash(validators: &[common::Validator]) -> String {
+    let mut sorted_ids: Vec<&str> = validators
+        .iter()
+        .map(|v| v.id.as_str())
+        .collect();
+    sorted_ids.sort_unstable();
+    let mut hasher = Sha256::new();
+    for id in &sorted_ids {
+        hasher.update(id.as_bytes());
+        hasher.update(b"\0");
+    }
+    hex::encode(hasher.finalize())
+}
+
+/// Verify that a block header is backed by a valid quorum of Ed25519 signatures from active validators.
+pub fn verify_pbft_consensus(
+    block_hash: &str,
+    block_header: &BlockHeader,
+    active_validators: &[common::Validator],
+    pbft_signatures: &[common::BlockSignature],
+) -> Result<()> {
+    // 1. Verify that the active validator set matches the validator_set_hash committed in the header
+    let computed_hash = compute_validator_set_hash(active_validators);
+    if computed_hash != block_header.validator_set_hash {
+        bail!(
+            "Validator set hash mismatch: header has {}, computed {}",
+            block_header.validator_set_hash,
+            computed_hash
+        );
+    }
+
+    // 2. Compute quorum threshold
+    let n = active_validators.len();
+    if n == 0 {
+        bail!("Active validator set is empty");
+    }
+
+    let allow_small_cluster_quorum = std::env::var("CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM")
+        .map(|v| v == "true" || v == "1")
+        .unwrap_or(false);
+
+    let quorum = match n {
+        3 if allow_small_cluster_quorum => 2,
+        _ => (2 * n / 3) + 1,
+    };
+
+    // 3. Verify signatures
+    let validator_pubkeys: std::collections::HashMap<String, String> = active_validators
+        .iter()
+        .map(|v| (v.id.clone(), v.pubkey.trim_start_matches("0x").to_ascii_lowercase()))
+        .collect();
+
+    let mut seen_validators = std::collections::HashSet::new();
+    let message = format!("creg-pbft-v1:commit:{}", block_hash);
+
+    for sig in pbft_signatures {
+        let expected_pubkey = match validator_pubkeys.get(&sig.validator_id) {
+            Some(pk) => pk,
+            None => continue,
+        };
+
+        let clean_sig_pubkey = sig.pubkey.trim_start_matches("0x").to_ascii_lowercase();
+        if clean_sig_pubkey != *expected_pubkey {
+            continue;
+        }
+
+        if !seen_validators.insert(sig.validator_id.clone()) {
+            continue;
+        }
+
+        let pubkey_bytes = hex::decode(expected_pubkey)
+            .map_err(|e| anyhow::anyhow!("Invalid validator pubkey hex for {}: {}", sig.validator_id, e))?;
+        let verifying_key = VerifyingKey::try_from(pubkey_bytes.as_slice())
+            .map_err(|e| anyhow::anyhow!("Invalid validator pubkey for {}: {}", sig.validator_id, e))?;
+
+        let signature_bytes = hex::decode(sig.signature.trim_start_matches("0x"))
+            .map_err(|e| anyhow::anyhow!("Invalid signature hex from {}: {}", sig.validator_id, e))?;
+        let signature = Signature::try_from(signature_bytes.as_slice())
+            .map_err(|e| anyhow::anyhow!("Invalid signature format from {}: {}", sig.validator_id, e))?;
+
+        verifying_key
+            .verify(message.as_bytes(), &signature)
+            .map_err(|e| anyhow::anyhow!("Cryptographic signature verification failed for {}: {}", sig.validator_id, e))?;
+    }
+
+    let approvals = seen_validators.len();
+    if approvals < quorum {
+        bail!(
+            "Insufficient PBFT consensus signatures: got {} valid, need {} (quorum for validator set size {})",
+            approvals,
+            quorum,
+            n
+        );
+    }
+
+    Ok(())
 }
 
 // ── Block header verification ─────────────────────────────────────────────────
@@ -170,6 +271,12 @@ pub struct LightClientResponse {
     pub proof: MerkleProof,
     /// Header chain from the node's latest checkpoint to the package block.
     pub header_chain: Vec<(BlockHeader, String)>,
+    /// Ed25519 signatures from PBFT Commit phase over the block hash.
+    #[serde(default)]
+    pub pbft_signatures: Vec<common::BlockSignature>,
+    /// Active validator set at the block height (or current).
+    #[serde(default)]
+    pub active_validators: Vec<common::Validator>,
 }
 
 /// Fetch and cryptographically verify a package verdict using SPV-style proof.
@@ -234,6 +341,14 @@ pub async fn verify_package(
 
     // 3. Verify the proof block itself and bind it to the verified header chain.
     verify_header(&resp.block_header, &resp.block_hash, resp.block_header.height)?;
+
+    // Verify PBFT consensus validator signatures and quorums.
+    verify_pbft_consensus(
+        &resp.block_hash,
+        &resp.block_header,
+        &resp.active_validators,
+        &resp.pbft_signatures,
+    )?;
 
     let relevant_headers: Vec<(BlockHeader, String)> = resp
         .header_chain
@@ -439,5 +554,80 @@ mod tests {
         let c1 = Checkpoint::genesis();
         let c2 = Checkpoint::genesis();
         assert_eq!(c1.hash, c2.hash, "Genesis hash must be deterministic");
+    }
+
+    #[test]
+    fn test_pbft_consensus_verification() {
+        use ed25519_dalek::{SigningKey, Signer};
+        use common::{Validator, BlockSignature};
+
+        // Create keys for 3 validators
+        let keys: Vec<SigningKey> = (0..3)
+            .map(|i| SigningKey::from_bytes(&[i as u8 + 1; 32]))
+            .collect();
+
+        let validators: Vec<Validator> = keys
+            .iter()
+            .enumerate()
+            .map(|(i, key)| Validator {
+                id: format!("val-{}", i),
+                alias: format!("val-{}", i),
+                pubkey: hex::encode(key.verifying_key().as_bytes()),
+                eth_address: String::new(),
+                stake: 100,
+                reputation: 100,
+                status: "online".into(),
+            })
+            .collect();
+
+        // Calculate expected validator set hash
+        let val_set_hash = compute_validator_set_hash(&validators);
+
+        let mut block_header = BlockHeader {
+            height: 1,
+            prev_hash: "0".repeat(64),
+            merkle_root: "0".repeat(64),
+            proposer_id: "val-0".into(),
+            timestamp: chrono::Utc::now(),
+            validator_set_hash: val_set_hash.clone(),
+            vrf_output: None,
+            vrf_proof: None,
+        };
+
+        let block_hash = "abc123abc123abc123abc123abc123abc123abc123abc123abc123abc1231234".to_string();
+        let message = format!("creg-pbft-v1:commit:{}", block_hash);
+
+        // Sign the block hash
+        let pbft_signatures: Vec<BlockSignature> = keys
+            .iter()
+            .enumerate()
+            .map(|(i, key)| {
+                let signature = key.sign(message.as_bytes());
+                BlockSignature {
+                    validator_id: format!("val-{}", i),
+                    pubkey: hex::encode(key.verifying_key().as_bytes()),
+                    signature: hex::encode(signature.to_bytes()),
+                }
+            })
+            .collect();
+
+        // Standard quorum of 3 validators is (2*3/3)+1 = 3.
+        // If CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM=false (default): we need all 3 signatures.
+        std::env::set_var("CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM", "false");
+        
+        // 3/3 signatures should pass
+        assert!(verify_pbft_consensus(&block_hash, &block_header, &validators, &pbft_signatures).is_ok());
+
+        // 2/3 signatures should fail
+        assert!(verify_pbft_consensus(&block_hash, &block_header, &validators, &pbft_signatures[..2]).is_err());
+
+        // Enable small cluster quorum (threshold becomes 2 for size 3)
+        std::env::set_var("CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM", "true");
+        assert!(verify_pbft_consensus(&block_hash, &block_header, &validators, &pbft_signatures[..2]).is_ok());
+        assert!(verify_pbft_consensus(&block_hash, &block_header, &validators, &pbft_signatures[..1]).is_err());
+
+        // Mismatched validator set hash should fail
+        block_header.validator_set_hash = "wrong-hash".to_string();
+        assert!(verify_pbft_consensus(&block_hash, &block_header, &validators, &pbft_signatures).is_err());
     }
 }

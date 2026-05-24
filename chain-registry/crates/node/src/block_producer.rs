@@ -181,7 +181,7 @@ async fn produce_block(
         height: tip_height + 1,
         prev_hash,
         merkle_root: merkle_root(&txs),
-        proposer_id: node_id,
+        proposer_id: node_id.clone(),
         timestamp: Utc::now(),
         validator_set_hash,
         vrf_output,
@@ -198,7 +198,88 @@ async fn produce_block(
     let vs = s.validator_set.clone();
     s.pbft_engine.start_round(block.clone(), vs.into())?;
 
+    let bh = block.hash();
+    let mut prep_cmd = None;
+    let mut commit_cmd = None;
+
+    if let Some(ref privkey_hex) = privkey {
+        if let Ok(pk_bytes) = hex::decode(privkey_hex) {
+            if let Ok(sk) = ed25519_dalek::SigningKey::try_from(pk_bytes.as_slice()) {
+                use ed25519_dalek::Signer;
+
+                // 1. Proposer casts its own PREPARE vote
+                let prep_msg_str = consensus::pbft::pbft_signature_message("prepare", &bh);
+                let prep_sig = hex::encode(sk.sign(prep_msg_str.as_bytes()).to_bytes());
+                let pubkey = hex::encode(sk.verifying_key().as_bytes());
+
+                let prep_sig_obj = common::BlockSignature {
+                    validator_id: node_id.clone(),
+                    pubkey: pubkey.clone(),
+                    signature: prep_sig.clone(),
+                };
+
+                let prepare_quorum_reached = s.pbft_engine.prepare(&bh, &node_id, prep_sig_obj).unwrap_or(false);
+
+                let prep_msg = common::GossipMessage::PbftPrepare {
+                    block_hash: bh.clone(),
+                    validator_id: node_id.clone(),
+                    signature: prep_sig,
+                };
+                if let Ok(data) = serde_json::to_vec(&prep_msg) {
+                    prep_cmd = Some(crate::p2p::P2PCommand::Broadcast {
+                        topic: "creg/v1/blocks".into(),
+                        data,
+                    });
+                }
+
+                // 2. Proposer casts its own COMMIT vote if prepare quorum reached
+                if prepare_quorum_reached {
+                    let commit_msg_str = consensus::pbft::pbft_signature_message("commit", &bh);
+                    let commit_sig = hex::encode(sk.sign(commit_msg_str.as_bytes()).to_bytes());
+
+                    let commit_sig_obj = common::BlockSignature {
+                        validator_id: node_id.clone(),
+                        pubkey,
+                        signature: commit_sig.clone(),
+                    };
+
+                    let commit_quorum_reached = s.pbft_engine.commit(&bh, &node_id, commit_sig_obj).unwrap_or(false);
+
+                    let commit_msg = common::GossipMessage::PbftCommit {
+                        block_hash: bh.clone(),
+                        validator_id: node_id.clone(),
+                        signature: commit_sig,
+                    };
+                    if let Ok(data) = serde_json::to_vec(&commit_msg) {
+                        commit_cmd = Some(crate::p2p::P2PCommand::Broadcast {
+                            topic: "creg/v1/blocks".into(),
+                            data,
+                        });
+                    }
+
+                    if commit_quorum_reached {
+                        tracing::info!("[PBFT Proposer] Block {} finalised locally by proposer quorum", &bh[..12]);
+                        if let Some(final_block) = s.pbft_engine.get_finalised_block(&bh) {
+                            let _ = s.chain.insert_block(&final_block);
+                            s.publisher_index.apply_block(&final_block);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // Proofs are epoch-specific (seed = prev_hash); clear cache for next round.
     s.vrf_proofs.clear();
+
+    drop(s);
+
+    if let Some(cmd) = prep_cmd {
+        let _ = p2p.sender.send(cmd).await;
+    }
+    if let Some(cmd) = commit_cmd {
+        let _ = p2p.sender.send(cmd).await;
+    }
+
     Ok(block)
 }

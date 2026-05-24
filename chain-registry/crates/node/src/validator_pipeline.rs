@@ -697,8 +697,14 @@ mod shielded_tests {
         assert_eq!(n, nonce);
     }
 
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        static MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        MUTEX.lock().unwrap()
+    }
+
     #[test]
     fn parse_ecies_bundle_round_trip() {
+        let _lock = env_lock();
         // Set up a validator X25519 keypair.
         let mut rng = rand::rngs::OsRng;
         let mut secret_bytes = [0u8; 32];
@@ -749,6 +755,7 @@ mod shielded_tests {
 
     #[test]
     fn tampered_ecies_bundle_fails() {
+        let _lock = env_lock();
         // Set up a valid bundle, then flip a byte in the wrapped region.
         let mut rng = rand::rngs::OsRng;
         let mut secret_bytes = [0u8; 32];

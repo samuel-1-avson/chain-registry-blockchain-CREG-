@@ -9,7 +9,11 @@ use resolver::light_client::{build_merkle_proof, LightClientResponse};
 
 /// Build a full light-client proof response for a given package canonical ID.
 /// Returns None if the package is not found or not verified.
-pub fn build_proof(canonical: &str, chain: &ChainStore) -> Result<Option<LightClientResponse>> {
+pub fn build_proof(
+    canonical: &str,
+    chain: &ChainStore,
+    active_validators: &[common::Validator],
+) -> Result<Option<LightClientResponse>> {
     // Find the ChainRecord.
     let record = match chain.get_package(canonical)? {
         Some(r) => r,
@@ -70,5 +74,7 @@ pub fn build_proof(canonical: &str, chain: &ChainStore) -> Result<Option<LightCl
         block_header: block.header,
         proof,
         header_chain,
+        pbft_signatures: block.pbft_signatures,
+        active_validators: active_validators.to_vec(),
     }))
 }

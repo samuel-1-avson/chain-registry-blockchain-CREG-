@@ -1291,6 +1291,7 @@ async fn get_package(State(state): State<SharedState>, Path(canonical): Path<Str
 async fn submit_package(
     State(state): State<SharedState>,
     Extension(p2p_handle): Extension<crate::p2p::P2PHandle>,
+    Extension(event_bus): Extension<events::EventBus>,
     Json(request): Json<PublishRequest>,
 ) -> Response {
     let canonical = request.id.canonical();
@@ -1299,7 +1300,7 @@ async fn submit_package(
     let gossip_req = common::GossipMessage::PublishRequest(request.clone());
     let receipt = match crate::package_admission::admit_publish_request(
         &state,
-        request,
+        request.clone(),
         crate::package_admission::AdmissionOptions {
             surface: crate::package_admission::AdmissionSurface::Rest,
             verify_publisher_auth: true,
@@ -1323,6 +1324,11 @@ async fn submit_package(
         "{} added to pending pool ({} pending)",
         receipt.canonical,
         receipt.pending_count
+    );
+
+    events::emit(
+        &event_bus,
+        events::RegistryEvent::package_submitted(&receipt.canonical, &request.publisher_pubkey),
     );
 
     (
@@ -1506,7 +1512,7 @@ async fn get_proof(State(state): State<SharedState>, Path(canonical): Path<Strin
         .to_string();
     let s = state.read().await;
 
-    match crate::proof::build_proof(&canonical, &s.chain) {
+    match crate::proof::build_proof(&canonical, &s.chain, &s.validator_set.validators) {
         Ok(Some(proof)) => Json(proof).into_response(),
         Ok(None) => not_found(format!("No proof available for: {}", canonical)),
         Err(e) => server_err(e.to_string()),

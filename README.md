@@ -2,8 +2,8 @@
 
 > A decentralized, Byzantine-Fault-Tolerant package distribution network that replaces single-authority trust in npm/PyPI/Cargo with cryptographic consensus from a staked validator set.
 
-[![Testnet](https://img.shields.io/badge/testnet-v0.3.0-blue)](chain-registry/docs/CURRENT_STATUS.md)
-[![Local%20Cluster](https://img.shields.io/badge/local%20cluster-3%20validators%20validated-green)](chain-registry/docs/CURRENT_STATUS.md)
+[![Testnet](https://img.shields.io/badge/testnet-v0.3.0-blue)](chain-registry/docs/MASTER_PROJECT_READINESS_AND_CLIENT_AUDIT_2026-05-18.md)
+[![Local%20Cluster](https://img.shields.io/badge/local%20cluster-3%20validators%20validated-green)](chain-registry/docs/MASTER_PROJECT_READINESS_AND_CLIENT_AUDIT_2026-05-18.md)
 [![Kubernetes](https://img.shields.io/badge/k8s-manifests%20available-blue)](chain-registry/k8s/)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey)](#license)
 [![Rust](https://img.shields.io/badge/rust-1.90-orange)](chain-registry/Cargo.toml)
@@ -17,7 +17,7 @@
 
 **The solution.** Chain Registry replaces single-authority trust with a **decentralized Byzantine-Fault-Tolerant validator network** that independently analyzes every package before it is considered `Verified`. Each package passes through a three-stage validation pipeline — static analysis, behavioral sandbox, ML deep scan — and only becomes installable once a `⌊2n/3⌋+1` PBFT quorum of economically-staked validators has signed an `Approve` vote. Packages are content-addressed in IPFS, the chain is persisted in RocksDB, and final state roots are anchored to Ethereum L1 via a Groth16 rollup bridge.
 
-**Current status.** The most recently revalidated path is the **local distributed three-validator bootstrap** driven by [`chain-registry/local-testnet.ps1`](chain-registry/local-testnet.ps1) and [`chain-registry/docker-compose.local-testnet.yml`](chain-registry/docker-compose.local-testnet.yml). That path now proves a cluster can advance beyond genesis with a non-zero active validator set and a non-zero P2P mesh. The single-validator Docker profile remains useful for inner-loop development, while multi-host and Sepolia-facing work is tracked in [`chain-registry/docs/CURRENT_STATUS.md`](chain-registry/docs/CURRENT_STATUS.md) and the active master readiness roadmap in [`chain-registry/docs/MASTER_PROJECT_READINESS_AND_CLIENT_AUDIT_2026-05-18.md`](chain-registry/docs/MASTER_PROJECT_READINESS_AND_CLIENT_AUDIT_2026-05-18.md). Kustomize manifests are available under [`chain-registry/k8s/`](chain-registry/k8s/). The repo currently ships a CLI with 27 commands, a React web explorer, a Ratatui terminal explorer, a faucet, a relayer paymaster, and a Prometheus/Grafana observability stack. The current technical audit lives in [`chain-registry/docs/DEEP_DIVE_ANALYSIS.md`](chain-registry/docs/DEEP_DIVE_ANALYSIS.md), with older audit snapshots archived under [`chain-registry/docs/archive/COMPREHENSIVE_CODEBASE_ANALYSIS.md`](chain-registry/docs/archive/COMPREHENSIVE_CODEBASE_ANALYSIS.md) and [`chain-registry/docs/archive/REMEDIATION_BACKLOG.md`](chain-registry/docs/archive/REMEDIATION_BACKLOG.md).
+**Current status.** The most recently revalidated path is the **local distributed three-validator bootstrap** driven by [`chain-registry/local-testnet.ps1`](chain-registry/local-testnet.ps1) and [`chain-registry/docker-compose.local-testnet.yml`](chain-registry/docker-compose.local-testnet.yml). That path now proves a cluster can advance beyond genesis with a non-zero active validator set and a non-zero P2P mesh. The single-validator Docker profile remains useful for inner-loop development, while multi-host and Sepolia-facing work is tracked in the active master readiness roadmap and status document [`chain-registry/docs/MASTER_PROJECT_READINESS_AND_CLIENT_AUDIT_2026-05-18.md`](chain-registry/docs/MASTER_PROJECT_READINESS_AND_CLIENT_AUDIT_2026-05-18.md). Kustomize manifests are available under [`chain-registry/k8s/`](chain-registry/k8s/). The repo currently ships a CLI with 27 commands, a React web explorer, a Ratatui terminal explorer, a faucet, a relayer paymaster, and a Prometheus/Grafana observability stack. Older audit snapshots are archived under [`chain-registry/docs/archive/COMPREHENSIVE_CODEBASE_ANALYSIS.md`](chain-registry/docs/archive/COMPREHENSIVE_CODEBASE_ANALYSIS.md) and [`chain-registry/docs/archive/REMEDIATION_BACKLOG.md`](chain-registry/docs/archive/REMEDIATION_BACKLOG.md).
 
 ---
 
@@ -341,23 +341,15 @@ make testnet-smoke    # full E2E diagnostic via `creg doctor --testnet`
 
 ### Documentation
 
-- [`chain-registry/docs/CURRENT_STATUS.md`](chain-registry/docs/CURRENT_STATUS.md) — live repo-aligned operational status and verified workflows
-- [`chain-registry/docs/MASTER_PROJECT_READINESS_AND_CLIENT_AUDIT_2026-05-18.md`](chain-registry/docs/MASTER_PROJECT_READINESS_AND_CLIENT_AUDIT_2026-05-18.md) — active readiness roadmap and client audit
+- [`chain-registry/docs/MASTER_PROJECT_READINESS_AND_CLIENT_AUDIT_2026-05-18.md`](chain-registry/docs/MASTER_PROJECT_READINESS_AND_CLIENT_AUDIT_2026-05-18.md) — active master readiness roadmap, client audit, and system status
 - [`chain-registry/DELIVERABLES_INDEX.md`](chain-registry/DELIVERABLES_INDEX.md) — current artifact and deliverable map
-- [`chain-registry/docs/DEEP_DIVE_ANALYSIS.md`](chain-registry/docs/DEEP_DIVE_ANALYSIS.md) — live deep technical analysis in the nested repo
+- [`chain-registry/docs/API_ADMISSION_BOUNDARY_CONTRACT.md`](chain-registry/docs/API_ADMISSION_BOUNDARY_CONTRACT.md) — API route boundaries and admission contract
+- [`chain-registry/docs/API_COOKBOOK.md`](chain-registry/docs/API_COOKBOOK.md) — live REST API curl cookbook
+- [`chain-registry/docs/VALIDATOR_ONBOARDING_RUNBOOK_2026-05-18.md`](chain-registry/docs/VALIDATOR_ONBOARDING_RUNBOOK_2026-05-18.md) — validator onboarding guide and runbook
 - [`chain-registry/docs/archive/TESTNET_READINESS_REPORT.md`](chain-registry/docs/archive/TESTNET_READINESS_REPORT.md) — archived public testnet readiness snapshot
 - [`chain-registry/docs/archive/COMPREHENSIVE_CODEBASE_ANALYSIS.md`](chain-registry/docs/archive/COMPREHENSIVE_CODEBASE_ANALYSIS.md) — archived repository-wide audit snapshot
 - [`chain-registry/docs/archive/REMEDIATION_BACKLOG.md`](chain-registry/docs/archive/REMEDIATION_BACKLOG.md) — archived remediation backlog and implementation history
 - [`chain-registry/docs/archive/IMPLEMENTATION_PLAN.md`](chain-registry/docs/archive/IMPLEMENTATION_PLAN.md) — archived implementation roadmap and sequencing plan
-- [`chain-registry/docs/SYSTEM_DEEP_DIVE.md`](chain-registry/docs/SYSTEM_DEEP_DIVE.md) — architecture overview
-- [`chain-registry/docs/EXPLORER_DEEP_DIVE.md`](chain-registry/docs/EXPLORER_DEEP_DIVE.md) — canonical explorer and user-surface analysis
-- [`chain-registry/docs/API_COOKBOOK.md`](chain-registry/docs/API_COOKBOOK.md) — live REST API curl examples
-- [`chain-registry/docs/JOIN_TESTNET.md`](chain-registry/docs/JOIN_TESTNET.md) — validator onboarding guide
-- [`chain-registry/docs/TESTNET_DEEP_DIVE.md`](chain-registry/docs/TESTNET_DEEP_DIVE.md) — testnet architecture and E2E snapshot
-- [`chain-registry/docs/VALIDATOR_DEEP_DIVE.md`](chain-registry/docs/VALIDATOR_DEEP_DIVE.md) — historical validator-system analysis snapshot
-- [`chain-registry/docs/WALLET_DEEP_DIVE.md`](chain-registry/docs/WALLET_DEEP_DIVE.md) — historical wallet-architecture analysis snapshot
-- [`chain-registry/docs/RELAYER_PAYMASTER_DESIGN.md`](chain-registry/docs/RELAYER_PAYMASTER_DESIGN.md) — sponsored transaction design
-- [`chain-registry/docs/PROJECT_DOCUMENTATION.md`](chain-registry/docs/PROJECT_DOCUMENTATION.md) — nested-repo documentation hub
 
 ---
 
