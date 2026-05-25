@@ -76,7 +76,13 @@ pub async fn get_challenge(client: &reqwest::Client, base: &str) -> Result<Chall
 
 pub async fn get_network(client: &reqwest::Client, base: &str) -> Result<NetworkInfo> {
     let url = format!("{}/api/network", base.trim_end_matches('/'));
-    Ok(client.get(&url).send().await?.error_for_status()?.json().await?)
+    Ok(client
+        .get(&url)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?)
 }
 
 pub async fn get_balance(
@@ -99,8 +105,13 @@ pub async fn get_balance(
     // if the JSON shape is unexpected. The faucet has returned different
     // shapes in the past (e.g. `{"error":"..."}` on failure).
     let body = res.text().await?;
-    serde_json::from_str::<BalanceResponse>(&body)
-        .map_err(|e| anyhow!("balance parse failed ({}): body={}", e, truncate(&body, 200)))
+    serde_json::from_str::<BalanceResponse>(&body).map_err(|e| {
+        anyhow!(
+            "balance parse failed ({}): body={}",
+            e,
+            truncate(&body, 200)
+        )
+    })
 }
 
 fn truncate(s: &str, max: usize) -> String {
@@ -198,9 +209,15 @@ mod tests {
 
     #[test]
     fn address_validation() {
-        assert!(is_valid_evm_address("0xf4c0bdbb681a61aa0b123e82c04b0d692f53d58e"));
-        assert!(is_valid_evm_address("f4c0bdbb681a61aa0b123e82c04b0d692f53d58e"));
+        assert!(is_valid_evm_address(
+            "0xf4c0bdbb681a61aa0b123e82c04b0d692f53d58e"
+        ));
+        assert!(is_valid_evm_address(
+            "f4c0bdbb681a61aa0b123e82c04b0d692f53d58e"
+        ));
         assert!(!is_valid_evm_address("0xf4c0"));
-        assert!(!is_valid_evm_address("0xZZZZbdbb681a61aa0b123e82c04b0d692f53d58e"));
+        assert!(!is_valid_evm_address(
+            "0xZZZZbdbb681a61aa0b123e82c04b0d692f53d58e"
+        ));
     }
 }

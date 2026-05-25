@@ -186,8 +186,9 @@ impl WasmSandbox {
         // No epoch_interruption, no async_support — pure synchronous execution
         // with external timeout enforcement.
 
-        let engine = Engine::new(&engine_config)
-            .map_err(|e| SandboxError::CompilationError(format!("Engine creation failed: {}", e)))?;
+        let engine = Engine::new(&engine_config).map_err(|e| {
+            SandboxError::CompilationError(format!("Engine creation failed: {}", e))
+        })?;
 
         Ok(Self { engine, config })
     }
@@ -226,11 +227,15 @@ impl WasmSandbox {
         // so we can enforce timeout externally via tokio::time::timeout.
         let handle = tokio::task::spawn_blocking(move || {
             // Build store with resource limits.
-            let limits = StoreLimitsBuilder::new()
-                .memory_size(memory_limit)
-                .build();
+            let limits = StoreLimitsBuilder::new().memory_size(memory_limit).build();
 
-            let mut store = Store::new(&engine, SandboxState { limits, exit_code: None });
+            let mut store = Store::new(
+                &engine,
+                SandboxState {
+                    limits,
+                    exit_code: None,
+                },
+            );
             store.limiter(|state| &mut state.limits);
 
             // ── WASI stub linker ──────────────────────────────────────────
@@ -238,93 +243,141 @@ impl WasmSandbox {
 
             // fd_write(fd, iovs, iovs_len, nwritten) -> errno
             let _ = linker.func_wrap(
-                "wasi_snapshot_preview1", "fd_write",
+                "wasi_snapshot_preview1",
+                "fd_write",
                 |_: wasmtime::Caller<'_, SandboxState>,
-                 _fd: i32, _iovs: i32, _iovs_len: i32, _nwritten: i32| -> i32 { 8 },
+                 _fd: i32,
+                 _iovs: i32,
+                 _iovs_len: i32,
+                 _nwritten: i32|
+                 -> i32 { 8 },
             );
             let _ = linker.func_wrap(
-                "wasi_snapshot_preview1", "fd_read",
+                "wasi_snapshot_preview1",
+                "fd_read",
                 |_: wasmtime::Caller<'_, SandboxState>,
-                 _fd: i32, _iovs: i32, _iovs_len: i32, _nread: i32| -> i32 { 8 },
+                 _fd: i32,
+                 _iovs: i32,
+                 _iovs_len: i32,
+                 _nread: i32|
+                 -> i32 { 8 },
             );
             let _ = linker.func_wrap(
-                "wasi_snapshot_preview1", "fd_close",
+                "wasi_snapshot_preview1",
+                "fd_close",
                 |_: wasmtime::Caller<'_, SandboxState>, _fd: i32| -> i32 { 8 },
             );
             let _ = linker.func_wrap(
-                "wasi_snapshot_preview1", "fd_seek",
+                "wasi_snapshot_preview1",
+                "fd_seek",
                 |_: wasmtime::Caller<'_, SandboxState>,
-                 _fd: i32, _offset: i64, _whence: i32, _newoffset: i32| -> i32 { 8 },
+                 _fd: i32,
+                 _offset: i64,
+                 _whence: i32,
+                 _newoffset: i32|
+                 -> i32 { 8 },
             );
             let _ = linker.func_wrap(
-                "wasi_snapshot_preview1", "fd_fdstat_get",
+                "wasi_snapshot_preview1",
+                "fd_fdstat_get",
                 |_: wasmtime::Caller<'_, SandboxState>, _fd: i32, _stat: i32| -> i32 { 8 },
             );
             let _ = linker.func_wrap(
-                "wasi_snapshot_preview1", "fd_fdstat_set_flags",
+                "wasi_snapshot_preview1",
+                "fd_fdstat_set_flags",
                 |_: wasmtime::Caller<'_, SandboxState>, _fd: i32, _flags: i32| -> i32 { 8 },
             );
             let _ = linker.func_wrap(
-                "wasi_snapshot_preview1", "fd_filestat_get",
+                "wasi_snapshot_preview1",
+                "fd_filestat_get",
                 |_: wasmtime::Caller<'_, SandboxState>, _fd: i32, _stat: i32| -> i32 { 8 },
             );
             let _ = linker.func_wrap(
-                "wasi_snapshot_preview1", "fd_prestat_get",
+                "wasi_snapshot_preview1",
+                "fd_prestat_get",
                 |_: wasmtime::Caller<'_, SandboxState>, _fd: i32, _prestat: i32| -> i32 { 8 },
             );
             let _ = linker.func_wrap(
-                "wasi_snapshot_preview1", "fd_prestat_dir_name",
-                |_: wasmtime::Caller<'_, SandboxState>,
-                 _fd: i32, _path: i32, _len: i32| -> i32 { 8 },
+                "wasi_snapshot_preview1",
+                "fd_prestat_dir_name",
+                |_: wasmtime::Caller<'_, SandboxState>, _fd: i32, _path: i32, _len: i32| -> i32 {
+                    8
+                },
             );
             let _ = linker.func_wrap(
-                "wasi_snapshot_preview1", "path_open",
+                "wasi_snapshot_preview1",
+                "path_open",
                 |_: wasmtime::Caller<'_, SandboxState>,
-                 _: i32, _: i32, _: i32, _: i32, _: i32,
-                 _: i64, _: i64, _: i32, _: i32| -> i32 { 8 },
+                 _: i32,
+                 _: i32,
+                 _: i32,
+                 _: i32,
+                 _: i32,
+                 _: i64,
+                 _: i64,
+                 _: i32,
+                 _: i32|
+                 -> i32 { 8 },
             );
             let _ = linker.func_wrap(
-                "wasi_snapshot_preview1", "environ_sizes_get",
+                "wasi_snapshot_preview1",
+                "environ_sizes_get",
                 |_: wasmtime::Caller<'_, SandboxState>, _count: i32, _size: i32| -> i32 { 0 },
             );
             let _ = linker.func_wrap(
-                "wasi_snapshot_preview1", "environ_get",
+                "wasi_snapshot_preview1",
+                "environ_get",
                 |_: wasmtime::Caller<'_, SandboxState>, _environ: i32, _buf: i32| -> i32 { 0 },
             );
             let _ = linker.func_wrap(
-                "wasi_snapshot_preview1", "args_sizes_get",
+                "wasi_snapshot_preview1",
+                "args_sizes_get",
                 |_: wasmtime::Caller<'_, SandboxState>, _argc: i32, _size: i32| -> i32 { 0 },
             );
             let _ = linker.func_wrap(
-                "wasi_snapshot_preview1", "args_get",
+                "wasi_snapshot_preview1",
+                "args_get",
                 |_: wasmtime::Caller<'_, SandboxState>, _argv: i32, _buf: i32| -> i32 { 0 },
             );
             let _ = linker.func_wrap(
-                "wasi_snapshot_preview1", "clock_time_get",
-                |_: wasmtime::Caller<'_, SandboxState>,
-                 _id: i32, _prec: i64, _time: i32| -> i32 { 52 },
+                "wasi_snapshot_preview1",
+                "clock_time_get",
+                |_: wasmtime::Caller<'_, SandboxState>, _id: i32, _prec: i64, _time: i32| -> i32 {
+                    52
+                },
             );
             let _ = linker.func_wrap(
-                "wasi_snapshot_preview1", "clock_res_get",
+                "wasi_snapshot_preview1",
+                "clock_res_get",
                 |_: wasmtime::Caller<'_, SandboxState>, _id: i32, _res: i32| -> i32 { 52 },
             );
             let _ = linker.func_wrap(
-                "wasi_snapshot_preview1", "random_get",
+                "wasi_snapshot_preview1",
+                "random_get",
                 |_: wasmtime::Caller<'_, SandboxState>, _buf: i32, _len: i32| -> i32 { 52 },
             );
             let _ = linker.func_wrap(
-                "wasi_snapshot_preview1", "sched_yield",
+                "wasi_snapshot_preview1",
+                "sched_yield",
                 |_: wasmtime::Caller<'_, SandboxState>| -> i32 { 0 },
             );
             let _ = linker.func_wrap(
-                "wasi_snapshot_preview1", "poll_oneoff",
+                "wasi_snapshot_preview1",
+                "poll_oneoff",
                 |_: wasmtime::Caller<'_, SandboxState>,
-                 _in: i32, _out: i32, _nsubs: i32, _nevents: i32| -> i32 { 52 },
+                 _in: i32,
+                 _out: i32,
+                 _nsubs: i32,
+                 _nevents: i32|
+                 -> i32 { 52 },
             );
             // proc_exit: record exit code and bail — MUST NOT call process::exit.
             let _ = linker.func_wrap(
-                "wasi_snapshot_preview1", "proc_exit",
-                |mut caller: wasmtime::Caller<'_, SandboxState>, code: i32| -> Result<(), anyhow::Error> {
+                "wasi_snapshot_preview1",
+                "proc_exit",
+                |mut caller: wasmtime::Caller<'_, SandboxState>,
+                 code: i32|
+                 -> Result<(), anyhow::Error> {
                     caller.data_mut().exit_code = Some(code);
                     anyhow::bail!("wasm-sandbox-proc-exit:{}", code)
                 },
@@ -338,11 +391,13 @@ impl WasmSandbox {
             let func = instance
                 .get_typed_func::<(), i32>(&mut store, "_start")
                 .or_else(|_| instance.get_typed_func::<(), i32>(&mut store, "main"))
-                .map_err(|e| SandboxError::ExecutionError(format!("No entry point (_start/main): {}", e)))?;
+                .map_err(|e| {
+                    SandboxError::ExecutionError(format!("No entry point (_start/main): {}", e))
+                })?;
 
-            let call_result = func.call(&mut store, ()).map_err(|e| {
-                SandboxError::ExecutionError(e.to_string())
-            });
+            let call_result = func
+                .call(&mut store, ())
+                .map_err(|e| SandboxError::ExecutionError(e.to_string()));
 
             // Measure peak memory
             let memories: Vec<wasmtime::Memory> = instance
@@ -399,11 +454,15 @@ impl WasmSandbox {
             Ok(Err(join_err)) => {
                 // JoinError — the blocking task panicked
                 Err(SandboxError::ExecutionError(format!(
-                    "WASM execution task failed: {}", join_err
+                    "WASM execution task failed: {}",
+                    join_err
                 )))
             }
             Err(_elapsed) => {
-                warn!("WASM execution timed out (limit: {}s)", self.config.timeout_secs);
+                warn!(
+                    "WASM execution timed out (limit: {}s)",
+                    self.config.timeout_secs
+                );
                 Err(SandboxError::Timeout(timeout_duration))
             }
         }

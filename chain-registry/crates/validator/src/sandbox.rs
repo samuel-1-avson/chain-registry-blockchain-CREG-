@@ -222,8 +222,15 @@ pub async fn run(
     // ── Engine 1: nsjail ──────────────────────────────────────────────────────
     if command_ready("nsjail", &["--version"]).await {
         tracing::info!("nsjail detected — using primary sandbox engine");
-        let result =
-            run_nsjail_sandbox(&tarball_path, _pkg_id, &config, manifest, &resolved_ips, start_time).await;
+        let result = run_nsjail_sandbox(
+            &tarball_path,
+            _pkg_id,
+            &config,
+            manifest,
+            &resolved_ips,
+            start_time,
+        )
+        .await;
         let _ = std::fs::remove_dir_all(&tmp_dir);
         let result = result?;
         cache_result(&cache_key, &result);
@@ -267,8 +274,15 @@ pub async fn run(
     // ── Engine 2: gVisor (runsc) ──────────────────────────────────────────────
     if command_ready("runsc", &["--version"]).await {
         tracing::info!("gVisor (runsc) detected — using userspace syscall sandbox");
-        let result =
-            run_gvisor_sandbox(&tarball_path, _pkg_id, &config, manifest, &resolved_ips, start_time).await;
+        let result = run_gvisor_sandbox(
+            &tarball_path,
+            _pkg_id,
+            &config,
+            manifest,
+            &resolved_ips,
+            start_time,
+        )
+        .await;
         let _ = std::fs::remove_dir_all(&tmp_dir);
         let result = result?;
         cache_result(&cache_key, &result);
@@ -442,11 +456,7 @@ fn nsjail_install_args(ecosystem: &str, tarball_path: &Path) -> Vec<std::ffi::Os
             tarball_path.to_string_lossy()
         ),
     };
-    vec![
-        "/bin/sh".into(),
-        "-c".into(),
-        cmd_str.into(),
-    ]
+    vec!["/bin/sh".into(), "-c".into(), cmd_str.into()]
 }
 
 /// Select ecosystem-specific Docker image and install command.
@@ -1196,7 +1206,11 @@ mod tests {
         let mut mock_stderr = Vec::new();
         for i in 0..600 {
             mock_stderr.extend_from_slice(
-                format!("[SECCOMP] connect(fd, addr={{sa_family=AF_INET, addr=1.1.1.{}, port=443}})\n", i).as_bytes()
+                format!(
+                    "[SECCOMP] connect(fd, addr={{sa_family=AF_INET, addr=1.1.1.{}, port=443}})\n",
+                    i
+                )
+                .as_bytes(),
             );
         }
 

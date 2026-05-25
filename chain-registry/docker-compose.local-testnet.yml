@@ -28,6 +28,7 @@ x-web-explorer-image: &web-explorer-image
       VITE_DEFAULT_NETWORK_PROFILE: ${VITE_DEFAULT_NETWORK_PROFILE:-sepolia}
       VITE_DEV_MODE: ${VITE_DEV_MODE:-true}
       VITE_API_BASE: ""
+      VITE_NODE_ROUTE_MODE: ${VITE_NODE_ROUTE_MODE:-legacy}
 
 x-local-validator-set: &local-validator-set >-
   {"validators":[{"id":"node-1","alias":"validator-1","pubkey":"808704b7245921ce7fa3d923bccd0cc30cea91885bc639e92ba4e4c20fcfe6bd","eth_address":"${LOCAL_GENESIS_VALIDATOR_EVM_ADDRESS:-0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC}","stake":100,"reputation":100,"status":"online"},{"id":"node-2","alias":"validator-2","pubkey":"c01ac0cf441e6fb2532273322d703afd55b2b418319958b1799014a83bff7a40","eth_address":"0x90F79bf6EB2c4f870365E785982E1f101E93b906","stake":100,"reputation":100,"status":"online"},{"id":"node-3","alias":"validator-3","pubkey":"712651f450ba05b63898b99ef5f7ba45632e8e2527f7f715cd671ec4024cc51e","eth_address":"0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65","stake":100,"reputation":100,"status":"online"}]}
@@ -197,6 +198,7 @@ services:
       - "9007:9000"
     volumes:
       - node-1-data:/data
+      - ./rules:/app/rules:ro
       - ./circuits:/app/circuits:ro
       - ./validators:/app/validators:ro
       - ./models:/app/models:ro
@@ -218,6 +220,7 @@ services:
       - "9008:9000"
     volumes:
       - node-2-data:/data
+      - ./rules:/app/rules:ro
       - ./circuits:/app/circuits:ro
       - ./validators:/app/validators:ro
       - ./models:/app/models:ro
@@ -240,6 +243,7 @@ services:
       - "9009:9000"
     volumes:
       - node-3-data:/data
+      - ./rules:/app/rules:ro
       - ./circuits:/app/circuits:ro
       - ./validators:/app/validators:ro
       - ./models:/app/models:ro
@@ -266,6 +270,7 @@ services:
       - "9010:9000"
     volumes:
       - observer-data:/data
+      - ./rules:/app/rules:ro
       - ./circuits:/app/circuits:ro
       - ./validators:/app/validators:ro
       - ./models:/app/models:ro

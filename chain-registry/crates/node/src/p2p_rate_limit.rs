@@ -179,7 +179,11 @@ impl P2PRateLimiter {
         }
 
         let (multiplier, is_validator) = self.get_multiplier(peer, validators);
-        let allowed = bucket.vote_bucket.check_and_consume(self.config.vote_limit, self.config.window, multiplier);
+        let allowed = bucket.vote_bucket.check_and_consume(
+            self.config.vote_limit,
+            self.config.window,
+            multiplier,
+        );
 
         if !allowed && !is_validator {
             // First violation - ban the peer (validators are exempt from auto-bans)
@@ -208,7 +212,11 @@ impl P2PRateLimiter {
         }
 
         let (multiplier, is_validator) = self.get_multiplier(peer, validators);
-        let allowed = bucket.block_bucket.check_and_consume(self.config.block_limit, self.config.window, multiplier);
+        let allowed = bucket.block_bucket.check_and_consume(
+            self.config.block_limit,
+            self.config.window,
+            multiplier,
+        );
 
         if !allowed && !is_validator {
             let ban_duration = self.config.ban_duration * (bucket.violation_count + 1);
@@ -236,7 +244,11 @@ impl P2PRateLimiter {
         }
 
         let (multiplier, is_validator) = self.get_multiplier(peer, validators);
-        let allowed = bucket.general_bucket.check_and_consume(self.config.general_limit, self.config.window, multiplier);
+        let allowed = bucket.general_bucket.check_and_consume(
+            self.config.general_limit,
+            self.config.window,
+            multiplier,
+        );
 
         if !allowed && !is_validator {
             let ban_duration = self.config.ban_duration * (bucket.violation_count + 1);
@@ -466,6 +478,9 @@ mod tests {
 
         // 11th should be rate-limited but validator must NOT be banned
         assert!(!limiter.check_vote(peer, &validators));
-        assert!(!limiter.is_banned(peer), "Active validator should be exempt from bans");
+        assert!(
+            !limiter.is_banned(peer),
+            "Active validator should be exempt from bans"
+        );
     }
 }

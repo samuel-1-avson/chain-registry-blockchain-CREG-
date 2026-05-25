@@ -35,10 +35,10 @@ export function isEvmAddress(s) {
   return /^0x[a-fA-F0-9]{40}$/.test(trimmed)
 }
 
-/** 0x + 64 hex — block or tx hash shape. */
+/** 32-byte hex hash, with or without a 0x prefix. */
 export function isHash32(s) {
   if (typeof s !== 'string') return false
-  return /^0x[a-fA-F0-9]{64}$/.test(s.trim())
+  return /^(0x)?[a-fA-F0-9]{64}$/.test(s.trim())
 }
 
 /** Integer height check (accepts decimal strings). */

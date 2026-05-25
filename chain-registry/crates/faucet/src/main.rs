@@ -17,8 +17,8 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use dashmap::DashMap;
 use chrono::{DateTime, Utc};
+use dashmap::DashMap;
 use metrics::{counter, gauge};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
@@ -28,7 +28,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 use tokio_postgres::NoTls;
 use tower_http::cors::{Any, CorsLayer};
-use tracing::{info, warn, error};
+use tracing::{error, info, warn};
 
 sol!(
     #[sol(rpc)]
@@ -65,15 +65,14 @@ struct FaucetConfig {
 
 impl FaucetConfig {
     fn from_env() -> Self {
-        let faucet_key = std::env::var("FAUCET_PRIVATE_KEY")
-            .expect("FAUCET_PRIVATE_KEY must be set");
-        let faucet_address = std::env::var("FAUCET_ADDRESS")
-            .expect("FAUCET_ADDRESS must be set");
-        
+        let faucet_key =
+            std::env::var("FAUCET_PRIVATE_KEY").expect("FAUCET_PRIVATE_KEY must be set");
+        let faucet_address = std::env::var("FAUCET_ADDRESS").expect("FAUCET_ADDRESS must be set");
+
         Self {
             drip_amount: env_u128("FAUCET_DRIP_AMOUNT", 1000_000_000_000_000_000_000), // 1000 tCREG
             native_drip_amount: env_u128("FAUCET_NATIVE_DRIP_AMOUNT", 100_000_000_000_000_000), // 0.1 ETH
-            cooldown_secs: env_u64("FAUCET_COOLDOWN_SECS", 60),                        // 1 minute
+            cooldown_secs: env_u64("FAUCET_COOLDOWN_SECS", 60), // 1 minute
             ip_cooldown_secs: env_u64("FAUCET_IP_COOLDOWN_SECS", 60),
             max_balance: env_u128("FAUCET_MAX_BALANCE", 10000_000_000_000_000_000_000), // 10k tCREG
             native_max_balance: env_u128("FAUCET_NATIVE_MAX_BALANCE", 1_000_000_000_000_000_000), // 1 ETH
@@ -133,10 +132,7 @@ impl RateLimiter {
                 let remaining = cooldown - elapsed;
                 let retry_after_seconds = remaining.as_secs().max(1);
                 return Err(CooldownRejection {
-                    message: format!(
-                        "IP rate limit: wait {} seconds",
-                        retry_after_seconds
-                    ),
+                    message: format!("IP rate limit: wait {} seconds", retry_after_seconds),
                     retry_after_seconds,
                 });
             }
@@ -218,7 +214,11 @@ impl PersistentRateLimiter {
     }
 
     /// Check cooldown: consult in-memory first; if not found, query Postgres.
-    async fn check_address(&self, address: &str, cooldown: Duration) -> Result<(), CooldownRejection> {
+    async fn check_address(
+        &self,
+        address: &str,
+        cooldown: Duration,
+    ) -> Result<(), CooldownRejection> {
         // Fast path — in-memory cache hit.
         if let Err(r) = self.memory.check_address(address, cooldown) {
             return Err(r);
@@ -226,7 +226,13 @@ impl PersistentRateLimiter {
         // Slow path — Postgres source of truth (catches post-restart attempts).
         if let Some(pg) = &self.pg {
             let key = format!("addr:{}", address.to_lowercase());
-            if let Ok(rows) = pg.query("SELECT last_request_unix FROM faucet_rate_limits WHERE key=$1", &[&key]).await {
+            if let Ok(rows) = pg
+                .query(
+                    "SELECT last_request_unix FROM faucet_rate_limits WHERE key=$1",
+                    &[&key],
+                )
+                .await
+            {
                 if let Some(row) = rows.first() {
                     let last_unix: i64 = row.get(0);
                     let now_unix = chrono::Utc::now().timestamp();
@@ -235,7 +241,10 @@ impl PersistentRateLimiter {
                     if elapsed_secs < cooldown_secs {
                         let remaining = cooldown_secs - elapsed_secs;
                         return Err(CooldownRejection {
-                            message: format!("Please wait {} seconds before requesting again", remaining),
+                            message: format!(
+                                "Please wait {} seconds before requesting again",
+                                remaining
+                            ),
                             retry_after_seconds: remaining,
                         });
                     }
@@ -251,7 +260,13 @@ impl PersistentRateLimiter {
         }
         if let Some(pg) = &self.pg {
             let key = format!("ip:{}", ip);
-            if let Ok(rows) = pg.query("SELECT last_request_unix FROM faucet_rate_limits WHERE key=$1", &[&key]).await {
+            if let Ok(rows) = pg
+                .query(
+                    "SELECT last_request_unix FROM faucet_rate_limits WHERE key=$1",
+                    &[&key],
+                )
+                .await
+            {
                 if let Some(row) = rows.first() {
                     let last_unix: i64 = row.get(0);
                     let now_unix = chrono::Utc::now().timestamp();
@@ -479,14 +494,32 @@ async fn main() -> anyhow::Result<()> {
 
     // Pre-declare metric descriptions so they appear in /metrics even before
     // the first drip.
-    metrics::describe_counter!("faucet_drips_total", "Total number of successful drip operations");
+    metrics::describe_counter!(
+        "faucet_drips_total",
+        "Total number of successful drip operations"
+    );
     metrics::describe_counter!("faucet_token_drips_total", "Successful tCREG token drips");
-    metrics::describe_counter!("faucet_native_drips_total", "Successful native ETH gas drips");
+    metrics::describe_counter!(
+        "faucet_native_drips_total",
+        "Successful native ETH gas drips"
+    );
     metrics::describe_counter!("faucet_failures_total", "Failed drip attempts");
-    metrics::describe_counter!("faucet_rate_limited_total", "Requests rejected by rate limiter");
-    metrics::describe_counter!("faucet_pow_failures_total", "Requests rejected due to invalid PoW");
-    metrics::describe_gauge!("faucet_token_balance", "Current faucet tCREG token balance (raw wei)");
-    metrics::describe_gauge!("faucet_native_balance", "Current faucet native ETH balance (raw wei)");
+    metrics::describe_counter!(
+        "faucet_rate_limited_total",
+        "Requests rejected by rate limiter"
+    );
+    metrics::describe_counter!(
+        "faucet_pow_failures_total",
+        "Requests rejected due to invalid PoW"
+    );
+    metrics::describe_gauge!(
+        "faucet_token_balance",
+        "Current faucet tCREG token balance (raw wei)"
+    );
+    metrics::describe_gauge!(
+        "faucet_native_balance",
+        "Current faucet native ETH balance (raw wei)"
+    );
 
     // Clone config for the background balance gauge task before `state` is
     // moved into the axum router.
@@ -501,10 +534,13 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/balance/:address", get(get_balance))
         .route("/api/network", get(get_network_info))
         .route("/health", get(health_check))
-        .route("/metrics", get(move || {
-            let handle = prometheus_handle.clone();
-            async move { handle.render() }
-        }))
+        .route(
+            "/metrics",
+            get(move || {
+                let handle = prometheus_handle.clone();
+                async move { handle.render() }
+            }),
+        )
         // ── Operator admin endpoints (require FAUCET_ADMIN_TOKEN) ─────────────
         .route("/admin/pause", post(admin_pause))
         .route("/admin/resume", post(admin_resume))
@@ -524,10 +560,9 @@ async fn main() -> anyhow::Result<()> {
         if let (Some(cert_path), Some(key_path)) = (tls_cert, tls_key) {
             use axum_server::tls_rustls::RustlsConfig;
 
-            let tls_config =
-                RustlsConfig::from_pem_file(&cert_path, &key_path)
-                    .await
-                    .expect("Failed to load TLS certificate/key");
+            let tls_config = RustlsConfig::from_pem_file(&cert_path, &key_path)
+                .await
+                .expect("Failed to load TLS certificate/key");
 
             info!("Faucet listening on https://{}", addr);
 
@@ -560,7 +595,11 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
 
     Ok(())
 }
@@ -619,7 +658,10 @@ async fn execute_token_transfer(config: &FaucetConfig, to_address: &str) -> Resu
     Ok(tx_hash)
 }
 
-async fn execute_native_transfer(config: &FaucetConfig, to_address: &str) -> Result<String, String> {
+async fn execute_native_transfer(
+    config: &FaucetConfig,
+    to_address: &str,
+) -> Result<String, String> {
     let signer: PrivateKeySigner = config
         .faucet_key
         .parse()
@@ -708,9 +750,7 @@ async fn get_native_balance(config: &FaucetConfig, address: &str) -> Result<u128
 
 /// Issue a proof-of-work challenge. Client must find a nonce such that
 /// SHA-256(challenge || nonce) has `difficulty` leading zero bits.
-async fn get_challenge(
-    State(state): State<Arc<AppState>>,
-) -> impl IntoResponse {
+async fn get_challenge(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     info!(">>> get_challenge request received");
     use rand::RngCore;
     let mut bytes = [0u8; 16];
@@ -718,7 +758,9 @@ async fn get_challenge(
     let challenge = hex::encode(bytes);
 
     // Prune expired challenges periodically.
-    state.pow_challenges.retain(|_, v| v.created_at.elapsed() < POW_TTL);
+    state
+        .pow_challenges
+        .retain(|_, v| v.created_at.elapsed() < POW_TTL);
 
     state.pow_challenges.insert(
         challenge.clone(),
@@ -740,7 +782,7 @@ async fn get_challenge(
 
 /// Verify proof-of-work: SHA-256(challenge || nonce) must have `difficulty` leading zero bits.
 fn verify_pow(challenge: &str, nonce: &str, difficulty: u8) -> bool {
-    use sha2::{Sha256, Digest};
+    use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(challenge.as_bytes());
     hasher.update(nonce.as_bytes());
@@ -789,7 +831,9 @@ async fn handle_drip(
             None => {
                 return (
                     StatusCode::BAD_REQUEST,
-                    JsonResponse(DripResponse::error("Missing proof-of-work challenge. Call GET /api/challenge first.")),
+                    JsonResponse(DripResponse::error(
+                        "Missing proof-of-work challenge. Call GET /api/challenge first.",
+                    )),
                 );
             }
         };
@@ -809,7 +853,8 @@ async fn handle_drip(
         match pow_entry {
             Some((_, pc)) if pc.created_at.elapsed() < POW_TTL => {
                 if !verify_pow(&challenge, &nonce, pc.difficulty) {
-                    counter!("faucet_pow_failures_total", "reason" => "invalid_solution").increment(1);
+                    counter!("faucet_pow_failures_total", "reason" => "invalid_solution")
+                        .increment(1);
                     return (
                         StatusCode::BAD_REQUEST,
                         JsonResponse(DripResponse::error("Invalid proof-of-work solution.")),
@@ -817,10 +862,13 @@ async fn handle_drip(
                 }
             }
             _ => {
-                counter!("faucet_pow_failures_total", "reason" => "expired_or_unknown").increment(1);
+                counter!("faucet_pow_failures_total", "reason" => "expired_or_unknown")
+                    .increment(1);
                 return (
                     StatusCode::BAD_REQUEST,
-                    JsonResponse(DripResponse::error("Unknown or expired challenge. Request a new one.")),
+                    JsonResponse(DripResponse::error(
+                        "Unknown or expired challenge. Request a new one.",
+                    )),
                 );
             }
         }
@@ -908,8 +956,7 @@ async fn handle_drip(
                 success: false,
                 message: format!(
                     "Address already has enough test funds for now ({}, {}).",
-                    token_msg,
-                    native_msg
+                    token_msg, native_msg
                 ),
                 error: None,
                 tx_hash: None,
@@ -950,7 +997,10 @@ async fn handle_drip(
     if should_send_token {
         match execute_token_transfer(&state.config, &address).await {
             Ok(tx_hash) => {
-                parts.push(format!("{} tCREG", state.config.drip_amount / 10_u128.pow(18)));
+                parts.push(format!(
+                    "{} tCREG",
+                    state.config.drip_amount / 10_u128.pow(18)
+                ));
                 token_tx_hash = Some(tx_hash);
                 counter!("faucet_token_drips_total").increment(1);
             }
@@ -963,96 +1013,110 @@ async fn handle_drip(
     }
 
     if token_tx_hash.is_some() || native_tx_hash.is_some() {
-            state.rate_limiter.record_request(&address, &client_ip).await;
-            counter!("faucet_drips_total").increment(1);
+        state
+            .rate_limiter
+            .record_request(&address, &client_ip)
+            .await;
+        counter!("faucet_drips_total").increment(1);
 
-            // Update stats
-            let mut stats = state.stats.lock().await;
-            stats.total_drips += 1;
-            stats.unique_addresses = state.rate_limiter.address_count();
-            if token_tx_hash.is_some() {
-                stats.total_distributed = stats.total_distributed.saturating_add(state.config.drip_amount);
-            }
-            if native_tx_hash.is_some() {
-                stats.total_native_distributed = stats.total_native_distributed.saturating_add(state.config.native_drip_amount);
-            }
-            stats.last_drip = Some(Utc::now());
-            drop(stats);
-
-            info!(
-                "Dripped {} to {}{}{}",
-                parts.join(" + "),
-                address,
-                token_tx_hash
-                    .as_ref()
-                    .map(|tx| format!(" (token tx: {})", tx))
-                    .unwrap_or_default(),
-                native_tx_hash
-                    .as_ref()
-                    .map(|tx| format!(" (gas tx: {})", tx))
-                    .unwrap_or_default()
-            );
-
-            (
-                StatusCode::OK,
-                JsonResponse(DripResponse {
-                    success: true,
-                    message: if failures.is_empty() {
-                        format!("Sent {}.", parts.join(" + "))
-                    } else {
-                        format!("Sent {}. Partial issue: {}", parts.join(" + "), failures.join("; "))
-                    },
-                    error: None,
-                    tx_hash: token_tx_hash.clone().or_else(|| native_tx_hash.clone()),
-                    amount: Some(parts.join(" + ")),
-                    retry_after_seconds: None,
-                    cooldown_seconds: Some(state.config.cooldown_secs),
-                    token_tx_hash,
-                    native_tx_hash,
-                    token_amount: if should_send_token {
-                        Some(format!("{}", state.config.drip_amount / 10_u128.pow(18)))
-                    } else {
-                        None
-                    },
-                    native_amount: if should_send_native {
-                        Some(format!("{:.4}", state.config.native_drip_amount as f64 / 10_f64.powi(18)))
-                    } else {
-                        None
-                    },
-                }),
-            )
-        } else {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                JsonResponse(DripResponse {
-                    success: false,
-                    message: if failures.is_empty() {
-                        "Faucet transfer failed for an unknown reason.".to_string()
-                    } else {
-                        format!("Faucet transfer failed: {}", failures.join("; "))
-                    },
-                    error: Some(if failures.is_empty() {
-                        "unknown_error".to_string()
-                    } else {
-                        failures.join("; ")
-                    }),
-                    tx_hash: None,
-                    amount: None,
-                    retry_after_seconds: None,
-                    cooldown_seconds: None,
-                    token_tx_hash: None,
-                    native_tx_hash: None,
-                    token_amount: None,
-                    native_amount: None,
-                }),
-            )
+        // Update stats
+        let mut stats = state.stats.lock().await;
+        stats.total_drips += 1;
+        stats.unique_addresses = state.rate_limiter.address_count();
+        if token_tx_hash.is_some() {
+            stats.total_distributed = stats
+                .total_distributed
+                .saturating_add(state.config.drip_amount);
         }
+        if native_tx_hash.is_some() {
+            stats.total_native_distributed = stats
+                .total_native_distributed
+                .saturating_add(state.config.native_drip_amount);
+        }
+        stats.last_drip = Some(Utc::now());
+        drop(stats);
+
+        info!(
+            "Dripped {} to {}{}{}",
+            parts.join(" + "),
+            address,
+            token_tx_hash
+                .as_ref()
+                .map(|tx| format!(" (token tx: {})", tx))
+                .unwrap_or_default(),
+            native_tx_hash
+                .as_ref()
+                .map(|tx| format!(" (gas tx: {})", tx))
+                .unwrap_or_default()
+        );
+
+        (
+            StatusCode::OK,
+            JsonResponse(DripResponse {
+                success: true,
+                message: if failures.is_empty() {
+                    format!("Sent {}.", parts.join(" + "))
+                } else {
+                    format!(
+                        "Sent {}. Partial issue: {}",
+                        parts.join(" + "),
+                        failures.join("; ")
+                    )
+                },
+                error: None,
+                tx_hash: token_tx_hash.clone().or_else(|| native_tx_hash.clone()),
+                amount: Some(parts.join(" + ")),
+                retry_after_seconds: None,
+                cooldown_seconds: Some(state.config.cooldown_secs),
+                token_tx_hash,
+                native_tx_hash,
+                token_amount: if should_send_token {
+                    Some(format!("{}", state.config.drip_amount / 10_u128.pow(18)))
+                } else {
+                    None
+                },
+                native_amount: if should_send_native {
+                    Some(format!(
+                        "{:.4}",
+                        state.config.native_drip_amount as f64 / 10_f64.powi(18)
+                    ))
+                } else {
+                    None
+                },
+            }),
+        )
+    } else {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            JsonResponse(DripResponse {
+                success: false,
+                message: if failures.is_empty() {
+                    "Faucet transfer failed for an unknown reason.".to_string()
+                } else {
+                    format!("Faucet transfer failed: {}", failures.join("; "))
+                },
+                error: Some(if failures.is_empty() {
+                    "unknown_error".to_string()
+                } else {
+                    failures.join("; ")
+                }),
+                tx_hash: None,
+                amount: None,
+                retry_after_seconds: None,
+                cooldown_seconds: None,
+                token_tx_hash: None,
+                native_tx_hash: None,
+                token_amount: None,
+                native_amount: None,
+            }),
+        )
+    }
 }
 
 /// Get faucet statistics
 async fn get_stats(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let stats = state.stats.lock().await;
-    
+
     // Get real faucet balance
     let faucet_balance = get_token_balance(&state.config, &state.config.faucet_address)
         .await
@@ -1060,7 +1124,7 @@ async fn get_stats(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let faucet_native_balance = get_native_balance(&state.config, &state.config.faucet_address)
         .await
         .unwrap_or(0);
-    
+
     JsonResponse(serde_json::json!({
         "drip_amount": state.config.drip_amount.to_string(),
         "native_drip_amount": state.config.native_drip_amount.to_string(),
@@ -1087,27 +1151,23 @@ async fn get_balance(
     let native_balance = get_native_balance(&state.config, &address).await;
 
     match (token_balance, native_balance) {
-        (Ok(balance), Ok(native)) => {
-            JsonResponse(serde_json::json!({
-                "address": address,
-                "balance": balance.to_string(),
-                "balance_formatted": format!("{:.2}", balance as f64 / 10_f64.powi(18)),
-                "token_balance": balance.to_string(),
-                "token_balance_formatted": format!("{:.2}", balance as f64 / 10_f64.powi(18)),
-                "native_balance": native.to_string(),
-                "native_balance_formatted": format!("{:.4}", native as f64 / 10_f64.powi(18)),
-            }))
-        }
-        (token_result, native_result) => {
-            JsonResponse(serde_json::json!({
-                "address": address,
-                "error": format!(
-                    "token={}, native={}",
-                    token_result.err().unwrap_or_else(|| "ok".to_string()),
-                    native_result.err().unwrap_or_else(|| "ok".to_string())
-                ),
-            }))
-        }
+        (Ok(balance), Ok(native)) => JsonResponse(serde_json::json!({
+            "address": address,
+            "balance": balance.to_string(),
+            "balance_formatted": format!("{:.2}", balance as f64 / 10_f64.powi(18)),
+            "token_balance": balance.to_string(),
+            "token_balance_formatted": format!("{:.2}", balance as f64 / 10_f64.powi(18)),
+            "native_balance": native.to_string(),
+            "native_balance_formatted": format!("{:.4}", native as f64 / 10_f64.powi(18)),
+        })),
+        (token_result, native_result) => JsonResponse(serde_json::json!({
+            "address": address,
+            "error": format!(
+                "token={}, native={}",
+                token_result.err().unwrap_or_else(|| "ok".to_string()),
+                native_result.err().unwrap_or_else(|| "ok".to_string())
+            ),
+        })),
     }
 }
 
@@ -1193,10 +1253,7 @@ fn check_admin_auth(
 }
 
 /// `POST /admin/pause` — stop accepting new drip requests.
-async fn admin_pause(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-) -> impl IntoResponse {
+async fn admin_pause(State(state): State<Arc<AppState>>, headers: HeaderMap) -> impl IntoResponse {
     if let Err(e) = check_admin_auth(&headers) {
         return e;
     }
@@ -1209,10 +1266,7 @@ async fn admin_pause(
 }
 
 /// `POST /admin/resume` — re-enable drip requests after a pause.
-async fn admin_resume(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-) -> impl IntoResponse {
+async fn admin_resume(State(state): State<Arc<AppState>>, headers: HeaderMap) -> impl IntoResponse {
     if let Err(e) = check_admin_auth(&headers) {
         return e;
     }
@@ -1225,10 +1279,7 @@ async fn admin_resume(
 }
 
 /// `GET /admin/status` — live operational snapshot (address count, pause state, stats).
-async fn admin_status(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-) -> impl IntoResponse {
+async fn admin_status(State(state): State<Arc<AppState>>, headers: HeaderMap) -> impl IntoResponse {
     if let Err(e) = check_admin_auth(&headers) {
         return e;
     }

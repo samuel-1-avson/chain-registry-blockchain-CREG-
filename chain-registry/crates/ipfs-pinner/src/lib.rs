@@ -309,7 +309,7 @@ impl PinningManager {
                 if let Ok(saved_pins) = serde_json::from_slice::<HashMap<String, PinInfo>>(&data) {
                     let mut pins = self.pins.write().await;
                     let mut stats = self.stats.write().await;
-                    
+
                     for (cid, info) in saved_pins {
                         pins.insert(cid.clone(), info.clone());
                         stats.total_pins += 1;
@@ -335,7 +335,7 @@ impl PinningManager {
                     serde_json::to_vec_pretty(&*pins)
                 }
             };
-            
+
             if let Ok(json) = data {
                 if let Err(e) = tokio::fs::write(path, json).await {
                     warn!("Failed to persist pinner state to {}: {}", path, e);
@@ -362,7 +362,10 @@ impl PinningManager {
             return Ok(());
         }
 
-        info!("Running verification for {} pinned CIDs", pins_to_verify.len());
+        info!(
+            "Running verification for {} pinned CIDs",
+            pins_to_verify.len()
+        );
 
         for cid in pins_to_verify {
             match verifier.verify(&cid).await {

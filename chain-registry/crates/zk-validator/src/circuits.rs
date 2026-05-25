@@ -266,22 +266,30 @@ impl DoubleSignCircuit {
 
 impl ConstraintSynthesizer<Fr> for DoubleSignCircuit {
     fn generate_constraints(self, cs: ConstraintSystemRef<Fr>) -> Result<(), SynthesisError> {
-        let validator_pubkey_lo =
-            FpVar::new_input(cs.clone(), || Ok(Fr::from_le_bytes_mod_order(&self.validator_pubkey_lo)))?;
-        let validator_pubkey_hi =
-            FpVar::new_input(cs.clone(), || Ok(Fr::from_le_bytes_mod_order(&self.validator_pubkey_hi)))?;
-        let package_hash_lo =
-            FpVar::new_input(cs.clone(), || Ok(Fr::from_le_bytes_mod_order(&self.package_hash_lo)))?;
-        let package_hash_hi =
-            FpVar::new_input(cs.clone(), || Ok(Fr::from_le_bytes_mod_order(&self.package_hash_hi)))?;
-        let vote1_lo =
-            FpVar::new_input(cs.clone(), || Ok(Fr::from_le_bytes_mod_order(&self.vote1_hash_lo)))?;
-        let vote1_hi =
-            FpVar::new_input(cs.clone(), || Ok(Fr::from_le_bytes_mod_order(&self.vote1_hash_hi)))?;
-        let vote2_lo =
-            FpVar::new_input(cs.clone(), || Ok(Fr::from_le_bytes_mod_order(&self.vote2_hash_lo)))?;
-        let vote2_hi =
-            FpVar::new_input(cs.clone(), || Ok(Fr::from_le_bytes_mod_order(&self.vote2_hash_hi)))?;
+        let validator_pubkey_lo = FpVar::new_input(cs.clone(), || {
+            Ok(Fr::from_le_bytes_mod_order(&self.validator_pubkey_lo))
+        })?;
+        let validator_pubkey_hi = FpVar::new_input(cs.clone(), || {
+            Ok(Fr::from_le_bytes_mod_order(&self.validator_pubkey_hi))
+        })?;
+        let package_hash_lo = FpVar::new_input(cs.clone(), || {
+            Ok(Fr::from_le_bytes_mod_order(&self.package_hash_lo))
+        })?;
+        let package_hash_hi = FpVar::new_input(cs.clone(), || {
+            Ok(Fr::from_le_bytes_mod_order(&self.package_hash_hi))
+        })?;
+        let vote1_lo = FpVar::new_input(cs.clone(), || {
+            Ok(Fr::from_le_bytes_mod_order(&self.vote1_hash_lo))
+        })?;
+        let vote1_hi = FpVar::new_input(cs.clone(), || {
+            Ok(Fr::from_le_bytes_mod_order(&self.vote1_hash_hi))
+        })?;
+        let vote2_lo = FpVar::new_input(cs.clone(), || {
+            Ok(Fr::from_le_bytes_mod_order(&self.vote2_hash_lo))
+        })?;
+        let vote2_hi = FpVar::new_input(cs.clone(), || {
+            Ok(Fr::from_le_bytes_mod_order(&self.vote2_hash_hi))
+        })?;
 
         // Binding constraints: ensure allocated variables are actually used in
         // the constraint system so the Groth16 verifier binds the public
@@ -577,12 +585,8 @@ mod tests {
     #[test]
     fn test_double_sign_circuit_accepts_different_hashes() {
         let cs = ConstraintSystem::<Fr>::new_ref();
-        let circuit = DoubleSignCircuit::from_hashes(
-            &[7u8; 32],
-            &[9u8; 32],
-            &[0x11; 32],
-            &[0x22; 32],
-        );
+        let circuit =
+            DoubleSignCircuit::from_hashes(&[7u8; 32], &[9u8; 32], &[0x11; 32], &[0x22; 32]);
         circuit.generate_constraints(cs.clone()).unwrap();
         assert!(cs.is_satisfied().unwrap());
     }
@@ -667,7 +671,10 @@ mod tests {
             1, // minimum non-empty batch
         );
         circuit.generate_constraints(cs.clone()).unwrap();
-        assert!(cs.is_satisfied().unwrap(), "tx_count=1 must satisfy circuit");
+        assert!(
+            cs.is_satisfied().unwrap(),
+            "tx_count=1 must satisfy circuit"
+        );
     }
 
     #[test]
@@ -690,10 +697,16 @@ mod tests {
     fn test_batch_circuit_different_roots_distinguished() {
         // Two circuits with different roots must produce different public inputs.
         let c1 = BatchStateTransitionCircuit::from_roots(
-            &[0x01u8; 32], &[0x02u8; 32], &[0x03u8; 32], 10,
+            &[0x01u8; 32],
+            &[0x02u8; 32],
+            &[0x03u8; 32],
+            10,
         );
         let c2 = BatchStateTransitionCircuit::from_roots(
-            &[0x11u8; 32], &[0x22u8; 32], &[0x33u8; 32], 10,
+            &[0x11u8; 32],
+            &[0x22u8; 32],
+            &[0x33u8; 32],
+            10,
         );
         assert_ne!(
             c1.public_inputs(),

@@ -137,9 +137,7 @@ const VERIFYING_KEY_FILE: &str = "double_sign_vk.bin";
 /// invocations reuse the cached `Arc`.
 static DOUBLE_SIGN_KEYS: OnceLock<Arc<(ProvingKey<Bn254>, VerifyingKey<Bn254>)>> = OnceLock::new();
 
-fn load_or_generate_keys(
-    keys_dir: &Path,
-) -> Result<Arc<(ProvingKey<Bn254>, VerifyingKey<Bn254>)>> {
+fn load_or_generate_keys(keys_dir: &Path) -> Result<Arc<(ProvingKey<Bn254>, VerifyingKey<Bn254>)>> {
     if let Some(existing) = DOUBLE_SIGN_KEYS.get() {
         return Ok(existing.clone());
     }
@@ -157,7 +155,10 @@ fn load_or_generate_keys(
             .context("deserialize double-sign verifying key")?;
         (pk, vk)
     } else {
-        if std::env::var("CREG_PRODUCTION").map(|v| v == "1" || v.eq_ignore_ascii_case("true")).unwrap_or(false) {
+        if std::env::var("CREG_PRODUCTION")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
+        {
             panic!(
                 "PRODUCTION GUARD: Double-sign ZK keys not found in '{}'. \
                  Refusing to generate ephemeral keys on a production node. \
@@ -256,8 +257,7 @@ impl SlashingProofGenerator {
         }
 
         let groth = groth16_to_display(&proof);
-        let public_inputs_decimal: Vec<String> =
-            public_inputs.iter().map(fr_to_decimal).collect();
+        let public_inputs_decimal: Vec<String> = public_inputs.iter().map(fr_to_decimal).collect();
 
         let nullifier = self.compute_nullifier(&evidence.public_inputs);
 
@@ -288,10 +288,10 @@ impl SlashingProofGenerator {
         )?;
         let package_hash = hex32(&evidence.public_inputs.package_hash)
             .context("invalid package_hash in evidence")?;
-        let vote1_hash = hex32(&evidence.public_inputs.vote1_hash)
-            .context("invalid vote1_hash in evidence")?;
-        let vote2_hash = hex32(&evidence.public_inputs.vote2_hash)
-            .context("invalid vote2_hash in evidence")?;
+        let vote1_hash =
+            hex32(&evidence.public_inputs.vote1_hash).context("invalid vote1_hash in evidence")?;
+        let vote2_hash =
+            hex32(&evidence.public_inputs.vote2_hash).context("invalid vote2_hash in evidence")?;
 
         if vote1_hash == vote2_hash {
             anyhow::bail!("vote1_hash == vote2_hash: not a double-sign");
@@ -357,8 +357,7 @@ impl SlashingProofGenerator {
 
         let verify_vote_sig = |vote: &VoteDetails, label: &str| -> Result<()> {
             use ed25519_dalek::{
-                Signature as Ed25519Sig, Verifier,
-                VerifyingKey as Ed25519VerifyingKey,
+                Signature as Ed25519Sig, Verifier, VerifyingKey as Ed25519VerifyingKey,
             };
 
             let raw = vote.signature_hex.trim_start_matches("0x");
@@ -745,19 +744,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_generate_and_verify_double_sign_proof() {
-        let tmp = std::env::temp_dir().join(format!(
-            "creg-zk-slash-test-{}",
-            std::process::id()
-        ));
+        let tmp = std::env::temp_dir().join(format!("creg-zk-slash-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         let generator = SlashingProofGenerator::new(ProofConfig {
             keys_dir: tmp.clone(),
         });
 
-        let evidence = sample_evidence(
-            &hex::encode([0xCCu8; 32]),
-            &hex::encode([0xDDu8; 32]),
-        );
+        let evidence = sample_evidence(&hex::encode([0xCCu8; 32]), &hex::encode([0xDDu8; 32]));
 
         let proof = generator
             .generate_double_sign_proof(&evidence)
@@ -787,10 +780,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_rejects_equal_vote_hashes() {
-        let tmp = std::env::temp_dir().join(format!(
-            "creg-zk-slash-equal-{}",
-            std::process::id()
-        ));
+        let tmp = std::env::temp_dir().join(format!("creg-zk-slash-equal-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         let generator = SlashingProofGenerator::new(ProofConfig {
             keys_dir: tmp.clone(),

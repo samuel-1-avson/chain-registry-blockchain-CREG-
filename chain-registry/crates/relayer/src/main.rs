@@ -20,13 +20,7 @@ use dashmap::DashMap;
 use k256::ecdsa::{RecoveryId, Signature as K256Signature, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{
-    collections::HashMap,
-    fs,
-    net::SocketAddr,
-    sync::Arc,
-    time::Duration,
-};
+use std::{collections::HashMap, fs, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::time::sleep;
 use tower_http::cors::{Any, CorsLayer};
 use tracing::{error, info};
@@ -65,8 +59,8 @@ struct RelayerConfig {
 
 impl RelayerConfig {
     async fn from_env(http_client: &reqwest::Client) -> anyhow::Result<Self> {
-        let private_key = std::env::var("RELAYER_PRIVATE_KEY")
-            .expect("RELAYER_PRIVATE_KEY must be set");
+        let private_key =
+            std::env::var("RELAYER_PRIVATE_KEY").expect("RELAYER_PRIVATE_KEY must be set");
         let signer: PrivateKeySigner = private_key.parse()?;
         let relayer_address = signer.address();
 
@@ -412,7 +406,10 @@ async fn main() -> anyhow::Result<()> {
     info!("  Relayer address: {}", config.relayer_address);
     info!("  Policy:          {}", config.policy_path);
     info!("  Policy mode:     {}", policy.mode);
-    info!("  Nonce scope:     {}", policy.replay_protection.nonce_scope);
+    info!(
+        "  Nonce scope:     {}",
+        policy.replay_protection.nonce_scope
+    );
     info!("  RPC:             {}", config.rpc_url);
 
     let state = Arc::new(AppState {
@@ -443,7 +440,11 @@ async fn main() -> anyhow::Result<()> {
     info!("Relayer listening on http://{}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
 
     Ok(())
 }
@@ -571,7 +572,11 @@ async fn sponsor_request(
         }
     };
 
-    if let Err(message) = check_quota(&state.wallet_daily_counts, &wallet_quota_key(prepared.owner, prepared.action), state.policy.chain.daily_wallet_quota) {
+    if let Err(message) = check_quota(
+        &state.wallet_daily_counts,
+        &wallet_quota_key(prepared.owner, prepared.action),
+        state.policy.chain.daily_wallet_quota,
+    ) {
         return (
             StatusCode::TOO_MANY_REQUESTS,
             Json(SponsorResponse {
@@ -584,7 +589,11 @@ async fn sponsor_request(
         )
             .into_response();
     }
-    if let Err(message) = check_quota(&state.ip_daily_counts, &ip_quota_key(state.config.active_chain_id, &client_ip), state.policy.chain.daily_ip_quota) {
+    if let Err(message) = check_quota(
+        &state.ip_daily_counts,
+        &ip_quota_key(state.config.active_chain_id, &client_ip),
+        state.policy.chain.daily_ip_quota,
+    ) {
         return (
             StatusCode::TOO_MANY_REQUESTS,
             Json(SponsorResponse {
@@ -648,26 +657,27 @@ async fn sponsor_request(
             .into_response();
     }
 
-    let on_chain_nonce = match fetch_token_nonce(&state, prepared.token_contract, prepared.owner).await {
-        Ok(value) => value,
-        Err(err) => {
-            error!(
+    let on_chain_nonce =
+        match fetch_token_nonce(&state, prepared.token_contract, prepared.owner).await {
+            Ok(value) => value,
+            Err(err) => {
+                error!(
                 "Failed to fetch token nonce for sponsor request. Token: {}, Owner: {}. Error: {}",
                 prepared.token_contract, prepared.owner, err
             );
-            return (
-                StatusCode::BAD_GATEWAY,
-                Json(SponsorResponse {
-                    success: false,
-                    request_id: String::new(),
-                    status: "failed".to_string(),
-                    tx_hash: None,
-                    message: format!("Relayer failed to reach blockchain node: {}", err),
-                }),
-            )
-                .into_response();
-        }
-    };
+                return (
+                    StatusCode::BAD_GATEWAY,
+                    Json(SponsorResponse {
+                        success: false,
+                        request_id: String::new(),
+                        status: "failed".to_string(),
+                        tx_hash: None,
+                        message: format!("Relayer failed to reach blockchain node: {}", err),
+                    }),
+                )
+                    .into_response();
+            }
+        };
     if on_chain_nonce != prepared.permit_nonce {
         return (
             StatusCode::CONFLICT,
@@ -702,9 +712,17 @@ async fn sponsor_request(
         }
     };
 
-    state.sponsor_nonces.insert(owner_nonce_key, expected_nonce + 1);
-    record_quota(&state.wallet_daily_counts, &wallet_quota_key(prepared.owner, prepared.action));
-    record_quota(&state.ip_daily_counts, &ip_quota_key(state.config.active_chain_id, &client_ip));
+    state
+        .sponsor_nonces
+        .insert(owner_nonce_key, expected_nonce + 1);
+    record_quota(
+        &state.wallet_daily_counts,
+        &wallet_quota_key(prepared.owner, prepared.action),
+    );
+    record_quota(
+        &state.ip_daily_counts,
+        &ip_quota_key(state.config.active_chain_id, &client_ip),
+    );
 
     let request_id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
@@ -718,7 +736,10 @@ async fn sponsor_request(
             chain_id: state.config.active_chain_id,
             tx_hash: None,
             block_number: None,
-            message: format!("Submitting sponsored {} transaction.", prepared.action.as_str()),
+            message: format!(
+                "Submitting sponsored {} transaction.",
+                prepared.action.as_str()
+            ),
             created_at: now.clone(),
             updated_at: now,
         },
@@ -754,7 +775,10 @@ async fn sponsor_request(
         &state,
         &request_id,
         "submitted",
-        &format!("Sponsored {} transaction submitted.", prepared.action.as_str()),
+        &format!(
+            "Sponsored {} transaction submitted.",
+            prepared.action.as_str()
+        ),
         Some(tx_hash.clone()),
         None,
     );
@@ -772,7 +796,10 @@ async fn sponsor_request(
             request_id,
             status: "submitted".to_string(),
             tx_hash: Some(tx_hash),
-            message: format!("Sponsored {} transaction submitted.", prepared.action.as_str()),
+            message: format!(
+                "Sponsored {} transaction submitted.",
+                prepared.action.as_str()
+            ),
         }),
     )
         .into_response()
@@ -816,16 +843,20 @@ async fn build_quote(
 
     let chain = &state.policy.chain;
     if !chain.enabled {
-        return Err(format!("Sponsored transactions are disabled for {}.", chain.label));
+        return Err(format!(
+            "Sponsored transactions are disabled for {}.",
+            chain.label
+        ));
     }
     ensure_contract_allowed(chain, token_contract, "token contract")?;
     ensure_contract_allowed(chain, staking_contract, "staking contract")?;
 
-    let action_policy = chain
-        .actions
-        .get(&action)
-        .cloned()
-        .ok_or_else(|| format!("Policy does not allow sponsored {} actions.", action.as_str()))?;
+    let action_policy = chain.actions.get(&action).cloned().ok_or_else(|| {
+        format!(
+            "Policy does not allow sponsored {} actions.",
+            action.as_str()
+        )
+    })?;
 
     if amount > action_policy.max_amount_wei {
         return Err(format!(
@@ -850,8 +881,12 @@ async fn build_quote(
         &state.sponsor_nonces,
         &sponsor_nonce_key(state.config.active_chain_id, owner),
     );
-    let permit_deadline = U256::from((Utc::now().timestamp() as u64) + state.policy.replay_protection.max_expiry_seconds);
-    let expires_at = U256::from((Utc::now().timestamp() as u64) + state.policy.replay_protection.max_expiry_seconds);
+    let permit_deadline = U256::from(
+        (Utc::now().timestamp() as u64) + state.policy.replay_protection.max_expiry_seconds,
+    );
+    let expires_at = U256::from(
+        (Utc::now().timestamp() as u64) + state.policy.replay_protection.max_expiry_seconds,
+    );
     let gas_price = fetch_gas_price(&state.http_client, &state.config.rpc_url).await?;
     let estimated_fee = gas_price.saturating_mul(U256::from(chain.max_gas_per_request));
 
@@ -914,7 +949,8 @@ fn validate_sponsor_request(
     }
 
     let token_contract = parse_address(&request.intent_message.token_contract, "token contract")?;
-    let staking_contract = parse_address(&request.intent_message.staking_contract, "staking contract")?;
+    let staking_contract =
+        parse_address(&request.intent_message.staking_contract, "staking contract")?;
     let permit_spender = parse_address(&request.permit_message.spender, "permit spender")?;
 
     if permit_spender != staking_contract {
@@ -960,7 +996,12 @@ fn validate_sponsor_request(
         .actions
         .get(&action)
         .cloned()
-        .ok_or_else(|| format!("Policy does not allow sponsored {} actions.", action.as_str()))?;
+        .ok_or_else(|| {
+            format!(
+                "Policy does not allow sponsored {} actions.",
+                action.as_str()
+            )
+        })?;
     if amount > action_policy.max_amount_wei {
         return Err(format!(
             "Requested amount exceeds the relayer policy cap for {}.",
@@ -1133,7 +1174,12 @@ fn load_policy(policy_path: &str, active_chain_id: u64) -> anyhow::Result<Loaded
         .chains
         .into_iter()
         .find(|chain| chain.id == active_chain_id)
-        .ok_or_else(|| anyhow::anyhow!("No relayer policy configured for active chain {}", active_chain_id))?;
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "No relayer policy configured for active chain {}",
+                active_chain_id
+            )
+        })?;
 
     let mut actions = HashMap::new();
     for selector in raw_chain.allow_selectors {
@@ -1239,7 +1285,10 @@ fn ensure_contract_allowed(
     label: &str,
 ) -> Result<(), String> {
     if !chain.allow_contracts.contains(&contract) {
-        return Err(format!("{} is not allowlisted by the relayer policy.", label));
+        return Err(format!(
+            "{} is not allowlisted by the relayer policy.",
+            label
+        ));
     }
     Ok(())
 }
@@ -1291,8 +1340,9 @@ fn recover_address_from_signature(digest: &B256, signature_hex: &str) -> Result<
     let recovery_id = normalize_recovery_id(bytes[64])?;
     let signature = K256Signature::try_from(&bytes[..64])
         .map_err(|e| format!("Invalid ECDSA signature: {}", e))?;
-    let verifying_key = VerifyingKey::recover_from_prehash(digest.as_slice(), &signature, recovery_id)
-        .map_err(|e| format!("Failed to recover signer: {}", e))?;
+    let verifying_key =
+        VerifyingKey::recover_from_prehash(digest.as_slice(), &signature, recovery_id)
+            .map_err(|e| format!("Failed to recover signer: {}", e))?;
     let uncompressed = verifying_key.to_encoded_point(false);
     let pubkey = uncompressed.as_bytes();
     let hashed = keccak256(&pubkey[1..]);
@@ -1313,8 +1363,7 @@ fn parse_signature_parts(signature_hex: &str) -> Result<ParsedSignatureParts, St
 
 fn parse_signature_bytes(signature_hex: &str) -> Result<[u8; 65], String> {
     let normalized = signature_hex.trim().trim_start_matches("0x");
-    let decoded = hex::decode(normalized)
-        .map_err(|e| format!("Invalid hex signature: {}", e))?;
+    let decoded = hex::decode(normalized).map_err(|e| format!("Invalid hex signature: {}", e))?;
     if decoded.len() != 65 {
         return Err("Signatures must be 65-byte hex strings.".to_string());
     }
@@ -1333,13 +1382,8 @@ fn normalize_recovery_id(v: u8) -> Result<RecoveryId, String> {
 }
 
 async fn fetch_chain_id(http_client: &reqwest::Client, rpc_url: &str) -> anyhow::Result<u64> {
-    let response: RpcEnvelope<String> = rpc_call(
-        http_client,
-        rpc_url,
-        "eth_chainId",
-        serde_json::json!([]),
-    )
-    .await?;
+    let response: RpcEnvelope<String> =
+        rpc_call(http_client, rpc_url, "eth_chainId", serde_json::json!([])).await?;
 
     let result = response
         .result
@@ -1348,18 +1392,17 @@ async fn fetch_chain_id(http_client: &reqwest::Client, rpc_url: &str) -> anyhow:
 }
 
 async fn fetch_gas_price(http_client: &reqwest::Client, rpc_url: &str) -> Result<U256, String> {
-    let response: RpcEnvelope<String> = rpc_call(
-        http_client,
-        rpc_url,
-        "eth_gasPrice",
-        serde_json::json!([]),
-    )
-    .await
-    .map_err(|e| format!("Failed to fetch gas price: {}", e))?;
+    let response: RpcEnvelope<String> =
+        rpc_call(http_client, rpc_url, "eth_gasPrice", serde_json::json!([]))
+            .await
+            .map_err(|e| format!("Failed to fetch gas price: {}", e))?;
 
-    let result = response
-        .result
-        .ok_or_else(|| response.error.map(|e| e.to_string()).unwrap_or_else(|| "Missing gas price result".to_string()))?;
+    let result = response.result.ok_or_else(|| {
+        response
+            .error
+            .map(|e| e.to_string())
+            .unwrap_or_else(|| "Missing gas price result".to_string())
+    })?;
     U256::from_str_radix(result.trim_start_matches("0x"), 16)
         .map_err(|e| format!("Failed to parse gas price: {}", e))
 }
@@ -1400,7 +1443,10 @@ async fn fetch_token_nonce(
         .await
         .map(|response| response._0)
         .map_err(|e| {
-            let msg = format!("Failed to read token permit nonce from {}: {}", token_contract, e);
+            let msg = format!(
+                "Failed to read token permit nonce from {}: {}",
+                token_contract, e
+            );
             error!("{}", msg);
             msg
         })
@@ -1442,11 +1488,7 @@ fn current_nonce(store: &DashMap<String, u64>, key: &str) -> u64 {
     store.get(key).map(|entry| *entry).unwrap_or(0)
 }
 
-fn check_quota(
-    store: &DashMap<String, DailyCounter>,
-    key: &str,
-    limit: u64,
-) -> Result<(), String> {
+fn check_quota(store: &DashMap<String, DailyCounter>, key: &str, limit: u64) -> Result<(), String> {
     let today = Utc::now().format("%Y-%m-%d").to_string();
     if let Some(counter) = store.get(key) {
         if counter.day == today && counter.count >= limit {
@@ -1460,7 +1502,13 @@ fn record_quota(store: &DashMap<String, DailyCounter>, key: &str) {
     let today = Utc::now().format("%Y-%m-%d").to_string();
     let next_count = store
         .get(key)
-        .map(|entry| if entry.day == today { entry.count + 1 } else { 1 })
+        .map(|entry| {
+            if entry.day == today {
+                entry.count + 1
+            } else {
+                1
+            }
+        })
         .unwrap_or(1);
     store.insert(
         key.to_string(),
@@ -1519,13 +1567,19 @@ fn classify_send_error(err: &str) -> (StatusCode, String) {
     {
         return (
             StatusCode::UNPROCESSABLE_ENTITY,
-            format!("Permit could not be applied on-chain: {}", revert_reason.unwrap_or_else(|| err.to_string())),
+            format!(
+                "Permit could not be applied on-chain: {}",
+                revert_reason.unwrap_or_else(|| err.to_string())
+            ),
         );
     }
     if lower.contains("execution reverted") {
         return (
             StatusCode::UNPROCESSABLE_ENTITY,
-            format!("On-chain transaction reverted: {}", revert_reason.unwrap_or_else(|| err.to_string())),
+            format!(
+                "On-chain transaction reverted: {}",
+                revert_reason.unwrap_or_else(|| err.to_string())
+            ),
         );
     }
     (StatusCode::BAD_GATEWAY, err.to_string())
@@ -1571,11 +1625,15 @@ mod tests {
     #[test]
     fn infer_action_kind_maps_sponsored_helpers() {
         assert_eq!(
-            infer_action_kind("stakeAsPublisherWithPermit(address,uint256,uint256,uint8,bytes32,bytes32)"),
+            infer_action_kind(
+                "stakeAsPublisherWithPermit(address,uint256,uint256,uint8,bytes32,bytes32)"
+            ),
             Some(SponsoredActionKind::Publisher)
         );
         assert_eq!(
-            infer_action_kind("applyToBeValidatorWithPermit(address,uint256,uint256,uint8,bytes32,bytes32)"),
+            infer_action_kind(
+                "applyToBeValidatorWithPermit(address,uint256,uint256,uint8,bytes32,bytes32)"
+            ),
             Some(SponsoredActionKind::Validator)
         );
     }

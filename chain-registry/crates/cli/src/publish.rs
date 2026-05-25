@@ -214,10 +214,7 @@ pub async fn run(
     }
 
     // ── 7. Fallback to REST (Legacy) ──────────────────────────────────────────
-    let url = format!(
-        "{}",
-        publisher_packages_url(node_url)
-    );
+    let url = format!("{}", publisher_packages_url(node_url));
 
     let pb_submit = ProgressBar::with_draw_target(Some(0), ProgressDrawTarget::stderr());
     pb_submit.set_style(
@@ -229,11 +226,8 @@ pub async fn run(
 
     let request_clone = request.clone();
     let url_clone = url.clone();
-    let resp = crate::retry::with_retry(
-        "submit package",
-        3,
-        Duration::from_millis(500),
-        move || {
+    let resp =
+        crate::retry::with_retry("submit package", 3, Duration::from_millis(500), move || {
             let req = request_clone.clone();
             let u = url_clone.clone();
             async move {
@@ -244,9 +238,8 @@ pub async fn run(
                     .await
                     .context("Failed to reach registry node")
             }
-        },
-    )
-    .await?;
+        })
+        .await?;
 
     pb_submit.finish_and_clear();
 
@@ -308,27 +301,22 @@ async fn pin_to_ipfs_with_progress(bytes: &[u8], pb: &ProgressBar) -> Result<Str
     let bytes_owned = bytes.to_vec();
     let add_url_owned = add_url.clone();
     let ipfs_base_owned = ipfs_base.clone();
-    let local = crate::retry::with_retry(
-        "IPFS upload",
-        3,
-        Duration::from_millis(500),
-        move || {
-            use reqwest::multipart as mp;
-            let form = mp::Form::new().part(
-                "file",
-                mp::Part::bytes(bytes_owned.clone()).file_name("package.tgz"),
-            );
-            let url = add_url_owned.clone();
-            async move {
-                reqwest::Client::new()
-                    .post(&url)
-                    .multipart(form)
-                    .send()
-                    .await
-                    .map_err(|e| anyhow::anyhow!("IPFS daemon not reachable: {}", e))
-            }
-        },
-    )
+    let local = crate::retry::with_retry("IPFS upload", 3, Duration::from_millis(500), move || {
+        use reqwest::multipart as mp;
+        let form = mp::Form::new().part(
+            "file",
+            mp::Part::bytes(bytes_owned.clone()).file_name("package.tgz"),
+        );
+        let url = add_url_owned.clone();
+        async move {
+            reqwest::Client::new()
+                .post(&url)
+                .multipart(form)
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("IPFS daemon not reachable: {}", e))
+        }
+    })
     .await;
 
     pb.set_position(bytes.len() as u64);
@@ -522,8 +510,8 @@ fn encrypt_for_validators(data: &[u8]) -> Result<(Vec<u8>, String)> {
         // Try to read the validator set's X25519 public key from env
         match std::env::var("CREG_VALIDATOR_PUBKEY_X25519") {
             Ok(pubkey_hex) => {
-                use x25519_dalek::{PublicKey, EphemeralSecret};
-                use sha2::{Sha256, Digest};
+                use sha2::{Digest, Sha256};
+                use x25519_dalek::{EphemeralSecret, PublicKey};
 
                 let pubkey_bytes: [u8; 32] = hex::decode(&pubkey_hex)
                     .context("Invalid CREG_VALIDATOR_PUBKEY_X25519 hex")?
@@ -618,8 +606,8 @@ pub async fn sign_offline(
 
     // 5. Sign with Ed25519
     let privkey_bytes = hex::decode(privkey_hex.trim()).context("Invalid private key hex")?;
-    let signing_key = SigningKey::try_from(privkey_bytes.as_slice())
-        .context("Invalid Ed25519 private key")?;
+    let signing_key =
+        SigningKey::try_from(privkey_bytes.as_slice()).context("Invalid Ed25519 private key")?;
     let pubkey = signing_key.verifying_key();
 
     let msg = common::publish_signature_message(&pkg_id, &content_hash, &publisher_address);
@@ -659,12 +647,15 @@ pub async fn sign_offline(
     };
 
     // 6. Write to file
-    let json = serde_json::to_string_pretty(&request)
-        .context("Failed to serialize publish request")?;
+    let json =
+        serde_json::to_string_pretty(&request).context("Failed to serialize publish request")?;
     std::fs::write(output_path, &json)
         .with_context(|| format!("Cannot write to {}", output_path.display()))?;
 
-    println!("  ✓ Signed publish request written to {}", output_path.display());
+    println!(
+        "  ✓ Signed publish request written to {}",
+        output_path.display()
+    );
     println!("    Package: {}", pkg_id.canonical());
     println!("    Address: {}", publisher_address);
     println!("    Pubkey:  {}", publisher_pubkeys[0]);
@@ -679,17 +670,17 @@ pub async fn sign_offline(
 pub async fn submit_signed(signed_file: &Path, node_url: Option<&str>) -> Result<()> {
     let json = std::fs::read_to_string(signed_file)
         .with_context(|| format!("Cannot read signed file: {}", signed_file.display()))?;
-    let mut request: PublishRequest = serde_json::from_str(&json)
-        .context("Invalid signed publish request JSON")?;
+    let mut request: PublishRequest =
+        serde_json::from_str(&json).context("Invalid signed publish request JSON")?;
 
     request.publisher_address = canonicalize_publisher_address(&request.publisher_address)?;
 
-    println!("  Submitting offline-signed package: {}", request.id.canonical());
-
-    let url = format!(
-        "{}",
-        publisher_packages_url(node_url)
+    println!(
+        "  Submitting offline-signed package: {}",
+        request.id.canonical()
     );
+
+    let url = format!("{}", publisher_packages_url(node_url));
 
     let request_clone2 = request.clone();
     let url_clone2 = url.clone();
@@ -733,7 +724,9 @@ pub(crate) fn canonicalize_publisher_address(publisher_address: &str) -> Result<
 fn publisher_packages_url(node_url: Option<&str>) -> String {
     format!(
         "{}/v1/publisher/packages",
-        node_url.unwrap_or("https://registry.chain-pkg.io").trim_end_matches('/')
+        node_url
+            .unwrap_or("https://registry.chain-pkg.io")
+            .trim_end_matches('/')
     )
 }
 

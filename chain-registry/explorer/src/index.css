@@ -1,6 +1,6 @@
 /* Chain Registry Explorer - Minimal & Intuitive Design */
 /* Design Principles: Clean, Readable, Accessible, Beautiful */
-/* Google Fonts loaded via index.html <link> — no duplicate @import needed */
+/* Uses local system fonts so the explorer works without public internet access. */
 
 :root {
   /* Core Colors - Minimal Palette */
@@ -35,8 +35,8 @@
   --status-syncing: #f59e0b;
   
   /* Typography */
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', 'SF Mono', Monaco, monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-mono: "SF Mono", Consolas, Monaco, monospace;
   
   /* Spacing Scale */
   --space-1: 4px;

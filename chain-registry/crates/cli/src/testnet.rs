@@ -92,11 +92,7 @@ pub async fn status(node_url: Option<&str>) -> Result<()> {
             println!("{} Node: {}", "●".green(), "Online".green());
 
             // Try to get chain info
-            if let Ok(info) = client
-                .get(format!("{}/v1/chain/stats", url))
-                .send()
-                .await
-            {
+            if let Ok(info) = client.get(format!("{}/v1/chain/stats", url)).send().await {
                 if let Ok(data) = info.json::<serde_json::Value>().await {
                     if let Some(tip) = data["tip_height"].as_u64() {
                         println!("  Chain tip: {}", tip.to_string().cyan());

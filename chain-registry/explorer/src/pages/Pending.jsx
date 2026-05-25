@@ -10,7 +10,9 @@ import { StatusBadge } from '../components/StatusBadge.jsx'
 
 export default function Pending() {
   const { data, error, loading, refetch } = usePolling((s) => nodeApi.pending(s), { intervalMs: 3000 })
-  const items = data?.packages || []
+  const items = (data?.packages || []).map((item) => (
+    typeof item === 'string' ? { canonical: item } : item
+  ))
 
   if (error && !items.length) return <ErrorState error={error} onRetry={refetch} title="Could not load mempool" />
 
@@ -21,7 +23,7 @@ export default function Pending() {
         <StatusBadge variant="info" pulse>{items.length} waiting</StatusBadge>
       </header>
       {!loading && !items.length ? (
-        <EmptyState title="Mempool is empty" description="No pending transactions — the chain is caught up." />
+        <EmptyState title="Mempool is empty" description="No pending transactions - the chain is caught up." />
       ) : (
         <div className="ce-card" style={{ padding: 0, overflow: 'hidden' }}>
           <table className="ce-table">
@@ -46,7 +48,7 @@ export default function Pending() {
                       )}
                     </td>
                     <td><Hash value={t.publisher} kind="publisher" start={6} end={4} /></td>
-                    <td>{t.received_at ? <TimeAgo timestamp={t.received_at} /> : '—'}</td>
+                    <td>{t.received_at ? <TimeAgo timestamp={t.received_at} /> : '-'}</td>
                     <td><StatusBadge variant="warning">{t.stage || 'pending'}</StatusBadge></td>
                   </tr>
                 ))}

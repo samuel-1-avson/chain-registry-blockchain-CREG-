@@ -102,7 +102,11 @@ async fn check_github_releases(current_version: &str, check_only: bool) -> Resul
     Ok(())
 }
 
-async fn install_update(download_url: &str, version: &str, expected_sha256: Option<&str>) -> Result<()> {
+async fn install_update(
+    download_url: &str,
+    version: &str,
+    expected_sha256: Option<&str>,
+) -> Result<()> {
     use indicatif::{ProgressBar, ProgressStyle};
 
     println!("{} Downloading creg v{}...", "→".cyan(), version);
@@ -144,10 +148,17 @@ async fn install_update(download_url: &str, version: &str, expected_sha256: Opti
                     expected, actual_hash
                 );
             }
-            println!("  {} SHA-256 checksum verified: {}", "✓".green(), &actual_hash[..16]);
+            println!(
+                "  {} SHA-256 checksum verified: {}",
+                "✓".green(),
+                &actual_hash[..16]
+            );
         }
         None => {
-            println!("  {} No checksum in release metadata — skipping verification", "⚠".yellow());
+            println!(
+                "  {} No checksum in release metadata — skipping verification",
+                "⚠".yellow()
+            );
             println!("    SHA-256: {}", actual_hash);
         }
     }

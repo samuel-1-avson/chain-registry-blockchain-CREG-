@@ -37,9 +37,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
     libssl-dev \
     build-essential \
-    clang \
-    llvm \
-    libclang-dev \
+    clang-17 \
+    llvm-17 \
+    llvm-17-dev \
+    libclang-17-dev \
     cmake \
     libopenblas-dev \
     protobuf-compiler \
@@ -52,9 +53,9 @@ COPY --from=rust-toolchain /usr/local/cargo /usr/local/cargo
 COPY --from=rust-toolchain /usr/local/rustup /usr/local/rustup
 ENV CARGO_HOME=/usr/local/cargo
 ENV RUSTUP_HOME=/usr/local/rustup
-ENV LIBCLANG_PATH=/usr/lib/llvm-18/lib
-ENV LLVM_CONFIG_PATH=/usr/bin/llvm-config-18
-ENV CLANG_PATH=/usr/bin/clang-18
+ENV LIBCLANG_PATH=/usr/lib/llvm-17/lib
+ENV LLVM_CONFIG_PATH=/usr/bin/llvm-config-17
+ENV CLANG_PATH=/usr/bin/clang-17
 ENV PATH="/usr/local/cargo/bin:$PATH"
 ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 ENV CARGO_BUILD_JOBS=1
@@ -153,18 +154,21 @@ COPY docker-compose*.yml ./
 RUN touch crates/*/src/*.rs
 
 # Build the node binaries with all features.
-# Avoid passing debug-only clang flags through bindgen here; librocksdb-sys
-# treats the extra arg as a libclang parse failure during the real build.
-RUN CARGO_BUILD_JOBS=2 RUST_BACKTRACE=1 cargo build -vv --release --locked --package chain-registry-node --bin creg-node --bin creg-indexer
+# Keep remap-only Rust flags out of librocksdb-sys bindgen/libclang.
+RUN unset RUSTFLAGS CARGO_ENCODED_RUSTFLAGS && \
+    CARGO_BUILD_JOBS=2 RUST_BACKTRACE=1 cargo build -vv --release --locked --package chain-registry-node --bin creg-node --bin creg-indexer
 
 # Build CLI tools (includes TUI explorer)
-RUN cargo build --release --locked --package chain-registry-cli
+RUN unset RUSTFLAGS CARGO_ENCODED_RUSTFLAGS && \
+    cargo build --release --locked --package chain-registry-cli
 
 # Build Faucet service (testnet)
-RUN cargo build --release --locked --package faucet
+RUN unset RUSTFLAGS CARGO_ENCODED_RUSTFLAGS && \
+    cargo build --release --locked --package faucet
 
 # Build Relayer service (sponsored testnet transactions)
-RUN cargo build --release --locked --package chain-registry-relayer
+RUN unset RUSTFLAGS CARGO_ENCODED_RUSTFLAGS && \
+    cargo build --release --locked --package chain-registry-relayer
 
 # ── Stage 3: Runtime ──────────────────────────────────────────────────────────
 # Must match builder glibc version (Ubuntu 24.04 has glibc 2.39)

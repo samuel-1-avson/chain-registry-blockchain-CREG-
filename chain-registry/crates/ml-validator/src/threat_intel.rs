@@ -8,8 +8,8 @@
 //! No ML training required — the database grows organically as the
 //! validator network flags packages.
 
-use sha2::{Digest, Sha256};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::OnceLock;
@@ -62,7 +62,12 @@ impl ThreatIntelResult {
         if self.matches.is_empty() {
             return 0.0;
         }
-        let max_threat: u8 = self.matches.iter().map(|(_, e)| e.threat_level).max().unwrap_or(0);
+        let max_threat: u8 = self
+            .matches
+            .iter()
+            .map(|(_, e)| e.threat_level)
+            .max()
+            .unwrap_or(0);
         match max_threat {
             5 => 0.99,
             4 => 0.90,
@@ -88,11 +93,17 @@ static THREAT_DB: OnceLock<ThreatDatabase> = OnceLock::new();
 fn seed_database() -> ThreatDatabase {
     match serde_json::from_str::<ThreatDatabase>(SEED_THREATS_JSON) {
         Ok(db) => {
-            info!("Loaded {} compiled-in seed threat-intel entries", db.entries.len());
+            info!(
+                "Loaded {} compiled-in seed threat-intel entries",
+                db.entries.len()
+            );
             db
         }
         Err(e) => {
-            warn!("Failed to parse compiled-in seed_threats.json: {} — proceeding without seeds", e);
+            warn!(
+                "Failed to parse compiled-in seed_threats.json: {} — proceeding without seeds",
+                e
+            );
             ThreatDatabase::default()
         }
     }
@@ -182,7 +193,11 @@ pub fn check(tarball_bytes: &[u8], files: &[(String, String)]) -> ThreatIntelRes
     // Check whole-tarball hash.
     let tarball_hash = sha256_hex(tarball_bytes);
     if let Some(entry) = db.entries.get(&tarball_hash) {
-        debug!("Threat intel: tarball hash {} matches '{}'", &tarball_hash[..16], entry.label);
+        debug!(
+            "Threat intel: tarball hash {} matches '{}'",
+            &tarball_hash[..16],
+            entry.label
+        );
         matches.push((tarball_hash, entry.clone()));
     }
 
@@ -196,7 +211,12 @@ pub fn check(tarball_bytes: &[u8], files: &[(String, String)]) -> ThreatIntelRes
         seen.insert(hash.clone());
 
         if let Some(entry) = db.entries.get(&hash) {
-            debug!("Threat intel: file '{}' hash {} matches '{}'", path, &hash[..16], entry.label);
+            debug!(
+                "Threat intel: file '{}' hash {} matches '{}'",
+                path,
+                &hash[..16],
+                entry.label
+            );
             matches.push((hash, entry.clone()));
         }
     }
@@ -230,7 +250,10 @@ pub fn record_threat(hash: &str, entry: ThreatEntry) -> Result<(), String> {
     let json = serde_json::to_string_pretty(&db).map_err(|e| format!("serialize: {e}"))?;
     std::fs::write(&path, json).map_err(|e| format!("write: {e}"))?;
 
-    info!("Recorded threat intel entry: hash={}", &hash[..16.min(hash.len())]);
+    info!(
+        "Recorded threat intel entry: hash={}",
+        &hash[..16.min(hash.len())]
+    );
     Ok(())
 }
 
@@ -271,11 +294,14 @@ mod tests {
     #[test]
     fn test_threat_intel_result_probability_level_5() {
         let r = ThreatIntelResult {
-            matches: vec![("abc".into(), ThreatEntry {
-                label: "test".into(),
-                threat_level: 5,
-                source: "test".into(),
-            })],
+            matches: vec![(
+                "abc".into(),
+                ThreatEntry {
+                    label: "test".into(),
+                    threat_level: 5,
+                    source: "test".into(),
+                },
+            )],
         };
         assert!(!r.is_empty());
         assert!((r.to_probability() - 0.99).abs() < 0.01);
@@ -284,11 +310,14 @@ mod tests {
     #[test]
     fn test_threat_intel_result_probability_level_3() {
         let r = ThreatIntelResult {
-            matches: vec![("abc".into(), ThreatEntry {
-                label: "test".into(),
-                threat_level: 3,
-                source: "test".into(),
-            })],
+            matches: vec![(
+                "abc".into(),
+                ThreatEntry {
+                    label: "test".into(),
+                    threat_level: 3,
+                    source: "test".into(),
+                },
+            )],
         };
         assert!((r.to_probability() - 0.70).abs() < 0.01);
     }
@@ -297,9 +326,7 @@ mod tests {
     fn test_check_no_match_empty_db() {
         // With default empty database, nothing should match.
         let tarball = b"some tarball bytes";
-        let files = vec![
-            ("index.js".to_string(), "console.log('safe')".to_string()),
-        ];
+        let files = vec![("index.js".to_string(), "console.log('safe')".to_string())];
         let result = check(tarball, &files);
         assert!(result.is_empty());
     }
@@ -333,13 +360,19 @@ mod tests {
             threat_level: 5,
             source: "unit-test".into(),
         };
-        record_threat("deadbeef00112233deadbeef00112233deadbeef00112233deadbeef00112233", entry).unwrap();
+        record_threat(
+            "deadbeef00112233deadbeef00112233deadbeef00112233deadbeef00112233",
+            entry,
+        )
+        .unwrap();
 
         // Read back and verify.
         let json = std::fs::read_to_string(&db_path).unwrap();
         let db: ThreatDatabase = serde_json::from_str(&json).unwrap();
         assert_eq!(db.entries.len(), 1);
-        assert!(db.entries.contains_key("deadbeef00112233deadbeef00112233deadbeef00112233deadbeef00112233"));
+        assert!(db
+            .entries
+            .contains_key("deadbeef00112233deadbeef00112233deadbeef00112233deadbeef00112233"));
 
         // Cleanup.
         let _ = std::fs::remove_file(&db_path);

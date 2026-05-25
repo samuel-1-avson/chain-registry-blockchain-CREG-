@@ -168,7 +168,9 @@ impl ShamirSecretSharing {
         // Only fill indices 0..254; 255 maps back to 0 (g^255 = 1 = g^0).
         loop {
             table[exp[i as usize] as usize] = i;
-            if i == 254 { break; }
+            if i == 254 {
+                break;
+            }
             i += 1;
         }
         table

@@ -120,12 +120,20 @@ fn eth_to_wei_str(eth: f64) -> String {
     let s = format!("{:.18}", eth);
     let parts: Vec<&str> = s.split('.').collect();
     let integer = parts[0];
-    let fraction = if parts.len() > 1 { parts[1] } else { "000000000000000000" };
+    let fraction = if parts.len() > 1 {
+        parts[1]
+    } else {
+        "000000000000000000"
+    };
     let fraction = &format!("{:0<18}", fraction)[..18];
     let combined = format!("{}{}", integer, fraction);
     // Strip leading zeros but keep at least "0"
     let trimmed = combined.trim_start_matches('0');
-    if trimmed.is_empty() { "0".to_string() } else { trimmed.to_string() }
+    if trimmed.is_empty() {
+        "0".to_string()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 /// Parse "0.01eth" / "1ETH" / "1000000000000000000wei" → f64 ETH.

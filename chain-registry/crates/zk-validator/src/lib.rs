@@ -29,7 +29,7 @@ use ark_snark::SNARK;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use thiserror::Error;
-use tracing::{debug, info, warn, instrument};
+use tracing::{debug, info, instrument, warn};
 
 pub mod batch;
 pub mod circuits;
@@ -158,7 +158,10 @@ impl ZkValidator {
         // indicates a deployment error; silently falling back to ephemeral keys
         // would invalidate all existing ZK proofs and open the door to proof
         // forgery (since the new ephemeral key is unknown to the network).
-        if std::env::var("CREG_PRODUCTION").map(|v| v == "1" || v.eq_ignore_ascii_case("true")).unwrap_or(false) {
+        if std::env::var("CREG_PRODUCTION")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
+        {
             panic!(
                 "PRODUCTION GUARD: ZK trusted setup key files not found in '{}'. \
                  Refusing to generate ephemeral keys on a production node. \

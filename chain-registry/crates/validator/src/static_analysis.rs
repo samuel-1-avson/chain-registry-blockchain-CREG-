@@ -375,7 +375,6 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
             }
         }
 
-
         if has_high_entropy {
             match crate::llm::predict_intent(&content).await {
                 Ok(Some(score)) if score >= 80 => {
@@ -823,9 +822,9 @@ fn check_escape_density(line: &str) -> Option<(usize, usize)> {
             let next = bytes[i + 1];
             if next == b'x' {
                 // Hex escape: \xHH
-                if i + 3 < bytes.len() 
-                    && bytes[i + 2].is_ascii_hexdigit() 
-                    && bytes[i + 3].is_ascii_hexdigit() 
+                if i + 3 < bytes.len()
+                    && bytes[i + 2].is_ascii_hexdigit()
+                    && bytes[i + 3].is_ascii_hexdigit()
                 {
                     count += 1;
                     escape_bytes += 4;
@@ -834,8 +833,7 @@ fn check_escape_density(line: &str) -> Option<(usize, usize)> {
                 }
             } else if next == b'u' {
                 // Unicode escape: \uHHHH or \u{H...}
-                if i + 5 < bytes.len() 
-                    && bytes[i + 2..i + 6].iter().all(|&b| b.is_ascii_hexdigit()) 
+                if i + 5 < bytes.len() && bytes[i + 2..i + 6].iter().all(|&b| b.is_ascii_hexdigit())
                 {
                     count += 1;
                     escape_bytes += 6;
@@ -876,7 +874,6 @@ fn check_escape_density(line: &str) -> Option<(usize, usize)> {
         None
     }
 }
-
 
 fn is_source_file(path: &str) -> bool {
     let ext = std::path::Path::new(path)
@@ -1074,7 +1071,8 @@ mod tests {
     #[test]
     fn test_check_escape_density_none() {
         assert!(check_escape_density("hello world").is_none());
-        assert!(check_escape_density("\\x41\\x42\\x43\\x44\\x45\\x46\\x47").is_none()); // 7 escapes (needs >= 8)
+        assert!(check_escape_density("\\x41\\x42\\x43\\x44\\x45\\x46\\x47").is_none());
+        // 7 escapes (needs >= 8)
     }
 
     #[test]
@@ -1140,4 +1138,3 @@ mod tests {
         assert!(ratio < 0.15); // Below 15%, so run() won't add SA014 finding.
     }
 }
-

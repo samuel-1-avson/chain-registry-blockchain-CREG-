@@ -36,12 +36,9 @@ pub async fn run(
     let effective_node_ref = effective_node_url.as_deref();
 
     println!("{} Resolving {} ...", "→".cyan(), pkg_id.canonical().bold());
-    let verdict = retry::with_retry(
-        "resolve package",
-        3,
-        Duration::from_millis(500),
-        || resolver::resolve_id(&pkg_id, effective_node_ref),
-    )
+    let verdict = retry::with_retry("resolve package", 3, Duration::from_millis(500), || {
+        resolver::resolve_id(&pkg_id, effective_node_ref)
+    })
     .await?;
 
     // ── C-22: Org-level policy check ─────────────────────────────────────────
@@ -63,8 +60,7 @@ pub async fn run(
                     // Publisher is not yet carried in the verdict; pass empty string.
                     // Publisher-based policy rules apply when the publisher field is
                     // populated in a future resolver upgrade.
-                    let mut violations =
-                        policy.evaluate(&pkg_id.canonical(), &status_str, "");
+                    let mut violations = policy.evaluate(&pkg_id.canonical(), &status_str, "");
 
                     // block_on_findings: check verified packages for matching severities.
                     if let VerdictStatus::Verified { findings, .. } = &verdict.status {
@@ -198,11 +194,7 @@ pub async fn run(
     // Write audit receipt to the lockfile (C-21).
     let cwd = std::env::current_dir().unwrap_or_default();
     if let Err(e) = crate::lockfile::write_receipt(&cwd, &verdict) {
-        eprintln!(
-            "{} Failed to write audit receipt: {}",
-            "⚠".yellow(),
-            e
-        );
+        eprintln!("{} Failed to write audit receipt: {}", "⚠".yellow(), e);
     }
 
     let mut local_tarball: Option<std::path::PathBuf> = None;
@@ -230,20 +222,13 @@ pub async fn run(
             let ipfs_cid_owned = ipfs_cid.clone();
             let content_hash_owned = content_hash.clone();
             let temp_file_owned = temp_file.clone();
-            match retry::with_retry(
-                "P2P download",
-                3,
-                Duration::from_millis(500),
-                || {
-                    let dl = resolver::downloader::P2PDownloader::new(
-                        vec![fallback_node.clone()],
-                    );
-                    let cid = ipfs_cid_owned.clone();
-                    let hash = content_hash_owned.clone();
-                    let path = temp_file_owned.clone();
-                    async move { dl.download(&cid, &hash, &path).await }
-                },
-            )
+            match retry::with_retry("P2P download", 3, Duration::from_millis(500), || {
+                let dl = resolver::downloader::P2PDownloader::new(vec![fallback_node.clone()]);
+                let cid = ipfs_cid_owned.clone();
+                let hash = content_hash_owned.clone();
+                let path = temp_file_owned.clone();
+                async move { dl.download(&cid, &hash, &path).await }
+            })
             .await
             {
                 Ok(_) => {
@@ -303,7 +288,12 @@ fn delegate_to_real_pm(ecosystem: &str, raw_package: &str) -> Result<()> {
                 parent.canonicalize().ok() != shim_dir.canonicalize().ok()
             })
         })
-        .ok_or_else(|| anyhow::anyhow!("Real '{}' not found in PATH (only our shim exists)", pm_name))?;
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "Real '{}' not found in PATH (only our shim exists)",
+                pm_name
+            )
+        })?;
 
     let mut args: Vec<&str> = match ecosystem {
         "npm" => vec!["install", raw_package],

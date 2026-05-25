@@ -409,15 +409,11 @@ impl DecryptionCoordinator {
 
         // ── 2. Signature verification ────────────────────────────────────────
         if !request.signature.is_empty() && !request.requestor_pubkey.is_empty() {
-            match verify_ed25519_signature(
-                &request.requestor_pubkey,
-                &request.signature,
-                |msg| {
-                    msg.extend_from_slice(request.canonical.as_bytes());
-                    msg.extend_from_slice(request.purpose.as_bytes());
-                    msg.extend_from_slice(&request.timestamp.to_be_bytes());
-                },
-            ) {
+            match verify_ed25519_signature(&request.requestor_pubkey, &request.signature, |msg| {
+                msg.extend_from_slice(request.canonical.as_bytes());
+                msg.extend_from_slice(request.purpose.as_bytes());
+                msg.extend_from_slice(&request.timestamp.to_be_bytes());
+            }) {
                 Ok(true) => {}
                 Ok(false) => {
                     warn!(
@@ -427,7 +423,10 @@ impl DecryptionCoordinator {
                     return false;
                 }
                 Err(e) => {
-                    warn!("Signature verification error for {}: {}", request.requestor, e);
+                    warn!(
+                        "Signature verification error for {}: {}",
+                        request.requestor, e
+                    );
                     return false;
                 }
             }

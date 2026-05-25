@@ -57,19 +57,35 @@ pub async fn run(filter: Option<&str>, node_url: Option<&str>, ci_mode: bool) ->
             }
             Ok(r) => {
                 eprintln!("{} Server returned {}", "✗".red(), r.status());
-                if retry_count >= max_retries { break; }
+                if retry_count >= max_retries {
+                    break;
+                }
                 let delay = std::cmp::min(1u64 << retry_count, 30);
                 retry_count += 1;
-                eprintln!("{} Reconnecting in {}s... ({}/{})", "↻".yellow(), delay, retry_count, max_retries);
+                eprintln!(
+                    "{} Reconnecting in {}s... ({}/{})",
+                    "↻".yellow(),
+                    delay,
+                    retry_count,
+                    max_retries
+                );
                 tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
                 continue 'reconnect;
             }
             Err(e) => {
                 eprintln!("{} Connection failed: {}", "✗".red(), e);
-                if retry_count >= max_retries { break; }
+                if retry_count >= max_retries {
+                    break;
+                }
                 let delay = std::cmp::min(1u64 << retry_count, 30);
                 retry_count += 1;
-                eprintln!("{} Reconnecting in {}s... ({}/{})", "↻".yellow(), delay, retry_count, max_retries);
+                eprintln!(
+                    "{} Reconnecting in {}s... ({}/{})",
+                    "↻".yellow(),
+                    delay,
+                    retry_count,
+                    max_retries
+                );
                 tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
                 continue 'reconnect;
             }
@@ -83,19 +99,35 @@ pub async fn run(filter: Option<&str>, node_url: Option<&str>, ci_mode: bool) ->
                 Ok(Some(c)) => c,
                 Ok(None) => {
                     eprintln!("{} Stream closed by server.", "⚠".yellow());
-                    if retry_count >= max_retries { break 'reconnect; }
+                    if retry_count >= max_retries {
+                        break 'reconnect;
+                    }
                     let delay = std::cmp::min(1u64 << retry_count, 30);
                     retry_count += 1;
-                    eprintln!("{} Reconnecting in {}s... ({}/{})", "↻".yellow(), delay, retry_count, max_retries);
+                    eprintln!(
+                        "{} Reconnecting in {}s... ({}/{})",
+                        "↻".yellow(),
+                        delay,
+                        retry_count,
+                        max_retries
+                    );
                     tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
                     continue 'reconnect;
                 }
                 Err(e) => {
                     eprintln!("{} Stream error: {}", "✗".red(), e);
-                    if retry_count >= max_retries { break 'reconnect; }
+                    if retry_count >= max_retries {
+                        break 'reconnect;
+                    }
                     let delay = std::cmp::min(1u64 << retry_count, 30);
                     retry_count += 1;
-                    eprintln!("{} Reconnecting in {}s... ({}/{})", "↻".yellow(), delay, retry_count, max_retries);
+                    eprintln!(
+                        "{} Reconnecting in {}s... ({}/{})",
+                        "↻".yellow(),
+                        delay,
+                        retry_count,
+                        max_retries
+                    );
                     tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
                     continue 'reconnect;
                 }

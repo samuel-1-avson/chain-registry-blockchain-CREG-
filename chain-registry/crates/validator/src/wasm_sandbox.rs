@@ -1,4 +1,4 @@
-use crate::sandbox::{SandboxConfig, SandboxResult, SandboxMetrics, NetworkMode};
+use crate::sandbox::{NetworkMode, SandboxConfig, SandboxMetrics, SandboxResult};
 use anyhow::{Context, Result};
 use common::{Finding, FindingSeverity, PackageManifest};
 use std::time::Instant;
@@ -34,7 +34,10 @@ pub async fn run_in_wasm(
     config: &SandboxConfig,
     _manifest: &PackageManifest,
 ) -> Result<SandboxResult> {
-    tracing::info!("[WASM] Initializing WASM sandbox execution for {}...", pkg_id);
+    tracing::info!(
+        "[WASM] Initializing WASM sandbox execution for {}...",
+        pkg_id
+    );
     let start_time = Instant::now();
 
     let mut findings = Vec::new();
@@ -74,7 +77,9 @@ pub async fn run_in_wasm(
             id: "SB006".into(),
             title: "Missing WASM Content".into(),
             severity: FindingSeverity::Critical,
-            description: "Package was flagged as a WASM candidate but contains no valid .wasm modules.".into(),
+            description:
+                "Package was flagged as a WASM candidate but contains no valid .wasm modules."
+                    .into(),
             file: "wasm_sandbox".into(),
             line: None,
         });
@@ -127,7 +132,8 @@ pub async fn run_in_wasm(
         }
     };
 
-    let sandbox_input = wasm_sandbox_crate::SandboxInput::new(&pkg_id.name, &pkg_id.version, &pkg_id.ecosystem);
+    let sandbox_input =
+        wasm_sandbox_crate::SandboxInput::new(&pkg_id.name, &pkg_id.version, &pkg_id.ecosystem);
 
     let mut execution_failed = false;
 
@@ -156,7 +162,10 @@ pub async fn run_in_wasm(
                         id: "SB006".into(),
                         title: "WASM execution failed".into(),
                         severity: FindingSeverity::Critical,
-                        description: format!("WASM module {} exited with non-zero code {}.", path, res.exit_code),
+                        description: format!(
+                            "WASM module {} exited with non-zero code {}.",
+                            path, res.exit_code
+                        ),
                         file: path,
                         line: None,
                     });
@@ -199,7 +208,9 @@ pub async fn run_in_wasm(
             id: "SB005".into(),
             title: "WASM Execution Succeeded".into(),
             severity: FindingSeverity::Low,
-            description: "Package was securely executed within WebAssembly strict architecture boundaries.".into(),
+            description:
+                "Package was securely executed within WebAssembly strict architecture boundaries."
+                    .into(),
             file: "wasm_sandbox".into(),
             line: None,
         });
@@ -226,11 +237,11 @@ pub async fn run_in_wasm(
 mod tests {
     use super::*;
     use common::{PackageId, PackageManifest};
-    use tempfile::NamedTempFile;
-    use std::io::Write;
     use flate2::write::GzEncoder;
     use flate2::Compression;
+    use std::io::Write;
     use tar::Builder;
+    use tempfile::NamedTempFile;
 
     fn create_test_tarball(wasm_filename: &str, wasm_bytes: &[u8]) -> NamedTempFile {
         let temp_file = NamedTempFile::new().unwrap();
@@ -241,7 +252,8 @@ mod tests {
             let mut header = tar::Header::new_gnu();
             header.set_size(wasm_bytes.len() as u64);
             header.set_mode(0o755);
-            tar.append_data(&mut header, wasm_filename, wasm_bytes).unwrap();
+            tar.append_data(&mut header, wasm_filename, wasm_bytes)
+                .unwrap();
             tar.finish().unwrap();
         }
         temp_file
@@ -251,10 +263,11 @@ mod tests {
     async fn test_wasm_sandbox_success() {
         let wasm_bytes = &[
             0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // Magic & Version
-            0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f,       // Type: () -> i32
-            0x03, 0x02, 0x01, 0x00,                         // Function index 0 uses type index 0
-            0x07, 0x08, 0x01, 0x04, 0x6d, 0x61, 0x69, 0x6e, 0x00, 0x00, // Export "main" as function index 0
-            0x0a, 0x07, 0x01, 0x05, 0x00, 0x41, 0x00, 0x0b  // Code: main() { return 0; }
+            0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f, // Type: () -> i32
+            0x03, 0x02, 0x01, 0x00, // Function index 0 uses type index 0
+            0x07, 0x08, 0x01, 0x04, 0x6d, 0x61, 0x69, 0x6e, 0x00,
+            0x00, // Export "main" as function index 0
+            0x0a, 0x07, 0x01, 0x05, 0x00, 0x41, 0x00, 0x0b, // Code: main() { return 0; }
         ];
 
         let temp_tarball = create_test_tarball("payload.wasm", wasm_bytes);
@@ -284,7 +297,11 @@ mod tests {
 
         // Should contain SB005 indicating success
         let has_success = result.findings.iter().any(|f| f.id == "SB005");
-        assert!(has_success, "Expected SB005 success finding, got {:?}", result.findings);
+        assert!(
+            has_success,
+            "Expected SB005 success finding, got {:?}",
+            result.findings
+        );
     }
 
     #[tokio::test]
@@ -294,10 +311,12 @@ mod tests {
         // The i32.const 0 after the loop is unreachable but satisfies the type checker.
         let loop_wasm_bytes = &[
             0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // Magic & Version
-            0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f,       // Type: () -> i32
-            0x03, 0x02, 0x01, 0x00,                         // Function index 0 uses type index 0
-            0x07, 0x08, 0x01, 0x04, 0x6d, 0x61, 0x69, 0x6e, 0x00, 0x00, // Export "main" as function index 0
-            0x0a, 0x0b, 0x01, 0x09, 0x00, 0x03, 0x40, 0x0c, 0x00, 0x0b, 0x41, 0x00, 0x0b // Code: loop { br 0 }; i32.const 0; end
+            0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f, // Type: () -> i32
+            0x03, 0x02, 0x01, 0x00, // Function index 0 uses type index 0
+            0x07, 0x08, 0x01, 0x04, 0x6d, 0x61, 0x69, 0x6e, 0x00,
+            0x00, // Export "main" as function index 0
+            0x0a, 0x0b, 0x01, 0x09, 0x00, 0x03, 0x40, 0x0c, 0x00, 0x0b, 0x41, 0x00,
+            0x0b, // Code: loop { br 0 }; i32.const 0; end
         ];
 
         let temp_tarball = create_test_tarball("payload.wasm", loop_wasm_bytes);
@@ -324,12 +343,16 @@ mod tests {
             .unwrap();
 
         assert_eq!(result.metrics.exit_code, 1);
-        
+
         // Should contain SB006 indicating execution failure/timeout
         let failure_finding = result.findings.iter().find(|f| f.id == "SB006");
         assert!(failure_finding.is_some(), "Expected SB006 failure finding");
         let desc = &failure_finding.unwrap().description;
-        assert!(desc.contains("timed out"), "Expected description to mention timeout, got: {}", desc);
+        assert!(
+            desc.contains("timed out"),
+            "Expected description to mention timeout, got: {}",
+            desc
+        );
     }
 
     #[tokio::test]
@@ -359,7 +382,9 @@ mod tests {
         assert_eq!(result.metrics.exit_code, 1);
         let failure_finding = result.findings.iter().find(|f| f.id == "SB006");
         assert!(failure_finding.is_some());
-        assert!(failure_finding.unwrap().description.contains("no valid .wasm modules"));
+        assert!(failure_finding
+            .unwrap()
+            .description
+            .contains("no valid .wasm modules"));
     }
 }
-

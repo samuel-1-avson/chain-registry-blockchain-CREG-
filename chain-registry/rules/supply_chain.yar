@@ -288,7 +288,7 @@ rule PrototypePollution : vulnerability {
         $pp2 = "constructor.prototype" nocase
         $pp3 = "Object.assign" nocase
     condition:
-        $pp1 or $pp2 or $pp3
+        any of ($pp*)
 }
 
 // ─── Dependency Confusion ───────────────────────────────────────────────────

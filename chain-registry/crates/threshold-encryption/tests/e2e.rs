@@ -140,7 +140,10 @@ fn test_e2e_full_lifecycle_3_of_5() {
         let plaintext = te
             .decrypt_with_shares(&encrypted, subset)
             .unwrap_or_else(|e| {
-                panic!("decrypt_with_shares (shares {start}..{}) failed: {e}", start + 3)
+                panic!(
+                    "decrypt_with_shares (shares {start}..{}) failed: {e}",
+                    start + 3
+                )
             });
         assert_eq!(
             plaintext, content,
@@ -193,7 +196,10 @@ fn test_e2e_tampered_encrypted_share_rejected() {
     tampered[last] ^= 0xff;
 
     let result = te.decrypt_share(&tampered, &secs[(idx as usize) - 1]);
-    assert!(result.is_err(), "tampered share must fail AEAD authentication");
+    assert!(
+        result.is_err(),
+        "tampered share must fail AEAD authentication"
+    );
 }
 
 /// Mismatched validator key count is caught before any encryption starts.
@@ -226,7 +232,8 @@ fn test_e2e_threshold_m_minus_1_insufficient() {
     let shares: Vec<KeyShare> = (1u8..=2)
         .map(|idx| {
             let enc = encrypted.encrypted_shares.get(&idx).unwrap();
-            te.decrypt_share(enc, &secs[(idx - 1) as usize]).expect("decrypt ok")
+            te.decrypt_share(enc, &secs[(idx - 1) as usize])
+                .expect("decrypt ok")
         })
         .collect();
 
@@ -315,7 +322,8 @@ async fn test_e2e_service_channel_store_and_signed_response() {
     };
 
     let (cmd_tx, cmd_rx) = tokio::sync::mpsc::channel::<DecryptionCommand>(16);
-    let (resp_tx, mut resp_rx) = tokio::sync::mpsc::channel::<threshold_encryption::distribution::DecryptionResponse>(16);
+    let (resp_tx, mut resp_rx) =
+        tokio::sync::mpsc::channel::<threshold_encryption::distribution::DecryptionResponse>(16);
 
     let service = DecryptionService::new(config, cmd_rx, resp_tx).expect("service init ok");
     tokio::spawn(service.run());
@@ -360,19 +368,26 @@ async fn test_e2e_service_channel_store_and_signed_response() {
         .expect("ProcessRequest send ok");
 
     // ── Step C: collect response (up to 500 ms) ───────────────────────────────
-    let response = tokio::time::timeout(
-        tokio::time::Duration::from_millis(500),
-        resp_rx.recv(),
-    )
-    .await
-    .expect("timed out waiting for service response")
-    .expect("response channel closed unexpectedly");
+    let response = tokio::time::timeout(tokio::time::Duration::from_millis(500), resp_rx.recv())
+        .await
+        .expect("timed out waiting for service response")
+        .expect("response channel closed unexpectedly");
 
     assert_eq!(response.canonical, canonical, "canonical mismatch");
-    assert_eq!(response.validator_id, "validator-e2e", "validator_id mismatch");
+    assert_eq!(
+        response.validator_id, "validator-e2e",
+        "validator_id mismatch"
+    );
     assert_eq!(response.share_index, 1, "share_index mismatch");
-    assert!(!response.encrypted_share.is_empty(), "encrypted_share must not be empty");
-    assert_eq!(response.signature.len(), 64, "Ed25519 signature must be 64 bytes");
+    assert!(
+        !response.encrypted_share.is_empty(),
+        "encrypted_share must not be empty"
+    );
+    assert_eq!(
+        response.signature.len(),
+        64,
+        "Ed25519 signature must be 64 bytes"
+    );
 
     // ── Step D: verify Ed25519 response signature ─────────────────────────────
     // Message layout from service.rs::sign_response:
@@ -407,7 +422,8 @@ async fn test_e2e_service_no_share_no_response() {
     };
 
     let (cmd_tx, cmd_rx) = tokio::sync::mpsc::channel::<DecryptionCommand>(16);
-    let (resp_tx, mut resp_rx) = tokio::sync::mpsc::channel::<threshold_encryption::distribution::DecryptionResponse>(16);
+    let (resp_tx, mut resp_rx) =
+        tokio::sync::mpsc::channel::<threshold_encryption::distribution::DecryptionResponse>(16);
 
     let service = DecryptionService::new(config, cmd_rx, resp_tx).expect("service init ok");
     tokio::spawn(service.run());
@@ -427,11 +443,8 @@ async fn test_e2e_service_no_share_no_response() {
         .expect("send ok");
 
     // Expect no response within 100 ms.
-    let result = tokio::time::timeout(
-        tokio::time::Duration::from_millis(100),
-        resp_rx.recv(),
-    )
-    .await;
+    let result =
+        tokio::time::timeout(tokio::time::Duration::from_millis(100), resp_rx.recv()).await;
 
     assert!(
         result.is_err(),
@@ -474,16 +487,26 @@ fn test_e2e_coordinator_request_validation() {
 
     // ── Expired request (timestamp > 3600s old) ───────────────────────────────
     let stale_ts = now.saturating_sub(3601);
-    let stale_req =
-        signed_request(canonical, "audit", &req_sk, requestor_pubkey.clone(), stale_ts);
+    let stale_req = signed_request(
+        canonical,
+        "audit",
+        &req_sk,
+        requestor_pubkey.clone(),
+        stale_ts,
+    );
     assert!(
         coordinator.request_decryption(stale_req).is_err(),
         "expired request must be rejected"
     );
 
     // ── Tampered signature (last byte flipped) ────────────────────────────────
-    let mut tampered_req =
-        signed_request(canonical, "audit", &req_sk, requestor_pubkey.clone(), unix_now());
+    let mut tampered_req = signed_request(
+        canonical,
+        "audit",
+        &req_sk,
+        requestor_pubkey.clone(),
+        unix_now(),
+    );
     let sig_len = tampered_req.signature.len();
     tampered_req.signature[sig_len - 1] ^= 0x01;
     assert!(
@@ -510,7 +533,9 @@ fn test_e2e_coordinator_collects_partial_shares_and_becomes_ready() {
 
     let canonical = "cargo:serde@1.0.190";
     let req = signed_request(canonical, "test", &req_sk, req_vk.to_vec(), unix_now());
-    coordinator.request_decryption(req).expect("request accepted");
+    coordinator
+        .request_decryption(req)
+        .expect("request accepted");
 
     // Build a signed partial response from val-1.
     let enc_share_bytes = vec![0xaa; 48]; // arbitrary blob
@@ -645,7 +670,10 @@ fn test_e2e_share_distributor_full_flow() {
     assert_eq!(distributed.len(), 3, "one share per validator");
 
     // No confirmations yet.
-    assert!(!distributor.can_decrypt(canonical), "no confirmations → can_decrypt must be false");
+    assert!(
+        !distributor.can_decrypt(canonical),
+        "no confirmations → can_decrypt must be false"
+    );
 
     // Confirm val-1 (1 of 2 needed).
     distributor
@@ -667,7 +695,10 @@ fn test_e2e_share_distributor_full_flow() {
 
     // Confirm non-existent share.
     let err = distributor.confirm_share(canonical, "val-99");
-    assert!(err.is_err(), "confirming a non-existent share must return an error");
+    assert!(
+        err.is_err(),
+        "confirming a non-existent share must return an error"
+    );
 }
 
 /// ShareDistributor with fewer registered validators than total_shares must fail.
@@ -680,7 +711,8 @@ fn test_e2e_share_distributor_insufficient_validators() {
 
     let mut key = [0u8; 32];
     rand::thread_rng().fill_bytes(&mut key);
-    let result = distributor.distribute_shares("npm:pkg@1.0.0", &key, &ShieldedAccessPolicy::default());
+    let result =
+        distributor.distribute_shares("npm:pkg@1.0.0", &key, &ShieldedAccessPolicy::default());
     assert!(
         result.is_err(),
         "distribute_shares must fail when fewer validators than total_shares"

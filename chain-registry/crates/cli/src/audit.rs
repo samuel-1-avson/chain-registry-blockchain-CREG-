@@ -320,14 +320,22 @@ fn read_cargo_packages() -> Result<Vec<InstalledPackage>> {
     let content = std::fs::read_to_string(lockfile)?;
 
     // Parse Cargo.lock as TOML (it's a valid TOML file)
-    let parsed: toml::Value = toml::from_str(&content)
-        .context("Failed to parse Cargo.lock as TOML")?;
+    let parsed: toml::Value =
+        toml::from_str(&content).context("Failed to parse Cargo.lock as TOML")?;
 
     let mut result = Vec::new();
     if let Some(packages) = parsed.get("package").and_then(|v| v.as_array()) {
         for pkg in packages {
-            let name = pkg.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let version = pkg.get("version").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let name = pkg
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let version = pkg
+                .get("version")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             if !name.is_empty() && !version.is_empty() {
                 result.push(InstalledPackage {
                     name,

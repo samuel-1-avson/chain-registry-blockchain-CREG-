@@ -70,10 +70,7 @@ pub fn decrypt_key_file(path: &Path, passphrase: &str) -> Result<String> {
     }
 
     if lines.len() != 4 || lines[0] != ENC_HEADER {
-        anyhow::bail!(
-            "Invalid encrypted key file format at {}",
-            path.display()
-        );
+        anyhow::bail!("Invalid encrypted key file format at {}", path.display());
     }
 
     let salt: [u8; 32] = hex::decode(lines[1])
@@ -158,7 +155,10 @@ pub fn run(output_path: Option<&Path>, role: &str) -> Result<()> {
     } else {
         let encrypted = encrypt_key(&privkey_hex, &passphrase)?;
         write_key_file(&key_path, &encrypted)?;
-        println!("  {} Private key saved (AES-256-GCM encrypted)", "✓".green());
+        println!(
+            "  {} Private key saved (AES-256-GCM encrypted)",
+            "✓".green()
+        );
     }
 
     // ── Print summary ─────────────────────────────────────────────────────────
@@ -218,8 +218,7 @@ pub fn run_with_mnemonic(output_path: Option<&Path>, role: &str, restore: bool) 
             .map_err(|e| anyhow::anyhow!("Invalid mnemonic: {}", e))?
     } else {
         // Generate a fresh 24-word mnemonic (256-bit entropy)
-        Mnemonic::generate(24)
-            .map_err(|e| anyhow::anyhow!("Mnemonic generation failed: {}", e))?
+        Mnemonic::generate(24).map_err(|e| anyhow::anyhow!("Mnemonic generation failed: {}", e))?
     };
 
     // SLIP-0010: derive Ed25519 master key from BIP39 seed
@@ -230,9 +229,7 @@ pub fn run_with_mnemonic(output_path: Option<&Path>, role: &str, restore: bool) 
     mac.update(&seed);
     let result = mac.finalize().into_bytes();
     // First 32 bytes = private key, last 32 bytes = chain code (unused for Ed25519)
-    let secret_bytes: [u8; 32] = result[..32]
-        .try_into()
-        .context("HMAC output too short")?;
+    let secret_bytes: [u8; 32] = result[..32].try_into().context("HMAC output too short")?;
 
     let signing_key = SigningKey::from_bytes(&secret_bytes);
     let pubkey = signing_key.verifying_key();
@@ -263,13 +260,19 @@ pub fn run_with_mnemonic(output_path: Option<&Path>, role: &str, restore: bool) 
     } else {
         let encrypted = encrypt_key(&privkey_hex, &passphrase)?;
         write_key_file(&key_path, &encrypted)?;
-        println!("  {} Private key saved (AES-256-GCM encrypted)", "✓".green());
+        println!(
+            "  {} Private key saved (AES-256-GCM encrypted)",
+            "✓".green()
+        );
     }
 
     // Display mnemonic (only for fresh generation)
     if !restore {
         println!();
-        println!("  {} WRITE DOWN YOUR MNEMONIC — this is your backup!", "⚠".yellow().bold());
+        println!(
+            "  {} WRITE DOWN YOUR MNEMONIC — this is your backup!",
+            "⚠".yellow().bold()
+        );
         println!("  ┌──────────────────────────────────────────────────────┐");
         let words: Vec<&str> = mnemonic.words().collect();
         for (i, chunk) in words.chunks(4).enumerate() {
@@ -427,7 +430,12 @@ fn write_key_file(path: &Path, content: &str) -> Result<()> {
         let path_str = path.to_string_lossy();
         // Remove inherited permissions and grant only the current user full control
         let _ = Command::new("icacls")
-            .args([path_str.as_ref(), "/inheritance:r", "/grant:r", &format!("{}:F", whoami::username())])
+            .args([
+                path_str.as_ref(),
+                "/inheritance:r",
+                "/grant:r",
+                &format!("{}:F", whoami::username()),
+            ])
             .output();
     }
 

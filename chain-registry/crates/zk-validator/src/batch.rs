@@ -16,7 +16,10 @@
 //! On first use without existing key files, ephemeral keys are generated and
 //! persisted with a warning. A trusted-ceremony setup should replace them.
 
-use std::{path::PathBuf, sync::{Arc, OnceLock}};
+use std::{
+    path::PathBuf,
+    sync::{Arc, OnceLock},
+};
 
 use ark_bn254::{Bn254, Fr};
 use ark_groth16::{Groth16, ProvingKey, VerifyingKey};
@@ -52,7 +55,12 @@ impl BatchInputs {
         next_root: [u8; 32],
         tx_count: u64,
     ) -> Self {
-        Self { prev_root, data_root, next_root, tx_count }
+        Self {
+            prev_root,
+            data_root,
+            next_root,
+            tx_count,
+        }
     }
 
     /// Produce the 6-element public input vector for the on-chain verifier.
@@ -201,10 +209,7 @@ fn load_or_generate_keys() -> Result<Arc<(ProvingKey<Bn254>, VerifyingKey<Bn254>
     let vk_path = dir.join(VK_FILE);
 
     let pair = if pk_path.exists() && vk_path.exists() {
-        info!(
-            "Loading batch ZK keys from {}",
-            dir.display()
-        );
+        info!("Loading batch ZK keys from {}", dir.display());
         let pk_bytes = std::fs::read(&pk_path)
             .map_err(|e| ZkError::SerializationError(format!("Read batch_pk.bin: {}", e)))?;
         let vk_bytes = std::fs::read(&vk_path)
@@ -216,7 +221,10 @@ fn load_or_generate_keys() -> Result<Arc<(ProvingKey<Bn254>, VerifyingKey<Bn254>
             .map_err(|e| ZkError::SerializationError(e.to_string()))?;
         (pk, vk)
     } else {
-        if std::env::var("CREG_PRODUCTION").map(|v| v == "1" || v.eq_ignore_ascii_case("true")).unwrap_or(false) {
+        if std::env::var("CREG_PRODUCTION")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
+        {
             panic!(
                 "PRODUCTION GUARD: Batch ZK key files not found in '{}'. \
                  Refusing to generate ephemeral keys on a production node. \
@@ -284,20 +292,19 @@ mod tests {
     use super::*;
 
     fn make_inputs(tx_count: u64) -> BatchInputs {
-        BatchInputs::new(
-            [0x01u8; 32],
-            [0x02u8; 32],
-            [0x03u8; 32],
-            tx_count,
-        )
+        BatchInputs::new([0x01u8; 32], [0x02u8; 32], [0x03u8; 32], tx_count)
     }
 
     #[test]
     fn test_batch_prove_and_verify() {
         let validator = BatchStateTransitionValidator::new().unwrap();
         let inputs = make_inputs(5);
-        let proof = validator.generate_proof(&inputs).expect("proof generation must succeed");
-        let ok = validator.verify_proof(&proof, &inputs).expect("verification must not error");
+        let proof = validator
+            .generate_proof(&inputs)
+            .expect("proof generation must succeed");
+        let ok = validator
+            .verify_proof(&proof, &inputs)
+            .expect("verification must not error");
         assert!(ok, "self-generated proof must verify");
     }
 
@@ -306,7 +313,10 @@ mod tests {
         let validator = BatchStateTransitionValidator::new().unwrap();
         let inputs = make_inputs(0);
         let result = validator.generate_proof(&inputs);
-        assert!(result.is_err(), "tx_count=0 must be rejected before proving");
+        assert!(
+            result.is_err(),
+            "tx_count=0 must be rejected before proving"
+        );
     }
 
     #[test]

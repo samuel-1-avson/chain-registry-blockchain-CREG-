@@ -62,7 +62,10 @@ fn print_stake_help() {
     eprintln!("     {}", "creg stake 1 --key-file /path/to/key".cyan());
     eprintln!();
     eprintln!("  2. Stake as validator:");
-    eprintln!("     {}", "creg stake 100 --role validator --key-file /path/to/key".cyan());
+    eprintln!(
+        "     {}",
+        "creg stake 100 --role validator --key-file /path/to/key".cyan()
+    );
     eprintln!();
     eprintln!("  3. Check your balance:");
     eprintln!("     {}", "cast balance $ADDRESS --rpc-url $RPC".cyan());

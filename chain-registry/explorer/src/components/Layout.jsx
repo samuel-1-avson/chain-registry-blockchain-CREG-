@@ -57,9 +57,9 @@ export function Layout({ children, sseState, reconnectAttempt, chainStats }) {
             <span style={{ color: 'var(--text-primary)', fontWeight: 700, fontSize: 15, letterSpacing: '-0.01em' }}>
               Chain Registry
             </span>
-            {chainStats?.current_height != null && (
+            {chainStats?.tip_height != null && (
               <span style={{ color: 'var(--text-tertiary)', fontSize: 11, fontFamily: 'var(--font-mono)', marginLeft: 8 }}>
-                #{chainStats.current_height}
+                #{chainStats.tip_height}
               </span>
             )}
           </Link>
@@ -77,7 +77,7 @@ export function Layout({ children, sseState, reconnectAttempt, chainStats }) {
         {children}
       </main>
       <footer style={{ maxWidth: 1440, margin: '0 auto', padding: '24px', borderTop: '1px solid var(--border)', color: 'var(--text-tertiary)', fontSize: 12, display: 'flex', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
-        <span>Chain Registry Explorer · deep-linkable, keyboard-accessible, open-source</span>
+        <span>Chain Registry Explorer - deep-linkable, keyboard-accessible, open-source</span>
         <span><Link to="/about" style={{ color: 'var(--text-secondary)' }}>About</Link></span>
       </footer>
     </div>

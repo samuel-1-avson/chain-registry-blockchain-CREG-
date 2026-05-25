@@ -2,7 +2,10 @@ param(
     [switch]$SkipExplorer,
     [switch]$SkipCleanup,
     [switch]$RunSmokeTests,
-    [switch]$SkipPublish
+    [switch]$SkipPublish,
+    [switch]$SkipDrip,
+    [switch]$RebuildImages,
+    [switch]$RebuildAppImage
 )
 
 $ErrorActionPreference = "Stop"

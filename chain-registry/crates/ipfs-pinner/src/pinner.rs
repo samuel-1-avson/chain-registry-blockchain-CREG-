@@ -147,9 +147,9 @@ impl IpfsPinner for IpfsApiPinner {
 
         // Parse JSON response and check for exact CID match in the Keys map.
         // The /pin/ls response is: {"Keys": {"<cid>": {"Type": "..."}}}
-        let data: serde_json::Value = response.json().await
-            .unwrap_or(serde_json::Value::Null);
-        Ok(data.get("Keys")
+        let data: serde_json::Value = response.json().await.unwrap_or(serde_json::Value::Null);
+        Ok(data
+            .get("Keys")
             .and_then(|k| k.as_object())
             .map(|keys| keys.contains_key(cid))
             .unwrap_or(false))

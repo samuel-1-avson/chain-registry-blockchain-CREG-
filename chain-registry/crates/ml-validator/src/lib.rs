@@ -31,9 +31,9 @@ pub use deep_scan::{
     deep_scan, DeepScanResult, DeepScanner, MlError, SuspiciousFile, ThreatClassification,
 };
 
-pub mod yara_scanner;
 pub mod osv_client;
 pub mod threat_intel;
+pub mod yara_scanner;
 
 /// Threat level classification
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

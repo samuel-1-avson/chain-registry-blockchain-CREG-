@@ -441,10 +441,7 @@ impl ThresholdEncryption {
             ThresholdError::DecryptionError(format!("invalid validator private key: {}", e))
         })?;
 
-        let shared = diffie_hellman(
-            our_secret.to_nonzero_scalar(),
-            ephemeral_public.as_affine(),
-        );
+        let shared = diffie_hellman(our_secret.to_nonzero_scalar(), ephemeral_public.as_affine());
         let aes_key = {
             let mut hasher = Sha256::new();
             hasher.update(b"creg-ecies-v1");

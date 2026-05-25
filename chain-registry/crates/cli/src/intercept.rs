@@ -162,9 +162,7 @@ fn print_path_instructions(dir: &Path) {
     let _ = dir;
 
     #[cfg(windows)]
-    println!(
-        "  Restart your terminal (or open a new one) for PATH changes to take effect."
-    );
+    println!("  Restart your terminal (or open a new one) for PATH changes to take effect.");
 
     #[cfg(not(windows))]
     {

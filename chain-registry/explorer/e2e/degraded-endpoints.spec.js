@@ -162,4 +162,42 @@ test.describe('Degraded endpoint states', () => {
     await expect(page.getByRole('link', { name: '#42', exact: true })).toBeVisible()
     await expect(page.getByText(/Proof path \(1 nodes\)/i)).toBeVisible()
   })
+
+  test('block detail treats bare 64-character hashes as block hashes', async ({ page }) => {
+    const hash = '64492845d276c151781028584624d3d22de533cda467d7a4718ba868298992eb'
+    let heightEndpointHit = false
+    let hashEndpointHit = false
+
+    await mockNodeApi(page, {
+      [`/v1/public/blocks/${hash}`]: {
+        status: 400,
+        body: { error: 'height must be numeric' },
+      },
+      [`/v1/public/blocks/hash/${hash}`]: {
+        body: {
+          height: 36,
+          hash,
+          prev_hash: '0'.repeat(64),
+          timestamp: new Date().toISOString(),
+          producer: 'validator-1',
+          transactions: [],
+          votes: [],
+          finalized: true,
+        },
+      },
+    })
+
+    await page.route('**/v1/public/blocks/**', async (route) => {
+      const path = new URL(route.request().url()).pathname
+      if (path === `/v1/public/blocks/${hash}`) heightEndpointHit = true
+      if (path === `/v1/public/blocks/hash/${hash}`) hashEndpointHit = true
+      return route.fallback()
+    })
+
+    await page.goto(`/block/hash/${hash}`)
+
+    await expect(page.getByRole('heading', { name: 'Block #36' })).toBeVisible()
+    expect(hashEndpointHit).toBe(true)
+    expect(heightEndpointHit).toBe(false)
+  })
 })

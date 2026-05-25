@@ -4,8 +4,10 @@
 
 const API_BASE = import.meta.env.VITE_API_BASE || ''
 const OPERATOR_API_KEY = import.meta.env.VITE_OPERATOR_API_KEY || ''
+const NODE_ROUTE_MODE = (import.meta.env.VITE_NODE_ROUTE_MODE || 'auto').toLowerCase()
 const LEGACY_FALLBACK_STATUSES = new Set([404, 405, 501])
 const OPTIONAL_ENDPOINT_STATUSES = new Set([401, 403, 404, 405, 501, 503])
+let detectedRouteMode = null
 
 export class ApiError extends Error {
   constructor(status, url, body) {
@@ -29,6 +31,10 @@ function isLegacyFallbackEligible(error) {
   return error instanceof ApiError && LEGACY_FALLBACK_STATUSES.has(error.status)
 }
 
+function shouldPreferLegacyRoutes() {
+  return NODE_ROUTE_MODE === 'legacy' || detectedRouteMode === 'legacy'
+}
+
 function isOptionalEndpointUnavailable(error) {
   return error instanceof ApiError && OPTIONAL_ENDPOINT_STATUSES.has(error.status)
 }
@@ -46,10 +52,19 @@ async function scopedNodeFetch(path, { scope = 'public', headers = {}, ...option
 }
 
 async function groupedNodeFetch(groupedPath, legacyPath, options = {}) {
+  if (legacyPath && shouldPreferLegacyRoutes()) {
+    return scopedNodeFetch(legacyPath, options)
+  }
+
+  if (NODE_ROUTE_MODE === 'grouped') {
+    return scopedNodeFetch(groupedPath, options)
+  }
+
   try {
     return await scopedNodeFetch(groupedPath, options)
   } catch (error) {
     if (!legacyPath || !isLegacyFallbackEligible(error)) throw error
+    detectedRouteMode = 'legacy'
     return scopedNodeFetch(legacyPath, options)
   }
 }
@@ -311,3 +326,4 @@ export const nodeApi = {
 }
 
 export { API_BASE }
+export { NODE_ROUTE_MODE }

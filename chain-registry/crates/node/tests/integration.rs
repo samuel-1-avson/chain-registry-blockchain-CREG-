@@ -213,7 +213,9 @@ mod chain_store_tests {
 #[cfg(test)]
 mod consensus_tests {
     use chrono::Utc;
-    use common::{Block, BlockHeader, BlockSignature, Transaction, ValidatorSignature, ValidatorVote};
+    use common::{
+        Block, BlockHeader, BlockSignature, Transaction, ValidatorSignature, ValidatorVote,
+    };
     use consensus::{validator_set::ValidatorInfo, PbftEngine, ValidatorSet};
     use ed25519_dalek::{Signer, SigningKey};
     use rand::rngs::OsRng;
@@ -295,11 +297,9 @@ mod consensus_tests {
             validators.push(v);
         }
 
-        let active: Vec<consensus::vrf::VrfValidator> = validators
-            .iter()
-            .map(|v| v.to_vrf_validator())
-            .collect();
-        
+        let active: Vec<consensus::vrf::VrfValidator> =
+            validators.iter().map(|v| v.to_vrf_validator()).collect();
+
         let proposer_id = consensus::vrf::select_proposer_deterministic(&active, &"0".repeat(64))
             .expect("selected proposer");
 
@@ -333,11 +333,9 @@ mod consensus_tests {
             validators.push(v);
         }
 
-        let active: Vec<consensus::vrf::VrfValidator> = validators
-            .iter()
-            .map(|v| v.to_vrf_validator())
-            .collect();
-        
+        let active: Vec<consensus::vrf::VrfValidator> =
+            validators.iter().map(|v| v.to_vrf_validator()).collect();
+
         let proposer_id = consensus::vrf::select_proposer_deterministic(&active, &"0".repeat(64))
             .expect("selected proposer");
 

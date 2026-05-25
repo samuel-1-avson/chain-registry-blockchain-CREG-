@@ -82,10 +82,7 @@ pub async fn generate_zk_proof(
                 .iter()
                 .any(|f| matches!(f.severity, common::FindingSeverity::Critical)),
             Err(e) => {
-                warn!(
-                    "Sandbox unavailable, treating as UNSAFE: {}",
-                    e
-                );
+                warn!("Sandbox unavailable, treating as UNSAFE: {}", e);
                 false
             }
         };

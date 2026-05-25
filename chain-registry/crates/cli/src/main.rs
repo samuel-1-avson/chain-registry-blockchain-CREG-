@@ -784,7 +784,9 @@ async fn run(cli: Cli) -> Result<()> {
             }
         }
         Commands::Lockfile { clear, dir, diff } => {
-            let d = dir.unwrap_or_else(|| std::env::current_dir().expect("cannot determine current directory"));
+            let d = dir.unwrap_or_else(|| {
+                std::env::current_dir().expect("cannot determine current directory")
+            });
             if clear {
                 let path = d.join("pkg-lock.chain");
                 if path.exists() {

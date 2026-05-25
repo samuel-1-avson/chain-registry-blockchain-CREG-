@@ -4,6 +4,7 @@ import { VitePWA } from 'vite-plugin-pwa'
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  cacheDir: process.env.VITE_CACHE_DIR || 'node_modules/.vite',
   plugins: [
     react(),
     VitePWA({
@@ -13,7 +14,7 @@ export default defineConfig({
       manifest: {
         name: 'Chain Registry Explorer',
         short_name: 'CRegExplorer',
-        description: 'Block explorer for the Chain Registry L1 — blocks, validators, packages, bridge, governance.',
+        description: 'Block explorer for the Chain Registry L1 - blocks, validators, packages, bridge, governance.',
         theme_color: '#0a0b0f',
         background_color: '#0a0b0f',
         display: 'standalone',
@@ -50,14 +51,6 @@ export default defineConfig({
             options: {
               cacheName: 'api-block-detail',
               expiration: { maxEntries: 200, maxAgeSeconds: 86400 },
-            },
-          },
-          {
-            urlPattern: /^https:\/\/fonts\.(googleapis|gstatic)\.com\/.*/,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'google-fonts',
-              expiration: { maxEntries: 20, maxAgeSeconds: 31536000 },
             },
           },
         ],

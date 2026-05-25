@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { API_BASE } from '../api/node.js'
+import { API_BASE, NODE_ROUTE_MODE } from '../api/node.js'
 
 // Connection lifecycle states surfaced to consumers so the UI can render
 // a "connecting / live / stale / offline" banner instead of silently polling.
@@ -18,11 +18,13 @@ const joinUrl = (base, path) => {
 }
 
 /**
- * Subscribe to /v1/public/events (or a custom SSE endpoint) with exponential reconnect.
+ * Subscribe to the node event stream with exponential reconnect.
  * onEvent receives the parsed JSON payload (or raw string if not JSON).
  * Returns { state, lastEventAt, reconnectAttempt }.
  */
-export function useSse({ path = '/v1/public/events', onEvent, eventTypes = null, enabled = true } = {}) {
+const DEFAULT_EVENTS_PATH = NODE_ROUTE_MODE === 'legacy' ? '/v1/events' : '/v1/public/events'
+
+export function useSse({ path = DEFAULT_EVENTS_PATH, onEvent, eventTypes = null, enabled = true } = {}) {
   const [state, setState] = useState(enabled ? SSE_STATE.Connecting : SSE_STATE.Idle)
   const [lastEventAt, setLastEventAt] = useState(null)
   const [reconnectAttempt, setReconnectAttempt] = useState(0)
@@ -53,36 +55,6 @@ export function useSse({ path = '/v1/public/events', onEvent, eventTypes = null,
       const url = joinUrl(API_BASE, path)
       setState(SSE_STATE.Connecting)
 
-      // Try WebSocket first if it's the main events endpoint.
-      if (path === '/v1/public/events') {
-        const wsUrl = url.replace(/^http/, 'ws').replace(/\/v1\/public\/events$/, '/v1/public/ws')
-        try {
-          const ws = new WebSocket(wsUrl)
-          ws.onopen = () => {
-            if (cancelled) return ws.close()
-            attempt = 0
-            setReconnectAttempt(0)
-            setState(SSE_STATE.Live)
-            setLastEventAt(Date.now())
-          }
-          ws.onmessage = (evt) => handlePayload(evt.data, 'message')
-          ws.onerror = () => {}
-          ws.onclose = () => {
-            if (cancelled) return
-            setState(SSE_STATE.Error)
-            attempt += 1
-            setReconnectAttempt(attempt)
-            const delay = Math.min(30_000, 500 * 2 ** Math.min(attempt, 6))
-            reconnectTimer = setTimeout(connect, delay)
-          }
-          es = { close: () => ws.close() }
-          return
-        } catch (e) {
-          console.warn('WebSocket failed, falling back to SSE')
-        }
-      }
-
-      // Fallback to SSE
       es = new EventSource(url)
       es.onopen = () => {
         if (cancelled) return

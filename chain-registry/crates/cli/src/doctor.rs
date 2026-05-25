@@ -8,6 +8,9 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::time::{Duration, Instant};
 
+const DOCTOR_HTTP_TIMEOUT_SECS: u64 = 10;
+const FAUCET_DRIP_TIMEOUT_SECS: u64 = 60;
+
 pub struct DoctorOptions<'a> {
     pub node_url: Option<&'a str>,
     pub json: bool,
@@ -253,7 +256,7 @@ async fn run_testnet(options: DoctorOptions<'_>) -> Result<()> {
         .unwrap_or_else(|| "http://127.0.0.1:3007".to_string());
 
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(DOCTOR_HTTP_TIMEOUT_SECS))
         .build()?;
 
     let mut checks = Vec::new();
@@ -324,7 +327,8 @@ async fn run_testnet(options: DoctorOptions<'_>) -> Result<()> {
     };
 
     let runtime_config_url = format!("{}/v1/runtime/config", node.trim_end_matches('/'));
-    let runtime_config = match get_json::<RuntimeConfigResponse>(&client, &runtime_config_url).await {
+    let runtime_config = match get_json::<RuntimeConfigResponse>(&client, &runtime_config_url).await
+    {
         Ok(config) => {
             let token = config.token_contract.clone().unwrap_or_default();
             let staking = config.staking_contract.clone().unwrap_or_default();
@@ -361,27 +365,29 @@ async fn run_testnet(options: DoctorOptions<'_>) -> Result<()> {
         }
     };
 
-    let eth_chain_id = match rpc_hex_u64(&client, &eth_rpc, "eth_chainId", serde_json::json!([])).await {
-        Ok(chain_id) => {
-            let block_number = rpc_hex_u64(&client, &eth_rpc, "eth_blockNumber", serde_json::json!([]))
-                .await
-                .unwrap_or(0);
-            checks.push(DoctorCheck::pass(
-                "Ethereum RPC",
-                true,
-                format!("{} — chain_id={} block={}", eth_rpc, chain_id, block_number),
-            ));
-            Some(chain_id)
-        }
-        Err(error) => {
-            checks.push(DoctorCheck::fail(
-                "Ethereum RPC",
-                true,
-                format!("Could not query {}: {}", eth_rpc, error),
-            ));
-            None
-        }
-    };
+    let eth_chain_id =
+        match rpc_hex_u64(&client, &eth_rpc, "eth_chainId", serde_json::json!([])).await {
+            Ok(chain_id) => {
+                let block_number =
+                    rpc_hex_u64(&client, &eth_rpc, "eth_blockNumber", serde_json::json!([]))
+                        .await
+                        .unwrap_or(0);
+                checks.push(DoctorCheck::pass(
+                    "Ethereum RPC",
+                    true,
+                    format!("{} — chain_id={} block={}", eth_rpc, chain_id, block_number),
+                ));
+                Some(chain_id)
+            }
+            Err(error) => {
+                checks.push(DoctorCheck::fail(
+                    "Ethereum RPC",
+                    true,
+                    format!("Could not query {}: {}", eth_rpc, error),
+                ));
+                None
+            }
+        };
 
     if let Some(config) = &runtime_config {
         let mut contract_failures = Vec::new();
@@ -401,12 +407,17 @@ async fn run_testnet(options: DoctorOptions<'_>) -> Result<()> {
             match rpc_get_code(&client, &eth_rpc, address).await {
                 Ok(code) if code != "0x" && code != "0x0" => {}
                 Ok(_) => contract_failures.push(format!("{}={} has no bytecode", label, address)),
-                Err(error) => contract_failures.push(format!("{}={} lookup failed: {}", label, address, error)),
+                Err(error) => contract_failures
+                    .push(format!("{}={} lookup failed: {}", label, address, error)),
             }
         }
 
         checks.push(if contract_failures.is_empty() {
-            DoctorCheck::pass("Contract bytecode", true, "token/staking/registry bytecode present")
+            DoctorCheck::pass(
+                "Contract bytecode",
+                true,
+                "token/staking/registry bytecode present",
+            )
         } else {
             DoctorCheck::fail("Contract bytecode", true, contract_failures.join("; "))
         });
@@ -425,13 +436,13 @@ async fn run_testnet(options: DoctorOptions<'_>) -> Result<()> {
         checks.push(if creg_testnet {
             DoctorCheck::pass(
                 "CREG_TESTNET flag",
-                false,
+                true,
                 "CREG_TESTNET=true — PID lock disabled, multiple nodes can share this machine",
             )
         } else {
             DoctorCheck::fail(
                 "CREG_TESTNET flag",
-                false,
+                true,
                 "CREG_TESTNET not set — starting two nodes on the same machine will fail with a \
                  PID lock error. Set CREG_TESTNET=true or use docker compose (which sets it \
                  automatically).",
@@ -447,7 +458,10 @@ async fn run_testnet(options: DoctorOptions<'_>) -> Result<()> {
                 "status={} mode={} faucet_balance={}",
                 health.status,
                 health.mode.clone().unwrap_or_else(|| "unknown".to_string()),
-                health.faucet_balance.clone().unwrap_or_else(|| "unknown".to_string())
+                health
+                    .faucet_balance
+                    .clone()
+                    .unwrap_or_else(|| "unknown".to_string())
             );
             checks.push(if ok {
                 DoctorCheck::pass("Faucet health", true, message)
@@ -467,7 +481,8 @@ async fn run_testnet(options: DoctorOptions<'_>) -> Result<()> {
     };
 
     let faucet_network_url = format!("{}/api/network", faucet.trim_end_matches('/'));
-    let faucet_network = match get_json::<FaucetNetworkResponse>(&client, &faucet_network_url).await {
+    let faucet_network = match get_json::<FaucetNetworkResponse>(&client, &faucet_network_url).await
+    {
         Ok(network) => {
             let message = format!(
                 "chain_id={} rpc_url={} token={} explorer={}",
@@ -489,7 +504,9 @@ async fn run_testnet(options: DoctorOptions<'_>) -> Result<()> {
         }
     };
 
-    if let (Some(network), Some(chain_id), Some(config)) = (&faucet_network, eth_chain_id, &runtime_config) {
+    if let (Some(network), Some(chain_id), Some(config)) =
+        (&faucet_network, eth_chain_id, &runtime_config)
+    {
         let token_matches = normalize_address(config.token_contract.as_deref().unwrap_or_default())
             == normalize_address(&network.token_contract);
         let chain_matches = network.chain_id == chain_id;
@@ -580,7 +597,11 @@ async fn run_testnet(options: DoctorOptions<'_>) -> Result<()> {
         ipfs_url: ipfs,
         faucet_url: Some(faucet),
         eth_rpc_url: Some(eth_rpc),
-        explorer_url: if options.skip_explorer { None } else { Some(explorer) },
+        explorer_url: if options.skip_explorer {
+            None
+        } else {
+            Some(explorer)
+        },
         checks,
     };
 
@@ -588,7 +609,11 @@ async fn run_testnet(options: DoctorOptions<'_>) -> Result<()> {
     let _ = chain_stats;
     let _ = faucet_health;
 
-    finish_report("creg doctor — testnet end-to-end check", report, options.json)
+    finish_report(
+        "creg doctor — testnet end-to-end check",
+        report,
+        options.json,
+    )
 }
 
 fn print_check(label: &str, note: &str) {
@@ -722,7 +747,12 @@ async fn rpc_call(
         .await
         .with_context(|| format!("RPC {} call to {} failed", method, rpc_url))?
         .error_for_status()
-        .with_context(|| format!("RPC {} call to {} returned an error status", method, rpc_url))?
+        .with_context(|| {
+            format!(
+                "RPC {} call to {} returned an error status",
+                method, rpc_url
+            )
+        })?
         .json::<serde_json::Value>()
         .await
         .with_context(|| format!("Could not decode RPC {} response", method))?;
@@ -755,7 +785,7 @@ pub async fn faucet_drip_probe(
     recipient: Option<&str>,
 ) -> Result<FaucetDripOutcome> {
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(FAUCET_DRIP_TIMEOUT_SECS))
         .build()?;
     let recipient = recipient
         .map(str::to_string)
@@ -767,8 +797,14 @@ pub fn format_drip_outcome(outcome: &FaucetDripOutcome) -> String {
     format!(
         "recipient={} amount={} tx_hash={} balance_before={} balance_after={}",
         outcome.recipient,
-        outcome.amount.clone().unwrap_or_else(|| "unknown".to_string()),
-        outcome.tx_hash.clone().unwrap_or_else(|| "unknown".to_string()),
+        outcome
+            .amount
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string()),
+        outcome
+            .tx_hash
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string()),
         outcome.balance_before,
         outcome.balance_after
     )
@@ -779,7 +815,9 @@ async fn run_faucet_drip_probe(
     faucet_url: &str,
     recipient: &str,
 ) -> Result<FaucetDripOutcome> {
-    let before = faucet_balance(client, faucet_url, recipient).await.unwrap_or(0);
+    let before = faucet_balance(client, faucet_url, recipient)
+        .await
+        .unwrap_or(0);
     let challenge: FaucetChallengeResponse = get_json(
         client,
         &format!("{}/api/challenge", faucet_url.trim_end_matches('/')),
@@ -787,8 +825,10 @@ async fn run_faucet_drip_probe(
     .await?;
     let nonce = solve_pow(&challenge.challenge, challenge.difficulty);
 
+    let drip_url = format!("{}/api/drip", faucet_url.trim_end_matches('/'));
     let response = client
-        .post(format!("{}/api/drip", faucet_url.trim_end_matches('/')))
+        .post(&drip_url)
+        .timeout(Duration::from_secs(FAUCET_DRIP_TIMEOUT_SECS))
         .json(&serde_json::json!({
             "address": recipient,
             "challenge": challenge.challenge,
@@ -796,13 +836,32 @@ async fn run_faucet_drip_probe(
         }))
         .send()
         .await
-        .context("Faucet drip request failed")?
-        .json::<FaucetDripResponse>()
+        .with_context(|| {
+            format!(
+                "Faucet drip request failed for {} via {} after {}s",
+                recipient, drip_url, FAUCET_DRIP_TIMEOUT_SECS
+            )
+        })?;
+
+    let status = response.status();
+    let body = response
+        .text()
         .await
-        .context("Could not decode faucet drip response")?;
+        .with_context(|| format!("Could not read faucet drip response body from {}", drip_url))?;
+    let response = serde_json::from_str::<FaucetDripResponse>(&body).with_context(|| {
+        format!(
+            "Could not decode faucet drip response from {} (status {}): {}",
+            drip_url, status, body
+        )
+    })?;
 
     if !response.success {
-        anyhow::bail!("faucet drip failed for {}: {}", recipient, response.message);
+        anyhow::bail!(
+            "faucet drip failed for {} (status {}): {}",
+            recipient,
+            status,
+            response.message
+        );
     }
 
     let after = faucet_balance(client, faucet_url, recipient).await?;
@@ -827,7 +886,11 @@ async fn run_faucet_drip_probe(
 async fn faucet_balance(client: &reqwest::Client, faucet_url: &str, address: &str) -> Result<u128> {
     let response: FaucetBalanceResponse = get_json(
         client,
-        &format!("{}/api/balance/{}", faucet_url.trim_end_matches('/'), address),
+        &format!(
+            "{}/api/balance/{}",
+            faucet_url.trim_end_matches('/'),
+            address
+        ),
     )
     .await?;
     response

@@ -2,14 +2,14 @@
 // End-to-end tests: spin up a real in-process node on a random port,
 // submit a package, wait for it to be verified, and confirm via the API.
 
+use axum::http::StatusCode;
+use axum::{routing::post, Json, Router};
 use chrono::Utc;
 use common::{PackageId, PackageManifest, PublishRequest};
-use std::{sync::Arc, time::Duration};
-use tokio::{sync::RwLock, time::timeout};
-use axum::{routing::post, Json, Router};
-use axum::http::StatusCode;
 use serde_json::Value;
+use std::{sync::Arc, time::Duration};
 use tokio::net::TcpListener;
+use tokio::{sync::RwLock, time::timeout};
 
 fn make_tarball(path: &str, content: &str) -> Vec<u8> {
     let mut tar_bytes = Vec::new();
@@ -20,7 +20,9 @@ fn make_tarball(path: &str, content: &str) -> Vec<u8> {
         header.set_size(content.as_bytes().len() as u64);
         header.set_mode(0o644);
         header.set_cksum();
-        archive.append_data(&mut header, path, content.as_bytes()).unwrap();
+        archive
+            .append_data(&mut header, path, content.as_bytes())
+            .unwrap();
         archive.finish().unwrap();
         archive.into_inner().unwrap().finish().unwrap();
     }
@@ -457,7 +459,9 @@ async fn e2e_legacy_private_api_acl_protection() {
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
 
     // Private route should be locked/unavailable.
-    let resp = reqwest::get(format!("{}/v1/runtime/config", url)).await.unwrap();
+    let resp = reqwest::get(format!("{}/v1/runtime/config", url))
+        .await
+        .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
 
     // 2. Set operator key to verify authorization gate
@@ -465,7 +469,9 @@ async fn e2e_legacy_private_api_acl_protection() {
     std::env::set_var("CREG_OPERATOR_API_KEY", secret_key);
 
     // Request without headers -> 401 Unauthorized
-    let resp = reqwest::get(format!("{}/v1/runtime/config", url)).await.unwrap();
+    let resp = reqwest::get(format!("{}/v1/runtime/config", url))
+        .await
+        .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::UNAUTHORIZED);
 
     // Request with incorrect x-operator-key header -> 401 Unauthorized

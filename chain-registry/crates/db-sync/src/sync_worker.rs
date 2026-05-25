@@ -144,26 +144,18 @@ impl SyncWorker {
         )
         .execute(pool)
         .await?;
-        sqlx::query(
-            "ALTER TABLE packages ADD COLUMN IF NOT EXISTS shielded BOOLEAN DEFAULT FALSE",
-        )
-        .execute(pool)
-        .await?;
-        sqlx::query(
-            "ALTER TABLE packages ADD COLUMN IF NOT EXISTS findings JSONB DEFAULT '[]'",
-        )
-        .execute(pool)
-        .await?;
-        sqlx::query(
-            "ALTER TABLE packages ADD COLUMN IF NOT EXISTS access_count INT DEFAULT 0",
-        )
-        .execute(pool)
-        .await?;
-        sqlx::query(
-            "ALTER TABLE packages ADD COLUMN IF NOT EXISTS last_accessed TIMESTAMPTZ",
-        )
-        .execute(pool)
-        .await?;
+        sqlx::query("ALTER TABLE packages ADD COLUMN IF NOT EXISTS shielded BOOLEAN DEFAULT FALSE")
+            .execute(pool)
+            .await?;
+        sqlx::query("ALTER TABLE packages ADD COLUMN IF NOT EXISTS findings JSONB DEFAULT '[]'")
+            .execute(pool)
+            .await?;
+        sqlx::query("ALTER TABLE packages ADD COLUMN IF NOT EXISTS access_count INT DEFAULT 0")
+            .execute(pool)
+            .await?;
+        sqlx::query("ALTER TABLE packages ADD COLUMN IF NOT EXISTS last_accessed TIMESTAMPTZ")
+            .execute(pool)
+            .await?;
 
         // Add revocation_reason column if missing (migration)
         sqlx::query("ALTER TABLE packages ADD COLUMN IF NOT EXISTS revocation_reason TEXT")

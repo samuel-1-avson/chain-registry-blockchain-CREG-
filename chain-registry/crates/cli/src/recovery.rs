@@ -32,20 +32,20 @@ pub struct Share {
 /// Uses GF(256) Shamir Secret Sharing: each byte of the secret is
 /// independently split into shares using a random polynomial of degree
 /// `m - 1` evaluated at x = 1..n.
-pub fn split(
-    privkey_hex: &str,
-    guardians: &[String],
-    threshold: u8,
-) -> Result<Vec<Share>> {
-    let secret = hex::decode(privkey_hex.trim())
-        .context("Invalid private key hex for splitting")?;
+pub fn split(privkey_hex: &str, guardians: &[String], threshold: u8) -> Result<Vec<Share>> {
+    let secret =
+        hex::decode(privkey_hex.trim()).context("Invalid private key hex for splitting")?;
     let n = u8::try_from(guardians.len()).context("Max 255 guardians supported")?;
 
     if threshold < 2 {
         bail!("Threshold must be at least 2");
     }
     if threshold > n {
-        bail!("Threshold ({}) cannot exceed number of guardians ({})", threshold, n);
+        bail!(
+            "Threshold ({}) cannot exceed number of guardians ({})",
+            threshold,
+            n
+        );
     }
 
     let mut shares: Vec<Vec<u8>> = (0..n).map(|_| Vec::with_capacity(secret.len())).collect();
@@ -236,8 +236,7 @@ pub fn run_split(
     for share in &shares {
         let filename = format!("share-{}-{}.json", share.index, share.guardian);
         let path = output_dir.join(&filename);
-        let json = serde_json::to_string_pretty(share)
-            .context("Failed to serialize share")?;
+        let json = serde_json::to_string_pretty(share).context("Failed to serialize share")?;
         std::fs::write(&path, &json)
             .with_context(|| format!("Cannot write share to {}", path.display()))?;
         println!(
@@ -267,10 +266,7 @@ pub fn run_split(
 }
 
 /// `creg recovery reconstruct` — reconstruct a private key from guardian shares.
-pub fn run_reconstruct(
-    share_files: &[std::path::PathBuf],
-    output_path: &Path,
-) -> Result<()> {
+pub fn run_reconstruct(share_files: &[std::path::PathBuf], output_path: &Path) -> Result<()> {
     use colored::Colorize;
 
     let mut shares = Vec::new();
@@ -336,11 +332,7 @@ mod tests {
     #[test]
     fn test_split_and_reconstruct_2_of_3() {
         let secret = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-        let guardians = vec![
-            "alice".into(),
-            "bob".into(),
-            "carol".into(),
-        ];
+        let guardians = vec!["alice".into(), "bob".into(), "carol".into()];
         let shares = split(secret, &guardians, 2).unwrap();
         assert_eq!(shares.len(), 3);
 
@@ -376,10 +368,12 @@ mod tests {
         let shares = split(secret, &guardians, 3).unwrap();
 
         let result = reconstruct(&shares[0..2]);
-        assert!(result.is_err() || {
-            let r = result.unwrap();
-            r != secret  // With fewer shares than threshold, result should differ
-        });
+        assert!(
+            result.is_err() || {
+                let r = result.unwrap();
+                r != secret // With fewer shares than threshold, result should differ
+            }
+        );
     }
 
     #[test]

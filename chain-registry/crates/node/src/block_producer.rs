@@ -218,7 +218,10 @@ async fn produce_block(
                     signature: prep_sig.clone(),
                 };
 
-                let prepare_quorum_reached = s.pbft_engine.prepare(&bh, &node_id, prep_sig_obj).unwrap_or(false);
+                let prepare_quorum_reached = s
+                    .pbft_engine
+                    .prepare(&bh, &node_id, prep_sig_obj)
+                    .unwrap_or(false);
 
                 let prep_msg = common::GossipMessage::PbftPrepare {
                     block_hash: bh.clone(),
@@ -243,7 +246,10 @@ async fn produce_block(
                         signature: commit_sig.clone(),
                     };
 
-                    let commit_quorum_reached = s.pbft_engine.commit(&bh, &node_id, commit_sig_obj).unwrap_or(false);
+                    let commit_quorum_reached = s
+                        .pbft_engine
+                        .commit(&bh, &node_id, commit_sig_obj)
+                        .unwrap_or(false);
 
                     let commit_msg = common::GossipMessage::PbftCommit {
                         block_hash: bh.clone(),
@@ -258,7 +264,10 @@ async fn produce_block(
                     }
 
                     if commit_quorum_reached {
-                        tracing::info!("[PBFT Proposer] Block {} finalised locally by proposer quorum", &bh[..12]);
+                        tracing::info!(
+                            "[PBFT Proposer] Block {} finalised locally by proposer quorum",
+                            &bh[..12]
+                        );
                         if let Some(final_block) = s.pbft_engine.get_finalised_block(&bh) {
                             let _ = s.chain.insert_block(&final_block);
                             s.publisher_index.apply_block(&final_block);

@@ -173,7 +173,9 @@ impl Verifier for IpfsVerifier {
             while let Some(join_result) = set.join_next().await {
                 match join_result {
                     Ok(result) => results.push(result),
-                    Err(e) => results.push(Err(anyhow::anyhow!("Verification task panicked: {}", e))),
+                    Err(e) => {
+                        results.push(Err(anyhow::anyhow!("Verification task panicked: {}", e)))
+                    }
                 }
             }
         }

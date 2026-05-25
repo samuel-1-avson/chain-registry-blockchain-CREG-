@@ -156,9 +156,7 @@ impl DeepScanner {
                 "CREG_FORCE_ONNX=true is DEPRECATED and ignored. The legacy ONNX path has been retired. Defaulting to the YARA-X rule-based scanning waterfall."
             );
         }
-        tracing::info!(
-            "ML deep-scan: ONNX model not required (rule-based YARA-X pipeline active)"
-        );
+        tracing::info!("ML deep-scan: ONNX model not required (rule-based YARA-X pipeline active)");
         Ok(())
     }
 
@@ -268,8 +266,6 @@ impl DeepScanner {
             is_mock: false,
         })
     }
-
-
 }
 
 impl Default for DeepScanner {
@@ -312,7 +308,10 @@ pub fn deep_scan(
     match result_rx.recv_timeout(SCAN_TIMEOUT) {
         Ok(result) => result,
         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-            warn!("Deep-scan inference timed out after {}s", SCAN_TIMEOUT.as_secs());
+            warn!(
+                "Deep-scan inference timed out after {}s",
+                SCAN_TIMEOUT.as_secs()
+            );
             Ok(timeout_result())
         }
         Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(MlError::InferenceError(
@@ -339,7 +338,10 @@ fn mock_result() -> DeepScanResult {
 
 /// Produce a degraded result when ONNX inference timed out.
 fn timeout_result() -> DeepScanResult {
-    warn!("ML deep-scan timed out — inference did not complete within {}s.", SCAN_TIMEOUT.as_secs());
+    warn!(
+        "ML deep-scan timed out — inference did not complete within {}s.",
+        SCAN_TIMEOUT.as_secs()
+    );
     DeepScanResult {
         malicious_probability: 0.0,
         confidence: 0.0,
@@ -351,8 +353,6 @@ fn timeout_result() -> DeepScanResult {
     }
 }
 
-
-
 /// Extract text source files from a tar.gz byte slice, filtered to extensions
 /// appropriate for the given ecosystem. Passing an empty or unknown ecosystem
 /// falls back to a broad cross-ecosystem set.
@@ -360,7 +360,10 @@ fn timeout_result() -> DeepScanResult {
 /// Filtering by ecosystem prevents false positives: a Rust crate that ships
 /// Python helper scripts should not have those scripts scanned with the
 /// JavaScript/Python ruleset and vice-versa.
-fn extract_source_files(tarball: &[u8], ecosystem: &str) -> Result<Vec<(String, String)>, std::io::Error> {
+fn extract_source_files(
+    tarball: &[u8],
+    ecosystem: &str,
+) -> Result<Vec<(String, String)>, std::io::Error> {
     use std::io::Read;
     let gz = flate2::read::GzDecoder::new(tarball);
     let mut archive = tar::Archive::new(gz);
@@ -388,7 +391,10 @@ fn is_source_file_for_ecosystem(path: &str, ecosystem: &str) -> bool {
         .unwrap_or("");
 
     match ecosystem.to_ascii_lowercase().trim() {
-        "npm" => matches!(ext, "js" | "ts" | "mjs" | "cjs" | "jsx" | "tsx" | "sh" | "bash"),
+        "npm" => matches!(
+            ext,
+            "js" | "ts" | "mjs" | "cjs" | "jsx" | "tsx" | "sh" | "bash"
+        ),
         "pypi" => matches!(ext, "py" | "pyw" | "sh" | "bash"),
         "cargo" => matches!(ext, "rs" | "sh" | "bash" | "toml"),
         "rubygems" | "gem" => matches!(ext, "rb" | "sh" | "bash"),
@@ -398,8 +404,21 @@ fn is_source_file_for_ecosystem(path: &str, ecosystem: &str) -> bool {
         // Broad fallback for unknown ecosystems — covers all common scripting languages
         _ => matches!(
             ext,
-            "js" | "ts" | "mjs" | "cjs" | "py" | "rb" | "rs" | "java"
-            | "go" | "sh" | "bash" | "php" | "kt" | "swift" | "c" | "cpp"
+            "js" | "ts"
+                | "mjs"
+                | "cjs"
+                | "py"
+                | "rb"
+                | "rs"
+                | "java"
+                | "go"
+                | "sh"
+                | "bash"
+                | "php"
+                | "kt"
+                | "swift"
+                | "c"
+                | "cpp"
         ),
     }
 }

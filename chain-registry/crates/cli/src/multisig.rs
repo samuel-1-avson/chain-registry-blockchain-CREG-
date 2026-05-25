@@ -49,8 +49,8 @@ impl MultisigSession {
     /// Compute the HMAC over stable fields:
     ///   `canonical || content_hash || ipfs_cid || threshold || ecosystem || version`
     fn compute_mac(&self) -> String {
-        let key = std::env::var("CREG_SESSION_HMAC_KEY")
-            .unwrap_or_else(|_| self.content_hash.clone());
+        let key =
+            std::env::var("CREG_SESSION_HMAC_KEY").unwrap_or_else(|_| self.content_hash.clone());
         let msg = format!(
             "{}{}{}{}{}{}{}",
             self.canonical,
@@ -61,8 +61,8 @@ impl MultisigSession {
             self.ecosystem,
             self.version,
         );
-        let mut mac = HmacSha256::new_from_slice(key.as_bytes())
-            .expect("HMAC accepts any key length");
+        let mut mac =
+            HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC accepts any key length");
         mac.update(msg.as_bytes());
         hex::encode(mac.finalize().into_bytes())
     }
@@ -178,7 +178,10 @@ pub async fn init(
     let (name, version) = if let Some(at_pos) = stem.rfind('@') {
         (&stem[..at_pos], &stem[at_pos + 1..])
     } else if let Some(dash_pos) = stem.rfind('-').filter(|&p| {
-        stem[p + 1..].chars().next().map_or(false, |c| c.is_ascii_digit())
+        stem[p + 1..]
+            .chars()
+            .next()
+            .map_or(false, |c| c.is_ascii_digit())
     }) {
         (&stem[..dash_pos], &stem[dash_pos + 1..])
     } else {
@@ -187,7 +190,10 @@ pub async fn init(
 
     // Infer ecosystem from extension or env var
     let ecosystem = std::env::var("CREG_ECOSYSTEM").unwrap_or_else(|_| {
-        let ext = tarball_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        let ext = tarball_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("");
         match ext {
             "crate" => "cargo",
             "whl" | "tar" => "pip",

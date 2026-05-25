@@ -24,8 +24,7 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
-        Block, Borders, Cell, Clear, Gauge, List, ListItem, Paragraph, Row, Sparkline, Table,
-        Wrap,
+        Block, Borders, Cell, Clear, Gauge, List, ListItem, Paragraph, Row, Sparkline, Table, Wrap,
     },
     Frame, Terminal,
 };
@@ -56,7 +55,11 @@ fn is_legacy_fallback_status(status: reqwest::StatusCode) -> bool {
     matches!(status.as_u16(), 404 | 405 | 501)
 }
 
-fn scoped_get(client: &reqwest::Client, url: String, scope: ApiRouteScope) -> reqwest::RequestBuilder {
+fn scoped_get(
+    client: &reqwest::Client,
+    url: String,
+    scope: ApiRouteScope,
+) -> reqwest::RequestBuilder {
     let request = client.get(url);
     match scope {
         ApiRouteScope::Operator => match operator_api_key() {
@@ -130,16 +133,76 @@ static IS_LIGHT_THEME: AtomicBool = AtomicBool::new(false);
 // Color palette for a cohesive, beautiful look
 struct Theme;
 impl Theme {
-    fn primary() -> Color { if IS_LIGHT_THEME.load(Ordering::Relaxed) { Color::Blue } else { Color::Cyan } }
-    fn secondary() -> Color { if IS_LIGHT_THEME.load(Ordering::Relaxed) { Color::Rgb(0, 0, 139) } else { Color::Blue } }
-    fn success() -> Color { if IS_LIGHT_THEME.load(Ordering::Relaxed) { Color::Rgb(0, 100, 0) } else { Color::Green } }
-    fn warning() -> Color { if IS_LIGHT_THEME.load(Ordering::Relaxed) { Color::Rgb(150, 100, 0) } else { Color::Yellow } }
-    fn error() -> Color { if IS_LIGHT_THEME.load(Ordering::Relaxed) { Color::Rgb(139, 0, 0) } else { Color::Red } }
-    fn accent() -> Color { if IS_LIGHT_THEME.load(Ordering::Relaxed) { Color::Magenta } else { Color::Magenta } }
-    fn text() -> Color { if IS_LIGHT_THEME.load(Ordering::Relaxed) { Color::Black } else { Color::White } }
-    fn text_dim() -> Color { if IS_LIGHT_THEME.load(Ordering::Relaxed) { Color::DarkGray } else { Color::Gray } }
-    fn border() -> Color { if IS_LIGHT_THEME.load(Ordering::Relaxed) { Color::Gray } else { Color::DarkGray } }
-    fn highlight() -> Color { if IS_LIGHT_THEME.load(Ordering::Relaxed) { Color::Rgb(200, 220, 255) } else { Color::LightCyan } }
+    fn primary() -> Color {
+        if IS_LIGHT_THEME.load(Ordering::Relaxed) {
+            Color::Blue
+        } else {
+            Color::Cyan
+        }
+    }
+    fn secondary() -> Color {
+        if IS_LIGHT_THEME.load(Ordering::Relaxed) {
+            Color::Rgb(0, 0, 139)
+        } else {
+            Color::Blue
+        }
+    }
+    fn success() -> Color {
+        if IS_LIGHT_THEME.load(Ordering::Relaxed) {
+            Color::Rgb(0, 100, 0)
+        } else {
+            Color::Green
+        }
+    }
+    fn warning() -> Color {
+        if IS_LIGHT_THEME.load(Ordering::Relaxed) {
+            Color::Rgb(150, 100, 0)
+        } else {
+            Color::Yellow
+        }
+    }
+    fn error() -> Color {
+        if IS_LIGHT_THEME.load(Ordering::Relaxed) {
+            Color::Rgb(139, 0, 0)
+        } else {
+            Color::Red
+        }
+    }
+    fn accent() -> Color {
+        if IS_LIGHT_THEME.load(Ordering::Relaxed) {
+            Color::Magenta
+        } else {
+            Color::Magenta
+        }
+    }
+    fn text() -> Color {
+        if IS_LIGHT_THEME.load(Ordering::Relaxed) {
+            Color::Black
+        } else {
+            Color::White
+        }
+    }
+    fn text_dim() -> Color {
+        if IS_LIGHT_THEME.load(Ordering::Relaxed) {
+            Color::DarkGray
+        } else {
+            Color::Gray
+        }
+    }
+    fn border() -> Color {
+        if IS_LIGHT_THEME.load(Ordering::Relaxed) {
+            Color::Gray
+        } else {
+            Color::DarkGray
+        }
+    }
+    fn highlight() -> Color {
+        if IS_LIGHT_THEME.load(Ordering::Relaxed) {
+            Color::Rgb(200, 220, 255)
+        } else {
+            Color::LightCyan
+        }
+    }
 }
 
 // ============================================================================
@@ -239,9 +302,16 @@ enum FaucetStatus {
     /// No active request.
     Idle,
     /// PoW being solved and drip request in-flight.
-    Working { started_at: Instant, message: String },
+    Working {
+        started_at: Instant,
+        message: String,
+    },
     /// Drip completed; show success for a few seconds.
-    Success { tx_hash: String, amount: String, at: Instant },
+    Success {
+        tx_hash: String,
+        amount: String,
+        at: Instant,
+    },
     /// Drip failed.
     Failed { error: String, at: Instant },
 }
@@ -386,11 +456,16 @@ enum DataUpdate {
     /// SSE stream (re-)connected successfully.
     NodeConnected,
     /// SSE stream dropped; UI should show disconnect banner.
-    NodeDisconnected { retry_in_secs: u64 },
+    NodeDisconnected {
+        retry_in_secs: u64,
+    },
     /// Live PBFT round snapshot.
     Consensus(ConsensusState),
     /// Faucet health/reserve snapshot.
-    FaucetHealth { healthy: bool, token_reserve: Option<String> },
+    FaucetHealth {
+        healthy: bool,
+        token_reserve: Option<String>,
+    },
     /// Faucet network info (chain id, RPC URL, etc.).
     FaucetNetwork(crate::faucet_client::NetworkInfo),
     /// Faucet balance lookup result for the current input address.
@@ -486,7 +561,10 @@ impl App {
         if self.stats.total_stake > 0 || self.validators.is_empty() {
             self.stats.total_stake
         } else {
-            self.validators.iter().map(|validator| validator.stake).sum()
+            self.validators
+                .iter()
+                .map(|validator| validator.stake)
+                .sum()
         }
     }
 
@@ -814,38 +892,39 @@ async fn fetch_pending_packages(
         Some(format!("{}/v1/packages?limit=50", api_base)),
         ApiRouteScope::Public,
     )
-    .await {
-            if let Some(arr) = json["packages"].as_array() {
-                for v in arr {
-                    let canonical = v["canonical"].as_str().unwrap_or_default();
-                    if canonical.is_empty() {
-                        continue;
-                    }
-                    // canonical is e.g. "npm/express@4.18.0"
-                    let parts: Vec<&str> = canonical.splitn(2, '/').collect();
-                    let ecosystem = parts.first().copied().unwrap_or("?").to_string();
-                    let name_ver = parts.get(1).copied().unwrap_or(canonical);
-                    let (pkg_name, version) = if let Some(pos) = name_ver.rfind('@') {
-                        (&name_ver[..pos], &name_ver[pos + 1..])
-                    } else {
-                        (name_ver, "?")
-                    };
-                    packages.push(PackageInfo {
-                        name: pkg_name.to_string(),
-                        ecosystem,
-                        version: version.to_string(),
-                        status: v["status"].as_str().unwrap_or("verified").to_string(),
-                        publisher: v["publisher_pubkey"]
-                            .as_str()
-                            .unwrap_or("")
-                            .chars()
-                            .take(16)
-                            .collect(),
-                        verified_at: v["verified_at"].as_str().map(|s| s.to_string()),
-                        content_hash: v["content_hash"].as_str().unwrap_or("").to_string(),
-                    });
+    .await
+    {
+        if let Some(arr) = json["packages"].as_array() {
+            for v in arr {
+                let canonical = v["canonical"].as_str().unwrap_or_default();
+                if canonical.is_empty() {
+                    continue;
                 }
+                // canonical is e.g. "npm/express@4.18.0"
+                let parts: Vec<&str> = canonical.splitn(2, '/').collect();
+                let ecosystem = parts.first().copied().unwrap_or("?").to_string();
+                let name_ver = parts.get(1).copied().unwrap_or(canonical);
+                let (pkg_name, version) = if let Some(pos) = name_ver.rfind('@') {
+                    (&name_ver[..pos], &name_ver[pos + 1..])
+                } else {
+                    (name_ver, "?")
+                };
+                packages.push(PackageInfo {
+                    name: pkg_name.to_string(),
+                    ecosystem,
+                    version: version.to_string(),
+                    status: v["status"].as_str().unwrap_or("verified").to_string(),
+                    publisher: v["publisher_pubkey"]
+                        .as_str()
+                        .unwrap_or("")
+                        .chars()
+                        .take(16)
+                        .collect(),
+                    verified_at: v["verified_at"].as_str().map(|s| s.to_string()),
+                    content_hash: v["content_hash"].as_str().unwrap_or("").to_string(),
+                });
             }
+        }
     }
 
     // 2. Pending pool — bare canonical ID strings not yet in the chain store.
@@ -855,38 +934,40 @@ async fn fetch_pending_packages(
         Some(format!("{}/v1/pending", api_base)),
         ApiRouteScope::Operator,
     )
-    .await {
-            if let Some(arr) = json["packages"].as_array() {
-                for v in arr {
-                    let canonical = v.as_str().unwrap_or_default().to_string();
-                    if canonical.is_empty() {
-                        continue;
-                    }
-                    // Skip if already present from the verified list.
-                    if packages.iter().any(|p| {
-                        format!("{}/{}@{}", p.ecosystem, p.name, p.version) == canonical
-                    }) {
-                        continue;
-                    }
-                    let parts: Vec<&str> = canonical.splitn(2, '/').collect();
-                    let ecosystem = parts.first().copied().unwrap_or("?").to_string();
-                    let name_ver = parts.get(1).copied().unwrap_or(&canonical);
-                    let (pkg_name, version) = if let Some(pos) = name_ver.rfind('@') {
-                        (&name_ver[..pos], &name_ver[pos + 1..])
-                    } else {
-                        (name_ver, "?")
-                    };
-                    packages.push(PackageInfo {
-                        name: pkg_name.to_string(),
-                        ecosystem,
-                        version: version.to_string(),
-                        status: "pending".to_string(),
-                        publisher: String::new(),
-                        verified_at: None,
-                        content_hash: String::new(),
-                    });
+    .await
+    {
+        if let Some(arr) = json["packages"].as_array() {
+            for v in arr {
+                let canonical = v.as_str().unwrap_or_default().to_string();
+                if canonical.is_empty() {
+                    continue;
                 }
+                // Skip if already present from the verified list.
+                if packages
+                    .iter()
+                    .any(|p| format!("{}/{}@{}", p.ecosystem, p.name, p.version) == canonical)
+                {
+                    continue;
+                }
+                let parts: Vec<&str> = canonical.splitn(2, '/').collect();
+                let ecosystem = parts.first().copied().unwrap_or("?").to_string();
+                let name_ver = parts.get(1).copied().unwrap_or(&canonical);
+                let (pkg_name, version) = if let Some(pos) = name_ver.rfind('@') {
+                    (&name_ver[..pos], &name_ver[pos + 1..])
+                } else {
+                    (name_ver, "?")
+                };
+                packages.push(PackageInfo {
+                    name: pkg_name.to_string(),
+                    ecosystem,
+                    version: version.to_string(),
+                    status: "pending".to_string(),
+                    publisher: String::new(),
+                    verified_at: None,
+                    content_hash: String::new(),
+                });
             }
+        }
     }
 
     Ok(packages)
@@ -896,10 +977,7 @@ async fn fetch_pending_packages(
 ///
 /// Calls `/v1/pending` which returns `{count, packages: ["npm/foo@1.0", …]}`.
 /// Each canonical string is parsed into a `MempoolTx` for display.
-async fn fetch_mempool(
-    client: &reqwest::Client,
-    api_base: &str,
-) -> Result<Vec<MempoolTx>> {
+async fn fetch_mempool(client: &reqwest::Client, api_base: &str) -> Result<Vec<MempoolTx>> {
     let json = get_json_with_fallback(
         client,
         format!("{}/v1/operator/pending", api_base),
@@ -948,10 +1026,7 @@ async fn fetch_runtime_config(client: &reqwest::Client, api_base: &str) -> Resul
     })
 }
 
-async fn fetch_consensus_state(
-    client: &reqwest::Client,
-    api_base: &str,
-) -> Result<ConsensusState> {
+async fn fetch_consensus_state(client: &reqwest::Client, api_base: &str) -> Result<ConsensusState> {
     // Try the dedicated endpoint first.
     if let Ok(json) = get_json_with_fallback(
         client,
@@ -959,27 +1034,25 @@ async fn fetch_consensus_state(
         Some(format!("{}/v1/consensus/state", api_base)),
         ApiRouteScope::Validator,
     )
-    .await {
-                let total = json["total_validators"].as_u64().unwrap_or(0) as usize;
-                return Ok(ConsensusState {
-                    round: json["round"].as_u64().unwrap_or(0),
-                    phase: json["phase"]
-                        .as_str()
-                        .unwrap_or("UNKNOWN")
-                        .to_uppercase(),
-                    proposer: json["proposer"]
-                        .as_str()
-                        .unwrap_or("unknown")
-                        .chars()
-                        .take(16)
-                        .collect::<String>()
-                        + "…",
-                    prepare_votes: json["prepare_votes"].as_u64().unwrap_or(0) as usize,
-                    commit_votes: json["commit_votes"].as_u64().unwrap_or(0) as usize,
-                    quorum: total * 2 / 3 + 1,
-                    total_validators: total,
-                    fetched_at: Instant::now(),
-                });
+    .await
+    {
+        let total = json["total_validators"].as_u64().unwrap_or(0) as usize;
+        return Ok(ConsensusState {
+            round: json["round"].as_u64().unwrap_or(0),
+            phase: json["phase"].as_str().unwrap_or("UNKNOWN").to_uppercase(),
+            proposer: json["proposer"]
+                .as_str()
+                .unwrap_or("unknown")
+                .chars()
+                .take(16)
+                .collect::<String>()
+                + "…",
+            prepare_votes: json["prepare_votes"].as_u64().unwrap_or(0) as usize,
+            commit_votes: json["commit_votes"].as_u64().unwrap_or(0) as usize,
+            quorum: total * 2 / 3 + 1,
+            total_validators: total,
+            fetched_at: Instant::now(),
+        });
     }
 
     // Fallback: derive from stats endpoint.
@@ -1022,7 +1095,8 @@ async fn sse_event_listener(
             Some(format!("{}/v1/events", api_base)),
             ApiRouteScope::Public,
         )
-        .await {
+        .await
+        {
             Ok(r) => r,
             Err(_) => {
                 // Connection refused / DNS failure — node is unreachable.
@@ -1139,16 +1213,24 @@ fn apply_data_update(app: &mut App, update: DataUpdate) {
         DataUpdate::Consensus(state) => {
             app.consensus_state = Some(state);
         }
-        DataUpdate::FaucetHealth { healthy, token_reserve } => {
+        DataUpdate::FaucetHealth {
+            healthy,
+            token_reserve,
+        } => {
             app.faucet.health = if healthy { "online" } else { "offline" }.into();
             app.faucet.faucet_token_reserve = token_reserve;
         }
         DataUpdate::FaucetNetwork(info) => {
             app.faucet.network = Some(info);
         }
-        DataUpdate::FaucetBalance { token, native, token_fmt, native_fmt } => {
-            let had_data = token.is_some() || native.is_some()
-                || token_fmt.is_some() || native_fmt.is_some();
+        DataUpdate::FaucetBalance {
+            token,
+            native,
+            token_fmt,
+            native_fmt,
+        } => {
+            let had_data =
+                token.is_some() || native.is_some() || token_fmt.is_some() || native_fmt.is_some();
             app.faucet.last_balance = token.clone();
             app.faucet.last_native_balance = native.clone();
             app.faucet.last_balance_fmt = token_fmt.clone();
@@ -1181,12 +1263,18 @@ fn apply_data_update(app: &mut App, update: DataUpdate) {
             }
         }
         DataUpdate::FaucetError(error) => {
-            app.faucet.status = FaucetStatus::Failed { error, at: Instant::now() };
+            app.faucet.status = FaucetStatus::Failed {
+                error,
+                at: Instant::now(),
+            };
         }
         DataUpdate::FaucetDripProgress(msg) => {
             if matches!(app.faucet.status, FaucetStatus::Working { .. }) {
                 if let FaucetStatus::Working { started_at, .. } = app.faucet.status {
-                    app.faucet.status = FaucetStatus::Working { started_at, message: msg };
+                    app.faucet.status = FaucetStatus::Working {
+                        started_at,
+                        message: msg,
+                    };
                 }
             } else {
                 app.faucet.status = FaucetStatus::Working {
@@ -1204,7 +1292,10 @@ fn apply_data_update(app: &mut App, update: DataUpdate) {
                 };
             }
             Err(error) => {
-                app.faucet.status = FaucetStatus::Failed { error, at: Instant::now() };
+                app.faucet.status = FaucetStatus::Failed {
+                    error,
+                    at: Instant::now(),
+                };
             }
         },
         DataUpdate::RuntimeIdentity(identity) => {
@@ -1451,7 +1542,8 @@ fn handle_mouse(app: &mut App, mouse: crossterm::event::MouseEvent) {
     match mouse.kind {
         MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
             let row = mouse.row;
-            if row == 2 || row == 3 || row == 4 { // Approximate header area
+            if row == 2 || row == 3 || row == 4 {
+                // Approximate header area
                 match mouse.column {
                     0..=12 => app.current_view = View::Overview,
                     13..=23 => app.current_view = View::Blocks,
@@ -1463,7 +1555,10 @@ fn handle_mouse(app: &mut App, mouse: crossterm::event::MouseEvent) {
                     87..=99 => app.current_view = View::Operator,
                     100..=113 => app.current_view = View::Consensus,
                     114..=124 => app.current_view = View::Faucet,
-                    125..=136 => { app.current_view = View::Overview; app.is_searching = true; },
+                    125..=136 => {
+                        app.current_view = View::Overview;
+                        app.is_searching = true;
+                    }
                     137..=145 => app.current_view = View::Bridge,
                     146..=160 => app.current_view = View::Metrics,
                     _ => {}
@@ -1496,7 +1591,7 @@ fn handle_mouse(app: &mut App, mouse: crossterm::event::MouseEvent) {
                     _ => {}
                 }
             }
-        },
+        }
         MouseEventKind::ScrollDown => match app.current_view {
             View::Blocks | View::Overview => {
                 if app.selected_block < app.blocks.len().saturating_sub(1) {
@@ -1584,46 +1679,63 @@ fn draw_consensus(f: &mut Frame, app: &App, area: Rect) {
             // Phase colour
             let phase_color = match cs.phase.as_str() {
                 "PRE-PREPARE" => Color::Cyan,
-                "PREPARE"     => Color::Yellow,
-                "COMMIT"      => Color::Green,
-                "FINALIZED"   => Color::LightGreen,
-                _             => Color::Gray,
+                "PREPARE" => Color::Yellow,
+                "COMMIT" => Color::Green,
+                "FINALIZED" => Color::LightGreen,
+                _ => Color::Gray,
             };
 
             // Quorum gauge for PREPARE votes
             let prepare_pct = if cs.quorum > 0 {
                 (cs.prepare_votes as f64 / cs.quorum as f64 * 100.0).min(100.0) as u16
-            } else { 0 };
+            } else {
+                0
+            };
             let commit_pct = if cs.quorum > 0 {
                 (cs.commit_votes as f64 / cs.quorum as f64 * 100.0).min(100.0) as u16
-            } else { 0 };
+            } else {
+                0
+            };
 
             let age_secs = cs.fetched_at.elapsed().as_secs();
 
             // Pre-compute display strings so we don't reference temporaries.
-            let round_str    = format!("#{}", cs.round);
-            let val_str      = format!("{}", cs.total_validators);
-            let quorum_str   = format!("{}", cs.quorum);
-            let prepare_str  = format!("{}/{} ({}%)", cs.prepare_votes, cs.quorum, prepare_pct);
-            let commit_str   = format!("{}/{} ({}%)", cs.commit_votes, cs.quorum, commit_pct);
-            let age_str      = format!("{}s ago", age_secs);
+            let round_str = format!("#{}", cs.round);
+            let val_str = format!("{}", cs.total_validators);
+            let quorum_str = format!("{}", cs.quorum);
+            let prepare_str = format!("{}/{} ({}%)", cs.prepare_votes, cs.quorum, prepare_pct);
+            let commit_str = format!("{}/{} ({}%)", cs.commit_votes, cs.quorum, commit_pct);
+            let age_str = format!("{}s ago", age_secs);
 
             let rows = vec![
-                Row::new(vec!["Round",         round_str.as_str()])
+                Row::new(vec!["Round", round_str.as_str()])
                     .style(Style::default().fg(Theme::text())),
-                Row::new(vec!["Phase",          cs.phase.as_str()])
-                    .style(Style::default().fg(phase_color).add_modifier(Modifier::BOLD)),
-                Row::new(vec!["Proposer",       cs.proposer.as_str()])
+                Row::new(vec!["Phase", cs.phase.as_str()]).style(
+                    Style::default()
+                        .fg(phase_color)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Row::new(vec!["Proposer", cs.proposer.as_str()])
                     .style(Style::default().fg(Theme::accent())),
-                Row::new(vec!["Validators",     val_str.as_str()])
+                Row::new(vec!["Validators", val_str.as_str()])
                     .style(Style::default().fg(Theme::text())),
-                Row::new(vec!["Quorum (2f+1)",  quorum_str.as_str()])
+                Row::new(vec!["Quorum (2f+1)", quorum_str.as_str()])
                     .style(Style::default().fg(Theme::text())),
-                Row::new(vec!["PREPARE votes",  prepare_str.as_str()])
-                    .style(Style::default().fg(if prepare_pct >= 100 { Color::Green } else { Color::Yellow })),
-                Row::new(vec!["COMMIT votes",   commit_str.as_str()])
-                    .style(Style::default().fg(if commit_pct >= 100 { Color::Green } else { Color::Yellow })),
-                Row::new(vec!["Snapshot age",   age_str.as_str()])
+                Row::new(vec!["PREPARE votes", prepare_str.as_str()]).style(Style::default().fg(
+                    if prepare_pct >= 100 {
+                        Color::Green
+                    } else {
+                        Color::Yellow
+                    },
+                )),
+                Row::new(vec!["COMMIT votes", commit_str.as_str()]).style(Style::default().fg(
+                    if commit_pct >= 100 {
+                        Color::Green
+                    } else {
+                        Color::Yellow
+                    },
+                )),
+                Row::new(vec!["Snapshot age", age_str.as_str()])
                     .style(Style::default().fg(Theme::text_dim())),
             ];
 
@@ -1643,21 +1755,32 @@ fn draw_consensus(f: &mut Frame, app: &App, area: Rect) {
             )
             .block(Block::default().borders(Borders::NONE))
             .header(
-                Row::new(vec!["Field", "Value"])
-                    .style(Style::default().fg(Theme::text_dim()).add_modifier(Modifier::BOLD)),
+                Row::new(vec!["Field", "Value"]).style(
+                    Style::default()
+                        .fg(Theme::text_dim())
+                        .add_modifier(Modifier::BOLD),
+                ),
             );
             f.render_widget(table, chunks[0]);
 
             // PREPARE progress bar
             let prepare_gauge = Gauge::default()
-                .block(Block::default().title(" PREPARE votes ").borders(Borders::ALL))
+                .block(
+                    Block::default()
+                        .title(" PREPARE votes ")
+                        .borders(Borders::ALL),
+                )
                 .gauge_style(Style::default().fg(Color::Yellow))
                 .percent(prepare_pct);
             f.render_widget(prepare_gauge, chunks[1]);
 
             // COMMIT progress bar
             let commit_gauge = Gauge::default()
-                .block(Block::default().title(" COMMIT votes ").borders(Borders::ALL))
+                .block(
+                    Block::default()
+                        .title(" COMMIT votes ")
+                        .borders(Borders::ALL),
+                )
                 .gauge_style(Style::default().fg(Color::Green))
                 .percent(commit_pct);
             f.render_widget(commit_gauge, chunks[2]);
@@ -1670,7 +1793,12 @@ fn draw_disconnect_banner(f: &mut Frame, app: &App) {
     // Center a 3-row × 50-col banner at the top of the screen.
     let width: u16 = 54.min(area.width);
     let x = area.x + area.width.saturating_sub(width) / 2;
-    let banner_area = Rect { x, y: area.y, width, height: 3 };
+    let banner_area = Rect {
+        x,
+        y: area.y,
+        width,
+        height: 3,
+    };
 
     let msg = if app.reconnect_in > 0 {
         format!(
@@ -2317,7 +2445,8 @@ fn draw_validators_preview(f: &mut Frame, app: &App, area: Rect) {
         ],
     )
     .header(
-        Row::new(vec!["Validator", "Stake(k)", "Rep"]).style(Style::default().fg(Theme::text_dim())),
+        Row::new(vec!["Validator", "Stake(k)", "Rep"])
+            .style(Style::default().fg(Theme::text_dim())),
     )
     .block(
         Block::default()
@@ -2469,14 +2598,16 @@ fn render_reputation_bar(reputation: u8) -> String {
 
 fn draw_packages(f: &mut Frame, app: &App, area: Rect) {
     if app.packages.is_empty() {
-        let text = Paragraph::new("No packages found. Packages will appear here when published to the registry.")
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(format!(" PACKAGES ({} on-chain) ", app.stats.package_count))
-                    .border_style(Style::default().fg(Theme::primary())),
-            )
-            .style(Style::default().fg(Theme::text_dim()));
+        let text = Paragraph::new(
+            "No packages found. Packages will appear here when published to the registry.",
+        )
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(format!(" PACKAGES ({} on-chain) ", app.stats.package_count))
+                .border_style(Style::default().fg(Theme::primary())),
+        )
+        .style(Style::default().fg(Theme::text_dim()));
         f.render_widget(text, area);
         return;
     }
@@ -2556,7 +2687,12 @@ fn draw_packages(f: &mut Frame, app: &App, area: Rect) {
             let text = vec![
                 Line::from(vec![
                     Span::styled("Name:       ", Style::default().fg(Theme::text_dim())),
-                    Span::styled(&pkg.name, Style::default().fg(Theme::primary()).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        &pkg.name,
+                        Style::default()
+                            .fg(Theme::primary())
+                            .add_modifier(Modifier::BOLD),
+                    ),
                 ]),
                 Line::from(vec![
                     Span::styled("Version:    ", Style::default().fg(Theme::text_dim())),
@@ -2568,11 +2704,14 @@ fn draw_packages(f: &mut Frame, app: &App, area: Rect) {
                 ]),
                 Line::from(vec![
                     Span::styled("Status:     ", Style::default().fg(Theme::text_dim())),
-                    Span::styled(&pkg.status, Style::default().fg(match pkg.status.as_str() {
-                        "verified" => Theme::success(),
-                        "pending" => Theme::warning(),
-                        _ => Theme::error(),
-                    })),
+                    Span::styled(
+                        &pkg.status,
+                        Style::default().fg(match pkg.status.as_str() {
+                            "verified" => Theme::success(),
+                            "pending" => Theme::warning(),
+                            _ => Theme::error(),
+                        }),
+                    ),
                 ]),
                 Line::from(vec![
                     Span::styled("Publisher:  ", Style::default().fg(Theme::text_dim())),
@@ -2629,7 +2768,12 @@ fn draw_package_detail(f: &mut Frame, app: &App, area: Rect) {
         Line::from(""),
         Line::from(vec![
             Span::styled("Name:         ", Style::default().fg(Theme::text_dim())),
-            Span::styled(&pkg.name, Style::default().fg(Theme::text()).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                &pkg.name,
+                Style::default()
+                    .fg(Theme::text())
+                    .add_modifier(Modifier::BOLD),
+            ),
         ]),
         Line::from(vec![
             Span::styled("Version:      ", Style::default().fg(Theme::text_dim())),
@@ -2641,11 +2785,14 @@ fn draw_package_detail(f: &mut Frame, app: &App, area: Rect) {
         ]),
         Line::from(vec![
             Span::styled("Status:       ", Style::default().fg(Theme::text_dim())),
-            Span::styled(&pkg.status, Style::default().fg(match pkg.status.as_str() {
-                "verified" => Theme::success(),
-                "pending" => Theme::warning(),
-                _ => Theme::error(),
-            })),
+            Span::styled(
+                &pkg.status,
+                Style::default().fg(match pkg.status.as_str() {
+                    "verified" => Theme::success(),
+                    "pending" => Theme::warning(),
+                    _ => Theme::error(),
+                }),
+            ),
         ]),
         Line::from(vec![
             Span::styled("Publisher:    ", Style::default().fg(Theme::text_dim())),
@@ -2768,9 +2915,13 @@ fn draw_mempool(f: &mut Frame, app: &App, area: Rect) {
     }
 
     // Table of mempool entries
-    let header_cells = ["#", "Canonical ID", "Type", "Age"]
-        .iter()
-        .map(|h| Cell::from(*h).style(Style::default().fg(Theme::primary()).add_modifier(Modifier::BOLD)));
+    let header_cells = ["#", "Canonical ID", "Type", "Age"].iter().map(|h| {
+        Cell::from(*h).style(
+            Style::default()
+                .fg(Theme::primary())
+                .add_modifier(Modifier::BOLD),
+        )
+    });
     let table_header = Row::new(header_cells).height(1);
 
     let rows: Vec<Row> = app
@@ -2894,11 +3045,19 @@ fn draw_operator(f: &mut Frame, app: &App, area: Rect) {
 
     let summary = Paragraph::new(vec![
         Line::from(format!("Mode: validator console")),
-        Line::from(format!("Validators online: {}/{}", active_validators, app.validators.len())),
+        Line::from(format!(
+            "Validators online: {}/{}",
+            active_validators,
+            app.validators.len()
+        )),
         Line::from(format!("Connected peers: {}", app.peer_ids.len())),
         Line::from(format!("Bridge status: {}", app.stats.bridge_status)),
     ])
-    .block(Block::default().borders(Borders::ALL).title(" Operator Summary "))
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Operator Summary "),
+    )
     .style(Style::default().fg(Theme::text()))
     .wrap(Wrap { trim: true });
     f.render_widget(summary, chunks[0]);
@@ -2908,33 +3067,55 @@ fn draw_operator(f: &mut Frame, app: &App, area: Rect) {
     if let Some(id) = &app.runtime_identity {
         identity_lines.push(Line::from(vec![
             Span::styled("Node ID:   ", Style::default().fg(Theme::text_dim())),
-            Span::styled(&id.node_id, Style::default().fg(Theme::primary()).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                &id.node_id,
+                Style::default()
+                    .fg(Theme::primary())
+                    .add_modifier(Modifier::BOLD),
+            ),
         ]));
         identity_lines.push(Line::from(vec![
             Span::styled("Ed25519:   ", Style::default().fg(Theme::text_dim())),
-            Span::styled(id.validator_pubkey.as_deref().unwrap_or("not configured"), Style::default().fg(Theme::accent())),
+            Span::styled(
+                id.validator_pubkey.as_deref().unwrap_or("not configured"),
+                Style::default().fg(Theme::accent()),
+            ),
         ]));
         identity_lines.push(Line::from(vec![
             Span::styled("Action:    ", Style::default().fg(Theme::text_dim())),
             Span::raw("Copy these values to the Web Explorer to register your identity."),
         ]));
     } else {
-        identity_lines.push(Line::from(Span::styled("Fetching local node identity...", Style::default().fg(Theme::text_dim()))));
+        identity_lines.push(Line::from(Span::styled(
+            "Fetching local node identity...",
+            Style::default().fg(Theme::text_dim()),
+        )));
     }
 
     let identity = Paragraph::new(identity_lines)
-        .block(Block::default().borders(Borders::ALL).title(" Detected Validator Identity ").border_style(Style::default().fg(Theme::primary())))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Detected Validator Identity ")
+                .border_style(Style::default().fg(Theme::primary())),
+        )
         .style(Style::default().fg(Theme::text()));
     f.render_widget(identity, chunks[1]);
 
     let commands = Paragraph::new(vec![
         Line::from("Browser explorer:  http://localhost:3007"),
         Line::from("Node health:        creg testnet status --node-url http://localhost:8080"),
-        Line::from("Register ID:        creg testnet register-validator --node-id <id> --pubkey <key>"),
+        Line::from(
+            "Register ID:        creg testnet register-validator --node-id <id> --pubkey <key>",
+        ),
         Line::from("Stake validator:    creg testnet stake-validator --key 0x<private-key> 100"),
         Line::from("Stake publisher:    creg testnet stake-publisher --key 0x<private-key> 100"),
     ])
-    .block(Block::default().borders(Borders::ALL).title(" Operator Commands "))
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Operator Commands "),
+    )
     .style(Style::default().fg(Theme::text()))
     .wrap(Wrap { trim: true });
     f.render_widget(commands, chunks[2]);
@@ -2943,7 +3124,11 @@ fn draw_operator(f: &mut Frame, app: &App, area: Rect) {
         Line::from("This console is the operator surface for validator monitoring."),
         Line::from("Use it to inspect blocks, validator health, packages, peers, and live events."),
     ])
-    .block(Block::default().borders(Borders::ALL).title(" Operator Workflow "))
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Operator Workflow "),
+    )
     .style(Style::default().fg(Theme::text()))
     .wrap(Wrap { trim: true });
     f.render_widget(workflow, chunks[3]);
@@ -3088,11 +3273,9 @@ async fn fetch_faucet_health(
         return Some((false, None));
     }
     let json: Value = res.json().await.ok()?;
-    let healthy = json["status"].as_str() == Some("healthy")
-        && json["faucet"].as_str() == Some("online");
-    let reserve = json["faucet_balance"]
-        .as_str()
-        .map(|s| s.to_string());
+    let healthy =
+        json["status"].as_str() == Some("healthy") && json["faucet"].as_str() == Some("online");
+    let reserve = json["faucet_balance"].as_str().map(|s| s.to_string());
     Some((healthy, reserve))
 }
 
@@ -3205,9 +3388,12 @@ fn draw_faucet(f: &mut Frame, app: &App, area: Rect) {
 
     // Title
     let title = Paragraph::new(Line::from(vec![
-        Span::styled("⛲ Testnet Faucet", Style::default()
-            .fg(Theme::accent())
-            .add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "⛲ Testnet Faucet",
+            Style::default()
+                .fg(Theme::accent())
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw("   "),
         Span::styled(
             format!("[{}]", app.faucet.health),
@@ -3230,7 +3416,10 @@ fn draw_faucet(f: &mut Frame, app: &App, area: Rect) {
     let mut net_lines: Vec<Line> = Vec::new();
     net_lines.push(Line::from(vec![
         Span::styled("Endpoint:  ", Style::default().fg(Theme::text_dim())),
-        Span::styled(app.faucet.base.clone(), Style::default().fg(Theme::highlight())),
+        Span::styled(
+            app.faucet.base.clone(),
+            Style::default().fg(Theme::highlight()),
+        ),
     ]));
     if let Some(net) = &app.faucet.network {
         net_lines.push(Line::from(vec![
@@ -3248,10 +3437,7 @@ fn draw_faucet(f: &mut Frame, app: &App, area: Rect) {
     if let Some(reserve) = &app.faucet.faucet_token_reserve {
         net_lines.push(Line::from(vec![
             Span::styled("Reserve:   ", Style::default().fg(Theme::text_dim())),
-            Span::styled(
-                format_wei(reserve),
-                Style::default().fg(Theme::primary()),
-            ),
+            Span::styled(format_wei(reserve), Style::default().fg(Theme::primary())),
             Span::styled(" tCREG", Style::default().fg(Theme::text_dim())),
         ]));
     }
@@ -3265,7 +3451,9 @@ fn draw_faucet(f: &mut Frame, app: &App, area: Rect) {
 
     // Address input
     let input_style = if app.faucet.editing {
-        Style::default().fg(Theme::highlight()).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Theme::highlight())
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(Theme::text())
     };
@@ -3290,13 +3478,12 @@ fn draw_faucet(f: &mut Frame, app: &App, area: Rect) {
     } else {
         Theme::border()
     };
-    let input_widget = Paragraph::new(Line::from(Span::styled(display, input_style)))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(input_title)
-                .border_style(Style::default().fg(input_border)),
-        );
+    let input_widget = Paragraph::new(Line::from(Span::styled(display, input_style))).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(input_title)
+            .border_style(Style::default().fg(input_border)),
+    );
     f.render_widget(input_widget, chunks[2]);
 
     // Balance. Prefer the faucet's pre-formatted decimal strings so the TUI
@@ -3346,11 +3533,22 @@ fn draw_faucet(f: &mut Frame, app: &App, area: Rect) {
             "Idle. Enter a recipient address and press [d] to drip.".to_string(),
             Theme::text_dim(),
         ),
-        FaucetStatus::Working { started_at, message } => (
-            format!("⏳ {} ({}s elapsed)", message, started_at.elapsed().as_secs()),
+        FaucetStatus::Working {
+            started_at,
+            message,
+        } => (
+            format!(
+                "⏳ {} ({}s elapsed)",
+                message,
+                started_at.elapsed().as_secs()
+            ),
             Theme::warning(),
         ),
-        FaucetStatus::Success { tx_hash, amount, at } => (
+        FaucetStatus::Success {
+            tx_hash,
+            amount,
+            at,
+        } => (
             format!(
                 "✓ Drip succeeded ({}s ago)\n  amount: {}\n  tx:     {}",
                 at.elapsed().as_secs(),
@@ -3407,7 +3605,10 @@ fn draw_bridge(f: &mut Frame, app: &App, area: Rect) {
     let text = vec![
         Line::from(format!("Bridge Status: {}", app.stats.bridge_status)),
         Line::from(format!("Latest L1 Block: {}", app.stats.l1_block)),
-        Line::from(format!("Anchor count in memory: {}", app.bridge_anchors.len())),
+        Line::from(format!(
+            "Anchor count in memory: {}",
+            app.bridge_anchors.len()
+        )),
     ];
     let paragraph = Paragraph::new(text)
         .block(block)
@@ -3420,13 +3621,18 @@ fn draw_metrics(f: &mut Frame, app: &App, area: Rect) {
         .borders(Borders::ALL)
         .title(" CHAIN METRICS ")
         .border_style(Style::default().fg(Theme::success()));
-        
+
     let text = vec![
-        Line::from(Span::styled("Live metrics tracking coming in Sprint 5", Style::default().fg(Theme::text_dim()))),
+        Line::from(Span::styled(
+            "Live metrics tracking coming in Sprint 5",
+            Style::default().fg(Theme::text_dim()),
+        )),
         Line::from(format!("TPS History length: {}", app.tps_history.len())),
-        Line::from(format!("Metric Accumulations: {}", app.metrics_history.len())),
+        Line::from(format!(
+            "Metric Accumulations: {}",
+            app.metrics_history.len()
+        )),
     ];
-    let paragraph = Paragraph::new(text)
-        .block(block);
+    let paragraph = Paragraph::new(text).block(block);
     f.render_widget(paragraph, area);
 }

@@ -26,7 +26,9 @@ const MAX_CACHE_SIZE: usize = 5000;
 /// the thundering-herd that occurs when the entire cache is cleared at once.
 static OSV_CACHE: std::sync::LazyLock<Mutex<lru::LruCache<String, OsvResult>>> =
     std::sync::LazyLock::new(|| {
-        Mutex::new(lru::LruCache::new(NonZeroUsize::new(MAX_CACHE_SIZE).unwrap()))
+        Mutex::new(lru::LruCache::new(
+            NonZeroUsize::new(MAX_CACHE_SIZE).unwrap(),
+        ))
     });
 
 /// Information about a package to query against OSV.
@@ -124,10 +126,7 @@ pub fn query(info: &PackageInfo) -> OsvResult {
         return OsvResult::unavailable();
     }
 
-    let cache_key = format!(
-        "{}:{}@{}",
-        info.ecosystem, info.name, info.version
-    );
+    let cache_key = format!("{}:{}@{}", info.ecosystem, info.name, info.version);
 
     // Cache lookup — `mut` required because LruCache::get updates LRU order.
     if let Ok(mut cache) = OSV_CACHE.lock() {
@@ -150,62 +149,58 @@ pub fn query(info: &PackageInfo) -> OsvResult {
         .timeout(OSV_TIMEOUT)
         .build()
     {
-        Ok(client) => {
-            match client.post(OSV_API_URL).json(&body).send() {
-                Ok(resp) => {
-                    if resp.status().is_success() {
-                        match resp.json::<OsvResponse>() {
-                            Ok(osv_resp) => {
-                                let vulns: Vec<OsvVulnerability> = osv_resp
-                                    .vulns
-                                    .into_iter()
-                                    .map(|v| {
-                                        let severity = v
-                                            .database_specific
-                                            .as_ref()
-                                            .and_then(|db| db.get("severity"))
-                                            .and_then(|s| s.as_str())
-                                            .map(String::from);
-                                        OsvVulnerability {
-                                            id: v.id,
-                                            summary: v
-                                                .summary
-                                                .unwrap_or_else(|| "No summary".into()),
-                                            severity,
-                                        }
-                                    })
-                                    .collect();
+        Ok(client) => match client.post(OSV_API_URL).json(&body).send() {
+            Ok(resp) => {
+                if resp.status().is_success() {
+                    match resp.json::<OsvResponse>() {
+                        Ok(osv_resp) => {
+                            let vulns: Vec<OsvVulnerability> = osv_resp
+                                .vulns
+                                .into_iter()
+                                .map(|v| {
+                                    let severity = v
+                                        .database_specific
+                                        .as_ref()
+                                        .and_then(|db| db.get("severity"))
+                                        .and_then(|s| s.as_str())
+                                        .map(String::from);
+                                    OsvVulnerability {
+                                        id: v.id,
+                                        summary: v.summary.unwrap_or_else(|| "No summary".into()),
+                                        severity,
+                                    }
+                                })
+                                .collect();
 
-                                debug!(
-                                    "OSV returned {} vulnerabilities for {}",
-                                    vulns.len(),
-                                    cache_key
-                                );
+                            debug!(
+                                "OSV returned {} vulnerabilities for {}",
+                                vulns.len(),
+                                cache_key
+                            );
 
-                                OsvResult {
-                                    queried: true,
-                                    vulnerabilities: vulns,
-                                }
-                            }
-                            Err(e) => {
-                                warn!("Failed to parse OSV response: {}", e);
-                                OsvResult::unavailable()
+                            OsvResult {
+                                queried: true,
+                                vulnerabilities: vulns,
                             }
                         }
-                    } else {
-                        debug!("OSV returned status {} for {}", resp.status(), cache_key);
-                        OsvResult {
-                            queried: true,
-                            vulnerabilities: Vec::new(),
+                        Err(e) => {
+                            warn!("Failed to parse OSV response: {}", e);
+                            OsvResult::unavailable()
                         }
                     }
-                }
-                Err(e) => {
-                    warn!("OSV query failed for {}: {}", cache_key, e);
-                    OsvResult::unavailable()
+                } else {
+                    debug!("OSV returned status {} for {}", resp.status(), cache_key);
+                    OsvResult {
+                        queried: true,
+                        vulnerabilities: Vec::new(),
+                    }
                 }
             }
-        }
+            Err(e) => {
+                warn!("OSV query failed for {}: {}", cache_key, e);
+                OsvResult::unavailable()
+            }
+        },
         Err(e) => {
             warn!("Failed to create HTTP client for OSV: {}", e);
             OsvResult::unavailable()
