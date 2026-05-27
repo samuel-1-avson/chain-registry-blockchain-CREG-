@@ -26,15 +26,12 @@
 //   • Pulls staking-event logs by polling `eth_getLogs` from a cursor.
 //   • Decodes each log into a `ValidatorSetDelta`.
 //   • Honours `finality_lag_blocks` (head − block_height ≥ lag before applying).
-//   • Persists the cursor in memory only (sled persistence is TODO; flagged in
-//     `cursor` doc-comment).
+//   • Persists worker cursor + observed set to `validator-set-sync.cursor.json`
+//     under `CREG_DATA_DIR` (atomic write on save).
 //
 // What this scaffold does NOT do (intentionally — follow-up):
-//   • Wire into main.rs. Behaviour is unchanged unless a caller explicitly
-//     spawns `SyncWorker::run_in_shadow_mode`.
-//   • Reorg unwinding (the Sepolia ≤6-block reorg case).
 //   • Multi-RPC quorum.
-//   • Sled-backed cursor persistence.
+//   • Full reorg rewind of observed_active (hash mismatch is detected; reset only).
 
 use alloy::{
     primitives::{Address, B256, U256},
@@ -318,8 +315,7 @@ pub enum SyncMode {
     ChainAuthoritative,
 }
 
-/// In-memory state the worker owns. Sled persistence is a follow-up — when
-/// added, the cursor and observed-set fields will be flushed on every apply.
+/// Worker state mirrored to `validator-set-sync.cursor.json` on each apply.
 #[derive(Default, serde::Serialize, serde::Deserialize)]
 pub struct WorkerState {
     /// Highest `(block_height, log_index)` we've consumed. None on first run.
@@ -954,7 +950,9 @@ async fn save_cursor(
     };
     let path = cursor_path(&data_dir);
     let json = serde_json::to_string_pretty(worker_state)?;
-    tokio::fs::write(&path, json).await?;
+    let tmp = path.with_extension("cursor.json.tmp");
+    tokio::fs::write(&tmp, &json).await?;
+    tokio::fs::rename(&tmp, &path).await?;
     Ok(())
 }
 

@@ -421,6 +421,17 @@ async fn main() -> Result<()> {
         }
     }
 
+    let production_security_errors = config.validate_production_security();
+    if !production_security_errors.is_empty() {
+        for err in &production_security_errors {
+            tracing::error!("  ✗ {}", err);
+        }
+        anyhow::bail!(
+            "Cannot start node: unsafe environment for production (CREG_TESTNET=false). \
+             Unset CREG_DEV_SANDBOX and CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM, or set CREG_TESTNET=true for local clusters."
+        );
+    }
+
     // Genesis-hash pin (legacy path). Always log the computed hash so operators can grab it
     // for their chain spec; if CREG_GENESIS_HASH is set, also enforce match.
     match config.validate_genesis_hash() {

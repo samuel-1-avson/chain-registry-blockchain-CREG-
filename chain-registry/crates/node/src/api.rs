@@ -1116,11 +1116,15 @@ async fn bridge_anchors(State(state): State<SharedState>) -> impl IntoResponse {
 // arrives (e.g. via a GovernanceProposal transaction variant), this handler
 // will scan the chain for proposal transactions.
 async fn governance_proposals(State(_state): State<SharedState>) -> impl IntoResponse {
-    Json(serde_json::json!({
-        "proposals": Vec::<serde_json::Value>::new(),
-        "total": 0,
-        "note": "On-chain governance is planned for a future release.",
-    }))
+    (
+        StatusCode::NOT_IMPLEMENTED,
+        Json(serde_json::json!({
+            "error": "governance_not_enabled",
+            "proposals": Vec::<serde_json::Value>::new(),
+            "total": 0,
+            "message": "On-chain governance is not enabled on this node. Set VITE_GOVERNANCE_ENABLED=true in the explorer when governance ships.",
+        })),
+    )
 }
 
 // GET /v1/metrics/history?range=1h
