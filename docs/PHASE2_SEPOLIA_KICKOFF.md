@@ -35,6 +35,14 @@ cd f:\project\chain-registry\chain-registry
 
 Checks: `curl http://localhost:8090/v1/health` and logs show `Spec signature verified`.
 
+**RPC for `validator_set_sync`:** use a provider that returns full `eth_getLogs` (Infura/Alchemy/QuickNode). Example:
+
+```powershell
+.\testnet\run-sepolia-reuse.ps1 -RpcUrl "https://sepolia.infura.io/v3/YOUR_KEY" -StartNode
+```
+
+Default script RPC is `https://1rpc.io/sepolia`. Wait until `/v1/health` shows `validator_set_sync.state` = `synced` (not `degraded`).
+
 ---
 
 ## Step 1 — Create deploy secrets file

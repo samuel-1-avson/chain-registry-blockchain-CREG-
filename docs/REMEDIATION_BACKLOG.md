@@ -18,6 +18,8 @@ Track security and remediation work from [SECURITY_AND_REMEDIATION_IMPLEMENTATIO
 | REM-103 | done | 2 | JSON cursor sidecar + idempotency/reorg tests; atomic save |
 | REM-210 | done | 2 | [TESTNET_SEPOLIA_RUNBOOK.md](./TESTNET_SEPOLIA_RUNBOOK.md) |
 | SEC-203 | done | 2 | `creg chain-spec validate` — genesis hash + optional `.sig` Ed25519 verify |
+| SEC-101 | done | 2 | Hot-key runbook rotation + `.env.example` placeholders |
+| SEC-101b | done | 2 | Startup WARN with fingerprint (bridge, faucet, relayer) when not testnet |
 | SEC-302 | pending | 3 | CrossChainRegistry |
 
 _Update status when PRs merge._

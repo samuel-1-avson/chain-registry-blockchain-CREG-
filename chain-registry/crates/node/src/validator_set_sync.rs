@@ -867,9 +867,16 @@ async fn fetch_deltas(
         .json()
         .await?;
 
+    if let Some(err) = resp.get("error") {
+        anyhow::bail!("eth_getLogs RPC error: {}", err);
+    }
     let logs = resp["result"]
         .as_array()
-        .ok_or_else(|| anyhow::anyhow!("eth_getLogs returned no result array"))?;
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "eth_getLogs returned no result array (use a full-archive Sepolia RPC; set CREG_ETH_RPC or -RpcUrl)"
+            )
+        })?;
 
     let mut deltas = Vec::new();
     for log in logs {

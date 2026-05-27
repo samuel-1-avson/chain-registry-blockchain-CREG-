@@ -10,7 +10,7 @@
 #   .\testnet\run-sepolia-reuse.ps1 -StartNode   # also boot creg-node (foreground)
 
 param(
-    [string]$RpcUrl = "https://ethereum-sepolia-rpc.publicnode.com",
+    [string]$RpcUrl = "https://1rpc.io/sepolia",
     [string]$SpecServerPort = "8888",
     [int]$ApiPort = 8090,
     [switch]$StartNode,

@@ -4,6 +4,7 @@
 pub mod block;
 pub mod chain_spec;
 pub mod error;
+pub mod hot_key;
 pub mod package;
 pub mod verdict;
 
@@ -15,6 +16,7 @@ pub mod proto {
 pub use block::*;
 pub use chain_spec::*;
 pub use error::*;
+pub use hot_key::*;
 pub use package::*;
 pub use verdict::*;
 
