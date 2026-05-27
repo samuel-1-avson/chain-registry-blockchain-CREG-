@@ -41,7 +41,7 @@ Checks: `curl http://localhost:8090/v1/health` and logs show `Spec signature ver
 .\testnet\run-sepolia-reuse.ps1 -RpcUrl "https://sepolia.infura.io/v3/YOUR_KEY" -StartNode
 ```
 
-Default script RPC is `https://1rpc.io/sepolia`. Wait until `/v1/health` shows `validator_set_sync.state` = `synced` (not `degraded`).
+Default script RPC is `https://ethereum-sepolia-rpc.publicnode.com`. The node chunks `eth_getLogs` (default 10 000 blocks per request; override with `CREG_ETH_LOG_CHUNK_BLOCKS`). Wait until `/v1/health` shows `validator_set_sync.state` = `synced` (not `degraded`). First catch-up from `epoch_block_height: 0` can take several minutes.
 
 ---
 
@@ -165,13 +165,23 @@ cargo run -p chain-registry-cli -- doctor --testnet
 
 ## Step 6 — Phase 2 exit proof (same week)
 
-| Check | Command / artifact |
-|-------|-------------------|
-| Runbook exercised | Second person repeats Steps 1–5 or documents deltas |
-| L1 contracts | Etherscan links for `staking`, `registry`, `zk_verifier` |
-| Spec signature | `verify_chain_spec` exit 0 |
-| Sync cursor restart | Stop node → restart → `validator_set_sync_state` still `synced`, no duplicate validators |
-| Observability | REM-211 after metrics endpoint is up |
+| Check | Command / artifact | Status |
+|-------|-------------------|--------|
+| Runbook exercised | Second person repeats Steps 1–5 or documents deltas | pending |
+| L1 contracts | Etherscan links for `staking`, `registry`, `zk_verifier` | pending links |
+| Spec signature | `creg chain-spec validate` exit 0 | ✓ (SEC-203) |
+| Sync `eth_getLogs` works on public Sepolia RPCs | Chunked (10k blocks) — `state: synced` after first walk | ✓ (REM-103b) |
+| Sync cursor restart | Stop node → restart → `validator_set_sync.state` returns to `synced` from saved cursor in seconds, no re-walk | ✓ — restart synced in ~10s, cursor pinned at `safe_block` |
+| Observability | REM-211 after metrics endpoint is up | pending |
+
+### 2026-05-27 proof artifacts (Option A reuse, publicnode RPC)
+
+```
+safe_block:    10,936,321
+first walk:    ~9 min (zero staking events on Sepolia → cursor advanced to safe_block)
+restart walk:  ~10 s (resumed from saved cursor 10,936,323 → 10,936,359)
+last_error:    null throughout
+```
 
 ---
 
