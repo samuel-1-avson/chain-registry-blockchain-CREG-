@@ -233,7 +233,7 @@ creg stake --amount 10000 --role validator --address 0xYourEthAddress
 | **Reputation.sol** | On-chain validator approval/rejection counters | **Active** |
 | **VRF.sol** | Verifiable random beacon adaptor | **Active** |
 | **CregToken.sol** | ERC20 + EIP-2612 permit for CREG | **Active** |
-| **ZKVerifier.sol** | Groth16 verifier wrapper (⚠ ISSUE-002) | **Active** |
+| **ZKVerifier.sol** | Groth16 verifier wrapper (ISSUE-002 fixed; see `contracts/test/ZKVerifier.t.sol`) | **Active** |
 | **Groth16Verifier.sol** | snarkJS-generated Groth16 verifier | **Active** |
 | **ZKSlashingVerifier.sol** | Double-signing evidence verifier | **Active** |
 | **SlashingEvidence.sol** | Permissionless slashing evidence submission | **Active** |

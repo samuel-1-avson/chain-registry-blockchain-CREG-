@@ -155,6 +155,15 @@ Point each validator/full node at Sepolia L1 and the signed spec.
 | `CREG_VALIDATOR_KEY` | Ed25519 hex (64 chars), from `creg keygen` |
 | `CREG_BRIDGE_KEY` | Separate secp256k1 key if bridge enabled |
 
+**Option A — reuse existing Sepolia deploy (no `forge` redeploy):**
+
+```powershell
+.\testnet\run-sepolia-reuse.ps1
+.\testnet\run-sepolia-reuse.ps1 -StartNode   # listens on :8090 by default
+```
+
+The script sets `CREG_SPEC_SIGNATURE_URL` so the node fetches the detached `.sig` from the local spec server without changing the signed spec JSON. Do not set `CREG_GENESIS_HASH` to `spec.genesis_hash` unless you have pinned the legacy network-identity hash from a running node log.
+
 **Quick local smoke against Sepolia spec (no Docker cluster):**
 
 ```powershell

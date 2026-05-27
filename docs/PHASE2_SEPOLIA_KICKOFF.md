@@ -17,6 +17,24 @@
 
 If unsure, treat as **fresh deploy** (cleanest for operators).
 
+### Option A — reuse (no redeploy)
+
+When `contracts/deployments/sepolia-latest.json` matches `chain-spec.sepolia.json` and bytecode is live on Sepolia:
+
+```powershell
+cd f:\project\chain-registry\chain-registry
+.\testnet\run-sepolia-reuse.ps1              # verify L1 + spec server :8888
+.\testnet\run-sepolia-reuse.ps1 -StartNode   # API on :8090 (avoids local Docker :8080)
+```
+
+| Env | Purpose |
+|-----|---------|
+| `CREG_CHAIN_SPEC_URL` | `http://localhost:8888/chain-spec.json` |
+| `CREG_SPEC_SIGNATURE_URL` | `http://localhost:8888/chain-spec.json.sig` (do **not** edit `detached_signature_url` in the JSON) |
+| `CREG_GENESIS_HASH` | **Leave unset** for reuse — spec `genesis_hash` ≠ legacy `compute_network_identity_hash()` from env |
+
+Checks: `curl http://localhost:8090/v1/health` and logs show `Spec signature verified`.
+
 ---
 
 ## Step 1 — Create deploy secrets file

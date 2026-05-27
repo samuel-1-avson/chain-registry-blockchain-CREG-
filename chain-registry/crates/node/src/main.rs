@@ -346,7 +346,9 @@ async fn main() -> Result<()> {
                 "CREG_SPEC_SIGNING_PUBKEY is not set — skipping spec signature verification (dev build)"
             );
         } else {
-            let sig = chain_spec_boot::fetch_spec_signature(&spec.signing.detached_signature_url)
+            let sig_url = std::env::var("CREG_SPEC_SIGNATURE_URL")
+                .unwrap_or_else(|_| spec.signing.detached_signature_url.clone());
+            let sig = chain_spec_boot::fetch_spec_signature(&sig_url)
                 .await
                 .map_err(|e| anyhow::anyhow!("Failed to fetch spec signature: {}", e))?;
             spec.verify_signature(&sig, pinned_pubkey)
