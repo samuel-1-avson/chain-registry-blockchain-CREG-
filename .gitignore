@@ -323,3 +323,4 @@ playground/
 !/docs/
 !/docs/**
 !/docs/**/*.md
+!chain-registry/migrations/README.md
