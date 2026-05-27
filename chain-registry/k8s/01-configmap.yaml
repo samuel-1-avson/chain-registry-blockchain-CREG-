@@ -20,10 +20,11 @@ data:
   CREG_PEERS: ""
   CREG_MAX_PEERS: "15"
   
-  # Validator Configuration
+  # Validator Configuration (testnet cluster — not production mainnet)
+  CREG_TESTNET: "true"
   CREG_IS_VALIDATOR: "true"
-  CREG_SINGLE_VALIDATOR_MODE: "true"
-  CREG_DEV_SANDBOX: "true"
+  CREG_DEV_SANDBOX: "false"
+  # Optional for single-replica dev: CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM=true
   CREG_BLOCK_INTERVAL: "5"
   
   # IPFS Configuration

@@ -397,6 +397,12 @@ async fn main() -> anyhow::Result<()> {
 
     let http_client = reqwest::Client::new();
     let config = RelayerConfig::from_env(&http_client).await?;
+    common::warn_hot_key_from_env(
+        "relayer",
+        "RELAYER_PRIVATE_KEY",
+        &config.private_key,
+        common::is_testnet_env(),
+    );
     let policy = load_policy(&config.policy_path, config.active_chain_id)?;
 
     info!("╔════════════════════════════════════════════════════════╗");

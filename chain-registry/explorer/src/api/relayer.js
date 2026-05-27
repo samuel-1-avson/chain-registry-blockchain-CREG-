@@ -1,5 +1,4 @@
-// Sponsored-stake relayer client.
-// The relayer forwards pre-signed stake intents so users can stake without gas.
+// Sponsored-stake relayer client (matches crates/relayer routes).
 
 const DEFAULT_RELAYER_BASE = import.meta.env.VITE_RELAYER_URL || ''
 
@@ -20,16 +19,22 @@ async function relayerFetch(base, path, init = {}) {
 }
 
 export const relayerApi = {
-  status: (base = DEFAULT_RELAYER_BASE) => relayerFetch(base, '/v1/relayer/status'),
   policy: (base = DEFAULT_RELAYER_BASE) => relayerFetch(base, '/v1/relayer/policy'),
-  quota: (owner, base = DEFAULT_RELAYER_BASE) =>
-    relayerFetch(base, `/v1/relayer/quota/${owner}`),
-  submit: (payload, base = DEFAULT_RELAYER_BASE) =>
-    relayerFetch(base, '/v1/relayer/stake', {
+  quote: (payload, base = DEFAULT_RELAYER_BASE) =>
+    relayerFetch(base, '/v1/relayer/quote', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     }),
+  sponsor: (payload, base = DEFAULT_RELAYER_BASE) =>
+    relayerFetch(base, '/v1/relayer/sponsor', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+  status: (requestId, base = DEFAULT_RELAYER_BASE) =>
+    relayerFetch(base, `/v1/relayer/status/${encodeURIComponent(requestId)}`),
+  health: (base = DEFAULT_RELAYER_BASE) => relayerFetch(base, '/health'),
 }
 
 export { DEFAULT_RELAYER_BASE }

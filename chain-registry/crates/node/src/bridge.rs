@@ -56,6 +56,16 @@ pub async fn run(state: Arc<RwLock<NodeState>>) {
 
     tracing::info!("On-chain bridge started");
 
+    {
+        let (bridge_key, is_testnet) = {
+            let s = state.read().await;
+            (s.config.bridge_privkey.clone(), s.config.is_testnet)
+        };
+        if let Some(ref key) = bridge_key {
+            common::warn_hot_key_from_env("bridge", "CREG_BRIDGE_KEY", key, is_testnet);
+        }
+    }
+
     // ── Wait for RPC to be available ──────────────────────────────────────────
     let mut rpc_ready = false;
     while !rpc_ready {

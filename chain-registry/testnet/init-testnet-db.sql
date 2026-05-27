@@ -1,3 +1,5 @@
+-- DEPRECATED: prefer chain-registry/migrations/001_db_sync_bootstrap.sql (+ 002_testnet_extras.sql).
+-- This file duplicates core tables with different names (validator_signatures, chain_blocks).
 -- Initialize testnet database schema
 -- Chain Registry Testnet PostgreSQL Schema
 

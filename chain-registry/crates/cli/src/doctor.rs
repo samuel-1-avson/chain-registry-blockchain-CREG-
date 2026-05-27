@@ -222,6 +222,43 @@ async fn run_basic(options: DoctorOptions<'_>) -> Result<()> {
         DoctorCheck::pass("Dev sandbox bypass", false, "not set (production mode)")
     });
 
+    let small_cluster_quorum =
+        std::env::var("CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM").as_deref() == Ok("true");
+    checks.push(if small_cluster_quorum {
+        DoctorCheck::fail(
+            "PBFT small-cluster quorum",
+            false,
+            "CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM=true — relaxed quorum (dev/single-node only)",
+        )
+    } else {
+        DoctorCheck::pass(
+            "PBFT small-cluster quorum",
+            false,
+            "not set (standard ⌊2n/3⌋+1 quorum)",
+        )
+    });
+
+    let testnet_mode = std::env::var("CREG_TESTNET").as_deref() == Ok("true");
+    if !testnet_mode && (dev_sandbox || small_cluster_quorum) {
+        checks.push(DoctorCheck::fail(
+            "Production safety",
+            false,
+            "CREG_TESTNET=false with dev bypass env vars — node startup will refuse this combination",
+        ));
+    } else if !testnet_mode {
+        checks.push(DoctorCheck::pass(
+            "Production safety",
+            false,
+            "CREG_TESTNET=false and no dev bypass env vars detected",
+        ));
+    } else {
+        checks.push(DoctorCheck::skipped(
+            "Production safety",
+            false,
+            "CREG_TESTNET=true (testnet mode)",
+        ));
+    }
+
     let report = DoctorReport {
         mode: "basic",
         ok: !checks.iter().any(DoctorCheck::is_failure),

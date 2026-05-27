@@ -426,6 +426,12 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let config = FaucetConfig::from_env();
+    common::warn_hot_key_from_env(
+        "faucet",
+        "FAUCET_PRIVATE_KEY",
+        &config.faucet_key,
+        common::is_testnet_env(),
+    );
 
     info!("╔════════════════════════════════════════════════════════╗");
     info!("║        Chain Registry Testnet Faucet (REAL)            ║");

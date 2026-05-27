@@ -436,6 +436,33 @@ impl NodeConfig {
         errors
     }
 
+    /// Reject unsafe development bypasses when `CREG_TESTNET` is not true.
+    pub fn validate_production_security(&self) -> Vec<String> {
+        if self.is_testnet {
+            return Vec::new();
+        }
+
+        let mut errors = Vec::new();
+
+        if std::env::var("CREG_DEV_SANDBOX").as_deref() == Ok("true") {
+            errors.push(
+                "CREG_DEV_SANDBOX=true is not allowed when CREG_TESTNET=false — \
+                 behavioural sandbox bypass must not run on production networks."
+                    .into(),
+            );
+        }
+
+        if std::env::var("CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM").as_deref() == Ok("true") {
+            errors.push(
+                "CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM=true is not allowed when CREG_TESTNET=false — \
+                 relaxed PBFT quorum weakens BFT guarantees. Use a full validator set or enable testnet mode."
+                    .into(),
+            );
+        }
+
+        errors
+    }
+
     /// SHA-256 over a canonical encoding of the node's network-identity inputs:
     ///   chain_id | registry | governance | staking | token | (id:pubkey)*
     ///
@@ -622,6 +649,35 @@ mod tests {
             reputation: 100,
             status: "online".into(),
         }
+    }
+
+    #[test]
+    fn production_security_env_guards() {
+        std::env::set_var("CREG_DEV_SANDBOX", "true");
+        std::env::set_var("CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM", "true");
+
+        let mut prod = base_config();
+        prod.is_testnet = false;
+        let prod_errors = prod.validate_production_security();
+        assert!(
+            prod_errors.iter().any(|e| e.contains("CREG_DEV_SANDBOX")),
+            "{prod_errors:?}"
+        );
+        assert!(
+            prod_errors
+                .iter()
+                .any(|e| e.contains("CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM")),
+            "{prod_errors:?}"
+        );
+
+        let testnet = base_config();
+        assert!(
+            testnet.validate_production_security().is_empty(),
+            "testnet should allow dev bypass env vars"
+        );
+
+        std::env::remove_var("CREG_DEV_SANDBOX");
+        std::env::remove_var("CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM");
     }
 
     #[test]

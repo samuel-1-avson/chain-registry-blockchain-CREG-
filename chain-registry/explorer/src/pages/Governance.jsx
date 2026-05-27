@@ -115,8 +115,19 @@ function GovStat({ label, value, hint }) {
   )
 }
 
+const GOVERNANCE_ENABLED = import.meta.env.VITE_GOVERNANCE_ENABLED === 'true'
+
 /* ── Main page ─────────────────────────────────────────────────────────────── */
 export default function Governance() {
+  if (!GOVERNANCE_ENABLED) {
+    return (
+      <EmptyState
+        title="Governance disabled"
+        message="On-chain governance is not enabled in this explorer build. The node returns HTTP 501 until governance is wired. Set VITE_GOVERNANCE_ENABLED=true when the feature ships."
+      />
+    )
+  }
+
   const [typeFilter, setTypeFilter] = useState('all')
 
   const { data, error, loading, refetch } = usePolling(

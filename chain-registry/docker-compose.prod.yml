@@ -57,13 +57,13 @@ services:
       - ./config:/app/config:ro
     environment:
       CREG_CHAIN_ID: "creg-mainnet-beta"
-      CREG_TESTNET: "false" # This is our actual P2P network
+      CREG_TESTNET: "false"
+      # Do not set CREG_DEV_SANDBOX or CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM here — node refuses them when CREG_TESTNET=false.
       CREG_DATA_DIR: "/data"
       CREG_LISTEN: "0.0.0.0:8080"
       CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/9000"
       CREG_ETH_RPC: "${SEPOLIA_RPC_URL}" # Use the real Sepolia RPC
       CREG_IPFS_URL: "http://ipfs:5001"
-      CREG_SINGLE_VALIDATOR_MODE: "true" # ALLOWS PROGRESS WITH ONE NODE
       CREG_REGISTRY_ADDR: "${VITE_SEPOLIA_REGISTRY_ADDR}"
       CREG_TOKEN_ADDR: "${VITE_SEPOLIA_CREG_TOKEN}"
       CREG_STAKING_ADDR: "${VITE_SEPOLIA_STAKING_ADDR}"

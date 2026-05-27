@@ -149,6 +149,18 @@ struct RateLimitError {
     retry_after: u64,
 }
 
+/// POST package submission (legacy and grouped publisher routes).
+fn is_publish_submit(path: &str, method: &axum::http::Method) -> bool {
+    method == axum::http::Method::POST
+        && (path == "/v1/packages" || path == "/v1/publisher/packages")
+}
+
+/// Validator consensus vote (legacy and grouped routes).
+fn is_consensus_vote(path: &str, method: &axum::http::Method) -> bool {
+    method == axum::http::Method::POST
+        && (path == "/v1/consensus/vote" || path == "/v1/validator/consensus/vote")
+}
+
 /// Axum middleware that applies rate limiting based on the request path.
 pub async fn rate_limit_middleware(
     limiter: axum::extract::Extension<RateLimiter>,
@@ -163,10 +175,11 @@ pub async fn rate_limit_middleware(
         .unwrap_or(IpAddr::from([127, 0, 0, 1]));
 
     let path = req.uri().path();
+    let method = req.method();
 
-    let allowed = if path == "/v1/packages" && req.method() == axum::http::Method::POST {
+    let allowed = if is_publish_submit(path, method) {
         limiter.check_publish(ip)
-    } else if path == "/v1/consensus/vote" {
+    } else if is_consensus_vote(path, method) {
         limiter.check_vote(ip)
     } else {
         limiter.check_general(ip)
@@ -255,5 +268,21 @@ mod tests {
         assert!(limiter.check_publish(ip));
         assert!(!limiter.check_publish(ip)); // publish exhausted
         assert!(limiter.check_general(ip)); // general still has room
+    }
+
+    #[test]
+    fn publish_path_detection_covers_grouped_route() {
+        use axum::http::Method;
+        assert!(is_publish_submit("/v1/publisher/packages", &Method::POST));
+        assert!(is_publish_submit("/v1/packages", &Method::POST));
+        assert!(!is_publish_submit("/v1/publisher/packages", &Method::GET));
+    }
+
+    #[test]
+    fn vote_path_detection_covers_grouped_route() {
+        use axum::http::Method;
+        assert!(is_consensus_vote("/v1/validator/consensus/vote", &Method::POST));
+        assert!(is_consensus_vote("/v1/consensus/vote", &Method::POST));
+        assert!(!is_consensus_vote("/v1/validator/consensus/vote", &Method::GET));
     }
 }

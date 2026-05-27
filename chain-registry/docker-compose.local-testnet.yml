@@ -194,7 +194,7 @@ services:
     container_name: creg-local-node-1
     ports:
       - "8080:8080"
-      - "51057:50051"
+      - "30157:50051"
       - "9007:9000"
     volumes:
       - node-1-data:/data
@@ -216,7 +216,7 @@ services:
     container_name: creg-local-node-2
     ports:
       - "8085:8080"
-      - "51058:50051"
+      - "30158:50051"
       - "9008:9000"
     volumes:
       - node-2-data:/data
@@ -239,7 +239,7 @@ services:
     container_name: creg-local-node-3
     ports:
       - "8086:8080"
-      - "51059:50051"
+      - "30159:50051"
       - "9009:9000"
     volumes:
       - node-3-data:/data
@@ -266,7 +266,7 @@ services:
           - node
     ports:
       - "8087:8080"
-      - "51060:50051"
+      - "30160:50051"
       - "9010:9000"
     volumes:
       - observer-data:/data

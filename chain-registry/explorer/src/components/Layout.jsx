@@ -4,6 +4,8 @@ import { SearchBar } from './SearchBar.jsx'
 import { ThemeToggle } from './ThemeToggle.jsx'
 import { ConnectionBanner } from './ConnectionBanner.jsx'
 
+const GOVERNANCE_ENABLED = import.meta.env.VITE_GOVERNANCE_ENABLED === 'true'
+
 const NAV = [
   { to: '/', label: 'Dashboard', end: true },
   { to: '/blocks', label: 'Blocks' },
@@ -15,7 +17,7 @@ const NAV = [
   { to: '/events', label: 'Events' },
   { to: '/network', label: 'Network' },
   { to: '/metrics', label: 'Metrics' },
-  { to: '/governance', label: 'Governance' },
+  ...(GOVERNANCE_ENABLED ? [{ to: '/governance', label: 'Governance' }] : []),
   { to: '/richlist', label: 'Rich List' },
   { to: '/reorgs', label: 'Reorgs' },
   { to: '/proof', label: 'Proof' },

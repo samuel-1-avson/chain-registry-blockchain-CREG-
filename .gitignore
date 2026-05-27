@@ -10,6 +10,7 @@
 # =============================================================================
 *.md
 !README.md
+!chain-registry/migrations/README.md
 
 # =============================================================================
 # DOCS DIRECTORY
@@ -317,3 +318,9 @@ playground/
 !.dockerignore
 !.gitmodules
 !.env.example
+!**/.env.*.example
+# Repository-root documentation (Phase 1); **/docs/ above still ignores other docs trees
+!/docs/
+!/docs/**
+!/docs/**/*.md
+!chain-registry/migrations/README.md

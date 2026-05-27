@@ -346,7 +346,9 @@ async fn main() -> Result<()> {
                 "CREG_SPEC_SIGNING_PUBKEY is not set — skipping spec signature verification (dev build)"
             );
         } else {
-            let sig = chain_spec_boot::fetch_spec_signature(&spec.signing.detached_signature_url)
+            let sig_url = std::env::var("CREG_SPEC_SIGNATURE_URL")
+                .unwrap_or_else(|_| spec.signing.detached_signature_url.clone());
+            let sig = chain_spec_boot::fetch_spec_signature(&sig_url)
                 .await
                 .map_err(|e| anyhow::anyhow!("Failed to fetch spec signature: {}", e))?;
             spec.verify_signature(&sig, pinned_pubkey)
@@ -419,6 +421,17 @@ async fn main() -> Result<()> {
                 "Cannot start node due to configuration errors. Fix the above and restart."
             );
         }
+    }
+
+    let production_security_errors = config.validate_production_security();
+    if !production_security_errors.is_empty() {
+        for err in &production_security_errors {
+            tracing::error!("  ✗ {}", err);
+        }
+        anyhow::bail!(
+            "Cannot start node: unsafe environment for production (CREG_TESTNET=false). \
+             Unset CREG_DEV_SANDBOX and CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM, or set CREG_TESTNET=true for local clusters."
+        );
     }
 
     // Genesis-hash pin (legacy path). Always log the computed hash so operators can grab it
