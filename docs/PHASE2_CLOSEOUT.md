@@ -45,10 +45,11 @@ Expected health: `status=ok`, `validator_set_sync.state=synced`, `last_error` nu
 | Item | Phase | Notes |
 |------|-------|-------|
 | REM-211 | 2+ | Grafana/Prometheus vs testnet profile |
-| SEC-105 | 2+ | Ed25519 → ETH address CLI warning |
+| SEC-105 | done | [WALLET_KEY_DERIVATION.md](./WALLET_KEY_DERIVATION.md) |
+| REM-211 | partial | [OBSERVABILITY_SEPOLIA.md](./OBSERVABILITY_SEPOLIA.md) — validate Grafana import |
 | REM-203 | 2+ | Unify alloy workspace version |
 | REM-202 | 2 | Governance wiring (D3: keep disabled) |
-| Second-operator runbook | ops | Repeat Steps 1–5 or document deltas |
+| Second-operator runbook | ops | [SEPOLIA_SECOND_OPERATOR_CHECKLIST.md](./SEPOLIA_SECOND_OPERATOR_CHECKLIST.md) |
 | SEC-302 | 3 | CrossChainRegistry |
 
 ## Merge

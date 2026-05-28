@@ -21,6 +21,14 @@ These environment variables load **secp256k1 signing keys** into process memory:
 
 Startup logs emit a **warning** (key fingerprint only, never the secret) when `CREG_BRIDGE_KEY`, `FAUCET_PRIVATE_KEY`, or `RELAYER_PRIVATE_KEY` are loaded while `CREG_TESTNET` is not `true`.
 
+### CREG Ed25519 keys vs Ethereum wallets (SEC-105)
+
+`creg keygen` produces **Ed25519** secrets for consensus and publish signatures. The CLI may print a **derived** `0x` address — that is **not** a MetaMask/BIP-44 account. Do not send funds to it without verifying control with a real secp256k1 key.
+
+`creg stake --key-file` requires a standard Ethereum private key for `cast send`; it **rejects** key files from `creg keygen`.
+
+See [WALLET_KEY_DERIVATION.md](./WALLET_KEY_DERIVATION.md).
+
 ### Rotation procedure (exposed or departing operator)
 
 1. **Stop** the affected service (node bridge worker, faucet, or relayer).

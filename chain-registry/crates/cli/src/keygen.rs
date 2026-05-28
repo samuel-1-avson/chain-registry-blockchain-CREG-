@@ -96,10 +96,36 @@ pub fn decrypt_key_file(path: &Path, passphrase: &str) -> Result<String> {
     String::from_utf8(plaintext).context("decrypted key is not valid UTF-8")
 }
 
+/// True when `hex` looks like a 32-byte Ed25519 secret from `creg keygen` (64 hex chars).
+pub fn looks_like_creg_ed25519_secret_hex(hex_str: &str) -> bool {
+    let s = hex_str
+        .trim()
+        .strip_prefix("0x")
+        .unwrap_or(hex_str.trim());
+    s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// Prominent warning when showing an Ethereum address derived from a CREG Ed25519 secret.
+/// See docs/WALLET_KEY_DERIVATION.md (SEC-105).
+pub fn print_ed25519_derived_eth_warning() {
+    eprintln!();
+    eprintln!(
+        "  {}",
+        "WARNING — derived ETH address is NOT a standard wallet (SEC-105)".yellow().bold()
+    );
+    eprintln!(
+        "  CREG interprets your Ed25519 secret as raw secp256k1 bytes to print a 0x address."
+    );
+    eprintln!("  It will NOT match MetaMask, Ledger, or BIP-44 (m/44'/60'/0'/0/0) accounts.");
+    eprintln!("  Use a normal Ethereum wallet private key to send ETH or call staking contracts.");
+    eprintln!("  Details: docs/WALLET_KEY_DERIVATION.md");
+    eprintln!();
+}
+
 /// Derive the Ethereum address (0x-prefixed, 20 bytes) from a 32-byte
 /// private key hex string.  Uses secp256k1 → keccak256 derivation so
 /// users see their on-chain identity alongside their Ed25519 identity. (W9)
-fn derive_eth_address(privkey_hex: &str) -> Option<String> {
+pub fn derive_eth_address(privkey_hex: &str) -> Option<String> {
     use k256::ecdsa::SigningKey as K256SigningKey;
     use sha3::{Digest, Keccak256};
 
@@ -115,6 +141,13 @@ fn derive_eth_address(privkey_hex: &str) -> Option<String> {
     let hash = hasher.finalize();
     // Ethereum address = last 20 bytes of keccak256(pubkey_uncompressed)
     Some(format!("0x{}", hex::encode(&hash[12..])))
+}
+
+fn print_derived_eth_address_line(privkey_hex: &str) {
+    if let Some(eth_addr) = derive_eth_address(privkey_hex) {
+        print_ed25519_derived_eth_warning();
+        println!("  ETH address (derived): {}", eth_addr);
+    }
 }
 
 /// Generate a new keypair and save it to `output_path`.
@@ -165,9 +198,7 @@ pub fn run(output_path: Option<&Path>, role: &str) -> Result<()> {
     println!("\n  {} keypair generated for role: {}", "✓", role);
     println!("  Private key: {}", key_path.display());
     println!("  Public key:  {} (Ed25519)", pubkey_hex);
-    if let Some(eth_addr) = derive_eth_address(&privkey_hex) {
-        println!("  ETH address: {} (secp256k1-derived)", eth_addr);
-    }
+    print_derived_eth_address_line(&privkey_hex);
     println!();
 
     match role {
@@ -291,9 +322,7 @@ pub fn run_with_mnemonic(output_path: Option<&Path>, role: &str, restore: bool) 
     println!("  {} keypair generated for role: {} (BIP39)", "✓", role);
     println!("  Private key: {}", key_path.display());
     println!("  Public key:  {} (Ed25519)", pubkey_hex);
-    if let Some(eth_addr) = derive_eth_address(&privkey_hex) {
-        println!("  ETH address: {} (secp256k1-derived)", eth_addr);
-    }
+    print_derived_eth_address_line(&privkey_hex);
     println!();
 
     Ok(())
@@ -344,8 +373,11 @@ pub fn rotate(key_path: Option<&Path>, role: &str) -> Result<()> {
                 "  Old pubkey:  {} (Ed25519)",
                 hex::encode(old_sk.verifying_key().as_bytes())
             );
-            if let Some(eth_addr) = derive_eth_address(old_privkey_hex.trim()) {
-                println!("  Old ETH addr: {}", eth_addr);
+            if derive_eth_address(old_privkey_hex.trim()).is_some() {
+                print_ed25519_derived_eth_warning();
+                if let Some(eth_addr) = derive_eth_address(old_privkey_hex.trim()) {
+                    println!("  Old ETH addr (derived): {}", eth_addr);
+                }
             }
         }
     }
@@ -375,9 +407,7 @@ pub fn rotate(key_path: Option<&Path>, role: &str) -> Result<()> {
 
     println!("  {} New key written to {}", "✓".green(), path.display());
     println!("  New pubkey:  {} (Ed25519)", new_pub);
-    if let Some(eth_addr) = derive_eth_address(&new_priv) {
-        println!("  New ETH addr: {}", eth_addr);
-    }
+    print_derived_eth_address_line(&new_priv);
     println!();
     println!("  {} Action required:", "⚠".yellow().bold());
     println!("  Register the new public key on-chain before publishing:");
@@ -391,6 +421,32 @@ pub fn rotate(key_path: Option<&Path>, role: &str) -> Result<()> {
     );
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detects_ed25519_secret_shape() {
+        assert!(looks_like_creg_ed25519_secret_hex(
+            "a".repeat(64).as_str()
+        ));
+        assert!(looks_like_creg_ed25519_secret_hex(
+            &format!("0x{}", "b".repeat(64))
+        ));
+        assert!(!looks_like_creg_ed25519_secret_hex(
+            "0x1234567890abcdef1234567890abcdef12345678"
+        ));
+    }
+
+    #[test]
+    fn derive_eth_from_valid_scalar() {
+        // Valid non-zero secp256k1 scalar (32 bytes) for deterministic derivation smoke test.
+        let sk = "0000000000000000000000000000000000000000000000000000000000000001";
+        let addr = derive_eth_address(sk).expect("address");
+        assert!(addr.starts_with("0x") && addr.len() == 42);
+    }
 }
 
 fn default_key_path(role: &str) -> PathBuf {

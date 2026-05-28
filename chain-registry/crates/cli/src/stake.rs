@@ -71,6 +71,17 @@ pub async fn run(
             .with_context(|| format!("Cannot read key file: {}", kp.display()))?;
         let key = key.trim();
 
+        if crate::keygen::looks_like_creg_ed25519_secret_hex(key) {
+            crate::keygen::print_ed25519_derived_eth_warning();
+            bail!(
+                "The key file looks like a CREG Ed25519 secret from `creg keygen`.\n\
+                 `creg stake` sends transactions with `cast` and needs a standard Ethereum\n\
+                 wallet private key (32-byte secp256k1), not your Ed25519 validator/publisher key.\n\
+                 Fund and use a separate EOA, or run the printed `cast send` with --private-key $EOA_KEY.\n\
+                 See docs/WALLET_KEY_DERIVATION.md."
+            );
+        }
+
         println!("\n  Sending transaction...");
         // Build and sign the transaction using cast (Foundry toolchain).
         let status = std::process::Command::new("cast")

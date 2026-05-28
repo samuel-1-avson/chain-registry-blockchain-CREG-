@@ -14,6 +14,9 @@ Central documentation for the Chain Registry monorepo (`chain-registry/`).
 | Document | Description |
 |----------|-------------|
 | [SECURITY_OPS_RUNBOOK.md](./SECURITY_OPS_RUNBOOK.md) | Hot keys, unsafe env vars, TLS, operator API keys |
+| [WALLET_KEY_DERIVATION.md](./WALLET_KEY_DERIVATION.md) | Ed25519 vs Ethereum wallet keys (SEC-105) |
+| [SEPOLIA_SECOND_OPERATOR_CHECKLIST.md](./SEPOLIA_SECOND_OPERATOR_CHECKLIST.md) | Second-operator sign-off for Option A reuse |
+| [OBSERVABILITY_SEPOLIA.md](./OBSERVABILITY_SEPOLIA.md) | Prometheus scrape for local Sepolia node (REM-211) |
 | [REMEDIATION_BACKLOG.md](./REMEDIATION_BACKLOG.md) | Live status of SEC-/REM-/DOC- work items |
 
 ## Data & API

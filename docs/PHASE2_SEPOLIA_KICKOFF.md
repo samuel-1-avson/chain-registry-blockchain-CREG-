@@ -207,9 +207,9 @@ validator_set_sync.state:    synced
 
 ## After Sepolia (post–Phase 2 backlog)
 
-- SEC-105 — Ed25519 → ETH address warning
+- ~~SEC-105~~ — done ([WALLET_KEY_DERIVATION.md](./WALLET_KEY_DERIVATION.md))
 - REM-203 — unify alloy
-- REM-211 — Grafana/Prometheus vs testnet profile
+- REM-211 — partial ([OBSERVABILITY_SEPOLIA.md](./OBSERVABILITY_SEPOLIA.md)); validate Grafana import
 
 Governance: keep **disabled** (`VITE_GOVERNANCE_ENABLED` unset) until REM-202 is explicitly scheduled (**D3**).
 

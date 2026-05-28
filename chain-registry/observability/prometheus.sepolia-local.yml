@@ -1,0 +1,27 @@
+# Prometheus scrape config for a single creg-node on the host (Sepolia Option A reuse).
+# Usage (from chain-registry/):
+#   docker run --rm -p 9090:9090 `
+#     -v "${PWD}/observability/prometheus.sepolia-local.yml:/etc/prometheus/prometheus.yml:ro" `
+#     prom/prometheus:v2.51.0 `
+#     --config.file=/etc/prometheus/prometheus.yml
+#
+# On Windows Docker Desktop, host.docker.internal reaches the host API port.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: chain-registry-sepolia-local
+
+scrape_configs:
+  - job_name: creg_node_sepolia
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["host.docker.internal:8090"]
+        labels:
+          network: sepolia
+          profile: option-a-reuse
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
