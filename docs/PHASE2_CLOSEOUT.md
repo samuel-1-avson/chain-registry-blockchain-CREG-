@@ -45,7 +45,7 @@ Expected health: `status=ok`, `validator_set_sync.state=synced`, `last_error` nu
 | Item | Phase | Notes |
 |------|-------|-------|
 | SEC-105 | done | [WALLET_KEY_DERIVATION.md](./WALLET_KEY_DERIVATION.md) |
-| REM-211 | partial | [OBSERVABILITY_SEPOLIA.md](./OBSERVABILITY_SEPOLIA.md) — config committed; live scrape + Grafana optional |
+| REM-211 | done | [OBSERVABILITY_SEPOLIA.md](./OBSERVABILITY_SEPOLIA.md) — Prometheus target UP; Grafana optional |
 | REM-203 | in PR | Branch `rem-203-alloy-unify` — `alloy = { workspace = true }` (0.6); build OK |
 | REM-202 | 2 | Governance wiring (D3: keep disabled) |
 | Second-operator runbook | ops | [SEPOLIA_SECOND_OPERATOR_CHECKLIST.md](./SEPOLIA_SECOND_OPERATOR_CHECKLIST.md) |
