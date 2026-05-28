@@ -2,15 +2,13 @@
 // Lightweight Prometheus-compatible metrics endpoint.
 // Exposed at GET /metrics — scrape with any Prometheus-compatible system.
 //
-// Metrics exposed:
-//   creg_chain_height            — current chain tip height (gauge)
-//   creg_package_count           — total verified packages (gauge)
-//   creg_pending_pool_size       — packages awaiting consensus (gauge)
-//   creg_publisher_count         — unique publishers seen (gauge)
-//   creg_blocks_produced_total   — blocks produced by this node (counter)
-//   creg_votes_cast_total        — PBFT votes cast by this node (counter)
-//   creg_packages_verified_total — packages this node helped verify (counter)
-//   creg_packages_rejected_total — packages this node rejected (counter)
+// Local chain (RocksDB):
+//   creg_chain_tip_height      — height index of the tip block (genesis alone => 0)
+//   creg_chain_blocks_stored   — count of blocks in local storage (genesis alone => 1)
+//   creg_package_count, creg_pending_pool_size, creg_publisher_count
+//
+// L1 validator set sync (Sepolia staking logs):
+//   creg_validator_set_sync_*    — mirrors /v1/health.validator_set_sync
 
 use crate::NodeState;
 use std::sync::Arc;
@@ -20,15 +18,41 @@ use tokio::sync::RwLock;
 pub async fn render(state: Arc<RwLock<NodeState>>) -> String {
     let s = state.read().await;
     let stats = s.chain.stats();
+    let sync = &s.validator_set_sync;
 
-    let mut out = String::with_capacity(1024);
+    let mut out = String::with_capacity(2048);
 
     metric(
         &mut out,
-        "creg_chain_height",
-        "Current chain tip height",
+        "creg_chain_tip_height",
+        "Height index of the local chain tip (only genesis => 0; not Sepolia block number)",
         "gauge",
         stats.tip_height as f64,
+    );
+
+    metric(
+        &mut out,
+        "creg_chain_blocks_stored",
+        "Blocks stored in the local chain DB (genesis at height 0 counts as 1)",
+        "gauge",
+        stats.block_count as f64,
+    );
+
+    // Deprecated alias: same series as creg_chain_tip_height (kept for existing dashboards).
+    metric(
+        &mut out,
+        "creg_chain_height",
+        "DEPRECATED: use creg_chain_tip_height (same value)",
+        "gauge",
+        stats.tip_height as f64,
+    );
+
+    metric(
+        &mut out,
+        "creg_block_count",
+        "DEPRECATED: use creg_chain_blocks_stored (same value)",
+        "gauge",
+        stats.block_count as f64,
     );
 
     metric(
@@ -49,21 +73,12 @@ pub async fn render(state: Arc<RwLock<NodeState>>) -> String {
 
     metric(
         &mut out,
-        "creg_block_count",
-        "Total blocks in the chain",
-        "gauge",
-        stats.block_count as f64,
-    );
-
-    metric(
-        &mut out,
         "creg_publisher_count",
         "Unique publishers tracked",
         "gauge",
         s.publisher_index.publisher_count() as f64,
     );
 
-    // Node identity label.
     let node_id = &s.config.node_id;
     labeled_metric(
         &mut out,
@@ -77,7 +92,71 @@ pub async fn render(state: Arc<RwLock<NodeState>>) -> String {
         1.0,
     );
 
+    metric(
+        &mut out,
+        "creg_validator_set_sync_enabled",
+        "1 when chain-authoritative validator set sync is enabled",
+        "gauge",
+        if sync.enabled { 1.0 } else { 0.0 },
+    );
+
+    metric(
+        &mut out,
+        "creg_validator_set_sync_state_code",
+        "Sync state enum: 0=disabled 1=syncing 2=reorg-replaying 3=degraded 4=synced",
+        "gauge",
+        validator_set_sync_state_code(&sync.state) as f64,
+    );
+
+    metric(
+        &mut out,
+        "creg_validator_set_sync_last_finalized_source_block",
+        "Last L1 block height applied to the authoritative validator set (0 if unknown)",
+        "gauge",
+        sync.last_finalized_source_block.unwrap_or(0) as f64,
+    );
+
+    metric(
+        &mut out,
+        "creg_validator_set_sync_cursor_block",
+        "L1 log cursor block height (0 if unknown)",
+        "gauge",
+        sync.cursor_block.unwrap_or(0) as f64,
+    );
+
+    metric(
+        &mut out,
+        "creg_validator_set_sync_has_error",
+        "1 when validator_set_sync.last_error is set",
+        "gauge",
+        if sync.last_error.is_some() { 1.0 } else { 0.0 },
+    );
+
+    labeled_metric(
+        &mut out,
+        "creg_validator_set_sync_info",
+        "Validator set sync mode and state (value is always 1 when labeled series is present)",
+        "gauge",
+        &[
+            ("mode", sync.mode.as_str()),
+            ("state", sync.state.as_str()),
+        ],
+        1.0,
+    );
+
     out
+}
+
+/// Numeric encoding for alert rules (e.g. `== 4` for synced).
+pub fn validator_set_sync_state_code(state: &str) -> i32 {
+    match state {
+        "disabled" => 0,
+        "syncing" => 1,
+        "reorg-replaying" => 2,
+        "degraded" => 3,
+        "synced" => 4,
+        _ => -1,
+    }
 }
 
 fn metric(buf: &mut String, name: &str, help: &str, kind: &str, value: f64) {
@@ -98,8 +177,29 @@ fn labeled_metric(
     buf.push_str(&format!("# TYPE {} {}\n", name, kind));
     let label_str = labels
         .iter()
-        .map(|(k, v)| format!("{}=\"{}\"", k, v))
+        .map(|(k, v)| format!("{}=\"{}\"", k, escape_label(v)))
         .collect::<Vec<_>>()
         .join(",");
     buf.push_str(&format!("{}{{{}}} {}\n\n", name, label_str, value));
+}
+
+fn escape_label(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validator_set_sync_state_codes() {
+        assert_eq!(validator_set_sync_state_code("synced"), 4);
+        assert_eq!(validator_set_sync_state_code("syncing"), 1);
+        assert_eq!(validator_set_sync_state_code("unknown"), -1);
+    }
+
+    #[test]
+    fn escape_label_quotes() {
+        assert_eq!(escape_label(r#"a"b"#), r#"a\"b"#);
+    }
 }
