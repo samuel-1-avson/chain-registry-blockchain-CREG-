@@ -41,7 +41,7 @@ Checks: `curl http://localhost:8090/v1/health` and logs show `Spec signature ver
 .\testnet\run-sepolia-reuse.ps1 -RpcUrl "https://sepolia.infura.io/v3/YOUR_KEY" -StartNode
 ```
 
-Default script RPC is `https://1rpc.io/sepolia`. Wait until `/v1/health` shows `validator_set_sync.state` = `synced` (not `degraded`).
+Default script RPC is `https://ethereum-sepolia-rpc.publicnode.com`. The node chunks `eth_getLogs` (default 10 000 blocks per request; override with `CREG_ETH_LOG_CHUNK_BLOCKS`). Wait until `/v1/health` shows `validator_set_sync.state` = `synced` (not `degraded`). First catch-up from `epoch_block_height: 0` can take several minutes.
 
 ---
 
@@ -163,25 +163,53 @@ cargo run -p chain-registry-cli -- doctor --testnet
 
 ---
 
-## Step 6 — Phase 2 exit proof (same week)
+## Step 6 — Phase 2 exit proof
 
-| Check | Command / artifact |
-|-------|-------------------|
-| Runbook exercised | Second person repeats Steps 1–5 or documents deltas |
-| L1 contracts | Etherscan links for `staking`, `registry`, `zk_verifier` |
-| Spec signature | `verify_chain_spec` exit 0 |
-| Sync cursor restart | Stop node → restart → `validator_set_sync_state` still `synced`, no duplicate validators |
-| Observability | REM-211 after metrics endpoint is up |
+| Check | Command / artifact | Status |
+|-------|-------------------|--------|
+| Runbook exercised | Second person repeats Steps 1–5 or documents deltas | deferred (ops) — see [PHASE2_CLOSEOUT.md](./PHASE2_CLOSEOUT.md) |
+| L1 contracts | Etherscan links for `staking`, `registry`, `zk_verifier` | ✓ — links below |
+| Spec signature | `creg chain-spec validate` exit 0 | ✓ (SEC-203) |
+| Sync `eth_getLogs` works on public Sepolia RPCs | Chunked (10k blocks) — `state: synced` after first walk | ✓ (REM-103b) |
+| Sync cursor restart | Stop node → restart → `validator_set_sync.state` returns to `synced` from saved cursor in seconds, no re-walk | ✓ |
+| Node health | `Invoke-RestMethod http://localhost:8090/v1/health` | ✓ 2026-05-28 |
+| Observability | REM-211 dashboards | deferred post-ship |
+
+### L1 contracts (Sepolia)
+
+| Contract | Etherscan |
+|----------|-----------|
+| staking `0xe58324Ce72718F802f3d6182e8eA06Cf91cc5d22` | https://sepolia.etherscan.io/address/0xe58324Ce72718F802f3d6182e8eA06Cf91cc5d22 |
+| registry `0x3413EE0B398BE8696346ae294b28301E9AA2D16d` | https://sepolia.etherscan.io/address/0x3413EE0B398BE8696346ae294b28301E9AA2D16d |
+| zk_verifier `0x5aa70Af0e9c05A4e24485Ef72A7563976d919423` | https://sepolia.etherscan.io/address/0x5aa70Af0e9c05A4e24485Ef72A7563976d919423 |
+
+### Proof artifacts (Option A reuse, publicnode RPC)
+
+**2026-05-27**
+
+```
+safe_block:    10,936,321
+first walk:    ~9 min (zero staking events → cursor advanced to safe_block)
+restart walk:  ~10 s (cursor 10,936,323 → 10,936,359)
+last_error:    null
+```
+
+**2026-05-28** (ship verification)
+
+```
+last_finalized_source_block: 10,937,522
+validator_set_sync.state:    synced
+```
+
+**Phase 2 shipped:** see [PHASE2_CLOSEOUT.md](./PHASE2_CLOSEOUT.md). Merge `phase-1-security-foundation` → `main`.
 
 ---
 
-## After Sepolia (parallel Phase 2 code)
+## After Sepolia (post–Phase 2 backlog)
 
-- SEC-203 — `creg chain-spec validate`
-- SEC-101 / SEC-101b — hot-key runbook + startup warnings
-- SEC-105 — Ed25519 → ETH address warning
+- ~~SEC-105~~ — done ([WALLET_KEY_DERIVATION.md](./WALLET_KEY_DERIVATION.md))
 - REM-203 — unify alloy
-- REM-211 — Grafana/Prometheus vs testnet profile
+- REM-211 — partial ([OBSERVABILITY_SEPOLIA.md](./OBSERVABILITY_SEPOLIA.md)); validate Grafana import
 
 Governance: keep **disabled** (`VITE_GOVERNANCE_ENABLED` unset) until REM-202 is explicitly scheduled (**D3**).
 

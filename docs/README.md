@@ -14,6 +14,9 @@ Central documentation for the Chain Registry monorepo (`chain-registry/`).
 | Document | Description |
 |----------|-------------|
 | [SECURITY_OPS_RUNBOOK.md](./SECURITY_OPS_RUNBOOK.md) | Hot keys, unsafe env vars, TLS, operator API keys |
+| [WALLET_KEY_DERIVATION.md](./WALLET_KEY_DERIVATION.md) | Ed25519 vs Ethereum wallet keys (SEC-105) |
+| [SEPOLIA_SECOND_OPERATOR_CHECKLIST.md](./SEPOLIA_SECOND_OPERATOR_CHECKLIST.md) | Second-operator sign-off for Option A reuse |
+| [OBSERVABILITY_SEPOLIA.md](./OBSERVABILITY_SEPOLIA.md) | Prometheus scrape for local Sepolia node (REM-211) |
 | [REMEDIATION_BACKLOG.md](./REMEDIATION_BACKLOG.md) | Live status of SEC-/REM-/DOC- work items |
 
 ## Data & API
@@ -22,6 +25,7 @@ Central documentation for the Chain Registry monorepo (`chain-registry/`).
 |----------|-------------|
 | [TESTNET_SEPOLIA_RUNBOOK.md](./TESTNET_SEPOLIA_RUNBOOK.md) | Sepolia contract deploy, chain-spec sign/publish, node env |
 | [PHASE2_SEPOLIA_KICKOFF.md](./PHASE2_SEPOLIA_KICKOFF.md) | Phase 2 Option A — ordered Sepolia-first checklist |
+| [PHASE2_CLOSEOUT.md](./PHASE2_CLOSEOUT.md) | Phase 2 ship checklist, Etherscan links, deferred items |
 | [DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md) | Canonical PostgreSQL schema (`db-sync`) vs legacy testnet SQL |
 | [API_COOKBOOK.md](./API_COOKBOOK.md) | REST examples by route group |
 

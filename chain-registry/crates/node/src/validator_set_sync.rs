@@ -594,6 +594,15 @@ async fn rebuild_worker_state(
         for delta in deltas {
             apply_delta(&mut worker_state, &delta);
         }
+        // Advance to safe_block even if no deltas observed, so subsequent
+        // polls only scan the small tail above safe_block.
+        let need_advance = worker_state
+            .cursor
+            .map(|(h, _)| h < safe_block)
+            .unwrap_or(true);
+        if need_advance {
+            worker_state.cursor = Some((safe_block, u32::MAX));
+        }
     }
 
     if let Some((height, _)) = worker_state.cursor {
@@ -754,6 +763,17 @@ pub async fn run(
                         }
                     }
                 }
+                // Advance the cursor to the safe block we just scanned, even when no
+                // deltas were observed. Without this, a chain with sparse or zero
+                // staking events would re-walk the full block range on every poll
+                // and on every restart (defeats REM-103 cursor persistence).
+                let need_advance = worker_state
+                    .cursor
+                    .map(|(h, _)| h < safe_block)
+                    .unwrap_or(true);
+                if need_advance {
+                    worker_state.cursor = Some((safe_block, u32::MAX));
+                }
                 if let Some((height, _)) = worker_state.cursor {
                     worker_state.cursor_block_hash =
                         Some(fetch_block_hash(&client, &config.eth_rpc_url, height).await?);
@@ -803,7 +823,43 @@ async fn fetch_latest_block(client: &reqwest::Client, rpc_url: &str) -> anyhow::
         .map_err(|e| anyhow::anyhow!("invalid block number: {}", e))
 }
 
+/// Max blocks per `eth_getLogs` call. Public Sepolia RPCs often cap range (e.g. 10k–50k).
+const DEFAULT_ETH_GET_LOGS_BLOCK_CHUNK: u64 = 10_000;
+
+fn eth_get_logs_block_chunk() -> u64 {
+    std::env::var("CREG_ETH_LOG_CHUNK_BLOCKS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or(DEFAULT_ETH_GET_LOGS_BLOCK_CHUNK)
+}
+
 async fn fetch_deltas(
+    client: &reqwest::Client,
+    rpc_url: &str,
+    staking_addr: &alloy::primitives::Address,
+    from_block: u64,
+    to_block: u64,
+) -> anyhow::Result<Vec<ValidatorSetDelta>> {
+    if from_block > to_block {
+        return Ok(Vec::new());
+    }
+
+    let chunk_size = eth_get_logs_block_chunk();
+    let mut deltas = Vec::new();
+    let mut start = from_block;
+    while start <= to_block {
+        let end = start.saturating_add(chunk_size.saturating_sub(1)).min(to_block);
+        let mut chunk =
+            fetch_deltas_chunk(client, rpc_url, staking_addr, start, end).await?;
+        deltas.append(&mut chunk);
+        start = end.saturating_add(1);
+    }
+    deltas.sort_by_key(|delta| (delta.block_height, delta.log_index));
+    Ok(deltas)
+}
+
+async fn fetch_deltas_chunk(
     client: &reqwest::Client,
     rpc_url: &str,
     staking_addr: &alloy::primitives::Address,

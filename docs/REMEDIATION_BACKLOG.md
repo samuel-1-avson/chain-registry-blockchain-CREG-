@@ -20,6 +20,11 @@ Track security and remediation work from [SECURITY_AND_REMEDIATION_IMPLEMENTATIO
 | SEC-203 | done | 2 | `creg chain-spec validate` — genesis hash + optional `.sig` Ed25519 verify |
 | SEC-101 | done | 2 | Hot-key runbook rotation + `.env.example` placeholders |
 | SEC-101b | done | 2 | Startup WARN with fingerprint (bridge, faucet, relayer) when not testnet |
+| REM-103b | done | 2 | Chunked `eth_getLogs` (10k blocks, `CREG_ETH_LOG_CHUNK_BLOCKS`) + cursor advance on empty deltas; Sepolia restart synced in ~10s vs 9m cold walk |
+| SEC-105 | done | 2+ | `creg keygen` warning + `creg stake` rejects Ed25519 key file; [WALLET_KEY_DERIVATION.md](./WALLET_KEY_DERIVATION.md) |
+| REM-211 | partial | 2+ | [OBSERVABILITY_SEPOLIA.md](./OBSERVABILITY_SEPOLIA.md) + `prometheus.sepolia-local.yml` |
 | SEC-302 | pending | 3 | CrossChainRegistry |
+
+**Phase 2 ship (2026-05-28):** Sepolia Option A proof complete — see [PHASE2_CLOSEOUT.md](./PHASE2_CLOSEOUT.md). Post-ship: REM-211 (Grafana validation), REM-203, second-operator sign-off.
 
 _Update status when PRs merge._
