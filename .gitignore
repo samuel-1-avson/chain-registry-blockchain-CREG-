@@ -11,6 +11,7 @@
 *.md
 !README.md
 !chain-registry/migrations/README.md
+!chain-registry/contracts/README.md
 
 # =============================================================================
 # DOCS DIRECTORY
