@@ -21,6 +21,17 @@ docker run --rm -d --name creg-prom-sepolia -p 9090:9090 `
 
 4. Optional full stack: use `docker-compose.observability.yml` with `prometheus.testnet.yml` for the 10-validator Docker testnet.
 
+## Validate config (offline)
+
+The Prometheus image entrypoint is `prometheus`, not `promtool`. Use:
+
+```powershell
+cd chain-registry
+docker run --rm --entrypoint promtool `
+  -v "${PWD}/observability/prometheus.sepolia-local.yml:/etc/prometheus/prometheus.yml:ro" `
+  prom/prometheus:v2.51.0 check config /etc/prometheus/prometheus.yml
+```
+
 ## Dashboards
 
 - `chain-registry/observability/grafana-dashboard.json` — import into Grafana.
