@@ -46,11 +46,23 @@ Expected health: `status=ok`, `validator_set_sync.state=synced`, `last_error` nu
 |------|-------|-------|
 | SEC-105 | done | [WALLET_KEY_DERIVATION.md](./WALLET_KEY_DERIVATION.md) |
 | REM-211 | done | [OBSERVABILITY_SEPOLIA.md](./OBSERVABILITY_SEPOLIA.md) — Prometheus target UP; Grafana optional |
-| REM-203 | in PR | Branch `rem-203-alloy-unify` — `alloy = { workspace = true }` (0.6); build OK |
-| REM-202 | 2 | Governance wiring (D3: keep disabled) |
-| Second-operator runbook | ops | [SEPOLIA_SECOND_OPERATOR_CHECKLIST.md](./SEPOLIA_SECOND_OPERATOR_CHECKLIST.md) |
-| SEC-302 | 3 | CrossChainRegistry |
+| REM-203 | Done | Merged [PR #6](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/pull/6) |
+| REM-211 | Done | Prometheus scrape + `/metrics` extensions |
+| REM-202 | Deferred | Governance wiring (D3: keep disabled) |
+| Second-operator runbook | **Open** | [SEPOLIA_SECOND_OPERATOR_CHECKLIST.md](./SEPOLIA_SECOND_OPERATOR_CHECKLIST.md) |
+| Hot-key rotation drill | **Open** | [SECURITY_OPS_RUNBOOK.md](./SECURITY_OPS_RUNBOOK.md) (`SEC-101`) |
 
-## Merge
+## Phase 2 review checklist (plan)
 
-Merged to `main` via [PR #5](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/pull/5) (`ce791d7`).
+- [x] REM-103 persistence verified with restart
+- [x] Governance disabled (not stub) — D3 / REM-201
+- [x] SEC-203, SEC-105, REM-203 on `main`
+- [ ] Sepolia runbook executed by second engineer
+- [ ] Hot-key rotation exercised once on testnet (optional procedural)
+
+**Phase 3:** [PHASE3_KICKOFF.md](./PHASE3_KICKOFF.md) — decision **D4** recorded as SEC-303c (defer SEC-302).
+
+## Merge history
+
+- Phase 2 Sepolia ship: [PR #5](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/pull/5) (`ce791d7`)
+- REM-203 + metrics: [PR #6](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/pull/6) (`f6a4871`)

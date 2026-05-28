@@ -115,8 +115,8 @@ enum Commands {
         /// Paths to additional Ed25519 private key files for 2-of-3 multi-sig publishing.
         #[arg(long = "extra-key-file")]
         extra_keys: Vec<std::path::PathBuf>,
-        /// Encrypt the package for the validator quorum (Shielded).
-        #[arg(long)]
+        /// Experimental threshold encryption (requires CREG_SHIELDED_PUBLISH_ENABLED on CLI and node).
+        #[arg(long, hide = true)]
         shield: bool,
         /// Publisher EVM address with active on-chain stake.
         #[arg(long, env = "CREG_PUBLISHER_ADDRESS")]

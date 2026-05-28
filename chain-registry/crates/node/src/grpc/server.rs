@@ -23,6 +23,7 @@ fn admission_status(error: crate::package_admission::AdmissionError) -> Status {
     let message = error.to_string();
     match error {
         AdmissionError::InvalidPackageId(_)
+        | AdmissionError::ShieldedPublishDisabled(_)
         | AdmissionError::Scanner(
             crate::admission_scan::AdmissionScanError::Rejected { .. }
             | crate::admission_scan::AdmissionScanError::ContentHashMismatch { .. },

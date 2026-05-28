@@ -23,6 +23,13 @@ pub async fn run(
 ) -> Result<()> {
     let publisher_address = canonicalize_publisher_address(publisher_address)?;
 
+    if shield && !common::shielded_publish_enabled() {
+        bail!(
+            "Shielded publish requires CREG_SHIELDED_PUBLISH_ENABLED=true on this machine and on \
+             the node (experimental; SEC-304). See docs/PHASE3_KICKOFF.md."
+        );
+    }
+
     // ── 1. Read and hash the tarball ─────────────────────────────────────────
     let tarball_bytes = std::fs::read(tarball_path)
         .with_context(|| format!("Cannot read tarball: {}", tarball_path.display()))?;

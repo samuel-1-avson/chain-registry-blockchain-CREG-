@@ -16,7 +16,7 @@ These environment variables load **secp256k1 signing keys** into process memory:
 
 - Never commit keys to git. Use `.env` locally and a secret manager in production.
 - Rotate immediately if a key is exposed.
-- Prefer KMS/Vault integration (see SEC-301 in the implementation plan).
+- Prefer KMS/Vault integration — see [adr/ADR-KMS-HOT-KEYS.md](./adr/ADR-KMS-HOT-KEYS.md) (SEC-301a).
 - On Sepolia and other testnets, set `CREG_TESTNET=true` on the node so hot-key warnings are suppressed when keys are expected.
 
 Startup logs emit a **warning** (key fingerprint only, never the secret) when `CREG_BRIDGE_KEY`, `FAUCET_PRIVATE_KEY`, or `RELAYER_PRIVATE_KEY` are loaded while `CREG_TESTNET` is not `true`.

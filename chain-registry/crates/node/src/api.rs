@@ -1353,6 +1353,7 @@ fn rest_admission_error(error: crate::package_admission::AdmissionError) -> Resp
     let status = match &error {
         AdmissionError::InvalidPackageId(_)
         | AdmissionError::InvalidPublisherSignature(_)
+        | AdmissionError::ShieldedPublishDisabled(_)
         | AdmissionError::Scanner(
             crate::admission_scan::AdmissionScanError::Rejected { .. }
             | crate::admission_scan::AdmissionScanError::ContentHashMismatch { .. },

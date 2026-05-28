@@ -23,9 +23,14 @@ Track security and remediation work from [SECURITY_AND_REMEDIATION_IMPLEMENTATIO
 | REM-103b | done | 2 | Chunked `eth_getLogs` (10k blocks, `CREG_ETH_LOG_CHUNK_BLOCKS`) + cursor advance on empty deltas; Sepolia restart synced in ~10s vs 9m cold walk |
 | SEC-105 | done | 2+ | `creg keygen` warning + `creg stake` rejects Ed25519 key file; [WALLET_KEY_DERIVATION.md](./WALLET_KEY_DERIVATION.md) |
 | REM-211 | done | 2+ | Live scrape verified (`creg_node_sepolia` UP); Grafana import optional |
-| REM-203 | in PR | 2+ | `rem-203-alloy-unify`: node uses workspace alloy 0.6; lockfile pruned |
-| SEC-302 | pending | 3 | CrossChainRegistry |
+| REM-203 | done | 2+ | Merged [PR #6](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/pull/6) — workspace alloy 0.6; `/metrics` validator_set_sync |
+| SEC-303c | done | 3 | D4: cross-chain **Planned** / disabled; spec `cross_chain: false`; crate docs — [PHASE3_KICKOFF.md](./PHASE3_KICKOFF.md) |
+| SEC-302 | deferred | 3 | CrossChainRegistry ISSUE-005/006 — execute only if D4 reversed |
+| SEC-306a | done | 3 | D5: PrivateRegistry **Planned** — README + contracts/README |
+| SEC-304 | done | 3 | `CREG_SHIELDED_PUBLISH_ENABLED` default false; node + CLI |
+| SEC-305 | partial | 3 | `--shield` hidden from help; `admission_rejects_shielded_when_disabled` passes; E2E round-trip open |
+| SEC-301a | done | 3 | [adr/ADR-KMS-HOT-KEYS.md](./adr/ADR-KMS-HOT-KEYS.md) — testnet env/Vault; mainnet requires SEC-301b |
 
-**Phase 2 ship (2026-05-28):** Sepolia Option A proof complete — see [PHASE2_CLOSEOUT.md](./PHASE2_CLOSEOUT.md). Post-ship: REM-211 live validation, REM-203, second-operator sign-off.
+**Phase 2 ship (2026-05-28):** Sepolia Option A on `main` — [PHASE2_CLOSEOUT.md](./PHASE2_CLOSEOUT.md). **Phase 3:** [PHASE3_KICKOFF.md](./PHASE3_KICKOFF.md). Ops: second-operator checklist + optional hot-key rotation drill.
 
 _Update status when PRs merge._

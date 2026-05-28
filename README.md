@@ -161,13 +161,11 @@ creg multisig sign --session .creg-multisig.json --key-file ~/keyA.key
 creg multisig submit --session .creg-multisig.json
 ```
 
-### Shielded variant (encrypted tarball)
+### Shielded variant (experimental — disabled by default)
 
-```bash
-creg publish ./my-pkg-1.0.0.tgz --shield --key-file ~/.creg/publisher.key --publisher-address 0xYourPublisherAddress
-```
+Shielded publish is **off** unless both the CLI and node set `CREG_SHIELDED_PUBLISH_ENABLED=true` (Phase 3 / SEC-304). The `--shield` flag is hidden from `creg publish --help` until E2E coverage lands (SEC-305).
 
-The tarball is encrypted with a per-package AES-256-GCM key; the key is threshold-encrypted to the validator set. **Note:** shielded decryption is still tracked as an open issue in [`chain-registry/docs/DEEP_DIVE_ANALYSIS.md`](chain-registry/docs/DEEP_DIVE_ANALYSIS.md) and should be treated as experimental.
+When enabled, the tarball is AES-256-GCM encrypted and the key is threshold-encrypted to the validator set. Treat as experimental; see [`docs/PHASE3_KICKOFF.md`](docs/PHASE3_KICKOFF.md).
 
 ---
 
@@ -242,7 +240,7 @@ creg stake --amount 10000 --role validator --address 0xYourEthAddress
 | **ValidatorRewards.sol** | Staking rewards distribution | **Active** |
 | **PinningRewards.sol** | IPFS pinner rewards | **Active** |
 | **PackageInsurance.sol** | Optional insurance coverage for verified packages | **Active** |
-| **PrivateRegistry.sol** | Enterprise M-of-N decrypted registries (⚠ ISSUE-004) | **Active** |
+| **PrivateRegistry.sol** | Enterprise M-of-N decrypted registries (ISSUE-004) | **Planned** — no contract in tree; implement only with enterprise commitment (D5) |
 | **CrossChainRegistry.sol** | Multi-chain verification receipts (⚠ ISSUE-005/006) | **Planned** |
 
 See [`chain-registry/docs/DEEP_DIVE_ANALYSIS.md`](chain-registry/docs/DEEP_DIVE_ANALYSIS.md) for contract-level findings.

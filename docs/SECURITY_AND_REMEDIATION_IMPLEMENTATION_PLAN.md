@@ -258,6 +258,8 @@ Maps every weakness and fix to a work item ID.
 
 ## 5. Phase 3 — Security & multi-chain (target: 8–12 weeks)
 
+**Kickoff record:** [PHASE3_KICKOFF.md](./PHASE3_KICKOFF.md) (D4 → **SEC-303c** as of 2026-05-28).
+
 **Exit criteria:** Cross-chain either fixed and tested or explicitly disabled in product; PrivateRegistry status accurate; shielded publish behind feature flag with E2E or removed from marketing; external audit scheduled or completed for critical paths.
 
 ### Epic 3.1 — CrossChainRegistry (ISSUE-005, ISSUE-006, W7)

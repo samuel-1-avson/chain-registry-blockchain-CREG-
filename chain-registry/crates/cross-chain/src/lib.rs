@@ -1,5 +1,10 @@
 //! Cross-Chain Package Verification
 //!
+//! **Product status (Phase 3 / decision D4):** Configuration and client scaffolding only.
+//! On-chain `CrossChainRegistry` remains **Planned** (ISSUE-005/006 open). Sepolia chain specs
+//! ship with `feature_flags.cross_chain: false`. Do not enable multi-chain UI or production
+//! traffic until **SEC-302a/b** land and tests are green, or an explicit product sign-off.
+//!
 //! This crate provides multi-chain support for Chain Registry,
 //! enabling package verification to be shared across multiple L1/L2 chains.
 //!

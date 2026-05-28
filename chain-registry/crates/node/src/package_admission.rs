@@ -47,6 +47,7 @@ pub enum AdmissionError {
     Revoked(String),
     AlreadyPending(String),
     Storage(String),
+    ShieldedPublishDisabled(String),
 }
 
 impl std::fmt::Display for AdmissionError {
@@ -55,9 +56,10 @@ impl std::fmt::Display for AdmissionError {
             Self::InvalidPackageId(message)
             | Self::InvalidPublisherSignature(message)
             | Self::AlreadyVerified(message)
-            | Self::Revoked(message)
+            |             Self::Revoked(message)
             | Self::AlreadyPending(message)
-            | Self::Storage(message) => write!(f, "{}", message),
+            | Self::Storage(message)
+            | Self::ShieldedPublishDisabled(message) => write!(f, "{}", message),
             Self::Publisher(error) => write!(f, "{}", error),
             Self::Scanner(error) => write!(f, "Pre-mempool YARA admission failed: {}", error),
         }
@@ -91,6 +93,13 @@ pub async fn admit_publish_request(
     options: AdmissionOptions,
 ) -> Result<AdmissionReceipt, AdmissionError> {
     validate_package_id(&request)?;
+    if request.shielded && !common::shielded_publish_enabled() {
+        return Err(AdmissionError::ShieldedPublishDisabled(
+            "shielded publish is disabled; set CREG_SHIELDED_PUBLISH_ENABLED=true on the node \
+             (experimental — see docs/PHASE3_KICKOFF.md)"
+                .to_string(),
+        ));
+    }
     if options.verify_publisher_auth {
         verify_publish_auth(state, &request).await?;
     }
@@ -676,6 +685,33 @@ rule TestMaliciousPayload {{
         assert_eq!(receipt.canonical, "npm:test@1.0.0");
         assert_eq!(receipt.pending_count, 1);
         assert!(state.read().await.pending_pool.contains("npm:test@1.0.0"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn admission_rejects_shielded_when_disabled() -> anyhow::Result<()> {
+        let _guard = env_lock().lock().await;
+        let _enabled = EnvRestore::set("CREG_SHIELDED_PUBLISH_ENABLED", "false");
+        let (state, _tempdir) = make_test_state(1, "http://127.0.0.1:65535".into()).await?;
+        let mut request = signed_request(b"payload", common::sha256_hex(b"payload"), "bafyshield");
+        request.shielded = true;
+
+        let error = admit_publish_request(
+            &state,
+            request,
+            AdmissionOptions {
+                surface: AdmissionSurface::Rest,
+                verify_publisher_auth: false,
+            },
+        )
+        .await
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            AdmissionError::ShieldedPublishDisabled(_)
+        ));
+        assert!(!state.read().await.pending_pool.contains("npm:test@1.0.0"));
         Ok(())
     }
 }

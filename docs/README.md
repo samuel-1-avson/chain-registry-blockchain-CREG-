@@ -26,6 +26,8 @@ Central documentation for the Chain Registry monorepo (`chain-registry/`).
 | [TESTNET_SEPOLIA_RUNBOOK.md](./TESTNET_SEPOLIA_RUNBOOK.md) | Sepolia contract deploy, chain-spec sign/publish, node env |
 | [PHASE2_SEPOLIA_KICKOFF.md](./PHASE2_SEPOLIA_KICKOFF.md) | Phase 2 Option A — ordered Sepolia-first checklist |
 | [PHASE2_CLOSEOUT.md](./PHASE2_CLOSEOUT.md) | Phase 2 ship checklist, Etherscan links, deferred items |
+| [PHASE3_KICKOFF.md](./PHASE3_KICKOFF.md) | Phase 3 start — D4 cross-chain decision (SEC-303c), epic order |
+| [adr/ADR-KMS-HOT-KEYS.md](./adr/ADR-KMS-HOT-KEYS.md) | SEC-301a — KMS/Vault vs env for bridge, faucet, relayer hot keys |
 | [DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md) | Canonical PostgreSQL schema (`db-sync`) vs legacy testnet SQL |
 | [API_COOKBOOK.md](./API_COOKBOOK.md) | REST examples by route group |
 
