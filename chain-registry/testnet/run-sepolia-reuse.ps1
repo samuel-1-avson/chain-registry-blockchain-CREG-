@@ -26,6 +26,29 @@ Set-Location $repoRoot
 function Write-Step($msg) { Write-Host "`n=== $msg ===" -ForegroundColor Cyan }
 function Write-Ok($msg) { Write-Host "  OK $msg" -ForegroundColor Green }
 
+function Wait-SpecServerReady {
+    param(
+        [int]$Port,
+        [int]$MaxWaitSec = 90
+    )
+    $healthUrl = "http://localhost:$Port/health"
+    $deadline = (Get-Date).AddSeconds($MaxWaitSec)
+    $attempt = 0
+    while ((Get-Date) -lt $deadline) {
+        $attempt++
+        try {
+            $health = Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 5
+            if ($health.StatusCode -eq 200) {
+                return
+            }
+        } catch {
+            # Container may still be starting on Windows/WSL2 after force-recreate.
+        }
+        Start-Sleep -Seconds 2
+    }
+    throw "Spec server did not become ready at $healthUrl within ${MaxWaitSec}s (docker container may still be starting)"
+}
+
 $specPath = Join-Path $scriptDir "chain-spec.sepolia.json"
 $sigPath = Join-Path $scriptDir "chain-spec.sepolia.json.sig"
 if (-not (Test-Path $specPath)) {
@@ -68,10 +91,9 @@ if (-not $SkipSpecServer) {
     if ($LASTEXITCODE -ne 0) { throw "docker compose up failed (exit $LASTEXITCODE)" }
     $ErrorActionPreference = $prevEap
     Pop-Location
-    Start-Sleep -Seconds 2
-    $health = Invoke-WebRequest -Uri "http://localhost:$SpecServerPort/health" -UseBasicParsing -TimeoutSec 10
-    if ($health.StatusCode -ne 200) { throw "Spec server health failed" }
-    $specFetch = Invoke-WebRequest -Uri $specUrl -UseBasicParsing -TimeoutSec 10
+    Write-Host "  Waiting for spec server on port $SpecServerPort..." -ForegroundColor DarkGray
+    Wait-SpecServerReady -Port $SpecServerPort
+    $specFetch = Invoke-WebRequest -Uri $specUrl -UseBasicParsing -TimeoutSec 30
     if ($specFetch.StatusCode -ne 200) { throw "Could not fetch $specUrl" }
     Write-Ok "Spec server: $specUrl"
 }

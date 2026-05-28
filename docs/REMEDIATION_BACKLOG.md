@@ -23,4 +23,6 @@ Track security and remediation work from [SECURITY_AND_REMEDIATION_IMPLEMENTATIO
 | REM-103b | done | 2 | Chunked `eth_getLogs` (10k blocks, `CREG_ETH_LOG_CHUNK_BLOCKS`) + cursor advance on empty deltas; Sepolia restart synced in ~10s vs 9m cold walk |
 | SEC-302 | pending | 3 | CrossChainRegistry |
 
+**Phase 2 ship (2026-05-28):** Sepolia Option A proof complete — see [PHASE2_CLOSEOUT.md](./PHASE2_CLOSEOUT.md). Post-ship: REM-211, SEC-105, REM-203.
+
 _Update status when PRs merge._

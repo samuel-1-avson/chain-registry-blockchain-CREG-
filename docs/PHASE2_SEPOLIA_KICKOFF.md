@@ -163,32 +163,50 @@ cargo run -p chain-registry-cli -- doctor --testnet
 
 ---
 
-## Step 6 — Phase 2 exit proof (same week)
+## Step 6 — Phase 2 exit proof
 
 | Check | Command / artifact | Status |
 |-------|-------------------|--------|
-| Runbook exercised | Second person repeats Steps 1–5 or documents deltas | pending |
-| L1 contracts | Etherscan links for `staking`, `registry`, `zk_verifier` | pending links |
+| Runbook exercised | Second person repeats Steps 1–5 or documents deltas | deferred (ops) — see [PHASE2_CLOSEOUT.md](./PHASE2_CLOSEOUT.md) |
+| L1 contracts | Etherscan links for `staking`, `registry`, `zk_verifier` | ✓ — links below |
 | Spec signature | `creg chain-spec validate` exit 0 | ✓ (SEC-203) |
 | Sync `eth_getLogs` works on public Sepolia RPCs | Chunked (10k blocks) — `state: synced` after first walk | ✓ (REM-103b) |
-| Sync cursor restart | Stop node → restart → `validator_set_sync.state` returns to `synced` from saved cursor in seconds, no re-walk | ✓ — restart synced in ~10s, cursor pinned at `safe_block` |
-| Observability | REM-211 after metrics endpoint is up | pending |
+| Sync cursor restart | Stop node → restart → `validator_set_sync.state` returns to `synced` from saved cursor in seconds, no re-walk | ✓ |
+| Node health | `Invoke-RestMethod http://localhost:8090/v1/health` | ✓ 2026-05-28 |
+| Observability | REM-211 dashboards | deferred post-ship |
 
-### 2026-05-27 proof artifacts (Option A reuse, publicnode RPC)
+### L1 contracts (Sepolia)
+
+| Contract | Etherscan |
+|----------|-----------|
+| staking `0xe58324Ce72718F802f3d6182e8eA06Cf91cc5d22` | https://sepolia.etherscan.io/address/0xe58324Ce72718F802f3d6182e8eA06Cf91cc5d22 |
+| registry `0x3413EE0B398BE8696346ae294b28301E9AA2D16d` | https://sepolia.etherscan.io/address/0x3413EE0B398BE8696346ae294b28301E9AA2D16d |
+| zk_verifier `0x5aa70Af0e9c05A4e24485Ef72A7563976d919423` | https://sepolia.etherscan.io/address/0x5aa70Af0e9c05A4e24485Ef72A7563976d919423 |
+
+### Proof artifacts (Option A reuse, publicnode RPC)
+
+**2026-05-27**
 
 ```
 safe_block:    10,936,321
-first walk:    ~9 min (zero staking events on Sepolia → cursor advanced to safe_block)
-restart walk:  ~10 s (resumed from saved cursor 10,936,323 → 10,936,359)
-last_error:    null throughout
+first walk:    ~9 min (zero staking events → cursor advanced to safe_block)
+restart walk:  ~10 s (cursor 10,936,323 → 10,936,359)
+last_error:    null
 ```
+
+**2026-05-28** (ship verification)
+
+```
+last_finalized_source_block: 10,937,522
+validator_set_sync.state:    synced
+```
+
+**Phase 2 shipped:** see [PHASE2_CLOSEOUT.md](./PHASE2_CLOSEOUT.md). Merge `phase-1-security-foundation` → `main`.
 
 ---
 
-## After Sepolia (parallel Phase 2 code)
+## After Sepolia (post–Phase 2 backlog)
 
-- SEC-203 — `creg chain-spec validate`
-- SEC-101 / SEC-101b — hot-key runbook + startup warnings
 - SEC-105 — Ed25519 → ETH address warning
 - REM-203 — unify alloy
 - REM-211 — Grafana/Prometheus vs testnet profile
