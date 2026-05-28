@@ -23,7 +23,7 @@ Track security and remediation work from [SECURITY_AND_REMEDIATION_IMPLEMENTATIO
 | REM-103b | done | 2 | Chunked `eth_getLogs` (10k blocks, `CREG_ETH_LOG_CHUNK_BLOCKS`) + cursor advance on empty deltas; Sepolia restart synced in ~10s vs 9m cold walk |
 | SEC-105 | done | 2+ | `creg keygen` warning + `creg stake` rejects Ed25519 key file; [WALLET_KEY_DERIVATION.md](./WALLET_KEY_DERIVATION.md) |
 | REM-211 | partial | 2+ | [OBSERVABILITY_SEPOLIA.md](./OBSERVABILITY_SEPOLIA.md) + `prometheus.sepolia-local.yml`; live scrape / Grafana optional |
-| REM-203 | pending | 2+ | Unify `crates/node` alloy to workspace 0.6 |
+| REM-203 | in PR | 2+ | `rem-203-alloy-unify`: node uses workspace alloy 0.6; lockfile pruned |
 | SEC-302 | pending | 3 | CrossChainRegistry |
 
 **Phase 2 ship (2026-05-28):** Sepolia Option A proof complete — see [PHASE2_CLOSEOUT.md](./PHASE2_CLOSEOUT.md). Post-ship: REM-211 live validation, REM-203, second-operator sign-off.
