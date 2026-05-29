@@ -489,81 +489,22 @@ fn sign_with_pgp_if_configured(tarball: &[u8]) -> Result<(Option<String>, Option
 
 /// Encrypt the tarball for the validator set using AES-GCM-256 and ECIES.
 fn encrypt_for_validators(data: &[u8]) -> Result<(Vec<u8>, String)> {
-    use aes_gcm::{
-        aead::{Aead, KeyInit},
-        Aes256Gcm, Key, Nonce,
-    };
-    use rand::{thread_rng, RngCore};
-
-    // 1. Generate ephemeral symmetric key
-    let mut aes_key = [0u8; 32];
-    thread_rng().fill_bytes(&mut aes_key);
-    let key = Key::<Aes256Gcm>::from_slice(&aes_key);
-    let cipher = Aes256Gcm::new(key);
-
-    // 2. Encrypt payload
-    let mut nonce_bytes = [0u8; 12];
-    thread_rng().fill_bytes(&mut nonce_bytes);
-    let nonce = Nonce::from_slice(&nonce_bytes);
-
-    let ciphertext = cipher
-        .encrypt(nonce, data)
-        .map_err(|e| anyhow::anyhow!("Encryption failed: {}", e))?;
-
-    // 3. Encrypt the key bundle with the validator set's X25519 public key (ECIES)
-    let raw_bundle = format!("{}:{}", hex::encode(aes_key), hex::encode(nonce_bytes));
-
-    let bundle = {
-        // Try to read the validator set's X25519 public key from env
-        match std::env::var("CREG_VALIDATOR_PUBKEY_X25519") {
-            Ok(pubkey_hex) => {
-                use sha2::{Digest, Sha256};
-                use x25519_dalek::{EphemeralSecret, PublicKey};
-
-                let pubkey_bytes: [u8; 32] = hex::decode(&pubkey_hex)
-                    .context("Invalid CREG_VALIDATOR_PUBKEY_X25519 hex")?
-                    .try_into()
-                    .map_err(|_| anyhow::anyhow!("X25519 pubkey must be 32 bytes"))?;
-                let their_public = PublicKey::from(pubkey_bytes);
-
-                // ECIES: ephemeral X25519 key exchange → derive AES key → encrypt bundle
-                let ephemeral_secret = EphemeralSecret::random_from_rng(thread_rng());
-                let ephemeral_public = x25519_dalek::PublicKey::from(&ephemeral_secret);
-                let shared_secret = ephemeral_secret.diffie_hellman(&their_public);
-
-                // KDF: SHA-256(shared_secret)
-                let wrap_key_bytes = Sha256::digest(shared_secret.as_bytes());
-                let wrap_key = Key::<Aes256Gcm>::from_slice(&wrap_key_bytes);
-                let wrap_cipher = Aes256Gcm::new(wrap_key);
-
-                let mut wrap_nonce_bytes = [0u8; 12];
-                thread_rng().fill_bytes(&mut wrap_nonce_bytes);
-                let wrap_nonce = Nonce::from_slice(&wrap_nonce_bytes);
-
-                let encrypted_bundle = wrap_cipher
-                    .encrypt(wrap_nonce, raw_bundle.as_bytes())
-                    .map_err(|e| anyhow::anyhow!("Bundle encryption failed: {}", e))?;
-
-                // Format: ephemeral_pubkey_hex:wrap_nonce_hex:encrypted_bundle_hex
-                format!(
-                    "ecies:{}:{}:{}",
-                    hex::encode(ephemeral_public.as_bytes()),
-                    hex::encode(wrap_nonce_bytes),
-                    hex::encode(encrypted_bundle)
-                )
-            }
-            Err(_) => {
-                eprintln!("  {} CREG_VALIDATOR_PUBKEY_X25519 not set — key bundle is plaintext (dev mode only)", "⚠".to_string());
-                format!("plain:{}", raw_bundle)
-            }
+    let validator_pubkey = match std::env::var("CREG_VALIDATOR_PUBKEY_X25519") {
+        Ok(pubkey_hex) => {
+            let bytes: [u8; 32] = hex::decode(pubkey_hex.trim())
+                .context("Invalid CREG_VALIDATOR_PUBKEY_X25519 hex")?
+                .try_into()
+                .map_err(|_| anyhow::anyhow!("X25519 pubkey must be 32 bytes"))?;
+            Some(bytes)
+        }
+        Err(_) => {
+            eprintln!(
+                "  ⚠ CREG_VALIDATOR_PUBKEY_X25519 not set — key bundle is plaintext (dev mode only)"
+            );
+            None
         }
     };
-
-    // Prepend nonce to ciphertext for easier retrieval
-    let mut final_payload = nonce_bytes.to_vec();
-    final_payload.extend(ciphertext);
-
-    Ok((final_payload, bundle))
+    common::encrypt_shielded_package(data, validator_pubkey.as_ref())
 }
 
 // ────────────────────────────────────────────────────────────────────────────

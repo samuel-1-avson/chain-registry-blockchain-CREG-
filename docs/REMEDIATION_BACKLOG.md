@@ -28,7 +28,7 @@ Track security and remediation work from [SECURITY_AND_REMEDIATION_IMPLEMENTATIO
 | SEC-302 | deferred | 3 | CrossChainRegistry ISSUE-005/006 — execute only if D4 reversed |
 | SEC-306a | done | 3 | D5: PrivateRegistry **Planned** — README + contracts/README |
 | SEC-304 | done | 3 | `CREG_SHIELDED_PUBLISH_ENABLED` default false; node + CLI |
-| SEC-305 | partial | 3 | `--shield` hidden from help; `admission_rejects_shielded_when_disabled` passes; E2E round-trip open |
+| SEC-305 | done | 3 | Shared `shielded_wire` format (CLI ↔ node); admission skips YARA on ciphertext; `admission_accepts_shielded_when_enabled` + common round-trip tests |
 | SEC-301a | done | 3 | [adr/ADR-KMS-HOT-KEYS.md](./adr/ADR-KMS-HOT-KEYS.md) — testnet env/Vault; mainnet requires SEC-301b |
 | SEC-301b | done | 3 | `chain-registry-secrets` crate — env + Vault KV2; wired to node/faucet/relayer |
 

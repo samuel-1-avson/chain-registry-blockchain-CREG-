@@ -7,6 +7,7 @@ pub mod error;
 pub mod feature_flags;
 pub mod hot_key;
 pub mod package;
+pub mod shielded_wire;
 pub mod verdict;
 
 /// gRPC and Protobuf definitions (Generated Choice)
@@ -20,6 +21,7 @@ pub use error::*;
 pub use feature_flags::*;
 pub use hot_key::*;
 pub use package::*;
+pub use shielded_wire::*;
 pub use verdict::*;
 
 // ── Cryptographic helpers ─────────────────────────────────────────────────────

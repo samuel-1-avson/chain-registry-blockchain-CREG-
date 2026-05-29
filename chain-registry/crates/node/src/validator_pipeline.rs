@@ -509,122 +509,12 @@ async fn decrypt_shielded(
     bundle: &str,
     _state: &crate::SharedState,
 ) -> anyhow::Result<Vec<u8>> {
-    use aes_gcm::{aead::Aead, Aes256Gcm, KeyInit, Nonce};
-
-    let (aes_key, aes_nonce) = parse_key_bundle(bundle)?;
-
-    if data.len() < 12 + 16 {
-        anyhow::bail!(
-            "shielded tarball too short ({} bytes) — expected nonce(12) + ciphertext(≥16)",
-            data.len()
-        );
-    }
-
-    // The CLI prepends the same 12-byte nonce in front of the ciphertext for
-    // convenience. We prefer the bundle-authenticated nonce (ECIES wrap MAC
-    // integrity-protects it) and use it as the canonical value. If the prefix
-    // disagrees, that is a tampering signal — reject.
-    let prefixed = &data[..12];
-    if prefixed != aes_nonce.as_slice() {
-        anyhow::bail!("shielded tarball nonce prefix does not match authenticated bundle nonce");
-    }
-    let ciphertext = &data[12..];
-
-    let cipher = Aes256Gcm::new_from_slice(&aes_key)
-        .map_err(|e| anyhow::anyhow!("invalid AES key derived from bundle: {}", e))?;
-    let plaintext = cipher
-        .decrypt(Nonce::from_slice(&aes_nonce), ciphertext)
-        .map_err(|e| anyhow::anyhow!("shielded AES-GCM decrypt failed: {}", e))?;
-
+    let plaintext = common::decrypt_shielded_package(data, bundle)?;
     tracing::info!(
         "Shielded package decrypted successfully: {} bytes",
         plaintext.len()
     );
     Ok(plaintext)
-}
-
-/// Extract the AES-256-GCM key and nonce from a key bundle string.
-///
-/// Handles both the `plain:` dev format and the `ecies:` production format
-/// documented on `decrypt_shielded`.
-fn parse_key_bundle(bundle: &str) -> anyhow::Result<([u8; 32], [u8; 12])> {
-    if let Some(rest) = bundle.strip_prefix("plain:") {
-        let (k_hex, n_hex) = rest
-            .split_once(':')
-            .ok_or_else(|| anyhow::anyhow!("malformed plain bundle: missing ':' separator"))?;
-        let key: [u8; 32] = hex::decode(k_hex)?
-            .try_into()
-            .map_err(|_| anyhow::anyhow!("plain bundle: AES key must be 32 bytes"))?;
-        let nonce: [u8; 12] = hex::decode(n_hex)?
-            .try_into()
-            .map_err(|_| anyhow::anyhow!("plain bundle: nonce must be 12 bytes"))?;
-        return Ok((key, nonce));
-    }
-
-    if let Some(rest) = bundle.strip_prefix("ecies:") {
-        use aes_gcm::{aead::Aead, Aes256Gcm, KeyInit, Nonce};
-        use sha2::{Digest, Sha256};
-        use x25519_dalek::{PublicKey, StaticSecret};
-
-        let parts: Vec<&str> = rest.split(':').collect();
-        if parts.len() != 3 {
-            anyhow::bail!(
-                "malformed ecies bundle: expected 3 hex fields (eph_pub:wrap_nonce:ct), got {}",
-                parts.len()
-            );
-        }
-        let eph_pub_bytes: [u8; 32] = hex::decode(parts[0])?
-            .try_into()
-            .map_err(|_| anyhow::anyhow!("ecies bundle: ephemeral pubkey must be 32 bytes"))?;
-        let wrap_nonce_bytes: [u8; 12] = hex::decode(parts[1])?
-            .try_into()
-            .map_err(|_| anyhow::anyhow!("ecies bundle: wrap nonce must be 12 bytes"))?;
-        let wrapped = hex::decode(parts[2])?;
-
-        let secret_hex = std::env::var("CREG_VALIDATOR_PRIVKEY_X25519").map_err(|_| {
-            anyhow::anyhow!(
-                "CREG_VALIDATOR_PRIVKEY_X25519 is not set — cannot decrypt ecies key bundle. \
-                 Set it to the 32-byte hex X25519 secret that matches the publisher-facing \
-                 CREG_VALIDATOR_PUBKEY_X25519."
-            )
-        })?;
-        let secret_bytes: [u8; 32] = hex::decode(secret_hex.trim())?
-            .try_into()
-            .map_err(|_| anyhow::anyhow!("CREG_VALIDATOR_PRIVKEY_X25519 must be 32 bytes"))?;
-
-        let our_secret = StaticSecret::from(secret_bytes);
-        let their_public = PublicKey::from(eph_pub_bytes);
-        let shared = our_secret.diffie_hellman(&their_public);
-
-        // Derive wrap key as SHA-256(shared_secret) — matches the CLI side.
-        let wrap_key_bytes: [u8; 32] = Sha256::digest(shared.as_bytes()).into();
-
-        let wrap_cipher = Aes256Gcm::new_from_slice(&wrap_key_bytes)
-            .map_err(|e| anyhow::anyhow!("ecies bundle: wrap key init failed: {}", e))?;
-        let wrap_nonce = Nonce::from_slice(&wrap_nonce_bytes);
-        let raw_bundle_bytes = wrap_cipher
-            .decrypt(wrap_nonce, wrapped.as_slice())
-            .map_err(|e| anyhow::anyhow!("ecies bundle: wrap decrypt failed: {}", e))?;
-        let raw_bundle = std::str::from_utf8(&raw_bundle_bytes)
-            .map_err(|e| anyhow::anyhow!("ecies bundle: raw payload is not UTF-8: {}", e))?;
-
-        let (k_hex, n_hex) = raw_bundle
-            .split_once(':')
-            .ok_or_else(|| anyhow::anyhow!("ecies bundle: malformed raw payload"))?;
-        let key: [u8; 32] = hex::decode(k_hex)?
-            .try_into()
-            .map_err(|_| anyhow::anyhow!("ecies bundle: AES key must be 32 bytes"))?;
-        let nonce: [u8; 12] = hex::decode(n_hex)?
-            .try_into()
-            .map_err(|_| anyhow::anyhow!("ecies bundle: AES nonce must be 12 bytes"))?;
-        return Ok((key, nonce));
-    }
-
-    let preview: String = bundle.chars().take(16).collect();
-    anyhow::bail!(
-        "unsupported key bundle format (expected 'plain:' or 'ecies:' prefix, got {:?}…)",
-        preview
-    )
 }
 
 // Note: The Shamir secret-sharing threshold-decryption path (decrypt_share,
@@ -640,149 +530,30 @@ fn parse_key_bundle(bundle: &str) -> anyhow::Result<([u8; 32], [u8; 12])> {
 
 #[cfg(test)]
 mod shielded_tests {
-    use super::*;
-    use aes_gcm::{aead::Aead, Aes256Gcm, KeyInit, Nonce};
-    use rand::RngCore;
-
-    fn make_plain_bundle(key: &[u8; 32], nonce: &[u8; 12]) -> String {
-        format!("plain:{}:{}", hex::encode(key), hex::encode(nonce))
-    }
-
-    fn make_ecies_bundle(
-        validator_pub: &x25519_dalek::PublicKey,
-        aes_key: &[u8; 32],
-        aes_nonce: &[u8; 12],
-    ) -> String {
-        use sha2::{Digest, Sha256};
-        use x25519_dalek::EphemeralSecret;
-
-        let mut rng = rand::rngs::OsRng;
-        let ephemeral_secret = EphemeralSecret::random_from_rng(&mut rng);
-        let ephemeral_public = x25519_dalek::PublicKey::from(&ephemeral_secret);
-        let shared = ephemeral_secret.diffie_hellman(validator_pub);
-        let wrap_key_bytes: [u8; 32] = Sha256::digest(shared.as_bytes()).into();
-
-        let wrap_cipher = Aes256Gcm::new_from_slice(&wrap_key_bytes).unwrap();
-        let mut wrap_nonce_bytes = [0u8; 12];
-        rng.fill_bytes(&mut wrap_nonce_bytes);
-        let wrap_nonce = Nonce::from_slice(&wrap_nonce_bytes);
-        let raw_bundle = format!("{}:{}", hex::encode(aes_key), hex::encode(aes_nonce));
-        let wrapped = wrap_cipher
-            .encrypt(wrap_nonce, raw_bundle.as_bytes())
-            .unwrap();
-
-        format!(
-            "ecies:{}:{}:{}",
-            hex::encode(ephemeral_public.as_bytes()),
-            hex::encode(wrap_nonce_bytes),
-            hex::encode(wrapped)
-        )
-    }
-
-    fn build_shielded_tarball(plaintext: &[u8], key: &[u8; 32], nonce: &[u8; 12]) -> Vec<u8> {
-        let cipher = Aes256Gcm::new_from_slice(key).unwrap();
-        let ct = cipher.encrypt(Nonce::from_slice(nonce), plaintext).unwrap();
-        let mut out = nonce.to_vec();
-        out.extend_from_slice(&ct);
-        out
-    }
-
-    #[test]
-    fn parse_plain_bundle_round_trip() {
-        let key = [7u8; 32];
-        let nonce = [3u8; 12];
-        let bundle = make_plain_bundle(&key, &nonce);
-        let (k, n) = parse_key_bundle(&bundle).unwrap();
-        assert_eq!(k, key);
-        assert_eq!(n, nonce);
-    }
-
-    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
-        static MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        MUTEX.lock().unwrap()
-    }
-
-    #[test]
-    fn parse_ecies_bundle_round_trip() {
-        let _lock = env_lock();
-        // Set up a validator X25519 keypair.
-        let mut rng = rand::rngs::OsRng;
-        let mut secret_bytes = [0u8; 32];
-        rng.fill_bytes(&mut secret_bytes);
-        let secret = x25519_dalek::StaticSecret::from(secret_bytes);
-        let public = x25519_dalek::PublicKey::from(&secret);
-
-        // Point the parser at it via the env var.
-        std::env::set_var(
-            "CREG_VALIDATOR_PRIVKEY_X25519",
-            hex::encode(secret.to_bytes()),
-        );
-
-        let aes_key = [0x42u8; 32];
-        let aes_nonce = [0xabu8; 12];
-        let bundle = make_ecies_bundle(&public, &aes_key, &aes_nonce);
-        let (k, n) = parse_key_bundle(&bundle).unwrap();
-        assert_eq!(k, aes_key);
-        assert_eq!(n, aes_nonce);
-
-        std::env::remove_var("CREG_VALIDATOR_PRIVKEY_X25519");
-    }
-
+    /// `decrypt_shielded` delegates to `common::decrypt_shielded_package`; exercise the same wire format the CLI publishes.
     #[tokio::test]
-    async fn decrypt_shielded_plain_round_trip() {
-        let key = [1u8; 32];
-        let nonce = [2u8; 12];
-        let plaintext = b"hello world this is a secret package";
-        let tarball = build_shielded_tarball(plaintext, &key, &nonce);
-        let bundle = make_plain_bundle(&key, &nonce);
-
-        // State is only used for logging in the new implementation; we can
-        // fabricate one with a minimal NodeState via a raw Arc::new, but
-        // decrypt_shielded's signature requires a SharedState reference. Since
-        // the plain path never touches state, we pass a dangling but unused
-        // SharedState via Arc::new_uninit... Actually simpler: drive through
-        // parse_key_bundle + manual AES-GCM, which exercises the same core.
-        let (k, n) = parse_key_bundle(&bundle).unwrap();
-        assert_eq!(k, key);
-        assert_eq!(n, nonce);
-        use aes_gcm::{aead::Aead, Aes256Gcm, KeyInit, Nonce};
-        let cipher = Aes256Gcm::new_from_slice(&k).unwrap();
-        let got = cipher
-            .decrypt(Nonce::from_slice(&n), &tarball[12..])
-            .unwrap();
+    async fn decrypt_shielded_matches_common_plain_round_trip() {
+        let plaintext = b"shielded e2e plain path";
+        let (wire, bundle) = common::encrypt_shielded_package(plaintext, None).unwrap();
+        let got = common::decrypt_shielded_package(&wire, &bundle).unwrap();
         assert_eq!(got, plaintext);
     }
 
-    #[test]
-    fn tampered_ecies_bundle_fails() {
-        let _lock = env_lock();
-        // Set up a valid bundle, then flip a byte in the wrapped region.
-        let mut rng = rand::rngs::OsRng;
-        let mut secret_bytes = [0u8; 32];
-        rng.fill_bytes(&mut secret_bytes);
-        let secret = x25519_dalek::StaticSecret::from(secret_bytes);
+    #[tokio::test]
+    async fn decrypt_shielded_matches_common_ecies_round_trip() {
+        let secret = x25519_dalek::StaticSecret::random_from_rng(rand::thread_rng());
         let public = x25519_dalek::PublicKey::from(&secret);
         std::env::set_var(
             "CREG_VALIDATOR_PRIVKEY_X25519",
             hex::encode(secret.to_bytes()),
         );
 
-        let bundle = make_ecies_bundle(&public, &[9u8; 32], &[5u8; 12]);
-        // Corrupt the last hex character of the wrapped ciphertext.
-        let mut tampered = bundle.into_bytes();
-        let last = tampered.len() - 1;
-        tampered[last] = if tampered[last] == b'0' { b'1' } else { b'0' };
-        let tampered = String::from_utf8(tampered).unwrap();
-
-        let result = parse_key_bundle(&tampered);
-        assert!(result.is_err(), "tampered ECIES bundle must fail AEAD");
+        let plaintext = b"shielded e2e ecies path";
+        let (wire, bundle) =
+            common::encrypt_shielded_package(plaintext, Some(public.as_bytes())).unwrap();
+        let got = common::decrypt_shielded_package(&wire, &bundle).unwrap();
+        assert_eq!(got, plaintext);
 
         std::env::remove_var("CREG_VALIDATOR_PRIVKEY_X25519");
-    }
-
-    #[test]
-    fn unsupported_bundle_format_rejected() {
-        let result = parse_key_bundle("legacy:garbage:data");
-        assert!(result.is_err());
     }
 }

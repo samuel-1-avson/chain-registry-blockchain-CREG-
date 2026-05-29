@@ -688,6 +688,42 @@ rule TestMaliciousPayload {{
         Ok(())
     }
 
+    fn shielded_signed_request(
+        plaintext: &[u8],
+        wire: &[u8],
+        bundle: &str,
+        cid: &str,
+    ) -> PublishRequest {
+        let mut request =
+            signed_request(plaintext, common::sha256_hex(plaintext), cid);
+        request.shielded = true;
+        request.key_bundle = Some(bundle.to_string());
+        assert_ne!(wire, plaintext, "IPFS mock must serve encrypted wire bytes");
+        request
+    }
+
+    #[tokio::test]
+    async fn admission_accepts_shielded_when_enabled() -> anyhow::Result<()> {
+        let _guard = env_lock().lock().await;
+        let _enabled = EnvRestore::set("CREG_SHIELDED_PUBLISH_ENABLED", "true");
+        let plaintext = make_tarball("index.js", "module.exports = () => 'shielded-safe';")?;
+        let (wire, bundle) = common::encrypt_shielded_package(&plaintext, None)?;
+        let ipfs_url = spawn_mock_ipfs(wire.clone(), StatusCode::OK).await;
+        let (state, _tempdir) = make_test_state(1, ipfs_url).await?;
+        let request = shielded_signed_request(
+            &plaintext,
+            &wire,
+            &bundle,
+            "bafyshieldedenabled",
+        );
+
+        let receipt = admit_for_test(&state, request).await?;
+        assert_eq!(receipt.canonical, "npm:test@1.0.0");
+        assert_eq!(receipt.pending_count, 1);
+        assert!(state.read().await.pending_pool.contains("npm:test@1.0.0"));
+        Ok(())
+    }
+
     #[tokio::test]
     async fn admission_rejects_shielded_when_disabled() -> anyhow::Result<()> {
         let _guard = env_lock().lock().await;

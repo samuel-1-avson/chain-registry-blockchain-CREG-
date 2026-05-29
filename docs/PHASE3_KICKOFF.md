@@ -54,7 +54,7 @@ To switch to **SEC-302**, update this section, set acceptance criteria from plan
 | Item | Status |
 |------|--------|
 | **SEC-304** | Done — `CREG_SHIELDED_PUBLISH_ENABLED` defaults **false**; node admission + CLI gate |
-| **SEC-305** | Partial — `--shield` hidden from `creg publish --help`; E2E round-trip still open |
+| **SEC-305** | Done — `common::shielded_wire` (encrypt/decrypt); admission skips pre-mempool YARA on ciphertext; `admission_accepts_shielded_when_enabled`; `--shield` still hidden from help |
 
 ---
 
@@ -62,7 +62,7 @@ To switch to **SEC-302**, update this section, set acceptance criteria from plan
 
 1. **Epic 3.1** — Cross-chain: hold **SEC-302** (deferred) or execute after D4 reversal  
 2. **Epic 3.2** — **SEC-306a** PrivateRegistry → **Planned** (**D5** done)  
-3. **Epic 3.3** — **SEC-304** done; **SEC-305** E2E remaining  
+3. **Epic 3.3** — **SEC-304** / **SEC-305** done  
 4. **Epic 3.4** — **SEC-301a/b** done — `chain-registry-secrets` (env + Vault); production rejects `CREG_SECRETS_BACKEND=env` when not testnet  
 5. **Epic 3.5** — **SEC-401** audit scope, **SEC-402** partition test, **SEC-307** rate-limit ADR  
 6. **Epic 3.6** — **REM-205** explorer refactor (P3)
@@ -73,6 +73,6 @@ Track status in [REMEDIATION_BACKLOG.md](./REMEDIATION_BACKLOG.md).
 
 - Cross-chain fixed **or** explicitly disabled in product (D4 → **disabled** for now)  
 - PrivateRegistry status accurate (**D5** → Planned)  
-- Shielded publish gated + tested or demoted (**SEC-304** done; **SEC-305** E2E open)  
+- Shielded publish gated + tested (**SEC-304** / **SEC-305** done; feature flag + unit/E2E admission tests)  
 - KMS ADR approved; testnet implementation started  
 - Audit scheduled with scope  

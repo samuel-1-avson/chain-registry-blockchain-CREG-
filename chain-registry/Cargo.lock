@@ -2423,12 +2423,14 @@ dependencies = [
 name = "common"
 version = "0.1.0"
 dependencies = [
+ "aes-gcm",
  "anyhow",
  "chrono",
  "ed25519-dalek",
  "hex",
  "prost",
  "prost-types",
+ "rand 0.8.5",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -2437,6 +2439,7 @@ dependencies = [
  "tonic-build",
  "tracing",
  "uuid 1.22.0",
+ "x25519-dalek",
 ]
 
 [[package]]

@@ -112,6 +112,16 @@ pub async fn run_pre_mempool_yara_gate(
     request: &PublishRequest,
     ipfs_url: &str,
 ) -> Result<(), AdmissionScanError> {
+    if request.shielded {
+        // IPFS holds encrypted bytes; plaintext hash is checked after decryption in
+        // validator_pipeline. YARA on ciphertext is not meaningful at admission.
+        tracing::debug!(
+            canonical = %request.id.canonical(),
+            "Skipping pre-mempool YARA for shielded publish (SEC-305)"
+        );
+        return Ok(());
+    }
+
     if !ml_validator::yara_scanner::rules_available() {
         return Err(AdmissionScanError::RulesUnavailable);
     }
