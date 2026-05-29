@@ -2160,6 +2160,7 @@ dependencies = [
  "anyhow",
  "axum",
  "axum-server",
+ "chain-registry-secrets",
  "chrono",
  "common",
  "consensus",
@@ -2211,6 +2212,7 @@ dependencies = [
  "alloy",
  "anyhow",
  "axum",
+ "chain-registry-secrets",
  "chrono",
  "common",
  "dashmap 5.5.3",
@@ -2225,6 +2227,19 @@ dependencies = [
  "tracing",
  "tracing-subscriber 0.3.23",
  "uuid 1.22.0",
+]
+
+[[package]]
+name = "chain-registry-secrets"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "common",
+ "hex",
+ "reqwest 0.11.27",
+ "serde",
+ "serde_json",
+ "tracing",
 ]
 
 [[package]]
@@ -4141,6 +4156,7 @@ dependencies = [
  "anyhow",
  "axum",
  "axum-server",
+ "chain-registry-secrets",
  "chrono",
  "common",
  "dashmap 5.5.3",

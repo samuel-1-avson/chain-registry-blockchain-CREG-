@@ -63,7 +63,7 @@ To switch to **SEC-302**, update this section, set acceptance criteria from plan
 1. **Epic 3.1** — Cross-chain: hold **SEC-302** (deferred) or execute after D4 reversal  
 2. **Epic 3.2** — **SEC-306a** PrivateRegistry → **Planned** (**D5** done)  
 3. **Epic 3.3** — **SEC-304** done; **SEC-305** E2E remaining  
-4. **Epic 3.4** — **SEC-301a** ADR done ([adr/ADR-KMS-HOT-KEYS.md](./adr/ADR-KMS-HOT-KEYS.md)); **SEC-301b** provider implementation next  
+4. **Epic 3.4** — **SEC-301a/b** done — `chain-registry-secrets` (env + Vault); production rejects `CREG_SECRETS_BACKEND=env` when not testnet  
 5. **Epic 3.5** — **SEC-401** audit scope, **SEC-402** partition test, **SEC-307** rate-limit ADR  
 6. **Epic 3.6** — **REM-205** explorer refactor (P3)
 

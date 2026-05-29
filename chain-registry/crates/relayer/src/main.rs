@@ -58,23 +58,30 @@ struct RelayerConfig {
 }
 
 impl RelayerConfig {
-    async fn from_env(http_client: &reqwest::Client) -> anyhow::Result<Self> {
-        let private_key =
-            std::env::var("RELAYER_PRIVATE_KEY").expect("RELAYER_PRIVATE_KEY must be set");
+    async fn from_env(
+        http_client: &reqwest::Client,
+    ) -> anyhow::Result<(Self, chain_registry_secrets::SecretsProvider)> {
+        let secrets = chain_registry_secrets::SecretsProvider::from_env()?;
+        let private_key = secrets
+            .secp256k1_signing_key_hex(chain_registry_secrets::HotKeyRole::Relayer)
+            .await?;
         let signer: PrivateKeySigner = private_key.parse()?;
         let relayer_address = signer.address();
 
         let rpc_url = env_string("RELAYER_RPC_URL", "http://localhost:8545");
         let active_chain_id = fetch_chain_id(http_client, &rpc_url).await?;
 
-        Ok(Self {
-            port: env_u16("RELAYER_PORT", 8083),
-            rpc_url,
-            private_key,
-            policy_path: env_string("RELAYER_POLICY_PATH", "config/relayer-policy.example.json"),
-            relayer_address,
-            active_chain_id,
-        })
+        Ok((
+            Self {
+                port: env_u16("RELAYER_PORT", 8083),
+                rpc_url,
+                private_key,
+                policy_path: env_string("RELAYER_POLICY_PATH", "config/relayer-policy.example.json"),
+                relayer_address,
+                active_chain_id,
+            },
+            secrets,
+        ))
     }
 }
 
@@ -396,10 +403,10 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let http_client = reqwest::Client::new();
-    let config = RelayerConfig::from_env(&http_client).await?;
-    common::warn_hot_key_from_env(
+    let (config, secrets) = RelayerConfig::from_env(&http_client).await?;
+    secrets.warn_hot_key_if_env(
         "relayer",
-        "RELAYER_PRIVATE_KEY",
+        chain_registry_secrets::HotKeyRole::Relayer,
         &config.private_key,
         common::is_testnet_env(),
     );

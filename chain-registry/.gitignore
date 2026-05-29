@@ -25,6 +25,9 @@ docs/
 *.env
 secrets/
 *secret*
+# SEC-301b: hot-key loader crate (source only — not credential files)
+!crates/secrets/
+!crates/secrets/**
 !.gitignore
 
 # =============================================================================

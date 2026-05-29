@@ -430,7 +430,8 @@ async fn main() -> Result<()> {
         }
         anyhow::bail!(
             "Cannot start node: unsafe environment for production (CREG_TESTNET=false). \
-             Unset CREG_DEV_SANDBOX and CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM, or set CREG_TESTNET=true for local clusters."
+             Unset CREG_DEV_SANDBOX and CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM, use CREG_SECRETS_BACKEND=vault for hot keys, \
+             or set CREG_TESTNET=true for local clusters."
         );
     }
 

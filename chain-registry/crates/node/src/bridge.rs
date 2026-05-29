@@ -62,7 +62,14 @@ pub async fn run(state: Arc<RwLock<NodeState>>) {
             (s.config.bridge_privkey.clone(), s.config.is_testnet)
         };
         if let Some(ref key) = bridge_key {
-            common::warn_hot_key_from_env("bridge", "CREG_BRIDGE_KEY", key, is_testnet);
+            if let Ok(secrets) = chain_registry_secrets::SecretsProvider::from_env() {
+                secrets.warn_hot_key_if_env(
+                    "bridge",
+                    chain_registry_secrets::HotKeyRole::Bridge,
+                    key,
+                    is_testnet,
+                );
+            }
         }
     }
 

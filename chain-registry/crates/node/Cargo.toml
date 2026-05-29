@@ -21,6 +21,7 @@ path = "src/bin/creg_indexer.rs"
 
 [dependencies]
 common    = { path = "../common" }
+chain-registry-secrets = { path = "../secrets" }
 validator = { path = "../validator" }
 ml-validator = { path = "../ml-validator" }
 consensus = { path = "../consensus" }

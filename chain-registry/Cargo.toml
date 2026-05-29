@@ -16,6 +16,7 @@ members = [
     "crates/ipfs-pinner",
     "crates/faucet",
     "crates/relayer",
+    "crates/secrets",
 ]
 resolver = "2"
 

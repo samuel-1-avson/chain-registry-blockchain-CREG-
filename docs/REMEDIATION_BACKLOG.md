@@ -30,6 +30,7 @@ Track security and remediation work from [SECURITY_AND_REMEDIATION_IMPLEMENTATIO
 | SEC-304 | done | 3 | `CREG_SHIELDED_PUBLISH_ENABLED` default false; node + CLI |
 | SEC-305 | partial | 3 | `--shield` hidden from help; `admission_rejects_shielded_when_disabled` passes; E2E round-trip open |
 | SEC-301a | done | 3 | [adr/ADR-KMS-HOT-KEYS.md](./adr/ADR-KMS-HOT-KEYS.md) — testnet env/Vault; mainnet requires SEC-301b |
+| SEC-301b | done | 3 | `chain-registry-secrets` crate — env + Vault KV2; wired to node/faucet/relayer |
 
 **Phase 2 ship (2026-05-28):** Sepolia Option A on `main` — [PHASE2_CLOSEOUT.md](./PHASE2_CLOSEOUT.md). **Phase 3:** [PHASE3_KICKOFF.md](./PHASE3_KICKOFF.md). Ops: second-operator checklist + optional hot-key rotation drill.
 

@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 common = { path = "../common" }
+chain-registry-secrets = { path = "../secrets" }
 tokio = { version = "1", features = ["full"] }
 axum = "0.7"
 axum-server = { version = "0.7", features = ["tls-rustls"], optional = true }

@@ -231,7 +231,7 @@ impl NodeConfig {
             data_dir: PathBuf::from(env("CREG_DATA_DIR", "./data")),
             node_id: env("CREG_NODE_ID", &Uuid::new_v4().to_string()),
             validator_privkey: std::env::var("CREG_VALIDATOR_KEY").ok(),
-            bridge_privkey: std::env::var("CREG_BRIDGE_KEY").ok(),
+            bridge_privkey: None,
             is_validator: env("CREG_IS_VALIDATOR", "false") == "true",
             peers: std::env::var("CREG_PEERS")
                 .unwrap_or_default()
@@ -275,31 +275,21 @@ impl NodeConfig {
             is_testnet: env("CREG_TESTNET", "false") == "true",
         };
 
-        if let Ok(vault_addr) = std::env::var("CREG_VAULT_ADDR") {
-            if let Ok(vault_token) = std::env::var("CREG_VAULT_TOKEN") {
-                if let Ok(client) = reqwest::Client::builder().build() {
-                    let url = format!(
-                        "{}/v1/secret/data/creg/validator",
-                        vault_addr.trim_end_matches('/')
-                    );
-                    if let Ok(resp) = client
-                        .get(&url)
-                        .header("X-Vault-Token", vault_token)
-                        .send()
-                        .await
-                    {
-                        if let Ok(json) = resp.json::<serde_json::Value>().await {
-                            if let Some(data) = json.get("data").and_then(|d| d.get("data")) {
-                                if let Some(vk) = data.get("validator_key").and_then(|v| v.as_str())
-                                {
-                                    config.validator_privkey = Some(vk.to_string());
-                                }
-                                if let Some(bk) = data.get("bridge_key").and_then(|v| v.as_str()) {
-                                    config.bridge_privkey = Some(bk.to_string());
-                                }
-                            }
-                        }
-                    }
+        if let Ok(secrets) = chain_registry_secrets::SecretsProvider::from_env() {
+            if let Ok(Some(bk)) = secrets
+                .try_secp256k1_signing_key_hex(chain_registry_secrets::HotKeyRole::Bridge)
+                .await
+            {
+                config.bridge_privkey = Some(bk);
+            }
+            if config.validator_privkey.is_none() {
+                if let Ok(Some(vk)) = secrets
+                    .try_secp256k1_signing_key_hex(
+                        chain_registry_secrets::HotKeyRole::ValidatorEd25519,
+                    )
+                    .await
+                {
+                    config.validator_privkey = Some(vk);
                 }
             }
         }
@@ -459,6 +449,10 @@ impl NodeConfig {
                     .into(),
             );
         }
+
+        errors.extend(chain_registry_secrets::validate_production_secrets_policy(
+            self.is_testnet,
+        ));
 
         errors
     }
@@ -655,6 +649,7 @@ mod tests {
     fn production_security_env_guards() {
         std::env::set_var("CREG_DEV_SANDBOX", "true");
         std::env::set_var("CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM", "true");
+        std::env::set_var("CREG_SECRETS_BACKEND", "env");
 
         let mut prod = base_config();
         prod.is_testnet = false;
@@ -669,6 +664,12 @@ mod tests {
                 .any(|e| e.contains("CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM")),
             "{prod_errors:?}"
         );
+        assert!(
+            prod_errors
+                .iter()
+                .any(|e| e.contains("CREG_SECRETS_BACKEND")),
+            "{prod_errors:?}"
+        );
 
         let testnet = base_config();
         assert!(
@@ -678,6 +679,7 @@ mod tests {
 
         std::env::remove_var("CREG_DEV_SANDBOX");
         std::env::remove_var("CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM");
+        std::env::remove_var("CREG_SECRETS_BACKEND");
     }
 
     #[test]

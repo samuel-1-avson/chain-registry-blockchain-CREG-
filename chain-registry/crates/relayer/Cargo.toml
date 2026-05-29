@@ -9,6 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 common = { path = "../common" }
+chain-registry-secrets = { path = "../secrets" }
 tokio = { workspace = true }
 axum = { workspace = true, features = ["json"] }
 tower = { workspace = true }

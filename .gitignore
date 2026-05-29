@@ -29,6 +29,9 @@ docs/
 secrets/
 **/secrets/
 *secret*
+# SEC-301b: hot-key loader crate (source only — not credential files)
+!chain-registry/crates/secrets/
+!chain-registry/crates/secrets/**
 !.gitignore
 
 # =============================================================================

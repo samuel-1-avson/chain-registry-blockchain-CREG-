@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|--------|
-| **Status** | Accepted (testnet); implementation tracked as SEC-301b |
+| **Status** | Accepted — SEC-301b implemented in `chain-registry-secrets` |
 | **Date** | 2026-05-28 |
 | **Work items** | SEC-301a (this ADR), SEC-301b (provider code) |
 | **Related** | SEC-101, SEC-101b, [SECURITY_OPS_RUNBOOK.md](../SECURITY_OPS_RUNBOOK.md) |
@@ -86,8 +86,8 @@ Load once at process startup; reuse existing `warn_hot_key_from_env` only when b
 
 Before mainnet sign-off:
 
-- [ ] SEC-301b merged with Vault (or chosen cloud KMS) backend
-- [ ] `validate_production_security()` rejects `CREG_SECRETS_BACKEND=env` when not testnet
+- [x] SEC-301b merged with Vault (or chosen cloud KMS) backend — `chain-registry-secrets`
+- [x] `validate_production_security()` rejects `CREG_SECRETS_BACKEND=env` when not testnet
 - [ ] k8s manifests use External Secrets Operator or CSI driver — no raw hex in `Secret` data
 - [ ] Rotation drill executed and logged (extends SEC-101)
 

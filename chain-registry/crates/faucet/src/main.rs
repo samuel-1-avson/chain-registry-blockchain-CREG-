@@ -64,12 +64,14 @@ struct FaucetConfig {
 }
 
 impl FaucetConfig {
-    fn from_env() -> Self {
-        let faucet_key =
-            std::env::var("FAUCET_PRIVATE_KEY").expect("FAUCET_PRIVATE_KEY must be set");
+    async fn from_env() -> anyhow::Result<(Self, chain_registry_secrets::SecretsProvider)> {
+        let secrets = chain_registry_secrets::SecretsProvider::from_env()?;
+        let faucet_key = secrets
+            .secp256k1_signing_key_hex(chain_registry_secrets::HotKeyRole::Faucet)
+            .await?;
         let faucet_address = std::env::var("FAUCET_ADDRESS").expect("FAUCET_ADDRESS must be set");
 
-        Self {
+        Ok((Self {
             drip_amount: env_u128("FAUCET_DRIP_AMOUNT", 1000_000_000_000_000_000_000), // 1000 tCREG
             native_drip_amount: env_u128("FAUCET_NATIVE_DRIP_AMOUNT", 100_000_000_000_000_000), // 0.1 ETH
             cooldown_secs: env_u64("FAUCET_COOLDOWN_SECS", 60), // 1 minute
@@ -81,7 +83,7 @@ impl FaucetConfig {
             token_contract: std::env::var("FAUCET_TOKEN_CONTRACT")
                 .expect("FAUCET_TOKEN_CONTRACT must be set"),
             faucet_address,
-        }
+        }, secrets))
     }
 }
 
@@ -425,10 +427,10 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    let config = FaucetConfig::from_env();
-    common::warn_hot_key_from_env(
+    let (config, secrets) = FaucetConfig::from_env().await?;
+    secrets.warn_hot_key_if_env(
         "faucet",
-        "FAUCET_PRIVATE_KEY",
+        chain_registry_secrets::HotKeyRole::Faucet,
         &config.faucet_key,
         common::is_testnet_env(),
     );
