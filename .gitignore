@@ -140,6 +140,14 @@ data/
 **/data/
 node*-data/
 **/node*-data/
+sepolia-node-data/
+**/sepolia-node-data/
+**/testnet/ops-201-logs/
+**/testnet/.tools/
+**/testnet/.env.publish.local
+**/testnet/.env.sepolia.faucet
+**/testnet/secrets/
+**/testnet/secrets/**
 validator*-data/
 **/validator*-data/
 ipfs-data/

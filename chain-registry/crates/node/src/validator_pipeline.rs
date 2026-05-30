@@ -34,6 +34,13 @@ async fn tick(
     tx_out: &FinalizedTxSender,
     p2p_handle: crate::p2p::P2PHandle,
 ) -> anyhow::Result<()> {
+    // Observer nodes sync validator-set state from L1 but do not run local
+    // validation. Draining the pending pool here would remove submissions with
+    // no chain record, so `GET /v1/packages/:canonical` would 404 immediately.
+    if !state.read().await.config.is_validator {
+        return Ok(());
+    }
+
     let pending: Vec<PublishRequest> = {
         let mut s = state.write().await;
         s.pending_pool.ready_for_validation()

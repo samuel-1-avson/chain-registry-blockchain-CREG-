@@ -176,6 +176,77 @@ Then: `curl http://localhost:8080/v1/health` and `creg doctor --testnet`.
 
 ---
 
+## Publish smoke (E2E-301)
+
+End-to-end check: stake publisher → IPFS → `creg publish` → node admits package → REST/CLI can read **pending** status.
+
+### Observer vs validator
+
+`run-sepolia-reuse.ps1` and `run-ops-201-verify.ps1` start the node in **observer mode** (`CREG_IS_VALIDATOR=false`, no `CREG_VALIDATOR_KEY`). The node syncs the L1 validator set but does **not** locally run PBFT finalization.
+
+On observer nodes, the validator pipeline must **not** drain the in-memory pending pool (fixed in `validator_pipeline.rs`: pipeline ticks are skipped when `!is_validator`). Without that fix, publish succeeds but `GET /v1/packages/:canonical` returns 404 within ~1s.
+
+**Verified on chain** requires `CREG_IS_VALIDATOR=true`, `CREG_VALIDATOR_KEY`, and stake — see `run-3node-host.ps1` or backlog item NET-301. Pending visibility alone is enough for E2E-301.
+
+### Prerequisites
+
+| Item | Command / notes |
+|------|----------------|
+| Foundry `cast` | `.\testnet\install-foundry.ps1` |
+| Stake + env | `.\testnet\prepare-sepolia-publish.ps1 -PublisherKey 0x<64-hex>` → `testnet/.env.publish.local` |
+| Ed25519 publish key | `creg keygen publisher` → `publisher.key` at repo root |
+| IPFS | `.\testnet\start-ipfs.ps1` (API `http://127.0.0.1:5001`) |
+| Node | `.\testnet\run-sepolia-reuse.ps1 -StartNode` → health `validator_set_sync.state=synced` on `:8090` |
+| ZK keys (optional gRPC) | `CREG_ZK_KEYS_DIR` → repo `circuits/` (set by `run-ops-201-verify.ps1`) |
+
+### Publish and verify
+
+```powershell
+cd chain-registry
+cargo build --release -p chain-registry-node -p chain-registry-cli
+
+# Terminal A — keep running; do not restart between publish and lookup
+.\testnet\run-sepolia-reuse.ps1 -StartNode
+
+# Terminal B — load publish env from prepare script
+Get-Content .\testnet\.env.publish.local | ForEach-Object {
+  if ($_ -match '^([^#=]+)=(.*)$') { Set-Item -Path "Env:$($matches[1])" -Value $matches[2] }
+}
+
+.\target\release\creg.exe publish .\tmp\ops-201-smoke\pkg.tgz `
+  --key-file .\publisher.key `
+  --publisher-address $env:CREG_PUBLISHER_ADDRESS `
+  --node-url http://127.0.0.1:8090 `
+  --grpc-url http://127.0.0.1:50051
+
+$canonical = 'npm:@creg/ops-201-smoke@1.0.20260530-141625'  # or your package id
+$enc = [uri]::EscapeDataString($canonical)
+Invoke-RestMethod "http://127.0.0.1:8090/v1/public/packages/$enc"
+
+.\target\release\creg.exe cache --clear
+.\target\release\creg.exe status $canonical --node-url http://127.0.0.1:8090
+```
+
+| Check | Pass |
+|-------|------|
+| Publish | Success; IPFS CID printed |
+| REST `GET /v1/public/packages/{encoded}` | JSON `"status": "pending"` (not 404) |
+| `creg status` | **UNVERIFIED** (“pending pool — consensus not yet complete”), not **UNKNOWN** |
+
+### Common mistakes
+
+| Mistake | Symptom |
+|---------|---------|
+| Omit `--node-url` on publish/status | CLI talks to `https://registry.chain-pkg.io` |
+| Unencoded canonical in URL (`npm:@scope/pkg@1.0`) | `"No route for /v1/public/packages/npm:..."` |
+| Restart `creg-node` after publish | Pending pool is **in-memory** — package gone until re-publish |
+| Stale verdict cache | Run `creg cache --clear` after fixing node URL |
+| Old `creg-node` without observer pending fix | 404 shortly after successful publish |
+
+Automated helper: `.\testnet\run-ops-201-verify.ps1` (optional `-SkipPublish` for node-only checks).
+
+---
+
 ## Post-deploy verification
 
 ```powershell

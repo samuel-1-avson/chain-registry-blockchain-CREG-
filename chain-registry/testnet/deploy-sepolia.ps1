@@ -12,6 +12,16 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Split-Path -Parent $scriptDir
 Set-Location $repoRoot
 
+$toolsDir = Join-Path $scriptDir ".tools\foundry"
+$toolsCast = Join-Path $toolsDir "cast.exe"
+$toolsForge = Join-Path $toolsDir "forge.exe"
+$cast = if (Test-Path $toolsCast) { $toolsCast } elseif (Get-Command cast -ErrorAction SilentlyContinue) { (Get-Command cast).Source } else { $null }
+$forge = if (Test-Path $toolsForge) { $toolsForge } elseif (Get-Command forge -ErrorAction SilentlyContinue) { (Get-Command forge).Source } else { $null }
+if (-not $cast -or -not $forge) {
+    Write-Error "cast/forge not found. Run .\testnet\install-foundry.ps1 or add Foundry to PATH."
+}
+$env:FOUNDRY_DISABLE_NIGHTLY_WARNING = "1"
+
 # Load .env.sepolia
 $envFile = Join-Path $scriptDir ".env.sepolia"
 if (-not (Test-Path $envFile)) {
@@ -28,8 +38,22 @@ Get-Content $envFile | ForEach-Object {
 if (-not $env:SEPOLIA_RPC_URL -or $env:SEPOLIA_RPC_URL -like "*YOUR_*") {
     Write-Error "SEPOLIA_RPC_URL is not set or still contains placeholder. Edit .env.sepolia"
 }
+if (-not $env:DEPLOYER_KEY -and $env:GOVERNANCE_SIGNER_KEY) {
+    $env:DEPLOYER_KEY = $env:GOVERNANCE_SIGNER_KEY
+    Write-Host "Using GOVERNANCE_SIGNER_KEY as DEPLOYER_KEY (unified authority)." -ForegroundColor DarkGray
+}
 if (-not $env:DEPLOYER_KEY) {
-    Write-Error "DEPLOYER_KEY is not set. Edit .env.sepolia"
+    Write-Error "DEPLOYER_KEY is not set. Run .\testnet\setup-sepolia-authority.ps1"
+}
+if (-not $env:GOVERNANCE_THRESHOLD) {
+    $env:GOVERNANCE_THRESHOLD = "1"
+}
+if ($env:GOVERNANCE_SIGNER_ADDRESS) {
+    $derivedRaw = & $cast wallet address --private-key $env:DEPLOYER_KEY 2>&1 | Out-String
+    $derived = if ($derivedRaw -match '(0x[a-fA-F0-9]{40})') { $matches[1] } else { $null }
+    if ($derived -and ($derived.ToLower() -ne $env:GOVERNANCE_SIGNER_ADDRESS.Trim().ToLower())) {
+        Write-Error "DEPLOYER_KEY does not match GOVERNANCE_SIGNER_ADDRESS. Run .\testnet\setup-sepolia-authority.ps1"
+    }
 }
 
 # Safety check: refuse Anvil default key
@@ -39,10 +63,13 @@ if ($env:DEPLOYER_KEY -eq $anvilKey) {
 }
 
 # Check deployer balance
-$deployerAddr = cast wallet address $env:DEPLOYER_KEY
+$deployerRaw = & $cast wallet address --private-key $env:DEPLOYER_KEY 2>&1 | Out-String
+if ($deployerRaw -notmatch '(0x[a-fA-F0-9]{40})') { Write-Error "Could not derive deployer address from DEPLOYER_KEY" }
+$deployerAddr = $matches[1]
 Write-Host "Deployer address: $deployerAddr"
 
-$balance = cast balance $deployerAddr --rpc-url $env:SEPOLIA_RPC_URL 2>$null
+$balance = & $cast balance $deployerAddr --rpc-url $env:SEPOLIA_RPC_URL 2>&1 | Out-String
+$balance = $balance.Trim()
 if ($LASTEXITCODE -ne 0) {
     $balance = "0"
 }
@@ -73,7 +100,7 @@ $forgeArgs = @(
     "-vvv"
 )
 
-& forge $forgeArgs
+& $forge $forgeArgs
 
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Deployment failed"
@@ -92,7 +119,7 @@ if ($env:ETHERSCAN_API_KEY) {
         "--resume",
         "-vvv"
     )
-    & forge $verifyArgs
+    & $forge $verifyArgs
 }
 
 # Read deployment manifest

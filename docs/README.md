@@ -8,6 +8,9 @@ Central documentation for the Chain Registry monorepo (`chain-registry/`).
 |----------|-------------|
 | [SYSTEM_FULL_ANALYSIS_REPORT.md](./SYSTEM_FULL_ANALYSIS_REPORT.md) | Architecture, APIs, data stores, blockchain, wallets, readiness scores |
 | [SECURITY_AND_REMEDIATION_IMPLEMENTATION_PLAN.md](./SECURITY_AND_REMEDIATION_IMPLEMENTATION_PLAN.md) | Security remediation backlog and phased execution plan |
+| [NEXT_WORK.md](./NEXT_WORK.md) | Prioritized testnet readiness checklist (owners + acceptance criteria) |
+| [session_analysis_report.md](./session_analysis_report.md) | AI session postmortem — root causes, hotspots, severity |
+| [prompt_improvement_tips.md](./prompt_improvement_tips.md) | Copy-paste prompts for bounded work on this repo |
 
 ## Security & operations
 

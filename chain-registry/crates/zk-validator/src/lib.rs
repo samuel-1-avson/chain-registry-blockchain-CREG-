@@ -99,18 +99,15 @@ impl PackageInputs {
         }
     }
 
-    /// Convert to public inputs for verification
+    /// Public inputs for Groth16 verification.
+    ///
+    /// Must match the order of `new_input` allocations in
+    /// [`PackageValidationCircuit::generate_constraints`]. Content and manifest
+    /// hashes are carried in the gRPC/REST admission layer (hash equality checks);
+    /// the SNARK currently proves only the claimed analysis flags.
     pub fn public_inputs(&self) -> Vec<Fr> {
         vec![
-            // Content hash (first 16 bytes as two Fr elements)
-            Fr::from_le_bytes_mod_order(&self.content_hash[..16]),
-            Fr::from_le_bytes_mod_order(&self.content_hash[16..]),
-            // Manifest hash
-            Fr::from_le_bytes_mod_order(&self.manifest_hash[..16]),
-            Fr::from_le_bytes_mod_order(&self.manifest_hash[16..]),
-            // Safety score (public threshold check)
             Fr::from(self.static_analysis_score as u64),
-            // Binary flags
             Fr::from(if self.sandbox_safe { 1u64 } else { 0 }),
             Fr::from(if self.no_vulnerable_deps { 1u64 } else { 0 }),
         ]

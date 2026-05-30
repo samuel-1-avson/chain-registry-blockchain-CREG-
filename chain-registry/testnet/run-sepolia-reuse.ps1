@@ -31,22 +31,63 @@ function Wait-SpecServerReady {
         [int]$Port,
         [int]$MaxWaitSec = 90
     )
-    $healthUrl = "http://localhost:$Port/health"
+    $probeUrls = @(
+        "http://localhost:$Port/chain-spec.json",
+        "http://localhost:$Port/health"
+    )
     $deadline = (Get-Date).AddSeconds($MaxWaitSec)
-    $attempt = 0
     while ((Get-Date) -lt $deadline) {
-        $attempt++
-        try {
-            $health = Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 5
-            if ($health.StatusCode -eq 200) {
-                return
-            }
-        } catch {
-            # Container may still be starting on Windows/WSL2 after force-recreate.
+        foreach ($url in $probeUrls) {
+            try {
+                $r = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 5
+                if ($r.StatusCode -eq 200) { return }
+            } catch { }
         }
         Start-Sleep -Seconds 2
     }
-    throw "Spec server did not become ready at $healthUrl within ${MaxWaitSec}s (docker container may still be starting)"
+    throw "Spec server did not become ready on port $Port within ${MaxWaitSec}s"
+}
+
+function Test-SpecServerReady {
+    param([int]$Port)
+    try {
+        $r = Invoke-WebRequest -Uri "http://localhost:$Port/chain-spec.json" -UseBasicParsing -TimeoutSec 5
+        return ($r.StatusCode -eq 200)
+    } catch {
+        return $false
+    }
+}
+
+function Stop-ListenerOnPort {
+    param([int]$Port)
+    $conn = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
+    if ($conn) {
+        $listenerPid = $conn.OwningProcess | Select-Object -First 1
+        Write-Host "  Stopping stale listener on port $Port (pid $listenerPid)" -ForegroundColor Yellow
+        Stop-Process -Id $listenerPid -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 2
+    }
+}
+
+function Start-PythonSpecServerFallback {
+    param(
+        [string]$ServerDir,
+        [int]$Port = 8888
+    )
+    if (Test-SpecServerReady -Port $Port) {
+        Write-Ok "Spec server already serving chain-spec.json on port $Port"
+        return
+    }
+    Stop-ListenerOnPort -Port $Port
+    $python = Get-Command python -ErrorAction SilentlyContinue
+    if (-not $python) {
+        throw "Docker spec server failed and python is not on PATH for http.server fallback"
+    }
+    Write-Host "  Starting Python static spec server on port $Port (Docker fallback)" -ForegroundColor Yellow
+    Start-Process -FilePath $python.Source -ArgumentList @(
+        "-m", "http.server", "$Port", "--directory", $ServerDir
+    ) -WorkingDirectory $ServerDir -WindowStyle Hidden | Out-Null
+    Wait-SpecServerReady -Port $Port -MaxWaitSec 30
 }
 
 $specPath = Join-Path $scriptDir "chain-spec.sepolia.json"
@@ -79,18 +120,24 @@ if (-not $SkipSpecServer) {
     $serverDir = Join-Path $scriptDir "spec-server"
     # Do not edit spec JSON here (invalidates detached signature). Override sig URL via env.
     Copy-Item -Force $specPath (Join-Path $serverDir "chain-spec.sepolia.json")
+    Copy-Item -Force $specPath (Join-Path $serverDir "chain-spec.json")
     if (Test-Path $sigPath) {
         Copy-Item -Force $sigPath (Join-Path $serverDir "chain-spec.sepolia.json.sig")
+        Copy-Item -Force $sigPath (Join-Path $serverDir "chain-spec.json.sig")
     } else {
         Write-Warning "Missing signature file; node may fail spec verification"
     }
-    Push-Location $serverDir
     $prevEap = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
+    Push-Location $serverDir
     docker compose up -d --force-recreate 2>&1 | Out-Host
-    if ($LASTEXITCODE -ne 0) { throw "docker compose up failed (exit $LASTEXITCODE)" }
-    $ErrorActionPreference = $prevEap
+    $dockerExit = $LASTEXITCODE
     Pop-Location
+    $ErrorActionPreference = $prevEap
+    if ($dockerExit -ne 0) {
+        Write-Warning "docker compose up failed (exit $dockerExit). Using Python http.server fallback."
+        Start-PythonSpecServerFallback -ServerDir $serverDir -Port ([int]$SpecServerPort)
+    }
     Write-Host "  Waiting for spec server on port $SpecServerPort..." -ForegroundColor DarkGray
     Wait-SpecServerReady -Port $SpecServerPort
     $specFetch = Invoke-WebRequest -Uri $specUrl -UseBasicParsing -TimeoutSec 30
@@ -121,6 +168,8 @@ $env:CREG_DATA_DIR = (Resolve-Path (New-Item -ItemType Directory -Force -Path (J
 $env:CREG_LISTEN = "0.0.0.0:$ApiPort"
 $env:CREG_P2P_LISTEN = "/ip4/0.0.0.0/tcp/9011"
 $env:CREG_IS_VALIDATOR = "false"
+# Observer reuse: drop invalid template validator key from .env (config validates hex if set).
+Remove-Item Env:CREG_VALIDATOR_KEY -ErrorAction SilentlyContinue
 $env:RUST_LOG = "info,chain_registry_node=debug"
 
 Write-Host ""
@@ -138,4 +187,5 @@ if ($StartNode) {
 } else {
     Write-Host "Spec server is up. Start node with:" -ForegroundColor Yellow
     Write-Host "  .\testnet\run-sepolia-reuse.ps1 -StartNode" -ForegroundColor White
+    exit 0
 }
