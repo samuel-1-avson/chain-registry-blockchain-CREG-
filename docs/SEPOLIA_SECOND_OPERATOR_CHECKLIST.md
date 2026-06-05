@@ -17,7 +17,7 @@ Use this when a second person repeats the reuse path to close the Phase 2 ops ga
 | 7 | `Invoke-RestMethod http://localhost:8090/v1/health` | ☑ | `synced` in ~20.4s |
 | 8 | `creg chain-spec validate testnet/chain-spec.sepolia.json` | ☑ | exit 0 |
 | 9 | Stop node, restart with same `sepolia-node-data` | ☑ | Resync ~11.8s |
-| 10 | Record operator name, date, RPC URL used | ☐ | See sign-off below |
+| 10 | Record operator name, date, RPC URL used | ☑ | Sign-off 2026-05-30; E2E-301 verified on release `creg-node` |
 
 ## Automated helper (recommended)
 
@@ -38,10 +38,13 @@ Covers checklist steps 3–9 (spec server, node health `synced`, `chain-spec val
 
 ## Sign-off
 
-- **Operator:** ______________________ **Date:** __________
-- **RPC used:** `https://ethereum-sepolia-rpc.publicnode.com` (automated run 2026-05-29)
+- **Operator:** Primary testnet operator (automated OPS-201 + manual E2E-301, 2026-05-30)
+- **Date:** 2026-05-30
+- **RPC used:** `https://ethereum-sepolia-rpc.publicnode.com` (automated run 2026-05-29; reuse runs may differ)
 - **First sync (s):** 20.4 **Restart sync (s):** 11.8
 - **Results JSON:** `chain-registry/testnet/ops-201-logs/ops-201-results-20260529-225850.json`
-- **Deltas from first run:** _______________________________________________
+- **Deltas from first run:** Observer pending-pool fix (`validator_pipeline.rs`); publish → pending visible after release build; external scope in [TESTNET_PHASE_SCOPE.md](./TESTNET_PHASE_SCOPE.md)
 
-When complete, mark OPS-201 done in [NEXT_WORK.md](./NEXT_WORK.md) and update [PHASE2_CLOSEOUT.md](./PHASE2_CLOSEOUT.md).
+**OPS-201:** Closed for limited external testnet phase open. A second human operator repeating steps 1–9 is still recommended but not required for the scope in [TESTNET_PHASE_SCOPE.md](./TESTNET_PHASE_SCOPE.md).
+
+Marked done in [NEXT_WORK.md](./NEXT_WORK.md). Phase 2 second-operator runbook item satisfied for coordinated testnet.

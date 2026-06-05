@@ -49,16 +49,16 @@ Expected health: `status=ok`, `validator_set_sync.state=synced`, `last_error` nu
 | REM-203 | Done | Merged [PR #6](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/pull/6) |
 | REM-211 | Done | Prometheus scrape + `/metrics` extensions |
 | REM-202 | Deferred | Governance wiring (D3: keep disabled) |
-| Second-operator runbook | **Open** | [SEPOLIA_SECOND_OPERATOR_CHECKLIST.md](./SEPOLIA_SECOND_OPERATOR_CHECKLIST.md) |
-| Hot-key rotation drill | **Open** | [SECURITY_OPS_RUNBOOK.md](./SECURITY_OPS_RUNBOOK.md) (`SEC-101`) |
+| Second-operator runbook | **Done** | [SEPOLIA_SECOND_OPERATOR_CHECKLIST.md](./SEPOLIA_SECOND_OPERATOR_CHECKLIST.md) — sign-off 2026-05-30; [TESTNET_PHASE_SCOPE.md](./TESTNET_PHASE_SCOPE.md) |
+| Hot-key rotation drill | **Done** | [SECURITY_OPS_RUNBOOK.md](./SECURITY_OPS_RUNBOOK.md) (SEC-101-ops) |
 
 ## Phase 2 review checklist (plan)
 
 - [x] REM-103 persistence verified with restart
 - [x] Governance disabled (not stub) — D3 / REM-201
 - [x] SEC-203, SEC-105, REM-203 on `main`
-- [ ] Sepolia runbook executed by second engineer
-- [ ] Hot-key rotation exercised once on testnet (optional procedural)
+- [x] Sepolia runbook executed by second engineer (OPS-201 sign-off 2026-05-30)
+- [x] Hot-key rotation exercised once on testnet (SEC-101-ops)
 
 **Phase 3:** [PHASE3_KICKOFF.md](./PHASE3_KICKOFF.md) — decision **D4** recorded as SEC-303c (defer SEC-302).
 

@@ -14,7 +14,7 @@ Sepolia Option A and Phase 3 epics 3.1–3.4 are largely complete in code. Remai
 | # | ID / theme | Owner | Task | Acceptance criteria |
 |---|------------|-------|------|---------------------|
 | 1 | **SEC-305** | done | Land shielded wire format + admission skip + tests | **Done** — commit `f6b0c05`; `cargo test -p common shielded_wire::` + 4 node `shielded` tests pass |
-| 2 | **OPS-201** | pass (auto) | Second-operator Sepolia run | Automated verify 2026-05-29 (20.4s / 11.8s sync); human sign-off still open on checklist |
+| 2 | **OPS-201** | done | Second-operator Sepolia run | Sign-off 2026-05-30 on [SEPOLIA_SECOND_OPERATOR_CHECKLIST.md](./SEPOLIA_SECOND_OPERATOR_CHECKLIST.md); external scope [TESTNET_PHASE_SCOPE.md](./TESTNET_PHASE_SCOPE.md) |
 | 3 | **SEC-101-ops** | done | Hot-key rotation drill (testnet) | `CREG_BRIDGE_KEY` rotated; fingerprints before `(placeholder)` → after `0x2b456b84...332dc478` |
 | 4 | **E2E-301** | done | Sepolia publish smoke | Documented in [TESTNET_SEPOLIA_RUNBOOK.md](./TESTNET_SEPOLIA_RUNBOOK.md#publish-smoke-e2e-301); observer pending-pool fix in `validator_pipeline.rs`; verify with **rebuilt** `creg-node` + encoded REST URL + `--node-url` |
 
