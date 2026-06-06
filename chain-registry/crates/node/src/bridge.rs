@@ -81,8 +81,21 @@ pub async fn run(state: Arc<RwLock<NodeState>>) {
             s.config.eth_rpc_url.clone()
         };
 
+        let parsed_url = match rpc_url.parse() {
+            Ok(url) => url,
+            Err(e) => {
+                tracing::error!(
+                    "Invalid CREG_ETH_RPC URL {:?}: {} — retrying in 5s",
+                    rpc_url,
+                    e
+                );
+                sleep(Duration::from_secs(5)).await;
+                continue;
+            }
+        };
+
         match ProviderBuilder::new()
-            .on_http(rpc_url.parse().expect("CREG_ETH_RPC must be a valid URL"))
+            .on_http(parsed_url)
             .get_chain_id()
             .await
         {

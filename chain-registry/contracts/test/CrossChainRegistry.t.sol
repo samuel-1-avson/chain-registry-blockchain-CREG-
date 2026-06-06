@@ -261,6 +261,19 @@ contract CrossChainRegistryTest is Test {
         vm.expectRevert(CrossChainRegistry.Unauthorized.selector);
         ccr.receiveVerification(DST_CHAIN, encodedMsg, sigs);
     }
+
+    // ── AxelarAdapter governance gate (ISSUE-010) ───────────────────────────
+
+    function test_axelarAdapterSetChainNameRequiresGovernance() public {
+        AxelarAdapter adapter = new AxelarAdapter(address(0xBEEF), address(ccr));
+
+        vm.prank(address(0xDEAD));
+        vm.expectRevert(AxelarAdapter.NotGovernance.selector);
+        adapter.setChainName(DST_CHAIN, "test-chain");
+
+        adapter.setChainName(DST_CHAIN, "test-chain");
+        assertEq(adapter.chainNames(DST_CHAIN), "test-chain");
+    }
 }
 
 // ── Minimal bridge stub ──────────────────────────────────────────────────────

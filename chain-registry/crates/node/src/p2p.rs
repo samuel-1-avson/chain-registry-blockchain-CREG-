@@ -35,6 +35,60 @@ enum VoteValidationError {
     SignatureVerificationFailed,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PbftValidationError {
+    UnknownValidator,
+    MissingValidatorPubkey,
+    SignatureVerificationFailed,
+}
+
+fn validate_pbft_phase_message(
+    validator_set: &common::ValidatorSet,
+    phase: &str,
+    block_hash: &str,
+    validator_id: &str,
+    signature_hex: &str,
+) -> Result<common::BlockSignature, PbftValidationError> {
+    let validator = validator_set
+        .validators
+        .iter()
+        .find(|validator| validator.id == validator_id)
+        .ok_or(PbftValidationError::UnknownValidator)?;
+
+    if validator.pubkey.is_empty() {
+        return Err(PbftValidationError::MissingValidatorPubkey);
+    }
+
+    consensus::pbft::verify_pbft_phase_signature(
+        phase,
+        block_hash,
+        &validator.pubkey,
+        signature_hex,
+    )
+    .map_err(|_| PbftValidationError::SignatureVerificationFailed)?;
+
+    Ok(common::BlockSignature {
+        validator_id: validator_id.to_string(),
+        pubkey: validator.pubkey.clone(),
+        signature: signature_hex.to_string(),
+    })
+}
+
+fn report_pbft_validation_failure(
+    phase: &str,
+    validator_id: &str,
+    block_hash: &str,
+    error: PbftValidationError,
+) {
+    tracing::warn!(
+        phase = phase,
+        validator_id = validator_id,
+        block_hash = block_hash,
+        ?error,
+        "P2P: rejected invalid PBFT gossip signature"
+    );
+}
+
 fn validate_vote_gossip_message(
     message: &[u8],
     validator_set: &common::ValidatorSet,
@@ -555,13 +609,28 @@ impl P2PNode {
                                         }
                                     }
                                     common::GossipMessage::PbftPrepare { block_hash, validator_id, signature } => {
-                                        // Validate signature (simplified, could be moved to validate_pbft_message)
-                                        let pubkey_hex = {
+                                        let sig = {
                                             let s = state.read().await;
-                                            s.validator_set.validators.iter().find(|v| v.id == validator_id).map(|v| v.pubkey.clone()).unwrap_or_default()
+                                            match validate_pbft_phase_message(
+                                                &s.validator_set,
+                                                "prepare",
+                                                &block_hash,
+                                                &validator_id,
+                                                &signature,
+                                            ) {
+                                                Ok(sig) => sig,
+                                                Err(error) => {
+                                                    report_pbft_validation_failure(
+                                                        "prepare",
+                                                        &validator_id,
+                                                        &block_hash,
+                                                        error,
+                                                    );
+                                                    continue;
+                                                }
+                                            }
                                         };
                                         let mut s = state.write().await;
-                                        let sig = common::BlockSignature { validator_id: validator_id.clone(), pubkey: pubkey_hex, signature: signature.clone() };
                                         if let Ok(true) = s.pbft_engine.prepare(&block_hash, &validator_id, sig) {
                                             // Broadcast PbftCommit
                                             if let Some(our_id) = s.config.node_id.clone().into() {
@@ -588,12 +657,28 @@ impl P2PNode {
                                         }
                                     }
                                     common::GossipMessage::PbftCommit { block_hash, validator_id, signature } => {
-                                        let pubkey_hex = {
+                                        let sig = {
                                             let s = state.read().await;
-                                            s.validator_set.validators.iter().find(|v| v.id == validator_id).map(|v| v.pubkey.clone()).unwrap_or_default()
+                                            match validate_pbft_phase_message(
+                                                &s.validator_set,
+                                                "commit",
+                                                &block_hash,
+                                                &validator_id,
+                                                &signature,
+                                            ) {
+                                                Ok(sig) => sig,
+                                                Err(error) => {
+                                                    report_pbft_validation_failure(
+                                                        "commit",
+                                                        &validator_id,
+                                                        &block_hash,
+                                                        error,
+                                                    );
+                                                    continue;
+                                                }
+                                            }
                                         };
                                         let mut s = state.write().await;
-                                        let sig = common::BlockSignature { validator_id: validator_id.clone(), pubkey: pubkey_hex, signature };
                                         if let Ok(true) = s.pbft_engine.commit(&block_hash, &validator_id, sig) {
                                             // Finalized!
                                             tracing::info!("[PBFT] Block {} finalised by quorum", &block_hash[..12]);

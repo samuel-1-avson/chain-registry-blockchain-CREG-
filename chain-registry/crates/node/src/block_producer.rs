@@ -44,13 +44,20 @@ pub async fn run(
 
                 // Broadcast PbftPrePrepare to start the consensus round
                 let msg = common::GossipMessage::PbftPrePrepare { block };
-                let _ = p2p_handle
-                    .sender
-                    .send(crate::p2p::P2PCommand::Broadcast {
-                        topic: "creg/v1/blocks".into(),
-                        data: serde_json::to_vec(&msg).unwrap_or_default(),
-                    })
-                    .await;
+                match serde_json::to_vec(&msg) {
+                    Ok(data) => {
+                        let _ = p2p_handle
+                            .sender
+                            .send(crate::p2p::P2PCommand::Broadcast {
+                                topic: "creg/v1/blocks".into(),
+                                data,
+                            })
+                            .await;
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to serialize PbftPrePrepare gossip: {}", e);
+                    }
+                }
             }
             Err(e) => tracing::error!("Block production failed: {}", e),
         }
@@ -148,13 +155,20 @@ async fn produce_block(
                 output: out.clone(),
                 proof: prf.clone(),
             };
-            let _ = p2p
-                .sender
-                .send(crate::p2p::P2PCommand::Broadcast {
-                    topic: "creg/v1/vrf-proofs".into(),
-                    data: serde_json::to_vec(&gossip_msg).unwrap_or_default(),
-                })
-                .await;
+            match serde_json::to_vec(&gossip_msg) {
+                Ok(data) => {
+                    let _ = p2p
+                        .sender
+                        .send(crate::p2p::P2PCommand::Broadcast {
+                            topic: "creg/v1/vrf-proofs".into(),
+                            data,
+                        })
+                        .await;
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to serialize VRF proof gossip: {}", e);
+                }
+            }
 
             let selected_proposer =
                 consensus::vrf::select_proposer_deterministic(&active, &epoch_seed)

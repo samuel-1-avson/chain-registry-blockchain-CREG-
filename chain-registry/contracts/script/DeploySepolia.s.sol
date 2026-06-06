@@ -103,6 +103,7 @@ contract DeploySepolia is Script {
 
         // Optionally seed the first validator from CREG_BRIDGE_KEY.
         _seedFirstValidator(deployerKey, deployer);
+        _configureFinalizeRelay(deployerKey);
 
         console.log("Governance:", address(governance));
         console.log("Staking:   ", address(staking));
@@ -183,6 +184,55 @@ contract DeploySepolia is Script {
         vm.stopBroadcast();
 
         console.log("Genesis validator seeded:", bridgeSigner);
+    }
+
+    /// @dev ISSUE-008: enable finalize relay allowlist on testnet so only the chain
+    ///      node bridge (or configured relayer) may call finalizePackage.
+    function _configureFinalizeRelay(uint256 deployerKey) internal {
+        if (!vm.envOr("ENFORCE_FINALIZE_RELAYS", true)) {
+            console.log("Finalize relay enforcement skipped (ENFORCE_FINALIZE_RELAYS=false)");
+            return;
+        }
+
+        address relay = vm.envOr("FINALIZE_RELAY_ADDRESS", address(0));
+        if (relay == address(0)) {
+            try vm.envUint("CREG_BRIDGE_KEY") returns (uint256 bridgeKey) {
+                relay = vm.addr(bridgeKey);
+            } catch {
+                console.log("Finalize relay skipped: set FINALIZE_RELAY_ADDRESS or CREG_BRIDGE_KEY");
+                return;
+            }
+        }
+
+        vm.startBroadcast(deployerKey);
+
+        bytes memory authorizeRelay = abi.encodeWithSelector(
+            ChainRegistry.setPackageFinalizeRelay.selector,
+            relay,
+            true
+        );
+        uint256 authId = governance.submit(
+            address(registry),
+            authorizeRelay,
+            "testnet: authorize finalizePackage relay"
+        );
+        governance.vote(authId, true);
+
+        bytes memory enforce = abi.encodeWithSelector(
+            ChainRegistry.setEnforceFinalizeRelays.selector,
+            true
+        );
+        uint256 enforceId = governance.submit(
+            address(registry),
+            enforce,
+            "testnet: enforce finalizePackage relay allowlist"
+        );
+        governance.vote(enforceId, true);
+
+        vm.stopBroadcast();
+
+        console.log("Finalize relay authorized:", relay);
+        console.log("enforceFinalizeRelays: true");
     }
 
     function _writeManifest(address deployer) internal {

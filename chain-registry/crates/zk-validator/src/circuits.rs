@@ -11,14 +11,52 @@ use ark_relations::r1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisE
 
 use crate::{PackageInputs, ZkError};
 
+/// Split a 32-byte hash into low/high 128-bit field limbs (BN254-safe).
+fn split_hash32(hash: &[u8]) -> ([u8; 16], [u8; 16]) {
+    let mut lo = [0u8; 16];
+    let mut hi = [0u8; 16];
+    lo.copy_from_slice(&hash[..16]);
+    hi.copy_from_slice(&hash[16..32]);
+    (lo, hi)
+}
+
+fn bind_hash32_limbs(
+    cs: ConstraintSystemRef<Fr>,
+    hash: &[u8],
+) -> Result<(), SynthesisError> {
+    let (lo_bytes, hi_bytes) = split_hash32(hash);
+    let lo_input =
+        FpVar::new_input(cs.clone(), || Ok(Fr::from_le_bytes_mod_order(&lo_bytes)))?;
+    let hi_input =
+        FpVar::new_input(cs.clone(), || Ok(Fr::from_le_bytes_mod_order(&hi_bytes)))?;
+    let lo_witness =
+        FpVar::new_witness(cs.clone(), || Ok(Fr::from_le_bytes_mod_order(&lo_bytes)))?;
+    let hi_witness =
+        FpVar::new_witness(cs.clone(), || Ok(Fr::from_le_bytes_mod_order(&hi_bytes)))?;
+    lo_input.enforce_equal(&lo_witness)?;
+    hi_input.enforce_equal(&hi_witness)?;
+    Ok(())
+}
+
 /// Circuit for validating a package's safety
 ///
 /// This circuit proves that:
-/// 1. The content hash matches the expected hash
+/// 1. The content hash and manifest hash are bound as public inputs
 /// 2. Static analysis score is above threshold (≥80)
 /// 3. Sandbox execution passed
 /// 4. No vulnerable dependencies
 /// 5. Code complexity is within acceptable limits
+///
+/// # Public inputs (7 Fr elements, order fixed for verifier compatibility)
+/// ```text
+///   0. content_hash_lo
+///   1. content_hash_hi
+///   2. manifest_hash_lo
+///   3. manifest_hash_hi
+///   4. static_analysis_score
+///   5. sandbox_safe
+///   6. no_vulnerable_deps
+/// ```
 #[derive(Clone)]
 pub struct PackageValidationCircuit {
     /// Private witness: The actual package content (hashed)
@@ -64,13 +102,42 @@ impl PackageValidationCircuit {
 
 impl ConstraintSynthesizer<Fr> for PackageValidationCircuit {
     fn generate_constraints(self, cs: ConstraintSystemRef<Fr>) -> Result<(), SynthesisError> {
-        // Allocate public inputs
-        let static_score_var = UInt8::new_input(cs.clone(), || Ok(self.static_analysis_score))?;
-        let sandbox_safe_var = Boolean::new_input(cs.clone(), || Ok(self.sandbox_safe))?;
-        let no_vuln_deps_var = Boolean::new_input(cs.clone(), || Ok(self.no_vulnerable_deps))?;
+        if self.content_hash.len() != 32 || self.manifest_hash.len() != 32 {
+            return Err(SynthesisError::Unsatisfiable);
+        }
 
-        // Allocate private witnesses
+        // Bind content/manifest hashes as public inputs (witness equality).
+        bind_hash32_limbs(cs.clone(), &self.content_hash)?;
+        bind_hash32_limbs(cs.clone(), &self.manifest_hash)?;
+
+        // One field element per public policy flag (matches PackageInputs::public_inputs).
+        let static_score_input = FpVar::new_input(cs.clone(), || {
+            Ok(Fr::from(self.static_analysis_score as u64))
+        })?;
+        let sandbox_safe_input = FpVar::new_input(cs.clone(), || {
+            Ok(Fr::from(if self.sandbox_safe { 1u64 } else { 0 }))
+        })?;
+        let no_vuln_deps_input = FpVar::new_input(cs.clone(), || {
+            Ok(Fr::from(if self.no_vulnerable_deps { 1u64 } else { 0 }))
+        })?;
+
+        // Private witnesses mirror the public inputs for range/flag constraints.
+        let static_score_var = UInt8::new_witness(cs.clone(), || Ok(self.static_analysis_score))?;
+        let sandbox_safe_var = Boolean::new_witness(cs.clone(), || Ok(self.sandbox_safe))?;
+        let no_vuln_deps_var = Boolean::new_witness(cs.clone(), || Ok(self.no_vulnerable_deps))?;
         let complexity_var = UInt8::new_witness(cs.clone(), || Ok(self.complexity_score))?;
+
+        let static_score_witness_fp = static_score_var.to_bits_le()?.iter().enumerate().fold(
+            FpVar::zero(),
+            |acc, (i, b)| acc + FpVar::from(b.to_owned()) * FpVar::constant(Fr::from(1u64 << i)),
+        );
+        static_score_input.enforce_equal(&static_score_witness_fp)?;
+
+        let sandbox_witness_fp = FpVar::from(sandbox_safe_var.to_bits_le()?[0].clone());
+        sandbox_safe_input.enforce_equal(&sandbox_witness_fp)?;
+
+        let no_vuln_witness_fp = FpVar::from(no_vuln_deps_var.to_bits_le()?[0].clone());
+        no_vuln_deps_input.enforce_equal(&no_vuln_witness_fp)?;
 
         // Constraint 1: Static analysis score >= 80
         // Strategy: compute `diff = score - 80` in the field and constrain `diff` to
@@ -501,6 +568,25 @@ impl ConstraintSynthesizer<Fr> for BatchStateTransitionCircuit {
 mod tests {
     use super::*;
     use ark_relations::r1cs::ConstraintSystem;
+
+    #[test]
+    fn test_package_validation_public_input_count() {
+        let cs = ConstraintSystem::<Fr>::new_ref();
+        let circuit = PackageValidationCircuit {
+            content_hash: vec![1u8; 32],
+            manifest_hash: vec![2u8; 32],
+            static_analysis_score: 95,
+            sandbox_safe: true,
+            no_vulnerable_deps: true,
+            complexity_score: 70,
+        };
+        circuit.generate_constraints(cs.clone()).unwrap();
+        assert_eq!(
+            cs.num_instance_variables(),
+            8,
+            "constant + 7 public inputs"
+        );
+    }
 
     #[test]
     fn test_package_validation_circuit() {

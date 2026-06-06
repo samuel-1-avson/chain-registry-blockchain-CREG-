@@ -19,6 +19,15 @@ import "./Reputation.sol";
 ///      - Failure: bond slashed, rejection stands
 contract Appeal {
 
+    // ── Reentrancy Guard ─────────────────────────────────────────────────────
+    bool private _locked;
+    modifier nonReentrant() {
+        require(!_locked, "Reentrant call");
+        _locked = true;
+        _;
+        _locked = false;
+    }
+
     // ── Structs ───────────────────────────────────────────────────────────────
 
     enum AppealStatus { Pending, Approved, Rejected, Expired }
@@ -106,7 +115,7 @@ contract Appeal {
     function appeal(
         string calldata canonical,
         string calldata statement
-    ) external payable returns (uint256 id) {
+    ) external payable nonReentrant returns (uint256 id) {
         if (msg.value < MIN_APPEAL_BOND)
             revert BondTooLow(msg.value, MIN_APPEAL_BOND);
 
@@ -125,7 +134,7 @@ contract Appeal {
     // ── Panel voting ──────────────────────────────────────────────────────────
 
     /// @notice A panelist votes on an appeal.  Must post PANELIST_VOTE_BOND.
-    function vote(uint256 id, bool approve) external payable {
+    function vote(uint256 id, bool approve) external payable nonReentrant {
         if (!isPanelist[msg.sender]) revert NotPanelist();
         require(msg.value >= PANELIST_VOTE_BOND, "Must post panelist vote bond");
 
@@ -158,7 +167,7 @@ contract Appeal {
         uint256 id,
         bool approve,
         bytes calldata signature
-    ) external {
+    ) external nonReentrant {
         AppealRecord storage rec = _appeals[id];
         if (rec.status != AppealStatus.Pending) revert AppealNotPending();
 
@@ -203,15 +212,18 @@ contract Appeal {
     }
 
     /// @notice Expire an appeal that has passed its window without a decision.
-    function expireAppeal(uint256 id) external {
+    function expireAppeal(uint256 id) external nonReentrant {
         AppealRecord storage rec = _appeals[id];
         if (rec.status != AppealStatus.Pending) revert AppealNotPending();
         if (block.timestamp <= rec.submittedAt + APPEAL_WINDOW)
             revert AppealNotPending();
 
         rec.status = AppealStatus.Expired;
-        // Bond is forfeited on expiry.
-        payable(governance).transfer(rec.bond);
+        // CEI: clear bond before external transfer.
+        uint256 bond = rec.bond;
+        rec.bond = 0;
+        (bool ok,) = governance.call{value: bond}("");
+        require(ok, "Bond transfer failed");
         emit AppealExpired(id, rec.canonical);
     }
 
@@ -221,8 +233,11 @@ contract Appeal {
         AppealRecord storage rec = _appeals[id];
         rec.status = AppealStatus.Approved;
 
-        // Return appeal bond to publisher.
-        payable(rec.publisher).transfer(rec.bond);
+        // CEI: clear bond before external transfer so reentrancy cannot double-pay.
+        uint256 bond = rec.bond;
+        rec.bond = 0;
+        (bool ok,) = rec.publisher.call{value: bond}("");
+        require(ok, "Bond refund failed");
 
         // Distribute panelist bonds: return correct voters' bonds + split
         // incorrect voters' bonds among correct voters.
@@ -235,8 +250,11 @@ contract Appeal {
         AppealRecord storage rec = _appeals[id];
         rec.status = AppealStatus.Rejected;
 
-        // Slash the appeal bond — add to staking slash pool.
-        staking.slash(rec.publisher, rec.bond, "Failed appeal");
+        // CEI: forfeit ETH bond to governance (bond is ETH, not CREG stake).
+        uint256 bond = rec.bond;
+        rec.bond = 0;
+        (bool ok,) = governance.call{value: bond}("");
+        require(ok, "Bond forfeit failed");
 
         // Distribute panelist bonds.
         _distributePanelistBonds(rec, false);
@@ -267,7 +285,8 @@ contract Appeal {
         for (uint256 i = 0; i < rec.voters.length; i++) {
             address v = rec.voters[i];
             if (rec.votedApprove[v] == outcomeApproved) {
-                payable(v).transfer(PANELIST_VOTE_BOND + reward);
+                (bool ok,) = v.call{value: PANELIST_VOTE_BOND + reward}("");
+                require(ok, "Panelist bond refund failed");
             }
             // Incorrect voters' bonds stay in the contract (already accounted for).
         }

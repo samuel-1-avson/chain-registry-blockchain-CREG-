@@ -4,8 +4,8 @@
 # ── Stage 1: Build Frontend ───────────────────────────────────────────────────
 FROM node:20-slim AS frontend-builder
 WORKDIR /explorer
-COPY explorer/package*.json ./
-RUN if [ -f package-lock.json ]; then npm ci --silent; else npm install --silent --no-fund --no-audit; fi
+COPY explorer/package*.json explorer/.npmrc* ./
+RUN if [ -f package-lock.json ]; then npm ci --no-fund --no-audit || npm ci --no-fund --no-audit; else npm install --no-fund --no-audit || npm install --no-fund --no-audit; fi
 COPY explorer/ ./
 RUN npm run build
 
@@ -44,7 +44,23 @@ COPY --from=frontend-builder /explorer/dist /build/explorer/dist
 
 # Copy Cargo files for dependency caching
 COPY Cargo.toml Cargo.lock ./
-COPY crates/*/Cargo.toml crates/*/
+COPY crates/common/Cargo.toml   crates/common/
+COPY crates/cli/Cargo.toml      crates/cli/
+COPY crates/resolver/Cargo.toml crates/resolver/
+COPY crates/validator/Cargo.toml crates/validator/
+COPY crates/consensus/Cargo.toml crates/consensus/
+COPY crates/node/Cargo.toml     crates/node/
+COPY crates/faucet/Cargo.toml   crates/faucet/
+COPY crates/relayer/Cargo.toml  crates/relayer/
+COPY crates/zk-validator/Cargo.toml     crates/zk-validator/
+COPY crates/ml-validator/Cargo.toml     crates/ml-validator/
+COPY crates/wasm-sandbox/Cargo.toml     crates/wasm-sandbox/
+COPY crates/threshold-encryption/Cargo.toml crates/threshold-encryption/
+COPY crates/cross-chain/Cargo.toml        crates/cross-chain/
+COPY crates/insurance/Cargo.toml        crates/insurance/
+COPY crates/db-sync/Cargo.toml          crates/db-sync/
+COPY crates/ipfs-pinner/Cargo.toml      crates/ipfs-pinner/
+COPY crates/secrets/Cargo.toml          crates/secrets/
 
 # Build-script inputs required for dependency caching
 COPY crates/common/build.rs     crates/common/
@@ -66,7 +82,8 @@ RUN mkdir -p crates/common/src && echo "pub fn _stub() {}" > crates/common/src/l
     mkdir -p crates/db-sync/src && echo "pub fn _stub() {}" > crates/db-sync/src/lib.rs && \
     mkdir -p crates/ipfs-pinner/src && echo "pub fn _stub() {}" > crates/ipfs-pinner/src/lib.rs && \
     mkdir -p crates/faucet/src && echo "fn main() {}" > crates/faucet/src/main.rs && \
-    mkdir -p crates/relayer/src && echo "fn main() {}" > crates/relayer/src/main.rs
+    mkdir -p crates/relayer/src && echo "fn main() {}" > crates/relayer/src/main.rs && \
+    mkdir -p crates/secrets/src && echo "pub fn _stub() {}" > crates/secrets/src/lib.rs
 
 # Pre-build dependencies (cached layer)
 RUN cargo fetch || (sleep 5 && cargo fetch) || (sleep 10 && cargo fetch)
@@ -81,6 +98,7 @@ COPY config/ config/
 COPY rules/ rules/
 COPY testnet/ testnet/
 COPY validators/ validators/
+COPY docker-compose*.yml ./
 
 # Touch files to ensure rebuild
 RUN touch crates/*/src/*.rs
@@ -119,6 +137,8 @@ COPY --from=builder /build/rules /app/rules
 RUN useradd -r -s /bin/false creg && \
     mkdir -p /data && \
     chown creg:creg /data
+
+ENV CREG_DATA_DIR=/data
 
 USER creg
 

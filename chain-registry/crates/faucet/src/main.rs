@@ -459,10 +459,15 @@ async fn main() -> anyhow::Result<()> {
     // re-running deploy-contracts + sync-testnet-artifacts.
     match get_token_balance(&config, &config.faucet_address).await {
         Ok(0) => {
+            let chain_id = env_u64("FAUCET_CHAIN_ID", 31337);
+            let fund_hint = if chain_id == 11155111 {
+                "testnet\\fund-sepolia-faucet-governance.ps1"
+            } else {
+                "scripts/start-testnet.ps1 (or Fund-TestnetFaucet)"
+            };
             error!("╔═══════════════════════════════════════════════════════════╗");
             error!("║  FAUCET BALANCE IS ZERO — drip requests WILL FAIL         ║");
-            error!("║  Fix: run scripts/start-testnet.ps1 (or Fund-TestnetFaucet)║");
-            error!("║  to redeploy contracts and refund this wallet.            ║");
+            error!("║  Fix: run {fund_hint} to fund this wallet.               ║");
             error!("╚═══════════════════════════════════════════════════════════╝");
         }
         Ok(bal) => {
@@ -951,6 +956,40 @@ async fn handle_drip(
         }
     };
 
+    if should_send_token {
+        match get_token_balance(&state.config, &state.config.faucet_address).await {
+            Ok(faucet_balance) if faucet_balance < state.config.drip_amount => {
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    JsonResponse(DripResponse::error(
+                        "Faucet is out of tCREG. An operator must fund the faucet wallet before more token drips are possible.",
+                    )),
+                );
+            }
+            Err(err) => {
+                error!("Could not read faucet token balance before drip: {}", err);
+            }
+            _ => {}
+        }
+    }
+
+    if should_send_native {
+        match get_native_balance(&state.config, &state.config.faucet_address).await {
+            Ok(faucet_native) if faucet_native < state.config.native_drip_amount => {
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    JsonResponse(DripResponse::error(
+                        "Faucet is out of testnet ETH for gas drips. Fund the faucet wallet with Sepolia ETH.",
+                    )),
+                );
+            }
+            Err(err) => {
+                error!("Could not read faucet native balance before drip: {}", err);
+            }
+            _ => {}
+        }
+    }
+
     if !should_send_token && !should_send_native {
         let token_msg = token_balance
             .map(|balance| format!("{} tCREG", balance / 10_u128.pow(18)))
@@ -1179,6 +1218,14 @@ async fn get_balance(
     }
 }
 
+fn chain_display_name(chain_id: u64) -> &'static str {
+    match chain_id {
+        11155111 => "CREG Testnet (Sepolia)",
+        31337 => "CREG Testnet (Anvil)",
+        _ => "CREG Testnet",
+    }
+}
+
 /// Network configuration info for wallet setup and next-step guidance
 async fn get_network_info(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let explorer_url = env_string("FAUCET_EXPLORER_URL", "http://localhost:3007");
@@ -1190,7 +1237,7 @@ async fn get_network_info(State(state): State<Arc<AppState>>) -> impl IntoRespon
         "rpc_url": rpc_url,
         "token_contract": state.config.token_contract,
         "explorer_url": explorer_url,
-        "chain_name": "CREG Testnet (Anvil)",
+        "chain_name": chain_display_name(chain_id),
         "currency": "ETH",
         "token_symbol": "tCREG",
         "native_currency_symbol": "ETH",
@@ -1204,16 +1251,38 @@ async fn health_check(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         get_token_balance(&state.config, &state.config.faucet_address).await,
         get_native_balance(&state.config, &state.config.faucet_address).await,
     ) {
-        (Ok(faucet_balance), Ok(faucet_native_balance)) => (
-            StatusCode::OK,
-            JsonResponse(serde_json::json!({
-                "status": "healthy",
+        (Ok(faucet_balance), Ok(faucet_native_balance)) => {
+            let token_ready = faucet_balance >= state.config.drip_amount;
+            let native_ready = state.config.native_drip_amount == 0
+                || faucet_native_balance >= state.config.native_drip_amount;
+            let ready = token_ready && native_ready;
+            let status_code = if ready {
+                StatusCode::OK
+            } else {
+                StatusCode::SERVICE_UNAVAILABLE
+            };
+            let status = if ready { "healthy" } else { "degraded" };
+            let mut body = serde_json::json!({
+                "status": status,
                 "faucet": "online",
                 "mode": "real",
                 "faucet_balance": faucet_balance.to_string(),
                 "faucet_native_balance": faucet_native_balance.to_string(),
-            })),
-        ),
+                "token_drips_available": token_ready,
+                "native_drips_available": native_ready,
+            });
+            if !token_ready {
+                body["warning"] = serde_json::json!(
+                    "Faucet wallet has insufficient tCREG; run testnet/fund-sepolia-faucet-governance.ps1 on Sepolia"
+                );
+            }
+            if !native_ready {
+                body["warning_native"] = serde_json::json!(
+                    "Faucet wallet has insufficient Sepolia ETH for gas drips"
+                );
+            }
+            (status_code, JsonResponse(body))
+        }
         (token_result, native_result) => (
             StatusCode::SERVICE_UNAVAILABLE,
             JsonResponse(serde_json::json!({

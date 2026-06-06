@@ -225,12 +225,12 @@ fn load_or_generate_keys() -> Result<Arc<(ProvingKey<Bn254>, VerifyingKey<Bn254>
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
             .unwrap_or(false)
         {
-            panic!(
+            return Err(ZkError::InvalidInput(format!(
                 "PRODUCTION GUARD: Batch ZK key files not found in '{}'. \
                  Refusing to generate ephemeral keys on a production node. \
                  Run `creg advanced zk-setup`, or set CREG_ZK_KEYS_DIR correctly.",
                 dir.display()
-            );
+            )));
         }
 
         warn!(

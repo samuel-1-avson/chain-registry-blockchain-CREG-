@@ -110,6 +110,10 @@ circuits/build/
 circuits/keys/
 **/circuits/build/
 **/circuits/keys/
+**/circuits/*.bin
+**/circuits/batch_*.bin
+**/circuits/proving_key_package*.bin
+**/circuits/verifying_key_package*.bin
 *.r1cs
 *.zkey
 *.ptau
@@ -286,6 +290,14 @@ lcov.info
 # DOCKER
 # =============================================================================
 docker-compose.override.yml
+
+# =============================================================================
+# LOCAL DIAGNOSTICS (never commit)
+# =============================================================================
+rpc-probe.txt
+_disk_usage_report.txt
+**/rpc-probe.txt
+**/_disk_usage_report.txt
 
 # =============================================================================
 # MISCELLANEOUS

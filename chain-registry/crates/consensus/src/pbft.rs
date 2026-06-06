@@ -6,7 +6,6 @@
 use crate::ValidatorSet;
 use anyhow::{bail, Result};
 use common::{Block, BlockSignature};
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
@@ -32,6 +31,39 @@ const PBFT_SIGNATURE_DOMAIN: &str = "creg-pbft-v1";
 /// Canonical message signed by validators during PBFT block consensus.
 pub fn pbft_signature_message(phase: &str, block_hash: &str) -> String {
     format!("{}:{}:{}", PBFT_SIGNATURE_DOMAIN, phase, block_hash)
+}
+
+/// Verify an Ed25519 PBFT phase signature against a validator pubkey.
+pub fn verify_pbft_phase_signature(
+    phase: &str,
+    block_hash: &str,
+    pubkey_hex: &str,
+    signature_hex: &str,
+) -> Result<()> {
+    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+
+    let expected_pubkey = pubkey_hex.trim_start_matches("0x").to_ascii_lowercase();
+    let pubkey_bytes = hex::decode(&expected_pubkey).map_err(|e| {
+        anyhow::anyhow!("Invalid validator pubkey hex for PBFT {}: {}", phase, e)
+    })?;
+    let verifying_key = VerifyingKey::try_from(pubkey_bytes.as_slice())
+        .map_err(|e| anyhow::anyhow!("Invalid validator pubkey for PBFT {}: {}", phase, e))?;
+
+    let signature_bytes = hex::decode(signature_hex.trim_start_matches("0x")).map_err(|e| {
+        anyhow::anyhow!(
+            "Invalid PBFT {} signature hex: {}",
+            phase,
+            e
+        )
+    })?;
+    let signature = Signature::try_from(signature_bytes.as_slice()).map_err(|e| {
+        anyhow::anyhow!("Invalid PBFT {} signature format: {}", phase, e)
+    })?;
+
+    let message = pbft_signature_message(phase, block_hash);
+    verifying_key
+        .verify(message.as_bytes(), &signature)
+        .map_err(|e| anyhow::anyhow!("Invalid PBFT {} signature: {}", phase, e))
 }
 
 /// Configuration for PBFT consensus parameters.
@@ -333,40 +365,7 @@ impl PbftRound {
             );
         }
 
-        let pubkey_bytes = hex::decode(&expected_pubkey).map_err(|e| {
-            anyhow::anyhow!("Invalid validator pubkey hex for {}: {}", validator_id, e)
-        })?;
-        let verifying_key = VerifyingKey::try_from(pubkey_bytes.as_slice())
-            .map_err(|e| anyhow::anyhow!("Invalid validator pubkey for {}: {}", validator_id, e))?;
-
-        let signature_bytes = hex::decode(sig.signature.trim_start_matches("0x")).map_err(|e| {
-            anyhow::anyhow!(
-                "Invalid PBFT {} signature hex from {}: {}",
-                phase,
-                validator_id,
-                e
-            )
-        })?;
-        let signature = Signature::try_from(signature_bytes.as_slice()).map_err(|e| {
-            anyhow::anyhow!(
-                "Invalid PBFT {} signature from {}: {}",
-                phase,
-                validator_id,
-                e
-            )
-        })?;
-
-        let message = pbft_signature_message(phase, &self.block.hash());
-        verifying_key
-            .verify(message.as_bytes(), &signature)
-            .map_err(|e| {
-                anyhow::anyhow!(
-                    "Invalid PBFT {} signature from {}: {}",
-                    phase,
-                    validator_id,
-                    e
-                )
-            })
+        verify_pbft_phase_signature(phase, &self.block.hash(), &expected_pubkey, &sig.signature)
     }
 
     /// Returns the finalised signatures to embed in the ChainRecord.

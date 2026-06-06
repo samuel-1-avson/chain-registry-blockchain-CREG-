@@ -7,6 +7,10 @@ import "./VRF.sol";
 import "./Governance.sol";
 import "./ZKVerifier.sol";
 
+interface IGovernancePause {
+    function isPaused() external view returns (bool);
+}
+
 /// @title ChainRegistry
 /// @notice Core on-chain package registry with ZK proof support
 /// @dev Records publish/revoke events. Supports both PBFT consensus
@@ -92,6 +96,18 @@ contract ChainRegistry {
     /// batchId → transactionDataRoot (for Data Availability)
     mapping(uint256 => bytes32) public batchDataRoots;
 
+    /// Relays (e.g. BatchOperations) that may submit packages on behalf of a staked publisher.
+    mapping(address => bool) public packageSubmitRelays;
+
+    /// Relays (e.g. chain node bridge) authorized to call finalizePackage when enforcement is on.
+    mapping(address => bool) public packageFinalizeRelays;
+
+    /// When true, finalizePackage must be called by an authorized relay (testnet hardening).
+    bool public enforceFinalizeRelays;
+
+    /// Per-package validator signature replay guard (canonical key → validator → signed).
+    mapping(bytes32 => mapping(address => bool)) public validatorSignedForPackage;
+
     // ── Events ────────────────────────────────────────────────────────────────
 
     event PackageSubmitted(bytes32 indexed key, string canonical, address indexed publisher);
@@ -101,6 +117,9 @@ contract ChainRegistry {
     event GovernanceUpdated(address newGovernance);
     event QuorumUpdated(uint8 newQuorumPct);
     event ZKValidationToggled(bool enabled);
+    event PackageSubmitRelayUpdated(address indexed relay, bool enabled);
+    event PackageFinalizeRelayUpdated(address indexed relay, bool enabled);
+    event EnforceFinalizeRelaysUpdated(bool enabled);
     
     event BatchSubmitted(
         uint256 indexed batchId,
@@ -122,6 +141,10 @@ contract ChainRegistry {
     error NotGovernance();
     error NotPublisher();
     error ZKDisabled();
+    error NotAuthorizedSubmitRelay();
+    error NotAuthorizedFinalizeRelay();
+    error AlreadyVerified(string canonical);
+    error ValidatorAlreadySigned(address validator);
 
     // ── Modifiers ─────────────────────────────────────────────────────────────
 
@@ -131,7 +154,7 @@ contract ChainRegistry {
     }
 
     modifier whenNotPaused() {
-        if (Governance(governance).isPaused()) {
+        if (IGovernancePause(governance).isPaused()) {
             revert("System is paused");
         }
         _;
@@ -167,6 +190,30 @@ contract ChainRegistry {
         bytes32 contentHash,
         string calldata ipfsCid
     ) external whenNotPaused {
+        _storePendingPackage(msg.sender, canonical, contentHash, ipfsCid);
+    }
+
+    /// @notice Submit a package on behalf of a staked publisher via an authorized relay.
+    /// @dev Used by BatchOperations so `msg.sender` can differ from the publisher while
+    ///      preserving the publisher stake check against `publisher`.
+    function submitPackageFor(
+        address publisher,
+        string calldata canonical,
+        bytes32 contentHash,
+        string calldata ipfsCid
+    ) external whenNotPaused {
+        if (msg.sender != publisher && !packageSubmitRelays[msg.sender]) {
+            revert NotAuthorizedSubmitRelay();
+        }
+        _storePendingPackage(publisher, canonical, contentHash, ipfsCid);
+    }
+
+    function _storePendingPackage(
+        address publisher,
+        string calldata canonical,
+        bytes32 contentHash,
+        string calldata ipfsCid
+    ) internal {
         bytes32 key = _key(canonical);
         PackageRecord storage rec = packages[key];
 
@@ -175,13 +222,13 @@ contract ChainRegistry {
         }
 
         // Publisher must have staked tokens to publish.
-        require(staking.stakedBalance(msg.sender) > 0, "Publisher must stake first");
+        require(staking.stakedBalance(publisher) > 0, "Publisher must stake first");
 
         packages[key] = PackageRecord({
             canonical:         canonical,
             contentHash:       contentHash,
             ipfsCid:           ipfsCid,
-            publisher:         msg.sender,
+            publisher:         publisher,
             publishedAt:       uint64(block.timestamp),
             // Note: blockhash() only works for the 256 most recent blocks.
             // blockNumber is the reliable inclusion anchor; blockHash is best-effort.
@@ -193,7 +240,7 @@ contract ChainRegistry {
             zkProofHash:       bytes32(0)
         });
 
-        emit PackageSubmitted(key, canonical, msg.sender);
+        emit PackageSubmitted(key, canonical, publisher);
     }
     
     /// @notice Submit a package with ZK proof for instant verification
@@ -301,14 +348,21 @@ contract ChainRegistry {
 
     /// @notice Finalize a package after PBFT consensus.
     /// @dev Called by the chain node once the off-chain PBFT round completes.
+    ///      Signature replay per validator is rejected. When `enforceFinalizeRelays`
+    ///      is enabled (governance), only authorized relay contracts may call.
     function finalizePackage(
         string calldata canonical,
         ValidatorSig[] calldata sigs
     ) external whenNotPaused {
+        if (enforceFinalizeRelays && !packageFinalizeRelays[msg.sender]) {
+            revert NotAuthorizedFinalizeRelay();
+        }
+
         bytes32 key = _key(canonical);
         PackageRecord storage rec = packages[key];
 
         if (rec.status == PackageStatus.Unknown) revert NotFound(canonical);
+        if (rec.status == PackageStatus.Verified) revert AlreadyVerified(canonical);
         if (rec.status == PackageStatus.Revoked)  revert AlreadyRevoked(canonical);
 
         uint activeValidators = staking.activeValidatorCount();
@@ -324,10 +378,15 @@ contract ChainRegistry {
             // Validator must be staked and active.
             if (!staking.isActiveValidator(s.validator)) continue;
 
+            if (validatorSignedForPackage[key][s.validator]) {
+                revert ValidatorAlreadySigned(s.validator);
+            }
+
             // Verify ECDSA signature over (canonical ++ contentHash).
             address recovered = _recoverSigner(digest, s.signature);
             if (recovered != s.validator) revert InvalidSignature(s.validator);
 
+            validatorSignedForPackage[key][s.validator] = true;
             consensusProofs[key].push(s);
             if (s.approved) {
                 approvals++;
@@ -479,6 +538,24 @@ contract ChainRegistry {
     
     function setZKValidationFee(uint256 fee) external onlyGovernance {
         zkValidationFee = fee;
+    }
+
+    /// @notice Allow or revoke a relay contract that submits packages for staked publishers.
+    function setPackageSubmitRelay(address relay, bool enabled) external onlyGovernance {
+        packageSubmitRelays[relay] = enabled;
+        emit PackageSubmitRelayUpdated(relay, enabled);
+    }
+
+    /// @notice Allow or revoke a relay that may call finalizePackage when enforcement is on.
+    function setPackageFinalizeRelay(address relay, bool enabled) external onlyGovernance {
+        packageFinalizeRelays[relay] = enabled;
+        emit PackageFinalizeRelayUpdated(relay, enabled);
+    }
+
+    /// @notice Toggle finalizePackage relay allowlist (off by default — permissionless relaying).
+    function setEnforceFinalizeRelays(bool enabled) external onlyGovernance {
+        enforceFinalizeRelays = enabled;
+        emit EnforceFinalizeRelaysUpdated(enabled);
     }
     
     /// @notice Withdraw accumulated ZK validation fees

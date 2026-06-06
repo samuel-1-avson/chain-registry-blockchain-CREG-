@@ -434,4 +434,7 @@ contract Governance {
     function signerCount() external view returns (uint256) {
         return signers.length;
     }
+
+    /// @notice Accept ETH from Appeal bond forfeitures and other protocol flows.
+    receive() external payable {}
 }

@@ -71,6 +71,8 @@ contract AppealTest is Test {
 
         vm.deal(publisher, 10 ether);
         vm.deal(panelist1, 1 ether);
+        vm.deal(panelist2, 1 ether);
+        vm.deal(panelist3, 1 ether);
     }
 
     function test_SubmitAppealRequiresBond() public {
@@ -94,9 +96,9 @@ contract AppealTest is Test {
         uint256 balBefore = publisher.balance;
 
         // Three panelists approve.
-        vm.prank(panelist1); appeal.vote(id, true);
-        vm.prank(panelist2); appeal.vote(id, true);
-        vm.prank(panelist3); appeal.vote(id, true);
+        vm.prank(panelist1); appeal.vote{value: 0.01 ether}(id, true);
+        vm.prank(panelist2); appeal.vote{value: 0.01 ether}(id, true);
+        vm.prank(panelist3); appeal.vote{value: 0.01 ether}(id, true);
 
         (,,, Appeal.AppealStatus status,,,) = appeal.getAppeal(id);
         assertEq(uint(status), uint(Appeal.AppealStatus.Approved));
@@ -105,23 +107,18 @@ contract AppealTest is Test {
     }
 
     function test_PanelRejectionSlashesBond() public {
-        // Publisher must stake CREG first to be slashable.
-        uint256 stakeAmount = 10 * 10**18; // 10 CREG
-        cregToken.transfer(publisher, stakeAmount);
-        vm.prank(publisher);
-        cregToken.approve(address(staking), stakeAmount);
-        vm.prank(publisher);
-        staking.stakeAsPublisher(stakeAmount);
+        uint256 govBalBefore = address(governance).balance;
 
         vm.prank(publisher);
         uint256 id = appeal.appeal{value: 0.1 ether}(CANONICAL, "Trying my luck");
 
-        vm.prank(panelist1); appeal.vote(id, false);
-        vm.prank(panelist2); appeal.vote(id, false);
-        vm.prank(panelist3); appeal.vote(id, false);
+        vm.prank(panelist1); appeal.vote{value: 0.01 ether}(id, false);
+        vm.prank(panelist2); appeal.vote{value: 0.01 ether}(id, false);
+        vm.prank(panelist3); appeal.vote{value: 0.01 ether}(id, false);
 
         (,,, Appeal.AppealStatus status,,,) = appeal.getAppeal(id);
         assertEq(uint(status), uint(Appeal.AppealStatus.Rejected));
+        assertEq(address(governance).balance, govBalBefore + 0.1 ether);
     }
 
     function test_CannotVoteTwice() public {
@@ -129,11 +126,11 @@ contract AppealTest is Test {
         uint256 id = appeal.appeal{value: 0.1 ether}(CANONICAL, "Please reconsider");
 
         vm.prank(panelist1);
-        appeal.vote(id, true);
+        appeal.vote{value: 0.01 ether}(id, true);
 
         vm.prank(panelist1);
         vm.expectRevert();
-        appeal.vote(id, true);
+        appeal.vote{value: 0.01 ether}(id, true);
     }
 
     function test_NonPanelistCannotVote() public {
@@ -180,5 +177,96 @@ contract AppealTest is Test {
         uint256 id = appeal.appeal{value: bond}(CANONICAL, "Fuzz test");
         (,, uint256 storedBond,,,, ) = appeal.getAppeal(id);
         assertEq(storedBond, bond);
+    }
+
+    function test_ReentrancyBlockedDuringVoteResolution() public {
+        ReentrantPanelist reentrant = new ReentrantPanelist(appeal);
+        vm.deal(address(reentrant), 1 ether);
+
+        vm.prank(address(governance));
+        appeal.addPanelist(address(reentrant));
+
+        vm.prank(publisher);
+        uint256 id = appeal.appeal{value: 0.1 ether}(CANONICAL, "reentrancy probe");
+
+        vm.prank(panelist1);
+        appeal.vote{value: 0.01 ether}(id, true);
+        vm.prank(panelist2);
+        appeal.vote{value: 0.01 ether}(id, true);
+
+        vm.expectRevert("Panelist bond refund failed");
+        reentrant.voteApprove{value: 0.01 ether}(id);
+    }
+
+    function test_ReentrancyBlockedDuringPublisherBondRefund() public {
+        ReentrantPublisher pub = new ReentrantPublisher(appeal);
+        vm.deal(address(pub), 2 ether);
+
+        uint256 id = pub.submitAppeal{value: 0.1 ether}(CANONICAL, "bond refund probe");
+
+        vm.prank(panelist1);
+        appeal.vote{value: 0.01 ether}(id, true);
+        vm.prank(panelist2);
+        appeal.vote{value: 0.01 ether}(id, true);
+
+        pub.armReenter();
+        vm.expectRevert("Bond refund failed");
+        vm.prank(panelist3);
+        appeal.vote{value: 0.01 ether}(id, true);
+    }
+}
+
+/// @dev Re-enters appeal() from its receive hook when the appeal bond is refunded.
+contract ReentrantPublisher {
+    Appeal appeal;
+    string canonical;
+    bool reenter;
+
+    constructor(Appeal _appeal) {
+        appeal = _appeal;
+    }
+
+    function submitAppeal(string calldata canonical_, string calldata statement)
+        external
+        payable
+        returns (uint256 id)
+    {
+        canonical = canonical_;
+        return appeal.appeal{value: msg.value}(canonical_, statement);
+    }
+
+    function armReenter() external {
+        reenter = true;
+    }
+
+    receive() external payable {
+        if (reenter) {
+            reenter = false;
+            appeal.appeal{value: 0.1 ether}(canonical, "reenter during refund");
+        }
+    }
+}
+
+/// @dev Re-enters vote() from its receive hook during bond distribution.
+contract ReentrantPanelist {
+    Appeal appeal;
+    uint256 targetId;
+    bool reenter;
+
+    constructor(Appeal _appeal) {
+        appeal = _appeal;
+    }
+
+    function voteApprove(uint256 id) external payable {
+        targetId = id;
+        reenter = true;
+        appeal.vote{value: msg.value}(id, true);
+    }
+
+    receive() external payable {
+        if (reenter) {
+            reenter = false;
+            appeal.vote{value: 0.01 ether}(targetId, true);
+        }
     }
 }

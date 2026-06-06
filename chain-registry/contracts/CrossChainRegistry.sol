@@ -539,6 +539,8 @@ contract LayerZeroAdapter is IMessageBridge {
 /// @title AxelarAdapter
 /// @notice Adapter for Axelar cross-chain messaging
 contract AxelarAdapter is IMessageBridge {
+    error NotGovernance();
+
     // Axelar gateway address
     address public gateway;
     
@@ -597,8 +599,11 @@ contract AxelarAdapter is IMessageBridge {
         CrossChainRegistry(registry).receiveVerification(srcChainId, encodedMessage, signatures);
     }
     
-    /// @notice Set chain name for a chain ID
+    /// @notice Set chain name for a chain ID (governance-only).
     function setChainName(uint16 chainId, string calldata name) external {
+        if (msg.sender != CrossChainRegistry(registry).governance()) {
+            revert NotGovernance();
+        }
         chainNames[chainId] = name;
     }
     

@@ -2,8 +2,9 @@
 
 > A decentralized, Byzantine-Fault-Tolerant package distribution network that replaces single-authority trust in npm/PyPI/Cargo with cryptographic consensus from a staked validator set.
 
-[![Testnet](https://img.shields.io/badge/testnet-v0.3.0-blue)](docs/SECURITY_AND_REMEDIATION_IMPLEMENTATION_PLAN.md)
-[![Local%20Cluster](https://img.shields.io/badge/local%20cluster-3%20validators%20validated-green)](docs/SYSTEM_FULL_ANALYSIS_REPORT.md)
+[![Testnet](https://img.shields.io/badge/testnet-creg--testnet--1-blue)](chain-registry/testnet/chain-spec.sepolia.json)
+[![Sepolia L1](https://img.shields.io/badge/L1-Sepolia-11155111-purple)](https://sepolia.etherscan.io)
+[![Validators](https://img.shields.io/badge/validators-up%20to%2050-green)](chain-registry/testnet/chain-spec.sepolia.json)
 [![Kubernetes](https://img.shields.io/badge/k8s-manifests%20available-blue)](chain-registry/k8s/)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey)](#license)
 [![Rust](https://img.shields.io/badge/rust-1.90-orange)](chain-registry/Cargo.toml)
@@ -17,7 +18,7 @@
 
 **The solution.** Chain Registry replaces single-authority trust with a **decentralized Byzantine-Fault-Tolerant validator network** that independently analyzes every package before it is considered `Verified`. Each package passes through a three-stage validation pipeline — static analysis, behavioral sandbox, ML deep scan — and only becomes installable once a `⌊2n/3⌋+1` PBFT quorum of economically-staked validators has signed an `Approve` vote. Packages are content-addressed in IPFS, the chain is persisted in RocksDB, and final state roots are anchored to Ethereum L1 via a Groth16 rollup bridge.
 
-**Current status.** The most recently revalidated path is the **local distributed three-validator bootstrap** driven by [`chain-registry/local-testnet.ps1`](chain-registry/local-testnet.ps1) and [`chain-registry/docker-compose.local-testnet.yml`](chain-registry/docker-compose.local-testnet.yml). That path now proves a cluster can advance beyond genesis with a non-zero active validator set and a non-zero P2P mesh. The single-validator Docker profile remains useful for inner-loop development, while multi-host and Sepolia-facing work is tracked in [`docs/SECURITY_AND_REMEDIATION_IMPLEMENTATION_PLAN.md`](docs/SECURITY_AND_REMEDIATION_IMPLEMENTATION_PLAN.md) and the full system analysis in [`docs/SYSTEM_FULL_ANALYSIS_REPORT.md`](docs/SYSTEM_FULL_ANALYSIS_REPORT.md). See the [documentation index](docs/README.md) for security runbooks, API cookbook, and schema notes. Kustomize manifests are available under [`chain-registry/k8s/`](chain-registry/k8s/). The repo currently ships a CLI with 27 commands, a React web explorer, a Ratatui terminal explorer, a faucet, a relayer paymaster, and a Prometheus/Grafana observability stack.
+**Current status.** The primary deployment path is the **Sepolia testnet stack** in [`chain-registry/docker-compose.yml`](chain-registry/docker-compose.yml): IPFS, signed chain-spec server, validator node, PostgreSQL indexer, Sepolia faucet, relayer, and web explorer. Chain parameters and contract addresses live in [`chain-registry/testnet/chain-spec.sepolia.json`](chain-registry/testnet/chain-spec.sepolia.json) (`creg-testnet-1`, phase `alpha`). A **local three-validator bootstrap** is available via [`chain-registry/local-testnet.ps1`](chain-registry/local-testnet.ps1). Deep technical analysis: [`chain-registry/DEEP_DIVE_ANALYSIS.md`](chain-registry/DEEP_DIVE_ANALYSIS.md). Kustomize manifests: [`chain-registry/k8s/`](chain-registry/k8s/).
 
 ---
 
@@ -26,33 +27,42 @@
 **Prerequisites.**
 
 - Docker Desktop (or docker-engine + compose v2)
-- PowerShell for the repo-validated local bootstrap wrapper
-- Enough free resources for a three-validator local stack
+- Sepolia RPC URL (`SEPOLIA_RPC_URL` or `CREG_ETH_RPC`)
+- Faucet operator address in `.env` (`FAUCET_ADDRESS` — required by compose)
+- Optional: `FAUCET_PRIVATE_KEY`, `RELAYER_PRIVATE_KEY` for funded services
 
-**Recommended: validated local distributed bootstrap.**
+**Sepolia testnet stack (matches `docker-compose.yml`).**
+
+```bash
+cd chain-registry
+cp .env.example .env
+# Edit .env: SEPOLIA_RPC_URL, FAUCET_ADDRESS, contract overrides if needed
+docker compose up -d --build
+curl http://localhost:8090/v1/health
+```
+
+Default host ports from compose: **node API 8090**, **web explorer 3007**, **faucet 8082**, **relayer 8083**, **indexer 8084**, **IPFS API 5001**, **chain spec 8888**, **PostgreSQL 5432**.
+
+**Health checks.**
+
+```bash
+curl http://localhost:8090/v1/health
+curl http://localhost:3007/health
+curl http://localhost:8082/health
+```
+
+**Optional profiles.**
+
+- CLI: `docker compose --profile cli run --rm cli --help`
+- TUI explorer: `docker compose --profile tui run --rm tui-explorer`
+- Observability overlay: `docker compose -f docker-compose.yml -f observability/docker-compose.observability.yml up -d`
+
+**Local three-validator cluster (no Sepolia).**
 
 ```powershell
 cd chain-registry
 ./local-testnet.ps1 -RunSmokeTests
 ```
-
-This wrapper drives the canonical local stack in [`chain-registry/docker-compose.local-testnet.yml`](chain-registry/docker-compose.local-testnet.yml), deploys local contracts, starts three validators plus observer/indexer/faucet/relayer, and runs the smoke flow in [`chain-registry/scripts/smoke-test-local-testnet.ps1`](chain-registry/scripts/smoke-test-local-testnet.ps1).
-
-**Fast inner loop: single-validator development cluster.**
-
-```bash
-cd chain-registry
-cp .env.example .env
-docker compose up -d
-curl http://localhost:8080/v1/health
-```
-
-**Optional UI and CLI surfaces.**
-
-- Embedded UI: <http://localhost:8080/ui/>
-- Standalone explorer: `docker compose --profile web-explorer up -d` → <http://localhost:3007>
-- Terminal explorer: `docker compose --profile tui run --rm tui-explorer`
-- Publisher workflow: `docker compose --profile cli run --rm cli publish ...`
 
 ---
 
@@ -227,23 +237,23 @@ creg stake --amount 10000 --role validator --address 0xYourEthAddress
 | **Registry.sol** | Core package index; PBFT finalization + ZK verification | **Active** |
 | **Staking.sol** | Publisher & validator stake management, slashing | **Active** |
 | **Governance.sol** | M-of-N multisig + emergency pause | **Active** |
-| **GovernanceV2.sol** | Upgrade target with timelock and delegation | **Active** |
+| **GovernanceV2.sol** | Token-weighted governance (future migration) | **Planned** |
 | **Reputation.sol** | On-chain validator approval/rejection counters | **Active** |
-| **VRF.sol** | Verifiable random beacon adaptor | **Active** |
+| **VRF.sol** | Chainlink VRF validator selection | **Partial** (callback incomplete) |
 | **CregToken.sol** | ERC20 + EIP-2612 permit for CREG | **Active** |
 | **ZKVerifier.sol** | Groth16 verifier wrapper (ISSUE-002 fixed; see `contracts/test/ZKVerifier.t.sol`) | **Active** |
 | **Groth16Verifier.sol** | snarkJS-generated Groth16 verifier | **Active** |
 | **ZKSlashingVerifier.sol** | Double-signing evidence verifier | **Active** |
 | **SlashingEvidence.sol** | Permissionless slashing evidence submission | **Active** |
 | **Appeal.sol** | Publisher appeal process | **Active** |
-| **BatchOperations.sol** | Batch submit / verify helpers | **Active** |
+| **BatchOperations.sol** | Batch submit / verify helpers | **Inactive** (stake check broken) |
 | **ValidatorRewards.sol** | Staking rewards distribution | **Active** |
 | **PinningRewards.sol** | IPFS pinner rewards | **Active** |
 | **PackageInsurance.sol** | Optional insurance coverage for verified packages | **Active** |
 | **PrivateRegistry.sol** | Enterprise M-of-N decrypted registries (ISSUE-004) | **Planned** — no contract in tree; implement only with enterprise commitment (D5) |
-| **CrossChainRegistry.sol** | Multi-chain verification receipts (⚠ ISSUE-005/006) | **Planned** |
+| **CrossChainRegistry.sol** | Multi-chain verification receipts | **Scaffold** |
 
-See [`chain-registry/docs/DEEP_DIVE_ANALYSIS.md`](chain-registry/docs/DEEP_DIVE_ANALYSIS.md) for contract-level findings.
+See [`chain-registry/DEEP_DIVE_ANALYSIS.md`](chain-registry/DEEP_DIVE_ANALYSIS.md) for contract-level findings and issue registry.
 
 ---
 
@@ -334,7 +344,7 @@ make testnet-smoke    # full E2E diagnostic via `creg doctor --testnet`
 1. Fork the repository and create a feature branch.
 2. Run `cargo fmt` and `cargo clippy --workspace --all-targets -- -D warnings` before committing.
 3. Add tests — unit tests for `crates/*`, Foundry tests for `contracts/`.
-4. Reference any issue IDs from [`chain-registry/docs/DEEP_DIVE_ANALYSIS.md`](chain-registry/docs/DEEP_DIVE_ANALYSIS.md), [`chain-registry/docs/MASTER_PROJECT_READINESS_AND_CLIENT_AUDIT_2026-05-18.md`](chain-registry/docs/MASTER_PROJECT_READINESS_AND_CLIENT_AUDIT_2026-05-18.md), or [`chain-registry/docs/archive/REMEDIATION_BACKLOG.md`](chain-registry/docs/archive/REMEDIATION_BACKLOG.md) in your PR description.
+4. Reference issue IDs from [`chain-registry/DEEP_DIVE_ANALYSIS.md`](chain-registry/DEEP_DIVE_ANALYSIS.md) (ISSUE-001…) in your PR description.
 5. CI runs `cargo test`, `forge test`, and explorer tests; all must pass.
 
 ### Documentation

@@ -16,7 +16,7 @@ pub mod vrf;
 // anyhow::Result is unused here
 // common imports are handled within submodules
 pub use evidence_votes::{aggregate_evidence_votes, EvidenceVoteOutcome};
-pub use pbft::{PbftConfig, PbftEngine, ViewChangeSignal};
+pub use pbft::{verify_pbft_phase_signature, PbftConfig, PbftEngine, ViewChangeSignal};
 pub use validator_set::ValidatorSet;
 
 pub mod vote_accumulator;

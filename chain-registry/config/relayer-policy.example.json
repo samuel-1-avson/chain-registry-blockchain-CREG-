@@ -3,32 +3,6 @@
   "mode": "testnet-only",
   "chains": [
     {
-      "id": 31337,
-      "label": "Local Anvil",
-      "enabled": true,
-      "dailyWalletQuota": 25,
-      "dailyIpQuota": 100,
-      "maxGasPerRequest": 500000,
-      "allowContracts": [
-        "${TESTNET_TOKEN_ADDR}",
-        "${TESTNET_STAKING_ADDR}"
-      ],
-      "allowSelectors": [
-        {
-          "key": "publisher",
-          "name": "stakeAsPublisherWithPermit(address,uint256,uint256,uint8,bytes32,bytes32)",
-          "selector": "0xe2389e9e",
-          "maxAmountWei": "1000000000000000000000"
-        },
-        {
-          "key": "validator",
-          "name": "applyToBeValidatorWithPermit(address,uint256,uint256,uint8,bytes32,bytes32)",
-          "selector": "0x46bbf25e",
-          "maxAmountWei": "5000000000000000000000"
-        }
-      ]
-    },
-    {
       "id": 11155111,
       "label": "Ethereum Sepolia",
       "enabled": true,
@@ -53,32 +27,6 @@
           "maxAmountWei": "5000000000000000000000"
         }
       ]
-    },
-    {
-      "id": 560048,
-      "label": "Ethereum Hoodi",
-      "enabled": true,
-      "dailyWalletQuota": 10,
-      "dailyIpQuota": 25,
-      "maxGasPerRequest": 650000,
-      "allowContracts": [
-        "${VITE_HOODI_CREG_TOKEN}",
-        "${VITE_HOODI_STAKING_ADDR}"
-      ],
-      "allowSelectors": [
-        {
-          "key": "publisher",
-          "name": "stakeAsPublisherWithPermit(address,uint256,uint256,uint8,bytes32,bytes32)",
-          "selector": "0xe2389e9e",
-          "maxAmountWei": "5000000000000000000000"
-        },
-        {
-          "key": "validator",
-          "name": "applyToBeValidatorWithPermit(address,uint256,uint256,uint8,bytes32,bytes32)",
-          "selector": "0x46bbf25e",
-          "maxAmountWei": "5000000000000000000000"
-        }
-      ]
     }
   ],
   "signature": {
@@ -91,8 +39,8 @@
     "maxExpirySeconds": 300
   },
   "notes": [
+    "Sepolia-only relayer policy for the public Chain Registry testnet.",
     "Keep this allowlist narrow. Do not sponsor arbitrary calldata.",
-    "Use testnet-only relayer keys that are isolated from deployer and faucet wallets.",
-    "Replace placeholder contract addresses with concrete deployed addresses per environment before enabling sponsorship."
+    "Use testnet-only relayer keys that are isolated from deployer and faucet wallets."
   ]
 }

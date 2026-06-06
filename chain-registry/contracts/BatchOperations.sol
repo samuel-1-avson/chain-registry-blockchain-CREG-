@@ -49,11 +49,13 @@ contract BatchOperations {
     function batchSubmitPackages(PackageSubmission[] calldata packages) external {
         if (packages.length == 0) revert EmptyBatch();
         if (packages.length > 50) revert BatchTooLarge();
+        require(staking.stakedBalance(msg.sender) > 0, "Publisher must stake first");
         
         uint256 gasStart = gasleft();
         
         for (uint i = 0; i < packages.length; i++) {
-            registry.submitPackage(
+            registry.submitPackageFor(
+                msg.sender,
                 packages[i].canonical,
                 packages[i].contentHash,
                 packages[i].ipfsCID

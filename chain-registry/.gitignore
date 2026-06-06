@@ -95,6 +95,11 @@ remappings.txt
 circuits/build/
 circuits/keys/
 circuits/*.bin
+circuits/batch_*.bin
+circuits/proving_key_package*.bin
+circuits/verifying_key_package*.bin
+**/circuits/*.bin
+**/circuits/batch_*.bin
 *.r1cs
 *.zkey
 *.ptau

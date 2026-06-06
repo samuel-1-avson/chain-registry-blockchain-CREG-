@@ -159,7 +159,7 @@ fn load_or_generate_keys(keys_dir: &Path) -> Result<Arc<(ProvingKey<Bn254>, Veri
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
             .unwrap_or(false)
         {
-            panic!(
+            anyhow::bail!(
                 "PRODUCTION GUARD: Double-sign ZK keys not found in '{}'. \
                  Refusing to generate ephemeral keys on a production node. \
                  Run `creg advanced zk-setup`, or set CREG_ZK_KEYS_DIR correctly.",

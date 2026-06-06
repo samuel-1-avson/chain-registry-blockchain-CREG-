@@ -8,7 +8,7 @@ import "../Reputation.sol";
 import "../VRF.sol";
 import "../Governance.sol";
 import "../ZKVerifier.sol";
-import "../CregToken.sol";
+import "../BatchOperations.sol";
 
 contract FeeReceiver {
     event Received(uint256 amount);
@@ -96,6 +96,8 @@ contract RegistryTest is Test {
         // Wire contracts together.
         staking.setContracts(address(registry), address(reputation));
         reputation.setRegistry(address(registry));
+
+        vm.deal(alice, 10 ether);
     }
 
     // ── Helper: fund and approve CREG tokens ────────────────────────────────
@@ -202,10 +204,11 @@ contract RegistryTest is Test {
         ChainRegistry zkRegistry = _deployRegistryWithMockZK();
         uint256[8] memory proof;
         uint256[] memory wrongInputs = _zkInputs("npm:other@1.0.0", CONTENT_HASH, IPFS_CID);
+        uint256 fee = zkRegistry.zkValidationFee();
 
         vm.prank(alice);
         vm.expectRevert(ChainRegistry.InvalidZKPublicInputs.selector);
-        zkRegistry.submitPackageWithZKProof{value: zkRegistry.zkValidationFee()}(
+        zkRegistry.submitPackageWithZKProof{value: fee}(
             CANONICAL,
             CONTENT_HASH,
             IPFS_CID,
@@ -219,9 +222,10 @@ contract RegistryTest is Test {
         ChainRegistry zkRegistry = _deployRegistryWithMockZK();
         uint256[8] memory proof;
         uint256[] memory inputs = _zkInputs(CANONICAL, CONTENT_HASH, IPFS_CID);
+        uint256 fee = zkRegistry.zkValidationFee();
 
         vm.prank(alice);
-        zkRegistry.submitPackageWithZKProof{value: zkRegistry.zkValidationFee()}(
+        zkRegistry.submitPackageWithZKProof{value: fee}(
             CANONICAL,
             CONTENT_HASH,
             IPFS_CID,
@@ -486,5 +490,96 @@ contract RegistryTest is Test {
             signature: abi.encodePacked(r, s, v),
             approved:  approved
         });
+    }
+
+    function test_batchSubmitPackagesViaAuthorizedRelay() public {
+        _stakeAsPublisher(alice);
+
+        BatchOperations batchOps = new BatchOperations(
+            address(registry),
+            address(staking),
+            address(governance)
+        );
+        vm.prank(address(governance));
+        registry.setPackageSubmitRelay(address(batchOps), true);
+
+        BatchOperations.PackageSubmission[] memory packages =
+            new BatchOperations.PackageSubmission[](1);
+        packages[0] = BatchOperations.PackageSubmission({
+            canonical: CANONICAL,
+            contentHash: CONTENT_HASH,
+            ipfsCID: IPFS_CID
+        });
+
+        vm.prank(alice);
+        batchOps.batchSubmitPackages(packages);
+
+        bytes32 key = keccak256(abi.encodePacked(CANONICAL));
+        (,,, address publisher,,,,,,,) = registry.packages(key);
+        assertEq(publisher, alice);
+    }
+
+    function test_submitPackageForRejectsUnauthorizedRelay() public {
+        _stakeAsPublisher(alice);
+        address relay = makeAddr("unauthorized-relay");
+
+        vm.prank(relay);
+        vm.expectRevert(ChainRegistry.NotAuthorizedSubmitRelay.selector);
+        registry.submitPackageFor(
+            alice,
+            CANONICAL,
+            CONTENT_HASH,
+            IPFS_CID
+        );
+    }
+
+    function test_finalizePackageRejectsDuplicateValidatorSig() public {
+        _stakeAsPublisher(alice);
+        _submitPackage(alice);
+        _joinValidator(bob);
+        _joinValidator(carol);
+
+        ChainRegistry.ValidatorSig[] memory sigs = new ChainRegistry.ValidatorSig[](3);
+        sigs[0] = _makeValidatorSig(bobKey, bob, CANONICAL, CONTENT_HASH, true);
+        sigs[1] = _makeValidatorSig(bobKey, bob, CANONICAL, CONTENT_HASH, true);
+        sigs[2] = _makeValidatorSig(carolKey, carol, CANONICAL, CONTENT_HASH, true);
+
+        vm.expectRevert(abi.encodeWithSelector(ChainRegistry.ValidatorAlreadySigned.selector, bob));
+        registry.finalizePackage(CANONICAL, sigs);
+    }
+
+    function test_finalizePackageRejectsDoubleFinalize() public {
+        _stakeAndVerify();
+
+        ChainRegistry.ValidatorSig[] memory sigs = new ChainRegistry.ValidatorSig[](2);
+        sigs[0] = _makeValidatorSig(bobKey, bob, CANONICAL, CONTENT_HASH, true);
+        sigs[1] = _makeValidatorSig(carolKey, carol, CANONICAL, CONTENT_HASH, true);
+
+        vm.expectRevert(abi.encodeWithSelector(ChainRegistry.AlreadyVerified.selector, CANONICAL));
+        registry.finalizePackage(CANONICAL, sigs);
+    }
+
+    function test_finalizePackageEnforcesAuthorizedRelay() public {
+        _stakeAsPublisher(alice);
+        _submitPackage(alice);
+        _joinValidator(bob);
+        _joinValidator(carol);
+
+        address relay = makeAddr("finalize-relay");
+        vm.prank(address(governance));
+        registry.setEnforceFinalizeRelays(true);
+        vm.prank(address(governance));
+        registry.setPackageFinalizeRelay(relay, true);
+
+        ChainRegistry.ValidatorSig[] memory sigs = new ChainRegistry.ValidatorSig[](2);
+        sigs[0] = _makeValidatorSig(bobKey, bob, CANONICAL, CONTENT_HASH, true);
+        sigs[1] = _makeValidatorSig(carolKey, carol, CANONICAL, CONTENT_HASH, true);
+
+        vm.expectRevert(ChainRegistry.NotAuthorizedFinalizeRelay.selector);
+        registry.finalizePackage(CANONICAL, sigs);
+
+        vm.prank(relay);
+        registry.finalizePackage(CANONICAL, sigs);
+        assertEq(uint(registry.getStatus(CANONICAL)), uint(ChainRegistry.PackageStatus.Verified));
     }
 }

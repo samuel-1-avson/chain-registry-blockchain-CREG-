@@ -12,12 +12,16 @@
 //! # Example
 //!
 //! ```rust
-//! use zk_validator::{ZkValidator, PackageInputs};
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! use zk_validator::{PackageInputs, ZkValidator};
 //!
 //! let validator = ZkValidator::new()?;
-//! let inputs = PackageInputs::new(content_hash, manifest_hash, static_analysis_passed);
+//! let inputs = PackageInputs::new([1u8; 32], [2u8; 32], 95, true);
 //! let proof = validator.generate_proof(&inputs)?;
 //! let is_valid = validator.verify_proof(&proof, &inputs.public_inputs())?;
+//! assert!(is_valid);
+//! # Ok(())
+//! # }
 //! ```
 
 use ark_bn254::{Bn254, Fr};
@@ -64,6 +68,18 @@ pub type ZkProof = Proof<Bn254>;
 pub type ZkProvingKey = ProvingKey<Bn254>;
 pub type ZkVerifyingKey = VerifyingKey<Bn254>;
 
+/// Split a 32-byte hash into BN254 field limbs (low/high 128-bit halves).
+pub fn hash32_to_fr_limbs(hash: &[u8; 32]) -> (Fr, Fr) {
+    let mut lo = [0u8; 16];
+    let mut hi = [0u8; 16];
+    lo.copy_from_slice(&hash[..16]);
+    hi.copy_from_slice(&hash[16..]);
+    (
+        Fr::from_le_bytes_mod_order(&lo),
+        Fr::from_le_bytes_mod_order(&hi),
+    )
+}
+
 /// Input data for package validation
 #[derive(Clone, Debug)]
 pub struct PackageInputs {
@@ -102,11 +118,15 @@ impl PackageInputs {
     /// Public inputs for Groth16 verification.
     ///
     /// Must match the order of `new_input` allocations in
-    /// [`PackageValidationCircuit::generate_constraints`]. Content and manifest
-    /// hashes are carried in the gRPC/REST admission layer (hash equality checks);
-    /// the SNARK currently proves only the claimed analysis flags.
+    /// [`PackageValidationCircuit::generate_constraints`].
     pub fn public_inputs(&self) -> Vec<Fr> {
+        let (content_lo, content_hi) = hash32_to_fr_limbs(&self.content_hash);
+        let (manifest_lo, manifest_hi) = hash32_to_fr_limbs(&self.manifest_hash);
         vec![
+            content_lo,
+            content_hi,
+            manifest_lo,
+            manifest_hi,
             Fr::from(self.static_analysis_score as u64),
             Fr::from(if self.sandbox_safe { 1u64 } else { 0 }),
             Fr::from(if self.no_vulnerable_deps { 1u64 } else { 0 }),
@@ -129,9 +149,9 @@ pub struct ZkValidator {
 }
 
 impl ZkValidator {
-    /// Default file names for trusted setup keys
-    const PROVING_KEY_FILE: &'static str = "proving_key.bin";
-    const VERIFYING_KEY_FILE: &'static str = "verifying_key.bin";
+    /// Default file names for trusted setup keys (bump suffix when public inputs change).
+    const PROVING_KEY_FILE: &'static str = "proving_key_package_v2.bin";
+    const VERIFYING_KEY_FILE: &'static str = "verifying_key_package_v2.bin";
 
     /// Initialize the ZK validator.
     ///
@@ -147,7 +167,14 @@ impl ZkValidator {
 
         if pk_path.exists() && vk_path.exists() {
             info!("Loading ZK keys from {}", keys_dir.display());
-            return Self::from_key_files(&pk_path, &vk_path);
+            let validator = Self::from_key_files(&pk_path, &vk_path)?;
+            if validator.smoke_test_keys().is_ok() {
+                return Ok(validator);
+            }
+            warn!(
+                "Stale or incompatible ZK keys in {} — regenerating for the current circuit",
+                keys_dir.display()
+            );
         }
 
         // Production guard: refuse to proceed with ephemeral keys when the
@@ -159,13 +186,13 @@ impl ZkValidator {
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
             .unwrap_or(false)
         {
-            panic!(
+            return Err(ZkError::InvalidInput(format!(
                 "PRODUCTION GUARD: ZK trusted setup key files not found in '{}'. \
                  Refusing to generate ephemeral keys on a production node. \
                  Run `creg advanced zk-setup` to generate certified keys, or \
                  set CREG_ZK_KEYS_DIR to the correct key directory.",
                 keys_dir.display()
-            );
+            )));
         }
 
         warn!(
@@ -196,11 +223,25 @@ impl ZkValidator {
         Ok(validator)
     }
 
-    /// Resolve the key directory from `CREG_ZK_KEYS_DIR` or default `./circuits`.
+    /// Resolve the key directory from `CREG_ZK_KEYS_DIR` or `<crate>/circuits`.
     fn keys_dir() -> PathBuf {
         std::env::var("CREG_ZK_KEYS_DIR")
             .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("circuits"))
+            .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("circuits"))
+    }
+
+    /// Prove + verify once to ensure on-disk keys match the current circuit layout.
+    fn smoke_test_keys(&self) -> Result<(), ZkError> {
+        let inputs = PackageInputs::new([0u8; 32], [0u8; 32], 95, true);
+        let proof = self.generate_proof(&inputs)?;
+        let ok = self.verify_proof(&proof, &inputs.public_inputs())?;
+        if ok {
+            Ok(())
+        } else {
+            Err(ZkError::VerificationError(
+                "loaded ZK keys failed smoke verification".into(),
+            ))
+        }
     }
 
     /// Load validator from key files on disk.
@@ -346,6 +387,16 @@ impl Default for ZkValidator {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_package_public_inputs_bind_hashes() {
+        let inputs_a = PackageInputs::new([1u8; 32], [2u8; 32], 95, true);
+        let mut inputs_b = inputs_a.clone();
+        inputs_b.content_hash[0] = 9;
+
+        assert_eq!(inputs_a.public_inputs().len(), 7);
+        assert_ne!(inputs_a.public_inputs(), inputs_b.public_inputs());
+    }
 
     #[test]
     fn test_zk_proof_lifecycle() {

@@ -48,6 +48,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     && rm -rf /var/lib/apt/lists/*
 
+# bindgen (librocksdb-sys) expects clang/llvm-config on PATH.
+RUN ln -sf /usr/bin/clang-17 /usr/bin/clang && \
+    ln -sf /usr/bin/llvm-config-17 /usr/bin/llvm-config
+
 # Reuse the official Rust 1.90 toolchain while keeping the Ubuntu 24.04 builder.
 COPY --from=rust-toolchain /usr/local/cargo /usr/local/cargo
 COPY --from=rust-toolchain /usr/local/rustup /usr/local/rustup
@@ -105,6 +109,7 @@ COPY crates/cross-chain/Cargo.toml        crates/cross-chain/
 COPY crates/insurance/Cargo.toml        crates/insurance/
 COPY crates/db-sync/Cargo.toml          crates/db-sync/
 COPY crates/ipfs-pinner/Cargo.toml      crates/ipfs-pinner/
+COPY crates/secrets/Cargo.toml          crates/secrets/
 
 # Stub sources so Cargo can resolve dependencies before we copy real code.
 RUN mkdir -p crates/common/src     && echo "pub fn _stub() {}" > crates/common/src/lib.rs
@@ -131,6 +136,7 @@ RUN mkdir -p crates/ipfs-pinner/src      && echo "pub fn _stub() {}" > crates/ip
 
 # Faucet stub
 RUN mkdir -p crates/faucet/src           && echo "fn main() {}"      > crates/faucet/src/main.rs
+RUN mkdir -p crates/secrets/src          && echo "pub fn _stub() {}" > crates/secrets/src/lib.rs
 
 # Pre-fetch dependencies with retries so transient registry DNS issues do not
 # fail the image build early.
@@ -217,6 +223,7 @@ COPY --from=builder /build/rules /app/rules
 RUN useradd -r -s /bin/false creg
 RUN mkdir -p /data && chown creg:creg /data
 RUN chown -R creg:creg /app/circuits
+ENV CREG_DATA_DIR=/data
 USER creg
 
 VOLUME ["/data"]

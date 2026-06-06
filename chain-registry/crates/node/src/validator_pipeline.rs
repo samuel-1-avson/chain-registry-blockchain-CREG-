@@ -287,29 +287,8 @@ async fn process_package(
         ValidatorVote::Reject { reason } => (false, Some(reason.clone())),
     };
 
-    // Sign the gossip vote using the canonical domain-separated format.
-    // This binds the verdict to the exact content hash + validator pubkey,
-    // preventing cross-version / cross-validator signature replay.
-    let gossip_sig = {
-        use ed25519_dalek::{Signer, SigningKey};
-        let key_bytes = hex::decode(privkey_str).unwrap_or_default();
-        if let Ok(key_arr) = key_bytes.try_into() as Result<[u8; 32], _> {
-            let sk = SigningKey::from_bytes(&key_arr);
-            let scanner_profile_digest =
-                common::scanner_profile_digest(&our_sig.ml_model_version, &analysis_bundles);
-            let msg = crate::gossip::canonical_vote_message(
-                &canonical,
-                &req.content_hash,
-                approved,
-                &our_sig.validator_pubkey,
-                &scanner_profile_digest,
-                &evidence_digest,
-            );
-            hex::encode(sk.sign(msg.as_bytes()).to_bytes())
-        } else {
-            our_sig.signature.clone()
-        }
-    };
+    // Reuse the signature produced above — same canonical vote message format.
+    let gossip_sig = our_sig.signature.clone();
 
     let gossip_vote = crate::gossip::VoteGossip {
         consensus_subject: canonical.clone(),
@@ -326,13 +305,30 @@ async fn process_package(
         signature: gossip_sig,
     };
 
-    let _ = p2p_handle
+    let gossip_bytes = match serde_json::to_vec(&gossip_vote) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            tracing::error!(
+                "Failed to serialize gossip vote for {}: {}",
+                canonical,
+                e
+            );
+            cleanup(&state, &canonical).await;
+            return;
+        }
+    };
+
+    if p2p_handle
         .sender
         .send(crate::p2p::P2PCommand::Broadcast {
             topic: "creg/v1/votes".into(),
-            data: serde_json::to_vec(&gossip_vote).unwrap_or_default(),
+            data: gossip_bytes,
         })
-        .await;
+        .await
+        .is_err()
+    {
+        tracing::warn!("P2P broadcast channel closed while gossiping vote for {}", canonical);
+    }
 
     // ── WAIT FOR QUORUM OUTCOME ───────────────────────────────────────────────
     let assigned_validator_count = {

@@ -10,60 +10,55 @@ import { privateKeyToAccount } from 'viem/accounts'
 // ============================================
 
 const API_BASE = import.meta.env.VITE_API_BASE || ''
-const BUILD_CREG_TOKEN_ADDR = import.meta.env.VITE_CREG_TOKEN || null
-const BUILD_STAKING_ADDR = import.meta.env.VITE_STAKING_ADDR || null
+const SEPOLIA_CREG_TOKEN = import.meta.env.VITE_SEPOLIA_CREG_TOKEN || null
+const SEPOLIA_STAKING_ADDR = import.meta.env.VITE_SEPOLIA_STAKING_ADDR || null
+const SEPOLIA_REGISTRY_ADDR = import.meta.env.VITE_SEPOLIA_REGISTRY_ADDR || null
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
+const NETWORK_PROFILE_ID = 'sepolia'
 const DEFAULT_VALIDATOR_REGISTRATION_MODE = 'staking-plus-identity-sync'
 const DEFAULT_VALIDATOR_REGISTRATION_NOTE = 'Stake on-chain, register your validator EVM address, node ID, and Ed25519 pubkey with /v1/validators/register, wait for governance approval, and the node sync loop will admit active validators into consensus automatically.'
 // Private key input is only enabled in Vite dev mode (import.meta.env.DEV).
 // VITE_DEV_MODE is intentionally NOT checked here — env vars are baked into the
 // production bundle and a misconfigured server could expose this to end users.
 const PRIVATE_KEY_WALLET_ENABLED = import.meta.env.DEV === true
-const DEFAULT_NETWORK_PROFILE_ID = import.meta.env.VITE_DEFAULT_NETWORK_PROFILE || 'sepolia'
 
-const buildChainConfig = (id, name, rpcUrl, nativeCurrency = { name: 'CREG', symbol: 'CREG', decimals: 18 }) => ({
+const buildChainConfig = (id, name, rpcUrl, nativeCurrency = { name: 'Sepolia Ether', symbol: 'ETH', decimals: 18 }) => ({
   id,
   name,
   nativeCurrency,
   rpcUrls: { default: { http: [rpcUrl] } },
 })
 
-const PUBLIC_TESTNET_PROFILES = {
-    sepolia: {
-    id: 'sepolia',
-    label: 'Ethereum Sepolia',
-    shortLabel: 'Sepolia',
-    description: 'Public Ethereum app and contract testnet.',
-    purpose: 'Public Testnet Testing',
-    chainId: 11155111,
-    rpcUrl: import.meta.env.VITE_SEPOLIA_RPC_URL || 'https://ethereum-sepolia-rpc.publicnode.com',
-    faucetUrl: import.meta.env.VITE_SEPOLIA_FAUCET_URL || 'https://sepolia-faucet.pk910.de/',
-    blockExplorerUrl: import.meta.env.VITE_SEPOLIA_BLOCK_EXPLORER_URL || 'https://sepolia.etherscan.io',
-    tokenContract: import.meta.env.VITE_SEPOLIA_CREG_TOKEN || null,
-    stakingContract: import.meta.env.VITE_SEPOLIA_STAKING_ADDR || null,
-    registryAddress: import.meta.env.VITE_SEPOLIA_REGISTRY_ADDR || null,
-    validatorRegistrationMode: 'public-testnet',
-    validatorRegistrationNote: 'Sepolia is the primary public testnet for Chain Registry. Deploy contracts to Sepolia to enable full staking and publishing functionality.',
-    directFunding: true,
-  },
-  hoodi: {
-    id: 'hoodi',
-    label: 'Ethereum Hoodi',
-    shortLabel: 'Hoodi',
-    description: 'Public Ethereum validator and staking testnet.',
-    purpose: 'Validator, staking, and protocol-upgrade testing',
-    chainId: 560048,
-    rpcUrl: import.meta.env.VITE_HOODI_RPC_URL || 'https://rpc.hoodi.ethpandaops.io',
-    faucetUrl: import.meta.env.VITE_HOODI_FAUCET_URL || 'https://hoodi-faucet.pk910.de/',
-    blockExplorerUrl: import.meta.env.VITE_HOODI_BLOCK_EXPLORER_URL || 'https://hoodi.etherscan.io',
-    tokenContract: import.meta.env.VITE_HOODI_CREG_TOKEN || null,
-    stakingContract: import.meta.env.VITE_HOODI_STAKING_ADDR || null,
-    registryAddress: import.meta.env.VITE_HOODI_REGISTRY_ADDR || null,
-    validatorRegistrationMode: 'public-validator-testnet',
-    validatorRegistrationNote: 'Hoodi is the public Ethereum testnet for validator and staking flows. Configure VITE_HOODI_* contract addresses before using direct on-chain staking from this explorer on Hoodi.',
-    directFunding: false,
-  },
-}
+const buildSepoliaRpcUrl = (origin) => (
+  import.meta.env.VITE_SEPOLIA_RPC_URL
+  || (origin ? `${origin}/rpc` : 'https://ethereum-sepolia-rpc.publicnode.com')
+)
+
+const buildSepoliaNetworkProfile = (origin) => ({
+  id: NETWORK_PROFILE_ID,
+  label: 'Ethereum Sepolia',
+  shortLabel: 'Sepolia',
+  description: 'Public Ethereum testnet for Chain Registry.',
+  purpose: 'Public Testnet',
+  chainId: 11155111,
+  rpcUrl: buildSepoliaRpcUrl(origin),
+  faucetUrl: import.meta.env.VITE_SEPOLIA_FAUCET_URL || 'https://sepolia-faucet.pk910.de/',
+  blockExplorerUrl: import.meta.env.VITE_SEPOLIA_BLOCK_EXPLORER_URL || 'https://sepolia.etherscan.io',
+  tokenContract: SEPOLIA_CREG_TOKEN,
+  stakingContract: SEPOLIA_STAKING_ADDR,
+  registryAddress: SEPOLIA_REGISTRY_ADDR,
+  validatorRegistrationMode: 'public-testnet',
+  validatorRegistrationNote: 'Sepolia is the Chain Registry public testnet. Stake tCREG, register validator identity with the node, and use the in-app faucet for test tokens.',
+  directFunding: true,
+  faucetApiBase: `${API_BASE}/api`,
+  faucetApiUrl: `${API_BASE}/api/drip`,
+  chain: buildChainConfig(
+    11155111,
+    'Ethereum Sepolia',
+    buildSepoliaRpcUrl(origin),
+    { name: 'Sepolia Ether', symbol: 'ETH', decimals: 18 },
+  ),
+})
 
 const IS_TESTNET = typeof __IS_TESTNET__ !== 'undefined' ? __IS_TESTNET__ : (import.meta.env.VITE_NETWORK || 'testnet') !== 'mainnet'
 
@@ -73,8 +68,6 @@ const ERC20_ABI = [
   { name: 'approve', type: 'function', stateMutability: 'nonpayable',
     inputs: [{ name: 'spender', type: 'address' }, { name: 'amount', type: 'uint256' }],
     outputs: [{ name: '', type: 'bool' }] },
-  { name: 'publicMint', type: 'function', stateMutability: 'nonpayable',
-    inputs: [{ name: 'amount', type: 'uint256' }], outputs: [] },
 ]
 
 const STAKING_ABI = [
@@ -389,10 +382,6 @@ function App({ initialView = 'blocks', initialShowPublishForm = false, embedded 
   const [walletFundingCooldownSecs, setWalletFundingCooldownSecs] = useState(0)
   const [relayerPolicy, setRelayerPolicy] = useState(null)
   const [relayerPolicyError, setRelayerPolicyError] = useState(null)
-  const [activeNetworkProfileId, setActiveNetworkProfileId] = useState(() => {
-    if (typeof window === 'undefined') return DEFAULT_NETWORK_PROFILE_ID
-    return window.localStorage.getItem('creg.walletNetworkProfile') || DEFAULT_NETWORK_PROFILE_ID
-  })
   const [walletKeyInput, setWalletKeyInput] = useState('')
   const [stakeLoading, setStakeLoading] = useState(false)
   const [sponsoredStakeLoading, setSponsoredStakeLoading] = useState(false)
@@ -412,8 +401,8 @@ function App({ initialView = 'blocks', initialShowPublishForm = false, embedded 
   const [validatorRegistrationLoading, setValidatorRegistrationLoading] = useState(false)
   const [validatorRegistrationResult, setValidatorRegistrationResult] = useState(null)
   const [runtimeConfig, setRuntimeConfig] = useState({
-    tokenContract: normalizeContractAddress(BUILD_CREG_TOKEN_ADDR),
-    stakingContract: normalizeContractAddress(BUILD_STAKING_ADDR),
+    tokenContract: normalizeContractAddress(SEPOLIA_CREG_TOKEN),
+    stakingContract: normalizeContractAddress(SEPOLIA_STAKING_ADDR),
     registryAddress: null,
     isTestnet: IS_TESTNET,
     validatorRegistrationMode: DEFAULT_VALIDATOR_REGISTRATION_MODE,
@@ -446,9 +435,7 @@ function App({ initialView = 'blocks', initialShowPublishForm = false, embedded 
   const browserHost = typeof window !== 'undefined' && window.location.hostname ? window.location.hostname : '127.0.0.1'
   const explorerOrigin = typeof window !== 'undefined' ? window.location.origin : 'http://127.0.0.1:3007'
   const directNodeUrl = `http://${browserHost}:8080`
-  const directFaucetUrl = `http://${browserHost}:8082`
-  const directRpcUrl = `http://${browserHost}:8545`
-  const directRelayerUrl = import.meta.env.VITE_RELAYER_URL || `http://${browserHost}:8083`
+  const relayerBaseUrl = import.meta.env.VITE_RELAYER_URL || `${API_BASE || explorerOrigin}/v1/relayer`
 
   const sseRef = useRef(null)
   const searchInputRef = useRef(null)
@@ -456,93 +443,52 @@ function App({ initialView = 'blocks', initialShowPublishForm = false, embedded 
   const pollDelayRef = useRef(5000)
   const blocksRef = useRef([])
 
-  const networkProfiles = useMemo(() => ({
-    anvil: {
-      id: 'anvil',
-      label: 'Local Anvil',
-      shortLabel: 'Anvil',
-      description: 'Fast local development chain with direct in-app faucet funding.',
-      purpose: 'Fast local iteration',
-      chain: buildChainConfig(31337, 'Anvil Local', directRpcUrl, { name: 'CREG', symbol: 'CREG', decimals: 18 }),
-      rpcUrl: directRpcUrl,
-      faucetUrl: directFaucetUrl,
-      faucetApiBase: `${API_BASE}/api`,
-      faucetApiUrl: `${API_BASE}/api/drip`,
-      blockExplorerUrl: explorerOrigin,
-      tokenContract: BUILD_CREG_TOKEN_ADDR,
-      stakingContract: BUILD_STAKING_ADDR,
-      registryAddress: runtimeConfig.registryAddress,
-      validatorRegistrationMode: runtimeConfig.validatorRegistrationMode,
-      validatorRegistrationNote: runtimeConfig.validatorRegistrationNote,
-      directFunding: true,
-    },
-    sepolia: {
-      ...PUBLIC_TESTNET_PROFILES.sepolia,
-      chain: buildChainConfig(PUBLIC_TESTNET_PROFILES.sepolia.chainId, PUBLIC_TESTNET_PROFILES.sepolia.label, PUBLIC_TESTNET_PROFILES.sepolia.rpcUrl),
-      faucetApiUrl: null,
-    },
-    hoodi: {
-      ...PUBLIC_TESTNET_PROFILES.hoodi,
-      chain: buildChainConfig(PUBLIC_TESTNET_PROFILES.hoodi.chainId, PUBLIC_TESTNET_PROFILES.hoodi.label, PUBLIC_TESTNET_PROFILES.hoodi.rpcUrl, { name: 'Hoodi Ether', symbol: 'ETH', decimals: 18 }),
-      faucetApiUrl: null,
-    },
-  }), [directRpcUrl, directFaucetUrl, explorerOrigin, runtimeConfig.registryAddress, runtimeConfig.validatorRegistrationMode, runtimeConfig.validatorRegistrationNote])
+  const activeNetworkProfile = useMemo(
+    () => buildSepoliaNetworkProfile(explorerOrigin),
+    [explorerOrigin],
+  )
 
   useEffect(() => {
-    if (networkProfiles[activeNetworkProfileId]) {
-      if (typeof window !== 'undefined') {
-        window.localStorage.setItem('creg.walletNetworkProfile', activeNetworkProfileId)
+    if (typeof window === 'undefined') return
+    try {
+      const stored = window.localStorage.getItem('creg.walletNetworkProfile')
+      if (stored && stored !== NETWORK_PROFILE_ID) {
+        window.localStorage.setItem('creg.walletNetworkProfile', NETWORK_PROFILE_ID)
       }
-      return
-    }
-    setActiveNetworkProfileId(DEFAULT_NETWORK_PROFILE_ID in networkProfiles ? DEFAULT_NETWORK_PROFILE_ID : 'anvil')
-  }, [activeNetworkProfileId, networkProfiles])
-
-  const activeNetworkProfile = useMemo(
-    () => networkProfiles[activeNetworkProfileId] || networkProfiles[DEFAULT_NETWORK_PROFILE_ID] || networkProfiles.anvil,
-    [activeNetworkProfileId, networkProfiles]
-  )
+    } catch (_) { /* ignore */ }
+  }, [])
 
   const activeChain = activeNetworkProfile.chain
   const activeRpcUrl = activeNetworkProfile.rpcUrl
   const activeFaucetUrl = activeNetworkProfile.faucetUrl
 
   const tokenContractAddress = useMemo(
-    () => activeNetworkProfile.id === 'anvil'
-      ? (normalizeContractAddress(runtimeConfig.tokenContract) || normalizeContractAddress(BUILD_CREG_TOKEN_ADDR))
-      : normalizeContractAddress(activeNetworkProfile.tokenContract),
-    [activeNetworkProfile, runtimeConfig.tokenContract]
+    () => normalizeContractAddress(activeNetworkProfile.tokenContract)
+      || normalizeContractAddress(runtimeConfig.tokenContract),
+    [activeNetworkProfile.tokenContract, runtimeConfig.tokenContract]
   )
 
   const stakingContractAddress = useMemo(
-    () => activeNetworkProfile.id === 'anvil'
-      ? (normalizeContractAddress(runtimeConfig.stakingContract) || normalizeContractAddress(BUILD_STAKING_ADDR))
-      : normalizeContractAddress(activeNetworkProfile.stakingContract),
-    [activeNetworkProfile, runtimeConfig.stakingContract]
+    () => normalizeContractAddress(activeNetworkProfile.stakingContract)
+      || normalizeContractAddress(runtimeConfig.stakingContract),
+    [activeNetworkProfile.stakingContract, runtimeConfig.stakingContract]
   )
 
   const activeRegistryAddress = useMemo(
-    () => activeNetworkProfile.id === 'anvil'
-      ? normalizeContractAddress(runtimeConfig.registryAddress)
-      : normalizeContractAddress(activeNetworkProfile.registryAddress),
-    [activeNetworkProfile, runtimeConfig.registryAddress]
+    () => normalizeContractAddress(activeNetworkProfile.registryAddress)
+      || normalizeContractAddress(runtimeConfig.registryAddress),
+    [activeNetworkProfile.registryAddress, runtimeConfig.registryAddress]
   )
 
-  const activeValidatorRegistrationMode = activeNetworkProfile.id === 'anvil'
-    ? runtimeConfig.validatorRegistrationMode
-    : activeNetworkProfile.validatorRegistrationMode
+  const activeValidatorRegistrationMode = activeNetworkProfile.validatorRegistrationMode
+    || runtimeConfig.validatorRegistrationMode
 
-  const activeValidatorRegistrationNote = activeNetworkProfile.id === 'anvil'
-    ? runtimeConfig.validatorRegistrationNote
-    : activeNetworkProfile.validatorRegistrationNote
+  const activeValidatorRegistrationNote = activeNetworkProfile.validatorRegistrationNote
+    || runtimeConfig.validatorRegistrationNote
 
   const activeProfileHasContracts = Boolean(tokenContractAddress && stakingContractAddress)
-  const activeFundingActionLabel = activeNetworkProfile.id === 'sepolia' ? '💧 Mint Test CREG' : activeNetworkProfile.directFunding ? '💧 Fund Wallet' : `💧 Open ${activeNetworkProfile.shortLabel} Faucet`
-  const activeFundingHelp = activeNetworkProfile.id === 'sepolia'
-    ? 'You can mint test CREG tokens directly on Sepolia using the button above. For ETH gas, use the external faucet button.'
-    : activeNetworkProfile.directFunding
-      ? 'The local faucet can fund the connected address directly from the explorer.'
-      : `${activeNetworkProfile.label} uses external public faucets. The explorer can switch your wallet network cleanly, but public faucets still require opening the faucet site for manual completion.`
+  const activeFundingActionLabel = '💧 Request Test tCREG'
+  const activeFundingHelp = 'Request test tCREG from the Chain Registry faucet. For Sepolia ETH gas, use the external faucet link.'
   const walletFundingCooldownActive = activeNetworkProfile.directFunding && walletFundingCooldownSecs > 0
   const walletFundingButtonLabel = walletFundingLoading
     ? 'Funding...'
@@ -652,7 +598,7 @@ function App({ initialView = 'blocks', initialShowPublishForm = false, embedded 
       type,           // e.g. 'publisher' | 'validator' | 'sponsored'
       amount,
       txHash: txHash || null,
-      network: activeNetworkProfileId,
+      network: NETWORK_PROFILE_ID,
       at: new Date().toISOString(),
     }
     setStakeTxHistory(prev => {
@@ -662,7 +608,7 @@ function App({ initialView = 'blocks', initialShowPublishForm = false, embedded 
       } catch { /* storage full — ignore */ }
       return next
     })
-  }, [activeNetworkProfileId])
+  }, [NETWORK_PROFILE_ID])
 
   const refreshRecentBlocks = useCallback(async (tipHeight) => {
     const currentBlocks = blocksRef.current
@@ -1003,7 +949,7 @@ function App({ initialView = 'blocks', initialShowPublishForm = false, embedded 
   useEffect(() => {
     setWalletFundingResult(null)
     setWalletFundingCooldownSecs(0)
-  }, [walletAccount?.address, activeNetworkProfileId])
+  }, [walletAccount?.address, activeRpcUrl])
 
   // Auto-detect local node identity
   useEffect(() => {
@@ -1030,7 +976,7 @@ function App({ initialView = 'blocks', initialShowPublishForm = false, embedded 
 
   const refreshRelayerPolicy = useCallback(async () => {
     try {
-      const response = await fetch(`${directRelayerUrl}/v1/relayer/policy`)
+      const response = await fetch(`${relayerBaseUrl}/policy`)
       const payload = await response.json().catch(() => null)
       if (!response.ok) {
         throw new Error(payload?.error || `Relayer policy request failed with status ${response.status}`)
@@ -1041,7 +987,7 @@ function App({ initialView = 'blocks', initialShowPublishForm = false, embedded 
       setRelayerPolicy(null)
       setRelayerPolicyError(err.message || 'Failed to reach the relayer service.')
     }
-  }, [directRelayerUrl])
+  }, [relayerBaseUrl])
 
   useEffect(() => {
     refreshRelayerPolicy()
@@ -1083,11 +1029,8 @@ function App({ initialView = 'blocks', initialShowPublishForm = false, embedded 
       blockExplorerUrls: profile.blockExplorerUrl ? [profile.blockExplorerUrl] : [],
     }
 
-    // Anvil (31337) is typically preconfigured in MetaMask as "Localhost 8545" or similar
-    // user-custom. Try switch first; fall back to add only on 4902.
-    // Public testnets (Sepolia, Hoodi, etc.) are often NOT in MetaMask — add-first is
-    // idempotent (switches if already present) and avoids the noisy 4902 pre-fallback.
-    const addFirst = profile.id !== 'anvil'
+    // Sepolia is often not preconfigured in MetaMask — add-first is idempotent.
+    const addFirst = true
 
     const doSwitch = () => provider.request({
       method: 'wallet_switchEthereumChain',
@@ -1122,23 +1065,6 @@ function App({ initialView = 'blocks', initialShowPublishForm = false, embedded 
       await doAdd()
     }
   }, [activeNetworkProfile])
-
-  const selectNetworkProfile = useCallback(async (profileId) => {
-    const nextProfile = networkProfiles[profileId]
-    if (!nextProfile) return
-
-    setActiveNetworkProfileId(profileId)
-    setStakeResult(null)
-    setWalletFundingResult(null)
-
-    if (walletProvider?.request) {
-      try {
-        await ensureWalletChain(walletProvider, nextProfile)
-      } catch (err) {
-        alert(`Failed to switch wallet to ${nextProfile.label}: ${err.message || err}`)
-      }
-    }
-  }, [networkProfiles, walletProvider, ensureWalletChain])
 
   const connectExternalProvider = useCallback(async (provider, type, providerName, persistMeta = null) => {
     if (!provider?.request) {
@@ -1277,7 +1203,7 @@ function App({ initialView = 'blocks', initialShowPublishForm = false, embedded 
 
   const pollSponsoredRequest = useCallback(async (requestId, role, requestedAmount, initialTxHash = null) => {
     for (let attempt = 0; attempt < 30; attempt += 1) {
-      const response = await fetch(`${directRelayerUrl}/v1/relayer/status/${requestId}`)
+      const response = await fetch(`${relayerBaseUrl}/status/${requestId}`)
       const payload = await response.json().catch(() => null)
       if (!response.ok || !payload) {
         break
@@ -1302,7 +1228,7 @@ function App({ initialView = 'blocks', initialShowPublishForm = false, embedded 
 
       await new Promise((resolve) => window.setTimeout(resolve, 2000))
     }
-  }, [directRelayerUrl, refreshWalletBalance, fetchData, recordStakeTx])
+  }, [relayerBaseUrl, refreshWalletBalance, fetchData, recordStakeTx])
 
   const fundConnectedWallet = useCallback(async () => {
     if (!walletAccount?.address) return
@@ -1319,46 +1245,19 @@ function App({ initialView = 'blocks', initialShowPublishForm = false, embedded 
     setWalletFundingResult(null)
 
     try {
-      if (!activeNetworkProfile.directFunding || (!activeNetworkProfile.faucetApiUrl && activeNetworkProfile.id !== 'sepolia')) {
+      if (!activeNetworkProfile.faucetApiUrl) {
         if (activeFaucetUrl) {
           window.open(activeFaucetUrl, '_blank', 'noopener,noreferrer')
           setWalletFundingResult({
             success: true,
-            message: `${activeNetworkProfile.label} uses an external public faucet. Opened the faucet in a new tab. Public faucets usually require captcha, login, or manual approval, so direct in-app funding is only available on Local Anvil.`,
+            message: `${activeNetworkProfile.label} faucet opened in a new tab. Complete any captcha or login there, then return and refresh your balance.`,
           })
           return
         }
         throw new Error(`No faucet URL is configured for ${activeNetworkProfile.label}.`)
       }
 
-      if (activeNetworkProfile.id === 'sepolia') {
-        // Direct minting on Sepolia via publicMint function
-        if (!tokenContractAddress) {
-          throw new Error('Sepolia tCREG token address not configured. Please deploy contracts to Sepolia first.')
-        }
-        const walletClient = createSigningWalletClient()
-        const amountToMint = parseUnits('1000', 18) // Default 1000 CREG
-        const mintTx = await walletClient.writeContract({
-          account: walletAccount.address,
-          address: tokenContractAddress,
-          abi: ERC20_ABI,
-          functionName: 'publicMint',
-          args: [amountToMint],
-        })
-        const publicClient = createPublicClient({ chain: activeChain, transport: http(activeRpcUrl) })
-        await publicClient.waitForTransactionReceipt({ hash: mintTx })
-        setWalletFundingResult({
-          success: true,
-          message: '1,000 tCREG minted successfully on Sepolia!',
-          tokenTxHash: mintTx,
-        })
-        await refreshWalletBalance()
-        return
-      }
-
-      // Attempt PoW challenge flow: request a challenge, mine, then drip.
-      // If the faucet has PoW disabled it will accept a bare {address} too,
-      // but we always try the challenge path first for correctness.
+      // PoW challenge flow when enabled; bare {address} works when PoW is disabled.
       const faucetBase = activeNetworkProfile.faucetApiBase || activeNetworkProfile.faucetApiUrl.replace(/\/drip$/, '')
       let challenge = null
       let nonce = null
@@ -1543,7 +1442,7 @@ function App({ initialView = 'blocks', initialShowPublishForm = false, embedded 
       return
     }
     if (!tokenContractAddress || !stakingContractAddress) {
-      setStakeResult({ success: false, message: activeNetworkProfile.id === 'anvil' ? 'Live contract addresses are unavailable. Wait for runtime config from the node or rebuild with testnet addresses.' : `No Chain Registry deployment is configured for ${activeNetworkProfile.label} yet. Set the relevant VITE_${activeNetworkProfile.shortLabel.toUpperCase()}_* contract env vars before using direct staking on this public profile.` })
+      setStakeResult({ success: false, message: 'Sepolia contract addresses are not configured. Rebuild the explorer with VITE_SEPOLIA_* env vars or wait for runtime config from the node.' })
       return
     }
     if (!confirmRepeatStake(role, requestedAmount)) return
@@ -1612,7 +1511,7 @@ function App({ initialView = 'blocks', initialShowPublishForm = false, embedded 
     const requestedAmount = amountOverride || stakeAmount
     if (!walletAccount?.address || !requestedAmount) return
     if (!tokenContractAddress || !stakingContractAddress) {
-      setStakeResult({ success: false, message: activeNetworkProfile.id === 'anvil' ? 'Live contract addresses are unavailable. Wait for runtime config from the node or rebuild with testnet addresses.' : `No Chain Registry deployment is configured for ${activeNetworkProfile.label} yet. Set the relevant VITE_${activeNetworkProfile.shortLabel.toUpperCase()}_* contract env vars before using direct staking on this public profile.` })
+      setStakeResult({ success: false, message: 'Sepolia contract addresses are not configured. Rebuild the explorer with VITE_SEPOLIA_* env vars or wait for runtime config from the node.' })
       return
     }
     if (!confirmRepeatStake(role, requestedAmount)) return
@@ -1647,7 +1546,7 @@ function App({ initialView = 'blocks', initialShowPublishForm = false, embedded 
         throw new Error(`Insufficient tCREG balance. You have ${have} tCREG but need ${requestedAmount}. Use the faucet to mint test tokens first.`)
       }
 
-      const quoteResponse = await fetch(`${directRelayerUrl}/v1/relayer/quote`, {
+      const quoteResponse = await fetch(`${relayerBaseUrl}/quote`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1700,7 +1599,7 @@ function App({ initialView = 'blocks', initialShowPublishForm = false, embedded 
         },
       })
 
-      const sponsorResponse = await fetch(`${directRelayerUrl}/v1/relayer/sponsor`, {
+      const sponsorResponse = await fetch(`${relayerBaseUrl}/sponsor`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1733,7 +1632,7 @@ function App({ initialView = 'blocks', initialShowPublishForm = false, embedded 
     } finally {
       setSponsoredStakeLoading(false)
     }
-  }, [walletAccount, walletProvider, stakeAmount, tokenContractAddress, stakingContractAddress, activeNetworkProfile, activeSponsoredPublisherPolicy, activeSponsoredValidatorPolicy, relayerPolicyError, activeChain, directRelayerUrl, createSigningWalletClient, ensureWalletChain, pollSponsoredRequest, refreshWalletBalance, fetchData, confirmRepeatStake])
+  }, [walletAccount, walletProvider, stakeAmount, tokenContractAddress, stakingContractAddress, activeNetworkProfile, activeSponsoredPublisherPolicy, activeSponsoredValidatorPolicy, relayerPolicyError, activeChain, activeRpcUrl, relayerBaseUrl, createSigningWalletClient, ensureWalletChain, pollSponsoredRequest, refreshWalletBalance, fetchData, confirmRepeatStake])
 
   const registerValidatorIdentity = useCallback(async () => {
     if (!walletAccount?.address) return
@@ -2457,51 +2356,17 @@ function App({ initialView = 'blocks', initialShowPublishForm = false, embedded 
             {view === 'wallet' && (
               <div style={{ padding: 'var(--space-4)', maxWidth: 640, margin: '0 auto' }}>
 
-                {/* ── Network Selector (compact inline) ─────────────────── */}
-                <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
-                  {Object.values(networkProfiles).map((profile) => (
-                    <button
-                      key={profile.id}
-                      type="button"
-                      onClick={() => selectNetworkProfile(profile.id)}
-                      style={{
-                        flex: 1,
-                        padding: '10px 12px',
-                        borderRadius: '10px',
-                        border: `1.5px solid ${activeNetworkProfile.id === profile.id ? 'rgba(99,102,241,0.5)' : 'var(--border)'}`,
-                        background: activeNetworkProfile.id === profile.id ? 'rgba(99,102,241,0.1)' : 'var(--surface)',
-                        color: 'var(--text-primary)',
-                        cursor: 'pointer',
-                        textAlign: 'center',
-                        fontSize: '0.85rem',
-                        fontWeight: activeNetworkProfile.id === profile.id ? 600 : 400,
-                      }}
-                    >
-                      {profile.shortLabel}
-                      <div style={{ fontSize: '0.7rem', color: 'var(--text-tertiary)', marginTop: '2px' }}>
-                        {profile.chain.id}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-                {activeNetworkProfile.id !== 'anvil' && (
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 'var(--space-4)' }}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        try { window.localStorage.removeItem('creg.walletNetworkProfile') } catch (_) { /* ignore */ }
-                        selectNetworkProfile('anvil')
-                      }}
-                      style={{
-                        background: 'transparent', border: 'none', padding: '2px 0',
-                        color: 'var(--text-tertiary)', fontSize: '0.75rem',
-                        cursor: 'pointer', textDecoration: 'underline',
-                      }}
-                    >
-                      Reset to Local Anvil
-                    </button>
+                <div style={{
+                  marginBottom: 'var(--space-4)', padding: '10px 14px', borderRadius: '10px',
+                  border: '1.5px solid rgba(99,102,241,0.35)', background: 'rgba(99,102,241,0.08)',
+                  fontSize: '0.85rem', color: 'var(--text-primary)',
+                }}>
+                  <strong>{activeNetworkProfile.label}</strong>
+                  <span style={{ color: 'var(--text-tertiary)', marginLeft: '8px' }}>Chain ID {activeChain.id}</span>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)', marginTop: '4px' }}>
+                    {activeNetworkProfile.description}
                   </div>
-                )}
+                </div>
 
                 {/* ── Not Connected: Connect Wallet ─────────────────────── */}
                 {!walletAccount ? (
@@ -2631,6 +2496,9 @@ function App({ initialView = 'blocks', initialShowPublishForm = false, embedded 
                             {walletFundingResult.nativeTxHash && <div className="wallet-tx">Gas: {truncateHash(walletFundingResult.nativeTxHash, 10, 6)}</div>}
                           </div>
                         )}
+                        <div style={{ color: 'var(--text-tertiary)', fontSize: '0.75rem', marginTop: '10px', lineHeight: 1.4 }}>
+                          {activeFundingHelp}
+                        </div>
                       </div>
                     </div>
 
@@ -2642,9 +2510,7 @@ function App({ initialView = 'blocks', initialShowPublishForm = false, embedded 
                       <div className="detail-content">
                         {(!tokenContractAddress || !stakingContractAddress) && (
                           <div className="wallet-result warning" style={{ marginBottom: '10px' }}>
-                            {activeNetworkProfile.id === 'anvil'
-                              ? 'Contract addresses are loading from the node...'
-                              : `Configure VITE_${activeNetworkProfile.shortLabel.toUpperCase()}_* env vars to enable staking.`}
+                            Sepolia contract addresses are loading or not configured. Rebuild with VITE_SEPOLIA_* env vars if this persists.
                           </div>
                         )}
                         {(onChainPublisherStake !== null || onChainValidatorState !== null) && (

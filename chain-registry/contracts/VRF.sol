@@ -50,8 +50,13 @@ contract VRF is VRFConsumerBaseV2 {
     /// How many validators to assign per package submission.
     uint8 public validatorsPerPackage = 7;
 
-    /// Pending VRF requests: requestId → packageCanonical
-    mapping(uint256 => string) public pendingRequests;
+    struct PendingVRFRequest {
+        string packageCanonical;
+        address[] activeValidators;
+    }
+
+    /// Pending VRF requests keyed by Chainlink request ID.
+    mapping(uint256 => PendingVRFRequest) private pendingVRFRequests;
     
     /// Completed selections: packageHash → selected validators
     mapping(bytes32 => address[]) public selections;
@@ -119,7 +124,6 @@ contract VRF is VRFConsumerBaseV2 {
             revert SelectionAlreadyComplete(packageKey);
         }
 
-        // Request random words from Chainlink VRF
         requestId = vrfCoordinator.requestRandomWords(
             keyHash,
             subscriptionId,
@@ -128,51 +132,42 @@ contract VRF is VRFConsumerBaseV2 {
             NUM_WORDS
         );
 
-        pendingRequests[requestId] = packageCanonical;
-        
-        // Store active validators temporarily for this request
-        // In production, consider a more gas-efficient approach
+        pendingVRFRequests[requestId] = PendingVRFRequest({
+            packageCanonical: packageCanonical,
+            activeValidators: activeValidators
+        });
+
         emit RandomnessRequested(requestId, packageCanonical);
         
         return requestId;
     }
 
     /// @notice Chainlink VRF callback with random words.
-    /// @dev This function is called by the VRF coordinator with random results.
-    /// @param requestId The ID of the VRF request
-    /// @param randomWords Array of random words (we use only the first)
+    /// @dev Fisher-Yates shuffle over the validator set stored at request time.
     function fulfillRandomWords(
         uint256 requestId,
         uint256[] memory randomWords
     ) internal override {
         if (randomWords.length == 0) revert InvalidVRFResponse();
-        
-        string memory packageCanonical = pendingRequests[requestId];
-        if (bytes(packageCanonical).length == 0) revert NoPendingRequest(requestId);
 
-        // Clear pending request
-        delete pendingRequests[requestId];
+        PendingVRFRequest memory pending = pendingVRFRequests[requestId];
+        if (bytes(pending.packageCanonical).length == 0) revert NoPendingRequest(requestId);
 
-        // Use the random word as seed for Fisher-Yates shuffle
-        uint256 seed = randomWords[0];
-        bytes32 packageKey = keccak256(bytes(packageCanonical));
-        
-        // Note: In a full implementation, we'd need to access the active validator set
-        // This could be passed via a separate storage mechanism or callback data
-        // For now, we emit an event that off-chain validators can use
-        
-        emit ValidatorsAssigned(packageKey, new address[](0));
-        
-        // Mark selection as initiated (validators will be stored by the calling contract)
+        delete pendingVRFRequests[requestId];
+
+        bytes32 packageKey = keccak256(bytes(pending.packageCanonical));
+        address[] memory selected = _selectValidatorsWithSeed(
+            pending.activeValidators,
+            randomWords[0]
+        );
+
+        selections[packageKey] = selected;
         selectionComplete[packageKey] = true;
+
+        emit ValidatorsAssigned(packageKey, selected);
     }
 
-    /// @notice Select validators using a provided random seed.
-    /// @dev This is called by the Registry contract after VRF fulfillment.
-    /// @param packageCanonical The package canonical ID
-    /// @param activeValidators Current active validator addresses
-    /// @param randomSeed The random seed from VRF
-    /// @return selected The selected validator subset
+    /// @notice Select validators using a provided random seed (governance manual path).
     function selectValidatorsWithSeed(
         string calldata packageCanonical,
         address[] calldata activeValidators,
@@ -183,26 +178,7 @@ contract VRF is VRFConsumerBaseV2 {
             "Not enough active validators"
         );
 
-        // Fisher-Yates shuffle using the provided VRF seed
-        address[] memory pool = new address[](activeValidators.length);
-        for (uint i = 0; i < activeValidators.length; i++) {
-            pool[i] = activeValidators[i];
-        }
-
-        for (uint i = activeValidators.length - 1; i > 0; i--) {
-            // Derive a pseudo-random index using the VRF seed
-            uint j = uint(keccak256(abi.encodePacked(randomSeed, i))) % (i + 1);
-            // Swap pool[i] and pool[j]
-            address tmp = pool[i];
-            pool[i] = pool[j];
-            pool[j] = tmp;
-        }
-
-        // Take the first N from the shuffled array
-        selected = new address[](validatorsPerPackage);
-        for (uint i = 0; i < validatorsPerPackage; i++) {
-            selected[i] = pool[i];
-        }
+        selected = _selectValidatorsWithSeed(activeValidators, randomSeed);
 
         bytes32 key = keccak256(bytes(packageCanonical));
         selections[key] = selected;
@@ -212,9 +188,30 @@ contract VRF is VRFConsumerBaseV2 {
         return selected;
     }
 
+    /// @dev Fisher-Yates shuffle using a VRF seed; returns the first `validatorsPerPackage` entries.
+    function _selectValidatorsWithSeed(
+        address[] memory activeValidators,
+        uint256 randomSeed
+    ) internal view returns (address[] memory selected) {
+        address[] memory pool = new address[](activeValidators.length);
+        for (uint i = 0; i < activeValidators.length; i++) {
+            pool[i] = activeValidators[i];
+        }
+
+        for (uint i = activeValidators.length - 1; i > 0; i--) {
+            uint j = uint(keccak256(abi.encodePacked(randomSeed, i))) % (i + 1);
+            address tmp = pool[i];
+            pool[i] = pool[j];
+            pool[j] = tmp;
+        }
+
+        selected = new address[](validatorsPerPackage);
+        for (uint i = 0; i < validatorsPerPackage; i++) {
+            selected[i] = pool[i];
+        }
+    }
+
     /// @notice Get the selected validators for a package.
-    /// @param packageCanonical The package canonical ID
-    /// @return The array of selected validator addresses
     function getSelectedValidators(
         string calldata packageCanonical
     ) external view returns (address[] memory) {
@@ -223,8 +220,6 @@ contract VRF is VRFConsumerBaseV2 {
     }
 
     /// @notice Check if validator selection is complete for a package.
-    /// @param packageCanonical The package canonical ID
-    /// @return True if selection is complete
     function isSelectionComplete(string calldata packageCanonical) external view returns (bool) {
         return selectionComplete[keccak256(bytes(packageCanonical))];
     }

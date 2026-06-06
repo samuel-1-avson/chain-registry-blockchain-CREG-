@@ -38,7 +38,7 @@ use alloy::{
     providers::{Provider, ProviderBuilder},
     sol,
 };
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::Utc;
 use common::ValidatorIdentity;
 use std::{collections::HashMap, sync::Arc};
@@ -501,7 +501,10 @@ async fn main() -> Result<()> {
     // ── Finalized-tx channel (created before state so API can send to it) ───────
     let (tx_sender, tx_receiver): (FinalizedTxSender, FinalizedTxReceiver) =
         finalized_tx::channel();
-    let zk_validator = Arc::new(zk_validator::ZkValidator::default());
+    let zk_validator = Arc::new(
+        zk_validator::ZkValidator::new()
+            .context("Failed to initialize ZK validator — ensure CREG_ZK_KEYS_DIR contains proving_key_package_v2.bin and verifying_key_package_v2.bin when CREG_PRODUCTION=true")?,
+    );
 
     // ── Shared state ──────────────────────────────────────────────────────────
     let state: SharedState = Arc::new(RwLock::new(NodeState {
