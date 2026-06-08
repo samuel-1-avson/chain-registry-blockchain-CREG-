@@ -7,7 +7,7 @@
 #   copy testnet/.env.sepolia → .env (or set SEPOLIA_RPC_URL + CREG_* in .env)
 #   docker compose up -d --no-build
 #
-# Optional profiles: cli, tui
+# Optional profiles: cli, tui, llm (local Ollama for Lane B/C)
 # Observability overlay: docker compose -f docker-compose.yml -f observability/docker-compose.observability.yml up -d
 #
 # Local Anvil dev (legacy): docker compose -f docker-compose.anvil.yml up -d
@@ -108,6 +108,13 @@ services:
 
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      CREG_LLM_ENABLED: ${CREG_LLM_ENABLED:-false}
+      CREG_LLM_PROVIDERS: ${CREG_LLM_PROVIDERS:-ollama,openrouter}
+      CREG_LLM_MODEL: ${CREG_LLM_MODEL:-llama3.2}
+      CREG_OLLAMA_URL: ${CREG_OLLAMA_URL:-http://ollama:11434}
+      CREG_INTELLIGENCE_ENABLED: ${CREG_INTELLIGENCE_ENABLED:-false}
+      CREG_INTELLIGENCE_AUTO: ${CREG_INTELLIGENCE_AUTO:-true}
       RUST_LOG: ${RUST_LOG:-info,chain_registry_node=debug}
 
     ports:
@@ -316,7 +323,19 @@ services:
       timeout: 5s
       retries: 5
 
+  # ── Ollama (optional — docker compose --profile llm up -d) ────────────────
+  ollama:
+    image: ollama/ollama:latest
+    container_name: creg-ollama
+    profiles: ["llm"]
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    restart: unless-stopped
+
 volumes:
   ipfs-data:
   node-data:
   postgres-data:
+  ollama-data:

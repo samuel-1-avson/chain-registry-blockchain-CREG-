@@ -37,6 +37,20 @@ services:
       CREG_DATA_DIR: /data
       CREG_LISTEN: 0.0.0.0:8080
       CREG_P2P_LISTEN: /ip4/0.0.0.0/tcp/9000
+      CREG_IPFS_URL: ${CREG_IPFS_URL:-}
+      CREG_ML_ENABLED: ${CREG_ML_ENABLED:-true}
+      CREG_ML_MODEL_PATH: ${CREG_ML_MODEL_PATH:-/app/models}
+      # Lane B — validator Stage 4 LLM (opt-in; set CREG_LLM_ENABLED=true in .env)
+      CREG_LLM_ENABLED: ${CREG_LLM_ENABLED:-false}
+      CREG_LLM_PROVIDERS: ${CREG_LLM_PROVIDERS:-ollama,openrouter}
+      CREG_LLM_MODEL: ${CREG_LLM_MODEL:-llama3.2}
+      CREG_OLLAMA_URL: ${CREG_OLLAMA_URL:-http://host.docker.internal:11434}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # Lane C — post-consensus intelligence (explorer API)
+      CREG_INTELLIGENCE_ENABLED: ${CREG_INTELLIGENCE_ENABLED:-false}
+      CREG_INTELLIGENCE_AUTO: ${CREG_INTELLIGENCE_AUTO:-true}
     ports:
       - "8080:8080"
       - "9000:9000"

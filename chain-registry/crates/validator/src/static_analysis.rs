@@ -307,7 +307,7 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
     // and OSV lookups. Falls back to empty strings when no manifest is found
     // (patterns with `ecosystem: None` still apply; ecosystem-specific patterns
     // are skipped).
-    let (pkg_name, _pkg_version, ecosystem) = extract_package_identity(&files);
+    let (pkg_name, pkg_version, ecosystem) = extract_package_identity(&files);
 
     for (path, content) in &files {
         // Only analyse source files; skip binaries, images, lock files, etc.
@@ -446,6 +446,9 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
             deterministic_findings.push(finding);
         }
     }
+
+    // ── Pinned OSV advisories (consensus-safe, no live HTTP) ───────────────
+    let osv_pinned_findings = pinned_osv_findings(&pkg_name, &pkg_version, &ecosystem);
 
     // ── Rule-Based ML Scoring (Phase 2a) ────────────────────────────────────
     // Extract AST features from source files and run rule-based threat scoring.
@@ -634,6 +637,12 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
             snippet_llm_findings,
         ),
         build_evidence_group(
+            "osv-pinned",
+            "Pinned OSV vulnerability advisories",
+            EvidenceDeterminism::Advisory,
+            osv_pinned_findings,
+        ),
+        build_evidence_group(
             "rule-ml",
             "Rule-based ML scoring",
             EvidenceDeterminism::Deterministic,
@@ -752,6 +761,19 @@ fn group_score(id: &str, findings: &[Finding]) -> f64 {
                 _ => 0.0,
             })
             .fold(0.0, f64::max),
+        "osv-pinned" => {
+            if findings.iter().any(|finding| finding.id == "OSV002") {
+                90.0
+            } else if findings.iter().any(|finding| finding.id == "OSV003") {
+                65.0
+            } else if findings.iter().any(|finding| finding.id == "OSV004") {
+                40.0
+            } else if findings.iter().any(|finding| finding.id == "OSV001") {
+                30.0
+            } else {
+                0.0
+            }
+        }
         _ => 0.0,
     }
 }
@@ -761,16 +783,96 @@ fn compute_deterministic_score(groups: &[EvidenceGroup]) -> f64 {
     let rule_ml_score = score_for_group(groups, "rule-ml");
     let deep_score = score_for_group(groups, "deep-scan");
 
-    let weighted = static_score * 0.30 + rule_ml_score * 0.25 + deep_score * 0.30;
+    let mut weighted = static_score * 0.30 + rule_ml_score * 0.25 + deep_score * 0.30;
+    let mut weight_sum = 0.85;
+
+    if ml_validator::osv_block_critical_enabled()
+        && groups.iter().any(|group| {
+            group.id == "osv-pinned"
+                && group
+                    .findings
+                    .iter()
+                    .any(|finding| finding.id == "OSV002")
+        })
+    {
+        weighted += score_for_group(groups, "osv-pinned") * 0.15;
+        weight_sum += 0.15;
+    }
+
     if weighted == 0.0 {
         0.0
     } else {
-        (weighted / 0.85).min(100.0)
+        (weighted / weight_sum).min(100.0)
     }
 }
 
 fn compute_advisory_score(groups: &[EvidenceGroup]) -> f64 {
-    score_for_group(groups, "snippet-llm")
+    score_for_group(groups, "snippet-llm").max(score_for_group(groups, "osv-pinned"))
+}
+
+/// Advisory CVE findings from the pinned local OSV snapshot (`CREG_OSV_CONSENSUS=true`).
+fn pinned_osv_findings(name: &str, version: &str, ecosystem: &str) -> Vec<Finding> {
+    if !ml_validator::osv_consensus_enabled() || name.trim().is_empty() {
+        return Vec::new();
+    }
+
+    let info = ml_validator::osv_client::PackageInfo {
+        name: name.to_string(),
+        version: if version.trim().is_empty() {
+            "0.0.0".to_string()
+        } else {
+            version.to_string()
+        },
+        ecosystem: ecosystem.to_string(),
+    };
+
+    let result = ml_validator::osv_lookup_pinned(&info);
+    if !result.queried {
+        return vec![Finding {
+            id: "OSV001".into(),
+            title: "Pinned OSV snapshot unavailable".into(),
+            severity: FindingSeverity::Medium,
+            description: "Consensus OSV is enabled but the local pinned snapshot is missing, unreadable, or epoch-mismatched. Known CVEs were not checked.".into(),
+            file: "osv_snapshot".into(),
+            line: None,
+        }];
+    }
+
+    if result.vulnerabilities.is_empty() {
+        return Vec::new();
+    }
+
+    result
+        .vulnerabilities
+        .iter()
+        .take(8)
+        .map(|vuln| {
+            let (id, severity) = osv_finding_class(vuln.severity.as_deref());
+            Finding {
+                id: id.to_string(),
+                title: format!("Known vulnerability: {}", vuln.id),
+                severity,
+                description: if vuln.summary.is_empty() {
+                    format!("Pinned OSV snapshot lists advisory {}.", vuln.id)
+                } else {
+                    format!("{} — {}", vuln.id, vuln.summary)
+                },
+                file: "osv_snapshot".into(),
+                line: None,
+            }
+        })
+        .collect()
+}
+
+fn osv_finding_class(severity: Option<&str>) -> (&'static str, FindingSeverity) {
+    let sev = severity.unwrap_or("").to_ascii_uppercase();
+    if sev.contains("CRITICAL") {
+        ("OSV002", FindingSeverity::Critical)
+    } else if sev.contains("HIGH") {
+        ("OSV003", FindingSeverity::High)
+    } else {
+        ("OSV004", FindingSeverity::Medium)
+    }
 }
 
 fn compute_ensemble_score(deterministic_score: f64, advisory_score: f64) -> f64 {

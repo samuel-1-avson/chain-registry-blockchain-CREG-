@@ -42,6 +42,11 @@ $spec.contracts.appeal        = $manifest.appeal
 $spec.contracts.validator_rewards = $manifest.validatorRewards
 $spec.contracts.vrf           = $manifest.vrf
 
+if ($manifest.stakingDeployBlock) {
+    $spec.validator_set.epoch_block_height = [int64]$manifest.stakingDeployBlock
+    Write-Success "Set validator_set.epoch_block_height to $($manifest.stakingDeployBlock)"
+}
+
 # Update genesis time to now
 $spec.genesis_time = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
 

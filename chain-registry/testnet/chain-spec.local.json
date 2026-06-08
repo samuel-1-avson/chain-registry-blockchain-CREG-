@@ -59,7 +59,7 @@
       {
         "id": "validator-1",
         "alias": "Local Validator 1",
-        "pubkey": "0437e4adac481519cd6ae66907294c40cfcbf0bdeadd47806f6233be4bd5f82d",
+        "pubkey": "468995cdd3c27569e004c89098c44bf584b1a4c6cd89a203fc47825f48684964",
         "eth_address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
         "stake": 100,
         "reputation": 100,
@@ -68,7 +68,7 @@
       {
         "id": "validator-2",
         "alias": "Local Validator 2",
-        "pubkey": "59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d",
+        "pubkey": "314019a4fc3d9b3b613a2c80558c069d7ef157386e81befefcfd88d4eaf0b768",
         "eth_address": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
         "stake": 100,
         "reputation": 100,

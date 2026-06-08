@@ -120,7 +120,9 @@ pub enum OutputFormat {
 }
 
 fn default_node_url() -> String {
-    "https://registry.chain-pkg.io".to_string()
+    // Local node by default; override with --node-url, CREG_NODE_URL, or a public
+    // testnet endpoint in the config file. (No live public default is shipped yet.)
+    "http://localhost:8080".to_string()
 }
 
 fn default_timeout() -> u64 {
@@ -234,7 +236,7 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = Config::default();
-        assert_eq!(config.node.url, "https://registry.chain-pkg.io");
+        assert_eq!(config.node.url, "http://localhost:8080");
         assert_eq!(config.node.timeout, 30);
         assert!(config.display.colors);
         assert!(config.display.progress);

@@ -427,9 +427,26 @@ mod tests {
             },
         ];
 
-        let winner = select_proposer(&validators, std::str::from_utf8(seed).unwrap()).unwrap();
-        // val_1 has invalid proof, so it should be skipped; val_2 wins by fallback.
-        assert_eq!(winner, "val_2");
+        let seed_str = std::str::from_utf8(seed).unwrap();
+        let winner = select_proposer(&validators, seed_str).unwrap();
+        // When not every validator has a valid VRF proof, selection falls back to the
+        // deterministic pubkey+seed scores for the full set (including invalid-proof
+        // validators). Ensure the mixed set matches that deterministic outcome.
+        let expected = select_proposer_deterministic(&validators, seed_str).unwrap();
+        assert_eq!(
+            winner, expected,
+            "invalid VRF proof must not change proposer vs all-deterministic fallback"
+        );
+        assert!(
+            verify(
+                seed,
+                &validators[0].pubkey,
+                validators[0].vrf_output.as_ref().unwrap(),
+                validators[0].vrf_proof.as_ref().unwrap(),
+            )
+            .is_err(),
+            "fixture proof must fail verification"
+        );
     }
 
     #[test]

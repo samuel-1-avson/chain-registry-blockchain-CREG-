@@ -22,6 +22,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     clang \
     llvm \
     libclang-dev \
+    libclang1 \
     cmake \
     libopenblas-dev \
     protobuf-compiler \
@@ -33,6 +34,8 @@ ENV CARGO_HOME=/usr/local/cargo
 ENV RUSTUP_HOME=/usr/local/rustup
 ENV PATH="/usr/local/cargo/bin:$PATH"
 ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
+# bindgen (librocksdb-sys) on Debian bookworm
+ENV LIBCLANG_PATH=/usr/lib/x86_64-linux-gnu
 
 RUN mkdir -p "$CARGO_HOME" && \
     printf '[net]\nretry = 3\ngit-fetch-with-cli = true\n\n[registries.crates-io]\nprotocol = "sparse"\n' > "$CARGO_HOME/config.toml"
@@ -103,11 +106,11 @@ COPY docker-compose*.yml ./
 # Touch files to ensure rebuild
 RUN touch crates/*/src/*.rs
 
-# Build the actual binaries
-RUN cargo build --release --package chain-registry-node && \
-    cargo build --release --package chain-registry-cli && \
-    cargo build --release --package faucet && \
-    cargo build --release --package chain-registry-relayer
+# Build the actual binaries (no global RUSTFLAGS — keeps librocksdb-sys bindgen working).
+RUN env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS cargo build --release --locked --package chain-registry-node --bin creg-node && \
+    env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS cargo build --release --locked --package chain-registry-cli && \
+    env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS cargo build --release --locked --package faucet && \
+    env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS cargo build --release --locked --package chain-registry-relayer
 
 # ── Stage 3: Runtime ──────────────────────────────────────────────────────────
 FROM debian:bookworm-slim AS runtime

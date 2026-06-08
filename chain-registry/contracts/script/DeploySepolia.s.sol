@@ -32,6 +32,7 @@ contract DeploySepolia is Script {
     CregToken     public cregToken;
     ValidatorRewards public validatorRewards;
     PinningRewards public pinningRewards;
+    uint256 public stakingDeployBlock;
 
     function run() external {
         uint256 deployerKey = vm.envUint("DEPLOYER_KEY");
@@ -63,6 +64,7 @@ contract DeploySepolia is Script {
         }
 
         staking    = new Staking(address(governance), address(cregToken));
+        stakingDeployBlock = block.number;
         validatorRewards = new ValidatorRewards(
             address(staking),
             address(cregToken),
@@ -248,6 +250,7 @@ contract DeploySepolia is Script {
             '  "deployer":   "', vm.toString(deployer),           '",\n',
             '  "governance": "', vm.toString(address(governance)), '",\n',
             '  "staking":    "', vm.toString(address(staking)),    '",\n',
+            '  "stakingDeployBlock": "', vm.toString(stakingDeployBlock), '",\n',
             '  "reputation": "', vm.toString(address(reputation)), '",\n',
             '  "vrf":        "', vm.toString(address(vrf)),        '",\n',
             '  "zkVerifier": "', vm.toString(address(zkVerifier)), '",\n',

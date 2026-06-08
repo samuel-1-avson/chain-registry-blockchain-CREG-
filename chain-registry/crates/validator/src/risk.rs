@@ -275,6 +275,9 @@ fn is_non_blocking_testnet_dev_bypass(
 }
 
 fn is_deterministic_finding(id: &str) -> bool {
+    if id.starts_with("OSV") {
+        return id == "OSV002" && ml_validator::osv_block_critical_enabled();
+    }
     !matches!(id, "SA011" | "SA012") && !id.starts_with("LLM")
 }
 
@@ -348,6 +351,7 @@ fn build_evidence_digest(
         bundle_set.embedding_model_id.clone(),
         bundle_set.index_epoch.clone(),
         bundle_set.threshold_profile_id.clone(),
+        bundle_set.osv_snapshot_epoch.clone(),
         reputation_delta.to_string(),
         deterministic_score.to_string(),
         evidence_items.join("||"),
@@ -438,6 +442,55 @@ mod tests {
 
         assert_eq!(summary.deterministic_findings, 0);
         assert_eq!(summary.advisory_findings, 1);
+    }
+
+    #[test]
+    fn osv_findings_are_advisory_not_deterministic() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::remove_var("CREG_OSV_BLOCK_CRITICAL");
+        std::env::remove_var("CREG_OSV_CONSENSUS");
+
+        let aggregator = RiskAggregator::default();
+        let summary = aggregator.summarize(
+            &PackageId::new("npm", "pkg", "1.0.0"),
+            &[finding("OSV003", FindingSeverity::High)],
+            0.0,
+            0.0,
+            65.0,
+            None,
+            &AnalysisBundleSet::default(),
+            &reputation(0),
+        );
+
+        assert!(!summary.deterministic_block);
+        assert_eq!(summary.deterministic_findings, 0);
+        assert_eq!(summary.advisory_findings, 1);
+    }
+
+    #[test]
+    fn osv002_blocks_when_block_critical_enabled() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::set_var("CREG_OSV_CONSENSUS", "true");
+        std::env::set_var("CREG_OSV_BLOCK_CRITICAL", "true");
+
+        let aggregator = RiskAggregator::default();
+        let summary = aggregator.summarize(
+            &PackageId::new("npm", "pkg", "1.0.0"),
+            &[finding("OSV002", FindingSeverity::Critical)],
+            0.0,
+            90.0,
+            15.0,
+            None,
+            &AnalysisBundleSet::default(),
+            &reputation(0),
+        );
+
+        assert!(summary.deterministic_block);
+        assert_eq!(summary.deterministic_findings, 1);
+        assert_eq!(summary.disposition, RiskDisposition::Block);
+
+        std::env::remove_var("CREG_OSV_BLOCK_CRITICAL");
+        std::env::remove_var("CREG_OSV_CONSENSUS");
     }
 
     #[test]

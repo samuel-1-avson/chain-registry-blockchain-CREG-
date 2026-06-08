@@ -1,5 +1,5 @@
 // crates/node/src/main.rs
-// Chain registry node — single binary that runs all subsystems.
+// Chain registry node â€” single binary that runs all subsystems.
 #![deny(clippy::unwrap_used)]
 
 mod admission_scan;
@@ -14,6 +14,7 @@ mod events;
 mod explorer;
 mod finalized_tx;
 mod gossip;
+mod intelligence;
 mod grpc;
 mod json_rpc;
 mod metrics;
@@ -30,7 +31,7 @@ mod state;
 mod sync;
 mod validator_pipeline;
 // Phase-1 scaffold for chain-derived validator set. Compiled and tested but
-// not yet wired into runtime — see docs/VALIDATOR_SET_SYNC_DESIGN.md.
+// not yet wired into runtime â€” see docs/VALIDATOR_SET_SYNC_DESIGN.md.
 mod chain_spec_boot;
 mod validator_set_sync;
 
@@ -148,7 +149,7 @@ fn wei_to_creg_u64(value: alloy::primitives::U256) -> u64 {
 
 /// Verify the L1 RPC reports the chain ID we expect. Operators set
 /// `CREG_EXPECTED_L1_CHAIN_ID` to e.g. `11155111` (Sepolia) or `1` (mainnet)
-/// to guard against silently joining the wrong settlement chain — a very easy
+/// to guard against silently joining the wrong settlement chain â€” a very easy
 /// misconfiguration when copying contract addresses between environments.
 ///
 /// Skipped when the env var is unset, so local Anvil dev keeps working.
@@ -190,7 +191,7 @@ async fn validate_l1_chain_id(rpc_url: &str, expected_from_spec: Option<u64>) ->
 
     if observed != expected {
         anyhow::bail!(
-            "L1 chain id mismatch — CREG_ETH_RPC ({}) reports chain id {} but \
+            "L1 chain id mismatch â€” CREG_ETH_RPC ({}) reports chain id {} but \
              CREG_EXPECTED_L1_CHAIN_ID is {}. Refusing to start; this would \
              settle bridge transactions on the wrong network.",
             rpc_url,
@@ -299,7 +300,7 @@ async fn main() -> Result<()> {
 
     let mut config = config::NodeConfig::load().await;
 
-    // ── Chain Spec Boot Validation ──────────────────────────────────────────────
+    // â”€â”€ Chain Spec Boot Validation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Replaces the "read N envs and pray" model with a single fetched, signed,
     // validated chain spec. See docs/CHAIN_SPEC_DESIGN.md.
 
@@ -343,7 +344,7 @@ async fn main() -> Result<()> {
 
         if pinned_pubkey.chars().all(|c| c == '0') {
             tracing::warn!(
-                "CREG_SPEC_SIGNING_PUBKEY is not set — skipping spec signature verification (dev build)"
+                "CREG_SPEC_SIGNING_PUBKEY is not set â€” skipping spec signature verification (dev build)"
             );
         } else {
             let sig_url = std::env::var("CREG_SPEC_SIGNATURE_URL")
@@ -369,7 +370,7 @@ async fn main() -> Result<()> {
         if let Some(expected) = &pinned_chain_id {
             if &spec.chain_id != expected {
                 anyhow::bail!(
-                    "chain_id mismatch — CREG_CHAIN_ID={} but spec says {}. Refusing to start.",
+                    "chain_id mismatch â€” CREG_CHAIN_ID={} but spec says {}. Refusing to start.",
                     expected,
                     spec.chain_id
                 );
@@ -382,7 +383,7 @@ async fn main() -> Result<()> {
         if let Some(expected) = &pinned_genesis_hash {
             if &computed_genesis_hash != expected {
                 anyhow::bail!(
-                    "genesis_hash mismatch — CREG_GENESIS_HASH={} but spec computes {}. Refusing to start.",
+                    "genesis_hash mismatch â€” CREG_GENESIS_HASH={} but spec computes {}. Refusing to start.",
                     expected,
                     computed_genesis_hash
                 );
@@ -401,12 +402,12 @@ async fn main() -> Result<()> {
         validate_l1_chain_id(&config.eth_rpc_url, None).await?;
     }
 
-    // ── Validate configuration early — fail fast with clear messages ──────────
+    // â”€â”€ Validate configuration early â€” fail fast with clear messages â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     let config_errors = config.validate();
     if !config_errors.is_empty() {
         tracing::warn!("Configuration warnings/errors:");
         for err in &config_errors {
-            tracing::warn!("  ✗ {}", err);
+            tracing::warn!("  âœ— {}", err);
         }
         let hard_errors: Vec<_> = config_errors
             .iter()
@@ -426,7 +427,7 @@ async fn main() -> Result<()> {
     let production_security_errors = config.validate_production_security();
     if !production_security_errors.is_empty() {
         for err in &production_security_errors {
-            tracing::error!("  ✗ {}", err);
+            tracing::error!("  âœ— {}", err);
         }
         anyhow::bail!(
             "Cannot start node: unsafe environment for production (CREG_TESTNET=false). \
@@ -450,7 +451,7 @@ async fn main() -> Result<()> {
 
     validate_contract_addresses(&config).await?;
 
-    // ── Single-node enforcement (mainnet only) ────────────────────────────────
+    // â”€â”€ Single-node enforcement (mainnet only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // On mainnet, acquire a PID lock in the data directory to prevent multiple
     // nodes from running on the same machine. Testnet skips this entirely.
     let _pid_lock = if config.is_testnet {
@@ -461,25 +462,25 @@ async fn main() -> Result<()> {
         Some(pidlock::PidLock::acquire(&config.data_dir)?)
     };
 
-    tracing::info!("╔══════════════════════════════════════╗");
+    tracing::info!("â•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—");
     tracing::info!(
-        "║    chain-registry node v{}        ║",
+        "â•‘    chain-registry node v{}        â•‘",
         env!("CARGO_PKG_VERSION")
     );
-    tracing::info!("╚══════════════════════════════════════╝");
+    tracing::info!("â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
     tracing::info!("  listen:      {}", config.listen_addr);
     tracing::info!("  data dir:    {}", config.data_dir.display());
     tracing::info!("  node id:     {}", config.node_id);
     tracing::info!("  validator:   {}", config.is_validator);
     tracing::info!("  peers:       {}", config.peers.len());
 
-    // ── Open persistent storage ───────────────────────────────────────────────
+    // â”€â”€ Open persistent storage â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     let chain = chain_store::ChainStore::open(&config.data_dir)?;
     let chain_for_sync = chain.clone();
     let tip = chain.tip_height()?;
     tracing::info!("  chain tip:   height={}", tip);
 
-    // ── Rebuild publisher index from chain history ────────────────────────────
+    // â”€â”€ Rebuild publisher index from chain history â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     let mut publisher_index = PublisherIndex::new();
     {
         let mut blocks = Vec::new();
@@ -492,24 +493,24 @@ async fn main() -> Result<()> {
         tracing::info!("  publishers:  {}", publisher_index.publisher_count());
     }
 
-    // ── Event bus (broadcast channel for SSE clients) ─────────────────────────
+    // â”€â”€ Event bus (broadcast channel for SSE clients) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     let event_bus = new_event_bus();
 
-    // ── P2P Networking (libp2p) ───────────────────────────────────────────────
+    // â”€â”€ P2P Networking (libp2p) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     let (p2p_node, p2p_handle) = p2p::P2PNode::new(&config.p2p_listen)?;
 
-    // ── Finalized-tx channel (created before state so API can send to it) ───────
+    // â”€â”€ Finalized-tx channel (created before state so API can send to it) â”€â”€â”€â”€â”€â”€â”€
     let (tx_sender, tx_receiver): (FinalizedTxSender, FinalizedTxReceiver) =
         finalized_tx::channel();
     let zk_validator = Arc::new(
         zk_validator::ZkValidator::new()
-            .context("Failed to initialize ZK validator — ensure CREG_ZK_KEYS_DIR contains proving_key_package_v2.bin and verifying_key_package_v2.bin when CREG_PRODUCTION=true")?,
+            .context("Failed to initialize ZK validator â€” ensure CREG_ZK_KEYS_DIR contains proving_key_package_v2.bin and verifying_key_package_v2.bin when CREG_PRODUCTION=true")?,
     );
 
-    // ── Shared state ──────────────────────────────────────────────────────────
+    // â”€â”€ Shared state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     let state: SharedState = Arc::new(RwLock::new(NodeState {
         chain,
-        pending_pool: pending_pool::PendingPool::new(),
+        pending_pool: pending_pool::PendingPool::open(&config.data_dir),
         publisher_index,
         validator_set_bootstrap: config.validator_set.clone(),
         validator_set: config.validator_set.clone(),
@@ -557,14 +558,6 @@ async fn main() -> Result<()> {
         loop {
             seed_redial.tick().await;
 
-            let has_peers = {
-                let state_guard = state_for_seed_redial.read().await;
-                !state_guard.p2p_status.peers.is_empty()
-            };
-            if has_peers {
-                continue;
-            }
-
             for addr in &dialable_seeds {
                 let _ = p2p_handle_for_seeds
                     .sender
@@ -576,10 +569,10 @@ async fn main() -> Result<()> {
 
     tokio::spawn(p2p_node.run(Arc::clone(&state), Arc::clone(&event_bus)));
 
-    // ── Spawn background tasks ────────────────────────────────────────────────
+    // â”€â”€ Spawn background tasks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     tracing::info!("Starting subsystems...");
 
-    // PostgreSQL sync worker (chain store → PostgreSQL ETL)
+    // PostgreSQL sync worker (chain store â†’ PostgreSQL ETL)
     // Default to the dedicated `creg-indexer` service so validators do not
     // own both the consensus path and the explorer mirror path in the same
     // process. Set CREG_PG_SYNC_IN_PROCESS=true to restore the legacy mode.
@@ -610,7 +603,7 @@ async fn main() -> Result<()> {
 
     tokio::spawn(sync::run(Arc::clone(&state)));
 
-    // ── ML model existence check (T6) ─────────────────────────────────────────
+    // â”€â”€ ML model existence check (T6) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     {
         let scanner = ml_validator::deep_scan::DeepScanner::default();
         if let Err(e) = scanner.validate_at_startup() {
@@ -640,7 +633,7 @@ async fn main() -> Result<()> {
         Arc::clone(&admission_store),
     ));
 
-    // ── Validator set sync (chain-authoritative with static bootstrap) ──────
+    // â”€â”€ Validator set sync (chain-authoritative with static bootstrap) â”€â”€â”€â”€â”€â”€
     {
         let start_block = chain_spec
             .as_ref()
@@ -702,7 +695,7 @@ async fn main() -> Result<()> {
         }
     }
 
-    // ── Start gRPC Server (Industrial Speed) ──────────────────────────────────
+    // â”€â”€ Start gRPC Server (Industrial Speed) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     let grpc_state = Arc::clone(&state);
     let watcher_bus = Arc::clone(&event_bus);
     tokio::spawn(async move {
@@ -728,7 +721,7 @@ async fn main() -> Result<()> {
             .expect("gRPC server failed");
     });
 
-    // ── Start REST API + SSE + Metrics ────────────────────────────────────────
+    // â”€â”€ Start REST API + SSE + Metrics â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     let limiter = rate_limit::RateLimiter::new(Default::default());
     rate_limit::spawn_purge_task(limiter.clone());
 
@@ -742,7 +735,7 @@ async fn main() -> Result<()> {
         p2p_handle,
     );
 
-    // ── Optional TLS termination ──────────────────────────────────────────────
+    // â”€â”€ Optional TLS termination â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Set CREG_TLS_CERT and CREG_TLS_KEY environment variables to enable HTTPS.
     #[cfg(feature = "tls")]
     {
@@ -772,11 +765,11 @@ async fn main() -> Result<()> {
         }
     }
 
-    // ── Plain HTTP (default) ──────────────────────────────────────────────────
+    // â”€â”€ Plain HTTP (default) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     let listener = tokio::net::TcpListener::bind(&config.listen_addr).await?;
     tracing::info!("REST API listening on http://{}", config.listen_addr);
 
-    // ── Graceful shutdown on SIGINT (Ctrl-C) or SIGTERM ───────────────────────
+    // â”€â”€ Graceful shutdown on SIGINT (Ctrl-C) or SIGTERM â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     axum::serve(
         listener,
         app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
@@ -904,8 +897,8 @@ async fn shutdown_signal() {
     let terminate = std::future::pending::<()>();
 
     tokio::select! {
-        _ = ctrl_c    => { tracing::info!("Received Ctrl-C — shutting down..."); }
-        _ = terminate => { tracing::info!("Received SIGTERM — shutting down..."); }
+        _ = ctrl_c    => { tracing::info!("Received Ctrl-C â€” shutting down..."); }
+        _ = terminate => { tracing::info!("Received SIGTERM â€” shutting down..."); }
     }
 }
 // explorer and rate_limit are declared here so they're available to api.rs

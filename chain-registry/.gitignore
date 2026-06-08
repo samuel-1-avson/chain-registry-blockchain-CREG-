@@ -261,6 +261,8 @@ core.*
 # =============================================================================
 # TESTNET GENERATED ARTIFACTS
 # =============================================================================
+testnet/sepolia-3node.env
+testnet/soak-3node-logs/
 testnet/artifacts/
 config/*/deployment.json
 config/local/

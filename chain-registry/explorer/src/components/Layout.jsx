@@ -3,6 +3,7 @@ import { Link, NavLink } from 'react-router-dom'
 import { SearchBar } from './SearchBar.jsx'
 import { ThemeToggle } from './ThemeToggle.jsx'
 import { ConnectionBanner } from './ConnectionBanner.jsx'
+import { TestnetPhaseBanner } from './TestnetPhaseBanner.jsx'
 
 const GOVERNANCE_ENABLED = import.meta.env.VITE_GOVERNANCE_ENABLED === 'true'
 
@@ -40,6 +41,7 @@ const navLinkStyle = ({ isActive }) => ({
 export function Layout({ children, sseState, reconnectAttempt, chainStats }) {
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)', color: 'var(--text-primary)' }}>
+      <TestnetPhaseBanner />
       <header style={{
         position: 'sticky',
         top: 0,

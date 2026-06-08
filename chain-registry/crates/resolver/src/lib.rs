@@ -81,7 +81,7 @@ fn parse_pkg(raw: &str) -> (String, Option<String>) {
 }
 
 fn default_node_url() -> String {
-    std::env::var("CREG_NODE_URL").unwrap_or_else(|_| "https://registry.chain-pkg.io".into())
+    std::env::var("CREG_NODE_URL").unwrap_or_else(|_| "http://localhost:8080".into())
 }
 
 pub mod light_client;
@@ -97,7 +97,7 @@ pub async fn resolve_verified(
     checkpoint: Option<&Checkpoint>,
 ) -> anyhow::Result<common::TrustVerdict> {
     let url = node_url.map(String::from).unwrap_or_else(|| {
-        std::env::var("CREG_NODE_URL").unwrap_or_else(|_| "https://registry.chain-pkg.io".into())
+        std::env::var("CREG_NODE_URL").unwrap_or_else(|_| "http://localhost:8080".into())
     });
     let cp = checkpoint.cloned().unwrap_or_else(Checkpoint::genesis);
 

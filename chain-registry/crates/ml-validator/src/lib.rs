@@ -30,8 +30,15 @@ pub mod deep_scan;
 pub use deep_scan::{
     deep_scan, DeepScanResult, DeepScanner, MlError, SuspiciousFile, ThreatClassification,
 };
+pub use osv_snapshot::{
+    bundle_epoch as osv_bundle_epoch, lookup_advisory as osv_lookup_advisory,
+    lookup_pinned as osv_lookup_pinned, osv_block_critical_enabled, osv_consensus_enabled,
+    osv_live_fallback_enabled, snapshot_available as osv_snapshot_available, OsvSnapshot,
+    SCHEMA_V1,
+};
 
 pub mod osv_client;
+pub mod osv_snapshot;
 pub mod threat_intel;
 pub mod yara_scanner;
 

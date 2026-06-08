@@ -13,6 +13,7 @@ pub mod consensus_admission;
 pub mod events;
 pub mod finalized_tx;
 pub mod gossip;
+pub mod intelligence;
 pub mod json_rpc;
 pub mod openapi;
 pub mod p2p;

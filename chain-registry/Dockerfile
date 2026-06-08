@@ -41,6 +41,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     llvm-17 \
     llvm-17-dev \
     libclang-17-dev \
+    libclang1-17 \
     cmake \
     libopenblas-dev \
     protobuf-compiler \
@@ -66,12 +67,13 @@ ENV CARGO_BUILD_JOBS=1
 ARG SOURCE_DATE_EPOCH
 ENV SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}
 ENV CARGO_INCREMENTAL=0
-ENV RUSTFLAGS="--remap-path-prefix=/build=/src"
+# Do not set RUSTFLAGS globally — remap-path-prefix breaks librocksdb-sys bindgen/libclang.
 
 RUN mkdir -p "$CARGO_HOME" && \
   printf '[net]\nretry = 10\ngit-fetch-with-cli = true\n\n[http]\nmultiplexing = false\ntimeout = 600\n\n[registries.crates-io]\nprotocol = "sparse"\n' > "$CARGO_HOME/config.toml"
 
-RUN cargo --version && rustc --version
+RUN cargo --version && rustc --version && \
+    test -e "${LIBCLANG_PATH}/libclang.so.1" -o -e "${LIBCLANG_PATH}/libclang.so"
 
 WORKDIR /build
 
@@ -160,20 +162,23 @@ COPY docker-compose*.yml ./
 RUN touch crates/*/src/*.rs
 
 # Build the node binaries with all features.
-# Keep remap-only Rust flags out of librocksdb-sys bindgen/libclang.
-RUN unset RUSTFLAGS CARGO_ENCODED_RUSTFLAGS && \
-    CARGO_BUILD_JOBS=2 RUST_BACKTRACE=1 cargo build -vv --release --locked --package chain-registry-node --bin creg-node --bin creg-indexer
+RUN env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS \
+    CARGO_BUILD_JOBS=2 RUST_BACKTRACE=1 \
+    cargo build --release --locked --package chain-registry-node --bin creg-node --bin creg-indexer
 
 # Build CLI tools (includes TUI explorer)
-RUN unset RUSTFLAGS CARGO_ENCODED_RUSTFLAGS && \
+RUN env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS \
+    RUSTFLAGS="--remap-path-prefix=/build=/src" \
     cargo build --release --locked --package chain-registry-cli
 
 # Build Faucet service (testnet)
-RUN unset RUSTFLAGS CARGO_ENCODED_RUSTFLAGS && \
+RUN env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS \
+    RUSTFLAGS="--remap-path-prefix=/build=/src" \
     cargo build --release --locked --package faucet
 
 # Build Relayer service (sponsored testnet transactions)
-RUN unset RUSTFLAGS CARGO_ENCODED_RUSTFLAGS && \
+RUN env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS \
+    RUSTFLAGS="--remap-path-prefix=/build=/src" \
     cargo build --release --locked --package chain-registry-relayer
 
 # ── Stage 3: Runtime ──────────────────────────────────────────────────────────

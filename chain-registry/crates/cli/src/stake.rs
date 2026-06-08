@@ -10,62 +10,70 @@ pub enum StakeRole {
     Validator,
 }
 
-/// Stake tokens via the Staking smart contract.
-/// In a full deployment this would use ethers-rs / alloy to send a real
-/// transaction. Here we provide the correct calldata and guidance.
+/// Stake CREG tokens via the Staking smart contract.
+///
+/// The Staking contract custodies **ERC-20 CREG**, not native ETH, so this runs
+/// the same two-step flow used on Sepolia: `approve(staking, amount)` on the
+/// token contract, then `stakeAsPublisher(uint256)` / `applyToBeValidator(uint256)`
+/// on the staking contract. Requires Foundry `cast` and a funded secp256k1 EOA key
+/// (NOT an Ed25519 `creg keygen` key).
 pub async fn run(
-    amount_eth: f64,
+    amount_tokens: f64,
     role: StakeRole,
     key_path: Option<&std::path::Path>,
     rpc_url: Option<&str>,
     staking_addr: Option<&str>,
+    token_addr: Option<&str>,
 ) -> Result<()> {
     let rpc = rpc_url.unwrap_or("http://127.0.0.1:8545");
-    let contract = match staking_addr {
-        Some(addr) if !addr.is_empty() && addr != "0x0000000000000000000000000000000000000000" => addr.to_string(),
-        _ => match std::env::var("STAKING_CONTRACT_ADDR") {
-            Ok(addr) if !addr.is_empty() => addr,
-            _ => bail!("Staking contract address required. Set --staking-addr or STAKING_CONTRACT_ADDR env var."),
-        },
-    };
 
-    if amount_eth <= 0.0 {
+    if amount_tokens <= 0.0 {
         bail!("Stake amount must be greater than 0");
     }
 
-    let min_eth = match role {
+    let min_tokens = match role {
         StakeRole::Publisher => 1.0,
         StakeRole::Validator => 100.0,
     };
 
-    if amount_eth < min_eth {
+    if amount_tokens < min_tokens {
         bail!(
-            "Minimum stake for {:?} is {} ETH (you specified {} ETH)",
+            "Minimum stake for {:?} is {} CREG (you specified {} CREG)",
             role,
-            min_eth,
-            amount_eth
+            min_tokens,
+            amount_tokens
         );
     }
 
-    // Use string-based decimal-to-wei conversion to avoid float precision loss
-    let wei = eth_to_wei_str(amount_eth);
-    let fn_selector = match role {
-        StakeRole::Publisher => "stakeAsPublisher()",
-        StakeRole::Validator => "joinAsValidator()",
+    let staking = resolve_addr(
+        staking_addr,
+        &[
+            "CREG_STAKING_ADDR",
+            "STAKING_CONTRACT_ADDR",
+            "TESTNET_STAKING_ADDR",
+        ],
+    )
+    .context("Staking contract address required. Pass --staking-addr or set CREG_STAKING_ADDR.")?;
+
+    let token = resolve_addr(token_addr, &["CREG_TOKEN_ADDR", "TESTNET_TOKEN_ADDR"]).context(
+        "CREG token address required for the ERC-20 approve step. \
+         Pass --token-addr or set CREG_TOKEN_ADDR.",
+    )?;
+
+    // Use string-based decimal-to-wei conversion to avoid float precision loss.
+    let wei = eth_to_wei_str(amount_tokens);
+    let stake_sig = match role {
+        StakeRole::Publisher => "stakeAsPublisher(uint256)",
+        StakeRole::Validator => "applyToBeValidator(uint256)",
     };
 
-    // Keccak4 of function selectors.
-    let selector_hex = match role {
-        StakeRole::Publisher => "9c52a7f1", // keccak256("stakeAsPublisher()")[:4]
-        StakeRole::Validator => "d9d98ce4", // keccak256("joinAsValidator()")[:4]
-    };
-
-    println!("\n  Staking {} ETH as {:?}", amount_eth, role);
-    println!("  Contract:  {}", contract);
+    println!("\n  Staking {} CREG as {:?}", amount_tokens, role);
+    println!("  Token:     {}", token);
+    println!("  Staking:   {}", staking);
     println!("  Network:   {}", rpc);
-    println!("  Function:  {}", fn_selector);
+    println!("  Flow:      approve({}, {}) then {}", staking, wei, stake_sig);
 
-    // If a key file was provided, read the private key and send the transaction.
+    // If a key file was provided, read the private key and send both transactions.
     if let Some(kp) = key_path {
         let key = std::fs::read_to_string(kp)
             .with_context(|| format!("Cannot read key file: {}", kp.display()))?;
@@ -82,15 +90,34 @@ pub async fn run(
             );
         }
 
-        println!("\n  Sending transaction...");
-        // Build and sign the transaction using cast (Foundry toolchain).
-        let status = std::process::Command::new("cast")
+        // Step 1 — approve the staking contract to pull `wei` CREG.
+        println!("\n  [1/2] Approving token spend...");
+        let approve = std::process::Command::new("cast")
             .args([
                 "send",
-                &contract,
-                &format!("0x{}", selector_hex),
-                "--value",
-                &format!("{}wei", wei),
+                &token,
+                "approve(address,uint256)",
+                &staking,
+                &wei,
+                "--private-key",
+                key,
+                "--rpc-url",
+                rpc,
+            ])
+            .status()
+            .context("cast not found — install Foundry: https://getfoundry.sh")?;
+        if !approve.success() {
+            bail!("Token approval failed (exit code {:?})", approve.code());
+        }
+
+        // Step 2 — stake / apply.
+        println!("  [2/2] Sending stake transaction...");
+        let staked = std::process::Command::new("cast")
+            .args([
+                "send",
+                &staking,
+                stake_sig,
+                &wei,
                 "--private-key",
                 key,
                 "--rpc-url",
@@ -99,7 +126,7 @@ pub async fn run(
             .status()
             .context("cast not found — install Foundry: https://getfoundry.sh")?;
 
-        if status.success() {
+        if staked.success() {
             println!("\n  ✓ Stake transaction confirmed.");
             match role {
                 StakeRole::Publisher => {
@@ -107,23 +134,47 @@ pub async fn run(
                 }
                 StakeRole::Validator => {
                     println!(
-                        "    Set CREG_IS_VALIDATOR=true and restart creg-node to join consensus."
+                        "    Validator application submitted; pending operator/consensus admission.\n\
+                         Set CREG_IS_VALIDATOR=true and start creg-node to join consensus."
                     );
                 }
             }
         } else {
-            bail!("Transaction failed (exit code {:?})", status.code());
+            bail!("Stake transaction failed (exit code {:?})", staked.code());
         }
     } else {
-        // No key — print the cast command for the user to run manually.
-        println!("\n  No key file provided. Run this command to stake:\n");
-        println!("  cast send {} 0x{} \\", contract, selector_hex);
-        println!("    --value {}wei \\", wei);
-        println!("    --private-key $YOUR_PRIVATE_KEY \\");
-        println!("    --rpc-url {}", rpc);
+        // No key — print the two cast commands for the user to run manually.
+        println!("\n  No key file provided. Run these two commands to stake:\n");
+        println!("  # 1. Approve the staking contract to pull your CREG");
+        println!(
+            "  cast send {} \"approve(address,uint256)\" {} {} \\",
+            token, staking, wei
+        );
+        println!("    --private-key $YOUR_EOA_KEY --rpc-url {}\n", rpc);
+        println!("  # 2. Stake");
+        println!("  cast send {} \"{}\" {} \\", staking, stake_sig, wei);
+        println!("    --private-key $YOUR_EOA_KEY --rpc-url {}", rpc);
     }
 
     Ok(())
+}
+
+/// Resolve a contract address from an explicit CLI value or a list of fallback
+/// environment variables, skipping empty values and the zero address.
+fn resolve_addr(explicit: Option<&str>, env_keys: &[&str]) -> Result<String> {
+    if let Some(addr) = explicit {
+        if !addr.is_empty() && addr != "0x0000000000000000000000000000000000000000" {
+            return Ok(addr.to_string());
+        }
+    }
+    for key in env_keys {
+        if let Ok(val) = std::env::var(key) {
+            if !val.is_empty() && val != "0x0000000000000000000000000000000000000000" {
+                return Ok(val);
+            }
+        }
+    }
+    bail!("contract address not provided")
 }
 
 /// Convert ETH amount to wei string without float precision loss.
@@ -186,11 +237,11 @@ mod tests {
 
     #[test]
     fn publisher_min_stake() {
-        // 0.001 ETH should fail for publisher (min 0.01)
+        // 0.001 CREG should fail for publisher (min 1 CREG)
         tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap()
-            .block_on(run(0.001, StakeRole::Publisher, None, None, None))
+            .block_on(run(0.001, StakeRole::Publisher, None, None, None, None))
             .unwrap_err();
     }
 }

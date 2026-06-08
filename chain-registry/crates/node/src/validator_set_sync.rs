@@ -794,6 +794,9 @@ pub async fn run(
                 update_sync_status(&state, |status| {
                     status.state = "degraded".to_string();
                     status.last_error = Some(e.to_string());
+                    status.cursor_block = worker_state.cursor.map(|(height, _)| height);
+                    status.cursor_log_index = worker_state.cursor.map(|(_, idx)| idx);
+                    status.cursor_block_hash = worker_state.cursor_block_hash.clone();
                 })
                 .await;
                 tracing::warn!("validator_set_sync: failed to fetch deltas: {}", e);
@@ -854,12 +857,54 @@ async fn fetch_deltas(
             fetch_deltas_chunk(client, rpc_url, staking_addr, start, end).await?;
         deltas.append(&mut chunk);
         start = end.saturating_add(1);
+        if start <= to_block {
+            // Public RPCs (e.g. Infura free tier) rate-limit bursty eth_getLogs scans.
+            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        }
     }
     deltas.sort_by_key(|delta| (delta.block_height, delta.log_index));
     Ok(deltas)
 }
 
+fn eth_get_logs_retryable(err: &anyhow::Error) -> bool {
+    let msg = err.to_string();
+    msg.contains("eth_getLogs returned no result array")
+        || msg.contains("Too Many Requests")
+        || msg.contains("rate limit")
+        || msg.contains("429")
+}
+
 async fn fetch_deltas_chunk(
+    client: &reqwest::Client,
+    rpc_url: &str,
+    staking_addr: &alloy::primitives::Address,
+    from_block: u64,
+    to_block: u64,
+) -> anyhow::Result<Vec<ValidatorSetDelta>> {
+    let mut delay_ms = 500u64;
+    for attempt in 0..5 {
+        match fetch_deltas_chunk_once(client, rpc_url, staking_addr, from_block, to_block).await {
+            Ok(deltas) => return Ok(deltas),
+            Err(e) if attempt < 4 && eth_get_logs_retryable(&e) => {
+                tracing::debug!(
+                    target: "validator_set_sync",
+                    attempt = attempt + 1,
+                    from_block,
+                    to_block,
+                    "eth_getLogs transient failure, retrying in {}ms: {}",
+                    delay_ms,
+                    e
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+                delay_ms = delay_ms.saturating_mul(2);
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    unreachable!()
+}
+
+async fn fetch_deltas_chunk_once(
     client: &reqwest::Client,
     rpc_url: &str,
     staking_addr: &alloy::primitives::Address,

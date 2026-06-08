@@ -685,6 +685,17 @@ impl P2PNode {
                                             if let Some(final_block) = s.pbft_engine.get_finalised_block(&block_hash) {
                                                 let _ = s.chain.insert_block(&final_block);
                                                 s.publisher_index.apply_block(&final_block);
+                                                let data_dir = s.config.data_dir.clone();
+                                                let ipfs_url = if s.config.ipfs_url.is_empty() {
+                                                    None
+                                                } else {
+                                                    Some(s.config.ipfs_url.clone())
+                                                };
+                                                crate::intelligence::schedule_for_block(
+                                                    &final_block,
+                                                    data_dir,
+                                                    ipfs_url,
+                                                );
                                             }
                                         }
                                     }
@@ -820,6 +831,7 @@ mod tests {
             index_epoch: "index-epoch-1".into(),
             threshold_profile_id: "thresholds-v1".into(),
             llm_prompt_profile_id: "llm-prompt-v1".into(),
+            osv_snapshot_epoch: "osv-off".into(),
         };
         let evidence_digest = common::sha256_hex(b"p2p-test-evidence");
         let ml_model_version = "creg-detect-v1.0.0".to_string();

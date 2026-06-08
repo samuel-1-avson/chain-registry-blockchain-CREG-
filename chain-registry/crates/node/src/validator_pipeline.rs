@@ -6,12 +6,13 @@ use crate::{finalized_tx::FinalizedTxSender, NodeState};
 use chrono::Utc;
 use common::{ChainRecord, PackageStatus, PublishRequest, Transaction, ValidatorVote};
 use consensus::{aggregate_evidence_votes, EvidenceVoteOutcome};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{interval, Duration};
 
 const POLL_INTERVAL_SECS: u64 = 1;
-const VOTE_TIMEOUT_SECS: u64 = 10; // Reduced from 30s for faster consensus
+const VOTE_POLL_MS: u64 = 500;
 
 pub async fn run(
     state: Arc<RwLock<NodeState>>,
@@ -331,14 +332,16 @@ async fn process_package(
     }
 
     // ── WAIT FOR QUORUM OUTCOME ───────────────────────────────────────────────
-    let assigned_validator_count = {
+    let (assigned_validator_count, vote_timeout_secs) = {
         let s = state.read().await;
-        s.validator_set.validators.len()
+        (
+            s.validator_set.validators.len(),
+            s.config.vote_timeout_secs.max(1),
+        )
     };
     let mut consensus_outcome = None;
 
-    // Wait for quorum with shorter timeout for faster consensus
-    let max_iterations = VOTE_TIMEOUT_SECS * 2; // 0.5s per iteration
+    let max_iterations = vote_timeout_secs.saturating_mul(1000).div_ceil(VOTE_POLL_MS);
     for _ in 0..max_iterations {
         {
             let sr = state.read().await;
@@ -351,11 +354,24 @@ async fn process_package(
                 }
             }
         }
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(VOTE_POLL_MS)).await;
     }
 
     let Some(consensus_outcome) = consensus_outcome else {
-        tracing::error!("Consensus timeout for package {}", canonical);
+        let detail = {
+            let s = state.read().await;
+            s.package_round(&canonical)
+                .map(|round| summarize_vote_round(round.signatures(), assigned_validator_count))
+                .unwrap_or_else(|| "no votes recorded".to_string())
+        };
+        tracing::error!(
+            "Consensus timeout for package {} after {}s (quorum needs {} of {} validators): {}",
+            canonical,
+            vote_timeout_secs,
+            (assigned_validator_count * 2 / 3) + 1,
+            assigned_validator_count,
+            detail
+        );
         cleanup(&state, &canonical).await;
         return;
     };
@@ -426,6 +442,53 @@ async fn process_package(
     }
 
     cleanup(&state, &canonical).await;
+}
+
+fn summarize_vote_round(
+    signatures: &[common::ValidatorSignature],
+    assigned_validator_count: usize,
+) -> String {
+    let quorum = (assigned_validator_count * 2 / 3) + 1;
+    let mut degraded = 0usize;
+    let mut approve_profiles: HashMap<String, usize> = HashMap::new();
+    let mut reject_count = 0usize;
+
+    for sig in signatures {
+        if !common::is_consensus_grade_vote(
+            &sig.ml_model_version,
+            &sig.analysis_bundles,
+            &sig.evidence_digest,
+        ) {
+            degraded += 1;
+            continue;
+        }
+        let profile_key = format!(
+            "{}:{}",
+            common::scanner_profile_digest(&sig.ml_model_version, &sig.analysis_bundles),
+            &sig.evidence_digest[..sig.evidence_digest.len().min(12)]
+        );
+        match &sig.vote {
+            ValidatorVote::Approve => {
+                *approve_profiles.entry(profile_key).or_default() += 1;
+            }
+            ValidatorVote::Reject { .. } => reject_count += 1,
+        }
+    }
+
+    let best_profile = approve_profiles
+        .iter()
+        .max_by_key(|(_, count)| *count)
+        .map(|(profile, count)| format!("{profile}={count}"))
+        .unwrap_or_else(|| "none".to_string());
+
+    format!(
+        "votes={} degraded={} rejects={} quorum={} top_approve_profile={}",
+        signatures.len(),
+        degraded,
+        reject_count,
+        quorum,
+        best_profile
+    )
 }
 
 async fn cleanup(state: &Arc<RwLock<NodeState>>, canonical: &str) {

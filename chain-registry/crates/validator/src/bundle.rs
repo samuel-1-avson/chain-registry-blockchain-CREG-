@@ -15,6 +15,7 @@ pub struct AnalysisBundleSet {
     pub index_epoch: String,
     pub threshold_profile_id: String,
     pub llm_prompt_profile_id: String,
+    pub osv_snapshot_epoch: String,
 }
 
 impl AnalysisBundleSet {
@@ -27,6 +28,7 @@ impl AnalysisBundleSet {
             index_epoch: env_or("CREG_INDEX_EPOCH", "index-epoch-0"),
             threshold_profile_id: env_or("CREG_THRESHOLD_PROFILE_ID", "thresholds-v1"),
             llm_prompt_profile_id: env_or("CREG_LLM_PROMPT_PROFILE_ID", "llm-prompt-v1"),
+            osv_snapshot_epoch: ml_validator::osv_bundle_epoch(),
         }
     }
 
@@ -39,6 +41,7 @@ impl AnalysisBundleSet {
             index_epoch: self.index_epoch.clone(),
             threshold_profile_id: self.threshold_profile_id.clone(),
             llm_prompt_profile_id: self.llm_prompt_profile_id.clone(),
+            osv_snapshot_epoch: self.osv_snapshot_epoch.clone(),
         }
     }
 }
@@ -72,5 +75,6 @@ mod tests {
         assert!(!bundles.index_epoch.is_empty());
         assert!(!bundles.threshold_profile_id.is_empty());
         assert!(!bundles.llm_prompt_profile_id.is_empty());
+        assert!(!bundles.osv_snapshot_epoch.is_empty());
     }
 }

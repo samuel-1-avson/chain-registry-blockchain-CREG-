@@ -356,7 +356,7 @@ pub async fn submit(
         ..Default::default()
     };
 
-    let url = format!("{}/v1/packages", base.trim_end_matches('/'));
+    let url = format!("{}/v1/publisher/packages", base.trim_end_matches('/'));
     let resp = reqwest::Client::new()
         .post(&url)
         .json(&request)

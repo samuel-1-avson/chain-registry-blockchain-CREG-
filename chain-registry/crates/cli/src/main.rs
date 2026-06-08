@@ -17,6 +17,7 @@ mod intercept;
 mod keygen;
 mod lockfile;
 mod multisig;
+mod osv_snapshot;
 mod output;
 mod policy;
 mod publish;
@@ -230,20 +231,23 @@ enum Commands {
         ci: bool,
     },
 
-    /// Stake ETH as a publisher or validator.
+    /// Stake CREG tokens as a publisher or validator (ERC-20 approve + stake).
     Stake {
-        /// Amount in ETH (e.g. "1.5").
+        /// Amount of CREG tokens (e.g. "1" publisher, "100" validator).
         amount: String,
         /// Role: "publisher" | "validator".
         #[arg(short, long, default_value = "publisher")]
         role: String,
         /// Staking contract address (0x…).
-        #[arg(long, env = "STAKING_CONTRACT_ADDR")]
+        #[arg(long, env = "CREG_STAKING_ADDR")]
         staking_addr: Option<String>,
+        /// CREG token (ERC-20) address for the approve step (0x…).
+        #[arg(long, env = "CREG_TOKEN_ADDR")]
+        token_addr: Option<String>,
         /// EVM RPC URL.
         #[arg(long)]
         rpc_url: Option<String>,
-        /// Path to file containing deployer/caller private key (hex).
+        /// Path to file containing the EVM (secp256k1) private key (hex).
         #[arg(long = "key-file", env = "CREG_KEY_FILE")]
         key: Option<std::path::PathBuf>,
     },
@@ -362,6 +366,12 @@ enum Commands {
         command: PolicyCommands,
     },
 
+    /// Build or manage pinned OSV vulnerability snapshots.
+    OsvSnapshot {
+        #[command(subcommand)]
+        command: OsvSnapshotCommands,
+    },
+
     /// Export a Software Bill of Materials (SBOM) for a package.
     Sbom {
         /// Package name
@@ -403,6 +413,28 @@ enum Commands {
     ChainSpec {
         #[command(subcommand)]
         command: chain_spec::ChainSpecCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum OsvSnapshotCommands {
+    /// Query OSV and write a creg-osv-snapshot-v1 JSON file for validators.
+    Build {
+        /// Snapshot epoch (must match CREG_OSV_SNAPSHOT_EPOCH on validators).
+        #[arg(long, default_value = "osv-epoch-0")]
+        epoch: String,
+        /// Output path (`-` for stdout). Defaults to stdout when omitted.
+        #[arg(short, long, value_name = "FILE")]
+        output: Option<std::path::PathBuf>,
+        /// Package list file (`ecosystem:name@version` per line).
+        #[arg(long, value_name = "FILE")]
+        packages: Option<std::path::PathBuf>,
+        /// Package keys as `ecosystem:name@version` arguments.
+        #[arg(value_name = "PACKAGE")]
+        package_keys: Vec<String>,
+        /// Delay between OSV API queries in milliseconds.
+        #[arg(long, default_value_t = 250)]
+        delay_ms: u64,
     },
 }
 
@@ -848,22 +880,24 @@ async fn run(cli: Cli) -> Result<()> {
             amount,
             role,
             staking_addr,
+            token_addr,
             rpc_url,
             key,
         } => {
             use stake::{parse_amount, StakeRole};
-            let eth = parse_amount(&amount)?;
+            let tokens = parse_amount(&amount)?;
             let r = if role == "validator" {
                 StakeRole::Validator
             } else {
                 StakeRole::Publisher
             };
             stake::run(
-                eth,
+                tokens,
                 r,
                 key.as_deref(),
                 rpc_url.as_deref(),
                 staking_addr.as_deref(),
+                token_addr.as_deref(),
             )
             .await?;
         }
@@ -1114,6 +1148,21 @@ async fn run(cli: Cli) -> Result<()> {
             PolicyCommands::Init => {
                 policy::show_policy_init()?;
             }
+        },
+        Commands::OsvSnapshot { command } => match command {
+            OsvSnapshotCommands::Build {
+                epoch,
+                output,
+                packages,
+                package_keys,
+                delay_ms,
+            } => osv_snapshot::run_build(
+                &epoch,
+                output.as_deref(),
+                packages.as_deref(),
+                &package_keys,
+                delay_ms,
+            )?,
         },
         Commands::Sbom {
             package,

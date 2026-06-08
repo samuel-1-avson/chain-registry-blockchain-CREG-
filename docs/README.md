@@ -10,6 +10,7 @@ Central documentation for the Chain Registry monorepo (`chain-registry/`).
 | [SECURITY_AND_REMEDIATION_IMPLEMENTATION_PLAN.md](./SECURITY_AND_REMEDIATION_IMPLEMENTATION_PLAN.md) | Security remediation backlog and phased execution plan |
 | [NEXT_WORK.md](./NEXT_WORK.md) | Prioritized testnet readiness checklist (owners + acceptance criteria) |
 | [TESTNET_PHASE_SCOPE.md](./TESTNET_PHASE_SCOPE.md) | External testnet phase scope — observer vs validator, limits, NET-301 deferral |
+| [PUBLIC_TESTNET_QUICKSTART.md](./PUBLIC_TESTNET_QUICKSTART.md) | One-page publisher / developer / validator quickstart for Sepolia testnet |
 | [session_analysis_report.md](./session_analysis_report.md) | AI session postmortem — root causes, hotspots, severity |
 | [prompt_improvement_tips.md](./prompt_improvement_tips.md) | Copy-paste prompts for bounded work on this repo |
 

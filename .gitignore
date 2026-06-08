@@ -147,6 +147,8 @@ node*-data/
 sepolia-node-data/
 **/sepolia-node-data/
 **/testnet/ops-201-logs/
+**/testnet/soak-3node-logs/
+**/testnet/sepolia-3node.env
 **/testnet/.tools/
 **/testnet/.env.publish.local
 **/testnet/.env.sepolia.faucet

@@ -673,7 +673,7 @@ fn publisher_packages_url(node_url: Option<&str>) -> String {
     format!(
         "{}/v1/publisher/packages",
         node_url
-            .unwrap_or("https://registry.chain-pkg.io")
+            .unwrap_or("http://localhost:8080")
             .trim_end_matches('/')
     )
 }

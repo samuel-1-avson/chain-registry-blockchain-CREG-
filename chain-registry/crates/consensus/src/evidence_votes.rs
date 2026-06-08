@@ -92,6 +92,7 @@ mod tests {
             index_epoch: "index-epoch-1".into(),
             threshold_profile_id: "thresholds-v1".into(),
             llm_prompt_profile_id: "llm-prompt-v1".into(),
+            osv_snapshot_epoch: "osv-off".into(),
         };
         ValidatorSignature {
             validator_id: id.to_string(),

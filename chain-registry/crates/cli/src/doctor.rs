@@ -148,6 +148,97 @@ pub struct FaucetDripOutcome {
     pub balance_after: u128,
 }
 
+fn append_fleet_consensus_checks(checks: &mut Vec<DoctorCheck>) {
+    let yara_dir =
+        std::env::var("CREG_YARA_RULES_DIR").unwrap_or_else(|_| "rules".to_string());
+    let yara_ok = std::path::Path::new(&yara_dir).is_dir()
+        && std::fs::read_dir(&yara_dir)
+            .map(|mut entries| entries.next().is_some())
+            .unwrap_or(false);
+    checks.push(if yara_ok {
+        DoctorCheck::pass(
+            "YARA rules directory",
+            false,
+            format!("{yara_dir} contains rule files"),
+        )
+    } else {
+        DoctorCheck::fail(
+            "YARA rules directory",
+            false,
+            format!(
+                "CREG_YARA_RULES_DIR={yara_dir} is missing or empty — validators may disagree on scans"
+            ),
+        )
+    });
+
+    let bundles = validator::bundle::AnalysisBundleSet::current();
+    let refs = bundles.to_refs();
+    let scanner_version = ml_validator::DeepScanner::default().model_version();
+    if scanner_version.starts_with("degraded") {
+        checks.push(DoctorCheck::fail(
+            "Scanner version",
+            true,
+            format!("degraded scanner profile: {scanner_version}"),
+        ));
+    } else if refs.is_consensus_complete() {
+        let digest = common::scanner_profile_digest(&scanner_version, &refs);
+        checks.push(DoctorCheck::pass(
+            "Scanner profile bundles",
+            false,
+            format!(
+                "scanner={scanner_version} digest={}… osv_epoch={}",
+                &digest[..digest.len().min(16)],
+                refs.osv_snapshot_epoch
+            ),
+        ));
+    } else {
+        checks.push(DoctorCheck::fail(
+            "Scanner profile bundles",
+            true,
+            "analysis bundle env vars are incomplete — votes may be excluded from quorum",
+        ));
+    }
+
+    let llm_enabled = std::env::var("CREG_LLM_ENABLED")
+        .map(|v| v == "true" || v == "1")
+        .unwrap_or(false);
+    checks.push(if llm_enabled {
+        DoctorCheck::fail(
+            "LLM advisory lane",
+            false,
+            "CREG_LLM_ENABLED=true can produce non-deterministic evidence across fleet nodes",
+        )
+    } else {
+        DoctorCheck::pass("LLM advisory lane", false, "disabled or unset")
+    });
+
+    if let Ok(raw) = std::env::var("CREG_VOTE_TIMEOUT_SECS") {
+        match raw.parse::<u64>() {
+            Ok(secs) if secs >= 5 => checks.push(DoctorCheck::pass(
+                "Vote timeout",
+                false,
+                format!("CREG_VOTE_TIMEOUT_SECS={secs}"),
+            )),
+            Ok(secs) => checks.push(DoctorCheck::fail(
+                "Vote timeout",
+                false,
+                format!("CREG_VOTE_TIMEOUT_SECS={secs} is very low for multi-validator quorum"),
+            )),
+            Err(_) => checks.push(DoctorCheck::fail(
+                "Vote timeout",
+                false,
+                format!("CREG_VOTE_TIMEOUT_SECS={raw} is not a valid integer"),
+            )),
+        }
+    } else {
+        checks.push(DoctorCheck::pass(
+            "Vote timeout",
+            false,
+            "unset (defaults to chain-spec vote_timeout_ms or 10s)",
+        ));
+    }
+}
+
 pub async fn run(options: DoctorOptions<'_>) -> Result<()> {
     if options.testnet {
         run_testnet(options).await
@@ -258,6 +349,8 @@ async fn run_basic(options: DoctorOptions<'_>) -> Result<()> {
             "CREG_TESTNET=true (testnet mode)",
         ));
     }
+
+    append_fleet_consensus_checks(&mut checks);
 
     let report = DoctorReport {
         mode: "basic",

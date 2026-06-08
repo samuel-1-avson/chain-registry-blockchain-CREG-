@@ -161,6 +161,7 @@ pub struct AnalysisBundleRefs {
     pub index_epoch: String,
     pub threshold_profile_id: String,
     pub llm_prompt_profile_id: String,
+    pub osv_snapshot_epoch: String,
 }
 
 #[derive(serde::Serialize, ToSchema)]

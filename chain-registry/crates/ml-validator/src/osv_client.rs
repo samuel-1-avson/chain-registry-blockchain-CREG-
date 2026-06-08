@@ -63,7 +63,7 @@ pub struct OsvResult {
 }
 
 impl OsvResult {
-    fn unavailable() -> Self {
+    pub(crate) fn unavailable() -> Self {
         Self {
             queried: false,
             vulnerabilities: Vec::new(),
@@ -100,8 +100,18 @@ struct OsvVuln {
     database_specific: Option<serde_json::Value>,
 }
 
+/// Stable cache key for snapshot entries and in-process LRU cache.
+pub fn cache_key(info: &PackageInfo) -> String {
+    format!(
+        "{}:{}@{}",
+        map_ecosystem(&info.ecosystem),
+        info.name,
+        info.version
+    )
+}
+
 /// Map our ecosystem strings to OSV ecosystem identifiers.
-fn map_ecosystem(ecosystem: &str) -> String {
+pub fn map_ecosystem(ecosystem: &str) -> String {
     let lower = ecosystem.to_lowercase();
     match lower.as_str() {
         "npm" => "npm".to_string(),
@@ -126,12 +136,12 @@ pub fn query(info: &PackageInfo) -> OsvResult {
         return OsvResult::unavailable();
     }
 
-    let cache_key = format!("{}:{}@{}", info.ecosystem, info.name, info.version);
+    let key = cache_key(info);
 
     // Cache lookup — `mut` required because LruCache::get updates LRU order.
     if let Ok(mut cache) = OSV_CACHE.lock() {
-        if let Some(cached) = cache.get(&cache_key) {
-            debug!("OSV cache hit for {}", cache_key);
+        if let Some(cached) = cache.get(&key) {
+            debug!("OSV cache hit for {}", key);
             return cached.clone();
         }
     }
@@ -175,7 +185,7 @@ pub fn query(info: &PackageInfo) -> OsvResult {
                             debug!(
                                 "OSV returned {} vulnerabilities for {}",
                                 vulns.len(),
-                                cache_key
+                                key
                             );
 
                             OsvResult {
@@ -189,7 +199,7 @@ pub fn query(info: &PackageInfo) -> OsvResult {
                         }
                     }
                 } else {
-                    debug!("OSV returned status {} for {}", resp.status(), cache_key);
+                    debug!("OSV returned status {} for {}", resp.status(), key);
                     OsvResult {
                         queried: true,
                         vulnerabilities: Vec::new(),
@@ -197,7 +207,7 @@ pub fn query(info: &PackageInfo) -> OsvResult {
                 }
             }
             Err(e) => {
-                warn!("OSV query failed for {}: {}", cache_key, e);
+                warn!("OSV query failed for {}: {}", key, e);
                 OsvResult::unavailable()
             }
         },
@@ -211,7 +221,7 @@ pub fn query(info: &PackageInfo) -> OsvResult {
     // entry at capacity, avoiding the thundering-herd caused by clearing
     // the whole HashMap at once.
     if let Ok(mut cache) = OSV_CACHE.lock() {
-        cache.put(cache_key, result.clone());
+        cache.put(key, result.clone());
     }
 
     result

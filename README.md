@@ -143,9 +143,17 @@ The `creg` CLI ships **27 commands**. The most-used subset:
 ### Step 1 — Generate keys and stake
 
 ```bash
-creg keygen --out ~/.creg/publisher.key
-creg stake --amount 1000 --role publisher
+creg keygen publisher --out ~/.creg/publisher.key
+
+# Stake tCREG on Sepolia (separate EOA wallet — not the Ed25519 key file).
+export CREG_STAKING_ADDR=0xf28C63C4Aafd27025E535Ab9ab7B4daC18C96Bc2
+export CREG_TOKEN_ADDR=0x97c21d46B3eac604e92E907D54aA92eEc0Af550b
+creg stake --amount 1 --role publisher \
+  --key ~/.creg/publisher-eoa.key \
+  --rpc-url "$SEPOLIA_RPC_URL"
 ```
+
+See [docs/PUBLIC_TESTNET_QUICKSTART.md](docs/PUBLIC_TESTNET_QUICKSTART.md) for the full publisher/developer/validator paths.
 
 ### Step 2 — Publish (single publisher)
 
@@ -349,7 +357,8 @@ make testnet-smoke    # full E2E diagnostic via `creg doctor --testnet`
 
 ### Documentation
 
-- [`chain-registry/docs/MASTER_PROJECT_READINESS_AND_CLIENT_AUDIT_2026-05-18.md`](chain-registry/docs/MASTER_PROJECT_READINESS_AND_CLIENT_AUDIT_2026-05-18.md) — active master readiness roadmap, client audit, and system status
+- [`docs/PUBLIC_TESTNET_QUICKSTART.md`](docs/PUBLIC_TESTNET_QUICKSTART.md) — publisher / developer / validator quickstart
+- [`chain-registry/TESTNET_READINESS_REPORT.md`](chain-registry/TESTNET_READINESS_REPORT.md) — evidence-based public testnet readiness (2026-06-08)
 - [`chain-registry/DELIVERABLES_INDEX.md`](chain-registry/DELIVERABLES_INDEX.md) — current artifact and deliverable map
 - [`chain-registry/docs/API_ADMISSION_BOUNDARY_CONTRACT.md`](chain-registry/docs/API_ADMISSION_BOUNDARY_CONTRACT.md) — API route boundaries and admission contract
 - [`chain-registry/docs/API_COOKBOOK.md`](chain-registry/docs/API_COOKBOOK.md) — live REST API curl cookbook

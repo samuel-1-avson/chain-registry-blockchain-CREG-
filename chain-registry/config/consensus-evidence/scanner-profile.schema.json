@@ -53,7 +53,8 @@
         "embedding_model_id",
         "index_epoch",
         "threshold_profile_id",
-        "llm_prompt_profile_id"
+        "llm_prompt_profile_id",
+        "osv_snapshot_epoch"
       ],
       "properties": {
         "policy_bundle_id": {
@@ -81,6 +82,10 @@
           "minLength": 1
         },
         "llm_prompt_profile_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "osv_snapshot_epoch": {
           "type": "string",
           "minLength": 1
         }

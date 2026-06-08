@@ -140,7 +140,7 @@ pub struct PublishRequest {
 }
 
 /// Shared references to the analysis bundles active when a validator formed a verdict.
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AnalysisBundleRefs {
     #[serde(default)]
     pub policy_bundle_id: String,
@@ -156,9 +156,41 @@ pub struct AnalysisBundleRefs {
     pub threshold_profile_id: String,
     #[serde(default)]
     pub llm_prompt_profile_id: String,
+    /// Pinned OSV snapshot epoch (`osv-off` when consensus OSV is disabled).
+    #[serde(default)]
+    pub osv_snapshot_epoch: String,
+}
+
+fn default_osv_snapshot_epoch() -> String {
+    "osv-off".to_string()
+}
+
+impl Default for AnalysisBundleRefs {
+    fn default() -> Self {
+        Self {
+            policy_bundle_id: String::new(),
+            feature_schema_id: String::new(),
+            expert_bundle_id: String::new(),
+            embedding_model_id: String::new(),
+            index_epoch: String::new(),
+            threshold_profile_id: String::new(),
+            llm_prompt_profile_id: String::new(),
+            osv_snapshot_epoch: default_osv_snapshot_epoch(),
+        }
+    }
 }
 
 impl AnalysisBundleRefs {
+    /// Effective OSV epoch for digests and completeness checks.
+    pub fn effective_osv_snapshot_epoch(&self) -> String {
+        let trimmed = self.osv_snapshot_epoch.trim();
+        if trimmed.is_empty() {
+            default_osv_snapshot_epoch()
+        } else {
+            trimmed.to_string()
+        }
+    }
+
     /// True when the vote names every deterministic scanner artifact needed
     /// to reproduce its consensus decision.
     pub fn is_consensus_complete(&self) -> bool {
@@ -173,12 +205,13 @@ impl AnalysisBundleRefs {
         ]
         .iter()
         .all(|value| !value.trim().is_empty())
+            && !self.effective_osv_snapshot_epoch().trim().is_empty()
     }
 
     /// Stable, domain-separated digest of the scanner/profile references.
     pub fn scanner_profile_digest(&self, scanner_version: &str) -> String {
         let input = format!(
-            "creg-scanner-profile-v1|scanner={}|policy={}|features={}|experts={}|embedding={}|index={}|thresholds={}|llm_prompt={}",
+            "creg-scanner-profile-v1|scanner={}|policy={}|features={}|experts={}|embedding={}|index={}|thresholds={}|llm_prompt={}|osv={}",
             scanner_version.trim(),
             self.policy_bundle_id.trim(),
             self.feature_schema_id.trim(),
@@ -187,6 +220,7 @@ impl AnalysisBundleRefs {
             self.index_epoch.trim(),
             self.threshold_profile_id.trim(),
             self.llm_prompt_profile_id.trim(),
+            self.effective_osv_snapshot_epoch().trim(),
         );
         crate::sha256_hex(input.as_bytes())
     }

@@ -13,6 +13,7 @@
 
 pub mod bundle;
 pub mod diff;
+pub mod intelligence;
 pub mod llm;
 pub mod pgp;
 pub mod report;

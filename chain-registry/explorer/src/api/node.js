@@ -150,6 +150,12 @@ export const nodeApi = {
     groupedNodeFetch(`/v1/public/packages/${encodeURIComponent(canonical)}`, `/v1/packages/${encodeURIComponent(canonical)}`, { signal }),
   packageProof: (canonical, signal) =>
     groupedNodeFetch(`/v1/public/packages/${encodeURIComponent(canonical)}/proof`, `/v1/packages/${encodeURIComponent(canonical)}/proof`, { signal }),
+  packageIntelligence: (canonical, signal) =>
+    groupedNodeFetch(
+      `/v1/public/packages/${encodeURIComponent(canonical)}/intelligence`,
+      `/v1/packages/${encodeURIComponent(canonical)}/intelligence`,
+      { signal },
+    ),
 
   publisher: (pubkey, signal) =>
     groupedNodeFetch(`/v1/public/publishers/${encodeURIComponent(pubkey)}`, `/v1/publishers/${encodeURIComponent(pubkey)}`, { signal }),

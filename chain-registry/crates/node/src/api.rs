@@ -88,6 +88,10 @@ fn public_routes(sse_bus: EventBus, ws_bus: EventBus) -> Router<SharedState> {
         .route("/v1/public/packages", get(list_packages))
         .route("/v1/public/packages/:canonical", get(get_package))
         .route("/v1/public/packages/:canonical/proof", get(get_proof))
+        .route(
+            "/v1/public/packages/:canonical/intelligence",
+            get(get_package_intelligence),
+        )
         .route("/v1/public/blocks", get(list_blocks_paginated))
         .route("/v1/public/blocks/:height", get(get_block_by_height))
         .route("/v1/public/blocks/hash/:hash", get(get_block_by_hash))
@@ -154,6 +158,10 @@ fn operator_routes() -> Router<SharedState> {
         .route("/v1/operator/pending", get(list_pending))
         .route("/v1/operator/metrics/history", get(metrics_history))
         .route("/v1/operator/api-boundaries", get(api_boundaries))
+        .route(
+            "/v1/operator/packages/:canonical/intelligence/generate",
+            post(generate_package_intelligence),
+        )
         .layer(axum::middleware::from_fn(private_api_acl_middleware))
 }
 
@@ -203,6 +211,10 @@ fn legacy_public_routes(sse_bus: EventBus, ws_bus: EventBus) -> Router<SharedSta
         .route("/v1/packages", get(list_packages).post(submit_package))
         .route("/v1/packages/:canonical/revoke", post(revoke_package))
         .route("/v1/packages/:canonical/proof", get(get_proof))
+        .route(
+            "/v1/packages/:canonical/intelligence",
+            get(get_package_intelligence),
+        )
         // Blocks
         .route("/v1/blocks", get(list_blocks_paginated))
         .route("/v1/blocks/:height", get(get_block_by_height))
@@ -1289,6 +1301,72 @@ async fn get_package(State(state): State<SharedState>, Path(canonical): Path<Str
     }
 
     not_found(format!("Package not found: {}", canonical))
+}
+
+// GET /v1/packages/:canonical/intelligence  (Lane C — non-binding deep analysis)
+async fn get_package_intelligence(
+    State(state): State<SharedState>,
+    Path(canonical): Path<String>,
+) -> Response {
+    let canonical = urlencoding::decode(&canonical)
+        .unwrap_or_default()
+        .to_string();
+    let s = state.read().await;
+    let store = crate::intelligence::IntelligenceStore::new(&s.config.data_dir);
+
+    if let Ok(Some(record)) = s.chain.get_package(&canonical) {
+        let resp = store.response_for_package(&canonical, Some(&record.content_hash));
+        return Json(resp).into_response();
+    }
+
+    Json(store.response_for_package(&canonical, None)).into_response()
+}
+
+// POST /v1/operator/packages/:canonical/intelligence/generate
+async fn generate_package_intelligence(
+    State(state): State<SharedState>,
+    Path(canonical): Path<String>,
+) -> Response {
+    if !crate::intelligence::intelligence_enabled() {
+        return (
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "error": "CREG_INTELLIGENCE_ENABLED is not set on this node"
+            })),
+        )
+            .into_response();
+    }
+
+    let canonical = urlencoding::decode(&canonical)
+        .unwrap_or_default()
+        .to_string();
+    let (record, data_dir, ipfs_url) = {
+        let s = state.read().await;
+        let Some(record) = s.chain.get_package(&canonical).ok().flatten() else {
+            return not_found(format!("Package not found: {}", canonical));
+        };
+        let ipfs_url = if s.config.ipfs_url.is_empty() {
+            None
+        } else {
+            Some(s.config.ipfs_url.clone())
+        };
+        (record, s.config.data_dir.clone(), ipfs_url)
+    };
+
+    match crate::intelligence::generate_and_store(&record, &data_dir, ipfs_url.as_deref()).await
+    {
+        Ok(report) => Json(serde_json::json!({
+            "canonical": canonical,
+            "status": report.status,
+            "report": report,
+        }))
+        .into_response(),
+        Err(error) => (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": error.to_string() })),
+        )
+            .into_response(),
+    }
 }
 
 // POST /v1/packages
@@ -2960,6 +3038,7 @@ mod tests {
             index_epoch: "2026-05-07".into(),
             threshold_profile_id: "thresholds-v1".into(),
             llm_prompt_profile_id: "prompt-v2".into(),
+            osv_snapshot_epoch: "osv-off".into(),
         }
     }
 
