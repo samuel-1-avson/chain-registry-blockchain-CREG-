@@ -142,6 +142,9 @@ datasets/
 # =============================================================================
 data/
 **/data/
+# Compile-time typosquat baseline (include_str! in validator crate)
+!chain-registry/crates/validator/data/
+!chain-registry/crates/validator/data/typosquat.json
 node*-data/
 **/node*-data/
 sepolia-node-data/
