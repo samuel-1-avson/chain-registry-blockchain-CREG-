@@ -55,6 +55,17 @@ jobs:
       - name: Set deterministic timestamp
         run: echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> "$GITHUB_ENV"
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build explorer UI (rust-embed input)
+        working-directory: chain-registry/explorer
+        run: |
+          if [ -f package-lock.json ]; then npm ci --no-fund --no-audit; else npm install --no-fund --no-audit; fi
+          npm run build
+
       - name: Build release binaries
         run: |
           cargo build --locked --release --package chain-registry-node
@@ -93,6 +104,18 @@ jobs:
             chain-registry/target
           key: ${{ runner.os }}-cargo-release-${{ hashFiles('chain-registry/Cargo.lock') }}
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build explorer UI (rust-embed input)
+        working-directory: chain-registry/explorer
+        shell: bash
+        run: |
+          if [ -f package-lock.json ]; then npm ci --no-fund --no-audit; else npm install --no-fund --no-audit; fi
+          npm run build
+
       - name: Build node binary
         run: cargo build --release --package chain-registry-node
 
@@ -130,6 +153,17 @@ jobs:
             ~/.cargo/git
             chain-registry/target
           key: ${{ runner.os }}-cargo-release-${{ hashFiles('chain-registry/Cargo.lock') }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build explorer UI (rust-embed input)
+        working-directory: chain-registry/explorer
+        run: |
+          if [ -f package-lock.json ]; then npm ci --no-fund --no-audit; else npm install --no-fund --no-audit; fi
+          npm run build
 
       - name: Build node binary
         run: cargo build --release --package chain-registry-node
