@@ -2,12 +2,13 @@ import React from 'react'
 
 const PHASE = import.meta.env.VITE_TESTNET_PHASE || ''
 const SINGLE_VALIDATOR = import.meta.env.VITE_SINGLE_VALIDATOR === 'true'
+const DEV_SANDBOX_CAVEAT = import.meta.env.VITE_DEV_SANDBOX_CAVEAT === 'true'
 
 /**
- * Shown on alpha / single-validator testnets so users do not expect fleet-wide verified status.
+ * Shown on alpha / lab testnets so users know quorum and sandbox limitations.
  */
 export function TestnetPhaseBanner() {
-  if (!PHASE && !SINGLE_VALIDATOR) return null
+  if (!PHASE && !SINGLE_VALIDATOR && !DEV_SANDBOX_CAVEAT) return null
 
   const lines = []
   if (PHASE) {
@@ -17,6 +18,13 @@ export function TestnetPhaseBanner() {
     lines.push(
       'Single-validator alpha — packages may stay pending until NET-301 multi-validator quorum ships.'
     )
+  } else if (PHASE === 'coordinated-lab' || DEV_SANDBOX_CAVEAT) {
+    lines.push(
+      'NET-301: 2-validator quorum proven in maintainer lab. Behavioural sandbox may use CREG_DEV_SANDBOX on Windows — not production-grade until SANDBOX-301.'
+    )
+  }
+  if (DEV_SANDBOX_CAVEAT && !SINGLE_VALIDATOR) {
+    lines.push('No public hosted node URL in chain spec yet — set CREG_NODE_URL to your operator endpoint.')
   }
 
   return (

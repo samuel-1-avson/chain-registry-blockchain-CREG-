@@ -1,9 +1,9 @@
 # CREG testnet — external phase scope
 
-**Status:** Phase open (limited)  
+**Status:** Phase open (limited) — coordinated 3-node lab  
 **Network:** Sepolia L1 + `creg-testnet-1` (signed chain spec)  
 **Effective:** 2026-05-30  
-**Review:** 2026-06-30 or when [NET-301](./NEXT_WORK.md) (multi-validator Sepolia) ships
+**Review:** 2026-07-30 or when [SANDBOX-301](./NEXT_WORK.md) + public hosting ship
 
 This page defines what external participants can expect from the **current** testnet. It is not a mainnet commitment.
 
@@ -13,7 +13,7 @@ This page defines what external participants can expect from the **current** tes
 
 A **coordinated Sepolia deployment** of Chain Registry: publishers submit signed packages; validators (when deployed) analyze and finalize; observers sync L1 validator-set state and expose APIs.
 
-**Canonical operator docs:** [TESTNET_SEPOLIA_RUNBOOK.md](./TESTNET_SEPOLIA_RUNBOOK.md) · [SEPOLIA_SECOND_OPERATOR_CHECKLIST.md](./SEPOLIA_SECOND_OPERATOR_CHECKLIST.md)
+**Canonical operator docs:** [TESTNET_SEPOLIA_RUNBOOK.md](./TESTNET_SEPOLIA_RUNBOOK.md) · [../chain-registry/testnet/OPERATOR.md](../chain-registry/testnet/OPERATOR.md)
 
 ---
 
@@ -24,7 +24,7 @@ A **coordinated Sepolia deployment** of Chain Registry: publishers submit signed
 | **Observer** (default in reuse scripts) | `false` | Syncs Sepolia staking/registry; serves API; admits publishes into **pending**; does **not** run local PBFT finalization |
 | **Validator** | `true` + `CREG_VALIDATOR_KEY` + stake | Runs analysis, votes, and can drive packages to **verified** on the local chain |
 
-Until **NET-301** (multi-validator Sepolia), the project runs a **single-observer testnet** for external smoke: one known `creg-node` per environment, not a decentralized validator fleet.
+**NET-301 (2026-06-09):** Maintainer lab runs **2 validators + 1 observer** with PBFT quorum; publish reaches **`verified`** with `validator_count=2`. Windows Docker lab uses `CREG_DEV_SANDBOX=true` (behavioural analysis bypass) until [SANDBOX-301](./NEXT_WORK.md) on Linux. Public internet hosting and release binaries are still pending — external users without operator coordination should treat this as **coordinated lab**, not a self-service public fleet.
 
 ---
 
@@ -38,20 +38,21 @@ Until **NET-301** (multi-validator Sepolia), the project runs a **single-observe
 | **revoked** | Rejected or revoked on chain |
 | **UNKNOWN** | Not on chain and not in pending (wrong node, restart, wrong URL, or cache) |
 
-**Verified** means this **node’s** chain store has accepted the package after validator workflow—not “every node on the internet agrees” until multi-node testnet is proven.
+**Verified** means this **node’s** chain store has accepted the package after validator workflow. In the maintainer 3-node lab, all three nodes reach the same tip after quorum finalization; strangers on the public internet still need a **hosted node URL** (not yet published in the signed chain spec).
 
 ---
 
 ## Known limits (read before integrating)
 
-1. **Pending pool is in-memory** — Restarting `creg-node` drops pending submissions; re-publish if needed.
+1. **Pending pool persistence** — 3-node fleet persists to `pending_pool.json` under `CREG_DATA_DIR`; single-node dev stacks may still lose pending state on restart unless configured.
 2. **Observer nodes keep pending visible** — As of `validator_pipeline` observer fix, observers no longer delete pending entries after ~1s (rebuild required).
-3. **No cross-chain** — `feature_flags.cross_chain: false` in spec ([D4](./PHASE3_KICKOFF.md)); bridge UI/receipts deferred.
+3. **No cross-chain** — `feature_flags.cross_chain: false` in spec (SEC-303c in [REMEDIATION_BACKLOG.md](./REMEDIATION_BACKLOG.md)); bridge UI/receipts deferred.
 4. **Governance API disabled** — HTTP 501 by design (REM-201); explorer governance gated.
 5. **Shielded publish** — Off unless `CREG_SHIELDED_PUBLISH_ENABLED=true` on client and node (experimental, SEC-304/305).
 6. **CLI / REST footguns** — Always pass `--node-url` (or `CREG_NODE_URL`) for local testnet; URL-encode canonicals in REST paths (`@` and `/` break unencoded routes).
 7. **Bootnodes / public IPFS in spec** — Example hostnames; production testnet fleet not operated by this repo alone.
-8. **Single-observer period** — Multi-validator Sepolia (**NET-301**) targeted for review by **2026-06-30**; until then, do not assume PBFT quorum across independent operators.
+8. **Dev sandbox on Windows lab** — `CREG_DEV_SANDBOX=true` skips real behavioural sandboxing (SB012 approve-with-warning). Do not treat Windows soak as production security validation; use Linux `start-3node-sandbox.ps1` for SANDBOX-301.
+9. **Public URLs** — Chain spec still points at localhost or placeholders until a domain is registered and [patch-sepolia-chain-spec-services.ps1](../chain-registry/testnet/patch-sepolia-chain-spec-services.ps1) is run with `-BaseDomain` (see [gcp-public-hosting.md](../chain-registry/testnet/gcp-public-hosting.md)).
 
 ---
 
@@ -78,9 +79,11 @@ Until **NET-301** (multi-validator Sepolia), the project runs a **single-observe
 |------|------|
 | Observer pending-pool fix on `main` | Yes |
 | E2E-301 publish smoke documented and verified | Yes |
-| OPS-201 sign-off | [SEPOLIA_SECOND_OPERATOR_CHECKLIST.md](./SEPOLIA_SECOND_OPERATOR_CHECKLIST.md) |
+| OPS-201 sign-off | Done 2026-05-30 (see [TESTNET_SEPOLIA_RUNBOOK.md](./TESTNET_SEPOLIA_RUNBOOK.md)) |
 | This scope page published | Yes |
-| NET-301 or dated single-observer decision | Single-observer until **2026-06-30** (see above) |
+| NET-301 multi-validator quorum (maintainer lab) | **Done** 2026-06-09 (`net-301-quorum-verify.ps1`; dev sandbox on Windows) |
+| SANDBOX-301 real nsjail engine | Open — Linux Docker only |
+| Public chain-spec URLs + hosting | Open — see gcp-public-hosting runbook |
 
 ---
 
