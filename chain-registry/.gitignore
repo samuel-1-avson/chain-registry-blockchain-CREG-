@@ -44,6 +44,7 @@ secrets/
 *password*
 *credential*
 *wallet*
+!explorer/src/pages/WalletPage.jsx
 *mnemonic*
 *seed*
 private*

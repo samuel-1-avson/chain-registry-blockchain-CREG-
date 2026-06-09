@@ -50,6 +50,7 @@ secrets/
 *password*
 *credential*
 *wallet*
+!chain-registry/explorer/src/pages/WalletPage.jsx
 *mnemonic*
 *seed*
 private*
