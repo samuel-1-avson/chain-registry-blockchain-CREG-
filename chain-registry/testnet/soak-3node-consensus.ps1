@@ -19,6 +19,7 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Split-Path -Parent $scriptDir
 Set-Location $repoRoot
 . (Join-Path $scriptDir "ipfs-api.ps1")
+. (Join-Path $scriptDir "node-api.ps1")
 
 $envFile = Join-Path $scriptDir "sepolia-3node.env"
 if (Test-Path $envFile) {
@@ -47,46 +48,54 @@ function Log($msg) {
 
 function Wait-NodeHealth {
     param([int]$Port, [int]$MaxSec)
-    $deadline = (Get-Date).AddSeconds($MaxSec)
-    $url = "http://localhost:$Port/v1/health"
-    while ((Get-Date) -lt $deadline) {
-        try {
-            $h = Invoke-RestMethod -Uri $url -TimeoutSec 10
-            $sync = $h.validator_set_sync
-            if ($h.status -eq "ok" -and $sync.state -eq "synced") {
-                return $h
-            }
-            Log "$url status=$($h.status) validator_set_sync=$($sync.state)"
-        } catch {
-            Log "waiting for $url ..."
-        }
-        Start-Sleep -Seconds 5
-    }
-    throw "Health not synced on port $Port within ${MaxSec}s"
+    return Wait-NodeHealthSynced -Port $Port -MaxSec $MaxSec -Log { param($m) Log $m }
 }
 
 function Get-ChainStats {
     param([int]$Port)
-    $url = "http://localhost:$Port/v1/chain/stats"
-    return Invoke-RestMethod -Uri $url -TimeoutSec 15
+    return Get-NodeChainStats -Port $Port
 }
 
 function Invoke-Creg {
     param(
         [Parameter(ValueFromRemainingArguments = $true)][string[]]$CregArgs,
-        [string]$LogPath = ""
+        [string]$LogPath = "",
+        [switch]$ViaFleetDocker
     )
-    $cregRelease = Join-Path $repoRoot "target\release\creg.exe"
-    $cregDebug = Join-Path $repoRoot "target\debug\creg.exe"
-    $bin = if (Test-Path $cregRelease) { $cregRelease } elseif (Test-Path $cregDebug) { $cregDebug } else { $null }
     $prevEap = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
-    if ($bin) {
-        $out = & $bin @CregArgs 2>&1
+    if ($ViaFleetDocker) {
+        $network = Get-Creg3NodeFleetNetwork
+        if (-not $network) {
+            throw "Fleet docker network not found (is creg-3node-ipfs running?)"
+        }
+        $image = if ($env:CREG_3NODE_NODE_IMAGE) { $env:CREG_3NODE_NODE_IMAGE } else { "creg-node:local-3node" }
+        $dockerArgs = @(
+            "run", "--rm",
+            "--network", $network,
+            "-v", "${repoRoot}:/work",
+            "-w", "/work",
+            "-e", "CREG_IPFS_URL=http://ipfs:5001",
+            "-e", "CREG_ZK_KEYS_DIR=/app/circuits"
+        )
+        if ($env:CREG_ETH_RPC) {
+            $dockerArgs += @("-e", "CREG_ETH_RPC=$($env:CREG_ETH_RPC)")
+        }
+        $dockerArgs += @("--entrypoint", "/app/creg", $image)
+        $dockerArgs += $CregArgs
+        $out = docker @dockerArgs 2>&1
+        $exitCode = $LASTEXITCODE
     } else {
-        $out = cargo run --bin creg -p chain-registry-cli -- @CregArgs 2>&1
+        $cregRelease = Join-Path $repoRoot "target\release\creg.exe"
+        $cregDebug = Join-Path $repoRoot "target\debug\creg.exe"
+        $bin = if (Test-Path $cregRelease) { $cregRelease } elseif (Test-Path $cregDebug) { $cregDebug } else { $null }
+        if ($bin) {
+            $out = & $bin @CregArgs 2>&1
+        } else {
+            $out = cargo run --bin creg -p chain-registry-cli -- @CregArgs 2>&1
+        }
+        $exitCode = $LASTEXITCODE
     }
-    $exitCode = $LASTEXITCODE
     $ErrorActionPreference = $prevEap
     if ($LogPath) {
         $out | Out-File -FilePath $LogPath -Encoding utf8
@@ -109,13 +118,18 @@ function Publish-SoakPackage {
     }
 
     $ipfsUrl = "http://127.0.0.1:$IpfsHostPort"
-    $env:CREG_IPFS_URL = $ipfsUrl
+    $ipfsMode = Get-CregIpfsPublishMode -HostUrl $ipfsUrl
+    if ($ipfsMode -eq "unreachable") {
+        throw "IPFS API not reachable at $ipfsUrl or via docker exec (is creg-3node-ipfs up?)"
+    }
+    if ($ipfsMode -eq "host") {
+        $env:CREG_IPFS_URL = $ipfsUrl
+        Log "IPFS publish via host API $ipfsUrl"
+    } else {
+        Log "IPFS host port $IpfsHostPort unreachable; publish via fleet docker (CREG_IPFS_URL=http://ipfs:5001)"
+    }
     $zkKeysDir = Join-Path $repoRoot "circuits"
     $env:CREG_ZK_KEYS_DIR = $zkKeysDir
-
-    if (-not (Test-CregIpfsApi -BaseUrl $ipfsUrl)) {
-        throw "IPFS API not reachable at $ipfsUrl (is creg-3node-ipfs up?)"
-    }
 
     $pubKey = Join-Path $repoRoot "publisher.key"
     if (-not (Test-Path $pubKey)) {
@@ -165,13 +179,16 @@ function Publish-SoakPackage {
         throw "tar failed - install tar (Git for Windows) or use WSL"
     }
 
-    $api = "http://localhost:$ApiPort"
+    $viaDocker = ($ipfsMode -eq "docker")
+    $api = if ($viaDocker) { "http://creg-node-1:8080" } else { "http://localhost:$ApiPort" }
+    $tarArg = if ($viaDocker) { "/work/tmp/soak-3node-smoke/pkg.tgz" } else { $tar }
+    $keyArg = if ($viaDocker) { "/work/publisher.key" } else { $pubKey }
     $logDir = Join-Path $repoRoot "testnet\soak-3node-logs"
     New-Item -ItemType Directory -Force -Path $logDir | Out-Null
-    Log "Publishing $tar to $api (IPFS $ipfsUrl)"
+    Log "Publishing $tar to $api (IPFS mode=$ipfsMode)"
     $maxAttempts = 5
     for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
-        $publishExit = Invoke-Creg --node-url $api publish $tar --key-file $pubKey `
+        $publishExit = Invoke-Creg -ViaFleetDocker:$viaDocker --node-url $api publish $tarArg --key-file $keyArg `
             --publisher-address $env:CREG_PUBLISHER_ADDRESS `
             -LogPath (Join-Path $logDir "publish-$ts-attempt$attempt.txt")
         if ($publishExit -eq 0) {

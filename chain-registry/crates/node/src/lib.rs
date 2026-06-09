@@ -23,6 +23,7 @@ pub mod publisher_index;
 pub mod rate_limit;
 pub mod state;
 pub mod validator_pipeline;
+pub mod validator_set_sync;
 
 // ── Private modules required by the public ones above ────────────────────────
 mod bridge;

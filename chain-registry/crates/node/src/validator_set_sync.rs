@@ -1048,6 +1048,25 @@ async fn load_cursor(state: &Arc<RwLock<NodeState>>) -> Option<WorkerState> {
     serde_json::from_str(&json).ok()
 }
 
+/// Reconcile the active validator set after local identity metadata is registered.
+/// L1 deltas may have been applied before `/v1/validators/register` supplied
+/// node_id/pubkey for an address already present in `observed_active`.
+pub async fn reconcile_after_identity_registration(
+    state: Arc<RwLock<NodeState>>,
+) -> anyhow::Result<()> {
+    let enabled = {
+        let s = state.read().await;
+        s.validator_set_sync.enabled
+    };
+    if !enabled {
+        return Ok(());
+    }
+    if let Some(worker_state) = load_cursor(&state).await {
+        reconcile_state_from_worker(state, &worker_state).await?;
+    }
+    Ok(())
+}
+
 async fn save_cursor(
     state: &Arc<RwLock<NodeState>>,
     worker_state: &WorkerState,

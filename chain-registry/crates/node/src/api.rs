@@ -969,6 +969,16 @@ async fn register_validator_identity(
     let response = registration.clone();
     s.validator_registrations
         .insert(normalized_key, registration);
+    drop(s);
+
+    if let Err(error) =
+        crate::validator_set_sync::reconcile_after_identity_registration(state).await
+    {
+        tracing::warn!(
+            target: "validator_set_sync",
+            "reconcile after identity registration failed: {error}"
+        );
+    }
 
     (StatusCode::ACCEPTED, Json(response)).into_response()
 }

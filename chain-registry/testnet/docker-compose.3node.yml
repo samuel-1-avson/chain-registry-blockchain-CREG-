@@ -80,8 +80,10 @@ services:
     depends_on:
       ipfs-perms:
         condition: service_completed_successfully
-    command: >
-      daemon --migrate=true --enable-gc
+    # Bind API on all interfaces so Windows host port-forward (15001) accepts POST /api/v0/*.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - "ipfs config Addresses.API /ip4/0.0.0.0/tcp/5001 2>/dev/null || true; exec ipfs daemon --migrate=true --enable-gc"
     healthcheck:
       test: ["CMD-SHELL", "ipfs id || exit 1"]
       interval: 5s
@@ -127,6 +129,7 @@ services:
       CREG_P2P_SEEDS: /dns4/creg-node-2/tcp/9000,/dns4/creg-node-3/tcp/9000
       CREG_IS_VALIDATOR: "true"
       CREG_VALIDATOR_KEY: ${CREG_VALIDATOR_KEY_1}
+      CREG_OPERATOR_API_KEY: ${CREG_OPERATOR_API_KEY:-docker-dev-operator-key}
       CREG_NODE_ID: core-1
       CREG_PEERS: http://creg-node-2:8080,http://creg-node-3:8080
     ports:
@@ -152,6 +155,7 @@ services:
       <<: *creg-node-base-env
       CREG_IS_VALIDATOR: "true"
       CREG_VALIDATOR_KEY: ${CREG_VALIDATOR_KEY_2}
+      CREG_OPERATOR_API_KEY: ${CREG_OPERATOR_API_KEY:-docker-dev-operator-key}
       CREG_NODE_ID: validator-2
       CREG_PEERS: http://creg-node-1:8080,http://creg-node-3:8080
       CREG_P2P_SEEDS: /dns4/creg-node-1/tcp/9000,/dns4/creg-node-3/tcp/9000
