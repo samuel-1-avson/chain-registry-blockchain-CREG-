@@ -31,8 +31,8 @@ x-creg-node-base-env: &creg-node-base-env
   CREG_LISTEN: 0.0.0.0:8080
   CREG_DATA_DIR: /data
   CREG_BLOCK_INTERVAL: "5"
-  # Default false for credible security; set CREG_DEV_SANDBOX=true in sepolia-3node.env for Windows soak without nsjail.
-  CREG_DEV_SANDBOX: ${CREG_DEV_SANDBOX:-false}
+  # CREG_DEV_SANDBOX: set in sepolia-3node.env only (do not interpolate from host shell —
+  # host ${CREG_DEV_SANDBOX:-false} overrides env_file and breaks Windows soak after edits).
   CREG_IPFS_URL: http://ipfs:5001
   CREG_P2P_LISTEN: /ip4/0.0.0.0/tcp/9000
   CREG_CHAIN_SPEC_URL: http://spec-server/chain-spec.json
