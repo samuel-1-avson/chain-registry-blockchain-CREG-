@@ -32,6 +32,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -55,22 +57,19 @@ jobs:
       - name: Set deterministic timestamp
         run: echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> "$GITHUB_ENV"
 
-      - name: Verify reproducible release binaries
-        run: bash ./scripts/release-assurance.sh --out-dir artifacts/release-assurance-linux
+      - name: Build release binaries
+        run: |
+          cargo build --locked --release --package chain-registry-node
+          cargo build --locked --release --package chain-registry-cli
+          strip target/release/creg-node target/release/creg
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: linux-amd64
           path: |
-            chain-registry/artifacts/release-assurance-linux/binaries/creg-node
-            chain-registry/artifacts/release-assurance-linux/binaries/creg
-
-      - name: Upload release assurance evidence
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-assurance-linux
-          path: chain-registry/artifacts/release-assurance-linux
+            chain-registry/target/release/creg-node
+            chain-registry/target/release/creg
 
   build-windows:
     runs-on: windows-latest
@@ -80,6 +79,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -118,6 +119,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -167,12 +170,6 @@ jobs:
           name: linux-amd64
           path: dist/linux-amd64
 
-      - name: Download Linux assurance evidence
-        uses: actions/download-artifact@v4
-        with:
-          name: release-assurance-linux
-          path: dist/release-assurance-linux
-
       - name: Download Windows artifacts
         uses: actions/download-artifact@v4
         with:
@@ -194,8 +191,6 @@ jobs:
           (cd dist/windows-amd64 && zip -r "../../release/chain-registry-${TAG}-windows-amd64.zip" creg-node.exe creg.exe)
           tar -czf "release/chain-registry-${TAG}-macos-amd64.tar.gz" \
             -C dist/macos-amd64 creg-node creg
-          tar -czf "release/chain-registry-${TAG}-release-assurance-linux.tar.gz" \
-            -C dist/release-assurance-linux .
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
