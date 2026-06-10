@@ -47,7 +47,9 @@ $suffix = $BaseDomain
 if ($suffix.EndsWith(".$ParentDomain")) {
     $suffix = $suffix.Substring(0, $suffix.Length - $ParentDomain.Length - 1)
 }
-$hosts = @("api", "explorer", "faucet", "spec", "ipfs") | ForEach-Object { "$_.${suffix}" }
+$hosts = @("api", "explorer", "faucet", "spec", "ipfs", $suffix) | ForEach-Object {
+    if ($_ -eq $suffix) { $suffix } else { "$_.${suffix}" }
+}
 
 foreach ($recName in $hosts) {
     $fqdn = "$recName.$ParentDomain"

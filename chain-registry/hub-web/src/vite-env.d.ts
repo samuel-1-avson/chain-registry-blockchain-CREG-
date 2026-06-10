@@ -16,3 +16,18 @@ declare module "*.md?raw" {
   const content: string;
   export default content;
 }
+
+declare module "@walletconnect/ethereum-provider" {
+  export const EthereumProvider: {
+    init: (config: Record<string, unknown>) => Promise<{
+      enable: () => Promise<void>;
+      accounts: string[];
+      chainId: number | string;
+      disconnect?: () => Promise<void>;
+      request: (args: {
+        method: string;
+        params?: unknown[];
+      }) => Promise<unknown>;
+    }>;
+  };
+}

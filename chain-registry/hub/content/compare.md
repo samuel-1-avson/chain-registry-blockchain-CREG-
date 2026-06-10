@@ -1,19 +1,17 @@
 # Compare contribution paths
 
-Choose the path that matches your goal. You can pursue both over time; the dashboard (Phase 2+) will track separate quest lines.
+| | **Publish** | **Validate** | **Observer** |
+|---|-------------|--------------|--------------|
+| **Goal** | Ship signed packages | Operate consensus nodes | Explore and learn |
+| **Wallet** | Yes (Sepolia) | Yes (Sepolia) | Optional |
+| **Stake** | No | Yes | No |
+| **Skills** | CLI, CI, packaging | Ops, RPC, monitoring | Reading docs / explorer |
+| **Primary tool** | CREG CLI + API | Validator node + CLI | Explorer |
 
-| | **Publisher** | **Validator** | **Observer** |
-|---|---------------|---------------|--------------|
-| **Goal** | Ship packages to the registry | Operate consensus / validation | Learn without on-chain actions |
-| **Wallet** | Required for publish txs | Required for stake & register | Optional |
-| **CLI** | `creg` publish flow | Operator scripts + node compose | None |
-| **Infra** | Laptop is enough | VM or bare metal for node | Browser only |
-| **Primary tool** | [Explorer packages](https://explorer.testnet.cregnet.dev/packages) | [Explorer validators](https://explorer.testnet.cregnet.dev/validators) | [Explorer dashboard](https://explorer.testnet.cregnet.dev) |
-| **Docs entry** | [Publish guide](/publish) | [Validate guide](/validate) | [FAQ](/faq) |
-| **Time to first win** | First package indexed | Registered + syncing node | Read docs + watch blocks |
+## Observer
+
+You can browse the **explorer**, read docs, and use the **faucet** without committing to publish or validate. Connect a wallet only when you want on-chain reads tied to your address.
 
 ## Not sure?
 
-- **I build libraries or apps** → start with [Publish](/publish).
-- **I run infrastructure** → start with [Validate](/validate).
-- **I am just exploring** → read [FAQ](/faq), browse the explorer, skip wallet connect for now.
+Start with **Publish** if you are a developer testing releases. Choose **Validate** if you want to run infrastructure. Most newcomers read [/faq](/faq) first, then pick a path from the [home](/) page.

@@ -1,0 +1,3 @@
+[submodule "Creg-waitlist"]
+	path = Creg-waitlist
+	url = https://github.com/samuel-1-avson/Creg-waitlist.git

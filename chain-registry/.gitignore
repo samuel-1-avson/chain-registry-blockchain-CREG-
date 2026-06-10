@@ -58,6 +58,9 @@ secrets/
 *credential*
 *wallet*
 !explorer/src/pages/WalletPage.jsx
+!hub-web/src/wallet/
+!hub-web/src/wallet/**
+!hub-web/src/components/WalletButton.tsx
 *mnemonic*
 *seed*
 private*
@@ -207,6 +210,8 @@ downloads/
 eggs/
 .eggs/
 lib/
+!hub-web/src/lib/
+!hub-web/src/lib/**
 lib64/
 parts/
 sdist/

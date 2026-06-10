@@ -47,6 +47,7 @@ Public HTTPS endpoints (maintainer-operated):
 
 | Service | URL |
 |---------|-----|
+| **Join hub** | https://testnet.cregnet.dev |
 | **API** | https://api.testnet.cregnet.dev |
 | **Explorer** | https://explorer.testnet.cregnet.dev |
 | **Faucet** | https://faucet.testnet.cregnet.dev |

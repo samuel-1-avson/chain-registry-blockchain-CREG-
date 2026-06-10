@@ -154,9 +154,64 @@ services:
     profiles:
       - waitlist
 
+  hub-api:
+    build:
+      context: ../hub-api
+      dockerfile: Dockerfile
+    image: creg-hub-api:local
+    container_name: creg-cloud-hub-api
+    environment:
+      HUB_API_PORT: "8095"
+      HUB_DB_PATH: /data/hub.db
+    ports:
+      - "${CREG_HUB_API_PORT:-8095}:8095"
+    volumes:
+      - cloud-hub-db-data:/data
+    networks:
+      - creg-cloud-edge
+    restart: unless-stopped
+    profiles:
+      - hub
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8095/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  hub-web:
+    build:
+      context: ..
+      dockerfile: hub-web/Dockerfile
+      args:
+        VITE_WALLETCONNECT_PROJECT_ID: ${VITE_WALLETCONNECT_PROJECT_ID:-}
+        VITE_EXPLORER_URL: ${VITE_EXPLORER_URL:-${CREG_PUBLIC_EXPLORER_URL:-}}
+        VITE_FAUCET_URL: ${VITE_FAUCET_URL:-https://${CREG_PUBLIC_FAUCET_HOST:-faucet.testnet.cregnet.dev}}
+        VITE_DOCS_URL: ${VITE_DOCS_URL:-}
+        VITE_API_URL: ${VITE_API_URL:-https://${CREG_PUBLIC_API_HOST:-api.testnet.cregnet.dev}}
+    image: creg-hub-web:local
+    container_name: creg-cloud-hub-web
+    ports:
+      - "${CREG_HUB_WEB_PORT:-8094}:80"
+    networks:
+      - creg-cloud-edge
+    depends_on:
+      hub-api:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles:
+      - hub
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
 networks:
   creg-cloud-edge:
     driver: bridge
 
 volumes:
   cloud-ipfs-data:
+  cloud-hub-db-data:

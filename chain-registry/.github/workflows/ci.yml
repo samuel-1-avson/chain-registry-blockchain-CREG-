@@ -126,6 +126,34 @@ jobs:
           name: release-assurance
           path: artifacts/release-assurance
 
+  # ── Join hub (hub-web) ─────────────────────────────────────────────────────
+  hub-web:
+    name: Hub web (build)
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: chain-registry/hub-web
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: chain-registry/hub-web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --no-fund --no-audit
+
+      - name: Typecheck
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
   # ── Solidity contracts ─────────────────────────────────────────────────────
   contracts:
     name: Solidity (Foundry)

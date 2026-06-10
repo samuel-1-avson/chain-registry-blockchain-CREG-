@@ -53,6 +53,10 @@ if [[ -n "${CREG_PUBLIC_FAUCET_HOST:-}" ]]; then
   cp "${CADDY_DIR}/faucet-edge.caddy.example" "${CADDY_DIR}/faucet-edge.caddy"
   echo "Activated caddy/faucet-edge.caddy for ${CREG_PUBLIC_FAUCET_HOST}"
 fi
+if [[ -n "${CREG_PUBLIC_JOIN_HOST:-}" ]]; then
+  cp "${CADDY_DIR}/hub-edge.caddy.example" "${CADDY_DIR}/hub.caddy"
+  echo "Activated caddy/hub.caddy for ${CREG_PUBLIC_JOIN_HOST}"
+fi
 
 DOCKER=(docker)
 if ! docker info >/dev/null 2>&1; then
@@ -69,9 +73,17 @@ COMPOSE_FILES=(
   "${SCRIPT_DIR}/docker-compose.cloud-edge-ingress.yml"
 )
 
+COMPOSE_PROFILE_LIST=()
 if [[ -f "${SCRIPT_DIR}/waitlist/dist/index.html" ]]; then
   echo "Waitlist dist found — enabling waitlist profile"
-  export COMPOSE_PROFILES=waitlist
+  COMPOSE_PROFILE_LIST+=(waitlist)
+fi
+if [[ -n "${CREG_PUBLIC_JOIN_HOST:-}" ]]; then
+  echo "Join hub enabled — enabling hub profile (${CREG_PUBLIC_JOIN_HOST})"
+  COMPOSE_PROFILE_LIST+=(hub)
+fi
+if [[ ${#COMPOSE_PROFILE_LIST[@]} -gt 0 ]]; then
+  export COMPOSE_PROFILES="$(IFS=,; echo "${COMPOSE_PROFILE_LIST[*]}")"
 fi
 
 COMPOSE_ARGS=()
@@ -104,4 +116,7 @@ echo "Cloud edge up."
 echo "  docker logs -f creg-cloud-caddy"
 if [[ -n "${CREG_PUBLIC_API_HOST:-}" ]]; then
   echo "  curl -fsS https://${CREG_PUBLIC_API_HOST}/v1/health"
+fi
+if [[ -n "${CREG_PUBLIC_JOIN_HOST:-}" ]]; then
+  echo "  curl -fsS https://${CREG_PUBLIC_JOIN_HOST}/api/health"
 fi

@@ -1,31 +1,26 @@
-# Publish on the testnet
+# Publish packages on CREG testnet
 
-Publishing lets you register packages on the CREG Sepolia lab and see them indexed by the network. This path is for developers who want to exercise the CLI, signing flow, and explorer visibility.
+Publishing on **creg-testnet-1** lets you exercise the full registry flow: sign a package manifest, submit it on Sepolia, and confirm it appears in the public explorer.
 
-## Why publish?
+## Why publish here?
 
-- Validate your package signing and metadata workflow end-to-end.
-- Appear on the [explorer](https://explorer.testnet.cregnet.dev) package list.
-- Help the testnet team find publisher UX gaps before mainnet.
+- Test CLI and CI flows before mainnet.
+- See how signatures and metadata land on-chain.
+- Share reproducible packages with other testnet participants.
 
 ## Prerequisites
 
-- A Sepolia-funded wallet (ETH for gas).
-- The `creg` CLI installed — see [releases](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases) or `scripts/install-creg.ps1` / `install-creg.sh` in the repo.
-- Testnet RPC access (public API or your own Sepolia endpoint).
+1. **Sepolia ETH** for gas — use the [testnet faucet](https://faucet.testnet.cregnet.dev) if needed.
+2. **CREG CLI** installed (`creg` from this repository).
+3. A **wallet** on Sepolia (chain id `11155111`).
 
-## High-level steps
+## High-level flow
 
-1. **Fund your wallet** — Claim Sepolia ETH from the [faucet](https://faucet.testnet.cregnet.dev).
-2. **Install the CLI** — `creg --version` should print a build you trust.
-3. **Configure Sepolia** — Point the CLI at the testnet API (`https://api.testnet.cregnet.dev`) and Sepolia RPC.
-4. **Publish a package** — Follow [PUBLIC_TESTNET_QUICKSTART.md](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/blob/main/docs/PUBLIC_TESTNET_QUICKSTART.md) for the exact commands.
-5. **Verify on explorer** — Open your package page and confirm status.
+1. Build and sign your package locally with the CLI.
+2. Submit to the Sepolia-backed registry API.
+3. Open the **explorer** and search for your package hash or publisher address.
 
-## Useful links
+## Next steps
 
-- [Explorer — Packages](https://explorer.testnet.cregnet.dev/packages)
-- [Testnet API health](https://api.testnet.cregnet.dev/v1/health)
-- [Compare paths](/compare) — Publisher vs validator vs observer
-
-Quest checklists and progress tracking arrive in Phase 2 (SIWE sign-in).
+- Read [PUBLIC_TESTNET_QUICKSTART.md](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/blob/main/docs/PUBLIC_TESTNET_QUICKSTART.md) for commands and environment setup.
+- Compare paths on [/compare](/compare) if you are unsure whether to publish or validate.

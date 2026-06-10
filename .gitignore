@@ -51,6 +51,9 @@ secrets/
 *credential*
 *wallet*
 !chain-registry/explorer/src/pages/WalletPage.jsx
+!chain-registry/hub-web/src/wallet/
+!chain-registry/hub-web/src/wallet/**
+!chain-registry/hub-web/src/components/WalletButton.tsx
 *mnemonic*
 *seed*
 private*
@@ -246,6 +249,8 @@ downloads/
 eggs/
 .eggs/
 lib/
+!chain-registry/hub-web/src/lib/
+!chain-registry/hub-web/src/lib/**
 lib64/
 parts/
 sdist/
