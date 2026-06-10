@@ -1,0 +1,2 @@
+# Optional join-hub vhost. Leave empty when CREG_PUBLIC_JOIN_HOST is unset.
+# Copy from hub-edge.caddy.example when enabling join.testnet TLS on the edge VM.

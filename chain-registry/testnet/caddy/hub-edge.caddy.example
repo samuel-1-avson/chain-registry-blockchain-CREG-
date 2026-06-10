@@ -1,0 +1,9 @@
+# Join portal vhost (optional). Set CREG_PUBLIC_JOIN_HOST in env.
+{$CREG_PUBLIC_JOIN_HOST} {
+	handle /api/* {
+		reverse_proxy 127.0.0.1:{$CREG_HUB_API_PORT}
+	}
+	handle {
+		reverse_proxy 127.0.0.1:{$CREG_HUB_WEB_PORT}
+	}
+}

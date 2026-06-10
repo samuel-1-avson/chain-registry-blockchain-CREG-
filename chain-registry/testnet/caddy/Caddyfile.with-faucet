@@ -3,10 +3,8 @@
 	email {$CREG_ACME_EMAIL}
 }
 
-# Waitlist SPA (waitlist.cregnet.dev). Requires waitlist container + DNS A record.
-{$CREG_PUBLIC_WAITLIST_HOST} {
-	reverse_proxy waitlist:80
-}
+import waitlist.caddy
+import hub.caddy
 
 {$CREG_PUBLIC_API_HOST} {
 	reverse_proxy creg-node-3:8080 {

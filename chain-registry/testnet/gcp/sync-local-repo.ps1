@@ -29,8 +29,11 @@ $remoteRoot = "$remoteHome/$remoteRel"
 
 Write-Host "[gcp-sync] Packing local repo (excluding target/) ..."
 Push-Location $repoRoot
-if (Test-Path $tarLocal) { Remove-Item $tarLocal -Force }
-& tar -czf $tarLocal --exclude=target --exclude=.git .
+if (Test-Path $tarLocal) {
+  try { Remove-Item $tarLocal -Force -ErrorAction Stop }
+  catch { $tarLocal = Join-Path $env:TEMP ("creg-chain-registry-sync-" + [guid]::NewGuid().ToString("n") + ".tgz") }
+}
+& tar -czf $tarLocal --exclude=target --exclude=.git --exclude=node_modules --exclude=hub-web/node_modules .
 Pop-Location
 
 Write-Host "[gcp-sync] Uploading to ${VmName}:$remoteRoot ..."

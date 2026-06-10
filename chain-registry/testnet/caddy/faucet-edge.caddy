@@ -1,0 +1,2 @@
+# Optional faucet vhost for cloud-edge layouts. Leave empty when CREG_PUBLIC_FAUCET_HOST is unset.
+# Copy from faucet-edge.caddy.example when enabling faucet TLS on the edge VM.

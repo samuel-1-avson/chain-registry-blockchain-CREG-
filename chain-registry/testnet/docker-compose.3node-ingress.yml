@@ -30,9 +30,14 @@ services:
       CREG_PUBLIC_IPFS_HOST: ${CREG_PUBLIC_IPFS_HOST:?set CREG_PUBLIC_IPFS_HOST}
       CREG_PUBLIC_FAUCET_HOST: ${CREG_PUBLIC_FAUCET_HOST:?set CREG_PUBLIC_FAUCET_HOST when using Caddyfile.with-faucet}
       CREG_PUBLIC_WAITLIST_HOST: ${CREG_PUBLIC_WAITLIST_HOST:-}
+      CREG_PUBLIC_JOIN_HOST: ${CREG_PUBLIC_JOIN_HOST:-}
+      CREG_HUB_WEB_PORT: ${CREG_HUB_WEB_PORT:-8094}
+      CREG_HUB_API_PORT: ${CREG_HUB_API_PORT:-8095}
     volumes:
       # Default includes faucet vhost; set CREG_CADDYFILE=./caddy/Caddyfile when faucet is off.
       - ${CREG_CADDYFILE:-./caddy/Caddyfile.with-faucet}:/etc/caddy/Caddyfile:ro
+      - ./caddy/waitlist.caddy:/etc/caddy/waitlist.caddy:ro
+      - ./caddy/hub.caddy:/etc/caddy/hub.caddy:ro
       - caddy-data:/data
       - caddy-config:/config
     networks:

@@ -1,6 +1,6 @@
 # Deliverables index
 
-> **Updated:** 2026-06-09  
+> **Updated:** 2026-06-10  
 > Map of active documentation and operator surfaces.
 
 ## Documentation entrypoints
@@ -23,7 +23,18 @@
 | [`testnet/OPERATOR.md`](testnet/OPERATOR.md) | 3-node Sepolia operator runbook |
 | [`testnet/gcp-public-hosting.md`](testnet/gcp-public-hosting.md) | GCP + Cloudflare HTTPS (HOSTING-301) |
 | [`testnet/hosting-301-verify.ps1`](testnet/hosting-301-verify.ps1) | Verify public vhosts |
-| [`testnet/gcp/deploy-stack.ps1`](testnet/gcp/deploy-stack.ps1) | Sync repo + start stack on VM |
+| [`testnet/gcp/deploy-stack.ps1`](testnet/gcp/deploy-stack.ps1) | Sync repo + start stack on edge VM |
+| [`../docs/GCP-VALIDATOR-FLEET.md`](../docs/GCP-VALIDATOR-FLEET.md) | Option A validator fleet on GCP |
+| [`../docs/TESTNET-HUB-DESIGN.md`](../docs/TESTNET-HUB-DESIGN.md) | Join portal hub (`join.testnet.cregnet.dev`) design and phased plan |
+| [`hub-web/`](../hub-web/) | Join hub SPA (Vite + React) |
+| [`hub-api/`](../hub-api/) | Join hub API (health, SIWE/quests in later phases) |
+| [`hub/content/quests/`](../hub/content/quests/) | Versioned quest definitions (YAML, Phase 2+) |
+| [`testnet/docker-compose.hub.yml`](testnet/docker-compose.hub.yml) | Local hub stack overlay |
+| [`testnet/start-hub-local.ps1`](testnet/start-hub-local.ps1) | Start hub on `:8094` / `:8095` |
+| [`testnet/gcp/provision-validator-vm.ps1`](testnet/gcp/provision-validator-vm.ps1) | Provision `creg-validator-vm` |
+| [`testnet/gcp/deploy-validator-fleet.ps1`](testnet/gcp/deploy-validator-fleet.ps1) | Deploy validator fleet to private VM |
+| [`testnet/docker-compose.validator-fleet.yml`](testnet/docker-compose.validator-fleet.yml) | 3-node fleet compose (scale to 10) |
+| [`testnet/start-validator-fleet-gcp.sh`](testnet/start-validator-fleet-gcp.sh) | Start fleet on validator VM |
 | [`testnet/gcp/deploy-waitlist.ps1`](testnet/gcp/deploy-waitlist.ps1) | Build + deploy waitlist static site |
 | [`testnet/gcp/deploy-waitlist-firebase.ps1`](testnet/gcp/deploy-waitlist-firebase.ps1) | Deploy Firestore rules + `registerWaitlist` |
 | [`testnet/docker-compose.3node.yml`](testnet/docker-compose.3node.yml) | Core 3-node compose |

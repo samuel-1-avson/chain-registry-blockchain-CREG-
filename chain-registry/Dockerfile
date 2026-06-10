@@ -163,7 +163,10 @@ RUN touch crates/*/src/*.rs
 
 # Build the node binaries with all features.
 RUN env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS \
-    CARGO_BUILD_JOBS=2 RUST_BACKTRACE=1 \
+    LIBCLANG_PATH=/usr/lib/llvm-17/lib \
+    LLVM_CONFIG_PATH=/usr/bin/llvm-config-17 \
+    CLANG_PATH=/usr/bin/clang-17 \
+    CARGO_BUILD_JOBS=1 RUST_BACKTRACE=1 \
     cargo build --release --locked --package chain-registry-node --bin creg-node --bin creg-indexer
 
 # Build CLI tools (includes TUI explorer)

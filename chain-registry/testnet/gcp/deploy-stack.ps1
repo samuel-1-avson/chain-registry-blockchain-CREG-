@@ -16,6 +16,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $gcpDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$testnetDir = Split-Path -Parent $gcpDir
 $cfg = & (Join-Path $gcpDir "_Load-HostingEnv.ps1")
 
 if (-not $ProjectId) { $ProjectId = $cfg.GCP_PROJECT }
@@ -25,6 +26,18 @@ if (-not $GithubRepo) { $GithubRepo = $cfg.GITHUB_REPO }
 if (-not $Branch) { $Branch = $cfg.GITHUB_BRANCH }
 
 & (Join-Path $gcpDir "push-env.ps1") -ProjectId $ProjectId -Zone $Zone -VmName $VmName
+
+$envFile = Join-Path $testnetDir "sepolia-3node.env"
+$hybridMode = $false
+if (Test-Path $envFile) {
+    $hybridMode = Select-String -Path $envFile -Pattern '^\s*CREG_HYBRID_MODE\s*=\s*true' -Quiet
+}
+$caddyContainer = if ($hybridMode) { "creg-cloud-caddy" } else { "creg-3node-caddy" }
+if ($hybridMode) {
+    Write-Host "[gcp-deploy] CREG_HYBRID_MODE=true - edge-only stack (start validators locally with start-local-validators.ps1)" -ForegroundColor Cyan
+} else {
+    Write-Host "[gcp-deploy] Full 3-node stack on $VmName (default; no separate validator VM required)" -ForegroundColor Cyan
+}
 
 if ($Source -eq "local") {
     & (Join-Path $gcpDir "sync-local-repo.ps1") -ProjectId $ProjectId -Zone $Zone -VmName $VmName
@@ -43,4 +56,7 @@ gcloud compute ssh $VmName --zone=$Zone --project=$ProjectId --strict-host-key-c
 
 Write-Host ""
 Write-Host "[gcp-deploy] Done. Watch TLS:" -ForegroundColor Cyan
-Write-Host "  .\testnet\gcp\ssh-vm.ps1 -Command 'docker logs -f creg-3node-caddy'"
+Write-Host "  .\testnet\gcp\ssh-vm.ps1 -Command 'docker logs -f $caddyContainer'"
+if ($hybridMode) {
+    Write-Host "  Then on this PC (WireGuard up): .\testnet\start-local-validators.ps1" -ForegroundColor Cyan
+}

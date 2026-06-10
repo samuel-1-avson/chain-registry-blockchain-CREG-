@@ -1,0 +1,4 @@
+# Cloud edge (waitlist published on host port). Set CREG_PUBLIC_WAITLIST_HOST in env.
+{$CREG_PUBLIC_WAITLIST_HOST} {
+	reverse_proxy 127.0.0.1:{$CREG_WAITLIST_HOST_PORT}
+}

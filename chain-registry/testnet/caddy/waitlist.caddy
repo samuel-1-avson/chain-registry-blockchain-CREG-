@@ -1,0 +1,2 @@
+# Optional waitlist vhost. Leave empty when CREG_PUBLIC_WAITLIST_HOST is unset.
+# Copy from waitlist.caddy.example (3-node) or waitlist-edge.caddy.example (fleet/hybrid).

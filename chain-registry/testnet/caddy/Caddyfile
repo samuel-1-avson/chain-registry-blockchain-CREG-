@@ -9,9 +9,7 @@
 	email {$CREG_ACME_EMAIL}
 }
 
-{$CREG_PUBLIC_WAITLIST_HOST} {
-	reverse_proxy waitlist:80
-}
+import waitlist.caddy
 
 {$CREG_PUBLIC_API_HOST} {
 	reverse_proxy creg-node-3:8080 {

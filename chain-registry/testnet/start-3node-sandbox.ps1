@@ -1,5 +1,5 @@
 # Start 3-node Sepolia fleet with nsjail secure image (SANDBOX-301).
-# Linux Docker Engine required — nsjail uses privileged containers.
+# Linux container backend required (Docker Desktop WSL2 on Windows OK) — nsjail uses privileged containers.
 #
 # Usage:
 #   .\testnet\start-3node-sandbox.ps1

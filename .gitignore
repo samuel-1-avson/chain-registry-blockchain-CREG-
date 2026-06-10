@@ -153,6 +153,7 @@ sepolia-node-data/
 **/testnet/ops-201-logs/
 **/testnet/soak-3node-logs/
 **/testnet/sepolia-3node.env
+**/testnet/*-301-logs/
 **/testnet/.tools/
 **/testnet/.env.publish.local
 **/testnet/.env.sepolia.faucet
@@ -218,6 +219,10 @@ yarn-debug.log*
 yarn-error.log*
 package-lock.json
 **/package-lock.json
+!Creg-waitlist/package-lock.json
+!Creg-waitlist/functions/package-lock.json
+!chain-registry/hub-web/package-lock.json
+!chain-registry/hub-api/package-lock.json
 yarn.lock
 **/yarn.lock
 .npm/

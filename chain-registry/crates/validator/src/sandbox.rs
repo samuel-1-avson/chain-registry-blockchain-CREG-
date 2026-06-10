@@ -220,7 +220,8 @@ pub async fn run(
     let resolved_ips = resolve_manifest_domains(&manifest.allowed_network_hosts).await;
 
     // ── Engine 1: nsjail ──────────────────────────────────────────────────────
-    if command_ready("nsjail", &["--version"]).await {
+    // nsjail has no --version flag; --help exits 0 when the binary is usable.
+    if command_ready("nsjail", &["--help"]).await {
         tracing::info!("nsjail detected — using primary sandbox engine");
         let result = run_nsjail_sandbox(
             &tarball_path,

@@ -1,0 +1,4 @@
+# Cloud edge faucet vhost (optional). Set CREG_PUBLIC_FAUCET_HOST in env.
+{$CREG_PUBLIC_FAUCET_HOST} {
+	reverse_proxy 127.0.0.1:{$CREG_3NODE_FAUCET_PORT}
+}

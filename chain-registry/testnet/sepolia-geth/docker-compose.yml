@@ -1,0 +1,29 @@
+# Sepolia execution client — JSON-RPC for CREG_ETH_RPC (internal VPC only).
+# Deployed on creg-sepolia-geth-vm via testnet/gcp/deploy-sepolia-geth.ps1
+
+services:
+  geth:
+    image: ethereum/client-go:stable
+    container_name: creg-sepolia-geth
+    restart: unless-stopped
+    # Published on VM NIC; VPC access restricted by firewall (creg-testnet tag only).
+    ports:
+      - "8545:8545"
+    volumes:
+      - geth-data:/root/.ethereum
+    command:
+      - --sepolia
+      - --syncmode=snap
+      - --http
+      - --http.addr=0.0.0.0
+      - --http.port=8545
+      - --http.api=eth,net,web3
+      - --http.vhosts=*
+      - --authrpc.addr=127.0.0.1
+      - --authrpc.port=8551
+      - --metrics
+      - --metrics.addr=127.0.0.1
+      - --metrics.port=6060
+
+volumes:
+  geth-data:

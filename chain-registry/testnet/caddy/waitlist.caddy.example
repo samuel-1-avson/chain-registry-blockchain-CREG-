@@ -1,0 +1,4 @@
+# 3-node stack (waitlist container on creg-3node network). Set CREG_PUBLIC_WAITLIST_HOST in env.
+{$CREG_PUBLIC_WAITLIST_HOST} {
+	reverse_proxy waitlist:80
+}

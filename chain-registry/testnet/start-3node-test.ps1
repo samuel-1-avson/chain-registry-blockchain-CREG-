@@ -15,7 +15,8 @@
 param(
     [string]$RpcUrl = "",
     [switch]$SkipRpcVerify,
-    [switch]$FreshVolumes
+    [switch]$FreshVolumes,
+    [switch]$Sandbox
 )
 
 $ErrorActionPreference = "Stop"
@@ -31,6 +32,15 @@ $repoRoot = Split-Path -Parent $scriptDir
 Set-Location $repoRoot
 
 $composeFile = Join-Path $scriptDir "docker-compose.3node.yml"
+$composeSandboxFile = Join-Path $scriptDir "docker-compose.3node-sandbox.yml"
+function Get-ComposeArgs {
+    param([string[]]$Extra)
+    $args = @("-f", $composeFile)
+    if ($Sandbox) { $args += @("-f", $composeSandboxFile) }
+    if (Test-Path $fleetEnv) { $args += @("--env-file", $fleetEnv) }
+    if ($Extra) { $args += $Extra }
+    return $args
+}
 $fleetEnv = Join-Path $scriptDir "sepolia-3node.env"
 $fleetEnvExample = Join-Path $scriptDir "sepolia-3node.env.example"
 $legacySepoliaEnv = Join-Path $scriptDir ".env.sepolia"
@@ -299,16 +309,12 @@ Write-Success "Signed Sepolia chain spec present"
 
 # Step 1: Clean up previous test runs (keep volumes unless -FreshVolumes passed later)
 Write-Step "Cleaning up previous test runs"
-$downArgs = @("-f", $composeFile, "down", "--remove-orphans")
+$downArgs = @(Get-ComposeArgs @("down", "--remove-orphans"))
 if ($FreshVolumes) {
     $downArgs += "-v"
     Write-Warn "FreshVolumes: removing named volumes (ipfs-data, creg-data-*)"
 }
-if (Test-Path $fleetEnv) {
-    docker compose @downArgs --env-file $fleetEnv 2>$null
-} else {
-    docker compose @downArgs 2>$null
-}
+docker compose @downArgs 2>$null
 Write-Success "Previous containers removed"
 
 # Step 2: Ensure spec-server mount files are current, start infrastructure
@@ -333,13 +339,8 @@ Or:   docker volume rm testnet_ipfs-data
     }
 }
 Write-Step "Starting infrastructure (IPFS, spec-server)"
-if (Test-Path $fleetEnv) {
-    Invoke-IpfsVolumePerms -ComposeArgs @("-f", $composeFile, "--env-file", $fleetEnv)
-    docker compose -f $composeFile --env-file $fleetEnv up -d ipfs spec-server
-} else {
-    Invoke-IpfsVolumePerms -ComposeArgs @("-f", $composeFile)
-    docker compose -f $composeFile up -d ipfs spec-server
-}
+Invoke-IpfsVolumePerms -ComposeArgs @(Get-ComposeArgs)
+docker compose @(Get-ComposeArgs @("up", "-d", "ipfs", "spec-server"))
 if ($LASTEXITCODE -ne 0) {
     Write-Error "docker compose failed to start infrastructure"
 }
@@ -378,22 +379,31 @@ if (-not $specReady) {
 Write-Success "spec-server ready at http://localhost:$specHostPort/chain-spec.json"
 
 # Step 3: Build and start the 3 nodes
-Write-Step "Building node image (Dockerfile.windows)"
-if (Test-Path $fleetEnv) {
-    docker compose -f $composeFile --env-file $fleetEnv build creg-node-1
+if ($Sandbox) {
+    Write-Step "SANDBOX-301: using chain-registry-node-secure:latest (run build-3node-secure-image first)"
+    $secureBuild = Join-Path $scriptDir "build-3node-secure-image.ps1"
+    if (Test-Path $secureBuild) {
+        & $secureBuild -SkipAppBuild
+        if ($LASTEXITCODE -ne 0) { Write-Error "Secure image build failed" }
+    } else {
+        docker image inspect chain-registry-node-secure:latest 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Missing chain-registry-node-secure:latest — run .\testnet\build-3node-secure-image.ps1"
+        }
+    }
 } else {
-    docker compose -f $composeFile build creg-node-1
-}
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "Node image build failed. See Docker output above."
+    Write-Step "Building node image (Dockerfile.windows)"
+    docker compose @(Get-ComposeArgs) build creg-node-1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Node image build failed. See Docker output above."
+    }
 }
 
 Write-Step "Starting 3 Chain Registry nodes"
-if (Test-Path $fleetEnv) {
-    docker compose -f $composeFile --env-file $fleetEnv up -d creg-node-1 creg-node-2 creg-node-3
-} else {
-    docker compose -f $composeFile up -d creg-node-1 creg-node-2 creg-node-3
-}
+$upArgs = @(Get-ComposeArgs) + @("up", "-d")
+if ($Sandbox) { $upArgs += "--no-build" }
+$upArgs += @("creg-node-1", "creg-node-2", "creg-node-3")
+docker compose @upArgs
 
 Write-Host ""
 Write-Host "Waiting for nodes to boot (chain-spec fetch + Sepolia L1 sync)..." -ForegroundColor Cyan

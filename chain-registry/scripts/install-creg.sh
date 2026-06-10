@@ -42,7 +42,9 @@ case "$ARCH" in
   *) echo "Unsupported arch: $ARCH"; exit 1 ;;
 esac
 
-URL="https://github.com/chain-registry/chain-registry/releases/download/${VERSION}/${TARBALL}"
+# Override when releases live on a fork: export CREG_GITHUB_REPO=owner/repo
+GITHUB_REPO="${CREG_GITHUB_REPO:-samuel-1-avson/chain-registry-blockchain-CREG-}"
+URL="https://github.com/${GITHUB_REPO}/releases/download/${VERSION}/${TARBALL}"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 

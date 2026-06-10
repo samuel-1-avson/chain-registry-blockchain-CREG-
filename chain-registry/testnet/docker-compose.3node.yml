@@ -7,7 +7,7 @@
 #
 # Usage:
 #   .\testnet\start-3node-test.ps1
-#   ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â or manually ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â
+#   ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â or manually ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â
 #   docker compose -f testnet/docker-compose.3node.yml --env-file testnet/sepolia-3node.env build creg-node-1
 #   docker compose -f testnet/docker-compose.3node.yml --env-file testnet/sepolia-3node.env up -d
 
@@ -26,12 +26,12 @@ x-creg-node-common: &creg-node-common
 x-creg-node-base-env: &creg-node-base-env
   CREG_CHAIN_ID: creg-testnet-1
   CREG_EXPECTED_L1_CHAIN_ID: "11155111"
-  # CREG_ETH_RPC comes from sepolia-3node.env (env_file) ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â do not interpolate here;
+  # CREG_ETH_RPC comes from sepolia-3node.env (env_file) ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â do not interpolate here;
   # host-shell ${CREG_ETH_RPC} overrides the file and breaks Infura after publicnode sessions.
   CREG_LISTEN: 0.0.0.0:8080
   CREG_DATA_DIR: /data
   CREG_BLOCK_INTERVAL: "5"
-  # CREG_DEV_SANDBOX: set in sepolia-3node.env only (do not interpolate from host shell —
+  # CREG_DEV_SANDBOX: set in sepolia-3node.env only (do not interpolate from host shell â€”
   # host ${CREG_DEV_SANDBOX:-false} overrides env_file and breaks Windows soak after edits).
   CREG_IPFS_URL: http://ipfs:5001
   CREG_P2P_LISTEN: /ip4/0.0.0.0/tcp/9000
@@ -59,7 +59,14 @@ services:
       - ipfs-data:/data/ipfs
     entrypoint: ["/bin/sh", "-c"]
     command:
-      - "chown -R 1000:100 /data/ipfs && chmod -R u+rwX,g+rX,o-rwx /data/ipfs && rm -f /data/ipfs/repo.lock || exit 1"
+      - |
+        mkdir -p /data/ipfs
+        if [ ! -f /data/ipfs/config ]; then
+          IPFS_PATH=/data/ipfs ipfs init --profile=server
+        fi
+        chown -R 1000:100 /data/ipfs
+        chmod -R u+rwX,g+rX,o-rwx /data/ipfs
+        rm -f /data/ipfs/repo.lock
     restart: "no"
     networks:
       - creg-3node
@@ -83,7 +90,7 @@ services:
     # Bind API on all interfaces so Windows host port-forward (15001) accepts POST /api/v0/*.
     entrypoint: ["/bin/sh", "-c"]
     command:
-      - "ipfs config Addresses.API /ip4/0.0.0.0/tcp/5001 2>/dev/null || true; exec ipfs daemon --migrate=true --enable-gc"
+      - "export IPFS_PATH=/data/ipfs; ipfs init --profile=server 2>/dev/null || true; ipfs config Addresses.API /ip4/0.0.0.0/tcp/5001 2>/dev/null || true; exec ipfs daemon --migrate=true --enable-gc"
     healthcheck:
       test: ["CMD-SHELL", "ipfs id || exit 1"]
       interval: 5s
@@ -102,6 +109,8 @@ services:
     volumes:
       - ./chain-spec.sepolia.json:/usr/share/nginx/html/chain-spec.json:ro
       - ./chain-spec.sepolia.json.sig:/usr/share/nginx/html/chain-spec.json.sig:ro
+      - ./chain-spec.sepolia.json:/usr/share/nginx/html/chain-spec.sepolia.json:ro
+      - ./chain-spec.sepolia.json.sig:/usr/share/nginx/html/chain-spec.sepolia.json.sig:ro
       - ./nginx-spec.conf:/etc/nginx/conf.d/default.conf:ro
     ports:
       # Host port defaults to 18888 to avoid clashing with testnet/spec-server (8888).
@@ -109,7 +118,7 @@ services:
     networks:
       - creg-3node
     healthcheck:
-      # Use 127.0.0.1 ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Alpine wget treats localhost as ::1 but nginx may listen on IPv4 only.
+      # Use 127.0.0.1 ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â Alpine wget treats localhost as ::1 but nginx may listen on IPv4 only.
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/chain-spec.json > /dev/null"]
       interval: 5s
       timeout: 5s
@@ -118,7 +127,7 @@ services:
     restart: unless-stopped
 
   # ============================================================================
-  # Node 1 ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Bootstrap Validator
+  # Node 1 ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â Bootstrap Validator
   # ============================================================================
   creg-node-1:
     <<: *creg-node-common
@@ -146,7 +155,7 @@ services:
         condition: service_healthy
 
   # ============================================================================
-  # Node 2 ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Validator
+  # Node 2 ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â Validator
   # ============================================================================
   creg-node-2:
     <<: *creg-node-common
@@ -175,7 +184,7 @@ services:
         condition: service_started
 
   # ============================================================================
-  # Node 3 ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Observer / Full Node
+  # Node 3 ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â Observer / Full Node
   # ============================================================================
   creg-node-3:
     <<: *creg-node-common

@@ -85,7 +85,7 @@ function Get-Fingerprint([string]$hexKey) {
 }
 
 Log "=== SEC-101-ops drill: hot-key fingerprint snapshot ==="
-Log "See docs/SEC-101-ops-rotation-drill.md for full procedure"
+Log "See docs/SECURITY_OPS_RUNBOOK.md for full procedure"
 Log ""
 
 $testnet = $env:CREG_TESTNET
@@ -116,7 +116,7 @@ Log "  1. Stop affected service"
 Log "  2. Rotate key in vault / .env (never commit)"
 Log "  3. Restart with CREG_TESTNET=true"
 Log "  4. Re-run this script and confirm fingerprint changed"
-Log "  5. Fill sign-off in docs/SEC-101-ops-rotation-drill.md"
+Log "  5. Record sign-off in docs/NEXT_WORK.md (SEC-101-ops)"
 Log ""
 
 if ($WhatIf) {

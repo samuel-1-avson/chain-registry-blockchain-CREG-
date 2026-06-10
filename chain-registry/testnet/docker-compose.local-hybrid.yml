@@ -1,0 +1,32 @@
+# Local overlay: 3 CREG nodes on operator workstation; shared services stay on GCP.
+#
+# Usage (Windows, WireGuard connected):
+#   .\testnet\start-local-validators.ps1
+#
+# Overrides IPFS + chain-spec to cloud URLs; Sepolia RPC via WireGuard to internal Geth.
+
+services:
+  creg-node-1:
+    depends_on: {}
+    environment:
+      CREG_IPFS_URL: ${CREG_CLOUD_IPFS_URL:-https://ipfs.testnet.cregnet.dev}
+      CREG_CHAIN_SPEC_URL: ${CREG_CLOUD_CHAIN_SPEC_URL:-https://spec.testnet.cregnet.dev/chain-spec.json}
+      CREG_ETH_RPC: ${CREG_ETH_RPC:-http://10.128.0.3:8545}
+
+  creg-node-2:
+    depends_on:
+      creg-node-1:
+        condition: service_started
+    environment:
+      CREG_IPFS_URL: ${CREG_CLOUD_IPFS_URL:-https://ipfs.testnet.cregnet.dev}
+      CREG_CHAIN_SPEC_URL: ${CREG_CLOUD_CHAIN_SPEC_URL:-https://spec.testnet.cregnet.dev/chain-spec.json}
+      CREG_ETH_RPC: ${CREG_ETH_RPC:-http://10.128.0.3:8545}
+
+  creg-node-3:
+    depends_on:
+      creg-node-1:
+        condition: service_started
+    environment:
+      CREG_IPFS_URL: ${CREG_CLOUD_IPFS_URL:-https://ipfs.testnet.cregnet.dev}
+      CREG_CHAIN_SPEC_URL: ${CREG_CLOUD_CHAIN_SPEC_URL:-https://spec.testnet.cregnet.dev/chain-spec.json}
+      CREG_ETH_RPC: ${CREG_ETH_RPC:-http://10.128.0.3:8545}

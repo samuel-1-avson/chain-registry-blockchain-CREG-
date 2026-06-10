@@ -32,8 +32,21 @@ if (-not $Version) {
     exit $LASTEXITCODE
 }
 
+$githubRepo = $env:CREG_GITHUB_REPO
+if (-not $githubRepo) {
+    try {
+        $remote = git remote get-url origin 2>$null
+        if ($remote -match 'github\.com[:/](.+?)(?:\.git)?$') {
+            $githubRepo = $matches[1]
+        }
+    } catch { }
+}
+if (-not $githubRepo) {
+    $githubRepo = "samuel-1-avson/chain-registry-blockchain-CREG-"
+}
+
 $asset = "chain-registry-$Version-windows-amd64.zip"
-$url = "https://github.com/chain-registry/chain-registry/releases/download/$Version/$asset"
+$url = "https://github.com/$githubRepo/releases/download/$Version/$asset"
 $zip = Join-Path $env:TEMP $asset
 
 Write-Host "Downloading $url ..." -ForegroundColor Cyan

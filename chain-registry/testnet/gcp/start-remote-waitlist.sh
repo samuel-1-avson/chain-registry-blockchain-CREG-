@@ -23,6 +23,13 @@ COMPOSE=("${DOCKER[@]}" compose
   --env-file testnet/sepolia-3node.env
 )
 
+if [[ ! -f testnet/caddy/waitlist.caddy.example ]]; then
+  echo "Missing testnet/caddy/waitlist.caddy.example" >&2
+  exit 1
+fi
+cp testnet/caddy/waitlist.caddy.example testnet/caddy/waitlist.caddy
+echo "Activated testnet/caddy/waitlist.caddy for waitlist vhost"
+
 echo "=== Building waitlist image ==="
 "${COMPOSE[@]}" build waitlist
 echo "=== Starting waitlist ==="

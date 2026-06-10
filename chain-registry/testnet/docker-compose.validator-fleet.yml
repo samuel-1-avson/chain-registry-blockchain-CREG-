@@ -1,0 +1,118 @@
+# Validator fleet on dedicated GCP VM (no local IPFS/spec  use edge VPC services).
+#
+# Prerequisites in sepolia-3node.env:
+#   CREG_ETH_RPC=http://10.128.0.3:8545
+#   CREG_EDGE_INTERNAL_IP=<creg-testnet-vm VPC IP>
+#   CREG_IPFS_URL=http://${CREG_EDGE_INTERNAL_IP}:15001
+#   CREG_CHAIN_SPEC_URL=http://${CREG_EDGE_INTERNAL_IP}:18888/chain-spec.json
+#
+# Usage:
+#   ./testnet/start-validator-fleet-gcp.sh
+#
+# Ports (host): API 28180-28189, P2P 29100-29109 (3 nodes use 28180-28182 / 29100-29102).
+
+x-creg-fleet-common: &creg-fleet-common
+  # Prebuilt image (default on GCP fleet VM  avoids OOM building librocksdb on small instances).
+  # Local source build: set CREG_FLEET_BUILD=1 and uncomment build below.
+  image: ${CREG_FLEET_IMAGE:-ghcr.io/chain-registry/chain-registry:latest}
+  build:
+    context: ..
+    dockerfile: Dockerfile.windows
+  env_file:
+    - sepolia-3node.env
+  networks:
+    - creg-validator-fleet
+  restart: unless-stopped
+
+x-creg-fleet-base-env: &creg-fleet-base-env
+  CREG_CHAIN_ID: creg-testnet-1
+  CREG_EXPECTED_L1_CHAIN_ID: "11155111"
+  CREG_LISTEN: 0.0.0.0:8080
+  CREG_DATA_DIR: /data
+  CREG_BLOCK_INTERVAL: "5"
+  CREG_IPFS_URL: ${CREG_IPFS_URL:?set CREG_IPFS_URL to edge VM IPFS}
+  CREG_CHAIN_SPEC_URL: ${CREG_CHAIN_SPEC_URL:?set CREG_CHAIN_SPEC_URL to edge spec-server}
+  CREG_CHAIN_SPEC_OFFLINE: "false"
+  CREG_P2P_LISTEN: /ip4/0.0.0.0/tcp/9000
+  CREG_SPEC_SIGNING_PUBKEY: "0437e4adac481519cd6ae66907294c40cfcbf0bdeadd47806f6233be4bd5f82d"
+  CREG_REGISTRY_ADDR: ${CREG_REGISTRY_ADDR:-0x3aCfF05d00AC199412a94326eD8aA874aaA3596c}
+  CREG_STAKING_ADDR: ${CREG_STAKING_ADDR:-0xf28C63C4Aafd27025E535Ab9ab7B4daC18C96Bc2}
+  CREG_GOVERNANCE_ADDR: ${CREG_GOVERNANCE_ADDR:-0x9a14F359E2bdBb43F1526743C4A91955F29Ba59A}
+  CREG_TOKEN_ADDR: ${CREG_TOKEN_ADDR:-0x97c21d46B3eac604e92E907D54aA92eEc0Af550b}
+  CREG_ZK_VERIFIER_ADDR: ${CREG_ZK_VERIFIER_ADDR:-0x0922AE98AF1D809360BDd5D5AAd84f0D823A5cF3}
+  # Required when sepolia-3node.env sets CREG_DEV_SANDBOX=true (all fleet nodes).
+  CREG_TESTNET: "true"
+  RUST_LOG: info,chain_registry_node=debug
+
+services:
+  creg-node-1:
+    <<: *creg-fleet-common
+    container_name: creg-fleet-node1
+    environment:
+      <<: *creg-fleet-base-env
+      CREG_P2P_SEEDS: /dns4/creg-node-2/tcp/9000,/dns4/creg-node-3/tcp/9000
+      CREG_IS_VALIDATOR: "true"
+      CREG_VALIDATOR_KEY: ${CREG_VALIDATOR_KEY_1}
+      CREG_OPERATOR_API_KEY: ${CREG_OPERATOR_API_KEY:-docker-dev-operator-key}
+      CREG_NODE_ID: core-1
+      CREG_PEERS: http://creg-node-2:8080,http://creg-node-3:8080
+      CREG_BRIDGE_KEY: ${CREG_BRIDGE_KEY:-}
+    ports:
+      - "${CREG_3NODE_NODE1_API_PORT:-28180}:8080"
+      - "${CREG_3NODE_NODE1_P2P_PORT:-29100}:9000"
+    volumes:
+      - fleet-data-1:/data
+      - ./chain-spec-cache:/cache:ro
+      - ../rules:/rules:ro
+
+  creg-node-2:
+    <<: *creg-fleet-common
+    container_name: creg-fleet-node2
+    environment:
+      <<: *creg-fleet-base-env
+      CREG_IS_VALIDATOR: "true"
+      CREG_VALIDATOR_KEY: ${CREG_VALIDATOR_KEY_2}
+      CREG_OPERATOR_API_KEY: ${CREG_OPERATOR_API_KEY:-docker-dev-operator-key}
+      CREG_NODE_ID: validator-2
+      CREG_PEERS: http://creg-node-1:8080,http://creg-node-3:8080
+      CREG_P2P_SEEDS: /dns4/creg-node-1/tcp/9000,/dns4/creg-node-3/tcp/9000
+      CREG_BRIDGE_KEY: ${CREG_BRIDGE_KEY:-}
+    ports:
+      - "${CREG_3NODE_NODE2_API_PORT:-28181}:8080"
+      - "${CREG_3NODE_NODE2_P2P_PORT:-29101}:9000"
+    volumes:
+      - fleet-data-2:/data
+      - ./chain-spec-cache:/cache:ro
+      - ../rules:/rules:ro
+    depends_on:
+      creg-node-1:
+        condition: service_started
+
+  creg-node-3:
+    <<: *creg-fleet-common
+    container_name: creg-fleet-node3
+    environment:
+      <<: *creg-fleet-base-env
+      CREG_IS_VALIDATOR: "false"
+      CREG_OPERATOR_API_KEY: ${CREG_OPERATOR_API_KEY:-docker-dev-operator-key}
+      CREG_NODE_ID: observer-1
+      CREG_PEERS: http://creg-node-1:8080,http://creg-node-2:8080
+      CREG_P2P_SEEDS: /dns4/creg-node-1/tcp/9000,/dns4/creg-node-2/tcp/9000
+    ports:
+      - "${CREG_3NODE_NODE3_API_PORT:-28182}:8080"
+      - "${CREG_3NODE_NODE3_P2P_PORT:-29102}:9000"
+    volumes:
+      - fleet-data-3:/data
+      - ./chain-spec-cache:/cache:ro
+    depends_on:
+      creg-node-1:
+        condition: service_started
+
+networks:
+  creg-validator-fleet:
+    driver: bridge
+
+volumes:
+  fleet-data-1:
+  fleet-data-2:
+  fleet-data-3:

@@ -55,15 +55,30 @@ try {
 } catch {
     Log "Release not found at $releaseUrl"
     Log "Create with: git tag $Version && git push origin $Version"
-    Log "Workflow: chain-registry/.github/workflows/release-binaries.yml"
+    Log "Workflow: .github/workflows/release-binaries.yml"
     exit 1
 }
 
-$linuxUrl = "https://github.com/$GithubRepo/releases/download/$Version/chain-registry-$Version-linux-amd64.tar.gz"
+$linuxAsset = $release.assets | Where-Object { $_.name -eq "chain-registry-$Version-linux-amd64.tar.gz" }
+if (-not $linuxAsset) {
+    Log "MISSING linux asset for download check"
+    exit 1
+}
+$linuxUrl = $linuxAsset.browser_download_url
 try {
-    $head = Invoke-WebRequest -Uri $linuxUrl -Method Head -TimeoutSec 30
-    if ($head.StatusCode -ge 200 -and $head.StatusCode -lt 400) {
-        Log "OK HEAD $linuxUrl"
+    if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
+        curl.exe -sI -L --max-time 20 $linuxUrl | Select-Object -First 1 | ForEach-Object {
+            if ($_ -match '^HTTP/\S+\s+([23]\d\d)') {
+                Log "OK HEAD $linuxUrl"
+            } else {
+                throw "unexpected response: $_"
+            }
+        }
+    } else {
+        $head = Invoke-WebRequest -Uri $linuxUrl -Method Head -TimeoutSec 20 -MaximumRedirection 5
+        if ($head.StatusCode -ge 200 -and $head.StatusCode -lt 400) {
+            Log "OK HEAD $linuxUrl"
+        }
     }
 } catch {
     Log "HEAD failed for linux tarball: $($_.Exception.Message)"

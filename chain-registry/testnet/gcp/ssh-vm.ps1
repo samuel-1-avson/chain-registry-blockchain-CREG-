@@ -18,7 +18,7 @@ if (-not $ProjectId) { $ProjectId = $cfg.GCP_PROJECT }
 if (-not $Zone) { $Zone = $cfg.GCP_ZONE }
 if (-not $VmName) { $VmName = $cfg.GCP_VM_NAME }
 
-$sshBase = @("--zone=$Zone", "--project=$ProjectId", "--strict-host-key-checking=no")
+$sshBase = @("--zone=$Zone", "--project=$ProjectId", "--tunnel-through-iap", "--strict-host-key-checking=no", "--quiet")
 if ($Command) {
     gcloud compute ssh $VmName @sshBase --command=$Command
 } else {

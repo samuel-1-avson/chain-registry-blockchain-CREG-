@@ -1,43 +1,50 @@
 # GCP & Firebase budget architecture
 
-> **Updated:** 2026-06-09  
-> **Scope:** Public Sepolia testnet (single VM) + marketing waitlist (static SPA + Firebase backend)
+> **Updated:** 2026-06-10  
+> **Scope:** Public Sepolia testnet (3-tier GCP VMs) + marketing waitlist (static SPA + Firebase backend)
 
 ## Two GCP projects
 
 | Project | ID | What runs here | Monthly target / cap |
 |---------|-----|----------------|----------------------|
-| **Testnet VM** | `gen-lang-client-0022105784` | Validators, Caddy TLS, explorer, faucet, IPFS, waitlist **static** nginx | **$150** / **$175** |
+| **Testnet hosting** | `gen-lang-client-0022105784` | Edge VM + validator fleet VM + internal Geth + NAT | **$300** / **$350** |
 | **Waitlist backend** | `gen-lang-client-0098858574` | Firestore (named DB), `registerWaitlist` Cloud Function, Secret Manager (**Blaze**) | **$10** / **$25** |
 
-**Typical combined spend:** ~$119 (VM) + ~$0–8 (Firebase at low signup volume) ≈ **~$122/month**.
+**Typical combined spend (Option A, 3-node fleet):** ~$280–300 (GCP) + ~$0–8 (Firebase) ≈ **~$285–310/month**.
 
-## Architecture
+## Architecture (Option A — production)
 
 ```
-Browser
-  ├─ https://testnet.cregnet.dev/*     → VM 35.225.225.20 (project 0022105784)
-  ├─ https://waitlist.cregnet.dev      → same VM (nginx SPA only)
-  └─ Firebase SDK / registerWaitlist     → project 0098858574 (us-central1)
+Browser → creg-testnet-vm (edge, public IP)
+       → creg-validator-vm (validators, private)
+       → creg-sepolia-geth-vm (Sepolia RPC, private)
 ```
+
+Runbook: [GCP-VALIDATOR-FLEET.md](./GCP-VALIDATOR-FLEET.md).
 
 | Item | Value |
 |------|--------|
-| VM | `creg-testnet-vm`, `e2-standard-4`, `us-central1-a` |
-| Static IP | `35.225.225.20` |
+| Edge VM | `creg-testnet-vm`, `e2-standard-4`, `us-central1-a` |
+| Validator fleet VM | `creg-validator-vm`, `e2-standard-8`, no public IP |
+| Geth VM | `creg-sepolia-geth-vm`, `e2-standard-2`, no public IP |
+| Static IP (edge) | `35.225.225.20` |
 | Firestore database | `ai-studio-6b167dc8-a078-4526-a86b-de2a8722a753` |
 | Callable function | `registerWaitlist` (Node 20, `us-central1`) |
 
-## VM cost drivers (0022105784)
+## VM cost drivers (0022105784, Option A)
 
 | Line item | Est. monthly |
 |-----------|----------------|
-| `e2-standard-4` on-demand | ~$98 |
-| 100 GB `pd-balanced` disk | ~$10 |
-| Egress (light–moderate) | ~$3–12 |
-| Optional snapshots | ~$2–4 |
+| `creg-testnet-vm` (`e2-standard-4`) | ~$98 |
+| `creg-validator-vm` (`e2-standard-8`) | ~$196 |
+| `creg-sepolia-geth-vm` (`e2-standard-2`) | ~$49 |
+| Disks (100 + 200 + 100 GB `pd-balanced`) | ~$40 |
+| Cloud NAT + egress | ~$5–15 |
+| Optional snapshots | ~$2–8 |
 
-**Primary risk:** internet egress (Cloudflare DNS-only → all HTTPS/RPC bytes exit GCP).
+**At 10 nodes:** same `e2-standard-8` validator VM; scale via compose only (~**$280–320/mo** total GCP).
+
+**Primary risk:** internet egress on the edge VM (Cloudflare DNS-only → HTTPS/RPC bytes exit GCP).
 
 ## Firebase cost drivers (0098858574)
 
@@ -67,5 +74,7 @@ Browser
 
 ## What we do not run (cost control)
 
-- GKE, Cloud Load Balancing, Cloud SQL, second VM for validators
+- GKE, Cloud Load Balancing, Cloud SQL
 - Duplicating waitlist registration on the VM
+
+RPC/API ingress detail and phased LB options: [GCP-RPC-ARCHITECTURE.md](./GCP-RPC-ARCHITECTURE.md).

@@ -1,0 +1,162 @@
+# GCP edge stack — no validator containers on this VM.
+#
+# Production (Option A): validators on creg-validator-vm; set CREG_VALIDATOR_FLEET_MODE=true.
+# Legacy hybrid: validators on operator PC + WireGuard (CREG_HYBRID_MODE=true).
+#
+# Usage (on creg-testnet-vm):
+#   ./testnet/start-cloud-edge-gcp.sh
+
+x-cloud-edge-network: &cloud-edge-network
+  networks:
+    - creg-cloud-edge
+
+services:
+  ipfs-perms:
+    image: ipfs/kubo:latest
+    container_name: creg-cloud-ipfs-perms
+    user: "0:0"
+    volumes:
+      - cloud-ipfs-data:/data/ipfs
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        mkdir -p /data/ipfs
+        if [ ! -f /data/ipfs/config ]; then
+          IPFS_PATH=/data/ipfs ipfs init --profile=server
+        fi
+        chown -R 1000:100 /data/ipfs
+        chmod -R u+rwX,g+rX,o-rwx /data/ipfs
+        rm -f /data/ipfs/repo.lock
+    restart: "no"
+    networks:
+      - creg-cloud-edge
+
+  ipfs:
+    image: ipfs/kubo:latest
+    container_name: creg-cloud-ipfs
+    volumes:
+      - cloud-ipfs-data:/data/ipfs
+    ports:
+      - "${CREG_3NODE_IPFS_HOST_PORT:-15001}:5001"
+    networks:
+      - creg-cloud-edge
+    depends_on:
+      ipfs-perms:
+        condition: service_completed_successfully
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - "export IPFS_PATH=/data/ipfs; ipfs init --profile=server 2>/dev/null || true; ipfs config Addresses.API /ip4/0.0.0.0/tcp/5001 2>/dev/null || true; exec ipfs daemon --migrate=true --enable-gc"
+    healthcheck:
+      test: ["CMD-SHELL", "ipfs id || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+
+  spec-server:
+    image: nginx:alpine
+    container_name: creg-cloud-spec-server
+    volumes:
+      - ./chain-spec.sepolia.json:/usr/share/nginx/html/chain-spec.json:ro
+      - ./chain-spec.sepolia.json.sig:/usr/share/nginx/html/chain-spec.json.sig:ro
+      - ./nginx-spec.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "${CREG_3NODE_SPEC_HOST_PORT:-18888}:80"
+    networks:
+      - creg-cloud-edge
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/chain-spec.json > /dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  faucet:
+    image: creg-node:local-3node
+    container_name: creg-cloud-faucet
+    build:
+      context: ..
+      dockerfile: Dockerfile.windows
+    entrypoint: ["/app/faucet"]
+    environment:
+      CREG_SECRETS_BACKEND: env
+      FAUCET_PORT: "8082"
+      # Self-hosted Sepolia on creg-sepolia-geth-vm (VPC internal).
+      FAUCET_RPC_URL: ${SEPOLIA_RPC_URL:-${CREG_ETH_RPC:-http://10.128.0.3:8545}}
+      FAUCET_PUBLIC_RPC_URL: ${FAUCET_PUBLIC_RPC_URL:-https://${CREG_PUBLIC_API_HOST}/rpc}
+      FAUCET_PRIVATE_KEY: ${FAUCET_PRIVATE_KEY:-}
+      FAUCET_ADDRESS: ${FAUCET_ADDRESS:-}
+      FAUCET_TOKEN_CONTRACT: ${CREG_TOKEN_ADDR:-0x97c21d46B3eac604e92E907D54aA92eEc0Af550b}
+      FAUCET_CHAIN_ID: "11155111"
+      FAUCET_DRIP_AMOUNT: "1000000000000000000000"
+      FAUCET_COOLDOWN_SECS: "60"
+      FAUCET_POW_DISABLED: "true"
+      FAUCET_EXPLORER_URL: ${CREG_PUBLIC_EXPLORER_URL:-https://${CREG_PUBLIC_EXPLORER_HOST}}
+      RUST_LOG: info
+    ports:
+      - "${CREG_3NODE_FAUCET_PORT:-8082}:8082"
+    networks:
+      - creg-cloud-edge
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8082/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  web-explorer:
+    image: chain-registry-web-explorer:3node
+    build:
+      context: ../explorer
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE: ""
+        VITE_NETWORK: testnet
+        VITE_NODE_ROUTE_MODE: auto
+        VITE_SEPOLIA_CREG_TOKEN: ${CREG_TOKEN_ADDR:-0x97c21d46B3eac604e92E907D54aA92eEc0Af550b}
+        VITE_SEPOLIA_STAKING_ADDR: ${CREG_STAKING_ADDR:-0xf28C63C4Aafd27025E535Ab9ab7B4daC18C96Bc2}
+        VITE_SEPOLIA_REGISTRY_ADDR: ${CREG_REGISTRY_ADDR:-0x3aCfF05d00AC199412a94326eD8aA874aaA3596c}
+        VITE_DEFAULT_NETWORK_PROFILE: sepolia
+        VITE_OPERATOR_API_KEY: ${CREG_OPERATOR_API_KEY:-docker-dev-operator-key}
+        VITE_TESTNET_PHASE: coordinated-lab
+        VITE_SINGLE_VALIDATOR: "false"
+        VITE_DEV_SANDBOX_CAVEAT: "true"
+    container_name: creg-cloud-explorer
+    ports:
+      - "${CREG_3NODE_EXPLORER_PORT:-3017}:80"
+    volumes:
+      - ${CREG_EXPLORER_NGINX_CONF:-./nginx/explorer-hybrid.conf}:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - creg-cloud-edge
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  waitlist:
+    build:
+      context: ./waitlist
+      dockerfile: Dockerfile
+    image: creg-waitlist:local
+    container_name: creg-cloud-waitlist
+    ports:
+      - "${CREG_WAITLIST_HOST_PORT:-8088}:80"
+    networks:
+      - creg-cloud-edge
+    restart: unless-stopped
+    profiles:
+      - waitlist
+
+networks:
+  creg-cloud-edge:
+    driver: bridge
+
+volumes:
+  cloud-ipfs-data:

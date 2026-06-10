@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "source": "deep-research-report.md",
+  "source": "chain-registry/DELIVERABLES_INDEX.md",
   "policy": {
     "direct_ddc_scope": "Only compilers, compiler-like generators, and owned codegen wrappers are direct DDC targets.",
     "default_release_gate": "Reproducible rebuild plus evidence bundle is required for release binaries.",

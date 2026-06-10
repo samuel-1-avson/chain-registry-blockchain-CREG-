@@ -21,6 +21,7 @@
 !testnet/SOAK_TEST.md
 !testnet/bootstrap/README.md
 !testnet/spec-server/README.md
+!hub/content/**/*.md
 
 # =============================================================================
 # DOCS DIRECTORY
@@ -182,6 +183,8 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 package-lock.json
+!hub-web/package-lock.json
+!hub-api/package-lock.json
 yarn.lock
 .npm/
 .yarn/
@@ -277,7 +280,12 @@ core.*
 testnet/sepolia-3node.env
 testnet/gcp/hosting.env
 testnet/gcp/hosting-state.json
+testnet/gcp/sepolia-geth-state.json
+testnet/gcp/validator-fleet-state.json
+testnet/nginx/explorer-fleet.conf
+testnet/docker-compose.validator-fleet.generated.yml
 testnet/soak-3node-logs/
+testnet/*-301-logs/
 testnet/artifacts/
 config/*/deployment.json
 config/local/

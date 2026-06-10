@@ -1,5 +1,5 @@
 # OPS-201 — Sepolia Option A verification (same-machine automation)
-# Mirrors docs/SEPOLIA_SECOND_OPERATOR_CHECKLIST.md steps 3–9 where possible.
+# Mirrors docs/TESTNET_SEPOLIA_RUNBOOK.md second-operator verification steps where possible.
 #
 # Usage:
 #   .\testnet\run-ops-201-verify.ps1

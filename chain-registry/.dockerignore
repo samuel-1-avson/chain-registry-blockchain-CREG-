@@ -34,6 +34,10 @@ Cargo.lock.bak
 # Node modules (built in container)
 explorer/node_modules/
 explorer/dist/
+hub-web/node_modules/
+hub-web/dist/
+hub-api/node_modules/
+hub-api/dist/
 
 # Test files
 tests/

@@ -41,9 +41,11 @@ function Resolve-SepoliaRpc {
 
 Import-DotEnv (Join-Path $scriptDir ".env.sepolia.faucet")
 Import-DotEnv (Join-Path $scriptDir ".env.sepolia")
+# docker-compose.yml reads FAUCET_ADDRESS from repo-root .env (creg-faucet container).
+Import-DotEnv (Join-Path (Split-Path -Parent $scriptDir) ".env")
 
 if (-not $env:FAUCET_ADDRESS) {
-    throw "Missing FAUCET_ADDRESS - run .\testnet\setup-sepolia-faucet.ps1"
+    throw "Missing FAUCET_ADDRESS - run .\testnet\setup-sepolia-faucet.ps1 or set it in .env"
 }
 
 $senderKey = $FromPrivateKey
