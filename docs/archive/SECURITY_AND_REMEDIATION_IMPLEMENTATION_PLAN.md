@@ -2,7 +2,7 @@
 
 **Status:** Approved baseline (defaults locked — pending owner assignment)  
 **Created:** 2026-05-27  
-**Parent document:** [SYSTEM_FULL_ANALYSIS_REPORT.md](./SYSTEM_FULL_ANALYSIS_REPORT.md)  
+**Parent document:** [../chain-registry/DEEP_DIVE_ANALYSIS.md](../chain-registry/DEEP_DIVE_ANALYSIS.md)  
 **Audience:** Engineering, security, DevOps  
 **Purpose:** Turn security weaknesses (W1–W15), tracked issues (ISSUE-002/004/005/006), P0–P3 fixes, and the four-phase roadmap into an actionable backlog you can review, prioritize, and execute.
 
@@ -105,7 +105,7 @@ Maps every weakness and fix to a work item ID.
 | ID | Task | Primary files | Acceptance criteria |
 |----|------|---------------|---------------------|
 | **DOC-101** | Create `chain-registry/docs/` skeleton: index, links from root README | `README.md`, `docs/README.md` | All README doc links resolve; index lists runbooks |
-| **DOC-102** | Port or author **API cookbook** (curl examples per route group) | `docs/API_COOKBOOK.md`, `crates/node/src/api.rs` | Covers public, publisher, validator, operator; matches OpenAPI |
+| **DOC-102** | Port or author **API cookbook** (curl examples per route group) | `chain-registry/docs/API_COOKBOOK.md`, `crates/node/src/api.rs` | Covers public, publisher, validator, operator; matches OpenAPI |
 | **DOC-103** | Author **security ops runbook** (keys, TLS, env danger list) | `docs/SECURITY_OPS_RUNBOOK.md` | Documents W1, W12, operator key, `CREG_DEV_SANDBOX`, rotation procedure |
 | **DOC-104** | **Remediation backlog** living doc synced to this plan | `docs/REMEDIATION_BACKLOG.md` | Each SEC/REM item has status column |
 
@@ -123,7 +123,7 @@ Maps every weakness and fix to a work item ID.
 
 **Dependencies:** Local testnet running (`local-testnet.ps1`).
 
-**Tests:** Extend Playwright or manual checklist in `docs/API_COOKBOOK.md`.
+**Tests:** Extend Playwright or manual checklist in `chain-registry/docs/API_COOKBOOK.md`.
 
 ---
 
@@ -258,7 +258,7 @@ Maps every weakness and fix to a work item ID.
 
 ## 5. Phase 3 — Security & multi-chain (target: 8–12 weeks)
 
-**Kickoff record:** [PHASE3_KICKOFF.md](./PHASE3_KICKOFF.md) (D4 → **SEC-303c** as of 2026-05-28).
+**Cross-chain decision (D4):** recorded as **SEC-303c** in [REMEDIATION_BACKLOG.md](./REMEDIATION_BACKLOG.md) (2026-05-28).
 
 **Exit criteria:** Cross-chain either fixed and tested or explicitly disabled in product; PrivateRegistry status accurate; shielded publish behind feature flag with E2E or removed from marketing; external audit scheduled or completed for critical paths.
 

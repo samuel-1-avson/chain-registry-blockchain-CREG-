@@ -3,7 +3,7 @@
 **Status:** Phase open (limited) — coordinated 3-node lab  
 **Network:** Sepolia L1 + `creg-testnet-1` (signed chain spec)  
 **Effective:** 2026-05-30  
-**Review:** 2026-07-30 or when [SANDBOX-301](./NEXT_WORK.md) + public hosting ship
+**Review:** 2026-07-30 or when [SEC-401](./SEC-401-AUDIT-SCOPE.md) audit completes
 
 This page defines what external participants can expect from the **current** testnet. It is not a mainnet commitment.
 
@@ -24,7 +24,7 @@ A **coordinated Sepolia deployment** of Chain Registry: publishers submit signed
 | **Observer** (default in reuse scripts) | `false` | Syncs Sepolia staking/registry; serves API; admits publishes into **pending**; does **not** run local PBFT finalization |
 | **Validator** | `true` + `CREG_VALIDATOR_KEY` + stake | Runs analysis, votes, and can drive packages to **verified** on the local chain |
 
-**NET-301 (2026-06-09):** Maintainer lab runs **2 validators + 1 observer** with PBFT quorum; publish reaches **`verified`** with `validator_count=2`. Windows Docker lab uses `CREG_DEV_SANDBOX=true` (behavioural analysis bypass) until [SANDBOX-301](./NEXT_WORK.md) on Linux. Public internet hosting and release binaries are still pending — external users without operator coordination should treat this as **coordinated lab**, not a self-service public fleet.
+**NET-301 (2026-06-09):** Maintainer lab runs **2 validators + 1 observer** with PBFT quorum; publish reaches **`verified`** with `validator_count=2`. **HOSTING-301 (2026-06-10):** Public HTTPS at `https://api.testnet.cregnet.dev` and sibling vhosts (see [README](../README.md)). **SANDBOX-301 (2026-06-10):** Production compose uses real nsjail sandbox (`sandbox-301-verify.ps1`). Windows dev soak may still use `CREG_DEV_SANDBOX=true` locally only.
 
 ---
 
@@ -38,7 +38,7 @@ A **coordinated Sepolia deployment** of Chain Registry: publishers submit signed
 | **revoked** | Rejected or revoked on chain |
 | **UNKNOWN** | Not on chain and not in pending (wrong node, restart, wrong URL, or cache) |
 
-**Verified** means this **node’s** chain store has accepted the package after validator workflow. In the maintainer 3-node lab, all three nodes reach the same tip after quorum finalization; strangers on the public internet still need a **hosted node URL** (not yet published in the signed chain spec).
+**Verified** means this **node’s** chain store has accepted the package after validator workflow. On the public fleet, use `CREG_NODE_URL=https://api.testnet.cregnet.dev` (or the operator URL you trust).
 
 ---
 
@@ -51,8 +51,8 @@ A **coordinated Sepolia deployment** of Chain Registry: publishers submit signed
 5. **Shielded publish** — Off unless `CREG_SHIELDED_PUBLISH_ENABLED=true` on client and node (experimental, SEC-304/305).
 6. **CLI / REST footguns** — Always pass `--node-url` (or `CREG_NODE_URL`) for local testnet; URL-encode canonicals in REST paths (`@` and `/` break unencoded routes).
 7. **Bootnodes / public IPFS in spec** — Example hostnames; production testnet fleet not operated by this repo alone.
-8. **Dev sandbox on Windows lab** — `CREG_DEV_SANDBOX=true` skips real behavioural sandboxing (SB012 approve-with-warning). Do not treat Windows soak as production security validation; use Linux `start-3node-sandbox.ps1` for SANDBOX-301.
-9. **Public URLs** — Chain spec still points at localhost or placeholders until a domain is registered and [patch-sepolia-chain-spec-services.ps1](../chain-registry/testnet/patch-sepolia-chain-spec-services.ps1) is run with `-BaseDomain` (see [gcp-public-hosting.md](../chain-registry/testnet/gcp-public-hosting.md)).
+8. **Dev sandbox profile** — `CREG_DEV_SANDBOX=true` in `sepolia-3node.env` skips real behavioural sandboxing (SB012 approve-with-warning). Do not treat that profile as production security validation; use `start-3node-sandbox.ps1` + `sandbox-301-verify.ps1` for SANDBOX-301 (Linux container backend; Docker Desktop WSL2 on Windows qualifies).
+9. **Public URLs** — Live at `*.testnet.cregnet.dev` after HOSTING-301. Re-patch spec with [prepare-public-hosting.ps1](../chain-registry/testnet/prepare-public-hosting.ps1) when URLs change; verify with [hosting-301-verify.ps1](../chain-registry/testnet/hosting-301-verify.ps1).
 
 ---
 
@@ -82,8 +82,9 @@ A **coordinated Sepolia deployment** of Chain Registry: publishers submit signed
 | OPS-201 sign-off | Done 2026-05-30 (see [TESTNET_SEPOLIA_RUNBOOK.md](./TESTNET_SEPOLIA_RUNBOOK.md)) |
 | This scope page published | Yes |
 | NET-301 multi-validator quorum (maintainer lab) | **Done** 2026-06-09 (`net-301-quorum-verify.ps1`; dev sandbox on Windows) |
-| SANDBOX-301 real nsjail engine | Open — Linux Docker only |
-| Public chain-spec URLs + hosting | Open — see gcp-public-hosting runbook |
+| SANDBOX-301 real nsjail engine | **Done** 2026-06-10 (`sandbox-301-verify.ps1`; `Dockerfile.windows` app rebuild + secure image overlay) |
+| Public chain-spec URLs + hosting (HOSTING-301) | **Done** 2026-06-10 — [gcp-public-hosting.md](../chain-registry/testnet/gcp-public-hosting.md) |
+| Waitlist (static + Firebase) | **Done** — [WAITLIST_FIREBASE_DEPLOY.md](./WAITLIST_FIREBASE_DEPLOY.md) |
 
 ---
 

@@ -1,375 +1,152 @@
 # Chain Registry
 
-> A decentralized, Byzantine-Fault-Tolerant package distribution network that replaces single-authority trust in npm/PyPI/Cargo with cryptographic consensus from a staked validator set.
+A decentralized package registry that replaces single-authority trust (npm, PyPI, Cargo, and similar) with **independent validator consensus**. Packages are content-addressed, analyzed through a multi-stage security pipeline, finalized by PBFT quorum, and anchored to Ethereum.
 
-[![Testnet](https://img.shields.io/badge/testnet-creg--testnet--1-blue)](chain-registry/testnet/chain-spec.sepolia.json)
-[![Sepolia L1](https://img.shields.io/badge/L1-Sepolia-11155111-purple)](https://sepolia.etherscan.io)
-[![Validators](https://img.shields.io/badge/validators-up%20to%2050-green)](chain-registry/testnet/chain-spec.sepolia.json)
-[![Kubernetes](https://img.shields.io/badge/k8s-manifests%20available-blue)](chain-registry/k8s/)
-[![License](https://img.shields.io/badge/license-MIT-lightgrey)](#license)
-[![Rust](https://img.shields.io/badge/rust-1.90-orange)](chain-registry/Cargo.toml)
-[![Solidity](https://img.shields.io/badge/solidity-0.8.24-purple)](chain-registry/contracts/)
+**Network:** `creg-testnet-1` on Sepolia testnet · **Phase:** public alpha
 
 ---
 
-## What Is Chain Registry?
+## What problem this solves
 
-**The problem.** Modern software supply chain attacks — `event-stream`, SolarWinds, XZ Utils, the 2024 `ua-parser-js` compromise — all exploit the same weakness: the single-authority trust model of package registries like npm, PyPI, Maven, and RubyGems. One compromised maintainer, one stolen API token, or one unreviewed merge is enough to ship malicious code to millions of downstream consumers.
-
-**The solution.** Chain Registry replaces single-authority trust with a **decentralized Byzantine-Fault-Tolerant validator network** that independently analyzes every package before it is considered `Verified`. Each package passes through a three-stage validation pipeline — static analysis, behavioral sandbox, ML deep scan — and only becomes installable once a `⌊2n/3⌋+1` PBFT quorum of economically-staked validators has signed an `Approve` vote. Packages are content-addressed in IPFS, the chain is persisted in RocksDB, and final state roots are anchored to Ethereum L1 via a Groth16 rollup bridge.
-
-**Current status.** The primary deployment path is the **Sepolia testnet stack** in [`chain-registry/docker-compose.yml`](chain-registry/docker-compose.yml): IPFS, signed chain-spec server, validator node, PostgreSQL indexer, Sepolia faucet, relayer, and web explorer. Chain parameters and contract addresses live in [`chain-registry/testnet/chain-spec.sepolia.json`](chain-registry/testnet/chain-spec.sepolia.json) (`creg-testnet-1`, phase `alpha`). A **local three-validator bootstrap** is available via [`chain-registry/local-testnet.ps1`](chain-registry/local-testnet.ps1). Deep technical analysis: [`chain-registry/DEEP_DIVE_ANALYSIS.md`](chain-registry/DEEP_DIVE_ANALYSIS.md). Kustomize manifests: [`chain-registry/k8s/`](chain-registry/k8s/).
+Supply-chain attacks exploit one compromised maintainer or stolen API token. Chain Registry treats every publish as a **consensus decision**: economically staked validators run static analysis, behavioral sandboxing, and ML-assisted review before a package can reach **verified** status. Consumers install against cryptographic verdicts, not publisher reputation alone.
 
 ---
 
-## Quick Start
+## How it works
 
-**Prerequisites.**
-
-- Docker Desktop (or docker-engine + compose v2)
-- Sepolia RPC URL (`SEPOLIA_RPC_URL` or `CREG_ETH_RPC`)
-- Faucet operator address in `.env` (`FAUCET_ADDRESS` — required by compose)
-- Optional: `FAUCET_PRIVATE_KEY`, `RELAYER_PRIVATE_KEY` for funded services
-
-**Sepolia testnet stack (matches `docker-compose.yml`).**
-
-```bash
-cd chain-registry
-cp .env.example .env
-# Edit .env: SEPOLIA_RPC_URL, FAUCET_ADDRESS, contract overrides if needed
-docker compose up -d --build
-curl http://localhost:8090/v1/health
-```
-
-Default host ports from compose: **node API 8090**, **web explorer 3007**, **faucet 8082**, **relayer 8083**, **indexer 8084**, **IPFS API 5001**, **chain spec 8888**, **PostgreSQL 5432**.
-
-**Health checks.**
-
-```bash
-curl http://localhost:8090/v1/health
-curl http://localhost:3007/health
-curl http://localhost:8082/health
-```
-
-**Optional profiles.**
-
-- CLI: `docker compose --profile cli run --rm cli --help`
-- TUI explorer: `docker compose --profile tui run --rm tui-explorer`
-- Observability overlay: `docker compose -f docker-compose.yml -f observability/docker-compose.observability.yml up -d`
-
-**Local three-validator cluster (no Sepolia).**
-
-```powershell
-cd chain-registry
-./local-testnet.ps1 -RunSmokeTests
-```
-
----
-
-## Architecture Overview
+1. **Publish** — A staked publisher signs a package, pins it to IPFS, and submits to the network.
+2. **Validate** — Validators run a three-stage pipeline (static → sandbox → deep scan).
+3. **Finalize** — A `⌊2n/3⌋+1` PBFT quorum records the verdict on the chain (RocksDB).
+4. **Install** — The `creg` CLI and explorers read **verified** status before delegating to npm/pip/cargo shims.
+5. **Anchor** — State roots can be posted to Ethereum L1 via the Groth16 rollup bridge.
 
 ```mermaid
-graph LR
-    CLI[creg CLI] -->|HTTP/gRPC| NODE[Validator Node]
-    CLI -->|ipfs add| IPFS[(IPFS)]
-    NODE --> PIPE[3-Stage Pipeline]
-    PIPE --> PBFT[PBFT Consensus]
-    PBFT --> BP[Block Producer]
-    BP --> ROCKS[(RocksDB)]
-    BP --> BR[Bridge]
-    BR --> L1[Ethereum L1]
-    NODE --> WEB[Web Explorer]
-    NODE --> TUI[TUI Explorer]
-    NODE --> PG[(PostgreSQL)]
+flowchart LR
+    Publisher[Publisher] -->|IPFS + signed publish| Node[Validator network]
+    Node --> Pipeline[Security pipeline]
+    Pipeline --> PBFT[PBFT consensus]
+    PBFT --> Chain[(Chain store)]
+    Chain --> CLI[creg CLI / explorers]
+    Chain --> L1[Ethereum Sepolia]
 ```
 
 | Layer | Technology |
-| --- | --- |
-| **Validator runtime** | Rust 1.90 · Tokio · axum · tonic · libp2p |
-| **Consensus** | Custom PBFT · Ed25519-based VRF · Gossipsub broadcast |
-| **Validation Stage 1** | Static analysis (entropy, YARA-X, Levenshtein typosquat, diff) |
-| **Validation Stage 2** | Sandbox waterfall: nsjail → gVisor → Docker → WASM |
-| **Validation Stage 3** | ML deep scan: ONNX CodeBERT · OSV.dev · threat intel · optional LLM |
-| **ZK layer** | arkworks Groth16 · BN254 · snarkJS verifier contract |
-| **Smart contracts** | Solidity 0.8.24 · Foundry · 17 contracts |
-| **Content addressing** | IPFS Kubo v0.27 |
-| **Storage** | RocksDB (embedded) + PostgreSQL (indexer via db-sync) |
-| **Bridge** | alloy 0.6 → Ethereum / Arbitrum / Optimism / Polygon |
-| **Web UI** | React 19 · Vite · Viem · MetaMask / WalletConnect |
-| **Terminal UI** | Ratatui |
-| **Observability** | Prometheus · Alertmanager · Grafana |
-| **Orchestration** | Docker Compose (dev) · Kustomize (prod) |
+|-------|------------|
+| Validator runtime | Rust · libp2p · axum |
+| Consensus | PBFT · Ed25519 |
+| Content addressing | IPFS |
+| Smart contracts | Solidity on Sepolia (staking, registry, governance, ZK verifier) |
+| CLI | `creg` — publish, install, stake, audit, multisig |
+| Web | React explorer · public REST API |
 
 ---
 
-## CLI Usage
+## Live services
 
-The `creg` CLI ships **27 commands**. The most-used subset:
+Public HTTPS endpoints (maintainer-operated):
 
-| Command | Description |
-| --- | --- |
-| `creg keygen` | Generate an Ed25519 keypair with BIP-39 mnemonic |
-| `creg stake --amount N` | Stake CREG tokens as publisher or validator |
-| `creg publish <tarball>` | Sign, pin to IPFS, and submit a package to the pending pool |
-| `creg install <pkg>` | Verify trust verdict and install (or delegate to real npm/pip/cargo) |
-| `creg status <pkg>` | Look up the verdict for a package without installing |
-| `creg audit` | Audit every installed package against the chain |
-| `creg verify <pkg>` | Single-package verification with proof checkpoint |
-| `creg multisig init` | Start an M-of-N co-signed publish session |
-| `creg multisig sign` | Co-sign a pending multisig publish session |
-| `creg multisig submit` | Submit once the threshold is met |
-| `creg setup-shims` | Install PATH shims for npm/pip/cargo/gem/mvn |
-| `creg remove-shims` | Restore original package manager binaries |
-| `creg doctor` | Run health checks (basic or full E2E testnet mode) |
-| `creg console` | Launch the Ratatui terminal explorer |
-| `creg watch` | Real-time stream of publish/consensus events |
-| `creg search <q>` | Search the chain-indexed package metadata |
-| `creg info <pkg>` | Package detail with validator signatures |
-| `creg diff` | Diff local lockfile against chain state |
-| `creg testnet status` | Show testnet node health and chain stats |
-| `creg testnet drip` | Request testnet tokens from the faucet (solves PoW) |
-| `creg advanced zk-generate <pkg>` | Generate a Groth16 proof for a package |
-| `creg advanced zk-verify <pkg>` | Verify a package's ZK proof |
-| `creg advanced ml-verify <pkg>` | Run ML deep scan locally |
-| `creg advanced wasm-validate <pkg>` | Run the WASM validator on a package |
-| `creg recovery init` | Split a key via Shamir for social recovery |
-| `creg cache --clear` | Clear the verification cache |
-| `creg config init` | Initialize `~/.creg/config.toml` |
+| Service | URL |
+|---------|-----|
+| **API** | https://api.testnet.cregnet.dev |
+| **Explorer** | https://explorer.testnet.cregnet.dev |
+| **Faucet** | https://faucet.testnet.cregnet.dev |
+| **Chain spec** | https://spec.testnet.cregnet.dev |
+| **IPFS gateway** | https://ipfs.testnet.cregnet.dev |
+| **Waitlist** | https://waitlist.cregnet.dev |
+
+**Binaries:** [v0.1.0-testnet release](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases/tag/v0.1.0-testnet) (`creg` + `creg-node` for Linux, Windows, macOS).
+
+Chain parameters and contract addresses: [`chain-registry/testnet/chain-spec.sepolia.json`](chain-registry/testnet/chain-spec.sepolia.json).
 
 ---
 
-## Publishing a Package
+## Who this is for
 
-### Step 1 — Generate keys and stake
-
-```bash
-creg keygen publisher --out ~/.creg/publisher.key
-
-# Stake tCREG on Sepolia (separate EOA wallet — not the Ed25519 key file).
-export CREG_STAKING_ADDR=0xf28C63C4Aafd27025E535Ab9ab7B4daC18C96Bc2
-export CREG_TOKEN_ADDR=0x97c21d46B3eac604e92E907D54aA92eEc0Af550b
-creg stake --amount 1 --role publisher \
-  --key ~/.creg/publisher-eoa.key \
-  --rpc-url "$SEPOLIA_RPC_URL"
-```
-
-See [docs/PUBLIC_TESTNET_QUICKSTART.md](docs/PUBLIC_TESTNET_QUICKSTART.md) for the full publisher/developer/validator paths.
-
-### Step 2 — Publish (single publisher)
-
-```bash
-creg publish ./my-pkg-1.0.0.tgz \
-  --key-file ~/.creg/publisher.key \
-  --publisher-address 0xYourPublisherAddress \
-  --ecosystem npm
-```
-
-The CLI hashes the tarball, pins it to IPFS, constructs a `PublishRequest`, signs the canonical package id, content hash, and canonical `publisher_address`, and submits the request over gRPC with REST fallback. Runtime admission now rejects unstaked publishers before the package reaches the pending pool.
-
-### Multisig variant (M-of-N publishers)
-
-```bash
-# Coordinator:
-creg multisig init my-pkg-1.0.0.tgz --threshold 2 --publisher-address 0xYourPublisherAddress
-
-# Each co-signer runs:
-creg multisig sign --session .creg-multisig.json --key-file ~/keyA.key
-
-# Once threshold met, any co-signer runs:
-creg multisig submit --session .creg-multisig.json
-```
-
-### Shielded variant (experimental — disabled by default)
-
-Shielded publish is **off** unless both the CLI and node set `CREG_SHIELDED_PUBLISH_ENABLED=true` (Phase 3 / SEC-304). The `--shield` flag is hidden from `creg publish --help` until E2E coverage lands (SEC-305).
-
-When enabled, the tarball is AES-256-GCM encrypted and the key is threshold-encrypted to the validator set. Treat as experimental; see [`docs/PHASE3_KICKOFF.md`](docs/PHASE3_KICKOFF.md).
+| Audience | Start here |
+|----------|------------|
+| **Publishers & developers** | [docs/PUBLIC_TESTNET_QUICKSTART.md](docs/PUBLIC_TESTNET_QUICKSTART.md) |
+| **Validators & operators** | [chain-registry/testnet/OPERATOR.md](chain-registry/testnet/OPERATOR.md) |
+| **Participants — scope & limits** | [docs/TESTNET_PHASE_SCOPE.md](docs/TESTNET_PHASE_SCOPE.md) |
+| **Infrastructure & hosting** | [chain-registry/testnet/gcp-public-hosting.md](chain-registry/testnet/gcp-public-hosting.md) |
 
 ---
 
-## Running a Validator Node
+## Quick start (developers)
 
-| Env var | Description | Example |
-| --- | --- | --- |
-| `CREG_NODE_ID` | Node identifier | `node-1` |
-| `CREG_IS_VALIDATOR` | Enable validator role | `true` |
-| `CREG_VALIDATOR_KEY` | Hex-encoded Ed25519 secret key | `ed25519:...` |
-| `CREG_LISTEN` | REST API listen address | `0.0.0.0:8080` |
-| `CREG_DATA_DIR` | RocksDB data directory | `/data` |
-| `CREG_P2P_LISTEN` | libp2p listen multiaddr | `/ip4/0.0.0.0/tcp/9000` |
-| `CREG_P2P_SEEDS` | Seed peers | `/ip4/1.2.3.4/tcp/9000/p2p/<peer-id>` |
-| `CREG_ETH_RPC` | Ethereum RPC endpoint | `https://mainnet.infura.io/...` |
-| `CREG_IPFS_URL` | IPFS API endpoint | `http://ipfs:5001` |
-| `CREG_BLOCK_INTERVAL` | Seconds between blocks | `2` |
-| `CREG_SINGLE_VALIDATOR_MODE` | Collapse quorum to 1 (dev only) | `false` on mainnet |
-| `CREG_DEV_SANDBOX` | Skip sandbox when no engine available | `false` on mainnet |
-| `CREG_ZK_ENABLED` | Enable ZK proof path | `true` |
-| `CREG_ML_ENABLED` | Enable ML deep scan | `true` |
-| `CREG_WASM_ENABLED` | Enable WASM validator engine | `true` |
-| `CREG_REGISTRY_ADDR` | Registry.sol contract address | `0x...` |
-| `CREG_STAKING_ADDR` | Staking.sol contract address | `0x...` |
-| `CREG_GOVERNANCE_ADDR` | Governance.sol contract address | `0x...` |
-| `CREG_ZK_VERIFIER_ADDR` | ZKVerifier.sol address | `0x...` |
-| `RUST_LOG` | Log filter | `info,chain_registry_node=debug` |
-
-**Docker run example.**
+**Install CLI** (from release or source):
 
 ```bash
-docker run -d \
-  --name creg-node \
-  -p 8080:8080 -p 9000:9000 -p 50051:50051 \
-  -v creg-data:/data \
-  -e CREG_NODE_ID=node-1 \
-  -e CREG_IS_VALIDATOR=true \
-  -e CREG_VALIDATOR_KEY=$NODE1_VALIDATOR_KEY \
-  -e CREG_DATA_DIR=/data \
-  -e CREG_ETH_RPC=https://sepolia.infura.io/v3/$INFURA_KEY \
-  -e CREG_IPFS_URL=http://ipfs:5001 \
-  -e CREG_DEV_SANDBOX=false \
-  ghcr.io/chain-registry/node:latest
+# From GitHub release
+./chain-registry/scripts/install-creg.sh --version v0.1.0-testnet
+
+# Or build from source
+cd chain-registry && cargo build --release -p cli
 ```
 
-**On-chain staking.** Before your node can vote, you must stake on `Staking.sol` and be approved by governance:
+**Point at the public API:**
 
 ```bash
-creg stake --amount 10000 --role validator --address 0xYourEthAddress
-# Governance multisig then approves your validator via Governance.sol proposals
+export CREG_NODE_URL=https://api.testnet.cregnet.dev
+creg doctor
 ```
+
+Full publisher, validator, and staking flows: [PUBLIC_TESTNET_QUICKSTART.md](docs/PUBLIC_TESTNET_QUICKSTART.md).
 
 ---
 
-## Smart Contracts
+## Repository layout
 
-| Contract | Purpose | Status |
-| --- | --- | --- |
-| **Registry.sol** | Core package index; PBFT finalization + ZK verification | **Active** |
-| **Staking.sol** | Publisher & validator stake management, slashing | **Active** |
-| **Governance.sol** | M-of-N multisig + emergency pause | **Active** |
-| **GovernanceV2.sol** | Token-weighted governance (future migration) | **Planned** |
-| **Reputation.sol** | On-chain validator approval/rejection counters | **Active** |
-| **VRF.sol** | Chainlink VRF validator selection | **Partial** (callback incomplete) |
-| **CregToken.sol** | ERC20 + EIP-2612 permit for CREG | **Active** |
-| **ZKVerifier.sol** | Groth16 verifier wrapper (ISSUE-002 fixed; see `contracts/test/ZKVerifier.t.sol`) | **Active** |
-| **Groth16Verifier.sol** | snarkJS-generated Groth16 verifier | **Active** |
-| **ZKSlashingVerifier.sol** | Double-signing evidence verifier | **Active** |
-| **SlashingEvidence.sol** | Permissionless slashing evidence submission | **Active** |
-| **Appeal.sol** | Publisher appeal process | **Active** |
-| **BatchOperations.sol** | Batch submit / verify helpers | **Inactive** (stake check broken) |
-| **ValidatorRewards.sol** | Staking rewards distribution | **Active** |
-| **PinningRewards.sol** | IPFS pinner rewards | **Active** |
-| **PackageInsurance.sol** | Optional insurance coverage for verified packages | **Active** |
-| **PrivateRegistry.sol** | Enterprise M-of-N decrypted registries (ISSUE-004) | **Planned** — no contract in tree; implement only with enterprise commitment (D5) |
-| **CrossChainRegistry.sol** | Multi-chain verification receipts | **Scaffold** |
-
-See [`chain-registry/DEEP_DIVE_ANALYSIS.md`](chain-registry/DEEP_DIVE_ANALYSIS.md) for contract-level findings and issue registry.
+| Path | Contents |
+|------|----------|
+| [`chain-registry/`](chain-registry/) | Rust workspace, contracts, explorer, testnet compose, GCP scripts |
+| [`Creg-waitlist/`](Creg-waitlist/) | Marketing waitlist SPA + Firebase `registerWaitlist` function |
+| [`docs/`](docs/) | Documentation index, runbooks, security, budget model |
+| [`circuits/`](circuits/) | ZK Groth16 circuits |
 
 ---
 
-## Configuration Reference
+## Documentation
 
-### `node.toml` (alternative to env vars)
+**[docs/README.md](docs/README.md)** — full index (operators, security, testnet, cost model).
 
-```toml
-[node]
-id            = "node-1"
-is_validator  = true
-listen_addr   = "0.0.0.0:8080"
-data_dir      = "/data"
-block_interval_secs = 2
+| Document | Purpose |
+|----------|---------|
+| [DEEP_DIVE_ANALYSIS.md](chain-registry/DEEP_DIVE_ANALYSIS.md) | Technical architecture and issue registry |
+| [TESTNET_READINESS_REPORT.md](chain-registry/TESTNET_READINESS_REPORT.md) | Readiness assessment and evidence |
+| [NEXT_WORK.md](docs/NEXT_WORK.md) | Current open work (maintainers) |
+| [GCP-BUDGET-ARCHITECTURE.md](docs/GCP-BUDGET-ARCHITECTURE.md) | Two-project cost model (VM + Firebase) |
 
-[p2p]
-listen  = "/ip4/0.0.0.0/tcp/9000"
-seeds   = ["/ip4/1.2.3.4/tcp/9000/p2p/12D3KooW..."]
+---
 
-[ethereum]
-rpc_url           = "https://mainnet.infura.io/v3/YOUR_KEY"
-registry_addr     = "0x..."
-staking_addr      = "0x..."
-governance_addr   = "0x..."
-zk_verifier_addr  = "0x..."
+## Status (June 2026)
 
-[ipfs]
-url = "http://ipfs:5001"
+| Milestone | Status |
+|-----------|--------|
+| Sepolia contracts + 3-node lab | Live |
+| 2-validator PBFT quorum (NET-301) | Done |
+| Real sandbox engine (SANDBOX-301) | Done |
+| Public HTTPS hosting (HOSTING-301) | Done — `testnet.cregnet.dev` |
+| Binary release `v0.1.0-testnet` (DIST-301) | Done |
+| Waitlist (static + Firebase registration) | Live |
+| External security audit (SEC-401) | Scheduled — scope ready |
 
-[sandbox]
-dev_bypass           = false
-nsjail_config        = "/app/config/sandbox/nsjail-seccomp.cfg"
-docker_seccomp       = "/app/config/sandbox/docker-seccomp.json"
-rootfs_dir           = "/app/config/sandbox/rootfs"
-timeout_secs         = 120
-memory_mb            = 512
-
-[features]
-zk_enabled   = true
-ml_enabled   = true
-wasm_enabled = true
-llm_enabled  = false
-
-[logging]
-filter = "info,chain_registry_node=debug,zk_validator=debug"
-```
-
-### Key env vars (deployment)
-
-| Var | Purpose |
-| --- | --- |
-| `CREG_TESTNET_MODE` | Enable multi-node testnet allowances |
-| `CREG_TLS_CERT` / `CREG_TLS_KEY` | Enable HTTPS on the REST API (feature `tls`) |
-| `CREG_PG_URL` | Enable PostgreSQL indexer sync |
-| `OPENROUTER_API_KEY` | Optional cloud LLM backend |
-| `ANTHROPIC_API_KEY` | Optional cloud LLM backend |
+This is a **public alpha testnet**, not mainnet. Economic guarantees, cross-chain features, and formal audit completion are still in progress. See [TESTNET_PHASE_SCOPE.md](docs/TESTNET_PHASE_SCOPE.md) for participant expectations.
 
 ---
 
 ## Contributing
 
-### Build
-
-```bash
-cd chain-registry
-cargo build --workspace --release
-cd contracts && forge build
-cd ../explorer && npm ci && npm run build
-```
-
-### Test
+Contributions welcome. Build and test from `chain-registry/`:
 
 ```bash
 cargo test --workspace
 cd contracts && forge test
-cd ../explorer && npm test
 ```
 
-### Full testnet smoke test
-
-```bash
-make testnet          # start 3-node cluster
-make testnet-smoke    # full E2E diagnostic via `creg doctor --testnet`
-```
-
-### PR process
-
-1. Fork the repository and create a feature branch.
-2. Run `cargo fmt` and `cargo clippy --workspace --all-targets -- -D warnings` before committing.
-3. Add tests — unit tests for `crates/*`, Foundry tests for `contracts/`.
-4. Reference issue IDs from [`chain-registry/DEEP_DIVE_ANALYSIS.md`](chain-registry/DEEP_DIVE_ANALYSIS.md) (ISSUE-001…) in your PR description.
-5. CI runs `cargo test`, `forge test`, and explorer tests; all must pass.
-
-### Documentation
-
-- [`docs/PUBLIC_TESTNET_QUICKSTART.md`](docs/PUBLIC_TESTNET_QUICKSTART.md) — publisher / developer / validator quickstart
-- [`chain-registry/TESTNET_READINESS_REPORT.md`](chain-registry/TESTNET_READINESS_REPORT.md) — evidence-based public testnet readiness (2026-06-08)
-- [`chain-registry/DELIVERABLES_INDEX.md`](chain-registry/DELIVERABLES_INDEX.md) — current artifact and deliverable map
-- [`chain-registry/docs/API_ADMISSION_BOUNDARY_CONTRACT.md`](chain-registry/docs/API_ADMISSION_BOUNDARY_CONTRACT.md) — API route boundaries and admission contract
-- [`chain-registry/docs/API_COOKBOOK.md`](chain-registry/docs/API_COOKBOOK.md) — live REST API curl cookbook
-- [`chain-registry/docs/VALIDATOR_ONBOARDING_RUNBOOK_2026-05-18.md`](chain-registry/docs/VALIDATOR_ONBOARDING_RUNBOOK_2026-05-18.md) — validator onboarding guide and runbook
-- [`chain-registry/docs/archive/TESTNET_READINESS_REPORT.md`](chain-registry/docs/archive/TESTNET_READINESS_REPORT.md) — archived public testnet readiness snapshot
-- [`chain-registry/docs/archive/COMPREHENSIVE_CODEBASE_ANALYSIS.md`](chain-registry/docs/archive/COMPREHENSIVE_CODEBASE_ANALYSIS.md) — archived repository-wide audit snapshot
-- [`chain-registry/docs/archive/REMEDIATION_BACKLOG.md`](chain-registry/docs/archive/REMEDIATION_BACKLOG.md) — archived remediation backlog and implementation history
-- [`chain-registry/docs/archive/IMPLEMENTATION_PLAN.md`](chain-registry/docs/archive/IMPLEMENTATION_PLAN.md) — archived implementation roadmap and sequencing plan
+See [DELIVERABLES_INDEX.md](chain-registry/DELIVERABLES_INDEX.md) for scripts and compose profiles. Reference issue IDs from [DEEP_DIVE_ANALYSIS.md](chain-registry/DEEP_DIVE_ANALYSIS.md) in pull requests.
 
 ---
 
 ## License
 
-MIT License. See [`LICENSE`](LICENSE) for details.
+MIT — see [LICENSE](LICENSE).

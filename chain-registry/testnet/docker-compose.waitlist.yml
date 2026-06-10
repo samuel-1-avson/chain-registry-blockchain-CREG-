@@ -1,0 +1,21 @@
+# Marketing / waitlist static site (nginx). TLS via Caddy in docker-compose.3node-ingress.yml.
+#
+# Prerequisite: testnet/waitlist/dist/ exists (run deploy-waitlist.ps1 -BuildOnly).
+# DNS: A record for CREG_PUBLIC_WAITLIST_HOST (e.g. waitlist.cregnet.dev) -> VM IP.
+
+services:
+  waitlist:
+    build:
+      context: ./waitlist
+      dockerfile: Dockerfile
+    image: creg-waitlist:local
+    container_name: creg-waitlist
+    networks:
+      - creg-3node
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

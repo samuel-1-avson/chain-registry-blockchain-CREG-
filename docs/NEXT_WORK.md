@@ -3,7 +3,7 @@
 **Updated:** 2026-06-10  
 **Context:** [REMEDIATION_BACKLOG.md](./REMEDIATION_BACKLOG.md), [TESTNET_SEPOLIA_RUNBOOK.md](./TESTNET_SEPOLIA_RUNBOOK.md), [../chain-registry/TESTNET_READINESS_REPORT.md](../chain-registry/TESTNET_READINESS_REPORT.md)
 
-The coordinated Sepolia 3-node lab is **proven** including **NET-301** (2-validator quorum, publish → `verified`, tip advance on 2026-06-09). **DIST-301** shipped `v0.1.0-testnet` binaries on 2026-06-10. Remaining P0 work: **real sandboxing (SANDBOX-301), public hosting URLs, and audit booking (SEC-401)**.
+The coordinated Sepolia 3-node lab is **proven** including **NET-301** (2-validator quorum, publish → `verified`, tip advance on 2026-06-09). **DIST-301** shipped `v0.1.0-testnet` binaries on 2026-06-10. **SANDBOX-301** passed on 2026-06-10. **HOSTING-301** passed on 2026-06-10 (`hosting-301-verify.ps1` on `testnet.cregnet.dev`). Remaining P0: **SEC-401** audit booking.
 
 | Owner | Use for assignment; default **TBD** until filled in. |
 
@@ -16,10 +16,11 @@ These five items are the gating work before inviting external participants with 
 | # | ID | Owner | Task | Acceptance criteria |
 |---|-----|-------|------|---------------------|
 | 1 | **NET-301** | done | Multi-validator PBFT quorum on Sepolia | **Done** 2026-06-09 — `net-301-quorum-verify.ps1` pass; validator-2 Active; `validator_count=2`; tip 2→3; Windows lab uses `CREG_DEV_SANDBOX=true`. Topology: [../chain-registry/testnet/OPERATOR.md](../chain-registry/testnet/OPERATOR.md). |
-| 2 | **SANDBOX-301** | TBD | Real behavioral sandbox (disable dev bypass) | Fleet runs with `CREG_DEV_SANDBOX=false`. At least one engine (**nsjail** or **gVisor/runsc**) detected and used on Linux validator images; publish smoke shows sandbox engine ≠ `dev-bypass`. Windows dev may keep bypass only in documented local profiles. |
+| 2 | **SANDBOX-301** | done | Real behavioral sandbox (disable dev bypass) | **Done** 2026-06-10 — `sandbox-301-verify.ps1` pass; validators on `chain-registry-node-secure:latest` with `CREG_DEV_SANDBOX=false`; nsjail detected via `--help` probe; publish smoke shows real engine (not `dev-bypass`). Windows dev may keep `CREG_DEV_SANDBOX=true` only in documented local profiles (`start-3node-test.ps1`). |
 | 3 | **DIST-301** | done | Ship `creg` + `creg-node` binaries | **Done** 2026-06-10 — [v0.1.0-testnet release](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases/tag/v0.1.0-testnet) (linux/windows/macos); workflow [27245595554](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/actions/runs/27245595554); `verify-dist-301.ps1` API asset checks pass. |
-| 4 | **SEC-401** | outreach ready | Schedule external security audit | Scope: [SEC-401-AUDIT-SCOPE.md](./SEC-401-AUDIT-SCOPE.md). Outreach template: [SEC-401-VENDOR-OUTREACH.md](./SEC-401-VENDOR-OUTREACH.md). Pin auditor baseline tag `v0.1.0-testnet` before kickoff. **Vendor / start date:** TBD (send RFP). |
-| 5 | **DOC-301** | done | Doc rationalization | **Done** 2026-06-08 — single index at [README.md](./README.md); removed duplicate analyses, phase closeouts, and archive snapshots. |
+| 4 | **SEC-401** | outreach ready | Schedule external security audit | Scope: [SEC-401-AUDIT-SCOPE.md](./SEC-401-AUDIT-SCOPE.md). Generate send-ready email: `.\testnet\prepare-sec-401-outreach.ps1` → `docs/SEC-401-outreach-ready.md`. Pin tag `v0.1.0-testnet` at kickoff. **Vendor / start date:** TBD (send RFP). |
+| 5 | **HOSTING-301** | done | Public HTTPS URLs (GCP + Caddy) | **Done** 2026-06-10 — `testnet.cregnet.dev` → `35.225.225.20`; `hosting-301-verify.ps1` pass (api, explorer, spec, faucet, ipfs). Runbook: [gcp-public-hosting.md](../chain-registry/testnet/gcp-public-hosting.md). Budget: [GCP-BUDGET-ARCHITECTURE.md](./GCP-BUDGET-ARCHITECTURE.md). Optional: fund faucet wallet for native Sepolia gas drips. |
+| 6 | **DOC-301** | done | Doc rationalization | **Done** 2026-06-08 — single index at [README.md](./README.md); removed duplicate analyses, phase closeouts, and archive snapshots. |
 
 ---
 
@@ -57,6 +58,7 @@ These five items are the gating work before inviting external participants with 
 | 3-node soak | 2026-06-08 | `soak-3node-consensus.ps1` — PBFT commit + parity |
 | NET-301 | 2026-06-09 | `net-301-quorum-verify.ps1` — 2-validator quorum + publish verified (dev sandbox on Windows) |
 | DIST-301 | 2026-06-10 | `v0.1.0-testnet` GitHub release — `creg` + `creg-node` for linux/windows/macos |
+| HOSTING-301 | 2026-06-10 | Public HTTPS on GCP (`35.225.225.20`); Caddy TLS; all five vhosts verified |
 | Pending pool persistence | 2026-06-08 | `pending_pool.json` under `CREG_DATA_DIR` |
 | Public lab compose | 2026-06-08 | Explorer + faucet overlay, local service URLs in chain spec |
 | DOC quickstart | 2026-06-08 | [PUBLIC_TESTNET_QUICKSTART.md](./PUBLIC_TESTNET_QUICKSTART.md) |
@@ -71,7 +73,7 @@ These five items are the gating work before inviting external participants with 
 | SEC-306b | PrivateRegistry Planned only |
 | REM-202 | Governance intentionally disabled (REM-201) |
 | REM-205 | Explorer refactor; maintainability only |
-| Public internet hosting | GCP + DNS/TLS paused; see [../chain-registry/testnet/gcp-public-hosting.md](../chain-registry/testnet/gcp-public-hosting.md) when resumed |
+| HOSTING-301 without domain | Superseded — live at `testnet.cregnet.dev` (2026-06-10) |
 | Phase 4 (PROD-*) | Mainnet / release assurance after testnet sign-off |
 
 ---
@@ -80,11 +82,12 @@ These five items are the gating work before inviting external participants with 
 
 ```mermaid
 flowchart TD
-    S1[1 NET-301 multi-validator quorum] --> S2[2 SANDBOX-301 real engine]
-    S2 --> S3[3 DIST-301 release binaries]
-    S3 --> S4[4 SEC-401 audit scheduled]
-    S4 --> S5[5 P1 quality items]
-    S5 --> S6[6 Public hosting when ready]
+    S1[NET-301 quorum] --> S2[SANDBOX-301 nsjail]
+    S2 --> S3[DIST-301 binaries]
+    S3 --> S4[HOSTING-301 public HTTPS]
+    S4 --> S5[Waitlist Firebase]
+    S5 --> S6[SEC-401 audit]
+    S6 --> S7[P1 quality items]
 ```
 
 ### Execution scripts (P0)
@@ -92,24 +95,35 @@ flowchart TD
 | Step | Script / doc | Notes |
 |------|----------------|-------|
 | **NET-301** | `.\testnet\register-validator-2-sepolia.ps1` then `.\testnet\net-301-quorum-verify.ps1` | Requires validator-2 Active on L1; topology in [OPERATOR.md](../chain-registry/testnet/OPERATOR.md) |
-| **SANDBOX-301** | `.\testnet\start-3node-sandbox.ps1` then `.\testnet\soak-3node-sandbox.ps1` | Linux Docker + nsjail; `CREG_DEV_SANDBOX=false` |
+| **SANDBOX-301** | `.\testnet\build-3node-secure-image.ps1` then `.\testnet\start-3node-sandbox.ps1` then `.\testnet\sandbox-301-verify.ps1` | Linux container backend (Docker Desktop WSL2 OK); `CREG_DEV_SANDBOX=false` on validators |
 | **DIST-301** | `git tag v0.1.0-testnet && git push origin v0.1.0-testnet` then `.\testnet\verify-dist-301.ps1` | Install: `CREG_GITHUB_REPO=owner/repo ./scripts/install-creg.sh --version v0.1.0-testnet` |
-| **SEC-401** | Send [SEC-401-VENDOR-OUTREACH.md](./SEC-401-VENDOR-OUTREACH.md) + [SEC-401-AUDIT-SCOPE.md](./SEC-401-AUDIT-SCOPE.md) | Record vendor + **start date** below when booked |
+| **SEC-401** | `.\testnet\prepare-sec-401-outreach.ps1` then email vendors from [SEC-401-VENDOR-OUTREACH.md](./SEC-401-VENDOR-OUTREACH.md) | Attach or link [SEC-401-AUDIT-SCOPE.md](./SEC-401-AUDIT-SCOPE.md); record vendor + **start date** below |
+| **HOSTING-301** | `.\testnet\gcp\run-hosting-301.ps1 -Step all -Confirm` (or step-by-step in [gcp-public-hosting.md](../chain-registry/testnet/gcp-public-hosting.md)) | `.\testnet\hosting-301-verify.ps1 -BaseDomain testnet.cregnet.dev` |
 
-**SEC-401 booking (fill when scheduled):**
+**SEC-401 outreach (send today):**
+
+| Vendor | Contact | Status | Sent |
+|--------|---------|--------|------|
+| Trail of Bits | security@trailofbits.com | **Ready** — [SEC-401-VENDOR-OUTREACH.md](./SEC-401-VENDOR-OUTREACH.md) | ☐ |
+| OpenZeppelin | audits@openzeppelin.com | **Ready** — [SEC-401-VENDOR-OUTREACH.md](./SEC-401-VENDOR-OUTREACH.md) | ☐ |
+
+Copy email bodies from [SEC-401-VENDOR-OUTREACH.md](./SEC-401-VENDOR-OUTREACH.md). Attach or link [SEC-401-AUDIT-SCOPE.md](./SEC-401-AUDIT-SCOPE.md). Archived copy: [archive/SEC-401-outreach-ready.md](./archive/SEC-401-outreach-ready.md).
+
+**SEC-401 booking (fill when vendor confirms):**
 
 | Field | Value |
 |-------|--------|
-| Vendor | _TBD — send [SEC-401-VENDOR-OUTREACH.md](./SEC-401-VENDOR-OUTREACH.md)_ |
+| Vendor | _TBD_ |
 | Start date | _TBD_ |
-| Commit / tag | `v0.1.0-testnet` (pin at kickoff; includes NET-301 + compose sandbox fix) |
+| Commit / tag | `v0.1.0-testnet` @ `245bf5b59341adff6cbf26769360cf30f112f508` (GitHub remote) |
 
 **Public hosting (after domain registered):**
 
 ```powershell
 cd chain-registry
-.\testnet\patch-sepolia-chain-spec-services.ps1 -BaseDomain "testnet.YOUR_DOMAIN"
-# Then deploy per testnet/gcp-public-hosting.md and restart fleet with updated spec URL
+.\testnet\prepare-public-hosting.ps1 -BaseDomain "testnet.YOUR_DOMAIN" -AcmeEmail "you@example.com" -StaticIp "VM_IP"
+# GCP VM: testnet/gcp-public-hosting.md then ./testnet/start-3node-gcp.sh
+.\testnet\hosting-301-verify.ps1 -BaseDomain "testnet.YOUR_DOMAIN"
 ```
 
 ---
@@ -127,9 +141,10 @@ cd chain-registry
 .\testnet\register-validator-2-sepolia.ps1
 .\testnet\net-301-quorum-verify.ps1
 
-# SANDBOX-301 (Linux Docker)
+# SANDBOX-301 (Linux container backend — Docker Desktop WSL2 on Windows OK)
+.\testnet\build-3node-secure-image.ps1
 .\testnet\start-3node-sandbox.ps1
-.\testnet\soak-3node-sandbox.ps1
+.\testnet\sandbox-301-verify.ps1
 
 # Single-node Sepolia reuse
 .\testnet\run-sepolia-reuse.ps1 -StartNode

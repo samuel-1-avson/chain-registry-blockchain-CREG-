@@ -1,0 +1,37 @@
+# TLS reverse proxy for the 3-node public testnet (Let's Encrypt via Caddy).
+# Hostnames come from environment variables set in sepolia-3node.env.
+#
+# Required: CREG_ACME_EMAIL, CREG_PUBLIC_API_HOST, CREG_PUBLIC_EXPLORER_HOST,
+#           CREG_PUBLIC_SPEC_HOST, CREG_PUBLIC_IPFS_HOST
+# Optional: CREG_PUBLIC_FAUCET_HOST (omit or leave empty to skip faucet vhost)
+
+{
+	email {$CREG_ACME_EMAIL}
+}
+
+{$CREG_PUBLIC_WAITLIST_HOST} {
+	reverse_proxy waitlist:80
+}
+
+{$CREG_PUBLIC_API_HOST} {
+	reverse_proxy creg-node-3:8080 {
+		flush_interval -1
+	}
+}
+
+{$CREG_PUBLIC_EXPLORER_HOST} {
+	reverse_proxy web-explorer:80 {
+		flush_interval -1
+	}
+}
+
+{$CREG_PUBLIC_SPEC_HOST} {
+	reverse_proxy spec-server:80
+}
+
+{$CREG_PUBLIC_IPFS_HOST} {
+	reverse_proxy ipfs:5001
+}
+
+# No faucet vhost in this file. Use Caddyfile.with-faucet (compose default) when
+# the faucet service is running — see testnet/gcp-public-hosting.md.

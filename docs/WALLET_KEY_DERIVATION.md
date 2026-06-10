@@ -53,4 +53,4 @@ If the file is from `creg keygen`, the command **refuses** to run and points her
 
 - [SECURITY_OPS_RUNBOOK.md](./SECURITY_OPS_RUNBOOK.md) — hot keys and env vars
 - [TESTNET_SEPOLIA_RUNBOOK.md](./TESTNET_SEPOLIA_RUNBOOK.md) — Sepolia deploy and node boot
-- [PHASE2_SEPOLIA_KICKOFF.md](./PHASE2_SEPOLIA_KICKOFF.md) — Option A reuse checklist
+- [TESTNET_SEPOLIA_RUNBOOK.md](./TESTNET_SEPOLIA_RUNBOOK.md) — Sepolia reuse checklist

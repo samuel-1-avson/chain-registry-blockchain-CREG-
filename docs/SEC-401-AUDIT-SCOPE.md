@@ -83,7 +83,7 @@
 Auditors receive:
 
 1. This repo at commit: _______________
-2. [TESTNET_SEPOLIA_RUNBOOK.md](./TESTNET_SEPOLIA_RUNBOOK.md) and [SEPOLIA_SECOND_OPERATOR_CHECKLIST.md](./SEPOLIA_SECOND_OPERATOR_CHECKLIST.md)
+2. [TESTNET_SEPOLIA_RUNBOOK.md](./TESTNET_SEPOLIA_RUNBOOK.md) and [../chain-registry/testnet/OPERATOR.md](../chain-registry/testnet/OPERATOR.md)
 3. Sepolia RPC (operator-provided key or shared read-only endpoint)
 4. Optional: running node on `:8090` with synced `validator_set_sync`
 
@@ -127,9 +127,19 @@ flowchart LR
 ## 8. References
 
 - [SECURITY_OPS_RUNBOOK.md](./SECURITY_OPS_RUNBOOK.md)
-- [PHASE3_KICKOFF.md](./PHASE3_KICKOFF.md)
+- [REMEDIATION_BACKLOG.md](./REMEDIATION_BACKLOG.md) (SEC-303c cross-chain deferral)
 - [WALLET_KEY_DERIVATION.md](./WALLET_KEY_DERIVATION.md)
 - [adr/ADR-KMS-HOT-KEYS.md](./adr/ADR-KMS-HOT-KEYS.md)
+
+---
+
+## 9. Vendor outreach
+
+Email template and checklist: [SEC-401-VENDOR-OUTREACH.md](./SEC-401-VENDOR-OUTREACH.md)
+
+Generate send-ready copy (pinned tag + SHA): from `chain-registry/`, run `.\testnet\prepare-sec-401-outreach.ps1` → [SEC-401-outreach-ready.md](./SEC-401-outreach-ready.md).
+
+When a vendor confirms, update [NEXT_WORK.md](./NEXT_WORK.md) SEC-401 booking table with vendor name and start date.
 
 ---
 

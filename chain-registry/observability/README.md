@@ -1,10 +1,10 @@
-# Observability — Sepolia single node (REM-211)
+# Observability (REM-211)
 
-Prometheus, Grafana, Loki, and Tempo configs live under `chain-registry/observability/`.
+Prometheus, Grafana, Loki, and Tempo configs for Chain Registry.
 
-## Option A reuse on the host
+## Sepolia single-node (Option A reuse)
 
-When `creg-node` runs at `http://localhost:8090` (`testnet/run-sepolia-reuse.ps1 -StartNode`):
+When `creg-node` runs on the host at `http://localhost:8090` (see `testnet/run-sepolia-reuse.ps1 -StartNode`):
 
 1. Confirm metrics: `curl http://localhost:8090/metrics`
 2. Start Prometheus with the local profile:
@@ -19,9 +19,9 @@ docker run --rm -d --name creg-prom-sepolia -p 9090:9090 `
 
 3. Open http://localhost:9090/targets — `creg_node_sepolia` should be **UP**.
 
-4. Optional full stack: use `docker-compose.observability.yml` with `prometheus.testnet.yml` for the 10-validator Docker testnet.
+4. Optional full stack (Grafana + Loki + alerts): from repo root with main compose files, swap Prometheus config to `prometheus.testnet.yml` for multi-node Docker testnet.
 
-## Validate config (offline)
+### Validate config (offline)
 
 The Prometheus image entrypoint is `prometheus`, not `promtool`. Use:
 
@@ -32,7 +32,7 @@ docker run --rm --entrypoint promtool `
   prom/prometheus:v2.51.0 check config /etc/prometheus/prometheus.yml
 ```
 
-## Key metrics (`GET /metrics`)
+### Key metrics (`GET /metrics`)
 
 **Local CREG chain** (observer node with only genesis is normal):
 
@@ -53,13 +53,17 @@ docker run --rm --entrypoint promtool `
 
 Example alert: `creg_validator_set_sync_state_code != 4` for 5m (when sync enabled).
 
+## Testnet (10 validators)
+
+See comments in `prometheus.testnet.yml` and `docker-compose.observability.yml`.
+
 ## Dashboards
 
-- `chain-registry/observability/grafana-dashboard.json` — import into Grafana.
-- `chain-registry/observability/alerts.yml` — used with default `prometheus.yml`.
+- `grafana-dashboard.json` — import into Grafana (port 3000 when observability compose is up).
+- `alerts.yml` — used with default `prometheus.yml`.
 
 ## Acceptance (REM-211)
 
-- [x] `/metrics` returns Prometheus text from a running node
-- [x] `prometheus.sepolia-local.yml` target healthy for `:8090` (`creg_node_sepolia` **up** at http://localhost:9090/targets)
-- [ ] Grafana dashboard shows node metrics (optional)
+- [ ] `/metrics` returns Prometheus text from running node
+- [ ] `prometheus.sepolia-local.yml` target healthy for `:8090`
+- [ ] Grafana dashboard shows node block/consensus metrics (optional)

@@ -6,9 +6,21 @@
 # =============================================================================
 
 # =============================================================================
-# DOCUMENTATION — ALL .md files ignored
+# DOCUMENTATION — ignore generated/local notes; track operator-facing docs
 # =============================================================================
 *.md
+!DELIVERABLES_INDEX.md
+!TESTNET_READINESS_REPORT.md
+!DEEP_DIVE_ANALYSIS.md
+!DOCKER.md
+!observability/README.md
+!testnet/README.md
+!testnet/OPERATOR.md
+!testnet/QUICKSTART.md
+!testnet/gcp-public-hosting.md
+!testnet/SOAK_TEST.md
+!testnet/bootstrap/README.md
+!testnet/spec-server/README.md
 
 # =============================================================================
 # DOCS DIRECTORY
@@ -263,6 +275,8 @@ core.*
 # TESTNET GENERATED ARTIFACTS
 # =============================================================================
 testnet/sepolia-3node.env
+testnet/gcp/hosting.env
+testnet/gcp/hosting-state.json
 testnet/soak-3node-logs/
 testnet/artifacts/
 config/*/deployment.json

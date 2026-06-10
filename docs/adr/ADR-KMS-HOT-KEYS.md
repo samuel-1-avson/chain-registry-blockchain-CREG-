@@ -100,5 +100,5 @@ Before mainnet sign-off:
 ## References
 
 - [SECURITY_AND_REMEDIATION_IMPLEMENTATION_PLAN.md](../SECURITY_AND_REMEDIATION_IMPLEMENTATION_PLAN.md) — Epic 3.4
-- [PHASE3_KICKOFF.md](../PHASE3_KICKOFF.md)
+- [REMEDIATION_BACKLOG.md](../REMEDIATION_BACKLOG.md) (SEC-301a/b)
 - `chain-registry/crates/common/src/hot_key.rs` — SEC-101b warnings

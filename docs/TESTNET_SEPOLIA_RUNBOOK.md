@@ -307,6 +307,6 @@ Keep the previous `sepolia-latest.json` and spec in git history for forensics.
 ## Related docs
 
 - [SECURITY_AND_REMEDIATION_IMPLEMENTATION_PLAN.md](./SECURITY_AND_REMEDIATION_IMPLEMENTATION_PLAN.md) — REM-210, Phase 2
-- [PHASE1_CLOSEOUT.md](./PHASE1_CLOSEOUT.md)
+- [REMEDIATION_BACKLOG.md](./REMEDIATION_BACKLOG.md)
 - [DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md) — PostgreSQL mirror (optional on testnet)
 - Local 3-validator Docker: `docker-compose.local-testnet.yml` + `local-testnet.ps1` (Anvil, not Sepolia)

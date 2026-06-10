@@ -2,9 +2,11 @@
 
 One-page guide for **publishers**, **developers**, and **validators** joining the Chain Registry Sepolia testnet (`creg-testnet-1`).
 
-**Read first:** [TESTNET_PHASE_SCOPE.md](./TESTNET_PHASE_SCOPE.md) — defines what “verified” means today and known limits (single-observer period, in-memory pending pool, placeholder public URLs in chain spec).
+**Read first:** [TESTNET_PHASE_SCOPE.md](./TESTNET_PHASE_SCOPE.md) — defines what “verified” means today and known limits.
 
-**Readiness snapshot:** [chain-registry/TESTNET_READINESS_REPORT.md](../chain-registry/TESTNET_READINESS_REPORT.md) (2026-06-08).
+**Public API:** `https://api.testnet.cregnet.dev` — set `CREG_NODE_URL` to this (or pass `--node-url`).
+
+**Readiness snapshot:** [TESTNET_READINESS_REPORT.md](../chain-registry/TESTNET_READINESS_REPORT.md)
 
 ---
 
@@ -12,7 +14,7 @@ One-page guide for **publishers**, **developers**, and **validators** joining th
 
 | Requirement | Notes |
 |-------------|--------|
-| **Node URL** | Always set `CREG_NODE_URL` or pass `--node-url`. Default is `http://localhost:8080` — not a public hosted endpoint. |
+| **Node URL** | Set `CREG_NODE_URL=https://api.testnet.cregnet.dev` for the public fleet. Default `http://localhost:8080` is for local dev only. |
 | **Sepolia RPC** | For staking: `SEPOLIA_RPC_URL` or `CREG_ETH_RPC` |
 | **Foundry `cast`** | Required for `creg stake` and `creg testnet stake-*` |
 | **IPFS** | Local Kubo (`ipfs daemon`) or operator-provided gateway for `creg publish` |
@@ -152,7 +154,7 @@ $env:VALIDATOR_2_ETH_PRIVATE_KEY = "0x..."
 .\chain-registry\testnet\register-validator-2-sepolia.ps1
 ```
 
-See [SEPOLIA_SECOND_OPERATOR_CHECKLIST.md](./SEPOLIA_SECOND_OPERATOR_CHECKLIST.md).
+See [TESTNET_SEPOLIA_RUNBOOK.md](./TESTNET_SEPOLIA_RUNBOOK.md) and [OPERATOR.md](../chain-registry/testnet/OPERATOR.md) for validator fleet operations.
 
 ---
 
@@ -203,13 +205,11 @@ When maintainers publish a tag (`v*`), GitHub Actions workflow `release-binaries
 
 ---
 
-## What is not ready for public self-service
+## Alpha limitations
 
-Until the P0 items in [TESTNET_READINESS_REPORT.md](../chain-registry/TESTNET_READINESS_REPORT.md) §7 are closed:
+- **SEC-401** external security audit not yet complete — treat as public alpha, not production.
+- **L1 bridge anchoring** requires operator `CREG_BRIDGE_KEY` configuration.
+- **Cross-chain** and **shielded publish** remain disabled in chain spec.
+- **Governance HTTP API** returns 501 by design.
 
-- Public bootnode / faucet / explorer URLs in `chain-spec.sepolia.json` are placeholders
-- No published `creg` binary installer (build from source or wait for GitHub release)
-- Multi-operator PBFT quorum (NET-301) not shipped — do not assume fleet-wide `verified`
-- L1 bridge anchoring requires operator `CREG_BRIDGE_KEY` configuration
-
-**Support:** [GitHub Issues](https://github.com/chain-registry/chain-registry/issues)
+**Support:** GitHub Issues URL in `chain-spec.sepolia.json` → `support.issues`

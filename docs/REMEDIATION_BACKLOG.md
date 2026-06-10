@@ -24,7 +24,7 @@ Track security and remediation work from [SECURITY_AND_REMEDIATION_IMPLEMENTATIO
 | SEC-105 | done | 2+ | `creg keygen` warning + `creg stake` rejects Ed25519 key file; [WALLET_KEY_DERIVATION.md](./WALLET_KEY_DERIVATION.md) |
 | REM-211 | done | 2+ | Live scrape verified (`creg_node_sepolia` UP); Grafana import optional |
 | REM-203 | done | 2+ | Merged [PR #6](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/pull/6) — workspace alloy 0.6; `/metrics` validator_set_sync |
-| SEC-303c | done | 3 | D4: cross-chain **Planned** / disabled; spec `cross_chain: false`; crate docs — [PHASE3_KICKOFF.md](./PHASE3_KICKOFF.md) |
+| SEC-303c | done | 3 | D4: cross-chain **Planned** / disabled; spec `cross_chain: false`; see [TESTNET_PHASE_SCOPE.md](./TESTNET_PHASE_SCOPE.md) |
 | SEC-302 | deferred | 3 | CrossChainRegistry ISSUE-005/006 — execute only if D4 reversed |
 | SEC-306a | done | 3 | D5: PrivateRegistry **Planned** — README + contracts/README |
 | SEC-304 | done | 3 | `CREG_SHIELDED_PUBLISH_ENABLED` default false; node + CLI |
@@ -32,6 +32,6 @@ Track security and remediation work from [SECURITY_AND_REMEDIATION_IMPLEMENTATIO
 | SEC-301a | done | 3 | [adr/ADR-KMS-HOT-KEYS.md](./adr/ADR-KMS-HOT-KEYS.md) — testnet env/Vault; mainnet requires SEC-301b |
 | SEC-301b | done | 3 | `chain-registry-secrets` crate — env + Vault KV2; wired to node/faucet/relayer |
 
-**Phase 2 ship (2026-05-28):** Sepolia Option A on `main` — [PHASE2_CLOSEOUT.md](./PHASE2_CLOSEOUT.md). **Phase 3:** [PHASE3_KICKOFF.md](./PHASE3_KICKOFF.md). Ops: second-operator checklist + optional hot-key rotation drill.
+**Phase 2 ship (2026-05-28):** Sepolia Option A on `main`. **Phase 3 epics:** largely complete in code; open work tracked in [NEXT_WORK.md](./NEXT_WORK.md).
 
 _Update status when PRs merge._

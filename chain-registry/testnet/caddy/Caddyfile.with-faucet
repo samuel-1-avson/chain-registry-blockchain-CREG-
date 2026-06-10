@@ -1,0 +1,33 @@
+# Full public stack including faucet (use when faucet service is running).
+{
+	email {$CREG_ACME_EMAIL}
+}
+
+# Waitlist SPA (waitlist.cregnet.dev). Requires waitlist container + DNS A record.
+{$CREG_PUBLIC_WAITLIST_HOST} {
+	reverse_proxy waitlist:80
+}
+
+{$CREG_PUBLIC_API_HOST} {
+	reverse_proxy creg-node-3:8080 {
+		flush_interval -1
+	}
+}
+
+{$CREG_PUBLIC_EXPLORER_HOST} {
+	reverse_proxy web-explorer:80 {
+		flush_interval -1
+	}
+}
+
+{$CREG_PUBLIC_FAUCET_HOST} {
+	reverse_proxy faucet:8082
+}
+
+{$CREG_PUBLIC_SPEC_HOST} {
+	reverse_proxy spec-server:80
+}
+
+{$CREG_PUBLIC_IPFS_HOST} {
+	reverse_proxy ipfs:5001
+}

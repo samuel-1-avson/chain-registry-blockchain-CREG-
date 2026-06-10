@@ -3,6 +3,8 @@
 **Scope document:** [SEC-401-AUDIT-SCOPE.md](./SEC-401-AUDIT-SCOPE.md)  
 **When booked:** Record vendor name and start date in [NEXT_WORK.md](./NEXT_WORK.md) (SEC-401 row).
 
+**Send-ready email:** From `chain-registry/`, run `.\testnet\prepare-sec-401-outreach.ps1` to generate [SEC-401-outreach-ready.md](./SEC-401-outreach-ready.md) with the pinned `v0.1.0-testnet` tag SHA. Customize `-ContactName` before sending.
+
 ---
 
 ## Email subject
@@ -19,7 +21,7 @@ We are scheduling a **fixed-scope security review** of the Chain Registry testne
 
 **Repository:** https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-  
 **Scope document:** attached `SEC-401-AUDIT-SCOPE.md` (or link to repo `docs/SEC-401-AUDIT-SCOPE.md`)  
-**Commit / tag for review:** `v0.1.0-testnet` (or current `main` SHA at kickoff — pin before audit starts)
+**Commit / tag for review:** `v0.1.0-testnet` (SHA from `prepare-sec-401-outreach.ps1` output — pin before audit starts)
 
 **In scope (priority order):**
 
@@ -31,7 +33,7 @@ We are scheduling a **fixed-scope security review** of the Chain Registry testne
 
 **Deliverables:** Rolling findings (weeks 2–3), final report with severity + PoC (week 4), optional retest window for P0/P1.
 
-**Environment we provide:** Sepolia RPC access, operator runbook (`chain-registry/testnet/OPERATOR.md`), optional synced node on `:8090`.
+**Environment we provide:** Sepolia RPC access, operator runbook (`chain-registry/testnet/OPERATOR.md`), optional synced node on public API after HOSTING-301.
 
 Please reply with:
 
