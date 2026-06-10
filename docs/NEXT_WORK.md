@@ -1,9 +1,9 @@
 # Next work — testnet readiness checklist
 
-**Updated:** 2026-06-09  
+**Updated:** 2026-06-10  
 **Context:** [REMEDIATION_BACKLOG.md](./REMEDIATION_BACKLOG.md), [TESTNET_SEPOLIA_RUNBOOK.md](./TESTNET_SEPOLIA_RUNBOOK.md), [../chain-registry/TESTNET_READINESS_REPORT.md](../chain-registry/TESTNET_READINESS_REPORT.md)
 
-The coordinated Sepolia 3-node lab is **proven** including **NET-301** (2-validator quorum, publish → `verified`, tip advance on 2026-06-09). Remaining P0 work: **real sandboxing (SANDBOX-301), release binaries (DIST-301), public hosting URLs, and audit booking (SEC-401)**.
+The coordinated Sepolia 3-node lab is **proven** including **NET-301** (2-validator quorum, publish → `verified`, tip advance on 2026-06-09). **DIST-301** shipped `v0.1.0-testnet` binaries on 2026-06-10. Remaining P0 work: **real sandboxing (SANDBOX-301), public hosting URLs, and audit booking (SEC-401)**.
 
 | Owner | Use for assignment; default **TBD** until filled in. |
 
@@ -17,7 +17,7 @@ These five items are the gating work before inviting external participants with 
 |---|-----|-------|------|---------------------|
 | 1 | **NET-301** | done | Multi-validator PBFT quorum on Sepolia | **Done** 2026-06-09 — `net-301-quorum-verify.ps1` pass; validator-2 Active; `validator_count=2`; tip 2→3; Windows lab uses `CREG_DEV_SANDBOX=true`. Topology: [../chain-registry/testnet/OPERATOR.md](../chain-registry/testnet/OPERATOR.md). |
 | 2 | **SANDBOX-301** | TBD | Real behavioral sandbox (disable dev bypass) | Fleet runs with `CREG_DEV_SANDBOX=false`. At least one engine (**nsjail** or **gVisor/runsc**) detected and used on Linux validator images; publish smoke shows sandbox engine ≠ `dev-bypass`. Windows dev may keep bypass only in documented local profiles. |
-| 3 | **DIST-301** | in progress | Ship `creg` + `creg-node` binaries | Tag `v0.1.0-testnet` on `main` (≥ `65fe3e8`) → [release-binaries.yml](../chain-registry/.github/workflows/release-binaries.yml) → `.\testnet\verify-dist-301.ps1 -Version v0.1.0-testnet`. |
+| 3 | **DIST-301** | done | Ship `creg` + `creg-node` binaries | **Done** 2026-06-10 — [v0.1.0-testnet release](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases/tag/v0.1.0-testnet) (linux/windows/macos); workflow [27245595554](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/actions/runs/27245595554); `verify-dist-301.ps1` API asset checks pass. |
 | 4 | **SEC-401** | outreach ready | Schedule external security audit | Scope: [SEC-401-AUDIT-SCOPE.md](./SEC-401-AUDIT-SCOPE.md). Outreach template: [SEC-401-VENDOR-OUTREACH.md](./SEC-401-VENDOR-OUTREACH.md). Pin auditor baseline tag `v0.1.0-testnet` before kickoff. **Vendor / start date:** TBD (send RFP). |
 | 5 | **DOC-301** | done | Doc rationalization | **Done** 2026-06-08 — single index at [README.md](./README.md); removed duplicate analyses, phase closeouts, and archive snapshots. |
 
@@ -56,6 +56,7 @@ These five items are the gating work before inviting external participants with 
 | E2E-301 | 2026-05 | Sepolia publish smoke documented |
 | 3-node soak | 2026-06-08 | `soak-3node-consensus.ps1` — PBFT commit + parity |
 | NET-301 | 2026-06-09 | `net-301-quorum-verify.ps1` — 2-validator quorum + publish verified (dev sandbox on Windows) |
+| DIST-301 | 2026-06-10 | `v0.1.0-testnet` GitHub release — `creg` + `creg-node` for linux/windows/macos |
 | Pending pool persistence | 2026-06-08 | `pending_pool.json` under `CREG_DATA_DIR` |
 | Public lab compose | 2026-06-08 | Explorer + faucet overlay, local service URLs in chain spec |
 | DOC quickstart | 2026-06-08 | [PUBLIC_TESTNET_QUICKSTART.md](./PUBLIC_TESTNET_QUICKSTART.md) |
