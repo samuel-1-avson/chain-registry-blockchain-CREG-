@@ -31,7 +31,7 @@ function StatCard({ label, value, hint, variant = 'default', sparkData, animateV
       style={{
         borderColor: variant === 'accent' ? 'var(--border-accent)' : undefined,
         transition: 'border-color .3s, box-shadow .3s',
-        boxShadow: flash ? 'inset 0 0 20px rgba(99,102,241,0.10)' : undefined,
+        boxShadow: flash ? 'inset 0 0 20px rgba(232, 163, 92, 0.10)' : undefined,
       }}
     >
       <span className="ce-stat-label">{label}</span>
@@ -67,7 +67,7 @@ function EventFilters({ active, onChange }) {
             padding: '3px 10px',
             borderRadius: 'var(--radius-full)',
             border: `1px solid ${active === t ? 'var(--border-accent)' : 'var(--border)'}`,
-            background: active === t ? 'rgba(99,102,241,0.12)' : 'transparent',
+            background: active === t ? 'rgba(232, 163, 92, 0.08)' : 'transparent',
             color: active === t ? 'var(--accent-primary-light)' : 'var(--text-tertiary)',
             fontSize: 10,
             fontWeight: 600,

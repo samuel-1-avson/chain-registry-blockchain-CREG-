@@ -13,7 +13,7 @@ import { formatNumber } from '../utils/format.js'
 
 /* ── Chart theme (respects CSS variables) ──────────────────────────────────── */
 const CHART_COLORS = {
-  primary: '#6366f1',
+  primary: '#e8a35c',
   success: '#22c55e',
   warning: '#f59e0b',
   error: '#ef4444',
@@ -45,7 +45,7 @@ function TimeRangeSelector({ active, onChange }) {
             padding: '4px 10px',
             borderRadius: 'var(--radius-full)',
             border: `1px solid ${active === t ? 'var(--border-accent)' : 'var(--border)'}`,
-            background: active === t ? 'rgba(99,102,241,0.12)' : 'transparent',
+            background: active === t ? 'rgba(232, 163, 92, 0.08)' : 'transparent',
             color: active === t ? 'var(--accent-primary-light)' : 'var(--text-tertiary)',
             fontSize: 10, fontWeight: 600, cursor: 'pointer',
             transition: 'all var(--transition-fast)',

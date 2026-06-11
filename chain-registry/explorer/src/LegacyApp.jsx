@@ -2358,7 +2358,7 @@ function App({ initialView = 'blocks', initialShowPublishForm = false, embedded 
 
                 <div style={{
                   marginBottom: 'var(--space-4)', padding: '10px 14px', borderRadius: '10px',
-                  border: '1.5px solid rgba(99,102,241,0.35)', background: 'rgba(99,102,241,0.08)',
+                  border: '1.5px solid rgba(232,163,92,0.45)', background: 'rgba(232,163,92,0.08)',
                   fontSize: '0.85rem', color: 'var(--text-primary)',
                 }}>
                   <strong>{activeNetworkProfile.label}</strong>

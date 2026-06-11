@@ -49,9 +49,9 @@ class ErrorBoundary extends React.Component {
   render() {
     if (this.state.err) {
       return (
-        <div style={{ padding: 40, color: '#f8fafc', background: '#0a0b0f', minHeight: '100vh' }}>
+        <div style={{ padding: 40, color: 'var(--text-primary)', background: 'var(--bg)', minHeight: '100vh' }}>
           <h1>Explorer crashed</h1>
-          <pre style={{ color: '#ef4444', whiteSpace: 'pre-wrap' }}>{String(this.state.err?.stack || this.state.err)}</pre>
+          <pre style={{ color: 'var(--accent-error)', whiteSpace: 'pre-wrap' }}>{String(this.state.err?.stack || this.state.err)}</pre>
           <button onClick={() => location.reload()} style={{ marginTop: 20, padding: '8px 16px' }}>Reload</button>
         </div>
       )
