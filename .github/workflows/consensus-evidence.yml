@@ -15,6 +15,8 @@ on:
       - "chain-registry/crates/node/src/p2p.rs"
       - "chain-registry/crates/node/src/sync.rs"
       - "chain-registry/crates/node/src/validator_pipeline.rs"
+      - "chain-registry/crates/validator/**"
+      - "chain-registry/testnet/malicious-fixtures/**"
   pull_request:
     branches: [main]
     paths:
@@ -29,6 +31,8 @@ on:
       - "chain-registry/crates/node/src/p2p.rs"
       - "chain-registry/crates/node/src/sync.rs"
       - "chain-registry/crates/node/src/validator_pipeline.rs"
+      - "chain-registry/crates/validator/**"
+      - "chain-registry/testnet/malicious-fixtures/**"
 
 permissions:
   contents: read
@@ -68,3 +72,4 @@ jobs:
         run: |
           cargo test --locked -p consensus evidence_votes --lib
           cargo test --locked -p common -p consensus vote_accumulator --lib
+          cargo test --locked -p validator malicious_fixture_suite_static_analysis
