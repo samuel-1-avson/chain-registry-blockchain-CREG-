@@ -49,6 +49,14 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install protobuf compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends protobuf-compiler libprotobuf-dev
+
       - name: Validate scanner profile and evidence fixtures
         run: |
           bash -n scripts/validate-consensus-evidence.sh
