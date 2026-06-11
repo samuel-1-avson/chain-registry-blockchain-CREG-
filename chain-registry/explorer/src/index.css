@@ -225,7 +225,12 @@ input:focus-visible, button:focus-visible, select:focus-visible {
   margin: 0 auto;
   padding: var(--space-6);
   min-height: calc(100vh - 120px);
-  animation: explorer-enter 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .explorer-main {
+    animation: explorer-enter 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
 }
 
 @keyframes explorer-enter {
