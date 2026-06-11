@@ -29,6 +29,7 @@ if [[ ! -f testnet/start-3node-gcp.sh ]]; then
   exit 1
 fi
 chmod 600 testnet/sepolia-3node.env
+find testnet -name '*.sh' -exec sed -i 's/\r$//' {} + 2>/dev/null || true
 chmod +x testnet/_source-sepolia-env.sh testnet/start-3node-gcp.sh testnet/start-cloud-edge-gcp.sh testnet/start-validator-fleet-gcp.sh 2>/dev/null || true
 # Strip UTF-8 BOM in place if push-env ran before normalization (Linux source breaks on BOM).
 if head -c 3 testnet/sepolia-3node.env | grep -q $'^\xEF\xBB\xBF'; then

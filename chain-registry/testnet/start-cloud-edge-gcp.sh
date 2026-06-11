@@ -33,11 +33,14 @@ if [[ "${CREG_VALIDATOR_FLEET_MODE:-false}" == "true" ]]; then
     exit 1
   fi
   export CREG_CLOUD_CADDYFILE="./caddy/Caddyfile.fleet"
+  observer_host="${CREG_OBSERVER_POOL_LB_IP:-${CREG_VALIDATOR_VM_INTERNAL_IP}}"
+  observer_port="${CREG_3NODE_NODE3_API_PORT:-28182}"
+  export CREG_OBSERVER_API_UPSTREAM="${observer_host}:${observer_port}"
   FLEET_NGINX="${SCRIPT_DIR}/nginx/explorer-fleet.conf"
   sed "s/@VALIDATOR_IP@/${CREG_VALIDATOR_VM_INTERNAL_IP}/g" \
     "${SCRIPT_DIR}/nginx/explorer-fleet.conf.template" > "$FLEET_NGINX"
   export CREG_EXPLORER_NGINX_CONF="./nginx/explorer-fleet.conf"
-  echo "Validator fleet mode — API/explorer -> ${CREG_VALIDATOR_VM_INTERNAL_IP}"
+  echo "Validator fleet mode — public API -> ${CREG_OBSERVER_API_UPSTREAM} (explorer nginx -> ${CREG_VALIDATOR_VM_INTERNAL_IP})"
 elif [[ "${CREG_HYBRID_MODE:-false}" == "true" ]]; then
   echo "Hybrid mode — API -> WireGuard peer ${CREG_WG_LOCAL_PEER:-10.200.0.2}"
 else
@@ -81,6 +84,10 @@ fi
 if [[ -n "${CREG_PUBLIC_JOIN_HOST:-}" ]]; then
   echo "Join hub enabled — enabling hub profile (${CREG_PUBLIC_JOIN_HOST})"
   COMPOSE_PROFILE_LIST+=(hub)
+  if [[ -n "${CREG_HUB_API_CLOUD_RUN_URL:-}" ]]; then
+    echo "Hub API on Cloud Run (${CREG_HUB_API_CLOUD_RUN_URL}) — edge runs hub-web only"
+    export CREG_HUB_EDGE_API_MODE=cloudrun
+  fi
 fi
 if [[ ${#COMPOSE_PROFILE_LIST[@]} -gt 0 ]]; then
   export COMPOSE_PROFILES="$(IFS=,; echo "${COMPOSE_PROFILE_LIST[*]}")"
@@ -95,6 +102,7 @@ COMPOSE=("${DOCKER[@]}" compose "${COMPOSE_ARGS[@]}" --env-file "$ENV_FILE")
 COMPOSE_ENV=(
   CREG_CLOUD_CADDYFILE="${CREG_CLOUD_CADDYFILE}"
   CREG_EXPLORER_NGINX_CONF="${CREG_EXPLORER_NGINX_CONF}"
+  CREG_OBSERVER_API_UPSTREAM="${CREG_OBSERVER_API_UPSTREAM:-}"
 )
 compose_run() {
   env "${COMPOSE_ENV[@]}" "${COMPOSE[@]}" "$@"
@@ -109,7 +117,16 @@ echo "=== Stopping legacy full-stack containers if present ==="
 
 echo "=== Starting cloud edge stack ==="
 compose_run down --remove-orphans 2>/dev/null || true
-compose_run up -d --build --remove-orphans
+# Fixed container_name + profile drift leaves orphans compose down does not remove.
+mapfile -t stale_ids < <("${DOCKER[@]}" ps -aq --filter 'name=creg-cloud-' 2>/dev/null || true)
+if [[ ${#stale_ids[@]} -gt 0 ]]; then
+  "${DOCKER[@]}" rm -f "${stale_ids[@]}" 2>/dev/null || true
+fi
+UP_ARGS=(up -d --build --remove-orphans --force-recreate)
+if [[ -n "${CREG_HUB_API_CLOUD_RUN_URL:-}" ]]; then
+  UP_ARGS+=(--scale hub-api=0)
+fi
+compose_run "${UP_ARGS[@]}"
 
 echo ""
 echo "Cloud edge up."
