@@ -33,7 +33,7 @@
     "yara_report_sha256": "b83d7f0a5f1c2e3b0c4d5a69788766554433221100ffeeddccbbaa9988776655",
     "sandbox_report_sha256": "4b68ab3847feda7d6c62c1fbcbeebfa35eab7351ed5e78f4ddadea5df64b8015"
   },
-  "evidence_digest": "1b5e2494714442a1666fed24391d5c2d38a99ee863c6de52c510654a403500b3",
+  "evidence_digest": "4f51ed3d981cb551c448174b22878141d7b9ee48588ee2c6874b2fec3d2250eb",
   "signed_by": [
     {
       "key_id": "validator-fixture-key-1",

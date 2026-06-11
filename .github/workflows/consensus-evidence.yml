@@ -7,6 +7,7 @@ on:
       - ".github/workflows/consensus-evidence.yml"
       - "chain-registry/config/consensus-evidence/**"
       - "chain-registry/scripts/validate-consensus-evidence.sh"
+      - "chain-registry/scripts/validate-consensus-evidence.mjs"
       - "chain-registry/crates/common/src/package.rs"
       - "chain-registry/crates/consensus/src/vote_accumulator.rs"
       - "chain-registry/crates/node/src/api.rs"
@@ -20,6 +21,7 @@ on:
       - ".github/workflows/consensus-evidence.yml"
       - "chain-registry/config/consensus-evidence/**"
       - "chain-registry/scripts/validate-consensus-evidence.sh"
+      - "chain-registry/scripts/validate-consensus-evidence.mjs"
       - "chain-registry/crates/common/src/package.rs"
       - "chain-registry/crates/consensus/src/vote_accumulator.rs"
       - "chain-registry/crates/node/src/api.rs"
@@ -46,6 +48,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install protobuf compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends protobuf-compiler libprotobuf-dev
 
       - name: Validate scanner profile and evidence fixtures
         run: |
