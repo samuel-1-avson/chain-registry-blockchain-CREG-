@@ -5,6 +5,8 @@ import { defineConfig, type Plugin } from "vite";
 
 const require = createRequire(import.meta.url);
 const wcPkg = "@walletconnect/ethereum-provider";
+const hubApiProxyTarget =
+  process.env.VITE_HUB_API_PROXY_TARGET ?? "http://127.0.0.1:8095";
 
 function walletConnectOptional(): Plugin {
   let resolved = false;
@@ -41,7 +43,7 @@ export default defineConfig({
     },
     proxy: {
       "/api": {
-        target: "http://127.0.0.1:8095",
+        target: hubApiProxyTarget,
         changeOrigin: true,
       },
     },

@@ -1,31 +1,46 @@
-import apiMd from "@hub-content/api.md?raw";
+import { CommandBlock } from "../components/CommandBlock";
 import { EXTERNAL_LINKS } from "../config/links";
-import { MarkdownContent } from "../components/MarkdownContent";
 
 export function ApiPage() {
   return (
-    <>
-      <MarkdownContent source={apiMd} />
-      <p style={styles.ctaRow}>
-        <a href={EXTERNAL_LINKS.apiDocs} style={styles.cta}>
-          Open Swagger UI
-        </a>
-      </p>
-    </>
+    <div className="hub-page">
+      <header className="hub-page-header">
+        <p className="hub-eyebrow">API reference</p>
+        <h1>Build against the public CREG node API</h1>
+        <p>
+          Use the public read routes for chain stats, packages, blocks,
+          validators, addresses, and bridge status. Publisher and validator
+          write routes require the correct credentials.
+        </p>
+        <div className="hub-actions">
+          <a
+            className="hub-button"
+            href={EXTERNAL_LINKS.apiDocs}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Open Swagger UI
+          </a>
+          <a className="hub-button-secondary" href={EXTERNAL_LINKS.api}>
+            API base
+          </a>
+        </div>
+      </header>
+
+      <section className="hub-grid-wide">
+        <CommandBlock
+          label="Health"
+          command="curl -s https://api.testnet.cregnet.dev/v1/public/health | jq ."
+        />
+        <CommandBlock
+          label="Chain stats"
+          command="curl -s https://api.testnet.cregnet.dev/v1/public/chain/stats | jq ."
+        />
+        <CommandBlock
+          label="Packages"
+          command="curl -s 'https://api.testnet.cregnet.dev/v1/public/packages?limit=10' | jq ."
+        />
+      </section>
+    </div>
   );
 }
-
-const styles = {
-  ctaRow: { marginTop: "1.5rem" },
-  cta: {
-    display: "inline-flex",
-    alignItems: "center",
-    padding: "0.5rem 1rem",
-    borderRadius: "var(--radius-md)",
-    background: "var(--accent-primary)",
-    color: "#fff",
-    fontWeight: 600,
-    fontSize: "0.9rem",
-    textDecoration: "none",
-  },
-};

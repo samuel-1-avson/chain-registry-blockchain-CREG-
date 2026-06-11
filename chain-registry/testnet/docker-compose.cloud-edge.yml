@@ -60,6 +60,8 @@ services:
     volumes:
       - ./chain-spec.sepolia.json:/usr/share/nginx/html/chain-spec.json:ro
       - ./chain-spec.sepolia.json.sig:/usr/share/nginx/html/chain-spec.json.sig:ro
+      - ./chain-spec.sepolia.json:/usr/share/nginx/html/chain-spec.sepolia.json:ro
+      - ./chain-spec.sepolia.json.sig:/usr/share/nginx/html/chain-spec.sepolia.json.sig:ro
       - ./nginx-spec.conf:/etc/nginx/conf.d/default.conf:ro
     ports:
       - "${CREG_3NODE_SPEC_HOST_PORT:-18888}:80"
@@ -196,9 +198,6 @@ services:
       - "${CREG_HUB_WEB_PORT:-8094}:80"
     networks:
       - creg-cloud-edge
-    depends_on:
-      hub-api:
-        condition: service_healthy
     restart: unless-stopped
     profiles:
       - hub
