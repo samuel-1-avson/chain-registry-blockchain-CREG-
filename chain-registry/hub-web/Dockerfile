@@ -3,7 +3,7 @@ FROM node:20-slim AS builder
 WORKDIR /app/hub-web
 
 COPY hub-web/package.json hub-web/package-lock.json ./
-RUN npm ci --no-fund --no-audit
+RUN npm ci --legacy-peer-deps --install-strategy=nested --no-fund --no-audit
 
 COPY hub-web/ ./
 COPY hub/content/ ../hub/content/

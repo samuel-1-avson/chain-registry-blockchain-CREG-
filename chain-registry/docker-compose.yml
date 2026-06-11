@@ -241,6 +241,8 @@ services:
       FAUCET_TOKEN_CONTRACT: ${CREG_TOKEN_ADDR:-0x97c21d46B3eac604e92E907D54aA92eEc0Af550b}
       FAUCET_CHAIN_ID: "11155111"
       FAUCET_DRIP_AMOUNT: "1000000000000000000000"
+      # Set to 0 until the faucet wallet holds enough Sepolia ETH for gas drips (default 0.1 ETH).
+      FAUCET_NATIVE_DRIP_AMOUNT: "${FAUCET_NATIVE_DRIP_AMOUNT:-0}"
       FAUCET_COOLDOWN_SECS: "60"
       FAUCET_POW_DISABLED: "true"
       FAUCET_ADMIN_TOKEN: ${FAUCET_ADMIN_TOKEN:-dev-admin-secret}

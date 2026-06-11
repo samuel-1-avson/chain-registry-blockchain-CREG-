@@ -1,2 +1,4 @@
-# Optional faucet vhost for cloud-edge layouts. Leave empty when CREG_PUBLIC_FAUCET_HOST is unset.
-# Copy from faucet-edge.caddy.example when enabling faucet TLS on the edge VM.
+# Cloud edge faucet vhost (optional). Set CREG_PUBLIC_FAUCET_HOST in env.
+{$CREG_PUBLIC_FAUCET_HOST} {
+	reverse_proxy 127.0.0.1:{$CREG_3NODE_FAUCET_PORT}
+}

@@ -39,7 +39,7 @@ Pop-Location
 Write-Host "[gcp-sync] Uploading to ${VmName}:$remoteRoot ..."
 gcloud compute ssh $VmName @sshOpts --command="mkdir -p '$remoteRoot'" | Out-Null
 gcloud compute scp $tarLocal "${VmName}:/tmp/creg-chain-registry-sync.tgz" --zone=$Zone --project=$ProjectId --tunnel-through-iap --strict-host-key-checking=no --quiet
-gcloud compute ssh $VmName @sshOpts --command="tar -xzf /tmp/creg-chain-registry-sync.tgz -C '$remoteRoot' && rm -f /tmp/creg-chain-registry-sync.tgz" | Out-Null
+gcloud compute ssh $VmName @sshOpts --command="tar -xzf /tmp/creg-chain-registry-sync.tgz -C '$remoteRoot' && rm -f /tmp/creg-chain-registry-sync.tgz && sed -i 's/\r$//' '$remoteRoot'/testnet/start-cloud-edge-gcp.sh '$remoteRoot'/testnet/_source-sepolia-env.sh '$remoteRoot'/testnet/sepolia-3node.env" | Out-Null
 
 Remove-Item $tarLocal -Force -ErrorAction SilentlyContinue
 Write-Host "[gcp-sync] Local tree synced to $remoteRoot"

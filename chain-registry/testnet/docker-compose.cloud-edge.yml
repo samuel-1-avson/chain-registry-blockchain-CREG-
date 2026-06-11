@@ -91,6 +91,7 @@ services:
       FAUCET_TOKEN_CONTRACT: ${CREG_TOKEN_ADDR:-0x97c21d46B3eac604e92E907D54aA92eEc0Af550b}
       FAUCET_CHAIN_ID: "11155111"
       FAUCET_DRIP_AMOUNT: "1000000000000000000000"
+      FAUCET_NATIVE_DRIP_AMOUNT: ${FAUCET_NATIVE_DRIP_AMOUNT:-0}
       FAUCET_COOLDOWN_SECS: "60"
       FAUCET_POW_DISABLED: "true"
       FAUCET_EXPLORER_URL: ${CREG_PUBLIC_EXPLORER_URL:-https://${CREG_PUBLIC_EXPLORER_HOST}}
@@ -101,7 +102,7 @@ services:
       - creg-cloud-edge
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8082/health || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8082/health || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5

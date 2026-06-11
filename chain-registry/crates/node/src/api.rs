@@ -531,11 +531,16 @@ fn constant_time_eq(left: &str, right: &str) -> bool {
 // ─── Handlers ────────────────────────────────────────────────────────────────
 
 async fn health(State(state): State<SharedState>) -> impl IntoResponse {
+    // MAL-001: surface the sandbox engine so operators/monitoring can verify
+    // public validators are not running with the dev bypass. Detection is
+    // cached after the first call.
+    let sandbox = validator::sandbox::engine_status().await;
     let s = state.read().await;
     Json(serde_json::json!({
         "status":  "ok",
         "version": env!("CARGO_PKG_VERSION"),
         "validator_set_sync": s.validator_set_sync.clone(),
+        "sandbox": sandbox,
     }))
 }
 
@@ -639,6 +644,12 @@ struct RuntimeConfigResponse {
     validator_set_last_finalized_source_block: Option<u64>,
     node_id: String,
     validator_pubkey: Option<String>,
+    /// MAL-001: sandbox engine this validator will use ("nsjail", "gvisor",
+    /// "docker", "dev-bypass", "none").
+    sandbox_engine: String,
+    /// MAL-001: true when CREG_DEV_SANDBOX=true is active. Must be false on
+    /// public validator profiles.
+    sandbox_dev_bypass: bool,
 }
 
 #[derive(Deserialize)]
@@ -664,6 +675,7 @@ fn non_zero_address(value: &str) -> Option<String> {
 }
 
 async fn runtime_config(State(state): State<SharedState>) -> impl IntoResponse {
+    let sandbox = validator::sandbox::engine_status().await;
     let s = state.read().await;
     let chain_id = if s.config.chain_id.is_empty() {
         if s.config.is_testnet {
@@ -709,6 +721,8 @@ async fn runtime_config(State(state): State<SharedState>) -> impl IntoResponse {
             }
             None
         }),
+        sandbox_engine: sandbox.engine,
+        sandbox_dev_bypass: sandbox.dev_bypass,
     })
 }
 

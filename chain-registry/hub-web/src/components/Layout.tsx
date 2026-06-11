@@ -11,13 +11,14 @@ const NAV: NavItem[] = [
   { to: "/publish", label: "Publish" },
   { to: "/validate", label: "Validate" },
   { to: "/compare", label: "Compare" },
+  { to: "/docs", label: "Docs" },
+  { to: "/api-reference", label: "API" },
   { to: "/faq", label: "FAQ" },
 ];
 
 const EXTERNAL = [
   { href: EXTERNAL_LINKS.explorer, label: "Explorer" },
   { href: EXTERNAL_LINKS.faucet, label: "Faucet" },
-  { href: EXTERNAL_LINKS.docs, label: "Docs" },
 ] as const;
 
 export function Layout() {
@@ -72,8 +73,11 @@ export function Layout() {
       </main>
       <footer style={styles.footer}>
         <span>CREG Sepolia testnet · chain id 11155111</span>
-        <a href={EXTERNAL_LINKS.api} target="_blank" rel="noreferrer">
-          API
+        <NavLink to="/api-reference" style={{ color: "inherit" }}>
+          API reference
+        </NavLink>
+        <a href={EXTERNAL_LINKS.apiDocs} target="_blank" rel="noreferrer">
+          Swagger UI
         </a>
       </footer>
     </div>

@@ -43,6 +43,89 @@ async fn command_ready(program: &str, args: &[&str]) -> bool {
 
 // ── Public Types ────────────────────────────────────────────────────────────
 
+/// Reported sandbox engine status for health/runtime-config surfaces (MAL-001).
+///
+/// Mirrors the engine waterfall in [`run`] without executing a package, so
+/// operators and monitoring can verify which engine a validator will use
+/// before it ever votes.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SandboxStatus {
+    /// Engine that will be used for behavioural analysis:
+    /// "nsjail", "dev-bypass", "gvisor", "docker", or "none".
+    pub engine: String,
+    /// True when `CREG_DEV_SANDBOX=true` is set in the environment.
+    /// Behavioural analysis is skipped and every package receives the
+    /// High-severity SB012 finding. Must be false on public validators.
+    pub dev_bypass: bool,
+    /// True when the active engine runs packages with real isolation
+    /// (nsjail/gVisor/Docker). False for dev-bypass and none.
+    pub isolated: bool,
+    /// True when the engine is a degraded fallback (Docker raises SB010;
+    /// "none" means non-WASM packages fail closed and the validator abstains).
+    pub degraded: bool,
+    /// Human-readable note for operators.
+    pub note: String,
+}
+
+static SANDBOX_STATUS: tokio::sync::OnceCell<SandboxStatus> = tokio::sync::OnceCell::const_new();
+
+/// Detect (once per process) which sandbox engine this node will use.
+/// The result is cached because engine availability does not change at
+/// runtime and probing spawns external processes.
+pub async fn engine_status() -> SandboxStatus {
+    SANDBOX_STATUS
+        .get_or_init(detect_engine_status)
+        .await
+        .clone()
+}
+
+async fn detect_engine_status() -> SandboxStatus {
+    let dev_bypass = std::env::var("CREG_DEV_SANDBOX").as_deref() == Ok("true");
+    if command_ready("nsjail", &["--help"]).await {
+        return SandboxStatus {
+            engine: "nsjail".into(),
+            dev_bypass,
+            isolated: true,
+            degraded: false,
+            note: "kernel namespaces + seccomp-BPF (primary engine)".into(),
+        };
+    }
+    if dev_bypass {
+        return SandboxStatus {
+            engine: "dev-bypass".into(),
+            dev_bypass,
+            isolated: false,
+            degraded: true,
+            note: "CREG_DEV_SANDBOX=true — behavioural analysis skipped; every package receives SB012 (High). Local development only.".into(),
+        };
+    }
+    if command_ready("runsc", &["--version"]).await {
+        return SandboxStatus {
+            engine: "gvisor".into(),
+            dev_bypass,
+            isolated: true,
+            degraded: false,
+            note: "userspace syscall interception (runsc)".into(),
+        };
+    }
+    if command_ready("docker", &["version", "--format", "{{.Server.Version}}"]).await {
+        return SandboxStatus {
+            engine: "docker".into(),
+            dev_bypass,
+            isolated: true,
+            degraded: true,
+            note: "OCI container fallback — packages receive SB010 (degraded isolation)".into(),
+        };
+    }
+    SandboxStatus {
+        engine: "none".into(),
+        dev_bypass,
+        isolated: false,
+        degraded: true,
+        note: "no sandbox engine available — non-WASM packages fail closed and this validator abstains".into(),
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SandboxResult {
     pub findings: Vec<Finding>,

@@ -38,7 +38,20 @@ if ! docker info >/dev/null 2>&1; then
   fi
 fi
 
-COMPOSE=("${DOCKER[@]}" compose -f "${SCRIPT_DIR}/docker-compose.validator-fleet.yml" --env-file "$ENV_FILE")
+# MAL-001: real sandbox (nsjail) is the default for the public fleet.
+# Set CREG_FLEET_DEV_SANDBOX=1 only for throwaway dev fleets — it skips the
+# secure-image build and lets CREG_DEV_SANDBOX from sepolia-3node.env apply.
+SECURE_SANDBOX=1
+if [[ "${CREG_FLEET_DEV_SANDBOX:-0}" == "1" ]]; then
+  SECURE_SANDBOX=0
+  echo "WARNING: CREG_FLEET_DEV_SANDBOX=1 — validators may run WITHOUT a real sandbox. Never use for public profiles." >&2
+fi
+
+COMPOSE_FILES=(-f "${SCRIPT_DIR}/docker-compose.validator-fleet.yml")
+if [[ "$SECURE_SANDBOX" -eq 1 ]]; then
+  COMPOSE_FILES+=(-f "${SCRIPT_DIR}/docker-compose.fleet-sandbox.yml")
+fi
+COMPOSE=("${DOCKER[@]}" compose "${COMPOSE_FILES[@]}" --env-file "$ENV_FILE")
 FLEET_IMAGE="${CREG_FLEET_IMAGE:-ghcr.io/chain-registry/chain-registry:latest}"
 export CREG_FLEET_IMAGE="$FLEET_IMAGE"
 
@@ -77,12 +90,25 @@ if [[ "$use_prebuilt" -eq 0 ]]; then
     "${DOCKER[@]}" tag "$built_id" creg-node:fleet 2>/dev/null || true
   fi
 fi
+# ── MAL-001: build secure (nsjail) image on top of the resolved fleet image ──
+# Dockerfile.secure expects base tag chain-registry-app:latest; retag whatever
+# fleet image we resolved (GHCR pull or local build) and compile nsjail on it.
+if [[ "$SECURE_SANDBOX" -eq 1 ]]; then
+  echo "=== Building secure validator image (nsjail) from ${FLEET_IMAGE} ==="
+  "${DOCKER[@]}" tag "$FLEET_IMAGE" chain-registry-app:latest
+  "${DOCKER[@]}" build -t chain-registry-node-secure:fleet -f "${REPO_ROOT}/Dockerfile.secure" "$REPO_ROOT"
+  "${DOCKER[@]}" run --rm --entrypoint nsjail chain-registry-node-secure:fleet --help >/dev/null
+  echo "=== chain-registry-node-secure:fleet ready (nsjail verified) ==="
+fi
+
 echo "=== Starting validator fleet (3 nodes) ==="
 "${COMPOSE[@]}" down --remove-orphans 2>/dev/null || true
-if [[ "$use_prebuilt" -eq 1 ]]; then
+if [[ "$use_prebuilt" -eq 1 && "$SECURE_SANDBOX" -eq 0 ]]; then
   "${COMPOSE[@]}" up -d --pull always --no-build --remove-orphans
 else
-  "${COMPOSE[@]}" up -d --build --remove-orphans
+  # Secure mode: chain-registry-node-secure:fleet is a local-only tag — a
+  # registry pull would fail, so start from local images.
+  "${COMPOSE[@]}" up -d --no-build --remove-orphans
 fi
 
 echo ""

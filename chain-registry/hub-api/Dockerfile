@@ -2,8 +2,8 @@ FROM node:20-slim AS builder
 
 WORKDIR /app
 
-COPY package.json ./
-RUN npm install --no-fund --no-audit
+COPY package.json package-lock.json ./
+RUN npm ci --no-fund --no-audit
 
 COPY tsconfig.json ./
 COPY src ./src
@@ -17,8 +17,8 @@ ENV NODE_ENV=production
 ENV HUB_API_PORT=8095
 ENV HUB_DB_PATH=/data/hub.db
 
-COPY package.json ./
-RUN npm install --omit=dev --no-fund --no-audit
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --no-fund --no-audit
 
 COPY --from=builder /app/dist ./dist
 

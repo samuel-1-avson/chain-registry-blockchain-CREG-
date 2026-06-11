@@ -36,6 +36,7 @@ $env:VALIDATOR_2_ETH_PRIVATE_KEY = "0x..."   # never commit
 |---------|-------|-------------------|------|
 | Windows dev soak | `Dockerfile.windows` | `true` optional | Windows |
 | Credible testnet | `Dockerfile.secure` (nsjail) | `false` | Linux container backend (Docker Desktop WSL2 on Windows qualifies) |
+| GCP public fleet (MAL-001) | `Dockerfile.secure` on fleet image (`chain-registry-node-secure:fleet`) | `false` (forced by `docker-compose.fleet-sandbox.yml`) | creg-validator-vm (Linux) |
 
 Linux secure fleet:
 
@@ -45,9 +46,31 @@ Linux secure fleet:
 .\testnet\sandbox-301-verify.ps1                # or soak-3node-sandbox.ps1
 ```
 
+GCP public fleet (MAL-001 — secure sandbox is the default):
+
+```powershell
+.\testnet\gcp\deploy-validator-fleet.ps1        # builds nsjail image on VM, applies fleet-sandbox overlay
+.\testnet\gcp\verify-fleet-sandbox.ps1          # evidence JSON in testnet/sandbox-301-logs/
+```
+
+Public validator profiles must never run `CREG_DEV_SANDBOX=true`. The fleet start script only skips the secure overlay when `CREG_FLEET_DEV_SANDBOX=1` is set explicitly (dev fleets only).
+
 Build images manually: `.\testnet\build-3node-secure-image.ps1` (or `build-3node-secure-image.sh` on Linux). After validator code changes, rebuild with `-RebuildApp`.
 
 Reference privileged profile: `docker-compose.testnet.yml` (`node-1` uses `chain-registry-node-secure:latest`).
+
+---
+
+## IPFS Pinning & Availability (IPFS-001 / IPFS-002)
+
+Every accepted (non-revoked) package CID must be pinned by operator infrastructure, and availability must be checked on a schedule.
+
+```powershell
+.\testnet\gcp\run-ipfs-pin-check.ps1                 # pin all CIDs on edge Kubo + verify availability
+.\testnet\gcp\run-ipfs-pin-check.ps1 -CheckOnly      # availability check only
+```
+
+Reports land in `testnet/ipfs-pin-logs/` (launch-gate evidence). On the edge VM, schedule hourly via cron — see the header of `testnet/ipfs-pin-check.py`. Non-zero exit = unavailable content → treat as Scenario 4 in `docs/INCIDENT_RESPONSE_RUNBOOK.md`.
 
 ---
 

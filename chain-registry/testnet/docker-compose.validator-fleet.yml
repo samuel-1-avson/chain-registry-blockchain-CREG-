@@ -40,7 +40,9 @@ x-creg-fleet-base-env: &creg-fleet-base-env
   CREG_GOVERNANCE_ADDR: ${CREG_GOVERNANCE_ADDR:-0x9a14F359E2bdBb43F1526743C4A91955F29Ba59A}
   CREG_TOKEN_ADDR: ${CREG_TOKEN_ADDR:-0x97c21d46B3eac604e92E907D54aA92eEc0Af550b}
   CREG_ZK_VERIFIER_ADDR: ${CREG_ZK_VERIFIER_ADDR:-0x0922AE98AF1D809360BDd5D5AAd84f0D823A5cF3}
-  # Required when sepolia-3node.env sets CREG_DEV_SANDBOX=true (all fleet nodes).
+  # Testnet profile (small-cluster quorum etc.). MAL-001: validators must NOT
+  # run CREG_DEV_SANDBOX=true — docker-compose.fleet-sandbox.yml overlay forces
+  # false and provides the nsjail secure image.
   CREG_TESTNET: "true"
   RUST_LOG: info,chain_registry_node=debug
 

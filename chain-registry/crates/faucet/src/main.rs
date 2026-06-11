@@ -1255,13 +1255,22 @@ async fn health_check(State(state): State<Arc<AppState>>) -> impl IntoResponse {
             let token_ready = faucet_balance >= state.config.drip_amount;
             let native_ready = state.config.native_drip_amount == 0
                 || faucet_native_balance >= state.config.native_drip_amount;
-            let ready = token_ready && native_ready;
-            let status_code = if ready {
+            let fully_ready = token_ready && native_ready;
+            // Liveness: return 200 whenever the process can reach RPC and report
+            // balances. Readiness fields (token_drips_available / native_drips_available)
+            // let operators fund or tune drips without marking the container dead.
+            let status_code = if token_ready || native_ready {
                 StatusCode::OK
             } else {
                 StatusCode::SERVICE_UNAVAILABLE
             };
-            let status = if ready { "healthy" } else { "degraded" };
+            let status = if fully_ready {
+                "healthy"
+            } else if token_ready || native_ready {
+                "degraded"
+            } else {
+                "unavailable"
+            };
             let mut body = serde_json::json!({
                 "status": status,
                 "faucet": "online",
