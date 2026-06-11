@@ -32,19 +32,25 @@ if (-not $VmName) {
 function Log($m) { Write-Host "[ipfs-pin-check] $m" }
 
 $sshOpts = @("--zone=$Zone", "--project=$ProjectId", "--tunnel-through-iap", "--strict-host-key-checking=no", "--quiet")
+$scpOpts = @("--zone=$Zone", "--project=$ProjectId", "--tunnel-through-iap", "--strict-host-key-checking=no", "--quiet")
+$remoteHome = (gcloud compute ssh $VmName @sshOpts --command='printf "%s" $HOME').Trim()
+if ($LASTEXITCODE -ne 0) { throw "could not resolve remote home" }
+$remotePinDir = "$remoteHome/creg-pin-check"
 
 $localScript = Join-Path $testnetDir "ipfs-pin-check.py"
 if (-not (Test-Path $localScript)) { throw "Missing $localScript" }
 
-Log "Uploading ipfs-pin-check.py to $VmName..."
-gcloud compute ssh $VmName @sshOpts --command="mkdir -p ~/creg-pin-check" | Out-Null
-gcloud compute scp $localScript "${VmName}:~/creg-pin-check/ipfs-pin-check.py" @sshOpts
+Log "Uploading ipfs-pin-check.py to $VmName ($remotePinDir)..."
+gcloud compute ssh $VmName @sshOpts --command="mkdir -p '$remotePinDir/reports'" | Out-Null
+gcloud compute scp $localScript "${VmName}:${remotePinDir}/ipfs-pin-check.py" @scpOpts
 if ($LASTEXITCODE -ne 0) { throw "scp failed" }
 
 $skipPin = if ($CheckOnly) { "1" } else { "0" }
-$remoteCmd = "cd ~/creg-pin-check && sed -i 's/\r$//' ipfs-pin-check.py && " +
-    "CREG_API_URL='$ApiUrl' CREG_IPFS_API='$IpfsApi' CREG_PIN_SKIP_PIN=$skipPin " +
-    "CREG_PIN_REPORT_DIR=~/creg-pin-check/reports python3 ipfs-pin-check.py"
+$remoteCmd = @(
+    "cd '$remotePinDir'",
+    "sed -i 's/\r$//' ipfs-pin-check.py",
+    "CREG_API_URL='$ApiUrl' CREG_IPFS_API='$IpfsApi' CREG_PIN_SKIP_PIN=$skipPin CREG_PIN_REPORT_DIR='$remotePinDir/reports' python3 ipfs-pin-check.py"
+) -join " && "
 
 Log "Running pin + availability check (API=$ApiUrl IPFS=$IpfsApi)..."
 gcloud compute ssh $VmName @sshOpts --command=$remoteCmd
@@ -52,16 +58,16 @@ $checkExit = $LASTEXITCODE
 if ($checkExit -eq 2) { throw "pin check could not reach the registry API" }
 
 Log "Fetching latest report..."
-$latest = (gcloud compute ssh $VmName @sshOpts --command="ls -1t ~/creg-pin-check/reports | head -n1").Trim()
+$latest = (gcloud compute ssh $VmName @sshOpts --command="ls -1t '$remotePinDir/reports' | head -n1").Trim()
 if (-not $latest) { throw "no report produced" }
 
 $outDir = Join-Path $testnetDir "ipfs-pin-logs"
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
-gcloud compute scp "${VmName}:~/creg-pin-check/reports/$latest" (Join-Path $outDir $latest) @sshOpts
+gcloud compute scp "${VmName}:${remotePinDir}/reports/$latest" (Join-Path $outDir $latest) @scpOpts
 if ($LASTEXITCODE -ne 0) { throw "report download failed" }
 
 if ($checkExit -ne 0) {
-    Log "FAILED — unavailable package content detected (see $outDir\$latest)"
+    Log "FAILED: unavailable package content detected (see $outDir\$latest)"
     exit 1
 }
-Log "PASSED — all package CIDs pinned and available (evidence: $outDir\$latest)"
+Log "PASSED: all package CIDs pinned and available (evidence: $outDir\$latest)"
