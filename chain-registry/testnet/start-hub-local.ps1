@@ -6,7 +6,8 @@
 #
 # Dev without Docker (two terminals):
 #   cd hub-api && npm install && npm run dev
-#   cd hub-web && npm install && npm run dev
+#   cd hub-web && npm install --legacy-peer-deps --install-strategy=nested --omit=optional && npm run dev
+#   (Optional WC: npm install @walletconnect/ethereum-provider)
 
 param(
     [switch]$Down,

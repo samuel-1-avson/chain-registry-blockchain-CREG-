@@ -13,6 +13,11 @@ pub struct TrustVerdict {
     pub resolved_at: DateTime<Utc>,
     /// Whether this verdict came from the local cache or a live chain query.
     pub source: VerdictSource,
+    /// MAL-004/LLM-002: risk band, deterministic vs advisory (LLM) finding
+    /// split from the finalized record. None for gRPC fast path, legacy
+    /// cache entries, and nodes that predate the field.
+    #[serde(default)]
+    pub deterministic_risk: Option<crate::DeterministicRiskSummary>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -33,10 +33,12 @@ pub fn print_verdict(v: &TrustVerdict) {
                 " ".dimmed(),
                 &content_hash[..std::cmp::min(16, content_hash.len())]
             );
+            print_risk_summary(v.deterministic_risk.as_ref());
             print_findings(findings, &v.source);
         }
         VerdictStatus::Revoked { reason, findings } => {
             println!("  {} {}", "reason:".red(), reason.red());
+            print_risk_summary(v.deterministic_risk.as_ref());
             print_findings(findings, &v.source);
         }
         VerdictStatus::Unverified => {
@@ -48,6 +50,38 @@ pub fn print_verdict(v: &TrustVerdict) {
         VerdictStatus::Unknown => {
             println!("  {}", "Package not found in the chain registry.".dimmed());
         }
+    }
+}
+
+/// MAL-004/LLM-002: surface the risk band, deterministic finding counts, and
+/// the advisory (LLM) lane — clearly labeled as not part of consensus.
+fn print_risk_summary(risk: Option<&common::DeterministicRiskSummary>) {
+    let Some(r) = risk else { return };
+
+    let band = if r.band.is_empty() { "unrated" } else { &r.band };
+    let colored_band = match band.to_ascii_lowercase().as_str() {
+        "critical" | "high" => band.red().bold().to_string(),
+        "medium" | "elevated" => band.yellow().bold().to_string(),
+        "low" | "minimal" => band.green().bold().to_string(),
+        _ => band.bold().to_string(),
+    };
+
+    println!(
+        "  {} band {} — deterministic score {} ({} critical, {} high)",
+        "risk:".dimmed(),
+        colored_band,
+        r.deterministic_score,
+        r.critical_findings,
+        r.high_findings,
+    );
+    if r.advisory_findings > 0 || r.advisory_score > 0 {
+        println!(
+            "  {} score {} with {} finding(s) {}",
+            "llm:".dimmed(),
+            r.advisory_score,
+            r.advisory_findings,
+            "(advisory only — not part of consensus)".dimmed(),
+        );
     }
 }
 

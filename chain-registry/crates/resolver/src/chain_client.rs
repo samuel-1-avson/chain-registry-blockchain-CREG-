@@ -48,6 +48,7 @@ pub async fn fetch_verdict(id: &PackageId, node_url: &str) -> Result<TrustVerdic
                     source: VerdictSource::Chain {
                         node_url: node_url.to_string(),
                     },
+                    deterministic_risk: None,
                 });
             }
         }
@@ -109,6 +110,7 @@ async fn fetch_verdict_rest(id: &PackageId, node_url: &str) -> Result<TrustVerdi
             source: VerdictSource::Chain {
                 node_url: node_url.to_string(),
             },
+            deterministic_risk: None,
         });
     }
 
@@ -125,6 +127,7 @@ async fn fetch_verdict_rest(id: &PackageId, node_url: &str) -> Result<TrustVerdi
         #[allow(dead_code)]
         published_at: Option<String>,
         revocation_reason: Option<String>,
+        deterministic_risk: Option<common::DeterministicRiskSummary>,
     }
 
     let record: PackageApiResp = resp
@@ -156,5 +159,6 @@ async fn fetch_verdict_rest(id: &PackageId, node_url: &str) -> Result<TrustVerdi
         source: VerdictSource::Chain {
             node_url: node_url.to_string(),
         },
+        deterministic_risk: record.deterministic_risk,
     })
 }

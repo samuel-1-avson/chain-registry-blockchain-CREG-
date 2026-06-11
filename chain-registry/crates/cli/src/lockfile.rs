@@ -280,6 +280,7 @@ mod tests {
             source: VerdictSource::Chain {
                 node_url: "http://localhost".into(),
             },
+            deterministic_risk: None,
         }
     }
 

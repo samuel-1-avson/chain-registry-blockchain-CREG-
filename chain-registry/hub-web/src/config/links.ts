@@ -8,6 +8,9 @@ export const EXTERNAL_LINKS = {
     import.meta.env.VITE_DOCS_URL ??
     "https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/blob/main/docs/PUBLIC_TESTNET_QUICKSTART.md",
   api: import.meta.env.VITE_API_URL ?? "https://api.testnet.cregnet.dev",
+  apiDocs:
+    import.meta.env.VITE_API_DOCS_URL ??
+    `${import.meta.env.VITE_API_URL ?? "https://api.testnet.cregnet.dev"}/api-docs/`,
 } as const;
 
 export const SEPOLIA_CHAIN_ID = 11_155_111;

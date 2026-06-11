@@ -44,6 +44,7 @@ pub async fn resolve_id(id: &PackageId, node_url: Option<&str>) -> Result<TrustV
                 status: VerdictStatus::Unknown,
                 resolved_at: Utc::now(),
                 source: VerdictSource::Chain { node_url: url },
+                deterministic_risk: None,
             }
         }
     };
