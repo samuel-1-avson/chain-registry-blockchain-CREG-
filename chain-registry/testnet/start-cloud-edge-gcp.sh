@@ -116,11 +116,12 @@ echo "=== Stopping legacy full-stack containers if present ==="
 
 echo "=== Starting cloud edge stack ==="
 compose_run down --remove-orphans 2>/dev/null || true
-for stale in creg-cloud-caddy creg-cloud-explorer creg-cloud-faucet creg-cloud-spec-server \
-  creg-cloud-ipfs creg-cloud-ipfs-perms creg-cloud-waitlist creg-cloud-hub-api creg-cloud-hub-web; do
-  "${DOCKER[@]}" rm -f "$stale" 2>/dev/null || true
-done
-UP_ARGS=(up -d --build --remove-orphans)
+# Fixed container_name + profile drift leaves orphans compose down does not remove.
+mapfile -t stale_ids < <("${DOCKER[@]}" ps -aq --filter 'name=creg-cloud-' 2>/dev/null || true)
+if [[ ${#stale_ids[@]} -gt 0 ]]; then
+  "${DOCKER[@]}" rm -f "${stale_ids[@]}" 2>/dev/null || true
+fi
+UP_ARGS=(up -d --build --remove-orphans --force-recreate)
 if [[ -n "${CREG_HUB_API_CLOUD_RUN_URL:-}" ]]; then
   UP_ARGS+=(--scale hub-api=0)
 fi
