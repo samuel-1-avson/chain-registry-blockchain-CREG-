@@ -1,7 +1,7 @@
 # Fleet layout: validators on creg-validator-vm (VPC); edge services on this VM.
-# API proxies to observer node on the validator fleet internal IP.
+# API proxies to observer read pool (Phase 2 ILB) or legacy observer on validator VM.
 #
-# Requires: CREG_VALIDATOR_VM_INTERNAL_IP, CREG_3NODE_NODE3_API_PORT (default 28182)
+# Requires: CREG_OBSERVER_API_UPSTREAM (host:port) — set by start-cloud-edge-gcp.sh
 
 {
 	email {$CREG_ACME_EMAIL}
@@ -12,7 +12,7 @@ import faucet-edge.caddy
 import hub.caddy
 
 {$CREG_PUBLIC_API_HOST} {
-	reverse_proxy {$CREG_VALIDATOR_VM_INTERNAL_IP}:{$CREG_3NODE_NODE3_API_PORT} {
+	reverse_proxy {$CREG_OBSERVER_API_UPSTREAM} {
 		flush_interval -1
 	}
 }

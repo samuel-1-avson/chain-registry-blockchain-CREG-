@@ -1,6 +1,14 @@
-# Join portal vhost (optional). Set CREG_PUBLIC_JOIN_HOST (e.g. testnet.cregnet.dev).
+# Join portal vhost (optional). Set CREG_PUBLIC_JOIN_HOST (e.g. join.testnet.cregnet.dev).
+# Phase 2: set CREG_HUB_API_CLOUD_RUN_URL to Cloud Run service URL (deploy-hub-api-cloudrun.ps1).
 {$CREG_PUBLIC_JOIN_HOST} {
 	handle /api/* {
+		@cloudrun expression {env.CREG_HUB_API_CLOUD_RUN_URL} != ""
+		handle @cloudrun {
+			reverse_proxy {$CREG_HUB_API_CLOUD_RUN_URL} {
+				flush_interval -1
+				header_up Host {http.request.host}
+			}
+		}
 		reverse_proxy 127.0.0.1:{$CREG_HUB_API_PORT}
 	}
 	handle {

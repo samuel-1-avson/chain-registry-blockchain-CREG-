@@ -1,38 +1,71 @@
 :root {
   color-scheme: dark;
 
-  --bg: #0a0b0f;
-  --bg-elevated: #12131a;
-  --surface: rgba(255, 255, 255, 0.03);
-  --surface-hover: rgba(255, 255, 255, 0.06);
+  /* Surfaces — warm charcoal, not blue-gray SaaS */
+  --bg: #0c0d11;
+  --bg-elevated: #14161c;
+  --bg-overlay: rgba(12, 13, 17, 0.92);
+  --surface: rgba(255, 248, 240, 0.03);
+  --surface-hover: rgba(255, 248, 240, 0.06);
+  --surface-active: rgba(255, 248, 240, 0.09);
 
-  --border: rgba(255, 255, 255, 0.06);
-  --border-hover: rgba(255, 255, 255, 0.12);
-  --border-accent: rgba(99, 102, 241, 0.3);
+  --border: rgba(255, 248, 240, 0.08);
+  --border-hover: rgba(255, 248, 240, 0.14);
+  --border-accent: rgba(232, 163, 92, 0.45);
 
-  --text-primary: #f8fafc;
-  --text-secondary: #94a3b8;
-  --text-tertiary: #64748b;
+  --text-primary: #f4f0e8;
+  --text-secondary: #a8a29e;
+  --text-tertiary: #78716c;
 
-  --accent-primary: #6366f1;
-  --accent-primary-light: #818cf8;
-  --accent-success: #22c55e;
-  --accent-warning: #f59e0b;
-  --accent-error: #ef4444;
+  /* Copper registry accent — dominant story */
+  --accent-primary: #e8a35c;
+  --accent-primary-dim: #c4843f;
+  --accent-primary-light: #f5c98a;
+  --accent-glow: rgba(232, 163, 92, 0.22);
 
-  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  --font-mono: "SF Mono", Consolas, Monaco, monospace;
+  /* Semantic */
+  --accent-success: #4ade80;
+  --accent-success-dim: rgba(74, 222, 128, 0.12);
+  --accent-warning: #fbbf24;
+  --accent-warning-dim: rgba(251, 191, 36, 0.12);
+  --accent-error: #f87171;
+  --accent-error-dim: rgba(248, 113, 113, 0.12);
+  --accent-info: #67e8f9;
+  --accent-info-dim: rgba(103, 232, 249, 0.1);
 
+  /* Path accents */
+  --path-observe: #67e8f9;
+  --path-publish: #e8a35c;
+  --path-validate: #a78bfa;
+  --path-docs: #86efac;
+
+  --font-display: "Newsreader", Georgia, "Times New Roman", serif;
+  --font-sans: "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
+  --space-5: 20px;
   --space-6: 24px;
   --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
 
-  --radius-sm: 6px;
+  --radius-sm: 4px;
   --radius-md: 8px;
   --radius-lg: 12px;
+  --radius-full: 9999px;
 
-  --transition-fast: 150ms ease;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 8px 28px rgba(0, 0, 0, 0.45);
+  --shadow-glow: 0 0 0 1px var(--border-accent), 0 12px 40px var(--accent-glow);
+
+  --transition-fast: 140ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-medium: 260ms cubic-bezier(0.4, 0, 0.2, 1);
+
   --z-sticky: 100;
+  --z-dropdown: 200;
+  --max-width: 1180px;
 }
