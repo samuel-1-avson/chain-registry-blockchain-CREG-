@@ -77,7 +77,7 @@ function ActivityFilter({ active, onChange }) {
             padding: '3px 8px',
             borderRadius: 'var(--radius-full)',
             border: `1px solid ${active === k ? 'var(--border-accent)' : 'var(--border)'}`,
-            background: active === k ? 'rgba(99,102,241,0.12)' : 'transparent',
+            background: active === k ? 'rgba(232, 163, 92, 0.08)' : 'transparent',
             color: active === k ? 'var(--accent-primary-light)' : 'var(--text-tertiary)',
             fontSize: 10, fontWeight: 600, cursor: 'pointer',
             textTransform: 'uppercase', letterSpacing: '0.03em',

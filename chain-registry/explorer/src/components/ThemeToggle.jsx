@@ -31,17 +31,10 @@ export function ThemeToggle() {
   return (
     <button
       type="button"
+      className="explorer-theme-toggle"
       onClick={() => setTheme(next)}
       aria-label={`Switch to ${next} theme`}
       title={`Switch to ${next} theme`}
-      style={{
-        width: 36, height: 36, borderRadius: 'var(--radius-md)',
-        background: 'var(--surface)', border: '1px solid var(--border)',
-        color: 'var(--text-secondary)', cursor: 'pointer',
-        fontSize: 16,
-        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        transition: 'all var(--transition-fast)',
-      }}
     >
       {theme === 'dark' ? '☀' : '☾'}
     </button>

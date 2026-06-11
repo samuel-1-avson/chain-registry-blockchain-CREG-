@@ -350,5 +350,5 @@ const btnAccentStyle = {
   ...btnStyle,
   border: '1px solid var(--accent-primary)',
   color: 'var(--accent-primary-light)',
-  background: 'rgba(99,102,241,0.08)',
+  background: 'rgba(232, 163, 92, 0.08)',
 }

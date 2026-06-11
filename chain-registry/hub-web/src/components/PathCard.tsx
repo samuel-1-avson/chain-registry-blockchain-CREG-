@@ -1,46 +1,36 @@
 import { Link } from "react-router-dom";
 
+type PathKind = "observe" | "publish" | "validate" | "docs";
+
 type PathCardProps = {
   title: string;
   description: string;
   to: string;
   cta: string;
+  path?: PathKind;
+  index?: number;
 };
 
-export function PathCard({ title, description, to, cta }: PathCardProps) {
+export function PathCard({
+  title,
+  description,
+  to,
+  cta,
+  path = "observe",
+  index,
+}: PathCardProps) {
   return (
-    <article style={styles.card}>
-      <h2 style={styles.title}>{title}</h2>
-      <p style={styles.body}>{description}</p>
-      <Link to={to} style={styles.link}>
-        {cta} →
+    <article className="hub-path-card" data-path={path}>
+      {index != null && (
+        <span className="hub-path-index">
+          {String(index).padStart(2, "0")}
+        </span>
+      )}
+      <h2>{title}</h2>
+      <p>{description}</p>
+      <Link to={to} className="hub-button-secondary">
+        {cta}
       </Link>
     </article>
   );
 }
-
-const styles = {
-  card: {
-    border: "1px solid var(--border)",
-    borderRadius: "var(--radius-lg)",
-    padding: "1.25rem",
-    background: "var(--surface)",
-    display: "flex",
-    flexDirection: "column" as const,
-    gap: "0.75rem",
-    minHeight: "100%",
-  },
-  title: {
-    margin: 0,
-    fontSize: "1.2rem",
-  },
-  body: {
-    margin: 0,
-    color: "var(--text-secondary)",
-    flex: 1,
-  },
-  link: {
-    fontWeight: 600,
-    textDecoration: "none",
-  },
-};
