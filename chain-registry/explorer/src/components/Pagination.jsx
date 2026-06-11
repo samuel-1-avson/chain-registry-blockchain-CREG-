@@ -5,7 +5,7 @@ const btn = (active, disabled) => ({
   minWidth: 36,
   borderRadius: 'var(--radius-sm)',
   border: `1px solid ${active ? 'var(--border-accent)' : 'var(--border)'}`,
-  background: active ? 'rgba(99,102,241,0.12)' : 'var(--surface)',
+  background: active ? 'rgba(232, 163, 92, 0.08)' : 'var(--surface)',
   color: disabled ? 'var(--text-disabled)' : active ? 'var(--accent-primary-light)' : 'var(--text-secondary)',
   cursor: disabled ? 'not-allowed' : 'pointer',
   fontSize: '12px',

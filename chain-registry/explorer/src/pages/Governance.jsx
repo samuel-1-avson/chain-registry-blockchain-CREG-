@@ -180,7 +180,7 @@ export default function Governance() {
               padding: '4px 12px',
               borderRadius: 'var(--radius-full)',
               border: `1px solid ${typeFilter === t ? 'var(--border-accent)' : 'var(--border)'}`,
-              background: typeFilter === t ? 'rgba(99,102,241,0.12)' : 'transparent',
+              background: typeFilter === t ? 'rgba(232, 163, 92, 0.08)' : 'transparent',
               color: typeFilter === t ? 'var(--accent-primary-light)' : 'var(--text-tertiary)',
               fontSize: 11, fontWeight: 600, cursor: 'pointer',
               textTransform: 'uppercase', letterSpacing: '0.03em',

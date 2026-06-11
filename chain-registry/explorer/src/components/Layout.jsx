@@ -26,63 +26,47 @@ const NAV = [
   { to: '/publisher', label: 'Publish' },
 ]
 
-const navLinkStyle = ({ isActive }) => ({
-  padding: '6px 12px',
-  borderRadius: 'var(--radius-sm)',
-  color: isActive ? 'var(--accent-primary-light)' : 'var(--text-secondary)',
-  background: isActive ? 'rgba(99,102,241,0.12)' : 'transparent',
-  fontSize: 13,
-  fontWeight: 600,
-  textDecoration: 'none',
-  whiteSpace: 'nowrap',
-  transition: 'all var(--transition-fast)',
-})
-
 export function Layout({ children, sseState, reconnectAttempt, chainStats }) {
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg)', color: 'var(--text-primary)' }}>
+    <div className="explorer-shell">
+      <a href="#main-content" className="explorer-skip">
+        Skip to main content
+      </a>
       <TestnetPhaseBanner />
-      <header style={{
-        position: 'sticky',
-        top: 0,
-        zIndex: 'var(--z-sticky)',
-        background: 'var(--bg-elevated)',
-        borderBottom: '1px solid var(--border)',
-        backdropFilter: 'blur(8px)',
-      }}>
-        <div style={{ maxWidth: 1440, margin: '0 auto', padding: '12px 24px', display: 'flex', alignItems: 'center', gap: 'var(--space-4)' }}>
-          <Link to="/" style={{ display: 'flex', alignItems: 'center', gap: 8, textDecoration: 'none' }}>
-            <span style={{
-              width: 28, height: 28, borderRadius: 'var(--radius-sm)',
-              background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-info))',
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-              color: '#fff', fontWeight: 700, fontSize: 13,
-            }}>C</span>
-            <span style={{ color: 'var(--text-primary)', fontWeight: 700, fontSize: 15, letterSpacing: '-0.01em' }}>
-              Chain Registry
-            </span>
+      <header className="explorer-header">
+        <div className="explorer-header-inner">
+          <Link to="/" className="explorer-brand">
+            <span className="explorer-brand-mark" aria-hidden="true">C</span>
+            <span className="explorer-brand-title">Chain Registry</span>
             {chainStats?.tip_height != null && (
-              <span style={{ color: 'var(--text-tertiary)', fontSize: 11, fontFamily: 'var(--font-mono)', marginLeft: 8 }}>
-                #{chainStats.tip_height}
-              </span>
+              <span className="explorer-brand-height">#{chainStats.tip_height}</span>
             )}
           </Link>
           <SearchBar />
           <ConnectionBanner state={sseState} reconnectAttempt={reconnectAttempt} />
           <ThemeToggle />
         </div>
-        <nav aria-label="Primary" style={{ maxWidth: 1440, margin: '0 auto', padding: '0 24px 10px', display: 'flex', gap: 4, overflowX: 'auto' }}>
+        <nav aria-label="Primary" className="explorer-nav">
           {NAV.map((n) => (
-            <NavLink key={n.to} to={n.to} end={n.end} style={navLinkStyle}>{n.label}</NavLink>
+            <NavLink
+              key={n.to}
+              to={n.to}
+              end={n.end}
+              className={({ isActive }) =>
+                isActive ? 'explorer-nav-link active' : 'explorer-nav-link'
+              }
+            >
+              {n.label}
+            </NavLink>
           ))}
         </nav>
       </header>
-      <main style={{ maxWidth: 1440, margin: '0 auto', padding: '24px', minHeight: 'calc(100vh - 120px)' }}>
+      <main id="main-content" className="explorer-main">
         {children}
       </main>
-      <footer style={{ maxWidth: 1440, margin: '0 auto', padding: '24px', borderTop: '1px solid var(--border)', color: 'var(--text-tertiary)', fontSize: 12, display: 'flex', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
-        <span>Chain Registry Explorer - deep-linkable, keyboard-accessible, open-source</span>
-        <span><Link to="/about" style={{ color: 'var(--text-secondary)' }}>About</Link></span>
+      <footer className="explorer-footer">
+        <span>Chain Registry Explorer — deep-linkable, keyboard-accessible, open-source</span>
+        <span><Link to="/about">About</Link></span>
       </footer>
     </div>
   )
