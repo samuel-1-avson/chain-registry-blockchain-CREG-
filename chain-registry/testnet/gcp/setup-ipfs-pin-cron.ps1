@@ -24,6 +24,10 @@ if (-not $VmName) {
 }
 
 $sshOpts = @("--zone=$Zone", "--project=$ProjectId", "--tunnel-through-iap", "--strict-host-key-checking=no", "--quiet")
+$scpOpts = @("--zone=$Zone", "--project=$ProjectId", "--tunnel-through-iap", "--strict-host-key-checking=no", "--quiet")
+$remoteHome = (gcloud compute ssh $VmName @sshOpts --command='printf "%s" $HOME').Trim()
+if ($LASTEXITCODE -ne 0) { throw "could not resolve remote home" }
+$remotePinDir = "$remoteHome/creg-pin-check"
 
 function Log($m) { Write-Host "[ipfs-cron] $m" }
 
@@ -32,15 +36,15 @@ $localInstaller = Join-Path $gcpDir "install-ipfs-hourly-cron.sh"
 if (-not (Test-Path $localScript)) { throw "Missing $localScript" }
 if (-not (Test-Path $localInstaller)) { throw "Missing $localInstaller" }
 
-Log "Uploading pin checker to $VmName..."
-gcloud compute ssh $VmName @sshOpts --command="mkdir -p ~/creg-pin-check/reports" | Out-Null
-gcloud compute scp $localScript "${VmName}:~/creg-pin-check/ipfs-pin-check.py" @sshOpts
-gcloud compute scp $localInstaller "${VmName}:~/creg-pin-check/install-ipfs-hourly-cron.sh" @sshOpts
+Log "Uploading pin checker to $VmName ($remotePinDir)..."
+gcloud compute ssh $VmName @sshOpts --command="mkdir -p '$remotePinDir/reports'" | Out-Null
+gcloud compute scp $localScript "${VmName}:${remotePinDir}/ipfs-pin-check.py" @scpOpts
+gcloud compute scp $localInstaller "${VmName}:${remotePinDir}/install-ipfs-hourly-cron.sh" @scpOpts
 if ($LASTEXITCODE -ne 0) { throw "upload failed" }
 
-$remoteCmd = "sed -i 's/\r$//' ~/creg-pin-check/*.sh ~/creg-pin-check/*.py 2>/dev/null; " +
-    "chmod +x ~/creg-pin-check/install-ipfs-hourly-cron.sh; " +
-    "CREG_API_URL='$ApiUrl' CREG_IPFS_API='$IpfsApi' bash ~/creg-pin-check/install-ipfs-hourly-cron.sh"
+$remoteCmd = "sed -i 's/\r$//' '$remotePinDir'/*.sh '$remotePinDir'/*.py 2>/dev/null; " +
+    "chmod +x '$remotePinDir/install-ipfs-hourly-cron.sh'; " +
+    "CREG_API_URL='$ApiUrl' CREG_IPFS_API='$IpfsApi' bash '$remotePinDir/install-ipfs-hourly-cron.sh'"
 
 Log "Installing hourly cron (API=$ApiUrl IPFS=$IpfsApi)..."
 gcloud compute ssh $VmName @sshOpts --command=$remoteCmd
