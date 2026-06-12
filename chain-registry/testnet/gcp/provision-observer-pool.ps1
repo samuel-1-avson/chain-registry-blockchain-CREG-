@@ -55,6 +55,7 @@ $fwApi = "creg-observers-allow-api-from-testnet"
 $fwP2pToValidators = "creg-validators-allow-p2p-from-observers"
 $fwP2pFromValidators = "creg-observers-allow-p2p-from-validators"
 $fwIap = "creg-observers-allow-iap-ssh"
+$fwLbHealth = "creg-observers-allow-lb-health-checks"
 $hcName = "creg-observer-api-tcp"
 $backendName = "creg-observer-api-backend"
 $igName = $MigName
@@ -146,6 +147,9 @@ Ensure-Firewall -Name $fwP2pFromValidators -Desc "Observer P2P from validators" 
 Ensure-Firewall -Name $fwIap -Desc "IAP SSH to observer pool" `
     -Rules "tcp:22" -TargetTag $ObserverTag -SourceTags $null -SourceRanges "35.235.240.0/20"
 
+Ensure-Firewall -Name $fwLbHealth -Desc "ILB TCP health checks to observer API" `
+    -Rules "tcp:$ApiPort" -TargetTag $ObserverTag -SourceTags $null -SourceRanges "130.211.0.0/22,35.191.0.0/16"
+
 # Instance template
 $meta = "github-repo=$GithubRepo,github-branch=$GithubBranch"
 $templateExists = gcloud compute instance-templates describe $TemplateName --project=$ProjectId 2>$null
@@ -221,6 +225,16 @@ if ($LASTEXITCODE -ne 0) {
         --region=$Region `
         --instance-group=$MigName `
         --instance-group-zone=$Zone | Out-Null
+} else {
+    $backendGroups = @(gcloud compute backend-services describe $backendName --region=$Region --project=$ProjectId --format="value(backends.group)" 2>$null | Where-Object { $_ })
+    if ($backendGroups.Count -eq 0) {
+        Log "Backend service $backendName has no instance groups; attaching $MigName"
+        gcloud compute backend-services add-backend $backendName `
+            --project=$ProjectId `
+            --region=$Region `
+            --instance-group=$MigName `
+            --instance-group-zone=$Zone | Out-Null
+    }
 }
 
 $frExists = gcloud compute forwarding-rules describe $InternalLbName --region=$Region --project=$ProjectId 2>$null

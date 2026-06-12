@@ -58,9 +58,9 @@ foreach ($key in $steps.Keys) {
 
 $failed = @($steps.Values | Where-Object { $_ -eq $false })
 if ($failed.Count -gt 0) {
-    Log "FAILED — $($failed.Count) step(s) did not pass"
+    Log "FAILED - $($failed.Count) step(s) did not pass"
     exit 1
 }
 
-Log "PASSED — rehearsal checks complete"
+Log "PASSED - rehearsal checks complete"
 exit 0

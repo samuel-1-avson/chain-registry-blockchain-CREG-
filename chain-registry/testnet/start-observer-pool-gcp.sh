@@ -50,12 +50,50 @@ fi
 FLEET_IMAGE="${CREG_FLEET_IMAGE:-ghcr.io/chain-registry/chain-registry:latest}"
 export CREG_FLEET_IMAGE="$FLEET_IMAGE"
 
-echo "=== Pulling observer image: ${FLEET_IMAGE} ==="
-"${DOCKER[@]}" pull "$FLEET_IMAGE" || true
+use_prebuilt=1
+if [[ -n "${CREG_FLEET_BUILD:-}" ]] || [[ -n "${CREG_OBSERVER_BUILD:-}" ]]; then
+  use_prebuilt=0
+fi
+
+if [[ "$use_prebuilt" -eq 1 ]]; then
+  echo "=== Pulling observer image: ${FLEET_IMAGE} ==="
+  if ! "${DOCKER[@]}" pull "$FLEET_IMAGE" 2>/dev/null; then
+    found_local=0
+    for local_tag in creg-node:fleet chain-registry-node-secure:fleet chain-registry-app:latest; do
+      if "${DOCKER[@]}" image inspect "$local_tag" >/dev/null 2>&1; then
+        echo "Prebuilt pull failed; using local image ${local_tag}" >&2
+        export CREG_FLEET_IMAGE="$local_tag"
+        FLEET_IMAGE="$local_tag"
+        found_local=1
+        break
+      fi
+    done
+    if [[ "$found_local" -eq 0 ]]; then
+      echo "No local observer image; building from synced source (Dockerfile.windows)" >&2
+      use_prebuilt=0
+    fi
+  fi
+fi
+
+if [[ "$use_prebuilt" -eq 0 ]]; then
+  echo "=== Building observer image from synced source (Dockerfile.windows) ==="
+  COMPOSE_BUILD=("${DOCKER[@]}" compose -f "${SCRIPT_DIR}/docker-compose.validator-fleet.yml" --env-file "$ENV_FILE")
+  "${COMPOSE_BUILD[@]}" build creg-node-1
+  built_id="$("${COMPOSE_BUILD[@]}" images -q creg-node-1 2>/dev/null | head -n1)"
+  if [[ -n "$built_id" ]]; then
+    "${DOCKER[@]}" tag "$built_id" creg-node:fleet
+    export CREG_FLEET_IMAGE="creg-node:fleet"
+    FLEET_IMAGE="creg-node:fleet"
+  fi
+fi
 
 COMPOSE=("${DOCKER[@]}" compose -f "${SCRIPT_DIR}/docker-compose.observer-pool.yml" --env-file "$ENV_FILE")
 echo "=== Starting observer pool container (${CREG_OBSERVER_NODE_ID}) ==="
-"${COMPOSE[@]}" up -d --pull always observer
+if "${DOCKER[@]}" image inspect "$FLEET_IMAGE" >/dev/null 2>&1; then
+  "${COMPOSE[@]}" up -d --no-build --pull never observer
+else
+  "${COMPOSE[@]}" up -d --pull always observer
+fi
 
 echo ""
 echo "Observer API: http://127.0.0.1:${CREG_OBSERVER_POOL_API_PORT:-28182}/v1/public/health"

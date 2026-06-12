@@ -80,8 +80,11 @@ foreach ($node in @(
         } catch { Log "WARN: could not parse /v1/health from $ctr" }
     }
     if ($bypass -eq $true) { throw "$ctr /v1/health reports sandbox.dev_bypass=true" }
-    if ($engine -and $engine -ne "nsjail") {
-        Log "WARN: $ctr sandbox.engine=$engine (expected nsjail)"
+    if (-not $engine) {
+        throw "$ctr /v1/health missing sandbox.engine - rebuild fleet with CREG_FLEET_BUILD=1 (deploy-validator-fleet.ps1)"
+    }
+    if ($engine -ne "nsjail") {
+        throw "$ctr sandbox.engine=$engine (expected nsjail)"
     }
 
     Log "$ctr image=$($img.out) CREG_DEV_SANDBOX=$($sb.out) engine=$engine dev_bypass=$bypass"

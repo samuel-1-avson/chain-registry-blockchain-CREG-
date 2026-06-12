@@ -47,18 +47,31 @@ if ($Live) {
         $health = Invoke-RestMethod -Uri $api -TimeoutSec 20
         $gates.live_api_health = ($health.status -eq "ok")
         if ($health.sandbox) {
-            $gates.live_sandbox_reported = [bool]$health.sandbox.engine
+            $gates.live_sandbox_reported = ($health.sandbox.engine -eq "nsjail" -and $health.sandbox.dev_bypass -eq $false)
         }
     } catch {
         $gates.live_api_health = $false
-        Log "WARN: could not fetch $api — $($_.Exception.Message)"
+        Log "WARN: could not fetch $api - $($_.Exception.Message)"
     }
+    $fleetScript = Join-Path $scriptDir "gcp\verify-fleet-sandbox.ps1"
+    if (Test-Path $fleetScript) {
+        & $fleetScript
+        if ($LASTEXITCODE -eq 0) {
+            $gates.live_sandbox_reported = $true
+        } elseif ($null -eq $gates.live_sandbox_reported) {
+            $gates.live_sandbox_reported = $false
+        }
+    }
+}
+
+if ($Live -and $gates.live_sandbox_reported -ne $true) {
+    $gates.live_sandbox_reported = $false
 }
 
 $failed = @($gates.GetEnumerator() | Where-Object { $_.Value -eq $false })
 if ($failed.Count -gt 0) {
     $failed | ForEach-Object { Log "FAIL: $($_.Key)" }
-    throw "L2 local gate verify failed ($($failed.Count) checks)"
+    throw ("L2 local gate verify failed ({0} checks)" -f $failed.Count)
 }
 
 $outDir = Join-Path $scriptDir "l2-gate-logs"

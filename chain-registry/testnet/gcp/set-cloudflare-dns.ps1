@@ -13,6 +13,7 @@ param(
     [string]$ParentDomain = "",
     [string]$BaseDomain = "",
     [string]$ApiToken = "",
+    [string[]]$RecordNames = @(),
     [switch]$WhatIf
 )
 
@@ -47,7 +48,9 @@ $suffix = $BaseDomain
 if ($suffix.EndsWith(".$ParentDomain")) {
     $suffix = $suffix.Substring(0, $suffix.Length - $ParentDomain.Length - 1)
 }
-$hosts = @("api", "explorer", "faucet", "spec", "ipfs", $suffix) | ForEach-Object {
+$defaultHosts = @("api", "explorer", "faucet", "spec", "ipfs", $suffix)
+$hosts = if ($RecordNames.Count -gt 0) { $RecordNames } else { $defaultHosts }
+$hosts = $hosts | ForEach-Object {
     if ($_ -eq $suffix) { $suffix } else { "$_.${suffix}" }
 }
 

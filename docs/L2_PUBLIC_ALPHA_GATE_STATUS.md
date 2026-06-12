@@ -2,11 +2,11 @@
 
 > Living tracker for [CREG_LIMITATIONS_PUBLIC_READINESS_PLAN.md](./CREG_LIMITATIONS_PUBLIC_READINESS_PLAN.md).  
 > **Target level:** L2 Public Alpha (open waitlist, honest disclaimers — not mainnet).  
-> **Last updated:** 2026-06-11
+> **Last updated:** 2026-06-12
 
 | Gate | Status | Evidence / next action |
 | --- | --- | --- |
-| Real sandbox on public validators (MAL-001) | **Partial** | Fleet verify passed with nsjail + `CREG_DEV_SANDBOX=false`; redeploy validators on post-merge image so `/v1/health` reports `sandbox.engine` |
+| Real sandbox on public validators (MAL-001) | **Pass** | Fleet verify: `engine=nsjail`, `CREG_DEV_SANDBOX=false`; public `GET https://api.testnet.cregnet.dev/v1/health` reports `sandbox.engine=nsjail` (2026-06-12) |
 | Public endpoint health (HOSTING-301) | **Pass** | `hosting-301-verify.ps1` on `testnet.cregnet.dev` |
 | Publisher quickstart E2E | **Partial** | `PUBLIC_TESTNET_QUICKSTART.md` + publish smokes; needs rehearsal sign-off |
 | Validator operator checklist (VAL-002) | **Pass** | [VALIDATOR_ONBOARDING_CHECKLIST.md](./VALIDATOR_ONBOARDING_CHECKLIST.md) |
@@ -17,12 +17,12 @@
 | Incident response runbook | **Pass** | [INCIDENT_RESPONSE_RUNBOOK.md](./INCIDENT_RESPONSE_RUNBOOK.md) |
 | Public copy — no production overclaims | **Partial** | Hub FAQ/network/disclaimer copy shipped; white paper + social still need review |
 | Waitlist segmentation | **Pass** | Firebase waitlist deployed |
-| Public-alpha rehearsal (MAIN-006) | **Open** | Run `testnet/public-alpha-rehearsal.ps1` |
+| Public-alpha rehearsal (MAIN-006) | **Pass** | `public-alpha-rehearsal.ps1 -Execute` — l2_gates, malicious_fixtures, hosting_verify, fleet_sandbox all PASS (2026-06-12) |
 | Cloud Run hub-api (Phase 2) | **Pass** | `deploy-hub-api-cloudrun.ps1`; Phase 2 health — see [GCP_PHASE2_RUNBOOK.md](./GCP_PHASE2_RUNBOOK.md) |
-| Public HTTPS LB (api.testnet.cregnet.dev) | **Partial** | LB `136.110.145.47`; backend HEALTHY; managed cert PROVISIONING/FAILED_NOT_VISIBLE until DNS cutover |
+| Public HTTPS LB (api.testnet.cregnet.dev) | **Pass** | DNS → `136.110.145.47`; managed cert ACTIVE; HTTP backend to edge `:80` — `GET /v1/health` OK |
 | Cloud Armor (WAF) | **Blocked** | `SECURITY_POLICIES` quota 0; `setup-cloud-armor.ps1` not applied |
-| Observer pool (ILB) | **Partial** | ILB `10.128.0.5` provisioned; edge env not cut over — [GCP_PHASE2_RUNBOOK.md](./GCP_PHASE2_RUNBOOK.md) |
-| DNS api.testnet.cregnet.dev | **Open** | A record `35.225.225.20` (edge VM); target LB `136.110.145.47` |
+| Observer pool (ILB) | **Pass** | ILB `10.128.0.5`; edge `CREG_OBSERVER_API_UPSTREAM=10.128.0.5:28182` — [GCP_PHASE2_RUNBOOK.md](./GCP_PHASE2_RUNBOOK.md) |
+| DNS api.testnet.cregnet.dev | **Pass** | Cloudflare A → `136.110.145.47` |
 
 ## Verify locally
 
@@ -37,13 +37,12 @@ With live endpoints:
 
 ```powershell
 .\testnet\l2-gate-verify.ps1 -Live -BaseDomain testnet.cregnet.dev
+.\testnet\public-alpha-rehearsal.ps1 -Execute -BaseDomain testnet.cregnet.dev
 ```
 
 ## Immediate operator actions
 
 1. **SEC-401** — send outreach (Trail of Bits, OpenZeppelin); fill booking table in [NEXT_WORK.md](./NEXT_WORK.md).
-2. **MAL-001** — `deploy-validator-fleet.ps1` after pulling `main` (includes `/v1/health` sandbox status).
-3. **IPFS-002** — `.\testnet\gcp\setup-ipfs-pin-cron.ps1` (installs hourly cron + first evidence run).
-4. **MAIN-006** — `.\testnet\public-alpha-rehearsal.ps1` when fleet + faucet are up.
-5. **Phase 2** — observer pool cutover, DNS to LB `136.110.145.47`, Cloud Armor quota; see [GCP_PHASE2_RUNBOOK.md](./GCP_PHASE2_RUNBOOK.md).
-
+2. **Cloud Armor** — request `SECURITY_POLICIES` quota increase; then run `setup-cloud-armor.ps1`.
+3. **Public copy** — review white paper + social for production overclaims before widening waitlist.
+4. **Observer redeploy** — one-command image path: build on validator VM, transfer, import (see [GCP_PHASE2_RUNBOOK.md](./GCP_PHASE2_RUNBOOK.md#observer-image-pipeline)).

@@ -21,7 +21,7 @@ if (-not $MigName) { $MigName = if ($cfg.GCP_OBSERVER_MIG_NAME) { $cfg.GCP_OBSER
 function Log($m) { Write-Host "[observer-deploy] $m" }
 
 $instances = @(gcloud compute instance-groups managed list-instances $MigName `
-    --zone=$Zone --project=$ProjectId --format="value(instance)" 2>$null | Where-Object { $_ })
+    --zone=$Zone --project=$ProjectId --format="value(instance.basename())" 2>$null | Where-Object { $_ -and $_ -notmatch '^us-central1' })
 
 if ($instances.Count -eq 0) {
     throw "No instances in MIG $MigName. Run provision-observer-pool.ps1 -Confirm first."
@@ -34,20 +34,16 @@ if (-not $Confirm) {
 }
 
 $testnetDir = Split-Path -Parent $gcpDir
-$repoRoot = Split-Path -Parent $testnetDir
-& (Join-Path $gcpDir "push-env.ps1") -ProjectId $ProjectId -Zone $Zone -VmName ($instances[0] -replace ".*/instances/", "")
 
 foreach ($uri in $instances) {
     $vm = ($uri -split "/")[-1]
-    Log "Deploying on $vm ..."
-    gcloud compute scp (Join-Path $testnetDir "sepolia-3node.env") "${vm}:/tmp/sepolia-3node.env" `
-        --zone=$Zone --project=$ProjectId --quiet
-    gcloud compute ssh $vm --zone=$Zone --project=$ProjectId --quiet --command=@"
-sudo mkdir -p /opt/chain-registry/chain-registry/testnet
-sudo cp /tmp/sepolia-3node.env /opt/chain-registry/chain-registry/testnet/sepolia-3node.env 2>/dev/null || true
-cd /opt/chain-registry/chain-registry && git pull --ff-only 2>/dev/null || true
-./testnet/start-observer-pool-gcp.sh
-"@
+    Log "Syncing repo to $vm ..."
+    & (Join-Path $gcpDir "sync-local-repo.ps1") -ProjectId $ProjectId -Zone $Zone -VmName $vm
+    & (Join-Path $gcpDir "push-env.ps1") -ProjectId $ProjectId -Zone $Zone -VmName $vm -TunnelThroughIap
+    $repoSlug = ($cfg.GITHUB_REPO -split '/')[-1]
+    Log "Starting observer on $vm ..."
+    # Synced local tree may be ahead of GHCR; rebuild observer image from source.
+    gcloud compute ssh $vm --zone=$Zone --project=$ProjectId --tunnel-through-iap --quiet --command="set -euo pipefail; cd ~/creg-hosting/$repoSlug/chain-registry; chmod +x testnet/start-observer-pool-gcp.sh; CREG_FLEET_BUILD=1 ./testnet/start-observer-pool-gcp.sh"
 }
 
 Log "Done. Verify ILB health and edge Caddy upstream."

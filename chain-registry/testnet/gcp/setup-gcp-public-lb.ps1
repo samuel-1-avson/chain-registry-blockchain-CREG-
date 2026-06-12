@@ -20,7 +20,9 @@ param(
     [string]$ProxyName = "",
     [string]$ForwardingRuleName = "",
     [string]$CertName = "",
-    [int]$BackendPort = 443,
+    [int]$BackendPort = 80,
+    [ValidateSet("HTTP", "HTTPS")]
+    [string]$BackendProtocol = "HTTP",
     [switch]$Confirm
 )
 
@@ -41,7 +43,8 @@ if (-not $ForwardingRuleName) { $ForwardingRuleName = "creg-api-https-fr" }
 if (-not $CertName) { $CertName = "creg-api-managed-cert" }
 
 $igName = "creg-edge-unmanaged-ig"
-$hcName = "creg-edge-https-hc"
+$hcName = if ($BackendProtocol -eq "HTTP") { "creg-edge-http-hc" } else { "creg-edge-https-hc" }
+$igPortName = if ($BackendProtocol -eq "HTTP") { "http" } else { "https" }
 
 function Log($m) { Write-Host "[public-lb] $m" }
 
@@ -49,7 +52,7 @@ if (-not $Confirm) {
     Write-Host ""
     Write-Host "Will create external HTTPS LB (GCP-009 prerequisite):" -ForegroundColor Yellow
     Write-Host "  Global IP: $LbIpName"
-    Write-Host "  Backend:   $BackendName -> $VmName`:$BackendPort (HTTPS to Caddy)"
+    Write-Host "  Backend:   $BackendName -> $VmName`:$BackendPort ($BackendProtocol to Caddy; LB terminates TLS)"
     Write-Host "  Host:      $ApiHost (Google-managed certificate)"
     Write-Host "  URL map:   default -> $BackendName"
     Write-Host ""
@@ -81,20 +84,32 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 gcloud compute instance-groups unmanaged set-named-ports $igName `
-    --zone=$Zone --project=$ProjectId --named-ports="https:${BackendPort}" | Out-Null
+    --zone=$Zone --project=$ProjectId --named-ports="${igPortName}:${BackendPort},https:443" | Out-Null
 
-# Health check (HTTPS to /v1/health via Caddy)
+# Health check (/v1/health via Caddy). Prefer HTTP backend when LB terminates TLS (HTTPS-to-HTTPS often 502s).
 $hcExists = gcloud compute health-checks describe $hcName --project=$ProjectId 2>$null
 if ($LASTEXITCODE -ne 0) {
-    gcloud compute health-checks create https $hcName `
-        --project=$ProjectId `
-        --port=$BackendPort `
-        --request-path=/v1/health `
-        --host=$ApiHost `
-        --check-interval=15s `
-        --timeout=5s `
-        --unhealthy-threshold=3 `
-        --healthy-threshold=2 | Out-Null
+    if ($BackendProtocol -eq "HTTP") {
+        gcloud compute health-checks create http $hcName `
+            --project=$ProjectId `
+            --port=$BackendPort `
+            --request-path=/v1/health `
+            --host=$ApiHost `
+            --check-interval=15s `
+            --timeout=5s `
+            --unhealthy-threshold=3 `
+            --healthy-threshold=2 | Out-Null
+    } else {
+        gcloud compute health-checks create https $hcName `
+            --project=$ProjectId `
+            --port=$BackendPort `
+            --request-path=/v1/health `
+            --host=$ApiHost `
+            --check-interval=15s `
+            --timeout=5s `
+            --unhealthy-threshold=3 `
+            --healthy-threshold=2 | Out-Null
+    }
 }
 
 $beExists = gcloud compute backend-services describe $BackendName --global --project=$ProjectId 2>$null
@@ -102,8 +117,8 @@ if ($LASTEXITCODE -ne 0) {
     gcloud compute backend-services create $BackendName `
         --project=$ProjectId `
         --global `
-        --protocol=HTTPS `
-        --port-name=https `
+        --protocol=$BackendProtocol `
+        --port-name=$igPortName `
         --health-checks=$hcName `
         --timeout=30s | Out-Null
 }

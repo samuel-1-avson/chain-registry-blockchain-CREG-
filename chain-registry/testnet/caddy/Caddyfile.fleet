@@ -11,6 +11,13 @@ import waitlist.caddy
 import faucet-edge.caddy
 import hub.caddy
 
+# HTTP for Google external HTTPS LB backends (LB terminates TLS; do not redirect to HTTPS).
+http://{$CREG_PUBLIC_API_HOST} {
+	reverse_proxy {$CREG_OBSERVER_API_UPSTREAM} {
+		flush_interval -1
+	}
+}
+
 {$CREG_PUBLIC_API_HOST} {
 	reverse_proxy {$CREG_OBSERVER_API_UPSTREAM} {
 		flush_interval -1
