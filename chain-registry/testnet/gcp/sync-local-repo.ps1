@@ -53,26 +53,17 @@ Assert-LastExitCode "mkdir remote root"
 gcloud compute scp $tarLocal "${VmName}:/tmp/creg-chain-registry-sync.tgz" --zone=$Zone --project=$ProjectId --tunnel-through-iap --strict-host-key-checking=no --quiet
 Assert-LastExitCode "scp tarball"
 
-$extractScript = @"
-set -euo pipefail
-remote_bytes=`$(stat -c%s /tmp/creg-chain-registry-sync.tgz)
-if [ "`$remote_bytes" -ne $localBytes ]; then
-  echo "upload size mismatch: expected $localBytes got `$remote_bytes" >&2
-  exit 1
-fi
-gzip -t /tmp/creg-chain-registry-sync.tgz
-tar -xzf /tmp/creg-chain-registry-sync.tgz -C '$remoteRoot'
-rm -f /tmp/creg-chain-registry-sync.tgz
-find '$remoteRoot'/testnet -name '*.sh' -exec sed -i 's/\r$//' {} +
-"@
-
-$extractLocal = Join-Path $env:TEMP "creg-sync-extract.sh"
-Set-Content -Path $extractLocal -Value $extractScript -NoNewline -Encoding utf8NoBOM
-gcloud compute scp $extractLocal "${VmName}:/tmp/creg-sync-extract.sh" --zone=$Zone --project=$ProjectId --tunnel-through-iap --strict-host-key-checking=no --quiet
-Assert-LastExitCode "scp extract script"
-gcloud compute ssh $VmName @sshOpts --command="bash /tmp/creg-sync-extract.sh && rm -f /tmp/creg-sync-extract.sh"
+$extractCmd = @(
+    "set -euo pipefail",
+    "remote_bytes=`$(stat -c%s /tmp/creg-chain-registry-sync.tgz)",
+    "if [ `"`$remote_bytes`" -ne $localBytes ]; then echo upload size mismatch >&2; exit 1; fi",
+    "gzip -t /tmp/creg-chain-registry-sync.tgz",
+    "tar -xzf /tmp/creg-chain-registry-sync.tgz -C '$remoteRoot'",
+    "rm -f /tmp/creg-chain-registry-sync.tgz",
+    "find '$remoteRoot'/testnet -name '*.sh' -exec sed -i 's/\r$//' {} +"
+) -join "; "
+gcloud compute ssh $VmName @sshOpts --command=$extractCmd
 Assert-LastExitCode "extract on VM"
 
 Remove-Item $tarLocal -Force -ErrorAction SilentlyContinue
-Remove-Item $extractLocal -Force -ErrorAction SilentlyContinue
 Write-Host "[gcp-sync] Local tree synced to $remoteRoot"

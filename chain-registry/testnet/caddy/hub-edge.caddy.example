@@ -4,9 +4,9 @@
 	handle /api/* {
 		@cloudrun expression {env.CREG_HUB_API_CLOUD_RUN_URL} != ""
 		handle @cloudrun {
+			# Do not set Host to the public join hostname — Cloud Run expects its *.run.app host.
 			reverse_proxy {$CREG_HUB_API_CLOUD_RUN_URL} {
 				flush_interval -1
-				header_up Host {http.request.host}
 			}
 		}
 		reverse_proxy 127.0.0.1:{$CREG_HUB_API_PORT}
