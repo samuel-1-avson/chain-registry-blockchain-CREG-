@@ -84,10 +84,16 @@ fi
 
 if [[ "$use_prebuilt" -eq 0 ]]; then
   echo "=== Building ${FLEET_IMAGE} (Dockerfile.windows - libclang for librocksdb-sys) ==="
-  "${COMPOSE[@]}" build creg-node-1
-  built_id="$("${COMPOSE[@]}" images -q creg-node-1 2>/dev/null | head -n1)"
+  # Build without fleet-sandbox overlay so images -q resolves the app image,
+  # not chain-registry-node-secure:fleet from the MAL-001 compose override.
+  COMPOSE_BUILD=("${DOCKER[@]}" compose -f "${SCRIPT_DIR}/docker-compose.validator-fleet.yml" --env-file "$ENV_FILE")
+  "${COMPOSE_BUILD[@]}" build creg-node-1
+  built_id="$("${COMPOSE_BUILD[@]}" images -q creg-node-1 2>/dev/null | head -n1)"
   if [[ -n "$built_id" ]]; then
-    "${DOCKER[@]}" tag "$built_id" creg-node:fleet 2>/dev/null || true
+    "${DOCKER[@]}" tag "$built_id" creg-node:fleet
+    "${DOCKER[@]}" tag "$built_id" chain-registry-app:latest
+    FLEET_IMAGE="creg-node:fleet"
+    export CREG_FLEET_IMAGE="$FLEET_IMAGE"
   fi
 fi
 # ── MAL-001: build secure (nsjail) image on top of the resolved fleet image ──
