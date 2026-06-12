@@ -23,6 +23,7 @@ $steps = [ordered]@{
     malicious_fixtures = $false
     hosting_verify     = $null
     fleet_sandbox      = $null
+    hub_explorer_smoke = $null
 }
 
 & (Join-Path $scriptDir "l2-gate-verify.ps1")
@@ -41,6 +42,11 @@ if ($Execute) {
     if (Test-Path $fleetScript) {
         & $fleetScript
         $steps.fleet_sandbox = ($LASTEXITCODE -eq 0)
+    }
+    $smokeScript = Join-Path $scriptDir "hub-explorer-smoke.ps1"
+    if (Test-Path $smokeScript) {
+        & $smokeScript -BaseDomain $BaseDomain
+        $steps.hub_explorer_smoke = ($LASTEXITCODE -eq 0)
     }
 }
 

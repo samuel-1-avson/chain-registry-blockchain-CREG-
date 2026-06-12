@@ -1,6 +1,5 @@
 export type UpstreamProbe = {
   name: string;
-  url: string;
   ok: boolean;
   statusCode?: number;
   latencyMs: number;

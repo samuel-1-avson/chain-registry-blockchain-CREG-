@@ -95,7 +95,7 @@ services:
       FAUCET_DRIP_AMOUNT: "1000000000000000000000"
       FAUCET_NATIVE_DRIP_AMOUNT: ${FAUCET_NATIVE_DRIP_AMOUNT:-0}
       FAUCET_COOLDOWN_SECS: "60"
-      FAUCET_POW_DISABLED: "true"
+      FAUCET_POW_DISABLED: ${FAUCET_POW_DISABLED:-false}
       FAUCET_EXPLORER_URL: ${CREG_PUBLIC_EXPLORER_URL:-https://${CREG_PUBLIC_EXPLORER_HOST}}
       RUST_LOG: info
     ports:
@@ -123,7 +123,6 @@ services:
         VITE_SEPOLIA_STAKING_ADDR: ${CREG_STAKING_ADDR:-0xf28C63C4Aafd27025E535Ab9ab7B4daC18C96Bc2}
         VITE_SEPOLIA_REGISTRY_ADDR: ${CREG_REGISTRY_ADDR:-0x3aCfF05d00AC199412a94326eD8aA874aaA3596c}
         VITE_DEFAULT_NETWORK_PROFILE: sepolia
-        VITE_OPERATOR_API_KEY: ${CREG_OPERATOR_API_KEY:-docker-dev-operator-key}
         VITE_TESTNET_PHASE: coordinated-lab
         VITE_SINGLE_VALIDATOR: "false"
         VITE_DEV_SANDBOX_CAVEAT: "true"
@@ -166,6 +165,9 @@ services:
     environment:
       HUB_API_PORT: "8095"
       HUB_DB_PATH: /data/hub.db
+      HUB_SIWE_DOMAIN: ${CREG_PUBLIC_JOIN_HOST:-testnet.cregnet.dev}
+      HUB_SIWE_URI: https://${CREG_PUBLIC_JOIN_HOST:-testnet.cregnet.dev}
+      NODE_ENV: production
     ports:
       - "${CREG_HUB_API_PORT:-8095}:8095"
     volumes:

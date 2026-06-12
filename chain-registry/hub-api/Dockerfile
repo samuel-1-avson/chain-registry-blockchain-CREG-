@@ -7,6 +7,7 @@ RUN npm ci --no-fund --no-audit
 
 COPY tsconfig.json ./
 COPY src ./src
+COPY migrations ./migrations
 RUN npm run build
 
 FROM node:20-slim
@@ -21,6 +22,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-fund --no-audit
 
 COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/migrations ./migrations
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends wget \

@@ -1,0 +1,25 @@
+# Faucet HashiCorp Vault configuration (edge VM / docker-compose.cloud-edge.yml)
+#
+# Copy relevant lines into sepolia-3node.env (gitignored) after Vault is reachable.
+# Requires chain_registry_secrets Vault backend (see crates/secrets).
+
+# CREG_SECRETS_BACKEND=env
+CREG_SECRETS_BACKEND=vault
+
+VAULT_ADDR=https://vault.example.com:8200
+# Prefer AppRole in production; token only for bootstrap.
+# VAULT_TOKEN=hvs....
+# VAULT_ROLE_ID=...
+# VAULT_SECRET_ID=...
+
+# Default KV v2 path (override if needed)
+# CREG_VAULT_SECRET_PATH_FAUCET=secret/data/creg/faucet
+
+# Remove plain-text key once Vault is verified:
+# FAUCET_PRIVATE_KEY=
+
+# PoW recommended when Cloud Armor quota is unavailable
+FAUCET_POW_DISABLED=false
+
+# Optional Cloud Armor (requires non-zero quota — see docs/HUB_API_REMEDIATION_STATUS.md)
+# GCP_ARMOR_POLICY_NAME=creg-testnet-edge

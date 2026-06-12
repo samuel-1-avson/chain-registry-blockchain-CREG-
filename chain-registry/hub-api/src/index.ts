@@ -1,7 +1,11 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
-import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { HubDatabase } from "./db/index.js";
+import { rateLimit } from "./middleware/rateLimit.js";
+import { sessionMiddleware, type SessionVariables } from "./middleware/session.js";
+import { createAuthRoutes } from "./routes/auth.js";
+
+const IMPLEMENTATION_PHASE = "1";
 
 const port = Number(process.env.HUB_API_PORT ?? process.env.PORT ?? "8095");
 const dbPath = process.env.HUB_DB_PATH ?? "/data/hub.db";
@@ -17,10 +21,32 @@ const publicSpecUrl =
   process.env.HUB_SPEC_URL ??
   "https://spec.testnet.cregnet.dev/chain-spec.json";
 const probeTimeoutMs = Number(process.env.HUB_STATUS_TIMEOUT_MS ?? "3500");
+const sessionMaxAgeSec = Number(process.env.HUB_SESSION_MAX_AGE_SEC ?? "86400");
+const nonceTtlSec = Number(process.env.HUB_NONCE_TTL_SEC ?? "300");
+const siweDomain =
+  process.env.HUB_SIWE_DOMAIN ?? process.env.CREG_PUBLIC_JOIN_HOST ?? "testnet.cregnet.dev";
+const siweUri =
+  process.env.HUB_SIWE_URI ?? `https://${siweDomain.replace(/^https?:\/\//, "")}`;
+const secureCookies =
+  process.env.HUB_COOKIE_SECURE !== "false" && process.env.NODE_ENV === "production";
+const statusRateLimitWindowMs = Number(
+  process.env.HUB_STATUS_RATE_WINDOW_MS ?? "60000",
+);
+const statusRateLimitMax = Number(process.env.HUB_STATUS_RATE_MAX ?? "30");
+const authRateLimitWindowMs = Number(process.env.HUB_AUTH_RATE_WINDOW_MS ?? "60000");
+const authRateLimitMax = Number(process.env.HUB_AUTH_RATE_MAX ?? "20");
 
 type UpstreamProbe = {
   name: string;
   url: string;
+  ok: boolean;
+  statusCode?: number;
+  latencyMs: number;
+  message?: string;
+};
+
+type PublicProbe = {
+  name: string;
   ok: boolean;
   statusCode?: number;
   latencyMs: number;
@@ -32,92 +58,154 @@ type ProbeWithData = {
   data: unknown;
 };
 
-// Ensure SQLite parent directory exists (Phase 0: volume mount only; schema in Phase 2).
+const hubDb = new HubDatabase(dbPath);
+let dbInitError: string | undefined;
+
 try {
-  mkdirSync(dirname(dbPath), { recursive: true });
-} catch {
-  // Non-fatal for health-only scaffold.
+  hubDb.connect();
+} catch (error) {
+  dbInitError = error instanceof Error ? error.message : "Database connect failed";
+  console.error(`hub-api database init failed: ${dbInitError}`);
 }
 
-const app = new Hono();
+const app = new Hono<{ Variables: SessionVariables }>();
 
-app.get("/api/health", (c) =>
-  c.json({
-    status: "ok",
+app.use("*", sessionMiddleware({ db: hubDb, maxAgeSec: sessionMaxAgeSec, secure: secureCookies }));
+
+app.get("/api/health", (c) => {
+  const dbState = hubDb.getState();
+  const body: Record<string, unknown> = {
+    status: dbState === "error" ? "degraded" : "ok",
     service: "hub-api",
-    phase: "2",
-    dbPathConfigured: Boolean(dbPath),
+    phase: IMPLEMENTATION_PHASE,
+    db: dbState,
+  };
+
+  if (dbState === "ready") {
+    try {
+      const migrationCount = hubDb.handle
+        .prepare("SELECT COUNT(*) AS count FROM schema_migrations")
+        .get() as { count: number };
+      body.migrationsApplied = migrationCount.count;
+    } catch {
+      body.db = "error";
+      body.status = "degraded";
+    }
+  }
+
+  if (dbInitError) {
+    body.dbError = dbInitError;
+  }
+
+  return c.json(body, dbState === "error" ? 503 : 200);
+});
+
+const authRoutes = createAuthRoutes({
+  db: hubDb,
+  siweDomain: siweDomain.replace(/^https?:\/\//, ""),
+  siweUri,
+  nonceTtlSec,
+  sessionMaxAgeSec,
+  secureCookies,
+});
+
+authRoutes.use(
+  "*",
+  rateLimit({
+    windowMs: authRateLimitWindowMs,
+    max: authRateLimitMax,
+    keyPrefix: "auth",
   }),
 );
 
-app.get("/api/status/public", async (c) => {
-  const checkedAt = new Date().toISOString();
-  const [nodeHealth, nodeStats, faucetHealth, faucetStats, spec, explorer] =
-    await Promise.all([
-      fetchJsonProbe("node_api", joinUrl(publicNodeApiUrl, "/v1/public/health")),
-      fetchJsonProbe(
-        "node_chain_stats",
-        joinUrl(publicNodeApiUrl, "/v1/public/chain/stats"),
-      ),
-      fetchJsonProbe("faucet", joinUrl(publicFaucetUrl, "/health")),
-      fetchJsonProbe("faucet_stats", joinUrl(publicFaucetUrl, "/api/stats")),
-      fetchJsonProbe("chain_spec", publicSpecUrl),
-      fetchProbe("explorer", publicExplorerUrl),
-    ]);
+app.route("/api/auth", authRoutes);
 
-  const probes = [
-    nodeHealth.probe,
-    nodeStats.probe,
-    faucetHealth.probe,
-    faucetStats.probe,
-    spec.probe,
-    explorer,
-  ];
-  const criticalOk = nodeHealth.probe.ok && faucetHealth.probe.ok && spec.probe.ok;
-  const allOk = probes.every((probe) => probe.ok);
-  const chainStats = asRecord(nodeStats.data);
-  const faucetStatsData = asRecord(faucetStats.data);
+app.get(
+  "/api/status/public",
+  rateLimit({
+    windowMs: statusRateLimitWindowMs,
+    max: statusRateLimitMax,
+    keyPrefix: "status-public",
+  }),
+  async (c) => {
+    const checkedAt = new Date().toISOString();
+    const [nodeHealth, nodeStats, faucetHealth, faucetStats, spec, explorer] =
+      await Promise.all([
+        fetchJsonProbe("node_api", joinUrl(publicNodeApiUrl, "/v1/public/health")),
+        fetchJsonProbe(
+          "node_chain_stats",
+          joinUrl(publicNodeApiUrl, "/v1/public/chain/stats"),
+        ),
+        fetchJsonProbe("faucet", joinUrl(publicFaucetUrl, "/health")),
+        fetchJsonProbe("faucet_stats", joinUrl(publicFaucetUrl, "/api/stats")),
+        fetchJsonProbe("chain_spec", publicSpecUrl),
+        fetchProbe("explorer", publicExplorerUrl),
+      ]);
 
-  return c.json({
-    status: criticalOk && allOk ? "ok" : "degraded",
-    service: "hub-api",
-    phase: "1",
-    checkedAt,
-    upstreams: probes,
-    chain: {
-      height:
-        pickNumber(chainStats, "current_height") ??
-        pickNumber(chainStats, "tip_height"),
-      finalizedHeight: pickNumber(chainStats, "finalized_height"),
-      validators:
-        pickNumber(chainStats, "active_validators") ??
-        pickNumber(chainStats, "validator_count"),
-      packages: pickNumber(chainStats, "package_count"),
-      finalizationLag: pickNumber(chainStats, "finalization_lag"),
-    },
-    faucet: {
-      tokenDripsAvailable: pickBoolean(
-        asRecord(faucetHealth.data),
-        "token_drips_available",
-      ),
-      nativeDripsAvailable: pickBoolean(
-        asRecord(faucetHealth.data),
-        "native_drips_available",
-      ),
-      totalDrips: pickNestedNumber(faucetStatsData, ["stats", "total_drips"]),
-      cooldownSeconds: pickNumber(faucetStatsData, "cooldown_seconds"),
-      tokenReserve: pickString(faucetStatsData, "faucet_balance_formatted"),
-      nativeReserve: pickString(
-        faucetStatsData,
-        "faucet_native_balance_formatted",
-      ),
-    },
-  });
-});
+    const probes = [
+      nodeHealth.probe,
+      nodeStats.probe,
+      faucetHealth.probe,
+      faucetStats.probe,
+      spec.probe,
+      explorer,
+    ];
+    const criticalOk = nodeHealth.probe.ok && faucetHealth.probe.ok && spec.probe.ok;
+    const allOk = probes.every((probe) => probe.ok);
+    const chainStats = asRecord(nodeStats.data);
+    const faucetStatsData = asRecord(faucetStats.data);
+
+    return c.json({
+      status: criticalOk && allOk ? "ok" : "degraded",
+      service: "hub-api",
+      phase: IMPLEMENTATION_PHASE,
+      checkedAt,
+      upstreams: probes.map(toPublicProbe),
+      chain: {
+        height:
+          pickNumber(chainStats, "current_height") ??
+          pickNumber(chainStats, "tip_height"),
+        finalizedHeight: pickNumber(chainStats, "finalized_height"),
+        validators:
+          pickNumber(chainStats, "active_validators") ??
+          pickNumber(chainStats, "validator_count"),
+        packages: pickNumber(chainStats, "package_count"),
+        finalizationLag: pickNumber(chainStats, "finalization_lag"),
+      },
+      faucet: {
+        tokenDripsAvailable: pickBoolean(
+          asRecord(faucetHealth.data),
+          "token_drips_available",
+        ),
+        nativeDripsAvailable: pickBoolean(
+          asRecord(faucetHealth.data),
+          "native_drips_available",
+        ),
+        totalDrips: pickNestedNumber(faucetStatsData, ["stats", "total_drips"]),
+        cooldownSeconds: pickNumber(faucetStatsData, "cooldown_seconds"),
+        tokenReserve: pickString(faucetStatsData, "faucet_balance_formatted"),
+        nativeReserve: pickString(
+          faucetStatsData,
+          "faucet_native_balance_formatted",
+        ),
+      },
+    });
+  },
+);
 
 serve({ fetch: app.fetch, port }, (info) => {
-  console.log(`hub-api listening on http://127.0.0.1:${info.port}`);
+  console.log(`hub-api listening on http://127.0.0.1:${info.port} (phase ${IMPLEMENTATION_PHASE})`);
 });
+
+function toPublicProbe(probe: UpstreamProbe): PublicProbe {
+  return {
+    name: probe.name,
+    ok: probe.ok,
+    statusCode: probe.statusCode,
+    latencyMs: probe.latencyMs,
+    message: probe.message,
+  };
+}
 
 function joinUrl(base: string, path: string): string {
   const cleanBase = base.replace(/\/$/, "");
