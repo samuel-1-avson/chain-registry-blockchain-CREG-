@@ -533,9 +533,17 @@ fn constant_time_eq(left: &str, right: &str) -> bool {
 async fn health(State(state): State<SharedState>) -> impl IntoResponse {
     // MAL-001: surface the sandbox engine so operators/monitoring can verify
     // public validators are not running with the dev bypass. Detection is
-    // cached after the first call.
-    let sandbox = validator::sandbox::engine_status().await;
+    // cached after the first call. Read-only nodes (observer pool) proxy the
+    // validator fleet status from CREG_PEERS when they have no local engine.
     let s = state.read().await;
+    let mut sandbox = validator::sandbox::engine_status().await;
+    if !s.config.is_validator && sandbox.engine == "none" {
+        if let Some(peer_sandbox) =
+            validator::sandbox::fleet_sandbox_from_peers(&s.config.peers).await
+        {
+            sandbox = peer_sandbox;
+        }
+    }
     Json(serde_json::json!({
         "status":  "ok",
         "version": env!("CARGO_PKG_VERSION"),

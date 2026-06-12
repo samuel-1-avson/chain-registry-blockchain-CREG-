@@ -48,7 +48,7 @@ async fn command_ready(program: &str, args: &[&str]) -> bool {
 /// Mirrors the engine waterfall in [`run`] without executing a package, so
 /// operators and monitoring can verify which engine a validator will use
 /// before it ever votes.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SandboxStatus {
     /// Engine that will be used for behavioural analysis:
     /// "nsjail", "dev-bypass", "gvisor", "docker", or "none".
@@ -77,6 +77,45 @@ pub async fn engine_status() -> SandboxStatus {
         .get_or_init(detect_engine_status)
         .await
         .clone()
+}
+
+/// For read-only nodes (observers), probe validator HTTP peers for fleet sandbox
+/// status when the local process has no sandbox engine installed.
+pub async fn fleet_sandbox_from_peers(peer_urls: &[String]) -> Option<SandboxStatus> {
+    if peer_urls.is_empty() {
+        return None;
+    }
+
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return None,
+    };
+
+    #[derive(serde::Deserialize)]
+    struct PeerHealth {
+        sandbox: Option<SandboxStatus>,
+    }
+
+    for url in peer_urls {
+        let health_url = format!("{}/v1/health", url.trim_end_matches('/'));
+        let Ok(resp) = client.get(&health_url).send().await else {
+            continue;
+        };
+        if !resp.status().is_success() {
+            continue;
+        }
+        let Ok(body) = resp.json::<PeerHealth>().await else {
+            continue;
+        };
+        if let Some(sandbox) = body.sandbox.filter(|s| s.engine != "none") {
+            return Some(sandbox);
+        }
+    }
+
+    None
 }
 
 async fn detect_engine_status() -> SandboxStatus {
