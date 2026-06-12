@@ -37,10 +37,11 @@ if [[ "${CREG_VALIDATOR_FLEET_MODE:-false}" == "true" ]]; then
   observer_port="${CREG_3NODE_NODE3_API_PORT:-28182}"
   export CREG_OBSERVER_API_UPSTREAM="${observer_host}:${observer_port}"
   FLEET_NGINX="${SCRIPT_DIR}/nginx/explorer-fleet.conf"
-  sed "s/@VALIDATOR_IP@/${CREG_VALIDATOR_VM_INTERNAL_IP}/g" \
+  sed -e "s/@VALIDATOR_IP@/${CREG_VALIDATOR_VM_INTERNAL_IP}/g" \
+    -e "s/@OBSERVER_UPSTREAM@/${CREG_OBSERVER_API_UPSTREAM}/g" \
     "${SCRIPT_DIR}/nginx/explorer-fleet.conf.template" > "$FLEET_NGINX"
   export CREG_EXPLORER_NGINX_CONF="./nginx/explorer-fleet.conf"
-  echo "Validator fleet mode — public API -> ${CREG_OBSERVER_API_UPSTREAM} (explorer nginx -> ${CREG_VALIDATOR_VM_INTERNAL_IP})"
+  echo "Validator fleet mode — public API -> ${CREG_OBSERVER_API_UPSTREAM} (explorer nginx -> ${CREG_OBSERVER_API_UPSTREAM})"
 elif [[ "${CREG_HYBRID_MODE:-false}" == "true" ]]; then
   echo "Hybrid mode — API -> WireGuard peer ${CREG_WG_LOCAL_PEER:-10.200.0.2}"
 else

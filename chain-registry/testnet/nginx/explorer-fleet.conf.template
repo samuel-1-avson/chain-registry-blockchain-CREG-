@@ -7,7 +7,8 @@ server {
     root /usr/share/nginx/html;
     index index.html;
 
-    set $node3_upstream http://@VALIDATOR_IP@:28182;
+    # Read pool: observer ILB (CREG_OBSERVER_API_UPSTREAM), not validator VM :28182.
+    set $node3_upstream http://@OBSERVER_UPSTREAM@;
     set $node2_upstream http://@VALIDATOR_IP@:28181;
 
     add_header X-Frame-Options "SAMEORIGIN" always;
