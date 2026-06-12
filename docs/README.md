@@ -28,6 +28,8 @@ Start at the [project README](../README.md), then use the sections below.
 | [GCP-RPC-ARCHITECTURE.md](./GCP-RPC-ARCHITECTURE.md) | API/JSON-RPC on GCP — today vs upgrade path |
 | [GCP-VALIDATOR-FLEET.md](./GCP-VALIDATOR-FLEET.md) | Option A — dedicated validator VM (production) |
 | [GCP-SEPOLIA-GETH-INTERNAL.md](./GCP-SEPOLIA-GETH-INTERNAL.md) | Internal Sepolia Geth VM |
+| [GCP_PHASE2_RUNBOOK.md](./GCP_PHASE2_RUNBOOK.md) | Observer pool ILB, Cloud Run hub-api, public API LB |
+| [L2_PUBLIC_ALPHA_GATE_STATUS.md](./L2_PUBLIC_ALPHA_GATE_STATUS.md) | L2 public-alpha gate tracker |
 | [WAITLIST_FIREBASE_DEPLOY.md](./WAITLIST_FIREBASE_DEPLOY.md) | Waitlist Firebase backend deploy |
 | [../chain-registry/testnet/README.md](../chain-registry/testnet/README.md) | Testnet directory index |
 | [../chain-registry/DOCKER.md](../chain-registry/DOCKER.md) | Docker compose profiles |

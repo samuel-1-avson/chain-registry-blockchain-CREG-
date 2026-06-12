@@ -1,0 +1,7 @@
+{
+  "url": "https://creg-hub-api-wmkf4sobla-uc.a.run.app",
+  "image": "us-central1-docker.pkg.dev/gen-lang-client-0022105784/creg-testnet/creg-hub-api:latest",
+  "region": "us-central1",
+  "deployedAt": "2026-06-11T08:48:44.1519769Z",
+  "service": "creg-hub-api"
+}
