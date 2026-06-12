@@ -20,6 +20,7 @@ fi
 echo "=== Loading $TARBALL ==="
 gunzip -c "$TARBALL" | "${DOCKER[@]}" load
 export CREG_FLEET_IMAGE=creg-node:fleet
+export CREG_FORCE_RECREATE=1
 cd "$REPO_ROOT"
 chmod +x testnet/start-observer-pool-gcp.sh
 exec ./testnet/start-observer-pool-gcp.sh

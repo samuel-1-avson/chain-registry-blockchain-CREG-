@@ -76,7 +76,7 @@ Acquire tCREG via the operator faucet or `testnet/stake-publisher-sepolia.ps1`.
 ```bash
 ipfs daemon   # or use operator IPFS API via CREG_IPFS_URL
 
-export CREG_NODE_URL=http://localhost:8090   # or operator node
+export CREG_NODE_URL=https://api.testnet.cregnet.dev   # public fleet (local: http://localhost:28182)
 
 creg publish ./my-package-1.0.0.tgz \
   --key-file ~/.creg/publisher.key \
@@ -99,7 +99,7 @@ creg status npm:my-package@1.0.0 --node-url "$CREG_NODE_URL"
 ### Install a verified package
 
 ```bash
-export CREG_NODE_URL=http://localhost:8090
+export CREG_NODE_URL=https://api.testnet.cregnet.dev
 
 creg install npm:lodash@4.17.21
 # Add --unverified to allow pending/unknown (not recommended for production)
@@ -186,7 +186,7 @@ See [TESTNET_SEPOLIA_RUNBOOK.md](./TESTNET_SEPOLIA_RUNBOOK.md) and [OPERATOR.md]
 When maintainers publish a tag (`v*`), GitHub Actions workflow `release-binaries.yml` attaches `creg` and `creg-node` to the release. Then:
 
 ```bash
-./scripts/install-creg.sh --version v0.1.0-testnet
+./scripts/install-creg.sh --version v0.1.1-testnet
 ```
 
 ---

@@ -1,6 +1,6 @@
 # Next work — testnet readiness checklist
 
-**Updated:** 2026-06-10  
+**Updated:** 2026-06-12  
 **Context:** [REMEDIATION_BACKLOG.md](./REMEDIATION_BACKLOG.md), [TESTNET_SEPOLIA_RUNBOOK.md](./TESTNET_SEPOLIA_RUNBOOK.md), [../chain-registry/TESTNET_READINESS_REPORT.md](../chain-registry/TESTNET_READINESS_REPORT.md)
 
 The coordinated Sepolia 3-node lab is **proven** including **NET-301** (2-validator quorum, publish → `verified`, tip advance on 2026-06-09). **DIST-301** shipped `v0.1.0-testnet` binaries on 2026-06-10. **SANDBOX-301** passed on 2026-06-10. **HOSTING-301** passed on 2026-06-10 (`hosting-301-verify.ps1` on `testnet.cregnet.dev`). Remaining P0: **SEC-401** audit booking.
@@ -18,7 +18,7 @@ These five items are the gating work before inviting external participants with 
 | 1 | **NET-301** | done | Multi-validator PBFT quorum on Sepolia | **Done** 2026-06-09 — `net-301-quorum-verify.ps1` pass; validator-2 Active; `validator_count=2`; tip 2→3; Windows lab uses `CREG_DEV_SANDBOX=true`. Topology: [../chain-registry/testnet/OPERATOR.md](../chain-registry/testnet/OPERATOR.md). |
 | 2 | **SANDBOX-301** | done | Real behavioral sandbox (disable dev bypass) | **Done** 2026-06-10 — `sandbox-301-verify.ps1` pass; validators on `chain-registry-node-secure:latest` with `CREG_DEV_SANDBOX=false`; nsjail detected via `--help` probe; publish smoke shows real engine (not `dev-bypass`). Windows dev may keep `CREG_DEV_SANDBOX=true` only in documented local profiles (`start-3node-test.ps1`). |
 | 3 | **DIST-301** | done | Ship `creg` + `creg-node` binaries | **Done** 2026-06-10 — [v0.1.0-testnet release](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases/tag/v0.1.0-testnet) (linux/windows/macos); workflow [27245595554](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/actions/runs/27245595554); `verify-dist-301.ps1` API asset checks pass. |
-| 4 | **SEC-401** | outreach ready | Schedule external security audit | Scope: [SEC-401-AUDIT-SCOPE.md](./SEC-401-AUDIT-SCOPE.md). Generate send-ready email: `.\testnet\prepare-sec-401-outreach.ps1` → `docs/SEC-401-outreach-ready.md`. Pin tag `v0.1.0-testnet` at kickoff. **Vendor / start date:** TBD (send RFP). |
+| 4 | **SEC-401** | outreach ready | Schedule external security audit | Scope: [SEC-401-AUDIT-SCOPE.md](./SEC-401-AUDIT-SCOPE.md). Send-ready email: [SEC-401-outreach-ready.md](./SEC-401-outreach-ready.md) (`v0.1.1-testnet` @ `203962ff`). **Vendor / start date:** TBD — send RFP to Trail of Bits + OpenZeppelin. |
 | 5 | **HOSTING-301** | done | Public HTTPS URLs (GCP + Caddy) | **Done** 2026-06-10 — `testnet.cregnet.dev` → `35.225.225.20`; `hosting-301-verify.ps1` pass (api, explorer, spec, faucet, ipfs). Runbook: [gcp-public-hosting.md](../chain-registry/testnet/gcp-public-hosting.md). Budget: [GCP-BUDGET-ARCHITECTURE.md](./GCP-BUDGET-ARCHITECTURE.md). Optional: fund faucet wallet for native Sepolia gas drips. |
 | 6 | **DOC-301** | done | Doc rationalization | **Done** 2026-06-08 — single index at [README.md](./README.md); removed duplicate analyses, phase closeouts, and archive snapshots. |
 
@@ -115,7 +115,7 @@ Copy email bodies from [SEC-401-VENDOR-OUTREACH.md](./SEC-401-VENDOR-OUTREACH.md
 |-------|--------|
 | Vendor | _TBD_ |
 | Start date | _TBD_ |
-| Commit / tag | `v0.1.0-testnet` @ `245bf5b59341adff6cbf26769360cf30f112f508` (GitHub remote) |
+| Commit / tag | `v0.1.1-testnet` @ `203962ff97f2ae103ff44e8bbf9873b6c8e00647` (GitHub remote) |
 
 **Public hosting (after domain registered):**
 

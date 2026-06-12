@@ -89,10 +89,14 @@ fi
 
 COMPOSE=("${DOCKER[@]}" compose -f "${SCRIPT_DIR}/docker-compose.observer-pool.yml" --env-file "$ENV_FILE")
 echo "=== Starting observer pool container (${CREG_OBSERVER_NODE_ID}) ==="
+recreate_args=()
+if [[ "${CREG_FORCE_RECREATE:-0}" == "1" ]]; then
+  recreate_args=(--force-recreate)
+fi
 if "${DOCKER[@]}" image inspect "$FLEET_IMAGE" >/dev/null 2>&1; then
-  "${COMPOSE[@]}" up -d --no-build --pull never observer
+  "${COMPOSE[@]}" up -d "${recreate_args[@]}" --no-build --pull never observer
 else
-  "${COMPOSE[@]}" up -d --pull always observer
+  "${COMPOSE[@]}" up -d "${recreate_args[@]}" --pull always observer
 fi
 
 echo ""

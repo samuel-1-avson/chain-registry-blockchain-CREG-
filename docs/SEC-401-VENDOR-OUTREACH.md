@@ -3,7 +3,7 @@
 **Scope document:** [SEC-401-AUDIT-SCOPE.md](./SEC-401-AUDIT-SCOPE.md)  
 **When booked:** Record vendor name and start date in [NEXT_WORK.md](./NEXT_WORK.md) (SEC-401 row).
 
-**Send-ready email:** From `chain-registry/`, run `.\testnet\prepare-sec-401-outreach.ps1` to generate [SEC-401-outreach-ready.md](./SEC-401-outreach-ready.md) with the pinned `v0.1.0-testnet` tag SHA. Customize `-ContactName` before sending.
+**Send-ready email:** From `chain-registry/`, run `.\testnet\prepare-sec-401-outreach.ps1 -Tag v0.1.1-testnet -ContactName "Your Name"` to generate [SEC-401-outreach-ready.md](./SEC-401-outreach-ready.md). Send to vendors below; record booking in [NEXT_WORK.md](./NEXT_WORK.md).
 
 ---
 
@@ -21,7 +21,7 @@ We are scheduling a **fixed-scope security review** of the Chain Registry testne
 
 **Repository:** https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-  
 **Scope document:** attached `SEC-401-AUDIT-SCOPE.md` (or link to repo `docs/SEC-401-AUDIT-SCOPE.md`)  
-**Commit / tag for review:** `v0.1.0-testnet` (SHA from `prepare-sec-401-outreach.ps1` output — pin before audit starts)
+**Commit / tag for review:** `v0.1.1-testnet` (SHA from `prepare-sec-401-outreach.ps1` output — pin before audit starts)
 
 **In scope (priority order):**
 
