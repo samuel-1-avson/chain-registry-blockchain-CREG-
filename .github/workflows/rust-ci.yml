@@ -81,8 +81,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: npm
-          cache-dependency-path: chain-registry/explorer/package-lock.json
 
       - name: Build explorer frontend
         working-directory: chain-registry/explorer
