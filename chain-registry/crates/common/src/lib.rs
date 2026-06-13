@@ -132,4 +132,18 @@ pub enum GossipMessage {
         validator_id: String,
         signature: String,
     },
+    /// A validator identity registration, gossiped so one POST to any node
+    /// propagates the (evm_address, node_id, ed25519_pubkey) binding to the
+    /// whole fleet. Carries the original ownership proofs so every receiver
+    /// independently re-verifies before applying — no node has to trust the
+    /// sender. Eliminates the manual "POST to every node" drift class.
+    ValidatorRegistration {
+        evm_address: String,
+        node_id: String,
+        ed25519_pubkey: String,
+        alias: Option<String>,
+        nonce: String,
+        evm_signature: String,
+        ed25519_signature: String,
+    },
 }

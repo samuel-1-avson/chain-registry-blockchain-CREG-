@@ -20,6 +20,7 @@ mod grpc;
 mod json_rpc;
 mod l1_quorum;
 mod metrics;
+mod validator_registry_gossip;
 mod openapi;
 mod p2p;
 mod p2p_rate_limit;
@@ -501,6 +502,10 @@ async fn main() -> Result<()> {
     // â”€â”€ P2P Networking (libp2p) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     let (p2p_node, p2p_handle) = p2p::P2PNode::new(&config.p2p_listen)?;
 
+    // Make the p2p sender available to API/worker code that needs to gossip
+    // validator identity registrations fleet-wide.
+    validator_registry_gossip::set_gossip_sender(p2p_handle.sender.clone());
+
     // â”€â”€ Finalized-tx channel (created before state so API can send to it) â”€â”€â”€â”€â”€â”€â”€
     let (tx_sender, tx_receiver): (FinalizedTxSender, FinalizedTxReceiver) =
         finalized_tx::channel();
@@ -570,6 +575,39 @@ async fn main() -> Result<()> {
     });
 
     tokio::spawn(p2p_node.run(Arc::clone(&state), Arc::clone(&event_bus)));
+
+    // â”€â”€ Validator identity registrations: restore + periodic re-broadcast â”€â”€â”€â”€â”€â”€
+    // Reapply persisted registrations so a restart keeps every known validator
+    // identity, then periodically re-gossip them so late-joining / restarted
+    // peers converge without operator re-POSTing to each node.
+    {
+        let state_for_registry = Arc::clone(&state);
+        let data_dir = config.data_dir.clone();
+        tokio::spawn(async move {
+            for proof in validator_registry_gossip::load_all(&data_dir) {
+                match api::apply_validator_registration(&state_for_registry, &proof).await {
+                    Ok(_) => tracing::info!(
+                        "Restored persisted validator registration for {}",
+                        proof.node_id
+                    ),
+                    Err((_, e)) => tracing::warn!(
+                        "Could not restore validator registration for {}: {}",
+                        proof.node_id,
+                        e
+                    ),
+                }
+            }
+
+            let mut ticker = interval(Duration::from_secs(120));
+            ticker.tick().await; // consume immediate first tick
+            loop {
+                ticker.tick().await;
+                for proof in validator_registry_gossip::load_all(&data_dir) {
+                    validator_registry_gossip::broadcast(proof).await;
+                }
+            }
+        });
+    }
 
     // â”€â”€ Spawn background tasks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     tracing::info!("Starting subsystems...");

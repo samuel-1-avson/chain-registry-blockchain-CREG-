@@ -895,114 +895,129 @@ fn verify_validator_identity_proofs(
     verify_ed25519_identity_signature(&message, ed25519_pubkey, ed25519_signature)
 }
 
-async fn register_validator_identity(
-    State(state): State<SharedState>,
-    Json(request): Json<RegisterValidatorIdentityRequest>,
-) -> Response {
-    let evm_address = match validate_evm_address(&request.evm_address) {
-        Ok(value) => value,
-        Err(error) => {
-            return (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })).into_response();
-        }
-    };
-
-    let node_id = match validate_node_id(&request.node_id) {
-        Ok(value) => value,
-        Err(error) => {
-            return (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })).into_response();
-        }
-    };
-
-    let ed25519_pubkey = match validate_ed25519_pubkey(&request.ed25519_pubkey) {
-        Ok(value) => value,
-        Err(error) => {
-            return (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })).into_response();
-        }
-    };
-
-    let nonce = match validate_registration_nonce(&request.nonce) {
-        Ok(value) => value,
-        Err(error) => {
-            return (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })).into_response();
-        }
-    };
+/// Validate, verify ownership proofs, and apply a validator identity
+/// registration to local state (insert + reconcile). Shared by the HTTP
+/// handler and the gossip-receive path so a registration is processed
+/// identically no matter how it arrives, and every node re-verifies the
+/// proofs itself (trustless propagation).
+pub(crate) async fn apply_validator_registration(
+    state: &SharedState,
+    proof: &crate::validator_registry_gossip::RegistrationProof,
+) -> Result<ValidatorRegistrationStatus, (StatusCode, String)> {
+    let evm_address =
+        validate_evm_address(&proof.evm_address).map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+    let node_id = validate_node_id(&proof.node_id).map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+    let ed25519_pubkey =
+        validate_ed25519_pubkey(&proof.ed25519_pubkey).map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+    let nonce =
+        validate_registration_nonce(&proof.nonce).map_err(|e| (StatusCode::BAD_REQUEST, e))?;
 
     let chain_id = {
         let s = state.read().await;
         node_chain_id(&s.config)
     };
 
-    if let Err(error) = verify_validator_identity_proofs(
+    verify_validator_identity_proofs(
         &chain_id,
         &evm_address,
         &node_id,
         &ed25519_pubkey,
         &nonce,
-        &request.evm_signature,
-        &request.ed25519_signature,
-    ) {
-        return (StatusCode::UNAUTHORIZED, Json(ErrorResponse { error })).into_response();
-    }
+        &proof.evm_signature,
+        &proof.ed25519_signature,
+    )
+    .map_err(|e| (StatusCode::UNAUTHORIZED, e))?;
 
     let normalized_key = normalized_validator_key(&evm_address);
-    let alias = request
+    let alias = proof
         .alias
+        .clone()
         .unwrap_or_else(|| node_id.clone())
         .trim()
         .to_string();
 
-    let mut s = state.write().await;
-
-    if s.validator_registrations.iter().any(|(key, registration)| {
-        *key != normalized_key
-            && (registration.identity.node_id == node_id
-                || registration.identity.ed25519_pubkey == ed25519_pubkey)
-    }) {
-        return (
-            StatusCode::CONFLICT,
-            Json(ErrorResponse {
-                error: "node_id or Ed25519 pubkey is already registered to another wallet"
-                    .to_string(),
-            }),
-        )
-            .into_response();
-    }
-
-    let identity = ValidatorIdentity {
-        evm_address,
-        node_id,
-        ed25519_pubkey,
-    }
-    .normalized();
-
-    let mut registration = s
-        .validator_registrations
-        .remove(&normalized_key)
-        .unwrap_or_else(|| ValidatorRegistrationStatus {
-            reputation: 100,
-            ..ValidatorRegistrationStatus::default()
-        });
-
-    registration.alias = alias;
-    registration.identity = identity;
-    registration.registered_with_node = true;
-    registration.status = validator_registration_status_text(&registration);
-
-    let response = registration.clone();
-    s.validator_registrations
-        .insert(normalized_key, registration);
-    drop(s);
-
-    if let Err(error) =
-        crate::validator_set_sync::reconcile_after_identity_registration(state).await
     {
-        tracing::warn!(
-            target: "validator_set_sync",
-            "reconcile after identity registration failed: {error}"
-        );
-    }
+        let mut s = state.write().await;
 
-    (StatusCode::ACCEPTED, Json(response)).into_response()
+        if s.validator_registrations.iter().any(|(key, registration)| {
+            *key != normalized_key
+                && (registration.identity.node_id == node_id
+                    || registration.identity.ed25519_pubkey == ed25519_pubkey)
+        }) {
+            return Err((
+                StatusCode::CONFLICT,
+                "node_id or Ed25519 pubkey is already registered to another wallet".to_string(),
+            ));
+        }
+
+        let identity = ValidatorIdentity {
+            evm_address,
+            node_id,
+            ed25519_pubkey,
+        }
+        .normalized();
+
+        let mut registration = s
+            .validator_registrations
+            .remove(&normalized_key)
+            .unwrap_or_else(|| ValidatorRegistrationStatus {
+                reputation: 100,
+                ..ValidatorRegistrationStatus::default()
+            });
+
+        registration.alias = alias;
+        registration.identity = identity;
+        registration.registered_with_node = true;
+        registration.status = validator_registration_status_text(&registration);
+
+        let response = registration.clone();
+        s.validator_registrations
+            .insert(normalized_key, registration);
+        drop(s);
+
+        if let Err(error) =
+            crate::validator_set_sync::reconcile_after_identity_registration(state.clone()).await
+        {
+            tracing::warn!(
+                target: "validator_set_sync",
+                "reconcile after identity registration failed: {error}"
+            );
+        }
+
+        Ok(response)
+    }
+}
+
+async fn register_validator_identity(
+    State(state): State<SharedState>,
+    Json(request): Json<RegisterValidatorIdentityRequest>,
+) -> Response {
+    let proof = crate::validator_registry_gossip::RegistrationProof {
+        evm_address: request.evm_address,
+        node_id: request.node_id,
+        ed25519_pubkey: request.ed25519_pubkey,
+        alias: request.alias,
+        nonce: request.nonce,
+        evm_signature: request.evm_signature,
+        ed25519_signature: request.ed25519_signature,
+    };
+
+    match apply_validator_registration(&state, &proof).await {
+        Ok(response) => {
+            // Persist so the registration survives a restart, then gossip it so
+            // the rest of the fleet converges from this single POST.
+            let data_dir = {
+                let s = state.read().await;
+                s.config.data_dir.clone()
+            };
+            if let Err(e) = crate::validator_registry_gossip::persist(&data_dir, &proof) {
+                tracing::warn!("Failed to persist validator registration: {}", e);
+            }
+            crate::validator_registry_gossip::broadcast(proof).await;
+            (StatusCode::ACCEPTED, Json(response)).into_response()
+        }
+        Err((code, error)) => (code, Json(ErrorResponse { error })).into_response(),
+    }
 }
 
 /// DELETE /v1/validators/registrations/:evm_address

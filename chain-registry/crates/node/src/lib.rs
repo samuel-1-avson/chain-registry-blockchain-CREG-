@@ -12,6 +12,7 @@ pub mod chain_store;
 pub mod config;
 pub mod consensus_admission;
 pub mod l1_quorum;
+pub mod validator_registry_gossip;
 pub mod events;
 pub mod finalized_tx;
 pub mod gossip;

@@ -302,6 +302,8 @@ impl P2PNode {
         let blocks_topic = gossipsub::IdentTopic::new("creg/v1/blocks");
         let submissions_topic = gossipsub::IdentTopic::new("creg/v1/submissions");
         let vrf_proofs_topic = gossipsub::IdentTopic::new("creg/v1/vrf-proofs");
+        let validators_topic =
+            gossipsub::IdentTopic::new(crate::validator_registry_gossip::REGISTRATION_TOPIC);
 
         self.swarm
             .behaviour_mut()
@@ -319,6 +321,10 @@ impl P2PNode {
             .behaviour_mut()
             .gossipsub
             .subscribe(&vrf_proofs_topic)?;
+        self.swarm
+            .behaviour_mut()
+            .gossipsub
+            .subscribe(&validators_topic)?;
 
         loop {
             tokio::select! {
@@ -446,6 +452,34 @@ impl P2PNode {
                                     } else {
                                         s.vrf_proofs.insert(validator_id.clone(), (output.clone(), proof.clone()));
                                         tracing::debug!("Accepted VRF proof from {} for epoch {}", validator_id, &epoch_seed[..epoch_seed.len().min(12)]);
+                                    }
+                                }
+                            }
+                            continue;
+                        }
+
+                        // ── Validator identity registrations ───────────────────
+                        // A peer gossips a registration (with ownership proofs)
+                        // so one POST propagates fleet-wide. We re-verify the
+                        // proofs locally before applying — never trust the sender
+                        // — and persist so a restart keeps the binding.
+                        if topic_str.contains("validators") {
+                            if let Ok(common::GossipMessage::ValidatorRegistration {
+                                evm_address, node_id, ed25519_pubkey, alias, nonce, evm_signature, ed25519_signature,
+                            }) = serde_json::from_slice(&message.data) {
+                                let proof = crate::validator_registry_gossip::RegistrationProof {
+                                    evm_address, node_id, ed25519_pubkey, alias, nonce, evm_signature, ed25519_signature,
+                                };
+                                match crate::api::apply_validator_registration(&state, &proof).await {
+                                    Ok(status) => {
+                                        let data_dir = { let s = state.read().await; s.config.data_dir.clone() };
+                                        if let Err(e) = crate::validator_registry_gossip::persist(&data_dir, &proof) {
+                                            tracing::warn!("Failed to persist gossiped validator registration: {}", e);
+                                        }
+                                        tracing::info!("Applied gossiped validator registration for {} ({})", proof.node_id, status.status);
+                                    }
+                                    Err((_, e)) => {
+                                        tracing::debug!("Dropped gossiped validator registration for {}: {}", proof.node_id, e);
                                     }
                                 }
                             }
