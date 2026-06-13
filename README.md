@@ -1,3 +1,9 @@
+## GitHub
+
+**Canonical repository:** [chain-registry-blockchain-CREG-](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-) — protocol, testnet, explorer, hub, and ops in one tree. Waitlist SPA: [Creg-waitlist](https://github.com/samuel-1-avson/Creg-waitlist).
+
+---
+
 # Chain Registry (CREG)
 
 A decentralized package registry that replaces single-authority trust (npm, PyPI, Cargo, and similar) with **independent validator consensus**. Packages are content-addressed, analyzed through a multi-stage security pipeline, finalized by PBFT quorum, and anchored to Ethereum.
@@ -52,7 +58,7 @@ flowchart LR
 | **Join hub** | https://testnet.cregnet.dev |
 | **Waitlist** | https://waitlist.cregnet.dev |
 
-**Binaries:** [v0.1.0-testnet release](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases/tag/v0.1.0-testnet) (`creg` + `creg-node` for Linux, Windows, macOS).
+**Binaries:** [v0.1.1-testnet release](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases/tag/v0.1.1-testnet) (`creg` + `creg-node` for Linux, Windows, macOS).
 
 Chain parameters: [`chain-registry/testnet/chain-spec.sepolia.json`](chain-registry/testnet/chain-spec.sepolia.json).
 
@@ -64,12 +70,12 @@ This repo is organized like other public blockchains — **protocol and consensu
 
 | What to explore | Where |
 |-----------------|-------|
-| **Protocol source (start here)** | [`chain-registry/`](chain-registry/) |
-| **Public documentation** | [`docs/PUBLIC.md`](docs/PUBLIC.md) |
-| **ZK circuits** | [`circuits/`](circuits/) |
+| **Repository** | [chain-registry-blockchain-CREG-](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-) |
+| **Public documentation** | [docs/PUBLIC.md](docs/PUBLIC.md) |
+| **ZK circuits** | [circuits/](circuits/) |
 | **Release binaries** | [Releases](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases) |
 
-The alpha waitlist app is a separate product surface: live at [waitlist.cregnet.dev](https://waitlist.cregnet.dev), source in [samuel-1-avson/Creg-waitlist](https://github.com/samuel-1-avson/Creg-waitlist). Explorer, hub, and GCP deploy scripts remain in this monorepo but are **not** linked from the default README.
+The alpha waitlist app is a separate product surface: live at [waitlist.cregnet.dev](https://waitlist.cregnet.dev), source in [samuel-1-avson/Creg-waitlist](https://github.com/samuel-1-avson/Creg-waitlist).
 
 ---
 

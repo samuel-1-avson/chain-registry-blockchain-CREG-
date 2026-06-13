@@ -3,7 +3,7 @@
 Curated entry point for **protocol, validators, publishers, and auditors**.  
 Hosting runbooks, Firebase deploy guides, budget models, and internal maintainer docs are kept in-repo for the core team but are **not** linked from the public README or waitlist.
 
-**GitHub:** browse protocol source at [`chain-registry/`](../chain-registry/) ([direct tree link](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/tree/main/chain-registry)).
+**GitHub:** [chain-registry-blockchain-CREG-](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-) (canonical public repository).
 
 ---
 
@@ -51,7 +51,7 @@ cargo test --workspace
 cd contracts && forge test
 ```
 
-Release binaries: [v0.1.0-testnet](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases/tag/v0.1.0-testnet).
+Release binaries: [v0.1.1-testnet](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases/tag/v0.1.1-testnet).
 
 ---
 

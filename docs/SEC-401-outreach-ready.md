@@ -1,4 +1,4 @@
-﻿Subject: RFP: Chain Registry Sepolia testnet security review (4 weeks, Rust + Solidity)
+Subject: RFP: Chain Registry Sepolia testnet security review (4 weeks, Rust + Solidity)
 
 Hello,
 
@@ -6,7 +6,7 @@ We are scheduling a fixed-scope security review of the Chain Registry testnet st
 
 Repository: https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-
 Scope document: https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/blob/main/docs/SEC-401-AUDIT-SCOPE.md
-Commit / tag for review: `v0.1.1-testnet` (SHA: `203962ff97f2ae103ff44e8bbf9873b6c8e00647`) - pin this ref before audit starts
+Commit / tag for review: `v0.1.1-testnet` (SHA: `8108281597f6e7494281da0fc6609397d472b4d8`) - pin this ref before audit starts
 
 In scope (priority order):
 1. Off-chain package admission and validator pipeline (package_admission, validator_pipeline, publish API)

@@ -61,7 +61,7 @@ Thank you,
 ## Checklist before sending
 
 - [x] Engineering lead reviewed [SEC-401-AUDIT-SCOPE.md](./SEC-401-AUDIT-SCOPE.md)
-- [x] Auditor baseline tag proposed: `v0.1.0-testnet` (DIST-301)
+- [x] Auditor baseline tag proposed: `v0.1.1-testnet` (SEC-401 scope pin)
 - [ ] No production/mainnet secrets in repo or attachments
 - [ ] Sepolia RPC endpoint provisioned (read-only or dedicated key)
 - [ ] Start date recorded in NEXT_WORK when vendor confirms
