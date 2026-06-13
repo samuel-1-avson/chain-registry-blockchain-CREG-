@@ -40,3 +40,6 @@ common = { path = "../common" }
 tempfile = "3"
 wasmprinter = "0.201"
 wat = "1.201"
+
+[lints]
+workspace = true

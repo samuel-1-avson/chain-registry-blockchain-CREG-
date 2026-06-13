@@ -21,3 +21,6 @@ tonic      = { workspace = true }
 prost      = { workspace = true }
 futures    = { workspace = true }
 dirs        = "5"
+
+[lints]
+workspace = true

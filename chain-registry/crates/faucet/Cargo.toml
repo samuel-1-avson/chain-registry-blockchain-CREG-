@@ -33,3 +33,6 @@ tokio-test = "0.4"
 [features]
 default = []
 tls = ["axum-server"]
+
+[lints]
+workspace = true

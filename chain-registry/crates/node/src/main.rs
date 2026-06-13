@@ -1,6 +1,7 @@
 // crates/node/src/main.rs
 // Chain registry node â€” single binary that runs all subsystems.
 #![deny(clippy::unwrap_used)]
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 mod admission_scan;
 mod api;

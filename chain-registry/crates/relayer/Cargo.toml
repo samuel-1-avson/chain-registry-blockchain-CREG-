@@ -26,3 +26,5 @@ alloy = { workspace = true }
 hex = { workspace = true }
 dashmap = "5.5"
 k256 = { version = "0.13", features = ["ecdsa"] }
+[lints]
+workspace = true
