@@ -22,6 +22,15 @@ $testnetDir = Split-Path -Parent $gcpDir
 $repoRoot = Split-Path -Parent $testnetDir
 $monitoringDir = Join-Path $testnetDir "monitoring"
 $cfg = & (Join-Path $gcpDir "_Load-HostingEnv.ps1")
+. (Join-Path $gcpDir "_GcpSecret.ps1")
+
+function Log($m) { Write-Host "[deploy-monitoring] $m" }
+
+if (-not $ProjectId) { $ProjectId = $cfg.GCP_PROJECT }
+if (-not $Zone) { $Zone = $cfg.GCP_ZONE }
+if (-not $VmName) { $VmName = $cfg.GCP_VM_NAME }
+
+$cfg = Resolve-AlertConfigFromGsm -Config $cfg -ProjectId $ProjectId -Log { param($m) Log $m }
 
 function Escape-YamlSingleQuoted([string]$Value) {
     if (-not $Value) { return "" }
@@ -151,12 +160,6 @@ inhibit_rules:
 "@
     [System.IO.File]::WriteAllText($OutPath, $body)
 }
-
-function Log($m) { Write-Host "[deploy-monitoring] $m" }
-
-if (-not $ProjectId) { $ProjectId = $cfg.GCP_PROJECT }
-if (-not $Zone) { $Zone = $cfg.GCP_ZONE }
-if (-not $VmName) { $VmName = $cfg.GCP_VM_NAME }
 
 $envFile = Join-Path $testnetDir "sepolia-3node.env"
 $fleetMode = $true

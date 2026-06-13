@@ -22,6 +22,9 @@ param(
 $ErrorActionPreference = "Stop"
 $gcpDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $envFile = Join-Path $gcpDir "hosting.env"
+. (Join-Path $gcpDir "_GcpSecret.ps1")
+$cfg = & (Join-Path $gcpDir "_Load-HostingEnv.ps1")
+$projectId = $cfg.GCP_PROJECT
 
 function Log($m) { Write-Host "[setup-alert-receiver] $m" }
 
@@ -48,27 +51,46 @@ function Set-EnvLine {
     Set-Content -Path $envFile -Value $out -Encoding utf8
 }
 
+function Remove-EnvLine {
+    param([string]$Key)
+    $pattern = "^\s*$([regex]::Escape($Key))\s*="
+    $out = Get-Content $envFile | Where-Object { $_ -notmatch $pattern }
+    Set-Content -Path $envFile -Value $out -Encoding utf8
+}
+
 switch ($Channel) {
     "ntfy" {
         if (-not $NtfyTopic) {
             $suffix = (Get-Random -Minimum 100000 -Maximum 999999)
             $NtfyTopic = "creg-testnet-alerts-$suffix"
         }
-        Set-EnvLine -Key "GCP_ALERT_NTFY_TOPIC" -Value $NtfyTopic
+        if (-not $projectId) { throw "GCP_PROJECT missing in hosting.env" }
+        $secretId = if ($cfg.GCP_ALERT_NTFY_TOPIC_SECRET) { $cfg.GCP_ALERT_NTFY_TOPIC_SECRET } else { "creg-testnet-alert-ntfy-topic" }
+        Set-GcpSecretValue -ProjectId $projectId -SecretId $secretId -Value $NtfyTopic
+        Set-EnvLine -Key "GCP_ALERT_NTFY_TOPIC_SECRET" -Value $secretId
         Set-EnvLine -Key "GCP_ALERT_NTFY_SERVER" -Value "https://ntfy.sh"
-        Log "ntfy topic: $NtfyTopic"
+        Remove-EnvLine -Key "GCP_ALERT_NTFY_TOPIC"
+        Log "ntfy topic stored in Secret Manager ($secretId)"
         Log "Subscribe on phone: install ntfy app, add topic '$NtfyTopic'"
         Log "Web: https://ntfy.sh/$NtfyTopic"
     }
     "webhook" {
         if (-not $WebhookUrl) { throw "-WebhookUrl required for webhook channel" }
-        Set-EnvLine -Key "GCP_ALERT_WEBHOOK_URL" -Value $WebhookUrl
-        Log "Generic webhook configured"
+        if (-not $projectId) { throw "GCP_PROJECT missing in hosting.env" }
+        $secretId = if ($cfg.GCP_ALERT_WEBHOOK_SECRET) { $cfg.GCP_ALERT_WEBHOOK_SECRET } else { "creg-testnet-alert-webhook" }
+        Set-GcpSecretValue -ProjectId $projectId -SecretId $secretId -Value $WebhookUrl
+        Set-EnvLine -Key "GCP_ALERT_WEBHOOK_SECRET" -Value $secretId
+        Remove-EnvLine -Key "GCP_ALERT_WEBHOOK_URL"
+        Log "Generic webhook stored in Secret Manager ($secretId)"
     }
     "slack" {
         if (-not $SlackWebhookUrl) { throw "-SlackWebhookUrl required for slack channel" }
-        Set-EnvLine -Key "GCP_ALERT_SLACK_WEBHOOK_URL" -Value $SlackWebhookUrl
-        Log "Slack incoming webhook configured"
+        if (-not $projectId) { throw "GCP_PROJECT missing in hosting.env" }
+        $secretId = if ($cfg.GCP_ALERT_SLACK_WEBHOOK_SECRET) { $cfg.GCP_ALERT_SLACK_WEBHOOK_SECRET } else { "creg-testnet-alert-slack-webhook" }
+        Set-GcpSecretValue -ProjectId $projectId -SecretId $secretId -Value $SlackWebhookUrl
+        Set-EnvLine -Key "GCP_ALERT_SLACK_WEBHOOK_SECRET" -Value $secretId
+        Remove-EnvLine -Key "GCP_ALERT_SLACK_WEBHOOK_URL"
+        Log "Slack webhook stored in Secret Manager ($secretId)"
     }
     "email" {
         Log "Email channel uses GCP_ALERT_EMAIL_TO and GCP_ALERT_SMTP_* in hosting.env"

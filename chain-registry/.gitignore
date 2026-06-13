@@ -38,6 +38,7 @@ docs/
 *.env
 secrets/
 *secret*
+!testnet/gcp/_GcpSecret.ps1
 # SEC-301b: hot-key loader crate (source only — not credential files)
 !crates/secrets/
 !crates/secrets/**

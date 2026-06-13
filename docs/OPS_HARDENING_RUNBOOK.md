@@ -31,16 +31,19 @@ The node exposes Prometheus metrics at `GET /metrics`
    (validators + observers).
 2. Load the alert rules: `testnet/monitoring/creg-alerts.yml` via
    `rule_files:` in `prometheus.yml`.
-3. Point Alertmanager at your channel. For GCP, either run
-   `testnet/gcp/setup-alert-receiver.ps1` (default: **ntfy** mobile push) or set in
+3. Point Alertmanager at your channel. For GCP, run
+   `testnet/gcp/setup-alert-receiver.ps1` (default: **ntfy** mobile push). It stores
+   sensitive values in **GCP Secret Manager** and keeps only secret *names* in
    `testnet/gcp/hosting.env` (see `hosting.env.example`):
-   - `GCP_ALERT_NTFY_TOPIC` / `GCP_ALERT_NTFY_SERVER` — ntfy.sh push (no Slack)
-   - `GCP_ALERT_SLACK_WEBHOOK_URL` — Slack incoming webhook
-   - `GCP_ALERT_WEBHOOK_URL` — Discord / Google Chat / custom webhook
+   - `GCP_ALERT_NTFY_TOPIC_SECRET` + `GCP_ALERT_NTFY_SERVER` — ntfy.sh push (no Slack)
+   - `GCP_ALERT_SLACK_WEBHOOK_SECRET` — Slack incoming webhook
+   - `GCP_ALERT_WEBHOOK_SECRET` — Discord / Google Chat / custom webhook
    - `GCP_ALERT_EMAIL_TO` + `GCP_ALERT_SMTP_*` — email via SMTP
-   - `GCP_ALERT_PAGERDUTY_ROUTING_KEY` — optional PagerDuty Events API v2 key
-   `deploy-monitoring.ps1` generates `testnet/monitoring/alertmanager-gcp.yml`
-   from these values (gitignored; template in `alertmanager-gcp.yml.example`).
+   - `GCP_ALERT_PAGERDUTY_SECRET` — optional PagerDuty Events API v2 key
+   Enable `secretmanager.googleapis.com` on the testnet project before first use.
+   `deploy-monitoring.ps1` reads secrets via `_GcpSecret.ps1`, generates
+   `testnet/monitoring/alertmanager-gcp.yml` (gitignored; template in
+   `alertmanager-gcp.yml.example`).
 4. **GCP testnet (edge VM):** run `testnet/gcp/deploy-monitoring.ps1` to
    generate `testnet/monitoring/prometheus-gcp.yml`, sync to `creg-testnet-vm`,
    and start `testnet/monitoring/docker-compose.monitoring.yml`. Verify with
