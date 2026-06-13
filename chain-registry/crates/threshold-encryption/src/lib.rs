@@ -172,9 +172,9 @@ impl ThresholdEncryption {
         if threshold == 0 || threshold > total_shares {
             return Err(ThresholdError::InvalidThreshold(threshold, total_shares));
         }
-        if total_shares > 255 {
-            return Err(ThresholdError::InvalidThreshold(threshold, total_shares));
-        }
+        // The SSS 255-share maximum is enforced by the `u8` type itself, so no
+        // explicit upper-bound check is needed (an `x > 255` test on a u8 is a
+        // deny-by-default clippy correctness error).
 
         info!(
             "Creating threshold encryption: {} of {}",
