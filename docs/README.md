@@ -1,5 +1,8 @@
 # Chain Registry — documentation index
 
+> **Public visitors:** use **[PUBLIC.md](./PUBLIC.md)** — protocol, validators, and contracts only.  
+> This page is the **full maintainer index** (hosting, Firebase, budget, security ops).
+
 Start at the [project README](../README.md), then use the sections below.
 
 **Artifact map (scripts, compose, components):** [DELIVERABLES_INDEX.md](../chain-registry/DELIVERABLES_INDEX.md)

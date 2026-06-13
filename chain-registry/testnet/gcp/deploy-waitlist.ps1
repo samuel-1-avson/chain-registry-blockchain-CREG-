@@ -49,6 +49,10 @@ if (Test-Path $waitlistEnv) {
     $dockerEnvArgs += "--env-file"
     $dockerEnvArgs += $waitlistEnv
     Log "Using $waitlistEnv for VITE_RECAPTCHA_SITE_KEY at build time"
+} elseif ($env:VITE_RECAPTCHA_SITE_KEY) {
+    $dockerEnvArgs += "-e"
+    $dockerEnvArgs += "VITE_RECAPTCHA_SITE_KEY=$($env:VITE_RECAPTCHA_SITE_KEY)"
+    Log "Using VITE_RECAPTCHA_SITE_KEY from shell environment for build"
 } else {
     Write-Host "[waitlist-deploy] WARN: $waitlistEnv not found - production build needs VITE_RECAPTCHA_SITE_KEY" -ForegroundColor Yellow
 }
@@ -56,10 +60,11 @@ if (Test-Path $waitlistEnv) {
 Log "Building waitlist via Linux Node container (avoids Windows rollup issues)..."
 docker run --rm `
     -v "${WaitlistSource}:/app" `
+    -v creg-waitlist-node-modules:/app/node_modules `
     @dockerEnvArgs `
     -w /app `
     node:22-alpine `
-    sh -c "rm -rf node_modules dist && npm install && npm run build"
+    sh -c "npm install && npm run build"
 
 if (-not (Test-Path (Join-Path $distDir "index.html"))) {
     New-Item -ItemType Directory -Force -Path $distDir | Out-Null
