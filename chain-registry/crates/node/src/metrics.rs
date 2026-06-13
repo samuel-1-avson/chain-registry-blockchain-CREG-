@@ -195,6 +195,34 @@ pub async fn render(state: Arc<RwLock<NodeState>>) -> String {
         bridge.finalized_l1_block.unwrap_or(0) as f64,
     );
 
+    // ── MAL-001 sandbox posture (validators) ─────────────────────────────────
+    let sandbox = validator::sandbox::engine_status().await;
+    metric(
+        &mut out,
+        "creg_sandbox_dev_bypass",
+        "1 when CREG_DEV_SANDBOX=true (behavioural analysis skipped); must be 0 on public validators",
+        "gauge",
+        if sandbox.dev_bypass { 1.0 } else { 0.0 },
+    );
+    metric(
+        &mut out,
+        "creg_sandbox_isolated",
+        "1 when the active sandbox engine runs packages with real isolation",
+        "gauge",
+        if sandbox.isolated { 1.0 } else { 0.0 },
+    );
+    labeled_metric(
+        &mut out,
+        "creg_sandbox_info",
+        "Sandbox engine selected for behavioural analysis (value is always 1)",
+        "gauge",
+        &[
+            ("engine", sandbox.engine.as_str()),
+            ("degraded", if sandbox.degraded { "true" } else { "false" }),
+        ],
+        1.0,
+    );
+
     out
 }
 

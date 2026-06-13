@@ -22,9 +22,11 @@ services:
     privileged: true
     environment:
       CREG_DEV_SANDBOX: "false"
+      CREG_PUBLIC_VALIDATOR: "true"
 
   creg-node-2:
     image: chain-registry-node-secure:fleet
     privileged: true
     environment:
       CREG_DEV_SANDBOX: "false"
+      CREG_PUBLIC_VALIDATOR: "true"

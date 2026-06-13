@@ -54,6 +54,7 @@ services:
       <<: *creg-fleet-base-env
       CREG_P2P_SEEDS: /dns4/creg-node-2/tcp/9000,/dns4/creg-node-3/tcp/9000
       CREG_IS_VALIDATOR: "true"
+      CREG_PUBLIC_VALIDATOR: "true"
       CREG_VALIDATOR_KEY: ${CREG_VALIDATOR_KEY_1}
       CREG_OPERATOR_API_KEY: ${CREG_OPERATOR_API_KEY:-docker-dev-operator-key}
       CREG_NODE_ID: core-1
@@ -73,6 +74,7 @@ services:
     environment:
       <<: *creg-fleet-base-env
       CREG_IS_VALIDATOR: "true"
+      CREG_PUBLIC_VALIDATOR: "true"
       CREG_VALIDATOR_KEY: ${CREG_VALIDATOR_KEY_2}
       CREG_OPERATOR_API_KEY: ${CREG_OPERATOR_API_KEY:-docker-dev-operator-key}
       CREG_NODE_ID: validator-2
