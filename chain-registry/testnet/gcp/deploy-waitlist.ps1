@@ -104,7 +104,7 @@ ENV='$remoteRoot/testnet/sepolia-3node.env'
 touch "`$ENV"
 grep -q '^CREG_PUBLIC_WAITLIST_HOST=' "`$ENV" 2>/dev/null && sed -i 's/^CREG_PUBLIC_WAITLIST_HOST=.*/CREG_PUBLIC_WAITLIST_HOST=$WaitlistHost/' "`$ENV" || echo 'CREG_PUBLIC_WAITLIST_HOST=$WaitlistHost' >> "`$ENV"
 chmod 600 "`$ENV"
-"@
+"@ -replace "`r", ""
 
 Log "Setting CREG_PUBLIC_WAITLIST_HOST=$WaitlistHost on VM..."
 gcloud compute ssh $VmName @sshOpts --command=$patchEnv | Out-Null
