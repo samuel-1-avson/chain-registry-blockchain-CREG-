@@ -1413,8 +1413,7 @@ async fn generate_package_intelligence(
         (record, s.config.data_dir.clone(), ipfs_url)
     };
 
-    match crate::intelligence::generate_and_store(&record, &data_dir, ipfs_url.as_deref()).await
-    {
+    match crate::intelligence::generate_and_store(&record, &data_dir, ipfs_url.as_deref()).await {
         Ok(report) => Json(serde_json::json!({
             "canonical": canonical,
             "status": report.status,

@@ -146,7 +146,11 @@ mod tests {
         persist(dir.path(), &proof("0xDEF", "node-2")).expect("persist 3");
 
         let all = load_all(dir.path());
-        assert_eq!(all.len(), 2, "duplicate EVM address must not create two rows");
+        assert_eq!(
+            all.len(),
+            2,
+            "duplicate EVM address must not create two rows"
+        );
         let renamed = all
             .iter()
             .find(|p| p.evm_address.eq_ignore_ascii_case("0xabc"))

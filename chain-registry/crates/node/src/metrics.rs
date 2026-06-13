@@ -137,10 +137,7 @@ pub async fn render(state: Arc<RwLock<NodeState>>) -> String {
         "creg_validator_set_sync_info",
         "Validator set sync mode and state (value is always 1 when labeled series is present)",
         "gauge",
-        &[
-            ("mode", sync.mode.as_str()),
-            ("state", sync.state.as_str()),
-        ],
+        &[("mode", sync.mode.as_str()), ("state", sync.state.as_str())],
         1.0,
     );
 

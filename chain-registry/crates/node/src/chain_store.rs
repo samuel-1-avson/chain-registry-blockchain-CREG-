@@ -684,7 +684,9 @@ mod tests {
         assert!(outcome_a.replaced_hash.is_none(), "first insert is no fork");
 
         // Re-inserting the identical block is not a replacement.
-        let outcome_same = store.insert_block_with_outcome(&block_a).expect("re-insert");
+        let outcome_same = store
+            .insert_block_with_outcome(&block_a)
+            .expect("re-insert");
         assert!(outcome_same.replaced_hash.is_none());
 
         // A different block at the same height is a fork replacement.
@@ -705,7 +707,10 @@ mod tests {
         let block2 = block(2, &block1.hash(), "node-a", &["abandoned"]);
         store.insert_block(&block2).expect("insert 2");
 
-        assert!(store.get_package("npm:abandoned@1.0.0").expect("get").is_some());
+        assert!(store
+            .get_package("npm:abandoned@1.0.0")
+            .expect("get")
+            .is_some());
 
         // Rewind to height 1: block 2 is abandoned but stays readable by hash.
         let abandoned = store.rollback_to_height(1).expect("rollback");

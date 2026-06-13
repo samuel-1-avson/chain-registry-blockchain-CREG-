@@ -105,8 +105,7 @@ async fn sync_once(state: Arc<RwLock<NodeState>>) -> anyhow::Result<()> {
                 &prev_hash[..12],
                 &block.header.prev_hash[..12]
             );
-            match attempt_reorg_recovery(&state, &client, &peer_urls, height - 1, peer_height)
-                .await
+            match attempt_reorg_recovery(&state, &client, &peer_urls, height - 1, peer_height).await
             {
                 Ok(true) => {
                     tracing::info!("Reorg recovery succeeded — chain re-aligned with peers");
@@ -219,7 +218,10 @@ async fn attempt_reorg_recovery(
         };
         let Some(ours) = ours else { continue };
         let Some(theirs) = fetch_block(client, peer_urls, k).await else {
-            tracing::warn!("Reorg recovery: could not fetch peer block {} — aborting", k);
+            tracing::warn!(
+                "Reorg recovery: could not fetch peer block {} — aborting",
+                k
+            );
             return Ok(false);
         };
         if ours.hash() == theirs.hash() {
@@ -248,15 +250,25 @@ async fn attempt_reorg_recovery(
     let mut link_hash = ancestor_hash;
     for h in (fork_height + 1)..=peer_height {
         let Some(b) = fetch_block(client, peer_urls, h).await else {
-            tracing::warn!("Reorg recovery: peer branch incomplete at height {} — aborting", h);
+            tracing::warn!(
+                "Reorg recovery: peer branch incomplete at height {} — aborting",
+                h
+            );
             return Ok(false);
         };
         if b.header.height != h {
-            tracing::warn!("Reorg recovery: block claims height {} at {} — aborting", b.header.height, h);
+            tracing::warn!(
+                "Reorg recovery: block claims height {} at {} — aborting",
+                b.header.height,
+                h
+            );
             return Ok(false);
         }
         if b.header.prev_hash != link_hash {
-            tracing::warn!("Reorg recovery: peer branch broke linkage at height {} — aborting", h);
+            tracing::warn!(
+                "Reorg recovery: peer branch broke linkage at height {} — aborting",
+                h
+            );
             return Ok(false);
         }
         let effective_set = crate::validator_set_history::set_at(&data_dir, b.header.height)
@@ -301,7 +313,8 @@ async fn attempt_reorg_recovery(
                 canonical_blocks.push(b);
             }
         }
-        s.publisher_index.rebuild_from_chain(canonical_blocks.iter());
+        s.publisher_index
+            .rebuild_from_chain(canonical_blocks.iter());
 
         let depth = local_tip - fork_height;
         s.record_reorg(depth, abandoned, link_hash.clone());

@@ -81,8 +81,7 @@ pub fn append(data_dir: &Path, record: AnchorRecord) -> Result<usize> {
     let tmp_path = path.with_extension("json.tmp");
     let bytes = serde_json::to_vec_pretty(&anchors).context("serialize anchor journal")?;
     std::fs::create_dir_all(data_dir).ok();
-    std::fs::write(&tmp_path, &bytes)
-        .with_context(|| format!("write {}", tmp_path.display()))?;
+    std::fs::write(&tmp_path, &bytes).with_context(|| format!("write {}", tmp_path.display()))?;
     std::fs::rename(&tmp_path, &path)
         .with_context(|| format!("rename {} → {}", tmp_path.display(), path.display()))?;
     Ok(anchors.len())

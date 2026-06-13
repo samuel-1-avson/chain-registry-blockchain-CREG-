@@ -1017,9 +1017,10 @@ async fn fetch_deltas(
     let mut deltas = Vec::new();
     let mut start = from_block;
     while start <= to_block {
-        let end = start.saturating_add(chunk_size.saturating_sub(1)).min(to_block);
-        let mut chunk =
-            fetch_deltas_chunk(client, rpc_url, staking_addr, start, end).await?;
+        let end = start
+            .saturating_add(chunk_size.saturating_sub(1))
+            .min(to_block);
+        let mut chunk = fetch_deltas_chunk(client, rpc_url, staking_addr, start, end).await?;
         deltas.append(&mut chunk);
         start = end.saturating_add(1);
         if start <= to_block {

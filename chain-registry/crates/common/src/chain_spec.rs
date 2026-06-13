@@ -508,8 +508,7 @@ mod tests {
         const ONCHAIN_SLASH_CRITICAL_BP: u16 = 3000; // SLASH_CRITICAL_PCT = 30%
 
         // Compile-time embed of the canonical published Sepolia spec.
-        const SEPOLIA_SPEC_JSON: &str =
-            include_str!("../../../testnet/chain-spec.sepolia.json");
+        const SEPOLIA_SPEC_JSON: &str = include_str!("../../../testnet/chain-spec.sepolia.json");
 
         #[test]
         fn sepolia_spec_matches_onchain_staking_constants() {

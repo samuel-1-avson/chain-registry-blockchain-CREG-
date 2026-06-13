@@ -15,13 +15,11 @@ mod events;
 mod explorer;
 mod finalized_tx;
 mod gossip;
-mod intelligence;
 mod grpc;
+mod intelligence;
 mod json_rpc;
 mod l1_quorum;
 mod metrics;
-mod validator_registry_gossip;
-mod validator_set_history;
 mod openapi;
 mod p2p;
 mod p2p_rate_limit;
@@ -34,6 +32,8 @@ mod rate_limit;
 mod state;
 mod sync;
 mod validator_pipeline;
+mod validator_registry_gossip;
+mod validator_set_history;
 // Phase-1 scaffold for chain-derived validator set. Compiled and tested but
 // not yet wired into runtime â€” see docs/VALIDATOR_SET_SYNC_DESIGN.md.
 mod chain_spec_boot;

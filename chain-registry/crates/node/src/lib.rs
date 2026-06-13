@@ -11,14 +11,12 @@ pub mod bridge_anchors;
 pub mod chain_store;
 pub mod config;
 pub mod consensus_admission;
-pub mod l1_quorum;
-pub mod validator_registry_gossip;
-pub mod validator_set_history;
 pub mod events;
 pub mod finalized_tx;
 pub mod gossip;
 pub mod intelligence;
 pub mod json_rpc;
+pub mod l1_quorum;
 pub mod openapi;
 pub mod p2p;
 pub mod package_admission;
@@ -27,6 +25,8 @@ pub mod publisher_index;
 pub mod rate_limit;
 pub mod state;
 pub mod validator_pipeline;
+pub mod validator_registry_gossip;
+pub mod validator_set_history;
 pub mod validator_set_sync;
 
 // ── Private modules required by the public ones above ────────────────────────

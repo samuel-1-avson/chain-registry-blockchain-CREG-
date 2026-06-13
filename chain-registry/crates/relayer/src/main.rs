@@ -95,7 +95,10 @@ impl RelayerConfig {
                 port: env_u16("RELAYER_PORT", 8083),
                 rpc_url,
                 private_key,
-                policy_path: env_string("RELAYER_POLICY_PATH", "config/relayer-policy.example.json"),
+                policy_path: env_string(
+                    "RELAYER_POLICY_PATH",
+                    "config/relayer-policy.example.json",
+                ),
                 relayer_address,
                 active_chain_id,
                 data_dir: env_string("RELAYER_DATA_DIR", "."),

@@ -87,7 +87,11 @@ pub fn set_at(data_dir: &Path, height: u64) -> Option<ValidatorSet> {
 
 /// Record `set` as effective from `effective_from_height`, but only if its
 /// membership differs from the most recent snapshot (dedup). Atomic write.
-pub fn record(data_dir: &Path, effective_from_height: u64, set: &ValidatorSet) -> anyhow::Result<()> {
+pub fn record(
+    data_dir: &Path,
+    effective_from_height: u64,
+    set: &ValidatorSet,
+) -> anyhow::Result<()> {
     if set.validators.is_empty() {
         return Ok(());
     }
@@ -151,9 +155,18 @@ mod tests {
     #[test]
     fn select_at_picks_latest_not_after_height() {
         let snaps = vec![
-            ValidatorSetSnapshot { effective_from_height: 0, validators: set(&["aa"]) },
-            ValidatorSetSnapshot { effective_from_height: 10, validators: set(&["aa", "bb"]) },
-            ValidatorSetSnapshot { effective_from_height: 20, validators: set(&["bb", "cc"]) },
+            ValidatorSetSnapshot {
+                effective_from_height: 0,
+                validators: set(&["aa"]),
+            },
+            ValidatorSetSnapshot {
+                effective_from_height: 10,
+                validators: set(&["aa", "bb"]),
+            },
+            ValidatorSetSnapshot {
+                effective_from_height: 20,
+                validators: set(&["bb", "cc"]),
+            },
         ];
         assert_eq!(select_at(&snaps, 5).unwrap().effective_from_height, 0);
         assert_eq!(select_at(&snaps, 10).unwrap().effective_from_height, 10);

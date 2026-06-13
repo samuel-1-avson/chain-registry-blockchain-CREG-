@@ -92,7 +92,10 @@ mod tests {
         assert_eq!(majority_hash(&split), None);
 
         // Single responder is trivially a majority of itself.
-        assert_eq!(majority_hash(&["0xaa".to_string()]), Some("0xaa".to_string()));
+        assert_eq!(
+            majority_hash(&["0xaa".to_string()]),
+            Some("0xaa".to_string())
+        );
 
         assert_eq!(majority_hash(&[]), None);
     }
