@@ -488,4 +488,59 @@ mod tests {
         assert_eq!(seeds.len(), 1);
         assert!(seeds[0].contains("bootnode-1"));
     }
+
+    // ── Sepolia chain-spec ↔ on-chain Staking.sol drift guard ────────────────
+    //
+    // The published Sepolia chain spec is informational for some fields but is
+    // read by operators and surfaced in the UI. It MUST match the deployed
+    // (immutable) Staking.sol constants. These expected values mirror
+    // contracts/Staking.sol; update both together if the contract ever changes
+    // on a new deployment. This test fails the build if the JSON drifts.
+    mod sepolia_onchain_drift {
+        use super::super::ChainSpec;
+
+        // contracts/Staking.sol — Sepolia deployment.
+        const ONCHAIN_UNBONDING_SECONDS: u64 = 14 * 24 * 60 * 60; // UNBONDING_PERIOD = 14 days
+        const ONCHAIN_MIN_VALIDATOR_STAKE_WEI: &str = "100000000000000000000"; // minValidatorStake = 100 CREG
+        const ONCHAIN_MIN_PUBLISHER_STAKE_WEI: &str = "1000000000000000000"; // minPublisherStake = 1 CREG
+        const ONCHAIN_SLASH_LOW_BP: u16 = 200; // SLASH_LOW_PCT = 2%
+        const ONCHAIN_SLASH_MEDIUM_BP: u16 = 1000; // SLASH_MEDIUM_PCT = 10%
+        const ONCHAIN_SLASH_CRITICAL_BP: u16 = 3000; // SLASH_CRITICAL_PCT = 30%
+
+        // Compile-time embed of the canonical published Sepolia spec.
+        const SEPOLIA_SPEC_JSON: &str =
+            include_str!("../../../testnet/chain-spec.sepolia.json");
+
+        #[test]
+        fn sepolia_spec_matches_onchain_staking_constants() {
+            let spec: ChainSpec = serde_json::from_str(SEPOLIA_SPEC_JSON)
+                .expect("testnet/chain-spec.sepolia.json must parse");
+            let p = &spec.consensus_params;
+
+            assert_eq!(
+                p.unbonding_period_seconds, ONCHAIN_UNBONDING_SECONDS,
+                "chain-spec unbonding_period_seconds drifted from Staking.sol UNBONDING_PERIOD (14 days)"
+            );
+            assert_eq!(
+                p.min_validator_stake_wei, ONCHAIN_MIN_VALIDATOR_STAKE_WEI,
+                "chain-spec min_validator_stake_wei drifted from Staking.sol minValidatorStake"
+            );
+            assert_eq!(
+                p.min_publisher_stake_wei, ONCHAIN_MIN_PUBLISHER_STAKE_WEI,
+                "chain-spec min_publisher_stake_wei drifted from Staking.sol minPublisherStake"
+            );
+            assert_eq!(
+                p.slash_penalty_low_bp, ONCHAIN_SLASH_LOW_BP,
+                "chain-spec slash_penalty_low_bp drifted from Staking.sol SLASH_LOW_PCT"
+            );
+            assert_eq!(
+                p.slash_penalty_medium_bp, ONCHAIN_SLASH_MEDIUM_BP,
+                "chain-spec slash_penalty_medium_bp drifted from Staking.sol SLASH_MEDIUM_PCT"
+            );
+            assert_eq!(
+                p.slash_penalty_critical_bp, ONCHAIN_SLASH_CRITICAL_BP,
+                "chain-spec slash_penalty_critical_bp drifted from Staking.sol SLASH_CRITICAL_PCT"
+            );
+        }
+    }
 }

@@ -7,6 +7,13 @@ import "./Registry.sol";
 /// @notice Cross-chain package verification bridge
 /// @dev Enables package verification status to be shared across multiple chains
 ///      using generic message passing interfaces (LayerZero, Axelar, etc.)
+///
+/// @dev ⚠️  EXPERIMENTAL — NOT DEPLOYED AND NOT WIRED. This contract is a
+///      design scaffold and is intentionally absent from the Sepolia
+///      deployment (chain spec `feature_flags.cross_chain = false`). The live
+///      L2→L1 path is the rollup-checkpoint bridge in crates/node/src/bridge.rs
+///      via Registry.submitRollupBatch — NOT this contract. Do not assume any
+///      message-passing wiring exists until it is deployed and referenced.
 contract CrossChainRegistry {
     
     // ── Structs ───────────────────────────────────────────────────────────────

@@ -21,11 +21,9 @@ sol!(
     interface IRegistry {
         function latestStateRoot() external view returns (bytes32 _0);
 
-        function finalizePackage(
-            string calldata canonical,
-            bytes[] calldata validatorSignatures
-        ) external;
-
+        // NOTE: Registry.finalizePackage exists on-chain but is intentionally
+        // NOT bound here — this bridge settles L2 state via periodic rollup
+        // checkpoints (submitRollupBatch), not per-package L1 finalization.
         function submitRollupBatch(
             bytes32 prevRoot,
             bytes32 nextRoot,

@@ -1,6 +1,12 @@
 // crates/consensus/src/forced_inclusion.rs
 // Censorship-resistance mechanism: tracks pending transactions and
 // flags proposers that repeatedly omit eligible transactions.
+//
+// STATUS: building block, NOT yet wired into the node's block-production or
+// mempool path (no references in crates/node). The chain therefore does not
+// currently enforce forced-inclusion / anti-censorship guarantees at runtime.
+// The type + its tests exist so the mechanism can be integrated later; treat
+// any "censorship resistance" claim as aspirational until this is wired in.
 
 use std::collections::HashMap;
 use std::time::Instant;
