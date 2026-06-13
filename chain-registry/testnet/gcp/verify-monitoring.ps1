@@ -21,28 +21,14 @@ if (-not $ProjectId) { $ProjectId = $cfg.GCP_PROJECT }
 if (-not $Zone) { $Zone = $cfg.GCP_ZONE }
 if (-not $VmName) { $VmName = $cfg.GCP_VM_NAME }
 
-$remoteCmd = @'
-set -euo pipefail
-prom_ok=0
-if curl -fsS http://127.0.0.1:9090/-/healthy >/dev/null 2>&1; then prom_ok=1; fi
-if [ "$prom_ok" -ne 1 ]; then
-  echo "PROMETHEUS_UNHEALTHY"
-  exit 2
-fi
-echo "PROMETHEUS_OK"
-targets_json=$(curl -fsS 'http://127.0.0.1:9090/api/v1/targets')
-echo "$targets_json" | grep -q '"health":"up"' || { echo "NO_UP_TARGETS"; exit 3; }
-echo "TARGETS_UP"
-metrics=$(curl -fsS 'http://127.0.0.1:9090/api/v1/query?query=creg_chain_tip_height')
-echo "$metrics" | grep -q '"status":"success"' || { echo "METRICS_QUERY_FAILED"; exit 4; }
-echo "METRICS_OK"
-sandbox=$(curl -fsS 'http://127.0.0.1:9090/api/v1/query?query=creg_sandbox_dev_bypass')
-echo "$sandbox" | grep -q '"status":"success"' || { echo "SANDBOX_METRICS_MISSING"; exit 5; }
-echo "SANDBOX_METRICS_OK"
-alerts=$(curl -fsS 'http://127.0.0.1:9090/api/v1/rules' )
-echo "$alerts" | grep -q 'CregSandboxDevBypass' || { echo "ALERT_RULES_MISSING"; exit 6; }
-echo "ALERT_RULES_OK"
-'@
+$repoSlug = ($cfg.GITHUB_REPO -split '/')[-1]
+$localScript = Join-Path $gcpDir "verify-monitoring-remote.sh"
+$sshOpts = @("--zone=$Zone", "--project=$ProjectId", "--tunnel-through-iap", "--strict-host-key-checking=no", "--quiet")
+$remoteHome = (gcloud compute ssh $VmName @sshOpts --command="printf '%s' `$HOME").Trim()
+$remotePath = "$remoteHome/creg-hosting/$repoSlug/chain-registry/testnet/gcp/verify-monitoring-remote.sh"
+gcloud compute ssh $VmName @sshOpts --command="mkdir -p '$(Split-Path $remotePath -Parent)'" | Out-Null
+gcloud compute scp $localScript "${VmName}:${remotePath}" @sshOpts
+$remoteCmd = "sed -i 's/\r$//' '$remotePath' && chmod +x '$remotePath' && bash '$remotePath'"
 
 Log "Checking Prometheus on $VmName (IAP)..."
 $out = & (Join-Path $gcpDir "ssh-vm.ps1") -Command $remoteCmd 2>&1

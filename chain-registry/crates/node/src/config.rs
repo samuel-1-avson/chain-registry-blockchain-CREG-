@@ -721,10 +721,7 @@ mod tests {
         let mut validator = base_config();
         validator.is_validator = true;
         let errors = validator.validate_mal001_public_validator();
-        assert!(
-            errors.iter().any(|e| e.contains("MAL-001")),
-            "{errors:?}"
-        );
+        assert!(errors.iter().any(|e| e.contains("MAL-001")), "{errors:?}");
 
         std::env::remove_var("CREG_PUBLIC_VALIDATOR");
         assert!(
