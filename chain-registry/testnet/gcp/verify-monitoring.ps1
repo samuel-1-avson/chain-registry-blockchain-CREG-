@@ -55,7 +55,7 @@ Pass "Alert rules loaded (incl. CregSandboxDevBypass)"
 if ($text -match 'ALERT_RECEIVERS_OK') {
     Pass "Alertmanager receivers wired (Slack and/or PagerDuty)"
 } elseif ($text -match 'ALERT_RECEIVERS_UNCONFIGURED') {
-    Write-Host "  WARN  Alertmanager has no external receivers — set GCP_ALERT_SLACK_WEBHOOK_URL in hosting.env and redeploy" -ForegroundColor Yellow
+    Write-Host "  WARN  Alertmanager has no external receivers - set GCP_ALERT_SLACK_WEBHOOK_URL in hosting.env and redeploy" -ForegroundColor Yellow
 } else {
     Fail "Could not determine Alertmanager receiver status"
 }
