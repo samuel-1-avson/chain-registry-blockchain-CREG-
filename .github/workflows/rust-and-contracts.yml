@@ -1,0 +1,108 @@
+name: Rust & Contracts CI
+
+# The Cargo workspace and Foundry project live in the `chain-registry/`
+# subdirectory, so every `run` step uses `working-directory: chain-registry`
+# (same pattern as consensus-evidence.yml). GitHub Actions only executes
+# workflows under the repository-root `.github/workflows/`, which is why this
+# lives here rather than in `chain-registry/.github/workflows/`.
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - ".github/workflows/rust-and-contracts.yml"
+      - "chain-registry/crates/**"
+      - "chain-registry/Cargo.toml"
+      - "chain-registry/Cargo.lock"
+      - "chain-registry/contracts/**"
+      - "chain-registry/foundry.toml"
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/rust-and-contracts.yml"
+      - "chain-registry/crates/**"
+      - "chain-registry/Cargo.toml"
+      - "chain-registry/Cargo.lock"
+      - "chain-registry/contracts/**"
+      - "chain-registry/foundry.toml"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+defaults:
+  run:
+    working-directory: chain-registry
+
+jobs:
+  # ── Rust workspace: fmt, clippy (deny warnings), tests ─────────────────────
+  rust:
+    name: Rust (fmt, clippy, test)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libssl-dev build-essential clang llvm libclang-dev \
+            cmake libopenblas-dev protobuf-compiler libprotobuf-dev
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            chain-registry/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('chain-registry/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Clippy (deny warnings)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Run tests
+        run: cargo test --workspace --locked
+        env:
+          # Unreachable on purpose -> tests use their offline fallback path.
+          CREG_NODE_URL: "http://127.0.0.1:19999"
+
+  # ── Solidity contracts (Foundry) ───────────────────────────────────────────
+  contracts:
+    name: Solidity (Foundry)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly
+
+      - name: Cache Foundry build artifacts
+        uses: actions/cache@v4
+        with:
+          path: chain-registry/contracts/out
+          key: foundry-${{ hashFiles('chain-registry/contracts/**/*.sol') }}
+
+      - name: Compile contracts
+        run: forge build
+
+      - name: Run Solidity tests
+        run: forge test -vvv
