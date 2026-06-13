@@ -50,10 +50,26 @@ flowchart LR
 | **Explorer** | https://explorer.testnet.cregnet.dev |
 | **Faucet** | https://faucet.testnet.cregnet.dev |
 | **Join hub** | https://testnet.cregnet.dev |
+| **Waitlist** | https://waitlist.cregnet.dev |
 
 **Binaries:** [v0.1.0-testnet release](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases/tag/v0.1.0-testnet) (`creg` + `creg-node` for Linux, Windows, macOS).
 
 Chain parameters: [`chain-registry/testnet/chain-spec.sepolia.json`](chain-registry/testnet/chain-spec.sepolia.json).
+
+---
+
+## On GitHub
+
+This repo is organized like other public blockchains — **protocol and consensus first**, not product web apps or hosting runbooks.
+
+| What to explore | Where |
+|-----------------|-------|
+| **Protocol source (start here)** | [`chain-registry/`](chain-registry/) |
+| **Public documentation** | [`docs/PUBLIC.md`](docs/PUBLIC.md) |
+| **ZK circuits** | [`circuits/`](circuits/) |
+| **Release binaries** | [Releases](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases) |
+
+The alpha waitlist app is a separate product surface: live at [waitlist.cregnet.dev](https://waitlist.cregnet.dev), source in [samuel-1-avson/Creg-waitlist](https://github.com/samuel-1-avson/Creg-waitlist). Explorer, hub, and GCP deploy scripts remain in this monorepo but are **not** linked from the default README.
 
 ---
 
@@ -119,6 +135,7 @@ This repository follows the same pattern as other open blockchains: **protocol c
 | Real sandbox engine | Done |
 | Public HTTPS testnet | Live — `testnet.cregnet.dev` |
 | Binary release `v0.1.0-testnet` | Done |
+| Public alpha waitlist | Live — [waitlist.cregnet.dev](https://waitlist.cregnet.dev) |
 | External security audit | Scheduled — scope in maintainer docs |
 
 This is a **public alpha testnet**, not mainnet. See [TESTNET_PHASE_SCOPE.md](docs/TESTNET_PHASE_SCOPE.md) for participant expectations.

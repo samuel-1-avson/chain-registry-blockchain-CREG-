@@ -9,30 +9,40 @@ Registration uses the callable Cloud Function **`registerWaitlist`**. Browsers c
 - Firebase CLI (`npx firebase-tools@latest`)
 - `firebase login`
 - **Blaze billing** on `gen-lang-client-0098858574`
-- Secret Manager API enabled
-- reCAPTCHA v3 site key + secret key
+- [reCAPTCHA Enterprise](https://cloud.google.com/recaptcha-enterprise) key (score / website integration)
+- `recaptchaenterprise.googleapis.com` API enabled
 
 ## One-time setup
 
 ```powershell
 cd Creg-waitlist
 
-# Secret (paste reCAPTCHA *secret* when prompted — name is RECAPTCHA_SECRET_KEY, not the value)
-"YOUR_RECAPTCHA_SECRET" | firebase functions:secrets:set RECAPTCHA_SECRET_KEY --project gen-lang-client-0098858574 --data-file -
-
-# Client site key for production builds
+# Client site key for production builds (Enterprise key from Cloud Console / gcloud)
 copy .env.example .env
 # Edit .env → VITE_RECAPTCHA_SITE_KEY=...
 ```
 
-## Deploy
+Grant the function runtime service account reCAPTCHA Enterprise access:
 
 ```powershell
-cd chain-registry
-.\testnet\gcp\deploy-waitlist-firebase.ps1
+gcloud projects add-iam-policy-binding gen-lang-client-0098858574 `
+  --member="serviceAccount:913012834874-compute@developer.gserviceaccount.com" `
+  --role="roles/recaptchaenterprise.agent"
 ```
 
-PowerShell must quote comma-separated targets:
+The function verifies tokens with the **Enterprise Assessments API** (site key is configured in `functions/src/index.ts`). No classic reCAPTCHA secret key is required.
+
+Ensure the Cloud Run service allows public callable invocations (Firebase deploy sets `invoker: "public"`; if registration returns 403 Unauthenticated, run):
+
+```powershell
+gcloud run services add-iam-policy-binding registerwaitlist `
+  --region=us-central1 `
+  --project=gen-lang-client-0098858574 `
+  --member="allUsers" `
+  --role="roles/run.invoker"
+```
+
+## Deploy
 
 ```powershell
 cd Creg-waitlist
@@ -51,8 +61,8 @@ Requires `Creg-waitlist/.env` with `VITE_RECAPTCHA_SITE_KEY` before build.
 ## Verify
 
 1. https://waitlist.cregnet.dev/ loads
-2. Connect wallet → select role → register
-3. Counter increments; duplicate wallet rejected
+2. Connect wallet → select role → register (success shows queue position + tier)
+3. Duplicate wallet → rejected
 4. Direct Firestore writes from browser console → permission denied
 
 ## Key IDs
@@ -61,5 +71,7 @@ Requires `Creg-waitlist/.env` with `VITE_RECAPTCHA_SITE_KEY` before build.
 |------|--------|
 | Firebase project | `gen-lang-client-0098858574` |
 | Named Firestore DB | `ai-studio-6b167dc8-a078-4526-a86b-de2a8722a753` |
-| Function | `registerWaitlist` (`us-central1`) |
+| Function | `registerWaitlist` (`us-central1`, public invoker) |
+| reCAPTCHA site key | `6LfLaB0tAAAAAD-YmiBUrSNzEsybw6C-jWSxDSqM` (`creg-waitlist`) |
 | Static host | `waitlist.cregnet.dev` |
+| Waitlist app repo | [github.com/samuel-1-avson/Creg-waitlist](https://github.com/samuel-1-avson/Creg-waitlist) |

@@ -4,6 +4,8 @@ Rust validator network, `creg` CLI, Solidity contracts, ZK circuits, and testnet
 
 This directory is the **public blockchain surface** of the repository — comparable to how Bitcoin Core or go-ethereum expose node and consensus code, not product web apps or hosting runbooks.
 
+**Browse on GitHub:** [github.com/.../tree/main/chain-registry](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/tree/main/chain-registry)
+
 ---
 
 ## What is here

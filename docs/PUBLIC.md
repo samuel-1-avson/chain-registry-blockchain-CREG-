@@ -3,6 +3,8 @@
 Curated entry point for **protocol, validators, publishers, and auditors**.  
 Hosting runbooks, Firebase deploy guides, budget models, and internal maintainer docs are kept in-repo for the core team but are **not** linked from the public README or waitlist.
 
+**GitHub:** browse protocol source at [`chain-registry/`](../chain-registry/) ([direct tree link](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/tree/main/chain-registry)).
+
 ---
 
 ## Start here
@@ -64,4 +66,4 @@ Release binaries: [v0.1.0-testnet](https://github.com/samuel-1-avson/chain-regis
 | [`chain-registry/rules/`](../chain-registry/rules/) | Supply-chain YARA rules |
 | [`chain-registry/tests/`](../chain-registry/tests/) | Integration tests |
 
-Web frontends (explorer, hub), waitlist apps, and cloud deploy scripts live elsewhere in the monorepo and are **not** part of this public documentation set.
+Web frontends (explorer, hub) and cloud deploy scripts live elsewhere in the monorepo and are **not** part of this public documentation set. The waitlist SPA is maintained in the separate [Creg-waitlist](https://github.com/samuel-1-avson/Creg-waitlist) repository.
