@@ -87,6 +87,13 @@ contract Staking {
     address    public governance;
     uint256    public slashPool;   // Accumulated slashed CREG (distributed to honest validators)
 
+    /// Governance-authorized external slashers (e.g. PackageInsurance), in
+    /// addition to Registry and Governance. Empty by default — no external
+    /// contract can slash unless governance explicitly authorizes it.
+    mapping(address => bool) public authorizedSlashers;
+
+    event SlasherUpdated(address indexed slasher, bool allowed);
+
     /// EIP-712 domain separator for validator-admission attestations, set once at deploy.
     bytes32 public immutable DOMAIN_SEPARATOR;
 
@@ -175,6 +182,19 @@ contract Staking {
         require(registry == address(0), "Already set");
         registry   = _registry;
         reputation = Reputation(_reputation);
+    }
+
+    /// @notice Authorize or revoke an external contract to call slash /
+    ///         slashSeverity, in addition to Registry and Governance.
+    /// @dev Governance-only. PackageInsurance.resolveClaim depends on this:
+    ///      without an authorization its slash() call reverts (the ACL only
+    ///      permitted registry/governance). Authorize the deployed
+    ///      PackageInsurance address before enabling the insurance feature.
+    function setSlasher(address slasher, bool allowed) external {
+        if (msg.sender != governance) revert NotAuthorized();
+        require(slasher != address(0), "Zero slasher");
+        authorizedSlashers[slasher] = allowed;
+        emit SlasherUpdated(slasher, allowed);
     }
 
     // ── Publisher staking ─────────────────────────────────────────────────────
@@ -485,7 +505,7 @@ contract Staking {
         external
         nonReentrant
     {
-        if (msg.sender != registry && msg.sender != governance)
+        if (msg.sender != registry && msg.sender != governance && !authorizedSlashers[msg.sender])
             revert NotAuthorized();
 
         // For active validators prefer their validator stake as the base so
@@ -510,7 +530,7 @@ contract Staking {
         external
         nonReentrant
     {
-        if (msg.sender != registry && msg.sender != governance)
+        if (msg.sender != registry && msg.sender != governance && !authorizedSlashers[msg.sender])
             revert NotAuthorized();
         _executeSlash(account, amount, reason);
     }

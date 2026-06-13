@@ -637,6 +637,15 @@ contract ChainRegistry {
             s := mload(add(sig, 64))
             v := byte(0, mload(add(sig, 96)))
         }
+        if (v < 27) v += 27;
+        // Reject high-s signatures (EIP-2 malleability), matching the admission
+        // path in Staking._recoverSigner. ecrecover accepts both s and (n - s),
+        // so without this a third party could mint a second valid signature for
+        // the same payload. Returns address(0) on a malleable signature, which
+        // callers already treat as a non-active / invalid signer.
+        if (uint256(s) > 0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0) {
+            return address(0);
+        }
         return ecrecover(digest, v, r, s);
     }
 }

@@ -48,6 +48,12 @@ if (-not $env:DEPLOYER_KEY) {
 if (-not $env:GOVERNANCE_THRESHOLD) {
     $env:GOVERNANCE_THRESHOLD = "1"
 }
+if ([int]$env:GOVERNANCE_THRESHOLD -le 1) {
+    Write-Warning ("GOVERNANCE_THRESHOLD=1: a single signer (the bridge/deployer key) can propose " +
+        "AND execute any governance action, including L1 anchoring, minting, and slashing. " +
+        "Acceptable for a coordinated single-operator testnet only. Before public exposure, " +
+        "redeploy with GOVERNANCE_THRESHOLD>=2 and independent GENESIS_SIGNERS.")
+}
 if ($env:GOVERNANCE_SIGNER_ADDRESS) {
     $derivedRaw = & $cast wallet address --private-key $env:DEPLOYER_KEY 2>&1 | Out-String
     $derived = if ($derivedRaw -match '(0x[a-fA-F0-9]{40})') { $matches[1] } else { $null }

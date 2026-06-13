@@ -121,6 +121,85 @@ contract SlashPriorityTest is Test {
     }
 }
 
+/// @notice Tests for the governance-authorized external slasher allowlist
+///         (PackageInsurance ACL fix). An external contract (e.g.
+///         PackageInsurance) may only slash once governance authorizes it.
+contract AuthorizedSlasherTest is Test {
+
+    Staking    staking;
+    Governance governance;
+    CregToken  cregToken;
+    Reputation reputation;
+
+    address constant GOV_SIGNER = address(0xA11CE);
+    address constant REGISTRY   = address(0xBEEF);
+
+    address pub;
+    address insurance; // stand-in for a deployed PackageInsurance contract
+    uint256 constant PUB_STAKE = 100e18;
+
+    function setUp() public {
+        address[] memory signers = new address[](1);
+        signers[0] = GOV_SIGNER;
+        governance = new Governance(signers, 1);
+        cregToken  = new CregToken(address(this), address(this), address(this), address(this));
+        staking    = new Staking(address(governance), address(cregToken));
+        reputation = new Reputation(address(governance));
+        staking.setContracts(REGISTRY, address(reputation));
+
+        pub = makeAddr("publisher");
+        insurance = makeAddr("insurance");
+
+        cregToken.transfer(pub, PUB_STAKE);
+        vm.prank(pub);
+        cregToken.approve(address(staking), PUB_STAKE);
+        vm.prank(pub);
+        staking.stakeAsPublisher(PUB_STAKE);
+    }
+
+    /// An un-authorized external caller cannot slash.
+    function test_unauthorizedCannotSlash() public {
+        vm.prank(insurance);
+        vm.expectRevert();
+        staking.slash(pub, 10e18, "insurance claim");
+    }
+
+    /// Only governance may manage the slasher allowlist.
+    function test_onlyGovernanceCanSetSlasher() public {
+        vm.prank(insurance);
+        vm.expectRevert();
+        staking.setSlasher(insurance, true);
+    }
+
+    /// Once authorized, the external slasher can slash publisher stake.
+    function test_authorizedSlasherCanSlash() public {
+        vm.prank(address(governance));
+        staking.setSlasher(insurance, true);
+        assertTrue(staking.authorizedSlashers(insurance), "slasher must be authorized");
+
+        uint256 stakeBefore = staking.publisherStakes(pub);
+        vm.prank(insurance);
+        staking.slash(pub, 10e18, "insurance claim");
+        assertEq(
+            staking.publisherStakes(pub),
+            stakeBefore - 10e18,
+            "authorized slasher must reduce stake"
+        );
+    }
+
+    /// Revoking authorization restores the original ACL.
+    function test_revokedSlasherCannotSlash() public {
+        vm.prank(address(governance));
+        staking.setSlasher(insurance, true);
+        vm.prank(address(governance));
+        staking.setSlasher(insurance, false);
+
+        vm.prank(insurance);
+        vm.expectRevert();
+        staking.slash(pub, 10e18, "insurance claim");
+    }
+}
+
 /// @notice Tests for ISSUE-031: Governance.removeSigner array cleanup.
 contract GovernanceSignerArrayTest is Test {
 
