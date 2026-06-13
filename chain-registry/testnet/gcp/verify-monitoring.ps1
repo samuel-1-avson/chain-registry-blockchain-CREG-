@@ -59,7 +59,7 @@ if ($text -notmatch 'METRICS_OK') { Fail "creg_chain_tip_height query failed" }
 Pass "Chain metrics present"
 
 if ($text -notmatch 'SANDBOX_METRICS_OK') {
-    Fail "creg_sandbox_dev_bypass not scraped yet — redeploy fleet with MAL-001 metrics build"
+    Fail "creg_sandbox_dev_bypass not scraped yet - redeploy fleet with MAL-001 metrics build"
 }
 Pass "MAL-001 sandbox metrics present"
 
