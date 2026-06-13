@@ -28,6 +28,16 @@ $env:VALIDATOR_2_ETH_PRIVATE_KEY = "0x..."   # never commit
 .\testnet\net-301-quorum-verify.ps1
 ```
 
+### GCP fleet (`creg-validator-vm`): validator-2 identity
+
+L1 can show **Active** while runtime still reports `active_validators: 1` if `/v1/validators/registrations` is empty on the fleet APIs.
+
+1. `.\testnet\register-validator-2-sepolia.ps1 -CheckOnly` (L1 Active + Ed25519 pubkey).
+2. Do not rely on `-RegisterIdentity` alone on Windows — `node-api.ps1` targets local `creg-3node-*` Docker, not GCP `creg-fleet-node*`. Sign locally (same logic as the script), `gcloud compute scp` the JSON body to the VM, then POST `/v1/validators/register` on ports **28180** and **28181** via `.\testnet\gcp\ssh-validator-vm.ps1`.
+3. Repeat the same POST on the **observer pool** (`creg-observer-pool-*`, port **28182**) so `api.testnet.cregnet.dev` chain stats match the validators.
+4. Poll until `active_validators` is **2** on validator VM and public API.
+5. `.\testnet\approve-validator-governance-sepolia.ps1 -Applicant <EVM>` only if `governance_approved` stays false (2026-06-12: not needed; L1 already Active).
+
 ---
 
 ## Sandbox (SANDBOX-301)
@@ -96,6 +106,37 @@ Install (uses `CREG_GITHUB_REPO` or git `origin`):
 export CREG_GITHUB_REPO=samuel-1-avson/chain-registry-blockchain-CREG-
 ./scripts/install-creg.sh --version v0.1.0-testnet
 ```
+
+---
+
+## Sepolia L1 JSON-RPC (public)
+
+| URL | Purpose |
+|-----|---------|
+| `https://explorer.<base>/rpc` | Sepolia `eth_*` for wallets, `cast`, staking txs |
+| `https://faucet.<base>/rpc` | Same proxy on faucet host (after edge Caddy `sepolia-public-rpc.caddy`) |
+| `https://api.<base>/rpc` | **CREG only** (`creg_chainId`, `creg_blockNumber`, …) — not Sepolia |
+
+Verify: `.\testnet\verify-sepolia-rpc-endpoints.ps1`
+
+`FAUCET_PUBLIC_RPC_URL` in the faucet container must point at **explorer** `/rpc`, never `api.* /rpc`.
+
+---
+
+## L1 anchoring & reorg safety (P0 hardening)
+
+**Trust model (honesty label):** L1 anchors are **checkpoint attestations** (`proof_mode: checkpoint-attestation`), not validity proofs — the Groth16 batch circuit only proves the batch is non-empty; state roots are computed off-chain by the bridge. Do not market them as ZK-proven rollup batches until the circuit constrains the real state transition.
+
+| Knob | Default | Meaning |
+|------|---------|---------|
+| `CREG_VALIDATOR_SET_FINALITY_LAG` | `2` (testnet) / `6` | L1 blocks to wait before applying staking events to the validator set. `0` logs a warning — shallow Sepolia reorgs can flap membership. |
+| `CREG_BRIDGE_SELF_APPROVE` | `true` | When `false`, the bridge only **submits** batch proposals; an independent governance signer must vote to execute. Required for a meaningful `GOVERNANCE_THRESHOLD>=2` setup. |
+
+**Anchor journal:** every settled batch is persisted to `$CREG_DATA_DIR/bridge_anchors.json` (capped at 500, newest first) with L1 tx hash, L1 block, roots, and tx count. Served by `GET /v1/bridge/anchors`; the explorer Bridge tab now shows real history.
+
+**Reorg journal:** L2 fork events are recorded automatically (PBFT same-height replacement, and peer-sync divergence recovery up to depth 64 with signature re-verification + longest-chain rule) and served by `GET /v1/reorgs`. A reorg deeper than 64 blocks halts auto-recovery and requires operator investigation — treat as an incident.
+
+**Governance threshold:** `deploy-sepolia.ps1` warns when `GOVERNANCE_THRESHOLD<=1` (single key can propose **and** execute anchoring/minting/slashing). Redeploy with `GOVERNANCE_THRESHOLD>=2` and independent `GENESIS_SIGNERS` before public exposure; the node also logs this warning at each batch submit.
 
 ---
 

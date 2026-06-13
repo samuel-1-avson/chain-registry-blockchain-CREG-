@@ -57,6 +57,17 @@ if [[ -n "${CREG_PUBLIC_FAUCET_HOST:-}" ]]; then
   cp "${CADDY_DIR}/faucet-edge.caddy.example" "${CADDY_DIR}/faucet-edge.caddy"
   echo "Activated caddy/faucet-edge.caddy for ${CREG_PUBLIC_FAUCET_HOST}"
 fi
+
+# Sepolia L1 JSON-RPC shown in faucet UI (eth_*). Never point at api.* /rpc (creg_* only).
+if [[ -z "${FAUCET_PUBLIC_RPC_URL:-}" && -n "${CREG_PUBLIC_EXPLORER_HOST:-}" ]]; then
+  export FAUCET_PUBLIC_RPC_URL="https://${CREG_PUBLIC_EXPLORER_HOST}/rpc"
+fi
+if [[ -z "${CREG_SEPOLIA_PUBLIC_RPC_UPSTREAM:-}" ]]; then
+  export CREG_SEPOLIA_PUBLIC_RPC_UPSTREAM="https://ethereum-sepolia-rpc.publicnode.com"
+fi
+if [[ -z "${CREG_SEPOLIA_PUBLIC_RPC_UPSTREAM_HOST:-}" ]]; then
+  export CREG_SEPOLIA_PUBLIC_RPC_UPSTREAM_HOST="ethereum-sepolia-rpc.publicnode.com"
+fi
 if [[ -n "${CREG_PUBLIC_JOIN_HOST:-}" ]]; then
   cp "${CADDY_DIR}/hub-edge.caddy.example" "${CADDY_DIR}/hub.caddy"
   echo "Activated caddy/hub.caddy for ${CREG_PUBLIC_JOIN_HOST}"

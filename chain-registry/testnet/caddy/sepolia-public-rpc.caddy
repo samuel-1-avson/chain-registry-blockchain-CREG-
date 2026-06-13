@@ -1,0 +1,12 @@
+# Shared Sepolia L1 JSON-RPC proxy (eth_*). Imported by faucet-edge and similar vhosts.
+# GET/HEAD: JSON descriptor (browser-friendly). POST: proxy to Sepolia upstream.
+handle_path /rpc* {
+	@jsonrpc method POST
+	handle @jsonrpc {
+		reverse_proxy {$CREG_SEPOLIA_PUBLIC_RPC_UPSTREAM} {
+			header_up Host {$CREG_SEPOLIA_PUBLIC_RPC_UPSTREAM_HOST}
+		}
+	}
+	header Content-Type application/json
+	respond `{"service":"CREG Sepolia L1 JSON-RPC","chainId":"0xaa36a7","usage":"POST JSON-RPC 2.0 eth_* methods to this URL","example":{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}}` 200
+}

@@ -87,7 +87,8 @@ services:
       FAUCET_PORT: "8082"
       # Self-hosted Sepolia on creg-sepolia-geth-vm (VPC internal).
       FAUCET_RPC_URL: ${SEPOLIA_RPC_URL:-${CREG_ETH_RPC:-http://10.128.0.3:8545}}
-      FAUCET_PUBLIC_RPC_URL: ${FAUCET_PUBLIC_RPC_URL:-https://${CREG_PUBLIC_API_HOST}/rpc}
+      # Sepolia eth_* JSON-RPC — NOT the CREG node /rpc on api.* (creg_* methods only).
+      FAUCET_PUBLIC_RPC_URL: ${FAUCET_PUBLIC_RPC_URL:-https://${CREG_PUBLIC_EXPLORER_HOST}/rpc}
       FAUCET_PRIVATE_KEY: ${FAUCET_PRIVATE_KEY:-}
       FAUCET_ADDRESS: ${FAUCET_ADDRESS:-}
       FAUCET_TOKEN_CONTRACT: ${CREG_TOKEN_ADDR:-0x97c21d46B3eac604e92E907D54aA92eEc0Af550b}

@@ -81,6 +81,9 @@ server {
     }
 
     location = /rpc {
+        if ($request_method != POST) {
+            return 200 '{"service":"CREG Sepolia L1 JSON-RPC","chainId":"0xaa36a7","usage":"POST JSON-RPC 2.0 eth_* methods to this URL"}';
+        }
         proxy_pass https://ethereum-sepolia-rpc.publicnode.com/;
         proxy_ssl_server_name on;
         proxy_set_header Host ethereum-sepolia-rpc.publicnode.com;

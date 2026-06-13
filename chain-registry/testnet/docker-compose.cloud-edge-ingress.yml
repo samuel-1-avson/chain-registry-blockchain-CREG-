@@ -31,10 +31,13 @@ services:
       CREG_3NODE_SPEC_HOST_PORT: ${CREG_3NODE_SPEC_HOST_PORT:-18888}
       CREG_3NODE_IPFS_HOST_PORT: ${CREG_3NODE_IPFS_HOST_PORT:-15001}
       CREG_WAITLIST_HOST_PORT: ${CREG_WAITLIST_HOST_PORT:-8088}
+      CREG_SEPOLIA_PUBLIC_RPC_UPSTREAM: ${CREG_SEPOLIA_PUBLIC_RPC_UPSTREAM:-https://ethereum-sepolia-rpc.publicnode.com}
+      CREG_SEPOLIA_PUBLIC_RPC_UPSTREAM_HOST: ${CREG_SEPOLIA_PUBLIC_RPC_UPSTREAM_HOST:-ethereum-sepolia-rpc.publicnode.com}
     volumes:
       - ${CREG_CLOUD_CADDYFILE:-./caddy/Caddyfile.hybrid}:/etc/caddy/Caddyfile:ro
       - ./caddy/waitlist.caddy:/etc/caddy/waitlist.caddy:ro
       - ./caddy/faucet-edge.caddy:/etc/caddy/faucet-edge.caddy:ro
+      - ./caddy/sepolia-public-rpc.caddy:/etc/caddy/sepolia-public-rpc.caddy:ro
       - ./caddy/hub.caddy:/etc/caddy/hub.caddy:ro
       - cloud-caddy-data:/data
       - cloud-caddy-config:/config
