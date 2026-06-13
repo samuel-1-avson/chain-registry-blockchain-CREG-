@@ -17,16 +17,17 @@
 //!
 //! # Example
 //!
-//! ```rust,no_run
-//! use cross_chain::{MultiChainClient, ChainConfig};
+//! ```rust
+//! use cross_chain::MultiChainClient;
 //!
+//! // Build a client across multiple chains. These are placeholder/testnet
+//! // configs; override addresses via CREG_CHAIN_<NAME>_* env vars.
 //! let client = MultiChainClient::new(vec![
-//!     ChainConfig::arbitrum(),
-//!     ChainConfig::optimism(),
+//!     MultiChainClient::arbitrum(),
+//!     MultiChainClient::optimism(),
 //! ]);
 //!
-//! // Sync package verification across chains
-//! client.sync_verification("npm:package@1.0.0").await?;
+//! assert!(client.list_chains().len() >= 2);
 //! ```
 
 use serde::{Deserialize, Serialize};

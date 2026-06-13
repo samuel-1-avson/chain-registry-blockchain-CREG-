@@ -13,11 +13,12 @@
 //! # Example
 //!
 //! ```rust
-//! use ml_validator::{MlValidator, PackageFeatures};
+//! use ml_validator::{MlValidator, FeatureExtractor};
 //!
+//! let package_code = "console.log('hello world')";
 //! let validator = MlValidator::new();
-//! let features = PackageFeatures::extract("npm", package_code).unwrap();
-//! let score = validator.predict(&features);
+//! let features = FeatureExtractor::extract("npm", package_code).unwrap();
+//! let _score = validator.predict(&features);
 //! ```
 
 use std::collections::HashMap;

@@ -520,7 +520,8 @@ mod tests {
             ..Default::default()
         };
 
-        assert_eq!(stats.approval_rate(), 0.777); // 70/90
+        // 70/90 = 0.7777… — compare with tolerance, not an exact truncated literal.
+        assert!((stats.approval_rate() - 70.0_f64 / 90.0).abs() < 1e-12);
         assert_eq!(stats.average_payout(), 10.0); // 650/65
     }
 }

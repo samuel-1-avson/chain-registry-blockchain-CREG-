@@ -7,19 +7,18 @@
 //! # Example
 //!
 //! ```rust
-//! use threshold_encryption::{ThresholdEncryption, KeyShare};
+//! use threshold_encryption::ThresholdEncryption;
 //!
-//! // Create encryption for 3-of-5 threshold
+//! // Create a 3-of-5 threshold scheme.
 //! let te = ThresholdEncryption::new(3, 5).unwrap();
 //!
-//! // Generate shares
+//! // Split a secret into 5 shares; any 3 can reconstruct it.
 //! let shares = te.generate_shares(b"secret encryption key").unwrap();
+//! assert_eq!(shares.len(), 5);
 //!
-//! // Encrypt package
-//! let encrypted = te.encrypt_package(b"package content", &shares[0]).unwrap();
-//!
-//! // Decrypt with 3 shares
-//! let decrypted = te.decrypt_with_shares(&encrypted, &shares[..3]).unwrap();
+//! // Full package encryption additionally binds each share to a validator's
+//! // secp256k1 public key via `encrypt_package` / `decrypt_with_shares`;
+//! // see the crate tests for the end-to-end validator-keypair flow.
 //! ```
 
 use aes_gcm::{
