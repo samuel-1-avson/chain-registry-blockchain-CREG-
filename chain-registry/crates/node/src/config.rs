@@ -266,9 +266,7 @@ impl NodeConfig {
                 "0x0000000000000000000000000000000000000000",
             ),
             block_interval_secs: env("CREG_BLOCK_INTERVAL", "5").parse().unwrap_or(5),
-            vote_timeout_secs: env("CREG_VOTE_TIMEOUT_SECS", "10")
-                .parse()
-                .unwrap_or(10),
+            vote_timeout_secs: env("CREG_VOTE_TIMEOUT_SECS", "10").parse().unwrap_or(10),
             ipfs_url: env("CREG_IPFS_URL", "http://127.0.0.1:5001"),
             pg_url: env("CREG_PG_URL", ""),
             validator_set: serde_json::from_str(&env("CREG_VALIDATOR_SET", "{\"validators\":[]}"))
@@ -564,7 +562,8 @@ impl NodeConfig {
         if self.block_interval_secs == 5 && spec.consensus_params.block_time_seconds != 5 {
             self.block_interval_secs = spec.consensus_params.block_time_seconds;
         }
-        if std::env::var("CREG_VOTE_TIMEOUT_SECS").is_err() && spec.consensus_params.vote_timeout_ms > 0
+        if std::env::var("CREG_VOTE_TIMEOUT_SECS").is_err()
+            && spec.consensus_params.vote_timeout_ms > 0
         {
             self.vote_timeout_secs = spec.consensus_params.vote_timeout_ms.div_ceil(1000).max(1);
         }

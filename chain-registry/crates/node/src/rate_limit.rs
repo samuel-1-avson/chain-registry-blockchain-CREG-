@@ -281,8 +281,14 @@ mod tests {
     #[test]
     fn vote_path_detection_covers_grouped_route() {
         use axum::http::Method;
-        assert!(is_consensus_vote("/v1/validator/consensus/vote", &Method::POST));
+        assert!(is_consensus_vote(
+            "/v1/validator/consensus/vote",
+            &Method::POST
+        ));
         assert!(is_consensus_vote("/v1/consensus/vote", &Method::POST));
-        assert!(!is_consensus_vote("/v1/validator/consensus/vote", &Method::GET));
+        assert!(!is_consensus_vote(
+            "/v1/validator/consensus/vote",
+            &Method::GET
+        ));
     }
 }

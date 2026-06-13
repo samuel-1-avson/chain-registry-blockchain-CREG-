@@ -118,7 +118,10 @@ pub fn parse_key_bundle(bundle: &str) -> Result<([u8; 32], [u8; 12])> {
 
         let parts: Vec<&str> = rest.split(':').collect();
         if parts.len() != 3 {
-            bail!("malformed ecies bundle: expected 3 fields, got {}", parts.len());
+            bail!(
+                "malformed ecies bundle: expected 3 fields, got {}",
+                parts.len()
+            );
         }
         let eph_pub: [u8; 32] = hex::decode(parts[0])?
             .try_into()
@@ -142,10 +145,7 @@ pub fn parse_key_bundle(bundle: &str) -> Result<([u8; 32], [u8; 12])> {
         let wrap_cipher = Aes256Gcm::new_from_slice(&wrap_key_bytes)
             .map_err(|e| anyhow::anyhow!("ecies wrap key init: {}", e))?;
         let raw = wrap_cipher
-            .decrypt(
-                Nonce::from_slice(&wrap_nonce_bytes),
-                wrapped.as_slice(),
-            )
+            .decrypt(Nonce::from_slice(&wrap_nonce_bytes), wrapped.as_slice())
             .map_err(|e| anyhow::anyhow!("ecies bundle unwrap failed: {}", e))?;
         let raw_bundle = std::str::from_utf8(&raw).context("ecies raw payload not UTF-8")?;
         let (k_hex, n_hex) = raw_bundle
@@ -197,8 +197,7 @@ mod tests {
         );
 
         let plaintext = b"ecies shielded round trip";
-        let (wire, bundle) =
-            encrypt_shielded_package(plaintext, Some(public.as_bytes())).unwrap();
+        let (wire, bundle) = encrypt_shielded_package(plaintext, Some(public.as_bytes())).unwrap();
         assert!(bundle.starts_with("ecies:"));
         let got = decrypt_shielded_package(&wire, &bundle).unwrap();
         assert_eq!(got, plaintext);

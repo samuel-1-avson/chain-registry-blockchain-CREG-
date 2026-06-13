@@ -149,8 +149,7 @@ pub struct FaucetDripOutcome {
 }
 
 fn append_fleet_consensus_checks(checks: &mut Vec<DoctorCheck>) {
-    let yara_dir =
-        std::env::var("CREG_YARA_RULES_DIR").unwrap_or_else(|_| "rules".to_string());
+    let yara_dir = std::env::var("CREG_YARA_RULES_DIR").unwrap_or_else(|_| "rules".to_string());
     let yara_ok = std::path::Path::new(&yara_dir).is_dir()
         && std::fs::read_dir(&yara_dir)
             .map(|mut entries| entries.next().is_some())

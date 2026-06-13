@@ -68,8 +68,7 @@ pub async fn run(cmd: ChainSpecCommands) -> Result<()> {
 }
 
 fn load_spec(path: &str) -> Result<common::ChainSpec> {
-    let json = std::fs::read_to_string(path)
-        .with_context(|| format!("read spec file {}", path))?;
+    let json = std::fs::read_to_string(path).with_context(|| format!("read spec file {}", path))?;
     serde_json::from_str(&json).map_err(|e| anyhow::anyhow!("Invalid spec JSON in {}: {}", path, e))
 }
 
@@ -249,14 +248,8 @@ mod tests {
         let mut json = minimal_unsigned_spec_json();
         json = json.replace("\"genesis_hash\": \"\"", "\"genesis_hash\": \"0xdeadbeef\"");
         file.write_all(json.as_bytes()).unwrap();
-        let err = validate_spec(
-            file.path().to_str().unwrap(),
-            None,
-            None,
-            false,
-            true,
-        )
-        .unwrap_err();
+        let err =
+            validate_spec(file.path().to_str().unwrap(), None, None, false, true).unwrap_err();
         assert!(err.to_string().contains("genesis_hash mismatch"));
     }
 

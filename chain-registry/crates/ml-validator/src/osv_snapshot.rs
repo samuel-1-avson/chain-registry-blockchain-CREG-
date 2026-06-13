@@ -115,7 +115,9 @@ pub fn reset_snapshot_cache_for_tests() {
 }
 
 fn file_mtime(path: &Path) -> Option<SystemTime> {
-    std::fs::metadata(path).ok().and_then(|meta| meta.modified().ok())
+    std::fs::metadata(path)
+        .ok()
+        .and_then(|meta| meta.modified().ok())
 }
 
 fn load_snapshot_from_disk(path: &Path, expected_epoch: &str) -> Option<Arc<OsvSnapshot>> {

@@ -56,7 +56,7 @@ impl std::fmt::Display for AdmissionError {
             Self::InvalidPackageId(message)
             | Self::InvalidPublisherSignature(message)
             | Self::AlreadyVerified(message)
-            |             Self::Revoked(message)
+            | Self::Revoked(message)
             | Self::AlreadyPending(message)
             | Self::Storage(message)
             | Self::ShieldedPublishDisabled(message) => write!(f, "{}", message),
@@ -694,8 +694,7 @@ rule TestMaliciousPayload {{
         bundle: &str,
         cid: &str,
     ) -> PublishRequest {
-        let mut request =
-            signed_request(plaintext, common::sha256_hex(plaintext), cid);
+        let mut request = signed_request(plaintext, common::sha256_hex(plaintext), cid);
         request.shielded = true;
         request.key_bundle = Some(bundle.to_string());
         assert_ne!(wire, plaintext, "IPFS mock must serve encrypted wire bytes");
@@ -710,12 +709,7 @@ rule TestMaliciousPayload {{
         let (wire, bundle) = common::encrypt_shielded_package(&plaintext, None)?;
         let ipfs_url = spawn_mock_ipfs(wire.clone(), StatusCode::OK).await;
         let (state, _tempdir) = make_test_state(1, ipfs_url).await?;
-        let request = shielded_signed_request(
-            &plaintext,
-            &wire,
-            &bundle,
-            "bafyshieldedenabled",
-        );
+        let request = shielded_signed_request(&plaintext, &wire, &bundle, "bafyshieldedenabled");
 
         let receipt = admit_for_test(&state, request).await?;
         assert_eq!(receipt.canonical, "npm:test@1.0.0");
@@ -743,10 +737,7 @@ rule TestMaliciousPayload {{
         .await
         .unwrap_err();
 
-        assert!(matches!(
-            error,
-            AdmissionError::ShieldedPublishDisabled(_)
-        ));
+        assert!(matches!(error, AdmissionError::ShieldedPublishDisabled(_)));
         assert!(!state.read().await.pending_pool.contains("npm:test@1.0.0"));
         Ok(())
     }

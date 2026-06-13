@@ -71,19 +71,25 @@ impl FaucetConfig {
             .await?;
         let faucet_address = std::env::var("FAUCET_ADDRESS").expect("FAUCET_ADDRESS must be set");
 
-        Ok((Self {
-            drip_amount: env_u128("FAUCET_DRIP_AMOUNT", 1000_000_000_000_000_000_000), // 1000 tCREG
-            native_drip_amount: env_u128("FAUCET_NATIVE_DRIP_AMOUNT", 100_000_000_000_000_000), // 0.1 ETH
-            cooldown_secs: env_u64("FAUCET_COOLDOWN_SECS", 60), // 1 minute
-            ip_cooldown_secs: env_u64("FAUCET_IP_COOLDOWN_SECS", 60),
-            max_balance: env_u128("FAUCET_MAX_BALANCE", 10000_000_000_000_000_000_000), // 10k tCREG
-            native_max_balance: env_u128("FAUCET_NATIVE_MAX_BALANCE", 1_000_000_000_000_000_000), // 1 ETH
-            rpc_url: env_string("FAUCET_RPC_URL", "http://localhost:8545"),
-            faucet_key,
-            token_contract: std::env::var("FAUCET_TOKEN_CONTRACT")
-                .expect("FAUCET_TOKEN_CONTRACT must be set"),
-            faucet_address,
-        }, secrets))
+        Ok((
+            Self {
+                drip_amount: env_u128("FAUCET_DRIP_AMOUNT", 1000_000_000_000_000_000_000), // 1000 tCREG
+                native_drip_amount: env_u128("FAUCET_NATIVE_DRIP_AMOUNT", 100_000_000_000_000_000), // 0.1 ETH
+                cooldown_secs: env_u64("FAUCET_COOLDOWN_SECS", 60), // 1 minute
+                ip_cooldown_secs: env_u64("FAUCET_IP_COOLDOWN_SECS", 60),
+                max_balance: env_u128("FAUCET_MAX_BALANCE", 10000_000_000_000_000_000_000), // 10k tCREG
+                native_max_balance: env_u128(
+                    "FAUCET_NATIVE_MAX_BALANCE",
+                    1_000_000_000_000_000_000,
+                ), // 1 ETH
+                rpc_url: env_string("FAUCET_RPC_URL", "http://localhost:8545"),
+                faucet_key,
+                token_contract: std::env::var("FAUCET_TOKEN_CONTRACT")
+                    .expect("FAUCET_TOKEN_CONTRACT must be set"),
+                faucet_address,
+            },
+            secrets,
+        ))
     }
 }
 
@@ -1286,9 +1292,8 @@ async fn health_check(State(state): State<Arc<AppState>>) -> impl IntoResponse {
                 );
             }
             if !native_ready {
-                body["warning_native"] = serde_json::json!(
-                    "Faucet wallet has insufficient Sepolia ETH for gas drips"
-                );
+                body["warning_native"] =
+                    serde_json::json!("Faucet wallet has insufficient Sepolia ETH for gas drips");
             }
             (status_code, JsonResponse(body))
         }

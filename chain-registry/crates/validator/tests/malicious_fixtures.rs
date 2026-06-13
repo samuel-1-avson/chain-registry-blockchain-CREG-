@@ -36,11 +36,7 @@ fn tar_package(package_dir: &Path) -> Vec<u8> {
 
 fn load_fixtures() -> Vec<(FixtureMeta, Vec<u8>)> {
     let root = fixtures_root();
-    assert!(
-        root.is_dir(),
-        "missing fixture root at {}",
-        root.display()
-    );
+    assert!(root.is_dir(), "missing fixture root at {}", root.display());
 
     let mut out = Vec::new();
     for entry in fs::read_dir(&root).expect("read fixtures dir") {
