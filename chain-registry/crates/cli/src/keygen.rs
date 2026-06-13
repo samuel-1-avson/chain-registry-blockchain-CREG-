@@ -98,10 +98,7 @@ pub fn decrypt_key_file(path: &Path, passphrase: &str) -> Result<String> {
 
 /// True when `hex` looks like a 32-byte Ed25519 secret from `creg keygen` (64 hex chars).
 pub fn looks_like_creg_ed25519_secret_hex(hex_str: &str) -> bool {
-    let s = hex_str
-        .trim()
-        .strip_prefix("0x")
-        .unwrap_or(hex_str.trim());
+    let s = hex_str.trim().strip_prefix("0x").unwrap_or(hex_str.trim());
     s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit())
 }
 
@@ -111,7 +108,9 @@ pub fn print_ed25519_derived_eth_warning() {
     eprintln!();
     eprintln!(
         "  {}",
-        "WARNING — derived ETH address is NOT a standard wallet (SEC-105)".yellow().bold()
+        "WARNING — derived ETH address is NOT a standard wallet (SEC-105)"
+            .yellow()
+            .bold()
     );
     eprintln!(
         "  CREG interprets your Ed25519 secret as raw secp256k1 bytes to print a 0x address."
@@ -429,12 +428,11 @@ mod tests {
 
     #[test]
     fn detects_ed25519_secret_shape() {
-        assert!(looks_like_creg_ed25519_secret_hex(
-            "a".repeat(64).as_str()
-        ));
-        assert!(looks_like_creg_ed25519_secret_hex(
-            &format!("0x{}", "b".repeat(64))
-        ));
+        assert!(looks_like_creg_ed25519_secret_hex("a".repeat(64).as_str()));
+        assert!(looks_like_creg_ed25519_secret_hex(&format!(
+            "0x{}",
+            "b".repeat(64)
+        )));
         assert!(!looks_like_creg_ed25519_secret_hex(
             "0x1234567890abcdef1234567890abcdef12345678"
         ));

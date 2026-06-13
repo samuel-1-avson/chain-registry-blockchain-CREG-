@@ -58,7 +58,11 @@ pub fn print_verdict(v: &TrustVerdict) {
 fn print_risk_summary(risk: Option<&common::DeterministicRiskSummary>) {
     let Some(r) = risk else { return };
 
-    let band = if r.band.is_empty() { "unrated" } else { &r.band };
+    let band = if r.band.is_empty() {
+        "unrated"
+    } else {
+        &r.band
+    };
     let colored_band = match band.to_ascii_lowercase().as_str() {
         "critical" | "high" => band.red().bold().to_string(),
         "medium" | "elevated" => band.yellow().bold().to_string(),

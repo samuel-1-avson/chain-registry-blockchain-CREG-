@@ -17,6 +17,7 @@ on:
       - "chain-registry/crates/node/src/validator_pipeline.rs"
       - "chain-registry/crates/validator/**"
       - "chain-registry/testnet/malicious-fixtures/**"
+      - "chain-registry/Cargo.lock"
   pull_request:
     branches: [main]
     paths:
@@ -33,6 +34,7 @@ on:
       - "chain-registry/crates/node/src/validator_pipeline.rs"
       - "chain-registry/crates/validator/**"
       - "chain-registry/testnet/malicious-fixtures/**"
+      - "chain-registry/Cargo.lock"
 
 permissions:
   contents: read

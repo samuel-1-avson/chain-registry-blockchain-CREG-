@@ -1,6 +1,7 @@
 // crates/cli/src/main.rs
 // `creg` — the main CLI. Wraps the shim logic with a friendly interface.
 #![deny(clippy::unwrap_used)]
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 mod advanced;
 mod audit;

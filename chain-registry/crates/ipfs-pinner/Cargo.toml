@@ -27,3 +27,6 @@ common = { path = "../common" }
 [dev-dependencies]
 tokio-test = "0.4"
 mockall = "0.12"
+
+[lints]
+workspace = true

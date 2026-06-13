@@ -162,9 +162,7 @@ fn parse_backend(raw: Option<&str>) -> Result<SecretsBackend> {
     match raw.unwrap_or("env").trim().to_ascii_lowercase().as_str() {
         "" | "env" | "environment" => Ok(SecretsBackend::Env),
         "vault" | "hashicorp" | "hashicorp-vault" => Ok(SecretsBackend::Vault),
-        other => bail!(
-            "unsupported CREG_SECRETS_BACKEND={other:?} (use 'env' or 'vault')"
-        ),
+        other => bail!("unsupported CREG_SECRETS_BACKEND={other:?} (use 'env' or 'vault')"),
     }
 }
 
@@ -192,8 +190,7 @@ pub fn validate_production_secrets_policy(is_testnet: bool) -> Vec<String> {
 
 pub(crate) fn normalize_secp256k1_hex(key: &str, role: HotKeyRole) -> Result<String> {
     let raw = key.trim().trim_start_matches("0x");
-    let bytes = hex::decode(raw)
-        .with_context(|| format!("{} is not valid hex", role.env_var()))?;
+    let bytes = hex::decode(raw).with_context(|| format!("{} is not valid hex", role.env_var()))?;
     if bytes.len() != 32 {
         bail!(
             "{} must be 32 bytes (64 hex chars), got {} bytes",

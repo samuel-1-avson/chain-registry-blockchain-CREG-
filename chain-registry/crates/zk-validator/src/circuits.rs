@@ -20,19 +20,12 @@ fn split_hash32(hash: &[u8]) -> ([u8; 16], [u8; 16]) {
     (lo, hi)
 }
 
-fn bind_hash32_limbs(
-    cs: ConstraintSystemRef<Fr>,
-    hash: &[u8],
-) -> Result<(), SynthesisError> {
+fn bind_hash32_limbs(cs: ConstraintSystemRef<Fr>, hash: &[u8]) -> Result<(), SynthesisError> {
     let (lo_bytes, hi_bytes) = split_hash32(hash);
-    let lo_input =
-        FpVar::new_input(cs.clone(), || Ok(Fr::from_le_bytes_mod_order(&lo_bytes)))?;
-    let hi_input =
-        FpVar::new_input(cs.clone(), || Ok(Fr::from_le_bytes_mod_order(&hi_bytes)))?;
-    let lo_witness =
-        FpVar::new_witness(cs.clone(), || Ok(Fr::from_le_bytes_mod_order(&lo_bytes)))?;
-    let hi_witness =
-        FpVar::new_witness(cs.clone(), || Ok(Fr::from_le_bytes_mod_order(&hi_bytes)))?;
+    let lo_input = FpVar::new_input(cs.clone(), || Ok(Fr::from_le_bytes_mod_order(&lo_bytes)))?;
+    let hi_input = FpVar::new_input(cs.clone(), || Ok(Fr::from_le_bytes_mod_order(&hi_bytes)))?;
+    let lo_witness = FpVar::new_witness(cs.clone(), || Ok(Fr::from_le_bytes_mod_order(&lo_bytes)))?;
+    let hi_witness = FpVar::new_witness(cs.clone(), || Ok(Fr::from_le_bytes_mod_order(&hi_bytes)))?;
     lo_input.enforce_equal(&lo_witness)?;
     hi_input.enforce_equal(&hi_witness)?;
     Ok(())
@@ -127,10 +120,13 @@ impl ConstraintSynthesizer<Fr> for PackageValidationCircuit {
         let no_vuln_deps_var = Boolean::new_witness(cs.clone(), || Ok(self.no_vulnerable_deps))?;
         let complexity_var = UInt8::new_witness(cs.clone(), || Ok(self.complexity_score))?;
 
-        let static_score_witness_fp = static_score_var.to_bits_le()?.iter().enumerate().fold(
-            FpVar::zero(),
-            |acc, (i, b)| acc + FpVar::from(b.to_owned()) * FpVar::constant(Fr::from(1u64 << i)),
-        );
+        let static_score_witness_fp = static_score_var
+            .to_bits_le()?
+            .iter()
+            .enumerate()
+            .fold(FpVar::zero(), |acc, (i, b)| {
+                acc + FpVar::from(b.to_owned()) * FpVar::constant(Fr::from(1u64 << i))
+            });
         static_score_input.enforce_equal(&static_score_witness_fp)?;
 
         let sandbox_witness_fp = FpVar::from(sandbox_safe_var.to_bits_le()?[0].clone());
@@ -581,11 +577,7 @@ mod tests {
             complexity_score: 70,
         };
         circuit.generate_constraints(cs.clone()).unwrap();
-        assert_eq!(
-            cs.num_instance_variables(),
-            8,
-            "constant + 7 public inputs"
-        );
+        assert_eq!(cs.num_instance_variables(), 8, "constant + 7 public inputs");
     }
 
     #[test]

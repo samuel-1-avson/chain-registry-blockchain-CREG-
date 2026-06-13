@@ -17,18 +17,23 @@ impl VaultSecretsBackend {
             .context("VAULT_ADDR or CREG_VAULT_ADDR must be set when CREG_SECRETS_BACKEND=vault")?;
         let token = std::env::var("VAULT_TOKEN")
             .or_else(|_| std::env::var("CREG_VAULT_TOKEN"))
-            .context("VAULT_TOKEN or CREG_VAULT_TOKEN must be set when CREG_SECRETS_BACKEND=vault")?;
+            .context(
+                "VAULT_TOKEN or CREG_VAULT_TOKEN must be set when CREG_SECRETS_BACKEND=vault",
+            )?;
         let client = Client::builder()
             .timeout(Duration::from_secs(10))
             .build()
             .context("failed to build Vault HTTP client")?;
-        Ok(Self { addr, token, client })
+        Ok(Self {
+            addr,
+            token,
+            client,
+        })
     }
 
     pub async fn secp256k1_signing_key_hex(&self, role: HotKeyRole) -> Result<String> {
-        let path = std::env::var(role.vault_path_env()).unwrap_or_else(|_| {
-            role.default_vault_path().to_string()
-        });
+        let path = std::env::var(role.vault_path_env())
+            .unwrap_or_else(|_| role.default_vault_path().to_string());
         let data = self.read_kv2_secret(&path).await?;
         let raw = extract_vault_field(&data, role).with_context(|| {
             format!(
@@ -41,11 +46,7 @@ impl VaultSecretsBackend {
 
     async fn read_kv2_secret(&self, path: &str) -> Result<serde_json::Value> {
         let path = path.trim().trim_start_matches('/');
-        let url = format!(
-            "{}/v1/{}",
-            self.addr.trim_end_matches('/'),
-            path
-        );
+        let url = format!("{}/v1/{}", self.addr.trim_end_matches('/'), path);
         let resp = self
             .client
             .get(&url)

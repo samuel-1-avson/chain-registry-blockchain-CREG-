@@ -260,23 +260,17 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg_attr(
-        windows,
-        ignore = "wasmtime entrypoint execution traps on Windows for the minimal \
-                  hand-crafted module (same platform quirk that ignores the loop \
-                  test); runs on Linux CI. Run locally with --ignored."
-    )]
     async fn test_wasm_sandbox_success() {
-        let wasm_bytes = &[
-            0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // Magic & Version
-            0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f, // Type: () -> i32
-            0x03, 0x02, 0x01, 0x00, // Function index 0 uses type index 0
-            0x07, 0x08, 0x01, 0x04, 0x6d, 0x61, 0x69, 0x6e, 0x00,
-            0x00, // Export "main" as function index 0
-            0x0a, 0x07, 0x01, 0x05, 0x00, 0x41, 0x00, 0x0b, // Code: main() { return 0; }
-        ];
+        // Hand-crafted bytecode omitted memory/import sections and traps on wasmtime 17+.
+        let wasm_bytes = wat::parse_str(
+            r#"(module
+                (func (export "main") (result i32)
+                  i32.const 0)
+            )"#,
+        )
+        .expect("valid WAT");
 
-        let temp_tarball = create_test_tarball("payload.wasm", wasm_bytes);
+        let temp_tarball = create_test_tarball("payload.wasm", &wasm_bytes);
         let pkg_id = PackageId {
             name: "test-package-wasm".into(),
             version: "1.0.0".into(),

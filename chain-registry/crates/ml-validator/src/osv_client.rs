@@ -182,11 +182,7 @@ pub fn query(info: &PackageInfo) -> OsvResult {
                                 })
                                 .collect();
 
-                            debug!(
-                                "OSV returned {} vulnerabilities for {}",
-                                vulns.len(),
-                                key
-                            );
+                            debug!("OSV returned {} vulnerabilities for {}", vulns.len(), key);
 
                             OsvResult {
                                 queried: true,

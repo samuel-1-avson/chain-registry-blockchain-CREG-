@@ -19,3 +19,6 @@ sqlx = { version = "0.7", features = ["runtime-tokio", "postgres", "chrono", "js
 
 # Scheduling
 tokio-cron-scheduler = "0.9"
+
+[lints]
+workspace = true

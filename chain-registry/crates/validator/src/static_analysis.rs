@@ -788,11 +788,7 @@ fn compute_deterministic_score(groups: &[EvidenceGroup]) -> f64 {
 
     if ml_validator::osv_block_critical_enabled()
         && groups.iter().any(|group| {
-            group.id == "osv-pinned"
-                && group
-                    .findings
-                    .iter()
-                    .any(|finding| finding.id == "OSV002")
+            group.id == "osv-pinned" && group.findings.iter().any(|finding| finding.id == "OSV002")
         })
     {
         weighted += score_for_group(groups, "osv-pinned") * 0.15;
