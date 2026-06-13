@@ -683,7 +683,16 @@ impl P2PNode {
                                             // Finalized!
                                             tracing::info!("[PBFT] Block {} finalised by quorum", &block_hash[..12]);
                                             if let Some(final_block) = s.pbft_engine.get_finalised_block(&block_hash) {
-                                                let _ = s.chain.insert_block(&final_block);
+                                                match s.chain.insert_block_with_outcome(&final_block) {
+                                                    Ok(outcome) => {
+                                                        if let Some(replaced) = outcome.replaced_hash {
+                                                            s.record_reorg(1, vec![replaced], outcome.hash.clone());
+                                                        }
+                                                    }
+                                                    Err(e) => {
+                                                        tracing::error!("[PBFT] Failed to insert finalised block: {}", e);
+                                                    }
+                                                }
                                                 s.publisher_index.apply_block(&final_block);
                                                 let data_dir = s.config.data_dir.clone();
                                                 let ipfs_url = if s.config.ipfs_url.is_empty() {

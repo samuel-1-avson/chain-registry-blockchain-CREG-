@@ -1128,10 +1128,23 @@ async fn bridge_status(State(state): State<SharedState>) -> impl IntoResponse {
 
 // GET /v1/bridge/anchors
 //
-// Returns the anchor commit history. For now, synthesises a single entry
-// from the current bridge status since we don't persist a full log yet.
+// Returns the persisted anchor commit journal (newest first) with real L1
+// transaction hashes. Falls back to a synthesized entry from the live bridge
+// status only when the journal is empty (e.g. node restarted mid-flight on
+// a data dir written by an older build).
 async fn bridge_anchors(State(state): State<SharedState>) -> impl IntoResponse {
     let s = state.read().await;
+
+    let journal = crate::bridge_anchors::load(&s.config.data_dir);
+    if !journal.is_empty() {
+        let total = journal.len();
+        return Json(serde_json::json!({
+            "anchors": journal,
+            "total": total,
+            "proof_mode": "checkpoint-attestation",
+        }));
+    }
+
     let bs = &s.bridge_status;
     let mut anchors: Vec<serde_json::Value> = Vec::new();
 

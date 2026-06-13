@@ -129,6 +129,96 @@ impl ChainStore {
 
     // ── Block operations ─────────────────────────────────────────────────────
 
+    /// Insert a block, detecting whether it replaces a different block that
+    /// was already finalized at the same height (i.e. a fork / reorg).
+    ///
+    /// Returns the outcome so callers can record a `ReorgEvent` when a
+    /// replacement happened instead of silently overwriting history.
+    pub fn insert_block_with_outcome(&self, block: &Block) -> Result<BlockInsertOutcome> {
+        let new_hash = block.hash();
+        let replaced_hash = match self.get_block_by_height(block.header.height)? {
+            Some(existing) => {
+                let existing_hash = existing.hash();
+                if existing_hash != new_hash {
+                    Some(existing_hash)
+                } else {
+                    None
+                }
+            }
+            None => None,
+        };
+        self.insert_block(block)?;
+        Ok(BlockInsertOutcome {
+            hash: new_hash,
+            replaced_hash,
+        })
+    }
+
+    /// Remove the height index for every block above `height`, returning the
+    /// hashes of the abandoned blocks (highest first). The blocks themselves
+    /// remain retrievable by hash so abandoned forks stay inspectable in the
+    /// explorer; only the canonical height → hash mapping is rewound.
+    ///
+    /// Callers MUST rebuild derived state (package index, publisher index)
+    /// afterwards via `rebuild_package_index` + `PublisherIndex::rebuild_from_chain`.
+    pub fn rollback_to_height(&self, height: u64) -> Result<Vec<String>> {
+        let tip = self.tip_height()?;
+        if tip <= height {
+            return Ok(vec![]);
+        }
+        let cf_height = self
+            .db
+            .cf_handle(CF_BLOCKS_BY_HEIGHT)
+            .context("cf blocks_by_height")?;
+
+        let mut abandoned = Vec::new();
+        let mut batch = rocksdb::WriteBatch::default();
+        for h in ((height + 1)..=tip).rev() {
+            if let Some(hash_bytes) = self.db.get_cf(&cf_height, h.to_be_bytes())? {
+                abandoned.push(String::from_utf8_lossy(&hash_bytes).to_string());
+            }
+            batch.delete_cf(&cf_height, h.to_be_bytes());
+        }
+        self.db.write(batch)?;
+        tracing::warn!(
+            "Chain rolled back from height {} to {} ({} blocks abandoned)",
+            tip,
+            height,
+            abandoned.len()
+        );
+        Ok(abandoned)
+    }
+
+    /// Rebuild the package index (CF_PACKAGES) by replaying every canonical
+    /// block from genesis to the current tip. Required after a reorg rewind so
+    /// records indexed from abandoned blocks don't linger.
+    pub fn rebuild_package_index(&self) -> Result<()> {
+        let cf_pkg = self.db.cf_handle(CF_PACKAGES).context("cf packages")?;
+
+        // Clear the existing index.
+        let keys: Vec<Box<[u8]>> = self
+            .db
+            .iterator_cf(&cf_pkg, rocksdb::IteratorMode::Start)
+            .filter_map(|item| item.ok().map(|(k, _)| k))
+            .collect();
+        let mut batch = rocksdb::WriteBatch::default();
+        for key in keys {
+            batch.delete_cf(&cf_pkg, key);
+        }
+        self.db.write(batch)?;
+
+        // Replay the canonical chain. insert_block re-indexes Publish /
+        // Revoke / RotatePublisherKey transactions idempotently.
+        let tip = self.tip_height()?;
+        for h in 0..=tip {
+            if let Some(block) = self.get_block_by_height(h)? {
+                self.insert_block(&block)?;
+            }
+        }
+        tracing::info!("Package index rebuilt from canonical chain (tip {})", tip);
+        Ok(())
+    }
+
     pub fn insert_block(&self, block: &Block) -> Result<()> {
         let hash = block.hash();
         let bytes = serde_json::to_vec(block)?;
@@ -509,10 +599,129 @@ impl ChainStore {
     }
 }
 
+/// Result of `insert_block_with_outcome`.
+#[derive(Clone, Debug)]
+pub struct BlockInsertOutcome {
+    /// Hash of the inserted block.
+    pub hash: String,
+    /// Hash of a *different* block that previously occupied the same height,
+    /// if any. `Some(_)` means a fork replaced finalized history and the
+    /// caller should record a reorg event.
+    pub replaced_hash: Option<String>,
+}
+
 #[derive(serde::Serialize)]
 pub struct ChainStats {
     pub tip_height: u64,
     pub tip_hash: String,
     pub package_count: usize,
     pub block_count: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+    use common::{
+        merkle_root, AnalysisBundleRefs, Block, BlockHeader, ChainRecord, DeterministicRiskSummary,
+        PackageId, Transaction,
+    };
+
+    fn publish_record(name: &str) -> ChainRecord {
+        ChainRecord {
+            id: PackageId::new("npm", name, "1.0.0"),
+            content_hash: common::sha256_hex(name.as_bytes()),
+            ipfs_cid: "bafytestcid".into(),
+            publisher_pubkey: "publisher-pubkey".into(),
+            block_hash: String::new(),
+            published_at: Utc::now(),
+            validator_signatures: vec![],
+            status: PackageStatus::Verified,
+            shielded: false,
+            key_bundle: None,
+            pgp_fingerprint: None,
+            findings: vec![],
+            analysis_bundles: AnalysisBundleRefs::default(),
+            evidence_digest: String::new(),
+            deterministic_risk: DeterministicRiskSummary::default(),
+            access_count: 0,
+            last_accessed: None,
+            threshold: 0,
+            publisher_pubkeys: vec![],
+            manifest: None,
+        }
+    }
+
+    fn block(height: u64, prev_hash: &str, proposer: &str, packages: &[&str]) -> Block {
+        let transactions: Vec<Transaction> = packages
+            .iter()
+            .map(|name| Transaction::Publish(publish_record(name)))
+            .collect();
+        Block {
+            header: BlockHeader {
+                height,
+                prev_hash: prev_hash.to_string(),
+                merkle_root: merkle_root(&transactions),
+                proposer_id: proposer.into(),
+                timestamp: Utc::now(),
+                validator_set_hash: "test".into(),
+                vrf_output: None,
+                vrf_proof: None,
+            },
+            transactions,
+            pbft_signatures: vec![],
+        }
+    }
+
+    #[test]
+    fn insert_block_with_outcome_detects_replacement() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = ChainStore::open(dir.path()).expect("open");
+        let genesis_hash = store.tip_hash().expect("tip hash");
+
+        let block_a = block(1, &genesis_hash, "node-a", &["pkg-a"]);
+        let outcome_a = store.insert_block_with_outcome(&block_a).expect("insert a");
+        assert!(outcome_a.replaced_hash.is_none(), "first insert is no fork");
+
+        // Re-inserting the identical block is not a replacement.
+        let outcome_same = store.insert_block_with_outcome(&block_a).expect("re-insert");
+        assert!(outcome_same.replaced_hash.is_none());
+
+        // A different block at the same height is a fork replacement.
+        let block_b = block(1, &genesis_hash, "node-b", &["pkg-b"]);
+        let outcome_b = store.insert_block_with_outcome(&block_b).expect("insert b");
+        assert_eq!(outcome_b.replaced_hash, Some(block_a.hash()));
+        assert_eq!(store.tip_hash().expect("tip"), block_b.hash());
+    }
+
+    #[test]
+    fn rollback_and_rebuild_drop_abandoned_packages() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = ChainStore::open(dir.path()).expect("open");
+        let genesis_hash = store.tip_hash().expect("tip hash");
+
+        let block1 = block(1, &genesis_hash, "node-a", &["kept"]);
+        store.insert_block(&block1).expect("insert 1");
+        let block2 = block(2, &block1.hash(), "node-a", &["abandoned"]);
+        store.insert_block(&block2).expect("insert 2");
+
+        assert!(store.get_package("npm:abandoned@1.0.0").expect("get").is_some());
+
+        // Rewind to height 1: block 2 is abandoned but stays readable by hash.
+        let abandoned = store.rollback_to_height(1).expect("rollback");
+        assert_eq!(abandoned, vec![block2.hash()]);
+        assert_eq!(store.tip_height().expect("tip"), 1);
+        assert!(store
+            .get_block_by_hash(&block2.hash())
+            .expect("by hash")
+            .is_some());
+
+        // Rebuilding the package index removes records from abandoned blocks.
+        store.rebuild_package_index().expect("rebuild");
+        assert!(store.get_package("npm:kept@1.0.0").expect("get").is_some());
+        assert!(store
+            .get_package("npm:abandoned@1.0.0")
+            .expect("get")
+            .is_none());
+    }
 }

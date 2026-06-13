@@ -6,6 +6,7 @@ mod admission_scan;
 mod api;
 mod block_producer;
 mod bridge;
+mod bridge_anchors;
 mod chain_store;
 mod config;
 mod consensus_admission;
@@ -638,13 +639,27 @@ async fn main() -> Result<()> {
         let start_block = chain_spec
             .as_ref()
             .map(|spec| spec.validator_set.epoch_block_height);
+        // Apply L1 staking events only after a finality buffer so shallow
+        // Sepolia reorgs cannot flap the validator set. Override with
+        // CREG_VALIDATOR_SET_FINALITY_LAG (in L1 blocks).
+        let default_finality_lag: u64 = if config.is_testnet { 2 } else { 6 };
+        let finality_lag_blocks = std::env::var("CREG_VALIDATOR_SET_FINALITY_LAG")
+            .ok()
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .unwrap_or(default_finality_lag);
+        if finality_lag_blocks == 0 {
+            tracing::warn!(
+                "CREG_VALIDATOR_SET_FINALITY_LAG=0 — L1 staking events are applied with no \
+                 finality buffer; a shallow L1 reorg can flap validator membership."
+            );
+        }
         let sync_config = validator_set_sync::SyncConfig {
             eth_rpc_url: config.eth_rpc_url.clone(),
             staking_addr: config.staking_addr.parse().unwrap_or_else(|_| {
                 tracing::warn!("Invalid staking address; validator set sync disabled");
                 alloy::primitives::Address::ZERO
             }),
-            finality_lag_blocks: if config.is_testnet { 0 } else { 6 },
+            finality_lag_blocks,
             poll_interval_secs: 30,
             start_block,
         };

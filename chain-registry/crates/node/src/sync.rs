@@ -22,6 +22,11 @@ use tokio::time::{interval, Duration};
 /// Sync interval — check for new blocks from peers every 10 seconds.
 const SYNC_INTERVAL_SECS: u64 = 10;
 
+/// Maximum reorg depth this node will automatically recover from. Forks
+/// deeper than this require operator intervention (they indicate either a
+/// long partition or an attack and should not be auto-adopted).
+const MAX_REORG_DEPTH: u64 = 64;
+
 pub async fn run(state: Arc<RwLock<NodeState>>) {
     // Initial sync at startup.
     if let Err(e) = sync_once(Arc::clone(&state)).await {
@@ -81,18 +86,7 @@ async fn sync_once(state: Arc<RwLock<NodeState>>) -> anyhow::Result<()> {
     };
 
     for height in (our_height + 1)..=peer_height {
-        let mut block = None;
-        for url in &peer_urls {
-            let full_url = format!("{}/v1/blocks/{}", url.trim_end_matches('/'), height);
-            if let Ok(resp) = client.get(&full_url).send().await {
-                if let Ok(b) = resp.json::<common::Block>().await {
-                    block = Some(b);
-                    break;
-                }
-            }
-        }
-
-        let block = match block {
+        let block = match fetch_block(&client, &peer_urls, height).await {
             Some(b) => b,
             None => {
                 tracing::warn!("Could not fetch block {} from any peer", height);
@@ -100,14 +94,30 @@ async fn sync_once(state: Arc<RwLock<NodeState>>) -> anyhow::Result<()> {
             }
         };
 
-        // Validate chain linkage.
+        // Validate chain linkage. A mismatch means our local chain forked
+        // from the network's canonical chain — attempt reorg recovery
+        // instead of halting sync forever.
         if block.header.prev_hash != prev_hash {
-            tracing::error!(
-                "Block {} has wrong prev_hash (expected {}, got {})",
+            tracing::warn!(
+                "Block {} has wrong prev_hash (expected {}, got {}) — \
+                 local chain has diverged from peers, attempting reorg recovery",
                 height,
                 &prev_hash[..12],
                 &block.header.prev_hash[..12]
             );
+            match attempt_reorg_recovery(&state, &client, &peer_urls, height - 1, peer_height)
+                .await
+            {
+                Ok(true) => {
+                    tracing::info!("Reorg recovery succeeded — chain re-aligned with peers");
+                }
+                Ok(false) => {
+                    tracing::warn!("Reorg recovery not applied — will retry on next sync tick");
+                }
+                Err(e) => {
+                    tracing::error!("Reorg recovery failed: {}", e);
+                }
+            }
             break;
         }
 
@@ -150,6 +160,153 @@ async fn sync_once(state: Arc<RwLock<NodeState>>) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+/// Fetch a block at `height` from the first peer that serves it.
+async fn fetch_block(
+    client: &reqwest::Client,
+    peer_urls: &[String],
+    height: u64,
+) -> Option<common::Block> {
+    for url in peer_urls {
+        let full_url = format!("{}/v1/blocks/{}", url.trim_end_matches('/'), height);
+        if let Ok(resp) = client.get(&full_url).send().await {
+            if let Ok(b) = resp.json::<common::Block>().await {
+                return Some(b);
+            }
+        }
+    }
+    None
+}
+
+/// Attempt to recover from a fork between the local chain and the network.
+///
+/// `local_tip` is the highest local height that conflicts with the peers'
+/// branch (the block whose hash the peers' next block does not link to).
+///
+/// Strategy (longest-valid-chain):
+///   1. Walk back from `local_tip` (bounded by `MAX_REORG_DEPTH`) comparing
+///      local block hashes with peer block hashes to find the common ancestor.
+///   2. Fetch the peers' branch from `ancestor+1..=peer_height`, verifying
+///      linkage and the PBFT signature quorum on every block *before*
+///      mutating any local state.
+///   3. Only adopt the new branch if it is strictly longer than ours.
+///   4. Roll back to the ancestor, insert the new branch, rebuild the package
+///      and publisher indexes, and record a `ReorgEvent` for /v1/reorgs.
+///
+/// Returns Ok(true) if the reorg was applied, Ok(false) if it was declined
+/// (no ancestor found within depth limit, branch invalid, or not longer).
+async fn attempt_reorg_recovery(
+    state: &Arc<RwLock<NodeState>>,
+    client: &reqwest::Client,
+    peer_urls: &[String],
+    local_tip: u64,
+    peer_height: u64,
+) -> anyhow::Result<bool> {
+    // ── 1. Find the common ancestor ───────────────────────────────────────
+    let floor = local_tip.saturating_sub(MAX_REORG_DEPTH);
+    let mut ancestor: Option<(u64, String)> = None;
+
+    for k in (floor..=local_tip).rev() {
+        let ours = {
+            let s = state.read().await;
+            s.chain.get_block_by_height(k)?
+        };
+        let Some(ours) = ours else { continue };
+        let Some(theirs) = fetch_block(client, peer_urls, k).await else {
+            tracing::warn!("Reorg recovery: could not fetch peer block {} — aborting", k);
+            return Ok(false);
+        };
+        if ours.hash() == theirs.hash() {
+            ancestor = Some((k, ours.hash()));
+            break;
+        }
+    }
+
+    let Some((fork_height, ancestor_hash)) = ancestor else {
+        tracing::error!(
+            "Reorg recovery: no common ancestor within {} blocks of height {} — \
+             this fork is too deep to auto-recover; operator intervention required",
+            MAX_REORG_DEPTH,
+            local_tip
+        );
+        return Ok(false);
+    };
+
+    // ── 2. Fetch and fully validate the peers' branch before adopting ────
+    let validator_set = {
+        let s = state.read().await;
+        s.validator_set.clone()
+    };
+
+    let mut new_branch: Vec<common::Block> = Vec::new();
+    let mut link_hash = ancestor_hash;
+    for h in (fork_height + 1)..=peer_height {
+        let Some(b) = fetch_block(client, peer_urls, h).await else {
+            tracing::warn!("Reorg recovery: peer branch incomplete at height {} — aborting", h);
+            return Ok(false);
+        };
+        if b.header.height != h {
+            tracing::warn!("Reorg recovery: block claims height {} at {} — aborting", b.header.height, h);
+            return Ok(false);
+        }
+        if b.header.prev_hash != link_hash {
+            tracing::warn!("Reorg recovery: peer branch broke linkage at height {} — aborting", h);
+            return Ok(false);
+        }
+        if let Err(e) = verify_block_signatures(&b, &validator_set) {
+            tracing::error!(
+                "Reorg recovery: peer branch block {} failed signature verification: {} — \
+                 refusing to adopt fork",
+                h,
+                e
+            );
+            return Ok(false);
+        }
+        link_hash = b.hash();
+        new_branch.push(b);
+    }
+
+    // ── 3. Longest-chain rule: only adopt a strictly longer branch ───────
+    let new_tip_height = fork_height + new_branch.len() as u64;
+    if new_tip_height <= local_tip {
+        tracing::warn!(
+            "Reorg recovery: peer branch tip {} is not longer than local tip {} — keeping ours",
+            new_tip_height,
+            local_tip
+        );
+        return Ok(false);
+    }
+
+    // ── 4. Apply: rewind, adopt, rebuild derived state, record the event ─
+    {
+        let mut s = state.write().await;
+        let abandoned = s.chain.rollback_to_height(fork_height)?;
+        for b in &new_branch {
+            s.chain.insert_block(b)?;
+        }
+        s.chain.rebuild_package_index()?;
+
+        let tip = s.chain.tip_height()?;
+        let mut canonical_blocks = Vec::with_capacity((tip + 1) as usize);
+        for h in 0..=tip {
+            if let Some(b) = s.chain.get_block_by_height(h)? {
+                canonical_blocks.push(b);
+            }
+        }
+        s.publisher_index.rebuild_from_chain(canonical_blocks.iter());
+
+        let depth = local_tip - fork_height;
+        s.record_reorg(depth, abandoned, link_hash.clone());
+    }
+
+    tracing::info!(
+        "Reorg applied: fork at height {}, new tip {} ({})",
+        fork_height,
+        new_tip_height,
+        &link_hash[..link_hash.len().min(12)]
+    );
+    Ok(true)
 }
 
 /// Verify PBFT consensus signatures on every Publish transaction in a block.

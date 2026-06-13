@@ -133,24 +133,37 @@ export default function Bridge() {
       {/* Header */}
       <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <h1 style={{ margin: 0, fontSize: 20 }}>L1 Bridge</h1>
+          <h1 style={{ margin: 0, fontSize: 20 }}>L1 Checkpoint Anchoring</h1>
           <StatusBadge variant={s.healthy ?? s.last_anchor_block ? 'success' : 'warning'}>
             {s.healthy || s.last_anchor_block ? 'Operational' : 'Unknown'}
           </StatusBadge>
+          {s.proof_mode && (
+            <StatusBadge variant="warning">{s.proof_mode}</StatusBadge>
+          )}
         </div>
         <ShareButton />
       </header>
+
+      {/* Trust model disclosure */}
+      <p style={{ margin: 0, color: 'var(--text-tertiary)', fontSize: 12, lineHeight: 1.5 }}>
+        Verified L2 batches are anchored to Ethereum as checkpoint attestations signed by the bridge
+        operator and approved by governance. State roots are computed off-chain by PBFT validators —
+        anchors are <strong>not</strong> validity proofs.
+      </p>
 
       {/* Health overview */}
       <HealthCard status={s} />
 
       {/* Bridge identity */}
       <section className="ce-card" style={{ display: 'grid', gap: 'var(--space-3)' }}>
-        <h2 style={{ margin: 0, fontSize: 14 }}>Bridge configuration</h2>
-        <Row k="Bridge contract" v={s.bridge_contract ? <Hash value={s.bridge_contract} full showCopy /> : '—'} />
+        <h2 style={{ margin: 0, fontSize: 14 }}>Anchor configuration</h2>
+        <Row k="Registry contract" v={(s.bridge_contract || s.registry_address) ? <Hash value={s.bridge_contract || s.registry_address} full showCopy /> : '—'} />
         <Row k="Signer address" v={s.signer_address ? <Hash value={s.signer_address} full showCopy /> : '—'} />
-        <Row k="Last anchor root" v={s.last_anchor_root ? <Hash value={s.last_anchor_root} full showCopy /> : '—'} />
-        <Row k="Last anchor block" v={s.last_anchor_block ?? '—'} />
+        <Row k="Current state root" v={(s.last_anchor_root || s.current_state_root) ? <Hash value={s.last_anchor_root || s.current_state_root} full showCopy /> : '—'} />
+        <Row k="Last anchor L1 tx" v={s.last_anchor_tx_hash ? <Hash value={s.last_anchor_tx_hash} full showCopy /> : '—'} />
+        <Row k="Last anchor block" v={s.last_anchor_block ?? s.last_finalized_eth_block ?? '—'} />
+        <Row k="Finalized L1 block" v={s.finalized_l1_block ?? '—'} />
+        <Row k="Anchors recorded" v={s.anchor_count ?? '—'} />
       </section>
 
       {/* Anchor history / commit timeline */}

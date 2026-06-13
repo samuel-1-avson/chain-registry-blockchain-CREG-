@@ -40,6 +40,8 @@ sol!(
     interface IGovernance {
         function proposalCount() external view returns (uint256 _0);
 
+        function threshold() external view returns (uint256 _0);
+
         function submit(
             address target,
             bytes calldata callData,
@@ -49,6 +51,43 @@ sol!(
         function vote(uint256 id, bool approve) external;
     }
 );
+
+/// Trust-model label attached to every anchor. The Groth16 batch circuit
+/// currently proves only that the batch is non-empty — state roots are
+/// computed off-chain and trusted from the bridge operator — so anchors are
+/// checkpoint attestations, NOT validity proofs. Keep this label honest until
+/// the circuit constrains the real state transition.
+const PROOF_MODE: &str = "checkpoint-attestation";
+
+/// Whether the bridge should immediately vote `approve` on its own batch
+/// proposal. Defaults to true (required for liveness while governance runs
+/// threshold-1). Set CREG_BRIDGE_SELF_APPROVE=false once an independent
+/// second signer approves batches, so the bridge key alone can no longer
+/// both propose and execute.
+fn bridge_self_approve_enabled() -> bool {
+    std::env::var("CREG_BRIDGE_SELF_APPROVE")
+        .map(|v| v.trim().eq_ignore_ascii_case("true") || v.trim() == "1")
+        .unwrap_or(true)
+}
+
+/// Best-effort fetch of the L1 block number currently tagged `finalized`.
+async fn fetch_finalized_l1_block<T, P>(provider: &P) -> Option<u64>
+where
+    T: alloy::transports::Transport + Clone,
+    P: Provider<T>,
+{
+    let result: Result<serde_json::Value, _> = provider
+        .client()
+        .request("eth_getBlockByNumber", ("finalized", false))
+        .await;
+    match result {
+        Ok(block) => block
+            .get("number")
+            .and_then(|n| n.as_str())
+            .and_then(|hex_str| u64::from_str_radix(hex_str.trim_start_matches("0x"), 16).ok()),
+        Err(_) => None,
+    }
+}
 
 pub async fn run(state: Arc<RwLock<NodeState>>) {
     let mut ticker = interval(Duration::from_secs(10));
@@ -129,7 +168,7 @@ pub async fn run(state: Arc<RwLock<NodeState>>) {
 }
 
 async fn tick(state: Arc<RwLock<NodeState>>, last_height: &mut u64) -> anyhow::Result<()> {
-    let (rpc_url, registry_addr, governance_addr, priv_key_opt, current_tip) = {
+    let (rpc_url, registry_addr, governance_addr, priv_key_opt, current_tip, data_dir) = {
         let s = state.read().await;
         (
             s.config.eth_rpc_url.clone(),
@@ -137,6 +176,7 @@ async fn tick(state: Arc<RwLock<NodeState>>, last_height: &mut u64) -> anyhow::R
             s.config.governance_addr.clone(),
             s.config.bridge_privkey.clone(),
             s.chain.tip_height()?,
+            s.config.data_dir.clone(),
         )
     };
 
@@ -293,6 +333,30 @@ async fn tick(state: Arc<RwLock<NodeState>>, last_height: &mut u64) -> anyhow::R
         }
     };
 
+    // Centralization guardrail: warn loudly when governance runs at
+    // threshold 1, where the bridge key alone can propose AND execute the
+    // batch (submit + self-vote). At threshold ≥ 2 the self-vote below is
+    // just one approval and an independent signer must co-approve.
+    let governance_threshold: u64 = governance_contract
+        .threshold()
+        .call()
+        .await
+        .map(|t| t._0.to::<u64>())
+        .unwrap_or(0);
+    if governance_threshold == 1 {
+        tracing::warn!(
+            "Governance threshold is 1 — the bridge key alone controls L1 anchoring. \
+             Raise GOVERNANCE_THRESHOLD to ≥ 2 with independent signers before public exposure."
+        );
+    }
+    let self_approve = bridge_self_approve_enabled();
+    if !self_approve && governance_threshold <= 1 {
+        tracing::warn!(
+            "CREG_BRIDGE_SELF_APPROVE=false with governance threshold ≤ 1: \
+             batches will stay pending until another signer votes."
+        );
+    }
+
     let proposal_id = governance_contract.proposalCount().call().await?._0;
     let call_data = IRegistry::submitRollupBatchCall {
         prevRoot: prev_root.into(),
@@ -304,8 +368,10 @@ async fn tick(state: Arc<RwLock<NodeState>>, last_height: &mut u64) -> anyhow::R
     }
     .abi_encode();
 
-    let submit_result: anyhow::Result<()> = async {
-        governance_contract
+    let batch_start_height = *last_height + 1;
+
+    let submit_result: anyhow::Result<Option<String>> = async {
+        let submit_tx = governance_contract
             .submit(
                 contract_addr,
                 call_data.into(),
@@ -316,35 +382,109 @@ async fn tick(state: Arc<RwLock<NodeState>>, last_height: &mut u64) -> anyhow::R
             .watch()
             .await?;
 
-        governance_contract
+        if !self_approve {
+            tracing::info!(
+                "Rollup batch proposal {} submitted ({:#x}); awaiting external governance approval \
+                 (CREG_BRIDGE_SELF_APPROVE=false)",
+                proposal_id,
+                submit_tx
+            );
+            return Ok(None);
+        }
+
+        let vote_tx = governance_contract
             .vote(proposal_id, true)
             .send()
             .await?
             .watch()
             .await?;
 
-        Ok(())
+        // The vote that meets the threshold executes submitRollupBatch, so
+        // its hash is the anchor's L1 transaction (under threshold-1 that is
+        // this self-vote; under higher thresholds execution happens in a
+        // later signer's vote and this records the bridge's approval tx).
+        Ok(Some(format!("{:#x}", vote_tx)))
     }
     .await;
 
     match submit_result {
-        Ok(()) => {
-            tracing::info!(
-                "Successfully settled Rollup Batch on L1 via governance proposal {}. New State Root: 0x{}",
-                proposal_id,
-                hex::encode(next_root)
-            );
-            let eth_block = provider.get_block_number().await.unwrap_or(0);
+        Ok(anchor_tx_hash) => {
+            let executed = anchor_tx_hash.is_some();
+            if executed {
+                tracing::info!(
+                    "Rollup batch settled on L1 via governance proposal {} (proof mode: {}). New state root: 0x{}",
+                    proposal_id,
+                    PROOF_MODE,
+                    hex::encode(next_root)
+                );
+            }
+
+            // Resolve the L1 block the anchor landed in (from its receipt)
+            // and the chain's current *finalized* block tag.
+            let anchor_l1_block = match &anchor_tx_hash {
+                Some(tx_hash) => match tx_hash.parse::<alloy::primitives::B256>() {
+                    Ok(parsed) => provider
+                        .get_transaction_receipt(parsed)
+                        .await
+                        .ok()
+                        .flatten()
+                        .and_then(|receipt| receipt.block_number),
+                    Err(_) => None,
+                },
+                None => None,
+            };
+            let finalized_l1_block = fetch_finalized_l1_block(&provider).await;
+            let head_block = provider.get_block_number().await.unwrap_or(0);
+            let committed_at = chrono::Utc::now().to_rfc3339();
+
+            // Persist the anchor to the on-disk journal so /v1/bridge/anchors
+            // serves real history with L1 tx hashes across restarts.
+            let anchor = crate::bridge_anchors::AnchorRecord {
+                l2_height_start: batch_start_height,
+                l2_height: new_last_height,
+                l1_tx_hash: anchor_tx_hash.clone(),
+                l1_block: anchor_l1_block,
+                prev_root: format!("0x{}", hex::encode(prev_root)),
+                state_root: format!("0x{}", hex::encode(next_root)),
+                data_root: format!("0x{}", hex::encode(data_root)),
+                tx_count: batch_transactions.len() as u64,
+                proposal_id: proposal_id.to_string(),
+                committed_at: committed_at.clone(),
+                proof_mode: PROOF_MODE.to_string(),
+            };
+            let anchor_count = match crate::bridge_anchors::append(&data_dir, anchor) {
+                Ok(count) => count,
+                Err(e) => {
+                    tracing::error!("Failed to persist bridge anchor journal: {}", e);
+                    crate::bridge_anchors::load(&data_dir).len()
+                }
+            };
+
             *last_height = new_last_height;
             let mut s = state.write().await;
-            s.bridge_status.bridge_sync_status = "L2 Scaled".into();
-            s.bridge_status.last_finalized_eth_block = eth_block;
-            s.bridge_status.current_state_root = format!("0x{}", hex::encode(next_root));
+            s.bridge_status.bridge_sync_status = if executed {
+                "Anchored (checkpoint)".into()
+            } else {
+                format!(
+                    "Batch proposal {} pending external governance approval",
+                    proposal_id
+                )
+            };
+            s.bridge_status.last_finalized_eth_block = anchor_l1_block.unwrap_or(head_block);
+            s.bridge_status.finalized_l1_block = finalized_l1_block;
+            if executed {
+                s.bridge_status.current_state_root = format!("0x{}", hex::encode(next_root));
+            }
+            s.bridge_status.last_anchor_tx_hash = anchor_tx_hash;
+            s.bridge_status.last_anchor_at = Some(committed_at);
+            s.bridge_status.proof_mode = PROOF_MODE.to_string();
+            s.bridge_status.anchor_count = anchor_count;
         }
         Err(e) => {
             tracing::error!("Failed to submit Rollup Batch to L1 via governance: {}", e);
             let mut s = state.write().await;
             s.bridge_status.bridge_sync_status = format!("Rollup Error: {}", e);
+            s.bridge_status.proof_mode = PROOF_MODE.to_string();
             return Err(e);
         }
     }

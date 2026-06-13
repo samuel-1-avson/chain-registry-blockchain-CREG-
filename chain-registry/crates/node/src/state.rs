@@ -74,6 +74,22 @@ pub struct BridgeStatus {
     pub registry_address: String,
     pub bridge_sync_status: String,
     pub current_state_root: String,
+    /// L1 transaction hash of the most recent anchor commit (the governance
+    /// vote/execute transaction that landed `submitRollupBatch`).
+    pub last_anchor_tx_hash: Option<String>,
+    /// RFC 3339 timestamp of the most recent anchor commit.
+    pub last_anchor_at: Option<String>,
+    /// The most recent L1 block reported as *finalized* by the RPC
+    /// (`eth_getBlockByNumber("finalized")`), as opposed to
+    /// `last_finalized_eth_block` which historically recorded the head.
+    pub finalized_l1_block: Option<u64>,
+    /// Honesty label for the anchoring trust model. The current Groth16
+    /// batch circuit only proves the batch is non-empty — state roots are
+    /// computed off-chain and trusted from the bridge operator — so this is
+    /// a checkpoint attestation, not a validity proof.
+    pub proof_mode: String,
+    /// Number of anchor commits persisted in the local anchor journal.
+    pub anchor_count: usize,
 }
 
 #[derive(Serialize, Clone, Debug, Default)]
@@ -97,6 +113,10 @@ pub struct ReorgEvent {
     pub abandoned_blocks: Vec<String>,
     pub new_tip: String,
 }
+
+/// Maximum number of reorg events retained in memory (and served by
+/// `/v1/reorgs`). Oldest entries are dropped first.
+pub const MAX_REORG_EVENTS: usize = 100;
 
 #[derive(Clone, Debug)]
 pub struct PackageRound {
@@ -206,6 +226,32 @@ pub struct NodeState {
 }
 
 impl NodeState {
+    /// Record a chain reorganization event so it is visible via `/v1/reorgs`
+    /// and the explorer Reorgs tab. Newest events are kept at the front.
+    pub fn record_reorg(
+        &mut self,
+        depth: u64,
+        abandoned_blocks: Vec<String>,
+        new_tip: impl Into<String>,
+    ) {
+        let new_tip = new_tip.into();
+        let event = ReorgEvent {
+            id: format!("reorg-{}", uuid::Uuid::new_v4()),
+            timestamp: Utc::now().to_rfc3339(),
+            depth,
+            abandoned_blocks,
+            new_tip: new_tip.clone(),
+        };
+        tracing::warn!(
+            depth = depth,
+            new_tip = %new_tip,
+            "Chain reorganization recorded ({} abandoned blocks)",
+            event.abandoned_blocks.len()
+        );
+        self.reorgs.insert(0, event);
+        self.reorgs.truncate(MAX_REORG_EVENTS);
+    }
+
     pub fn record_package_vote(
         &mut self,
         subject: impl Into<String>,

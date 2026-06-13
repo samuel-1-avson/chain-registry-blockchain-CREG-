@@ -283,7 +283,19 @@ async fn produce_block(
                             &bh[..12]
                         );
                         if let Some(final_block) = s.pbft_engine.get_finalised_block(&bh) {
-                            let _ = s.chain.insert_block(&final_block);
+                            match s.chain.insert_block_with_outcome(&final_block) {
+                                Ok(outcome) => {
+                                    if let Some(replaced) = outcome.replaced_hash {
+                                        s.record_reorg(1, vec![replaced], outcome.hash.clone());
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::error!(
+                                        "[PBFT Proposer] Failed to insert finalised block: {}",
+                                        e
+                                    );
+                                }
+                            }
                             s.publisher_index.apply_block(&final_block);
                         }
                     }
