@@ -5,6 +5,9 @@ set -euo pipefail
 curl -fsS http://127.0.0.1:9090/-/healthy >/dev/null
 echo "PROMETHEUS_OK"
 
+curl -fsS http://127.0.0.1:9093/-/healthy >/dev/null
+echo "ALERTMANAGER_OK"
+
 targets_json="$(curl -fsS 'http://127.0.0.1:9090/api/v1/targets')"
 if echo "$targets_json" | grep -q '"health":"up"'; then
   echo "TARGETS_UP"
@@ -35,4 +38,11 @@ if echo "$alerts" | grep -q 'CregSandboxDevBypass'; then
 else
   echo "ALERT_RULES_MISSING"
   exit 6
+fi
+
+receivers="$(curl -fsS 'http://127.0.0.1:9093/api/v2/receivers')"
+if echo "$receivers" | grep -Eq 'webhook_configs|pagerduty_configs'; then
+  echo "ALERT_RECEIVERS_OK"
+else
+  echo "ALERT_RECEIVERS_UNCONFIGURED"
 fi
