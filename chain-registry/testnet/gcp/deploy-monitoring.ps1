@@ -102,7 +102,7 @@ $targetYaml
     static_configs:
       - targets: ["localhost:9090"]
 "@
-Set-Content -Path $prometheusPath -Value $prometheusBody -Encoding utf8NoBOM
+[System.IO.File]::WriteAllText($prometheusPath, $prometheusBody)
 Log "Wrote $prometheusPath"
 
 if (-not $SkipSync) {
