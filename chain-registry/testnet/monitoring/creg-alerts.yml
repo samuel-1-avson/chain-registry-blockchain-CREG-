@@ -1,0 +1,96 @@
+# Prometheus alerting rules for the CREG testnet.
+#
+# Scrape the node /metrics endpoint (label the job "creg-node"), then load this
+# file via `rule_files:` in prometheus.yml and point Alertmanager at your
+# channel. Metric names match crates/node/src/metrics.rs.
+#
+# Gauge-progress alerts use delta() (these gauges increase monotonically within
+# the scrape window): tip height, finalized L1 block, anchor count, reorgs.
+
+groups:
+  - name: creg-node-health
+    rules:
+      - alert: CregNodeDown
+        expr: up{job="creg-node"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "CREG node {{ $labels.instance }} is down"
+          description: "Prometheus cannot scrape /metrics for 2m."
+
+      - alert: CregBlockProductionStalled
+        expr: delta(creg_chain_tip_height[15m]) == 0 and creg_active_validators >= 1
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "No new L2 blocks in 15m on {{ $labels.instance }}"
+          description: "Tip height has not advanced while validators are active — proposer stalled or consensus stuck."
+
+  - name: creg-consensus
+    rules:
+      - alert: CregPbftQuorumAtRisk
+        expr: creg_active_validators < 2
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Active validators below PBFT quorum on {{ $labels.instance }}"
+          description: "creg_active_validators={{ $value }}; NET-301 requires >= 2 active validators for fault tolerance."
+
+      - alert: CregL2ReorgObserved
+        expr: delta(creg_reorg_events_total[1h]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "L2 chain reorganization recorded on {{ $labels.instance }}"
+          description: "{{ $value }} reorg event(s) in the last hour — inspect /v1/reorgs."
+
+  - name: creg-l1-sync
+    rules:
+      - alert: CregValidatorSetSyncDegraded
+        expr: creg_validator_set_sync_enabled == 1 and creg_validator_set_sync_state_code == 3
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "L1 validator-set sync degraded on {{ $labels.instance }}"
+          description: "State=degraded for 10m — likely L1 RPC failure. Check CREG_ETH_RPC / CREG_ETH_RPC_FALLBACKS."
+
+      - alert: CregValidatorSetSyncError
+        expr: creg_validator_set_sync_enabled == 1 and creg_validator_set_sync_has_error == 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "L1 validator-set sync reporting an error on {{ $labels.instance }}"
+
+      - alert: CregValidatorSetReorgChurn
+        expr: creg_validator_set_sync_state_code == 2
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Validator-set sync stuck reorg-replaying on {{ $labels.instance }}"
+          description: "Sustained L1 reorg replay for 15m — possible shallow-finality flapping; review CREG_VALIDATOR_SET_FINALITY_LAG."
+
+  - name: creg-bridge
+    rules:
+      - alert: CregBridgeL1Stalled
+        expr: creg_bridge_finalized_l1_block > 0 and delta(creg_bridge_finalized_l1_block[1h]) == 0
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Bridge has not seen a new finalized L1 block in 1h on {{ $labels.instance }}"
+          description: "The checkpoint bridge cannot read L1 finalized state — anchoring is blocked. Check the bridge L1 RPC."
+
+  # Faucet / relayer wallet balances are emitted by those services, not the
+  # node. If you run them with their own metrics (or a blackbox balance probe),
+  # add rules like:
+  #   - alert: CregFaucetLowBalance
+  #     expr: creg_faucet_native_balance_wei < 5e16   # < 0.05 ETH
+  #   - alert: CregRelayerLowBalance
+  #     expr: creg_relayer_native_balance_wei < 5e16
+  # See docs/OPS_HARDENING_RUNBOOK.md for the balance-probe approach.

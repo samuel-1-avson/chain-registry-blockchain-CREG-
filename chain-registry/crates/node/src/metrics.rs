@@ -144,6 +144,60 @@ pub async fn render(state: Arc<RwLock<NodeState>>) -> String {
         1.0,
     );
 
+    // ── Consensus / validator set health ────────────────────────────────────
+    let active_validators = s
+        .validator_set
+        .validators
+        .iter()
+        .filter(|v| v.status == "online" || v.status == "self")
+        .count();
+    metric(
+        &mut out,
+        "creg_active_validators",
+        "Validators currently eligible for PBFT consensus (status online/self)",
+        "gauge",
+        active_validators as f64,
+    );
+    metric(
+        &mut out,
+        "creg_validator_set_total",
+        "Total validators in the active set (any status)",
+        "gauge",
+        s.validator_set.validators.len() as f64,
+    );
+
+    metric(
+        &mut out,
+        "creg_reorg_events_total",
+        "L2 chain reorganizations recorded since start (retained window)",
+        "gauge",
+        s.reorgs.len() as f64,
+    );
+
+    // ── L1 checkpoint bridge ────────────────────────────────────────────────
+    let bridge = &s.bridge_status;
+    metric(
+        &mut out,
+        "creg_bridge_anchor_count",
+        "Number of L2->L1 checkpoint anchors committed (persisted journal length)",
+        "gauge",
+        bridge.anchor_count as f64,
+    );
+    metric(
+        &mut out,
+        "creg_bridge_last_anchor_eth_block",
+        "L1 block of the most recent checkpoint anchor (0 if none yet)",
+        "gauge",
+        bridge.last_finalized_eth_block as f64,
+    );
+    metric(
+        &mut out,
+        "creg_bridge_finalized_l1_block",
+        "Most recent L1 block tagged finalized as observed by the bridge (0 if unknown)",
+        "gauge",
+        bridge.finalized_l1_block.unwrap_or(0) as f64,
+    );
+
     out
 }
 
