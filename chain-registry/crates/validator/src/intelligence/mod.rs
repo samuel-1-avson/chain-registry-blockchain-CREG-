@@ -65,10 +65,7 @@ pub async fn generate_report(record: &ChainRecord, tarball: &[u8]) -> PackageInt
         if llm_review.degraded {
             format!(
                 "Lane B skipped or degraded: {}",
-                llm_review
-                    .degraded_reason
-                    .as_deref()
-                    .unwrap_or("unknown")
+                llm_review.degraded_reason.as_deref().unwrap_or("unknown")
             )
         } else {
             format!(
@@ -78,7 +75,13 @@ pub async fn generate_report(record: &ChainRecord, tarball: &[u8]) -> PackageInt
         },
     );
 
-    let sections = synthesize_sections(&explore, &findings_summary, &osv_summary, record, &llm_review);
+    let sections = synthesize_sections(
+        &explore,
+        &findings_summary,
+        &osv_summary,
+        record,
+        &llm_review,
+    );
     trace_step(
         &mut trace,
         &mut step_no,
@@ -166,11 +169,7 @@ fn explore_tarball(tarball: &[u8], record: &ChainRecord) -> String {
         "{} files (~{} KB), top-level: [{}]",
         file_count,
         total_bytes / 1024,
-        top_dirs
-            .into_iter()
-            .take(8)
-            .collect::<Vec<_>>()
-            .join(", ")
+        top_dirs.into_iter().take(8).collect::<Vec<_>>().join(", ")
     )
 }
 
@@ -293,9 +292,8 @@ fn synthesize_sections(
         );
     }
 
-    let mut actions = vec![
-        "Review consensus findings and sandbox permissions before install.".into(),
-    ];
+    let mut actions =
+        vec!["Review consensus findings and sandbox permissions before install.".into()];
     if llm_review.degraded {
         actions.push(
             "Enable CREG_LLM_ENABLED on an intelligence node for full semantic analysis.".into(),

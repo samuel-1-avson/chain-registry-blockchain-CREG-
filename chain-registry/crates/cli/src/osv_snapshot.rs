@@ -85,8 +85,7 @@ pub fn run_build(
         entries,
     };
 
-    let json =
-        serde_json::to_string_pretty(&snapshot).context("serialize OSV snapshot JSON")?;
+    let json = serde_json::to_string_pretty(&snapshot).context("serialize OSV snapshot JSON")?;
 
     match output {
         Some(path) if path.as_os_str() == "-" => {
@@ -103,7 +102,11 @@ pub fn run_build(
             }
             std::fs::write(path, &json)
                 .with_context(|| format!("write snapshot to {}", path.display()))?;
-            eprintln!("Wrote {} entries to {}", snapshot.entries.len(), path.display());
+            eprintln!(
+                "Wrote {} entries to {}",
+                snapshot.entries.len(),
+                path.display()
+            );
         }
         None => {
             print!("{json}");

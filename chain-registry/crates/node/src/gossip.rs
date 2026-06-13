@@ -160,14 +160,14 @@ impl Gossip {
     /// Returns `true` if this message hash has already been processed within the
     /// configured TTL window.  Inserts the hash if it is new.
     pub fn is_duplicate(&self, msg_hash: &str) -> bool {
-        let mut seen = self.seen.lock().unwrap();
+        let mut seen = self.seen.lock().expect("gossip seen-set mutex poisoned");
         !seen.insert(msg_hash.to_owned())
     }
 
     /// Evict entries older than `message_ttl_secs`.
     /// Call periodically (e.g. from a background timer) to bound memory.
     pub fn evict_stale(&self) {
-        let mut seen = self.seen.lock().unwrap();
+        let mut seen = self.seen.lock().expect("gossip seen-set mutex poisoned");
         // Simple strategy: just clear when the set grows large.
         // A production implementation would pair each entry with an Instant.
         if seen.len() > 10_000 {

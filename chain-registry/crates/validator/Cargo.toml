@@ -32,3 +32,9 @@ ed25519-dalek = { workspace = true }
 wasm_sandbox_crate = { package = "wasm-sandbox", path = "../wasm-sandbox" }
 
 
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+wat = "1.201"

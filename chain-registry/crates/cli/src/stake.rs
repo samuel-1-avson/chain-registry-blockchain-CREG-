@@ -71,7 +71,10 @@ pub async fn run(
     println!("  Token:     {}", token);
     println!("  Staking:   {}", staking);
     println!("  Network:   {}", rpc);
-    println!("  Flow:      approve({}, {}) then {}", staking, wei, stake_sig);
+    println!(
+        "  Flow:      approve({}, {}) then {}",
+        staking, wei, stake_sig
+    );
 
     // If a key file was provided, read the private key and send both transactions.
     if let Some(kp) = key_path {

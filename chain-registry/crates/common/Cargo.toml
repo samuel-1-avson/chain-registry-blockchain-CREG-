@@ -23,3 +23,6 @@ x25519-dalek = { version = "2.0", features = ["static_secrets"] }
 
 [build-dependencies]
 tonic-build = "0.12"
+
+[lints]
+workspace = true

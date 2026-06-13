@@ -309,11 +309,7 @@ async fn process_package(
     let gossip_bytes = match serde_json::to_vec(&gossip_vote) {
         Ok(bytes) => bytes,
         Err(e) => {
-            tracing::error!(
-                "Failed to serialize gossip vote for {}: {}",
-                canonical,
-                e
-            );
+            tracing::error!("Failed to serialize gossip vote for {}: {}", canonical, e);
             cleanup(&state, &canonical).await;
             return;
         }
@@ -328,7 +324,10 @@ async fn process_package(
         .await
         .is_err()
     {
-        tracing::warn!("P2P broadcast channel closed while gossiping vote for {}", canonical);
+        tracing::warn!(
+            "P2P broadcast channel closed while gossiping vote for {}",
+            canonical
+        );
     }
 
     // ── WAIT FOR QUORUM OUTCOME ───────────────────────────────────────────────
@@ -341,7 +340,9 @@ async fn process_package(
     };
     let mut consensus_outcome = None;
 
-    let max_iterations = vote_timeout_secs.saturating_mul(1000).div_ceil(VOTE_POLL_MS);
+    let max_iterations = vote_timeout_secs
+        .saturating_mul(1000)
+        .div_ceil(VOTE_POLL_MS);
     for _ in 0..max_iterations {
         {
             let sr = state.read().await;

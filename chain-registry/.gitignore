@@ -177,6 +177,13 @@ packages/
 dist/
 stress-report-out/
 
+# Keep malicious-fixture package inputs: they are committed test inputs for
+# crates/validator/tests/malicious_fixtures.rs, not scratch output. The broad
+# `package/` rule above otherwise excludes them, which breaks the test in a
+# fresh CI checkout ("<id> missing package/ directory").
+!testnet/malicious-fixtures/*/package/
+!testnet/malicious-fixtures/*/package/**
+
 # =============================================================================
 # NODE.JS / NPM (libraries)
 # =============================================================================

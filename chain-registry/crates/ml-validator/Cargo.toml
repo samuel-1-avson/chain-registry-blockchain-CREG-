@@ -58,3 +58,6 @@ common = { path = "../common" }
 
 [dev-dependencies]
 tempfile = "3"
+
+[lints]
+workspace = true
