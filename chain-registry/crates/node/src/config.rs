@@ -429,6 +429,28 @@ impl NodeConfig {
         errors
     }
 
+    /// MAL-001: public validators (CREG_PUBLIC_VALIDATOR=true) must not run the
+    /// behavioural-sandbox dev bypass and must use an isolated engine (nsjail, etc.).
+    pub fn validate_mal001_public_validator(&self) -> Vec<String> {
+        if !self.is_validator {
+            return Vec::new();
+        }
+        if std::env::var("CREG_PUBLIC_VALIDATOR").as_deref() != Ok("true") {
+            return Vec::new();
+        }
+
+        let mut errors = Vec::new();
+        if std::env::var("CREG_DEV_SANDBOX").as_deref() == Ok("true") {
+            errors.push(
+                "MAL-001: CREG_DEV_SANDBOX=true is forbidden when CREG_PUBLIC_VALIDATOR=true — \
+                 public validators must run a real sandbox (nsjail). Use docker-compose.fleet-sandbox.yml \
+                 or unset CREG_PUBLIC_VALIDATOR for local-only dev."
+                    .into(),
+            );
+        }
+        errors
+    }
+
     /// Reject unsafe development bypasses when `CREG_TESTNET` is not true.
     pub fn validate_production_security(&self) -> Vec<String> {
         if self.is_testnet {
@@ -689,6 +711,28 @@ mod tests {
         std::env::remove_var("CREG_DEV_SANDBOX");
         std::env::remove_var("CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM");
         std::env::remove_var("CREG_SECRETS_BACKEND");
+    }
+
+    #[test]
+    fn mal001_public_validator_rejects_dev_sandbox() {
+        std::env::set_var("CREG_DEV_SANDBOX", "true");
+        std::env::set_var("CREG_PUBLIC_VALIDATOR", "true");
+
+        let mut validator = base_config();
+        validator.is_validator = true;
+        let errors = validator.validate_mal001_public_validator();
+        assert!(errors.iter().any(|e| e.contains("MAL-001")), "{errors:?}");
+
+        std::env::remove_var("CREG_PUBLIC_VALIDATOR");
+        assert!(
+            validator.validate_mal001_public_validator().is_empty(),
+            "without CREG_PUBLIC_VALIDATOR local dev bypass is allowed"
+        );
+
+        let observer = base_config();
+        assert!(observer.validate_mal001_public_validator().is_empty());
+
+        std::env::remove_var("CREG_DEV_SANDBOX");
     }
 
     #[test]

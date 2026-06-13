@@ -1,0 +1,37 @@
+# Example Prometheus config for GCP testnet (fleet mode).
+# Copy or generate via:
+#   .\testnet\gcp\deploy-monitoring.ps1
+#
+# Replace VALIDATOR_INTERNAL_IP with the fleet VM VPC address.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: creg-testnet-gcp
+    environment: public-alpha
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+rule_files:
+  - "alerts.yml"
+
+scrape_configs:
+  - job_name: creg-node
+    static_configs:
+      - targets:
+          - "VALIDATOR_INTERNAL_IP:28180"
+          - "VALIDATOR_INTERNAL_IP:28181"
+          - "VALIDATOR_INTERNAL_IP:28182"
+        labels:
+          role: validator-fleet
+    metrics_path: /metrics
+    scrape_interval: 15s
+    scrape_timeout: 10s
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

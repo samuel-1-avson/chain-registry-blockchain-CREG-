@@ -291,6 +291,7 @@ core.*
 # =============================================================================
 testnet/sepolia-3node.env
 testnet/gcp/hosting.env
+testnet/monitoring/prometheus-gcp.yml
 testnet/gcp/hosting-state.json
 testnet/gcp/sepolia-geth-state.json
 testnet/gcp/validator-fleet-state.json

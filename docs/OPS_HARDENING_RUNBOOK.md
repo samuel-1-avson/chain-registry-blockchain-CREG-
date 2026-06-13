@@ -23,6 +23,8 @@ The node exposes Prometheus metrics at `GET /metrics`
 | `creg_bridge_anchor_count` | L2→L1 checkpoints committed |
 | `creg_bridge_last_anchor_eth_block` | L1 block of the most recent anchor |
 | `creg_bridge_finalized_l1_block` | most recent finalized L1 block seen by the bridge |
+| `creg_sandbox_dev_bypass` | 1 when `CREG_DEV_SANDBOX=true` (must be 0 on public validators, MAL-001) |
+| `creg_sandbox_isolated` | 1 when nsjail/gVisor/Docker isolation is active |
 
 ### Wire it up
 1. Add a scrape job labelled `creg-node` pointing at each node's `/metrics`
@@ -30,11 +32,17 @@ The node exposes Prometheus metrics at `GET /metrics`
 2. Load the alert rules: `testnet/monitoring/creg-alerts.yml` via
    `rule_files:` in `prometheus.yml`.
 3. Point Alertmanager at your channel (PagerDuty/Slack/email).
+4. **GCP testnet (edge VM):** run `testnet/gcp/deploy-monitoring.ps1` to
+   generate `testnet/monitoring/prometheus-gcp.yml`, sync to `creg-testnet-vm`,
+   and start `testnet/monitoring/docker-compose.monitoring.yml`. Verify with
+   `testnet/gcp/verify-monitoring.ps1`. Prometheus listens on `127.0.0.1:9090`
+   on the edge VM (use IAP SSH port-forward to browse).
 
 ### Alerts (see `creg-alerts.yml`)
 Node down, block production stalled (15m), PBFT quorum at risk
 (`active_validators < 2`), L2 reorg observed, L1 sync degraded/errored/reorg-
-churning, and bridge L1 stalled (no finalized block in 1h).
+churning, bridge L1 stalled (no finalized block in 1h), and **MAL-001 sandbox**
+(`CregSandboxDevBypass`, `CregSandboxNotIsolated`).
 
 ### Faucet / relayer balances
 These run as separate services and are **not** in the node metrics. Options:

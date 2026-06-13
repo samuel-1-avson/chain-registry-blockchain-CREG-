@@ -86,6 +86,35 @@ groups:
           summary: "Bridge has not seen a new finalized L1 block in 1h on {{ $labels.instance }}"
           description: "The checkpoint bridge cannot read L1 finalized state — anchoring is blocked. Check the bridge L1 RPC."
 
+  - name: creg-sandbox-mal001
+    rules:
+      - alert: CregSandboxDevBypass
+        expr: creg_sandbox_dev_bypass == 1
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Sandbox dev bypass active on {{ $labels.instance }} (MAL-001)"
+          description: "CREG_DEV_SANDBOX=true skips behavioural analysis. Public validators must use nsjail (creg_sandbox_dev_bypass=0)."
+
+      - alert: CregSandboxNotIsolated
+        expr: creg_sandbox_isolated == 0 and creg_active_validators >= 1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "No isolated sandbox engine on {{ $labels.instance }} (MAL-001)"
+          description: "creg_sandbox_isolated=0 — rebuild with the secure fleet image or install nsjail before serving public traffic."
+
+      - alert: CregSandboxEngineDegraded
+        expr: creg_sandbox_info{degraded="true"} == 1 and creg_sandbox_dev_bypass == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Degraded sandbox engine on {{ $labels.instance }}"
+          description: "Engine={{ $labels.engine }} is a fallback (Docker/gVisor). Prefer nsjail on public validators."
+
   # Faucet / relayer wallet balances are emitted by those services, not the
   # node. If you run them with their own metrics (or a blackbox balance probe),
   # add rules like:

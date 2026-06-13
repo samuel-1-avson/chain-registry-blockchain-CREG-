@@ -441,6 +441,38 @@ async fn main() -> Result<()> {
         );
     }
 
+    let mal001_errors = config.validate_mal001_public_validator();
+    if !mal001_errors.is_empty() {
+        for err in &mal001_errors {
+            tracing::error!("  ✗ {}", err);
+        }
+        anyhow::bail!(
+            "Cannot start node: MAL-001 public-validator sandbox policy violated. \
+             See docs/CREG_LIMITATIONS_PUBLIC_READINESS_PLAN.md (MAL-001)."
+        );
+    }
+    if config.is_validator && std::env::var("CREG_PUBLIC_VALIDATOR").as_deref() == Ok("true") {
+        let sandbox = validator::sandbox::engine_status().await;
+        if sandbox.dev_bypass {
+            anyhow::bail!(
+                "MAL-001: public validator detected sandbox dev bypass at runtime (engine={}). \
+                 Rebuild with the secure fleet image or unset CREG_DEV_SANDBOX.",
+                sandbox.engine
+            );
+        }
+        if !sandbox.isolated {
+            anyhow::bail!(
+                "MAL-001: public validator requires an isolated sandbox engine (got '{}'). \
+                 Install nsjail (fleet secure image) before serving public traffic.",
+                sandbox.engine
+            );
+        }
+        tracing::info!(
+            "  MAL-001: public validator sandbox engine={} isolated=true",
+            sandbox.engine
+        );
+    }
+
     // Genesis-hash pin (legacy path). Always log the computed hash so operators can grab it
     // for their chain spec; if CREG_GENESIS_HASH is set, also enforce match.
     match config.validate_genesis_hash() {
