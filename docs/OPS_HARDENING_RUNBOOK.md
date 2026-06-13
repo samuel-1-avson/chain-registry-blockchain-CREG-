@@ -31,9 +31,13 @@ The node exposes Prometheus metrics at `GET /metrics`
    (validators + observers).
 2. Load the alert rules: `testnet/monitoring/creg-alerts.yml` via
    `rule_files:` in `prometheus.yml`.
-3. Point Alertmanager at your channel (PagerDuty/Slack/email). For GCP, set in
+3. Point Alertmanager at your channel. For GCP, either run
+   `testnet/gcp/setup-alert-receiver.ps1` (default: **ntfy** mobile push) or set in
    `testnet/gcp/hosting.env` (see `hosting.env.example`):
-   - `GCP_ALERT_SLACK_WEBHOOK_URL` — Slack incoming webhook (recommended)
+   - `GCP_ALERT_NTFY_TOPIC` / `GCP_ALERT_NTFY_SERVER` — ntfy.sh push (no Slack)
+   - `GCP_ALERT_SLACK_WEBHOOK_URL` — Slack incoming webhook
+   - `GCP_ALERT_WEBHOOK_URL` — Discord / Google Chat / custom webhook
+   - `GCP_ALERT_EMAIL_TO` + `GCP_ALERT_SMTP_*` — email via SMTP
    - `GCP_ALERT_PAGERDUTY_ROUTING_KEY` — optional PagerDuty Events API v2 key
    `deploy-monitoring.ps1` generates `testnet/monitoring/alertmanager-gcp.yml`
    from these values (gitignored; template in `alertmanager-gcp.yml.example`).

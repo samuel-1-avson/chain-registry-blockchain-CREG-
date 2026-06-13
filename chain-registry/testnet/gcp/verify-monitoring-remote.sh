@@ -41,7 +41,16 @@ else
 fi
 
 receivers="$(curl -fsS 'http://127.0.0.1:9093/api/v2/receivers')"
-if echo "$receivers" | grep -Eq 'webhook_configs|pagerduty_configs'; then
+am_cfg="$(cat "$HOME/creg-hosting/"*/chain-registry/testnet/monitoring/alertmanager-gcp.yml 2>/dev/null || true)"
+if echo "$am_cfg" | grep -q 'slack_configs:'; then
+  echo "ALERT_RECEIVERS_OK"
+elif echo "$am_cfg" | grep -q 'pagerduty_configs:'; then
+  echo "ALERT_RECEIVERS_OK"
+elif echo "$am_cfg" | grep -q 'email_configs:'; then
+  echo "ALERT_RECEIVERS_OK"
+elif echo "$am_cfg" | grep -q 'webhook_configs:'; then
+  echo "ALERT_RECEIVERS_NTFY"
+elif echo "$receivers" | grep -Eq 'slack_configs|pagerduty_configs|email_configs|webhook_configs'; then
   echo "ALERT_RECEIVERS_OK"
 else
   echo "ALERT_RECEIVERS_UNCONFIGURED"
