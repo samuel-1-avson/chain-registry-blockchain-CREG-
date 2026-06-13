@@ -20,10 +20,42 @@ pub async fn run(
     };
 
     let mut ticker = interval(Duration::from_secs(block_interval));
-    tracing::info!("Block producer started (interval: {}s)", block_interval);
+    // How long the chain tip may stall before the next-ranked proposer is
+    // allowed to step in. Each elapsed window promotes one more fallback rank,
+    // so a single offline proposer no longer halts block production.
+    let fallback_window_secs = std::env::var("CREG_PROPOSER_FALLBACK_SECS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or(block_interval.saturating_mul(2).max(1));
+    tracing::info!(
+        "Block producer started (interval: {}s, proposer fallback window: {}s)",
+        block_interval,
+        fallback_window_secs
+    );
+
+    let mut last_seen_tip: u64 = {
+        let s = state.read().await;
+        s.chain.tip_height().unwrap_or(0)
+    };
+    let mut tip_unchanged_since = std::time::Instant::now();
 
     loop {
         ticker.tick().await;
+
+        // Track how long the tip has been stalled. Re-reading every tick means
+        // blocks produced by peers reset the timer too, so fallback only
+        // engages during a genuine production stall.
+        let current_tip = {
+            let s = state.read().await;
+            s.chain.tip_height().unwrap_or(last_seen_tip)
+        };
+        if current_tip != last_seen_tip {
+            last_seen_tip = current_tip;
+            tip_unchanged_since = std::time::Instant::now();
+        }
+        let stall_secs = tip_unchanged_since.elapsed().as_secs();
+        let allowed_fallback_rank = (stall_secs / fallback_window_secs) as usize;
 
         // Drain everything the validator pipeline has finalised since last tick.
         let txs: Vec<Transaction> = finalized_tx::drain(&rx).await;
@@ -32,7 +64,14 @@ pub async fn run(
             continue;
         }
 
-        match produce_block(Arc::clone(&state), txs, p2p_handle.clone()).await {
+        match produce_block(
+            Arc::clone(&state),
+            txs,
+            p2p_handle.clone(),
+            allowed_fallback_rank,
+        )
+        .await
+        {
             Ok(block) => {
                 let bh = block.hash();
                 tracing::info!(
@@ -68,6 +107,7 @@ async fn produce_block(
     state: Arc<RwLock<NodeState>>,
     txs: Vec<Transaction>,
     p2p: crate::p2p::P2PHandle,
+    allowed_fallback_rank: usize,
 ) -> anyhow::Result<Block> {
     // ── Read-only snapshot of state needed for VRF selection ────────────────
     let (tip_height, prev_hash, node_id, privkey, our_pubkey, validator_set_hash) = {
@@ -170,15 +210,38 @@ async fn produce_block(
                 }
             }
 
-            let selected_proposer =
-                consensus::vrf::select_proposer_deterministic(&active, &epoch_seed)
-                    .ok_or_else(|| anyhow::anyhow!("No active validators to select proposer"))?;
-            if node_id != selected_proposer {
-                anyhow::bail!(
-                    "Node {} is not the selected proposer for this epoch (expected {})",
-                    node_id,
-                    selected_proposer
-                );
+            // Determine our position in the deterministic proposer ordering.
+            // Rank 0 is the primary proposer and always proceeds. A higher
+            // rank may only propose once the tip has stalled long enough to
+            // promote that rank (proposer-failure fallback for liveness).
+            let ranking = consensus::vrf::rank_proposers(&active, &epoch_seed);
+            if ranking.is_empty() {
+                anyhow::bail!("No active validators to select proposer");
+            }
+            let effective_rank = allowed_fallback_rank.min(ranking.len().saturating_sub(1));
+            match ranking.iter().position(|id| id == &node_id) {
+                Some(0) => {}
+                Some(rank) if rank == effective_rank => {
+                    tracing::warn!(
+                        "Proposer fallback engaged: tip stalled, node {} stepping in as rank-{} proposer (primary appears offline)",
+                        node_id,
+                        rank
+                    );
+                }
+                Some(rank) => {
+                    anyhow::bail!(
+                        "Node {} is proposer rank {} for this epoch; not its turn yet (allowed fallback rank {})",
+                        node_id,
+                        rank,
+                        effective_rank
+                    );
+                }
+                None => {
+                    anyhow::bail!(
+                        "Node {} is not in the active proposer set for this epoch",
+                        node_id
+                    );
+                }
             }
             (Some(out), Some(prf))
         } else {

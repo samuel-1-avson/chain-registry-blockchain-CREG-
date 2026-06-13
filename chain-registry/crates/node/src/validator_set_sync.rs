@@ -281,6 +281,12 @@ pub fn decode(log: LogView<'_>) -> Result<Option<ValidatorSetDelta>, DecodeError
 #[derive(Clone, Debug)]
 pub struct SyncConfig {
     pub eth_rpc_url: String,
+    /// Additional independent L1 RPC endpoints used for quorum reads. The
+    /// primary `eth_rpc_url` plus these form the endpoint set: head block
+    /// height is taken conservatively (median/min) and the cursor block hash
+    /// used for reorg detection must reach a strict majority before any
+    /// rebuild, so a single compromised or stale RPC cannot skew membership.
+    pub extra_rpc_urls: Vec<String>,
     pub staking_addr: Address,
     /// How far behind head we trail before applying a delta. 0 disables the
     /// lag (useful for local Anvil tests where reorgs do not happen).
@@ -296,12 +302,128 @@ impl Default for SyncConfig {
     fn default() -> Self {
         Self {
             eth_rpc_url: "http://127.0.0.1:8545".into(),
+            extra_rpc_urls: Vec::new(),
             staking_addr: Address::ZERO,
             finality_lag_blocks: 6,
             poll_interval_secs: 12,
             start_block: None,
         }
     }
+}
+
+impl SyncConfig {
+    /// The full ordered set of L1 RPC endpoints: primary first, then extras.
+    /// De-duplicated so a misconfiguration listing the primary twice does not
+    /// inflate the apparent quorum.
+    fn rpc_endpoints(&self) -> Vec<String> {
+        let mut endpoints = Vec::with_capacity(1 + self.extra_rpc_urls.len());
+        endpoints.push(self.eth_rpc_url.clone());
+        for url in &self.extra_rpc_urls {
+            let url = url.trim().to_string();
+            if !url.is_empty() && !endpoints.iter().any(|e| e == &url) {
+                endpoints.push(url);
+            }
+        }
+        endpoints
+    }
+}
+
+/// Fan out `eth_blockNumber` to every endpoint and combine conservatively via
+/// `l1_quorum::aggregate_height`. Errors only when no endpoint responds.
+async fn fetch_latest_block_quorum(
+    client: &reqwest::Client,
+    endpoints: &[String],
+) -> anyhow::Result<u64> {
+    let mut heights = Vec::with_capacity(endpoints.len());
+    let mut last_err: Option<String> = None;
+    for ep in endpoints {
+        match fetch_latest_block(client, ep).await {
+            Ok(h) => heights.push(h),
+            Err(e) => last_err = Some(e.to_string()),
+        }
+    }
+    crate::l1_quorum::aggregate_height(&heights).ok_or_else(|| {
+        anyhow::anyhow!(
+            "no L1 RPC endpoint returned a block number ({} tried): {}",
+            endpoints.len(),
+            last_err.unwrap_or_else(|| "unknown error".into())
+        )
+    })
+}
+
+/// Fetch a block hash from the first endpoint that answers (failover). Used
+/// for non-critical reads where we only need *a* hash to record the cursor.
+async fn fetch_block_hash_failover(
+    client: &reqwest::Client,
+    endpoints: &[String],
+    block_number: u64,
+) -> anyhow::Result<String> {
+    let mut last_err: Option<String> = None;
+    for ep in endpoints {
+        match fetch_block_hash(client, ep, block_number).await {
+            Ok(h) => return Ok(h),
+            Err(e) => last_err = Some(e.to_string()),
+        }
+    }
+    Err(anyhow::anyhow!(
+        "no L1 RPC endpoint returned block {} hash: {}",
+        block_number,
+        last_err.unwrap_or_else(|| "unknown error".into())
+    ))
+}
+
+/// Outcome of a quorum block-hash read used for reorg detection.
+enum HashQuorum {
+    /// A strict majority of endpoints agree on this hash.
+    Agreed(String),
+    /// Endpoints responded but did not reach a majority — inconclusive, so
+    /// the caller must NOT treat this as a reorg.
+    NoMajority,
+    /// No endpoint responded at all.
+    Unavailable,
+}
+
+/// Fan out `eth_getBlockByNumber` and require a strict majority agreement on
+/// the hash. Used to gate the destructive reorg rebuild so a single divergent
+/// RPC cannot force it.
+async fn fetch_block_hash_quorum(
+    client: &reqwest::Client,
+    endpoints: &[String],
+    block_number: u64,
+) -> HashQuorum {
+    let mut hashes = Vec::with_capacity(endpoints.len());
+    for ep in endpoints {
+        if let Ok(h) = fetch_block_hash(client, ep, block_number).await {
+            hashes.push(h);
+        }
+    }
+    if hashes.is_empty() {
+        return HashQuorum::Unavailable;
+    }
+    match crate::l1_quorum::majority_hash(&hashes) {
+        Some(h) => HashQuorum::Agreed(h),
+        None => HashQuorum::NoMajority,
+    }
+}
+
+/// Fetch staking deltas from the first endpoint that succeeds (failover).
+/// Logs are deterministic within the already quorum-confirmed finalized range,
+/// so failover (rather than cross-endpoint set agreement) is the right trade.
+async fn fetch_deltas_failover(
+    client: &reqwest::Client,
+    endpoints: &[String],
+    staking_addr: &alloy::primitives::Address,
+    from_block: u64,
+    to_block: u64,
+) -> anyhow::Result<Vec<ValidatorSetDelta>> {
+    let mut last_err: Option<anyhow::Error> = None;
+    for ep in endpoints {
+        match fetch_deltas(client, ep, staking_addr, from_block, to_block).await {
+            Ok(deltas) => return Ok(deltas),
+            Err(e) => last_err = Some(e),
+        }
+    }
+    Err(last_err.unwrap_or_else(|| anyhow::anyhow!("no L1 RPC endpoint returned staking logs")))
 }
 
 /// Mode for the worker. See module docstring for the phasing plan.
@@ -569,11 +691,12 @@ async fn rebuild_worker_state(
     safe_block: u64,
 ) -> anyhow::Result<WorkerState> {
     let mut worker_state = seed_worker_state_from_bootstrap(state).await;
+    let endpoints = config.rpc_endpoints();
 
     if let Some(start_block) = config.start_block {
         worker_state.cursor = Some((start_block, u32::MAX));
         worker_state.cursor_block_hash =
-            Some(fetch_block_hash(client, &config.eth_rpc_url, start_block).await?);
+            Some(fetch_block_hash_failover(client, &endpoints, start_block).await?);
     }
 
     let from_block = match worker_state.cursor {
@@ -582,9 +705,9 @@ async fn rebuild_worker_state(
     };
 
     if from_block <= safe_block {
-        let mut deltas = fetch_deltas(
+        let mut deltas = fetch_deltas_failover(
             client,
-            &config.eth_rpc_url,
+            &endpoints,
             &config.staking_addr,
             from_block,
             safe_block,
@@ -607,7 +730,7 @@ async fn rebuild_worker_state(
 
     if let Some((height, _)) = worker_state.cursor {
         worker_state.cursor_block_hash =
-            Some(fetch_block_hash(client, &config.eth_rpc_url, height).await?);
+            Some(fetch_block_hash_failover(client, &endpoints, height).await?);
     }
 
     Ok(worker_state)
@@ -623,6 +746,20 @@ pub async fn run(
     state: Arc<RwLock<NodeState>>,
 ) -> anyhow::Result<()> {
     let client = reqwest::Client::new();
+    let endpoints = config.rpc_endpoints();
+    if endpoints.len() > 1 {
+        tracing::info!(
+            target: "validator_set_sync",
+            "L1 quorum reads enabled across {} RPC endpoints",
+            endpoints.len()
+        );
+    } else {
+        tracing::warn!(
+            target: "validator_set_sync",
+            "single L1 RPC endpoint — set CREG_ETH_RPC_FALLBACKS to add quorum endpoints \
+             so one stale or compromised RPC cannot skew the validator set"
+        );
+    }
     let mut worker_state = match load_cursor(&state).await {
         Some(saved) => saved,
         None => {
@@ -643,7 +780,7 @@ pub async fn run(
         if let Some(start_block) = config.start_block {
             worker_state.cursor = Some((start_block, u32::MAX));
             worker_state.cursor_block_hash =
-                Some(fetch_block_hash(&client, &config.eth_rpc_url, start_block).await?);
+                Some(fetch_block_hash_failover(&client, &endpoints, start_block).await?);
         }
     }
     if matches!(mode, SyncMode::ChainAuthoritative) {
@@ -664,7 +801,7 @@ pub async fn run(
         })
         .await;
 
-        let latest_block = match fetch_latest_block(&client, &config.eth_rpc_url).await {
+        let latest_block = match fetch_latest_block_quorum(&client, &endpoints).await {
             Ok(b) => b,
             Err(e) => {
                 update_sync_status(&state, |status| {
@@ -684,32 +821,45 @@ pub async fn run(
         .await;
 
         if let Some((cursor_block, _)) = worker_state.cursor {
-            if let Ok(current_hash) =
-                fetch_block_hash(&client, &config.eth_rpc_url, cursor_block).await
-            {
-                if cursor_reorged(&worker_state, &current_hash) {
-                    update_sync_status(&state, |status| {
-                        status.state = "reorg-replaying".to_string();
-                        status.last_error = None;
-                    })
-                    .await;
+            match fetch_block_hash_quorum(&client, &endpoints, cursor_block).await {
+                HashQuorum::Agreed(current_hash) => {
+                    if cursor_reorged(&worker_state, &current_hash) {
+                        update_sync_status(&state, |status| {
+                            status.state = "reorg-replaying".to_string();
+                            status.last_error = None;
+                        })
+                        .await;
+                        tracing::warn!(
+                            target: "validator_set_sync",
+                            cursor_block,
+                            saved_hash =
+                                worker_state.cursor_block_hash.as_deref().unwrap_or("<none>"),
+                            current_hash = current_hash,
+                            "validator-set sync detected an L1 reorg (majority-confirmed); \
+                             rebuilding authoritative view"
+                        );
+                        worker_state =
+                            rebuild_worker_state(&client, &config, &state, safe_block).await?;
+                        if matches!(mode, SyncMode::ChainAuthoritative) {
+                            reconcile_state_from_worker(Arc::clone(&state), &worker_state).await?;
+                        }
+                        save_cursor(&state, &worker_state).await?;
+                    } else if worker_state.cursor_block_hash.is_none() {
+                        worker_state.cursor_block_hash = Some(current_hash);
+                        save_cursor(&state, &worker_state).await?;
+                    }
+                }
+                HashQuorum::NoMajority => {
+                    // Endpoints disagree with no majority — inconclusive. Do NOT
+                    // rebuild on the word of a possibly-divergent single RPC.
                     tracing::warn!(
                         target: "validator_set_sync",
                         cursor_block,
-                        saved_hash = worker_state.cursor_block_hash.as_deref().unwrap_or("<none>"),
-                        current_hash = current_hash,
-                        "validator-set sync detected an L1 reorg; rebuilding authoritative view"
+                        "L1 endpoints disagree on cursor block hash with no majority; \
+                         skipping reorg check this poll"
                     );
-                    worker_state =
-                        rebuild_worker_state(&client, &config, &state, safe_block).await?;
-                    if matches!(mode, SyncMode::ChainAuthoritative) {
-                        reconcile_state_from_worker(Arc::clone(&state), &worker_state).await?;
-                    }
-                    save_cursor(&state, &worker_state).await?;
-                } else if worker_state.cursor_block_hash.is_none() {
-                    worker_state.cursor_block_hash = Some(current_hash);
-                    save_cursor(&state, &worker_state).await?;
                 }
+                HashQuorum::Unavailable => {}
             }
         }
 
@@ -732,9 +882,9 @@ pub async fn run(
             continue;
         }
 
-        match fetch_deltas(
+        match fetch_deltas_failover(
             &client,
-            &config.eth_rpc_url,
+            &endpoints,
             &config.staking_addr,
             from_block,
             safe_block,
@@ -776,7 +926,7 @@ pub async fn run(
                 }
                 if let Some((height, _)) = worker_state.cursor {
                     worker_state.cursor_block_hash =
-                        Some(fetch_block_hash(&client, &config.eth_rpc_url, height).await?);
+                        Some(fetch_block_hash_failover(&client, &endpoints, height).await?);
                 }
                 if let Err(e) = save_cursor(&state, &worker_state).await {
                     tracing::warn!("Failed to save validator set sync cursor: {}", e);

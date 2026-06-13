@@ -10,7 +10,7 @@ use alloy::{
 };
 use axum::{
     extract::{ConnectInfo, Path, State},
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Json},
     routing::{get, post},
     Router,
@@ -20,15 +20,20 @@ use dashmap::DashMap;
 use k256::ecdsa::{RecoveryId, Signature as K256Signature, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{collections::HashMap, fs, net::SocketAddr, sync::Arc, time::Duration};
+use std::{collections::HashMap, fs, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tokio::time::sleep;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 use tracing::{error, info};
 use uuid::Uuid;
 
 const EIP712_DOMAIN_TYPE: &str =
     "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)";
 const SPONSORED_STAKE_INTENT_TYPE: &str = "SponsoredStakeIntent(address owner,address tokenContract,address stakingContract,uint8 action,uint256 amount,uint256 permitNonce,uint256 permitDeadline,uint256 relayerNonce,uint256 expiresAt)";
+/// EIP-2612 permit typehash struct string. Used to recover the permit signer
+/// off-chain so the relayer does not spend gas on a transaction whose permit
+/// would revert on-chain.
+const PERMIT_TYPE: &str =
+    "Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)";
 const TOKEN_NAME: &str = "Chain Registry Token";
 const TOKEN_VERSION: &str = "1";
 
@@ -55,6 +60,14 @@ struct RelayerConfig {
     policy_path: String,
     relayer_address: Address,
     active_chain_id: u64,
+    /// Directory for relayer-local persistence (sponsor nonce journal).
+    data_dir: String,
+    /// Only honour `X-Forwarded-For` / `X-Real-IP` when true. Enable only when
+    /// the relayer sits behind a trusted reverse proxy that sets these
+    /// headers; otherwise clients can spoof their IP to bypass per-IP quotas.
+    trust_proxy: bool,
+    /// Allowed CORS origins (exact match). Empty → allow any origin (dev only).
+    allowed_origins: Vec<String>,
 }
 
 impl RelayerConfig {
@@ -71,6 +84,12 @@ impl RelayerConfig {
         let rpc_url = env_string("RELAYER_RPC_URL", "http://localhost:8545");
         let active_chain_id = fetch_chain_id(http_client, &rpc_url).await?;
 
+        let allowed_origins: Vec<String> = env_string("RELAYER_ALLOWED_ORIGINS", "")
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+
         Ok((
             Self {
                 port: env_u16("RELAYER_PORT", 8083),
@@ -79,6 +98,9 @@ impl RelayerConfig {
                 policy_path: env_string("RELAYER_POLICY_PATH", "config/relayer-policy.example.json"),
                 relayer_address,
                 active_chain_id,
+                data_dir: env_string("RELAYER_DATA_DIR", "."),
+                trust_proxy: env_bool("RELAYER_TRUST_PROXY", false),
+                allowed_origins,
             },
             secrets,
         ))
@@ -435,10 +457,18 @@ async fn main() -> anyhow::Result<()> {
         ip_daily_counts: DashMap::new(),
     });
 
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
+    // Restore sponsor nonces so a relayer restart cannot reset the per-owner
+    // nonce to 0 and accept a stale/replayed sponsored-stake intent.
+    let restored = load_sponsor_nonces(&config.data_dir);
+    let restored_count = restored.len();
+    for (key, value) in restored {
+        state.sponsor_nonces.insert(key, value);
+    }
+    info!("  Data dir:        {}", config.data_dir);
+    info!("  Trust proxy hdr: {}", config.trust_proxy);
+    info!("  Restored nonces: {}", restored_count);
+
+    let cors = build_cors(&config.allowed_origins);
 
     let app = Router::new()
         .route("/health", get(health_check))
@@ -512,7 +542,7 @@ async fn quote_request(
     headers: HeaderMap,
     Json(request): Json<QuoteRequest>,
 ) -> impl IntoResponse {
-    let client_ip = extract_client_ip(&headers, peer_addr);
+    let client_ip = extract_client_ip(&headers, peer_addr, state.config.trust_proxy);
 
     match build_quote(&state, &request, &client_ip).await {
         Ok(response) => (StatusCode::OK, Json(response)).into_response(),
@@ -566,7 +596,7 @@ async fn sponsor_request(
     headers: HeaderMap,
     Json(request): Json<SponsorRequest>,
 ) -> impl IntoResponse {
-    let client_ip = extract_client_ip(&headers, peer_addr);
+    let client_ip = extract_client_ip(&headers, peer_addr, state.config.trust_proxy);
 
     let prepared = match validate_sponsor_request(&state, &request) {
         Ok(prepared) => prepared,
@@ -725,9 +755,27 @@ async fn sponsor_request(
         }
     };
 
+    // Recover the ERC-2612 permit signer off-chain and confirm it is the owner
+    // BEFORE spending relayer gas. Without this, a malformed/forged permit only
+    // fails inside the on-chain call — after the relayer has already paid.
+    if let Err(message) = verify_permit_signature(&state, &request, &prepared) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(SponsorResponse {
+                success: false,
+                request_id: String::new(),
+                status: "rejected".to_string(),
+                tx_hash: None,
+                message,
+            }),
+        )
+            .into_response();
+    }
+
     state
         .sponsor_nonces
         .insert(owner_nonce_key, expected_nonce + 1);
+    persist_sponsor_nonces(&state);
     record_quota(
         &state.wallet_daily_counts,
         &wallet_quota_key(prepared.owner, prepared.action),
@@ -1057,6 +1105,121 @@ fn verify_intent_signature(
     }
 
     Ok(())
+}
+
+/// EIP-712 digest of the ERC-2612 `Permit` typed-data over the token domain.
+/// Mirrors `hash_sponsored_intent` but for the permit struct so the relayer
+/// can recover the permit signer locally.
+fn hash_permit(chain_id: u64, token_contract: Address, prepared: &ValidatedActionRequest) -> B256 {
+    let domain_type_hash = keccak256(EIP712_DOMAIN_TYPE.as_bytes());
+    let domain_separator = keccak256(
+        (
+            domain_type_hash,
+            keccak256(TOKEN_NAME.as_bytes()),
+            keccak256(TOKEN_VERSION.as_bytes()),
+            U256::from(chain_id),
+            token_contract,
+        )
+            .abi_encode(),
+    );
+    let permit_type_hash = keccak256(PERMIT_TYPE.as_bytes());
+    let struct_hash = keccak256(
+        (
+            permit_type_hash,
+            prepared.owner,
+            prepared.staking_contract,
+            prepared.amount,
+            prepared.permit_nonce,
+            prepared.permit_deadline,
+        )
+            .abi_encode(),
+    );
+
+    let mut bytes = Vec::with_capacity(66);
+    bytes.extend_from_slice(&[0x19, 0x01]);
+    bytes.extend_from_slice(domain_separator.as_slice());
+    bytes.extend_from_slice(struct_hash.as_slice());
+    keccak256(bytes)
+}
+
+/// Recover the ERC-2612 permit signer and confirm it equals the owner, so the
+/// relayer never spends gas on a permit that would revert on-chain.
+fn verify_permit_signature(
+    state: &AppState,
+    request: &SponsorRequest,
+    prepared: &ValidatedActionRequest,
+) -> Result<(), String> {
+    let digest = hash_permit(
+        state.config.active_chain_id,
+        prepared.token_contract,
+        prepared,
+    );
+    let recovered = recover_address_from_signature(&digest, &request.permit_signature)?;
+    if recovered != prepared.owner {
+        return Err(format!(
+            "Permit signature recovered {}, expected owner {}.",
+            recovered, prepared.owner
+        ));
+    }
+    Ok(())
+}
+
+/// Build the CORS layer. With no configured origins we keep `Any` (dev) but
+/// warn; with an allowlist we restrict `Access-Control-Allow-Origin` to it.
+fn build_cors(allowed_origins: &[String]) -> CorsLayer {
+    let base = CorsLayer::new().allow_methods(Any).allow_headers(Any);
+    let origins: Vec<HeaderValue> = allowed_origins
+        .iter()
+        .filter_map(|o| o.parse::<HeaderValue>().ok())
+        .collect();
+    if origins.is_empty() {
+        info!("  CORS:            any origin (set RELAYER_ALLOWED_ORIGINS in production)");
+        base.allow_origin(Any)
+    } else {
+        info!("  CORS:            {} allowed origin(s)", origins.len());
+        base.allow_origin(AllowOrigin::list(origins))
+    }
+}
+
+fn sponsor_nonces_path(data_dir: &str) -> PathBuf {
+    PathBuf::from(data_dir).join("sponsor-nonces.json")
+}
+
+/// Load the persisted per-owner sponsor nonce map. Missing/unparseable file
+/// yields an empty map (we start from 0, matching first-boot behaviour).
+fn load_sponsor_nonces(data_dir: &str) -> HashMap<String, u64> {
+    match fs::read(sponsor_nonces_path(data_dir)) {
+        Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_default(),
+        Err(_) => HashMap::new(),
+    }
+}
+
+/// Persist the sponsor nonce map atomically (temp file + rename). Best-effort:
+/// a write failure is logged but does not fail the request that already
+/// validated and is about to be submitted.
+fn persist_sponsor_nonces(state: &AppState) {
+    let map: HashMap<String, u64> = state
+        .sponsor_nonces
+        .iter()
+        .map(|entry| (entry.key().clone(), *entry.value()))
+        .collect();
+    let path = sponsor_nonces_path(&state.config.data_dir);
+    let bytes = match serde_json::to_vec_pretty(&map) {
+        Ok(b) => b,
+        Err(e) => {
+            error!("Failed to serialize sponsor nonces: {}", e);
+            return;
+        }
+    };
+    let _ = fs::create_dir_all(&state.config.data_dir);
+    let tmp = path.with_extension("json.tmp");
+    if let Err(e) = fs::write(&tmp, &bytes) {
+        error!("Failed to write sponsor nonce journal: {}", e);
+        return;
+    }
+    if let Err(e) = fs::rename(&tmp, &path) {
+        error!("Failed to persist sponsor nonce journal: {}", e);
+    }
 }
 
 async fn send_sponsored_transaction(
@@ -1532,7 +1695,14 @@ fn record_quota(store: &DashMap<String, DailyCounter>, key: &str) {
     );
 }
 
-fn extract_client_ip(headers: &HeaderMap, peer_addr: SocketAddr) -> String {
+/// Resolve the client IP used for per-IP quotas. Proxy headers
+/// (`X-Forwarded-For`, `X-Real-IP`) are only honoured when `trust_proxy` is
+/// set, because otherwise any client can spoof them to evade the IP quota.
+/// When not trusting proxies we always use the real TCP peer address.
+fn extract_client_ip(headers: &HeaderMap, peer_addr: SocketAddr, trust_proxy: bool) -> String {
+    if !trust_proxy {
+        return peer_addr.ip().to_string();
+    }
     headers
         .get("x-forwarded-for")
         .and_then(|value| value.to_str().ok())
@@ -1544,6 +1714,7 @@ fn extract_client_ip(headers: &HeaderMap, peer_addr: SocketAddr) -> String {
                 .and_then(|value| value.to_str().ok())
                 .map(|value| value.trim().to_string())
         })
+        .filter(|s| !s.is_empty())
         .unwrap_or_else(|| peer_addr.ip().to_string())
 }
 
@@ -1619,6 +1790,16 @@ fn env_u16(key: &str, default: u16) -> u16 {
     std::env::var(key)
         .ok()
         .and_then(|value| value.parse::<u16>().ok())
+        .unwrap_or(default)
+}
+
+fn env_bool(key: &str, default: bool) -> bool {
+    std::env::var(key)
+        .ok()
+        .map(|value| {
+            let v = value.trim().to_ascii_lowercase();
+            v == "true" || v == "1" || v == "yes"
+        })
         .unwrap_or(default)
 }
 

@@ -18,6 +18,7 @@ mod gossip;
 mod intelligence;
 mod grpc;
 mod json_rpc;
+mod l1_quorum;
 mod metrics;
 mod openapi;
 mod p2p;
@@ -653,8 +654,17 @@ async fn main() -> Result<()> {
                  finality buffer; a shallow L1 reorg can flap validator membership."
             );
         }
+        // Additional independent L1 RPC endpoints for quorum reads, so one
+        // stale/compromised RPC cannot skew the validator set. Comma-separated.
+        let extra_rpc_urls: Vec<String> = std::env::var("CREG_ETH_RPC_FALLBACKS")
+            .unwrap_or_default()
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
         let sync_config = validator_set_sync::SyncConfig {
             eth_rpc_url: config.eth_rpc_url.clone(),
+            extra_rpc_urls,
             staking_addr: config.staking_addr.parse().unwrap_or_else(|_| {
                 tracing::warn!("Invalid staking address; validator set sync disabled");
                 alloy::primitives::Address::ZERO

@@ -125,6 +125,38 @@ pub fn select_proposer_deterministic(
         .map(|(id, _)| id)
 }
 
+/// Return validator ids ordered by ascending deterministic proposer score for
+/// `epoch_seed`. Index 0 is the primary proposer (the one
+/// `select_proposer_deterministic` returns); index 1 is the first fallback,
+/// and so on. Used by the block producer to let a lower-priority validator
+/// step in when the primary proposer is offline (liveness), with rotation
+/// driven by how long the chain has been stalled.
+pub fn rank_proposers(validators: &[VrfValidator], epoch_seed: &str) -> Vec<String> {
+    let mut scored: Vec<(String, String)> = validators
+        .iter()
+        .map(|v| {
+            let score = sha256_hex(format!("{}:{}", v.pubkey, epoch_seed).as_bytes());
+            (v.id.clone(), score)
+        })
+        .collect();
+    // Sort by score, then id, so the ordering is total and stable even if two
+    // validators ever hash to the same score.
+    scored.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
+    scored.into_iter().map(|(id, _)| id).collect()
+}
+
+/// Zero-based fallback rank of `validator_id` in the proposer ordering for
+/// `epoch_seed`, or `None` if the validator is not in the active set.
+pub fn proposer_rank(
+    validators: &[VrfValidator],
+    epoch_seed: &str,
+    validator_id: &str,
+) -> Option<usize> {
+    rank_proposers(validators, epoch_seed)
+        .into_iter()
+        .position(|id| id == validator_id)
+}
+
 /// Select the block proposer from the active set using VRF proofs.
 ///
 /// * If a validator provides a `vrf_output` + `vrf_proof`, the proof is verified
@@ -250,6 +282,44 @@ mod tests {
         let a = select_proposer(&validators, "seed1").unwrap();
         let b = select_proposer(&validators, "seed1").unwrap();
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn rank_proposers_orders_all_validators_with_primary_first() {
+        let validators = vec![
+            VrfValidator {
+                id: "val_1".into(),
+                pubkey: "aa".into(),
+                vrf_output: None,
+                vrf_proof: None,
+            },
+            VrfValidator {
+                id: "val_2".into(),
+                pubkey: "bb".into(),
+                vrf_output: None,
+                vrf_proof: None,
+            },
+            VrfValidator {
+                id: "val_3".into(),
+                pubkey: "cc".into(),
+                vrf_output: None,
+                vrf_proof: None,
+            },
+        ];
+
+        let ranking = rank_proposers(&validators, "seed1");
+        assert_eq!(ranking.len(), 3);
+
+        // Rank 0 must match the single-proposer selection.
+        let primary = select_proposer_deterministic(&validators, "seed1").unwrap();
+        assert_eq!(ranking[0], primary);
+
+        // Every validator appears exactly once and ranks are consistent.
+        for (idx, id) in ranking.iter().enumerate() {
+            assert_eq!(proposer_rank(&validators, "seed1", id), Some(idx));
+        }
+
+        assert_eq!(proposer_rank(&validators, "seed1", "nope"), None);
     }
 
     #[test]
