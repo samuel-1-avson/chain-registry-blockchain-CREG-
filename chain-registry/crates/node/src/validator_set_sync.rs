@@ -641,6 +641,21 @@ async fn reconcile_state_from_worker(
 
     s.validator_set.validators = next_validators;
 
+    // Record this set in the height-indexed history (effective from the next
+    // block) so blocks signed under it verify correctly after a later rotation
+    // (ISSUE-050). record() dedups when membership is unchanged.
+    let effective_from = s.chain.tip_height().unwrap_or(0).saturating_add(1);
+    let data_dir = s.config.data_dir.clone();
+    if let Err(e) =
+        crate::validator_set_history::record(&data_dir, effective_from, &s.validator_set)
+    {
+        tracing::warn!(
+            target: "validator_set_sync",
+            "failed to record validator-set history snapshot: {}",
+            e
+        );
+    }
+
     for registration in s.validator_registrations.values_mut() {
         let key = normalized_validator_key(&registration.identity.evm_address);
         let is_active = !key.is_empty() && active_addresses.contains(&key);

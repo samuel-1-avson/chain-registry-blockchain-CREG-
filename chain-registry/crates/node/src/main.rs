@@ -21,6 +21,7 @@ mod json_rpc;
 mod l1_quorum;
 mod metrics;
 mod validator_registry_gossip;
+mod validator_set_history;
 mod openapi;
 mod p2p;
 mod p2p_rate_limit;
@@ -541,6 +542,13 @@ async fn main() -> Result<()> {
         reorgs: Vec::new(),
         pbft_engine: crate::state::PbftEngine::new(),
     }));
+
+    // Seed the validator-set history with the bootstrap set effective from
+    // genesis, so blocks at early heights verify against the right set
+    // (ISSUE-050). Subsequent changes are recorded by the reconcile path.
+    if let Err(e) = validator_set_history::record(&config.data_dir, 0, &config.validator_set) {
+        tracing::warn!("Failed to seed validator-set history: {}", e);
+    }
 
     // Start P2P node in background
     let p2p_handle_for_seeds = p2p_handle.clone();

@@ -134,11 +134,16 @@ async fn sync_once(state: Arc<RwLock<NodeState>>) -> anyhow::Result<()> {
         // signatures against the current validator set. Without this check a
         // malicious peer could serve a syntactically-valid block whose payload
         // never reached consensus. (ISSUE-018)
-        let validator_set = {
+        let (validator_set, data_dir) = {
             let s = state.read().await;
-            s.validator_set.clone()
+            (s.validator_set.clone(), s.config.data_dir.clone())
         };
-        if let Err(e) = verify_block_signatures(&block, &validator_set) {
+        // Verify against the validator set that was active at THIS block's
+        // height (ISSUE-050), falling back to the current set when no
+        // historical snapshot covers it (no regression).
+        let effective_set = crate::validator_set_history::set_at(&data_dir, block.header.height)
+            .unwrap_or(validator_set);
+        if let Err(e) = verify_block_signatures(&block, &effective_set) {
             tracing::error!(
                 "Block {} failed signature verification: {} — halting sync",
                 height,
@@ -234,9 +239,9 @@ async fn attempt_reorg_recovery(
     };
 
     // ── 2. Fetch and fully validate the peers' branch before adopting ────
-    let validator_set = {
+    let (validator_set, data_dir) = {
         let s = state.read().await;
-        s.validator_set.clone()
+        (s.validator_set.clone(), s.config.data_dir.clone())
     };
 
     let mut new_branch: Vec<common::Block> = Vec::new();
@@ -254,7 +259,9 @@ async fn attempt_reorg_recovery(
             tracing::warn!("Reorg recovery: peer branch broke linkage at height {} — aborting", h);
             return Ok(false);
         }
-        if let Err(e) = verify_block_signatures(&b, &validator_set) {
+        let effective_set = crate::validator_set_history::set_at(&data_dir, b.header.height)
+            .unwrap_or_else(|| validator_set.clone());
+        if let Err(e) = verify_block_signatures(&b, &effective_set) {
             tracing::error!(
                 "Reorg recovery: peer branch block {} failed signature verification: {} — \
                  refusing to adopt fork",
