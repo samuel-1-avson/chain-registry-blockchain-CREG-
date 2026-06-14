@@ -645,9 +645,11 @@ impl PbftEngine {
     pub fn canonical_in_non_terminal_round(&self, canonical: &str) -> bool {
         self.rounds.values().any(|round| {
             !round.is_terminal()
-                && round.block.transactions.iter().any(|tx| {
-                    transaction_package_canonical(tx).as_deref() == Some(canonical)
-                })
+                && round
+                    .block
+                    .transactions
+                    .iter()
+                    .any(|tx| transaction_package_canonical(tx).as_deref() == Some(canonical))
         })
     }
 
