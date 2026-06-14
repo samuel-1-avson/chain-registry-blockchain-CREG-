@@ -93,8 +93,8 @@ pub fn requeue_front(buffer: &mut Vec<Transaction>, txs: Vec<Transaction>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use common::{ChainRecord, PackageId, PackageStatus, Transaction};
     use chrono::Utc;
+    use common::{ChainRecord, PackageId, PackageStatus, Transaction};
 
     fn sample_publish_tx(id: &str) -> Transaction {
         Transaction::Publish(ChainRecord {

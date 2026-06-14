@@ -209,10 +209,7 @@ pub async fn render(state: Arc<RwLock<NodeState>>) -> String {
             "creg_pbft_round_phase",
             "PBFT block round phase (1=pre_prepare 2=prepare 3=commit 4=finalised 5=failed)",
             "gauge",
-            &[
-                ("block_hash", hash_label),
-                ("phase", round.phase.as_str()),
-            ],
+            &[("block_hash", hash_label), ("phase", round.phase.as_str())],
             round.phase_code as f64,
         );
         labeled_metric(
