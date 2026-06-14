@@ -57,7 +57,8 @@ pub async fn run(
 
         let pb_shield =
             create_progress_bar(encrypted_bytes.len() as u64, "Uploading encrypted shield");
-        final_ipfs_cid = pin_to_ipfs_with_progress(&encrypted_bytes, &ipfs_base, &pb_shield).await?;
+        final_ipfs_cid =
+            pin_to_ipfs_with_progress(&encrypted_bytes, &ipfs_base, &pb_shield).await?;
         best_effort_pin_add(&ipfs_base, &final_ipfs_cid).await;
         pb_shield.finish_with_message("✓ Shield upload complete");
 
@@ -480,7 +481,12 @@ fn sign_with_pgp_if_configured(tarball: &[u8]) -> Result<(Option<String>, Option
     // Import into the user's default keyring (idempotent). Avoids obsolete
     // --secret-keyring, which modern GnuPG ignores in batch mode.
     let import = std::process::Command::new("gpg")
-        .args(["--batch", "--yes", "--import", key_path.to_str().unwrap_or("")])
+        .args([
+            "--batch",
+            "--yes",
+            "--import",
+            key_path.to_str().unwrap_or(""),
+        ])
         .output()
         .context("Failed to invoke gpg --import — ensure GnuPG is installed")?;
     if !import.status.success() {
@@ -542,13 +548,7 @@ fn sign_with_pgp_if_configured(tarball: &[u8]) -> Result<(Option<String>, Option
 
     // Export the corresponding public key in armored form.
     let pubkey_output = std::process::Command::new("gpg")
-        .args([
-            "--batch",
-            "--no-tty",
-            "--export",
-            "--armor",
-            &fingerprint,
-        ])
+        .args(["--batch", "--no-tty", "--export", "--armor", &fingerprint])
         .output()
         .context("Failed to export GPG public key")?;
 
@@ -806,11 +806,7 @@ mod tests {
     fn ipfs_pin_add_url_encodes_cid() {
         let base = "https://ipfs.testnet.cregnet.dev";
         let cid = "bafybeigdyrzt5sfp7udm7hx76q86x4nk";
-        let url = format!(
-            "{}/api/v0/pin/add?arg={}",
-            base,
-            urlencoding::encode(cid)
-        );
+        let url = format!("{}/api/v0/pin/add?arg={}", base, urlencoding::encode(cid));
         assert!(url.contains("pin/add?arg="));
         assert!(url.contains(cid));
     }

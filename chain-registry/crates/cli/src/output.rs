@@ -55,15 +55,9 @@ pub fn print_verdict(v: &TrustVerdict) {
 }
 
 fn print_pipeline_stages(v: &TrustVerdict) {
-    let evidence = v
-        .evidence_phase
-        .as_deref()
-        .unwrap_or("unknown");
+    let evidence = v.evidence_phase.as_deref().unwrap_or("unknown");
     let block = v.block_phase.as_deref().unwrap_or("unknown");
-    let chain = v
-        .chain_status
-        .as_deref()
-        .unwrap_or("unknown");
+    let chain = v.chain_status.as_deref().unwrap_or("unknown");
     println!(
         "  {} evidence: {} | block: {} | chain: {}",
         " ".dimmed(),
