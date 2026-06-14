@@ -22,7 +22,6 @@ on:
     paths:
       - ".github/workflows/rust-ci.yml"
       - "chain-registry/crates/**"
-      - "chain-registry/explorer/**"
       - "chain-registry/Cargo.toml"
       - "chain-registry/Cargo.lock"
   pull_request:
@@ -30,9 +29,11 @@ on:
     paths:
       - ".github/workflows/rust-ci.yml"
       - "chain-registry/crates/**"
-      - "chain-registry/explorer/**"
       - "chain-registry/Cargo.toml"
       - "chain-registry/Cargo.lock"
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -76,22 +77,6 @@ jobs:
           key: ${{ runner.os }}-cargo-1.93.0-${{ hashFiles('chain-registry/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-1.93.0-
 
-      # chain-registry-node embeds explorer/dist via rust_embed at compile time.
-      - name: Setup Node.js (explorer build)
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Build explorer frontend
-        working-directory: chain-registry/explorer
-        run: |
-          if [ -f package-lock.json ]; then
-            npm ci --no-fund --no-audit
-          else
-            npm install --no-fund --no-audit
-          fi
-          npm run build
-
       - name: Check formatting
         run: cargo fmt --all -- --check
 
@@ -103,3 +88,22 @@ jobs:
         env:
           # Unreachable on purpose -> tests use their offline fallback path.
           CREG_NODE_URL: "http://127.0.0.1:19999"
+
+  consensus-finalization-smoke:
+    name: Testnet consensus smoke
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: chain-registry
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run consensus finalization smoke
+        shell: pwsh
+        run: ./testnet/consensus-finalization-smoke.ps1
+        env:
+          CREG_SMOKE_BASE_DOMAIN: testnet.cregnet.dev
+          CREG_SMOKE_MIN_TIP: "0"

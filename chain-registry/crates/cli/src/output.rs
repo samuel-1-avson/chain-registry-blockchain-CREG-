@@ -46,11 +46,31 @@ pub fn print_verdict(v: &TrustVerdict) {
                 "  {}",
                 "Package is in the pending pool — consensus not yet complete.".dimmed()
             );
+            print_pipeline_stages(v);
         }
         VerdictStatus::Unknown => {
             println!("  {}", "Package not found in the chain registry.".dimmed());
         }
     }
+}
+
+fn print_pipeline_stages(v: &TrustVerdict) {
+    let evidence = v
+        .evidence_phase
+        .as_deref()
+        .unwrap_or("unknown");
+    let block = v.block_phase.as_deref().unwrap_or("unknown");
+    let chain = v
+        .chain_status
+        .as_deref()
+        .unwrap_or("unknown");
+    println!(
+        "  {} evidence: {} | block: {} | chain: {}",
+        " ".dimmed(),
+        evidence.cyan(),
+        block.cyan(),
+        chain.cyan(),
+    );
 }
 
 /// MAL-004/LLM-002: surface the risk band, deterministic finding counts, and

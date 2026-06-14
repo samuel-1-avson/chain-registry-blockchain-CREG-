@@ -42,7 +42,7 @@ if (Test-Path $envFile) {
 }
 $caddyContainer = if ($fleetMode -or $hybridMode) { "creg-cloud-caddy" } else { "creg-3node-caddy" }
 if ($fleetMode) {
-    Write-Host "[gcp-deploy] CREG_VALIDATOR_FLEET_MODE=true — edge stack on $VmName (validators on fleet VM)" -ForegroundColor Cyan
+    Write-Host "[gcp-deploy] CREG_VALIDATOR_FLEET_MODE=true - edge stack on $VmName (validators on fleet VM)" -ForegroundColor Cyan
 } elseif ($hybridMode) {
     Write-Host "[gcp-deploy] CREG_HYBRID_MODE=true - edge-only stack (start validators locally with start-local-validators.ps1)" -ForegroundColor Cyan
 } else {

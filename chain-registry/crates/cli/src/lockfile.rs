@@ -281,6 +281,9 @@ mod tests {
                 node_url: "http://localhost".into(),
             },
             deterministic_risk: None,
+            evidence_phase: None,
+            block_phase: None,
+            chain_status: None,
         }
     }
 

@@ -1,13 +1,8 @@
 // crates/consensus/src/forced_inclusion.rs
 // Censorship-resistance mechanism: tracks pending transactions and
 // flags proposers that repeatedly omit eligible transactions.
-//
-// STATUS: building block, NOT yet wired into the node's block-production or
-// mempool path (no references in crates/node). The chain therefore does not
-// currently enforce forced-inclusion / anti-censorship guarantees at runtime.
-// The type + its tests exist so the mechanism can be integrated later; treat
-// any "censorship resistance" claim as aspirational until this is wired in.
 
+use common::Transaction;
 use std::collections::HashMap;
 use std::time::Instant;
 
@@ -26,6 +21,8 @@ fn forced_inclusion_block_delay() -> u64 {
 pub struct PendingTransaction {
     /// Hash of the serialised transaction.
     pub tx_hash: String,
+    /// Full transaction payload awaiting inclusion.
+    pub transaction: Transaction,
     /// Block height at which the transaction was first seen by the tracker.
     pub submitted_at_height: u64,
     /// Wall-clock time added (for metrics/observability only).
@@ -54,14 +51,24 @@ impl ForcedInclusionTracker {
     }
 
     /// Record a new transaction that should eventually be included.
-    pub fn submit(&mut self, tx_hash: String, current_height: u64) {
+    pub fn submit(&mut self, tx: Transaction, current_height: u64) {
+        let tx_hash = common::transaction_hash(&tx);
         self.pending
             .entry(tx_hash.clone())
             .or_insert(PendingTransaction {
                 tx_hash,
+                transaction: tx,
                 submitted_at_height: current_height,
                 submitted_at: Instant::now(),
             });
+    }
+
+    /// Return forced-inclusion transaction payloads at `current_height`.
+    pub fn forced_transaction_payloads(&self, current_height: u64) -> Vec<&Transaction> {
+        self.forced_transactions(current_height)
+            .into_iter()
+            .map(|pending| &pending.transaction)
+            .collect()
     }
 
     /// Mark transactions as included after a block is finalised.
@@ -132,10 +139,27 @@ impl ForcedInclusionTracker {
 mod tests {
     use super::*;
 
+    fn sample_tx(hash_seed: &str) -> Transaction {
+        use chrono::Utc;
+        use common::{ChainRecord, PackageId, PackageStatus};
+
+        Transaction::Publish(ChainRecord {
+            id: PackageId::new("npm", hash_seed, "1.0.0"),
+            content_hash: hash_seed.into(),
+            ipfs_cid: "bafy".into(),
+            publisher_pubkey: "pk".into(),
+            block_hash: "0".repeat(64),
+            published_at: Utc::now(),
+            validator_signatures: vec![],
+            status: PackageStatus::Verified,
+            ..Default::default()
+        })
+    }
+
     #[test]
     fn forced_after_delay() {
         let mut tracker = ForcedInclusionTracker::new();
-        tracker.submit("tx1".into(), 10);
+        tracker.submit(sample_tx("tx1"), 10);
         assert!(tracker.forced_transactions(12).is_empty());
         assert_eq!(tracker.forced_transactions(15).len(), 1);
     }
@@ -143,29 +167,38 @@ mod tests {
     #[test]
     fn included_transactions_removed() {
         let mut tracker = ForcedInclusionTracker::new();
-        tracker.submit("tx1".into(), 10);
-        tracker.submit("tx2".into(), 10);
-        tracker.mark_included(&["tx1".into()]);
+        let tx1 = sample_tx("tx1");
+        let tx2 = sample_tx("tx2");
+        let tx1_hash = common::transaction_hash(&tx1);
+        tracker.submit(tx1, 10);
+        tracker.submit(tx2, 10);
+        tracker.mark_included(&[tx1_hash]);
         assert_eq!(tracker.pending_count(), 1);
     }
 
     #[test]
     fn censorship_detected() {
         let mut tracker = ForcedInclusionTracker::new();
-        tracker.submit("tx1".into(), 10);
-        tracker.submit("tx2".into(), 10);
+        let tx1 = sample_tx("tx1");
+        let tx2 = sample_tx("tx2");
+        let tx1_hash = common::transaction_hash(&tx1);
+        let tx2_hash = common::transaction_hash(&tx2);
+        tracker.submit(tx1, 10);
+        tracker.submit(tx2, 10);
 
-        let evidence = tracker.check_block("proposer_a", 16, &["tx1".into()]);
+        let evidence = tracker.check_block("proposer_a", 16, &[tx1_hash]);
         assert!(evidence.is_some());
         let ev = evidence.unwrap();
-        assert_eq!(ev.omitted_tx_hashes, vec!["tx2".to_string()]);
+        assert_eq!(ev.omitted_tx_hashes, vec![tx2_hash]);
     }
 
     #[test]
     fn no_censorship_when_all_included() {
         let mut tracker = ForcedInclusionTracker::new();
-        tracker.submit("tx1".into(), 10);
-        let evidence = tracker.check_block("proposer_a", 16, &["tx1".into()]);
+        let tx1 = sample_tx("tx1");
+        let tx1_hash = common::transaction_hash(&tx1);
+        tracker.submit(tx1, 10);
+        let evidence = tracker.check_block("proposer_a", 16, &[tx1_hash]);
         assert!(evidence.is_none());
     }
 }

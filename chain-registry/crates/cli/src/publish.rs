@@ -19,6 +19,7 @@ pub async fn run(
     publisher_address: &str,
     node_url: Option<&str>,
     grpc_url: Option<&str>,
+    ipfs_url: Option<&str>,
     shield: bool,
 ) -> Result<()> {
     let publisher_address = canonicalize_publisher_address(publisher_address)?;
@@ -38,9 +39,11 @@ pub async fn run(
     println!("  tarball:  {}", tarball_path.display());
     println!("  sha256:   {}", content_hash);
 
-    // ── 2. Pin to IPFS (via local IPFS daemon or Pinata) ──────────────────────
+    // ── 2. Pin to IPFS (via local IPFS daemon or fleet gateway) ───────────────
+    let ipfs_base = crate::config_file::effective_ipfs_url(ipfs_url);
     let pb = create_progress_bar(tarball_bytes.len() as u64, "Uploading to IPFS");
-    let ipfs_cid = pin_to_ipfs_with_progress(&tarball_bytes, &pb).await?;
+    let ipfs_cid = pin_to_ipfs_with_progress(&tarball_bytes, &ipfs_base, &pb).await?;
+    best_effort_pin_add(&ipfs_base, &ipfs_cid).await;
     pb.finish_with_message("✓ Upload complete");
     println!("  IPFS CID: {}", ipfs_cid);
 
@@ -54,7 +57,8 @@ pub async fn run(
 
         let pb_shield =
             create_progress_bar(encrypted_bytes.len() as u64, "Uploading encrypted shield");
-        final_ipfs_cid = pin_to_ipfs_with_progress(&encrypted_bytes, &pb_shield).await?;
+        final_ipfs_cid = pin_to_ipfs_with_progress(&encrypted_bytes, &ipfs_base, &pb_shield).await?;
+        best_effort_pin_add(&ipfs_base, &final_ipfs_cid).await;
         pb_shield.finish_with_message("✓ Shield upload complete");
 
         key_bundle = Some(bundle);
@@ -263,7 +267,9 @@ pub async fn run(
 
         // Provide user-friendly error messages
         let error_msg = match status.as_u16() {
-            403 => format!("Insufficient stake. Run: creg stake --amount 0.01eth"),
+            403 => format!(
+                "Insufficient stake. Stake 1 CREG as publisher: creg stake --amount 1 --role publisher --key-file <EOA_KEY>"
+            ),
             409 => format!("Package already exists. Use a different version."),
             400 => format!("Invalid request: {}", body),
             401 => format!("Unauthorized: Invalid signature or key."),
@@ -292,10 +298,11 @@ fn create_progress_bar(total_bytes: u64, msg: &str) -> ProgressBar {
 }
 
 /// Upload tarball bytes to IPFS with progress indication and return the CID.
-async fn pin_to_ipfs_with_progress(bytes: &[u8], pb: &ProgressBar) -> Result<String> {
-    // Try CREG_IPFS_URL first, then fallback to localhost, then dev stub.
-    let ipfs_base =
-        std::env::var("CREG_IPFS_URL").unwrap_or_else(|_| "http://127.0.0.1:5001".to_string());
+async fn pin_to_ipfs_with_progress(
+    bytes: &[u8],
+    ipfs_base: &str,
+    pb: &ProgressBar,
+) -> Result<String> {
     let add_url = format!("{}/api/v0/add", ipfs_base.trim_end_matches('/'));
 
     // We do not simulate progress here anymore. Instead, we let reqwest handle the actual network transfer.
@@ -307,7 +314,7 @@ async fn pin_to_ipfs_with_progress(bytes: &[u8], pb: &ProgressBar) -> Result<Str
 
     let bytes_owned = bytes.to_vec();
     let add_url_owned = add_url.clone();
-    let ipfs_base_owned = ipfs_base.clone();
+    let ipfs_base_owned = ipfs_base.to_string();
     let local = crate::retry::with_retry("IPFS upload", 3, Duration::from_millis(500), move || {
         use reqwest::multipart as mp;
         let form = mp::Form::new().part(
@@ -354,10 +361,37 @@ async fn pin_to_ipfs_with_progress(bytes: &[u8], pb: &ProgressBar) -> Result<Str
     }
 }
 
+/// Best-effort pin so fleet gateways retain the CID for admission fetches.
+async fn best_effort_pin_add(ipfs_base: &str, cid: &str) {
+    let pin_url = format!(
+        "{}/api/v0/pin/add?arg={}",
+        ipfs_base.trim_end_matches('/'),
+        urlencoding::encode(cid)
+    );
+    match reqwest::Client::new().post(&pin_url).send().await {
+        Ok(resp) if resp.status().is_success() => {
+            tracing::debug!(cid = %cid, "IPFS pin/add succeeded");
+        }
+        Ok(resp) => {
+            tracing::warn!(
+                cid = %cid,
+                status = %resp.status(),
+                "IPFS pin/add returned non-success (continuing)"
+            );
+        }
+        Err(error) => {
+            tracing::warn!(cid = %cid, %error, "IPFS pin/add failed (continuing)");
+        }
+    }
+}
+
 /// Upload tarball bytes to IPFS and return the CID (legacy, without progress).
 #[allow(dead_code)]
-async fn pin_to_ipfs(bytes: &[u8]) -> Result<String> {
-    pin_to_ipfs_with_progress(bytes, &ProgressBar::hidden()).await
+async fn pin_to_ipfs(bytes: &[u8], ipfs_url: Option<&str>) -> Result<String> {
+    let ipfs_base = crate::config_file::effective_ipfs_url(ipfs_url);
+    let cid = pin_to_ipfs_with_progress(bytes, &ipfs_base, &ProgressBar::hidden()).await?;
+    best_effort_pin_add(&ipfs_base, &cid).await;
+    Ok(cid)
 }
 
 /// Infer PackageId from package.json / Cargo.toml in the tarball.
@@ -403,11 +437,29 @@ fn extract_toml_field<'a>(content: &'a str, field: &str) -> Option<&'a str> {
     Some(&line[start..end])
 }
 
+/// First fingerprint from `gpg --list-secret-keys --with-colons`.
+fn first_secret_key_fingerprint() -> Option<String> {
+    let output = std::process::Command::new("gpg")
+        .args(["--batch", "--with-colons", "--list-secret-keys"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .find(|line| line.starts_with("fpr:"))
+        .and_then(|line| line.split(':').nth(9))
+        .map(str::to_string)
+}
+
 /// Sign the tarball with PGP if configured.
 ///
 /// Three modes (checked in order):
-///  1. `CREG_PGP_PRIVATE_KEY_PATH` — path to an armored secret key file. Signs
-///     the tarball using `gpg --batch --yes --detach-sign`.
+///  1. `CREG_PGP_PRIVATE_KEY_PATH` — armored secret key file; imports into the
+///     default keyring and signs with `gpg --detach-sign`. Use
+///     `CREG_PGP_PASSPHRASE` for passphrase-protected keys, or
+///     `CREG_PGP_KEY_FINGERPRINT` when multiple secret keys are present.
 ///  2. `CREG_PGP_SIG` / `CREG_PGP_KEY` — pre-computed armored sig + pubkey
 ///     passed through directly (backwards compat).
 ///  3. Nothing set — returns `(None, None)` silently.
@@ -425,38 +477,62 @@ fn sign_with_pgp_if_configured(tarball: &[u8]) -> Result<(Option<String>, Option
         None => return Ok((None, None)),
     };
 
+    // Import into the user's default keyring (idempotent). Avoids obsolete
+    // --secret-keyring, which modern GnuPG ignores in batch mode.
+    let import = std::process::Command::new("gpg")
+        .args(["--batch", "--yes", "--import", key_path.to_str().unwrap_or("")])
+        .output()
+        .context("Failed to invoke gpg --import — ensure GnuPG is installed")?;
+    if !import.status.success() {
+        let stderr = String::from_utf8_lossy(&import.stderr);
+        anyhow::bail!(
+            "gpg --import failed ({}). Check CREG_PGP_PRIVATE_KEY_PATH.\n{}",
+            import.status,
+            stderr.trim()
+        );
+    }
+
+    let fingerprint = std::env::var("CREG_PGP_KEY_FINGERPRINT")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .or_else(|| first_secret_key_fingerprint())
+        .context(
+            "Could not determine PGP fingerprint. Set CREG_PGP_KEY_FINGERPRINT or import the key with gpg.",
+        )?;
+
     // Write tarball to a temp file so gpg can sign it.
     let tmp_dir = std::env::temp_dir();
     let tarball_tmp = tmp_dir.join("creg_publish_gpg.tgz");
     std::fs::write(&tarball_tmp, tarball)
         .context("Failed to write temp tarball for GPG signing")?;
 
-    // Run: gpg --batch --yes --no-tty --pinentry-mode loopback
-    //          --default-key <fingerprint-or-key-path>
-    //          --detach-sign --armor --output <sig_file> <tarball>
     let sig_tmp = tmp_dir.join("creg_publish_gpg.sig");
 
-    let status = std::process::Command::new("gpg")
-        .args([
-            "--batch",
-            "--yes",
-            "--no-tty",
-            "--pinentry-mode",
-            "loopback",
-            "--secret-keyring",
-            key_path.to_str().unwrap_or(""),
-            "--detach-sign",
-            "--armor",
-            "--output",
-            sig_tmp.to_str().unwrap_or(""),
-            tarball_tmp.to_str().unwrap_or(""),
-        ])
+    let mut sign_cmd = std::process::Command::new("gpg");
+    sign_cmd.args([
+        "--batch",
+        "--yes",
+        "--no-tty",
+        "--local-user",
+        &fingerprint,
+        "--detach-sign",
+        "--armor",
+        "--output",
+        sig_tmp.to_str().unwrap_or(""),
+        tarball_tmp.to_str().unwrap_or(""),
+    ]);
+    if let Ok(passphrase) = std::env::var("CREG_PGP_PASSPHRASE") {
+        sign_cmd.args(["--pinentry-mode", "loopback", "--passphrase", &passphrase]);
+    }
+
+    let status = sign_cmd
         .status()
         .context("Failed to invoke gpg — ensure GnuPG is installed")?;
 
     if !status.success() {
         anyhow::bail!(
-            "gpg exited with status {}. Check CREG_PGP_PRIVATE_KEY_PATH and gpg-agent.",
+            "gpg sign failed ({}). For passphrase-protected keys set CREG_PGP_PASSPHRASE, \
+             or unset CREG_PGP_PRIVATE_KEY_PATH to publish without PGP.",
             status
         );
     }
@@ -471,8 +547,7 @@ fn sign_with_pgp_if_configured(tarball: &[u8]) -> Result<(Option<String>, Option
             "--no-tty",
             "--export",
             "--armor",
-            "--secret-keyring",
-            key_path.to_str().unwrap_or(""),
+            &fingerprint,
         ])
         .output()
         .context("Failed to export GPG public key")?;
@@ -521,6 +596,7 @@ pub async fn sign_offline(
     extra_privkeys: &[String],
     publisher_address: &str,
     shield: bool,
+    ipfs_url: Option<&str>,
     output_path: &Path,
 ) -> Result<()> {
     use ed25519_dalek::{Signer, SigningKey};
@@ -533,13 +609,13 @@ pub async fn sign_offline(
     let content_hash = common::sha256_hex(&tarball_bytes);
 
     // 2. Pin to IPFS (IPFS must still be available)
-    let ipfs_cid = pin_to_ipfs(&tarball_bytes).await?;
+    let ipfs_cid = pin_to_ipfs(&tarball_bytes, ipfs_url).await?;
     let mut final_ipfs_cid = ipfs_cid.clone();
     let mut key_bundle = None;
 
     if shield {
         let (encrypted_bytes, bundle) = encrypt_for_validators(&tarball_bytes)?;
-        final_ipfs_cid = pin_to_ipfs(&encrypted_bytes).await?;
+        final_ipfs_cid = pin_to_ipfs(&encrypted_bytes, ipfs_url).await?;
         key_bundle = Some(bundle);
     }
 
@@ -672,9 +748,7 @@ pub(crate) fn canonicalize_publisher_address(publisher_address: &str) -> Result<
 fn publisher_packages_url(node_url: Option<&str>) -> String {
     format!(
         "{}/v1/publisher/packages",
-        node_url
-            .unwrap_or("http://localhost:8080")
-            .trim_end_matches('/')
+        crate::config_file::effective_node_url(node_url).trim_end_matches('/')
     )
 }
 
@@ -686,8 +760,8 @@ fn resolve_grpc_url(node_url: Option<&str>, grpc_url: Option<&str>) -> String {
         return format!("http://{}", explicit);
     }
 
-    let host = node_url
-        .unwrap_or("http://localhost:8080")
+    let base = crate::config_file::effective_node_url(node_url);
+    let host = base
         .trim()
         .trim_start_matches("http://")
         .trim_start_matches("https://")
@@ -726,5 +800,18 @@ mod tests {
             resolve_grpc_url(Some("https://registry.example.com:8443"), None),
             "http://registry.example.com:50051"
         );
+    }
+
+    #[test]
+    fn ipfs_pin_add_url_encodes_cid() {
+        let base = "https://ipfs.testnet.cregnet.dev";
+        let cid = "bafybeigdyrzt5sfp7udm7hx76q86x4nk";
+        let url = format!(
+            "{}/api/v0/pin/add?arg={}",
+            base,
+            urlencoding::encode(cid)
+        );
+        assert!(url.contains("pin/add?arg="));
+        assert!(url.contains(cid));
     }
 }

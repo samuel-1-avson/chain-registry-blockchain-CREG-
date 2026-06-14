@@ -115,6 +115,21 @@ pub enum Transaction {
     },
 }
 
+/// Canonical SHA-256 hash of a transaction (serde_json bytes), matching
+/// the leaf hash used by [`merkle_root`].
+pub fn transaction_hash(tx: &Transaction) -> String {
+    sha256_hex(
+        serde_json::to_vec(tx)
+            .expect("transaction must be serializable")
+            .as_slice(),
+    )
+}
+
+/// Hashes for every transaction in a block (same encoding as [`merkle_root`]).
+pub fn block_transaction_hashes(block: &Block) -> Vec<String> {
+    block.transactions.iter().map(transaction_hash).collect()
+}
+
 /// Computes the Merkle root of a list of transaction hashes.
 /// Returns a fixed "empty" hash for an empty list.
 pub fn merkle_root(txs: &[Transaction]) -> String {

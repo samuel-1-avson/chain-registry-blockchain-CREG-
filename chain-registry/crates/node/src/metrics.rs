@@ -7,6 +7,9 @@
 //   creg_chain_blocks_stored   — count of blocks in local storage (genesis alone => 1)
 //   creg_package_count, creg_pending_pool_size, creg_publisher_count
 //
+// PBFT block consensus:
+//   creg_pbft_active_rounds, creg_pbft_round_phase, creg_pbft_round_age_seconds
+//
 // L1 validator set sync (Sepolia staking logs):
 //   creg_validator_set_sync_*    — mirrors /v1/health.validator_set_sync
 
@@ -77,6 +80,14 @@ pub async fn render(state: Arc<RwLock<NodeState>>) -> String {
         "Unique publishers tracked",
         "gauge",
         s.publisher_index.publisher_count() as f64,
+    );
+
+    metric(
+        &mut out,
+        "creg_pending_block_txs",
+        "Finalized transactions buffered awaiting block production",
+        "gauge",
+        crate::finalized_tx::pending_buffer_depth() as f64,
     );
 
     let node_id = &s.config.node_id;
@@ -169,6 +180,62 @@ pub async fn render(state: Arc<RwLock<NodeState>>) -> String {
         "L2 chain reorganizations recorded since start (retained window)",
         "gauge",
         s.reorgs.len() as f64,
+    );
+
+    // ── PBFT block consensus ─────────────────────────────────────────────────
+    let pbft_rounds = s.pbft_engine.observability_snapshot();
+    metric(
+        &mut out,
+        "creg_pbft_active_rounds",
+        "Number of PBFT block rounds currently tracked",
+        "gauge",
+        pbft_rounds.len() as f64,
+    );
+    metric(
+        &mut out,
+        "creg_pbft_max_round_age_seconds",
+        "Maximum phase age across non-terminal PBFT rounds",
+        "gauge",
+        s.pbft_engine.max_non_terminal_phase_age_seconds(),
+    );
+    for round in pbft_rounds {
+        let hash_label = if round.block_hash.len() > 12 {
+            &round.block_hash[..12]
+        } else {
+            round.block_hash.as_str()
+        };
+        labeled_metric(
+            &mut out,
+            "creg_pbft_round_phase",
+            "PBFT block round phase (1=pre_prepare 2=prepare 3=commit 4=finalised 5=failed)",
+            "gauge",
+            &[("block_hash", hash_label), ("phase", round.phase.as_str())],
+            round.phase_code as f64,
+        );
+        labeled_metric(
+            &mut out,
+            "creg_pbft_round_age_seconds",
+            "Seconds since the PBFT round entered its current phase",
+            "gauge",
+            &[("block_hash", hash_label)],
+            round.phase_age_seconds,
+        );
+    }
+
+    metric(
+        &mut out,
+        "creg_sync_lag_blocks",
+        "Blocks behind the highest known peer tip",
+        "gauge",
+        s.sync_lag_blocks as f64,
+    );
+
+    metric(
+        &mut out,
+        "creg_forced_inclusion_pending",
+        "Finalized transactions awaiting block inclusion (forced-inclusion tracker)",
+        "gauge",
+        s.forced_inclusion_tracker.pending_count() as f64,
     );
 
     // ── L1 checkpoint bridge ────────────────────────────────────────────────

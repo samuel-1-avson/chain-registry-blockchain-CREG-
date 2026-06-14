@@ -84,6 +84,42 @@ groups:
             {{ $value }} blocks. One or more nodes may be partitioned or syncing
             slowly.
 
+      - alert: PbftRoundStalled
+        expr: max(creg_pbft_round_age_seconds) > 60
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "PBFT block round phase age exceeded 60s ({{ $labels.instance }})"
+          description: >
+            A PBFT block round has remained in the same phase for more than 60
+            seconds. Block finalization may be stalled.
+
+      - alert: PbftFinalizationStall
+        expr: |
+          creg_chain_tip_height == 0
+          AND max(creg_pbft_max_round_age_seconds) > 30
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "PBFT finalization stall with tip at genesis ({{ $labels.instance }})"
+          description: >
+            Chain tip is still genesis while a PBFT block round has been active
+            for more than 30 seconds. Evidence quorum may have completed without
+            a committed block.
+
+      - alert: ObserverSyncLag
+        expr: creg_sync_lag_blocks > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Observer is more than 5 blocks behind peers ({{ $labels.instance }})"
+          description: >
+            Local tip lags the highest peer tip by {{ $value }} blocks. Sync may
+            be stalled or peers are advancing without this node catching up.
+
   - name: chain_registry_packages
     rules:
 

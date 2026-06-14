@@ -212,7 +212,6 @@ impl Config {
     }
 
     /// Get the effective node URL (CLI arg > env var > config file > default)
-    #[allow(dead_code)]
     pub fn node_url(&self, cli_override: Option<&str>) -> String {
         cli_override
             .map(String::from)
@@ -221,12 +220,55 @@ impl Config {
     }
 
     /// Get the effective IPFS URL
-    #[allow(dead_code)]
     pub fn ipfs_url(&self) -> String {
         std::env::var("CREG_IPFS_URL")
             .ok()
             .unwrap_or_else(|| self.ipfs.url.clone())
     }
+}
+
+/// Resolve node URL: CLI flag > `CREG_NODE_URL` > `~/.creg/config.toml` > default.
+pub fn effective_node_url(cli_override: Option<&str>) -> String {
+    Config::load()
+        .unwrap_or_default()
+        .node_url(cli_override)
+}
+
+/// Resolve IPFS API URL: CLI override > `CREG_IPFS_URL` > config file > default.
+pub fn effective_ipfs_url(cli_override: Option<&str>) -> String {
+    cli_override
+        .map(String::from)
+        .or_else(|| Config::load().ok().map(|c| c.ipfs_url()))
+        .unwrap_or_else(|| default_ipfs_url())
+}
+
+/// Host portion of a service URL (lowercased), if parseable.
+fn url_host_lower(url: &str) -> Option<String> {
+    let trimmed = url.trim();
+    let after_scheme = trimmed
+        .strip_prefix("http://")
+        .or_else(|| trimmed.strip_prefix("https://"))
+        .unwrap_or(trimmed);
+    let host_port = after_scheme.split('/').next()?;
+    let host = host_port.split('@').next()?.split(':').next()?;
+    if host.is_empty() {
+        None
+    } else {
+        Some(host.to_ascii_lowercase())
+    }
+}
+
+/// True when the URL points at loopback (localhost / 127.0.0.1 / ::1).
+pub fn is_local_service_url(url: &str) -> bool {
+    match url_host_lower(url) {
+        Some(host) => matches!(host.as_str(), "localhost" | "127.0.0.1" | "::1"),
+        None => true,
+    }
+}
+
+/// True when the node URL is not loopback (public testnet, remote fleet, etc.).
+pub fn is_remote_node_url(url: &str) -> bool {
+    !is_local_service_url(url)
 }
 
 #[cfg(test)]
@@ -248,5 +290,18 @@ mod tests {
         let toml_str = toml::to_string(&config).unwrap();
         assert!(toml_str.contains("url"));
         assert!(toml_str.contains("timeout"));
+    }
+
+    #[test]
+    fn local_service_url_detects_loopback_hosts() {
+        assert!(is_local_service_url("http://localhost:8080"));
+        assert!(is_local_service_url("http://127.0.0.1:5001"));
+        assert!(is_local_service_url("https://localhost/v1"));
+    }
+
+    #[test]
+    fn remote_node_url_detects_public_hosts() {
+        assert!(is_remote_node_url("https://api.testnet.cregnet.dev"));
+        assert!(!is_remote_node_url("http://localhost:28182"));
     }
 }

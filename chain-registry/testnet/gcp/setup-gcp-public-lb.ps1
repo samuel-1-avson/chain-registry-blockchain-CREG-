@@ -120,7 +120,16 @@ if ($LASTEXITCODE -ne 0) {
         --protocol=$BackendProtocol `
         --port-name=$igPortName `
         --health-checks=$hcName `
-        --timeout=30s | Out-Null
+        --timeout=120s | Out-Null
+}
+
+# Ensure backend request timeout matches long-running pipeline reads (Phase 3.1).
+if ($beExists -or (gcloud compute backend-services describe $BackendName --global --project=$ProjectId 2>$null)) {
+    gcloud compute backend-services update $BackendName `
+        --project=$ProjectId `
+        --global `
+        --timeout=120s | Out-Null
+    Log "Backend $BackendName timeout set to 120s"
 }
 
 $backendCount = (gcloud compute backend-services describe $BackendName --global --project=$ProjectId --format="value(backends.group)" 2>$null | Where-Object { $_ }).Count

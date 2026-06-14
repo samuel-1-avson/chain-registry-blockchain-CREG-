@@ -11,7 +11,7 @@ use axum::{
     routing::{delete, get, post},
     Json, Router,
 };
-use common::{PackageStatus, PublishRequest, Transaction, ValidatorIdentity};
+use common::{PackageStatus, PublishRequest, Transaction, ValidatorIdentity, ValidatorVote};
 use k256::ecdsa::{RecoveryId, Signature as K256Signature, VerifyingKey as K256VerifyingKey};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -148,6 +148,7 @@ fn validator_routes() -> Router<SharedState> {
         )
         .route("/v1/validator/consensus/vote", post(receive_vote))
         .route("/v1/validator/consensus/state", get(consensus_state))
+        .route("/v1/validator/consensus/pbft", get(consensus_pbft))
 }
 
 fn operator_routes() -> Router<SharedState> {
@@ -234,6 +235,7 @@ fn legacy_public_routes(sse_bus: EventBus, ws_bus: EventBus) -> Router<SharedSta
         // Consensus
         .route("/v1/consensus/vote", post(receive_vote))
         .route("/v1/consensus/state", get(consensus_state))
+        .route("/v1/consensus/pbft", get(consensus_pbft))
         .route("/v1/publishers/rotate-key", post(rotate_publisher_key))
         // Search
         .route("/v1/search", get(search_handler))
@@ -549,6 +551,10 @@ async fn health(State(state): State<SharedState>) -> impl IntoResponse {
         "version": env!("CARGO_PKG_VERSION"),
         "validator_set_sync": s.validator_set_sync.clone(),
         "sandbox": sandbox,
+        "sync": {
+            "lag_blocks": s.sync_lag_blocks,
+            "max_peer_tip": s.sync_max_peer_tip,
+        },
     }))
 }
 
@@ -1301,29 +1307,136 @@ async fn list_packages(
     }
 }
 
+/// BFT evidence quorum: ⌊2n/3⌋ + 1 (matches `/v1/consensus/state`).
+fn evidence_quorum(total_validators: usize) -> usize {
+    if total_validators == 0 {
+        1
+    } else {
+        (2 * total_validators / 3) + 1
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PackagePipelineStages {
+    evidence_phase: &'static str,
+    block_phase: &'static str,
+    chain_status: &'static str,
+}
+
+fn derive_evidence_phase(
+    round: Option<&crate::state::PackageRound>,
+    quorum: usize,
+) -> &'static str {
+    let Some(round) = round else {
+        return "none";
+    };
+    let mut approvals = 0usize;
+    let mut rejections = 0usize;
+    for sig in round.signatures() {
+        match &sig.vote {
+            ValidatorVote::Approve => approvals += 1,
+            ValidatorVote::Reject { .. } => rejections += 1,
+        }
+    }
+    if rejections >= quorum {
+        "rejected"
+    } else if approvals >= quorum {
+        "quorum-reached"
+    } else if round.vote_count() > 0 {
+        "voting"
+    } else {
+        "none"
+    }
+}
+
+fn derive_block_phase(
+    canonical: &str,
+    evidence_phase: &str,
+    on_chain: bool,
+    pbft_engine: &crate::state::PbftEngine,
+) -> &'static str {
+    if on_chain {
+        return "committed";
+    }
+    if pbft_engine.canonical_in_non_terminal_round(canonical) {
+        return "proposed";
+    }
+    if evidence_phase == "quorum-reached" {
+        return "queued";
+    }
+    "none"
+}
+
+fn derive_chain_status(record_status: Option<&PackageStatus>, in_pending_pool: bool) -> &'static str {
+    match record_status {
+        Some(PackageStatus::Verified) => "verified",
+        Some(PackageStatus::Revoked { .. }) => "rejected",
+        Some(PackageStatus::Pending) => "pending",
+        None if in_pending_pool => "pending",
+        None => "pending",
+    }
+}
+
+fn package_pipeline_stages(
+    canonical: &str,
+    record_status: Option<&PackageStatus>,
+    in_pending_pool: bool,
+    state: &crate::NodeState,
+) -> PackagePipelineStages {
+    let on_chain = record_status.is_some();
+    let quorum = evidence_quorum(state.validator_set.validators.len());
+    let mut evidence_phase = derive_evidence_phase(state.package_round(canonical), quorum);
+    if on_chain
+        && matches!(
+            record_status,
+            Some(PackageStatus::Verified) | Some(PackageStatus::Revoked { .. })
+        )
+    {
+        evidence_phase = "quorum-reached";
+    }
+    let block_phase = derive_block_phase(canonical, evidence_phase, on_chain, &state.pbft_engine);
+    let chain_status = derive_chain_status(record_status, in_pending_pool);
+    PackagePipelineStages {
+        evidence_phase,
+        block_phase,
+        chain_status,
+    }
+}
+
+#[derive(Serialize)]
+struct PackageResp {
+    canonical: String,
+    status: &'static str,
+    evidence_phase: &'static str,
+    block_phase: &'static str,
+    chain_status: &'static str,
+    block_hash: Option<String>,
+    content_hash: Option<String>,
+    ipfs_cid: Option<String>,
+    publisher: Option<String>,
+    published_at: Option<String>,
+    revocation_reason: Option<String>,
+    analysis_bundles: Option<common::AnalysisBundleRefs>,
+    evidence_digest: Option<String>,
+    deterministic_risk: Option<common::DeterministicRiskSummary>,
+}
+
 // GET /v1/packages/:canonical
 async fn get_package(State(state): State<SharedState>, Path(canonical): Path<String>) -> Response {
     let canonical = urlencoding::decode(&canonical)
         .unwrap_or_default()
         .to_string();
     let s = state.read().await;
+    let in_pending_pool = s.pending_pool.contains(&canonical);
 
     // Check verified chain first.
     if let Ok(Some(record)) = s.chain.get_package(&canonical) {
-        #[derive(Serialize)]
-        struct PackageResp {
-            canonical: String,
-            status: &'static str,
-            block_hash: Option<String>,
-            content_hash: Option<String>,
-            ipfs_cid: Option<String>,
-            publisher: Option<String>,
-            published_at: Option<String>,
-            revocation_reason: Option<String>,
-            analysis_bundles: Option<common::AnalysisBundleRefs>,
-            evidence_digest: Option<String>,
-            deterministic_risk: Option<common::DeterministicRiskSummary>,
-        }
+        let stages = package_pipeline_stages(
+            &canonical,
+            Some(&record.status),
+            in_pending_pool,
+            &s,
+        );
         let resp = PackageResp {
             canonical: record.id.canonical(),
             status: match &record.status {
@@ -1331,6 +1444,9 @@ async fn get_package(State(state): State<SharedState>, Path(canonical): Path<Str
                 PackageStatus::Revoked { .. } => "revoked",
                 _ => "pending",
             },
+            evidence_phase: stages.evidence_phase,
+            block_phase: stages.block_phase,
+            chain_status: stages.chain_status,
             block_hash: Some(record.block_hash.clone()),
             content_hash: Some(record.content_hash.clone()),
             ipfs_cid: Some(record.ipfs_cid.clone()),
@@ -1349,10 +1465,14 @@ async fn get_package(State(state): State<SharedState>, Path(canonical): Path<Str
     }
 
     // Check pending pool.
-    if s.pending_pool.contains(&canonical) {
+    if in_pending_pool {
+        let stages = package_pipeline_stages(&canonical, None, true, &s);
         return Json(serde_json::json!({
             "canonical": canonical,
             "status": "pending",
+            "evidence_phase": stages.evidence_phase,
+            "block_phase": stages.block_phase,
+            "chain_status": stages.chain_status,
             "analysis_bundles": serde_json::Value::Null,
             "evidence_digest": serde_json::Value::Null,
             "deterministic_risk": serde_json::Value::Null
@@ -2622,6 +2742,20 @@ async fn consensus_state(State(state): State<SharedState>) -> impl IntoResponse 
     }))
 }
 
+// GET /v1/consensus/pbft
+//
+// Snapshot of PBFT *block* consensus rounds (distinct from evidence vote rounds
+// exposed by `/v1/consensus/state`).
+async fn consensus_pbft(State(state): State<SharedState>) -> impl IntoResponse {
+    let s = state.read().await;
+    let rounds = s.pbft_engine.observability_snapshot();
+    Json(serde_json::json!({
+        "active_round_count": rounds.len(),
+        "max_non_terminal_phase_age_seconds": s.pbft_engine.max_non_terminal_phase_age_seconds(),
+        "rounds": rounds,
+    }))
+}
+
 // POST /v1/consensus/vote
 #[derive(Deserialize, Serialize)]
 pub struct VoteMessage {
@@ -3219,6 +3353,9 @@ mod tests {
             view_change_certs: HashMap::new(),
             reorgs: Vec::new(),
             pbft_engine: crate::state::PbftEngine::new(),
+            forced_inclusion_tracker: crate::state::ForcedInclusionTracker::new(),
+            sync_lag_blocks: 0,
+            sync_max_peer_tip: 0,
         }));
 
         Ok((state, tempdir, p2p_handle, tx_sender, tx_receiver))
@@ -4203,6 +4340,71 @@ mod tests {
             body_json["deterministic_risk"]["disposition"],
             deterministic_risk.disposition
         );
+        assert_eq!(body_json["status"], "verified");
+        assert_eq!(body_json["evidence_phase"], "quorum-reached");
+        assert_eq!(body_json["block_phase"], "committed");
+        assert_eq!(body_json["chain_status"], "verified");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn get_package_pending_with_quorum_exposes_pipeline_stages() -> anyhow::Result<()> {
+        let (state, _tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
+        let (_signing_key, validator_pubkey) = make_keypair();
+        let req = make_request_with_sigs(vec![], vec![], 0);
+        let canonical = req.id.canonical();
+
+        {
+            let mut s = state.write().await;
+            s.validator_set =
+                common::ValidatorSet::new(vec![validator("node-1", &validator_pubkey)]);
+            s.pending_pool.insert(req);
+            s.record_package_vote(
+                &canonical,
+                common::ValidatorSignature {
+                    validator_id: "node-1".into(),
+                    validator_pubkey,
+                    signature: "vote-sig".into(),
+                    vote: common::ValidatorVote::Approve,
+                    signed_at: chrono::Utc::now(),
+                    ml_model_version: "creg-detect-v1.0.0".into(),
+                    analysis_bundles: test_analysis_bundles(),
+                    evidence_digest: "evidence-digest-1".into(),
+                    deterministic_risk: test_deterministic_risk(),
+                },
+            );
+        }
+
+        let event_bus = new_event_bus();
+        let app = router(
+            state,
+            event_bus,
+            RateLimiter::new(RateLimitConfig::default()),
+            AttestationStore::new(),
+            crate::config::CorsConfig::default(),
+            tx_sender,
+            p2p_handle,
+        );
+
+        let response = app
+            .oneshot(
+                Request::get(format!(
+                    "/v1/public/packages/{}",
+                    urlencoding::encode(&canonical)
+                ))
+                .body(Body::empty())?,
+            )
+            .await?;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await?;
+        let body_json: serde_json::Value = serde_json::from_slice(&body)?;
+
+        assert_eq!(body_json["status"], "pending");
+        assert_eq!(body_json["evidence_phase"], "quorum-reached");
+        assert_eq!(body_json["block_phase"], "queued");
+        assert_eq!(body_json["chain_status"], "pending");
 
         Ok(())
     }

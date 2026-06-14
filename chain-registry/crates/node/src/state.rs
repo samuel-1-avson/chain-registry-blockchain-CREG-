@@ -19,6 +19,7 @@ use crate::{
     publisher_index::PublisherIndex,
 };
 
+pub use consensus::forced_inclusion::ForcedInclusionTracker;
 pub use consensus::pbft::PbftEngine;
 
 // ─── Validator registration ───────────────────────────────────────────────────
@@ -223,6 +224,12 @@ pub struct NodeState {
     pub reorgs: Vec<ReorgEvent>,
     /// The PBFT consensus engine managing block finalization.
     pub pbft_engine: PbftEngine,
+    /// Tracks finalized transactions awaiting forced inclusion after delay.
+    pub forced_inclusion_tracker: ForcedInclusionTracker,
+    /// Blocks behind the highest known peer tip (updated by sync loop).
+    pub sync_lag_blocks: u64,
+    /// Highest chain tip observed from configured peers during sync.
+    pub sync_max_peer_tip: u64,
 }
 
 impl NodeState {
@@ -272,6 +279,24 @@ impl NodeState {
 
     pub fn clear_package_round(&mut self, subject: &str) {
         self.package_rounds.remove(subject);
+    }
+
+    /// Apply forced-inclusion bookkeeping after a block is committed locally.
+    pub fn on_block_committed(&mut self, block: &common::Block) {
+        let hashes = common::block_transaction_hashes(block);
+        self.forced_inclusion_tracker.mark_included(&hashes);
+        if let Some(evidence) = self.forced_inclusion_tracker.check_block(
+            &block.header.proposer_id,
+            block.header.height,
+            &hashes,
+        ) {
+            tracing::warn!(
+                proposer = %evidence.proposer_id,
+                height = evidence.block_height,
+                omitted = evidence.omitted_tx_hashes.len(),
+                "[CENSORSHIP] Forced-inclusion transactions omitted from block"
+            );
+        }
     }
 }
 

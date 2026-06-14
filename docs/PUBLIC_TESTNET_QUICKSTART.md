@@ -17,7 +17,7 @@ One-page guide for **publishers**, **developers**, and **validators** joining th
 | **Node URL** | Set `CREG_NODE_URL=https://api.testnet.cregnet.dev` for the public fleet. Default `http://localhost:8080` is for local dev only. |
 | **Sepolia RPC** | For staking: `SEPOLIA_RPC_URL` or `CREG_ETH_RPC` |
 | **Foundry `cast`** | Required for `creg stake` and `creg testnet stake-*` |
-| **IPFS** | Local Kubo (`ipfs daemon`) or operator-provided gateway for `creg publish` |
+| **IPFS** | For **public testnet** publishes, set `CREG_IPFS_URL=https://ipfs.testnet.cregnet.dev` so fleet validators can fetch your tarball during admission. Local Kubo (`ipfs daemon` on `127.0.0.1:5001`) is fine for local dev only. |
 | **Two key types** | **Ed25519** (`creg keygen`) signs packages; **secp256k1 EOA** stakes tCREG on L1. See [WALLET_KEY_DERIVATION.md](./WALLET_KEY_DERIVATION.md). |
 
 **Contract addresses (Sepolia defaults):**
@@ -71,18 +71,25 @@ creg testnet drip --address 0xYourPublisherAddress
 
 Acquire tCREG via the operator faucet or `testnet/stake-publisher-sepolia.ps1`.
 
-### 4. Start IPFS and publish
+### 4. Pin to fleet IPFS and publish
+
+For the **public testnet**, point the CLI at the fleet IPFS gateway so admission can fetch your tarball (localhost-only CIDs cause 502/timeouts on `api.testnet.cregnet.dev`):
 
 ```bash
-ipfs daemon   # or use operator IPFS API via CREG_IPFS_URL
+export CREG_NODE_URL=https://api.testnet.cregnet.dev
+export CREG_IPFS_URL=https://ipfs.testnet.cregnet.dev
 
-export CREG_NODE_URL=https://api.testnet.cregnet.dev   # public fleet (local: http://localhost:28182)
+# Local dev only: run `ipfs daemon` and omit CREG_IPFS_URL (defaults to http://127.0.0.1:5001)
 
 creg publish ./my-package-1.0.0.tgz \
   --key-file ~/.creg/publisher.key \
   --publisher-address 0xYourPublisherAddress \
   --ecosystem npm
 ```
+
+You can override IPFS per command: `creg publish ... --ipfs-url https://ipfs.testnet.cregnet.dev`
+
+Run `creg doctor` before publishing — it warns when `CREG_NODE_URL` is remote but `CREG_IPFS_URL` is still localhost.
 
 ### 5. Track status
 
@@ -202,6 +209,7 @@ When maintainers publish a tag (`v*`), GitHub Actions workflow `release-binaries
 | `UnknownValidator` on node 2 | Complete L1 registration per OPERATOR.md |
 | `Consensus timeout` | Align scanner env across validators (`scanner-fleet.env`); check `creg doctor` profile digest |
 | Wrong node / UNKNOWN status | Set `CREG_NODE_URL`; pending is lost on node restart |
+| Publish 502 / admission timeout | Set `CREG_IPFS_URL=https://ipfs.testnet.cregnet.dev` when using public API; confirm CID with `curl -I "https://ipfs.testnet.cregnet.dev/ipfs/<cid>"` |
 
 ---
 
