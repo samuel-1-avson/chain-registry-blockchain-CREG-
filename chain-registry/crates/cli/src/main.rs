@@ -123,6 +123,9 @@ enum Commands {
         /// Publisher EVM address with active on-chain stake.
         #[arg(long, env = "CREG_PUBLISHER_ADDRESS")]
         publisher_address: String,
+        /// IPFS API URL for upload/pin. Overrides `CREG_IPFS_URL` and config file.
+        #[arg(long, env = "CREG_IPFS_URL")]
+        ipfs_url: Option<String>,
         /// Offline signing: produce a signed JSON file instead of
         /// submitting to the node.  Use `creg submit-signed <file>` later.
         #[arg(long)]
@@ -731,6 +734,7 @@ async fn run(cli: Cli) -> Result<()> {
             extra_keys,
             shield,
             publisher_address,
+            ipfs_url,
             offline,
         } => {
             let key_content = std::fs::read_to_string(&key)
@@ -752,6 +756,7 @@ async fn run(cli: Cli) -> Result<()> {
                     &extra_key_strs,
                     &publisher_address,
                     shield,
+                    ipfs_url.as_deref(),
                     &output_path,
                 )
                 .await?;
@@ -764,6 +769,7 @@ async fn run(cli: Cli) -> Result<()> {
                     &publisher_address,
                     cli.node_url.as_deref(),
                     cli.grpc_url.as_deref(),
+                    ipfs_url.as_deref(),
                     shield,
                 )
                 .await?;

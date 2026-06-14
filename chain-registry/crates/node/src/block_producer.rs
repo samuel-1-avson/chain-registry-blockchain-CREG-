@@ -1,5 +1,5 @@
 // crates/node/src/block_producer.rs
-// Produces new blocks on a fixed interval by draining the finalized-tx channel.
+// Produces new blocks on a fixed interval from a durable finalized-tx buffer.
 
 use crate::{finalized_tx, NodeState};
 use chrono::Utc;
@@ -8,6 +8,18 @@ use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{interval, Duration};
+
+/// Snapshot gathered after the VRF proposer gate passes.
+struct ProposerContext {
+    tip_height: u64,
+    prev_hash: String,
+    node_id: String,
+    privkey: Option<String>,
+    our_pubkey: Option<String>,
+    validator_set_hash: String,
+    vrf_output: Option<String>,
+    vrf_proof: Option<String>,
+}
 
 pub async fn run(
     state: Arc<RwLock<NodeState>>,
@@ -39,6 +51,7 @@ pub async fn run(
         s.chain.tip_height().unwrap_or(0)
     };
     let mut tip_unchanged_since = std::time::Instant::now();
+    let mut pending_txs: Vec<Transaction> = Vec::new();
 
     loop {
         ticker.tick().await;
@@ -57,21 +70,38 @@ pub async fn run(
         let stall_secs = tip_unchanged_since.elapsed().as_secs();
         let allowed_fallback_rank = (stall_secs / fallback_window_secs) as usize;
 
-        // Drain everything the validator pipeline has finalised since last tick.
-        let txs: Vec<Transaction> = finalized_tx::drain(&rx).await;
-        if txs.is_empty() {
-            tracing::debug!("Block producer: no new transactions");
+        // Always move channel deliveries into the durable buffer; never drop
+        // because this node is not the current VRF proposer.
+        finalized_tx::recv_into_buffer(&rx, &mut pending_txs).await;
+        if pending_txs.is_empty() {
+            tracing::debug!("Block producer: no pending finalized transactions");
             continue;
         }
 
-        match produce_block(
+        let ctx = match prepare_proposer_context(
             Arc::clone(&state),
-            txs,
-            p2p_handle.clone(),
+            &p2p_handle,
             allowed_fallback_rank,
         )
         .await
         {
+            Ok(ctx) => ctx,
+            Err(e) => {
+                tracing::debug!(
+                    pending = pending_txs.len(),
+                    "Block producer: not proposer this tick — keeping {} buffered tx(s): {}",
+                    pending_txs.len(),
+                    e
+                );
+                continue;
+            }
+        };
+
+        let txs: Vec<Transaction> = pending_txs.drain(..).collect();
+        finalized_tx::sync_pending_buffer_depth(pending_txs.len());
+        let txs_backup = txs.clone();
+
+        match produce_block(Arc::clone(&state), txs, p2p_handle.clone(), ctx).await {
             Ok(block) => {
                 let bh = block.hash();
                 tracing::info!(
@@ -98,18 +128,20 @@ pub async fn run(
                     }
                 }
             }
-            Err(e) => tracing::error!("Block production failed: {}", e),
+            Err(e) => {
+                tracing::error!("Block production failed: {}", e);
+                finalized_tx::requeue_front(&mut pending_txs, txs_backup);
+            }
         }
     }
 }
 
-async fn produce_block(
+/// Evaluate VRF proposer ranking and broadcast our proof when eligible.
+async fn prepare_proposer_context(
     state: Arc<RwLock<NodeState>>,
-    txs: Vec<Transaction>,
-    p2p: crate::p2p::P2PHandle,
+    p2p: &crate::p2p::P2PHandle,
     allowed_fallback_rank: usize,
-) -> anyhow::Result<Block> {
-    // ── Read-only snapshot of state needed for VRF selection ────────────────
+) -> anyhow::Result<ProposerContext> {
     let (tip_height, prev_hash, node_id, privkey, our_pubkey, validator_set_hash) = {
         let s = state.read().await;
         let tip_height = s.chain.tip_height()?;
@@ -123,9 +155,6 @@ async fn produce_block(
             .find(|v| v.id == node_id)
             .map(|v| v.pubkey.clone());
 
-        // Compute a deterministic hash of the validator set so light clients
-        // and bridge code can detect membership changes between blocks.
-        // Input: sorted validator IDs concatenated with NUL separators.
         let mut sorted_ids: Vec<&str> = s
             .validator_set
             .validators
@@ -152,7 +181,6 @@ async fn produce_block(
 
     let epoch_seed = prev_hash.clone();
 
-    // Build active set, injecting any cached VRF proofs from peers.
     let mut active: Vec<consensus::vrf::VrfValidator> = {
         let s = state.read().await;
         s.validator_set
@@ -179,7 +207,6 @@ async fn produce_block(
     let (vrf_output, vrf_proof) = if !active.is_empty() {
         if let Some(ref privkey) = privkey {
             let (out, prf) = consensus::vrf::prove(epoch_seed.as_bytes(), privkey)?;
-            // Inject our own proof into the active set.
             for v in &mut active {
                 if v.id == node_id {
                     v.vrf_output = Some(out.clone());
@@ -187,33 +214,23 @@ async fn produce_block(
                 }
             }
 
-            // Broadcast our VRF proof so peers can include it in their selection.
             let gossip_msg = common::GossipMessage::VrfProof {
                 validator_id: node_id.clone(),
-                pubkey: our_pubkey.unwrap_or_default(),
+                pubkey: our_pubkey.clone().unwrap_or_default(),
                 epoch_seed: epoch_seed.clone(),
                 output: out.clone(),
                 proof: prf.clone(),
             };
-            match serde_json::to_vec(&gossip_msg) {
-                Ok(data) => {
-                    let _ = p2p
-                        .sender
-                        .send(crate::p2p::P2PCommand::Broadcast {
-                            topic: "creg/v1/vrf-proofs".into(),
-                            data,
-                        })
-                        .await;
-                }
-                Err(e) => {
-                    tracing::warn!("Failed to serialize VRF proof gossip: {}", e);
-                }
+            if let Ok(data) = serde_json::to_vec(&gossip_msg) {
+                let _ = p2p
+                    .sender
+                    .send(crate::p2p::P2PCommand::Broadcast {
+                        topic: "creg/v1/vrf-proofs".into(),
+                        data,
+                    })
+                    .await;
             }
 
-            // Determine our position in the deterministic proposer ordering.
-            // Rank 0 is the primary proposer and always proceeds. A higher
-            // rank may only propose once the tip has stalled long enough to
-            // promote that rank (proposer-failure fallback for liveness).
             let ranking = consensus::vrf::rank_proposers(&active, &epoch_seed);
             if ranking.is_empty() {
                 anyhow::bail!("No active validators to select proposer");
@@ -248,15 +265,42 @@ async fn produce_block(
             (None, None)
         }
     } else {
-        // Dev/test fallback when no validator set is configured.
         (None, None)
     };
 
-    // ── Write the new block ────────────────────────────────────────────────
+    Ok(ProposerContext {
+        tip_height,
+        prev_hash,
+        node_id,
+        privkey,
+        our_pubkey,
+        validator_set_hash,
+        vrf_output,
+        vrf_proof,
+    })
+}
+
+async fn produce_block(
+    state: Arc<RwLock<NodeState>>,
+    txs: Vec<Transaction>,
+    p2p: crate::p2p::P2PHandle,
+    ctx: ProposerContext,
+) -> anyhow::Result<Block> {
+    let ProposerContext {
+        tip_height,
+        prev_hash: _,
+        node_id,
+        privkey,
+        our_pubkey: _,
+        validator_set_hash,
+        vrf_output,
+        vrf_proof,
+    } = ctx;
+
     let mut s = state.write().await;
     let header = BlockHeader {
         height: tip_height + 1,
-        prev_hash,
+        prev_hash: s.chain.tip_hash()?,
         merkle_root: merkle_root(&txs),
         proposer_id: node_id.clone(),
         timestamp: Utc::now(),
@@ -271,7 +315,6 @@ async fn produce_block(
         pbft_signatures: vec![],
     };
 
-    // Instead of inserting immediately, start the PBFT round
     let vs = s.validator_set.clone();
     s.pbft_engine.start_round(block.clone(), vs.into())?;
 
@@ -284,7 +327,6 @@ async fn produce_block(
             if let Ok(sk) = ed25519_dalek::SigningKey::try_from(pk_bytes.as_slice()) {
                 use ed25519_dalek::Signer;
 
-                // 1. Proposer casts its own PREPARE vote
                 let prep_msg_str = consensus::pbft::pbft_signature_message("prepare", &bh);
                 let prep_sig = hex::encode(sk.sign(prep_msg_str.as_bytes()).to_bytes());
                 let pubkey = hex::encode(sk.verifying_key().as_bytes());
@@ -312,7 +354,6 @@ async fn produce_block(
                     });
                 }
 
-                // 2. Proposer casts its own COMMIT vote if prepare quorum reached
                 if prepare_quorum_reached {
                     let commit_msg_str = consensus::pbft::pbft_signature_message("commit", &bh);
                     let commit_sig = hex::encode(sk.sign(commit_msg_str.as_bytes()).to_bytes());
@@ -367,7 +408,6 @@ async fn produce_block(
         }
     }
 
-    // Proofs are epoch-specific (seed = prev_hash); clear cache for next round.
     s.vrf_proofs.clear();
 
     drop(s);
@@ -380,4 +420,215 @@ async fn produce_block(
     }
 
     Ok(block)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        chain_store::ChainStore,
+        config::NodeConfig,
+        finalized_tx,
+        p2p::{P2PCommand, P2PHandle},
+        pending_pool::PendingPool,
+        publisher_index::PublisherIndex,
+        state::PbftEngine,
+        BridgeStatus, NodeState, P2PStatus,
+    };
+    use chrono::Utc;
+    use common::{
+        ChainRecord, PackageId, PackageStatus, Transaction, Validator, ValidatorSet,
+    };
+    use ed25519_dalek::SigningKey;
+    use rand::rngs::OsRng;
+    use tempfile::TempDir;
+
+    fn sample_publish_tx(name: &str) -> Transaction {
+        Transaction::Publish(ChainRecord {
+            id: PackageId::new("npm", name, "1.0.0"),
+            content_hash: "abc".into(),
+            ipfs_cid: "bafy".into(),
+            publisher_pubkey: "pk".into(),
+            block_hash: "0".repeat(64),
+            published_at: Utc::now(),
+            validator_signatures: vec![],
+            status: PackageStatus::Verified,
+            ..Default::default()
+        })
+    }
+
+    async fn two_validator_state(
+        primary_id: &str,
+        secondary_id: &str,
+    ) -> (Arc<RwLock<NodeState>>, TempDir, SigningKey, SigningKey) {
+        let dir = TempDir::new().unwrap();
+        let chain = ChainStore::open(dir.path()).unwrap();
+
+        let primary_sk = SigningKey::generate(&mut OsRng);
+        let secondary_sk = SigningKey::generate(&mut OsRng);
+
+        let validators = vec![
+            Validator {
+                id: primary_id.into(),
+                alias: "primary".into(),
+                pubkey: hex::encode(primary_sk.verifying_key().as_bytes()),
+                eth_address: "0x1111111111111111111111111111111111111111".into(),
+                stake: 1000,
+                reputation: 100,
+                status: "online".into(),
+            },
+            Validator {
+                id: secondary_id.into(),
+                alias: "secondary".into(),
+                pubkey: hex::encode(secondary_sk.verifying_key().as_bytes()),
+                eth_address: "0x2222222222222222222222222222222222222222".into(),
+                stake: 900,
+                reputation: 100,
+                status: "online".into(),
+            },
+        ];
+
+        let state = Arc::new(RwLock::new(NodeState {
+            chain,
+            pending_pool: PendingPool::new(),
+            publisher_index: PublisherIndex::new(),
+            validator_set_bootstrap: ValidatorSet::default(),
+            validator_set: ValidatorSet::new(validators),
+            package_rounds: std::collections::HashMap::new(),
+            config: NodeConfig {
+                node_id: primary_id.into(),
+                data_dir: dir.path().to_path_buf(),
+                block_interval_secs: 1,
+                ..NodeConfig::default()
+            },
+            p2p_status: P2PStatus::default(),
+            bridge_status: BridgeStatus::default(),
+            vrf_proofs: std::collections::HashMap::new(),
+            decryption_shares: std::collections::HashMap::new(),
+            validator_registrations: std::collections::HashMap::new(),
+            validator_set_sync: crate::state::ValidatorSetSyncStatus::default(),
+            view_change_certs: std::collections::HashMap::new(),
+            reorgs: Vec::new(),
+            pbft_engine: PbftEngine::new(),
+        }));
+
+        (state, dir, primary_sk, secondary_sk)
+    }
+
+    fn noop_p2p() -> P2PHandle {
+        let (sender, _rx) = tokio::sync::mpsc::channel::<P2PCommand>(1);
+        P2PHandle { sender }
+    }
+
+    async fn proposer_ranking(
+        state: &Arc<RwLock<NodeState>>,
+    ) -> anyhow::Result<(String, String)> {
+        let s = state.read().await;
+        let epoch_seed = s.chain.tip_hash()?;
+        let active: Vec<consensus::vrf::VrfValidator> = s
+            .validator_set
+            .validators
+            .iter()
+            .map(|v| consensus::vrf::VrfValidator {
+                id: v.id.clone(),
+                pubkey: v.pubkey.clone(),
+                vrf_output: None,
+                vrf_proof: None,
+            })
+            .collect();
+        let ranking = consensus::vrf::rank_proposers(&active, &epoch_seed);
+        anyhow::ensure!(
+            ranking.len() >= 2,
+            "expected two validators in proposer ranking"
+        );
+        Ok((ranking[0].clone(), ranking[1].clone()))
+    }
+
+    fn privkey_for_id(
+        id: &str,
+        primary_id: &str,
+        primary_sk: &SigningKey,
+        secondary_id: &str,
+        secondary_sk: &SigningKey,
+    ) -> String {
+        if id == primary_id {
+            hex::encode(primary_sk.to_bytes())
+        } else if id == secondary_id {
+            hex::encode(secondary_sk.to_bytes())
+        } else {
+            panic!("unexpected validator id {id}");
+        }
+    }
+
+    #[tokio::test]
+    async fn non_proposer_tick_keeps_buffered_transactions() {
+        let (state, _dir, primary_sk, secondary_sk) =
+            two_validator_state("validator-a", "validator-b").await;
+        let (rank0, rank1) = proposer_ranking(&state).await.expect("proposer ranking");
+        let (tx_sender, tx_receiver) = finalized_tx::channel();
+        let p2p = noop_p2p();
+
+        tx_sender.send(sample_publish_tx("buffered")).await.unwrap();
+
+        let mut pending_txs = Vec::new();
+        finalized_tx::recv_into_buffer(&tx_receiver, &mut pending_txs).await;
+        assert_eq!(pending_txs.len(), 1);
+
+        {
+            let mut s = state.write().await;
+            s.config.node_id = rank1.clone();
+            s.config.validator_privkey = Some(privkey_for_id(
+                &rank1,
+                "validator-a",
+                &primary_sk,
+                "validator-b",
+                &secondary_sk,
+            ));
+        }
+
+        let gate = prepare_proposer_context(Arc::clone(&state), &p2p, 0).await;
+        assert!(
+            gate.is_err(),
+            "rank-1 validator {rank1} should not propose on tick 0 (primary is {rank0})"
+        );
+        let err = gate.err().unwrap();
+        assert!(
+            err.to_string().contains("not its turn"),
+            "unexpected error: {err}"
+        );
+        assert_eq!(pending_txs.len(), 1, "buffer must retain the transaction");
+    }
+
+    #[tokio::test]
+    async fn proposer_consumes_buffer_and_advances_chain() {
+        let (state, _dir, primary_sk, secondary_sk) =
+            two_validator_state("validator-a", "validator-b").await;
+        let (rank0, _rank1) = proposer_ranking(&state).await.expect("proposer ranking");
+        let p2p = noop_p2p();
+
+        {
+            let mut s = state.write().await;
+            s.config.node_id = rank0.clone();
+            s.config.validator_privkey = Some(privkey_for_id(
+                &rank0,
+                "validator-a",
+                &primary_sk,
+                "validator-b",
+                &secondary_sk,
+            ));
+        }
+
+        let mut pending_txs = vec![sample_publish_tx("committed")];
+        let ctx = prepare_proposer_context(Arc::clone(&state), &p2p, 0)
+            .await
+            .unwrap_or_else(|e| panic!("rank-0 validator {rank0} should be allowed to propose: {e}"));
+
+        let txs: Vec<Transaction> = pending_txs.drain(..).collect();
+        let block = produce_block(Arc::clone(&state), txs, p2p, ctx)
+            .await
+            .expect("produce_block should succeed for rank-0 proposer");
+        assert_eq!(block.transactions.len(), 1);
+        assert_eq!(block.header.height, 1);
+        assert!(pending_txs.is_empty());
+    }
 }

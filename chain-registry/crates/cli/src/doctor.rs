@@ -273,6 +273,8 @@ async fn run_basic(options: DoctorOptions<'_>) -> Result<()> {
         DoctorCheck::fail("IPFS daemon", true, ipfs_msg)
     });
 
+    append_remote_node_local_ipfs_warning(&mut checks, &node, &ipfs);
+
     let (key_ok, key_msg) = check_publisher_key();
     checks.push(if key_ok {
         DoctorCheck::pass("Publisher key", false, key_msg)
@@ -667,6 +669,8 @@ async fn run_testnet(options: DoctorOptions<'_>) -> Result<()> {
         DoctorCheck::fail("IPFS daemon", true, ipfs_msg)
     });
 
+    append_remote_node_local_ipfs_warning(&mut checks, &node, &ipfs);
+
     if options.skip_explorer {
         checks.push(DoctorCheck::skipped(
             "Explorer",
@@ -791,13 +795,33 @@ fn finish_report(title: &str, report: DoctorReport, json: bool) -> Result<()> {
 }
 
 fn resolve_node_url(node_url: Option<&str>) -> String {
-    node_url.map(String::from).unwrap_or_else(|| {
-        std::env::var("CREG_NODE_URL").unwrap_or_else(|_| "http://localhost:8080".into())
-    })
+    crate::config_file::effective_node_url(node_url)
 }
 
 fn resolve_ipfs_url() -> String {
-    std::env::var("CREG_IPFS_URL").unwrap_or_else(|_| "http://127.0.0.1:5001".into())
+    crate::config_file::effective_ipfs_url(None)
+}
+
+fn append_remote_node_local_ipfs_warning(checks: &mut Vec<DoctorCheck>, node: &str, ipfs: &str) {
+    if crate::config_file::is_remote_node_url(node)
+        && crate::config_file::is_local_service_url(ipfs)
+    {
+        checks.push(DoctorCheck::fail(
+            "Fleet IPFS",
+            false,
+            format!(
+                "CREG_NODE_URL is remote ({node}) but CREG_IPFS_URL is local ({ipfs}). \
+                 Public testnet admission cannot fetch localhost-only CIDs — set \
+                 CREG_IPFS_URL=https://ipfs.testnet.cregnet.dev (or fleet gateway) before publish."
+            ),
+        ));
+    } else if crate::config_file::is_remote_node_url(node) {
+        checks.push(DoctorCheck::pass(
+            "Fleet IPFS",
+            false,
+            format!("remote node with non-local IPFS API ({ipfs})"),
+        ));
+    }
 }
 
 fn is_zero_like_address(value: &str) -> bool {
@@ -1150,16 +1174,32 @@ fn check_publisher_key() -> (bool, String) {
 }
 
 fn check_nsjail() -> (bool, String) {
+    if cfg!(windows) {
+        return (
+            true,
+            "not required on Windows — package sandbox runs on Linux validators (fleet uses nsjail)"
+                .into(),
+        );
+    }
     match which::which("nsjail") {
         Ok(p) => (true, format!("found at {}", p.display())),
         Err(_) => (
             false,
-            "nsjail not in PATH — sandbox will use WASM fallback".into(),
+            "nsjail not in PATH — run ./scripts/install-nsjail.sh (Linux) or use chain-registry-node-secure Docker image"
+                .into(),
         ),
     }
 }
 
 fn check_gpg() -> (bool, String) {
+    let pgp_configured = std::env::var("CREG_PGP_PRIVATE_KEY_PATH")
+        .ok()
+        .filter(|p| !p.trim().is_empty())
+        .is_some()
+        || std::env::var("CREG_PGP_SIG")
+            .ok()
+            .filter(|p| !p.trim().is_empty())
+            .is_some();
     match which::which("gpg") {
         Ok(p) => {
             // Get gpg version
@@ -1172,6 +1212,10 @@ fn check_gpg() -> (bool, String) {
                 .unwrap_or_else(|| "unknown version".into());
             (true, format!("{} — {}", p.display(), ver.trim()))
         }
+        Err(_) if !pgp_configured => (
+            true,
+            "not configured — optional unless CREG_PGP_PRIVATE_KEY_PATH is set".into(),
+        ),
         Err(_) => (false, "gpg not in PATH — PGP signing unavailable".into()),
     }
 }

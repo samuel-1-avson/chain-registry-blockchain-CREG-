@@ -79,6 +79,14 @@ pub async fn render(state: Arc<RwLock<NodeState>>) -> String {
         s.publisher_index.publisher_count() as f64,
     );
 
+    metric(
+        &mut out,
+        "creg_pending_block_txs",
+        "Finalized transactions buffered awaiting block production",
+        "gauge",
+        crate::finalized_tx::pending_buffer_depth() as f64,
+    );
+
     let node_id = &s.config.node_id;
     labeled_metric(
         &mut out,

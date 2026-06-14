@@ -18,6 +18,15 @@ pub struct TrustVerdict {
     /// cache entries, and nodes that predate the field.
     #[serde(default)]
     pub deterministic_risk: Option<crate::DeterministicRiskSummary>,
+    /// Evidence vote stage from the node API (`none`, `voting`, `quorum-reached`, `rejected`).
+    #[serde(default)]
+    pub evidence_phase: Option<String>,
+    /// Block production stage (`none`, `queued`, `proposed`, `committed`).
+    #[serde(default)]
+    pub block_phase: Option<String>,
+    /// Chain record stage (`pending`, `verified`, `rejected`).
+    #[serde(default)]
+    pub chain_status: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -49,6 +49,9 @@ pub async fn fetch_verdict(id: &PackageId, node_url: &str) -> Result<TrustVerdic
                         node_url: node_url.to_string(),
                     },
                     deterministic_risk: None,
+                    evidence_phase: None,
+                    block_phase: None,
+                    chain_status: Some("verified".into()),
                 });
             }
         }
@@ -111,6 +114,9 @@ async fn fetch_verdict_rest(id: &PackageId, node_url: &str) -> Result<TrustVerdi
                 node_url: node_url.to_string(),
             },
             deterministic_risk: None,
+            evidence_phase: None,
+            block_phase: None,
+            chain_status: None,
         });
     }
 
@@ -128,6 +134,9 @@ async fn fetch_verdict_rest(id: &PackageId, node_url: &str) -> Result<TrustVerdi
         published_at: Option<String>,
         revocation_reason: Option<String>,
         deterministic_risk: Option<common::DeterministicRiskSummary>,
+        evidence_phase: Option<String>,
+        block_phase: Option<String>,
+        chain_status: Option<String>,
     }
 
     let record: PackageApiResp = resp
@@ -160,5 +169,8 @@ async fn fetch_verdict_rest(id: &PackageId, node_url: &str) -> Result<TrustVerdi
             node_url: node_url.to_string(),
         },
         deterministic_risk: record.deterministic_risk,
+        evidence_phase: record.evidence_phase,
+        block_phase: record.block_phase,
+        chain_status: record.chain_status,
     })
 }
