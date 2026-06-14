@@ -601,6 +601,26 @@ impl PbftEngine {
     pub fn active_round_count(&self) -> usize {
         self.rounds.len()
     }
+
+    /// Whether `canonical` appears in a non-terminal PBFT round (block proposed).
+    pub fn canonical_in_non_terminal_round(&self, canonical: &str) -> bool {
+        self.rounds.values().any(|round| {
+            !round.is_terminal()
+                && round.block.transactions.iter().any(|tx| {
+                    transaction_package_canonical(tx).as_deref() == Some(canonical)
+                })
+        })
+    }
+}
+
+fn transaction_package_canonical(tx: &common::Transaction) -> Option<String> {
+    match tx {
+        common::Transaction::Publish(record) => Some(record.id.canonical()),
+        common::Transaction::Revoke {
+            package_canonical, ..
+        } => Some(package_canonical.clone()),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
