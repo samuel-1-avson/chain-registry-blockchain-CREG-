@@ -47,15 +47,7 @@ flowchart LR
 
 ---
 
-## Public testnet
 
-| Service | URL |
-|---------|-----|
-| **API** | https://api.testnet.cregnet.dev |
-| **Chain spec** | https://spec.testnet.cregnet.dev |
-| **Explorer** | https://explorer.testnet.cregnet.dev |
-| **Faucet** | https://faucet.testnet.cregnet.dev |
-| **Join hub** | https://testnet.cregnet.dev |
 | **Waitlist** | https://waitlist.cregnet.dev |
 
 **Binaries:** [v0.1.1-testnet release](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases/tag/v0.1.1-testnet) (`creg` + `creg-node` for Linux, Windows, macOS).
