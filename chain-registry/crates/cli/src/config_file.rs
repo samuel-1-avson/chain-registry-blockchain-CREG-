@@ -229,9 +229,7 @@ impl Config {
 
 /// Resolve node URL: CLI flag > `CREG_NODE_URL` > `~/.creg/config.toml` > default.
 pub fn effective_node_url(cli_override: Option<&str>) -> String {
-    Config::load()
-        .unwrap_or_default()
-        .node_url(cli_override)
+    Config::load().unwrap_or_default().node_url(cli_override)
 }
 
 /// Resolve IPFS API URL: CLI override > `CREG_IPFS_URL` > config file > default.

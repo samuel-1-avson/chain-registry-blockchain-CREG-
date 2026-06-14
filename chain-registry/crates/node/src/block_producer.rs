@@ -115,7 +115,7 @@ pub async fn run(
             }
         }
 
-        let txs: Vec<Transaction> = pending_txs.drain(..).collect();
+        let txs: Vec<Transaction> = std::mem::take(&mut pending_txs);
         finalized_tx::sync_pending_buffer_depth(pending_txs.len());
         let txs_backup = txs.clone();
 
@@ -643,7 +643,7 @@ mod tests {
                 panic!("rank-0 validator {rank0} should be allowed to propose: {e}")
             });
 
-        let txs: Vec<Transaction> = pending_txs.drain(..).collect();
+        let txs: Vec<Transaction> = std::mem::take(&mut pending_txs);
         let block = produce_block(Arc::clone(&state), txs, p2p, ctx)
             .await
             .expect("produce_block should succeed for rank-0 proposer");

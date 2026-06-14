@@ -1367,7 +1367,10 @@ fn derive_block_phase(
     "none"
 }
 
-fn derive_chain_status(record_status: Option<&PackageStatus>, in_pending_pool: bool) -> &'static str {
+fn derive_chain_status(
+    record_status: Option<&PackageStatus>,
+    in_pending_pool: bool,
+) -> &'static str {
     match record_status {
         Some(PackageStatus::Verified) => "verified",
         Some(PackageStatus::Revoked { .. }) => "rejected",
@@ -1431,12 +1434,7 @@ async fn get_package(State(state): State<SharedState>, Path(canonical): Path<Str
 
     // Check verified chain first.
     if let Ok(Some(record)) = s.chain.get_package(&canonical) {
-        let stages = package_pipeline_stages(
-            &canonical,
-            Some(&record.status),
-            in_pending_pool,
-            &s,
-        );
+        let stages = package_pipeline_stages(&canonical, Some(&record.status), in_pending_pool, &s);
         let resp = PackageResp {
             canonical: record.id.canonical(),
             status: match &record.status {
