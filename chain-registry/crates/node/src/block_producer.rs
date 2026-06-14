@@ -79,24 +79,21 @@ pub async fn run(
             continue;
         }
 
-        let ctx = match prepare_proposer_context(
-            Arc::clone(&state),
-            &p2p_handle,
-            allowed_fallback_rank,
-        )
-        .await
-        {
-            Ok(ctx) => ctx,
-            Err(e) => {
-                tracing::debug!(
-                    pending = pending_txs.len(),
-                    "Block producer: not proposer this tick — keeping {} buffered tx(s): {}",
-                    pending_txs.len(),
-                    e
-                );
-                continue;
-            }
-        };
+        let ctx =
+            match prepare_proposer_context(Arc::clone(&state), &p2p_handle, allowed_fallback_rank)
+                .await
+            {
+                Ok(ctx) => ctx,
+                Err(e) => {
+                    tracing::debug!(
+                        pending = pending_txs.len(),
+                        "Block producer: not proposer this tick — keeping {} buffered tx(s): {}",
+                        pending_txs.len(),
+                        e
+                    );
+                    continue;
+                }
+            };
 
         {
             let s = state.read().await;
@@ -108,8 +105,7 @@ pub async fn run(
                 .cloned()
                 .collect();
             if !forced.is_empty() {
-                let mut seen: HashSet<String> =
-                    pending_txs.iter().map(transaction_hash).collect();
+                let mut seen: HashSet<String> = pending_txs.iter().map(transaction_hash).collect();
                 for tx in forced.into_iter().rev() {
                     let hash = transaction_hash(&tx);
                     if seen.insert(hash) {
@@ -459,9 +455,7 @@ mod tests {
         BridgeStatus, NodeState, P2PStatus,
     };
     use chrono::Utc;
-    use common::{
-        ChainRecord, PackageId, PackageStatus, Transaction, Validator, ValidatorSet,
-    };
+    use common::{ChainRecord, PackageId, PackageStatus, Transaction, Validator, ValidatorSet};
     use ed25519_dalek::SigningKey;
     use rand::rngs::OsRng;
     use tempfile::TempDir;
@@ -546,9 +540,7 @@ mod tests {
         P2PHandle { sender }
     }
 
-    async fn proposer_ranking(
-        state: &Arc<RwLock<NodeState>>,
-    ) -> anyhow::Result<(String, String)> {
+    async fn proposer_ranking(state: &Arc<RwLock<NodeState>>) -> anyhow::Result<(String, String)> {
         let s = state.read().await;
         let epoch_seed = s.chain.tip_hash()?;
         let active: Vec<consensus::vrf::VrfValidator> = s
@@ -647,7 +639,9 @@ mod tests {
         let mut pending_txs = vec![sample_publish_tx("committed")];
         let ctx = prepare_proposer_context(Arc::clone(&state), &p2p, 0)
             .await
-            .unwrap_or_else(|e| panic!("rank-0 validator {rank0} should be allowed to propose: {e}"));
+            .unwrap_or_else(|e| {
+                panic!("rank-0 validator {rank0} should be allowed to propose: {e}")
+            });
 
         let txs: Vec<Transaction> = pending_txs.drain(..).collect();
         let block = produce_block(Arc::clone(&state), txs, p2p, ctx)
