@@ -88,13 +88,23 @@ if [[ "$use_prebuilt" -eq 0 ]]; then
   # not chain-registry-node-secure:fleet from the MAL-001 compose override.
   COMPOSE_BUILD=("${DOCKER[@]}" compose -f "${SCRIPT_DIR}/docker-compose.validator-fleet.yml" --env-file "$ENV_FILE")
   "${COMPOSE_BUILD[@]}" build creg-node-1
-  built_id="$("${COMPOSE_BUILD[@]}" images -q creg-node-1 2>/dev/null | head -n1)"
-  if [[ -n "$built_id" ]]; then
-    "${DOCKER[@]}" tag "$built_id" creg-node:fleet
-    "${DOCKER[@]}" tag "$built_id" chain-registry-app:latest
-    FLEET_IMAGE="creg-node:fleet"
-    export CREG_FLEET_IMAGE="$FLEET_IMAGE"
+  # Compose tags the build as ${CREG_FLEET_IMAGE} (default ghcr.io/.../latest).
+  # Do not use `compose images -q` here — with fleet-sandbox overlays or stale
+  # local tags it can return an old creg-node:fleet id instead of the fresh build.
+  built_ref="${CREG_FLEET_IMAGE:-ghcr.io/chain-registry/chain-registry:latest}"
+  if ! "${DOCKER[@]}" image inspect "$built_ref" >/dev/null 2>&1; then
+    built_id="$("${COMPOSE_BUILD[@]}" images -q creg-node-1 2>/dev/null | head -n1)"
+    if [[ -z "$built_id" ]]; then
+      echo "ERROR: fleet build produced no image (expected ${built_ref})" >&2
+      exit 1
+    fi
+    built_ref="$built_id"
   fi
+  "${DOCKER[@]}" tag "$built_ref" creg-node:fleet
+  "${DOCKER[@]}" tag "$built_ref" chain-registry-app:latest
+  FLEET_IMAGE="creg-node:fleet"
+  export CREG_FLEET_IMAGE="$FLEET_IMAGE"
+  echo "=== Tagged creg-node:fleet from ${built_ref} ==="
 fi
 # ── MAL-001: build secure (nsjail) image on top of the resolved fleet image ──
 # Dockerfile.secure expects base tag chain-registry-app:latest; retag whatever
