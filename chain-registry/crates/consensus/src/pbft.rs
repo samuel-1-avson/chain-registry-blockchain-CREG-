@@ -118,6 +118,45 @@ pub enum PbftPhase {
     Failed,
 }
 
+impl PbftPhase {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::PrePrepare => "pre_prepare",
+            Self::Prepare => "prepare",
+            Self::Commit => "commit",
+            Self::Finalised => "finalised",
+            Self::Failed => "failed",
+        }
+    }
+
+    /// Numeric encoding for Prometheus gauges and alert rules.
+    pub fn code(&self) -> i32 {
+        match self {
+            Self::PrePrepare => 1,
+            Self::Prepare => 2,
+            Self::Commit => 3,
+            Self::Finalised => 4,
+            Self::Failed => 5,
+        }
+    }
+}
+
+/// Snapshot of one PBFT block round for HTTP metrics and observability.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PbftRoundSnapshot {
+    pub block_hash: String,
+    pub block_height: u64,
+    pub phase: String,
+    pub phase_code: i32,
+    pub phase_age_seconds: f64,
+    pub prepare_count: usize,
+    pub commit_count: usize,
+    pub quorum: usize,
+    pub validator_count: usize,
+    pub view_number: u32,
+    pub view_change_count: u32,
+}
+
 /// A view-change signal returned by `timeout_rounds()` so the block producer
 /// or P2P layer can broadcast the certificate to peers.
 #[derive(Debug, Clone)]
@@ -611,6 +650,42 @@ impl PbftEngine {
                 })
         })
     }
+
+    /// Observability snapshot of all tracked PBFT block rounds.
+    pub fn observability_snapshot(&self) -> Vec<PbftRoundSnapshot> {
+        let mut rounds: Vec<PbftRoundSnapshot> = self
+            .rounds
+            .iter()
+            .map(|(block_hash, round)| PbftRoundSnapshot {
+                block_hash: block_hash.clone(),
+                block_height: round.block.header.height,
+                phase: round.phase.as_str().to_string(),
+                phase_code: round.phase.code(),
+                phase_age_seconds: round.phase_entered_at.elapsed().as_secs_f64(),
+                prepare_count: round.prepare_sigs.len(),
+                commit_count: round.commit_sigs.len(),
+                quorum: round.quorum(),
+                validator_count: round.validator_set.len(),
+                view_number: round.view_number,
+                view_change_count: round.view_change_count,
+            })
+            .collect();
+        rounds.sort_by(|a, b| {
+            a.block_height
+                .cmp(&b.block_height)
+                .then_with(|| a.block_hash.cmp(&b.block_hash))
+        });
+        rounds
+    }
+
+    /// Maximum phase age across non-terminal rounds (0 when none).
+    pub fn max_non_terminal_phase_age_seconds(&self) -> f64 {
+        self.rounds
+            .values()
+            .filter(|round| !round.is_terminal())
+            .map(|round| round.phase_entered_at.elapsed().as_secs_f64())
+            .fold(0.0, f64::max)
+    }
 }
 
 fn transaction_package_canonical(tx: &common::Transaction) -> Option<String> {
@@ -745,5 +820,23 @@ mod tests {
         assert!(round.receive_commit("node-1", prepare).is_err());
         assert!(round.commit_sigs.is_empty());
         assert_eq!(round.phase, PbftPhase::Commit);
+    }
+
+    #[test]
+    fn observability_snapshot_reports_active_round() {
+        use super::PbftEngine;
+
+        let signing_key = SigningKey::from_bytes(&[7u8; 32]);
+        let block = test_block("node-1");
+        let mut engine = PbftEngine::new();
+        engine
+            .start_round(block, validator_set("node-1", &signing_key))
+            .unwrap();
+
+        let rounds = engine.observability_snapshot();
+        assert_eq!(rounds.len(), 1);
+        assert_eq!(rounds[0].phase, "prepare");
+        assert_eq!(rounds[0].phase_code, 2);
+        assert!(engine.max_non_terminal_phase_age_seconds() >= 0.0);
     }
 }

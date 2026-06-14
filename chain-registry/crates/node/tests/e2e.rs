@@ -173,6 +173,9 @@ async fn start_test_node() -> (String, tokio::task::JoinHandle<()>) {
         view_change_certs: std::collections::HashMap::new(),
         reorgs: Vec::new(),
         pbft_engine: node::state::PbftEngine::new(),
+        forced_inclusion_tracker: node::state::ForcedInclusionTracker::new(),
+        sync_lag_blocks: 0,
+        sync_max_peer_tip: 0,
     }));
 
     let limiter = RateLimiter::new(RateLimitConfig::default());

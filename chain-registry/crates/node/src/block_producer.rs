@@ -3,8 +3,9 @@
 
 use crate::{finalized_tx, NodeState};
 use chrono::Utc;
-use common::{merkle_root, Block, BlockHeader, Transaction};
+use common::{merkle_root, transaction_hash, Block, BlockHeader, Transaction};
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{interval, Duration};
@@ -96,6 +97,27 @@ pub async fn run(
                 continue;
             }
         };
+
+        {
+            let s = state.read().await;
+            let height = s.chain.tip_height().unwrap_or(0);
+            let forced: Vec<Transaction> = s
+                .forced_inclusion_tracker
+                .forced_transaction_payloads(height)
+                .into_iter()
+                .cloned()
+                .collect();
+            if !forced.is_empty() {
+                let mut seen: HashSet<String> =
+                    pending_txs.iter().map(transaction_hash).collect();
+                for tx in forced.into_iter().rev() {
+                    let hash = transaction_hash(&tx);
+                    if seen.insert(hash) {
+                        pending_txs.insert(0, tx);
+                    }
+                }
+            }
+        }
 
         let txs: Vec<Transaction> = pending_txs.drain(..).collect();
         finalized_tx::sync_pending_buffer_depth(pending_txs.len());
@@ -401,6 +423,7 @@ async fn produce_block(
                                 }
                             }
                             s.publisher_index.apply_block(&final_block);
+                            s.on_block_committed(&final_block);
                         }
                     }
                 }
@@ -510,6 +533,9 @@ mod tests {
             view_change_certs: std::collections::HashMap::new(),
             reorgs: Vec::new(),
             pbft_engine: PbftEngine::new(),
+            forced_inclusion_tracker: crate::state::ForcedInclusionTracker::new(),
+            sync_lag_blocks: 0,
+            sync_max_peer_tip: 0,
         }));
 
         (state, dir, primary_sk, secondary_sk)

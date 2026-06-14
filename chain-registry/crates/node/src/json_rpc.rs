@@ -279,6 +279,9 @@ mod tests {
             view_change_certs: HashMap::new(),
             reorgs: Vec::new(),
             pbft_engine: crate::state::PbftEngine::new(),
+            forced_inclusion_tracker: crate::state::ForcedInclusionTracker::new(),
+            sync_lag_blocks: 0,
+            sync_max_peer_tip: 0,
         }));
 
         Ok((state, tempdir))

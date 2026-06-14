@@ -433,13 +433,16 @@ async fn process_package(
         ),
     };
 
-    if tx_out.send(tx).await.is_err() {
+    if tx_out.send(tx.clone()).await.is_err() {
         tracing::error!(
             "Finalized-tx channel closed — dropping result for {}",
             canonical
         );
     } else {
         tracing::info!("{} → {}", canonical, outcome_label);
+        let mut s = state.write().await;
+        let height = s.chain.tip_height().unwrap_or(0);
+        s.forced_inclusion_tracker.submit(tx, height);
     }
 
     cleanup(&state, &canonical).await;

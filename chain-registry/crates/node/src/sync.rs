@@ -15,17 +15,84 @@
 use crate::NodeState;
 use common::{Transaction, ValidatorSet, ValidatorVote};
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::sync::RwLock;
 use tokio::time::{interval, Duration};
 
 /// Sync interval — check for new blocks from peers every 10 seconds.
 const SYNC_INTERVAL_SECS: u64 = 10;
 
+/// Log peer heights when local tip has not advanced for this many sync polls.
+const STALL_LOG_AFTER_POLLS: u32 = 3;
+
 /// Maximum reorg depth this node will automatically recover from. Forks
 /// deeper than this require operator intervention (they indicate either a
 /// long partition or an attack and should not be auto-adopted).
 const MAX_REORG_DEPTH: u64 = 64;
+
+struct SyncStallTracker {
+    last_height: u64,
+    stall_polls: u32,
+}
+
+static SYNC_STALL: Mutex<SyncStallTracker> = Mutex::new(SyncStallTracker {
+    last_height: 0,
+    stall_polls: 0,
+});
+
+/// Compute lag between a local tip and the highest peer tip.
+pub fn sync_lag_blocks(local_tip: u64, max_peer_tip: u64) -> u64 {
+    max_peer_tip.saturating_sub(local_tip)
+}
+
+async fn query_peer_heights(
+    client: &reqwest::Client,
+    peer_urls: &[String],
+) -> (u64, HashMap<String, u64>) {
+    #[derive(serde::Deserialize)]
+    struct Stats {
+        tip_height: u64,
+    }
+
+    let mut max_tip = 0u64;
+    let mut per_peer = HashMap::new();
+    for url in peer_urls {
+        let full_url = format!("{}/v1/chain/stats", url.trim_end_matches('/'));
+        let height = match client.get(&full_url).send().await {
+            Ok(resp) if resp.status().is_success() => resp
+                .json::<Stats>()
+                .await
+                .map(|stats| stats.tip_height)
+                .unwrap_or(0),
+            _ => 0,
+        };
+        per_peer.insert(url.clone(), height);
+        max_tip = max_tip.max(height);
+    }
+    (max_tip, per_peer)
+}
+
+fn record_sync_stall(local_tip: u64, peer_heights: &HashMap<String, u64>) {
+    let mut tracker = SYNC_STALL.lock().expect("sync stall mutex poisoned");
+    if local_tip > tracker.last_height {
+        tracker.last_height = local_tip;
+        tracker.stall_polls = 0;
+        return;
+    }
+    tracker.stall_polls = tracker.stall_polls.saturating_add(1);
+    if tracker.stall_polls >= STALL_LOG_AFTER_POLLS {
+        let peer_summary: Vec<String> = peer_heights
+            .iter()
+            .map(|(url, height)| format!("{url}={height}"))
+            .collect();
+        tracing::warn!(
+            local_tip,
+            stall_polls = tracker.stall_polls,
+            peers = %peer_summary.join(", "),
+            "Chain sync stalled — no local progress while peers report heights"
+        );
+    }
+}
 
 pub async fn run(state: Arc<RwLock<NodeState>>) {
     // Initial sync at startup.
@@ -50,26 +117,25 @@ async fn sync_once(state: Arc<RwLock<NodeState>>) -> anyhow::Result<()> {
         (s.chain.tip_height()?, s.config.peers.clone())
     };
 
-    // Ask peers for their tip.
-    let mut peer_height = 0;
     let client = reqwest::Client::new();
+    let (peer_height, peer_heights) = query_peer_heights(&client, &peer_urls).await;
 
-    for url in &peer_urls {
-        let full_url = format!("{}/v1/chain/stats", url.trim_end_matches('/'));
-        if let Ok(resp) = client.get(&full_url).send().await {
-            #[derive(serde::Deserialize)]
-            struct Stats {
-                tip_height: u64,
-            }
-            if let Ok(stats) = resp.json::<Stats>().await {
-                peer_height = peer_height.max(stats.tip_height);
-            }
-        }
+    {
+        let mut s = state.write().await;
+        s.sync_max_peer_tip = peer_height;
+        s.sync_lag_blocks = sync_lag_blocks(our_height, peer_height);
     }
 
     if peer_height <= our_height {
+        record_sync_stall(our_height, &peer_heights);
         tracing::debug!("Chain is up to date (height {})", our_height);
         return Ok(());
+    }
+
+    {
+        let mut tracker = SYNC_STALL.lock().expect("sync stall mutex poisoned");
+        tracker.last_height = our_height;
+        tracker.stall_polls = 0;
     }
 
     tracing::info!(
@@ -158,6 +224,9 @@ async fn sync_once(state: Arc<RwLock<NodeState>>) -> anyhow::Result<()> {
             let mut s = state.write().await;
             s.chain.insert_block(&block)?;
             s.publisher_index.apply_block(&block);
+            s.on_block_committed(&block);
+            s.sync_max_peer_tip = peer_height;
+            s.sync_lag_blocks = sync_lag_blocks(height, peer_height);
         }
 
         tracing::info!("Synced block {} ({})", height, &prev_hash[..12]);
@@ -586,6 +655,13 @@ mod tests {
             publisher_pubkeys: vec![],
             manifest: None,
         }
+    }
+
+    #[test]
+    fn sync_lag_blocks_saturates_at_zero_when_caught_up() {
+        assert_eq!(super::sync_lag_blocks(10, 10), 0);
+        assert_eq!(super::sync_lag_blocks(12, 10), 0);
+        assert_eq!(super::sync_lag_blocks(3, 8), 5);
     }
 
     #[test]

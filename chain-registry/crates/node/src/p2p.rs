@@ -728,6 +728,7 @@ impl P2PNode {
                                                     }
                                                 }
                                                 s.publisher_index.apply_block(&final_block);
+                                                s.on_block_committed(&final_block);
                                                 let data_dir = s.config.data_dir.clone();
                                                 let ipfs_url = if s.config.ipfs_url.is_empty() {
                                                     None
@@ -929,6 +930,9 @@ mod tests {
             view_change_certs: HashMap::new(),
             reorgs: Vec::new(),
             pbft_engine: crate::state::PbftEngine::new(),
+            forced_inclusion_tracker: crate::state::ForcedInclusionTracker::new(),
+            sync_lag_blocks: 0,
+            sync_max_peer_tip: 0,
         })))
     }
 

@@ -148,6 +148,7 @@ fn validator_routes() -> Router<SharedState> {
         )
         .route("/v1/validator/consensus/vote", post(receive_vote))
         .route("/v1/validator/consensus/state", get(consensus_state))
+        .route("/v1/validator/consensus/pbft", get(consensus_pbft))
 }
 
 fn operator_routes() -> Router<SharedState> {
@@ -234,6 +235,7 @@ fn legacy_public_routes(sse_bus: EventBus, ws_bus: EventBus) -> Router<SharedSta
         // Consensus
         .route("/v1/consensus/vote", post(receive_vote))
         .route("/v1/consensus/state", get(consensus_state))
+        .route("/v1/consensus/pbft", get(consensus_pbft))
         .route("/v1/publishers/rotate-key", post(rotate_publisher_key))
         // Search
         .route("/v1/search", get(search_handler))
@@ -549,6 +551,10 @@ async fn health(State(state): State<SharedState>) -> impl IntoResponse {
         "version": env!("CARGO_PKG_VERSION"),
         "validator_set_sync": s.validator_set_sync.clone(),
         "sandbox": sandbox,
+        "sync": {
+            "lag_blocks": s.sync_lag_blocks,
+            "max_peer_tip": s.sync_max_peer_tip,
+        },
     }))
 }
 
@@ -2736,6 +2742,20 @@ async fn consensus_state(State(state): State<SharedState>) -> impl IntoResponse 
     }))
 }
 
+// GET /v1/consensus/pbft
+//
+// Snapshot of PBFT *block* consensus rounds (distinct from evidence vote rounds
+// exposed by `/v1/consensus/state`).
+async fn consensus_pbft(State(state): State<SharedState>) -> impl IntoResponse {
+    let s = state.read().await;
+    let rounds = s.pbft_engine.observability_snapshot();
+    Json(serde_json::json!({
+        "active_round_count": rounds.len(),
+        "max_non_terminal_phase_age_seconds": s.pbft_engine.max_non_terminal_phase_age_seconds(),
+        "rounds": rounds,
+    }))
+}
+
 // POST /v1/consensus/vote
 #[derive(Deserialize, Serialize)]
 pub struct VoteMessage {
@@ -3333,6 +3353,9 @@ mod tests {
             view_change_certs: HashMap::new(),
             reorgs: Vec::new(),
             pbft_engine: crate::state::PbftEngine::new(),
+            forced_inclusion_tracker: crate::state::ForcedInclusionTracker::new(),
+            sync_lag_blocks: 0,
+            sync_max_peer_tip: 0,
         }));
 
         Ok((state, tempdir, p2p_handle, tx_sender, tx_receiver))
