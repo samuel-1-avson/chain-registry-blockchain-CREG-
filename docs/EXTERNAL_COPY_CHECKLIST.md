@@ -1,14 +1,14 @@
 ﻿# External copy checklist (MAIN-007)
 
-Use before wide marketing or SEC-401 closes. In-repo surfaces passed review on 2026-06-12 (`docs/PUBLIC_COPY_REVIEW.md`).
+Use before wide marketing or SEC-401 closes. In-repo surfaces passed review on 2026-06-12 and whitepaper copy passed review on 2026-06-15 (`docs/PUBLIC_COPY_REVIEW.md`).
 
-## White paper (`CREG_WHITEPAPER` draft — outside repo)
+## Whitepaper (`docs/WHITEPAPER.md`)
 
-- [ ] Frame as **public alpha / coordinated testnet**, not mainnet or production.
-- [ ] Reference **v0.1.1-testnet** (or current tagged testnet release) where version matters.
-- [ ] No **production security** or audit-complete claims until SEC-401 vendor is booked and report is named with date.
-- [ ] Package safety: say **verified after validator quorum**, not guaranteed safe.
-- [ ] Remove banned phrases: production-ready, mainnet-ready, enterprise-grade security, audited (without vendor + date), guaranteed package safety.
+- [x] Frame as **public alpha / coordinated testnet**, not mainnet or production.
+- [x] Reference **v0.1.2-testnet** (or current tagged testnet release) where version matters.
+- [x] No **production security** or audit-complete claims until SEC-401 vendor is booked and report is named with date.
+- [x] Package safety: say **verified after validator quorum**, not guaranteed safe.
+- [x] Remove banned phrases: production-ready, mainnet-ready, enterprise-grade security, audited (without vendor + date), guaranteed package safety.
 
 ## Social (X, LinkedIn, etc.)
 

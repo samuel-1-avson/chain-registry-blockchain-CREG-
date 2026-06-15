@@ -11,6 +11,7 @@ Hosting runbooks, Firebase deploy guides, budget models, and internal maintainer
 
 | Document | Audience |
 |----------|----------|
+| [WHITEPAPER.md](./WHITEPAPER.md) | Developers, validators, auditors, ecosystem partners |
 | [PUBLIC_TESTNET_QUICKSTART.md](./PUBLIC_TESTNET_QUICKSTART.md) | Publishers, developers, validators |
 | [TESTNET_PHASE_SCOPE.md](./TESTNET_PHASE_SCOPE.md) | Testnet limits, verified semantics, alpha scope |
 | [WALLET_KEY_DERIVATION.md](./WALLET_KEY_DERIVATION.md) | Ed25519 (packages) vs Ethereum EOA (staking) |
@@ -21,6 +22,7 @@ Hosting runbooks, Firebase deploy guides, budget models, and internal maintainer
 
 | Document | Description |
 |----------|-------------|
+| [WHITEPAPER.md](./WHITEPAPER.md) | Public-alpha technical whitepaper |
 | [DEEP_DIVE_ANALYSIS.md](../chain-registry/DEEP_DIVE_ANALYSIS.md) | Architecture, data flows, issue registry |
 | [TESTNET_READINESS_REPORT.md](../chain-registry/TESTNET_READINESS_REPORT.md) | Evidence-based readiness snapshot |
 | [chain-spec.sepolia.json](../chain-registry/testnet/chain-spec.sepolia.json) | Live testnet chain parameters |
@@ -51,7 +53,7 @@ cargo test --workspace
 cd contracts && forge test
 ```
 
-Release binaries: [v0.1.1-testnet](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases/tag/v0.1.1-testnet).
+Release binaries: [v0.1.2-testnet](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases/tag/v0.1.2-testnet).
 
 ---
 

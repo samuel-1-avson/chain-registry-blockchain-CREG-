@@ -193,7 +193,7 @@ See [TESTNET_SEPOLIA_RUNBOOK.md](./TESTNET_SEPOLIA_RUNBOOK.md) and [OPERATOR.md]
 When maintainers publish a tag (`v*`), GitHub Actions workflow `release-binaries.yml` attaches `creg` and `creg-node` to the release. Then:
 
 ```bash
-./scripts/install-creg.sh --version v0.1.1-testnet
+./scripts/install-creg.sh --version v0.1.2-testnet
 ```
 
 ---

@@ -13,6 +13,7 @@ Start at the [project README](../README.md), then use the sections below.
 
 | Document | Audience |
 |----------|----------|
+| [WHITEPAPER.md](./WHITEPAPER.md) | Developers, validators, auditors, ecosystem partners |
 | [PUBLIC_TESTNET_QUICKSTART.md](./PUBLIC_TESTNET_QUICKSTART.md) | Publishers, developers, validators |
 | [TESTNET_PHASE_SCOPE.md](./TESTNET_PHASE_SCOPE.md) | What to expect — limits, verified semantics, alpha scope |
 | [WALLET_KEY_DERIVATION.md](./WALLET_KEY_DERIVATION.md) | Ed25519 (packages) vs Ethereum EOA (staking) |
@@ -43,6 +44,7 @@ Start at the [project README](../README.md), then use the sections below.
 
 | Document | Description |
 |----------|-------------|
+| [WHITEPAPER.md](./WHITEPAPER.md) | Public-alpha technical whitepaper |
 | [../chain-registry/DEEP_DIVE_ANALYSIS.md](../chain-registry/DEEP_DIVE_ANALYSIS.md) | Architecture, data flows, ISSUE registry |
 | [../chain-registry/TESTNET_READINESS_REPORT.md](../chain-registry/TESTNET_READINESS_REPORT.md) | Evidence-based readiness snapshot |
 | [NEXT_WORK.md](./NEXT_WORK.md) | Prioritized open work (maintainers) |

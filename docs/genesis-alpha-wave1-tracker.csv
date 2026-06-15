@@ -1,0 +1,6 @@
+﻿wallet,waitlist_position,tier,path,invite_sent,hub_signed_in,cli_installed,staked,first_action_at,blockers,notes
+0xf4c0bdbb681a61aa0b123e82c04b0d692f53d58e,1,alpha,validate,,,,,,Validator Node
+0x01a20c2882eac884c3957f062bee051247b03d42,4,alpha,validate,,,,,,Validator Node
+0x7820c3f9d272dc2647ec944fa92b91d0d7e1f2dc,6,alpha,validate,,,,,,Validator Node
+0xddd8f31dcfddbaaba7b7ac07032f8d714b64683b,7,alpha,publish,,,,,,Publisher
+0xe32a0274655f6bab3396df3ee9639a265750b420,8,alpha,validate,,,,,,Validator Node

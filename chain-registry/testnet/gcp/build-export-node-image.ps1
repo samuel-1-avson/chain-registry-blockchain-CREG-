@@ -11,7 +11,7 @@ param(
     [string]$ProjectId = "",
     [string]$Zone = "",
     [string]$ValidatorVm = "creg-validator-vm",
-    [string]$Tag = "v0.1.1-testnet",
+    [string]$Tag = "v0.1.2-testnet",
     [switch]$SyncLocal,
     [switch]$SkipCheckout,
     [switch]$Confirm

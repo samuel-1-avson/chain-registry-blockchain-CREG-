@@ -1,8 +1,8 @@
 # Public copy review (MAIN-007 / L2 gate)
 
-**Reviewed:** 2026-06-12  
-**Scope:** Hub web, public quickstart, operator docs visible to external users  
-**Verdict:** Pass for in-repo surfaces; white paper and social remain operator-owned outside this repo.
+**Reviewed:** 2026-06-15  
+**Scope:** Hub web, public quickstart, whitepaper, operator docs visible to external users  
+**Verdict:** Pass for in-repo surfaces; social copy remains operator-owned outside this repo.
 
 ## Checked surfaces
 
@@ -13,12 +13,12 @@
 | `docs/PUBLIC_TESTNET_QUICKSTART.md` | Pass | SEC-401 + alpha limitations section |
 | `docs/TESTNET_PHASE_SCOPE.md` | Pass | Defines verified/pending honestly |
 | `docs/L2_PUBLIC_ALPHA_GATE_STATUS.md` | Pass | Tracks partial gates explicitly |
+| `docs/WHITEPAPER.md` | Pass | Public alpha framing, SEC-401 open, no package-safety guarantee |
 
 ## Out of repo (manual before wide marketing)
 
 | Surface | Action |
 |---------|--------|
-| White paper (`CREG_WHITEPAPER` draft) | Keep "testnet / public alpha" framing; no production security claims until SEC-401 closes |
 | Social posts (X, LinkedIn, etc.) | Use hub FAQ language: coordinated testnet, waitlist, not mainnet |
 | Waitlist landing copy | Firebase deploy — confirm matches hub disclaimers |
 

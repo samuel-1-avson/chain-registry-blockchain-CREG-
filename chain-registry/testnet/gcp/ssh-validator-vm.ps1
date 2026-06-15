@@ -27,7 +27,7 @@ $sshBase = @(
     "--strict-host-key-checking=no"
 )
 if ($Command) {
-    gcloud compute ssh $VmName @sshBase --command=$Command
+    gcloud compute ssh $VmName @sshBase --command="$Command"
 } else {
     gcloud compute ssh $VmName @sshBase
 }

@@ -3,9 +3,11 @@
 # Usage:
 #   .\testnet\gcp\deploy-validator-fleet.ps1
 #   .\testnet\gcp\deploy-validator-fleet.ps1 -SkipSync   # env + restart only (faster)
+#   .\testnet\gcp\deploy-validator-fleet.ps1 -FleetBuild # compile on VM (CREG_FLEET_BUILD=1)
 
 param(
-    [switch]$SkipSync
+    [switch]$SkipSync,
+    [switch]$FleetBuild
 )
 
 $ErrorActionPreference = "Stop"
@@ -45,8 +47,12 @@ if ($SkipSync) {
     gcloud compute ssh $vmName @sshOpts --command="mkdir -p '$(Split-Path $remoteStart -Parent)'" | Out-Null
     gcloud compute scp $localStart "${vmName}:${remoteStart}" @scpOpts
 }
+if ($FleetBuild) {
+    Log "FleetBuild: remote start sets CREG_FLEET_BUILD=1 (VM compile)"
+}
 # nohup: long Docker builds must survive IAP SSH disconnects.
-$remoteCmd = "sed -i 's/\r$//' '$remoteStart' && chmod +x '$remoteStart' && nohup bash '$remoteStart' > /tmp/creg-fleet-start.log 2>&1 & sleep 2 && tail -n 30 /tmp/creg-fleet-start.log"
+$envPrefix = if ($FleetBuild) { "env CREG_FLEET_BUILD=1 " } else { "" }
+$remoteCmd = "sed -i 's/\r$//' '$remoteStart' && chmod +x '$remoteStart' && nohup ${envPrefix}bash '$remoteStart' > /tmp/creg-fleet-start.log 2>&1 & sleep 2 && tail -n 30 /tmp/creg-fleet-start.log"
 & (Join-Path $gcpDir "ssh-validator-vm.ps1") -Command $remoteCmd
 if ($LASTEXITCODE -ne 0) { throw "remote start failed" }
 

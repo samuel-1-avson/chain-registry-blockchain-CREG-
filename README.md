@@ -50,7 +50,7 @@ flowchart LR
 
 | **Waitlist** | https://waitlist.cregnet.dev |
 
-**Binaries:** [v0.1.1-testnet release](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases/tag/v0.1.1-testnet) (`creg` + `creg-node` for Linux, Windows, macOS).
+**Binaries:** [v0.1.2-testnet release](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases/tag/v0.1.2-testnet) (`creg` + `creg-node` for Linux, Windows, macOS).
 
 Chain parameters: [`chain-registry/testnet/chain-spec.sepolia.json`](chain-registry/testnet/chain-spec.sepolia.json).
 
@@ -63,6 +63,7 @@ This repo is organized like other public blockchains — **protocol and consensu
 | What to explore | Where |
 |-----------------|-------|
 | **Repository** | [chain-registry-blockchain-CREG-](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-) |
+| **Whitepaper** | [docs/WHITEPAPER.md](docs/WHITEPAPER.md) |
 | **Public documentation** | [docs/PUBLIC.md](docs/PUBLIC.md) |
 | **ZK circuits** | [circuits/](circuits/) |
 | **Release binaries** | [Releases](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases) |
@@ -117,6 +118,7 @@ This repository follows the same pattern as other open blockchains: **protocol c
 
 | Document | Purpose |
 |----------|---------|
+| [WHITEPAPER.md](docs/WHITEPAPER.md) | Public-alpha technical whitepaper |
 | [DEEP_DIVE_ANALYSIS.md](chain-registry/DEEP_DIVE_ANALYSIS.md) | Technical architecture and issue registry |
 | [TESTNET_READINESS_REPORT.md](chain-registry/TESTNET_READINESS_REPORT.md) | Readiness assessment and evidence |
 | [contracts/README.md](chain-registry/contracts/README.md) | Solidity contract status |
@@ -134,7 +136,7 @@ This repository follows the same pattern as other open blockchains: **protocol c
 | Public HTTPS testnet | Live — `testnet.cregnet.dev` |
 | Binary release `v0.1.0-testnet` | Done |
 | Public alpha waitlist | Live — [waitlist.cregnet.dev](https://waitlist.cregnet.dev) |
-| External security audit | Scheduled — scope in maintainer docs |
+| External security audit | Open — scope ready, vendor/start date TBD |
 
 This is a **public alpha testnet**, not mainnet. See [TESTNET_PHASE_SCOPE.md](docs/TESTNET_PHASE_SCOPE.md) for participant expectations.
 
