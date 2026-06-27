@@ -1,3 +1,6 @@
+[submodule "CREG-Contribution-Arena"]
+	path = CREG-Contribution-Arena
+	url = https://github.com/samuel-1-avson/CREG-Contribution-Arena.git
 [submodule "Creg-waitlist"]
 	path = Creg-waitlist
 	url = https://github.com/samuel-1-avson/Creg-waitlist.git
