@@ -10,7 +10,7 @@
 # Optional profiles: cli, tui, llm (local Ollama for Lane B/C)
 # Observability overlay: docker compose -f docker-compose.yml -f observability/docker-compose.observability.yml up -d
 #
-# Local Anvil dev (legacy): docker compose -f docker-compose.anvil.yml up -d
+# Archived local Anvil stacks: archive/anvil-lab/README.md
 
 services:
 
@@ -34,6 +34,36 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # ── Optional IPFS Pinner sidecar (for PinningRewards incentives) ─────────
+  # Run this alongside the node to earn pinning rewards for keeping package
+  # content available. The pinner is a separate sidecar (see crates/ipfs-pinner).
+  # Use PinningManager::start_status_server for basic /status exposure (stats + CIDs).
+  # See CREG_SYSTEM_WORKFLOW.md §9.12 + §15 for architecture and incentives.
+  # pinner:
+  #   image: chain-registry-app:latest
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   container_name: creg-pinner
+  #   entrypoint: ["/app/ipfs-pinner"]  # Assumes pinner binary is built into the image
+  #   environment:
+  #     PINNER_IPFS_URL: http://ipfs:5001
+  #     PINNER_ETH_RPC: ${CREG_ETH_RPC:-${SEPOLIA_RPC_URL:-https://ethereum-sepolia-rpc.publicnode.com}}
+  #     PINNER_CONTRACT_ADDR: ${PINNER_CONTRACT_ADDR:-}  # PinningRewards addr from deployments
+  #     PINNER_OPERATOR_KEY: ${PINNER_OPERATOR_KEY:-}
+  #     PINNER_MIN_STAKE: "1000000000000000000000"  # 1000 CREG
+  #     PINNER_AUTO_REGISTER: "true"
+  #     PINNER_VERIFICATION_INTERVAL: "3600"
+  #     PINNER_STATUS_ADDR: "0.0.0.0:8085"
+  #     RUST_LOG: "info"
+  #   ports:
+  #     - "8085:8085"
+  #   depends_on:
+  #     ipfs:
+  #       condition: service_healthy
+  #   restart: unless-stopped
+  #   # healthcheck via /status if status server is started in the pinner binary
 
   # ── Chain spec (signed Sepolia testnet config) ────────────────────────────
   spec-server:
@@ -96,6 +126,16 @@ services:
       CREG_ML_MODEL_PATH: "/app/models"
       CREG_WASM_ENABLED: "true"
       CREG_WASM_VALIDATORS_PATH: "/app/validators"
+
+      # ── Incentive systems (see CREG_SYSTEM_WORKFLOW.md §9.12 and §15) ─────────
+      # Analysis work rewards (ValidatorRewards) – low base, emitted on Verified.
+      # Address usually from chain-spec or deployment; override for custom.
+      CREG_VALIDATOR_REWARDS_ADDR: ${CREG_VALIDATOR_REWARDS_ADDR:-}
+
+      # Pinning rewards (PinningRewards.sol) are handled by the separate ipfs-pinner crate/process.
+      # Not embedded in the main node. Run alongside for IPFS availability incentives.
+      # CREG_PINNING_REWARDS_ADDR and related PinningConfig are used by crates/ipfs-pinner.
+      # See crates/ipfs-pinner/README or docs for standalone pinner deployment.
 
       CREG_SANDBOX_NSJAIL_CONFIG: "/app/config/sandbox/nsjail-seccomp.cfg"
       CREG_SANDBOX_DOCKER_SECCOMP: "/app/config/sandbox/docker-seccomp.json"

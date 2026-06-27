@@ -10,6 +10,9 @@
 // PBFT block consensus:
 //   creg_pbft_active_rounds, creg_pbft_round_phase, creg_pbft_round_age_seconds
 //
+// Gossip validation:
+//   creg_gossip_votes_rejected_total, creg_gossip_pbft_rejected_total
+//
 // L1 validator set sync (Sepolia staking logs):
 //   creg_validator_set_sync_*    — mirrors /v1/health.validator_set_sync
 
@@ -182,6 +185,21 @@ pub async fn render(state: Arc<RwLock<NodeState>>) -> String {
         s.reorgs.len() as f64,
     );
 
+    metric(
+        &mut out,
+        "creg_gossip_votes_rejected_total",
+        "Gossip vote messages rejected before mesh propagation",
+        "counter",
+        s.p2p_status.gossip_votes_rejected_total as f64,
+    );
+    metric(
+        &mut out,
+        "creg_gossip_pbft_rejected_total",
+        "PBFT Prepare/Commit gossip messages rejected at validation boundary",
+        "counter",
+        s.p2p_status.gossip_pbft_rejected_total as f64,
+    );
+
     // ── PBFT block consensus ─────────────────────────────────────────────────
     let pbft_rounds = s.pbft_engine.observability_snapshot();
     metric(
@@ -260,6 +278,71 @@ pub async fn render(state: Arc<RwLock<NodeState>>) -> String {
         "Most recent L1 block tagged finalized as observed by the bridge (0 if unknown)",
         "gauge",
         bridge.finalized_l1_block.unwrap_or(0) as f64,
+    );
+
+    // ── Incentives / Rewards monitoring (§9.12, §15) ─────────────────────────
+    // Emission counters from pipeline L1 hook (analysis work rewards).
+    metric(
+        &mut out,
+        "creg_reward_emissions_succeeded",
+        "Number of successful L1 distributeWorkRewards calls (Verified packages)",
+        "counter",
+        s.reward_emissions_succeeded as f64,
+    );
+    metric(
+        &mut out,
+        "creg_reward_emissions_failed",
+        "Number of failed L1 reward emission attempts",
+        "counter",
+        s.reward_emissions_failed as f64,
+    );
+    if let Some(treasury) = &s.config.treasury_addr {
+        labeled_metric(
+            &mut out,
+            "creg_incentives_treasury",
+            "Configured treasury address for reward funding (value=1)",
+            "gauge",
+            &[("addr", treasury.as_str())],
+            1.0,
+        );
+    }
+
+    // Live treasury balance from L1 (small best-effort query for actual monitoring when eth_rpc + addrs configured)
+    // Use cached values refreshed by background task (avoids per-scrape L1 cost)
+    metric(
+        &mut out,
+        "creg_treasury_balance",
+        "Current balance of the configured treasury address (in token units, from background L1 cache)",
+        "gauge",
+        s.treasury_balance as f64,
+    );
+    metric(
+        &mut out,
+        "creg_pending_rewards_estimate",
+        "Estimated pending rewards across system (from state, via background L1 cache)",
+        "gauge",
+        s.pending_rewards_estimate as f64,
+    );
+    metric(
+        &mut out,
+        "creg_total_rewards_distributed",
+        "Total rewards distributed via ValidatorRewards (from background L1 cache)",
+        "gauge",
+        s.total_rewards_distributed as f64,
+    );
+    metric(
+        &mut out,
+        "creg_rewards_pool_balance",
+        "Current PinningRewards pool balance (from background L1 cache)",
+        "gauge",
+        s.rewards_pool_balance as f64,
+    );
+    metric(
+        &mut out,
+        "creg_last_incentives_refresh",
+        "Unix timestamp of last background incentives refresh (0 if never)",
+        "gauge",
+        s.last_incentives_refresh.unwrap_or(0) as f64,
     );
 
     // ── MAL-001 sandbox posture (validators) ─────────────────────────────────

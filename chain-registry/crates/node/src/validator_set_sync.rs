@@ -523,6 +523,9 @@ fn validator_from_registration(
         stake: registration.stake.max(fallback_stake),
         reputation: registration.reputation.max(100),
         status: active_status_for(node_id, &identity.node_id),
+        // New performance fields default for freshly synced validators
+        performance_score: 500,
+        contribution_count: 0,
     })
 }
 
@@ -1531,6 +1534,8 @@ mod tests {
             stake: 100,
             reputation: 100,
             status: "online".into(),
+            performance_score: 500,
+            contribution_count: 0,
         }
     }
 
@@ -1547,6 +1552,7 @@ mod tests {
             validator_set_bootstrap: bootstrap.clone(),
             validator_set: bootstrap,
             package_rounds: HashMap::new(),
+            package_committees: HashMap::new(),
             config: NodeConfig {
                 data_dir: tempdir.path().to_path_buf(),
                 node_id: "node-2".into(),
@@ -1569,6 +1575,13 @@ mod tests {
             forced_inclusion_tracker: crate::state::ForcedInclusionTracker::new(),
             sync_lag_blocks: 0,
             sync_max_peer_tip: 0,
+            reward_emissions_succeeded: 0,
+            reward_emissions_failed: 0,
+            treasury_balance: 0,
+            pending_rewards_estimate: 0,
+            total_rewards_distributed: 0,
+            rewards_pool_balance: 0,
+            last_incentives_refresh: None,
         }));
 
         Ok((state, tempdir))

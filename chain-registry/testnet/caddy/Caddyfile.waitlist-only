@@ -1,0 +1,10 @@
+# Waitlist-only edge Caddy — single vhost, no testnet API/explorer/faucet routes.
+# Set CREG_PUBLIC_WAITLIST_HOST and CREG_ACME_EMAIL in sepolia-3node.env.
+
+{
+	email {$CREG_ACME_EMAIL}
+}
+
+{$CREG_PUBLIC_WAITLIST_HOST} {
+	reverse_proxy 127.0.0.1:{$CREG_WAITLIST_HOST_PORT}
+}

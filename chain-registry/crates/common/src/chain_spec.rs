@@ -240,6 +240,9 @@ impl ChainSpec {
                 stake: v.stake,
                 reputation: v.reputation,
                 status: v.status.clone(),
+                // Performance/resource proxy fields (default for spec-loaded sets)
+                performance_score: 500,
+                contribution_count: 0,
             })
             .collect();
         crate::ValidatorSet::new(validators)
@@ -372,7 +375,8 @@ mod tests {
                 .into(),
             consensus_params: ConsensusParams {
                 block_time_seconds: 5,
-                vote_timeout_ms: 10000,
+                // 120s (was 10s). At 10k+ validators the old value causes mass timeouts.
+                vote_timeout_ms: 120_000,
                 quorum_percentage: 67,
                 min_validator_stake_wei: "100000000000000000000".into(),
                 min_publisher_stake_wei: "1000000000000000000".into(),

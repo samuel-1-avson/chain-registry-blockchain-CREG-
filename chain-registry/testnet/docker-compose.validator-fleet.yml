@@ -1,6 +1,6 @@
 # Validator fleet on dedicated GCP VM (no local IPFS/spec  use edge VPC services).
 #
-# Prerequisites in sepolia-3node.env:
+# Prerequisites in sepolia-fleet.env (or legacy sepolia-3node.env):
 #   CREG_ETH_RPC=http://10.128.0.3:8545
 #   CREG_EDGE_INTERNAL_IP=<creg-testnet-vm VPC IP>
 #   CREG_IPFS_URL=http://${CREG_EDGE_INTERNAL_IP}:15001
@@ -9,7 +9,7 @@
 # Usage:
 #   ./testnet/start-validator-fleet-gcp.sh
 #
-# Ports (host): API 28180-28189, P2P 29100-29109 (3 nodes use 28180-28182 / 29100-29102).
+# Ports (host): API 28180-28189, P2P 29100-29109 (seed fleet uses 28180-28182 / 29100-29102).
 
 x-creg-fleet-common: &creg-fleet-common
   # Prebuilt image (default on GCP fleet VM  avoids OOM building librocksdb on small instances).
@@ -19,7 +19,7 @@ x-creg-fleet-common: &creg-fleet-common
     context: ..
     dockerfile: Dockerfile.windows
   env_file:
-    - sepolia-3node.env
+    - sepolia-fleet.env
   networks:
     - creg-validator-fleet
   restart: unless-stopped

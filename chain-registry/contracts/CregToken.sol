@@ -55,6 +55,8 @@ contract CregToken {
         // The remaining 22,000,000 CREG (up to MAX_SUPPLY of 42,000,000) can be
         // minted gradually by governance over time — for validator rewards,
         // ecosystem grants, and network growth. Never exceeds 42,000,000 total.
+        // Per-package verification rewards are set extremely low (see ValidatorRewards)
+        // to preserve long-term scarcity and token value even at high volume.
         _mint(_team,       4_000_000 * 10**18);
         _mint(_investors,  3_000_000 * 10**18);
         _mint(_community,  5_000_000 * 10**18);

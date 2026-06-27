@@ -96,7 +96,7 @@ SEPOLIA_RPC_URL=http://10.128.0.42:8545
 CREG_ETH_RPC=http://10.128.0.42:8545
 ```
 
-Add those lines to `testnet/sepolia-3node.env`, then redeploy the testnet stack:
+Add those lines to `testnet/sepolia-fleet.env`, then redeploy the testnet stack:
 
 ```powershell
 .\testnet\gcp\push-env.ps1
@@ -172,7 +172,7 @@ gcloud compute firewall-rules delete creg-sepolia-geth-allow-rpc-from-testnet --
 gcloud compute firewall-rules delete creg-sepolia-geth-allow-iap-ssh --quiet
 ```
 
-Revert `CREG_ETH_RPC` in `sepolia-3node.env` to Infura/Alchemy and redeploy.
+Revert `CREG_ETH_RPC` in `sepolia-fleet.env` to Infura/Alchemy and redeploy.
 
 ---
 

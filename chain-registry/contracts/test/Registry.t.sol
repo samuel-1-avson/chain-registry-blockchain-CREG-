@@ -97,6 +97,11 @@ contract RegistryTest is Test {
         staking.setContracts(address(registry), address(reputation));
         reputation.setRegistry(address(registry));
 
+        // Production deploy sets enforceFinalizeRelays=true; disable for tests that
+        // call finalizePackage from this contract unless a test re-enables it.
+        vm.prank(address(governance));
+        registry.setEnforceFinalizeRelays(false);
+
         vm.deal(alice, 10 ether);
     }
 
@@ -203,7 +208,7 @@ contract RegistryTest is Test {
         _stakeAsPublisher(alice);
         ChainRegistry zkRegistry = _deployRegistryWithMockZK();
         uint256[8] memory proof;
-        uint256[] memory wrongInputs = _zkInputs("npm:other@1.0.0", CONTENT_HASH, IPFS_CID);
+        uint256[] memory wrongInputs = _zkInputs(bytes32(uint256(999)));
         uint256 fee = zkRegistry.zkValidationFee();
 
         vm.prank(alice);
@@ -221,7 +226,7 @@ contract RegistryTest is Test {
         _stakeAsPublisher(alice);
         ChainRegistry zkRegistry = _deployRegistryWithMockZK();
         uint256[8] memory proof;
-        uint256[] memory inputs = _zkInputs(CANONICAL, CONTENT_HASH, IPFS_CID);
+        uint256[] memory inputs = _zkInputs(CONTENT_HASH);
         uint256 fee = zkRegistry.zkValidationFee();
 
         vm.prank(alice);
@@ -242,7 +247,7 @@ contract RegistryTest is Test {
         _stakeAsPublisher(alice);
         ChainRegistry zkRegistry = _deployRegistryWithMockZK();
         uint256[8] memory proof;
-        uint256[] memory wrongInputs = _zkInputs(CANONICAL, bytes32(uint256(123)), IPFS_CID);
+        uint256[] memory wrongInputs = _zkInputs(bytes32(uint256(123)));
 
         vm.prank(alice);
         zkRegistry.submitPackage(CANONICAL, CONTENT_HASH, IPFS_CID);
@@ -250,7 +255,7 @@ contract RegistryTest is Test {
         vm.expectRevert(ChainRegistry.InvalidZKPublicInputs.selector);
         zkRegistry.verifyZKProof(CANONICAL, proof, wrongInputs);
 
-        uint256[] memory inputs = _zkInputs(CANONICAL, CONTENT_HASH, IPFS_CID);
+        uint256[] memory inputs = _zkInputs(CONTENT_HASH);
         zkRegistry.verifyZKProof(CANONICAL, proof, inputs);
 
         assertEq(uint(zkRegistry.getStatus(CANONICAL)), uint(ChainRegistry.PackageStatus.Verified));
@@ -456,19 +461,15 @@ contract RegistryTest is Test {
         );
     }
 
-    function _zkInputs(
-        string memory canonical,
-        bytes32 contentHash,
-        string memory ipfsCid
-    ) internal pure returns (uint256[] memory inputs) {
-        bytes32 bindingHash = keccak256(
-            abi.encode("creg-zk-package-v1", canonical, contentHash, ipfsCid)
-        );
-        uint256 binding = uint256(bindingHash);
+    /// Match Registry._assertPackageProofBinding: publicInputs[0]=contentLow, [1]=contentHigh.
+    function _zkInputs(bytes32 contentHash) internal pure returns (uint256[] memory inputs) {
+        uint256 h = uint256(contentHash);
         inputs = new uint256[](2);
-        inputs[0] = binding >> 128;
-        inputs[1] = binding & uint256(type(uint128).max);
+        inputs[0] = h & uint256(type(uint128).max);
+        inputs[1] = h >> 128;
     }
+
+
 
     /// Produce a real ECDSA signature from a validator private key.
     function _makeValidatorSig(
@@ -531,6 +532,78 @@ contract RegistryTest is Test {
             CONTENT_HASH,
             IPFS_CID
         );
+    }
+
+    function test_batchSubmitPackagesRejectsUnstakedPublisher() public {
+        BatchOperations batchOps = new BatchOperations(
+            address(registry),
+            address(staking),
+            address(governance)
+        );
+        vm.prank(address(governance));
+        registry.setPackageSubmitRelay(address(batchOps), true);
+
+        BatchOperations.PackageSubmission[] memory packages =
+            new BatchOperations.PackageSubmission[](1);
+        packages[0] = BatchOperations.PackageSubmission({
+            canonical: CANONICAL,
+            contentHash: CONTENT_HASH,
+            ipfsCID: IPFS_CID
+        });
+
+        vm.prank(alice);
+        vm.expectRevert(bytes("Publisher must stake first"));
+        batchOps.batchSubmitPackages(packages);
+    }
+
+    function test_batchSubmitPackagesRejectsWithoutRelayAllowlist() public {
+        _stakeAsPublisher(alice);
+
+        BatchOperations batchOps = new BatchOperations(
+            address(registry),
+            address(staking),
+            address(governance)
+        );
+
+        BatchOperations.PackageSubmission[] memory packages =
+            new BatchOperations.PackageSubmission[](1);
+        packages[0] = BatchOperations.PackageSubmission({
+            canonical: CANONICAL,
+            contentHash: CONTENT_HASH,
+            ipfsCID: IPFS_CID
+        });
+
+        vm.prank(alice);
+        vm.expectRevert(ChainRegistry.NotAuthorizedSubmitRelay.selector);
+        batchOps.batchSubmitPackages(packages);
+    }
+
+    function test_deployDefaultsEnforceFinalizeRelays() public {
+        ChainRegistry fresh = new ChainRegistry(
+            address(staking),
+            address(reputation),
+            address(vrf),
+            address(governance),
+            address(zkVerifier)
+        );
+        assertTrue(fresh.enforceFinalizeRelays());
+    }
+
+    function test_finalizePackageRejectsUnauthorizedWhenEnforcementOn() public {
+        _stakeAsPublisher(alice);
+        _submitPackage(alice);
+        _joinValidator(bob);
+        _joinValidator(carol);
+
+        vm.prank(address(governance));
+        registry.setEnforceFinalizeRelays(true);
+
+        ChainRegistry.ValidatorSig[] memory sigs = new ChainRegistry.ValidatorSig[](2);
+        sigs[0] = _makeValidatorSig(bobKey, bob, CANONICAL, CONTENT_HASH, true);
+        sigs[1] = _makeValidatorSig(carolKey, carol, CANONICAL, CONTENT_HASH, true);
+
+        vm.expectRevert(ChainRegistry.NotAuthorizedFinalizeRelay.selector);
+        registry.finalizePackage(CANONICAL, sigs);
     }
 
     function test_finalizePackageRejectsDuplicateValidatorSig() public {

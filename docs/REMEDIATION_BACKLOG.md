@@ -31,7 +31,9 @@ Track security and remediation work from [SECURITY_AND_REMEDIATION_IMPLEMENTATIO
 | SEC-305 | done | 3 | Shared `shielded_wire` format (CLI ↔ node); admission skips YARA on ciphertext; `admission_accepts_shielded_when_enabled` + common round-trip tests |
 | SEC-301a | done | 3 | [adr/ADR-KMS-HOT-KEYS.md](./adr/ADR-KMS-HOT-KEYS.md) — testnet env/Vault; mainnet requires SEC-301b |
 | SEC-301b | done | 3 | `chain-registry-secrets` crate — env + Vault KV2; wired to node/faucet/relayer |
+| GAPS-2026-06 | in-progress | Audit + Hardening | Iteration 6 complete (batch + relays). Doc hub: `docs/WHAT_TO_DO_NEXT.md`. Remaining: Phase 0 evidence pack, Phase 2 bridge/ZK, testnet resume. See `docs/WEAKNESSES_GAPS_REMEDIATION_PLAN.md` §6 |
+| DOC-302 | done | 3 | 2026-06-26 — Doc hygiene: WHAT_TO_DO_NEXT, archive obsolete docs, gcp/README, fix broken links |
 
-**Phase 2 ship (2026-05-28):** Sepolia Option A on `main`. **Phase 3 epics:** largely complete in code; open work tracked in [NEXT_WORK.md](./NEXT_WORK.md).
+**Phase 2 ship (2026-05-28):** Sepolia Option A on `main`. **Phase 3 epics:** largely complete in code; open work tracked in [NEXT_WORK.md](./NEXT_WORK.md) and `WEAKNESSES_GAPS_REMEDIATION_PLAN.md`.
 
 _Update status when PRs merge._

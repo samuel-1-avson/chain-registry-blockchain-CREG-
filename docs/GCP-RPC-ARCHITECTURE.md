@@ -45,7 +45,7 @@ See `chain-registry/testnet/caddy/Caddyfile`.
 | Resource | ID / value | Role |
 |----------|------------|------|
 | Compute Engine | `creg-testnet-vm`, `e2-standard-4` | Edge: Caddy + explorer + faucet + IPFS + spec |
-| Compute Engine | `creg-validator-vm`, `e2-standard-8` | Validator fleet (3 now, up to 10) |
+| Compute Engine | `creg-validator-vm`, `e2-standard-8` | Optional maintainer seed fleet (2–10; external validators are separate) |
 | Compute Engine | `creg-sepolia-geth-vm`, `e2-standard-2` | Internal Sepolia JSON-RPC |
 | Static IP | `35.225.225.20` | DNS for `*.testnet.cregnet.dev` |
 | Firewall | TCP 22, 80, 443 | TLS on VM |
@@ -71,7 +71,7 @@ Budget context: [GCP-BUDGET-ARCHITECTURE.md](./GCP-BUDGET-ARCHITECTURE.md).
 Validators and `validator_set_sync` should not share a rate-limited public RPC.
 
 1. Create Infura or Alchemy Sepolia project key.
-2. Set in `chain-registry/testnet/sepolia-3node.env`:
+2. Set in `chain-registry/testnet/sepolia-fleet.env`:
 
 ```env
 SEPOLIA_RPC_URL=https://sepolia.infura.io/v3/YOUR_KEY
@@ -200,6 +200,6 @@ cd chain-registry
 |-----|--------|
 | [GCP-BUDGET-ARCHITECTURE.md](./GCP-BUDGET-ARCHITECTURE.md) | Two-project cost model |
 | [GCP-VALIDATOR-FLEET.md](./GCP-VALIDATOR-FLEET.md) | Validator fleet VM (Option A) |
-| [gcp-public-hosting.md](../chain-registry/testnet/gcp-public-hosting.md) | VM + Caddy deploy |
+| [testnet/gcp/README.md](../chain-registry/testnet/gcp/README.md) | VM + Caddy deploy scripts |
 | [OPERATOR.md](../chain-registry/testnet/OPERATOR.md) | Validator fleet + `CREG_ETH_RPC` |
 | [PUBLIC_TESTNET_QUICKSTART.md](./PUBLIC_TESTNET_QUICKSTART.md) | `CREG_NODE_URL` for developers |

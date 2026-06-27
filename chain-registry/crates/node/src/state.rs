@@ -67,6 +67,10 @@ pub fn validator_registration_status_text(registration: &ValidatorRegistrationSt
 pub struct P2PStatus {
     pub peers: Vec<String>,
     pub protocols: Vec<String>,
+    /// Gossip vote messages rejected at validation boundary (invalid sig/key/evidence).
+    pub gossip_votes_rejected_total: u64,
+    /// PBFT Prepare/Commit gossip messages rejected at validation boundary.
+    pub gossip_pbft_rejected_total: u64,
 }
 
 #[derive(Serialize, Clone, Default)]
@@ -203,6 +207,10 @@ pub struct NodeState {
     pub validator_set: common::ValidatorSet,
     /// Live package-consensus rounds keyed by the current consensus subject.
     pub package_rounds: HashMap<String, PackageRound>,
+
+    // Committee info is primarily stored in PendingPool per canonical.
+    // This map can cache the committee for fast lookup during voting windows.
+    pub package_committees: HashMap<String, common::AnalysisCommittee>,
     pub config: NodeConfig,
     // Live metrics for the Explorer UI
     pub p2p_status: P2PStatus,
@@ -230,6 +238,18 @@ pub struct NodeState {
     pub sync_lag_blocks: u64,
     /// Highest chain tip observed from configured peers during sync.
     pub sync_max_peer_tip: u64,
+    // Reward emission counters (for §9.12 incentives observability)
+    /// Successful L1 reward emissions (distributeWorkRewards calls that succeeded)
+    pub reward_emissions_succeeded: u64,
+    /// Failed L1 reward emissions (including tx send/watch errors)
+    pub reward_emissions_failed: u64,
+    // Live treasury / incentives values (populated via small L1 queries for monitoring)
+    pub treasury_balance: u128,
+    pub pending_rewards_estimate: u128,
+    // More views for incentives monitoring (§9.12)
+    pub total_rewards_distributed: u128,
+    pub rewards_pool_balance: u128,
+    pub last_incentives_refresh: Option<u64>,
 }
 
 impl NodeState {
@@ -317,6 +337,7 @@ mod tests {
             signed_at: Utc::now(),
             ml_model_version: model_version.to_string(),
             analysis_bundles: AnalysisBundleRefs::default(),
+            is_mandatory: false,
             evidence_digest: String::new(),
             deterministic_risk: common::DeterministicRiskSummary::default(),
         }

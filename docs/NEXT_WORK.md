@@ -1,184 +1,88 @@
-# Next work — testnet readiness checklist
+# Next work — prioritized backlog
 
-**Updated:** 2026-06-12  
-**Context:** [REMEDIATION_BACKLOG.md](./REMEDIATION_BACKLOG.md), [TESTNET_SEPOLIA_RUNBOOK.md](./TESTNET_SEPOLIA_RUNBOOK.md), [../chain-registry/TESTNET_READINESS_REPORT.md](../chain-registry/TESTNET_READINESS_REPORT.md)
-
-The coordinated Sepolia 3-node lab is **proven** including **NET-301** (2-validator quorum, publish → `verified`, tip advance on 2026-06-09). **DIST-301** shipped `v0.1.0-testnet` binaries on 2026-06-10. **SANDBOX-301** passed on 2026-06-10. **HOSTING-301** passed on 2026-06-10 (`hosting-301-verify.ps1` on `testnet.cregnet.dev`). Remaining P0: **SEC-401** audit booking.
-
-| Owner | Use for assignment; default **TBD** until filled in. |
+**Updated:** 2026-06-26  
+**Planning hub:** [WHAT_TO_DO_NEXT.md](./WHAT_TO_DO_NEXT.md)  
+**Context:** [REMEDIATION_BACKLOG.md](./REMEDIATION_BACKLOG.md), [WEAKNESSES_GAPS_REMEDIATION_PLAN.md](./WEAKNESSES_GAPS_REMEDIATION_PLAN.md)
 
 ---
 
-## P0 — Current focus (pre–public-testnet hardening)
+## Current phase
 
-These five items are the gating work before inviting external participants with stake. Order reflects dependency: consensus and sandbox credibility first, then distribution and audit.
-
-| # | ID | Owner | Task | Acceptance criteria |
-|---|-----|-------|------|---------------------|
-| 1 | **NET-301** | done | Multi-validator PBFT quorum on Sepolia | **Done** 2026-06-09 — `net-301-quorum-verify.ps1` pass; validator-2 Active; `validator_count=2`; tip 2→3; Windows lab uses `CREG_DEV_SANDBOX=true`. Topology: [../chain-registry/testnet/OPERATOR.md](../chain-registry/testnet/OPERATOR.md). |
-| 2 | **SANDBOX-301** | done | Real behavioral sandbox (disable dev bypass) | **Done** 2026-06-10 — `sandbox-301-verify.ps1` pass; validators on `chain-registry-node-secure:latest` with `CREG_DEV_SANDBOX=false`; nsjail detected via `--help` probe; publish smoke shows real engine (not `dev-bypass`). Windows dev may keep `CREG_DEV_SANDBOX=true` only in documented local profiles (`start-3node-test.ps1`). |
-| 3 | **DIST-301** | done | Ship `creg` + `creg-node` binaries | **Done** 2026-06-10 — [v0.1.0-testnet release](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases/tag/v0.1.0-testnet) (linux/windows/macos); workflow [27245595554](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/actions/runs/27245595554); `verify-dist-301.ps1` API asset checks pass. |
-| 4 | **SEC-401** | outreach ready | Schedule external security audit | Scope: [SEC-401-AUDIT-SCOPE.md](./SEC-401-AUDIT-SCOPE.md). Send-ready email: [SEC-401-outreach-ready.md](./SEC-401-outreach-ready.md) (`v0.1.1-testnet` @ `203962ff`). **Vendor / start date:** TBD — send RFP to Trail of Bits + OpenZeppelin. Public GitHub links aligned to `chain-registry-blockchain-CREG-` (2026-06-13). |
-| 5 | **HOSTING-301** | done | Public HTTPS URLs (GCP + Caddy) | **Done** 2026-06-10 — `testnet.cregnet.dev` → `35.225.225.20`; `hosting-301-verify.ps1` pass (api, explorer, spec, faucet, ipfs). Runbook: [gcp-public-hosting.md](../chain-registry/testnet/gcp-public-hosting.md). Budget: [GCP-BUDGET-ARCHITECTURE.md](./GCP-BUDGET-ARCHITECTURE.md). Optional: fund faucet wallet for native Sepolia gas drips. |
-| 6 | **DOC-301** | done | Doc rationalization | **Done** 2026-06-08 — single index at [README.md](./README.md); removed duplicate analyses, phase closeouts, and archive snapshots. |
+- **Protocol hardening:** Iteration 6 complete (BatchOperations + finalize relays; forge 37/37).
+- **Hosting:** Waitlist live on Firebase; **public testnet GCP stack may be stopped** to save cost — see [WAITLIST-ONLY-HOSTING.md](./WAITLIST-ONLY-HOSTING.md).
+- **Next decision:** Resume testnet for validator onboarding **or** continue product-only phase (waitlist + Contribution Arena).
 
 ---
 
-## P1 — Next 2–4 weeks (quality & ops)
+## P0 — Gating work
 
-| # | ID | Owner | Task | Acceptance criteria |
-|---|-----|-------|------|---------------------|
-| 6 | **SEC-402** | TBD | Network partition chaos test | `k8s/55-network-partition-test.yaml` executed; postmortem written; P1 findings tracked or fixed |
-| 7 | **ISSUE-008** | TBD | Finalize relay enforcement by default | Fresh Sepolia deploy enables relay allowlist; documented in runbook |
-| 8 | **ISSUE-013** | TBD | Close sandbox bypass in prod paths | No `CREG_DEV_SANDBOX=true` in prod compose profiles; `docker-compose.prod.yml` validated |
-| 9 | **REM-211+** | TBD | Sepolia observability | Grafana dashboards/alerts per [../chain-registry/observability/README.md](../chain-registry/observability/README.md) |
-| 10 | **BRIDGE-301** | TBD | Exercise L1 bridge in soak | `CREG_BRIDGE_KEY` set on validator-1; bridge batch observed on Sepolia or documented skip with health alert |
+| # | ID | Status | Task | Acceptance |
+|---|-----|--------|------|------------|
+| 1 | **SEC-401** | open | External security audit | Scope: [SEC-401-AUDIT-SCOPE.md](./SEC-401-AUDIT-SCOPE.md). Evidence pack from Phase 0 remediation. Vendor + start date TBD. |
+| 2 | **AUDIT-PACK** | open | Audit evidence pack | DEEP_DIVE status rollup, forge/cargo summaries, threat model — [WEAKNESSES_GAPS_REMEDIATION_PLAN.md](./WEAKNESSES_GAPS_REMEDIATION_PLAN.md) Phase 0 |
+| 3 | **TESTNET-RESUME** | ready | Resume public fleet when validators ready | `testnet/gcp/resume-testnet-hosting.ps1` + `hosting-301-verify.ps1`; [testnet/gcp/README.md](../chain-registry/testnet/gcp/README.md) |
 
 ---
 
-## P2 — Soon (not blocking coordinated testnet)
+## P1 — Quality (next 2–4 weeks)
 
-| # | ID | Owner | Task | Acceptance criteria |
-|---|-----|-------|------|---------------------|
-| 11 | **REM-212** | TBD | Soak CI (optional) | `testnet/soak-test/runner.py` in nightly workflow; artifact or job summary published |
-| 12 | **REM-204** | TBD | Split `api.rs` ACL | No behavior change; tests green; security-sensitive routes isolated |
-| 13 | **SEC-307** | TBD | Cluster rate-limit ADR | `docs/adr/ADR-RATE-LIMIT-SCALE.md` drafted if multi-replica deploy planned |
-| 14 | **SHIM-301** | TBD | Align shim security with `creg install` | Documented or fixed per ISSUE registry in [DEEP_DIVE_ANALYSIS.md](../chain-registry/DEEP_DIVE_ANALYSIS.md) |
+| # | ID | Status | Task | Acceptance |
+|---|-----|--------|------|------------|
+| 4 | **ISSUE-008** | **done** | Finalize relay enforcement | Default `enforceFinalizeRelays=true`; forge tests; [contracts/README.md](../chain-registry/contracts/README.md) |
+| 5 | **ISSUE-003** | **done** | BatchOperations publisher identity | `submitPackageFor` + forge tests |
+| 6 | **GOSSIP-301** | **done** | Gossip/PBFT validation (Iter 5) | Metrics + unit tests |
+| 7 | **BRIDGE-301** | open | L1 bridge soak | `CREG_BRIDGE_KEY` on validator; batch observed or documented skip + alert |
+| 8 | **SOAK-301** | open | Incentive / load soak | [testnet/SOAK_TEST.md](../chain-registry/testnet/SOAK_TEST.md); Phase 4 remediation |
+| 9 | **SEC-402** | open | Network partition chaos | `k8s/55-network-partition-test.yaml` + postmortem |
+| 10 | **ARENA-HUB** | open | Contribution Arena → Hub API | Apply `002_contribution_arena.sql`; [HUB_INTEGRATION.md](../CREG-Contribution-Arena/docs/HUB_INTEGRATION.md) |
 
 ---
 
-## Completed (2026-05 → 2026-06)
+## P2 — Soon (not blocking)
+
+| # | ID | Task |
+|---|-----|------|
+| 11 | **REM-211+** | Grafana dashboards per [observability/README.md](../chain-registry/observability/README.md) |
+| 12 | **VAL-SCALE** | Genesis Alpha validator cohort (10k slots, batched) — Phase 3 |
+| 13 | **ZK-CIRCUIT** | Circuit regen + trusted setup if binding changes — ISSUE-001 follow-up |
+| 14 | **SHIM-301** | Shim security vs `creg install` — DEEP_DIVE shim notes |
+
+---
+
+## Completed (reference)
 
 | ID | Done | Notes |
 |----|------|-------|
-| SEC-305 | 2026-05 | Shielded wire format + admission skip + tests |
-| OPS-201 | 2026-05-30 | Second-operator Sepolia run |
-| SEC-101-ops | 2026-05 | Hot-key rotation drill |
-| E2E-301 | 2026-05 | Sepolia publish smoke documented |
-| 3-node soak | 2026-06-08 | `soak-3node-consensus.ps1` — PBFT commit + parity |
-| NET-301 | 2026-06-09 | `net-301-quorum-verify.ps1` — 2-validator quorum + publish verified (dev sandbox on Windows) |
-| DIST-301 | 2026-06-10 | `v0.1.0-testnet` GitHub release — `creg` + `creg-node` for linux/windows/macos |
-| HOSTING-301 | 2026-06-10 | Public HTTPS on GCP (`35.225.225.20`); Caddy TLS; all five vhosts verified |
-| Pending pool persistence | 2026-06-08 | `pending_pool.json` under `CREG_DATA_DIR` |
-| Public lab compose | 2026-06-08 | Explorer + faucet overlay, local service URLs in chain spec |
-| DOC quickstart | 2026-06-08 | [PUBLIC_TESTNET_QUICKSTART.md](./PUBLIC_TESTNET_QUICKSTART.md) |
+| NET-301 | 2026-06-09 | 2-validator PBFT quorum |
+| SANDBOX-301 | 2026-06-10 | Real nsjail sandbox |
+| DIST-301 | 2026-06-10 | `v0.1.0-testnet` / `v0.1.2-testnet` binaries |
+| HOSTING-301 | 2026-06-10 | `testnet.cregnet.dev` (resumable) |
+| DOC-301 | 2026-06-08 | Doc index rationalization |
+| GAPS-Iter5 | 2026-06-26 | Gossip/PBFT hardening |
+| GAPS-Iter6 | 2026-06-26 | Batch + finalize relay forge tests |
 
 ---
 
-## Deferred (do not pull forward without product change)
-
-| ID | Reason |
-|----|--------|
-| SEC-302 | Cross-chain disabled (SEC-303c); `cross_chain: false` in spec |
-| SEC-306b | PrivateRegistry Planned only |
-| REM-202 | Governance intentionally disabled (REM-201) |
-| REM-205 | Explorer refactor; maintainability only |
-| HOSTING-301 without domain | Superseded — live at `testnet.cregnet.dev` (2026-06-10) |
-| Phase 4 (PROD-*) | Mainnet / release assurance after testnet sign-off |
-
----
-
-## Suggested order
-
-```mermaid
-flowchart TD
-    S1[NET-301 quorum] --> S2[SANDBOX-301 nsjail]
-    S2 --> S3[DIST-301 binaries]
-    S3 --> S4[HOSTING-301 public HTTPS]
-    S4 --> S5[Waitlist Firebase]
-    S5 --> S6[SEC-401 audit]
-    S6 --> S7[P1 quality items]
-```
-
-### Execution scripts (P0)
-
-| Step | Script / doc | Notes |
-|------|----------------|-------|
-| **NET-301** | `.\testnet\register-validator-2-sepolia.ps1` then `.\testnet\net-301-quorum-verify.ps1` | Requires validator-2 Active on L1; topology in [OPERATOR.md](../chain-registry/testnet/OPERATOR.md) |
-| **SANDBOX-301** | `.\testnet\build-3node-secure-image.ps1` then `.\testnet\start-3node-sandbox.ps1` then `.\testnet\sandbox-301-verify.ps1` | Linux container backend (Docker Desktop WSL2 OK); `CREG_DEV_SANDBOX=false` on validators |
-| **DIST-301** | `git tag v0.1.0-testnet && git push origin v0.1.0-testnet` then `.\testnet\verify-dist-301.ps1` | Install: `CREG_GITHUB_REPO=owner/repo ./scripts/install-creg.sh --version v0.1.0-testnet` |
-| **SEC-401** | `.\testnet\prepare-sec-401-outreach.ps1` then email vendors from [SEC-401-VENDOR-OUTREACH.md](./SEC-401-VENDOR-OUTREACH.md) | Attach or link [SEC-401-AUDIT-SCOPE.md](./SEC-401-AUDIT-SCOPE.md); record vendor + **start date** below |
-| **HOSTING-301** | `.\testnet\gcp\run-hosting-301.ps1 -Step all -Confirm` (or step-by-step in [gcp-public-hosting.md](../chain-registry/testnet/gcp-public-hosting.md)) | `.\testnet\hosting-301-verify.ps1 -BaseDomain testnet.cregnet.dev` |
-
-**SEC-401 outreach (send today):**
-
-| Vendor | Contact | Status | Sent |
-|--------|---------|--------|------|
-| Trail of Bits | security@trailofbits.com | **Ready** — [SEC-401-VENDOR-OUTREACH.md](./SEC-401-VENDOR-OUTREACH.md) | ☐ |
-| OpenZeppelin | audits@openzeppelin.com | **Ready** — [SEC-401-VENDOR-OUTREACH.md](./SEC-401-VENDOR-OUTREACH.md) | ☐ |
-
-Copy email bodies from [SEC-401-VENDOR-OUTREACH.md](./SEC-401-VENDOR-OUTREACH.md). Attach or link [SEC-401-AUDIT-SCOPE.md](./SEC-401-AUDIT-SCOPE.md). Archived copy: [archive/SEC-401-outreach-ready.md](./archive/SEC-401-outreach-ready.md).
-
-**SEC-401 booking (fill when vendor confirms):**
-
-| Field | Value |
-|-------|--------|
-| Vendor | _TBD_ |
-| Start date | _TBD_ |
-| Commit / tag | `v0.1.1-testnet` @ `8108281597f6e7494281da0fc6609397d472b4d8` (GitHub remote) |
-
-**Public hosting (after domain registered):**
-
-```powershell
-cd chain-registry
-.\testnet\prepare-public-hosting.ps1 -BaseDomain "testnet.YOUR_DOMAIN" -AcmeEmail "you@example.com" -StaticIp "VM_IP"
-# GCP VM: testnet/gcp-public-hosting.md then ./testnet/start-3node-gcp.sh
-.\testnet\hosting-301-verify.ps1 -BaseDomain "testnet.YOUR_DOMAIN"
-```
-
----
-
-## Quick commands (operators)
+## Quick commands
 
 ```powershell
 cd chain-registry
 
-# 3-node fleet
-.\testnet\start-3node-test.ps1
-.\testnet\soak-3node-consensus.ps1
+# Local verification
+cargo test --workspace
+cd contracts; forge test
 
-# NET-301 quorum proof
-.\testnet\register-validator-2-sepolia.ps1
-.\testnet\net-301-quorum-verify.ps1
+# Maintainer seed fleet env
+.\testnet\init-sepolia-fleet-env.ps1
 
-# SANDBOX-301 (Linux container backend — Docker Desktop WSL2 on Windows OK)
-.\testnet\build-3node-secure-image.ps1
-.\testnet\start-3node-sandbox.ps1
-.\testnet\sandbox-301-verify.ps1
+# Resume public hosting (when ready)
+.\testnet\gcp\resume-testnet-hosting.ps1
+.\testnet\hosting-301-verify.ps1 -BaseDomain testnet.cregnet.dev
 
-# Single-node Sepolia reuse
-.\testnet\run-sepolia-reuse.ps1 -StartNode
-.\testnet\run-ops-201-verify.ps1
-
-# Health & spec
-Invoke-RestMethod http://localhost:28180/v1/health
-cargo run --bin creg -p chain-registry-cli -- chain-spec validate testnet/chain-spec.sepolia.json
-
-# DIST-301 (maintainers — after tag push)
-.\testnet\verify-dist-301.ps1 -Version v0.1.0-testnet
+# Stop public hosting (cost saving)
+.\testnet\gcp\stop-testnet-hosting.ps1
 ```
-
-```bash
-# Release tag (maintainers)
-git tag v0.1.0-testnet && git push origin v0.1.0-testnet
-
-# Install from release (set repo if not chain-registry/chain-registry)
-export CREG_GITHUB_REPO=samuel-1-avson/chain-registry-blockchain-CREG-
-./scripts/install-creg.sh --version v0.1.0-testnet
-```
-
-### E2E publish smoke
-
-Full procedure: [TESTNET_SEPOLIA_RUNBOOK.md § Publish smoke](./TESTNET_SEPOLIA_RUNBOOK.md#publish-smoke-e2e-301).
-
-| Requirement | Notes |
-|-------------|--------|
-| Foundry `cast` | `.\testnet\install-foundry.ps1` |
-| Stake EOA | secp256k1 `0x` + 64 hex — not Ed25519 `publisher.key` |
-| `publisher.key` | Ed25519 from `creg keygen publisher` (publish signatures) |
-| IPFS | `.\testnet\start-ipfs.ps1` or Kubo on `127.0.0.1:5001` |
-| Node | Rebuilt `creg-node`; `validator_set_sync` synced; `--node-url` on all CLI calls |
 
 ---
 
-_Update this file when an item ships; mirror status in [REMEDIATION_BACKLOG.md](./REMEDIATION_BACKLOG.md)._
+_Update this file when an item ships; mirror in [REMEDIATION_BACKLOG.md](./REMEDIATION_BACKLOG.md)._

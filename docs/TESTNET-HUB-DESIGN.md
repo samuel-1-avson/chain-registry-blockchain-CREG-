@@ -138,7 +138,7 @@ join.testnet.cregnet.dev  (Caddy TLS on creg-testnet-vm)
 | Explorer | `https://explorer.testnet.cregnet.dev` |
 | CREG API | `https://api.testnet.cregnet.dev` |
 | Operator runbook | `chain-registry/testnet/OPERATOR.md` |
-| Friend onboarding | `chain-registry/FRIEND_ONBOARDING.md` (link or render subset) |
+| Validator onboarding | [VALIDATOR_ONBOARDING_CHECKLIST.md](./VALIDATOR_ONBOARDING_CHECKLIST.md) |
 
 ---
 
@@ -405,7 +405,7 @@ Optional CI job: `hub-api` tests on PR touching `hub-api/`; Playwright on PR tou
 | Caddy stub | `CREG_PUBLIC_JOIN_HOST` block in `Caddyfile.fleet` / `Caddyfile.hybrid` / `Caddyfile.with-faucet` |
 | Env example | Document `CREG_PUBLIC_JOIN_HOST`, `CREG_HUB_WEB_PORT`, `CREG_HUB_API_PORT` in `sepolia-3node.env.example` |
 | Local script | `testnet/start-hub-local.ps1` or document compose one-liner |
-| Docs pointer | Entry in `DELIVERABLES_INDEX.md` |
+| Docs pointer | [testnet/gcp/README.md](../chain-registry/testnet/gcp/README.md), [WHAT_TO_DO_NEXT.md](./WHAT_TO_DO_NEXT.md) |
 
 **Exit criteria:** `curl http://localhost:8095/api/health` OK; hub-web serves on `8094`; compose up/down documented.
 
@@ -497,4 +497,4 @@ Optional CI job: `hub-api` tests on PR touching `hub-api/`; Playwright on PR tou
 | [GCP-RPC-ARCHITECTURE.md](./GCP-RPC-ARCHITECTURE.md) | API/RPC ingress |
 | [WAITLIST_FIREBASE_DEPLOY.md](./WAITLIST_FIREBASE_DEPLOY.md) | Separate waitlist product (not hub) |
 | [../chain-registry/testnet/OPERATOR.md](../chain-registry/testnet/OPERATOR.md) | Validator operator runbook |
-| [../chain-registry/DELIVERABLES_INDEX.md](../chain-registry/DELIVERABLES_INDEX.md) | Scripts and compose index |
+| [../chain-registry/testnet/README.md](../chain-registry/testnet/README.md) | Testnet scripts and compose index |

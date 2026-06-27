@@ -132,6 +132,8 @@ fn upsert_registered_validator(
         stake: registration.stake,
         reputation: registration.reputation.max(100),
         status: "online".to_string(),
+        performance_score: 500,
+        contribution_count: 0,
     });
 }
 
@@ -556,6 +558,7 @@ async fn main() -> Result<()> {
         validator_set_bootstrap: config.validator_set.clone(),
         validator_set: config.validator_set.clone(),
         package_rounds: std::collections::HashMap::new(),
+        package_committees: std::collections::HashMap::new(),
         config: config.clone(),
         p2p_status: P2PStatus::default(),
         bridge_status: BridgeStatus {
@@ -577,6 +580,13 @@ async fn main() -> Result<()> {
         forced_inclusion_tracker: crate::state::ForcedInclusionTracker::new(),
         sync_lag_blocks: 0,
         sync_max_peer_tip: 0,
+        reward_emissions_succeeded: 0,
+        reward_emissions_failed: 0,
+        treasury_balance: 0,
+        pending_rewards_estimate: 0,
+        total_rewards_distributed: 0,
+        rewards_pool_balance: 0,
+        last_incentives_refresh: None,
     }));
 
     // Seed the validator-set history with the bootstrap set effective from
@@ -800,6 +810,20 @@ async fn main() -> Result<()> {
                 }
             });
         }
+    }
+
+    // â”€â”€ Incentives status refresher (background cached L1 queries for treasury monitoring) â”€â”€
+    {
+        let inc_state = Arc::clone(&state);
+        let inc_cfg = config.clone();
+        tokio::spawn(async move {
+            let mut ticker = interval(Duration::from_secs(60));
+            loop {
+                ticker.tick().await;
+                crate::api::refresh_incentives_status(Arc::clone(&inc_state), &inc_cfg).await;
+            }
+        });
+        tracing::info!("Incentives status refresher started (60s interval)");
     }
 
     // â”€â”€ Start gRPC Server (Industrial Speed) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

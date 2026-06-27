@@ -29,15 +29,22 @@ export CREG_NODE_URL=https://api.testnet.cregnet.dev
 ./target/release/creg doctor
 ```
 
-Full publisher and validator flows: [docs/PUBLIC_TESTNET_QUICKSTART.md](../docs/PUBLIC_TESTNET_QUICKSTART.md).
+Full publisher and validator flows: [testnet/QUICKSTART.md](testnet/QUICKSTART.md) and [testnet/OPERATOR.md](testnet/OPERATOR.md).
 
 ---
 
 ## Documentation
 
-**[docs/PUBLIC.md](../docs/PUBLIC.md)** — curated public docs (protocol, operators, contracts).
+Core docs are kept in root, docs/, testnet/, and observability/ (see docs/archive/README.md for what was archived as non-core).
 
-Architecture deep dive: [DEEP_DIVE_ANALYSIS.md](DEEP_DIVE_ANALYSIS.md).
+Key references:
+- [DEEP_DIVE_ANALYSIS.md](DEEP_DIVE_ANALYSIS.md) — architecture and issue registry
+- [../docs/WHAT_TO_DO_NEXT.md](../docs/WHAT_TO_DO_NEXT.md) — maintainer planning hub
+- [testnet/QUICKSTART.md](testnet/QUICKSTART.md)
+- [testnet/OPERATOR.md](testnet/OPERATOR.md)
+- [testnet/gcp/README.md](testnet/gcp/README.md)
+- [DOCKER.md](DOCKER.md)
+- [contracts/README.md](contracts/README.md)
 
 ---
 

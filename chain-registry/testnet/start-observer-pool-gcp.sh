@@ -6,7 +6,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
-ENV_FILE="${SCRIPT_DIR}/sepolia-3node.env"
+ENV_FILE="${SCRIPT_DIR}/sepolia-fleet.env"
+if [[ ! -f "$ENV_FILE" ]]; then
+  ENV_FILE="${SCRIPT_DIR}/sepolia-3node.env"
+fi
 if [[ ! -f "$ENV_FILE" ]]; then
   echo "Missing $ENV_FILE" >&2
   exit 1

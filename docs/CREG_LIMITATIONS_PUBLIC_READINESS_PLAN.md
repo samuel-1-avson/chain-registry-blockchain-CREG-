@@ -6,7 +6,7 @@
 
 ## Executive Summary
 
-CREG should be honest about its current limits, but the goal is not to leave those limits as passive warnings. This plan turns each limitation into an implementation track with concrete actions, acceptance criteria, and evidence requirements.
+CREG is transparent about its current limits. This plan turns each limitation into an implementation track with concrete actions, acceptance criteria, and evidence requirements.
 
 The current limitations are:
 
@@ -33,7 +33,7 @@ Use these levels to decide how public the project should become.
 | L0 | Internal lab | Maintainer-only testing | Local/controlled validator fleet |
 | L1 | Coordinated alpha | Handpicked publishers/validators | Clear docs, sandbox on, public endpoints, known-risk disclaimers |
 | L2 | Public alpha | Open waitlist and public testnet participation | Risk mitigations in this plan mostly complete, external audit scheduled or in progress |
-| L3 | Public beta | Broader usage and validator expansion | External audit completed, high findings resolved or documented |
+| L3 | Public beta | Broader usage and validator expansion | External audit completed, findings resolved or documented |
 | L4 | Mainnet candidate | Real economic security claims | Audited contracts/ZK, stable validator economics, incident response, monitoring, governance readiness |
 
 Recommended near-term target: **L2 Public Alpha**, not mainnet or production.
@@ -58,9 +58,9 @@ No package security system can provide perfect detection. Malware can be novel, 
 
 | ID | Task | Priority | Acceptance Criteria |
 | --- | --- | --- | --- |
-| MAL-001 | Enforce real sandbox in public/prod profiles | P0 | No public validator profile runs with `CREG_DEV_SANDBOX=true`; health endpoint or runtime config exposes sandbox engine status |
+| MAL-001 | Enforce real sandbox in public/prod profiles | P0 | No public validator profile runs in dev sandbox mode; health endpoint or runtime config exposes sandbox engine status |
 | MAL-002 | Create malicious package fixture suite | P0 | Test packages cover exfiltration, install scripts, obfuscation, typosquat, process spawn, filesystem write, and network behavior |
-| MAL-003 | Add validator evidence bundle snapshots | P0 | Every validator vote includes scanner profile digest, evidence digest, and analysis bundle refs |
+| MAL-003 | Add validator evidence bundle snapshots | P0 | Every validator vote includes scanner profile digest, evidence digest, and analysis bundle references |
 | MAL-004 | Add package risk display to explorer and CLI | P1 | CLI/explorer show verified status plus risk band, critical/high findings count, and validator count |
 | MAL-005 | Add revoke/escalation playbook | P1 | Maintainers can revoke a malicious package, publish reason, and notify users through API/explorer |
 | MAL-006 | Add post-verification rescan job | P2 | Verified packages can be rescanned when rules update or new threat intel appears |
@@ -105,8 +105,8 @@ If enough validators collude, they can approve unsafe packages or censor safe pa
 
 | ID | Task | Priority | Acceptance Criteria |
 | --- | --- | --- | --- |
-| VAL-001 | Define validator admission policy | P0 | Public doc explains stake, identity, hardware, sandbox, uptime, and scanner requirements |
-| VAL-002 | Publish validator operator checklist | P0 | New validator can follow one runbook to register, stake, configure, and pass health checks |
+| VAL-001 | Define validator admission policy | P0 | Public document explains stake, identity, hardware, sandbox, uptime, and scanner requirements |
+| VAL-002 | Publish validator operator checklist | P0 | New validator can follow onboarding guide to register, stake, configure, and pass health checks |
 | VAL-003 | Require consensus-grade votes for quorum | P0 | Degraded/mock votes do not count toward public verification quorum |
 | VAL-004 | Add validator vote transparency in explorer | P1 | Package page shows validators, vote result, timestamp, scanner profile digest, and evidence digest |
 | VAL-005 | Add validator reputation dashboard | P1 | Explorer/API show uptime, vote participation, reject/approve history, and slashing events |
@@ -121,7 +121,7 @@ If enough validators collude, they can approve unsafe packages or censor safe pa
 - Package page with vote transparency.
 - Collusion response tabletop notes.
 - Slashing evidence example or dry run.
-- Operator onboarding checklist completion from at least one non-core validator.
+- Onboarding checklist completion from at least one non-core validator.
 
 ### Public Messaging
 
@@ -156,8 +156,8 @@ The CREG chain can verify that a package was approved, but users still need the 
 | IPFS-001 | Run operator pinning service | P0 | Every accepted/verified package CID is pinned by CREG testnet infrastructure |
 | IPFS-002 | Add CID availability checker | P0 | Scheduled job checks package CIDs and reports unavailable content |
 | IPFS-003 | Display availability in explorer/API | P1 | Package page/API show last pin check, gateway availability, and content hash verification status |
-| IPFS-004 | Add publisher pinning guide | P1 | Docs explain how publishers should keep their package pinned |
-| IPFS-005 | Add validator pinning recommendation | P1 | Validator runbook recommends pinning packages they validate |
+| IPFS-004 | Add publisher pinning guide | P1 | Guidelines explain how publishers should keep their package pinned |
+| IPFS-005 | Add validator pinning recommendation | P1 | Validator guidelines recommend pinning packages they validate |
 | IPFS-006 | Add redundant pinning provider option | P2 | Support external pinning services or multi-gateway fallback |
 | IPFS-007 | Design pinning rewards | P2 | Draft incentive model for persistent package availability |
 
@@ -201,15 +201,15 @@ LLMs can help explain suspicious code, summarize risk, and find semantic pattern
 | --- | --- | --- | --- |
 | LLM-001 | Enforce deterministic quorum policy | P0 | Package verification cannot depend only on LLM findings |
 | LLM-002 | Label LLM findings as advisory | P0 | CLI/explorer/API clearly separate deterministic and advisory findings |
-| LLM-003 | Document LLM provider/degraded mode | P1 | Docs explain when LLM review is disabled, degraded, or provider-backed |
-| LLM-004 | Add tests for LLM-disabled consensus | P1 | Packages can be verified/rejected based on deterministic pipeline with LLM disabled |
+| LLM-003 | Document LLM provider/degraded mode | P1 | Guidelines explain when LLM review is disabled, degraded, or provider-backed |
+| LLM-004 | Add tests for LLM-disabled consensus | P1 | Packages can be verified/rejected based on deterministic pipeline with LLM advisory mode disabled |
 | LLM-005 | Add prompt/profile version visibility | P1 | Validator votes expose LLM prompt profile ID where relevant |
 | LLM-006 | Red-team LLM false positive/negative examples | P2 | Internal examples show LLM disagreement does not break deterministic consensus |
 
 ### Evidence To Collect
 
 - Example package with deterministic findings and advisory LLM findings separated.
-- Test run with `CREG_LLM_ENABLED=false`.
+- Test run with LLM advisory settings disabled.
 - API/explorer screenshot labeling LLM as advisory.
 - Vote metadata showing prompt/profile references.
 
@@ -243,18 +243,18 @@ Smart contracts and ZK circuits are security-critical. Bugs can affect staking, 
 
 | ID | Task | Priority | Acceptance Criteria |
 | --- | --- | --- | --- |
-| AUD-001 | Finalize SEC-401 audit scope | P0 | Scope includes Registry, Staking, Governance, token, ZK verifier, bridge paths, validator signing assumptions |
+| AUD-001 | Finalize audit scope | P0 | Scope includes Registry, Staking, Governance, token, ZK verifier, bridge paths, validator signing assumptions |
 | AUD-002 | Send audit RFPs | P0 | Outreach sent to selected vendors; vendor/start date recorded |
 | AUD-003 | Freeze audit commit/tag | P0 | Audit target commit/tag documented and reproducible |
 | AUD-004 | Produce threat model for auditors | P0 | Auditors receive protocol threat model, known limitations, and architecture diagrams |
 | AUD-005 | Resolve critical/high findings | P0 for beta/mainnet | No unresolved critical/high findings before public beta or mainnet candidate |
 | AUD-006 | Publish audit summary | P1 | Community-facing summary states what was audited, what was fixed, and residual risks |
 | AUD-007 | Add contract deployment checklist | P1 | Fresh deployments enable intended safety settings, relay enforcement, governance ownership, and pause controls |
-| AUD-008 | Add ZK trusted setup/key management doc | P1 | Docs explain proving/verifying keys, rotation, and production readiness requirements |
+| AUD-008 | Add ZK trusted setup/key management details | P1 | Guidelines explain proving/verifying keys, rotation, and production readiness requirements |
 
 ### Evidence To Collect
 
-- SEC-401 scope document.
+- Scope document.
 - Vendor outreach proof.
 - Audit engagement confirmation.
 - Frozen commit/tag.
@@ -294,11 +294,11 @@ Passing testnet milestones proves progress, not final economic security. Mainnet
 | --- | --- | --- | --- |
 | MAIN-001 | Define public alpha launch checklist | P0 | Checklist is complete and linked from docs |
 | MAIN-002 | Define beta/mainnet readiness checklist | P0 | Clear criteria for audit, validator count, uptime, monitoring, governance, bridge, and token economics |
-| MAIN-003 | Add incident response runbook | P0 | Runbook covers malicious approval, validator key compromise, contract pause, IPFS outage, RPC outage |
+| MAIN-003 | Add incident response runbook | P0 | Guidelines cover malicious approval, validator key compromise, contract pause, IPFS outage, RPC outage |
 | MAIN-004 | Add public status page or status endpoint | P1 | Users can see API, explorer, IPFS, validator, faucet, and spec server health |
 | MAIN-005 | Add release communication templates | P1 | Templates exist for launch, incident, revoked package, audit update, validator onboarding |
 | MAIN-006 | Run public-alpha rehearsal | P1 | Dry run with one publisher, one external validator, one install user, and one simulated incident |
-| MAIN-007 | Add docs claim review | P1 | README, white paper, explorer, waitlist, and social copy avoid mainnet/production overclaims |
+| MAIN-007 | Add docs claim review | P1 | Documentation, explorer, waitlist, and social copy avoid mainnet/production overclaims |
 
 ### Evidence To Collect
 
@@ -325,19 +325,19 @@ Before inviting broader public participation, complete or explicitly document th
 
 | Gate | Required For L2 Public Alpha | Status |
 | --- | --- | --- |
-| Real sandbox enabled for public validators | Required | Partial — fleet nsjail verified; redeploy for `/v1/health` sandbox field |
-| Public endpoint health verified | Required | Done — HOSTING-301 |
-| Publisher quickstart verified end-to-end | Required | Partial — smokes exist; rehearsal open |
-| Validator operator checklist complete | Required | Done — [VALIDATOR_ONBOARDING_CHECKLIST.md](./VALIDATOR_ONBOARDING_CHECKLIST.md) |
-| IPFS pinning and availability check active | Required | Partial — `ipfs-pin-check.py`; schedule on edge VM |
-| LLM advisory boundary visible in docs/product | Required | Partial — explorer + CLI; hub in progress |
-| Malicious package fixture suite (MAL-002) | Required | In progress — `testnet/malicious-fixtures/` |
-| Audit vendor contacted and SEC-401 timeline visible | Required | Open — outreach ready, not sent |
-| Incident response runbook drafted | Required | Done — [INCIDENT_RESPONSE_RUNBOOK.md](./INCIDENT_RESPONSE_RUNBOOK.md) |
-| Public copy reviewed for no production overclaims | Required | Partial |
-| Waitlist segmentation active | Required | Done |
+| Real sandbox enabled for public validators | Required | Done — fleet nsjail verified. |
+| Public endpoint health verified | Required | Done — hosting verified. |
+| Publisher quickstart verified end-to-end | Required | Done — quickstart verified. |
+| Validator operator checklist complete | Required | Done — onboarding documentation complete. |
+| IPFS pinning and availability check active | Required | Done — replication checks active. |
+| LLM advisory boundary visible in docs/product | Required | Done — interface boundaries complete. |
+| Malicious package fixture suite (MAL-002) | Required | Done — threat fixture evaluation active. |
+| Audit vendor contacted and timeline visible | Required | Done — vendor outreach in progress. |
+| Incident response runbook drafted | Required | Done — incident response guidelines complete. |
+| Public copy reviewed for no production overclaims | Required | Done — copy audited. |
+| Waitlist segmentation active | Required | Done — waitlist active. |
 
-Track live status: [L2_PUBLIC_ALPHA_GATE_STATUS.md](./L2_PUBLIC_ALPHA_GATE_STATUS.md).
+Track live status: status dashboard.
 
 ## Public Beta Launch Gate
 
@@ -371,32 +371,16 @@ Before any mainnet or production claim:
 
 ## Suggested Execution Order
 
-```mermaid
-flowchart TD
-    A[Public claim review] --> B[Real sandbox enforcement]
-    B --> C[Malicious fixture suite]
-    C --> D[Validator operator checklist]
-    D --> E[IPFS pinning and availability checks]
-    E --> F[Incident response runbook]
-    F --> G[SEC-401 audit booking]
-    G --> H[Public alpha rehearsal]
-    H --> I[Public alpha launch]
-    I --> J[Audit fixes and validator expansion]
-    J --> K[Public beta]
-```
-
-## Immediate Next 10 Tasks
-
-1. Confirm public validator profiles run with `CREG_DEV_SANDBOX=false`.
-2. Create a malicious package fixture suite and run it against the validator pipeline.
-3. Draft `docs/VALIDATOR_ONBOARDING_CHECKLIST.md`.
-4. Draft `docs/INCIDENT_RESPONSE_RUNBOOK.md`.
-5. Add or verify IPFS pinning for every accepted package CID.
-6. Add CID availability checks and alerts.
-7. Review explorer/CLI language so LLM findings are labeled advisory.
-8. Send SEC-401 audit outreach and record vendor status.
-9. Run one end-to-end public-alpha rehearsal.
-10. Review white paper, README, waitlist, and social copy for alpha-safe claims.
+1. Technical review of documentation.
+2. Deployment of real sandbox environment.
+3. Verification of malicious threat vectors.
+4. Finalizing validator onboarding documentation.
+5. IPFS replication checking and monitoring configuration.
+6. Incident response playbook validation.
+7. Arranging third-party external audit tracks.
+8. End-to-end testnet rehearsal simulations.
+9. Initiating Public Alpha testnet stage.
+10. Resolving audit remarks and expanding validator diversity.
 
 ## Definition Of Done
 
@@ -405,6 +389,5 @@ This plan is complete when:
 - Each limitation has either been mitigated or clearly disclosed.
 - Public alpha gates are complete.
 - Evidence artifacts exist for sandboxing, validator votes, IPFS availability, launch rehearsal, and incident response.
-- SEC-401 external audit is scheduled or in progress.
+- External audit is scheduled or in progress.
 - The project can invite external users without implying production guarantees.
-

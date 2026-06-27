@@ -45,6 +45,9 @@ pub struct PinningConfig {
     pub max_pins: usize,
     /// Path to persist CID map state (e.g., /data/pinner_state.json)
     pub db_path: Option<String>,
+    /// Optional address for basic status HTTP server (e.g. "0.0.0.0:8085")
+    /// Provides /status for basic observability of the pinner sidecar.
+    pub status_server_addr: Option<String>,
 }
 
 impl Default for PinningConfig {
@@ -59,6 +62,7 @@ impl Default for PinningConfig {
             verification_interval: 3600, // 1 hour
             max_pins: 10000,
             db_path: None,
+            status_server_addr: None,
         }
     }
 }
@@ -175,6 +179,11 @@ impl PinningManager {
         });
 
         info!("Pinning manager started successfully");
+
+        // Note: Call start_status_server(Arc::new(manager), addr) from your binary
+        // after creating the manager if config.status_server_addr is set.
+        // This provides basic /status for the ipfs-pinner sidecar observability.
+
         Ok(())
     }
 
@@ -341,6 +350,51 @@ impl PinningManager {
                     warn!("Failed to persist pinner state to {}: {}", path, e);
                 }
             }
+        }
+    }
+
+    /// Start a basic HTTP status server for the pinner (for observability).
+    /// Exposes GET /status with PinnerStats and basic info as JSON.
+    /// This provides basic status exposure for the ipfs-pinner sidecar.
+    pub async fn start_status_server(manager: Arc<Self>, addr: &str) -> Result<()> {
+        use std::net::SocketAddr;
+        use tokio::net::TcpListener;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let addr: SocketAddr = addr.parse().context("Invalid status server address")?;
+        let listener = TcpListener::bind(addr).await.context("Failed to bind status server")?;
+        info!("Pinner status server listening on {}", addr);
+
+        loop {
+            let (mut socket, _) = listener.accept().await?;
+            let manager = Arc::clone(&manager);
+
+            tokio::spawn(async move {
+                let mut buf = [0; 1024];
+                if let Ok(n) = socket.read(&mut buf).await {
+                    let request = String::from_utf8_lossy(&buf[..n]);
+                    if request.contains("GET /status") || request.contains("GET /") {
+                        let stats = manager.get_stats().await;
+                        let pins = manager.get_pins().await;
+                        let response = serde_json::json!({
+                            "status": "ok",
+                            "stats": stats,
+                            "active_pins": pins.len(),
+                            "pinned_cids": pins.iter().map(|p| &p.cid).collect::<Vec<_>>(),
+                            "note": "See CREG_SYSTEM_WORKFLOW.md §9.12 and §15 for pinning incentives"
+                        });
+                        let body = serde_json::to_string(&response).unwrap_or_default();
+                        let http_response = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                            body.len(),
+                            body
+                        );
+                        let _ = socket.write_all(http_response.as_bytes()).await;
+                    } else {
+                        let _ = socket.write_all(b"HTTP/1.1 404 Not Found\r\n\r\n").await;
+                    }
+                }
+            });
         }
     }
 

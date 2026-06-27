@@ -1,9 +1,13 @@
 # Chain Registry — public documentation
 
 Curated entry point for **protocol, validators, publishers, and auditors**.  
+
+At public scale CREG uses **hybrid analysis committees** (small mandatory core selected at admission + voluntary contributions). Committee data is public and queryable. See [CREG_SYSTEM_WORKFLOW.md](./CREG_SYSTEM_WORKFLOW.md#911-analysis-committee-selection-stake-weighting--caps) for details.
 Hosting runbooks, Firebase deploy guides, budget models, and internal maintainer docs are kept in-repo for the core team but are **not** linked from the public README or waitlist.
 
 **GitHub:** [chain-registry-blockchain-CREG-](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-) (canonical public repository).
+
+Maintainers: see [WHAT_TO_DO_NEXT.md](./WHAT_TO_DO_NEXT.md) (not linked from waitlist or public README).
 
 ---
 
@@ -68,4 +72,9 @@ Release binaries: [v0.1.2-testnet](https://github.com/samuel-1-avson/chain-regis
 | [`chain-registry/rules/`](../chain-registry/rules/) | Supply-chain YARA rules |
 | [`chain-registry/tests/`](../chain-registry/tests/) | Integration tests |
 
-Web frontends (explorer, hub) and cloud deploy scripts live elsewhere in the monorepo and are **not** part of this public documentation set. The waitlist SPA is maintained in the separate [Creg-waitlist](https://github.com/samuel-1-avson/Creg-waitlist) repository.
+Web frontends (explorer, hub) and cloud deploy scripts live elsewhere in the monorepo and are **not** part of this public documentation set.
+
+| Surface | URL | Doc |
+|---------|-----|-----|
+| Waitlist SPA | [waitlist.cregnet.dev](https://waitlist.cregnet.dev) | External [Creg-waitlist](https://github.com/samuel-1-avson/Creg-waitlist) repo |
+| Contribution Arena | [contribute.cregnet.dev](https://contribute.cregnet.dev) | [CREG-Contribution-Arena/README.md](../CREG-Contribution-Arena/README.md) |

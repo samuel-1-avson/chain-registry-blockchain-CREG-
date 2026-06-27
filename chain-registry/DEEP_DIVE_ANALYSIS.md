@@ -26,7 +26,7 @@
 
 Chain Registry is a **decentralized software supply-chain registry** implemented as a Rust workspace (`chain-registry/`) with an Ethereum L1 settlement layer. Publishers submit content-addressed packages (IPFS CIDs, SHA-256 hashes) to validator nodes; each package enters a **pending pool**, passes a multi-stage **validator pipeline** (static analysis, behavioral sandbox, differential analysis, optional LLM review, PGP, reputation), and is voted on by economically staked validators using **Ed25519 domain-separated signatures**. Approved packages are finalized into a **PBFT-backed append-only chain** stored in **RocksDB**, gossiped over **libp2p Gossipsub**, and periodically batched to L1 via a **Groth16 rollup bridge** that submits state transitions through **Governance.sol**. The canonical L1 package ledger lives in **Registry.sol** on Sepolia testnet (chain id 11155111), with companion contracts for staking, reputation, ZK verification, and governance.
 
-The codebase is architecturally ambitious: seventeen Rust crates cover consensus, ZK proofs (arkworks Groth16), ML/YARA scanning, WASM sandboxing, threshold encryption (feature-flagged off on testnet), cross-chain scaffolding, faucet, relayer, indexer, and secrets management. Production hardening is uneven: the node binary denies `clippy::unwrap_used`, yet several hot paths use `unwrap_or_default` fallbacks that weaken gossip integrity; ZK circuits document content-hash binding but do not constrain hashes in R1CS; and several Solidity auxiliary contracts (VRF callback, BatchOperations, CrossChainRegistry adapter) are incomplete or unsafe for production deployment.
+The codebase is architecturally ambitious: seventeen Rust crates cover consensus, ZK proofs (arkworks Groth16), ML/YARA scanning, WASM sandboxing, threshold encryption (feature-flagged off on testnet), cross-chain scaffolding, faucet, relayer, indexer, and secrets management. **June 2026 remediation (Iterations 5–6)** mitigated gossip/PBFT fallbacks (ISSUE-002/006/007), fixed BatchOperations publisher identity (ISSUE-003), and hardened finalize relay controls (ISSUE-008). Residual alpha risks: ZK circuit regen/trusted setup (ISSUE-001), bridge resilience, and CrossChain adapter ACL (ISSUE-010).
 
 **Operational posture today:** The primary `docker-compose.yml` targets **Sepolia** with IPFS, signed chain-spec server, node, PostgreSQL, indexer, faucet, relayer, and web explorer (port 3007). Local three-validator clusters and Kubernetes manifests exist for broader testing. Feature flags in `chain-spec.sepolia.json` enable ZK, ML, and WASM validation while **cross-chain, insurance, and threshold encryption remain disabled**.
 
@@ -297,9 +297,9 @@ On-chain Groth16 verification via BN254 precompiles; governance rotates verifyin
 
 #### Auxiliary contracts
 
-- **VRF.sol**: Chainlink request path incomplete in `fulfillRandomWords` (empty validator selection).
-- **BatchOperations.sol**: Calls `registry.submitPackage` as contract—breaks publisher stake check (`msg.sender` is batch contract).
-- **CrossChainRegistry.sol**: Axelar adapter `setChainName` lacks access control.
+- **VRF.sol**: Fixed on Sepolia (ISSUE-009); see contract tests.
+- **BatchOperations.sol**: Fixed — uses `submitPackageFor(msg.sender, …)` with governance submit-relay allowlist (ISSUE-003).
+- **CrossChainRegistry.sol**: Axelar adapter `setChainName` lacks access control (ISSUE-010; cross-chain disabled on testnet).
 - **Appeal.sol**: ETH transfers without reentrancy guard.
 - **GovernanceV2.sol**, **PackageInsurance.sol**: Present but not integrated with Rust node testnet path.
 
@@ -344,8 +344,8 @@ Global flags: `--unverified`, `CREG_NODE_URL`, `CREG_GRPC_URL`, `--output json`.
 | Component | Location | Role |
 |-----------|----------|------|
 | Docker Compose (Sepolia) | `docker-compose.yml` | IPFS, spec-server, node, postgres, faucet, relayer, indexer, web-explorer |
-| Local testnet | `docker-compose.local-testnet.yml`, `local-testnet.ps1` | 3-validator validated bootstrap |
-| Anvil dev | `docker-compose.anvil.yml` | Legacy local L1 |
+| Sepolia bootstrap | `docker-compose.testnet.yml`, `testnet.ps1` | Local bootstrap host |
+| Archived Anvil lab | `archive/anvil-lab/` | Retired local L1 (31337) |
 | Kubernetes | `k8s/` | Namespace, validators 1–10, postgres, ipfs, ingress, monitoring, backup |
 | Observability | `observability/prometheus.yml`, `docker-compose.observability.yml` | Node metrics, IPFS, OTEL/Loki/Tempo targets |
 | Chain spec | `testnet/chain-spec.sepolia.json` | Signed network params, contract addresses, feature flags |
@@ -377,21 +377,20 @@ Global flags: `--unverified`, `CREG_NODE_URL`, `CREG_GRPC_URL`, `--output json`.
 - **Impact**: A malicious prover can generate valid Groth16 proofs for arbitrary packages while attesting passing scores, undermining ZK-fast-path trust if relied upon for admission.
 - **Recommended Fix**: Add hash witnesses as public inputs (or commit in-circuit via Poseidon/SHA256 gadgets), constrain them against publisher-supplied values, and align `Registry.sol` `_assertPackageProofBinding` with circuit public signal layout. Regenerate trusted setup after circuit change.
 
-### ISSUE-002: Gossip vote signature falls back on invalid validator key hex
+### ISSUE-002: Gossip vote signature falls back on invalid validator key hex — **MITIGATED** (2026-06-26, Iteration 5)
 
-- **Severity**: Critical
-- **File**: `crates/node/src/validator_pipeline.rs:295-310`
-- **Description**: `hex::decode(privkey_str).unwrap_or_default()` produces empty bytes on decode failure; the branch then reuses `our_sig.signature.clone()` without binding to the canonical gossip message format.
-- **Impact**: Misconfigured nodes may broadcast votes that peers reject or mis-attribute, breaking quorum liveness or enabling signature confusion during incident response.
-- **Recommended Fix**: Replace `unwrap_or_default` with explicit error handling—abort gossip and log fatal misconfiguration if `CREG_VALIDATOR_KEY` is invalid.
+- **Severity**: Critical (mitigated)
+- **File**: `crates/node/src/validator_pipeline.rs`, `crates/node/src/p2p.rs`, `crates/node/src/config.rs`
+- **Description**: Invalid `CREG_VALIDATOR_KEY` no longer decodes silently; validator startup fails fast; inbound gossip votes use `validate_vote_gossip_message` with domain-separated Ed25519 verification.
+- **Fix**: Explicit errors on bad privkey hex; metrics `creg_gossip_votes_rejected_total`; VRF proof gossip skips when pubkey missing.
+- **Verification**: `cargo test` — `validate_vote_*`, `rejects_*` unit tests; bad-key startup bail.
 
-### ISSUE-003: BatchOperations breaks publisher stake identity
+### ISSUE-003: BatchOperations breaks publisher stake identity — **FIXED** (2026-06-26, Iteration 6)
 
-- **Severity**: Critical
-- **File**: `contracts/BatchOperations.sol:55-60`
-- **Description**: `batchSubmitPackages` loops `registry.submitPackage` as the batch contract address, not the end publisher. Registry checks `staking.stakedBalance(msg.sender)`.
-- **Impact**: Batch submissions always fail stake gate unless the batch contract itself stakes—feature is non-functional and may confuse integrators.
-- **Recommended Fix**: Add `publisher` field per submission and use `Staking` delegation pattern, or expose `submitPackageFor(publisher, ...)` on Registry with EIP-712 authorization.
+- **Severity**: Critical (resolved)
+- **File**: `contracts/BatchOperations.sol`, `contracts/Registry.sol`
+- **Description**: `batchSubmitPackages` calls `registry.submitPackageFor(msg.sender, ...)` so the staked publisher is recorded; relay must be governance-allowlisted via `setPackageSubmitRelay`.
+- **Fix**: Forge tests `test_batchSubmitPackagesViaAuthorizedRelay`, `test_batchSubmitPackagesRejectsUnstakedPublisher`, `test_batchSubmitPackagesRejectsWithoutRelayAllowlist`; documented in `contracts/README.md`.
 
 ### ISSUE-004: Bridge panics on malformed RPC URL at runtime
 
@@ -413,29 +412,27 @@ Global flags: `--unverified`, `CREG_NODE_URL`, `CREG_GRPC_URL`, `--output json`.
 - **Impact**: Hard node crash on deploy ordering mistakes; correct for security but needs documented startup ordering and health checks.
 - **Recommended Fix**: Fail startup gracefully in `main.rs` with actionable error before spawning tasks; document key provisioning in compose/k8s manifests.
 
-### ISSUE-006: Empty gossip payload on JSON serialization failure
+### ISSUE-006: Empty gossip payload on JSON serialization failure — **MITIGATED** (2026-06-26, Iteration 5)
 
-- **Severity**: High
-- **File**: `crates/node/src/validator_pipeline.rs:333`
-- **Description**: `serde_json::to_vec(&gossip_vote).unwrap_or_default()` broadcasts zero-length messages on failure.
-- **Impact**: Peers receive malformed gossip; debugging difficulty and potential vote starvation.
-- **Recommended Fix**: Treat serialization failure as fatal for that vote; increment metric `creg_gossip_serialize_errors`.
+- **Severity**: High (mitigated)
+- **File**: `crates/node/src/validator_pipeline.rs`
+- **Description**: Gossip vote serialization failures return explicit errors instead of empty payloads.
+- **Fix**: Aligned with Iteration 5 gossip hardening; covered by unit tests.
 
-### ISSUE-007: P2P PBFT Prepare uses simplified signature validation
+### ISSUE-007: P2P PBFT Prepare uses simplified signature validation — **MITIGATED** (2026-06-26, Iteration 5)
 
-- **Severity**: High
-- **File**: `crates/node/src/p2p.rs:556-565`
-- **Description**: Comment acknowledges validation is simplified; Prepare path constructs `BlockSignature` from gossip without full domain-separated PBFT verify used in `pbft.rs`.
-- **Impact**: Divergence between local PBFT engine and network gossip acceptance could allow invalid prepares on compromised or buggy peers.
-- **Recommended Fix**: Route all PBFT gossip through `consensus::pbft` verify helpers shared with block producer.
+- **Severity**: High (mitigated)
+- **File**: `crates/node/src/p2p.rs`, `crates/consensus/src/pbft.rs`
+- **Description**: Inbound PBFT Prepare/Commit gossip routed through `validate_pbft_phase_message` → `consensus::pbft::verify_pbft_phase_signature`.
+- **Fix**: Metric `creg_gossip_pbft_rejected_total`; signing centralized via `sign_pbft_phase` helper.
 
-### ISSUE-008: Permissionless finalizePackage on L1
+### ISSUE-008: Permissionless finalizePackage on L1 — **MITIGATED** (2026-06-26, Iteration 6)
 
-- **Severity**: High
-- **File**: `contracts/Registry.sol:304-351`
-- **Description**: Any caller may invoke `finalizePackage` with validator ECDSA signatures; no role gate.
-- **Impact**: Intended for trustless relaying, but signature replay or stale sig sets could grief pending packages if off-chain collection is sloppy.
-- **Recommended Fix**: Document relay requirements; consider `nonce` per package round or allowlisted relayers for testnet.
+- **Severity**: High (mitigated)
+- **File**: `contracts/Registry.sol`
+- **Description**: `enforceFinalizeRelays` defaults **true** on deploy; only `packageFinalizeRelays` may call `finalizePackage` when enforced. Per-validator replay blocked via `validatorSignedForPackage`.
+- **Fix**: Forge tests `test_deployDefaultsEnforceFinalizeRelays`, `test_finalizePackageRejectsUnauthorizedWhenEnforcementOn`, `test_finalizePackageEnforcesAuthorizedRelay`, duplicate-sig/double-finalize tests; documented in `contracts/README.md`. Governance may relax enforcement on testnet.
+- **Residual**: Per-package round nonce in `_sigDigest` not added; allowlist model chosen for testnet (see remediation plan Phase 1.3).
 
 ### ISSUE-009: VRF contract callback incomplete — **FIXED**
 

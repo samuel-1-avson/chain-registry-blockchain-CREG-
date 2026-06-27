@@ -7,8 +7,12 @@
 //   3. When a peer announces a block we don't have, fetch and apply it.
 //
 // The gossip model is simple: every node fans out to every known peer.
-// In a larger network this would be replaced with a structured gossip
-// (epidemic broadcast), but for a registry with tens of nodes, full fan-out is fine.
+// WARNING: This full fan-out model does NOT scale to 10k+ validators.
+// Every submission and vote would be sent to everyone → catastrophic bandwidth
+// and redundant analysis. For public testnets we must move to:
+//   - structured/epidemic gossip with limits
+//   - analysis committees (only a small sampled subset runs full pipeline)
+//   - possibly topic sharding per ecosystem or package prefix.
 
 // anyhow::Result is unused in this module
 use common::Block;
@@ -106,6 +110,10 @@ pub struct VoteGossip {
     /// Hex-encoded Ed25519 signature of `canonical_vote_message(...)`.
     /// The signed payload includes the scanner profile and evidence digest.
     pub signature: String,
+
+    // === HYBRID FIELDS ===
+    #[serde(default)]
+    pub is_mandatory: bool,   // true if this voter was in the primary mandatory committee for the package
 }
 
 /// Message sent to peers when we write a new block.

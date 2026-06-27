@@ -1,0 +1,13 @@
+# CREG node JSON-RPC (creg_* on /rpc and /jsonrpc). Imported by api.testnet vhost.
+# GET/HEAD: JSON descriptor (browser-friendly). POST: proxy to observer read pool.
+@creg_jsonrpc_path path /rpc* /jsonrpc*
+handle @creg_jsonrpc_path {
+	@jsonrpc method POST
+	handle @jsonrpc {
+		reverse_proxy {$CREG_OBSERVER_API_UPSTREAM} {
+			flush_interval -1
+		}
+	}
+	header Content-Type application/json
+	respond `{"service":"CREG testnet JSON-RPC","usage":"POST JSON-RPC 2.0 creg_* methods only — not Sepolia eth_*","sepoliaL1":"https://{$CREG_PUBLIC_EXPLORER_HOST}/rpc"}` 200
+}

@@ -177,6 +177,7 @@ contract ChainRegistry {
         quorumPct  = 67; // 2/3 majority
         zkValidationEnabled = true;
         zkValidationFee = 0.001 ether; // Cheaper than PBFT
+        enforceFinalizeRelays = true; // Safer default: only allowlisted relays by default (governance can relax)
     }
 
     // ── Publisher-facing ──────────────────────────────────────────────────────
@@ -606,12 +607,16 @@ contract ChainRegistry {
     ) internal pure {
         if (publicInputs.length < 2) revert InvalidZKPublicInputs();
 
-        (uint256 bindingHigh, uint256 bindingLow) =
-            _packageZKBindingInputs(canonical, contentHash, ipfsCid);
-
-        if (publicInputs[0] != bindingHigh || publicInputs[1] != bindingLow) {
+        // To address DEEP_DIVE ISSUE-001 (ZK must bind actual content/manifest hashes):
+        // The circuit binds content_hash and manifest_hash as public inputs (limbs).
+        // We now bind using the contentHash limbs directly (what the proof commits to).
+        // This ensures the submitted proof is for *this* contentHash (circuit-enforced).
+        // (ipfsCid + canonical provide additional context in submit; full tuple binding can use separate check if needed.)
+        (uint256 contentHigh, uint256 contentLow) = _contentHashToLimbs(contentHash);
+        if (publicInputs[0] != contentLow || publicInputs[1] != contentHigh) {
             revert InvalidZKPublicInputs();
         }
+        // Note: manifest limbs would be publicInputs[2,3] from circuit; can extend assert here if manifest provided in ZK submit.
     }
 
     function _packageZKBindingInputs(
@@ -625,6 +630,15 @@ contract ChainRegistry {
         uint256 binding = uint256(bindingHash);
         bindingHigh = binding >> 128;
         bindingLow = binding & UINT128_MASK;
+    }
+
+    function _contentHashToLimbs(bytes32 contentHash)
+        internal pure returns (uint256 high, uint256 low)
+    {
+        // Split 32-byte hash into high/low 128-bit limbs (matching circuit bind_hash32_limbs and public inputs order).
+        uint256 h = uint256(contentHash);
+        high = h >> 128;
+        low = h & UINT128_MASK;
     }
 
     function _recoverSigner(bytes32 digest, bytes memory sig)

@@ -1,108 +1,66 @@
 # Chain Registry — Quick Start Guide
 
-> Goal: get a node running quickly and verify the supported health/status surfaces.
+> Goal: get a node running quickly and verify health/status surfaces.
 
-For publisher/developer/validator flows, see [`../../docs/PUBLIC_TESTNET_QUICKSTART.md`](../../docs/PUBLIC_TESTNET_QUICKSTART.md). For readiness limits, see [`../TESTNET_READINESS_REPORT.md`](../TESTNET_READINESS_REPORT.md).
+**Scale testnet (10k+ validators):** [TESTNET_SCALE_ARCHITECTURE.md](../../docs/TESTNET_SCALE_ARCHITECTURE.md)  
+**External validators:** [VALIDATOR_ONBOARDING_CHECKLIST.md](../../docs/VALIDATOR_ONBOARDING_CHECKLIST.md)  
+**Publishers/developers:** [PUBLIC_TESTNET_QUICKSTART.md](../../docs/PUBLIC_TESTNET_QUICKSTART.md)
 
-## Choose Your Path
+## Choose your path
 
-| Path | Time | What You Get | Best For |
-|---|---|---|---|
+| Path | Time | What you get | Best for |
+|------|------|--------------|----------|
 | A. Single node (native) | 15 min | One node on your machine | Local development |
-| B. Bootstrap host (Docker) | 15-20 min | Shared services plus `node-1` | Local bootstrap/testnet bring-up |
-| C. 3-node local lab | 30 min | Local consensus simulation | PBFT and sync testing |
-| D. Friends alpha | 1-2 hours | Multi-host private alpha | Distributed networking checks |
+| B. Bootstrap host (Docker) | 15–20 min | Shared services + `node-1` | Local bootstrap |
+| C. External validator | 1–2 hours | Join public Sepolia testnet | Genesis Alpha cohort |
 
-## Path A: Single Node — Native
+
+## Path A: Single node — native
 
 ```bash
-git clone https://github.com/chain-registry/chain-registry.git
+git clone https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-.git
 cd chain-registry/testnet
 cp .env.example .env
-# Edit .env and set a unique CREG_NODE_ID
 ```
 
-Linux/macOS:
-
-```bash
-./start-local-node.sh -n my-node
-```
-
-Windows PowerShell:
-
-```powershell
-.\start-local-node.ps1 -NodeId my-node
-```
-
-Verify:
+Linux/macOS: `./start-local-node.sh -n my-node`  
+Windows: `.\start-local-node.ps1 -NodeId my-node`
 
 ```bash
 curl http://localhost:8080/v1/health
 curl http://localhost:8080/v1/chain/stats | jq
-curl http://localhost:8080/v1/nodes | jq
 ```
 
-## Path B: Bootstrap Host — Docker
-
-From the repo root:
+## Path B: Bootstrap host — Docker
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File testnet.ps1
 ```
 
-Equivalent Docker Compose flow:
+Or:
 
 ```bash
 docker compose --env-file .env.testnet -f docker-compose.testnet.yml up -d --build
 ```
 
-Verify the bootstrap host:
+## Path C: External validator (public testnet)
 
-```bash
-creg doctor --testnet --skip-drip
-curl http://localhost:8080/v1/health
-curl http://localhost:8080/v1/chain/stats | jq
-curl http://localhost:8080/v1/nodes | jq
-```
+Follow the full checklist — do **not** use the retired 3-node Sepolia lab.
 
-## Path C: 3-Node Local Lab
+1. [VALIDATOR_ONBOARDING_CHECKLIST.md](../../docs/VALIDATOR_ONBOARDING_CHECKLIST.md)
+2. [GENESIS_ALPHA_COHORT_PLAYBOOK.md](../../docs/GENESIS_ALPHA_COHORT_PLAYBOOK.md) (if invited)
+3. Deploy with `docker-compose.validator.yml` or release `creg-node`
+4. Point at `https://api.testnet.cregnet.dev` for registration smoke tests
 
-Use this only for local consensus experiments.
-
-```bash
-cd testnet
-docker compose -f docker-compose.3node.yml up -d --build
-```
-
-Verify all three nodes:
-
-```bash
-curl http://localhost:8080/v1/chain/stats | jq '.block_height'
-curl http://localhost:8081/v1/chain/stats | jq '.block_height'
-curl http://localhost:8082/v1/chain/stats | jq '.block_height'
-```
-
-## Path D: Friends Alpha
-
-Use [`TAILSCALE_SETUP.md`](TAILSCALE_SETUP.md) for the bootstrap-side setup and
-[`FRIEND_ONBOARDING.md`](FRIEND_ONBOARDING.md) for the joiner checklist.
-
-## Supported Smoke Checks
-
-Once a node is running, use these checks first:
+## Supported smoke checks
 
 ```bash
 curl http://localhost:8080/v1/health
 curl http://localhost:8080/v1/chain/stats | jq '{height: .block_height, peers: .peer_count, validators: .validator_count}'
-curl http://localhost:8080/v1/nodes | jq
-curl http://localhost:8080/metrics
 creg testnet status --node-url http://localhost:8080
 ```
 
-## Publishing A Package
-
-Use the CLI rather than posting raw multipart data directly to `/v1/packages`.
-Publishing now requires a staked publisher address.
+## Publishing a package
 
 ```bash
 creg --node-url http://localhost:8080 publish ./my-package.tgz \
@@ -110,27 +68,8 @@ creg --node-url http://localhost:8080 publish ./my-package.tgz \
   --publisher-address 0xYourPublisherAddress
 ```
 
-If `0xYourPublisherAddress` is not staked on-chain, the node rejects the
-request before it enters the pending pool.
+## Next steps
 
-## Common Issues
-
-### Port already in use
-
-Change `CREG_LISTEN` or free the port.
-
-### Chain spec signature invalid
-
-Re-verify the spec and detached signature before restarting the node.
-
-### Peer count stays at 0
-
-- Check `CREG_P2P_SEEDS` against the bootstrap multiaddr.
-- Confirm the bootstrap host is reachable.
-- On Tailscale setups, confirm `tailscale status` is healthy.
-
-## Next Steps
-
-1. Start with Path A or B.
-2. Run Path C once you want local consensus coverage.
-3. Move to Path D only after the bootstrap-host flow is stable.
+1. Developers: Path A or B, then [PUBLIC_TESTNET_QUICKSTART.md](../../docs/PUBLIC_TESTNET_QUICKSTART.md)
+2. Validators: Path C when cohort invites open
+3. Maintainers: [OPERATOR.md](./OPERATOR.md) and [gcp/README.md](./gcp/README.md)

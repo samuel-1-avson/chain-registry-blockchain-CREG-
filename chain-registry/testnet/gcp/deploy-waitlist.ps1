@@ -5,7 +5,7 @@
 #   .\testnet\gcp\deploy-waitlist.ps1 -Confirm
 #   .\testnet\gcp\deploy-waitlist.ps1 -Confirm -SkipDns
 #
-# Prerequisite: gcloud auth, VM running testnet stack, CF_API_TOKEN for DNS (unless -SkipDns).
+# Prerequisite: gcloud auth, edge VM running (waitlist-only stack is fine), CF_API_TOKEN for DNS (unless -SkipDns).
 
 param(
     [string]$ProjectId = "",
@@ -48,12 +48,28 @@ $dockerEnvArgs = @()
 if (Test-Path $waitlistEnv) {
     $dockerEnvArgs += "--env-file"
     $dockerEnvArgs += $waitlistEnv
-    Log "Using $waitlistEnv for VITE_RECAPTCHA_SITE_KEY at build time"
+    Log "Using $waitlistEnv for VITE_* build vars"
 } elseif ($env:VITE_RECAPTCHA_SITE_KEY) {
     $dockerEnvArgs += "-e"
     $dockerEnvArgs += "VITE_RECAPTCHA_SITE_KEY=$($env:VITE_RECAPTCHA_SITE_KEY)"
-    Log "Using VITE_RECAPTCHA_SITE_KEY from shell environment for build"
+    if ($env:VITE_WALLETCONNECT_PROJECT_ID) {
+        $dockerEnvArgs += "-e"
+        $dockerEnvArgs += "VITE_WALLETCONNECT_PROJECT_ID=$($env:VITE_WALLETCONNECT_PROJECT_ID)"
+    }
+    Log "Using VITE_* from shell environment for build"
 } else {
+    $sepoliaEnv = Join-Path $testnetDir "sepolia-3node.env"
+    if (Test-Path $sepoliaEnv) {
+        $wcLine = Select-String -Path $sepoliaEnv -Pattern '^VITE_WALLETCONNECT_PROJECT_ID=' | Select-Object -First 1
+        if ($wcLine) {
+            $wcVal = ($wcLine.Line -split '=', 2)[1].Trim().Trim('"')
+            if ($wcVal) {
+                $dockerEnvArgs += "-e"
+                $dockerEnvArgs += "VITE_WALLETCONNECT_PROJECT_ID=$wcVal"
+                Log "Using VITE_WALLETCONNECT_PROJECT_ID from sepolia-3node.env"
+            }
+        }
+    }
     Write-Host "[waitlist-deploy] WARN: $waitlistEnv not found - production build needs VITE_RECAPTCHA_SITE_KEY" -ForegroundColor Yellow
 }
 
@@ -119,4 +135,4 @@ gcloud compute ssh $VmName @sshOpts --command="bash $remoteDest '$remoteRoot'"
 Log "Verify (after DNS + ACME):"
 Write-Host "  curl -fsSI https://$WaitlistHost/" -ForegroundColor Cyan
 Write-Host ""
-Log "Testnet endpoints unchanged under testnet.cregnet.dev"
+Log "Waitlist-only edge mode: testnet subdomains stay offline until resume-testnet-hosting.ps1"

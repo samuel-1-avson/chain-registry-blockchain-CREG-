@@ -1,51 +1,31 @@
-# Chain Spec Server
+# Chain spec static server
 
-Minimal nginx-based server for hosting the signed chain spec.
+Serves the **signed** `chain-spec.sepolia.json` (+ `.sig`) over HTTP so nodes can verify network parameters at boot.
 
-## Quick Start
+## Files
 
-```bash
-cd testnet/spec-server
-cp ../chain-spec.sepolia.json ./chain-spec.json
-cp ../chain-spec.sepolia.json.sig ./chain-spec.json.sig
-docker compose up -d
+| File | Purpose |
+|------|---------|
+| `chain-spec.sepolia.json` | Copy of `../chain-spec.sepolia.json` |
+| `chain-spec.sepolia.json.sig` | Detached Ed25519 signature |
+| `nginx.conf` | Static file server |
+| `docker-compose.yml` | Local spec-server container |
+
+## Update after chain-spec change
+
+```powershell
+cd chain-registry\testnet
+.\finalize-sepolia-spec.ps1
+copy chain-spec.sepolia.json spec-server\chain-spec.sepolia.json
+copy chain-spec.sepolia.json.sig spec-server\chain-spec.sepolia.json.sig
 ```
 
-## Test
+Full procedure: [docs/TESTNET_SEPOLIA_RUNBOOK.md](../../../docs/TESTNET_SEPOLIA_RUNBOOK.md).
+
+## Verify independently
 
 ```bash
-curl http://localhost:8888/chain-spec.json | jq .chain_id
-curl http://localhost:8888/chain-spec.json.sig
-```
-
-## Production Deployment
-
-### Option A: Cloudflare Pages (Recommended — Free + CDN)
-
-1. Create a repo or folder with `chain-spec.json` + `chain-spec.json.sig`
-2. Push to GitHub
-3. Connect to Cloudflare Pages
-4. Your spec is available at `https://your-spec.pages.dev/chain-spec.json`
-
-### Option B: AWS S3 + CloudFront
-
-```bash
-aws s3 cp chain-spec.json s3://your-bucket/chain-spec.json
-aws s3 cp chain-spec.json.sig s3://your-bucket/chain-spec.json.sig
-```
-
-### Option C: Run this Docker Compose on a VPS
-
-```bash
-docker compose up -d
-# Place behind Cloudflare proxy for HTTPS + caching
-```
-
-## Node Configuration
-
-Nodes fetch the spec at boot via `CREG_CHAIN_SPEC_URL`:
-
-```bash
-CREG_CHAIN_SPEC_URL=https://your-spec-server.example.com/chain-spec.json
-CREG_SPEC_SIGNING_PUBKEY=0437e4adac481519cd6ae66907294c40cfcbf0bdeadd47806f6233be4bd5f82d
+cargo run --example verify_chain_spec --package common -- \
+  testnet/chain-spec.sepolia.json \
+  $(cat testnet/chain-spec.sepolia.json.sig)
 ```

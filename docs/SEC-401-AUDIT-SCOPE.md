@@ -28,6 +28,8 @@
 | Validator pipeline | `chain-registry/crates/node/src/validator_pipeline.rs` | ML/ZK stages, vote aggregation, evidence digests |
 | Publish / submit API | `chain-registry/crates/node/src/api.rs` (publisher routes) | AuthN on publish, signature message, gRPC + REST parity |
 | Validator set sync | `chain-registry/crates/node/src/validator_set_sync.rs` | `eth_getLogs` chunking, cursor, reorg handling |
+| P2P gossip validation | `chain-registry/crates/node/src/p2p.rs` | Vote + PBFT Prepare/Commit domain-separated Ed25519 verify; gossipsub strict reject; `creg_gossip_*_rejected_total` metrics |
+| Node config / key gate | `chain-registry/crates/node/src/config.rs`, `main.rs` | Fatal on bad/missing `CREG_VALIDATOR_KEY` when `CREG_IS_VALIDATOR=true` |
 | Chain spec boot | `chain-registry/crates/node/src/chain_spec_boot.rs`, `main.rs` | Signature verify, pinning, cache fallback |
 | CLI publish | `chain-registry/crates/cli/src/publish.rs` | Signing, IPFS pin, shielded wire format |
 | Shared wire | `chain-registry/crates/common/src/shielded_wire.rs` | Encrypt/decrypt round-trip, canonical hashes |

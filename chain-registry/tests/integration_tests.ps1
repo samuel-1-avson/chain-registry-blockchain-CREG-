@@ -162,29 +162,8 @@ function Test-ServiceStartup {
     # Clean up any existing containers
     docker-compose down -v 2>$null | Out-Null
     
-    # Start infrastructure services
-    docker-compose up -d anvil ipfs
-    
-    # Wait for Anvil
-    Write-Info "Waiting for Anvil to be ready..."
-    $anvilReady = $false
-    for ($i = 1; $i -le 30; $i++) {
-        try {
-            $response = Invoke-RestMethod -Uri "http://localhost:8545" -Method Post `
-                -Headers @{ "Content-Type" = "application/json" } `
-                -Body '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}' `
-                -TimeoutSec 2 -ErrorAction SilentlyContinue
-            if ($response) {
-                $anvilReady = $true
-                break
-            }
-        } catch {}
-        Start-Sleep -Seconds 1
-    }
-    
-    if (-not $anvilReady) {
-        Write-Warn "Anvil may not be fully ready"
-    }
+    # Start infrastructure services (Sepolia stack — no local Anvil)
+    docker-compose up -d ipfs spec-server
     
     # Wait for IPFS
     Write-Info "Waiting for IPFS to be ready..."
@@ -353,31 +332,7 @@ function Test-MultiValidatorConsensus {
 # TEST 7: Contract Deployment
 # =============================================================================
 function Test-ContractDeployment {
-    Write-Info "Testing contract deployment..."
-    
-    Set-Location $ProjectRoot
-    
-    # Check if contracts are deployed
-    try {
-        $body = @{
-            jsonrpc = "2.0"
-            method = "eth_getCode"
-            params = @("0x5FbDB2315678afecb367f032d93F642f64180aa3", "latest")
-            id = 1
-        } | ConvertTo-Json
-        
-        $response = Invoke-RestMethod -Uri "http://localhost:8545" -Method Post `
-            -Headers @{ "Content-Type" = "application/json" } `
-            -Body $body -TimeoutSec 5 -ErrorAction SilentlyContinue
-        
-        if ($response.result -and $response.result -ne "0x") {
-            Write-Info "Contract code found on Anvil"
-        } else {
-            Write-Warn "Contract deployment status unclear"
-        }
-    } catch {
-        Write-Warn "Could not check contract deployment: $_"
-    }
+    Write-Info "Skipping local L1 deploy check — contracts live on Sepolia (testnet/chain-spec.sepolia.json)"
     
     return $true
 }

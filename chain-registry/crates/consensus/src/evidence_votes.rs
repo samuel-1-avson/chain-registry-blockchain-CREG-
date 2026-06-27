@@ -1,6 +1,9 @@
 use common::{ValidatorSignature, ValidatorVote};
 use std::collections::HashMap;
 
+// Re-export for convenience; definition in common for sharing with node.
+pub use common::AnalysisCommittee;
+
 #[derive(Debug, Clone)]
 pub enum EvidenceVoteOutcome {
     Verified(Vec<ValidatorSignature>),
@@ -24,9 +27,12 @@ fn consensus_profile_key(sig: &ValidatorSignature) -> Option<String> {
 
 pub fn aggregate_evidence_votes(
     signatures: &[ValidatorSignature],
-    assigned_count: usize,
+    committee: &AnalysisCommittee,   // Hybrid: use committee instead of raw assigned_count
 ) -> Option<EvidenceVoteOutcome> {
-    let quorum_size = (assigned_count * 2 / 3) + 1;
+    let m = committee.size;                    // primary mandatory target
+    let mandatory_quorum = (2 * m / 3) + 1;
+    let effective = if committee.effective_size > 0 { committee.effective_size } else { m };
+
     let mut seen_indices = HashMap::new();
     let mut unique_votes = Vec::new();
 
@@ -44,7 +50,8 @@ pub fn aggregate_evidence_votes(
         }
     }
 
-    let mut approvals_by_profile: HashMap<String, Vec<ValidatorSignature>> = HashMap::new();
+    let mut mandatory_approvals_by_profile: HashMap<String, Vec<ValidatorSignature>> = HashMap::new();
+    let mut voluntary_approvals: Vec<ValidatorSignature> = Vec::new();
     let mut rejections = Vec::new();
 
     for sig in unique_votes {
@@ -52,20 +59,34 @@ pub fn aggregate_evidence_votes(
             continue;
         };
 
+        let is_in_committee = is_in_effective_committee(&sig, committee);
+
         match &sig.vote {
             ValidatorVote::Approve => {
-                let approvals = approvals_by_profile.entry(profile_key).or_default();
-                approvals.push(sig.clone());
-                if approvals.len() >= quorum_size {
-                    return Some(EvidenceVoteOutcome::Verified(approvals.clone()));
+                if sig.is_mandatory && is_in_committee {
+                    let approvals = mandatory_approvals_by_profile.entry(profile_key).or_default();
+                    approvals.push(sig.clone());
+                    if approvals.len() >= mandatory_quorum as usize {
+                        // Success: return mandatory + any voluntary for the record
+                        let mut combined = approvals.clone();
+                        combined.extend(voluntary_approvals.iter().cloned());
+                        return Some(EvidenceVoteOutcome::Verified(combined));
+                    }
+                } else if is_in_committee {
+                    voluntary_approvals.push(sig.clone());
                 }
             }
-            ValidatorVote::Reject { reason } => rejections.push(reason.clone()),
+            ValidatorVote::Reject { reason } => {
+                if is_in_committee {
+                    rejections.push(reason.clone());
+                }
+            }
         }
     }
 
-    let max_possible_approvals = assigned_count.saturating_sub(rejections.len());
-    if max_possible_approvals < quorum_size {
+    // Early rejection check using effective size
+    let max_possible_approvals = (effective as usize).saturating_sub(rejections.len());
+    if max_possible_approvals < mandatory_quorum as usize {
         return Some(EvidenceVoteOutcome::Rejected {
             reason: rejections
                 .into_iter()
@@ -77,13 +98,21 @@ pub fn aggregate_evidence_votes(
     None
 }
 
+fn is_in_effective_committee(sig: &ValidatorSignature, committee: &AnalysisCommittee) -> bool {
+    if committee.members.is_empty() {
+        return true; // fallback for small sets / tests
+    }
+    let limit = if committee.effective_size > 0 { committee.effective_size } else { committee.size };
+    committee.members.iter().take(limit as usize).any(|id| id == &sig.validator_id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{aggregate_evidence_votes, EvidenceVoteOutcome};
     use chrono::Utc;
     use common::{ValidatorSignature, ValidatorVote};
 
-    fn sig(id: &str, vote: ValidatorVote, model_version: &str) -> ValidatorSignature {
+    fn sig(id: &str, vote: ValidatorVote, model_version: &str, is_mand: bool) -> ValidatorSignature {
         let analysis_bundles = common::AnalysisBundleRefs {
             policy_bundle_id: "policy-v1".into(),
             feature_schema_id: "features-v1".into(),
@@ -104,25 +133,39 @@ mod tests {
             analysis_bundles,
             evidence_digest: common::sha256_hex(b"pipeline-test-evidence"),
             deterministic_risk: common::DeterministicRiskSummary::default(),
+            is_mandatory: is_mand,
+        }
+    }
+
+    fn test_committee(size: usize, members: &[&str]) -> super::AnalysisCommittee {
+        super::AnalysisCommittee {
+            size: size as u32,
+            members: members.iter().map(|s| s.to_string()).collect(),
+            effective_size: size as u32,
+            seed: "test".to_string(),
+            performance_bias: true,
+            ..Default::default()
         }
     }
 
     #[test]
     fn aggregates_to_verified_from_approval_quorum() {
+        let committee = test_committee(4, &["v1", "v2", "v3", "v4"]);
         let outcome = aggregate_evidence_votes(
             &[
-                sig("v1", ValidatorVote::Approve, "creg-detect-v1.0.0"),
-                sig("v2", ValidatorVote::Approve, "creg-detect-v1.0.0"),
-                sig("v3", ValidatorVote::Approve, "creg-detect-v1.0.0"),
+                sig("v1", ValidatorVote::Approve, "creg-detect-v1.0.0", true),
+                sig("v2", ValidatorVote::Approve, "creg-detect-v1.0.0", true),
+                sig("v3", ValidatorVote::Approve, "creg-detect-v1.0.0", true),
                 sig(
                     "v4",
                     ValidatorVote::Reject {
                         reason: "malicious".to_string(),
                     },
                     "creg-detect-v1.0.0",
+                    true,
                 ),
             ],
-            4,
+            &committee,
         );
 
         match outcome {
@@ -133,6 +176,7 @@ mod tests {
 
     #[test]
     fn aggregates_to_rejected_when_quorum_is_impossible() {
+        let committee = test_committee(3, &["v1", "v2", "v3"]);
         let outcome = aggregate_evidence_votes(
             &[
                 sig(
@@ -141,6 +185,7 @@ mod tests {
                         reason: "malicious".to_string(),
                     },
                     "creg-detect-v1.0.0",
+                    true,
                 ),
                 sig(
                     "v2",
@@ -148,9 +193,10 @@ mod tests {
                         reason: "backdoor".to_string(),
                     },
                     "creg-detect-v1.0.0",
+                    true,
                 ),
             ],
-            3,
+            &committee,
         );
 
         match outcome {
@@ -161,13 +207,14 @@ mod tests {
 
     #[test]
     fn duplicate_votes_do_not_count_twice() {
+        let committee = test_committee(3, &["v1", "v2"]);
         let outcome = aggregate_evidence_votes(
             &[
-                sig("v1", ValidatorVote::Approve, "creg-detect-v1.0.0"),
-                sig("v1", ValidatorVote::Approve, "creg-detect-v1.0.0"),
-                sig("v2", ValidatorVote::Approve, "creg-detect-v1.0.0"),
+                sig("v1", ValidatorVote::Approve, "creg-detect-v1.0.0", true),
+                sig("v1", ValidatorVote::Approve, "creg-detect-v1.0.0", true),
+                sig("v2", ValidatorVote::Approve, "creg-detect-v1.0.0", true),
             ],
-            3,
+            &committee,
         );
 
         assert!(
@@ -178,13 +225,14 @@ mod tests {
 
     #[test]
     fn degraded_votes_are_excluded_from_quorum() {
+        let committee = test_committee(4, &["v1", "v2", "v3", "v4"]);
         let outcome = aggregate_evidence_votes(
             &[
-                sig("v1", ValidatorVote::Approve, "degraded-no-model"),
-                sig("v2", ValidatorVote::Approve, "creg-detect-v1.0.0"),
-                sig("v3", ValidatorVote::Approve, "creg-detect-v1.0.0"),
+                sig("v1", ValidatorVote::Approve, "degraded-no-model", true),
+                sig("v2", ValidatorVote::Approve, "creg-detect-v1.0.0", true),
+                sig("v3", ValidatorVote::Approve, "creg-detect-v1.0.0", true),
             ],
-            4,
+            &committee,
         );
 
         assert!(
@@ -195,14 +243,15 @@ mod tests {
 
     #[test]
     fn approvals_must_share_the_same_profile_and_evidence_digest() {
-        let mut v1 = sig("v1", ValidatorVote::Approve, "creg-detect-v1.0.0");
-        let mut v2 = sig("v2", ValidatorVote::Approve, "creg-detect-v1.0.0");
-        let mut v3 = sig("v3", ValidatorVote::Approve, "creg-detect-v1.0.0");
+        let committee = test_committee(3, &["v1", "v2", "v3"]);
+        let mut v1 = sig("v1", ValidatorVote::Approve, "creg-detect-v1.0.0", true);
+        let mut v2 = sig("v2", ValidatorVote::Approve, "creg-detect-v1.0.0", true);
+        let mut v3 = sig("v3", ValidatorVote::Approve, "creg-detect-v1.0.0", true);
         v1.evidence_digest = common::sha256_hex(b"evidence-a");
         v2.evidence_digest = common::sha256_hex(b"evidence-a");
         v3.evidence_digest = common::sha256_hex(b"evidence-b");
 
-        let outcome = aggregate_evidence_votes(&[v1, v2, v3], 3);
+        let outcome = aggregate_evidence_votes(&[v1, v2, v3], &committee);
 
         assert!(
             outcome.is_none(),

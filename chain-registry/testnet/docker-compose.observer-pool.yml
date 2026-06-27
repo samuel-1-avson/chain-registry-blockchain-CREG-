@@ -2,7 +2,7 @@
 #
 # Peers with the private validator fleet; serves public read API on host port 28182.
 #
-# Prerequisites in sepolia-3node.env (or exported before compose):
+# Prerequisites in sepolia-fleet.env (or exported before compose):
 #   CREG_ETH_RPC, CREG_EDGE_INTERNAL_IP, CREG_VALIDATOR_VM_INTERNAL_IP
 #   CREG_VALIDATOR_P2P_SEEDS — comma seeds to validator fleet P2P
 #   CREG_VALIDATOR_HTTP_PEERS — HTTP peers for sync (validator-1, validator-2)
@@ -13,7 +13,7 @@
 x-observer-pool-common: &observer-pool-common
   image: ${CREG_FLEET_IMAGE:-ghcr.io/chain-registry/chain-registry:latest}
   env_file:
-    - sepolia-3node.env
+    - sepolia-fleet.env
   networks:
     - creg-observer-pool
   restart: unless-stopped

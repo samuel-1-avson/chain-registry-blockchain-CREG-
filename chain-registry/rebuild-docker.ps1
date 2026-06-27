@@ -329,7 +329,7 @@ docker images --format "  {{.Repository}}:{{.Tag}}  {{.Size}}" |
 Write-Host ""
 Write-Host "Next steps:"
 Write-Host "  Single validator:  docker compose up -d --build"
-Write-Host "  Local 3-node:      .\local-testnet.ps1 -SkipCleanup -RebuildImages -RebuildAppImage"
+Write-Host "  Sepolia bootstrap: pwsh -File testnet.ps1"
 Write-Host "  Config smoke:      .\test-docker.ps1 -Quick"
 Write-Host "  Full log:          $LogFile"
 Write-Host ""

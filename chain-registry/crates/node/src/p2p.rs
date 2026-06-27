@@ -89,6 +89,16 @@ fn report_pbft_validation_failure(
     );
 }
 
+/// Helper to sign a PBFT phase message (prepare/commit) using our key.
+/// Returns (signature_hex, pubkey_hex). Logs on failure in caller.
+fn sign_pbft_phase(sk: &ed25519_dalek::SigningKey, phase: &str, block_hash: &str) -> (String, String) {
+    use ed25519_dalek::Signer;
+    let message = consensus::pbft::pbft_signature_message(phase, block_hash);
+    let signature = hex::encode(sk.sign(message.as_bytes()).to_bytes());
+    let pubkey = hex::encode(sk.verifying_key().as_bytes());
+    (signature, pubkey)
+}
+
 fn validate_vote_gossip_message(
     message: &[u8],
     validator_set: &common::ValidatorSet,
@@ -108,6 +118,9 @@ fn validate_vote_gossip_message(
         return Err(VoteValidationError::MissingValidatorPubkey);
     }
 
+    let pubkey_bytes = hex::decode(&vote.validator_pubkey)
+        .map_err(|_| VoteValidationError::InvalidValidatorPubkeyHex)?;
+
     if vote.validator_pubkey != validator.pubkey {
         return Err(VoteValidationError::ValidatorPubkeyMismatch);
     }
@@ -120,8 +133,11 @@ fn validate_vote_gossip_message(
         return Err(VoteValidationError::MissingConsensusEvidence);
     }
 
-    let pubkey_bytes = hex::decode(&vote.validator_pubkey)
-        .map_err(|_| VoteValidationError::InvalidValidatorPubkeyHex)?;
+    if !vote.approved && vote.reject_reason.as_deref().unwrap_or("").trim().is_empty() {
+        // Treat reject without reason as non-grade to avoid silent fallbacks (addresses gossip signature/reason issues)
+        return Err(VoteValidationError::MissingConsensusEvidence);
+    }
+
     let verifying_key = VerifyingKey::try_from(pubkey_bytes.as_slice())
         .map_err(|_| VoteValidationError::InvalidValidatorPubkey)?;
 
@@ -155,7 +171,7 @@ fn vote_gossip_to_signature(vote: &crate::gossip::VoteGossip) -> common::Validat
             common::ValidatorVote::Approve
         } else {
             common::ValidatorVote::Reject {
-                reason: vote.reject_reason.clone().unwrap_or_default(),
+                reason: vote.reject_reason.clone().unwrap_or_else(|| "no reason provided".to_string()),
             }
         },
         signed_at: chrono::Utc::now(),
@@ -163,6 +179,7 @@ fn vote_gossip_to_signature(vote: &crate::gossip::VoteGossip) -> common::Validat
         analysis_bundles: vote.analysis_bundles.clone(),
         evidence_digest: vote.evidence_digest.clone(),
         deterministic_risk: vote.deterministic_risk.clone(),
+        is_mandatory: vote.is_mandatory,
     }
 }
 
@@ -423,6 +440,20 @@ impl P2PNode {
                                         let mut s = state.write().await;
                                         if !s.pending_pool.contains(&canonical) {
                                             s.pending_pool.insert(req.clone());
+                                            // Wire committee at "admission" for gossip path too
+                                            let tip = s.chain.tip_hash().unwrap_or_default();
+                                            let recent_vrf = s.chain.get_block_by_hash(&tip)
+                                                .ok()
+                                                .flatten()
+                                                .and_then(|b| b.header.vrf_output.clone());
+                                            let committee = crate::package_admission::compute_analysis_committee_at_admission(
+                                                &s.validator_set,
+                                                &canonical,
+                                                &req.content_hash,
+                                                tip,
+                                                recent_vrf,
+                                            );
+                                            s.pending_pool.set_analysis_committee(&canonical, committee);
                                             tracing::info!("Received {} via gossip", canonical);
                                         }
                                     }
@@ -597,6 +628,11 @@ impl P2PNode {
                                         &peer_id,
                                         gossipsub::MessageAcceptance::Reject,
                                     );
+                                    {
+                                        let mut s = state.write().await;
+                                        s.p2p_status.gossip_votes_rejected_total =
+                                            s.p2p_status.gossip_votes_rejected_total.saturating_add(1);
+                                    }
                                     tracing::warn!(
                                         peer = %peer_id,
                                         reason = ?error,
@@ -624,10 +660,7 @@ impl P2PNode {
                                                     if let Ok(pk_bytes) = hex::decode(our_privkey_hex) {
                                                         if let Ok(sk) = ed25519_dalek::SigningKey::try_from(pk_bytes.as_slice()) {
                                                             use ed25519_dalek::Signer;
-                                                            let message = consensus::pbft::pbft_signature_message("prepare", &bh);
-                                                            let signature = hex::encode(sk.sign(message.as_bytes()).to_bytes());
-                                                            let pubkey = hex::encode(sk.verifying_key().as_bytes());
-
+                                                            let (signature, pubkey) = sign_pbft_phase(&sk, "prepare", &bh);
                                                             let sig_obj = common::BlockSignature { validator_id: our_id.clone(), pubkey: pubkey.clone(), signature: signature.clone() };
                                                             let _ = s.pbft_engine.prepare(&bh, &our_id, sig_obj);
 
@@ -636,7 +669,11 @@ impl P2PNode {
                                                                 let topic = libp2p::gossipsub::IdentTopic::new("creg/v1/blocks");
                                                                 let _ = self.swarm.behaviour_mut().gossipsub.publish(topic, data);
                                                             }
+                                                        } else {
+                                                            tracing::warn!("Failed to parse own validator key for Prepare sign on {}", bh);
                                                         }
+                                                    } else {
+                                                        tracing::warn!("Failed to hex-decode own validator key for Prepare sign on {}", bh);
                                                     }
                                                 }
                                             }
@@ -660,6 +697,12 @@ impl P2PNode {
                                                         &block_hash,
                                                         error,
                                                     );
+                                                    {
+                                                        let mut s = state.write().await;
+                                                        s.p2p_status.gossip_pbft_rejected_total =
+                                                            s.p2p_status.gossip_pbft_rejected_total
+                                                                .saturating_add(1);
+                                                    }
                                                     continue;
                                                 }
                                             }
@@ -671,11 +714,7 @@ impl P2PNode {
                                                 if let Some(our_privkey_hex) = &s.config.validator_privkey {
                                                     if let Ok(pk_bytes) = hex::decode(our_privkey_hex) {
                                                         if let Ok(sk) = ed25519_dalek::SigningKey::try_from(pk_bytes.as_slice()) {
-                                                            use ed25519_dalek::Signer;
-                                                            let message = consensus::pbft::pbft_signature_message("commit", &block_hash);
-                                                            let commit_sig = hex::encode(sk.sign(message.as_bytes()).to_bytes());
-                                                            let pubkey = hex::encode(sk.verifying_key().as_bytes());
-
+                                                            let (commit_sig, pubkey) = sign_pbft_phase(&sk, "commit", &block_hash);
                                                             let sig_obj = common::BlockSignature { validator_id: our_id.clone(), pubkey: pubkey.clone(), signature: commit_sig.clone() };
                                                             let _ = s.pbft_engine.commit(&block_hash, &our_id, sig_obj);
 
@@ -684,7 +723,11 @@ impl P2PNode {
                                                                 let topic = libp2p::gossipsub::IdentTopic::new("creg/v1/blocks");
                                                                 let _ = self.swarm.behaviour_mut().gossipsub.publish(topic, data);
                                                             }
+                                                        } else {
+                                                            tracing::warn!("Failed to parse own validator key for Commit sign on {}", block_hash);
                                                         }
+                                                    } else {
+                                                        tracing::warn!("Failed to hex-decode own validator key for Commit sign on {}", block_hash);
                                                     }
                                                 }
                                             }
@@ -708,6 +751,12 @@ impl P2PNode {
                                                         &block_hash,
                                                         error,
                                                     );
+                                                    {
+                                                        let mut s = state.write().await;
+                                                        s.p2p_status.gossip_pbft_rejected_total =
+                                                            s.p2p_status.gossip_pbft_rejected_total
+                                                                .saturating_add(1);
+                                                    }
                                                     continue;
                                                 }
                                             }
@@ -859,6 +908,8 @@ mod tests {
             stake: 100,
             reputation: 100,
             status: "online".into(),
+            performance_score: 500,
+            contribution_count: 0,
         }
     }
 
@@ -901,6 +952,7 @@ mod tests {
             approved: true,
             reject_reason: None,
             signature: hex::encode(signing_key.sign(message.as_bytes()).to_bytes()),
+            is_mandatory: true,
         }
     }
 
@@ -917,6 +969,7 @@ mod tests {
             validator_set_bootstrap: validator_set.clone(),
             validator_set,
             package_rounds: HashMap::new(),
+            package_committees: HashMap::new(),
             config: crate::config::NodeConfig {
                 data_dir: tempdir.keep(),
                 ..Default::default()
@@ -933,6 +986,13 @@ mod tests {
             forced_inclusion_tracker: crate::state::ForcedInclusionTracker::new(),
             sync_lag_blocks: 0,
             sync_max_peer_tip: 0,
+            reward_emissions_succeeded: 0,
+            reward_emissions_failed: 0,
+            treasury_balance: 0,
+            pending_rewards_estimate: 0,
+            total_rewards_distributed: 0,
+            rewards_pool_balance: 0,
+            last_incentives_refresh: None,
         })))
     }
 
@@ -978,6 +1038,120 @@ mod tests {
                 .unwrap_err();
 
         assert_eq!(error, VoteValidationError::SignatureVerificationFailed);
+    }
+
+    #[test]
+    fn validate_vote_gossip_rejects_unknown_validator() {
+        let signing_key = SigningKey::from_bytes(&[7u8; 32]);
+        let validator_set = common::ValidatorSet::new(vec![validator("node-1", &signing_key)]);
+        let vote = signed_vote(
+            "unknown-node",
+            &signing_key,
+            hex::encode(signing_key.verifying_key().as_bytes()),
+        );
+
+        let error =
+            validate_vote_gossip_message(&serde_json::to_vec(&vote).unwrap(), &validator_set)
+                .unwrap_err();
+
+        assert_eq!(error, VoteValidationError::UnknownValidator);
+    }
+
+    #[test]
+    fn validate_vote_gossip_rejects_invalid_pubkey_hex() {
+        let signing_key = SigningKey::from_bytes(&[7u8; 32]);
+        let validator_set = common::ValidatorSet::new(vec![validator("node-1", &signing_key)]);
+        let vote = signed_vote("node-1", &signing_key, "not-valid-hex".into());
+
+        let error =
+            validate_vote_gossip_message(&serde_json::to_vec(&vote).unwrap(), &validator_set)
+                .unwrap_err();
+
+        assert_eq!(error, VoteValidationError::InvalidValidatorPubkeyHex);
+    }
+
+    fn pbft_phase_signature(phase: &str, block_hash: &str, signing_key: &SigningKey) -> String {
+        let message = consensus::pbft::pbft_signature_message(phase, block_hash);
+        hex::encode(signing_key.sign(message.as_bytes()).to_bytes())
+    }
+
+    #[test]
+    fn validate_pbft_prepare_accepts_domain_separated_signature() {
+        let signing_key = SigningKey::from_bytes(&[9u8; 32]);
+        let validator_set =
+            common::ValidatorSet::new(vec![validator("node-pbft", &signing_key)]);
+        let block_hash = "abc123blockhash";
+        let signature = pbft_phase_signature("prepare", block_hash, &signing_key);
+
+        let result = validate_pbft_phase_message(
+            &validator_set,
+            "prepare",
+            block_hash,
+            "node-pbft",
+            &signature,
+        )
+        .unwrap();
+
+        assert_eq!(result.validator_id, "node-pbft");
+        assert_eq!(result.signature, signature);
+    }
+
+    #[test]
+    fn validate_pbft_prepare_rejects_wrong_signature_domain() {
+        let signing_key = SigningKey::from_bytes(&[9u8; 32]);
+        let validator_set =
+            common::ValidatorSet::new(vec![validator("node-pbft", &signing_key)]);
+        let block_hash = "abc123blockhash";
+        // Signed for "commit" but presented as "prepare".
+        let wrong_domain_sig = pbft_phase_signature("commit", block_hash, &signing_key);
+
+        let error = validate_pbft_phase_message(
+            &validator_set,
+            "prepare",
+            block_hash,
+            "node-pbft",
+            &wrong_domain_sig,
+        )
+        .unwrap_err();
+
+        assert_eq!(error, PbftValidationError::SignatureVerificationFailed);
+    }
+
+    #[test]
+    fn validate_pbft_commit_rejects_unknown_validator() {
+        let signing_key = SigningKey::from_bytes(&[9u8; 32]);
+        let validator_set =
+            common::ValidatorSet::new(vec![validator("node-pbft", &signing_key)]);
+        let signature = pbft_phase_signature("commit", "block-1", &signing_key);
+
+        let error = validate_pbft_phase_message(
+            &validator_set,
+            "commit",
+            "block-1",
+            "missing-validator",
+            &signature,
+        )
+        .unwrap_err();
+
+        assert_eq!(error, PbftValidationError::UnknownValidator);
+    }
+
+    #[test]
+    fn validate_pbft_prepare_rejects_invalid_signature_hex() {
+        let signing_key = SigningKey::from_bytes(&[9u8; 32]);
+        let validator_set =
+            common::ValidatorSet::new(vec![validator("node-pbft", &signing_key)]);
+
+        let error = validate_pbft_phase_message(
+            &validator_set,
+            "prepare",
+            "block-1",
+            "node-pbft",
+            "zzzz",
+        )
+        .unwrap_err();
+
+        assert_eq!(error, PbftValidationError::SignatureVerificationFailed);
     }
 
     #[tokio::test]

@@ -10,9 +10,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
-ENV_FILE="${SCRIPT_DIR}/sepolia-3node.env"
+ENV_FILE="${SCRIPT_DIR}/sepolia-fleet.env"
 if [[ ! -f "$ENV_FILE" ]]; then
-  echo "Missing $ENV_FILE" >&2
+  ENV_FILE="${SCRIPT_DIR}/sepolia-3node.env"
+fi
+if [[ ! -f "$ENV_FILE" ]]; then
+  echo "Missing sepolia-fleet.env (run init-sepolia-fleet-env.ps1 or copy sepolia-fleet.env.example)" >&2
   exit 1
 fi
 
@@ -21,7 +24,7 @@ source "${SCRIPT_DIR}/_source-sepolia-env.sh"
 creg_source_sepolia_env "$ENV_FILE"
 
 if [[ -z "${CREG_EDGE_INTERNAL_IP:-}" ]]; then
-  echo "Set CREG_EDGE_INTERNAL_IP in sepolia-3node.env (creg-testnet-vm VPC IP)" >&2
+  echo "Set CREG_EDGE_INTERNAL_IP in sepolia-fleet.env (creg-testnet-vm VPC IP)" >&2
   exit 1
 fi
 
@@ -40,7 +43,7 @@ fi
 
 # MAL-001: real sandbox (nsjail) is the default for the public fleet.
 # Set CREG_FLEET_DEV_SANDBOX=1 only for throwaway dev fleets — it skips the
-# secure-image build and lets CREG_DEV_SANDBOX from sepolia-3node.env apply.
+# secure-image build and lets CREG_DEV_SANDBOX from sepolia-fleet.env apply.
 SECURE_SANDBOX=1
 if [[ "${CREG_FLEET_DEV_SANDBOX:-0}" == "1" ]]; then
   SECURE_SANDBOX=0
@@ -117,7 +120,7 @@ if [[ "$SECURE_SANDBOX" -eq 1 ]]; then
   echo "=== chain-registry-node-secure:fleet ready (nsjail verified) ==="
 fi
 
-echo "=== Starting validator fleet (3 nodes) ==="
+echo "=== Starting maintainer seed validator fleet ==="
 "${COMPOSE[@]}" down --remove-orphans 2>/dev/null || true
 if [[ "$use_prebuilt" -eq 1 && "$SECURE_SANDBOX" -eq 0 ]]; then
   "${COMPOSE[@]}" up -d --pull always --no-build --remove-orphans

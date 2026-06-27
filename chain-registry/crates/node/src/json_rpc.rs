@@ -264,6 +264,7 @@ mod tests {
             validator_set_bootstrap: common::ValidatorSet::default(),
             validator_set: common::ValidatorSet::default(),
             package_rounds: HashMap::new(),
+            package_committees: HashMap::new(),
             config: NodeConfig {
                 chain_id: "creg-testnet-1".into(),
                 data_dir: tempdir.path().to_path_buf(),
@@ -282,6 +283,13 @@ mod tests {
             forced_inclusion_tracker: crate::state::ForcedInclusionTracker::new(),
             sync_lag_blocks: 0,
             sync_max_peer_tip: 0,
+            reward_emissions_succeeded: 0,
+            reward_emissions_failed: 0,
+            treasury_balance: 0,
+            pending_rewards_estimate: 0,
+            total_rewards_distributed: 0,
+            rewards_pool_balance: 0,
+            last_incentives_refresh: None,
         }));
 
         Ok((state, tempdir))

@@ -1,0 +1,42 @@
+# Waitlist-only edge stack — minimal cost during marketing waitlist phase.
+# Keeps static waitlist SPA + Caddy TLS on creg-testnet-vm; no spec/ipfs/faucet/explorer/hub.
+#
+# Usage (on creg-testnet-vm):
+#   ./testnet/gcp/start-waitlist-edge-only.sh
+
+services:
+  waitlist:
+    build:
+      context: ./waitlist
+      dockerfile: Dockerfile
+    image: creg-waitlist:local
+    container_name: creg-cloud-waitlist
+    ports:
+      - "${CREG_WAITLIST_HOST_PORT:-8088}:80"
+    networks:
+      - creg-cloud-edge
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: creg-cloud-caddy
+    network_mode: host
+    environment:
+      CREG_ACME_EMAIL: ${CREG_ACME_EMAIL:?set CREG_ACME_EMAIL}
+      CREG_PUBLIC_WAITLIST_HOST: ${CREG_PUBLIC_WAITLIST_HOST:?set CREG_PUBLIC_WAITLIST_HOST}
+      CREG_WAITLIST_HOST_PORT: ${CREG_WAITLIST_HOST_PORT:-8088}
+    volumes:
+      - ${CREG_CLOUD_CADDYFILE:-./caddy/Caddyfile.waitlist-only}:/etc/caddy/Caddyfile:ro
+      - cloud-caddy-data:/data
+      - cloud-caddy-config:/config
+    depends_on:
+      - waitlist
+    restart: unless-stopped
+
+networks:
+  creg-cloud-edge:
+    driver: bridge
+
+volumes:
+  cloud-caddy-data:
+  cloud-caddy-config:

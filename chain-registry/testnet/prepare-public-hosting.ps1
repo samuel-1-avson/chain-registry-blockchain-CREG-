@@ -32,8 +32,14 @@ if (-not $SkipChainSpecPatch) {
     & (Join-Path $scriptDir "patch-sepolia-chain-spec-services.ps1") -BaseDomain $BaseDomain
 }
 
-$envPath = Join-Path $scriptDir "sepolia-3node.env"
-$envExample = Join-Path $scriptDir "sepolia-3node.env.example"
+$envPath = Join-Path $scriptDir "sepolia-fleet.env"
+$envExample = Join-Path $scriptDir "sepolia-fleet.env.example"
+if (-not (Test-Path $envExample)) {
+    $envExample = Join-Path $scriptDir "archive/3node-lab/sepolia-3node.env.example"
+}
+if (-not (Test-Path $envPath) -and (Test-Path (Join-Path $scriptDir "sepolia-3node.env"))) {
+    $envPath = Join-Path $scriptDir "sepolia-3node.env"
+}
 if (-not (Test-Path $envPath)) {
     if (Test-Path $envExample) {
         Copy-Item $envExample $envPath

@@ -21,12 +21,13 @@ $project = $cfg.GCP_PROJECT
 
 function Log($m) { Write-Host "[deploy-validator-fleet] $m" }
 
-$envFile = Join-Path $testnetDir "sepolia-3node.env"
+$envFile = Join-Path $testnetDir "sepolia-fleet.env"
+if (-not (Test-Path $envFile)) { $envFile = Join-Path $testnetDir "sepolia-3node.env" }
 if (-not (Test-Path $envFile)) {
-    throw "Missing $envFile - copy from sepolia-3node.env.example"
+    throw "Missing sepolia-fleet.env - run init-sepolia-fleet-env.ps1 or copy sepolia-fleet.env.example"
 }
 
-Log "Pushing sepolia-3node.env to $vmName..."
+Log "Pushing fleet env to $vmName..."
 & (Join-Path $gcpDir "push-env.ps1") -ProjectId $project -Zone $zone -VmName $vmName -EnvFile $envFile -TunnelThroughIap
 
 if (-not $SkipSync) {

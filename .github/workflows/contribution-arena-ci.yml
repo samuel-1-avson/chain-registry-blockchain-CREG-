@@ -1,0 +1,35 @@
+name: Contribution Arena CI
+
+on:
+  pull_request:
+    paths:
+      - "CREG-Contribution-Arena/**"
+      - ".github/workflows/contribution-arena-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "CREG-Contribution-Arena/**"
+      - ".github/workflows/contribution-arena-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: CREG-Contribution-Arena
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: CREG-Contribution-Arena/package-lock.json
+      - run: npm ci
+      - run: npm audit --omit=dev --audit-level=high
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      - run: npm run smoke:preview

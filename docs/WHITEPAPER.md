@@ -1,13 +1,14 @@
 # Chain Registry (CREG) Technical Whitepaper
 
-> Version: 0.2.0-public-alpha  
-> Date: 2026-06-15  
+> Version: 0.3.0-public-alpha  
+> Date: 2026-06-26  
 > Network: `creg-testnet-1` on Ethereum Sepolia  
 > Status: Public alpha testnet, not mainnet  
-> Repository: [chain-registry-blockchain-CREG-](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-)  
-> Related docs: [Public testnet quickstart](./PUBLIC_TESTNET_QUICKSTART.md), [phase scope](./TESTNET_PHASE_SCOPE.md), [readiness gates](./L2_PUBLIC_ALPHA_GATE_STATUS.md)
+> Related resources: Public testnet quickstart, Phase scope definitions, Readiness gates status, CREG_SYSTEM_WORKFLOW.md
 
 This whitepaper is technical documentation for the Chain Registry public alpha. It is not an offer to sell tokens, investment advice, or a claim of mainnet economic security. The external security audit track, SEC-401, remains open; production and mainnet claims require audit closure, operational hardening, and legal/compliance review.
+
+For the most current architecture details, committee/reward formulas, performance snapshots, treasury monitoring, and iterative improvement log, see `docs/CREG_SYSTEM_WORKFLOW.md` (especially §9.11–9.12 and §15). This whitepaper provides the high-level protocol description; the workflow document tracks implementation evolution.
 
 ## Abstract
 
@@ -19,14 +20,33 @@ CREG is not a promise that malicious code can never pass a registry. It is a pro
 
 Chain Registry is a decentralized package-integrity network for software supply chains. Its first public alpha targets package publishers, developers, validators, and security researchers who want a verifiable package status layer across ecosystems such as npm, PyPI, Cargo, and similar registries.
 
-CREG combines six ideas:
+At scale (thousands of validators), full redundant analysis would be impractical. CREG therefore uses a **hybrid mandatory + voluntary committee model**:
 
-1. Content-addressed package submission using IPFS CIDs and cryptographic content hashes.
-2. Publisher and validator staking on Ethereum Sepolia through CREG testnet contracts.
-3. Multi-stage validator analysis, including static rules, sandbox behavior, diff analysis, pinned vulnerability data, PGP checks, reputation, and optional LLM-assisted review.
-4. PBFT-style validator consensus with Ed25519 domain-separated signatures and explicit evidence metadata.
-5. A local CREG chain for fast package finality, with optional Ethereum L1 anchoring through governance-controlled contracts and Groth16 proof infrastructure.
-6. Public alpha operations with signed chain specs, documented limitations, security runbooks, malicious fixture testing, and readiness gates.
+- A small **mandatory core** (target ~100 validators for large sets; the full set for ≤50) is selected at admission time.
+- Selection is deterministic and VRF-seeded using a recent finalized block’s `vrf_output` (falling back to tip hash), combined with package identity.
+- The ordered list is further biased by on-chain stake (from `Staking.sol`) and reputation, then capped (max 4 slots per `eth_address`) to limit concentration.
+- Only the mandatory core runs the full security pipeline (fetch + sandbox + static + diff + evidence production). Their votes are required for the primary quorum (`floor(2M/3)+1` consensus-grade mandatory approvals).
+- Any validator may voluntarily run the pipeline and contribute supplementary evidence. Voluntary votes are recorded, improve liveness during expansion, and earn reputation/rewards.
+- The committee metadata (size, ordered members, seed, effective size after any expansion) is stored in the `ChainRecord` and exposed via the public API (`GET /v1/packages/:canonical/committee`).
+- On L1 finalization of the rollup batch containing the package, the bridge hook submits `distributeWorkRewards` to the `ValidatorRewards` contract, passing `isMandatory` flags so rewards and reputation correctly reflect participation.
+
+This design bounds CPU, memory, and IPFS load while preserving the core security property: package approval still requires a quorum of staked validators who produced reproducible, evidence-bound votes. The full validator set continues to provide PBFT block finality and L1 economic security.
+
+Committee selection at admission uses VRF-seeded deterministic ordering further biased by on-chain stake, reputation, and **performance_score** (a moving-average signal of demonstrated analysis reliability, with decay after repeated contributions). The full `AnalysisCommittee` (including `member_performance_at_finalization` snapshot captured at package finalization) is stored immutably in the `ChainRecord` and exposed via CLI (`creg chain-record`) and API. On Verified finalization the pipeline emits `distributeWorkRewards(..., isMandatory[])` to `ValidatorRewards.sol`; successful emission also applies a small performance boost to mandatory participants, closing the incentive/selection feedback loop. Points awarded per contribution are 25 (mandatory) or 10 (voluntary) base, ×1.2 for correct vote, ×(rep/100). Base per-package reward is deliberately low (0.00001 CREG) with correct-vote bonus.
+
+Pinning incentives are provided by the separate `PinningRewards.sol` contract (stake, registerPin/reportAccess, calculateRewards based on size×days×rate×popularity×reliability, verification, slashing). The ipfs-pinner sidecar can run alongside validators to earn availability rewards.
+
+CREG combines:
+
+- Content-addressed submission (IPFS CIDs + SHA-256) + publisher/validator staking on Sepolia.
+- Multi-stage pipeline (static, sandbox, diff, signals, PGP, reputation, advisory LLM) with deterministic consensus-grade evidence.
+- Hybrid mandatory+voluntary committees (target M=100, VRF-seeded + stake/rep/performance bias, per-eth cap) with at-finalization performance snapshots stored in ChainRecord.
+- PBFT block finality + package vote accumulator; optional L1 anchoring + ZK paths.
+- Work-based incentives: analysis rewards via L1 `distributeWorkRewards(..., isMandatory[])` (base 0.00001 CREG + bonuses, points 25/10×1.2, performance decay + L1 feedback) + separate PinningRewards (size×days×rate×popularity×reliability).
+- Treasury-funded (governance mints), with emission counters, treasury addr, `last_incentives_refresh` timestamp, total distributed, pool balance, and pending estimate exposed in runtime config, profiles, /metrics, and refreshed by background task + on-demand.
+- Public alpha with signed specs, documented limits, runbooks, and gates.
+
+Targeted hardenings (ZK circuit content-limb binding enforcement + on-chain assert, bridge merkle/robustness fixes, enforceFinalizeRelays=true default in Registry, BatchOperations notes, gossip/vote guards, etc.) have been applied; full iteration status and micro-step details are tracked in §15 of CREG_SYSTEM_WORKFLOW.md.
 
 The design goal is practical: a developer should be able to ask, "Was this exact package artifact verified by a quorum of accountable validators, under which rules, with which evidence, and is the content still available?"
 
@@ -111,7 +131,7 @@ The protocol moves package records through a small state machine:
 | `verified` | A validator quorum accepted the package and the local CREG chain stored it |
 | `revoked` | Governance or the publisher revoked the package, or consensus rejected it |
 
-On the public alpha, "verified" means the queried CREG node's chain store has accepted the package after validator workflow. Users should set `CREG_NODE_URL` to a public or operator endpoint they trust and should read [TESTNET_PHASE_SCOPE.md](./TESTNET_PHASE_SCOPE.md) for current semantics.
+On the public alpha, "verified" means the queried CREG node's chain store has accepted the package after validator workflow. Users should set `CREG_NODE_URL` to a public or operator endpoint they trust and should read the Phase Scope documentation for current semantics.
 
 ### 5.2 Publish Path
 
@@ -218,7 +238,22 @@ The current implementation uses package ids, content hashes, IPFS CIDs, publishe
 
 ## 8. Validator Security Pipeline
 
-CREG's validator pipeline is designed to make package approval hard to fake and easy to audit.
+CREG's validator pipeline is designed to make package approval hard to fake and easy to audit. At large validator set sizes, the expensive parts of the pipeline (IPFS fetch + sandbox execution + full evidence production) are performed only by a small, publicly verifiable **mandatory analysis committee**.
+
+### 8.1 Committee Selection (at admission time)
+- Computed deterministically the moment a submission passes admission (see `package_admission::compute_analysis_committee_at_admission`).
+- Base randomness comes from a recent finalized block’s `vrf_output` (VRF-seeded, re-using the same infrastructure used for block proposers) combined with package identity and chain tip.
+- The resulting ordered list is stake-weighted (higher on-chain stake produces smaller effective score → earlier position) and reputation-biased.
+- A hard per-`eth_address` cap (currently 4) prevents any single operator from dominating the mandatory core.
+- The resulting `AnalysisCommittee` (size, ordered member list, selection seed, effective size after any expansion) is attached to the pending entry and later written into the `ChainRecord`.
+
+### 8.2 Mandatory vs Voluntary
+- Only the primary mandatory core is required to produce consensus-grade evidence for the package-level quorum.
+- Any validator may voluntarily execute the full pipeline. Voluntary votes are recorded with `is_mandatory=false`, help during committee expansion on timeout, and are eligible for reputation/rewards.
+- This hybrid approach bounds resource usage at 10k+ validators while preserving the requirement for multiple independent, evidence-bound validator opinions.
+
+### 8.3 Admission
+Validators fetch the exact artifact bytes by CID, verify hashes, execute the security pipeline, produce a deterministic risk summary, sign a vote, and gossip it to the validator set. A vote is consensus-grade only when it includes complete bundle refs, a non-degraded scanner profile, and a non-empty evidence digest. Only mandatory core members are obligated to do the heavy work; volunteers may participate freely.
 
 ### 8.1 Admission
 
@@ -257,11 +292,52 @@ CREG can verify detached PGP signatures and track publisher/validator reputation
 
 LLM analysis can summarize semantic risk, explain suspicious files, and help human reviewers triage packages. It is advisory. LLM output is not the trust root for package approval, and public surfaces must label it separately from deterministic consensus findings.
 
-## 9. Consensus And Finality
+## 9. Mechanical Consensus And Finality
 
-### 9.1 Validator Vote Message
+CREG uses "mechanical consensus" to mean deterministic, machine-checkable agreement over package status and validator membership. The protocol does not ask a trusted operator to decide that a package is safe or that a validator should join. Instead, validators evaluate explicit rules, sign bounded messages, and allow contracts or nodes to verify threshold agreement.
 
-Package votes are signed over a domain-separated message that includes:
+CREG currently has four consensus surfaces:
+
+| Surface | What it decides | Primary verifier | Threshold |
+| --- | --- | --- | --- |
+| Validator admission consensus | Whether a pending validator applicant joins the active set | `Staking.approveByConsensus` | At least two thirds of active validators |
+| Package evidence consensus | Whether exact package bytes become verified or rejected | CREG vote accumulator | `floor(2n/3) + 1` assigned validators |
+| Block PBFT finality | Whether a CREG block is finalized into the local chain | PBFT engine | `floor(2n/3) + 1` validators, with strict small-cluster handling |
+| Optional L1 package finalization | Whether an L1 package record becomes verified | `Registry.finalizePackage` | Contract `quorumPct`, default 67% plus one |
+
+The key theme is evidence binding: consensus messages bind identities, package bytes, rule versions, scanner profiles, evidence digests, or block hashes so signatures cannot be reused in a different context.
+
+### 9.1 Validator Admission Mechanical Consensus
+
+Validator admission is a mechanical consensus process for admitting new operators without relying on one privileged key.
+
+The lifecycle is:
+
+1. An applicant stakes at least the validator minimum and enters `Pending`.
+2. Active validators independently evaluate the applicant against a deterministic rule set: stake present, identity registered, cooldown respected, application not expired, and rule-set version current.
+3. If the applicant passes, each active validator signs an EIP-712 admission attestation over `(applicant, stake, nonce, ruleSetVersion)`.
+4. Attestations are broadcast between nodes.
+5. Any node with at least two thirds of the active set can submit the sorted attestation bundle to `Staking.approveByConsensus`.
+6. The contract verifies signer activity, sorted unique signers, signature recovery, nonce freshness, pending state, application timeout, and quorum before activating the validator.
+
+On-chain invariants include:
+
+| Invariant | Purpose |
+| --- | --- |
+| Applicant must be `Pending` | Prevents re-approving active, rejected, withdrawn, or nonexistent accounts |
+| Applicant stake must meet `minValidatorStake` | Keeps validator admission economically bonded |
+| Application must be inside `APPLICATION_TIMEOUT` | Prevents stale approvals from being replayed later |
+| Nonce must be unused for the applicant | Prevents replay of an old quorum bundle |
+| Signers must be active validators | Prevents inactive or external accounts from counting |
+| Signers must be strictly sorted | Prevents duplicate signers in an O(n) contract check |
+| Each signature must recover to its declared signer | Prevents forged attestations |
+| `signerCount * 3 >= activeValidatorCount * 2` | Enforces at least two-thirds admission quorum |
+
+This admission path is intentionally "mechanical": the off-chain predicate is versioned by `RULE_SET_VERSION`, and the on-chain contract verifies the threshold. Governance retains an emergency approve/reject path while enabled, but it can be permanently disabled so admission becomes consensus-only.
+
+### 9.2 Package Evidence Vote Message
+
+Package votes are signed over a domain-separated Ed25519 message:
 
 ```text
 creg-vote-v2|<canonical>|<content_hash>|<approved>|<validator_pubkey>|<scanner_profile_digest>|<evidence_digest>
@@ -269,7 +345,7 @@ creg-vote-v2|<canonical>|<content_hash>|<approved>|<validator_pubkey>|<scanner_p
 
 This design prevents a validator signature from being reused across a different package, content hash, evidence profile, or approval decision.
 
-### 9.2 Consensus-Grade Votes
+### 9.3 Consensus-Grade Package Votes
 
 A vote must be complete and non-degraded to count toward quorum. Votes missing evidence metadata may remain visible for transparency, but they should not satisfy package finality.
 
@@ -282,13 +358,63 @@ Consensus-grade requirements include:
 - Scanner profile that is not in degraded/mock mode.
 - Agreement among quorum votes on the evidence/profile bundle.
 
-### 9.3 PBFT Block Finality
+The package vote accumulator tracks PREPARE and COMMIT votes for a package. Degraded votes are stored for transparency but excluded from quorum. Duplicate validator votes do not count twice. Approval quorum verifies the package; enough rejections can make approval quorum impossible and reject the package.
+
+For an assigned validator set of size `n`, package quorum is:
+
+```text
+floor(2n / 3) + 1
+```
+
+Examples:
+
+| Assigned validators | Required quorum |
+| --- | --- |
+| 3 | 3 |
+| 4 | 3 |
+| 5 | 4 |
+| 7 | 5 |
+| 10 | 7 |
+
+CREG's package evidence consensus is therefore not just "validators voted yes." It is "enough active validators signed the same package content under the same consensus-grade scanner profile and evidence digest."
+
+### 9.4 PBFT Block Finality
 
 Finalized package decisions become CREG chain transactions. The block-level PBFT engine runs PRE-PREPARE, PREPARE, and COMMIT phases with Ed25519 signatures under the `creg-pbft-v1` domain. Blocks include transaction roots, validator-set hashes, and PBFT signatures for light-client verification.
 
 The security assumption is standard for PBFT-style systems: safety depends on fewer than one third of validator voting power being Byzantine, plus network assumptions appropriate for timely view changes. CREG's alpha uses coordinated operators while the validator set expands.
 
-### 9.4 Validator Set
+PBFT phase signatures bind the phase and block hash:
+
+```text
+creg-pbft-v1:<phase>:<block_hash>
+```
+
+The PBFT round has three main phases:
+
+| Phase | Mechanic | Failure handling |
+| --- | --- | --- |
+| PRE-PREPARE | Selected proposer broadcasts the candidate block | Non-selected proposers are rejected |
+| PREPARE | Validators verify and sign the block hash | Quorum moves the round to COMMIT |
+| COMMIT | Validators commit to the prepared block | Quorum finalizes and stores the block |
+
+PBFT view changes use a separate threshold of `floor(n/3) + 1` view-change certificates for a new view. This prevents a single faulty validator from forcing view changes unilaterally while still allowing progress when the proposer stalls.
+
+Small cluster behavior is intentionally conservative: a three-validator set requires unanimity for the usual PBFT safety model unless an explicit local/testnet flag opts into a 2-of-3 bootstrap quorum. That shortcut is not a mainnet security assumption.
+
+### 9.5 Optional L1 Package Finalization
+
+The Solidity `Registry.finalizePackage` path verifies active validator ECDSA signatures over the package canonical id and content hash. It then requires approvals above `quorumPct`, which defaults to 67%. This path is separate from the local Ed25519 package vote accumulator, but it expresses the same idea at the L1 contract boundary: package finalization must be backed by a threshold of active validators.
+
+The contract-level required approvals are:
+
+```text
+required = (activeValidators * quorumPct) / 100 + 1
+```
+
+The current default `quorumPct` is 67, and governance can update the value within contract bounds.
+
+### 9.6 Validator Set
 
 The signed chain spec contains bootstrap validator information, while validator admission and validator-set sync connect to L1 staking state. Validator admission can be approved by governance in emergency paths or by validator consensus under the staking contract's consensus admission rules.
 
@@ -306,52 +432,211 @@ CREG uses Ethereum Sepolia for the public alpha contract layer. The contract sys
 | `Appeal.sol` | On-chain appeal mechanics for contested rejections |
 | `ZKVerifier.sol` / `Groth16Verifier.sol` | Groth16 verification path |
 
-The active Sepolia addresses are published in [`chain-spec.sepolia.json`](../chain-registry/testnet/chain-spec.sepolia.json) and summarized in the [public quickstart](./PUBLIC_TESTNET_QUICKSTART.md). Contract and ZK systems must complete external security review before they are used for mainnet economic claims.
+The active Sepolia addresses are published in the active network specifications and summarized in the public quickstart guide. Contract and ZK systems must complete external security review before they are used for mainnet economic claims.
 
-## 11. Token And Incentive Design
+## 11. Tokenomics And Incentive Design
 
-The CREG token is used in the current testnet contract system for publisher staking, validator staking, slashing, and governance-controlled ecosystem growth.
+The CREG token is the economic coordination asset in the current testnet contract system. It is used to bond publishers, bond validators, parameterize participation, slash misconduct, and fund future ecosystem growth. In public alpha, the token is testnet-facing (`tCREG` in user docs) and should not be treated as a finalized mainnet economic instrument.
 
-### 11.1 Current Contract Parameters
+### 11.1 Token Purpose
+
+CREG has four intended protocol functions:
+
+| Function | Explanation |
+| --- | --- |
+| Publisher stake | Publishers bond CREG before package submission so malicious or revoked packages can create economic consequences |
+| Validator stake | Validators bond CREG before joining consensus so dishonest behavior can be penalized |
+| Slashing and redistribution | Misconduct penalties accumulate in a slash pool that can reward honest active validators |
+| Governance-controlled growth | The capped reserve can be released by owner/governance for validator rewards, grants, ecosystem growth, or other approved programs |
+
+CREG is not used as gas on Ethereum Sepolia. Ethereum transactions still require Sepolia ETH. CREG is the protocol's staking and incentive token inside the CREG contract system.
+
+### 11.2 Supply Model
+
+The current `CregToken.sol` contract defines a hard-capped token supply:
 
 | Parameter | Current value |
 | --- | --- |
+| Token name | `Chain Registry Token` |
 | Token symbol | `CREG` |
-| Token decimals | 18 |
+| Decimals | 18 |
 | Maximum supply | 42,000,000 CREG |
 | Initial minted supply | 20,000,000 CREG |
-| Contract reserve capacity | 22,000,000 CREG, mintable only up to the cap by owner/governance |
-| Public alpha publisher minimum | 1 tCREG |
-| Public alpha validator minimum | 100 tCREG |
-| Testnet max validators | 50 |
-| Validator unbonding period | 14 days |
-| Restake cooldown after ejection | 7 days |
-| Slash tiers | 2%, 10%, 30% for low, medium, critical severity |
+| Remaining mint capacity | Up to ~12,500,000 CREG (governance-controlled) |
+| Mint authority | Contract owner/governance only |
+| Burn support | Token holders can burn their own CREG |
+| Permit support | EIP-712-style `permit` for allowance setting |
 
-### 11.2 Initial Allocation In Current Token Contract
+The hard cap means `totalSupply + mintAmount <= 42,000,000 CREG` must hold for any mint. Per-package verification incentives are set at extremely low levels (base 0.00001 CREG + 0.000005 correct-vote bonus) precisely so this fixed supply can support the network for a very long time, even with tens or hundreds of millions of packages. Treasury-funded rewards (governance mints) + emission counters + treasury address exposure in runtime config/metrics provide operational visibility into draw. The reserve is not automatically emitted. It can only enter circulation through explicit owner/governance mint calls.
 
-The current contract constructor mints:
+### 11.3 Current Initial Allocation
 
-| Bucket | Amount |
+The current token constructor mints 20,000,000 CREG:
+
+| Allocation bucket | Amount | Percent of max supply | Notes |
+| --- | ---: | ---: | --- |
+| Team | 4,000,000 CREG | ~9.52% | Current constructor parameter bucket |
+| Investors | 3,000,000 CREG | ~7.14% | Current constructor parameter bucket |
+| Community | 5,000,000 CREG | ~11.90% | Community allocation bucket |
+| Treasury | 8,000,000 CREG | ~19.05% | Treasury and operations bucket (seed for rewards) |
+| Unminted capped reserve | 22,000,000 CREG | ~52.38% | Future governance-controlled capacity |
+| Maximum supply | 42,000,000 CREG | 100.00% | Absolute cap |
+
+Verification incentives are tiny (0.00001 CREG base + 0.000005 correct-vote bonus) precisely to make the entire 42M supply last a very long time. Emission counters (succeeded/failed), treasury address, `last_incentives_refresh` timestamp, total distributed, pool balance, and pending estimate are exposed in runtime config, profile incentives, and Prometheus metrics (`creg_*` gauges); a periodic background task (60s) + on-demand refresh keeps values current for treasury draw monitoring. See CREG_SYSTEM_WORKFLOW.md §9.12 and §15 for current formulas, points (25/10 base ×1.2 correct), performance decay (0.985 after >5), L1 hook, snapshots, and incentive integration.
+
+These are current implementation parameters in the alpha contract tree. They are not a public-sale allocation, not a lockup schedule, and not a promise of future liquidity. A production token launch would require a complete allocation policy, vesting disclosures, jurisdiction-specific legal review, and governance approval.
+
+### 11.4 Staking Roles And Minimums
+
+CREG distinguishes publisher stake from validator stake:
+
+| Role | Current minimum | Contract path | Purpose |
+| --- | ---: | --- | --- |
+| Publisher | 1 CREG / tCREG | `stakeAsPublisher` | Required before publishing packages |
+| Validator | 100 CREG / tCREG | `applyToBeValidator` | Required before validator admission |
+| Light validator | 50 CREG / tCREG | Contract constant present | Future or specialized role; not the main public-alpha validator path |
+
+Minimum stakes are configurable by governance through `updateMinStakes`. The current public-alpha chain spec mirrors the 1 tCREG publisher minimum and 100 tCREG validator minimum.
+
+Publisher staking flow:
+
+1. Publisher approves the staking contract or uses permit-based staking.
+2. Publisher calls `stakeAsPublisher`.
+3. Registry admission checks `staking.stakedBalance(publisher) > 0`.
+4. Publisher can submit packages while stake remains bonded.
+5. Governance revocation of a malicious package can slash the publisher.
+
+Validator staking flow:
+
+1. Validator approves the staking contract or uses permit-based staking.
+2. Validator calls `applyToBeValidator` with at least the minimum stake.
+3. Validator enters `Pending`.
+4. Active validators sign admission attestations if deterministic admission rules pass.
+5. `approveByConsensus` activates the validator once two-thirds quorum is verified.
+6. Validator participates in package evidence voting and PBFT block finality.
+
+### 11.5 Validator Lifecycle
+
+The staking contract models validator state explicitly:
+
+| State | Meaning |
 | --- | --- |
-| Team | 4,000,000 CREG |
-| Investors | 3,000,000 CREG |
-| Community | 5,000,000 CREG |
-| Treasury | 8,000,000 CREG |
-| Future capped mint capacity | Up to 22,000,000 CREG |
+| `None` | No validator record |
+| `Pending` | Stake escrowed; waiting for governance or mechanical consensus admission |
+| `Active` | Validator can participate in consensus |
+| `Unbonding` | Validator has exited or been ejected; stake remains locked |
+| `Withdrawn` | Stake withdrawn after unbonding |
+| `Rejected` | Pending application rejected and stake refunded |
+| `Expired` | Pending application timed out and stake refunded |
 
-These are implementation parameters in the current contract tree, not a public-sale term sheet. Any mainnet token distribution, sale, or incentive program requires separate legal, governance, and disclosure work.
+Lifecycle parameters:
 
-### 11.3 Economic Logic
+| Parameter | Current value | Purpose |
+| --- | ---: | --- |
+| `APPLICATION_TIMEOUT` | 7 days | Pending validator applications expire if not approved |
+| `UNBONDING_PERIOD` | 14 days | Validators cannot immediately withdraw after exit |
+| `RESTAKE_COOLDOWN` | 7 days | Ejected validators must wait before re-applying |
+| `MAX_SLASH_COUNT` | 3 | Repeated slashing can auto-eject a validator |
 
-CREG incentives are designed around accountability:
+The unbonding period is important: validators remain slashable during unbonding, reducing hit-and-run behavior where a validator misbehaves and immediately exits.
 
-- Publishers stake to submit packages; malicious or revoked packages can expose stake to penalties.
-- Validators stake to participate in verification; bad votes, false approvals, or double-signing evidence can expose validator stake.
-- Slashed funds are not simply burned in the current staking design; they can be distributed to honest validators through reputation-weighted mechanisms.
-- Pinning rewards are planned as a path to improve long-term content availability.
+### 11.6 Slashing Model
 
-The economic model is still alpha. Mainnet economics must be validated with independent modeling, adversarial review, and jurisdiction-specific legal advice.
+Slashing converts misconduct into economic loss. The current staking contract supports severity-based and exact-amount slashing.
+
+Severity tiers:
+
+| Severity | Slash percentage | Example use |
+| --- | ---: | --- |
+| Low | 2% | Minor protocol or policy violation |
+| Medium | 10% | Serious operational or validation fault |
+| Critical | 30% | Malicious approval, severe misconduct, or high-impact incident |
+
+Authorized slashers:
+
+| Caller | Authority |
+| --- | --- |
+| Registry | Can slash publishers when governance revokes malicious packages |
+| Governance | Can slash for governance-confirmed misconduct |
+| Governance-authorized slasher contracts | Optional future modules such as insurance or slashing-evidence contracts |
+
+Slash priority:
+
+1. Active validator stake is slashed first when the account is an active validator.
+2. Publisher stake is slashed when there is no active validator stake.
+3. If neither balance alone covers the amount, remaining publisher and validator balances can be wiped.
+
+For validators, each successful validator-stake slash increments `slashCount`. When `slashCount >= MAX_SLASH_COUNT`, the validator is auto-ejected into unbonding.
+
+### 11.7 Validator Rewards And Incentive Mechanics
+
+CREG uses strictly work-based incentives (no block rewards or time-based issuance). The two systems are:
+
+**Analysis / Verification Rewards (ValidatorRewards.sol + pipeline L1 hook)**
+
+- Only paid on Verified finalization (after committee snapshot).
+- `distributeWorkRewards(..., bool[] isMandatory)` called from the Rust pipeline on L1.
+- Base reward 0.00001 CREG per package. Correct vote +0.000005 + (base × rep / 500) (max ~20%). Incorrect applies tiny penalty (floor 0.000001).
+- Points for reputation/selection feedback: base 25 (mandatory) / 10 (voluntary), ×1.2 if correct, ×(rep/100).
+- `isMandatory` flag gives higher points base and +10 delta in performance update + L1 success boost.
+- Performance score: participation + correct + mandatory + timeliness + quality deltas, moving average by contribution count, ×0.985 decay after >5 contributions, clamp 1-1000. Snapshot `member_performance_at_finalization` captured at finalization into `ChainRecord.analysis_committee`.
+- Successful L1 emission gives +3 perf boost to mandatory participants.
+
+**Pinning / Storage Rewards (PinningRewards.sol)**
+
+- Separate system for IPFS availability.
+- Pinners register with ≥1000 CREG stake, registerPin(cid, size), reportAccess.
+- `calculateRewards`: (size_bytes × days × rate/1e9) × (access>1000 ? 2 : 1) × reliability (successful / total verifs).
+- Verifiers (oracles) call submitVerification; failures slash ~1% stake into pool.
+- Claim from rewardsPool (governance-funded or from slashes).
+
+Rewards are funded from treasury (governance mints/allocations). Emission counters, treasury address, `last_incentives_refresh`, total distributed, pool balance, and pending estimate are exposed (runtime config + profile + Prometheus gauges) with background + on-demand refresh for monitoring draw. Per-package amounts are deliberately tiny so the 42 M hard cap remains viable at scale.
+
+The whitepaper intentionally does not claim a finalized emission schedule or APY. Future changes require governance. See CREG_SYSTEM_WORKFLOW.md §9.12 for formulas, flows, and examples.
+
+### 11.8 Fees And Treasury Flows
+
+The current `Registry.sol` includes a ZK validation fee path:
+
+| Fee | Current value | Asset |
+| --- | ---: | --- |
+| `zkValidationFee` | 0.001 ETH | Sepolia ETH in public alpha |
+
+This fee is paid to the registry contract for ZK proof submission paths and can be withdrawn by governance. It is separate from CREG staking and does not define a general protocol fee model.
+
+The treasury allocation and unminted reserve are intended to support:
+
+- Validator rewards and bootstrap incentives.
+- Ecosystem grants.
+- Security audits and bug bounties.
+- Public goods around package availability and pinning.
+- Operations, infrastructure, and incident response.
+
+Any production treasury policy should define approval processes, reporting cadence, spend limits, multisig/DAO controls, and conflict-of-interest handling.
+
+### 11.9 Pinning And Availability Incentives
+
+Package availability is not guaranteed by IPFS content addressing alone. CREG therefore has a dedicated `PinningRewards.sol` contract (separate from analysis rewards).
+
+Pinners register with MIN_STAKE (1000 CREG), call registerPin(cid, size), reportAccess on serve. Background verifiers call submitVerification; success updates last_verified and reliability, failure slashes stake into pool. `calculateRewards` = (size_bytes × days_since_claim × rewardPerGBPerDay / 1e9) × (accessCount > 1000 ? popular_multiplier : 1) × (successful_verifs / total_verifs).
+
+Rewards paid from rewardsPool (governance-funded or slash proceeds). The ipfs-pinner sidecar provides basic status (`/status` when enabled) and can be run alongside validators. See CREG_SYSTEM_WORKFLOW.md §9.12 for formulas and sidecar integration.
+
+Public alpha uses operator pinning; the contract and sidecar mechanics are active for incentive experiments and availability hardening.
+
+### 11.10 Tokenomics Risks And Mainnet Requirements
+
+Current tokenomics are alpha parameters. Before mainnet, CREG needs:
+
+- External audit of token, staking, registry, governance, slashing, and ZK verifier contracts.
+- Formal emissions and reserve-release policy.
+- Vesting and lockup disclosure for team, investor, treasury, and community allocations.
+- Validator reward modeling under realistic validator counts and package volume.
+- Slashing-process governance, evidence standards, and appeal rules.
+- Legal/compliance review for token distribution, public communications, and jurisdiction-specific obligations.
+- A public risk register that distinguishes utility, governance, staking, and speculative market risks.
+
+No section of this whitepaper should be read as a promise of profit, yield, listing, liquidity, or token price behavior.
 
 ## 12. Governance
 
@@ -430,10 +715,10 @@ ZK is powerful but security-sensitive. The current public alpha treats ZK as act
 | --- | --- |
 | Validator cartel above quorum threshold | Reduced by staking, transparency, and diversity; not eliminated |
 | Novel malware missed by scanners | Reduced by defense in depth; not eliminated |
-| L1 contract bug before audit | SEC-401 external audit is open |
-| ZK circuit or trusted setup flaw | Requires dedicated ZK audit and key-management review |
+| L1 contract bug before audit | SEC-401 external audit is open; targeted hardenings applied (ZK content-limb binding + assert, enforceFinalizeRelays default true, bridge parse robustness + safety, Batch notes) |
+| ZK circuit or trusted setup flaw | Requires dedicated ZK audit and key-management review; circuit now binds content/manifest hashes; on-chain assert strengthened to match |
 | Long-range sync attacks | Historical validator-set verification remains a hardening item |
-| IPFS unavailability | Requires redundant pinning and monitoring |
+| IPFS unavailability | Requires redundant pinning and monitoring; PinningRewards + sidecar status now active |
 | Legal/regulatory uncertainty | Requires jurisdiction-specific review before token or mainnet programs |
 
 ## 17. Standards And Research Alignment
@@ -455,9 +740,142 @@ CREG draws from blockchain, distributed systems, and software supply-chain secur
 
 CREG does not claim conformance certification to these frameworks. They are design references and evaluation lenses.
 
-## 18. Public Alpha Status
+## 18. Technology Stack And Attribution
 
-As of 2026-06-15, CREG is in public alpha testnet scope.
+This section names the first-order technologies, protocols, standards, libraries, frameworks, and infrastructure platforms intentionally used in CREG development and operation. It is included for attribution, reader clarity, and anti-plagiarism hygiene. Product names, project names, trademarks, and standards remain the property of their respective owners. Mentioning a technology does not imply endorsement by that project or vendor.
+
+For exact dependency versions and transitive packages, consult the project manifests, dependency configurations, and packaging manifests. This section is not a substitute for a formal open-source license audit before a commercial or mainnet release.
+
+### 18.1 Core Language, Runtime, And Rust Application Stack
+
+| Technology | Where CREG uses it | Attribution |
+| --- | --- | --- |
+| [Rust](https://www.rust-lang.org/) | Node, CLI, consensus, validator, resolver, relayer, faucet, ZK/ML crates | Systems programming language |
+| [Cargo](https://doc.rust-lang.org/cargo/) | Rust workspace build, package management, tests | Rust package manager and build tool |
+| [Tokio](https://tokio.rs/) | Async runtime for node, API, networking, background workers | Asynchronous Rust runtime |
+| [axum](https://docs.rs/axum/latest/axum/) | Node REST API, SSE/WebSocket surfaces | HTTP routing and request handling |
+| [Tower](https://docs.rs/tower/latest/tower/) and [tower-http](https://docs.rs/tower-http/latest/tower_http/) | Middleware, CORS, service composition | Rust service/middleware ecosystem |
+| [tonic](https://docs.rs/tonic/latest/tonic/) | gRPC server/client paths | Rust gRPC implementation |
+| [Protocol Buffers / prost](https://docs.rs/prost/latest/prost/) | Node protobuf messages | Rust protobuf implementation |
+| [Serde](https://serde.rs/) and `serde_json` | JSON serialization for chain specs, APIs, reports, configs | Rust serialization framework |
+| [clap](https://clap.rs/) | `creg` CLI argument parsing | Rust CLI argument parser |
+| [tracing](https://docs.rs/tracing/latest/tracing/) and `tracing-subscriber` | Structured logs and diagnostics | Rust instrumentation ecosystem |
+| [reqwest](https://docs.rs/reqwest/latest/reqwest/) | HTTP clients for IPFS, APIs, and integrations | Rust HTTP client |
+| `anyhow` and `thiserror` | Error handling across Rust crates | Rust error handling crates |
+| `chrono`, `uuid`, `hex`, `sha2`, `rand` | Time, IDs, encoding, hashing, randomness utilities | Rust ecosystem crates |
+
+### 18.2 Networking, Storage, And Content Addressing
+
+| Technology | Where CREG uses it | Attribution |
+| --- | --- | --- |
+| [libp2p](https://libp2p.io/) | Peer discovery, Gossipsub votes, blocks, submissions, network messages | Modular peer-to-peer networking stack |
+| [IPFS](https://ipfs.tech/) / [Kubo](https://docs.ipfs.tech/install/command-line/) | Package artifact storage and retrieval by CID | Content-addressed distributed storage protocol and node implementation |
+| [RocksDB](https://rocksdb.org/) | Local CREG chain store and indexes | Embedded persistent key-value store |
+| [PostgreSQL](https://www.postgresql.org/docs/) | Indexer and hub API data paths | Relational database |
+| [SQLite](https://www.sqlite.org/docs.html) / [better-sqlite3](https://github.com/WiseLibs/better-sqlite3) | Hub API local database path | Embedded SQL database and Node.js binding |
+| [OpenAPI](https://www.openapis.org/) | API schema/type generation paths | API specification format |
+| [JSON Schema](https://json-schema.org/) | Evidence bundle and scanner profile schemas | JSON validation standard |
+
+### 18.3 Blockchain, EVM, Contracts, And Wallet Tooling
+
+| Technology | Where CREG uses it | Attribution |
+| --- | --- | --- |
+| [Ethereum](https://ethereum.org/developers/docs/) | L1 staking, registry, governance, token, finality anchoring | Public blockchain platform |
+| [Ethereum Sepolia](https://ethereum.org/developers/docs/networks/#sepolia) | Public alpha L1 test network | Ethereum test network |
+| [Solidity](https://docs.soliditylang.org/) | Smart contracts core library | EVM smart contract language |
+| [Foundry](https://www.getfoundry.sh/) | Contract testing, deployment scripts, gas reports | Ethereum development framework |
+| [Alloy](https://docs.rs/alloy/latest/alloy/) | Rust EVM RPC, contract bindings, event sync | Rust Ethereum library suite |
+| [viem](https://viem.sh/) | TypeScript Ethereum client use in web surfaces | TypeScript Ethereum interface |
+| [SIWE](https://login.xyz/) | Hub API sign-in-with-Ethereum path | Sign-In with Ethereum standard/ecosystem |
+| [WalletConnect](https://www.walletconnect.network/) | Wallet provider support in explorer/waitlist surfaces | Wallet connectivity protocol |
+| [EIP-712](https://eips.ethereum.org/EIPS/eip-712) | Typed validator admission and permit-style signing assumptions | Ethereum typed structured data signing standard |
+| secp256k1 / ECDSA | Ethereum EOAs, contract signatures, staking wallets | Ethereum cryptographic signing primitive |
+
+### 18.4 Consensus And Cryptography
+
+| Technology / Standard | Where CREG uses it | Attribution |
+| --- | --- | --- |
+| [PBFT](https://pmg.csail.mit.edu/papers/osdi99.pdf) | CREG validator block finality and package quorum reasoning | Practical Byzantine Fault Tolerance research |
+| [Tendermint-family BFT concepts](https://docs.tendermint.com/master/spec/consensus/consensus.html) | Reference model for validator quorum and finality language | BFT consensus documentation |
+| [Ed25519](https://ed25519.cr.yp.to/) / [ed25519-dalek](https://docs.rs/ed25519-dalek/latest/ed25519_dalek/) | Package signatures, validator votes, PBFT phase signatures | Edwards-curve digital signatures and Rust implementation |
+| [SHA-2](https://csrc.nist.gov/projects/hash-functions) | Content and evidence hashing through `sha2` | NIST hash function family |
+| [Groth16](https://eprint.iacr.org/2016/260) | ZK proof infrastructure for package attestations and rollup paths | zk-SNARK proving system |
+| [BN254](https://eips.ethereum.org/EIPS/eip-196) | Ethereum-compatible pairing curve for Groth16 verifier paths | EVM precompile-supported pairing curve |
+| [arkworks](https://arkworks.rs/) | Rust Groth16, BN254, R1CS, serialization libraries | Rust zkSNARK ecosystem |
+| [Circom](https://docs.circom.io/) | Circuit sources for package and double-sign experiments | ZK circuit language |
+| [circomlib](https://github.com/iden3/circomlib) | Poseidon/EdDSA circuit components | Circom circuit library |
+| [snarkjs](https://github.com/iden3/snarkjs) | Circuit setup/proving/verifier export workflow | JavaScript zkSNARK tooling |
+| [Poseidon hash](https://eprint.iacr.org/2019/458) | ZK-friendly circuit hashing | Hash function research |
+| [OpenPGP](https://www.openpgp.org/) | Optional package signature checks and revocation context | OpenPGP ecosystem |
+
+### 18.5 Validation, Sandbox, And Security Analysis Tooling
+
+| Technology | Where CREG uses it | Attribution |
+| --- | --- | --- |
+| [YARA-X](https://virustotal.github.io/yara-x/) | Malware and supply-chain pattern scanning | VirusTotal rule-matching engine |
+| [OSV](https://google.github.io/osv.dev/) | Vulnerability advisory lookup and pinned snapshots | Open-source vulnerability database |
+| [Wasmtime](https://wasmtime.dev/) | WASM sandbox fallback and WASI execution paths | WebAssembly runtime |
+| [WASI](https://wasi.dev/) | WASM sandbox system interface model | WebAssembly System Interface |
+| [nsjail](https://github.com/google/nsjail) | Preferred Linux behavioral sandbox engine in public validator profiles | Process isolation/sandboxing tool |
+| [gVisor](https://gvisor.dev/) | Sandbox fallback/profile option | Application kernel sandbox |
+| [Docker](https://docs.docker.com/) | Validator, node, explorer, testnet, and sandbox packaging | Container tooling |
+| [ONNX](https://onnx.ai/) and [ONNX Runtime](https://onnxruntime.ai/) | Historical/optional ML model paths; current pipeline favors deterministic rule-based scanning | ML model format and runtime |
+| [tract](https://github.com/sonos/tract) | ONNX inference dependency present in the Rust workspace | Rust neural network inference library |
+| [Hugging Face Tokenizers](https://github.com/huggingface/tokenizers) | Tokenization dependency present in the Rust workspace | Tokenization library |
+| [Anthropic](https://docs.anthropic.com/), [OpenAI](https://platform.openai.com/docs/), [OpenRouter](https://openrouter.ai/docs), [Ollama](https://ollama.com/) | Optional LLM-assisted advisory review providers/runtimes | LLM provider/runtime ecosystems |
+
+### 18.6 Infrastructure, Deployment, And Observability
+
+| Technology | Where CREG uses it | Attribution |
+| --- | --- | --- |
+| [Docker Compose](https://docs.docker.com/compose/) | Local, testnet, validator, observability, and public-alpha stacks | Multi-container orchestration |
+| [Kubernetes](https://kubernetes.io/docs/home/) | K8s manifests for validator, ingress, monitoring, backup, and partition tests | Container orchestration platform |
+| [nginx](https://nginx.org/en/docs/) | Explorer and public reverse-proxy configs | Web server/reverse proxy |
+| [Caddy](https://caddyserver.com/docs/) | Public HTTPS edge configs | Web server with automatic HTTPS |
+| [Google Cloud](https://cloud.google.com/docs) / [Cloud Run](https://cloud.google.com/run/docs) | GCP hosting, hub API deployment, VM operations | Cloud infrastructure |
+| [Cloudflare](https://developers.cloudflare.com/) | DNS/TLS/public edge integration in runbooks | Internet edge and DNS platform |
+| [Firebase](https://firebase.google.com/docs) / [Firestore](https://firebase.google.com/docs/firestore) | Waitlist backend and rules | App backend and NoSQL document database |
+| [reCAPTCHA Enterprise](https://cloud.google.com/recaptcha-enterprise/docs) | Waitlist anti-abuse assessments | Google abuse-prevention service |
+| [Prometheus](https://prometheus.io/docs/introduction/overview/) | Metrics collection and alert rules | Monitoring system |
+| [Alertmanager](https://prometheus.io/docs/alerting/latest/alertmanager/) | Alert routing in observability stack | Prometheus alert manager |
+| [Grafana](https://grafana.com/docs/grafana/latest/) | Dashboards and visualization | Observability dashboard platform |
+| [Loki](https://grafana.com/docs/loki/latest/) | Log aggregation config | Grafana log aggregation system |
+| [Tempo](https://grafana.com/docs/tempo/latest/) | Trace backend config | Grafana tracing backend |
+| [OpenTelemetry](https://opentelemetry.io/docs/) | Collector configuration and telemetry pipeline | Observability standard/tooling |
+
+### 18.7 Web, API, And Public Product Surfaces
+
+| Technology | Where CREG uses it | Attribution |
+| --- | --- | --- |
+| [TypeScript](https://www.typescriptlang.org/docs/) | Hub API, hub web, waitlist functions, frontend type checking | Typed JavaScript language |
+| [Node.js](https://nodejs.org/en/learn/getting-started/introduction-to-nodejs) | Web builds, Firebase functions, scripts | JavaScript runtime |
+| [React](https://react.dev/) and [React DOM](https://react.dev/reference/react-dom) | Explorer, hub web, waitlist UI | UI library |
+| [React Router](https://reactrouter.com/) | Frontend routing | React routing library |
+| [Vite](https://vite.dev/guide/) | Frontend build tooling and dev servers | Web build tool |
+| [Tailwind CSS](https://tailwindcss.com/docs/installation/using-vite) | Waitlist styling integration | CSS utility framework |
+| [TanStack Query](https://tanstack.com/query/latest/docs/framework/react/overview) | Hub web data fetching/cache | Async state management for React |
+| [Recharts](https://recharts.org/) | Explorer charts | React charting library |
+| [Lucide](https://lucide.dev/) | Waitlist icons | Icon library |
+| [Motion](https://motion.dev/) | Waitlist animation dependency | Animation library |
+| [lit-html](https://lit.dev/docs/libraries/standalone-templates/) | Waitlist template dependency | HTML templating library |
+| [Hono](https://hono.dev/) | Hub API service framework | Web framework |
+| [Playwright](https://playwright.dev/) | Explorer end-to-end tests | Browser automation testing |
+| [Lighthouse](https://developer.chrome.com/docs/lighthouse/overview) | Explorer performance/accessibility audits | Web quality auditing tool |
+| [Workbox](https://developer.chrome.com/docs/workbox) | Explorer PWA integration dependency | Service worker/PWA toolkit |
+
+### 18.8 Attribution Boundaries
+
+CREG is an original protocol implementation that composes open protocols, open-source libraries, public standards, and cloud services. The project should continue to:
+
+- Keep third-party project names and official links visible in public technical documents.
+- Preserve upstream copyright and license files where required.
+- Run a license inventory before any mainnet or commercial release.
+- Avoid implying that any referenced project, vendor, or standards body endorses CREG.
+- Maintain lockfile-based dependency review for exact package/version attribution.
+
+## 19. Public Alpha Status
+
+As of 2026-06-26, CREG is in public alpha testnet scope. (See CREG_SYSTEM_WORKFLOW.md §15 for the living architecture improvement log.)
 
 | Area | Current public-alpha status |
 | --- | --- |
@@ -473,7 +891,7 @@ As of 2026-06-15, CREG is in public alpha testnet scope.
 
 The immediate public-alpha operating principle is simple: invite participation while keeping all public claims bounded by testnet status, known limitations, and audit state.
 
-## 19. Roadmap
+## 20. Roadmap
 
 ### Phase A: Public Alpha Hardening
 
@@ -501,7 +919,7 @@ The immediate public-alpha operating principle is simple: invite participation w
 - Establish incident response, revocation, and communication processes.
 - Complete legal/compliance review for any token distribution or public offering.
 
-## 20. Risk Disclosure
+## 21. Risk Disclosure
 
 CREG is security infrastructure. It should be evaluated with a conservative mindset.
 
@@ -515,9 +933,9 @@ Key risks:
 - Token parameters are alpha implementation details, not finalized mainnet economics.
 - Regulatory requirements may apply to any future token sale, public distribution, or mainnet launch.
 
-Users should not treat alpha verification as a guarantee of package safety. Validators, auditors, and developers should treat the current network as a live testbed for improving the protocol.
+Users should not treat alpha verification as proof that a package is safe. Validators, auditors, and developers should treat the current network as a live testbed for improving the protocol.
 
-## 21. Conclusion
+## 22. Conclusion
 
 Chain Registry reframes package trust as a consensus and evidence problem. Instead of asking developers to trust only a publisher account or a centralized registry, CREG asks a network of staked validators to review exact package bytes, sign reproducible evidence, finalize the result, and expose the record for verification.
 
@@ -532,22 +950,31 @@ The public alpha is already more than a concept: it includes a Rust node, CLI, c
 | Sepolia chain id | `11155111` |
 | Block time target | 5 seconds |
 | Vote timeout | 10 seconds |
-| Quorum percentage | 67 |
+| Quorum percentage | 67 (enforceFinalizeRelays=true by default in Registry constructor) |
+| Token max supply | 42,000,000 CREG (hard cap) |
+| Initial minted supply | 20,000,000 CREG |
+| Unminted capped reserve | Up to 22,000,000 CREG |
 | Publisher minimum stake | 1 tCREG |
 | Validator minimum stake | 100 tCREG |
-| Max validators | 50 |
+| Mandatory committee target (large sets) | ~100 (M=100), VRF-seeded + stake/rep/performance weighted, per-eth cap=4 |
+| Validator application timeout | 7 days |
 | Validator unbonding | 14 days |
+| Validator restake cooldown | 7 days |
+| Max slash count before auto-ejection | 3 |
 | Slash low | 2% |
 | Slash medium | 10% |
 | Slash critical | 30% |
-| ZK validation flag | Enabled in current spec |
+| ZK validation flag | Enabled in current spec (binding enforced) |
 | ML validation flag | Enabled in current spec |
 | WASM sandbox flag | Enabled in current spec |
 | Cross-chain flag | Disabled |
 | Insurance flag | Disabled |
 | Threshold encryption flag | Disabled |
+| Analysis reward base | 0.00001 CREG (correct-vote bonus 0.000005) |
+| Points base (mandatory / voluntary) | 25 / 10 ×1.2 correct ×(rep/100) |
+| Performance decay | 0.985 after >5 contributions (moving avg) |
 
-Source: [`chain-spec.sepolia.json`](../chain-registry/testnet/chain-spec.sepolia.json)
+Source: Chain spec configurations.
 
 ## Appendix B: Glossary
 
@@ -557,11 +984,13 @@ Source: [`chain-spec.sepolia.json`](../chain-registry/testnet/chain-spec.sepolia
 | Canonical id | Stable package id such as `npm:name@1.0.0` |
 | CID | IPFS content identifier |
 | Consensus-grade vote | Vote with valid validator identity, signature, scanner profile, and evidence digest |
+| Mechanical consensus | Deterministic validator agreement over membership or package status, verified by node logic or contracts |
 | Evidence digest | Hash commitment to deterministic findings used by validators |
 | PBFT | Practical Byzantine Fault Tolerance; quorum-based finality protocol |
 | Publisher | Account that submits packages and stakes CREG/tCREG |
 | Validator | Staked operator that analyzes packages and signs votes |
 | Observer | Read-only node serving API/indexer use cases |
+| Slash pool | Accumulated slashed CREG that can be distributed to honest active validators |
 | tCREG | Testnet CREG token used on Sepolia |
 | L1 | Ethereum Sepolia in the current alpha |
 | ZK | Zero-knowledge proof infrastructure, currently Groth16/Circom-based |
@@ -570,16 +999,12 @@ Source: [`chain-spec.sepolia.json`](../chain-registry/testnet/chain-spec.sepolia
 
 ### Project References
 
-- [Public testnet quickstart](./PUBLIC_TESTNET_QUICKSTART.md)
-- [Testnet phase scope](./TESTNET_PHASE_SCOPE.md)
-- [L2 public alpha gate status](./L2_PUBLIC_ALPHA_GATE_STATUS.md)
-- [CREG limitations public readiness plan](./CREG_LIMITATIONS_PUBLIC_READINESS_PLAN.md)
-- [Testnet readiness report](../chain-registry/TESTNET_READINESS_REPORT.md)
-- [Deep dive technical analysis](../chain-registry/DEEP_DIVE_ANALYSIS.md)
-- [External audit scope](./SEC-401-AUDIT-SCOPE.md)
-- [Wallet key derivation](./WALLET_KEY_DERIVATION.md)
-- [ZK circuits README](../circuits/README.md)
-- [Current Sepolia chain spec](../chain-registry/testnet/chain-spec.sepolia.json)
+- **Public Testnet Quickstart Guide**
+- **Phase Scope definitions and parameters**
+- **Readiness gates tracker**
+- **CREG limitations public readiness implementation plan**
+- **Ethereum Smart Contract directory**
+- **ZK Circuit specification**
 
 ### External Research And Standards
 

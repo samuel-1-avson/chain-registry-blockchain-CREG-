@@ -232,21 +232,28 @@ async fn prepare_proposer_context(
                 }
             }
 
-            let gossip_msg = common::GossipMessage::VrfProof {
-                validator_id: node_id.clone(),
-                pubkey: our_pubkey.clone().unwrap_or_default(),
-                epoch_seed: epoch_seed.clone(),
-                output: out.clone(),
-                proof: prf.clone(),
-            };
-            if let Ok(data) = serde_json::to_vec(&gossip_msg) {
-                let _ = p2p
-                    .sender
-                    .send(crate::p2p::P2PCommand::Broadcast {
-                        topic: "creg/v1/vrf-proofs".into(),
-                        data,
-                    })
-                    .await;
+            if let Some(pubkey) = our_pubkey.clone() {
+                let gossip_msg = common::GossipMessage::VrfProof {
+                    validator_id: node_id.clone(),
+                    pubkey,
+                    epoch_seed: epoch_seed.clone(),
+                    output: out.clone(),
+                    proof: prf.clone(),
+                };
+                if let Ok(data) = serde_json::to_vec(&gossip_msg) {
+                    let _ = p2p
+                        .sender
+                        .send(crate::p2p::P2PCommand::Broadcast {
+                            topic: "creg/v1/vrf-proofs".into(),
+                            data,
+                        })
+                        .await;
+                }
+            } else {
+                tracing::warn!(
+                    validator_id = %node_id,
+                    "Skipping VRF proof gossip: validator pubkey missing from active set"
+                );
             }
 
             let ranking = consensus::vrf::rank_proposers(&active, &epoch_seed);
@@ -493,6 +500,8 @@ mod tests {
                 stake: 1000,
                 reputation: 100,
                 status: "online".into(),
+                performance_score: 500,
+                contribution_count: 0,
             },
             Validator {
                 id: secondary_id.into(),
@@ -502,6 +511,8 @@ mod tests {
                 stake: 900,
                 reputation: 100,
                 status: "online".into(),
+                performance_score: 500,
+                contribution_count: 0,
             },
         ];
 
@@ -512,6 +523,7 @@ mod tests {
             validator_set_bootstrap: ValidatorSet::default(),
             validator_set: ValidatorSet::new(validators),
             package_rounds: std::collections::HashMap::new(),
+            package_committees: std::collections::HashMap::new(),
             config: NodeConfig {
                 node_id: primary_id.into(),
                 data_dir: dir.path().to_path_buf(),
@@ -530,6 +542,13 @@ mod tests {
             forced_inclusion_tracker: crate::state::ForcedInclusionTracker::new(),
             sync_lag_blocks: 0,
             sync_max_peer_tip: 0,
+            reward_emissions_succeeded: 0,
+            reward_emissions_failed: 0,
+            treasury_balance: 0,
+            pending_rewards_estimate: 0,
+            total_rewards_distributed: 0,
+            rewards_pool_balance: 0,
+            last_incentives_refresh: None,
         }));
 
         (state, dir, primary_sk, secondary_sk)

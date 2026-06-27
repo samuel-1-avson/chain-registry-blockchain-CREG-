@@ -1,11 +1,22 @@
 # Chain Registry — documentation index
 
-> **Public visitors:** use **[PUBLIC.md](./PUBLIC.md)** — protocol, validators, and contracts only.  
-> This page is the **full maintainer index** (hosting, Firebase, budget, security ops).
+> **Public visitors:** [PUBLIC.md](./PUBLIC.md) — protocol, validators, contracts only.  
+> **Planning next work:** [WHAT_TO_DO_NEXT.md](./WHAT_TO_DO_NEXT.md) — testing, waitlist, Arena, testnet prep.
 
 Start at the [project README](../README.md), then use the sections below.
 
-**Artifact map (scripts, compose, components):** [DELIVERABLES_INDEX.md](../chain-registry/DELIVERABLES_INDEX.md)
+---
+
+## Planning & status
+
+| Document | Purpose |
+|----------|---------|
+| [WHAT_TO_DO_NEXT.md](./WHAT_TO_DO_NEXT.md) | **Start here (maintainers)** — four tracks: system test, product surfaces, validator onboarding, audit |
+| [NEXT_WORK.md](./NEXT_WORK.md) | Prioritized IDs (NET-301, SEC-401, …) |
+| [WEAKNESSES_GAPS_REMEDIATION_PLAN.md](./WEAKNESSES_GAPS_REMEDIATION_PLAN.md) | Phased remediation + §6 living status |
+| [REMEDIATION_BACKLOG.md](./REMEDIATION_BACKLOG.md) | SEC-/REM-/DOC- ticket status |
+| [L2_PUBLIC_ALPHA_GATE_STATUS.md](./L2_PUBLIC_ALPHA_GATE_STATUS.md) | Public-alpha gate checklist |
+| [CREG_SYSTEM_WORKFLOW.md](./CREG_SYSTEM_WORKFLOW.md) | Full system design + §15 iteration log |
 
 ---
 
@@ -13,10 +24,13 @@ Start at the [project README](../README.md), then use the sections below.
 
 | Document | Audience |
 |----------|----------|
-| [WHITEPAPER.md](./WHITEPAPER.md) | Developers, validators, auditors, ecosystem partners |
+| [TESTNET_SCALE_ARCHITECTURE.md](./TESTNET_SCALE_ARCHITECTURE.md) | **10k+ validator topology** — start here for scale testnet |
+| [GENESIS_ALPHA_COHORT_PLAYBOOK.md](./GENESIS_ALPHA_COHORT_PLAYBOOK.md) | Wave 1 cohort operators |
+| [WHITEPAPER.md](./WHITEPAPER.md) | Developers, validators, auditors |
 | [PUBLIC_TESTNET_QUICKSTART.md](./PUBLIC_TESTNET_QUICKSTART.md) | Publishers, developers, validators |
-| [TESTNET_PHASE_SCOPE.md](./TESTNET_PHASE_SCOPE.md) | What to expect — limits, verified semantics, alpha scope |
-| [WALLET_KEY_DERIVATION.md](./WALLET_KEY_DERIVATION.md) | Ed25519 (packages) vs Ethereum EOA (staking) |
+| [TESTNET_PHASE_SCOPE.md](./TESTNET_PHASE_SCOPE.md) | Limits, verified semantics, alpha scope |
+| [VALIDATOR_ONBOARDING_CHECKLIST.md](./VALIDATOR_ONBOARDING_CHECKLIST.md) | External validator operators |
+| [WALLET_KEY_DERIVATION.md](./WALLET_KEY_DERIVATION.md) | Ed25519 vs Ethereum EOA |
 
 ---
 
@@ -25,18 +39,29 @@ Start at the [project README](../README.md), then use the sections below.
 | Document | Description |
 |----------|-------------|
 | [TESTNET_SEPOLIA_RUNBOOK.md](./TESTNET_SEPOLIA_RUNBOOK.md) | Sepolia deploy, chain-spec sign/publish |
-| [../chain-registry/testnet/OPERATOR.md](../chain-registry/testnet/OPERATOR.md) | 3-node Sepolia fleet (NET-301) |
-| [../chain-registry/testnet/QUICKSTART.md](../chain-registry/testnet/QUICKSTART.md) | Fastest path to a local node |
-| [../chain-registry/testnet/gcp-public-hosting.md](../chain-registry/testnet/gcp-public-hosting.md) | GCP VM + Cloudflare TLS (HOSTING-301) |
-| [GCP-BUDGET-ARCHITECTURE.md](./GCP-BUDGET-ARCHITECTURE.md) | Cost model — VM + Firebase (two projects) |
-| [GCP-RPC-ARCHITECTURE.md](./GCP-RPC-ARCHITECTURE.md) | API/JSON-RPC on GCP — today vs upgrade path |
-| [GCP-VALIDATOR-FLEET.md](./GCP-VALIDATOR-FLEET.md) | Option A — dedicated validator VM (production) |
-| [GCP-SEPOLIA-GETH-INTERNAL.md](./GCP-SEPOLIA-GETH-INTERNAL.md) | Internal Sepolia Geth VM |
-| [GCP_PHASE2_RUNBOOK.md](./GCP_PHASE2_RUNBOOK.md) | Observer pool ILB, Cloud Run hub-api, public API LB |
-| [L2_PUBLIC_ALPHA_GATE_STATUS.md](./L2_PUBLIC_ALPHA_GATE_STATUS.md) | L2 public-alpha gate tracker |
-| [WAITLIST_FIREBASE_DEPLOY.md](./WAITLIST_FIREBASE_DEPLOY.md) | Waitlist Firebase backend deploy |
+| [../chain-registry/testnet/OPERATOR.md](../chain-registry/testnet/OPERATOR.md) | Sepolia validator fleet |
+| [../chain-registry/testnet/QUICKSTART.md](../chain-registry/testnet/QUICKSTART.md) | Fastest local node path |
+| [../chain-registry/testnet/gcp/README.md](../chain-registry/testnet/gcp/README.md) | GCP scripts (resume/stop testnet, waitlist) |
+| [WAITLIST-ONLY-HOSTING.md](./WAITLIST-ONLY-HOSTING.md) | Waitlist-only phase (testnet paused) |
+| [GCP_PHASE2_RUNBOOK.md](./GCP_PHASE2_RUNBOOK.md) | Observer pool, Cloud Run hub-api, public API LB |
+| [GCP-BUDGET-ARCHITECTURE.md](./GCP-BUDGET-ARCHITECTURE.md) | Cost model |
+| [GCP-RPC-ARCHITECTURE.md](./GCP-RPC-ARCHITECTURE.md) | API/JSON-RPC on GCP |
+| [GCP-VALIDATOR-FLEET.md](./GCP-VALIDATOR-FLEET.md) | Dedicated validator VM |
+| [HYBRID-LOCAL-VALIDATORS.md](./HYBRID-LOCAL-VALIDATORS.md) | Legacy WireGuard path (deprecated) |
 | [../chain-registry/testnet/README.md](../chain-registry/testnet/README.md) | Testnet directory index |
 | [../chain-registry/DOCKER.md](../chain-registry/DOCKER.md) | Docker compose profiles |
+
+---
+
+## Product surfaces (non-node)
+
+| Document | Description |
+|----------|-------------|
+| [WAITLIST_FIREBASE_DEPLOY.md](./WAITLIST_FIREBASE_DEPLOY.md) | Waitlist Firebase deploy |
+| [WAITLIST-ADMIN-MONITORING.md](./WAITLIST-ADMIN-MONITORING.md) | Owner-only waitlist metrics |
+| [../CREG-Contribution-Arena/README.md](../CREG-Contribution-Arena/README.md) | Contribution Arena (quests, findings) |
+| [../CREG-Contribution-Arena/docs/HUB_INTEGRATION.md](../CREG-Contribution-Arena/docs/HUB_INTEGRATION.md) | Hub API migration boundary |
+| [TESTNET-HUB-DESIGN.md](./TESTNET-HUB-DESIGN.md) | Hub API design |
 
 ---
 
@@ -44,11 +69,10 @@ Start at the [project README](../README.md), then use the sections below.
 
 | Document | Description |
 |----------|-------------|
-| [WHITEPAPER.md](./WHITEPAPER.md) | Public-alpha technical whitepaper |
-| [../chain-registry/DEEP_DIVE_ANALYSIS.md](../chain-registry/DEEP_DIVE_ANALYSIS.md) | Architecture, data flows, ISSUE registry |
-| [../chain-registry/TESTNET_READINESS_REPORT.md](../chain-registry/TESTNET_READINESS_REPORT.md) | Evidence-based readiness snapshot |
-| [NEXT_WORK.md](./NEXT_WORK.md) | Prioritized open work (maintainers) |
-| [REMEDIATION_BACKLOG.md](./REMEDIATION_BACKLOG.md) | SEC-/REM-/DOC- remediation status |
+| [../chain-registry/DEEP_DIVE_ANALYSIS.md](../chain-registry/DEEP_DIVE_ANALYSIS.md) | Architecture + ISSUE registry |
+| [../chain-registry/TESTNET_READINESS_REPORT.md](../chain-registry/TESTNET_READINESS_REPORT.md) | Historical readiness snapshot |
+| [../chain-registry/contracts/README.md](../chain-registry/contracts/README.md) | Solidity contracts + relay model |
+| [L1_L2_HARDENING.md](./L1_L2_HARDENING.md) | Bridge / ZK / cross-layer notes |
 
 ---
 
@@ -56,12 +80,13 @@ Start at the [project README](../README.md), then use the sections below.
 
 | Document | Description |
 |----------|-------------|
-| [SECURITY_OPS_RUNBOOK.md](./SECURITY_OPS_RUNBOOK.md) | Hot keys, TLS, rotation drills |
+| [SECURITY_OPS_RUNBOOK.md](./SECURITY_OPS_RUNBOOK.md) | Hot keys, TLS, rotation |
+| [INCIDENT_RESPONSE_RUNBOOK.md](./INCIDENT_RESPONSE_RUNBOOK.md) | Protocol incidents |
 | [SEC-401-AUDIT-SCOPE.md](./SEC-401-AUDIT-SCOPE.md) | External audit RFP scope |
-| [SEC-401-VENDOR-OUTREACH.md](./SEC-401-VENDOR-OUTREACH.md) | Vendor outreach template |
+| [SEC-401-VENDOR-OUTREACH.md](./SEC-401-VENDOR-OUTREACH.md) | Vendor email templates |
 | [adr/ADR-KMS-HOT-KEYS.md](./adr/ADR-KMS-HOT-KEYS.md) | KMS vs env for operator keys |
 
-Regenerate vendor emails: `chain-registry/testnet/prepare-sec-401-outreach.ps1` → `docs/archive/SEC-401-outreach-ready.md` (example output).
+Regenerate outreach copy: `chain-registry/testnet/prepare-sec-401-outreach.ps1` → [archive/SEC-401-outreach-ready.md](./archive/SEC-401-outreach-ready.md).
 
 ---
 
@@ -69,14 +94,14 @@ Regenerate vendor emails: `chain-registry/testnet/prepare-sec-401-outreach.ps1` 
 
 | Document | Description |
 |----------|-------------|
-| [DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md) | PostgreSQL schema (`db-sync`) |
+| [DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md) | PostgreSQL (`db-sync`) |
 | [../chain-registry/migrations/README.md](../chain-registry/migrations/README.md) | DB migration order |
-| [../chain-registry/contracts/README.md](../chain-registry/contracts/README.md) | Solidity contract status |
 | [../chain-registry/observability/README.md](../chain-registry/observability/README.md) | Prometheus / Grafana |
 | [../circuits/README.md](../circuits/README.md) | ZK Circom circuits |
+| [../chain-registry/testnet/spec-server/README.md](../chain-registry/testnet/spec-server/README.md) | Signed chain-spec static host |
 
 ---
 
 ## Archived (historical only)
 
-[archive/README.md](./archive/README.md) — superseded plans and generated one-offs. Do not use for current operations.
+[archive/README.md](./archive/README.md) — superseded plans, one-off cohort exports, and deleted runbooks. **Do not use for current operations.**

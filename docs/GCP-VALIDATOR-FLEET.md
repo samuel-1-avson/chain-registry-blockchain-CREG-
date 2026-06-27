@@ -1,10 +1,10 @@
 # Option A — Dedicated validator fleet VM (VPC)
 
-> **Updated:** 2026-06-10  
+> **Updated:** 2026-06-26  
 > **Project:** `gen-lang-client-0022105784`  
-> **Goal:** Run CREG validators on a private GCP VM; edge TLS, explorer, faucet, IPFS, and spec stay on `creg-testnet-vm`.
+> **Goal:** Optional **maintainer seed validators** on a private GCP VM; **10,000+ external operators** run their own hosts per [TESTNET_SCALE_ARCHITECTURE.md](./TESTNET_SCALE_ARCHITECTURE.md).
 
-Production path for the public Sepolia testnet. Hybrid WireGuard-to-PC remains documented in [HYBRID-LOCAL-VALIDATORS.md](./HYBRID-LOCAL-VALIDATORS.md) but is not the default rollout.
+Edge TLS, explorer, faucet, IPFS, and spec stay on `creg-testnet-vm`. Hybrid WireGuard-to-PC is legacy only ([HYBRID-LOCAL-VALIDATORS.md](./HYBRID-LOCAL-VALIDATORS.md)).
 
 ---
 
@@ -31,24 +31,18 @@ API :28180-28189 (host)         (no public IP)
 | Tier | VM | Tag | Public IP | Role |
 |------|-----|-----|-----------|------|
 | Edge | `creg-testnet-vm` | `creg-testnet` | Yes (static) | TLS ingress, shared services |
-| Validator fleet | `creg-validator-vm` | `creg-validators` | **No** | `creg-node-1..N` (3 now, up to 10) |
+| Seed validator fleet | `creg-validator-vm` | `creg-validators` | **No** | Optional `creg-node-1..N` (2–10 maintainer seeds; not validator cap) |
 | Sepolia RPC | `creg-sepolia-geth-vm` | `creg-sepolia-geth` | **No** | `CREG_ETH_RPC` for validators |
 
 ---
 
 ## Sizing
 
-| Fleet size | Machine type | Boot disk | Est. VM cost/mo |
-|------------|--------------|-----------|-----------------|
-| 3 nodes (initial) | `e2-standard-8` | 200 GB | ~$216 |
-| 10 nodes (target) | `e2-standard-8` | 200 GB | same VM (scale in compose) |
+| Seed fleet size | Machine type | Boot disk | Est. VM cost/mo |
+|-----------------|--------------|-----------|-----------------|
+| 2–10 maintainer seeds | `e2-standard-8` | 200 GB | ~$216 |
 
-Combined with edge (`e2-standard-4` ~$108) + Geth (`e2-standard-2` ~$69) + NAT/egress (~$5-15):
-
-| Stage | ~$/mo |
-|-------|-------|
-| 3-node fleet + edge + Geth | ~$280-300 |
-| 10-node fleet (same VM) | ~$280-320 |
+External validators run on **operator-owned** infrastructure (not this VM). Combined maintainer GCP (edge + Geth + optional seeds): **~$280–320/mo** — see [GCP-BUDGET-ARCHITECTURE.md](./GCP-BUDGET-ARCHITECTURE.md).
 
 Detail: [GCP-BUDGET-ARCHITECTURE.md](./GCP-BUDGET-ARCHITECTURE.md).
 
@@ -87,7 +81,7 @@ No rule opens validator or Geth ports to `0.0.0.0/0`.
 
 ## Required env vars
 
-In `testnet/sepolia-3node.env` (after provision):
+In `testnet/sepolia-fleet.env` (after `init-sepolia-fleet-env.ps1`):
 
 ```env
 CREG_VALIDATOR_FLEET_MODE=true
@@ -120,7 +114,7 @@ cd chain-registry
 
 ### 2. Deploy validator fleet (Docker)
 
-Ensure `testnet/sepolia-3node.env` has validator keys, Geth RPC, and edge IP for IPFS/spec.
+Ensure `testnet/sepolia-fleet.env` has seed validator keys, Geth RPC, and edge IP for IPFS/spec.
 
 ```powershell
 .\testnet\gcp\deploy-validator-fleet.ps1
@@ -134,7 +128,7 @@ On the validator VM:
 
 ### 3. Cut over edge (no validators on edge VM)
 
-Set `CREG_VALIDATOR_FLEET_MODE=true` in `sepolia-3node.env`, then:
+Set `CREG_VALIDATOR_FLEET_MODE=true` in `sepolia-fleet.env`, then:
 
 ```powershell
 .\testnet\gcp\push-env.ps1
@@ -159,14 +153,14 @@ Or full edge deploy:
 
 ---
 
-## Scale to N nodes
+## Scale maintainer seed fleet (2–10 on one VM)
 
 ```powershell
 .\testnet\generate-validator-fleet-compose.ps1 -NodeCount 10
 .\testnet\gcp\deploy-validator-fleet.ps1
 ```
 
-Re-run `start-validator-fleet-gcp.sh` on the validator VM.
+Re-run `start-validator-fleet-gcp.sh` on the validator VM. This does **not** limit external validator count — cohort onboarding uses [VALIDATOR_ONBOARDING_CHECKLIST.md](./VALIDATOR_ONBOARDING_CHECKLIST.md).
 
 ---
 

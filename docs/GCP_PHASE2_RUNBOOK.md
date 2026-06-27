@@ -32,7 +32,7 @@ State files written by scripts (do not commit secrets):
 |--------|---------|
 | `provision-observer-pool.ps1` | MIG + internal LB for observer nodes |
 | `deploy-observer-pool.ps1` | Sync repo, push env, `start-observer-pool-gcp.sh` on pool VMs (`CREG_FLEET_BUILD=1` when image missing) |
-| `start-observer-pool-gcp.sh` | Sources `sepolia-3node.env`; optional `CREG_FLEET_BUILD` / `CREG_OBSERVER_BUILD` |
+| `start-observer-pool-gcp.sh` | Sources `sepolia-fleet.env`; optional `CREG_FLEET_BUILD` / `CREG_OBSERVER_BUILD` |
 | `build-export-node-image.sh` | On validator VM: compose build → tag `creg-node:fleet` → `/tmp/creg-node-fleet.tgz` |
 | `import-observer-node-image.sh` | On observer VM: load tarball, restart observer container |
 | `transfer-observer-node-image.ps1` | Validator → local → observer pipeline (use when observer disk is too small to build) |
@@ -46,7 +46,7 @@ State files written by scripts (do not commit secrets):
 
 ---
 
-## Env requirements (`sepolia-3node.env`)
+## Env requirements (`sepolia-fleet.env`)
 
 - `CREG_OBSERVER_POOL_LB_IP=10.128.0.5`
 - `CREG_OBSERVER_API_UPSTREAM=10.128.0.5:28182` (required for Caddy compose env interpolation)

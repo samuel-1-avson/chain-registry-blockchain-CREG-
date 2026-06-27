@@ -96,7 +96,7 @@ Verified packages cannot be fetched (operator IPFS node down, gateway failing, o
 Sepolia RPC failures break `validator_set_sync`, staking checks, or bridge anchoring.
 
 1. Confirm: node logs show `eth_getLogs` errors or `validator_set_sync_state=degraded`; check provider status page.
-2. Switch `CREG_ETH_RPC` to a backup provider (keep at least one alternate configured; archive-capable required). For the GCP fleet this is a `sepolia-3node.env` update + `deploy-validator-fleet.ps1 -SkipSync`.
+2. Switch `CREG_ETH_RPC` to a backup provider (keep at least one alternate configured; archive-capable required). For the GCP seed fleet this is a `sepolia-fleet.env` update + `deploy-validator-fleet.ps1 -SkipSync`.
 3. Internal geth option: point validators at the internal Sepolia geth VM once its sync is verified (`eth_getCode` at the Registry address) — see `testnet/gcp/deploy-sepolia-geth.ps1`.
 4. Validators keep operating on the last finalized validator set during the outage; new registrations and stake changes queue until sync recovers.
 5. Verify recovery: `validator_set_sync_state` healthy, `validator_set_last_finalized_source_block` advancing.

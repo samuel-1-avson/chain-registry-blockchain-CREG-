@@ -153,6 +153,8 @@ async fn start_test_node() -> (String, tokio::task::JoinHandle<()>) {
         stake: 1000,
         reputation: 100,
         status: "online".into(),
+        performance_score: 500,
+        contribution_count: 0,
     };
     let validator_set = common::ValidatorSet::new(vec![test_validator]);
 
@@ -163,6 +165,7 @@ async fn start_test_node() -> (String, tokio::task::JoinHandle<()>) {
         validator_set_bootstrap: common::ValidatorSet::default(),
         validator_set,
         package_rounds: std::collections::HashMap::new(),
+        package_committees: std::collections::HashMap::new(),
         config: config.clone(),
         p2p_status: P2PStatus::default(),
         bridge_status: BridgeStatus::default(),
@@ -176,6 +179,13 @@ async fn start_test_node() -> (String, tokio::task::JoinHandle<()>) {
         forced_inclusion_tracker: node::state::ForcedInclusionTracker::new(),
         sync_lag_blocks: 0,
         sync_max_peer_tip: 0,
+        reward_emissions_succeeded: 0,
+        reward_emissions_failed: 0,
+        treasury_balance: 0,
+        pending_rewards_estimate: 0,
+        total_rewards_distributed: 0,
+        rewards_pool_balance: 0,
+        last_incentives_refresh: None,
     }));
 
     let limiter = RateLimiter::new(RateLimitConfig::default());

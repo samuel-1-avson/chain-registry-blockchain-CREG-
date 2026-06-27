@@ -13,22 +13,14 @@ import hub.caddy
 
 # HTTP for Google external HTTPS LB backends (LB terminates TLS; do not redirect to HTTPS).
 http://{$CREG_PUBLIC_API_HOST} {
-	@api_rpc_browser path /rpc* method GET HEAD
-	handle @api_rpc_browser {
-		header Content-Type application/json
-		respond `{"service":"CREG testnet JSON-RPC","usage":"POST JSON-RPC 2.0 creg_* methods only — not Sepolia eth_*","sepoliaL1":"https://{$CREG_PUBLIC_EXPLORER_HOST}/rpc"}` 200
-	}
+	import creg-node-jsonrpc.caddy
 	reverse_proxy {$CREG_OBSERVER_API_UPSTREAM} {
 		flush_interval -1
 	}
 }
 
 {$CREG_PUBLIC_API_HOST} {
-	@api_rpc_browser path /rpc* method GET HEAD
-	handle @api_rpc_browser {
-		header Content-Type application/json
-		respond `{"service":"CREG testnet JSON-RPC","usage":"POST JSON-RPC 2.0 creg_* methods only — not Sepolia eth_*","sepoliaL1":"https://{$CREG_PUBLIC_EXPLORER_HOST}/rpc"}` 200
-	}
+	import creg-node-jsonrpc.caddy
 	reverse_proxy {$CREG_OBSERVER_API_UPSTREAM} {
 		flush_interval -1
 	}

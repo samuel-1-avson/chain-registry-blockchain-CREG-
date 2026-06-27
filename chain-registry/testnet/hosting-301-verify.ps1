@@ -17,7 +17,12 @@ Set-Location $repoRoot
 function Log($msg) { Write-Host "[hosting-301] $msg" }
 function Fail($msg) { Log "FAIL $msg"; exit 1 }
 
-if (-not $EnvFile) { $EnvFile = Join-Path $scriptDir "sepolia-3node.env" }
+if (-not $EnvFile) {
+    $fleetEnv = Join-Path $scriptDir "sepolia-fleet.env"
+    $legacyEnv = Join-Path $scriptDir "sepolia-3node.env"
+    if (Test-Path $fleetEnv) { $EnvFile = $fleetEnv }
+    else { $EnvFile = $legacyEnv }
+}
 $envVars = @{}
 if (Test-Path $EnvFile) {
     foreach ($line in Get-Content $EnvFile) {

@@ -14,6 +14,10 @@ pub struct PendingEntry {
     pub attempt_count: u32,
     /// Set to true once the validator pipeline has picked this up.
     pub in_progress: bool,
+
+    // === HYBRID ANALYSIS COMMITTEE (mandatory + voluntary support) ===
+    /// Populated at admission. Contains the deterministically selected mandatory committee.
+    pub analysis_committee: Option<common::AnalysisCommittee>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -22,6 +26,8 @@ struct PersistedEntry {
     received_at: DateTime<Utc>,
     attempt_count: u32,
     in_progress: bool,
+    #[serde(default)]
+    analysis_committee: Option<common::AnalysisCommittee>,
 }
 
 pub struct PendingPool {
@@ -63,6 +69,7 @@ impl PendingPool {
                                 attempt_count: persisted.attempt_count,
                                 // Stuck in_progress entries become eligible again after restart.
                                 in_progress: false,
+                                analysis_committee: persisted.analysis_committee,
                             },
                         );
                     }
@@ -108,6 +115,7 @@ impl PendingPool {
                         received_at: entry.received_at,
                         attempt_count: entry.attempt_count,
                         in_progress: entry.in_progress,
+                        analysis_committee: entry.analysis_committee.clone(),
                     },
                 )
             })
@@ -171,10 +179,23 @@ impl PendingPool {
                 received_at: Utc::now(),
                 attempt_count: 0,
                 in_progress: false,
+                analysis_committee: None,   // set later by admission or first processor
             },
         );
         self.persist();
         true
+    }
+
+    /// Attach or update the analysis committee for a package (called at admission or first processing).
+    pub fn set_analysis_committee(&mut self, canonical: &str, committee: common::AnalysisCommittee) {
+        if let Some(entry) = self.entries.get_mut(canonical) {
+            entry.analysis_committee = Some(committee);
+            self.persist();
+        }
+    }
+
+    pub fn get_committee(&self, canonical: &str) -> Option<&common::AnalysisCommittee> {
+        self.entries.get(canonical).and_then(|e| e.analysis_committee.as_ref())
     }
 
     pub fn contains(&self, canonical: &str) -> bool {

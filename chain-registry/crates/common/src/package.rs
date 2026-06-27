@@ -315,6 +315,45 @@ pub struct ChainRecord {
     /// Stored at finalization so that future versions can diff against it.
     #[serde(default)]
     pub manifest: Option<PackageManifest>,
+
+    // === HYBRID ANALYSIS COMMITTEE FIELDS (mandatory + voluntary) ===
+    #[serde(default)]
+    pub analysis_committee_size: u32,          // Target mandatory committee size (e.g. 100)
+    #[serde(default)]
+    pub analysis_selection_seed: String,       // Seed used to deterministically order/select the committee
+    #[serde(default)]
+    pub analysis_effective_size: u32,          // Actual size after any expansion
+    #[serde(default)]
+    pub analysis_mandatory_contributed: u32,   // How many mandatory votes were in the final record
+
+    /// Full committee metadata (including members list and performance_bias).
+    /// Preferred over the scalar fields for new records. Stored for full auditability
+    /// of how the mandatory set was chosen (stake/rep/perf-weighted VRF selection).
+    #[serde(default)]
+    pub analysis_committee: Option<AnalysisCommittee>,
+}
+
+impl ChainRecord {
+    /// Returns the committee, preferring the full object if present.
+    /// For legacy records (pre full committee storage), reconstructs a partial
+    /// AnalysisCommittee from the scalar fields (note: members list will be empty,
+    /// performance info unknown).
+    pub fn get_analysis_committee(&self) -> Option<AnalysisCommittee> {
+        if let Some(c) = &self.analysis_committee {
+            return Some(c.clone());
+        }
+        if self.analysis_committee_size > 0 || !self.analysis_selection_seed.is_empty() {
+            return Some(AnalysisCommittee {
+                size: self.analysis_committee_size,
+                members: vec![], // not stored in legacy scalars
+                seed: self.analysis_selection_seed.clone(),
+                effective_size: self.analysis_effective_size,
+                performance_bias: false, // unknown for old records,
+                ..Default::default()
+            });
+        }
+        None
+    }
 }
 
 /// Current lifecycle state of a package on the chain.
@@ -350,6 +389,10 @@ pub struct ValidatorSignature {
     /// Compact deterministic risk summary captured when this vote was formed.
     #[serde(default)]
     pub deterministic_risk: DeterministicRiskSummary,
+
+    // === HYBRID FIELDS ===
+    #[serde(default)]
+    pub is_mandatory: bool,   // true if this validator was in the primary selected committee
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -359,4 +402,29 @@ pub enum ValidatorVote {
     Reject {
         reason: String,
     },
+}
+
+/// Committee metadata for the hybrid mandatory + voluntary analysis model.
+/// Stored in pending entries and finalized ChainRecord for verifiability.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AnalysisCommittee {
+    /// Target size of the primary mandatory committee (e.g. 64).
+    pub size: u32,
+    /// Deterministic ordered list of validator_ids for this package.
+    /// First `size` are the primary mandatory set.
+    pub members: Vec<String>,
+    /// The seed used for deterministic selection (package + randomness source).
+    pub seed: String,
+    /// Effective size after any expansion due to timeouts.
+    #[serde(default)]
+    pub effective_size: u32,
+    /// Whether performance_score (resources/reliability) was factored into selection ordering.
+    #[serde(default)]
+    pub performance_bias: bool,
+
+    /// Snapshot of each member's performance_score (and contribution_count if desired)
+    /// captured at finalization time. This is "at-finalization-time" data for auditability.
+    /// Only populated for verified records going forward.
+    #[serde(default)]
+    pub member_performance_at_finalization: std::collections::HashMap<String, u32>,
 }

@@ -138,40 +138,20 @@ build_docker_images() {
 deploy_contracts() {
     log_step "4" "Deploying Smart Contracts"
     
-    log_info "Starting local infrastructure..."
+    log_info "Starting local infrastructure (Sepolia L1 — no Anvil)..."
     
     cd "$PROJECT_ROOT"
     
-    # Start Anvil and IPFS
-    docker-compose up -d anvil ipfs
+    docker-compose up -d ipfs spec-server
     
-    # Wait for Anvil
-    log_info "Waiting for Anvil to be ready..."
-    for i in {1..30}; do
-        if curl -s -X POST -H "Content-Type: application/json" \
-            --data '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}' \
-            http://localhost:8545 > /dev/null 2>&1; then
-            break
-        fi
-        sleep 1
-    done
+    log_info "Contracts are pre-deployed on Sepolia — see testnet/chain-spec.sepolia.json"
+    log_info "New L1 deploys: testnet/deploy-sepolia.ps1 or testnet/deploy-testnet.sh"
     
-    log_success "Anvil is ready"
-    
-    # Deploy contracts
-    log_info "Deploying testnet contracts..."
-    
-    if [ -f "$PROJECT_ROOT/testnet/deploy-testnet.sh" ]; then
-        cd "$PROJECT_ROOT/testnet"
-        bash deploy-testnet.sh
-        cd "$PROJECT_ROOT"
-    else
-        log_warn "Contract deployment script not found, using docker-compose deployer"
-        docker-compose up -d deploy-contracts
-        sleep 10
+    if [ -f "$PROJECT_ROOT/testnet/deploy-sepolia.ps1" ]; then
+        log_warn "Skipping automatic Sepolia deploy (requires funded keys). Use testnet/deploy-sepolia.ps1 manually."
     fi
     
-    log_success "Contracts deployed"
+    log_success "Infrastructure ready for Sepolia-backed testnet"
 }
 
 # Start validators

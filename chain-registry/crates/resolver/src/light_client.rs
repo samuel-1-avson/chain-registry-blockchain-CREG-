@@ -604,7 +604,9 @@ mod tests {
                 eth_address: String::new(),
                 stake: 100,
                 reputation: 100,
-                status: "online".into(),
+                status: "active".into(),
+                performance_score: 500,
+                contribution_count: 0,
             })
             .collect();
 

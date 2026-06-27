@@ -172,7 +172,8 @@ Track weekly:
 | [PUBLIC_TESTNET_QUICKSTART.md](./PUBLIC_TESTNET_QUICKSTART.md) | Technical steps |
 | [TESTNET-HUB-DESIGN.md](./TESTNET-HUB-DESIGN.md) | Hub quests & SIWE |
 | [NEXT_WORK.md](./NEXT_WORK.md) | P0/P1 readiness checklist |
-| [FRIEND_ONBOARDING.md](../chain-registry/testnet/FRIEND_ONBOARDING.md) | Private multi-host alpha (Tailscale) |
+| [HYBRID-LOCAL-VALIDATORS.md](./HYBRID-LOCAL-VALIDATORS.md) | Local validator + cloud observer |
+| [VALIDATOR_ONBOARDING_CHECKLIST.md](./VALIDATOR_ONBOARDING_CHECKLIST.md) | External validator onboarding |
 
 ---
 

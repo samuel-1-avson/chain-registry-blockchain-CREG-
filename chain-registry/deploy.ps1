@@ -8,8 +8,8 @@
       1. Pre-flight checks (Docker, disk, memory, ports)
       2. Environment setup and validation
       3. Docker image build (with Dockerfile selection)
-      4. Infrastructure startup (Anvil, IPFS, PostgreSQL)
-      5. Smart contract deployment
+      4. Infrastructure startup (spec-server, IPFS, PostgreSQL)
+      5. Sepolia contract address validation (no local L1 deploy)
       6. Validator node startup (1 or 10 nodes)
       7. Faucet and explorer startup (testnet)
       8. Health verification and smoke tests
@@ -588,15 +588,11 @@ if ($SkipBuild) {
 # ─── Step 4: Start Infrastructure ───────────────────────────────────────────
 Write-Section "Step 4: Infrastructure Services"
 
-Write-Step "4.1" "Starting Anvil (Ethereum local chain)"
-Invoke-Compose @("up", "-d", "anvil") | Out-Null
-$anvilReady = Wait-ForEndpoint -Name "Anvil" `
-    -Url "http://localhost:8545" `
-    -Method "POST" `
-    -Body '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}' `
-    -TimeoutSecs 30
-if (-not $anvilReady) {
-    Write-Fail "Anvil failed to start. Check: docker logs creg-testnet-anvil"
+Write-Step "4.1" "Starting chain spec server (Sepolia signed spec)"
+Invoke-Compose @("up", "-d", "spec-server") | Out-Null
+$specReady = Wait-ForEndpoint -Name "Chain spec" -Url "http://localhost:8888/chain-spec.json" -TimeoutSecs 30
+if (-not $specReady) {
+    Write-Fail "spec-server failed to start. Check: docker logs creg-testnet-spec-server"
     exit 1
 }
 
@@ -629,48 +625,20 @@ if (-not $pgReady) {
     Write-Warn "PostgreSQL may still be starting"
 }
 
-# ─── Step 5: Deploy Smart Contracts ─────────────────────────────────────────
-Write-Section "Step 5: Smart Contract Deployment"
+# ─── Step 5: Sepolia L1 contract addresses ───────────────────────────────────
+Write-Section "Step 5: Sepolia L1 (pre-deployed contracts)"
 
-if ($SkipContracts) {
-    Write-Step "5.0" "Skipping contract deployment (--SkipContracts)"
-    Write-OK "Using existing contract addresses from $EnvFile"
-} else {
-    Write-Step "5.1" "Deploying contracts via Foundry"
-
-    if ($Mode -eq "testnet") {
-        $manifestPath = Join-Path $ProjectRoot "contracts\deployments\latest.json"
-        if (Test-Path $manifestPath) {
-            Remove-Item $manifestPath -Force
-        }
-
-        $deployExitCode = Invoke-Compose @("run", "--rm", "--no-deps", "deploy-contracts")
-        Write-Step "5.2" "Loading deployed contract manifest"
-        if (-not (Import-DeployedContractManifest)) {
-            Write-Fail "Contract deployment did not produce a valid manifest."
-            exit 1
-        }
-
-        if ($deployExitCode -ne 0) {
-            Write-Warn "Contract deploy command returned a non-zero status, but a fresh manifest was produced. Continuing with deployed addresses."
-        }
-
-        Write-OK "Contracts deployed successfully"
+if ($Mode -eq "testnet") {
+    Write-Step "5.0" "Using Sepolia contract addresses from $EnvFile and testnet/chain-spec.sepolia.json"
+    if ($SkipContracts) {
+        Write-Info "SkipContracts set — no manifest sync performed"
     } else {
-        Write-Info "Dev mode: contracts deployed as part of compose startup"
-        Write-OK "Skipped (dev mode)"
+        Write-Info "Local Anvil deploy removed. New L1 deploys: testnet/deploy-sepolia.ps1"
     }
-
-    Write-Step "5.3" "Contract verification"
-    try {
-        $chainId = Invoke-RestMethod -Uri "http://localhost:8545" -Method POST `
-            -ContentType "application/json" `
-            -Body '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}' `
-            -TimeoutSec 5
-        Write-OK "Chain ID: $([Convert]::ToInt64($chainId.result, 16))"
-    } catch {
-        Write-Warn "Could not verify chain ID"
-    }
+    Write-OK "Sepolia L1 — chain id 11155111"
+} else {
+    Write-Step "5.0" "Dev compose uses Sepolia RPC from .env"
+    Write-OK "Skipped local L1 deploy"
 }
 
 # ─── Step 6: Start Validator Nodes ──────────────────────────────────────────
@@ -685,7 +653,7 @@ if ($Mode -eq "testnet") {
         Write-Info "Check logs: docker logs creg-testnet-node-1"
         Write-Info "Common issues:"
         Write-Info "  - Missing CREG_VALIDATOR_KEY in .env.testnet"
-        Write-Info "  - Anvil not reachable"
+        Write-Info "  - Sepolia RPC unreachable from container"
         Write-Info "  - Build failure (binary not in image)"
         exit 1
     }

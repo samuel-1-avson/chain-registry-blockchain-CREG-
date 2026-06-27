@@ -560,6 +560,8 @@ mod tests {
             stake: 100,
             reputation: 100,
             status: "online".into(),
+            performance_score: 500,
+            contribution_count: 0,
         }
     }
 
@@ -606,6 +608,7 @@ mod tests {
             analysis_bundles,
             evidence_digest,
             deterministic_risk: DeterministicRiskSummary::default(),
+            is_mandatory: true,
         }
     }
 
@@ -654,6 +657,11 @@ mod tests {
             threshold: 0,
             publisher_pubkeys: vec![],
             manifest: None,
+            analysis_committee_size: 0,
+            analysis_selection_seed: String::new(),
+            analysis_effective_size: 0,
+            analysis_mandatory_contributed: 0,
+            analysis_committee: None,
         }
     }
 
@@ -695,7 +703,7 @@ mod tests {
             })
             .collect();
         let canonical_outcome =
-            aggregate_evidence_votes(&canonical_votes, validator_set.validators.len())
+            aggregate_evidence_votes(&canonical_votes, &common::AnalysisCommittee { size: validator_set.validators.len() as u32, members: validator_set.validators.iter().map(|v| v.id.clone()).collect(), seed: String::new(), effective_size: validator_set.validators.len() as u32, performance_bias: true, ..Default::default() })
                 .expect("three canonical approvals should satisfy aggregation quorum");
         let EvidenceVoteOutcome::Verified(canonical_signatures) = canonical_outcome else {
             panic!("expected verified aggregation outcome for canonical votes");
@@ -722,7 +730,7 @@ mod tests {
             })
             .collect();
         let legacy_outcome =
-            aggregate_evidence_votes(&legacy_votes, validator_set.validators.len())
+            aggregate_evidence_votes(&legacy_votes, &common::AnalysisCommittee { size: validator_set.validators.len() as u32, members: validator_set.validators.iter().map(|v| v.id.clone()).collect(), seed: String::new(), effective_size: validator_set.validators.len() as u32, performance_bias: true, ..Default::default() })
                 .expect("three legacy approvals still satisfy vote aggregation quorum");
         let EvidenceVoteOutcome::Verified(legacy_signatures) = legacy_outcome else {
             panic!("expected verified aggregation outcome for legacy votes");

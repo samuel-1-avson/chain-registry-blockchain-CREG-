@@ -2,11 +2,9 @@
 
 One-page guide for **publishers**, **developers**, and **validators** joining the Chain Registry Sepolia testnet (`creg-testnet-1`).
 
-**Read first:** [TESTNET_PHASE_SCOPE.md](./TESTNET_PHASE_SCOPE.md) — defines what “verified” means today and known limits.
+**Read first:** Phase Scope definitions — defines what “verified” means today and known limits.
 
 **Public API:** `https://api.testnet.cregnet.dev` — set `CREG_NODE_URL` to this (or pass `--node-url`).
-
-**Readiness snapshot:** [TESTNET_READINESS_REPORT.md](../chain-registry/TESTNET_READINESS_REPORT.md)
 
 ---
 
@@ -16,9 +14,9 @@ One-page guide for **publishers**, **developers**, and **validators** joining th
 |-------------|--------|
 | **Node URL** | Set `CREG_NODE_URL=https://api.testnet.cregnet.dev` for the public fleet. Default `http://localhost:8080` is for local dev only. |
 | **Sepolia RPC** | For staking: `SEPOLIA_RPC_URL` or `CREG_ETH_RPC` |
-| **Foundry `cast`** | Required for `creg stake` and `creg testnet stake-*` |
+| **Staking Tooling** | Required for contract interactions |
 | **IPFS** | For **public testnet** publishes, set `CREG_IPFS_URL=https://ipfs.testnet.cregnet.dev` so fleet validators can fetch your tarball during admission. Local Kubo (`ipfs daemon` on `127.0.0.1:5001`) is fine for local dev only. |
-| **Two key types** | **Ed25519** (`creg keygen`) signs packages; **secp256k1 EOA** stakes tCREG on L1. See [WALLET_KEY_DERIVATION.md](./WALLET_KEY_DERIVATION.md). |
+| **Two key types** | **Ed25519** (`creg keygen`) signs packages; **secp256k1 EOA** stakes tCREG on L1. |
 
 **Contract addresses (Sepolia defaults):**
 
@@ -34,12 +32,12 @@ Minimum stakes (from chain spec): **1 tCREG** publisher, **100 tCREG** validator
 
 ## Publisher — publish a package
 
-### 1. Build the CLI
+### 1. Install the CLI
+
+Download and install the latest `creg` command-line utility:
 
 ```bash
-cd chain-registry
-cargo build --release -p cli
-export PATH="$PWD/target/release:$PATH"
+curl -sSf https://install.cregnet.dev/creg.sh | sh
 ```
 
 ### 2. Generate an Ed25519 publish key
@@ -55,21 +53,14 @@ Use a **separate Ethereum wallet** (not the Ed25519 key file):
 ```bash
 export SEPOLIA_RPC_URL=https://sepolia.infura.io/v3/YOUR_KEY
 export CREG_STAKING_ADDR=0xf28C63C4Aafd27025E535Ab9ab7B4daC18C96Bc2
-export CREG_TOKEN_ADDR=0x97c21d46B3eac604e92E907D54aA92eEc0Af550b
 
-# Option A — unified stake command (approve + stakeAsPublisher)
+# Stake command (approve + stakeAsPublisher)
 creg stake --amount 1 --role publisher \
   --key ~/.creg/publisher-eoa.key \
   --rpc-url "$SEPOLIA_RPC_URL"
-
-# Option B — testnet helper
-creg testnet stake-publisher 1 --key 0xYourEoaPrivateKey --rpc-url "$SEPOLIA_RPC_URL"
-
-# Option C — faucet first (if operator runs faucet on :8082)
-creg testnet drip --address 0xYourPublisherAddress
 ```
 
-Acquire tCREG via the operator faucet or `testnet/stake-publisher-sepolia.ps1`.
+Acquire tCREG via the public faucet operator.
 
 ### 4. Pin to fleet IPFS and publish
 
@@ -97,7 +88,7 @@ Run `creg doctor` before publishing — it warns when `CREG_NODE_URL` is remote 
 creg status npm:my-package@1.0.0 --node-url "$CREG_NODE_URL"
 ```
 
-**Expected today:** `pending` on observer nodes; `verified` only after a validator fleet finalizes (see NET-301 in [NEXT_WORK.md](./NEXT_WORK.md)).
+**Expected today:** `pending` on observer nodes; `verified` only after validator finalization.
 
 ---
 
@@ -126,19 +117,22 @@ creg setup-shims
 # Prefer `creg install` for verified IPFS-backed installs.
 ```
 
-### Browse the registry (explorer)
+### Browse the registry
 
-| Stack | URL | Notes |
-|-------|-----|-------|
-| Main Docker compose | http://localhost:3007 | Proxied to node :8090 |
-| 3-node Sepolia lab | http://localhost:28180/ui | Embedded node UI if image includes explorer dist |
-| Standalone dev | `cd explorer && VITE_API_BASE=http://localhost:28180 npm run dev` | Point at any node API port |
+You can browse registry statistics and verified package lists via the public registry dashboard:
+
+https://explorer.testnet.cregnet.dev
 
 ---
 
 ## Validator — join the network
 
-**Internal operators:** [chain-registry/testnet/OPERATOR.md](../chain-registry/testnet/OPERATOR.md) (3-node Sepolia fleet).
+At public-testnet scale CREG uses a **hybrid mandatory + voluntary analysis committee** model (see `CREG_SYSTEM_WORKFLOW.md` §9.11 for details):
+
+- A small mandatory core (target 100 for large sets) is selected at admission time (VRF-seeded + stake-weighted + per-`eth_address` cap).
+- Only mandatory members are required to run the full (expensive) pipeline.
+- Any validator can voluntarily run the pipeline; their votes are recorded and improve liveness/reputation.
+- Committee membership for any package is queryable at `/v1/packages/:canonical/committee`.
 
 **External validators (high level):**
 
@@ -154,47 +148,7 @@ creg stake --amount 100 --role validator \
 3. Wait for consensus admission (`approveByConsensus` from an active validator).
 4. Run `creg-node` with `CREG_IS_VALIDATOR=true`, `CREG_VALIDATOR_KEY`, signed chain spec URL.
 
-For validator-2 on the internal 3-node fleet:
-
-```powershell
-$env:VALIDATOR_2_ETH_PRIVATE_KEY = "0x..."
-.\chain-registry\testnet\register-validator-2-sepolia.ps1
-```
-
-See [TESTNET_SEPOLIA_RUNBOOK.md](./TESTNET_SEPOLIA_RUNBOOK.md) and [OPERATOR.md](../chain-registry/testnet/OPERATOR.md) for validator fleet operations.
-
----
-
-## Operator stacks (reference)
-
-| Goal | Command / doc |
-|------|----------------|
-| Full Sepolia stack (node + explorer + faucet) | `cd chain-registry && docker compose up -d` |
-| 3-node consensus lab | `.\chain-registry\testnet\start-3node-test.ps1` |
-| 3-node + explorer (+ optional faucet) | `.\chain-registry\testnet\start-3node-public.ps1` |
-| Patch chain-spec service URLs (local lab) | `.\chain-registry\testnet\patch-sepolia-chain-spec-services.ps1` |
-| Soak test (maintainers) | `.\chain-registry\testnet\soak-3node-consensus.ps1` |
-| Preflight | `creg doctor` (load `testnet/scanner-fleet.env` first) |
-| Sepolia deploy | [TESTNET_SEPOLIA_RUNBOOK.md](./TESTNET_SEPOLIA_RUNBOOK.md) |
-
-**3-node API ports (defaults):** 28180 (validator-1), 28181 (validator-2), 28182 (observer).  
-**Public lab UI:** explorer `http://localhost:3007`, faucet `http://localhost:8082` (when started with `-WithFaucet`).
-
-### Install `creg` without building manually
-
-```bash
-# Linux — from source until a release tag exists
-./chain-registry/scripts/install-creg.sh --build
-
-# Windows
-.\chain-registry\scripts\install-creg.ps1 -BuildFromSource
-```
-
-When maintainers publish a tag (`v*`), GitHub Actions workflow `release-binaries.yml` attaches `creg` and `creg-node` to the release. Then:
-
-```bash
-./scripts/install-creg.sh --version v0.1.2-testnet
-```
+Real (non-dev) sandbox + pinned scanner profile are required for your votes to count toward public quorum. Voluntary analysis is always allowed and encouraged.
 
 ---
 
@@ -206,8 +160,8 @@ When maintainers publish a tag (`v*`), GitHub Actions workflow `release-binaries
 | `Insufficient stake` / 403 on publish | Same; confirm `stakedBalance > 0` on Staking contract |
 | `expected value at line 1 column 1` on publish | UTF-8 BOM in `package.json` inside tarball |
 | `validator_set_sync=degraded` | Use archive-capable Sepolia RPC; set `epoch_block_height` in chain spec |
-| `UnknownValidator` on node 2 | Complete L1 registration per OPERATOR.md |
-| `Consensus timeout` | Align scanner env across validators (`scanner-fleet.env`); check `creg doctor` profile digest |
+| `UnknownValidator` on node | Complete L1 registration requirements |
+| `Consensus timeout` | Align scanner environment profiles across validators |
 | Wrong node / UNKNOWN status | Set `CREG_NODE_URL`; pending is lost on node restart |
 | Publish 502 / admission timeout | Set `CREG_IPFS_URL=https://ipfs.testnet.cregnet.dev` when using public API; confirm CID with `curl -I "https://ipfs.testnet.cregnet.dev/ipfs/<cid>"` |
 
@@ -216,8 +170,6 @@ When maintainers publish a tag (`v*`), GitHub Actions workflow `release-binaries
 ## Alpha limitations
 
 - **SEC-401** external security audit not yet complete — treat as public alpha, not production.
-- **L1 bridge anchoring** requires operator `CREG_BRIDGE_KEY` configuration.
+- **L1 bridge anchoring** requires operator bridge configuration.
 - **Cross-chain** and **shielded publish** remain disabled in chain spec.
 - **Governance HTTP API** returns 501 by design.
-
-**Support:** GitHub Issues URL in `chain-spec.sepolia.json` → `support.issues`

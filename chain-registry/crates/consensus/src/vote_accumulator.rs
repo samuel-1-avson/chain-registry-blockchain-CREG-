@@ -435,6 +435,7 @@ impl PackageVoteState {
                 analysis_bundles: v.analysis_bundles.clone(),
                 evidence_digest: v.evidence_digest.clone(),
                 deterministic_risk: common::DeterministicRiskSummary::default(),
+                is_mandatory: false, // default for accumulator path
             })
             .collect()
     }

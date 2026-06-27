@@ -81,11 +81,41 @@ pub struct Validator {
     pub stake: u64,
     pub reputation: u32,
     pub status: String, // "online", "self", "offline"
+
+    // --- Performance / resources proxy (for committee selection) ---
+    /// 0-1000 composite score reflecting observed ability to successfully and
+    /// timely complete expensive analysis work (sandbox + evidence production).
+    /// Higher == better demonstrated resources + reliability.
+    /// Updated from pipeline contributions and reward emissions.
+    /// Used to bias mandatory committee selection toward capable nodes.
+    #[serde(default = "default_perf_score")]
+    pub performance_score: u32,
+    /// Number of packages this validator has contributed to (for averaging).
+    #[serde(default)]
+    pub contribution_count: u32,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default)]
 pub struct ValidatorSet {
     pub validators: Vec<Validator>,
+}
+
+fn default_perf_score() -> u32 { 500 }
+
+impl Default for Validator {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            alias: String::new(),
+            pubkey: String::new(),
+            eth_address: String::new(),
+            stake: 0,
+            reputation: 0,
+            status: String::new(),
+            performance_score: default_perf_score(),
+            contribution_count: 0,
+        }
+    }
 }
 
 impl ValidatorSet {

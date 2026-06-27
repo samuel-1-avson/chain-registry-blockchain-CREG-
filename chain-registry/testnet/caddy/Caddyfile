@@ -1,5 +1,5 @@
-# TLS reverse proxy for the 3-node public testnet (Let's Encrypt via Caddy).
-# Hostnames come from environment variables set in sepolia-3node.env.
+# TLS reverse proxy for public testnet edge (Let's Encrypt via Caddy).
+# Hostnames come from environment variables set in sepolia-fleet.env.
 #
 # Required: CREG_ACME_EMAIL, CREG_PUBLIC_API_HOST, CREG_PUBLIC_EXPLORER_HOST,
 #           CREG_PUBLIC_SPEC_HOST, CREG_PUBLIC_IPFS_HOST

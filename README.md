@@ -14,7 +14,7 @@ A decentralized package registry that replaces single-authority trust (npm, PyPI
 
 ## What problem this solves
 
-Supply-chain attacks exploit one compromised maintainer or stolen API token. Chain Registry treats every publish as a **consensus decision**: economically staked validators run static analysis, behavioral sandboxing, and ML-assisted review before a package can reach **verified** status. Consumers install against cryptographic verdicts, not publisher reputation alone.
+Supply-chain attacks exploit one compromised maintainer or stolen API token. Chain Registry treats every publish as a **consensus decision**. At scale, analysis is performed by a small mandatory committee (VRF-seeded, stake-weighted, operator-capped) selected at admission time; any validator may contribute voluntarily. Packages reach **verified** status only after quorum of consensus-grade evidence + PBFT block finality. Consumers install against cryptographic verdicts and on-chain committee records, not publisher reputation alone.
 
 ---
 
@@ -77,7 +77,8 @@ The alpha waitlist app is a separate product surface: live at [waitlist.cregnet.
 | Audience | Start here |
 |----------|------------|
 | **Publishers & developers** | [docs/PUBLIC_TESTNET_QUICKSTART.md](docs/PUBLIC_TESTNET_QUICKSTART.md) |
-| **Validators & node operators** | [chain-registry/testnet/OPERATOR.md](chain-registry/testnet/OPERATOR.md) |
+| **Validators & node operators** | [docs/VALIDATOR_ONBOARDING_CHECKLIST.md](docs/VALIDATOR_ONBOARDING_CHECKLIST.md) |
+| **Maintainers (what's next)** | [docs/WHAT_TO_DO_NEXT.md](docs/WHAT_TO_DO_NEXT.md) |
 | **Auditors & researchers** | [chain-registry/DEEP_DIVE_ANALYSIS.md](chain-registry/DEEP_DIVE_ANALYSIS.md) |
 | **Testnet expectations** | [docs/TESTNET_PHASE_SCOPE.md](docs/TESTNET_PHASE_SCOPE.md) |
 
@@ -114,15 +115,17 @@ This repository follows the same pattern as other open blockchains: **protocol c
 
 ## Documentation
 
-**[docs/PUBLIC.md](docs/PUBLIC.md)** — protocol, operators, contracts, circuits (public-facing only).
-
 | Document | Purpose |
 |----------|---------|
+| [docs/TESTNET_SCALE_ARCHITECTURE.md](docs/TESTNET_SCALE_ARCHITECTURE.md) | **10k+ validator testnet topology** |
+| [docs/WHAT_TO_DO_NEXT.md](docs/WHAT_TO_DO_NEXT.md) | **Maintainers** — test system, waitlist, Arena, validator onboarding |
+| [docs/PUBLIC.md](docs/PUBLIC.md) | Public-facing protocol index |
+| [docs/README.md](docs/README.md) | Full maintainer doc index |
 | [WHITEPAPER.md](docs/WHITEPAPER.md) | Public-alpha technical whitepaper |
 | [DEEP_DIVE_ANALYSIS.md](chain-registry/DEEP_DIVE_ANALYSIS.md) | Technical architecture and issue registry |
-| [TESTNET_READINESS_REPORT.md](chain-registry/TESTNET_READINESS_REPORT.md) | Readiness assessment and evidence |
 | [contracts/README.md](chain-registry/contracts/README.md) | Solidity contract status |
 | [circuits/README.md](circuits/README.md) | ZK circuit build and verification |
+| [CREG-Contribution-Arena/README.md](CREG-Contribution-Arena/README.md) | Contribution Arena product |
 
 ---
 
@@ -130,13 +133,16 @@ This repository follows the same pattern as other open blockchains: **protocol c
 
 | Milestone | Status |
 |-----------|--------|
-| Sepolia contracts + 3-node lab | Live |
+| Sepolia contracts + scale testnet architecture | Live |
 | 2-validator PBFT quorum | Done |
 | Real sandbox engine | Done |
 | Public HTTPS testnet | Live — `testnet.cregnet.dev` |
 | Binary release `v0.1.0-testnet` | Done |
 | Public alpha waitlist | Live — [waitlist.cregnet.dev](https://waitlist.cregnet.dev) |
-| External security audit | Open — scope ready, vendor/start date TBD |
+| Contribution Arena | Alpha — [contribute.cregnet.dev](https://contribute.cregnet.dev) |
+| Phase 1 remediation (gossip, batch, relays) | Done — Iteration 6 |
+| Public testnet GCP stack | Resumable — may be stopped during waitlist-only phase |
+| External security audit | Open — scope ready, evidence pack pending |
 
 This is a **public alpha testnet**, not mainnet. See [TESTNET_PHASE_SCOPE.md](docs/TESTNET_PHASE_SCOPE.md) for participant expectations.
 

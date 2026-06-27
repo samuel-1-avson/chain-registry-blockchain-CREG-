@@ -34,14 +34,16 @@ function Import-DotEnv {
     }
 }
 
-Import-DotEnv (Join-Path $scriptDir "sepolia-3node.env")
+$envFile = Join-Path $scriptDir "sepolia-fleet.env"
+if (-not (Test-Path $envFile)) { $envFile = Join-Path $scriptDir "sepolia-3node.env" }
+Import-DotEnv $envFile
 Import-DotEnv (Join-Path $scriptDir ".env.sepolia")
 
 if (-not $RpcUrl) {
     $RpcUrl = $env:CREG_ETH_RPC
     if (-not $RpcUrl) { $RpcUrl = $env:SEPOLIA_RPC_URL }
 }
-if (-not $RpcUrl) { throw "Set CREG_ETH_RPC in testnet/sepolia-3node.env" }
+if (-not $RpcUrl) { throw "Set CREG_ETH_RPC in testnet/sepolia-fleet.env" }
 
 if (-not $GovernanceSignerKey) {
     $GovernanceSignerKey = $env:GOVERNANCE_SIGNER_KEY

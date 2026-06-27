@@ -12,7 +12,7 @@ resources:
   # Data stores
   - 10-postgres.yaml
   - 11-ipfs.yaml
-  - 12-anvil.yaml
+  # Anvil retired — use external Sepolia RPC (see 01-configmap.yaml CREG_ETH_RPC)
   
   # Application
   - 20-validator.yaml

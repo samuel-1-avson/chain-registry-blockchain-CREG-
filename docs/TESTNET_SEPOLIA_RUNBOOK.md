@@ -172,7 +172,7 @@ The script sets `CREG_SPEC_SIGNATURE_URL` so the node fetches the detached `.sig
 
 Then: `curl http://localhost:8080/v1/health` and `creg doctor --testnet`.
 
-**Multi-validator host:** see `testnet/run-3node-host.ps1` (sets `CREG_CHAIN_SPEC_URL` per node).
+**Multi-validator host:** each operator runs one validator per host — [VALIDATOR_ONBOARDING_CHECKLIST.md](./VALIDATOR_ONBOARDING_CHECKLIST.md).
 
 ---
 
@@ -186,7 +186,7 @@ End-to-end check: stake publisher → IPFS → `creg publish` → node admits pa
 
 On observer nodes, the validator pipeline must **not** drain the in-memory pending pool (fixed in `validator_pipeline.rs`: pipeline ticks are skipped when `!is_validator`). Without that fix, publish succeeds but `GET /v1/packages/:canonical` returns 404 within ~1s.
 
-**Verified on chain** requires `CREG_IS_VALIDATOR=true`, `CREG_VALIDATOR_KEY`, and stake — see `run-3node-host.ps1` or backlog item NET-301. Pending visibility alone is enough for E2E-301.
+**Verified on chain** requires `CREG_IS_VALIDATOR=true`, `CREG_VALIDATOR_KEY`, and stake — see [VALIDATOR_ONBOARDING_CHECKLIST.md](./VALIDATOR_ONBOARDING_CHECKLIST.md). Pending visibility alone is enough for E2E-301.
 
 ### Prerequisites
 
@@ -309,4 +309,4 @@ Keep the previous `sepolia-latest.json` and spec in git history for forensics.
 - [SECURITY_AND_REMEDIATION_IMPLEMENTATION_PLAN.md](./SECURITY_AND_REMEDIATION_IMPLEMENTATION_PLAN.md) — REM-210, Phase 2
 - [REMEDIATION_BACKLOG.md](./REMEDIATION_BACKLOG.md)
 - [DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md) — PostgreSQL mirror (optional on testnet)
-- Local 3-validator Docker: `docker-compose.local-testnet.yml` + `local-testnet.ps1` (Anvil, not Sepolia)
+- Local Sepolia bootstrap: `docker-compose.testnet.yml` + `testnet.ps1`

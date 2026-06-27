@@ -42,21 +42,56 @@ gcloud run services add-iam-policy-binding registerwaitlist `
   --role="roles/run.invoker"
 ```
 
-## Deploy
+## Deploy backend (Firestore + Functions)
 
 ```powershell
 cd Creg-waitlist
+$env:FUNCTIONS_DISCOVERY_TIMEOUT = "60"
 npx --yes firebase-tools@latest deploy --project gen-lang-client-0098858574 --only "firestore,functions:registerWaitlist" --force
 ```
 
-## Deploy static site (same VM as testnet)
+## Deploy static site (Firebase Hosting)
+
+Replaces the edge VM (`creg-testnet-vm`) for the SPA. Same Firebase project as the backend.
 
 ```powershell
-cd chain-registry
-.\testnet\gcp\deploy-waitlist.ps1 -Confirm -SkipDns
+cd chain-registry\testnet\gcp
+.\deploy-waitlist-hosting.ps1
 ```
 
-Requires `Creg-waitlist/.env` with `VITE_RECAPTCHA_SITE_KEY` before build.
+Requires `Creg-waitlist/.env` with `VITE_RECAPTCHA_SITE_KEY` and `VITE_WALLETCONNECT_PROJECT_ID` before build.
+
+**reCAPTCHA / WalletConnect allowlists** must include:
+
+- `waitlist.cregnet.dev`
+- `localhost`
+- `gen-lang-client-0098858574.web.app`
+- `gen-lang-client-0098858574.firebaseapp.com`
+
+### Custom domain + DNS
+
+1. Firebase console → Hosting → Add custom domain → `waitlist.cregnet.dev` (complete TXT verification if prompted)
+2. Point Cloudflare DNS (grey cloud / DNS only):
+
+```powershell
+$env:CLOUDFLARE_API_TOKEN = "..."
+cd chain-registry\testnet\gcp
+.\set-waitlist-dns-firebase.ps1
+```
+
+3. After HTTPS + registration work on the custom domain, stop the edge VM:
+
+```powershell
+.\stop-testnet-hosting.ps1 -Yes
+```
+
+### Legacy: VM static hosting
+
+```powershell
+.\deploy-waitlist.ps1 -Confirm -SkipDns
+```
+
+Use only if Firebase Hosting is unavailable. Prefer Hosting for ~$98/mo VM savings.
 
 ## Verify
 
@@ -72,6 +107,7 @@ Requires `Creg-waitlist/.env` with `VITE_RECAPTCHA_SITE_KEY` before build.
 | Firebase project | `gen-lang-client-0098858574` |
 | Named Firestore DB | `ai-studio-6b167dc8-a078-4526-a86b-de2a8722a753` |
 | Function | `registerWaitlist` (`us-central1`, public invoker) |
+| Public stats | `waitlistPublicStats` (`us-central1`, GET, cached) — `https://us-central1-gen-lang-client-0098858574.cloudfunctions.net/waitlistPublicStats` |
 | reCAPTCHA site key | `6LfLaB0tAAAAAD-YmiBUrSNzEsybw6C-jWSxDSqM` (`creg-waitlist`) |
 | Static host | `waitlist.cregnet.dev` |
 | Waitlist app repo | [github.com/samuel-1-avson/Creg-waitlist](https://github.com/samuel-1-avson/Creg-waitlist) |

@@ -210,6 +210,7 @@ fn legacy_public_routes(sse_bus: EventBus, ws_bus: EventBus) -> Router<SharedSta
         // Packages
         .route("/v1/packages/:canonical", get(get_package))
         .route("/v1/packages", get(list_packages).post(submit_package))
+        .route("/v1/packages/:canonical/committee", get(get_package_committee))
         .route("/v1/packages/:canonical/revoke", post(revoke_package))
         .route("/v1/packages/:canonical/proof", get(get_proof))
         .route(
@@ -648,6 +649,11 @@ struct RuntimeConfigResponse {
     registry_address: Option<String>,
     token_contract: Option<String>,
     staking_contract: Option<String>,
+    /// Analysis work rewards (ValidatorRewards.sol) – emitted on Verified via pipeline hook.
+    /// See workflow.md §9.12 for full mechanics (base 0.00001 CREG, points, isMandatory, performance feedback).
+    validator_rewards_contract: Option<String>,
+    /// Treasury address used to source rewards (from CregToken/ValidatorRewards). For monitoring.
+    treasury_addr: Option<String>,
     cors_allowed_origins: Vec<String>,
     cors_allowed_methods: Vec<String>,
     cors_allow_credentials: bool,
@@ -664,6 +670,14 @@ struct RuntimeConfigResponse {
     /// MAL-001: true when CREG_DEV_SANDBOX=true is active. Must be false on
     /// public validator profiles.
     sandbox_dev_bypass: bool,
+    // Incentive emission counters (see §9.12 and §15)
+    reward_emissions_succeeded: u64,
+    reward_emissions_failed: u64,
+    treasury_balance: u128,
+    pending_rewards_estimate: u128,
+    total_rewards_distributed: u128,
+    rewards_pool_balance: u128,
+    last_incentives_refresh: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -688,9 +702,132 @@ fn non_zero_address(value: &str) -> Option<String> {
     }
 }
 
+/// Small helper for treasury monitoring: query ERC20 balanceOf(treasury) via L1 RPC.
+/// Returns 0 on any error (best effort, non-blocking for config/metrics).
+async fn query_treasury_balance(rpc_url: &str, token_addr: &str, treasury_addr: &str) -> anyhow::Result<u128> {
+    use alloy::primitives::Address;
+    use alloy::providers::ProviderBuilder;
+    use alloy::sol;
+
+    sol! {
+        #[sol(rpc)]
+        interface IERC20 {
+            function balanceOf(address account) external view returns (uint256);
+        }
+    }
+
+    let provider = ProviderBuilder::new().on_http(rpc_url.parse()?);
+    let token: Address = token_addr.parse()?;
+    let treasury: Address = treasury_addr.parse()?;
+
+    let token_contract = IERC20::new(token, &provider);
+    let bal = token_contract.balanceOf(treasury).call().await?._0;
+    Ok(bal.to::<u128>())
+}
+
+async fn query_total_rewards_distributed(rpc_url: &str, rewards_addr: &str) -> anyhow::Result<u128> {
+    use alloy::primitives::Address;
+    use alloy::providers::ProviderBuilder;
+    use alloy::sol;
+
+    sol! {
+        #[sol(rpc)]
+        interface IValidatorRewards {
+            function totalRewardsDistributed() external view returns (uint256);
+        }
+    }
+
+    let provider = ProviderBuilder::new().on_http(rpc_url.parse()?);
+    let contract = IValidatorRewards::new(rewards_addr.parse()?, &provider);
+    let val = contract.totalRewardsDistributed().call().await?._0;
+    Ok(val.to::<u128>())
+}
+
+async fn query_rewards_pool(rpc_url: &str, pinning_addr: &str) -> anyhow::Result<u128> {
+    use alloy::primitives::Address;
+    use alloy::providers::ProviderBuilder;
+    use alloy::sol;
+
+    sol! {
+        #[sol(rpc)]
+        interface IPinningRewards {
+            function rewardsPool() external view returns (uint256);
+        }
+    }
+
+    let provider = ProviderBuilder::new().on_http(rpc_url.parse()?);
+    let contract = IPinningRewards::new(pinning_addr.parse()?, &provider);
+    let val = contract.rewardsPool().call().await?._0;
+    Ok(val.to::<u128>())
+}
+
+/// Refresh incentives values from L1 into state (treasury balance, total distributed, pool).
+/// Best effort; called from background task or on-demand.
+pub async fn refresh_incentives_status(state: Arc<tokio::sync::RwLock<crate::NodeState>>, config: &crate::config::NodeConfig) {
+    if config.eth_rpc_url.is_empty() {
+        return;
+    }
+    let rpc = &config.eth_rpc_url;
+
+    // Treasury balance
+    if let Some(tr) = &config.treasury_addr {
+        if let Ok(bal) = query_treasury_balance(rpc, &config.token_addr, tr).await {
+            let mut s = state.write().await;
+            s.treasury_balance = bal;
+        }
+    }
+
+    // ValidatorRewards total distributed
+    if !config.validator_rewards_addr.trim().is_empty()
+        && config.validator_rewards_addr != "0x0000000000000000000000000000000000000000"
+    {
+        if let Ok(total) = query_total_rewards_distributed(rpc, &config.validator_rewards_addr).await {
+            let mut s = state.write().await;
+            s.total_rewards_distributed = total;
+        }
+    }
+
+    // Pinning pool if configured
+    if let Some(pinning) = &config.pinning_rewards_addr {
+        if !pinning.trim().is_empty() && pinning != "0x0000000000000000000000000000000000000000" {
+            if let Ok(pool) = query_rewards_pool(rpc, pinning).await {
+                let mut s = state.write().await;
+                s.rewards_pool_balance = pool;
+            }
+        }
+    }
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    {
+        let mut s = state.write().await;
+        s.last_incentives_refresh = Some(now);
+    }
+}
+
 async fn runtime_config(State(state): State<SharedState>) -> impl IntoResponse {
     let sandbox = validator::sandbox::engine_status().await;
     let s = state.read().await;
+
+    // Small L1 query for actual treasury monitoring (balance of treasury in token)
+    // Run on demand; updates state for subsequent calls/metrics. Also refreshes pending est if possible.
+    let treasury_bal = if let Some(tr) = &s.config.treasury_addr {
+        let tok = &s.config.token_addr;
+        let rpc = &s.config.eth_rpc_url;
+        if let Ok(bal) = query_treasury_balance(rpc, tok, tr).await {
+            let mut sw = state.write().await;
+            sw.treasury_balance = bal;
+            bal
+        } else {
+            s.treasury_balance
+        }
+    } else {
+        s.treasury_balance
+    };
+    // For pending estimate, we can leave as-is or add similar contract query in future micro.
+    let pending_est = s.pending_rewards_estimate;
     let chain_id = if s.config.chain_id.is_empty() {
         if s.config.is_testnet {
             "creg-testnet-1".to_string()
@@ -715,6 +852,8 @@ async fn runtime_config(State(state): State<SharedState>) -> impl IntoResponse {
         registry_address: non_zero_address(&s.config.registry_addr),
         token_contract: non_zero_address(&s.config.token_addr),
         staking_contract: non_zero_address(&s.config.staking_addr),
+        validator_rewards_contract: non_zero_address(&s.config.validator_rewards_addr),
+        treasury_addr: s.config.treasury_addr.clone(),
         cors_allowed_origins: s.config.cors.allowed_origins.clone(),
         cors_allowed_methods: s.config.cors.allowed_methods.clone(),
         cors_allow_credentials: s.config.cors.allow_credentials,
@@ -737,6 +876,13 @@ async fn runtime_config(State(state): State<SharedState>) -> impl IntoResponse {
         }),
         sandbox_engine: sandbox.engine,
         sandbox_dev_bypass: sandbox.dev_bypass,
+        reward_emissions_succeeded: s.reward_emissions_succeeded,
+        reward_emissions_failed: s.reward_emissions_failed,
+        treasury_balance: treasury_bal,
+        pending_rewards_estimate: pending_est,
+        total_rewards_distributed: s.total_rewards_distributed,
+        rewards_pool_balance: s.rewards_pool_balance,
+        last_incentives_refresh: s.last_incentives_refresh,
     })
 }
 
@@ -1422,6 +1568,8 @@ struct PackageResp {
     analysis_bundles: Option<common::AnalysisBundleRefs>,
     evidence_digest: Option<String>,
     deterministic_risk: Option<common::DeterministicRiskSummary>,
+    // Committee info now embedded in ChainRecord for verified packages
+    analysis_committee: Option<serde_json::Value>,
 }
 
 // GET /v1/packages/:canonical
@@ -1458,6 +1606,20 @@ async fn get_package(State(state): State<SharedState>, Path(canonical): Path<Str
             analysis_bundles: Some(record.analysis_bundles.clone()),
             evidence_digest: Some(record.evidence_digest.clone()),
             deterministic_risk: Some(record.deterministic_risk.clone()),
+            analysis_committee: record.analysis_committee.as_ref().map(|c| {
+                let members_detailed: Vec<serde_json::Value> = c.members.iter().map(|m| {
+                    let score_at_final = c.member_performance_at_finalization.get(m).copied().unwrap_or(0);
+                    serde_json::json!({ "id": m, "performance_score_at_finalization": score_at_final })
+                }).collect();
+                serde_json::json!({
+                    "size": c.size,
+                    "members": members_detailed,
+                    "seed": c.seed,
+                    "effective_size": c.effective_size,
+                    "performance_bias": c.performance_bias,
+                    "member_performance_at_finalization": c.member_performance_at_finalization,
+                })
+            }),
         };
         return Json(resp).into_response();
     }
@@ -1498,6 +1660,75 @@ async fn get_package_intelligence(
     }
 
     Json(store.response_for_package(&canonical, None)).into_response()
+}
+
+// GET /v1/packages/:canonical/committee - Explorer/API surface for committee membership
+async fn get_package_committee(State(state): State<SharedState>, Path(canonical): Path<String>) -> Response {
+    let canonical = urlencoding::decode(&canonical).unwrap_or_default().to_string();
+    let s = state.read().await;
+
+    if let Some(c) = s.pending_pool.get_committee(&canonical) {
+        let members_detailed: Vec<serde_json::Value> = c.members.iter().map(|mid| {
+            let perf = s.validator_set.validators.iter()
+                .find(|v| &v.id == mid)
+                .map(|v| v.performance_score)
+                .unwrap_or(0);
+            serde_json::json!({ "id": mid, "performance_score": perf })
+        }).collect();
+        return Json(serde_json::json!({
+            "canonical": canonical,
+            "size": c.size,
+            "members": members_detailed,
+            "seed": c.seed,
+            "effective_size": c.effective_size,
+            "performance_bias": c.performance_bias,
+        })).into_response();
+    }
+
+    if let Ok(Some(record)) = s.chain.get_package(&canonical) {
+        if let Some(c) = record.get_analysis_committee() {
+            // Full or reconstructed committee. For modern records, member_performance_at_finalization
+            // has the scores captured at the exact moment of finalization (including this package's effect).
+            let members_detailed: Vec<serde_json::Value> = c.members.iter().map(|mid| {
+                let score_at_final = c.member_performance_at_finalization.get(mid).copied().unwrap_or(0);
+                // Live score may have changed since finalization
+                let live_score = s.validator_set.validators.iter()
+                    .find(|v| &v.id == mid)
+                    .map(|v| v.performance_score)
+                    .unwrap_or(0);
+                serde_json::json!({
+                    "id": mid,
+                    "performance_score_at_finalization": score_at_final,
+                    "current_performance_score": live_score,
+                })
+            }).collect();
+            return Json(serde_json::json!({
+                "canonical": canonical,
+                "size": c.size,
+                "members": members_detailed,
+                "seed": c.seed,
+                "effective_size": c.effective_size,
+                "performance_bias": c.performance_bias,
+                "mandatory_contributed": record.analysis_mandatory_contributed,
+                "note": if record.analysis_committee.is_some() {
+                    "at-finalization-time scores captured in member_performance_at_finalization"
+                } else {
+                    "legacy record - members list not available, scores not captured"
+                },
+            })).into_response();
+        }
+        // Legacy fallback
+        return Json(serde_json::json!({
+            "canonical": canonical,
+            "size": record.analysis_committee_size,
+            "seed": record.analysis_selection_seed,
+            "effective_size": record.analysis_effective_size,
+            "mandatory_contributed": record.analysis_mandatory_contributed,
+            "note": "no committee data; very old record"
+        })).into_response();
+    }
+
+    Json(serde_json::json!({"error": "no committee info for package"})).into_response()
 }
 
 // POST /v1/operator/packages/:canonical/intelligence/generate
@@ -2226,32 +2457,35 @@ async fn get_validator_profile(
     State(state): State<SharedState>,
     Path(address): Path<String>,
 ) -> Response {
-    if !is_evm_address_like(&address) {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse {
-                error: format!("Not a valid EVM address: {}", address),
-            }),
-        )
-            .into_response();
-    }
     let normalized = address.to_ascii_lowercase();
     let s = state.read().await;
 
-    let registration = s.validator_registrations.get(&normalized).cloned();
+    // Support either EVM address or node id for lookup
+    let registration = s.validator_registrations.get(&normalized).cloned()
+        .or_else(|| {
+            // try find registration by id? but registrations keyed by evm, fallback empty
+            None
+        });
     let active = s
         .validator_set
         .validators
         .iter()
-        .find(|v| v.eth_address.eq_ignore_ascii_case(&normalized))
+        .find(|v| v.eth_address.eq_ignore_ascii_case(&normalized) || v.id.eq_ignore_ascii_case(&normalized))
         .cloned();
 
     if registration.is_none() && active.is_none() {
         return not_found(format!("Validator not found: {}", address));
     }
 
-    let (stake, reputation, status, in_active_set) = match active.as_ref() {
-        Some(v) => (v.stake.to_string(), v.reputation, v.status.clone(), true),
+    let (stake, reputation, status, in_active_set, performance_score, contribution_count) = match active.as_ref() {
+        Some(v) => (
+            v.stake.to_string(),
+            v.reputation,
+            v.status.clone(),
+            true,
+            v.performance_score,
+            v.contribution_count,
+        ),
         None => (
             registration
                 .as_ref()
@@ -2263,6 +2497,8 @@ async fn get_validator_profile(
                 .map(|r| r.status.clone())
                 .unwrap_or_else(|| "unknown".to_string()),
             false,
+            0u32,
+            0u32,
         ),
     };
 
@@ -2281,7 +2517,21 @@ async fn get_validator_profile(
         "stake": stake,
         "reputation": reputation,
         "status": status,
+        "performance_score": performance_score,
+        "contribution_count": contribution_count,
         "recent_proposals": recent_proposals,
+        "incentives": {
+            "validator_rewards_contract": s.config.validator_rewards_addr.clone(),
+            "treasury_addr": s.config.treasury_addr.clone(),
+            "treasury_balance": s.treasury_balance,
+            "total_rewards_distributed": s.total_rewards_distributed,
+            "rewards_pool_balance": s.rewards_pool_balance,
+            "last_refresh": s.last_incentives_refresh,
+            "performance_score": performance_score,
+            "contribution_count": contribution_count,
+            "note": "See §9.12 in CREG_SYSTEM_WORKFLOW.md: rewards emitted via L1 distributeWorkRewards on Verified (base 0.00001 CREG + bonuses). performance_score feeds future mandatory committee selection. Treasury is the funding source (governance mints)."
+        },
+        "note": "performance_score reflects observed analysis reliability (higher = better resources/performance for mandatory committees). Full reward/points math and flows in workflow §9.12."
     }))
     .into_response()
 }
@@ -2786,6 +3036,8 @@ pub struct VoteMessage {
     pub deterministic_risk: common::DeterministicRiskSummary,
     pub approved: bool,
     pub reject_reason: Option<String>,
+    #[serde(default)]
+    pub is_mandatory: bool,
 }
 
 async fn receive_vote(
@@ -2948,6 +3200,7 @@ async fn receive_vote(
         analysis_bundles: vote.analysis_bundles.clone(),
         evidence_digest: vote.evidence_digest.clone(),
         deterministic_risk: vote.deterministic_risk.clone(),
+        is_mandatory: false, // TODO: extract from vote if available in this context
     };
 
     s.record_package_vote(vote.consensus_subject.clone(), sig);
@@ -3179,6 +3432,8 @@ mod tests {
             stake: 100,
             reputation: 100,
             status: "online".into(),
+            performance_score: 500,
+            contribution_count: 0,
         }
     }
 
@@ -3217,6 +3472,7 @@ mod tests {
             deterministic_risk: common::DeterministicRiskSummary::default(),
             approved,
             reject_reason: None,
+            is_mandatory: false,
         }
     }
 
@@ -3336,6 +3592,7 @@ mod tests {
             validator_set_bootstrap: common::ValidatorSet::default(),
             validator_set: common::ValidatorSet::default(),
             package_rounds: HashMap::new(),
+            package_committees: HashMap::new(),
             config: crate::config::NodeConfig {
                 data_dir: tempdir.path().to_path_buf(),
                 eth_rpc_url: rpc_url,
@@ -3354,6 +3611,13 @@ mod tests {
             forced_inclusion_tracker: crate::state::ForcedInclusionTracker::new(),
             sync_lag_blocks: 0,
             sync_max_peer_tip: 0,
+            reward_emissions_succeeded: 0,
+            reward_emissions_failed: 0,
+            treasury_balance: 0,
+            pending_rewards_estimate: 0,
+            total_rewards_distributed: 0,
+            rewards_pool_balance: 0,
+            last_incentives_refresh: None,
         }));
 
         Ok((state, tempdir, p2p_handle, tx_sender, tx_receiver))
@@ -4239,6 +4503,7 @@ mod tests {
                     analysis_bundles: bundles.clone(),
                     evidence_digest: "evidence-digest-1".into(),
                     deterministic_risk: deterministic_risk.clone(),
+                    is_mandatory: true,
                 },
             );
         }
@@ -4370,6 +4635,7 @@ mod tests {
                     analysis_bundles: test_analysis_bundles(),
                     evidence_digest: "evidence-digest-1".into(),
                     deterministic_risk: test_deterministic_risk(),
+                    is_mandatory: true,
                 },
             );
         }

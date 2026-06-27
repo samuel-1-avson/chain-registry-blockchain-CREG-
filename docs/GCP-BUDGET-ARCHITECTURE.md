@@ -10,7 +10,7 @@
 | **Testnet hosting** | `gen-lang-client-0022105784` | Edge VM + validator fleet VM + internal Geth + NAT | **$300** / **$350** |
 | **Waitlist backend** | `gen-lang-client-0098858574` | Firestore (named DB), `registerWaitlist` Cloud Function, Secret Manager (**Blaze**) | **$10** / **$25** |
 
-**Typical combined spend (Option A, 3-node fleet):** ~$280–300 (GCP) + ~$0–8 (Firebase) ≈ **~$285–310/month**.
+**Typical combined spend (maintainer edge + Geth + optional seed fleet):** ~$280–300 (GCP) + ~$0–8 (Firebase) ≈ **~$285–310/month**. External validators run on operator infrastructure — see [TESTNET_SCALE_ARCHITECTURE.md](./TESTNET_SCALE_ARCHITECTURE.md).
 
 ## Architecture (Option A — production)
 
@@ -61,14 +61,14 @@ Runbook: [GCP-VALIDATOR-FLEET.md](./GCP-VALIDATOR-FLEET.md).
 1. Create GCP Budget **`creg-testnet-hosting`** — $175 on `0022105784`
 2. Create GCP Budget **`creg-waitlist-firebase`** — $25 on `0098858574`
 3. Enable billing export to BigQuery (optional)
-4. VM kill switch: budget → Pub/Sub → stop `creg-testnet-vm` (see runbook in `testnet/gcp-public-hosting.md`)
+4. VM kill switch: budget → Pub/Sub → stop `creg-testnet-vm` (see [testnet/gcp/README.md](../chain-registry/testnet/gcp/README.md))
 5. Firebase emergency brake: disable `registerWaitlist` in Firebase console
 
 ## Deploy references
 
 | Task | Script / doc |
 |------|----------------|
-| VM + testnet stack | [gcp-public-hosting.md](../chain-registry/testnet/gcp-public-hosting.md) |
+| VM + testnet stack | [testnet/gcp/README.md](../chain-registry/testnet/gcp/README.md) |
 | Waitlist static site | `chain-registry/testnet/gcp/deploy-waitlist.ps1` |
 | Waitlist Firebase | [WAITLIST_FIREBASE_DEPLOY.md](./WAITLIST_FIREBASE_DEPLOY.md) |
 

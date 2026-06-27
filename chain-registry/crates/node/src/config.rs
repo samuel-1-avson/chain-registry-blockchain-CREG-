@@ -172,6 +172,13 @@ pub struct NodeConfig {
     pub token_addr: String,
     /// Staking contract address used by publisher and validator staking.
     pub staking_addr: String,
+    /// ValidatorRewards contract address on Ethereum for analysis work rewards.
+    pub validator_rewards_addr: String,
+    /// Treasury address (from ValidatorRewards or CregToken) used to fund rewards.
+    /// Exposed for monitoring (see §9.12 and §15). Optional; set via CREG_TREASURY_ADDR if known.
+    pub treasury_addr: Option<String>,
+    /// Optional PinningRewards contract address for storage incentives.
+    pub pinning_rewards_addr: Option<String>,
     /// Unique ID for this node (hex-encoded public key in production).
     pub node_id: String,
     /// This node's Ed25519 private key (hex). Used to sign validator votes.
@@ -265,8 +272,17 @@ impl NodeConfig {
                 "CREG_STAKING_ADDR",
                 "0x0000000000000000000000000000000000000000",
             ),
+            validator_rewards_addr: env(
+                "CREG_VALIDATOR_REWARDS_ADDR",
+                "0x0000000000000000000000000000000000000000",
+            ),
+            treasury_addr: std::env::var("CREG_TREASURY_ADDR").ok(),
+            pinning_rewards_addr: std::env::var("CREG_PINNING_REWARDS_ADDR").ok(),
             block_interval_secs: env("CREG_BLOCK_INTERVAL", "5").parse().unwrap_or(5),
-            vote_timeout_secs: env("CREG_VOTE_TIMEOUT_SECS", "10").parse().unwrap_or(10),
+            // NOTE: At large validator counts (thousands), the original 10s default is
+            // unrealistic. We default higher for public testnets and allow override.
+            // See scaling discussion in docs and validator_pipeline.
+            vote_timeout_secs: env("CREG_VOTE_TIMEOUT_SECS", "120").parse().unwrap_or(120),
             ipfs_url: env("CREG_IPFS_URL", "http://127.0.0.1:5001"),
             pg_url: env("CREG_PG_URL", ""),
             validator_set: serde_json::from_str(&env("CREG_VALIDATOR_SET", "{\"validators\":[]}"))
@@ -646,6 +662,9 @@ mod tests {
             governance_addr: "0x5FbDB2315678afecb367f032d93F642f64180aa3".into(),
             token_addr: "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9".into(),
             staking_addr: "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9".into(),
+            validator_rewards_addr: "0x0000000000000000000000000000000000000000".into(),
+            treasury_addr: None,
+            pinning_rewards_addr: None,
             node_id: "node-test".into(),
             validator_privkey: None,
             bridge_privkey: None,
@@ -673,6 +692,8 @@ mod tests {
             stake: 100,
             reputation: 100,
             status: "online".into(),
+            performance_score: 500,
+            contribution_count: 0,
         }
     }
 
@@ -733,6 +754,49 @@ mod tests {
         assert!(observer.validate_mal001_public_validator().is_empty());
 
         std::env::remove_var("CREG_DEV_SANDBOX");
+    }
+
+    #[test]
+    fn rejects_invalid_validator_key_hex() {
+        let mut cfg = base_config();
+        cfg.is_validator = true;
+        cfg.validator_privkey = Some("not-hex".into());
+        let errors = cfg.validate();
+        assert!(
+            errors.iter().any(|e| e.contains("CREG_VALIDATOR_KEY") && e.contains("valid hex")),
+            "expected invalid hex error, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn rejects_short_validator_key() {
+        let mut cfg = base_config();
+        cfg.is_validator = true;
+        cfg.validator_privkey = Some("deadbeef".into());
+        let errors = cfg.validate();
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("CREG_VALIDATOR_KEY") && e.contains("32 bytes")),
+            "expected length error, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn rejects_missing_validator_key_when_validator_mode() {
+        let mut cfg = base_config();
+        cfg.is_validator = true;
+        cfg.validator_privkey = None;
+        let errors = cfg.validate();
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("CREG_IS_VALIDATOR=true") && e.contains("not set")),
+            "expected missing key error, got: {:?}",
+            errors
+        );
     }
 
     #[test]

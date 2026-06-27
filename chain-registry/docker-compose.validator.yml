@@ -2,7 +2,7 @@
 # Runs exactly one Chain Registry validator on a single computer.
 #
 # Use this file on every validator host when the shared testnet services
-# (Anvil/IPFS/Postgres/Faucet/Explorer) are running elsewhere.
+# (IPFS/Postgres/Faucet/Explorer/spec-server) are running elsewhere.
 #
 # Usage:
 #   docker compose --env-file validator.env -f docker-compose.validator.yml up -d --build
@@ -30,7 +30,7 @@ x-validator-env: &validator-env
   CREG_BLOCK_INTERVAL: "${CREG_BLOCK_INTERVAL:-2}"
   CREG_SINGLE_VALIDATOR_MODE: "${CREG_SINGLE_VALIDATOR_MODE:-false}"
   CREG_DEV_SANDBOX: "${CREG_DEV_SANDBOX:-false}"
-  CREG_ETH_RPC: "${CREG_ETH_RPC:?set CREG_ETH_RPC to the shared Anvil RPC URL}"
+  CREG_ETH_RPC: "${CREG_ETH_RPC:?set CREG_ETH_RPC to the Sepolia RPC URL}"
   CREG_IPFS_URL: "${CREG_IPFS_URL:?set CREG_IPFS_URL to the shared IPFS API URL}"
   CREG_PG_URL: "${CREG_PG_URL:-}"
   CREG_VALIDATOR_SET: "${VALIDATOR_SET_JSON:-}"
@@ -94,7 +94,7 @@ services:
     command: ["--help"]
     environment:
       CREG_NODE_URL: "http://validator:8080"
-      CREG_ETH_RPC: "${CREG_ETH_RPC:?set CREG_ETH_RPC to the shared Anvil RPC URL}"
+      CREG_ETH_RPC: "${CREG_ETH_RPC:?set CREG_ETH_RPC to the Sepolia RPC URL}"
     depends_on:
       validator:
         condition: service_healthy

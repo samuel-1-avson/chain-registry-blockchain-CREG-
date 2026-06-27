@@ -502,9 +502,8 @@ fn merkle_root(leaves: &[[u8; 32]]) -> [u8; 32] {
     let mut current: Vec<[u8; 32]> = leaves.to_vec();
     while current.len() > 1 {
         if current.len() % 2 != 0 {
-            // SAFETY: current.len() >= 3 here (odd and > 1), so last() is always Some.
-            let last = *current.last().expect("non-empty after odd check");
-            current.push(last);
+            // Duplicate last leaf for odd length (standard Merkle padding).
+            current.push(*current.last().unwrap());
         }
         let mut next = Vec::with_capacity(current.len() / 2);
         for pair in current.chunks(2) {

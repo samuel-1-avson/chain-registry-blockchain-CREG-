@@ -43,11 +43,12 @@ try {
     # Deploy all Firestore configs in firebase.json (named DB). Per-DB targets
     # (firestore:<databaseId>) fail on firebase-tools 11.x; use firestore instead.
     # PowerShell splits on commas unless --only is quoted.
-    $deployOnly = "firestore,functions:registerWaitlist"
+    $deployOnly = "firestore,functions:registerWaitlist,functions:waitlistPublicStats,functions:waitlistAdminStats,functions:waitlistTrackView"
     if ($WhatIf) {
         Write-Host "[waitlist-firebase] WhatIf: would run: firebase deploy --project $projectId --only `"$deployOnly`""
     } else {
-        Write-Host "[waitlist-firebase] Deploying rules + registerWaitlist..."
+        Write-Host "[waitlist-firebase] Deploying rules + waitlist functions (set ADMIN_STATS_TOKEN first; see docs/WAITLIST-ADMIN-MONITORING.md)..."
+        $env:FUNCTIONS_DISCOVERY_TIMEOUT = "60"
         npx --yes firebase-tools@latest deploy --project $projectId --only $deployOnly --force
     }
 } finally {

@@ -1,7 +1,8 @@
 # Hybrid deployment — local validators, cloud edge
 
-> **Updated:** 2026-06-10  
-> **Note:** Production public testnet uses **Option A validator fleet** on GCP ([GCP-VALIDATOR-FLEET.md](./GCP-VALIDATOR-FLEET.md)). This doc is the legacy WireGuard-to-PC path.
+> **Updated:** 2026-06-26  
+> **Status:** **Legacy — do not use for new onboarding.**  
+> Production testnet targets **10,000+ independent validator operators** ([TESTNET_SCALE_ARCHITECTURE.md](./TESTNET_SCALE_ARCHITECTURE.md)). Maintainer path: GCP seed fleet ([GCP-VALIDATOR-FLEET.md](./GCP-VALIDATOR-FLEET.md)). This doc is the retired WireGuard-to-PC path only.
 
 > **Goal:** Run **creg-node-1/2/3** on your Windows PC; run **Caddy, explorer, faucet, IPFS, spec, waitlist** on GCP. Keep **self-hosted Sepolia** on `creg-sepolia-geth-vm` (no Infura).
 
@@ -28,7 +29,7 @@
 | Where | What |
 |-------|------|
 | **Local** | `creg-node-1`, `creg-node-2`, `creg-node-3` |
-| **GCP testnet VM** | Caddy, explorer, faucet, IPFS, spec-server, waitlist static |
+| **GCP testnet VM** | Caddy, explorer, faucet, IPFS, spec-server — see [testnet/gcp/README.md](../chain-registry/testnet/gcp/README.md) |
 | **GCP Geth VM** | Sepolia JSON-RPC `http://10.128.0.3:8545` |
 
 Public API `https://api.testnet.cregnet.dev` → Caddy → `10.200.0.2:28182` (local node-3).

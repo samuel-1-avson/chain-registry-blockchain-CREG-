@@ -3,6 +3,7 @@ set -euo pipefail
 REPO="${REPO:-$HOME/creg-hosting/chain-registry-blockchain-CREG-/chain-registry}"
 cd "$REPO/testnet"
 cp /tmp/sepolia-public-rpc.caddy caddy/
+cp /tmp/creg-node-jsonrpc.caddy caddy/ 2>/dev/null || true
 cp /tmp/Caddyfile.fleet caddy/ 2>/dev/null || true
 cp /tmp/Caddyfile.hybrid caddy/ 2>/dev/null || true
 cp /tmp/explorer-fleet.conf.template nginx/
@@ -17,6 +18,12 @@ sed -e "s/@VALIDATOR_IP@/${CREG_VALIDATOR_VM_INTERNAL_IP}/g" \
   nginx/explorer-fleet.conf.template > nginx/explorer-fleet.conf
 export CREG_EXPLORER_NGINX_CONF="./nginx/explorer-fleet.conf"
 export CREG_CLOUD_CADDYFILE="./caddy/Caddyfile.fleet"
+if [[ -n "${CREG_PUBLIC_WAITLIST_HOST:-}" ]]; then
+  cp caddy/waitlist-edge.caddy.example caddy/waitlist.caddy
+fi
+if [[ -n "${CREG_PUBLIC_JOIN_HOST:-}" ]]; then
+  cp caddy/hub-edge.caddy.example caddy/hub.caddy
+fi
 sudo -E docker compose -f docker-compose.cloud-edge.yml -f docker-compose.cloud-edge-ingress.yml \
   --env-file sepolia-3node.env up -d --force-recreate caddy web-explorer
 echo "RPC browser UX applied."

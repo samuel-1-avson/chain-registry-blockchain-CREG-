@@ -133,19 +133,8 @@ test_service_startup() {
     # Clean up any existing containers
     docker-compose down -v 2>/dev/null || true
     
-    # Start infrastructure services
-    docker-compose up -d anvil ipfs
-    
-    # Wait for services to be healthy
-    log_info "Waiting for Anvil to be ready..."
-    for i in {1..30}; do
-        if curl -s -X POST -H "Content-Type: application/json" \
-            --data '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}' \
-            http://localhost:8545 > /dev/null 2>&1; then
-            break
-        fi
-        sleep 1
-    done
+    # Start infrastructure services (Sepolia stack — no local Anvil)
+    docker-compose up -d ipfs spec-server
     
     log_info "Waiting for IPFS to be ready..."
     for i in {1..30}; do
@@ -286,21 +275,7 @@ test_multi_validator_consensus() {
 # TEST 7: Contract Deployment
 # =============================================================================
 test_contract_deployment() {
-    log_info "Testing contract deployment..."
-    
-    cd "$PROJECT_ROOT"
-    
-    # Check if contracts are deployed
-    local anvil_response=$(curl -s -X POST -H "Content-Type: application/json" \
-        --data '{"jsonrpc":"2.0","method":"eth_getCode","params":["0x5FbDB2315678afecb367f032d93F642f64180aa3", "latest"],"id":1}' \
-        http://localhost:8545 2>/dev/null || echo "")
-    
-    if [ -n "$anvil_response" ]; then
-        log_info "Contract code found on Anvil"
-    else
-        log_warn "Contract deployment status unclear"
-    fi
-    
+    log_info "Skipping local L1 deploy check — contracts live on Sepolia (chain-spec.sepolia.json)"
     return 0
 }
 

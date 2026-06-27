@@ -3,7 +3,7 @@
 > **Report date:** 2026-06-08 (progress addendum **2026-06-09**)  
 > **Network:** `creg-testnet-1` on Ethereum **Sepolia** (L1 chain id `11155111`)  
 > **Scope:** Readiness assessment for public testnet launch.  
-> **Status:** Historical snapshot below; **current status** is in [README.md](../README.md) and [NEXT_WORK.md](../docs/NEXT_WORK.md).
+> **Status:** Historical snapshot below; **current planning** is in [docs/WHAT_TO_DO_NEXT.md](../docs/WHAT_TO_DO_NEXT.md) and [docs/TESTNET_SCALE_ARCHITECTURE.md](../docs/TESTNET_SCALE_ARCHITECTURE.md). The retired 3-node Sepolia lab is archived under `testnet/archive/3node-lab/`.
 
 ### Progress since this report (2026-06-09)
 
@@ -14,7 +14,9 @@
 | DIST-301 — `v0.1.0-testnet` binaries | **Done** 2026-06-10 |
 | HOSTING-301 — `testnet.cregnet.dev` public HTTPS | **Done** 2026-06-10 |
 | Waitlist — `waitlist.cregnet.dev` + Firebase `registerWaitlist` | **Done** 2026-06-09 |
-| SEC-401 — external audit | **Open** — scope ready, vendor TBD |
+| SEC-401 — external audit | **Open** — scope ready, evidence pack pending |
+| Phase 1 remediation (Iter 5–6) | **Done** — gossip, batch, finalize relays |
+| Doc planning hub | [WHAT_TO_DO_NEXT.md](../docs/WHAT_TO_DO_NEXT.md) |
 
 **Revised lens (June 2026):** Coordinated public alpha is **live**. Remaining P0 before broad external stake: **SEC-401 audit**. See [TESTNET_PHASE_SCOPE.md](../docs/TESTNET_PHASE_SCOPE.md) for participant expectations.
 

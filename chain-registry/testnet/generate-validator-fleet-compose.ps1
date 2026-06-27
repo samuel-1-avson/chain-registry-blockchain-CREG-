@@ -31,7 +31,7 @@ $lines = @(
     "    context: ..",
     "    dockerfile: Dockerfile",
     "  env_file:",
-    "    - sepolia-3node.env",
+    "    - sepolia-fleet.env",
     "  networks:",
     "    - creg-validator-fleet",
     "  restart: unless-stopped",

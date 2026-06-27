@@ -1,4 +1,4 @@
-# Copy sepolia-3node.env to GCP VM via gcloud compute scp.
+# Copy sepolia-fleet.env (or legacy sepolia-3node.env) to GCP VM via gcloud compute scp.
 #
 # Usage:
 #   .\testnet\gcp\push-env.ps1
@@ -20,7 +20,13 @@ $cfg = & (Join-Path $gcpDir "_Load-HostingEnv.ps1")
 if (-not $ProjectId) { $ProjectId = $cfg.GCP_PROJECT }
 if (-not $Zone) { $Zone = $cfg.GCP_ZONE }
 if (-not $VmName) { $VmName = $cfg.GCP_VM_NAME }
-if (-not $EnvFile) { $EnvFile = Join-Path $testnetDir "sepolia-3node.env" }
+if (-not $EnvFile) {
+    $fleetEnv = Join-Path $testnetDir "sepolia-fleet.env"
+    $legacyEnv = Join-Path $testnetDir "sepolia-3node.env"
+    if (Test-Path $fleetEnv) { $EnvFile = $fleetEnv }
+    elseif (Test-Path $legacyEnv) { $EnvFile = $legacyEnv }
+    else { $EnvFile = $fleetEnv }
+}
 
 if (-not (Test-Path $EnvFile)) {
     throw "Missing $EnvFile - run prepare-public-hosting.ps1 first"
@@ -41,7 +47,10 @@ foreach ($line in Get-Content -LiteralPath $EnvFile) {
 
 $repoSlug = ($cfg.GITHUB_REPO -split '/')[-1]
 $remoteRel = "creg-hosting/$repoSlug/chain-registry/testnet"
-$remoteFile = "$remoteRel/sepolia-3node.env"
+$remoteFiles = @(
+    "$remoteRel/sepolia-fleet.env",
+    "$remoteRel/sepolia-3node.env"
+)
 
 $sshOpts = @("--zone=$Zone", "--project=$ProjectId", "--strict-host-key-checking=no", "--quiet")
 $scpOpts = @("--zone=$Zone", "--project=$ProjectId", "--strict-host-key-checking=no", "--quiet")
@@ -55,8 +64,6 @@ $remoteHome = (gcloud compute ssh $VmName @sshOpts --command="printf '%s' `$HOME
 if (-not $remoteHome) { throw "Could not resolve remote HOME on $VmName" }
 
 $remoteAbsDir = "$remoteHome/$remoteRel"
-$remoteAbsFile = "$remoteHome/$remoteFile"
-
 # Normalize to UTF-8 without BOM (PowerShell Set-Content -Encoding utf8 adds BOM; breaks Linux source).
 $utf8NoBom = New-Object System.Text.UTF8Encoding $false
 $content = [System.IO.File]::ReadAllText((Resolve-Path -LiteralPath $EnvFile).Path)
@@ -68,11 +75,14 @@ $content = $content -replace "`r`n", "`n" -replace "`r", ""
 $tempFile = [System.IO.Path]::GetTempFileName()
 try {
     [System.IO.File]::WriteAllText($tempFile, $content, $utf8NoBom)
-    Write-Host "[gcp-push] Uploading env (UTF-8 no BOM) to ${VmName}:$remoteAbsFile ..."
     gcloud compute ssh $VmName @sshOpts --command="mkdir -p '$remoteAbsDir' && chmod 700 '$remoteHome/creg-hosting'" | Out-Null
-    gcloud compute scp $tempFile "${VmName}:${remoteAbsFile}" @scpOpts
-    gcloud compute ssh $VmName @sshOpts --command="chmod 600 '$remoteAbsFile'" | Out-Null
+    foreach ($remoteFile in $remoteFiles) {
+        $remoteAbsFile = "$remoteHome/$remoteFile"
+        Write-Host "[gcp-push] Uploading env (UTF-8 no BOM) to ${VmName}:$remoteAbsFile ..."
+        gcloud compute scp $tempFile "${VmName}:${remoteAbsFile}" @scpOpts
+        gcloud compute ssh $VmName @sshOpts --command="chmod 600 '$remoteAbsFile'" | Out-Null
+    }
 } finally {
     Remove-Item -Force $tempFile -ErrorAction SilentlyContinue
 }
-Write-Host "[gcp-push] Done. Remote path: $remoteAbsFile"
+Write-Host "[gcp-push] Done. Remote paths: $($remoteFiles -join ', ')"

@@ -1,6 +1,6 @@
 # Makefile — chain-registry dev commands
 
-.PHONY: build test lint clean node cluster contracts deploy-local fmt check \
+.PHONY: build test lint clean node cluster contracts deploy-sepolia fmt check \
         testnet testnet-smoke testnet-no-explorer testnet-stop testnet-reset testnet-logs \
         up up-dev up-testnet down down-testnet logs-testnet release-assurance ddc-verify
 
@@ -51,7 +51,7 @@ node:
 	RUST_LOG=info,chain_registry_node=debug \
 	cargo run --release --bin creg-node
 
-## Spin up the full 3-node + IPFS + Anvil cluster
+## Spin up the Sepolia dev stack (docker-compose.yml)
 cluster:
 	docker compose up --build
 
@@ -78,7 +78,7 @@ up-testnet:
 	@echo "  Faucet:       http://localhost:8082/health"
 	@echo "  Relayer:      http://localhost:8083/health"
 	@echo "  Web Explorer: http://localhost:3007"
-	@echo "  Anvil RPC:    http://localhost:8545"
+	@echo "  Chain spec:   http://localhost:8888/chain-spec.json"
 	@echo "  PostgreSQL:   localhost:5437"
 	@echo ""
 	@echo "Tail logs with: make logs-testnet"
@@ -154,20 +154,7 @@ test-contracts:
 gas:
 	forge test --gas-report
 
-## Deploy to local Anvil
-deploy-local:
-	@echo "Starting Anvil..."
-	anvil &
-	sleep 2
-	DEPLOYER_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
-	GENESIS_SIGNERS="" \
-	GOVERNANCE_THRESHOLD=1 \
-	forge script contracts/script/Deploy.s.sol \
-		--rpc-url http://127.0.0.1:8545 \
-		--broadcast \
-		-vvvv
-
-## Deploy to Sepolia testnet
+## Deploy contracts to Sepolia testnet (see testnet/deploy-sepolia.ps1 for full flow)
 deploy-sepolia:
 	forge script contracts/script/Deploy.s.sol \
 		--rpc-url $$SEPOLIA_RPC_URL \

@@ -13,83 +13,35 @@ Complete Docker setup for running the Chain Registry blockchain with all new fea
 
 | File | Purpose | Use Case |
 |------|---------|----------|
-| `docker-compose.local-testnet.yml` | Canonical local distributed stack | Three-validator local bootstrap and smoke validation |
-| `docker-compose.yml` | Single-validator dev setup | Local development |
-| `docker-compose.testnet.yml` | Shared testnet services + bootstrap validator | Bootstrap host for testnet |
+| `docker-compose.yml` | Sepolia dev stack (single node) | Local development against Sepolia L1 |
+| `docker-compose.testnet.yml` | Bootstrap host (Sepolia) | Shared IPFS, spec-server, postgres, node-1, faucet |
 | `docker-compose.validator.yml` | One validator on one machine | Additional validator hosts |
 | `docker-compose.light.yml` | Resource-constrained setup | Consumer hardware |
-| `docker-compose.prebuilt.yml` | Prebuilt images | Fast smoke testing |
+| `archive/anvil-lab/*` | **Retired** local Anvil stacks | Historical reference only |
 
 ## 📌 Current Status
 
 The repo's live operational status is tracked in [TESTNET_READINESS_REPORT.md](TESTNET_READINESS_REPORT.md) and [../docs/NEXT_WORK.md](../docs/NEXT_WORK.md).
 
-Current Docker model:
+Current Docker model (Sepolia L1 only):
 
-- `local-testnet.ps1` + `docker-compose.local-testnet.yml` is the canonical local distributed bootstrap path
-- `docker-compose.yml` runs one local validator node
-- `docker-compose.testnet.yml` runs the bootstrap host with `node-1`
-- `docker-compose.validator.yml` runs exactly one validator on each additional computer
+- `docker-compose.yml` — single dev node against Sepolia (`SEPOLIA_RPC_URL` in `.env`)
+- `docker-compose.testnet.yml` — bootstrap host with `node-1`, spec-server, faucet, relayer
+- `docker-compose.validator.yml` — one validator per additional host
+- L1 contracts are pre-deployed on Sepolia (`testnet/chain-spec.sepolia.json`); new deploys use `testnet/deploy-sepolia.ps1`
 
-Migration note: if you previously ran the older multi-node testnet compose locally,
-start the updated testnet with `--remove-orphans` once so Docker removes the retired
-`node-2` through `node-10` containers.
-
-Known operational note: `deploy-contracts` can still exit non-zero after writing a
-fresh deployment manifest because of Foundry import/remapping issues. If
-`contracts/deployments/latest.json` exists, start `node-1`, `faucet`, and
-`web-explorer` with `--no-deps` while the remapping issue is being fixed.
+Archived: local Anvil stacks live under `archive/anvil-lab/` — see `archive/anvil-lab/README.md`.
 
 ## 🚀 Quick Start
 
-### 1. Canonical Local Distributed Stack
+### 1. Bootstrap host (Sepolia testnet)
 
 ```powershell
-./local-testnet.ps1 -RunSmokeTests
+pwsh -NoProfile -ExecutionPolicy Bypass -File testnet.ps1
+# optional smoke: testnet.ps1 -RunSmokeTests
 ```
 
-After changing explorer code, add `-RebuildImages` so Docker rebuilds the local
-explorer image before running checks:
-
-```powershell
-./local-testnet.ps1 -SkipCleanup -RebuildImages -RunSmokeTests
-```
-
-After changing Rust code that must be tested inside Docker, also pass
-`-RebuildAppImage`. This path compiles native RocksDB bindings and can fail if
-the Docker builder's libclang toolchain is not healthy:
-
-```powershell
-./local-testnet.ps1 -SkipCleanup -RebuildImages -RebuildAppImage -RunSmokeTests
-```
-
-This is the repo-validated path for proving distributed local behavior. It normalizes `.env.local-testnet`, deploys contracts, starts the three-validator stack from `docker-compose.local-testnet.yml`, and can run the smoke flow after startup.
-
-Use `-SkipExplorer` when you only want the core free local rehearsal path
-(Anvil, IPFS, Postgres, three validators, observer, indexer, faucet, and
-relayer). The smoke flow runs `creg doctor`, probes faucet drip, stakes a local
-publisher, publishes a generated smoke package, waits for inclusion, and prints
-final chain stats.
-
-For full local readiness, omit `-SkipExplorer` so the standalone web explorer is
-started and checked as part of doctor:
-
-```powershell
-./local-testnet.ps1 -RunSmokeTests
-```
-
-For a local mini-soak after the stack is running:
-
-```powershell
-./local-soak.ps1 -SkipExplorer -DurationMinutes 60 -IntervalSeconds 60
-```
-
-The soak runner repeats the smoke flow on a cadence, saves chain stats snapshots,
-waits for published packages to move out of the pending pool, and writes the
-final compose log tail under `tmp/local-soak/<run-id>/`. Use `-SkipPublish`
-when you only want repeated health and doctor checks, `-SkipDrip` when you are
-debugging without exercising faucet token transfer, or `-SkipInclusionWait`
-when you are debugging publish admission separately from consensus progress.
+Copy `.env.testnet.example` → `.env.testnet` and set Sepolia-funded keys (`CREG_BRIDGE_KEY`, `FAUCET_PRIVATE_KEY`, `RELAYER_PRIVATE_KEY`, `NODE1_VALIDATOR_KEY`).
 
 ### 2. Single Validator (Development)
 
@@ -162,7 +114,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File testnet.ps1
 # Optional GNU make wrapper if make is installed
 make testnet
 
-# Additional validator hosts: point at shared Anvil/IPFS/Postgres
+# Additional validator hosts: point at shared Sepolia RPC / IPFS / Postgres
 docker compose --env-file validator.env -f docker-compose.validator.yml up -d --build
 
 # View bootstrap logs
@@ -176,7 +128,7 @@ Bootstrap host helpers:
 
 - `pwsh -NoProfile -ExecutionPolicy Bypass -File testnet.ps1 -RunSmokeTests` — start and run the smoke tests automatically
 - `pwsh -NoProfile -ExecutionPolicy Bypass -File testnet.ps1 -SkipExplorer` — skip the standalone explorer container
-- `creg doctor --testnet --skip-drip` — verify the bootstrap testnet endpoints, contract wiring, faucet config, explorer, and Anvil RPC without mutating balances
+- `creg doctor --testnet --skip-drip` — verify bootstrap endpoints, Sepolia contract wiring, faucet config, and explorer without mutating balances
 - `creg doctor --testnet` — same as above, but also execute a live faucet drip probe against a throwaway address
 - `make testnet-*` aliases are also available if GNU make is installed
 
@@ -195,7 +147,7 @@ Set these env vars on every validator host:
 |---------|-------------|------|--------|
 | `node` | Validator node + API | 8080 | http://localhost:8080 |
 | `ipfs` | IPFS daemon | 5001 | http://localhost:5001 |
-| `anvil` | Local Ethereum | 8545 | http://localhost:8545 |
+| `spec-server` | Signed Sepolia chain spec | 8888 | http://localhost:8888/chain-spec.json |
 
 ### Explorer Services (NEW)
 
@@ -262,8 +214,8 @@ open http://localhost:3007
 | `CREG_IS_VALIDATOR` | Enable validator mode | `true` |
 | `CREG_VALIDATOR_KEY` | Validator private key | - |
 | `CREG_BLOCK_INTERVAL` | Block time in seconds | `2` |
-| `CREG_ETH_RPC` | Ethereum RPC URL | `http://anvil:8545` |
-| `CREG_DOCKER_ETH_RPC` | Docker-internal Ethereum RPC URL for the testnet compose | `http://anvil:8545` |
+| `CREG_ETH_RPC` | Sepolia RPC URL (host) | `https://ethereum-sepolia-rpc.publicnode.com` |
+| `CREG_DOCKER_ETH_RPC` | Sepolia RPC URL (containers) | same as `SEPOLIA_RPC_URL` |
 | `CREG_DOCKER_IPFS_URL` | Docker-internal IPFS API URL for the testnet compose | `http://ipfs:5001` |
 | `CREG_CORS_ALLOWED_ORIGINS` | Comma-separated browser origins allowed to call the REST API | empty (deny cross-origin) |
 | `CREG_CORS_ALLOWED_METHODS` | Comma-separated methods returned in CORS preflight responses | `GET,POST,DELETE,OPTIONS` |
@@ -328,7 +280,7 @@ docker compose logs --tail=100 node
 |--------|---------|----------|
 | `node-data` | Blockchain data | `/data` |
 | `ipfs-data` | IPFS storage | `/data/ipfs` |
-| `anvil-data` | Ethereum state | `/data` |
+
 
 To reset data:
 

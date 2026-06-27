@@ -649,6 +649,11 @@ mod tests {
             threshold: 0,
             publisher_pubkeys: vec![],
             manifest: None,
+            analysis_committee_size: 0,
+            analysis_selection_seed: String::new(),
+            analysis_effective_size: 0,
+            analysis_mandatory_contributed: 0,
+            analysis_committee: None,
         }
     }
 
