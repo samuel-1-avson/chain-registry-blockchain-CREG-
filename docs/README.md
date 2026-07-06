@@ -11,6 +11,7 @@ Start at the [project README](../README.md), then use the sections below.
 
 | Document | Purpose |
 |----------|---------|
+| [TESTNET_STATUS.md](./TESTNET_STATUS.md) | **Fleet live/paused matrix** — single source of truth |
 | [WHAT_TO_DO_NEXT.md](./WHAT_TO_DO_NEXT.md) | **Start here (maintainers)** — four tracks: system test, product surfaces, validator onboarding, audit |
 | [NEXT_WORK.md](./NEXT_WORK.md) | Prioritized IDs (NET-301, SEC-401, …) |
 | [WEAKNESSES_GAPS_REMEDIATION_PLAN.md](./WEAKNESSES_GAPS_REMEDIATION_PLAN.md) | Phased remediation + §6 living status |

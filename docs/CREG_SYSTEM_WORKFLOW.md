@@ -4,7 +4,7 @@
 > **Version:** Public alpha (`creg-testnet-1`)  
 > **Network:** Ethereum Sepolia (L1 chain id `11155111`)  
 > **Status:** Public alpha testnet — not mainnet  
-> **Last updated:** 2026-06-25 (§9 validator node flow added)
+> **Last updated:** 2026-07-06 (§1.7 whitepaper version, §9.11 alpha implementation note)
 
 This document describes the complete system workflow of the Chain Registry blockchain: architecture, components, consensus, networking, storage, security, operations, and developer onboarding. It is scoped to the **core blockchain project** (`chain-registry/` workspace, contracts, circuits, testnet) and excludes the waitlist application and contribution arena.
 
@@ -106,7 +106,7 @@ On the public alpha, **verified** means the queried node's chain store has accep
 chain-registry/                    # Root repository
 ├── README.md                      # Project overview
 ├── docs/                          # Public documentation
-│   ├── WHITEPAPER.md              # Technical whitepaper v0.2.0-public-alpha
+│   ├── WHITEPAPER.md              # Technical whitepaper v0.3.0-public-alpha
 │   ├── PUBLIC_TESTNET_QUICKSTART.md
 │   ├── TESTNET_PHASE_SCOPE.md
 │   └── CREG_SYSTEM_WORKFLOW.md    # This document
@@ -987,7 +987,9 @@ For public testnets with 10k+ validators, full redundant analysis is replaced by
 
 This keeps resource usage bounded while preserving Byzantine resistance, openness (voluntary path), and economic alignment with staking.
 
-See `package_admission::compute_analysis_committee_at_admission`, `aggregate_evidence_votes`, `update_performance_scores`, and the reward emission hook in `validator_pipeline`.
+**Public alpha implementation note (DOC-303):** Admission still computes and stores `AnalysisCommittee` metadata (VRF-seeded ordering, stake/reputation/performance bias, per-eth cap) in the pending entry and final `ChainRecord`. In the current node build, **who runs the expensive pipeline** is additionally gated by `should_perform_full_analysis` — a deterministic hash sample when the active validator set exceeds 50 nodes — which is **not yet identical** to the stored committee membership list. The `is_mandatory` flag on emitted votes currently follows the sampling gate, not committee membership alone. Integrators should treat committee API data as the **target** selection model; full alignment is tracked in [REMEDIATION_BACKLOG.md](./REMEDIATION_BACKLOG.md) DOC-303.
+
+See `package_admission::compute_analysis_committee_at_admission`, `validator_pipeline::should_perform_full_analysis`, `aggregate_evidence_votes`, `update_performance_scores`, and the reward emission hook in `validator_pipeline`.
 
 **L1 Reward Distribution Hook**: When a package reaches Verified on CREG, the pipeline submits the actual `distributeWorkRewards(..., bool[] isMandatory)` tx to L1 ValidatorRewards contract. Rewards use extremely low constants (base 0.00001 CREG) so the 42M supply lasts across enormous verification volume. `isMandatory` ensures mandatory committee members receive the higher points base. Successful L1 emission also gives a small boost to the participants' `performance_score`. This closes the loop from CREG verification to L1 rewards and reputation.
 

@@ -3,7 +3,7 @@
 **Scope document:** [SEC-401-AUDIT-SCOPE.md](./SEC-401-AUDIT-SCOPE.md)  
 **When booked:** Record vendor name and start date in [NEXT_WORK.md](./NEXT_WORK.md) (SEC-401 row).
 
-**Send-ready email:** From `chain-registry/`, run `.\testnet\prepare-sec-401-outreach.ps1 -Tag v0.1.1-testnet -ContactName "Your Name"` to generate [SEC-401-outreach-ready.md](./SEC-401-outreach-ready.md). Send to vendors below; record booking in [NEXT_WORK.md](./NEXT_WORK.md).
+**Send-ready email:** From `chain-registry/`, run `.\testnet\prepare-sec-401-outreach.ps1 -Tag v0.1.1-testnet -ContactName "Your Name"` to generate [archive/SEC-401-outreach-ready.md](./archive/SEC-401-outreach-ready.md). Send to vendors below; record booking in [NEXT_WORK.md](./NEXT_WORK.md).
 
 ---
 

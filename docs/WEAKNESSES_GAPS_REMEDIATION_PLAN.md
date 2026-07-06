@@ -45,7 +45,7 @@ Each phase should produce:
 
 **Tasks:**
 1. Review and finalize `docs/SEC-401-AUDIT-SCOPE.md` (update with current state of ZK binding, `enforceFinalizeRelays`, incentives monitoring, committee snapshots, and recent fixes).
-2. Update `docs/SEC-401-outreach-ready.md` and `SEC-401-VENDOR-OUTREACH.md` with latest architecture docs (point to current WHITEPAPER + workflow §9.11/9.12/15).
+2. Update `docs/archive/SEC-401-outreach-ready.md` and `SEC-401-VENDOR-OUTREACH.md` with latest architecture docs (point to current WHITEPAPER + workflow §9.11/9.12/15).
 3. Produce an "Audit Evidence Pack":
    - Current DEEP_DIVE issues with status (fixed / mitigated / open).
    - List of all recent changes since June 2026 baseline (ZK binding, bridge safety, reward emission instrumentation, performance snapshots, etc.).

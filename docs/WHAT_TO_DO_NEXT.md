@@ -13,7 +13,7 @@ This is the **single planning entry point**. Use it to choose between full-syste
 |------|--------|-------|
 | Core protocol | **Green** | `cargo test` gossip validation; `forge test` 37/37 contracts |
 | Remediation | **Phase 1 largely closed** | ISSUE-002/003/006/007/008 mitigated or fixed — see [WEAKNESSES_GAPS_REMEDIATION_PLAN.md](./WEAKNESSES_GAPS_REMEDIATION_PLAN.md) §6 |
-| Public testnet stack | **Paused (cost)** | GCP fleet can stay off; resume when validators ready — [resume-testnet-hosting.ps1](../chain-registry/testnet/gcp/resume-testnet-hosting.ps1) |
+| Public testnet stack | **Paused (cost)** | See [TESTNET_STATUS.md](./TESTNET_STATUS.md); resume via [resume-testnet-hosting.ps1](../chain-registry/testnet/gcp/resume-testnet-hosting.ps1) |
 | Waitlist | **Live** | Firebase — [WAITLIST-ONLY-HOSTING.md](./WAITLIST-ONLY-HOSTING.md) |
 | Contribution Arena | **Live (alpha)** | Firebase + optional Hub API — [CREG-Contribution-Arena/README.md](../CREG-Contribution-Arena/README.md) |
 | External audit | **Open** | [SEC-401-AUDIT-SCOPE.md](./SEC-401-AUDIT-SCOPE.md); evidence pack pending |

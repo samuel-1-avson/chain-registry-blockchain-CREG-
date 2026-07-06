@@ -24,5 +24,5 @@ Use before wide marketing or SEC-401 closes. In-repo surfaces passed review on 2
 
 ## Sign-off gate
 
-- [ ] SEC-401 vendor outreach booked (`docs/SEC-401-outreach-ready.md`)
+- [ ] SEC-401 vendor outreach booked (`docs/archive/SEC-401-outreach-ready.md`)
 - [ ] Re-run mental check against banned phrase list in `PUBLIC_COPY_REVIEW.md`

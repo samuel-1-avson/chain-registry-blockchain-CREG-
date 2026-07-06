@@ -291,7 +291,7 @@ Keep the previous `sepolia-latest.json` and spec in git history for forensics.
 ## Governance and feature flags
 
 - On-chain governance is deployed, but the **node API returns HTTP 501** and the explorer hides governance until `VITE_GOVERNANCE_ENABLED=true` (Phase 2 — REM-202).
-- Spec has `feature_flags.cross_chain: false` — align with [SECURITY_AND_REMEDIATION_IMPLEMENTATION_PLAN.md](./SECURITY_AND_REMEDIATION_IMPLEMENTATION_PLAN.md) decision **D4** before enabling bridge UI.
+- Spec has `feature_flags.cross_chain: false` — align with [archive/SECURITY_AND_REMEDIATION_IMPLEMENTATION_PLAN.md](./archive/SECURITY_AND_REMEDIATION_IMPLEMENTATION_PLAN.md) decision **D4** before enabling bridge UI.
 
 ---
 
@@ -306,7 +306,7 @@ Keep the previous `sepolia-latest.json` and spec in git history for forensics.
 
 ## Related docs
 
-- [SECURITY_AND_REMEDIATION_IMPLEMENTATION_PLAN.md](./SECURITY_AND_REMEDIATION_IMPLEMENTATION_PLAN.md) — REM-210, Phase 2
+- [archive/SECURITY_AND_REMEDIATION_IMPLEMENTATION_PLAN.md](./archive/SECURITY_AND_REMEDIATION_IMPLEMENTATION_PLAN.md) — REM-210, Phase 2
 - [REMEDIATION_BACKLOG.md](./REMEDIATION_BACKLOG.md)
 - [DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md) — PostgreSQL mirror (optional on testnet)
 - Local Sepolia bootstrap: `docker-compose.testnet.yml` + `testnet.ps1`

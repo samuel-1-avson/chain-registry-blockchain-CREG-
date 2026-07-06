@@ -1,7 +1,7 @@
 # SEC-401 — External security audit scope
 
 **Status:** Draft for vendor RFP / internal red-team scheduling  
-**Parent:** [SECURITY_AND_REMEDIATION_IMPLEMENTATION_PLAN.md](./SECURITY_AND_REMEDIATION_IMPLEMENTATION_PLAN.md) Epic 3.5  
+**Parent:** [archive/SECURITY_AND_REMEDIATION_IMPLEMENTATION_PLAN.md](./archive/SECURITY_AND_REMEDIATION_IMPLEMENTATION_PLAN.md) Epic 3.5  
 **Target network:** Sepolia testnet (`creg-testnet-1`) — not mainnet
 
 ---
@@ -139,7 +139,7 @@ flowchart LR
 
 Email template and checklist: [SEC-401-VENDOR-OUTREACH.md](./SEC-401-VENDOR-OUTREACH.md)
 
-Generate send-ready copy (pinned tag + SHA): from `chain-registry/`, run `.\testnet\prepare-sec-401-outreach.ps1` → [SEC-401-outreach-ready.md](./SEC-401-outreach-ready.md).
+Generate send-ready copy (pinned tag + SHA): from `chain-registry/`, run `.\testnet\prepare-sec-401-outreach.ps1` → [archive/SEC-401-outreach-ready.md](./archive/SEC-401-outreach-ready.md).
 
 When a vendor confirms, update [NEXT_WORK.md](./NEXT_WORK.md) SEC-401 booking table with vendor name and start date.
 

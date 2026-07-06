@@ -1,6 +1,8 @@
 # CREG testnet — external phase scope
 
-**Status:** Phase open (limited) — coordinated public testbed  
+> **Fleet status:** The public GCP testnet stack is **paused (cost)** as of 2026-06-26. Waitlist and Contribution Arena remain live. See [TESTNET_STATUS.md](./TESTNET_STATUS.md) for the current matrix and resume steps.
+
+**Status:** Public alpha — coordinated Sepolia testbed (fleet may be offline)  
 **Network:** Sepolia L1 + `creg-testnet-1`  
 **Effective:** 2026-05-30  
 **Review:** 2026-07-30 or when security audit completes
@@ -32,7 +34,7 @@ A **coordinated Sepolia deployment** of Chain Registry: publishers submit signed
 
 | Status | Meaning on API / `creg status` |
 |--------|--------------------------------|
-| **pending** | Admitted to the node’s in-memory pending pool; consensus not complete on this node |
+| **pending** | Admitted to the node’s pending pool (`pending_pool.json` on disk); consensus not complete on this node |
 | **UNVERIFIED** | CLI label for pending (install allowed with warnings per product policy) |
 | **verified** | Record on the node’s database chain after validator pipeline + finalization |
 | **revoked** | Rejected or revoked on chain |
@@ -46,14 +48,14 @@ Committee membership for any package (mandatory vs voluntary participants) is av
 
 ## Known limits (read before integrating)
 
-1. **Pending pool persistence** — Submissions persist to local storage; restart events on standalone nodes might reset pending state.
+1. **Pending pool persistence** — Submissions persist to `pending_pool.json` under the node data dir. Standalone or misconfigured nodes may still lose in-flight work on crash or manual deletion.
 2. **Observer nodes keep pending visible** — Observers maintain pending entries until consensus resolution completes.
 3. **No cross-chain** — Cross-chain bridge features and UI integration are deferred in this release.
 4. **Governance API disabled** — Administrative governance actions are restricted in the public explorer.
 5. **Shielded publish** — Shielded publication features are disabled by default.
 6. **CLI / REST syntax** — Always specify the node endpoint URL when making queries. Ensure package IDs are URL-encoded in REST paths.
 7. **Public storage gateways** — Package storage gateways are operated across multiple independent nodes.
-8. **Dev sandbox profile** — Standard deployments skip sandbox isolation to simplify local setup. This should not be used as security validation.
+8. **Dev sandbox profile** — Local dev may set `CREG_DEV_SANDBOX=true` to skip behavioural sandbox (SB012 advisory only). **Public Sepolia validators must not** — fleet health requires `CREG_DEV_SANDBOX=false` and real isolation (nsjail/gVisor/Docker). See [OPS_HARDENING_RUNBOOK.md](./OPS_HARDENING_RUNBOOK.md) MAL-001.
 9. **Public URLs** — Live endpoints are subject to updates as the network matures.
 10. **Committee selection** — At current scale the mandatory analysis core is small and deterministic (VRF + stake + cap). Voluntary contributions are always possible and recorded.
 

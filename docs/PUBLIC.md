@@ -1,5 +1,7 @@
 # Chain Registry — public documentation
 
+> **Testnet fleet:** Public GCP hosting is **paused (cost)**; waitlist and Contribution Arena are **live**. Current matrix: [TESTNET_STATUS.md](./TESTNET_STATUS.md).
+
 Curated entry point for **protocol, validators, publishers, and auditors**.  
 
 At public scale CREG uses **hybrid analysis committees** (small mandatory core selected at admission + voluntary contributions). Committee data is public and queryable. See [CREG_SYSTEM_WORKFLOW.md](./CREG_SYSTEM_WORKFLOW.md#911-analysis-committee-selection-stake-weighting--caps) for details.
@@ -16,6 +18,7 @@ Maintainers: see [WHAT_TO_DO_NEXT.md](./WHAT_TO_DO_NEXT.md) (not linked from wai
 | Document | Audience |
 |----------|----------|
 | [WHITEPAPER.md](./WHITEPAPER.md) | Developers, validators, auditors, ecosystem partners |
+| [TESTNET_STATUS.md](./TESTNET_STATUS.md) | **What is live today** — fleet, waitlist, Arena |
 | [PUBLIC_TESTNET_QUICKSTART.md](./PUBLIC_TESTNET_QUICKSTART.md) | Publishers, developers, validators |
 | [TESTNET_PHASE_SCOPE.md](./TESTNET_PHASE_SCOPE.md) | Testnet limits, verified semantics, alpha scope |
 | [WALLET_KEY_DERIVATION.md](./WALLET_KEY_DERIVATION.md) | Ed25519 (packages) vs Ethereum EOA (staking) |
