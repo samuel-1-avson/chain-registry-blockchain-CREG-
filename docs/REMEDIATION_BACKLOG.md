@@ -1,6 +1,6 @@
 # Remediation Backlog
 
-Track security and remediation work from [SECURITY_AND_REMEDIATION_IMPLEMENTATION_PLAN.md](./SECURITY_AND_REMEDIATION_IMPLEMENTATION_PLAN.md).
+Track security and remediation work from [archive/SECURITY_AND_REMEDIATION_IMPLEMENTATION_PLAN.md](./archive/SECURITY_AND_REMEDIATION_IMPLEMENTATION_PLAN.md).
 
 | ID | Status | Phase | Notes |
 |----|--------|-------|-------|
@@ -33,6 +33,7 @@ Track security and remediation work from [SECURITY_AND_REMEDIATION_IMPLEMENTATIO
 | SEC-301b | done | 3 | `chain-registry-secrets` crate — env + Vault KV2; wired to node/faucet/relayer |
 | GAPS-2026-06 | in-progress | Audit + Hardening | Iteration 6 complete (batch + relays). Doc hub: `docs/WHAT_TO_DO_NEXT.md`. Remaining: Phase 0 evidence pack, Phase 2 bridge/ZK, testnet resume. See `docs/WEAKNESSES_GAPS_REMEDIATION_PLAN.md` §6 |
 | DOC-302 | done | 3 | 2026-06-26 — Doc hygiene: WHAT_TO_DO_NEXT, archive obsolete docs, gcp/README, fix broken links |
+| DOC-303 | open | Audit | Committee metadata vs analysis sampling alignment — `is_mandatory` / `should_perform_full_analysis` not yet tied to admission committee; see WHITEPAPER §1 alpha note + WORKFLOW §9.11 |
 
 **Phase 2 ship (2026-05-28):** Sepolia Option A on `main`. **Phase 3 epics:** largely complete in code; open work tracked in [NEXT_WORK.md](./NEXT_WORK.md) and `WEAKNESSES_GAPS_REMEDIATION_PLAN.md`.
 

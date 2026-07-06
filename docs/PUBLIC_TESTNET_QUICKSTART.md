@@ -1,10 +1,12 @@
 # Public Testnet Quickstart
 
+> **Fleet status:** The public GCP fleet (`api.testnet.cregnet.dev`) may be **offline** while hosting is paused. Check [TESTNET_STATUS.md](./TESTNET_STATUS.md) before integrating. Local nodes and operator-run endpoints still work.
+
 One-page guide for **publishers**, **developers**, and **validators** joining the Chain Registry Sepolia testnet (`creg-testnet-1`).
 
-**Read first:** Phase Scope definitions — defines what “verified” means today and known limits.
+**Read first:** [TESTNET_PHASE_SCOPE.md](./TESTNET_PHASE_SCOPE.md) — defines what “verified” means today and known limits.
 
-**Public API:** `https://api.testnet.cregnet.dev` — set `CREG_NODE_URL` to this (or pass `--node-url`).
+**Public API (when fleet is up):** `https://api.testnet.cregnet.dev` — set `CREG_NODE_URL` to this (or pass `--node-url`).
 
 ---
 
