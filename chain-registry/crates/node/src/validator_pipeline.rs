@@ -154,7 +154,7 @@ async fn process_package(
         return;
     }
 
-    let (is_validator, node_id, privkey_opt, prev_manifest, prev_canonical, assigned_validator_count) = {
+    let (is_validator, node_id, privkey_opt, prev_manifest, prev_canonical, assigned_validator_count, admitted_committee) = {
         let s = state.read().await;
         let prev = s
             .chain
@@ -171,21 +171,29 @@ async fn process_package(
             prev.and_then(|r| r.manifest),
             prev_can,
             s.validator_set.validators.len(),
+            s.pending_pool.get_committee(&canonical).cloned(),
         )
     };
 
-    // === HYBRID COMMITTEE COMPUTATION (mandatory core + voluntary path) ===
-    // Compute deterministic committee for this package.
-    // Uses hash-based selection (can be upgraded to VRF-seeded later using existing VRF infra).
-    let committee = compute_hybrid_committee(&state, &canonical, &req.content_hash, assigned_validator_count).await;
+    // === CANONICAL COMMITTEE ASSIGNMENT ===
+    // Admission persists the assignment. Do not recompute a second sampling
+    // predicate here: that previously allowed a validator to be mandatory in
+    // the recorded committee but ineligible for the expensive analysis.
+    let committee = match admitted_committee {
+        Some(committee) => committee,
+        None => compute_hybrid_committee(&state, &canonical, &req.content_hash, assigned_validator_count).await,
+    };
     {
         let mut sw = state.write().await;
         sw.pending_pool.set_analysis_committee(&canonical, committee.clone());
         sw.package_committees.insert(canonical.clone(), committee.clone());
     }
 
-    let is_mandatory = committee.members.contains(&node_id);
-    let should_analyze = is_mandatory || true; // For now allow voluntary for all; later gate by opt-in or always-run for small sets.
+    let is_mandatory = committee
+        .members
+        .iter()
+        .take(committee.effective_size.max(committee.size) as usize)
+        .any(|member| member == &node_id);
 
     // Look up the previous version's sandbox result for runtime diff analysis
     // (DF005–DF007). Returns None on first publish or if this node did not
@@ -198,7 +206,7 @@ async fn process_package(
     // We only run the expensive full pipeline (IPFS fetch already done + sandbox etc.)
     // on a subset of validators. The rest will rely on evidence votes gossiped by
     // the selected analyzers.
-    let should_analyze = is_validator && should_perform_full_analysis(&node_id, &canonical, assigned_validator_count);
+    let should_analyze = is_validator && is_mandatory;
 
     let (vote, pgp_fingerprint, findings, analysis_bundles, evidence_digest, deterministic_risk) =
         if should_analyze {
@@ -810,35 +818,6 @@ async fn compute_hybrid_committee(
         tip,
         recent_vrf,
     )
-}
-
-/// Determines whether this validator node should perform the expensive full
-/// analysis (sandbox + deep pipeline) for a given package.
-///
-/// At small validator counts we keep the old behavior (everyone analyzes).
-/// At public testnet scale (thousands of validators) we sample so that only a
-/// small deterministic subset (mandatory committee target 100) runs the heavy work.
-/// Evidence from the analyzers is gossiped and used by everyone for quorum.
-///
-/// This is a pragmatic first step. A production solution should use a
-/// verifiable random committee (VRF over package hash + epoch).
-pub fn should_perform_full_analysis(
-    my_node_id: &str,
-    canonical: &str,
-    assigned_validator_count: usize,
-) -> bool {
-    if assigned_validator_count <= 50 {
-        return true;
-    }
-
-    // Target committee size (now 100) even at large validator counts. Modest relative to total set.
-    let target = 100usize.min(assigned_validator_count / 10 + 10);
-
-    let seed_bytes = common::sha256_hex(format!("analysis:{canonical}:{my_node_id}").as_bytes());
-    let seed_slice = hex::decode(&seed_bytes).unwrap_or(vec![0u8; 32]);
-    let val = u64::from_be_bytes(seed_slice[0..8].try_into().unwrap_or([0; 8]));
-
-    (val as usize) % assigned_validator_count < target
 }
 
 /// Decrypt a shielded package produced by `creg publish --shield`.

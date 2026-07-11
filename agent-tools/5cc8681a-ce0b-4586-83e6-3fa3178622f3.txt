@@ -1,0 +1,3271 @@
+warning: in the working copy of '.env.example', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of '.env.firebase', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'deploy/deploy-firebase-backend.ps1', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'deploy/deploy-firebase-hosting.ps1', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'firebase.json', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'functions/.gitignore', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'functions/package-lock.json', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'functions/package.json', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'functions/src/findings.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'functions/src/index.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'package.json', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'public/whitepaper/manifest.json', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'scripts/check-firebase-app-check.mjs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/App.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/components/FindingsBoard.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/components/GatewayLanding.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/components/WhitepaperLibrary.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/config/arenaFeatures.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/firebase.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/firebaseApi.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/hooks/useWeb3Wallet.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/index.css', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/main.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/types.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/vite-env.d.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tests/content.test.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tests/functions.pipeline.test.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tsconfig.json', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'vite.config.ts', LF will be replaced by CRLF the next time Git touches it
+ .env.example                          |  11 +
+ .env.firebase                         |   9 +-
+ deploy/deploy-firebase-backend.ps1    |  31 +-
+ deploy/deploy-firebase-hosting.ps1    |  12 +-
+ firebase.json                         |   6 +-
+ functions/.gitignore                  |   1 +
+ functions/package-lock.json           | 612 +++++++++++++++++++++++++++++++---
+ functions/package.json                |   1 +
+ functions/src/findings.ts             |  29 +-
+ functions/src/index.ts                |   3 +
+ package-lock.json                     |  29 ++
+ package.json                          |   4 +
+ public/whitepaper/manifest.json       |   2 +-
+ scripts/check-firebase-app-check.mjs  |  24 +-
+ server.ts                             |  98 +-----
+ src/App.tsx                           |   3 +
+ src/components/FindingsBoard.tsx      |  58 +++-
+ src/components/GatewayLanding.tsx     |  63 ++--
+ src/components/WhitepaperLibrary.tsx  |  84 ++++-
+ src/config/arenaFeatures.ts           |   2 +
+ src/firebase.ts                       |  22 +-
+ src/firebaseApi.ts                    |  15 +-
+ src/hooks/useWeb3Wallet.ts            | 236 ++++++-------
+ src/index.css                         |  53 +++
+ src/main.tsx                          |  45 ++-
+ src/types.ts                          |  23 +-
+ src/vite-env.d.ts                     |   4 +
+ src/wallet/injectedProviders.ts       | 128 -------
+ src/wallet/mobileWalletDeepLink.ts    |  67 ----
+ src/wallet/walletConnect.ts           | 140 --------
+ src/wallet/walletExtensionConflict.ts |  39 ---
+ tests/content.test.ts                 |  50 ++-
+ tests/functions.pipeline.test.ts      |   8 +
+ tsconfig.json                         |   6 +
+ vite.config.ts                        |   5 +
+ 35 files changed, 1178 insertions(+), 745 deletions(-)
+---warning: in the working copy of '.env.example', LF will be replaced by CRLF the next time Git touches it
+
+diff --git a/.env.example b/.env.example
+index 4f168a9..3e075ad 100644
+--- a/.env.example
++++ b/.env.example
+@@ -27,8 +27,19 @@ VITE_ARENA_ENABLE_REWARDS="false"
+ ARENA_ENABLE_AI="false"
+ VITE_ARENA_ENABLE_AI="false"
+ 
++# Genesis waitlist tab (uses waitlist-prod Firestore + registerWaitlist callable).
++VITE_ARENA_ENABLE_WAITLIST="false"
++# reCAPTCHA Enterprise site key for waitlist registration (distinct from App Check key).
++VITE_WAITLIST_RECAPTCHA_SITE_KEY=""
++
+ # WalletConnect project ID for mobile wallet sign-in (https://cloud.walletconnect.com).
+ VITE_WALLETCONNECT_PROJECT_ID=""
+ 
++# Firebase App Check — reCAPTCHA Enterprise site key (Firebase Console → App Check → Web).
++# Required before enabling ENFORCE_APP_CHECK=true on Functions.
++VITE_FIREBASE_APP_CHECK_SITE_KEY=""
++# Optional local emulator debug token (register in Firebase Console → App Check → Manage debug tokens).
++VITE_FIREBASE_APP_CHECK_DEBUG_TOKEN=""
++
+ # Managed platforms normally provide this value.
+ PORT="3000"
+diff --git a/.env.firebase b/.env.firebase
+index 5435d92..369a315 100644
+--- a/.env.firebase
++++ b/.env.firebase
+@@ -3,5 +3,12 @@ VITE_ARENA_FIREBASE_BACKEND=true
+ VITE_ARENA_ENABLE_WRITES=true
+ VITE_ARENA_ENABLE_WALLET_IDENTITY=true
+ VITE_ARENA_ENABLE_REWARDS=true
+-VITE_ARENA_ENABLE_AI=false
++VITE_ARENA_ENABLE_AI=true
+ VITE_WALLETCONNECT_PROJECT_ID=5e044dbdb79d21a953978b4031f66471
++
++# Firebase App Check — reCAPTCHA Enterprise (creg-contribution-arena-app-check key in GCP).
++VITE_FIREBASE_APP_CHECK_SITE_KEY=6Le0HDEtAAAAAMfQHQgHc43CZiGhHWhrezC-mxa-
++
++# Genesis waitlist (waitlist-prod database; same GCP project as Arena).
++VITE_ARENA_ENABLE_WAITLIST=true
++VITE_WAITLIST_RECAPTCHA_SITE_KEY=6LfLaB0tAAAAAD-YmiBUrSNzEsybw6C-jWSxDSqM
+diff --git a/deploy/deploy-firebase-backend.ps1 b/deploy/deploy-firebase-backend.ps1
+index c5958bf..c240fcd 100644
+--- a/deploy/deploy-firebase-backend.ps1
++++ b/deploy/deploy-firebase-backend.ps1
+@@ -2,6 +2,7 @@
+ param(
+   [switch]$Deploy,
+   [switch]$ReuseInstalledDependencies,
++  [switch]$EnforceAppCheck,
+   [string]$ProjectId = 'gen-lang-client-0098858574'
+ )
+ 
+@@ -16,7 +17,17 @@ if (Test-Path -LiteralPath $adcPath) {
+   $env:GOOGLE_APPLICATION_CREDENTIALS = $adcPath
+ }
+ $env:GOOGLE_CLOUD_PROJECT = $ProjectId
+-$env:FUNCTIONS_DISCOVERY_TIMEOUT = '60'
++$env:FUNCTIONS_DISCOVERY_TIMEOUT = '300'
++
++function Test-DeployConfirmed([string]$Target, [string]$Action) {
++  if ($Deploy) { return $true }
++  if ($null -eq $PSCmdlet) { return $true }
++  try {
++    return $PSCmdlet.ShouldProcess($Target, $Action)
++  } catch {
++    return $true
++  }
++}
+ 
+ Write-Host 'CREG Contribution Arena Firebase backend deployment' -ForegroundColor Cyan
+ Write-Host '  Script:    adc-node24-client-v4'
+@@ -25,6 +36,11 @@ Write-Host "  Project:   $ProjectId"
+ Write-Host '  Includes:  Firestore rules/indexes and Functions codebase arena'
+ Write-Host '  Hosting:   untouched'
+ Write-Host '  Controls:  existing Hosting configuration remains unchanged'
++if ($EnforceAppCheck) {
++  Write-Host '  App Check: ENFORCE_APP_CHECK=true (callable requests without valid tokens will fail)' -ForegroundColor Yellow
++} else {
++  Write-Host '  App Check: enforcement unchanged (set -EnforceAppCheck only after Hosting ships a configured client)'
++}
+ 
+ if (-not $Deploy) {
+   Write-Host 'Dry run only. Re-run with -Deploy after emulator tests and provider configuration.' -ForegroundColor Yellow
+@@ -81,7 +97,18 @@ if (-not (Get-Command java -ErrorAction SilentlyContinue)) {
+ }
+ 
+ Set-Location $source
+-if ($PSCmdlet.ShouldProcess($ProjectId, 'Deploy Arena Firestore rules and Firebase Functions')) {
++
++if ($EnforceAppCheck) {
++  $functionsEnvPath = Join-Path $source 'functions\.env'
++  $envLines = @()
++  if (Test-Path -LiteralPath $functionsEnvPath) {
++    $envLines = Get-Content -LiteralPath $functionsEnvPath | Where-Object { $_ -notmatch '^\s*ENFORCE_APP_CHECK=' }
++  }
++  $envLines += 'ENFORCE_APP_CHECK=true'
++  Set-Content -LiteralPath $functionsEnvPath -Value $envLines -Encoding utf8
++}
++
++if (Test-DeployConfirmed $ProjectId 'Deploy Arena Firestore rules and Firwarning: in the working copy of '.env.firebase', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'deploy/deploy-firebase-backend.ps1', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'deploy/deploy-firebase-hosting.ps1', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'firebase.json', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'functions/.gitignore', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'functions/package-lock.json', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'functions/package.json', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'functions/src/findings.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'functions/src/index.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'package.json', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'public/whitepaper/manifest.json', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'scripts/check-firebase-app-check.mjs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/App.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/components/FindingsBoard.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/components/GatewayLanding.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/components/WhitepaperLibrary.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/config/arenaFeatures.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/firebase.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/firebaseApi.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/hooks/useWeb3Wallet.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/index.css', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/main.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/types.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/vite-env.d.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tests/content.test.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tests/functions.pipeline.test.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tsconfig.json', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'vite.config.ts', LF will be replaced by CRLF the next time Git touches it
+ebase Functions') {
+   if ($ReuseInstalledDependencies) {
+     $functionsRuntime = Join-Path $source 'functions\node_modules\firebase-functions\package.json'
+     if (-not (Test-Path -LiteralPath $functionsRuntime)) {
+diff --git a/deploy/deploy-firebase-hosting.ps1 b/deploy/deploy-firebase-hosting.ps1
+index 0ed2322..aa8a0e0 100644
+--- a/deploy/deploy-firebase-hosting.ps1
++++ b/deploy/deploy-firebase-hosting.ps1
+@@ -17,6 +17,16 @@ if (Test-Path -LiteralPath $adcPath) {
+ }
+ $env:GOOGLE_CLOUD_PROJECT = $ProjectId
+ 
++function Test-DeployConfirmed([string]$Target, [string]$Action) {
++    if ($Deploy) { return $true }
++    if ($null -eq $PSCmdlet) { return $true }
++    try {
++        return $PSCmdlet.ShouldProcess($Target, $Action)
++    } catch {
++        return $true
++    }
++}
++
+ function Assert-LastExit([string]$Operation) {
+     if ($LASTEXITCODE -ne 0) { throw "$Operation failed with exit code $LASTEXITCODE." }
+ }
+@@ -51,7 +61,7 @@ if ($LASTEXITCODE -ne 0 -or $nodeMajor -ne 22) {
+     throw "Node 22 is required for Firebase deployment. Current major: $nodeMajor"
+ }
+ 
+-if (-not $PSCmdlet.ShouldProcess("$ProjectId/$SiteId", "Create/update isolated Arena Firebase Hosting site")) {
++if (-not (Test-DeployConfirmed "$ProjectId/$SiteId" "Create/update isolated Arena Firebase Hosting site")) {
+     exit 0
+ }
+ 
+diff --git a/firebase.json b/firebase.json
+index 89e1f5a..2c454a6 100644
+--- a/firebase.json
++++ b/firebase.json
+@@ -4,6 +4,10 @@
+       "database": "arena-prod",
+       "rules": "firestore.rules",
+       "indexes": "firestore.indexes.json"
++    },
++    {
++      "database": "waitlist-prod",
++      "rules": "firestore.waitlist.rules"
+     }
+   ],
+   "functions": [
+@@ -81,7 +85,7 @@
+         "headers": [
+           {
+             "key": "Content-Security-Policy",
+-            "value": "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' https://fonts.reown.com; img-src 'self' data: https: blob:; connect-src 'self' https://*.googleapis.com https://*.cloudfunctions.net https://*.firebaseio.com wss://*.firebaseio.com https://rpc.walletconnect.com https://rpc.walletconnect.org https://relay.walletconnect.com https://relay.walletconnect.org wss://relay.walletconnect.com wss://relay.walletconnect.org https://pulse.walletconnect.com https://pulse.walletconnect.org https://api.web3modal.com https://api.web3modal.org https://keys.walletconnect.com https://keys.walletconnect.org https://notify.walletconnect.com https://notify.walletconnect.org https://echo.walletconnect.com https://echo.walletconnect.org https://push.walletconnect.com https://push.walletconnect.org https://explorer-api.walletconnect.com https://ethereum.publicnode.com https://rpc.sepolia.org; frame-src 'self' https://*.firebaseapp.com https://verify.walletconnect.com https://verify.walletconnect.org https://secure.walletconnect.com https://secure.walletconnect.org"
++            "value": "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; script-src 'self' https://www.google.com https://www.gstatic.com; style-src 'self' 'unsafe-inline'; font-src 'self' https://fonts.reown.com; img-src 'self' data: https: blob:; connect-src 'self' https://*.googleapis.com https://content-firebaseappcheck.googleapis.com https://www.google.com https://recaptchaenterprise.googleapis.com https://*.cloudfunctions.net https://*.firebaseio.com wss://*.firebaseio.com https://rpc.walletconnect.com https://rpc.walletconnect.org https://relay.walletconnect.com https://relay.walletconnect.org wss://relay.walletconnect.com wss://relay.walletconnect.org https://pulse.walletconnect.com https://pulse.walletconnect.org https://api.web3modal.com https://api.web3modal.org https://keys.walletconnect.com https://keys.walletconnect.org https://notify.walletconnect.com https://notify.walletconnect.org https://echo.walletconnect.com https://echo.walletconnect.org https://push.walletconnect.com https://push.walletconnect.org https://explorer-api.walletconnect.com https://ethereum.publicnode.com https://rpc.sepolia.org; frame-src 'self' https://*.firebaseapp.com https://www.google.com https://www.recaptcha.net https://verify.walletconnect.com https://verify.walletconnect.org https://secure.walletconnect.com https://secure.walletconnect.org"
+           },
+           {
+             "key": "Cross-Origin-Opener-Policy",
+diff --git a/functions/.gitignore b/functions/.gitignore
+index f6f6f7d..b6da0d9 100644
+--- a/functions/.gitignore
++++ b/functions/.gitignore
+@@ -1,5 +1,6 @@
+ node_modules/
+ lib/
++src/arena-rag/
+ .env
+ .env.*
+ *.log
+diff --git a/functions/package-lock.json b/functions/package-lock.json
+index 703117a..a8a32ff 100644
+--- a/functions/package-lock.json
++++ b/functions/package-lock.json
+@@ -6,6 +6,7 @@
+     "": {
+       "name": "creg-contribution-arena-functions",
+       "dependencies": {
++        "@google-cloud/recaptcha-enterprise": "^6.4.2",
+         "@google/genai": "^2.4.0",
+         "creg-contribution-arena": "file:..",
+         "firebase-admin": "^13.4.0",
+@@ -26,6 +27,7 @@
+         "@google/genai": "^2.4.0",
+         "@tailwindcss/vite": "^4.1.14",
+         "@vitejs/plugin-react": "^5.0.4",
++        "@walletconnect/ethereum-provider": "2.11.0",
+         "dotenv": "^17.2.3",
+         "express": "^4.21.2",
+         "firebase": "^12.13.0",
+@@ -33,6 +35,7 @@
+         "motion": "^12.23.24",
+         "react": "^19.0.1",
+         "react-dom": "^19.0.1",
++        "react-google-recaptcha-v3": "^1.10.1",
+         "vite": "^6.2.3"
+       },
+       "devDependencies": {
+@@ -41,11 +44,15 @@
+         "@types/node": "^22.14.0",
+         "autoprefixer": "^10.4.21",
+         "esbuild": "^0.25.0",
++        "firebase-admin": "^13.4.0",
+         "firebase-functions": "^7.2.5",
+         "firebase-tools": "^15.22.0",
++        "playwright": "^1.61.1",
++        "serve": "^14.2.6",
+         "tailwindcss": "^4.1.14",
+         "tsx": "^4.21.0",
+         "typescript": "~5.8.2",
++        "viem": "^2.31.0",
+         "vite": "^6.2.3"
+       },
+       "engines": {
+@@ -219,6 +226,197 @@
+         "node": ">=14"
+       }
+     },
++    "node_modules/@google-cloud/recaptcha-enterprise": {
++      "version": "6.4.2",
++      "resolved": "https://registry.npmjs.org/@google-cloud/recaptcha-enterprise/-/recaptcha-enterprise-6.4.2.tgz",
++      "integrity": "sha512-RmPUgSPeMLeq7G59ieMwJckdO7bhY2o9eUwxoeJ58fi+OXrwGVtvzvl7me+roiYtmO+SN/VugkxA3TJfsfT2ZA==",
++      "license": "Apache-2.0",
++      "dependencies": {
++        "google-gax": "^5.0.0"
++      },
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@google-cloud/recaptcha-enterprise/node_modules/@grpc/proto-loader": {
++      "version": "0.8.1",
++      "resolved": "https://registry.npmjs.org/@grpc/proto-loader/-/proto-loader-0.8.1.tgz",
++      "integrity": "sha512-wtF6h+DY6M3YaDBPAmvuuA6jV8Sif9MjtOI5euKFWRgCDl5PeDpPsHR9u2l6St5ceY8AZgoNDww5+HvEsXFsGg==",
++      "license": "Apache-2.0",
++      "dependencies": {
++        "lodash.camelcase": "^4.3.0",
++        "long": "^5.0.0",
++        "protobufjs": "^7.5.5",
++        "yargs": "^17.7.2"
++      },
++      "bin": {
++        "proto-loader-gen-types": "build/bin/proto-loader-gen-types.js"
++      },
++      "engines": {
++        "node": ">=6"
++      }
++    },
++    "node_modules/@google-cloud/recaptcha-enterprise/node_modules/debug": {
++      "version": "4.4.3",
++      "resolved": "https://registry.npmjs.org/debug/-/debug-4.4.3.tgz",
++      "integrity": "sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA==",
++      "license": "MIT",
++      "dependencies": {
++        "ms": "^2.1.3"
++      },
++      "engines": {
++        "node": ">=6.0"
++      },
++      "peerDependenciesMeta": {
++        "supports-color": {
++          "optional": true
++        }
++      }
++    },
++    "node_modules/@google-cloud/recaptcha-enterprise/node_modules/gaxios": {
++      "version": "7.1.5",
++      "resolved": "https://registry.npmjs.org/gaxios/-/gaxios-7.1.5.tgz",
++      "integrity": "sha512-5FZy72Rh8LhtjmvDrKkI+lVhrsQrVKVsItxMoDm5mNQE+xR0WVIIs+jzPSJgBvKVsLi24fZhXJIsNI0bihDzFg==",
++      "license": "Apache-2.0",
++      "dependencies": {
++        "extend": "^3.0.2",
++        "https-proxy-agent": "^7.0.1",
++        "node-fetch": "^3.3.2"
++      },
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@google-cloud/recaptcha-enterprise/node_modules/google-auth-library": {
++      "version": "10.5.0",
++      "resolved": "https://registry.npmjs.org/google-auth-library/-/google-auth-library-10.5.0.tgz",
++      "integrity": "sha512-7ABviyMOlX5hIVD60YOfHw4/CxOfBhyduaYB+wbFWCWoni4N7SLcV46hrVRktuBbZjFC9ONyqamZITN7q3n32w==",
++      "license": "Apache-2.0",
++      "dependencies": {
++        "base64-js": "^1.3.0",
++        "ecdsa-sig-formatter": "^1.0.11",
++        "gaxios": "^7.0.0",
++        "gcp-metadata": "^8.0.0",
++        "google-logging-utils": "^1.0.0",
++        "gtoken": "^8.0.0",
++        "jws": "^4.0.0"
++      },
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@google-cloud/recaptcha-enterprise/node_modules/google-gax": {
++      "version": "5.0.7",
++      "resolved": "https://registry.npmjs.org/google-gax/-/google-gax-5.0.7.tgz",
++      "integrity": "sha512-EhiqaWWJ+9h7sCcKJTsoo6tMcjokVHhWsbSuWCnZJT4vIBP3y4mAoFLnt9SzgkVZeq24ZsFaArr06nnYYku2yA==",
++      "license": "Apache-2.0",
++      "dependencies": {
++        "@grpc/grpc-js": "^1.12.6",
++        "@grpc/proto-loader": "^0.8.0",
++        "duplexify": "^4.1.3",
++        "google-auth-library": "10.5.0",
++        "google-logging-utils": "1.1.3",
++        "node-fetch": "^3.3.2",
++        "object-hash": "^3.0.0",
++        "proto3-json-serializer": "3.0.4",
++        "protobufjs": "^7.5.4",
++        "retry-request": "^8.0.2",
++        "rimraf": "^5.0.1"
++      },
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@google-cloud/recaptcha-enterprise/node_modules/gtoken": {
++      "version": "8.0.0",
++      "resolved": "https://registry.npmjs.org/gtoken/-/gtoken-8.0.0.tgz",
++      "integrity": "sha512-+CqsMbHPiSTdtSO14O51eMNlrp9N79gmeqmXeouJOhfucAedHw9noVe/n5uJk3tbKE6a+6ZCQg3RPhVhHByAIw==",
++      "license": "MIT",
++      "dependencies": {
++        "gaxios": "^7.0.0",
++        "jws": "^4.0.0"
++      },
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@google-cloud/recaptcha-enterprise/node_modules/http-proxy-agent": {
++      "version": "7.0.2",
++      "resolved": "https://registry.npmjs.org/http-proxy-agent/-/http-proxy-agent-7.0.2.tgz",
++      "integrity": "sha512-T1gkAiYYDWYx3V5Bmyu7HcfcvL7mUrTWiM6yOfa3PIphViJ/gFPbvidQ+veqSOHci/PxBcDabeUNCzpOODJZig==",
++      "license": "MIT",
++      "dependencies": {
++        "agent-base": "^7.1.0",
++        "debug": "^4.3.4"
++      },
++      "engines": {
++        "node": ">= 14"
++      }
++    },
++    "node_modules/@google-cloud/recaptcha-enterprise/node_modules/ms": {
++      "version": "2.1.3",
++      "resolved": "https://registry.npmjs.org/ms/-/ms-2.1.3.tgz",
++      "integrity": "sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==",
++      "license": "MIT"
++    },
++    "node_modules/@google-cloud/recaptcha-enterprise/node_modules/node-fetch": {
++      "version": "3.3.2",
++      "resolved": "https://registry.npmjs.org/node-fetch/-/node-fetch-3.3.2.tgz",
++      "integrity": "sha512-dRB78srN/l6gqWulah9SrxeYnxeddIG30+GOqK/9OlLVyLg3HPnr6SqOWTWOXKRwC2eGYCkZ59NNuSgvSrpgOA==",
++      "license": "MIT",
++      "dependencies": {
++        "data-uri-to-buffer": "^4.0.0",
++        "fetch-blob": "^3.1.4",
++        "formdata-polyfill": "^4.0.10"
++      },
++      "engines": {
++        "node": "^12.20.0 || ^14.13.1 || >=16.0.0"
++      },
++      "funding": {
++        "type": "opencollective",
++        "url": "https://opencollective.com/node-fetch"
++      }
++    },
++    "node_modules/@google-cloud/recaptcha-enterprise/node_modules/proto3-json-serializer": {
++      "version": "3.0.4",
++      "resolved": "https://registry.npmjs.org/proto3-json-serializer/-/proto3-json-serializer-3.0.4.tgz",
++      "integrity": "sha512-E1sbAYg3aEbXrq0n1ojJkRHQJGE1kaE/O6GLA94y8rnJBfgvOPTOd1b9hOceQK1FFZI9qMh1vBERCyO2ifubcw==",
++      "license": "Apache-2.0",
++      "dependencies": {
++        "protobufjs": "^7.4.0"
++      },
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@google-cloud/recaptcha-enterprise/node_modules/retry-request": {
++      "version": "8.0.3",
++      "resolved": "https://registry.npmjs.org/retry-request/-/retry-request-8.0.3.tgz",
++      "integrity": "sha512-qqoc4kkGgP9cmQDWELlOpAmfgJOg0Yi7MT82ZjiPWu451ayju4itwomjM4/dBEliify8C1b3tSaeCOldugtwPQ==",
++      "license": "MIT",
++      "dependencies": {
++        "extend": "^3.0.2",
++        "teeny-request": "^10.0.0"
++      },
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@google-cloud/recaptcha-enterprise/node_modules/teeny-request": {
++      "version": "10.1.3",
++      "resolved": "https://registry.npmjs.org/teeny-request/-/teeny-request-10.1.3.tgz",
++      "integrity": "sha512-5yDliI1uWkYPo7W+Zvrxg6YmoWuj5iC5EydewqrRTvc68nyMTZhlPPlLg6cptUGfbQAb+N9XDPDPzF6N081lug==",
++      "license": "Apache-2.0",
++      "dependencies": {
++        "http-proxy-agent": "^7.0.0",
++        "https-proxy-agent": "^7.0.1",
++        "node-fetch": "^3.3.2",
++        "stream-events": "^1.0.5"
++      },
++      "engines": {
++        "node": ">=18"
++      }
++    },
+     "node_modules/@google-cloud/storage": {
+       "version": "7.21.0",
+       "resolved": "https://registry.npmjs.org/@google-cloud/storage/-/storage-7.21.0.tgz",
+@@ -317,7 +515,6 @@
+       "resolved": "https://registry.npmjs.org/@grpc/grpc-js/-/grpc-js-1.14.4.tgz",
+       "integrity": "sha512-k9Dj3DV/itK9D06Y8f190Qgop7/Ui+D0njFV3LHMPwPT75DpXLQohE9Wmz0QElrJnzsjB7KPWiKJbOl7IPDArQ==",
+       "license": "Apache-2.0",
+-      "optional": true,
+       "dependencies": {
+         "@grpc/proto-loader": "^0.8.0",
+         "@js-sdsl/ordered-map": "^4.4.2"
+@@ -331,7 +528,6 @@
+       "resolved": "https://registry.npmjs.org/@grpc/proto-loader/-/proto-loader-0.8.1.tgz",
+       "integrity": "sha512-wtF6h+DY6M3YaDBPAmvuuA6jV8Sif9MjtOI5euKFWRgCDl5PeDpPsHR9u2l6St5ceY8AZgoNDww5+HvEsXFsGg==",
+       "license": "Apache-2.0",
+-      "optional": true,
+       "dependencies": {
+         "lodash.camelcase": "^4.3.0",
+         "long": "^5.0.0",
+@@ -364,12 +560,107 @@
+         "node": ">=6"
+       }
+     },
++    "node_modules/@isaacs/cliui": {
++      "version": "8.0.2",
++      "resolved": "https://registry.npmjs.org/@isaacs/cliui/-/cliui-8.0.2.tgz",
++      "integrity": "sha512-O8jcjabXaleOG9DQ0+ARXWZBTfnP4WNAqzuiJK7ll44AmxGKv/J2M4TPjxjY3znBCfvBXFzucm1twdyFybFqEA==",
++      "license": "ISC",
++      "dependencies": {
++        "string-width": "^5.1.2",
++        "string-width-cjs": "npm:string-width@^4.2.0",
++        "strip-ansi": "^7.0.1",
++        "strip-ansi-cjs": "npm:strip-ansi@^6.0.1",
++        "wrap-ansi": "^8.1.0",
++        "wrap-ansi-cjs": "npm:wrap-ansi@^7.0.0"
++      },
++      "engines": {
++        "node": ">=12"
++      }
++    },
++    "node_modules/@isaacs/cliui/node_modules/ansi-regex": {
++      "version": "6.2.2",
++      "resolved": "https://registry.npmjs.org/ansi-regex/-/ansi-regex-6.2.2.tgz",
++      "integrity": "sha512-Bq3SmSpyFHaWjPk8If9yc6svM8c56dB5BAtW4Qbw5jHTwwXXcTLoRMkpDJp6VL0XzlWaCHTXrkFURMYmD0sLqg==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=12"
++      },
++      "funding": {
++        "url": "https://github.com/chalk/ansi-regex?sponsor=1"
++      }
++    },
++    "node_modules/@isaacs/cliui/node_modules/ansi-styles": {
++      "version": "6.2.3",
++      "resolved": "https://registry.npmjs.org/ansi-styles/-/ansi-styles-6.2.3.tgz",
++      "integrity": "sha512-4Dj6M28JB+oAH8kFkTLUo+a2jwOFkuqb3yucU0CANcRRUbxS0cP0nZYCGjcc3BNXwRIsUVmDGgzawme7zvJHvg==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=12"
++      },
++      "funding": {
++        "url": "https://github.com/chalk/ansi-styles?sponsor=1"
++      }
++    },
++    "node_modules/@isaacs/cliui/node_modules/emoji-regex": {
++      "version": "9.2.2",
++      "resolved": "https://registry.npmjs.org/emoji-regex/-/emoji-regex-9.2.2.tgz",
++      "integrity": "sha512-L18DaJsXSUk2+42pv8mLs5jJT2hqFkFE4j21wOmgbUqsZ2hL72NsUU785g9RXgo3s0ZNgVl42TiHp3ZtOv/Vyg==",
++      "license": "MIT"
++    },
++    "node_modules/@isaacs/cliui/node_modules/string-width": {
++      "version": "5.1.2",
++      "resolved": "https://registry.npmjs.org/string-width/-/string-width-5.1.2.tgz",
++      "integrity": "sha512-HnLOCR3vjcY8beoNLtcjZ5/nxn2afmME6lhrDrebokqMap+XbeW8n9TXpPDOqdGK5qcI3oT0GKTW6wC7EMiVqA==",
++      "license": "MIT",
++      "dependencies": {
++        "eastasianwidth": "^0.2.0",
++        "emoji-regex": "^9.2.2",
++        "strip-ansi": "^7.0.1"
++      },
++      "engines": {
++        "node": ">=12"
++      },
++      "funding": {
++        "url": "https://github.com/sponsors/sindresorhus"
++      }
++    },
++    "node_modules/@isaacs/cliui/node_modules/strip-ansi": {
++      "version": "7.2.0",
++      "resolved": "https://registry.npmjs.org/strip-ansi/-/strip-ansi-7.2.0.tgz",
++      "integrity": "sha512-yDPMNjp4WyfYBkHnjIRLfca1i6KMyGCtsVgoKe/z1+6vukgaENdgGBZt+ZmKPc4gavvEZ5OgHfHdrazhgNyG7w==",
++      "license": "MIT",
++      "dependencies": {
++        "ansi-regex": "^6.2.2"
++      },
++      "engines": {
++        "node": ">=12"
++      },
++      "funding": {
++        "url": "https://github.com/chalk/strip-ansi?sponsor=1"
++      }
++    },
++    "node_modules/@isaacs/cliui/node_modules/wrap-ansi": {
++      "version": "8.1.0",
++      "resolved": "https://registry.npmjs.org/wrap-ansi/-/wrap-ansi-8.1.0.tgz",
++      "integrity": "sha512-si7QWI6zUMq56bESFvagtmzMdGOtoxfR+Sez11Mobfc7tm+VkUckk9bW2UeffTGVUbOksxmSw0AA2gs8g71NCQ==",
++      "license": "MIT",
++      "dependencies": {
++        "ansi-styles": "^6.1.0",
++        "string-width": "^5.0.1",
++        "strip-ansi": "^7.0.1"
++      },
++      "engines": {
++        "node": ">=12"
++      },
++      "funding": {
++        "url": "https://github.com/chalk/wrap-ansi?sponsor=1"
++      }
++    },
+     "node_modules/@js-sdsl/ordered-map": {
+       "version": "4.4.2",
+       "resolved": "https://registry.npmjs.org/@js-sdsl/ordered-map/-/ordered-map-4.4.2.tgz",
+       "integrity": "sha512-iUKgm52T8HOE/makSxjqoWhe95ZJA1/G1sYsGev2JDKUSS14KAgg1LHb+Ba+IPow0xflbnSkOsZcO08C7w1gYw==",
+       "license": "MIT",
+-      "optional": true,
+       "funding": {
+         "type": "opencollective",
+         "url": "https://opencollective.com/js-sdsl"
+@@ -437,6 +728,16 @@
+         "node": ">=8.0.0"
+       }
+     },
++    "node_modules/@pkgjs/parseargs": {
++      "version": "0.11.0",
++      "resolved": "https://registry.npmjs.org/@pkgjs/parseargs/-/parseargs-0.11.0.tgz",
++      "integrity": "sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg==",
++      "license": "MIT",
++      "optional": true,
++      "engines": {
++        "node": ">=14"
++      }
++    },
+     "node_modules/@protobufjs/aspromise": {
+       "version": "1.1.2",
+       "resolved": "https://registry.npmjs.org/@protobufjs/aspromise/-/aspromise-1.1.2.tgz",
+@@ -772,7 +1073,6 @@
+       "resolved": "https://registry.npmjs.org/ansi-regex/-/ansi-regex-5.0.1.tgz",
+       "integrity": "sha512-quJQXlTSUGL2LH9SUXo8VwsY4soanhgo6LNSm84E1LBcE8s3O0wpdiRzyR9z/ZZJMlMWv37qOOb9pdJlMUEKFQ==",
+       "license": "MIT",
+-      "optional": true,
+       "engines": {
+         "node": ">=8"
+       }
+@@ -782,7 +1082,6 @@
+       "resolved": "https://registry.npmjs.org/ansi-styles/-/ansi-styles-4.3.0.tgz",
+       "integrity": "sha512-zbB9rCJAT1rbjiVDb2hqKFHNYLxgtk8NURxZ3IZwD3F6NtxbXZQCnnSi1Lkx+IDohdPlFp222wVALIheZJQSEg==",
+       "license": "MIT",
+-      "optional": true,
+       "dependencies": {
+         "color-convert": "^2.0.1"
+       },
+@@ -839,6 +1138,12 @@
+       "license": "MIT",
+       "optional": true
+     },
++    "node_modules/balanced-match": {
++      "version": "1.0.2",
++      "resolved": "https://registry.npmjs.org/balanced-match/-/balanced-match-1.0.2.tgz",
++      "integrity": "sha512-3oSeUO0TMV67hN1AmbXsK4yaqU7tjiHlbxRDZOpH0KW9+CeX4bRAaX0Anxt0tx2MrpRpWwQaPwIlISEJhYU5Pw==",
++      "license": "MIT"
++    },
+     "node_modules/base64-js": {
+       "version": "1.5.1",
+       "resolved": "https://registry.npmjs.org/base64-js/-/base64-js-1.5.1.tgz",
+@@ -892,6 +1197,15 @@
+         "npm": "1.2.8000 || >= 1.4.16"
+       }
+     },
++    "node_modules/brace-expansion": {
++      "version": "2.1.1",
++      "resolved": "https://registry.npmjs.org/brace-expansion/-/brace-expansion-2.1.1.tgz",
++      "integrity": "sha512-WR1cURNjuvBLMZBMbqM0UoE+WAfdUcEV1ccD8PVBVOI+Z3ND4+SZbN8RsfT2bMuG1qwz5RFvPukSZm5fF2D5eA==",
++      "license": "MIT",
++      "dependencies": {
++        "balanced-match": "^1.0.0"
++      }
++    },
+     "node_modules/buffer-equal-constant-time": {
+       "version": "1.0.1",
+       "resolved": "https://registry.npmjs.org/buffer-equal-constant-time/-/buffer-equal-constant-time-1.0.1.tgz",
+@@ -941,7 +1255,6 @@
+       "resolved": "https://registry.npmjs.org/cliui/-/cliui-8.0.1.tgz",
+       "integrity": "sha512-BSeNnyus75C4//NQ9gQt1/csTXyo/8Sb+afLAkzAptFuMsod9HFokGNudZpi/oQV73hnVK+sR+5PVRMd+Dr7YQ==",
+       "license": "ISC",
+-      "optional": true,
+       "dependencies": {
+         "string-width": "^4.2.0",
+         "strip-ansi": "^6.0.1",
+@@ -956,7 +1269,6 @@
+       "resolved": "https://registry.npmjs.org/color-convert/-/color-convert-2.0.1.tgz",
+       "integrity": "sha512-RRECPsj7iu/xb5oKYcsFHSppFNnsj/52OVTRKb4zP5onXwVF3zVmmToNcOfGC+CRDpfK/U584fMg38ZHCaElKQ==",
+       "license": "MIT",
+-      "optional": true,
+       "dependencies": {
+         "color-name": "~1.1.4"
+       },
+@@ -968,8 +1280,7 @@
+       "version": "1.1.4",
+       "resolved": "https://registry.npmjs.org/color-name/-/color-name-1.1.4.tgz",
+       "integrity": "sha512-dOy+3AuW3a2wNbZHIuMZpTcgjGuLU/uBL/ubcZF9OXbDo8ff4O8yVp5Bf0efS8uEoYo5q4Fx7dY9OgQGXgAsQA==",
+-      "license": "MIT",
+-      "optional": true
++      "license": "MIT"
+     },
+     "node_modules/combined-stream": {
+       "version": "1.0.8",
+@@ -1041,6 +1352,20 @@
+       "resolved": "..",
+       "link": true
+     },
++    "node_modules/cross-spawn": {
++      "version": "7.0.6",
++      "resolved": "https://registry.npmjs.org/cross-spawn/-/cross-spawn-7.0.6.tgz",
++      "integrity": "sha512-uV2QOWP2nWzsy2aMp8aRibhi9dlzF5Hgh5SHaB9OiTGEyDTiJJyx0uy51QXdyWbtAHNua4XJzUKca3OzKUd3vA==",
++      "license": "MIT",
++      "dependencies": {
++        "path-key": "^3.1.0",
++        "shebang-command": "^2.0.0",
++        "which": "^2.0.1"
++      },
++      "engines": {
++        "node": ">= 8"
++      }
++    },
+     "node_modules/data-uri-to-buffer": {
+       "version": "4.0.1",
+       "resolved": "https://registry.npmjs.org/data-uri-to-buffer/-/data-uri-to-buffer-4.0.1.tgz",
+@@ -1107,7 +1432,6 @@
+       "resolved": "https://registry.npmjs.org/duplexify/-/duplexify-4.1.3.tgz",
+       "integrity": "sha512-M3BmBhwJRZsSx38lZyhE53Csddgzl5R7xGJNk7CVddZD6CcmwMCH8J+7AprIrQKH7TonKxaCjcv27Qmf+sQ+oA==",
+       "license": "MIT",
+-      "optional": true,
+       "dependencies": {
+         "end-of-stream": "^1.4.1",
+         "inherits": "^2.0.3",
+@@ -1115,6 +1439,12 @@
+         "stream-shift": "^1.0.2"
+       }
+     },
++    "node_modules/eastasianwidth": {
++      "version": "0.2.0",
++      "resolved": "https://registry.npmjs.org/eastasianwidth/-/eastasianwidth-0.2.0.tgz",
++      "integrity": "sha512-I88TYZWc9XiYHRQ4/3c5rjjfgkjhLyW2luGIheGERbNQ6OY7yTybanSpDXZa8y7VUP9YmDcYa+eyq4ca7iLqWA==",
++      "license": "MIT"
++    },
+     "node_modules/ecdsa-sig-formatter": {
+       "version": "1.0.11",
+       "resolved": "https://registry.npmjs.org/ecdsa-sig-formatter/-/ecdsa-sig-formatter-1.0.11.tgz",
+@@ -1134,8 +1464,7 @@
+       "version": "8.0.0",
+       "resolved": "https://registry.npmjs.org/emoji-regex/-/emoji-regex-8.0.0.tgz",
+       "integrity": "sha512-MSjYzcWNOA0ewAHpz0MxpYFvwg6yjy1NG3xteoqz644VCo/RPgnr1/GGt+ic3iJTzQ8Eu3TdM14SawnVUmGE6A==",
+-      "license": "MIT",
+-      "optional": true
++      "license": "MIT"
+     },
+     "node_modules/encodeurl": {
+       "version": "2.0.0",
+@@ -1151,7 +1480,6 @@
+       "resolved": "https://registry.npmjs.org/end-of-stream/-/end-of-stream-1.4.5.tgz",
+       "integrity": "sha512-ooEGc6HP26xXq/N+GCGOT0JKCLDGrq2bQUZrQ7gyrJiZANJ/8YDTxTpQBXGMn+WbIQXNVpyWymm7KYVICQnyOg==",
+       "license": "MIT",
+-      "optional": true,
+       "dependencies": {
+         "once": "^1.4.0"
+       }
+@@ -1207,7 +1535,6 @@
+       "resolved": "https://registry.npmjs.org/escalade/-/escalade-3.2.0.tgz",
+       "integrity": "sha512-WUj2qlxaQtO4g6Pq5c29GTcWGDyd8itL8zTlipgECz3JesAiiOKotd8JU6otB3PACgG6xkJUyVhboMS+bje/jA==",
+       "license": "MIT",
+-      "optional": true,
+       "engines": {
+         "node": ">=6"
+       }
+@@ -1449,6 +1776,22 @@
+         "firebase-admin": "^11.10.0 || ^12.0.0 || ^13.0.0"
+       }
+     },
++    "node_modules/foreground-child": {
++      "version": "3.3.1",
++      "resolved": "https://registry.npmjs.org/foreground-child/-/foreground-child-3.3.1.tgz",
++      "integrity": "sha512-gIXjKqtFuWEgzFRJA9WCQeSJLZDjgJUOMCMzxtvFq/37KojM1BFGufqsCy0r4qSQmYLsZYMeyRqzIWOMup03sw==",
++      "license": "ISC",
++      "dependencies": {
++        "cross-spawn": "^7.0.6",
++        "signal-exit": "^4.0.1"
++      },
++      "engines": {
++        "node": ">=14"
++      },
++      "funding": {
++        "url": "https://github.com/sponsors/isaacs"
++      }
++    },
+     "node_modules/form-data": {
+       "version": "2.5.6",
+       "resolved": "https://registry.npmjs.org/form-data/-/form-data-2.5.6.tgz",
+@@ -1581,7 +1924,6 @@
+       "resolved": "https://registry.npmjs.org/get-caller-file/-/get-caller-file-2.0.5.tgz",
+       "integrity": "sha512-DyFP3BM/3YHTQOCUL/w0OZHR0lpKeGrxotcHWcqNEdnltqFwXVfhEBQ94eIo34AfQpo0rGki4cyIiftY06h2Fg==",
+       "license": "ISC",
+-      "optional": true,
+       "engines": {
+         "node": "6.* || 8.* || >= 10.*"
+       }
+@@ -1623,6 +1965,27 @@
+         "node": ">= 0.4"
+       }
+     },
++    "node_modules/glob": {
++      "version": "10.5.0",
++      "resolved": "https://registry.npmjs.org/glob/-/glob-10.5.0.tgz",
++      "integrity": "sha512-DfXN8DfhJ7NH3Oe7cFmu3NCu1wKbkReJ8TorzSAFbSKrlNaQSKfIzqYqVY8zlbs2NLBbWpRiU52GX2PbaBVNkg==",
++      "deprecated": "Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me",
++      "license": "ISC",
++      "dependencies": {
++        "foreground-child": "^3.1.0",
++        "jackspeak": "^3.1.2",
++        "minimatch": "^9.0.4",
++        "minipass": "^7.1.2",
++        "package-json-from-dist": "^1.0.0",
++        "path-scurry": "^1.11.1"
++      },
++      "bin": {
++        "glob": "dist/esm/bin.mjs"
++      },
++      "funding": {
++        "url": "https://github.com/sponsors/isaacs"
++      }
++    },
+     "node_modules/google-auth-library": {
+       "version": "10.7.0",
+       "resolved": "https://registry.npmjs.org/google-auth-library/-/google-auth-library-10.7.0.tgz",
+@@ -1978,7 +2341,6 @@
+       "resolved": "https://registry.npmjs.org/is-fullwidth-code-point/-/is-fullwidth-code-point-3.0.0.tgz",
+       "integrity": "sha512-zymm5+u+sCsSWyD9qNaejV3DFvhCKclKdizYaJUuHA83RLjb7nSuGnddCHGv0hk+KY7BMAlsWeK4Ueg6EV6XQg==",
+       "license": "MIT",
+-      "optional": true,
+       "engines": {
+         "node": ">=8"
+       }
+@@ -2009,6 +2371,12 @@
+       "license": "MIT",
+       "optional": true
+     },
++    "node_modules/isexe": {
++      "version": "2.0.0",
++      "resolved": "https://registry.npmjs.org/isexe/-/isexe-2.0.0.tgz",
++      "integrity": "sha512-RHxMLp9lnKHGHRng9QFhRCMbYAcVpn69smSGcq3f36xjgVVWThj4qqLbTLlq7Ssj8B+fIQ1EuCEGI2lKsyQeIw==",
++      "license": "ISC"
++    },
+     "node_modules/isows": {
+       "version": "1.0.7",
+       "resolved": "https://registry.npmjs.org/isows/-/isows-1.0.7.tgz",
+@@ -2024,6 +2392,21 @@
+         "ws": "*"
+       }
+     },
++    "node_modules/jackspeak": {
++      "version": "3.4.3",
++      "resolved": "https://registry.npmjs.org/jackspeak/-/jackspeak-3.4.3.tgz",
++      "integrity": "sha512-OGlZQpz2yfahA/Rd1Y8Cd9SIEsqvXkLVoSw/cgwhnhFMDbsQFeZYoJJ7bIZBS9BcamUW96asq/npPWugM+RQBw==",
++      "license": "BlueOak-1.0.0",
++      "dependencies": {
++        "@isaacs/cliui": "^8.0.2"
++      },
++      "funding": {
++        "url": "https://github.com/sponsors/isaacs"
++      },
++      "optionalDependencies": {
++        "@pkgjs/parseargs": "^0.11.0"
++      }
++    },
+     "node_modules/jose": {
+       "version": "4.15.9",
+       "resolved": "https://registry.npmjs.org/jose/-/jose-4.15.9.tgz",
+@@ -2139,8 +2522,7 @@
+       "version": "4.3.0",
+       "resolved": "https://registry.npmjs.org/lodash.camelcase/-/lodash.camelcase-4.3.0.tgz",
+       "integrity": "sha512-TwuEnCnxbc3rAvhf/LbG7tJUDzhqXyFnv3dtzLOPgCG/hODL7WFnsbwktkD7yUV0RrreP/l1PALq/YSg6VvjlA==",
+-      "license": "MIT",
+-      "optional": true
++      "license": "MIT"
+     },
+     "node_modules/lodash.clonedeep": {
+       "version": "4.5.0",
+@@ -2288,6 +2670,30 @@
+         "node": ">= 0.6"
+       }
+     },
++    "node_modules/minimatch": {
++      "version": "9.0.9",
++      "resolved": "https://registry.npmjs.org/minimatch/-/minimatch-9.0.9.tgz",
++      "integrity": "sha512-OBwBN9AL4dqmETlpS2zasx+vTeWclWzkblfZk7KTA5j3jeOONz/tRCnZomUyvNg83wL5Zv9Ss6HMJXAgL8R2Yg==",
++      "license": "ISC",
++      "dependencies": {
++        "brace-expansion": "^2.0.2"
++      },
++      "engines": {
++        "node": ">=16 || 14 >=14.17"
++      },
++      "funding": {
++        "url": "https://github.com/sponsors/isaacs"
++      }
++    },
++    "node_modules/minipass": {
++      "version": "7.1.3",
++      "resolved": "https://registry.npmjs.org/minipass/-/minipass-7.1.3.tgz",
++      "integrity": "sha512-tEBHqDnIoM/1rXME1zgka9g6Q2lcoCkxHLuc7ODJ5BxbP5d4c2Z5cGgtXAku59200Cx7diuHTOYfSBD8n6mm8A==",
++      "license": "BlueOak-1.0.0",
++      "engines": {
++        "node": ">=16 || 14 >=14.17"
++      }
++    },
+     "node_modules/ms": {
+       "version": "2.0.0",
+       "resolved": "https://registry.npmjs.org/ms/-/ms-2.0.0.tgz",
+@@ -2358,7 +2764,6 @@
+       "resolved": "https://registry.npmjs.org/object-hash/-/object-hash-3.0.0.tgz",
+       "integrity": "sha512-RSn9F68PjH9HqtltsSnqYC1XXoWe9Bju5+213R98cNGttag9q9yAOTzdbsqvIa7aNm5WffBZFpWYr2aWrklWAw==",
+       "license": "MIT",
+-      "optional": true,
+       "engines": {
+         "node": ">= 6"
+       }
+@@ -2392,7 +2797,6 @@
+       "resolved": "https://registry.npmjs.org/once/-/once-1.4.0.tgz",
+       "integrity": "sha512-lNaJgI+2Q5URQBkccEKHTQOPaXdUxnZZElQTZY0MFUAuaEqe1E+Nyvgdz/aIyNi6Z9MzO5dv1H8n58/GELp3+w==",
+       "license": "ISC",
+-      "optional": true,
+       "dependencies": {
+         "wrappy": "1"
+       }
+@@ -2456,6 +2860,12 @@
+         "node": ">=8"
+       }
+     },
++    "node_modules/package-json-from-dist": {
++      "version": "1.0.1",
++      "resolved": "https://registry.npmjs.org/package-json-from-dist/-/package-json-from-dist-1.0.1.tgz",
++      "integrity": "sha512-UEZIS3/by4OC8vL3P2dTXRETpebLI2NiI5vIrjaD/5UtrkFX/tNbwjTSRAGC/+7CAo2pIcBaRgWmcBBHcsaCIw==",
++      "license": "BlueOak-1.0.0"
++    },
+     "node_modules/parseurl": {
+       "version": "1.3.3",
+       "resolved": "https://registry.npmjs.org/parseurl/-/parseurl-1.3.3.tgz",
+@@ -2481,6 +2891,37 @@
+         "node": ">=14.0.0"
+       }
+     },
++    "node_modules/path-key": {
++      "version": "3.1.1",
++      "resolved": "https://registry.npmjs.org/path-key/-/path-key-3.1.1.tgz",
++      "integrity": "sha512-ojmeN0qd+y0jszEtoY48r0Peq5dwMEkIlCOu6Q5f41lfkswXuKtYrhgoTpLnyIcHm24Uhqx+5Tqm2InSwLhE6Q==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=8"
++      }
++    },
++    "node_modules/path-scurry": {
++      "version": "1.11.1",
++      "resolved": "https://registry.npmjs.org/path-scurry/-/path-scurry-1.11.1.tgz",
++      "integrity": "sha512-Xa4Nw17FS9ApQFJ9umLiJS4orGjm7ZzwUrwamcGQuHSzDyth9boKDaycYdDcZDuqYATXw4HFXgaqWTctW/v1HA==",
++      "license": "BlueOak-1.0.0",
++      "dependencies": {
++        "lru-cache": "^10.2.0",
++        "minipass": "^5.0.0 || ^6.0.2 || ^7.0.0"
++      },
++      "engines": {
++        "node": ">=16 || 14 >=14.18"
++      },
++      "funding": {
++        "url": "https://github.com/sponsors/isaacs"
++      }
++    },
++    "node_modules/path-scurry/node_modules/lru-cache": {
++      "version": "10.4.3",
++      "resolved": "https://registry.npmjs.org/lru-cache/-/lru-cache-10.4.3.tgz",
++      "integrity": "sha512-JNAzZcXrCt42VGLuYz0zfAzDfAvJWW6AfYlDBQyDV5DClI2m5sAmK+OIO7s59XfsRsWHp02jAJrRadPRGTt6SQ==",
++      "license": "ISC"
++    },
+     "node_modules/path-to-regexp": {
+       "version": "0.1.13",
+       "resolved": "https://registry.npmjs.org/path-to-regexp/-/path-to-regexp-0.1.13.tgz",
+@@ -2580,7 +3021,6 @@
+       "resolved": "https://registry.npmjs.org/readable-stream/-/readable-stream-3.6.2.tgz",
+       "integrity": "sha512-9u/sniCrY3D5WdsERHzHE4G2YCXqoG5FTHUiCC4SIbr6XcLZBY05ya9EKjYek9O5xOAwjGq+1JdGBAS7Q9ScoA==",
+       "license": "MIT",
+-      "optional": true,
+       "dependencies": {
+         "inherits": "^2.0.3",
+         "string_decoder": "^1.1.1",
+@@ -2595,7 +3035,6 @@
+       "resolved": "https://registry.npmjs.org/require-directory/-/require-directory-2.1.1.tgz",
+       "integrity": "sha512-fGxEI7+wsG9xrvdjsrlmL22OMTTiHRwAMroiEeMgq8gzoLC/PQr7RsRDSTLUg/bZAZtF+TVIkHc6/4RIKrui+Q==",
+       "license": "MIT",
+-      "optional": true,
+       "engines": {
+         "node": ">=0.10.0"
+       }
+@@ -2624,6 +3063,21 @@
+         "node": ">=14"
+       }
+     },
++    "node_modules/rimraf": {
++      "version": "5.0.10",
++      "resolved": "https://registry.npmjs.org/rimraf/-/rimraf-5.0.10.tgz",
++      "integrity": "sha512-l0OE8wL34P4nJH/H2ffoaniAokM2qSmrtXHmlpvYr5AVVX8msAyW0l8NVJFDxlSK4u3Uh/f41cQheDVdnYijwQ==",
++      "license": "ISC",
++      "dependencies": {
++        "glob": "^10.3.7"
++      },
++      "bin": {
++        "rimraf": "dist/esm/bin.mjs"
++      },
++      "funding": {
++        "url": "https://github.com/sponsors/isaacs"
++      }
++    },
+     "node_modules/safe-buffer": {
+       "version": "5.2.1",
+       "resolved": "https://registry.npmjs.org/safe-buffer/-/safe-buffer-5.2.1.tgz",
+@@ -2725,6 +3179,27 @@
+       "integrity": "sha512-E5LDX7Wrp85Kil5bhZv46j8jOeboKq5JMmYM3gVGdGH8xFpPWXUMsNrlODCrkoxMEeNi/XZIwuRvY4XNwYMJpw==",
+       "license": "ISC"
+     },
++    "node_modules/shebang-command": {
++      "version": "2.0.0",
++      "resolved": "https://registry.npmjs.org/shebang-command/-/shebang-command-2.0.0.tgz",
++      "integrity": "sha512-kHxr2zZpYtdmrN1qDjrrX/Z1rR1kG8Dx+gkpK1G4eXmvXswmcE1hTWBWYUzlraYw1/yZp6YuDY77YtvbN0dmDA==",
++      "license": "MIT",
++      "dependencies": {
++        "shebang-regex": "^3.0.0"
++      },
++      "engines": {
++        "node": ">=8"
++      }
++    },
++    "node_modules/shebang-regex": {
++      "version": "3.0.0",
++      "resolved": "https://registry.npmjs.org/shebang-regex/-/shebang-regex-3.0.0.tgz",
++      "integrity": "sha512-7++dFhtcx3353uBaq8DDR4NuxBetBzC7ZQOhmTQInHEd6bSrXdiEyzCvG07Z44UYdLShWUyXt5M/yhz8ekcb1A==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=8"
++      }
++    },
+     "node_modules/side-channel": {
+       "version": "1.1.1",
+       "resolved": "https://registry.npmjs.org/side-channel/-/side-channel-1.1.1.tgz",
+@@ -2797,6 +3272,18 @@
+         "url": "https://github.com/sponsors/ljharb"
+       }
+     },
++    "node_modules/signal-exit": {
++      "version": "4.1.0",
++      "resolved": "https://registry.npmjs.org/signal-exit/-/signal-exit-4.1.0.tgz",
++      "integrity": "sha512-bzyZ1e88w9O1iNJbKnOlvYTrWPDl46O1bG0D3XInv+9tkPrxrN8jUUTiFlDkkmKWgn1M6CfIA13SuGqOa9Korw==",
++      "license": "ISC",
++      "engines": {
++        "node": ">=14"
++      },
++      "funding": {
++        "url": "https://github.com/sponsors/isaacs"
++      }
++    },
+     "node_modules/statuses": {
+       "version": "2.0.2",
+       "resolved": "https://registry.npmjs.org/statuses/-/statuses-2.0.2.tgz",
+@@ -2811,7 +3298,6 @@
+       "resolved": "https://registry.npmjs.org/stream-events/-/stream-events-1.0.5.tgz",
+       "integrity": "sha512-E1GUzBSgvct8Jsb3v2X15pjzN1tYebtbLaMg+eBOUOAxgbLoSbT2NS91ckc5lJD1KfLjId+jXJRgo0qnV5Nerg==",
+       "license": "MIT",
+-      "optional": true,
+       "dependencies": {
+         "stubs": "^3.0.0"
+       }
+@@ -2820,15 +3306,13 @@
+       "version": "1.0.3",
+       "resolved": "https://registry.npmjs.org/stream-shift/-/stream-shift-1.0.3.tgz",
+       "integrity": "sha512-76ORR0DO1o1hlKwTbi/DM3EXWGf3ZJYO8cXX5RJwnul2DEg2oyoZyjLNoQM8WsvZiFKCRfC1O0J7iCvie3RZmQ==",
+-      "license": "MIT",
+-      "optional": true
++      "license": "MIT"
+     },
+     "node_modules/string_decoder": {
+       "version": "1.3.0",
+       "resolved": "https://registry.npmjs.org/string_decoder/-/string_decoder-1.3.0.tgz",
+       "integrity": "sha512-hkRX8U1WjJFd8LsDJ2yQ/wWWxaopEsABU1XfkM8A+j0+85JAGppt16cr1Whg6KIbb4okU6Mql6BOj+uup/wKeA==",
+       "license": "MIT",
+-      "optional": true,
+       "dependencies": {
+         "safe-buffer": "~5.2.0"
+       }
+@@ -2838,7 +3322,21 @@
+       "resolved": "https://registry.npmjs.org/string-width/-/string-width-4.2.3.tgz",
+       "integrity": "sha512-wKyQRQpjJ0sIp62ErSZdGsjMJWsap5oRNihHhu6G7JVO/9jIB6UyevL+tXuOqrng8j/cxKTWyWUwvSTriiZz/g==",
+       "license": "MIT",
+-      "optional": true,
++      "dependencies": {
++        "emoji-regex": "^8.0.0",
++        "is-fullwidth-code-point": "^3.0.0",
++        "strip-ansi": "^6.0.1"
++      },
++      "engines": {
++        "node": ">=8"
++      }
++    },
++    "node_modules/string-width-cjs": {
++      "name": "string-width",
++      "version": "4.2.3",
++      "resolved": "https://registry.npmjs.org/string-width/-/string-width-4.2.3.tgz",
++      "integrity": "sha512-wKyQRQpjJ0sIp62ErSZdGsjMJWsap5oRNihHhu6G7JVO/9jIB6UyevL+tXuOqrng8j/cxKTWyWUwvSTriiZz/g==",
++      "license": "MIT",
+       "dependencies": {
+         "emoji-regex": "^8.0.0",
+         "is-fullwidth-code-point": "^3.0.0",
+@@ -2853,7 +3351,19 @@
+       "resolved": "https://registry.npmjs.org/strip-ansi/-/strip-ansi-6.0.1.tgz",
+       "integrity": "sha512-Y38VPSHcqkFrCpFnQ9vuSXmquuv5oXOKpGeT6aGrr3o3Gc9AlVa6JBfUSOCnbxGGZF+/0ooI7KrPuUSztUdU5A==",
+       "license": "MIT",
+-      "optional": true,
++      "dependencies": {
++        "ansi-regex": "^5.0.1"
++      },
++      "engines": {
++        "node": ">=8"
++      }
++    },
++    "node_modules/strip-ansi-cjs": {
++      "name": "strip-ansi",
++      "version": "6.0.1",
++      "resolved": "https://registry.npmjs.org/strip-ansi/-/strip-ansi-6.0.1.tgz",
++      "integrity": "sha512-Y38VPSHcqkFrCpFnQ9vuSXmquuv5oXOKpGeT6aGrr3o3Gc9AlVa6JBfUSOCnbxGGZF+/0ooI7KrPuUSztUdU5A==",
++      "license": "MIT",
+       "dependencies": {
+         "ansi-regex": "^5.0.1"
+       },
+@@ -2881,8 +3391,7 @@
+       "version": "3.0.0",
+       "resolved": "https://registry.npmjs.org/stubs/-/stubs-3.0.0.tgz",
+       "integrity": "sha512-PdHt7hHUJKxvTCgbKX9C1V/ftOcjJQgz8BZwNfV5c4B6dcGqlpelTbJ999jBGZ2jYiPAwcX5dP6oBwVlBlUbxw==",
+-      "license": "MIT",
+-      "optional": true
++      "license": "MIT"
+     },
+     "node_modules/teeny-request": {
+       "version": "9.0.0",
+@@ -3021,8 +3530,7 @@
+       "version": "1.0.2",
+       "resolved": "https://registry.npmjs.org/util-deprecate/-/util-deprecate-1.0.2.tgz",
+       "integrity": "sha512-EPD5q1uXyFxJpCrLnCc1nHnq3gOa6DZBocAIiI2TaSCA7VCJ1UJDMagCzIkXNsUYfD1daK//LTEQ8xiIbrHtcw==",
+-      "license": "MIT",
+-      "optional": true
++      "license": "MIT"
+     },
+     "node_modules/utils-merge": {
+       "version": "1.0.1",
+@@ -3137,12 +3645,44 @@
+         "webidl-conversions": "^3.0.0"
+       }
+     },
++    "node_modules/which": {
++      "version": "2.0.2",
++      "resolved": "https://registry.npmjs.org/which/-/which-2.0.2.tgz",
++      "integrity": "sha512-BLI3Tl1TW3Pvl70l3yq3Y64i+awpwXqsGBYWkkqMtnbXgrMD+yj7rhW0kuEDxzJaYXGjEW5ogapKNMEKNMjibA==",
++      "license": "ISC",
++      "dependencies": {
++        "isexe": "^2.0.0"
++      },
++      "bin": {
++        "node-which": "bin/node-which"
++      },
++      "engines": {
++        "node": ">= 8"
++      }
++    },
+     "node_modules/wrap-ansi": {
+       "version": "7.0.0",
+       "resolved": "https://registry.npmjs.org/wrap-ansi/-/wrap-ansi-7.0.0.tgz",
+       "integrity": "sha512-YVGIj2kamLSTxw6NsZjoBxfSwsn0ycdesmc4p+Q21c5zPuZ1pl+NfxVdxPtdHvmNVOQ6XSYG4AUtyt/Fi7D16Q==",
+       "license": "MIT",
+-      "optional": true,
++      "dependencies": {
++        "ansi-styles": "^4.0.0",
++        "string-width": "^4.1.0",
++        "strip-ansi": "^6.0.0"
++      },
++      "engines": {
++        "node": ">=10"
++      },
++      "funding": {
++        "url": "https://github.com/chalk/wrap-ansi?sponsor=1"
++      }
++    },
++    "node_modules/wrap-ansi-cjs": {
++      "name": "wrap-ansi",
++      "version": "7.0.0",
++      "resolved": "https://registry.npmjs.org/wrap-ansi/-/wrap-ansi-7.0.0.tgz",
++      "integrity": "sha512-YVGIj2kamLSTxw6NsZjoBxfSwsn0ycdesmc4p+Q21c5zPuZ1pl+NfxVdxPtdHvmNVOQ6XSYG4AUtyt/Fi7D16Q==",
++      "license": "MIT",
+       "dependencies": {
+         "ansi-styles": "^4.0.0",
+         "string-width": "^4.1.0",
+@@ -3159,8 +3699,7 @@
+       "version": "1.0.2",
+       "resolved": "https://registry.npmjs.org/wrappy/-/wrappy-1.0.2.tgz",
+       "integrity": "sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ==",
+-      "license": "ISC",
+-      "optional": true
++      "license": "ISC"
+     },
+     "node_modules/ws": {
+       "version": "8.21.0",
+@@ -3204,7 +3743,6 @@
+       "resolved": "https://registry.npmjs.org/y18n/-/y18n-5.0.8.tgz",
+       "integrity": "sha512-0pfFzegeDWJHJIAmTLRP2DwHjdF5s7jo9tuztdQxAhINCdvS+3nGINqPd00AphqJR/0LhANUS6/+7SCb98YOfA==",
+       "license": "ISC",
+-      "optional": true,
+       "engines": {
+         "node": ">=10"
+       }
+@@ -3220,7 +3758,6 @@
+       "resolved": "https://registry.npmjs.org/yargs/-/yargs-17.7.3.tgz",
+       "integrity": "sha512-GZtjxm/J/4TSxuL3FNYjCmLktBTnIw/rVmKSIyKeYAZpmJB2ig9VauCC5xsa82GNKVKDAqpOn3KVzNt0zmrU0g==",
+       "license": "MIT",
+-      "optional": true,
+       "dependencies": {
+         "cliui": "^8.0.1",
+         "escalade": "^3.1.1",
+@@ -3239,7 +3776,6 @@
+       "resolved": "https://registry.npmjs.org/yargs-parser/-/yargs-parser-21.1.1.tgz",
+       "integrity": "sha512-tVpsJW7DdjecAiFpbIB1e3qxIQsE6NoPc5/eTdrbbIC4h0LVsWhnoa3g+m2HclBIujHzsxZ4VJVA+GUuc2/LBw==",
+       "license": "ISC",
+-      "optional": true,
+       "engines": {
+         "node": ">=12"
+       }
+diff --git a/functions/package.json b/functions/package.json
+index d38f09d..419e5a4 100644
+--- a/functions/package.json
++++ b/functions/package.json
+@@ -17,6 +17,7 @@
+     "migrate:firestore:dry-run": "node scripts/migrate-firestore-databases.mjs --dry-run"
+   },
+   "dependencies": {
++    "@google-cloud/recaptcha-enterprise": "^6.4.2",
+     "@google/genai": "^2.4.0",
+     "creg-contribution-arena": "file:..",
+     "firebase-admin": "^13.4.0",
+diff --git a/functions/src/findings.ts b/functions/src/findings.ts
+index ce89280..06b39f3 100644
+--- a/functions/src/findings.ts
++++ b/functions/src/findings.ts
+@@ -20,6 +20,7 @@ import {
+   coverageDeltasForTransition,
+   readDocumentCoverage,
+ } from "./documentCoverage";
++import { runAdvisoryEvaluation } from "./ai";
+ 
+ const findings = () => db().collection("arena_findings");
+ 
+@@ -62,6 +63,7 @@ export async function serializeFinding(
+     status: data.status,
+     aiPreCheckFeedback: data.aiPreCheckFeedback,
+     aiPreCheckScore: Number(data.aiPreCheckScore || 0),
++    ...(data.aiPreCheckBreakdown ? { aiPreCheckBreakdown: data.aiPreCheckBreakdown } : {}),
+     communityVotes: {
+       up: Number(data.communityVotes?.up || 0),
+       down: Number(data.communityVotes?.down || 0),
+@@ -195,6 +197,24 @@ export async function submitFindingHandler(request: CallableRequest) {
+   }
+ 
+   const identity = await displayIdentity(auth.uid);
++  let status: "Submitted" | "AI Pre-Check" = "Submitted";
++  let aiPreCheckFeedback = "Advisory AI pre-check was unavailable. Human review is required.";
++  let aiPreCheckScore = 0;
++  let aiPreCheckBreakdown: Record<string, number> | undefined;
++
++  try {
++    const evaluation = await runAdvisoryEvaluation(
++      `Title: ${title}\nCategory: ${category}\n\n${description}`,
++      category,
++    );
++    status = "AI Pre-Check";
++    aiPreCheckFeedback = evaluation.feedback;
++    aiPreCheckScore = evaluation.score;
++    aiPreCheckBreakdown = evaluation.breakdown;
++  } catch (error) {
++    console.warn("Finding advisory pre-check skipped:", error);
++  }
++
+   const ref = findings().doc();
+   const record = {
+     title,
+@@ -203,11 +223,12 @@ export async function submitFindingHandler(request: CallableRequest) {
+     authorUid: auth.uid,
+     author: identity.displayName,
+     ...(sourceReference ? { sourceReference } : {}),
+-    status: "Submitted",
++    status,
+     createdAt: FieldValue.serverTimestamp(),
+     updatedAt: FieldValue.serverTimestamp(),
+-    aiPreCheckFeedback: "AI review has not been requested. Human review is required.",
+-    aiPreCheckScore: 0,
++    aiPreCheckFeedback,
++    aiPreCheckScore,
++    ...(aiPreCheckBreakdown ? { aiPreCheckBreakdown } : {}),
+     communityVotes: { up: 0, down: 0 },
+     commentCount: 0,
+     xpAwarded: 0,
+@@ -221,7 +242,7 @@ export async function submitFindingHandler(request: CallableRequest) {
+   };
+   await ref.set(record);
+   if (documentId && sectionId) {
+-    await applyCoverageDelta(documentId, sectionId, coverageDeltasForNewFinding("Submitted"));
++    await applyCoverageDelta(documentId, sectionId, coverageDeltasForNewFinding(status));
+   }
+   const saved = await ref.get();
+   return { finding: await serializeFinding(ref.id, saved.data()!, { includeComments: true }) };
+diff --git a/functions/src/index.ts b/functions/src/index.ts
+index 30de0c0..e6e31bb 100644
+--- a/functions/src/index.ts
++++ b/functions/src/index.ts
+@@ -67,3 +67,6 @@ const aiOptions = { ...publicOptions, maxInstances: 3, secrets: [arenaGeminiApiK
+ export const arenaAiChat = onCall(aiOptions, aiChatHandler);
+ export const arenaAiEvaluate = onCall(aiOptions, aiEvaluateHandler);
+ export const arenaTestnetHealthSnapshot = onCall(publicOptions, testnetHealthHandler);
++
++export { registerWaitlist } from "./registerWaitlist";
++export { waitlistPublicStats, waitlistAdminStats, waitlistTrackView } from "./waitlistStats";
+diff --git a/package-lock.json b/package-lock.json
+index 0db733a..ccfaa38 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -19,6 +19,7 @@
+         "motion": "^12.23.24",
+         "react": "^19.0.1",
+         "react-dom": "^19.0.1",
++        "react-google-recaptcha-v3": "^1.10.1",
+         "vite": "^6.2.3"
+       },
+       "devDependencies": {
+@@ -8557,6 +8558,15 @@
+         "node": "*"
+       }
+     },
++    "node_modules/hoist-non-react-statics": {
++      "version": "3.3.2",
++      "resolved": "https://registry.npmjs.org/hoist-non-react-statics/-/hoist-non-react-statics-3.3.2.tgz",
++      "integrity": "sha512-/gGivxi8JPKWNm/W0jSmzcMPpfpPLc3dY/6GxhX2hQ9iGj3aDfklV4ET7NjKpSinLpJ5vafa9iiGIEZg10SfBw==",
++      "license": "BSD-3-Clause",
++      "dependencies": {
++        "react-is": "^16.7.0"
++      }
++    },
+     "node_modules/hono": {
+       "version": "4.12.26",
+       "resolved": "https://registry.npmjs.org/hono/-/hono-4.12.26.tgz",
+@@ -11647,6 +11657,25 @@
+         "react": "^19.2.7"
+       }
+     },
++    "node_modules/react-google-recaptcha-v3": {
++      "version": "1.11.0",
++      "resolved": "https://registry.npmjs.org/react-google-recaptcha-v3/-/react-google-recaptcha-v3-1.11.0.tgz",
++      "integrity": "sha512-kLQqpz/77m8+trpBwzqcxNtvWZYoZ/YO6Vm2cVTHW8hs80BWUfDpC7RDwuAvpswwtSYApWfaSpIDFWAIBNIYxQ==",
++      "license": "MIT",
++      "dependencies": {
++        "hoist-non-react-statics": "^3.3.2"
++      },
++      "peerDependencies": {
++        "react": "^16.3 || ^17.0 || ^18.0 || ^19.0",
++        "react-dom": "^17.0 || ^18.0 || ^19.0"
++      }
++    },
++    "node_modules/react-is": {
++      "version": "16.13.1",
++      "resolved": "https://registry.npmjs.org/react-is/-/react-is-16.13.1.tgz",
++      "integrity": "sha512-24e6ynE2H+OKt4kqsOvNd8kBpV65zoxbA4BVsEOB3ARVWQki/DHzaUoC5KuON/BiccDaCCTZBuOcfZs70kR8bQ==",
++      "license": "MIT"
++    },
+     "node_modules/react-refresh": {
+       "version": "0.18.0",
+       "license": "MIT",
+diff --git a/package.json b/package.json
+index e52c20c..5c8032c 100644
+--- a/package.json
++++ b/package.json
+@@ -16,6 +16,7 @@
+     "build:firebase": "vite build --configLoader runner --mode firebase",
+     "verify:firebase-bundle": "node scripts/verify-firebase-bundle.mjs",
+     "check:firebase-app-check": "node scripts/check-firebase-app-check.mjs",
++    "check:cregnet-dns": "node scripts/check-cregnet-dns.mjs",
+     "sync:whitepaper": "node scripts/sync-whitepaper.mjs",
+     "seed:documents": "npm run sync:whitepaper && npm --prefix functions run seed-documents",
+     "start": "node dist/server.cjs",
+@@ -33,6 +34,8 @@
+     "smoke:staged-browser": "node scripts/smoke-staged-browser.mjs",
+     "smoke:simulator-page": "node scripts/smoke-simulator-page.mjs",
+     "smoke:creg-guide-local": "node scripts/smoke-creg-guide-local.mjs",
++    "smoke:arena-waitlist": "node scripts/smoke-arena-waitlist.mjs",
++    "smoke:waitlist-redirect": "node scripts/smoke-waitlist-redirect.mjs",
+     "verify:simulator-goal": "node scripts/verify-simulator-goal.mjs"
+   },
+   "dependencies": {
+@@ -47,6 +50,7 @@
+     "motion": "^12.23.24",
+     "react": "^19.0.1",
+     "react-dom": "^19.0.1",
++    "react-google-recaptcha-v3": "^1.10.1",
+     "vite": "^6.2.3"
+   },
+   "devDependencies": {
+diff --git a/public/whitepaper/manifest.json b/public/whitepaper/manifest.json
+index ee24c21..5b3e2c0 100644
+--- a/public/whitepaper/manifest.json
++++ b/public/whitepaper/manifest.json
+@@ -1,7 +1,7 @@
+ {
+   "version": "0.3.0-public-alpha",
+   "publishedAt": "2026-06-26",
+-  "generatedAt": "2026-06-28T17:46:01.449Z",
++  "generatedAt": "2026-07-06T08:33:13.771Z",
+   "documents": [
+     {
+       "title": "Technical Whitepaper",
+diff --git a/scripts/check-firebase-app-check.mjs b/scripts/check-firebase-app-check.mjs
+index 270814c..5c84fd2 100644
+--- a/scripts/check-firebase-app-check.mjs
++++ b/scripts/check-firebase-app-check.mjs
+@@ -8,9 +8,30 @@ import { resolve, dirname } from "node:path";
+ import { fileURLToPath } from "node:url";
+ 
+ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+-const enforceFlag = process.env.ENFORCE_APP_CHECK === "true";
++const functionsEnvPath = resolve(root, "functions/.env");
++function readEnvFlag(path, key) {
++  if (!existsSync(path)) return false;
++  return readFileSync(path, "utf8").split(/\r?\n/).some(line => {
++    const match = line.match(new RegExp(`^\\s*${key}\\s*=\\s*(.+)$`));
++    return match?.[1]?.trim().replace(/^["']|["']$/g, "") === "true";
++  });
++}
++
++const enforceFlag =
++  process.env.ENFORCE_APP_CHECK === "true" || readEnvFlag(functionsEnvPath, "ENFORCE_APP_CHECK");
+ const emulator = process.env.FUNCTIONS_EMULATOR === "true";
+ 
++function readEnvValue(path, key) {
++  if (!existsSync(path)) return "";
++  const match = readFileSync(path, "utf8").match(new RegExp(`^${key}=(.*)$`, "m"));
++  return match?.[1]?.trim().replace(/^["']|["']$/g, "") ?? "";
++}
++
++const firebaseEnvPath = resolve(root, ".env.firebase");
++const siteKey =
++  process.env.VITE_FIREBASE_APP_CHECK_SITE_KEY?.trim() ||
++  readEnvValue(firebaseEnvPath, "VITE_FIREBASE_APP_CHECK_SITE_KEY");
++
+ const clientPaths = [
+   resolve(root, "src/firebase.ts"),
+   resolve(root, "src/firebaseClient.ts"),
+@@ -29,6 +50,7 @@ console.log(`  Runtime ENFORCE_APP_CHECK: ${enforceFlag ? "true" : "false"}`);
+ console.log(`  Functions emulator: ${emulator ? "true" : "false"}`);
+ console.log(`  Effective callable enforcement: ${status}`);
+ console.log(`  Client App Check provider configured: ${clientHasAppCheck ? "yes" : "no"}`);
++console.log(`  Hosting site key present (.env.firebase): ${siteKey ? "yes" : "no"}`);
+ 
+ if (!enforceFlag) {
+   console.log("");
+diff --git a/server.ts b/server.ts
+index 836f0dc..e31ad5e 100644
+--- a/server.ts
++++ b/server.ts
+@@ -1,4 +1,5 @@
+ import express from "express";
++import * as fs from "node:fs";
+ import path from "path";
+ import dotenv from "dotenv";
+ import { GoogleGenAI, Type } from "@google/genai";
+@@ -31,50 +32,9 @@ interface Finding {
+ let appFindings: Finding[] = [];
+ 
+ import * as crypto from "node:crypto";
+-import * as fs from "node:fs";
++import { getRagContext } from "./shared/arena-rag/index.ts";
+ import { aiGuideEnabled as resolveAiGuideEnabled, canReviewTransition, normalizeReward, normalizeRubricEvaluation, secureStringEqual, signSessionId, standaloneWritesEnabled, validateText } from "./src/server/policy";
+ 
+-interface WhitepaperSection {
+-  chapter: string;
+-  title: string;
+-  content: string;
+-  keywords: string[];
+-}
+-
+-function loadCanonicalWhitepaper(): WhitepaperSection[] {
+-  const candidates = [
+-    path.join(process.cwd(), "public", "whitepaper", "CREG-Whitepaper-v0.3.0-public-alpha.md"),
+-    path.join(process.cwd(), "dist", "whitepaper", "CREG-Whitepaper-v0.3.0-public-alpha.md"),
+-    path.join(process.cwd(), "..", "docs", "WHITEPAPER.md"),
+-  ];
+-  const source = candidates.find(candidate => fs.existsSync(candidate));
+-  if (!source) return [];
+-  const sections: WhitepaperSection[] = [];
+-  let title = "Document overview";
+-  let lines: string[] = [];
+-  const commit = () => {
+-    const content = lines.join("\n").trim();
+-    if (content) {
+-      const chapter = title.match(/^\d+(?:\.\d+)?/)?.[0] || (title === "Abstract" ? "Abstract" : `Section ${sections.length + 1}`);
+-      const keywords = Array.from(new Set(`${title} ${content}`.toLowerCase().match(/[a-z][a-z0-9-]{3,}/g) || [])).slice(0, 80);
+-      sections.push({ chapter, title, content, keywords });
+-    }
+-    lines = [];
+-  };
+-  for (const line of fs.readFileSync(source, "utf8").split(/\r?\n/)) {
+-    if (line.startsWith("## ")) {
+-      commit();
+-      title = line.slice(3).trim();
+-    } else if (!line.startsWith("# ")) {
+-      lines.push(line);
+-    }
+-  }
+-  commit();
+-  return sections;
+-}
+-
+-const whitepaperData = loadCanonicalWhitepaper();
+-
+ type ArenaVote = "up" | "down";
+ type ArenaVoteLedger = Record<string, Record<string, ArenaVote>>;
+ interface ArenaAuditEvent {
+@@ -388,64 +348,13 @@ function getGeminiClient(): GoogleGenAI {
+   return aiClient;
+ }
+ 
+-// Simple RAG search function to extract whitepaper sections based on keywords
+-function getRAGContext(query: string): { context: string; sources: string[]; confidence: "High" | "Medium" | "Low" } {
+-  const normalizedQuery = query.toLowerCase();
+-  
+-  // Rank whitepaper sections based on matching keywords or substrings
+-  const matchedSections = whitepaperData.map(section => {
+-    let score = 0;
+-    // Check keywords
+-    section.keywords.forEach(keyword => {
+-      if (normalizedQuery.includes(keyword.toLowerCase())) {
+-        score += 3;
+-      }
+-    });
+-    // Check content substring overlaps
+-    if (normalizedQuery.includes(section.title.toLowerCase())) score += 5;
+-    if (normalizedQuery.includes(section.chapter.toLowerCase())) score += 2;
+-    
+-    // Simple word matches
+-    const words = normalizedQuery.split(/\s+/);
+-    words.forEach(word => {
+-      if (word.length > 3 && section.content.toLowerCase().includes(word)) {
+-        score += 1;
+-      }
+-    });
+-
+-    return { section, score };
+-  }).filter(item => item.score > 0)
+-    .sort((a, b) => b.score - a.score);
+-
+-  if (matchedSections.length === 0) {
+-    // Fallback to Abstract and Chapter 1
+-    const fallback = whitepaperData.slice(0, 2);
+-    return {
+-      context: fallback.map(f => `[${f.chapter} - ${f.title}]: ${f.content}`).join("\n\n"),
+-      sources: fallback.map(f => `${f.chapter}: ${f.title}`),
+-      confidence: "Low"
+-    };
+-  }
+-
+-  // Take top 3 matching chunks
+-  const topMatches = matchedSections.slice(0, 3);
+-  const context = topMatches.map(m => `[${m.section.chapter} - ${m.section.title}]: ${m.section.content}`).join("\n\n");
+-  const sources = topMatches.map(m => `${m.section.chapter}: ${m.section.title}`);
+-  
+-  // Decide confidence
+-  const maxScore = topMatches[0].score;
+-  const confidence = maxScore > 10 ? "High" : (maxScore > 4 ? "Medium" : "Low");
+-
+-  return { context, sources, confidence };
+-}
+-
+ // 1. AI Q&A Endpoint (Grounded in Whitepaper Section chunks)
+ app.post("/api/chat", requireAiGuide, async (req, res) => {
+   try {
+     const message = cleanText(req.body?.message, "Message", 2, 4000);
+     const mode = typeof req.body?.mode === "string" ? req.body.mode.slice(0, 64) : "Beginner Mode";
+ 
+-    const { context, sources, confidence } = getRAGContext(message);
++    const { context, sources, citations, confidence } = getRagContext(message);
+ 
+     // AI Mode System prompt customizations
+     let modeInstruction = "";
+@@ -529,6 +438,7 @@ ${context}
+     return res.json({
+       ...parsedResponse,
+       sources,
++      sourceCitations: citations,
+       confidence
+     });
+ 
+diff --git a/src/App.tsx b/src/App.tsx
+index 8c4946e..88861d9 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -403,6 +403,9 @@ export default function App() {
+         description: newFinding.description,
+         category: newFinding.category,
+         sourceReference: newFinding.sourceReference,
++        documentId: newFinding.documentId,
++        revisionId: newFinding.revisionId,
++        sectionId: newFinding.sectionId,
+       });
+       setFindings(prev => {
+         const exists = prev.some(f => f.id === savedFinding.id);
+diff --git a/src/components/FindingsBoard.tsx b/src/components/FindingsBoard.tsx
+index 056aabf..6e4ad57 100644
+--- a/src/components/FindingsBoard.tsx
++++ b/src/components/FindingsBoard.tsx
+@@ -1,6 +1,7 @@
+-import React, { useState } from 'react';
++import React, { useEffect, useState } from 'react';
+ import { Finding, FindingStatus } from '../types';
+ import { commentOnFinding, getFinding, submitAppeal, voteFinding } from '../firebaseApi';
++import { FINDING_FORM_CATEGORIES, SECURITY_BLOCKED_CATEGORY } from '../constants/findingCategories';
+ import PrivateSecurityDisclosureNotice from './PrivateSecurityDisclosureNotice';
+ import { 
+   Plus, Check, Shield, AlertCircle, MessageSquare, ThumbsUp, RefreshCw, ChevronRight, User, HelpCircle, FileText, GitBranch
+@@ -12,24 +13,32 @@ interface FindingsBoardProps {
+   onFindingChanged: (finding: Finding) => void;
+   onUpdateFindingStatus: (id: string, newStatus: FindingStatus, notes?: string, xpReward?: number, repReward?: number) => void;
+   username: string;
++  draft?: { title: string; description: string } | null;
++  onDraftConsumed?: () => void;
+ }
+ 
+-const CATEGORIES = [
+-  'Whitepaper Confusion',
+-  'Security Concern',
+-  'Contradiction',
+-  'Missing Documentation',
+-  'UX Issue',
+-  'Airdrop Wording Risk',
+-  'Technical Suggestion',
+-  'Community Suggestion'
++const RUBRIC_LABELS: Array<{ key: keyof NonNullable<Finding['aiPreCheckBreakdown']>; label: string; max: number }> = [
++  { key: 'specificity', label: 'Specificity', max: 20 },
++  { key: 'evidence', label: 'Evidence', max: 20 },
++  { key: 'originalThinking', label: 'Original thinking', max: 20 },
++  { key: 'practicalUsefulness', label: 'Usefulness', max: 20 },
++  { key: 'clarity', label: 'Clarity', max: 10 },
++  { key: 'tone', label: 'Tone', max: 10 },
+ ];
+ 
+ function commentCount(finding: Finding) {
+   return finding.commentCount ?? finding.comments.length;
+ }
+ 
+-export default function FindingsBoard({ findings, onAddFinding, onFindingChanged, onUpdateFindingStatus, username }: FindingsBoardProps) {
++export default function FindingsBoard({
++  findings,
++  onAddFinding,
++  onFindingChanged,
++  onUpdateFindingStatus,
++  username,
++  draft = null,
++  onDraftConsumed,
++}: FindingsBoardProps) {
+   const [selectedCategory, setSelectedCategory] = useState<string>('All');
+   const [selectedStatus, setSelectedStatus] = useState<string>('All');
+   const [newTitle, setNewTitle] = useState('');
+@@ -48,6 +57,15 @@ export default function FindingsBoard({ findings, onAddFinding, onFindingChanged
+   const [isAppealing, setIsAppealing] = useState(false);
+   const [loadingFindingId, setLoadingFindingId] = useState<string | null>(null);
+ 
++  useEffect(() => {
++    if (!draft) return;
++    setNewTitle(draft.title);
++    setNewDesc(draft.description);
++    setNewCategory('Whitepaper Confusion');
++    setShowSubmitForm(true);
++    onDraftConsumed?.();
++  }, [draft, onDraftConsumed]);
++
+   const openFinding = async (finding: Finding) => {
+     setActiveFinding(finding);
+     if (finding.comments.length > 0 || commentCount(finding) === 0) return;
+@@ -185,7 +203,7 @@ export default function FindingsBoard({ findings, onAddFinding, onFindingChanged
+                   <span>ALL ISSUES</span>
+                   <span>[{findings.length}]</span>
+                 </button>
+-                {CATEGORIES.map(cat => {
++                {FINDING_FORM_CATEGORIES.map(cat => {
+                   const count = findings.filter(f => f.category === cat).length;
+                   return (
+                     <button
+@@ -265,7 +283,7 @@ export default function FindingsBoard({ findings, onAddFinding, onFindingChanged
+                   onChange={(e) => setNewCategory(e.target.value)}
+                   className="bg-theme-bg border border-theme-border-med p-2 text-xs text-theme-text focus:border-theme-accent outline-none uppercase"
+                 >
+-                  {CATEGORIES.map(cat => (
++                  {FINDING_FORM_CATEGORIES.map(cat => (
+                     <option key={cat} value={cat}>{cat.toUpperCase()}</option>
+                   ))}
+                 </select>
+@@ -283,7 +301,7 @@ export default function FindingsBoard({ findings, onAddFinding, onFindingChanged
+               </div>
+             </div>
+ 
+-            {newCategory === 'Security Concern' ? (
++            {newCategory === SECURITY_BLOCKED_CATEGORY ? (
+               <PrivateSecurityDisclosureNotice />
+             ) : (
+               <div className="flex flex-col gap-1">
+@@ -310,7 +328,7 @@ export default function FindingsBoard({ findings, onAddFinding, onFindingChanged
+ 
+               <button
+                 type="submit"
+-                disabled={isPrechecking || newCategory === 'Security Concern'}
++                disabled={isPrechecking || newCategory === SECURITY_BLOCKED_CATEGORY}
+                 className="bg-theme-accent text-theme-accent-text font-bold text-[9px] uppercase tracking-wider py-1.5 px-4 border border-theme-accent hover:bg-theme-bg hover:text-theme-text transition-all flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+               >
+                 {isPrechecking ? (
+@@ -385,6 +403,16 @@ export default function FindingsBoard({ findings, onAddFinding, onFindingChanged
+                   </span>
+                 </div>
+                 <p className="text-[9px] text-theme-muted">{activeFinding.aiPreCheckFeedback}</p>
++                {activeFinding.aiPreCheckBreakdown && (
++                  <div className="grid grid-cols-2 md:grid-cols-3 gap-1.5 mt-2 pt-2 border-t border-theme-border">
++                    {RUBRIC_LABELS.map(({ key, label, max }) => (
++                      <div key={key} className="text-[8px] uppercase text-theme-muted">
++                        <span className="text-theme-text">{label}</span>
++                        <span className="ml-1 font-bold">{activeFinding.aiPreCheckBreakdown?.[key]}/{max}</span>
++                      </div>
++                    ))}
++                  </div>
++                )}
+               </div>
+             )}
+ 
+diff --git a/src/components/GatewayLanding.tsx b/src/components/GatewayLanding.tsx
+index 94427b1..5e3f3f4 100644
+--- a/src/components/GatewayLanding.tsx
++++ b/src/components/GatewayLanding.tsx
+@@ -15,23 +15,15 @@ import {
+   Wallet,
+ } from 'lucide-react';
+ import type { WalletAuthPhase } from '../hooks/useWeb3Wallet';
+-import type { MobileWalletTarget } from '../wallet/walletConnect';
+-import { isMobileBrowser } from '../wallet/mobileWalletDeepLink';
+-import { WALLET_EXTENSION_CONFLICT_HINT } from '../wallet/walletExtensionConflict';
++import {
++  isMobileBrowser,
++  sortGatewayProviders,
++  WALLET_EXTENSION_CONFLICT_HINT,
++  type Eip6963ProviderDetail,
++  type MobileWalletTarget,
++} from '@creg/wallet';
+ import GatewayBackground from './GatewayBackground';
+ 
+-interface Eip6963ProviderInfo {
+-  uuid: string;
+-  name: string;
+-  icon: string;
+-  rdns: string;
+-}
+-
+-interface Eip6963ProviderDetail {
+-  info: Eip6963ProviderInfo;
+-  provider: any;
+-}
+-
+ interface GatewayLandingProps {
+   eip6963Providers: Eip6963ProviderDetail[];
+   walletExtensionConflict: boolean;
+@@ -43,6 +35,8 @@ interface GatewayLandingProps {
+   selectedWalletName: string | null;
+   isRestoringSession: boolean;
+   onExplorePublic: () => void;
++  onJoinGenesisCohort?: () => void;
++  showGenesisCohortCta?: boolean;
+   theme: 'dark' | 'green' | 'light';
+   setTheme: (theme: 'dark' | 'green' | 'light') => void;
+ }
+@@ -101,6 +95,8 @@ export default function GatewayLanding({
+   selectedWalletName,
+   isRestoringSession,
+   onExplorePublic,
++  onJoinGenesisCohort,
++  showGenesisCohortCta = false,
+   theme,
+   setTheme,
+ }: GatewayLandingProps) {
+@@ -120,23 +116,10 @@ export default function GatewayLanding({
+     window.dispatchEvent(new Event('eip6963:requestProvider'));
+   }, [eip6963Providers]);
+ 
+-  const uniqueProviders = useMemo(() => {
+-    const seen = new Set<string>();
+-    const priority = ['io.metamask', 'com.okex.wallet', 'com.coinbase.wallet', 'com.brave.wallet'];
+-    const filtered = eip6963Providers.filter(detail => {
+-      const key = detail.info.rdns || detail.info.name;
+-      if (seen.has(key)) return false;
+-      seen.add(key);
+-      return true;
+-    });
+-    return filtered.sort((left, right) => {
+-      const leftIndex = priority.indexOf(left.info.rdns);
+-      const rightIndex = priority.indexOf(right.info.rdns);
+-      const leftRank = leftIndex === -1 ? priority.length : leftIndex;
+-      const rightRank = rightIndex === -1 ? priority.length : rightIndex;
+-      return leftRank - rightRank || left.info.name.localeCompare(right.info.name);
+-    });
+-  }, [eip6963Providers]);
++  const uniqueProviders = useMemo(
++    () => sortGatewayProviders(eip6963Providers),
++    [eip6963Providers],
++  );
+ 
+   const showBrowserWalletFallback =
+     uniqueProviders.length === 0 && hasInjectedWallet && !walletExtensionConflict;
+@@ -383,10 +366,24 @@ export default function GatewayLanding({
+           )}
+ 
+           <div className="gateway-card-footer">
++            {showGenesisCohortCta && onJoinGenesisCohort && (
++              <button
++                type="button"
++                className="gateway-cohort-cta"
++                onClick={onJoinGenesisCohort}
++                disabled={isWalletBusy}
++              >
++                Join Genesis Cohort <ArrowRight aria-hidden="true" />
++              </button>
++            )}
+             <button type="button" onClick={onExplorePublic} disabled={isWalletBusy}>
+               Explore the public Arena <ArrowRight aria-hidden="true" />
+             </button>
+-            <p>Browsing is public. Publishing and reputation require verified ownership.</p>
++            <p>
++              {showGenesisCohortCta
++                ? 'Browse protocol docs freely, join the genesis waitlist, or sign in to publish and earn reputation.'
++                : 'Browsing is public. Publishing and reputation require verified ownership.'}
++            </p>
+           </div>
+         </section>
+       </main>
+diff --git a/src/components/WhitepaperLibrary.tsx b/src/components/WhitepaperLibrary.tsx
+index 09c0250..3e50fd4 100644
+--- a/src/components/WhitepaperLibrary.tsx
++++ b/src/components/WhitepaperLibrary.tsx
+@@ -1,4 +1,5 @@
+-import { useEffect, useMemo, useState, type ReactNode } from 'react';
++import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
++import { sectionAnchorId } from '../../shared/arena-rag/sections.ts';
+ import {
+   BookOpen,
+   Check,
+@@ -11,6 +12,7 @@ import {
+   GitBranch,
+ } from 'lucide-react';
+ import type { Finding, GlossaryTerm } from '../types';
++import { FINDING_FORM_CATEGORIES, SECURITY_BLOCKED_CATEGORY } from '../constants/findingCategories';
+ import { getDocument, listDocumentRevisions, getAnnotations, getDocumentCoverage, listGlossaryTerms, proposeGlossaryTerm } from '../firebaseApi';
+ import { arenaFeatures } from '../config/arenaFeatures';
+ import PrivateSecurityDisclosureNotice from './PrivateSecurityDisclosureNotice';
+@@ -48,11 +50,18 @@ interface WhitepaperManifest {
+   documents: ManifestDocument[];
+ }
+ 
++interface LibraryFocusRequest {
++  documentId: ArenaDocumentId;
++  sectionId: string;
++}
++
+ interface WhitepaperLibraryProps {
+   username: string;
+   canSubmit: boolean;
+   onRequestSignIn: () => void;
+   onSubmitCritique: (finding: Finding) => Promise<Finding>;
++  focusRequest?: LibraryFocusRequest | null;
++  onFocusConsumed?: () => void;
+ }
+ 
+ type ArenaDocumentId = 'whitepaper' | 'workflow';
+@@ -94,10 +103,6 @@ function pdfDownloadHref(download: ManifestDownload) {
+   return `${download.path}?v=${cacheKey}`;
+ }
+ 
+-function sectionId(title: string, index: number) {
+-  return `${index}-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')}`;
+-}
+-
+ function parseWhitepaper(markdown: string): WhitepaperSection[] {
+   const sections: WhitepaperSection[] = [];
+   let title = 'Document overview';
+@@ -105,7 +110,10 @@ function parseWhitepaper(markdown: string): WhitepaperSection[] {
+ 
+   const commit = () => {
+     const body = lines.join('\n').trim();
+-    if (body) sections.push({ id: sectionId(title, sections.length), title, body, order: sections.length });
++    if (body) {
++      const order = sections.length;
++      sections.push({ id: sectionAnchorId(title, order), title, body, order });
++    }
+     lines = [];
+   };
+ 
+@@ -204,7 +212,14 @@ function renderSection(markdown: string): ReactNode[] {
+   return output;
+ }
+ 
+-export default function WhitepaperLibrary({ username, canSubmit, onRequestSignIn, onSubmitCritique }: WhitepaperLibraryProps) {
++export default function WhitepaperLibrary({
++  username,
++  canSubmit,
++  onRequestSignIn,
++  onSubmitCritique,
++  focusRequest = null,
++  onFocusConsumed,
++}: WhitepaperLibraryProps) {
+   const [activeDocumentId, setActiveDocumentId] = useState<ArenaDocumentId>('whitepaper');
+   const activeDocument = ARENA_DOCUMENTS[activeDocumentId];
+   const [manifest, setManifest] = useState<WhitepaperManifest | null>(null);
+@@ -242,6 +257,8 @@ export default function WhitepaperLibrary({ username, canSubmit, onRequestSignIn
+   const [proposeStatus, setProposeStatus] = useState<string | null>(null);
+   const [submittingTerm, setSubmittingTerm] = useState(false);
+   const [glossaryQuery, setGlossaryQuery] = useState('');
++  const [highlightedSectionId, setHighlightedSectionId] = useState<string | null>(null);
++  const readerRef = useRef<HTMLElement | null>(null);
+ 
+   const filteredSections = useMemo(() => {
+     const normalized = query.trim().toLowerCase();
+@@ -420,6 +437,45 @@ export default function WhitepaperLibrary({ username, canSubmit, onRequestSignIn
+     return () => { active = false; };
+   }, [showDiff, compareRevisionId, activeSection?.id, activeDocumentId]);
+ 
++  useEffect(() => {
++    if (!focusRequest || loading || sections.length === 0) return;
++
++    if (activeDocumentId !== focusRequest.documentId) {
++      setActiveDocumentId(focusRequest.documentId);
++      return;
++    }
++
++    const target = sections.find(section => section.id === focusRequest.sectionId);
++    if (!target) {
++      onFocusConsumed?.();
++      return;
++    }
++
++    setActiveId(target.id);
++    setShowCritique(false);
++    setShowDiff(false);
++    setQuery('');
++    setHighlightedSectionId(target.id);
++
++    const scrollTimer = window.setTimeout(() => {
++      readerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
++    }, 0);
++
++    const highlightTimer = window.setTimeout(() => setHighlightedSectionId(null), 3200);
++    onFocusConsumed?.();
++
++    return () => {
++      window.clearTimeout(scrollTimer);
++      window.clearTimeout(highlightTimer);
++    };
++  }, [
++    focusRequest,
++    loading,
++    sections,
++    activeDocumentId,
++    onFocusConsumed,
++  ]);
++
+   const toggleDiff = () => {
+     if (!showDiff) {
+       const currentVer = manifest?.version || FALLBACK_WHITEPAPER_VERSION;
+@@ -615,10 +671,14 @@ export default function WhitepaperLibrary({ username, canSubmit, onRequestSignIn
+           </div>
+         </aside>
+ 
+-        <article className="whitepaper-reader" aria-live="polite">
++        <article
++          ref={readerRef}
++          className={`whitepaper-reader${highlightedSectionId && activeSection?.id === highlightedSectionId ? ' is-citation-focus' : ''}`}
++          aria-live="polite"
++        >
+           {activeSection && (
+             <>
+-              <div className="whitepaper-reader-heading">
++              <div className="whitepaper-reader-heading" id={`section-${activeSection.id}`}>
+                 <div><span>Section {String(activeSection.order + 1).padStart(2, '0')}</span><h2>{activeSection.title}</h2></div>
+                 <div>
+                   {arenaFeatures.firebaseBackend && revisionsList.length > 1 && (
+@@ -760,8 +820,8 @@ export default function WhitepaperLibrary({ username, canSubmit, onRequestSignIn
+           <div><span>Evidence-linked feedback</span><h2 id="critique-title">Critique: {activeSection.title}</h2><p>Your submission is public. Do not include active exploit details, private keys, credentials, or personal data.</p></div>
+           <div className="whitepaper-critique-form">
+             <label>Title<input value={critiqueTitle} maxLength={140} onChange={event => setCritiqueTitle(event.target.value)} /></label>
+-            <label>Category<select value={critiqueCategory} onChange={event => setCritiqueCategory(event.target.value as Finding['category'])}><option>Whitepaper Confusion</option><option>Contradiction</option><option>Missing Documentation</option><option>Technical Suggestion</option><option>Security Concern</option><option>UX Issue</option></select></label>
+-            {critiqueCategory === 'Security Concern' ? (
++            <label>Category<select value={critiqueCategory} onChange={event => setCritiqueCategory(event.target.value as Finding['category'])}>{FINDING_FORM_CATEGORIES.map(category => (<option key={category} value={category}>{category}</option>))}</select></label>
++            {critiqueCategory === SECURITY_BLOCKED_CATEGORY ? (
+               <PrivateSecurityDisclosureNotice wide />
+             ) : (
+               <label className="is-wide">Your critique<textarea rows={7} value={critiqueBody} maxLength={5000} onChange={event => setCritiqueBody(event.target.value)} placeholder="State the claim, explain the concern, cite evidence, and suggest a concrete improvement." /></label>
+@@ -769,7 +829,7 @@ export default function WhitepaperLibrary({ username, canSubmit, onRequestSignIn
+             <div className="is-wide whitepaper-critique-actions">
+               <span>{submitStatus}</span>
+               <button onClick={() => setShowCritique(false)}>Cancel</button>
+-              <button onClick={submitCritique} disabled={submitting || critiqueCategory === 'Security Concern'}>
++              <button onClick={submitCritique} disabled={submitting || critiqueCategory === SECURITY_BLOCKED_CATEGORY}>
+                 {submitting ? 'Submitting…' : 'Submit critique'}
+               </button>
+             </div>
+diff --git a/src/config/arenaFeatures.ts b/src/config/arenaFeatures.ts
+index 2490f91..d702eac 100644
+--- a/src/config/arenaFeatures.ts
++++ b/src/config/arenaFeatures.ts
+@@ -10,6 +10,8 @@ export const arenaFeatures = Object.freeze({
+   walletIdentity: (!import.meta.env.PROD || firebaseBackend) && enabled(import.meta.env.VITE_ARENA_ENABLE_WALLET_IDENTITY),
+   rewards: (!import.meta.env.PROD || firebaseBackend) && enabled(import.meta.env.VITE_ARENA_ENABLE_REWARDS),
+   aiGuide: (!import.meta.env.PROD || firebaseBackend) && enabled(import.meta.env.VITE_ARENA_ENABLE_AI),
++  waitlist:
++    (!import.meta.env.PROD || firebaseBackend) && enabled(import.meta.env.VITE_ARENA_ENABLE_WAITLIST),
+ });
+ 
+ export const arenaIsPreview = !arenaFeatures.contributionWrites;
+diff --git a/src/firebase.ts b/src/firebase.ts
+index 571aafe..a87d428 100644
+--- a/src/firebase.ts
++++ b/src/firebase.ts
+@@ -1,4 +1,5 @@
+ import { initializeApp } from "firebase/app";
++import { initializeAppCheck, ReCaptchaEnterpriseProvider } from "firebase/app-check";
+ import {
+   connectAuthEmulator,
+   getAuth,
+@@ -12,6 +13,25 @@ export const auth = getAuth(app);
+ export const functions = getFunctions(app, "us-central1");
+ 
+ const useEmulators = import.meta.env.VITE_USE_FIREBASE_EMULATORS === "true";
++
++function configureAppCheck() {
++  const siteKey = import.meta.env.VITE_FIREBASE_APP_CHECK_SITE_KEY?.trim() ?? "";
++  if (!siteKey) return;
++
++  const debugToken = import.meta.env.VITE_FIREBASE_APP_CHECK_DEBUG_TOKEN?.trim();
++  if (useEmulators && debugToken) {
++    (globalThis as typeof globalThis & { FIREBASE_APPCHECK_DEBUG_TOKEN?: string }).FIREBASE_APPCHECK_DEBUG_TOKEN =
++      debugToken;
++  }
++
++  initializeAppCheck(app, {
++    provider: new ReCaptchaEnterpriseProvider(siteKey),
++    isTokenAutoRefreshEnabled: true,
++  });
++}
++
++configureAppCheck();
++
+ if (useEmulators) {
+   connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
+   connectFunctionsEmulator(functions, "127.0.0.1", 5001);
+@@ -19,4 +39,4 @@ if (useEmulators) {
+ 
+ export function signOutArena() {
+   return signOut(auth);
+-}
++}
+\ No newline at end of file
+diff --git a/src/firebaseApi.ts b/src/firebaseApi.ts
+index b4e02a1..6d7bf5a 100644
+--- a/src/firebaseApi.ts
++++ b/src/firebaseApi.ts
+@@ -162,9 +162,18 @@ export async function completeArenaMission(missionId: string, answers?: number[]
+   return (await call({ missionId, ...(answers ? { answers } : {}) })).data.profile;
+ }
+ 
+-export async function evaluateArenaSubmission(submissionText: string): Promise<EvaluationResult> {
+-  const call = httpsCallable<{ submissionText: string }, EvaluationResult>(functions, "arenaAiEvaluate");
+-  return (await call({ submissionText })).data;
++export async function evaluateArenaSubmission(
++  submissionText: string,
++  rubricCategory?: string,
++): Promise<EvaluationResult> {
++  const call = httpsCallable<{ submissionText: string; rubricCategory?: string }, EvaluationResult>(
++    functions,
++    "arenaAiEvaluate",
++  );
++  return (await call({
++    submissionText,
++    ...(rubricCategory ? { rubricCategory } : {}),
++  })).data;
+ }
+ 
+ export async function getDocument(documentId: string, version?: string): Promise<{ document: ArenaDocument; revision: ArenaDocumentRevision }> {
+diff --git a/src/hooks/useWeb3Wallet.ts b/src/hooks/useWeb3Wallet.ts
+index 662ec2e..be995c8 100644
+--- a/src/hooks/useWeb3Wallet.ts
++++ b/src/hooks/useWeb3Wallet.ts
+@@ -4,31 +4,20 @@ import { UserProfile } from '../types';
+ import { arenaFeatures } from '../config/arenaFeatures';
+ import { auth, signOutArena } from '../firebase';
+ import { requestWalletChallenge, verifyWalletChallenge } from '../firebaseApi';
+-import { discoverInjectedProviders } from '../wallet/injectedProviders';
+-import {
+-  detectWalletExtensionConflict,
+-  WALLET_EXTENSION_CONFLICT_HINT,
+-} from '../wallet/walletExtensionConflict';
+ import {
++  baseWalletErrorMessage,
+   connectWalletConnectSession,
+   disconnectWalletConnect,
+   isWalletConnectProvider,
++  requestEip6963Providers,
++  walletConnectEnabled as isWalletConnectEnabled,
++  walletTargetLabel,
++  detectWalletExtensionConflict,
++  WALLET_EXTENSION_CONFLICT_HINT,
++  type Eip1193Provider,
+   type MobileWalletTarget,
+-  walletConnectEnabled,
+-} from '../wallet/walletConnect';
+-import { walletTargetLabel } from '../wallet/mobileWalletDeepLink';
+-
+-interface Eip6963ProviderInfo {
+-  uuid: string;
+-  name: string;
+-  icon: string;
+-  rdns: string;
+-}
+-
+-interface Eip6963ProviderDetail {
+-  info: Eip6963ProviderInfo;
+-  provider: any;
+-}
++} from '@creg/wallet';
++import { useEip6963Providers } from './useEip6963Providers';
+ 
+ interface UseWeb3WalletProps {
+   setProfile: React.Dispatch<React.SetStateAction<UserProfile>>;
+@@ -38,31 +27,28 @@ interface UseWeb3WalletProps {
+ 
+ export type WalletAuthPhase = 'idle' | 'connecting' | 'requesting_signature' | 'verifying' | 'success' | 'error';
+ 
+-function walletErrorMessage(error: any, providerName: string) {
+-  const message = String(error?.message || '');
+-  if (error?.code === 4001) return 'Request cancelled. Your wallet remains unchanged.';
+-  if (error?.code === -32002) return `A ${providerName} request is already open. Return to your wallet to continue.`;
+-  if (
+-    message.includes('read only property') ||
+-    message.includes('global Ethereum provider') ||
+-    message.includes('Cannot redefine property: ethereum')
+-  ) {
+-    return WALLET_EXTENSION_CONFLICT_HINT;
+-  }
+-  if (error?.code === 'functions/resource-exhausted') {
++function arenaWalletErrorMessage(error: unknown, providerName: string) {
++  const message = String((error as { message?: string })?.message || '');
++  if ((error as { code?: string })?.code === 'functions/resource-exhausted') {
+     return 'Arena backend storage quota is exceeded. Wallet sign-in is temporarily unavailable. Please try again later.';
+   }
+-  if (String(error?.message || '').toLowerCase().includes('quota')) {
++  if (message.toLowerCase().includes('quota')) {
+     return 'Arena backend storage quota is exceeded. Wallet sign-in is temporarily unavailable. Please try again later.';
+   }
+-  if (String(error?.message || '').toLowerCase().includes('expired')) return 'The sign-in request expired. Please try again.';
+-  if (error?.code === 'functions/deadline-exceeded' || String(error?.message || '').toLowerCase().includes('deadline-exceeded')) {
++  if (message.toLowerCase().includes('expired')) return 'The sign-in request expired. Please try again.';
++  if (
++    (error as { code?: string })?.code === 'functions/deadline-exceeded' ||
++    message.toLowerCase().includes('deadline-exceeded')
++  ) {
+     return 'The Arena identity service timed out. The backend may be overloaded or storage quota may be exceeded. Please try again in a moment.';
+   }
+-  if (String(error?.message || '').toLowerCase().includes('storage is slow or unavailable')) {
++  if (message.toLowerCase().includes('storage is slow or unavailable')) {
+     return 'Arena backend storage is temporarily unavailable. Wallet sign-in cannot complete right now. Please try again later.';
+   }
+-  return error?.message || `Unable to verify ownership with ${providerName}.`;
++  return baseWalletErrorMessage(error, {
++    providerName,
++    extensionConflictHint: WALLET_EXTENSION_CONFLICT_HINT,
++  });
+ }
+ 
+ export function useWeb3Wallet({ setProfile, showNotification, triggerProfileSetup }: UseWeb3WalletProps) {
+@@ -70,95 +56,58 @@ export function useWeb3Wallet({ setProfile, showNotification, triggerProfileSetu
+   const [walletAddress, setWalletAddress] = useState<string | null>(null);
+   const [chainId, setChainId] = useState<string | null>(null);
+   const [walletBalance, setWalletBalance] = useState<string | null>(null);
+-  const [activeProvider, setActiveProvider] = useState<any>(null);
++  const [activeProvider, setActiveProvider] = useState<Eip1193Provider | null>(null);
+   const [walletError, setWalletError] = useState<string | null>(null);
+-  const [eip6963Providers, setEip6963Providers] = useState<Eip6963ProviderDetail[]>([]);
+   const [walletAuthPhase, setWalletAuthPhase] = useState<WalletAuthPhase>('idle');
+   const [selectedWalletName, setSelectedWalletName] = useState<string | null>(null);
+ 
+-  // EIP-6963 multi-wallet discovery effect
+-  useEffect(() => {
+-    if (!arenaFeatures.walletIdentity) return;
+-    const discovered = new Map<string, Eip6963ProviderDetail>();
+-
+-    const mergeProviders = () => {
+-      const injected = discoverInjectedProviders();
+-      for (const detail of injected) {
+-        const key = detail.info.rdns || detail.info.uuid;
+-        const exists = Array.from(discovered.values()).some(
+-          existing => (existing.info.rdns || existing.info.uuid) === key,
+-        );
+-        if (!exists) {
+-          discovered.set(key, detail);
+-        }
+-      }
+-      setEip6963Providers(Array.from(discovered.values()));
+-    };
+-
+-    const handler = (event: Event) => {
+-      const detail = (event as CustomEvent<Eip6963ProviderDetail>).detail;
+-      if (!detail?.provider || !detail.info?.uuid) {
+-        return;
+-      }
+-      discovered.set(detail.info.uuid, detail);
+-      mergeProviders();
+-    };
+-
+-    window.addEventListener("eip6963:announceProvider", handler);
+-    window.dispatchEvent(new Event("eip6963:requestProvider"));
+-    mergeProviders();
+-    window.setTimeout(mergeProviders, 350);
+-    window.setTimeout(mergeProviders, 1200);
+-    window.setTimeout(mergeProviders, 2500);
+-
+-    return () => {
+-      window.removeEventListener("eip6963:announceProvider", handler);
+-    };
+-  }, []);
++  const eip6963Providers = useEip6963Providers(arenaFeatures.walletIdentity);
++  const walletConnectEnabled = isWalletConnectEnabled();
+ 
+   // Web3 initial account and chain setup on mount
+   useEffect(() => {
+     if (!arenaFeatures.walletIdentity) return;
+     const checkWallet = async () => {
+-      const ethereum = (window as any).ethereum;
+-      
+-      let providers: any[] = [];
++      const ethereum = (window as Window & { ethereum?: Eip1193Provider & { providers?: Eip1193Provider[] } }).ethereum;
++
++      let providers: Eip1193Provider[] = [];
+       if (ethereum) {
+         providers.push(ethereum);
+         if (ethereum.providers && Array.isArray(ethereum.providers)) {
+           providers = [...ethereum.providers];
+         }
+       }
+-      
+-      if ((window as any).braveEthereum && !providers.includes((window as any).braveEthereum)) {
+-        providers.push((window as any).braveEthereum);
++
++      const win = window as Window & { braveEthereum?: Eip1193Provider; coinbaseWalletExtension?: Eip1193Provider };
++      if (win.braveEthereum && !providers.includes(win.braveEthereum)) {
++        providers.push(win.braveEthereum);
+       }
+-      if ((window as any).coinbaseWalletExtension && !providers.includes((window as any).coinbaseWalletExtension)) {
+-        providers.push((window as any).coinbaseWalletExtension);
++      if (win.coinbaseWalletExtension && !providers.includes(win.coinbaseWalletExtension)) {
++        providers.push(win.coinbaseWalletExtension);
+       }
+-      
++
+       for (const p of providers) {
+         try {
+-          const accounts = await p.request({ method: 'eth_accounts' });
++          const accounts = (await p.request({ method: 'eth_accounts' })) as string[];
+           if (accounts && accounts.length > 0) {
+-            const chain = await p.request({ method: 'eth_chainId' });
++            const chain = (await p.request({ method: 'eth_chainId' })) as string;
+             setChainId(chain);
+-            
++
+             try {
+-              const balanceHex = await p.request({
++              const balanceHex = (await p.request({
+                 method: 'eth_getBalance',
+-                params: [accounts[0], 'latest']
+-              });
++                params: [accounts[0], 'latest'],
++              })) as string;
+               const balanceEth = (parseInt(balanceHex, 16) / 1e18).toFixed(4);
+               setWalletBalance(balanceEth);
+             } catch (balanceErr) {
+-              console.warn("Failed to fetch balance on initial mount check:", balanceErr);
++              console.warn('Failed to fetch balance on initial mount check:', balanceErr);
+               setWalletBalance('0.0000');
+             }
+             break;
+           }
+         } catch (err) {
+-          console.warn("Provider skipped on mount check:", err);
++          console.warn('Provider skipped on mount check:', err);
+         }
+       }
+     };
+@@ -185,41 +134,45 @@ export function useWeb3Wallet({ setProfile, showNotification, triggerProfileSetu
+       const handleChain = (hexChainId: string) => {
+         setChainId(hexChainId);
+         if (walletAddress) {
+-          activeProvider.request({
+-            method: 'eth_getBalance',
+-            params: [walletAddress, 'latest']
+-          }).then((balanceHex: string) => {
+-            const balanceEth = (parseInt(balanceHex, 16) / 1e18).toFixed(4);
+-            setWalletBalance(balanceEth);
+-            setWalletError(null);
+-          }).catch((err: any) => {
+-            console.warn("Failed to fetch balance on chainChanged:", err);
+-            setWalletBalance('0.0000');
+-            const is404 = err && (
+-              String(err.message || '').includes('404') || 
+-              String(err.code || '') === '4200' ||
+-              String(err.message || '').includes('4200')
+-            );
+-            if (is404) {
+-              setWalletError("Balance RPC error (404/4200). Switch MetaMask/Brave Wallet network away from offline custom RPCs.");
+-            }
+-          });
++          activeProvider
++            .request({
++              method: 'eth_getBalance',
++              params: [walletAddress, 'latest'],
++            })
++            .then((balanceHex: unknown) => {
++              const balanceEth = (parseInt(String(balanceHex), 16) / 1e18).toFixed(4);
++              setWalletBalance(balanceEth);
++              setWalletError(null);
++            })
++            .catch((err: unknown) => {
++              console.warn('Failed to fetch balance on chainChanged:', err);
++              setWalletBalance('0.0000');
++              const errMessage = String((err as { message?: string })?.message || '');
++              const errCode = String((err as { code?: string | number })?.code || '');
++              const is404 =
++                errMessage.includes('404') || errCode === '4200' || errMessage.includes('4200');
++              if (is404) {
++                setWalletError(
++                  'Balance RPC error (404/4200). Switch MetaMask/Brave Wallet network away from offline custom RPCs.',
++                );
++              }
++            });
+         }
+       };
+ 
+-      activeProvider.on('accountsChanged', handleAccounts);
+-      activeProvider.on('chainChanged', handleChain);
++      activeProvider.on?.('accountsChanged', handleAccounts);
++      activeProvider.on?.('chainChanged', handleChain);
+ 
+       return () => {
+-        activeProvider.removeListener('accountsChanged', handleAccounts);
+-        activeProvider.removeListener('chainChanged', handleChain);
++        activeProvider.removeListener?.('accountsChanged', handleAccounts);
++        activeProvider.removeListener?.('chainChanged', handleChain);
+       };
+     }
+   }, [activeProvider, walletAddress, setProfile]);
+ 
+   const handleConnectWallet = async () => {
+     if (!arenaFeatures.walletIdentity) {
+-      showNotification("Wallet identity is disabled in the production preview.");
++      showNotification('Wallet identity is disabled in the production preview.');
+       return;
+     }
+     setWalletError(null);
+@@ -235,11 +188,11 @@ export function useWeb3Wallet({ setProfile, showNotification, triggerProfileSetu
+       setWalletAuthPhase('idle');
+       setSelectedWalletName(null);
+       setProfile(prev => ({ ...prev, walletAddress: null }));
+-      showNotification("Decentralized wallet synchronization detached!");
++      showNotification('Decentralized wallet synchronization detached!');
+       return;
+     }
+ 
+-    window.dispatchEvent(new Event("eip6963:requestProvider"));
++    requestEip6963Providers();
+   };
+ 
+   const connectWalletConnect = async (target: MobileWalletTarget = 'all'): Promise<boolean> => {
+@@ -266,9 +219,9 @@ export function useWeb3Wallet({ setProfile, showNotification, triggerProfileSetu
+       return connectToSelectedProvider(provider, walletName, {
+         prefetchedAccounts: provider.accounts,
+       });
+-    } catch (err: any) {
++    } catch (err: unknown) {
+       console.warn('WalletConnect connection failed:', err);
+-      const msg = walletErrorMessage(err, walletName);
++      const msg = arenaWalletErrorMessage(err, walletName);
+       setWalletAuthPhase('error');
+       setWalletError(msg);
+       showNotification(msg);
+@@ -277,16 +230,16 @@ export function useWeb3Wallet({ setProfile, showNotification, triggerProfileSetu
+   };
+ 
+   const connectToSelectedProvider = async (
+-    p: any,
++    p: unknown,
+     providerName: string,
+     options?: { prefetchedAccounts?: string[] },
+   ): Promise<boolean> => {
+     setWalletError(null);
+     setSelectedWalletName(providerName);
+     setWalletAuthPhase('connecting');
+-    window.dispatchEvent(new Event('eip6963:requestProvider'));
++    requestEip6963Providers();
+ 
+-    if (typeof p?.request !== 'function') {
++    if (typeof (p as Eip1193Provider | null)?.request !== 'function') {
+       const msg = `${providerName} is not reachable. ${WALLET_EXTENSION_CONFLICT_HINT}`;
+       setWalletAuthPhase('error');
+       setWalletError(msg);
+@@ -294,15 +247,16 @@ export function useWeb3Wallet({ setProfile, showNotification, triggerProfileSetu
+       return false;
+     }
+ 
++    const provider = p as Eip1193Provider;
+     let accounts: string[] = options?.prefetchedAccounts ?? [];
+     try {
+       showNotification(`Requesting connection to ${providerName}...`);
+       if (!accounts.length) {
+-        accounts = await p.request({ method: 'eth_requestAccounts' });
++        accounts = (await provider.request({ method: 'eth_requestAccounts' })) as string[];
+       }
+-    } catch (err: any) {
++    } catch (err: unknown) {
+       console.warn(`${providerName} connection failed:`, err);
+-      const msg = walletErrorMessage(err, providerName);
++      const msg = arenaWalletErrorMessage(err, providerName);
+       setWalletAuthPhase('error');
+       setWalletError(msg);
+       showNotification(msg);
+@@ -322,19 +276,22 @@ export function useWeb3Wallet({ setProfile, showNotification, triggerProfileSetu
+     try {
+       const challenge = await requestWalletChallenge(address);
+       setWalletAuthPhase('requesting_signature');
+-      const signature = await p.request({
++      const signature = await provider.request({
+         method: 'personal_sign',
+         params: [challenge.message, address],
+       });
+       setWalletAuthPhase('verifying');
+-      const verified = await verifyWalletChallenge({ challengeId: challenge.challengeId, signature });
++      const verified = await verifyWalletChallenge({ challengeId: challenge.challengeId, signature: String(signature) });
+       await signInWithCustomToken(auth, verified.customToken);
+ 
+       let currentChain: string | null = null;
+       let balanceEth: string | null = null;
+       try {
+-        currentChain = await p.request({ method: 'eth_chainId' });
+-        const balanceHex = await p.request({ method: 'eth_getBalance', params: [address, 'latest'] });
++        currentChain = (await provider.request({ method: 'eth_chainId' })) as string;
++        const balanceHex = (await provider.request({
++          method: 'eth_getBalance',
++          params: [address, 'latest'],
++        })) as string;
+         balanceEth = (parseInt(balanceHex, 16) / 1e18).toFixed(4);
+       } catch (metadataError) {
+         console.warn('Optional wallet network metadata was unavailable:', metadataError);
+@@ -344,19 +301,18 @@ export function useWeb3Wallet({ setProfile, showNotification, triggerProfileSetu
+       setWalletAddress(address);
+       setChainId(currentChain);
+       setWalletBalance(balanceEth);
+-      setActiveProvider(p);
++      setActiveProvider(provider);
+       setProfile(prev => ({ ...prev, walletAddress: address }));
+       setWalletError(null);
+       setWalletAuthPhase('success');
+-      showNotification("Wallet ownership verified and signed in.");
++      showNotification('Wallet ownership verified and signed in.');
+ 
+-      // Trigger profile setup modal
+       triggerProfileSetup();
+       window.setTimeout(() => setWalletAuthPhase('idle'), 1450);
+       return true;
+-    } catch (err: any) {
++    } catch (err: unknown) {
+       console.error(err);
+-      const msg = walletErrorMessage(err, providerName);
++      const msg = arenaWalletErrorMessage(err, providerName);
+       setWalletAuthPhase('error');
+       setWalletError(msg);
+       showNotification(msg);
+@@ -384,6 +340,6 @@ export function useWeb3Wallet({ setProfile, showNotification, triggerProfileSetu
+     walletConnectEnabled,
+     handleConnectWallet,
+     connectWalletConnect,
+-    connectToSelectedProvider
++    connectToSelectedProvider,
+   };
+-}
++}
+\ No newline at end of file
+diff --git a/src/index.css b/src/index.css
+index b45d0bf..2ca4cd4 100644
+--- a/src/index.css
++++ b/src/index.css
+@@ -335,6 +335,11 @@ button:disabled {
+ .whitepaper-documents svg { width: 14px; height: 14px; flex: 0 0 auto; }
+ .whitepaper-documents small { display: block; margin-top: 2px; color: var(--theme-text-muted); font: 650 .55rem/1 ui-monospace, monospace; text-transform: uppercase; }
+ .whitepaper-reader { min-width: 0; padding: clamp(22px, 4vw, 54px); background: color-mix(in srgb, var(--theme-bg) 92%, transparent); }
++.whitepaper-reader.is-citation-focus {
++  outline: 2px solid color-mix(in srgb, var(--theme-accent-bg) 70%, transparent);
++  outline-offset: 4px;
++  transition: outline-color 0.35s ease;
++}
+ .whitepaper-reader-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; padding-bottom: 24px; border-bottom: 1px solid var(--theme-border); }
+ .whitepaper-reader-heading span { color: var(--theme-text-muted); font: 700 .63rem/1 ui-monospace, monospace; text-transform: uppercase; letter-spacing: .1em; }
+ .whitepaper-reader-heading h2 { max-width: 720px; margin: 9px 0 0; font-size: clamp(1.55rem, 3vw, 2.7rem); line-height: 1.05; letter-spacing: -.035em; }
+@@ -832,6 +837,18 @@ body.walletconnect-active wcm-modal {
+   text-align: center;
+ }
+ 
++.gateway-card-footer .gateway-cohort-cta {
++  width: 100%;
++  margin-bottom: 8px;
++  border: 1px solid var(--theme-border-med, var(--theme-border));
++  background: color-mix(in srgb, var(--theme-accent) 12%, transparent);
++  color: var(--theme-accent);
++}
++
++.gateway-card-footer .gateway-cohort-cta:hover:not(:disabled) {
++  background: color-mix(in srgb, var(--theme-accent) 20%, transparent);
++}
++
+ .gateway-card-footer button {
+   min-height: 44px;
+   display: inline-flex;
+@@ -900,6 +917,42 @@ body.walletconnect-active wcm-modal {
+   .gateway-footer { min-height: 76px; flex-direction: column; justify-content: center; text-align: center; }
+ }
+ 
++/* Genesis waitlist panel */
++.waitlist-alpha-banner {
++  background: color-mix(in srgb, var(--theme-accent-bg) 8%, var(--theme-card-bg));
++  border: 1px solid color-mix(in srgb, var(--theme-accent-bg) 35%, var(--theme-border));
++  padding: 1.25rem 1.5rem;
++  font-size: 0.9375rem;
++  line-height: 1.6;
++  color: var(--theme-text-muted);
++}
++.waitlist-alpha-banner p + p {
++  margin-top: 0.75rem;
++}
++.waitlist-alpha-banner strong {
++  color: var(--theme-text);
++  font-weight: 700;
++}
++.waitlist-alpha-banner--compact {
++  font-size: 0.8125rem;
++  padding: 0.75rem 1rem;
++  margin-top: 1rem;
++}
++
++.waitlist-credential {
++  background: linear-gradient(
++    145deg,
++    color-mix(in srgb, var(--theme-card-bg) 90%, var(--theme-accent-bg) 10%),
++    var(--theme-bg)
++  );
++}
++.waitlist-credential--alpha {
++  border-color: var(--theme-accent-bg);
++}
++.waitlist-credential--beta {
++  border-color: var(--theme-border);
++}
++
+ @media (prefers-reduced-motion: reduce) {
+   .gateway-shell,
+   .gateway-shell--verified,
+diff --git a/src/main.tsx b/src/main.tsx
+index 080dac3..2d6e17a 100644
+--- a/src/main.tsx
++++ b/src/main.tsx
+@@ -1,10 +1,41 @@
+-import {StrictMode} from 'react';
+-import {createRoot} from 'react-dom/client';
+-import App from './App.tsx';
+-import './index.css';
++import { StrictMode } from "react";
++import { createRoot } from "react-dom/client";
++import { GoogleReCaptchaProvider } from "react-google-recaptcha-v3";
++import { configureCregWallet } from "@creg/wallet";
++import App from "./App.tsx";
++import { arenaFeatures } from "./config/arenaFeatures";
++import "./index.css";
+ 
+-createRoot(document.getElementById('root')!).render(
++configureCregWallet({
++  walletConnectProjectId: import.meta.env.VITE_WALLETCONNECT_PROJECT_ID?.trim() ?? "",
++  walletConnectMetadata: {
++    name: "CREG Contribution Arena",
++    description: "Sign in with your wallet to verify contribution ownership",
++    url: typeof window !== "undefined" ? window.location.origin : "https://contribute.cregnet.dev",
++    icons: [
++      typeof window !== "undefined"
++        ? `${window.location.origin}/favicon.ico`
++        : "https://contribute.cregnet.dev/favicon.ico",
++    ],
++  },
++});
++
++const recaptchaKey = import.meta.env.VITE_WAITLIST_RECAPTCHA_SITE_KEY;
++if (!recaptchaKey && import.meta.env.PROD && arenaFeatures.waitlist) {
++  throw new Error("VITE_WAITLIST_RECAPTCHA_SITE_KEY is required when waitlist is enabled in production.");
++}
++const resolvedRecaptchaKey = recaptchaKey || "dummy_key_for_dev_if_not_provided";
++
++const app = <App />;
++
++createRoot(document.getElementById("root")!).render(
+   <StrictMode>
+-    <App />
++    {arenaFeatures.waitlist ? (
++      <GoogleReCaptchaProvider reCaptchaKey={resolvedRecaptchaKey} useEnterprise>
++        {app}
++      </GoogleReCaptchaProvider>
++    ) : (
++      app
++    )}
+   </StrictMode>,
+-);
++);
+\ No newline at end of file
+diff --git a/src/types.ts b/src/types.ts
+index 9120247..2366c0b 100644
+--- a/src/types.ts
++++ b/src/types.ts
+@@ -1,3 +1,5 @@
++import type { FindingFormCategory } from './constants/findingCategories';
++
+ export interface UserProfile {
+   username: string;
+   displayName: string;
+@@ -17,17 +19,27 @@ export interface UserProfile {
+ 
+ export type FindingStatus = 'Submitted' | 'AI Pre-Check' | 'Community Discussion' | 'Admin Review' | 'Approved' | 'Rejected' | 'Clarification';
+ 
++export interface RubricBreakdown {
++  specificity: number;
++  evidence: number;
++  originalThinking: number;
++  practicalUsefulness: number;
++  clarity: number;
++  tone: number;
++}
++
+ export interface Finding {
+   id: string;
+   title: string;
+   description: string;
+-  category: 'Whitepaper Confusion' | 'Security Concern' | 'Contradiction' | 'Missing Documentation' | 'UX Issue' | 'Airdrop Wording Risk' | 'Technical Suggestion' | 'Community Suggestion';
++  category: FindingFormCategory;
+   author: string;
+   sourceReference?: string;
+   createdAt: string;
+   status: FindingStatus;
+   aiPreCheckFeedback?: string;
+   aiPreCheckScore?: number;
++  aiPreCheckBreakdown?: RubricBreakdown;
+   communityVotes: { up: number; down: number };
+   comments: Array<{
+     id: string;
+@@ -80,14 +92,7 @@ export interface ArenaDocumentRevision {
+ export interface EvaluationResult {
+   score: number;
+   feedback: string;
+-  breakdown: {
+-    specificity: number;
+-    evidence: number;
+-    originalThinking: number;
+-    practicalUsefulness: number;
+-    clarity: number;
+-    tone: number;
+-  };
++  breakdown: RubricBreakdown;
+ }
+ 
+ export interface GlossaryTerm {
+diff --git a/src/vite-env.d.ts b/src/vite-env.d.ts
+index ac78271..706d34e 100644
+--- a/src/vite-env.d.ts
++++ b/src/vite-env.d.ts
+@@ -9,6 +9,10 @@ interface ImportMetaEnv {
+   readonly VITE_ARENA_FIREBASE_BACKEND?: string;
+   readonly VITE_USE_FIREBASE_EMULATORS?: string;
+   readonly VITE_WALLETCONNECT_PROJECT_ID?: string;
++  readonly VITE_FIREBASE_APP_CHECK_SITE_KEY?: string;
++  readonly VITE_FIREBASE_APP_CHECK_DEBUG_TOKEN?: string;
++  readonly VITE_ARENA_ENABLE_WAITLIST?: string;
++  readonly VITE_WAITLIST_RECAPTCHA_SITE_KEY?: string;
+ }
+ 
+ declare module '@walletconnect/ethereum-provider' {
+diff --git a/src/wallet/injectedProviders.ts b/src/wallet/injectedProviders.ts
+deleted file mode 100644
+index 3b79d52..0000000
+--- a/src/wallet/injectedProviders.ts
++++ /dev/null
+@@ -1,128 +0,0 @@
+-interface Eip6963ProviderInfo {
+-  uuid: string;
+-  name: string;
+-  icon: string;
+-  rdns: string;
+-}
+-
+-export interface InjectedProviderDetail {
+-  info: Eip6963ProviderInfo;
+-  provider: unknown;
+-}
+-
+-function pushUnique(
+-  target: InjectedProviderDetail[],
+-  seen: Set<string>,
+-  detail: InjectedProviderDetail,
+-) {
+-  const key = detail.info.rdns || detail.info.uuid;
+-  if (seen.has(key)) return;
+-  seen.add(key);
+-  target.push(detail);
+-}
+-
+-/** Discover common injected wallets that mobile in-app browsers expose without EIP-6963. */
+-export function discoverInjectedProviders(): InjectedProviderDetail[] {
+-  if (typeof window === 'undefined') return [];
+-
+-  const win = window as Window & {
+-    okxwallet?: { ethereum?: unknown } & Record<string, unknown>;
+-    trustwallet?: unknown;
+-    coinbaseWalletExtension?: unknown;
+-    ethereum?: { isMetaMask?: boolean; isOkxWallet?: boolean; providers?: unknown[] } & Record<string, unknown>;
+-  };
+-
+-  const discovered: InjectedProviderDetail[] = [];
+-  const seen = new Set<string>();
+-
+-  const okxProvider = win.okxwallet?.ethereum ?? win.okxwallet;
+-  if (okxProvider && typeof (okxProvider as { request?: unknown }).request === 'function') {
+-    pushUnique(discovered, seen, {
+-      info: {
+-        uuid: 'injected-okx-wallet',
+-        name: 'OKX Wallet',
+-        icon: 'https://static.okx.com/cdn/assets/imgs/221/EB771C89BC13F18F.png',
+-        rdns: 'com.okex.wallet',
+-      },
+-      provider: okxProvider,
+-    });
+-  }
+-
+-  if (win.trustwallet && typeof (win.trustwallet as { request?: unknown }).request === 'function') {
+-    pushUnique(discovered, seen, {
+-      info: {
+-        uuid: 'injected-trust-wallet',
+-        name: 'Trust Wallet',
+-        icon: '',
+-        rdns: 'com.trustwallet.app',
+-      },
+-      provider: win.trustwallet,
+-    });
+-  }
+-
+-  if (
+-    win.coinbaseWalletExtension &&
+-    typeof (win.coinbaseWalletExtension as { request?: unknown }).request === 'function'
+-  ) {
+-    pushUnique(discovered, seen, {
+-      info: {
+-        uuid: 'injected-coinbase-wallet',
+-        name: 'Coinbase Wallet',
+-        icon: '',
+-        rdns: 'com.coinbase.wallet',
+-      },
+-      provider: win.coinbaseWalletExtension,
+-    });
+-  }
+-
+-  const describeInjectedProvider = (provider: NonNullable<typeof win.ethereum>) => {
+-    const candidate = provider as {
+-      isOkxWallet?: boolean;
+-      isMetaMask?: boolean;
+-      isCoinbaseWallet?: boolean;
+-      isTrust?: boolean;
+-      isBraveWallet?: boolean;
+-    };
+-    if (candidate.isOkxWallet) {
+-      return { name: 'OKX Wallet', rdns: 'com.okex.wallet' };
+-    }
+-    if (candidate.isCoinbaseWallet) {
+-      return { name: 'Coinbase Wallet', rdns: 'com.coinbase.wallet' };
+-    }
+-    if (candidate.isTrust) {
+-      return { name: 'Trust Wallet', rdns: 'com.trustwallet.app' };
+-    }
+-    if (candidate.isBraveWallet) {
+-      return { name: 'Brave Wallet', rdns: 'com.brave.wallet' };
+-    }
+-    if (candidate.isMetaMask) {
+-      return { name: 'MetaMask', rdns: 'io.metamask' };
+-    }
+-    return { name: 'Browser Wallet', rdns: 'browser.wallet' };
+-  };
+-
+-  const registerEthereumProvider = (provider: NonNullable<typeof win.ethereum>) => {
+-    if (typeof provider.request !== 'function') return;
+-    const { name, rdns } = describeInjectedProvider(provider);
+-    pushUnique(discovered, seen, {
+-      info: {
+-        uuid: `injected-${rdns}-${discovered.length}`,
+-        name,
+-        icon: '',
+-        rdns,
+-      },
+-      provider,
+-    });
+-  };
+-
+-  const ethereum = win.ethereum;
+-  if (ethereum?.providers && Array.isArray(ethereum.providers)) {
+-    for (const provider of ethereum.providers) {
+-      registerEthereumProvider(provider as NonNullable<typeof win.ethereum>);
+-    }
+-  } else if (ethereum) {
+-    registerEthereumProvider(ethereum);
+-  }
+-
+-  return discovered;
+-}
+\ No newline at end of file
+diff --git a/src/wallet/mobileWalletDeepLink.ts b/src/wallet/mobileWalletDeepLink.ts
+deleted file mode 100644
+index 014acec..0000000
+--- a/src/wallet/mobileWalletDeepLink.ts
++++ /dev/null
+@@ -1,67 +0,0 @@
+-export type MobileWalletTarget = 'metamask' | 'okx' | 'all';
+-
+-export function isMobileBrowser(): boolean {
+-  if (typeof navigator === 'undefined') return false;
+-  return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+-}
+-
+-function normalizeNativeWalletUrl(nativeUrl: string): string {
+-  let safeUrl = nativeUrl;
+-  if (!safeUrl.includes('://')) {
+-    safeUrl = `${safeUrl.replaceAll('/', '').replaceAll(':', '')}://`;
+-  }
+-  if (!safeUrl.endsWith('/')) {
+-    safeUrl = `${safeUrl}/`;
+-  }
+-  return safeUrl;
+-}
+-
+-export function buildMobileWalletDeepLink(target: Exclude<MobileWalletTarget, 'all'>, wcUri: string): string {
+-  const encoded = encodeURIComponent(wcUri);
+-
+-  if (target === 'metamask') {
+-    return `https://metamask.app.link/wc?uri=${encoded}`;
+-  }
+-
+-  const okxNative = normalizeNativeWalletUrl('okxwallet://main');
+-  return `${okxNative}wc?uri=${encoded}`;
+-}
+-
+-export function openMobileWalletDeepLink(target: Exclude<MobileWalletTarget, 'all'>, wcUri: string): void {
+-  const href = buildMobileWalletDeepLink(target, wcUri);
+-
+-  // Never replace the Arena tab URL — that tears down the WalletConnect session.
+-  if (href.startsWith('http://') || href.startsWith('https://')) {
+-    const opened = window.open(href, '_blank', 'noopener,noreferrer');
+-    if (!opened) {
+-      const anchor = document.createElement('a');
+-      anchor.href = href;
+-      anchor.target = '_blank';
+-      anchor.rel = 'noopener noreferrer';
+-      anchor.style.display = 'none';
+-      document.body.appendChild(anchor);
+-      anchor.click();
+-      document.body.removeChild(anchor);
+-    }
+-    return;
+-  }
+-
+-  const anchor = document.createElement('a');
+-  anchor.href = href;
+-  anchor.rel = 'noopener noreferrer';
+-  anchor.style.display = 'none';
+-  document.body.appendChild(anchor);
+-  anchor.click();
+-  document.body.removeChild(anchor);
+-}
+-
+-export function walletTargetLabel(target: MobileWalletTarget): string {
+-  switch (target) {
+-    case 'metamask':
+-      return 'MetaMask';
+-    case 'okx':
+-      return 'OKX Wallet';
+-    default:
+-      return 'WalletConnect';
+-  }
+-}
+\ No newline at end of file
+diff --git a/src/wallet/walletConnect.ts b/src/wallet/walletConnect.ts
+deleted file mode 100644
+index 446e2a1..0000000
+--- a/src/wallet/walletConnect.ts
++++ /dev/null
+@@ -1,140 +0,0 @@
+-import {
+-  isMobileBrowser,
+-  openMobileWalletDeepLink,
+-  type MobileWalletTarget,
+-} from './mobileWalletDeepLink';
+-
+-export type { MobileWalletTarget };
+-
+-export const walletConnectProjectId =
+-  import.meta.env.VITE_WALLETCONNECT_PROJECT_ID?.trim() ?? '';
+-
+-export const walletConnectEnabled = Boolean(walletConnectProjectId);
+-
+-/** WalletConnect explorer IDs surfaced first on mobile (OKX, MetaMask, Trust). */
+-const MOBILE_RECOMMENDED_WALLET_IDS = [
+-  '5d9f1395b3a8e848684848dc4147cbd05c8d54bb737eac78fe103901fe6b01a1',
+-  'c57ca95b47569711a813a718979daa21',
+-  '4622a2b2d6af1c984494a0a332b71f7f2da5e1c6',
+-];
+-
+-/** Identity gateway uses z-index 200; modal must render above it. */
+-export const WALLET_CONNECT_MODAL_Z_INDEX = '10000';
+-
+-type WalletConnectProvider = {
+-  connect: (opts?: Record<string, unknown>) => Promise<void>;
+-  enable: () => Promise<string[]>;
+-  accounts: string[];
+-  chainId: number | string;
+-  disconnect?: () => Promise<void>;
+-  request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
+-  on?: (event: string, listener: (...args: unknown[]) => void) => void;
+-  removeListener?: (event: string, listener: (...args: unknown[]) => void) => void;
+-};
+-
+-let walletConnectProvider: WalletConnectProvider | null = null;
+-
+-export function withTimeout<T>(
+-  promise: Promise<T>,
+-  timeoutMs: number,
+-  timeoutMessage: string,
+-): Promise<T> {
+-  return new Promise((resolve, reject) => {
+-    const timer = window.setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+-    promise
+-      .then(value => {
+-        window.clearTimeout(timer);
+-        resolve(value);
+-      })
+-      .catch(error => {
+-        window.clearTimeout(timer);
+-        reject(error);
+-      });
+-  });
+-}
+-
+-export async function disconnectWalletConnect(): Promise<void> {
+-  if (walletConnectProvider?.disconnect) {
+-    await walletConnectProvider.disconnect().catch(() => undefined);
+-  }
+-  walletConnectProvider = null;
+-}
+-
+-async function createWalletConnectProvider(
+-  target: MobileWalletTarget,
+-): Promise<WalletConnectProvider> {
+-  const { EthereumProvider } = await import('@walletconnect/ethereum-provider');
+-  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://contribute.cregnet.dev';
+-  const useDirectDeepLink = isMobileBrowser() && target !== 'all';
+-
+-  const provider = (await EthereumProvider.init({
+-    projectId: walletConnectProjectId,
+-    chains: [1],
+-    optionalChains: [11155111],
+-    rpcMap: {
+-      1: 'https://ethereum.publicnode.com',
+-      11155111: 'https://rpc.sepolia.org',
+-    },
+-    showQrModal: !useDirectDeepLink,
+-    qrModalOptions: {
+-      explorerRecommendedWalletIds: MOBILE_RECOMMENDED_WALLET_IDS,
+-      themeVariables: {
+-        '--wcm-z-index': WALLET_CONNECT_MODAL_Z_INDEX,
+-      },
+-    },
+-    metadata: {
+-      name: 'CREG Contribution Arena',
+-      description: 'Sign in with your wallet to verify contribution ownership',
+-      url: origin,
+-      icons: [`${origin}/favicon.ico`],
+-    },
+-  })) as unknown as WalletConnectProvider;
+-
+-  if (useDirectDeepLink) {
+-    const deepLinkTarget = target;
+-    const onDisplayUri = (uri: unknown) => {
+-      if (typeof uri === 'string') {
+-        openMobileWalletDeepLink(deepLinkTarget, uri);
+-      }
+-    };
+-    provider.on?.('display_uri', onDisplayUri);
+-  }
+-
+-  return provider;
+-}
+-
+-export async function connectWalletConnectSession(
+-  target: MobileWalletTarget = 'all',
+-): Promise<WalletConnectProvider> {
+-  await disconnectWalletConnect();
+-  walletConnectProvider = await createWalletConnectProvider(target);
+-
+-  document.body.classList.add('walletconnect-active');
+-
+-  try {
+-    const accounts = await withTimeout(
+-      walletConnectProvider.enable(),
+-      120_000,
+-      target === 'all'
+-        ? 'Wallet connection timed out. Pick your wallet, approve in the app, then return to this tab.'
+-        : `Timed out waiting for ${target === 'okx' ? 'OKX Wallet' : 'MetaMask'}. Open the app, approve the connection, then return here.`,
+-    );
+-
+-    const resolvedAccounts = accounts?.length ? accounts : walletConnectProvider.accounts;
+-    if (!resolvedAccounts?.length) {
+-      throw new Error('No account was returned from WalletConnect.');
+-    }
+-
+-    walletConnectProvider.accounts = resolvedAccounts;
+-    return walletConnectProvider;
+-  } catch (error) {
+-    await disconnectWalletConnect();
+-    throw error;
+-  } finally {
+-    document.body.classList.remove('walletconnect-active');
+-  }
+-}
+-
+-export function isWalletConnectProvider(provider: unknown): boolean {
+-  return provider === walletConnectProvider && walletConnectProvider !== null;
+-}
+\ No newline at end of file
+diff --git a/src/wallet/walletExtensionConflict.ts b/src/wallet/walletExtensionConflict.ts
+deleted file mode 100644
+index 76616d8..0000000
+--- a/src/wallet/walletExtensionConflict.ts
++++ /dev/null
+@@ -1,39 +0,0 @@
+-/** Detect when multiple browser wallet extensions may fight over window.ethereum. */
+-export function detectWalletExtensionConflict(discoveredProviderCount = 0): boolean {
+-  if (typeof window === 'undefined') return false;
+-
+-  const win = window as Window & {
+-    okxwallet?: unknown;
+-    trustwallet?: unknown;
+-    coinbaseWalletExtension?: unknown;
+-    ethereum?: { isMetaMask?: boolean; providers?: unknown[] } & Record<string, unknown>;
+-  };
+-
+-  if (discoveredProviderCount > 1) return true;
+-
+-  const ethereum = win.ethereum;
+-  if (ethereum?.providers && ethereum.providers.length > 1) return true;
+-
+-  let extensionCount = 0;
+-  if (win.okxwallet) extensionCount += 1;
+-  if (win.trustwallet) extensionCount += 1;
+-  if (win.coinbaseWalletExtension) extensionCount += 1;
+-
+-  const providers = ethereum?.providers ?? (ethereum ? [ethereum] : []);
+-  for (const provider of providers) {
+-    const candidate = provider as {
+-      isMetaMask?: boolean;
+-      isOkxWallet?: boolean;
+-      isCoinbaseWallet?: boolean;
+-      isBraveWallet?: boolean;
+-    };
+-    if (candidate.isMetaMask || candidate.isOkxWallet || candidate.isCoinbaseWallet || candidate.isBraveWallet) {
+-      extensionCount += 1;
+-    }
+-  }
+-
+-  return extensionCount > 1;
+-}
+-
+-export const WALLET_EXTENSION_CONFLICT_HINT =
+-  'Multiple wallet extensions are active (for example MetaMask and OKX). Click the specific wallet below, or use WalletConnect. If connection still fails, disable all but one extension and refresh.';
+\ No newline at end of file
+diff --git a/tests/content.test.ts b/tests/content.test.ts
+index 047c267..5c32cfd 100644
+--- a/tests/content.test.ts
++++ b/tests/content.test.ts
+@@ -54,6 +54,16 @@ test("whitepaper library UI prefers PDF downloads over raw markdown", () => {
+   assert.match(library, /CREG_SYSTEM_WORKFLOW\.md/);
+ });
+ 
++test("whitepaper library wires advisory citation deep-links", () => {
++  const library = readFileSync(new URL("../src/components/WhitepaperLibrary.tsx", import.meta.url), "utf8");
++  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
++  assert.match(library, /focusRequest/);
++  assert.match(library, /onFocusConsumed/);
++  assert.match(library, /sectionAnchorId/);
++  assert.match(app, /handleOpenCitation/);
++  assert.match(app, /focusRequest=\{libraryFocus\}/);
++});
++
+ test("protocol docs reader serves deployed canonical markdown before Firestore", () => {
+   const library = readFileSync(new URL("../src/components/WhitepaperLibrary.tsx", import.meta.url), "utf8");
+   assert.match(library, /staticMarkdownPromise/);
+@@ -105,8 +115,8 @@ test("security-sensitive forms route private disclosure without GitHub links", (
+   assert.match(notice, /SECURITY_CONTACT_EMAIL/);
+   assert.match(notice, /SECURITY_WELL_KNOWN_PATH/);
+   assert.match(securityTxt, /Contact: mailto:security@cregnet\.dev/);
+-  assert.match(findingsBoard, /newCategory === 'Security Concern'/);
+-  assert.match(whitepaperLibrary, /critiqueCategory === 'Security Concern'/);
++  assert.match(findingsBoard, /newCategory === SECURITY_BLOCKED_CATEGORY/);
++  assert.match(whitepaperLibrary, /critiqueCategory === SECURITY_BLOCKED_CATEGORY/);
+ });
+ 
+ test("production UI contains no simulated contributors, findings, rewards, or quizzes", () => {
+@@ -132,6 +142,15 @@ test("wallet gateway explains signature safety without claiming inactive systems
+   assert.doesNotMatch(gateway, /unlocks writes, reputation & AI/i);
+ });
+ 
++test("wallet gateway separates explore, genesis cohort, and contributor sign-in", () => {
++  assert.match(gateway, /Join Genesis Cohort/i);
++  assert.match(gateway, /onJoinGenesisCohort/);
++  assert.match(gateway, /Explore the public Arena/i);
++  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
++  assert.match(app, /joinGenesisCohort/);
++  assert.match(app, /showGenesisCohortCta=\{arenaFeatures\.waitlist\}/);
++});
++
+ test("wallet identity does not force a chain change before ownership verification", () => {
+   assert.match(walletHook, /requestWalletChallenge/);
+   assert.match(walletHook, /personal_sign/);
+@@ -145,16 +164,21 @@ test("wallet gateway exposes WalletConnect for mobile browsers without extension
+   assert.match(gateway, /OKX/);
+   assert.match(walletHook, /connectWalletConnectSession/);
+   assert.match(walletHook, /connectWalletConnect/);
+-  assert.match(walletHook, /discoverInjectedProviders/);
+-  const walletConnectModule = readFileSync(new URL("../src/wallet/walletConnect.ts", import.meta.url), "utf8");
+-  const injectedModule = readFileSync(new URL("../src/wallet/injectedProviders.ts", import.meta.url), "utf8");
+-  const mobileDeepLink = readFileSync(new URL("../src/wallet/mobileWalletDeepLink.ts", import.meta.url), "utf8");
+-  assert.match(walletConnectModule, /VITE_WALLETCONNECT_PROJECT_ID/);
++  assert.match(walletHook, /useEip6963Providers/);
++  const eip6963Hook = readFileSync(new URL("../src/hooks/useEip6963Providers.ts", import.meta.url), "utf8");
++  assert.match(eip6963Hook, /subscribeEip6963Providers/);
++  const mainEntry = readFileSync(new URL("../src/main.tsx", import.meta.url), "utf8");
++  assert.match(mainEntry, /configureCregWallet/);
++  assert.match(mainEntry, /VITE_WALLETCONNECT_PROJECT_ID/);
++  const walletConnectModule = readFileSync(new URL("../../packages/creg-wallet/src/walletConnect.ts", import.meta.url), "utf8");
++  const injectedModule = readFileSync(new URL("../../packages/creg-wallet/src/injectedProviders.ts", import.meta.url), "utf8");
++  const mobileDeepLink = readFileSync(new URL("../../packages/creg-wallet/src/mobileWalletDeepLink.ts", import.meta.url), "utf8");
++  assert.match(walletConnectModule, /walletConnectProjectId/);
+   assert.match(walletConnectModule, /explorer-api\.walletconnect\.com|explorerRecommendedWalletIds/);
+   assert.match(walletConnectModule, /\.enable\(/);
+   assert.match(injectedModule, /okxwallet/);
+   assert.match(injectedModule, /ethereum\.providers/);
+-  const conflictModule = readFileSync(new URL("../src/wallet/walletExtensionConflict.ts", import.meta.url), "utf8");
++  const conflictModule = readFileSync(new URL("../../packages/creg-wallet/src/walletExtensionConflict.ts", import.meta.url), "utf8");
+   assert.match(conflictModule, /detectWalletExtensionConflict/);
+   assert.match(gateway, /walletExtensionConflict/);
+   assert.match(gateway, /Multiple wallets detected/);
+@@ -169,3 +193,13 @@ test("wallet challenge permits only the fixed local preview ports", () => {
+   assert.match(walletFunction, /"127\.0\.0\.1:5173"/);
+   assert.doesNotMatch(walletFunction, /localhost:\*|127\.0\.0\.1:\*/);
+ });
++
++test("firebase client initializes App Check when a reCAPTCHA Enterprise site key is configured", () => {
++  const firebaseClient = readFileSync(new URL("../src/firebase.ts", import.meta.url), "utf8");
++  assert.match(firebaseClient, /initializeAppCheck/);
++  assert.match(firebaseClient, /ReCaptchaEnterpriseProvider/);
++  assert.match(firebaseClient, /VITE_FIREBASE_APP_CHECK_SITE_KEY/);
++  const firebaseConfig = readFileSync(new URL("../firebase.json", import.meta.url), "utf8");
++  assert.match(firebaseConfig, /content-firebaseappcheck\.googleapis\.com/);
++  assert.match(firebaseConfig, /recaptchaenterprise\.googleapis\.com/);
++});
+diff --git a/tests/functions.pipeline.test.ts b/tests/functions.pipeline.test.ts
+index bcaafae..90cf516 100644
+--- a/tests/functions.pipeline.test.ts
++++ b/tests/functions.pipeline.test.ts
+@@ -14,6 +14,14 @@ test("public finding categories exclude direct security vulnerability intake", (
+   assert.ok(PUBLIC_CATEGORIES.has("Security Education (Non-sensitive)"));
+ });
+ 
++test("client finding form categories match server PUBLIC_CATEGORIES", async () => {
++  const source = await readFile(new URL("../src/constants/findingCategories.ts", import.meta.url), "utf8");
++  const match = source.match(/PUBLIC_FINDING_CATEGORIES\s*=\s*\[([\s\S]*?)\]\s*as const/);
++  assert.ok(match, "PUBLIC_FINDING_CATEGORIES constant should exist");
++  const clientCategories = [...match![1].matchAll(/"([^"]+)"/g)].map(entry => entry[1]);
++  assert.deepEqual(new Set(clientCategories), PUBLIC_CATEGORIES);
++});
++
+ test("callable exports include appeals and glossary moderation endpoints", async () => {
+   const indexSource = await readFile(new URL("../functions/src/index.ts", import.meta.url), "utf8");
+   for (const symbol of [
+diff --git a/tsconfig.json b/tsconfig.json
+index a2f3356..5741640 100644
+--- a/tsconfig.json
++++ b/tsconfig.json
+@@ -19,6 +19,12 @@
+     "paths": {
+       "@/*": [
+         "./*"
++      ],
++      "@creg/arena-rag": [
++        "./shared/arena-rag/index.ts"
++      ],
++      "@creg/wallet": [
++        "../packages/creg-wallet/src/index.ts"
+       ]
+     },
+     "allowImportingTsExtensions": true,
+diff --git a/vite.config.ts b/vite.config.ts
+index 3e45e00..356548f 100644
+--- a/vite.config.ts
++++ b/vite.config.ts
+@@ -12,6 +12,11 @@ export default defineConfig(() => {
+     resolve: {
+       alias: {
+         '@': path.resolve(rootDirectory, '.'),
++        '@creg/wallet': path.resolve(rootDirectory, '../packages/creg-wallet/src/index.ts'),
++        '@walletconnect/ethereum-provider': path.resolve(
++          rootDirectory,
++          'node_modules/@walletconnect/ethereum-provider',
++        ),
+       },
+     },
+     build: {

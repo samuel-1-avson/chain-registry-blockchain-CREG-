@@ -1,5 +1,6 @@
 // crates/node/src/bridge.rs
-// Monitors PBFT consensus and finalizes records on the Ethereum Registry contract.
+// Legacy research bridge. Production uses witnessed log checkpoints; this
+// module exits unless explicitly enabled in a development environment.
 
 use crate::NodeState;
 use alloy::sol_types::SolCall;
@@ -21,9 +22,9 @@ sol!(
     interface IRegistry {
         function latestStateRoot() external view returns (bytes32 _0);
 
-        // NOTE: Registry.finalizePackage exists on-chain but is intentionally
-        // NOT bound here — this bridge settles L2 state via periodic rollup
-        // checkpoints (submitRollupBatch), not per-package L1 finalization.
+        // NOTE: this ABI is retained only for the development research path.
+        // The batch function is retired in production because its legacy proof
+        // does not establish a state transition or data availability.
         function submitRollupBatch(
             bytes32 prevRoot,
             bytes32 nextRoot,
@@ -50,12 +51,22 @@ sol!(
     }
 );
 
-/// Trust-model label attached to every anchor. The Groth16 batch circuit
-/// currently proves only that the batch is non-empty — state roots are
-/// computed off-chain and trusted from the bridge operator — so anchors are
-/// checkpoint attestations, NOT validity proofs. Keep this label honest until
-/// the circuit constrains the real state transition.
-const PROOF_MODE: &str = "checkpoint-attestation";
+/// Trust-model label attached to the development-only legacy path.
+const PROOF_MODE: &str = "legacy-checkpoint-research";
+
+/// Legacy checkpointing can run only in an explicitly marked development
+/// environment. The old batch circuit does not prove a state transition or
+/// data availability, so it is not an acceptable security boundary for alpha,
+/// testnet, or production deployments.
+fn legacy_checkpoint_research_enabled() -> bool {
+    let enabled = std::env::var("CREG_ENABLE_LEGACY_CHECKPOINT_RESEARCH")
+        .map(|v| v.trim().eq_ignore_ascii_case("true") || v.trim() == "1")
+        .unwrap_or(false);
+    let development = std::env::var("CREG_DEVELOPMENT")
+        .map(|v| v.trim().eq_ignore_ascii_case("true") || v.trim() == "1")
+        .unwrap_or(false);
+    enabled && development
+}
 
 /// Whether the bridge should immediately vote `approve` on its own batch
 /// proposal. Defaults to true (required for liveness while governance runs
@@ -88,6 +99,18 @@ where
 }
 
 pub async fn run(state: Arc<RwLock<NodeState>>) {
+    if !legacy_checkpoint_research_enabled() {
+        let mut s = state.write().await;
+        s.bridge_status.bridge_sync_status =
+            "Legacy checkpointing disabled by Phase 0 safety freeze".into();
+        s.bridge_status.proof_mode = "disabled".into();
+        tracing::warn!(
+            "Legacy checkpointing is disabled. It may run only with both \
+             CREG_DEVELOPMENT=true and CREG_ENABLE_LEGACY_CHECKPOINT_RESEARCH=true."
+        );
+        return;
+    }
+
     let mut ticker = interval(Duration::from_secs(10));
     let mut last_processed_height = 0;
 

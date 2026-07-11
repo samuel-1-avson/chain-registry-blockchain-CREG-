@@ -1858,7 +1858,9 @@ fn rest_admission_error(error: crate::package_admission::AdmissionError) -> Resp
         AdmissionError::Scanner(crate::admission_scan::AdmissionScanError::PayloadTooLarge {
             ..
         }) => StatusCode::PAYLOAD_TOO_LARGE,
-        AdmissionError::AlreadyVerified(_) | AdmissionError::AlreadyPending(_) => {
+        AdmissionError::AlreadyVerified(_)
+        | AdmissionError::AlreadyPending(_)
+        | AdmissionError::NamespaceOwned(_) => {
             StatusCode::CONFLICT
         }
         AdmissionError::Storage(_) => StatusCode::INTERNAL_SERVER_ERROR,
@@ -3635,7 +3637,8 @@ mod tests {
             publisher_address: req.publisher_address.clone(),
             publisher_pubkey: req.publisher_pubkey.clone(),
             signature: req.signature.clone(),
-            publisher_attestation_proof: vec![1u8],
+            // CR-02: legacy ZK admission attestations are retired and ignored.
+            publisher_attestation_proof: vec![],
             claimed_static_analysis_score: 0,
             claimed_sandbox_safe: false,
             publisher_pubkeys: req.publisher_pubkeys.clone(),
@@ -3643,6 +3646,13 @@ mod tests {
             threshold: req.threshold as u32,
             manifest_json,
             manifest_hash,
+            publisher_evm_signature: req.publisher_evm_signature.clone(),
+            publisher_nonce: req.publisher_nonce.clone(),
+            publisher_expires_at: req.publisher_expires_at,
+            source_hash: req.source_hash.clone(),
+            ownership_claim: req.ownership_claim.clone(),
+            publisher_chain_id: req.publisher_chain_id.clone(),
+            publisher_staking_contract: req.publisher_staking_contract.clone(),
         }
     }
 
@@ -3759,6 +3769,25 @@ mod tests {
     #[test]
     fn multisig_rejects_mismatched_counts() {
         let req = make_request_with_sigs(vec!["aa".into(), "bb".into()], vec!["cc".into()], 2);
+        assert!(verify_publish_sig(&req).is_err());
+    }
+
+    #[test]
+    fn multisig_rejects_duplicate_pubkeys_even_with_duplicate_signatures() {
+        let (sk, pk) = make_keypair();
+        let req_base = make_request_with_sigs(vec![], vec![], 0);
+        let msg = common::publish_signature_message(
+            &req_base.id,
+            &req_base.content_hash,
+            &req_base.publisher_address,
+        );
+        let sig = hex::encode(sk.sign(msg.as_bytes()).to_bytes());
+        let req = PublishRequest {
+            publisher_pubkeys: vec![pk.clone(), pk],
+            signatures: vec![sig.clone(), sig],
+            threshold: 2,
+            ..req_base
+        };
         assert!(verify_publish_sig(&req).is_err());
     }
 
@@ -4288,10 +4317,7 @@ mod tests {
     #[tokio::test]
     async fn grpc_submit_package_rejects_unstaked_publishers() -> anyhow::Result<()> {
         let (state, _tempdir, _p2p_handle, _tx_sender, _tx_receiver) = make_test_state(0).await?;
-        let service = crate::grpc::server::MyRegistry::new(
-            state.clone(),
-            Arc::new(zk_validator::ZkValidator::default()),
-        );
+        let service = crate::grpc::server::MyRegistry::new(state.clone());
         let publish_req = make_signed_request("0x1111111111111111111111111111111111111111");
         let canonical = publish_req.id.canonical();
         let result = service

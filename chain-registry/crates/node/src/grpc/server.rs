@@ -2,7 +2,7 @@
 // Implementation of the gRPC Services defined in node.proto.
 
 use futures::Stream;
-use std::{pin::Pin, sync::Arc};
+use std::pin::Pin;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
 use tonic::{Request, Response, Status};
@@ -47,7 +47,9 @@ fn admission_status(error: crate::package_admission::AdmissionError) -> Status {
             | crate::admission_scan::AdmissionScanError::ExtractionFailed { .. },
         )
         | AdmissionError::Revoked(_) => Status::failed_precondition(message),
-        AdmissionError::AlreadyVerified(_) | AdmissionError::AlreadyPending(_) => {
+        AdmissionError::AlreadyVerified(_)
+        | AdmissionError::AlreadyPending(_)
+        | AdmissionError::NamespaceOwned(_) => {
             Status::already_exists(message)
         }
         AdmissionError::Storage(_) => Status::internal(message),
@@ -56,15 +58,11 @@ fn admission_status(error: crate::package_admission::AdmissionError) -> Status {
 
 pub struct MyRegistry {
     state: SharedState,
-    zk_validator: Arc<zk_validator::ZkValidator>,
 }
 
 impl MyRegistry {
-    pub fn new(state: SharedState, zk_validator: Arc<zk_validator::ZkValidator>) -> Self {
-        Self {
-            state,
-            zk_validator,
-        }
+    pub fn new(state: SharedState) -> Self {
+        Self { state }
     }
 }
 
@@ -105,15 +103,6 @@ impl RegistryService for MyRegistry {
                 .map_err(|e| Status::invalid_argument(format!("Invalid manifest payload: {}", e)))?
         };
 
-        let content_hash_vec = hex::decode(&req.content_hash)
-            .map_err(|e| Status::invalid_argument(format!("Invalid content hash hex: {}", e)))?;
-        if content_hash_vec.len() != 32 {
-            return Err(Status::invalid_argument("Content hash must be 32 bytes"));
-        }
-        let mut content_hash_bytes = [0u8; 32];
-        content_hash_bytes.copy_from_slice(&content_hash_vec);
-
-        let mut manifest_hash_bytes = [0u8; 32];
         let derived_manifest_hash_hex = common::sha256_hex(
             &serde_json::to_vec(&manifest)
                 .map_err(|e| Status::internal(format!("Serialize manifest: {}", e)))?,
@@ -127,15 +116,6 @@ impl RegistryService for MyRegistry {
                 "manifest_hash does not match manifest_json",
             ));
         }
-        let manifest_hash_hex = derived_manifest_hash_hex;
-
-        let manifest_hash_vec = hex::decode(&manifest_hash_hex)
-            .map_err(|e| Status::invalid_argument(format!("Invalid manifest hash hex: {}", e)))?;
-        if manifest_hash_vec.len() != 32 {
-            return Err(Status::invalid_argument("Manifest hash must be 32 bytes"));
-        }
-        manifest_hash_bytes.copy_from_slice(&manifest_hash_vec);
-
         let pkg_id = common::PackageId::new(&req.ecosystem, &req.name, &req.version);
         let publish_req = common::PublishRequest {
             id: pkg_id,
@@ -153,6 +133,14 @@ impl RegistryService for MyRegistry {
             publisher_pubkeys: req.publisher_pubkeys.clone(),
             signatures: req.signatures.clone(),
             threshold: req.threshold as usize,
+            publisher_evm_signature: req.publisher_evm_signature.clone(),
+            publisher_nonce: req.publisher_nonce.clone(),
+            publisher_expires_at: req.publisher_expires_at,
+            source_hash: req.source_hash.clone(),
+            manifest_hash: derived_manifest_hash_hex,
+            ownership_claim: req.ownership_claim.clone(),
+            publisher_chain_id: req.publisher_chain_id.clone(),
+            publisher_staking_contract: req.publisher_staking_contract.clone(),
             ..Default::default()
         };
 
@@ -160,50 +148,18 @@ impl RegistryService for MyRegistry {
             .await
             .map_err(admission_status)?;
 
-        // ── 1. Publisher Attestation Verification (Admission Consistency) ─────
-        if req.publisher_attestation_proof.is_empty() {
-            return Err(Status::invalid_argument(
-                "Missing publisher admission attestation proof",
-            ));
-        }
-
-        // Build the claimed public inputs exactly as submitted by the publisher.
-        // This attestation does not replace validator-side safety analysis.
-        let inputs = zk_validator::PackageInputs::new(
-            content_hash_bytes,
-            manifest_hash_bytes,
-            req.claimed_static_analysis_score as u8,
-            req.claimed_sandbox_safe,
-        );
-
-        // Deserialize and verify the publisher attestation over the claimed inputs.
-        match zk_validator::ZkValidator::deserialize_proof(&req.publisher_attestation_proof) {
-            Ok(proof) => {
-                let public_inputs = inputs.public_inputs();
-                match self.zk_validator.verify_proof(&proof, &public_inputs) {
-                    Ok(true) => {
-                        tracing::info!(
-                            "[ZK] Publisher admission attestation verified for package: {}",
-                            req.name
-                        );
-                    }
-                    _ => {
-                        tracing::warn!(
-                            "[ZK] Publisher admission attestation FAILED for package: {}",
-                            req.name
-                        );
-                        return Err(Status::permission_denied(
-                            "Invalid publisher admission attestation. Submission rejected.",
-                        ));
-                    }
-                }
-            }
-            Err(e) => {
-                return Err(Status::invalid_argument(format!(
-                    "Failed to deserialize publisher admission attestation: {}",
-                    e
-                )));
-            }
+        // CR-02: publisher-generated ZK attestations are retired. Their safety
+        // inputs were caller assertions, not independently measured analysis.
+        // Keep the protobuf fields for wire compatibility but never require,
+        // verify, store, or use them to affect admission or qualification.
+        if !req.publisher_attestation_proof.is_empty()
+            || req.claimed_static_analysis_score != 0
+            || req.claimed_sandbox_safe
+        {
+            tracing::warn!(
+                package = %req.name,
+                "Ignoring retired publisher ZK attestation fields"
+            );
         }
 
         let receipt = crate::package_admission::admit_publish_request(
@@ -211,7 +167,11 @@ impl RegistryService for MyRegistry {
             publish_req,
             crate::package_admission::AdmissionOptions {
                 surface: crate::package_admission::AdmissionSurface::Grpc,
-                verify_publisher_auth: false,
+                // gRPC is a public submission surface too.  Do not bypass
+                // publisher authentication merely because the transport is
+                // internal-looking; callers must satisfy the same admission
+                // policy as REST.
+                verify_publisher_auth: true,
             },
         )
         .await
@@ -220,7 +180,7 @@ impl RegistryService for MyRegistry {
         Ok(Response::new(SubmitResponse {
             accepted: true,
             message: format!(
-                "Publisher admission attestation verified; {} accepted into pending pool for validator review ({} pending)",
+                "{} accepted into pending pool for independent validator review ({} pending)",
                 receipt.canonical, receipt.pending_count
             ),
         }))

@@ -18,10 +18,21 @@ fn consensus_profile_key(sig: &ValidatorSignature) -> Option<String> {
     ) {
         return None;
     }
+    // Evidence digests identify the individual attestation and may legitimately
+    // differ across isolated workers (for example, sandbox traces or local
+    // reputation observations).  Quorum must agree on the versioned scanner
+    // profile and policy disposition, not on byte-identical local evidence.
+    // Every returned signature still retains its own evidence_digest for audit.
+    let decision = match &sig.vote {
+        ValidatorVote::Approve => "approve",
+        ValidatorVote::Reject { .. } => "reject",
+    };
     Some(format!(
-        "{}:{}",
+        "{}:{}:{}:{}",
         common::scanner_profile_digest(&sig.ml_model_version, &sig.analysis_bundles),
-        sig.evidence_digest
+        decision,
+        sig.deterministic_risk.band,
+        sig.deterministic_risk.disposition,
     ))
 }
 
@@ -242,7 +253,7 @@ mod tests {
     }
 
     #[test]
-    fn approvals_must_share_the_same_profile_and_evidence_digest() {
+    fn approvals_may_retain_distinct_evidence_digests() {
         let committee = test_committee(3, &["v1", "v2", "v3"]);
         let mut v1 = sig("v1", ValidatorVote::Approve, "creg-detect-v1.0.0", true);
         let mut v2 = sig("v2", ValidatorVote::Approve, "creg-detect-v1.0.0", true);
@@ -253,9 +264,7 @@ mod tests {
 
         let outcome = aggregate_evidence_votes(&[v1, v2, v3], &committee);
 
-        assert!(
-            outcome.is_none(),
-            "mixed evidence bundles must not satisfy a single quorum"
-        );
+        assert!(matches!(outcome, Some(EvidenceVoteOutcome::Verified(_))),
+            "distinct worker evidence must not prevent a policy quorum");
     }
 }

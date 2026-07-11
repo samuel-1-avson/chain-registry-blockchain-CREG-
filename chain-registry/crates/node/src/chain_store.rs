@@ -473,6 +473,25 @@ impl ChainStore {
         false
     }
 
+    /// Return the first non-empty publisher key observed for a package
+    /// namespace.  Callers use this as an ownership guard before admitting a
+    /// new version; the canonical event history remains authoritative.
+    pub fn publisher_for_prefix(&self, prefix: &str) -> Option<String> {
+        let cf = self.db.cf_handle(CF_PACKAGES)?;
+        for item in self.db.prefix_iterator_cf(&cf, prefix.as_bytes()) {
+            let Ok((key, bytes)) = item else { continue };
+            if !key.starts_with(prefix.as_bytes()) {
+                break;
+            }
+            if let Ok(record) = serde_json::from_slice::<ChainRecord>(&bytes) {
+                if !record.publisher_pubkey.trim().is_empty() {
+                    return Some(record.publisher_pubkey);
+                }
+            }
+        }
+        None
+    }
+
     /// Return the last-used rotation nonce for the given publisher pubkey.
     /// Returns 0 if no rotation has been recorded.
     pub fn publisher_rotation_nonce(&self, pubkey: &str) -> Option<u64> {

@@ -12,9 +12,11 @@ interface IGovernancePause {
 }
 
 /// @title ChainRegistry
-/// @notice Core on-chain package registry with ZK proof support
-/// @dev Records publish/revoke events. Supports both PBFT consensus
-///      and ZK proof validation for faster verification.
+/// @notice Legacy on-chain package registry.
+/// @dev ZK package qualification and ZK batch-settlement entry points are
+///      retired. A proof may establish only the statement encoded in its
+///      circuit; the legacy circuits do not establish package safety or a
+///      registry state transition.
 contract ChainRegistry {
 
     // ── ZK public-input binding ──────────────────────────────────────────────
@@ -52,7 +54,7 @@ contract ChainRegistry {
 
     struct ValidatorSig {
         address validator;
-        bytes   signature;         // ECDSA sig over (canonical ++ contentHash)
+        bytes   signature;         // ECDSA sig over domain + set snapshot + subject
         bool    approved;
     }
 
@@ -81,9 +83,10 @@ contract ChainRegistry {
     address public governance;   // Multisig / DAO that can update rules.
     uint8   public quorumPct;    // Minimum approval percentage (default 67).
     
-    // Validation configuration
+    // Legacy validation configuration. This value remains for ABI compatibility,
+    // but qualification cannot be re-enabled by this implementation.
     bool public zkValidationEnabled;
-    uint256 public zkValidationFee;  // Fee for ZK validation (cheaper than PBFT)
+    uint256 public zkValidationFee;
 
     // ── L2 Rollup State ────────────────────────────────────────────────────────
     
@@ -104,6 +107,9 @@ contract ChainRegistry {
 
     /// When true, finalizePackage must be called by an authorized relay (testnet hardening).
     bool public enforceFinalizeRelays;
+
+    bytes32 public constant VALIDATOR_SIGNATURE_DOMAIN =
+        keccak256("CREG-REGISTRY-VALIDATOR-SIGNATURE-V2");
 
     /// Per-package validator signature replay guard (canonical key → validator → signed).
     mapping(bytes32 => mapping(address => bool)) public validatorSignedForPackage;
@@ -145,6 +151,8 @@ contract ChainRegistry {
     error NotAuthorizedFinalizeRelay();
     error AlreadyVerified(string canonical);
     error ValidatorAlreadySigned(address validator);
+    error ZKQualificationRetired();
+    error LegacyCheckpointingRetired();
 
     // ── Modifiers ─────────────────────────────────────────────────────────────
 
@@ -175,8 +183,9 @@ contract ChainRegistry {
         zkVerifier = ZKVerifier(_zkVerifier);
         governance = _governance;
         quorumPct  = 67; // 2/3 majority
-        zkValidationEnabled = true;
-        zkValidationFee = 0.001 ether; // Cheaper than PBFT
+        // CR-02: caller-supplied ZK inputs must never qualify a package.
+        zkValidationEnabled = false;
+        zkValidationFee = 0;
         enforceFinalizeRelays = true; // Safer default: only allowlisted relays by default (governance can relax)
     }
 
@@ -224,6 +233,10 @@ contract ChainRegistry {
 
         // Publisher must have staked tokens to publish.
         require(staking.stakedBalance(publisher) > 0, "Publisher must stake first");
+        // CR-06: reserve one minimum publisher bond for this exact release so
+        // a publisher cannot publish unlimited versions and immediately
+        // withdraw the only stake at risk.
+        staking.reservePublisherLiability(key, publisher, staking.minPublisherStake());
 
         packages[key] = PackageRecord({
             canonical:         canonical,
@@ -244,7 +257,8 @@ contract ChainRegistry {
         emit PackageSubmitted(key, canonical, publisher);
     }
     
-    /// @notice Submit a package with ZK proof for instant verification
+    /// @notice Retired: ZK proofs cannot qualify a package.
+    /// @dev Retained only to preserve the deployed ABI during migration.
     /// @param canonical  Package canonical ID
     /// @param contentHash SHA-256 of the tarball
     /// @param ipfsCid    IPFS CID
@@ -257,68 +271,18 @@ contract ChainRegistry {
         uint256[8] calldata proof,
         uint256[] calldata publicInputs
     ) external payable whenNotPaused {
-        if (!zkValidationEnabled) revert ZKDisabled();
-        if (msg.value < zkValidationFee) revert("Insufficient fee");
-        
-        bytes32 key = _key(canonical);
-        PackageRecord storage rec = packages[key];
-
-        if (rec.status != PackageStatus.Unknown) {
-            revert AlreadyExists(canonical);
-        }
-
-        // Publisher must have staked tokens
-        require(staking.stakedBalance(msg.sender) > 0, "Publisher must stake first");
-
-        // Bind the proof's public inputs to this exact package tuple. The first
-        // two public inputs are the high/low 128-bit limbs of the package binding
-        // hash, keeping each limb inside the BN254 scalar field.
-        _assertPackageProofBinding(canonical, contentHash, ipfsCid, publicInputs);
-        
-        // Verify ZK proof on-chain
-        bool proofValid = zkVerifier.verifyProof(proof, publicInputs);
-        if (!proofValid) revert InvalidZKProof();
-        
-        // Compute proof hash for record
-        bytes32 proofHash = keccak256(abi.encodePacked(proof, publicInputs));
-
-        packages[key] = PackageRecord({
-            canonical:         canonical,
-            contentHash:       contentHash,
-            ipfsCid:           ipfsCid,
-            publisher:         msg.sender,
-            publishedAt:       uint64(block.timestamp),
-            blockHash:         blockhash(block.number - 1), // See note in submitPackage()
-            blockNumber:       block.number,
-            status:            PackageStatus.Verified,
-            revocationReason:  "",
-            validationMode:    ValidationMode.ZKProof,
-            zkProofHash:       proofHash
-        });
-        
-        // Store ZK proof data
-        zkProofs[key] = ZKProofData({
-            proof: proof,
-            publicInputs: publicInputs,
-            verifiedAt: uint64(block.timestamp)
-        });
-
-        emit PackageVerifiedZK(key, canonical, proofHash);
-        
-        // Refund excess fee
-        if (msg.value > zkValidationFee) {
-            payable(msg.sender).transfer(msg.value - zkValidationFee);
-        }
+        revert ZKQualificationRetired();
     }
 
-    // ── L2 Rollup Settlement ─────────────────────────────────────────────────
+    // ── Retired batch-settlement path ────────────────────────────────────────
 
-    /// @notice Submit a batch of package verifications to achieve L2 finality.
+    /// @notice Retired: the legacy batch circuit did not prove a state transition.
+    /// @dev Retained only to preserve the deployed ABI during migration.
     /// @param prevRoot Previous state root (must match latestStateRoot)
     /// @param nextRoot New state root after processing the batch
     /// @param txCount  Number of verified packages in this batch
     /// @param dataRoot Merkle root of the transaction data (for DA)
-    /// @param proof    Validity proof (ZK-SNARK) confirming the state transition
+    /// @param proof    Unused legacy argument.
     function submitRollupBatch(
         bytes32 prevRoot,
         bytes32 nextRoot,
@@ -327,22 +291,7 @@ contract ChainRegistry {
         uint256[8] calldata proof,
         uint256[] calldata publicInputs
     ) external onlyGovernance {
-        // 1. Verify previous state root matches
-        require(prevRoot == latestStateRoot, "Invalid previous state root");
-        
-        // 2. Verify validity proof (Validity Rollup)
-        // In a true L2, the ZK proof confirms that the transition from prev -> next
-        // is valid according to the protocol rules.
-        bool proofValid = zkVerifier.verifyProof(proof, publicInputs);
-        if (!proofValid) revert InvalidZKProof();
-        
-        // 3. Update state
-        totalBatches++;
-        latestStateRoot = nextRoot;
-        batchRoots[totalBatches] = nextRoot;
-        batchDataRoots[totalBatches] = dataRoot;
-        
-        emit BatchSubmitted(totalBatches, prevRoot, nextRoot, txCount, dataRoot);
+        revert LegacyCheckpointingRetired();
     }
 
     // ── Consensus-facing ─────────────────────────────────────────────────────
@@ -383,7 +332,8 @@ contract ChainRegistry {
                 revert ValidatorAlreadySigned(s.validator);
             }
 
-            // Verify ECDSA signature over (canonical ++ contentHash).
+            // Verify a chain/contract/set-domain signature over the exact
+            // package subject. This prevents cross-deployment replay.
             address recovered = _recoverSigner(digest, s.signature);
             if (recovered != s.validator) revert InvalidSignature(s.validator);
 
@@ -406,11 +356,14 @@ contract ChainRegistry {
         rec.blockHash = blockhash(block.number - 1);
         rec.blockNumber = block.number;
         rec.validationMode = ValidationMode.PBFT;
+        // Keep the publisher bond reserved through the challenge window.
+        try staking.markPackageFinalized(key) {} catch {}
 
         emit PackageVerified(key, canonical, approvals);
     }
     
-    /// @notice Verify a ZK proof for an existing pending package
+    /// @notice Retired: ZK proofs cannot qualify an existing pending package.
+    /// @dev Retained only to preserve the deployed ABI during migration.
     /// @param canonical Package canonical ID
     /// @param proof     Groth16 proof
     /// @param publicInputs Public inputs
@@ -419,36 +372,7 @@ contract ChainRegistry {
         uint256[8] calldata proof,
         uint256[] calldata publicInputs
     ) external whenNotPaused {
-        bytes32 key = _key(canonical);
-        PackageRecord storage rec = packages[key];
-
-        if (rec.status == PackageStatus.Unknown) revert NotFound(canonical);
-        if (rec.status == PackageStatus.Verified) return; // Already verified
-        if (rec.status == PackageStatus.Revoked) revert AlreadyRevoked(canonical);
-        if (!zkValidationEnabled) revert ZKDisabled();
-
-        _assertPackageProofBinding(canonical, rec.contentHash, rec.ipfsCid, publicInputs);
-
-        // Verify ZK proof
-        bool proofValid = zkVerifier.verifyProof(proof, publicInputs);
-        if (!proofValid) revert InvalidZKProof();
-
-        // Update record
-        bytes32 proofHash = keccak256(abi.encodePacked(proof, publicInputs));
-        rec.status = PackageStatus.Verified;
-        rec.validationMode = ValidationMode.ZKProof;
-        rec.zkProofHash = proofHash;
-        rec.blockHash = blockhash(block.number - 1);
-        rec.blockNumber = block.number;
-
-        // Store proof
-        zkProofs[key] = ZKProofData({
-            proof: proof,
-            publicInputs: publicInputs,
-            verifiedAt: uint64(block.timestamp)
-        });
-
-        emit PackageVerifiedZK(key, canonical, proofHash);
+        revert ZKQualificationRetired();
     }
 
     // ── Revocation ────────────────────────────────────────────────────────────
@@ -471,11 +395,37 @@ contract ChainRegistry {
         rec.status            = PackageStatus.Revoked;
         rec.revocationReason  = reason;
 
-        // If governance is revoking (malicious package), slash publisher stake based on severity.
+        // Release the package-specific liability. Governance revocations slash
+        // the reserved bond; publisher-initiated revocations release it.
+        try staking.resolvePublisherLiability(key, isGov, reason) {} catch {}
+        // Apply any additional severity slash after resolving the reserved
+        // release bond, so the two accounting paths cannot double-spend or
+        // underflow the reservation.
         if (isGov) {
             staking.slashSeverity(rec.publisher, severity, reason);
         }
 
+        emit PackageRevoked(key, canonical, reason);
+    }
+
+    /// @notice Narrow emergency revocation path available while governance has
+    /// paused the system.  It cannot publish, verify, transfer funds, or alter
+    /// policy; it only records a fail-closed package state and applies the
+    /// normal governance slash rule.
+    function emergencyRevokePackage(
+        string calldata canonical,
+        string calldata reason,
+        Staking.Severity severity
+    ) external onlyGovernance {
+        bytes32 key = _key(canonical);
+        PackageRecord storage rec = packages[key];
+        if (rec.status == PackageStatus.Unknown) revert NotFound(canonical);
+        if (rec.status == PackageStatus.Revoked) revert AlreadyRevoked(canonical);
+
+        rec.status = PackageStatus.Revoked;
+        rec.revocationReason = reason;
+        try staking.resolvePublisherLiability(key, true, reason) {} catch {}
+        staking.slashSeverity(rec.publisher, severity, reason);
         emit PackageRevoked(key, canonical, reason);
     }
 
@@ -533,6 +483,7 @@ contract ChainRegistry {
     }
     
     function setZKValidationEnabled(bool enabled) external onlyGovernance {
+        if (enabled) revert ZKQualificationRetired();
         zkValidationEnabled = enabled;
         emit ZKValidationToggled(enabled);
     }
@@ -559,7 +510,7 @@ contract ChainRegistry {
         emit EnforceFinalizeRelaysUpdated(enabled);
     }
     
-    /// @notice Withdraw accumulated ZK validation fees
+    /// @notice Withdraw legacy fees accrued before the ZK qualification freeze.
     /// @dev Protected against reentrancy since it transfers ETH.
     function withdrawFees(address payable to, uint256 amount) external onlyGovernance nonReentrant {
         require(address(this).balance >= amount, "Insufficient balance");
@@ -589,12 +540,22 @@ contract ChainRegistry {
     }
 
     function _sigDigest(string memory canonical, bytes32 contentHash)
-        internal pure returns (bytes32)
+        internal view returns (bytes32)
     {
         return keccak256(
             abi.encodePacked(
                 "\x19Ethereum Signed Message:\n32",
-                keccak256(abi.encodePacked(canonical, contentHash))
+                keccak256(
+                    abi.encode(
+                        VALIDATOR_SIGNATURE_DOMAIN,
+                        block.chainid,
+                        address(this),
+                        staking.activeValidatorCount(),
+                        quorumPct,
+                        canonical,
+                        contentHash
+                    )
+                )
             )
         );
     }

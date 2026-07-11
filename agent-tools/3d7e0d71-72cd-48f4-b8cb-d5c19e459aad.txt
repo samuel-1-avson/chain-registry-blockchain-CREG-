@@ -1,0 +1,200 @@
+
+${Y.body}`.toLowerCase().includes(p)):x},[g,x]),H=x.find(p=>p.id===h)||Te[0];d.useEffect(()=>{try{C(JSON.parse(localSto
+rage.getItem(o.progressKey)||"[]"))}catch{C([])}u(""),$(!1),j(!1),f("")},[n,o.progressKey]),d.useEffect(()=>{let 
+p=!0;A(!0),D(null);const xe=fetch("/whitepaper/manifest.json",{cache:"no-store"}).then(le=>{if(!le.ok)throw new 
+Error("Document manifest is unavailable.");return le.json()}).then(le=>{var Ce;const 
+Ae=le.documents.find(Ie=>Ie.kind===o.kind),Xt=(Ae==null?void 0:Ae.path)||o.fallbackPath,st=((Ce=Ae==null?void 
+0:Ae.sha256)==null?void 0:Ce.slice(0,12))||le.generatedAt||"latest";return 
+fetch(`${Xt}?v=${st}`,{cache:"no-store"}).then(Ie=>{if(!Ie.ok)throw new Error(`Canonical ${o.shortLabel.toLowerCase()} 
+is unavailable.`);return Ie.text()}).then(Ie=>({nextManifest:le,markdown:Ie,manifestEntry:Ae}))});return(async()=>{var 
+Qt;const{nextManifest:le,markdown:Ae,manifestEntry:Xt}=await xe;if(!p)return;const 
+st=Er(Ae),Ce=le.version||at,Ie=!!(F&&F!==Ce);if(i(le),u(((Qt=st[0])==null?void 
+0:Qt.id)||""),Ie&&ne.firebaseBackend)try{const[_e,ha]=await Promise.all([Et(n,F),At(n)]);if(!p)return;b(_e.revision.sec
+tions),z(ha),A(!1);return}catch(_e){console.warn(`Historical revision "${F}" unavailable; showing canonical 
+${o.shortLabel.toLowerCase()}.`,_e),ee("")}if(b(st),ne.firebaseBackend)try{const _e=await At(n);if(!p)return;z(_e.lengt
+h>0?_e:[{id:nt(n,Ce),version:Ce,publishedAt:le.publishedAt}])}catch(_e){console.warn(`Document revision list 
+unavailable for "${n}".`,_e),z([{id:nt(n,Ce),version:Ce,publishedAt:le.publishedAt}])}else 
+z([{id:nt(n,Ce),version:Ce,publishedAt:le.publishedAt}]);A(!1)})().catch(le=>{p&&(D(le instanceof 
+Error?le.message:`Unable to load the ${o.shortLabel.toLowerCase()}.`),A(!1))}),()=>{p=!1}},[F,n,o.kind,o.fallbackPath,o
+.shortLabel]),d.useEffect(()=>{if(!H||!ne.firebaseBackend){de([]);return}let p=!0;return 
+ie(!0),Rt(n,H.id).then(Y=>{p&&(de(Y),ie(!1))}).catch(Y=>{console.error("Failed to load 
+annotations:",Y),p&&ie(!1)}),()=>{p=!1}},[H==null?void 0:H.id,n]),d.useEffect(()=>{let p=!0;return 
+ne.firebaseBackend&&x.length>0&&(Pt(n).then(Y=>{p&&ce(Y)}).catch(Y=>console.error("Failed to load document 
+coverage:",Y)),Tt().then(Y=>{p&&be(Y)}).catch(Y=>console.error("Failed to load glossary 
+terms:",Y))),()=>{p=!1}},[x,n]),d.useEffect(()=>{if(!te||!Q||!H){c("");return}let p=!0;q(!0);const 
+Y=Q.split(":v")[1]||Q;return Et(n,Y).then(xe=>{if(!p)return;const 
+je=xe.revision.sections.find(le=>le.id===H.id);c(je?je.body:""),q(!1)}).catch(xe=>{console.error("Failed to load 
+comparison section:",xe),p&&(c(""),q(!1))}),()=>{p=!1}},[te,Q,H==null?void 0:H.id,n]);const Ye=()=>{if(!te){const 
+p=(m==null?void 0:m.version)||at,Y=M.find(xe=>xe.version!==p);Y&&Z(Y.id)}j(!te)},Ke=x.length?Math.round(R.filter(p=>x.s
+ome(Y=>Y.id===p)).length/x.length*100):0,Xe=()=>{if(!H||R.includes(H.id))return;const 
+p=[...R,H.id];C(p),localStorage.setItem(o.progressKey,JSON.stringify(p)),window.dispatchEvent(new 
+CustomEvent(o.progressEvent,{detail:p}))},Be=()=>{H&&(k(`Feedback on 
+${H.title}`),S(""),U(null),$(!0))},We=async()=>{if(!H||E.trim().length<8||L.trim().length<30){U("Use a specific title 
+and provide at least 30 characters of evidence-backed feedback.");return}X(!0),U(null);try{await 
+r({id:"",title:E.trim(),description:L.trim(),category:y,author:t,sourceReference:`${o.label} ${(m==null?void 
+0:m.version)||"current"} — ${H.title}`,createdAt:new Date().toISOString(),status:"Submitted",communityVotes:{up:0,dow
+n:0},comments:[],documentId:n,revisionId:nt(n,(m==null?void 0:m.version)||at),sectionId:H.id}),U("Critique submitted 
+to the public review queue."),S(""),$(!1),ne.firebaseBackend&&(Rt(n,H.id).then(p=>de(p)).catch(p=>console.error(p)),Pt(
+n).then(p=>ce(p)).catch(p=>console.error(p)))}catch(p){U(p instanceof Error?p.message:"The critique could not be 
+submitted.")}finally{X(!1)}};if(G)return 
+e.jsxs("div",{className:"whitepaper-state",children:[e.jsx(Ee,{className:"animate-pulse"})," Loading 
+",o.shortLabel.toLowerCase(),"…"]});if(N)return 
+e.jsxs("div",{className:"whitepaper-state",role:"alert",children:[e.jsx(ks,{})," ",N]});const Ge=m==null?void 
+0:m.documents.find(p=>p.kind===o.kind),ut=Ge==null?void 
+0:Ge.download,Kt=Object.keys(rt).map(p=>({id:p,...rt[p],manifest:m==null?void 
+0:m.documents.find(Y=>Y.kind===rt[p].kind)}));return e.jsxs("div",{className:"whitepaper-library",children:[e.jsxs("hea
+der",{className:"whitepaper-hero",children:[e.jsxs("div",{children:[e.jsx("span",{className:"whitepaper-kicker",childre
+n:"Canonical CREG documentation"}),e.jsx("h2",{children:"Read the protocol. Map the 
+workflow."}),e.jsx("p",{children:"Study the technical whitepaper and system workflow reference section by section, 
+cite precise passages, and submit evidence-linked criticism into the public review 
+queue."}),e.jsx("div",{className:"mt-4 flex flex-wrap 
+gap-2",children:Kt.map(p=>e.jsx("button",{onClick:()=>l(p.id),className:`border px-3 py-1.5 font-mono text-[10px] 
+font-bold uppercase transition-all cursor-pointer ${n===p.id?"bg-theme-accent text-theme-accent-text 
+border-theme-accent":"bg-theme-card border-theme-border text-theme-muted hover:text-theme-text"}`,children:p.shortLabel
+},p.id))})]}),e.jsxs("div",{className:"whitepaper-downloads",children:[n==="whitepaper"&&ne.firebaseBackend&&e.jsxs("bu
+tton",{onClick:()=>v(!0),className:"inline-flex items-center gap-1.5 border border-theme-border bg-theme-card px-3 
+py-1.5 font-mono text-[10px] font-bold uppercase hover:bg-theme-bg cursor-pointer 
+text-theme-text",children:[e.jsx(Ee,{className:"w-3.5 h-3.5"})," 
+Glossary"]}),ut&&e.jsxs("a",{href:ls(ut),download:!0,target:"_blank",rel:"noreferrer",children:[e.jsx(Jt,{})," 
+Download PDF ",e.jsxs("small",{children:[Math.ceil(ut.bytes/1024)," 
+KB"]})]})]})]}),e.jsxs("div",{className:"whitepaper-meta flex items-center 
+justify-between",children:[e.jsxs("div",{className:"flex flex-wrap gap-2",children:[e.jsxs("span",{children:["Version 
+",m==null?void 0:m.version]}),e.jsxs("span",{children:["Published ",m==null?void 
+0:m.publishedAt]}),e.jsxs("span",{children:[x.length," sections"]}),e.jsxs("span",{children:[Ke,"% read on this 
+device"]})]}),ne.firebaseBackend&&M.length>1&&e.jsxs("div",{className:"flex items-center gap-2 font-mono text-[9px] 
+font-bold uppercase",children:[e.jsx("span",{className:"text-theme-muted",children:"Select 
+Version:"}),e.jsx("select",{value:F,onChange:p=>{ee(p.target.value),j(!1)},className:"bg-theme-card border 
+border-theme-border p-1 text-[9px] text-theme-text font-bold outline-none uppercase 
+cursor-pointer",children:M.map(p=>e.jsxs("option",{value:p.version,children:["v",p.version," 
+",p.version===(m==null?void 0:m.version)?"(CURRENT)":""]},p.id))})]})]}),e.jsxs("div",{className:"whitepaper-workspace"
+,children:[e.jsxs("aside",{className:"whitepaper-index","aria-label":"Whitepaper 
+sections",children:[e.jsxs("label",{children:[e.jsx(Ea,{}),e.jsx("span",{className:"sr-only",children:"Search 
+whitepaper"}),e.jsx("input",{value:g,onChange:p=>f(p.target.value),placeholder:"Search 
+concepts…"})]}),e.jsxs("nav",{children:[Te.map(p=>{const Y=me[p.id],xe=Y&&Y.unresolved>0,je=Y&&Y.approved>0;return 
+e.jsxs("button",{onClick:()=>{u(p.id),$(!1)},className:`${p.id===(H==null?void 0:H.id)?"is-active":""} ${xe?"border-l 
+border-amber-500/80 bg-amber-500/5":""}`,children:[e.jsx("span",{children:String(p.order+1).padStart(2,"0")}),e.jsxs("d
+iv",{className:"flex-1 flex flex-col items-start min-w-0",children:[e.jsx("strong",{className:"truncate w-full 
+text-left",children:p.title}),e.jsxs("div",{className:"flex gap-1.5 
+mt-0.5",children:[xe&&e.jsxs("span",{className:"text-[8px] px-1 bg-amber-500/15 text-amber-500 border 
+border-amber-500/30 uppercase tracking-wider font-bold",children:["Drift 
+(",Y.unresolved,")"]}),je&&e.jsxs("span",{className:"text-[8px] px-1 bg-emerald-500/15 text-emerald-500 border 
+border-emerald-500/30 uppercase tracking-wider font-bold",children:["Approved 
+(",Y.approved,")"]})]})]}),R.includes(p.id)?e.jsx(Me,{className:"w-3.5 h-3.5 shrink-0"}):e.jsx(tt,{className:"w-3.5 
+h-3.5 shrink-0 text-theme-muted"})]},p.id)}),Te.length===0&&e.jsxs("p",{children:["No section matches 
+“",g,"”."]})]}),e.jsxs("div",{className:"whitepaper-documents",children:[e.jsx("h3",{children:"Canonical 
+PDFs"}),Kt.filter(p=>{var Y;return(Y=p.manifest)==null?void 0:Y.download}).map(p=>e.jsxs("a",{href:ls(p.manifest.downlo
+ad),download:!0,target:"_blank",rel:"noreferrer",children:[e.jsx(Jt,{}),e.jsxs("span",{children:[p.label,e.jsxs("small"
+,{children:["PDF · ",Math.ceil(p.manifest.download.bytes/1024)," KB"]})]})]},p.id))]})]}),e.jsx("article",{className:"
+whitepaper-reader","aria-live":"polite",children:H&&e.jsxs(e.Fragment,{children:[e.jsxs("div",{className:"whitepaper-re
+ader-heading",children:[e.jsxs("div",{children:[e.jsxs("span",{children:["Section ",String(H.order+1).padStart(2,"0")]}
+),e.jsx("h2",{children:H.title})]}),e.jsxs("div",{children:[ne.firebaseBackend&&M.length>1&&e.jsxs("button",{onClick:Ye
+,className:`mr-2 inline-flex items-center gap-1 border border-theme-border-med px-3 py-1.5 font-mono text-[10px] 
+font-bold uppercase hover:bg-theme-card ${te?"bg-theme-accent text-theme-accent-text 
+border-theme-accent":""}`,children:[e.jsx(Aa,{className:"w-3.5 h-3.5"})," ",te?"Close Diff":"Compare History"]}),e.jsx(
+"button",{onClick:Xe,disabled:R.includes(H.id),children:R.includes(H.id)?e.jsxs(e.Fragment,{children:[e.jsx(Me,{})," 
+Read"]}):e.jsxs(e.Fragment,{children:[e.jsx(Ee,{})," Mark as 
+read"]})}),e.jsxs("button",{onClick:s?Be:a,children:[e.jsx(kt,{})," Critique 
+section"]})]})]}),te?e.jsxs("div",{className:"mt-6 flex flex-col gap-4",children:[e.jsxs("div",{className:"flex 
+items-center gap-3 p-3 border border-theme-border bg-theme-card/25 font-mono text-[10px] 
+uppercase",children:[e.jsx(et,{className:"w-4 h-4 text-theme-muted"}),e.jsx("span",{children:"Compare with 
+version:"}),e.
+
+... (output truncated) ...
+
+MERIT PORTFOLIO",icon:yt},{tab:"info",text:"6. WORKFLOW 
+LAB",icon:Ha},{tab:"admin",text:"7. SECURITY INTEL",icon:Ya}].filter(v=>v.tab!=="admin"||c).map(v=>{const 
+w=v.icon,O=t===v.tab;return e.jsxs("button",{onClick:()=>s(v.tab),className:`w-full text-left text-[9px] font-bold 
+uppercase tracking-widest py-2 px-3 border transition-all flex items-center gap-2 ${O?"bg-theme-accent 
+text-theme-accent-text border-theme-accent font-extrabold":"text-theme-muted border-transparent hover:text-theme-text 
+hover:bg-theme-card"}`,children:[e.jsx(w,{className:"w-3.5 h-3.5 
+shrink-0"}),v.text]},v.tab)})})]}),e.jsxs("div",{className:"flex flex-col gap-2 pt-4 border-t 
+border-theme-border",children:[e.jsx("button",{onClick:()=>W?void Q():r(!1),className:`w-full text-[8px] uppercase 
+tracking-wider py-1.5 px-3 border transition-all truncate ${W?"bg-theme-accent text-theme-accent-text 
+border-theme-accent font-bold":"bg-transparent border-theme-border text-theme-muted hover:text-theme-text 
+hover:border-theme-border-med"}`,children:W&&_?e.jsxs("span",{className:"flex items-center gap-1.5 
+justify-center",children:[e.jsxs("span",{children:["WAL: 
+",_.slice(0,6),"...",_.slice(-4)]}),M&&e.jsx("span",{className:"network-badge 
+font-mono",children:M==="0xaa36a7"?"SEPOLIA":M==="0x1"?"MAINNET":"CHAIN"})]}):"Synchronize 
+Wallet"}),re&&e.jsxs("div",{className:"text-[7.5px] text-amber-500 border border-amber-500/30 bg-amber-500/5 p-2 
+uppercase tracking-wide leading-relaxed font-bold font-mono",children:["⚠ ",re]}),e.jsxs("div",{className:"flex 
+justify-between items-center text-[7px] text-theme-muted uppercase mt-1",children:[e.jsx("span",{children:"ALPHA 
+SYSTEM // v1.1.0"}),e.jsx("button",{onClick:be,className:"hover:text-theme-text hover:underline 
+text-right",children:"[WIPE STATE]"})]})]})]}),e.jsx("main",{className:"flex-1 p-4 sm:p-6 overflow-y-auto 
+relative",children:e.jsxs("div",{className:"max-w-5xl w-full mx-auto flex flex-col 
+gap-4",children:[W&&M&&M!=="0xaa36a7"&&e.jsxs("div",{className:"bg-amber-500/10 border border-amber-500/40 
+text-amber-500 p-3.5 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs font-semibold font-mono 
+rounded-sm",children:[e.jsxs("div",{className:"flex items-center gap-2",children:[e.jsx(Bt,{className:"w-4 h-4 
+shrink-0 text-amber-500 animate-pulse"}),e.jsx("span",{children:"WRONG NETWORK DETECTED: PLEASE SWITCH TO SEPOLIA 
+TESTNET"})]}),e.jsx("button",{onClick:async()=>{const v=ee||window.ethereum;if(v)try{await v.request({method:"wallet_sw
+itchEthereumChain",params:[{chainId:"0xaa36a7"}]}),z("0xaa36a7")}catch(w){console.error(w),D("Failed to switch chain 
+automatically.")}},className:"bg-amber-500 text-[#000] font-bold py-1 px-3 border border-amber-500 
+hover:bg-transparent hover:text-amber-500 transition-all cursor-pointer text-[10px]",children:"Switch 
+Network"})]}),L?e.jsxs("div",{className:"flex-1 flex flex-col items-center justify-center py-20 text-center 
+gap-2",children:[e.jsx(we,{className:"w-5 h-5 text-theme-accent animate-spin"}),e.jsx("p",{className:"text-[8px] 
+uppercase tracking-widest text-theme-muted animate-pulse",children:"MATCHING STATE 
+HASHES..."})]}):e.jsxs(e.Fragment,{children:[t==="feed"&&e.jsx("section",{className:"flex flex-col gap-3",children:e.js
+x(Mr,{username:y.username,canSubmit:W,onRequestSignIn:()=>r(!1),onSubmitCritique:ce})}),t==="chat"&&e.jsxs("section",{c
+lassName:"flex flex-col gap-3",children:[e.jsxs("div",{children:[e.jsx("h2",{className:"text-lg font-bold uppercase 
+tracking-wider text-theme-text font-mono",children:"Whitepaper RAG Interrogator"}),e.jsx("p",{className:"text-xs 
+text-theme-muted uppercase tracking-wide mt-1",children:"Ask targeted technical queries about active 
+parameters."})]}),e.jsx(dr,{onSuggestFinding:q})]}),t==="quests"&&e.jsx("section",{className:"flex flex-col gap-3",chil
+dren:e.jsx(Tr,{profile:y,findings:E,onOpenWhitepaper:()=>s("feed"),onOpenFindings:()=>s("board")})}),t==="board"&&e.jsx
+s("section",{className:"flex flex-col gap-3",children:[e.jsxs("div",{children:[e.jsx("h2",{className:"text-lg 
+font-bold uppercase tracking-wider text-theme-text font-mono",children:"Ecosystem Critique 
+Registry"}),e.jsx("p",{className:"text-xs text-theme-muted uppercase tracking-wide mt-1",children:"Spotted logical 
+flaws or missing rules? Register a verified query."})]}),e.jsx(mr,{findings:E,onAddFinding:ce,onFindingChanged:he,onUpd
+ateFindingStatus:me,username:y.username})]}),t==="dashboard"&&e.jsxs("section",{className:"flex flex-col 
+gap-3",children:[e.jsxs("div",{children:[e.jsx("h2",{className:"text-lg font-bold uppercase tracking-wider 
+text-theme-text font-mono",children:"Merit Certification Record"}),e.jsx("p",{className:"text-xs text-theme-muted 
+uppercase tracking-wide mt-1",children:"Review anti-spam trust ratios and unlocked 
+credentials."})]}),e.jsx(pr,{profile:y,username:(y==null?void 
+0:y.username)||"Contributor",findings:E,walletBalance:F})]}),t==="admin"&&c&&e.jsxs("section",{className:"flex 
+flex-col gap-3",children:[e.jsxs("div",{children:[e.jsx("h2",{className:"text-lg font-bold uppercase tracking-wider 
+text-theme-text font-mono",children:"Security Evaluation Node"}),e.jsx("p",{className:"text-xs text-theme-muted 
+uppercase tracking-wide mt-1",children:"Review real contribution records with an auditable server 
+action."})]}),e.jsx(xr,{findings:E,onReviewFinding:me})]}),t==="info"&&e.jsx("section",{className:"flex flex-col 
+gap-3",children:e.jsx(yn,{})})]})]})})]}),i&&e.jsx("div",{className:"fixed inset-0 z-50 flex items-end sm:items-center 
+justify-center p-4 bg-black/80 backdrop-blur-sm anim-fade-in 
+overflow-y-auto",children:e.jsxs("div",{className:"bg-theme-bg border-2 border-theme-border-med p-6 w-full max-w-sm 
+font-mono relative flex flex-col gap-5 text-xs shadow-2xl anim-fade-slide-up max-h-[min(92vh,640px)] 
+overflow-y-auto",children:[e.jsxs("div",{className:"flex justify-between items-center border-b border-theme-border 
+pb-3",children:[e.jsx("span",{className:"font-bold uppercase tracking-wider text-theme-text",children:dt(y)?"SET UP 
+YOUR PROFILE":"EDIT YOUR PROFILE"}),!dt(y)&&e.jsx("button",{onClick:()=>x(!1),className:"text-theme-muted 
+hover:text-theme-text text-[10px] p-2 -m-2",children:"[CLOSE]"})]}),e.jsx("p",{className:"text-[9px] uppercase 
+tracking-wide text-theme-muted leading-relaxed",children:"Choose a username and display name for the CREG Contribution 
+Arena. This is your on-chain identity — visible on leaderboards and findings."}),e.jsxs("div",{className:"flex 
+flex-col gap-1.5",children:[e.jsx("label",{className:"text-[8px] uppercase tracking-widest text-theme-muted 
+font-bold",children:"Username"}),e.jsx("input",{type:"text",value:b,onChange:v=>{const 
+w=v.target.value.replace(/[^a-zA-Z0-9_]/g,"").slice(0,24);h(w),R(null)},placeholder:"e.g. 
+crypto_auditor",className:"bg-theme-card border border-theme-border text-theme-text px-3 py-3 sm:py-2 text-base 
+sm:text-xs font-mono uppercase tracking-wide placeholder:text-theme-muted/50 focus:outline-none 
+focus:border-theme-accent 
+transition-colors",maxLength:24,autoFocus:!0,autoComplete:"username"}),e.jsx("span",{className:"text-[7px] 
+text-theme-muted",children:"3–24 CHARS • A-Z, 0-9, UNDERSCORES ONLY"})]}),e.jsxs("div",{className:"flex flex-col 
+gap-1.5",children:[e.jsx("label",{className:"text-[8px] uppercase tracking-widest text-theme-muted 
+font-bold",children:"Display 
+Name"}),e.jsx("input",{type:"text",value:u,onChange:v=>{g(v.target.value.slice(0,48)),R(null)},placeholder:"e.g. Alex 
+Chen",className:"bg-theme-card border border-theme-border text-theme-text px-3 py-3 sm:py-2 text-base sm:text-xs 
+font-mono placeholder:text-theme-muted/50 focus:outline-none focus:border-theme-accent 
+transition-colors",maxLength:48,autoComplete:"nickname"}),e.jsx("span",{className:"text-[7px] 
+text-theme-muted",children:"YOUR PUBLIC DISPLAY NAME • MAX 48 CHARS"})]}),f&&e.jsxs("div",{className:"text-[8px] 
+text-red-400 border border-red-400/30 bg-red-400/5 p-2 uppercase tracking-wide font-bold",children:["⚠ 
+",f]}),e.jsx("button",{disabled:C,onClick:()=>{(async()=>{const v=b.trim(),w=u.trim();if(v.length<3){R("Username must 
+be at least 3 characters.");return}if(!/^[a-zA-Z0-9_]+$/.test(v)){R("Username can only contain letters, numbers, and 
+underscores.");return}if(w.length<1){R("Display name is 
+required.");return}if(!ne.firebaseBackend){I(O=>({...O,username:v,displayName:w,profileComplete:!0})),x(!1),D(`Profile 
+identity set: ${v}`);return}G(!0),R(null);try{const O=await Os({username:v,displayName:w});I(B=>({...B,username:O.usern
+ame,displayName:O.displayName,profileComplete:O.profileComplete,walletAddress:O.walletAddress??B.walletAddress,reputati
+on:O.reputation,xp:O.xp,badges:O.badges,completedMissions:O.completedMissions,level:Math.max(1,Math.floor(O.xp/300)+1)}
+)),x(!1),D(`Profile saved: ${O.username}`)}catch(O){const B=String((O==null?void 0:O.code)||""),J=String((O==null?void 
+0:O.message)||"");B.includes("already-exists")?R("That username is already taken. Try 
+another."):B.includes("invalid-argument")?R(J||"Choose a custom username and display 
+name."):B.includes("unauthenticated")?R("Sign in with your wallet before saving your profile."):R("Could not save 
+profile. Please try again.")}finally{G(!1)}})()},className:"w-full py-3 sm:py-2.5 bg-theme-accent 
+text-theme-accent-text font-bold uppercase tracking-widest text-[10px] border border-theme-accent hover:opacity-90 
+transition-opacity cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed",children:C?"SAVING...":"CONFIRM 
+IDENTITY"}),!dt(y)&&e.jsx("button",{onClick:()=>x(!1),className:"w-full py-2 text-center text-[8px] uppercase 
+tracking-wider text-theme-muted hover:text-theme-text border border-transparent hover:border-theme-border",children:"Ca
+ncel"})]})})]})}xa.createRoot(document.getElementById("root")).render(e.jsx(d.StrictMode,{children:e.jsx(_n,{})}));expo
+rt{la as _};
+

@@ -206,6 +206,19 @@ impl PendingPool {
         self.entries.get(canonical)
     }
 
+    /// Return the Ed25519 publisher key that currently controls a package
+    /// namespace in the pending pool, if any.  Namespace ownership is a
+    /// package-level property, not a per-version race; admission uses this
+    /// helper before accepting a first version that has not reached the
+    /// canonical chain yet.
+    pub fn publisher_for_prefix(&self, prefix: &str) -> Option<String> {
+        self.entries
+            .values()
+            .filter(|entry| entry.request.id.canonical().starts_with(prefix))
+            .map(|entry| entry.request.publisher_pubkey.clone())
+            .find(|publisher| !publisher.trim().is_empty())
+    }
+
     /// Remove a package from the pool (after it's been verified or rejected).
     pub fn remove(&mut self, canonical: &str) -> Option<PendingEntry> {
         let removed = self.entries.remove(canonical);
@@ -280,6 +293,7 @@ mod tests {
             threshold: 0,
             publisher_pubkeys: vec![],
             signatures: vec![],
+            ..Default::default()
         }
     }
 

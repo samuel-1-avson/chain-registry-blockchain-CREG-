@@ -1,4 +1,9 @@
-use alloy::{primitives::Address, providers::ProviderBuilder, sol};
+use alloy::{
+    primitives::{keccak256, Address},
+    providers::ProviderBuilder,
+    sol,
+};
+use anyhow::Context;
 use common::{PackageStatus, PublishRequest};
 
 use crate::SharedState;
@@ -46,6 +51,7 @@ pub enum AdmissionError {
     AlreadyVerified(String),
     Revoked(String),
     AlreadyPending(String),
+    NamespaceOwned(String),
     Storage(String),
     ShieldedPublishDisabled(String),
 }
@@ -58,6 +64,7 @@ impl std::fmt::Display for AdmissionError {
             | Self::AlreadyVerified(message)
             | Self::Revoked(message)
             | Self::AlreadyPending(message)
+            | Self::NamespaceOwned(message)
             | Self::Storage(message)
             | Self::ShieldedPublishDisabled(message) => write!(f, "{}", message),
             Self::Publisher(error) => write!(f, "{}", error),
@@ -137,7 +144,10 @@ pub fn compute_analysis_committee_at_admission(
             .then_with(|| b.3.cmp(&a.3))
     });
 
-    // Apply per-eth cap (max 4 per eth_address to prevent concentration)
+    // Apply per-eth cap (max 4 per eth_address to prevent concentration) to
+    // the ranked order, but retain the complete ranked tail.  The first 100
+    // members are the primary committee; later members are deterministic
+    // expansion candidates when the primary committee has dropouts.
     const MAX_PER_ETH: u32 = 4;
     let mut members: Vec<String> = vec![];
     let mut eth_count: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
@@ -146,17 +156,15 @@ pub fn compute_analysis_committee_at_admission(
         if *count < MAX_PER_ETH {
             members.push(id.clone());
             *count += 1;
-            if members.len() >= 100 { break; }
         }
     }
 
-    // If not enough after cap, take more without cap (or fall back)
-    if members.len() < 100 {
-        for (_w, _stake, _rep, _perf, id, _eth) in scored.iter().skip(members.len()) {
-            if !members.contains(id) {
-                members.push(id.clone());
-                if members.len() >= 100 { break; }
-            }
+    // If the control-domain cap excluded too many validators, append the
+    // remaining identities in the same deterministic order.  This is bounded
+    // only by the validator-set size and gives expansion a real candidate set.
+    for (_w, _stake, _rep, _perf, id, _eth) in &scored {
+        if !members.contains(id) {
+            members.push(id.clone());
         }
     }
 
@@ -165,8 +173,6 @@ pub fn compute_analysis_committee_at_admission(
     } else {
         100u32.min(members.len() as u32)
     };
-    members.truncate(target_m as usize);
-
     common::AnalysisCommittee {
         size: target_m,
         members,
@@ -269,6 +275,7 @@ pub async fn admit_publish_request(
     }
 
     let canonical = request.id.canonical();
+    let namespace_prefix = format!("{}:{}@", request.id.ecosystem, request.id.name);
     let ipfs_url = {
         let state = state.read().await;
         match state.chain.get_package(&canonical) {
@@ -294,6 +301,23 @@ pub async fn admit_publish_request(
                 return Err(AdmissionError::AlreadyPending(format!(
                     "{} is already pending with the same content hash",
                     canonical
+                )));
+            }
+        }
+
+        // CR-07: the first accepted version establishes a namespace
+        // controller.  A different publisher key may rotate only through the
+        // explicit, authenticated key-rotation flow; it may not claim a later
+        // version by simply presenting a staked EVM address.
+        let chain_owner = state.chain.publisher_for_prefix(&namespace_prefix);
+        let pending_owner = state.pending_pool.publisher_for_prefix(&namespace_prefix);
+        let owner = chain_owner.or(pending_owner);
+        if let Some(owner) = owner {
+            let requested = request.publisher_pubkey.trim();
+            if !requested.is_empty() && owner != requested {
+                return Err(AdmissionError::NamespaceOwned(format!(
+                    "{} is controlled by another publisher; use the signed namespace transfer or key-rotation flow",
+                    namespace_prefix.trim_end_matches('@')
                 )));
             }
         }
@@ -359,6 +383,32 @@ pub async fn verify_publish_auth(
     validate_package_id(request)?;
     verify_publish_sig(request)
         .map_err(|error| AdmissionError::InvalidPublisherSignature(error.to_string()))?;
+
+    let require_dual = std::env::var("CREG_REQUIRE_PUBLISHER_DUAL_PROOF")
+        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+        .unwrap_or_else(|_| {
+            std::env::var("CREG_PRODUCTION")
+                .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+                .unwrap_or(false)
+        });
+
+    if request.publisher_evm_signature.trim().is_empty() {
+        if require_dual {
+            return Err(AdmissionError::InvalidPublisherSignature(
+                "Publisher EVM signature is required; legacy Ed25519-only admission is disabled"
+                    .into(),
+            ));
+        }
+        tracing::warn!(
+            canonical = %request.id.canonical(),
+            "Accepting legacy publisher proof in non-production compatibility mode"
+        );
+    } else {
+        verify_publisher_dual_proof(state, request)
+            .await
+            .map_err(|error| AdmissionError::InvalidPublisherSignature(error.to_string()))?;
+    }
+
     ensure_publisher_staked(state, &request.publisher_address)
         .await
         .map_err(AdmissionError::Publisher)
@@ -383,7 +433,7 @@ pub(crate) fn verify_publish_sig(req: &PublishRequest) -> anyhow::Result<()> {
         anyhow::bail!("Publisher EVM address is required for runtime admission");
     }
 
-    let msg = common::publish_signature_message(&req.id, &req.content_hash, &req.publisher_address);
+    let msg = publisher_signature_message(req)?;
 
     // Single-signature fallback.
     if req.publisher_pubkeys.is_empty() {
@@ -410,7 +460,12 @@ pub(crate) fn verify_publish_sig(req: &PublishRequest) -> anyhow::Result<()> {
     }
 
     let mut valid = 0usize;
+    let mut seen_pubkeys = std::collections::HashSet::new();
     for (pubkey_hex, sig_hex) in req.publisher_pubkeys.iter().zip(req.signatures.iter()) {
+        let normalized_pubkey = pubkey_hex.trim().to_ascii_lowercase();
+        if !seen_pubkeys.insert(normalized_pubkey) {
+            continue;
+        }
         let pk_bytes = match hex::decode(pubkey_hex) {
             Ok(b) => b,
             Err(_) => continue,
@@ -442,6 +497,130 @@ pub(crate) fn verify_publish_sig(req: &PublishRequest) -> anyhow::Result<()> {
             threshold
         )
     }
+}
+
+fn publisher_signature_message(req: &PublishRequest) -> anyhow::Result<String> {
+    if !req.publisher_nonce.trim().is_empty()
+        && req.publisher_expires_at > 0
+        && !req.manifest_hash.trim().is_empty()
+        && !req.publisher_chain_id.trim().is_empty()
+        && !req.publisher_staking_contract.trim().is_empty()
+    {
+        return Ok(common::publish_signature_message_v2(
+            &req.publisher_chain_id,
+            &req.publisher_staking_contract,
+            &req.id,
+            &req.content_hash,
+            &req.source_hash,
+            &req.manifest_hash,
+            &req.publisher_pubkey,
+            &req.publisher_address,
+            &req.ownership_claim,
+            &req.publisher_nonce,
+            req.submitted_at.timestamp(),
+            req.publisher_expires_at,
+        ));
+    }
+
+    Ok(common::publish_signature_message(
+        &req.id,
+        &req.content_hash,
+        &req.publisher_address,
+    ))
+}
+
+async fn verify_publisher_dual_proof(
+    state: &SharedState,
+    request: &PublishRequest,
+) -> anyhow::Result<()> {
+    let (chain_id, staking_contract) = {
+        let state = state.read().await;
+        (state.config.chain_id.clone(), state.config.staking_addr.clone())
+    };
+    if chain_id.trim().is_empty() || staking_contract.trim().is_empty() {
+        anyhow::bail!(
+            "Publisher dual-key proof cannot be verified without CREG_CHAIN_ID and CREG_STAKING_ADDR"
+        );
+    }
+    if request.publisher_chain_id != chain_id {
+        anyhow::bail!("Publisher proof chain ID does not match this node");
+    }
+    if common::canonical_publisher_address(&request.publisher_staking_contract)
+        != common::canonical_publisher_address(&staking_contract)
+    {
+        anyhow::bail!("Publisher proof staking contract does not match this node");
+    }
+    if request.publisher_nonce.trim().is_empty() {
+        anyhow::bail!("Publisher proof nonce is required");
+    }
+    let now = chrono::Utc::now().timestamp();
+    let issued_at = request.submitted_at.timestamp();
+    if issued_at > now.saturating_add(300) {
+        anyhow::bail!("Publisher proof issued-at time is too far in the future");
+    }
+    if request.publisher_expires_at <= now as u64 {
+        anyhow::bail!("Publisher proof has expired");
+    }
+    if request.publisher_expires_at > now.saturating_add(86_400) as u64 {
+        anyhow::bail!("Publisher proof expiry exceeds the 24-hour maximum");
+    }
+    let expected_claim = format!("{}:{}", request.id.ecosystem, request.id.name);
+    if request.ownership_claim != expected_claim {
+        anyhow::bail!("Publisher ownership claim does not match the package namespace");
+    }
+    let expected_manifest_hash = common::sha256_hex(
+        &serde_json::to_vec(&request.manifest).context("Failed to serialize package manifest")?,
+    );
+    if !request
+        .manifest_hash
+        .eq_ignore_ascii_case(&expected_manifest_hash)
+    {
+        anyhow::bail!("Publisher proof manifest digest does not match the submitted manifest");
+    }
+    let message = publisher_signature_message(request)?;
+    let recovered = recover_evm_personal_signer(&message, &request.publisher_evm_signature)?;
+    if recovered != common::canonical_publisher_address(&request.publisher_address) {
+        anyhow::bail!(
+            "EVM signature recovered {}, expected {}",
+            recovered,
+            common::canonical_publisher_address(&request.publisher_address)
+        );
+    }
+    Ok(())
+}
+
+fn recover_evm_personal_signer(message: &str, signature_hex: &str) -> anyhow::Result<String> {
+    use k256::ecdsa::{RecoveryId, Signature as K256Signature, VerifyingKey};
+
+    let normalized = signature_hex.trim().trim_start_matches("0x");
+    let bytes = hex::decode(normalized).context("EVM signature must be valid hex")?;
+    if bytes.len() != 65 {
+        anyhow::bail!("EVM signature must be 65 bytes");
+    }
+    let recovery = match bytes[64] {
+        0 | 1 => bytes[64],
+        27 | 28 => bytes[64] - 27,
+        other => anyhow::bail!("Unsupported EVM signature recovery id {}", other),
+    };
+    let recovery_id = RecoveryId::from_byte(recovery)
+        .ok_or_else(|| anyhow::anyhow!("Invalid EVM signature recovery id"))?;
+    let signature = K256Signature::try_from(&bytes[..64])
+        .context("Invalid EVM signature r/s values")?;
+    let prefix = format!("\x19Ethereum Signed Message:\n{}", message.as_bytes().len());
+    let mut payload = prefix.into_bytes();
+    payload.extend_from_slice(message.as_bytes());
+    let digest = keccak256(payload);
+    let verifying_key = VerifyingKey::recover_from_prehash(
+        digest.as_slice(),
+        &signature,
+        recovery_id,
+    )
+    .context("Failed to recover EVM signer")?;
+    let encoded = verifying_key.to_encoded_point(false);
+    let hash = keccak256(&encoded.as_bytes()[1..]);
+    Ok(Address::from_slice(&hash.as_slice()[12..])
+        .to_string()
+        .to_ascii_lowercase())
 }
 
 fn parse_publisher_address(publisher_address: &str) -> Result<Address, PublisherAdmissionError> {
@@ -910,6 +1089,41 @@ rule TestMaliciousPayload {{
         let c1 = compute_analysis_committee_at_admission(&vs, "npm:t@1", "h1", "tip1".into(), None);
         let c2 = compute_analysis_committee_at_admission(&vs, "npm:t@1", "h1", "tip1".into(), Some("vrf123".into()));
         assert_ne!(c1.seed, c2.seed, "VRF seed should change the selection seed");
+    }
+
+    #[test]
+    fn committee_selection_has_reachable_primary_and_expansion_members_at_scale() {
+        let validators = (0..10_000)
+            .map(|index| common::Validator {
+                id: format!("validator-{index}"),
+                alias: format!("validator-{index}"),
+                pubkey: format!("pubkey-{index}"),
+                eth_address: format!("0x{:040x}", index + 1),
+                stake: 100,
+                reputation: 100,
+                status: "active".into(),
+                performance_score: 500,
+                contribution_count: 0,
+            })
+            .collect();
+        let validator_set = common::ValidatorSet::new(validators);
+        let committee = compute_analysis_committee_at_admission(
+            &validator_set,
+            "npm:scale@1.0.0",
+            "content-hash",
+            "epoch-tip".into(),
+            None,
+        );
+        assert_eq!(committee.size, 100);
+        assert_eq!(committee.effective_size, 100);
+        assert_eq!(committee.members.len(), 10_000);
+        assert_eq!(
+            committee.members[..100]
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len(),
+            100
+        );
     }
 
     fn shielded_signed_request(

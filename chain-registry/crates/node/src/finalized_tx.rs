@@ -14,8 +14,9 @@ use tokio::sync::{mpsc, Mutex};
 /// At 5-second block intervals with ~100 tx/block this is comfortable.
 const CHANNEL_CAPACITY: usize = 512;
 
-/// In-memory buffer cap for finalized transactions awaiting block production.
-/// Txs are never dropped on a failed proposer gate; only this cap evicts.
+/// Backpressure threshold for finalized transactions awaiting block
+/// production. It is not a lossy capacity: the receiver stops draining when
+/// the threshold is reached and the channel applies backpressure.
 pub const PENDING_BLOCK_TX_BUFFER_CAP: usize = 1000;
 
 static PENDING_BUFFER_DEPTH: AtomicUsize = AtomicUsize::new(0);
@@ -47,20 +48,13 @@ pub fn channel() -> (FinalizedTxSender, FinalizedTxReceiver) {
     (tx, Arc::new(Mutex::new(rx)))
 }
 
-/// Non-blocking recv from the channel into `buffer`, respecting [`PENDING_BLOCK_TX_BUFFER_CAP`].
+/// Non-blocking recv from the channel into `buffer`, respecting the
+/// backpressure threshold without dropping an already-finalized transaction.
 pub async fn recv_into_buffer(rx: &FinalizedTxReceiver, buffer: &mut Vec<Transaction>) {
     let mut guard = rx.lock().await;
-    loop {
+    while buffer.len() < PENDING_BLOCK_TX_BUFFER_CAP {
         match guard.try_recv() {
             Ok(tx) => {
-                if buffer.len() >= PENDING_BLOCK_TX_BUFFER_CAP {
-                    tracing::warn!(
-                        pending = buffer.len(),
-                        cap = PENDING_BLOCK_TX_BUFFER_CAP,
-                        "Pending block tx buffer at cap; dropping finalized transaction"
-                    );
-                    continue;
-                }
                 buffer.push(tx);
             }
             Err(mpsc::error::TryRecvError::Empty) => break,
@@ -78,13 +72,11 @@ pub fn requeue_front(buffer: &mut Vec<Transaction>, txs: Vec<Transaction>) {
     let mut merged = txs;
     merged.append(buffer);
     if merged.len() > PENDING_BLOCK_TX_BUFFER_CAP {
-        let dropped = merged.len() - PENDING_BLOCK_TX_BUFFER_CAP;
         tracing::warn!(
-            dropped,
+            pending = merged.len(),
             cap = PENDING_BLOCK_TX_BUFFER_CAP,
-            "Pending block tx buffer overflow on requeue; dropping oldest transactions"
+            "Pending block tx buffer above backpressure threshold; retaining all finalized transactions"
         );
-        merged.drain(..dropped);
     }
     *buffer = merged;
     set_pending_buffer_depth(buffer.len());

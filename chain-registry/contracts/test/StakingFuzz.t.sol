@@ -83,6 +83,31 @@ contract StakingFuzzTest is Test {
         staking.stakeAsPublisher(amount);
     }
 
+    function test_publisherLiabilityBlocksWithdrawalUntilMatured() public {
+        address publisher = makeAddr("liability-publisher");
+        uint256 stake = 2 * staking.minPublisherStake();
+        _fundAndApprove(publisher, stake);
+        vm.prank(publisher);
+        staking.stakeAsPublisher(stake);
+
+        bytes32 packageKey = keccak256("npm:liability@1.0.0");
+        vm.prank(address(0xBEEF));
+        staking.reservePublisherLiability(packageKey, publisher, staking.minPublisherStake());
+
+        vm.prank(publisher);
+        vm.expectRevert(Staking.PublisherLiabilityLocked.selector);
+        staking.unstakeAsPublisher(stake);
+
+        vm.prank(address(0xBEEF));
+        staking.markPackageFinalized(packageKey);
+        vm.warp(block.timestamp + staking.PUBLISHER_LIABILITY_PERIOD() + 1);
+        staking.releaseMaturedPublisherLiability(packageKey);
+
+        vm.prank(publisher);
+        staking.unstakeAsPublisher(stake);
+        assertEq(staking.stakedBalance(publisher), 0);
+    }
+
     // ── Fuzz: Validator stake ─────────────────────────────────────────────────
 
     function testFuzz_ValidatorStakeApplyAndApprove(uint96 amount) public {

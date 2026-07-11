@@ -1,0 +1,1670 @@
+Using Node v22.23.0
+Arena runtime active: Node v22.23.0
+
+> creg-contribution-arena@0.0.0 test
+> tsx --test tests/policy.test.ts tests/content.test.ts tests/simulator.test.ts tests/firestore.indexes.test.ts tests/functions.pipeline.test.ts tests/profileSetup.test.ts
+
+TAP version 13
+# Subtest: technical summaries avoid absolute solved or guaranteed safety claims
+ok 1 - technical summaries avoid absolute solved or guaranteed safety claims
+  ---
+  duration_ms: 1.6864
+  type: 'test'
+  ...
+# Subtest: live-service claims are labeled as snapshots rather than monitoring
+ok 2 - live-service claims are labeled as snapshots rather than monitoring
+  ---
+  duration_ms: 0.3882
+  type: 'test'
+  ...
+# Subtest: whitepaper manifest tracks latest canonical docs from chain-registry
+ok 3 - whitepaper manifest tracks latest canonical docs from chain-registry
+  ---
+  duration_ms: 1.3873
+  type: 'test'
+  ...
+# Subtest: whitepaper library UI prefers PDF downloads over raw markdown
+ok 4 - whitepaper library UI prefers PDF downloads over raw markdown
+  ---
+  duration_ms: 0.892
+  type: 'test'
+  ...
+# Subtest: protocol docs reader serves deployed canonical markdown before Firestore
+ok 5 - protocol docs reader serves deployed canonical markdown before Firestore
+  ---
+  duration_ms: 1.2788
+  type: 'test'
+  ...
+# Subtest: project info center focuses on workflow learning surfaces
+ok 6 - project info center focuses on workflow learning surfaces
+  ---
+  duration_ms: 0.4709
+  type: 'test'
+  ...
+# Subtest: README clearly labels the bounded production-alpha state
+ok 7 - README clearly labels the bounded production-alpha state
+  ---
+  duration_ms: 0.4395
+  type: 'test'
+  ...
+# Subtest: production alpha avoids third-party font requests and accurately labels active features
+ok 8 - production alpha avoids third-party font requests and accurately labels active features
+  ---
+  duration_ms: 0.4196
+  type: 'test'
+  ...
+# Subtest: security-sensitive forms link to private GitHub advisories
+ok 9 - security-sensitive forms link to private GitHub advisories
+  ---
+  duration_ms: 2.3433
+  type: 'test'
+  ...
+# Subtest: production UI contains no simulated contributors, findings, rewards, or quizzes
+ok 10 - production UI contains no simulated contributors, findings, rewards, or quizzes
+  ---
+  duration_ms: 1.3282
+  type: 'test'
+  ...
+# Subtest: runtime container drops root privileges
+ok 11 - runtime container drops root privileges
+  ---
+  duration_ms: 0.1457
+  type: 'test'
+  ...
+# Subtest: wallet gateway explains signature safety without claiming inactive systems
+ok 12 - wallet gateway explains signature safety without claiming inactive systems
+  ---
+  duration_ms: 0.2254
+  type: 'test'
+  ...
+# Subtest: wallet identity does not force a chain change before ownership verification
+ok 13 - wallet identity does not force a chain change before ownership verification
+  ---
+  duration_ms: 0.1152
+  type: 'test'
+  ...
+# Subtest: wallet gateway exposes WalletConnect for mobile browsers without extensions
+ok 14 - wallet gateway exposes WalletConnect for mobile browsers without extensions
+  ---
+  duration_ms: 0.731
+  type: 'test'
+  ...
+# Subtest: wallet challenge permits only the fixed local preview ports
+ok 15 - wallet challenge permits only the fixed local preview ports
+  ---
+  duration_ms: 0.153
+  type: 'test'
+  ...
+# Subtest: firestore.indexes.json defines composite indexes for every multi-field Arena query
+ok 16 - firestore.indexes.json defines composite indexes for every multi-field Arena query
+  ---
+  duration_ms: 2.8397
+  type: 'test'
+  ...
+# Subtest: review transitions keep rejected findings terminal until appeal handler reopens them
+ok 17 - review transitions keep rejected findings terminal until appeal handler reopens them
+  ---
+  duration_ms: 2.6921
+  type: 'test'
+  ...
+# Subtest: public finding categories exclude direct security vulnerability intake
+ok 18 - public finding categories exclude direct security vulnerability intake
+  ---
+  duration_ms: 0.1428
+  type: 'test'
+  ...
+# Subtest: callable exports include appeals and glossary moderation endpoints
+ok 19 - callable exports include appeals and glossary moderation endpoints
+  ---
+  duration_ms: 5.4471
+  type: 'test'
+  ...
+# Subtest: firestore rules deny direct client access to appeals collection
+ok 20 - firestore rules deny direct client access to appeals collection
+  ---
+  duration_ms: 0.8015
+  type: 'test'
+  ...
+# Subtest: review workflow only permits explicit forward transitions
+ok 21 - review workflow only permits explicit forward transitions
+  ---
+  duration_ms: 3.228
+  type: 'test'
+  ...
+# Subtest: text validation trims values and enforces bounds
+ok 22 - text validation trims values and enforces bounds
+  ---
+  duration_ms: 0.3952
+  type: 'test'
+  ...
+# Subtest: reward normalization prevents negative and excessive awards
+ok 23 - reward normalization prevents negative and excessive awards
+  ---
+  duration_ms: 0.1014
+  type: 'test'
+  ...
+# Subtest: rubric totals are derived from bounded criterion scores
+ok 24 - rubric totals are derived from bounded criterion scores
+  ---
+  duration_ms: 0.1732
+  type: 'test'
+  ...
+# Subtest: session signatures are deterministic and compared safely
+ok 25 - session signatures are deterministic and compared safely
+  ---
+  duration_ms: 0.4092
+  type: 'test'
+  ...
+# Subtest: standalone contribution writes fail closed in production
+ok 26 - standalone contribution writes fail closed in production
+  ---
+  duration_ms: 0.0965
+  type: 'test'
+  ...
+# Subtest: AI guide requires both explicit enablement and a server credential
+ok 27 - AI guide requires both explicit enablement and a server credential
+  ---
+  duration_ms: 0.0835
+  type: 'test'
+  ...
+# Subtest: computeLineDiff identifies added, removed, and unchanged lines
+ok 28 - computeLineDiff identifies added, removed, and unchanged lines
+  ---
+  duration_ms: 0.6647
+  type: 'test'
+  ...
+# Subtest: obfuscateDisplayName hides name segments to protect user privacy
+ok 29 - obfuscateDisplayName hides name segments to protect user privacy
+  ---
+  duration_ms: 0.2293
+  type: 'test'
+  ...
+# Subtest: parseGateStatus correctly parses markdown table row elements
+ok 30 - parseGateStatus correctly parses markdown table row elements
+  ---
+  duration_ms: 0.3691
+  type: 'test'
+  ...
+# Subtest: parseLimitations correctly extracts track metadata, goals, and work items
+ok 31 - parseLimitations correctly extracts track metadata, goals, and work items
+  ---
+  duration_ms: 0.408
+  type: 'test'
+  ...
+# Subtest: calculateAdminRubricScore computes total score from 1-10 inputs with correct weighting
+ok 32 - calculateAdminRubricScore computes total score from 1-10 inputs with correct weighting
+  ---
+  duration_ms: 0.1476
+  type: 'test'
+  ...
+# Subtest: obfuscateWalletAddress sanitizes wallet address to protect privacy
+ok 33 - obfuscateWalletAddress sanitizes wallet address to protect privacy
+  ---
+  duration_ms: 0.1011
+  type: 'test'
+  ...
+# Subtest: placeholder helpers detect default Arena identities
+ok 34 - placeholder helpers detect default Arena identities
+  ---
+  duration_ms: 0.9932
+  type: 'test'
+  ...
+# Subtest: needsProfileSetup respects profileComplete
+ok 35 - needsProfileSetup respects profileComplete
+  ---
+  duration_ms: 0.1581
+  type: 'test'
+  ...
+# Subtest: profileEditorDefaults clears placeholder values
+ok 36 - profileEditorDefaults clears placeholder values
+  ---
+  duration_ms: 0.8281
+  type: 'test'
+  ...
+# Subtest: scenario: happy path publish to verified with rewards
+ok 37 - scenario: happy path publish to verified with rewards
+  ---
+  duration_ms: 16.1055
+  type: 'test'
+  ...
+# Subtest: scenario: low-stake publisher stays revoked with zero rewards
+ok 38 - scenario: low-stake publisher stays revoked with zero rewards
+  ---
+  duration_ms: 0.2556
+  type: 'test'
+  ...
+# Subtest: scenario: quorum failure revokes package without rewards
+ok 39 - scenario: quorum failure revokes package without rewards
+  ---
+  duration_ms: 0.2872
+  type: 'test'
+  ...
+# Subtest: simulator constants align with CREG_SYSTEM_WORKFLOW §9.12
+ok 40 - simulator constants align with CREG_SYSTEM_WORKFLOW §9.12
+  ---
+  duration_ms: 0.0968
+  type: 'test'
+  ...
+# Subtest: points formula matches mandatory 25 base with correct vote and rep scaling
+ok 41 - points formula matches mandatory 25 base with correct vote and rep scaling
+  ---
+  duration_ms: 0.0951
+  type: 'test'
+  ...
+# Subtest: voluntary low-rep correct vote yields smaller points than mandatory
+ok 42 - voluntary low-rep correct vote yields smaller points than mandatory
+  ---
+  duration_ms: 0.0826
+  type: 'test'
+  ...
+# Subtest: work reward for mandatory correct rep=80 matches workflow example band
+ok 43 - work reward for mandatory correct rep=80 matches workflow example band
+  ---
+  duration_ms: 0.209
+  type: 'test'
+  ...
+# Subtest: committee seed uses canonical + content_hash + vrf_or_tip per §9.11
+ok 44 - committee seed uses canonical + content_hash + vrf_or_tip per §9.11
+  ---
+  duration_ms: 1.2587
+  type: 'test'
+  ...
+# Subtest: committee selection enforces per-eth cap on first pass then relaxes to target M
+ok 45 - committee selection enforces per-eth cap on first pass then relaxes to target M
+  ---
+  duration_ms: 2.0359
+  type: 'test'
+  ...
+# Subtest: small validator sets need no relaxation and respect per-eth cap
+ok 46 - small validator sets need no relaxation and respect per-eth cap
+  ---
+  duration_ms: 0.3883
+  type: 'test'
+  ...
+# Subtest: publisher_submit enforces minimum stake before admission
+ok 47 - publisher_submit enforces minimum stake before admission
+  ---
+  duration_ms: 0.1572
+  type: 'test'
+  ...
+# Subtest: valid publisher_submit enters pending state
+ok 48 - valid publisher_submit enters pending state
+  ---
+  duration_ms: 0.0936
+  type: 'test'
+  ...
+# Subtest: quorum required follows floor(2M/3)+1
+ok 49 - quorum required follows floor(2M/3)+1
+  ---
+  duration_ms: 0.0558
+  type: 'test'
+  ...
+# Subtest: simulator module is isolated from arena reward and firebase paths
+ok 50 - simulator module is isolated from arena reward and firebase paths
+  ---
+  duration_ms: 0.9358
+  type: 'test'
+  ...
+# Subtest: admission gate failures revoke before committee selection
+ok 51 - admission gate failures revoke before committee selection
+  ---
+  duration_ms: 0.2767
+  type: 'test'
+  ...
+# Subtest: yara-admission-block preset revokes with zero rewards
+ok 52 - yara-admission-block preset revokes with zero rewards
+  ---
+  duration_ms: 0.1062
+  type: 'test'
+  ...
+# Subtest: inputsFromPreset preserves admission gate and stake for UI preset load
+ok 53 - inputsFromPreset preserves admission gate and stake for UI preset load
+  ---
+  duration_ms: 0.1593
+  type: 'test'
+  ...
+# Subtest: UI integrated path: initStateFromPreset + advanceOneStep revokes yara preset
+ok 54 - UI integrated path: initStateFromPreset + advanceOneStep revokes yara preset
+  ---
+  duration_ms: 0.2251
+  type: 'test'
+  ...
+# Subtest: runPresetToCompletion matches UI step-all path for yara-admission-block
+ok 55 - runPresetToCompletion matches UI step-all path for yara-admission-block
+  ---
+  duration_ms: 0.1195
+  type: 'test'
+  ...
+# Subtest: createSimulatorFromPreset + selectCommittee engine path for cap-relax-demo
+ok 56 - createSimulatorFromPreset + selectCommittee engine path for cap-relax-demo
+  ---
+  duration_ms: 0.4445
+  type: 'test'
+  ...
+# Subtest: cap-relax-demo preset fills M=100 with whale slots above cap
+ok 57 - cap-relax-demo preset fills M=100 with whale slots above cap
+  ---
+  duration_ms: 1.2393
+  type: 'test'
+  ...
+# Subtest: happy path uses split PBFT step ids package_quorum and block_pbft_finalize
+ok 58 - happy path uses split PBFT step ids package_quorum and block_pbft_finalize
+  ---
+  duration_ms: 0.1757
+  type: 'test'
+  ...
+# Subtest: pipeline sub-step failure revokes with partial stages and skips quorum
+ok 59 - pipeline sub-step failure revokes with partial stages and skips quorum
+  ---
+  duration_ms: 0.7314
+  type: 'test'
+  ...
+# Subtest: pipeline-sandbox-fail preset revokes via public API without quorum or PBFT
+ok 60 - pipeline-sandbox-fail preset revokes via public API without quorum or PBFT
+  ---
+  duration_ms: 0.1431
+  type: 'test'
+  ...
+# Subtest: scenario library presets cover happy path, quorum fail, low stake, whale cap, phase-1 gates, and pipeline failure
+ok 61 - scenario library presets cover happy path, quorum fail, low stake, whale cap, phase-1 gates, and pipeline failure
+  ---
+  duration_ms: 1.3926
+  type: 'test'
+  ...
+# Subtest: deep link helpers parse and build sim preset URLs
+ok 62 - deep link helpers parse and build sim preset URLs
+  ---
+  duration_ms: 0.274
+  type: 'test'
+  ...
+# Subtest: tokenomics estimates stay negligible vs 42M cap at 50k packages/day
+ok 63 - tokenomics estimates stay negligible vs 42M cap at 50k packages/day
+  ---
+  duration_ms: 0.1807
+  type: 'test'
+  ...
+# Subtest: committeeTargetM scenario selects full M after cap relaxation on large sets
+ok 64 - committeeTargetM scenario selects full M after cap relaxation on large sets
+  ---
+  duration_ms: 0.5249
+  type: 'test'
+  ...
+# Subtest: resolveVrfOrTip supports manual override and simulated tip mode
+ok 65 - resolveVrfOrTip supports manual override and simulated tip mode
+  ---
+  duration_ms: 0.12
+  type: 'test'
+  ...
+# Subtest: happy path records pipeline stages and event details
+ok 66 - happy path records pipeline stages and event details
+  ---
+  duration_ms: 0.1983
+  type: 'test'
+  ...
+# Subtest: step guide covers all workflow steps with checkpoints
+ok 67 - step guide covers all workflow steps with checkpoints
+  ---
+  duration_ms: 0.1386
+  type: 'test'
+  ...
+# Subtest: simulator UI exposes learn panel and flow diagram hooks
+not ok 68 - simulator UI exposes learn panel and flow diagram hooks
+  ---
+  duration_ms: 4.5874
+  type: 'test'
+  location: 'F:\\project\\chain-registry\\CREG-Contribution-Arena\\tests\\simulator.test.ts:1:17147'
+  failureType: 'testCodeFailure'
+  error: |-
+    The input did not match the regular expression /package_quorum|Package vote quorum/. Input:
+    
+    "import { useCallback, useEffect, useMemo, useState } from 'react';\r\n" +
+      'import {\r\n' +
+      '  Play,\r\n' +
+      '  RotateCcw,\r\n' +
+      '  SkipForward,\r\n' +
+      '  ChevronRight,\r\n' +
+      '  Coins,\r\n' +
+      '  Users,\r\n' +
+      '  Shield,\r\n' +
+      '  GitBranch,\r\n' +
+      '  AlertCircle,\r\n' +
+      '  BookOpen,\r\n' +
+      '  SlidersHorizontal,\r\n' +
+      '  Link2,\r\n' +
+      '  BarChart3,\r\n' +
+      '  Copy,\r\n' +
+      '  Check,\r\n' +
+      '  GraduationCap,\r\n' +
+      '  Vote,\r\n' +
+      '  Package,\r\n' +
+      '  HelpCircle,\r\n' +
+      '  Columns2,\r\n' +
+      "} from 'lucide-react';\r\n" +
+      "import SimulatorFlowDiagram from './simulator/SimulatorFlowDiagram';\r\n" +
+      "import SimulatorLearnPanel from './simulator/SimulatorLearnPanel';\r\n" +
+      "import SimulatorScenarioCompare from './simulator/SimulatorScenarioCompare';\r\n" +
+      "import SimulatorPinningMini, { type PinningMiniInputs } from './simulator/SimulatorPinningMini';\r\n" +
+      "import { getStepGuide, PIPELINE_SUBSTAGES } from '../simulator/simulatorStepGuide';\r\n" +
+      'import {\n' +
+      '  initStateFromPreset,\n' +
+      '  inputsFromPreset,\n' +
+      '  mergePresetScenario,\n' +
+      '  type SimulatorRunInputs,\n' +
+      "} from '../simulator/simulatorRunHelpers';\n" +
+      'import {\r\n' +
+      '  CREG_SIM_CONSTANTS,\r\n' +
+      '  advanceOneStep,\r\n' +
+      '  getNextStep,\r\n' +
+      '  getStepLabel,\r\n' +
+      '  getStepOrder,\r\n' +
+      '  type SimEvent,\n' +
+      '  type SimStepId,\r\n' +
+      '  type SimulatorState,\r\n' +
+      "} from '../simulator/cregWorkflowSimulator';\n" +
+      'import {\r\n' +
+      '  buildSimulatorDeepLink,\r\n' +
+      '  DEFAULT_PRESET_ID,\r\n' +
+      '  getDefaultPreset,\r\n' +
+      '  getPresetById,\r\n' +
+      '  parseSimulatorDeepLink,\r\n' +
+      '  SIMULATOR_PRESETS,\r\n' +
+      '  writeSimulatorDeepLink,\r\n' +
+      '  type SimulatorPreset,\r\n' +
+      "} from '../simulator/simulatorScenarios';\r\n" +
+      'import {\r\n' +
+      '  estimatePinningReward,\r\n' +
+      '  estimateWorkEmission,\r\n' +
+      '  formatCreg,\r\n' +
+      '  PINNING_EDU_CONSTANTS,\r\n' +
+      "} from '../simulator/simulatorTokenomics';\r\n" +
+      '\r\n' +
+      "type SimPanel = 'run' | 'learn' | 'compare' | 'scenarios' | 'inputs' | 'tokenomics';\r\n" +
+      '\r\n' +
+      'export type SimInputConfig = SimulatorRunInputs;\r\n' +
+      '\r\n' +
+      'export interface CregWorkflowSimulatorProps {\n' +
+      '  externalFocusStep?: SimStepId | null;\n' +
+      '  onExternalFocusConsumed?: () => void;\n' +
+      '}\n' +
+      '\r\n' +
+      'const DEFAULT_PINNING: PinningMiniInputs = {\r\n' +
+      '  sizeGiB: 2,\r\n' +
+      '  days: 30,\r\n' +
+      '  accessCount: 2450,\r\n' +
+      '  successRate: 94,\r\n' +
+      '};\r\n' +
+      '\r\n' +
+      'export default function CregWorkflowSimulator({\n' +
+      '  externalFocusStep = null,\n' +
+      '  onExternalFocusConsumed,\n' +
+      '}: CregWorkflowSimulatorProps = {}) {\n' +
+      "  const [activePanel, setActivePanel] = useState<SimPanel>('run');\r\n" +
+      '  const [presetId, setPresetId] = useState(DEFAULT_PRESET_ID);\r\n' +
+      '  const [inputs, setInputs] = useState<SimInputConfig>(() =>\n' +
+      '    inputsFromPreset(getDefaultPreset())\n' +
+      '  );\n' +
+      '  const [state, setState] = useState<SimulatorState>(() =>\n' +
+      '    initStateFromPreset(getDefaultPreset(), inputsFromPreset(getDefaultPreset()))\n' +
+      '  );\n' +
+      '  const [autoRunning, setAutoRunning] = useState(false);\r\n' +
+      '  const [copiedLink, setCopiedLink] = useState(false);\r\n' +
+      '  const [emissionPackagesPerDay, setEmissionPackagesPerDay] = useState(50_000);\r\n' +
+      '  const [selectedStep, setSelectedStep] = useState<SimStepId | null>(null);\r\n' +
+      '  const [showCheckpoints, setShowCheckpoints] = useState(true);\r\n' +
+      "  const [compareLeftId, setCompareLeftId] = useState('happy-path');\r\n" +
+      "  const [compareRightId, setCompareRightId] = useState('quorum-fail');\r\n" +
+      '  const [pinningInputs, setPinningInputs] = useState<PinningMiniInputs>(DEFAULT_PINNING);\r\n' +
+      '  const [recentlyCompleted, setRecentlyCompleted] = useState<SimStepId | null>(null);\r\n' +
+      '\n' +
+      '  const activePreset = useMemo(\r\n' +
+      '    () => getPresetById(presetId) ?? getDefaultPreset(),\r\n' +
+      '    [presetId]\r\n' +
+      '  );\r\n' +
+      '\r\n' +
+      '  const scenario = useMemo(\n' +
+      '    () => mergePresetScenario(activePreset, inputs),\n' +
+      '    [activePreset, inputs]\n' +
+      '  );\n' +
+      '\r\n' +
+      '  useEffect(() => {\n' +
+      '    const fromUrl = parseSimulatorDeepLink();\n' +
+      '    if (fromUrl && getPresetById(fromUrl)) {\n' +
+      '      const preset = getPresetById(fromUrl)!;\n' +
+      '      const presetInputs = inputsFromPreset(preset);\n' +
+      '      setPresetId(preset.id);\n' +
+      '      setInputs(presetInputs);\n' +
+      '      setState(initStateFromPreset(preset, presetInputs));\n' +
+      '    }\n' +
+      '    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-time deep link hydrate\n' +
+      '  }, []);\n' +
+      '\n' +
+      '  useEffect(() => {\n' +
+      '    if (!externalFocusStep) return;\n' +
+      "    setActivePanel('run');\n" +
+      '    setSelectedStep(externalFocusStep);\n' +
+      '    onExternalFocusConsumed?.();\n' +
+      '  }, [externalFocusStep, onExternalFocusConsumed]);\n' +
+      '\r\n' +
+      '  const loadPreset = useCallback((preset: SimulatorPreset, syncUrl = true) => {\n' +
+      '    const presetInputs = inputsFromPreset(preset);\n' +
+      '    setPresetId(preset.id);\n' +
+      '    setInputs(presetInputs);\n' +
+      '    setState(initStateFromPreset(preset, presetInputs));\n' +
+      '    if (syncUrl) writeSimulatorDeepLink(preset.id);\n' +
+      '  }, []);\n' +
+      '\r\n' +
+      '  const rebuildFromInputs = useCallback(() => {\r\n' +
+      '    setState(initStateFromPreset(activePreset, inputs));\r\n' +
+      '  }, [activePreset, inputs]);\r\n' +
+      '\r\n' +
+      '  const nextStep = getNextStep(state);\r\n' +
+      '  const isComplete = nextStep === null;\r\n' +
+      '\r\n' +
+      '  const focusStep = useMemo((): SimStepId | null => {\r\n' +
+      '    if (selectedStep) return selectedStep;\r\n' +
+      '    if (nextStep) return nextStep;\r\n' +
+      '    const order = getStepOrder();\r\n' +
+      '    for (let i = order.length - 1; i >= 0; i -= 1) {\r\n' +
+      '      if (state.completedSteps.includes(order[i])) return order[i];\r\n' +
+      '    }\r\n' +
+      '    return order[0] ?? null;\r\n' +
+      '  }, [selectedStep, nextStep, state.completedSteps]);\n' +
+      '\r\n' +
+      '  const stepProgress = useMemo(() => {\r\n' +
+      '    const order = getStepOrder();\r\n' +
+      '    return order.map(step => ({\r\n' +
+      '      id: step,\r\n' +
+      '      label: getStepLabel(step),\r\n' +
+      '      done: state.completedSteps.includes(step),\r\n' +
+      '      active: nextStep === step,\r\n' +
+      '    }));\r\n' +
+      '  }, [state.completedSteps, nextStep]);\r\n' +
+      '\r\n' +
+      '  const workEmission = useMemo(\r\n' +
+      '    () => estimateWorkEmission(emissionPackagesPerDay),\r\n' +
+      '    [emissionPackagesPerDay]\r\n' +
+      '  );\r\n' +
+      '\r\n' +
+      '  const pinningExample = useMemo(\r\n' +
+      '    () => estimatePinningReward(2, 30, 2450, 0.94),\r\n' +
+      '    []\r\n' +
+      '  );\r\n' +
+      '\r\n' +
+      '  const shareUrl = useMemo(() => buildSimulatorDeepLink(presetId), [presetId]);\r\n' +
+      '\r\n' +
+      '  const handleCopyLink = async () => {\r\n' +
+      '    try {\r\n' +
+      '      await navigator.clipboard.writeText(shareUrl);\r\n' +
+      '      setCopiedLink(true);\r\n' +
+      '      setTimeout(() => setCopiedLink(false), 2000);\r\n' +
+      '    } catch {\r\n' +
+      '      // clipboard unavailable\r\n' +
+      '    }\r\n' +
+      '  };\r\n' +
+      '\r\n' +
+      '  const handleReset = () => {\r\n' +
+      '    setAutoRunning(false);\r\n' +
+      '    setSelectedStep(null);\r\n' +
+      '    setRecentlyCompleted(null);\r\n' +
+      '    setState(initStateFromPreset(activePreset, inputs));\n' +
+      '  };\r\n' +
+      '\r\n' +
+      '  const flashCompletedStep = (step: SimStepId) => {\r\n' +
+      '    setRecentlyCompleted(step);\r\n' +
+      '    window.setTimeout(() => setRecentlyCompleted(null), 600);\r\n' +
+      '  };\r\n' +
+      '\r\n' +
+      '  const handleStep = () => {\r\n' +
+      '    if (!nextStep) return;\r\n' +
+      '    setState(prev => advanceOneStep(prev, scenario));\r\n' +
+      '    flashCompletedStep(nextStep);\n' +
+      '  };\r\n' +
+      '\r\n' +
+      '  const handleRunAll = async () => {\r\n' +
+      '    setAutoRunning(true);\r\n' +
+      '    let current = state;\r\n' +
+      '    let step = getNextStep(current);\r\n' +
+      '    while (step) {\r\n' +
+      '      current = advanceOneStep(current, scenario);\r\n' +
+      '      flashCompletedStep(step);\r\n' +
+      '      setState(current);\n' +
+      '      step = getNextStep(current);\r\n' +
+      '      await new Promise(r => setTimeout(r, 450));\r\n' +
+      '    }\r\n' +
+      '    setAutoRunning(false);\r\n' +
+      '  };\n' +
+      '\r\n' +
+      '  const panelBtn = (id: SimPanel, label: string, Icon: typeof Play) => (\r\n' +
+      '    <button\r\n' +
+      '      type="button"\r\n' +
+      '      onClick={() => setActivePanel(id)}\r\n' +
+      '      className={`min-h-9 px-3 py-1.5 border text-[9px] font-bold uppercase tracking-widest flex items-center gap-1.5 ${\r\n' +
+      '        activePanel === id\r\n' +
+      "          ? 'border-theme-accent bg-theme-accent/15 text-theme-text'\r\n" +
+      "          : 'border-theme-border text-theme-muted hover:text-theme-text'\r\n" +
+      '      }`}\r\n' +
+      '      data-testid={`sim-panel-${id}`}\r\n' +
+      '    >\r\n' +
+      '      <Icon className="w-3.5 h-3.5" /> {label}\r\n' +
+      '    </button>\r\n' +
+      '  );\r\n' +
+      '\r\n' +
+      '  return (\r\n' +
+      '    <div\r\n' +
+      '      className="creg-workflow-simulator flex flex-col gap-5 font-mono"\r\n' +
+      '      data-testid="creg-workflow-simulator"\r\n' +
+      '    >\r\n' +
+      '      <div className="border border-dashed border-theme-accent/40 bg-theme-accent/5 p-4 rounded-sm flex gap-3">\r\n' +
+      '        <AlertCircle className="w-5 h-5 text-theme-accent shrink-0 mt-0.5" aria-hidden="true" />\r\n' +
+      '        <div className="text-[10px] text-theme-muted leading-relaxed font-sans">\r\n' +
+      '          <strong className="text-theme-text uppercase tracking-wide block mb-1">Educational learning simulator</strong>\r\n' +
+      '          This model teaches how CREG publishes, selects validator committees, reaches quorum, finalizes via PBFT, and emits work-based incentives.\r\n' +
+      "          It does not connect to live nodes, Sepolia, or Arena XP/reputation. Parameters follow{' '}\r\n" +
+      '          <code className="text-theme-accent">CREG_SYSTEM_WORKFLOW.md</code> §9.11–9.12 and the public whitepaper.\r\n' +
+      '        </div>\r\n' +
+      '      </div>\r\n' +
+      '\r\n' +
+      '      <div className="flex flex-wrap gap-2">\r\n' +
+      "        {panelBtn('run', 'Run', Play)}\r\n" +
+      "        {panelBtn('learn', 'Learn', GraduationCap)}\r\n" +
+      "        {panelBtn('compare', 'Compare', Columns2)}\r\n" +
+      "        {panelBtn('scenarios', 'Scenarios', BookOpen)}\n" +
+      "        {panelBtn('inputs', 'Inputs', SlidersHorizontal)}\r\n" +
+      "        {panelBtn('tokenomics', 'Tokenomics', BarChart3)}\r\n" +
+      '      </div>\r\n' +
+      '\r\n' +
+      "      {activePanel === 'learn' && (\r\n" +
+      '        <section data-testid="sim-learn-tab">\r\n' +
+      '          <div className="flex flex-wrap items-center gap-3 mb-4">\r\n' +
+      '            <label className="flex items-center gap-2 text-[10px] text-theme-muted cursor-pointer">\r\n' +
+      '              <input\r\n' +
+      '                type="checkbox"\r\n' +
+      '                checked={showCheckpoints}\r\n' +
+      '                onChange={e => setShowCheckpoints(e.target.checked)}\r\n' +
+      '                data-testid="sim-checkpoints-toggle"\r\n' +
+      '              />\r\n' +
+      '              <HelpCircle className="w-3.5 h-3.5" />\r\n' +
+      '              Show checkpoint quizzes per step\r\n' +
+      '            </label>\r\n' +
+      '            <p className="text-[9px] text-theme-muted font-sans">\r\n' +
+      '              Click any step in the Run tab flow diagram to focus learning content here.\r\n' +
+      '            </p>\r\n' +
+      '          </div>\r\n' +
+      '          <SimulatorLearnPanel focusStep={focusStep} showCheckpoint={showCheckpoints} />\r\n' +
+      '        </section>\r\n' +
+      '      )}\n' +
+      '\r\n' +
+      "      {activePanel === 'compare' && (\r\n" +
+      '        <SimulatorScenarioCompare\r\n' +
+      '          inputs={inputs}\r\n' +
+      '          leftPresetId={compareLeftId}\r\n' +
+      '          rightPresetId={compareRightId}\r\n' +
+      '          onLeftChange={setCompareLeftId}\r\n' +
+      '          onRightChange={setCompareRightId}\r\n' +
+      '        />\r\n' +
+      '      )}\r\n' +
+      '\r\n' +
+      "      {activePanel === 'scenarios' && (\n" +
+      '        <section className="border border-theme-border bg-theme-card/10 p-4 flex flex-col gap-3" data-testid="sim-scenario-library">\r\n' +
+      '          <h3 className="text-[10px] font-bold uppercase tracking-wi'... 33757 more characters
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+  actual: |-
+    import { useCallback, useEffect, useMemo, useState } from 'react';
+    import {
+      Play,
+      RotateCcw,
+      SkipForward,
+      ChevronRight,
+      Coins,
+      Users,
+      Shield,
+      GitBranch,
+      AlertCircle,
+      BookOpen,
+      SlidersHorizontal,
+      Link2,
+      BarChart3,
+      Copy,
+      Check,
+      GraduationCap,
+      Vote,
+      Package,
+      HelpCircle,
+      Columns2,
+    } from 'lucide-react';
+    import SimulatorFlowDiagram from './simulator/SimulatorFlowDiagram';
+    import SimulatorLearnPanel from './simulator/SimulatorLearnPanel';
+    import SimulatorScenarioCompare from './simulator/SimulatorScenarioCompare';
+    import SimulatorPinningMini, { type PinningMiniInputs } from './simulator/SimulatorPinningMini';
+    import { getStepGuide, PIPELINE_SUBSTAGES } from '../simulator/simulatorStepGuide';
+    import {
+      initStateFromPreset,
+      inputsFromPreset,
+      mergePresetScenario,
+      type SimulatorRunInputs,
+    } from '../simulator/simulatorRunHelpers';
+    import {
+      CREG_SIM_CONSTANTS,
+      advanceOneStep,
+      getNextStep,
+      getStepLabel,
+      getStepOrder,
+      type SimEvent,
+      type SimStepId,
+      type SimulatorState,
+    } from '../simulator/cregWorkflowSimulator';
+    import {
+      buildSimulatorDeepLink,
+      DEFAULT_PRESET_ID,
+      getDefaultPreset,
+      getPresetById,
+      parseSimulatorDeepLink,
+      SIMULATOR_PRESETS,
+      writeSimulatorDeepLink,
+      type SimulatorPreset,
+    } from '../simulator/simulatorScenarios';
+    import {
+      estimatePinningReward,
+      estimateWorkEmission,
+      formatCreg,
+      PINNING_EDU_CONSTANTS,
+    } from '../simulator/simulatorTokenomics';
+    
+    type SimPanel = 'run' | 'learn' | 'compare' | 'scenarios' | 'inputs' | 'tokenomics';
+    
+    export type SimInputConfig = SimulatorRunInputs;
+    
+    export interface CregWorkflowSimulatorProps {
+      externalFocusStep?: SimStepId | null;
+      onExternalFocusConsumed?: () => void;
+    }
+    
+    const DEFAULT_PINNING: PinningMiniInputs = {
+      sizeGiB: 2,
+      days: 30,
+      accessCount: 2450,
+      successRate: 94,
+    };
+    
+    export default function CregWorkflowSimulator({
+      externalFocusStep = null,
+      onExternalFocusConsumed,
+    }: CregWorkflowSimulatorProps = {}) {
+      const [activePanel, setActivePanel] = useState<SimPanel>('run');
+      const [presetId, setPresetId] = useState(DEFAULT_PRESET_ID);
+      const [inputs, setInputs] = useState<SimInputConfig>(() =>
+        inputsFromPreset(getDefaultPreset())
+      );
+      const [state, setState] = useState<SimulatorState>(() =>
+        initStateFromPreset(getDefaultPreset(), inputsFromPreset(getDefaultPreset()))
+      );
+      const [autoRunning, setAutoRunning] = useState(false);
+      const [copiedLink, setCopiedLink] = useState(false);
+      const [emissionPackagesPerDay, setEmissionPackagesPerDay] = useState(50_000);
+      const [selectedStep, setSelectedStep] = useState<SimStepId | null>(null);
+      const [showCheckpoints, setShowCheckpoints] = useState(true);
+      const [compareLeftId, setCompareLeftId] = useState('happy-path');
+      const [compareRightId, setCompareRightId] = useState('quorum-fail');
+      const [pinningInputs, setPinningInputs] = useState<PinningMiniInputs>(DEFAULT_PINNING);
+      const [recentlyCompleted, setRecentlyCompleted] = useState<SimStepId | null>(null);
+    
+      const activePreset = useMemo(
+        () => getPresetById(presetId) ?? getDefaultPreset(),
+        [presetId]
+      );
+    
+      const scenario = useMemo(
+        () => mergePresetScenario(activePreset, inputs),
+        [activePreset, inputs]
+      );
+    
+      useEffect(() => {
+        const fromUrl = parseSimulatorDeepLink();
+        if (fromUrl && getPresetById(fromUrl)) {
+          const preset = getPresetById(fromUrl)!;
+          const presetInputs = inputsFromPreset(preset);
+          setPresetId(preset.id);
+          setInputs(presetInputs);
+          setState(initStateFromPreset(preset, presetInputs));
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- one-time deep link hydrate
+      }, []);
+    
+      useEffect(() => {
+        if (!externalFocusStep) return;
+        setActivePanel('run');
+        setSelectedStep(externalFocusStep);
+        onExternalFocusConsumed?.();
+      }, [externalFocusStep, onExternalFocusConsumed]);
+    
+      const loadPreset = useCallback((preset: SimulatorPreset, syncUrl = true) => {
+        const presetInputs = inputsFromPreset(preset);
+        setPresetId(preset.id);
+        setInputs(presetInputs);
+        setState(initStateFromPreset(preset, presetInputs));
+        if (syncUrl) writeSimulatorDeepLink(preset.id);
+      }, []);
+    
+      const rebuildFromInputs = useCallback(() => {
+        setState(initStateFromPreset(activePreset, inputs));
+      }, [activePreset, inputs]);
+    
+      const nextStep = getNextStep(state);
+      const isComplete = nextStep === null;
+    
+      const focusStep = useMemo((): SimStepId | null => {
+        if (selectedStep) return selectedStep;
+        if (nextStep) return nextStep;
+        const order = getStepOrder();
+        for (let i = order.length - 1; i >= 0; i -= 1) {
+          if (state.completedSteps.includes(order[i])) return order[i];
+        }
+        return order[0] ?? null;
+      }, [selectedStep, nextStep, state.completedSteps]);
+    
+      const stepProgress = useMemo(() => {
+        const order = getStepOrder();
+        return order.map(step => ({
+          id: step,
+          label: getStepLabel(step),
+          done: state.completedSteps.includes(step),
+          active: nextStep === step,
+        }));
+      }, [state.completedSteps, nextStep]);
+    
+      const workEmission = useMemo(
+        () => estimateWorkEmission(emissionPackagesPerDay),
+        [emissionPackagesPerDay]
+      );
+    
+      const pinningExample = useMemo(
+        () => estimatePinningReward(2, 30, 2450, 0.94),
+        []
+      );
+    
+      const shareUrl = useMemo(() => buildSimulatorDeepLink(presetId), [presetId]);
+    
+      const handleCopyLink = async () => {
+        try {
+          await navigator.clipboard.writeText(shareUrl);
+          setCopiedLink(true);
+          setTimeout(() => setCopiedLink(false), 2000);
+        } catch {
+          // clipboard unavailable
+        }
+      };
+    
+      const handleReset = () => {
+        setAutoRunning(false);
+        setSelectedStep(null);
+        setRecentlyCompleted(null);
+        setState(initStateFromPreset(activePreset, inputs));
+      };
+    
+      const flashCompletedStep = (step: SimStepId) => {
+        setRecentlyCompleted(step);
+        window.setTimeout(() => setRecentlyCompleted(null), 600);
+      };
+    
+      const handleStep = () => {
+        if (!nextStep) return;
+        setState(prev => advanceOneStep(prev, scenario));
+        flashCompletedStep(nextStep);
+      };
+    
+      const handleRunAll = async () => {
+        setAutoRunning(true);
+        let current = state;
+        let step = getNextStep(current);
+        while (step) {
+          current = advanceOneStep(current, scenario);
+          flashCompletedStep(step);
+          setState(current);
+          step = getNextStep(current);
+          await new Promise(r => setTimeout(r, 450));
+        }
+        setAutoRunning(false);
+      };
+    
+      const panelBtn = (id: SimPanel, label: string, Icon: typeof Play) => (
+        <button
+          type="button"
+          onClick={() => setActivePanel(id)}
+          className={`min-h-9 px-3 py-1.5 border text-[9px] font-bold uppercase tracking-widest flex items-center gap-1.5 ${
+            activePanel === id
+              ? 'border-theme-accent bg-theme-accent/15 text-theme-text'
+              : 'border-theme-border text-theme-muted hover:text-theme-text'
+          }`}
+          data-testid={`sim-panel-${id}`}
+        >
+          <Icon className="w-3.5 h-3.5" /> {label}
+        </button>
+      );
+    
+      return (
+        <div
+          className="creg-workflow-simulator flex flex-col gap-5 font-mono"
+          data-testid="creg-workflow-simulator"
+        >
+          <div className="border border-dashed border-theme-accent/40 bg-theme-accent/5 p-4 rounded-sm flex gap-3">
+            <AlertCircle className="w-5 h-5 text-theme-accent shrink-0 mt-0.5" aria-hidden="true" />
+            <div className="text-[10px] text-theme-muted leading-relaxed font-sans">
+              <strong className="text-theme-text uppercase tracking-wide block mb-1">Educational learning simulator</strong>
+              This model teaches how CREG publishes, selects validator committees, reaches quorum, finalizes via PBFT, and emits work-based incentives.
+              It does not connect to live nodes, Sepolia, or Arena XP/reputation. Parameters follow{' '}
+              <code className="text-theme-accent">CREG_SYSTEM_WORKFLOW.md</code> §9.11–9.12 and the public whitepaper.
+            </div>
+          </div>
+    
+          <div className="flex flex-wrap gap-2">
+            {panelBtn('run', 'Run', Play)}
+            {panelBtn('learn', 'Learn', GraduationCap)}
+            {panelBtn('compare', 'Compare', Columns2)}
+            {panelBtn('scenarios', 'Scenarios', BookOpen)}
+            {panelBtn('inputs', 'Inputs', SlidersHorizontal)}
+            {panelBtn('tokenomics', 'Tokenomics', BarChart3)}
+          </div>
+    
+          {activePanel === 'learn' && (
+            <section data-testid="sim-learn-tab">
+              <div className="flex flex-wrap items-center gap-3 mb-4">
+                <label className="flex items-center gap-2 text-[10px] text-theme-muted cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={showCheckpoints}
+                    onChange={e => setShowCheckpoints(e.target.checked)}
+                    data-testid="sim-checkpoints-toggle"
+                  />
+                  <HelpCircle className="w-3.5 h-3.5" />
+                  Show checkpoint quizzes per step
+                </label>
+                <p className="text-[9px] text-theme-muted font-sans">
+                  Click any step in the Run tab flow diagram to focus learning content here.
+                </p>
+              </div>
+              <SimulatorLearnPanel focusStep={focusStep} showCheckpoint={showCheckpoints} />
+            </section>
+          )}
+    
+          {activePanel === 'compare' && (
+            <SimulatorScenarioCompare
+              inputs={inputs}
+              leftPresetId={compareLeftId}
+              rightPresetId={compareRightId}
+              onLeftChange={setCompareLeftId}
+              onRightChange={setCompareRightId}
+            />
+          )}
+    
+          {activePanel === 'scenarios' && (
+            <section className="border border-theme-border bg-theme-card/10 p-4 flex flex-col gap-3" data-testid="sim-scenario-library">
+              <h3 className="text-[10px] font-bold uppercase tracking-widest text-theme-text flex items-center gap-2">
+                <BookOpen className="w-4 h-4 text-theme-accent" /> Scenario library
+              </h3>
+              <p className="text-[10px] text-theme-muted font-sans leading-relaxed">
+                Pick a preset to load publish inputs, validator sets, and vote outcomes. URLs update for sharing (deep link).
+              </p>
+              <div className="flex flex-wrap gap-2 items-center text-[10px]">
+                <code className="text-theme-accent break-all flex-1 min-w-0">{shareUrl}</code>
+                <button
+                  type="button"
+                  onClick={() => void handleCopyLink()}
+                  className="shrink-0 min-h-9 px-3 border border-theme-border flex items-center gap-1.5 text-[9px] uppercase font-bold hover:border-theme-accent"
+                  data-testid="sim-copy-deep-link"
+                >
+                  {copiedLink ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  {copiedLink ? 'Copied' : 'Copy link'}
+                </button>
+              </div>
+              <ul className="flex flex-col gap-2">
+                {SIMULATOR_PRESETS.map(preset => (
+                  <li key={preset.id}>
+                    <button
+                      type="button"
+                      onClick={() => loadPreset(preset)}
+                      className={`w-full text-left border p-3 transition-colors ${
+                        presetId === preset.id
+                          ? 'border-theme-accent bg-theme-accent/10'
+                          : 'border-theme-border hover:border-theme-border-med bg-theme-bg/20'
+                      }`}
+                      data-testid={`sim-preset-${preset.id}`}
+                    >
+                      <span className="text-[10px] font-bold text-theme-text uppercase tracking-wide flex items-center gap-2">
+                        <Link2 className="w-3.5 h-3.5 text-theme-accent" />
+                        {preset.title}
+                        {presetId === preset.id && (
+                          <span className="text-[8px] text-theme-accent font-normal">(active)</span>
+                        )}
+                      </span>
+                      <span className="text-[10px] text-theme-muted block mt-1 font-sans">{preset.summary}</span>
+                      <span className="text-[9px] text-theme-muted/80 block mt-2 font-sans leading-relaxed">{preset.explanation}</span>
+                      <ul className="mt-2 list-disc list-inside text-[9px] text-theme-muted font-sans">
+                        {preset.learnPoints.map(point => (
+                          <li key={point}>{point}</li>
+                        ))}
+                      </ul>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+    
+          {activePanel === 'inputs' && (
+            <section className="border border-theme-border bg-theme-card/10 p-4 flex flex-col gap-4" data-testid="sim-interactive-inputs">
+              <h3 className="text-[10px] font-bold uppercase tracking-widest text-theme-text flex items-center gap-2">
+                <SlidersHorizontal className="w-4 h-4 text-theme-accent" /> Interactive inputs
+              </h3>
+              <p className="text-[10px] text-theme-muted font-sans">
+                Tweak parameters, then Apply to reset the simulation with new committee size, stake, reputation, and vote outcomes.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-[10px]">
+                <label className="flex flex-col gap-1">
+                  <span className="text-theme-muted uppercase text-[8px]">Publisher stake (tCREG)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.5}
+                    value={inputs.publisherStake}
+                    onChange={e => setInputs(prev => ({ ...prev, publisherStake: Number(e.target.value) }))}
+                    className="bg-theme-bg border border-theme-border px-2 py-1.5 text-theme-text"
+                    data-testid="sim-input-stake"
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-theme-muted uppercase text-[8px]">Committee target M</span>
+                  <input
+                    type="range"
+                    min={3}
+                    max={100}
+                    value={Math.min(inputs.committeeTargetM, 100)}
+                    onChange={e => setInputs(prev => ({ ...prev, committeeTargetM: Number(e.target.value) }))}
+                    className="w-full"
+                    data-testid="sim-input-committee-m"
+                  />
+                  <span className="text-theme-text">{inputs.committeeTargetM} (capped by active validators)</span>
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-theme-muted uppercase text-[8px]">Validator v1 stake</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={inputs.validatorV1Stake}
+                    onChange={e => setInputs(prev => ({ ...prev, validatorV1Stake: Number(e.target.value) }))}
+                    className="bg-theme-bg border border-theme-border px-2 py-1.5 text-theme-text"
+                    data-testid="sim-input-v1-stake"
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-theme-muted uppercase text-[8px]">Validator v1 reputation (0–100)</span>
+                  <input
+                    type="range"
+                    min={1}
+                    max={100}
+                    value={inputs.validatorV1Reputation}
+                    onChange={e => setInputs(prev => ({ ...prev, validatorV1Reputation: Number(e.target.value) }))}
+                    className="w-full"
+                    data-testid="sim-input-v1-rep"
+                  />
+                  <span className="text-theme-text">{inputs.validatorV1Reputation}</span>
+                </label>
+                <fieldset className="flex flex-col gap-2 sm:col-span-2">
+                  <span className="text-theme-muted uppercase text-[8px]">VRF / tip mode (§9.11 seed)</span>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="vrf-mode"
+                      checked={inputs.vrfSeedMode === 'manual'}
+                      onChange={() => setInputs(prev => ({ ...prev, vrfSeedMode: 'manual' }))}
+                      data-testid="sim-input-vrf-manual"
+                    />
+                    <span className="text-theme-text">Manual override (vrf_or_tip field below)</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="vrf-mode"
+                      checked={inputs.vrfSeedMode === 'tip'}
+                      onChange={() => setInputs(prev => ({ ...prev, vrfSeedMode: 'tip' }))}
+                      data-testid="sim-input-vrf-tip"
+                    />
+                    <span className="text-theme-text">Simulated chain tip hash</span>
+                  </label>
+                </fieldset>
+                <label className="flex flex-col gap-1 sm:col-span-2">
+                  <span className="text-theme-muted uppercase text-[8px]">VRF / tip value (manual mode)</span>
+                  <input
+                    type="text"
+                    value={inputs.vrfSeed}
+                    onChange={e => setInputs(prev => ({ ...prev, vrfSeed: e.target.value }))}
+                    disabled={inputs.vrfSeedMode === 'tip'}
+                    className="bg-theme-bg border border-theme-border px-2 py-1.5 text-theme-text font-mono disabled:opacity-50"
+                    data-testid="sim-input-vrf"
+                  />
+                </label>
+                <label className="flex flex-col gap-1 sm:col-span-2">
+                  <span className="text-theme-muted uppercase text-[8px]">Admission gate failure (inject)</span>
+                  <select
+                    value={inputs.admissionGateFailure}
+                    onChange={e =>
+                      setInputs(prev => ({
+                        ...prev,
+                        admissionGateFailure: e.target.value as SimInputConfig['admissionGateFailure'],
+                      }))
+                    }
+                    className="bg-theme-bg border border-theme-border px-2 py-1.5 text-theme-text"
+                    data-testid="sim-input-admission-gate"
+                  >
+                    <option value="none">None (pass all gates)</option>
+                    <option value="invalid_signature">Ed25519 signature invalid</option>
+                    <option value="yara_block">YARA pre-scan block</option>
+                    <option value="rate_limit">Publisher rate limit</option>
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1 sm:col-span-2">
+                  <span className="text-theme-muted uppercase text-[8px]">Pipeline sub-step failure (inject)</span>
+                  <select
+                    value={inputs.pipelineSubstepFailure}
+                    onChange={e =>
+                      setInputs(prev => ({
+                        ...prev,
+                        pipelineSubstepFailure: e.target.value as SimInputConfig['pipelineSubstepFailure'],
+                      }))
+                    }
+                    className="bg-theme-bg border border-theme-border px-2 py-1.5 text-theme-text"
+                    data-testid="sim-input-pipeline-failure"
+                  >
+                    <option value="none">None (complete all stages)</option>
+                    {PIPELINE_SUBSTAGES.map(stage => (
+                      <option key={stage.id} value={stage.id}>
+                        Fail at: {stage.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <fieldset className="flex flex-col gap-2">
+                  <span className="text-theme-muted uppercase text-[8px]">Mandatory vote outcome</span>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="mandatory-votes"
+                      checked={inputs.mandatoryVotesApprove}
+                      onChange={() => setInputs(prev => ({ ...prev, mandatoryVotesApprove: true }))}
+                      data-testid="sim-input-votes-approve"
+                    />
+                    <span className="text-theme-text">Approve (quorum path)</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="mandatory-votes"
+                      checked={!inputs.mandatoryVotesApprove}
+                      onChange={() => setInputs(prev => ({ ...prev, mandatoryVotesApprove: false }))}
+                      data-testid="sim-input-votes-reject"
+                    />
+                    <span className="text-theme-text">Reject (quorum fail)</span>
+                  </label>
+                </fieldset>
+                <label className="flex items-center gap-2 cursor-pointer self-end">
+                  <input
+                    type="checkbox"
+                    checked={inputs.includeVoluntaryV5}
+                    onChange={e => setInputs(prev => ({ ...prev, includeVoluntaryV5: e.target.checked }))}
+                    data-testid="sim-input-voluntary"
+                  />
+                  <span className="text-theme-text">Include voluntary voter v5</span>
+                </label>
+              </div>
+              <button
+                type="button"
+                onClick={rebuildFromInputs}
+                className="self-start min-h-10 px-4 py-2 border border-theme-accent text-theme-accent text-[9px] font-bold uppercase tracking-widest hover:bg-theme-accent/10"
+                data-testid="sim-apply-inputs"
+              >
+                Apply inputs & reset run
+              </button>
+            </section>
+          )}
+    
+          {activePanel === 'tokenomics' && (
+            <section className="border border-theme-border bg-theme-card/10 p-4 flex flex-col gap-4" data-testid="sim-tokenomics-panel">
+              <h3 className="text-[10px] font-bold uppercase tracking-widest text-theme-text flex items-center gap-2">
+                <BarChart3 className="w-4 h-4 text-theme-accent" /> Tokenomics (educational)
+              </h3>
+    
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-[9px] uppercase tracking-wider">
+                <div className="border border-theme-border bg-theme-card/20 p-3">
+                  <span className="text-theme-muted block mb-1">Supply cap</span>
+                  <strong className="text-theme-accent text-xs">{CREG_SIM_CONSTANTS.MAX_SUPPLY_CREG.toLocaleString()} CREG</strong>
+                </div>
+                <div className="border border-theme-border bg-theme-card/20 p-3">
+                  <span className="text-theme-muted block mb-1">Work base / package</span>
+                  <strong className="text-theme-text text-xs">{CREG_SIM_CONSTANTS.BASE_PACKAGE_REWARD} CREG</strong>
+                </div>
+                <div className="border border-theme-border bg-theme-card/20 p-3">
+                  <span className="text-theme-muted block mb-1">Points (mand / vol)</span>
+                  <strong className="text-theme-text text-xs">
+                    {CREG_SIM_CONSTANTS.MANDATORY_BASE_POINTS} / {CREG_SIM_CONSTANTS.VOLUNTARY_BASE_POINTS}
+                  </strong>
+                </div>
+                <div className="border border-theme-border bg-theme-card/20 p-3">
+                  <span className="text-theme-muted block mb-1">Pinning rate</span>
+                  <strong className="text-theme-text text-xs">{PINNING_EDU_CONSTANTS.REWARD_PER_GB_PER_DAY} CREG/GB/day</strong>
+                </div>
+              </div>
+    
+              <div className="border border-theme-border/60 p-3 bg-theme-bg/30">
+                <h4 className="text-[9px] font-bold uppercase text-theme-text mb-2">Proof of Verification (ValidatorRewards)</h4>
+                <p className="text-[10px] text-theme-muted font-sans leading-relaxed mb-3">
+                  Tiny per-package payments on L1 after PBFT-verified quorum. Correct-vote bonus + reputation slice; treasury-funded via{' '}
+                  <code className="text-theme-accent">distributeWorkRewards</code>.
+                </p>
+                <label className="flex flex-col gap-1 text-[10px] mb-2">
+                  <span className="text-theme-muted uppercase text-[8px]">Network packages / day</span>
+                  <input
+                    type="range"
+                    min={1000}
+                    max={200000}
+                    step={1000}
+                    value={emissionPackagesPerDay}
+                    onChange={e => setEmissionPackagesPerDay(Number(e.target.value))}
+                    className="w-full"
+                    data-testid="sim-emission-slider"
+                  />
+                  <span className="text-theme-text">{emissionPackagesPerDay.toLocaleString()} packages/day</span>
+                </label>
+                <dl className="grid grid-cols-2 gap-2 text-[10px]">
+                  <div>
+                    <dt className="text-theme-muted">Est. daily verification CREG</dt>
+                    <dd className="text-theme-text font-bold">{formatCreg(workEmission.dailyCreg)}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-theme-muted">Est. yearly verification CREG</dt>
+                    <dd className="text-theme-text font-bold">{formatCreg(workEmission.yearlyCreg)}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-theme-muted">% of 42M cap / year</dt>
+                    <dd className="text-theme-text font-bold">{workEmission.pctOfSupplyCapPerYear}%</dd>
+                  </div>
+                  <div>
+                    <dt className="text-theme-muted">Avg reward / participant</dt>
+                    <dd className="text-theme-text font-bold">{formatCreg(workEmission.avgRewardPerParticipant)}</dd>
+                  </div>
+                </dl>
+              </div>
+    
+              <div className="border border-theme-border/60 p-3 bg-theme-bg/30">
+                <h4 className="text-[9px] font-bold uppercase text-theme-text mb-2">Proof of Pinning (PinningRewards)</h4>
+                <p className="text-[10px] text-theme-muted font-sans leading-relaxed mb-3">
+                  Separate availability track: size × days × rate, then popularity (2× if accesses &gt; 1000) and reliability multipliers. No coupling to verification rewards.
+                </p>
+                <dl className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-[10px]">
+                  <div>
+                    <dt className="text-theme-muted">Example (2 GiB, 30d)</dt>
+                    <dd className="text-theme-text">{formatCreg(pinningExample.baseCreg)} base</dd>
+                  </div>
+                  <div>
+                    <dt className="text-theme-muted">After popularity ×2</dt>
+                    <dd className="text-theme-text">{formatCreg(pinningExample.afterPopularityCreg)}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-theme-muted">After 94% reliability</dt>
+                    <dd className="text-theme-accent font-bold">{formatCreg(pinningExample.totalCreg)} CREG</dd>
+                  </div>
+                </dl>
+                <p className="text-[9px] text-theme-muted mt-2 font-sans">
+                  One pinning period can exceed thousands of verification packages — incentives are intentionally asymmetric (availability vs analysis).
+                </p>
+              </div>
+            </section>
+          )}
+    
+          {(activePanel === 'run' || activePanel === 'inputs') && (
+            <>
+              <div className="text-[9px] text-theme-muted uppercase tracking-wide flex items-center gap-2">
+                <span>Preset:</span>
+                <strong className="text-theme-accent">{activePreset.title}</strong>
+              </div>
+    
+              {state.package && (
+                <section
+                  className="border border-theme-border bg-theme-card/10 p-4"
+                  data-testid="sim-package-card"
+                >
+                  <h3 className="text-[10px] font-bold uppercase tracking-widest text-theme-text flex items-center gap-2 mb-2">
+                    <Package className="w-4 h-4 text-theme-accent" /> Package under simulation
+                  </h3>
+                  <dl className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[10px] font-mono">
+                    <div>
+                      <dt className="text-theme-muted uppercase text-[8px]">Canonical</dt>
+                      <dd className="text-theme-text break-all">{state.package.canonical}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-theme-muted uppercase text-[8px]">Content hash</dt>
+                      <dd className="text-theme-accent break-all">{state.package.contentHash}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-theme-muted uppercase text-[8px]">Publisher</dt>
+                      <dd className="text-theme-text">{state.package.publisherAddress}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-theme-muted uppercase text-[8px]">Stake / state</dt>
+                      <dd className="text-theme-text">
+                        {state.package.publisherStakeTcreg} tCREG ·{' '}
+                        <span className="text-theme-accent">{state.package.state}</span>
+                      </dd>
+                    </div>
+                  </dl>
+                </section>
+              )}
+    
+              <section className="border border-theme-border bg-theme-card/10 p-4">
+                <h3 className="text-[10px] font-bold uppercase tracking-widest text-theme-text flex items-center gap-2 mb-3">
+                  <GitBranch className="w-4 h-4 text-theme-accent" /> Interactive flow
+                </h3>
+                <p className="text-[10px] text-theme-muted font-sans mb-3">
+                  Click a step to inspect what happens in the CREG stack. Highlighted node = next step to run.
+                </p>
+                <SimulatorFlowDiagram
+                  steps={stepProgress}
+                  selectedStep={selectedStep}
+                  recentlyCompleted={recentlyCompleted}
+                  autoRunning={autoRunning}
+                  onSelectStep={step => {
+                    setSelectedStep(step);
+                    setActivePanel('learn');
+                  }}
+                />
+                {focusStep && (
+                  <p className="text-[10px] text-theme-muted font-sans mt-3 border-t border-theme-border/40 pt-3">
+                    <strong className="text-theme-text">{getStepGuide(focusStep).title}:</strong>{' '}
+                    {getStepGuide(focusStep).summary}
+                  </p>
+                )}
+              </section>
+    
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-[9px] uppercase tracking-wider">
+                <div className="border border-theme-border bg-theme-card/20 p-3">
+                  <span className="text-theme-muted block mb-1">Package state</span>
+                  <strong className="text-theme-accent text-xs">{state.package?.state ?? '—'}</strong>
+                </div>
+                <div className="border border-theme-border bg-theme-card/20 p-3">
+                  <span className="text-theme-muted block mb-1">Mandatory committee</span>
+                  <strong className="text-theme-text text-xs">{state.committee.length || '—'}</strong>
+                </div>
+                <div className="border border-theme-border bg-theme-card/20 p-3">
+                  <span className="text-theme-muted block mb-1">Quorum</span>
+                  <strong className="text-theme-text text-xs">
+                    {state.quorumRequired ? `${state.mandatoryApprovals}/${state.quorumRequired}` : '—'}
+                  </strong>
+                  {state.quorumRequired > 0 && (
+                    <span className="text-[8px] text-theme-muted normal-case block mt-1 font-sans">
+                      floor(2×{state.committee.length || 'M'}/3)+1
+                      {state.quorumReached ? ' · met' : state.mandatoryApprovals > 0 ? ' · short' : ''}
+                    </span>
+                  )}
+                </div>
+                <div className="border border-theme-border bg-theme-card/20 p-3">
+                  <span className="text-theme-muted block mb-1">CREG emitted (sim)</span>
+                  <strong className="text-theme-text text-xs">{state.totalCregEmitted || '0'}</strong>
+                </div>
+              </div>
+    
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={handleStep}
+                  disabled={!nextStep || autoRunning}
+                  className="min-h-10 px-4 py-2 border border-theme-accent bg-theme-accent text-theme-accent-text text-[9px] font-bold uppercase tracking-widest disabled:opacity-40 flex items-center gap-2"
+                  data-testid="sim-step-once"
+                >
+                  <SkipForward className="w-3.5 h-3.5" /> Step once
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleRunAll()}
+                  disabled={isComplete || autoRunning}
+                  className="min-h-10 px-4 py-2 border border-theme-border bg-theme-card text-theme-text text-[9px] font-bold uppercase tracking-widest disabled:opacity-40 flex items-center gap-2 hover:border-theme-border-med"
+                  data-testid="sim-run-all"
+                >
+                  <Play className="w-3.5 h-3.5" /> Run full path
+                </button>
+                <button
+                  type="button"
+                  onClick={handleReset}
+                  disabled={autoRunning}
+                  className="min-h-10 px-4 py-2 border border-theme-border text-theme-muted text-[9px] font-bold uppercase tracking-widest flex items-center gap-2 hover:text-theme-text"
+                  data-testid="sim-reset"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" /> Reset
+                </button>
+              </div>
+    
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <section className="border border-theme-border bg-theme-card/10 p-4 flex flex-col gap-3">
+                  <h3 className="text-[10px] font-bold uppercase tracking-widest text-theme-text flex items-center gap-2">
+                    <GitBranch className="w-4 h-4 text-theme-accent" /> Workflow steps
+                  </h3>
+                  <ol className="flex flex-col gap-1.5 text-[10px]">
+                    {stepProgress.map((step, idx) => (
+                      <li
+                        key={step.id}
+                        className={`flex items-center gap-2 px-2 py-1.5 border transition-colors duration-300 ${
+                          step.done
+                            ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-400'
+                            : step.active
+                              ? 'border-theme-accent/50 bg-theme-accent/10 text-theme-text sim-step-active-pulse'
+                              : 'border-theme-border/50 text-theme-muted'
+                        } ${recentlyCompleted === step.id ? 'sim-step-complete' : ''}`}
+                      >
+                        <span className="w-5 text-center font-bold">{idx + 1}</span>
+                        <ChevronRight className="w-3 h-3 shrink-0 opacity-60" />
+                        <span className="leading-tight">{step.label}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </section>
+    
+                <section className="border border-theme-border bg-theme-card/10 p-4 flex flex-col gap-3 max-h-72 overflow-y-auto">
+                  <h3 className="text-[10px] font-bold uppercase tracking-widest text-theme-text">Event log</h3>
+                  {state.eventLog.length === 0 ? (
+                    <p className="text-[10px] text-theme-muted">Press Step once or Run full path to begin.</p>
+                  ) : (
+                    <ul className="flex flex-col gap-2 text-[10px] text-theme-muted leading-relaxed">
+                      {state.eventLog.map((ev: SimEvent, i) => (
+                        <li
+                          key={`${ev.step}-${i}`}
+                          className={`border-l-2 border-theme-accent/40 pl-2 ${
+                            i === state.eventLog.length - 1 && recentlyCompleted
+                              ? 'sim-log-enter'
+                              : ''
+                          }`}
+                        >
+                          <span className="text-theme-accent uppercase text-[8px] block">
+                            {ev.step.replace(/_/g, ' ')}
+                          </span>
+                          {ev.message}
+                          {ev.detail && (
+                            <span className="text-[9px] text-theme-muted/80 block mt-0.5 font-mono">
+                              {ev.detail}
+                            </span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
+              </div>
+    
+              {state.pipelineStages.length > 0 && (
+                <section className="border border-theme-border bg-theme-card/10 p-4" data-testid="sim-pipeline-stages">
+                  <h3 className="text-[10px] font-bold uppercase tracking-widest text-theme-text mb-3">
+                    {state.pipelineStages.every(s => s.completed)
+                      ? 'Pipeline stages completed'
+                      : 'Pipeline stage progress (partial — failure branch)'}
+                  </h3>
+                  <div className="flex flex-wrap gap-2">
+                    {state.pipelineStages.map(stage => (
+                      <span
+                        key={stage.id}
+                        className={`text-[9px] px-2 py-1 border uppercase tracking-wide ${
+                          stage.completed
+                            ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
+                            : 'border-theme-border text-theme-muted'
+                        }`}
+                      >
+                        {stage.label}
+                      </span>
+                    ))}
+                  </div>
+                </section>
+              )}
+    
+              {state.votes.length > 0 && (
+                <section className="border border-theme-border bg-theme-card/10 p-4" data-testid="sim-vote-breakdown">
+                  <h3 className="text-[10px] font-bold uppercase tracking-widest text-theme-text flex items-center gap-2 mb-3">
+                    <Vote className="w-4 h-4" /> Vote breakdown
+                  </h3>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-[10px] text-left">
+                      <thead>
+                        <tr className="text-theme-muted uppercase text-[8px] border-b border-theme-border">
+                          <th className="py-2 pr-3">Validator</th>
+                          <th className="py-2 pr-3">Role</th>
+                          <th className="py-2 pr-3">Vote</th>
+                          <th className="py-2">Counts toward quorum</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {state.votes.map(v => (
+                          <tr key={v.validatorId} className="border-b border-theme-border/30">
+                            <td className="py-2 pr-3 text-theme-text">{v.validatorId}</td>
+                            <td className="py-2 pr-3">{v.isMandatory ? 'mandatory' : 'voluntary'}</td>
+                            <td className={`py-2 pr-3 ${v.approve ? 'text-emerald-400' : 'text-red-400'}`}>
+                              {v.approve ? 'approve' : 'reject'}
+                            </td>
+                            <td className="py-2">{v.isMandatory && v.approve ? 'yes' : 'no'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              )}
+    
+              {state.committee.length > 0 && (
+                <section className="border border-theme-border bg-theme-card/10 p-4">
+                  <h3 className="text-[10px] font-bold uppercase tracking-widest text-theme-text flex items-center gap-2 mb-3">
+                    <Users className="w-4 h-4" /> Mandatory committee (VRF + stake/rep/perf)
+                  </h3>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-[10px] text-left">
+                      <thead>
+                        <tr className="text-theme-muted uppercase text-[8px] border-b border-theme-border">
+                          <th className="py-2 pr-3">#</th>
+                          <th className="py-2 pr-3">Validator</th>
+                          <th className="py-2 pr-3">ETH</th>
+                          <th className="py-2">Weighted</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {state.committee.map(m => (
+                          <tr key={m.validatorId} className="border-b border-theme-border/30">
+                            <td className="py-2 pr-3">{m.order}</td>
+                            <td className="py-2 pr-3 text-theme-text">{m.validatorId}</td>
+                            <td className="py-2 pr-3">{m.ethAddress}</td>
+                            <td className="py-2 font-mono">{m.weightedScore.toExponential(3)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              )}
+    
+              <SimulatorPinningMini
+                inputs={pinningInputs}
+                onChange={patch => setPinningInputs(prev => ({ ...prev, ...patch }))}
+                verificationCregEmitted={state.totalCregEmitted}
+                verificationRewardCount={state.rewards.length}
+              />
+    
+              {state.rewards.length > 0 && (
+                <section className="border border-theme-border bg-theme-card/10 p-4">
+                  <h3 className="text-[10px] font-bold uppercase tracking-widest text-theme-text flex items-center gap-2 mb-3">
+                    <Coins className="w-4 h-4" /> L1 work rewards (educational)
+                  </h3>
+                  <p className="text-[10px] text-theme-muted mb-3 font-sans">
+                    Base {CREG_SIM_CONSTANTS.BASE_PACKAGE_REWARD} CREG · mandatory points {CREG_SIM_CONSTANTS.MANDATORY_BASE_POINTS} / voluntary{' '}
+                    {CREG_SIM_CONSTANTS.VOLUNTARY_BASE_POINTS} · supply cap {CREG_SIM_CONSTANTS.MAX_SUPPLY_CREG.toLocaleString()} CREG
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[10px]">
+                    {state.rewards.map(r => (
+                      <div key={r.validatorId} className="border border-theme-border/60 p-2 bg-theme-bg/30">
+                        <strong className="text-theme-text">{r.validatorId}</strong>
+                        <span className="text-theme-muted block">
+                          {r.cregReward} CREG · {r.points.toFixed(1)} pts · {r.isMandatory ? 'mandatory' : 'voluntary'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+            </>
+          )}
+    
+          <section className="border border-dashed border-theme-border p-4 text-[10px] text-theme-muted leading-relaxed font-sans">
+            <h3 className="font-mono text-[10px] font-bold uppercase text-theme-text flex items-center gap-2 mb-2">
+              <Shield className="w-4 h-4" /> What you learn
+            </h3>
+            <ul className="list-disc list-inside flex flex-col gap-1">
+              <li>Publishers sign packages and stake tCREG before admission.</li>
+              <li>Mandatory committees are VRF-seeded with stake, reputation, and performance weighting (max 4 slots per eth address).</li>
+              <li>Verified status requires mandatory quorum, then PBFT finality on the local CREG chain.</li>
+              <li>Work-based incentives use tiny per-package CREG amounts so the 42M cap sustains long-term verification volume.</li>
+              <li>Pinning rewards (Proof of Pinning) run in parallel — see Tokenomics panel and whitepaper § incentives.</li>
+            </ul>
+          </section>
+        </div>
+      );
+    }
+  operator: 'match'
+  stack: |-
+    TestContext.<anonymous> (F:\project\chain-registry\CREG-Contribution-Arena\tests\simulator.test.ts:554:10)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: scenario compare summarizes happy path vs quorum fail differently
+ok 69 - scenario compare summarizes happy path vs quorum fail differently
+  ---
+  duration_ms: 0.4043
+  type: 'test'
+  ...
+# Subtest: pinning estimate exceeds single verification run at default mini-sim params
+ok 70 - pinning estimate exceeds single verification run at default mini-sim params
+  ---
+  duration_ms: 0.0904
+  type: 'test'
+  ...
+# Subtest: content regression: production surfaces still forbid simulated contributor rewards
+ok 71 - content regression: production surfaces still forbid simulated contributor rewards
+  ---
+  duration_ms: 0.6151
+  type: 'test'
+  ...
+1..71
+# tests 71
+# suites 0
+# pass 70
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1011.9823

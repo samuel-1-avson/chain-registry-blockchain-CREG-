@@ -20,7 +20,7 @@
   },
 
   "feature_flags": {
-    "zk_validation": true,
+    "zk_validation": false,
     "ml_validation": true,
     "wasm_sandbox": true,
     "private_registries": true,

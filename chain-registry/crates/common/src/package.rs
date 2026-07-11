@@ -76,6 +76,43 @@ pub fn publish_signature_message(
     )
 }
 
+/// Domain-separated publisher authorization payload. The legacy helper above
+/// remains available for decoding old records, but new admission should use
+/// this version so signatures cannot be replayed across services, chains,
+/// contracts, packages, or validity windows.
+pub fn publish_signature_message_v2(
+    chain_id: &str,
+    staking_contract: &str,
+    id: &PackageId,
+    content_hash: &str,
+    source_hash: &str,
+    manifest_hash: &str,
+    publisher_pubkey: &str,
+    publisher_address: &str,
+    ownership_claim: &str,
+    nonce: &str,
+    issued_at: i64,
+    expires_at: u64,
+) -> String {
+    format!(
+        "creg-publisher-admission-v2\nservice:creg-package-admission\nchain_id:{}\nstaking_contract:{}\necosystem:{}\nname:{}\nversion:{}\ncontent_sha256:{}\nsource_sha256:{}\nmanifest_sha256:{}\ned25519_pubkey:{}\nevm_address:{}\nownership_claim:{}\nnonce:{}\nissued_at:{}\nexpires_at:{}",
+        chain_id.trim(),
+        canonical_publisher_address(staking_contract),
+        id.ecosystem.trim(),
+        id.name.trim(),
+        id.version.trim(),
+        content_hash.trim().to_ascii_lowercase(),
+        source_hash.trim().to_ascii_lowercase(),
+        manifest_hash.trim().to_ascii_lowercase(),
+        publisher_pubkey.trim().to_ascii_lowercase(),
+        canonical_publisher_address(publisher_address),
+        ownership_claim.trim(),
+        nonce.trim(),
+        issued_at,
+        expires_at,
+    )
+}
+
 impl std::fmt::Display for PackageId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.canonical())
@@ -102,6 +139,46 @@ pub struct PackageManifest {
     pub description: Option<String>,
 }
 
+#[cfg(test)]
+mod publisher_message_tests {
+    use super::{publish_signature_message_v2, PackageId};
+
+    #[test]
+    fn publisher_payload_is_domain_separated_and_binds_manifest_and_nonce() {
+        let id = PackageId::new("npm", "pkg", "1.0.0");
+        let first = publish_signature_message_v2(
+            "creg-testnet-1",
+            "0x1111111111111111111111111111111111111111",
+            &id,
+            "aa",
+            "bb",
+            "cc",
+            "dd",
+            "0x2222222222222222222222222222222222222222",
+            "npm:pkg",
+            "nonce-a",
+            1,
+            2,
+        );
+        let second = publish_signature_message_v2(
+            "creg-testnet-1",
+            "0x1111111111111111111111111111111111111111",
+            &id,
+            "aa",
+            "bb",
+            "changed-manifest",
+            "dd",
+            "0x2222222222222222222222222222222222222222",
+            "npm:pkg",
+            "nonce-a",
+            1,
+            2,
+        );
+        assert!(first.starts_with("creg-publisher-admission-v2\nservice:creg-package-admission"));
+        assert_ne!(first, second);
+    }
+}
+
 /// Submitted by a publisher to place a package in the pending pool.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PublishRequest {
@@ -110,13 +187,14 @@ pub struct PublishRequest {
     pub content_hash: String,
     /// IPFS CID where the tarball is already pinned.
     pub ipfs_cid: String,
-    /// Publisher's staked EVM address (0x-prefixed). Bound into the Ed25519
-    /// publish signature so runtime admission can enforce on-chain stake.
+    /// Publisher's staked EVM address (0x-prefixed). Production admission
+    /// binds it to the Ed25519 key with the dual-domain proof below.
     #[serde(default)]
     pub publisher_address: String,
     /// Publisher's Ed25519 public key (hex-encoded).
     pub publisher_pubkey: String,
-    /// Ed25519 signature over canonical(id) + content_hash + publisher_address.
+    /// Ed25519 signature over the versioned domain-separated payload (or the
+    /// legacy payload for compatibility-only environments).
     pub signature: String,
     pub manifest: PackageManifest,
     pub submitted_at: DateTime<Utc>,
@@ -137,6 +215,25 @@ pub struct PublishRequest {
     /// Multi-sig: signatures corresponding to `publisher_pubkeys`.
     #[serde(default)]
     pub signatures: Vec<String>,
+    /// Phase-1 dual-key publisher proof and replay/freshness metadata.
+    /// Empty values identify legacy records that must not pass production
+    /// admission; serde defaults preserve old queue records for migration.
+    #[serde(default)]
+    pub publisher_evm_signature: String,
+    #[serde(default)]
+    pub publisher_nonce: String,
+    #[serde(default)]
+    pub publisher_expires_at: u64,
+    #[serde(default)]
+    pub source_hash: String,
+    #[serde(default)]
+    pub manifest_hash: String,
+    #[serde(default)]
+    pub ownership_claim: String,
+    #[serde(default)]
+    pub publisher_chain_id: String,
+    #[serde(default)]
+    pub publisher_staking_contract: String,
 }
 
 /// Shared references to the analysis bundles active when a validator formed a verdict.

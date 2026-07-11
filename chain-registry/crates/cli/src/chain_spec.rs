@@ -192,7 +192,7 @@ mod tests {
     "max_validators": 50
   },
   "feature_flags": {
-    "zk_validation": true,
+    "zk_validation": false,
     "ml_validation": false,
     "wasm_sandbox": true,
     "private_registries": false,

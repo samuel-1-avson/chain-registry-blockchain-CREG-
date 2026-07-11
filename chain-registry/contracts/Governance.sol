@@ -118,6 +118,8 @@ contract Governance {
     error NotGovernance();
     error EmergencyNotAuthorized();
     error InvalidPauseReason();
+    error ProposalNotExpired();
+    error InvalidSignerSet();
 
     // ── Constructor ───────────────────────────────────────────────────────────
 
@@ -128,6 +130,7 @@ contract Governance {
         require(_threshold > 0, "Threshold must be > 0");
 
         for (uint i = 0; i < _signers.length; i++) {
+            if (_signers[i] == address(0) || isSigner[_signers[i]]) revert InvalidSignerSet();
             signers.push(_signers[i]);
             isSigner[_signers[i]] = true;
         }
@@ -295,6 +298,26 @@ contract Governance {
         emit EmergencyUnpaused(msg.sender, block.timestamp);
     }
 
+    /// @notice Create the only proposal that may be opened while paused.
+    /// @dev Without this escape hatch `submit` was blocked by `whenNotPaused`,
+    ///      while `emergencyUnpause` required a self-call, creating a
+    ///      permanent pause if no unpause proposal existed beforehand.
+    function submitEmergencyUnpause(string calldata description)
+        external
+        whenPaused
+        returns (uint256 id)
+    {
+        if (!isSigner[msg.sender]) revert NotSigner();
+        id = proposalCount++;
+        Proposal storage p = _proposals[id];
+        p.target = address(this);
+        p.callData = abi.encodeWithSignature("emergencyUnpause()");
+        p.description = description;
+        p.submittedAt = block.timestamp;
+        p.status = ProposalStatus.Pending;
+        emit ProposalSubmitted(id, msg.sender, description);
+    }
+
     /// @notice Check if the system is currently paused.
     /// @return True if paused
     function isPaused() external view returns (bool) {
@@ -360,6 +383,7 @@ contract Governance {
         if (!isSigner[msg.sender]) revert NotSigner();
         Proposal storage p = _proposals[id];
         if (p.status != ProposalStatus.Pending) revert ProposalNotPending();
+        if (block.timestamp <= p.submittedAt + votingPeriod) revert ProposalNotExpired();
 
         p.status = ProposalStatus.Cancelled;
         emit ProposalCancelled(id);

@@ -11,8 +11,9 @@ service RegistryService {
     rpc GetLatestVersion(GetVersionRequest) returns (GetVersionResponse);
     
     // Submit a signed package for pending validation.
-    // The attestation fields below are publisher claims checked for consistency
-    // during admission; they do not replace validator-side analysis.
+    // Legacy ZK attestation fields below are retained for wire compatibility
+    // and ignored. Publisher identity uses the dual-domain fields at 18–24;
+    // validator-side evidence remains the qualification authority.
     rpc SubmitPackage(SubmitRequest) returns (SubmitResponse);
 }
 
@@ -53,9 +54,9 @@ message SubmitRequest {
     string publisher_address = 16;
     string publisher_pubkey = 6;
     string signature = 7;
-    // Publisher-generated admission attestation fields.
-    // These bind the claimed content/manifest hashes and claimed analysis
-    // values. Validator nodes still run the authoritative safety pipeline.
+    // Deprecated/ignored as of the Phase 0 safety freeze. Legacy ZK package
+    // attestations encoded publisher-selected analysis values and must never
+    // affect admission or qualification. Fields remain for wire compatibility.
     bytes publisher_attestation_proof = 8;
     uint32 claimed_static_analysis_score = 9;
     bool claimed_sandbox_safe = 10;
@@ -64,6 +65,14 @@ message SubmitRequest {
     uint32 threshold = 13;
     string manifest_json = 14;
     string manifest_hash = 15;
+    // Phase-1 dual-key publisher proof and replay/freshness metadata.
+    string publisher_evm_signature = 18;
+    string publisher_nonce = 19;
+    uint64 publisher_expires_at = 20;
+    string source_hash = 21;
+    string ownership_claim = 22;
+    string publisher_chain_id = 23;
+    string publisher_staking_contract = 24;
 }
 
 message SubmitResponse {

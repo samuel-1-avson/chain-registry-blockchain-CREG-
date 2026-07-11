@@ -121,6 +121,23 @@ contract RegistryTest is Test {
         registry.submitPackage(CANONICAL, CONTENT_HASH, IPFS_CID);
     }
 
+    function test_pausedGovernanceCanSubmitAndExecuteUnpauseProposal() public {
+        vm.prank(alice);
+        governance.emergencyPause("test pause");
+        vm.prank(bob);
+        governance.confirmPauseRequest();
+        assertTrue(governance.isPaused());
+
+        vm.prank(alice);
+        uint256 proposalId = governance.submitEmergencyUnpause("recover paused system");
+        vm.prank(alice);
+        governance.vote(proposalId, true);
+        vm.prank(bob);
+        governance.vote(proposalId, true);
+
+        assertFalse(governance.isPaused());
+    }
+
     function test_publisherCanStakeAndSubmit() public {
         _stakeAsPublisher(alice);
         _submitPackage(alice);
@@ -202,35 +219,21 @@ contract RegistryTest is Test {
         registry.finalizePackage(CANONICAL, sigs);
     }
 
-    // ── ZK package binding ─────────────────────────────────────────────────
+    // ── Retired ZK qualification and checkpoint paths ───────────────────────
 
-    function test_submitPackageWithZKProofRequiresPackageBoundInputs() public {
-        _stakeAsPublisher(alice);
-        ChainRegistry zkRegistry = _deployRegistryWithMockZK();
-        uint256[8] memory proof;
-        uint256[] memory wrongInputs = _zkInputs(bytes32(uint256(999)));
-        uint256 fee = zkRegistry.zkValidationFee();
-
-        vm.prank(alice);
-        vm.expectRevert(ChainRegistry.InvalidZKPublicInputs.selector);
-        zkRegistry.submitPackageWithZKProof{value: fee}(
-            CANONICAL,
-            CONTENT_HASH,
-            IPFS_CID,
-            proof,
-            wrongInputs
-        );
+    function test_deployDisablesZKQualification() public view {
+        assertFalse(registry.zkValidationEnabled());
+        assertEq(registry.zkValidationFee(), 0);
     }
 
-    function test_submitPackageWithZKProofAcceptsPackageBoundInputs() public {
+    function test_zkProofCannotQualifyNewPackageEvenWithPassingCallerInputs() public {
         _stakeAsPublisher(alice);
-        ChainRegistry zkRegistry = _deployRegistryWithMockZK();
         uint256[8] memory proof;
         uint256[] memory inputs = _zkInputs(CONTENT_HASH);
-        uint256 fee = zkRegistry.zkValidationFee();
 
         vm.prank(alice);
-        zkRegistry.submitPackageWithZKProof{value: fee}(
+        vm.expectRevert(ChainRegistry.ZKQualificationRetired.selector);
+        registry.submitPackageWithZKProof(
             CANONICAL,
             CONTENT_HASH,
             IPFS_CID,
@@ -238,27 +241,46 @@ contract RegistryTest is Test {
             inputs
         );
 
-        assertEq(uint(zkRegistry.getStatus(CANONICAL)), uint(ChainRegistry.PackageStatus.Verified));
-        ChainRegistry.PackageRecord memory rec = zkRegistry.getPackage(CANONICAL);
-        assertEq(uint(rec.validationMode), uint(ChainRegistry.ValidationMode.ZKProof));
+        assertEq(uint(registry.getStatus(CANONICAL)), uint(ChainRegistry.PackageStatus.Unknown));
     }
 
-    function test_verifyZKProofForPendingPackageRequiresStoredPackageBinding() public {
+    function test_zkProofCannotQualifyPendingPackage() public {
         _stakeAsPublisher(alice);
-        ChainRegistry zkRegistry = _deployRegistryWithMockZK();
+        _submitPackage(alice);
         uint256[8] memory proof;
-        uint256[] memory wrongInputs = _zkInputs(bytes32(uint256(123)));
-
-        vm.prank(alice);
-        zkRegistry.submitPackage(CANONICAL, CONTENT_HASH, IPFS_CID);
-
-        vm.expectRevert(ChainRegistry.InvalidZKPublicInputs.selector);
-        zkRegistry.verifyZKProof(CANONICAL, proof, wrongInputs);
-
         uint256[] memory inputs = _zkInputs(CONTENT_HASH);
-        zkRegistry.verifyZKProof(CANONICAL, proof, inputs);
 
-        assertEq(uint(zkRegistry.getStatus(CANONICAL)), uint(ChainRegistry.PackageStatus.Verified));
+        vm.expectRevert(ChainRegistry.ZKQualificationRetired.selector);
+        registry.verifyZKProof(CANONICAL, proof, inputs);
+
+        assertEq(uint(registry.getStatus(CANONICAL)), uint(ChainRegistry.PackageStatus.Pending));
+    }
+
+    function test_governanceCannotReenableZKQualification() public {
+        vm.prank(address(governance));
+        vm.expectRevert(ChainRegistry.ZKQualificationRetired.selector);
+        registry.setZKValidationEnabled(true);
+        assertFalse(registry.zkValidationEnabled());
+    }
+
+    function test_legacyBatchProofCannotAdvanceCheckpointState() public {
+        uint256[8] memory proof;
+        uint256[] memory publicInputs = new uint256[](0);
+        bytes32 nextRoot = keccak256("untrusted-next-root");
+
+        vm.prank(address(governance));
+        vm.expectRevert(ChainRegistry.LegacyCheckpointingRetired.selector);
+        registry.submitRollupBatch(
+            bytes32(0),
+            nextRoot,
+            1,
+            keccak256("untrusted-data-root"),
+            proof,
+            publicInputs
+        );
+
+        assertEq(registry.latestStateRoot(), bytes32(0));
+        assertEq(registry.totalBatches(), 0);
     }
 
     // ── Revocation ────────────────────────────────────────────────────────────
@@ -478,11 +500,21 @@ contract RegistryTest is Test {
         string memory canonical,
         bytes32 contentHash,
         bool approved
-    ) internal pure returns (ChainRegistry.ValidatorSig memory) {
+    ) internal view returns (ChainRegistry.ValidatorSig memory) {
         bytes32 digest = keccak256(
             abi.encodePacked(
                 "\x19Ethereum Signed Message:\n32",
-                keccak256(abi.encodePacked(canonical, contentHash))
+                keccak256(
+                    abi.encode(
+                        registry.VALIDATOR_SIGNATURE_DOMAIN(),
+                        block.chainid,
+                        address(registry),
+                        staking.activeValidatorCount(),
+                        registry.quorumPct(),
+                        canonical,
+                        contentHash
+                    )
+                )
             )
         );
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(privKey, digest);

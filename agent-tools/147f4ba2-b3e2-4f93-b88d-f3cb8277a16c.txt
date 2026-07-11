@@ -1,0 +1,1429 @@
+
+> creg-contribution-arena@0.0.0 lint
+> tsc --noEmit
+
+
+> creg-contribution-arena@0.0.0 test
+> tsx --test tests/policy.test.ts tests/content.test.ts tests/simulator.test.ts tests/firestore.indexes.test.ts tests/functions.pipeline.test.ts tests/profileSetup.test.ts
+
+TAP version 13
+# Subtest: technical summaries avoid absolute solved or guaranteed safety claims
+ok 1 - technical summaries avoid absolute solved or guaranteed safety claims
+  ---
+  duration_ms: 1.0643
+  type: 'test'
+  ...
+# Subtest: live-service claims are labeled as snapshots rather than monitoring
+ok 2 - live-service claims are labeled as snapshots rather than monitoring
+  ---
+  duration_ms: 0.2456
+  type: 'test'
+  ...
+# Subtest: whitepaper manifest tracks latest canonical docs from chain-registry
+ok 3 - whitepaper manifest tracks latest canonical docs from chain-registry
+  ---
+  duration_ms: 84.9634
+  type: 'test'
+  ...
+# Subtest: whitepaper library UI prefers PDF downloads over raw markdown
+ok 4 - whitepaper library UI prefers PDF downloads over raw markdown
+  ---
+  duration_ms: 0.7356
+  type: 'test'
+  ...
+# Subtest: protocol docs reader serves deployed canonical markdown before Firestore
+ok 5 - protocol docs reader serves deployed canonical markdown before Firestore
+  ---
+  duration_ms: 1.0134
+  type: 'test'
+  ...
+# Subtest: project info center focuses on workflow learning surfaces
+ok 6 - project info center focuses on workflow learning surfaces
+  ---
+  duration_ms: 0.3632
+  type: 'test'
+  ...
+# Subtest: README clearly labels the bounded production-alpha state
+ok 7 - README clearly labels the bounded production-alpha state
+  ---
+  duration_ms: 0.3102
+  type: 'test'
+  ...
+# Subtest: production alpha avoids third-party font requests and accurately labels active features
+ok 8 - production alpha avoids third-party font requests and accurately labels active features
+  ---
+  duration_ms: 0.286
+  type: 'test'
+  ...
+# Subtest: security-sensitive forms block public exploit intake without GitHub links
+not ok 9 - security-sensitive forms block public exploit intake without GitHub links
+  ---
+  duration_ms: 4.0543
+  type: 'test'
+  location: 'F:\\project\\chain-registry\\CREG-Contribution-Arena\\tests\\content.test.ts:1:5298'
+  failureType: 'testCodeFailure'
+  error: |-
+    The input did not match the regular expression /critiqueCategory === 'Security Concern'/. Input:
+    
+    "import React, { useState } from 'react';\r\n" +
+      "import { Finding, FindingStatus } from '../types';\r\n" +
+      "import { commentOnFinding, getFinding, submitAppeal, voteFinding } from '../firebaseApi';\n" +
+      "import { PRIVATE_SECURITY_DISCLOSURE_NOTICE } from '../config/securityLinks';\r\n" +
+      'import { \r\n' +
+      '  Plus, Check, Shield, AlertCircle, MessageSquare, ThumbsUp, RefreshCw, ChevronRight, User, HelpCircle, FileText, GitBranch\r\n' +
+      "} from 'lucide-react';\r\n" +
+      '\r\n' +
+      'interface FindingsBoardProps {\r\n' +
+      '  findings: Finding[];\r\n' +
+      '  onAddFinding: (finding: Finding) => Promise<Finding>;\r\n' +
+      '  onFindingChanged: (finding: Finding) => void;\r\n' +
+      '  onUpdateFindingStatus: (id: string, newStatus: FindingStatus, notes?: string, xpReward?: number, repReward?: number) => void;\r\n' +
+      '  username: string;\r\n' +
+      '}\r\n' +
+      '\r\n' +
+      'const CATEGORIES = [\r\n' +
+      "  'Whitepaper Confusion',\r\n" +
+      "  'Security Concern',\r\n" +
+      "  'Contradiction',\r\n" +
+      "  'Missing Documentation',\r\n" +
+      "  'UX Issue',\r\n" +
+      "  'Airdrop Wording Risk',\r\n" +
+      "  'Technical Suggestion',\r\n" +
+      "  'Community Suggestion'\r\n" +
+      '];\r\n' +
+      '\r\n' +
+      'function commentCount(finding: Finding) {\n' +
+      '  return finding.commentCount ?? finding.comments.length;\n' +
+      '}\n' +
+      '\n' +
+      'export default function FindingsBoard({ findings, onAddFinding, onFindingChanged, onUpdateFindingStatus, username }: FindingsBoardProps) {\r\n' +
+      "  const [selectedCategory, setSelectedCategory] = useState<string>('All');\r\n" +
+      "  const [selectedStatus, setSelectedStatus] = useState<string>('All');\r\n" +
+      "  const [newTitle, setNewTitle] = useState('');\r\n" +
+      "  const [newDesc, setNewDesc] = useState('');\r\n" +
+      "  const [newCategory, setNewCategory] = useState<any>('Whitepaper Confusion');\r\n" +
+      "  const [newSource, setNewSource] = useState('');\r\n" +
+      '  const [showSubmitForm, setShowSubmitForm] = useState(false);\r\n' +
+      '  const [activeFinding, setActiveFinding] = useState<Finding | null>(null);\r\n' +
+      "  const [newComment, setNewComment] = useState('');\r\n" +
+      '  const [isPrechecking, setIsPrechecking] = useState(false);\r\n' +
+      '  const [actionError, setActionError] = useState<string | null>(null);\r\n' +
+      '\r\n' +
+      '  // Slice 5 Appeal States\r\n' +
+      "  const [appealText, setAppealText] = useState('');\r\n" +
+      '  const [showAppealForm, setShowAppealForm] = useState(false);\r\n' +
+      '  const [isAppealing, setIsAppealing] = useState(false);\n' +
+      '  const [loadingFindingId, setLoadingFindingId] = useState<string | null>(null);\n' +
+      '\n' +
+      '  const openFinding = async (finding: Finding) => {\n' +
+      '    setActiveFinding(finding);\n' +
+      '    if (finding.comments.length > 0 || commentCount(finding) === 0) return;\n' +
+      '    setLoadingFindingId(finding.id);\n' +
+      '    try {\n' +
+      '      const hydrated = await getFinding(finding.id, true);\n' +
+      '      setActiveFinding(hydrated);\n' +
+      '      onFindingChanged(hydrated);\n' +
+      '    } catch (err) {\n' +
+      '      console.error("Failed to load finding comments:", err);\n' +
+      '    } finally {\n' +
+      '      setLoadingFindingId(null);\n' +
+      '    }\n' +
+      '  };\r\n' +
+      '\r\n' +
+      '  // Status badge style helper - Retro Monochrome theme adaptive\r\n' +
+      '  const getStatusBadge = (status: FindingStatus) => {\r\n' +
+      '    switch (status) {\r\n' +
+      "      case 'Approved':\r\n" +
+      "        return 'bg-theme-accent text-theme-accent-text border-theme-accent';\r\n" +
+      "      case 'Rejected':\r\n" +
+      "        return 'bg-transparent text-theme-muted border-theme-border line-through';\r\n" +
+      "      case 'AI Pre-Check':\r\n" +
+      "      case 'Community Discussion':\r\n" +
+      "      case 'Admin Review':\r\n" +
+      "        return 'bg-transparent text-theme-text border-theme-border border-dashed';\r\n" +
+      '      default:\r\n' +
+      "        return 'bg-transparent text-theme-muted border-theme-border';\r\n" +
+      '    }\r\n' +
+      '  };\r\n' +
+      '\r\n' +
+      '  const handleSubmit = async (e: React.FormEvent) => {\r\n' +
+      '    e.preventDefault();\r\n' +
+      '    if (!newTitle.trim() || !newDesc.trim()) return;\r\n' +
+      '\r\n' +
+      '    setIsPrechecking(true);\r\n' +
+      '    setActionError(null);\r\n' +
+      '    try {\r\n' +
+      '      const newFindingItem: Finding = {\r\n' +
+      '        id: "find_" + Date.now(),\r\n' +
+      '        title: newTitle,\r\n' +
+      '        description: newDesc,\r\n' +
+      '        category: newCategory,\r\n' +
+      "        author: username || 'Contributor',\r\n" +
+      '        sourceReference: newSource || undefined,\r\n' +
+      '        createdAt: new Date().toISOString().slice(0, 10),\r\n' +
+      "        status: 'Submitted',\r\n" +
+      '        communityVotes: { up: 0, down: 0 },\r\n' +
+      '        comments: [],\r\n' +
+      '      };\r\n' +
+      '\r\n' +
+      '      const savedFinding = await onAddFinding(newFindingItem);\r\n' +
+      '\r\n' +
+      '      // Clean inputs\r\n' +
+      "      setNewTitle('');\r\n" +
+      "      setNewDesc('');\r\n" +
+      "      setNewSource('');\r\n" +
+      '      setShowSubmitForm(false);\r\n' +
+      '      setActiveFinding(savedFinding);\r\n' +
+      '\r\n' +
+      '    } catch (err: any) {\r\n' +
+      '      console.error(err);\r\n' +
+      '      setActionError(err.message || "Submission analysis failed. Check the evidence and retry.");\r\n' +
+      '    } finally {\r\n' +
+      '      setIsPrechecking(false);\r\n' +
+      '    }\r\n' +
+      '  };\r\n' +
+      '\r\n' +
+      "  const handleVote = async (id: string, type: 'up' | 'down') => {\r\n" +
+      '    try {\r\n' +
+      '      setActionError(null);\r\n' +
+      '      const updated = await voteFinding(id, type);\r\n' +
+      '      setActiveFinding(updated);\r\n' +
+      '      onFindingChanged(updated);\r\n' +
+      '    } catch (err) {\r\n' +
+      '      console.error("Error voting:", err);\r\n' +
+      '      setActionError(err instanceof Error ? err.message : "Vote failed.");\r\n' +
+      '    }\r\n' +
+      '  };\r\n' +
+      '\r\n' +
+      '  const handleAddComment = async () => {\r\n' +
+      '    if (!newComment.trim() || !activeFinding) return;\r\n' +
+      '    try {\r\n' +
+      '      setActionError(null);\r\n' +
+      '      const updated = await commentOnFinding(activeFinding.id, newComment);\r\n' +
+      '      setActiveFinding(updated);\r\n' +
+      '      onFindingChanged(updated);\r\n' +
+      "      setNewComment('');\r\n" +
+      '    } catch (err) {\r\n' +
+      '      console.error("Error adding comment:", err);\r\n' +
+      '      setActionError(err instanceof Error ? err.message : "Comment failed.");\r\n' +
+      '    }\r\n' +
+      '  };\r\n' +
+      '\r\n' +
+      '  const filteredFindings = findings.filter(f => {\r\n' +
+      "    const matchCat = selectedCategory === 'All' || f.category === selectedCategory;\r\n" +
+      "    const matchStatus = selectedStatus === 'All' || f.status === selectedStatus;\r\n" +
+      '    return matchCat && matchStatus;\r\n' +
+      '  });\r\n' +
+      '\r\n' +
+      '  return (\r\n' +
+      '    <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 font-mono text-xs">\r\n' +
+      '      {actionError && (\r\n' +
+      '        <div role="alert" className="lg:col-span-12 border border-theme-accent bg-theme-card px-4 py-3 text-theme-text font-sans">\r\n' +
+      '          {actionError}\r\n' +
+      '        </div>\r\n' +
+      '      )}\r\n' +
+      '      \r\n' +
+      '      {/* Category filters & create triggers */}\r\n' +
+      '      <div className="lg:col-span-4 flex flex-col gap-4">\r\n' +
+      '        <div className="bg-theme-card border border-theme-border p-4">\r\n' +
+      '          <button\r\n' +
+      '            onClick={() => {\r\n' +
+      '              setShowSubmitForm(!showSubmitForm);\r\n' +
+      '              setActiveFinding(null);\r\n' +
+      '            }}\r\n' +
+      '            className="w-full bg-theme-accent text-theme-accent-text font-bold uppercase tracking-wider py-2 px-4 hover:bg-theme-bg hover:text-theme-text border border-theme-accent transition-all text-[10px]"\r\n' +
+      '          >\r\n' +
+      "            {showSubmitForm ? 'CLOSE WINDOW' : 'REGISTER FINDING [+]'}\r\n" +
+      '          </button>\r\n' +
+      '        </div>\r\n' +
+      '\r\n' +
+      '        {/* Filter controls */}\r\n' +
+      '        {!showSubmitForm && (\r\n' +
+      '          <div className="bg-theme-card border border-theme-border p-4 flex flex-col gap-4">\r\n' +
+      '            <div>\r\n' +
+      '              <h4 className="text-[10px] text-theme-muted font-bold uppercase mb-2">CATEGORIES</h4>\r\n' +
+      '              <div className="flex flex-col gap-1">\r\n' +
+      '                <button\r\n' +
+      "                  onClick={() => setSelectedCategory('All')}\r\n" +
+      '                  className={`w-full text-left py-1 px-2 uppercase text-[9px] transition-all flex justify-between items-center ${\r\n' +
+      "                    selectedCategory === 'All' ? 'bg-theme-text/5 text-theme-text border-l-2 border-theme-accent pl-2.5' : 'text-theme-muted hover:text-theme-text'\r\n" +
+      '                  }`}\r\n' +
+      '                >\r\n' +
+      '                  <span>ALL ISSUES</span>\r\n' +
+      '                  <span>[{findings.length}]</span>\r\n' +
+      '                </button>\r\n' +
+      '                {CATEGORIES.map(cat => {\r\n' +
+      '                  const count = findings.filter(f => f.category === cat).length;\r\n' +
+      '                  return (\r\n' +
+      '                    <button\r\n' +
+      '                      key={cat}\r\n' +
+      '                      onClick={() => setSelectedCategory(cat)}\r\n' +
+      '                      className={`w-full text-left py-1.5 px-2 uppercase text-[9px] transition-all flex justify-between items-center ${\r\n' +
+      "                        selectedCategory === cat ? 'bg-theme-text/5 text-theme-text border-l-2 border-theme-accent pl-2.5' : 'text-theme-muted hover:text-theme-text'\r\n" +
+      '                      }`}\r\n' +
+      '                    >\r\n' +
+      '                      <span className="truncate mr-1">{cat}</span>\r\n' +
+      '                      <span>[{count}]</span>\r\n' +
+      '                    </button>\r\n' +
+      '                  );\r\n' +
+      '                })}\r\n' +
+      '              </div>\r\n' +
+      '            </div>\r\n' +
+      '\r\n' +
+      '            <div className="border-t border-theme-border pt-3">\r\n' +
+      '              <h4 className="text-[10px] text-theme-muted font-bold uppercase mb-2">AUDIT STATUS</h4>\r\n' +
+      '              <select\r\n' +
+      '                value={selectedStatus}\r\n' +
+      '                onChange={(e) => setSelectedStatus(e.target.value)}\r\n' +
+      '                className="w-full bg-theme-bg border border-theme-border-med p-2 text-[10px] text-theme-text outline-none focus:border-theme-accent uppercase"\r\n' +
+      '              >\r\n' +
+      '                <option value="All">ALL PROGRESSION STEPS</option>\r\n' +
+      '                <option value="Submitted">1. SUBMITTED</option>\r\n' +
+      '                <option value="AI Pre-Check">2. AI PRE-CHECK</option>\r\n' +
+      '                <option value="Community Discussion">3. DISCUSSION</option>\r\n' +
+      '                <option value="Admin Review">4. REVIEW</option>\r\n' +
+      '                <option value="Approved">5. APPROVED</option>\r\n' +
+      '                <option value="Rejected">6. REJECTED</option>\r\n' +
+      '                <option value="Clarification">7. CLARIFICATION</option>\r\n' +
+      '              </select>\r\n' +
+      '            </div>\r\n' +
+      '          </div>\r\n' +
+      '        )}\r\n' +
+      '\r\n' +
+      '        {/* Shortened Quality disclaimer */}\r\n' +
+      '        <div className="bg-theme-card border border-theme-border p-4">\r\n' +
+      '          <h5 className="text-[9px] uppercase font-bold text-theme-text mb-1 flex items-center gap-1.5">\r\n' +
+      '            <Shield className="w-3.5 h-3.5" />\r\n' +
+      '            REPUTATION PARAMETERS\r\n' +
+      '          </h5>\r\n' +
+      '          <p className="text-[10px] text-theme-muted leading-relaxed">\r\n' +
+      '            Constructive critiques citing exact section chapters yield up to <span className="text-theme-text font-bold underline">500 rep</span> on verified audits. No spam allowed.\r\n' +
+      '          </p>\r\n' +
+      '        </div>\r\n' +
+      '      </div>\r\n' +
+      '\r\n' +
+      '      {/* Main interactive findings board l'... 23179 more characters
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+  actual: |-
+    import React, { useState } from 'react';
+    import { Finding, FindingStatus } from '../types';
+    import { commentOnFinding, getFinding, submitAppeal, voteFinding } from '../firebaseApi';
+    import { PRIVATE_SECURITY_DISCLOSURE_NOTICE } from '../config/securityLinks';
+    import { 
+      Plus, Check, Shield, AlertCircle, MessageSquare, ThumbsUp, RefreshCw, ChevronRight, User, HelpCircle, FileText, GitBranch
+    } from 'lucide-react';
+    
+    interface FindingsBoardProps {
+      findings: Finding[];
+      onAddFinding: (finding: Finding) => Promise<Finding>;
+      onFindingChanged: (finding: Finding) => void;
+      onUpdateFindingStatus: (id: string, newStatus: FindingStatus, notes?: string, xpReward?: number, repReward?: number) => void;
+      username: string;
+    }
+    
+    const CATEGORIES = [
+      'Whitepaper Confusion',
+      'Security Concern',
+      'Contradiction',
+      'Missing Documentation',
+      'UX Issue',
+      'Airdrop Wording Risk',
+      'Technical Suggestion',
+      'Community Suggestion'
+    ];
+    
+    function commentCount(finding: Finding) {
+      return finding.commentCount ?? finding.comments.length;
+    }
+    
+    export default function FindingsBoard({ findings, onAddFinding, onFindingChanged, onUpdateFindingStatus, username }: FindingsBoardProps) {
+      const [selectedCategory, setSelectedCategory] = useState<string>('All');
+      const [selectedStatus, setSelectedStatus] = useState<string>('All');
+      const [newTitle, setNewTitle] = useState('');
+      const [newDesc, setNewDesc] = useState('');
+      const [newCategory, setNewCategory] = useState<any>('Whitepaper Confusion');
+      const [newSource, setNewSource] = useState('');
+      const [showSubmitForm, setShowSubmitForm] = useState(false);
+      const [activeFinding, setActiveFinding] = useState<Finding | null>(null);
+      const [newComment, setNewComment] = useState('');
+      const [isPrechecking, setIsPrechecking] = useState(false);
+      const [actionError, setActionError] = useState<string | null>(null);
+    
+      // Slice 5 Appeal States
+      const [appealText, setAppealText] = useState('');
+      const [showAppealForm, setShowAppealForm] = useState(false);
+      const [isAppealing, setIsAppealing] = useState(false);
+      const [loadingFindingId, setLoadingFindingId] = useState<string | null>(null);
+    
+      const openFinding = async (finding: Finding) => {
+        setActiveFinding(finding);
+        if (finding.comments.length > 0 || commentCount(finding) === 0) return;
+        setLoadingFindingId(finding.id);
+        try {
+          const hydrated = await getFinding(finding.id, true);
+          setActiveFinding(hydrated);
+          onFindingChanged(hydrated);
+        } catch (err) {
+          console.error("Failed to load finding comments:", err);
+        } finally {
+          setLoadingFindingId(null);
+        }
+      };
+    
+      // Status badge style helper - Retro Monochrome theme adaptive
+      const getStatusBadge = (status: FindingStatus) => {
+        switch (status) {
+          case 'Approved':
+            return 'bg-theme-accent text-theme-accent-text border-theme-accent';
+          case 'Rejected':
+            return 'bg-transparent text-theme-muted border-theme-border line-through';
+          case 'AI Pre-Check':
+          case 'Community Discussion':
+          case 'Admin Review':
+            return 'bg-transparent text-theme-text border-theme-border border-dashed';
+          default:
+            return 'bg-transparent text-theme-muted border-theme-border';
+        }
+      };
+    
+      const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!newTitle.trim() || !newDesc.trim()) return;
+    
+        setIsPrechecking(true);
+        setActionError(null);
+        try {
+          const newFindingItem: Finding = {
+            id: "find_" + Date.now(),
+            title: newTitle,
+            description: newDesc,
+            category: newCategory,
+            author: username || 'Contributor',
+            sourceReference: newSource || undefined,
+            createdAt: new Date().toISOString().slice(0, 10),
+            status: 'Submitted',
+            communityVotes: { up: 0, down: 0 },
+            comments: [],
+          };
+    
+          const savedFinding = await onAddFinding(newFindingItem);
+    
+          // Clean inputs
+          setNewTitle('');
+          setNewDesc('');
+          setNewSource('');
+          setShowSubmitForm(false);
+          setActiveFinding(savedFinding);
+    
+        } catch (err: any) {
+          console.error(err);
+          setActionError(err.message || "Submission analysis failed. Check the evidence and retry.");
+        } finally {
+          setIsPrechecking(false);
+        }
+      };
+    
+      const handleVote = async (id: string, type: 'up' | 'down') => {
+        try {
+          setActionError(null);
+          const updated = await voteFinding(id, type);
+          setActiveFinding(updated);
+          onFindingChanged(updated);
+        } catch (err) {
+          console.error("Error voting:", err);
+          setActionError(err instanceof Error ? err.message : "Vote failed.");
+        }
+      };
+    
+      const handleAddComment = async () => {
+        if (!newComment.trim() || !activeFinding) return;
+        try {
+          setActionError(null);
+          const updated = await commentOnFinding(activeFinding.id, newComment);
+          setActiveFinding(updated);
+          onFindingChanged(updated);
+          setNewComment('');
+        } catch (err) {
+          console.error("Error adding comment:", err);
+          setActionError(err instanceof Error ? err.message : "Comment failed.");
+        }
+      };
+    
+      const filteredFindings = findings.filter(f => {
+        const matchCat = selectedCategory === 'All' || f.category === selectedCategory;
+        const matchStatus = selectedStatus === 'All' || f.status === selectedStatus;
+        return matchCat && matchStatus;
+      });
+    
+      return (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 font-mono text-xs">
+          {actionError && (
+            <div role="alert" className="lg:col-span-12 border border-theme-accent bg-theme-card px-4 py-3 text-theme-text font-sans">
+              {actionError}
+            </div>
+          )}
+          
+          {/* Category filters & create triggers */}
+          <div className="lg:col-span-4 flex flex-col gap-4">
+            <div className="bg-theme-card border border-theme-border p-4">
+              <button
+                onClick={() => {
+                  setShowSubmitForm(!showSubmitForm);
+                  setActiveFinding(null);
+                }}
+                className="w-full bg-theme-accent text-theme-accent-text font-bold uppercase tracking-wider py-2 px-4 hover:bg-theme-bg hover:text-theme-text border border-theme-accent transition-all text-[10px]"
+              >
+                {showSubmitForm ? 'CLOSE WINDOW' : 'REGISTER FINDING [+]'}
+              </button>
+            </div>
+    
+            {/* Filter controls */}
+            {!showSubmitForm && (
+              <div className="bg-theme-card border border-theme-border p-4 flex flex-col gap-4">
+                <div>
+                  <h4 className="text-[10px] text-theme-muted font-bold uppercase mb-2">CATEGORIES</h4>
+                  <div className="flex flex-col gap-1">
+                    <button
+                      onClick={() => setSelectedCategory('All')}
+                      className={`w-full text-left py-1 px-2 uppercase text-[9px] transition-all flex justify-between items-center ${
+                        selectedCategory === 'All' ? 'bg-theme-text/5 text-theme-text border-l-2 border-theme-accent pl-2.5' : 'text-theme-muted hover:text-theme-text'
+                      }`}
+                    >
+                      <span>ALL ISSUES</span>
+                      <span>[{findings.length}]</span>
+                    </button>
+                    {CATEGORIES.map(cat => {
+                      const count = findings.filter(f => f.category === cat).length;
+                      return (
+                        <button
+                          key={cat}
+                          onClick={() => setSelectedCategory(cat)}
+                          className={`w-full text-left py-1.5 px-2 uppercase text-[9px] transition-all flex justify-between items-center ${
+                            selectedCategory === cat ? 'bg-theme-text/5 text-theme-text border-l-2 border-theme-accent pl-2.5' : 'text-theme-muted hover:text-theme-text'
+                          }`}
+                        >
+                          <span className="truncate mr-1">{cat}</span>
+                          <span>[{count}]</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+    
+                <div className="border-t border-theme-border pt-3">
+                  <h4 className="text-[10px] text-theme-muted font-bold uppercase mb-2">AUDIT STATUS</h4>
+                  <select
+                    value={selectedStatus}
+                    onChange={(e) => setSelectedStatus(e.target.value)}
+                    className="w-full bg-theme-bg border border-theme-border-med p-2 text-[10px] text-theme-text outline-none focus:border-theme-accent uppercase"
+                  >
+                    <option value="All">ALL PROGRESSION STEPS</option>
+                    <option value="Submitted">1. SUBMITTED</option>
+                    <option value="AI Pre-Check">2. AI PRE-CHECK</option>
+                    <option value="Community Discussion">3. DISCUSSION</option>
+                    <option value="Admin Review">4. REVIEW</option>
+                    <option value="Approved">5. APPROVED</option>
+                    <option value="Rejected">6. REJECTED</option>
+                    <option value="Clarification">7. CLARIFICATION</option>
+                  </select>
+                </div>
+              </div>
+            )}
+    
+            {/* Shortened Quality disclaimer */}
+            <div className="bg-theme-card border border-theme-border p-4">
+              <h5 className="text-[9px] uppercase font-bold text-theme-text mb-1 flex items-center gap-1.5">
+                <Shield className="w-3.5 h-3.5" />
+                REPUTATION PARAMETERS
+              </h5>
+              <p className="text-[10px] text-theme-muted leading-relaxed">
+                Constructive critiques citing exact section chapters yield up to <span className="text-theme-text font-bold underline">500 rep</span> on verified audits. No spam allowed.
+              </p>
+            </div>
+          </div>
+    
+          {/* Main interactive findings board list/details/form */}
+          <div className="lg:col-span-8 flex flex-col gap-4">
+            {showSubmitForm ? (
+              /* Create Finding Form with AI Pre-check indicator */
+              <form onSubmit={handleSubmit} className="bg-theme-card border border-theme-border p-5 flex flex-col gap-3">
+                <div>
+                  <h3 className="font-bold text-xs uppercase text-theme-text">Create Whitepaper Critique</h3>
+                  <p className="text-[9px] text-theme-muted uppercase mt-0.5">Submit contradictions or isolated sandbox issues.</p>
+                </div>
+    
+                <div className="flex flex-col gap-1">
+                  <label className="text-[9px] text-theme-muted uppercase font-bold">TITLE</label>
+                  <input
+                    required
+                    type="text"
+                    placeholder="Ambiguity in Section 8.7 regarding limits..."
+                    value={newTitle}
+                    onChange={(e) => setNewTitle(e.target.value)}
+                    className="bg-theme-bg border border-theme-border-med p-2 text-xs text-theme-text focus:border-theme-accent outline-none font-mono uppercase"
+                  />
+                </div>
+    
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[9px] text-theme-muted uppercase font-bold">CATEGORY</label>
+                    <select
+                      value={newCategory}
+                      onChange={(e) => setNewCategory(e.target.value)}
+                      className="bg-theme-bg border border-theme-border-med p-2 text-xs text-theme-text focus:border-theme-accent outline-none uppercase"
+                    >
+                      {CATEGORIES.map(cat => (
+                        <option key={cat} value={cat}>{cat.toUpperCase()}</option>
+                      ))}
+                    </select>
+                  </div>
+    
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[9px] text-theme-muted uppercase font-bold">REFERENCE</label>
+                    <input
+                      type="text"
+                      placeholder="Chapter 8.7 page 11"
+                      value={newSource}
+                      onChange={(e) => setNewSource(e.target.value)}
+                      className="bg-theme-bg border border-theme-border-med p-2 text-xs text-theme-text focus:border-theme-accent outline-none font-mono"
+                    />
+                  </div>
+                </div>
+    
+                {newCategory === 'Security Concern' ? (
+                  <div className="border border-rose-500/40 bg-rose-500/5 p-4 text-xs font-sans text-theme-text rounded-sm mt-1 flex flex-col gap-2.5">
+                    <strong className="font-mono text-xs text-rose-400 block uppercase">⚠ Private Security Disclosure Required</strong>
+                    <p>To protect system security, vulnerabilities (e.g. exploit details, consensus bugs, or contract risks) must NOT be submitted publicly.</p>
+                    <p>{PRIVATE_SECURITY_DISCLOSURE_NOTICE}</p>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[9px] text-theme-muted uppercase font-bold">CRITIQUE SPECIFICATION</label>
+                    <textarea
+                      required
+                      rows={4}
+                      placeholder="Provide details of the contradiction or gaps."
+                      value={newDesc}
+                      onChange={(e) => setNewDesc(e.target.value)}
+                      className="bg-theme-bg border border-theme-border-med p-2 text-xs text-theme-text focus:border-theme-accent outline-none font-mono"
+                    />
+                  </div>
+                )}
+    
+                <div className="flex items-center justify-between border-t border-theme-border pt-3 mt-1">
+                  <button
+                    type="button"
+                    onClick={() => setShowSubmitForm(false)}
+                    className="text-[9px] text-theme-muted hover:text-theme-text uppercase font-bold"
+                  >
+                    Cancel
+                  </button>
+    
+                  <button
+                    type="submit"
+                    disabled={isPrechecking || newCategory === 'Security Concern'}
+                    className="bg-theme-accent text-theme-accent-text font-bold text-[9px] uppercase tracking-wider py-1.5 px-4 border border-theme-accent hover:bg-theme-bg hover:text-theme-text transition-all flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isPrechecking ? (
+                      <>
+                        <RefreshCw className="w-3 h-3 animate-spin" />
+                        PRE-CHECKING...
+                      </>
+                    ) : (
+                      <>
+                        <Shield className="w-3 h-3" />
+                        RUN PRE-CHECK & SUBMIT
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            ) : activeFinding ? (
+              /* Detailed Finding View (collapsible chat, community notes, AI grader feedback) */
+              <div className="bg-theme-card border border-theme-border p-5 flex flex-col gap-4">
+                {/* Header row */}
+                <div className="flex flex-wrap justify-between items-start gap-2 border-b border-theme-border pb-3">
+                  <div>
+                    <button
+                      onClick={() => setActiveFinding(null)}
+                      className="text-[9px] text-theme-muted hover:text-theme-text font-bold flex items-center gap-1 mb-2 uppercase"
+                    >
+                      ← BACK TO LIST
+                    </button>
+                    <h4 className="text-xs font-bold uppercase text-theme-text">{activeFinding.title}</h4>
+                    <div className="flex items-center gap-2 text-[9px] text-theme-muted font-mono uppercase mt-0.5">
+                      <span>BY: {activeFinding.author}</span>
+                      <span>•</span>
+                      <span>{activeFinding.createdAt}</span>
+                    </div>
+                  </div>
+    
+                  <div className={`text-[8px] uppercase tracking-wider px-2 py-0.5 border ${getStatusBadge(activeFinding.status)} font-bold`}>
+                    {activeFinding.status}
+                  </div>
+                </div>
+    
+                {/* Description content */}
+                <div className="bg-theme-bg/50 border border-theme-border p-4 font-mono text-[10px]">
+                  <div className="text-[9px] uppercase tracking-widest text-[#888] font-bold mb-1 flex items-center gap-1">
+                    <FileText className="w-3.5 h-3.5" />
+                    PAYLOAD
+                  </div>
+                  {activeFinding.description}
+                  {(activeFinding.sourceReference || activeFinding.documentId) && (
+                    <div className="text-[9px] text-theme-text mt-1.5 pt-1 border-t border-theme-border uppercase tracking-widest flex flex-wrap gap-x-3 gap-y-1">
+                      {activeFinding.sourceReference && (
+                        <span>📍 REFERENCE: {activeFinding.sourceReference}</span>
+                      )}
+                      {activeFinding.documentId && (
+                        <>
+                          <span>• TARGET: {activeFinding.documentId}</span>
+                          {activeFinding.revisionId && <span>(v{activeFinding.revisionId.split(':v')[1] || activeFinding.revisionId})</span>}
+                          {activeFinding.sectionId && <span># {activeFinding.sectionId}</span>}
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+    
+                {/* AI pre-check result score and feedback banner */}
+                {activeFinding.aiPreCheckFeedback && (
+                  <div className="bg-theme-bg/40 border border-theme-border p-3 flex flex-col gap-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[8px] uppercase tracking-widest font-bold text-theme-muted">AUTOMATED PRE-CHECK</span>
+                      <span className="text-[9px] font-bold bg-theme-accent text-theme-accent-text px-1.5 py-0.1">
+                        SCORE: {activeFinding.aiPreCheckScore}/100
+                      </span>
+                    </div>
+                    <p className="text-[9px] text-theme-muted">{activeFinding.aiPreCheckFeedback}</p>
+                  </div>
+                )}
+    
+                {/* Resolution Banner */}
+                {activeFinding.resolution && (
+                  <div className="bg-theme-accent/10 border border-theme-accent p-3.5 flex flex-col gap-1 font-sans">
+                    <div className="flex items-center justify-between font-mono text-[8px] font-bold uppercase">
+                      <span className="text-theme-accent">MAINTAINER RESOLUTION: {activeFinding.resolution}</span>
+                      {activeFinding.resolutionRevisionId && (
+                        <span className="text-theme-text">RESOLVED IN: {activeFinding.resolutionRevisionId}</span>
+                      )}
+                    </div>
+                    {activeFinding.resolutionRationale && (
+                      <p className="text-[9px] text-theme-text/90 italic leading-relaxed mt-0.5 font-sans">
+                        "{activeFinding.resolutionRationale}"
+                      </p>
+                    )}
+                  </div>
+                )}
+    
+                {/* Critique Lifecycle Map */}
+                <div className="bg-theme-bg/30 border border-theme-border p-4 flex flex-col gap-3">
+                  <div className="text-[8px] uppercase tracking-widest font-bold text-theme-muted mb-1">
+                    Critique Lifecycle Map
+                  </div>
+                  <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-2.5">
+                    {['Submitted', 'AI Pre-Check', 'Community Discussion', 'Admin Review', activeFinding.status === 'Rejected' ? 'Rejected' : 'Approved'].map((step, idx) => {
+                      const isCurrent = activeFinding.status === step || 
+                                        (step === 'Approved' && activeFinding.status === 'Approved') ||
+                                        (step === 'Rejected' && activeFinding.status === 'Rejected');
+                      const statusesOrdered = ['Submitted', 'AI Pre-Check', 'Community Discussion', 'Admin Review', 'Approved', 'Rejected', 'Clarification'];
+                      const currentIdx = statusesOrdered.indexOf(activeFinding.status);
+                      const stepIdx = statusesOrdered.indexOf(step === 'Rejected' ? 'Rejected' : step);
+                      const isPassed = stepIdx >= 0 && currentIdx >= 0 && stepIdx < currentIdx;
+    
+                      return (
+                        <React.Fragment key={step}>
+                          <div className={`flex-1 flex items-center gap-2 p-2 border ${
+                            isCurrent 
+                              ? 'bg-theme-accent/15 border-theme-accent text-theme-accent font-bold' 
+                              : isPassed 
+                                ? 'border-theme-border bg-theme-card/10 text-theme-muted line-through' 
+                                : 'border-theme-border bg-theme-bg/10 text-theme-muted/65'
+                          } justify-center text-center font-mono text-[9px] uppercase tracking-wider`}>
+                            {step}
+                          </div>
+                          {idx < 4 && (
+                            <div className="hidden md:block text-theme-muted font-bold self-center">
+                              →
+                            </div>
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
+                  </div>
+                </div>
+    
+                {/* Evidence Chain View */}
+                <div className="bg-theme-bg/30 border border-theme-border p-4 flex flex-col gap-3">
+                  <div className="text-[8px] uppercase tracking-widest font-bold text-theme-muted mb-1 flex items-center gap-1.5">
+                    <GitBranch className="w-3.5 h-3.5" />
+                    Evidence Chain Connector
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4 relative">
+                    <div className="border border-theme-border bg-theme-card/15 p-2.5 flex flex-col justify-between">
+                      <span className="text-[7px] text-theme-muted uppercase font-bold tracking-widest">1. Section Claim</span>
+                      <span className="font-mono text-[10px] text-theme-text mt-1 truncate">
+                        {activeFinding.sectionId || "General Whitepaper"}
+                      </span>
+                    </div>
+    
+                    <div className="border border-theme-border bg-theme-card/15 p-2.5 flex flex-col justify-between">
+                      <span className="text-[7px] text-theme-muted uppercase font-bold tracking-widest">2. Critique</span>
+                      <span className="font-mono text-[10px] text-theme-text mt-1 truncate">
+                        {activeFinding.title}
+                      </span>
+                    </div>
+    
+                    <div className="border border-theme-border bg-theme-card/15 p-2.5 flex flex-col justify-between">
+                      <span className="text-[7px] text-theme-muted uppercase font-bold tracking-widest">3. Resolution</span>
+                      <span className={`font-mono text-[10px] mt-1 truncate ${activeFinding.resolution ? 'text-theme-accent font-bold' : 'text-amber-500 font-bold'}`}>
+                        {activeFinding.resolution?.toUpperCase() || "PENDING"}
+                      </span>
+                    </div>
+    
+                    <div className="border border-theme-border bg-theme-card/15 p-2.5 flex flex-col justify-between">
+                      <span className="text-[7px] text-theme-muted uppercase font-bold tracking-widest">4. Git Revision</span>
+                      <span className="font-mono text-[10px] text-theme-text mt-1 truncate" title={activeFinding.resolutionRevisionId || undefined}>
+                        {activeFinding.resolutionRevisionId 
+                          ? `v${activeFinding.resolutionRevisionId.split(':v')[1] || activeFinding.resolutionRevisionId}` 
+                          : "PENDING COMMIT"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+    
+                {/* Simulated Community Discussion comments */}
+                <div className="border border-theme-border p-3.5 flex flex-col gap-2">
+                  <h5 className="text-[9px] tracking-wider uppercase text-theme-muted font-bold flex items-center gap-1 mb-1">
+                    <MessageSquare className="w-3.5 h-3.5" />
+                    DISCUSSION CARRIER ({commentCount(activeFinding)})
+                  </h5>
+    
+                  <div className="flex flex-col gap-1.5 max-h-[140px] overflow-y-auto">
+                    {activeFinding.comments.map((comment) => (
+                      <div key={comment.id} className="text-[9px] bg-theme-text/5 p-2 border border-theme-border flex flex-col gap-0.5">
+                        <div className="font-bold text-theme-text flex items-center gap-1.5 uppercase">
+                          {comment.author}
+                          <span className="text-[8px] text-theme-muted font-normal">{comment.timestamp}</span>
+                        </div>
+                        <p className="text-theme-text/80">{comment.text}</p>
+                      </div>
+                    ))}
+                  </div>
+    
+                  {/* Add comment input */}
+                  <div className="flex gap-1.5 mt-1">
+                    <input
+                      type="text"
+                      placeholder="ADD COMMENT TO THREAD..."
+                      value={newComment}
+                      onChange={(e) => setNewComment(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleAddComment();
+                      }}
+                      className="flex-grow bg-theme-bg border border-theme-border-med px-2.5 py-1 text-xs text-theme-text uppercase placeholder-theme-muted focus:border-theme-accent outline-none"
+                    />
+                    <button
+                      onClick={handleAddComment}
+                      className="bg-theme-accent text-theme-accent-text font-bold text-[9px] uppercase tracking-wider px-3 border border-theme-accent hover:bg-theme-bg hover:text-theme-text transition-all"
+                    >
+                      Reply
+                    </button>
+                  </div>
+                </div>
+    
+                {/* Appeal Form */}
+                {showAppealForm && (
+                  <div className="border border-theme-border p-3.5 bg-theme-card/25 flex flex-col gap-2 font-mono">
+                    <span className="text-[9px] uppercase font-bold text-rose-400">File an Appeal</span>
+                    <p className="text-[9px] text-theme-muted font-sans leading-normal">State why the finding is valid, address the maintainer's rationale, and provide concrete references.</p>
+                    <textarea
+                      rows={3}
+                      value={appealText}
+                      onChange={e => setAppealText(e.target.value)}
+                      placeholder="Provide appeal grounds..."
+                      className="bg-theme-bg border border-theme-border-med p-2 text-xs text-theme-text focus:border-rose-500 outline-none"
+                    />
+                    <div className="flex justify-end gap-2 text-[9px] font-bold">
+                      <button
+                        onClick={() => { setShowAppealForm(false); setAppealText(''); }}
+                        className="text-theme-muted hover:text-theme-text uppercase"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={async () => {
+                          if (appealText.trim().length < 20) {
+                            setActionError('Appeal grounds must be at least 20 characters.');
+                            return;
+                          }
+                          setIsAppealing(true);
+                          setActionError(null);
+                          try {
+                            await submitAppeal(activeFinding.id, appealText.trim());
+                            setShowAppealForm(false);
+                            setAppealText('');
+                            setActionError(null);
+                          } catch (err) {
+                            setActionError(err instanceof Error ? err.message : 'Failed to submit appeal.');
+                          } finally {
+                            setIsAppealing(false);
+                          }
+                        }}
+                        disabled={isAppealing}
+                        className="border border-rose-500 bg-rose-500/15 hover:bg-rose-500/20 px-3 py-1 text-rose-400 uppercase disabled:opacity-50"
+                      >
+                        {isAppealing ? 'Submitting...' : 'Submit Appeal'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+    
+                {/* Voting buttons and back trigger */}
+                <div className="flex justify-between items-center border-t border-theme-border pt-3 mt-1 text-[9px]">
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleVote(activeFinding.id, 'up')}
+                      className="bg-theme-card border border-theme-border hover:border-theme-accent py-1 px-3 uppercase text-theme-text"
+                    >
+                      + UPVOTE ({activeFinding.communityVotes.up})
+                    </button>
+                    {activeFinding.author === username && (activeFinding.status === 'Rejected' || activeFinding.resolution === 'declined') && !showAppealForm && (
+                      <button
+                        onClick={() => setShowAppealForm(true)}
+                        className="border border-rose-500/45 bg-rose-500/5 hover:bg-rose-500/10 py-1 px-3 uppercase text-rose-400 font-bold"
+                      >
+                        Appeal Critique
+                      </button>
+                    )}
+                  </div>
+    
+                  <button
+                    onClick={() => {
+                      setActiveFinding(null);
+                      setShowAppealForm(false);
+                      setAppealText('');
+                    }}
+                    className="text-[9px] text-theme-muted hover:text-theme-text uppercase font-bold"
+                  >
+                    GO BACK
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* List of existing findings */
+              <div className="bg-theme-card border border-theme-border p-4 flex flex-col gap-2">
+                <div className="flex items-center justify-between border-b border-theme-border pb-2 mb-1.5">
+                  <div>
+                    <h3 className="font-bold text-xs uppercase text-theme-text">REVIEWS & AUDITS</h3>
+                  </div>
+                  <div className="text-[9px] text-theme-muted uppercase tracking-wider">
+                    MATCHES: {filteredFindings.length}
+                  </div>
+                </div>
+    
+                {filteredFindings.length === 0 ? (
+                  <div className="py-10 flex flex-col items-center justify-center text-center gap-1">
+                    <AlertCircle className="w-6 h-6 text-theme-muted animate-pulse" />
+                    <p className="text-[9px] text-theme-muted font-bold uppercase tracking-wider">Empty index match.</p>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-1.5">
+                    {filteredFindings.map((finding) => (
+                      <button
+                        key={finding.id}
+                        onClick={() => { void openFinding(finding); }}
+                        className="w-full text-left bg-transparent border border-theme-border hover:border-theme-accent hover:bg-theme-text/5 p-3 flex items-center justify-between gap-3 transition-all font-mono"
+                      >
+                        <div className="flex-grow min-w-0">
+                          <div className="flex flex-wrap items-center gap-1.5 mb-1 text-[8px]">
+                            <span className={`font-bold px-1.5 uppercase border ${getStatusBadge(finding.status)}`}>
+                              {finding.status}
+                            </span>
+                            <span className="bg-theme-text/5 border border-theme-border px-1.5 text-theme-text">
+                              [{finding.category.toUpperCase()}]
+                            </span>
+                          </div>
+                          <h4 className="text-[10px] font-semibold text-theme-text truncate">{finding.title}</h4>
+                          <p className="text-[8px] text-theme-muted truncate uppercase tracking-widest mt-0.5">
+                            BY {finding.author} | {finding.createdAt}
+                          </p>
+                        </div>
+    
+                        <div className="flex items-center gap-1 shrink-0 text-theme-muted text-[9px]">
+                          <MessageSquare className="w-3.5 h-3.5" />
+                          [{loadingFindingId === finding.id ? "…" : commentCount(finding)}]
+                          <ChevronRight className="w-3.5 h-3.5 text-theme-muted/50 ml-1" />
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+    
+        </div>
+      );
+    }
+    
+  operator: 'match'
+  stack: |-
+    TestContext.<anonymous> (F:\project\chain-registry\CREG-Contribution-Arena\tests\content.test.ts:100:10)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: production UI contains no simulated contributors, findings, rewards, or quizzes
+ok 10 - production UI contains no simulated contributors, findings, rewards, or quizzes
+  ---
+  duration_ms: 1.1643
+  type: 'test'
+  ...
+# Subtest: runtime container drops root privileges
+ok 11 - runtime container drops root privileges
+  ---
+  duration_ms: 0.1142
+  type: 'test'
+  ...
+# Subtest: wallet gateway explains signature safety without claiming inactive systems
+ok 12 - wallet gateway explains signature safety without claiming inactive systems
+  ---
+  duration_ms: 0.2182
+  type: 'test'
+  ...
+# Subtest: wallet identity does not force a chain change before ownership verification
+ok 13 - wallet identity does not force a chain change before ownership verification
+  ---
+  duration_ms: 0.1016
+  type: 'test'
+  ...
+# Subtest: wallet gateway exposes WalletConnect for mobile browsers without extensions
+ok 14 - wallet gateway exposes WalletConnect for mobile browsers without extensions
+  ---
+  duration_ms: 0.5827
+  type: 'test'
+  ...
+# Subtest: wallet challenge permits only the fixed local preview ports
+ok 15 - wallet challenge permits only the fixed local preview ports
+  ---
+  duration_ms: 0.1306
+  type: 'test'
+  ...
+# Subtest: firestore.indexes.json defines composite indexes for every multi-field Arena query
+ok 16 - firestore.indexes.json defines composite indexes for every multi-field Arena query
+  ---
+  duration_ms: 3.1418
+  type: 'test'
+  ...
+# Subtest: review transitions keep rejected findings terminal until appeal handler reopens them
+ok 17 - review transitions keep rejected findings terminal until appeal handler reopens them
+  ---
+  duration_ms: 1.1553
+  type: 'test'
+  ...
+# Subtest: public finding categories exclude direct security vulnerability intake
+ok 18 - public finding categories exclude direct security vulnerability intake
+  ---
+  duration_ms: 0.136
+  type: 'test'
+  ...
+# Subtest: callable exports include appeals and glossary moderation endpoints
+ok 19 - callable exports include appeals and glossary moderation endpoints
+  ---
+  duration_ms: 4.6056
+  type: 'test'
+  ...
+# Subtest: firestore rules deny direct client access to appeals collection
+ok 20 - firestore rules deny direct client access to appeals collection
+  ---
+  duration_ms: 41.1771
+  type: 'test'
+  ...
+# Subtest: review workflow only permits explicit forward transitions
+ok 21 - review workflow only permits explicit forward transitions
+  ---
+  duration_ms: 0.6556
+  type: 'test'
+  ...
+# Subtest: text validation trims values and enforces bounds
+ok 22 - text validation trims values and enforces bounds
+  ---
+  duration_ms: 0.3774
+  type: 'test'
+  ...
+# Subtest: reward normalization prevents negative and excessive awards
+ok 23 - reward normalization prevents negative and excessive awards
+  ---
+  duration_ms: 0.0928
+  type: 'test'
+  ...
+# Subtest: rubric totals are derived from bounded criterion scores
+ok 24 - rubric totals are derived from bounded criterion scores
+  ---
+  duration_ms: 0.1761
+  type: 'test'
+  ...
+# Subtest: session signatures are deterministic and compared safely
+ok 25 - session signatures are deterministic and compared safely
+  ---
+  duration_ms: 10.0425
+  type: 'test'
+  ...
+# Subtest: standalone contribution writes fail closed in production
+ok 26 - standalone contribution writes fail closed in production
+  ---
+  duration_ms: 0.1456
+  type: 'test'
+  ...
+# Subtest: AI guide requires both explicit enablement and a server credential
+ok 27 - AI guide requires both explicit enablement and a server credential
+  ---
+  duration_ms: 0.1012
+  type: 'test'
+  ...
+# Subtest: computeLineDiff identifies added, removed, and unchanged lines
+ok 28 - computeLineDiff identifies added, removed, and unchanged lines
+  ---
+  duration_ms: 0.722
+  type: 'test'
+  ...
+# Subtest: obfuscateDisplayName hides name segments to protect user privacy
+ok 29 - obfuscateDisplayName hides name segments to protect user privacy
+  ---
+  duration_ms: 0.2311
+  type: 'test'
+  ...
+# Subtest: parseGateStatus correctly parses markdown table row elements
+ok 30 - parseGateStatus correctly parses markdown table row elements
+  ---
+  duration_ms: 0.38
+  type: 'test'
+  ...
+# Subtest: parseLimitations correctly extracts track metadata, goals, and work items
+ok 31 - parseLimitations correctly extracts track metadata, goals, and work items
+  ---
+  duration_ms: 0.4048
+  type: 'test'
+  ...
+# Subtest: calculateAdminRubricScore computes total score from 1-10 inputs with correct weighting
+ok 32 - calculateAdminRubricScore computes total score from 1-10 inputs with correct weighting
+  ---
+  duration_ms: 0.1144
+  type: 'test'
+  ...
+# Subtest: obfuscateWalletAddress sanitizes wallet address to protect privacy
+ok 33 - obfuscateWalletAddress sanitizes wallet address to protect privacy
+  ---
+  duration_ms: 0.0786
+  type: 'test'
+  ...
+# Subtest: placeholder helpers detect default Arena identities
+ok 34 - placeholder helpers detect default Arena identities
+  ---
+  duration_ms: 1.2303
+  type: 'test'
+  ...
+# Subtest: needsProfileSetup respects profileComplete
+ok 35 - needsProfileSetup respects profileComplete
+  ---
+  duration_ms: 0.2345
+  type: 'test'
+  ...
+# Subtest: profileEditorDefaults clears placeholder values
+ok 36 - profileEditorDefaults clears placeholder values
+  ---
+  duration_ms: 1.0886
+  type: 'test'
+  ...
+# Subtest: scenario: happy path publish to verified with rewards
+ok 37 - scenario: happy path publish to verified with rewards
+  ---
+  duration_ms: 45.1253
+  type: 'test'
+  ...
+# Subtest: scenario: low-stake publisher stays revoked with zero rewards
+ok 38 - scenario: low-stake publisher stays revoked with zero rewards
+  ---
+  duration_ms: 0.2152
+  type: 'test'
+  ...
+# Subtest: scenario: quorum failure revokes package without rewards
+ok 39 - scenario: quorum failure revokes package without rewards
+  ---
+  duration_ms: 0.6665
+  type: 'test'
+  ...
+# Subtest: simulator constants align with CREG_SYSTEM_WORKFLOW §9.12
+ok 40 - simulator constants align with CREG_SYSTEM_WORKFLOW §9.12
+  ---
+  duration_ms: 0.0888
+  type: 'test'
+  ...
+# Subtest: points formula matches mandatory 25 base with correct vote and rep scaling
+ok 41 - points formula matches mandatory 25 base with correct vote and rep scaling
+  ---
+  duration_ms: 0.1034
+  type: 'test'
+  ...
+# Subtest: voluntary low-rep correct vote yields smaller points than mandatory
+ok 42 - voluntary low-rep correct vote yields smaller points than mandatory
+  ---
+  duration_ms: 0.0997
+  type: 'test'
+  ...
+# Subtest: work reward for mandatory correct rep=80 matches workflow example band
+ok 43 - work reward for mandatory correct rep=80 matches workflow example band
+  ---
+  duration_ms: 0.1765
+  type: 'test'
+  ...
+# Subtest: committee seed uses canonical + content_hash + vrf_or_tip per §9.11
+ok 44 - committee seed uses canonical + content_hash + vrf_or_tip per §9.11
+  ---
+  duration_ms: 0.4672
+  type: 'test'
+  ...
+# Subtest: committee selection enforces per-eth cap on first pass then relaxes to target M
+ok 45 - committee selection enforces per-eth cap on first pass then relaxes to target M
+  ---
+  duration_ms: 2.5716
+  type: 'test'
+  ...
+# Subtest: small validator sets need no relaxation and respect per-eth cap
+ok 46 - small validator sets need no relaxation and respect per-eth cap
+  ---
+  duration_ms: 0.3697
+  type: 'test'
+  ...
+# Subtest: publisher_submit enforces minimum stake before admission
+ok 47 - publisher_submit enforces minimum stake before admission
+  ---
+  duration_ms: 0.1698
+  type: 'test'
+  ...
+# Subtest: valid publisher_submit enters pending state
+ok 48 - valid publisher_submit enters pending state
+  ---
+  duration_ms: 0.0859
+  type: 'test'
+  ...
+# Subtest: quorum required follows floor(2M/3)+1
+ok 49 - quorum required follows floor(2M/3)+1
+  ---
+  duration_ms: 0.0541
+  type: 'test'
+  ...
+# Subtest: simulator module is isolated from arena reward and firebase paths
+ok 50 - simulator module is isolated from arena reward and firebase paths
+  ---
+  duration_ms: 0.9743
+  type: 'test'
+  ...
+# Subtest: admission gate failures revoke before committee selection
+ok 51 - admission gate failures revoke before committee selection
+  ---
+  duration_ms: 0.2515
+  type: 'test'
+  ...
+# Subtest: yara-admission-block preset revokes with zero rewards
+ok 52 - yara-admission-block preset revokes with zero rewards
+  ---
+  duration_ms: 4.5571
+  type: 'test'
+  ...
+# Subtest: inputsFromPreset preserves admission gate and stake for UI preset load
+ok 53 - inputsFromPreset preserves admission gate and stake for UI preset load
+  ---
+  duration_ms: 0.1106
+  type: 'test'
+  ...
+# Subtest: UI integrated path: initStateFromPreset + advanceOneStep revokes yara preset
+ok 54 - UI integrated path: initStateFromPreset + advanceOneStep revokes yara preset
+  ---
+  duration_ms: 4.8171
+  type: 'test'
+  ...
+# Subtest: runPresetToCompletion matches UI step-all path for yara-admission-block
+ok 55 - runPresetToCompletion matches UI step-all path for yara-admission-block
+  ---
+  duration_ms: 3.9369
+  type: 'test'
+  ...
+# Subtest: createSimulatorFromPreset + selectCommittee engine path for cap-relax-demo
+ok 56 - createSimulatorFromPreset + selectCommittee engine path for cap-relax-demo
+  ---
+  duration_ms: 3.2416
+  type: 'test'
+  ...
+# Subtest: cap-relax-demo preset fills M=100 with whale slots above cap
+ok 57 - cap-relax-demo preset fills M=100 with whale slots above cap
+  ---
+  duration_ms: 11.2838
+  type: 'test'
+  ...
+# Subtest: happy path uses split PBFT step ids package_quorum and block_pbft_finalize
+ok 58 - happy path uses split PBFT step ids package_quorum and block_pbft_finalize
+  ---
+  duration_ms: 0.2445
+  type: 'test'
+  ...
+# Subtest: quorum failure records package_quorum decision then block_pbft_finalize skip
+ok 59 - quorum failure records package_quorum decision then block_pbft_finalize skip
+  ---
+  duration_ms: 0.2148
+  type: 'test'
+  ...
+# Subtest: advanceOneStep from real start state exercises pipeline failure branch
+ok 60 - advanceOneStep from real start state exercises pipeline failure branch
+  ---
+  duration_ms: 0.294
+  type: 'test'
+  ...
+# Subtest: advanceOneStep reaches block_pbft_finalize skip on quorum fail without early revoke
+ok 61 - advanceOneStep reaches block_pbft_finalize skip on quorum fail without early revoke
+  ---
+  duration_ms: 0.1596
+  type: 'test'
+  ...
+# Subtest: pipeline sub-step failure revokes with partial stages and skips quorum
+ok 62 - pipeline sub-step failure revokes with partial stages and skips quorum
+  ---
+  duration_ms: 0.7396
+  type: 'test'
+  ...
+# Subtest: pipeline-sandbox-fail preset revokes via public API without quorum or PBFT
+ok 63 - pipeline-sandbox-fail preset revokes via public API without quorum or PBFT
+  ---
+  duration_ms: 16.3681
+  type: 'test'
+  ...
+# Subtest: computeEffectiveCommitteeSize applies +32 per timeout capped by pool and 256
+ok 64 - computeEffectiveCommitteeSize applies +32 per timeout capped by pool and 256
+  ---
+  duration_ms: 0.1221
+  type: 'test'
+  ...
+# Subtest: committee-timeout-expand preset grows committee beyond whale-cap baseline
+ok 65 - committee-timeout-expand preset grows committee beyond whale-cap baseline
+  ---
+  duration_ms: 14.1886
+  type: 'test'
+  ...
+# Subtest: interpretFleetPaused treats fetch errors and zero tip/peers as paused
+ok 66 - interpretFleetPaused treats fetch errors and zero tip/peers as paused
+  ---
+  duration_ms: 0.1606
+  type: 'test'
+  ...
+# Subtest: scenario library presets cover happy path, quorum fail, low stake, whale cap, timeout expand, phase-1 gates, and pipeline failure
+ok 67 - scenario library presets cover happy path, quorum fail, low stake, whale cap, timeout expand, phase-1 gates, and pipeline failure
+  ---
+  duration_ms: 85.7155
+  type: 'test'
+  ...
+# Subtest: deep link helpers parse and build sim preset URLs
+ok 68 - deep link helpers parse and build sim preset URLs
+  ---
+  duration_ms: 0.3118
+  type: 'test'
+  ...
+# Subtest: tokenomics estimates stay negligible vs 42M cap at 50k packages/day
+ok 69 - tokenomics estimates stay negligible vs 42M cap at 50k packages/day
+  ---
+  duration_ms: 0.2242
+  type: 'test'
+  ...
+# Subtest: buildValidatorPool supports 10k, 100k, and 500k procedural fleets
+ok 70 - buildValidatorPool supports 10k, 100k, and 500k procedural fleets
+  ---
+  duration_ms: 101.0747
+  type: 'test'
+  ...
+# Subtest: happy-path preset runs with 10k validator pool and M=100 committee
+ok 71 - happy-path preset runs with 10k validator pool and M=100 committee
+  ---
+  duration_ms: 36.1655
+  type: 'test'
+  ...
+# Subtest: 100k validator pool still selects production M=100 committee
+ok 72 - 100k validator pool still selects production M=100 committee
+  ---
+  duration_ms: 299.9757
+  type: 'test'
+  ...
+# Subtest: committeeTargetM scenario selects full M after cap relaxation on large sets
+ok 73 - committeeTargetM scenario selects full M after cap relaxation on large sets
+  ---
+  duration_ms: 0.9746
+  type: 'test'
+  ...
+# Subtest: resolveVrfOrTip supports manual override and simulated tip mode
+ok 74 - resolveVrfOrTip supports manual override and simulated tip mode
+  ---
+  duration_ms: 0.1919
+  type: 'test'
+  ...
+# Subtest: happy path records pipeline stages and event details
+ok 75 - happy path records pipeline stages and event details
+  ---
+  duration_ms: 0.2972
+  type: 'test'
+  ...
+# Subtest: step guide covers all workflow steps with checkpoints
+ok 76 - step guide covers all workflow steps with checkpoints
+  ---
+  duration_ms: 0.1781
+  type: 'test'
+  ...
+# Subtest: simulator UI exposes learn panel and flow diagram hooks
+ok 77 - simulator UI exposes learn panel and flow diagram hooks
+  ---
+  duration_ms: 1.0092
+  type: 'test'
+  ...
+# Subtest: scenario compare summarizes happy path vs quorum fail differently
+ok 78 - scenario compare summarizes happy path vs quorum fail differently
+  ---
+  duration_ms: 43.97
+  type: 'test'
+  ...
+# Subtest: pinning package size helpers span KiB through GiB
+ok 79 - pinning package size helpers span KiB through GiB
+  ---
+  duration_ms: 1.1079
+  type: 'test'
+  ...
+# Subtest: small npm-sized packages earn less pinning CREG than large mirrors
+ok 80 - small npm-sized packages earn less pinning CREG than large mirrors
+  ---
+  duration_ms: 0.1131
+  type: 'test'
+  ...
+# Subtest: pinning estimate exceeds single verification run at default mini-sim params
+ok 81 - pinning estimate exceeds single verification run at default mini-sim params
+  ---
+  duration_ms: 0.0738
+  type: 'test'
+  ...
+# Subtest: content regression: production surfaces still forbid simulated contributor rewards
+ok 82 - content regression: production surfaces still forbid simulated contributor rewards
+  ---
+  duration_ms: 0.5194
+  type: 'test'
+  ...
+1..82
+# tests 82
+# suites 0
+# pass 81
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 17937.2063

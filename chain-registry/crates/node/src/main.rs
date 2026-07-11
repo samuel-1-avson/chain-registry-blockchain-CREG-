@@ -545,11 +545,6 @@ async fn main() -> Result<()> {
     // â”€â”€ Finalized-tx channel (created before state so API can send to it) â”€â”€â”€â”€â”€â”€â”€
     let (tx_sender, tx_receiver): (FinalizedTxSender, FinalizedTxReceiver) =
         finalized_tx::channel();
-    let zk_validator = Arc::new(
-        zk_validator::ZkValidator::new()
-            .context("Failed to initialize ZK validator â€” ensure CREG_ZK_KEYS_DIR contains proving_key_package_v2.bin and verifying_key_package_v2.bin when CREG_PRODUCTION=true")?,
-    );
-
     // â”€â”€ Shared state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     let state: SharedState = Arc::new(RwLock::new(NodeState {
         chain,
@@ -833,7 +828,7 @@ async fn main() -> Result<()> {
         let addr = "0.0.0.0:50051"
             .parse()
             .expect("gRPC bind address must be valid");
-        let registry = grpc::MyRegistry::new(Arc::clone(&grpc_state), Arc::clone(&zk_validator));
+        let registry = grpc::MyRegistry::new(Arc::clone(&grpc_state));
         let watcher = grpc::MyWatcher::new(watcher_bus);
         let explorer = grpc::MyExplorer::new(Arc::clone(&grpc_state));
 

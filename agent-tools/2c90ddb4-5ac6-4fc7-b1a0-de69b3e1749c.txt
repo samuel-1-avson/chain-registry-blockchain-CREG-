@@ -1,0 +1,953 @@
+
+ */}var Wt=typeof Symbol=="function"&&Symbol.for,hy=Wt?Symbol.for("react.element"):60103,fy=Wt?Symbol.for("react.portal
+"):60106,df=Wt?Symbol.for("react.fragment"):60107,mf=Wt?Symbol.for("react.strict_mode"):60108,pf=Wt?Symbol.for("react.p
+rofiler"):60114,gf=Wt?Symbol.for("react.provider"):60109,yf=Wt?Symbol.for("react.context"):60110,dy=Wt?Symbol.for("reac
+t.async_mode"):60111,Zf=Wt?Symbol.for("react.concurrent_mode"):60111,vf=Wt?Symbol.for("react.forward_ref"):60112,bf=Wt?
+Symbol.for("react.suspense"):60113,y5=Wt?Symbol.for("react.suspense_list"):60120,_f=Wt?Symbol.for("react.memo"):60115,T
+f=Wt?Symbol.for("react.lazy"):60116,v5=Wt?Symbol.for("react.block"):60121,b5=Wt?Symbol.for("react.fundamental"):60117,_
+5=Wt?Symbol.for("react.responder"):60118,T5=Wt?Symbol.for("react.scope"):60119;function Pn(t){if(typeof 
+t=="object"&&t!==null){var e=t.$$typeof;switch(e){case hy:switch(t=t.type){case dy:case Zf:case df:case pf:case 
+mf:case bf:return t;default:switch(t=t&&t.$$typeof){case yf:case vf:case Tf:case _f:case gf:return t;default:return 
+e}}case fy:return e}}}function Sx(t){return Pn(t)===Zf}var w5={AsyncMode:dy,ConcurrentMode:Zf,ContextConsumer:yf,Contex
+tProvider:gf,Element:hy,ForwardRef:vf,Fragment:df,Lazy:Tf,Memo:_f,Portal:fy,Profiler:pf,StrictMode:mf,Suspense:bf,isAsy
+ncMode:function(t){return Sx(t)||Pn(t)===dy},isConcurrentMode:Sx,isContextConsumer:function(t){return 
+Pn(t)===yf},isContextProvider:function(t){return Pn(t)===gf},isElement:function(t){return typeof 
+t=="object"&&t!==null&&t.$$typeof===hy},isForwardRef:function(t){return Pn(t)===vf},isFragment:function(t){return 
+Pn(t)===df},isLazy:function(t){return Pn(t)===Tf},isMemo:function(t){return Pn(t)===_f},isPortal:function(t){return 
+Pn(t)===fy},isProfiler:function(t){return Pn(t)===pf},isStrictMode:function(t){return 
+Pn(t)===mf},isSuspense:function(t){return Pn(t)===bf},isValidElementType:function(t){return typeof t=="string"||typeof 
+t=="function"||t===df||t===Zf||t===pf||t===mf||t===bf||t===y5||typeof t=="object"&&t!==null&&(t.$$typeof===Tf||t.$$type
+of===_f||t.$$typeof===gf||t.$$typeof===yf||t.$$typeof===vf||t.$$typeof===b5||t.$$typeof===_5||t.$$typeof===T5||t.$$type
+of===v5)},typeOf:Pn},rt=UC((function(t,e){})),Ax=(rt.AsyncMode,rt.ConcurrentMode,rt.ContextConsumer,rt.ContextProvider,
+rt.Element,rt.ForwardRef,rt.Fragment,rt.Lazy,rt.Memo,rt.Portal,rt.Profiler,rt.StrictMode,rt.Suspense,rt.isAsyncMode,rt.
+isConcurrentMode,rt.isContextConsumer,rt.isContextProvider,rt.isElement,rt.isForwardRef,rt.isFragment,rt.isLazy,rt.isMe
+mo,rt.isPortal,rt.isProfiler,rt.isStrictMode,rt.isSuspense,rt.isValidElementType,rt.typeOf,UC((function(t){t.exports=w5
+}))),E5={$$typeof:!0,compare:!0,defaultProps:!0,displayName:!0,propTypes:!0,type:!0},Cx={};Cx[Ax.ForwardRef]={$$typeof:
+!0,render:!0,defaultProps:!0,displayName:!0,propTypes:!0},Cx[Ax.Memo]=E5;async function x5(t){const s=(await 
+n5(h5,"registerWaitlist")(t)).data;if(typeof s.position!="number"||s.tier!=="alpha"&&s.tier!=="beta")throw new 
+Error("Invalid registration response from server.");return{position:s.position,tier:s.tier}}const ag="https://github.co
+m/samuel-1-avson/chain-registry-blockchain-CREG-",S5={github:ag,readme:`${ag}/blob/main/README.md`,docs:`${ag}/blob/mai
+n/docs/PUBLIC.md`};function zC({compact:t=!1}){return t?b.jsxs("p",{className:"waitlist-alpha-banner 
+waitlist-alpha-banner--compact",role:"note",children:[b.jsx("strong",{children:"Waitlist only."})," Register here to 
+reserve a cohort slot. Testnet tools (explorer, hub, faucet) open separately when you are invited — not from this 
+page."]}):b.jsxs("aside",{className:"waitlist-alpha-banner",role:"note","aria-label":"Waitlist and public alpha 
+notice",children:[b.jsxs("p",{children:[b.jsx("strong",{children:"Public alpha — not mainnet or production."})," 
+Chain Registry is building a coordinated Sepolia testnet (creg-testnet-1). This site is the"," 
+",b.jsx("strong",{children:"waitlist"}),": connect a wallet, choose a role, and wait for the next onboarding 
+wave."]}),b.jsxs("p",{children:[b.jsx("strong",{children:"Not connected to live testnet apps."})," Explorer, join hub, 
+faucet, and API endpoints are operator-run alpha surfaces. Waitlist registrants are onboarded in cohorts; you will 
+receive instructions through official channels when your wave opens — not by following links on this 
+page."]}),b.jsxs("p",{children:[b.jsx("strong",{children:"No safety guarantees yet."})," Validator sandboxing, 
+slashing, and audit gates are still hardening. Do not treat registry output as audited or production-ready until 
+SEC-401 and mainnet readiness gates close."]})]})}const A5="A decentralized package registry where every release is a 
+consensus decision, not a single maintainer's word.",C5=[{title:"One compromised token",body:"A stolen npm or PyPI API 
+key can push malicious code to millions of installs overnight — with no independent review gate."},{title:"Silent 
+tampering",body:"Central registries can overwrite versions, yank packages unevenly, or suffer insider abuse. Consumers 
+rarely get cryptographic proof of what changed."},{title:"Reputation ≠ proof",body:"Star counts and download stats 
+tell you popularity, not safety. Supply-chain attacks target trusted packages precisely because trust is 
+assumed."}],R5=[{title:"Consensus before install",body:"Economically staked validators must agree — via PBFT quorum 
+— before a package reaches verified status on the registry."},{title:"Content-addressed delivery",body:"Artifacts 
+live on IPFS and are fetched by hash. What you download must match what validators approved 
+on-chain."},{title:"Evidence, not vibes",body:"Static analysis, WASM sandbox runs, deep scans, and optional ML review 
+produce auditable votes — not a lone moderator click."}],og=[{step:"01",title:"Publish",body:"A staked publisher 
+signs a package, pins it to IPFS, and submits metadata to the validator network (creg-testnet-1 on 
+Sepolia)."},{step:"02",title:"Validate",body:"Independent nodes run a multi-stage pipeline: static analysis → 
+behavioral WASM sandbox → deep scan (YARA / ML-assisted where enabled)."},{step:"03",title:"Finalize",body:"A 
+⌊2n/3⌋+1 PBFT quorum records the verdict. Ed25519-signed votes accumulate until consensus commits the package 
+state."},{step:"04",title:"Install",body:"The creg CLI and registry-aware shims install only against verified status 
+— cryptographic verdicts, not publisher reputation alone."},{step:"05",title:"Anchor",body:"State roots can roll up 
+to Ethereum Sepolia via Groth16 proofs — L1 settlement for registry integrity without trusting a single API 
+host."}],N5=[{id:"rust-pbft",category:"Consensus",title:"Rust validator mesh",subtitle:"PBFT · libp2p · 
+RocksDB",summary:"Seventeen Rust crates power validator nodes: Tokio async runtime, axum HTTP/gRPC APIs, Gossipsub 
+P2P, and an append-only chain store tuned for registry workloads — not generic smart-contract bloat.",bullets:["PBFT 
+finality with Ed25519 domain-separated signatures","libp2p gossip for block and vote propagation","RocksDB chain store 
+with inspectable audit history"]},{id:"security-pipeline",category:"Security",title:"Multi-stage verifier 
+pipeline",subtitle:"Static · Sandbox · Deep scan",summary:"Every pending package passes layered checks before votes 
+count. WASM sandboxes observe runtime behavior; YARA and ML-assisted stages flag known-bad patterns — alpha 
+hardening continues, but the architecture is built for proactive defense.",bullets:["WASM behavioral sandboxing on 
+validator nodes","Static analysis and differential review paths","Optional LLM-assisted review and PGP provenance 
+checks"]},{id:"ipfs",category:"Storage",title:"IPFS content vault",subtitle:"Hash-native retrieval",summary:"Packages 
+are addressed by CID and SHA-256 anchors — not by a fragile CDN path. Fetching bytes verifies integrity because the 
+hash is the identifier.",bullets:["Decentralized pinning across operator nodes","Location-agnostic installs survive 
+domain blocks","On-chain hash binds ledger state to blob 
+content"]},{id:"zk-bridge",category:"Settlement",title:"Groth16 L1 bridge",subtitle:"Ethereum Sepolia 
+anchoring",summary:"Registry state transitions can batch to Ethereum through a Groth16 rollup bridge — bringing 
+supply-chain verdicts to the chain developers already trust for economic security.",bullets:["ZK verifier contracts on 
+Sepolia testnet","Governance-controlled bridge parameters","Staking, registry, and reputation contracts on 
+L1"]},{id:"cli",category:"Developer UX",title:"creg CLI & shims",subtitle:"publish · install · stake · 
+audit",summary:"A first-class CLI publishes to IPFS, submits to validators, stakes tCREG, and installs through 
+registry-aware wrappers for npm, pip, and cargo workflows — one trust layer across ecosystems.",bullets:["creg 
+doctor health checks against node APIs","Multisig and audit flows for operators","Signed chain-spec bootstrapping for 
+node fleets"]},{id:"economics",category:"Incentives",title:"Stake & slash economics",subtitle:"tCREG utility on 
+testnet",summary:"Validators and publishers put capital at risk. Approving malicious code or negligent audits is 
+designed to burn stake — aligning node profit with ecosystem safety (full slashing enforcement is on the roadmap for 
+alpha).",bullets:["Validator stake gates participation in consensus votes","Publisher stake commits package 
+submissions","On-chain reputation weighting for governance signals"]}],I5=[{label:"npm / PyPI / 
+Cargo",creg:"Independent validator quorum",them:"Single org with admin keys"},{label:"Package identity",creg:"IPFS CID 
++ on-chain hash",them:"Mutable version strings"},{label:"Safety signal",creg:"Evidence votes + PBFT 
+verdict",them:"Report button & manual review"},{label:"Install trust",creg:"Verified status required",them:"Install 
+whatever resolves"},{label:"Settlement",creg:"Optional Ethereum L1 anchor",them:"Central database only"}];function 
+D5(){return b.jsxs("section",{id:"about",className:"py-24 border-t 
+border-line",children:[b.jsxs("div",{className:"mb-16 max-w-4xl",children:[b.jsxs("div",{className:"font-mono text-sm 
+uppercase font-bold text-accent mb-3 flex items-center gap-2",children:[b.jsx("span",{className:"w-4 h-[1.5px] 
+bg-accent inline-block"})," What is CREG"]}),b.jsxs("h2",{className:"text-3xl md:text-5xl font-sans font-bold 
+uppercase tracking-tight mb-6 leading-[1.05]",children:["Chain Registry is 
+a",b.jsx("br",{}),b.jsx("span",{className:"text-accent",children:"supply-chain 
+blockchain."})]}),b.jsx("p",{className:"text-ink-muted font-sans text-lg leading-relaxed 
+mb-4",children:A5}),b.jsxs("p",{className:"text-ink font-sans text-base leading-relaxed max-w-3xl",children:["CREG 
+(Chain Registry) replaces single-authority trust in npm, PyPI, Cargo, and similar registries with a staked validator 
+network on"," ",b.jsx("span",{className:"font-mono text-sm bg-surface px-1.5 py-0.5 
+retro-border",children:"creg-testnet-1"})," ","— anchored to Ethereum Sepolia. Publishers submit packages; 
+validators analyze them in sandboxes; consensus commits only what passes. You are joining the waitlist for that 
+network's next onboarding wave."]})]}),b.jsxs("div",{className:"grid grid-cols-1 lg:grid-cols-2 gap-8 mb-20",children:[
+b.jsxs(Ne.div,{initial:{opacity:0,y:16},whileInView:{opacity:1,y:0},viewport:{once:!0,margin:"-40px"},className:"bg-sur
+face p-8 retro-border retro-shadow",children:[b.jsxs("div",{className:"flex items-center gap-3 
+mb-6",children:[b.jsx("div",{className:"p-2 bg-ink text-paper retro-border",children:b.jsx(FV,{className:"w-5 
+h-5","aria-hidden":!0})}),b.jsx("h3",{className:"text-xl font-sans font-bold uppercase",children:"The 
+problem"})]}),b.jsx("p",{className:"text-ink-muted text-sm leading-relaxed mb-6",children:"Modern software is 
+assembled from thousands of dependencies. One compromised maintainer, leaked API token, or typosquat package can 
+compromise entire organizations — because centralized registries ask you to trust a single 
+gatekeeper."}),b.jsx("ul",{className:"space-y-4",children:C5.map(t=>b.jsxs("li",{className:"border-l-2 border-accent 
+pl-4",children:[b.jsx("div",{className:"font-mono text-xs font-bold uppercase text-accent 
+mb-1",children:t.title}),b.jsx("p",{className:"text-ink-muted text-sm leading-relaxed",children:t.body})]},t.title))})]
+}),b.jsxs(Ne.div,{initial:{opacity:0,y:16},whileInView:{opacity:1,y:0},viewport:{once:!0,margin:"-40px"},transition:{de
+lay:.08},className:"bg-surface p-8 retro-border retro-shadow",children:[b.jsxs("div",{className:"flex items-center 
+gap-3 mb-6",children:[b.jsx("div",{className:"p-2 bg-accent text-paper retro-border 
+border-accent",children:b.jsx(gV,{className:"w-5 h-5","aria-hidden":!0})}),b.jsx("h3",{className:"text-xl font-sans 
+font-bold uppercase",children:"CREG's answer"})]}),b.jsx("p",{className:"text-ink-muted text-sm leading-relaxed 
+mb-6",children:"Chain Registry treats every publish as a consensus decision. No package reaches verified status until 
+economically staked validators agree — after running real analysis, not a checkbox 
+review."}),b.jsx("ul",{className:"space-y-4",children:R5.map(t=>b.jsxs("li",{className:"border-l-2 border-ink 
+pl-4",children:[b.jsx("div",{className:"font-mono text-xs font-bold uppercase text-ink 
+mb-1",children:t.title}),b.jsx("p",{className:"text-ink-muted text-sm leading-relaxed",children:t.body})]},t.title))})]
+})]}),b.jsxs("div",{className:"mb-8",children:[b.jsxs("div",{className:"flex items-center gap-3 
+mb-6",children:[b.jsx(AV,{className:"w-5 h-5 text-accent","aria-hidden":!0}),b.jsx("h3",{className:"text-2xl font-sans 
+font-bold uppercase tracking-tight",children:"Why it is different"})]}),b.jsx("div",{className:"overflow-x-auto 
+retro-border bg-surface",children:b.jsxs("table",{className:"w-full min-w-[520px] text-left text-sm 
+font-sans",children:[b.jsx("thead",{children:b.jsxs("tr",{className:"border-b border-line 
+bg-paper/50",children:[b.jsx("th",{className:"p-4 font-mono text-[10px] uppercase font-bold 
+text-ink-muted",children:"Dimension"}),b.jsx("th",{className:"p-4 font-mono text-[10px] uppercase font-bold 
+text-accent",children:"Chain Registry (CREG)"}),b.jsx("th",{className:"p-4 font-mono text-[10px] uppercase font-bold 
+text-ink-muted",children:"Typical centralized registry"})]})}),b.jsx("tbody",{children:I5.map((t,e)=>b.jsxs("tr",{class
+Name:e%2===0?"bg-surface":"bg-paper/30",children:[b.jsx("td",{className:"p-4 font-bold 
+text-ink",children:t.label}),b.jsx("td",{className:"p-4 text-ink",children:t.creg}),b.jsx("td",{className:"p-4 
+text-ink-muted",children:t.them})]},t.label))})]})})]})]})}function k5(){return 
+b.jsxs("section",{id:"pipeline",className:"py-24 border-t border-line",children:[b.jsxs("div",{className:"mb-12 
+max-w-3xl",children:[b.jsxs("div",{className:"font-mono text-sm uppercase font-bold text-accent mb-3 flex items-center 
+gap-2",children:[b.jsx("span",{className:"w-4 h-[1.5px] bg-accent inline-block"})," Protocol 
+flow"]}),b.jsx("h2",{className:"text-3xl md:text-4xl font-sans font-bold uppercase tracking-tight mb-4",children:"From 
+publish to verified install"}),b.jsx("p",{className:"text-ink-muted font-sans text-lg leading-relaxed",children:"This 
+is how the Chain Registry blockchain works — not the waitlist signup flow. When your cohort opens, you will 
+participate in some or all of these stages depending on your role."})]}),b.jsx("ol",{className:"max-w-3xl mx-auto 
+list-none p-0 m-0 space-y-0",children:og.map((t,e)=>b.jsxs(Ne.li,{initial:{opacity:0,x:-12},whileInView:{opacity:1,x:0}
+,viewport:{once:!0,margin:"-30px"},transition:{delay:e*.06,duration:.4},className:"relative",children:[b.jsxs("div",{cl
+assName:"flex gap-6 md:gap-8",children:[b.jsxs("div",{className:"flex flex-col items-center 
+shrink-0",children:[b.jsx("div",{className:"w-12 h-12 flex items-center justify-center font-mono text-sm font-bold 
+bg-ink text-paper retro-border",children:t.step}),e<og.length-1&&b.jsx("div",{className:"w-[2px] flex-1 min-h-[24px] 
+bg-line my-2","aria-hidden":!0})]}),b.jsxs("div",{className:"pb-10 flex-1",children:[b.jsx("h3",{className:"text-xl 
+font-sans font-bold mb-2 uppercase tracking-tight",children:t.title}),b.jsx("p",{className:"text-ink-muted text-sm 
+leading-relaxed",children:t.body})]})]}),e<og.length-1&&b.jsx(oV,{className:"w-4 h-4 text-accent absolute left-[18px] 
+bottom-2 md:hidden","aria-hidden":!0})]},t.step))})]})}const M5={"rust-pbft":b.jsx(vV,{className:"w-6 h-6 
+text-paper"}),"security-pipeline":b.jsx(RV,{className:"w-6 h-6 text-paper"}),ipfs:b.jsx(_V,{className:"w-6 h-6 
+text-paper"}),"zk-bridge":b.jsx(wV,{className:"w-6 h-6 text-paper"}),cli:b.jsx(Wc,{className:"w-6 h-6 
+text-paper"}),economics:b.jsx($V,{className:"w-6 h-6 text-paper"})};function V5(){return 
+b.jsxs("section",{id:"technology",className:"py-24 border-t border-line",children:[b.jsxs("div",{className:"mb-16 
+max-w-3xl",children:[b.jsxs("div",{className:"font-mono text-sm uppercase font-bold text-accent mb-3 flex items-center 
+gap-2",children:[b.jsx("span",{className:"w-4 h-[1.5px] bg-accent inline-block"})," Under the 
+hood"]}),b.jsxs("h2",{className:"text-3xl md:text-5xl font-sans font-bold uppercase tracking-tight mb-4 
+leading-[1.05]",children:["Technology built for",b.jsx("br",{}),b.jsx("span",{className:"text-accent",children:"trust 
+at scale."})]}),b.jsx("p",{className:"text-ink-muted font-sans text-lg leading-relaxed",children:"CREG is not a 
+whitepaper wrapper around IPFS. It is a Rust validator mesh, a multi-stage security pipeline, Solidity settlement on 
+Sepolia, and a developer CLI — engineered so open-source supply chains can be verified, not merely 
+downloaded."})]}),b.jsx("div",{className:"grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6",children:N5.map((t,e)=>
+b.jsxs(Ne.article,{initial:{opacity:0,y:20},whileInView:{opacity:1,y:0},viewport:{once:!0,margin:"-40px"},transition:{d
+elay:e*.05,duration:.45},className:"bg-surface p-6 md:p-8 retro-border retro-shadow flex flex-col h-full group 
+hover:bg-paper transition-colors",children:[b.jsxs("div",{className:"flex items-start justify-between gap-4 
+mb-4",children:[b.jsx("span",{className:"font-mono text-[10px] uppercase font-bold tracking-widest text-accent px-2 
+py-1 bg-accent/10 retro-border border-accent",children:t.category}),b.jsx("div",{className:"p-3 bg-ink 
+group-hover:bg-accent transition-colors retro-border border-ink group-hover:border-accent 
+shrink-0",children:M5[t.id]})]}),b.jsx("h3",{className:"text-xl font-sans font-bold 
+mb-1",children:t.title}),b.jsx("p",{className:"font-mono text-[10px] uppercase text-ink-muted mb-4 
+tracking-wide",children:t.subtitle}),b.jsx("p",{className:"text-ink-muted text-sm leading-relaxed mb-6 
+flex-grow",children:t.summary}),b.jsx("ul",{className:"space-y-2 border-t border-line border-dashed 
+pt-4",children:t.bullets.map(n=>b.jsxs("li",{className:"flex gap-2 text-xs text-ink-muted font-mono 
+leading-relaxed",children:[b.jsx("span",{className:"text-accent 
+shrink-0",children:">"}),b.jsx("span",{children:n})]},n))})]},t.id))}),b.jsx("p",{className:"mt-12 text-center 
+text-ink-muted text-xs font-mono uppercase max-w-2xl mx-auto leading-relaxed",children:"Public alpha on Sepolia — ZK 
+binding, slashing enforcement, and cross-chain features are still hardening. Capabilities above reflect the 
+architecture being shipped, with honest alpha limitations documented in the project repo."})]})}const 
+O5=[{id:"01",icon:b.jsx(b1,{className:"w-5 h-5"}),title:"Connect & choose a role",body:"Link an Ethereum wallet 
+(Sepolia-ready later). Pick Validator Node, Publisher, or Security Audits so we know how to prioritize your 
+cohort."},{id:"02",icon:b.jsx(kf,{className:"w-5 h-5"}),title:"Verify & register",body:"reCAPTCHA and server-side 
+checks prevent spam. Your wallet address and role are stored securely — one registration per 
+wallet."},{id:"03",icon:b.jsx(uV,{className:"w-5 h-5"}),title:"Wait for your wave",body:"Genesis Alpha (slots 
+1–10,000) receives Wave 1 invites first. Vanguard Beta follows in Wave 2. You stay on this waitlist until CREG 
+announces your access window — not instant testnet login."},{id:"04",icon:b.jsx(ad,{className:"w-5 
+h-5"}),title:"Receive your access credential",body:"When you register, your tier and position lock in immediately 
+(e.g. #00042 · Genesis Alpha). Cohort onboarding — stake, CLI, hub links — arrives only through official invite 
+channels."}];function P5(){return b.jsxs("section",{id:"how-it-works",className:"py-24 border-t 
+border-line",children:[b.jsxs("div",{className:"mb-12 max-w-3xl",children:[b.jsxs("div",{className:"font-mono text-sm 
+uppercase font-bold text-accent mb-3 flex items-center gap-2",children:[b.jsx("span",{className:"w-4 h-[1.5px] 
+bg-accent inline-block"})," Process"]}),b.jsx("h2",{className:"text-3xl md:text-4xl font-sans font-bold uppercase 
+tracking-tight mb-4",children:"How the waitlist works"}),b.jsx("p",{className:"text-ink-muted font-sans text-lg 
+leading-relaxed",children:"This application does one job: capture your wallet and role so we can run a fair, staged 
+testnet launch. There is no shortcut to the explorer from here."})]}),b.jsx("ol",{className:"grid grid-cols-1 
+md:grid-cols-2 gap-6 list-none p-0 m-0",children:O5.map((t,e)=>b.jsxs(Ne.li,{initial:{opacity:0,y:12},whileInView:{opac
+ity:1,y:0},viewport:{once:!0,margin:"-40px"},transition:{delay:e*.06,duration:.4},className:"bg-surface p-6 md:p-8 
+retro-border retro-shadow flex flex-col gap-4",children:[b.jsxs("div",{className:"flex items-center 
+justify-between",children:[b.jsx("span",{className:"font-mono text-xs font-bold 
+text-accent",children:t.id}),b.jsx("div",{className:"p-2 bg-ink text-paper 
+retro-border",children:t.icon})]}),b.jsx("h3",{className:"text-xl font-sans 
+font-bold",children:t.title}),b.jsx("p",{className:"text-ink-muted text-sm leading-relaxed 
+flex-grow",children:t.body})]},t.id))})]})}const j5=[{q:"What is Chain Registry (CREG) in one sentence?",a:"A 
+decentralized package registry where staked validators run security pipelines and PBFT consensus before any dependency 
+reaches verified status — content-addressed on IPFS and anchored to Ethereum Sepolia, instead of trusting a single 
+npm-style gatekeeper."},{q:"What problem does CREG solve?",a:"Supply-chain attacks exploit one compromised maintainer 
+or stolen API token. CREG makes every publish a quorum decision: validators analyze packages in WASM sandboxes, vote 
+with evidence, and only then can the creg CLI treat a version as safe to install."},{q:"What technology makes CREG 
+unique?",a:"A Rust validator mesh (libp2p, RocksDB, PBFT), multi-stage static + sandbox + deep-scan pipeline, IPFS 
+hash-native storage, Groth16 rollup bridge to Sepolia, Solidity staking/registry contracts, and a creg CLI with 
+npm/pip/cargo-aware install shims — engineered for cryptographic verdicts, not reputation alone."},{q:"What is 
+Genesis Alpha vs Vanguard Beta?",a:"Your global registration number decides your tier. Slots 1–10,000 are Genesis 
+Alpha (Wave 1): first testnet cohort, highest recognition, planned Genesis NFT. Slot 10,001 and beyond are Vanguard 
+Beta (Wave 2): real benefits, staggered access after Alpha waves. Tier is locked forever at registration."},{q:"When 
+do I get testnet access?",a:"Alpha registrants receive Wave 1 cohort invites first. Beta registrants follow in Wave 2 
+after Alpha onboarding stabilizes. You will get instructions through official channels when your wallet is included 
+— this page never links to live testnet tools."},{q:"Why are there no explorer or faucet links here?",a:"This site 
+is intentionally isolated from live alpha tools. Mixing “join waitlist” with “go use the testnet now” confuses 
+onboarding. Operators invite cohorts when infrastructure and support are ready for the next wave."},{q:"Is this 
+mainnet or production-ready?",a:"No. CREG public alpha runs on Ethereum Sepolia. Contracts, monitoring, and security 
+review gates are still in progress. Do not deploy production dependencies based on testnet packages today."},{q:"What 
+do the three roles mean?",a:"Validator Node — you intend to run consensus and sandbox analysis (higher stake at 
+onboarding). Publisher — you plan to publish packages to the registry. Security Audits — you want to contribute 
+research or bounty work. Roles help us sequence cohort invites; you can register only once per wallet."},{q:"Do I need 
+Sepolia ETH or tCREG right now?",a:"Not to join the waitlist — only a wallet connection. Stake amounts (e.g. 100 
+tCREG validators, 1 tCREG publishers) apply when your cohort is invited to the testnet, not at registration 
+time."},{q:"What are Genesis NFTs?",a:"Genesis Alpha members (first 10,000 verified wallets) are tracked for Genesis 
+Node recognition and a planned commemorative NFT on the mainnet roadmap. Beta members receive a separate contributor 
+badge track. Nothing here is a token sale or financial offer."},{q:"How is my wallet data used?",a:"Your address and 
+role are stored in Firebase Firestore for waitlist operations only. We do not custody keys. See the project repo for 
+privacy and retention practices as they are published."}];function L5(){const[t,e]=J.useState(0);return 
+b.jsxs("section",{id:"faq",className:"py-24 border-t border-line",children:[b.jsxs("div",{className:"mb-12 
+max-w-3xl",children:[b.jsxs("div",{className:"font-mono text-sm uppercase font-bold text-accent mb-3 flex items-center 
+gap-2",children:[b.jsx("span",{className:"w-4 h-[1.5px] bg-accent inline-block"})," 
+FAQ"]}),b.jsx("h2",{className:"text-3xl md:text-4xl font-sans font-bold uppercase tracking-tight 
+mb-4",children:"Common questions"}),b.jsx("p",{className:"text-ink-muted font-sans text-lg 
+leading-relaxed",children:"What CREG is, why it exists, and straight answers about the waitlist and cohort 
+access."})]}),b.jsx("div",{className:"max-w-3xl space-y-3",children:j5.map((n,s)=>{const a=t===s;return 
+b.jsxs("div",{className:"retro-border bg-surface 
+overflow-hidden",children:[b.jsxs("button",{type:"button",onClick:()=>e(a?null:s),className:"w-full flex items-center 
+justify-between gap-4 p-5 text-left font-sans font-bold hover:bg-paper transition-colors focus-visible:outline 
+focus-visible:outline-2 focus-visible:outline-offset-2 
+focus-visible:outline-accent","aria-expanded":a,children:[b.jsx("span",{children:n.q}),b.jsx(mV,{className:`w-5 h-5 
+shrink-0 transition-transform ${a?"rotate-180":""}`,"aria-hidden":!0})]}),b.jsx(ya,{initial:!1,children:a&&b.jsx(Ne.div
+,{initial:{height:0,opacity:0},animate:{height:"auto",opacity:1},exit:{height:0,opacity:0},transition:{duration:.25},ch
+ildren:b.jsx("p",{className:"px-5 pb-5 text-ink-muted text-sm leading-relaxed border-t border-line 
+pt-4",children:n.a})})})]},n.q)})})]})}const wd=1e4,Ed={alpha:{id:"alpha",codename:"GENESIS ALPHA",wave:"Wave 1 · 
+Slots 1–10,000",tagline:"Founding cohort",access:"First coordinated testnet onboarding — hub, explorer, faucet, 
+and publish flows when your invite ships.",benefits:["Priority cohort invite before all Beta registrants","Genesis 
+Node recognition on the mainnet roadmap","Planned Genesis commemorative NFT (non-financial; details may 
+evolve)","Highest early governance signal weight","Direct alpha feedback channel with core 
+contributors"]},beta:{id:"beta",codename:"VANGUARD BETA",wave:"Wave 2 · Slot 10,001+",tagline:"Second wave 
+builders",access:"Staggered testnet access after Alpha waves stabilize — still on the inside, not the public open 
+door.",benefits:["Second-wave cohort invite after Alpha onboarding","Beta contributor badge in protocol 
+history","Publish & explore access when your Beta wave opens","Security bounty queue (priority below Alpha)","Early 
+feature previews and structured feedback loops"]}};function U5(t){return t<=wd?"alpha":"beta"}function BC(t){return 
+Math.max(0,wd-t)}function z5(t){return Math.min(100,t/wd*100)}function FC(t){return U5(t+1)}function 
+B5(t){return`#${String(t).padStart(5,"0")}`}const F5=6e4;function xd(){const[t,e]=J.useState(0);return 
+J.useEffect(()=>{let n=!1;async function s(){try{const l=await 
+k3(m3(LC,"stats","waitlist"));if(n)return;if(l.exists()){const u=l.data();u.count!==void 0&&e(u.count)}else 
+e(0)}catch(l){console.error("Failed to load waitlist stats:",l)}}s();const 
+a=window.setInterval(()=>{s()},F5);return()=>{n=!0,window.clearInterval(a)}},[]),t}function q5(){const 
+t=xd(),e=BC(t),n=e===0;return b.jsxs("section",{id:"access-tiers",className:"py-24 border-t 
+border-line",children:[b.jsxs("div",{className:"mb-12 max-w-3xl",children:[b.jsxs("div",{className:"font-mono text-sm 
+uppercase font-bold text-accent mb-3 flex items-center gap-2",children:[b.jsx(jV,{className:"w-4 
+h-4","aria-hidden":!0}),b.jsx("span",{className:"w-4 h-[1.5px] bg-accent inline-block"})," Access 
+ladder"]}),b.jsxs("h2",{className:"text-3xl md:text-5xl font-sans font-bold uppercase tracking-tight 
+mb-4",children:["Alpha genesis.",b.jsx("br",{}),b.jsx("span",{className:"text-accent italic",children:"Then Beta 
+vanguard."})]}),b.jsxs("p",{className:"text-ink-muted font-sans text-lg leading-relaxed",children:["Your slot number 
+decides your wave. The first"," ",b.jsx("strong",{className:"text-ink font-bold",children:"10,000"})," wallets 
+become"," ",b.jsx("strong",{className:"text-ink font-bold",children:"Genesis Alpha"})," — first testnet cohort, 
+highest recognition. Everyone after joins"," ",b.jsx("strong",{className:"text-ink font-bold",children:"Vanguard 
+Beta"})," with real benefits, staged one wave behind Alpha."]})]}),b.jsx("div",{className:"grid grid-cols-1 
+lg:grid-cols-2 gap-8 items-stretch",children:["alpha","beta"].map((s,a)=>{const 
+l=Ed[s],u=s==="alpha",d=u?!n:n,p=u&&!n;return b.jsxs(Ne.article,{initial:{opacity:0,y:16},whileInView:{opacity:1,y:0},v
+iewport:{once:!0,margin:"-40px"},transition:{delay:a*.08,duration:.45},className:`relative flex flex-col p-8 md:p-10 
+retro-border retro-shadow transition-colors ${d?"bg-accent/5 border-accent":"bg-surface border-line 
+opacity-90"}`,children:[p&&b.jsx("div",{className:"absolute top-4 right-4 font-mono text-[10px] uppercase font-bold 
+px-2 py-1 bg-accent text-paper retro-border border-accent animate-pulse",children:"Filling 
+now"}),u&&n&&b.jsx("div",{className:"absolute top-4 right-4 font-mono text-[10px] uppercase font-bold px-2 py-1 bg-ink 
+text-paper retro-border",children:"Closed"}),!u&&!n&&b.jsx("div",{className:"absolute top-4 right-4 font-mono 
+text-[10px] uppercase font-bold px-2 py-1 bg-surface text-ink-muted retro-border",children:"Opens at 
+10,001"}),b.jsx("p",{className:"font-mono text-xs uppercase tracking-[0.2em] text-accent font-bold 
+mb-2",children:l.wave}),b.jsx("h3",{className:"text-2xl md:text-3xl font-sans font-bold uppercase 
+mb-1",children:l.codename}),b.jsx("p",{className:"font-mono text-xs text-ink-muted uppercase 
+mb-6",children:l.tagline}),b.jsx("p",{className:"text-ink font-sans text-sm leading-relaxed mb-6 border-l-2 
+border-accent pl-4",children:l.access}),b.jsx("ul",{className:"space-y-3 
+flex-grow",children:l.benefits.map(g=>b.jsxs("li",{className:"flex gap-3 text-sm text-ink-muted 
+leading-relaxed",children:[b.jsx(Ac,{className:"w-4 h-4 text-accent shrink-0 
+mt-0.5","aria-hidden":!0}),b.jsx("span",{children:g})]},g))}),b.jsx("div",{className:"mt-8 pt-6 border-t border-line 
+border-dashed font-mono text-[10px] uppercase text-ink-muted",children:u?`${e.toLocaleString()} slots 
+remaining`:"Unlimited beta enrollment after Alpha fills"})]},s)})}),b.jsx("p",{className:"mt-8 text-center font-mono 
+text-[10px] uppercase text-ink-muted tracking-wider max-w-2xl mx-auto",children:"Tier is locked at registration time 
+from your global position. One wallet, one slot. Nothing on this page is a token sale or investment 
+offer."})]})}function H5({tier:t,position:e,role:n,address:s,onReset:a}){const l=Ed[t];return 
+b.jsxs("div",{className:"py-4 flex flex-col items-center w-full max-w-md 
+mx-auto",children:[b.jsxs("div",{className:`w-full retro-border retro-shadow-accent p-6 md:p-8 text-left 
+tier-credential tier-credential--${t}`,children:[b.jsxs("div",{className:"flex justify-between items-start gap-4 
+mb-6",children:[b.jsxs("div",{children:[b.jsx("p",{className:"font-mono text-[10px] uppercase tracking-[0.25em] 
+text-accent font-bold mb-1",children:"CREG access credential"}),b.jsx("h3",{className:"text-xl font-sans font-bold 
+uppercase",children:l.codename})]}),b.jsx("span",{className:"font-mono text-lg font-bold text-accent 
+tabular-nums",children:B5(e)})]}),b.jsxs("div",{className:"space-y-3 font-mono text-xs border-t border-b border-line 
+py-4 mb-6",children:[b.jsxs("div",{className:"flex justify-between 
+gap-4",children:[b.jsx("span",{className:"text-ink-muted 
+uppercase",children:"Wave"}),b.jsx("span",{className:"text-ink font-bold 
+text-right",children:l.wave})]}),b.jsxs("div",{className:"flex justify-between 
+gap-4",children:[b.jsx("span",{className:"text-ink-muted 
+uppercase",children:"Role"}),b.jsx("span",{className:"text-ink font-bold 
+text-right",children:n})]}),b.jsxs("div",{className:"flex justify-between 
+gap-4",children:[b.jsx("span",{className:"text-ink-muted 
+uppercase",children:"Wallet"}),b.jsxs("span",{className:"text-accent 
+font-bold",children:[s.slice(0,6),"…",s.slice(-4)]})]})]}),b.jsx("p",{className:"text-ink-muted font-sans text-sm 
+leading-relaxed mb-2",children:t==="alpha"?b.jsxs(b.Fragment,{children:["You secured a 
+",b.jsx("strong",{className:"text-ink",children:"Genesis Alpha"})," slot. Watch official channels for Wave 1 cohort 
+instructions."]}):b.jsxs(b.Fragment,{children:["You joined ",b.jsx("strong",{className:"text-ink",children:"Vanguard 
+Beta"}),". Alpha waves go first; your invite follows in Wave 2."]})}),b.jsx("p",{className:"text-[10px] font-mono 
+uppercase text-ink-muted",children:"No testnet links from this page — wait for your cohort 
+signal."})]}),b.jsx("button",{type:"button",onClick:a,className:"mt-8 text-ink font-bold hover:text-accent 
+transition-colors text-sm font-mono uppercase underline",children:"[ Register another wallet ]"})]})}function 
+G5(t){return t>0&&t<=1e3}function K5({showProjectedTier:t=!0}){const 
+e=xd(),n=BC(e),s=z5(e),a=n===0,l=G5(n),u=FC(e),d=Ed[u];return b.jsxs("div",{className:"mt-8 
+space-y-4","aria-live":"polite",children:[b.jsxs("div",{className:"retro-border bg-surface/80 p-4 
+md:p-5",children:[b.jsxs("div",{className:"flex flex-wrap justify-between gap-2 font-mono text-xs uppercase 
+mb-3",children:[b.jsx("span",{className:"text-ink font-bold tracking-wide",children:"Genesis Alpha 
+capacity"}),b.jsxs("span",{className:a?"text-ink-muted":l?"text-accent 
+font-bold":"text-accent",children:[e.toLocaleString()," / ",wd.toLocaleString()]})]}),b.jsxs("div",{className:"w-full 
+h-3 bg-paper border border-line p-[2px] relative overflow-hidden",children:[b.jsx(Ne.div,{className:`h-full ${l&&!a?"bg
+-accent":"bg-ink"}`,initial:{width:0},animate:{width:`${s}%`},transition:{duration:1.2,ease:"easeOut"}}),l&&!a&&b.jsx(N
+e.div,{className:"absolute inset-0 
+bg-accent/20",animate:{opacity:[.3,.7,.3]},transition:{duration:2,repeat:1/0}})]}),b.jsx("p",{className:"text-[10px] 
+font-mono text-ink-muted mt-3 uppercase tracking-wider leading-relaxed",children:a?b.jsxs(b.Fragment,{children:["Alpha 
+genesis is ",b.jsx("span",{className:"text-ink font-bold",children:"full"}),". New registrations join 
+",b.jsx("span",{className:"text-ink font-bold",children:"Vanguard Beta"})," (Wave 
+2)."]}):l?b.jsxs(b.Fragment,{children:[b.jsxs("span",{className:"text-accent font-bold",children:[n.toLocaleString()," 
+alpha slots left."]})," After slot 10,000, the next tier is Beta 
+only."]}):b.jsxs(b.Fragment,{children:[n.toLocaleString()," alpha slots remain before Wave 2 (Beta) opens for new 
+wallets."]})})]}),b.jsxs("div",{className:"flex justify-between items-center font-mono text-[10px] uppercase 
+text-ink-muted border-t border-line border-dashed pt-3",children:[b.jsx("span",{children:"Total enrolled (all 
+tiers)"}),b.jsx("span",{className:"text-ink 
+font-bold",children:e.toLocaleString()})]}),t&&b.jsxs("div",{className:`retro-border p-3 font-mono text-xs uppercase 
+${u==="alpha"?"bg-accent/10 border-accent text-accent":"bg-surface border-line 
+text-ink-muted"}`,children:[b.jsx("span",{className:"opacity-70",children:"Next registration earns · 
+"}),b.jsx("span",{className:"font-bold text-ink",children:d.codename})]})]})}function Yh(t,e,n){const 
+s=n.info.rdns||n.info.uuid;e.has(s)||(e.add(s),t.push(n))}function $5(){var d;if(typeof window>"u")return[];const 
+t=window,e=[],n=new Set,s=((d=t.okxwallet)==null?void 0:d.ethereum)??t.okxwallet;s&&typeof 
+s.request=="function"&&Yh(e,n,{info:{uuid:"injected-okx-wallet",name:"OKX Wallet",icon:"https://static.okx.com/cdn/asse
+ts/imgs/221/EB771C89BC13F18F.png",rdns:"com.okex.wallet"},provider:s}),t.trustwallet&&typeof 
+t.trustwallet.request=="function"&&Yh(e,n,{info:{uuid:"injected-trust-wallet",name:"Trust 
+Wallet",icon:"",rdns:"com.trustwallet.app"},provider:t.trustwallet}),t.coinbaseWalletExtension&&typeof 
+t.coinbaseWalletExtension.request=="function"&&Yh(e,n,{info:{uuid:"injected-coinbase-wallet",name:"Coinbase 
+Wallet",icon:"",rdns:"com.coinbase.wallet"},provider:t.coinbaseWalletExtension});const a=p=>{const g=p;return 
+g.isOkxWallet?{name:"OKX Wallet",rdns:"com.okex.wallet"}:g.isCoinbaseWallet?{name:"Coinbase 
+Wallet",rdns:"com.coinbase.wallet"}:g.isTrust?{name:"Trust 
+Wallet",rdns:"com.trustwallet.app"}:g.isBraveWallet?{name:"Brave Wallet",rdns:"com.brave.wallet"}:g.isPhantom?{name:"Ph
+antom",rdns:"app.phantom"}:g.isMetaMask?{name:"MetaMask",rdns:"io.metamask"}:{name:"Browser 
+Wallet",rdns:"browser.wallet"}},l=p=>{if(typeof p.request!="function")return;const{name:g,rdns:y}=a(p);Yh(e,n,{info:{uu
+id:`injected-${y}-${e.length}`,name:g,icon:"",rdns:y},provider:p})},u=t.ethereum;if(u!=null&&u.providers&&Array.isArray
+(u.providers))for(const p of u.providers)l(p);else u&&l(u);return e}function my(){return typeof 
+navigator>"u"?!1:/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)}function Y5(t){let e=t;return 
+e.includes("://")||(e=`${e.replaceAll("/","").replaceAll(":","")}://`),e.endsWith("/")||(e=`${e}/`),e}function 
+W5(t,e){const n=encodeURIComponent(e);return 
+t==="metamask"?`https://metamask.app.link/wc?uri=${n}`:`${Y5("okxwallet://main")}wc?uri=${n}`}function X5(t,e){const n=
+W5(t,e);if(n.startsWith("http://")||n.startsWith("https://")){if(!window.open(n,"_blank","noopener,noreferrer")){const 
+l=document.createElement("a");l.href=n,l.target="_blank",l.rel="noopener 
+noreferrer",l.style.display="none",document.body.appendChild(l),l.click(),document.body.removeChild(l)}return}const 
+s=document.createElement("a");s.href=n,s.rel="noopener 
+noreferrer",s.style.display="none",document.body.appendChild(s),s.click(),document.body.removeChild(s)}const 
+Q5="modulepreload",J5=function(t){return"/"+t},Rx={},Z5=function(e,n,s){let a=Promise.resolve();if(n&&n.length>0){let 
+u=function(g){return Promise.all(g.map(y=>Promise.resolve(y).then(_=>({status:"fulfilled",value:_}),_=>({status:"reject
+ed",reason:_}))))};document.getElementsByTagName("link");const 
+d=document.querySelector("meta[property=csp-nonce]"),p=(d==null?void 0:d.nonce)||(d==null?void 
+0:d.getAttribute("nonce"));a=u(n.map(g=>{if(g=J5(g),g in Rx)return;Rx[g]=!0;const 
+y=g.endsWith(".css"),_=y?'[rel="stylesheet"]':"";if(document.querySelector(`link[href="${g}"]${_}`))return;const E=docu
+ment.createElement("link");if(E.rel=y?"stylesheet":Q5,y||(E.as="script"),E.crossOrigin="",E.href=g,p&&E.setAttribute("n
+once",p),document.head.appendChild(E),y)return new 
+Promise((A,V)=>{E.addEventListener("load",A),E.addEventListener("error",()=>V(new Error(`Unable to preload CSS for 
+${g}`)))})}))}function l(u){const d=new 
+Event("vite:preloadError",{cancelable:!0});if(d.payload=u,window.dispatchEvent(d),!d.defaultPrevented)throw u}return 
+a.then(u=>{for(const d of u||[])d.status==="rejected"&&l(d.reason);return e().catch(l)})},qC="5e044dbdb79d21a953978b403
+1f66471".trim()??"",lg=!!qC,eU=["5d9f1395b3a8e848684848dc4147cbd05c8d54bb737eac78fe103901fe6b01a1","c57ca95b47569711a81
+3a718979daa21","4622a2b2d6af1c984494a0a332b71f7f2da5e1c6"],tU="10000";let Yi=null;function nU(t,e,n){return new 
+Promise((s,a)=>{const l=window.setTimeout(()=>a(new 
+Error(n)),e);t.then(u=>{window.clearTimeout(l),s(u)}).catch(u=>{window.clearTimeout(l),a(u)})})}async function 
+py(){Yi!=null&&Yi.disconnect&&await Yi.disconnect().catch(()=>{}),Yi=null}async function iU(t){var 
+l;const{EthereumProvider:e}=await Z5(async()=>{const{EthereumProvider:u}=await 
+import("./index.es-B3dqKxRj.js");return{EthereumProvider:u}},[]),n=typeof 
+window<"u"?window.location.origin:"https://waitlist.cregnet.dev",s=my()&&t!=="all",a=await e.init({projectId:qC,chains:
+[1],optionalChains:[11155111],rpcMap:{1:"https://ethereum.publicnode.com",11155111:"https://rpc.sepolia.org"},showQrMod
+al:!s,qrModalOptions:{explorerRecommendedWalletIds:eU,themeVariables:{"--wcm-z-index":tU}},metadata:{name:"CREG 
+Waitlist",description:"Connect your wallet to join the Chain Registry 
+waitlist",url:n,icons:[`${n}/favicon.ico`]}});if(s){const u=d=>{typeof 
+d=="string"&&X5(t,d)};(l=a.on)==null||l.call(a,"display_uri",u)}return a}async function sU(t="all"){await 
+py(),Yi=await iU(t),document.body.classList.add("walletconnect-active");try{const e=await 
+nU(Yi.enable(),12e4,t==="all"?"Wallet connection timed out. Approve in your wallet app, then return to this 
+tab.":`Timed out waiting for ${t==="okx"?"OKX Wallet":"MetaMask"}. Open the app, approve, then return 
+here.`),n=e!=null&&e.length?e:Yi.accounts;if(!(n!=null&&n.length))throw new Error("No account was returned from 
+WalletConnect.");return Yi.accounts=n,{accounts:n,provider:Yi}}catch(e){throw await 
+py(),e}finally{document.body.classList.remove("walletconnect-active")}}async function rU(t){try{await 
+t.request({method:"wallet_requestPermissions",params:[{eth_accounts:{}}]})}catch(n){if((n==null?void 
+0:n.code)===4001)throw n}const e=await t.request({method:"eth_requestAccounts"});if(!(e!=null&&e.length))throw new 
+Error("No accounts found.");return e}function aU(t){const e=t;return e.code===4001||e.code==="ACTION_REJECTED"?"Wallet 
+connection was rejected by the user.":e.code===-32002?"A wallet request is already open. Return to your wallet app to 
+continue.":e.message||"Wallet connection failed or was rejected."}function oU(){const[t,e]=J.useState(!1),[n,s]=J.useSt
+ate(""),[a,l]=J.useState(""),[u,d]=J.useState(!1),[p,g]=J.useState(""),[y,_]=J.useState([]);J.useEffect(()=>{const 
+L=new Map,G=()=>{for(const X of $5()){const 
+ne=X.info.rdns||X.info.uuid;L.has(ne)||L.set(ne,X)}_(Array.from(L.values()))},Q=X=>{var he;const ne=X.detail;!(ne!=null
+&&ne.provider)||!((he=ne.info)!=null&&he.uuid)||(L.set(ne.info.uuid,ne),G())};window.addEventListener("eip6963:announce
+Provider",Q),window.dispatchEvent(new Event("eip6963:requestProvider")),G();const W=[350,1200,2500].map(X=>window.setTi
+meout(G,X));return()=>{window.removeEventListener("eip6963:announceProvider",Q),W.forEach(X=>window.clearTimeout(X))}},
+[]);const E=J.useMemo(()=>{const L=my(),G=[],Q=new Map(y.map(X=>[X.info.rdns,X])),W=(X,ne)=>{const 
+he=Q.get(X);he&&G.push({id:`injected:${X}`,name:he.info.name||ne,icon:he.info.icon||void 
+0,kind:"injected",mobilePreferred:L})};W("com.okex.wallet","OKX 
+Wallet"),W("io.metamask","MetaMask"),W("com.brave.wallet","Brave 
+Wallet"),W("app.phantom","Phantom"),W("com.coinbase.wallet","Coinbase Wallet"),W("com.trustwallet.app","Trust 
+Wallet");for(const X of y){const ne=X.info.rdns;ne==="com.okex.wallet"||ne==="io.metamask"||ne==="com.brave.wallet"||ne
+==="app.phantom"||ne==="com.coinbase.wallet"||ne==="com.trustwallet.app"||G.push({id:`injected:${ne}`,name:X.info.name,
+icon:X.info.icon||void 0,kind:"injected"})}return 
+lg&&((L||!Q.has("io.metamask"))&&G.push({id:"walletconnect:metamask",name:L?"MetaMask (mobile app)":"MetaMask",kind:"wa
+lletconnect",mobilePreferred:L}),(L||!Q.has("com.okex.wallet"))&&G.push({id:"walletconnect:okx",name:L?"OKX Wallet 
+(mobile app)":"OKX Wallet",kind:"walletconnect",mobilePreferred:L}),G.push({id:"walletconnect:all",name:"WalletConnect"
+,kind:"walletconnect",mobilePreferred:L})),G},[y]),A=J.useCallback(async 
+L=>{g(""),d(!0);try{if(L.startsWith("injected:")){const X=L.slice(9),ne=y.find(I=>I.info.rdns===X);if(!ne)throw 
+window.self!==window.top?new Error("Wallet not detected in this preview. Open the waitlist in a full browser 
+tab."):new Error(`${X} is not available in this browser. Try WalletConnect on mobile or install the extension on 
+desktop.`);const he=await rU(ne.provider);s(he[0]),l(ne.info.name),e(!0);return}if(!lg)throw new Error("WalletConnect 
+is not configured for this deployment.");let G="all",Q="WalletConnect";L==="walletconnect:metamask"?(G="metamask",Q="Me
+taMask"):L==="walletconnect:okx"&&(G="okx",Q="OKX Wallet");const{accounts:W}=await 
+sU(G);s(W[0]),l(Q),e(!0)}catch(G){console.error("Wallet connection 
+failed:",G),g(aU(G))}finally{d(!1)}},[y]),V=J.useCallback(async()=>{await 
+py().catch(()=>{}),e(!1),s(""),l(""),g("")},[]),z=J.useCallback(async()=>{await V()},[V]);return{walletConnected:t,wall
+etAddress:n,connectedWalletName:a,isConnectingWallet:u,errorMsg:p,setErrorMsg:g,walletOptions:E,connectWallet:A,disconn
+ectWallet:V,resetWallet:z,isMobileBrowser:my(),walletConnectEnabled:lg}}const cg=S5;function lU(t,e,n){var 
+a,l,u,d,p,g,y;const s={error:t instanceof Error?t.message:String(t),authInfo:{userId:(a=Eo.currentUser)==null?void 
+0:a.uid,email:(l=Eo.currentUser)==null?void 0:l.email,emailVerified:(u=Eo.currentUser)==null?void 
+0:u.emailVerified,isAnonymous:(d=Eo.currentUser)==null?void 0:d.isAnonymous,tenantId:(p=Eo.currentUser)==null?void 
+0:p.tenantId,providerInfo:((y=(g=Eo.currentUser)==null?void 0:g.providerData)==null?void 
+0:y.map(_=>({providerId:_.providerId,email:_.email})))||[]},operationType:e,path:n};throw console.error("Firestore 
+Error: ",JSON.stringify(s)),new Error(JSON.stringify(s))}function cU(){const[t,e]=J.useState(!1);return J.useEffect(()=
+>{t?document.documentElement.classList.add("dark"):document.documentElement.classList.remove("dark")},[t]),b.jsxs("div"
+,{className:"relative min-h-screen text-ink font-sans selection:bg-accent/30 selection:text-ink overflow-x-hidden flex 
+flex-col",children:[b.jsx(hU,{}),b.jsx(fU,{isDark:t,setIsDark:e}),b.jsx(uU,{}),b.jsxs("main",{className:"relative z-10 
+flex-grow pt-24 pb-20 w-full max-w-7xl mx-auto px-6 md:px-12",children:[b.jsx(dU,{}),b.jsx("div",{className:"mb-8",chil
+dren:b.jsx(zC,{})}),b.jsx(D5,{}),b.jsx(k5,{}),b.jsx(V5,{}),b.jsx(mU,{}),b.jsx(P5,{}),b.jsx(q5,{}),b.jsx(SU,{}),b.jsx(yU
+,{}),b.jsx(bU,{}),b.jsx(L5,{}),b.jsx(_U,{})]}),b.jsx(AU,{})]})}function 
+uU(){const[t,e]=J.useState("hero");J.useEffect(()=>{const s=()=>{const a=["hero","about","pipeline","technology","paths
+","how-it-works","access-tiers","waitlist","features","roadmap","faq","tokenomics"];let l="hero";const 
+u=window.scrollY+window.innerHeight/3;for(const d of a){const 
+p=document.getElementById(d);p&&p.offsetTop<=u&&(l=d)}e(l)};return 
+window.addEventListener("scroll",s,{passive:!0}),s(),()=>window.removeEventListener("scroll",s)},[]);const n=[{id:"hero
+",label:"01"},{id:"about",label:"02"},{id:"pipeline",label:"03"},{id:"technology",label:"04"},{id:"paths",label:"05"},{
+id:"how-it-works",label:"06"},{id:"access-tiers",label:"07"},{id:"waitlist",label:"08"},{id:"features",label:"09"},{id:
+"roadmap",label:"10"},{id:"faq",label:"11"},{id:"tokenomics",label:"12"}];return b.jsx("div",{className:"fixed left-6 
+top-1/2 -translate-y-1/2 z-50 hidden xl:flex flex-col 
+gap-4",children:n.map(s=>b.jsxs("a",{href:`#${s.id}`,className:"flex items-center gap-3 font-mono text-sm 
+transition-all duration-300 group","aria-label":`Navigate to ${s.id}`,children:[b.jsx("span",{className:`w-[2px] 
+transition-all duration-300 ${t===s.id?"h-8 bg-accent":"h-2 bg-line group-hover:h-4 
+group-hover:bg-ink"}`}),b.jsx("span",{className:`transition-all duration-300 ${t===s.id?"text-ink font-bold 
+opacity-100":"text-ink-muted opacity-0 -translate-x-4 group-hover:translate-x-0 
+group-hover:opacity-100"}`,children:s.label})]},s.id))})}function hU(){const t=gr(0),e=gr(0),n=gr(typeof 
+window<"u"?window.innerWidth/2:500),s=gr(typeof window<"u"?window.innerHeight/2:500),a=ko(t,{stiffness:40,damping:30}),
+l=ko(e,{stiffness:40,damping:30}),u=ko(n,{stiffness:50,damping:20}),d=ko(s,{stiffness:50,damping:20});J.useEffect(()=>{
+const E=A=>{const{innerWidth:V,innerHeight:z}=window,L=(A.clientX/V-.5)*45,G=(A.clientY/z-.5)*45;t.set(L),e.set(G),n.se
+t(A.clientX),s.set(A.clientY)};return window.addEventListener("mousemove",E),()=>window.removeEventListener("mousemove"
+,E)},[t,e,n,s]);const{scrollY:p}=XM(),g=va(p,[0,3e3],[0,600]),y=va(p,[0,2e3],[60,85]),_=QM`radial-gradient(circle 
+600px at ${u}px ${d}px, black 30%, transparent 80%)`;return b.jsxs("div",{className:"fixed inset-0 pointer-events-none 
+overflow-hidden z-0 bg-paper",children:[b.jsx(Ne.div,{className:"absolute inset-x-0 top-0 w-full h-[100vh] flex 
+items-center justify-center opacity-15 dark:opacity-20",style:{perspective:1200,rotateY:a,rotateX:va(l,E=>-E+60),y:g,tr
+ansformStyle:"preserve-3d"},children:b.jsx(Ne.div,{animate:{backgroundPosition:["0px 0px","0px 
+100px"]},transition:{duration:2,repeat:1/0,ease:"linear"},className:"w-[200vw] h-[200vh] 
+origin-center",style:{rotateX:y,translateY:"10%",backgroundImage:"linear-gradient(var(--line) 1px, transparent 1px), 
+linear-gradient(90deg, var(--line) 1px, transparent 1px)",backgroundSize:"100px 
+100px",WebkitMaskImage:"radial-gradient(ellipse 70% 70% at center, black 10%, transparent 
+70%)",maskImage:"radial-gradient(ellipse 70% 70% at center, black 10%, transparent 
+70%)"}})}),b.jsx(Ne.div,{className:"absolute inset-x-0 top-0 w-full h-[100vh] flex items-center justify-center 
+mix-blend-darken dark:mix-blend-lighten",style:{perspective:1200,rotateY:a,rotateX:va(l,E=>-E+60),y:g,transformStyle:"p
+reserve-3d",WebkitMaskImage:_,maskImage:_},children:b.jsx(Ne.div,{animate:{backgroundPosition:["0px 0px","0px 
+100px"]},transition:{duration:2,repeat:1/0,ease:"linear"},className:"w-[200vw] h-[200vh] origin-center 
+drop-shadow-[0_0_15px_var(--accent)] 
+opacity-80",style:{rotateX:y,translateY:"10%",backgroundImage:"linear-gradient(var(--accent) 2px, transparent 2px), 
+linear-gradient(90deg, var(--accent) 2px, transparent 2px)",backgroundSize:"100px 
+100px"}})}),b.jsx("div",{className:"absolute inset-0 
+bg-[radial-gradient(ellipse_at_center,transparent_20%,var(--paper)_100%)]"}),b.jsx("div",{className:"absolute inset-0 
+bg-gradient-to-t from-paper via-transparent to-paper opacity-70"})]})}function 
+fU({isDark:t,setIsDark:e}){const[n,s]=J.useState(!1);return J.useEffect(()=>{const a=()=>s(window.scrollY>20);return 
+window.addEventListener("scroll",a),()=>window.removeEventListener("scroll",a)},[]),b.jsx("header",{className:`fixed 
+top-0 left-0 right-0 z-50 transition-all duration-300 ${n?"py-4 bg-paper/90 backdrop-blur-md retro-border-b":"py-6 
+bg-transparent"}`,children:b.jsxs("div",{className:"max-w-7xl mx-auto px-6 md:px-12 flex items-center 
+justify-between",children:[b.jsxs("a",{href:"#hero",className:"flex items-center gap-3 cursor-pointer 
+group",children:[b.jsx("div",{className:"w-8 h-8 flex items-center justify-center text-paper bg-ink retro-border 
+border-ink group-hover:bg-accent group-hover:border-accent transition-colors font-mono font-bold 
+text-sm",children:"CR"}),b.jsx("span",{className:"font-sans font-bold tracking-tight uppercase text-lg 
+group-hover:text-accent transition-colors",children:"Registry"})]}),b.jsxs("div",{className:"flex items-center 
+gap-6",children:[b.jsxs("nav",{className:"hidden md:flex items-center gap-8 font-mono text-sm uppercase font-bold 
+tracking-widest text-ink",children:[b.jsxs("a",{href:"#about",className:"hover:text-accent transition-colors relative 
+group",children:[b.jsx("span",{className:"relative z-10",children:"About"}),b.jsx("span",{className:"absolute 
+-bottom-1 left-0 w-full h-[3px] bg-accent/30 scale-x-0 group-hover:scale-x-100 transition-transform 
+origin-left"})]}),b.jsxs("a",{href:"#technology",className:"hover:text-accent transition-colors relative 
+group",children:[b.jsx("span",{className:"relative z-10",children:"Tech"}),b.jsx("span",{className:"absolute -bottom-1 
+left-0 w-full h-[3px] bg-accent/30 scale-x-0 group-hover:scale-x-100 transition-transform 
+origin-left"})]}),b.jsxs("a",{href:"#access-tiers",className:"hover:text-accent transition-colors relative 
+group",children:[b.jsx("span",{className:"relative z-10",children:"Tiers"}),b.jsx("span",{className:"absolute 
+-bottom-1 left-0 w-full h-[3px] bg-accent/30 scale-x-0 group-hover:scale-x-100 transition-transform 
+origin-left"})]}),b.jsxs("a",{href:"#how-it-works",className:"hover:text-accent transition-colors relative 
+group",children:[b.jsx("span",{className:"relative z-10",children:"How it works"}),b.jsx("span",{className:"absolute 
+-bottom-1 left-0 w-full h-[3px] bg-accent/30 scale-x-0 group-hover:scale-x-100 transition-transform 
+origin-left"})]}),b.jsxs("a",{href:"#faq",className:"hover:text-accent transition-colors relative 
+group",children:[b.jsx("span",{className:"relative z-10",children:"FAQ"}),b.jsx("span",{className:"absolute -bottom-1 
+left-0 w-full h-[3px] bg-accent/30 scale-x-0 group-hover:scale-x-100 transition-transform 
+origin-left"})]})]}),b.jsxs("div",{className:"flex items-center gap-4 sm:border-l border-line 
+sm:pl-6",children:[b.jsx("button",{onClick:()=>e(!t),className:"p-2 retro-border hover:bg-ink hover:text-paper 
+transition-colors rounded-full text-ink","aria-label":"Toggle Theme",children:t?b.jsx(UV,{className:"w-4 
+h-4"}):b.jsx(IV,{className:"w-4 h-4"})}),b.jsx("a",{href:"#waitlist",className:"hidden sm:inline-flex items-center 
+justify-center px-6 py-2 bg-surface text-ink font-mono text-sm font-bold uppercase retro-border retro-shadow 
+hover:bg-accent hover:text-paper hover:border-accent transition-all",children:"Join Waitlist"})]})]})]})})}function 
+dU(){const t=xd();return b.jsxs("section",{id:"hero",className:"py-20 md:py-32 grid grid-cols-1 lg:grid-cols-2 gap-16 
+items-center min-h-[85vh]",children:[b.jsxs("div",{className:"flex flex-col items-start z-10",children:[b.jsxs(Ne.div,{
+initial:{opacity:0,y:15},animate:{opacity:1,y:0},transition:{duration:.5},className:"inline-flex items-center gap-3 
+px-3 py-1 bg-surface font-mono text-xs uppercase tracking-widest font-bold retro-border 
+mb-8",children:[b.jsx("span",{className:"w-2 h-2 bg-accent inline-block"}),"Chain Registry · Public alpha waitlist · 
+Cohort onboarding"]}),b.jsxs(Ne.h1,{initial:{opacity:0,y:15},animate:{opacity:1,y:0},transition:{duration:.5,delay:.1},
+className:"text-4xl sm:text-5xl md:text-7xl font-sans font-bold leading-[1.05] tracking-tight mb-8 uppercase 
+break-words",children:["The registry",b.jsx("br",{}),b.jsx("span",{className:"text-accent",children:"blockchain."})]}),
+b.jsx(Ne.p,{initial:{opacity:0,y:15},animate:{opacity:1,y:0},transition:{duration:.5,delay:.2},className:"text-lg 
+text-ink-muted font-sans max-w-lg mb-8 leading-relaxed bg-surface/50 p-4 retro-border-l border-l-ink",children:"Chain 
+Registry (CREG) replaces centralized npm/PyPI trust with staked validator consensus — IPFS delivery, WASM sandboxes, 
+ML-assisted scans, PBFT finality, and Ethereum anchoring. Join the waitlist to reserve your cohort role; read below 
+for how the protocol works."}),b.jsxs(Ne.div,{initial:{opacity:0,y:15},animate:{opacity:1,y:0},transition:{duration:.5,
+delay:.3},className:"flex flex-col sm:flex-row flex-wrap gap-4 w-full 
+mt-2",children:[b.jsxs("a",{href:"#waitlist",className:"flex items-center justify-between gap-4 px-8 py-4 bg-ink 
+text-paper font-mono text-sm font-bold uppercase retro-border border-ink retro-shadow hover:bg-accent 
+hover:border-accent transition-all whitespace-nowrap",children:[b.jsx("span",{children:"Join 
+Waitlist"}),b.jsx(Wc,{className:"w-4 h-4"})]}),b.jsxs("a",{href:"#about",className:"flex items-center justify-between 
+gap-4 px-8 py-4 bg-surface text-ink font-mono text-sm font-bold uppercase retro-border retro-shadow hover:bg-paper 
+transition-all whitespace-nowrap",children:[b.jsx("span",{children:"What is CREG"}),b.jsx(ad,{className:"w-4 
+h-4"})]}),b.jsxs("button",{type:"button",onClick:()=>{navigator.share?navigator.share({title:"Chain Registry (CREG) 
+Waitlist",text:"Join the Chain Registry waitlist — secure, decentralized package distribution.",url:window.location.h
+ref}).catch(console.error):navigator.clipboard.writeText(window.location.href).then(()=>alert("Waitlist link copied to 
+clipboard!")).catch(()=>alert("Failed to copy link."))},className:"flex items-center justify-between gap-4 px-8 py-4 
+bg-surface text-ink font-mono text-sm font-bold uppercase retro-border retro-shadow hover:bg-paper transition-all 
+whitespace-nowrap",title:"Share Waitlist",children:[b.jsx("span",{children:"Share"}),b.jsx(VV,{className:"w-4 h-4"})]})
+]}),b.jsxs(Ne.div,{initial:{opacity:0,y:15},animate:{opacity:1,y:0},transition:{duration:.5,delay:.5},className:"mt-8 
+flex items-center gap-3 text-xs font-mono font-bold text-ink-muted uppercase",children:[b.jsx("div",{className:"flex 
+-space-x-2",children:[1,2,3].map(e=>b.jsx("div",{className:"w-6 h-6 rounded-full border border-surface bg-ink/10 flex 
+items-center justify-center overflow-hidden",children:b.jsx("div",{className:"w-full h-full bg-gradient-to-br 
+from-accent/20 to-transparent"})},e))}),b.jsx("span",{children:t>0?`${t.toLocaleString()} enrolled · 
+${Math.max(0,1e4-t).toLocaleString()} Alpha slots left`:"Be among the first 10,000 Genesis Alpha 
+members."})]})]}),b.jsx("div",{className:"w-full h-[400px] lg:h-[600px] relative z-0 flex items-center 
+justify-center",style:{perspective:"1200px"},children:b.jsx(pU,{})})]})}function mU(){const 
+t=[{id:"developer",label:"Developer",title:"Publish packages later",desc:"Signal interest as a Publisher. When your 
+cohort opens, you will get CLI install steps, stake guidance, and IPFS publish flows — after waitlist 
+approval.",cta:"Register as Publisher",href:"#waitlist",external:!1,steps:["Join waitlist below","Select Publisher 
+role","Await cohort invite with onboarding docs"]},{id:"enthusiast",label:"Builder / enthusiast",title:"Follow the 
+launch",desc:"Learn what CREG is building — supply-chain problem, validator pipeline, and tech stack below — then 
+register to hear when public alpha opens for your wave.",cta:"Join waitlist",href:"#waitlist",external:!1,steps:["Read 
+About & Technology sections","Register any role","Watch official channels for cohort 
+dates"]},{id:"validator",label:"Aspiring validator",title:"Run consensus & sandboxes",desc:"Register as Validator 
+Node. Highest commitment: hardware requirements, stake, and sandbox enforcement apply when you are invited — not 
+before.",cta:"Register as Validator",href:"#waitlist",external:!1,steps:["Connect wallet below","Select Validator 
+Node","Wait for validator cohort onboarding"]}];return b.jsxs("section",{id:"paths",className:"py-20 border-t 
+border-line",children:[b.jsxs("div",{className:"mb-12 max-w-3xl",children:[b.jsxs("div",{className:"font-mono text-sm 
+uppercase font-bold text-accent mb-3 flex items-center gap-2",children:[b.jsx("span",{className:"w-4 h-[1.5px] 
+bg-accent inline-block"})," Choose your path"]}),b.jsx("h2",{className:"text-3xl md:text-4xl font-sans font-bold 
+uppercase tracking-tight mb-4",children:"One destination: the waitlist."}),b.jsx("p",{className:"text-ink-muted 
+font-sans text-lg leading-relaxed",children:"Pick the role that matches how you want to participate. Every path ends 
+at registration — there are no live testnet shortcuts from this site."})]}),b.jsx("div",{className:"grid grid-cols-1 
+lg:grid-cols-3 gap-6",children:t.map((e,n)=>b.jsxs(Ne.article,{initial:{opacity:0,y:16},whileInView:{opacity:1,y:0},vie
+wport:{once:!0,margin:"-40px"},transition:{delay:n*.08,duration:.45},className:"bg-surface p-6 md:p-8 retro-border 
+retro-shadow flex flex-col h-full",children:[b.jsx("div",{className:"font-mono text-[10px] uppercase font-bold 
+tracking-widest text-accent mb-3",children:e.label}),b.jsx("h3",{className:"text-xl font-sans font-bold 
+mb-2",children:e.title}),b.jsx("p",{className:"text-ink-muted text-sm leading-relaxed mb-6 
+flex-grow",children:e.desc}),b.jsx("ul",{className:"space-y-2 mb-6 font-mono text-[11px] 
+text-ink-muted",children:e.steps.map((s,a)=>b.jsxs("li",{className:"flex gap-2",children:[b.jsx("span",{className:"text
+-accent",children:">"}),b.jsx("span",{children:s})]},a))}),b.jsxs("a",{href:e.href,...e.external?{target:"_blank",rel:"
+noreferrer"}:{},className:"inline-flex items-center justify-center gap-2 py-3 px-4 font-mono text-xs font-bold 
+uppercase retro-border transition-all bg-ink text-paper border-ink hover:bg-accent 
+hover:border-accent",children:[e.cta,b.jsx(ad,{className:"w-3.5 h-3.5"})]})]},e.id))})]})}function pU(){const 
+t=gr(0),e=gr(0),n=ko(t,{stiffness:60,damping:25}),s=ko(e,{stiffness:60,damping:25});return J.useEffect(()=>{const 
+a=l=>{const{innerWidth:u,innerHeight:d}=window,p=(l.clientX/u-.5)*50,g=(l.clientY/d-.5)*50;t.set(p),e.set(g)};return wi
+ndow.addEventListener("mousemove",a),()=>window.removeEventListener("mousemove",a)},[t,e]),b.jsx(Ne.div,{className:"rel
+ative w-64 h-64 flex items-center justify-center cursor-crosshair",style:{rotateY:n,rotateX:va(s,a=>-a),transformStyle:
+"preserve-3d"},children:[0,1,2].map(a=>b.jsxs(Ne.div,{animate:{rotateZ:360},transition:{duration:20+a*5,repeat:1/0,ease
+:"linear"},className:"absolute inset-0 retro-border flex items-center justify-center",style:{borderColor:a===1?"var(--a
+ccent)":"var(--ink)",rotateX:45+a*30,rotateY:60-a*15,width:`${100+a*15}%`,height:`${100+a*15}%`},children:[b.jsx("div",
+{className:"absolute -top-1 -left-1 w-2 h-2 bg-paper retro-border border-inherit"}),b.jsx("div",{className:"absolute 
+-bottom-1 -right-1 w-2 h-2 bg-paper retro-border border-inherit"})]},a))})}const gU=[{id:"01",category:"Core 
+Goals",icon:b.jsx(kf,{className:"w-6 h-6 text-paper"}),title:"Immutable Integrity",subtitle:"Unalterable Code 
+Provenance",overview:"By leveraging a decentralized ledger architecture, the Chain Registry ensures that once a 
+package is published, its exact state is permanently etched into the network's history. It effectively eliminates the 
+risk of silent tampering, retroactive state alterations, or unverified modifications that currently plague centralized 
+package managers. The immutable nature of this layer guarantees that what you audit today is guaranteed to be exactly 
+the same software deployed tomorrow, providing a mathematical assurance of supply chain 
+provenance.",details:["Automated Cryptographic Anchoring: Every release is securely anchored to our custom blockchain 
+via SHA-256 hashes.","Global Distribution (IPFS): Code fragments and package bundles are spread across a decentralized 
+IPFS network, eliminating single points of failure.","Tamper-Proof Ledger: Retroactive modifications, version 
+overwrites, or silent deletions by compromised author accounts are structurally impossible."]},{id:"02",category:"Core 
+Goals",icon:b.jsx(kV,{className:"w-6 h-6 text-paper"}),title:"Verification at Scale",subtitle:"Mathematical Safety 
+Proofs",overview:"Validators run WASM sandboxes, collect evidence votes, and participate in PBFT consensus before 
+packages gain registry status. The design targets proactive risk signals — static analysis, sandbox telemetry, and 
+slashing for negligent approvals — rather than waiting for post-incident reports. Full automation is still rolling 
+out on the public alpha testnet.",details:["Evidence-based votes: Validators record sandbox outcomes and vote on 
+package acceptance.","Distributed analysis: Multiple nodes can run isolated checks before consensus commits a 
+version.","Slashing path (in progress): Economic penalties for approving known-bad packages are on the roadmap, not 
+fully enforced in alpha."]},{id:"03",category:"Core Goals",icon:b.jsx(Df,{className:"w-6 h-6 
+text-paper"}),title:"Community Governance",subtitle:"Decentralized Control",overview:"The architectural risk of 
+traditional package registries is the administration keys held by very few individuals. By migrating governance to a 
+decentralized structure, no single corporate entity, rogue employee, or governmental pressure can override the system. 
+Critical registry parameters, node operator slashed, and network upgrades are collectively adjudicated by stakeholders 
+based on their historical contribution, effectively democratizing the world's open-source supply 
+layer.",details:["Stakeholder Consensus: Parameter mutations and system updates require multi-signature approval from 
+diverse global entities.","Censorship Resistance: The lack of centralized infrastructure makes targeted takedowns of 
+verified dependencies unfeasible.","Meritocratic Voting Weight: Governance influence is weighted proportionally to a 
+participant's established trust and auditing 
+accuracy."]},{id:"04",category:"Architecture",icon:b.jsx(Wc,{className:"w-6 h-6 text-paper"}),title:"Blockchain 
+Layer",subtitle:"The Ledger",overview:"The ledger layer (Rust, Sepolia-backed) records package submissions, validator 
+votes, and stake events. It is the settlement layer for registry state — not a general-purpose chain. Throughput and 
+finality targets are tuned for registry workloads; public alpha runs on a small validator fleet.",details:["Rust 
+implementation: Core node and consensus logic prioritize memory safety and predictable performance.","Chronological 
+audit trail: Submissions, votes, and stake changes append to an inspectable history.","Standard cryptography today: 
+ECDSA/secp256k1-style signing on Sepolia; post-quantum primitives are research-only until explicitly 
+shipped."]},{id:"05",category:"Architecture",icon:b.jsx(Df,{className:"w-6 h-6 text-paper"}),title:"Storage 
+Layer",subtitle:"The Vault",overview:"Rather than trusting an S3 bucket or a CDN edge node with the delivery of 
+arbitrary code, the registry uses IPFS (InterPlanetary File System). This creates a peer-to-peer data vault where 
+software is retrieved by its exact cryptographic hash rather than its location. This mechanism inherently verifies the 
+integrity of the downloaded file against the hash stored on the blockchain layer.",details:["Location-Agnostic 
+Retrieval: Packages are fetched via contents hashes, shielding against CDN outages or blocked domains.","Distributed 
+Pinning: Redundant storage nodes pin package data, ensuring perpetual availability long after the original 
+deployment.","Intrinsic Validation: The very act of fetching data verifies its integrity, as the hash requested must 
+perfectly match the delivered bytes."]},{id:"06",category:"Architecture",icon:b.jsx(kf,{className:"w-6 h-6 
+text-paper"}),title:"Security Layer",subtitle:"The Guard",overview:"A sophisticated incentive mechanism secures the 
+integrity of the auditing network. Independent validators are required to stake capital to participate. When they 
+accurately verify code safety, they are rewarded. If a validator clears a malicious package or exhibits network 
+negligence, their stake is structurally burned ('slashed'). This aligns economic incentives directly with the maximum 
+safety of the software registry ecosystem.",details:["Slashing Mechanisms: Severe economic penalties programmatically 
+deter validators from accepting bribes or deploying malicious audits.","Trust Score Aggregation: Node participants 
+build unforgeable, on-chain reputations that developers can use to filter packages.","Parallel Execution Verifiers: 
+Massive networks of guard nodes run code in isolated sandboxes simultaneously to detect zero-day injection 
+attacks."]}];function yU(){const[t,e]=J.useState(null);return J.useEffect(()=>{const 
+n=s=>{s.key==="Escape"&&e(null)};return t?(window.addEventListener("keydown",n),document.body.style.overflow="hidden"):
+document.body.style.overflow="auto",()=>{window.removeEventListener("keydown",n),document.body.style.overflow="auto"}},
+[t]),b.jsxs("section",{id:"features",className:"py-24 border-t border-line",children:[b.jsxs("div",{className:"mb-16 
+flex flex-col md:flex-row justify-between items-start md:items-end 
+gap-6",children:[b.jsxs("div",{children:[b.jsxs("div",{className:"font-mono text-sm uppercase font-bold text-accent 
+mb-3 flex items-center gap-2",children:[b.jsx("span",{className:"w-4 h-[1.5px] bg-accent inline-block"})," The 
+Vision"]}),b.jsxs("h2",{className:"text-4xl md:text-5xl font-sans font-bold uppercase tracking-tight 
+break-words",children:["System",b.jsx("br",{}),"Architecture & Goals"]})]}),b.jsx("p",{className:"text-ink-muted 
+font-sans max-w-lg text-lg",children:"Chain Registry is a public-alpha project: decentralized package integrity with 
+IPFS storage, validator sandboxes, and on-chain evidence — described honestly while SEC-401 and mainnet gates remain 
+open."})]}),b.jsx("div",{className:"grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8",children:gU.map((n,s)=>b.jsxs
+(Ne.div,{initial:{opacity:0,y:20},whileInView:{opacity:1,y:0},viewport:{once:!0,margin:"-50px"},transition:{delay:s*.1,
+duration:.5},onClick:()=>e(n),className:"bg-surface p-8 retro-border retro-shadow flex flex-col group relative 
+overflow-hidden cursor-pointer hover:bg-paper transition-colors",children:[b.jsx("div",{className:"font-mono text-xs 
+uppercase font-bold tracking-wider text-accent mb-4 p-2 bg-accent/10 w-fit retro-border 
+border-accent",children:n.category}),b.jsxs("div",{className:"font-mono text-lg font-bold text-ink-muted mb-8 pb-4 
+border-b border-line flex justify-between items-center",children:[b.jsxs("span",{children:["No. 
+",n.id]}),b.jsx("div",{className:"p-3 bg-ink group-hover:bg-accent group-hover:-translate-y-1 group-hover:rotate-6 
+transition-all duration-300 retro-border border-ink 
+group-hover:border-accent",children:n.icon})]}),b.jsx("h3",{className:"text-2xl font-sans font-bold 
+mb-4",children:n.title}),b.jsx("p",{className:"text-ink-muted font-sans leading-relaxed 
+line-clamp-3",children:n.overview}),b.jsxs("div",{className:"mt-8 flex items-center gap-2 text-accent font-mono 
+text-sm font-bold uppercase opacity-0 group-hover:opacity-100 transition-opacity mt-auto pt-4 border-t border-line 
+border-dashed",children:[b.jsx(xV,{className:"w-4 h-4"})," View Details ",b.jsx(ad,{className:"w-4 h-4 
+group-hover:translate-x-1 transition-transform"})]})]},n.id))}),b.jsx(ya,{children:t&&b.jsxs("div",{className:"fixed 
+inset-0 z-[200] flex items-center justify-center p-4 sm:p-6 md:p-12",children:[b.jsx(Ne.div,{initial:{opacity:0},animat
+e:{opacity:1},exit:{opacity:0},onClick:()=>e(null),className:"absolute inset-0 bg-paper/80 backdrop-blur-sm cursor-poin
+ter"}),b.jsxs(Ne.div,{initial:{opacity:0,scale:.98,y:10},animate:{opacity:1,scale:1,y:0},exit:{opacity:0,scale:.98,y:10
+},className:"bg-paper border border-line shadow-[0_30px_60px_-15px_rgba(0,0,0,0.1)] max-w-4xl w-full max-h-[90vh] 
+overflow-y-auto relative z-10 flex flex-col",children:[b.jsxs("div",{className:"sticky top-0 bg-paper/95 
+backdrop-blur-sm px-8 py-6 border-b border-line flex justify-between items-start 
+z-20",children:[b.jsxs("div",{className:"space-y-1",children:[b.jsx("div",{className:"font-mono text-[10px] uppercase 
+text-accent tracking-[0.2em] font-bold",children:t.category}),b.jsx("h3",{className:"text-3xl font-sans font-bold 
+leading-tight tracking-tight text-ink",children:t.title})]}),b.jsx("button",{onClick:()=>e(null),className:"p-2 
+text-ink-muted hover:text-ink transition-colors","aria-label":"Close modal",children:b.jsx(GV,{className:"w-6 
+h-6"})})]}),b.jsxs("div",{className:"p-8 md:p-12 flex-1 
+space-y-10",children:[b.jsxs("div",{children:[b.jsx("h4",{className:"text-xs font-mono font-bold mb-4 uppercase 
+tracking-widest text-ink-muted",children:t.subtitle}),b.jsx("p",{className:"text-ink font-sans text-base leading-relaxe
+d",children:t.overview})]}),b.jsxs("div",{className:"space-y-6",children:[b.jsxs("h5",{className:"font-mono text-xs 
+font-bold text-accent tracking-[0.1em] uppercase flex items-center gap-4",children:["KEY CAPABILITIES 
+",b.jsx("span",{className:"flex-1 h-[1px] bg-line block"})]}),b.jsx("ul",{className:"grid grid-cols-1 md:grid-cols-2 
+gap-6",children:t.details.map((n,s)=>{const[a,...l]=n.split(":"),u=l.join(":").trim();return 
+b.jsxs("li",{className:"flex flex-col gap-3 p-6 bg-surface border border-line hover:border-accent/40 
+transition-colors",children:[b.jsxs("span",{className:"font-mono text-xs text-accent 
+font-bold",children:[(s+1).toString().padStart(2,"0")," // ",a]}),b.jsx("span",{className:"text-ink font-sans 
+leading-relaxed text-sm",children:u})]},s)})})]})]})]})]})})]})}const vU=[{phase:"Phase 1: 
+Genesis",status:"Active",details:["Waitlist with Alpha (1–10,000) and Beta (10,001+) tiers — you are here.","Wave 
+1 Alpha cohort invites before Wave 2 Beta onboarding.","Genesis Node recognition for Alpha 
+registrants."]},{phase:"Phase 2: Cohort Alpha",status:"Next",details:["Wave-based invites with CLI, stake, and sandbox 
+setup docs.","Package publish → verify flows for approved cohorts.","Expanded validator sandbox and evidence-vote 
+hardening."]},{phase:"Phase 3: Public Beta",status:"Q4",details:["Open registry access for individual 
+developers.","Activation of the tokenomics and slashing layers.","Community governance signaling goes 
+live."]},{phase:"Phase 4: Mainnet",status:"Q1 Next Year",details:["Full decentralization of node 
+infrastructure.","Integration into major build tools (npm, cargo, pip).","Enterprise SLAs and compliance 
+certifications."]}];function bU(){return b.jsx("section",{id:"roadmap",className:"py-24 border-t 
+border-line",children:b.jsxs("div",{className:"max-w-4xl 
+mx-auto",children:[b.jsxs("div",{className:"mb-16",children:[b.jsxs("h2",{className:"text-4xl md:text-5xl font-sans 
+font-bold uppercase tracking-tight",children:["Mainnet",b.jsx("br",{}),"Roadmap"]}),b.jsx("p",{className:"mt-6 text-lg 
+text-ink-muted leading-relaxed font-sans max-w-2xl",children:"We are rolling out the Chain Registry architecture in 
+deterministic phases to ensure maximum security and network resilience."})]}),b.jsx("div",{className:"relative 
+border-l-2 border-line pl-8 md:pl-12 space-y-16",children:vU.map((t,e)=>{const n=t.status==="Active";return b.jsxs(Ne.d
+iv,{initial:{opacity:0,x:-20},whileInView:{opacity:1,x:0},viewport:{once:!0},transition:{duration:.5,delay:e*.1},classN
+ame:"relative",children:[b.jsx("div",{className:`absolute -left-[41px] md:-left-[57px] top-1 w-4 h-4 rounded-full 
+border-2 ${n?"bg-accent border-surface shadow-[0_0_10px_var(--accent)] animate-pulse":"bg-surface 
+border-line"}`}),b.jsxs("div",{className:"flex flex-col md:flex-row md:items-center gap-2 md:gap-6 
+mb-4",children:[b.jsx("h3",{className:`text-xl md:text-2xl font-bold font-sans tracking-tight 
+${n?"text-ink":"text-ink-muted"}`,children:t.phase}),b.jsx("span",{className:`font-mono text-xs font-bold uppercase 
+tracking-widest px-3 py-1 retro-border w-fit ${n?"bg-accent/10 border-accent text-accent":"bg-surface/50 border-line te
+xt-ink-muted"}`,children:t.status})]}),b.jsx("ul",{className:"space-y-3",children:t.details.map((s,a)=>b.jsxs("li",{cla
+ssName:"flex gap-4 items-start group",children:[b.jsx("span",{className:"text-accent font-mono mt-1 opacity-50 
+group-hover:opacity-100 transition-opacity",children:">"}),b.jsx("span",{className:"text-ink-muted leading-relaxed 
+text-sm md:text-base font-sans group-hover:text-ink transition-colors",children:s})]},a))})]},e)})})]})})}function 
+_U(){return b.jsxs("section",{id:"tokenomics",className:"py-24 grid grid-cols-1 lg:grid-cols-2 gap-16 items-center 
+border-t border-line",children:[b.jsxs(Ne.div,{initial:{opacity:0,x:-20},whileInView:{opacity:1,x:0},viewport:{once:!0}
+,transition:{duration:.5},className:"order-2 lg:order-1 bg-surface p-8 md:p-12 retro-border retro-shadow relative 
+overflow-hidden",children:[b.jsx("div",{className:"absolute top-0 right-0 p-4 border-b border-l border-line 
+bg-paper",children:b.jsx("div",{className:"w-3 h-3 rounded-full bg-accent 
+animate-pulse"})}),b.jsxs("div",{className:"font-mono text-sm uppercase font-bold text-accent tracking-widest mb-10 
+flex items-center gap-2",children:[b.jsx(Wc,{className:"w-4 h-4 ml-[-2px]"})," Asset 
+Profile"]}),b.jsx("div",{className:"text-6xl md:text-8xl font-sans font-bold mb-8 tracking-tighter text-ink 
+drop-shadow-[4px_4px_0_var(--surface-muted)] break-words",children:"tCREG"}),b.jsxs("div",{className:"font-mono 
+text-sm space-y-4 pt-6 border-t border-line text-ink-muted",children:[b.jsxs("p",{className:"flex justify-between 
+items-center",children:[b.jsx("span",{children:"TYPE:"}),b.jsx("span",{className:"bg-paper px-3 py-1 font-bold 
+text-ink retro-border",children:"UTILITY_WAITLIST"})]}),b.jsxs("p",{className:"flex justify-between 
+items-center",children:[b.jsx("span",{children:"SUPPLY:"}),b.jsx("span",{className:"bg-paper px-3 py-1 font-bold 
+text-ink retro-border",children:"ELASTIC"})]}),b.jsxs("p",{className:"flex justify-between 
+items-center",children:[b.jsx("span",{children:"FUNCTION:"}),b.jsx("span",{className:"bg-accent px-3 py-1 font-bold 
+text-paper retro-border border-accent",children:"NETWORK_SEC"})]})]})]}),b.jsxs(Ne.div,{initial:{opacity:0,x:20},whileI
+nView:{opacity:1,x:0},viewport:{once:!0},transition:{duration:.5},className:"order-1 
+lg:order-2",children:[b.jsxs("div",{className:"font-mono text-sm uppercase font-bold text-accent mb-3 flex 
+items-center gap-2",children:[b.jsx("span",{className:"w-4 h-[1.5px] bg-accent inline-block"})," 
+Economy"]}),b.jsxs("h2",{className:"text-4xl md:text-5xl font-sans font-bold mb-8 tracking-tight 
+uppercase",children:["Logic &",b.jsx("br",{}),"Incentives"]}),b.jsx("p",{className:"text-ink font-sans text-lg mb-8 
+leading-relaxed",children:"tCREG is the testnet utility token for staking, publishing, and validator rewards once you 
+are onboarded. Waitlist registration does not require tokens today — stake requirements apply after cohort 
+invite."}),b.jsx("ul",{className:"space-y-4 font-sans flex flex-col",children:["Validator Node: stake and operate 
+sandboxes after invite (target 100 tCREG on Sepolia).","Publisher: commit packages with a publisher stake after cohort 
+onboarding.","Security Audits: contribute findings and bounty-eligible reviews when the program 
+opens."].map((t,e)=>b.jsxs("li",{className:"flex items-start gap-4 p-4 bg-surface 
+retro-border",children:[b.jsx("div",{className:"w-6 h-6 bg-ink text-paper flex items-center justify-center font-bold 
+font-mono text-xs shrink-0 
+mt-0.5",children:e+1}),b.jsx("span",{className:"text-ink",children:t})]},e))})]})]})}function TU(){const[t]=J.useState(
+()=>Array.from({length:20}).map((e,n)=>({id:n,size:Math.random()*4+2,x:Math.random()*400-200,y:Math.random()*400-200,du
+ration:Math.random()*2+2,delay:Math.random()*1})));return b.jsx("div",{className:"absolute inset-0 overflow-hidden 
+pointer-events-none flex items-center justify-center z-0",children:t.map(e=>b.jsx(Ne.div,{className:"absolute 
+bg-accent rounded-full",style:{width:e.size,height:e.size},initial:{x:0,y:0,opacity:1,scale:0},animate:{x:e.x,y:e.y,opa
+city:0,scale:1.5},transition:{duration:e.duration,ease:"easeOut",delay:e.delay,repeat:1/0}},e.id))})}function 
+wU({onReset:t,role:e,address:n,tier:s,position:a}){const[l,u]=J.useState(0);J.useEffect(()=>{const p=setTimeout(()=>u(1
+),600),g=setTimeout(()=>u(2),1400),y=setTimeout(()=>u(3),2200),_=setTimeout(()=>u(4),3e3);return()=>{clearTimeout(p),cl
+earTimeout(g),clearTimeout(y),clearTimeout(_)}},[]);const d={hidden:{opacity:0,x:-10},visible:{opacity:1,x:0}};return 
+b.jsxs("div",{className:"py-6 flex flex-col items-center w-full max-w-md 
+mx-auto",children:[b.jsxs("div",{className:"space-y-6 w-full relative 
+mb-12",children:[b.jsx("div",{className:"absolute left-[15px] top-6 bottom-4 w-[2px] bg-line 
+z-0"}),b.jsxs(Ne.div,{initial:"hidden",animate:"visible",variants:d,className:"flex items-start gap-6 relative z-10 
+bg-surface",children:[b.jsx("div",{className:`w-8 h-8 mt-0 flex-shrink-0 flex items-center justify-center retro-border 
+${l>=1?"bg-accent border-accent text-paper":"bg-surface border-line 
+text-transparent"}`,children:l>=1?b.jsx(Ac,{className:"w-4 h-4"}):b.jsx("div",{className:"w-2 h-2 bg-ink/30 
+animate-pulse"})}),b.jsxs("div",{children:[b.jsx("p",{className:`text-sm font-mono font-bold uppercase 
+transition-colors ${l>=1?"text-ink":"text-ink-muted"}`,children:"Data Validation"}),b.jsx("p",{className:"text-xs 
+font-mono text-ink-muted mt-1 uppercase",children:"Payload format 
+verified"})]})]}),b.jsxs(Ne.div,{initial:"hidden",animate:l>=1?"visible":"hidden",variants:d,className:"flex 
+items-start gap-6 relative z-10 bg-surface",children:[b.jsx("div",{className:`w-8 h-8 mt-0 flex-shrink-0 flex 
+items-center justify-center retro-border ${l>=2?"bg-accent border-accent text-paper":"bg-surface border-line 
+text-transparent"}`,children:l>=2?b.jsx(Ac,{className:"w-4 h-4"}):l>=1?b.jsx("div",{className:"w-2 h-2 bg-ink/30 
+animate-pulse"}):null}),b.jsxs("div",{children:[b.jsx("p",{className:`text-sm font-mono font-bold uppercase 
+transition-colors ${l>=2?"text-ink":"text-ink-muted"}`,children:"Secure Transmission"}),b.jsx("p",{className:"text-xs 
+font-mono text-ink-muted mt-1 uppercase",children:"Encrypted pathway 
+established"})]})]}),b.jsxs(Ne.div,{initial:"hidden",animate:l>=2?"visible":"hidden",variants:d,className:"flex 
+items-start gap-6 relative z-10 bg-surface",children:[b.jsx("div",{className:`w-8 h-8 mt-0 flex-shrink-0 flex 
+items-center justify-center retro-border ${l>=3?"bg-accent border-accent text-paper":"bg-surface border-line 
+text-transparent"}`,children:l>=3?b.jsx(Ac,{className:"w-4 h-4"}):l>=2?b.jsx("div",{className:"w-2 h-2 bg-ink/30 
+animate-pulse"}):null}),b.jsxs("div",{children:[b.jsx("p",{className:`text-sm font-mono font-bold uppercase 
+transition-colors ${l>=3?"text-ink":"text-ink-muted"}`,children:"Server Processing"}),b.jsx("p",{className:"text-xs 
+font-mono text-ink-muted mt-1 uppercase",children:"Blockchain ledger updated"})]})]})]}),b.jsx(ya,{children:l>=4&&b.jsx
+s(Ne.div,{initial:{opacity:0,scale:.95},animate:{opacity:1,scale:1},className:"w-full",children:[b.jsx(TU,{}),b.jsx(H5,
+{tier:s,position:a,role:e,address:n,onReset:t})]})})]})}const Wh=[{threshold:0,phase:"Establishing 
+Link...",desc:"Initializing secure connection to the registry protocol."},{threshold:25,phase:"Verifying 
+Identity...",desc:"Authenticating ledger identity and checking role availability."},{threshold:50,phase:"Preparing 
+Payload...",desc:"Constructing cryptography payload and appending origin proofs."},{threshold:75,phase:"Submitting to 
+Ledger...",desc:"Broadcasting registration transaction to the decentralized network."},{threshold:90,phase:"Awaiting 
+Confirmation...",desc:"Waiting for network consensus to commit registration 
+block."},{threshold:100,phase:"Transmission Complete",desc:"Registration finalized and secured."}];function 
+EU(){const[t,e]=J.useState([]);return J.useEffect(()=>{let n=!1;const s=6e4;async function a(){try{const 
+u=R3(d3(LC,"registrations"),N3("timestamp","desc"),I3(10)),d=await M3(u);if(n)return;const p=d.docs.map(g=>{var 
+V;const y=g.data(),_=((V=y.timestamp)==null?void 0:V.toDate())||new Date,E=Math.floor((new 
+Date().getTime()-_.getTime())/1e3);let A="just now";return E>60?A=`${Math.floor(E/60)}m ago`:E>0&&(A=`${E}s 
+ago`),{address:y.walletAddress,role:y.role,tier:typeof y.tier=="string"?y.tier:void 
+0,time:A}});e(p)}catch(u){console.error("Failed to load recent registrations:",u)}}a();const 
+l=window.setInterval(()=>{a()},s);return()=>{n=!0,window.clearInterval(l)}},[]),t}function xU(){const t=EU();return 
+b.jsxs("div",{className:"bg-surface/50 border border-line p-4 font-mono mt-8 overflow-hidden h-[120px] relative 
+before:absolute before:inset-0 before:bg-gradient-to-b before:from-surface before:via-transparent before:to-surface 
+before:z-10 before:pointer-events-none",children:[b.jsxs("div",{className:"text-[10px] text-accent uppercase font-bold 
+tracking-widest mb-2 flex items-center gap-2",children:[b.jsx("div",{className:"w-2 h-2 bg-accent animate-pulse"})," 
+Live Network 
+Feed"]}),b.jsx(Ne.div,{animate:{y:[0,-100]},transition:{duration:15,repeat:1/0,ease:"linear"},className:"space-y-2 
+text-xs",children:(t.length>0?[...t,...t]:[{address:"Awaiting...",role:"Network Scanning",time:"- ",tier:void 
+0}]).map((e,n)=>b.jsxs("div",{className:"flex justify-between text-ink-muted opacity-80 
+gap-2",children:[b.jsxs("span",{className:"shrink-0",children:[">"," ",b.jsx("span",{className:"text-ink",children:e.ad
+dress?`${e.address.substring(0,5)}...${e.address.substring(e.address.length-3)}`:"........."})," 
+"]}),e.tier&&b.jsx("span",{className:`text-[9px] uppercase font-bold px-1 shrink-0 ${e.tier==="alpha"?"text-accent":"te
+xt-ink-muted"}`,children:e.tier==="alpha"?"α":"β"}),b.jsx("span",{className:"hidden sm:inline-block border-b 
+border-line border-dashed flex-1 mx-2 opacity-30 mt-2 min-w-[8px]"}),b.jsx("span",{className:"truncate max-w-[80px] 
+sm:max-w-none text-right",children:e.role}),b.jsx("span",{className:"w-12 text-right opacity-50 
+shrink-0",children:e.time})]},n))})]})}function SU(){const{executeRecaptcha:t}=g5(),[e,n]=J.useState({role:"Validator N
+ode"}),{walletConnected:s,walletAddress:a,connectedWalletName:l,isConnectingWallet:u,errorMsg:d,setErrorMsg:p,walletOpt
+ions:g,connectWallet:y,disconnectWallet:_,resetWallet:E,isMobileBrowser:A,walletConnectEnabled:V}=oU(),[z,L]=J.useState
+(!1),[G,Q]=J.useState("ESTABLISHING LINK..."),[W,X]=J.useState(0),[ne,he]=J.useState(!1),[I,C]=J.useState(null),R=xd(),
+D=FC(R),k=Ed[D],[j,N]=J.useState(""),[Ve,Fe]=J.useState(!1),[Y,oe]=J.useState(!1),[ce,we]=J.useState(!1),Me=()=>{he(!1)
+,n({role:"Validator Node"}),E(),N(""),C(null)},O=()=>{s?Fe(!0):oe(!0)},te=async fe=>{p(""),oe(!1),await 
+y(fe)},le=()=>{_(),Fe(!1),we(!1)},me=async fe=>{if(fe.preventDefault(),N(""),!s){N("Error: Secure wallet connection 
+missing.");return}if(!["Validator Node","Publisher","Security Audits"].includes(e.role)){N("Error: Invalid role 
+selected.");return}if(!t){console.error("Execute recaptcha not yet available"),N("reCAPTCHA validation failed to load. 
+Please try again later.");return}L(!0),X(0),Q("Establishing Link...");try{Q("Verifying Identity..."),X(25),await new 
+Promise(Re=>setTimeout(Re,800));let be="";try{be=await t("waitlist_registration")}catch(Re){throw Re}Q("Preparing 
+Payload..."),X(50),await new Promise(Re=>setTimeout(Re,800)),Q("Submitting to Ledger..."),X(75);const et=await 
+x5({walletAddress:a,role:e.role,recaptchaToken:be});C(et),Q("Awaiting Confirmation..."),X(90),await new 
+Promise(Re=>setTimeout(Re,600)),X(100),Q("Transmission 
+Complete"),setTimeout(()=>{L(!1),he(!0)},800)}catch(be){L(!1);const et=be instanceof Error?be.message:String(be),Re=be 
+instanceof Ti||typeof be=="object"&&be!==null&&"code"in be&&typeof 
+be.code=="string"?be.code:"";Re==="functions/already-exists"||Re==="permission-denied"||et.includes("already 
+registered")?N("This wallet address is already 
+registered."):Re==="functions/permission-denied"||et.includes("reCAPTCHA")?N("Bot verification failed. Please refresh 
+and try again."):Re==="functions/failed-precondition"?N("Registration is temporarily unavailable. Try again later."):Re
+==="functions/unauthenticated"||Re==="functions/unavailable"||et.toLowerCase().includes("unauthenticated")?N("Registrat
+ion service is unreachable. Please try again in a moment."):(N("Network error: Registration 
+failed."),lU(be,"write","registrations"))}};return b.jsxs("section",{id:"waitlist",className:"py-24 flex flex-col 
+lg:flex-row gap-16 items-start justify-between border-t border-line 
+min-h-[60vh]",children:[b.jsxs("div",{className:"w-full lg:w-5/12 pt-4",children:[b.jsxs("div",{className:"font-mono 
+text-sm uppercase font-bold text-accent mb-3 flex items-center gap-2",children:[b.jsx("span",{className:"w-4 h-[1.5px] 
+bg-accent inline-block"})," Access Portal"]}),b.jsxs("h2",{className:"text-4xl sm:text-5xl md:text-6xl font-sans 
+font-bold mb-6 uppercase tracking-tight leading-[1.05] 
+break-words",children:["Secure",b.jsx("br",{}),b.jsx("span",{className:"text-accent italic 
+pr-2",children:"Position."})]}),b.jsx("p",{className:"text-ink-muted font-sans text-lg leading-relaxed 
+max-w-sm",children:"Lock your wave: first 10,000 wallets earn Genesis Alpha (Wave 1 testnet). Everyone after joins 
+Vanguard Beta. Register below — tier is assigned from your global 
+position."}),b.jsx(K5,{}),b.jsx(zC,{compact:!0}),b.jsx(xU,{})]}),b.jsx("div",{className:"w-full lg:w-7/12 mt-8 
+lg:mt-0",children:b.jsx("div",{className:"w-full bg-surface p-8 md:p-12 retro-border retro-shadow",children:b.jsx(ya,{m
+ode:"wait",children:ne&&I?b.jsx(Ne.div,{initial:{opacity:0},animate:{opacity:1},exit:{opacity:0},className:"w-full",chi
+ldren:b.jsx(wU,{onReset:Me,role:e.role,address:a,tier:I.tier,position:I.position})},"success"):b.jsxs(Ne.form,{initial:
+{opacity:0},animate:{opacity:1},exit:{opacity:0},onSubmit:me,className:"space-y-6",children:[(d||j)&&b.jsx(Ne.div,{init
+ial:{opacity:0,height:0},animate:{opacity:1,height:"auto"},className:"bg-accent/10 border border-accent text-accent 
+p-3 font-mono text-xs uppercase",children:d||j}),b.jsxs("div",{className:"grid grid-cols-1 gap-6 relative",children:[b.
+jsxs("button",{type:"button",onClick:O,onMouseEnter:()=>we(!0),onMouseLeave:()=>we(!1),disabled:u,className:`w-full 
+py-4 px-5 font-mono text-sm font-bold uppercase flex items-center justify-center gap-3 retro-border transition-all 
+${s?"bg-accent/10 text-accent border-accent hover:bg-accent/20":"bg-surface text-ink hover:bg-paper"} ${u?"opacity-70 
+cursor-wait bg-surface/50":""}`,children:[u?b.jsx("div",{className:"w-5 h-5 border-[2px] border-ink/30 border-t-ink 
+rounded-full animate-spin"}):b.jsx(b1,{className:"w-5 h-5"}),b.jsx("span",{children:u?"Scanning 
+Extensions...":s&&a?ce?`${a.slice(0,6)}...${a.slice(-4)}`:l||"Wallet Connected":"Connect 
+Wallet"})]}),b.jsxs(ya,{children:[Ve&&b.jsxs("div",{className:"fixed inset-0 z-[100] flex items-center justify-center 
+p-4",children:[b.jsx(Ne.div,{initial:{opacity:0},animate:{opacity:1},exit:{opacity:0},className:"absolute inset-0 
+bg-background/80 backdrop-blur-sm",onClick:()=>Fe(!1)}),b.jsxs(Ne.div,{initial:{opacity:0,scale:.95,y:10},animate:{opac
+ity:1,scale:1,y:0},exit:{opacity:0,scale:.95,y:10},className:"relative bg-surface p-6 retro-border retro-shadow w-full 
+max-w-sm z-10",children:[b.jsx("h3",{className:"font-mono font-bold uppercase text-ink mb-2",children:"Disconnect 
+Wallet"}),b.jsx("p",{className:"text-sm font-sans text-ink-muted mb-2",children:"Are you sure you want to 
+disconnect?"}),b.jsx("p",{className:"text-[10px] font-mono text-ink-muted/70 mb-6 italic",children:"Note: To switch to 
+a different wallet address, you may also need to change the active account directly in your wallet 
+extension."}),b.jsxs("div",{className:"flex flex-col sm:flex-row 
+gap-4",children:[b.jsx("button",{type:"button",onClick:()=>Fe(!1),className:"w-full sm:flex-1 py-3 px-4 bg-surface 
+text-ink border border-line text-xs font-mono uppercase font-bold hover:bg-paper 
+transition-colors",children:"Cancel"}),b.jsx("button",{type:"button",onClick:le,className:"w-full sm:flex-1 py-3 px-4 
+bg-accent text-paper border border-accent text-xs font-mono uppercase font-bold hover:bg-accent/90 transition-colors 
+shadow-[0_0_15px_rgba(var(--accent-rgb),0.3)]",children:"Yes, 
+Disconnect"})]})]})]}),Y&&!s&&b.jsxs("div",{className:"fixed inset-0 z-[100] flex items-center justify-center 
+p-4",children:[b.jsx(Ne.div,{initial:{opacity:0},animate:{opacity:1},exit:{opacity:0},className:"absolute inset-0 
+bg-background/80 backdrop-blur-sm",onClick:()=>oe(!1)}),b.jsxs(Ne.div,{initial:{opacity:0,scale:.95,y:10},animate:{opac
+ity:1,scale:1,y:0},exit:{opacity:0,scale:.95,y:10},className:"relative bg-surface p-6 retro-border retro-shadow w-full 
+max-w-sm z-10",children:[b.jsx("h3",{className:"font-mono font-bold uppercase text-ink mb-2",children:"Select 
+Provider"}),A&&b.jsx("p",{className:"text-[10px] font-mono text-ink-muted mb-4 leading-relaxed",children:"On mobile, 
+use MetaMask or OKX via WalletConnect. Approve in your wallet app, then return to this 
+tab."}),!V&&A&&b.jsx("p",{className:"text-[10px] font-mono text-accent mb-4",children:"WalletConnect is not 
+configured. Mobile wallets require VITE_WALLETCONNECT_PROJECT_ID."}),b.jsx("div",{className:"flex flex-col gap-3 
+max-h-[50vh] overflow-y-auto",children:g.length===0?b.jsx("p",{className:"text-xs font-mono text-ink-muted 
+py-2",children:"No wallets detected. Install a browser extension or use WalletConnect on 
+mobile."}):g.map(fe=>b.jsxs("button",{type:"button",disabled:u,onClick:()=>void te(fe.id),className:"w-full py-3 px-4 
+bg-surface text-ink border border-line text-xs font-mono uppercase font-bold hover:bg-paper transition-colors flex 
+justify-between items-center gap-3 disabled:opacity-50",children:[b.jsxs("span",{className:"flex items-center gap-3 
+min-w-0",children:[fe.icon?b.jsx("img",{src:fe.icon,alt:"",className:"w-6 h-6 rounded-full shrink-0"}):null,b.jsx("span
+",{className:"truncate",children:fe.name})]}),fe.mobilePreferred&&b.jsx("span",{className:"text-[9px] text-accent 
+shrink-0",children:"Mobile"})]},fe.id))}),b.jsx("button",{type:"button",onClick:()=>oe(!1),className:"w-full mt-4 py-2 
+text-ink-muted text-xs font-mono uppercase font-bold hover:text-ink transition-colors border border-transparent 
+hover:border-line",children:"Cancel"})]})]})]})]}),b.jsxs("div",{className:"space-y-4 pt-4 border-t 
+border-line",children:[b.jsx("label",{className:"text-xs font-mono text-ink font-bold uppercase block",children:"1. 
+Select Designation"}),b.jsx("div",{className:"grid grid-cols-1 sm:grid-cols-3 gap-4",children:[{id:"Validator 
+Node",icon:b.jsx(Wc,{className:"w-5 h-5"}),desc:"Reserve a validator slot; run nodes after cohort 
+onboarding."},{id:"Publisher",icon:b.jsx(Df,{className:"w-5 h-5"}),desc:"Signal intent to publish packages when your 
+wave opens."},{id:"Security Audits",icon:b.jsx(kf,{className:"w-5 h-5"}),desc:"Join the security contributor waitlist 
+for future bounties."}].map(fe=>b.jsxs("div",{onClick:()=>n({...e,role:fe.id}),className:`cursor-pointer group 
+relative border p-4 transition-all duration-200 flex flex-col justify-between ${e.role===fe.id?"bg-accent/10 
+border-accent text-accent retro-shadow":"bg-surface border-line text-ink-muted hover:border-ink hover:text-ink 
+hover:bg-paper"}`,children:[b.jsx("div",{className:"absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-[200px] 
+opacity-0 group-hover:opacity-100 transition-opacity bg-ink text-paper text-xs font-mono p-2 retro-border border-ink 
+pointer-events-none z-20 text-center shadow-lg",children:fe.id==="Validator Node"?"Stake applies after invite (~100 
+tCREG Sepolia target)":fe.id==="Publisher"?"Publisher stake after onboarding (~1 tCREG target)":"Audit program opens 
+with cohort 
+waves"}),b.jsx("div",{className:"mb-4",children:fe.icon}),b.jsxs("div",{children:[b.jsx("div",{className:"font-mono 
+text-xs font-bold uppercase mb-1",children:fe.id}),b.jsx("div",{className:"font-sans text-[10px] leading-tight opacity-
+80",children:fe.desc})]})]},fe.id))})]}),b.jsx(ya,{mode:"wait",children:s&&b.jsx(Ne.div,{initial:{opacity:0,height:0},a
+nimate:{opacity:1,height:"auto"},exit:{opacity:0,height:0},className:"bg-surface border border-line p-5 font-mono 
+text-xs text-ink-muted",children:b.jsxs("div",{className:"flex flex-col gap-3",children:[b.jsxs("div",{className:"flex 
+justify-between items-center pb-2 border-b border-line border-dashed",children:[b.jsx("span",{className:"uppercase 
+font-bold",children:"Target Position:"}),b.jsx("span",{className:"text-ink 
+font-bold",children:e.role})]}),b.jsxs("div",{className:"flex justify-between 
+items-center",children:[b.jsx("span",{className:"uppercase",children:"Ledger Identity:"}),s?b.jsxs("span",{className:"t
+ext-accent",children:[a.slice(0,6),"...",a.slice(-4)]}):b.jsx("span",{className:"text-ink-muted/50",children:"PENDING"}
+)]})]})})}),b.jsx(ya,{children:z&&b.jsx(Ne.div,{initial:{opacity:0,height:0},animate:{opacity:1,height:"auto"},exit:{op
+acity:0,height:0},className:"overflow-hidden",children:b.jsxs("div",{className:"bg-surface border border-line p-5 
+font-mono text-xs mt-6 mb-2",children:[b.jsxs("div",{className:"text-accent uppercase font-bold mb-4 flex 
+justify-between",children:[b.jsx("span",{children:"System 
+Operations"}),b.jsxs("span",{children:[W.toFixed(0),"%"]})]}),b.jsx("div",{className:"w-full h-[2px] bg-line 
+rounded-none mb-6 relative overflow-hidden",children:b.jsx("div",{className:"absolute top-0 left-0 bottom-0 bg-accent 
+transition-all duration-300 
+ease-out",style:{width:`${W}%`}})}),b.jsx("div",{className:"space-y-3",children:Wh.map((fe,Ee)=>{var Re;const 
+be=W>=fe.threshold&&(Ee===Wh.length-1||W<Wh[Ee+1].threshold),et=W>=(((Re=Wh[Ee+1])==null?void 
+0:Re.threshold)||101);return b.jsxs("div",{className:`flex items-start gap-4 p-3 border transition-colors 
+${be?"bg-accent/10 border-accent text-ink":et?"bg-paper border-line text-ink-muted":"bg-surface border-line 
+opacity-40"}`,children:[b.jsx("div",{className:"mt-0.5 shrink-0",children:et?b.jsx(Ac,{className:"w-4 h-4 
+text-accent"}):be?b.jsx("div",{className:"w-4 h-4 border-2 border-paper/30 border-t-accent rounded-full 
+animate-spin"}):b.jsx(Df,{className:"w-4 h-4"})}),b.jsxs("div",{children:[b.jsx("div",{className:`font-bold uppercase 
+tracking-tight ${be?"text-accent":""}`,children:fe.phase}),b.jsx("div",{className:"font-sans text-[11px] mt-1 
+opacity-80 leading-snug",children:fe.desc})]})]},Ee)})})]})})}),s&&!z&&b.jsxs("div",{className:`mt-6 p-4 retro-border 
+font-mono text-xs uppercase ${D==="alpha"?"bg-accent/10 border-accent text-accent":"bg-surface border-line 
+text-ink-muted"}`,children:[b.jsx("span",{className:"opacity-80",children:"On submit you earn · 
+"}),b.jsx("span",{className:"font-bold text-ink",children:k.codename}),b.jsx("span",{className:"block mt-2 text-[10px] 
+normal-case font-sans text-ink-muted leading-relaxed",children:k.access})]}),b.jsx(Ne.button,{whileTap:s?{scale:.98}:{}
+,type:"submit",disabled:z||!s,className:`w-full h-[64px] mt-6 font-mono font-bold uppercase retro-border 
+transition-all flex flex-col justify-center items-center relative overflow-hidden group ${!s&&!z?"bg-surface 
+border-line text-ink-muted cursor-not-allowed retro-shadow-none shadow-none":"bg-ink text-paper border-ink 
+hover:bg-accent hover:border-accent disabled:cursor-not-allowed 
+retro-shadow"}`,children:z?b.jsxs(b.Fragment,{children:[b.jsx("div",{className:"absolute left-0 top-0 bottom-0 
+bg-accent transition-all duration-200 ease-out",style:{width:`${W}%`,opacity:.2}}),b.jsx("div",{className:"absolute 
+left-0 bottom-0 h-1 bg-accent transition-all duration-200 
+ease-out",style:{width:`${W}%`}}),b.jsxs("div",{className:"flex flex-col items-center justify-center relative z-10 
+w-full px-2",children:[b.jsxs("div",{className:"flex items-center gap-3",children:[b.jsx("div",{className:"w-4 h-4 
+border-[2px] border-paper/30 border-t-accent rounded-full animate-spin"}),b.jsx("span",{className:"text-sm 
+tracking-widest text-accent drop-shadow-[0_0_5px_var(--accent)]",children:G})]}),b.jsxs("div",{className:"text-[10px] 
+opacity-50 mt-1 font-mono flex w-full justify-between px-4",children:[b.jsxs("span",{children:[W.toFixed(0),"%"]}),b.js
+x("span",{children:"SYS_INIT"})]})]})]}):b.jsx("span",{className:"relative z-10 
+group-hover:drop-shadow-[0_0_5px_var(--paper)] transition-all",children:"Execute 
+Registration"})})]},"form")})})})]})}function AU(){return b.jsx("footer",{className:"border-t border-line bg-surface 
+relative z-10",children:b.jsxs("div",{className:"max-w-7xl mx-auto px-6 py-10 flex flex-col md:flex-row items-center 
+justify-between gap-6 font-mono text-sm",children:[b.jsxs("div",{className:"flex items-center 
+gap-3",children:[b.jsx("div",{className:"w-6 h-6 bg-ink flex items-center justify-center text-paper font-bold 
+text-[10px]",children:"CR"}),b.jsx("span",{className:"font-bold uppercase tracking-tight text-ink",children:"Chain 
+Registry"})]}),b.jsxs("div",{className:"flex flex-col items-center gap-2",children:[b.jsxs("div",{className:"flex 
+flex-wrap justify-center gap-4 sm:gap-6 text-ink-muted uppercase font-bold 
+text-xs",children:[b.jsx("a",{href:cg.github,target:"_blank",rel:"noreferrer",className:"hover:text-accent transition-c
+olors",children:"GitHub"}),b.jsx("a",{href:cg.readme,target:"_blank",rel:"noreferrer",className:"hover:text-accent tran
+sition-colors",children:"README"}),b.jsx("a",{href:cg.docs,target:"_blank",rel:"noreferrer",className:"hover:text-accen
+t transition-colors",children:"Docs"}),b.jsx("a",{href:"#faq",className:"hover:text-accent 
+transition-colors",children:"FAQ"}),b.jsx("a",{href:"#waitlist",className:"hover:text-accent 
+transition-colors",children:"Waitlist"})]}),b.jsx("p",{className:"text-ink-muted uppercase font-bold text-[10px] 
+tracking-wide text-center max-w-md",children:"Waitlist only — explorer, hub, faucet, and API are not linked 
+here."})]}),b.jsxs("div",{className:"text-xs text-ink-muted",children:["COPYRIGHT © ",new Date().getFullYear()," 
+Chain Registry (CREG)."]})]})})}const CU="6LfLaB0tAAAAAD-YmiBUrSNzEsybw6C-jWSxDSqM",RU=CU;DN.createRoot(document.getEle
+mentById("root")).render(b.jsx(J.StrictMode,{children:b.jsx(p5,{reCaptchaKey:RU,useEnterprise:!0,children:b.jsx(cU,{})}
+)}));export{Z5 as _,IU as a,NU as c,_N as g};
+

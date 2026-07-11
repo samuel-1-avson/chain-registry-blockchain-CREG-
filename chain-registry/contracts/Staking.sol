@@ -44,6 +44,9 @@ contract Staking {
     /// Unbonding period — validators must wait 14 days before withdrawing stake.
     /// This prevents hit-and-run attacks where a validator misbehaves then immediately exits.
     uint256 public constant UNBONDING_PERIOD = 14 days;
+    /// Publisher bond remains reserved after qualification so a later
+    /// challenge has a concrete liability window.
+    uint256 public constant PUBLISHER_LIABILITY_PERIOD = 30 days;
     /// Cooldown before a slashed/ejected validator can re-stake.
     uint256 public constant RESTAKE_COOLDOWN = 7 days;
     /// Maximum slashes before auto-ejection.
@@ -80,7 +83,16 @@ contract Staking {
     address public owner;
 
     mapping(address => uint256)        public publisherStakes;
+    mapping(address => uint256)        public publisherReserved;
     mapping(address => ValidatorEntry) public validators;
+
+    struct ReleaseLiability {
+        address publisher;
+        uint256 bond;
+        uint256 unlockAt;
+        bool active;
+    }
+    mapping(bytes32 => ReleaseLiability) public releaseLiabilities;
 
     Reputation public reputation;
     address    public registry;    // Only Registry can trigger slashing
@@ -121,6 +133,9 @@ contract Staking {
 
     event PublisherStaked        (address indexed publisher, uint256 amount);
     event PublisherUnstaked      (address indexed publisher, uint256 amount);
+    event PublisherLiabilityReserved(bytes32 indexed packageKey, address indexed publisher, uint256 bond);
+    event PublisherLiabilityReleased(bytes32 indexed packageKey, address indexed publisher, uint256 bond);
+    event PublisherLiabilitySlashed(bytes32 indexed packageKey, address indexed publisher, uint256 bond, string reason);
     event ValidatorApplied       (address indexed validator, uint256 stake);
     event ValidatorApproved      (address indexed validator);
     event ValidatorApprovedByConsensus(address indexed validator, uint256 nonce, uint256 signerCount);
@@ -157,6 +172,11 @@ contract Staking {
     error NonceAlreadyUsed          ();
     error InsufficientQuorum        (uint256 signerCount, uint256 required);
     error EmergencyPathDisabled     ();
+    error PublisherLiabilityLocked  (uint256 available, uint256 requested);
+    error ReleaseLiabilityExists    ();
+    error InvalidReleaseBond         ();
+    error LiabilityNotMature         (uint256 unlockAt);
+    error LiabilityNotFound          ();
 
     // ── Constructor ───────────────────────────────────────────────────────────
 
@@ -224,6 +244,10 @@ contract Staking {
     /// @param amount Amount of CREG to withdraw.
     function unstakeAsPublisher(uint256 amount) external nonReentrant {
         if (publisherStakes[msg.sender] < amount) revert InsufficientStake();
+        uint256 available = publisherStakes[msg.sender] > publisherReserved[msg.sender]
+            ? publisherStakes[msg.sender] - publisherReserved[msg.sender]
+            : 0;
+        if (amount > available) revert PublisherLiabilityLocked(available, amount);
         publisherStakes[msg.sender] -= amount;
         if (!cregToken.transfer(msg.sender, amount))
             revert TransferFailed();
@@ -232,6 +256,82 @@ contract Staking {
 
     function stakedBalance(address publisher) external view returns (uint256) {
         return publisherStakes[publisher];
+    }
+
+    function availablePublisherStake(address publisher) external view returns (uint256) {
+        return publisherStakes[publisher] > publisherReserved[publisher]
+            ? publisherStakes[publisher] - publisherReserved[publisher]
+            : 0;
+    }
+
+    /// @notice Reserve one concrete bond for a package release. Registry is the
+    /// only caller so a publisher cannot create an untracked liability.
+    function reservePublisherLiability(bytes32 packageKey, address publisher, uint256 bond)
+        external
+    {
+        if (msg.sender != registry) revert NotAuthorized();
+        if (publisher == address(0) || bond == 0) revert InvalidReleaseBond();
+        if (releaseLiabilities[packageKey].active) revert ReleaseLiabilityExists();
+        uint256 available = publisherStakes[publisher] > publisherReserved[publisher]
+            ? publisherStakes[publisher] - publisherReserved[publisher]
+            : 0;
+        if (available < bond) revert PublisherLiabilityLocked(available, bond);
+        publisherReserved[publisher] += bond;
+        releaseLiabilities[packageKey] = ReleaseLiability({
+            publisher: publisher,
+            bond: bond,
+            unlockAt: 0,
+            active: true
+        });
+        emit PublisherLiabilityReserved(packageKey, publisher, bond);
+    }
+
+    /// @notice Start the liability clock after a package reaches a named
+    /// qualification. The bond stays reserved until the period matures.
+    function markPackageFinalized(bytes32 packageKey) external {
+        if (msg.sender != registry) revert NotAuthorized();
+        ReleaseLiability storage liability = releaseLiabilities[packageKey];
+        if (!liability.active) revert LiabilityNotFound();
+        liability.unlockAt = block.timestamp + PUBLISHER_LIABILITY_PERIOD;
+    }
+
+    /// @notice Permissionless release once the challenge window has matured.
+    function releaseMaturedPublisherLiability(bytes32 packageKey) external nonReentrant {
+        ReleaseLiability storage liability = releaseLiabilities[packageKey];
+        if (!liability.active) revert LiabilityNotFound();
+        if (liability.unlockAt == 0 || block.timestamp < liability.unlockAt)
+            revert LiabilityNotMature(liability.unlockAt);
+        address publisher = liability.publisher;
+        uint256 bond = liability.bond;
+        if (publisherReserved[publisher] < bond) bond = publisherReserved[publisher];
+        publisherReserved[publisher] -= bond;
+        delete releaseLiabilities[packageKey];
+        emit PublisherLiabilityReleased(packageKey, publisher, bond);
+    }
+
+    /// @notice Resolve a package liability on revocation. Governance/Registry
+    /// may slash the reserved bond immediately; a non-slash resolution merely
+    /// releases the reservation and is intended for a reviewed false positive.
+    function resolvePublisherLiability(bytes32 packageKey, bool slashBond, string calldata reason)
+        external
+        nonReentrant
+    {
+        if (msg.sender != registry && msg.sender != governance) revert NotAuthorized();
+        ReleaseLiability storage liability = releaseLiabilities[packageKey];
+        if (!liability.active) revert LiabilityNotFound();
+        address publisher = liability.publisher;
+        uint256 bond = liability.bond;
+        if (publisherReserved[publisher] < bond) bond = publisherReserved[publisher];
+        publisherReserved[publisher] -= bond;
+        if (slashBond) {
+            if (publisherStakes[publisher] >= bond) publisherStakes[publisher] -= bond;
+            else bond = publisherStakes[publisher];
+            slashPool += bond;
+            emit PublisherLiabilitySlashed(packageKey, publisher, bond, reason);
+        } else {
+            emit PublisherLiabilityReleased(packageKey, publisher, bond);
+        }
+        delete releaseLiabilities[packageKey];
     }
 
     // ── Validator staking — two-step (apply → approve) ────────────────────────
@@ -561,10 +661,17 @@ contract Staking {
         } else if (!_isActiveVal && publisherStakes[account] >= amount) {
             // Case 2: publisher-only account — deduct from publisher stake.
             publisherStakes[account] -= amount;
+            // A governance slash outside the package-liability path may still
+            // consume reserved stake. Keep the accounting invariant explicit;
+            // the package resolver will slash only the remaining amount.
+            if (publisherReserved[account] > publisherStakes[account]) {
+                publisherReserved[account] = publisherStakes[account];
+            }
         } else {
             // Case 3: slash everything the account has left (both pools combined).
             amount = publisherStakes[account] + validators[account].stake;
             publisherStakes[account]        = 0;
+            publisherReserved[account]      = 0;
             validators[account].stake       = 0;
             validators[account].state       = ValidatorState.Withdrawn;
             validators[account].ejectedAt   = block.timestamp;

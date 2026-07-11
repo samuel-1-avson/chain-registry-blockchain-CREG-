@@ -7,9 +7,10 @@ use common::proto::registry_service_client::RegistryServiceClient;
 use common::proto::SubmitRequest;
 use common::{PackageId, PackageManifest, PublishRequest};
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
+use rand::RngCore;
+use sha3::{Digest, Keccak256};
 use std::path::Path;
 use std::time::Duration;
-use zk_validator::{PackageInputs, ZkValidator};
 
 pub async fn run(
     tarball_path: &Path,
@@ -79,6 +80,19 @@ pub async fn run(
     let pkg_id = detect_package_id(&tarball_bytes)?;
     println!("  package:  {}", pkg_id.canonical());
 
+    let manifest_hash_hex = common::sha256_hex(
+        &serde_json::to_vec(&manifest).context("Failed to serialize manifest")?,
+    );
+    let publisher_chain_id = std::env::var("CREG_CHAIN_ID").unwrap_or_default();
+    let publisher_staking_contract = std::env::var("CREG_STAKING_ADDR").unwrap_or_default();
+    let mut nonce_bytes = [0u8; 16];
+    rand::thread_rng().fill_bytes(&mut nonce_bytes);
+    let publisher_nonce = hex::encode(nonce_bytes);
+    let submitted_at = Utc::now();
+    let publisher_expires_at = (submitted_at + chrono::Duration::hours(1)).timestamp() as u64;
+    let ownership_claim = format!("{}:{}", pkg_id.ecosystem, pkg_id.name);
+    let source_hash = std::env::var("CREG_SOURCE_HASH").unwrap_or_else(|_| "unavailable".into());
+
     // ── 5. Sign: sig = Ed25519(privkey, canonical || content_hash || publisher_address) ─────
     let privkey_bytes = hex::decode(privkey_hex.trim()).context("Invalid private key hex")?;
 
@@ -87,7 +101,26 @@ pub async fn run(
         SigningKey::try_from(privkey_bytes.as_slice()).context("Invalid Ed25519 private key")?;
     let pubkey = signing_key.verifying_key();
 
-    let msg = common::publish_signature_message(&pkg_id, &content_hash, &publisher_address);
+    let msg = if !publisher_chain_id.trim().is_empty()
+        && !publisher_staking_contract.trim().is_empty()
+    {
+        common::publish_signature_message_v2(
+            &publisher_chain_id,
+            &publisher_staking_contract,
+            &pkg_id,
+            &content_hash,
+            &source_hash,
+            &manifest_hash_hex,
+            &hex::encode(pubkey.as_bytes()),
+            &publisher_address,
+            &ownership_claim,
+            &publisher_nonce,
+            submitted_at.timestamp(),
+            publisher_expires_at,
+        )
+    } else {
+        common::publish_signature_message(&pkg_id, &content_hash, &publisher_address)
+    };
     let signature = signing_key.sign(msg.as_bytes());
 
     let mut publisher_pubkeys = vec![hex::encode(pubkey.as_bytes())];
@@ -117,7 +150,7 @@ pub async fn run(
         publisher_pubkey: publisher_pubkeys[0].clone(),
         signature: signatures[0].clone(),
         manifest,
-        submitted_at: Utc::now(),
+        submitted_at,
         shielded: shield,
         key_bundle,
         pgp_signature,
@@ -125,65 +158,26 @@ pub async fn run(
         publisher_pubkeys: publisher_pubkeys.clone(),
         signatures: signatures.clone(),
         threshold: if publisher_pubkeys.len() >= 2 { 2 } else { 1 },
+        publisher_nonce: publisher_nonce.clone(),
+        publisher_expires_at,
+        source_hash: source_hash.clone(),
+        manifest_hash: manifest_hash_hex.clone(),
+        ownership_claim: ownership_claim.clone(),
+        publisher_chain_id: publisher_chain_id.clone(),
+        publisher_staking_contract: publisher_staking_contract.clone(),
+        publisher_evm_signature: std::env::var("CREG_PUBLISHER_EVM_KEY")
+            .ok()
+            .map(|key| sign_evm_personal_message(&key, &msg))
+            .transpose()?
+            .or_else(|| std::env::var("CREG_PUBLISHER_EVM_SIGNATURE").ok())
+            .unwrap_or_default(),
         ..Default::default()
     };
 
-    // ── 5.5. Generate publisher admission attestation ────────────────────────
-    // This proof binds the submitted content/manifest hashes plus publisher-
-    // claimed analysis values. It does NOT replace validator-side analysis.
-    println!("  Generating publisher admission attestation...");
-    let pb_zk = ProgressBar::with_draw_target(Some(0), ProgressDrawTarget::stderr());
-    pb_zk.set_style(
-        ProgressStyle::default_spinner()
-            .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
-            .template("{spinner:.cyan} {msg} [{elapsed}]")
-            .context("Invalid spinner template")?,
-    );
-    pb_zk.set_message("Computing Groth16 SNARK…");
-    pb_zk.enable_steady_tick(Duration::from_millis(80));
-
-    let validator = ZkValidator::new().context("Failed to initialize ZK validator")?;
-
-    let mut hash_bytes = [0u8; 32];
-    let hash_decoded = hex::decode(&content_hash).context("content_hash is not valid hex")?;
-    if hash_decoded.len() == 32 {
-        hash_bytes.copy_from_slice(&hash_decoded);
-    } else {
-        bail!("content_hash must be 32 bytes, got {}", hash_decoded.len());
-    }
-
-    // Compute manifest hash so the proof binds to the declared manifest.
-    let manifest_bytes =
-        serde_json::to_vec(&request.manifest).context("Failed to serialize manifest")?;
-    let manifest_hash_hex = common::sha256_hex(&manifest_bytes);
-    let manifest_hash_decoded =
-        hex::decode(&manifest_hash_hex).context("manifest hash is not valid hex")?;
-    let mut manifest_hash_bytes = [0u8; 32];
-    if manifest_hash_decoded.len() == 32 {
-        manifest_hash_bytes.copy_from_slice(&manifest_hash_decoded);
-    }
-
-    // Publisher-side inputs use claimed passing values so the circuit
-    // constraints are satisfiable and a valid attestation can be generated.
-    // Validator nodes independently evaluate the real analysis results; they
-    // do not trust these claimed values as an authoritative safety verdict.
-    let zk_inputs = PackageInputs::new(
-        hash_bytes,
-        manifest_hash_bytes,
-        85,   // Placeholder passing score (circuit requires ≥80)
-        true, // Placeholder passing sandbox (circuit requires true)
-    );
-
-    let proof = validator
-        .generate_proof(&zk_inputs)
-        .context("ZK proof generation failed")?;
-    let proof_bytes =
-        ZkValidator::serialize_proof(&proof).context("ZK proof serialization failed")?;
-    let zk_elapsed = pb_zk.elapsed();
-    pb_zk.finish_with_message(format!(
-        "✓ Publisher admission attestation generated ({:.1}s)",
-        zk_elapsed.as_secs_f32()
-    ));
+    // Compute the manifest digest for transport and future evidence binding.
+    // CR-02: publisher-generated ZK attestations are retired. Their safety
+    // inputs were caller assertions and are not generated or submitted here.
+    let manifest_hash_hex = request.manifest_hash.clone();
 
     // ── 6. Submit via gRPC (Primary High-Speed Tunnel) ────────────────────────
     let grpc_url = resolve_grpc_url(node_url, grpc_url);
@@ -200,18 +194,22 @@ pub async fn run(
             publisher_address: publisher_address.clone(),
             publisher_pubkey: publisher_pubkeys[0].clone(),
             signature: signatures[0].clone(),
-            publisher_attestation_proof: proof_bytes,
-            // These fields are publisher claims carried inside the admission
-            // attestation. Validators still run the real pipeline after
-            // admission and do not treat these values as authoritative.
-            claimed_static_analysis_score: zk_inputs.static_analysis_score as u32,
-            claimed_sandbox_safe: zk_inputs.sandbox_safe,
+            publisher_attestation_proof: vec![],
+            claimed_static_analysis_score: 0,
+            claimed_sandbox_safe: false,
             publisher_pubkeys: publisher_pubkeys.clone(),
             signatures: signatures.clone(),
             threshold: if publisher_pubkeys.len() >= 2 { 2 } else { 1 },
             manifest_json: serde_json::to_string(&request.manifest)
                 .context("Failed to serialize manifest for gRPC submission")?,
             manifest_hash: manifest_hash_hex,
+            publisher_evm_signature: request.publisher_evm_signature.clone(),
+            publisher_nonce: request.publisher_nonce.clone(),
+            publisher_expires_at: request.publisher_expires_at,
+            source_hash: request.source_hash.clone(),
+            ownership_claim: request.ownership_claim.clone(),
+            publisher_chain_id: request.publisher_chain_id.clone(),
+            publisher_staking_contract: request.publisher_staking_contract.clone(),
         };
 
         match client.submit_package(grpc_req).await {
@@ -257,11 +255,8 @@ pub async fn run(
 
     if resp.status().is_success() {
         println!("\n  ✓ Package submitted to pending pool.");
-        println!("    It will be assigned to validator nodes via VRF and");
-        println!(
-            "    verified through PBFT consensus. Use `creg status {}` to check.",
-            pkg_id.canonical()
-        );
+        println!("    It will receive named, independently signed evidence.");
+        println!("    No result is an absolute safety guarantee. Use `creg status {}` to check.", pkg_id.canonical());
     } else {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
@@ -283,6 +278,30 @@ pub async fn run(
     }
 
     Ok(())
+}
+
+/// Sign the same EIP-191 personal-message payload that node admission
+/// recovers. The key is read from an environment variable so it never enters
+/// the JSON request or process arguments. Production operators should prefer
+/// a KMS-backed signer and set `CREG_PUBLISHER_EVM_SIGNATURE` instead.
+fn sign_evm_personal_message(private_key_hex: &str, message: &str) -> Result<String> {
+    use k256::ecdsa::SigningKey;
+
+    let key_bytes = hex::decode(private_key_hex.trim().trim_start_matches("0x"))
+        .context("CREG_PUBLISHER_EVM_KEY must be hex")?;
+    let signing_key = SigningKey::from_slice(&key_bytes)
+        .context("CREG_PUBLISHER_EVM_KEY is not a valid secp256k1 key")?;
+    let prefix = format!("\x19Ethereum Signed Message:\n{}", message.as_bytes().len());
+    let mut payload = prefix.into_bytes();
+    payload.extend_from_slice(message.as_bytes());
+    let digest = Keccak256::digest(payload);
+    let (signature, recovery_id) = signing_key
+        .sign_prehash_recoverable(&digest)
+        .context("failed to sign publisher EVM proof")?;
+    let mut encoded = [0u8; 65];
+    encoded[..64].copy_from_slice(&signature.to_bytes());
+    encoded[64] = recovery_id.to_byte() + 27;
+    Ok(hex::encode(encoded))
 }
 
 /// Create a styled progress bar for file uploads
@@ -627,6 +646,18 @@ pub async fn sign_offline(
 
     // 4. Detect package identity
     let pkg_id = detect_package_id(&tarball_bytes)?;
+    let manifest_hash = common::sha256_hex(
+        &serde_json::to_vec(&manifest).context("Failed to serialize manifest")?,
+    );
+    let chain_id = std::env::var("CREG_CHAIN_ID").unwrap_or_default();
+    let staking_contract = std::env::var("CREG_STAKING_ADDR").unwrap_or_default();
+    let mut nonce_bytes = [0u8; 16];
+    rand::thread_rng().fill_bytes(&mut nonce_bytes);
+    let nonce = hex::encode(nonce_bytes);
+    let submitted_at = Utc::now();
+    let expires_at = (submitted_at + chrono::Duration::hours(1)).timestamp() as u64;
+    let ownership_claim = format!("{}:{}", pkg_id.ecosystem, pkg_id.name);
+    let source_hash = std::env::var("CREG_SOURCE_HASH").unwrap_or_else(|_| "unavailable".into());
 
     // 5. Sign with Ed25519
     let privkey_bytes = hex::decode(privkey_hex.trim()).context("Invalid private key hex")?;
@@ -634,7 +665,24 @@ pub async fn sign_offline(
         SigningKey::try_from(privkey_bytes.as_slice()).context("Invalid Ed25519 private key")?;
     let pubkey = signing_key.verifying_key();
 
-    let msg = common::publish_signature_message(&pkg_id, &content_hash, &publisher_address);
+    let msg = if !chain_id.trim().is_empty() && !staking_contract.trim().is_empty() {
+        common::publish_signature_message_v2(
+            &chain_id,
+            &staking_contract,
+            &pkg_id,
+            &content_hash,
+            &source_hash,
+            &manifest_hash,
+            &hex::encode(pubkey.as_bytes()),
+            &publisher_address,
+            &ownership_claim,
+            &nonce,
+            submitted_at.timestamp(),
+            expires_at,
+        )
+    } else {
+        common::publish_signature_message(&pkg_id, &content_hash, &publisher_address)
+    };
     let signature = signing_key.sign(msg.as_bytes());
 
     let mut publisher_pubkeys = vec![hex::encode(pubkey.as_bytes())];
@@ -659,7 +707,7 @@ pub async fn sign_offline(
         publisher_pubkey: publisher_pubkeys[0].clone(),
         signature: signatures[0].clone(),
         manifest,
-        submitted_at: Utc::now(),
+        submitted_at,
         shielded: shield,
         key_bundle,
         pgp_signature,
@@ -667,6 +715,19 @@ pub async fn sign_offline(
         publisher_pubkeys: publisher_pubkeys.clone(),
         signatures: signatures.clone(),
         threshold: if publisher_pubkeys.len() >= 2 { 2 } else { 1 },
+        publisher_nonce: nonce,
+        publisher_expires_at: expires_at,
+        source_hash,
+        manifest_hash,
+        ownership_claim,
+        publisher_chain_id: chain_id,
+        publisher_staking_contract: staking_contract,
+        publisher_evm_signature: std::env::var("CREG_PUBLISHER_EVM_KEY")
+            .ok()
+            .map(|key| sign_evm_personal_message(&key, &msg))
+            .transpose()?
+            .or_else(|| std::env::var("CREG_PUBLISHER_EVM_SIGNATURE").ok())
+            .unwrap_or_default(),
         ..Default::default()
     };
 

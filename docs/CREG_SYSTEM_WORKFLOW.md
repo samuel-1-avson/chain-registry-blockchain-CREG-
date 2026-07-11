@@ -102,7 +102,7 @@ On the public alpha, **verified** means the queried node's chain store has accep
 
 ### 1.7 Repository Layout
 
-```
+```text
 chain-registry/                    # Root repository
 ├── README.md                      # Project overview
 ├── docs/                          # Public documentation
@@ -188,7 +188,7 @@ flowchart TB
 
 | Layer | Technology | Role |
 |-------|------------|------|
-| **Settlement (L1)** | Solidity on Sepolia | Staking, on-chain registry mirror, governance, ZK verifier, token economics |
+| **Settlement (L1)** | Solidity on Sepolia | Legacy staking/registry mirror and governance; package-ZK qualification and validity checkpoint paths are retired |
 | **CREG chain (L2-local)** | Rust + RocksDB | Fast package finality, PBFT blocks, package index |
 | **Consensus** | PBFT + vote accumulator + VRF | Package approval quorum + block finality |
 | **Networking** | libp2p (Gossipsub, Kademlia, identify) | Votes, blocks, submissions, VRF proofs, validator registrations |
@@ -319,7 +319,7 @@ flowchart LR
     SignVote --> Gossip[Gossip VoteGossip]
     SignReject --> Gossip
     Gossip --> Quorum{Vote accumulator quorum?}
-    Quorum -->|yes| FinalTx[Transaction::Publish]
+    Quorum -->|yes| FinalTx["Publish transaction"]
     Quorum -->|no| Cleanup[Remove from pending]
 ```
 
@@ -682,7 +682,7 @@ stateDiagram-v2
     Analyzing --> Voting: analysis complete
     Voting --> Approved: vote quorum reached
     Voting --> Rejected: reject quorum or timeout
-    Approved --> BlockQueued: Transaction::Publish
+    Approved --> BlockQueued: Publish transaction
     BlockQueued --> Finalized: PBFT block committed
     Finalized --> Verified: in chain store
     Rejected --> [*]: removed from pending
@@ -756,8 +756,8 @@ Observer nodes keep packages in **pending** until validators reach consensus. If
 
 ```mermaid
 flowchart TD
-    A[Generate Ed25519 validator key] --> B[Stake ≥ 100 tCREG on Sepolia]
-    B --> C[applyToBeValidator → Pending on L1]
+    A[Generate Ed25519 validator key] --> B["Stake >= 100 tCREG on Sepolia"]
+    B --> C["applyToBeValidator -> Pending on L1"]
     C --> D[Register identity on node API]
     D --> E[Active validators sign admission attestations]
     E --> F[approveByConsensus on Staking.sol]
@@ -1034,7 +1034,7 @@ flowchart TD
         Admit --> Select[VRF-seeded selection<br/>weighted = hash / stake / rep / perf<br/>M=100 mandatory + voluntary path]
         Select --> Analyze[Mandatory + Voluntary Validators<br/>full pipeline: IPFS + sandbox + ML]
         Analyze --> Vote[Sign vote + evidence<br/>is_mandatory flag set for selected]
-        Vote --> Quorum[Quorum reached → Verified]
+        Vote --> Quorum["Quorum reached -> Verified"]
     end
 
     subgraph "Performance + Snapshot"
@@ -1044,19 +1044,19 @@ flowchart TD
         Decay -->|no| PerfAvg[moving avg with count]
         PerfAvg --> Snap[Snapshot member_performance_at_finalization<br/>into AnalysisCommittee]
         PerfDecay --> Snap
-        Snap --> Record[ChainRecord with analysis_committee<br/>(immutable audit record)]
+        Snap --> Record["ChainRecord with analysis_committee<br/>immutable audit record"]
     end
 
     subgraph "L1 Emission"
         Record --> Hook[try_emit_l1_rewards<br/>pass is_mand_flags from final_sigs]
-        Hook --> L1Call[ValidatorRewards.distributeWorkRewards<br/>canonical, addrs, approvs, wasGood, reps, isMand[]]
+        Hook --> L1Call["ValidatorRewards.distributeWorkRewards<br/>canonical, addrs, approvs, wasGood, reps, isMand flags"]
         L1Call --> CalcL1[_calculateWorkReward + _calculatePoints]
         CalcL1 --> Credit[pendingRewards += reward<br/>packagesVerified++, correct/incorrect]
         Credit --> Events[Emit WorkReward<br/>AnalysisContribution points<br/>AnalysisCommitteeFinalized]
     end
 
     subgraph "Feedback & Claim"
-        Events --> Claim[Validator: claimRewards → transfer]
+        Events --> Claim["Validator: claimRewards -> transfer"]
         L1Call -->|success| Boost[+3 perf for mandatory participants]
         Boost --> Select
         PerfAvg --> Select
@@ -1067,7 +1067,7 @@ flowchart TD
         PReg[registerPinner 1000 CREG + registerPin] --> PReport[reportAccess + periodic submitVerification]
         PReport --> PCalc[calculateRewards<br/>size_bytes × days × rate/1e9<br/>× popularity(2× if >1000) × reliability]
         PCalc --> PClaim[claimRewards from rewardsPool]
-        PReport -->|fail| Slash[1% stake slashed → pool]
+        PReport -->|fail| Slash["1% stake slashed -> pool"]
     end
 ```
 
@@ -1820,7 +1820,7 @@ Tests exist in pbft.rs for receive_prepare; gossip roundtrip covered indirectly 
 - Now explicitly binds/verifies the submitted contentHash limbs against the proof's public inputs (addressing the core of "circuit does not bind content hashes" and mismatch between on-chain binding (keccak tuple) and circuit's content/manifest limbs).
 - The binding now prioritizes the actual content hash the circuit commits to (publicInputs[0,1] per current circuit).
 - Added comment explaining the fix for ISSUE-001; manifest binding can be extended when manifest is passed in ZK submit.
-- This ensures ZK proofs used for package verification are bound to the exact content (and by extension the package record).
+- Legacy ZK public-input binding is retained only for migration analysis. It does not qualify a package or prove a state transition; production admission and qualification use independently generated evidence.
 
 **Rationale:**
 - Even with circuit updates for bind_hash32_limbs, the on-chain check was using a derived binding that didn't align with the proof's hash public inputs, allowing potential misuse of proofs for wrong content.

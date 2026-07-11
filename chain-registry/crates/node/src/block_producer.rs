@@ -1,5 +1,6 @@
 // crates/node/src/block_producer.rs
-// Produces new blocks on a fixed interval from a durable finalized-tx buffer.
+// Produces new blocks on a fixed interval from a bounded/backpressured
+// finalized-tx buffer. Durable queue migration remains a release gate.
 
 use crate::{finalized_tx, NodeState};
 use chrono::Utc;
@@ -71,8 +72,8 @@ pub async fn run(
         let stall_secs = tip_unchanged_since.elapsed().as_secs();
         let allowed_fallback_rank = (stall_secs / fallback_window_secs) as usize;
 
-        // Always move channel deliveries into the durable buffer; never drop
-        // because this node is not the current VRF proposer.
+        // Always move channel deliveries into the backpressured buffer; never
+        // drop because this node is not the current proposer.
         finalized_tx::recv_into_buffer(&rx, &mut pending_txs).await;
         if pending_txs.is_empty() {
             tracing::debug!("Block producer: no pending finalized transactions");
