@@ -70,6 +70,18 @@ pub struct ConsensusParams {
     /// accidentally split the network.
     #[serde(default)]
     pub namespace_authority_activation_height: Option<u64>,
+    /// Exact adapter/policy/trust-root combinations validators may certify.
+    /// These pins are consensus data and therefore part of the genesis hash.
+    #[serde(default)]
+    pub namespace_authority_policies: Vec<NamespaceAuthorityPolicySpec>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NamespaceAuthorityPolicySpec {
+    pub adapter_id: String,
+    pub adapter_version: String,
+    pub policy_sha256: String,
+    pub trust_root_sha256: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

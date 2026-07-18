@@ -160,6 +160,7 @@ pub struct NodeConfig {
     /// Consensus-committed activation height for proof-retaining namespace
     /// ownership transactions. `None` keeps compatibility mode enabled.
     pub namespace_authority_activation_height: Option<u64>,
+    pub namespace_authority_policies: Vec<common::NamespaceAuthorityPolicySpec>,
     /// HTTP bind address for the REST API.
     pub listen_addr: String,
     /// Persistent data directory (chain + pending pool).
@@ -251,6 +252,11 @@ impl NodeConfig {
             )
             .ok()
             .and_then(|value| value.parse().ok()),
+            namespace_authority_policies: serde_json::from_str(&env(
+                "CREG_NAMESPACE_AUTHORITY_POLICIES",
+                "[]",
+            ))
+            .unwrap_or_default(),
             listen_addr: env("CREG_LISTEN", "0.0.0.0:8080"),
             data_dir: PathBuf::from(env("CREG_DATA_DIR", "./data")),
             node_id: env("CREG_NODE_ID", &Uuid::new_v4().to_string()),
@@ -352,9 +358,10 @@ impl NodeConfig {
             if self.chain_id.trim().is_empty()
                 || !genesis_is_valid
                 || is_zero_like(&self.staking_addr)
+                || self.namespace_authority_policies.is_empty()
             {
                 errors.push(
-                    "Authoritative namespace activation requires a chain ID, canonical genesis hash, and non-zero staking contract"
+                    "Authoritative namespace activation requires a chain ID, canonical genesis hash, non-zero staking contract, and pinned adapter policies"
                         .into(),
                 );
             }
@@ -561,6 +568,24 @@ impl NodeConfig {
         buf.push_str(&self.staking_addr.trim().to_lowercase());
         buf.push('|');
         buf.push_str(&self.token_addr.trim().to_lowercase());
+        let mut authority_policies = self.namespace_authority_policies.clone();
+        authority_policies.sort_by(|left, right| {
+            left.adapter_id
+                .cmp(&right.adapter_id)
+                .then_with(|| left.adapter_version.cmp(&right.adapter_version))
+                .then_with(|| left.policy_sha256.cmp(&right.policy_sha256))
+                .then_with(|| left.trust_root_sha256.cmp(&right.trust_root_sha256))
+        });
+        for policy in authority_policies {
+            buf.push('|');
+            buf.push_str(&policy.adapter_id);
+            buf.push(':');
+            buf.push_str(&policy.adapter_version);
+            buf.push(':');
+            buf.push_str(&policy.policy_sha256.to_ascii_lowercase());
+            buf.push(':');
+            buf.push_str(&policy.trust_root_sha256.to_ascii_lowercase());
+        }
         for v in validators {
             buf.push('|');
             buf.push_str(v.id.trim());
@@ -613,6 +638,8 @@ impl NodeConfig {
         }
         self.namespace_authority_activation_height =
             spec.consensus_params.namespace_authority_activation_height;
+        self.namespace_authority_policies =
+            spec.consensus_params.namespace_authority_policies.clone();
         if let Ok(hash) = spec.compute_genesis_hash() {
             self.network_genesis_hash = hash.trim_start_matches("0x").to_ascii_lowercase();
         }
