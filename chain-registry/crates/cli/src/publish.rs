@@ -80,9 +80,8 @@ pub async fn run(
     let pkg_id = detect_package_id(&tarball_bytes)?;
     println!("  package:  {}", pkg_id.canonical());
 
-    let manifest_hash_hex = common::sha256_hex(
-        &serde_json::to_vec(&manifest).context("Failed to serialize manifest")?,
-    );
+    let manifest_hash_hex =
+        common::sha256_hex(&serde_json::to_vec(&manifest).context("Failed to serialize manifest")?);
     let publisher_chain_id = std::env::var("CREG_CHAIN_ID").unwrap_or_default();
     let publisher_staking_contract = std::env::var("CREG_STAKING_ADDR").unwrap_or_default();
     let mut nonce_bytes = [0u8; 16];
@@ -101,26 +100,25 @@ pub async fn run(
         SigningKey::try_from(privkey_bytes.as_slice()).context("Invalid Ed25519 private key")?;
     let pubkey = signing_key.verifying_key();
 
-    let msg = if !publisher_chain_id.trim().is_empty()
-        && !publisher_staking_contract.trim().is_empty()
-    {
-        common::publish_signature_message_v2(
-            &publisher_chain_id,
-            &publisher_staking_contract,
-            &pkg_id,
-            &content_hash,
-            &source_hash,
-            &manifest_hash_hex,
-            &hex::encode(pubkey.as_bytes()),
-            &publisher_address,
-            &ownership_claim,
-            &publisher_nonce,
-            submitted_at.timestamp(),
-            publisher_expires_at,
-        )
-    } else {
-        common::publish_signature_message(&pkg_id, &content_hash, &publisher_address)
-    };
+    let msg =
+        if !publisher_chain_id.trim().is_empty() && !publisher_staking_contract.trim().is_empty() {
+            common::publish_signature_message_v2(
+                &publisher_chain_id,
+                &publisher_staking_contract,
+                &pkg_id,
+                &content_hash,
+                &source_hash,
+                &manifest_hash_hex,
+                &hex::encode(pubkey.as_bytes()),
+                &publisher_address,
+                &ownership_claim,
+                &publisher_nonce,
+                submitted_at.timestamp(),
+                publisher_expires_at,
+            )
+        } else {
+            common::publish_signature_message(&pkg_id, &content_hash, &publisher_address)
+        };
     let signature = signing_key.sign(msg.as_bytes());
 
     let mut publisher_pubkeys = vec![hex::encode(pubkey.as_bytes())];
@@ -210,6 +208,7 @@ pub async fn run(
             ownership_claim: request.ownership_claim.clone(),
             publisher_chain_id: request.publisher_chain_id.clone(),
             publisher_staking_contract: request.publisher_staking_contract.clone(),
+            publisher_issued_at: request.submitted_at.timestamp(),
         };
 
         match client.submit_package(grpc_req).await {
@@ -256,7 +255,10 @@ pub async fn run(
     if resp.status().is_success() {
         println!("\n  ✓ Package submitted to pending pool.");
         println!("    It will receive named, independently signed evidence.");
-        println!("    No result is an absolute safety guarantee. Use `creg status {}` to check.", pkg_id.canonical());
+        println!(
+            "    No result is an absolute safety guarantee. Use `creg status {}` to check.",
+            pkg_id.canonical()
+        );
     } else {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
@@ -646,9 +648,8 @@ pub async fn sign_offline(
 
     // 4. Detect package identity
     let pkg_id = detect_package_id(&tarball_bytes)?;
-    let manifest_hash = common::sha256_hex(
-        &serde_json::to_vec(&manifest).context("Failed to serialize manifest")?,
-    );
+    let manifest_hash =
+        common::sha256_hex(&serde_json::to_vec(&manifest).context("Failed to serialize manifest")?);
     let chain_id = std::env::var("CREG_CHAIN_ID").unwrap_or_default();
     let staking_contract = std::env::var("CREG_STAKING_ADDR").unwrap_or_default();
     let mut nonce_bytes = [0u8; 16];

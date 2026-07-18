@@ -2,10 +2,9 @@
 // Produces new blocks on a fixed interval from a bounded/backpressured
 // finalized-tx buffer. Durable queue migration remains a release gate.
 
-use crate::{finalized_tx, NodeState};
+use crate::{chain_store::FinalizedWorkFailureOutcome, finalized_tx, NodeState};
 use chrono::Utc;
 use common::{merkle_root, transaction_hash, Block, BlockHeader, Transaction};
-use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -53,7 +52,8 @@ pub async fn run(
         s.chain.tip_height().unwrap_or(0)
     };
     let mut tip_unchanged_since = std::time::Instant::now();
-    let mut pending_txs: Vec<Transaction> = Vec::new();
+    let mut pending_txs = Vec::new();
+    hydrate_ready_work(&state, &mut pending_txs).await;
 
     loop {
         ticker.tick().await;
@@ -75,6 +75,11 @@ pub async fn run(
         // Always move channel deliveries into the backpressured buffer; never
         // drop because this node is not the current proposer.
         finalized_tx::recv_into_buffer(&rx, &mut pending_txs).await;
+        // Refill only the available buffer capacity from durable storage.  This
+        // is repeated every tick so a restart never materializes the entire
+        // queue in memory, and work delayed by retry backoff becomes eligible
+        // without a process restart.
+        hydrate_ready_work(&state, &mut pending_txs).await;
         if pending_txs.is_empty() {
             tracing::debug!("Block producer: no pending finalized transactions");
             continue;
@@ -149,10 +154,67 @@ pub async fn run(
             }
             Err(e) => {
                 tracing::error!("Block production failed: {}", e);
-                finalized_tx::requeue_front(&mut pending_txs, txs_backup);
+                let chain = { state.read().await.chain.clone() };
+                let mut retryable = Vec::new();
+                for tx in txs_backup {
+                    let work_id = transaction_hash(&tx);
+                    match chain.record_finalized_work_failure(&work_id, &e.to_string()) {
+                        Ok(FinalizedWorkFailureOutcome::DeadLettered) => {
+                            tracing::error!("Finalized work {} moved to dead letter", work_id)
+                        }
+                        // The durable record now carries a future retry
+                        // deadline. Do not requeue it in memory or the
+                        // backoff would be bypassed on the next tick.
+                        Ok(FinalizedWorkFailureOutcome::Retrying) => {}
+                        Ok(FinalizedWorkFailureOutcome::Missing) => {
+                            tracing::warn!(
+                                "Failed transaction {} was not durable work; retaining it in memory",
+                                work_id
+                            );
+                            retryable.push(tx);
+                        }
+                        Err(record_error) => {
+                            tracing::error!(
+                                "Failed to record durable-work retry for {}: {}",
+                                work_id,
+                                record_error
+                            );
+                            retryable.push(tx);
+                        }
+                    }
+                }
+                finalized_tx::requeue_front(&mut pending_txs, retryable);
             }
         }
     }
+}
+
+/// Refill the producer buffer from durable work without exceeding its
+/// backpressure cap.  Hash de-duplication covers the normal case where a
+/// persisted item was also delivered over the best-effort notification
+/// channel before the producer observed it.
+async fn hydrate_ready_work(state: &Arc<RwLock<NodeState>>, buffer: &mut Vec<Transaction>) {
+    let capacity = finalized_tx::PENDING_BLOCK_TX_BUFFER_CAP.saturating_sub(buffer.len());
+    if capacity == 0 {
+        finalized_tx::sync_pending_buffer_depth(buffer.len());
+        return;
+    }
+    let work = {
+        let s = state.read().await;
+        s.chain.pending_ready_finalized_work(capacity)
+    };
+    match work {
+        Ok(work) => {
+            let mut seen: HashSet<String> = buffer.iter().map(transaction_hash).collect();
+            for (_, tx) in work {
+                if seen.insert(transaction_hash(&tx)) {
+                    buffer.push(tx);
+                }
+            }
+        }
+        Err(error) => tracing::error!("Failed to hydrate durable finalized work: {}", error),
+    }
+    finalized_tx::sync_pending_buffer_depth(buffer.len());
 }
 
 /// Evaluate VRF proposer ranking and broadcast our proof when eligible.
@@ -174,19 +236,10 @@ async fn prepare_proposer_context(
             .find(|v| v.id == node_id)
             .map(|v| v.pubkey.clone());
 
-        let mut sorted_ids: Vec<&str> = s
-            .validator_set
-            .validators
-            .iter()
-            .map(|v| v.id.as_str())
-            .collect();
-        sorted_ids.sort_unstable();
-        let mut hasher = Sha256::new();
-        for id in &sorted_ids {
-            hasher.update(id.as_bytes());
-            hasher.update(b"\0");
-        }
-        let validator_set_hash = hex::encode(hasher.finalize());
+        // Commit to the complete canonical validator authority, not only the
+        // validator IDs. Stake/key/status substitutions must change the block
+        // header commitment and be detected by syncing nodes.
+        let validator_set_hash = common::canonical_validator_set_hash(&s.validator_set);
 
         (
             tip_height,

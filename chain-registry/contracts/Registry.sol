@@ -91,7 +91,7 @@ contract ChainRegistry {
     // ── L2 Rollup State ────────────────────────────────────────────────────────
     
     bytes32 public latestStateRoot;  // Merkle root of the entire verified registry
-    uint256 public totalBatches;      // Counter for rollup batches submitted to L1
+    uint256 public totalBatches;      // Historical legacy batch-submission counter
     
     /// batchId → stateRoot
     mapping(uint256 => bytes32) public batchRoots;

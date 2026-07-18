@@ -11,7 +11,8 @@ import "./Registry.sol";
 /// @dev ⚠️  EXPERIMENTAL — NOT DEPLOYED AND NOT WIRED. This contract is a
 ///      design scaffold and is intentionally absent from the Sepolia
 ///      deployment (chain spec `feature_flags.cross_chain = false`). The live
-///      L2→L1 path is the rollup-checkpoint bridge in crates/node/src/bridge.rs
+///      The former L2→L1 batch-settlement bridge in crates/node/src/bridge.rs
+///      is retired research code; it is not a rollup or package-safety path.
 ///      via Registry.submitRollupBatch — NOT this contract. Do not assume any
 ///      message-passing wiring exists until it is deployed and referenced.
 contract CrossChainRegistry {

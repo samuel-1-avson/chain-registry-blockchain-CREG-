@@ -38,6 +38,16 @@ Public health (no auth): `GET /v1/health` and `GET /v1/public/health`.
 
 Publisher and validator routes require the appropriate credentials — see Swagger for auth headers and request bodies.
 
+## Validator-set transitions
+
+`GET /v1/validator/set-transitions` returns the node's persisted quorum-certified history in ascending effective-height order. Unsigned compatibility observations are intentionally omitted, so a new or rebuilt node cannot promote them into validator authority.
+
+`POST /v1/validator/set-transitions` accepts a domain-separated Ed25519 quorum certificate from the validator set active immediately before the transition. The certificate is the authorization: a single node or operator key cannot rotate validator authority. Each receiver independently verifies the prior-set quorum, requires `effective_from_height` to be its next block height, checks `previous_block_hash` against its canonical tip, and persists only a continuous, non-conflicting certificate.
+
+Accepted transitions propagate on the dedicated gossip topic `creg/v1/validator-set-transitions`. Gossip does not make a transition trusted; peers repeat the same certificate, continuity, replay, and fork-anchor validation before accepting it.
+
+Responses are `202` for an accepted certificate (including an exact retry while the same tip is current), `401` for an invalid/insufficient certificate, `409` for a stale height, conflicting certificate, checkpoint-history violation, or local tip-anchor conflict, and `503` when the configured checkpoint itself is malformed. New or rebuilt nodes should be provisioned with an independently verified `CREG_WEAK_SUBJECTIVITY_CHECKPOINT` before trusting post-checkpoint history.
+
 ## Hub API (this site)
 
 The join portal has a small companion API for health and (later) SIWE sessions:

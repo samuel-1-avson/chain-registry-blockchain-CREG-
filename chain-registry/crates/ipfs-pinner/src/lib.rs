@@ -358,11 +358,13 @@ impl PinningManager {
     /// This provides basic status exposure for the ipfs-pinner sidecar.
     pub async fn start_status_server(manager: Arc<Self>, addr: &str) -> Result<()> {
         use std::net::SocketAddr;
-        use tokio::net::TcpListener;
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
 
         let addr: SocketAddr = addr.parse().context("Invalid status server address")?;
-        let listener = TcpListener::bind(addr).await.context("Failed to bind status server")?;
+        let listener = TcpListener::bind(addr)
+            .await
+            .context("Failed to bind status server")?;
         info!("Pinner status server listening on {}", addr);
 
         loop {

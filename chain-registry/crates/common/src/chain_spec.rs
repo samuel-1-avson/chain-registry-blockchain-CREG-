@@ -64,6 +64,12 @@ pub struct ConsensusParams {
     pub slash_penalty_medium_bp: u16,
     pub slash_penalty_critical_bp: u16,
     pub max_validators: u32,
+    /// First block that requires proof-retaining authoritative namespace
+    /// transactions. Because consensus parameters are part of the signed
+    /// genesis payload, operators cannot activate this independently and
+    /// accidentally split the network.
+    #[serde(default)]
+    pub namespace_authority_activation_height: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

@@ -31,7 +31,8 @@ pub struct TrustVerdict {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum VerdictStatus {
-    /// Chain has a valid consensus record — install proceeds silently.
+    /// Legacy chain has a consensus record. This is not a guarantee that the
+    /// package is safe and must not bypass client freshness or revocation checks.
     Verified {
         block_hash: String,
         content_hash: String,
@@ -51,6 +52,8 @@ pub enum VerdictStatus {
 }
 
 impl VerdictStatus {
+    /// Compatibility helper for legacy callers. `true` means only that the
+    /// legacy record is verified; it is not a package-safety guarantee.
     pub fn is_safe(&self) -> bool {
         matches!(self, VerdictStatus::Verified { .. })
     }

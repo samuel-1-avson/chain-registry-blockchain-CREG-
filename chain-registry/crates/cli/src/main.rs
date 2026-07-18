@@ -756,41 +756,83 @@ async fn run(cli: Cli) -> Result<()> {
         }
 
         Commands::Performance { id, node_url, json } => {
-            let url = node_url.or_else(|| cli.node_url.clone()).unwrap_or_else(|| "http://localhost:28180".to_string());
+            let url = node_url
+                .or_else(|| cli.node_url.clone())
+                .unwrap_or_else(|| "http://localhost:28180".to_string());
             let normalized = id.trim().to_ascii_lowercase();
             // Simple query to profile endpoint which now includes performance_score
             let client = reqwest::Client::new();
-            let resp = client.get(format!("{}/v1/validators/{}", url.trim_end_matches('/'), normalized))
-                .send().await?;
+            let resp = client
+                .get(format!(
+                    "{}/v1/validators/{}",
+                    url.trim_end_matches('/'),
+                    normalized
+                ))
+                .send()
+                .await?;
             if resp.status().is_success() {
                 let val: serde_json::Value = resp.json().await?;
                 if json || json_out {
                     println!("{}", serde_json::to_string_pretty(&val)?);
                 } else {
                     println!("Validator: {}", normalized);
-                    println!("  performance_score: {}", val.get("performance_score").unwrap_or(&serde_json::json!(0)));
-                    println!("  contribution_count: {}", val.get("contribution_count").unwrap_or(&serde_json::json!(0)));
-                    println!("  stake: {}", val.get("stake").unwrap_or(&serde_json::json!("?")));
-                    println!("  reputation: {}", val.get("reputation").unwrap_or(&serde_json::json!(0)));
+                    println!(
+                        "  performance_score: {}",
+                        val.get("performance_score")
+                            .unwrap_or(&serde_json::json!(0))
+                    );
+                    println!(
+                        "  contribution_count: {}",
+                        val.get("contribution_count")
+                            .unwrap_or(&serde_json::json!(0))
+                    );
+                    println!(
+                        "  stake: {}",
+                        val.get("stake").unwrap_or(&serde_json::json!("?"))
+                    );
+                    println!(
+                        "  reputation: {}",
+                        val.get("reputation").unwrap_or(&serde_json::json!(0))
+                    );
                     if let Some(inc) = val.get("incentives") {
                         println!("  incentives:");
-                        println!("    rewards_contract: {}", inc.get("validator_rewards_contract").unwrap_or(&serde_json::json!("")));
+                        println!(
+                            "    rewards_contract: {}",
+                            inc.get("validator_rewards_contract")
+                                .unwrap_or(&serde_json::json!(""))
+                        );
                         println!("    (See workflow.md §9.12 for emission on Verified, points, and selection feedback)");
                     }
                     println!("(Higher performance_score = preferred for mandatory analysis committees if resources/capable)");
                 }
             } else {
-                eprintln!("Failed to fetch validator performance for {}: {}", normalized, resp.status());
+                eprintln!(
+                    "Failed to fetch validator performance for {}: {}",
+                    normalized,
+                    resp.status()
+                );
             }
         }
 
-        Commands::ChainRecord { canonical, node_url, json } => {
-            let url = node_url.or_else(|| cli.node_url.clone()).unwrap_or_else(|| "http://localhost:28180".to_string());
+        Commands::ChainRecord {
+            canonical,
+            node_url,
+            json,
+        } => {
+            let url = node_url
+                .or_else(|| cli.node_url.clone())
+                .unwrap_or_else(|| "http://localhost:28180".to_string());
             let canon = urlencoding::encode(&canonical).into_owned();
             let client = reqwest::Client::new();
             // Fetch full package record; non-JSON mode pretty-prints the entire raw ChainRecord + committee details
-            let resp = client.get(format!("{}/v1/packages/{}", url.trim_end_matches('/'), canon))
-                .send().await?;
+            let resp = client
+                .get(format!(
+                    "{}/v1/packages/{}",
+                    url.trim_end_matches('/'),
+                    canon
+                ))
+                .send()
+                .await?;
             if resp.status().is_success() {
                 let val: serde_json::Value = resp.json().await?;
                 if json || json_out {
@@ -802,24 +844,43 @@ async fn run(cli: Cli) -> Result<()> {
 
                     // Additionally provide a focused committee breakdown with at-finalization scores
                     if let Some(committee) = val.get("analysis_committee") {
-                        println!("\n=== Committee details (at-finalization performance scores) ===");
-                        println!("  size: {}", committee.get("size").unwrap_or(&serde_json::json!(0)));
-                        println!("  performance_bias: {}", committee.get("performance_bias").unwrap_or(&serde_json::json!(false)));
+                        println!(
+                            "\n=== Committee details (at-finalization performance scores) ==="
+                        );
+                        println!(
+                            "  size: {}",
+                            committee.get("size").unwrap_or(&serde_json::json!(0))
+                        );
+                        println!(
+                            "  performance_bias: {}",
+                            committee
+                                .get("performance_bias")
+                                .unwrap_or(&serde_json::json!(false))
+                        );
                         if let Some(members) = committee.get("members").and_then(|m| m.as_array()) {
-                            println!("  members (id + performance_score_at_finalization + current):");
+                            println!(
+                                "  members (id + performance_score_at_finalization + current):"
+                            );
                             for m in members {
                                 println!("    - {}", serde_json::to_string(m).unwrap_or_default());
                             }
                         }
                         if let Some(scores) = committee.get("member_performance_at_finalization") {
-                            println!("  member_performance_at_finalization: {}", serde_json::to_string_pretty(scores).unwrap_or_default());
+                            println!(
+                                "  member_performance_at_finalization: {}",
+                                serde_json::to_string_pretty(scores).unwrap_or_default()
+                            );
                         }
                     } else if let Some(size) = val.get("analysis_committee_size") {
                         println!("\n(legacy scalars) committee_size: {}", size);
                     }
                 }
             } else {
-                eprintln!("Failed to fetch ChainRecord for {}: {}", canonical, resp.status());
+                eprintln!(
+                    "Failed to fetch ChainRecord for {}: {}",
+                    canonical,
+                    resp.status()
+                );
             }
         }
         Commands::Publish {

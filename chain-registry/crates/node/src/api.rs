@@ -89,6 +89,18 @@ fn public_routes(sse_bus: EventBus, ws_bus: EventBus) -> Router<SharedState> {
         .route("/v1/public/packages/:canonical", get(get_package))
         .route("/v1/public/packages/:canonical/proof", get(get_proof))
         .route(
+            "/v1/public/transparency/:log_id/head",
+            get(get_transparency_head),
+        )
+        .route(
+            "/v1/public/transparency/:log_id/inclusion/:sequence",
+            get(get_transparency_inclusion_proof),
+        )
+        .route(
+            "/v1/public/transparency/:log_id/consistency/:tree_size",
+            get(get_transparency_consistency_proof),
+        )
+        .route(
             "/v1/public/packages/:canonical/intelligence",
             get(get_package_intelligence),
         )
@@ -133,6 +145,10 @@ fn publisher_routes() -> Router<SharedState> {
             post(revoke_package),
         )
         .route("/v1/publisher/rotate-key", post(rotate_publisher_key))
+        .route(
+            "/v1/publisher/namespaces/lifecycle",
+            post(submit_namespace_lifecycle),
+        )
 }
 
 fn validator_routes() -> Router<SharedState> {
@@ -149,6 +165,10 @@ fn validator_routes() -> Router<SharedState> {
         .route("/v1/validator/consensus/vote", post(receive_vote))
         .route("/v1/validator/consensus/state", get(consensus_state))
         .route("/v1/validator/consensus/pbft", get(consensus_pbft))
+        .route(
+            "/v1/validator/set-transitions",
+            get(list_validator_set_transitions).post(submit_validator_set_transition),
+        )
 }
 
 fn operator_routes() -> Router<SharedState> {
@@ -210,9 +230,21 @@ fn legacy_public_routes(sse_bus: EventBus, ws_bus: EventBus) -> Router<SharedSta
         // Packages
         .route("/v1/packages/:canonical", get(get_package))
         .route("/v1/packages", get(list_packages).post(submit_package))
-        .route("/v1/packages/:canonical/committee", get(get_package_committee))
+        .route(
+            "/v1/packages/:canonical/committee",
+            get(get_package_committee),
+        )
         .route("/v1/packages/:canonical/revoke", post(revoke_package))
         .route("/v1/packages/:canonical/proof", get(get_proof))
+        .route("/v1/transparency/:log_id/head", get(get_transparency_head))
+        .route(
+            "/v1/transparency/:log_id/inclusion/:sequence",
+            get(get_transparency_inclusion_proof),
+        )
+        .route(
+            "/v1/transparency/:log_id/consistency/:tree_size",
+            get(get_transparency_consistency_proof),
+        )
         .route(
             "/v1/packages/:canonical/intelligence",
             get(get_package_intelligence),
@@ -238,6 +270,10 @@ fn legacy_public_routes(sse_bus: EventBus, ws_bus: EventBus) -> Router<SharedSta
         .route("/v1/consensus/state", get(consensus_state))
         .route("/v1/consensus/pbft", get(consensus_pbft))
         .route("/v1/publishers/rotate-key", post(rotate_publisher_key))
+        .route(
+            "/v1/publishers/namespaces/lifecycle",
+            post(submit_namespace_lifecycle),
+        )
         // Search
         .route("/v1/search", get(search_handler))
         // Event streaming - SSE & Websockets
@@ -328,6 +364,12 @@ const API_ROUTE_BOUNDARIES: &[ApiRouteBoundary] = &[
         category: ApiRouteCategory::Validator,
         security: ApiRouteSecurity::ValidatorSignatureSetMembership,
         note: "Consensus endpoints require validator signatures and active-set membership.",
+    },
+    ApiRouteBoundary {
+        path: "/v1/validator/set-transitions",
+        category: ApiRouteCategory::Validator,
+        security: ApiRouteSecurity::ValidatorSignatureSetMembership,
+        note: "Validator-set transitions require an Ed25519 quorum certificate from the preceding active set; every receiver revalidates height and canonical-tip continuity.",
     },
     ApiRouteBoundary {
         path: "/v1/operator/*",
@@ -704,7 +746,11 @@ fn non_zero_address(value: &str) -> Option<String> {
 
 /// Small helper for treasury monitoring: query ERC20 balanceOf(treasury) via L1 RPC.
 /// Returns 0 on any error (best effort, non-blocking for config/metrics).
-async fn query_treasury_balance(rpc_url: &str, token_addr: &str, treasury_addr: &str) -> anyhow::Result<u128> {
+async fn query_treasury_balance(
+    rpc_url: &str,
+    token_addr: &str,
+    treasury_addr: &str,
+) -> anyhow::Result<u128> {
     use alloy::primitives::Address;
     use alloy::providers::ProviderBuilder;
     use alloy::sol;
@@ -725,7 +771,10 @@ async fn query_treasury_balance(rpc_url: &str, token_addr: &str, treasury_addr: 
     Ok(bal.to::<u128>())
 }
 
-async fn query_total_rewards_distributed(rpc_url: &str, rewards_addr: &str) -> anyhow::Result<u128> {
+async fn query_total_rewards_distributed(
+    rpc_url: &str,
+    rewards_addr: &str,
+) -> anyhow::Result<u128> {
     use alloy::primitives::Address;
     use alloy::providers::ProviderBuilder;
     use alloy::sol;
@@ -763,7 +812,10 @@ async fn query_rewards_pool(rpc_url: &str, pinning_addr: &str) -> anyhow::Result
 
 /// Refresh incentives values from L1 into state (treasury balance, total distributed, pool).
 /// Best effort; called from background task or on-demand.
-pub async fn refresh_incentives_status(state: Arc<tokio::sync::RwLock<crate::NodeState>>, config: &crate::config::NodeConfig) {
+pub async fn refresh_incentives_status(
+    state: Arc<tokio::sync::RwLock<crate::NodeState>>,
+    config: &crate::config::NodeConfig,
+) {
     if config.eth_rpc_url.is_empty() {
         return;
     }
@@ -781,7 +833,9 @@ pub async fn refresh_incentives_status(state: Arc<tokio::sync::RwLock<crate::Nod
     if !config.validator_rewards_addr.trim().is_empty()
         && config.validator_rewards_addr != "0x0000000000000000000000000000000000000000"
     {
-        if let Ok(total) = query_total_rewards_distributed(rpc, &config.validator_rewards_addr).await {
+        if let Ok(total) =
+            query_total_rewards_distributed(rpc, &config.validator_rewards_addr).await
+        {
             let mut s = state.write().await;
             s.total_rewards_distributed = total;
         }
@@ -1230,6 +1284,115 @@ async fn list_validator_registrations(State(state): State<SharedState>) -> impl 
     Json(registrations)
 }
 
+/// GET /v1/validator/set-transitions
+///
+/// Returns the persisted quorum-certified transition history in ascending
+/// effective-height order. Compatibility entries have no certificate and are
+/// deliberately omitted: rebuilding nodes must never promote an unsigned
+/// local observation into validator authority.
+async fn list_validator_set_transitions(State(state): State<SharedState>) -> Response {
+    let data_dir = state.read().await.config.data_dir.clone();
+    let transitions: Vec<common::AuthenticatedValidatorSetSnapshot> =
+        crate::validator_set_history::load(&data_dir)
+            .into_iter()
+            .filter_map(|entry| entry.certificate)
+            .collect();
+    Json(transitions).into_response()
+}
+
+/// POST /v1/validator/set-transitions
+///
+/// Stores a validator-set transition only after an Ed25519 quorum from the
+/// previous active set verifies it. The signatures themselves are the
+/// authorization: no individual operator can rotate the committee source.
+/// A configured genesis set remains a local trust anchor and cannot be sent
+/// through this endpoint as an unsigned "height zero" transition.
+async fn submit_validator_set_transition(
+    State(state): State<SharedState>,
+    Json(snapshot): Json<common::AuthenticatedValidatorSetSnapshot>,
+) -> Response {
+    let (data_dir, tip_height, tip_hash, previous) = {
+        let s = state.read().await;
+        let previous = crate::validator_set_history::set_at(
+            &s.config.data_dir,
+            snapshot.effective_from_height.saturating_sub(1),
+        )
+        .unwrap_or_else(|| s.validator_set.clone());
+        (
+            s.config.data_dir.clone(),
+            s.chain.tip_height().unwrap_or(0),
+            s.chain.tip_hash().unwrap_or_default(),
+            previous,
+        )
+    };
+    let checkpoint_allows = match crate::validator_set_history::checkpoint_from_env() {
+        Ok(Some(checkpoint)) => {
+            common::validator_snapshot_certificate_hash(&snapshot)
+                == common::validator_snapshot_certificate_hash(&checkpoint)
+                || crate::validator_set_history::authenticated_at_from_checkpoint(
+                    &data_dir,
+                    snapshot.effective_from_height.saturating_sub(1),
+                    &checkpoint,
+                )
+                .is_some()
+        }
+        Ok(None) => true,
+        Err(error) => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(ErrorResponse { error }),
+            )
+                .into_response();
+        }
+    };
+    if !checkpoint_allows {
+        return (
+            StatusCode::CONFLICT,
+            Json(ErrorResponse {
+                error: "validator-set transition is outside the configured checkpoint history"
+                    .into(),
+            }),
+        )
+            .into_response();
+    }
+    if let Err(error) =
+        crate::validator_set_history::validate_transition_at_tip(&snapshot, tip_height, &tip_hash)
+    {
+        return (
+            StatusCode::CONFLICT,
+            Json(ErrorResponse {
+                error: error.to_string(),
+            }),
+        )
+            .into_response();
+    }
+    let effective_from_height = snapshot.effective_from_height;
+    let validator_set_hash = snapshot.validator_set_hash.clone();
+    let gossip_snapshot = snapshot.clone();
+    match crate::validator_set_history::record_authenticated(&data_dir, snapshot, &previous) {
+        Ok(()) => {
+            crate::validator_registry_gossip::broadcast_validator_set_transition(gossip_snapshot)
+                .await;
+            (
+                StatusCode::ACCEPTED,
+                Json(serde_json::json!({
+                    "accepted": true,
+                    "effective_from_height": effective_from_height,
+                    "validator_set_hash": validator_set_hash,
+                })),
+            )
+                .into_response()
+        }
+        Err(error) => (
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorResponse {
+                error: format!("validator-set transition rejected: {error}"),
+            }),
+        )
+            .into_response(),
+    }
+}
+
 // GET /v1/nodes
 async fn get_nodes(State(state): State<SharedState>) -> impl IntoResponse {
     let s = state.read().await;
@@ -1663,18 +1826,30 @@ async fn get_package_intelligence(
 }
 
 // GET /v1/packages/:canonical/committee - Explorer/API surface for committee membership
-async fn get_package_committee(State(state): State<SharedState>, Path(canonical): Path<String>) -> Response {
-    let canonical = urlencoding::decode(&canonical).unwrap_or_default().to_string();
+async fn get_package_committee(
+    State(state): State<SharedState>,
+    Path(canonical): Path<String>,
+) -> Response {
+    let canonical = urlencoding::decode(&canonical)
+        .unwrap_or_default()
+        .to_string();
     let s = state.read().await;
 
     if let Some(c) = s.pending_pool.get_committee(&canonical) {
-        let members_detailed: Vec<serde_json::Value> = c.members.iter().map(|mid| {
-            let perf = s.validator_set.validators.iter()
-                .find(|v| &v.id == mid)
-                .map(|v| v.performance_score)
-                .unwrap_or(0);
-            serde_json::json!({ "id": mid, "performance_score": perf })
-        }).collect();
+        let members_detailed: Vec<serde_json::Value> = c
+            .members
+            .iter()
+            .map(|mid| {
+                let perf = s
+                    .validator_set
+                    .validators
+                    .iter()
+                    .find(|v| &v.id == mid)
+                    .map(|v| v.performance_score)
+                    .unwrap_or(0);
+                serde_json::json!({ "id": mid, "performance_score": perf })
+            })
+            .collect();
         return Json(serde_json::json!({
             "canonical": canonical,
             "size": c.size,
@@ -1682,26 +1857,38 @@ async fn get_package_committee(State(state): State<SharedState>, Path(canonical)
             "seed": c.seed,
             "effective_size": c.effective_size,
             "performance_bias": c.performance_bias,
-        })).into_response();
+        }))
+        .into_response();
     }
 
     if let Ok(Some(record)) = s.chain.get_package(&canonical) {
         if let Some(c) = record.get_analysis_committee() {
             // Full or reconstructed committee. For modern records, member_performance_at_finalization
             // has the scores captured at the exact moment of finalization (including this package's effect).
-            let members_detailed: Vec<serde_json::Value> = c.members.iter().map(|mid| {
-                let score_at_final = c.member_performance_at_finalization.get(mid).copied().unwrap_or(0);
-                // Live score may have changed since finalization
-                let live_score = s.validator_set.validators.iter()
-                    .find(|v| &v.id == mid)
-                    .map(|v| v.performance_score)
-                    .unwrap_or(0);
-                serde_json::json!({
-                    "id": mid,
-                    "performance_score_at_finalization": score_at_final,
-                    "current_performance_score": live_score,
+            let members_detailed: Vec<serde_json::Value> = c
+                .members
+                .iter()
+                .map(|mid| {
+                    let score_at_final = c
+                        .member_performance_at_finalization
+                        .get(mid)
+                        .copied()
+                        .unwrap_or(0);
+                    // Live score may have changed since finalization
+                    let live_score = s
+                        .validator_set
+                        .validators
+                        .iter()
+                        .find(|v| &v.id == mid)
+                        .map(|v| v.performance_score)
+                        .unwrap_or(0);
+                    serde_json::json!({
+                        "id": mid,
+                        "performance_score_at_finalization": score_at_final,
+                        "current_performance_score": live_score,
+                    })
                 })
-            }).collect();
+                .collect();
             return Json(serde_json::json!({
                 "canonical": canonical,
                 "size": c.size,
@@ -1715,7 +1902,8 @@ async fn get_package_committee(State(state): State<SharedState>, Path(canonical)
                 } else {
                     "legacy record - members list not available, scores not captured"
                 },
-            })).into_response();
+            }))
+            .into_response();
         }
         // Legacy fallback
         return Json(serde_json::json!({
@@ -1725,7 +1913,8 @@ async fn get_package_committee(State(state): State<SharedState>, Path(canonical)
             "effective_size": record.analysis_effective_size,
             "mandatory_contributed": record.analysis_mandatory_contributed,
             "note": "no committee data; very old record"
-        })).into_response();
+        }))
+        .into_response();
     }
 
     Json(serde_json::json!({"error": "no committee info for package"})).into_response()
@@ -1850,6 +2039,7 @@ fn rest_admission_error(error: crate::package_admission::AdmissionError) -> Resp
         AdmissionError::Publisher(PublisherAdmissionError::Unstaked(_))
         | AdmissionError::Revoked(_) => StatusCode::FORBIDDEN,
         AdmissionError::Publisher(PublisherAdmissionError::Unavailable(_))
+        | AdmissionError::CertifiedCommitteeRequired(_)
         | AdmissionError::Scanner(
             crate::admission_scan::AdmissionScanError::RulesUnavailable
             | crate::admission_scan::AdmissionScanError::IpfsFetch { .. }
@@ -1860,9 +2050,7 @@ fn rest_admission_error(error: crate::package_admission::AdmissionError) -> Resp
         }) => StatusCode::PAYLOAD_TOO_LARGE,
         AdmissionError::AlreadyVerified(_)
         | AdmissionError::AlreadyPending(_)
-        | AdmissionError::NamespaceOwned(_) => {
-            StatusCode::CONFLICT
-        }
+        | AdmissionError::NamespaceOwned(_) => StatusCode::CONFLICT,
         AdmissionError::Storage(_) => StatusCode::INTERNAL_SERVER_ERROR,
     };
 
@@ -1970,8 +2158,10 @@ async fn revoke_package(
                 revoked_by: req.revoker_pubkey.clone(),
                 evidence_hash: record.content_hash.clone(),
             };
-            if tx_sender.send(tx).await.is_err() {
-                return server_err("Finalized-tx channel closed".to_string());
+            if let Err(error) =
+                crate::finalized_tx::persist_and_notify(&state, &tx_sender, tx).await
+            {
+                return server_err(format!("Failed to persist revocation work: {}", error));
             }
             tracing::info!(
                 canonical = %canonical,
@@ -2009,6 +2199,46 @@ async fn get_proof(State(state): State<SharedState>, Path(canonical): Path<Strin
         Ok(Some(proof)) => Json(proof).into_response(),
         Ok(None) => not_found(format!("No proof available for: {}", canonical)),
         Err(e) => server_err(e.to_string()),
+    }
+}
+
+// Transparency-log endpoints deliberately expose unsigned data only. Clients
+// must require a configured, independently witnessed SignedTreeHead before
+// treating a returned proof as install-eligible.
+async fn get_transparency_head(
+    State(state): State<SharedState>,
+    Path(log_id): Path<String>,
+) -> Response {
+    let state = state.read().await;
+    match state.chain.transparency_tree_head(&log_id) {
+        Ok(Some(head)) => Json(head).into_response(),
+        Ok(None) => not_found(format!("No transparency tree head for log: {log_id}")),
+        Err(error) => server_err(error.to_string()),
+    }
+}
+
+async fn get_transparency_inclusion_proof(
+    State(state): State<SharedState>,
+    Path((log_id, sequence)): Path<(String, u64)>,
+) -> Response {
+    let state = state.read().await;
+    match state.chain.transparency_inclusion_proof(&log_id, sequence) {
+        Ok(proof) => Json(proof).into_response(),
+        Err(error) => not_found(error.to_string()),
+    }
+}
+
+async fn get_transparency_consistency_proof(
+    State(state): State<SharedState>,
+    Path((log_id, tree_size)): Path<(String, u64)>,
+) -> Response {
+    let state = state.read().await;
+    match state
+        .chain
+        .transparency_consistency_proof(&log_id, tree_size)
+    {
+        Ok(proof) => Json(proof).into_response(),
+        Err(error) => not_found(error.to_string()),
     }
 }
 
@@ -2166,6 +2396,7 @@ async fn get_transaction(
                 common::Transaction::RotatePublisherKey {
                     canonical_prefix, ..
                 } => canonical_prefix.clone(),
+                common::Transaction::NamespaceLifecycle(event) => event.namespace.clone(),
             };
 
             if tx_canonical == canonical {
@@ -2291,6 +2522,7 @@ fn tx_kind_label(tx: &Transaction) -> &'static str {
         Transaction::ValidatorJoin { .. } => "validator-join",
         Transaction::ValidatorLeave { .. } => "validator-leave",
         Transaction::RotatePublisherKey { .. } => "rotate-key",
+        Transaction::NamespaceLifecycle(_) => "namespace-lifecycle",
     }
 }
 
@@ -2303,6 +2535,7 @@ fn tx_canonical(tx: &Transaction) -> Option<String> {
         Transaction::RotatePublisherKey {
             canonical_prefix, ..
         } => Some(canonical_prefix.clone()),
+        Transaction::NamespaceLifecycle(event) => Some(event.namespace.clone()),
         _ => None,
     }
 }
@@ -2316,7 +2549,7 @@ fn tx_touches_address(tx: &Transaction, addr: &str) -> bool {
             validator_id.to_ascii_lowercase() == addr
         }
         Transaction::ValidatorLeave { validator_id } => validator_id.to_ascii_lowercase() == addr,
-        // Publish / RotatePublisherKey use ed25519 pubkeys, not EVM addresses — skip here.
+        // Publish / ownership lifecycle events use Ed25519 pubkeys, not EVM addresses — skip here.
         _ => false,
     }
 }
@@ -2463,7 +2696,10 @@ async fn get_validator_profile(
     let s = state.read().await;
 
     // Support either EVM address or node id for lookup
-    let registration = s.validator_registrations.get(&normalized).cloned()
+    let registration = s
+        .validator_registrations
+        .get(&normalized)
+        .cloned()
         .or_else(|| {
             // try find registration by id? but registrations keyed by evm, fallback empty
             None
@@ -2472,37 +2708,41 @@ async fn get_validator_profile(
         .validator_set
         .validators
         .iter()
-        .find(|v| v.eth_address.eq_ignore_ascii_case(&normalized) || v.id.eq_ignore_ascii_case(&normalized))
+        .find(|v| {
+            v.eth_address.eq_ignore_ascii_case(&normalized)
+                || v.id.eq_ignore_ascii_case(&normalized)
+        })
         .cloned();
 
     if registration.is_none() && active.is_none() {
         return not_found(format!("Validator not found: {}", address));
     }
 
-    let (stake, reputation, status, in_active_set, performance_score, contribution_count) = match active.as_ref() {
-        Some(v) => (
-            v.stake.to_string(),
-            v.reputation,
-            v.status.clone(),
-            true,
-            v.performance_score,
-            v.contribution_count,
-        ),
-        None => (
-            registration
-                .as_ref()
-                .map(|r| r.stake.to_string())
-                .unwrap_or_default(),
-            registration.as_ref().map(|r| r.reputation).unwrap_or(0),
-            registration
-                .as_ref()
-                .map(|r| r.status.clone())
-                .unwrap_or_else(|| "unknown".to_string()),
-            false,
-            0u32,
-            0u32,
-        ),
-    };
+    let (stake, reputation, status, in_active_set, performance_score, contribution_count) =
+        match active.as_ref() {
+            Some(v) => (
+                v.stake.to_string(),
+                v.reputation,
+                v.status.clone(),
+                true,
+                v.performance_score,
+                v.contribution_count,
+            ),
+            None => (
+                registration
+                    .as_ref()
+                    .map(|r| r.stake.to_string())
+                    .unwrap_or_default(),
+                registration.as_ref().map(|r| r.reputation).unwrap_or(0),
+                registration
+                    .as_ref()
+                    .map(|r| r.status.clone())
+                    .unwrap_or_else(|| "unknown".to_string()),
+                false,
+                0u32,
+                0u32,
+            ),
+        };
 
     let blocks = s.chain.list_blocks(0, 500).unwrap_or_default();
     let recent_proposals: Vec<serde_json::Value> = blocks
@@ -2736,7 +2976,19 @@ async fn rotate_publisher_key(
 ) -> Response {
     use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 
-    // 1. Verify sig_from_old: old key signs new_pubkey
+    if let Err(error) = common::validate_namespace_prefix(&req.canonical_prefix) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: format!("Invalid canonical namespace prefix: {}", error),
+            }),
+        )
+            .into_response();
+    }
+
+    // 1. Both keys authorize this exact namespace, successor key, and nonce.
+    // Signing only the other key would permit replaying a legitimate rotation
+    // across every namespace owned by the same publisher.
     let verify_sig = |pubkey_hex: &str, msg: &str, sig_hex: &str| -> anyhow::Result<()> {
         let pk_bytes = hex::decode(pubkey_hex)?;
         let sig_bytes = hex::decode(sig_hex)?;
@@ -2748,7 +3000,13 @@ async fn rotate_publisher_key(
             .map_err(|_| anyhow::anyhow!("signature verification failed"))
     };
 
-    if let Err(e) = verify_sig(&req.old_pubkey, &req.new_pubkey, &req.sig_from_old) {
+    let rotation_message = common::publisher_rotation_message(
+        &req.canonical_prefix,
+        &req.old_pubkey,
+        &req.new_pubkey,
+        req.nonce,
+    );
+    if let Err(e) = verify_sig(&req.old_pubkey, &rotation_message, &req.sig_from_old) {
         return (
             StatusCode::BAD_REQUEST,
             Json(ErrorResponse {
@@ -2757,7 +3015,7 @@ async fn rotate_publisher_key(
         )
             .into_response();
     }
-    if let Err(e) = verify_sig(&req.new_pubkey, &req.old_pubkey, &req.sig_from_new) {
+    if let Err(e) = verify_sig(&req.new_pubkey, &rotation_message, &req.sig_from_new) {
         return (
             StatusCode::BAD_REQUEST,
             Json(ErrorResponse {
@@ -2840,13 +3098,124 @@ async fn rotate_publisher_key(
         nonce: req.nonce,
     };
 
-    if tx_sender.send(tx).await.is_err() {
-        return server_err("Finalized-tx channel closed".to_string());
+    if let Err(error) = crate::finalized_tx::persist_and_notify(&state, &tx_sender, tx).await {
+        return server_err(format!("Failed to persist key-rotation work: {}", error));
     }
 
     Json(serde_json::json!({
         "status": "queued",
         "message": "Key rotation will be included in the next block"
+    }))
+    .into_response()
+}
+
+// POST /v1/publisher/namespaces/lifecycle
+//
+// Delegate and transfer are authorized by both controllers over a
+// domain-separated event. Recovery is intentionally unavailable until a
+// registry authority adapter can independently verify its proof.
+async fn submit_namespace_lifecycle(
+    State(state): State<SharedState>,
+    Extension(tx_sender): Extension<FinalizedTxSender>,
+    Json(event): Json<common::NamespaceLifecycleEvent>,
+) -> Response {
+    if let Err(error) = event.verify_controller_signatures() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: format!("Invalid namespace lifecycle signatures: {}", error),
+            }),
+        )
+            .into_response();
+    }
+
+    let now = chrono::Utc::now();
+    if event.issued_at > now + chrono::Duration::minutes(5)
+        || event.expires_at <= now
+        || event.expires_at > now + chrono::Duration::hours(24)
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "Namespace lifecycle event is outside the permitted validity window".into(),
+            }),
+        )
+            .into_response();
+    }
+    if matches!(event.action, common::NamespaceLifecycleAction::Recover) {
+        return (
+            StatusCode::CONFLICT,
+            Json(ErrorResponse {
+                error: "Namespace recovery requires a verified npm/PyPI authority proof; no authority adapter is enabled".into(),
+            }),
+        )
+            .into_response();
+    }
+
+    let nonce_consumed = {
+        let state = state.read().await;
+        let Some(controller) = state.chain.publisher_for_prefix(&event.namespace) else {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(ErrorResponse {
+                    error: format!(
+                        "Namespace {} has no established controller",
+                        event.namespace
+                    ),
+                }),
+            )
+                .into_response();
+        };
+        if !controller.eq_ignore_ascii_case(&event.current_controller_ed25519_pubkey) {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(ErrorResponse {
+                    error: "Namespace lifecycle current controller does not own this namespace"
+                        .into(),
+                }),
+            )
+                .into_response();
+        }
+        match state.chain.consume_namespace_lifecycle_nonce(
+            &event.namespace,
+            &event.current_controller_ed25519_pubkey,
+            event.nonce,
+        ) {
+            Ok(value) => value,
+            Err(error) => {
+                return server_err(format!(
+                    "Failed to consume namespace lifecycle nonce: {}",
+                    error
+                ));
+            }
+        }
+    };
+    if !nonce_consumed {
+        return (
+            StatusCode::CONFLICT,
+            Json(ErrorResponse {
+                error: "Namespace lifecycle nonce has already been used".into(),
+            }),
+        )
+            .into_response();
+    }
+
+    if let Err(error) = crate::finalized_tx::persist_and_notify(
+        &state,
+        &tx_sender,
+        common::Transaction::NamespaceLifecycle(event),
+    )
+    .await
+    {
+        return server_err(format!(
+            "Failed to queue namespace lifecycle event: {}",
+            error
+        ));
+    }
+
+    Json(serde_json::json!({
+        "status": "queued",
+        "message": "Namespace lifecycle event will be included in the next block"
     }))
     .into_response()
 }
@@ -3529,19 +3898,96 @@ mod tests {
             threshold,
             publisher_pubkeys,
             signatures,
+            ..Default::default()
         }
     }
 
-    fn make_signed_request(publisher_address: &str) -> PublishRequest {
-        let (sk, pk) = make_keypair();
+    fn make_signed_request(chain_id: &str, staking_contract: &str) -> PublishRequest {
+        let (ed25519_key, ed25519_pubkey) = make_keypair();
+        let (evm_key, publisher_address) = make_evm_keypair();
         let mut req = make_request_with_sigs(vec![], vec![], 0);
-        req.publisher_address = publisher_address.into();
-        let msg =
-            common::publish_signature_message(&req.id, &req.content_hash, &req.publisher_address);
-        let sig = sk.sign(msg.as_bytes());
-        req.publisher_pubkey = pk;
-        req.signature = hex::encode(sig.to_bytes());
+        req.publisher_address = publisher_address;
+        req.publisher_pubkey = ed25519_pubkey;
+        req.publisher_chain_id = chain_id.into();
+        req.publisher_staking_contract = staking_contract.into();
+        req.publisher_nonce = format!("api-unstaked-{}", uuid::Uuid::new_v4());
+        req.publisher_expires_at =
+            (req.submitted_at + chrono::Duration::hours(1)).timestamp() as u64;
+        req.source_hash = common::sha256_hex(b"api-unstaked-source");
+        req.manifest_hash = common::sha256_hex(&serde_json::to_vec(&req.manifest).unwrap());
+        req.ownership_claim = format!("{}:{}", req.id.ecosystem, req.id.name);
+        let message = common::publish_signature_message_v2(
+            &req.publisher_chain_id,
+            &req.publisher_staking_contract,
+            &req.id,
+            &req.content_hash,
+            &req.source_hash,
+            &req.manifest_hash,
+            &req.publisher_pubkey,
+            &req.publisher_address,
+            &req.ownership_claim,
+            &req.publisher_nonce,
+            req.submitted_at.timestamp(),
+            req.publisher_expires_at,
+        );
+        req.signature = hex::encode(ed25519_key.sign(message.as_bytes()).to_bytes());
+        req.publisher_evm_signature = sign_evm_personal_message(&evm_key, &message);
         req
+    }
+
+    fn signed_namespace_lifecycle_event(
+        action: common::NamespaceLifecycleAction,
+        namespace: &str,
+        current: &SigningKey,
+        next: &SigningKey,
+        nonce: u64,
+        issued_at: chrono::DateTime<chrono::Utc>,
+        expires_at: chrono::DateTime<chrono::Utc>,
+    ) -> common::NamespaceLifecycleEvent {
+        let mut event = common::NamespaceLifecycleEvent {
+            schema_version: common::OWNERSHIP_SCHEMA_VERSION,
+            action,
+            namespace: namespace.into(),
+            current_controller_ed25519_pubkey: hex::encode(current.verifying_key().as_bytes()),
+            next_controller_ed25519_pubkey: hex::encode(next.verifying_key().as_bytes()),
+            nonce,
+            issued_at,
+            expires_at,
+            current_controller_signature: String::new(),
+            next_controller_signature: String::new(),
+            authority_proof_digest: if matches!(action, common::NamespaceLifecycleAction::Recover) {
+                "a".repeat(64)
+            } else {
+                String::new()
+            },
+        };
+        let message = event.signing_message();
+        if !matches!(action, common::NamespaceLifecycleAction::Recover) {
+            event.current_controller_signature =
+                hex::encode(current.sign(message.as_bytes()).to_bytes());
+        }
+        event.next_controller_signature = hex::encode(next.sign(message.as_bytes()).to_bytes());
+        event
+    }
+
+    async fn establish_test_namespace_controller(
+        state: &SharedState,
+        namespace_name: &str,
+        controller_pubkey: String,
+    ) -> anyhow::Result<String> {
+        let record = ChainRecord {
+            id: PackageId::new("npm", namespace_name, "1.0.0"),
+            content_hash: common::sha256_hex(namespace_name.as_bytes()),
+            ipfs_cid: "bafylifecycletest".into(),
+            publisher_pubkey: controller_pubkey,
+            block_hash: "0xabc123".into(),
+            published_at: chrono::Utc::now(),
+            status: PackageStatus::Verified,
+            ..ChainRecord::default()
+        };
+        let namespace = common::package_namespace_prefix(&record.id);
+        state.read().await.chain.save_package(&record)?;
+        Ok(namespace)
     }
 
     async fn spawn_mock_staking_rpc(staked_balance: u64) -> String {
@@ -3596,6 +4042,7 @@ mod tests {
             package_rounds: HashMap::new(),
             package_committees: HashMap::new(),
             config: crate::config::NodeConfig {
+                chain_id: "creg-api-test".into(),
                 data_dir: tempdir.path().to_path_buf(),
                 eth_rpc_url: rpc_url,
                 staking_addr: "0x1000000000000000000000000000000000000001".into(),
@@ -3653,6 +4100,7 @@ mod tests {
             ownership_claim: req.ownership_claim.clone(),
             publisher_chain_id: req.publisher_chain_id.clone(),
             publisher_staking_contract: req.publisher_staking_contract.clone(),
+            publisher_issued_at: req.submitted_at.timestamp(),
         }
     }
 
@@ -3993,7 +4441,14 @@ mod tests {
             tx_sender,
             p2p_handle,
         );
-        let request = make_signed_request("0x1111111111111111111111111111111111111111");
+        let (chain_id, staking_contract) = {
+            let state = state.read().await;
+            (
+                state.config.chain_id.clone(),
+                state.config.staking_addr.clone(),
+            )
+        };
+        let request = make_signed_request(&chain_id, &staking_contract);
         let canonical = request.id.canonical();
 
         let response = app
@@ -4026,7 +4481,14 @@ mod tests {
             tx_sender,
             p2p_handle,
         );
-        let request = make_signed_request("0x1111111111111111111111111111111111111111");
+        let (chain_id, staking_contract) = {
+            let state = state.read().await;
+            (
+                state.config.chain_id.clone(),
+                state.config.staking_addr.clone(),
+            )
+        };
+        let request = make_signed_request(&chain_id, &staking_contract);
         let canonical = request.id.canonical();
 
         let response = app
@@ -4315,10 +4777,193 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn namespace_lifecycle_route_queues_authenticated_transfer() -> anyhow::Result<()> {
+        let (state, _tempdir, p2p_handle, tx_sender, tx_receiver) = make_test_state(0).await?;
+        let (current, current_pubkey) = make_keypair();
+        let (next, next_pubkey) = make_keypair();
+        let namespace =
+            establish_test_namespace_controller(&state, "lifecycle-route", current_pubkey).await?;
+        let now = chrono::Utc::now();
+        let event = signed_namespace_lifecycle_event(
+            common::NamespaceLifecycleAction::Transfer,
+            &namespace,
+            &current,
+            &next,
+            1,
+            now,
+            now + chrono::Duration::hours(1),
+        );
+        let app = router(
+            state,
+            new_event_bus(),
+            RateLimiter::new(RateLimitConfig::default()),
+            AttestationStore::new(),
+            crate::config::CorsConfig::default(),
+            tx_sender,
+            p2p_handle,
+        );
+
+        let response = app
+            .oneshot(
+                Request::post("/v1/publisher/namespaces/lifecycle")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&event)?))?,
+            )
+            .await?;
+        assert_eq!(response.status(), StatusCode::OK);
+        let queued = tx_receiver
+            .lock()
+            .await
+            .try_recv()
+            .expect("transfer should be queued");
+        match queued {
+            common::Transaction::NamespaceLifecycle(queued) => {
+                assert_eq!(queued.namespace, namespace);
+                assert_eq!(queued.next_controller_ed25519_pubkey, next_pubkey);
+            }
+            other => panic!("expected namespace lifecycle transaction, got {other:?}"),
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn namespace_lifecycle_route_rejects_conflicting_controller_and_replay(
+    ) -> anyhow::Result<()> {
+        let (state, _tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
+        let (controller, controller_pubkey) = make_keypair();
+        let (next, _next_pubkey) = make_keypair();
+        let namespace =
+            establish_test_namespace_controller(&state, "lifecycle-conflict", controller_pubkey)
+                .await?;
+        let (attacker, _attacker_pubkey) = make_keypair();
+        let now = chrono::Utc::now();
+        let unauthorized = signed_namespace_lifecycle_event(
+            common::NamespaceLifecycleAction::Transfer,
+            &namespace,
+            &attacker,
+            &next,
+            1,
+            now,
+            now + chrono::Duration::hours(1),
+        );
+        let valid = signed_namespace_lifecycle_event(
+            common::NamespaceLifecycleAction::Delegate,
+            &namespace,
+            &controller,
+            &next,
+            2,
+            now,
+            now + chrono::Duration::hours(1),
+        );
+        let app = router(
+            state,
+            new_event_bus(),
+            RateLimiter::new(RateLimitConfig::default()),
+            AttestationStore::new(),
+            crate::config::CorsConfig::default(),
+            tx_sender,
+            p2p_handle,
+        );
+
+        let unauthorized_response = app
+            .clone()
+            .oneshot(
+                Request::post("/v1/publisher/namespaces/lifecycle")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&unauthorized)?))?,
+            )
+            .await?;
+        assert_eq!(unauthorized_response.status(), StatusCode::FORBIDDEN);
+
+        let accepted = app
+            .clone()
+            .oneshot(
+                Request::post("/v1/publisher/namespaces/lifecycle")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&valid)?))?,
+            )
+            .await?;
+        assert_eq!(accepted.status(), StatusCode::OK);
+        let replay = app
+            .oneshot(
+                Request::post("/v1/publisher/namespaces/lifecycle")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&valid)?))?,
+            )
+            .await?;
+        assert_eq!(replay.status(), StatusCode::CONFLICT);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn namespace_lifecycle_route_rejects_expired_and_unverified_recovery(
+    ) -> anyhow::Result<()> {
+        let (state, _tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
+        let (current, current_pubkey) = make_keypair();
+        let (next, _next_pubkey) = make_keypair();
+        let namespace =
+            establish_test_namespace_controller(&state, "lifecycle-expiry", current_pubkey).await?;
+        let now = chrono::Utc::now();
+        let expired = signed_namespace_lifecycle_event(
+            common::NamespaceLifecycleAction::Transfer,
+            &namespace,
+            &current,
+            &next,
+            1,
+            now - chrono::Duration::hours(2),
+            now - chrono::Duration::hours(1),
+        );
+        let recovery = signed_namespace_lifecycle_event(
+            common::NamespaceLifecycleAction::Recover,
+            &namespace,
+            &current,
+            &next,
+            2,
+            now,
+            now + chrono::Duration::hours(1),
+        );
+        let app = router(
+            state,
+            new_event_bus(),
+            RateLimiter::new(RateLimitConfig::default()),
+            AttestationStore::new(),
+            crate::config::CorsConfig::default(),
+            tx_sender,
+            p2p_handle,
+        );
+
+        let expired_response = app
+            .clone()
+            .oneshot(
+                Request::post("/v1/publisher/namespaces/lifecycle")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&expired)?))?,
+            )
+            .await?;
+        assert_eq!(expired_response.status(), StatusCode::BAD_REQUEST);
+        let recovery_response = app
+            .oneshot(
+                Request::post("/v1/publisher/namespaces/lifecycle")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&recovery)?))?,
+            )
+            .await?;
+        assert_eq!(recovery_response.status(), StatusCode::CONFLICT);
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn grpc_submit_package_rejects_unstaked_publishers() -> anyhow::Result<()> {
         let (state, _tempdir, _p2p_handle, _tx_sender, _tx_receiver) = make_test_state(0).await?;
         let service = crate::grpc::server::MyRegistry::new(state.clone());
-        let publish_req = make_signed_request("0x1111111111111111111111111111111111111111");
+        let (chain_id, staking_contract) = {
+            let state = state.read().await;
+            (
+                state.config.chain_id.clone(),
+                state.config.staking_addr.clone(),
+            )
+        };
+        let publish_req = make_signed_request(&chain_id, &staking_contract);
         let canonical = publish_req.id.canonical();
         let result = service
             .submit_package(GrpcRequest::new(make_submit_request(&publish_req)))
@@ -4328,6 +4973,31 @@ mod tests {
         assert_eq!(status.code(), Code::PermissionDenied);
         assert!(status.message().contains("has no on-chain stake"));
         assert!(!state.read().await.pending_pool.contains(&canonical));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn grpc_dual_key_proof_requires_signed_issued_at() -> anyhow::Result<()> {
+        let (state, _tempdir, _p2p_handle, _tx_sender, _tx_receiver) = make_test_state(0).await?;
+        let service = crate::grpc::server::MyRegistry::new(state.clone());
+        let (chain_id, staking_contract) = {
+            let state = state.read().await;
+            (
+                state.config.chain_id.clone(),
+                state.config.staking_addr.clone(),
+            )
+        };
+        let publish_req = make_signed_request(&chain_id, &staking_contract);
+        let mut grpc_req = make_submit_request(&publish_req);
+        grpc_req.publisher_issued_at = 0;
+
+        let status = service
+            .submit_package(GrpcRequest::new(grpc_req))
+            .await
+            .expect_err("a dual-key proof without its signed issued-at must fail closed");
+        assert_eq!(status.code(), Code::InvalidArgument);
+        assert!(status.message().contains("publisher_issued_at is required"));
 
         Ok(())
     }

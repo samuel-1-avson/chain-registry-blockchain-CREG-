@@ -84,10 +84,12 @@ environment, an authorized operator must:
 - The bridge's legacy code remains available only behind explicit development
   flags for research; it is not a production checkpoint protocol.
 - Publisher identity, namespace ownership, liability locking, pause recovery,
-  committee selection, and freshness protection remain open Phase 1–5 work.
-- Added regression tests have not yet run because the local environment lacks
-  Foundry and Cargo execution was previously unreliable. The implementation is
-  not marked fixed until those tests run in a pinned toolchain environment.
+  committee authority, and freshness protection remain incomplete Phase 1–5
+  work; implemented controls and their residual rollout dependencies are kept
+  current in the master tracker.
+- Rust and Arena regression suites now have captured local passing evidence.
+  Foundry verification and independent review remain outstanding, and no
+  finding is marked fixed solely from a working-tree test result.
 
 ## Required documentation set
 

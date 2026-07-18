@@ -1,7 +1,7 @@
 # Chain Registry (CREG) Technical Whitepaper
 
 > Version: 0.3.0-public-alpha  
-> Date: 2026-06-26  
+> Date: 2026-07-18\
 > Network: `creg-testnet-1` on Ethereum Sepolia  
 > Status: Public alpha testnet, not mainnet  
 > Related resources: Public testnet quickstart, Phase scope definitions, Readiness gates status, CREG_SYSTEM_WORKFLOW.md
@@ -32,7 +32,11 @@ At scale (thousands of validators), full redundant analysis would be impractical
 
 This design bounds CPU, memory, and IPFS load while preserving the core security property: package approval still requires a quorum of staked validators who produced reproducible, evidence-bound votes. The full validator set continues to provide PBFT block finality and L1 economic security.
 
-**Public alpha caveat:** Committee metadata is computed and published at admission, but the current node implementation also uses a separate hash-based analysis sampler (`should_perform_full_analysis`) when the validator set is large. The `is_mandatory` vote flag follows that sampler today, not committee membership alone. Full alignment is open work (DOC-303 in [REMEDIATION_BACKLOG.md](./REMEDIATION_BACKLOG.md)).
+**Public alpha caveat:** Committee metadata is computed once at admission, persisted with the pending package, and reused by the expensive-analysis pipeline; validators no longer apply a second independent sampling predicate. Certified mode still requires a published checkpoint, a live multi-operator rehearsal, and external review before it can be represented as production-ready.
+
+**Certified committee authority:** A new validator set is accepted only through a transition signed by a distinct prior-set quorum (`floor(2n/3)+1`). The certificate binds the effective height, prior block/fork anchor, both validator-set hashes, and the next set. A committee assignment binds that certificate digest, snapshot hash and height, selection randomness, seed, and ordered members; receivers derive the expected randomness from the exact anchor block's VRF output (or its hash fallback) and recompute the assignment rather than trusting the admitting node. Conflicting, replayed, expired, or fork-substituted authority records are rejected. Signed transition certificates propagate peer-to-peer, but every recipient validates the prior-set quorum and local continuity before accepting the gossip for propagation or persistence.
+
+**Weak subjectivity:** A fresh or rebuilt node may be configured with a known-good signed validator-set checkpoint. Once configured, committee authority is accepted only from a cryptographically continuous certificate history containing that exact checkpoint. Nodes can retrieve certified history from peers, but prevalidate the complete bounded timeline from bootstrap authority, compare canonical block anchors, and persist only an eligible fully validated prefix. History writes are serialized, checkpoint ancestry is retained beyond the compatibility pruning cap, and reorg recovery truncates certificates anchored beyond the canonical ancestor. This is a deployment trust anchor, not a centralized validator role. `CREG_REQUIRE_CERTIFIED_COMMITTEES=true` enables fail-closed admission when no checkpoint-anchored authority exists. The public alpha has not yet published a real independently verified checkpoint or completed the live multi-operator long-range/reorg rehearsal; this mode is therefore a readiness control, not a claim that testnet security is complete.
 
 Committee selection at admission uses VRF-seeded deterministic ordering further biased by on-chain stake, reputation, and **performance_score** (a moving-average signal of demonstrated analysis reliability, with decay after repeated contributions). The full `AnalysisCommittee` (including `member_performance_at_finalization` snapshot captured at package finalization) is stored immutably in the `ChainRecord` and exposed via CLI (`creg chain-record`) and API. On Verified finalization the pipeline emits `distributeWorkRewards(..., isMandatory[])` to `ValidatorRewards.sol`; successful emission also applies a small performance boost to mandatory participants, closing the incentive/selection feedback loop. Points awarded per contribution are 25 (mandatory) or 10 (voluntary) base, ×1.2 for correct vote, ×(rep/100). Base per-package reward is deliberately low (0.00001 CREG) with correct-vote bonus.
 
@@ -719,7 +723,7 @@ ZK is powerful but security-sensitive. The current public alpha treats ZK as act
 | Novel malware missed by scanners | Reduced by defense in depth; not eliminated |
 | L1 contract bug before audit | SEC-401 external audit is open; targeted hardenings applied (ZK content-limb binding + assert, enforceFinalizeRelays default true, bridge parse robustness + safety, Batch notes) |
 | ZK circuit or trusted setup flaw | Requires dedicated ZK audit and key-management review; circuit now binds content/manifest hashes; on-chain assert strengthened to match |
-| Long-range sync attacks | Historical validator-set verification remains a hardening item |
+| Long-range sync attacks | Signed transition history, exact checkpoint matching, canonical-anchor checks, and fail-closed certified mode are implemented; a real published checkpoint and live multi-operator long-range/reorg rehearsal remain required |
 | IPFS unavailability | Requires redundant pinning and monitoring; PinningRewards + sidecar status now active |
 | Legal/regulatory uncertainty | Requires jurisdiction-specific review before token or mainnet programs |
 

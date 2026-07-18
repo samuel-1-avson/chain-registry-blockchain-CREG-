@@ -74,6 +74,30 @@ fn validate_pbft_phase_message(
     })
 }
 
+fn validate_pbft_pre_prepare_block(
+    block: &common::Block,
+    validator_set: &common::ValidatorSet,
+    tip_height: u64,
+    tip_hash: &str,
+) -> anyhow::Result<()> {
+    if block.header.height != tip_height.saturating_add(1) {
+        anyhow::bail!("PBFT proposal is not for the next canonical height");
+    }
+    if block.header.prev_hash != tip_hash {
+        anyhow::bail!("PBFT proposal does not extend the canonical tip");
+    }
+    if block.header.validator_set_hash != common::canonical_validator_set_hash(validator_set) {
+        anyhow::bail!("PBFT proposal commits to the wrong validator set");
+    }
+    if block.header.merkle_root != common::merkle_root(&block.transactions) {
+        anyhow::bail!("PBFT proposal has an invalid transaction Merkle root");
+    }
+    if block.header.vrf_output.is_some() != block.header.vrf_proof.is_some() {
+        anyhow::bail!("PBFT proposal must carry both VRF output and proof or neither");
+    }
+    Ok(())
+}
+
 fn report_pbft_validation_failure(
     phase: &str,
     validator_id: &str,
@@ -91,7 +115,11 @@ fn report_pbft_validation_failure(
 
 /// Helper to sign a PBFT phase message (prepare/commit) using our key.
 /// Returns (signature_hex, pubkey_hex). Logs on failure in caller.
-fn sign_pbft_phase(sk: &ed25519_dalek::SigningKey, phase: &str, block_hash: &str) -> (String, String) {
+fn sign_pbft_phase(
+    sk: &ed25519_dalek::SigningKey,
+    phase: &str,
+    block_hash: &str,
+) -> (String, String) {
     use ed25519_dalek::Signer;
     let message = consensus::pbft::pbft_signature_message(phase, block_hash);
     let signature = hex::encode(sk.sign(message.as_bytes()).to_bytes());
@@ -133,7 +161,14 @@ fn validate_vote_gossip_message(
         return Err(VoteValidationError::MissingConsensusEvidence);
     }
 
-    if !vote.approved && vote.reject_reason.as_deref().unwrap_or("").trim().is_empty() {
+    if !vote.approved
+        && vote
+            .reject_reason
+            .as_deref()
+            .unwrap_or("")
+            .trim()
+            .is_empty()
+    {
         // Treat reject without reason as non-grade to avoid silent fallbacks (addresses gossip signature/reason issues)
         return Err(VoteValidationError::MissingConsensusEvidence);
     }
@@ -171,7 +206,10 @@ fn vote_gossip_to_signature(vote: &crate::gossip::VoteGossip) -> common::Validat
             common::ValidatorVote::Approve
         } else {
             common::ValidatorVote::Reject {
-                reason: vote.reject_reason.clone().unwrap_or_else(|| "no reason provided".to_string()),
+                reason: vote
+                    .reject_reason
+                    .clone()
+                    .unwrap_or_else(|| "no reason provided".to_string()),
             }
         },
         signed_at: chrono::Utc::now(),
@@ -212,6 +250,53 @@ fn report_validation_result(
             "P2P: failed to report gossipsub message validation result"
         );
     }
+}
+
+fn requires_payload_validation_before_acceptance(topic: &str) -> bool {
+    topic.contains("votes") || topic.contains("validator-set-transitions")
+}
+
+fn transition_persistence_failure_acceptance(
+    error: &anyhow::Error,
+) -> gossipsub::MessageAcceptance {
+    if error
+        .chain()
+        .any(|cause| cause.downcast_ref::<std::io::Error>().is_some())
+    {
+        // A receiver-side filesystem failure is not evidence that the sender
+        // supplied an invalid transition, so do not penalize the peer.
+        gossipsub::MessageAcceptance::Ignore
+    } else {
+        // Certificate, continuity, replay, and same-height conflict failures
+        // are attributable to the received payload.
+        gossipsub::MessageAcceptance::Reject
+    }
+}
+
+fn validate_and_persist_transition(
+    data_dir: &std::path::Path,
+    snapshot: common::AuthenticatedValidatorSetSnapshot,
+    previous: &common::ValidatorSet,
+    tip_height: u64,
+    tip_hash: &str,
+    checkpoint: Option<&common::AuthenticatedValidatorSetSnapshot>,
+) -> anyhow::Result<()> {
+    if let Some(checkpoint) = checkpoint {
+        let is_checkpoint = common::validator_snapshot_certificate_hash(&snapshot)
+            == common::validator_snapshot_certificate_hash(checkpoint);
+        let descends_from_checkpoint =
+            crate::validator_set_history::authenticated_at_from_checkpoint(
+                data_dir,
+                snapshot.effective_from_height.saturating_sub(1),
+                checkpoint,
+            )
+            .is_some();
+        if !is_checkpoint && !descends_from_checkpoint {
+            anyhow::bail!("validator-set transition is outside the configured checkpoint history");
+        }
+    }
+    crate::validator_set_history::validate_transition_at_tip(&snapshot, tip_height, tip_hash)?;
+    crate::validator_set_history::record_authenticated(data_dir, snapshot, previous)
 }
 
 /// Combined P2P behaviour.
@@ -321,6 +406,9 @@ impl P2PNode {
         let vrf_proofs_topic = gossipsub::IdentTopic::new("creg/v1/vrf-proofs");
         let validators_topic =
             gossipsub::IdentTopic::new(crate::validator_registry_gossip::REGISTRATION_TOPIC);
+        let validator_set_transitions_topic = gossipsub::IdentTopic::new(
+            crate::validator_registry_gossip::VALIDATOR_SET_TRANSITIONS_TOPIC,
+        );
 
         self.swarm
             .behaviour_mut()
@@ -342,6 +430,10 @@ impl P2PNode {
             .behaviour_mut()
             .gossipsub
             .subscribe(&validators_topic)?;
+        self.swarm
+            .behaviour_mut()
+            .gossipsub
+            .subscribe(&validator_set_transitions_topic)?;
 
         loop {
             tokio::select! {
@@ -418,7 +510,7 @@ impl P2PNode {
                             continue;
                         }
 
-                        if !topic_str.contains("votes") {
+                        if !requires_payload_validation_before_acceptance(topic_str) {
                             report_validation_result(
                                 &mut self.swarm,
                                 &id,
@@ -446,13 +538,37 @@ impl P2PNode {
                                                 .ok()
                                                 .flatten()
                                                 .and_then(|b| b.header.vrf_output.clone());
-                                            let committee = crate::package_admission::compute_analysis_committee_at_admission(
-                                                &s.validator_set,
-                                                &canonical,
-                                                &req.content_hash,
-                                                tip,
-                                                recent_vrf,
-                                            );
+                                            let selection_randomness = recent_vrf.clone().unwrap_or_else(|| tip.clone());
+                                            let next_height = s.chain.tip_height().unwrap_or(0).saturating_add(1);
+                                            let certified = crate::validator_set_history::committee_authority_at(
+                                                &s.config.data_dir,
+                                                next_height,
+                                            ).ok().flatten().filter(|snapshot| {
+                                                snapshot.validator_set_hash
+                                                    == common::canonical_validator_set_hash(&s.validator_set)
+                                            });
+                                            let committee = match certified {
+                                                Some(snapshot) => crate::package_admission::compute_analysis_committee_for_authenticated_snapshot(
+                                                    &snapshot,
+                                                    &canonical,
+                                                    &req.content_hash,
+                                                    selection_randomness,
+                                                ),
+                                                None => crate::package_admission::compute_analysis_committee_at_admission(
+                                                    &s.validator_set,
+                                                    &canonical,
+                                                    &req.content_hash,
+                                                    tip,
+                                                    recent_vrf,
+                                                ),
+                                            };
+                                            if crate::validator_set_history::certified_committees_required()
+                                                && committee.validator_snapshot_certificate_hash.is_empty()
+                                            {
+                                                s.pending_pool.remove(&canonical);
+                                                tracing::warn!("P2P: dropping {} because certified committee authority is required", canonical);
+                                                continue;
+                                            }
                                             s.pending_pool.set_analysis_committee(&canonical, committee);
                                             tracing::info!("Received {} via gossip", canonical);
                                         }
@@ -512,6 +628,83 @@ impl P2PNode {
                                     Err((_, e)) => {
                                         tracing::debug!("Dropped gossiped validator registration for {}: {}", proof.node_id, e);
                                     }
+                                }
+                            }
+                            continue;
+                        }
+                        if topic_str.contains("validator-set-transitions") {
+                            let snapshot = match serde_json::from_slice(&message.data) {
+                                Ok(common::GossipMessage::ValidatorSetTransition { snapshot }) => {
+                                    snapshot
+                                }
+                                Ok(_) | Err(_) => {
+                                    report_validation_result(
+                                        &mut self.swarm,
+                                        &id,
+                                        &peer_id,
+                                        gossipsub::MessageAcceptance::Reject,
+                                    );
+                                    tracing::warn!(
+                                        message_id = %id,
+                                        peer = %peer_id,
+                                        "P2P: rejected malformed validator-set transition gossip"
+                                    );
+                                    continue;
+                                }
+                            };
+
+                            let (data_dir, tip_height, tip_hash, previous) = {
+                                let s = state.read().await;
+                                (
+                                    s.config.data_dir.clone(),
+                                    s.chain.tip_height().unwrap_or(0),
+                                    s.chain.tip_hash().unwrap_or_default(),
+                                    crate::validator_set_history::set_at(
+                                        &s.config.data_dir,
+                                        snapshot.effective_from_height.saturating_sub(1),
+                                    )
+                                    .unwrap_or_else(|| s.validator_set.clone()),
+                                )
+                            };
+                            let checkpoint = match crate::validator_set_history::checkpoint_from_env() {
+                                Ok(checkpoint) => checkpoint,
+                                Err(error) => {
+                                    report_validation_result(
+                                        &mut self.swarm,
+                                        &id,
+                                        &peer_id,
+                                        gossipsub::MessageAcceptance::Ignore,
+                                    );
+                                    tracing::error!("Dropped validator-set transition: invalid weak-subjectivity checkpoint: {error}");
+                                    continue;
+                                }
+                            };
+                            match validate_and_persist_transition(
+                                &data_dir,
+                                snapshot,
+                                &previous,
+                                tip_height,
+                                &tip_hash,
+                                checkpoint.as_ref(),
+                            ) {
+                                Ok(()) => {
+                                    report_validation_result(
+                                        &mut self.swarm,
+                                        &id,
+                                        &peer_id,
+                                        gossipsub::MessageAcceptance::Accept,
+                                    );
+                                }
+                                Err(error) => {
+                                    let acceptance =
+                                        transition_persistence_failure_acceptance(&error);
+                                    report_validation_result(
+                                        &mut self.swarm,
+                                        &id,
+                                        &peer_id,
+                                        acceptance,
+                                    );
+                                    tracing::debug!("Dropped validator-set transition gossip: {error}");
                                 }
                             }
                             continue;
@@ -650,6 +843,21 @@ impl P2PNode {
                                     common::GossipMessage::PbftPrePrepare { block } => {
                                         let mut s = state.write().await;
                                         let vs = s.validator_set.clone();
+                                        let tip_height = s.chain.tip_height().unwrap_or(0);
+                                        let tip_hash = s.chain.tip_hash().unwrap_or_default();
+                                        if let Err(error) = validate_pbft_pre_prepare_block(
+                                            &block,
+                                            &vs,
+                                            tip_height,
+                                            &tip_hash,
+                                        ) {
+                                            tracing::warn!(
+                                                peer = %peer_id,
+                                                error = %error,
+                                                "Rejected invalid PBFT pre-prepare block"
+                                            );
+                                            continue;
+                                        }
                                         if let Err(e) = s.pbft_engine.start_round(block.clone(), vs.into()) {
                                             tracing::warn!("Failed to start PBFT round: {}", e);
                                         } else {
@@ -913,6 +1121,37 @@ mod tests {
         }
     }
 
+    fn signed_transition(
+        validator_set: &common::ValidatorSet,
+        signing_keys: &[SigningKey],
+        signer_indexes: &[usize],
+        effective_from_height: u64,
+        previous_block_hash: String,
+    ) -> common::AuthenticatedValidatorSetSnapshot {
+        let mut transition = common::AuthenticatedValidatorSetSnapshot {
+            schema_version: common::VALIDATOR_SNAPSHOT_SCHEMA_VERSION,
+            effective_from_height,
+            previous_block_hash,
+            previous_validator_set_hash: common::canonical_validator_set_hash(validator_set),
+            validators: validator_set.clone(),
+            validator_set_hash: common::canonical_validator_set_hash(validator_set),
+            transition_signatures: Vec::new(),
+        };
+        let message = common::validator_set_transition_message(&transition);
+        for index in signer_indexes {
+            let validator = &validator_set.validators[*index];
+            let signing_key = &signing_keys[*index];
+            transition
+                .transition_signatures
+                .push(common::ValidatorSetTransitionSignature {
+                    validator_id: validator.id.clone(),
+                    validator_pubkey: validator.pubkey.clone(),
+                    signature: hex::encode(signing_key.sign(message.as_bytes()).to_bytes()),
+                });
+        }
+        transition
+    }
+
     fn signed_vote(
         validator_id: &str,
         signing_key: &SigningKey,
@@ -960,7 +1199,9 @@ mod tests {
         validator_set: common::ValidatorSet,
     ) -> anyhow::Result<crate::SharedState> {
         let tempdir = tempfile::tempdir()?;
-        let chain = crate::chain_store::ChainStore::open(tempdir.path())?;
+        let data_dir = tempdir.keep();
+        let chain = crate::chain_store::ChainStore::open(&data_dir)?;
+        crate::validator_set_history::record(&data_dir, 0, &validator_set)?;
 
         Ok(Arc::new(RwLock::new(crate::NodeState {
             chain,
@@ -971,7 +1212,7 @@ mod tests {
             package_rounds: HashMap::new(),
             package_committees: HashMap::new(),
             config: crate::config::NodeConfig {
-                data_dir: tempdir.keep(),
+                data_dir,
                 ..Default::default()
             },
             p2p_status: crate::P2PStatus::default(),
@@ -994,6 +1235,153 @@ mod tests {
             rewards_pool_balance: 0,
             last_incentives_refresh: None,
         })))
+    }
+
+    #[test]
+    fn validator_set_transition_acceptance_is_deferred_until_validation() {
+        assert!(requires_payload_validation_before_acceptance(
+            "creg/v1/validator-set-transitions"
+        ));
+        assert!(requires_payload_validation_before_acceptance(
+            "creg/v1/votes"
+        ));
+        assert!(!requires_payload_validation_before_acceptance(
+            "creg/v1/blocks"
+        ));
+    }
+
+    #[test]
+    fn transition_payload_failures_reject_but_local_io_failures_do_not() {
+        let conflicting =
+            anyhow::anyhow!("conflicting validator-set transition at the same effective height");
+        assert!(matches!(
+            transition_persistence_failure_acceptance(&conflicting),
+            gossipsub::MessageAcceptance::Reject
+        ));
+
+        let io_error = anyhow::Error::new(std::io::Error::other("disk unavailable"));
+        assert!(matches!(
+            transition_persistence_failure_acceptance(&io_error),
+            gossipsub::MessageAcceptance::Ignore
+        ));
+    }
+
+    #[test]
+    fn transition_receiver_rejects_stale_fork_conflict_checkpoint_and_invalid_quorum(
+    ) -> anyhow::Result<()> {
+        let signing_keys: Vec<_> = (1u8..=4)
+            .map(|seed| SigningKey::from_bytes(&[seed; 32]))
+            .collect();
+        let validator_set = common::ValidatorSet::new(
+            signing_keys
+                .iter()
+                .enumerate()
+                .map(|(index, key)| validator(&format!("node-{}", index + 1), key))
+                .collect(),
+        );
+        let dir = tempfile::tempdir()?;
+        crate::validator_set_history::record(dir.path(), 0, &validator_set)?;
+        let tip_hash = common::Block::genesis().hash();
+        let valid = signed_transition(
+            &validator_set,
+            &signing_keys,
+            &[0, 1, 2],
+            1,
+            tip_hash.clone(),
+        );
+
+        validate_and_persist_transition(
+            dir.path(),
+            valid.clone(),
+            &validator_set,
+            0,
+            &tip_hash,
+            None,
+        )?;
+        validate_and_persist_transition(
+            dir.path(),
+            valid.clone(),
+            &validator_set,
+            0,
+            &tip_hash,
+            None,
+        )?; // exact idempotent replay
+
+        let stale = signed_transition(
+            &validator_set,
+            &signing_keys,
+            &[0, 1, 2],
+            2,
+            tip_hash.clone(),
+        );
+        assert!(validate_and_persist_transition(
+            dir.path(),
+            stale,
+            &validator_set,
+            0,
+            &tip_hash,
+            None,
+        )
+        .is_err());
+
+        let wrong_fork =
+            signed_transition(&validator_set, &signing_keys, &[0, 1, 2], 1, "f".repeat(64));
+        assert!(validate_and_persist_transition(
+            dir.path(),
+            wrong_fork.clone(),
+            &validator_set,
+            0,
+            &tip_hash,
+            None,
+        )
+        .is_err());
+        assert!(validate_and_persist_transition(
+            dir.path(),
+            valid.clone(),
+            &validator_set,
+            0,
+            &tip_hash,
+            Some(&wrong_fork),
+        )
+        .is_err());
+
+        let insufficient_quorum =
+            signed_transition(&validator_set, &signing_keys, &[0, 1], 1, tip_hash.clone());
+        assert!(validate_and_persist_transition(
+            dir.path(),
+            insufficient_quorum,
+            &validator_set,
+            0,
+            &tip_hash,
+            None,
+        )
+        .is_err());
+
+        let conflicting_certificate = signed_transition(
+            &validator_set,
+            &signing_keys,
+            &[1, 2, 3],
+            1,
+            tip_hash.clone(),
+        );
+        assert!(validate_and_persist_transition(
+            dir.path(),
+            conflicting_certificate,
+            &validator_set,
+            0,
+            &tip_hash,
+            None,
+        )
+        .is_err());
+
+        assert_eq!(
+            common::validator_snapshot_certificate_hash(
+                &crate::validator_set_history::authenticated_at(dir.path(), 1)
+                    .expect("original transition remains authoritative")
+            ),
+            common::validator_snapshot_certificate_hash(&valid)
+        );
+        Ok(())
     }
 
     #[test]
@@ -1078,8 +1466,7 @@ mod tests {
     #[test]
     fn validate_pbft_prepare_accepts_domain_separated_signature() {
         let signing_key = SigningKey::from_bytes(&[9u8; 32]);
-        let validator_set =
-            common::ValidatorSet::new(vec![validator("node-pbft", &signing_key)]);
+        let validator_set = common::ValidatorSet::new(vec![validator("node-pbft", &signing_key)]);
         let block_hash = "abc123blockhash";
         let signature = pbft_phase_signature("prepare", block_hash, &signing_key);
 
@@ -1097,10 +1484,51 @@ mod tests {
     }
 
     #[test]
+    fn validate_pbft_pre_prepare_binds_tip_height_merkle_and_validator_authority() {
+        let signing_key = SigningKey::from_bytes(&[9u8; 32]);
+        let validator_set = common::ValidatorSet::new(vec![validator("node-pbft", &signing_key)]);
+        let tip_hash = common::Block::genesis().hash();
+        let block = common::Block {
+            header: common::BlockHeader {
+                height: 1,
+                prev_hash: tip_hash.clone(),
+                merkle_root: common::merkle_root(&[]),
+                proposer_id: "node-pbft".into(),
+                timestamp: chrono::Utc::now(),
+                validator_set_hash: common::canonical_validator_set_hash(&validator_set),
+                vrf_output: None,
+                vrf_proof: None,
+            },
+            transactions: Vec::new(),
+            pbft_signatures: Vec::new(),
+        };
+        validate_pbft_pre_prepare_block(&block, &validator_set, 0, &tip_hash)
+            .expect("canonical next-height proposal is structurally valid");
+
+        let mut wrong_fork = block.clone();
+        wrong_fork.header.prev_hash = "f".repeat(64);
+        assert!(
+            validate_pbft_pre_prepare_block(&wrong_fork, &validator_set, 0, &tip_hash).is_err()
+        );
+
+        let mut wrong_authority = block.clone();
+        wrong_authority.header.validator_set_hash = "e".repeat(64);
+        assert!(
+            validate_pbft_pre_prepare_block(&wrong_authority, &validator_set, 0, &tip_hash)
+                .is_err()
+        );
+
+        let mut wrong_merkle = block;
+        wrong_merkle.header.merkle_root = "d".repeat(64);
+        assert!(
+            validate_pbft_pre_prepare_block(&wrong_merkle, &validator_set, 0, &tip_hash).is_err()
+        );
+    }
+
+    #[test]
     fn validate_pbft_prepare_rejects_wrong_signature_domain() {
         let signing_key = SigningKey::from_bytes(&[9u8; 32]);
-        let validator_set =
-            common::ValidatorSet::new(vec![validator("node-pbft", &signing_key)]);
+        let validator_set = common::ValidatorSet::new(vec![validator("node-pbft", &signing_key)]);
         let block_hash = "abc123blockhash";
         // Signed for "commit" but presented as "prepare".
         let wrong_domain_sig = pbft_phase_signature("commit", block_hash, &signing_key);
@@ -1120,8 +1548,7 @@ mod tests {
     #[test]
     fn validate_pbft_commit_rejects_unknown_validator() {
         let signing_key = SigningKey::from_bytes(&[9u8; 32]);
-        let validator_set =
-            common::ValidatorSet::new(vec![validator("node-pbft", &signing_key)]);
+        let validator_set = common::ValidatorSet::new(vec![validator("node-pbft", &signing_key)]);
         let signature = pbft_phase_signature("commit", "block-1", &signing_key);
 
         let error = validate_pbft_phase_message(
@@ -1139,17 +1566,11 @@ mod tests {
     #[test]
     fn validate_pbft_prepare_rejects_invalid_signature_hex() {
         let signing_key = SigningKey::from_bytes(&[9u8; 32]);
-        let validator_set =
-            common::ValidatorSet::new(vec![validator("node-pbft", &signing_key)]);
+        let validator_set = common::ValidatorSet::new(vec![validator("node-pbft", &signing_key)]);
 
-        let error = validate_pbft_phase_message(
-            &validator_set,
-            "prepare",
-            "block-1",
-            "node-pbft",
-            "zzzz",
-        )
-        .unwrap_err();
+        let error =
+            validate_pbft_phase_message(&validator_set, "prepare", "block-1", "node-pbft", "zzzz")
+                .unwrap_err();
 
         assert_eq!(error, PbftValidationError::SignatureVerificationFailed);
     }
@@ -1247,6 +1668,79 @@ mod tests {
         })
         .await
         .expect("gossipsub vote should reach the peer within the timeout");
+
+        task_a.abort();
+        task_b.abort();
+        let _ = task_a.await;
+        let _ = task_b.await;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn gossipsub_signed_transition_is_independently_persisted_by_peer() -> anyhow::Result<()>
+    {
+        let signing_keys: Vec<_> = (1u8..=4)
+            .map(|seed| SigningKey::from_bytes(&[seed; 32]))
+            .collect();
+        let validator_set = common::ValidatorSet::new(
+            signing_keys
+                .iter()
+                .enumerate()
+                .map(|(index, key)| validator(&format!("node-{}", index + 1), key))
+                .collect(),
+        );
+        let state_a = make_test_state(validator_set.clone()).await?;
+        let state_b = make_test_state(validator_set.clone()).await?;
+        let anchor_hash = { state_a.read().await.chain.tip_hash()? };
+        let transition =
+            signed_transition(&validator_set, &signing_keys, &[0, 1, 2], 1, anchor_hash);
+
+        let listen_addr_a = reserve_listen_addr();
+        let listen_addr_b = reserve_listen_addr();
+        let (node_a, handle_a) = P2PNode::new(&listen_addr_a)?;
+        let (node_b, _handle_b) = P2PNode::new(&listen_addr_b)?;
+        let event_bus_a = crate::events::new_event_bus();
+        let event_bus_b = crate::events::new_event_bus();
+        let receiver_data_dir = state_b.read().await.config.data_dir.clone();
+
+        let task_a = tokio::spawn(node_a.run(state_a, event_bus_a));
+        let task_b = tokio::spawn(node_b.run(state_b, event_bus_b));
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        handle_a
+            .sender
+            .send(P2PCommand::Dial {
+                addr: listen_addr_b.parse()?,
+            })
+            .await?;
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        handle_a
+            .sender
+            .send(P2PCommand::Broadcast {
+                topic: crate::validator_registry_gossip::VALIDATOR_SET_TRANSITIONS_TOPIC.into(),
+                data: serde_json::to_vec(&common::GossipMessage::ValidatorSetTransition {
+                    snapshot: transition.clone(),
+                })?,
+            })
+            .await?;
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(received) =
+                    crate::validator_set_history::authenticated_at(&receiver_data_dir, 1)
+                {
+                    assert_eq!(
+                        common::validator_snapshot_certificate_hash(&received),
+                        common::validator_snapshot_certificate_hash(&transition)
+                    );
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .expect("signed transition should reach and be persisted by the peer");
 
         task_a.abort();
         task_b.abort();

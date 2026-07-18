@@ -117,7 +117,7 @@ This repository follows the same pattern as other open blockchains: **protocol c
 
 | Document | Purpose |
 |----------|---------|
-| [docs/TESTNET_SCALE_ARCHITECTURE.md](docs/TESTNET_SCALE_ARCHITECTURE.md) | **10k+ validator testnet topology** |
+| [docs/TESTNET_SCALE_ARCHITECTURE.md](docs/TESTNET_SCALE_ARCHITECTURE.md) | Future scale-topology design — not a current deployment claim |
 | [docs/WHAT_TO_DO_NEXT.md](docs/WHAT_TO_DO_NEXT.md) | **Maintainers** — test system, waitlist, Arena, validator onboarding |
 | [docs/PUBLIC.md](docs/PUBLIC.md) | Public-facing protocol index |
 | [docs/README.md](docs/README.md) | Full maintainer doc index |

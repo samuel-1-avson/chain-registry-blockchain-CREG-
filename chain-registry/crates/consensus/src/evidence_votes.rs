@@ -38,11 +38,15 @@ fn consensus_profile_key(sig: &ValidatorSignature) -> Option<String> {
 
 pub fn aggregate_evidence_votes(
     signatures: &[ValidatorSignature],
-    committee: &AnalysisCommittee,   // Hybrid: use committee instead of raw assigned_count
+    committee: &AnalysisCommittee, // Hybrid: use committee instead of raw assigned_count
 ) -> Option<EvidenceVoteOutcome> {
-    let m = committee.size;                    // primary mandatory target
+    let m = committee.size; // primary mandatory target
     let mandatory_quorum = (2 * m / 3) + 1;
-    let effective = if committee.effective_size > 0 { committee.effective_size } else { m };
+    let effective = if committee.effective_size > 0 {
+        committee.effective_size
+    } else {
+        m
+    };
 
     let mut seen_indices = HashMap::new();
     let mut unique_votes = Vec::new();
@@ -61,7 +65,8 @@ pub fn aggregate_evidence_votes(
         }
     }
 
-    let mut mandatory_approvals_by_profile: HashMap<String, Vec<ValidatorSignature>> = HashMap::new();
+    let mut mandatory_approvals_by_profile: HashMap<String, Vec<ValidatorSignature>> =
+        HashMap::new();
     let mut voluntary_approvals: Vec<ValidatorSignature> = Vec::new();
     let mut rejections = Vec::new();
 
@@ -75,7 +80,9 @@ pub fn aggregate_evidence_votes(
         match &sig.vote {
             ValidatorVote::Approve => {
                 if sig.is_mandatory && is_in_committee {
-                    let approvals = mandatory_approvals_by_profile.entry(profile_key).or_default();
+                    let approvals = mandatory_approvals_by_profile
+                        .entry(profile_key)
+                        .or_default();
                     approvals.push(sig.clone());
                     if approvals.len() >= mandatory_quorum as usize {
                         // Success: return mandatory + any voluntary for the record
@@ -113,8 +120,16 @@ fn is_in_effective_committee(sig: &ValidatorSignature, committee: &AnalysisCommi
     if committee.members.is_empty() {
         return true; // fallback for small sets / tests
     }
-    let limit = if committee.effective_size > 0 { committee.effective_size } else { committee.size };
-    committee.members.iter().take(limit as usize).any(|id| id == &sig.validator_id)
+    let limit = if committee.effective_size > 0 {
+        committee.effective_size
+    } else {
+        committee.size
+    };
+    committee
+        .members
+        .iter()
+        .take(limit as usize)
+        .any(|id| id == &sig.validator_id)
 }
 
 #[cfg(test)]
@@ -123,7 +138,12 @@ mod tests {
     use chrono::Utc;
     use common::{ValidatorSignature, ValidatorVote};
 
-    fn sig(id: &str, vote: ValidatorVote, model_version: &str, is_mand: bool) -> ValidatorSignature {
+    fn sig(
+        id: &str,
+        vote: ValidatorVote,
+        model_version: &str,
+        is_mand: bool,
+    ) -> ValidatorSignature {
         let analysis_bundles = common::AnalysisBundleRefs {
             policy_bundle_id: "policy-v1".into(),
             feature_schema_id: "features-v1".into(),
@@ -264,7 +284,9 @@ mod tests {
 
         let outcome = aggregate_evidence_votes(&[v1, v2, v3], &committee);
 
-        assert!(matches!(outcome, Some(EvidenceVoteOutcome::Verified(_))),
-            "distinct worker evidence must not prevent a policy quorum");
+        assert!(
+            matches!(outcome, Some(EvidenceVoteOutcome::Verified(_))),
+            "distinct worker evidence must not prevent a policy quorum"
+        );
     }
 }

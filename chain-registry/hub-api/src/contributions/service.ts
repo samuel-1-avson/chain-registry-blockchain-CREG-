@@ -8,8 +8,8 @@ import {
   type ArenaActor,
   type ContributionStatus,
   type CreateContributionInput,
-} from "./domain";
-import type { ContributionRepository } from "./repository";
+} from "./domain.js";
+import type { ContributionRepository } from "./repository.js";
 
 export interface ArenaRequestContext {
   actor: ArenaActor | null;
@@ -23,15 +23,17 @@ export class ContributionService {
   ) {}
 
   async create(context: ArenaRequestContext, input: CreateContributionInput) {
-    if (!context.actor) throw new ArenaDomainError("UNAUTHENTICATED", "Authentication is required.");
-    const normalized = normalizeCreateContribution(context.actor, input);
+    const actor = context.actor;
+    if (!actor) throw new ArenaDomainError("UNAUTHENTICATED", "Authentication is required.");
+    const normalized = normalizeCreateContribution(actor, input);
     return this.repository.withTransaction(async repository => {
       const contribution = await repository.createContribution({
         ...input,
         ...normalized,
+        status: "draft",
       });
       await repository.appendAudit({
-        actorId: context.actor!.id,
+        actorId: actor.id,
         contributionId: contribution.id,
         action: "contribution.created",
         nextState: contribution,
@@ -49,18 +51,19 @@ export class ContributionService {
   }
 
   async transition(context: ArenaRequestContext, id: string, nextStatus: ContributionStatus) {
-    if (!context.actor) throw new ArenaDomainError("UNAUTHENTICATED", "Authentication is required.");
+    const actor = context.actor;
+    if (!actor) throw new ArenaDomainError("UNAUTHENTICATED", "Authentication is required.");
     return this.repository.withTransaction(async repository => {
       const current = await repository.findContributionById(id, { includePrivate: true });
       if (!current) throw new ArenaDomainError("NOT_FOUND", "Contribution not found.");
-      assertCanViewContribution(context.actor, current);
-      assertCanTransition(context.actor, current, nextStatus);
+      assertCanViewContribution(actor, current);
+      assertCanTransition(actor, current, nextStatus);
 
       const updated = await repository.updateContributionStatus(id, current.status, nextStatus);
       if (!updated) throw new ArenaDomainError("CONFLICT", "The contribution changed while it was being reviewed.");
 
       await repository.appendAudit({
-        actorId: context.actor.id,
+        actorId: actor.id,
         contributionId: id,
         action: `contribution.${nextStatus}`,
         previousState: current,
@@ -77,7 +80,7 @@ export class ContributionService {
           points: outcome.points,
           policyVersion: this.reputationPolicyVersion,
           reason: `Contribution reached ${nextStatus} under ${this.reputationPolicyVersion}.`,
-          awardedBy: context.actor.id,
+          awardedBy: actor.id,
         });
       }
       return updated;
@@ -85,13 +88,14 @@ export class ContributionService {
   }
 
   async vote(context: ArenaRequestContext, id: string, vote: -1 | 1) {
-    if (!context.actor) throw new ArenaDomainError("UNAUTHENTICATED", "Authentication is required.");
+    const actor = context.actor;
+    if (!actor) throw new ArenaDomainError("UNAUTHENTICATED", "Authentication is required.");
     if (vote !== -1 && vote !== 1) throw new ArenaDomainError("INVALID_INPUT", "Vote must be -1 or 1.");
     const contribution = await this.get(context, id);
-    assertCanVote(context.actor, contribution);
-    const result = await this.repository.upsertVote({ contributionId: id, actorId: context.actor.id, vote });
+    assertCanVote(actor, contribution);
+    const result = await this.repository.upsertVote({ contributionId: id, actorId: actor.id, vote });
     await this.repository.appendAudit({
-      actorId: context.actor.id,
+      actorId: actor.id,
       contributionId: id,
       action: result === "created" ? "vote.created" : "vote.updated",
       requestId: context.requestId,

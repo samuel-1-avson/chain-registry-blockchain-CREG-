@@ -93,6 +93,94 @@ pub async fn render(state: Arc<RwLock<NodeState>>) -> String {
         crate::finalized_tx::pending_buffer_depth() as f64,
     );
 
+    match s.chain.finalized_work_stats() {
+        Ok(stats) => {
+            metric(
+                &mut out,
+                "creg_durable_finalized_work_depth",
+                "Persisted finalized work awaiting durable block inclusion",
+                "gauge",
+                stats.active_depth as f64,
+            );
+            metric(
+                &mut out,
+                "creg_durable_finalized_work_ready_depth",
+                "Persisted finalized work currently eligible for production",
+                "gauge",
+                stats.ready_depth as f64,
+            );
+            metric(
+                &mut out,
+                "creg_durable_finalized_work_deferred_depth",
+                "Persisted finalized work waiting for retry backoff",
+                "gauge",
+                stats.deferred_depth as f64,
+            );
+            metric(
+                &mut out,
+                "creg_durable_finalized_work_retrying_depth",
+                "Persisted finalized work with one or more failed deliveries",
+                "gauge",
+                stats.retrying_depth as f64,
+            );
+            metric(
+                &mut out,
+                "creg_durable_finalized_work_retry_attempts",
+                "Sum of recorded retry attempts across active durable work",
+                "gauge",
+                stats.retry_attempts as f64,
+            );
+            metric(
+                &mut out,
+                "creg_durable_finalized_work_oldest_age_seconds",
+                "Age of the oldest persisted finalized work item",
+                "gauge",
+                stats.oldest_age_seconds.unwrap_or(0) as f64,
+            );
+        }
+        Err(error) => {
+            tracing::error!(
+                "Failed to collect durable finalized-work metrics: {}",
+                error
+            );
+            for name in [
+                "creg_durable_finalized_work_depth",
+                "creg_durable_finalized_work_ready_depth",
+                "creg_durable_finalized_work_deferred_depth",
+                "creg_durable_finalized_work_retrying_depth",
+                "creg_durable_finalized_work_retry_attempts",
+                "creg_durable_finalized_work_oldest_age_seconds",
+            ] {
+                metric(
+                    &mut out,
+                    name,
+                    "Durable finalized-work metric unavailable",
+                    "gauge",
+                    -1.0,
+                );
+            }
+        }
+    }
+    match s.chain.finalized_work_depths() {
+        Ok((_, dead_letter_depth)) => metric(
+            &mut out,
+            "creg_durable_finalized_work_dead_letter_depth",
+            "Finalized work retained for operator review",
+            "gauge",
+            dead_letter_depth as f64,
+        ),
+        Err(error) => {
+            tracing::error!("Failed to collect durable dead-letter depth: {}", error);
+            metric(
+                &mut out,
+                "creg_durable_finalized_work_dead_letter_depth",
+                "Finalized work retained for operator review",
+                "gauge",
+                -1.0,
+            );
+        }
+    }
+
     let node_id = &s.config.node_id;
     labeled_metric(
         &mut out,

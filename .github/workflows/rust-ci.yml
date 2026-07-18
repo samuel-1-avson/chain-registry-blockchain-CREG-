@@ -24,6 +24,10 @@ on:
       - "chain-registry/crates/**"
       - "chain-registry/Cargo.toml"
       - "chain-registry/Cargo.lock"
+      - "chain-registry/contracts/Registry.sol"
+      - "chain-registry/scripts/check-security-freeze.sh"
+      - "chain-registry/testnet/chain-spec*.json"
+      - "chain-registry/testnet/spec-server/chain-spec*.json"
   pull_request:
     branches: [main]
     paths:
@@ -31,6 +35,10 @@ on:
       - "chain-registry/crates/**"
       - "chain-registry/Cargo.toml"
       - "chain-registry/Cargo.lock"
+      - "chain-registry/contracts/Registry.sol"
+      - "chain-registry/scripts/check-security-freeze.sh"
+      - "chain-registry/testnet/chain-spec*.json"
+      - "chain-registry/testnet/spec-server/chain-spec*.json"
   schedule:
     - cron: "0 6 * * *"
   workflow_dispatch:
@@ -47,6 +55,16 @@ defaults:
     working-directory: chain-registry
 
 jobs:
+  security-freeze:
+    name: Security-freeze regression guard
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify retired qualification paths remain disabled
+        run: bash scripts/check-security-freeze.sh
+
   rust:
     name: Rust (fmt, clippy, test)
     runs-on: ubuntu-latest

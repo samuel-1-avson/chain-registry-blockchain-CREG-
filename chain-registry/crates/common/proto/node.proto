@@ -73,6 +73,8 @@ message SubmitRequest {
     string ownership_claim = 22;
     string publisher_chain_id = 23;
     string publisher_staking_contract = 24;
+    // Unix timestamp (seconds) included in the v2/v3 publisher signature.
+    int64 publisher_issued_at = 25;
 }
 
 message SubmitResponse {

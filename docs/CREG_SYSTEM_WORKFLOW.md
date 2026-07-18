@@ -4,7 +4,7 @@
 > **Version:** Public alpha (`creg-testnet-1`)  
 > **Network:** Ethereum Sepolia (L1 chain id `11155111`)  
 > **Status:** Public alpha testnet — not mainnet  
-> **Last updated:** 2026-07-06 (§1.7 whitepaper version, §9.11 alpha implementation note)
+> **Last updated:** 2026-07-18 (checkpoint bootstrap, receiver validation, and certified committee hardening)
 
 This document describes the complete system workflow of the Chain Registry blockchain: architecture, components, consensus, networking, storage, security, operations, and developer onboarding. It is scoped to the **core blockchain project** (`chain-registry/` workspace, contracts, circuits, testnet) and excludes the waitlist application and contribution arena.
 
@@ -987,9 +987,17 @@ For public testnets with 10k+ validators, full redundant analysis is replaced by
 
 This keeps resource usage bounded while preserving Byzantine resistance, openness (voluntary path), and economic alignment with staking.
 
-**Public alpha implementation note (DOC-303):** Admission still computes and stores `AnalysisCommittee` metadata (VRF-seeded ordering, stake/reputation/performance bias, per-eth cap) in the pending entry and final `ChainRecord`. In the current node build, **who runs the expensive pipeline** is additionally gated by `should_perform_full_analysis` — a deterministic hash sample when the active validator set exceeds 50 nodes — which is **not yet identical** to the stored committee membership list. The `is_mandatory` flag on emitted votes currently follows the sampling gate, not committee membership alone. Integrators should treat committee API data as the **target** selection model; full alignment is tracked in [REMEDIATION_BACKLOG.md](./REMEDIATION_BACKLOG.md) DOC-303.
+**Public alpha implementation note (DOC-303):** Admission computes and stores one `AnalysisCommittee` (VRF-seeded ordering, stake/reputation/performance bias, and per-EVM-address cap) in the pending entry. The validator pipeline reuses that exact assignment for expensive-analysis eligibility and the `is_mandatory` vote flag; it does not run a second sampling predicate. The same assignment is committed to the final `ChainRecord`. Certified mode additionally binds it to authenticated validator authority and the canonical randomness anchor.
 
-See `package_admission::compute_analysis_committee_at_admission`, `validator_pipeline::should_perform_full_analysis`, `aggregate_evidence_votes`, `update_performance_scores`, and the reward emission hook in `validator_pipeline`.
+### Certified Validator Sets and Committee Authority
+
+New validator-set transitions are signed by a distinct `floor(2n/3)+1` quorum of the **preceding** set. A transition commits to its effective height, preceding block hash, previous-set hash, next-set hash, and the complete next validator set. Nodes persist only verified, continuous transitions; conflicts at an effective height and replayed certificates do not replace an existing authority record.
+
+Committee assignments now commit to the validator-set hash, snapshot height, preceding-block fork anchor, certificate digest, public selection randomness, selector seed, and ordered members. Any node handling a certified assignment loads the exact anchor block, derives expected randomness from its VRF output (or the anchor hash fallback), recomputes the assignment from the persisted snapshot, and rejects member substitution, attacker-chosen randomness, certificate substitution, or fork-anchor replay. Signed transitions are also gossiped on the dedicated `creg/v1/validator-set-transitions` topic; receivers defer gossip acceptance until they independently repeat next-height, local-tip, quorum, checkpoint, and continuity checks and durably persist the certificate.
+
+For new or rebuilt nodes, operators may provision `CREG_WEAK_SUBJECTIVITY_CHECKPOINT` with a previously verified transition certificate. Peers expose certified history through `GET /v1/validator/set-transitions`, but a rebuilding node accepts no timeline unless it contains that exact checkpoint, every transition verifies sequentially from bootstrap authority, peer histories have a compatible prefix, and every locally available block anchor matches the canonical chain. The node prevalidates the complete bounded response before importing its eligible prefix. History writes are serialized, a configured checkpoint chain is retained beyond the 512-entry compatibility cap, and reorg recovery removes certificates anchored after the canonical ancestor. This checkpoint is deployment configuration, not a privileged network message. `CREG_REQUIRE_CERTIFIED_COMMITTEES=true` makes package admission fail closed until checkpoint-anchored certified authority is available. Public alpha still requires a published independently verified checkpoint plus live multi-operator reorg/long-range rehearsal before this mode is enabled network-wide.
+
+See `package_admission::compute_analysis_committee_at_admission`, `package_admission::verify_analysis_committee_assignment`, the persisted-assignment gate in `validator_pipeline`, `aggregate_evidence_votes`, `update_performance_scores`, and the reward emission hook in `validator_pipeline`.
 
 **L1 Reward Distribution Hook**: When a package reaches Verified on CREG, the pipeline submits the actual `distributeWorkRewards(..., bool[] isMandatory)` tx to L1 ValidatorRewards contract. Rewards use extremely low constants (base 0.00001 CREG) so the 42M supply lasts across enormous verification volume. `isMandatory` ensures mandatory committee members receive the higher points base. Successful L1 emission also gives a small boost to the participants' `performance_score`. This closes the loop from CREG verification to L1 rewards and reputation.
 
@@ -1065,7 +1073,7 @@ flowchart TD
 
     subgraph "Pinning Rewards (parallel)"
         PReg[registerPinner 1000 CREG + registerPin] --> PReport[reportAccess + periodic submitVerification]
-        PReport --> PCalc[calculateRewards<br/>size_bytes × days × rate/1e9<br/>× popularity(2× if >1000) × reliability]
+        PReport --> PCalc["calculateRewards<br/>size_bytes × days × rate/1e9<br/>× popularity (2× if >1000) × reliability"]
         PCalc --> PClaim[claimRewards from rewardsPool]
         PReport -->|fail| Slash["1% stake slashed -> pool"]
     end
@@ -1360,7 +1368,7 @@ See source:
 | Novel malware missed by scanners | Defense in depth reduces risk; not eliminated |
 | L1 contract bug | External audit (SEC-401) is open |
 | ZK circuit or trusted setup flaw | Requires dedicated ZK audit |
-| Long-range sync attacks | Historical validator-set verification is a hardening item |
+| Long-range sync attacks | Signed history, exact checkpoint matching, canonical-anchor checks, retention, and reorg truncation are implemented; a real published checkpoint and live multi-operator long-range/reorg rehearsal remain required |
 | IPFS unavailability | Requires redundant pinning and monitoring |
 
 ### 10.3 Cryptographic Primitives
@@ -1927,11 +1935,11 @@ This is a **public alpha testnet**, not mainnet. Key limitations:
 - ZK proofs are experimental infrastructure
 - Cross-chain, insurance, and threshold encryption disabled
 - Checkpoint-attestation bridge mode (not full state validity proof)
-- Pending pool persistence varies by node restart behavior
+- Abrupt process-kill/chaos recovery still requires an operator rehearsal
 - No economic guarantees or mainnet token commitments
 
 See `docs/TESTNET_PHASE_SCOPE.md` for participant expectations.
 
 ---
 
-*This document is derived from the CREG codebase, whitepaper, and operator documentation as of June 2026. For protocol authority, refer to `docs/WHITEPAPER.md`. For implementation gaps, refer to `chain-registry/DEEP_DIVE_ANALYSIS.md`.*
+*This document is derived from the CREG codebase, whitepaper, and operator documentation as of July 2026. For protocol authority, refer to `docs/WHITEPAPER.md`. For implementation gaps, refer to `chain-registry/DEEP_DIVE_ANALYSIS.md`.*

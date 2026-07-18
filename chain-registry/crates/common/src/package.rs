@@ -1,7 +1,10 @@
 // crates/common/src/package.rs
 
+use crate::{CertifiedNamespaceAuthority, NamespaceAuthorityProof, NamespaceAuthorityPurpose};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+
+pub const PUBLISHER_AUTHORIZATION_SCHEMA_VERSION: u16 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum FindingSeverity {
@@ -63,6 +66,160 @@ pub fn canonical_publisher_address(publisher_address: &str) -> String {
     format!("0x{}", stripped.to_ascii_lowercase())
 }
 
+/// Canonical namespace prefix shared by every version of a package.
+///
+/// The trailing `@` is deliberate: it prevents a namespace such as
+/// `npm:foo` from also matching `npm:foobar` in prefix-indexed stores.
+pub fn package_namespace_prefix(id: &PackageId) -> String {
+    format!("{}:{}@", id.ecosystem.trim(), id.name.trim())
+}
+
+/// Canonical npm/PyPI namespace used by authoritative ownership statements.
+/// Legacy registry identifiers remain byte-for-byte decodable; this stricter
+/// form is used only by the activation-gated authority protocol so aliases
+/// cannot acquire independent controllers.
+pub fn authoritative_package_namespace(id: &PackageId) -> Result<String, &'static str> {
+    let ecosystem = id.ecosystem.trim().to_ascii_lowercase();
+    if ecosystem != id.ecosystem {
+        return Err("authoritative ecosystem must be canonical lowercase");
+    }
+    let name = canonical_authoritative_package_name(&ecosystem, &id.name)?;
+    if name != id.name {
+        return Err("authoritative package name is not canonical");
+    }
+    Ok(format!("{}:{}@", ecosystem, name))
+}
+
+/// Validate that a serialized namespace is the one canonical spelling for
+/// its upstream ecosystem.
+pub fn validate_authoritative_namespace(prefix: &str) -> Result<(), &'static str> {
+    validate_namespace_prefix(prefix)?;
+    let (ecosystem, marked_name) = prefix
+        .split_once(':')
+        .ok_or("namespace prefix must contain an ecosystem separator")?;
+    let name = marked_name
+        .strip_suffix('@')
+        .ok_or("namespace prefix must end with '@'")?;
+    let canonical = canonical_authoritative_package_name(ecosystem, name)?;
+    if ecosystem != ecosystem.to_ascii_lowercase() || name != canonical {
+        return Err("authoritative namespace is not canonical");
+    }
+    Ok(())
+}
+
+fn canonical_authoritative_package_name(
+    ecosystem: &str,
+    name: &str,
+) -> Result<String, &'static str> {
+    if name.is_empty() || name != name.trim() || name.chars().any(char::is_control) {
+        return Err("authoritative package name is invalid");
+    }
+    match ecosystem {
+        "pypi" => {
+            let mut normalized = String::with_capacity(name.len());
+            let mut separator = false;
+            for byte in name.bytes() {
+                if byte.is_ascii_alphanumeric() {
+                    normalized.push((byte as char).to_ascii_lowercase());
+                    separator = false;
+                } else if matches!(byte, b'-' | b'_' | b'.') {
+                    if !separator {
+                        normalized.push('-');
+                        separator = true;
+                    }
+                } else {
+                    return Err("PyPI package name contains an unsupported character");
+                }
+            }
+            if normalized.is_empty() || normalized.starts_with('-') || normalized.ends_with('-') {
+                return Err("PyPI package name is invalid");
+            }
+            Ok(normalized)
+        }
+        "npm" => {
+            if name != name.to_ascii_lowercase() {
+                return Err("npm package name must be lowercase");
+            }
+            let valid_component = |component: &str| {
+                !component.is_empty()
+                    && component.bytes().all(|byte| {
+                        byte.is_ascii_lowercase()
+                            || byte.is_ascii_digit()
+                            || matches!(byte, b'-' | b'_' | b'.' | b'~')
+                    })
+            };
+            if let Some(scoped) = name.strip_prefix('@') {
+                let Some((scope, package)) = scoped.split_once('/') else {
+                    return Err("scoped npm package name must contain one '/' separator");
+                };
+                if package.contains('/') || !valid_component(scope) || !valid_component(package) {
+                    return Err("scoped npm package name is invalid");
+                }
+            } else if name.contains('/') || !valid_component(name) {
+                return Err("npm package name is invalid");
+            }
+            Ok(name.to_string())
+        }
+        _ => Err("authoritative ownership supports only npm and PyPI namespaces"),
+    }
+}
+
+pub fn is_canonical_single_line(value: &str) -> bool {
+    !value.is_empty()
+        && value == value.trim()
+        && !value
+            .chars()
+            .any(|ch| ch.is_control() || ch == '\u{2028}' || ch == '\u{2029}')
+}
+
+fn is_lower_hex_sha256(value: &str) -> bool {
+    value.len() == 64
+        && value == value.to_ascii_lowercase()
+        && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+/// Validate the serialized form accepted by namespace-transfer and key-rotation
+/// events. This deliberately accepts ecosystem-specific characters in names
+/// (for example npm's `@scope/name`) while rejecting ambiguous, whitespace, or
+/// version-qualified prefixes.
+pub fn validate_namespace_prefix(prefix: &str) -> Result<(), &'static str> {
+    let value = prefix.trim();
+    if value != prefix || value.len() < 4 || !value.ends_with('@') {
+        return Err("namespace prefix must be trimmed and end with '@'");
+    }
+    let Some((ecosystem, name_with_marker)) = value.split_once(':') else {
+        return Err("namespace prefix must contain an ecosystem separator");
+    };
+    let Some(name) = name_with_marker.strip_suffix('@') else {
+        return Err("namespace prefix must end with '@'");
+    };
+    if ecosystem.is_empty() || name.is_empty() {
+        return Err("namespace ecosystem and name are required");
+    }
+    if ecosystem.chars().any(char::is_whitespace) || name.chars().any(char::is_whitespace) {
+        return Err("namespace prefix must not contain whitespace");
+    }
+    Ok(())
+}
+
+/// Domain-separated authorization payload for a namespace-scoped publisher key
+/// rotation. Both keys sign this exact payload, preventing signatures from one
+/// namespace, nonce, or CREG deployment from being replayed for another.
+pub fn publisher_rotation_message(
+    canonical_prefix: &str,
+    old_pubkey: &str,
+    new_pubkey: &str,
+    nonce: u64,
+) -> String {
+    format!(
+        "creg-publisher-key-rotation-v1\nservice:creg-package-ownership\nnamespace:{}\nold_ed25519_pubkey:{}\nnew_ed25519_pubkey:{}\nnonce:{}",
+        canonical_prefix.trim(),
+        old_pubkey.trim().to_ascii_lowercase(),
+        new_pubkey.trim().to_ascii_lowercase(),
+        nonce,
+    )
+}
+
 pub fn publish_signature_message(
     id: &PackageId,
     content_hash: &str,
@@ -113,6 +270,115 @@ pub fn publish_signature_message_v2(
     )
 }
 
+/// Version 3 of the publisher authorization payload. It retains all v2
+/// bindings and additionally commits to the exact registry-authority evidence
+/// bundle supplied with the request.
+pub fn publish_signature_message_v3(
+    chain_id: &str,
+    staking_contract: &str,
+    id: &PackageId,
+    content_hash: &str,
+    source_hash: &str,
+    manifest_hash: &str,
+    publisher_pubkey: &str,
+    publisher_address: &str,
+    ownership_claim: &str,
+    nonce: &str,
+    issued_at: i64,
+    expires_at: u64,
+    authority_proof_digest: &str,
+) -> String {
+    format!(
+        "{}\nownership_proof_sha256:{}",
+        publish_signature_message_v2(
+            chain_id,
+            staking_contract,
+            id,
+            content_hash,
+            source_hash,
+            manifest_hash,
+            publisher_pubkey,
+            publisher_address,
+            ownership_claim,
+            nonce,
+            issued_at,
+            expires_at,
+        ),
+        authority_proof_digest.trim().to_ascii_lowercase(),
+    )
+}
+
+/// Activation-gated publisher authorization. Besides the v3 package and
+/// authority-proof bindings, v4 commits to retrieval/encryption metadata and
+/// the complete multisig policy so a proposer cannot downgrade a threshold
+/// request or substitute an IPFS/key bundle while reusing valid signatures.
+#[allow(clippy::too_many_arguments)]
+pub fn publish_signature_message_v4(
+    chain_id: &str,
+    genesis_hash: &str,
+    staking_contract: &str,
+    id: &PackageId,
+    content_hash: &str,
+    source_hash: &str,
+    manifest_hash: &str,
+    ipfs_cid: &str,
+    shielded: bool,
+    key_bundle_sha256: &str,
+    pgp_signature_sha256: &str,
+    pgp_public_key_sha256: &str,
+    publisher_pubkey: &str,
+    publisher_address: &str,
+    ownership_claim: &str,
+    nonce: &str,
+    issued_at: i64,
+    expires_at: u64,
+    threshold: usize,
+    publisher_pubkeys: &[String],
+    authority_proof_digest: &str,
+) -> String {
+    let keyset = canonical_publisher_keyset(publisher_pubkey, publisher_pubkeys).join(",");
+    format!(
+        "creg-publisher-admission-v4\nservice:creg-package-admission\nchain_id:{}\ngenesis_hash:{}\nstaking_contract:{}\necosystem:{}\nname:{}\nversion:{}\ncontent_sha256:{}\nsource_sha256:{}\nmanifest_sha256:{}\nipfs_cid:{}\nshielded:{}\nkey_bundle_sha256:{}\npgp_signature_sha256:{}\npgp_public_key_sha256:{}\ned25519_pubkey:{}\nevm_address:{}\nownership_claim:{}\nnonce:{}\nissued_at:{}\nexpires_at:{}\nthreshold:{}\npublisher_pubkeys:{}\nownership_proof_sha256:{}",
+        chain_id.trim(),
+        genesis_hash.trim().to_ascii_lowercase(),
+        canonical_publisher_address(staking_contract),
+        id.ecosystem.trim(),
+        id.name.trim(),
+        id.version.trim(),
+        content_hash.trim().to_ascii_lowercase(),
+        source_hash.trim().to_ascii_lowercase(),
+        manifest_hash.trim().to_ascii_lowercase(),
+        ipfs_cid.trim(),
+        shielded,
+        key_bundle_sha256.trim().to_ascii_lowercase(),
+        pgp_signature_sha256.trim().to_ascii_lowercase(),
+        pgp_public_key_sha256.trim().to_ascii_lowercase(),
+        publisher_pubkey.trim().to_ascii_lowercase(),
+        canonical_publisher_address(publisher_address),
+        ownership_claim.trim(),
+        nonce.trim(),
+        issued_at,
+        expires_at,
+        threshold,
+        keyset,
+        authority_proof_digest.trim().to_ascii_lowercase(),
+    )
+}
+
+pub fn canonical_publisher_keyset(primary: &str, additional: &[String]) -> Vec<String> {
+    let mut keys = if additional.is_empty() {
+        vec![primary.trim().to_ascii_lowercase()]
+    } else {
+        additional
+            .iter()
+            .map(|key| key.trim().to_ascii_lowercase())
+            .collect()
+    };
+    keys.sort();
+    keys.dedup();
+    keys
+}
+
 impl std::fmt::Display for PackageId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.canonical())
@@ -141,7 +407,10 @@ pub struct PackageManifest {
 
 #[cfg(test)]
 mod publisher_message_tests {
-    use super::{publish_signature_message_v2, PackageId};
+    use super::{
+        package_namespace_prefix, publish_signature_message_v2, publish_signature_message_v3,
+        publisher_rotation_message, validate_namespace_prefix, PackageId,
+    };
 
     #[test]
     fn publisher_payload_is_domain_separated_and_binds_manifest_and_nonce() {
@@ -176,6 +445,40 @@ mod publisher_message_tests {
         );
         assert!(first.starts_with("creg-publisher-admission-v2\nservice:creg-package-admission"));
         assert_ne!(first, second);
+
+        let third = publish_signature_message_v3(
+            "creg-testnet-1",
+            "0x1111111111111111111111111111111111111111",
+            &id,
+            "aa",
+            "bb",
+            "cc",
+            "dd",
+            "0x2222222222222222222222222222222222222222",
+            "npm:pkg",
+            "nonce-a",
+            1,
+            2,
+            &"e".repeat(64),
+        );
+        assert_ne!(first, third);
+    }
+
+    #[test]
+    fn namespace_prefix_is_unambiguous_and_rotation_payload_is_scoped() {
+        let id = PackageId::new("npm", "@creg/pkg", "1.0.0");
+        let prefix = package_namespace_prefix(&id);
+        assert_eq!(prefix, "npm:@creg/pkg@");
+        assert!(validate_namespace_prefix(&prefix).is_ok());
+        assert!(validate_namespace_prefix("npm:pkg").is_err());
+        assert!(validate_namespace_prefix("npm:pkg@1.0.0@").is_ok());
+        assert!(validate_namespace_prefix("npm:pkg @").is_err());
+
+        let first = publisher_rotation_message("npm:pkg@", "AA", "BB", 7);
+        let changed_namespace = publisher_rotation_message("npm:other@", "AA", "BB", 7);
+        let changed_nonce = publisher_rotation_message("npm:pkg@", "AA", "BB", 8);
+        assert_ne!(first, changed_namespace);
+        assert_ne!(first, changed_nonce);
     }
 }
 
@@ -233,7 +536,307 @@ pub struct PublishRequest {
     #[serde(default)]
     pub publisher_chain_id: String,
     #[serde(default)]
+    pub publisher_genesis_hash: String,
+    #[serde(default)]
     pub publisher_staking_contract: String,
+    /// `4` is required for proof-retaining post-activation transactions.
+    /// Zero identifies historical v1-v3 admission messages.
+    #[serde(default)]
+    pub publisher_authorization_version: u16,
+    /// Optional authoritative upstream ownership evidence. When present, its
+    /// digest is bound into the v3 dual-controller signature payload.
+    #[serde(default)]
+    pub ownership_proof: Option<NamespaceAuthorityProof>,
+    /// Quorum certificate produced after validators independently verify the
+    /// upstream evidence. The raw proof alone is never authoritative.
+    #[serde(default)]
+    pub namespace_authority_certificate: Option<CertifiedNamespaceAuthority>,
+}
+
+/// Publisher authorization retained in authoritative publish transactions.
+/// Unlike the legacy `Publish(ChainRecord)` variant, this contains everything
+/// a peer or rebuilding node needs to reconstruct the signed publisher
+/// message and verify the optional upstream namespace certificate.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PublisherAuthorizationV1 {
+    pub schema_version: u16,
+    pub chain_id: String,
+    pub genesis_hash: String,
+    pub staking_contract: String,
+    pub publisher_address: String,
+    pub publisher_ed25519_pubkey: String,
+    pub publisher_ed25519_signature: String,
+    pub publisher_evm_signature: String,
+    pub nonce: String,
+    pub issued_at: i64,
+    pub expires_at: u64,
+    pub source_hash: String,
+    pub manifest_hash: String,
+    pub ipfs_cid: String,
+    pub shielded: bool,
+    #[serde(default)]
+    pub key_bundle_sha256: String,
+    #[serde(default)]
+    pub pgp_signature_sha256: String,
+    #[serde(default)]
+    pub pgp_public_key_sha256: String,
+    pub ownership_claim: String,
+    #[serde(default)]
+    pub threshold: usize,
+    #[serde(default)]
+    pub publisher_pubkeys: Vec<String>,
+    #[serde(default)]
+    pub signatures: Vec<String>,
+    #[serde(default)]
+    pub ownership_proof: Option<NamespaceAuthorityProof>,
+    #[serde(default)]
+    pub authority_certificate: Option<CertifiedNamespaceAuthority>,
+}
+
+impl PublisherAuthorizationV1 {
+    pub fn from_publish_request(request: &PublishRequest) -> Self {
+        Self {
+            schema_version: PUBLISHER_AUTHORIZATION_SCHEMA_VERSION,
+            chain_id: request.publisher_chain_id.clone(),
+            genesis_hash: request.publisher_genesis_hash.clone(),
+            staking_contract: request.publisher_staking_contract.clone(),
+            publisher_address: request.publisher_address.clone(),
+            publisher_ed25519_pubkey: request.publisher_pubkey.clone(),
+            publisher_ed25519_signature: request.signature.clone(),
+            publisher_evm_signature: request.publisher_evm_signature.clone(),
+            nonce: request.publisher_nonce.clone(),
+            issued_at: request.submitted_at.timestamp(),
+            expires_at: request.publisher_expires_at,
+            source_hash: request.source_hash.clone(),
+            manifest_hash: request.manifest_hash.clone(),
+            ipfs_cid: request.ipfs_cid.clone(),
+            shielded: request.shielded,
+            key_bundle_sha256: request
+                .key_bundle
+                .as_ref()
+                .map(|bundle| crate::sha256_hex(bundle.as_bytes()))
+                .unwrap_or_default(),
+            pgp_signature_sha256: request
+                .pgp_signature
+                .as_ref()
+                .map(|value| crate::sha256_hex(value.as_bytes()))
+                .unwrap_or_default(),
+            pgp_public_key_sha256: request
+                .pgp_public_key
+                .as_ref()
+                .map(|value| crate::sha256_hex(value.as_bytes()))
+                .unwrap_or_default(),
+            ownership_claim: request.ownership_claim.clone(),
+            threshold: request.threshold,
+            publisher_pubkeys: request.publisher_pubkeys.clone(),
+            signatures: request.signatures.clone(),
+            ownership_proof: request.ownership_proof.clone(),
+            authority_certificate: request.namespace_authority_certificate.clone(),
+        }
+    }
+
+    pub fn signing_message(&self, id: &PackageId, content_hash: &str) -> String {
+        publish_signature_message_v4(
+            &self.chain_id,
+            &self.genesis_hash,
+            &self.staking_contract,
+            id,
+            content_hash,
+            &self.source_hash,
+            &self.manifest_hash,
+            &self.ipfs_cid,
+            self.shielded,
+            &self.key_bundle_sha256,
+            &self.pgp_signature_sha256,
+            &self.pgp_public_key_sha256,
+            &self.publisher_ed25519_pubkey,
+            &self.publisher_address,
+            &self.ownership_claim,
+            &self.nonce,
+            self.issued_at,
+            self.expires_at,
+            self.threshold,
+            &self.publisher_pubkeys,
+            &self
+                .ownership_proof
+                .as_ref()
+                .map(NamespaceAuthorityProof::digest)
+                .unwrap_or_default(),
+        )
+    }
+
+    pub fn authorization_digest(&self, id: &PackageId, content_hash: &str) -> String {
+        crate::sha256_hex(self.signing_message(id, content_hash).as_bytes())
+    }
+
+    pub fn validate_record_binding(&self, record: &ChainRecord) -> Result<(), &'static str> {
+        if self.schema_version != PUBLISHER_AUTHORIZATION_SCHEMA_VERSION
+            || !is_canonical_single_line(&self.chain_id)
+            || !is_lower_hex_sha256(&self.genesis_hash)
+            || !is_canonical_single_line(&self.nonce)
+            || !is_canonical_single_line(&self.ownership_claim)
+            || !is_canonical_single_line(&record.id.version)
+            || self.nonce.len() > 128
+            || !self
+                .nonce
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+            || self.issued_at < 0
+            || self.expires_at <= self.issued_at as u64
+        {
+            return Err("publisher authorization metadata is incomplete");
+        }
+        let staking_contract = canonical_publisher_address(&self.staking_contract);
+        let publisher_address = canonical_publisher_address(&self.publisher_address);
+        if staking_contract != self.staking_contract
+            || publisher_address != self.publisher_address
+            || staking_contract.len() != 42
+            || publisher_address.len() != 42
+            || !staking_contract[2..]
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit())
+            || !publisher_address[2..]
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err("publisher authorization addresses are not canonical");
+        }
+        let namespace = authoritative_package_namespace(&record.id)?;
+        if self.ownership_claim != namespace.trim_end_matches('@') {
+            return Err("publisher authorization ownership claim is not canonical");
+        }
+        if !self.publisher_ed25519_pubkey.eq(&record.publisher_pubkey)
+            || self.publisher_ed25519_pubkey.len() != 64
+            || self.publisher_ed25519_pubkey != self.publisher_ed25519_pubkey.to_ascii_lowercase()
+            || !self
+                .publisher_ed25519_pubkey
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err("publisher authorization key does not match the record controller");
+        }
+        if self.ipfs_cid != record.ipfs_cid
+            || self.shielded != record.shielded
+            || self.key_bundle_sha256
+                != record
+                    .key_bundle
+                    .as_ref()
+                    .map(|bundle| crate::sha256_hex(bundle.as_bytes()))
+                    .unwrap_or_default()
+            || !is_canonical_single_line(&self.ipfs_cid)
+            || (!self.key_bundle_sha256.is_empty() && !is_lower_hex_sha256(&self.key_bundle_sha256))
+            || (self.shielded != !self.key_bundle_sha256.is_empty())
+            || self.pgp_signature_sha256 != record.pgp_signature_sha256
+            || self.pgp_public_key_sha256 != record.pgp_public_key_sha256
+            || (!self.pgp_signature_sha256.is_empty()
+                && !is_lower_hex_sha256(&self.pgp_signature_sha256))
+            || (!self.pgp_public_key_sha256.is_empty()
+                && !is_lower_hex_sha256(&self.pgp_public_key_sha256))
+            || (self.pgp_signature_sha256.is_empty() != self.pgp_public_key_sha256.is_empty())
+        {
+            return Err("publisher authorization retrieval metadata does not match the record");
+        }
+        let keyset =
+            canonical_publisher_keyset(&self.publisher_ed25519_pubkey, &self.publisher_pubkeys);
+        let canonical_signature = |signature: &str| {
+            signature.len() == 128
+                && signature == signature.to_ascii_lowercase()
+                && signature.bytes().all(|byte| byte.is_ascii_hexdigit())
+        };
+        if keyset.iter().any(|key| {
+            key.len() != 64
+                || key != &key.to_ascii_lowercase()
+                || !key.bytes().all(|byte| byte.is_ascii_hexdigit())
+        }) || self.threshold == 0
+            || self.threshold > keyset.len()
+            || (!self.publisher_pubkeys.is_empty()
+                && (self.publisher_pubkeys != keyset
+                    || !keyset.contains(&self.publisher_ed25519_pubkey)))
+            || (self.publisher_pubkeys.is_empty() && self.threshold != 1)
+            || (self.publisher_pubkeys.is_empty()
+                && (!self.signatures.is_empty()
+                    || !canonical_signature(&self.publisher_ed25519_signature)))
+            || (!self.publisher_pubkeys.is_empty()
+                && (!self.publisher_ed25519_signature.is_empty()
+                    || self.signatures.len() != self.publisher_pubkeys.len()
+                    || self
+                        .signatures
+                        .iter()
+                        .any(|signature| !canonical_signature(signature))))
+            || record.threshold != self.threshold
+            || record.publisher_pubkeys != self.publisher_pubkeys
+        {
+            return Err("publisher authorization multisig policy is invalid");
+        }
+        let manifest = record
+            .manifest
+            .as_ref()
+            .ok_or("authorized publish record lacks its signed manifest")?;
+        let manifest_hash = crate::sha256_hex(
+            &serde_json::to_vec(manifest).map_err(|_| "package manifest does not serialize")?,
+        );
+        if !manifest_hash.eq_ignore_ascii_case(&self.manifest_hash) {
+            return Err("authorized publish manifest digest does not match the record");
+        }
+        if self.source_hash.len() != 64
+            || !self
+                .source_hash
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit())
+            || self.source_hash != self.source_hash.to_ascii_lowercase()
+            || self.manifest_hash.len() != 64
+            || !self
+                .manifest_hash
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit())
+            || self.manifest_hash != self.manifest_hash.to_ascii_lowercase()
+            || record.content_hash.len() != 64
+            || !record
+                .content_hash
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit())
+            || record.content_hash != record.content_hash.to_ascii_lowercase()
+        {
+            return Err("authorized publish source/manifest digest is invalid");
+        }
+
+        if let Some(proof) = &self.ownership_proof {
+            proof.validate_structure()?;
+            if proof.namespace != namespace
+                || proof.controller_ed25519_pubkey != self.publisher_ed25519_pubkey
+                || proof.controller_evm_address != self.publisher_address
+            {
+                return Err("ownership proof does not bind the publisher authorization");
+            }
+        }
+
+        if let Some(certificate) = &self.authority_certificate {
+            certificate.statement.validate_structure()?;
+            let proof = self
+                .ownership_proof
+                .as_ref()
+                .ok_or("authority certificate requires its ownership proof")?;
+            if !matches!(
+                certificate.statement.purpose,
+                NamespaceAuthorityPurpose::Claim
+            ) || certificate.statement.chain_id != self.chain_id
+                || certificate.statement.genesis_hash != self.genesis_hash
+                || certificate.statement.namespace != namespace
+                || !certificate
+                    .statement
+                    .next_controller_ed25519_pubkey
+                    .eq_ignore_ascii_case(&self.publisher_ed25519_pubkey)
+                || !canonical_publisher_address(&certificate.statement.next_controller_evm_address)
+                    .eq_ignore_ascii_case(&canonical_publisher_address(&self.publisher_address))
+                || certificate.statement.authority_proof.digest() != proof.digest()
+                || certificate.statement.authorization_digest
+                    != self.authorization_digest(&record.id, &record.content_hash)
+            {
+                return Err("namespace authority certificate does not bind the publish record");
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Shared references to the analysis bundles active when a validator formed a verdict.
@@ -388,6 +991,11 @@ pub struct ChainRecord {
     pub key_bundle: Option<String>,
     /// Verified PGP fingerprint (if any).
     pub pgp_fingerprint: Option<String>,
+    /// Hashes of the exact optional detached PGP inputs bound by publisher v4.
+    #[serde(default)]
+    pub pgp_signature_sha256: String,
+    #[serde(default)]
+    pub pgp_public_key_sha256: String,
     /// Security validation findings (Sandbox, Static, Diff).
     pub findings: Vec<Finding>,
     /// Versioned policy and feature bundles used while producing this record.
@@ -415,13 +1023,13 @@ pub struct ChainRecord {
 
     // === HYBRID ANALYSIS COMMITTEE FIELDS (mandatory + voluntary) ===
     #[serde(default)]
-    pub analysis_committee_size: u32,          // Target mandatory committee size (e.g. 100)
+    pub analysis_committee_size: u32, // Target mandatory committee size (e.g. 100)
     #[serde(default)]
-    pub analysis_selection_seed: String,       // Seed used to deterministically order/select the committee
+    pub analysis_selection_seed: String, // Seed used to deterministically order/select the committee
     #[serde(default)]
-    pub analysis_effective_size: u32,          // Actual size after any expansion
+    pub analysis_effective_size: u32, // Actual size after any expansion
     #[serde(default)]
-    pub analysis_mandatory_contributed: u32,   // How many mandatory votes were in the final record
+    pub analysis_mandatory_contributed: u32, // How many mandatory votes were in the final record
 
     /// Full committee metadata (including members list and performance_bias).
     /// Preferred over the scalar fields for new records. Stored for full auditability
@@ -489,7 +1097,7 @@ pub struct ValidatorSignature {
 
     // === HYBRID FIELDS ===
     #[serde(default)]
-    pub is_mandatory: bool,   // true if this validator was in the primary selected committee
+    pub is_mandatory: bool, // true if this validator was in the primary selected committee
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -524,4 +1132,88 @@ pub struct AnalysisCommittee {
     /// Only populated for verified records going forward.
     #[serde(default)]
     pub member_performance_at_finalization: std::collections::HashMap<String, u32>,
+    /// Canonical hash of the validator set used by the selector. Empty only
+    /// for legacy records that predate snapshot-bound assignment proofs.
+    #[serde(default)]
+    pub validator_snapshot_hash: String,
+    /// Height at which the validator snapshot became effective.
+    #[serde(default)]
+    pub validator_snapshot_height: u64,
+    /// Final block hash under the preceding set. This prevents a committee
+    /// assignment from being replayed onto a competing chain fork.
+    #[serde(default)]
+    pub validator_snapshot_anchor_block_hash: String,
+    /// Digest of the quorum-certified snapshot. Empty marks a legacy/local
+    /// assignment and must never be treated as an authenticated anchor.
+    #[serde(default)]
+    pub validator_snapshot_certificate_hash: String,
+    /// Public randomness that was used to derive `seed`. Keeping it lets any
+    /// node recompute the deterministic ordering instead of trusting a seed
+    /// supplied by the admitting node.
+    #[serde(default)]
+    pub selection_randomness: String,
+    /// SHA-256 commitment to subject, snapshot, seed, ordered members, and
+    /// selector parameters. It makes any post-selection edit detectable.
+    #[serde(default)]
+    pub assignment_proof: String,
+}
+
+pub fn committee_assignment_proof(
+    canonical: &str,
+    content_hash: &str,
+    committee: &AnalysisCommittee,
+) -> String {
+    let members = committee.members.join(",");
+    crate::sha256_hex(
+        format!(
+            "creg-committee-assignment-v2\nservice:creg-consensus\nsubject:{}\ncontent_hash:{}\nvalidator_snapshot_hash:{}\nvalidator_snapshot_height:{}\nvalidator_snapshot_anchor_block_hash:{}\nvalidator_snapshot_certificate_hash:{}\nselection_randomness:{}\nseed:{}\nsize:{}\neffective_size:{}\nperformance_bias:{}\nmembers:{}",
+            canonical,
+            content_hash,
+            committee.validator_snapshot_hash,
+            committee.validator_snapshot_height,
+            committee.validator_snapshot_anchor_block_hash,
+            committee.validator_snapshot_certificate_hash,
+            committee.selection_randomness,
+            committee.seed,
+            committee.size,
+            committee.effective_size,
+            committee.performance_bias,
+            members,
+        )
+        .as_bytes(),
+    )
+}
+
+impl AnalysisCommittee {
+    pub fn assignment_proof_is_valid(&self, canonical: &str, content_hash: &str) -> bool {
+        !self.validator_snapshot_hash.is_empty()
+            && !self.selection_randomness.is_empty()
+            && self.assignment_proof == committee_assignment_proof(canonical, content_hash, self)
+    }
+}
+
+#[cfg(test)]
+mod committee_assignment_tests {
+    use super::*;
+
+    #[test]
+    fn assignment_proof_detects_snapshot_and_member_tampering() {
+        let mut committee = AnalysisCommittee {
+            size: 2,
+            members: vec!["v1".into(), "v2".into()],
+            seed: "a".repeat(64),
+            effective_size: 2,
+            performance_bias: true,
+            validator_snapshot_hash: "b".repeat(64),
+            validator_snapshot_height: 42,
+            validator_snapshot_anchor_block_hash: "c".repeat(64),
+            validator_snapshot_certificate_hash: "d".repeat(64),
+            selection_randomness: "e".repeat(64),
+            ..Default::default()
+        };
+        committee.assignment_proof = committee_assignment_proof("npm:pkg@1.0.0", "f", &committee);
+        assert!(committee.assignment_proof_is_valid("npm:pkg@1.0.0", "f"));
+        committee.members.swap(0, 1);
+        assert!(!committee.assignment_proof_is_valid("npm:pkg@1.0.0", "f"));
+    }
 }

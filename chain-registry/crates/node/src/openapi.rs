@@ -281,6 +281,52 @@ pub struct ConsensusState {
     pub validators: Vec<ConsensusValidator>,
 }
 
+/// Validator membership committed by a signed set-transition certificate.
+#[derive(serde::Serialize, ToSchema)]
+pub struct ValidatorSetMember {
+    pub id: String,
+    pub alias: String,
+    /// Hex-encoded Ed25519 public key.
+    pub pubkey: String,
+    pub eth_address: String,
+    pub stake: u64,
+    pub reputation: u32,
+    pub status: String,
+    pub performance_score: u32,
+    pub contribution_count: u64,
+}
+
+/// One distinct member of the preceding validator set authorizing a transition.
+#[derive(serde::Serialize, ToSchema)]
+pub struct ValidatorSetTransitionSignature {
+    pub validator_id: String,
+    pub validator_pubkey: String,
+    /// Hex-encoded Ed25519 signature over the domain-separated transition message.
+    pub signature: String,
+}
+
+/// Quorum-certified validator-set transition. The receiving node independently
+/// verifies the prior-set quorum, next-height continuity, and local tip anchor.
+#[derive(serde::Serialize, ToSchema)]
+pub struct ValidatorSetTransitionRequest {
+    #[schema(example = 1)]
+    pub schema_version: u16,
+    pub effective_from_height: u64,
+    /// Canonical hash of the final block governed by the preceding set.
+    pub previous_block_hash: String,
+    pub previous_validator_set_hash: String,
+    pub validators: Vec<ValidatorSetMember>,
+    pub validator_set_hash: String,
+    pub transition_signatures: Vec<ValidatorSetTransitionSignature>,
+}
+
+#[derive(serde::Serialize, ToSchema)]
+pub struct ValidatorSetTransitionAccepted {
+    pub accepted: bool,
+    pub effective_from_height: u64,
+    pub validator_set_hash: String,
+}
+
 #[derive(serde::Serialize, ToSchema)]
 pub struct AddressProfile {
     pub address: String,
@@ -556,6 +602,40 @@ pub mod paths {
     )]
     pub async fn register_validator_identity() {}
 
+    /// Fetch the complete persisted quorum-certified validator-set transition
+    /// history in ascending effective-height order. Rebuilding nodes treat
+    /// this response as untrusted input: every signature, authority link,
+    /// configured weak-subjectivity checkpoint, and canonical block anchor is
+    /// independently verified before any certificate is persisted.
+    #[utoipa::path(
+        get,
+        path = "/v1/validator/set-transitions",
+        tag = "validators",
+        responses(
+            (status = 200, body = [ValidatorSetTransitionRequest]),
+        ),
+    )]
+    pub async fn list_validator_set_transitions() {}
+
+    /// Submit a signed validator-set transition for independent validation,
+    /// durable persistence, and propagation on
+    /// `creg/v1/validator-set-transitions`. Authorization is the Ed25519 quorum
+    /// certificate from the preceding set; an individual operator credential
+    /// cannot replace it.
+    #[utoipa::path(
+        post,
+        path = "/v1/validator/set-transitions",
+        tag = "validators",
+        request_body = ValidatorSetTransitionRequest,
+        responses(
+            (status = 202, body = ValidatorSetTransitionAccepted),
+            (status = 401, body = ApiError, description = "Invalid or insufficient prior-set certificate"),
+            (status = 409, body = ApiError, description = "Stale height, replay/checkpoint conflict, or local fork-anchor mismatch"),
+            (status = 503, body = ApiError, description = "Configured weak-subjectivity checkpoint is malformed"),
+        ),
+    )]
+    pub async fn submit_validator_set_transition() {}
+
     /// P2P topology — peer list, role, and connection health.
     #[utoipa::path(
         get,
@@ -798,6 +878,8 @@ impl Modify for SecurityAddon {
         paths::get_address_transactions,
         paths::get_validator_profile,
         paths::register_validator_identity,
+        paths::list_validator_set_transitions,
+        paths::submit_validator_set_transition,
         paths::p2p_status,
         paths::bridge_anchors,
         paths::governance_proposals,
@@ -838,6 +920,10 @@ impl Modify for SecurityAddon {
         ConsensusRound,
         ConsensusValidator,
         ConsensusState,
+        ValidatorSetMember,
+        ValidatorSetTransitionSignature,
+        ValidatorSetTransitionRequest,
+        ValidatorSetTransitionAccepted,
         AddressProfile,
         AddressTxRef,
         AddressTxList,

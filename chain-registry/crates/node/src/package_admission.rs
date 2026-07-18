@@ -54,6 +54,7 @@ pub enum AdmissionError {
     NamespaceOwned(String),
     Storage(String),
     ShieldedPublishDisabled(String),
+    CertifiedCommitteeRequired(String),
 }
 
 impl std::fmt::Display for AdmissionError {
@@ -67,6 +68,7 @@ impl std::fmt::Display for AdmissionError {
             | Self::NamespaceOwned(message)
             | Self::Storage(message)
             | Self::ShieldedPublishDisabled(message) => write!(f, "{}", message),
+            Self::CertifiedCommitteeRequired(message) => write!(f, "{}", message),
             Self::Publisher(error) => write!(f, "{}", error),
             Self::Scanner(error) => write!(f, "Pre-mempool YARA admission failed: {}", error),
         }
@@ -114,24 +116,41 @@ pub fn compute_analysis_committee_at_admission(
         };
     }
     let randomness = recent_vrf_output.as_deref().unwrap_or(&tip_hash);
-    let seed = common::sha256_hex(format!("hybrid:{canonical}:{content_hash}:{randomness}").as_bytes());
-    let mut scored: Vec<(u128, u64, u32, u32, String, String)> = validator_set.validators.iter().map(|v| {
-        let id = v.id.clone();
-        let eth = v.eth_address.clone();
-        let stake = v.stake;
-        let rep = v.reputation;
-        let perf = v.performance_score;  // higher = better demonstrated resources/reliability
-        let score_hex = common::sha256_hex(format!("{}:{}", hex::encode(&seed), id).as_bytes());
-        let score = u128::from_str_radix(&score_hex[0..32], 16).unwrap_or(u128::MAX);
-        let stake_w = if stake > 0 { score / (stake as u128) } else { u128::MAX };
-        // Reputation feedback: higher rep -> smaller effective weight (earlier in list)
-        let rep_w = if rep > 0 { stake_w / (rep as u128) } else { stake_w };
-        // Performance/resources proxy: higher perf -> smaller weight -> earlier selection
-        // This biases the mandatory committee toward nodes that have proven they can
-        // successfully run the expensive verification pipeline.
-        let weighted = if perf > 0 { rep_w / (perf as u128) } else { rep_w };
-        (weighted, stake, rep, perf, id, eth)
-    }).collect();
+    let seed =
+        common::sha256_hex(format!("hybrid:{canonical}:{content_hash}:{randomness}").as_bytes());
+    let mut scored: Vec<(u128, u64, u32, u32, String, String)> = validator_set
+        .validators
+        .iter()
+        .map(|v| {
+            let id = v.id.clone();
+            let eth = v.eth_address.clone();
+            let stake = v.stake;
+            let rep = v.reputation;
+            let perf = v.performance_score; // higher = better demonstrated resources/reliability
+            let score_hex = common::sha256_hex(format!("{}:{}", hex::encode(&seed), id).as_bytes());
+            let score = u128::from_str_radix(&score_hex[0..32], 16).unwrap_or(u128::MAX);
+            let stake_w = if stake > 0 {
+                score / (stake as u128)
+            } else {
+                u128::MAX
+            };
+            // Reputation feedback: higher rep -> smaller effective weight (earlier in list)
+            let rep_w = if rep > 0 {
+                stake_w / (rep as u128)
+            } else {
+                stake_w
+            };
+            // Performance/resources proxy: higher perf -> smaller weight -> earlier selection
+            // This biases the mandatory committee toward nodes that have proven they can
+            // successfully run the expensive verification pipeline.
+            let weighted = if perf > 0 {
+                rep_w / (perf as u128)
+            } else {
+                rep_w
+            };
+            (weighted, stake, rep, perf, id, eth)
+        })
+        .collect();
 
     // Sort ascending by weighted score (high stake + high rep + high performance makes weighted smaller -> earlier in list)
     // Performance (resources/reliability) is now factored so nodes proven capable of running
@@ -151,10 +170,12 @@ pub fn compute_analysis_committee_at_admission(
     const MAX_PER_ETH: u32 = 4;
     let mut members: Vec<String> = vec![];
     let mut eth_count: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+    let mut selected = std::collections::HashSet::new();
     for (_w, _stake, _rep, _perf, id, eth) in &scored {
         let count = eth_count.entry(eth.clone()).or_insert(0);
         if *count < MAX_PER_ETH {
             members.push(id.clone());
+            selected.insert(id.clone());
             *count += 1;
         }
     }
@@ -163,7 +184,7 @@ pub fn compute_analysis_committee_at_admission(
     // remaining identities in the same deterministic order.  This is bounded
     // only by the validator-set size and gives expansion a real candidate set.
     for (_w, _stake, _rep, _perf, id, _eth) in &scored {
-        if !members.contains(id) {
+        if selected.insert(id.clone()) {
             members.push(id.clone());
         }
     }
@@ -173,14 +194,92 @@ pub fn compute_analysis_committee_at_admission(
     } else {
         100u32.min(members.len() as u32)
     };
-    common::AnalysisCommittee {
+    let mut committee = common::AnalysisCommittee {
         size: target_m,
         members,
         seed: hex::encode(seed),
         effective_size: target_m,
         performance_bias: true,
+        validator_snapshot_hash: common::canonical_validator_set_hash(validator_set),
+        // The caller supplies a canonical tip hash; the current local history
+        // is compatibility-only until a certified transition is installed.
+        validator_snapshot_height: 0,
+        validator_snapshot_anchor_block_hash: tip_hash.clone(),
+        selection_randomness: randomness.to_string(),
         ..Default::default()
+    };
+    committee.assignment_proof =
+        common::committee_assignment_proof(canonical, content_hash, &committee);
+    committee
+}
+
+/// Compute an assignment using a previously verified validator-set transition.
+/// The transition must have been validated before persistence; this function
+/// still binds its digest and fork anchor into the resulting proof so followers
+/// can reject a substituted committee without trusting the admitting node.
+pub fn compute_analysis_committee_for_authenticated_snapshot(
+    snapshot: &common::AuthenticatedValidatorSetSnapshot,
+    canonical: &str,
+    content_hash: &str,
+    selection_randomness: String,
+) -> common::AnalysisCommittee {
+    let mut committee = compute_analysis_committee_at_admission(
+        &snapshot.validators,
+        canonical,
+        content_hash,
+        snapshot.previous_block_hash.clone(),
+        Some(selection_randomness),
+    );
+    committee.validator_snapshot_hash = snapshot.validator_set_hash.clone();
+    committee.validator_snapshot_height = snapshot.effective_from_height;
+    committee.validator_snapshot_anchor_block_hash = snapshot.previous_block_hash.clone();
+    committee.validator_snapshot_certificate_hash =
+        common::validator_snapshot_certificate_hash(snapshot);
+    committee.assignment_proof =
+        common::committee_assignment_proof(canonical, content_hash, &committee);
+    committee
+}
+
+/// Verify both the immutable committee commitment and the deterministic
+/// selection against the exact certified validator snapshot and independently
+/// derived anchor-block randomness. This never treats a local compatibility
+/// history entry as an authority anchor.
+pub fn verify_analysis_committee_assignment(
+    snapshot: &common::AuthenticatedValidatorSetSnapshot,
+    canonical: &str,
+    content_hash: &str,
+    expected_selection_randomness: &str,
+    committee: &common::AnalysisCommittee,
+) -> Result<(), &'static str> {
+    if !committee.assignment_proof_is_valid(canonical, content_hash) {
+        return Err("committee assignment proof is invalid");
     }
+    if committee.validator_snapshot_hash != snapshot.validator_set_hash
+        || committee.validator_snapshot_height != snapshot.effective_from_height
+        || committee.validator_snapshot_anchor_block_hash != snapshot.previous_block_hash
+        || committee.validator_snapshot_certificate_hash
+            != common::validator_snapshot_certificate_hash(snapshot)
+    {
+        return Err("committee is not bound to the certified validator snapshot");
+    }
+    if committee.selection_randomness != expected_selection_randomness {
+        return Err("committee selection randomness does not match its anchor block");
+    }
+    let expected = compute_analysis_committee_for_authenticated_snapshot(
+        snapshot,
+        canonical,
+        content_hash,
+        expected_selection_randomness.to_owned(),
+    );
+    if committee.size != expected.size
+        || committee.effective_size != expected.effective_size
+        || committee.performance_bias != expected.performance_bias
+        || committee.seed != expected.seed
+        || committee.members != expected.members
+    {
+        return Err("committee members do not match deterministic snapshot selection");
+    }
+    Ok(())
 }
 
 /// Update validator performance scores based on contributions to a finalized package.
@@ -206,9 +305,15 @@ pub fn update_performance_scores(
         .unwrap_or(0);
 
     for sig in final_sigs {
-        if let Some(v) = validator_set.validators.iter_mut().find(|vv| vv.id == sig.validator_id) {
-            let is_mand = sig.is_mandatory && committee.members.iter().any(|m| m == &sig.validator_id);
-            let was_correct = package_was_accepted == matches!(sig.vote, common::ValidatorVote::Approve);
+        if let Some(v) = validator_set
+            .validators
+            .iter_mut()
+            .find(|vv| vv.id == sig.validator_id)
+        {
+            let is_mand =
+                sig.is_mandatory && committee.members.iter().any(|m| m == &sig.validator_id);
+            let was_correct =
+                package_was_accepted == matches!(sig.vote, common::ValidatorVote::Approve);
 
             // Base delta from participation
             let mut delta: i32 = 5;
@@ -249,7 +354,8 @@ pub fn update_performance_scores(
             // Apply with simple moving average (contribution_count prevents early volatility)
             let contrib = (v.contribution_count as u64).max(1);
             let current = v.performance_score as i32;
-            let new_avg = ((current as i64 * contrib as i64) + (delta as i64 * 10)) / (contrib as i64 + 1);
+            let new_avg =
+                ((current as i64 * contrib as i64) + (delta as i64 * 10)) / (contrib as i64 + 1);
 
             v.performance_score = new_avg.clamp(1, 1000) as u32;
             v.contribution_count = v.contribution_count.saturating_add(1);
@@ -275,7 +381,7 @@ pub async fn admit_publish_request(
     }
 
     let canonical = request.id.canonical();
-    let namespace_prefix = format!("{}:{}@", request.id.ecosystem, request.id.name);
+    let namespace_prefix = common::package_namespace_prefix(&request.id);
     let ipfs_url = {
         let state = state.read().await;
         match state.chain.get_package(&canonical) {
@@ -309,18 +415,12 @@ pub async fn admit_publish_request(
         // controller.  A different publisher key may rotate only through the
         // explicit, authenticated key-rotation flow; it may not claim a later
         // version by simply presenting a staked EVM address.
-        let chain_owner = state.chain.publisher_for_prefix(&namespace_prefix);
-        let pending_owner = state.pending_pool.publisher_for_prefix(&namespace_prefix);
-        let owner = chain_owner.or(pending_owner);
-        if let Some(owner) = owner {
-            let requested = request.publisher_pubkey.trim();
-            if !requested.is_empty() && owner != requested {
-                return Err(AdmissionError::NamespaceOwned(format!(
-                    "{} is controlled by another publisher; use the signed namespace transfer or key-rotation flow",
-                    namespace_prefix.trim_end_matches('@')
-                )));
-            }
-        }
+        ensure_namespace_controller(
+            &namespace_prefix,
+            &request.publisher_pubkey,
+            state.chain.publisher_for_prefix(&namespace_prefix),
+            state.pending_pool.publisher_for_prefix(&namespace_prefix),
+        )?;
         state.config.ipfs_url.clone()
     };
 
@@ -337,6 +437,17 @@ pub async fn admit_publish_request(
 
     let pending_count = {
         let mut state = state.write().await;
+
+        // The pre-scan check above is only an early rejection. Scanning happens
+        // without the state lock, so a competing first submission can establish
+        // the namespace while this request is being scanned. Re-check while
+        // holding the write lock immediately before the pending-pool mutation.
+        ensure_namespace_controller(
+            &namespace_prefix,
+            &request.publisher_pubkey,
+            state.chain.publisher_for_prefix(&namespace_prefix),
+            state.pending_pool.publisher_for_prefix(&namespace_prefix),
+        )?;
         if !state.pending_pool.insert(request.clone()) {
             return Err(AdmissionError::AlreadyPending(format!(
                 "{} is already pending with the same content hash",
@@ -348,18 +459,57 @@ pub async fn admit_publish_request(
         // Compute early so all nodes get the same mandatory committee via gossip.
         let tip = state.chain.tip_hash().unwrap_or_default();
         // Try to get recent VRF from tip block for VRF-seeded selection
-        let recent_vrf = state.chain.get_block_by_hash(&tip)
+        let recent_vrf = state
+            .chain
+            .get_block_by_hash(&tip)
             .ok()
             .flatten()
             .and_then(|b| b.header.vrf_output.clone());
-        let committee = compute_analysis_committee_at_admission(
-            &state.validator_set,
-            &canonical,
-            &request.content_hash,
-            tip,
-            recent_vrf,
-        );
-        state.pending_pool.set_analysis_committee(&canonical, committee);
+        let selection_randomness = recent_vrf.clone().unwrap_or_else(|| tip.clone());
+        // A certificate is optional during the migration, but when one is
+        // present for the active set it is the only valid committee anchor.
+        // Local history entries are deliberately not upgraded by assertion.
+        let next_height = state.chain.tip_height().unwrap_or(0).saturating_add(1);
+        let certified = match crate::validator_set_history::committee_authority_at(
+            &state.config.data_dir,
+            next_height,
+        ) {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                tracing::error!("Weak-subjectivity checkpoint configuration rejected: {error}");
+                None
+            }
+        }
+        .filter(|snapshot| {
+            snapshot.validator_set_hash
+                == common::canonical_validator_set_hash(&state.validator_set)
+        });
+        let committee = match certified {
+            Some(snapshot) => compute_analysis_committee_for_authenticated_snapshot(
+                &snapshot,
+                &canonical,
+                &request.content_hash,
+                selection_randomness,
+            ),
+            None => compute_analysis_committee_at_admission(
+                &state.validator_set,
+                &canonical,
+                &request.content_hash,
+                tip,
+                recent_vrf,
+            ),
+        };
+        if crate::validator_set_history::certified_committees_required()
+            && committee.validator_snapshot_certificate_hash.is_empty()
+        {
+            state.pending_pool.remove(&canonical);
+            return Err(AdmissionError::CertifiedCommitteeRequired(
+                "Certified, checkpoint-anchored validator snapshot is required for package admission".into(),
+            ));
+        }
+        state
+            .pending_pool
+            .set_analysis_committee(&canonical, committee);
         state.pending_pool.len()
     };
 
@@ -376,6 +526,26 @@ pub async fn admit_publish_request(
     })
 }
 
+fn ensure_namespace_controller(
+    namespace_prefix: &str,
+    requested_pubkey: &str,
+    chain_owner: Option<String>,
+    pending_owner: Option<String>,
+) -> Result<(), AdmissionError> {
+    let Some(owner) = chain_owner.or(pending_owner) else {
+        return Ok(());
+    };
+
+    if owner.trim().eq_ignore_ascii_case(requested_pubkey.trim()) {
+        return Ok(());
+    }
+
+    Err(AdmissionError::NamespaceOwned(format!(
+        "{} is controlled by another publisher; use the signed namespace transfer or key-rotation flow",
+        namespace_prefix.trim_end_matches('@')
+    )))
+}
+
 pub async fn verify_publish_auth(
     state: &SharedState,
     request: &PublishRequest,
@@ -384,18 +554,17 @@ pub async fn verify_publish_auth(
     verify_publish_sig(request)
         .map_err(|error| AdmissionError::InvalidPublisherSignature(error.to_string()))?;
 
-    let require_dual = std::env::var("CREG_REQUIRE_PUBLISHER_DUAL_PROOF")
-        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
-        .unwrap_or_else(|_| {
-            std::env::var("CREG_PRODUCTION")
-                .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
-                .unwrap_or(false)
-        });
+    // CR-01: dual identity binding is fail-closed. A deployment must opt in to
+    // the legacy Ed25519-only compatibility mode explicitly, and production
+    // mode never permits that override.
+    let production = env_flag("CREG_PRODUCTION");
+    let allow_legacy = !production && env_flag("CREG_ALLOW_LEGACY_PUBLISHER_PROOF");
 
-    if request.publisher_evm_signature.trim().is_empty() {
-        if require_dual {
+    let has_dual_proof = !request.publisher_evm_signature.trim().is_empty();
+    if !has_dual_proof {
+        if !allow_legacy {
             return Err(AdmissionError::InvalidPublisherSignature(
-                "Publisher EVM signature is required; legacy Ed25519-only admission is disabled"
+                "Publisher EVM signature is required; set CREG_ALLOW_LEGACY_PUBLISHER_PROOF=true only for a non-production compatibility migration"
                     .into(),
             ));
         }
@@ -411,7 +580,31 @@ pub async fn verify_publish_auth(
 
     ensure_publisher_staked(state, &request.publisher_address)
         .await
-        .map_err(AdmissionError::Publisher)
+        .map_err(AdmissionError::Publisher)?;
+
+    if has_dual_proof {
+        let chain = { state.read().await.chain.clone() };
+        let consumed = chain
+            .consume_publisher_admission_nonce(
+                &request.publisher_address,
+                &request.publisher_nonce,
+                request.publisher_expires_at,
+            )
+            .map_err(|error| AdmissionError::InvalidPublisherSignature(error.to_string()))?;
+        if !consumed {
+            return Err(AdmissionError::InvalidPublisherSignature(
+                "Publisher proof nonce has already been used".into(),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn env_flag(name: &str) -> bool {
+    std::env::var(name)
+        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
 }
 
 fn validate_package_id(request: &PublishRequest) -> Result<(), AdmissionError> {
@@ -423,6 +616,14 @@ fn validate_package_id(request: &PublishRequest) -> Result<(), AdmissionError> {
             "Package ecosystem, name, and version are required".to_string(),
         ));
     }
+    common::validate_namespace_prefix(&common::package_namespace_prefix(&request.id)).map_err(
+        |error| {
+            AdmissionError::InvalidPackageId(format!(
+                "Invalid package namespace for admission: {}",
+                error
+            ))
+        },
+    )?;
     Ok(())
 }
 
@@ -433,13 +634,18 @@ pub(crate) fn verify_publish_sig(req: &PublishRequest) -> anyhow::Result<()> {
         anyhow::bail!("Publisher EVM address is required for runtime admission");
     }
 
+    let primary_pubkey = req.publisher_pubkey.trim();
+    let primary_pubkey_bytes =
+        hex::decode(primary_pubkey).context("Publisher Ed25519 public key must be valid hex")?;
+    VerifyingKey::try_from(primary_pubkey_bytes.as_slice())
+        .map_err(|_| anyhow::anyhow!("Invalid Ed25519 public key"))?;
+
     let msg = publisher_signature_message(req)?;
 
     // Single-signature fallback.
     if req.publisher_pubkeys.is_empty() {
-        let pubkey_bytes = hex::decode(&req.publisher_pubkey)?;
         let sig_bytes = hex::decode(&req.signature)?;
-        let vk = VerifyingKey::try_from(pubkey_bytes.as_slice())
+        let vk = VerifyingKey::try_from(primary_pubkey_bytes.as_slice())
             .map_err(|_| anyhow::anyhow!("Invalid Ed25519 public key"))?;
         let sig = Signature::try_from(sig_bytes.as_slice())
             .map_err(|_| anyhow::anyhow!("Invalid Ed25519 signature"))?;
@@ -460,9 +666,11 @@ pub(crate) fn verify_publish_sig(req: &PublishRequest) -> anyhow::Result<()> {
     }
 
     let mut valid = 0usize;
+    let mut primary_signed = false;
     let mut seen_pubkeys = std::collections::HashSet::new();
     for (pubkey_hex, sig_hex) in req.publisher_pubkeys.iter().zip(req.signatures.iter()) {
         let normalized_pubkey = pubkey_hex.trim().to_ascii_lowercase();
+        let is_primary_pubkey = normalized_pubkey.eq_ignore_ascii_case(primary_pubkey);
         if !seen_pubkeys.insert(normalized_pubkey) {
             continue;
         }
@@ -484,12 +692,13 @@ pub(crate) fn verify_publish_sig(req: &PublishRequest) -> anyhow::Result<()> {
         };
         if vk.verify(msg.as_bytes(), &sig).is_ok() {
             valid += 1;
+            if is_primary_pubkey {
+                primary_signed = true;
+            }
         }
     }
 
-    if valid >= threshold {
-        Ok(())
-    } else {
+    if valid < threshold {
         anyhow::bail!(
             "Multi-sig verification failed: only {}/{} valid signatures (need {})",
             valid,
@@ -497,15 +706,128 @@ pub(crate) fn verify_publish_sig(req: &PublishRequest) -> anyhow::Result<()> {
             threshold
         )
     }
+
+    if !primary_signed {
+        anyhow::bail!(
+            "Multi-sig verification failed: the declared namespace controller key did not sign"
+        )
+    }
+
+    Ok(())
 }
 
 fn publisher_signature_message(req: &PublishRequest) -> anyhow::Result<String> {
+    if req.publisher_authorization_version == 4 {
+        let namespace = common::authoritative_package_namespace(&req.id)
+            .map_err(|error| anyhow::anyhow!("Invalid authoritative namespace: {}", error))?;
+        if req.ownership_claim != namespace.trim_end_matches('@') {
+            anyhow::bail!("Publisher ownership claim is not the canonical namespace");
+        }
+        let keyset =
+            common::canonical_publisher_keyset(&req.publisher_pubkey, &req.publisher_pubkeys);
+        if req.threshold == 0
+            || req.threshold > keyset.len()
+            || (!req.publisher_pubkeys.is_empty()
+                && (req.publisher_pubkeys != keyset || !keyset.contains(&req.publisher_pubkey)))
+            || (req.publisher_pubkeys.is_empty() && req.threshold != 1)
+        {
+            anyhow::bail!("Publisher v4 multisig policy is not canonical");
+        }
+        if req.source_hash.len() != 64
+            || req.source_hash != req.source_hash.to_ascii_lowercase()
+            || !req.source_hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            anyhow::bail!("Publisher v4 source hash must be lowercase SHA-256");
+        }
+        let proof_digest = match &req.ownership_proof {
+            Some(proof) => {
+                proof
+                    .validate_structure()
+                    .map_err(|error| anyhow::anyhow!("Invalid ownership proof: {}", error))?;
+                proof.digest()
+            }
+            None => String::new(),
+        };
+        let key_bundle_sha256 = req
+            .key_bundle
+            .as_ref()
+            .map(|bundle| common::sha256_hex(bundle.as_bytes()))
+            .unwrap_or_default();
+        let pgp_signature_sha256 = req
+            .pgp_signature
+            .as_ref()
+            .map(|value| common::sha256_hex(value.as_bytes()))
+            .unwrap_or_default();
+        let pgp_public_key_sha256 = req
+            .pgp_public_key
+            .as_ref()
+            .map(|value| common::sha256_hex(value.as_bytes()))
+            .unwrap_or_default();
+        return Ok(common::publish_signature_message_v4(
+            &req.publisher_chain_id,
+            &req.publisher_genesis_hash,
+            &req.publisher_staking_contract,
+            &req.id,
+            &req.content_hash,
+            &req.source_hash,
+            &req.manifest_hash,
+            &req.ipfs_cid,
+            req.shielded,
+            &key_bundle_sha256,
+            &pgp_signature_sha256,
+            &pgp_public_key_sha256,
+            &req.publisher_pubkey,
+            &req.publisher_address,
+            &req.ownership_claim,
+            &req.publisher_nonce,
+            req.submitted_at.timestamp(),
+            req.publisher_expires_at,
+            req.threshold,
+            &req.publisher_pubkeys,
+            &proof_digest,
+        ));
+    }
     if !req.publisher_nonce.trim().is_empty()
         && req.publisher_expires_at > 0
         && !req.manifest_hash.trim().is_empty()
         && !req.publisher_chain_id.trim().is_empty()
         && !req.publisher_staking_contract.trim().is_empty()
     {
+        if let Some(proof) = &req.ownership_proof {
+            proof
+                .validate_structure()
+                .map_err(|error| anyhow::anyhow!("Invalid ownership proof: {}", error))?;
+            if proof.namespace != common::package_namespace_prefix(&req.id) {
+                anyhow::bail!("Ownership proof namespace does not match the submitted package");
+            }
+            if !proof
+                .controller_evm_address
+                .eq_ignore_ascii_case(&req.publisher_address)
+            {
+                anyhow::bail!("Ownership proof EVM controller does not match the publisher");
+            }
+            if !proof
+                .controller_ed25519_pubkey
+                .eq_ignore_ascii_case(&req.publisher_pubkey)
+            {
+                anyhow::bail!("Ownership proof Ed25519 controller does not match the publisher");
+            }
+            return Ok(common::publish_signature_message_v3(
+                &req.publisher_chain_id,
+                &req.publisher_staking_contract,
+                &req.id,
+                &req.content_hash,
+                &req.source_hash,
+                &req.manifest_hash,
+                &req.publisher_pubkey,
+                &req.publisher_address,
+                &req.ownership_claim,
+                &req.publisher_nonce,
+                req.submitted_at.timestamp(),
+                req.publisher_expires_at,
+                &proof.digest(),
+            ));
+        }
         return Ok(common::publish_signature_message_v2(
             &req.publisher_chain_id,
             &req.publisher_staking_contract,
@@ -533,9 +855,13 @@ async fn verify_publisher_dual_proof(
     state: &SharedState,
     request: &PublishRequest,
 ) -> anyhow::Result<()> {
-    let (chain_id, staking_contract) = {
+    let (chain_id, genesis_hash, staking_contract) = {
         let state = state.read().await;
-        (state.config.chain_id.clone(), state.config.staking_addr.clone())
+        (
+            state.config.chain_id.clone(),
+            state.config.network_genesis_hash.clone(),
+            state.config.staking_addr.clone(),
+        )
     };
     if chain_id.trim().is_empty() || staking_contract.trim().is_empty() {
         anyhow::bail!(
@@ -545,13 +871,25 @@ async fn verify_publisher_dual_proof(
     if request.publisher_chain_id != chain_id {
         anyhow::bail!("Publisher proof chain ID does not match this node");
     }
+    if request.publisher_authorization_version == 4
+        && request.publisher_genesis_hash != genesis_hash
+    {
+        anyhow::bail!("Publisher proof genesis hash does not match this network");
+    }
     if common::canonical_publisher_address(&request.publisher_staking_contract)
         != common::canonical_publisher_address(&staking_contract)
     {
         anyhow::bail!("Publisher proof staking contract does not match this node");
     }
-    if request.publisher_nonce.trim().is_empty() {
-        anyhow::bail!("Publisher proof nonce is required");
+    let nonce = request.publisher_nonce.trim();
+    if nonce.is_empty() || nonce.len() > 128 {
+        anyhow::bail!("Publisher proof nonce must contain 1 to 128 characters");
+    }
+    if !nonce
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+    {
+        anyhow::bail!("Publisher proof nonce may contain only ASCII letters, digits, '-' and '_'");
     }
     let now = chrono::Utc::now().timestamp();
     let issued_at = request.submitted_at.timestamp();
@@ -604,18 +942,15 @@ fn recover_evm_personal_signer(message: &str, signature_hex: &str) -> anyhow::Re
     };
     let recovery_id = RecoveryId::from_byte(recovery)
         .ok_or_else(|| anyhow::anyhow!("Invalid EVM signature recovery id"))?;
-    let signature = K256Signature::try_from(&bytes[..64])
-        .context("Invalid EVM signature r/s values")?;
+    let signature =
+        K256Signature::try_from(&bytes[..64]).context("Invalid EVM signature r/s values")?;
     let prefix = format!("\x19Ethereum Signed Message:\n{}", message.as_bytes().len());
     let mut payload = prefix.into_bytes();
     payload.extend_from_slice(message.as_bytes());
     let digest = keccak256(payload);
-    let verifying_key = VerifyingKey::recover_from_prehash(
-        digest.as_slice(),
-        &signature,
-        recovery_id,
-    )
-    .context("Failed to recover EVM signer")?;
+    let verifying_key =
+        VerifyingKey::recover_from_prehash(digest.as_slice(), &signature, recovery_id)
+            .context("Failed to recover EVM signer")?;
     let encoded = verifying_key.to_encoded_point(false);
     let hash = keccak256(&encoded.as_bytes()[1..]);
     Ok(Address::from_slice(&hash.as_slice()[12..])
@@ -734,6 +1069,12 @@ mod tests {
         fn set(key: &'static str, value: impl AsRef<str>) -> Self {
             let previous = std::env::var(key).ok();
             std::env::set_var(key, value.as_ref());
+            Self { key, previous }
+        }
+
+        fn remove(key: &'static str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::remove_var(key);
             Self { key, previous }
         }
     }
@@ -926,6 +1267,7 @@ rule TestMaliciousPayload {{
             threshold: 0,
             publisher_pubkeys: Vec::new(),
             signatures: Vec::new(),
+            ..Default::default()
         };
         let message = common::publish_signature_message(
             &request.id,
@@ -941,6 +1283,10 @@ rule TestMaliciousPayload {{
         state: &SharedState,
         request: PublishRequest,
     ) -> Result<AdmissionReceipt, AdmissionError> {
+        // Existing package-admission fixtures exercise scanner and storage
+        // behavior with a synthetic Ed25519-only publisher. Production code
+        // rejects this path by default; tests opt in locally and explicitly.
+        let _legacy = EnvRestore::set("CREG_ALLOW_LEGACY_PUBLISHER_PROOF", "true");
         admit_publish_request(
             state,
             request,
@@ -950,6 +1296,62 @@ rule TestMaliciousPayload {{
             },
         )
         .await
+    }
+
+    #[tokio::test]
+    async fn publisher_admission_rejects_legacy_proof_by_default() -> anyhow::Result<()> {
+        let _guard = env_lock().lock().await;
+        let _legacy = EnvRestore::remove("CREG_ALLOW_LEGACY_PUBLISHER_PROOF");
+        let _production = EnvRestore::remove("CREG_PRODUCTION");
+        let (state, _tempdir) = make_test_state(1, "http://127.0.0.1:65535".into()).await?;
+        let request = signed_request(b"payload", common::sha256_hex(b"payload"), "bafylegacy");
+
+        let error = verify_publish_auth(&state, &request).await.unwrap_err();
+        assert!(matches!(
+            error,
+            AdmissionError::InvalidPublisherSignature(message)
+                if message.contains("Publisher EVM signature is required")
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn multisig_requires_the_declared_namespace_controller_to_sign() {
+        let (_controller_signing_key, controller_pubkey) = make_keypair();
+        let (first_signing_key, first_pubkey) = make_keypair();
+        let (second_signing_key, second_pubkey) = make_keypair();
+        let mut request = signed_request(
+            b"payload",
+            common::sha256_hex(b"payload"),
+            "bafymultisig-controller",
+        );
+        request.publisher_pubkey = controller_pubkey;
+        request.publisher_pubkeys = vec![first_pubkey, second_pubkey];
+        request.threshold = 2;
+        let message = common::publish_signature_message(
+            &request.id,
+            &request.content_hash,
+            &request.publisher_address,
+        );
+        request.signatures = vec![
+            hex::encode(first_signing_key.sign(message.as_bytes()).to_bytes()),
+            hex::encode(second_signing_key.sign(message.as_bytes()).to_bytes()),
+        ];
+
+        let error = verify_publish_sig(&request).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("declared namespace controller key did not sign"));
+    }
+
+    #[test]
+    fn namespace_controller_check_rejects_a_different_key_and_accepts_key_casing() {
+        let prefix = "npm:controlled-package@";
+        assert!(ensure_namespace_controller(prefix, "AABB", Some("aabb".into()), None,).is_ok());
+        assert!(matches!(
+            ensure_namespace_controller(prefix, "ccdd", Some("aabb".into()), None),
+            Err(AdmissionError::NamespaceOwned(_))
+        ));
     }
 
     #[tokio::test]
@@ -1076,19 +1478,180 @@ rule TestMaliciousPayload {{
         // Small integration test for admission committee
         let guard = state.read().await;
         let committee = guard.pending_pool.get_committee("npm:test@1.0.0");
-        assert!(committee.is_some(), "committee should be computed at admission time");
-        assert_eq!(committee.unwrap().size, 1, "for 1 validator test, committee size should be 1");
+        assert!(
+            committee.is_some(),
+            "committee should be computed at admission time"
+        );
+        assert_eq!(
+            committee.unwrap().size,
+            1,
+            "for 1 validator test, committee size should be 1"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn mandatory_certified_committee_mode_rejects_legacy_authority() -> anyhow::Result<()> {
+        let _guard = env_lock().lock().await;
+        let rules = tempfile::tempdir()?;
+        write_rules(rules.path(), 5)?;
+        let _rules = EnvRestore::set("CREG_YARA_RULES_DIR", rules.path().display().to_string());
+        let _required = EnvRestore::set("CREG_REQUIRE_CERTIFIED_COMMITTEES", "true");
+        let payload = make_tarball("index.js", "module.exports = () => 'safe';")?;
+        let ipfs_url = spawn_mock_ipfs(payload.clone(), StatusCode::OK).await;
+        let (state, _tempdir) = make_test_state(1, ipfs_url).await?;
+        let request = signed_request(&payload, common::sha256_hex(&payload), "bafycertrequired");
+
+        let error = admit_for_test(&state, request).await.unwrap_err();
+        assert!(matches!(
+            error,
+            AdmissionError::CertifiedCommitteeRequired(_)
+        ));
+        assert!(!state.read().await.pending_pool.contains("npm:test@1.0.0"));
         Ok(())
     }
 
     #[test]
     fn committee_selection_uses_vrf_seed_when_provided() {
         let mut vs = common::ValidatorSet::default();
-        vs.validators.push(common::Validator { id: "v1".into(), alias: "v1".into(), pubkey: "p1".into(), eth_address: "0x1".into(), stake: 100, reputation: 50, status: "active".into(), performance_score: 500, contribution_count: 0 });
-        vs.validators.push(common::Validator { id: "v2".into(), alias: "v2".into(), pubkey: "p2".into(), eth_address: "0x2".into(), stake: 100, reputation: 50, status: "active".into(), performance_score: 500, contribution_count: 0 });
+        vs.validators.push(common::Validator {
+            id: "v1".into(),
+            alias: "v1".into(),
+            pubkey: "p1".into(),
+            eth_address: "0x1".into(),
+            stake: 100,
+            reputation: 50,
+            status: "active".into(),
+            performance_score: 500,
+            contribution_count: 0,
+        });
+        vs.validators.push(common::Validator {
+            id: "v2".into(),
+            alias: "v2".into(),
+            pubkey: "p2".into(),
+            eth_address: "0x2".into(),
+            stake: 100,
+            reputation: 50,
+            status: "active".into(),
+            performance_score: 500,
+            contribution_count: 0,
+        });
         let c1 = compute_analysis_committee_at_admission(&vs, "npm:t@1", "h1", "tip1".into(), None);
-        let c2 = compute_analysis_committee_at_admission(&vs, "npm:t@1", "h1", "tip1".into(), Some("vrf123".into()));
-        assert_ne!(c1.seed, c2.seed, "VRF seed should change the selection seed");
+        let c2 = compute_analysis_committee_at_admission(
+            &vs,
+            "npm:t@1",
+            "h1",
+            "tip1".into(),
+            Some("vrf123".into()),
+        );
+        assert_ne!(
+            c1.seed, c2.seed,
+            "VRF seed should change the selection seed"
+        );
+    }
+
+    #[test]
+    fn certified_committee_rejects_member_and_fork_anchor_tampering() {
+        let keys: Vec<_> = (0..4).map(|_| SigningKey::generate(&mut OsRng)).collect();
+        let previous = common::ValidatorSet::new(
+            keys.iter()
+                .enumerate()
+                .map(|(index, key)| common::Validator {
+                    id: format!("v{index}"),
+                    alias: format!("v{index}"),
+                    pubkey: hex::encode(key.verifying_key().as_bytes()),
+                    eth_address: format!("0x{index:040x}"),
+                    stake: 100,
+                    reputation: 100,
+                    status: "active".into(),
+                    performance_score: 500,
+                    contribution_count: 0,
+                })
+                .collect(),
+        );
+        let mut snapshot = common::AuthenticatedValidatorSetSnapshot {
+            schema_version: common::VALIDATOR_SNAPSHOT_SCHEMA_VERSION,
+            effective_from_height: 9,
+            previous_block_hash: "a".repeat(64),
+            previous_validator_set_hash: common::canonical_validator_set_hash(&previous),
+            validators: previous.clone(),
+            validator_set_hash: common::canonical_validator_set_hash(&previous),
+            transition_signatures: vec![],
+        };
+        let message = common::validator_set_transition_message(&snapshot);
+        for (index, key) in keys.iter().take(3).enumerate() {
+            snapshot
+                .transition_signatures
+                .push(common::ValidatorSetTransitionSignature {
+                    validator_id: format!("v{index}"),
+                    validator_pubkey: hex::encode(key.verifying_key().as_bytes()),
+                    signature: hex::encode(key.sign(message.as_bytes()).to_bytes()),
+                });
+        }
+        snapshot.validate_against(&previous).expect("prior quorum");
+        let mut committee = compute_analysis_committee_for_authenticated_snapshot(
+            &snapshot,
+            "npm:certified@1.0.0",
+            "content-hash",
+            "vrf-output".into(),
+        );
+        assert!(verify_analysis_committee_assignment(
+            &snapshot,
+            "npm:certified@1.0.0",
+            "content-hash",
+            "vrf-output",
+            &committee,
+        )
+        .is_ok());
+
+        committee.members.reverse();
+        assert!(verify_analysis_committee_assignment(
+            &snapshot,
+            "npm:certified@1.0.0",
+            "content-hash",
+            "vrf-output",
+            &committee,
+        )
+        .is_err());
+        committee = compute_analysis_committee_for_authenticated_snapshot(
+            &snapshot,
+            "npm:certified@1.0.0",
+            "content-hash",
+            "vrf-output".into(),
+        );
+        committee.validator_snapshot_anchor_block_hash = "b".repeat(64);
+        committee.assignment_proof =
+            common::committee_assignment_proof("npm:certified@1.0.0", "content-hash", &committee);
+        assert!(verify_analysis_committee_assignment(
+            &snapshot,
+            "npm:certified@1.0.0",
+            "content-hash",
+            "vrf-output",
+            &committee,
+        )
+        .is_err());
+
+        // Recomputing both the selected ordering and its self-consistent proof
+        // cannot substitute attacker-chosen randomness for the anchor block's
+        // authenticated VRF output.
+        let attacker_committee = compute_analysis_committee_for_authenticated_snapshot(
+            &snapshot,
+            "npm:certified@1.0.0",
+            "content-hash",
+            "attacker-grinded-randomness".into(),
+        );
+        assert!(attacker_committee.assignment_proof_is_valid("npm:certified@1.0.0", "content-hash"));
+        assert_ne!(attacker_committee.seed, committee.seed);
+        assert_eq!(
+            verify_analysis_committee_assignment(
+                &snapshot,
+                "npm:certified@1.0.0",
+                "content-hash",
+                "vrf-output",
+                &attacker_committee,
+            ),
+            Err("committee selection randomness does not match its anchor block")
+        );
     }
 
     #[test]
@@ -1124,6 +1687,56 @@ rule TestMaliciousPayload {{
                 .len(),
             100
         );
+    }
+
+    #[test]
+    fn committee_selection_vectors_are_deterministic_at_required_boundaries() {
+        for validator_count in [1usize, 4, 7, 50, 51, 100, 1_000, 10_000] {
+            let validators = (0..validator_count)
+                .map(|index| common::Validator {
+                    id: format!("validator-{index}"),
+                    alias: format!("Validator {index}"),
+                    pubkey: format!("pubkey-{index}"),
+                    eth_address: format!("0x{:040x}", index + 1),
+                    stake: 100,
+                    reputation: 100,
+                    status: "active".into(),
+                    performance_score: 500,
+                    contribution_count: 0,
+                })
+                .collect();
+            let validator_set = common::ValidatorSet::new(validators);
+
+            let first = compute_analysis_committee_at_admission(
+                &validator_set,
+                "npm:selector-vector@1.0.0",
+                "content-digest",
+                "authenticated-snapshot-tip".into(),
+                Some("randomness-epoch-7".into()),
+            );
+            let second = compute_analysis_committee_at_admission(
+                &validator_set,
+                "npm:selector-vector@1.0.0",
+                "content-digest",
+                "authenticated-snapshot-tip".into(),
+                Some("randomness-epoch-7".into()),
+            );
+
+            assert_eq!(first.seed, second.seed, "vector {validator_count}");
+            assert_eq!(first.members, second.members, "vector {validator_count}");
+            assert_eq!(first.size, validator_count.min(100) as u32);
+            assert_eq!(first.effective_size, first.size);
+            assert_eq!(first.members.len(), validator_count);
+            assert_eq!(
+                first
+                    .members
+                    .iter()
+                    .collect::<std::collections::HashSet<_>>()
+                    .len(),
+                validator_count,
+                "vector {validator_count} must not duplicate members"
+            );
+        }
     }
 
     fn shielded_signed_request(

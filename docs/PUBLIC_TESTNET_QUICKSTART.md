@@ -171,6 +171,10 @@ Real (non-dev) sandbox + pinned scanner profile are required for your votes to c
 
 ## Alpha limitations
 
+### Certified committee rollout
+
+The default public-alpha path retains compatibility behavior until operators publish a verified validator-set checkpoint. New or rebuilt nodes must receive the exact signed certificate through `CREG_WEAK_SUBJECTIVITY_CHECKPOINT`; do not copy a certificate solely from gossip or one HTTP peer. Rebuild an observer canary first, compare `GET /v1/validator/set-transitions` with two independently controlled peers, and verify that missing, conflicting, long-range, and fork-anchored histories are rejected. `CREG_REQUIRE_CERTIFIED_COMMITTEES=true` is a fail-closed rollout control and must be enabled only after the staged operator checkpoint rehearsal and recovery drill documented in `testnet/OPERATOR.md`.
+
 - **SEC-401** external security audit not yet complete — treat as public alpha, not production.
 - **L1 bridge anchoring** requires operator bridge configuration.
 - **Cross-chain** and **shielded publish** remain disabled in chain spec.

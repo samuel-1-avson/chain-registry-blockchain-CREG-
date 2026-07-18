@@ -47,6 +47,8 @@ $lines = @(
     '  CREG_CHAIN_SPEC_OFFLINE: "false"',
     "  CREG_P2P_LISTEN: /ip4/0.0.0.0/tcp/9000",
     '  CREG_SPEC_SIGNING_PUBKEY: "0437e4adac481519cd6ae66907294c40cfcbf0bdeadd47806f6233be4bd5f82d"',
+    "  CREG_WEAK_SUBJECTIVITY_CHECKPOINT: `${CREG_WEAK_SUBJECTIVITY_CHECKPOINT:-}",
+    "  CREG_REQUIRE_CERTIFIED_COMMITTEES: `${CREG_REQUIRE_CERTIFIED_COMMITTEES:-false}",
     "  RUST_LOG: info,chain_registry_node=debug",
     "",
     "services:"

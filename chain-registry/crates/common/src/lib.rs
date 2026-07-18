@@ -7,8 +7,11 @@ pub mod error;
 pub mod feature_flags;
 pub mod hot_key;
 pub mod intelligence;
+pub mod ownership;
 pub mod package;
 pub mod shielded_wire;
+pub mod transparency_log;
+pub mod validator_snapshot;
 pub mod verdict;
 
 /// gRPC and Protobuf definitions (Generated Choice)
@@ -22,8 +25,11 @@ pub use error::*;
 pub use feature_flags::*;
 pub use hot_key::*;
 pub use intelligence::*;
+pub use ownership::*;
 pub use package::*;
 pub use shielded_wire::*;
+pub use transparency_log::*;
+pub use validator_snapshot::*;
 pub use verdict::*;
 
 // ── Cryptographic helpers ─────────────────────────────────────────────────────
@@ -100,7 +106,9 @@ pub struct ValidatorSet {
     pub validators: Vec<Validator>,
 }
 
-fn default_perf_score() -> u32 { 500 }
+fn default_perf_score() -> u32 {
+    500
+}
 
 impl Default for Validator {
     fn default() -> Self {
@@ -175,5 +183,10 @@ pub enum GossipMessage {
         nonce: String,
         evm_signature: String,
         ed25519_signature: String,
+    },
+    /// A quorum-signed validator-set transition. Receivers must verify the
+    /// certificate against their own persisted prior set before accepting it.
+    ValidatorSetTransition {
+        snapshot: AuthenticatedValidatorSetSnapshot,
     },
 }

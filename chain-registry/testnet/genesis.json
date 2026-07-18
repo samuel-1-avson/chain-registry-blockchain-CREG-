@@ -52,7 +52,7 @@
     "work_rewards_enabled": true,
     "package_verification_reward_min": "500000000000000000",
     "package_verification_reward_max": "1000000000000000000",
-    "zk_validation_fee": "1000000000000000",
+    "zk_validation_fee": "0",
     "base_premium_rate": 100
   },
   
@@ -93,7 +93,7 @@
   },
   
   "feature_flags": {
-    "zk_validation": true,
+    "zk_validation": false,
     "ml_validation": true,
     "wasm_sandbox": true,
     "private_registries": true,

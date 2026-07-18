@@ -113,7 +113,7 @@ pub struct VoteGossip {
 
     // === HYBRID FIELDS ===
     #[serde(default)]
-    pub is_mandatory: bool,   // true if this voter was in the primary mandatory committee for the package
+    pub is_mandatory: bool, // true if this voter was in the primary mandatory committee for the package
 }
 
 /// Message sent to peers when we write a new block.

@@ -6,7 +6,6 @@ use crate::retry;
 use anyhow::{bail, Result};
 use colored::Colorize;
 use common::{PackageId, VerdictStatus};
-use dialoguer::Confirm;
 use std::time::Duration;
 
 pub async fn run(
@@ -126,35 +125,22 @@ pub async fn run(
                 )
             });
             if has_severe && !allow_unverified {
-                let proceed = Confirm::new()
-                    .with_prompt(format!(
-                        "{} Package '{}' has high-severity security findings. Install anyway?",
-                        "⚠".yellow().bold(),
-                        pkg_id.canonical()
-                    ))
-                    .default(false)
-                    .interact()?;
-                if !proceed {
-                    bail!("Install cancelled due to security findings.");
-                }
+                bail!(
+                    "{} Package '{}' has high-severity security findings. Refusing installation; use --unverified only for an explicitly accepted break-glass exception.",
+                    "✗".red().bold(),
+                    pkg_id.canonical()
+                );
             }
         }
 
         VerdictStatus::Unverified => {
             output::print_verdict(&verdict);
             if !allow_unverified {
-                let proceed = Confirm::new()
-                    .with_prompt(format!(
-                        "{} Package '{}' is not yet chain-verified. Install anyway?",
-                        "⚠".yellow(),
-                        pkg_id.canonical()
-                    ))
-                    .default(false)
-                    .interact()?;
-
-                if !proceed {
-                    bail!("Install cancelled — package not chain-verified.");
-                }
+                bail!(
+                    "{} Package '{}' is not qualified. Refusing installation; use --unverified only for an explicitly accepted break-glass exception.",
+                    "✗".red().bold(),
+                    pkg_id.canonical()
+                );
             } else {
                 println!(
                     "{} installing unverified package (--unverified flag set)",

@@ -179,7 +179,7 @@ impl PendingPool {
                 received_at: Utc::now(),
                 attempt_count: 0,
                 in_progress: false,
-                analysis_committee: None,   // set later by admission or first processor
+                analysis_committee: None, // set later by admission or first processor
             },
         );
         self.persist();
@@ -187,7 +187,11 @@ impl PendingPool {
     }
 
     /// Attach or update the analysis committee for a package (called at admission or first processing).
-    pub fn set_analysis_committee(&mut self, canonical: &str, committee: common::AnalysisCommittee) {
+    pub fn set_analysis_committee(
+        &mut self,
+        canonical: &str,
+        committee: common::AnalysisCommittee,
+    ) {
         if let Some(entry) = self.entries.get_mut(canonical) {
             entry.analysis_committee = Some(committee);
             self.persist();
@@ -195,7 +199,9 @@ impl PendingPool {
     }
 
     pub fn get_committee(&self, canonical: &str) -> Option<&common::AnalysisCommittee> {
-        self.entries.get(canonical).and_then(|e| e.analysis_committee.as_ref())
+        self.entries
+            .get(canonical)
+            .and_then(|e| e.analysis_committee.as_ref())
     }
 
     pub fn contains(&self, canonical: &str) -> bool {

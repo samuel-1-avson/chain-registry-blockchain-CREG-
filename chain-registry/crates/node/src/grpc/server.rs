@@ -46,12 +46,11 @@ fn admission_status(error: crate::package_admission::AdmissionError) -> Status {
             crate::admission_scan::AdmissionScanError::RulesUnavailable
             | crate::admission_scan::AdmissionScanError::ExtractionFailed { .. },
         )
+        | AdmissionError::CertifiedCommitteeRequired(_)
         | AdmissionError::Revoked(_) => Status::failed_precondition(message),
         AdmissionError::AlreadyVerified(_)
         | AdmissionError::AlreadyPending(_)
-        | AdmissionError::NamespaceOwned(_) => {
-            Status::already_exists(message)
-        }
+        | AdmissionError::NamespaceOwned(_) => Status::already_exists(message),
         AdmissionError::Storage(_) => Status::internal(message),
     }
 }
@@ -117,6 +116,17 @@ impl RegistryService for MyRegistry {
             ));
         }
         let pkg_id = common::PackageId::new(&req.ecosystem, &req.name, &req.version);
+        let submitted_at = if req.publisher_issued_at == 0 {
+            if !req.publisher_evm_signature.trim().is_empty() {
+                return Err(Status::invalid_argument(
+                    "publisher_issued_at is required for a dual-key publisher proof",
+                ));
+            }
+            chrono::Utc::now()
+        } else {
+            chrono::DateTime::<chrono::Utc>::from_timestamp(req.publisher_issued_at, 0)
+                .ok_or_else(|| Status::invalid_argument("publisher_issued_at is invalid"))?
+        };
         let publish_req = common::PublishRequest {
             id: pkg_id,
             content_hash: req.content_hash.clone(),
@@ -125,7 +135,7 @@ impl RegistryService for MyRegistry {
             publisher_pubkey: req.publisher_pubkey.clone(),
             signature: req.signature.clone(),
             manifest,
-            submitted_at: chrono::Utc::now(),
+            submitted_at,
             shielded: false,
             key_bundle: None,
             pgp_signature: None,

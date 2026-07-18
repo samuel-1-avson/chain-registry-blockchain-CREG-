@@ -2,7 +2,7 @@ import type {
   ArenaContribution,
   ContributionStatus,
   CreateContributionInput,
-} from "./domain";
+} from "./domain.js";
 
 export interface CreateContributionRecord extends CreateContributionInput {
   actorId: string;

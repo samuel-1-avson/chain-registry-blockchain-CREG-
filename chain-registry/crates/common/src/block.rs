@@ -1,6 +1,9 @@
 // crates/common/src/block.rs
 
-use crate::{sha256_hex, ChainRecord};
+use crate::{
+    sha256_hex, ChainRecord, NamespaceLifecycleEvent, NamespaceLifecycleEventV2,
+    PublisherAuthorizationV1,
+};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -79,6 +82,14 @@ pub struct BlockSignature {
 pub enum Transaction {
     /// A new package accepted by consensus.
     Publish(ChainRecord),
+    /// A package accepted with the complete publisher authorization retained
+    /// for deterministic peer validation and chain rebuilds. This variant is
+    /// mandatory for new publications after the namespace-authority activation
+    /// height; `Publish` remains decodable for historical blocks.
+    PublishAuthorizedV1 {
+        record: ChainRecord,
+        authorization: PublisherAuthorizationV1,
+    },
     /// A previously accepted package has been revoked.
     Revoke {
         package_canonical: String,
@@ -113,6 +124,43 @@ pub enum Transaction {
         #[serde(default)]
         nonce: u64,
     },
+    /// A signed delegation, transfer, or recovery request for a package
+    /// namespace. Nodes independently verify both controller signatures before
+    /// applying the derived namespace-controller index.
+    NamespaceLifecycle(NamespaceLifecycleEvent),
+    /// Chain-bound lifecycle transition used after authoritative namespace
+    /// activation. Recovery carries its independently signed upstream-authority
+    /// certificate so peers and rebuilding nodes never need a live registry
+    /// lookup during consensus replay.
+    NamespaceLifecycleV2(NamespaceLifecycleEventV2),
+}
+
+impl Transaction {
+    /// Package record carried by either the historical or proof-retaining
+    /// publication transaction.
+    pub fn published_record(&self) -> Option<&ChainRecord> {
+        match self {
+            Self::Publish(record) | Self::PublishAuthorizedV1 { record, .. } => Some(record),
+            _ => None,
+        }
+    }
+
+    /// Namespace lifecycle event carried by the historical transaction.
+    pub fn namespace_lifecycle_v1(&self) -> Option<&NamespaceLifecycleEvent> {
+        match self {
+            Self::NamespaceLifecycle(event) => Some(event),
+            _ => None,
+        }
+    }
+
+    /// Chain-bound namespace lifecycle event carried by the authoritative
+    /// transaction variant.
+    pub fn namespace_lifecycle_v2(&self) -> Option<&NamespaceLifecycleEventV2> {
+        match self {
+            Self::NamespaceLifecycleV2(event) => Some(event),
+            _ => None,
+        }
+    }
 }
 
 /// Canonical SHA-256 hash of a transaction (serde_json bytes), matching

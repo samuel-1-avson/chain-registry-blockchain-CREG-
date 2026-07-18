@@ -2,7 +2,7 @@
 
 > Goal: get a node running quickly and verify health/status surfaces.
 
-**Scale testnet (10k+ validators):** [TESTNET_SCALE_ARCHITECTURE.md](../../docs/TESTNET_SCALE_ARCHITECTURE.md)  
+**Current topology:** coordinated research alpha; the scale architecture is future design, not a deployment claim.
 **External validators:** [VALIDATOR_ONBOARDING_CHECKLIST.md](../../docs/VALIDATOR_ONBOARDING_CHECKLIST.md)  
 **Publishers/developers:** [PUBLIC_TESTNET_QUICKSTART.md](../../docs/PUBLIC_TESTNET_QUICKSTART.md)
 
@@ -12,7 +12,7 @@
 |------|------|--------------|----------|
 | A. Single node (native) | 15 min | One node on your machine | Local development |
 | B. Bootstrap host (Docker) | 15–20 min | Shared services + `node-1` | Local bootstrap |
-| C. External validator | 1–2 hours | Join public Sepolia testnet | Genesis Alpha cohort |
+| C. External validator | Not currently open | Future onboarding design | Authorized future cohort |
 
 
 ## Path A: Single node — native
@@ -67,6 +67,12 @@ creg --node-url http://localhost:8080 publish ./my-package.tgz \
   --key-file ~/.creg/publisher.key \
   --publisher-address 0xYourPublisherAddress
 ```
+
+## Certified validator authority (staged rollout)
+
+Leave `CREG_REQUIRE_CERTIFIED_COMMITTEES=false` until operators publish a real signed checkpoint certificate and its independent verification evidence. For a new or rebuilt node, place that exact single-line certificate JSON in `CREG_WEAK_SUBJECTIVITY_CHECKPOINT`; never select a checkpoint from gossip or one HTTP peer.
+
+Start with an observer canary. It must retrieve a certificate history containing the exact configured checkpoint, verify each prior-set quorum and canonical block anchor, and reject missing/conflicting checkpoint history. Compare `GET /v1/validator/set-transitions` with two independently controlled peers before enabling mandatory mode. Follow the staged rollout and recovery procedure in [OPERATOR.md](./OPERATOR.md).
 
 ## Next steps
 

@@ -208,6 +208,102 @@ mod chain_store_tests {
         let found = store.get_package("npm:malicious@1.0.0").unwrap().unwrap();
         assert!(matches!(found.status, PackageStatus::Revoked { .. }));
     }
+
+    #[test]
+    fn durable_finalized_work_survives_restart_retries_and_dead_letters_without_drop() {
+        let dir = TempDir::new().expect("tempdir");
+        let first = Transaction::Revoke {
+            package_canonical: "npm:queue-first@1.0.0".into(),
+            reason: "integration test".into(),
+            revoked_by: "validator-1".into(),
+            evidence_hash: "evidence-first".into(),
+        };
+        let second = Transaction::Revoke {
+            package_canonical: "npm:queue-second@1.0.0".into(),
+            reason: "integration test".into(),
+            revoked_by: "validator-1".into(),
+            evidence_hash: "evidence-second".into(),
+        };
+        let first_id = common::transaction_hash(&first);
+        let second_id = common::transaction_hash(&second);
+
+        {
+            let store = ChainStore::open(dir.path()).expect("open store");
+            assert!(store.enqueue_finalized_work(&first).expect("enqueue first"));
+            assert!(store
+                .enqueue_finalized_work(&second)
+                .expect("enqueue second"));
+        }
+
+        let store = ChainStore::open(dir.path()).expect("restart after enqueue");
+        assert_eq!(
+            store
+                .pending_ready_finalized_work(1)
+                .expect("bounded hydration")
+                .len(),
+            1
+        );
+        assert_eq!(store.finalized_work_stats().expect("stats").active_depth, 2);
+
+        let block = Block {
+            header: BlockHeader {
+                height: 1,
+                prev_hash: store.tip_hash().expect("tip"),
+                merkle_root: common::merkle_root(std::slice::from_ref(&first)),
+                proposer_id: "test-node".into(),
+                timestamp: Utc::now(),
+                validator_set_hash: "dev".into(),
+                vrf_output: None,
+                vrf_proof: None,
+            },
+            transactions: vec![first],
+            pbft_signatures: vec![],
+        };
+        store.insert_block(&block).expect("canonical inclusion");
+        assert_eq!(
+            store
+                .record_finalized_work_failure(&first_id, "already acknowledged")
+                .expect("missing acknowledged work is harmless"),
+            node::chain_store::FinalizedWorkFailureOutcome::Missing
+        );
+        assert_eq!(
+            store
+                .record_finalized_work_failure(&second_id, "attempt one")
+                .expect("first retry"),
+            node::chain_store::FinalizedWorkFailureOutcome::Retrying
+        );
+        drop(store);
+
+        let restarted = ChainStore::open(dir.path()).expect("restart after retry");
+        let stats = restarted
+            .finalized_work_stats()
+            .expect("persisted retry stats");
+        assert_eq!(stats.active_depth, 1);
+        assert_eq!(stats.deferred_depth, 1);
+        assert_eq!(stats.retrying_depth, 1);
+        assert_eq!(stats.retry_attempts, 1);
+        assert!(restarted
+            .pending_ready_finalized_work(10)
+            .expect("backoff respected")
+            .is_empty());
+
+        for retry in 2..=6 {
+            let outcome = restarted
+                .record_finalized_work_failure(&second_id, &format!("attempt {retry}"))
+                .expect("record retry");
+            assert_eq!(
+                outcome,
+                if retry == 6 {
+                    node::chain_store::FinalizedWorkFailureOutcome::DeadLettered
+                } else {
+                    node::chain_store::FinalizedWorkFailureOutcome::Retrying
+                }
+            );
+        }
+        let (active, dead) = restarted.finalized_work_depths().expect("depths");
+        assert_eq!(active, 0);
+        assert_eq!(dead, 1);
+    }
 }
 
 #[cfg(test)]

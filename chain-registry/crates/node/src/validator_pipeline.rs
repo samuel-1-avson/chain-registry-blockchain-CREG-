@@ -149,12 +149,26 @@ async fn process_package(
             revoked_by: node_id,
             evidence_hash: "".into(),
         };
-        let _ = tx_out.send(tx).await;
+        if let Err(error) = crate::finalized_tx::persist_and_notify(&state, &tx_out, tx).await {
+            tracing::error!(
+                "Failed to persist finalized revocation for {}: {}",
+                canonical,
+                error
+            );
+        }
         cleanup(&state, &canonical).await;
         return;
     }
 
-    let (is_validator, node_id, privkey_opt, prev_manifest, prev_canonical, assigned_validator_count, admitted_committee) = {
+    let (
+        is_validator,
+        node_id,
+        privkey_opt,
+        prev_manifest,
+        prev_canonical,
+        assigned_validator_count,
+        admitted_committee,
+    ) = {
         let s = state.read().await;
         let prev = s
             .chain
@@ -181,12 +195,71 @@ async fn process_package(
     // the recorded committee but ineligible for the expensive analysis.
     let committee = match admitted_committee {
         Some(committee) => committee,
-        None => compute_hybrid_committee(&state, &canonical, &req.content_hash, assigned_validator_count).await,
+        None => {
+            compute_hybrid_committee(
+                &state,
+                &canonical,
+                &req.content_hash,
+                assigned_validator_count,
+            )
+            .await
+        }
     };
+    // A committee that claims a transition certificate must be reproducible
+    // from that exact persisted certificate. Do not fall back to the mutable
+    // current validator set: doing so would make fork/replay substitution
+    // possible after a rotation.
+    if !committee.validator_snapshot_certificate_hash.is_empty() {
+        let verified = {
+            let s = state.read().await;
+            let expected_selection_randomness =
+                s.chain
+                    .get_block_by_hash(&committee.validator_snapshot_anchor_block_hash)
+                    .ok()
+                    .flatten()
+                    .filter(|block| block.hash() == committee.validator_snapshot_anchor_block_hash)
+                    .map(|block| {
+                        block.header.vrf_output.unwrap_or_else(|| {
+                            committee.validator_snapshot_anchor_block_hash.clone()
+                        })
+                    });
+            expected_selection_randomness
+                .as_deref()
+                .and_then(|expected_selection_randomness| {
+                    crate::validator_set_history::committee_authority_at(
+                        &s.config.data_dir,
+                        committee.validator_snapshot_height,
+                    )
+                    .ok()
+                    .flatten()
+                    .filter(|snapshot| {
+                        crate::package_admission::verify_analysis_committee_assignment(
+                            snapshot,
+                            &canonical,
+                            &req.content_hash,
+                            expected_selection_randomness,
+                            &committee,
+                        )
+                        .is_ok()
+                    })
+                })
+                .is_some()
+        };
+        if !verified {
+            tracing::error!(
+                canonical = %canonical,
+                "Rejecting package with an invalid certified committee assignment"
+            );
+            cleanup(&state, &canonical).await;
+            return;
+        }
+    }
     {
         let mut sw = state.write().await;
-        sw.pending_pool.set_analysis_committee(&canonical, committee.clone());
-        sw.package_committees.insert(canonical.clone(), committee.clone());
+        sw.pending_pool
+            .set_analysis_committee(&canonical, committee.clone());
+        sw.package_committees
+            .insert(canonical.clone(), committee.clone());
     }
 
     let is_mandatory = committee
@@ -213,7 +286,8 @@ async fn process_package(
             if let Some(privkey) = privkey_opt.as_ref() {
                 tracing::info!(
                     "[Consensus] Running FULL analysis for {} (set size: {}, this node selected)",
-                    canonical, assigned_validator_count
+                    canonical,
+                    assigned_validator_count
                 );
                 match validator::validate_package(
                     &req,
@@ -322,7 +396,7 @@ async fn process_package(
             analysis_bundles: analysis_bundles.clone(),
             evidence_digest: evidence_digest.clone(),
             deterministic_risk: deterministic_risk.clone(),
-            is_mandatory: should_analyze,  // in hybrid: true only for selected mandatory nodes
+            is_mandatory: should_analyze, // in hybrid: true only for selected mandatory nodes
         }
     };
 
@@ -399,7 +473,10 @@ async fn process_package(
     // Get committee for hybrid quorum
     let committee = {
         let sr = state.read().await;
-        sr.package_committees.get(&canonical).cloned().unwrap_or_default()
+        sr.package_committees
+            .get(&canonical)
+            .cloned()
+            .unwrap_or_default()
     };
 
     let max_iterations = vote_timeout_secs
@@ -410,9 +487,7 @@ async fn process_package(
             let sr = state.read().await;
             if let Some(round) = sr.package_round(&canonical) {
                 // Use hybrid quorum logic (mandatory core first, volunteers for liveness)
-                if let Some(outcome) =
-                    aggregate_evidence_votes(round.signatures(), &committee)
-                {
+                if let Some(outcome) = aggregate_evidence_votes(round.signatures(), &committee) {
                     consensus_outcome = Some(outcome);
                     break;
                 }
@@ -424,7 +499,8 @@ async fn process_package(
             let mut sw = state.write().await;
             if let Some(c) = sw.package_committees.get_mut(&canonical) {
                 if c.effective_size < (c.members.len() as u32).min(256) {
-                    let expand_by = 32u32.min((c.members.len() as u32).saturating_sub(c.effective_size));
+                    let expand_by =
+                        32u32.min((c.members.len() as u32).saturating_sub(c.effective_size));
                     c.effective_size += expand_by;
                     // Note: in real impl, also update pending_pool
                 }
@@ -494,7 +570,8 @@ async fn process_package(
                 let s = state.read().await;
                 for mid in &committee.members {
                     if let Some(v) = s.validator_set.validators.iter().find(|vv| &vv.id == mid) {
-                        committee_for_record.member_performance_at_finalization
+                        committee_for_record
+                            .member_performance_at_finalization
                             .insert(mid.clone(), v.performance_score);
                     }
                 }
@@ -543,11 +620,14 @@ async fn process_package(
                 &final_sigs,
                 &is_mand_flags,
                 &committee,
-            ).await {
+            )
+            .await
+            {
                 Ok(_) => {
                     {
                         let mut s = state.write().await;
-                        s.reward_emissions_succeeded = s.reward_emissions_succeeded.saturating_add(1);
+                        s.reward_emissions_succeeded =
+                            s.reward_emissions_succeeded.saturating_add(1);
                     }
                     tracing::info!(
                         target: "reward_emission",
@@ -579,10 +659,11 @@ async fn process_package(
         ),
     };
 
-    if tx_out.send(tx.clone()).await.is_err() {
+    if let Err(error) = crate::finalized_tx::persist_and_notify(&state, &tx_out, tx.clone()).await {
         tracing::error!(
-            "Finalized-tx channel closed — dropping result for {}",
-            canonical
+            "Finalized work persisted but could not notify block producer for {}: {}",
+            canonical,
+            error
         );
     } else {
         tracing::info!("{} → {}", canonical, outcome_label);
@@ -738,9 +819,15 @@ async fn try_emit_l1_rewards(
         })
         .collect();
 
-    let approvs: Vec<bool> = final_sigs.iter().map(|s| matches!(s.vote, common::ValidatorVote::Approve)).collect();
+    let approvs: Vec<bool> = final_sigs
+        .iter()
+        .map(|s| matches!(s.vote, common::ValidatorVote::Approve))
+        .collect();
     let package_was_good = true; // Verified path
-    let reps: Vec<alloy::primitives::U256> = final_sigs.iter().map(|_| alloy::primitives::U256::from(50u64)).collect();
+    let reps: Vec<alloy::primitives::U256> = final_sigs
+        .iter()
+        .map(|_| alloy::primitives::U256::from(50u64))
+        .collect();
     let mand: Vec<bool> = is_mand_flags.to_vec();
 
     // Setup provider with wallet for tx submission (same as bridge)
@@ -754,14 +841,17 @@ async fn try_emit_l1_rewards(
     let rewards = IValidatorRewards::new(rewards_addr.parse()?, &provider);
 
     // Send the tx (state-changing)
-    let pending = rewards.distributeWorkRewards(
-        canonical.to_string(),
-        validators,
-        approvs,
-        package_was_good,
-        reps,
-        mand,
-    ).send().await?;
+    let pending = rewards
+        .distributeWorkRewards(
+            canonical.to_string(),
+            validators,
+            approvs,
+            package_was_good,
+            reps,
+            mand,
+        )
+        .send()
+        .await?;
 
     let tx_hash = pending.watch().await?;
     tracing::info!(target: "reward_emission", "L1 distributeWorkRewards tx sent for {}: {}", canonical, tx_hash);
@@ -774,7 +864,12 @@ async fn try_emit_l1_rewards(
         let mut s = state.write().await;
         for (i, sig) in final_sigs.iter().enumerate() {
             if is_mand_flags.get(i).copied().unwrap_or(false) {
-                if let Some(v) = s.validator_set.validators.iter_mut().find(|vv| vv.id == sig.validator_id) {
+                if let Some(v) = s
+                    .validator_set
+                    .validators
+                    .iter_mut()
+                    .find(|vv| vv.id == sig.validator_id)
+                {
                     // Small boost for L1-confirmed rewarded mandatory work (decays via other logic)
                     let before = v.performance_score;
                     v.performance_score = (v.performance_score.saturating_add(3)).min(1000);
@@ -806,7 +901,9 @@ async fn compute_hybrid_committee(
 ) -> common::AnalysisCommittee {
     let s = state.read().await;
     let tip = s.chain.tip_hash().unwrap_or_default();
-    let recent_vrf = s.chain.get_block_by_hash(&tip)
+    let recent_vrf = s
+        .chain
+        .get_block_by_hash(&tip)
         .ok()
         .flatten()
         .and_then(|b| b.header.vrf_output.clone());

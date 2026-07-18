@@ -24,6 +24,7 @@ use crate::p2p::P2PCommand;
 
 /// Gossip topic for validator identity registrations.
 pub const REGISTRATION_TOPIC: &str = "creg/v1/validators";
+pub const VALIDATOR_SET_TRANSITIONS_TOPIC: &str = "creg/v1/validator-set-transitions";
 
 const REGISTRATIONS_FILE: &str = "validator-registrations.json";
 
@@ -87,6 +88,31 @@ pub async fn broadcast(proof: RegistrationProof) {
         .await
     {
         tracing::debug!("Failed to enqueue validator registration broadcast: {}", e);
+    }
+}
+
+pub async fn broadcast_validator_set_transition(
+    snapshot: common::AuthenticatedValidatorSetSnapshot,
+) {
+    let Some(sender) = GOSSIP_SENDER.get() else {
+        return;
+    };
+    let data = match serde_json::to_vec(&common::GossipMessage::ValidatorSetTransition { snapshot })
+    {
+        Ok(data) => data,
+        Err(error) => {
+            tracing::warn!("Failed to serialize validator-set transition gossip: {error}");
+            return;
+        }
+    };
+    if let Err(error) = sender
+        .send(P2PCommand::Broadcast {
+            topic: VALIDATOR_SET_TRANSITIONS_TOPIC.into(),
+            data,
+        })
+        .await
+    {
+        tracing::debug!("Failed to enqueue validator-set transition broadcast: {error}");
     }
 }
 

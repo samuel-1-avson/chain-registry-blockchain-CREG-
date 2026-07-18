@@ -10,6 +10,24 @@ use std::sync::{
 };
 use tokio::sync::{mpsc, Mutex};
 
+/// Persist finalized work before its best-effort in-memory notification.
+/// A notification failure leaves the durable entry available for recovery.
+pub async fn persist_and_notify(
+    state: &crate::SharedState,
+    sender: &FinalizedTxSender,
+    tx: Transaction,
+) -> anyhow::Result<bool> {
+    let inserted = {
+        let state = state.read().await;
+        state.chain.enqueue_finalized_work(&tx)?
+    };
+    sender
+        .send(tx)
+        .await
+        .map_err(|_| anyhow::anyhow!("finalized-work notification channel closed"))?;
+    Ok(inserted)
+}
+
 /// Capacity of the finalized-tx channel.
 /// At 5-second block intervals with ~100 tx/block this is comfortable.
 const CHANNEL_CAPACITY: usize = 512;
@@ -52,10 +70,14 @@ pub fn channel() -> (FinalizedTxSender, FinalizedTxReceiver) {
 /// backpressure threshold without dropping an already-finalized transaction.
 pub async fn recv_into_buffer(rx: &FinalizedTxReceiver, buffer: &mut Vec<Transaction>) {
     let mut guard = rx.lock().await;
+    let mut seen: std::collections::HashSet<String> =
+        buffer.iter().map(common::transaction_hash).collect();
     while buffer.len() < PENDING_BLOCK_TX_BUFFER_CAP {
         match guard.try_recv() {
             Ok(tx) => {
-                buffer.push(tx);
+                if seen.insert(common::transaction_hash(&tx)) {
+                    buffer.push(tx);
+                }
             }
             Err(mpsc::error::TryRecvError::Empty) => break,
             Err(mpsc::error::TryRecvError::Disconnected) => break,

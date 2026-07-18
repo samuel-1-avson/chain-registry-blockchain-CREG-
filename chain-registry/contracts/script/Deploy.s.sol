@@ -71,7 +71,8 @@ contract DeployChainRegistry is Script {
         pinningRewards = new PinningRewards(address(cregToken));
 
         // Local Anvil deployments use a permissive verifier so the bridge path
-        // can exercise rollup settlement without a production Groth16 key set.
+        // can exercise retired legacy batch-settlement research without a
+        // production Groth16 key set. It is not a rollup deployment path.
         require(testnetMode, "DevZKVerifier requires TESTNET_MODE=true");
         require(block.chainid == 31337, "DevZKVerifier only allowed on Anvil chain 31337");
         zkVerifier = address(new DevZKVerifier());

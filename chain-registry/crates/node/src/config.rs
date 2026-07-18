@@ -154,6 +154,12 @@ pub struct NodeConfig {
     /// network identity hash so a node configured for one chain cannot
     /// silently join another.
     pub chain_id: String,
+    /// Canonical 64-character network genesis identity used in all new
+    /// namespace-authority signatures.
+    pub network_genesis_hash: String,
+    /// Consensus-committed activation height for proof-retaining namespace
+    /// ownership transactions. `None` keeps compatibility mode enabled.
+    pub namespace_authority_activation_height: Option<u64>,
     /// HTTP bind address for the REST API.
     pub listen_addr: String,
     /// Persistent data directory (chain + pending pool).
@@ -236,6 +242,15 @@ impl NodeConfig {
 
         let mut config = Self {
             chain_id: env("CREG_CHAIN_ID", ""),
+            network_genesis_hash: env("CREG_GENESIS_HASH", "")
+                .trim()
+                .trim_start_matches("0x")
+                .to_ascii_lowercase(),
+            namespace_authority_activation_height: std::env::var(
+                "CREG_NAMESPACE_AUTHORITY_ACTIVATION_HEIGHT",
+            )
+            .ok()
+            .and_then(|value| value.parse().ok()),
             listen_addr: env("CREG_LISTEN", "0.0.0.0:8080"),
             data_dir: PathBuf::from(env("CREG_DATA_DIR", "./data")),
             node_id: env("CREG_NODE_ID", &Uuid::new_v4().to_string()),
@@ -327,6 +342,24 @@ impl NodeConfig {
                 || trimmed.eq_ignore_ascii_case("0x0000000000000000000000000000000000000000")
         };
 
+        if self.namespace_authority_activation_height.is_some() {
+            let genesis_is_valid = self.network_genesis_hash.len() == 64
+                && self
+                    .network_genesis_hash
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit())
+                && self.network_genesis_hash == self.network_genesis_hash.to_ascii_lowercase();
+            if self.chain_id.trim().is_empty()
+                || !genesis_is_valid
+                || is_zero_like(&self.staking_addr)
+            {
+                errors.push(
+                    "Authoritative namespace activation requires a chain ID, canonical genesis hash, and non-zero staking contract"
+                        .into(),
+                );
+            }
+        }
+
         // A validator node must have a signing key.
         if self.is_validator && self.validator_privkey.is_none() {
             errors.push(
@@ -374,7 +407,7 @@ impl NodeConfig {
         if self.bridge_privkey.is_some() && is_zero_like(&self.governance_addr) {
             errors.push(
                 "CREG_GOVERNANCE_ADDR is the zero address. \
-                 Set CREG_GOVERNANCE_ADDR so the bridge can execute rollup settlement via Governance.sol."
+                 Set CREG_GOVERNANCE_ADDR only for retired legacy batch-settlement research via Governance.sol."
                     .into(),
             );
         }
@@ -514,6 +547,13 @@ impl NodeConfig {
         let mut buf = String::new();
         buf.push_str(self.chain_id.trim());
         buf.push('|');
+        buf.push_str(
+            &self
+                .namespace_authority_activation_height
+                .map(|height| height.to_string())
+                .unwrap_or_else(|| "disabled".to_string()),
+        );
+        buf.push('|');
         buf.push_str(&self.registry_addr.trim().to_lowercase());
         buf.push('|');
         buf.push_str(&self.governance_addr.trim().to_lowercase());
@@ -570,6 +610,11 @@ impl NodeConfig {
     pub fn apply_chain_spec(&mut self, spec: &common::ChainSpec) {
         if self.chain_id.is_empty() {
             self.chain_id = spec.chain_id.clone();
+        }
+        self.namespace_authority_activation_height =
+            spec.consensus_params.namespace_authority_activation_height;
+        if let Ok(hash) = spec.compute_genesis_hash() {
+            self.network_genesis_hash = hash.trim_start_matches("0x").to_ascii_lowercase();
         }
         if self.p2p_seeds.is_empty() {
             self.p2p_seeds = spec.p2p_seeds();
@@ -763,7 +808,9 @@ mod tests {
         cfg.validator_privkey = Some("not-hex".into());
         let errors = cfg.validate();
         assert!(
-            errors.iter().any(|e| e.contains("CREG_VALIDATOR_KEY") && e.contains("valid hex")),
+            errors
+                .iter()
+                .any(|e| e.contains("CREG_VALIDATOR_KEY") && e.contains("valid hex")),
             "expected invalid hex error, got: {:?}",
             errors
         );

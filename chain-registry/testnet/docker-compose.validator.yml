@@ -37,6 +37,10 @@ services:
       CREG_DATA_DIR: /data
       CREG_LISTEN: 0.0.0.0:8080
       CREG_P2P_LISTEN: /ip4/0.0.0.0/tcp/9000
+      # Rollout controls: leave the checkpoint empty until an independently
+      # verified certificate is published and rehearsed by operators.
+      CREG_WEAK_SUBJECTIVITY_CHECKPOINT: ${CREG_WEAK_SUBJECTIVITY_CHECKPOINT:-}
+      CREG_REQUIRE_CERTIFIED_COMMITTEES: ${CREG_REQUIRE_CERTIFIED_COMMITTEES:-false}
       CREG_IPFS_URL: ${CREG_IPFS_URL:-}
       CREG_ML_ENABLED: ${CREG_ML_ENABLED:-true}
       CREG_ML_MODEL_PATH: ${CREG_ML_MODEL_PATH:-/app/models}

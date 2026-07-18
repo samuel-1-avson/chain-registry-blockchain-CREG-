@@ -1,7 +1,10 @@
 # Chain Registry testnet — operator runbook
 
 **Network:** Sepolia (`creg-testnet-1`, L1 chain id `11155111`)  
-**Scale model:** 10,000+ independent validator operators — see [TESTNET_SCALE_ARCHITECTURE.md](../../docs/TESTNET_SCALE_ARCHITECTURE.md)
+**Current topology:** the checked-in Sepolia specification has one validator
+and no bootnodes. It is a coordinated research alpha and has no Byzantine
+tolerance claim. [TESTNET_SCALE_ARCHITECTURE.md](../../docs/TESTNET_SCALE_ARCHITECTURE.md)
+is a future design, not evidence of independently operated validators.
 
 This runbook is for **maintainers** operating edge services, optional seed validators, and cohort onboarding. External validators follow [VALIDATOR_ONBOARDING_CHECKLIST.md](../../docs/VALIDATOR_ONBOARDING_CHECKLIST.md).
 
@@ -125,6 +128,29 @@ Verify: `.\testnet\verify-sepolia-rpc-endpoints.ps1`
 | `CREG_BRIDGE_SELF_APPROVE` | `true` | Set `false` for multi-signer governance anchor path |
 
 Anchors: `GET /v1/bridge/anchors`. Reorgs: `GET /v1/reorgs`.
+
+## Validator-set checkpoint rollout
+
+Before enabling certified committee authority, independently verify a signed validator-set transition certificate: its effective height, prior block hash, prior/next validator-set hashes, and distinct `floor(2n/3)+1` prior-set signatures must all match the canonical chain view.
+
+1. Distribute that exact verified certificate out of band as `CREG_WEAK_SUBJECTIVITY_CHECKPOINT`.
+2. Put the single-line JSON value into the node's environment file, keep `CREG_REQUIRE_CERTIFIED_COMMITTEES=false`, and restart one observer canary.
+3. Compare `GET /v1/validator/set-transitions` on the canary and two independent peers. The exact checkpoint certificate hash and every descendant height/hash must agree.
+4. Rebuild the canary from an empty node data directory. Verify that it retrieves history only from a peer chain containing the exact configured checkpoint and rejects missing, conflicting, or fork-anchored history.
+5. Validate receipt of `creg/v1/validator-set-transitions`; every peer must independently reject replay conflicts, stale height, invalid quorum, and the wrong canonical-tip anchor.
+6. After a successful fleet rehearsal, enable `CREG_REQUIRE_CERTIFIED_COMMITTEES=true` on one admission canary, verify certified assignment proofs, and roll it out gradually.
+
+The checkpoint is a bootstrap trust anchor, not a privileged validator role or an API override. Do not enable mandatory mode without the verified certificate and rehearsal evidence.
+
+### Recovery and rollback
+
+1. Remove a node with checkpoint/authority errors from admission traffic; do not let it choose a newer checkpoint from gossip or a single peer.
+2. Preserve its logs, `validator-set-history.json`, configured checkpoint JSON, and canonical tip hash for incident comparison.
+3. Compare the configured certificate and descendant history with at least two independently controlled operators. A same-height certificate mismatch or anchor mismatch is a security incident, not an automatic longest-chain decision.
+4. Restore the last independently verified checkpoint and rebuild the node. Keep mandatory mode enabled during recovery; disabling it reopens compatibility authority and requires an explicit, documented emergency decision.
+5. Re-admit the node only after its canonical block hashes, certificate history, and certified committee assignments match the rehearsed fleet evidence.
+
+Never silently move the weak-subjectivity checkpoint backward. A checkpoint replacement requires the same independent verification and staged rehearsal as the original rollout.
 
 ---
 

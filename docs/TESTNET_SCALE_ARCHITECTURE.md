@@ -1,10 +1,15 @@
-# Testnet scale architecture (10,000+ validators)
+# Future testnet scale architecture (not a deployment claim)
 
 **Updated:** 2026-06-26  
 **Network:** `creg-testnet-1` on Sepolia  
 **Audience:** Maintainers, operators, and external validator candidates
 
-This document replaces the retired **3-node local lab** as the canonical testnet topology. The public testnet is designed for **Genesis Alpha (10,000 waitlist slots)** and beyond: many independent validator operators, not a fixed maintainer-only trio.
+This is a future-state design document, not a record of deployed topology or
+performance. The checked-in Sepolia specification records one validator and no
+bootnodes; it is a coordinated research alpha with no Byzantine-tolerance or
+decentralization claim. Independent control-domain attestations, conformance
+tests, and public deployment evidence are required before this design can be
+called a testnet topology.
 
 ---
 

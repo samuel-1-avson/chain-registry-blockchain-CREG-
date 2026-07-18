@@ -1,6 +1,10 @@
 # Chain Registry Testnet
 
-Chain spec, bootstrap material, and operator guides for `creg-testnet-1` — **10,000+ validator scale testnet** ([TESTNET_SCALE_ARCHITECTURE.md](../../docs/TESTNET_SCALE_ARCHITECTURE.md)).
+Chain spec, bootstrap material, and operator guides for `creg-testnet-1`.
+The checked-in Sepolia specification records one validator and no bootnodes;
+this is a coordinated research alpha, not a BFT, decentralized, or public
+scale-testnet deployment. [TESTNET_SCALE_ARCHITECTURE.md](../../docs/TESTNET_SCALE_ARCHITECTURE.md)
+is future design only.
 
 **Maintainers:** [docs/WHAT_TO_DO_NEXT.md](../../docs/WHAT_TO_DO_NEXT.md)  
 **Evidence snapshot:** [TESTNET_READINESS_REPORT.md](../TESTNET_READINESS_REPORT.md) (historical; see WHAT_TO_DO_NEXT for current phase)

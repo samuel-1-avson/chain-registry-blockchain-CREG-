@@ -25,7 +25,7 @@ Start at the [project README](../README.md), then use the sections below.
 
 | Document | Audience |
 |----------|----------|
-| [TESTNET_SCALE_ARCHITECTURE.md](./TESTNET_SCALE_ARCHITECTURE.md) | **10k+ validator topology** — start here for scale testnet |
+| [TESTNET_SCALE_ARCHITECTURE.md](./TESTNET_SCALE_ARCHITECTURE.md) | Future scale-topology design — not evidence of a deployed scale testnet |
 | [GENESIS_ALPHA_COHORT_PLAYBOOK.md](./GENESIS_ALPHA_COHORT_PLAYBOOK.md) | Wave 1 cohort operators |
 | [WHITEPAPER.md](./WHITEPAPER.md) | Developers, validators, auditors |
 | [PUBLIC_TESTNET_QUICKSTART.md](./PUBLIC_TESTNET_QUICKSTART.md) | Publishers, developers, validators |
