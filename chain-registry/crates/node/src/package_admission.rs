@@ -381,9 +381,25 @@ pub async fn admit_publish_request(
     }
 
     let canonical = request.id.canonical();
-    let namespace_prefix = common::package_namespace_prefix(&request.id);
+    let namespace_prefix = if request.publisher_authorization_version == 4 {
+        common::authoritative_package_namespace(&request.id)
+            .map_err(|error| AdmissionError::InvalidPackageId(error.to_string()))?
+    } else {
+        common::package_namespace_prefix(&request.id)
+    };
     let ipfs_url = {
         let state = state.read().await;
+        let next_height = state.chain.tip_height().unwrap_or(0).saturating_add(1);
+        let authority_active = state
+            .config
+            .namespace_authority_activation_height
+            .is_some_and(|height| next_height >= height);
+        if authority_active && request.publisher_authorization_version != 4 {
+            return Err(AdmissionError::InvalidPublisherSignature(
+                "Publisher authorization v4 is required after namespace-authority activation"
+                    .into(),
+            ));
+        }
         match state.chain.get_package(&canonical) {
             Ok(Some(record)) => {
                 if matches!(record.status, PackageStatus::Verified) {
@@ -415,11 +431,72 @@ pub async fn admit_publish_request(
         // controller.  A different publisher key may rotate only through the
         // explicit, authenticated key-rotation flow; it may not claim a later
         // version by simply presenting a staked EVM address.
+        let chain_controller = state.chain.publisher_for_prefix(&namespace_prefix);
+        if authority_active {
+            let authorization = common::PublisherAuthorizationV1::from_publish_request(&request);
+            let record = common::ChainRecord {
+                id: request.id.clone(),
+                content_hash: request.content_hash.clone(),
+                ipfs_cid: request.ipfs_cid.clone(),
+                publisher_pubkey: request.publisher_pubkey.clone(),
+                publisher_pubkeys: request.publisher_pubkeys.clone(),
+                threshold: request.threshold,
+                shielded: request.shielded,
+                key_bundle: request.key_bundle.clone(),
+                manifest: Some(request.manifest.clone()),
+                pgp_signature_sha256: request
+                    .pgp_signature
+                    .as_ref()
+                    .map(|value| common::sha256_hex(value.as_bytes()))
+                    .unwrap_or_default(),
+                pgp_public_key_sha256: request
+                    .pgp_public_key
+                    .as_ref()
+                    .map(|value| common::sha256_hex(value.as_bytes()))
+                    .unwrap_or_default(),
+                ..Default::default()
+            };
+            authorization
+                .validate_record_binding(&record)
+                .map_err(|error| AdmissionError::InvalidPublisherSignature(error.to_string()))?;
+            if chain_controller.is_none() {
+                let certificate =
+                    authorization
+                        .authority_certificate
+                        .as_ref()
+                        .ok_or_else(|| {
+                            AdmissionError::InvalidPublisherSignature(
+                        "First namespace claim requires a quorum-certified npm/PyPI authority proof"
+                            .into(),
+                    )
+                        })?;
+                let consensus_config =
+                    crate::namespace_consensus::NamespaceConsensusConfig::from_node_config(
+                        &state.config,
+                    );
+                crate::namespace_consensus::validate_authority_certificate(
+                    &state.chain,
+                    next_height,
+                    &consensus_config,
+                    certificate,
+                    common::NamespaceAuthorityPurpose::Claim,
+                    chrono::Utc::now().timestamp(),
+                )
+                .map_err(|error| AdmissionError::InvalidPublisherSignature(error.to_string()))?;
+            } else if authorization.authority_certificate.is_some() {
+                return Err(AdmissionError::InvalidPublisherSignature(
+                    "An established namespace publish must not replay a first-claim certificate"
+                        .into(),
+                ));
+            }
+        }
         ensure_namespace_controller(
             &namespace_prefix,
             &request.publisher_pubkey,
-            state.chain.publisher_for_prefix(&namespace_prefix),
+            chain_controller,
             state.pending_pool.publisher_for_prefix(&namespace_prefix),
+            active_publish_delegation(&state.chain, &namespace_prefix, &request)
+                .map_err(|error| AdmissionError::Storage(error.to_string()))?,
         )?;
         state.config.ipfs_url.clone()
     };
@@ -447,14 +524,19 @@ pub async fn admit_publish_request(
             &request.publisher_pubkey,
             state.chain.publisher_for_prefix(&namespace_prefix),
             state.pending_pool.publisher_for_prefix(&namespace_prefix),
+            active_publish_delegation(&state.chain, &namespace_prefix, &request)
+                .map_err(|error| AdmissionError::Storage(error.to_string()))?,
         )?;
-        if !state.pending_pool.insert(request.clone()) {
-            return Err(AdmissionError::AlreadyPending(format!(
-                "{} is already pending with the same content hash",
-                canonical
-            )));
+        match state.pending_pool.insert_durable(request.clone()) {
+            Ok(true) => {}
+            Ok(false) => {
+                return Err(AdmissionError::AlreadyPending(format!(
+                    "{} is already pending with the same content hash",
+                    canonical
+                )))
+            }
+            Err(error) => return Err(AdmissionError::Storage(error.to_string())),
         }
-
         // === WIRE REAL COMMITTEE COMPUTATION AT ADMISSION TIME (hybrid model) ===
         // Compute early so all nodes get the same mandatory committee via gossip.
         let tip = state.chain.tip_hash().unwrap_or_default();
@@ -507,9 +589,32 @@ pub async fn admit_publish_request(
                 "Certified, checkpoint-anchored validator snapshot is required for package admission".into(),
             ));
         }
-        state
+        if let Err(error) = state
             .pending_pool
-            .set_analysis_committee(&canonical, committee);
+            .set_analysis_committee_durable(&canonical, committee)
+        {
+            state.pending_pool.remove(&canonical);
+            return Err(AdmissionError::Storage(error.to_string()));
+        }
+        if !request.publisher_evm_signature.trim().is_empty() {
+            let nonce_consumed = match state.chain.consume_publisher_admission_nonce(
+                &request.publisher_address,
+                &request.publisher_nonce,
+                request.publisher_expires_at,
+            ) {
+                Ok(consumed) => consumed,
+                Err(error) => {
+                    state.pending_pool.remove(&canonical);
+                    return Err(AdmissionError::Storage(error.to_string()));
+                }
+            };
+            if !nonce_consumed {
+                state.pending_pool.remove(&canonical);
+                return Err(AdmissionError::InvalidPublisherSignature(
+                    "Publisher proof nonce has already been used".into(),
+                ));
+            }
+        }
         state.pending_pool.len()
     };
 
@@ -531,7 +636,11 @@ fn ensure_namespace_controller(
     requested_pubkey: &str,
     chain_owner: Option<String>,
     pending_owner: Option<String>,
+    delegated: bool,
 ) -> Result<(), AdmissionError> {
+    if delegated {
+        return Ok(());
+    }
     let Some(owner) = chain_owner.or(pending_owner) else {
         return Ok(());
     };
@@ -544,6 +653,23 @@ fn ensure_namespace_controller(
         "{} is controlled by another publisher; use the signed namespace transfer or key-rotation flow",
         namespace_prefix.trim_end_matches('@')
     )))
+}
+
+fn active_publish_delegation(
+    chain: &crate::chain_store::ChainStore,
+    namespace: &str,
+    request: &PublishRequest,
+) -> anyhow::Result<bool> {
+    let Some(root) = chain.publisher_for_prefix(namespace) else {
+        return Ok(false);
+    };
+    let key = crate::namespace_consensus::delegation_key(namespace, &request.publisher_pubkey);
+    Ok(chain.namespace_delegation(&key)?.is_some_and(|delegation| {
+        delegation.root_ed25519_pubkey == root
+            && delegation.delegate_evm_address == request.publisher_address
+            && delegation.scopes.iter().any(|scope| scope == "publish")
+            && chrono::Utc::now().timestamp() < delegation.expires_at
+    }))
 }
 
 pub async fn verify_publish_auth(
@@ -581,22 +707,6 @@ pub async fn verify_publish_auth(
     ensure_publisher_staked(state, &request.publisher_address)
         .await
         .map_err(AdmissionError::Publisher)?;
-
-    if has_dual_proof {
-        let chain = { state.read().await.chain.clone() };
-        let consumed = chain
-            .consume_publisher_admission_nonce(
-                &request.publisher_address,
-                &request.publisher_nonce,
-                request.publisher_expires_at,
-            )
-            .map_err(|error| AdmissionError::InvalidPublisherSignature(error.to_string()))?;
-        if !consumed {
-            return Err(AdmissionError::InvalidPublisherSignature(
-                "Publisher proof nonce has already been used".into(),
-            ));
-        }
-    }
 
     Ok(())
 }
@@ -927,7 +1037,10 @@ async fn verify_publisher_dual_proof(
     Ok(())
 }
 
-fn recover_evm_personal_signer(message: &str, signature_hex: &str) -> anyhow::Result<String> {
+pub(crate) fn recover_evm_personal_signer(
+    message: &str,
+    signature_hex: &str,
+) -> anyhow::Result<String> {
     use k256::ecdsa::{RecoveryId, Signature as K256Signature, VerifyingKey};
 
     let normalized = signature_hex.trim().trim_start_matches("0x");
@@ -1347,9 +1460,11 @@ rule TestMaliciousPayload {{
     #[test]
     fn namespace_controller_check_rejects_a_different_key_and_accepts_key_casing() {
         let prefix = "npm:controlled-package@";
-        assert!(ensure_namespace_controller(prefix, "AABB", Some("aabb".into()), None,).is_ok());
+        assert!(
+            ensure_namespace_controller(prefix, "AABB", Some("aabb".into()), None, false).is_ok()
+        );
         assert!(matches!(
-            ensure_namespace_controller(prefix, "ccdd", Some("aabb".into()), None),
+            ensure_namespace_controller(prefix, "ccdd", Some("aabb".into()), None, false),
             Err(AdmissionError::NamespaceOwned(_))
         ));
     }

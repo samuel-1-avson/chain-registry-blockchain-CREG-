@@ -181,14 +181,34 @@ fn validate_vote_gossip_message(
     let signature = Signature::try_from(signature_bytes.as_slice())
         .map_err(|_| VoteValidationError::InvalidSignatureFormat)?;
 
-    let message = crate::gossip::canonical_vote_message(
-        &vote.consensus_subject,
-        &vote.content_hash,
-        vote.approved,
-        &vote.validator_pubkey,
-        &common::scanner_profile_digest(&vote.ml_model_version, &vote.analysis_bundles),
-        &vote.evidence_digest,
+    let scanner_profile =
+        common::scanner_profile_digest(&vote.ml_model_version, &vote.analysis_bundles);
+    let vote_metadata = crate::gossip::vote_metadata_digest(
+        vote.is_mandatory,
+        &vote.deterministic_risk,
+        vote.reject_reason.as_deref(),
     );
+    let message = if vote.publisher_authorization_digest.is_empty() {
+        crate::gossip::canonical_vote_message(
+            &vote.consensus_subject,
+            &vote.content_hash,
+            vote.approved,
+            &vote.validator_pubkey,
+            &scanner_profile,
+            &vote.evidence_digest,
+        )
+    } else {
+        crate::gossip::canonical_authorized_vote_message(
+            &vote.consensus_subject,
+            &vote.content_hash,
+            vote.approved,
+            &vote.validator_pubkey,
+            &scanner_profile,
+            &vote.evidence_digest,
+            &vote.publisher_authorization_digest,
+            &vote_metadata,
+        )
+    };
 
     verifying_key
         .verify(message.as_bytes(), &signature)
@@ -510,7 +530,14 @@ impl P2PNode {
                             continue;
                         }
 
-                        if !requires_payload_validation_before_acceptance(topic_str) {
+                        let defer_pre_prepare_validation = topic_str.contains("blocks")
+                            && matches!(
+                                serde_json::from_slice::<common::GossipMessage>(&message.data),
+                                Ok(common::GossipMessage::PbftPrePrepare { .. })
+                            );
+                        if !requires_payload_validation_before_acceptance(topic_str)
+                            && !defer_pre_prepare_validation
+                        {
                             report_validation_result(
                                 &mut self.swarm,
                                 &id,
@@ -856,8 +883,40 @@ impl P2PNode {
                                                 error = %error,
                                                 "Rejected invalid PBFT pre-prepare block"
                                             );
+                                            report_validation_result(
+                                                &mut self.swarm,
+                                                &id,
+                                                &peer_id,
+                                                gossipsub::MessageAcceptance::Reject,
+                                            );
                                             continue;
                                         }
+                                        let namespace_config =
+                                            crate::namespace_consensus::NamespaceConsensusConfig::from_node_config(&s.config);
+                                        if let Err(error) = crate::namespace_consensus::validate_block(
+                                            &s.chain,
+                                            &block,
+                                            &namespace_config,
+                                        ) {
+                                            tracing::warn!(
+                                                peer = %peer_id,
+                                                error = %error,
+                                                "Rejected PBFT pre-prepare with invalid namespace transition"
+                                            );
+                                            report_validation_result(
+                                                &mut self.swarm,
+                                                &id,
+                                                &peer_id,
+                                                gossipsub::MessageAcceptance::Reject,
+                                            );
+                                            continue;
+                                        }
+                                        report_validation_result(
+                                            &mut self.swarm,
+                                            &id,
+                                            &peer_id,
+                                            gossipsub::MessageAcceptance::Accept,
+                                        );
                                         if let Err(e) = s.pbft_engine.start_round(block.clone(), vs.into()) {
                                             tracing::warn!("Failed to start PBFT round: {}", e);
                                         } else {
@@ -974,15 +1033,20 @@ impl P2PNode {
                                             // Finalized!
                                             tracing::info!("[PBFT] Block {} finalised by quorum", &block_hash[..12]);
                                             if let Some(final_block) = s.pbft_engine.get_finalised_block(&block_hash) {
-                                                match s.chain.insert_block_with_outcome(&final_block) {
+                                                let inserted = match s.chain.insert_block_with_outcome(&final_block) {
                                                     Ok(outcome) => {
                                                         if let Some(replaced) = outcome.replaced_hash {
                                                             s.record_reorg(1, vec![replaced], outcome.hash.clone());
                                                         }
+                                                        true
                                                     }
                                                     Err(e) => {
                                                         tracing::error!("[PBFT] Failed to insert finalised block: {}", e);
+                                                        false
                                                     }
+                                                };
+                                                if !inserted {
+                                                    continue;
                                                 }
                                                 s.publisher_index.apply_block(&final_block);
                                                 s.on_block_committed(&final_block);
@@ -1181,6 +1245,7 @@ mod tests {
         crate::gossip::VoteGossip {
             consensus_subject: "npm/pkg@1.0.0".into(),
             content_hash: "deadbeef".into(),
+            publisher_authorization_digest: String::new(),
             validator_id: validator_id.into(),
             validator_pubkey,
             ml_model_version,

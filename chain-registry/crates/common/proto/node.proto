@@ -75,6 +75,15 @@ message SubmitRequest {
     string publisher_staking_contract = 24;
     // Unix timestamp (seconds) included in the v2/v3 publisher signature.
     int64 publisher_issued_at = 25;
+    // CR-07 proof-retaining publisher authorization v4.
+    uint32 publisher_authorization_version = 26;
+    string publisher_genesis_hash = 27;
+    string ownership_proof_json = 28;
+    string namespace_authority_certificate_json = 29;
+    bool shielded = 30;
+    string key_bundle = 31;
+    string pgp_signature = 32;
+    string pgp_public_key = 33;
 }
 
 message SubmitResponse {

@@ -65,7 +65,7 @@ impl PublisherIndex {
 
     fn apply_tx(&mut self, tx: &Transaction, timestamp: DateTime<Utc>) {
         match tx {
-            Transaction::Publish(record) => {
+            Transaction::Publish(record) | Transaction::PublishAuthorizedV1 { record, .. } => {
                 let pubkey = record.publisher_pubkey.clone();
                 let canonical = record.id.canonical();
 

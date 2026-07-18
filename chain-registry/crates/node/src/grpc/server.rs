@@ -116,6 +116,29 @@ impl RegistryService for MyRegistry {
             ));
         }
         let pkg_id = common::PackageId::new(&req.ecosystem, &req.name, &req.version);
+        let ownership_proof = if req.ownership_proof_json.trim().is_empty() {
+            None
+        } else {
+            Some(
+                serde_json::from_str(&req.ownership_proof_json).map_err(|error| {
+                    Status::invalid_argument(format!("Invalid ownership proof: {error}"))
+                })?,
+            )
+        };
+        let namespace_authority_certificate =
+            if req.namespace_authority_certificate_json.trim().is_empty() {
+                None
+            } else {
+                Some(
+                    serde_json::from_str(&req.namespace_authority_certificate_json).map_err(
+                        |error| {
+                            Status::invalid_argument(format!(
+                                "Invalid namespace authority certificate: {error}"
+                            ))
+                        },
+                    )?,
+                )
+            };
         let submitted_at = if req.publisher_issued_at == 0 {
             if !req.publisher_evm_signature.trim().is_empty() {
                 return Err(Status::invalid_argument(
@@ -136,10 +159,10 @@ impl RegistryService for MyRegistry {
             signature: req.signature.clone(),
             manifest,
             submitted_at,
-            shielded: false,
-            key_bundle: None,
-            pgp_signature: None,
-            pgp_public_key: None,
+            shielded: req.shielded,
+            key_bundle: (!req.key_bundle.is_empty()).then_some(req.key_bundle.clone()),
+            pgp_signature: (!req.pgp_signature.is_empty()).then_some(req.pgp_signature.clone()),
+            pgp_public_key: (!req.pgp_public_key.is_empty()).then_some(req.pgp_public_key.clone()),
             publisher_pubkeys: req.publisher_pubkeys.clone(),
             signatures: req.signatures.clone(),
             threshold: req.threshold as usize,
@@ -150,7 +173,11 @@ impl RegistryService for MyRegistry {
             manifest_hash: derived_manifest_hash_hex,
             ownership_claim: req.ownership_claim.clone(),
             publisher_chain_id: req.publisher_chain_id.clone(),
+            publisher_genesis_hash: req.publisher_genesis_hash.clone(),
             publisher_staking_contract: req.publisher_staking_contract.clone(),
+            publisher_authorization_version: req.publisher_authorization_version as u16,
+            ownership_proof,
+            namespace_authority_certificate,
             ..Default::default()
         };
 

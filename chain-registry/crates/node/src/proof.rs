@@ -39,10 +39,10 @@ pub fn build_proof(
     };
 
     // Locate the transaction index within the block.
-    let tx_index = block
-        .transactions
-        .iter()
-        .position(|tx| matches!(tx, Transaction::Publish(r) if r.id.canonical() == canonical));
+    let tx_index = block.transactions.iter().position(|tx| {
+        tx.published_record()
+            .is_some_and(|record| record.id.canonical() == canonical)
+    });
 
     let tx_index = match tx_index {
         Some(i) => i,

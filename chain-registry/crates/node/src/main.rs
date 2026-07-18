@@ -21,6 +21,7 @@ mod intelligence;
 mod json_rpc;
 mod l1_quorum;
 mod metrics;
+mod namespace_consensus;
 mod openapi;
 mod p2p;
 mod p2p_rate_limit;
@@ -515,6 +516,14 @@ async fn main() -> Result<()> {
 
     // â”€â”€ Open persistent storage â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     let chain = chain_store::ChainStore::open(&config.data_dir)?;
+    chain.configure_namespace_consensus(
+        namespace_consensus::NamespaceConsensusConfig::from_node_config(&config),
+    )?;
+    if config.namespace_authority_activation_height.is_some() {
+        // Fail closed before serving or joining consensus if canonical history
+        // cannot deterministically rebuild the authoritative namespace state.
+        chain.rebuild_package_index()?;
+    }
     let chain_for_sync = chain.clone();
     let tip = chain.tip_height()?;
     tracing::info!("  chain tip:   height={}", tip);

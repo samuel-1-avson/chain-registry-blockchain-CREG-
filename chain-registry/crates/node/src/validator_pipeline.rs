@@ -348,6 +348,13 @@ async fn process_package(
         }
     };
 
+    let publisher_authorization_digest = if req.publisher_authorization_version == 4 {
+        common::PublisherAuthorizationV1::from_publish_request(&req)
+            .authorization_digest(&req.id, &req.content_hash)
+    } else {
+        String::new()
+    };
+
     let our_sig = {
         use ed25519_dalek::{Signer, SigningKey};
         let key_bytes = match hex::decode(privkey_str) {
@@ -372,18 +379,37 @@ async fn process_package(
         let ml_model_version = ml_validator::DeepScanner::default().model_version();
         let scanner_profile_digest =
             common::scanner_profile_digest(&ml_model_version, &analysis_bundles);
+        let reject_reason = match &vote {
+            ValidatorVote::Approve => None,
+            ValidatorVote::Reject { reason } => Some(reason.as_str()),
+        };
+        let vote_metadata_digest =
+            crate::gossip::vote_metadata_digest(should_analyze, &deterministic_risk, reject_reason);
 
         // Use the same domain-separated message format for both local records
         // and gossiped votes so synced blocks can verify every validator vote
         // against one canonical payload.
-        let msg = crate::gossip::canonical_vote_message(
-            &canonical,
-            &req.content_hash,
-            approved,
-            &validator_pubkey,
-            &scanner_profile_digest,
-            &evidence_digest,
-        );
+        let msg = if publisher_authorization_digest.is_empty() {
+            crate::gossip::canonical_vote_message(
+                &canonical,
+                &req.content_hash,
+                approved,
+                &validator_pubkey,
+                &scanner_profile_digest,
+                &evidence_digest,
+            )
+        } else {
+            crate::gossip::canonical_authorized_vote_message(
+                &canonical,
+                &req.content_hash,
+                approved,
+                &validator_pubkey,
+                &scanner_profile_digest,
+                &evidence_digest,
+                &publisher_authorization_digest,
+                &vote_metadata_digest,
+            )
+        };
         let signature = signing_key.sign(msg.as_bytes());
 
         common::ValidatorSignature {
@@ -420,6 +446,7 @@ async fn process_package(
         let gossip_vote = crate::gossip::VoteGossip {
             consensus_subject: canonical.clone(),
             content_hash: req.content_hash.clone(),
+            publisher_authorization_digest: publisher_authorization_digest.clone(),
             validator_id: node_id.clone(),
             validator_pubkey: our_sig.validator_pubkey.clone(),
             ml_model_version: our_sig.ml_model_version.clone(),
@@ -590,6 +617,16 @@ async fn process_package(
                 shielded: req.shielded,
                 key_bundle: req.key_bundle.clone(),
                 pgp_fingerprint,
+                pgp_signature_sha256: req
+                    .pgp_signature
+                    .as_ref()
+                    .map(|value| common::sha256_hex(value.as_bytes()))
+                    .unwrap_or_default(),
+                pgp_public_key_sha256: req
+                    .pgp_public_key
+                    .as_ref()
+                    .map(|value| common::sha256_hex(value.as_bytes()))
+                    .unwrap_or_default(),
                 findings,
                 analysis_bundles,
                 evidence_digest,
@@ -597,6 +634,7 @@ async fn process_package(
                 access_count: 0,
                 last_accessed: None,
                 manifest: Some(req.manifest.clone()),
+                threshold: req.threshold,
                 // Full committee data now captured in the immutable on-chain record
                 analysis_committee_size: committee.size,
                 analysis_selection_seed: committee.seed.clone(),
@@ -646,7 +684,25 @@ async fn process_package(
                 }
             }
 
-            (Transaction::Publish(record), "VERIFIED")
+            let transaction = if req.publisher_authorization_version == 4 {
+                let authorization = common::PublisherAuthorizationV1::from_publish_request(&req);
+                if let Err(error) = authorization.validate_record_binding(&record) {
+                    tracing::error!(
+                        canonical = %canonical,
+                        "Refusing to finalize invalid publisher v4 authorization: {}",
+                        error
+                    );
+                    cleanup(&state, &canonical).await;
+                    return;
+                }
+                Transaction::PublishAuthorizedV1 {
+                    record,
+                    authorization,
+                }
+            } else {
+                Transaction::Publish(record)
+            };
+            (transaction, "VERIFIED")
         }
         EvidenceVoteOutcome::Rejected { reason } => (
             common::Transaction::Revoke {

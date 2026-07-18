@@ -1035,8 +1035,15 @@ fn verify_block_signatures(
         .collect();
 
     for (tx_idx, tx) in block.transactions.iter().enumerate() {
-        let record = match tx {
-            Transaction::Publish(r) => r,
+        let (record, publisher_authorization_digest) = match tx {
+            Transaction::Publish(record) => (record, None),
+            Transaction::PublishAuthorizedV1 {
+                record,
+                authorization,
+            } => (
+                record,
+                Some(authorization.authorization_digest(&record.id, &record.content_hash)),
+            ),
             _ => continue,
         };
         let canonical = record.id.canonical();
@@ -1092,14 +1099,37 @@ fn verify_block_signatures(
                 Err(_) => continue,
             };
 
-            let message = crate::gossip::canonical_vote_message(
-                &canonical,
-                &record.content_hash,
-                matches!(sig.vote, ValidatorVote::Approve),
-                &sig.validator_pubkey,
-                &common::scanner_profile_digest(&sig.ml_model_version, &sig.analysis_bundles),
-                &sig.evidence_digest,
+            let scanner_profile =
+                common::scanner_profile_digest(&sig.ml_model_version, &sig.analysis_bundles);
+            let reject_reason = match &sig.vote {
+                ValidatorVote::Approve => None,
+                ValidatorVote::Reject { reason } => Some(reason.as_str()),
+            };
+            let vote_metadata = crate::gossip::vote_metadata_digest(
+                sig.is_mandatory,
+                &sig.deterministic_risk,
+                reject_reason,
             );
+            let message = match publisher_authorization_digest.as_deref() {
+                Some(digest) => crate::gossip::canonical_authorized_vote_message(
+                    &canonical,
+                    &record.content_hash,
+                    matches!(sig.vote, ValidatorVote::Approve),
+                    &sig.validator_pubkey,
+                    &scanner_profile,
+                    &sig.evidence_digest,
+                    digest,
+                    &vote_metadata,
+                ),
+                None => crate::gossip::canonical_vote_message(
+                    &canonical,
+                    &record.content_hash,
+                    matches!(sig.vote, ValidatorVote::Approve),
+                    &sig.validator_pubkey,
+                    &scanner_profile,
+                    &sig.evidence_digest,
+                ),
+            };
 
             if vk.verify(message.as_bytes(), &ed_sig).is_ok() {
                 let profile_key = format!(

@@ -247,7 +247,7 @@ async fn tick(state: Arc<RwLock<NodeState>>, last_height: &mut u64) -> anyhow::R
 
         if let Some(b) = block {
             for tx in &b.transactions {
-                if let Transaction::Publish(record) = tx {
+                if let Some(record) = tx.published_record() {
                     if record.status == PackageStatus::Verified {
                         batch_transactions.push(record.clone());
                     }

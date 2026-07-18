@@ -6,6 +6,7 @@
 // ── Public modules (used directly by integration tests) ──────────────────────
 pub mod admission_scan;
 pub mod api;
+pub mod authority_adapter;
 pub mod block_producer;
 pub mod bridge_anchors;
 pub mod chain_store;
@@ -17,6 +18,7 @@ pub mod gossip;
 pub mod intelligence;
 pub mod json_rpc;
 pub mod l1_quorum;
+pub mod namespace_consensus;
 pub mod openapi;
 pub mod p2p;
 pub mod package_admission;

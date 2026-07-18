@@ -692,7 +692,8 @@ impl PbftEngine {
 
 fn transaction_package_canonical(tx: &common::Transaction) -> Option<String> {
     match tx {
-        common::Transaction::Publish(record) => Some(record.id.canonical()),
+        common::Transaction::Publish(record)
+        | common::Transaction::PublishAuthorizedV1 { record, .. } => Some(record.id.canonical()),
         common::Transaction::Revoke {
             package_canonical, ..
         } => Some(package_canonical.clone()),

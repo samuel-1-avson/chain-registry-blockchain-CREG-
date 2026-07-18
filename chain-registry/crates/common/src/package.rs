@@ -762,7 +762,7 @@ impl PublisherAuthorizationV1 {
                     || self
                         .signatures
                         .iter()
-                        .any(|signature| !canonical_signature(signature))))
+                        .any(|signature| !signature.is_empty() && !canonical_signature(signature))))
             || record.threshold != self.threshold
             || record.publisher_pubkeys != self.publisher_pubkeys
         {

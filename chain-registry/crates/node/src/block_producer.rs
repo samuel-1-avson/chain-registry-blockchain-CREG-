@@ -3,6 +3,7 @@
 // finalized-tx buffer. Durable queue migration remains a release gate.
 
 use crate::{chain_store::FinalizedWorkFailureOutcome, finalized_tx, NodeState};
+use anyhow::Context;
 use chrono::Utc;
 use common::{merkle_root, transaction_hash, Block, BlockHeader, Transaction};
 use std::collections::HashSet;
@@ -382,7 +383,8 @@ async fn produce_block(
         prev_hash: s.chain.tip_hash()?,
         merkle_root: merkle_root(&txs),
         proposer_id: node_id.clone(),
-        timestamp: Utc::now(),
+        timestamp: chrono::DateTime::from_timestamp(Utc::now().timestamp(), 0)
+            .expect("current Unix time is representable"),
         validator_set_hash,
         vrf_output,
         vrf_proof,
@@ -393,6 +395,11 @@ async fn produce_block(
         transactions: txs,
         pbft_signatures: vec![],
     };
+
+    let namespace_config =
+        crate::namespace_consensus::NamespaceConsensusConfig::from_node_config(&s.config);
+    crate::namespace_consensus::validate_block(&s.chain, &block, &namespace_config)
+        .context("refusing to propose a block with an invalid namespace transition")?;
 
     let vs = s.validator_set.clone();
     s.pbft_engine.start_round(block.clone(), vs.into())?;
@@ -466,21 +473,25 @@ async fn produce_block(
                             &bh[..12]
                         );
                         if let Some(final_block) = s.pbft_engine.get_finalised_block(&bh) {
-                            match s.chain.insert_block_with_outcome(&final_block) {
+                            let inserted = match s.chain.insert_block_with_outcome(&final_block) {
                                 Ok(outcome) => {
                                     if let Some(replaced) = outcome.replaced_hash {
                                         s.record_reorg(1, vec![replaced], outcome.hash.clone());
                                     }
+                                    true
                                 }
                                 Err(e) => {
                                     tracing::error!(
                                         "[PBFT Proposer] Failed to insert finalised block: {}",
                                         e
                                     );
+                                    false
                                 }
+                            };
+                            if inserted {
+                                s.publisher_index.apply_block(&final_block);
+                                s.on_block_committed(&final_block);
                             }
-                            s.publisher_index.apply_block(&final_block);
-                            s.on_block_committed(&final_block);
                         }
                     }
                 }

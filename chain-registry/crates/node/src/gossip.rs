@@ -47,6 +47,7 @@ impl Default for GossipConfig {
 /// Domain-separation tag for the canonical consensus vote message format.
 /// Bumping the version invalidates any cached signatures from older validators.
 pub const VOTE_MESSAGE_DOMAIN: &str = "creg-vote-v2";
+pub const AUTHORIZED_VOTE_MESSAGE_DOMAIN: &str = "creg-vote-v3";
 
 /// Canonical message that a validator signs when casting a PBFT vote.
 ///
@@ -77,6 +78,47 @@ pub fn canonical_vote_message(
     )
 }
 
+/// Post-activation vote message. The publisher authorization digest commits
+/// to the genesis-bound controller, EVM proof, nonce, package retrieval data,
+/// and multisig policy retained in `PublishAuthorizedV1`.
+#[allow(clippy::too_many_arguments)]
+pub fn canonical_authorized_vote_message(
+    canonical: &str,
+    content_hash: &str,
+    approved: bool,
+    validator_pubkey: &str,
+    scanner_profile_digest: &str,
+    evidence_digest: &str,
+    publisher_authorization_digest: &str,
+    vote_metadata_digest: &str,
+) -> String {
+    format!(
+        "{}|{}|{}|{}|{}|{}|{}|{}|{}",
+        AUTHORIZED_VOTE_MESSAGE_DOMAIN,
+        canonical,
+        content_hash,
+        approved,
+        validator_pubkey,
+        scanner_profile_digest,
+        evidence_digest,
+        publisher_authorization_digest,
+        vote_metadata_digest
+    )
+}
+
+pub fn vote_metadata_digest(
+    is_mandatory: bool,
+    deterministic_risk: &common::DeterministicRiskSummary,
+    reject_reason: Option<&str>,
+) -> String {
+    let payload = serde_json::json!({
+        "is_mandatory": is_mandatory,
+        "deterministic_risk": deterministic_risk,
+        "reject_reason": reject_reason.unwrap_or(""),
+    });
+    common::sha256_hex(&serde_json::to_vec(&payload).expect("vote metadata is JSON serializable"))
+}
+
 /// Message sent to peers when we produce a PBFT vote.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VoteGossip {
@@ -89,6 +131,9 @@ pub struct VoteGossip {
     /// cross-version replay. Serde default keeps wire-format backward compat.
     #[serde(default)]
     pub content_hash: String,
+    /// Empty for historical v2 votes; required for publisher authorization v4.
+    #[serde(default)]
+    pub publisher_authorization_digest: String,
     pub validator_id: String,
     /// Hex-encoded Ed25519 public key of the voting validator.
     pub validator_pubkey: String,

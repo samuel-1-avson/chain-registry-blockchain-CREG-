@@ -53,7 +53,7 @@ pub async fn apply_block(pool: &PgPool, block: &Block) -> Result<()> {
 
     for transaction in &block.transactions {
         match transaction {
-            Transaction::Publish(record) => {
+            Transaction::Publish(record) | Transaction::PublishAuthorizedV1 { record, .. } => {
                 upsert_package(&mut *tx, record).await?;
                 for sig in &record.validator_signatures {
                     upsert_validator_vote(&mut *tx, &record.id.canonical(), sig).await?;

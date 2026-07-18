@@ -32,6 +32,8 @@ const CF_PACKAGES: &str = "packages";
 const CF_NAMESPACE_CONTROLLERS: &str = "namespace_controllers";
 const CF_NAMESPACE_LIFECYCLE_NONCES: &str = "namespace_lifecycle_nonces";
 const CF_APPLIED_NAMESPACE_LIFECYCLE_NONCES: &str = "applied_namespace_lifecycle_nonces";
+const CF_APPLIED_PUBLISHER_AUTHORIZATION_NONCES: &str = "applied_publisher_authorization_nonces";
+const CF_NAMESPACE_DELEGATIONS: &str = "namespace_delegations";
 const CF_PUBLISHER_ADMISSION_NONCES: &str = "publisher_admission_nonces";
 const CF_FINALIZED_WORK: &str = "finalized_work";
 const CF_FINALIZED_WORK_DEAD_LETTER: &str = "finalized_work_dead_letter";
@@ -81,6 +83,8 @@ fn namespace_lifecycle_nonce_key(
 #[derive(Clone)]
 pub struct ChainStore {
     db: Arc<DB>,
+    namespace_consensus:
+        Arc<std::sync::RwLock<crate::namespace_consensus::NamespaceConsensusConfig>>,
     /// RocksDB does not provide a conditional put through this wrapper. This
     /// lock makes check-and-record atomic for concurrent admissions handled by
     /// this node; the durable record then protects restarts. Cross-node replay
@@ -93,6 +97,28 @@ pub struct ChainStore {
 }
 
 impl ChainStore {
+    pub fn configure_namespace_consensus(
+        &self,
+        config: crate::namespace_consensus::NamespaceConsensusConfig,
+    ) -> Result<()> {
+        config.validate()?;
+        let mut current = self
+            .namespace_consensus
+            .write()
+            .map_err(|_| anyhow::anyhow!("namespace consensus configuration lock is poisoned"))?;
+        *current = config;
+        Ok(())
+    }
+
+    pub fn namespace_consensus_config(
+        &self,
+    ) -> Result<crate::namespace_consensus::NamespaceConsensusConfig> {
+        self.namespace_consensus
+            .read()
+            .map(|config| config.clone())
+            .map_err(|_| anyhow::anyhow!("namespace consensus configuration lock is poisoned"))
+    }
+
     pub fn open(data_dir: &Path) -> Result<Self> {
         std::fs::create_dir_all(data_dir)?;
 
@@ -116,6 +142,11 @@ impl ChainStore {
             ColumnFamilyDescriptor::new(CF_NAMESPACE_CONTROLLERS, Options::default()),
             ColumnFamilyDescriptor::new(CF_NAMESPACE_LIFECYCLE_NONCES, Options::default()),
             ColumnFamilyDescriptor::new(CF_APPLIED_NAMESPACE_LIFECYCLE_NONCES, Options::default()),
+            ColumnFamilyDescriptor::new(
+                CF_APPLIED_PUBLISHER_AUTHORIZATION_NONCES,
+                Options::default(),
+            ),
+            ColumnFamilyDescriptor::new(CF_NAMESPACE_DELEGATIONS, Options::default()),
             ColumnFamilyDescriptor::new(CF_PUBLISHER_ADMISSION_NONCES, Options::default()),
             ColumnFamilyDescriptor::new(CF_FINALIZED_WORK, Options::default()),
             ColumnFamilyDescriptor::new(CF_FINALIZED_WORK_DEAD_LETTER, Options::default()),
@@ -128,6 +159,7 @@ impl ChainStore {
 
         let store = Self {
             db: Arc::new(db),
+            namespace_consensus: Arc::new(std::sync::RwLock::new(Default::default())),
             publisher_admission_nonce_lock: Arc::new(std::sync::Mutex::new(())),
             transparency_log_lock: Arc::new(std::sync::Mutex::new(())),
         };
@@ -160,6 +192,8 @@ impl ChainStore {
             CF_NAMESPACE_CONTROLLERS,
             CF_NAMESPACE_LIFECYCLE_NONCES,
             CF_APPLIED_NAMESPACE_LIFECYCLE_NONCES,
+            CF_APPLIED_PUBLISHER_AUTHORIZATION_NONCES,
+            CF_NAMESPACE_DELEGATIONS,
             CF_PUBLISHER_ADMISSION_NONCES,
             CF_FINALIZED_WORK,
             CF_FINALIZED_WORK_DEAD_LETTER,
@@ -172,6 +206,7 @@ impl ChainStore {
 
         Ok(Self {
             db: Arc::new(db),
+            namespace_consensus: Arc::new(std::sync::RwLock::new(Default::default())),
             publisher_admission_nonce_lock: Arc::new(std::sync::Mutex::new(())),
             transparency_log_lock: Arc::new(std::sync::Mutex::new(())),
         })
@@ -304,6 +339,14 @@ impl ChainStore {
             .db
             .cf_handle(CF_APPLIED_NAMESPACE_LIFECYCLE_NONCES)
             .context("cf applied_namespace_lifecycle_nonces")?;
+        let cf_applied_publisher_authorization_nonces = self
+            .db
+            .cf_handle(CF_APPLIED_PUBLISHER_AUTHORIZATION_NONCES)
+            .context("cf applied_publisher_authorization_nonces")?;
+        let cf_namespace_delegations = self
+            .db
+            .cf_handle(CF_NAMESPACE_DELEGATIONS)
+            .context("cf namespace_delegations")?;
         let cf_finalized_work = self
             .db
             .cf_handle(CF_FINALIZED_WORK)
@@ -338,6 +381,19 @@ impl ChainStore {
         for key in applied_nonce_keys {
             batch.delete_cf(&cf_applied_namespace_lifecycle_nonces, key);
         }
+        for cf in [
+            &cf_applied_publisher_authorization_nonces,
+            &cf_namespace_delegations,
+        ] {
+            let keys: Vec<Box<[u8]>> = self
+                .db
+                .iterator_cf(cf, rocksdb::IteratorMode::Start)
+                .filter_map(|item| item.ok().map(|(key, _)| key))
+                .collect();
+            for key in keys {
+                batch.delete_cf(cf, key);
+            }
+        }
         self.db.write(batch)?;
 
         // Replay the canonical chain. insert_block re-indexes Publish /
@@ -353,6 +409,9 @@ impl ChainStore {
     }
 
     pub fn insert_block(&self, block: &Block) -> Result<()> {
+        let namespace_config = self.namespace_consensus_config()?;
+        let namespace_effects =
+            crate::namespace_consensus::validate_block(self, block, &namespace_config)?;
         let hash = block.hash();
         let bytes = serde_json::to_vec(block)?;
         let height_key = block.header.height.to_be_bytes();
@@ -374,6 +433,14 @@ impl ChainStore {
             .db
             .cf_handle(CF_APPLIED_NAMESPACE_LIFECYCLE_NONCES)
             .context("cf applied_namespace_lifecycle_nonces")?;
+        let cf_applied_publisher_authorization_nonces = self
+            .db
+            .cf_handle(CF_APPLIED_PUBLISHER_AUTHORIZATION_NONCES)
+            .context("cf applied_publisher_authorization_nonces")?;
+        let cf_namespace_delegations = self
+            .db
+            .cf_handle(CF_NAMESPACE_DELEGATIONS)
+            .context("cf namespace_delegations")?;
         let cf_finalized_work = self
             .db
             .cf_handle(CF_FINALIZED_WORK)
@@ -391,23 +458,25 @@ impl ChainStore {
             // work. Include this delete in the same RocksDB WriteBatch as the
             // block/index writes so a restart cannot lose work after ack.
             batch.delete_cf(&cf_finalized_work, transaction_hash(tx).as_bytes());
-            if let common::Transaction::Publish(record) = tx {
+            if let Some(record) = tx.published_record() {
                 // Update block_hash to the real finalized hash before persisting.
                 let mut rec = record.clone();
                 rec.block_hash = hash.clone();
                 let rec_bytes = serde_json::to_vec(&rec)?;
                 batch.put_cf(&cf_pkg, rec.id.canonical().as_bytes(), &rec_bytes);
-                let namespace = common::package_namespace_prefix(&rec.id);
-                if self
-                    .db
-                    .get_cf(&cf_namespace_controllers, namespace.as_bytes())?
-                    .is_none()
-                {
-                    batch.put_cf(
-                        &cf_namespace_controllers,
-                        namespace.as_bytes(),
-                        rec.publisher_pubkey.as_bytes(),
-                    );
+                if matches!(tx, common::Transaction::Publish(_)) {
+                    let namespace = common::package_namespace_prefix(&rec.id);
+                    if self
+                        .db
+                        .get_cf(&cf_namespace_controllers, namespace.as_bytes())?
+                        .is_none()
+                    {
+                        batch.put_cf(
+                            &cf_namespace_controllers,
+                            namespace.as_bytes(),
+                            rec.publisher_pubkey.as_bytes(),
+                        );
+                    }
                 }
             }
             if let common::Transaction::Revoke {
@@ -507,6 +576,31 @@ impl ChainStore {
                     );
                 }
             }
+        }
+
+        for (namespace, state) in namespace_effects.controllers {
+            batch.put_cf(
+                &cf_namespace_controllers,
+                namespace.as_bytes(),
+                serde_json::to_vec(&state)?,
+            );
+        }
+        for (key, delegation) in namespace_effects.delegations {
+            batch.put_cf(
+                &cf_namespace_delegations,
+                key.as_bytes(),
+                serde_json::to_vec(&delegation)?,
+            );
+        }
+        for key in namespace_effects.publisher_nonce_keys {
+            batch.put_cf(
+                &cf_applied_publisher_authorization_nonces,
+                key.as_bytes(),
+                b"",
+            );
+        }
+        for key in namespace_effects.lifecycle_nonce_keys {
+            batch.put_cf(&cf_applied_namespace_lifecycle_nonces, key.as_bytes(), b"");
         }
 
         self.db.write(batch)?;
@@ -620,19 +714,29 @@ impl ChainStore {
             .db
             .cf_handle(CF_NAMESPACE_CONTROLLERS)
             .context("cf namespace_controllers")?;
-        let bytes = serde_json::to_vec(record)?;
-        self.db
-            .put_cf(&cf, record.id.canonical().as_bytes(), &bytes)?;
         // Keep direct package-store users (including maintenance tooling) on
         // the same first-publisher ownership rule as block insertion.  Never
         // overwrite an established controller here; lifecycle events are the
         // only controller-change path.
         let namespace = common::package_namespace_prefix(&record.id);
-        if self
+        let establishes_controller = self
             .db
             .get_cf(&namespace_cf, namespace.as_bytes())?
-            .is_none()
+            .is_none();
+        if establishes_controller
+            && self
+                .namespace_consensus_config()?
+                .activation_height
+                .is_some()
         {
+            anyhow::bail!(
+                "direct package storage cannot establish a post-activation namespace controller"
+            );
+        }
+        let bytes = serde_json::to_vec(record)?;
+        self.db
+            .put_cf(&cf, record.id.canonical().as_bytes(), &bytes)?;
+        if establishes_controller {
             self.db.put_cf(
                 &namespace_cf,
                 namespace.as_bytes(),
@@ -718,6 +822,14 @@ impl ChainStore {
     pub fn publisher_for_prefix(&self, prefix: &str) -> Option<String> {
         if let Some(cf) = self.db.cf_handle(CF_NAMESPACE_CONTROLLERS) {
             if let Ok(Some(controller)) = self.db.get_cf(&cf, prefix.as_bytes()) {
+                if let Ok(state) = serde_json::from_slice::<
+                    crate::namespace_consensus::NamespaceControllerState,
+                >(&controller)
+                {
+                    if !state.root_ed25519_pubkey.is_empty() {
+                        return Some(state.root_ed25519_pubkey);
+                    }
+                }
                 let controller = String::from_utf8_lossy(&controller).trim().to_string();
                 if !controller.is_empty() {
                     return Some(controller);
@@ -737,6 +849,60 @@ impl ChainStore {
             }
         }
         None
+    }
+
+    pub fn namespace_controller_state(
+        &self,
+        namespace: &str,
+    ) -> Result<Option<crate::namespace_consensus::NamespaceControllerState>> {
+        let cf = self
+            .db
+            .cf_handle(CF_NAMESPACE_CONTROLLERS)
+            .context("cf namespace_controllers")?;
+        let Some(bytes) = self.db.get_cf(&cf, namespace.as_bytes())? else {
+            return Ok(None);
+        };
+        if let Ok(state) = serde_json::from_slice(&bytes) {
+            return Ok(Some(state));
+        }
+        let controller = String::from_utf8(bytes.to_vec())
+            .context("legacy namespace controller is not UTF-8")?;
+        if controller.trim().is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(
+            crate::namespace_consensus::NamespaceControllerState::legacy(namespace, &controller),
+        ))
+    }
+
+    pub fn namespace_delegation(
+        &self,
+        key: &str,
+    ) -> Result<Option<crate::namespace_consensus::NamespaceDelegationState>> {
+        let cf = self
+            .db
+            .cf_handle(CF_NAMESPACE_DELEGATIONS)
+            .context("cf namespace_delegations")?;
+        self.db
+            .get_cf(&cf, key.as_bytes())?
+            .map(|bytes| serde_json::from_slice(&bytes).context("decode namespace delegation"))
+            .transpose()
+    }
+
+    pub fn is_publisher_authorization_nonce_applied(&self, key: &str) -> Result<bool> {
+        let cf = self
+            .db
+            .cf_handle(CF_APPLIED_PUBLISHER_AUTHORIZATION_NONCES)
+            .context("cf applied_publisher_authorization_nonces")?;
+        Ok(self.db.get_cf(&cf, key.as_bytes())?.is_some())
+    }
+
+    pub fn is_namespace_lifecycle_nonce_applied(&self, key: &str) -> Result<bool> {
+        let cf = self
+            .db
+            .cf_handle(CF_APPLIED_NAMESPACE_LIFECYCLE_NONCES)
+            .context("cf applied_namespace_lifecycle_nonces")?;
+        Ok(self.db.get_cf(&cf, key.as_bytes())?.is_some())
     }
 
     /// Atomically consume a namespace-lifecycle nonce. The namespace and
@@ -834,6 +1000,50 @@ impl ChainStore {
         };
         let encoded = serde_json::to_vec(&envelope).context("serialize finalized work")?;
         self.db.put_cf(&cf, work_id.as_bytes(), encoded)?;
+        Ok(true)
+    }
+
+    /// Atomically reserve a lifecycle nonce and persist its finalized work.
+    /// This prevents a storage failure from burning a nonce before the event is
+    /// recoverable by the block producer after restart.
+    pub fn enqueue_namespace_lifecycle_work(
+        &self,
+        tx: &Transaction,
+        namespace: &str,
+        current_controller_pubkey: &str,
+        nonce: u64,
+    ) -> Result<bool> {
+        let nonce_key = namespace_lifecycle_nonce_key(namespace, current_controller_pubkey, nonce)?;
+        let _guard = self
+            .publisher_admission_nonce_lock
+            .lock()
+            .map_err(|_| anyhow::anyhow!("publisher admission nonce lock is poisoned"))?;
+        let nonce_cf = self
+            .db
+            .cf_handle(CF_NAMESPACE_LIFECYCLE_NONCES)
+            .context("cf namespace_lifecycle_nonces")?;
+        if self.db.get_cf(&nonce_cf, nonce_key.as_bytes())?.is_some() {
+            return Ok(false);
+        }
+
+        let work_id = transaction_hash(tx);
+        let work_cf = self
+            .db
+            .cf_handle(CF_FINALIZED_WORK)
+            .context("cf finalized_work")?;
+        let envelope = FinalizedWorkEnvelope {
+            schema_version: 1,
+            transaction: tx.clone(),
+            enqueued_at: chrono::Utc::now().to_rfc3339(),
+            retry_count: 0,
+            last_error: None,
+            next_attempt_at: None,
+        };
+        let encoded = serde_json::to_vec(&envelope).context("serialize finalized work")?;
+        let mut batch = rocksdb::WriteBatch::default();
+        batch.put_cf(&nonce_cf, nonce_key.as_bytes(), b"");
+        batch.put_cf(&work_cf, work_id.as_bytes(), encoded);
+        self.db.write(batch)?;
         Ok(true)
     }
 

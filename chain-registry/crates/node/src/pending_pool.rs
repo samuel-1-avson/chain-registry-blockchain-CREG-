@@ -7,6 +7,7 @@ use common::PublishRequest;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+#[derive(Clone)]
 pub struct PendingEntry {
     pub request: PublishRequest,
     pub received_at: DateTime<Utc>,
@@ -99,9 +100,9 @@ impl PendingPool {
         pool
     }
 
-    fn persist(&self) {
+    fn persist_result(&self) -> anyhow::Result<()> {
         let Some(path) = &self.path else {
-            return;
+            return Ok(());
         };
 
         let snapshot: HashMap<String, PersistedEntry> = self
@@ -121,30 +122,20 @@ impl PendingPool {
             })
             .collect();
 
-        let encoded = match serde_json::to_string_pretty(&snapshot) {
-            Ok(json) => json,
-            Err(error) => {
-                tracing::warn!("[PendingPool] Failed to serialize pending pool: {}", error);
-                return;
-            }
-        };
+        let encoded = serde_json::to_string_pretty(&snapshot)?;
 
         let tmp = path.with_extension("json.tmp");
-        if let Err(error) = std::fs::write(&tmp, &encoded) {
-            tracing::warn!(
-                "[PendingPool] Failed to write pending pool temp file {}: {}",
-                tmp.display(),
-                error
-            );
-            return;
-        }
+        std::fs::write(&tmp, &encoded)?;
         if let Err(error) = std::fs::rename(&tmp, path) {
-            tracing::warn!(
-                "[PendingPool] Failed to commit pending pool {}: {}",
-                path.display(),
-                error
-            );
             let _ = std::fs::remove_file(&tmp);
+            return Err(error.into());
+        }
+        Ok(())
+    }
+
+    fn persist(&self) {
+        if let Err(error) = self.persist_result() {
+            tracing::warn!("[PendingPool] Failed to persist pending pool: {}", error);
         }
     }
 
@@ -155,6 +146,16 @@ impl PendingPool {
     /// If the same canonical exists but with a *different* content hash
     /// (i.e. a resubmission with changed content), it replaces the old entry.
     pub fn insert(&mut self, request: PublishRequest) -> bool {
+        match self.insert_durable(request) {
+            Ok(inserted) => inserted,
+            Err(error) => {
+                tracing::warn!("[PendingPool] Durable insert failed: {}", error);
+                false
+            }
+        }
+    }
+
+    pub fn insert_durable(&mut self, request: PublishRequest) -> anyhow::Result<bool> {
         let key = request.id.canonical();
 
         if let Some(existing) = self.entries.get(&key) {
@@ -163,7 +164,7 @@ impl PendingPool {
                     "[PendingPool] Duplicate submission ignored for {} (same content hash)",
                     key
                 );
-                return false;
+                return Ok(false);
             }
             tracing::info!(
                 "[PendingPool] Replacing pending entry for {} (new content hash)",
@@ -172,8 +173,8 @@ impl PendingPool {
         }
 
         tracing::info!("[PendingPool] Inserting package: {}", key);
-        self.entries.insert(
-            key,
+        let previous = self.entries.insert(
+            key.clone(),
             PendingEntry {
                 request,
                 received_at: Utc::now(),
@@ -182,8 +183,18 @@ impl PendingPool {
                 analysis_committee: None, // set later by admission or first processor
             },
         );
-        self.persist();
-        true
+        if let Err(error) = self.persist_result() {
+            match previous {
+                Some(previous) => {
+                    self.entries.insert(key, previous);
+                }
+                None => {
+                    self.entries.remove(&key);
+                }
+            }
+            return Err(error);
+        }
+        Ok(true)
     }
 
     /// Attach or update the analysis committee for a package (called at admission or first processing).
@@ -196,6 +207,28 @@ impl PendingPool {
             entry.analysis_committee = Some(committee);
             self.persist();
         }
+    }
+
+    pub fn set_analysis_committee_durable(
+        &mut self,
+        canonical: &str,
+        committee: common::AnalysisCommittee,
+    ) -> anyhow::Result<()> {
+        let previous = self
+            .entries
+            .get(canonical)
+            .and_then(|entry| entry.analysis_committee.clone());
+        let Some(entry) = self.entries.get_mut(canonical) else {
+            anyhow::bail!("pending package disappeared before committee persistence");
+        };
+        entry.analysis_committee = Some(committee);
+        if let Err(error) = self.persist_result() {
+            if let Some(entry) = self.entries.get_mut(canonical) {
+                entry.analysis_committee = previous;
+            }
+            return Err(error);
+        }
+        Ok(())
     }
 
     pub fn get_committee(&self, canonical: &str) -> Option<&common::AnalysisCommittee> {

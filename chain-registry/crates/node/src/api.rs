@@ -2387,6 +2387,7 @@ async fn get_transaction(
         for tx in &block.transactions {
             let tx_canonical = match tx {
                 common::Transaction::Publish(record) => record.id.canonical(),
+                common::Transaction::PublishAuthorizedV1 { record, .. } => record.id.canonical(),
                 common::Transaction::Revoke {
                     package_canonical, ..
                 } => package_canonical.clone(),
@@ -2397,6 +2398,7 @@ async fn get_transaction(
                     canonical_prefix, ..
                 } => canonical_prefix.clone(),
                 common::Transaction::NamespaceLifecycle(event) => event.namespace.clone(),
+                common::Transaction::NamespaceLifecycleV2(event) => event.namespace.clone(),
             };
 
             if tx_canonical == canonical {
@@ -2517,18 +2519,21 @@ fn is_evm_address_like(s: &str) -> bool {
 fn tx_kind_label(tx: &Transaction) -> &'static str {
     match tx {
         Transaction::Publish(_) => "publish",
+        Transaction::PublishAuthorizedV1 { .. } => "publish-authorized-v1",
         Transaction::Revoke { .. } => "revoke",
         Transaction::Slash { .. } => "slash",
         Transaction::ValidatorJoin { .. } => "validator-join",
         Transaction::ValidatorLeave { .. } => "validator-leave",
         Transaction::RotatePublisherKey { .. } => "rotate-key",
         Transaction::NamespaceLifecycle(_) => "namespace-lifecycle",
+        Transaction::NamespaceLifecycleV2(_) => "namespace-lifecycle-v2",
     }
 }
 
 fn tx_canonical(tx: &Transaction) -> Option<String> {
     match tx {
         Transaction::Publish(rec) => Some(rec.id.canonical()),
+        Transaction::PublishAuthorizedV1 { record, .. } => Some(record.id.canonical()),
         Transaction::Revoke {
             package_canonical, ..
         } => Some(package_canonical.clone()),
@@ -2536,6 +2541,7 @@ fn tx_canonical(tx: &Transaction) -> Option<String> {
             canonical_prefix, ..
         } => Some(canonical_prefix.clone()),
         Transaction::NamespaceLifecycle(event) => Some(event.namespace.clone()),
+        Transaction::NamespaceLifecycleV2(event) => Some(event.namespace.clone()),
         _ => None,
     }
 }
@@ -2549,6 +2555,10 @@ fn tx_touches_address(tx: &Transaction, addr: &str) -> bool {
             validator_id.to_ascii_lowercase() == addr
         }
         Transaction::ValidatorLeave { validator_id } => validator_id.to_ascii_lowercase() == addr,
+        Transaction::PublishAuthorizedV1 { authorization, .. } => {
+            authorization.publisher_address == addr
+        }
+        Transaction::NamespaceLifecycleV2(event) => event.next_controller_evm_address == addr,
         // Publish / ownership lifecycle events use Ed25519 pubkeys, not EVM addresses — skip here.
         _ => false,
     }
@@ -3114,59 +3124,132 @@ async fn rotate_publisher_key(
 // Delegate and transfer are authorized by both controllers over a
 // domain-separated event. Recovery is intentionally unavailable until a
 // registry authority adapter can independently verify its proof.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum NamespaceLifecycleSubmission {
+    V2(common::NamespaceLifecycleEventV2),
+    V1(common::NamespaceLifecycleEvent),
+}
+
 async fn submit_namespace_lifecycle(
     State(state): State<SharedState>,
     Extension(tx_sender): Extension<FinalizedTxSender>,
-    Json(event): Json<common::NamespaceLifecycleEvent>,
+    Json(submission): Json<NamespaceLifecycleSubmission>,
 ) -> Response {
-    if let Err(error) = event.verify_controller_signatures() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse {
-                error: format!("Invalid namespace lifecycle signatures: {}", error),
-            }),
-        )
-            .into_response();
-    }
-
     let now = chrono::Utc::now();
-    if event.issued_at > now + chrono::Duration::minutes(5)
-        || event.expires_at <= now
-        || event.expires_at > now + chrono::Duration::hours(24)
-    {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse {
-                error: "Namespace lifecycle event is outside the permitted validity window".into(),
-            }),
-        )
-            .into_response();
-    }
-    if matches!(event.action, common::NamespaceLifecycleAction::Recover) {
-        return (
-            StatusCode::CONFLICT,
-            Json(ErrorResponse {
-                error: "Namespace recovery requires a verified npm/PyPI authority proof; no authority adapter is enabled".into(),
-            }),
-        )
-            .into_response();
-    }
-
-    let nonce_consumed = {
-        let state = state.read().await;
-        let Some(controller) = state.chain.publisher_for_prefix(&event.namespace) else {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(ErrorResponse {
-                    error: format!(
-                        "Namespace {} has no established controller",
-                        event.namespace
-                    ),
-                }),
+    let (tx, namespace, current_controller, nonce) = match submission {
+        NamespaceLifecycleSubmission::V1(event) => {
+            let activation = {
+                let state = state.read().await;
+                let next_height = state.chain.tip_height().unwrap_or(0).saturating_add(1);
+                state
+                    .config
+                    .namespace_authority_activation_height
+                    .is_some_and(|height| next_height >= height)
+            };
+            if activation {
+                return (
+                    StatusCode::CONFLICT,
+                    Json(ErrorResponse {
+                        error: "Legacy lifecycle v1 is retired after namespace-authority activation; submit the chain-bound v2 event".into(),
+                    }),
+                )
+                    .into_response();
+            }
+            if let Err(error) = event.verify_controller_signatures() {
+                return bad_request(format!("Invalid namespace lifecycle signatures: {error}"));
+            }
+            if event.issued_at > now + chrono::Duration::minutes(5)
+                || event.expires_at <= now
+                || event.expires_at > now + chrono::Duration::hours(24)
+            {
+                return bad_request(
+                    "Namespace lifecycle event is outside the permitted validity window",
+                );
+            }
+            if matches!(event.action, common::NamespaceLifecycleAction::Recover) {
+                return (
+                    StatusCode::CONFLICT,
+                    Json(ErrorResponse {
+                        error: "Legacy recovery has no replay-verifiable certificate and remains disabled".into(),
+                    }),
+                )
+                    .into_response();
+            }
+            (
+                common::Transaction::NamespaceLifecycle(event.clone()),
+                event.namespace,
+                event.current_controller_ed25519_pubkey,
+                event.nonce,
             )
-                .into_response();
+        }
+        NamespaceLifecycleSubmission::V2(event) => {
+            if let Err(error) = event.verify_controller_signatures() {
+                return bad_request(format!(
+                    "Invalid namespace lifecycle v2 signatures: {error}"
+                ));
+            }
+            let now_seconds = now.timestamp();
+            if event.issued_at > now_seconds.saturating_add(300)
+                || event.expires_at <= now_seconds
+                || event.expires_at > now_seconds.saturating_add(86_400)
+            {
+                return bad_request(
+                    "Namespace lifecycle v2 event is outside the permitted validity window",
+                );
+            }
+            let tx = common::Transaction::NamespaceLifecycleV2(event.clone());
+            let preflight = {
+                let state = state.read().await;
+                let height = state.chain.tip_height().unwrap_or(0).saturating_add(1);
+                let block = common::Block {
+                    header: common::BlockHeader {
+                        height,
+                        prev_hash: state.chain.tip_hash().unwrap_or_default(),
+                        merkle_root: common::merkle_root(std::slice::from_ref(&tx)),
+                        proposer_id: "namespace-lifecycle-api-preflight".into(),
+                        timestamp: chrono::DateTime::from_timestamp(now_seconds, 0)
+                            .expect("current Unix time is representable"),
+                        validator_set_hash: common::canonical_validator_set_hash(
+                            &state.validator_set,
+                        ),
+                        vrf_output: None,
+                        vrf_proof: None,
+                    },
+                    transactions: vec![tx.clone()],
+                    pbft_signatures: vec![],
+                };
+                let config = crate::namespace_consensus::NamespaceConsensusConfig::from_node_config(
+                    &state.config,
+                );
+                crate::namespace_consensus::validate_block(&state.chain, &block, &config)
+            };
+            if let Err(error) = preflight {
+                return (
+                    StatusCode::CONFLICT,
+                    Json(ErrorResponse {
+                        error: format!("Namespace lifecycle v2 rejected: {error}"),
+                    }),
+                )
+                    .into_response();
+            }
+            (
+                tx,
+                event.namespace,
+                event.current_controller_ed25519_pubkey,
+                event.nonce,
+            )
+        }
+    };
+
+    let queued = {
+        let state = state.read().await;
+        let Some(controller) = state.chain.publisher_for_prefix(&namespace) else {
+            return not_found(format!(
+                "Namespace {namespace} has no established controller"
+            ));
         };
-        if !controller.eq_ignore_ascii_case(&event.current_controller_ed25519_pubkey) {
+        if !controller.eq_ignore_ascii_case(&current_controller) {
             return (
                 StatusCode::FORBIDDEN,
                 Json(ErrorResponse {
@@ -3176,41 +3259,33 @@ async fn submit_namespace_lifecycle(
             )
                 .into_response();
         }
-        match state.chain.consume_namespace_lifecycle_nonce(
-            &event.namespace,
-            &event.current_controller_ed25519_pubkey,
-            event.nonce,
-        ) {
-            Ok(value) => value,
-            Err(error) => {
-                return server_err(format!(
-                    "Failed to consume namespace lifecycle nonce: {}",
-                    error
-                ));
-            }
-        }
+        state
+            .chain
+            .enqueue_namespace_lifecycle_work(&tx, &namespace, &current_controller, nonce)
     };
-    if !nonce_consumed {
-        return (
-            StatusCode::CONFLICT,
-            Json(ErrorResponse {
-                error: "Namespace lifecycle nonce has already been used".into(),
-            }),
-        )
-            .into_response();
+    match queued {
+        Ok(true) => {}
+        Ok(false) => {
+            return (
+                StatusCode::CONFLICT,
+                Json(ErrorResponse {
+                    error: "Namespace lifecycle nonce has already been used".into(),
+                }),
+            )
+                .into_response()
+        }
+        Err(error) => {
+            return server_err(format!(
+                "Failed to persist namespace lifecycle event: {error}"
+            ))
+        }
     }
-
-    if let Err(error) = crate::finalized_tx::persist_and_notify(
-        &state,
-        &tx_sender,
-        common::Transaction::NamespaceLifecycle(event),
-    )
-    .await
-    {
-        return server_err(format!(
-            "Failed to queue namespace lifecycle event: {}",
-            error
-        ));
+    if tx_sender.send(tx).await.is_err() {
+        tracing::warn!(
+            namespace = %namespace,
+            nonce,
+            "Namespace lifecycle event is durable but its in-memory notification was deferred"
+        );
     }
 
     Json(serde_json::json!({
@@ -3387,6 +3462,8 @@ pub struct VoteMessage {
     /// cross-version replay. Defaults to empty for backwards compatibility.
     #[serde(default)]
     pub content_hash: String,
+    #[serde(default)]
+    pub publisher_authorization_digest: String,
     pub validator_id: String,
     pub phase: String,
     /// Hex-encoded Ed25519 signature of `gossip::canonical_vote_message(...)`.
@@ -3534,14 +3611,34 @@ async fn receive_vote(
         // Canonical domain-separated vote message — must match exactly what
         // validator_pipeline.rs::gossip_sig produces via
         // gossip::canonical_vote_message.
-        let msg = crate::gossip::canonical_vote_message(
-            &vote.consensus_subject,
-            &vote.content_hash,
-            vote.approved,
-            &vote.validator_pubkey,
-            &common::scanner_profile_digest(&vote.ml_model_version, &vote.analysis_bundles),
-            &vote.evidence_digest,
+        let scanner_profile =
+            common::scanner_profile_digest(&vote.ml_model_version, &vote.analysis_bundles);
+        let vote_metadata = crate::gossip::vote_metadata_digest(
+            vote.is_mandatory,
+            &vote.deterministic_risk,
+            vote.reject_reason.as_deref(),
         );
+        let msg = if vote.publisher_authorization_digest.is_empty() {
+            crate::gossip::canonical_vote_message(
+                &vote.consensus_subject,
+                &vote.content_hash,
+                vote.approved,
+                &vote.validator_pubkey,
+                &scanner_profile,
+                &vote.evidence_digest,
+            )
+        } else {
+            crate::gossip::canonical_authorized_vote_message(
+                &vote.consensus_subject,
+                &vote.content_hash,
+                vote.approved,
+                &vote.validator_pubkey,
+                &scanner_profile,
+                &vote.evidence_digest,
+                &vote.publisher_authorization_digest,
+                &vote_metadata,
+            )
+        };
         if vk.verify(msg.as_bytes(), &sig).is_err() {
             return (
                 StatusCode::UNAUTHORIZED,
@@ -3571,7 +3668,7 @@ async fn receive_vote(
         analysis_bundles: vote.analysis_bundles.clone(),
         evidence_digest: vote.evidence_digest.clone(),
         deterministic_risk: vote.deterministic_risk.clone(),
-        is_mandatory: false, // TODO: extract from vote if available in this context
+        is_mandatory: vote.is_mandatory,
     };
 
     s.record_package_vote(vote.consensus_subject.clone(), sig);
@@ -3833,6 +3930,7 @@ mod tests {
         VoteMessage {
             consensus_subject: canonical.into(),
             content_hash: content_hash.into(),
+            publisher_authorization_digest: String::new(),
             validator_id: validator_id.into(),
             phase: "commit".into(),
             signature: hex::encode(signing_key.sign(message.as_bytes()).to_bytes()),

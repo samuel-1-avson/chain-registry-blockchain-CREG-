@@ -83,14 +83,50 @@ pub async fn run(
     let manifest_hash_hex =
         common::sha256_hex(&serde_json::to_vec(&manifest).context("Failed to serialize manifest")?);
     let publisher_chain_id = std::env::var("CREG_CHAIN_ID").unwrap_or_default();
+    let publisher_genesis_hash = std::env::var("CREG_GENESIS_HASH")
+        .unwrap_or_default()
+        .trim()
+        .trim_start_matches("0x")
+        .to_ascii_lowercase();
     let publisher_staking_contract = std::env::var("CREG_STAKING_ADDR").unwrap_or_default();
     let mut nonce_bytes = [0u8; 16];
     rand::thread_rng().fill_bytes(&mut nonce_bytes);
     let publisher_nonce = hex::encode(nonce_bytes);
     let submitted_at = Utc::now();
     let publisher_expires_at = (submitted_at + chrono::Duration::hours(1)).timestamp() as u64;
-    let ownership_claim = format!("{}:{}", pkg_id.ecosystem, pkg_id.name);
-    let source_hash = std::env::var("CREG_SOURCE_HASH").unwrap_or_else(|_| "unavailable".into());
+    let publisher_authorization_version = if !publisher_chain_id.is_empty()
+        && publisher_genesis_hash.len() == 64
+        && !publisher_staking_contract.is_empty()
+    {
+        4
+    } else {
+        0
+    };
+    let ownership_claim = if publisher_authorization_version == 4 {
+        common::authoritative_package_namespace(&pkg_id)
+            .map_err(|error| anyhow::anyhow!(error))?
+            .trim_end_matches('@')
+            .to_string()
+    } else {
+        format!("{}:{}", pkg_id.ecosystem, pkg_id.name)
+    };
+    let source_hash = std::env::var("CREG_SOURCE_HASH").unwrap_or_else(|_| content_hash.clone());
+    let namespace_authority_certificate: Option<common::CertifiedNamespaceAuthority> =
+        std::env::var("CREG_NAMESPACE_AUTHORITY_CERTIFICATE_PATH")
+            .ok()
+            .map(|path| {
+                let bytes = std::fs::read(&path)
+                    .with_context(|| format!("Cannot read authority certificate {path}"))?;
+                serde_json::from_slice(&bytes)
+                    .with_context(|| format!("Invalid authority certificate {path}"))
+            })
+            .transpose()?;
+    let ownership_proof = namespace_authority_certificate
+        .as_ref()
+        .map(|certificate| certificate.statement.authority_proof.clone());
+
+    // Optional PGP material is hashed into publisher authorization v4.
+    let (pgp_signature, pgp_public_key) = sign_with_pgp_if_configured(&tarball_bytes)?;
 
     // ── 5. Sign: sig = Ed25519(privkey, canonical || content_hash || publisher_address) ─────
     let privkey_bytes = hex::decode(privkey_hex.trim()).context("Invalid private key hex")?;
@@ -98,55 +134,97 @@ pub async fn run(
     use ed25519_dalek::{Signer, SigningKey};
     let signing_key =
         SigningKey::try_from(privkey_bytes.as_slice()).context("Invalid Ed25519 private key")?;
-    let pubkey = signing_key.verifying_key();
-
-    let msg =
-        if !publisher_chain_id.trim().is_empty() && !publisher_staking_contract.trim().is_empty() {
-            common::publish_signature_message_v2(
-                &publisher_chain_id,
-                &publisher_staking_contract,
-                &pkg_id,
-                &content_hash,
-                &source_hash,
-                &manifest_hash_hex,
-                &hex::encode(pubkey.as_bytes()),
-                &publisher_address,
-                &ownership_claim,
-                &publisher_nonce,
-                submitted_at.timestamp(),
-                publisher_expires_at,
-            )
-        } else {
-            common::publish_signature_message(&pkg_id, &content_hash, &publisher_address)
-        };
-    let signature = signing_key.sign(msg.as_bytes());
-
-    let mut publisher_pubkeys = vec![hex::encode(pubkey.as_bytes())];
-    let mut signatures = vec![hex::encode(signature.to_bytes())];
-
+    let primary_pubkey = hex::encode(signing_key.verifying_key().as_bytes());
+    let mut signers = vec![(primary_pubkey.clone(), signing_key)];
     for key_hex in extra_privkeys {
         let key_bytes = hex::decode(key_hex.trim())
             .with_context(|| format!("Invalid extra private key hex: {}", key_hex))?;
         let sk = SigningKey::try_from(key_bytes.as_slice())
             .with_context(|| format!("Invalid Ed25519 extra private key: {}", key_hex))?;
-        let pk = sk.verifying_key();
-        let sig = sk.sign(msg.as_bytes());
-        publisher_pubkeys.push(hex::encode(pk.as_bytes()));
-        signatures.push(hex::encode(sig.to_bytes()));
+        signers.push((hex::encode(sk.verifying_key().as_bytes()), sk));
     }
-
-    // ── 5.5. Optional PGP signing ─────────────────────────────────────────────
-    // If PGP_PRIVATE_KEY_PATH is set, load the armored secret key and sign the
-    // tarball to produce a detached PGP signature over the content hash.
-    let (pgp_signature, pgp_public_key) = sign_with_pgp_if_configured(&tarball_bytes)?;
+    signers.sort_by(|left, right| left.0.cmp(&right.0));
+    signers.dedup_by(|left, right| left.0 == right.0);
+    let publisher_pubkeys: Vec<String> = signers.iter().map(|(key, _)| key.clone()).collect();
+    let threshold = if publisher_pubkeys.len() >= 2 { 2 } else { 1 };
+    let key_bundle_sha256 = key_bundle
+        .as_ref()
+        .map(|value| common::sha256_hex(value.as_bytes()))
+        .unwrap_or_default();
+    let pgp_signature_sha256 = pgp_signature
+        .as_ref()
+        .map(|value| common::sha256_hex(value.as_bytes()))
+        .unwrap_or_default();
+    let pgp_public_key_sha256 = pgp_public_key
+        .as_ref()
+        .map(|value| common::sha256_hex(value.as_bytes()))
+        .unwrap_or_default();
+    let authority_proof_digest = ownership_proof
+        .as_ref()
+        .map(common::NamespaceAuthorityProof::digest)
+        .unwrap_or_default();
+    let msg = if publisher_authorization_version == 4 {
+        common::publish_signature_message_v4(
+            &publisher_chain_id,
+            &publisher_genesis_hash,
+            &publisher_staking_contract,
+            &pkg_id,
+            &content_hash,
+            &source_hash,
+            &manifest_hash_hex,
+            &final_ipfs_cid,
+            shield,
+            &key_bundle_sha256,
+            &pgp_signature_sha256,
+            &pgp_public_key_sha256,
+            &primary_pubkey,
+            &publisher_address,
+            &ownership_claim,
+            &publisher_nonce,
+            submitted_at.timestamp(),
+            publisher_expires_at,
+            threshold,
+            &publisher_pubkeys,
+            &authority_proof_digest,
+        )
+    } else if !publisher_chain_id.is_empty() && !publisher_staking_contract.is_empty() {
+        common::publish_signature_message_v2(
+            &publisher_chain_id,
+            &publisher_staking_contract,
+            &pkg_id,
+            &content_hash,
+            &source_hash,
+            &manifest_hash_hex,
+            &primary_pubkey,
+            &publisher_address,
+            &ownership_claim,
+            &publisher_nonce,
+            submitted_at.timestamp(),
+            publisher_expires_at,
+        )
+    } else {
+        common::publish_signature_message(&pkg_id, &content_hash, &publisher_address)
+    };
+    let signatures: Vec<String> = signers
+        .iter()
+        .map(|(_, signer)| hex::encode(signer.sign(msg.as_bytes()).to_bytes()))
+        .collect();
 
     let request = PublishRequest {
         id: pkg_id.clone(),
         content_hash: content_hash.clone(),
         ipfs_cid: final_ipfs_cid.clone(),
         publisher_address: publisher_address.clone(),
-        publisher_pubkey: publisher_pubkeys[0].clone(),
-        signature: signatures[0].clone(),
+        publisher_pubkey: primary_pubkey.clone(),
+        signature: if publisher_authorization_version == 4 {
+            String::new()
+        } else {
+            signatures[publisher_pubkeys
+                .iter()
+                .position(|key| key == &primary_pubkey)
+                .expect("primary signer is present")]
+            .clone()
+        },
         manifest,
         submitted_at,
         shielded: shield,
@@ -155,14 +233,18 @@ pub async fn run(
         pgp_public_key,
         publisher_pubkeys: publisher_pubkeys.clone(),
         signatures: signatures.clone(),
-        threshold: if publisher_pubkeys.len() >= 2 { 2 } else { 1 },
+        threshold,
         publisher_nonce: publisher_nonce.clone(),
         publisher_expires_at,
         source_hash: source_hash.clone(),
         manifest_hash: manifest_hash_hex.clone(),
         ownership_claim: ownership_claim.clone(),
         publisher_chain_id: publisher_chain_id.clone(),
+        publisher_genesis_hash: publisher_genesis_hash.clone(),
         publisher_staking_contract: publisher_staking_contract.clone(),
+        publisher_authorization_version,
+        ownership_proof,
+        namespace_authority_certificate,
         publisher_evm_signature: std::env::var("CREG_PUBLISHER_EVM_KEY")
             .ok()
             .map(|key| sign_evm_personal_message(&key, &msg))
@@ -190,8 +272,8 @@ pub async fn run(
             content_hash: content_hash.clone(),
             ipfs_cid: final_ipfs_cid,
             publisher_address: publisher_address.clone(),
-            publisher_pubkey: publisher_pubkeys[0].clone(),
-            signature: signatures[0].clone(),
+            publisher_pubkey: request.publisher_pubkey.clone(),
+            signature: request.signature.clone(),
             publisher_attestation_proof: vec![],
             claimed_static_analysis_score: 0,
             claimed_sandbox_safe: false,
@@ -209,6 +291,24 @@ pub async fn run(
             publisher_chain_id: request.publisher_chain_id.clone(),
             publisher_staking_contract: request.publisher_staking_contract.clone(),
             publisher_issued_at: request.submitted_at.timestamp(),
+            publisher_authorization_version: request.publisher_authorization_version as u32,
+            publisher_genesis_hash: request.publisher_genesis_hash.clone(),
+            ownership_proof_json: request
+                .ownership_proof
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()?
+                .unwrap_or_default(),
+            namespace_authority_certificate_json: request
+                .namespace_authority_certificate
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()?
+                .unwrap_or_default(),
+            shielded: request.shielded,
+            key_bundle: request.key_bundle.clone().unwrap_or_default(),
+            pgp_signature: request.pgp_signature.clone().unwrap_or_default(),
+            pgp_public_key: request.pgp_public_key.clone().unwrap_or_default(),
         };
 
         match client.submit_package(grpc_req).await {
@@ -651,22 +751,103 @@ pub async fn sign_offline(
     let manifest_hash =
         common::sha256_hex(&serde_json::to_vec(&manifest).context("Failed to serialize manifest")?);
     let chain_id = std::env::var("CREG_CHAIN_ID").unwrap_or_default();
+    let genesis_hash = std::env::var("CREG_GENESIS_HASH")
+        .unwrap_or_default()
+        .trim()
+        .trim_start_matches("0x")
+        .to_ascii_lowercase();
     let staking_contract = std::env::var("CREG_STAKING_ADDR").unwrap_or_default();
     let mut nonce_bytes = [0u8; 16];
     rand::thread_rng().fill_bytes(&mut nonce_bytes);
     let nonce = hex::encode(nonce_bytes);
     let submitted_at = Utc::now();
     let expires_at = (submitted_at + chrono::Duration::hours(1)).timestamp() as u64;
-    let ownership_claim = format!("{}:{}", pkg_id.ecosystem, pkg_id.name);
-    let source_hash = std::env::var("CREG_SOURCE_HASH").unwrap_or_else(|_| "unavailable".into());
+    let authorization_version =
+        if !chain_id.is_empty() && genesis_hash.len() == 64 && !staking_contract.is_empty() {
+            4
+        } else {
+            0
+        };
+    let ownership_claim = if authorization_version == 4 {
+        common::authoritative_package_namespace(&pkg_id)
+            .map_err(|error| anyhow::anyhow!(error))?
+            .trim_end_matches('@')
+            .to_string()
+    } else {
+        format!("{}:{}", pkg_id.ecosystem, pkg_id.name)
+    };
+    let source_hash = std::env::var("CREG_SOURCE_HASH").unwrap_or_else(|_| content_hash.clone());
+    let namespace_authority_certificate: Option<common::CertifiedNamespaceAuthority> =
+        std::env::var("CREG_NAMESPACE_AUTHORITY_CERTIFICATE_PATH")
+            .ok()
+            .map(|path| {
+                let bytes = std::fs::read(&path)
+                    .with_context(|| format!("Cannot read authority certificate {path}"))?;
+                serde_json::from_slice(&bytes)
+                    .with_context(|| format!("Invalid authority certificate {path}"))
+            })
+            .transpose()?;
+    let ownership_proof = namespace_authority_certificate
+        .as_ref()
+        .map(|certificate| certificate.statement.authority_proof.clone());
+    let (pgp_signature, pgp_public_key) = sign_with_pgp_if_configured(&tarball_bytes)?;
 
     // 5. Sign with Ed25519
     let privkey_bytes = hex::decode(privkey_hex.trim()).context("Invalid private key hex")?;
     let signing_key =
         SigningKey::try_from(privkey_bytes.as_slice()).context("Invalid Ed25519 private key")?;
-    let pubkey = signing_key.verifying_key();
-
-    let msg = if !chain_id.trim().is_empty() && !staking_contract.trim().is_empty() {
+    let primary_pubkey = hex::encode(signing_key.verifying_key().as_bytes());
+    let mut signers = vec![(primary_pubkey.clone(), signing_key)];
+    for key_hex in extra_privkeys {
+        let key_bytes = hex::decode(key_hex.trim())?;
+        let signer = SigningKey::try_from(key_bytes.as_slice())?;
+        signers.push((hex::encode(signer.verifying_key().as_bytes()), signer));
+    }
+    signers.sort_by(|left, right| left.0.cmp(&right.0));
+    signers.dedup_by(|left, right| left.0 == right.0);
+    let publisher_pubkeys: Vec<String> = signers.iter().map(|(key, _)| key.clone()).collect();
+    let threshold = if publisher_pubkeys.len() >= 2 { 2 } else { 1 };
+    let key_bundle_sha256 = key_bundle
+        .as_ref()
+        .map(|value| common::sha256_hex(value.as_bytes()))
+        .unwrap_or_default();
+    let pgp_signature_sha256 = pgp_signature
+        .as_ref()
+        .map(|value| common::sha256_hex(value.as_bytes()))
+        .unwrap_or_default();
+    let pgp_public_key_sha256 = pgp_public_key
+        .as_ref()
+        .map(|value| common::sha256_hex(value.as_bytes()))
+        .unwrap_or_default();
+    let authority_proof_digest = ownership_proof
+        .as_ref()
+        .map(common::NamespaceAuthorityProof::digest)
+        .unwrap_or_default();
+    let msg = if authorization_version == 4 {
+        common::publish_signature_message_v4(
+            &chain_id,
+            &genesis_hash,
+            &staking_contract,
+            &pkg_id,
+            &content_hash,
+            &source_hash,
+            &manifest_hash,
+            &final_ipfs_cid,
+            shield,
+            &key_bundle_sha256,
+            &pgp_signature_sha256,
+            &pgp_public_key_sha256,
+            &primary_pubkey,
+            &publisher_address,
+            &ownership_claim,
+            &nonce,
+            submitted_at.timestamp(),
+            expires_at,
+            threshold,
+            &publisher_pubkeys,
+            &authority_proof_digest,
+        )
+    } else if !chain_id.trim().is_empty() && !staking_contract.trim().is_empty() {
         common::publish_signature_message_v2(
             &chain_id,
             &staking_contract,
@@ -674,7 +855,7 @@ pub async fn sign_offline(
             &content_hash,
             &source_hash,
             &manifest_hash,
-            &hex::encode(pubkey.as_bytes()),
+            &primary_pubkey,
             &publisher_address,
             &ownership_claim,
             &nonce,
@@ -684,29 +865,26 @@ pub async fn sign_offline(
     } else {
         common::publish_signature_message(&pkg_id, &content_hash, &publisher_address)
     };
-    let signature = signing_key.sign(msg.as_bytes());
-
-    let mut publisher_pubkeys = vec![hex::encode(pubkey.as_bytes())];
-    let mut signatures = vec![hex::encode(signature.to_bytes())];
-
-    for key_hex in extra_privkeys {
-        let key_bytes = hex::decode(key_hex.trim())?;
-        let sk = SigningKey::try_from(key_bytes.as_slice())?;
-        let pk = sk.verifying_key();
-        let sig = sk.sign(msg.as_bytes());
-        publisher_pubkeys.push(hex::encode(pk.as_bytes()));
-        signatures.push(hex::encode(sig.to_bytes()));
-    }
-
-    let (pgp_signature, pgp_public_key) = sign_with_pgp_if_configured(&tarball_bytes)?;
+    let signatures: Vec<String> = signers
+        .iter()
+        .map(|(_, signer)| hex::encode(signer.sign(msg.as_bytes()).to_bytes()))
+        .collect();
 
     let request = PublishRequest {
         id: pkg_id.clone(),
         content_hash,
         ipfs_cid: final_ipfs_cid,
         publisher_address: publisher_address.clone(),
-        publisher_pubkey: publisher_pubkeys[0].clone(),
-        signature: signatures[0].clone(),
+        publisher_pubkey: primary_pubkey.clone(),
+        signature: if authorization_version == 4 {
+            String::new()
+        } else {
+            signatures[publisher_pubkeys
+                .iter()
+                .position(|key| key == &primary_pubkey)
+                .expect("primary signer is present")]
+            .clone()
+        },
         manifest,
         submitted_at,
         shielded: shield,
@@ -715,14 +893,18 @@ pub async fn sign_offline(
         pgp_public_key,
         publisher_pubkeys: publisher_pubkeys.clone(),
         signatures: signatures.clone(),
-        threshold: if publisher_pubkeys.len() >= 2 { 2 } else { 1 },
+        threshold,
         publisher_nonce: nonce,
         publisher_expires_at: expires_at,
         source_hash,
         manifest_hash,
         ownership_claim,
         publisher_chain_id: chain_id,
+        publisher_genesis_hash: genesis_hash,
         publisher_staking_contract: staking_contract,
+        publisher_authorization_version: authorization_version,
+        ownership_proof,
+        namespace_authority_certificate,
         publisher_evm_signature: std::env::var("CREG_PUBLISHER_EVM_KEY")
             .ok()
             .map(|key| sign_evm_personal_message(&key, &msg))
@@ -744,7 +926,7 @@ pub async fn sign_offline(
     );
     println!("    Package: {}", pkg_id.canonical());
     println!("    Address: {}", publisher_address);
-    println!("    Pubkey:  {}", publisher_pubkeys[0]);
+    println!("    Pubkey:  {}", primary_pubkey);
     println!();
     println!("  Submit from a networked machine with:");
     println!("    creg submit-signed {}", output_path.display());

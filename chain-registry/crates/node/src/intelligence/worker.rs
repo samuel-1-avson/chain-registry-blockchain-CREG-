@@ -26,7 +26,7 @@ pub fn schedule_for_block(block: &common::Block, data_dir: PathBuf, ipfs_url: Op
     }
 
     for tx in &block.transactions {
-        let Transaction::Publish(record) = tx else {
+        let Some(record) = tx.published_record() else {
             continue;
         };
         if !matches!(record.status, common::PackageStatus::Verified) {
