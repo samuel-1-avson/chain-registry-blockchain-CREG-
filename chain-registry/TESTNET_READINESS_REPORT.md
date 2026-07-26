@@ -149,7 +149,7 @@ Batches verified blocks, computes Merkle roots, generates Groth16 proofs, submit
 libp2p Gossipsub mesh works; sync reaches tip. **Caveats:** the mesh required manual seed corrections (`/dns4/...` not `/ip4/hostname`), the `main.rs` seed-redial robustness fix is in the working tree but **not yet baked into the running image**, and historical validator-set verification during long-range sync is not implemented (ISSUE-016 open).
 
 ### 5.7 Explorer / Frontend — **C+ (65)**
-Full-featured React explorer, cleanly reverse-proxied to the node API in the **main** `docker-compose.yml` (port 3007, operator key injected). **It is not part of the 3-node Sepolia fleet** — you must point it at a node port manually or use the node's embedded `/ui`. Public deployment URLs in the chain spec are placeholders, the governance page is backed by a `501` API (ISSUE-017 open), and the 32 Playwright tests are **not run in CI**.
+Full-featured React explorer, cleanly reverse-proxied to the node API in the **main** `docker-compose.yml` (port 3007). Operator credentials are not embedded in its browser bundle or injected by the public proxy; operator-only reads therefore require trusted server-side tooling. **It is not part of the 3-node Sepolia fleet** — you must point it at a node port manually or use the node's embedded `/ui`. Public deployment URLs in the chain spec are placeholders, the governance page is backed by a `501` API (ISSUE-017 open), and the 32 Playwright tests are **not run in CI**.
 
 ### 5.8 Deployment Infra — **B+ (80)**
 Docker Compose (Sepolia + local), Kubernetes manifests (validators 1–10, ingress, backup), Prometheus scraping, and the signed spec server are all present and coherent — genuinely operations-grade scaffolding.

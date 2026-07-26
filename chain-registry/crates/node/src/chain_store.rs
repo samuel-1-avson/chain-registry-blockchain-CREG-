@@ -10,20 +10,45 @@ use common::{
     ConsistencyProof, InclusionProof, PackageStatus, Transaction, TransparencyEvent, TreeHead,
     TRANSPARENCY_LOG_VERSION,
 };
-use rocksdb::{ColumnFamilyDescriptor, Options, DB};
+use rocksdb::{checkpoint::Checkpoint, ColumnFamilyDescriptor, Options, WriteOptions, DB};
 use semver;
 use sled;
 use std::sync::Arc;
-use std::{collections::HashSet, path::Path};
+use std::{
+    collections::{BTreeMap, HashSet},
+    path::{Path, PathBuf},
+};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct FinalizedWorkEnvelope {
     schema_version: u8,
     transaction: Transaction,
     enqueued_at: String,
+    /// Canonical tip when this node first durably accepted the work. Legacy
+    /// v1 envelopes lack this field and are conservatively rehydrated at the
+    /// current tip.
+    #[serde(default)]
+    submitted_at_height: Option<u64>,
     retry_count: u32,
     last_error: Option<String>,
     next_attempt_at: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct ReorgJournalEntry {
+    height: u64,
+    hash: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct ReorgJournal {
+    schema_version: u8,
+    common_ancestor: u64,
+    ancestor_hash: String,
+    old_branch: Vec<ReorgJournalEntry>,
+    /// Exact pre-reorg authority history. `None` records that the history file
+    /// did not exist, which is distinct from an empty but present history.
+    validator_history: Option<Vec<u8>>,
 }
 
 const CF_BLOCKS_BY_HASH: &str = "blocks_by_hash";
@@ -40,6 +65,9 @@ const CF_FINALIZED_WORK_DEAD_LETTER: &str = "finalized_work_dead_letter";
 const CF_TRANSPARENCY_EVENTS: &str = "transparency_events";
 const CF_TRANSPARENCY_LEAVES: &str = "transparency_leaves";
 const CF_TRANSPARENCY_HEADS: &str = "transparency_heads";
+const CF_REORG_JOURNAL: &str = "reorg_journal";
+const REORG_JOURNAL_KEY: &[u8] = b"active";
+const REORG_FINALIZED_WORK_PREFIX: &[u8] = b"finalized_work\0";
 const MAX_FINALIZED_WORK_RETRIES: u32 = 5;
 
 /// Operational view of the durable finalized-work queue.  Every field is
@@ -66,6 +94,18 @@ pub enum FinalizedWorkFailureOutcome {
     DeadLettered,
 }
 
+fn is_reorg_requeueable_finalized_work(transaction: &Transaction) -> bool {
+    matches!(
+        transaction,
+        Transaction::Publish(_)
+            | Transaction::PublishAuthorizedV1 { .. }
+            | Transaction::Revoke { .. }
+            | Transaction::RotatePublisherKey { .. }
+            | Transaction::NamespaceLifecycle(_)
+            | Transaction::NamespaceLifecycleV2(_)
+    )
+}
+
 fn namespace_lifecycle_nonce_key(
     namespace: &str,
     current_controller_pubkey: &str,
@@ -83,6 +123,9 @@ fn namespace_lifecycle_nonce_key(
 #[derive(Clone)]
 pub struct ChainStore {
     db: Arc<DB>,
+    /// Parent directory of `chain.rocksdb`. Reorg checkpoints must be created
+    /// on this filesystem because RocksDB uses hard links for immutable SSTs.
+    data_dir: Arc<PathBuf>,
     namespace_consensus:
         Arc<std::sync::RwLock<crate::namespace_consensus::NamespaceConsensusConfig>>,
     /// RocksDB does not provide a conditional put through this wrapper. This
@@ -102,11 +145,16 @@ impl ChainStore {
         config: crate::namespace_consensus::NamespaceConsensusConfig,
     ) -> Result<()> {
         config.validate()?;
-        let mut current = self
-            .namespace_consensus
-            .write()
-            .map_err(|_| anyhow::anyhow!("namespace consensus configuration lock is poisoned"))?;
-        *current = config;
+        {
+            let mut current = self.namespace_consensus.write().map_err(|_| {
+                anyhow::anyhow!("namespace consensus configuration lock is poisoned")
+            })?;
+            *current = config;
+        }
+        // `open` restores the old canonical durable state immediately when a
+        // process died during reorg adoption. Rebuild consensus-derived
+        // package state only after the signed namespace configuration exists.
+        self.recover_incomplete_reorg()?;
         Ok(())
     }
 
@@ -117,6 +165,274 @@ impl ChainStore {
             .read()
             .map(|config| config.clone())
             .map_err(|_| anyhow::anyhow!("namespace consensus configuration lock is poisoned"))
+    }
+
+    fn reorg_write_options() -> WriteOptions {
+        let mut options = WriteOptions::default();
+        options.set_sync(true);
+        options
+    }
+
+    fn load_reorg_journal(&self) -> Result<Option<ReorgJournal>> {
+        let cf = self
+            .db
+            .cf_handle(CF_REORG_JOURNAL)
+            .context("cf reorg_journal")?;
+        self.db
+            .get_cf(&cf, REORG_JOURNAL_KEY)?
+            .map(|bytes| serde_json::from_slice(&bytes).context("decode active reorg journal"))
+            .transpose()
+    }
+
+    fn load_reorg_finalized_work_snapshot(&self) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+        let cf = self
+            .db
+            .cf_handle(CF_REORG_JOURNAL)
+            .context("cf reorg_journal")?;
+        let mut entries = Vec::new();
+        for item in self.db.iterator_cf(&cf, rocksdb::IteratorMode::Start) {
+            let (key, value) = item?;
+            if key.as_ref() == REORG_JOURNAL_KEY {
+                continue;
+            }
+            let Some(work_id) = key.as_ref().strip_prefix(REORG_FINALIZED_WORK_PREFIX) else {
+                anyhow::bail!("reorg journal contains an unknown record");
+            };
+            let work_id =
+                String::from_utf8(work_id.to_vec()).context("invalid reorg work identifier")?;
+            let envelope = Self::decode_finalized_work(&value)?;
+            if transaction_hash(&envelope.transaction) != work_id {
+                anyhow::bail!("reorg journal finalized-work key does not match its transaction");
+            }
+            entries.push((work_id.into_bytes(), value.to_vec()));
+        }
+        Ok(entries)
+    }
+
+    /// Persist the old canonical branch before the first live reorg write.
+    /// The sync WAL write makes process/power-loss recovery choose the prior
+    /// fully committed branch unless adoption explicitly completes.
+    pub(crate) fn begin_reorg_journal(
+        &self,
+        common_ancestor: u64,
+        old_branch: &[Block],
+    ) -> Result<()> {
+        if self.load_reorg_journal()?.is_some() {
+            anyhow::bail!("another reorg journal is already active");
+        }
+        let reorg_cf = self
+            .db
+            .cf_handle(CF_REORG_JOURNAL)
+            .context("cf reorg_journal")?;
+        if self
+            .db
+            .iterator_cf(&reorg_cf, rocksdb::IteratorMode::Start)
+            .next()
+            .is_some()
+        {
+            anyhow::bail!("reorg journal contains orphaned records");
+        }
+        let ancestor = self
+            .get_block_by_height(common_ancestor)?
+            .ok_or_else(|| anyhow::anyhow!("reorg journal common ancestor is unavailable"))?;
+        let ancestor_hash = ancestor.hash();
+        let mut expected_height = common_ancestor.saturating_add(1);
+        let mut expected_parent = ancestor_hash.clone();
+        let mut entries = Vec::with_capacity(old_branch.len());
+        for block in old_branch {
+            if block.header.height != expected_height || block.header.prev_hash != expected_parent {
+                anyhow::bail!("reorg journal old branch is not a contiguous canonical suffix");
+            }
+            let canonical = self.get_block_by_height(expected_height)?.ok_or_else(|| {
+                anyhow::anyhow!("reorg journal old canonical block is unavailable")
+            })?;
+            if serde_json::to_value(&canonical)? != serde_json::to_value(block)? {
+                anyhow::bail!("reorg journal old branch does not match canonical storage");
+            }
+            let hash = block.hash();
+            entries.push(ReorgJournalEntry {
+                height: expected_height,
+                hash: hash.clone(),
+            });
+            expected_height = expected_height.saturating_add(1);
+            expected_parent = hash;
+        }
+        if expected_height.saturating_sub(1) != self.tip_height()? {
+            anyhow::bail!("reorg journal does not cover the complete canonical suffix");
+        }
+
+        crate::validator_set_history::with_reorg_snapshot(
+            self.data_dir.as_path(),
+            |validator_history| {
+                let journal = ReorgJournal {
+                    schema_version: 2,
+                    common_ancestor,
+                    ancestor_hash,
+                    old_branch: entries,
+                    validator_history,
+                };
+                let bytes = serde_json::to_vec(&journal).context("encode reorg journal")?;
+                let work_cf = self
+                    .db
+                    .cf_handle(CF_FINALIZED_WORK)
+                    .context("cf finalized_work")?;
+                let mut batch = rocksdb::WriteBatch::default();
+                batch.put_cf(&reorg_cf, REORG_JOURNAL_KEY, bytes);
+                for item in self.db.iterator_cf(&work_cf, rocksdb::IteratorMode::Start) {
+                    let (work_id, value) = item?;
+                    let envelope = Self::decode_finalized_work(&value)?;
+                    if transaction_hash(&envelope.transaction).as_bytes() != work_id.as_ref() {
+                        anyhow::bail!("finalized-work key does not match its transaction");
+                    }
+                    let mut journal_key =
+                        Vec::with_capacity(REORG_FINALIZED_WORK_PREFIX.len() + work_id.len());
+                    journal_key.extend_from_slice(REORG_FINALIZED_WORK_PREFIX);
+                    journal_key.extend_from_slice(&work_id);
+                    batch.put_cf(&reorg_cf, journal_key, value);
+                }
+                self.db
+                    .write_opt(batch, &Self::reorg_write_options())
+                    .context(
+                        "persist reorg journal, validator history, and finalized-work snapshot",
+                    )?;
+                Ok(())
+            },
+        )
+    }
+
+    /// Restore the canonical height mapping, finalized-work queue, and
+    /// validator authority history from an active journal. This is safe before
+    /// namespace consensus configuration is available. Derived package state
+    /// is rebuilt by `recover_incomplete_reorg` after configuration.
+    fn restore_reorg_durable_state_if_needed(&self) -> Result<bool> {
+        let Some(journal) = self.load_reorg_journal()? else {
+            return Ok(false);
+        };
+        if journal.schema_version != 2 {
+            anyhow::bail!("unsupported reorg journal schema version");
+        }
+        let ancestor = self
+            .get_block_by_hash(&journal.ancestor_hash)?
+            .ok_or_else(|| anyhow::anyhow!("reorg journal ancestor body is unavailable"))?;
+        if ancestor.header.height != journal.common_ancestor
+            || ancestor.hash() != journal.ancestor_hash
+        {
+            anyhow::bail!("reorg journal ancestor binding is invalid");
+        }
+
+        let mut expected_height = journal.common_ancestor.saturating_add(1);
+        let mut expected_parent = journal.ancestor_hash.clone();
+        for entry in &journal.old_branch {
+            let block = self
+                .get_block_by_hash(&entry.hash)?
+                .ok_or_else(|| anyhow::anyhow!("reorg journal old block body is unavailable"))?;
+            if entry.height != expected_height
+                || block.header.height != entry.height
+                || block.header.prev_hash != expected_parent
+                || block.hash() != entry.hash
+            {
+                anyhow::bail!("reorg journal old branch binding is invalid");
+            }
+            expected_height = expected_height.saturating_add(1);
+            expected_parent = entry.hash.clone();
+        }
+
+        let cf_height = self
+            .db
+            .cf_handle(CF_BLOCKS_BY_HEIGHT)
+            .context("cf blocks_by_height")?;
+        let cf_finalized_work = self
+            .db
+            .cf_handle(CF_FINALIZED_WORK)
+            .context("cf finalized_work")?;
+        let finalized_work_snapshot = self.load_reorg_finalized_work_snapshot()?;
+        let height_keys: Vec<Box<[u8]>> = self
+            .db
+            .iterator_cf(&cf_height, rocksdb::IteratorMode::Start)
+            .map(|item| item.map(|(key, _)| key))
+            .collect::<std::result::Result<_, _>>()?;
+        let mut batch = rocksdb::WriteBatch::default();
+        for key in height_keys {
+            let encoded: [u8; 8] = key
+                .as_ref()
+                .try_into()
+                .map_err(|_| anyhow::anyhow!("canonical height key is malformed"))?;
+            if u64::from_be_bytes(encoded) > journal.common_ancestor {
+                batch.delete_cf(&cf_height, key);
+            }
+        }
+        batch.put_cf(
+            &cf_height,
+            journal.common_ancestor.to_be_bytes(),
+            journal.ancestor_hash.as_bytes(),
+        );
+        for entry in &journal.old_branch {
+            batch.put_cf(
+                &cf_height,
+                entry.height.to_be_bytes(),
+                entry.hash.as_bytes(),
+            );
+        }
+        let finalized_work_keys: Vec<Box<[u8]>> = self
+            .db
+            .iterator_cf(&cf_finalized_work, rocksdb::IteratorMode::Start)
+            .map(|item| item.map(|(key, _)| key))
+            .collect::<std::result::Result<_, _>>()?;
+        for key in finalized_work_keys {
+            batch.delete_cf(&cf_finalized_work, key);
+        }
+        for (work_id, value) in finalized_work_snapshot {
+            batch.put_cf(&cf_finalized_work, work_id, value);
+        }
+        self.db
+            .write_opt(batch, &Self::reorg_write_options())
+            .context("restore canonical height mapping and finalized work from reorg journal")?;
+        crate::validator_set_history::restore_reorg_snapshot(
+            self.data_dir.as_path(),
+            journal.validator_history.as_deref(),
+        )
+        .context("restore validator-set history from reorg journal")?;
+        tracing::warn!(
+            ancestor = journal.common_ancestor,
+            restored_tip = expected_height.saturating_sub(1),
+            "Recovered prior canonical height mapping from incomplete reorg journal"
+        );
+        Ok(true)
+    }
+
+    /// Complete startup/live recovery of an interrupted reorg after the signed
+    /// namespace configuration has been installed.
+    pub(crate) fn recover_incomplete_reorg(&self) -> Result<bool> {
+        if !self.restore_reorg_durable_state_if_needed()? {
+            return Ok(false);
+        }
+        self.rebuild_package_index()
+            .context("rebuild derived state while recovering incomplete reorg")?;
+        self.complete_reorg_journal()?;
+        Ok(true)
+    }
+
+    pub(crate) fn complete_reorg_journal(&self) -> Result<()> {
+        if self.load_reorg_journal()?.is_none() {
+            return Ok(());
+        }
+        let cf = self
+            .db
+            .cf_handle(CF_REORG_JOURNAL)
+            .context("cf reorg_journal")?;
+        let keys: Vec<Box<[u8]>> = self
+            .db
+            .iterator_cf(&cf, rocksdb::IteratorMode::Start)
+            .map(|item| item.map(|(key, _)| key))
+            .collect::<std::result::Result<_, _>>()?;
+        let mut batch = rocksdb::WriteBatch::default();
+        for key in keys {
+            batch.delete_cf(&cf, key);
+        }
+        self.db
+            .write_opt(batch, &Self::reorg_write_options())
+            .context("clear committed reorg journal")?;
+        Ok(())
     }
 
     pub fn open(data_dir: &Path) -> Result<Self> {
@@ -153,16 +469,20 @@ impl ChainStore {
             ColumnFamilyDescriptor::new(CF_TRANSPARENCY_EVENTS, Options::default()),
             ColumnFamilyDescriptor::new(CF_TRANSPARENCY_LEAVES, Options::default()),
             ColumnFamilyDescriptor::new(CF_TRANSPARENCY_HEADS, Options::default()),
+            ColumnFamilyDescriptor::new(CF_REORG_JOURNAL, Options::default()),
         ];
 
         let db = DB::open_cf_descriptors(&opts, &db_path, cfs).context("Failed to open RocksDB")?;
 
         let store = Self {
             db: Arc::new(db),
+            data_dir: Arc::new(data_dir.to_path_buf()),
             namespace_consensus: Arc::new(std::sync::RwLock::new(Default::default())),
             publisher_admission_nonce_lock: Arc::new(std::sync::Mutex::new(())),
             transparency_log_lock: Arc::new(std::sync::Mutex::new(())),
         };
+
+        store.restore_reorg_durable_state_if_needed()?;
 
         // Write the genesis block if the chain is empty.
         if store.tip_height()? == 0 && store.block_count() == 0 {
@@ -200,16 +520,24 @@ impl ChainStore {
             CF_TRANSPARENCY_EVENTS,
             CF_TRANSPARENCY_LEAVES,
             CF_TRANSPARENCY_HEADS,
+            CF_REORG_JOURNAL,
         ];
         let db = DB::open_cf_for_read_only(&opts, &db_path, cfs, false)
             .context("Failed to open RocksDB in read-only mode")?;
 
-        Ok(Self {
+        let store = Self {
             db: Arc::new(db),
+            data_dir: Arc::new(data_dir.to_path_buf()),
             namespace_consensus: Arc::new(std::sync::RwLock::new(Default::default())),
             publisher_admission_nonce_lock: Arc::new(std::sync::Mutex::new(())),
             transparency_log_lock: Arc::new(std::sync::Mutex::new(())),
-        })
+        };
+        if store.load_reorg_journal()?.is_some() {
+            anyhow::bail!(
+                "chain has an incomplete reorg journal; open it read-write to recover first"
+            );
+        }
+        Ok(store)
     }
 
     /// Migrate data from a legacy sled database into this RocksDB store.
@@ -266,28 +594,18 @@ impl ChainStore {
 
     // ── Block operations ─────────────────────────────────────────────────────
 
-    /// Insert a block, detecting whether it replaces a different block that
-    /// was already finalized at the same height (i.e. a fork / reorg).
+    /// Insert a block without permitting an implicit canonical replacement.
     ///
-    /// Returns the outcome so callers can record a `ReorgEvent` when a
-    /// replacement happened instead of silently overwriting history.
+    /// A different block at an occupied height is rejected by `insert_block`.
+    /// Reorganizations must go through the full-branch checkpoint preflight
+    /// and explicit rollback path in sync, so this outcome can only report an
+    /// idempotent insert or a newly appended block.
     pub fn insert_block_with_outcome(&self, block: &Block) -> Result<BlockInsertOutcome> {
         let new_hash = block.hash();
-        let replaced_hash = match self.get_block_by_height(block.header.height)? {
-            Some(existing) => {
-                let existing_hash = existing.hash();
-                if existing_hash != new_hash {
-                    Some(existing_hash)
-                } else {
-                    None
-                }
-            }
-            None => None,
-        };
         self.insert_block(block)?;
         Ok(BlockInsertOutcome {
             hash: new_hash,
-            replaced_hash,
+            replaced_hash: None,
         })
     }
 
@@ -326,6 +644,100 @@ impl ChainStore {
         Ok(abandoned)
     }
 
+    /// Validate a complete reorganization branch in an isolated RocksDB
+    /// checkpoint before the live canonical height index is changed.
+    ///
+    /// The checkpoint is rewound to `common_ancestor` and its derived package,
+    /// namespace-controller, delegation, and applied-nonce state is rebuilt
+    /// from that prefix. Candidate blocks are then inserted sequentially so
+    /// CR-07 validation observes the candidate branch rather than state left
+    /// behind by the abandoned branch.
+    pub(crate) fn preflight_reorg_branch(
+        &self,
+        common_ancestor: u64,
+        candidate_blocks: &[Block],
+    ) -> Result<()> {
+        let canonical_tip = self.tip_height()?;
+        if common_ancestor > canonical_tip {
+            anyhow::bail!(
+                "reorg common ancestor {} is above canonical tip {}",
+                common_ancestor,
+                canonical_tip
+            );
+        }
+        if candidate_blocks.is_empty() {
+            anyhow::bail!("reorg candidate branch is empty");
+        }
+
+        let ancestor = self
+            .get_block_by_height(common_ancestor)?
+            .ok_or_else(|| anyhow::anyhow!("reorg common ancestor block is unavailable"))?;
+        let mut expected_height = common_ancestor.saturating_add(1);
+        let mut expected_parent = ancestor.hash();
+        for block in candidate_blocks {
+            if block.header.height != expected_height {
+                anyhow::bail!(
+                    "reorg candidate height {} does not continue expected height {}",
+                    block.header.height,
+                    expected_height
+                );
+            }
+            if block.header.prev_hash != expected_parent {
+                anyhow::bail!(
+                    "reorg candidate block {} does not descend from the candidate prefix",
+                    block.header.height
+                );
+            }
+            expected_height = expected_height.saturating_add(1);
+            expected_parent = block.hash();
+        }
+
+        let checkpoint_root = tempfile::Builder::new()
+            .prefix("creg-reorg-preflight-")
+            .tempdir_in(self.data_dir.as_ref())
+            .context("create reorg preflight directory")?;
+        let checkpoint_path = checkpoint_root.path().join("chain.rocksdb");
+        Checkpoint::new(self.db.as_ref())
+            .context("create RocksDB checkpoint handle")?
+            .create_checkpoint(&checkpoint_path)
+            .context("create RocksDB reorg checkpoint")?;
+
+        let preflight =
+            ChainStore::open(checkpoint_root.path()).context("open isolated reorg checkpoint")?;
+        preflight.configure_namespace_consensus(self.namespace_consensus_config()?)?;
+        let validation = (|| -> Result<()> {
+            preflight.rollback_to_height(common_ancestor)?;
+            preflight
+                .rebuild_package_index()
+                .context("rebuild common-ancestor namespace state in reorg checkpoint")?;
+            for block in candidate_blocks {
+                preflight.insert_block(block).with_context(|| {
+                    format!(
+                        "candidate branch failed CR-07 preflight at height {}",
+                        block.header.height
+                    )
+                })?;
+            }
+            preflight
+                .rebuild_package_index()
+                .context("candidate branch failed deterministic rebuild preflight")?;
+            if preflight.tip_height()? != candidate_blocks.last().expect("non-empty").header.height
+                || preflight.tip_hash()? != expected_parent
+            {
+                anyhow::bail!("isolated reorg checkpoint did not reach the candidate tip");
+            }
+            Ok(())
+        })();
+        drop(preflight);
+        if let Err(error) = checkpoint_root.close() {
+            tracing::warn!(
+                error = %error,
+                "Could not remove completed RocksDB reorg checkpoint"
+            );
+        }
+        validation
+    }
+
     /// Rebuild the package index (CF_PACKAGES) by replaying every canonical
     /// block from genesis to the current tip. Required after a reorg rewind so
     /// records indexed from abandoned blocks don't linger.
@@ -347,11 +759,6 @@ impl ChainStore {
             .db
             .cf_handle(CF_NAMESPACE_DELEGATIONS)
             .context("cf namespace_delegations")?;
-        let cf_finalized_work = self
-            .db
-            .cf_handle(CF_FINALIZED_WORK)
-            .context("cf finalized_work")?;
-
         // Clear the existing index.
         let keys: Vec<Box<[u8]>> = self
             .db
@@ -409,17 +816,41 @@ impl ChainStore {
     }
 
     pub fn insert_block(&self, block: &Block) -> Result<()> {
+        let hash = block.hash();
+        let bytes = serde_json::to_vec(block)?;
+        if let Some(existing) = self.get_block_by_height(block.header.height)? {
+            if existing.hash() != hash
+                || serde_json::to_value(&existing)? != serde_json::to_value(block)?
+            {
+                anyhow::bail!(
+                    "refusing direct replacement of canonical block at height {}; use the preflighted reorg path",
+                    block.header.height
+                );
+            }
+        }
         let namespace_config = self.namespace_consensus_config()?;
         let namespace_effects =
             crate::namespace_consensus::validate_block(self, block, &namespace_config)?;
-        let hash = block.hash();
-        let bytes = serde_json::to_vec(block)?;
         let height_key = block.header.height.to_be_bytes();
 
         let cf_hash = self
             .db
             .cf_handle(CF_BLOCKS_BY_HASH)
             .context("cf blocks_by_hash")?;
+        let body_already_stored =
+            if let Some(existing_bytes) = self.db.get_cf(&cf_hash, hash.as_bytes())? {
+                let existing_body: serde_json::Value = serde_json::from_slice(&existing_bytes)
+                    .context("decode block body stored under existing header hash")?;
+                if existing_body != serde_json::to_value(block)? {
+                    anyhow::bail!(
+                        "refusing replacement of block body stored under existing header hash {}",
+                        hash
+                    );
+                }
+                true
+            } else {
+                false
+            };
         let cf_height = self
             .db
             .cf_handle(CF_BLOCKS_BY_HEIGHT)
@@ -449,7 +880,12 @@ impl ChainStore {
         // Use a WriteBatch for atomicity.
         let mut batch = rocksdb::WriteBatch::default();
         let mut lifecycle_nonces_in_block = HashSet::new();
-        batch.put_cf(&cf_hash, hash.as_bytes(), &bytes);
+        // Preserve the first accepted encoding. A decoded/re-encoded block can
+        // differ only in JSON map order; semantic equality above makes that an
+        // idempotent replay without allowing body or certificate replacement.
+        if !body_already_stored {
+            batch.put_cf(&cf_hash, hash.as_bytes(), &bytes);
+        }
         batch.put_cf(&cf_height, height_key, hash.as_bytes());
 
         // Index every Publish transaction into the package tree.
@@ -991,9 +1427,10 @@ impl ChainStore {
             return Ok(false);
         }
         let envelope = FinalizedWorkEnvelope {
-            schema_version: 1,
+            schema_version: 2,
             transaction: tx.clone(),
             enqueued_at: chrono::Utc::now().to_rfc3339(),
+            submitted_at_height: Some(self.tip_height()?),
             retry_count: 0,
             last_error: None,
             next_attempt_at: None,
@@ -1032,9 +1469,10 @@ impl ChainStore {
             .cf_handle(CF_FINALIZED_WORK)
             .context("cf finalized_work")?;
         let envelope = FinalizedWorkEnvelope {
-            schema_version: 1,
+            schema_version: 2,
             transaction: tx.clone(),
             enqueued_at: chrono::Utc::now().to_rfc3339(),
+            submitted_at_height: Some(self.tip_height()?),
             retry_count: 0,
             last_error: None,
             next_attempt_at: None,
@@ -1058,6 +1496,7 @@ impl ChainStore {
                         schema_version: 1,
                         transaction,
                         enqueued_at: Utc::now().to_rfc3339(),
+                        submitted_at_height: None,
                         retry_count: 0,
                         last_error: None,
                         next_attempt_at: None,
@@ -1093,6 +1532,118 @@ impl ChainStore {
             let (key, value) = item?;
             let id = String::from_utf8(key.to_vec()).context("invalid finalized work key")?;
             work.push((id, Self::decode_finalized_work(&value)?.transaction));
+        }
+        Ok(work)
+    }
+
+    /// Reconcile operational finalized work after a candidate branch has been
+    /// fully inserted but before its reorg journal is committed.
+    ///
+    /// The pre-reorg queue is read from the synced journal snapshot, so retry
+    /// metadata survives. Work included by the new canonical branch is
+    /// removed, while eligible transactions found only on the abandoned
+    /// branch are durably requeued. Governance/validator-set transactions are
+    /// deliberately not synthesized into local work because this queue only
+    /// accepts independently authenticated package and namespace operations.
+    pub(crate) fn reconcile_finalized_work_after_reorg(
+        &self,
+        abandoned_branch: &[Block],
+        canonical_transaction_hashes: &HashSet<String>,
+    ) -> Result<Vec<(Transaction, u64)>> {
+        if self.load_reorg_journal()?.is_none() {
+            anyhow::bail!("cannot reconcile finalized work without an active reorg journal");
+        }
+
+        let mut desired = BTreeMap::<String, Vec<u8>>::new();
+        for (work_id, value) in self.load_reorg_finalized_work_snapshot()? {
+            let work_id = String::from_utf8(work_id).context("invalid reorg work identifier")?;
+            let envelope = Self::decode_finalized_work(&value)?;
+            if transaction_hash(&envelope.transaction) != work_id {
+                anyhow::bail!("reorg finalized-work snapshot is internally inconsistent");
+            }
+            if !canonical_transaction_hashes.contains(&work_id) {
+                desired.insert(work_id, value);
+            }
+        }
+
+        for block in abandoned_branch {
+            for transaction in &block.transactions {
+                if !is_reorg_requeueable_finalized_work(transaction) {
+                    continue;
+                }
+                let work_id = transaction_hash(transaction);
+                if canonical_transaction_hashes.contains(&work_id) {
+                    continue;
+                }
+                let envelope = FinalizedWorkEnvelope {
+                    schema_version: 2,
+                    transaction: transaction.clone(),
+                    // The original submission height/time predates inclusion
+                    // but is unavailable after acknowledgement. The abandoned
+                    // block timestamp is a deterministic conservative bound.
+                    enqueued_at: block.header.timestamp.to_rfc3339(),
+                    submitted_at_height: Some(block.header.height),
+                    retry_count: 0,
+                    last_error: None,
+                    next_attempt_at: None,
+                };
+                desired
+                    .entry(work_id)
+                    .or_insert(serde_json::to_vec(&envelope)?);
+            }
+        }
+
+        let cf = self
+            .db
+            .cf_handle(CF_FINALIZED_WORK)
+            .context("cf finalized_work")?;
+        let current_keys: Vec<Box<[u8]>> = self
+            .db
+            .iterator_cf(&cf, rocksdb::IteratorMode::Start)
+            .map(|item| item.map(|(key, _)| key))
+            .collect::<std::result::Result<_, _>>()?;
+        let mut batch = rocksdb::WriteBatch::default();
+        for key in current_keys {
+            batch.delete_cf(&cf, key);
+        }
+        for (work_id, value) in &desired {
+            batch.put_cf(&cf, work_id.as_bytes(), value);
+        }
+        self.db
+            .write_opt(batch, &Self::reorg_write_options())
+            .context("persist reconciled finalized work before committing reorg")?;
+
+        let fallback_height = self.tip_height()?;
+        desired
+            .into_values()
+            .map(|value| {
+                let envelope = Self::decode_finalized_work(&value)?;
+                Ok((
+                    envelope.transaction,
+                    envelope.submitted_at_height.unwrap_or(fallback_height),
+                ))
+            })
+            .collect()
+    }
+
+    /// Return durable work with the original block-height deadline anchor used
+    /// to rebuild the in-memory forced-inclusion tracker after restart.
+    pub(crate) fn finalized_work_for_tracker(
+        &self,
+        fallback_height: u64,
+    ) -> Result<Vec<(Transaction, u64)>> {
+        let cf = self
+            .db
+            .cf_handle(CF_FINALIZED_WORK)
+            .context("cf finalized_work")?;
+        let mut work = Vec::new();
+        for item in self.db.iterator_cf(&cf, rocksdb::IteratorMode::Start) {
+            let (_, value) = item?;
+            let envelope = Self::decode_finalized_work(&value)?;
+            work.push((
+                envelope.transaction,
+                envelope.submitted_at_height.unwrap_or(fallback_height),
+            ));
         }
         Ok(work)
     }
@@ -1536,9 +2087,8 @@ impl ChainStore {
 pub struct BlockInsertOutcome {
     /// Hash of the inserted block.
     pub hash: String,
-    /// Hash of a *different* block that previously occupied the same height,
-    /// if any. `Some(_)` means a fork replaced finalized history and the
-    /// caller should record a reorg event.
+    /// Retained for API compatibility. Direct canonical replacement is now
+    /// rejected, so successful inserts always return `None`.
     pub replaced_hash: Option<String>,
 }
 
@@ -1556,7 +2106,8 @@ mod tests {
     use chrono::{Duration, Utc};
     use common::{
         merkle_root, AnalysisBundleRefs, Block, BlockHeader, ChainRecord, DeterministicRiskSummary,
-        NamespaceLifecycleAction, NamespaceLifecycleEvent, PackageId, Transaction,
+        NamespaceAuthorityPolicySpec, NamespaceLifecycleAction, NamespaceLifecycleEvent,
+        NamespaceLifecycleEventV2, PackageId, Transaction, Validator, ValidatorSet,
     };
     use ed25519_dalek::{Signer, SigningKey};
     use rand::rngs::OsRng;
@@ -1574,6 +2125,8 @@ mod tests {
             shielded: false,
             key_bundle: None,
             pgp_fingerprint: None,
+            pgp_signature_sha256: String::new(),
+            pgp_public_key_sha256: String::new(),
             findings: vec![],
             analysis_bundles: AnalysisBundleRefs::default(),
             evidence_digest: String::new(),
@@ -1621,8 +2174,18 @@ mod tests {
         }
     }
 
+    fn validator_set(id: &str, key_byte: u8) -> ValidatorSet {
+        ValidatorSet::new(vec![Validator {
+            id: id.into(),
+            alias: id.into(),
+            pubkey: hex::encode([key_byte; 32]),
+            status: "online".into(),
+            ..Validator::default()
+        }])
+    }
+
     #[test]
-    fn insert_block_with_outcome_detects_replacement() {
+    fn direct_same_height_replacement_is_rejected_without_mutating_canonical_state() {
         let dir = tempfile::tempdir().expect("tempdir");
         let store = ChainStore::open(dir.path()).expect("open");
         let genesis_hash = store.tip_hash().expect("tip hash");
@@ -1637,11 +2200,374 @@ mod tests {
             .expect("re-insert");
         assert!(outcome_same.replaced_hash.is_none());
 
-        // A different block at the same height is a fork replacement.
+        // Block hashes commit only to the header. A peer must not be able to
+        // replace the stored body or PBFT certificate while retaining that
+        // header hash.
+        let mut same_hash_tamper = block_a.clone();
+        same_hash_tamper.transactions =
+            vec![Transaction::Publish(publish_record("same-hash-tamper"))];
+        assert_eq!(same_hash_tamper.hash(), block_a.hash());
+        store
+            .insert_block_with_outcome(&same_hash_tamper)
+            .expect_err("same-header body replacement must fail closed");
+        assert!(store
+            .get_package("npm:same-hash-tamper@1.0.0")
+            .expect("read rejected same-hash package")
+            .is_none());
+
+        // A different block at the same height must go through the explicit,
+        // full-branch reorg path rather than silently overwriting finality.
         let block_b = block(1, &genesis_hash, "node-b", &["pkg-b"]);
-        let outcome_b = store.insert_block_with_outcome(&block_b).expect("insert b");
-        assert_eq!(outcome_b.replaced_hash, Some(block_a.hash()));
-        assert_eq!(store.tip_hash().expect("tip"), block_b.hash());
+        let error = store
+            .insert_block_with_outcome(&block_b)
+            .expect_err("direct replacement must fail closed");
+        assert!(
+            error.to_string().contains("preflighted reorg path"),
+            "unexpected error: {error}"
+        );
+        assert_eq!(store.tip_hash().expect("tip"), block_a.hash());
+        assert!(store
+            .get_package("npm:pkg-a@1.0.0")
+            .expect("read canonical package")
+            .is_some());
+        assert!(store
+            .get_package("npm:pkg-b@1.0.0")
+            .expect("read rejected package")
+            .is_none());
+    }
+
+    #[test]
+    fn post_rollback_same_hash_body_replacement_is_rejected_but_semantic_replay_succeeds() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = ChainStore::open(dir.path()).expect("open");
+        let genesis_hash = store.tip_hash().expect("genesis hash");
+        let original = block(1, &genesis_hash, "node-a", &["original"]);
+        store.insert_block(&original).expect("insert original");
+        let original_encoding = serde_json::to_vec(&original).expect("encode original");
+        let alternate_encoding =
+            serde_json::to_vec(&serde_json::to_value(&original).expect("canonicalize original"))
+                .expect("encode alternate field order");
+        assert_ne!(
+            alternate_encoding, original_encoding,
+            "test requires two semantically equivalent JSON encodings"
+        );
+        let cf_hash = store
+            .db
+            .cf_handle(CF_BLOCKS_BY_HASH)
+            .expect("blocks-by-hash cf");
+        store
+            .db
+            .put_cf(&cf_hash, original.hash().as_bytes(), &alternate_encoding)
+            .expect("install legacy-equivalent encoding");
+
+        store.rollback_to_height(0).expect("rollback original");
+        store
+            .rebuild_package_index()
+            .expect("rebuild rolled-back state");
+        assert_eq!(store.tip_height().expect("tip"), 0);
+
+        let mut same_hash_tamper = original.clone();
+        same_hash_tamper.transactions =
+            vec![Transaction::Publish(publish_record("post-rollback-tamper"))];
+        assert_eq!(same_hash_tamper.hash(), original.hash());
+        let error = store
+            .insert_block(&same_hash_tamper)
+            .expect_err("hash-indexed body replacement must fail after rollback");
+        assert!(
+            error.to_string().contains("existing header hash"),
+            "unexpected error: {error}"
+        );
+        assert_eq!(store.tip_height().expect("tip after rejection"), 0);
+        assert_eq!(
+            serde_json::to_value(
+                store
+                    .get_block_by_hash(&original.hash())
+                    .expect("read original by hash")
+                    .expect("original remains inspectable"),
+            )
+            .expect("serialize stored original"),
+            serde_json::to_value(&original).expect("serialize expected original"),
+        );
+        assert!(store
+            .get_package("npm:post-rollback-tamper@1.0.0")
+            .expect("read rejected package")
+            .is_none());
+
+        // Re-adopting a semantically identical historical body remains
+        // idempotent even when its persisted JSON map/field order differs.
+        store
+            .insert_block(&original)
+            .expect("restore semantically identical historical block");
+        assert_eq!(store.tip_hash().expect("restored tip"), original.hash());
+        assert_eq!(
+            store
+                .db
+                .get_cf(&cf_hash, original.hash().as_bytes())
+                .expect("read original encoding")
+                .expect("original encoding remains"),
+            alternate_encoding,
+            "idempotent replay must not rewrite the first accepted encoding"
+        );
+    }
+
+    #[test]
+    fn incomplete_reorg_journal_restores_old_branch_after_restart() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = ChainStore::open(dir.path()).expect("open");
+        let genesis_hash = store.tip_hash().expect("genesis hash");
+        let prefix = block(1, &genesis_hash, "prefix", &["prefix"]);
+        store.insert_block(&prefix).expect("insert prefix");
+        let old_tip = block(2, &prefix.hash(), "old", &["old"]);
+        store.insert_block(&old_tip).expect("insert old tip");
+        crate::validator_set_history::record(dir.path(), 0, &validator_set("old-set", 11))
+            .expect("seed old validator history");
+        let old_history = std::fs::read(dir.path().join("validator-set-history.json"))
+            .expect("read old validator history");
+
+        store
+            .begin_reorg_journal(1, std::slice::from_ref(&old_tip))
+            .expect("persist old branch");
+        store.rollback_to_height(1).expect("rewind old branch");
+        store
+            .rebuild_package_index()
+            .expect("rebuild common-prefix state");
+
+        let candidate_two = block(2, &prefix.hash(), "candidate-two", &["candidate-two"]);
+        store
+            .insert_block(&candidate_two)
+            .expect("insert candidate block two");
+        let candidate_three = block(
+            3,
+            &candidate_two.hash(),
+            "candidate-three",
+            &["candidate-three"],
+        );
+        store
+            .insert_block(&candidate_three)
+            .expect("insert candidate block three");
+        crate::validator_set_history::record(dir.path(), 3, &validator_set("candidate-set", 12))
+            .expect("simulate candidate validator-history import");
+        assert_ne!(
+            std::fs::read(dir.path().join("validator-set-history.json"))
+                .expect("read candidate validator history"),
+            old_history
+        );
+        drop(store);
+
+        // Opening the database restores the prior canonical height mapping
+        // before any caller can observe an uncommitted candidate tip.
+        let recovered = ChainStore::open(dir.path()).expect("reopen after interrupted reorg");
+        assert_eq!(recovered.tip_hash().expect("restored tip"), old_tip.hash());
+        recovered
+            .configure_namespace_consensus(Default::default())
+            .expect("rebuild recovered derived state");
+        assert!(recovered
+            .get_package("npm:old@1.0.0")
+            .expect("read restored package")
+            .is_some());
+        assert!(recovered
+            .get_package("npm:candidate-two@1.0.0")
+            .expect("read abandoned candidate package")
+            .is_none());
+        assert!(recovered
+            .get_package("npm:candidate-three@1.0.0")
+            .expect("read abandoned candidate package")
+            .is_none());
+        assert!(recovered
+            .load_reorg_journal()
+            .expect("read cleared journal")
+            .is_none());
+        assert_eq!(
+            std::fs::read(dir.path().join("validator-set-history.json"))
+                .expect("read restored validator history"),
+            old_history,
+            "startup recovery must restore authority history with the old canonical branch"
+        );
+        drop(recovered);
+
+        // Recovery is durable and does not replay after the journal is
+        // cleared.
+        let reopened = ChainStore::open(dir.path()).expect("reopen recovered store");
+        reopened
+            .configure_namespace_consensus(Default::default())
+            .expect("configure recovered store");
+        assert_eq!(
+            reopened.tip_hash().expect("durable old tip"),
+            old_tip.hash()
+        );
+    }
+
+    #[test]
+    fn completed_reorg_journal_preserves_candidate_after_restart() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = ChainStore::open(dir.path()).expect("open");
+        let genesis_hash = store.tip_hash().expect("genesis hash");
+        let prefix = block(1, &genesis_hash, "prefix", &["prefix"]);
+        store.insert_block(&prefix).expect("insert prefix");
+        let old_tip = block(2, &prefix.hash(), "old", &["old"]);
+        store.insert_block(&old_tip).expect("insert old tip");
+        crate::validator_set_history::record(dir.path(), 0, &validator_set("old-set", 21))
+            .expect("seed old validator history");
+
+        store
+            .begin_reorg_journal(1, std::slice::from_ref(&old_tip))
+            .expect("persist old branch");
+        store.rollback_to_height(1).expect("rewind old branch");
+        store
+            .rebuild_package_index()
+            .expect("rebuild common-prefix state");
+        let candidate_two = block(2, &prefix.hash(), "candidate-two", &["candidate-two"]);
+        store
+            .insert_block(&candidate_two)
+            .expect("insert candidate block two");
+        let candidate_three = block(
+            3,
+            &candidate_two.hash(),
+            "candidate-three",
+            &["candidate-three"],
+        );
+        store
+            .insert_block(&candidate_three)
+            .expect("insert candidate block three");
+        store
+            .rebuild_package_index()
+            .expect("rebuild candidate state");
+        crate::validator_set_history::record(dir.path(), 3, &validator_set("candidate-set", 22))
+            .expect("persist candidate validator history");
+        store
+            .complete_reorg_journal()
+            .expect("commit candidate branch");
+        drop(store);
+
+        let reopened = ChainStore::open(dir.path()).expect("reopen committed store");
+        reopened
+            .configure_namespace_consensus(Default::default())
+            .expect("configure committed store");
+        assert_eq!(
+            reopened.tip_hash().expect("committed candidate tip"),
+            candidate_three.hash()
+        );
+        assert!(reopened
+            .get_package("npm:old@1.0.0")
+            .expect("read abandoned old package")
+            .is_none());
+        assert!(reopened
+            .get_package("npm:candidate-two@1.0.0")
+            .expect("read committed package")
+            .is_some());
+        assert!(reopened
+            .get_package("npm:candidate-three@1.0.0")
+            .expect("read committed package")
+            .is_some());
+        assert_eq!(
+            crate::validator_set_history::set_at(dir.path(), 3)
+                .expect("candidate validator history remains")
+                .validators[0]
+                .id,
+            "candidate-set"
+        );
+    }
+
+    #[test]
+    fn reorg_preflight_rebuilds_branch_relative_namespace_state() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = ChainStore::open(dir.path()).expect("open");
+        let config = crate::namespace_consensus::NamespaceConsensusConfig {
+            chain_id: "creg-reorg-test".into(),
+            genesis_hash: "a".repeat(64),
+            staking_contract: format!("0x{}", "1".repeat(40)),
+            activation_height: Some(2),
+            authority_policies: vec![NamespaceAuthorityPolicySpec {
+                authority: common::OwnershipAuthority::NpmTrustedPublisher,
+                adapter_id: "test-adapter".into(),
+                adapter_version: "1".into(),
+                verifier_sha256: "d".repeat(64),
+                policy_sha256: "b".repeat(64),
+                trust_root_sha256: "c".repeat(64),
+            }],
+            policy_source_verified: true,
+        };
+        store
+            .configure_namespace_consensus(config.clone())
+            .expect("configure namespace consensus");
+
+        let root = SigningKey::from_bytes(&[31; 32]);
+        let abandoned_successor = SigningKey::from_bytes(&[32; 32]);
+        let candidate_successor = SigningKey::from_bytes(&[33; 32]);
+        let root_pubkey = hex::encode(root.verifying_key().as_bytes());
+        let namespace = "npm:branch-owned@";
+        let genesis_hash = store.tip_hash().expect("genesis hash");
+        let mut record = publish_record("branch-owned");
+        record.publisher_pubkey = root_pubkey.clone();
+        let prefix = block_with_transactions(
+            1,
+            &genesis_hash,
+            "node-a",
+            vec![Transaction::Publish(record)],
+        );
+        store
+            .insert_block(&prefix)
+            .expect("insert pre-activation claim");
+
+        let timestamp = 1_800_000_000i64;
+        let make_transfer = |next: &SigningKey, proposer: &str| {
+            let mut event = NamespaceLifecycleEventV2 {
+                schema_version: 2,
+                chain_id: config.chain_id.clone(),
+                genesis_hash: config.genesis_hash.clone(),
+                action: NamespaceLifecycleAction::Transfer,
+                namespace: namespace.into(),
+                current_controller_ed25519_pubkey: root_pubkey.clone(),
+                current_controller_evm_address: String::new(),
+                next_controller_ed25519_pubkey: hex::encode(next.verifying_key().as_bytes()),
+                next_controller_evm_address: format!("0x{}", "2".repeat(40)),
+                delegation_scopes: vec![],
+                delegation_expires_at: None,
+                nonce: 1,
+                issued_at: timestamp - 60,
+                expires_at: timestamp + 60,
+                current_controller_signature: String::new(),
+                next_controller_signature: String::new(),
+                authority_proof_digest: String::new(),
+                authority_certificate: None,
+            };
+            let message = event.signing_message();
+            event.current_controller_signature =
+                hex::encode(root.sign(message.as_bytes()).to_bytes());
+            event.next_controller_signature = hex::encode(next.sign(message.as_bytes()).to_bytes());
+            let mut block = block_with_transactions(
+                2,
+                &prefix.hash(),
+                proposer,
+                vec![Transaction::NamespaceLifecycleV2(event)],
+            );
+            block.header.timestamp =
+                DateTime::from_timestamp(timestamp, 0).expect("fixed timestamp");
+            block
+        };
+
+        let abandoned = make_transfer(&abandoned_successor, "node-a");
+        store
+            .insert_block(&abandoned)
+            .expect("insert abandoned branch");
+        let abandoned_controller = hex::encode(abandoned_successor.verifying_key().as_bytes());
+        assert_eq!(
+            store.publisher_for_prefix(namespace),
+            Some(abandoned_controller.clone())
+        );
+
+        let candidate = make_transfer(&candidate_successor, "node-b");
+        store
+            .preflight_reorg_branch(1, std::slice::from_ref(&candidate))
+            .expect("candidate validates from common-ancestor state");
+
+        // Preflight is isolated: the abandoned branch remains canonical until
+        // sync explicitly adopts the fully validated candidate branch.
+        assert_eq!(store.tip_hash().expect("tip"), abandoned.hash());
+        assert_eq!(
+            store.publisher_for_prefix(namespace),
+            Some(abandoned_controller)
+        );
     }
 
     #[test]
@@ -2113,6 +3039,155 @@ mod tests {
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].0, second_id);
         assert_ne!(pending[0].0, first_id);
+    }
+
+    #[test]
+    fn failed_reorg_restores_exact_finalized_work_snapshot() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = ChainStore::open(dir.path()).expect("open");
+        let genesis_hash = store.tip_hash().expect("genesis hash");
+        let old_branch = block(1, &genesis_hash, "old-proposer", &["old-canonical"]);
+        store.insert_block(&old_branch).expect("insert old branch");
+
+        let pending = Transaction::Revoke {
+            package_canonical: "npm:pre-reorg-pending@1.0.0".into(),
+            reason: "reorg-test".into(),
+            revoked_by: "validator-1".into(),
+            evidence_hash: "pending-evidence".into(),
+        };
+        let pending_id = transaction_hash(&pending);
+        store
+            .enqueue_finalized_work(&pending)
+            .expect("enqueue pending");
+        assert_eq!(
+            store
+                .record_finalized_work_failure(&pending_id, "pre-reorg retry")
+                .expect("record retry"),
+            FinalizedWorkFailureOutcome::Retrying
+        );
+        store
+            .begin_reorg_journal(0, std::slice::from_ref(&old_branch))
+            .expect("begin reorg");
+
+        store.rollback_to_height(0).expect("rewind old branch");
+        store.rebuild_package_index().expect("rebuild ancestor");
+        let candidate = block_with_transactions(
+            1,
+            &genesis_hash,
+            "candidate-proposer",
+            vec![pending.clone()],
+        );
+        store
+            .insert_block(&candidate)
+            .expect("candidate acknowledges pending work");
+        let post_journal_work = Transaction::Revoke {
+            package_canonical: "npm:must-not-leak@1.0.0".into(),
+            reason: "candidate-only".into(),
+            revoked_by: "validator-2".into(),
+            evidence_hash: "candidate-evidence".into(),
+        };
+        store
+            .enqueue_finalized_work(&post_journal_work)
+            .expect("simulate candidate-only queue mutation");
+
+        assert!(store
+            .recover_incomplete_reorg()
+            .expect("recover failed reorg"));
+        assert_eq!(store.tip_hash().expect("restored tip"), old_branch.hash());
+        let pending_after = store.pending_finalized_work().expect("restored work");
+        assert_eq!(pending_after.len(), 1);
+        assert_eq!(pending_after[0].0, pending_id);
+        let stats = store.finalized_work_stats().expect("restored retry stats");
+        assert_eq!(stats.retrying_depth, 1);
+        assert_eq!(stats.retry_attempts, 1);
+        let tracker_work = store
+            .finalized_work_for_tracker(99)
+            .expect("tracker recovery metadata");
+        assert_eq!(tracker_work.len(), 1);
+        assert_eq!(tracker_work[0].1, 1);
+    }
+
+    #[test]
+    fn successful_reorg_requeues_only_abandoned_finalized_work() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = ChainStore::open(dir.path()).expect("open");
+        let genesis_hash = store.tip_hash().expect("genesis hash");
+        let revoke = |name: &str| Transaction::Revoke {
+            package_canonical: format!("npm:{name}@1.0.0"),
+            reason: "reorg-test".into(),
+            revoked_by: "validator-1".into(),
+            evidence_hash: common::sha256_hex(name.as_bytes()),
+        };
+        let abandoned_only = revoke("abandoned-only");
+        let shared = revoke("shared");
+        let governance = Transaction::Slash {
+            validator_id: "validator-2".into(),
+            amount: 1,
+            reason: "fixture".into(),
+        };
+        let old_branch = block_with_transactions(
+            1,
+            &genesis_hash,
+            "old-proposer",
+            vec![abandoned_only.clone(), shared.clone(), governance.clone()],
+        );
+        store.insert_block(&old_branch).expect("insert old branch");
+
+        let pending_then_included = revoke("pending-then-included");
+        store
+            .enqueue_finalized_work(&pending_then_included)
+            .expect("enqueue pre-reorg work");
+        store
+            .begin_reorg_journal(0, std::slice::from_ref(&old_branch))
+            .expect("begin reorg");
+
+        store.rollback_to_height(0).expect("rewind old branch");
+        store.rebuild_package_index().expect("rebuild ancestor");
+        let candidate = block_with_transactions(
+            1,
+            &genesis_hash,
+            "candidate-proposer",
+            vec![shared.clone(), pending_then_included.clone()],
+        );
+        store.insert_block(&candidate).expect("insert candidate");
+        store.rebuild_package_index().expect("rebuild candidate");
+        let canonical_hashes: HashSet<String> = candidate
+            .transactions
+            .iter()
+            .map(transaction_hash)
+            .collect();
+        let tracker_work = store
+            .reconcile_finalized_work_after_reorg(
+                std::slice::from_ref(&old_branch),
+                &canonical_hashes,
+            )
+            .expect("reconcile finalized work");
+        assert_eq!(tracker_work.len(), 1);
+        assert_eq!(
+            transaction_hash(&tracker_work[0].0),
+            transaction_hash(&abandoned_only)
+        );
+        assert_eq!(tracker_work[0].1, old_branch.header.height);
+        store.complete_reorg_journal().expect("commit reorg");
+        drop(store);
+
+        let reopened = ChainStore::open(dir.path()).expect("reopen adopted branch");
+        assert_eq!(
+            reopened.tip_hash().expect("candidate tip"),
+            candidate.hash()
+        );
+        let pending_after = reopened
+            .pending_finalized_work()
+            .expect("requeued abandoned work");
+        assert_eq!(pending_after.len(), 1);
+        assert_eq!(
+            pending_after[0].0,
+            transaction_hash(&abandoned_only),
+            "newly canonical work must remain acknowledged"
+        );
+        assert_ne!(pending_after[0].0, transaction_hash(&shared));
+        assert_ne!(pending_after[0].0, transaction_hash(&governance));
+        assert_ne!(pending_after[0].0, transaction_hash(&pending_then_included));
     }
 
     #[test]

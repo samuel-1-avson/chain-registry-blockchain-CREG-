@@ -9,6 +9,11 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 
 /// Schema version. Node refuses unknown versions.
+///
+/// CR-07 extends the v1 consensus payload with optional, signed policy fields.
+/// Keeping the version and signature domain stable lets pre-activation specs
+/// retain their existing signatures; activating CR-07 still changes the
+/// canonical payload and therefore requires an intentional re-sign.
 pub const CURRENT_SPEC_VERSION: i32 = 1;
 
 /// Domain separator for spec signature verification.
@@ -68,18 +73,23 @@ pub struct ConsensusParams {
     /// transactions. Because consensus parameters are part of the signed
     /// genesis payload, operators cannot activate this independently and
     /// accidentally split the network.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub namespace_authority_activation_height: Option<u64>,
     /// Exact adapter/policy/trust-root combinations validators may certify.
     /// These pins are consensus data and therefore part of the genesis hash.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub namespace_authority_policies: Vec<NamespaceAuthorityPolicySpec>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct NamespaceAuthorityPolicySpec {
+    /// Upstream ecosystem whose registry statements this policy verifies.
+    pub authority: crate::OwnershipAuthority,
     pub adapter_id: String,
     pub adapter_version: String,
+    /// SHA-256 of the exact verifier executable validators must invoke.
+    pub verifier_sha256: String,
     pub policy_sha256: String,
     pub trust_root_sha256: String,
 }
@@ -384,7 +394,7 @@ mod tests {
 
     fn test_spec() -> ChainSpec {
         ChainSpec {
-            spec_version: 1,
+            spec_version: CURRENT_SPEC_VERSION,
             chain_id: "creg-testnet-1".into(),
             network: Network::Testnet,
             phase: Phase::Alpha,
@@ -403,6 +413,8 @@ mod tests {
                 slash_penalty_medium_bp: 1000,
                 slash_penalty_critical_bp: 3000,
                 max_validators: 50,
+                namespace_authority_activation_height: None,
+                namespace_authority_policies: vec![],
             },
             feature_flags: FeatureFlags {
                 zk_validation: false,
@@ -493,6 +505,39 @@ mod tests {
         let a_pos = s.find("\"a\"").unwrap();
         let z_pos = s.find("\"z\"").unwrap();
         assert!(a_pos < z_pos);
+    }
+
+    #[test]
+    fn cr07_fields_are_backward_compatible_until_signed_activation() {
+        let mut spec = test_spec();
+        let value = serde_json::to_value(&spec).unwrap();
+        let consensus = value["consensus_params"].as_object().unwrap();
+        assert!(!consensus.contains_key("namespace_authority_activation_height"));
+        assert!(!consensus.contains_key("namespace_authority_policies"));
+
+        spec.consensus_params.namespace_authority_activation_height = Some(100);
+        spec.consensus_params.namespace_authority_policies =
+            vec![NamespaceAuthorityPolicySpec {
+                authority: crate::OwnershipAuthority::PypiTrustedPublisher,
+                adapter_id: "creg-pypi-sigstore".into(),
+                adapter_version: "2.0.0".into(),
+                verifier_sha256: "1".repeat(64),
+                policy_sha256: "2".repeat(64),
+                trust_root_sha256: "3".repeat(64),
+            }];
+        let value = serde_json::to_value(&spec).unwrap();
+        assert_eq!(
+            value["consensus_params"]["namespace_authority_activation_height"],
+            100
+        );
+        assert_eq!(
+            value["consensus_params"]["namespace_authority_policies"][0]["authority"],
+            "pypi_trusted_publisher"
+        );
+
+        let mut unknown = value["consensus_params"]["namespace_authority_policies"][0].clone();
+        unknown["unsigned_extension"] = serde_json::json!(true);
+        assert!(serde_json::from_value::<NamespaceAuthorityPolicySpec>(unknown).is_err());
     }
 
     #[test]

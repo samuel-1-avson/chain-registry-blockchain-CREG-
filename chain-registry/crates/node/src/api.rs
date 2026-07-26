@@ -12,15 +12,27 @@ use axum::{
     Json, Router,
 };
 use common::{PackageStatus, PublishRequest, Transaction, ValidatorIdentity, ValidatorVote};
+use futures::StreamExt;
 use k256::ecdsa::{RecoveryId, Signature as K256Signature, VerifyingKey as K256VerifyingKey};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::{
+    path::{Path as FsPath, PathBuf},
+    sync::{Arc, OnceLock},
+    time::Duration as StdDuration,
+};
+use tokio::{io::AsyncWriteExt, sync::Semaphore};
 use tower_http::{
     cors::{Any, CorsLayer},
     limit::RequestBodyLimitLayer,
     trace::TraceLayer,
 };
 
+use crate::authority_adapter::{
+    ArtifactDigestAlgorithm, AuthorityAdapterConfig, AuthorityAdapterError,
+    AuthorityAdapterRequestV2, AuthorityChallengeV1, DEFAULT_MAX_ARTIFACT_BYTES,
+    DEFAULT_MAX_EVIDENCE_BYTES, DEFAULT_MAX_RESULT_BYTES, HARD_MAX_ARTIFACT_BYTES,
+    HARD_MAX_EVIDENCE_BYTES, HARD_MAX_RESULT_BYTES,
+};
 use crate::consensus_admission::{accept_peer_attestation, AdmissionAttestation, AttestationStore};
 use crate::{
     events::{self, sse_handler, EventBus},
@@ -149,9 +161,32 @@ fn publisher_routes() -> Router<SharedState> {
             "/v1/publisher/namespaces/lifecycle",
             post(submit_namespace_lifecycle),
         )
+        .route(
+            "/v1/publisher/namespaces/delegate",
+            post(submit_namespace_delegate),
+        )
+        .route(
+            "/v1/publisher/namespaces/transfer",
+            post(submit_namespace_transfer),
+        )
+        .route(
+            "/v1/publisher/namespaces/recover",
+            post(submit_namespace_recovery),
+        )
 }
 
 fn validator_routes() -> Router<SharedState> {
+    let authority_routes = Router::new()
+        .route(
+            "/v1/validator/namespace-authority/attest",
+            post(attest_namespace_authority),
+        )
+        .route(
+            "/v1/validator/namespace-authority/certificates",
+            post(assemble_namespace_authority_certificate),
+        )
+        .layer(axum::middleware::from_fn(private_api_acl_middleware));
+
     Router::new()
         .route("/v1/validator/register", post(register_validator_identity))
         .route(
@@ -169,6 +204,7 @@ fn validator_routes() -> Router<SharedState> {
             "/v1/validator/set-transitions",
             get(list_validator_set_transitions).post(submit_validator_set_transition),
         )
+        .merge(authority_routes)
 }
 
 fn operator_routes() -> Router<SharedState> {
@@ -372,6 +408,12 @@ const API_ROUTE_BOUNDARIES: &[ApiRouteBoundary] = &[
         note: "Validator-set transitions require an Ed25519 quorum certificate from the preceding active set; every receiver revalidates height and canonical-tip continuity.",
     },
     ApiRouteBoundary {
+        path: "/v1/validator/namespace-authority/*",
+        category: ApiRouteCategory::Validator,
+        security: ApiRouteSecurity::OperatorApiKeyAcl,
+        note: "An operator API key protects the expensive local service; the node must be an active anchor-set validator using a signature-verified policy and hash-pinned verifier, while certificates still require a deterministic prior-set quorum.",
+    },
+    ApiRouteBoundary {
         path: "/v1/operator/*",
         category: ApiRouteCategory::Operator,
         security: ApiRouteSecurity::OperatorApiKeyAcl,
@@ -538,7 +580,6 @@ async fn private_api_acl_middleware(req: Request<Body>, next: Next) -> Response 
 fn configured_operator_secret() -> Option<String> {
     std::env::var(OPERATOR_API_KEY_ENV)
         .ok()
-        .or_else(|| std::env::var(OPERATOR_PUBKEY_ENV).ok())
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
 }
@@ -3122,8 +3163,8 @@ async fn rotate_publisher_key(
 // POST /v1/publisher/namespaces/lifecycle
 //
 // Delegate and transfer are authorized by both controllers over a
-// domain-separated event. Recovery is intentionally unavailable until a
-// registry authority adapter can independently verify its proof.
+// domain-separated event. Recovery requires a v2 event carrying an
+// independently verified, prior-set-quorum namespace-authority certificate.
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum NamespaceLifecycleSubmission {
@@ -3131,11 +3172,74 @@ enum NamespaceLifecycleSubmission {
     V1(common::NamespaceLifecycleEvent),
 }
 
+impl NamespaceLifecycleSubmission {
+    fn action(&self) -> common::NamespaceLifecycleAction {
+        match self {
+            Self::V2(event) => event.action,
+            Self::V1(event) => event.action,
+        }
+    }
+}
+
 async fn submit_namespace_lifecycle(
     State(state): State<SharedState>,
     Extension(tx_sender): Extension<FinalizedTxSender>,
     Json(submission): Json<NamespaceLifecycleSubmission>,
 ) -> Response {
+    submit_namespace_lifecycle_inner(state, tx_sender, submission, None).await
+}
+
+async fn submit_namespace_delegate(
+    State(state): State<SharedState>,
+    Extension(tx_sender): Extension<FinalizedTxSender>,
+    Json(submission): Json<NamespaceLifecycleSubmission>,
+) -> Response {
+    submit_namespace_lifecycle_inner(
+        state,
+        tx_sender,
+        submission,
+        Some(common::NamespaceLifecycleAction::Delegate),
+    )
+    .await
+}
+
+async fn submit_namespace_transfer(
+    State(state): State<SharedState>,
+    Extension(tx_sender): Extension<FinalizedTxSender>,
+    Json(submission): Json<NamespaceLifecycleSubmission>,
+) -> Response {
+    submit_namespace_lifecycle_inner(
+        state,
+        tx_sender,
+        submission,
+        Some(common::NamespaceLifecycleAction::Transfer),
+    )
+    .await
+}
+
+async fn submit_namespace_recovery(
+    State(state): State<SharedState>,
+    Extension(tx_sender): Extension<FinalizedTxSender>,
+    Json(submission): Json<NamespaceLifecycleSubmission>,
+) -> Response {
+    submit_namespace_lifecycle_inner(
+        state,
+        tx_sender,
+        submission,
+        Some(common::NamespaceLifecycleAction::Recover),
+    )
+    .await
+}
+
+async fn submit_namespace_lifecycle_inner(
+    state: SharedState,
+    tx_sender: FinalizedTxSender,
+    submission: NamespaceLifecycleSubmission,
+    required_action: Option<common::NamespaceLifecycleAction>,
+) -> Response {
+    if required_action.is_some_and(|required| submission.action() != required) {
+        return bad_request("Namespace lifecycle action does not match the requested endpoint");
+    }
     let now = chrono::Utc::now();
     let (tx, namespace, current_controller, nonce) = match submission {
         NamespaceLifecycleSubmission::V1(event) => {
@@ -3291,6 +3395,566 @@ async fn submit_namespace_lifecycle(
     Json(serde_json::json!({
         "status": "queued",
         "message": "Namespace lifecycle event will be included in the next block"
+    }))
+    .into_response()
+}
+
+static AUTHORITY_VERIFIER_SLOTS: OnceLock<Arc<Semaphore>> = OnceLock::new();
+
+#[derive(Debug, Deserialize)]
+pub struct NamespaceAuthorityAttestationRequest {
+    pub adapter_id: String,
+    pub adapter_version: String,
+    pub authority: common::OwnershipAuthority,
+    pub evidence_url: String,
+    pub artifact_url: String,
+    pub expected_issuer: String,
+    pub expected_subject: String,
+    pub challenge: AuthorityChallengeV1,
+    pub anchor_height: u64,
+    pub anchor_block_hash: String,
+    pub validator_set_hash: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct NamespaceAuthorityAttestationResponse {
+    pub statement: common::NamespaceAuthorityStatement,
+    pub validators: common::ValidatorSet,
+    pub signature: common::NamespaceAuthoritySignature,
+}
+
+fn authority_env_usize(name: &str, default: usize, maximum: usize) -> Result<usize, String> {
+    let value = match std::env::var(name) {
+        Ok(value) => value
+            .parse::<usize>()
+            .map_err(|_| format!("{name} must be an unsigned integer"))?,
+        Err(std::env::VarError::NotPresent) => default,
+        Err(std::env::VarError::NotUnicode(_)) => {
+            return Err(format!("{name} is not valid Unicode"))
+        }
+    };
+    if value == 0 || value > maximum {
+        return Err(format!("{name} must be between 1 and {maximum}"));
+    }
+    Ok(value)
+}
+
+fn authority_adapter_config(
+    policy: &common::NamespaceAuthorityPolicySpec,
+) -> Result<AuthorityAdapterConfig, String> {
+    let path_env = match policy.authority {
+        common::OwnershipAuthority::NpmTrustedPublisher => {
+            "CREG_NAMESPACE_AUTHORITY_NPM_VERIFIER_PATH"
+        }
+        common::OwnershipAuthority::PypiTrustedPublisher => {
+            "CREG_NAMESPACE_AUTHORITY_PYPI_VERIFIER_PATH"
+        }
+    };
+    let verifier_path = std::env::var(path_env)
+        .map(PathBuf::from)
+        .map_err(|_| format!("{path_env} is required on authority-attesting validators"))?;
+    let timeout_seconds =
+        authority_env_usize("CREG_NAMESPACE_AUTHORITY_VERIFIER_TIMEOUT_SECS", 30, 120)?;
+    let max_evidence_bytes = authority_env_usize(
+        "CREG_NAMESPACE_AUTHORITY_MAX_EVIDENCE_BYTES",
+        DEFAULT_MAX_EVIDENCE_BYTES,
+        HARD_MAX_EVIDENCE_BYTES,
+    )?;
+    let max_artifact_bytes = authority_env_usize(
+        "CREG_NAMESPACE_AUTHORITY_MAX_ARTIFACT_BYTES",
+        DEFAULT_MAX_ARTIFACT_BYTES,
+        HARD_MAX_ARTIFACT_BYTES,
+    )?;
+    let max_result_bytes = authority_env_usize(
+        "CREG_NAMESPACE_AUTHORITY_MAX_RESULT_BYTES",
+        DEFAULT_MAX_RESULT_BYTES,
+        HARD_MAX_RESULT_BYTES,
+    )?;
+    Ok(AuthorityAdapterConfig {
+        verifier_path,
+        verifier_sha256: policy.verifier_sha256.clone(),
+        adapter_id: policy.adapter_id.clone(),
+        adapter_version: policy.adapter_version.clone(),
+        policy_sha256: policy.policy_sha256.clone(),
+        trust_root_sha256: policy.trust_root_sha256.clone(),
+        timeout: StdDuration::from_secs(timeout_seconds as u64),
+        max_evidence_bytes,
+        max_artifact_bytes,
+        max_result_bytes,
+    })
+}
+
+fn authority_adapter_error_response(error: AuthorityAdapterError) -> Response {
+    let message = format!("Authority evidence rejected: {error}");
+    match error {
+        AuthorityAdapterError::InvalidRequest(_)
+        | AuthorityAdapterError::EvidenceTooLarge
+        | AuthorityAdapterError::EvidenceEncoding
+        | AuthorityAdapterError::EvidenceDigestMismatch
+        | AuthorityAdapterError::ArtifactTooLarge
+        | AuthorityAdapterError::ArtifactEncoding
+        | AuthorityAdapterError::ArtifactDigestMismatch
+        | AuthorityAdapterError::VerifierRejected
+        | AuthorityAdapterError::InvalidResultJson(_)
+        | AuthorityAdapterError::NonCanonicalResult
+        | AuthorityAdapterError::ResultMismatch(_) => bad_request(message),
+        AuthorityAdapterError::InvalidConfig(_)
+        | AuthorityAdapterError::VerifierUnavailable
+        | AuthorityAdapterError::VerifierDigestMismatch
+        | AuthorityAdapterError::Spawn(_)
+        | AuthorityAdapterError::Timeout
+        | AuthorityAdapterError::UnexpectedDiagnostics
+        | AuthorityAdapterError::ResultTooLarge => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorResponse { error: message }),
+        )
+            .into_response(),
+        AuthorityAdapterError::Io(_) => server_err(message),
+    }
+}
+
+async fn fetch_authority_resource(
+    authority: common::OwnershipAuthority,
+    url: &str,
+    maximum: usize,
+    artifact: bool,
+) -> Result<Vec<u8>, String> {
+    if artifact {
+        crate::authority_adapter::validate_artifact_url(url, authority)
+            .map_err(|error| error.to_string())?;
+    } else {
+        crate::authority_adapter::validate_evidence_url(url, authority)
+            .map_err(|error| error.to_string())?;
+    }
+    let resource = if artifact { "artifact" } else { "evidence" };
+    let accept = if artifact {
+        "application/octet-stream"
+    } else {
+        "application/json"
+    };
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .no_proxy()
+        .connect_timeout(StdDuration::from_secs(10))
+        .timeout(StdDuration::from_secs(30))
+        .build()
+        .map_err(|error| format!("cannot construct authority evidence client: {error}"))?;
+    let response = client
+        .get(url)
+        .header("accept", accept)
+        .header("accept-encoding", "identity")
+        .send()
+        .await
+        .map_err(|error| format!("authority {resource} fetch failed: {error}"))?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "authority {resource} endpoint returned HTTP {}",
+            response.status()
+        ));
+    }
+    if response
+        .content_length()
+        .is_some_and(|length| length > maximum as u64)
+    {
+        return Err(format!(
+            "authority {resource} exceeds the configured size limit"
+        ));
+    }
+    let mut bytes = Vec::new();
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk =
+            chunk.map_err(|error| format!("authority {resource} stream failed: {error}"))?;
+        if bytes.len().saturating_add(chunk.len()) > maximum {
+            return Err(format!(
+                "authority {resource} exceeds the configured size limit"
+            ));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    if bytes.is_empty() {
+        return Err(format!(
+            "authority {resource} endpoint returned an empty body"
+        ));
+    }
+    Ok(bytes)
+}
+
+async fn archive_authority_blob(
+    data_dir: &FsPath,
+    collection: &str,
+    algorithm: ArtifactDigestAlgorithm,
+    digest: &str,
+    bytes: &[u8],
+) -> Result<(), String> {
+    if digest.len() < 2
+        || digest != digest.to_ascii_lowercase()
+        || !digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Err(format!("authority {collection} archive digest is invalid"));
+    }
+    if algorithm.digest(bytes) != digest {
+        return Err(format!("authority {collection} archive digest mismatch"));
+    }
+    let directory = data_dir
+        .join(collection)
+        .join(algorithm.name())
+        .join(&digest[..2]);
+    tokio::fs::create_dir_all(&directory)
+        .await
+        .map_err(|error| format!("cannot create authority {collection} archive: {error}"))?;
+    let destination = directory.join(format!("{digest}.bin"));
+    if let Ok(existing) = tokio::fs::read(&destination).await {
+        return if algorithm.digest(&existing) == digest {
+            Ok(())
+        } else {
+            Err(format!(
+                "existing authority {collection} archive entry is corrupted"
+            ))
+        };
+    }
+    let temporary = directory.join(format!("{digest}.{}.tmp", uuid::Uuid::new_v4()));
+    let mut file = tokio::fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&temporary)
+        .await
+        .map_err(|error| format!("cannot create authority {collection} archive entry: {error}"))?;
+    if let Err(error) = file.write_all(bytes).await {
+        drop(file);
+        let _ = tokio::fs::remove_file(&temporary).await;
+        return Err(format!(
+            "cannot write authority {collection} archive entry: {error}"
+        ));
+    }
+    if let Err(error) = file.sync_all().await {
+        drop(file);
+        let _ = tokio::fs::remove_file(&temporary).await;
+        return Err(format!(
+            "cannot sync authority {collection} archive entry: {error}"
+        ));
+    }
+    drop(file);
+    if let Err(error) = tokio::fs::rename(&temporary, &destination).await {
+        let _ = tokio::fs::remove_file(&temporary).await;
+        let existing = tokio::fs::read(&destination)
+            .await
+            .map_err(|_| format!("cannot commit authority {collection} archive entry: {error}"))?;
+        if algorithm.digest(&existing) != digest {
+            return Err(format!(
+                "raced authority {collection} archive entry is corrupted"
+            ));
+        }
+    }
+    #[cfg(unix)]
+    {
+        let directory_handle = tokio::fs::File::open(&directory).await.map_err(|error| {
+            format!("cannot open authority {collection} archive directory: {error}")
+        })?;
+        directory_handle.sync_all().await.map_err(|error| {
+            format!("cannot sync authority {collection} archive directory: {error}")
+        })?;
+    }
+    Ok(())
+}
+
+async fn attest_namespace_authority(
+    State(state): State<SharedState>,
+    Json(request): Json<NamespaceAuthorityAttestationRequest>,
+) -> Response {
+    let now = chrono::Utc::now().timestamp();
+    if let Err(error) = request.challenge.validate_at(now) {
+        return bad_request(format!("Invalid namespace authority challenge: {error}"));
+    }
+    if request.challenge.authority_ecosystem() != request.authority.ecosystem() {
+        return bad_request("Authority ecosystem does not match the challenge namespace");
+    }
+
+    let (policy, mut validators, validator_id, validator_pubkey, validator_private_key, data_dir) = {
+        let node = state.read().await;
+        if !node.config.is_validator {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(ErrorResponse {
+                    error: "Only validator nodes may issue namespace authority attestations".into(),
+                }),
+            )
+                .into_response();
+        }
+        let namespace_config =
+            crate::namespace_consensus::NamespaceConsensusConfig::from_node_config(&node.config);
+        if namespace_config.activation_height.is_none()
+            || !namespace_config.policy_source_verified
+            || namespace_config.validate().is_err()
+        {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(ErrorResponse {
+                    error: "Namespace authority attestation requires a complete signature-verified chain-spec policy".into(),
+                }),
+            )
+                .into_response();
+        }
+        if request.challenge.chain_id != node.config.chain_id
+            || request.challenge.genesis_hash != node.config.network_genesis_hash
+        {
+            return bad_request("Authority challenge targets a different chain or genesis");
+        }
+        let matching: Vec<_> = node
+            .config
+            .namespace_authority_policies
+            .iter()
+            .filter(|policy| {
+                policy.authority == request.authority
+                    && policy.adapter_id == request.adapter_id
+                    && policy.adapter_version == request.adapter_version
+            })
+            .cloned()
+            .collect();
+        if matching.len() != 1 {
+            return bad_request(
+                "Authority adapter selection is absent or ambiguous in the signed chain spec",
+            );
+        }
+        let Some(anchor) = node
+            .chain
+            .get_block_by_height(request.anchor_height)
+            .map_err(|error| error.to_string())
+            .unwrap_or(None)
+        else {
+            return bad_request("Authority certificate anchor block is not canonical");
+        };
+        if anchor.hash() != request.anchor_block_hash
+            || anchor.header.validator_set_hash != request.validator_set_hash
+        {
+            return bad_request("Authority certificate anchor identity does not match chain state");
+        }
+        let tip = node.chain.tip_height().unwrap_or(0);
+        if tip.saturating_sub(request.anchor_height)
+            > common::MAX_NAMESPACE_AUTHORITY_ANCHOR_LAG_BLOCKS
+        {
+            return bad_request("Authority certificate anchor is too old");
+        }
+        let mut validators = match crate::validator_set_history::verification_set_at(
+            &node.config.data_dir,
+            request.anchor_height,
+            &node.validator_set_bootstrap,
+        ) {
+            Ok(validators) => validators,
+            Err(error) => {
+                return bad_request(format!("Authority anchor has no trusted set: {error}"))
+            }
+        };
+        validators.validators.sort_by(|left, right| {
+            left.id
+                .cmp(&right.id)
+                .then_with(|| left.pubkey.cmp(&right.pubkey))
+        });
+        if common::canonical_validator_set_hash(&validators) != request.validator_set_hash {
+            return bad_request("Authority anchor validator set does not match its block header");
+        }
+        let Some(private_key) = node.config.validator_privkey.clone() else {
+            return server_err("Validator authority signer key is unavailable");
+        };
+        let private_bytes = match hex::decode(private_key.trim().trim_start_matches("0x")) {
+            Ok(bytes) => bytes,
+            Err(_) => return server_err("Validator authority signer key is invalid hexadecimal"),
+        };
+        let private_bytes: [u8; 32] = match private_bytes.try_into() {
+            Ok(bytes) => bytes,
+            Err(_) => return server_err("Validator authority signer key must be 32 bytes"),
+        };
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&private_bytes);
+        let validator_pubkey = hex::encode(signing_key.verifying_key().as_bytes());
+        let Some(validator_id) = validators
+            .validators
+            .iter()
+            .find(|validator| validator.pubkey == validator_pubkey)
+            .map(|validator| validator.id.clone())
+        else {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(ErrorResponse {
+                    error: "This node is not a member of the authority anchor validator set".into(),
+                }),
+            )
+                .into_response();
+        };
+        (
+            matching.into_iter().next().expect("one matching policy"),
+            validators,
+            validator_id,
+            validator_pubkey,
+            private_bytes,
+            node.config.data_dir.clone(),
+        )
+    };
+
+    let adapter_config = match authority_adapter_config(&policy) {
+        Ok(config) => config,
+        Err(error) => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(ErrorResponse { error }),
+            )
+                .into_response()
+        }
+    };
+    let concurrent = match authority_env_usize(
+        "CREG_NAMESPACE_AUTHORITY_MAX_CONCURRENT_VERIFICATIONS",
+        2,
+        4,
+    ) {
+        Ok(value) => value,
+        Err(error) => return server_err(error),
+    };
+    let semaphore = AUTHORITY_VERIFIER_SLOTS
+        .get_or_init(|| Arc::new(Semaphore::new(concurrent)))
+        .clone();
+    let _permit = match semaphore.try_acquire_owned() {
+        Ok(permit) => permit,
+        Err(_) => {
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                Json(ErrorResponse {
+                    error: "All namespace authority verifier slots are busy".into(),
+                }),
+            )
+                .into_response()
+        }
+    };
+
+    let (evidence, artifact) = tokio::join!(
+        fetch_authority_resource(
+            request.authority,
+            &request.evidence_url,
+            adapter_config.max_evidence_bytes,
+            false,
+        ),
+        fetch_authority_resource(
+            request.authority,
+            &request.artifact_url,
+            adapter_config.max_artifact_bytes,
+            true,
+        )
+    );
+    let evidence = match evidence {
+        Ok(evidence) => evidence,
+        Err(error) => return bad_request(error),
+    };
+    let artifact = match artifact {
+        Ok(artifact) => artifact,
+        Err(error) => return bad_request(error),
+    };
+    let evidence_digest = common::sha256_hex(&evidence);
+    let artifact_digest_algorithm = ArtifactDigestAlgorithm::for_authority(request.authority);
+    let artifact_digest = artifact_digest_algorithm.digest(&artifact);
+    let adapter_request = AuthorityAdapterRequestV2 {
+        schema_version: crate::authority_adapter::AUTHORITY_ADAPTER_PROTOCOL_VERSION,
+        authority: request.authority,
+        evidence_url: request.evidence_url,
+        evidence_sha256: evidence_digest.clone(),
+        evidence_hex: hex::encode(&evidence),
+        artifact_url: request.artifact_url,
+        artifact_digest_algorithm,
+        artifact_digest: artifact_digest.clone(),
+        artifact_hex: hex::encode(&artifact),
+        expected_issuer: request.expected_issuer,
+        expected_subject: request.expected_subject,
+        expected_audience: request.authority.expected_audience().to_owned(),
+        challenge: request.challenge,
+    };
+    let observation = match crate::authority_adapter::verify_with_sidecar(
+        &adapter_config,
+        &adapter_request,
+    )
+    .await
+    {
+        Ok(observation) => observation,
+        Err(error) => return authority_adapter_error_response(error),
+    };
+    if let Err(error) = archive_authority_blob(
+        &data_dir,
+        "authority-evidence",
+        ArtifactDigestAlgorithm::Sha256,
+        &evidence_digest,
+        &evidence,
+    )
+    .await
+    {
+        return server_err(error);
+    }
+    if let Err(error) = archive_authority_blob(
+        &data_dir,
+        "authority-artifacts",
+        artifact_digest_algorithm,
+        &artifact_digest,
+        &artifact,
+    )
+    .await
+    {
+        return server_err(error);
+    }
+    let statement = match observation.into_statement(
+        request.anchor_height,
+        request.anchor_block_hash,
+        request.validator_set_hash,
+    ) {
+        Ok(statement) => statement,
+        Err(error) => return server_err(error.to_string()),
+    };
+    use ed25519_dalek::Signer;
+    let signing_key = ed25519_dalek::SigningKey::from_bytes(&validator_private_key);
+    let signature = common::NamespaceAuthoritySignature {
+        validator_id,
+        validator_pubkey,
+        signature: hex::encode(
+            signing_key
+                .sign(statement.signing_message().as_bytes())
+                .to_bytes(),
+        ),
+    };
+    Json(NamespaceAuthorityAttestationResponse {
+        statement,
+        validators,
+        signature,
+    })
+    .into_response()
+}
+
+async fn assemble_namespace_authority_certificate(
+    State(state): State<SharedState>,
+    Json(certificate): Json<common::CertifiedNamespaceAuthority>,
+) -> Response {
+    let node = state.read().await;
+    let target_height = node.chain.tip_height().unwrap_or(0).saturating_add(1);
+    let config =
+        crate::namespace_consensus::NamespaceConsensusConfig::from_node_config(&node.config);
+    if config.activation_height.is_none()
+        || !config.policy_source_verified
+        || config.validate().is_err()
+    {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorResponse {
+                error: "Namespace authority certificate validation requires a complete signature-verified chain-spec policy".into(),
+            }),
+        )
+            .into_response();
+    }
+    if let Err(error) = crate::namespace_consensus::validate_authority_certificate(
+        &node.chain,
+        target_height,
+        &config,
+        &certificate,
+        certificate.statement.purpose,
+        chrono::Utc::now().timestamp(),
+    ) {
+        return bad_request(format!("Authority certificate rejected: {error}"));
+    }
+    Json(serde_json::json!({
+        "certificate_digest": certificate.digest(),
+        "certificate": certificate,
     }))
     .into_response()
 }
@@ -4199,6 +4863,26 @@ mod tests {
             publisher_chain_id: req.publisher_chain_id.clone(),
             publisher_staking_contract: req.publisher_staking_contract.clone(),
             publisher_issued_at: req.submitted_at.timestamp(),
+            publisher_authorization_version: req.publisher_authorization_version as u32,
+            publisher_genesis_hash: req.publisher_genesis_hash.clone(),
+            ownership_proof_json: req
+                .ownership_proof
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()
+                .unwrap()
+                .unwrap_or_default(),
+            namespace_authority_certificate_json: req
+                .namespace_authority_certificate
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()
+                .unwrap()
+                .unwrap_or_default(),
+            shielded: req.shielded,
+            key_bundle: req.key_bundle.clone().unwrap_or_default(),
+            pgp_signature: req.pgp_signature.clone().unwrap_or_default(),
+            pgp_public_key: req.pgp_public_key.clone().unwrap_or_default(),
         }
     }
 
@@ -4695,7 +5379,7 @@ mod tests {
     async fn private_api_acl_fails_closed_without_operator_secret() -> anyhow::Result<()> {
         let _env_lock = api_env_lock().lock().await;
         let _api_key = EnvRestore::remove(OPERATOR_API_KEY_ENV);
-        let _operator_pubkey = EnvRestore::remove(OPERATOR_PUBKEY_ENV);
+        let _operator_pubkey = EnvRestore::set(OPERATOR_PUBKEY_ENV, &"ab".repeat(32));
         let (state, _tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
         let event_bus = new_event_bus();
         let app = router(
@@ -4776,6 +5460,34 @@ mod tests {
             )
             .await?;
         assert_eq!(missing_internal_auth.status(), StatusCode::UNAUTHORIZED);
+
+        let missing_authority_auth = app
+            .clone()
+            .oneshot(
+                Request::post("/v1/validator/namespace-authority/attest")
+                    .header("content-type", "application/json")
+                    .body(Body::from("{}"))?,
+            )
+            .await?;
+        assert_eq!(missing_authority_auth.status(), StatusCode::UNAUTHORIZED);
+
+        let authorized_authority_reaches_handler = app
+            .clone()
+            .oneshot(
+                Request::post("/v1/validator/namespace-authority/attest")
+                    .header(header::AUTHORIZATION, "Bearer private-route-secret")
+                    .header("content-type", "application/json")
+                    .body(Body::from("{}"))?,
+            )
+            .await?;
+        assert_ne!(
+            authorized_authority_reaches_handler.status(),
+            StatusCode::UNAUTHORIZED
+        );
+        assert_ne!(
+            authorized_authority_reaches_handler.status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
 
         let authorized_internal_reaches_handler = app
             .oneshot(
@@ -4901,9 +5613,23 @@ mod tests {
             p2p_handle,
         );
 
+        let mismatched = app
+            .clone()
+            .oneshot(
+                Request::post("/v1/publisher/namespaces/delegate")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&event)?))?,
+            )
+            .await?;
+        assert_eq!(mismatched.status(), StatusCode::BAD_REQUEST);
+        assert!(
+            tx_receiver.lock().await.try_recv().is_err(),
+            "an action submitted to the wrong lifecycle endpoint must not be queued"
+        );
+
         let response = app
             .oneshot(
-                Request::post("/v1/publisher/namespaces/lifecycle")
+                Request::post("/v1/publisher/namespaces/transfer")
                     .header("content-type", "application/json")
                     .body(Body::from(serde_json::to_vec(&event)?))?,
             )

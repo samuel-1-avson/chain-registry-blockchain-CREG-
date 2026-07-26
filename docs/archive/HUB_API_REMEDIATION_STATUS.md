@@ -7,7 +7,7 @@ Tracks implementation of [WEB_APPS_DATABASE_API_AUDIT.md](./WEB_APPS_DATABASE_AP
 | 1 | SQLite schema + migrations | **Done** | `hub-api/migrations/001_initial.sql`; `better-sqlite3`; parameterized queries only |
 | 2 | Session middleware (HttpOnly, Secure, SameSite=Lax) | **Done** | `hub-api/src/middleware/session.ts`; SIWE verify creates session |
 | 3 | Rate-limit `/api/status/public` and `/api/auth/*` | **Done** | In-memory limiter; env-tunable windows |
-| 4 | Remove `VITE_OPERATOR_API_KEY` from production explorer build | **Done** | Removed from `docker-compose.cloud-edge.yml`; local compose retains dev key |
+| 4 | Remove operator credentials from production explorer builds | **Done** | Removed from all browser builds; node Compose profiles now require a separately provisioned server-side key |
 | 5 | Fix hub health metadata | **Done** | `phase: "1"`, `db: ready\|not_configured\|error` |
 | 6 | Faucet PoW / edge rate limits | **Partial** | Cloud-edge default `FAUCET_POW_DISABLED=false`; Cloud Armor still blocked if quota=0 |
 | 7 | Faucet key in Vault | **Documented** | See `testnet/gcp/faucet-vault-env.example` |

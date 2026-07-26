@@ -12,6 +12,170 @@ use sha3::{Digest, Keccak256};
 use std::path::Path;
 use std::time::Duration;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PublisherAuthorizationConfig {
+    chain_id: String,
+    genesis_hash: String,
+    staking_contract: String,
+}
+
+/// Resolve the consensus identity used by publisher authorization v4.
+///
+/// The three values are one configuration unit. Falling back to a legacy
+/// signature when only part of that identity is present can produce a request
+/// whose signatures are valid for a different network, so partial or malformed
+/// configuration is always an error.
+fn publisher_authorization_config(
+    chain_id: &str,
+    genesis_hash: &str,
+    staking_contract: &str,
+    cr07_marker_present: bool,
+    allow_legacy: bool,
+) -> Result<Option<PublisherAuthorizationConfig>> {
+    let any_identity_value = [chain_id, genesis_hash, staking_contract]
+        .iter()
+        .any(|value| !value.is_empty());
+    if !any_identity_value && !cr07_marker_present {
+        if allow_legacy {
+            return Ok(None);
+        }
+        bail!(
+            "Refusing to create a legacy publisher signature by default. Configure \
+             CREG_CHAIN_ID, CREG_GENESIS_HASH, and CREG_STAKING_ADDR for authorization v4, \
+             or set CREG_ALLOW_LEGACY_PUBLISHER_PROOF=true only when intentionally targeting \
+             a non-production pre-activation network"
+        );
+    }
+
+    if chain_id.is_empty()
+        || chain_id != chain_id.trim()
+        || !common::is_canonical_single_line(chain_id)
+    {
+        bail!(
+            "CR-07 publisher authorization requires a canonical, non-empty CREG_CHAIN_ID; \
+             refusing to create a legacy signature"
+        );
+    }
+
+    let normalized_genesis = genesis_hash
+        .trim()
+        .strip_prefix("0x")
+        .unwrap_or(genesis_hash.trim())
+        .to_ascii_lowercase();
+    if normalized_genesis.len() != 64
+        || !normalized_genesis
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit())
+    {
+        bail!(
+            "CR-07 publisher authorization requires CREG_GENESIS_HASH to be exactly 32 bytes \
+             of hexadecimal data; refusing to create a legacy signature"
+        );
+    }
+
+    let normalized_staking = common::canonical_publisher_address(staking_contract);
+    if staking_contract.is_empty()
+        || staking_contract != staking_contract.trim()
+        || !crate::faucet_client::is_valid_evm_address(staking_contract)
+        || normalized_staking == "0x0000000000000000000000000000000000000000"
+    {
+        bail!(
+            "CR-07 publisher authorization requires CREG_STAKING_ADDR to be a valid 20-byte \
+             EVM address; refusing to create a legacy signature"
+        );
+    }
+
+    Ok(Some(PublisherAuthorizationConfig {
+        chain_id: chain_id.to_string(),
+        genesis_hash: normalized_genesis,
+        staking_contract: normalized_staking,
+    }))
+}
+
+fn load_publisher_authorization_config() -> Result<Option<PublisherAuthorizationConfig>> {
+    let identity_env_present = ["CREG_CHAIN_ID", "CREG_GENESIS_HASH", "CREG_STAKING_ADDR"]
+        .iter()
+        .any(|name| std::env::var_os(name).is_some());
+    let chain_id_env = std::env::var("CREG_CHAIN_ID").ok();
+    let genesis_hash_env = std::env::var("CREG_GENESIS_HASH").ok();
+    let staking_contract_env = std::env::var("CREG_STAKING_ADDR").ok();
+    let cr07_marker_present = identity_env_present
+        || [
+            "CREG_NAMESPACE_AUTHORITY_ACTIVATION_HEIGHT",
+            "CREG_NAMESPACE_AUTHORITY_POLICIES",
+            "CREG_NAMESPACE_AUTHORITY_CERTIFICATE_PATH",
+            "CREG_NAMESPACE_AUTHORITY_PROOF_PATH",
+        ]
+        .iter()
+        .any(|name| std::env::var_os(name).is_some());
+
+    publisher_authorization_config(
+        chain_id_env.as_deref().unwrap_or_default(),
+        genesis_hash_env.as_deref().unwrap_or_default(),
+        staking_contract_env.as_deref().unwrap_or_default(),
+        cr07_marker_present,
+        !env_truthy("CREG_PRODUCTION") && env_truthy("CREG_ALLOW_LEGACY_PUBLISHER_PROOF"),
+    )
+}
+
+fn env_truthy(name: &str) -> bool {
+    std::env::var(name)
+        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+}
+
+fn whole_second_now() -> chrono::DateTime<Utc> {
+    chrono::DateTime::from_timestamp(Utc::now().timestamp(), 0)
+        .expect("current Unix time is representable")
+}
+
+fn load_json_from_env<T>(variable: &str, description: &str) -> Result<Option<T>>
+where
+    T: serde::de::DeserializeOwned,
+{
+    match std::env::var(variable) {
+        Ok(path) if !path.trim().is_empty() => {
+            let bytes = std::fs::read(&path)
+                .with_context(|| format!("Cannot read {description} {path}"))?;
+            serde_json::from_slice(&bytes)
+                .with_context(|| format!("Invalid {description} {path}"))
+                .map(Some)
+        }
+        Ok(_) | Err(std::env::VarError::NotPresent) => Ok(None),
+        Err(std::env::VarError::NotUnicode(_)) => {
+            bail!("{variable} must contain a valid Unicode filesystem path")
+        }
+    }
+}
+
+fn load_namespace_authority_material() -> Result<(
+    Option<common::NamespaceAuthorityProof>,
+    Option<common::CertifiedNamespaceAuthority>,
+)> {
+    let certificate: Option<common::CertifiedNamespaceAuthority> = load_json_from_env(
+        "CREG_NAMESPACE_AUTHORITY_CERTIFICATE_PATH",
+        "authority certificate",
+    )?;
+    let standalone_proof: Option<common::NamespaceAuthorityProof> =
+        load_json_from_env("CREG_NAMESPACE_AUTHORITY_PROOF_PATH", "authority proof")?;
+
+    let proof = match (&certificate, standalone_proof) {
+        (Some(certificate), Some(proof)) => {
+            if proof.digest() != certificate.statement.authority_proof.digest() {
+                bail!(
+                    "CREG_NAMESPACE_AUTHORITY_PROOF_PATH does not match the proof embedded in \
+                     CREG_NAMESPACE_AUTHORITY_CERTIFICATE_PATH"
+                );
+            }
+            Some(proof)
+        }
+        (Some(certificate), None) => Some(certificate.statement.authority_proof.clone()),
+        (None, proof) => proof,
+    };
+
+    Ok((proof, certificate))
+}
+
 pub async fn run(
     tarball_path: &Path,
     manifest_path: Option<&Path>,
@@ -24,6 +188,8 @@ pub async fn run(
     shield: bool,
 ) -> Result<()> {
     let publisher_address = canonicalize_publisher_address(publisher_address)?;
+    let publisher_authorization_config = load_publisher_authorization_config()?;
+    let namespace_authority_material = load_namespace_authority_material()?;
 
     if shield && !common::shielded_publish_enabled() {
         bail!(
@@ -82,26 +248,25 @@ pub async fn run(
 
     let manifest_hash_hex =
         common::sha256_hex(&serde_json::to_vec(&manifest).context("Failed to serialize manifest")?);
-    let publisher_chain_id = std::env::var("CREG_CHAIN_ID").unwrap_or_default();
-    let publisher_genesis_hash = std::env::var("CREG_GENESIS_HASH")
-        .unwrap_or_default()
-        .trim()
-        .trim_start_matches("0x")
-        .to_ascii_lowercase();
-    let publisher_staking_contract = std::env::var("CREG_STAKING_ADDR").unwrap_or_default();
+    let (
+        publisher_chain_id,
+        publisher_genesis_hash,
+        publisher_staking_contract,
+        publisher_authorization_version,
+    ) = match publisher_authorization_config {
+        Some(config) => (
+            config.chain_id,
+            config.genesis_hash,
+            config.staking_contract,
+            4,
+        ),
+        None => (String::new(), String::new(), String::new(), 0),
+    };
     let mut nonce_bytes = [0u8; 16];
     rand::thread_rng().fill_bytes(&mut nonce_bytes);
     let publisher_nonce = hex::encode(nonce_bytes);
-    let submitted_at = Utc::now();
+    let submitted_at = whole_second_now();
     let publisher_expires_at = (submitted_at + chrono::Duration::hours(1)).timestamp() as u64;
-    let publisher_authorization_version = if !publisher_chain_id.is_empty()
-        && publisher_genesis_hash.len() == 64
-        && !publisher_staking_contract.is_empty()
-    {
-        4
-    } else {
-        0
-    };
     let ownership_claim = if publisher_authorization_version == 4 {
         common::authoritative_package_namespace(&pkg_id)
             .map_err(|error| anyhow::anyhow!(error))?
@@ -111,19 +276,7 @@ pub async fn run(
         format!("{}:{}", pkg_id.ecosystem, pkg_id.name)
     };
     let source_hash = std::env::var("CREG_SOURCE_HASH").unwrap_or_else(|_| content_hash.clone());
-    let namespace_authority_certificate: Option<common::CertifiedNamespaceAuthority> =
-        std::env::var("CREG_NAMESPACE_AUTHORITY_CERTIFICATE_PATH")
-            .ok()
-            .map(|path| {
-                let bytes = std::fs::read(&path)
-                    .with_context(|| format!("Cannot read authority certificate {path}"))?;
-                serde_json::from_slice(&bytes)
-                    .with_context(|| format!("Invalid authority certificate {path}"))
-            })
-            .transpose()?;
-    let ownership_proof = namespace_authority_certificate
-        .as_ref()
-        .map(|certificate| certificate.statement.authority_proof.clone());
+    let (ownership_proof, namespace_authority_certificate) = namespace_authority_material;
 
     // Optional PGP material is hashed into publisher authorization v4.
     let (pgp_signature, pgp_public_key) = sign_with_pgp_if_configured(&tarball_bytes)?;
@@ -163,6 +316,10 @@ pub async fn run(
         .as_ref()
         .map(common::NamespaceAuthorityProof::digest)
         .unwrap_or_default();
+    let authority_certificate_digest = namespace_authority_certificate
+        .as_ref()
+        .map(common::CertifiedNamespaceAuthority::digest)
+        .unwrap_or_default();
     let msg = if publisher_authorization_version == 4 {
         common::publish_signature_message_v4(
             &publisher_chain_id,
@@ -186,21 +343,7 @@ pub async fn run(
             threshold,
             &publisher_pubkeys,
             &authority_proof_digest,
-        )
-    } else if !publisher_chain_id.is_empty() && !publisher_staking_contract.is_empty() {
-        common::publish_signature_message_v2(
-            &publisher_chain_id,
-            &publisher_staking_contract,
-            &pkg_id,
-            &content_hash,
-            &source_hash,
-            &manifest_hash_hex,
-            &primary_pubkey,
-            &publisher_address,
-            &ownership_claim,
-            &publisher_nonce,
-            submitted_at.timestamp(),
-            publisher_expires_at,
+            &authority_certificate_digest,
         )
     } else {
         common::publish_signature_message(&pkg_id, &content_hash, &publisher_address)
@@ -516,17 +659,23 @@ async fn pin_to_ipfs(bytes: &[u8], ipfs_url: Option<&str>) -> Result<String> {
     Ok(cid)
 }
 
-/// Infer PackageId from package.json / Cargo.toml in the tarball.
+/// Infer PackageId from package.json, pyproject.toml, or Cargo.toml in a
+/// gzip-compressed source archive.
 fn detect_package_id(tarball_bytes: &[u8]) -> Result<PackageId> {
     use std::io::Read;
     let gz = flate2::read::GzDecoder::new(tarball_bytes);
     let mut archive = tar::Archive::new(gz);
+    let mut cargo_candidate = None;
 
     for entry in archive.entries()? {
         let mut entry: tar::Entry<'_, flate2::read::GzDecoder<&[u8]>> = entry?;
         let path = entry.path()?.to_string_lossy().to_string();
+        let file_name = path
+            .rsplit(|character| character == '/' || character == '\\')
+            .next()
+            .unwrap_or(path.as_str());
 
-        if path.ends_with("package.json") {
+        if file_name == "package.json" {
             let mut content = String::new();
             entry.read_to_string(&mut content)?;
             #[derive(serde::Deserialize)]
@@ -538,17 +687,88 @@ fn detect_package_id(tarball_bytes: &[u8]) -> Result<PackageId> {
             return Ok(PackageId::new("npm", p.name, p.version));
         }
 
-        if path.ends_with("Cargo.toml") {
+        if file_name == "pyproject.toml" {
+            let mut content = String::new();
+            entry.read_to_string(&mut content)?;
+            return package_id_from_pyproject(&content);
+        }
+
+        if file_name == "Cargo.toml" {
             let mut content = String::new();
             entry.read_to_string(&mut content)?;
             // Very simple parse — a full implementation uses toml crate.
             let name = extract_toml_field(&content, "name").unwrap_or("unknown");
             let version = extract_toml_field(&content, "version").unwrap_or("0.0.0");
-            return Ok(PackageId::new("cargo", name, version));
+            if cargo_candidate.is_none() {
+                cargo_candidate = Some(PackageId::new("cargo", name, version));
+            }
         }
     }
 
-    bail!("Could not detect package identity from tarball contents")
+    cargo_candidate.context(
+        "Could not detect package identity from package.json, pyproject.toml, or Cargo.toml",
+    )
+}
+
+fn package_id_from_pyproject(content: &str) -> Result<PackageId> {
+    let document: toml::Value =
+        toml::from_str(content).context("Invalid pyproject.toml package metadata")?;
+    let project = document.get("project");
+    let poetry = document.get("tool").and_then(|tool| tool.get("poetry"));
+
+    let name = project
+        .and_then(|section| section.get("name"))
+        .and_then(toml::Value::as_str)
+        .or_else(|| {
+            poetry
+                .and_then(|section| section.get("name"))
+                .and_then(toml::Value::as_str)
+        })
+        .context("pyproject.toml must declare project.name or tool.poetry.name")?;
+    let version = project
+        .and_then(|section| section.get("version"))
+        .and_then(toml::Value::as_str)
+        .or_else(|| {
+            poetry
+                .and_then(|section| section.get("version"))
+                .and_then(toml::Value::as_str)
+        })
+        .context("pyproject.toml must declare a static project.version or tool.poetry.version")?;
+    if !common::is_canonical_single_line(version) {
+        bail!("pyproject.toml package version must be a non-empty single-line string");
+    }
+
+    Ok(PackageId::new(
+        "pypi",
+        canonical_pypi_package_name(name)?,
+        version,
+    ))
+}
+
+fn canonical_pypi_package_name(name: &str) -> Result<String> {
+    if name.is_empty() || name != name.trim() {
+        bail!("PyPI project name must be non-empty and must not contain surrounding whitespace");
+    }
+
+    let mut canonical = String::with_capacity(name.len());
+    let mut previous_was_separator = false;
+    for byte in name.bytes() {
+        if byte.is_ascii_alphanumeric() {
+            canonical.push((byte as char).to_ascii_lowercase());
+            previous_was_separator = false;
+        } else if matches!(byte, b'-' | b'_' | b'.') {
+            if !previous_was_separator {
+                canonical.push('-');
+                previous_was_separator = true;
+            }
+        } else {
+            bail!("PyPI project name contains a character outside [A-Za-z0-9._-]");
+        }
+    }
+    if canonical.is_empty() || canonical.starts_with('-') || canonical.ends_with('-') {
+        bail!("PyPI project name must begin and end with an ASCII letter or digit");
+    }
+    Ok(canonical)
 }
 
 fn extract_toml_field<'a>(content: &'a str, field: &str) -> Option<&'a str> {
@@ -723,6 +943,8 @@ pub async fn sign_offline(
     use ed25519_dalek::{Signer, SigningKey};
 
     let publisher_address = canonicalize_publisher_address(publisher_address)?;
+    let publisher_authorization_config = load_publisher_authorization_config()?;
+    let namespace_authority_material = load_namespace_authority_material()?;
 
     // 1. Read and hash the tarball
     let tarball_bytes = std::fs::read(tarball_path)
@@ -750,24 +972,21 @@ pub async fn sign_offline(
     let pkg_id = detect_package_id(&tarball_bytes)?;
     let manifest_hash =
         common::sha256_hex(&serde_json::to_vec(&manifest).context("Failed to serialize manifest")?);
-    let chain_id = std::env::var("CREG_CHAIN_ID").unwrap_or_default();
-    let genesis_hash = std::env::var("CREG_GENESIS_HASH")
-        .unwrap_or_default()
-        .trim()
-        .trim_start_matches("0x")
-        .to_ascii_lowercase();
-    let staking_contract = std::env::var("CREG_STAKING_ADDR").unwrap_or_default();
+    let (chain_id, genesis_hash, staking_contract, authorization_version) =
+        match publisher_authorization_config {
+            Some(config) => (
+                config.chain_id,
+                config.genesis_hash,
+                config.staking_contract,
+                4,
+            ),
+            None => (String::new(), String::new(), String::new(), 0),
+        };
     let mut nonce_bytes = [0u8; 16];
     rand::thread_rng().fill_bytes(&mut nonce_bytes);
     let nonce = hex::encode(nonce_bytes);
-    let submitted_at = Utc::now();
+    let submitted_at = whole_second_now();
     let expires_at = (submitted_at + chrono::Duration::hours(1)).timestamp() as u64;
-    let authorization_version =
-        if !chain_id.is_empty() && genesis_hash.len() == 64 && !staking_contract.is_empty() {
-            4
-        } else {
-            0
-        };
     let ownership_claim = if authorization_version == 4 {
         common::authoritative_package_namespace(&pkg_id)
             .map_err(|error| anyhow::anyhow!(error))?
@@ -777,19 +996,7 @@ pub async fn sign_offline(
         format!("{}:{}", pkg_id.ecosystem, pkg_id.name)
     };
     let source_hash = std::env::var("CREG_SOURCE_HASH").unwrap_or_else(|_| content_hash.clone());
-    let namespace_authority_certificate: Option<common::CertifiedNamespaceAuthority> =
-        std::env::var("CREG_NAMESPACE_AUTHORITY_CERTIFICATE_PATH")
-            .ok()
-            .map(|path| {
-                let bytes = std::fs::read(&path)
-                    .with_context(|| format!("Cannot read authority certificate {path}"))?;
-                serde_json::from_slice(&bytes)
-                    .with_context(|| format!("Invalid authority certificate {path}"))
-            })
-            .transpose()?;
-    let ownership_proof = namespace_authority_certificate
-        .as_ref()
-        .map(|certificate| certificate.statement.authority_proof.clone());
+    let (ownership_proof, namespace_authority_certificate) = namespace_authority_material;
     let (pgp_signature, pgp_public_key) = sign_with_pgp_if_configured(&tarball_bytes)?;
 
     // 5. Sign with Ed25519
@@ -823,6 +1030,10 @@ pub async fn sign_offline(
         .as_ref()
         .map(common::NamespaceAuthorityProof::digest)
         .unwrap_or_default();
+    let authority_certificate_digest = namespace_authority_certificate
+        .as_ref()
+        .map(common::CertifiedNamespaceAuthority::digest)
+        .unwrap_or_default();
     let msg = if authorization_version == 4 {
         common::publish_signature_message_v4(
             &chain_id,
@@ -846,21 +1057,7 @@ pub async fn sign_offline(
             threshold,
             &publisher_pubkeys,
             &authority_proof_digest,
-        )
-    } else if !chain_id.trim().is_empty() && !staking_contract.trim().is_empty() {
-        common::publish_signature_message_v2(
-            &chain_id,
-            &staking_contract,
-            &pkg_id,
-            &content_hash,
-            &source_hash,
-            &manifest_hash,
-            &primary_pubkey,
-            &publisher_address,
-            &ownership_claim,
-            &nonce,
-            submitted_at.timestamp(),
-            expires_at,
+            &authority_certificate_digest,
         )
     } else {
         common::publish_signature_message(&pkg_id, &content_hash, &publisher_address)
@@ -1020,7 +1217,34 @@ fn resolve_grpc_url(node_url: Option<&str>, grpc_url: Option<&str>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{publisher_packages_url, resolve_grpc_url};
+    use super::{
+        detect_package_id, package_id_from_pyproject, publisher_authorization_config,
+        publisher_packages_url, resolve_grpc_url,
+    };
+
+    fn source_archive(entries: &[(&str, &str)]) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        {
+            let encoder = flate2::write::GzEncoder::new(&mut bytes, flate2::Compression::default());
+            let mut archive = tar::Builder::new(encoder);
+            for (path, content) in entries {
+                let mut header = tar::Header::new_gnu();
+                header.set_size(content.len() as u64);
+                header.set_mode(0o644);
+                header.set_cksum();
+                archive
+                    .append_data(&mut header, path, content.as_bytes())
+                    .expect("append source metadata");
+            }
+            archive.finish().expect("finish tar archive");
+            archive
+                .into_inner()
+                .expect("recover gzip encoder")
+                .finish()
+                .expect("finish gzip stream");
+        }
+        bytes
+    }
 
     #[test]
     fn publish_rest_fallback_uses_grouped_publisher_route() {
@@ -1053,5 +1277,77 @@ mod tests {
         let url = format!("{}/api/v0/pin/add?arg={}", base, urlencoding::encode(cid));
         assert!(url.contains("pin/add?arg="));
         assert!(url.contains(cid));
+    }
+
+    #[test]
+    fn pyproject_detection_uses_canonical_pypi_identity() {
+        let package = package_id_from_pyproject(
+            r#"
+[project]
+name = "Example_Package.Name"
+version = "1.2.3"
+"#,
+        )
+        .expect("valid PEP 621 metadata");
+
+        assert_eq!(package.ecosystem, "pypi");
+        assert_eq!(package.name, "example-package-name");
+        assert_eq!(package.version, "1.2.3");
+        assert_eq!(package.canonical(), "pypi:example-package-name@1.2.3");
+    }
+
+    #[test]
+    fn pyproject_takes_precedence_over_bundled_cargo_manifest() {
+        let archive = source_archive(&[
+            (
+                "example/native/Cargo.toml",
+                "[package]\nname = \"native-helper\"\nversion = \"0.1.0\"\n",
+            ),
+            (
+                "example/pyproject.toml",
+                "[project]\nname = \"Python_Project\"\nversion = \"2.0.0\"\n",
+            ),
+        ]);
+
+        let package = detect_package_id(&archive).expect("detect Python source distribution");
+        assert_eq!(package.canonical(), "pypi:python-project@2.0.0");
+    }
+
+    #[test]
+    fn publisher_v4_configuration_is_atomic_and_normalized() {
+        let config = publisher_authorization_config(
+            "creg-testnet-1",
+            &format!("0x{}", "AB".repeat(32)),
+            "0xABCDEFabcdefABCDEFabcdefABCDEFabcdefABCD",
+            false,
+            false,
+        )
+        .expect("complete v4 configuration")
+        .expect("v4 enabled");
+
+        assert_eq!(config.chain_id, "creg-testnet-1");
+        assert_eq!(config.genesis_hash, "ab".repeat(32));
+        assert_eq!(
+            config.staking_contract,
+            "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd"
+        );
+    }
+
+    #[test]
+    fn publisher_v4_configuration_rejects_partial_or_marker_only_setup() {
+        assert!(publisher_authorization_config("creg-testnet-1", "", "", false, false).is_err());
+        assert!(publisher_authorization_config("", "", "", true, false).is_err());
+        assert!(publisher_authorization_config(
+            "creg-testnet-1",
+            &"aa".repeat(32),
+            "",
+            false,
+            false
+        )
+        .is_err());
+        assert!(publisher_authorization_config("", "", "", false, false).is_err());
+        assert!(publisher_authorization_config("", "", "", false, true)
+            .expect("legacy mode")
+            .is_none());
     }
 }

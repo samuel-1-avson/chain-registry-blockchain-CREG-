@@ -30,6 +30,7 @@ pub struct PendingTransaction {
 }
 
 /// Tracks pending transactions and detects censorship.
+#[derive(Debug, Clone)]
 pub struct ForcedInclusionTracker {
     /// tx_hash → pending tx metadata
     pending: HashMap<String, PendingTransaction>,
@@ -132,6 +133,15 @@ impl ForcedInclusionTracker {
     /// Number of currently pending (un-included) transactions.
     pub fn pending_count(&self) -> usize {
         self.pending.len()
+    }
+
+    /// Original canonical-height anchor for a pending transaction. This is
+    /// exposed so durable recovery can prove that a reorg/restart did not
+    /// silently reset its forced-inclusion deadline.
+    pub fn submitted_at_height(&self, tx_hash: &str) -> Option<u64> {
+        self.pending
+            .get(tx_hash)
+            .map(|pending| pending.submitted_at_height)
     }
 }
 

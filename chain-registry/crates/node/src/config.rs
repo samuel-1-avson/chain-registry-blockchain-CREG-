@@ -161,6 +161,12 @@ pub struct NodeConfig {
     /// ownership transactions. `None` keeps compatibility mode enabled.
     pub namespace_authority_activation_height: Option<u64>,
     pub namespace_authority_policies: Vec<common::NamespaceAuthorityPolicySpec>,
+    /// Startup-only provenance for consensus-critical authority policy pins.
+    /// Activation is rejected unless these values came from a signature-
+    /// verified chain spec.
+    pub namespace_authority_policy_source_verified: bool,
+    /// Retains fail-closed parsing errors instead of silently disabling CR-07.
+    pub namespace_authority_config_errors: Vec<String>,
     /// HTTP bind address for the REST API.
     pub listen_addr: String,
     /// Persistent data directory (chain + pending pool).
@@ -241,22 +247,50 @@ impl NodeConfig {
 
         let max_peers = env("CREG_MAX_PEERS", "15").parse().unwrap_or(15);
 
+        let mut namespace_authority_config_errors = Vec::new();
+        let namespace_authority_activation_height =
+            match std::env::var("CREG_NAMESPACE_AUTHORITY_ACTIVATION_HEIGHT") {
+                Ok(value) => match value.parse::<u64>() {
+                    Ok(height) => Some(height),
+                    Err(_) => {
+                        namespace_authority_config_errors.push(
+                            "CREG_NAMESPACE_AUTHORITY_ACTIVATION_HEIGHT must be an unsigned integer"
+                                .to_owned(),
+                        );
+                        None
+                    }
+                },
+                Err(std::env::VarError::NotPresent) => None,
+                Err(std::env::VarError::NotUnicode(_)) => {
+                    namespace_authority_config_errors.push(
+                        "CREG_NAMESPACE_AUTHORITY_ACTIVATION_HEIGHT is not valid Unicode"
+                            .to_owned(),
+                    );
+                    None
+                }
+            };
+        let namespace_authority_policies_raw = env("CREG_NAMESPACE_AUTHORITY_POLICIES", "[]");
+        let namespace_authority_policies =
+            match serde_json::from_str(&namespace_authority_policies_raw) {
+                Ok(policies) => policies,
+                Err(error) => {
+                    namespace_authority_config_errors.push(format!(
+                        "CREG_NAMESPACE_AUTHORITY_POLICIES is invalid JSON: {error}"
+                    ));
+                    Vec::new()
+                }
+            };
+
         let mut config = Self {
             chain_id: env("CREG_CHAIN_ID", ""),
             network_genesis_hash: env("CREG_GENESIS_HASH", "")
                 .trim()
                 .trim_start_matches("0x")
                 .to_ascii_lowercase(),
-            namespace_authority_activation_height: std::env::var(
-                "CREG_NAMESPACE_AUTHORITY_ACTIVATION_HEIGHT",
-            )
-            .ok()
-            .and_then(|value| value.parse().ok()),
-            namespace_authority_policies: serde_json::from_str(&env(
-                "CREG_NAMESPACE_AUTHORITY_POLICIES",
-                "[]",
-            ))
-            .unwrap_or_default(),
+            namespace_authority_activation_height,
+            namespace_authority_policies,
+            namespace_authority_policy_source_verified: false,
+            namespace_authority_config_errors,
             listen_addr: env("CREG_LISTEN", "0.0.0.0:8080"),
             data_dir: PathBuf::from(env("CREG_DATA_DIR", "./data")),
             node_id: env("CREG_NODE_ID", &Uuid::new_v4().to_string()),
@@ -340,7 +374,7 @@ impl NodeConfig {
     /// Validate the configuration and return a list of human-readable errors.
     /// Call this at startup before opening any resources.
     pub fn validate(&self) -> Vec<String> {
-        let mut errors = Vec::new();
+        let mut errors = self.namespace_authority_config_errors.clone();
 
         let is_zero_like = |value: &str| {
             let trimmed = value.trim();
@@ -364,6 +398,29 @@ impl NodeConfig {
                     "Authoritative namespace activation requires a chain ID, canonical genesis hash, non-zero staking contract, and pinned adapter policies"
                         .into(),
                 );
+            }
+            if !self.namespace_authority_policy_source_verified {
+                errors.push(
+                    "Authoritative namespace activation requires policy pins from a signature-verified chain spec"
+                        .into(),
+                );
+            }
+            for policy in &self.namespace_authority_policies {
+                let lower_sha256 = |value: &str| {
+                    value.len() == 64
+                        && value == value.to_ascii_lowercase()
+                        && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+                };
+                if !common::is_canonical_single_line(&policy.adapter_id)
+                    || !common::is_canonical_single_line(&policy.adapter_version)
+                    || !lower_sha256(&policy.verifier_sha256)
+                    || !lower_sha256(&policy.policy_sha256)
+                    || !lower_sha256(&policy.trust_root_sha256)
+                {
+                    errors.push(
+                        "Authoritative namespace adapter policy pins are not canonical".into(),
+                    );
+                }
             }
         }
 
@@ -570,17 +627,24 @@ impl NodeConfig {
         buf.push_str(&self.token_addr.trim().to_lowercase());
         let mut authority_policies = self.namespace_authority_policies.clone();
         authority_policies.sort_by(|left, right| {
-            left.adapter_id
-                .cmp(&right.adapter_id)
+            left.authority
+                .ecosystem()
+                .cmp(right.authority.ecosystem())
+                .then_with(|| left.adapter_id.cmp(&right.adapter_id))
                 .then_with(|| left.adapter_version.cmp(&right.adapter_version))
+                .then_with(|| left.verifier_sha256.cmp(&right.verifier_sha256))
                 .then_with(|| left.policy_sha256.cmp(&right.policy_sha256))
                 .then_with(|| left.trust_root_sha256.cmp(&right.trust_root_sha256))
         });
         for policy in authority_policies {
             buf.push('|');
+            buf.push_str(policy.authority.ecosystem());
+            buf.push(':');
             buf.push_str(&policy.adapter_id);
             buf.push(':');
             buf.push_str(&policy.adapter_version);
+            buf.push(':');
+            buf.push_str(&policy.verifier_sha256.to_ascii_lowercase());
             buf.push(':');
             buf.push_str(&policy.policy_sha256.to_ascii_lowercase());
             buf.push(':');
@@ -632,7 +696,7 @@ impl NodeConfig {
     }
 
     /// Apply a resolved chain spec, with env vars taking precedence.
-    pub fn apply_chain_spec(&mut self, spec: &common::ChainSpec) {
+    pub fn apply_chain_spec(&mut self, spec: &common::ChainSpec, signature_verified: bool) {
         if self.chain_id.is_empty() {
             self.chain_id = spec.chain_id.clone();
         }
@@ -640,6 +704,7 @@ impl NodeConfig {
             spec.consensus_params.namespace_authority_activation_height;
         self.namespace_authority_policies =
             spec.consensus_params.namespace_authority_policies.clone();
+        self.namespace_authority_policy_source_verified = signature_verified;
         if let Ok(hash) = spec.compute_genesis_hash() {
             self.network_genesis_hash = hash.trim_start_matches("0x").to_ascii_lowercase();
         }
@@ -725,6 +790,11 @@ mod tests {
     fn base_config() -> NodeConfig {
         NodeConfig {
             chain_id: "creg-test-1".into(),
+            network_genesis_hash: String::new(),
+            namespace_authority_activation_height: None,
+            namespace_authority_policies: vec![],
+            namespace_authority_policy_source_verified: false,
+            namespace_authority_config_errors: vec![],
             listen_addr: "127.0.0.1:8080".into(),
             data_dir: PathBuf::from("./data"),
             p2p_listen: "/ip4/0.0.0.0/tcp/4001".into(),

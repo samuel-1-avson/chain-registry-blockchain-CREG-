@@ -335,10 +335,11 @@ pub fn publish_signature_message_v4(
     threshold: usize,
     publisher_pubkeys: &[String],
     authority_proof_digest: &str,
+    authority_certificate_digest: &str,
 ) -> String {
     let keyset = canonical_publisher_keyset(publisher_pubkey, publisher_pubkeys).join(",");
     format!(
-        "creg-publisher-admission-v4\nservice:creg-package-admission\nchain_id:{}\ngenesis_hash:{}\nstaking_contract:{}\necosystem:{}\nname:{}\nversion:{}\ncontent_sha256:{}\nsource_sha256:{}\nmanifest_sha256:{}\nipfs_cid:{}\nshielded:{}\nkey_bundle_sha256:{}\npgp_signature_sha256:{}\npgp_public_key_sha256:{}\ned25519_pubkey:{}\nevm_address:{}\nownership_claim:{}\nnonce:{}\nissued_at:{}\nexpires_at:{}\nthreshold:{}\npublisher_pubkeys:{}\nownership_proof_sha256:{}",
+        "creg-publisher-admission-v4\nservice:creg-package-admission\nchain_id:{}\ngenesis_hash:{}\nstaking_contract:{}\necosystem:{}\nname:{}\nversion:{}\ncontent_sha256:{}\nsource_sha256:{}\nmanifest_sha256:{}\nipfs_cid:{}\nshielded:{}\nkey_bundle_sha256:{}\npgp_signature_sha256:{}\npgp_public_key_sha256:{}\ned25519_pubkey:{}\nevm_address:{}\nownership_claim:{}\nnonce:{}\nissued_at:{}\nexpires_at:{}\nthreshold:{}\npublisher_pubkeys:{}\nownership_proof_sha256:{}\nauthority_certificate_sha256:{}",
         chain_id.trim(),
         genesis_hash.trim().to_ascii_lowercase(),
         canonical_publisher_address(staking_contract),
@@ -362,6 +363,7 @@ pub fn publish_signature_message_v4(
         threshold,
         keyset,
         authority_proof_digest.trim().to_ascii_lowercase(),
+        authority_certificate_digest.trim().to_ascii_lowercase(),
     )
 }
 
@@ -408,9 +410,49 @@ pub struct PackageManifest {
 #[cfg(test)]
 mod publisher_message_tests {
     use super::{
-        package_namespace_prefix, publish_signature_message_v2, publish_signature_message_v3,
-        publisher_rotation_message, validate_namespace_prefix, PackageId,
+        authoritative_package_namespace, package_namespace_prefix, publish_signature_message_v2,
+        publish_signature_message_v3, publish_signature_message_v4, publisher_rotation_message,
+        validate_authoritative_namespace, validate_namespace_prefix, PackageId,
     };
+
+    #[allow(clippy::too_many_arguments)]
+    fn v4_message(
+        id: &PackageId,
+        genesis_hash: &str,
+        ipfs_cid: &str,
+        shielded: bool,
+        key_bundle_sha256: &str,
+        pgp_signature_sha256: &str,
+        threshold: usize,
+        publisher_pubkeys: &[String],
+        authority_proof_digest: &str,
+        authority_certificate_digest: &str,
+    ) -> String {
+        publish_signature_message_v4(
+            "creg-testnet-1",
+            genesis_hash,
+            "0x1111111111111111111111111111111111111111",
+            id,
+            &"1".repeat(64),
+            &"2".repeat(64),
+            &"3".repeat(64),
+            ipfs_cid,
+            shielded,
+            key_bundle_sha256,
+            pgp_signature_sha256,
+            &"6".repeat(64),
+            &"a".repeat(64),
+            "0x2222222222222222222222222222222222222222",
+            "npm:pkg",
+            "nonce-a",
+            1_700_000_000,
+            1_700_000_600,
+            threshold,
+            publisher_pubkeys,
+            authority_proof_digest,
+            authority_certificate_digest,
+        )
+    }
 
     #[test]
     fn publisher_payload_is_domain_separated_and_binds_manifest_and_nonce() {
@@ -480,10 +522,174 @@ mod publisher_message_tests {
         assert_ne!(first, changed_namespace);
         assert_ne!(first, changed_nonce);
     }
+
+    #[test]
+    fn authoritative_namespaces_reject_npm_and_pypi_aliases() {
+        assert_eq!(
+            authoritative_package_namespace(&PackageId::new("npm", "@creg/pkg", "1.0.0")),
+            Ok("npm:@creg/pkg@".into())
+        );
+        assert!(
+            authoritative_package_namespace(&PackageId::new("npm", "@CREG/pkg", "1.0.0")).is_err()
+        );
+        assert!(authoritative_package_namespace(&PackageId::new(
+            "npm",
+            "@creg/pkg/other",
+            "1.0.0"
+        ))
+        .is_err());
+
+        assert_eq!(
+            authoritative_package_namespace(&PackageId::new("pypi", "zope-interface", "6.0.0")),
+            Ok("pypi:zope-interface@".into())
+        );
+        for alias in ["Zope.Interface", "zope_interface", "zope..interface"] {
+            assert!(
+                authoritative_package_namespace(&PackageId::new("pypi", alias, "6.0.0")).is_err()
+            );
+        }
+        assert!(validate_authoritative_namespace("pypi:zope-interface@").is_ok());
+        assert!(validate_authoritative_namespace("pypi:zope_interface@").is_err());
+        assert!(validate_authoritative_namespace("cargo:serde@").is_err());
+    }
+
+    #[test]
+    fn publisher_v4_message_binds_retrieval_multisig_and_authority_data() {
+        let id = PackageId::new("npm", "pkg", "1.0.0");
+        let keys = vec!["a".repeat(64), "b".repeat(64)];
+        let base = v4_message(
+            &id,
+            &"4".repeat(64),
+            "bafy-package",
+            true,
+            &"5".repeat(64),
+            &"7".repeat(64),
+            2,
+            &keys,
+            &"8".repeat(64),
+            &"9".repeat(64),
+        );
+        assert!(base.starts_with("creg-publisher-admission-v4\nservice:creg-package-admission"));
+
+        let mutations = [
+            v4_message(
+                &id,
+                &"0".repeat(64),
+                "bafy-package",
+                true,
+                &"5".repeat(64),
+                &"7".repeat(64),
+                2,
+                &keys,
+                &"8".repeat(64),
+                &"9".repeat(64),
+            ),
+            v4_message(
+                &id,
+                &"4".repeat(64),
+                "bafy-substituted",
+                true,
+                &"5".repeat(64),
+                &"7".repeat(64),
+                2,
+                &keys,
+                &"8".repeat(64),
+                &"9".repeat(64),
+            ),
+            v4_message(
+                &id,
+                &"4".repeat(64),
+                "bafy-package",
+                false,
+                &"5".repeat(64),
+                &"7".repeat(64),
+                2,
+                &keys,
+                &"8".repeat(64),
+                &"9".repeat(64),
+            ),
+            v4_message(
+                &id,
+                &"4".repeat(64),
+                "bafy-package",
+                true,
+                &"0".repeat(64),
+                &"7".repeat(64),
+                2,
+                &keys,
+                &"8".repeat(64),
+                &"9".repeat(64),
+            ),
+            v4_message(
+                &id,
+                &"4".repeat(64),
+                "bafy-package",
+                true,
+                &"5".repeat(64),
+                &"0".repeat(64),
+                2,
+                &keys,
+                &"8".repeat(64),
+                &"9".repeat(64),
+            ),
+            v4_message(
+                &id,
+                &"4".repeat(64),
+                "bafy-package",
+                true,
+                &"5".repeat(64),
+                &"7".repeat(64),
+                1,
+                &keys,
+                &"8".repeat(64),
+                &"9".repeat(64),
+            ),
+            v4_message(
+                &id,
+                &"4".repeat(64),
+                "bafy-package",
+                true,
+                &"5".repeat(64),
+                &"7".repeat(64),
+                2,
+                &["a".repeat(64), "c".repeat(64)],
+                &"8".repeat(64),
+                &"9".repeat(64),
+            ),
+            v4_message(
+                &id,
+                &"4".repeat(64),
+                "bafy-package",
+                true,
+                &"5".repeat(64),
+                &"7".repeat(64),
+                2,
+                &keys,
+                &"0".repeat(64),
+                &"9".repeat(64),
+            ),
+            v4_message(
+                &id,
+                &"4".repeat(64),
+                "bafy-package",
+                true,
+                &"5".repeat(64),
+                &"7".repeat(64),
+                2,
+                &keys,
+                &"8".repeat(64),
+                &"0".repeat(64),
+            ),
+        ];
+        for mutation in mutations {
+            assert_ne!(base, mutation);
+        }
+    }
 }
 
 /// Submitted by a publisher to place a package in the pending pool.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct PublishRequest {
     pub id: PackageId,
     /// SHA-256 of the tarball bytes.
@@ -558,6 +764,7 @@ pub struct PublishRequest {
 /// a peer or rebuilding node needs to reconstruct the signed publisher
 /// message and verify the optional upstream namespace certificate.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PublisherAuthorizationV1 {
     pub schema_version: u16,
     pub chain_id: String,
@@ -662,6 +869,11 @@ impl PublisherAuthorizationV1 {
                 .as_ref()
                 .map(NamespaceAuthorityProof::digest)
                 .unwrap_or_default(),
+            &self
+                .authority_certificate
+                .as_ref()
+                .map(CertifiedNamespaceAuthority::digest)
+                .unwrap_or_default(),
         )
     }
 
@@ -747,22 +959,17 @@ impl PublisherAuthorizationV1 {
             key.len() != 64
                 || key != &key.to_ascii_lowercase()
                 || !key.bytes().all(|byte| byte.is_ascii_hexdigit())
-        }) || self.threshold == 0
+        }) || self.publisher_pubkeys.is_empty()
+            || self.publisher_pubkeys != keyset
+            || !keyset.contains(&self.publisher_ed25519_pubkey)
+            || self.threshold == 0
             || self.threshold > keyset.len()
-            || (!self.publisher_pubkeys.is_empty()
-                && (self.publisher_pubkeys != keyset
-                    || !keyset.contains(&self.publisher_ed25519_pubkey)))
-            || (self.publisher_pubkeys.is_empty() && self.threshold != 1)
-            || (self.publisher_pubkeys.is_empty()
-                && (!self.signatures.is_empty()
-                    || !canonical_signature(&self.publisher_ed25519_signature)))
-            || (!self.publisher_pubkeys.is_empty()
-                && (!self.publisher_ed25519_signature.is_empty()
-                    || self.signatures.len() != self.publisher_pubkeys.len()
-                    || self
-                        .signatures
-                        .iter()
-                        .any(|signature| !signature.is_empty() && !canonical_signature(signature))))
+            || !self.publisher_ed25519_signature.is_empty()
+            || self.signatures.len() != self.publisher_pubkeys.len()
+            || self
+                .signatures
+                .iter()
+                .any(|signature| !signature.is_empty() && !canonical_signature(signature))
             || record.threshold != self.threshold
             || record.publisher_pubkeys != self.publisher_pubkeys
         {
@@ -829,8 +1036,7 @@ impl PublisherAuthorizationV1 {
                 || !canonical_publisher_address(&certificate.statement.next_controller_evm_address)
                     .eq_ignore_ascii_case(&canonical_publisher_address(&self.publisher_address))
                 || certificate.statement.authority_proof.digest() != proof.digest()
-                || certificate.statement.authorization_digest
-                    != self.authorization_digest(&record.id, &record.content_hash)
+                || certificate.statement.authority_intent_digest != proof.challenge_sha256
             {
                 return Err("namespace authority certificate does not bind the publish record");
             }
@@ -1189,6 +1395,142 @@ impl AnalysisCommittee {
         !self.validator_snapshot_hash.is_empty()
             && !self.selection_randomness.is_empty()
             && self.assignment_proof == committee_assignment_proof(canonical, content_hash, self)
+    }
+}
+
+#[cfg(test)]
+mod publisher_authorization_tests {
+    use super::*;
+
+    fn record_fixture() -> ChainRecord {
+        ChainRecord {
+            id: PackageId::new("npm", "owned-package", "1.0.0"),
+            content_hash: "1".repeat(64),
+            ipfs_cid: "bafy-owned-package".into(),
+            publisher_pubkey: "a".repeat(64),
+            shielded: false,
+            threshold: 1,
+            publisher_pubkeys: vec!["a".repeat(64)],
+            manifest: Some(PackageManifest::default()),
+            ..Default::default()
+        }
+    }
+
+    fn authorization_fixture(record: &ChainRecord) -> PublisherAuthorizationV1 {
+        let manifest = record.manifest.as_ref().expect("test manifest");
+        PublisherAuthorizationV1 {
+            schema_version: PUBLISHER_AUTHORIZATION_SCHEMA_VERSION,
+            chain_id: "creg-testnet-1".into(),
+            genesis_hash: "2".repeat(64),
+            staking_contract: "0x1111111111111111111111111111111111111111".into(),
+            publisher_address: "0x2222222222222222222222222222222222222222".into(),
+            publisher_ed25519_pubkey: record.publisher_pubkey.clone(),
+            publisher_ed25519_signature: String::new(),
+            publisher_evm_signature: "c".repeat(130),
+            nonce: "publisher-nonce-1".into(),
+            issued_at: 1_700_000_000,
+            expires_at: 1_700_000_600,
+            source_hash: "3".repeat(64),
+            manifest_hash: crate::sha256_hex(
+                &serde_json::to_vec(manifest).expect("serialize test manifest"),
+            ),
+            ipfs_cid: record.ipfs_cid.clone(),
+            shielded: record.shielded,
+            key_bundle_sha256: String::new(),
+            pgp_signature_sha256: String::new(),
+            pgp_public_key_sha256: String::new(),
+            ownership_claim: "npm:owned-package".into(),
+            threshold: record.threshold,
+            publisher_pubkeys: record.publisher_pubkeys.clone(),
+            signatures: vec!["b".repeat(128)],
+            ownership_proof: None,
+            authority_certificate: None,
+        }
+    }
+
+    #[test]
+    fn publisher_authorization_accepts_exact_record_binding() {
+        let record = record_fixture();
+        let authorization = authorization_fixture(&record);
+        assert!(authorization.validate_record_binding(&record).is_ok());
+    }
+
+    #[test]
+    fn publisher_authorization_rejects_record_metadata_substitution() {
+        let record = record_fixture();
+        let authorization = authorization_fixture(&record);
+
+        let mut changed = record.clone();
+        changed.ipfs_cid = "bafy-attacker-package".into();
+        assert!(authorization.validate_record_binding(&changed).is_err());
+
+        let mut changed = record.clone();
+        changed.publisher_pubkey = "d".repeat(64);
+        assert!(authorization.validate_record_binding(&changed).is_err());
+
+        let mut changed = record.clone();
+        changed.shielded = true;
+        changed.key_bundle = Some("substituted-key-bundle".into());
+        assert!(authorization.validate_record_binding(&changed).is_err());
+
+        let mut changed = record;
+        changed
+            .manifest
+            .as_mut()
+            .expect("test manifest")
+            .description = Some("post-signature edit".into());
+        assert!(authorization.validate_record_binding(&changed).is_err());
+    }
+
+    #[test]
+    fn publisher_authorization_rejects_multisig_downgrade_and_aliases() {
+        let record = record_fixture();
+        let authorization = authorization_fixture(&record);
+
+        let mut downgraded = authorization.clone();
+        downgraded.threshold = 0;
+        assert!(downgraded.validate_record_binding(&record).is_err());
+
+        let mut alternate_single_signer_encoding = authorization.clone();
+        alternate_single_signer_encoding.publisher_pubkeys.clear();
+        alternate_single_signer_encoding.signatures.clear();
+        alternate_single_signer_encoding.publisher_ed25519_signature = "b".repeat(128);
+        let mut alternate_record = record.clone();
+        alternate_record.publisher_pubkeys.clear();
+        assert!(alternate_single_signer_encoding
+            .validate_record_binding(&alternate_record)
+            .is_err());
+
+        let mut ambiguous = authorization.clone();
+        ambiguous.publisher_pubkeys = vec!["b".repeat(64), "a".repeat(64)];
+        ambiguous.signatures = vec!["c".repeat(128), "d".repeat(128)];
+        ambiguous.publisher_ed25519_signature.clear();
+        ambiguous.threshold = 2;
+        let mut ambiguous_record = record.clone();
+        ambiguous_record.publisher_pubkeys = ambiguous.publisher_pubkeys.clone();
+        ambiguous_record.threshold = 2;
+        assert!(ambiguous
+            .validate_record_binding(&ambiguous_record)
+            .is_err());
+
+        let mut aliased_record = record.clone();
+        aliased_record.id.name = "Owned_Package".into();
+        assert!(authorization
+            .validate_record_binding(&aliased_record)
+            .is_err());
+
+        let mut malformed = authorization;
+        malformed.source_hash = "A".repeat(64);
+        assert!(malformed.validate_record_binding(&record).is_err());
+    }
+
+    #[test]
+    fn publisher_authorization_rejects_unknown_json_fields() {
+        let record = record_fixture();
+        let authorization = authorization_fixture(&record);
+        let mut value = serde_json::to_value(authorization).unwrap();
+        value["unsigned_extension"] = serde_json::json!("ignored-by-old-readers");
+        assert!(serde_json::from_value::<PublisherAuthorizationV1>(value).is_err());
     }
 }
 

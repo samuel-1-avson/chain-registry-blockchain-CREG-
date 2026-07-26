@@ -1,7 +1,7 @@
 # Chain Registry (CREG) Technical Whitepaper
 
 > Version: 0.3.0-public-alpha  
-> Date: 2026-07-18\
+> Date: 2026-07-25\
 > Network: `creg-testnet-1` on Ethereum Sepolia  
 > Status: Public alpha testnet, not mainnet  
 > Related resources: Public testnet quickstart, Phase scope definitions, Readiness gates status, CREG_SYSTEM_WORKFLOW.md
@@ -37,6 +37,8 @@ This design bounds CPU, memory, and IPFS load while preserving the core security
 **Certified committee authority:** A new validator set is accepted only through a transition signed by a distinct prior-set quorum (`floor(2n/3)+1`). The certificate binds the effective height, prior block/fork anchor, both validator-set hashes, and the next set. A committee assignment binds that certificate digest, snapshot hash and height, selection randomness, seed, and ordered members; receivers derive the expected randomness from the exact anchor block's VRF output (or its hash fallback) and recompute the assignment rather than trusting the admitting node. Conflicting, replayed, expired, or fork-substituted authority records are rejected. Signed transition certificates propagate peer-to-peer, but every recipient validates the prior-set quorum and local continuity before accepting the gossip for propagation or persistence.
 
 **Weak subjectivity:** A fresh or rebuilt node may be configured with a known-good signed validator-set checkpoint. Once configured, committee authority is accepted only from a cryptographically continuous certificate history containing that exact checkpoint. Nodes can retrieve certified history from peers, but prevalidate the complete bounded timeline from bootstrap authority, compare canonical block anchors, and persist only an eligible fully validated prefix. History writes are serialized, checkpoint ancestry is retained beyond the compatibility pruning cap, and reorg recovery truncates certificates anchored beyond the canonical ancestor. This is a deployment trust anchor, not a centralized validator role. `CREG_REQUIRE_CERTIFIED_COMMITTEES=true` enables fail-closed admission when no checkpoint-anchored authority exists. The public alpha has not yet published a real independently verified checkpoint or completed the live multi-operator long-range/reorg rehearsal; this mode is therefore a readiness control, not a claim that testnet security is complete.
+
+**Authoritative package namespace ownership (CR-07):** Post-activation first claims use a chain/genesis-bound v4 publisher authorization and a v2 npm/PyPI authority certificate rather than first-submitter ownership. The proposed controller signs a fresh, artifact-independent intent; each attesting validator separately fetches bounded official evidence and artifact bytes, verifies exact intent inclusion through a hash-pinned sidecar outside consensus, and signs a statement bound to the signed-spec policy and a recent canonical validator-set anchor. A preceding-set `floor(2n/3)+1` quorum certificate is retained with the transaction, so consensus, restart, rebuild, and reorg validation remain deterministic and perform no live registry request. Production verifier/trust/policy artifacts, an official npm trusted-publisher authentication-mode signal, a signed activation/checkpoint, operator rehearsal, and independent review remain open gates.
 
 Committee selection at admission uses VRF-seeded deterministic ordering further biased by on-chain stake, reputation, and **performance_score** (a moving-average signal of demonstrated analysis reliability, with decay after repeated contributions). The full `AnalysisCommittee` (including `member_performance_at_finalization` snapshot captured at package finalization) is stored immutably in the `ChainRecord` and exposed via CLI (`creg chain-record`) and API. On Verified finalization the pipeline emits `distributeWorkRewards(..., isMandatory[])` to `ValidatorRewards.sol`; successful emission also applies a small performance boost to mandatory participants, closing the incentive/selection feedback loop. Points awarded per contribution are 25 (mandatory) or 10 (voluntary) base, ×1.2 for correct vote, ×(rep/100). Base per-package reward is deliberately low (0.00001 CREG) with correct-vote bonus.
 
@@ -147,6 +149,70 @@ On the public alpha, "verified" means the queried CREG node's chain store has ac
 4. The publisher's Ethereum EOA must have publisher stake in `Staking.sol`.
 5. The node verifies admission requirements, stores the package as pending, and exposes pending status.
 
+### 5.2.1 Authoritative Namespace Ownership And Lifecycle
+
+CR-07 separates upstream ecosystem verification from deterministic consensus:
+
+1. The controller signs a fresh intent binding chain ID, genesis hash, `claim`
+   or `recover` purpose, canonical npm/PyPI namespace, current and proposed
+   Ed25519/EVM controllers, durable nonce, issuance time, and expiry. The
+   intent excludes its enclosing artifact digest, avoiding a content-hash
+   fixed point.
+2. A new upstream release contains that exact intent. Protocol v2 receives an
+   official `evidence_url` and `artifact_url`, fetches both independently with
+   redirects disabled and separate size limits (16 MiB default and 64 MiB hard
+   maximum for artifacts), hashes evidence with SHA-256, and computes the
+   registry-native artifact identity: SHA-512 for npm or SHA-256 for PyPI.
+3. A validator-local, hash-pinned sidecar outside consensus verifies registry
+   signatures, signed-spec-pinned issuer/audience/workload policy and trust
+   material, native artifact identity, and exact intent inclusion. For npm,
+   provenance is not sufficient by itself: policy must require an official
+   signal that trusted-publisher authentication mode was used.
+   Its `verified_at` completion time is checked against the local validator
+   clock but excluded from the shared proof/statement, so independently timed
+   validators still sign byte-identical statement content.
+4. Each validator retains accepted evidence as
+   `creg-evidence:sha256:<digest>` and artifact bytes under
+   `CREG_DATA_DIR/authority-artifacts/<sha256|sha512>/<prefix>/<digest>.bin`,
+   then signs an authority statement bound to a recent canonical block and its
+   authenticated validator-set hash.
+5. A caller assembles matching signatures from the preceding validator set.
+   The `floor(2n/3)+1` certificate is attached to the final v4 first claim or
+   recovery authorization. Consensus verifies its policy pins, validity,
+   controllers, native artifact digest, quorum, and fork anchor without
+   contacting npm or PyPI.
+
+The authority attestation and certificate-validation routes additionally
+require a high-entropy `CREG_OPERATOR_API_KEY` through `X-Operator-Key` or
+`Authorization: Bearer`. This service ACL does not replace controller or
+validator/quorum signatures. Attestation has a dedicated 2-per-source-IP per
+minute bucket; verifier concurrency defaults to 2 and has a hard maximum of 4.
+The key remains server-side operator material and is never embedded in browser
+code or injected by the public explorer proxy.
+An operator public key is verification material, not a secret; it cannot
+authenticate either private authority route.
+
+After activation, legacy first-claim and rotation paths cannot silently
+downgrade authority. `delegate` grants an expiring signed `publish` scope while
+retaining the root controller; `transfer` requires current-root and successor
+authorization; `recover` requires a fresh recovery-purpose v2 authority
+certificate. Lifecycle and publisher authorization nonces are durable and
+single-use. The same deterministic reducer runs during proposal, PBFT
+pre-prepare, insertion, restart/rebuild, sync, and isolated reorg preflight, so
+abandoned-branch controllers, delegations, certificates, and nonces do not
+poison the adopted branch.
+
+Before activation, legacy CLI signing and legacy multisig are also fail-closed
+by default. They require
+`CREG_ALLOW_LEGACY_PUBLISHER_PROOF=true` on an explicitly non-production
+network and remain unavailable when `CREG_PRODUCTION=true`.
+
+The mechanism is implemented as a fail-closed protocol boundary, not a claim
+of production upstream authority. Reviewed production npm/PyPI verifier
+binaries, official trust material, signed policy bundles, the npm
+authentication-mode signal, a versioned signed activation/checkpoint, live
+operator rehearsal, and independent security review are still required.
+
 ### 5.3 Validation Path
 
 Validators fetch the exact artifact bytes by CID, verify hashes, execute the security pipeline, produce a deterministic risk summary, sign a vote, and gossip it to the validator set. A vote is consensus-grade only when it includes complete bundle refs, a non-degraded scanner profile, and a non-empty evidence digest.
@@ -236,6 +302,7 @@ The current implementation uses package ids, content hashes, IPFS CIDs, publishe
 | Manifest hash | Binds declared package metadata where available |
 | Publisher signature | Proves package submission authority under the publisher Ed25519 key |
 | Publisher EOA | Binds submission to on-chain stake |
+| Namespace authority certificate | Binds a v4 first claim or recovery to signed-spec-pinned npm/PyPI evidence, native artifact identity, controller intent, recent canonical anchor, and preceding-set quorum |
 | Scanner profile digest | Commits to rule/model/profile versions used by the validator |
 | Evidence digest | Commits to deterministic findings used in the vote |
 | Validator signature | Commits a validator's approval or rejection vote |
@@ -714,6 +781,7 @@ ZK is powerful but security-sensitive. The current public alpha treats ZK as act
 | Public API abuse | Rate limits, operator ACLs, monitoring |
 | Chain-spec substitution | Signed chain spec with pinned public key |
 | IPFS content loss | Pinning service, availability checks, future incentives |
+| First-submitter namespace takeover or forged recovery | Post-activation v4 first claims and recovery require a chain/genesis-bound, recent-anchor, preceding-set-quorum npm/PyPI authority certificate; lifecycle nonces are durable |
 
 ### 16.2 Threats Not Fully Solved
 
@@ -725,6 +793,7 @@ ZK is powerful but security-sensitive. The current public alpha treats ZK as act
 | ZK circuit or trusted setup flaw | Requires dedicated ZK audit and key-management review; circuit now binds content/manifest hashes; on-chain assert strengthened to match |
 | Long-range sync attacks | Signed transition history, exact checkpoint matching, canonical-anchor checks, and fail-closed certified mode are implemented; a real published checkpoint and live multi-operator long-range/reorg rehearsal remain required |
 | IPFS unavailability | Requires redundant pinning and monitoring; PinningRewards + sidecar status now active |
+| Upstream namespace-verifier compromise or ambiguous npm authentication mode | Protocol pins verifier/policy/trust hashes and quorum-certifies observations, but reviewed production artifacts and an official npm trusted-publisher authentication-mode signal remain required |
 | Legal/regulatory uncertainty | Requires jurisdiction-specific review before token or mainnet programs |
 
 ## 17. Standards And Research Alignment
@@ -881,7 +950,7 @@ CREG is an original protocol implementation that composes open protocols, open-s
 
 ## 19. Public Alpha Status
 
-As of 2026-06-26, CREG is in public alpha testnet scope. (See CREG_SYSTEM_WORKFLOW.md §15 for the living architecture improvement log.)
+As of 2026-07-25, CREG is in public alpha testnet scope. (See CREG_SYSTEM_WORKFLOW.md §15 for the living architecture improvement log.)
 
 | Area | Current public-alpha status |
 | --- | --- |
@@ -893,6 +962,7 @@ As of 2026-06-26, CREG is in public alpha testnet scope. (See CREG_SYSTEM_WORKFL
 | IPFS availability checks | Public readiness gate passed |
 | Incident response runbook | Drafted and linked in docs |
 | External audit | SEC-401 scope ready; vendor/start date TBD |
+| CR-07 namespace authority | Deterministic v4 lifecycle and v2 certificate boundary implemented in the current worktree; production npm/PyPI verifier/trust/policy artifacts, npm authentication-mode signal, signed activation/checkpoint, rehearsal, and independent review remain gates |
 | Mainnet | Not launched |
 
 The immediate public-alpha operating principle is simple: invite participation while keeping all public claims bounded by testnet status, known limitations, and audit state.
@@ -936,6 +1006,10 @@ Key risks:
 - Public alpha infrastructure can degrade, restart, or expose inconsistent pending state.
 - IPFS content must be pinned to remain retrievable.
 - L1 contract and ZK systems are not externally audited yet.
+- Authoritative npm/PyPI ownership is not production-ready until the pinned
+  verifier/trust/policy artifacts, official npm authentication-mode signal,
+  signed activation/checkpoint, operator rehearsal, and independent review are
+  complete.
 - Token parameters are alpha implementation details, not finalized mainnet economics.
 - Regulatory requirements may apply to any future token sale, public distribution, or mainnet launch.
 

@@ -7,7 +7,9 @@ resources:
   # Core infrastructure
   - 00-namespace.yaml
   - 01-configmap.yaml
-  - 02-secrets.yaml
+  # Secrets are intentionally not generated from repository files. Provision
+  # creg-secrets and postgres-secrets out of band before applying this overlay;
+  # see k8s/README.md.
   
   # Data stores
   - 10-postgres.yaml

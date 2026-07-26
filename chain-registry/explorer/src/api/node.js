@@ -3,7 +3,6 @@
 // node clearly does not implement the grouped endpoint yet.
 
 const API_BASE = import.meta.env.VITE_API_BASE || ''
-const OPERATOR_API_KEY = import.meta.env.VITE_OPERATOR_API_KEY || ''
 const NODE_ROUTE_MODE = (import.meta.env.VITE_NODE_ROUTE_MODE || 'auto').toLowerCase()
 const LEGACY_FALLBACK_STATUSES = new Set([404, 405, 501])
 const OPTIONAL_ENDPOINT_STATUSES = new Set([401, 403, 404, 405, 501, 503])
@@ -39,16 +38,13 @@ function isOptionalEndpointUnavailable(error) {
   return error instanceof ApiError && OPTIONAL_ENDPOINT_STATUSES.has(error.status)
 }
 
-function withScopeHeaders(scope, headers = {}) {
-  if (scope !== 'operator' || !OPERATOR_API_KEY) return headers
-  return { 'X-Operator-Key': OPERATOR_API_KEY, ...headers }
-}
-
-async function scopedNodeFetch(path, { scope = 'public', headers = {}, ...options } = {}) {
-  return nodeFetch(path, {
-    ...options,
-    headers: withScopeHeaders(scope, headers),
-  })
+async function scopedNodeFetch(path, options = {}) {
+  // A browser bundle must never contain the operator service credential.
+  // Operator-scoped reads therefore fail closed and use their existing
+  // endpoint-unavailable fallbacks unless a server-side trusted proxy is used.
+  const requestOptions = { ...options }
+  delete requestOptions.scope
+  return nodeFetch(path, requestOptions)
 }
 
 async function groupedNodeFetch(groupedPath, legacyPath, options = {}) {

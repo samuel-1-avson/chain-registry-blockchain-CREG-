@@ -49,6 +49,7 @@ services:
       CREG_IS_VALIDATOR: "true"
       CREG_VALIDATOR_KEY: "${NODE1_VALIDATOR_KEY}"
       CREG_LISTEN: "0.0.0.0:8080"
+      CREG_OPERATOR_API_KEY: "${CREG_OPERATOR_API_KEY:?set a high-entropy server-side operator API key}"
       CREG_DATA_DIR: "/data"
       CREG_ETH_RPC: "http://anvil:8545"
       CREG_SINGLE_VALIDATOR_MODE: "true"

@@ -26,6 +26,18 @@ data:
   CREG_DEV_SANDBOX: "false"
   # Optional for single-replica dev: CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM=true
   CREG_BLOCK_INTERVAL: "5"
+
+  # CR-07 authority verification. Consensus activation height and accepted
+  # adapter/policy/trust-root pins are intentionally absent: they must come
+  # from the signature-verified chain spec. Empty paths keep attestation
+  # disabled until reviewed verifier binaries are mounted read-only.
+  CREG_NAMESPACE_AUTHORITY_NPM_VERIFIER_PATH: ""
+  CREG_NAMESPACE_AUTHORITY_PYPI_VERIFIER_PATH: ""
+  CREG_NAMESPACE_AUTHORITY_VERIFIER_TIMEOUT_SECS: "30"
+  CREG_NAMESPACE_AUTHORITY_MAX_EVIDENCE_BYTES: "2097152"
+  CREG_NAMESPACE_AUTHORITY_MAX_ARTIFACT_BYTES: "16777216"
+  CREG_NAMESPACE_AUTHORITY_MAX_RESULT_BYTES: "65536"
+  CREG_NAMESPACE_AUTHORITY_MAX_CONCURRENT_VERIFICATIONS: "2"
   
   # IPFS Configuration
   CREG_IPFS_URL: "http://ipfs:5001"

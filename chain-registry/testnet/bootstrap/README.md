@@ -17,17 +17,18 @@ cd testnet/bootstrap
 
 # 1. Copy env template
 cp bootstrap.env.example bootstrap.env
-# Edit bootstrap.env — set CREG_P2P_ANNOUNCE, CREG_ETH_RPC_URL, etc.
+# Edit bootstrap.env — set CREG_P2P_ANNOUNCE, CREG_ETH_RPC_URL, and a
+# high-entropy CREG_OPERATOR_API_KEY.
 
 # 2. Generate persistent P2P key
 mkdir -p data p2p-key
 # The node will generate a key on first boot; check logs for Peer ID:
-docker compose up bootstrap
+docker compose --env-file bootstrap.env up bootstrap
 # Look for: "local_peer_id=12D3KooW..."
 
 # 3. Note the Peer ID and add it to the chain spec
 # Then restart:
-docker compose up -d
+docker compose --env-file bootstrap.env up -d
 ```
 
 ## Deployment Options
@@ -40,7 +41,7 @@ Providers: Hetzner, OVH, DigitalOcean, AWS EC2
 2. Open firewall: `ufw allow 9000/tcp && ufw allow 8080/tcp`
 3. Install Docker: `curl -fsSL https://get.docker.com | sh`
 4. Clone repo, configure `bootstrap.env`
-5. `docker compose up -d`
+5. `docker compose --env-file bootstrap.env up -d`
 
 ### Option B: Behind NAT with Cloudflare Tunnel
 
@@ -51,7 +52,7 @@ If you cannot get a static IP or open ports:
 # TUNNEL_TOKEN=your-token-from-cloudflare-zero-trust
 
 # Deploy with tunnel profile
-docker compose --profile tunnel up -d
+docker compose --env-file bootstrap.env --profile tunnel up -d
 ```
 
 **Caveat:** Cloudflare Tunnel adds latency. Use direct IP when possible.
@@ -110,7 +111,9 @@ Recommended alerts:
 
 - Bootstrap nodes do **not** hold validator keys
 - Do not run `--validator=true` on a bootstrap node
-- Keep `bootstrap.env` private (contains RPC URLs)
+- Keep `bootstrap.env` private (contains RPC URLs and `CREG_OPERATOR_API_KEY`)
+- Never place `CREG_OPERATOR_API_KEY` in a `VITE_*` variable, JavaScript
+  bundle, public proxy configuration, or checked-in deployment value
 - Use a read-only L1 RPC if possible (no signing needed)
 
 ## Geographic Distribution

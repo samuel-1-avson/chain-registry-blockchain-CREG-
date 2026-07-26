@@ -1,0 +1,13 @@
+{
+  "name": "@creg/authority-adapter-contract",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Fail-closed protocol fixtures for CREG namespace-authority verifier sidecars",
+  "engines": {
+    "node": ">=22.14.0"
+  },
+  "scripts": {
+    "test": "node --test"
+  }
+}

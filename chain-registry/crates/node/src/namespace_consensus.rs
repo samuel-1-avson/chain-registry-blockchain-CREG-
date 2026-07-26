@@ -22,6 +22,7 @@ pub struct NamespaceConsensusConfig {
     pub staking_contract: String,
     pub activation_height: Option<u64>,
     pub authority_policies: Vec<NamespaceAuthorityPolicySpec>,
+    pub policy_source_verified: bool,
 }
 
 impl NamespaceConsensusConfig {
@@ -32,6 +33,7 @@ impl NamespaceConsensusConfig {
             staking_contract: common::canonical_publisher_address(&config.staking_addr),
             activation_height: config.namespace_authority_activation_height,
             authority_policies: config.namespace_authority_policies.clone(),
+            policy_source_verified: config.namespace_authority_policy_source_verified,
         }
     }
 
@@ -53,12 +55,14 @@ impl NamespaceConsensusConfig {
                 .all(|byte| byte.is_ascii_hexdigit())
             || self.staking_contract.len() != 42
             || self.authority_policies.is_empty()
+            || !self.policy_source_verified
         {
             anyhow::bail!("authoritative namespace consensus configuration is incomplete");
         }
         for policy in &self.authority_policies {
             if !common::is_canonical_single_line(&policy.adapter_id)
                 || !common::is_canonical_single_line(&policy.adapter_version)
+                || !is_lower_sha256(&policy.verifier_sha256)
                 || !is_lower_sha256(&policy.policy_sha256)
                 || !is_lower_sha256(&policy.trust_root_sha256)
             {
@@ -333,7 +337,9 @@ fn validate_lifecycle_v2(
     let Some(mut state) = controller_for(chain, controllers, &event.namespace)? else {
         anyhow::bail!("namespace lifecycle event targets an unclaimed namespace");
     };
-    if state.root_ed25519_pubkey != event.current_controller_ed25519_pubkey {
+    if state.root_ed25519_pubkey != event.current_controller_ed25519_pubkey
+        || state.root_evm_address != event.current_controller_evm_address
+    {
         anyhow::bail!("namespace lifecycle current controller conflicts with chain state");
     }
     if event.nonce <= state.last_lifecycle_nonce {
@@ -432,12 +438,16 @@ pub(crate) fn validate_authority_certificate(
         || statement.issued_at > reference_time
         || reference_time >= statement.expires_at
         || statement.anchor_height >= target_height
+        || target_height.saturating_sub(statement.anchor_height)
+            > common::MAX_NAMESPACE_AUTHORITY_ANCHOR_LAG_BLOCKS
     {
         anyhow::bail!("namespace authority certificate context is invalid");
     }
     let policy_allowed = config.authority_policies.iter().any(|policy| {
-        policy.adapter_id == statement.adapter_id
+        policy.authority == statement.authority_proof.authority
+            && policy.adapter_id == statement.adapter_id
             && policy.adapter_version == statement.adapter_version
+            && policy.verifier_sha256 == statement.verifier_sha256
             && policy.policy_sha256 == statement.policy_sha256
             && policy.trust_root_sha256 == statement.trust_root_sha256
     });

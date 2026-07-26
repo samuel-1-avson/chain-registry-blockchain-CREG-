@@ -34,6 +34,8 @@ pub struct RateLimitConfig {
     pub publish_limit: u32,
     /// Max votes per window.
     pub vote_limit: u32,
+    /// Max expensive namespace-authority verifier runs per window.
+    pub authority_limit: u32,
     /// Sliding window duration.
     pub window: Duration,
 }
@@ -48,6 +50,7 @@ impl Default for RateLimitConfig {
             general_limit: 3000,
             publish_limit: 10,
             vote_limit: 60,
+            authority_limit: 2,
             window: Duration::from_secs(60),
         }
     }
@@ -98,6 +101,7 @@ pub struct RateLimiter {
     general: Arc<Mutex<HashMap<IpAddr, Bucket>>>,
     publish: Arc<Mutex<HashMap<IpAddr, Bucket>>>,
     vote: Arc<Mutex<HashMap<IpAddr, Bucket>>>,
+    authority: Arc<Mutex<HashMap<IpAddr, Bucket>>>,
     config: RateLimitConfig,
 }
 
@@ -107,6 +111,7 @@ impl RateLimiter {
             general: Arc::new(Mutex::new(HashMap::new())),
             publish: Arc::new(Mutex::new(HashMap::new())),
             vote: Arc::new(Mutex::new(HashMap::new())),
+            authority: Arc::new(Mutex::new(HashMap::new())),
             config,
         }
     }
@@ -129,11 +134,15 @@ impl RateLimiter {
         self.check(&self.vote, ip, self.config.vote_limit)
     }
 
+    pub fn check_authority(&self, ip: IpAddr) -> bool {
+        self.check(&self.authority, ip, self.config.authority_limit)
+    }
+
     /// Purge expired entries from all buckets (call periodically).
     pub fn purge_expired(&self) {
         let now = Instant::now();
         let window = self.config.window;
-        for buckets in [&self.general, &self.publish, &self.vote] {
+        for buckets in [&self.general, &self.publish, &self.vote, &self.authority] {
             let mut map = lock_buckets(buckets);
             map.retain(|_, bucket| {
                 bucket.timestamps.retain(|&t| now - t < window);
@@ -161,6 +170,10 @@ fn is_consensus_vote(path: &str, method: &axum::http::Method) -> bool {
         && (path == "/v1/consensus/vote" || path == "/v1/validator/consensus/vote")
 }
 
+fn is_authority_attestation(path: &str, method: &axum::http::Method) -> bool {
+    method == axum::http::Method::POST && path == "/v1/validator/namespace-authority/attest"
+}
+
 /// Axum middleware that applies rate limiting based on the request path.
 pub async fn rate_limit_middleware(
     limiter: axum::extract::Extension<RateLimiter>,
@@ -177,7 +190,9 @@ pub async fn rate_limit_middleware(
     let path = req.uri().path();
     let method = req.method();
 
-    let allowed = if is_publish_submit(path, method) {
+    let allowed = if is_authority_attestation(path, method) {
+        limiter.check_authority(ip)
+    } else if is_publish_submit(path, method) {
         limiter.check_publish(ip)
     } else if is_consensus_vote(path, method) {
         limiter.check_vote(ip)
@@ -290,5 +305,22 @@ mod tests {
             "/v1/validator/consensus/vote",
             &Method::GET
         ));
+    }
+
+    #[test]
+    fn authority_attestation_has_a_dedicated_tight_bucket() {
+        use axum::http::Method;
+        let limiter = RateLimiter::new(RateLimitConfig {
+            authority_limit: 1,
+            ..Default::default()
+        });
+        let ip = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1));
+        assert!(is_authority_attestation(
+            "/v1/validator/namespace-authority/attest",
+            &Method::POST
+        ));
+        assert!(limiter.check_authority(ip));
+        assert!(!limiter.check_authority(ip));
+        assert!(limiter.check_general(ip));
     }
 }

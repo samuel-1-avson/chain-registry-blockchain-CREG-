@@ -38,11 +38,17 @@
 | 2026-07-18 | `npm test` / `CREG-Contribution-Arena` | 0 | All 126 Arena policy, canonical-content, manifest, RAG, simulator, wallet, scaling, and production-surface regression tests passed. A final focused `npx tsx --test tests/content.test.ts` run also passed 19/19 after the last document sync. | Does not replace browser accessibility/E2E testing against a deployed testnet. |
 | 2026-07-18 | `npm run generate:document-pdfs`, `npm run sync:whitepaper`, Functions `sync-knowledge.mjs`, PDF text/page inspection, PyMuPDF page rendering, and SHA-256/byte manifest verification / `CREG-Contribution-Arena` | 0 | Regenerated the whitepaper and workflow PDFs, rendered Mermaid diagrams into the A4 content box, removed blank overflow pages, visually inspected representative/final pages, synchronized public and Functions knowledge assets, and confirmed every manifest byte count/hash plus both manifest copies match. | Visual inspection covered representative security, diagram, table, first, and final pages rather than pixel-diffing every page. |
 | 2026-07-18 | `cargo fmt --all -- --check` plus `git diff --check` in the parent repository and Arena submodule | 0 | Current Rust formatting and whitespace checks pass after all code, documentation, generated asset, and evidence updates. | Git emitted existing LF-to-CRLF conversion warnings on Windows; no whitespace error remained. |
+| 2026-07-25 | `docker compose ... config --no-interpolate --quiet`, `js-yaml` parse plus `kubectl kustomize` of edited Kubernetes manifests, generated-fleet inspection, `node --check`, targeted secret/default inventories, and `git diff --check` / `chain-registry` | 0 | The edited CR-07 environment templates, Compose profiles, fail-required Kubernetes Secret references, operator/quickstart/API notes, and remediation surfaces are syntactically consistent and expose the bounded verifier variables. Documents cover signed-spec pins, separate `artifact_url` fetching, native npm/PyPI digests, content-addressed archives, secret-only server-side `CREG_OPERATOR_API_KEY` via operator/bearer headers (the public verification key is not accepted), removal of browser/proxy credential embedding and known defaults, fail-required node manifests, the 2-per-IP/minute authority bucket, concurrency hard maximum 4, local-only `verified_at`, and explicit `CREG_ALLOW_LEGACY_PUBLISHER_PROOF` compatibility. | This is configuration/documentation validation only. It does not compile the current CR-07 Rust worktree, execute either route, prove ACL/rate/concurrency behavior, verify real npm/PyPI evidence or authentication-mode signals, validate manifests against a live Kubernetes API, or satisfy operator/security-review gates. |
 
 Pending: CI execution of `bash scripts/check-security-freeze.sh`, full workspace
 lint/test, clean Foundry build/test/fuzz/invariant/static analysis, live
 independently operated checkpoint/reorg/long-range exercises, a real independently
-verified checkpoint and operator rehearsal, cryptographic npm/PyPI authority
-adapters, integration/chaos/client freshness tests, browser accessibility/E2E,
-SBOM, provenance validation, and independent security review. Pending entries
-are not passing evidence.
+verified checkpoint and operator rehearsal, fresh CR-07 compile/adversarial/
+multi-node results including the authenticated authority-attestation and
+certificate routes, byte-identical statement and ACL/rate/concurrency
+regressions, real cryptographic npm/PyPI verifier sidecars, official
+trust material, signed policy bundles including npm trusted-publisher
+authentication-mode verification, a signed activation spec,
+integration/chaos/client freshness tests, browser accessibility/E2E, SBOM,
+provenance validation, and independent security review. Pending entries are
+not passing evidence.

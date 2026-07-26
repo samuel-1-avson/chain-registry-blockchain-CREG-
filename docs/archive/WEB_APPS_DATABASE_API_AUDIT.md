@@ -18,7 +18,10 @@
 | **Faucet** | **Operational with testnet tradeoffs** | Hot key in env on edge; PoW disabled on cloud-edge; open CORS. |
 | **Waitlist** | **Firebase (client-side)** | No server DB in this repo; Firestore rules are out of scope here. |
 
-**Top risks before wider public alpha:** (1) operator API key in explorer build args, (2) faucet hot wallet + PoW off on edge, (3) hub-api abuse amplifier, (4) hub DB/session work not started before SIWE/quests.
+**Top risks before wider public alpha:** The former browser/proxy operator-key
+exposure is remediated. Remaining risks are (1) faucet hot wallet + PoW off on
+edge, (2) hub-api abuse amplification, and (3) hub DB/session work not started
+before SIWE/quests.
 
 ---
 
@@ -31,6 +34,8 @@ flowchart TB
     HW[hub-web SPA]
     WL[waitlist SPA]
   end
+
+  OPS[Trusted operator tooling]
 
   subgraph edge [creg-testnet-vm edge]
     CADDY[Caddy TLS]
@@ -55,7 +60,7 @@ flowchart TB
 
   HUB_W -->|/api/*| CR
   NGX_E -->|/v1/public/*| OBS
-  NGX_E -->|/v1/operator/* + key| VAL[Validator :28181]
+  OPS -->|private route + secret| VAL[Validator :28181]
   NGX_E -->|/api/*| FAUCET
 
   CR -->|probes| OBS
@@ -157,14 +162,16 @@ No SIWE session yet (`DashboardPage.tsx` / design doc Phase 2).
 
 | Client | Base | Routes |
 |--------|------|--------|
-| `node.js` | `VITE_API_BASE` (empty = same-origin) | `/v1/public/*` (reads), `/v1/operator/*` (ops), legacy `/v1/*` fallbacks |
+| `node.js` | `VITE_API_BASE` (empty = same-origin) | `/v1/public/*` reads and unauthenticated legacy fallbacks; private reads fail closed |
 | `faucet.js` | `/api/*` or `VITE_FAUCET_URL` | drip, challenge, stats |
 | `relayer.js` | `/v1/relayer/*` | sponsored txs |
 | `useSse.js` | `/v1/public/events` | SSE |
 
-**Build-time flags:** `VITE_OPERATOR_API_KEY`, `VITE_NODE_ROUTE_MODE`, Sepolia contract addresses (`docker-compose.cloud-edge.yml`).
+**Build-time flags:** `VITE_NODE_ROUTE_MODE` and Sepolia contract addresses (`docker-compose.cloud-edge.yml`). Operator credentials are server-side only.
 
-**Nginx proxy** (`testnet/nginx/explorer-fleet.conf.template`): public reads → `CREG_OBSERVER_API_UPSTREAM`; operator routes → validator `:28181` with injected `X-Operator-Key`.
+**Nginx proxy** (`testnet/nginx/explorer-fleet.conf.template`): public reads →
+`CREG_OBSERVER_API_UPSTREAM`; no operator credential is injected. Trusted
+operator tooling must authenticate separately.
 
 ### 3.4 Faucet (`crates/faucet/src/main.rs`)
 
@@ -198,8 +205,8 @@ Operator ACL: fails closed if `CREG_OPERATOR_API_KEY` unset; `X-Operator-Key` or
 
 | ID | Finding | Location | Recommendation |
 |----|---------|----------|----------------|
-| **WAA-001** | `VITE_OPERATOR_API_KEY` baked into explorer JS | `docker-compose.cloud-edge.yml`, `explorer/Dockerfile` | Remove from build args; rely on nginx-injected key only for operator paths; never use production key in client |
-| **WAA-002** | Hardcoded `docker-dev-operator-key` in nginx | `explorer-fleet.conf.template`, `explorer-hybrid.conf`, `explorer-3node.conf` | Ensure production `CREG_OPERATOR_API_KEY` is unique; rotate if ever exposed; consider removing operator routes from public explorer host |
+| **WAA-001** | Legacy operator credential was baked into explorer JS | `docker-compose.cloud-edge.yml`, `explorer/Dockerfile` | **Remediated:** removed from all build args and browser code; operator credentials remain server-side only |
+| **WAA-002** | A known default operator credential was injected by nginx | `explorer-fleet.conf.template`, `explorer-hybrid.conf`, `explorer-3node.conf` | **Remediated:** public explorer proxies no longer inject credentials; node manifests require a separately provisioned secret |
 | **WAA-003** | Faucet hot key in environment on edge VM | `docker-compose.cloud-edge.yml` (`FAUCET_PRIVATE_KEY`) | Vault backend for fleet; minimal balance; monitor `/metrics` |
 | **WAA-004** | PoW disabled on cloud-edge faucet | `FAUCET_POW_DISABLED: "true"` | Re-enable PoW or add Cloud Armor / IP allowlist; tighten cooldown |
 | **WAA-005** | hub-api fan-out amplifier | `GET /api/status/public` — 6 upstream fetches per request | Per-IP rate limit; cache aggregated status 30–60s; reduce probe count |
@@ -233,7 +240,7 @@ Operator ACL: fails closed if `CREG_OPERATOR_API_KEY` unset; `X-Operator-Key` or
 |--------|-----|------|----------------|
 | View blocks / packages | Explorer | `/v1/public/...` | Node observer state |
 | Live SSE | Explorer | `/v1/public/events` | Node |
-| Network / pending (ops UI) | Explorer | `/v1/operator/...` | Validator node |
+| Network / pending (private ops) | Trusted operator tooling | `/v1/operator/...` + server-side credential | Validator node |
 | Request tCREG | Explorer / Faucet | `POST /api/drip` | Sepolia + faucet key |
 | Hub dashboard status | Hub-web | `/api/status/public` | hub-api aggregation only |
 | Connect wallet (hub) | Hub-web | — | Wallet vendor RPC |
@@ -261,7 +268,7 @@ Post-redeploy checks:
 1. Implement SQLite schema + migrations with **parameterized queries only**.
 2. Add session middleware (HttpOnly, Secure, SameSite=Lax) per `TESTNET-HUB-DESIGN.md`.
 3. Rate-limit `/api/status/public` and all `/api/auth/*` routes.
-4. Remove `VITE_OPERATOR_API_KEY` from production explorer builds.
+4. Keep operator credentials out of every browser build and public proxy.
 5. Fix hub health metadata (`db` state, consistent `phase`).
 
 ### Testnet hardening (parallel)

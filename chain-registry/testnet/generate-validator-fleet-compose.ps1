@@ -82,11 +82,11 @@ for ($i = 1; $i -le $NodeCount; $i++) {
     $lines += "    container_name: creg-fleet-node$i"
     $lines += "    environment:"
     $lines += "      <<: *creg-fleet-base-env"
+    $lines += "      CREG_OPERATOR_API_KEY: `${CREG_OPERATOR_API_KEY:?set a high-entropy server-side operator API key}"
     $lines += "      CREG_P2P_SEEDS: $seeds"
     $lines += "      CREG_IS_VALIDATOR: `"$isValidator`""
     if ($i -le 2) {
         $lines += "      CREG_VALIDATOR_KEY: $valKey"
-        $lines += "      CREG_OPERATOR_API_KEY: `${CREG_OPERATOR_API_KEY:-docker-dev-operator-key}"
     }
     $lines += "      CREG_NODE_ID: $nodeId"
     $lines += "      CREG_PEERS: $peers"

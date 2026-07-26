@@ -113,6 +113,7 @@ services:
       CREG_VALIDATOR_KEY: "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
       CREG_NODE_ID: validator-1
       CREG_LISTEN: 0.0.0.0:8080
+      CREG_OPERATOR_API_KEY: ${CREG_OPERATOR_API_KEY:?set a high-entropy server-side operator API key}
       CREG_DATA_DIR: /data
       CREG_BLOCK_INTERVAL: "5"
       CREG_DEV_SANDBOX: "false"

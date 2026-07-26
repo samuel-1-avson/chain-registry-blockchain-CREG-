@@ -329,7 +329,7 @@ Global flags: `--unverified`, `CREG_NODE_URL`, `CREG_GRPC_URL`, `--output json`.
 
 ### 3.5 Explorer System
 
-**Web explorer** (`explorer/`): React SPA with nginx reverse proxy to node API, relayer, and faucet; Sepolia wallet integration via env-injected contract addresses. Operator endpoints require `CREG_OPERATOR_API_KEY` / `VITE_OPERATOR_API_KEY`.
+**Web explorer** (`explorer/`): React SPA with nginx reverse proxy to node API, relayer, and faucet; Sepolia wallet integration via env-injected contract addresses. Operator endpoints require server-side `CREG_OPERATOR_API_KEY`; that credential is never embedded in the browser bundle, so public explorer calls to operator-only reads fail closed unless mediated by a trusted server-side proxy.
 
 **Embedded UI** (`crates/node/src/explorer.rs`): Served at `/ui/` on the node when enabled.
 

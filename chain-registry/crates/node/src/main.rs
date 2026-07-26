@@ -5,6 +5,7 @@
 
 mod admission_scan;
 mod api;
+mod authority_adapter;
 mod block_producer;
 mod bridge;
 mod bridge_anchors;
@@ -316,6 +317,7 @@ async fn main() -> Result<()> {
     let spec_offline = std::env::var("CREG_CHAIN_SPEC_OFFLINE").unwrap_or_default() == "true";
     let pinned_genesis_hash = std::env::var("CREG_GENESIS_HASH").ok();
     let pinned_chain_id = std::env::var("CREG_CHAIN_ID").ok();
+    let mut chain_spec_signature_verified = false;
 
     let chain_spec = match chain_spec_boot::resolve_chain_spec(
         spec_url.as_deref(),
@@ -351,6 +353,15 @@ async fn main() -> Result<()> {
             .unwrap_or("0000000000000000000000000000000000000000000000000000000000000000");
 
         if pinned_pubkey.chars().all(|c| c == '0') {
+            if spec
+                .consensus_params
+                .namespace_authority_activation_height
+                .is_some()
+            {
+                anyhow::bail!(
+                    "CR-07 namespace authority activation requires a build with a pinned chain-spec signing key"
+                );
+            }
             tracing::warn!(
                 "CREG_SPEC_SIGNING_PUBKEY is not set â€” skipping spec signature verification (dev build)"
             );
@@ -362,6 +373,7 @@ async fn main() -> Result<()> {
                 .map_err(|e| anyhow::anyhow!("Failed to fetch spec signature: {}", e))?;
             spec.verify_signature(&sig, pinned_pubkey)
                 .map_err(|e| anyhow::anyhow!("Spec signature invalid: {}", e))?;
+            chain_spec_signature_verified = true;
             tracing::info!("Spec signature verified");
         }
 
@@ -398,6 +410,8 @@ async fn main() -> Result<()> {
             }
         }
         tracing::info!("Computed genesis hash: {}", computed_genesis_hash);
+        config.apply_chain_spec(spec, chain_spec_signature_verified);
+        tracing::info!("Chain spec applied to runtime config");
 
         // Step 5: L1 connectivity probe (already exists; now driven by spec)
         validate_l1_chain_id(&config.eth_rpc_url, Some(spec.l1.chain_id)).await?;
@@ -423,6 +437,8 @@ async fn main() -> Result<()> {
                 e.contains("CREG_VALIDATOR_KEY")
                     || e.contains("CREG_BRIDGE_KEY")
                     || e.contains("CREG_VALIDATOR_SET entry")
+                    || e.contains("CREG_NAMESPACE_AUTHORITY")
+                    || e.contains("Authoritative namespace")
             })
             .collect();
         if !hard_errors.is_empty() {
@@ -476,17 +492,13 @@ async fn main() -> Result<()> {
         );
     }
 
-    // Genesis-hash pin (legacy path). Always log the computed hash so operators can grab it
-    // for their chain spec; if CREG_GENESIS_HASH is set, also enforce match.
-    match config.validate_genesis_hash() {
-        Ok(hash) => tracing::info!("  genesis hash: 0x{}", hash),
-        Err(msg) => anyhow::bail!(msg),
-    }
-
-    // Apply chain spec to config (Step 8) AFTER legacy validation so env overrides win.
-    if let Some(spec) = &chain_spec {
-        config.apply_chain_spec(spec);
-        tracing::info!("Chain spec applied to runtime config");
+    // The signed-spec path already verified its canonical genesis hash above.
+    // Keep the legacy identity check only for env-only compatibility mode.
+    if chain_spec.is_none() {
+        match config.validate_genesis_hash() {
+            Ok(hash) => tracing::info!("  genesis hash: 0x{}", hash),
+            Err(msg) => anyhow::bail!(msg),
+        }
     }
 
     validate_contract_addresses(&config).await?;
@@ -540,6 +552,16 @@ async fn main() -> Result<()> {
         publisher_index.rebuild_from_chain(blocks.iter());
         tracing::info!("  publishers:  {}", publisher_index.publisher_count());
     }
+    let mut forced_inclusion_tracker = crate::state::ForcedInclusionTracker::new();
+    for (transaction, submitted_at_height) in chain.finalized_work_for_tracker(tip)? {
+        forced_inclusion_tracker.submit(transaction, submitted_at_height);
+    }
+    if forced_inclusion_tracker.pending_count() > 0 {
+        tracing::info!(
+            "  forced work: {} durable transaction(s) restored",
+            forced_inclusion_tracker.pending_count()
+        );
+    }
 
     // â”€â”€ Event bus (broadcast channel for SSE clients) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     let event_bus = new_event_bus();
@@ -581,7 +603,7 @@ async fn main() -> Result<()> {
         view_change_certs: HashMap::new(),
         reorgs: Vec::new(),
         pbft_engine: crate::state::PbftEngine::new(),
-        forced_inclusion_tracker: crate::state::ForcedInclusionTracker::new(),
+        forced_inclusion_tracker,
         sync_lag_blocks: 0,
         sync_max_peer_tip: 0,
         reward_emissions_succeeded: 0,

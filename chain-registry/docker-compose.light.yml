@@ -29,6 +29,7 @@ services:
       - CREG_DATA_DIR=/data
       - CREG_LISTEN=0.0.0.0:8080
       - CREG_P2P_LISTEN=/ip4/0.0.0.0/tcp/4001
+      - CREG_OPERATOR_API_KEY=${CREG_OPERATOR_API_KEY:?set a high-entropy server-side operator API key}
       
       # Pruning settings (aggressive for low storage)
       - CREG_PACKAGE_RETENTION_DAYS=14

@@ -19,6 +19,7 @@
 // exactly as before. Full reconstruction of pre-join history from L1 staking
 // events is a larger follow-up.
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
@@ -96,6 +97,69 @@ pub struct ValidatorSetSnapshot {
 
 fn history_path(data_dir: &Path) -> PathBuf {
     data_dir.join(HISTORY_FILE)
+}
+
+fn validate_history_bytes(bytes: &[u8]) -> anyhow::Result<()> {
+    serde_json::from_slice::<Vec<ValidatorSetSnapshot>>(bytes)
+        .map(|_| ())
+        .map_err(|error| anyhow::anyhow!("invalid validator-set history snapshot: {error}"))
+}
+
+/// Persist a complete history replacement durably before reporting success.
+/// Callers hold `history_write_guard`, so the fixed temporary path cannot race
+/// another local history writer.
+fn persist_history_bytes(data_dir: &Path, bytes: &[u8]) -> anyhow::Result<()> {
+    validate_history_bytes(bytes)?;
+    std::fs::create_dir_all(data_dir)?;
+    let path = history_path(data_dir);
+    let tmp = path.with_extension("json.tmp");
+    let mut file = std::fs::File::create(&tmp)?;
+    file.write_all(bytes)?;
+    file.sync_all()?;
+    drop(file);
+    std::fs::rename(&tmp, &path)?;
+    // Best-effort directory sync strengthens rename durability on platforms
+    // that support opening directories as files.
+    if let Ok(directory) = std::fs::File::open(data_dir) {
+        let _ = directory.sync_all();
+    }
+    Ok(())
+}
+
+/// Run `persist` while the exact pre-reorg history snapshot is protected from
+/// concurrent local writers. The closure durably writes the RocksDB journal,
+/// making that journal the transaction boundary for subsequent history edits.
+pub(crate) fn with_reorg_snapshot<T>(
+    data_dir: &Path,
+    persist: impl FnOnce(Option<Vec<u8>>) -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
+    let _write_guard = history_write_guard()?;
+    let snapshot = match std::fs::read(history_path(data_dir)) {
+        Ok(bytes) => {
+            validate_history_bytes(&bytes)?;
+            Some(bytes)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error.into()),
+    };
+    persist(snapshot)
+}
+
+/// Idempotently restore the history captured by an active reorg journal.
+/// The journal remains present if this fails, so startup can retry safely.
+pub(crate) fn restore_reorg_snapshot(
+    data_dir: &Path,
+    snapshot: Option<&[u8]>,
+) -> anyhow::Result<()> {
+    let _write_guard = history_write_guard()?;
+    match snapshot {
+        Some(bytes) => persist_history_bytes(data_dir, bytes),
+        None => match std::fs::remove_file(history_path(data_dir)) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error.into()),
+        },
+    }
 }
 
 /// Load all snapshots (ascending `effective_from_height`). Empty if missing.
@@ -340,12 +404,7 @@ pub fn record(
     enforce_retention(&mut snapshots)?;
 
     let bytes = serde_json::to_vec_pretty(&snapshots)?;
-    std::fs::create_dir_all(data_dir).ok();
-    let path = history_path(data_dir);
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, &bytes)?;
-    std::fs::rename(&tmp, &path)?;
-    Ok(())
+    persist_history_bytes(data_dir, &bytes)
 }
 
 /// Remove authority entries whose anchor lies on an abandoned branch. A
@@ -361,12 +420,7 @@ pub fn truncate_after_reorg(data_dir: &Path, common_ancestor: u64) -> anyhow::Re
         return Ok(());
     }
     let bytes = serde_json::to_vec_pretty(&snapshots)?;
-    std::fs::create_dir_all(data_dir).ok();
-    let path = history_path(data_dir);
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, &bytes)?;
-    std::fs::rename(&tmp, &path)?;
-    Ok(())
+    persist_history_bytes(data_dir, &bytes)
 }
 
 /// Persist a transition only after its certificate verifies against the prior
@@ -415,12 +469,7 @@ pub fn record_authenticated(
     snapshots.sort_by_key(|snapshot| snapshot.effective_from_height);
     enforce_retention(&mut snapshots)?;
     let bytes = serde_json::to_vec_pretty(&snapshots)?;
-    std::fs::create_dir_all(data_dir).ok();
-    let path = history_path(data_dir);
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, &bytes)?;
-    std::fs::rename(&tmp, &path)?;
-    Ok(())
+    persist_history_bytes(data_dir, &bytes)
 }
 
 #[cfg(test)]

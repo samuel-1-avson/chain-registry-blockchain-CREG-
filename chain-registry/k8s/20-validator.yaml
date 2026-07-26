@@ -51,6 +51,11 @@ spec:
                 secretKeyRef:
                   name: creg-secrets
                   key: NODE1_VALIDATOR_KEY
+            - name: CREG_OPERATOR_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: creg-secrets
+                  key: CREG_OPERATOR_API_KEY
           volumeMounts:
             - name: creg-data
               mountPath: /data

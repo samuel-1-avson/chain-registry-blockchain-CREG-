@@ -1,0 +1,235 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:creg:authority-adapter-result:v2",
+  "title": "CREG authority adapter result v2",
+  "description": "A documentation and fixture schema mirroring AuthorityAdapterResultV2. Passing this schema never establishes cryptographic verification or proves that request-bound fields were echoed. verified_at is required validator-local freshness metadata and MUST NOT enter a shared NamespaceAuthorityProof or NamespaceAuthorityStatement.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "verified",
+    "adapter_id",
+    "adapter_version",
+    "authority",
+    "evidence_url",
+    "evidence_sha256",
+    "artifact_url",
+    "issuer",
+    "subject",
+    "audience",
+    "purpose",
+    "namespace",
+    "challenge_sha256",
+    "current_controller_ed25519_pubkey",
+    "current_controller_evm_address",
+    "next_controller_ed25519_pubkey",
+    "next_controller_evm_address",
+    "authority_intent_sha256",
+    "artifact_digest_algorithm",
+    "artifact_digest",
+    "policy_sha256",
+    "trust_root_sha256",
+    "proof_issued_at",
+    "proof_expires_at",
+    "verified_at"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 2
+    },
+    "verified": {
+      "const": true
+    },
+    "adapter_id": {
+      "$ref": "#/$defs/canonicalText128"
+    },
+    "adapter_version": {
+      "$ref": "#/$defs/canonicalText64"
+    },
+    "authority": {
+      "enum": [
+        "npm_trusted_publisher",
+        "pypi_trusted_publisher"
+      ]
+    },
+    "evidence_url": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "evidence_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "artifact_url": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "issuer": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "subject": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "audience": {
+      "type": "string"
+    },
+    "purpose": {
+      "enum": [
+        "claim",
+        "recover"
+      ]
+    },
+    "namespace": {
+      "type": "string",
+      "pattern": "^(npm|pypi):.+@$"
+    },
+    "challenge_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "current_controller_ed25519_pubkey": {
+      "oneOf": [
+        {
+          "const": ""
+        },
+        {
+          "$ref": "#/$defs/ed25519PublicKey"
+        }
+      ]
+    },
+    "current_controller_evm_address": {
+      "oneOf": [
+        {
+          "const": ""
+        },
+        {
+          "$ref": "#/$defs/evmAddress"
+        }
+      ]
+    },
+    "next_controller_ed25519_pubkey": {
+      "$ref": "#/$defs/ed25519PublicKey"
+    },
+    "next_controller_evm_address": {
+      "$ref": "#/$defs/evmAddress"
+    },
+    "authority_intent_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "artifact_digest_algorithm": {
+      "enum": [
+        "sha256",
+        "sha512"
+      ]
+    },
+    "artifact_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]+$"
+    },
+    "policy_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "trust_root_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "proof_issued_at": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "proof_expires_at": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "verified_at": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Validator-local sidecar verification time used only for freshness checks. It MUST NOT enter the shared NamespaceAuthorityProof, NamespaceAuthorityStatement, or their consensus/signing identity; independently timed validator observations must still aggregate."
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "authority": {
+            "const": "npm_trusted_publisher"
+          }
+        },
+        "required": [
+          "authority"
+        ]
+      },
+      "then": {
+        "properties": {
+          "audience": {
+            "const": "npm:registry.npmjs.org"
+          },
+          "artifact_url": {
+            "pattern": "^https://registry\\.npmjs\\.org/[^?#]+$"
+          },
+          "artifact_digest_algorithm": {
+            "const": "sha512"
+          },
+          "artifact_digest": {
+            "pattern": "^[0-9a-f]{128}$"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "authority": {
+            "const": "pypi_trusted_publisher"
+          }
+        },
+        "required": [
+          "authority"
+        ]
+      },
+      "then": {
+        "properties": {
+          "audience": {
+            "const": "pypi"
+          },
+          "artifact_url": {
+            "pattern": "^https://files\\.pythonhosted\\.org/[^?#]+$"
+          },
+          "artifact_digest_algorithm": {
+            "const": "sha256"
+          },
+          "artifact_digest": {
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "ed25519PublicKey": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "evmAddress": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{40}$"
+    },
+    "canonicalText64": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "canonicalText128": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    }
+  }
+}

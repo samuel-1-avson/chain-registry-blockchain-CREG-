@@ -293,7 +293,14 @@ pub struct ValidatorSetMember {
     pub reputation: u32,
     pub status: String,
     pub performance_score: u32,
-    pub contribution_count: u64,
+    pub contribution_count: u32,
+}
+
+/// Canonical validator-set document carried by authenticated transition and
+/// namespace-authority certificates.
+#[derive(serde::Serialize, ToSchema)]
+pub struct ValidatorSet {
+    pub validators: Vec<ValidatorSetMember>,
 }
 
 /// One distinct member of the preceding validator set authorizing a transition.
@@ -315,7 +322,7 @@ pub struct ValidatorSetTransitionRequest {
     /// Canonical hash of the final block governed by the preceding set.
     pub previous_block_hash: String,
     pub previous_validator_set_hash: String,
-    pub validators: Vec<ValidatorSetMember>,
+    pub validators: ValidatorSet,
     pub validator_set_hash: String,
     pub transition_signatures: Vec<ValidatorSetTransitionSignature>,
 }
@@ -325,6 +332,273 @@ pub struct ValidatorSetTransitionAccepted {
     pub accepted: bool,
     pub effective_from_height: u64,
     pub validator_set_hash: String,
+}
+
+/// Upstream authority selected by a signed chain-spec policy.
+#[derive(serde::Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum NamespaceOwnershipAuthority {
+    /// npm trusted-publisher OIDC identity and npm provenance evidence.
+    NpmTrustedPublisher,
+    /// PyPI trusted-publisher OIDC identity and PyPI attestation evidence.
+    PypiTrustedPublisher,
+}
+
+/// State transition authorized by an upstream namespace-authority certificate.
+#[derive(serde::Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum NamespaceAuthorityPurpose {
+    Claim,
+    Recover,
+}
+
+/// Fresh controller intent embedded in the registry-published artifact.
+///
+/// `next_controller_signature` is an Ed25519 signature over the
+/// domain-separated intent. Current-controller fields may be omitted for a
+/// first claim, but are mandatory for recovery.
+#[derive(serde::Serialize, ToSchema)]
+pub struct NamespaceAuthorityChallenge {
+    #[schema(example = 1)]
+    pub schema_version: u16,
+    pub purpose: NamespaceAuthorityPurpose,
+    /// `creg-claim.json` for a claim or `creg-recovery.json` for recovery.
+    #[schema(example = "creg-claim.json")]
+    pub challenge_document: String,
+    pub chain_id: String,
+    /// Lowercase SHA-256 genesis hash.
+    pub genesis_hash: String,
+    /// Canonical `<ecosystem>:<name>@` namespace.
+    #[schema(example = "npm:example-package@")]
+    pub namespace: String,
+    /// Required for recovery; empty or omitted for a first claim.
+    #[serde(default)]
+    pub current_controller_ed25519_pubkey: String,
+    /// Required for recovery; empty or omitted for a first claim.
+    #[serde(default)]
+    pub current_controller_evm_address: String,
+    /// Lowercase hex Ed25519 public key of the proposed controller.
+    pub next_controller_ed25519_pubkey: String,
+    /// Canonical 0x-prefixed EVM address of the proposed controller.
+    pub next_controller_evm_address: String,
+    /// Non-zero, purpose-bound replay-protection nonce.
+    pub nonce: u64,
+    /// Whole Unix seconds.
+    pub issued_at: i64,
+    /// Whole Unix seconds; the challenge lifetime is bounded by node policy.
+    pub expires_at: i64,
+    /// Lowercase hex Ed25519 signature by the proposed controller.
+    pub next_controller_signature: String,
+}
+
+/// Exact upstream proof independently verified by a validator.
+#[derive(serde::Serialize, ToSchema)]
+pub struct NamespaceAuthorityProof {
+    #[schema(example = 2)]
+    pub schema_version: u16,
+    pub authority: NamespaceOwnershipAuthority,
+    pub namespace: String,
+    pub issuer: String,
+    pub subject: String,
+    pub audience: String,
+    /// Immutable content-addressed archive location.
+    pub evidence_uri: String,
+    /// Official npm/PyPI URL from which the exact evidence bytes were fetched.
+    pub registry_evidence_uri: String,
+    pub evidence_sha256: String,
+    /// SHA-256 of the artifact-independent controller intent.
+    pub challenge_sha256: String,
+    /// `sha512` for npm or `sha256` for PyPI.
+    pub artifact_digest_algorithm: String,
+    pub artifact_digest: String,
+    pub controller_evm_address: String,
+    pub controller_ed25519_pubkey: String,
+    /// RFC 3339 UTC timestamp from the verified upstream proof.
+    pub issued_at: String,
+    /// RFC 3339 UTC timestamp from the verified upstream proof.
+    pub expires_at: String,
+}
+
+/// Deterministic, chain-bound statement signed independently by validators.
+#[derive(serde::Serialize, ToSchema)]
+pub struct NamespaceAuthorityStatement {
+    #[schema(example = 2)]
+    pub schema_version: u16,
+    pub chain_id: String,
+    pub genesis_hash: String,
+    pub purpose: NamespaceAuthorityPurpose,
+    pub namespace: String,
+    pub current_controller_ed25519_pubkey: String,
+    pub current_controller_evm_address: String,
+    pub next_controller_ed25519_pubkey: String,
+    pub next_controller_evm_address: String,
+    pub authority_nonce: u64,
+    pub authority_intent_digest: String,
+    pub authority_proof: NamespaceAuthorityProof,
+    pub adapter_id: String,
+    pub adapter_version: String,
+    /// SHA-256 of the exact verifier executable selected by signed policy.
+    pub verifier_sha256: String,
+    pub policy_sha256: String,
+    pub trust_root_sha256: String,
+    pub anchor_height: u64,
+    pub anchor_block_hash: String,
+    pub validator_set_hash: String,
+    /// Whole Unix seconds.
+    pub issued_at: i64,
+    /// Whole Unix seconds.
+    pub expires_at: i64,
+}
+
+/// One active validator's Ed25519 signature over a namespace-authority
+/// statement.
+#[derive(serde::Serialize, ToSchema)]
+pub struct NamespaceAuthoritySignature {
+    pub validator_id: String,
+    pub validator_pubkey: String,
+    pub signature: String,
+}
+
+/// Request for one validator to independently fetch and verify upstream
+/// namespace-authority evidence.
+#[derive(serde::Serialize, ToSchema)]
+pub struct NamespaceAuthorityAttestationRequest {
+    pub adapter_id: String,
+    pub adapter_version: String,
+    pub authority: NamespaceOwnershipAuthority,
+    /// Official HTTPS npm/PyPI evidence URL. Redirects are rejected.
+    pub evidence_url: String,
+    /// Official immutable registry artifact URL. The node separately fetches
+    /// bounded bytes without redirects; the verifier must bind their native
+    /// digest to the provenance and find the exact fresh challenge inside.
+    pub artifact_url: String,
+    pub expected_issuer: String,
+    pub expected_subject: String,
+    pub challenge: NamespaceAuthorityChallenge,
+    /// Recent canonical block authenticated by the validator set below.
+    pub anchor_height: u64,
+    pub anchor_block_hash: String,
+    pub validator_set_hash: String,
+}
+
+/// One independently produced validator attestation. Callers aggregate
+/// matching statements until the validator set's BFT quorum is reached.
+#[derive(serde::Serialize, ToSchema)]
+pub struct NamespaceAuthorityAttestationResponse {
+    pub statement: NamespaceAuthorityStatement,
+    pub validators: ValidatorSet,
+    pub signature: NamespaceAuthoritySignature,
+}
+
+/// Quorum-certified namespace authority. The included validator set is replay
+/// material and is not a self-authenticating trust root.
+#[derive(serde::Serialize, ToSchema)]
+pub struct CertifiedNamespaceAuthority {
+    pub statement: NamespaceAuthorityStatement,
+    pub validators: ValidatorSet,
+    pub signatures: Vec<NamespaceAuthoritySignature>,
+}
+
+/// Successful validation of an aggregated namespace-authority certificate.
+#[derive(serde::Serialize, ToSchema)]
+pub struct NamespaceAuthorityCertificateResponse {
+    pub certificate_digest: String,
+    pub certificate: CertifiedNamespaceAuthority,
+}
+
+/// Namespace-controller state transition selected by the request body.
+#[derive(serde::Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum NamespaceLifecycleAction {
+    Delegate,
+    Transfer,
+    Recover,
+}
+
+/// Legacy namespace lifecycle event. This format has no chain/genesis or EVM
+/// controller binding and is rejected for new submissions after the configured
+/// namespace-authority activation height. Legacy recovery is always rejected.
+#[derive(serde::Serialize, ToSchema)]
+pub struct NamespaceLifecycleEventV1 {
+    #[schema(example = 1)]
+    pub schema_version: u16,
+    pub action: NamespaceLifecycleAction,
+    /// Canonical `<ecosystem>:<name>@` namespace.
+    pub namespace: String,
+    pub current_controller_ed25519_pubkey: String,
+    pub next_controller_ed25519_pubkey: String,
+    pub nonce: u64,
+    /// RFC 3339 UTC timestamp.
+    pub issued_at: String,
+    /// RFC 3339 UTC timestamp.
+    pub expires_at: String,
+    pub current_controller_signature: String,
+    pub next_controller_signature: String,
+    /// Empty for delegate/transfer. A digest does not make v1 recovery
+    /// admissible.
+    #[serde(default)]
+    pub authority_proof_digest: String,
+}
+
+/// Chain-bound namespace lifecycle event used at and after CR-07 activation.
+///
+/// Delegate and transfer require signatures from both current and next
+/// controllers. Recovery deliberately leaves `current_controller_signature`
+/// empty and instead requires the next-controller signature plus a recent,
+/// purpose-bound validator-quorum authority certificate.
+#[derive(serde::Serialize, ToSchema)]
+pub struct NamespaceLifecycleEventV2 {
+    #[schema(example = 2)]
+    pub schema_version: u16,
+    pub chain_id: String,
+    pub genesis_hash: String,
+    pub action: NamespaceLifecycleAction,
+    /// Canonical `<ecosystem>:<name>@` namespace.
+    pub namespace: String,
+    pub current_controller_ed25519_pubkey: String,
+    pub current_controller_evm_address: String,
+    pub next_controller_ed25519_pubkey: String,
+    pub next_controller_evm_address: String,
+    /// Exactly `["publish"]` for delegation; empty otherwise.
+    #[serde(default)]
+    pub delegation_scopes: Vec<String>,
+    /// Whole Unix seconds after `issued_at` for delegation; absent otherwise.
+    #[serde(default)]
+    pub delegation_expires_at: Option<i64>,
+    /// Monotonically increasing controller nonce.
+    pub nonce: u64,
+    /// Whole Unix seconds.
+    pub issued_at: i64,
+    /// Whole Unix seconds.
+    pub expires_at: i64,
+    /// Empty only for recovery.
+    pub current_controller_signature: String,
+    pub next_controller_signature: String,
+    /// Required for recovery and equal to the included proof's digest; empty
+    /// for delegate/transfer.
+    #[serde(default)]
+    pub authority_proof_digest: String,
+    /// Required only for recovery.
+    #[serde(default)]
+    pub authority_certificate: Option<CertifiedNamespaceAuthority>,
+}
+
+/// Untagged lifecycle request accepted by the generic and action-specific
+/// routes. `schema_version` and the v2 chain-bound fields distinguish the two
+/// wire formats; no wrapper object or variant tag is present in JSON.
+#[derive(serde::Serialize, ToSchema)]
+#[serde(untagged)]
+pub enum NamespaceLifecycleSubmission {
+    V2(NamespaceLifecycleEventV2),
+    V1(NamespaceLifecycleEventV1),
+}
+
+#[derive(serde::Serialize, ToSchema)]
+pub struct NamespaceLifecycleQueuedResponse {
+    #[schema(example = "queued")]
+    pub status: String,
+    #[schema(example = "Namespace lifecycle event will be included in the next block")]
+    pub message: String,
 }
 
 #[derive(serde::Serialize, ToSchema)]
@@ -636,6 +910,161 @@ pub mod paths {
     )]
     pub async fn submit_validator_set_transition() {}
 
+    /// Ask this validator to independently attest an npm/PyPI namespace claim
+    /// or recovery.
+    ///
+    /// The proposed controller's Ed25519 signature authenticates the intent,
+    /// while an operator API key protects this expensive validator-local
+    /// service from anonymous resource exhaustion. Neither credential can
+    /// substitute for the validator quorum ultimately required. The node
+    /// fetches the exact evidence bytes from the official
+    /// registry origins, runs the hash-pinned verifier selected by the signed
+    /// chain spec over both the evidence and artifact bytes, binds the result
+    /// to a recent canonical block and its authenticated validator set,
+    /// archives both inputs by digest, and returns this validator's signature.
+    /// Callers must obtain matching attestations from a BFT quorum before
+    /// constructing a certificate.
+    ///
+    /// During rollout, requests that do not match exactly one signed policy
+    /// are rejected. A matched policy without its matching hash-pinned
+    /// verifier binary fails closed with 503 rather than issuing an
+    /// under-specified attestation.
+    #[utoipa::path(
+        post,
+        path = "/v1/validator/namespace-authority/attest",
+        tag = "validators",
+        request_body = NamespaceAuthorityAttestationRequest,
+        responses(
+            (status = 200, body = NamespaceAuthorityAttestationResponse, description = "Independent validator attestation"),
+            (status = 400, body = ApiError, description = "Invalid controller challenge, authority evidence, adapter result, or canonical anchor"),
+            (status = 401, body = ApiError, description = "Operator API credentials are missing or invalid"),
+            (status = 403, body = ApiError, description = "Node is not a validator or is absent from the anchor validator set"),
+            (status = 429, body = ApiError, description = "All bounded authority-verifier slots are busy"),
+            (status = 500, body = ApiError, description = "Local signing or evidence-archive failure"),
+            (status = 503, body = ApiError, description = "Signed policy has no usable hash-pinned verifier configuration"),
+        ),
+    )]
+    pub async fn attest_namespace_authority() {}
+
+    /// Validate an aggregated namespace-authority quorum certificate against
+    /// this node's canonical chain state.
+    ///
+    /// An operator API key protects the endpoint, but the certificate's
+    /// validator signatures remain the consensus authorization and the API
+    /// credential cannot replace quorum. The carried validator set is checked
+    /// against the set authenticated at
+    /// the recent canonical anchor, along with chain/genesis, purpose,
+    /// controller intent, nonce, validity interval, adapter, verifier, policy,
+    /// and trust-root bindings. This endpoint validates and returns the
+    /// canonical digest; it does not collect attestations for the caller.
+    #[utoipa::path(
+        post,
+        path = "/v1/validator/namespace-authority/certificates",
+        tag = "validators",
+        request_body = CertifiedNamespaceAuthority,
+        responses(
+            (status = 200, body = NamespaceAuthorityCertificateResponse, description = "Certificate is valid for the node's next block context"),
+            (status = 400, body = ApiError, description = "Invalid quorum, expiry, policy mismatch, or stale/conflicting canonical anchor"),
+            (status = 401, body = ApiError, description = "Operator API credentials are missing or invalid"),
+            (status = 503, body = ApiError, description = "Private API is locked or the signed authority policy is unavailable"),
+        ),
+    )]
+    pub async fn assemble_namespace_authority_certificate() {}
+
+    /// Submit a signed namespace delegation, transfer, or recovery event.
+    ///
+    /// The JSON body is an untagged v1 or v2 event. V1 delegate/transfer
+    /// remains available only before the configured CR-07 activation height;
+    /// v1 is rejected after activation and v1 recovery is never accepted. V2
+    /// binds the event to chain id, genesis, both Ed25519/EVM controller
+    /// identities, a durable monotonic nonce, and whole-second validity.
+    /// Delegate/transfer require both controller signatures. Recovery requires
+    /// a v2 event signed by the next controller and an independently verified,
+    /// recent canonical-anchor validator-quorum authority certificate.
+    #[utoipa::path(
+        post,
+        path = "/v1/publisher/namespaces/lifecycle",
+        tag = "publishers",
+        request_body = NamespaceLifecycleSubmission,
+        responses(
+            (status = 200, body = NamespaceLifecycleQueuedResponse, description = "Event durably queued for block inclusion"),
+            (status = 400, body = ApiError, description = "Malformed event, invalid signatures/validity, or invalid v2 action-specific fields"),
+            (status = 403, body = ApiError, description = "Declared current controller does not own the namespace"),
+            (status = 404, body = ApiError, description = "Namespace has no established controller"),
+            (status = 409, body = ApiError, description = "Retired v1 event, forbidden v1 recovery, replay/stale nonce, or failed chain-state preflight"),
+            (status = 500, body = ApiError, description = "Durable queue persistence failure"),
+        ),
+    )]
+    pub async fn submit_namespace_lifecycle() {}
+
+    /// Submit a delegation event through the action-specific route.
+    ///
+    /// The body must set `action` to `delegate`. V2 delegation permits only
+    /// the time-bounded `publish` scope, does not replace the root controller,
+    /// and must not carry authority proof/certificate fields. V1 is accepted
+    /// only before CR-07 activation.
+    #[utoipa::path(
+        post,
+        path = "/v1/publisher/namespaces/delegate",
+        tag = "publishers",
+        request_body = NamespaceLifecycleSubmission,
+        responses(
+            (status = 200, body = NamespaceLifecycleQueuedResponse, description = "Delegation durably queued for block inclusion"),
+            (status = 400, body = ApiError, description = "Action mismatch, malformed delegation, or invalid controller signatures"),
+            (status = 403, body = ApiError, description = "Declared current controller does not own the namespace"),
+            (status = 404, body = ApiError, description = "Namespace has no established controller"),
+            (status = 409, body = ApiError, description = "Retired v1 event, replay/stale nonce, or failed chain-state preflight"),
+            (status = 500, body = ApiError, description = "Durable queue persistence failure"),
+        ),
+    )]
+    pub async fn submit_namespace_delegate() {}
+
+    /// Submit a root-controller transfer through the action-specific route.
+    ///
+    /// The body must set `action` to `transfer`. Current and next controllers
+    /// sign the same domain-separated event. V2 transfer must not carry
+    /// delegation or authority data. V1 is accepted only before CR-07
+    /// activation.
+    #[utoipa::path(
+        post,
+        path = "/v1/publisher/namespaces/transfer",
+        tag = "publishers",
+        request_body = NamespaceLifecycleSubmission,
+        responses(
+            (status = 200, body = NamespaceLifecycleQueuedResponse, description = "Transfer durably queued for block inclusion"),
+            (status = 400, body = ApiError, description = "Action mismatch, malformed transfer, or invalid controller signatures"),
+            (status = 403, body = ApiError, description = "Declared current controller does not own the namespace"),
+            (status = 404, body = ApiError, description = "Namespace has no established controller"),
+            (status = 409, body = ApiError, description = "Retired v1 event, replay/stale nonce, or failed chain-state preflight"),
+            (status = 500, body = ApiError, description = "Durable queue persistence failure"),
+        ),
+    )]
+    pub async fn submit_namespace_transfer() {}
+
+    /// Submit an authority-certified recovery through the action-specific
+    /// route.
+    ///
+    /// The body must set `action` to `recover` and must use v2. The successor
+    /// signs the event; the old controller signature is empty. The included
+    /// certificate must bind the same namespace, current/next Ed25519 and EVM
+    /// controllers, nonce, validity, proof digest, chain/genesis, signed
+    /// adapter policy, recent canonical block anchor, and validator-set quorum.
+    #[utoipa::path(
+        post,
+        path = "/v1/publisher/namespaces/recover",
+        tag = "publishers",
+        request_body = NamespaceLifecycleSubmission,
+        responses(
+            (status = 200, body = NamespaceLifecycleQueuedResponse, description = "Recovery durably queued for block inclusion"),
+            (status = 400, body = ApiError, description = "Action mismatch, malformed recovery, invalid successor signature, or missing/mismatched certificate"),
+            (status = 403, body = ApiError, description = "Declared current controller conflicts with namespace state"),
+            (status = 404, body = ApiError, description = "Namespace has no established controller"),
+            (status = 409, body = ApiError, description = "V1 recovery, replay/stale nonce, invalid quorum/policy, or stale/conflicting canonical anchor"),
+            (status = 500, body = ApiError, description = "Durable queue persistence failure"),
+        ),
+    )]
+    pub async fn submit_namespace_recovery() {}
+
     /// P2P topology — peer list, role, and connection health.
     #[utoipa::path(
         get,
@@ -852,6 +1281,7 @@ impl Modify for SecurityAddon {
         (name = "blocks",       description = "Block list, lookup by height or hash, gossip intake"),
         (name = "transactions", description = "Transaction lookup and pending pool"),
         (name = "packages",     description = "Package publish records, proofs, revocation"),
+        (name = "publishers",   description = "Publisher identity and authoritative namespace lifecycle"),
         (name = "validators",   description = "Validator identity registrations and profiles"),
         (name = "consensus",    description = "PBFT round state and vote intake"),
         (name = "network",      description = "Peer set and P2P topology"),
@@ -880,6 +1310,12 @@ impl Modify for SecurityAddon {
         paths::register_validator_identity,
         paths::list_validator_set_transitions,
         paths::submit_validator_set_transition,
+        paths::attest_namespace_authority,
+        paths::assemble_namespace_authority_certificate,
+        paths::submit_namespace_lifecycle,
+        paths::submit_namespace_delegate,
+        paths::submit_namespace_transfer,
+        paths::submit_namespace_recovery,
         paths::p2p_status,
         paths::bridge_anchors,
         paths::governance_proposals,
@@ -921,9 +1357,25 @@ impl Modify for SecurityAddon {
         ConsensusValidator,
         ConsensusState,
         ValidatorSetMember,
+        ValidatorSet,
         ValidatorSetTransitionSignature,
         ValidatorSetTransitionRequest,
         ValidatorSetTransitionAccepted,
+        NamespaceOwnershipAuthority,
+        NamespaceAuthorityPurpose,
+        NamespaceAuthorityChallenge,
+        NamespaceAuthorityProof,
+        NamespaceAuthorityStatement,
+        NamespaceAuthoritySignature,
+        NamespaceAuthorityAttestationRequest,
+        NamespaceAuthorityAttestationResponse,
+        CertifiedNamespaceAuthority,
+        NamespaceAuthorityCertificateResponse,
+        NamespaceLifecycleAction,
+        NamespaceLifecycleEventV1,
+        NamespaceLifecycleEventV2,
+        NamespaceLifecycleSubmission,
+        NamespaceLifecycleQueuedResponse,
         AddressProfile,
         AddressTxRef,
         AddressTxList,

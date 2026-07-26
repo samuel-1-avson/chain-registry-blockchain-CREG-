@@ -112,6 +112,16 @@ services:
       CREG_SPEC_SIGNATURE_URL: http://spec-server/chain-spec.json.sig
       CREG_SPEC_SIGNING_PUBKEY: ${CREG_SPEC_SIGNING_PUBKEY:-0437e4adac481519cd6ae66907294c40cfcbf0bdeadd47806f6233be4bd5f82d}
 
+      # CR-07 activation and policy pins come only from that verified spec.
+      # Empty verifier paths keep authority attestation fail-closed.
+      CREG_NAMESPACE_AUTHORITY_NPM_VERIFIER_PATH: ${CREG_NAMESPACE_AUTHORITY_NPM_VERIFIER_PATH:-}
+      CREG_NAMESPACE_AUTHORITY_PYPI_VERIFIER_PATH: ${CREG_NAMESPACE_AUTHORITY_PYPI_VERIFIER_PATH:-}
+      CREG_NAMESPACE_AUTHORITY_VERIFIER_TIMEOUT_SECS: ${CREG_NAMESPACE_AUTHORITY_VERIFIER_TIMEOUT_SECS:-30}
+      CREG_NAMESPACE_AUTHORITY_MAX_EVIDENCE_BYTES: ${CREG_NAMESPACE_AUTHORITY_MAX_EVIDENCE_BYTES:-2097152}
+      CREG_NAMESPACE_AUTHORITY_MAX_ARTIFACT_BYTES: ${CREG_NAMESPACE_AUTHORITY_MAX_ARTIFACT_BYTES:-16777216}
+      CREG_NAMESPACE_AUTHORITY_MAX_RESULT_BYTES: ${CREG_NAMESPACE_AUTHORITY_MAX_RESULT_BYTES:-65536}
+      CREG_NAMESPACE_AUTHORITY_MAX_CONCURRENT_VERIFICATIONS: ${CREG_NAMESPACE_AUTHORITY_MAX_CONCURRENT_VERIFICATIONS:-2}
+
       CREG_IPFS_URL: http://ipfs:5001
 
       # Sepolia contracts (defaults from testnet/chain-spec.sepolia.json; override in .env)
@@ -143,8 +153,9 @@ services:
       CREG_SANDBOX_TIMEOUT: "120"
       CREG_SANDBOX_MEMORY_MB: "512"
 
-      # Unlocks /v1/runtime/config, /v1/nodes, /v1/pending, etc. for the explorer.
-      CREG_OPERATOR_API_KEY: ${CREG_OPERATOR_API_KEY:-docker-dev-operator-key}
+      # Protects operator/internal routes. This stays server-side and is never
+      # passed to the explorer build or public nginx proxy.
+      CREG_OPERATOR_API_KEY: ${CREG_OPERATOR_API_KEY:?set a high-entropy server-side operator API key}
 
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
@@ -345,7 +356,6 @@ services:
         VITE_SEPOLIA_STAKING_ADDR: ${CREG_STAKING_ADDR:-0xf28C63C4Aafd27025E535Ab9ab7B4daC18C96Bc2}
         VITE_SEPOLIA_REGISTRY_ADDR: ${CREG_REGISTRY_ADDR:-0x3aCfF05d00AC199412a94326eD8aA874aaA3596c}
         VITE_DEFAULT_NETWORK_PROFILE: sepolia
-        VITE_OPERATOR_API_KEY: ${CREG_OPERATOR_API_KEY:-docker-dev-operator-key}
     container_name: creg-web-explorer
     ports:
       - "3007:80"

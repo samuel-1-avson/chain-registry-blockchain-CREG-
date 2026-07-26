@@ -828,6 +828,9 @@ pub(crate) fn verify_publish_sig(req: &PublishRequest) -> anyhow::Result<()> {
 
 fn publisher_signature_message(req: &PublishRequest) -> anyhow::Result<String> {
     if req.publisher_authorization_version == 4 {
+        if req.submitted_at.timestamp_subsec_nanos() != 0 {
+            anyhow::bail!("Publisher v4 submitted_at must use whole Unix seconds");
+        }
         let namespace = common::authoritative_package_namespace(&req.id)
             .map_err(|error| anyhow::anyhow!("Invalid authoritative namespace: {}", error))?;
         if req.ownership_claim != namespace.trim_end_matches('@') {
@@ -835,11 +838,12 @@ fn publisher_signature_message(req: &PublishRequest) -> anyhow::Result<String> {
         }
         let keyset =
             common::canonical_publisher_keyset(&req.publisher_pubkey, &req.publisher_pubkeys);
-        if req.threshold == 0
+        if req.publisher_pubkeys.is_empty()
+            || !req.signature.is_empty()
+            || req.threshold == 0
             || req.threshold > keyset.len()
-            || (!req.publisher_pubkeys.is_empty()
-                && (req.publisher_pubkeys != keyset || !keyset.contains(&req.publisher_pubkey)))
-            || (req.publisher_pubkeys.is_empty() && req.threshold != 1)
+            || req.publisher_pubkeys != keyset
+            || !keyset.contains(&req.publisher_pubkey)
         {
             anyhow::bail!("Publisher v4 multisig policy is not canonical");
         }
@@ -858,6 +862,11 @@ fn publisher_signature_message(req: &PublishRequest) -> anyhow::Result<String> {
             }
             None => String::new(),
         };
+        let certificate_digest = req
+            .namespace_authority_certificate
+            .as_ref()
+            .map(common::CertifiedNamespaceAuthority::digest)
+            .unwrap_or_default();
         let key_bundle_sha256 = req
             .key_bundle
             .as_ref()
@@ -895,6 +904,7 @@ fn publisher_signature_message(req: &PublishRequest) -> anyhow::Result<String> {
             req.threshold,
             &req.publisher_pubkeys,
             &proof_digest,
+            &certificate_digest,
         ));
     }
     if !req.publisher_nonce.trim().is_empty()

@@ -138,7 +138,7 @@ services:
       CREG_P2P_SEEDS: /dns4/creg-node-2/tcp/9000,/dns4/creg-node-3/tcp/9000
       CREG_IS_VALIDATOR: "true"
       CREG_VALIDATOR_KEY: ${CREG_VALIDATOR_KEY_1}
-      CREG_OPERATOR_API_KEY: ${CREG_OPERATOR_API_KEY:-docker-dev-operator-key}
+      CREG_OPERATOR_API_KEY: ${CREG_OPERATOR_API_KEY:?set a high-entropy server-side operator API key}
       CREG_NODE_ID: core-1
       CREG_PEERS: http://creg-node-2:8080,http://creg-node-3:8080
     ports:
@@ -164,7 +164,7 @@ services:
       <<: *creg-node-base-env
       CREG_IS_VALIDATOR: "true"
       CREG_VALIDATOR_KEY: ${CREG_VALIDATOR_KEY_2}
-      CREG_OPERATOR_API_KEY: ${CREG_OPERATOR_API_KEY:-docker-dev-operator-key}
+      CREG_OPERATOR_API_KEY: ${CREG_OPERATOR_API_KEY:?set a high-entropy server-side operator API key}
       CREG_NODE_ID: validator-2
       CREG_PEERS: http://creg-node-1:8080,http://creg-node-3:8080
       CREG_P2P_SEEDS: /dns4/creg-node-1/tcp/9000,/dns4/creg-node-3/tcp/9000

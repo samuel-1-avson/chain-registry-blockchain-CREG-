@@ -20,6 +20,58 @@ use std::path::Path;
 
 type HmacSha256 = Hmac<Sha256>;
 
+const CR07_ENV_MARKERS: &[&str] = &[
+    "CREG_CHAIN_ID",
+    "CREG_GENESIS_HASH",
+    "CREG_STAKING_ADDR",
+    "CREG_NAMESPACE_AUTHORITY_ACTIVATION_HEIGHT",
+    "CREG_NAMESPACE_AUTHORITY_POLICIES",
+    "CREG_NAMESPACE_AUTHORITY_CERTIFICATE_PATH",
+    "CREG_NAMESPACE_AUTHORITY_PROOF_PATH",
+];
+
+fn ensure_legacy_multisig_allowed() -> Result<()> {
+    let configured: Vec<&str> = CR07_ENV_MARKERS
+        .iter()
+        .copied()
+        .filter(|name| std::env::var_os(name).is_some())
+        .collect();
+    let allow_legacy =
+        !env_truthy("CREG_PRODUCTION") && env_truthy("CREG_ALLOW_LEGACY_PUBLISHER_PROOF");
+    ensure_legacy_multisig_allowed_for(&configured, allow_legacy)
+}
+
+fn env_truthy(name: &str) -> bool {
+    std::env::var(name)
+        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+}
+
+fn ensure_legacy_multisig_allowed_for(configured: &[&str], allow_legacy: bool) -> Result<()> {
+    if configured.is_empty() && allow_legacy {
+        return Ok(());
+    }
+
+    if configured.is_empty() {
+        bail!(
+            "Legacy `creg multisig` is disabled by default because its signatures are not \
+             chain/genesis bound. Set CREG_ALLOW_LEGACY_PUBLISHER_PROOF=true only when \
+             intentionally targeting a non-production pre-activation network; use \
+             `creg publish --extra-key-file` for authorization v4."
+        );
+    }
+
+    bail!(
+        "Legacy `creg multisig` sessions cannot be used with CR-07/post-activation \
+         publisher authorization (detected {}). The legacy session does not bind the chain, \
+         genesis block, staking contract, manifest, signer keyset, authority proof, or authority \
+         certificate. Use `creg publish <tarball> --key-file <KEY> --extra-key-file <KEY> ...` \
+         (optionally with `--offline <FILE>`) so every signer produces authorization v4. Only \
+         unset these variables when intentionally targeting a pre-activation legacy network.",
+        configured.join(", ")
+    )
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct MultisigSession {
     /// Package canonical name
@@ -128,6 +180,7 @@ pub async fn init(
     _node_url: Option<&str>,
     output: &Path,
 ) -> Result<()> {
+    ensure_legacy_multisig_allowed()?;
     let publisher_address = crate::publish::canonicalize_publisher_address(publisher_address)?;
 
     let ipfs_url =
@@ -196,13 +249,17 @@ pub async fn init(
             .unwrap_or("");
         match ext {
             "crate" => "cargo",
-            "whl" | "tar" => "pip",
+            "whl" | "tar" => "pypi",
             "jar" => "maven",
             "gem" => "gem",
             _ => "npm",
         }
         .to_string()
     });
+    let ecosystem = match ecosystem.trim().to_ascii_lowercase().as_str() {
+        "pip" | "pypi" => "pypi".to_string(),
+        canonical => canonical.to_string(),
+    };
 
     let session = MultisigSession {
         canonical: format!("{}:{}@{}", ecosystem, name, version),
@@ -235,6 +292,11 @@ pub async fn init(
 
 /// Add a co-signer's signature to the session.
 pub fn sign(session_path: &Path, privkey_hex: &str) -> Result<()> {
+    ensure_legacy_multisig_allowed()?;
+    sign_legacy_session(session_path, privkey_hex)
+}
+
+fn sign_legacy_session(session_path: &Path, privkey_hex: &str) -> Result<()> {
     use ed25519_dalek::{Signer, SigningKey};
 
     let mut session = MultisigSession::load(session_path)?;
@@ -299,6 +361,7 @@ pub async fn submit(
     manifest_path: Option<&Path>,
     node_url: Option<&str>,
 ) -> Result<()> {
+    ensure_legacy_multisig_allowed()?;
     let session = MultisigSession::load(session_path)?;
 
     if !session.is_ready() {
@@ -422,7 +485,7 @@ mod tests {
         let signing_key = SigningKey::generate(&mut OsRng);
         let privkey_hex = hex::encode(signing_key.to_bytes());
 
-        sign(&session_path, &privkey_hex).expect("sign session");
+        sign_legacy_session(&session_path, &privkey_hex).expect("sign session");
 
         let signed = MultisigSession::load(&session_path).expect("load signed session");
         assert_eq!(signed.signatures.len(), 1);
@@ -444,5 +507,26 @@ mod tests {
             .verifying_key()
             .verify(message.as_bytes(), &signature)
             .expect("signature must verify against scoped canonical payload");
+    }
+
+    #[test]
+    fn legacy_multisig_refuses_cr07_configuration_with_upgrade_guidance() {
+        let error = ensure_legacy_multisig_allowed_for(
+            &["CREG_CHAIN_ID", "CREG_GENESIS_HASH", "CREG_STAKING_ADDR"],
+            false,
+        )
+        .expect_err("legacy session must not be used after CR-07 activation");
+        let message = error.to_string();
+
+        assert!(message.contains("cannot be used with CR-07/post-activation"));
+        assert!(message.contains("--extra-key-file"));
+        assert!(message.contains("CREG_GENESIS_HASH"));
+    }
+
+    #[test]
+    fn legacy_multisig_requires_explicit_pre_activation_opt_in() {
+        assert!(ensure_legacy_multisig_allowed_for(&[], false).is_err());
+        assert!(ensure_legacy_multisig_allowed_for(&[], true).is_ok());
+        assert!(ensure_legacy_multisig_allowed_for(&["CREG_CHAIN_ID"], true).is_err());
     }
 }

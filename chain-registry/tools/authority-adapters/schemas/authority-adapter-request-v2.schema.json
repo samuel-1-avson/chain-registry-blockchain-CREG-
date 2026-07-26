@@ -1,0 +1,331 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:creg:authority-adapter-request:v2",
+  "title": "CREG authority adapter request v2",
+  "description": "A documentation and fixture schema mirroring AuthorityAdapterRequestV2. Cryptographic, exact-URL, digest, archive, and cross-field validation remains mandatory outside JSON Schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "authority",
+    "evidence_url",
+    "evidence_sha256",
+    "evidence_hex",
+    "artifact_url",
+    "artifact_digest_algorithm",
+    "artifact_digest",
+    "artifact_hex",
+    "expected_issuer",
+    "expected_subject",
+    "expected_audience",
+    "challenge"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 2
+    },
+    "authority": {
+      "enum": [
+        "npm_trusted_publisher",
+        "pypi_trusted_publisher"
+      ]
+    },
+    "evidence_url": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "evidence_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "evidence_hex": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 16777216,
+      "pattern": "^(?:[0-9a-f]{2})+$"
+    },
+    "artifact_url": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "artifact_digest_algorithm": {
+      "enum": [
+        "sha256",
+        "sha512"
+      ]
+    },
+    "artifact_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]+$"
+    },
+    "artifact_hex": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 134217728,
+      "pattern": "^(?:[0-9a-f]{2})+$"
+    },
+    "expected_issuer": {
+      "$ref": "#/$defs/canonicalText512"
+    },
+    "expected_subject": {
+      "$ref": "#/$defs/canonicalText1024"
+    },
+    "expected_audience": {
+      "type": "string"
+    },
+    "challenge": {
+      "$ref": "#/$defs/challenge"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "authority": {
+            "const": "npm_trusted_publisher"
+          }
+        },
+        "required": [
+          "authority"
+        ]
+      },
+      "then": {
+        "properties": {
+          "evidence_url": {
+            "pattern": "^https://registry\\.npmjs\\.org(?:/|$)"
+          },
+          "artifact_url": {
+            "pattern": "^https://registry\\.npmjs\\.org/[^?#]+$"
+          },
+          "artifact_digest_algorithm": {
+            "const": "sha512"
+          },
+          "artifact_digest": {
+            "pattern": "^[0-9a-f]{128}$"
+          },
+          "expected_audience": {
+            "const": "npm:registry.npmjs.org"
+          },
+          "challenge": {
+            "properties": {
+              "namespace": {
+                "pattern": "^npm:"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "authority": {
+            "const": "pypi_trusted_publisher"
+          }
+        },
+        "required": [
+          "authority"
+        ]
+      },
+      "then": {
+        "properties": {
+          "evidence_url": {
+            "pattern": "^https://pypi\\.org(?:/|$)"
+          },
+          "artifact_url": {
+            "pattern": "^https://files\\.pythonhosted\\.org/[^?#]+$"
+          },
+          "artifact_digest_algorithm": {
+            "const": "sha256"
+          },
+          "artifact_digest": {
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "expected_audience": {
+            "const": "pypi"
+          },
+          "challenge": {
+            "properties": {
+              "namespace": {
+                "pattern": "^pypi:"
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "ed25519PublicKey": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "ed25519Signature": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{128}$"
+    },
+    "evmAddress": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{40}$"
+    },
+    "canonicalText512": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "canonicalText1024": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "challenge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "purpose",
+        "challenge_document",
+        "chain_id",
+        "genesis_hash",
+        "namespace",
+        "current_controller_ed25519_pubkey",
+        "current_controller_evm_address",
+        "next_controller_ed25519_pubkey",
+        "next_controller_evm_address",
+        "nonce",
+        "issued_at",
+        "expires_at",
+        "next_controller_signature"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "purpose": {
+          "enum": [
+            "claim",
+            "recover"
+          ]
+        },
+        "challenge_document": {
+          "enum": [
+            "creg-claim.json",
+            "creg-recovery.json"
+          ]
+        },
+        "chain_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "genesis_hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "namespace": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 512,
+          "pattern": "^(npm|pypi):.+@$"
+        },
+        "current_controller_ed25519_pubkey": {
+          "oneOf": [
+            {
+              "const": ""
+            },
+            {
+              "$ref": "#/$defs/ed25519PublicKey"
+            }
+          ]
+        },
+        "current_controller_evm_address": {
+          "oneOf": [
+            {
+              "const": ""
+            },
+            {
+              "$ref": "#/$defs/evmAddress"
+            }
+          ]
+        },
+        "next_controller_ed25519_pubkey": {
+          "$ref": "#/$defs/ed25519PublicKey"
+        },
+        "next_controller_evm_address": {
+          "$ref": "#/$defs/evmAddress"
+        },
+        "nonce": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "issued_at": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "expires_at": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "next_controller_signature": {
+          "$ref": "#/$defs/ed25519Signature"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "purpose": {
+                "const": "claim"
+              }
+            },
+            "required": [
+              "purpose"
+            ]
+          },
+          "then": {
+            "properties": {
+              "challenge_document": {
+                "const": "creg-claim.json"
+              },
+              "current_controller_ed25519_pubkey": {
+                "const": ""
+              },
+              "current_controller_evm_address": {
+                "const": ""
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "purpose": {
+                "const": "recover"
+              }
+            },
+            "required": [
+              "purpose"
+            ]
+          },
+          "then": {
+            "properties": {
+              "challenge_document": {
+                "const": "creg-recovery.json"
+              },
+              "current_controller_ed25519_pubkey": {
+                "$ref": "#/$defs/ed25519PublicKey"
+              },
+              "current_controller_evm_address": {
+                "$ref": "#/$defs/evmAddress"
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

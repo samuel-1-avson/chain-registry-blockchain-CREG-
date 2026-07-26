@@ -4,7 +4,7 @@
 > **Version:** Public alpha (`creg-testnet-1`)  
 > **Network:** Ethereum Sepolia (L1 chain id `11155111`)  
 > **Status:** Public alpha testnet — not mainnet  
-> **Last updated:** 2026-07-18 (checkpoint bootstrap, receiver validation, and certified committee hardening)
+> **Last updated:** 2026-07-25 (CR-07 authoritative namespace lifecycle and protocol-v2 authority verification)
 
 This document describes the complete system workflow of the Chain Registry blockchain: architecture, components, consensus, networking, storage, security, operations, and developer onboarding. It is scoped to the **core blockchain project** (`chain-registry/` workspace, contracts, circuits, testnet) and excludes the waitlist application and contribution arena.
 
@@ -266,9 +266,11 @@ Submitted by publishers to enter the pending pool:
 | `ipfs_cid` | IPFS CID where tarball is pinned |
 | `publisher_address` | Staked EVM address (0x-prefixed) |
 | `publisher_pubkey` | Ed25519 public key (hex) |
-| `signature` | Ed25519 signature over `canonical(id) + content_hash + publisher_address` |
+| `signature` / `publisher_signatures` | Legacy signature or v4 threshold Ed25519 signatures over the complete chain/genesis/package/controller authorization |
 | `manifest` | Declared behaviors (network hosts, FS writes, process spawns) |
 | `shielded` | Whether tarball is encrypted (feature disabled on testnet) |
+| `publisher_authorization_version` | Selects the chain/genesis-bound v4 authorization after CR-07 activation |
+| `namespace_authority_certificate` | Preceding-set quorum certificate required for an authoritative first claim |
 
 #### Chain Record
 
@@ -293,11 +295,32 @@ Genesis block: height 0, empty transactions, `prev_hash` = 64 zeros.
 
 | Variant | Purpose |
 |---------|---------|
-| `Publish(ChainRecord)` | Verified package record (contains full `analysis_committee` object with `member_performance_at_finalization` snapshot taken at the moment of finalization) |
+| `Publish(ChainRecord)` | Legacy compatibility record, rejected after CR-07 activation |
+| `PublishAuthorizedV1 { record, authorization }` | Proof-retaining verified record with the complete v4 publisher authorization and optional first-claim certificate |
 | `Revoke { ... }` | Governance or publisher revocation |
 | `Slash { ... }` | Validator slashing event |
 | `ValidatorJoin` / `ValidatorLeave` | Validator set changes |
-| `RotatePublisherKey { ... }` | Ed25519 key rotation with nonce anti-replay |
+| `RotatePublisherKey { ... }` | Legacy key rotation, rejected after CR-07 activation |
+| `NamespaceLifecycleV2(...)` | Chain/genesis-bound delegate, transfer, or certificate-gated recovery with durable nonce |
+
+#### CR-07 Namespace Authority State
+
+Authoritative namespace state is separate from a package version. npm names
+are canonicalized according to npm rules; PyPI names use normalized
+PEP-503-style identity. The persisted reducer tracks:
+
+| State | Consensus meaning |
+|-------|-------------------|
+| Root controller | Current authoritative Ed25519 and EVM controller |
+| Delegation | Root-issued, expiring scope; the initial supported scope is `publish` |
+| Publisher authorization nonce | Single-use v4 package authorization replay protection |
+| Lifecycle nonce and prior-event hash | Monotonic delegate/transfer/recover ordering |
+| Authority certificate digest | Retained proof for the claim or recovery that established the controller |
+
+The activation height and allowed npm/PyPI adapter ID/version, verifier
+executable SHA-256, policy SHA-256, and trust-root SHA-256 are consensus
+parameters in the signature-verified chain spec. Environment-only activation
+or policy replacement is rejected.
 
 ### 3.3 Validator Security Pipeline
 
@@ -459,7 +482,13 @@ Small three-validator testnet clusters may opt into 2-of-3 via `CREG_PBFT_ALLOW_
 
 ### 4.7 Reorganization Handling
 
-Chain sync (`sync.rs`) supports automatic recovery from forks up to `MAX_REORG_DEPTH` (64 blocks). Deeper forks require operator intervention.
+Chain sync (`sync.rs`) supports automatic recovery from forks up to
+`MAX_REORG_DEPTH` (64 blocks). A candidate branch is CR-07-preflighted against
+state rebuilt at the common ancestor before the live canonical branch is
+mutated. Namespace controllers, delegations, authority certificates, and
+publisher/lifecycle nonces are replayed deterministically during sync,
+restart/rebuild, and reorg recovery; abandoned-branch state cannot authorize
+the adopted branch. Deeper forks require operator intervention.
 
 ### 4.8 Censorship Resistance
 
@@ -651,12 +680,15 @@ Canonical network parameters in signed `testnet/chain-spec.sepolia.json`:
 
 - Network id: `creg-testnet-1`
 - Consensus params (block time 5s, quorum 67%, stake minimums)
+- CR-07 activation height and npm/PyPI adapter, verifier, policy, and trust-root pins
 - Contract addresses
 - Validator set bootstrap
 - Feature flags
 - Service URLs
 
 Verified at boot via Ed25519 detached signature (`chain_spec_boot.rs`).
+Authoritative namespace activation is rejected unless its height and policies
+came from this signature-verified spec.
 
 ---
 
@@ -671,6 +703,87 @@ Verified at boot via Ed25519 detached signature (`chain_spec_boot.rs`).
 5. Set `CREG_NODE_URL` and `CREG_IPFS_URL` to fleet endpoints
 6. Publish: `creg publish ./package.tgz --ecosystem npm`
 7. Track status: `creg status npm:package@1.0.0`
+
+### 8.1.1 Authoritative First Claim And Recovery (CR-07)
+
+```mermaid
+sequenceDiagram
+    participant Controller
+    participant Registry as npm / PyPI
+    participant V as Independent validators
+    participant Sidecar as Hash-pinned verifier
+    participant Consensus
+
+    Controller->>Controller: Sign fresh chain/genesis/namespace intent
+    Controller->>Registry: Publish artifact containing exact intent
+    Controller->>V: evidence_url + artifact_url + intent + recent anchor
+    V->>Registry: Separately fetch bounded evidence and artifact bytes
+    V->>Sidecar: Exact bytes + native digests + signed-spec policy
+    Sidecar-->>V: Canonical verified observation
+    V-->>Controller: Anchor-set validator statement/signature
+    Controller->>Controller: Assemble preceding-set quorum certificate
+    Controller->>Consensus: v4 claim or v2-certified recovery
+    Consensus->>Consensus: Deterministic certificate/lifecycle replay
+```
+
+The controller intent binds chain ID, genesis hash, purpose (`claim` or
+`recover`), canonical namespace, current and proposed Ed25519/EVM controllers,
+durable nonce, issuance, and expiry. It deliberately excludes the enclosing
+artifact digest. Protocol v2 separately fetches official `evidence_url` and
+`artifact_url` bytes with redirects disabled, a 2 MiB default evidence limit,
+and a 16 MiB default artifact limit (64 MiB protocol maximum). Validators
+compute evidence SHA-256 and registry-native artifact SHA-512 for npm or
+SHA-256 for PyPI.
+
+The validator-local sidecar runs outside consensus. Its executable, policy,
+and trust-root digests must match the signed chain-spec policy, and it must
+prove that upstream signatures, namespace and artifact identity, and the exact
+controller challenge embedded in the artifact all agree. Each validator
+performs this work independently; one validator's output is never a trust root
+for another. For npm, provenance alone does not prove trusted-publisher
+authentication mode: the production policy must require an official npm
+authentication-mode signal.
+
+Both authority POST routes require `CREG_OPERATOR_API_KEY` through
+`X-Operator-Key` or `Authorization: Bearer`. That service ACL is layered on top
+of the controller signature, anchor-set validator signature, and certificate
+quorum. Attestation has an independent 2-per-source-IP per minute bucket.
+Verifier concurrency defaults to 2 and has a hard maximum of 4.
+The operator key is server-side material and must never be embedded in a
+`VITE_*` variable, browser bundle, public proxy configuration, URL, or request
+body.
+`CREG_OPERATOR_PUBKEY` is public verification material and cannot satisfy the
+private API ACL.
+
+The sidecar's `verified_at` is checked against the invoking validator's local
+clock and challenge window, but is not copied into the shared proof or
+statement. Shared fields remain byte-identical when honest validators finish
+at different seconds and can therefore be quorum-signed.
+
+Accepted evidence is retained as `creg-evidence:sha256:<digest>`. Artifact
+bytes are retained under
+`CREG_DATA_DIR/authority-artifacts/<sha256|sha512>/<prefix>/<digest>.bin`.
+The authority statement binds the policy pins, proof, native artifact digest,
+and a recent canonical block/validator-set hash. A valid certificate requires
+matching distinct signatures from `floor(2n/3)+1` members of that preceding
+authenticated set.
+
+Post-activation first claims use v4 publisher authorization with the
+certificate attached. `delegate` retains the root controller and grants an
+expiring `publish` scope; `transfer` requires current-root and successor
+signatures; `recover` requires a fresh recovery-purpose v2 certificate.
+Publisher and lifecycle nonces are durable and single-use.
+
+Legacy CLI signing and legacy `creg multisig` are disabled by default. A
+non-production pre-activation lab must explicitly set
+`CREG_ALLOW_LEGACY_PUBLISHER_PROOF=true`; setting `CREG_PRODUCTION=true`
+disables the compatibility path regardless of that flag.
+
+Production verifier binaries, official trust material, signed policy bundles,
+the npm trusted-publisher authentication-mode signal, a versioned signed
+activation/checkpoint, live operator rehearsal, and independent security
+review remain readiness gates. The in-repository protocol boundary and
+sidecar contract do not satisfy those external gates.
 
 ### 8.2 Transaction Lifecycle
 
@@ -1356,9 +1469,11 @@ See source:
 | LLM false positive/negative | LLM output stays advisory only |
 | Malicious package update | Static, sandbox, diff, and revocation workflows |
 | Validator double-signing | Evidence and slashing design (`SlashingEvidence.sol`) |
-| Public API abuse | Rate limits, operator ACLs, monitoring |
+| Public API abuse | Operator ACLs; dedicated 2-per-IP/minute authority-attestation bucket; verifier concurrency hard-capped at 4; monitoring |
 | Chain-spec substitution | Signed chain spec with pinned public key at boot |
 | IPFS content loss | Operator pinning, availability checks |
+| First-submitter namespace takeover | Post-activation first claim requires chain/genesis-bound v4 authorization plus a recent-anchor preceding-set-quorum npm/PyPI certificate |
+| Unauthorized delegation, transfer, or recovery | Domain-separated controller signatures, durable nonces, scoped/expiring delegation, dual-signature transfer, and fresh v2 certificate for recovery |
 
 ### 10.2 Threats Not Fully Solved (Alpha)
 
@@ -1370,6 +1485,8 @@ See source:
 | ZK circuit or trusted setup flaw | Requires dedicated ZK audit |
 | Long-range sync attacks | Signed history, exact checkpoint matching, canonical-anchor checks, retention, and reorg truncation are implemented; a real published checkpoint and live multi-operator long-range/reorg rehearsal remain required |
 | IPFS unavailability | Requires redundant pinning and monitoring |
+| npm/PyPI verifier or policy compromise | Hash-pinned sidecars, signed-spec policy/trust pins, independent validator execution, and prior-set quorum reduce single-party risk; production verifier/trust/policy artifacts and independent review remain open |
+| npm provenance without trusted-publisher authentication | Must remain `ownership_unconfirmed` unless an official npm authentication-mode signal satisfies the reviewed policy |
 
 ### 10.3 Cryptographic Primitives
 
@@ -1402,6 +1519,10 @@ Documented in `DEEP_DIVE_ANALYSIS.md`:
 - Simplified VRF (not full RFC 9381)
 - Bridge proof mode is checkpoint-attestation, not full state transition validity
 - Some Solidity auxiliary contracts incomplete for production
+- CR-07 production npm/PyPI verifier binaries, official trust material, policy
+  bundles, npm trusted-publisher authentication-mode signal, signed
+  activation/checkpoint, operator rehearsal, and independent review remain
+  external gates
 
 Operators should treat testnet deployments as **alpha** until audit closure and hardening.
 
@@ -1498,7 +1619,12 @@ Toolchain pinned to Rust 1.93.0 for deterministic fmt/clippy gates.
 
 ### 12.4 Readiness Gates
 
-Documented in `TESTNET_READINESS_REPORT.md` and `L2_PUBLIC_ALPHA_GATE_STATUS.md`. External security audit (SEC-401) remains open.
+Documented in `TESTNET_READINESS_REPORT.md` and
+`L2_PUBLIC_ALPHA_GATE_STATUS.md`. External security audit (SEC-401) remains
+open. CR-07 also remains gated on reviewed production npm/PyPI
+verifier/trust/policy artifacts, the official npm trusted-publisher
+authentication-mode signal, a signed activation/checkpoint, live operator
+rehearsal, and independent review.
 
 ---
 
@@ -1550,6 +1676,20 @@ Shared: IPFS, chain-spec nginx, P2P ports 29100–29102.
 | `CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM` | 2-of-3 testnet shortcut (dev only) |
 | `CREG_PROPOSER_FALLBACK_SECS` | Proposer stall fallback rotation |
 | `CREG_BRIDGE_KEY` | Hot key for L1 bridge submissions |
+| `CREG_NAMESPACE_AUTHORITY_NPM_VERIFIER_PATH` | Absolute validator-local npm verifier; empty keeps npm attestation fail-closed |
+| `CREG_NAMESPACE_AUTHORITY_PYPI_VERIFIER_PATH` | Absolute validator-local PyPI verifier; empty keeps PyPI attestation fail-closed |
+| `CREG_NAMESPACE_AUTHORITY_VERIFIER_TIMEOUT_SECS` | Sidecar deadline, default 30 seconds |
+| `CREG_NAMESPACE_AUTHORITY_MAX_EVIDENCE_BYTES` | Official evidence limit, default 2 MiB |
+| `CREG_NAMESPACE_AUTHORITY_MAX_ARTIFACT_BYTES` | Official artifact limit, default 16 MiB, hard maximum 64 MiB |
+| `CREG_NAMESPACE_AUTHORITY_MAX_RESULT_BYTES` | Canonical sidecar result limit, default 64 KiB |
+| `CREG_NAMESPACE_AUTHORITY_MAX_CONCURRENT_VERIFICATIONS` | Per-node sidecar concurrency bound, default 2, hard maximum 4 |
+| `CREG_OPERATOR_API_KEY` | High-entropy server-side ACL required by both namespace-authority POST routes; never expose to a browser bundle or public proxy |
+| `CREG_ALLOW_LEGACY_PUBLISHER_PROOF` | Explicit non-production pre-activation CLI compatibility; default false and ignored when `CREG_PRODUCTION=true` |
+
+`CREG_NAMESPACE_AUTHORITY_ACTIVATION_HEIGHT` and
+`CREG_NAMESPACE_AUTHORITY_POLICIES` may be useful diagnostic mirrors during
+spec preparation, but cannot authorize activation. Consensus accepts those
+values only from a signature-verified chain spec.
 
 ### 13.5 Distribution
 
@@ -1936,10 +2076,13 @@ This is a **public alpha testnet**, not mainnet. Key limitations:
 - Cross-chain, insurance, and threshold encryption disabled
 - Checkpoint-attestation bridge mode (not full state validity proof)
 - Abrupt process-kill/chaos recovery still requires an operator rehearsal
+- CR-07 production npm/PyPI verifier/trust/policy artifacts, official npm
+  authentication-mode signal, signed activation/checkpoint, operator
+  rehearsal, and independent review are not yet complete
 - No economic guarantees or mainnet token commitments
 
 See `docs/TESTNET_PHASE_SCOPE.md` for participant expectations.
 
 ---
 
-*This document is derived from the CREG codebase, whitepaper, and operator documentation as of July 2026. For protocol authority, refer to `docs/WHITEPAPER.md`. For implementation gaps, refer to `chain-registry/DEEP_DIVE_ANALYSIS.md`.*
+*This document is derived from the CREG codebase, whitepaper, and operator documentation as of 2026-07-25. For protocol authority, refer to `docs/WHITEPAPER.md`. For implementation gaps, refer to `chain-registry/DEEP_DIVE_ANALYSIS.md`.*

@@ -175,6 +175,47 @@ Real (non-dev) sandbox + pinned scanner profile are required for your votes to c
 
 The default public-alpha path retains compatibility behavior until operators publish a verified validator-set checkpoint. New or rebuilt nodes must receive the exact signed certificate through `CREG_WEAK_SUBJECTIVITY_CHECKPOINT`; do not copy a certificate solely from gossip or one HTTP peer. Rebuild an observer canary first, compare `GET /v1/validator/set-transitions` with two independently controlled peers, and verify that missing, conflicting, long-range, and fork-anchored histories are rejected. `CREG_REQUIRE_CERTIFIED_COMMITTEES=true` is a fail-closed rollout control and must be enabled only after the staged operator checkpoint rehearsal and recovery drill documented in `testnet/OPERATOR.md`.
 
+### Authoritative namespace rollout
+
+The current public-alpha endpoint must not be assumed to authorize npm/PyPI
+ownership. CR-07 uses a two-stage flow: a proposed controller signs a fresh
+chain/genesis/namespace/controller intent, publishes it inside a new upstream
+artifact, and supplies official `evidence_url` and `artifact_url` values to
+independently operated validators. Validators separately fetch bounded bytes
+and require native artifact SHA-512 for npm or SHA-256 for PyPI. Only a matching
+`floor(2n/3) + 1` certificate can authorize the final claim or recovery;
+consensus verifies that certificate without live registry access.
+
+npm provenance alone does not prove trusted-publisher authentication mode; a
+reviewed external policy must require an official npm authentication-mode
+signal. Accepted evidence and artifact bytes are archived content-addressably.
+
+The future activation height and accepted verifier/policy/trust-root hashes
+must come from a signature-verified chain spec, never an environment-only
+override. The planned validator interfaces are
+`POST /v1/validator/namespace-authority/attest` and
+`POST /v1/validator/namespace-authority/certificates`; they are not guaranteed
+available until documented by the deployed OpenAPI specification. They are
+operator-controlled services requiring `CREG_OPERATOR_API_KEY` through
+`X-Operator-Key` or a bearer token in addition to controller/quorum
+signatures; they are not anonymous public publisher endpoints. Attestation is
+limited to 2 requests per source IP per minute and verifier concurrency is
+capped at 4. Validator-local `verified_at` is not placed in shared proof bytes.
+The operator key is server-side only and must never enter a `VITE_*` variable,
+browser bundle, public proxy configuration, URL, or request body.
+`CREG_OPERATOR_PUBKEY` is public verification material and cannot authenticate
+either private authority route.
+Real
+npm/PyPI verifier sidecars, official trust material, reviewed policy/verifier
+artifacts, a signed activation spec, multi-operator rehearsal, and independent
+security review remain release gates.
+
+Legacy CLI signing and `creg multisig` require the explicit
+`CREG_ALLOW_LEGACY_PUBLISHER_PROOF=true` escape hatch and are only for
+non-production pre-activation labs. The CLI refuses that path when
+`CREG_PRODUCTION=true`; public testnet publishing must use v4 identity
+configuration.
+
 - **SEC-401** external security audit not yet complete — treat as public alpha, not production.
 - **L1 bridge anchoring** requires operator bridge configuration.
 - **Cross-chain** and **shielded publish** remain disabled in chain spec.

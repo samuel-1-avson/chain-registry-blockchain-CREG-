@@ -13,6 +13,7 @@
 // of package verification transactions, linear sync is perfectly adequate.
 
 use crate::NodeState;
+use anyhow::Context;
 use common::{AuthenticatedValidatorSetSnapshot, Transaction, ValidatorSet, ValidatorVote};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -693,6 +694,85 @@ async fn fetch_block(
     None
 }
 
+fn canonical_reorg_blocks(state: &NodeState) -> anyhow::Result<Vec<common::Block>> {
+    let tip = state.chain.tip_height()?;
+    let mut canonical_blocks = Vec::with_capacity((tip + 1) as usize);
+    for height in 0..=tip {
+        let block = state.chain.get_block_by_height(height)?.ok_or_else(|| {
+            anyhow::anyhow!(
+                "canonical block {} is missing while rebuilding reorg state",
+                height
+            )
+        })?;
+        canonical_blocks.push(block);
+    }
+    Ok(canonical_blocks)
+}
+
+fn rebuild_reorg_derived_state(state: &mut NodeState) -> anyhow::Result<()> {
+    state.chain.rebuild_package_index()?;
+    let canonical_blocks = canonical_reorg_blocks(state)?;
+    state
+        .publisher_index
+        .rebuild_from_chain(canonical_blocks.iter());
+    Ok(())
+}
+
+fn reconciled_forced_inclusion_tracker(
+    forced_inclusion_before: &crate::state::ForcedInclusionTracker,
+    canonical_transaction_hashes: &HashSet<String>,
+    durable_work: Vec<(Transaction, u64)>,
+) -> crate::state::ForcedInclusionTracker {
+    let mut tracker = forced_inclusion_before.clone();
+    let canonical_hashes: Vec<String> = canonical_transaction_hashes.iter().cloned().collect();
+    tracker.mark_included(&canonical_hashes);
+    for (transaction, submitted_at_height) in durable_work {
+        tracker.submit(transaction, submitted_at_height);
+    }
+    tracker
+}
+
+fn rebuild_reorg_operational_state(
+    state: &mut NodeState,
+    abandoned_branch: &[common::Block],
+    forced_inclusion_before: &crate::state::ForcedInclusionTracker,
+) -> anyhow::Result<()> {
+    let canonical_blocks = canonical_reorg_blocks(state)?;
+    let canonical_transaction_hashes: HashSet<String> = canonical_blocks
+        .iter()
+        .flat_map(|block| block.transactions.iter())
+        .map(common::transaction_hash)
+        .collect();
+    let durable_work = state
+        .chain
+        .reconcile_finalized_work_after_reorg(abandoned_branch, &canonical_transaction_hashes)
+        .context("reconcile finalized work against adopted reorg branch")?;
+
+    state.forced_inclusion_tracker = reconciled_forced_inclusion_tracker(
+        forced_inclusion_before,
+        &canonical_transaction_hashes,
+        durable_work,
+    );
+    Ok(())
+}
+
+fn restore_reorg_branch(
+    state: &mut NodeState,
+    forced_inclusion_before: &crate::state::ForcedInclusionTracker,
+) -> anyhow::Result<()> {
+    // The tracker is in-memory only. Restore it even if durable recovery below
+    // fails so a declined reorg cannot silently reset censorship deadlines.
+    state.forced_inclusion_tracker = forced_inclusion_before.clone();
+    if !state.chain.recover_incomplete_reorg()? {
+        anyhow::bail!("cannot restore reorg branch without an active journal");
+    }
+    // ChainStore restores the canonical mapping, package/namespace state, and
+    // the pre-reorg durable work snapshot before clearing the journal. Rebuild
+    // the remaining in-memory publisher view from that recovered chain.
+    rebuild_reorg_derived_state(state)?;
+    Ok(())
+}
+
 /// Attempt to recover from a fork between the local chain and the network.
 ///
 /// `local_tip` is the highest local height that conflicts with the peers'
@@ -777,7 +857,7 @@ async fn attempt_reorg_recovery(
     }
 
     let mut new_branch: Vec<common::Block> = Vec::new();
-    let mut link_hash = ancestor_hash;
+    let mut link_hash = ancestor_hash.clone();
     for h in (fork_height + 1)..=peer_height {
         let Some(b) = fetch_block(client, peer_urls, h).await else {
             tracing::warn!(
@@ -866,33 +946,162 @@ async fn attempt_reorg_recovery(
         return Ok(false);
     }
 
-    // ── 4. Apply: rewind, adopt, rebuild derived state, record the event ─
+    // Namespace ownership validation is stateful. Verify the complete branch
+    // against common-ancestor-derived state in a physical RocksDB checkpoint
+    // before changing any live canonical height mapping.
     {
-        let mut s = state.write().await;
-        let abandoned = s.chain.rollback_to_height(fork_height)?;
-        crate::validator_set_history::truncate_after_reorg(&data_dir, fork_height)?;
-        for b in &new_branch {
-            s.chain.insert_block(b)?;
+        let s = state.read().await;
+        if s.chain.tip_height()? != local_tip
+            || s.chain
+                .get_block_by_height(fork_height)?
+                .is_none_or(|block| block.hash() != ancestor_hash)
+        {
+            tracing::warn!(
+                "Reorg recovery: local canonical chain changed during branch download — retrying"
+            );
+            return Ok(false);
         }
-        s.chain.rebuild_package_index()?;
-
-        let tip = s.chain.tip_height()?;
-        let mut canonical_blocks = Vec::with_capacity((tip + 1) as usize);
-        for h in 0..=tip {
-            if let Some(b) = s.chain.get_block_by_height(h)? {
-                canonical_blocks.push(b);
-            }
+        if let Err(error) = s.chain.preflight_reorg_branch(fork_height, &new_branch) {
+            tracing::error!(
+                "Reorg recovery: candidate branch failed isolated CR-07 preflight: {}",
+                error
+            );
+            return Ok(false);
         }
-        s.publisher_index
-            .rebuild_from_chain(canonical_blocks.iter());
-
-        let depth = local_tip - fork_height;
-        s.record_reorg(depth, abandoned, link_hash.clone());
     }
 
+    // ── 4. Apply: rewind, rebuild the ancestor, adopt, then commit metadata ─
+    let (depth, abandoned, forced_inclusion_before) = {
+        let mut s = state.write().await;
+        if s.chain.tip_height()? != local_tip
+            || s.chain
+                .get_block_by_height(fork_height)?
+                .is_none_or(|block| block.hash() != ancestor_hash)
+        {
+            tracing::warn!(
+                "Reorg recovery: local canonical chain changed after preflight — retrying"
+            );
+            return Ok(false);
+        }
+
+        let mut old_branch = Vec::with_capacity((local_tip - fork_height) as usize);
+        for height in (fork_height + 1)..=local_tip {
+            old_branch.push(s.chain.get_block_by_height(height)?.ok_or_else(|| {
+                anyhow::anyhow!(
+                    "canonical block {} disappeared before reorg adoption",
+                    height
+                )
+            })?);
+        }
+        let forced_inclusion_before = s.forced_inclusion_tracker.clone();
+        s.chain
+            .begin_reorg_journal(fork_height, &old_branch)
+            .context("persist old canonical branch before reorg adoption")?;
+
+        let adoption = (|| -> anyhow::Result<Vec<String>> {
+            let abandoned = s.chain.rollback_to_height(fork_height)?;
+            // rollback_to_height only rewinds canonical height mappings. Clear
+            // and replay all namespace/package/nonces from the common prefix
+            // before the first candidate transition is validated.
+            rebuild_reorg_derived_state(&mut s)?;
+            for block in &new_branch {
+                s.chain.insert_block(block).with_context(|| {
+                    format!(
+                        "apply preflighted reorg block at height {}",
+                        block.header.height
+                    )
+                })?;
+            }
+            rebuild_reorg_derived_state(&mut s)?;
+            Ok(abandoned)
+        })();
+
+        let abandoned = match adoption {
+            Ok(abandoned) => abandoned,
+            Err(error) => {
+                let restore = restore_reorg_branch(&mut s, &forced_inclusion_before);
+                return match restore {
+                    Ok(()) => Err(error.context(
+                        "preflighted reorg failed during live application; old branch restored",
+                    )),
+                    Err(restore_error) => Err(anyhow::anyhow!(
+                        "preflighted reorg failed during live application ({error}); \
+                         restoring the old branch also failed ({restore_error})"
+                    )),
+                };
+            }
+        };
+
+        if let Err(error) =
+            rebuild_reorg_operational_state(&mut s, &old_branch, &forced_inclusion_before)
+        {
+            let restore = restore_reorg_branch(&mut s, &forced_inclusion_before);
+            return match restore {
+                Ok(()) => Err(error
+                    .context("reorg operational-state reconciliation failed; old branch restored")),
+                Err(restore_error) => Err(anyhow::anyhow!(
+                    "reorg operational-state reconciliation failed ({error}); \
+                     restoring the old branch also failed ({restore_error})"
+                )),
+            };
+        }
+
+        // Validator history remains untouched until the complete candidate
+        // chain and every live derived index have been rebuilt successfully.
+        if let Err(error) =
+            crate::validator_set_history::truncate_after_reorg(&data_dir, fork_height)
+        {
+            let restore = restore_reorg_branch(&mut s, &forced_inclusion_before);
+            return match restore {
+                Ok(()) => Err(error.context(
+                    "validator history truncation failed after candidate adoption; old branch restored",
+                )),
+                Err(restore_error) => Err(anyhow::anyhow!(
+                    "validator history truncation failed after candidate adoption ({error}); \
+                     restoring the old branch also failed ({restore_error})"
+                )),
+            };
+        }
+
+        (local_tip - fork_height, abandoned, forced_inclusion_before)
+    };
+
     if let Some(transitions) = transition_history {
-        import_transition_history_through(state, transitions, new_tip_height.saturating_add(1))
-            .await?;
+        if let Err(error) =
+            import_transition_history_through(state, transitions, new_tip_height.saturating_add(1))
+                .await
+        {
+            let recovery = {
+                let mut s = state.write().await;
+                restore_reorg_branch(&mut s, &forced_inclusion_before)
+            };
+            return match recovery {
+                Ok(()) => Err(error.context(
+                    "validator history import failed after candidate adoption; old branch restored",
+                )),
+                Err(recovery_error) => Err(anyhow::anyhow!(
+                    "validator history import failed after candidate adoption ({error}); \
+                     recovering the old branch also failed ({recovery_error})"
+                )),
+            };
+        }
+    }
+    {
+        let mut s = state.write().await;
+        if let Err(error) = s.chain.complete_reorg_journal() {
+            let recovery = restore_reorg_branch(&mut s, &forced_inclusion_before);
+            return match recovery {
+                Ok(()) => {
+                    Err(error
+                        .context("reorg commit marker could not be cleared; old branch restored"))
+                }
+                Err(recovery_error) => Err(anyhow::anyhow!(
+                    "reorg commit marker could not be cleared ({error}); \
+                     recovering the old branch also failed ({recovery_error})"
+                )),
+            };
+        }
+        s.record_reorg(depth, abandoned, link_hash.clone());
     }
 
     tracing::info!(
@@ -1161,8 +1370,9 @@ fn verify_block_signatures(
 #[cfg(test)]
 mod tests {
     use super::{
-        ensure_histories_are_prefix_compatible, validate_peer_transition_history,
-        verify_block_consensus_certificate, verify_block_signatures, PeerTransitionHistory,
+        ensure_histories_are_prefix_compatible, reconciled_forced_inclusion_tracker,
+        validate_peer_transition_history, verify_block_consensus_certificate,
+        verify_block_signatures, PeerTransitionHistory,
     };
     use chrono::Utc;
     use common::{
@@ -1174,7 +1384,7 @@ mod tests {
     };
     use consensus::{aggregate_evidence_votes, EvidenceVoteOutcome};
     use ed25519_dalek::{Signer, SigningKey};
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
 
     #[derive(Clone, Copy)]
     enum VotePayloadFormat {
@@ -1351,6 +1561,8 @@ mod tests {
             shielded: false,
             key_bundle: None,
             pgp_fingerprint: None,
+            pgp_signature_sha256: String::new(),
+            pgp_public_key_sha256: String::new(),
             findings: vec![],
             analysis_bundles: AnalysisBundleRefs::default(),
             evidence_digest: String::new(),
@@ -1373,6 +1585,48 @@ mod tests {
         assert_eq!(super::sync_lag_blocks(10, 10), 0);
         assert_eq!(super::sync_lag_blocks(12, 10), 0);
         assert_eq!(super::sync_lag_blocks(3, 8), 5);
+    }
+
+    #[test]
+    fn reorg_tracker_preserves_deadlines_and_removes_newly_canonical_work() {
+        let revoke = |name: &str| Transaction::Revoke {
+            package_canonical: format!("npm:{name}@1.0.0"),
+            reason: "reorg-test".into(),
+            revoked_by: "validator-1".into(),
+            evidence_hash: common::sha256_hex(name.as_bytes()),
+        };
+        let preserved = revoke("preserved");
+        let newly_canonical = revoke("newly-canonical");
+        let abandoned = revoke("abandoned");
+        let preserved_hash = common::transaction_hash(&preserved);
+        let canonical_hash = common::transaction_hash(&newly_canonical);
+        let abandoned_hash = common::transaction_hash(&abandoned);
+
+        let mut before = crate::state::ForcedInclusionTracker::new();
+        before.submit(preserved.clone(), 2);
+        before.submit(newly_canonical, 3);
+
+        let canonical = HashSet::from([canonical_hash.clone()]);
+        let reconciled = reconciled_forced_inclusion_tracker(
+            &before,
+            &canonical,
+            vec![
+                // The durable queue may also contain an item already tracked;
+                // idempotent submit must retain its original deadline anchor.
+                (preserved, 99),
+                (abandoned, 4),
+            ],
+        );
+
+        assert_eq!(reconciled.pending_count(), 2);
+        assert_eq!(reconciled.submitted_at_height(&preserved_hash), Some(2));
+        assert_eq!(reconciled.submitted_at_height(&abandoned_hash), Some(4));
+        assert_eq!(reconciled.submitted_at_height(&canonical_hash), None);
+
+        // A failed reorg restores the untouched snapshot, including the
+        // transaction the candidate branch would otherwise acknowledge.
+        assert_eq!(before.pending_count(), 2);
+        assert_eq!(before.submitted_at_height(&canonical_hash), Some(3));
     }
 
     #[test]

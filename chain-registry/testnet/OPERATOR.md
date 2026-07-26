@@ -152,6 +152,133 @@ The checkpoint is a bootstrap trust anchor, not a privileged validator role or a
 
 Never silently move the weak-subjectivity checkpoint backward. A checkpoint replacement requires the same independent verification and staged rehearsal as the original rollout.
 
+## CR-07 namespace-authority rollout
+
+This rollout is separate from validator-set checkpoint rollout. Do not enable
+authoritative namespace ownership merely because the schema or adapter
+boundary compiles.
+
+### Preconditions
+
+1. Obtain independently reviewed npm and PyPI verifier executables plus the
+   exact policy and trust-root bundles used to build them.
+2. Hash every executable, policy, and trust-root bundle. Put the authority,
+   adapter ID/version, verifier SHA-256, policy SHA-256, trust-root SHA-256,
+   and activation height in the chain spec consensus parameters.
+3. Regenerate the versioned chain spec and genesis identity, sign it, and
+   distribute it through the existing pinned spec-signing key path. Activation
+   or policy values supplied only through
+   `CREG_NAMESPACE_AUTHORITY_ACTIVATION_HEIGHT` or
+   `CREG_NAMESPACE_AUTHORITY_POLICIES` are not authorized.
+4. Mount each verifier read-only at its absolute path and configure:
+
+   | Variable | Initial rollout guidance |
+   |----------|--------------------------|
+   | `CREG_NAMESPACE_AUTHORITY_NPM_VERIFIER_PATH` | Empty until the reviewed npm verifier is mounted |
+   | `CREG_NAMESPACE_AUTHORITY_PYPI_VERIFIER_PATH` | Empty until the reviewed PyPI verifier is mounted |
+   | `CREG_NAMESPACE_AUTHORITY_VERIFIER_TIMEOUT_SECS` | Start at `30`; never exceed the protocol cap |
+   | `CREG_NAMESPACE_AUTHORITY_MAX_EVIDENCE_BYTES` | Start at `2097152` |
+   | `CREG_NAMESPACE_AUTHORITY_MAX_ARTIFACT_BYTES` | Start at `16777216`; hard maximum `67108864` |
+   | `CREG_NAMESPACE_AUTHORITY_MAX_RESULT_BYTES` | Start at `65536` |
+   | `CREG_NAMESPACE_AUTHORITY_MAX_CONCURRENT_VERIFICATIONS` | Start at `2`; hard maximum `4` |
+
+5. Confirm that exact accepted evidence is stored below `CREG_DATA_DIR` under
+   content-addressed references of the form
+   `creg-evidence:sha256:<digest>`. The separately fetched official artifact
+   must be stored at
+   `authority-artifacts/<sha256|sha512>/<prefix>/<digest>.bin`, using SHA-512
+   for npm and SHA-256 for PyPI. Bearer tokens must never enter either archive,
+   logs, or a certificate.
+6. Generate a distinct high-entropy `CREG_OPERATOR_API_KEY` for each operator
+   trust domain. Both authority routes require it through `X-Operator-Key` or
+   `Authorization: Bearer`; a checked-in sample/default key is not acceptable.
+   Keep it server-side: never pass it through a `VITE_*` build argument,
+   JavaScript bundle, public proxy configuration, URL, or request body.
+   `CREG_OPERATOR_PUBKEY` is public verification material and cannot unlock
+   private routes; do not configure it as an API-key substitute.
+   Rotate it independently of controller and validator signing keys.
+
+### Canary procedure
+
+1. Before activation, create a controller-signed intent for a disposable npm
+   or PyPI namespace and include it in a new upstream release. The intent binds
+   chain, genesis, purpose, namespace, controllers, nonce, issuance, and
+   expiry, but not its enclosing artifact digest.
+2. Submit official `evidence_url` and `artifact_url` values independently to
+   canary validators using the planned authenticated
+   `POST /v1/validator/namespace-authority/attest` route. Each validator must
+   separately fetch bounded evidence and artifact bytes, compute SHA-256 for
+   evidence and native SHA-512 (npm) or SHA-256 (PyPI) for the artifact, and
+   run its own pinned verifier; copying another validator's result is not
+   verification.
+   Include `X-Operator-Key: <CREG_OPERATOR_API_KEY>` or the equivalent bearer
+   header. The controller-signed challenge is still required; the service key
+   does not authorize a namespace.
+3. Assemble matching signed statements into a certificate, submit it to the
+   planned `POST /v1/validator/namespace-authority/certificates` validation
+   route, and require distinct signatures from `floor(2n/3) + 1` members of
+   the authenticated anchor set.
+4. Attach the completed certificate to the final v4 authorization. Verify that
+   changing the package, certificate, controller, chain/genesis, validity
+   interval, policy pin, or anchor causes rejection.
+5. Repeat for recovery and verify that recovery without a fresh recovery-
+   purpose certificate fails. Rebuild and restart the canary, then exercise a
+   fork/reorg whose abandoned branch contained an authority certificate.
+6. Only after the real sidecars, multi-operator results, evidence retention,
+   and rollback drill have been independently reviewed should operators sign a
+   spec with a future activation height.
+
+For npm, require a registry-origin signal that the release actually used
+trusted-publisher authentication mode. Provenance availability alone is not
+that signal and must not be promoted into namespace authority. The exact npm
+trust material, authentication-mode policy, and verifier artifact are external
+rollout inputs that still need independent review.
+
+The attestation endpoint permits 2 requests per source IP per minute and at
+most 4 concurrent verifier processes per node (default 2). A `429` or busy
+response is a capacity signal, not permission to use a different proof path.
+Sidecar `verified_at` is checked only for validator-local freshness and is
+excluded from the shared proof/statement; otherwise independently timed
+validators could not sign identical statement bytes.
+
+### Legacy CLI compatibility
+
+Legacy CLI signing and `creg multisig` are disabled by default when no complete
+v4 identity is configured. A pre-activation development network must set
+`CREG_ALLOW_LEGACY_PUBLISHER_PROOF=true` explicitly, and the CLI still refuses
+the legacy path when `CREG_PRODUCTION=true`. Never enable this flag on the
+public fleet or after CR-07 activation.
+
+The two endpoint names above are rollout placeholders until they appear in the
+shipped OpenAPI document and their adversarial tests are recorded. Do not
+schedule activation against a binary that does not expose and protect them.
+
+### Failure and rollback
+
+1. Remove an affected validator from authority-attestation traffic. Leave
+   deterministic certificate validation enabled; disabling it would reopen
+   namespace takeover paths.
+2. Preserve the controller intent, official evidence/artifact URLs, both
+   content-addressed archive entries, native artifact digest, verifier
+   executable digest, policy/trust-root digests, npm authentication-mode signal
+   where applicable, signed statement, certificate, canonical anchor, and logs.
+3. Stop issuing new statements by clearing the affected verifier path or
+   removing the service route, then rotate `CREG_OPERATOR_API_KEY` if exposure
+   is possible. Never replace a verifier binary in place while retaining its
+   old digest.
+4. Compare the certificate and anchor with at least two independently
+   controlled validators. A statement mismatch, evidence mismatch, or
+   same-height anchor conflict is a security incident.
+5. If a reorg abandons the certificate anchor, discard that certificate and
+   repeat attestation against the new canonical anchor. Do not replay an
+   abandoned-branch certificate.
+6. Correct consensus pins only through a newly reviewed, coordinated, signed
+   chain-spec rollout. An environment override is not a rollback.
+
+There is no claim yet that production npm/PyPI sidecars, a real signed
+activation spec, independent security review, or operator rehearsal exist.
+All four remain explicit testnet gates.
+
 ---
 
 ## Routine operations
