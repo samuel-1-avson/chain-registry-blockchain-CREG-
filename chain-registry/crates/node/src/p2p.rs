@@ -313,13 +313,15 @@ fn validate_and_persist_transition(
         is_configured_checkpoint = common::validator_snapshot_certificate_hash(&snapshot)
             == common::validator_snapshot_certificate_hash(checkpoint);
         if is_configured_checkpoint
-            && common::validator_snapshot_witness_hash(&snapshot)
+            && (common::validator_snapshot_witness_hash(&snapshot)
                 != common::validator_snapshot_witness_hash(checkpoint)
+                || snapshot.validate_structure().is_err())
         {
             // Logical checkpoint identity deliberately excludes its witness.
             // Always install and propagate only the independently configured
-            // witness bytes. Ignore an alternate original so gossipsub cannot
-            // relay attacker-chosen (or merely non-canonical) checkpoint bytes.
+            // witness bytes. Ignore an alternate or structurally inconsistent
+            // original so gossipsub cannot relay attacker-chosen checkpoint
+            // bytes.
             exact_checkpoint_acceptance = gossipsub::MessageAcceptance::Ignore;
         }
         let descends_from_checkpoint = is_configured_checkpoint
