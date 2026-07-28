@@ -23,16 +23,40 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
+use anyhow::Context;
 use common::{AuthenticatedValidatorSetSnapshot, ValidatorSet};
 use serde::{Deserialize, Serialize};
 
 const HISTORY_FILE: &str = "validator-set-history.json";
 
+#[cfg(test)]
+tokio::task_local! {
+    static TEST_CHECKPOINT_ENV_OVERRIDE: std::cell::RefCell<Option<String>>;
+}
+
+#[cfg(test)]
+pub(crate) async fn with_checkpoint_env_override<T>(
+    value: Option<String>,
+    future: impl std::future::Future<Output = T>,
+) -> T {
+    TEST_CHECKPOINT_ENV_OVERRIDE
+        .scope(std::cell::RefCell::new(value), future)
+        .await
+}
+
+fn checkpoint_environment_value() -> Option<String> {
+    #[cfg(test)]
+    if let Ok(value) = TEST_CHECKPOINT_ENV_OVERRIDE.try_with(|current| current.borrow().clone()) {
+        return value;
+    }
+    std::env::var("CREG_WEAK_SUBJECTIVITY_CHECKPOINT").ok()
+}
+
 /// Load a deployment-provisioned weak-subjectivity checkpoint. It is never
 /// accepted from the network; operators must provision the same certificate
 /// out of band for a new/rebuilding node.
 pub fn checkpoint_from_env() -> Result<Option<AuthenticatedValidatorSetSnapshot>, String> {
-    let Ok(raw) = std::env::var("CREG_WEAK_SUBJECTIVITY_CHECKPOINT") else {
+    let Some(raw) = checkpoint_environment_value() else {
         return Ok(None);
     };
     let raw = raw.trim();
@@ -44,28 +68,9 @@ pub fn checkpoint_from_env() -> Result<Option<AuthenticatedValidatorSetSnapshot>
     }
     let checkpoint: AuthenticatedValidatorSetSnapshot = serde_json::from_str(raw)
         .map_err(|error| format!("invalid CREG_WEAK_SUBJECTIVITY_CHECKPOINT: {error}"))?;
-    if checkpoint.schema_version != common::VALIDATOR_SNAPSHOT_SCHEMA_VERSION
-        || checkpoint.effective_from_height == 0
-        || checkpoint.validators.validators.is_empty()
-        || checkpoint.validator_set_hash
-            != common::canonical_validator_set_hash(&checkpoint.validators)
-        || checkpoint.previous_block_hash.len() != 64
-        || checkpoint.previous_validator_set_hash.len() != 64
-        || !checkpoint
-            .previous_block_hash
-            .bytes()
-            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
-        || !checkpoint
-            .previous_validator_set_hash
-            .bytes()
-            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
-        || checkpoint.transition_signatures.is_empty()
-    {
-        return Err(
-            "invalid CREG_WEAK_SUBJECTIVITY_CHECKPOINT: inconsistent certificate structure"
-                .to_string(),
-        );
-    }
+    checkpoint
+        .validate_structure()
+        .map_err(|error| format!("invalid CREG_WEAK_SUBJECTIVITY_CHECKPOINT: {error}"))?;
     Ok(Some(checkpoint))
 }
 
@@ -95,6 +100,38 @@ pub struct ValidatorSetSnapshot {
     pub certificate: Option<AuthenticatedValidatorSetSnapshot>,
 }
 
+/// Classifies failures from the authenticated history writer without relying
+/// on error-message matching at API or gossip boundaries.
+#[derive(Debug, thiserror::Error)]
+pub enum RecordAuthenticatedError {
+    /// The received certificate itself is invalid or lacks a prior-set quorum.
+    #[error("invalid validator-set transition: {0}")]
+    InvalidCertificate(String),
+    /// The certificate can be valid in isolation but cannot extend the local
+    /// canonical transition history.
+    #[error("{0}")]
+    Conflict(String),
+    /// The receiver could not safely read, retain, serialize, or durably
+    /// replace its local history. This is not evidence of malicious gossip.
+    #[error("validator-set history persistence failed: {source}")]
+    Persistence {
+        #[source]
+        source: anyhow::Error,
+    },
+}
+
+impl RecordAuthenticatedError {
+    pub(crate) fn persistence(source: impl Into<anyhow::Error>) -> Self {
+        Self::Persistence {
+            source: source.into(),
+        }
+    }
+
+    pub fn is_persistence(&self) -> bool {
+        matches!(self, Self::Persistence { .. })
+    }
+}
+
 fn history_path(data_dir: &Path) -> PathBuf {
     data_dir.join(HISTORY_FILE)
 }
@@ -103,6 +140,82 @@ fn validate_history_bytes(bytes: &[u8]) -> anyhow::Result<()> {
     serde_json::from_slice::<Vec<ValidatorSetSnapshot>>(bytes)
         .map(|_| ())
         .map_err(|error| anyhow::anyhow!("invalid validator-set history snapshot: {error}"))
+}
+
+#[cfg(unix)]
+fn sync_parent_directory(data_dir: &Path) -> anyhow::Result<()> {
+    std::fs::File::open(data_dir)?.sync_all()?;
+    Ok(())
+}
+
+#[cfg(all(not(unix), not(windows)))]
+fn sync_parent_directory(_data_dir: &Path) -> anyhow::Result<()> {
+    anyhow::bail!("durable validator-history directory sync is unsupported on this platform")
+}
+
+#[cfg(windows)]
+fn durable_replace(from: &Path, to: &Path, _data_dir: &Path) -> anyhow::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+
+    const MOVEFILE_REPLACE_EXISTING: u32 = 0x1;
+    const MOVEFILE_WRITE_THROUGH: u32 = 0x8;
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn MoveFileExW(
+            existing_file_name: *const u16,
+            new_file_name: *const u16,
+            flags: u32,
+        ) -> i32;
+    }
+
+    let from_wide: Vec<u16> = from.as_os_str().encode_wide().chain(Some(0)).collect();
+    let to_wide: Vec<u16> = to.as_os_str().encode_wide().chain(Some(0)).collect();
+    let moved = unsafe {
+        MoveFileExW(
+            from_wide.as_ptr(),
+            to_wide.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if moved == 0 {
+        return Err(std::io::Error::last_os_error()).with_context(|| {
+            format!(
+                "durably replace validator history {} with {}",
+                to.display(),
+                from.display()
+            )
+        });
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn durable_replace(from: &Path, to: &Path, data_dir: &Path) -> anyhow::Result<()> {
+    std::fs::rename(from, to)?;
+    // The rename is not committed until its parent metadata is durable.
+    sync_parent_directory(data_dir)
+}
+
+fn durable_remove_history(data_dir: &Path) -> anyhow::Result<()> {
+    let path = history_path(data_dir);
+    if !path.exists() {
+        return Ok(());
+    }
+
+    // A durably renamed tombstone makes the active history path absent before
+    // the journal can be cleared. If the final unlink is lost in a crash, only
+    // the ignored tombstone can reappear.
+    let tombstone = path.with_extension("json.removed");
+    durable_replace(&path, &tombstone, data_dir)?;
+    match std::fs::remove_file(&tombstone) {
+        Ok(()) => {
+            #[cfg(not(windows))]
+            sync_parent_directory(data_dir)?;
+            Ok(())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+    }
 }
 
 /// Persist a complete history replacement durably before reporting success.
@@ -114,14 +227,15 @@ fn persist_history_bytes(data_dir: &Path, bytes: &[u8]) -> anyhow::Result<()> {
     let path = history_path(data_dir);
     let tmp = path.with_extension("json.tmp");
     let mut file = std::fs::File::create(&tmp)?;
-    file.write_all(bytes)?;
-    file.sync_all()?;
+    if let Err(error) = file.write_all(bytes).and_then(|_| file.sync_all()) {
+        drop(file);
+        let _ = std::fs::remove_file(&tmp);
+        return Err(error.into());
+    }
     drop(file);
-    std::fs::rename(&tmp, &path)?;
-    // Best-effort directory sync strengthens rename durability on platforms
-    // that support opening directories as files.
-    if let Ok(directory) = std::fs::File::open(data_dir) {
-        let _ = directory.sync_all();
+    if let Err(error) = durable_replace(&tmp, &path, data_dir) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(error);
     }
     Ok(())
 }
@@ -154,22 +268,64 @@ pub(crate) fn restore_reorg_snapshot(
     let _write_guard = history_write_guard()?;
     match snapshot {
         Some(bytes) => persist_history_bytes(data_dir, bytes),
-        None => match std::fs::remove_file(history_path(data_dir)) {
-            Ok(()) => Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(error.into()),
-        },
+        None => durable_remove_history(data_dir),
     }
 }
 
-/// Load all snapshots (ascending `effective_from_height`). Empty if missing.
-pub fn load(data_dir: &Path) -> Vec<ValidatorSetSnapshot> {
+/// Load and structurally validate the local history. This does not establish
+/// authority: certificate quorum and prior-set continuity require an explicit
+/// trust root and are checked by the strict authenticated accessors below.
+pub fn load_checked(data_dir: &Path) -> anyhow::Result<Vec<ValidatorSetSnapshot>> {
     let mut snaps: Vec<ValidatorSetSnapshot> = match std::fs::read(history_path(data_dir)) {
-        Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_default(),
-        Err(_) => Vec::new(),
+        Ok(bytes) => serde_json::from_slice(&bytes)
+            .with_context(|| format!("parse {}", history_path(data_dir).display()))?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("read {}", history_path(data_dir).display()));
+        }
     };
     snaps.sort_by_key(|s| s.effective_from_height);
-    snaps
+    for pair in snaps.windows(2) {
+        if pair[0].effective_from_height == pair[1].effective_from_height {
+            anyhow::bail!(
+                "validator-set history contains duplicate effective height {}",
+                pair[0].effective_from_height
+            );
+        }
+    }
+    for entry in &snaps {
+        let Some(certificate) = entry.certificate.as_ref() else {
+            continue;
+        };
+        certificate.validate_structure().map_err(|error| {
+            anyhow::anyhow!(
+                "validator-set history contains a malformed certificate at height {}: {}",
+                entry.effective_from_height,
+                error
+            )
+        })?;
+        if entry.effective_from_height != certificate.effective_from_height
+            || common::canonical_validator_set_hash(&entry.validators)
+                != certificate.validator_set_hash
+            || common::canonical_validator_set_hash(&certificate.validators)
+                != certificate.validator_set_hash
+        {
+            anyhow::bail!(
+                "validator-set history contains an inconsistent certificate at height {}",
+                entry.effective_from_height
+            );
+        }
+    }
+    Ok(snaps)
+}
+
+/// Load all snapshots (ascending `effective_from_height`). Empty if missing or
+/// unreadable. Security-sensitive writers use `load_checked` and fail closed;
+/// this compatibility accessor retains the historical fallback contract for
+/// callers that do not make a new authority decision.
+pub fn load(data_dir: &Path) -> Vec<ValidatorSetSnapshot> {
+    load_checked(data_dir).unwrap_or_default()
 }
 
 /// Sorted, lowercased pubkey list — the membership identity used to decide
@@ -227,21 +383,89 @@ pub fn select_at(snapshots: &[ValidatorSetSnapshot], height: u64) -> Option<&Val
 /// Return the validator set active at `height` from the on-disk history, or
 /// `None` to signal the caller should use its current set (no regression).
 pub fn set_at(data_dir: &Path, height: u64) -> Option<ValidatorSet> {
-    let snapshots = load(data_dir);
-    let snap = select_at(&snapshots, height)?;
+    set_at_checked(data_dir, height).ok().flatten()
+}
+
+pub fn set_at_checked(data_dir: &Path, height: u64) -> anyhow::Result<Option<ValidatorSet>> {
+    let snapshots = load_checked(data_dir)?;
+    let Some(snap) = select_at(&snapshots, height) else {
+        return Ok(None);
+    };
     if snap.validators.validators.is_empty() {
-        None
+        Ok(None)
     } else {
-        Some(snap.validators.clone())
+        Ok(Some(snap.validators.clone()))
     }
 }
 
-/// Return only a quorum-certified snapshot suitable for a new security
-/// decision such as committee assignment. Legacy local history intentionally
-/// returns `None` here rather than being upgraded by assertion.
+/// Lossy observational lookup of the latest certificate at `height`.
+///
+/// This intentionally does not establish certificate ancestry and must never
+/// be used to make a committee, consensus, or admission decision. Security
+/// boundaries use `authenticated_at_checked` with an explicit trusted
+/// bootstrap set, or the configured-checkpoint accessor below.
 pub fn authenticated_at(data_dir: &Path, height: u64) -> Option<AuthenticatedValidatorSetSnapshot> {
     let snapshots = load(data_dir);
-    select_at(&snapshots, height)?.certificate.clone()
+    select_at(&snapshots, height).and_then(|snapshot| snapshot.certificate.clone())
+}
+
+/// Return a certificate only after validating the complete persisted
+/// certificate chain against the deployment-provisioned bootstrap set.
+///
+/// Unsigned compatibility entries may describe the currently authenticated
+/// set, but may not change it. Every certified transition must continue the
+/// preceding authenticated set and carry its quorum. The full retained chain
+/// is checked even when `height` selects an earlier certificate, so a poisoned
+/// tail cannot be silently ignored by a security-sensitive reader.
+pub fn authenticated_at_checked(
+    data_dir: &Path,
+    height: u64,
+    trusted_bootstrap: &ValidatorSet,
+) -> anyhow::Result<Option<AuthenticatedValidatorSetSnapshot>> {
+    let snapshots = load_checked(data_dir)?;
+    let mut current_hash = common::canonical_validator_set_hash(trusted_bootstrap);
+    let mut current_set = trusted_bootstrap.clone();
+    let mut selected = None;
+    let mut authority_started = false;
+
+    for entry in &snapshots {
+        let Some(certificate) = entry.certificate.as_ref() else {
+            if authority_started {
+                anyhow::bail!(
+                    "validator-set history contains an unsigned entry after authenticated authority starts at height {}",
+                    entry.effective_from_height
+                );
+            }
+            if common::canonical_validator_set_hash(&entry.validators) != current_hash {
+                anyhow::bail!(
+                    "validator-set history contains an unsigned authority change at height {}",
+                    entry.effective_from_height
+                );
+            }
+            continue;
+        };
+        if certificate.previous_validator_set_hash != current_hash {
+            anyhow::bail!(
+                "validator-set history breaks trusted-bootstrap continuity at height {}",
+                entry.effective_from_height
+            );
+        }
+        certificate.validate_against(&current_set).map_err(|error| {
+            anyhow::anyhow!(
+                "validator-set history contains an invalid authenticated transition at height {}: {}",
+                entry.effective_from_height,
+                error
+            )
+        })?;
+        current_hash = certificate.validator_set_hash.clone();
+        current_set = certificate.validators.clone();
+        authority_started = true;
+        if entry.effective_from_height <= height {
+            selected = Some(certificate.clone());
+        }
+    }
+
+    Ok(selected)
 }
 
 /// Return a certificate only when the local history contains the configured
@@ -253,26 +477,37 @@ pub fn authenticated_at_from_checkpoint(
     height: u64,
     checkpoint: &AuthenticatedValidatorSetSnapshot,
 ) -> Option<AuthenticatedValidatorSetSnapshot> {
-    let snapshots = load(data_dir);
+    authenticated_at_from_checkpoint_checked(data_dir, height, checkpoint)
+        .ok()
+        .flatten()
+}
+
+pub fn authenticated_at_from_checkpoint_checked(
+    data_dir: &Path,
+    height: u64,
+    checkpoint: &AuthenticatedValidatorSetSnapshot,
+) -> anyhow::Result<Option<AuthenticatedValidatorSetSnapshot>> {
+    let snapshots = load_checked(data_dir)?;
     let checkpoint_hash = common::validator_snapshot_certificate_hash(checkpoint);
     let mut current_hash = checkpoint.validator_set_hash.clone();
     let mut current_set = checkpoint.validators.clone();
     let mut found = false;
-    for entry in snapshots
-        .iter()
-        .filter(|entry| entry.effective_from_height <= height)
-    {
+    for entry in &snapshots {
         if !found {
             // Compatibility/bootstrap entries may predate the configured
             // checkpoint and therefore legitimately have no certificate.
             // They are not authority anchors; skip them while searching for
             // the exact out-of-band checkpoint.
             if let Some(certificate) = entry.certificate.as_ref() {
-                if common::validator_snapshot_certificate_hash(certificate) == checkpoint_hash
-                    && entry.effective_from_height == certificate.effective_from_height
-                    && common::canonical_validator_set_hash(&entry.validators)
-                        == certificate.validator_set_hash
-                {
+                if common::validator_snapshot_certificate_hash(certificate) == checkpoint_hash {
+                    if entry.effective_from_height != certificate.effective_from_height
+                        || common::canonical_validator_set_hash(&entry.validators)
+                            != certificate.validator_set_hash
+                    {
+                        anyhow::bail!(
+                            "configured checkpoint has an inconsistent local history entry"
+                        );
+                    }
                     found = true;
                     current_hash = certificate.validator_set_hash.clone();
                     current_set = certificate.validators.clone();
@@ -281,22 +516,52 @@ pub fn authenticated_at_from_checkpoint(
             continue;
         }
         // Once anchored, every subsequent history entry must be certified.
-        let certificate = entry.certificate.as_ref()?;
+        let certificate = entry.certificate.as_ref().ok_or_else(|| {
+            anyhow::anyhow!(
+                "validator-set history contains an unsigned entry after the configured checkpoint"
+            )
+        })?;
         if entry.effective_from_height != certificate.effective_from_height
             || common::canonical_validator_set_hash(&entry.validators)
                 != certificate.validator_set_hash
-            || certificate.previous_validator_set_hash != current_hash
-            || certificate.validate_against(&current_set).is_err()
         {
-            return None;
+            anyhow::bail!(
+                "validator-set history contains an inconsistent checkpoint descendant at height {}",
+                entry.effective_from_height
+            );
+        }
+        if certificate.previous_validator_set_hash != current_hash {
+            anyhow::bail!(
+                "validator-set history breaks checkpoint continuity at height {}",
+                entry.effective_from_height
+            );
+        }
+        if let Err(error) = certificate.validate_against(&current_set) {
+            anyhow::bail!(
+                "validator-set history contains an invalid checkpoint descendant at height {}: {}",
+                entry.effective_from_height,
+                error
+            );
         }
         current_hash = certificate.validator_set_hash.clone();
         current_set = certificate.validators.clone();
     }
     if !found {
-        return None;
+        return Ok(None);
     }
-    select_at(&snapshots, height)?.certificate.clone()
+    if height < checkpoint.effective_from_height {
+        return Ok(None);
+    }
+    let selected = select_at(&snapshots, height).ok_or_else(|| {
+        anyhow::anyhow!("configured checkpoint history has no entry at requested height {height}")
+    })?;
+    let certificate = selected.certificate.clone().ok_or_else(|| {
+        anyhow::anyhow!(
+            "validator-set history selected an unsigned checkpoint descendant at height {}",
+            selected.effective_from_height
+        )
+    })?;
+    Ok(Some(certificate))
 }
 
 /// Resolve committee authority under the configured weak-subjectivity policy.
@@ -304,44 +569,47 @@ pub fn authenticated_at_from_checkpoint(
 pub fn committee_authority_at(
     data_dir: &Path,
     height: u64,
+    trusted_bootstrap: &ValidatorSet,
 ) -> Result<Option<AuthenticatedValidatorSetSnapshot>, String> {
     match checkpoint_from_env()? {
-        Some(checkpoint) => Ok(authenticated_at_from_checkpoint(
-            data_dir,
-            height,
-            &checkpoint,
-        )),
-        None => Ok(authenticated_at(data_dir, height)),
+        Some(checkpoint) => authenticated_at_from_checkpoint_checked(data_dir, height, &checkpoint)
+            .map_err(|error| format!("validator-set history unavailable: {error}")),
+        None => authenticated_at_checked(data_dir, height, trusted_bootstrap)
+            .map_err(|error| format!("validator-set history unavailable: {error}")),
     }
 }
 
 /// Resolve the validator set used for historical block verification. At and
-/// after a configured checkpoint this is fail-closed; prior bootstrap heights
-/// retain compatibility lookup semantics.
+/// after a configured checkpoint this is fail-closed; earlier/no-checkpoint
+/// history is authenticated from the immutable deployment bootstrap.
 pub fn verification_set_at(
     data_dir: &Path,
     height: u64,
-    current: &ValidatorSet,
+    trusted_bootstrap: &ValidatorSet,
 ) -> Result<ValidatorSet, String> {
     let checkpoint = checkpoint_from_env()?;
-    verification_set_at_with_checkpoint(data_dir, height, current, checkpoint.as_ref())
+    verification_set_at_with_checkpoint(data_dir, height, trusted_bootstrap, checkpoint.as_ref())
 }
 
 fn verification_set_at_with_checkpoint(
     data_dir: &Path,
     height: u64,
-    current: &ValidatorSet,
+    trusted_bootstrap: &ValidatorSet,
     checkpoint: Option<&AuthenticatedValidatorSetSnapshot>,
 ) -> Result<ValidatorSet, String> {
     match checkpoint {
         Some(checkpoint) if height >= checkpoint.effective_from_height => {
-            authenticated_at_from_checkpoint(data_dir, height, checkpoint)
+            authenticated_at_from_checkpoint_checked(data_dir, height, checkpoint)
+                .map_err(|error| format!("validator-set history unavailable: {error}"))?
                 .map(|snapshot| snapshot.validators)
                 .ok_or_else(|| {
                     format!("no checkpoint-descended validator authority at height {height}")
                 })
         }
-        _ => Ok(set_at(data_dir, height).unwrap_or_else(|| current.clone())),
+        _ => Ok(authenticated_at_checked(data_dir, height, trusted_bootstrap)
+            .map_err(|error| format!("validator-set history unavailable: {error}"))?
+            .map(|snapshot| snapshot.validators)
+            .unwrap_or_else(|| trusted_bootstrap.clone())),
     }
 }
 
@@ -378,7 +646,7 @@ pub fn record(
     if set.validators.is_empty() {
         return Ok(());
     }
-    let mut snapshots = load(data_dir);
+    let mut snapshots = load_checked(data_dir)?;
 
     if snapshots.iter().any(|snapshot| {
         snapshot.effective_from_height == effective_from_height && snapshot.certificate.is_some()
@@ -412,7 +680,7 @@ pub fn record(
 /// anchored to the common ancestor itself.
 pub fn truncate_after_reorg(data_dir: &Path, common_ancestor: u64) -> anyhow::Result<()> {
     let _write_guard = history_write_guard()?;
-    let mut snapshots = load(data_dir);
+    let mut snapshots = load_checked(data_dir)?;
     let max_effective_height = common_ancestor.saturating_add(1);
     let original_len = snapshots.len();
     snapshots.retain(|snapshot| snapshot.effective_from_height <= max_effective_height);
@@ -429,17 +697,19 @@ pub fn record_authenticated(
     data_dir: &Path,
     snapshot: AuthenticatedValidatorSetSnapshot,
     previous: &ValidatorSet,
-) -> anyhow::Result<()> {
-    let _write_guard = history_write_guard()?;
+) -> Result<(), RecordAuthenticatedError> {
+    let _write_guard = history_write_guard().map_err(RecordAuthenticatedError::persistence)?;
     snapshot
         .validate_against(previous)
-        .map_err(|error| anyhow::anyhow!("invalid validator-set transition: {error}"))?;
-    let mut snapshots = load(data_dir);
+        .map_err(|error| RecordAuthenticatedError::InvalidCertificate(error.to_string()))?;
+    let mut snapshots = load_checked(data_dir).map_err(RecordAuthenticatedError::persistence)?;
     if let Some(active) = select_at(&snapshots, snapshot.effective_from_height.saturating_sub(1)) {
         if common::canonical_validator_set_hash(&active.validators)
             != common::canonical_validator_set_hash(previous)
         {
-            anyhow::bail!("validator-set transition does not continue the persisted active set");
+            return Err(RecordAuthenticatedError::Conflict(
+                "validator-set transition does not continue the persisted active set".into(),
+            ));
         }
     }
     if let Some(existing) = snapshots
@@ -449,7 +719,9 @@ pub fn record_authenticated(
         if common::canonical_validator_set_hash(&existing.validators)
             != common::canonical_validator_set_hash(&snapshot.validators)
         {
-            anyhow::bail!("conflicting validator-set transition at the same effective height");
+            return Err(RecordAuthenticatedError::Conflict(
+                "conflicting validator-set transition at the same effective height".into(),
+            ));
         }
         if let Some(existing_certificate) = &existing.certificate {
             if common::validator_snapshot_certificate_hash(existing_certificate)
@@ -457,7 +729,9 @@ pub fn record_authenticated(
             {
                 return Ok(()); // exact idempotent replay
             }
-            anyhow::bail!("conflicting validator-set certificate at the same effective height");
+            return Err(RecordAuthenticatedError::Conflict(
+                "conflicting validator-set certificate at the same effective height".into(),
+            ));
         }
     }
     snapshots.retain(|existing| existing.effective_from_height != snapshot.effective_from_height);
@@ -467,9 +741,91 @@ pub fn record_authenticated(
         certificate: Some(snapshot),
     });
     snapshots.sort_by_key(|snapshot| snapshot.effective_from_height);
-    enforce_retention(&mut snapshots)?;
-    let bytes = serde_json::to_vec_pretty(&snapshots)?;
-    persist_history_bytes(data_dir, &bytes)
+    enforce_retention(&mut snapshots).map_err(RecordAuthenticatedError::persistence)?;
+    let bytes =
+        serde_json::to_vec_pretty(&snapshots).map_err(RecordAuthenticatedError::persistence)?;
+    persist_history_bytes(data_dir, &bytes).map_err(RecordAuthenticatedError::persistence)
+}
+
+/// Install the exact out-of-band weak-subjectivity checkpoint as a local trust
+/// root when pre-checkpoint transition history has been pruned. The configured
+/// certificate is persisted (never untrusted peer witness bytes), and every
+/// later descendant still goes through `record_authenticated`.
+pub(crate) fn record_configured_checkpoint(
+    data_dir: &Path,
+    proposed: &AuthenticatedValidatorSetSnapshot,
+) -> Result<(), RecordAuthenticatedError> {
+    let configured = checkpoint_from_env()
+        .map_err(|error| RecordAuthenticatedError::InvalidCertificate(error.to_string()))?
+        .ok_or_else(|| {
+            RecordAuthenticatedError::Conflict(
+                "cannot install validator checkpoint without configured weak-subjectivity trust root"
+                    .into(),
+            )
+        })?;
+    record_configured_checkpoint_against(data_dir, proposed, &configured)
+}
+
+fn record_configured_checkpoint_against(
+    data_dir: &Path,
+    proposed: &AuthenticatedValidatorSetSnapshot,
+    configured: &AuthenticatedValidatorSetSnapshot,
+) -> Result<(), RecordAuthenticatedError> {
+    let configured_hash = common::validator_snapshot_certificate_hash(configured);
+    if configured_hash != common::validator_snapshot_certificate_hash(proposed) {
+        return Err(RecordAuthenticatedError::Conflict(
+            "proposed validator checkpoint does not match the configured trust root".into(),
+        ));
+    }
+
+    let _write_guard = history_write_guard().map_err(RecordAuthenticatedError::persistence)?;
+    let snapshots = load_checked(data_dir).map_err(RecordAuthenticatedError::persistence)?;
+    let mut reconciled: Vec<_> = snapshots
+        .iter()
+        .filter(|entry| entry.effective_from_height < configured.effective_from_height)
+        .cloned()
+        .collect();
+    reconciled.push(ValidatorSetSnapshot {
+        effective_from_height: configured.effective_from_height,
+        validators: configured.validators.clone(),
+        certificate: Some(configured.clone()),
+    });
+
+    let mut current_hash = configured.validator_set_hash.clone();
+    let mut current_set = configured.validators.clone();
+    for entry in snapshots
+        .into_iter()
+        .filter(|entry| entry.effective_from_height > configured.effective_from_height)
+    {
+        let Some(certificate) = entry.certificate.as_ref() else {
+            // Compatibility writers may have raced ahead of checkpoint
+            // installation. An unsigned entry is not a descendant and is
+            // deliberately removed rather than promoted by local assertion.
+            continue;
+        };
+        if certificate.previous_validator_set_hash != current_hash {
+            // A structurally valid certificate on another local branch is not
+            // descended from the configured trust root. Discard that branch;
+            // any of its children will likewise fail continuity below.
+            continue;
+        }
+        certificate.validate_against(&current_set).map_err(|error| {
+            RecordAuthenticatedError::persistence(anyhow::anyhow!(
+                "local validator-set history contains an invalid configured-checkpoint descendant at height {}: {}",
+                entry.effective_from_height,
+                error
+            ))
+        })?;
+        current_hash = certificate.validator_set_hash.clone();
+        current_set = certificate.validators.clone();
+        reconciled.push(entry);
+    }
+
+    reconciled.sort_by_key(|entry| entry.effective_from_height);
+    enforce_retention_for_checkpoint_hash(&mut reconciled, Some(&configured_hash));
+    let bytes =
+        serde_json::to_vec_pretty(&reconciled).map_err(RecordAuthenticatedError::persistence)?;
+    persist_history_bytes(data_dir, &bytes).map_err(RecordAuthenticatedError::persistence)
 }
 
 #[cfg(test)]
@@ -595,6 +951,22 @@ mod tests {
     }
 
     #[test]
+    fn reorg_snapshot_absence_durably_removes_active_history_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        record(dir.path(), 0, &set(&["aa"])).expect("record history");
+        assert!(history_path(dir.path()).exists());
+
+        restore_reorg_snapshot(dir.path(), None).expect("remove history");
+        assert!(!history_path(dir.path()).exists());
+        assert!(load(dir.path()).is_empty());
+
+        // A later legitimate bootstrap write must not be obstructed by a
+        // tombstone left by the durable-removal protocol.
+        record(dir.path(), 0, &set(&["bb"])).expect("record replacement history");
+        assert_eq!(load(dir.path())[0].validators.validators[0].pubkey, "bb");
+    }
+
+    #[test]
     fn set_at_returns_none_when_empty_and_some_otherwise() {
         let dir = tempfile::tempdir().expect("tempdir");
         assert!(set_at(dir.path(), 1).is_none());
@@ -661,12 +1033,25 @@ mod tests {
                 },
             );
         }
-        assert!(record_authenticated(dir.path(), alternate_certificate, &previous).is_err());
+        alternate_certificate
+            .validate_against(&previous)
+            .expect("alternate witness has an independent quorum");
         assert_eq!(
-            authenticated_at(dir.path(), 7)
-                .expect("certified snapshot")
-                .validator_set_hash,
-            transition.validator_set_hash
+            common::validator_snapshot_certificate_hash(&alternate_certificate),
+            common::validator_snapshot_certificate_hash(&transition)
+        );
+        assert_ne!(
+            common::validator_snapshot_witness_hash(&alternate_certificate),
+            common::validator_snapshot_witness_hash(&transition)
+        );
+        record_authenticated(dir.path(), alternate_certificate, &previous)
+            .expect("alternate valid quorum converges idempotently");
+        let retained = authenticated_at(dir.path(), 7).expect("certified snapshot");
+        assert_eq!(retained.validator_set_hash, transition.validator_set_hash);
+        assert_eq!(
+            common::validator_snapshot_witness_hash(&retained),
+            common::validator_snapshot_witness_hash(&transition),
+            "the first independently validated witness remains the audit record"
         );
         assert!(authenticated_at_from_checkpoint(dir.path(), 7, &transition).is_some());
         let mut conflicting_checkpoint = transition.clone();
@@ -682,6 +1067,63 @@ mod tests {
             .transition_signatures
             .push(duplicate_signer.transition_signatures[0].clone());
         assert!(duplicate_signer.validate_against(&previous).is_err());
+    }
+
+    #[test]
+    fn authenticated_writer_classifies_certificate_conflict_and_local_history_failures() {
+        let keys: Vec<_> = (0..4).map(|_| SigningKey::generate(&mut OsRng)).collect();
+        let previous = keyed_set(&keys);
+
+        let invalid_dir = tempfile::tempdir().expect("invalid tempdir");
+        record(invalid_dir.path(), 0, &previous).expect("bootstrap invalid history");
+        let mut invalid = signed_transition(1, &previous, &previous, &keys);
+        invalid.transition_signatures.truncate(2);
+        assert!(matches!(
+            record_authenticated(invalid_dir.path(), invalid, &previous),
+            Err(RecordAuthenticatedError::InvalidCertificate(_))
+        ));
+
+        let conflict_dir = tempfile::tempdir().expect("conflict tempdir");
+        record(conflict_dir.path(), 0, &previous).expect("bootstrap conflict history");
+        let accepted = signed_transition(1, &previous, &previous, &keys);
+        record_authenticated(conflict_dir.path(), accepted, &previous)
+            .expect("initial certificate");
+        let alternate_keys: Vec<_> = (0..4).map(|_| SigningKey::generate(&mut OsRng)).collect();
+        let alternate = signed_transition(1, &previous, &keyed_set(&alternate_keys), &keys);
+        assert!(matches!(
+            record_authenticated(conflict_dir.path(), alternate, &previous),
+            Err(RecordAuthenticatedError::Conflict(_))
+        ));
+
+        let persistence_dir = tempfile::tempdir().expect("persistence tempdir");
+        std::fs::write(history_path(persistence_dir.path()), b"{not-json")
+            .expect("corrupt local history");
+        let valid = signed_transition(1, &previous, &previous, &keys);
+        assert!(matches!(
+            record_authenticated(persistence_dir.path(), valid, &previous),
+            Err(RecordAuthenticatedError::Persistence { .. })
+        ));
+    }
+
+    #[test]
+    fn malformed_history_is_not_confused_with_absent_checkpoint_ancestry() {
+        let keys: Vec<_> = (0..4).map(|_| SigningKey::generate(&mut OsRng)).collect();
+        let validators = keyed_set(&keys);
+        let checkpoint = signed_transition(1, &validators, &validators, &keys);
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(history_path(dir.path()), b"{malformed-history")
+            .expect("write malformed history");
+
+        assert!(load_checked(dir.path()).is_err());
+        assert!(authenticated_at_checked(dir.path(), 1, &validators).is_err());
+        assert!(
+            authenticated_at_from_checkpoint_checked(dir.path(), 1, &checkpoint).is_err(),
+            "local corruption is an error, not absent ancestry"
+        );
+        assert!(
+            authenticated_at_from_checkpoint(dir.path(), 1, &checkpoint).is_none(),
+            "the explicitly lossy compatibility wrapper remains non-panicking"
+        );
     }
 
     #[test]
@@ -753,6 +1195,10 @@ mod tests {
         conflicting.previous_validator_set_hash = "f".repeat(64);
         write_history(dir.path(), &conflicting_history);
         assert!(authenticated_at_from_checkpoint(dir.path(), 6, &checkpoint).is_none());
+        assert!(
+            authenticated_at_from_checkpoint_checked(dir.path(), 5, &checkpoint).is_err(),
+            "an invalid later descendant poisons the full retained checkpoint chain"
+        );
 
         let mut unsigned_history = valid_history;
         unsigned_history
@@ -767,6 +1213,216 @@ mod tests {
         assert!(
             verification_set_at_with_checkpoint(dir.path(), 6, &validators, Some(&checkpoint))
                 .is_err()
+        );
+    }
+
+    #[test]
+    fn authenticated_reader_requires_a_complete_chain_from_the_explicit_bootstrap() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let bootstrap_keys: Vec<_> =
+            (0..4).map(|_| SigningKey::generate(&mut OsRng)).collect();
+        let rotated_keys: Vec<_> =
+            (0..4).map(|_| SigningKey::generate(&mut OsRng)).collect();
+        let final_keys: Vec<_> = (0..4).map(|_| SigningKey::generate(&mut OsRng)).collect();
+        let bootstrap = keyed_set(&bootstrap_keys);
+        let rotated = keyed_set(&rotated_keys);
+        let final_set = keyed_set(&final_keys);
+        record(dir.path(), 0, &bootstrap).expect("trusted bootstrap history");
+
+        let first = signed_transition(1, &bootstrap, &rotated, &bootstrap_keys);
+        record_authenticated(dir.path(), first, &bootstrap).expect("first transition");
+        let second = signed_transition(2, &rotated, &final_set, &rotated_keys);
+        record_authenticated(dir.path(), second.clone(), &rotated).expect("second transition");
+        assert_eq!(
+            common::validator_snapshot_certificate_hash(
+                &authenticated_at_checked(dir.path(), 2, &bootstrap)
+                    .expect("strict authenticated read")
+                    .expect("latest authenticated certificate")
+            ),
+            common::validator_snapshot_certificate_hash(&second)
+        );
+
+        let valid_history = load_checked(dir.path()).expect("valid history");
+        let mut unsigned_same_set_history = valid_history.clone();
+        unsigned_same_set_history.push(ValidatorSetSnapshot {
+            effective_from_height: 3,
+            validators: final_set.clone(),
+            certificate: None,
+        });
+        write_history(dir.path(), &unsigned_same_set_history);
+        assert!(
+            authenticated_at_checked(dir.path(), 3, &bootstrap).is_err(),
+            "no unsigned entry is allowed after authenticated authority starts"
+        );
+
+        let attacker_keys: Vec<_> =
+            (0..4).map(|_| SigningKey::generate(&mut OsRng)).collect();
+        let attacker_set = keyed_set(&attacker_keys);
+        let forged = signed_transition(3, &attacker_set, &attacker_set, &attacker_keys);
+        let mut forged_history = valid_history.clone();
+        forged_history.push(ValidatorSetSnapshot {
+            effective_from_height: forged.effective_from_height,
+            validators: forged.validators.clone(),
+            certificate: Some(forged.clone()),
+        });
+        write_history(dir.path(), &forged_history);
+
+        assert_eq!(
+            common::validator_snapshot_certificate_hash(
+                &authenticated_at(dir.path(), 3)
+                    .expect("lossy observation can still report the stored tail")
+            ),
+            common::validator_snapshot_certificate_hash(&forged)
+        );
+        assert!(
+            authenticated_at_checked(dir.path(), 3, &bootstrap).is_err(),
+            "a self-signed alternative tail must not become authority"
+        );
+        assert!(
+            verification_set_at_with_checkpoint(dir.path(), 3, &bootstrap, None).is_err(),
+            "historical verification must not trust the structurally valid alternative tail"
+        );
+
+        let mut unsigned_history = valid_history;
+        unsigned_history.push(ValidatorSetSnapshot {
+            effective_from_height: 3,
+            validators: attacker_set,
+            certificate: None,
+        });
+        write_history(dir.path(), &unsigned_history);
+        assert!(
+            authenticated_at_checked(dir.path(), 3, &bootstrap).is_err(),
+            "an unsigned compatibility entry cannot change authenticated authority"
+        );
+    }
+
+    #[test]
+    fn checkpoint_install_reconciles_local_forks_and_keeps_only_valid_descendants() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let bootstrap_keys: Vec<_> =
+            (0..4).map(|_| SigningKey::generate(&mut OsRng)).collect();
+        let checkpoint_keys: Vec<_> =
+            (0..4).map(|_| SigningKey::generate(&mut OsRng)).collect();
+        let child_keys: Vec<_> = (0..4).map(|_| SigningKey::generate(&mut OsRng)).collect();
+        let grandchild_keys: Vec<_> =
+            (0..4).map(|_| SigningKey::generate(&mut OsRng)).collect();
+        let fork_keys: Vec<_> = (0..4).map(|_| SigningKey::generate(&mut OsRng)).collect();
+        let bootstrap = keyed_set(&bootstrap_keys);
+        let checkpoint_set = keyed_set(&checkpoint_keys);
+        let child_set = keyed_set(&child_keys);
+        let grandchild_set = keyed_set(&grandchild_keys);
+        let fork_set = keyed_set(&fork_keys);
+        let checkpoint =
+            signed_transition(5, &bootstrap, &checkpoint_set, &bootstrap_keys);
+        let child = signed_transition(6, &checkpoint_set, &child_set, &checkpoint_keys);
+        let fork = signed_transition(8, &fork_set, &fork_set, &fork_keys);
+        let grandchild =
+            signed_transition(9, &child_set, &grandchild_set, &child_keys);
+
+        write_history(
+            dir.path(),
+            &[
+                ValidatorSetSnapshot {
+                    effective_from_height: 0,
+                    validators: bootstrap,
+                    certificate: None,
+                },
+                ValidatorSetSnapshot {
+                    effective_from_height: 5,
+                    validators: fork_set.clone(),
+                    certificate: None,
+                },
+                ValidatorSetSnapshot {
+                    effective_from_height: 6,
+                    validators: child.validators.clone(),
+                    certificate: Some(child.clone()),
+                },
+                ValidatorSetSnapshot {
+                    effective_from_height: 7,
+                    validators: fork_set.clone(),
+                    certificate: None,
+                },
+                ValidatorSetSnapshot {
+                    effective_from_height: 8,
+                    validators: fork.validators.clone(),
+                    certificate: Some(fork),
+                },
+                ValidatorSetSnapshot {
+                    effective_from_height: 9,
+                    validators: grandchild.validators.clone(),
+                    certificate: Some(grandchild.clone()),
+                },
+            ],
+        );
+
+        record_configured_checkpoint_against(dir.path(), &checkpoint, &checkpoint)
+            .expect("install and reconcile configured checkpoint");
+        let reconciled = load_checked(dir.path()).expect("reconciled history");
+        assert_eq!(
+            reconciled
+                .iter()
+                .map(|entry| entry.effective_from_height)
+                .collect::<Vec<_>>(),
+            vec![0, 5, 6, 9]
+        );
+        assert_eq!(
+            common::validator_snapshot_certificate_hash(
+                reconciled[1]
+                    .certificate
+                    .as_ref()
+                    .expect("configured checkpoint retained")
+            ),
+            common::validator_snapshot_certificate_hash(&checkpoint)
+        );
+        assert_eq!(
+            common::validator_snapshot_certificate_hash(
+                &authenticated_at_from_checkpoint_checked(dir.path(), 99, &checkpoint)
+                    .expect("validate reconciled checkpoint history")
+                    .expect("grandchild authority")
+            ),
+            common::validator_snapshot_certificate_hash(&grandchild)
+        );
+    }
+
+    #[test]
+    fn checkpoint_install_fails_closed_without_rewriting_an_invalid_descendant() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let bootstrap_keys: Vec<_> =
+            (0..4).map(|_| SigningKey::generate(&mut OsRng)).collect();
+        let checkpoint_keys: Vec<_> =
+            (0..4).map(|_| SigningKey::generate(&mut OsRng)).collect();
+        let bootstrap = keyed_set(&bootstrap_keys);
+        let checkpoint_set = keyed_set(&checkpoint_keys);
+        let checkpoint =
+            signed_transition(5, &bootstrap, &checkpoint_set, &bootstrap_keys);
+        let mut invalid =
+            signed_transition(6, &checkpoint_set, &checkpoint_set, &checkpoint_keys);
+        invalid.transition_signatures.truncate(1);
+        write_history(
+            dir.path(),
+            &[
+                ValidatorSetSnapshot {
+                    effective_from_height: 5,
+                    validators: checkpoint.validators.clone(),
+                    certificate: Some(checkpoint.clone()),
+                },
+                ValidatorSetSnapshot {
+                    effective_from_height: 6,
+                    validators: invalid.validators.clone(),
+                    certificate: Some(invalid),
+                },
+            ],
+        );
+        let before = std::fs::read(history_path(dir.path())).expect("read original history");
+
+        assert!(matches!(
+            record_configured_checkpoint_against(dir.path(), &checkpoint, &checkpoint),
+            Err(RecordAuthenticatedError::Persistence { .. })
+        ));
+        assert_eq!(
+            std::fs::read(history_path(dir.path())).expect("read retained history"),
+            before,
+            "invalid descendants must abort before any durable replacement"
         );
     }
 

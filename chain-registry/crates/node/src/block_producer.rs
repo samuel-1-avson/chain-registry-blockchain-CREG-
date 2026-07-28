@@ -23,6 +23,43 @@ struct ProposerContext {
     vrf_proof: Option<String>,
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error(
+    "stale proposer context: captured tip {captured_height}:{captured_hash}, current tip {current_height}:{current_hash}"
+)]
+struct StaleProposerContext {
+    captured_height: u64,
+    captured_hash: String,
+    current_height: u64,
+    current_hash: String,
+}
+
+fn ensure_proposer_context_is_current(
+    captured_height: u64,
+    captured_hash: &str,
+    current_height: u64,
+    current_hash: &str,
+) -> Result<(), StaleProposerContext> {
+    if captured_height != current_height || captured_hash != current_hash {
+        return Err(StaleProposerContext {
+            captured_height,
+            captured_hash: captured_hash.to_owned(),
+            current_height,
+            current_hash: current_hash.to_owned(),
+        });
+    }
+    Ok(())
+}
+
+fn restore_stale_context_transactions(
+    pending_txs: &mut Vec<Transaction>,
+    mut attempted_txs: Vec<Transaction>,
+) {
+    attempted_txs.append(pending_txs);
+    *pending_txs = attempted_txs;
+    finalized_tx::sync_pending_buffer_depth(pending_txs.len());
+}
+
 pub async fn run(
     state: Arc<RwLock<NodeState>>,
     rx: finalized_tx::FinalizedTxReceiver,
@@ -154,6 +191,14 @@ pub async fn run(
                 }
             }
             Err(e) => {
+                if e.downcast_ref::<StaleProposerContext>().is_some() {
+                    tracing::debug!(
+                        pending = txs_backup.len(),
+                        "Block producer context became stale before PBFT; retrying buffered transactions"
+                    );
+                    restore_stale_context_transactions(&mut pending_txs, txs_backup);
+                    continue;
+                }
                 tracing::error!("Block production failed: {}", e);
                 let chain = { state.read().await.chain.clone() };
                 let mut retryable = Vec::new();
@@ -368,7 +413,7 @@ async fn produce_block(
 ) -> anyhow::Result<Block> {
     let ProposerContext {
         tip_height,
-        prev_hash: _,
+        prev_hash,
         node_id,
         privkey,
         our_pubkey: _,
@@ -378,13 +423,26 @@ async fn produce_block(
     } = ctx;
 
     let mut s = state.write().await;
+    let current_tip_height = s.chain.tip_height()?;
+    let current_tip_hash = s.chain.tip_hash()?;
+    ensure_proposer_context_is_current(
+        tip_height,
+        &prev_hash,
+        current_tip_height,
+        &current_tip_hash,
+    )?;
+    let parent = s
+        .chain
+        .get_block_by_height(tip_height)?
+        .ok_or_else(|| anyhow::anyhow!("canonical parent block is unavailable"))?;
+    let timestamp = crate::block_time::next_live_timestamp(parent.header.timestamp, Utc::now())
+        .context("refusing to propose a block with an invalid live timestamp")?;
     let header = BlockHeader {
         height: tip_height + 1,
-        prev_hash: s.chain.tip_hash()?,
+        prev_hash,
         merkle_root: merkle_root(&txs),
         proposer_id: node_id.clone(),
-        timestamp: chrono::DateTime::from_timestamp(Utc::now().timestamp(), 0)
-            .expect("current Unix time is representable"),
+        timestamp,
         validator_set_hash,
         vrf_output,
         vrf_proof,
@@ -662,6 +720,40 @@ mod tests {
         }
     }
 
+    #[test]
+    fn proposer_context_requires_the_exact_captured_tip() {
+        assert!(ensure_proposer_context_is_current(7, "tip-a", 7, "tip-a").is_ok());
+
+        let advanced = ensure_proposer_context_is_current(7, "tip-a", 8, "tip-b")
+            .expect_err("an advanced tip must make the captured context stale");
+        assert_eq!(advanced.captured_height, 7);
+        assert_eq!(advanced.current_height, 8);
+
+        let competing_hash = ensure_proposer_context_is_current(7, "tip-a", 7, "tip-b")
+            .expect_err("a competing tip hash must make the captured context stale");
+        assert_eq!(competing_hash.captured_hash, "tip-a");
+        assert_eq!(competing_hash.current_hash, "tip-b");
+    }
+
+    #[test]
+    fn stale_context_retry_restores_every_attempted_transaction_in_order() {
+        let attempted = vec![sample_publish_tx("first"), sample_publish_tx("second")];
+        let later = sample_publish_tx("later");
+        let mut pending = vec![later.clone()];
+        let expected_hashes = attempted
+            .iter()
+            .chain(std::iter::once(&later))
+            .map(transaction_hash)
+            .collect::<Vec<_>>();
+
+        restore_stale_context_transactions(&mut pending, attempted);
+
+        assert_eq!(
+            pending.iter().map(transaction_hash).collect::<Vec<_>>(),
+            expected_hashes
+        );
+    }
+
     #[tokio::test]
     async fn non_proposer_tick_keeps_buffered_transactions() {
         let (state, _dir, primary_sk, secondary_sk) =
@@ -733,6 +825,9 @@ mod tests {
             .expect("produce_block should succeed for rank-0 proposer");
         assert_eq!(block.transactions.len(), 1);
         assert_eq!(block.header.height, 1);
+        let genesis = common::Block::genesis();
+        assert!(block.header.timestamp > genesis.header.timestamp);
+        assert_eq!(block.header.timestamp.timestamp_subsec_nanos(), 0);
         assert!(pending_txs.is_empty());
     }
 }

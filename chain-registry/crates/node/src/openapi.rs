@@ -11,7 +11,7 @@
 // the path + schema in the `ApiDoc` struct.
 
 use utoipa::{
-    openapi::security::{ApiKey, ApiKeyValue, SecurityScheme},
+    openapi::security::{ApiKey, ApiKeyValue, Http, HttpAuthScheme, SecurityScheme},
     Modify, OpenApi, ToSchema,
 };
 
@@ -905,6 +905,8 @@ pub mod paths {
             (status = 202, body = ValidatorSetTransitionAccepted),
             (status = 401, body = ApiError, description = "Invalid or insufficient prior-set certificate"),
             (status = 409, body = ApiError, description = "Stale height, replay/checkpoint conflict, or local fork-anchor mismatch"),
+            (status = 413, description = "Transition body exceeds the 1 MiB endpoint limit"),
+            (status = 500, body = ApiError, description = "Local validator-history read, retention, serialization, or durable persistence failure"),
             (status = 503, body = ApiError, description = "Configured weak-subjectivity checkpoint is malformed"),
         ),
     )]
@@ -943,6 +945,7 @@ pub mod paths {
             (status = 500, body = ApiError, description = "Local signing or evidence-archive failure"),
             (status = 503, body = ApiError, description = "Signed policy has no usable hash-pinned verifier configuration"),
         ),
+        security(("OperatorKey" = []), ("OperatorBearer" = [])),
     )]
     pub async fn attest_namespace_authority() {}
 
@@ -968,6 +971,7 @@ pub mod paths {
             (status = 401, body = ApiError, description = "Operator API credentials are missing or invalid"),
             (status = 503, body = ApiError, description = "Private API is locked or the signed authority policy is unavailable"),
         ),
+        security(("OperatorKey" = []), ("OperatorBearer" = [])),
     )]
     pub async fn assemble_namespace_authority_certificate() {}
 
@@ -1259,6 +1263,10 @@ impl Modify for SecurityAddon {
         components.add_security_scheme(
             "OperatorKey",
             SecurityScheme::ApiKey(ApiKey::Header(ApiKeyValue::new("X-Operator-Key"))),
+        );
+        components.add_security_scheme(
+            "OperatorBearer",
+            SecurityScheme::Http(Http::new(HttpAuthScheme::Bearer)),
         );
     }
 }

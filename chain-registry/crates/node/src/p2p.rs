@@ -79,6 +79,8 @@ fn validate_pbft_pre_prepare_block(
     validator_set: &common::ValidatorSet,
     tip_height: u64,
     tip_hash: &str,
+    tip_timestamp: chrono::DateTime<chrono::Utc>,
+    now: chrono::DateTime<chrono::Utc>,
 ) -> anyhow::Result<()> {
     if block.header.height != tip_height.saturating_add(1) {
         anyhow::bail!("PBFT proposal is not for the next canonical height");
@@ -95,6 +97,7 @@ fn validate_pbft_pre_prepare_block(
     if block.header.vrf_output.is_some() != block.header.vrf_proof.is_some() {
         anyhow::bail!("PBFT proposal must carry both VRF output and proof or neither");
     }
+    crate::block_time::validate_live_timestamp(tip_timestamp, block.header.timestamp, now)?;
     Ok(())
 }
 
@@ -279,12 +282,15 @@ fn requires_payload_validation_before_acceptance(topic: &str) -> bool {
 fn transition_persistence_failure_acceptance(
     error: &anyhow::Error,
 ) -> gossipsub::MessageAcceptance {
-    if error
-        .chain()
-        .any(|cause| cause.downcast_ref::<std::io::Error>().is_some())
-    {
-        // A receiver-side filesystem failure is not evidence that the sender
-        // supplied an invalid transition, so do not penalize the peer.
+    if error.chain().any(|cause| {
+        cause
+            .downcast_ref::<crate::validator_set_history::RecordAuthenticatedError>()
+            .is_some_and(crate::validator_set_history::RecordAuthenticatedError::is_persistence)
+            || cause.downcast_ref::<std::io::Error>().is_some()
+    }) {
+        // A receiver-side read, retention, serialization, or filesystem
+        // failure is not evidence that the sender supplied an invalid
+        // transition, so do not penalize the peer.
         gossipsub::MessageAcceptance::Ignore
     } else {
         // Certificate, continuity, replay, and same-height conflict failures
@@ -296,27 +302,72 @@ fn transition_persistence_failure_acceptance(
 fn validate_and_persist_transition(
     data_dir: &std::path::Path,
     snapshot: common::AuthenticatedValidatorSetSnapshot,
-    previous: &common::ValidatorSet,
+    trusted_bootstrap: &common::ValidatorSet,
     tip_height: u64,
     tip_hash: &str,
     checkpoint: Option<&common::AuthenticatedValidatorSetSnapshot>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<gossipsub::MessageAcceptance> {
+    let mut is_configured_checkpoint = false;
+    let mut exact_checkpoint_acceptance = gossipsub::MessageAcceptance::Accept;
     if let Some(checkpoint) = checkpoint {
-        let is_checkpoint = common::validator_snapshot_certificate_hash(&snapshot)
+        is_configured_checkpoint = common::validator_snapshot_certificate_hash(&snapshot)
             == common::validator_snapshot_certificate_hash(checkpoint);
-        let descends_from_checkpoint =
-            crate::validator_set_history::authenticated_at_from_checkpoint(
+        if is_configured_checkpoint
+            && common::validator_snapshot_witness_hash(&snapshot)
+                != common::validator_snapshot_witness_hash(checkpoint)
+        {
+            // Logical checkpoint identity deliberately excludes its witness.
+            // Always install and propagate only the independently configured
+            // witness bytes. Ignore an alternate original so gossipsub cannot
+            // relay attacker-chosen (or merely non-canonical) checkpoint bytes.
+            exact_checkpoint_acceptance = gossipsub::MessageAcceptance::Ignore;
+        }
+        let descends_from_checkpoint = is_configured_checkpoint
+            || crate::validator_set_history::authenticated_at_from_checkpoint_checked(
                 data_dir,
                 snapshot.effective_from_height.saturating_sub(1),
                 checkpoint,
             )
+            .map_err(crate::validator_set_history::RecordAuthenticatedError::persistence)?
             .is_some();
-        if !is_checkpoint && !descends_from_checkpoint {
+        if !descends_from_checkpoint {
             anyhow::bail!("validator-set transition is outside the configured checkpoint history");
         }
     }
     crate::validator_set_history::validate_transition_at_tip(&snapshot, tip_height, tip_hash)?;
-    crate::validator_set_history::record_authenticated(data_dir, snapshot, previous)
+    if is_configured_checkpoint {
+        crate::validator_set_history::record_configured_checkpoint(data_dir, &snapshot)?;
+    } else {
+        let previous_height = snapshot.effective_from_height.saturating_sub(1);
+        let previous = match checkpoint {
+            Some(checkpoint) => {
+                crate::validator_set_history::authenticated_at_from_checkpoint_checked(
+                    data_dir,
+                    previous_height,
+                    checkpoint,
+                )
+                .map_err(crate::validator_set_history::RecordAuthenticatedError::persistence)?
+                .map(|certificate| certificate.validators)
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "validator-set transition has no configured-checkpoint-descended prior authority"
+                    )
+                })?
+            }
+            None => crate::validator_set_history::authenticated_at_checked(
+                data_dir,
+                previous_height,
+                trusted_bootstrap,
+            )
+            .map_err(crate::validator_set_history::RecordAuthenticatedError::persistence)?
+            .map(|certificate| certificate.validators)
+            // With no prior certificate this is the first transition and only
+            // the deployment bootstrap set may authorize it.
+            .unwrap_or_else(|| trusted_bootstrap.clone()),
+        };
+        crate::validator_set_history::record_authenticated(data_dir, snapshot, &previous)?;
+    }
+    Ok(exact_checkpoint_acceptance)
 }
 
 /// Combined P2P behaviour.
@@ -570,6 +621,7 @@ impl P2PNode {
                                             let certified = crate::validator_set_history::committee_authority_at(
                                                 &s.config.data_dir,
                                                 next_height,
+                                                &s.validator_set_bootstrap,
                                             ).ok().flatten().filter(|snapshot| {
                                                 snapshot.validator_set_hash
                                                     == common::canonical_validator_set_hash(&s.validator_set)
@@ -680,46 +732,50 @@ impl P2PNode {
                                 }
                             };
 
-                            let (data_dir, tip_height, tip_hash, previous) = {
+                            let persistence = {
+                                // Serialize the canonical-tip check and
+                                // synchronous history replacement with reorg
+                                // adoption, which holds the state write guard
+                                // through journal commit.
                                 let s = state.read().await;
-                                (
-                                    s.config.data_dir.clone(),
-                                    s.chain.tip_height().unwrap_or(0),
-                                    s.chain.tip_hash().unwrap_or_default(),
-                                    crate::validator_set_history::set_at(
+                                let checkpoint =
+                                    match crate::validator_set_history::checkpoint_from_env() {
+                                        Ok(checkpoint) => checkpoint,
+                                        Err(error) => {
+                                            report_validation_result(
+                                                &mut self.swarm,
+                                                &id,
+                                                &peer_id,
+                                                gossipsub::MessageAcceptance::Ignore,
+                                            );
+                                            tracing::error!("Dropped validator-set transition: invalid weak-subjectivity checkpoint: {error}");
+                                            continue;
+                                        }
+                                    };
+                                (|| -> anyhow::Result<gossipsub::MessageAcceptance> {
+                                    let tip_height = s.chain.tip_height().map_err(
+                                        crate::validator_set_history::RecordAuthenticatedError::persistence,
+                                    )?;
+                                    let tip_hash = s.chain.tip_hash().map_err(
+                                        crate::validator_set_history::RecordAuthenticatedError::persistence,
+                                    )?;
+                                    validate_and_persist_transition(
                                         &s.config.data_dir,
-                                        snapshot.effective_from_height.saturating_sub(1),
+                                        snapshot,
+                                        &s.validator_set_bootstrap,
+                                        tip_height,
+                                        &tip_hash,
+                                        checkpoint.as_ref(),
                                     )
-                                    .unwrap_or_else(|| s.validator_set.clone()),
-                                )
+                                })()
                             };
-                            let checkpoint = match crate::validator_set_history::checkpoint_from_env() {
-                                Ok(checkpoint) => checkpoint,
-                                Err(error) => {
+                            match persistence {
+                                Ok(acceptance) => {
                                     report_validation_result(
                                         &mut self.swarm,
                                         &id,
                                         &peer_id,
-                                        gossipsub::MessageAcceptance::Ignore,
-                                    );
-                                    tracing::error!("Dropped validator-set transition: invalid weak-subjectivity checkpoint: {error}");
-                                    continue;
-                                }
-                            };
-                            match validate_and_persist_transition(
-                                &data_dir,
-                                snapshot,
-                                &previous,
-                                tip_height,
-                                &tip_hash,
-                                checkpoint.as_ref(),
-                            ) {
-                                Ok(()) => {
-                                    report_validation_result(
-                                        &mut self.swarm,
-                                        &id,
-                                        &peer_id,
-                                        gossipsub::MessageAcceptance::Accept,
+                                        acceptance,
                                     );
                                 }
                                 Err(error) => {
@@ -872,11 +928,33 @@ impl P2PNode {
                                         let vs = s.validator_set.clone();
                                         let tip_height = s.chain.tip_height().unwrap_or(0);
                                         let tip_hash = s.chain.tip_hash().unwrap_or_default();
+                                        let Some(tip_timestamp) = s
+                                            .chain
+                                            .get_block_by_height(tip_height)
+                                            .ok()
+                                            .flatten()
+                                            .map(|block| block.header.timestamp)
+                                        else {
+                                            tracing::warn!(
+                                                peer = %peer_id,
+                                                tip_height,
+                                                "Rejected PBFT pre-prepare because the canonical tip timestamp is unavailable"
+                                            );
+                                            report_validation_result(
+                                                &mut self.swarm,
+                                                &id,
+                                                &peer_id,
+                                                gossipsub::MessageAcceptance::Reject,
+                                            );
+                                            continue;
+                                        };
                                         if let Err(error) = validate_pbft_pre_prepare_block(
                                             &block,
                                             &vs,
                                             tip_height,
                                             &tip_hash,
+                                            tip_timestamp,
+                                            chrono::Utc::now(),
                                         ) {
                                             tracing::warn!(
                                                 peer = %peer_id,
@@ -1329,6 +1407,16 @@ mod tests {
             transition_persistence_failure_acceptance(&io_error),
             gossipsub::MessageAcceptance::Ignore
         ));
+
+        let retention_error = anyhow::Error::new(
+            crate::validator_set_history::RecordAuthenticatedError::Persistence {
+                source: anyhow::anyhow!("configured checkpoint retention failed"),
+            },
+        );
+        assert!(matches!(
+            transition_persistence_failure_acceptance(&retention_error),
+            gossipsub::MessageAcceptance::Ignore
+        ));
     }
 
     #[test]
@@ -1422,16 +1510,53 @@ mod tests {
         )
         .is_err());
 
-        let conflicting_certificate = signed_transition(
+        let alternate_certificate = signed_transition(
             &validator_set,
             &signing_keys,
             &[1, 2, 3],
             1,
             tip_hash.clone(),
         );
+        assert_eq!(
+            common::validator_snapshot_certificate_hash(&alternate_certificate),
+            common::validator_snapshot_certificate_hash(&valid)
+        );
+        assert_ne!(
+            common::validator_snapshot_witness_hash(&alternate_certificate),
+            common::validator_snapshot_witness_hash(&valid)
+        );
+        validate_and_persist_transition(
+            dir.path(),
+            alternate_certificate,
+            &validator_set,
+            0,
+            &tip_hash,
+            None,
+        )?;
+
+        let mut conflicting_transition = valid.clone();
+        conflicting_transition.validators.validators[0].stake += 1;
+        conflicting_transition.validator_set_hash =
+            common::canonical_validator_set_hash(&conflicting_transition.validators);
+        conflicting_transition.transition_signatures.clear();
+        let conflicting_message = common::validator_set_transition_message(&conflicting_transition);
+        for index in [0usize, 1, 2] {
+            let validator = &validator_set.validators[index];
+            conflicting_transition.transition_signatures.push(
+                common::ValidatorSetTransitionSignature {
+                    validator_id: validator.id.clone(),
+                    validator_pubkey: validator.pubkey.clone(),
+                    signature: hex::encode(
+                        signing_keys[index]
+                            .sign(conflicting_message.as_bytes())
+                            .to_bytes(),
+                    ),
+                },
+            );
+        }
         assert!(validate_and_persist_transition(
             dir.path(),
-            conflicting_certificate,
+            conflicting_transition,
             &validator_set,
             0,
             &tip_hash,
@@ -1439,12 +1564,100 @@ mod tests {
         )
         .is_err());
 
+        let retained = crate::validator_set_history::authenticated_at(dir.path(), 1)
+            .expect("original transition remains authoritative");
         assert_eq!(
-            common::validator_snapshot_certificate_hash(
-                &crate::validator_set_history::authenticated_at(dir.path(), 1)
-                    .expect("original transition remains authoritative")
+            common::validator_snapshot_witness_hash(&retained),
+            common::validator_snapshot_witness_hash(&valid),
+            "alternate honest peer witness must not rewrite the first audit certificate"
+        );
+
+        let corrupt_dir = tempfile::tempdir()?;
+        crate::validator_set_history::record(corrupt_dir.path(), 0, &validator_set)?;
+        std::fs::write(
+            corrupt_dir.path().join("validator-set-history.json"),
+            b"{corrupt-history",
+        )?;
+        let local_error = validate_and_persist_transition(
+            corrupt_dir.path(),
+            valid,
+            &validator_set,
+            0,
+            &tip_hash,
+            None,
+        )
+        .expect_err("corrupt local history must fail closed");
+        assert!(matches!(
+            transition_persistence_failure_acceptance(&local_error),
+            gossipsub::MessageAcceptance::Ignore
+        ));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn transition_receiver_installs_exact_configured_checkpoint_on_pruned_node(
+    ) -> anyhow::Result<()> {
+        let signing_keys: Vec<_> = (1u8..=4)
+            .map(|seed| SigningKey::from_bytes(&[seed; 32]))
+            .collect();
+        let validator_set = common::ValidatorSet::new(
+            signing_keys
+                .iter()
+                .enumerate()
+                .map(|(index, key)| validator(&format!("node-{}", index + 1), key))
+                .collect(),
+        );
+        let tip_hash = common::Block::genesis().hash();
+        let checkpoint = signed_transition(
+            &validator_set,
+            &signing_keys,
+            &[0, 1, 2],
+            1,
+            tip_hash.clone(),
+        );
+        let dir = tempfile::tempdir()?;
+        let mut received_without_configured_witness = checkpoint.clone();
+        received_without_configured_witness
+            .transition_signatures
+            .clear();
+
+        // There is deliberately no prior-set history in this rebuilt node.
+        // The arbitrary `previous` value proves the receiver takes the
+        // configured trust-root path instead of quorum-validating against it.
+        let acceptance = crate::validator_set_history::with_checkpoint_env_override(
+            Some(serde_json::to_string(&checkpoint)?),
+            async {
+                validate_and_persist_transition(
+                    dir.path(),
+                    received_without_configured_witness,
+                    &common::ValidatorSet::default(),
+                    0,
+                    &tip_hash,
+                    Some(&checkpoint),
+                )
+            },
+        )
+        .await?;
+        assert!(matches!(
+            acceptance,
+            gossipsub::MessageAcceptance::Ignore
+        ));
+
+        let persisted = crate::validator_set_history::load_checked(dir.path())?;
+        assert_eq!(persisted.len(), 1);
+        assert_eq!(
+            persisted[0].certificate.as_ref().map(
+                common::validator_snapshot_certificate_hash
             ),
-            common::validator_snapshot_certificate_hash(&valid)
+            Some(common::validator_snapshot_certificate_hash(&checkpoint))
+        );
+        assert_eq!(
+            persisted[0]
+                .certificate
+                .as_ref()
+                .map(common::validator_snapshot_witness_hash),
+            Some(common::validator_snapshot_witness_hash(&checkpoint)),
+            "the configured witness must replace unverifiable received bytes"
         );
         Ok(())
     }
@@ -1553,13 +1766,15 @@ mod tests {
         let signing_key = SigningKey::from_bytes(&[9u8; 32]);
         let validator_set = common::ValidatorSet::new(vec![validator("node-pbft", &signing_key)]);
         let tip_hash = common::Block::genesis().hash();
+        let now = chrono::DateTime::from_timestamp(1_900_000_000, 0).unwrap();
+        let tip_timestamp = chrono::DateTime::from_timestamp(1_899_999_999, 0).unwrap();
         let block = common::Block {
             header: common::BlockHeader {
                 height: 1,
                 prev_hash: tip_hash.clone(),
                 merkle_root: common::merkle_root(&[]),
                 proposer_id: "node-pbft".into(),
-                timestamp: chrono::Utc::now(),
+                timestamp: now,
                 validator_set_hash: common::canonical_validator_set_hash(&validator_set),
                 vrf_output: None,
                 vrf_proof: None,
@@ -1567,26 +1782,108 @@ mod tests {
             transactions: Vec::new(),
             pbft_signatures: Vec::new(),
         };
-        validate_pbft_pre_prepare_block(&block, &validator_set, 0, &tip_hash)
+        validate_pbft_pre_prepare_block(&block, &validator_set, 0, &tip_hash, tip_timestamp, now)
             .expect("canonical next-height proposal is structurally valid");
 
         let mut wrong_fork = block.clone();
         wrong_fork.header.prev_hash = "f".repeat(64);
-        assert!(
-            validate_pbft_pre_prepare_block(&wrong_fork, &validator_set, 0, &tip_hash).is_err()
-        );
+        assert!(validate_pbft_pre_prepare_block(
+            &wrong_fork,
+            &validator_set,
+            0,
+            &tip_hash,
+            tip_timestamp,
+            now,
+        )
+        .is_err());
 
         let mut wrong_authority = block.clone();
         wrong_authority.header.validator_set_hash = "e".repeat(64);
-        assert!(
-            validate_pbft_pre_prepare_block(&wrong_authority, &validator_set, 0, &tip_hash)
-                .is_err()
-        );
+        assert!(validate_pbft_pre_prepare_block(
+            &wrong_authority,
+            &validator_set,
+            0,
+            &tip_hash,
+            tip_timestamp,
+            now,
+        )
+        .is_err());
 
         let mut wrong_merkle = block;
         wrong_merkle.header.merkle_root = "d".repeat(64);
+        assert!(validate_pbft_pre_prepare_block(
+            &wrong_merkle,
+            &validator_set,
+            0,
+            &tip_hash,
+            tip_timestamp,
+            now,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn validate_pbft_pre_prepare_rejects_backdated_and_future_timestamps() {
+        let signing_key = SigningKey::from_bytes(&[10u8; 32]);
+        let validator_set = common::ValidatorSet::new(vec![validator("node-time", &signing_key)]);
+        let tip_hash = common::Block::genesis().hash();
+        let now = chrono::DateTime::from_timestamp(1_900_000_000, 0).unwrap();
+        let tip_timestamp = chrono::DateTime::from_timestamp(1_899_999_800, 0).unwrap();
+        let mut block = common::Block {
+            header: common::BlockHeader {
+                height: 1,
+                prev_hash: tip_hash.clone(),
+                merkle_root: common::merkle_root(&[]),
+                proposer_id: "node-time".into(),
+                timestamp: now,
+                validator_set_hash: common::canonical_validator_set_hash(&validator_set),
+                vrf_output: None,
+                vrf_proof: None,
+            },
+            transactions: Vec::new(),
+            pbft_signatures: Vec::new(),
+        };
+
+        block.header.timestamp = chrono::DateTime::from_timestamp(now.timestamp() - 61, 0).unwrap();
         assert!(
-            validate_pbft_pre_prepare_block(&wrong_merkle, &validator_set, 0, &tip_hash).is_err()
+            validate_pbft_pre_prepare_block(
+                &block,
+                &validator_set,
+                0,
+                &tip_hash,
+                tip_timestamp,
+                now,
+            )
+            .is_err(),
+            "a monotonic but stale proposal must not revive expired authorizations"
+        );
+
+        block.header.timestamp = chrono::DateTime::from_timestamp(now.timestamp() + 61, 0).unwrap();
+        assert!(
+            validate_pbft_pre_prepare_block(
+                &block,
+                &validator_set,
+                0,
+                &tip_hash,
+                tip_timestamp,
+                now,
+            )
+            .is_err(),
+            "a far-future proposal must not poison subsequent chain time"
+        );
+
+        block.header.timestamp = tip_timestamp;
+        assert!(
+            validate_pbft_pre_prepare_block(
+                &block,
+                &validator_set,
+                0,
+                &tip_hash,
+                tip_timestamp,
+                now,
+            )
+            .is_err(),
+            "a child timestamp must be strictly later than its parent"
         );
     }
 

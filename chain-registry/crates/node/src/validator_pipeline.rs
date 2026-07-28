@@ -229,6 +229,7 @@ async fn process_package(
                     crate::validator_set_history::committee_authority_at(
                         &s.config.data_dir,
                         committee.validator_snapshot_height,
+                        &s.validator_set_bootstrap,
                     )
                     .ok()
                     .flatten()

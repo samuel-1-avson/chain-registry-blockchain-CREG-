@@ -49,8 +49,10 @@ Follow the full checklist — do **not** use the retired 3-node Sepolia lab.
 
 1. [VALIDATOR_ONBOARDING_CHECKLIST.md](../../docs/VALIDATOR_ONBOARDING_CHECKLIST.md)
 2. [GENESIS_ALPHA_COHORT_PLAYBOOK.md](../../docs/GENESIS_ALPHA_COHORT_PLAYBOOK.md) (if invited)
-3. Deploy with `docker-compose.validator.yml` or release `creg-node`
-4. Point at `https://api.testnet.cregnet.dev` for registration smoke tests
+3. Configure and monitor UTC synchronization with NTP/chrony; live proposals
+   outside the protocol's 60-second clock-skew window fail closed.
+4. Deploy with `docker-compose.validator.yml` or release `creg-node`
+5. Point at `https://api.testnet.cregnet.dev` for registration smoke tests
 
 ## Supported smoke checks
 
@@ -100,8 +102,11 @@ trusted-publisher authentication mode was used; a reviewed external
 verifier/policy must require the official npm authentication-mode signal.
 
 `POST /v1/validator/namespace-authority/attest` and
-`POST /v1/validator/namespace-authority/certificates` are planned authenticated
-interfaces, not currently guaranteed public endpoints. Both require
+`POST /v1/validator/namespace-authority/certificates` are implemented
+authenticated node interfaces and are registered in the shipped OpenAPI
+document. They are not guaranteed to be enabled on the deployed public
+endpoint until operators roll out a matching binary and reviewed verifier
+artifacts. Both require
 `CREG_OPERATOR_API_KEY` through `X-Operator-Key` or
 `Authorization: Bearer`; this service ACL is additional to controller and
 validator/quorum signatures. Attestation is limited to 2 requests per IP per

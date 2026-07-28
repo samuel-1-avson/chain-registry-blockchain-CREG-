@@ -16,6 +16,10 @@ use serde::{Deserialize, Serialize};
 pub const OWNERSHIP_SCHEMA_VERSION: u16 = 1;
 pub const NAMESPACE_AUTHORITY_PROOF_SCHEMA_VERSION: u16 = 2;
 pub const NAMESPACE_AUTHORITY_CERTIFICATE_SCHEMA_VERSION: u16 = 2;
+/// Maximum lifetime of a claim/recovery statement certified by validators.
+pub const MAX_NAMESPACE_AUTHORITY_CERTIFICATE_TTL_SECS: i64 = 15 * 60;
+/// Maximum inclusion window for a chain-bound namespace lifecycle event.
+pub const MAX_NAMESPACE_LIFECYCLE_EVENT_TTL_SECS: i64 = 24 * 60 * 60;
 /// Limits authority certificates to a recent authenticated validator set and
 /// prevents a retired committee from creating long-range namespace claims.
 pub const MAX_NAMESPACE_AUTHORITY_ANCHOR_LAG_BLOCKS: u64 = 64;
@@ -355,9 +359,16 @@ impl NamespaceAuthorityStatement {
         {
             return Err("authority certificate intent binding is invalid");
         }
+        if self.issued_at < 0
+            || self.expires_at <= self.issued_at
+            || self.expires_at.saturating_sub(self.issued_at)
+                > MAX_NAMESPACE_AUTHORITY_CERTIFICATE_TTL_SECS
+            || self.authority_proof.expires_at.timestamp() < self.expires_at
+        {
+            return Err("authority certificate validity window is invalid");
+        }
         if !is_canonical_single_line(&self.adapter_id)
             || !is_canonical_single_line(&self.adapter_version)
-            || self.expires_at <= self.issued_at
             || self.authority_proof.issued_at.timestamp() < self.issued_at.saturating_sub(60)
             || self.authority_proof.issued_at.timestamp() > self.expires_at
         {
@@ -684,7 +695,11 @@ impl NamespaceLifecycleEventV2 {
         {
             return Err("namespace lifecycle v2 successor EVM address is invalid");
         }
-        if self.issued_at < 0 || self.expires_at <= self.issued_at {
+        if self.issued_at < 0
+            || self.expires_at <= self.issued_at
+            || self.expires_at.saturating_sub(self.issued_at)
+                > MAX_NAMESPACE_LIFECYCLE_EVENT_TTL_SECS
+        {
             return Err("namespace lifecycle v2 expiry must be after issuance");
         }
         match self.action {
@@ -826,7 +841,10 @@ impl NamespaceLifecycleEvent {
         {
             return Err("namespace lifecycle event must change the controller");
         }
-        if self.expires_at <= self.issued_at {
+        if self.expires_at <= self.issued_at
+            || self.expires_at.signed_duration_since(self.issued_at)
+                > chrono::Duration::seconds(MAX_NAMESPACE_LIFECYCLE_EVENT_TTL_SECS)
+        {
             return Err("namespace lifecycle expiry must be after issuance");
         }
         match self.action {
@@ -1075,7 +1093,7 @@ mod tests {
             anchor_block_hash: "5".repeat(64),
             validator_set_hash: crate::canonical_validator_set_hash(validators),
             issued_at: 1_700_000_000,
-            expires_at: 1_700_003_600,
+            expires_at: 1_700_000_600,
         }
     }
 
@@ -1237,6 +1255,41 @@ mod tests {
     }
 
     #[test]
+    fn authority_certificate_requires_bounded_validity_covered_by_its_proof() {
+        let (_, validators) = validator_fixture();
+        let statement = authority_statement(
+            NamespaceAuthorityPurpose::Claim,
+            proof(),
+            &validators,
+            "",
+            "",
+            7,
+        );
+        assert!(statement.validate_structure().is_ok());
+
+        let mut exact_limit = statement.clone();
+        exact_limit.expires_at =
+            exact_limit.issued_at + MAX_NAMESPACE_AUTHORITY_CERTIFICATE_TTL_SECS;
+        assert!(exact_limit.validate_structure().is_ok());
+
+        let mut too_long = statement.clone();
+        too_long.expires_at = too_long.issued_at + MAX_NAMESPACE_AUTHORITY_CERTIFICATE_TTL_SECS + 1;
+        assert_eq!(
+            too_long.validate_structure(),
+            Err("authority certificate validity window is invalid")
+        );
+
+        let mut proof_expires_first = statement;
+        proof_expires_first.authority_proof.expires_at =
+            DateTime::from_timestamp(proof_expires_first.expires_at - 1, 0)
+                .expect("valid proof expiry");
+        assert_eq!(
+            proof_expires_first.validate_structure(),
+            Err("authority certificate validity window is invalid")
+        );
+    }
+
+    #[test]
     fn authority_certificate_rejects_tampering_and_ambiguous_signers() {
         let (keys, validators) = validator_fixture();
         let statement = authority_statement(
@@ -1304,6 +1357,17 @@ mod tests {
         let event = signed_lifecycle_event(event, Some(&current), &next);
         assert!(event.verify_controller_signatures().is_ok());
 
+        let mut exact_limit = event.clone();
+        exact_limit.expires_at = exact_limit.issued_at + MAX_NAMESPACE_LIFECYCLE_EVENT_TTL_SECS;
+        assert!(exact_limit.validate_structure().is_ok());
+
+        let mut too_long = event.clone();
+        too_long.expires_at = too_long.issued_at + MAX_NAMESPACE_LIFECYCLE_EVENT_TTL_SECS + 1;
+        assert_eq!(
+            too_long.validate_structure(),
+            Err("namespace lifecycle v2 expiry must be after issuance")
+        );
+
         let mut unknown = serde_json::to_value(&event).unwrap();
         unknown["unsigned_extension"] = serde_json::json!("must-reject");
         assert!(serde_json::from_value::<NamespaceLifecycleEventV2>(unknown).is_err());
@@ -1346,7 +1410,7 @@ mod tests {
             delegation_expires_at: None,
             nonce: 9,
             issued_at: 1_700_000_000,
-            expires_at: 1_700_003_600,
+            expires_at: 1_700_000_600,
             current_controller_signature: String::new(),
             next_controller_signature: String::new(),
             authority_proof_digest: String::new(),
@@ -1470,6 +1534,19 @@ mod tests {
         assert!(event.is_valid_at(now));
         assert!(event.is_valid_at(now + Duration::minutes(30)));
         assert!(!event.is_valid_at(event.expires_at));
+
+        let mut exact_limit = event.clone();
+        exact_limit.expires_at =
+            exact_limit.issued_at + Duration::seconds(MAX_NAMESPACE_LIFECYCLE_EVENT_TTL_SECS);
+        assert!(exact_limit.validate_structure().is_ok());
+
+        let mut too_long = exact_limit;
+        too_long.expires_at += Duration::seconds(1);
+        assert_eq!(
+            too_long.validate_structure(),
+            Err("namespace lifecycle expiry must be after issuance")
+        );
+
         event.expires_at = now;
         assert!(!event.is_valid_at(now));
     }

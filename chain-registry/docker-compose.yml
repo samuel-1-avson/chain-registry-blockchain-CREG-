@@ -112,6 +112,12 @@ services:
       CREG_SPEC_SIGNATURE_URL: http://spec-server/chain-spec.json.sig
       CREG_SPEC_SIGNING_PUBKEY: ${CREG_SPEC_SIGNING_PUBKEY:-0437e4adac481519cd6ae66907294c40cfcbf0bdeadd47806f6233be4bd5f82d}
 
+      # Staged validator-authority rollout. Leave the checkpoint empty and
+      # mandatory mode false until an independently verified certificate and
+      # fleet rehearsal are available.
+      CREG_WEAK_SUBJECTIVITY_CHECKPOINT: "${CREG_WEAK_SUBJECTIVITY_CHECKPOINT:-}"
+      CREG_REQUIRE_CERTIFIED_COMMITTEES: "${CREG_REQUIRE_CERTIFIED_COMMITTEES:-false}"
+
       # CR-07 activation and policy pins come only from that verified spec.
       # Empty verifier paths keep authority attestation fail-closed.
       CREG_NAMESPACE_AUTHORITY_NPM_VERIFIER_PATH: ${CREG_NAMESPACE_AUTHORITY_NPM_VERIFIER_PATH:-}

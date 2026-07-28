@@ -4,7 +4,7 @@
 > **Version:** Public alpha (`creg-testnet-1`)  
 > **Network:** Ethereum Sepolia (L1 chain id `11155111`)  
 > **Status:** Public alpha testnet — not mainnet  
-> **Last updated:** 2026-07-25 (CR-07 authoritative namespace lifecycle and protocol-v2 authority verification)
+> **Last updated:** 2026-07-28 (CR-07 rollout surfaces, protocol lifetimes, and deterministic block-time validation)
 
 This document describes the complete system workflow of the Chain Registry blockchain: architecture, components, consensus, networking, storage, security, operations, and developer onboarding. It is scoped to the **core blockchain project** (`chain-registry/` workspace, contracts, circuits, testnet) and excludes the waitlist application and contribution arena.
 
@@ -467,6 +467,11 @@ Small three-validator testnet clusters may opt into 2-of-3 via `CREG_PBFT_ALLOW_
 - Proposer must match VRF/deterministic selection for the epoch
 - PBFT signatures must verify under `creg-pbft-v1` domain
 - Unknown validators are rejected on P2P ingress
+- Every canonical child timestamp must be strictly later than its parent
+- A live PBFT proposal must use whole Unix seconds and fall within 60 seconds
+  of the receiving node's clock. Historical replay, sync, and reorg validation
+  enforce deterministic parent-child monotonicity without rejecting an old
+  block merely because of its current wall-clock age.
 
 ### 4.5 Propagation
 
@@ -767,12 +772,19 @@ The authority statement binds the policy pins, proof, native artifact digest,
 and a recent canonical block/validator-set hash. A valid certificate requires
 matching distinct signatures from `floor(2n/3)+1` members of that preceding
 authenticated set.
+An authority statement/certificate may remain valid for at most 15 minutes.
+The proof-retaining v4 publisher authorization and a v2 lifecycle event each
+have a maximum 24-hour issuance-to-expiry window.
 
 Post-activation first claims use v4 publisher authorization with the
 certificate attached. `delegate` retains the root controller and grants an
 expiring `publish` scope; `transfer` requires current-root and successor
 signatures; `recover` requires a fresh recovery-purpose v2 certificate.
 Publisher and lifecycle nonces are durable and single-use.
+The generic `POST /v1/publisher/namespaces/lifecycle` endpoint and the
+action-specific `/delegate`, `/transfer`, and `/recover` endpoints accept the
+same versioned body; an action-specific route rejects a signed body naming a
+different action.
 
 Legacy CLI signing and legacy `creg multisig` are disabled by default. A
 non-production pre-activation lab must explicitly set
@@ -783,7 +795,11 @@ Production verifier binaries, official trust material, signed policy bundles,
 the npm trusted-publisher authentication-mode signal, a versioned signed
 activation/checkpoint, live operator rehearsal, and independent security
 review remain readiness gates. The in-repository protocol boundary and
-sidecar contract do not satisfy those external gates.
+sidecar contract do not satisfy those external gates. Production deployment
+must additionally isolate each verifier as an unprivileged, network-denied,
+resource-bounded process with immutable executable/policy/trust mounts, close
+the hash-check-to-launch replacement window, and enforce archive retention,
+quota, and reviewed garbage collection.
 
 ### 8.2 Transaction Lifecycle
 
@@ -1106,9 +1122,11 @@ This keeps resource usage bounded while preserving Byzantine resistance, opennes
 
 New validator-set transitions are signed by a distinct `floor(2n/3)+1` quorum of the **preceding** set. A transition commits to its effective height, preceding block hash, previous-set hash, next-set hash, and the complete next validator set. Nodes persist only verified, continuous transitions; conflicts at an effective height and replayed certificates do not replace an existing authority record.
 
-Committee assignments now commit to the validator-set hash, snapshot height, preceding-block fork anchor, certificate digest, public selection randomness, selector seed, and ordered members. Any node handling a certified assignment loads the exact anchor block, derives expected randomness from its VRF output (or the anchor hash fallback), recomputes the assignment from the persisted snapshot, and rejects member substitution, attacker-chosen randomness, certificate substitution, or fork-anchor replay. Signed transitions are also gossiped on the dedicated `creg/v1/validator-set-transitions` topic; receivers defer gossip acceptance until they independently repeat next-height, local-tip, quorum, checkpoint, and continuity checks and durably persist the certificate.
+The protocol's legacy-named certificate hash is a **logical transition ID** over those signed transition fields; it deliberately excludes the replaceable signature list. Honest peers can receive different valid prior-set quorum subsets without creating a false conflict. Every declared signature is still validated, and the exact sorted witness digest remains available for audit while the first accepted witness encoding is retained. Existing alpha assignments that used the older witness-sensitive digest must be drained or migrated before mandatory certified-committee mode is enabled.
 
-For new or rebuilt nodes, operators may provision `CREG_WEAK_SUBJECTIVITY_CHECKPOINT` with a previously verified transition certificate. Peers expose certified history through `GET /v1/validator/set-transitions`, but a rebuilding node accepts no timeline unless it contains that exact checkpoint, every transition verifies sequentially from bootstrap authority, peer histories have a compatible prefix, and every locally available block anchor matches the canonical chain. The node prevalidates the complete bounded response before importing its eligible prefix. History writes are serialized, a configured checkpoint chain is retained beyond the 512-entry compatibility cap, and reorg recovery removes certificates anchored after the canonical ancestor. This checkpoint is deployment configuration, not a privileged network message. `CREG_REQUIRE_CERTIFIED_COMMITTEES=true` makes package admission fail closed until checkpoint-anchored certified authority is available. Public alpha still requires a published independently verified checkpoint plus live multi-operator reorg/long-range rehearsal before this mode is enabled network-wide.
+Committee assignments now commit to the validator-set hash, snapshot height, preceding-block fork anchor, logical transition ID, public selection randomness, selector seed, and ordered members. Any node handling a certified assignment loads the exact anchor block, derives expected randomness from its VRF output (or the anchor hash fallback), recomputes the assignment from the persisted snapshot, and rejects member substitution, attacker-chosen randomness, transition substitution, or fork-anchor replay. Signed transitions are also gossiped on the dedicated `creg/v1/validator-set-transitions` topic; receivers defer gossip acceptance until they independently repeat body/count bounds, validator-identity uniqueness, next-height, local-tip, full-witness, quorum, checkpoint, and continuity checks and durably persist the certificate.
+
+For new or rebuilt nodes, operators may provision `CREG_WEAK_SUBJECTIVITY_CHECKPOINT` with a previously verified transition certificate. Peers expose certified history through `GET /v1/validator/set-transitions`, but a rebuilding node accepts no timeline unless it contains that exact checkpoint, peer histories have a compatible prefix, and every locally available block anchor matches the canonical chain. When a peer supplies the pre-checkpoint prefix, the node verifies it sequentially from bootstrap authority; when retention has pruned that prefix, the exact independently verified checkpoint becomes the trust root and every supplied descendant must verify sequentially from its validator set. The node prevalidates the complete bounded response before importing its eligible prefix. History writes are serialized, a configured checkpoint chain is retained beyond the 512-entry compatibility cap, and reorg recovery removes certificates anchored after the canonical ancestor. This checkpoint is deployment configuration, not a privileged network message. `CREG_REQUIRE_CERTIFIED_COMMITTEES=true` makes package admission fail closed until checkpoint-anchored certified authority is available. Public alpha still requires a published independently verified checkpoint plus live multi-operator reorg/long-range rehearsal before this mode is enabled network-wide.
 
 See `package_admission::compute_analysis_committee_at_admission`, `package_admission::verify_analysis_committee_assignment`, the persisted-assignment gate in `validator_pipeline`, `aggregate_evidence_votes`, `update_performance_scores`, and the reward emission hook in `validator_pipeline`.
 
@@ -1676,6 +1694,8 @@ Shared: IPFS, chain-spec nginx, P2P ports 29100–29102.
 | `CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM` | 2-of-3 testnet shortcut (dev only) |
 | `CREG_PROPOSER_FALLBACK_SECS` | Proposer stall fallback rotation |
 | `CREG_BRIDGE_KEY` | Hot key for L1 bridge submissions |
+| `CREG_WEAK_SUBJECTIVITY_CHECKPOINT` | Complete independently verified signed validator-set transition for new/rebuilt nodes; empty until published and rehearsed |
+| `CREG_REQUIRE_CERTIFIED_COMMITTEES` | Fail-closed committee admission control; default false until checkpoint rollout and fleet rehearsal complete |
 | `CREG_NAMESPACE_AUTHORITY_NPM_VERIFIER_PATH` | Absolute validator-local npm verifier; empty keeps npm attestation fail-closed |
 | `CREG_NAMESPACE_AUTHORITY_PYPI_VERIFIER_PATH` | Absolute validator-local PyPI verifier; empty keeps PyPI attestation fail-closed |
 | `CREG_NAMESPACE_AUTHORITY_VERIFIER_TIMEOUT_SECS` | Sidecar deadline, default 30 seconds |
@@ -2085,4 +2105,4 @@ See `docs/TESTNET_PHASE_SCOPE.md` for participant expectations.
 
 ---
 
-*This document is derived from the CREG codebase, whitepaper, and operator documentation as of 2026-07-25. For protocol authority, refer to `docs/WHITEPAPER.md`. For implementation gaps, refer to `chain-registry/DEEP_DIVE_ANALYSIS.md`.*
+*This document is derived from the CREG codebase, whitepaper, and operator documentation as of 2026-07-28. For protocol authority, refer to `docs/WHITEPAPER.md`. For implementation gaps, refer to `chain-registry/DEEP_DIVE_ANALYSIS.md`.*

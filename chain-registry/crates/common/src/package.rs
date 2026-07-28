@@ -5,6 +5,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 pub const PUBLISHER_AUTHORIZATION_SCHEMA_VERSION: u16 = 1;
+/// Maximum lifetime of a proof-retaining publisher authorization.
+pub const MAX_PUBLISHER_AUTHORIZATION_TTL_SECS: u64 = 24 * 60 * 60;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum FindingSeverity {
@@ -895,6 +897,8 @@ impl PublisherAuthorizationV1 {
                 .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
             || self.issued_at < 0
             || self.expires_at <= self.issued_at as u64
+            || self.expires_at.saturating_sub(self.issued_at as u64)
+                > MAX_PUBLISHER_AUTHORIZATION_TTL_SECS
         {
             return Err("publisher authorization metadata is incomplete");
         }
@@ -1349,7 +1353,8 @@ pub struct AnalysisCommittee {
     /// assignment from being replayed onto a competing chain fork.
     #[serde(default)]
     pub validator_snapshot_anchor_block_hash: String,
-    /// Digest of the quorum-certified snapshot. Empty marks a legacy/local
+    /// Witness-independent logical ID of the quorum-certified transition.
+    /// The legacy field name is retained on wire. Empty marks a legacy/local
     /// assignment and must never be treated as an authenticated anchor.
     #[serde(default)]
     pub validator_snapshot_certificate_hash: String,
@@ -1453,6 +1458,22 @@ mod publisher_authorization_tests {
         let record = record_fixture();
         let authorization = authorization_fixture(&record);
         assert!(authorization.validate_record_binding(&record).is_ok());
+    }
+
+    #[test]
+    fn publisher_authorization_rejects_validity_over_twenty_four_hours() {
+        let record = record_fixture();
+        let mut authorization = authorization_fixture(&record);
+        authorization.expires_at =
+            authorization.issued_at as u64 + MAX_PUBLISHER_AUTHORIZATION_TTL_SECS;
+        assert!(authorization.validate_record_binding(&record).is_ok());
+
+        authorization.expires_at =
+            authorization.issued_at as u64 + MAX_PUBLISHER_AUTHORIZATION_TTL_SECS + 1;
+        assert_eq!(
+            authorization.validate_record_binding(&record),
+            Err("publisher authorization metadata is incomplete")
+        );
     }
 
     #[test]

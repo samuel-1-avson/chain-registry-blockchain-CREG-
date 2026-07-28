@@ -27,6 +27,11 @@ data:
   # Optional for single-replica dev: CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM=true
   CREG_BLOCK_INTERVAL: "5"
 
+  # Weak-subjectivity / certified committee rollout. Keep these staged defaults
+  # until an exact signed checkpoint is independently verified and rehearsed.
+  CREG_WEAK_SUBJECTIVITY_CHECKPOINT: ""
+  CREG_REQUIRE_CERTIFIED_COMMITTEES: "false"
+
   # CR-07 authority verification. Consensus activation height and accepted
   # adapter/policy/trust-root pins are intentionally absent: they must come
   # from the signature-verified chain spec. Empty paths keep attestation

@@ -35,6 +35,10 @@ x-validator-env: &validator-env
   CREG_IPFS_URL: "${CREG_IPFS_URL:?set CREG_IPFS_URL to the shared IPFS API URL}"
   CREG_PG_URL: "${CREG_PG_URL:-}"
   CREG_VALIDATOR_SET: "${VALIDATOR_SET_JSON:-}"
+  # Leave empty/false until the exact signed checkpoint is independently
+  # verified and the mandatory-mode rollout is rehearsed.
+  CREG_WEAK_SUBJECTIVITY_CHECKPOINT: "${CREG_WEAK_SUBJECTIVITY_CHECKPOINT:-}"
+  CREG_REQUIRE_CERTIFIED_COMMITTEES: "${CREG_REQUIRE_CERTIFIED_COMMITTEES:-false}"
   # CR-07 activation and policy pins come only from the signature-verified
   # chain spec. Verifier paths stay empty until reviewed binaries are mounted
   # read-only at the corresponding absolute container paths.

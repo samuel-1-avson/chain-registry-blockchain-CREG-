@@ -19,6 +19,7 @@ One-page guide for **publishers**, **developers**, and **validators** joining th
 | **Staking Tooling** | Required for contract interactions |
 | **IPFS** | For **public testnet** publishes, set `CREG_IPFS_URL=https://ipfs.testnet.cregnet.dev` so fleet validators can fetch your tarball during admission. Local Kubo (`ipfs daemon` on `127.0.0.1:5001`) is fine for local dev only. |
 | **Two key types** | **Ed25519** (`creg keygen`) signs packages; **secp256k1 EOA** stakes tCREG on L1. |
+| **Validator UTC clock** | Validator/block-producer hosts must run monitored NTP/chrony. Live PBFT proposals outside the 60-second clock-skew window fail closed. |
 
 **Contract addresses (Sepolia defaults):**
 
@@ -164,7 +165,7 @@ Real (non-dev) sandbox + pinned scanner profile are required for your votes to c
 | `validator_set_sync=degraded` | Use archive-capable Sepolia RPC; set `epoch_block_height` in chain spec |
 | `UnknownValidator` on node | Complete L1 registration requirements |
 | `Consensus timeout` | Align scanner environment profiles across validators |
-| Wrong node / UNKNOWN status | Set `CREG_NODE_URL`; pending is lost on node restart |
+| Wrong node / UNKNOWN status | Set `CREG_NODE_URL`; pending state is durable on its admitting node but is not a global record until finalization, so querying another node or replacing its data directory can return `UNKNOWN` |
 | Publish 502 / admission timeout | Set `CREG_IPFS_URL=https://ipfs.testnet.cregnet.dev` when using public API; confirm CID with `curl -I "https://ipfs.testnet.cregnet.dev/ipfs/<cid>"` |
 
 ---
@@ -192,11 +193,13 @@ signal. Accepted evidence and artifact bytes are archived content-addressably.
 
 The future activation height and accepted verifier/policy/trust-root hashes
 must come from a signature-verified chain spec, never an environment-only
-override. The planned validator interfaces are
+override. The repository node API and shipped OpenAPI document implement
 `POST /v1/validator/namespace-authority/attest` and
-`POST /v1/validator/namespace-authority/certificates`; they are not guaranteed
-available until documented by the deployed OpenAPI specification. They are
-operator-controlled services requiring `CREG_OPERATOR_API_KEY` through
+`POST /v1/validator/namespace-authority/certificates`. Operators must still
+confirm that the public testnet is running a binary that exposes and protects
+them; source implementation is not evidence that the deployed routes or real
+verifiers are enabled. They are operator-controlled services requiring
+`CREG_OPERATOR_API_KEY` through
 `X-Operator-Key` or a bearer token in addition to controller/quorum
 signatures; they are not anonymous public publisher endpoints. Attestation is
 limited to 2 requests per source IP per minute and verifier concurrency is

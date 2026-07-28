@@ -42,18 +42,22 @@ Publisher and validator routes require the appropriate credentials — see Swagg
 
 `GET /v1/validator/set-transitions` returns the node's persisted quorum-certified history in ascending effective-height order. Unsigned compatibility observations are intentionally omitted, so a new or rebuilt node cannot promote them into validator authority.
 
-`POST /v1/validator/set-transitions` accepts a domain-separated Ed25519 quorum certificate from the validator set active immediately before the transition. The certificate is the authorization: a single node or operator key cannot rotate validator authority. Each receiver independently verifies the prior-set quorum, requires `effective_from_height` to be its next block height, checks `previous_block_hash` against its canonical tip, and persists only a continuous, non-conflicting certificate.
+`POST /v1/validator/set-transitions` accepts a domain-separated Ed25519 quorum certificate from the validator set active immediately before the transition. The certificate is the authorization: a single node or operator key cannot rotate validator authority. Each receiver independently verifies every declared witness, the prior-set quorum, validator identity/key uniqueness, protocol count bounds, `effective_from_height` as its next block height, and `previous_block_hash` against its canonical tip before persisting a continuous, non-conflicting certificate. The route has a dedicated 1 MiB body limit matching the gossip envelope limit.
 
 Accepted transitions propagate on the dedicated gossip topic `creg/v1/validator-set-transitions`. Gossip does not make a transition trusted; peers repeat the same certificate, continuity, replay, and fork-anchor validation before accepting it.
 
-Responses are `202` for an accepted certificate (including an exact retry while the same tip is current), `401` for an invalid/insufficient certificate, `409` for a stale height, conflicting certificate, checkpoint-history violation, or local tip-anchor conflict, and `503` when the configured checkpoint itself is malformed. New or rebuilt nodes should be provisioned with an independently verified `CREG_WEAK_SUBJECTIVITY_CHECKPOINT` before trusting post-checkpoint history.
+The stable transition ID hashes the signed transition fields, not the replaceable signature list. Two independently valid quorum subsets therefore converge on the same checkpoint and committee authority. Nodes still validate every received signature and retain the first accepted exact witness encoding; an exact witness digest can distinguish those audit records without changing consensus identity.
 
-## Namespace-authority attestations (planned CR-07 interface)
+Responses are `202` for an accepted certificate (including a logically identical retry while the same tip is current), `401` for an invalid/insufficient certificate, `409` for a stale height, conflicting transition, checkpoint-history violation, or local tip-anchor conflict, `413` for a body above 1 MiB, `500` for a local validator-history read, retention, serialization, or durable persistence failure, and `503` when the configured checkpoint itself is malformed. New or rebuilt nodes should be provisioned with an independently verified `CREG_WEAK_SUBJECTIVITY_CHECKPOINT` before trusting post-checkpoint history.
 
-The following paths are reserved but are **not a claim that the deployed API or real ecosystem verifiers are available**:
+## Namespace-authority attestations (implemented API, gated rollout)
 
-| Method | Path | Planned purpose |
-|--------|------|-----------------|
+The node router and shipped OpenAPI document implement the following paths.
+Their presence in source is **not a claim that a deployed API has enabled them
+or that reviewed ecosystem verifiers are available**:
+
+| Method | Path | Purpose |
+|--------|------|---------|
 | POST | `/v1/validator/namespace-authority/attest` | Ask one authenticated validator to separately fetch and verify bounded official evidence and `artifact_url` bytes using its independently installed, signed-spec-pinned verifier, then return its signed authority statement |
 | POST | `/v1/validator/namespace-authority/certificates` | Validate a caller-assembled deterministic prior-set quorum certificate for a claim or recovery and return its digest |
 
@@ -77,7 +81,7 @@ configured value above the hard maximum of 4. Exhausted rate or execution
 capacity is not authority evidence and must be retried without bypassing the
 ACL or certificate rules.
 
-The intended flow is:
+The implemented protocol flow is:
 
 1. A proposed controller signs a fresh chain/genesis/namespace/controller intent.
 2. A new npm/PyPI artifact contains that intent; registry provenance or attestations identify the upstream publisher and exact artifact.
@@ -92,7 +96,23 @@ in the shared proof or statement. Validators processing the same canonical
 request therefore sign byte-identical statement content despite completing
 verification at different seconds.
 
-Both routes must remain request-size limited and fail closed when an official artifact cannot be fetched, the native digest differs, or the verifier executable, signed policy, trust root, or chain anchor is unavailable or mismatched. For npm, a provenance envelope is not by itself proof that trusted-publisher authentication was used: the external verifier/policy must require an official npm authentication-mode signal. Real trust material, policy bundles, and reviewed npm/PyPI verifier artifacts remain external deployment gates. The authoritative request/response schemas and status codes will be the shipped OpenAPI document once implementation and adversarial tests are complete. Until then, clients must not depend on these placeholders.
+Both routes must remain request-size limited and fail closed when an official artifact cannot be fetched, the native digest differs, or the verifier executable, signed policy, trust root, or chain anchor is unavailable or mismatched. For npm, a provenance envelope is not by itself proof that trusted-publisher authentication was used: the external verifier/policy must require an official npm authentication-mode signal. Real trust material, policy bundles, and reviewed npm/PyPI verifier artifacts remain external deployment gates. The shipped OpenAPI document defines the repository request/response schemas and status codes. Clients must still confirm that the deployed binary exposes and protects these routes before relying on them.
+
+## Namespace lifecycle
+
+`POST /v1/publisher/namespaces/lifecycle` accepts a signed delegation, transfer,
+or recovery event. The action-specific routes
+`POST /v1/publisher/namespaces/delegate`,
+`POST /v1/publisher/namespaces/transfer`, and
+`POST /v1/publisher/namespaces/recover` use the same versioned body but require
+its signed `action` to match the selected route.
+
+Delegation retains the root controller and grants only a signed, expiring
+`publish` scope. Transfer requires the current root and successor to sign the
+same event. Recovery requires a fresh recovery-purpose npm/PyPI authority
+certificate for the proposed controller. Durable nonces, chain/genesis scope,
+validity windows, controller state, and the prior-event hash are checked before
+the event is queued and again during deterministic block replay.
 
 ## Hub API (this site)
 

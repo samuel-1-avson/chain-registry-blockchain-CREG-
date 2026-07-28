@@ -516,15 +516,14 @@ mod tests {
         assert!(!consensus.contains_key("namespace_authority_policies"));
 
         spec.consensus_params.namespace_authority_activation_height = Some(100);
-        spec.consensus_params.namespace_authority_policies =
-            vec![NamespaceAuthorityPolicySpec {
-                authority: crate::OwnershipAuthority::PypiTrustedPublisher,
-                adapter_id: "creg-pypi-sigstore".into(),
-                adapter_version: "2.0.0".into(),
-                verifier_sha256: "1".repeat(64),
-                policy_sha256: "2".repeat(64),
-                trust_root_sha256: "3".repeat(64),
-            }];
+        spec.consensus_params.namespace_authority_policies = vec![NamespaceAuthorityPolicySpec {
+            authority: crate::OwnershipAuthority::PypiTrustedPublisher,
+            adapter_id: "creg-pypi-sigstore".into(),
+            adapter_version: "2.0.0".into(),
+            verifier_sha256: "1".repeat(64),
+            policy_sha256: "2".repeat(64),
+            trust_root_sha256: "3".repeat(64),
+        }];
         let value = serde_json::to_value(&spec).unwrap();
         assert_eq!(
             value["consensus_params"]["namespace_authority_activation_height"],

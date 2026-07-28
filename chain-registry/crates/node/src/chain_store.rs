@@ -13,10 +13,10 @@ use common::{
 use rocksdb::{checkpoint::Checkpoint, ColumnFamilyDescriptor, Options, WriteOptions, DB};
 use semver;
 use sled;
-use std::sync::Arc;
 use std::{
     collections::{BTreeMap, HashSet},
     path::{Path, PathBuf},
+    sync::{Arc, Condvar, Mutex},
 };
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -137,6 +137,131 @@ pub struct ChainStore {
     /// leaf, and head durable together; this lock prevents two local writers
     /// from choosing the same sequence number.
     transparency_log_lock: Arc<std::sync::Mutex<()>>,
+    /// Serializes every RocksDB mutation against reorg journal creation,
+    /// adoption, recovery, and completion.
+    ///
+    /// Lock order is: caller-owned `NodeState` lock -> this store mutation
+    /// lock -> validator-set-history lock. Code holding this lock must never
+    /// acquire `NodeState`.
+    store_mutation_lock: Arc<StoreMutationMutex>,
+    #[cfg(test)]
+    reorg_begin_test_hook: Arc<Mutex<Option<ReorgBeginTestHook>>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StoreMutationOwner {
+    Idle,
+    Ordinary,
+    Reorg,
+}
+
+#[derive(Debug)]
+struct StoreMutationMutex {
+    owner: Mutex<StoreMutationOwner>,
+    available: Condvar,
+}
+
+impl Default for StoreMutationMutex {
+    fn default() -> Self {
+        Self {
+            owner: Mutex::new(StoreMutationOwner::Idle),
+            available: Condvar::new(),
+        }
+    }
+}
+
+struct StoreMutationGuard {
+    mutex: Arc<StoreMutationMutex>,
+    owner: StoreMutationOwner,
+}
+
+impl StoreMutationGuard {
+    fn ordinary(mutex: &Arc<StoreMutationMutex>) -> Result<Self> {
+        let mut owner = mutex
+            .owner
+            .lock()
+            .map_err(|_| anyhow::anyhow!("store mutation lock is poisoned"))?;
+        loop {
+            match *owner {
+                StoreMutationOwner::Idle => {
+                    *owner = StoreMutationOwner::Ordinary;
+                    return Ok(Self {
+                        mutex: Arc::clone(mutex),
+                        owner: StoreMutationOwner::Ordinary,
+                    });
+                }
+                StoreMutationOwner::Ordinary => {
+                    owner = mutex
+                        .available
+                        .wait(owner)
+                        .map_err(|_| anyhow::anyhow!("store mutation lock is poisoned"))?;
+                }
+                StoreMutationOwner::Reorg => {
+                    anyhow::bail!(
+                        "chain is in reorg-recovery maintenance; canonical mutations are unavailable"
+                    );
+                }
+            }
+        }
+    }
+
+    fn reorg(mutex: &Arc<StoreMutationMutex>) -> Result<Self> {
+        let mut owner = mutex
+            .owner
+            .lock()
+            .map_err(|_| anyhow::anyhow!("store mutation lock is poisoned"))?;
+        loop {
+            match *owner {
+                StoreMutationOwner::Idle => {
+                    *owner = StoreMutationOwner::Reorg;
+                    return Ok(Self {
+                        mutex: Arc::clone(mutex),
+                        owner: StoreMutationOwner::Reorg,
+                    });
+                }
+                StoreMutationOwner::Ordinary => {
+                    owner = mutex
+                        .available
+                        .wait(owner)
+                        .map_err(|_| anyhow::anyhow!("store mutation lock is poisoned"))?;
+                }
+                StoreMutationOwner::Reorg => {
+                    anyhow::bail!("another live reorg mutation guard is already active");
+                }
+            }
+        }
+    }
+}
+
+impl Drop for StoreMutationGuard {
+    fn drop(&mut self) {
+        let mut current = self
+            .mutex
+            .owner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        debug_assert_eq!(*current, self.owner);
+        if *current == self.owner {
+            *current = StoreMutationOwner::Idle;
+            self.mutex.available.notify_all();
+        }
+    }
+}
+
+#[cfg(test)]
+#[derive(Clone)]
+struct ReorgBeginTestHook {
+    lock_acquired: Arc<std::sync::Barrier>,
+    resume: Arc<std::sync::Barrier>,
+}
+
+/// Capability authorizing the canonical writes that are part of one active
+/// reorganization. Public mutation entry points reject all writes while the
+/// durable journal exists; only code holding this DB-bound guard may apply or
+/// commit the preflighted candidate branch.
+pub(crate) struct ReorgMutationGuard {
+    db: Arc<DB>,
+    mutation: StoreMutationGuard,
 }
 
 impl ChainStore {
@@ -184,6 +309,44 @@ impl ChainStore {
             .transpose()
     }
 
+    /// Acquire the store-wide ordinary mutation capability and check the
+    /// durable maintenance latch while that capability is held. Keeping the
+    /// returned guard alive through the RocksDB write closes the former
+    /// check-then-write race with `begin_reorg_journal`.
+    fn ensure_no_active_reorg(&self) -> Result<StoreMutationGuard> {
+        let guard = StoreMutationGuard::ordinary(&self.store_mutation_lock)?;
+        if self.load_reorg_journal()?.is_some() {
+            anyhow::bail!(
+                "chain is in reorg-recovery maintenance; canonical mutations are unavailable"
+            );
+        }
+        Ok(guard)
+    }
+
+    fn try_active_reorg_guard(&self) -> Result<Option<ReorgMutationGuard>> {
+        let mutation = StoreMutationGuard::reorg(&self.store_mutation_lock)?;
+        if self.load_reorg_journal()?.is_none() {
+            return Ok(None);
+        }
+        Ok(Some(ReorgMutationGuard {
+            db: Arc::clone(&self.db),
+            mutation,
+        }))
+    }
+
+    fn validate_reorg_guard(&self, guard: &ReorgMutationGuard) -> Result<()> {
+        if !Arc::ptr_eq(&self.db, &guard.db)
+            || !Arc::ptr_eq(&self.store_mutation_lock, &guard.mutation.mutex)
+            || guard.mutation.owner != StoreMutationOwner::Reorg
+        {
+            anyhow::bail!("reorg mutation guard belongs to a different chain database");
+        }
+        if self.load_reorg_journal()?.is_none() {
+            anyhow::bail!("reorg mutation guard is no longer active");
+        }
+        Ok(())
+    }
+
     fn load_reorg_finalized_work_snapshot(&self) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
         let cf = self
             .db
@@ -216,7 +379,25 @@ impl ChainStore {
         &self,
         common_ancestor: u64,
         old_branch: &[Block],
-    ) -> Result<()> {
+    ) -> Result<ReorgMutationGuard> {
+        // Acquire this before observing the journal or taking either durable
+        // snapshot. Ordinary mutations retain the same store-wide capability
+        // from their maintenance check through their write, so neither the
+        // canonical branch nor finalized-work queue can change underneath
+        // this journal.
+        let mutation = StoreMutationGuard::reorg(&self.store_mutation_lock)?;
+        #[cfg(test)]
+        {
+            let hook = self
+                .reorg_begin_test_hook
+                .lock()
+                .map_err(|_| anyhow::anyhow!("reorg begin test hook lock is poisoned"))?
+                .clone();
+            if let Some(hook) = hook {
+                hook.lock_acquired.wait();
+                hook.resume.wait();
+            }
+        }
         if self.load_reorg_journal()?.is_some() {
             anyhow::bail!("another reorg journal is already active");
         }
@@ -295,7 +476,10 @@ impl ChainStore {
                     .context(
                         "persist reorg journal, validator history, and finalized-work snapshot",
                     )?;
-                Ok(())
+                Ok(ReorgMutationGuard {
+                    db: Arc::clone(&self.db),
+                    mutation,
+                })
             },
         )
     }
@@ -403,19 +587,31 @@ impl ChainStore {
     /// Complete startup/live recovery of an interrupted reorg after the signed
     /// namespace configuration has been installed.
     pub(crate) fn recover_incomplete_reorg(&self) -> Result<bool> {
-        if !self.restore_reorg_durable_state_if_needed()? {
+        let Some(guard) = self.try_active_reorg_guard()? else {
             return Ok(false);
-        }
-        self.rebuild_package_index()
+        };
+        self.recover_incomplete_reorg_with_guard(&guard)
+    }
+
+    /// Restore an interrupted live adoption while retaining its already-owned
+    /// store mutation capability. Terminal adoption failures call this before
+    /// their `ReorgMutationGuard` can be dropped; attempting to acquire a
+    /// second exclusive guard would otherwise reject recovery and leave the
+    /// durable journal latched.
+    pub(crate) fn recover_incomplete_reorg_with_guard(
+        &self,
+        guard: &ReorgMutationGuard,
+    ) -> Result<bool> {
+        self.validate_reorg_guard(guard)?;
+        self.restore_reorg_durable_state_if_needed()?;
+        self.rebuild_package_index_for_reorg(guard)
             .context("rebuild derived state while recovering incomplete reorg")?;
-        self.complete_reorg_journal()?;
+        self.complete_reorg_journal(guard)?;
         Ok(true)
     }
 
-    pub(crate) fn complete_reorg_journal(&self) -> Result<()> {
-        if self.load_reorg_journal()?.is_none() {
-            return Ok(());
-        }
+    pub(crate) fn complete_reorg_journal(&self, guard: &ReorgMutationGuard) -> Result<()> {
+        self.validate_reorg_guard(guard)?;
         let cf = self
             .db
             .cf_handle(CF_REORG_JOURNAL)
@@ -480,9 +676,15 @@ impl ChainStore {
             namespace_consensus: Arc::new(std::sync::RwLock::new(Default::default())),
             publisher_admission_nonce_lock: Arc::new(std::sync::Mutex::new(())),
             transparency_log_lock: Arc::new(std::sync::Mutex::new(())),
+            store_mutation_lock: Arc::new(StoreMutationMutex::default()),
+            #[cfg(test)]
+            reorg_begin_test_hook: Arc::new(Mutex::new(None)),
         };
 
-        store.restore_reorg_durable_state_if_needed()?;
+        if let Some(guard) = store.try_active_reorg_guard()? {
+            store.restore_reorg_durable_state_if_needed()?;
+            drop(guard);
+        }
 
         // Write the genesis block if the chain is empty.
         if store.tip_height()? == 0 && store.block_count() == 0 {
@@ -531,6 +733,9 @@ impl ChainStore {
             namespace_consensus: Arc::new(std::sync::RwLock::new(Default::default())),
             publisher_admission_nonce_lock: Arc::new(std::sync::Mutex::new(())),
             transparency_log_lock: Arc::new(std::sync::Mutex::new(())),
+            store_mutation_lock: Arc::new(StoreMutationMutex::default()),
+            #[cfg(test)]
+            reorg_begin_test_hook: Arc::new(Mutex::new(None)),
         };
         if store.load_reorg_journal()?.is_some() {
             anyhow::bail!(
@@ -543,6 +748,7 @@ impl ChainStore {
     /// Migrate data from a legacy sled database into this RocksDB store.
     /// Call once at startup if the sled directory still exists.
     pub fn migrate_from_sled(&self, sled_dir: &Path) -> Result<u64> {
+        let _mutation = self.ensure_no_active_reorg()?;
         let sled_db_path = sled_dir.join("chain.db");
         if !sled_db_path.exists() {
             return Ok(0);
@@ -617,6 +823,20 @@ impl ChainStore {
     /// Callers MUST rebuild derived state (package index, publisher index)
     /// afterwards via `rebuild_package_index` + `PublisherIndex::rebuild_from_chain`.
     pub fn rollback_to_height(&self, height: u64) -> Result<Vec<String>> {
+        let _mutation = self.ensure_no_active_reorg()?;
+        self.rollback_to_height_inner(height)
+    }
+
+    pub(crate) fn rollback_to_height_for_reorg(
+        &self,
+        guard: &ReorgMutationGuard,
+        height: u64,
+    ) -> Result<Vec<String>> {
+        self.validate_reorg_guard(guard)?;
+        self.rollback_to_height_inner(height)
+    }
+
+    fn rollback_to_height_inner(&self, height: u64) -> Result<Vec<String>> {
         let tip = self.tip_height()?;
         if tip <= height {
             return Ok(vec![]);
@@ -742,6 +962,16 @@ impl ChainStore {
     /// block from genesis to the current tip. Required after a reorg rewind so
     /// records indexed from abandoned blocks don't linger.
     pub fn rebuild_package_index(&self) -> Result<()> {
+        let _mutation = self.ensure_no_active_reorg()?;
+        self.rebuild_package_index_inner(None)
+    }
+
+    pub(crate) fn rebuild_package_index_for_reorg(&self, guard: &ReorgMutationGuard) -> Result<()> {
+        self.validate_reorg_guard(guard)?;
+        self.rebuild_package_index_inner(Some(guard))
+    }
+
+    fn rebuild_package_index_inner(&self, reorg_guard: Option<&ReorgMutationGuard>) -> Result<()> {
         let cf_pkg = self.db.cf_handle(CF_PACKAGES).context("cf packages")?;
         let cf_namespace_controllers = self
             .db
@@ -808,7 +1038,12 @@ impl ChainStore {
         let tip = self.tip_height()?;
         for h in 0..=tip {
             if let Some(block) = self.get_block_by_height(h)? {
-                self.insert_block(&block)?;
+                match reorg_guard {
+                    Some(guard) => self.insert_block_for_reorg(guard, &block)?,
+                    // Public rebuild holds the ordinary store mutation guard
+                    // for the whole clear-and-replay operation.
+                    None => self.insert_block_inner(&block)?,
+                }
             }
         }
         tracing::info!("Package index rebuilt from canonical chain (tip {})", tip);
@@ -816,16 +1051,88 @@ impl ChainStore {
     }
 
     pub fn insert_block(&self, block: &Block) -> Result<()> {
+        let _mutation = self.ensure_no_active_reorg()?;
+        self.insert_block_inner(block)
+    }
+
+    pub(crate) fn insert_block_for_reorg(
+        &self,
+        guard: &ReorgMutationGuard,
+        block: &Block,
+    ) -> Result<()> {
+        self.validate_reorg_guard(guard)?;
+        self.insert_block_inner(block)
+    }
+
+    fn insert_block_inner(&self, block: &Block) -> Result<()> {
         let hash = block.hash();
         let bytes = serde_json::to_vec(block)?;
-        if let Some(existing) = self.get_block_by_height(block.header.height)? {
+        // PBFT certificates attest the header hash but are not themselves
+        // committed by it. Different honest quorum subsets or signature order
+        // therefore describe the same canonical payload. Idempotence compares
+        // exactly the header and transaction body, while preserving the first
+        // accepted certificate encoding.
+        let canonical_payload = serde_json::to_value((&block.header, &block.transactions))?;
+        let existing_at_height = self.get_block_by_height(block.header.height)?;
+        if let Some(existing) = existing_at_height.as_ref() {
             if existing.hash() != hash
-                || serde_json::to_value(&existing)? != serde_json::to_value(block)?
+                || serde_json::to_value((&existing.header, &existing.transactions))?
+                    != canonical_payload
             {
                 anyhow::bail!(
                     "refusing direct replacement of canonical block at height {}; use the preflighted reorg path",
                     block.header.height
                 );
+            }
+        }
+
+        if block.header.height == 0 {
+            let genesis = Block::genesis();
+            if serde_json::to_value(block)? != serde_json::to_value(&genesis)?
+                || block.hash() != genesis.hash()
+            {
+                anyhow::bail!("height zero must contain the exact canonical genesis block");
+            }
+            if existing_at_height.is_none() && self.block_count() != 0 {
+                anyhow::bail!("canonical genesis may only initialize an empty chain store");
+            }
+        } else {
+            let expected_merkle_root = common::merkle_root(&block.transactions);
+            if block.header.merkle_root != expected_merkle_root {
+                anyhow::bail!("block merkle root does not commit to its transaction body");
+            }
+
+            let parent_height = block.header.height - 1;
+            let parent = self.get_block_by_height(parent_height)?.ok_or_else(|| {
+                anyhow::anyhow!("canonical parent block {parent_height} is missing")
+            })?;
+            let parent_hash = parent.hash();
+            if block.header.prev_hash != parent_hash {
+                anyhow::bail!(
+                    "block {} does not descend from canonical parent {}",
+                    block.header.height,
+                    parent_height
+                );
+            }
+            crate::block_time::validate_chain_timestamp(
+                parent.header.timestamp,
+                block.header.timestamp,
+            )
+            .with_context(|| {
+                format!(
+                    "block {} timestamp does not follow canonical parent {}",
+                    block.header.height, parent_height
+                )
+            })?;
+            if existing_at_height.is_none() {
+                let expected_height = self.tip_height()?.saturating_add(1);
+                if block.header.height != expected_height {
+                    anyhow::bail!(
+                        "new canonical block height {} does not append expected height {}",
+                        block.header.height,
+                        expected_height
+                    );
+                }
             }
         }
         let namespace_config = self.namespace_consensus_config()?;
@@ -839,9 +1146,12 @@ impl ChainStore {
             .context("cf blocks_by_hash")?;
         let body_already_stored =
             if let Some(existing_bytes) = self.db.get_cf(&cf_hash, hash.as_bytes())? {
-                let existing_body: serde_json::Value = serde_json::from_slice(&existing_bytes)
+                let existing_block: Block = serde_json::from_slice(&existing_bytes)
                     .context("decode block body stored under existing header hash")?;
-                if existing_body != serde_json::to_value(block)? {
+                if existing_block.hash() != hash
+                    || serde_json::to_value((&existing_block.header, &existing_block.transactions))?
+                        != canonical_payload
+                {
                     anyhow::bail!(
                         "refusing replacement of block body stored under existing header hash {}",
                         hash
@@ -881,8 +1191,9 @@ impl ChainStore {
         let mut batch = rocksdb::WriteBatch::default();
         let mut lifecycle_nonces_in_block = HashSet::new();
         // Preserve the first accepted encoding. A decoded/re-encoded block can
-        // differ only in JSON map order; semantic equality above makes that an
-        // idempotent replay without allowing body or certificate replacement.
+        // differ in JSON map order or carry a different valid PBFT quorum
+        // subset/order; payload equality above makes that an idempotent replay
+        // without allowing header or transaction replacement.
         if !body_already_stored {
             batch.put_cf(&cf_hash, hash.as_bytes(), &bytes);
         }
@@ -1145,6 +1456,7 @@ impl ChainStore {
     }
 
     pub fn save_package(&self, record: &ChainRecord) -> Result<()> {
+        let _mutation = self.ensure_no_active_reorg()?;
         let cf = self.db.cf_handle(CF_PACKAGES).context("cf packages")?;
         let namespace_cf = self
             .db
@@ -1351,6 +1663,7 @@ impl ChainStore {
         current_controller_pubkey: &str,
         nonce: u64,
     ) -> Result<bool> {
+        let _mutation = self.ensure_no_active_reorg()?;
         let key = namespace_lifecycle_nonce_key(namespace, current_controller_pubkey, nonce)?;
         let _guard = self
             .publisher_admission_nonce_lock
@@ -1384,6 +1697,7 @@ impl ChainStore {
         nonce: &str,
         expires_at: u64,
     ) -> Result<bool> {
+        let _mutation = self.ensure_no_active_reorg()?;
         let publisher = common::canonical_publisher_address(publisher_address);
         let nonce = nonce.trim();
         if publisher.is_empty() {
@@ -1418,6 +1732,7 @@ impl ChainStore {
     /// idempotency key and the durable work identifier, so a retry cannot add a
     /// second logical item.
     pub fn enqueue_finalized_work(&self, tx: &Transaction) -> Result<bool> {
+        let _mutation = self.ensure_no_active_reorg()?;
         let work_id = transaction_hash(tx);
         let cf = self
             .db
@@ -1450,6 +1765,7 @@ impl ChainStore {
         current_controller_pubkey: &str,
         nonce: u64,
     ) -> Result<bool> {
+        let _mutation = self.ensure_no_active_reorg()?;
         let nonce_key = namespace_lifecycle_nonce_key(namespace, current_controller_pubkey, nonce)?;
         let _guard = self
             .publisher_admission_nonce_lock
@@ -1547,12 +1863,11 @@ impl ChainStore {
     /// accepts independently authenticated package and namespace operations.
     pub(crate) fn reconcile_finalized_work_after_reorg(
         &self,
+        guard: &ReorgMutationGuard,
         abandoned_branch: &[Block],
         canonical_transaction_hashes: &HashSet<String>,
     ) -> Result<Vec<(Transaction, u64)>> {
-        if self.load_reorg_journal()?.is_none() {
-            anyhow::bail!("cannot reconcile finalized work without an active reorg journal");
-        }
+        self.validate_reorg_guard(guard)?;
 
         let mut desired = BTreeMap::<String, Vec<u8>>::new();
         for (work_id, value) in self.load_reorg_finalized_work_snapshot()? {
@@ -1713,6 +2028,7 @@ impl ChainStore {
         source: &str,
         occurred_at: &str,
     ) -> Result<TreeHead> {
+        let _mutation = self.ensure_no_active_reorg()?;
         if log_id.trim().is_empty()
             || kind.trim().is_empty()
             || subject.trim().is_empty()
@@ -1868,6 +2184,7 @@ impl ChainStore {
     /// Acknowledge only after the transaction has been included in durable
     /// finalized block history. Failed production leaves the work item intact.
     pub fn acknowledge_finalized_work(&self, work_id: &str) -> Result<()> {
+        let _mutation = self.ensure_no_active_reorg()?;
         let cf = self
             .db
             .cf_handle(CF_FINALIZED_WORK)
@@ -1879,6 +2196,7 @@ impl ChainStore {
     /// Move unrecoverable work to a durable dead-letter record. This never
     /// discards the original transaction or its failure reason.
     pub fn dead_letter_finalized_work(&self, work_id: &str, reason: &str) -> Result<bool> {
+        let _mutation = self.ensure_no_active_reorg()?;
         let work_cf = self
             .db
             .cf_handle(CF_FINALIZED_WORK)
@@ -1914,6 +2232,7 @@ impl ChainStore {
         work_id: &str,
         error: &str,
     ) -> Result<FinalizedWorkFailureOutcome> {
+        let _mutation = self.ensure_no_active_reorg()?;
         let cf = self
             .db
             .cf_handle(CF_FINALIZED_WORK)
@@ -2105,9 +2424,10 @@ mod tests {
     use super::*;
     use chrono::{Duration, Utc};
     use common::{
-        merkle_root, AnalysisBundleRefs, Block, BlockHeader, ChainRecord, DeterministicRiskSummary,
-        NamespaceAuthorityPolicySpec, NamespaceLifecycleAction, NamespaceLifecycleEvent,
-        NamespaceLifecycleEventV2, PackageId, Transaction, Validator, ValidatorSet,
+        merkle_root, AnalysisBundleRefs, Block, BlockHeader, BlockSignature, ChainRecord,
+        DeterministicRiskSummary, NamespaceAuthorityPolicySpec, NamespaceLifecycleAction,
+        NamespaceLifecycleEvent, NamespaceLifecycleEventV2, PackageId, Transaction, Validator,
+        ValidatorSet,
     };
     use ed25519_dalek::{Signer, SigningKey};
     use rand::rngs::OsRng;
@@ -2158,13 +2478,32 @@ mod tests {
         proposer: &str,
         transactions: Vec<Transaction>,
     ) -> Block {
+        static NEXT_TEST_BLOCK_SECOND: std::sync::atomic::AtomicI64 =
+            std::sync::atomic::AtomicI64::new(0);
+        let now_floor = Utc::now().timestamp().saturating_add(1);
+        let mut observed = NEXT_TEST_BLOCK_SECOND.load(std::sync::atomic::Ordering::SeqCst);
+        let timestamp = loop {
+            let candidate = now_floor.max(observed.saturating_add(1));
+            match NEXT_TEST_BLOCK_SECOND.compare_exchange(
+                observed,
+                candidate,
+                std::sync::atomic::Ordering::SeqCst,
+                std::sync::atomic::Ordering::SeqCst,
+            ) {
+                Ok(_) => {
+                    break DateTime::from_timestamp(candidate, 0)
+                        .expect("test block timestamp is representable");
+                }
+                Err(current) => observed = current,
+            }
+        };
         Block {
             header: BlockHeader {
                 height,
                 prev_hash: prev_hash.to_string(),
                 merkle_root: merkle_root(&transactions),
                 proposer_id: proposer.into(),
-                timestamp: Utc::now(),
+                timestamp,
                 validator_set_hash: "test".into(),
                 vrf_output: None,
                 vrf_proof: None,
@@ -2184,15 +2523,50 @@ mod tests {
         }])
     }
 
+    fn signed_block_certificate(
+        block: &Block,
+        signers: impl IntoIterator<Item = (String, SigningKey)>,
+    ) -> Vec<BlockSignature> {
+        let block_hash = block.hash();
+        signers
+            .into_iter()
+            .map(|(validator_id, key)| BlockSignature {
+                validator_id,
+                pubkey: hex::encode(key.verifying_key().as_bytes()),
+                signature: hex::encode(key.sign(block_hash.as_bytes()).to_bytes()),
+            })
+            .collect()
+    }
+
     #[test]
     fn direct_same_height_replacement_is_rejected_without_mutating_canonical_state() {
         let dir = tempfile::tempdir().expect("tempdir");
         let store = ChainStore::open(dir.path()).expect("open");
         let genesis_hash = store.tip_hash().expect("tip hash");
 
-        let block_a = block(1, &genesis_hash, "node-a", &["pkg-a"]);
+        let signing_keys: Vec<_> = (1u8..=4)
+            .map(|seed| SigningKey::from_bytes(&[seed; 32]))
+            .collect();
+        let mut block_a = block(1, &genesis_hash, "node-a", &["pkg-a"]);
+        block_a.pbft_signatures = signed_block_certificate(
+            &block_a,
+            signing_keys
+                .iter()
+                .take(3)
+                .enumerate()
+                .map(|(index, key)| (format!("validator-{index}"), key.clone())),
+        );
         let outcome_a = store.insert_block_with_outcome(&block_a).expect("insert a");
         assert!(outcome_a.replaced_hash.is_none(), "first insert is no fork");
+        let cf_hash = store
+            .db
+            .cf_handle(CF_BLOCKS_BY_HASH)
+            .expect("blocks-by-hash cf");
+        let first_stored_bytes = store
+            .db
+            .get_cf(&cf_hash, block_a.hash().as_bytes())
+            .expect("read first certificate encoding")
+            .expect("first certificate stored");
 
         // Re-inserting the identical block is not a replacement.
         let outcome_same = store
@@ -2200,9 +2574,38 @@ mod tests {
             .expect("re-insert");
         assert!(outcome_same.replaced_hash.is_none());
 
+        // Signature order and the exact honest quorum subset are not committed
+        // by the block hash. Both variants are idempotent, and neither may
+        // overwrite the first accepted certificate/encoding.
+        let mut reordered_certificate = block_a.clone();
+        reordered_certificate.pbft_signatures.reverse();
+        store
+            .insert_block_with_outcome(&reordered_certificate)
+            .expect("reordered valid certificate is the same canonical payload");
+        let mut alternate_certificate = block_a.clone();
+        alternate_certificate.pbft_signatures = signed_block_certificate(
+            &alternate_certificate,
+            signing_keys
+                .iter()
+                .enumerate()
+                .skip(1)
+                .map(|(index, key)| (format!("validator-{index}"), key.clone())),
+        );
+        store
+            .insert_block_with_outcome(&alternate_certificate)
+            .expect("alternate valid quorum subset is the same canonical payload");
+        assert_eq!(
+            store
+                .db
+                .get_cf(&cf_hash, block_a.hash().as_bytes())
+                .expect("read retained certificate encoding")
+                .expect("certificate remains stored"),
+            first_stored_bytes,
+            "certificate-only replay must retain the first stored bytes"
+        );
+
         // Block hashes commit only to the header. A peer must not be able to
-        // replace the stored body or PBFT certificate while retaining that
-        // header hash.
+        // replace the stored transaction body while retaining that header hash.
         let mut same_hash_tamper = block_a.clone();
         same_hash_tamper.transactions =
             vec![Transaction::Publish(publish_record("same-hash-tamper"))];
@@ -2237,6 +2640,78 @@ mod tests {
     }
 
     #[test]
+    fn canonical_insert_rejects_gaps_wrong_parents_non_monotonic_time_and_stale_merkle() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = ChainStore::open(dir.path()).expect("open");
+        let genesis = store
+            .get_block_by_height(0)
+            .expect("read genesis")
+            .expect("genesis");
+        let first = block(1, &genesis.hash(), "node-a", &["first"]);
+        store.insert_block(&first).expect("insert first");
+
+        let gap = block(3, &first.hash(), "node-a", &["gap"]);
+        assert!(store
+            .insert_block(&gap)
+            .expect_err("height gap must fail closed")
+            .to_string()
+            .contains("canonical parent block 2 is missing"));
+
+        let wrong_parent = block(2, &genesis.hash(), "node-a", &["wrong-parent"]);
+        assert!(store
+            .insert_block(&wrong_parent)
+            .expect_err("wrong parent must fail closed")
+            .to_string()
+            .contains("does not descend from canonical parent"));
+
+        let mut non_monotonic = block(2, &first.hash(), "node-a", &["non-monotonic"]);
+        non_monotonic.header.timestamp = first.header.timestamp;
+        assert!(store
+            .insert_block(&non_monotonic)
+            .expect_err("non-monotonic timestamp must fail closed")
+            .to_string()
+            .contains("strictly later"));
+
+        let mut stale_merkle = block(2, &first.hash(), "node-a", &["original-body"]);
+        stale_merkle.transactions = vec![Transaction::Publish(publish_record("tampered-body"))];
+        assert!(store
+            .insert_block(&stale_merkle)
+            .expect_err("stale transaction commitment must fail closed")
+            .to_string()
+            .contains("merkle root"));
+
+        let valid_child = block(2, &first.hash(), "node-a", &["valid"]);
+        store
+            .insert_block(&valid_child)
+            .expect("strictly ordered child");
+        store
+            .insert_block(&valid_child)
+            .expect("idempotent occupied-height replay still checks its parent");
+
+        // Historical age is not a live-admission rule: a strictly ordered
+        // 2024 chain remains valid when replayed years later.
+        let historical_dir = tempfile::tempdir().expect("historical tempdir");
+        let historical_store = ChainStore::open(historical_dir.path()).expect("historical store");
+        let historical_genesis = historical_store
+            .get_block_by_height(0)
+            .expect("read historical genesis")
+            .expect("historical genesis");
+        let mut historical_one =
+            block(1, &historical_genesis.hash(), "node-a", &["historical-one"]);
+        historical_one.header.timestamp =
+            historical_genesis.header.timestamp + chrono::Duration::seconds(1);
+        historical_store
+            .insert_block(&historical_one)
+            .expect("historical first child");
+        let mut historical_two = block(2, &historical_one.hash(), "node-a", &["historical-two"]);
+        historical_two.header.timestamp =
+            historical_one.header.timestamp + chrono::Duration::seconds(1);
+        historical_store
+            .insert_block(&historical_two)
+            .expect("historical second child");
+    }
+
+    #[test]
     fn post_rollback_same_hash_body_replacement_is_rejected_but_semantic_replay_succeeds() {
         let dir = tempfile::tempdir().expect("tempdir");
         let store = ChainStore::open(dir.path()).expect("open");
@@ -2245,8 +2720,7 @@ mod tests {
         store.insert_block(&original).expect("insert original");
         let original_encoding = serde_json::to_vec(&original).expect("encode original");
         let alternate_encoding =
-            serde_json::to_vec(&serde_json::to_value(&original).expect("canonicalize original"))
-                .expect("encode alternate field order");
+            serde_json::to_vec_pretty(&original).expect("encode alternate whitespace");
         assert_ne!(
             alternate_encoding, original_encoding,
             "test requires two semantically equivalent JSON encodings"
@@ -2324,17 +2798,19 @@ mod tests {
         let old_history = std::fs::read(dir.path().join("validator-set-history.json"))
             .expect("read old validator history");
 
-        store
+        let reorg_guard = store
             .begin_reorg_journal(1, std::slice::from_ref(&old_tip))
             .expect("persist old branch");
-        store.rollback_to_height(1).expect("rewind old branch");
         store
-            .rebuild_package_index()
+            .rollback_to_height_for_reorg(&reorg_guard, 1)
+            .expect("rewind old branch");
+        store
+            .rebuild_package_index_for_reorg(&reorg_guard)
             .expect("rebuild common-prefix state");
 
         let candidate_two = block(2, &prefix.hash(), "candidate-two", &["candidate-two"]);
         store
-            .insert_block(&candidate_two)
+            .insert_block_for_reorg(&reorg_guard, &candidate_two)
             .expect("insert candidate block two");
         let candidate_three = block(
             3,
@@ -2343,7 +2819,7 @@ mod tests {
             &["candidate-three"],
         );
         store
-            .insert_block(&candidate_three)
+            .insert_block_for_reorg(&reorg_guard, &candidate_three)
             .expect("insert candidate block three");
         crate::validator_set_history::record(dir.path(), 3, &validator_set("candidate-set", 12))
             .expect("simulate candidate validator-history import");
@@ -2352,6 +2828,7 @@ mod tests {
                 .expect("read candidate validator history"),
             old_history
         );
+        drop(reorg_guard);
         drop(store);
 
         // Opening the database restores the prior canonical height mapping
@@ -2398,6 +2875,81 @@ mod tests {
     }
 
     #[test]
+    fn reorg_begin_excludes_mutation_before_the_durable_journal_exists() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = ChainStore::open(dir.path()).expect("open");
+        let genesis_hash = store.tip_hash().expect("genesis hash");
+        let old_tip = block(1, &genesis_hash, "old", &["old-tip"]);
+        store.insert_block(&old_tip).expect("insert old tip");
+
+        let lock_acquired = Arc::new(std::sync::Barrier::new(2));
+        let resume = Arc::new(std::sync::Barrier::new(2));
+        *store.reorg_begin_test_hook.lock().expect("test hook lock") = Some(ReorgBeginTestHook {
+            lock_acquired: Arc::clone(&lock_acquired),
+            resume: Arc::clone(&resume),
+        });
+
+        let begin_store = store.clone();
+        let begin_old_tip = old_tip.clone();
+        let begin = std::thread::spawn(move || {
+            begin_store.begin_reorg_journal(0, std::slice::from_ref(&begin_old_tip))
+        });
+
+        // The reorg owns the in-memory mutation lock, but its durable latch is
+        // deliberately not written yet. This is the precise historical
+        // check-then-write window.
+        lock_acquired.wait();
+        assert!(store
+            .load_reorg_journal()
+            .expect("journal status while begin is paused")
+            .is_none());
+
+        let queued = Transaction::Publish(publish_record("must-not-slip"));
+        let mutation_store = store.clone();
+        let (mutation_result_tx, mutation_result_rx) = std::sync::mpsc::channel();
+        let mutation = std::thread::spawn(move || {
+            mutation_result_tx
+                .send(mutation_store.enqueue_finalized_work(&queued))
+                .expect("send mutation result");
+        });
+        let mutation_result = mutation_result_rx.recv_timeout(std::time::Duration::from_secs(5));
+
+        // Always release the paused begin thread before asserting so a failed
+        // regression test cannot strand a worker.
+        resume.wait();
+        let reorg_guard = begin
+            .join()
+            .expect("join reorg begin")
+            .expect("begin reorg");
+        let mutation_result = match mutation_result {
+            Ok(result) => result,
+            Err(error) => {
+                store
+                    .complete_reorg_journal(&reorg_guard)
+                    .expect("release timed-out reorg");
+                drop(reorg_guard);
+                mutation.join().expect("join timed-out ordinary mutation");
+                panic!(
+                    "ordinary mutation did not fail promptly while reorg owned the store: {error}"
+                );
+            }
+        };
+        mutation.join().expect("join ordinary mutation");
+        let error = mutation_result
+            .expect_err("ordinary mutation must not slip before journal persistence");
+        assert!(error.to_string().contains("reorg-recovery maintenance"));
+        assert!(store
+            .pending_finalized_work()
+            .expect("pending work")
+            .is_empty());
+
+        *store.reorg_begin_test_hook.lock().expect("test hook lock") = None;
+        store
+            .complete_reorg_journal(&reorg_guard)
+            .expect("complete reorg");
+    }
+
+    #[test]
     fn completed_reorg_journal_preserves_candidate_after_restart() {
         let dir = tempfile::tempdir().expect("tempdir");
         let store = ChainStore::open(dir.path()).expect("open");
@@ -2409,16 +2961,18 @@ mod tests {
         crate::validator_set_history::record(dir.path(), 0, &validator_set("old-set", 21))
             .expect("seed old validator history");
 
-        store
+        let reorg_guard = store
             .begin_reorg_journal(1, std::slice::from_ref(&old_tip))
             .expect("persist old branch");
-        store.rollback_to_height(1).expect("rewind old branch");
         store
-            .rebuild_package_index()
+            .rollback_to_height_for_reorg(&reorg_guard, 1)
+            .expect("rewind old branch");
+        store
+            .rebuild_package_index_for_reorg(&reorg_guard)
             .expect("rebuild common-prefix state");
         let candidate_two = block(2, &prefix.hash(), "candidate-two", &["candidate-two"]);
         store
-            .insert_block(&candidate_two)
+            .insert_block_for_reorg(&reorg_guard, &candidate_two)
             .expect("insert candidate block two");
         let candidate_three = block(
             3,
@@ -2427,16 +2981,17 @@ mod tests {
             &["candidate-three"],
         );
         store
-            .insert_block(&candidate_three)
+            .insert_block_for_reorg(&reorg_guard, &candidate_three)
             .expect("insert candidate block three");
         store
-            .rebuild_package_index()
+            .rebuild_package_index_for_reorg(&reorg_guard)
             .expect("rebuild candidate state");
         crate::validator_set_history::record(dir.path(), 3, &validator_set("candidate-set", 22))
             .expect("persist candidate validator history");
         store
-            .complete_reorg_journal()
+            .complete_reorg_journal(&reorg_guard)
             .expect("commit candidate branch");
+        drop(reorg_guard);
         drop(store);
 
         let reopened = ChainStore::open(dir.path()).expect("reopen committed store");
@@ -2466,6 +3021,63 @@ mod tests {
                 .id,
             "candidate-set"
         );
+    }
+
+    #[test]
+    fn failed_reorg_restore_latches_durable_mutation_maintenance() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = ChainStore::open(dir.path()).expect("open");
+        let genesis_hash = store.tip_hash().expect("genesis hash");
+        let old_tip = block(1, &genesis_hash, "old", &["old"]);
+        store.insert_block(&old_tip).expect("insert old tip");
+        let reorg_guard = store
+            .begin_reorg_journal(0, std::slice::from_ref(&old_tip))
+            .expect("begin reorg");
+
+        let mut journal = store
+            .load_reorg_journal()
+            .expect("read journal")
+            .expect("active journal");
+        journal.validator_history = Some(b"not-valid-history-json".to_vec());
+        let journal_cf = store
+            .db
+            .cf_handle(CF_REORG_JOURNAL)
+            .expect("reorg journal cf");
+        store
+            .db
+            .put_cf(
+                &journal_cf,
+                REORG_JOURNAL_KEY,
+                serde_json::to_vec(&journal).expect("encode corrupt fixture"),
+            )
+            .expect("install corrupt recovery fixture");
+
+        store
+            .rollback_to_height_for_reorg(&reorg_guard, 0)
+            .expect("simulate interrupted rewind");
+        drop(reorg_guard);
+        assert!(store.recover_incomplete_reorg().is_err());
+        assert!(store
+            .load_reorg_journal()
+            .expect("journal remains readable")
+            .is_some());
+
+        let queued = Transaction::Revoke {
+            package_canonical: "npm:maintenance-gated@1.0.0".into(),
+            reason: "fixture".into(),
+            revoked_by: "validator-1".into(),
+            evidence_hash: "fixture".into(),
+        };
+        assert!(store
+            .enqueue_finalized_work(&queued)
+            .expect_err("failed recovery must block queue mutation")
+            .to_string()
+            .contains("reorg-recovery maintenance"));
+        assert!(store
+            .insert_block(&block(1, &genesis_hash, "candidate", &["candidate"]))
+            .expect_err("failed recovery must block canonical mutation")
+            .to_string()
+            .contains("reorg-recovery maintenance"));
     }
 
     #[test]
@@ -3048,6 +3660,10 @@ mod tests {
         let genesis_hash = store.tip_hash().expect("genesis hash");
         let old_branch = block(1, &genesis_hash, "old-proposer", &["old-canonical"]);
         store.insert_block(&old_branch).expect("insert old branch");
+        crate::validator_set_history::record(dir.path(), 0, &validator_set("old-set", 41))
+            .expect("seed old validator history");
+        let old_history = std::fs::read(dir.path().join("validator-set-history.json"))
+            .expect("read old validator history");
 
         let pending = Transaction::Revoke {
             package_canonical: "npm:pre-reorg-pending@1.0.0".into(),
@@ -3065,21 +3681,41 @@ mod tests {
                 .expect("record retry"),
             FinalizedWorkFailureOutcome::Retrying
         );
-        store
+        let reorg_guard = store
             .begin_reorg_journal(0, std::slice::from_ref(&old_branch))
             .expect("begin reorg");
 
-        store.rollback_to_height(0).expect("rewind old branch");
-        store.rebuild_package_index().expect("rebuild ancestor");
+        store
+            .rollback_to_height_for_reorg(&reorg_guard, 0)
+            .expect("rewind old branch");
+        store
+            .rebuild_package_index_for_reorg(&reorg_guard)
+            .expect("rebuild ancestor");
         let candidate = block_with_transactions(
             1,
             &genesis_hash,
             "candidate-proposer",
             vec![pending.clone()],
         );
-        store
+        assert!(store
             .insert_block(&candidate)
+            .expect_err("active reorg journal must maintenance-gate canonical insertion")
+            .to_string()
+            .contains("reorg-recovery maintenance"));
+        store
+            .insert_block_for_reorg(&reorg_guard, &candidate)
             .expect("candidate acknowledges pending work");
+        crate::validator_set_history::record(
+            dir.path(),
+            candidate.header.height,
+            &validator_set("candidate-set", 42),
+        )
+        .expect("simulate candidate validator history before terminal fault");
+        assert_ne!(
+            std::fs::read(dir.path().join("validator-set-history.json"))
+                .expect("read candidate validator history"),
+            old_history
+        );
         let post_journal_work = Transaction::Revoke {
             package_canonical: "npm:must-not-leak@1.0.0".into(),
             reason: "candidate-only".into(),
@@ -3088,11 +3724,21 @@ mod tests {
         };
         store
             .enqueue_finalized_work(&post_journal_work)
-            .expect("simulate candidate-only queue mutation");
+            .expect_err("active reorg journal must maintenance-gate independent work");
 
         assert!(store
-            .recover_incomplete_reorg()
-            .expect("recover failed reorg"));
+            .recover_incomplete_reorg_with_guard(&reorg_guard)
+            .expect("recover failed reorg using the live guard"));
+        assert!(store
+            .load_reorg_journal()
+            .expect("read cleared reorg journal")
+            .is_none());
+        assert_eq!(
+            std::fs::read(dir.path().join("validator-set-history.json"))
+                .expect("read restored validator history"),
+            old_history
+        );
+        drop(reorg_guard);
         assert_eq!(store.tip_hash().expect("restored tip"), old_branch.hash());
         let pending_after = store.pending_finalized_work().expect("restored work");
         assert_eq!(pending_after.len(), 1);
@@ -3137,20 +3783,28 @@ mod tests {
         store
             .enqueue_finalized_work(&pending_then_included)
             .expect("enqueue pre-reorg work");
-        store
+        let reorg_guard = store
             .begin_reorg_journal(0, std::slice::from_ref(&old_branch))
             .expect("begin reorg");
 
-        store.rollback_to_height(0).expect("rewind old branch");
-        store.rebuild_package_index().expect("rebuild ancestor");
+        store
+            .rollback_to_height_for_reorg(&reorg_guard, 0)
+            .expect("rewind old branch");
+        store
+            .rebuild_package_index_for_reorg(&reorg_guard)
+            .expect("rebuild ancestor");
         let candidate = block_with_transactions(
             1,
             &genesis_hash,
             "candidate-proposer",
             vec![shared.clone(), pending_then_included.clone()],
         );
-        store.insert_block(&candidate).expect("insert candidate");
-        store.rebuild_package_index().expect("rebuild candidate");
+        store
+            .insert_block_for_reorg(&reorg_guard, &candidate)
+            .expect("insert candidate");
+        store
+            .rebuild_package_index_for_reorg(&reorg_guard)
+            .expect("rebuild candidate");
         let canonical_hashes: HashSet<String> = candidate
             .transactions
             .iter()
@@ -3158,6 +3812,7 @@ mod tests {
             .collect();
         let tracker_work = store
             .reconcile_finalized_work_after_reorg(
+                &reorg_guard,
                 std::slice::from_ref(&old_branch),
                 &canonical_hashes,
             )
@@ -3168,7 +3823,10 @@ mod tests {
             transaction_hash(&abandoned_only)
         );
         assert_eq!(tracker_work[0].1, old_branch.header.height);
-        store.complete_reorg_journal().expect("commit reorg");
+        store
+            .complete_reorg_journal(&reorg_guard)
+            .expect("commit reorg");
+        drop(reorg_guard);
         drop(store);
 
         let reopened = ChainStore::open(dir.path()).expect("reopen adopted branch");

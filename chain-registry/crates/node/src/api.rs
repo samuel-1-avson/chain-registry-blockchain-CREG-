@@ -47,6 +47,34 @@ use utoipa_swagger_ui::SwaggerUi;
 
 pub(crate) use crate::package_admission::verify_publish_sig;
 
+const VALIDATOR_TRANSITION_MAX_BODY_BYTES: usize = 1024 * 1024;
+
+#[cfg(test)]
+#[derive(Clone)]
+struct NamespaceLifecycleAdmissionTestHook {
+    namespace: String,
+    preflight_complete: Arc<std::sync::Barrier>,
+    resume: Arc<std::sync::Barrier>,
+}
+
+#[cfg(test)]
+static NAMESPACE_LIFECYCLE_ADMISSION_TEST_HOOK: OnceLock<
+    std::sync::Mutex<Option<NamespaceLifecycleAdmissionTestHook>>,
+> = OnceLock::new();
+
+#[cfg(test)]
+fn pause_namespace_lifecycle_after_preflight(namespace: &str) {
+    let hook = NAMESPACE_LIFECYCLE_ADMISSION_TEST_HOOK
+        .get_or_init(|| std::sync::Mutex::new(None))
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone();
+    if let Some(hook) = hook.filter(|hook| hook.namespace == namespace) {
+        hook.preflight_complete.wait();
+        hook.resume.wait();
+    }
+}
+
 /// Query parameters for GET /v1/packages
 #[derive(Deserialize)]
 struct ListPackagesParams {
@@ -202,7 +230,11 @@ fn validator_routes() -> Router<SharedState> {
         .route("/v1/validator/consensus/pbft", get(consensus_pbft))
         .route(
             "/v1/validator/set-transitions",
-            get(list_validator_set_transitions).post(submit_validator_set_transition),
+            get(list_validator_set_transitions)
+                .post(submit_validator_set_transition)
+                .layer(RequestBodyLimitLayer::new(
+                    VALIDATOR_TRANSITION_MAX_BODY_BYTES,
+                )),
         )
         .merge(authority_routes)
 }
@@ -1334,11 +1366,36 @@ async fn list_validator_registrations(State(state): State<SharedState>) -> impl 
 async fn list_validator_set_transitions(State(state): State<SharedState>) -> Response {
     let data_dir = state.read().await.config.data_dir.clone();
     let transitions: Vec<common::AuthenticatedValidatorSetSnapshot> =
-        crate::validator_set_history::load(&data_dir)
-            .into_iter()
-            .filter_map(|entry| entry.certificate)
-            .collect();
+        match crate::validator_set_history::load_checked(&data_dir) {
+            Ok(history) => history,
+            Err(error) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorResponse {
+                        error: format!("validator-set history unavailable: {error}"),
+                    }),
+                )
+                    .into_response();
+            }
+        }
+        .into_iter()
+        .filter_map(|entry| entry.certificate)
+        .collect();
     Json(transitions).into_response()
+}
+
+fn validator_transition_record_status(
+    error: &crate::validator_set_history::RecordAuthenticatedError,
+) -> StatusCode {
+    match error {
+        crate::validator_set_history::RecordAuthenticatedError::InvalidCertificate(_) => {
+            StatusCode::UNAUTHORIZED
+        }
+        crate::validator_set_history::RecordAuthenticatedError::Conflict(_) => StatusCode::CONFLICT,
+        crate::validator_set_history::RecordAuthenticatedError::Persistence { .. } => {
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    }
 }
 
 /// POST /v1/validator/set-transitions
@@ -1352,32 +1409,27 @@ async fn submit_validator_set_transition(
     State(state): State<SharedState>,
     Json(snapshot): Json<common::AuthenticatedValidatorSetSnapshot>,
 ) -> Response {
-    let (data_dir, tip_height, tip_hash, previous) = {
+    let chain_context = {
         let s = state.read().await;
-        let previous = crate::validator_set_history::set_at(
-            &s.config.data_dir,
-            snapshot.effective_from_height.saturating_sub(1),
-        )
-        .unwrap_or_else(|| s.validator_set.clone());
-        (
-            s.config.data_dir.clone(),
-            s.chain.tip_height().unwrap_or(0),
-            s.chain.tip_hash().unwrap_or_default(),
-            previous,
-        )
+        s.chain
+            .tip_height()
+            .and_then(|tip_height| s.chain.tip_hash().map(|tip_hash| (tip_height, tip_hash)))
+            .map(|(tip_height, tip_hash)| (s.config.data_dir.clone(), tip_height, tip_hash))
     };
-    let checkpoint_allows = match crate::validator_set_history::checkpoint_from_env() {
-        Ok(Some(checkpoint)) => {
-            common::validator_snapshot_certificate_hash(&snapshot)
-                == common::validator_snapshot_certificate_hash(&checkpoint)
-                || crate::validator_set_history::authenticated_at_from_checkpoint(
-                    &data_dir,
-                    snapshot.effective_from_height.saturating_sub(1),
-                    &checkpoint,
-                )
-                .is_some()
+    let (data_dir, tip_height, tip_hash) = match chain_context {
+        Ok(context) => context,
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: format!("canonical chain state unavailable: {error}"),
+                }),
+            )
+                .into_response();
         }
-        Ok(None) => true,
+    };
+    let configured_checkpoint = match crate::validator_set_history::checkpoint_from_env() {
+        Ok(checkpoint) => checkpoint,
         Err(error) => {
             return (
                 StatusCode::SERVICE_UNAVAILABLE,
@@ -1385,6 +1437,32 @@ async fn submit_validator_set_transition(
             )
                 .into_response();
         }
+    };
+    let is_configured_checkpoint = configured_checkpoint.as_ref().is_some_and(|checkpoint| {
+        common::validator_snapshot_certificate_hash(&snapshot)
+            == common::validator_snapshot_certificate_hash(checkpoint)
+    });
+    let checkpoint_allows = match configured_checkpoint.as_ref() {
+        Some(_) if is_configured_checkpoint => true,
+        Some(checkpoint) => {
+            match crate::validator_set_history::authenticated_at_from_checkpoint_checked(
+                &data_dir,
+                snapshot.effective_from_height.saturating_sub(1),
+                checkpoint,
+            ) {
+                Ok(authority) => authority.is_some(),
+                Err(error) => {
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(ErrorResponse {
+                            error: format!("validator-set history unavailable: {error}"),
+                        }),
+                    )
+                        .into_response();
+                }
+            }
+        }
+        None => true,
     };
     if !checkpoint_allows {
         return (
@@ -1409,8 +1487,100 @@ async fn submit_validator_set_transition(
     }
     let effective_from_height = snapshot.effective_from_height;
     let validator_set_hash = snapshot.validator_set_hash.clone();
-    let gossip_snapshot = snapshot.clone();
-    match crate::validator_set_history::record_authenticated(&data_dir, snapshot, &previous) {
+    let gossip_snapshot = configured_checkpoint
+        .as_ref()
+        .filter(|_| is_configured_checkpoint)
+        .cloned()
+        .unwrap_or_else(|| snapshot.clone());
+    let persistence = {
+        // Keep a state read guard through the synchronous history replacement.
+        // A reorg writer therefore cannot journal/truncate/import/commit around
+        // a transition that was validated against a different canonical tip.
+        let s = state.read().await;
+        (|| -> Result<(), (StatusCode, String)> {
+            let locked_tip_height = s.chain.tip_height().map_err(|error| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("canonical chain height unavailable: {error}"),
+                )
+            })?;
+            let locked_tip_hash = s.chain.tip_hash().map_err(|error| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("canonical chain tip unavailable: {error}"),
+                )
+            })?;
+            crate::validator_set_history::validate_transition_at_tip(
+                &snapshot,
+                locked_tip_height,
+                &locked_tip_hash,
+            )
+            .map_err(|error| (StatusCode::CONFLICT, error.to_string()))?;
+            let record_result = if is_configured_checkpoint {
+                // A rebuilding node may intentionally lack the checkpoint's
+                // historical prior set. Install only the exact, independently
+                // configured certificate as its local trust root.
+                crate::validator_set_history::record_configured_checkpoint(
+                    &s.config.data_dir,
+                    &snapshot,
+                )
+            } else {
+                let previous_height = snapshot.effective_from_height.saturating_sub(1);
+                let previous = match configured_checkpoint.as_ref() {
+                    Some(checkpoint) => {
+                        crate::validator_set_history::authenticated_at_from_checkpoint_checked(
+                            &s.config.data_dir,
+                            previous_height,
+                            checkpoint,
+                        )
+                        .map_err(|error| {
+                            (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                format!("validator-set history unavailable: {error}"),
+                            )
+                        })?
+                        .map(|certificate| certificate.validators)
+                        .ok_or_else(|| {
+                            (
+                                StatusCode::CONFLICT,
+                                "validator-set transition has no configured-checkpoint-descended prior authority"
+                                    .into(),
+                            )
+                        })?
+                    }
+                    None => crate::validator_set_history::authenticated_at_checked(
+                        &s.config.data_dir,
+                        previous_height,
+                        &s.validator_set_bootstrap,
+                    )
+                    .map_err(|error| {
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            format!("validator-set history unavailable: {error}"),
+                        )
+                    })?
+                    .map(|certificate| certificate.validators)
+                    // No authenticated certificate means this is the first
+                    // transition, so the provisioned bootstrap set remains
+                    // the only admissible signing authority.
+                    .unwrap_or_else(|| s.validator_set_bootstrap.clone()),
+                };
+                crate::validator_set_history::record_authenticated(
+                    &s.config.data_dir,
+                    snapshot,
+                    &previous,
+                )
+            };
+            record_result.map_err(|error| {
+                (
+                    validator_transition_record_status(&error),
+                    format!("validator-set transition rejected: {error}"),
+                )
+            })?;
+            Ok(())
+        })()
+    };
+    match persistence {
         Ok(()) => {
             crate::validator_registry_gossip::broadcast_validator_set_transition(gossip_snapshot)
                 .await;
@@ -1424,13 +1594,7 @@ async fn submit_validator_set_transition(
             )
                 .into_response()
         }
-        Err(error) => (
-            StatusCode::UNAUTHORIZED,
-            Json(ErrorResponse {
-                error: format!("validator-set transition rejected: {error}"),
-            }),
-        )
-            .into_response(),
+        Err((status, error)) => (status, Json(ErrorResponse { error })).into_response(),
     }
 }
 
@@ -3243,23 +3407,6 @@ async fn submit_namespace_lifecycle_inner(
     let now = chrono::Utc::now();
     let (tx, namespace, current_controller, nonce) = match submission {
         NamespaceLifecycleSubmission::V1(event) => {
-            let activation = {
-                let state = state.read().await;
-                let next_height = state.chain.tip_height().unwrap_or(0).saturating_add(1);
-                state
-                    .config
-                    .namespace_authority_activation_height
-                    .is_some_and(|height| next_height >= height)
-            };
-            if activation {
-                return (
-                    StatusCode::CONFLICT,
-                    Json(ErrorResponse {
-                        error: "Legacy lifecycle v1 is retired after namespace-authority activation; submit the chain-bound v2 event".into(),
-                    }),
-                )
-                    .into_response();
-            }
             if let Err(error) = event.verify_controller_signatures() {
                 return bad_request(format!("Invalid namespace lifecycle signatures: {error}"));
             }
@@ -3303,17 +3450,92 @@ async fn submit_namespace_lifecycle_inner(
                 );
             }
             let tx = common::Transaction::NamespaceLifecycleV2(event.clone());
-            let preflight = {
-                let state = state.read().await;
-                let height = state.chain.tip_height().unwrap_or(0).saturating_add(1);
+            (
+                tx,
+                event.namespace,
+                event.current_controller_ed25519_pubkey,
+                event.nonce,
+            )
+        }
+    };
+
+    let queued = {
+        let state = state.read().await;
+        let tip_height = match state.chain.tip_height() {
+            Ok(height) => height,
+            Err(error) => {
+                return server_err(format!(
+                    "Canonical chain height unavailable for namespace lifecycle admission: {error}"
+                ))
+            }
+        };
+        let tip_hash = match state.chain.tip_hash() {
+            Ok(hash) => hash,
+            Err(error) => {
+                return server_err(format!(
+                    "Canonical chain tip unavailable for namespace lifecycle admission: {error}"
+                ))
+            }
+        };
+        let next_height = tip_height.saturating_add(1);
+
+        match &tx {
+            common::Transaction::NamespaceLifecycle(_) => {
+                if state
+                    .config
+                    .namespace_authority_activation_height
+                    .is_some_and(|height| next_height >= height)
+                {
+                    return (
+                        StatusCode::CONFLICT,
+                        Json(ErrorResponse {
+                            error: "Legacy lifecycle v1 is retired after namespace-authority activation; submit the chain-bound v2 event".into(),
+                        }),
+                    )
+                        .into_response();
+                }
+            }
+            common::Transaction::NamespaceLifecycleV2(_) => {
+                let parent = match state.chain.get_block_by_height(tip_height) {
+                    Ok(Some(parent)) => parent,
+                    Ok(None) => {
+                        return server_err(format!(
+                            "Canonical parent block {tip_height} is unavailable for namespace lifecycle admission"
+                        ))
+                    }
+                    Err(error) => {
+                        return server_err(format!(
+                            "Canonical parent block {tip_height} is unavailable for namespace lifecycle admission: {error}"
+                        ))
+                    }
+                };
+                if parent.hash() != tip_hash {
+                    return server_err(
+                        "Canonical chain tip changed while preparing namespace lifecycle admission",
+                    );
+                }
+                let timestamp =
+                    match crate::block_time::next_live_timestamp(parent.header.timestamp, now) {
+                        Ok(timestamp) => timestamp,
+                        Err(error) => {
+                            return (
+                                StatusCode::SERVICE_UNAVAILABLE,
+                                Json(ErrorResponse {
+                                    error: format!(
+                                        "Namespace lifecycle admission cannot derive a live block timestamp: {error}"
+                                    ),
+                                }),
+                            )
+                                .into_response()
+                        }
+                    };
                 let block = common::Block {
                     header: common::BlockHeader {
-                        height,
-                        prev_hash: state.chain.tip_hash().unwrap_or_default(),
+                        height: next_height,
+                        prev_hash: tip_hash,
                         merkle_root: common::merkle_root(std::slice::from_ref(&tx)),
                         proposer_id: "namespace-lifecycle-api-preflight".into(),
-                        timestamp: chrono::DateTime::from_timestamp(now_seconds, 0)
-                            .expect("current Unix time is representable"),
+                        timestamp,
                         validator_set_hash: common::canonical_validator_set_hash(
                             &state.validator_set,
                         ),
@@ -3326,28 +3548,24 @@ async fn submit_namespace_lifecycle_inner(
                 let config = crate::namespace_consensus::NamespaceConsensusConfig::from_node_config(
                     &state.config,
                 );
-                crate::namespace_consensus::validate_block(&state.chain, &block, &config)
-            };
-            if let Err(error) = preflight {
-                return (
-                    StatusCode::CONFLICT,
-                    Json(ErrorResponse {
-                        error: format!("Namespace lifecycle v2 rejected: {error}"),
-                    }),
-                )
-                    .into_response();
+                if let Err(error) =
+                    crate::namespace_consensus::validate_block(&state.chain, &block, &config)
+                {
+                    return (
+                        StatusCode::CONFLICT,
+                        Json(ErrorResponse {
+                            error: format!("Namespace lifecycle v2 rejected: {error}"),
+                        }),
+                    )
+                        .into_response();
+                }
             }
-            (
-                tx,
-                event.namespace,
-                event.current_controller_ed25519_pubkey,
-                event.nonce,
-            )
+            _ => unreachable!("lifecycle submission always creates a lifecycle transaction"),
         }
-    };
 
-    let queued = {
-        let state = state.read().await;
+        #[cfg(test)]
+        pause_namespace_lifecycle_after_preflight(&namespace);
+
         let Some(controller) = state.chain.publisher_for_prefix(&namespace) else {
             return not_found(format!(
                 "Namespace {namespace} has no established controller"
@@ -4473,6 +4691,33 @@ mod tests {
         API_ENV_LOCK.get_or_init(|| Mutex::new(()))
     }
 
+    #[test]
+    fn validator_transition_record_errors_have_stable_http_classification() {
+        use crate::validator_set_history::RecordAuthenticatedError;
+
+        assert_eq!(
+            validator_transition_record_status(&RecordAuthenticatedError::InvalidCertificate(
+                "insufficient quorum".into()
+            )),
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            validator_transition_record_status(&RecordAuthenticatedError::Conflict(
+                "persisted authority differs".into()
+            )),
+            StatusCode::CONFLICT
+        );
+        assert_eq!(
+            validator_transition_record_status(&RecordAuthenticatedError::Persistence {
+                source: anyhow::Error::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "disk unavailable",
+                )),
+            }),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+    }
+
     struct EnvRestore {
         key: &'static str,
         previous: Option<String>,
@@ -4732,6 +4977,43 @@ mod tests {
         event
     }
 
+    fn signed_namespace_lifecycle_event_v2(
+        chain_id: &str,
+        genesis_hash: &str,
+        namespace: &str,
+        current: &SigningKey,
+        next: &SigningKey,
+        nonce: u64,
+        issued_at: i64,
+        expires_at: i64,
+    ) -> common::NamespaceLifecycleEventV2 {
+        let mut event = common::NamespaceLifecycleEventV2 {
+            schema_version: 2,
+            chain_id: chain_id.into(),
+            genesis_hash: genesis_hash.into(),
+            action: common::NamespaceLifecycleAction::Transfer,
+            namespace: namespace.into(),
+            current_controller_ed25519_pubkey: hex::encode(current.verifying_key().as_bytes()),
+            current_controller_evm_address: String::new(),
+            next_controller_ed25519_pubkey: hex::encode(next.verifying_key().as_bytes()),
+            next_controller_evm_address: "0x2222222222222222222222222222222222222222".into(),
+            delegation_scopes: Vec::new(),
+            delegation_expires_at: None,
+            nonce,
+            issued_at,
+            expires_at,
+            current_controller_signature: String::new(),
+            next_controller_signature: String::new(),
+            authority_proof_digest: String::new(),
+            authority_certificate: None,
+        };
+        let message = event.signing_message();
+        event.current_controller_signature =
+            hex::encode(current.sign(message.as_bytes()).to_bytes());
+        event.next_controller_signature = hex::encode(next.sign(message.as_bytes()).to_bytes());
+        event
+    }
+
     async fn establish_test_namespace_controller(
         state: &SharedState,
         namespace_name: &str,
@@ -4832,6 +5114,209 @@ mod tests {
         }));
 
         Ok((state, tempdir, p2p_handle, tx_sender, tx_receiver))
+    }
+
+    fn transition_request_for_tip(
+        effective_from_height: u64,
+        previous_block_hash: String,
+    ) -> common::AuthenticatedValidatorSetSnapshot {
+        let validators = common::ValidatorSet::default();
+        common::AuthenticatedValidatorSetSnapshot {
+            schema_version: common::VALIDATOR_SNAPSHOT_SCHEMA_VERSION,
+            effective_from_height,
+            previous_block_hash,
+            previous_validator_set_hash: common::canonical_validator_set_hash(&validators),
+            validator_set_hash: common::canonical_validator_set_hash(&validators),
+            validators,
+            transition_signatures: Vec::new(),
+        }
+    }
+
+    fn signed_checkpoint_for_tip(
+        effective_from_height: u64,
+        previous_block_hash: String,
+    ) -> common::AuthenticatedValidatorSetSnapshot {
+        let signing_key = SigningKey::from_bytes(&[71u8; 32]);
+        let validator = common::Validator {
+            id: "checkpoint-validator".into(),
+            alias: "checkpoint-validator".into(),
+            pubkey: hex::encode(signing_key.verifying_key().as_bytes()),
+            eth_address: String::new(),
+            stake: 100,
+            reputation: 100,
+            status: "online".into(),
+            performance_score: 500,
+            contribution_count: 0,
+        };
+        let validators = common::ValidatorSet::new(vec![validator]);
+        let mut checkpoint = common::AuthenticatedValidatorSetSnapshot {
+            schema_version: common::VALIDATOR_SNAPSHOT_SCHEMA_VERSION,
+            effective_from_height,
+            previous_block_hash,
+            previous_validator_set_hash: common::canonical_validator_set_hash(&validators),
+            validator_set_hash: common::canonical_validator_set_hash(&validators),
+            validators,
+            transition_signatures: Vec::new(),
+        };
+        let message = common::validator_set_transition_message(&checkpoint);
+        let signer_id = checkpoint.validators.validators[0].id.clone();
+        let signer_pubkey = checkpoint.validators.validators[0].pubkey.clone();
+        checkpoint.transition_signatures.push(
+            common::ValidatorSetTransitionSignature {
+                validator_id: signer_id,
+                validator_pubkey: signer_pubkey,
+                signature: hex::encode(signing_key.sign(message.as_bytes()).to_bytes()),
+            },
+        );
+        checkpoint
+    }
+
+    #[tokio::test]
+    async fn exact_configured_checkpoint_bootstraps_pruned_node_and_returns_accepted(
+    ) -> anyhow::Result<()> {
+        let (state, tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
+        let tip_hash = state.read().await.chain.tip_hash()?;
+        let checkpoint = signed_checkpoint_for_tip(1, tip_hash);
+        let mut received_without_configured_witness = checkpoint.clone();
+        received_without_configured_witness
+            .transition_signatures
+            .clear();
+
+        // Model a rebuilt node whose pre-checkpoint authority history was
+        // intentionally pruned. The prior validator set must not be required
+        // to install the exact independently configured trust root.
+        let history_path = tempdir.path().join("validator-set-history.json");
+        if history_path.exists() {
+            std::fs::remove_file(&history_path)?;
+        }
+        let app = router(
+            state,
+            new_event_bus(),
+            RateLimiter::new(RateLimitConfig::default()),
+            AttestationStore::new(),
+            crate::config::CorsConfig::default(),
+            tx_sender,
+            p2p_handle,
+        );
+        let response = crate::validator_set_history::with_checkpoint_env_override(
+            Some(serde_json::to_string(&checkpoint)?),
+            app.oneshot(
+                Request::post("/v1/validator/set-transitions")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(
+                        &received_without_configured_witness,
+                    )?))?,
+            ),
+        )
+        .await?;
+
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        let persisted = crate::validator_set_history::load_checked(tempdir.path())?;
+        assert_eq!(persisted.len(), 1);
+        let persisted_checkpoint = persisted[0]
+            .certificate
+            .as_ref()
+            .expect("checkpoint certificate is persisted");
+        assert_eq!(
+            common::validator_snapshot_certificate_hash(persisted_checkpoint),
+            common::validator_snapshot_certificate_hash(&checkpoint)
+        );
+        assert_eq!(
+            common::validator_snapshot_witness_hash(persisted_checkpoint),
+            common::validator_snapshot_witness_hash(&checkpoint),
+            "API ingress must retain and gossip the configured witness, never received alternate bytes"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn transition_routes_distinguish_local_corruption_stale_and_bad_checkpoint(
+    ) -> anyhow::Result<()> {
+        let (state, tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
+        let app = router(
+            state.clone(),
+            new_event_bus(),
+            RateLimiter::new(RateLimitConfig::default()),
+            AttestationStore::new(),
+            crate::config::CorsConfig::default(),
+            tx_sender,
+            p2p_handle,
+        );
+        let tip_hash = state.read().await.chain.tip_hash()?;
+        let history_path = tempdir.path().join("validator-set-history.json");
+        std::fs::write(&history_path, b"{malformed-history")?;
+
+        let get_response = app
+            .clone()
+            .oneshot(Request::get("/v1/validator/set-transitions").body(Body::empty())?)
+            .await?;
+        assert_eq!(get_response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+        let next = transition_request_for_tip(1, tip_hash.clone());
+        let post_response = crate::validator_set_history::with_checkpoint_env_override(
+            None,
+            app.clone().oneshot(
+                Request::post("/v1/validator/set-transitions")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&next)?))?,
+            ),
+        )
+        .await?;
+        assert_eq!(post_response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+        std::fs::remove_file(&history_path)?;
+        let stale = transition_request_for_tip(2, tip_hash);
+        let stale_response = crate::validator_set_history::with_checkpoint_env_override(
+            None,
+            app.clone().oneshot(
+                Request::post("/v1/validator/set-transitions")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&stale)?))?,
+            ),
+        )
+        .await?;
+        assert_eq!(stale_response.status(), StatusCode::CONFLICT);
+
+        let checkpoint_response = crate::validator_set_history::with_checkpoint_env_override(
+            Some("{not-json".into()),
+            app.oneshot(
+                Request::post("/v1/validator/set-transitions")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&stale)?))?,
+            ),
+        )
+        .await?;
+        assert_eq!(
+            checkpoint_response.status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn transition_post_has_a_one_mibibyte_route_cap() -> anyhow::Result<()> {
+        let (state, _tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
+        let app = router(
+            state,
+            new_event_bus(),
+            RateLimiter::new(RateLimitConfig::default()),
+            AttestationStore::new(),
+            crate::config::CorsConfig::default(),
+            tx_sender,
+            p2p_handle,
+        );
+        let response = app
+            .oneshot(
+                Request::post("/v1/validator/set-transitions")
+                    .header("content-type", "application/json")
+                    .body(Body::from(vec![
+                        b' ';
+                        VALIDATOR_TRANSITION_MAX_BODY_BYTES + 1
+                    ]))?,
+            )
+            .await?;
+        assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        Ok(())
     }
 
     fn make_submit_request(req: &PublishRequest) -> SubmitRequest {
@@ -5647,6 +6132,147 @@ mod tests {
             }
             other => panic!("expected namespace lifecycle transaction, got {other:?}"),
         }
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn namespace_lifecycle_v2_preflight_and_enqueue_exclude_a_chain_writer(
+    ) -> anyhow::Result<()> {
+        let (state, _tempdir, p2p_handle, tx_sender, tx_receiver) = make_test_state(0).await?;
+        let (current, current_pubkey) = make_keypair();
+        let (next, _next_pubkey) = make_keypair();
+        let genesis_hash = "a".repeat(64);
+        {
+            let mut state = state.write().await;
+            state.config.network_genesis_hash = genesis_hash.clone();
+        }
+        let namespace =
+            establish_test_namespace_controller(&state, "lifecycle-v2-race", current_pubkey)
+                .await?;
+        let now = chrono::Utc::now().timestamp();
+        let event = signed_namespace_lifecycle_event_v2(
+            "creg-api-test",
+            &genesis_hash,
+            &namespace,
+            &current,
+            &next,
+            1,
+            now,
+            now.saturating_add(3_600),
+        );
+
+        let preflight_complete = Arc::new(std::sync::Barrier::new(2));
+        let resume = Arc::new(std::sync::Barrier::new(2));
+        *NAMESPACE_LIFECYCLE_ADMISSION_TEST_HOOK
+            .get_or_init(|| std::sync::Mutex::new(None))
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some(NamespaceLifecycleAdmissionTestHook {
+                namespace: namespace.clone(),
+                preflight_complete: Arc::clone(&preflight_complete),
+                resume: Arc::clone(&resume),
+            });
+
+        let app = router(
+            state.clone(),
+            new_event_bus(),
+            RateLimiter::new(RateLimitConfig::default()),
+            AttestationStore::new(),
+            crate::config::CorsConfig::default(),
+            tx_sender,
+            p2p_handle,
+        );
+        let request = tokio::spawn(async move {
+            app.oneshot(
+                Request::post("/v1/publisher/namespaces/transfer")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&event)?))?,
+            )
+            .await
+            .map_err(anyhow::Error::from)
+        });
+
+        let reached = Arc::clone(&preflight_complete);
+        tokio::task::spawn_blocking(move || {
+            reached.wait();
+        })
+        .await?;
+
+        let writer_state = Arc::clone(&state);
+        let (writer_started_tx, writer_started_rx) = tokio::sync::oneshot::channel();
+        let mut writer = tokio::spawn(async move {
+            let _ = writer_started_tx.send(());
+            let state = writer_state.write().await;
+            let tip_height = state.chain.tip_height()?;
+            let parent = state
+                .chain
+                .get_block_by_height(tip_height)?
+                .ok_or_else(|| anyhow::anyhow!("test canonical parent is unavailable"))?;
+            let block = common::Block {
+                header: common::BlockHeader {
+                    height: tip_height.saturating_add(1),
+                    prev_hash: parent.hash(),
+                    merkle_root: common::merkle_root(&[]),
+                    proposer_id: "concurrent-chain-writer".into(),
+                    timestamp: crate::block_time::next_live_timestamp(
+                        parent.header.timestamp,
+                        chrono::Utc::now(),
+                    )?,
+                    validator_set_hash: common::canonical_validator_set_hash(&state.validator_set),
+                    vrf_output: None,
+                    vrf_proof: None,
+                },
+                transactions: Vec::new(),
+                pbft_signatures: Vec::new(),
+            };
+            state.chain.insert_block(&block)
+        });
+        writer_started_rx.await?;
+        let early_writer_result =
+            tokio::time::timeout(std::time::Duration::from_millis(100), &mut writer)
+                .await
+                .ok();
+        let writer_finished_while_preflight_paused = early_writer_result.is_some();
+
+        // Always release the request before asserting, so a regression cannot
+        // strand a runtime worker at the test-only barrier.
+        let release = Arc::clone(&resume);
+        tokio::task::spawn_blocking(move || {
+            release.wait();
+        })
+        .await?;
+        let response_result = request.await;
+        let writer_result = match early_writer_result {
+            Some(result) => result,
+            None => writer.await,
+        };
+        *NAMESPACE_LIFECYCLE_ADMISSION_TEST_HOOK
+            .get_or_init(|| std::sync::Mutex::new(None))
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+
+        let response = response_result??;
+        writer_result??;
+        assert!(
+            !writer_finished_while_preflight_paused,
+            "a canonical writer must not advance the chain between lifecycle preflight and enqueue"
+        );
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(state.read().await.chain.tip_height()?, 1);
+        let queued = state.read().await.chain.finalized_work_for_tracker(99)?;
+        assert_eq!(queued.len(), 1);
+        assert_eq!(
+            queued[0].1, 0,
+            "durable work must retain the same tip height used by its preflight"
+        );
+        assert!(matches!(
+            &queued[0].0,
+            common::Transaction::NamespaceLifecycleV2(_)
+        ));
+        assert!(matches!(
+            tx_receiver.lock().await.try_recv(),
+            Ok(common::Transaction::NamespaceLifecycleV2(_))
+        ));
         Ok(())
     }
 

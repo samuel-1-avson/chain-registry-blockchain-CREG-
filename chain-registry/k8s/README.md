@@ -29,3 +29,11 @@ manifest.
 All validator `secretKeyRef` entries are non-optional. A missing Secret or key
 therefore prevents the Pod from starting instead of silently selecting a
 default.
+
+The base `creg-config` keeps `CREG_WEAK_SUBJECTIVITY_CHECKPOINT` empty and
+`CREG_REQUIRE_CERTIFIED_COMMITTEES=false`. For a staged rollout, provision the
+complete independently verified signed checkpoint through an
+environment-specific ConfigMap/overlay, rebuild an observer canary, and compare
+its certified history with independently controlled peers. Enable mandatory
+mode only after the checkpoint and recovery rehearsal succeeds; never select a
+checkpoint from gossip or one HTTP peer.

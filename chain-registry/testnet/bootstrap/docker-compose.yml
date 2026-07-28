@@ -20,6 +20,8 @@ services:
       - bootstrap.env
     environment:
       CREG_OPERATOR_API_KEY: ${CREG_OPERATOR_API_KEY:?set a high-entropy server-side operator API key}
+      CREG_WEAK_SUBJECTIVITY_CHECKPOINT: "${CREG_WEAK_SUBJECTIVITY_CHECKPOINT:-}"
+      CREG_REQUIRE_CERTIFIED_COMMITTEES: "${CREG_REQUIRE_CERTIFIED_COMMITTEES:-false}"
     volumes:
       - ./data:/data
       - ./p2p-key:/app/p2p-key:ro

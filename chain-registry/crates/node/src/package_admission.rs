@@ -254,11 +254,19 @@ pub fn verify_analysis_committee_assignment(
     if !committee.assignment_proof_is_valid(canonical, content_hash) {
         return Err("committee assignment proof is invalid");
     }
+    let logical_transition_id = common::validator_snapshot_certificate_hash(snapshot);
+    // Migration compatibility: assignments produced before logical
+    // transition IDs used the exact witness digest. Accept that binding only
+    // when this node has the same audited witness; all new assignments use the
+    // witness-independent logical ID above.
+    let snapshot_binding_matches = committee.validator_snapshot_certificate_hash
+        == logical_transition_id
+        || committee.validator_snapshot_certificate_hash
+            == common::validator_snapshot_witness_hash(snapshot);
     if committee.validator_snapshot_hash != snapshot.validator_set_hash
         || committee.validator_snapshot_height != snapshot.effective_from_height
         || committee.validator_snapshot_anchor_block_hash != snapshot.previous_block_hash
-        || committee.validator_snapshot_certificate_hash
-            != common::validator_snapshot_certificate_hash(snapshot)
+        || !snapshot_binding_matches
     {
         return Err("committee is not bound to the certified validator snapshot");
     }
@@ -555,6 +563,7 @@ pub async fn admit_publish_request(
         let certified = match crate::validator_set_history::committee_authority_at(
             &state.config.data_dir,
             next_height,
+            &state.validator_set_bootstrap,
         ) {
             Ok(snapshot) => snapshot,
             Err(error) => {
@@ -1726,6 +1735,47 @@ rule TestMaliciousPayload {{
             "content-hash",
             "vrf-output",
             &committee,
+        )
+        .is_ok());
+
+        let mut alternate_witness = snapshot.clone();
+        alternate_witness.transition_signatures.clear();
+        for index in [1usize, 2, 3] {
+            let key = &keys[index];
+            alternate_witness
+                .transition_signatures
+                .push(common::ValidatorSetTransitionSignature {
+                    validator_id: format!("v{index}"),
+                    validator_pubkey: hex::encode(key.verifying_key().as_bytes()),
+                    signature: hex::encode(key.sign(message.as_bytes()).to_bytes()),
+                });
+        }
+        alternate_witness
+            .validate_against(&previous)
+            .expect("alternate prior quorum");
+        assert!(verify_analysis_committee_assignment(
+            &alternate_witness,
+            "npm:certified@1.0.0",
+            "content-hash",
+            "vrf-output",
+            &committee,
+        )
+        .is_ok());
+
+        let mut legacy_witness_bound = committee.clone();
+        legacy_witness_bound.validator_snapshot_certificate_hash =
+            common::validator_snapshot_witness_hash(&snapshot);
+        legacy_witness_bound.assignment_proof = common::committee_assignment_proof(
+            "npm:certified@1.0.0",
+            "content-hash",
+            &legacy_witness_bound,
+        );
+        assert!(verify_analysis_committee_assignment(
+            &snapshot,
+            "npm:certified@1.0.0",
+            "content-hash",
+            "vrf-output",
+            &legacy_witness_bound,
         )
         .is_ok());
 

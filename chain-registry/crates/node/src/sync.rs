@@ -154,28 +154,24 @@ async fn fetch_peer_transition_histories(
     histories
 }
 
-/// Validate an untrusted peer history without mutating local authority state.
-/// Every certificate is checked sequentially from the configured bootstrap
-/// validator set. Anchors at or below `canonical_tip` must name the exact local
-/// canonical block, while later anchors are checked immediately before their
-/// certificate becomes eligible for persistence.
-fn validate_peer_transition_history(
+/// Validate certificate continuity and the exact out-of-band checkpoint
+/// without assuming that the peer is on our current fork. Canonical anchors
+/// are deliberately a separate phase: a peer history needed to validate a
+/// candidate reorg suffix cannot be rejected against the abandoned local fork.
+fn validate_peer_transition_certificate_chain(
     history: &PeerTransitionHistory,
     bootstrap: &ValidatorSet,
     checkpoint: Option<&AuthenticatedValidatorSetSnapshot>,
-    canonical_tip: u64,
-    canonical_anchors: &HashMap<u64, String>,
 ) -> Result<(), String> {
     if history.transitions.len() > MAX_TRANSITION_HISTORY_ENTRIES {
         return Err("validator-set transition history exceeds the entry limit".into());
     }
 
-    let checkpoint_hash = checkpoint.map(common::validator_snapshot_certificate_hash);
-    let mut checkpoint_found = checkpoint_hash.is_none();
     let mut previous_height = None;
-    let mut authority = bootstrap.clone();
-
     for transition in &history.transitions {
+        transition
+            .validate_structure()
+            .map_err(|error| format!("malformed transition certificate: {error}"))?;
         if previous_height.is_some_and(|height| transition.effective_from_height <= height) {
             return Err(
                 "validator-set transition history is unordered or contains duplicate heights"
@@ -188,42 +184,76 @@ fn validate_peer_transition_history(
                 transition.effective_from_height, history.advertised_tip
             ));
         }
+        previous_height = Some(transition.effective_from_height);
+    }
+
+    let (mut authority, first_untrusted_index) = match checkpoint {
+        Some(checkpoint) => {
+            let checkpoint_id = common::validator_snapshot_certificate_hash(checkpoint);
+            let Some(index) = history.transitions.iter().position(|transition| {
+                common::validator_snapshot_certificate_hash(transition) == checkpoint_id
+            }) else {
+                return Err(
+                    "peer history does not contain the configured weak-subjectivity checkpoint"
+                        .into(),
+                );
+            };
+            // The checkpoint certificate was independently verified before
+            // out-of-band provisioning and is the weak-subjectivity trust
+            // root. Pre-checkpoint history may have been pruned; every
+            // descendant received here is still independently quorum-checked.
+            (checkpoint.validators.clone(), index.saturating_add(1))
+        }
+        None => (bootstrap.clone(), 0),
+    };
+    for transition in history.transitions.iter().skip(first_untrusted_index) {
         transition
             .validate_against(&authority)
             .map_err(|error| format!("invalid transition certificate: {error}"))?;
-
-        let anchor_height = transition.effective_from_height.saturating_sub(1);
-        if anchor_height <= canonical_tip {
-            let canonical_hash = canonical_anchors
-                .get(&anchor_height)
-                .ok_or_else(|| format!("local canonical block {anchor_height} is unavailable"))?;
-            if transition.previous_block_hash.as_str() != canonical_hash.as_str() {
-                return Err(format!(
-                    "transition at height {} anchors a conflicting fork",
-                    transition.effective_from_height
-                ));
-            }
-        }
-
-        let transition_certificate_hash = common::validator_snapshot_certificate_hash(transition);
-        if checkpoint_hash.as_deref() == Some(transition_certificate_hash.as_str()) {
-            checkpoint_found = true;
-        }
-        previous_height = Some(transition.effective_from_height);
         authority = transition.validators.clone();
-    }
-
-    if !checkpoint_found {
-        return Err(
-            "peer history does not contain the configured weak-subjectivity checkpoint".into(),
-        );
     }
     Ok(())
 }
 
-/// Histories may differ only by a suffix. A different certificate or a
-/// missing intermediate transition before both histories' tips is a
-/// conflicting authority timeline and is rejected rather than peer-voted.
+fn validate_peer_transition_anchors(
+    history: &PeerTransitionHistory,
+    canonical_tip: u64,
+    canonical_anchors: &HashMap<u64, String>,
+) -> Result<(), String> {
+    for transition in &history.transitions {
+        let anchor_height = transition.effective_from_height.saturating_sub(1);
+        if anchor_height > canonical_tip {
+            continue;
+        }
+        let canonical_hash = canonical_anchors
+            .get(&anchor_height)
+            .ok_or_else(|| format!("local canonical block {anchor_height} is unavailable"))?;
+        if transition.previous_block_hash.as_str() != canonical_hash.as_str() {
+            return Err(format!(
+                "transition at height {} anchors a conflicting fork",
+                transition.effective_from_height
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Full validation for a linear extension of the current canonical chain.
+fn validate_peer_transition_history(
+    history: &PeerTransitionHistory,
+    bootstrap: &ValidatorSet,
+    checkpoint: Option<&AuthenticatedValidatorSetSnapshot>,
+    canonical_tip: u64,
+    canonical_anchors: &HashMap<u64, String>,
+) -> Result<(), String> {
+    validate_peer_transition_certificate_chain(history, bootstrap, checkpoint)?;
+    validate_peer_transition_anchors(history, canonical_tip, canonical_anchors)
+}
+
+/// Histories may differ only by a suffix. Alternate valid signature witnesses
+/// for the same logical transition are compatible; a different transition or
+/// a missing intermediate transition before both tips is a conflicting
+/// authority timeline and is rejected rather than peer-voted.
 fn ensure_histories_are_prefix_compatible(
     left: &[AuthenticatedValidatorSetSnapshot],
     right: &[AuthenticatedValidatorSetSnapshot],
@@ -237,9 +267,25 @@ fn ensure_histories_are_prefix_compatible(
         .map(|transition| transition.effective_from_height)
         .unwrap_or_default();
     let shared_tip = left_tip.min(right_tip);
+    // A retained local history may begin after a pruned pre-checkpoint prefix.
+    // Compare the complete overlapping interval; each history has already
+    // passed bootstrap/checkpoint continuity validation independently.
+    let shared_start = left
+        .first()
+        .map(|transition| transition.effective_from_height)
+        .unwrap_or_default()
+        .max(
+            right
+                .first()
+                .map(|transition| transition.effective_from_height)
+                .unwrap_or_default(),
+        );
     let left_prefix: HashMap<u64, String> = left
         .iter()
-        .filter(|transition| transition.effective_from_height <= shared_tip)
+        .filter(|transition| {
+            transition.effective_from_height >= shared_start
+                && transition.effective_from_height <= shared_tip
+        })
         .map(|transition| {
             (
                 transition.effective_from_height,
@@ -249,7 +295,10 @@ fn ensure_histories_are_prefix_compatible(
         .collect();
     let right_prefix: HashMap<u64, String> = right
         .iter()
-        .filter(|transition| transition.effective_from_height <= shared_tip)
+        .filter(|transition| {
+            transition.effective_from_height >= shared_start
+                && transition.effective_from_height <= shared_tip
+        })
         .map(|transition| {
             (
                 transition.effective_from_height,
@@ -304,7 +353,7 @@ async fn select_transition_history_for_sync(
     peer_urls: &[String],
     peer_heights: &HashMap<String, u64>,
 ) -> anyhow::Result<Option<Vec<AuthenticatedValidatorSetSnapshot>>> {
-    let mut candidates = fetch_peer_transition_histories(client, peer_urls, peer_heights).await;
+    let candidates = fetch_peer_transition_histories(client, peer_urls, peer_heights).await;
     let (bootstrap, data_dir) = {
         let state = state.read().await;
         (
@@ -315,16 +364,14 @@ async fn select_transition_history_for_sync(
     let checkpoint =
         crate::validator_set_history::checkpoint_from_env().map_err(anyhow::Error::msg)?;
     let local_transitions: Vec<AuthenticatedValidatorSetSnapshot> =
-        crate::validator_set_history::load(&data_dir)
+        crate::validator_set_history::load_checked(&data_dir)?
             .into_iter()
             .filter_map(|entry| entry.certificate)
             .collect();
 
     let canonical_tip = state.read().await.chain.tip_height()?;
-    let required_anchor_heights: HashSet<u64> = candidates
+    let required_anchor_heights: HashSet<u64> = local_transitions
         .iter()
-        .flat_map(|candidate| candidate.transitions.iter())
-        .chain(local_transitions.iter())
         .map(|transition| transition.effective_from_height.saturating_sub(1))
         .filter(|height| *height <= canonical_tip)
         .collect();
@@ -341,12 +388,10 @@ async fn select_transition_history_for_sync(
 
     let mut valid = Vec::new();
     for candidate in candidates {
-        match validate_peer_transition_history(
+        match validate_peer_transition_certificate_chain(
             &candidate,
             &bootstrap,
             checkpoint.as_ref(),
-            canonical_tip,
-            &canonical_anchors,
         ) {
             Ok(()) => valid.push(candidate),
             Err(error) => tracing::warn!(
@@ -428,43 +473,66 @@ async fn select_transition_history_for_sync(
 /// canonical chain. The complete eligible prefix is prevalidated before the
 /// first write, preventing an invalid peer suffix from causing partial state
 /// mutation.
-async fn import_transition_history_through(
-    state: &Arc<RwLock<NodeState>>,
+fn import_transition_history_through_locked(
+    state: &NodeState,
     transitions: &[AuthenticatedValidatorSetSnapshot],
     requested_effective_height: u64,
 ) -> anyhow::Result<usize> {
-    let (bootstrap, data_dir, canonical_tip, anchors) = {
-        let state = state.read().await;
-        let canonical_tip = state.chain.tip_height()?;
-        let max_effective_height = requested_effective_height.min(canonical_tip.saturating_add(1));
-        let mut anchors = HashMap::new();
-        for transition in transitions
-            .iter()
-            .filter(|transition| transition.effective_from_height <= max_effective_height)
-        {
-            let anchor_height = transition.effective_from_height.saturating_sub(1);
-            let block = state
-                .chain
-                .get_block_by_height(anchor_height)?
-                .ok_or_else(|| {
-                    anyhow::anyhow!("local canonical block {anchor_height} is unavailable")
-                })?;
-            anchors.insert(anchor_height, block.hash());
-        }
-        (
-            state.validator_set_bootstrap.clone(),
-            state.config.data_dir.clone(),
-            canonical_tip,
-            anchors,
-        )
-    };
+    let bootstrap = state.validator_set_bootstrap.clone();
+    let data_dir = state.config.data_dir.clone();
+    let canonical_tip = state.chain.tip_height()?;
     let max_effective_height = requested_effective_height.min(canonical_tip.saturating_add(1));
-    let mut authority = bootstrap;
+    let checkpoint =
+        crate::validator_set_history::checkpoint_from_env().map_err(anyhow::Error::msg)?;
+    let history = PeerTransitionHistory {
+        source: "transition-import".into(),
+        advertised_tip: u64::MAX,
+        transitions: transitions.to_vec(),
+    };
+    validate_peer_transition_certificate_chain(&history, &bootstrap, checkpoint.as_ref())
+        .map_err(anyhow::Error::msg)?;
+
+    let first_import_index = checkpoint
+        .as_ref()
+        .and_then(|checkpoint| {
+            let checkpoint_id = common::validator_snapshot_certificate_hash(checkpoint);
+            transitions.iter().position(|transition| {
+                common::validator_snapshot_certificate_hash(transition) == checkpoint_id
+            })
+        })
+        .unwrap_or(0);
+    let importable = transitions
+        .iter()
+        .enumerate()
+        .skip(first_import_index)
+        .filter(|(_, transition)| transition.effective_from_height <= max_effective_height);
+    let mut anchors = HashMap::new();
+    for (_, transition) in importable.clone() {
+        let anchor_height = transition.effective_from_height.saturating_sub(1);
+        let block = state
+            .chain
+            .get_block_by_height(anchor_height)?
+            .ok_or_else(|| {
+                anyhow::anyhow!("local canonical block {anchor_height} is unavailable")
+            })?;
+        anchors.insert(anchor_height, block.hash());
+    }
+    let mut authority = checkpoint
+        .as_ref()
+        .map(|checkpoint| checkpoint.validators.clone())
+        .unwrap_or(bootstrap);
     let mut staged = Vec::new();
-    for transition in transitions {
-        transition
-            .validate_against(&authority)
-            .map_err(|error| anyhow::anyhow!("invalid transition certificate: {error}"))?;
+    for (index, transition) in transitions.iter().enumerate().skip(first_import_index) {
+        let is_configured_checkpoint = checkpoint.as_ref().is_some_and(|checkpoint| {
+            index == first_import_index
+                && common::validator_snapshot_certificate_hash(transition)
+                    == common::validator_snapshot_certificate_hash(checkpoint)
+        });
+        if !is_configured_checkpoint {
+            transition
+                .validate_against(&authority)
+                .map_err(|error| anyhow::anyhow!("invalid transition certificate: {error}"))?;
+        }
         if transition.effective_from_height <= max_effective_height {
             let anchor_height = transition.effective_from_height.saturating_sub(1);
             let canonical_hash = anchors.get(&anchor_height).ok_or_else(|| {
@@ -476,19 +544,39 @@ async fn import_transition_history_through(
                     transition.effective_from_height
                 );
             }
-            staged.push((transition.clone(), authority.clone()));
+            staged.push((
+                transition.clone(),
+                authority.clone(),
+                is_configured_checkpoint,
+            ));
         }
         authority = transition.validators.clone();
     }
 
-    for (transition, previous) in &staged {
-        crate::validator_set_history::record_authenticated(
-            &data_dir,
-            transition.clone(),
-            previous,
-        )?;
+    for (transition, previous, is_configured_checkpoint) in &staged {
+        if *is_configured_checkpoint {
+            crate::validator_set_history::record_configured_checkpoint(&data_dir, transition)?;
+        } else {
+            crate::validator_set_history::record_authenticated(
+                &data_dir,
+                transition.clone(),
+                previous,
+            )?;
+        }
     }
     Ok(staged.len())
+}
+
+async fn import_transition_history_through(
+    state: &Arc<RwLock<NodeState>>,
+    transitions: &[AuthenticatedValidatorSetSnapshot],
+    requested_effective_height: u64,
+) -> anyhow::Result<usize> {
+    // Keep the state read guard through synchronous history persistence. That
+    // makes the local tip/anchor snapshot and the resulting file replacement
+    // one serialization interval with canonical writers.
+    let state = state.read().await;
+    import_transition_history_through_locked(&state, transitions, requested_effective_height)
 }
 
 pub async fn run(state: Arc<RwLock<NodeState>>) {
@@ -620,17 +708,20 @@ async fn sync_once(state: Arc<RwLock<NodeState>>) -> anyhow::Result<()> {
         // signatures against the current validator set. Without this check a
         // malicious peer could serve a syntactically-valid block whose payload
         // never reached consensus. (ISSUE-018)
-        let (validator_set, data_dir) = {
+        let (bootstrap_set, data_dir) = {
             let s = state.read().await;
-            (s.validator_set.clone(), s.config.data_dir.clone())
+            (
+                s.validator_set_bootstrap.clone(),
+                s.config.data_dir.clone(),
+            )
         };
         // Verify against the validator set that was active at THIS block's
-        // height (ISSUE-050), falling back to the current set when no
-        // historical snapshot covers it (no regression).
+        // height (ISSUE-050), rooted in the immutable deployment bootstrap
+        // when no certified transition covers it.
         let effective_set = match crate::validator_set_history::verification_set_at(
             &data_dir,
             block.header.height,
-            &validator_set,
+            &bootstrap_set,
         ) {
             Ok(set) => set,
             Err(error) => {
@@ -718,6 +809,18 @@ fn rebuild_reorg_derived_state(state: &mut NodeState) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn rebuild_reorg_derived_state_during_adoption(
+    state: &mut NodeState,
+    guard: &crate::chain_store::ReorgMutationGuard,
+) -> anyhow::Result<()> {
+    state.chain.rebuild_package_index_for_reorg(guard)?;
+    let canonical_blocks = canonical_reorg_blocks(state)?;
+    state
+        .publisher_index
+        .rebuild_from_chain(canonical_blocks.iter());
+    Ok(())
+}
+
 fn reconciled_forced_inclusion_tracker(
     forced_inclusion_before: &crate::state::ForcedInclusionTracker,
     canonical_transaction_hashes: &HashSet<String>,
@@ -734,6 +837,7 @@ fn reconciled_forced_inclusion_tracker(
 
 fn rebuild_reorg_operational_state(
     state: &mut NodeState,
+    guard: &crate::chain_store::ReorgMutationGuard,
     abandoned_branch: &[common::Block],
     forced_inclusion_before: &crate::state::ForcedInclusionTracker,
 ) -> anyhow::Result<()> {
@@ -745,7 +849,11 @@ fn rebuild_reorg_operational_state(
         .collect();
     let durable_work = state
         .chain
-        .reconcile_finalized_work_after_reorg(abandoned_branch, &canonical_transaction_hashes)
+        .reconcile_finalized_work_after_reorg(
+            guard,
+            abandoned_branch,
+            &canonical_transaction_hashes,
+        )
         .context("reconcile finalized work against adopted reorg branch")?;
 
     state.forced_inclusion_tracker = reconciled_forced_inclusion_tracker(
@@ -758,18 +866,27 @@ fn rebuild_reorg_operational_state(
 
 fn restore_reorg_branch(
     state: &mut NodeState,
+    reorg_guard: &crate::chain_store::ReorgMutationGuard,
     forced_inclusion_before: &crate::state::ForcedInclusionTracker,
 ) -> anyhow::Result<()> {
     // The tracker is in-memory only. Restore it even if durable recovery below
     // fails so a declined reorg cannot silently reset censorship deadlines.
     state.forced_inclusion_tracker = forced_inclusion_before.clone();
-    if !state.chain.recover_incomplete_reorg()? {
+    if !state
+        .chain
+        .recover_incomplete_reorg_with_guard(reorg_guard)?
+    {
         anyhow::bail!("cannot restore reorg branch without an active journal");
     }
     // ChainStore restores the canonical mapping, package/namespace state, and
     // the pre-reorg durable work snapshot before clearing the journal. Rebuild
-    // the remaining in-memory publisher view from that recovered chain.
-    rebuild_reorg_derived_state(state)?;
+    // only the remaining in-memory publisher view here: calling the public
+    // package rebuild would try to acquire an ordinary store mutation guard
+    // while `reorg_guard` still exclusively owns that store.
+    let canonical_blocks = canonical_reorg_blocks(state)?;
+    state
+        .publisher_index
+        .rebuild_from_chain(canonical_blocks.iter());
     Ok(())
 }
 
@@ -842,7 +959,21 @@ async fn attempt_reorg_recovery(
     };
 
     if let Some(transitions) = transition_history {
-        let retained_local: Vec<_> = crate::validator_set_history::load(&data_dir)
+        let checkpoint =
+            crate::validator_set_history::checkpoint_from_env().map_err(anyhow::Error::msg)?;
+        let candidate_history = PeerTransitionHistory {
+            source: "candidate-reorg-branch".into(),
+            advertised_tip: peer_height,
+            transitions: transitions.to_vec(),
+        };
+        validate_peer_transition_certificate_chain(
+            &candidate_history,
+            &bootstrap_set,
+            checkpoint.as_ref(),
+        )
+        .map_err(anyhow::Error::msg)?;
+
+        let retained_local: Vec<_> = crate::validator_set_history::load_checked(&data_dir)?
             .into_iter()
             .filter(|entry| entry.effective_from_height <= fork_height.saturating_add(1))
             .filter_map(|entry| entry.certificate)
@@ -850,6 +981,35 @@ async fn attempt_reorg_recovery(
         if let Err(error) = ensure_histories_are_prefix_compatible(&retained_local, transitions) {
             tracing::error!(
                 "Reorg recovery: peer validator authority conflicts at or before the common ancestor: {}",
+                error
+            );
+            return Ok(false);
+        }
+        let retained_anchor_heights: HashSet<_> = transitions
+            .iter()
+            .map(|transition| transition.effective_from_height.saturating_sub(1))
+            .filter(|height| *height <= fork_height)
+            .collect();
+        let retained_anchors = {
+            let s = state.read().await;
+            let mut anchors = HashMap::new();
+            for height in retained_anchor_heights {
+                let Some(block) = s.chain.get_block_by_height(height)? else {
+                    tracing::error!(
+                        "Reorg recovery: canonical validator anchor {} is unavailable",
+                        height
+                    );
+                    return Ok(false);
+                };
+                anchors.insert(height, block.hash());
+            }
+            anchors
+        };
+        if let Err(error) =
+            validate_peer_transition_anchors(&candidate_history, fork_height, &retained_anchors)
+        {
+            tracing::error!(
+                "Reorg recovery: peer validator authority conflicts before the fork: {}",
                 error
             );
             return Ok(false);
@@ -901,7 +1061,7 @@ async fn attempt_reorg_recovery(
             match crate::validator_set_history::verification_set_at(
                 &data_dir,
                 b.header.height,
-                &validator_set,
+                &bootstrap_set,
             ) {
                 Ok(set) => set,
                 Err(error) => {
@@ -971,7 +1131,7 @@ async fn attempt_reorg_recovery(
     }
 
     // ── 4. Apply: rewind, rebuild the ancestor, adopt, then commit metadata ─
-    let (depth, abandoned, forced_inclusion_before) = {
+    {
         let mut s = state.write().await;
         if s.chain.tip_height()? != local_tip
             || s.chain
@@ -994,32 +1154,37 @@ async fn attempt_reorg_recovery(
             })?);
         }
         let forced_inclusion_before = s.forced_inclusion_tracker.clone();
-        s.chain
+        let reorg_guard = s
+            .chain
             .begin_reorg_journal(fork_height, &old_branch)
             .context("persist old canonical branch before reorg adoption")?;
 
         let adoption = (|| -> anyhow::Result<Vec<String>> {
-            let abandoned = s.chain.rollback_to_height(fork_height)?;
+            let abandoned = s
+                .chain
+                .rollback_to_height_for_reorg(&reorg_guard, fork_height)?;
             // rollback_to_height only rewinds canonical height mappings. Clear
             // and replay all namespace/package/nonces from the common prefix
             // before the first candidate transition is validated.
-            rebuild_reorg_derived_state(&mut s)?;
+            rebuild_reorg_derived_state_during_adoption(&mut s, &reorg_guard)?;
             for block in &new_branch {
-                s.chain.insert_block(block).with_context(|| {
-                    format!(
-                        "apply preflighted reorg block at height {}",
-                        block.header.height
-                    )
-                })?;
+                s.chain
+                    .insert_block_for_reorg(&reorg_guard, block)
+                    .with_context(|| {
+                        format!(
+                            "apply preflighted reorg block at height {}",
+                            block.header.height
+                        )
+                    })?;
             }
-            rebuild_reorg_derived_state(&mut s)?;
+            rebuild_reorg_derived_state_during_adoption(&mut s, &reorg_guard)?;
             Ok(abandoned)
         })();
 
         let abandoned = match adoption {
             Ok(abandoned) => abandoned,
             Err(error) => {
-                let restore = restore_reorg_branch(&mut s, &forced_inclusion_before);
+                let restore = restore_reorg_branch(&mut s, &reorg_guard, &forced_inclusion_before);
                 return match restore {
                     Ok(()) => Err(error.context(
                         "preflighted reorg failed during live application; old branch restored",
@@ -1032,10 +1197,13 @@ async fn attempt_reorg_recovery(
             }
         };
 
-        if let Err(error) =
-            rebuild_reorg_operational_state(&mut s, &old_branch, &forced_inclusion_before)
-        {
-            let restore = restore_reorg_branch(&mut s, &forced_inclusion_before);
+        if let Err(error) = rebuild_reorg_operational_state(
+            &mut s,
+            &reorg_guard,
+            &old_branch,
+            &forced_inclusion_before,
+        ) {
+            let restore = restore_reorg_branch(&mut s, &reorg_guard, &forced_inclusion_before);
             return match restore {
                 Ok(()) => Err(error
                     .context("reorg operational-state reconciliation failed; old branch restored")),
@@ -1051,7 +1219,7 @@ async fn attempt_reorg_recovery(
         if let Err(error) =
             crate::validator_set_history::truncate_after_reorg(&data_dir, fork_height)
         {
-            let restore = restore_reorg_branch(&mut s, &forced_inclusion_before);
+            let restore = restore_reorg_branch(&mut s, &reorg_guard, &forced_inclusion_before);
             return match restore {
                 Ok(()) => Err(error.context(
                     "validator history truncation failed after candidate adoption; old branch restored",
@@ -1063,33 +1231,30 @@ async fn attempt_reorg_recovery(
             };
         }
 
-        (local_tip - fork_height, abandoned, forced_inclusion_before)
-    };
-
-    if let Some(transitions) = transition_history {
-        if let Err(error) =
-            import_transition_history_through(state, transitions, new_tip_height.saturating_add(1))
-                .await
-        {
-            let recovery = {
-                let mut s = state.write().await;
-                restore_reorg_branch(&mut s, &forced_inclusion_before)
-            };
-            return match recovery {
-                Ok(()) => Err(error.context(
-                    "validator history import failed after candidate adoption; old branch restored",
-                )),
-                Err(recovery_error) => Err(anyhow::anyhow!(
-                    "validator history import failed after candidate adoption ({error}); \
-                     recovering the old branch also failed ({recovery_error})"
-                )),
-            };
+        // Keep the NodeState write lock through synchronous history persistence
+        // and journal commit. No API, producer, or gossip receiver can accept a
+        // mutation that would otherwise be erased by crash recovery.
+        if let Some(transitions) = transition_history {
+            if let Err(error) = import_transition_history_through_locked(
+                &s,
+                transitions,
+                new_tip_height.saturating_add(1),
+            ) {
+                let recovery = restore_reorg_branch(&mut s, &reorg_guard, &forced_inclusion_before);
+                return match recovery {
+                    Ok(()) => Err(error.context(
+                        "validator history import failed after candidate adoption; old branch restored",
+                    )),
+                    Err(recovery_error) => Err(anyhow::anyhow!(
+                        "validator history import failed after candidate adoption ({error}); \
+                         recovering the old branch also failed ({recovery_error})"
+                    )),
+                };
+            }
         }
-    }
-    {
-        let mut s = state.write().await;
-        if let Err(error) = s.chain.complete_reorg_journal() {
-            let recovery = restore_reorg_branch(&mut s, &forced_inclusion_before);
+
+        if let Err(error) = s.chain.complete_reorg_journal(&reorg_guard) {
+            let recovery = restore_reorg_branch(&mut s, &reorg_guard, &forced_inclusion_before);
             return match recovery {
                 Ok(()) => {
                     Err(error
@@ -1101,7 +1266,7 @@ async fn attempt_reorg_recovery(
                 )),
             };
         }
-        s.record_reorg(depth, abandoned, link_hash.clone());
+        s.record_reorg(local_tip - fork_height, abandoned, link_hash.clone());
     }
 
     tracing::info!(
@@ -1371,6 +1536,7 @@ fn verify_block_signatures(
 mod tests {
     use super::{
         ensure_histories_are_prefix_compatible, reconciled_forced_inclusion_tracker,
+        validate_peer_transition_anchors, validate_peer_transition_certificate_chain,
         validate_peer_transition_history, verify_block_consensus_certificate,
         verify_block_signatures, PeerTransitionHistory,
     };
@@ -1682,6 +1848,94 @@ mod tests {
     }
 
     #[test]
+    fn pinned_checkpoint_validates_a_pruned_precheckpoint_suffix() {
+        let key_sets: Vec<Vec<SigningKey>> = [31u8, 41, 51]
+            .into_iter()
+            .map(|base| {
+                (0..4)
+                    .map(|offset| SigningKey::from_bytes(&[base + offset; 32]))
+                    .collect()
+            })
+            .collect();
+        let validator_sets: Vec<ValidatorSet> =
+            key_sets.iter().map(|keys| validator_set(keys)).collect();
+        let bootstrap = validator_sets[0].clone();
+        let mut transitions = Vec::new();
+        let mut current_index = 0usize;
+        for height in 1u64..=514 {
+            let next_index = (current_index + 1) % validator_sets.len();
+            transitions.push(signed_transition(
+                height,
+                &format!("{:064x}", height.saturating_sub(1)),
+                &validator_sets[current_index],
+                &validator_sets[next_index],
+                &key_sets[current_index],
+            ));
+            current_index = next_index;
+        }
+        let checkpoint = transitions[499].clone();
+        let full_history = transitions.clone();
+        let retained_suffix = transitions.split_off(transitions.len() - 512);
+        assert_eq!(retained_suffix[0].effective_from_height, 3);
+        let history = PeerTransitionHistory {
+            source: "peerless-local-restart".into(),
+            advertised_tip: 514,
+            transitions: retained_suffix,
+        };
+
+        assert!(
+            validate_peer_transition_certificate_chain(&history, &bootstrap, None).is_err(),
+            "the pruned prefix no longer begins at bootstrap authority"
+        );
+        validate_peer_transition_certificate_chain(&history, &bootstrap, Some(&checkpoint))
+            .expect("the exact pinned checkpoint is the trust root for its retained descendants");
+        ensure_histories_are_prefix_compatible(&full_history, &history.transitions)
+            .expect("a pruned pre-checkpoint prefix is compatible over its complete overlap");
+    }
+
+    #[test]
+    fn candidate_fork_history_defers_only_post_fork_anchor_checks() {
+        let keys: Vec<_> = (21..=24)
+            .map(|byte| SigningKey::from_bytes(&[byte; 32]))
+            .collect();
+        let bootstrap = validator_set(&keys);
+        let common_anchor = "a".repeat(64);
+        let old_fork_anchor = "b".repeat(64);
+        let candidate_anchor = "c".repeat(64);
+        let checkpoint = signed_transition(2, &common_anchor, &bootstrap, &bootstrap, &keys);
+        let candidate_descendant =
+            signed_transition(4, &candidate_anchor, &bootstrap, &bootstrap, &keys);
+        let history = PeerTransitionHistory {
+            source: "candidate-peer".into(),
+            advertised_tip: 4,
+            transitions: vec![checkpoint.clone(), candidate_descendant],
+        };
+
+        validate_peer_transition_certificate_chain(&history, &bootstrap, Some(&checkpoint))
+            .expect("quorum and exact checkpoint remain mandatory before fork selection");
+
+        let old_fork_anchors = HashMap::from([(1, common_anchor.clone()), (3, old_fork_anchor)]);
+        assert!(validate_peer_transition_history(
+            &history,
+            &bootstrap,
+            Some(&checkpoint),
+            3,
+            &old_fork_anchors,
+        )
+        .is_err());
+
+        // Before adoption, only the common prefix is authoritative locally.
+        validate_peer_transition_anchors(&history, 1, &HashMap::from([(1, common_anchor)]))
+            .expect("post-fork anchor must not be compared with the abandoned branch");
+        validate_peer_transition_anchors(
+            &history,
+            3,
+            &HashMap::from([(1, "a".repeat(64)), (3, candidate_anchor)]),
+        )
+        .expect("downloaded candidate blocks supply the deferred suffix anchors");
+    }
+
+    #[test]
     fn long_range_or_conflicting_transition_timelines_are_rejected() {
         let keys: Vec<_> = (11..=14)
             .map(|byte| SigningKey::from_bytes(&[byte; 32]))
@@ -1697,6 +1951,29 @@ mod tests {
             ensure_histories_are_prefix_compatible(&canonical_history, &alternative_history)
                 .expect_err("two certified timelines at the same height must not be peer-voted");
         assert!(error.contains("conflicting"), "unexpected error: {error}");
+
+        let mut alternate_checkpoint_witness = checkpoint.clone();
+        alternate_checkpoint_witness.transition_signatures.clear();
+        let checkpoint_message = validator_set_transition_message(&alternate_checkpoint_witness);
+        for index in [1usize, 2, 3] {
+            alternate_checkpoint_witness.transition_signatures.push(
+                ValidatorSetTransitionSignature {
+                    validator_id: bootstrap.validators[index].id.clone(),
+                    validator_pubkey: bootstrap.validators[index].pubkey.clone(),
+                    signature: hex::encode(
+                        keys[index].sign(checkpoint_message.as_bytes()).to_bytes(),
+                    ),
+                },
+            );
+        }
+        alternate_checkpoint_witness
+            .validate_against(&bootstrap)
+            .expect("alternate peer quorum");
+        ensure_histories_are_prefix_compatible(
+            &[checkpoint.clone()],
+            &[alternate_checkpoint_witness],
+        )
+        .expect("independently valid peer witnesses identify one logical transition");
 
         let missing_intermediate = vec![
             checkpoint.clone(),

@@ -54,6 +54,10 @@ x-node-base: &node-base
     CREG_SPEC_SIGNATURE_URL: http://spec-server/chain-spec.json.sig
     CREG_SPEC_SIGNING_PUBKEY: "${CREG_SPEC_SIGNING_PUBKEY:-0437e4adac481519cd6ae66907294c40cfcbf0bdeadd47806f6233be4bd5f82d}"
     CREG_OPERATOR_API_KEY: "${CREG_OPERATOR_API_KEY:?set a high-entropy server-side operator API key}"
+    # Staged validator-authority controls: do not enable mandatory mode before
+    # publishing, independently verifying, and rehearsing the exact checkpoint.
+    CREG_WEAK_SUBJECTIVITY_CHECKPOINT: "${CREG_WEAK_SUBJECTIVITY_CHECKPOINT:-}"
+    CREG_REQUIRE_CERTIFIED_COMMITTEES: "${CREG_REQUIRE_CERTIFIED_COMMITTEES:-false}"
     # CR-07 activation and policy pins are signed-spec-only. These local
     # verifier paths stay empty until reviewed binaries are mounted read-only.
     CREG_NAMESPACE_AUTHORITY_NPM_VERIFIER_PATH: "${CREG_NAMESPACE_AUTHORITY_NPM_VERIFIER_PATH:-}"

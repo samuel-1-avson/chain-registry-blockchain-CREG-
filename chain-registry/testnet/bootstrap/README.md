@@ -19,6 +19,9 @@ cd testnet/bootstrap
 cp bootstrap.env.example bootstrap.env
 # Edit bootstrap.env — set CREG_P2P_ANNOUNCE, CREG_ETH_RPC_URL, and a
 # high-entropy CREG_OPERATOR_API_KEY.
+# Leave CREG_REQUIRE_CERTIFIED_COMMITTEES=false until fleet rehearsal. For a
+# rebuilt node, add only the exact independently verified
+# CREG_WEAK_SUBJECTIVITY_CHECKPOINT supplied out of band.
 
 # 2. Generate persistent P2P key
 mkdir -p data p2p-key

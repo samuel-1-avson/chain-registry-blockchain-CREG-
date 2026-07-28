@@ -7,8 +7,13 @@ use crate::{sha256_hex, ValidatorSet};
 use serde::{Deserialize, Serialize};
 
 pub const VALIDATOR_SNAPSHOT_SCHEMA_VERSION: u16 = 1;
+/// Absolute protocol resource bound for authenticated validator-set envelopes.
+/// Deployments may use a lower signed chain-spec limit; no receiver performs
+/// unbounded identity or signature work above this ceiling.
+pub const MAX_VALIDATOR_SET_MEMBERS: usize = 10_000;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ValidatorSetTransitionSignature {
     pub validator_id: String,
     pub validator_pubkey: String,
@@ -16,6 +21,7 @@ pub struct ValidatorSetTransitionSignature {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AuthenticatedValidatorSetSnapshot {
     pub schema_version: u16,
     /// First canonical block height governed by this set.
@@ -52,10 +58,31 @@ pub fn validator_set_transition_message(snapshot: &AuthenticatedValidatorSetSnap
     )
 }
 
-/// Stable digest used by downstream assignments to commit to the exact
-/// certified transition, including its signers. This is an identifier, not a
-/// substitute for `validate_against`.
+/// Logical identifier for a certified validator-set transition.
+///
+/// The legacy function name is retained for wire/storage compatibility, but
+/// the digest deliberately excludes the replaceable signature witness. Two
+/// independently valid prior-set quorum subsets certify the same transition
+/// and must converge on the same checkpoint, history, and committee identity.
+/// The validator-set hashes commit to the complete preceding/next sets; the
+/// schema/domain, effective height, and fork anchor are bound explicitly.
+/// This identifier is never a substitute for independently calling
+/// `validate_against` on the received witness.
 pub fn validator_snapshot_certificate_hash(snapshot: &AuthenticatedValidatorSetSnapshot) -> String {
+    sha256_hex(
+        format!(
+            "creg-certified-validator-set-transition-id-v1\nschema_version:{}\n{}",
+            snapshot.schema_version,
+            validator_set_transition_message(snapshot)
+        )
+        .as_bytes(),
+    )
+}
+
+/// Exact audit digest of a particular signature witness. Consensus identity
+/// must use `validator_snapshot_certificate_hash`; this digest is useful only
+/// when operators need to distinguish the precise certificate bytes/signers.
+pub fn validator_snapshot_witness_hash(snapshot: &AuthenticatedValidatorSetSnapshot) -> String {
     let mut canonical = snapshot.clone();
     canonical.transition_signatures.sort_by(|left, right| {
         left.validator_id
@@ -66,15 +93,57 @@ pub fn validator_snapshot_certificate_hash(snapshot: &AuthenticatedValidatorSetS
     sha256_hex(&serde_json::to_vec(&canonical).expect("validator snapshot serializes"))
 }
 
-fn is_lower_hex_hash(value: &str) -> bool {
-    value.len() == 64
+fn is_lower_hex(value: &str, expected_len: usize) -> bool {
+    value.len() == expected_len
         && value.bytes().all(|byte| byte.is_ascii_hexdigit())
         && value == value.to_ascii_lowercase()
 }
 
+fn is_lower_hex_hash(value: &str) -> bool {
+    is_lower_hex(value, 64)
+}
+
+fn validate_validator_identities(set: &ValidatorSet) -> Result<(), &'static str> {
+    use std::collections::HashSet;
+
+    if set.validators.is_empty() {
+        return Err("validator set is empty");
+    }
+    if set.validators.len() > MAX_VALIDATOR_SET_MEMBERS {
+        return Err("validator set exceeds the protocol member limit");
+    }
+    let mut ids = HashSet::with_capacity(set.validators.len());
+    let mut pubkeys = HashSet::with_capacity(set.validators.len());
+    for validator in &set.validators {
+        if validator.id.trim().is_empty() {
+            return Err("validator set contains an empty validator identity");
+        }
+        if validator.pubkey.trim().is_empty() {
+            return Err("validator set contains an empty validator public key");
+        }
+        if validator.pubkey.len() != 64
+            || !validator
+                .pubkey
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        {
+            return Err("validator set contains a non-canonical Ed25519 public key");
+        }
+        if !ids.insert(validator.id.as_str()) {
+            return Err("validator set contains duplicate validator identities");
+        }
+        if !pubkeys.insert(validator.pubkey.to_ascii_lowercase()) {
+            return Err("validator set contains duplicate validator public keys");
+        }
+    }
+    Ok(())
+}
+
 impl AuthenticatedValidatorSetSnapshot {
-    pub fn validate_against(&self, previous: &ValidatorSet) -> Result<(), &'static str> {
-        use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+    /// Validate fields that are self-authenticating or structurally required
+    /// without assuming access to the preceding validator set. This is the
+    /// minimum gate for an out-of-band weak-subjectivity trust root.
+    pub fn validate_structure(&self) -> Result<(), &'static str> {
         use std::collections::HashSet;
 
         if self.schema_version != VALIDATOR_SNAPSHOT_SCHEMA_VERSION {
@@ -86,44 +155,82 @@ impl AuthenticatedValidatorSetSnapshot {
         if !is_lower_hex_hash(&self.previous_block_hash) {
             return Err("validator snapshot lacks a canonical prior block hash");
         }
-        if previous.validators.is_empty() {
-            return Err("validator snapshot has no prior validator set");
+        if !is_lower_hex_hash(&self.previous_validator_set_hash) {
+            return Err("validator snapshot lacks a canonical prior validator-set hash");
         }
-        if self.validators.validators.is_empty()
-            || self.validator_set_hash != canonical_validator_set_hash(&self.validators)
-            || self.previous_validator_set_hash != canonical_validator_set_hash(previous)
-        {
+        validate_validator_identities(&self.validators)?;
+        if self.validator_set_hash != canonical_validator_set_hash(&self.validators) {
+            return Err("validator snapshot hash does not match its validator set");
+        }
+        if self.transition_signatures.is_empty() {
+            return Err("validator-set transition has no signature witness");
+        }
+        if self.transition_signatures.len() > MAX_VALIDATOR_SET_MEMBERS {
+            return Err("validator-set transition witness exceeds the protocol member limit");
+        }
+        let mut signer_ids = HashSet::with_capacity(self.transition_signatures.len());
+        for witness in &self.transition_signatures {
+            if witness.validator_id.trim().is_empty() {
+                return Err("validator-set transition witness has an empty signer identity");
+            }
+            if !signer_ids.insert(witness.validator_id.as_str()) {
+                return Err("validator-set transition contains duplicate signer identities");
+            }
+            if !is_lower_hex(&witness.validator_pubkey, 64) {
+                return Err(
+                    "validator-set transition witness has a non-canonical Ed25519 public key",
+                );
+            }
+            if !is_lower_hex(&witness.signature, 128) {
+                return Err("validator-set transition witness has a malformed signature");
+            }
+        }
+        Ok(())
+    }
+
+    pub fn validate_against(&self, previous: &ValidatorSet) -> Result<(), &'static str> {
+        use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+        use std::collections::{HashMap, HashSet};
+
+        self.validate_structure()?;
+        validate_validator_identities(previous)?;
+        if self.previous_validator_set_hash != canonical_validator_set_hash(previous) {
             return Err("validator snapshot hashes do not match their sets");
+        }
+        if self.transition_signatures.len() > previous.validators.len() {
+            return Err("validator-set transition witness exceeds the prior-set size");
         }
         let message = validator_set_transition_message(self);
         let mut signers = HashSet::new();
-        let mut declared_signers = HashSet::new();
+        let validators_by_id: HashMap<&str, _> = previous
+            .validators
+            .iter()
+            .map(|validator| (validator.id.as_str(), validator))
+            .collect();
         for signature in &self.transition_signatures {
-            if !declared_signers.insert(signature.validator_id.clone()) {
+            if !signers.insert(signature.validator_id.clone()) {
                 return Err("validator-set transition contains duplicate signer identities");
             }
-            let Some(validator) = previous.validators.iter().find(|validator| {
-                validator.id == signature.validator_id
-                    && validator
-                        .pubkey
-                        .eq_ignore_ascii_case(&signature.validator_pubkey)
-            }) else {
-                continue;
+            let Some(validator) = validators_by_id.get(signature.validator_id.as_str()) else {
+                return Err("validator-set transition contains an unknown signer");
             };
+            if validator.pubkey != signature.validator_pubkey {
+                return Err("validator-set transition signer public key does not match");
+            }
             let Ok(pubkey) = hex::decode(&validator.pubkey) else {
-                continue;
+                return Err("validator-set transition signer public key is malformed");
             };
             let Ok(signature_bytes) = hex::decode(&signature.signature) else {
-                continue;
+                return Err("validator-set transition signature is malformed");
             };
             let Ok(pubkey) = VerifyingKey::try_from(pubkey.as_slice()) else {
-                continue;
+                return Err("validator-set transition signer public key is malformed");
             };
             let Ok(signature) = Signature::try_from(signature_bytes.as_slice()) else {
-                continue;
+                return Err("validator-set transition signature is malformed");
             };
-            if pubkey.verify(message.as_bytes(), &signature).is_ok() {
-                signers.insert(validator.id.clone());
+            if pubkey.verify(message.as_bytes(), &signature).is_err() {
+                return Err("validator-set transition signature is invalid");
             }
         }
         let quorum = (2 * previous.validators.len()) / 3 + 1;
@@ -185,6 +292,108 @@ mod tests {
                 });
         }
         assert!(snapshot.validate_against(&previous).is_ok());
+
+        let mut alternate_witness = snapshot.clone();
+        alternate_witness.transition_signatures.clear();
+        for index in [1usize, 2, 3] {
+            let key = &keys[index];
+            alternate_witness
+                .transition_signatures
+                .push(ValidatorSetTransitionSignature {
+                    validator_id: format!("v{index}"),
+                    validator_pubkey: hex::encode(key.verifying_key().as_bytes()),
+                    signature: hex::encode(key.sign(message.as_bytes()).to_bytes()),
+                });
+        }
+        assert!(alternate_witness.validate_against(&previous).is_ok());
+        assert_eq!(
+            validator_snapshot_certificate_hash(&snapshot),
+            validator_snapshot_certificate_hash(&alternate_witness),
+            "honest quorum subsets must share one logical transition id"
+        );
+        assert_ne!(
+            validator_snapshot_witness_hash(&snapshot),
+            validator_snapshot_witness_hash(&alternate_witness),
+            "the audit digest still distinguishes exact witnesses"
+        );
+
+        let mut quorum_plus_invalid = snapshot.clone();
+        quorum_plus_invalid
+            .transition_signatures
+            .push(ValidatorSetTransitionSignature {
+                validator_id: "v3".into(),
+                validator_pubkey: hex::encode(keys[3].verifying_key().as_bytes()),
+                signature: "00".repeat(64),
+            });
+        assert!(
+            quorum_plus_invalid.validate_against(&previous).is_err(),
+            "a valid quorum must not hide an invalid declared witness"
+        );
+
+        let mut duplicate_previous_id = previous.clone();
+        duplicate_previous_id.validators[1].id = duplicate_previous_id.validators[0].id.clone();
+        assert_eq!(
+            snapshot.validate_against(&duplicate_previous_id),
+            Err("validator set contains duplicate validator identities")
+        );
+        let mut duplicate_previous_pubkey = previous.clone();
+        duplicate_previous_pubkey.validators[1].pubkey =
+            duplicate_previous_pubkey.validators[0].pubkey.clone();
+        assert_eq!(
+            snapshot.validate_against(&duplicate_previous_pubkey),
+            Err("validator set contains duplicate validator public keys")
+        );
+        let mut malformed_previous_non_signer = previous.clone();
+        malformed_previous_non_signer.validators[3].pubkey = "not-ed25519".into();
+        assert_eq!(
+            snapshot.validate_against(&malformed_previous_non_signer),
+            Err("validator set contains a non-canonical Ed25519 public key")
+        );
+        let mut duplicate_next_pubkey = snapshot.clone();
+        let mut duplicate_member = duplicate_next_pubkey.validators.validators[0].clone();
+        duplicate_member.id = "another-next-id".into();
+        duplicate_next_pubkey
+            .validators
+            .validators
+            .push(duplicate_member);
+        assert_eq!(
+            duplicate_next_pubkey.validate_against(&previous),
+            Err("validator set contains duplicate validator public keys")
+        );
+        let mut malformed_next_pubkey = snapshot.clone();
+        malformed_next_pubkey.validators.validators[0].pubkey = "ab".repeat(31);
+        assert_eq!(
+            malformed_next_pubkey.validate_against(&previous),
+            Err("validator set contains a non-canonical Ed25519 public key")
+        );
+        let mut empty_next_id = snapshot.clone();
+        empty_next_id.validators.validators[0].id.clear();
+        assert_eq!(
+            empty_next_id.validate_against(&previous),
+            Err("validator set contains an empty validator identity")
+        );
+        let mut oversized_next = snapshot.clone();
+        oversized_next.validators.validators =
+            vec![snapshot.validators.validators[0].clone(); MAX_VALIDATOR_SET_MEMBERS + 1];
+        assert_eq!(
+            oversized_next.validate_against(&previous),
+            Err("validator set exceeds the protocol member limit")
+        );
+
+        let mut unknown_snapshot_field = serde_json::to_value(&snapshot).expect("snapshot json");
+        unknown_snapshot_field["unsigned_extension"] = serde_json::json!(true);
+        assert!(serde_json::from_value::<AuthenticatedValidatorSetSnapshot>(
+            unknown_snapshot_field
+        )
+        .is_err());
+        let mut unknown_signature_field = serde_json::to_value(&snapshot).expect("snapshot json");
+        unknown_signature_field["transition_signatures"][0]["unsigned_extension"] =
+            serde_json::json!(true);
+        assert!(serde_json::from_value::<AuthenticatedValidatorSetSnapshot>(
+            unknown_signature_field
+        )
+        .is_err());
+
         snapshot.effective_from_height += 1;
         assert!(snapshot.validate_against(&previous).is_err());
     }

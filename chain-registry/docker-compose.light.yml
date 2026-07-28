@@ -30,6 +30,10 @@ services:
       - CREG_LISTEN=0.0.0.0:8080
       - CREG_P2P_LISTEN=/ip4/0.0.0.0/tcp/4001
       - CREG_OPERATOR_API_KEY=${CREG_OPERATOR_API_KEY:?set a high-entropy server-side operator API key}
+      # New/rebuilt light nodes may use a verified checkpoint. Mandatory mode
+      # stays false until the fleet rollout has been rehearsed.
+      - CREG_WEAK_SUBJECTIVITY_CHECKPOINT=${CREG_WEAK_SUBJECTIVITY_CHECKPOINT:-}
+      - CREG_REQUIRE_CERTIFIED_COMMITTEES=${CREG_REQUIRE_CERTIFIED_COMMITTEES:-false}
       
       # Pruning settings (aggressive for low storage)
       - CREG_PACKAGE_RETENTION_DAYS=14

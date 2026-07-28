@@ -8,6 +8,7 @@ pub mod admission_scan;
 pub mod api;
 pub mod authority_adapter;
 pub mod block_producer;
+pub mod block_time;
 pub mod bridge_anchors;
 pub mod chain_store;
 pub mod config;

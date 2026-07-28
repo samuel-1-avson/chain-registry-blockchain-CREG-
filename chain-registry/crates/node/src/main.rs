@@ -7,6 +7,7 @@ mod admission_scan;
 mod api;
 mod authority_adapter;
 mod block_producer;
+mod block_time;
 mod bridge;
 mod bridge_anchors;
 mod chain_store;

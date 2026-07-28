@@ -37,7 +37,7 @@ pub const DEFAULT_MAX_ARTIFACT_BYTES: usize = 16 * 1024 * 1024;
 pub const HARD_MAX_ARTIFACT_BYTES: usize = 64 * 1024 * 1024;
 pub const DEFAULT_MAX_RESULT_BYTES: usize = 64 * 1024;
 pub const HARD_MAX_RESULT_BYTES: usize = 1024 * 1024;
-pub const MAX_CHALLENGE_TTL_SECS: i64 = 15 * 60;
+pub const MAX_CHALLENGE_TTL_SECS: i64 = common::MAX_NAMESPACE_AUTHORITY_CERTIFICATE_TTL_SECS;
 pub const MAX_CLOCK_SKEW_SECS: i64 = 60;
 const MAX_STDERR_BYTES: usize = 8 * 1024;
 
@@ -313,7 +313,7 @@ impl AuthorityChallengeV1 {
         if self.issued_at < 0
             || self.expires_at <= self.issued_at
             || self.expires_at - self.issued_at > MAX_CHALLENGE_TTL_SECS
-            || now > self.expires_at
+            || now >= self.expires_at
             || self.issued_at > now.saturating_add(MAX_CLOCK_SKEW_SECS)
         {
             return Err(AuthorityAdapterError::InvalidRequest(
@@ -637,7 +637,7 @@ pub async fn verify_with_sidecar(
     if !stderr.is_empty() {
         return Err(AuthorityAdapterError::UnexpectedDiagnostics);
     }
-    validate_canonical_result(config, request, &stdout, now)
+    validate_canonical_result(config, request, &stdout, Utc::now().timestamp())
 }
 
 /// Validate a sidecar's raw stdout. Exposed separately so protocol fixtures can
@@ -670,6 +670,11 @@ fn validate_result_fields(
     now: i64,
 ) -> Result<VerifiedAuthorityObservation, AuthorityAdapterError> {
     let challenge = &request.challenge;
+    if now >= challenge.expires_at {
+        return Err(AuthorityAdapterError::ResultMismatch(
+            "sidecar completed after the challenge validity window",
+        ));
+    }
     if result.schema_version != AUTHORITY_ADAPTER_PROTOCOL_VERSION || !result.verified {
         return Err(AuthorityAdapterError::ResultMismatch(
             "sidecar did not return a verified v2 result",
@@ -721,11 +726,14 @@ fn validate_result_fields(
     }
     if result.proof_issued_at < 0
         || result.proof_issued_at < challenge.issued_at.saturating_sub(MAX_CLOCK_SKEW_SECS)
-        || result.proof_issued_at > challenge.expires_at
+        || result.proof_issued_at >= challenge.expires_at
         || result.proof_expires_at <= result.proof_issued_at
+        || result.proof_expires_at < challenge.expires_at
         || result.verified_at < challenge.issued_at.saturating_sub(MAX_CLOCK_SKEW_SECS)
+        || result.verified_at < result.proof_issued_at.saturating_sub(MAX_CLOCK_SKEW_SECS)
+        || result.verified_at >= result.proof_expires_at
         || result.verified_at > now.saturating_add(MAX_CLOCK_SKEW_SECS)
-        || result.verified_at > challenge.expires_at
+        || result.verified_at >= challenge.expires_at
     {
         return Err(AuthorityAdapterError::ResultMismatch(
             "proof or verification time is inconsistent with the fresh challenge",
@@ -1108,6 +1116,101 @@ mod tests {
         assert!(matches!(
             validate_canonical_result(&config(), &request, &raw, NOW),
             Err(AuthorityAdapterError::ResultMismatch(_))
+        ));
+    }
+
+    #[test]
+    fn rejects_proof_expiry_and_verification_time_inconsistencies() {
+        let request = request();
+
+        let mut proof_expires_first = result(&request);
+        proof_expires_first.proof_expires_at = request.challenge.expires_at - 1;
+        let raw = to_jcs_canonical_json(&proof_expires_first).unwrap();
+        assert!(matches!(
+            validate_canonical_result(&config(), &request, &raw, NOW),
+            Err(AuthorityAdapterError::ResultMismatch(_))
+        ));
+
+        let mut exclusive_request = request.clone();
+        exclusive_request.challenge.expires_at = NOW + 30;
+        let next_controller = SigningKey::from_bytes(&[7; 32]);
+        exclusive_request.challenge.next_controller_signature = hex::encode(
+            next_controller
+                .sign(exclusive_request.challenge.signing_message().as_bytes())
+                .to_bytes(),
+        );
+
+        let mut issued_at_expiry = result(&exclusive_request);
+        issued_at_expiry.proof_issued_at = exclusive_request.challenge.expires_at;
+        issued_at_expiry.proof_expires_at = exclusive_request.challenge.expires_at + 1;
+        issued_at_expiry.verified_at = exclusive_request.challenge.expires_at - 1;
+        let raw = to_jcs_canonical_json(&issued_at_expiry).unwrap();
+        assert!(matches!(
+            validate_canonical_result(&config(), &exclusive_request, &raw, NOW),
+            Err(AuthorityAdapterError::ResultMismatch(_))
+        ));
+
+        let mut verified_at_expiry = result(&exclusive_request);
+        verified_at_expiry.proof_expires_at = exclusive_request.challenge.expires_at + 1;
+        verified_at_expiry.verified_at = exclusive_request.challenge.expires_at;
+        let raw = to_jcs_canonical_json(&verified_at_expiry).unwrap();
+        assert!(matches!(
+            validate_canonical_result(&config(), &exclusive_request, &raw, NOW),
+            Err(AuthorityAdapterError::ResultMismatch(_))
+        ));
+
+        assert!(matches!(
+            validate_result_fields(
+                &config(),
+                &exclusive_request,
+                result(&exclusive_request),
+                exclusive_request.challenge.expires_at,
+            ),
+            Err(AuthorityAdapterError::ResultMismatch(
+                "sidecar completed after the challenge validity window"
+            ))
+        ));
+
+        let mut short_request = request.clone();
+        short_request.challenge.expires_at = NOW + 30;
+        let next_controller = SigningKey::from_bytes(&[7; 32]);
+        short_request.challenge.next_controller_signature = hex::encode(
+            next_controller
+                .sign(short_request.challenge.signing_message().as_bytes())
+                .to_bytes(),
+        );
+        let mut verified_after_expiry = result(&short_request);
+        verified_after_expiry.proof_expires_at = short_request.challenge.expires_at;
+        verified_after_expiry.verified_at = verified_after_expiry.proof_expires_at;
+        let raw = to_jcs_canonical_json(&verified_after_expiry).unwrap();
+        assert!(matches!(
+            validate_canonical_result(&config(), &short_request, &raw, NOW),
+            Err(AuthorityAdapterError::ResultMismatch(_))
+        ));
+
+        let mut verified_too_early = result(&request);
+        verified_too_early.verified_at =
+            verified_too_early.proof_issued_at - MAX_CLOCK_SKEW_SECS - 1;
+        let raw = to_jcs_canonical_json(&verified_too_early).unwrap();
+        assert!(matches!(
+            validate_canonical_result(&config(), &request, &raw, NOW),
+            Err(AuthorityAdapterError::ResultMismatch(_))
+        ));
+    }
+
+    #[test]
+    fn challenge_is_expired_at_its_exclusive_upper_bound() {
+        let mut request = request();
+        request.challenge.expires_at = NOW;
+        let next_controller = SigningKey::from_bytes(&[7; 32]);
+        request.challenge.next_controller_signature = hex::encode(
+            next_controller
+                .sign(request.challenge.signing_message().as_bytes())
+                .to_bytes(),
+        );
+        assert!(matches!(
+            request.validate_at(NOW, DEFAULT_MAX_EVIDENCE_BYTES, DEFAULT_MAX_ARTIFACT_BYTES),
+            Err(AuthorityAdapterError::InvalidRequest(_))
         ));
     }
 

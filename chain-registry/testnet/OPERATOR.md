@@ -26,6 +26,18 @@ Cohort waves: [GENESIS_ALPHA_COHORT_PLAYBOOK.md](../../docs/GENESIS_ALPHA_COHORT
 
 ---
 
+## Clock synchronization
+
+Every validator and block-producing host must maintain synchronized UTC with
+NTP, chrony, or an equivalent monitored time service. Live PBFT proposals use
+whole Unix seconds and fail closed when they are more than 60 seconds behind or
+ahead of a receiver's clock. Operators must treat drift near that bound as a
+liveness incident. Historical sync and rebuild still require each child
+timestamp to be strictly later than its parent, but do not compare old blocks
+to the current wall clock.
+
+---
+
 ## Maintainer seed fleet (optional)
 
 Small maintainer fleet on GCP seeds P2P and early quorum while external operators join.
@@ -135,7 +147,7 @@ Before enabling certified committee authority, independently verify a signed val
 
 1. Distribute that exact verified certificate out of band as `CREG_WEAK_SUBJECTIVITY_CHECKPOINT`.
 2. Put the single-line JSON value into the node's environment file, keep `CREG_REQUIRE_CERTIFIED_COMMITTEES=false`, and restart one observer canary.
-3. Compare `GET /v1/validator/set-transitions` on the canary and two independent peers. The exact checkpoint certificate hash and every descendant height/hash must agree.
+3. Compare `GET /v1/validator/set-transitions` on the canary and two independent peers. The checkpoint's logical transition ID and every descendant height/set hash must agree. Exact quorum-witness digests may differ when peers received different valid prior-set quorum subsets; verify every witness independently rather than requiring byte-identical signature lists.
 4. Rebuild the canary from an empty node data directory. Verify that it retrieves history only from a peer chain containing the exact configured checkpoint and rejects missing, conflicting, or fork-anchored history.
 5. Validate receipt of `creg/v1/validator-set-transitions`; every peer must independently reject replay conflicts, stale height, invalid quorum, and the wrong canonical-tip anchor.
 6. After a successful fleet rehearsal, enable `CREG_REQUIRE_CERTIFIED_COMMITTEES=true` on one admission canary, verify certified assignment proofs, and roll it out gradually.
@@ -182,14 +194,21 @@ boundary compiles.
    | `CREG_NAMESPACE_AUTHORITY_MAX_RESULT_BYTES` | Start at `65536` |
    | `CREG_NAMESPACE_AUTHORITY_MAX_CONCURRENT_VERIFICATIONS` | Start at `2`; hard maximum `4` |
 
-5. Confirm that exact accepted evidence is stored below `CREG_DATA_DIR` under
+5. Run each verifier under a dedicated unprivileged identity and reviewed OS
+   sandbox with outbound network denied, explicit CPU/memory/process limits,
+   and read-only executable/policy/trust mounts. Hash pinning and an
+   environment-cleared subprocess are not an OS sandbox. The deployment must
+   also prevent executable replacement between hash verification and launch.
+6. Confirm that exact accepted evidence is stored below `CREG_DATA_DIR` under
    content-addressed references of the form
    `creg-evidence:sha256:<digest>`. The separately fetched official artifact
    must be stored at
    `authority-artifacts/<sha256|sha512>/<prefix>/<digest>.bin`, using SHA-512
    for npm and SHA-256 for PyPI. Bearer tokens must never enter either archive,
-   logs, or a certificate.
-6. Generate a distinct high-entropy `CREG_OPERATOR_API_KEY` for each operator
+   logs, or a certificate. Configure capacity alerts, retention, quota, and
+   reviewed garbage collection before accepting public traffic; the
+   repository writer does not supply a production archive quota.
+7. Generate a distinct high-entropy `CREG_OPERATOR_API_KEY` for each operator
    trust domain. Both authority routes require it through `X-Operator-Key` or
    `Authorization: Bearer`; a checked-in sample/default key is not acceptable.
    Keep it server-side: never pass it through a `VITE_*` build argument,
@@ -205,7 +224,7 @@ boundary compiles.
    chain, genesis, purpose, namespace, controllers, nonce, issuance, and
    expiry, but not its enclosing artifact digest.
 2. Submit official `evidence_url` and `artifact_url` values independently to
-   canary validators using the planned authenticated
+   canary validators using the authenticated
    `POST /v1/validator/namespace-authority/attest` route. Each validator must
    separately fetch bounded evidence and artifact bytes, compute SHA-256 for
    evidence and native SHA-512 (npm) or SHA-256 (PyPI) for the artifact, and
@@ -215,7 +234,7 @@ boundary compiles.
    header. The controller-signed challenge is still required; the service key
    does not authorize a namespace.
 3. Assemble matching signed statements into a certificate, submit it to the
-   planned `POST /v1/validator/namespace-authority/certificates` validation
+   `POST /v1/validator/namespace-authority/certificates` validation
    route, and require distinct signatures from `floor(2n/3) + 1` members of
    the authenticated anchor set.
 4. Attach the completed certificate to the final v4 authorization. Verify that
@@ -249,9 +268,10 @@ v4 identity is configured. A pre-activation development network must set
 the legacy path when `CREG_PRODUCTION=true`. Never enable this flag on the
 public fleet or after CR-07 activation.
 
-The two endpoint names above are rollout placeholders until they appear in the
-shipped OpenAPI document and their adversarial tests are recorded. Do not
-schedule activation against a binary that does not expose and protect them.
+Both endpoints are implemented in the node router and appear in the shipped
+OpenAPI document. Do not schedule activation until their adversarial results
+are recorded and the deployed canary binary is confirmed to expose and protect
+them; repository implementation alone is not deployment evidence.
 
 ### Failure and rollback
 

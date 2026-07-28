@@ -55,6 +55,12 @@ event whose domain includes the chain ID, genesis hash, canonical namespace,
 action, current and next Ed25519/EVM controllers, durable nonce, issuance
 time, expiry, and prior-event hash.
 
+The action-specific routes
+`POST /v1/publisher/namespaces/delegate`,
+`POST /v1/publisher/namespaces/transfer`, and
+`POST /v1/publisher/namespaces/recover` accept the same versioned body and
+reject it unless the signed `action` matches the selected route.
+
 - `delegate` grants only the signed, expiring scope (initially `publish`) and
   retains the root controller.
 - `transfer` requires the current root and successor to authorize the same
@@ -104,7 +110,8 @@ self-hash:
    namespace/controllers, validity interval, and canonical block/set anchor.
    It never trusts one adapter response or fetches upstream data during replay.
 
-The planned authenticated validator endpoints are:
+The authenticated validator endpoints implemented by the node API and
+registered in its shipped OpenAPI document are:
 
 - `POST /v1/validator/namespace-authority/attest` for one validator's
   independently verified statement and signature. Its request includes

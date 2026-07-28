@@ -436,6 +436,7 @@ pub(crate) fn validate_authority_certificate(
         || statement.chain_id != config.chain_id
         || statement.genesis_hash != config.genesis_hash
         || statement.issued_at > reference_time
+        || reference_time < statement.authority_proof.issued_at.timestamp()
         || reference_time >= statement.expires_at
         || statement.anchor_height >= target_height
         || target_height.saturating_sub(statement.anchor_height)
@@ -527,4 +528,98 @@ fn is_lower_sha256(value: &str) -> bool {
     value.len() == 64
         && value == value.to_ascii_lowercase()
         && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::DateTime;
+
+    #[test]
+    fn authority_certificate_cannot_be_consumed_before_its_proof_existed() {
+        let proof_issued_at = 1_700_000_100;
+        let genesis = common::Block::genesis();
+        let certificate = CertifiedNamespaceAuthority {
+            statement: common::NamespaceAuthorityStatement {
+                schema_version: common::NAMESPACE_AUTHORITY_CERTIFICATE_SCHEMA_VERSION,
+                chain_id: "creg-testnet-1".into(),
+                genesis_hash: "1".repeat(64),
+                purpose: NamespaceAuthorityPurpose::Claim,
+                namespace: "npm:owned-package@".into(),
+                current_controller_ed25519_pubkey: String::new(),
+                current_controller_evm_address: String::new(),
+                next_controller_ed25519_pubkey: "a".repeat(64),
+                next_controller_evm_address: "0x1111111111111111111111111111111111111111".into(),
+                authority_nonce: 1,
+                authority_intent_digest: "b".repeat(64),
+                authority_proof: common::NamespaceAuthorityProof {
+                    schema_version: common::NAMESPACE_AUTHORITY_PROOF_SCHEMA_VERSION,
+                    authority: common::OwnershipAuthority::NpmTrustedPublisher,
+                    namespace: "npm:owned-package@".into(),
+                    issuer: "https://token.actions.githubusercontent.com".into(),
+                    subject: "repo:creg/owned-package:ref:refs/tags/v1.0.0".into(),
+                    audience: "npm:registry.npmjs.org".into(),
+                    evidence_uri: format!("creg-evidence:sha256:{}", "c".repeat(64)),
+                    registry_evidence_uri:
+                        "https://registry.npmjs.org/-/npm/v1/attestations/owned-package@1.0.0"
+                            .into(),
+                    evidence_sha256: "c".repeat(64),
+                    challenge_sha256: "b".repeat(64),
+                    artifact_digest_algorithm: "sha512".into(),
+                    artifact_digest: "d".repeat(128),
+                    controller_evm_address: "0x1111111111111111111111111111111111111111".into(),
+                    controller_ed25519_pubkey: "a".repeat(64),
+                    issued_at: DateTime::from_timestamp(proof_issued_at, 0)
+                        .expect("valid proof issuance"),
+                    expires_at: DateTime::from_timestamp(1_700_000_900, 0)
+                        .expect("valid proof expiry"),
+                },
+                adapter_id: "creg-npm-authority".into(),
+                adapter_version: "1.0.0".into(),
+                verifier_sha256: "e".repeat(64),
+                policy_sha256: "f".repeat(64),
+                trust_root_sha256: "0".repeat(64),
+                anchor_height: 0,
+                anchor_block_hash: genesis.hash(),
+                validator_set_hash: genesis.header.validator_set_hash,
+                issued_at: 1_700_000_000,
+                expires_at: 1_700_000_800,
+            },
+            validators: common::ValidatorSet::default(),
+            signatures: Vec::new(),
+        };
+        assert!(
+            certificate.statement.validate_structure().is_ok(),
+            "the adversarial statement must be structurally valid"
+        );
+        let config = NamespaceConsensusConfig {
+            chain_id: certificate.statement.chain_id.clone(),
+            genesis_hash: certificate.statement.genesis_hash.clone(),
+            authority_policies: vec![NamespaceAuthorityPolicySpec {
+                authority: common::OwnershipAuthority::NpmTrustedPublisher,
+                adapter_id: certificate.statement.adapter_id.clone(),
+                adapter_version: certificate.statement.adapter_version.clone(),
+                verifier_sha256: certificate.statement.verifier_sha256.clone(),
+                policy_sha256: certificate.statement.policy_sha256.clone(),
+                trust_root_sha256: certificate.statement.trust_root_sha256.clone(),
+            }],
+            ..NamespaceConsensusConfig::default()
+        };
+        let directory = tempfile::tempdir().expect("temporary chain");
+        let chain = ChainStore::open(directory.path()).expect("open chain");
+
+        let error = validate_authority_certificate(
+            &chain,
+            1,
+            &config,
+            &certificate,
+            NamespaceAuthorityPurpose::Claim,
+            proof_issued_at - 1,
+        )
+        .expect_err("proof must already exist at the consuming block's timestamp");
+        assert_eq!(
+            error.to_string(),
+            "namespace authority certificate context is invalid"
+        );
+    }
 }

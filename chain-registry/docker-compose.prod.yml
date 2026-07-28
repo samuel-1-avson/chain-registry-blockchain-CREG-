@@ -71,6 +71,10 @@ services:
       CREG_NODE_ID: "${CREG_NODE_ID:-node-1}"
       CREG_IS_VALIDATOR: "${CREG_IS_VALIDATOR:-true}"
       CREG_OPERATOR_API_KEY: "${CREG_OPERATOR_API_KEY:?set a high-entropy server-side operator API key}"
+      # Staged controls remain disabled until a real checkpoint has been
+      # independently verified and rehearsed by the operator fleet.
+      CREG_WEAK_SUBJECTIVITY_CHECKPOINT: "${CREG_WEAK_SUBJECTIVITY_CHECKPOINT:-}"
+      CREG_REQUIRE_CERTIFIED_COMMITTEES: "${CREG_REQUIRE_CERTIFIED_COMMITTEES:-false}"
       # This profile cannot enable CR-07 with environment-only activation:
       # activation and accepted pins must come from a signature-verified spec.
       CREG_NAMESPACE_AUTHORITY_NPM_VERIFIER_PATH: "${CREG_NAMESPACE_AUTHORITY_NPM_VERIFIER_PATH:-}"
