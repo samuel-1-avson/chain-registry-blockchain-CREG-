@@ -82,6 +82,7 @@ function Invoke-CargoSignature {
 }
 
 $specPath = Join-Path $scriptDir "chain-spec.sepolia.json"
+$signingKeyEnvName = & (Join-Path $scriptDir "require-spec-signing-key.ps1") -SpecPath $specPath
 if (-not (Test-Path $specPath)) { throw "Missing $specPath" }
 $spec = Get-Content $specPath -Raw | ConvertFrom-Json
 
@@ -138,7 +139,7 @@ if ([System.IO.File]::ReadAllBytes($specPath)[0] -ne 0x7b) {
 }
 Write-Host "Updated vrf in chain-spec.sepolia.json"
 
-# Genesis hash + signature (same key as finalize-sepolia-spec.ps1)
+# Genesis hash + signature (operator-supplied secret; never a repository key)
 $genesisHash = Invoke-CargoLastLine -Args @("run", "--example", "compute_genesis_hash", "--package", "common", "--", $specPath)
 if (-not $genesisHash) { throw "Failed to compute genesis hash" }
 
@@ -147,9 +148,8 @@ $spec.genesis_hash = $genesisHash
 Write-JsonFileNoBom -Path $specPath -Json ($spec | ConvertTo-Json -Depth 20 -Compress)
 Write-Host "Genesis hash: $genesisHash"
 
-$privkey = "9d91e9e0d82a02b7be8c40a522d899eea9eeffad244323be3e568973211f3a6d"
 $sigPath = Join-Path $scriptDir "chain-spec.sepolia.json.sig"
-$sig = Invoke-CargoSignature -Args @("run", "--example", "sign_chain_spec", "--package", "common", "--", $specPath, $privkey)
+$sig = Invoke-CargoSignature -Args @("run", "--example", "sign_chain_spec", "--package", "common", "--", $specPath, "--key-env", $signingKeyEnvName)
 if (-not $sig) { throw "Failed to sign chain spec" }
 Write-JsonFileNoBom -Path $sigPath -Json $sig
 Write-Host "Signed chain spec"

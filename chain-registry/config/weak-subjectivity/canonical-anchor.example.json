@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "chain_id": "REPLACE_WITH_SIGNED_CHAIN_ID",
+  "network": "REPLACE_WITH_NETWORK",
+  "block_height": 0,
+  "block_hash": "REPLACE_WITH_LOWERCASE_32_BYTE_CANONICAL_BLOCK_HASH",
+  "validator_set_hash": "REPLACE_WITH_LOWERCASE_32_BYTE_PRIOR_SET_HASH",
+  "canonical_head_height": 0,
+  "observed_at": "REPLACE_WITH_RFC3339_UTC_SECONDS",
+  "source": {
+    "operator_id": "REPLACE_WITH_INDEPENDENT_OPERATOR_ID",
+    "reference": "REPLACE_WITH_RETAINED_OBSERVATION_REFERENCE",
+    "evidence_sha256": "REPLACE_WITH_RETAINED_OBSERVATION_SHA256"
+  }
+}

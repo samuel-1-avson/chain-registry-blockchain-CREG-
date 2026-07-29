@@ -1,0 +1,401 @@
+{
+  "schema_version": 1,
+  "kind": "creg-repository-capability-matrix",
+  "generator": {
+    "id": "creg-me-28-capability-gate",
+    "version": 1
+  },
+  "scope": {
+    "assertion": "repository_configuration_only",
+    "deployed_state": "not_evaluated",
+    "signed_checkpoint_publication": "not_evaluated",
+    "release_readiness": "signed_sepolia_repository_publication_only",
+    "complete_system_release_readiness": "not_evaluated"
+  },
+  "release_readiness": {
+    "status": "blocked",
+    "ready": false,
+    "scope": "signed_sepolia_repository_publication_only",
+    "blockers": [
+      "sepolia_canonical_integrity_invalid",
+      "sepolia_publication_mirrors_diverge",
+      "sepolia_signing_key_unacceptable"
+    ],
+    "complete_system_release_readiness": "not_evaluated"
+  },
+  "inputs": [
+    {
+      "path": ".env.example",
+      "sha256": "f69e88ea20ffa8b709c9150712eb528d9f8a9b627bed2db21c0131880c1311aa"
+    },
+    {
+      "path": "config/cr07-activation-manifest.json",
+      "sha256": "7cf47961bf83ce5f9d5da1e1953fc6a6a328365918af81652c88abd2e6da441e"
+    },
+    {
+      "path": "config/weak-subjectivity/canonical-anchor.example.json",
+      "sha256": "7d58172b6fd19b97968e3ef0aa8a1c28a8a54f80ecd35be019e7acdb2683c279"
+    },
+    {
+      "path": "contracts/Registry.sol",
+      "sha256": "8007c1f51ea9c8938fc1354dc5914cc63fd693ad92fc3dcb01cca00dc3bdf408"
+    },
+    {
+      "path": "docker-compose.light.yml",
+      "sha256": "59ed1ce66f99680cb953c0bc80efce56c7f161ac4c3449eb599a01a10eedd7be"
+    },
+    {
+      "path": "docker-compose.prod.yml",
+      "sha256": "1e53fcbdded477d10190bc30906a652c322d81ab20a32ed8bb41097eef95bc08"
+    },
+    {
+      "path": "docker-compose.testnet.yml",
+      "sha256": "b72daa38b04a6c3826bbc597de58f502865a2ddee5406eeb87b4b3a2d865918e"
+    },
+    {
+      "path": "docker-compose.validator.yml",
+      "sha256": "704875545149261023684af815626ffe088ffe5a9f2b1f00359da9ec22d2cf7e"
+    },
+    {
+      "path": "docker-compose.yml",
+      "sha256": "dceb7e01a51dc5c5ebf2a01eda28b8b8b234776a95b6a24b91470f2eb8f4bda8"
+    },
+    {
+      "path": "k8s/01-configmap.yaml",
+      "sha256": "71f12eaca282d1bf82799388f5ae2e1aa0034d5034ffb1abad1d6f77f7f0406f"
+    },
+    {
+      "path": "scripts/generate-capability-matrix.mjs",
+      "sha256": "d4fc4c42b586af8413ac8dac28dfd8be21f9448307e297cc6424c09b93a48bdb"
+    },
+    {
+      "path": "scripts/validate-cr07-activation.mjs",
+      "sha256": "72da911f0575d6e59363190ba3b107f44ce7ec7e7d0c4f11db830f06c6d7fd1e"
+    },
+    {
+      "path": "testnet/.env.example",
+      "sha256": "0035caf565dba20afac47a536cfbf2c9b08d9ca65aaddf4b2c00717cdd541fbf"
+    },
+    {
+      "path": "testnet/bootstrap/bootstrap.env.example",
+      "sha256": "4f57c4c258ee5d9bb0bb79e4d7124054a88700cb851a9d0522b786cf9ee17cad"
+    },
+    {
+      "path": "testnet/bootstrap/docker-compose.yml",
+      "sha256": "554d5fd61d9afe8e1c81b07c910eff4775a0db8cbb9e46e9994f4a95fe87159a"
+    },
+    {
+      "path": "testnet/chain-spec.example.json",
+      "sha256": "3dd7872f8ed700e0be4c5f4f46d070373f9d5175ed4240fd9d988fb185042917"
+    },
+    {
+      "path": "testnet/chain-spec.local.json",
+      "sha256": "bcfe39d36aba5cfdee6e1df0788976f94871dcd3972c6bd5a8d0d3caca7e9e6a"
+    },
+    {
+      "path": "testnet/chain-spec.sepolia.json",
+      "sha256": "78585e2269babfa18fbd0c7565552d17feb8b88d6e6273fea3af3d3eeab34629"
+    },
+    {
+      "path": "testnet/chain-spec.sepolia.json.sig",
+      "sha256": "f04cda66afa36b4e4cdc7b71fd8d6b7fb1766e108950a0f3775f7a56a68760a6"
+    },
+    {
+      "path": "testnet/docker-compose.observer-pool.yml",
+      "sha256": "d8c6b5c6a9e5ae9950fc438453d3dd2ca0f747d103bdf13adec2530aafebc908"
+    },
+    {
+      "path": "testnet/docker-compose.validator-fleet.yml",
+      "sha256": "5dead5c83885a7595deade65c6929d937204ed4b9f2678ddd29b1f5c39d9e396"
+    },
+    {
+      "path": "testnet/docker-compose.validator.yml",
+      "sha256": "a687404cac0f8bee1de30ee1e67cd9007df264590c7e2e0bea0be5b9e9ec8b8f"
+    },
+    {
+      "path": "testnet/genesis.json",
+      "sha256": "faad4111069744b2dfc5e39045bdd9453423764f80281dc1662e26dc3c0a121d"
+    },
+    {
+      "path": "testnet/require-spec-signing-key.ps1",
+      "sha256": "64b6a1446272f0e5e82fe4bfee80acbef39425adfb8c4aba2756aa88e58738ca"
+    },
+    {
+      "path": "testnet/sepolia-fleet.env.example",
+      "sha256": "d4ecab68d7a8c8fb350b14bd2eabf0092367352943780524edc1ef8e2e096f11"
+    },
+    {
+      "path": "testnet/spec-server/chain-spec.json",
+      "sha256": "ddd5dd8e8aaed33e8a90acaa00715b65e210115b411b25fec3079e2c445c9dfb"
+    },
+    {
+      "path": "testnet/spec-server/chain-spec.json.sig",
+      "sha256": "780b781afe8958c635c519267ee1e5ffe22e35b89b885b000a91e3175014e790"
+    },
+    {
+      "path": "testnet/spec-server/chain-spec.sepolia.json",
+      "sha256": "d667878b5cc2f495f3ebc20daa025d750c1333e11a95dd028585b8372ed9f3a0"
+    },
+    {
+      "path": "testnet/spec-server/chain-spec.sepolia.json.sig",
+      "sha256": "6dfec63c0e88d618abb327979db22a7b94018381d8514dbb5ec7bb4e0ffacd69"
+    }
+  ],
+  "chain_specs": [
+    {
+      "path": "testnet/chain-spec.local.json",
+      "chain_id": "creg-testnet-1",
+      "network": "testnet",
+      "phase": "alpha",
+      "zk_validation": false,
+      "legacy_batch_flag_representable": false,
+      "cr07_manifest_guarded": true
+    },
+    {
+      "path": "testnet/chain-spec.sepolia.json",
+      "chain_id": "creg-testnet-1",
+      "network": "testnet",
+      "phase": "alpha",
+      "zk_validation": false,
+      "legacy_batch_flag_representable": false,
+      "cr07_manifest_guarded": true
+    },
+    {
+      "path": "testnet/spec-server/chain-spec.json",
+      "chain_id": "creg-testnet-1",
+      "network": "testnet",
+      "phase": "alpha",
+      "zk_validation": false,
+      "legacy_batch_flag_representable": false,
+      "cr07_manifest_guarded": true
+    },
+    {
+      "path": "testnet/spec-server/chain-spec.sepolia.json",
+      "chain_id": "creg-testnet-1",
+      "network": "testnet",
+      "phase": "alpha",
+      "zk_validation": false,
+      "legacy_batch_flag_representable": false,
+      "cr07_manifest_guarded": true
+    },
+    {
+      "path": "testnet/chain-spec.example.json",
+      "chain_id": "creg-testnet-1",
+      "network": "testnet",
+      "phase": "alpha",
+      "zk_validation": false,
+      "legacy_batch_flag_representable": false,
+      "cr07_manifest_guarded": false
+    },
+    {
+      "path": "testnet/genesis.json",
+      "chain_id": "creg-testnet-1",
+      "network": "testnet",
+      "phase": null,
+      "zk_validation": false,
+      "legacy_batch_flag_representable": false,
+      "cr07_manifest_guarded": false
+    }
+  ],
+  "capabilities": [
+    {
+      "id": "zk_package_qualification",
+      "repository_state": "retired",
+      "chain_spec_state": "disabled",
+      "source_guard": "unconditional_revert",
+      "deployed_state": "not_evaluated"
+    },
+    {
+      "id": "legacy_batch_checkpointing",
+      "repository_state": "retired",
+      "chain_spec_representation": "absent",
+      "source_guard": "unconditional_revert",
+      "deployed_state": "not_evaluated"
+    },
+    {
+      "id": "cr07_authoritative_namespace",
+      "repository_state": "disabled",
+      "activation_manifest": "config/cr07-activation-manifest.json",
+      "guarded_chain_specs": 4,
+      "activation_spec": null,
+      "genesis_hash": null,
+      "canonical_spec_sha256": null,
+      "activation_payload_sha256": null,
+      "deployed_state": "not_evaluated"
+    },
+    {
+      "id": "weak_subjectivity_checkpoint",
+      "repository_state": "staged_unconfigured_defaults",
+      "template_state": "non_deployable_placeholder",
+      "rollout_surfaces": 14,
+      "published_checkpoint": "not_evaluated",
+      "deployed_state": "not_evaluated"
+    },
+    {
+      "id": "certified_committee_mandatory_mode",
+      "repository_state": "staged_compatibility_defaults",
+      "mandatory_default": false,
+      "rollout_surfaces": 14,
+      "deployed_state": "not_evaluated"
+    },
+    {
+      "id": "signed_sepolia_spec_publication",
+      "repository_state": "blocked",
+      "release_ready": false,
+      "blockers": [
+        "sepolia_canonical_integrity_invalid",
+        "sepolia_publication_mirrors_diverge",
+        "sepolia_signing_key_unacceptable"
+      ],
+      "deployed_state": "not_evaluated"
+    }
+  ],
+  "sepolia_publication_integrity": {
+    "status": "blocked",
+    "release_ready": false,
+    "readiness_scope": "signed_sepolia_repository_publication_only",
+    "blockers": [
+      "sepolia_canonical_integrity_invalid",
+      "sepolia_publication_mirrors_diverge",
+      "sepolia_signing_key_unacceptable"
+    ],
+    "canonical": {
+      "spec_path": "testnet/chain-spec.sepolia.json",
+      "signature_path": "testnet/chain-spec.sepolia.json.sig",
+      "declared_genesis_hash": "0x0bb4b1ff2f1d0f86c678f5d31da99b0abf84dca46e29c728321afe55cf0e6660",
+      "computed_genesis_hash": "0xddd15847e100e98ac8d85e80f91a4fa1e21f7f936f58aea762434cf590a11e0a",
+      "genesis_hash_valid": false,
+      "spec_sha256": "78585e2269babfa18fbd0c7565552d17feb8b88d6e6273fea3af3d3eeab34629",
+      "signature_sha256": "f04cda66afa36b4e4cdc7b71fd8d6b7fb1766e108950a0f3775f7a56a68760a6",
+      "spec_byte_length": 2577,
+      "signature_byte_length": 128,
+      "signature_format_valid": true,
+      "signature_cryptographically_valid": false,
+      "status": "blocked"
+    },
+    "mirrors": [
+      {
+        "spec_path": "testnet/spec-server/chain-spec.sepolia.json",
+        "signature_path": "testnet/spec-server/chain-spec.sepolia.json.sig",
+        "spec_sha256": "d667878b5cc2f495f3ebc20daa025d750c1333e11a95dd028585b8372ed9f3a0",
+        "signature_sha256": "6dfec63c0e88d618abb327979db22a7b94018381d8514dbb5ec7bb4e0ffacd69",
+        "spec_byte_length": 2731,
+        "signature_byte_length": 128,
+        "exact_spec_bytes": false,
+        "exact_signature_bytes": false,
+        "exact_publication_pair": false,
+        "status": "blocked"
+      },
+      {
+        "spec_path": "testnet/spec-server/chain-spec.json",
+        "signature_path": "testnet/spec-server/chain-spec.json.sig",
+        "spec_sha256": "ddd5dd8e8aaed33e8a90acaa00715b65e210115b411b25fec3079e2c445c9dfb",
+        "signature_sha256": "780b781afe8958c635c519267ee1e5ffe22e35b89b885b000a91e3175014e790",
+        "spec_byte_length": 2729,
+        "signature_byte_length": 130,
+        "exact_spec_bytes": false,
+        "exact_signature_bytes": false,
+        "exact_publication_pair": false,
+        "status": "blocked"
+      }
+    ],
+    "mirrors_exact": false,
+    "signing_key": {
+      "configured_pubkey_hex": "0437e4adac481519cd6ae66907294c40cfcbf0bdeadd47806f6233be4bd5f82d",
+      "repository_disclosed_development_key": true,
+      "disclosure_source": "testnet/require-spec-signing-key.ps1",
+      "disallowed_by_activation_manifest": true,
+      "disallow_source": "config/cr07-activation-manifest.json",
+      "acceptable_for_publication": false,
+      "status": "blocked"
+    }
+  },
+  "retirement_contract": {
+    "path": "contracts/Registry.sol",
+    "zk_entrypoints": [
+      "submitPackageWithZKProof",
+      "verifyZKProof"
+    ],
+    "zk_enable_setter": "setZKValidationEnabled",
+    "legacy_batch_entrypoint": "submitRollupBatch",
+    "source_guard": "unconditional_revert",
+    "deployed_bytecode_evaluated": false
+  },
+  "weak_subjectivity_template": {
+    "path": "config/weak-subjectivity/canonical-anchor.example.json",
+    "repository_state": "non_deployable_placeholder",
+    "signed_checkpoint_evidence_evaluated": false
+  },
+  "rollout_defaults": [
+    {
+      "path": ".env.example",
+      "checkpoint_default": "unset_documented_placeholder",
+      "certified_committees_default": "unset_documented_false"
+    },
+    {
+      "path": "docker-compose.light.yml",
+      "checkpoint_default": "empty",
+      "certified_committees_default": "false"
+    },
+    {
+      "path": "docker-compose.prod.yml",
+      "checkpoint_default": "empty",
+      "certified_committees_default": "false"
+    },
+    {
+      "path": "docker-compose.testnet.yml",
+      "checkpoint_default": "empty",
+      "certified_committees_default": "false"
+    },
+    {
+      "path": "docker-compose.validator.yml",
+      "checkpoint_default": "empty",
+      "certified_committees_default": "false"
+    },
+    {
+      "path": "docker-compose.yml",
+      "checkpoint_default": "empty",
+      "certified_committees_default": "false"
+    },
+    {
+      "path": "k8s/01-configmap.yaml",
+      "checkpoint_default": "empty",
+      "certified_committees_default": "false"
+    },
+    {
+      "path": "testnet/.env.example",
+      "checkpoint_default": "unset_documented_placeholder",
+      "certified_committees_default": "unset_documented_false"
+    },
+    {
+      "path": "testnet/bootstrap/bootstrap.env.example",
+      "checkpoint_default": "unset_documented_placeholder",
+      "certified_committees_default": "false"
+    },
+    {
+      "path": "testnet/bootstrap/docker-compose.yml",
+      "checkpoint_default": "empty",
+      "certified_committees_default": "false"
+    },
+    {
+      "path": "testnet/docker-compose.observer-pool.yml",
+      "checkpoint_default": "empty",
+      "certified_committees_default": "false"
+    },
+    {
+      "path": "testnet/docker-compose.validator-fleet.yml",
+      "checkpoint_default": "empty",
+      "certified_committees_default": "false"
+    },
+    {
+      "path": "testnet/docker-compose.validator.yml",
+      "checkpoint_default": "empty",
+      "certified_committees_default": "false"
+    },
+    {
+      "path": "testnet/sepolia-fleet.env.example",
+      "checkpoint_default": "unset_documented_placeholder",
+      "certified_committees_default": "false"
+    }
+  ]
+}

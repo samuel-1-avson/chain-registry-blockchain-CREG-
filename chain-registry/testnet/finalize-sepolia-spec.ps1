@@ -30,6 +30,7 @@ Write-Success "Loaded deployment manifest"
 
 # Step 2: Patch chain-spec.sepolia.json
 $specPath = Join-Path $scriptDir "chain-spec.sepolia.json"
+$signingKeyEnvName = & (Join-Path $scriptDir "require-spec-signing-key.ps1") -SpecPath $specPath
 $spec = Get-Content $specPath | ConvertFrom-Json
 
 $spec.contracts.governance    = $manifest.governance
@@ -73,8 +74,7 @@ Write-Success "Updated genesis_hash in spec"
 
 # Step 4: Sign the spec
 Write-Step "Signing chain spec"
-$privkey = "9d91e9e0d82a02b7be8c40a522d899eea9eeffad244323be3e568973211f3a6d"
-$sig = cargo run --example sign_chain_spec --package common -- $specPath $privkey 2>$null | Select-Object -Last 1
+$sig = cargo run --example sign_chain_spec --package common -- $specPath --key-env $signingKeyEnvName 2>$null | Select-Object -Last 1
 
 $sigPath = Join-Path $scriptDir "chain-spec.sepolia.json.sig"
 Set-Content -Path $sigPath -Value $sig

@@ -123,6 +123,7 @@ contract ConsensusAdmissionTest is Test {
 
     /// 3 of 4 active → 3*3=9 ≥ 2*4=8 → quorum met.
     function test_happyPath_exactTwoThirdsQuorum() public {
+        uint256 epochBefore = staking.validatorSetEpoch();
         (address[] memory signers, bytes[] memory sigs) =
             _buildBundle(3, applicant, STAKE_AMT, 1);
 
@@ -131,6 +132,7 @@ contract ConsensusAdmissionTest is Test {
         (, Staking.ValidatorState state,,,,) = staking.validators(applicant);
         assertEq(uint8(state), uint8(Staking.ValidatorState.Active), "must be Active after quorum");
         assertTrue(staking.consensusNonceUsed(applicant, 1), "nonce must be recorded as used");
+        assertEq(staking.validatorSetEpoch(), epochBefore + 1, "admission must advance epoch");
     }
 
     function test_happyPath_superQuorumAllSigners() public {
@@ -153,6 +155,34 @@ contract ConsensusAdmissionTest is Test {
             Staking.InsufficientQuorum.selector, uint256(2), uint256(3)
         ));
         staking.approveByConsensus(applicant, 1, signers, sigs);
+    }
+
+    function test_staleAdmissionBundleRejectedAfterSameCountSetChange() public {
+        uint256 signedEpoch = staking.validatorSetEpoch();
+        (address[] memory signers, bytes[] memory sigs) =
+            _buildBundle(3, applicant, STAKE_AMT, 77);
+
+        // Remove the fourth validator (which is not part of the signature
+        // bundle), then admit a replacement through the emergency path. The
+        // active count returns to four, but the exact membership epoch changes.
+        vm.prank(activeAddrs[3]);
+        staking.initiateUnbonding();
+
+        address replacement = makeAddr("same-count-replacement");
+        cregToken.transfer(replacement, STAKE_AMT);
+        vm.startPrank(replacement);
+        cregToken.approve(address(staking), STAKE_AMT);
+        staking.applyToBeValidator(STAKE_AMT);
+        vm.stopPrank();
+        vm.prank(address(governance));
+        staking.approveValidator(replacement);
+
+        assertEq(staking.activeValidatorCount(), N_ACTIVE);
+        assertEq(staking.validatorSetEpoch(), signedEpoch + 2);
+        vm.expectRevert(
+            abi.encodeWithSelector(Staking.InvalidSignature.selector, signers[0])
+        );
+        staking.approveByConsensus(applicant, 77, signers, sigs);
     }
 
     // ── Signer set integrity ──────────────────────────────────────────────────

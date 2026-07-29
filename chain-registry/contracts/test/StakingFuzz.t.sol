@@ -91,11 +91,18 @@ contract StakingFuzzTest is Test {
         staking.stakeAsPublisher(stake);
 
         bytes32 packageKey = keccak256("npm:liability@1.0.0");
+        uint256 releaseBond = staking.minPublisherStake();
         vm.prank(address(0xBEEF));
-        staking.reservePublisherLiability(packageKey, publisher, staking.minPublisherStake());
+        staking.reservePublisherLiability(packageKey, publisher, releaseBond);
 
         vm.prank(publisher);
-        vm.expectRevert(Staking.PublisherLiabilityLocked.selector);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Staking.PublisherLiabilityLocked.selector,
+                stake - releaseBond,
+                stake
+            )
+        );
         staking.unstakeAsPublisher(stake);
 
         vm.prank(address(0xBEEF));

@@ -1,0 +1,236 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:creg:pypi-authority-policy:v1",
+  "title": "CREG PyPI authority-verifier policy v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "authority",
+    "adapter_id",
+    "adapter_version",
+    "sigstore_instance",
+    "predicate_type",
+    "publishers",
+    "archive"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "authority": {
+      "const": "pypi_trusted_publisher"
+    },
+    "adapter_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "adapter_version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "sigstore_instance": {
+      "const": "production"
+    },
+    "predicate_type": {
+      "const": "https://docs.pypi.org/attestations/publish/v1"
+    },
+    "publishers": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 10000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "namespace",
+          "issuer",
+          "subject",
+          "publisher"
+        ],
+        "properties": {
+          "namespace": {
+            "type": "string",
+            "pattern": "^pypi:[a-z0-9]+(?:-[a-z0-9]+)*@$"
+          },
+          "issuer": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "subject": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "publisher": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/githubPublisher"
+              },
+              {
+                "$ref": "#/$defs/gitlabPublisher"
+              },
+              {
+                "$ref": "#/$defs/googlePublisher"
+              },
+              {
+                "$ref": "#/$defs/circleCiPublisher"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "archive": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_entries",
+        "max_entry_bytes",
+        "max_uncompressed_bytes",
+        "max_compression_ratio"
+      ],
+      "properties": {
+        "max_entries": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "max_entry_bytes": {
+          "type": "integer",
+          "minimum": 65536,
+          "maximum": 67108864
+        },
+        "max_uncompressed_bytes": {
+          "type": "integer",
+          "minimum": 65536,
+          "maximum": 536870912
+        },
+        "max_compression_ratio": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        }
+      }
+    }
+  },
+  "$defs": {
+    "optionalText": {
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "githubPublisher": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "repository",
+        "workflow"
+      ],
+      "properties": {
+        "kind": {
+          "const": "GitHub"
+        },
+        "repository": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "workflow": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "environment": {
+          "$ref": "#/$defs/optionalText"
+        }
+      }
+    },
+    "gitlabPublisher": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "repository",
+        "workflow_filepath"
+      ],
+      "properties": {
+        "kind": {
+          "const": "GitLab"
+        },
+        "repository": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "workflow_filepath": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "environment": {
+          "$ref": "#/$defs/optionalText"
+        }
+      }
+    },
+    "googlePublisher": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "email"
+      ],
+      "properties": {
+        "kind": {
+          "const": "Google"
+        },
+        "email": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        }
+      }
+    },
+    "circleCiPublisher": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "project_id",
+        "pipeline_definition_id"
+      ],
+      "properties": {
+        "kind": {
+          "const": "CircleCI"
+        },
+        "project_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "pipeline_definition_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "vcs_origin": {
+          "$ref": "#/$defs/optionalText"
+        },
+        "vcs_ref": {
+          "$ref": "#/$defs/optionalText"
+        }
+      }
+    }
+  }
+}

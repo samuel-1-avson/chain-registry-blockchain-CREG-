@@ -2666,11 +2666,13 @@ mod tests {
 
         let mut non_monotonic = block(2, &first.hash(), "node-a", &["non-monotonic"]);
         non_monotonic.header.timestamp = first.header.timestamp;
-        assert!(store
+        let error = store
             .insert_block(&non_monotonic)
-            .expect_err("non-monotonic timestamp must fail closed")
-            .to_string()
-            .contains("strictly later"));
+            .expect_err("non-monotonic timestamp must fail closed");
+        assert!(
+            format!("{error:#}").contains("strictly later"),
+            "unexpected error: {error:#}"
+        );
 
         let mut stale_merkle = block(2, &first.hash(), "node-a", &["original-body"]);
         stale_merkle.transactions = vec![Transaction::Publish(publish_record("tampered-body"))];
@@ -2748,7 +2750,7 @@ mod tests {
             .insert_block(&same_hash_tamper)
             .expect_err("hash-indexed body replacement must fail after rollback");
         assert!(
-            error.to_string().contains("existing header hash"),
+            error.to_string().contains("merkle root"),
             "unexpected error: {error}"
         );
         assert_eq!(store.tip_height().expect("tip after rejection"), 0);

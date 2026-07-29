@@ -83,8 +83,14 @@ height and accepted npm/PyPI verifier, policy, and trust-root hashes must be
 consensus parameters in a signature-verified chain spec. Leave
 `CREG_NAMESPACE_AUTHORITY_NPM_VERIFIER_PATH` and
 `CREG_NAMESPACE_AUTHORITY_PYPI_VERIFIER_PATH` empty unless the reviewed
-binaries are mounted at those exact absolute paths. Empty or mismatched
-verifiers must fail closed.
+self-contained binaries are mounted at those exact absolute paths. The
+generated Python PyPI console launcher is not such an artifact because its hash
+does not bind imported verifier/dependency bytes. Empty or mismatched verifiers
+must fail closed. A locked one-file build recipe exists, but its output is
+platform/architecture/CPython-build specific and is not a reviewed release.
+The current Windows Rust launch environment also lacks the private
+per-invocation `TEMP`/`TMP`/`TMPDIR` contract required by the frozen
+executable, so PyPI activation remains disabled.
 
 The two-stage flow avoids self-referential artifact hashing: a controller first
 signs a fresh chain/genesis/namespace/controller intent, then publishes an
@@ -101,6 +107,17 @@ maximum is 64 MiB (`67108864`). npm provenance alone does not prove that npm
 trusted-publisher authentication mode was used; a reviewed external
 verifier/policy must require the official npm authentication-mode signal.
 
+The validator-local evidence/artifact archive defaults to a shared 10 GiB and
+100000-entry quota with a 365-day minimum retention window. Configure
+`CREG_NAMESPACE_AUTHORITY_ARCHIVE_MAX_BYTES`,
+`CREG_NAMESPACE_AUTHORITY_ARCHIVE_MAX_ENTRIES`, and
+`CREG_NAMESPACE_AUTHORITY_ARCHIVE_MIN_RETENTION_SECS` explicitly for each
+validator's storage capacity. These are validator-local availability controls,
+not consensus parameters, and independently operated validators need not use
+identical capacity values. Quota pressure collects only retention-eligible
+content and fails closed when it cannot make room; it does not replace backups
+or legal retention procedures.
+
 `POST /v1/validator/namespace-authority/attest` and
 `POST /v1/validator/namespace-authority/certificates` are implemented
 authenticated node interfaces and are registered in the shipped OpenAPI
@@ -113,11 +130,11 @@ validator/quorum signatures. Attestation is limited to 2 requests per IP per
 minute, with verifier concurrency default 2 and hard maximum 4. Sidecar
 `verified_at` is local freshness data and is deliberately excluded from the
 shared statement so independent validators sign identical bytes. Treat the
-shipped OpenAPI document as authoritative. Real npm/PyPI sidecars, official trust
-material, reviewed policy/verifier artifacts, a signed activation spec,
-multi-operator rehearsal, and independent security review are still required
-before testnet activation. See [OPERATOR.md](./OPERATOR.md) for rollout and
-rollback.
+shipped OpenAPI document as authoritative. Real npm/PyPI self-contained
+verifier artifacts, official trust material, reviewed policy, a signed
+activation spec, multi-operator rehearsal, and independent security review are
+still required before testnet activation. See [OPERATOR.md](./OPERATOR.md) for
+rollout and rollback.
 
 Keep the operator key server-side. Do not add it to a `VITE_*` variable,
 browser bundle, public nginx configuration, URL, or request body.

@@ -74,6 +74,7 @@ Start at the [project README](../README.md), then use the sections below.
 | [../chain-registry/TESTNET_READINESS_REPORT.md](../chain-registry/TESTNET_READINESS_REPORT.md) | Historical readiness snapshot |
 | [../chain-registry/contracts/README.md](../chain-registry/contracts/README.md) | Solidity contracts + relay model |
 | [L1_L2_HARDENING.md](./L1_L2_HARDENING.md) | Bridge / ZK / cross-layer notes |
+| [protocol/NAMESPACE_AUTHORITY_ACTIVATION.md](./protocol/NAMESPACE_AUTHORITY_ACTIVATION.md) | Normative CR-07 signed activation, verifier, policy, trust, ceremony, and rollback requirements |
 
 ---
 

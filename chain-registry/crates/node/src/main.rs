@@ -5,6 +5,7 @@
 
 mod admission_scan;
 mod api;
+mod authority_archive;
 mod authority_adapter;
 mod block_producer;
 mod block_time;

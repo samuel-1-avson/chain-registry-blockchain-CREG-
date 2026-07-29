@@ -112,6 +112,11 @@ contract Staking {
     /// (applicant, nonce) → used. Prevents replay of a consensus-admission bundle.
     mapping(address => mapping(uint256 => bool)) public consensusNonceUsed;
 
+    /// Monotonic version of the exact active validator membership. It advances
+    /// once for each address entering or leaving the Active set, regardless of
+    /// whether the resulting active-validator count changes.
+    uint256 public validatorSetEpoch;
+
     /// When `false`, the legacy `approveValidator(...)` / `rejectValidator(...)` path is
     /// permanently disabled and admission is gated exclusively by `approveByConsensus`.
     /// Governance can flip this off; it cannot be flipped back on.
@@ -144,6 +149,7 @@ contract Staking {
     event ValidatorUnbonding     (address indexed validator, uint256 unbondingAt);
     event ValidatorWithdrawn     (address indexed validator, uint256 amount);
     event ValidatorLeft          (address indexed validator);
+    event ValidatorSetEpochAdvanced(uint256 indexed epoch, address indexed validator, bool active);
     event EmergencyGovernanceDisabled();
     event Slashed                (address indexed account, uint256 amount, string reason);
     event SlashPoolDistributed   (uint256 amount, uint256 validatorCount);
@@ -177,6 +183,7 @@ contract Staking {
     error InvalidReleaseBond         ();
     error LiabilityNotMature         (uint256 unlockAt);
     error LiabilityNotFound          ();
+    error InvalidSlashAmount         ();
 
     // ── Constructor ───────────────────────────────────────────────────────────
 
@@ -406,6 +413,7 @@ contract Staking {
         ValidatorEntry storage v = validators[validator];
         if (v.state != ValidatorState.Pending) revert NotPending();
         v.state = ValidatorState.Active;
+        _advanceValidatorSetEpoch(validator, true);
         emit ValidatorApproved(validator);
     }
 
@@ -446,6 +454,7 @@ contract Staking {
     //   • Every signer is currently Active.
     //   • No duplicate signers (enforced by requiring strictly ascending addresses).
     //   • Every signature recovers to its declared signer over the EIP-712 digest.
+    //   • The digest binds the exact current validatorSetEpoch, not only its count.
     //   • signerCount * 3 >= activeValidatorCount * 2  (≥ 2/3 quorum).
     //   • Nonce hasn't been used for this applicant.
     //
@@ -458,11 +467,14 @@ contract Staking {
         uint256 nonce
     ) public view returns (bytes32) {
         bytes32 structHash = keccak256(abi.encode(
-            keccak256("ValidatorAdmission(address applicant,uint256 stake,uint256 nonce,uint256 ruleSetVersion)"),
+            keccak256(
+                "ValidatorAdmission(address applicant,uint256 stake,uint256 nonce,uint256 ruleSetVersion,uint256 validatorSetEpoch)"
+            ),
             applicant,
             stake,
             nonce,
-            RULE_SET_VERSION
+            RULE_SET_VERSION,
+            validatorSetEpoch
         ));
         return keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash));
     }
@@ -501,6 +513,7 @@ contract Staking {
 
         consensusNonceUsed[applicant][nonce] = true;
         v.state = ValidatorState.Active;
+        _advanceValidatorSetEpoch(applicant, true);
         emit ValidatorApprovedByConsensus(applicant, nonce, signers.length);
     }
 
@@ -552,6 +565,7 @@ contract Staking {
 
         v.state = ValidatorState.Unbonding;
         v.unbondingAt = block.timestamp;
+        _advanceValidatorSetEpoch(msg.sender, false);
 
         emit ValidatorUnbonding(msg.sender, block.timestamp);
     }
@@ -638,48 +652,91 @@ contract Staking {
     /// @dev Slash `amount` CREG from `account`.
     ///
     /// Priority order:
-    ///   1. Active validator stake — so slashCount is always incremented and the
-    ///      auto-eject mechanic applies to misbehaving validators, even when they
-    ///      also hold publisher stake.
-    ///   2. Publisher stake — used when there is no active validator stake.
-    ///   3. Total wipeout — when neither balance alone covers `amount`.
+    ///   1. Active validator stake, so the offence counter and auto-eject rule
+    ///      apply even when the validator is also a publisher.
+    ///   2. Unreserved publisher stake. Package-specific reserved bonds are only
+    ///      consumed by resolvePublisherLiability, which can update the matching
+    ///      release-liability record atomically.
+    ///   3. For a non-active validator, any remaining validator stake.
+    ///
+    /// The applied slash is capped at `amount` and at the account's slashable
+    /// balance. This prevents a cross-pool slash from turning a partial request
+    /// into a total wipeout.
     function _executeSlash(address account, uint256 amount, string calldata reason) internal {
-        bool _isActiveVal = validators[account].state == ValidatorState.Active
-                            && validators[account].stake > 0;
+        if (amount == 0) revert InvalidSlashAmount();
 
-        if (_isActiveVal && validators[account].stake >= amount) {
-            // Case 1: active validator — deduct from validator stake and track slashes.
-            validators[account].stake      -= amount;
-            validators[account].slashCount += 1;
-            // Auto-eject after MAX_SLASH_COUNT slashes.
-            if (validators[account].slashCount >= MAX_SLASH_COUNT) {
-                validators[account].state      = ValidatorState.Unbonding;
-                validators[account].unbondingAt = block.timestamp;
-                validators[account].ejectedAt  = block.timestamp;
-                emit ValidatorLeft(account);
+        ValidatorEntry storage validator = validators[account];
+        bool wasActive = validator.state == ValidatorState.Active;
+        uint256 remaining = amount;
+        uint256 slashed;
+        bool leftActiveSet;
+
+        if (wasActive && validator.stake > 0) {
+            uint256 validatorSlash = remaining < validator.stake
+                ? remaining
+                : validator.stake;
+            validator.stake -= validatorSlash;
+            validator.slashCount += 1;
+            remaining -= validatorSlash;
+            slashed += validatorSlash;
+
+            // A stake wipeout withdraws the validator immediately; otherwise
+            // auto-eject after MAX_SLASH_COUNT non-zero slashes.
+            if (validator.stake == 0) {
+                validator.state = ValidatorState.Withdrawn;
+                validator.ejectedAt = block.timestamp;
+                leftActiveSet = true;
+            } else if (validator.slashCount >= MAX_SLASH_COUNT) {
+                validator.state = ValidatorState.Unbonding;
+                validator.unbondingAt = block.timestamp;
+                validator.ejectedAt = block.timestamp;
+                leftActiveSet = true;
             }
-        } else if (!_isActiveVal && publisherStakes[account] >= amount) {
-            // Case 2: publisher-only account — deduct from publisher stake.
-            publisherStakes[account] -= amount;
-            // A governance slash outside the package-liability path may still
-            // consume reserved stake. Keep the accounting invariant explicit;
-            // the package resolver will slash only the remaining amount.
-            if (publisherReserved[account] > publisherStakes[account]) {
-                publisherReserved[account] = publisherStakes[account];
+        }
+
+        uint256 publisherStake = publisherStakes[account];
+        uint256 reserved = publisherReserved[account];
+        uint256 availablePublisherStake = publisherStake > reserved
+            ? publisherStake - reserved
+            : 0;
+        if (remaining > 0 && availablePublisherStake > 0) {
+            uint256 publisherSlash = remaining < availablePublisherStake
+                ? remaining
+                : availablePublisherStake;
+            publisherStakes[account] = publisherStake - publisherSlash;
+            remaining -= publisherSlash;
+            slashed += publisherSlash;
+        }
+
+        // Validators remain slashable during unbonding. Preserve the historic
+        // publisher-first priority for non-active dual-role accounts.
+        if (!wasActive && remaining > 0 && validator.stake > 0) {
+            uint256 validatorSlash = remaining < validator.stake
+                ? remaining
+                : validator.stake;
+            validator.stake -= validatorSlash;
+            slashed += validatorSlash;
+            if (validator.stake == 0) {
+                validator.state = ValidatorState.Withdrawn;
+                validator.ejectedAt = block.timestamp;
             }
-        } else {
-            // Case 3: slash everything the account has left (both pools combined).
-            amount = publisherStakes[account] + validators[account].stake;
-            publisherStakes[account]        = 0;
-            publisherReserved[account]      = 0;
-            validators[account].stake       = 0;
-            validators[account].state       = ValidatorState.Withdrawn;
-            validators[account].ejectedAt   = block.timestamp;
+        }
+
+        if (slashed == 0) revert InsufficientStake();
+
+        if (leftActiveSet) {
+            emit ValidatorLeft(account);
+            _advanceValidatorSetEpoch(account, false);
         }
 
         // Slashed CREG is not burned — it goes into the pool for honest validators.
-        slashPool += amount;
-        emit Slashed(account, amount, reason);
+        slashPool += slashed;
+        emit Slashed(account, slashed, reason);
+    }
+
+    function _advanceValidatorSetEpoch(address validator, bool active) internal {
+        validatorSetEpoch++;
+        emit ValidatorSetEpochAdvanced(validatorSetEpoch, validator, active);
     }
 
     // ── Slash Pool Distribution ───────────────────────────────────────────────

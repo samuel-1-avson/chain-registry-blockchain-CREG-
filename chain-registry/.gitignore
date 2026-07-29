@@ -23,6 +23,10 @@
 !testnet/spec-server/README.md
 !k8s/README.md
 !hub/content/**/*.md
+!config/weak-subjectivity/README.md
+!tools/authority-adapters/README.md
+!tools/authority-adapters/pypi-verifier/README.md
+!tools/authority-adapters/npm-verifier/README.md
 
 # =============================================================================
 # DOCS DIRECTORY
@@ -197,6 +201,7 @@ yarn-error.log*
 package-lock.json
 !hub-web/package-lock.json
 !hub-api/package-lock.json
+!tools/authority-adapters/npm-verifier/package-lock.json
 yarn.lock
 .npm/
 .yarn/

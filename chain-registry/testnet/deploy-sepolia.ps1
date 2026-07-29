@@ -141,5 +141,6 @@ if (Test-Path $manifestPath) {
 Write-Host ""
 Write-Host "Next steps:" -ForegroundColor Cyan
 Write-Host "  1. Copy contract addresses into testnet/chain-spec.json"
-Write-Host "  2. Run: cargo run --example sign_chain_spec -- testnet/chain-spec.json <privkey_hex>"
+Write-Host "  2. Load SPEC_SIGNING_KEY from an approved secret manager, then run:"
+Write-Host "     cargo run --example sign_chain_spec -- testnet/chain-spec.json --key-env SPEC_SIGNING_KEY"
 Write-Host "  3. Publish chain-spec.json + signature to your spec server"

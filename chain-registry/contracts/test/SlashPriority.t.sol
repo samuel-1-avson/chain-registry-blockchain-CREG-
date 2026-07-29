@@ -94,6 +94,76 @@ contract SlashPriorityTest is Test {
         assertEq(_valSlashCount(val), 1, "slashCount must be 1 after slash");
     }
 
+    /// A zero-value request must not manufacture an offence or membership change.
+    function test_zeroSlashRejectedWithoutCountOrEpochChange() public {
+        uint256 validatorStakeBefore = _valStake(val);
+        uint256 publisherStakeBefore = staking.publisherStakes(val);
+        uint256 slashCountBefore = _valSlashCount(val);
+        uint256 epochBefore = staking.validatorSetEpoch();
+
+        vm.prank(REGISTRY);
+        vm.expectRevert(Staking.InvalidSlashAmount.selector);
+        staking.slash(val, 0, "zero-value slash");
+
+        assertEq(_valStake(val), validatorStakeBefore, "zero slash changed validator stake");
+        assertEq(
+            staking.publisherStakes(val),
+            publisherStakeBefore,
+            "zero slash changed publisher stake"
+        );
+        assertEq(_valSlashCount(val), slashCountBefore, "zero slash incremented offence count");
+        assertEq(staking.validatorSetEpoch(), epochBefore, "zero slash changed membership epoch");
+        assertTrue(staking.isActiveValidator(val), "zero slash ejected validator");
+    }
+
+    /// A request spanning both balances must deduct exactly the requested amount,
+    /// not rewrite the request to the sum of both balances.
+    function test_dualRole_crossPoolSlashNeverExceedsRequest() public {
+        uint256 requested = VAL_STAKE + 50e18;
+        uint256 totalBefore = _valStake(val) + staking.publisherStakes(val);
+        uint256 epochBefore = staking.validatorSetEpoch();
+
+        vm.prank(REGISTRY);
+        staking.slash(val, requested, "cross-pool slash");
+
+        uint256 totalAfter = _valStake(val) + staking.publisherStakes(val);
+        assertEq(totalBefore - totalAfter, requested, "slash exceeded requested amount");
+        assertEq(_valStake(val), 0, "validator stake should be consumed first");
+        assertEq(staking.publisherStakes(val), 50e18, "publisher remainder is incorrect");
+        assertEq(staking.slashPool(), requested, "slash pool does not match applied slash");
+        assertEq(staking.validatorSetEpoch(), epochBefore + 1, "active exit must advance once");
+        assertFalse(staking.isActiveValidator(val), "wiped validator stayed active");
+    }
+
+    /// Generic slashing cannot consume a package-specific reserved bond because
+    /// it has no package key with which to update the matching liability record.
+    function test_publisherSlashPreservesReservedReleaseLiability() public {
+        bytes32 packageKey = keccak256("npm:reserved@1.0.0");
+        uint256 bond = 80e18;
+
+        vm.prank(REGISTRY);
+        staking.reservePublisherLiability(packageKey, pub, bond);
+
+        vm.prank(REGISTRY);
+        staking.slash(pub, 50e18, "generic publisher slash");
+
+        // Only 20 CREG was unreserved and therefore slashable.
+        assertEq(staking.publisherStakes(pub), bond, "reserved stake was consumed");
+        assertEq(staking.publisherReserved(pub), bond, "aggregate reservation changed");
+        assertEq(staking.slashPool(), 20e18, "slash was not capped at available stake");
+        (address liabilityPublisher, uint256 liabilityBond,, bool active) =
+            staking.releaseLiabilities(packageKey);
+        assertEq(liabilityPublisher, pub, "liability publisher changed");
+        assertEq(liabilityBond, bond, "liability bond changed");
+        assertTrue(active, "liability was silently removed");
+
+        // The keyed resolution can still release the complete reservation.
+        vm.prank(REGISTRY);
+        staking.resolvePublisherLiability(packageKey, false, "reviewed");
+        assertEq(staking.publisherReserved(pub), 0, "reservation did not release");
+        assertEq(staking.publisherStakes(pub), bond, "release changed publisher stake");
+    }
+
     /// Publisher-only account still gets slashed from publisher stake.
     function test_publisherOnly_slashHitsPublisherStake() public {
         uint256 slashAmt       = 20e18;

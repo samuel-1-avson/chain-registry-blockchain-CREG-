@@ -5,7 +5,7 @@
 **Canonical repo:** [chain-registry-blockchain-CREG-](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-)  
 **Release tag:** `v0.1.2-testnet`
 
-This playbook turns waitlist **Genesis Alpha** registrants (positions 1ΓÇô10,000) into active publishers or validators on the public Sepolia testnet fleet. **Vanguard Beta** (10,001+) uses the same technical steps but ships in a later wave after Alpha stabilizes.
+This playbook turns waitlist **Genesis Alpha** registrants (positions 1–10,000) into active publishers or validators on the public Sepolia testnet fleet. **Vanguard Beta** (10,001+) uses the same technical steps but ships in a later wave after Alpha stabilizes.
 
 ---
 
@@ -13,10 +13,10 @@ This playbook turns waitlist **Genesis Alpha** registrants (positions 1ΓÇô10,
 
 | Tier | Codename | Waitlist slots | Wave | When to invite |
 |------|----------|----------------|------|----------------|
-| **alpha** | Genesis Alpha | 1ΓÇô10,000 | Wave 1 | Now (coordinated batches) |
+| **alpha** | Genesis Alpha | 1–10,000 | Wave 1 | Now (coordinated batches) |
 | **beta** | Vanguard Beta | 10,001+ | Wave 2 | After Wave 1 soak + SEC-401 booking |
 
-Tier assignment is automatic at registration time (`position <= 10_000` ΓåÆ alpha). See waitlist `TIER_DEFINITIONS` in [Creg-waitlist](https://github.com/samuel-1-avson/Creg-waitlist).
+Tier assignment is automatic at registration time (`position <= 10_000` → alpha). See waitlist `TIER_DEFINITIONS` in [Creg-waitlist](https://github.com/samuel-1-avson/Creg-waitlist).
 
 **Do not** promise mainnet tokens, guaranteed NFTs, or production security. Frame everything as **public alpha** on Sepolia.
 
@@ -26,14 +26,14 @@ Tier assignment is automatic at registration time (`position <= 10_000` ΓåÆ a
 
 | Batch | Size | Purpose |
 |-------|------|---------|
-| Pilot | 5ΓÇô10 wallets | Smoke full path (install ΓåÆ faucet ΓåÆ stake ΓåÆ publish or observe) |
-| Batch A | 25ΓÇô50 | Publishers only ΓÇö `creg publish` + explorer verify |
-| Batch B | 10ΓÇô20 | Validators only ΓÇö stake + node compose (operator-reviewed) |
+| Pilot | 5–10 wallets | Smoke full path (install → faucet → stake → publish or observe) |
+| Batch A | 25–50 | Publishers only — `creg publish` + explorer verify |
+| Batch B | 10–20 | Validators only — stake + node compose (operator-reviewed) |
 | Batch C | 100+ | After pilot + A/B logs clean for 48h |
 
 Track each invite in a simple sheet: `wallet`, `tier`, `path` (publish | validate | observe), `invite_sent`, `cli_installed`, `staked`, `first_action_at`, `blockers`.
 
-Template: [genesis-alpha-wave1-tracker.csv](./genesis-alpha-wave1-tracker.csv) ΓÇö refresh with `.\testnet\gcp\export-genesis-alpha-wave1.ps1 -WriteCsv`
+Template: [genesis-alpha-wave1-tracker.csv](./genesis-alpha-wave1-tracker.csv) — refresh with `.\testnet\gcp\export-genesis-alpha-wave1.ps1 -WriteCsv`
 
 ---
 
@@ -41,7 +41,7 @@ Template: [genesis-alpha-wave1-tracker.csv](./genesis-alpha-wave1-tracker.csv) �
 
 Before sending invites:
 
-- [ ] Public fleet healthy ΓÇö [hosting-301-verify.ps1](../chain-registry/testnet/hosting-301-verify.ps1) against `testnet.cregnet.dev`
+- [ ] Public fleet healthy — [hosting-301-verify.ps1](../chain-registry/testnet/hosting-301-verify.ps1) against `testnet.cregnet.dev`
 - [ ] Faucet funded (tCREG + optional native Sepolia ETH drips)
 - [ ] [PUBLIC_TESTNET_QUICKSTART.md](./PUBLIC_TESTNET_QUICKSTART.md) reviewed (contract addresses current)
 - [ ] [TESTNET_PHASE_SCOPE.md](./TESTNET_PHASE_SCOPE.md) linked in every invite (verified semantics, alpha limits)
@@ -51,7 +51,7 @@ Before sending invites:
 
 ## Invite email template (Genesis Alpha)
 
-**Subject:** CREG Genesis Alpha ΓÇö your Wave 1 testnet invite
+**Subject:** CREG Genesis Alpha — your Wave 1 testnet invite
 
 **Body:**
 
@@ -60,13 +60,13 @@ Hi {{name}},
 
 You're in the CREG Genesis Alpha cohort (waitlist {{position}}).
 
-CREG is a supply-chain registry for chain artifacts ΓÇö signed publishes, IPFS pins, and validator verification on Sepolia. This is public alpha, not mainnet.
+CREG is a supply-chain registry for chain artifacts — signed publishes, IPFS pins, and validator verification on Sepolia. This is public alpha, not mainnet.
 
 Your path: {{path}}  (publish | validate | observe)
 
 1) Join hub (quests + status)
    https://testnet.cregnet.dev
-   Connect wallet ΓåÆ Sign in with Ethereum (Sepolia)
+   Connect wallet → Sign in with Ethereum (Sepolia)
 
 2) Install CLI (v0.1.2-testnet)
    export CREG_GITHUB_REPO=samuel-1-avson/chain-registry-blockchain-CREG-
@@ -88,7 +88,7 @@ https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/blob/main/docs
 
 Reply in this thread if blocked >24h. Do not share private keys or validator keys in email.
 
-ΓÇö CREG testnet ops
+— CREG testnet ops
 ```
 
 Customize `{{path}}` per registrant role from waitlist metadata when available.
@@ -108,7 +108,7 @@ Customize `{{path}}` per registrant role from waitlist metadata when available.
 | 7 | `creg publish` against public API | Package `verified` in explorer |
 | 8 | Hub quest: mark publish complete | `/quests` on hub |
 
-Contract defaults: [PUBLIC_TESTNET_QUICKSTART.md ┬º Before you start](./PUBLIC_TESTNET_QUICKSTART.md).
+Contract defaults: [PUBLIC_TESTNET_QUICKSTART.md § Before you start](./PUBLIC_TESTNET_QUICKSTART.md).
 
 ---
 
@@ -124,7 +124,7 @@ Contract defaults: [PUBLIC_TESTNET_QUICKSTART.md ┬º Before you start](./PUBLI
 | 6 | Run node (compose / operator fleet) | `/v1/health` + peer count |
 | 7 | Publish smoke observed as validator | Quorum attestation in logs |
 
-Validator onboarding remains **operator-gated** in Wave 1 ΓÇö enrollment intent via hub only; no private keys in browser.
+Validator onboarding remains **operator-gated** in Wave 1 — enrollment intent via hub only; no private keys in browser.
 
 ---
 
@@ -145,8 +145,8 @@ For wallets that only want to explore:
 | Wrong network | Switch wallet to Sepolia (11155111); hub shows network guard |
 | Faucet cooldown | Wait `cooldown_seconds` from faucet stats; no bypass in alpha |
 | `creg publish` rejected | Confirm stake, `CREG_NODE_URL`, IPFS reachable, Ed25519 vs EOA keys |
-| SIWE fails | Clock skew, wrong domain, or expired nonce ΓÇö sign in again from hub |
-| "Verified" confusion | Link [TESTNET_PHASE_SCOPE.md](./TESTNET_PHASE_SCOPE.md) ΓÇö verified on queried node chain |
+| SIWE fails | Clock skew, wrong domain, or expired nonce — sign in again from hub |
+| "Verified" confusion | Link [TESTNET_PHASE_SCOPE.md](./TESTNET_PHASE_SCOPE.md) — verified on queried node chain |
 
 ---
 
@@ -156,9 +156,9 @@ Track weekly:
 
 - Invites sent / accepted (any hub sign-in)
 - CLI installs (self-reported or quest completion)
-- Unique publisher addresses with ΓëÑ1 verified package
-- Validator candidates ΓåÆ active validators
-- Mean time from invite ΓåÆ first on-chain action
+- Unique publisher addresses with ≥1 verified package
+- Validator candidates → active validators
+- Mean time from invite → first on-chain action
 - Faucet abuse flags / support volume
 
 **Exit criteria for Wave 2 (Beta):** Pilot + Batch A/B complete, no P0 fleet incidents for 7 days, SEC-401 vendor scheduled.

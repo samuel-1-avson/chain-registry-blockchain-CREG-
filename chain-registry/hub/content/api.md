@@ -86,7 +86,7 @@ The implemented protocol flow is:
 1. A proposed controller signs a fresh chain/genesis/namespace/controller intent.
 2. A new npm/PyPI artifact contains that intent; registry provenance or attestations identify the upstream publisher and exact artifact.
 3. The attestation request includes official `evidence_url` and `artifact_url` values. Each validator separately downloads both with redirects disabled and independent limits (`CREG_NAMESPACE_AUTHORITY_MAX_EVIDENCE_BYTES` and `CREG_NAMESPACE_AUTHORITY_MAX_ARTIFACT_BYTES`). It hashes evidence with SHA-256 and the artifact with the registry-native algorithm: SHA-512 for npm, SHA-256 for PyPI.
-4. A successful validator archives evidence as `creg-evidence:sha256:<digest>` and artifact bytes under `CREG_DATA_DIR/authority-artifacts/<sha256|sha512>/<prefix>/<digest>.bin`.
+4. A successful validator archives evidence as `creg-evidence:sha256:<digest>` and artifact bytes under `CREG_DATA_DIR/authority-artifacts/<sha256|sha512>/<prefix>/<digest>.bin`. The pair shares the fail-closed `CREG_NAMESPACE_AUTHORITY_ARCHIVE_MAX_BYTES` and `CREG_NAMESPACE_AUTHORITY_ARCHIVE_MAX_ENTRIES` limits. Quota-pressure garbage collection removes only content older than `CREG_NAMESPACE_AUTHORITY_ARCHIVE_MIN_RETENTION_SECS`; the incoming pair is never its own eviction candidate.
 5. The publisher collects `floor(2n/3) + 1` matching signatures from the authenticated validator set, assembles and validates the certificate, and attaches it to the final v4 package authorization or recovery event.
 6. Consensus checks the certificate, policy pins, native artifact identity, validity window, and canonical block/set anchor without contacting npm or PyPI.
 
@@ -97,6 +97,11 @@ request therefore sign byte-identical statement content despite completing
 verification at different seconds.
 
 Both routes must remain request-size limited and fail closed when an official artifact cannot be fetched, the native digest differs, or the verifier executable, signed policy, trust root, or chain anchor is unavailable or mismatched. For npm, a provenance envelope is not by itself proof that trusted-publisher authentication was used: the external verifier/policy must require an official npm authentication-mode signal. Real trust material, policy bundles, and reviewed npm/PyPI verifier artifacts remain external deployment gates. The shipped OpenAPI document defines the repository request/response schemas and status codes. Clients must still confirm that the deployed binary exposes and protects these routes before relying on them.
+
+The archive defaults are 10 GiB, 100000 entries, and 365 days minimum
+retention. Exhausting either quota without an eligible old entry rejects the
+attestation before a validator signature is issued. This local bounded cache
+does not provide backup, regulatory retention, or upstream trust.
 
 ## Namespace lifecycle
 

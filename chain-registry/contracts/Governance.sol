@@ -163,7 +163,7 @@ contract Governance {
         if (bytes(reason).length == 0) revert InvalidPauseReason();
         if (systemStatus == SystemStatus.Paused) revert SystemPaused();
         require(
-            block.timestamp >= pausedAt + PAUSE_COOLDOWN,
+            pausedAt == 0 || block.timestamp >= pausedAt + PAUSE_COOLDOWN,
             "Pause cooldown active"
         );
         require(
@@ -235,7 +235,7 @@ contract Governance {
         if (bytes(reason).length == 0) revert InvalidPauseReason();
         if (systemStatus == SystemStatus.Paused) revert SystemPaused();
         require(
-            block.timestamp >= pausedAt + PAUSE_COOLDOWN,
+            pausedAt == 0 || block.timestamp >= pausedAt + PAUSE_COOLDOWN,
             "Pause cooldown active"
         );
 

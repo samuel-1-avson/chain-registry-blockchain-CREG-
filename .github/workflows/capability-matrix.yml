@@ -1,0 +1,100 @@
+name: Repository capability matrix (not release readiness)
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - ".github/workflows/capability-matrix.yml"
+      - "chain-registry/.env.example"
+      - "chain-registry/config/capability-matrix.json"
+      - "chain-registry/config/cr07-activation-manifest.json"
+      - "chain-registry/config/weak-subjectivity/**"
+      - "chain-registry/contracts/Registry.sol"
+      - "chain-registry/docker-compose*.yml"
+      - "chain-registry/k8s/01-configmap.yaml"
+      - "chain-registry/scripts/generate-capability-matrix.mjs"
+      - "chain-registry/scripts/generate-capability-matrix.test.mjs"
+      - "chain-registry/scripts/validate-cr07-activation.mjs"
+      - "chain-registry/scripts/validate-cr07-activation.test.mjs"
+      - "chain-registry/testnet/.env.example"
+      - "chain-registry/testnet/bootstrap/bootstrap.env.example"
+      - "chain-registry/testnet/sepolia-fleet.env.example"
+      - "chain-registry/testnet/**/chain-spec*.json"
+      - "chain-registry/testnet/**/chain-spec*.json.sig"
+      - "chain-registry/testnet/**/docker-compose*.yml"
+      - "chain-registry/testnet/chain-spec*.json"
+      - "chain-registry/testnet/chain-spec*.json.sig"
+      - "chain-registry/testnet/genesis.json"
+      - "chain-registry/testnet/require-spec-signing-key.ps1"
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/capability-matrix.yml"
+      - "chain-registry/.env.example"
+      - "chain-registry/config/capability-matrix.json"
+      - "chain-registry/config/cr07-activation-manifest.json"
+      - "chain-registry/config/weak-subjectivity/**"
+      - "chain-registry/contracts/Registry.sol"
+      - "chain-registry/docker-compose*.yml"
+      - "chain-registry/k8s/01-configmap.yaml"
+      - "chain-registry/scripts/generate-capability-matrix.mjs"
+      - "chain-registry/scripts/generate-capability-matrix.test.mjs"
+      - "chain-registry/scripts/validate-cr07-activation.mjs"
+      - "chain-registry/scripts/validate-cr07-activation.test.mjs"
+      - "chain-registry/testnet/.env.example"
+      - "chain-registry/testnet/bootstrap/bootstrap.env.example"
+      - "chain-registry/testnet/sepolia-fleet.env.example"
+      - "chain-registry/testnet/**/chain-spec*.json"
+      - "chain-registry/testnet/**/chain-spec*.json.sig"
+      - "chain-registry/testnet/**/docker-compose*.yml"
+      - "chain-registry/testnet/chain-spec*.json"
+      - "chain-registry/testnet/chain-spec*.json.sig"
+      - "chain-registry/testnet/genesis.json"
+      - "chain-registry/testnet/require-spec-signing-key.ps1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: chain-registry
+
+jobs:
+  repository-capabilities:
+    name: Source/config truth gate (not a release gate)
+    runs-on: ubuntu-latest
+
+    steps:
+      # actions/checkout v4.4.0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      # actions/setup-node v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+
+      - name: Syntax checks
+        run: |
+          node --check scripts/generate-capability-matrix.mjs
+          node --check scripts/generate-capability-matrix.test.mjs
+
+      - name: Run adversarial capability tests
+        run: |
+          node --test scripts/generate-capability-matrix.test.mjs
+          node --test scripts/validate-cr07-activation.test.mjs
+
+      - name: Verify truth-preserving checked matrix
+        run: node scripts/generate-capability-matrix.mjs --check config/capability-matrix.json
+
+      - name: Emit CI capability matrix
+        run: node scripts/generate-capability-matrix.mjs --output capability-matrix.ci.json
+
+      # actions/upload-artifact v4.6.2
+      - name: Retain machine-readable matrix
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: creg-capability-matrix-${{ github.sha }}
+          path: chain-registry/capability-matrix.ci.json
+          if-no-files-found: error
+          retention-days: 14

@@ -16,11 +16,11 @@ use futures::StreamExt;
 use k256::ecdsa::{RecoveryId, Signature as K256Signature, VerifyingKey as K256VerifyingKey};
 use serde::{Deserialize, Serialize};
 use std::{
-    path::{Path as FsPath, PathBuf},
+    path::PathBuf,
     sync::{Arc, OnceLock},
     time::Duration as StdDuration,
 };
-use tokio::{io::AsyncWriteExt, sync::Semaphore};
+use tokio::sync::Semaphore;
 use tower_http::{
     cors::{Any, CorsLayer},
     limit::RequestBodyLimitLayer,
@@ -32,6 +32,11 @@ use crate::authority_adapter::{
     AuthorityAdapterRequestV2, AuthorityChallengeV1, DEFAULT_MAX_ARTIFACT_BYTES,
     DEFAULT_MAX_EVIDENCE_BYTES, DEFAULT_MAX_RESULT_BYTES, HARD_MAX_ARTIFACT_BYTES,
     HARD_MAX_EVIDENCE_BYTES, HARD_MAX_RESULT_BYTES,
+};
+use crate::authority_archive::{
+    AuthorityArchivePolicy, DEFAULT_ARCHIVE_MAX_BYTES, DEFAULT_ARCHIVE_MAX_ENTRIES,
+    DEFAULT_ARCHIVE_MIN_RETENTION_SECS, HARD_MAX_ARCHIVE_BYTES, HARD_MAX_ARCHIVE_ENTRIES,
+    HARD_MAX_ARCHIVE_MIN_RETENTION_SECS,
 };
 use crate::consensus_admission::{accept_peer_attestation, AdmissionAttestation, AttestationStore};
 use crate::{
@@ -517,19 +522,7 @@ async fn receive_admission_attestation(
         Err(e) => return bad_request(format!("invalid staking address: {e}")),
     };
 
-    let chain_id = {
-        use alloy::providers::Provider;
-        let provider = alloy::providers::ProviderBuilder::new().on_http(match rpc_url.parse() {
-            Ok(u) => u,
-            Err(e) => return bad_request(format!("invalid rpc url: {e}")),
-        });
-        match provider.get_chain_id().await {
-            Ok(id) => id,
-            Err(e) => return server_err(format!("chain_id lookup failed: {e}")),
-        }
-    };
-
-    match accept_peer_attestation(&store, chain_id, staking_addr, att).await {
+    match accept_peer_attestation(&store, &rpc_url, staking_addr, att).await {
         Ok(fresh) => Json(serde_json::json!({ "accepted": true, "new": fresh })).into_response(),
         Err(e) => bad_request(format!("rejected: {e}")),
     }
@@ -3657,8 +3650,25 @@ fn authority_env_usize(name: &str, default: usize, maximum: usize) -> Result<usi
     Ok(value)
 }
 
+fn authority_env_u64(name: &str, default: u64, maximum: u64) -> Result<u64, String> {
+    let value = match std::env::var(name) {
+        Ok(value) => value
+            .parse::<u64>()
+            .map_err(|_| format!("{name} must be an unsigned integer"))?,
+        Err(std::env::VarError::NotPresent) => default,
+        Err(std::env::VarError::NotUnicode(_)) => {
+            return Err(format!("{name} is not valid Unicode"))
+        }
+    };
+    if value == 0 || value > maximum {
+        return Err(format!("{name} must be between 1 and {maximum}"));
+    }
+    Ok(value)
+}
+
 fn authority_adapter_config(
     policy: &common::NamespaceAuthorityPolicySpec,
+    data_dir: &std::path::Path,
 ) -> Result<AuthorityAdapterConfig, String> {
     let path_env = match policy.authority {
         common::OwnershipAuthority::NpmTrustedPublisher => {
@@ -3688,8 +3698,11 @@ fn authority_adapter_config(
         DEFAULT_MAX_RESULT_BYTES,
         HARD_MAX_RESULT_BYTES,
     )?;
+    let canonical_data_dir = std::fs::canonicalize(data_dir)
+        .map_err(|error| format!("cannot resolve node data directory for verifier scratch: {error}"))?;
     Ok(AuthorityAdapterConfig {
         verifier_path,
+        scratch_root: canonical_data_dir.join("authority-verifier-scratch"),
         verifier_sha256: policy.verifier_sha256.clone(),
         adapter_id: policy.adapter_id.clone(),
         adapter_version: policy.adapter_version.clone(),
@@ -3700,6 +3713,44 @@ fn authority_adapter_config(
         max_artifact_bytes,
         max_result_bytes,
     })
+}
+
+fn authority_archive_policy(
+    adapter: &AuthorityAdapterConfig,
+) -> Result<AuthorityArchivePolicy, String> {
+    let policy = AuthorityArchivePolicy {
+        max_bytes: authority_env_u64(
+            "CREG_NAMESPACE_AUTHORITY_ARCHIVE_MAX_BYTES",
+            DEFAULT_ARCHIVE_MAX_BYTES,
+            HARD_MAX_ARCHIVE_BYTES,
+        )?,
+        max_entries: authority_env_usize(
+            "CREG_NAMESPACE_AUTHORITY_ARCHIVE_MAX_ENTRIES",
+            DEFAULT_ARCHIVE_MAX_ENTRIES,
+            HARD_MAX_ARCHIVE_ENTRIES,
+        )?,
+        minimum_retention: StdDuration::from_secs(authority_env_u64(
+            "CREG_NAMESPACE_AUTHORITY_ARCHIVE_MIN_RETENTION_SECS",
+            DEFAULT_ARCHIVE_MIN_RETENTION_SECS,
+            HARD_MAX_ARCHIVE_MIN_RETENTION_SECS,
+        )?),
+    };
+    policy.validate()?;
+    let maximum_observation_bytes = (adapter.max_evidence_bytes as u64)
+        .checked_add(adapter.max_artifact_bytes as u64)
+        .ok_or_else(|| "authority archive observation limit overflowed".to_owned())?;
+    if policy.max_bytes < maximum_observation_bytes {
+        return Err(format!(
+            "CREG_NAMESPACE_AUTHORITY_ARCHIVE_MAX_BYTES must be at least \
+             {maximum_observation_bytes} for the configured evidence and artifact limits"
+        ));
+    }
+    if policy.max_entries < 2 {
+        return Err(
+            "CREG_NAMESPACE_AUTHORITY_ARCHIVE_MAX_ENTRIES must be at least 2".to_owned(),
+        );
+    }
+    Ok(policy)
 }
 
 fn authority_adapter_error_response(error: AuthorityAdapterError) -> Response {
@@ -3796,84 +3847,6 @@ async fn fetch_authority_resource(
         ));
     }
     Ok(bytes)
-}
-
-async fn archive_authority_blob(
-    data_dir: &FsPath,
-    collection: &str,
-    algorithm: ArtifactDigestAlgorithm,
-    digest: &str,
-    bytes: &[u8],
-) -> Result<(), String> {
-    if digest.len() < 2
-        || digest != digest.to_ascii_lowercase()
-        || !digest.bytes().all(|byte| byte.is_ascii_hexdigit())
-    {
-        return Err(format!("authority {collection} archive digest is invalid"));
-    }
-    if algorithm.digest(bytes) != digest {
-        return Err(format!("authority {collection} archive digest mismatch"));
-    }
-    let directory = data_dir
-        .join(collection)
-        .join(algorithm.name())
-        .join(&digest[..2]);
-    tokio::fs::create_dir_all(&directory)
-        .await
-        .map_err(|error| format!("cannot create authority {collection} archive: {error}"))?;
-    let destination = directory.join(format!("{digest}.bin"));
-    if let Ok(existing) = tokio::fs::read(&destination).await {
-        return if algorithm.digest(&existing) == digest {
-            Ok(())
-        } else {
-            Err(format!(
-                "existing authority {collection} archive entry is corrupted"
-            ))
-        };
-    }
-    let temporary = directory.join(format!("{digest}.{}.tmp", uuid::Uuid::new_v4()));
-    let mut file = tokio::fs::OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(&temporary)
-        .await
-        .map_err(|error| format!("cannot create authority {collection} archive entry: {error}"))?;
-    if let Err(error) = file.write_all(bytes).await {
-        drop(file);
-        let _ = tokio::fs::remove_file(&temporary).await;
-        return Err(format!(
-            "cannot write authority {collection} archive entry: {error}"
-        ));
-    }
-    if let Err(error) = file.sync_all().await {
-        drop(file);
-        let _ = tokio::fs::remove_file(&temporary).await;
-        return Err(format!(
-            "cannot sync authority {collection} archive entry: {error}"
-        ));
-    }
-    drop(file);
-    if let Err(error) = tokio::fs::rename(&temporary, &destination).await {
-        let _ = tokio::fs::remove_file(&temporary).await;
-        let existing = tokio::fs::read(&destination)
-            .await
-            .map_err(|_| format!("cannot commit authority {collection} archive entry: {error}"))?;
-        if algorithm.digest(&existing) != digest {
-            return Err(format!(
-                "raced authority {collection} archive entry is corrupted"
-            ));
-        }
-    }
-    #[cfg(unix)]
-    {
-        let directory_handle = tokio::fs::File::open(&directory).await.map_err(|error| {
-            format!("cannot open authority {collection} archive directory: {error}")
-        })?;
-        directory_handle.sync_all().await.map_err(|error| {
-            format!("cannot sync authority {collection} archive directory: {error}")
-        })?;
-    }
-    Ok(())
 }
 
 async fn attest_namespace_authority(
@@ -4008,8 +3981,18 @@ async fn attest_namespace_authority(
         )
     };
 
-    let adapter_config = match authority_adapter_config(&policy) {
+    let adapter_config = match authority_adapter_config(&policy, &data_dir) {
         Ok(config) => config,
+        Err(error) => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(ErrorResponse { error }),
+            )
+                .into_response()
+        }
+    };
+    let archive_policy = match authority_archive_policy(&adapter_config) {
+        Ok(policy) => policy,
         Err(error) => {
             return (
                 StatusCode::SERVICE_UNAVAILABLE,
@@ -4091,27 +4074,26 @@ async fn attest_namespace_authority(
         Ok(observation) => observation,
         Err(error) => return authority_adapter_error_response(error),
     };
-    if let Err(error) = archive_authority_blob(
+    let archive_outcome = match crate::authority_archive::archive_authority_observation(
         &data_dir,
-        "authority-evidence",
-        ArtifactDigestAlgorithm::Sha256,
+        archive_policy,
         &evidence_digest,
         &evidence,
-    )
-    .await
-    {
-        return server_err(error);
-    }
-    if let Err(error) = archive_authority_blob(
-        &data_dir,
-        "authority-artifacts",
         artifact_digest_algorithm,
         &artifact_digest,
         &artifact,
     )
     .await
     {
-        return server_err(error);
+        Ok(outcome) => outcome,
+        Err(error) => return server_err(error),
+    };
+    if archive_outcome.reclaimed_entries > 0 {
+        tracing::info!(
+            reclaimed_entries = archive_outcome.reclaimed_entries,
+            reclaimed_bytes = archive_outcome.reclaimed_bytes,
+            "garbage-collected retention-eligible namespace authority archive entries"
+        );
     }
     let statement = match observation.into_statement(
         request.anchor_height,

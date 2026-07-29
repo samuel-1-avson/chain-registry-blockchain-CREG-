@@ -4,7 +4,7 @@
 > **Version:** Public alpha (`creg-testnet-1`)  
 > **Network:** Ethereum Sepolia (L1 chain id `11155111`)  
 > **Status:** Public alpha testnet — not mainnet  
-> **Last updated:** 2026-07-28 (CR-07 rollout surfaces, protocol lifetimes, and deterministic block-time validation)
+> **Last updated:** 2026-07-29 (repository-controlled CR-07 activation/archive gates and weak-subjectivity checkpoint tooling)
 
 This document describes the complete system workflow of the Chain Registry blockchain: architecture, components, consensus, networking, storage, security, operations, and developer onboarding. It is scoped to the **core blockchain project** (`chain-registry/` workspace, contracts, circuits, testnet) and excludes the waitlist application and contribution arena.
 
@@ -33,7 +33,16 @@ This document describes the complete system workflow of the Chain Registry block
 
 ### 1.1 What CREG Is
 
-Chain Registry (CREG) is a **decentralized package-integrity network** for software supply chains. It replaces single-authority registry trust (npm, PyPI, Cargo, and similar) with **independent validator consensus**. Publishers submit content-addressed packages; economically staked validators run a multi-stage security pipeline; two-layer consensus (package votes + PBFT blocks) finalizes records on a local CREG chain; state can be anchored to Ethereum Sepolia via contracts and a rollup bridge.
+Chain Registry (CREG) is designed as a **decentralized package-integrity
+network** for software supply chains. Its target protocol reduces
+single-authority registry trust (npm, PyPI, Cargo, and similar) by requiring
+independently controlled validator consensus over content-addressed packages.
+The recorded public-alpha topology currently has one validator and no
+bootnodes, so it provides neither operational decentralization nor Byzantine
+fault tolerance yet. Two consensus layers—package votes and PBFT blocks—finalize
+records on a local CREG chain. Sepolia contracts currently provide staking and
+governance experiments; the legacy batch checkpoint is retired and is not a
+rollup or state-transition validity proof.
 
 CREG is **not a general-purpose EVM smart-contract chain**. It is a specialized BFT chain whose blocks primarily contain **package verdict transactions**, not arbitrary contract execution. See [§1.2 CREG vs EVM L2](#12-creg-vs-evm-l2) for a side-by-side comparison.
 
@@ -54,7 +63,10 @@ When people say "Layer 2 blockchain," they often mean an **EVM-compatible chain*
 CREG has two cooperating layers:
 
 1. **Local CREG chain** (Rust, RocksDB, PBFT) — fast finality for package records.
-2. **Ethereum Sepolia** (Solidity) — economic security (staking, slashing) and optional L1 anchoring via `submitRollupBatch` / `finalizePackage`.
+2. **Ethereum Sepolia** (Solidity) — research-alpha staking, slashing,
+   governance, and Registry mirroring. The legacy `submitRollupBatch` path and
+   package-ZK qualification are retired; they must not be described as L2
+   validity or production settlement.
 
 You cannot point standard Ethereum tooling at a CREG node RPC and deploy arbitrary contracts. Public endpoints deliberately separate **CREG RPC** (`creg_*`) from **Sepolia RPC** (`eth_*` for wallets and staking). That split is intentional: CREG optimizes for auditable package verdicts, not general-purpose on-chain computation.
 
@@ -179,7 +191,8 @@ flowchart TB
     Pipeline --> P2P
     Store --> PG
     Bridge --> Store
-    Bridge --> Gov --> Registry
+    Bridge -.->|legacy path retired| Gov
+    Gov -.->|submitRollupBatch reverts| Registry
     VSetSync --> Staking
     Staking -.->|stake checks| Admission
 ```
@@ -207,7 +220,8 @@ The `creg-node` binary (`crates/node/src/main.rs`) spawns these background tasks
 4. **Chain sync** — peer height polling, linear block fetch
 5. **Validator pipeline** — only when `CREG_IS_VALIDATOR=true`
 6. **Block producer** — drains finalized-transaction channel
-7. **L1 bridge** — periodic rollup checkpoints to Sepolia
+7. **L1 bridge** — optional research-only legacy checkpoint worker; disabled by
+   default and not a rollup validity path
 8. **Validator registration sync** — L1 staking state polling
 9. **Consensus admission** — on-chain admission attestations
 10. **Validator set sync** — chain-authoritative membership from `Staking.sol`
@@ -322,6 +336,14 @@ executable SHA-256, policy SHA-256, and trust-root SHA-256 are consensus
 parameters in the signature-verified chain spec. Environment-only activation
 or policy replacement is rejected.
 
+The repository additionally contains a signed activation-manifest validator
+and CI gate. The checked-in manifest has `status: "disabled"` and requires all
+four guarded operational chain specs to omit CR-07 activation fields. Its
+11/11 Node tests cover exact signed candidates and fail-closed signature,
+content, mirror, authority, pin, signing-key, and manifest-version failures.
+This is a repository-controlled release gate; it is not a signed production
+activation, deployed configuration, or production-key ceremony.
+
 ### 3.3 Validator Security Pipeline
 
 The pipeline (`crates/validator/src/lib.rs`, orchestrated by `crates/node/src/validator_pipeline.rs`) runs these stages:
@@ -376,7 +398,7 @@ flowchart LR
 | Chain store | `node/chain_store.rs` | RocksDB persistence |
 | Pending pool | `node/pending_pool.rs` | Pre-consensus mempool (`pending_pool.json`) |
 | Block producer | `node/block_producer.rs` | VRF proposer gate, block assembly, PBFT round start |
-| L1 bridge | `node/bridge.rs` | Rollup batch submission via `submitRollupBatch` |
+| Legacy L1 bridge | `node/bridge.rs` | Disabled research worker retained for migration analysis; the current Registry rejects `submitRollupBatch` |
 | Chain sync | `node/sync.rs` | Linear block sync from peers (HTTP) |
 | Explorer | `explorer/` | React UI for blocks, packages, validators |
 | Faucet | `crates/faucet` | tCREG distribution on Sepolia |
@@ -420,9 +442,7 @@ sequenceDiagram
         BP->>PBFT: PRE-PREPARE block with txs
         BP->>P2P: PBFT Prepare/Commit gossip
         PBFT->>Store: insert_block + PBFT signatures
-        Bridge->>Store: poll new blocks
-        Bridge->>Bridge: Merkle batch + Groth16 proof
-        Bridge->>Registry: submitRollupBatch via Governance
+        Note over Bridge,Registry: No active settlement step: the legacy bridge is disabled and the current Registry rejects submitRollupBatch
     else Rejected
         Pipeline->>Pending: cleanup
     end
@@ -483,7 +503,14 @@ Small three-validator testnet clusters may opt into 2-of-3 via `CREG_PBFT_ALLOW_
 
 **Local finality:** A block is final when PBFT COMMIT quorum is reached and the block is inserted into RocksDB. Package records in that block are **verified** on that node.
 
-**L1 anchoring (optional):** The bridge worker batches verified blocks, computes Merkle data roots, generates Groth16 proofs, and submits `submitRollupBatch` through Governance to Registry.sol. Current proof mode is `checkpoint-attestation` — Groth16 batch proves non-empty batch, not full state transition validity.
+**L1 anchoring (not currently available):** The repository retains a disabled
+legacy bridge worker that can construct Merkle batch data and a historical
+Groth16 checkpoint attestation. The current `Registry.sol` deliberately
+reverts `submitRollupBatch`, so no CREG block is presently settled or finalized
+on Sepolia through that path. The historical circuit proved only a non-empty
+batch-shaped statement, not execution of the CREG state transition. Re-enabling
+an anchoring design requires a new protocol specification, contract interface,
+proof statement, migration, and independent review.
 
 ### 4.7 Reorganization Handling
 
@@ -511,11 +538,11 @@ Deployed addresses are published in `testnet/chain-spec.sepolia.json`:
 |----------|------|
 | `CregToken.sol` | ERC-20 tCREG with hard cap (42M) and permit support |
 | `Staking.sol` | Publisher/validator stakes, lifecycle, unbonding, slashing |
-| `Registry.sol` | L1 package lifecycle, finalize/revoke, ZK proof entry points |
+| `Registry.sol` | L1 package lifecycle and EIP-712 finalize/revoke paths; retained ZK entry point reverts |
 | `Governance.sol` | M-of-N governance, emergency pause, bridge batch proposals |
 | `Reputation.sol` | Validator/publisher scoring signals |
 | `Appeal.sol` | On-chain appeal mechanics |
-| `ZKVerifier.sol` / `Groth16Verifier.sol` | Groth16 verification path |
+| `ZKVerifier.sol` / `Groth16Verifier.sol` | Retained experimental Groth16 verifier; not an active package-qualification trust path |
 | `VRF.sol` | On-chain VRF (partial integration) |
 | `ValidatorRewards.sol` | Validator reward distribution |
 | `SlashingEvidence.sol` | Double-sign and evidence slashing |
@@ -531,7 +558,7 @@ Deployed addresses are published in `testnet/chain-spec.sepolia.json`:
 | Validator admission | `Staking.approveByConsensus` | ≥ 2/3 active validators |
 | Package evidence | CREG vote accumulator (off-chain) | `floor(2n/3) + 1` |
 | Block PBFT | PBFT engine (off-chain) | `floor(2n/3) + 1` |
-| L1 package finalization | `Registry.finalizePackage` | `quorumPct` (default 67%) + 1 |
+| L1 package finalization | `Registry.finalizePackage` | EIP-712 `PackageVerdict` bound to chain/Registry/package/decision/exact `validatorSetEpoch`/live `quorumPct`/15-minute maximum validity; approvals exceed configured percentage |
 
 ### 5.3 Staking Economics
 
@@ -558,7 +585,7 @@ From `chain-spec.sepolia.json`:
 
 | Flag | Status |
 |------|--------|
-| `zk_validation` | enabled |
+| `zk_validation` | **disabled** |
 | `ml_validation` | enabled |
 | `wasm_sandbox` | enabled |
 | `private_registries` | enabled |
@@ -575,7 +602,14 @@ Located in `circuits/`:
 | `PackageValidator.circom` | Package validation attestations |
 | `DoubleSignProof.circom` | Conflicting validator vote evidence for slashing |
 
-Built with Circom; verified on-chain via `ZKVerifier.sol`. ZK is active infrastructure in alpha, not a substitute for external audit.
+Built with Circom for research and regression analysis. The shipped chain
+specifications set `zk_validation:false`, and the Registry package-
+qualification entry point reverts. The present circuit constrains its content
+and manifest hash limbs, but neither that circuit nor its deployed verifier is
+an active package-safety or state-transition trust path. Re-enabling or
+redesigning any ZK use requires a dedicated circuit/contract review, trusted-
+setup and key-management review, reproducible tests, and an explicit protocol
+decision.
 
 ---
 
@@ -598,6 +632,7 @@ Built with Circom; verified on-chain via `ZKVerifier.sol`. ZK is active infrastr
 | `creg/v1/submissions` | Publish gossip |
 | `creg/v1/vrf-proofs` | Proposer VRF proofs |
 | `creg/v1/validators` | Identity registrations (Ed25519↔EVM bindings) |
+| `creg/v1/validator-set-transitions` | Prior-set-quorum-certified validator-set transitions; every receiver revalidates continuity, fork anchor, checkpoint ancestry, and witnesses |
 
 ### 6.3 Ingress Validation
 
@@ -768,6 +803,17 @@ at different seconds and can therefore be quorum-signed.
 Accepted evidence is retained as `creg-evidence:sha256:<digest>`. Artifact
 bytes are retained under
 `CREG_DATA_DIR/authority-artifacts/<sha256|sha512>/<prefix>/<digest>.bin`.
+The repository archive module applies a single locked admission decision to
+the evidence/artifact pair, with shared byte and entry quotas, a configurable
+minimum-retention window, pressure-only oldest-eligible garbage collection,
+idempotent exact replay, corrupt/symlink rejection, and rollback of entries
+created by a failed pair operation. The defaults are 10 GiB, 100000 entries,
+and 365 days; env, Compose, Kubernetes, quickstart, and operator surfaces expose
+all three controls. The lock is process-local and provides no coordination for
+two processes sharing a filesystem or `CREG_DATA_DIR`. Deployment storage
+sizing, capacity alerts, backups, restore drills, disaster recovery, and legal
+retention remain operator/external responsibilities.
+
 The authority statement binds the policy pins, proof, native artifact digest,
 and a recent canonical block/validator-set hash. A valid certificate requires
 matching distinct signatures from `floor(2n/3)+1` members of that preceding
@@ -791,15 +837,47 @@ non-production pre-activation lab must explicitly set
 `CREG_ALLOW_LEGACY_PUBLISHER_PROOF=true`; setting `CREG_PRODUCTION=true`
 disables the compatibility path regardless of that flag.
 
-Production verifier binaries, official trust material, signed policy bundles,
-the npm trusted-publisher authentication-mode signal, a versioned signed
-activation/checkpoint, live operator rehearsal, and independent security
-review remain readiness gates. The in-repository protocol boundary and
-sidecar contract do not satisfy those external gates. Production deployment
+The adapter-boundary tests pass, and two real cryptographic verifier candidates
+now replace the earlier rejection fixture as implementation artifacts:
+
+- The npm verifier checks strict canonical protocol input, exact package,
+  version, PURL, URL and SHA-512 identity, bounded gzip/USTAR challenge
+  inclusion, pinned registry-key evidence, and offline Sigstore/Fulcio/SCT/
+  Rekor provenance. Its unit suite passes 20 tests with one deliberately
+  skipped operator-supplied production fixture. Two same-target Node SEA builds
+  were byte-identical. It still cannot return success because npm's official
+  evidence does not distinguish OIDC trusted publishing from token-based
+  `publish --provenance`.
+- The PyPI verifier performs offline PEP 740/Sigstore verification against the
+  exact hashed trusted-root bytes, binds the repository/project/artifact and
+  challenge, checks verified Rekor integration time, and preflights and streams
+  bounded ZIP/TAR/gzip content. Its suite passes 29 tests with one deliberately
+  skipped external production fixture. A locked PyInstaller recipe produced
+  byte-identical same-target Windows one-file candidates containing the pinned
+  CPython runtime and dependencies.
+
+These are local candidate/build results, not reviewed production releases.
+The PyPI Windows candidate also exposed a real integration gate: the node's
+cleared child environment currently omits the fresh private per-invocation
+`TEMP`/`TMP`/`TMPDIR` that the one-file bootloader requires. Inheriting ambient
+temp state is not an acceptable workaround; the node must create, permission,
+hold, and remove a private scratch directory and pass only those absolute temp
+paths plus the protocol variable.
+The official npm trusted-publisher authentication-mode signal is externally
+unavailable, so npm authority must remain fail-closed. Neither candidate has
+reviewed production policy/root material, a live positive fixture, all target
+platform artifacts, a signed activation, or independent review.
+
+The repository signed-activation gate is implemented and passes 11/11, but its
+manifest remains disabled. A real reviewed chain spec and activation manifest
+signed with production-controlled keys do not yet exist. Production deployment
 must additionally isolate each verifier as an unprivileged, network-denied,
-resource-bounded process with immutable executable/policy/trust mounts, close
-the hash-check-to-launch replacement window, and enforce archive retention,
-quota, and reviewed garbage collection.
+resource-bounded process with immutable executable/policy/trust mounts and
+close the hash-check-to-launch replacement window. Seven focused archive tests
+pass on Windows; the Unix-only symlink case was not exercised there. The
+complete node suite passes 209/209 and the CLI suite passes 41/41; the current
+full Rust workspace/all-target run and post-run rustfmt verification remain
+pending.
 
 ### 8.2 Transaction Lifecycle
 
@@ -853,13 +931,21 @@ The resolver checks verified status before delegating to package-manager shims.
 5. db-sync mirrors new blocks to PostgreSQL
 6. Explorer reflects updated state
 
-### 8.6 L1 Bridge Checkpoint
+### 8.6 Retired L1 Bridge Checkpoint
 
-1. Bridge worker polls chain store for new finalized blocks
-2. Builds Merkle batch of state transitions
-3. Generates Groth16 proof via `zk-validator`
-4. Submits `submitRollupBatch` through Governance
-5. Registry.sol records checkpoint on Sepolia
+The codebase retains a research-only bridge worker for migration analysis, but
+the production-shaped workflow stops after local PBFT finality:
+
+1. The legacy worker can poll locally finalized blocks.
+2. It can construct historical batch inputs and a checkpoint-attestation
+   proof.
+3. It must remain disabled because that proof is not a CREG state-transition
+   validity proof.
+4. The current `Registry.sol` rejects `submitRollupBatch`; it does not record a
+   CREG checkpoint on Sepolia.
+5. Operators must not advertise Sepolia settlement or anchoring until a
+   replacement protocol has been specified, implemented, migrated, and
+   independently reviewed.
 
 ---
 
@@ -1127,6 +1213,15 @@ The protocol's legacy-named certificate hash is a **logical transition ID** over
 Committee assignments now commit to the validator-set hash, snapshot height, preceding-block fork anchor, logical transition ID, public selection randomness, selector seed, and ordered members. Any node handling a certified assignment loads the exact anchor block, derives expected randomness from its VRF output (or the anchor hash fallback), recomputes the assignment from the persisted snapshot, and rejects member substitution, attacker-chosen randomness, transition substitution, or fork-anchor replay. Signed transitions are also gossiped on the dedicated `creg/v1/validator-set-transitions` topic; receivers defer gossip acceptance until they independently repeat body/count bounds, validator-identity uniqueness, next-height, local-tip, full-witness, quorum, checkpoint, and continuity checks and durably persist the certificate.
 
 For new or rebuilt nodes, operators may provision `CREG_WEAK_SUBJECTIVITY_CHECKPOINT` with a previously verified transition certificate. Peers expose certified history through `GET /v1/validator/set-transitions`, but a rebuilding node accepts no timeline unless it contains that exact checkpoint, peer histories have a compatible prefix, and every locally available block anchor matches the canonical chain. When a peer supplies the pre-checkpoint prefix, the node verifies it sequentially from explicit bootstrap authority; when retention has pruned that prefix, the exact independently verified checkpoint becomes the trust root and every supplied descendant must verify sequentially from its validator set. Local authenticated reads also revalidate the full available chain from that explicit bootstrap/checkpoint rather than trusting structurally valid disk bytes. Checkpoint installation validates the complete certified tail before atomically replacing local history, removes unsigned compatibility remnants, and performs no rewrite if a descendant is invalid. History writes are serialized, a configured checkpoint chain is retained beyond the 512-entry compatibility cap, and reorg recovery removes certificates anchored after the canonical ancestor. This checkpoint is deployment configuration, not a privileged network message. `CREG_REQUIRE_CERTIFIED_COMMITTEES=true` makes package admission fail closed until checkpoint-anchored certified authority is available. Public alpha still requires a published independently verified checkpoint plus live multi-operator reorg/long-range rehearsal before this mode is enabled network-wide.
+
+The repository publication/verification CLI, fail-closed canonical-anchor
+template, operator procedure, and CI gate validate supplied prior-set quorum,
+canonical-anchor binding, checkpoint age, independently signed evidence, and
+replay/rollback/direct-lineage rules. Syntax and all 11 adversarial/CLI tests
+pass. The tool deliberately does not query the chain or create a validator
+certificate, validator key, verifier key, or canonical-chain observation. Its
+tests use synthetic inputs: no real checkpoint or key was fabricated,
+independently verified, published, configured, or deployed.
 
 See `package_admission::compute_analysis_committee_at_admission`, `package_admission::verify_analysis_committee_assignment`, the persisted-assignment gate in `validator_pipeline`, `aggregate_evidence_votes`, `update_performance_scores`, and the reward emission hook in `validator_pipeline`.
 
@@ -1501,10 +1596,11 @@ See source:
 | Novel malware missed by scanners | Defense in depth reduces risk; not eliminated |
 | L1 contract bug | External audit (SEC-401) is open |
 | ZK circuit or trusted setup flaw | Requires dedicated ZK audit |
-| Long-range sync attacks | Signed history, exact checkpoint matching, canonical-anchor checks, retention, and reorg truncation are implemented; a real published checkpoint and live multi-operator long-range/reorg rehearsal remain required |
+| Long-range sync attacks | Signed history, exact checkpoint matching, canonical-anchor checks, retention, and reorg truncation are implemented. The publication/verification CLI and CI pass 11/11 synthetic adversarial/CLI tests; a real independently verified checkpoint and live multi-operator long-range/reorg rehearsal remain required |
 | IPFS unavailability | Requires redundant pinning and monitoring |
-| npm/PyPI verifier or policy compromise | Hash-pinned sidecars, signed-spec policy/trust pins, independent validator execution, and prior-set quorum reduce single-party risk; production verifier/trust/policy artifacts and independent review remain open |
-| npm provenance without trusted-publisher authentication | Must remain `ownership_unconfirmed` unless an official npm authentication-mode signal satisfies the reviewed policy |
+| npm/PyPI verifier or policy compromise | Complete self-contained verifier artifacts, signed-spec policy/trust pins, independent validator execution, and prior-set quorum reduce single-party risk; a generated Python launcher hash does not bind imports, and production verifier/trust/policy artifacts, live rehearsal, and independent review remain open |
+| npm provenance without trusted-publisher authentication | Must remain `ownership_unconfirmed`; the required official npm authentication-mode signal is externally unavailable |
+| Authority archive exhaustion or unsafe sharing | Repository byte/entry quotas, minimum age, and pressure-GC fail closed locally; locking is process-local, and shared-filesystem coordination, deployment capacity/alerts, backups/restore, disaster recovery, and legal retention remain external |
 
 ### 10.3 Cryptographic Primitives
 
@@ -1533,14 +1629,25 @@ Safety depends on fewer than one-third of validator voting power being Byzantine
 
 Documented in `DEEP_DIVE_ANALYSIS.md`:
 
-- ZK circuits document content-hash binding but do not constrain hashes in R1CS
+- The current ZK circuit constrains content and manifest hash limbs as public
+  inputs; the older unconstrained-hash finding applies only to superseded
+  implementations. ZK qualification nevertheless remains retired from the
+  production package-admission path. The current local Foundry suite passes
+  111/111, but immutable dependency pinning, a reproducibly clean CI checkout,
+  and independent circuit review remain.
 - Simplified VRF (not full RFC 9381)
 - Bridge proof mode is checkpoint-attestation, not full state transition validity
 - Some Solidity auxiliary contracts incomplete for production
 - CR-07 production npm/PyPI verifier binaries, official trust material, policy
-  bundles, npm trusted-publisher authentication-mode signal, signed
-  activation/checkpoint, operator rehearsal, and independent review remain
-  external gates
+  bundles, operator rehearsal, and independent review remain external gates;
+  the official npm authentication-mode signal is externally unavailable
+- The repository activation gate is implemented and disabled; no real
+  production-signed activation manifest/spec exists
+- Weak-subjectivity publication tooling is implemented, but no real checkpoint
+  or independently controlled verification key/evidence has been published
+- Authority archive limits are implemented locally; current Rust verification,
+  shared-filesystem coordination, capacity alerts, backups/restore, disaster
+  recovery, and legal-retention controls remain open
 
 Operators should treat testnet deployments as **alpha** until audit closure and hardening.
 
@@ -1622,10 +1729,19 @@ Runbooks in `docs/`:
 |----------|---------|-------|
 | `rust-ci.yml` | push/PR to main, daily cron | `cargo fmt`, `clippy -D warnings`, `cargo test --workspace` |
 | `consensus-evidence.yml` | consensus changes | Evidence bundle validation |
+| `cr07-activation.yml` | activation/spec/config changes | 11-test adversarial signed-manifest gate plus validation of the disabled repository state |
+| `weak-subjectivity-checkpoint.yml` | checkpoint tool/template/runbook changes | Syntax plus 11-test adversarial publication/verification gate |
 | `release-binaries.yml` | version tags | Binary builds for Linux/Windows/macOS |
 | `release-assurance-smoke.yml` | releases | Post-release smoke tests |
 
 Toolchain pinned to Rust 1.93.0 for deterministic fmt/clippy gates.
+
+The 2026-07-29 local contract run used pinned `solc` 0.8.24 and Foundry
+1.6.0-nightly: all 12 suites and 111 tests passed with 0 failed/skipped,
+including 1000-run fuzz cases and the first-pause cooldown regression. This is
+current local evidence, not reproducibly clean CI: compiler warnings,
+immutable dependency/toolchain pinning, and clean-checkout execution remain
+open.
 
 ### 12.3 Quality Policies
 
@@ -1639,10 +1755,14 @@ Toolchain pinned to Rust 1.93.0 for deterministic fmt/clippy gates.
 
 Documented in `TESTNET_READINESS_REPORT.md` and
 `L2_PUBLIC_ALPHA_GATE_STATUS.md`. External security audit (SEC-401) remains
-open. CR-07 also remains gated on reviewed production npm/PyPI
-verifier/trust/policy artifacts, the official npm trusted-publisher
-authentication-mode signal, a signed activation/checkpoint, live operator
-rehearsal, and independent review.
+open. Repository activation/checkpoint release tooling and local authority
+archive limits are implemented, but they do not satisfy rollout gates. CR-07
+remains gated on reviewed production npm/PyPI verifier/trust/policy artifacts,
+a real production-signed activation manifest/spec, live operator rehearsal,
+and independent review; the official npm trusted-publisher authentication-mode
+signal is externally unavailable. Certified committee rollout separately
+requires a real independently verified checkpoint and multi-operator
+long-range/reorg rehearsal.
 
 ---
 
@@ -1703,6 +1823,9 @@ Shared: IPFS, chain-spec nginx, P2P ports 29100–29102.
 | `CREG_NAMESPACE_AUTHORITY_MAX_ARTIFACT_BYTES` | Official artifact limit, default 16 MiB, hard maximum 64 MiB |
 | `CREG_NAMESPACE_AUTHORITY_MAX_RESULT_BYTES` | Canonical sidecar result limit, default 64 KiB |
 | `CREG_NAMESPACE_AUTHORITY_MAX_CONCURRENT_VERIFICATIONS` | Per-node sidecar concurrency bound, default 2, hard maximum 4 |
+| `CREG_NAMESPACE_AUTHORITY_ARCHIVE_MAX_BYTES` | Validator-local shared evidence/artifact byte quota, default 10 GiB |
+| `CREG_NAMESPACE_AUTHORITY_ARCHIVE_MAX_ENTRIES` | Validator-local shared evidence/artifact file quota, default 100000 |
+| `CREG_NAMESPACE_AUTHORITY_ARCHIVE_MIN_RETENTION_SECS` | Minimum age for pressure-GC eligibility, default 365 days |
 | `CREG_OPERATOR_API_KEY` | High-entropy server-side ACL required by both namespace-authority POST routes; never expose to a browser bundle or public proxy |
 | `CREG_ALLOW_LEGACY_PUBLISHER_PROOF` | Explicit non-production pre-activation CLI compatibility; default false and ignored when `CREG_PRODUCTION=true` |
 
@@ -1956,7 +2079,7 @@ Incentives monitoring is now more complete and observable.
 **New dedicated plan created:** `docs/WEAKNESSES_GAPS_REMEDIATION_PLAN.md` (2026-06-26) covering the five main gaps from the system rating:
 - External audit acceleration
 - Remaining DEEP_DIVE code items (gossip, BatchOperations, finalize relays)
-- Bridge + ZK + cross-layer hardening
+- Legacy bridge/ZK retirement cleanup and any future cross-layer protocol design
 - Validator set decentralization
 - End-to-end incentive soak testing
 
@@ -1994,7 +2117,8 @@ Tests exist in pbft.rs for receive_prepare; gossip roundtrip covered indirectly 
 - Even with circuit updates for bind_hash32_limbs, the on-chain check was using a derived binding that didn't align with the proof's hash public inputs, allowing potential misuse of proofs for wrong content.
 - Ties to architecture: ZK is part of the validation surface for fast-path or additional trust; must be sound for package integrity.
 - No circuit change needed this step (circuit already binds); on-chain enforcement strengthened.
-- Bridge (submitRollupBatch) still uses separate validity; this focuses on per-package ZK.
+- The legacy `submitRollupBatch` entry point is retired and reverts. The
+  historical batch circuit is not a separate active validity system.
 
 This completes the Tier 1 gossip + ZK polish for this cycle.
 
@@ -2096,13 +2220,20 @@ This is a **public alpha testnet**, not mainnet. Key limitations:
 - Cross-chain, insurance, and threshold encryption disabled
 - Checkpoint-attestation bridge mode (not full state validity proof)
 - Abrupt process-kill/chaos recovery still requires an operator rehearsal
-- CR-07 production npm/PyPI verifier/trust/policy artifacts, official npm
-  authentication-mode signal, signed activation/checkpoint, operator
-  rehearsal, and independent review are not yet complete
+- CR-07 production npm/PyPI verifier/trust/policy artifacts, a real
+  production-signed activation manifest/spec, operator rehearsal, and
+  independent review are not yet complete; the official npm
+  authentication-mode signal is externally unavailable
+- Weak-subjectivity publication/verification tooling exists, but no real
+  independently verified checkpoint or live multi-operator rehearsal exists
+- Authority archive quota/retention/pressure-GC is repository-implemented but
+  current Rust results, shared-filesystem coordination, deployment
+  capacity/alerts, backups/restore, disaster recovery, and legal retention are
+  still open
 - No economic guarantees or mainnet token commitments
 
 See `docs/TESTNET_PHASE_SCOPE.md` for participant expectations.
 
 ---
 
-*This document is derived from the CREG codebase, whitepaper, and operator documentation as of 2026-07-28. For protocol authority, refer to `docs/WHITEPAPER.md`. For implementation gaps, refer to `chain-registry/DEEP_DIVE_ANALYSIS.md`.*
+*This document is derived from the CREG codebase, whitepaper, and operator documentation as of 2026-07-29. For protocol authority, refer to `docs/WHITEPAPER.md`. For implementation gaps, refer to `chain-registry/DEEP_DIVE_ANALYSIS.md`.*

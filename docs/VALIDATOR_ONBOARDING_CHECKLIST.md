@@ -3,8 +3,19 @@
 > Tracks: VAL-001 (admission policy), VAL-002 (operator checklist), MAL-001 (sandbox requirement)  
 > Network: `creg-testnet-1` (Sepolia-anchored public alpha)  
 > Audience: external validator operators joining the CREG testnet
+>
+> **Current reality (2026-07-29):** the checked-in Sepolia topology records
+> one validator and no bootnodes. External admission is not represented as
+> open or complete. This is a recruitment/readiness checklist until operators
+> publish a signed onboarding window and independently verify the live fleet.
 
 This is the single runbook a new validator operator follows to register, stake, configure, and pass health checks. Completing every item in this document is a requirement for participating in public verification quorum.
+
+Running several nodes for the same person or organization does not create
+Byzantine fault tolerance. An operator counts as independent only when its
+governance, validator keys, host/cloud account, deployment credentials,
+monitoring, and incident decision path are not controlled by an existing
+operator. Control-domain disclosures are retained with the onboarding record.
 
 ## 1. Admission Policy (VAL-001)
 
@@ -20,6 +31,8 @@ A validator is admitted to the public testnet validator set when all of the foll
 | Uptime | Node reachable and participating in rounds (target ≥ 95% during alpha) | Health endpoint polling, vote participation history |
 | Hardware (minimum) | 4 vCPU / 8 GB RAM / 50 GB SSD, Linux with user namespaces enabled (nsjail) | Operator attestation; sandbox verification |
 | Key hygiene | Validator Ed25519 key and EOA key stored per [SECURITY_OPS_RUNBOOK.md](./SECURITY_OPS_RUNBOOK.md); never committed | Operator attestation |
+| Independent control | Governance, keys, infrastructure, monitoring, and incident authority disclosed and independently controlled | Two-person review of retained control-domain statement |
+| Certified history | Exact independently verified weak-subjectivity checkpoint and descendant history accepted | Checkpoint evidence plus rebuilt-node rehearsal |
 
 Votes from nodes that do not meet the sandbox and scanner-profile requirements are degraded/advisory and **do not count toward public verification quorum** (VAL-003).
 
@@ -32,7 +45,9 @@ Votes from nodes that do not meet the sandbox and scanner-profile requirements a
 - [ ] Sepolia ETH for gas and tCREG for stake (faucet: `creg testnet drip --address 0x...` when the operator faucet is up).
 - [ ] Read [TESTNET_PHASE_SCOPE.md](./TESTNET_PHASE_SCOPE.md) and [PUBLIC_TESTNET_QUICKSTART.md](./PUBLIC_TESTNET_QUICKSTART.md) — understand what "verified" means today.
 
-Contract addresses (Sepolia defaults):
+Contract addresses recorded in the current repository Sepolia spec are shown
+below. Verify them against the exact signature-verified chain spec supplied for
+the onboarding window; this table is not an authority to transact:
 
 | Contract | Address |
 | --- | --- |
@@ -88,11 +103,43 @@ export CREG_NODE_URL=https://api.testnet.cregnet.dev
 | `CREG_ETH_RPC` | Archive-capable Sepolia RPC |
 | `CREG_IPFS_URL` | Local Kubo or operator IPFS API |
 | `CREG_EXPECTED_L1_CHAIN_ID` | `11155111` |
+| `CREG_WEAK_SUBJECTIVITY_CHECKPOINT` | Exact single-line checkpoint certificate independently approved for the onboarding window |
+| `CREG_REQUIRE_CERTIFIED_COMMITTEES` | `true` only after the signed checkpoint rollout and fleet rehearsal; never enable by copying an anchor from one peer |
 
 - [ ] Scanner rules mounted and matching the fleet profile (`rules/` directory, `testnet/scanner-fleet.env`).
 - [ ] Recommended: pin the IPFS CIDs of packages you validate (IPFS-005) — keeps verified content retrievable.
+- [ ] Compare `GET /v1/validator/set-transitions` with at least two independent
+      peers and retain evidence that the configured checkpoint and all
+      descendants agree.
+- [ ] Rebuild an observer from the checkpoint before activating validator
+      duties; missing, conflicting, fork-anchored, replayed, and long-range
+      histories must fail closed.
 
-## 6. Sandbox Verification (MAL-001 — mandatory)
+CR-07 npm/PyPI authority attestation is a separate privileged role. A
+validator MUST NOT configure either authority verifier unless the exact
+self-contained verifier, policy, and trust-root hashes appear in the signed
+chain spec and the CR-07 activation manifest is valid. A normal validator can
+join while CR-07 remains disabled.
+
+## 6. Bootnode role (optional and separately reviewed)
+
+A validator is not automatically a bootnode. Operators volunteering a
+bootnode additionally provide:
+
+- a stable DNS name, static P2P endpoint, and exact peer ID for the signed
+  chain spec;
+- DDoS controls and resource limits without validator/operator API exposure;
+- retained uptime, connection, restart, and abuse metrics;
+- a key and infrastructure control domain distinct from the existing
+  bootnodes; and
+- a process-kill/restart and partition rehearsal showing that peers can still
+  discover at least one independently controlled seed.
+
+Placeholder peer IDs or DNS names are never added to an operational signed
+spec. At least two independently controlled bootnodes are required before the
+topology is described as resilient.
+
+## 7. Sandbox Verification (MAL-001 — mandatory)
 
 - [ ] Run with a real sandbox engine. Preferred: nsjail secure image (`Dockerfile.secure`, see `testnet/build-3node-secure-image.sh`); fleet operators get this by default from `start-validator-fleet-gcp.sh`.
 - [ ] Verify the engine in-process:
@@ -107,7 +154,7 @@ curl -s "$CREG_NODE_URL/v1/runtime/config" | jq '{sandbox_engine, sandbox_dev_by
 
 A validator running the dev bypass produces SB012 (High) findings on every package and its votes are not consensus-grade.
 
-## 7. Health Checks
+## 8. Health Checks
 
 - [ ] API reachable: `curl -fsS http://<node>:8080/healthz` (or your mapped port).
 - [ ] P2P connected: peer count > 0 in `/v1/chain/stats`.
@@ -116,15 +163,19 @@ A validator running the dev bypass produces SB012 (High) findings on every packa
 - [ ] Vote participation: your node appears in vote records for new packages.
 - [ ] Clock synced (NTP) — consensus timestamps drift otherwise.
 
-## 8. Operations
+## 9. Operations
 
 - [ ] Read [SECURITY_OPS_RUNBOOK.md](./SECURITY_OPS_RUNBOOK.md) — hot-key handling and rotation procedure.
 - [ ] Read [INCIDENT_RESPONSE_RUNBOOK.md](./INCIDENT_RESPONSE_RUNBOOK.md) — know how revocation and key-compromise response work before you need them.
 - [ ] Set up log retention (≥ 7 days) — vote evidence may be requested during disputes.
 - [ ] Subscribe to operator announcements (GitHub Issues / support channel) for chain-spec updates and emergency notices.
 - [ ] Plan upgrades: validators are expected to update within 72h of a security release during alpha.
+- [ ] Complete and retain the operator rehearsal matrix: transition replay,
+      invalid quorum, partition/heal, fork/reorg anchor, rebuilt node,
+      long-range alternative history, verifier crash/timeout (if applicable),
+      and abrupt process kill during durable work.
 
-## 9. Exit / Deregistration
+## 10. Exit / Deregistration
 
 - [ ] Announce planned exit in the operator channel (avoid surprise quorum loss).
 - [ ] Stop the node, then unstake via the Staking contract after the unbonding window.
@@ -137,5 +188,11 @@ Operator onboarding is complete when:
 1. All checklist items above are checked.
 2. The node has participated in at least one verification round with a consensus-grade vote.
 3. Sandbox evidence (`/v1/runtime/config` output or `verify-fleet-sandbox.ps1` JSON) is archived.
+4. The independently reviewed control-domain statement, checkpoint evidence,
+   signed-spec hash, binary hash, and rehearsal record are linked from the
+   operator acceptance record.
+5. At least one maintainer and one reviewer outside the candidate operator's
+   control domain sign off. Repository documentation alone cannot supply this
+   evidence.
 
 Maintainers record completion in [NEXT_WORK.md](./NEXT_WORK.md) (VAL-002 row) — completion by at least one non-core operator is an L2 Public Alpha gate.

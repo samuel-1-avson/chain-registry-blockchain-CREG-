@@ -33,6 +33,7 @@ pub mod validator_set_history;
 pub mod validator_set_sync;
 
 // ── Private modules required by the public ones above ────────────────────────
+mod authority_archive;
 mod bridge;
 mod db_sync_proxy;
 mod explorer;

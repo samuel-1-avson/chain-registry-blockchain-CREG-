@@ -29,4 +29,6 @@ Unauthorized relays revert with `NotAuthorizedSubmitRelay`. See `contracts/test/
 
 ## Finalize relay model (`Registry.sol`)
 
-`enforceFinalizeRelays` defaults to **true** on deploy. When enabled, only addresses in `packageFinalizeRelays` may call `finalizePackage`. Governance may relax enforcement for permissionless relaying on testnets. Per-validator signature replay is blocked via `validatorSignedForPackage`.
+`enforceFinalizeRelays` defaults to **true** on deploy. When enabled, only addresses in `packageFinalizeRelays` may call `finalizePackage`. Governance may relax enforcement for permissionless relaying on testnets.
+
+Every `ValidatorSig` is an EIP-712 `PackageVerdict` bound to the chain, Registry address, package key, content hash, `approved` decision, current quorum percentage, exact `Staking.validatorSetEpoch`, and an `issuedAt`/`expiresAt` interval no longer than 15 minutes. Membership changes advance the epoch even when the active count returns to the same value. Finalization requires the signed epoch to equal the current epoch, the signer to remain active, a low-s signature, and the live quorum; `validatorSignedForPackage` and the package key prevent replay. This changes the research-alpha `finalizePackage` tuple ABI and requires contract redeployment plus relayer/signer updates; no production migration is represented by this repository change.

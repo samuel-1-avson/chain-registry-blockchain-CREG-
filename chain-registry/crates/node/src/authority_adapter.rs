@@ -89,6 +89,10 @@ pub enum AuthorityAdapterError {
 #[derive(Debug, Clone)]
 pub struct AuthorityAdapterConfig {
     pub verifier_path: PathBuf,
+    /// Absolute, node-owned parent for one private directory per invocation.
+    /// The child receives only that invocation directory through TEMP/TMP/
+    /// TMPDIR; ambient process environment is never inherited.
+    pub scratch_root: PathBuf,
     pub verifier_sha256: String,
     pub adapter_id: String,
     pub adapter_version: String,
@@ -115,6 +119,11 @@ impl AuthorityAdapterConfig {
         {
             return Err(AuthorityAdapterError::InvalidConfig(
                 "verifier, policy, and trust-root SHA-256 pins are required",
+            ));
+        }
+        if !self.scratch_root.is_absolute() {
+            return Err(AuthorityAdapterError::InvalidConfig(
+                "verifier scratch root must be absolute",
             ));
         }
         if self.timeout.is_zero() || self.timeout > Duration::from_secs(120) {
@@ -155,6 +164,59 @@ impl AuthorityAdapterConfig {
         }
         Ok(path)
     }
+}
+
+fn private_invocation_scratch(
+    root: &Path,
+) -> Result<tempfile::TempDir, AuthorityAdapterError> {
+    if !root.is_absolute() {
+        return Err(AuthorityAdapterError::InvalidConfig(
+            "verifier scratch root must be absolute",
+        ));
+    }
+    let metadata = match std::fs::symlink_metadata(root) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            std::fs::create_dir_all(root).map_err(AuthorityAdapterError::Io)?;
+            std::fs::symlink_metadata(root).map_err(AuthorityAdapterError::Io)?
+        }
+        Err(error) => return Err(AuthorityAdapterError::Io(error)),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(AuthorityAdapterError::InvalidConfig(
+            "verifier scratch root must be a real directory",
+        ));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(root, std::fs::Permissions::from_mode(0o700))
+            .map_err(AuthorityAdapterError::Io)?;
+    }
+    let canonical_root = std::fs::canonicalize(root).map_err(AuthorityAdapterError::Io)?;
+    let scratch = tempfile::Builder::new()
+        .prefix("creg-authority-")
+        .tempdir_in(canonical_root)
+        .map_err(AuthorityAdapterError::Io)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(scratch.path(), std::fs::Permissions::from_mode(0o700))
+            .map_err(AuthorityAdapterError::Io)?;
+    }
+    Ok(scratch)
+}
+
+async fn join_sidecar_task<T>(
+    task: tokio::task::JoinHandle<std::io::Result<T>>,
+) -> Result<T, AuthorityAdapterError> {
+    task.await
+        .map_err(|error| {
+            AuthorityAdapterError::Io(std::io::Error::other(format!(
+                "authority verifier I/O task failed: {error}"
+            )))
+        })?
+        .map_err(AuthorityAdapterError::Io)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -593,16 +655,27 @@ pub async fn verify_with_sidecar(
         AuthorityAdapterError::InvalidRequest("request cannot be encoded as canonical JSON")
     })?;
 
+    let scratch = private_invocation_scratch(&config.scratch_root)?;
+    let scratch_path = scratch.path().to_path_buf();
     let mut command = Command::new(&verifier);
     command
         .env_clear()
         .env("CREG_AUTHORITY_ADAPTER_PROTOCOL", "2")
+        .env("TEMP", &scratch_path)
+        .env("TMP", &scratch_path)
+        .env("TMPDIR", &scratch_path)
         .current_dir(verifier.parent().unwrap_or_else(|| Path::new(".")))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
-    let mut child = command.spawn().map_err(AuthorityAdapterError::Spawn)?;
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            scratch.close().map_err(AuthorityAdapterError::Io)?;
+            return Err(AuthorityAdapterError::Spawn(error));
+        }
+    };
     let mut stdin = child.stdin.take().ok_or_else(|| {
         AuthorityAdapterError::Io(std::io::Error::other("verifier stdin unavailable"))
     })?;
@@ -613,21 +686,31 @@ pub async fn verify_with_sidecar(
         AuthorityAdapterError::Io(std::io::Error::other("verifier stderr unavailable"))
     })?;
 
-    let io = async move {
-        let write = async move {
+    let write = tokio::spawn(async move {
             stdin.write_all(&input).await?;
             stdin.shutdown().await
-        };
-        let read_stdout = read_limited(stdout, config.max_result_bytes);
-        let read_stderr = read_limited(stderr, MAX_STDERR_BYTES);
-        let wait = child.wait();
-        let (_, stdout, stderr, status) = tokio::try_join!(write, read_stdout, read_stderr, wait)?;
-        Ok::<_, std::io::Error>((stdout, stderr, status))
+    });
+    let read_stdout = tokio::spawn(read_limited(stdout, config.max_result_bytes));
+    let read_stderr = tokio::spawn(read_limited(stderr, MAX_STDERR_BYTES));
+    let status = match tokio::time::timeout(config.timeout, child.wait()).await {
+        Ok(status) => status.map_err(AuthorityAdapterError::Io)?,
+        Err(_) => {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            write.abort();
+            read_stdout.abort();
+            read_stderr.abort();
+            let _ = write.await;
+            let _ = read_stdout.await;
+            let _ = read_stderr.await;
+            scratch.close().map_err(AuthorityAdapterError::Io)?;
+            return Err(AuthorityAdapterError::Timeout);
+        }
     };
-    let (stdout, stderr, status) = tokio::time::timeout(config.timeout, io)
-        .await
-        .map_err(|_| AuthorityAdapterError::Timeout)?
-        .map_err(AuthorityAdapterError::Io)?;
+    join_sidecar_task(write).await?;
+    let stdout = join_sidecar_task(read_stdout).await?;
+    let stderr = join_sidecar_task(read_stderr).await?;
+    scratch.close().map_err(AuthorityAdapterError::Io)?;
     if stdout.len() > config.max_result_bytes {
         return Err(AuthorityAdapterError::ResultTooLarge);
     }
@@ -897,6 +980,7 @@ mod tests {
     fn config() -> AuthorityAdapterConfig {
         AuthorityAdapterConfig {
             verifier_path: PathBuf::from("unused-for-protocol-validation"),
+            scratch_root: std::env::temp_dir().join("creg-authority-adapter-tests"),
             verifier_sha256: "11".repeat(32),
             adapter_id: "creg-pypi-sigstore".to_owned(),
             adapter_version: "1.0.0".to_owned(),
@@ -907,6 +991,78 @@ mod tests {
             max_artifact_bytes: DEFAULT_MAX_ARTIFACT_BYTES,
             max_result_bytes: DEFAULT_MAX_RESULT_BYTES,
         }
+    }
+
+    #[test]
+    fn invocation_scratch_is_private_absolute_and_removed() {
+        let parent = tempfile::tempdir().unwrap();
+        let root = parent.path().join("authority-verifier-scratch");
+        let scratch = private_invocation_scratch(&root).unwrap();
+        let invocation_path = scratch.path().to_path_buf();
+
+        assert!(invocation_path.is_absolute());
+        assert!(invocation_path.starts_with(std::fs::canonicalize(&root).unwrap()));
+        assert!(invocation_path.is_dir());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&root).unwrap().permissions().mode() & 0o777,
+                0o700
+            );
+            assert_eq!(
+                std::fs::metadata(&invocation_path)
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o700
+            );
+        }
+
+        scratch.close().unwrap();
+        assert!(!invocation_path.exists());
+        assert!(root.is_dir());
+    }
+
+    #[test]
+    fn relative_or_nondirectory_scratch_root_is_rejected() {
+        let mut invalid = config();
+        invalid.scratch_root = PathBuf::from("relative-scratch");
+        assert!(matches!(
+            invalid.validate_protocol(),
+            Err(AuthorityAdapterError::InvalidConfig(
+                "verifier scratch root must be absolute"
+            ))
+        ));
+
+        let parent = tempfile::tempdir().unwrap();
+        let file = parent.path().join("not-a-directory");
+        std::fs::write(&file, b"not a directory").unwrap();
+        assert!(matches!(
+            private_invocation_scratch(&file),
+            Err(AuthorityAdapterError::InvalidConfig(
+                "verifier scratch root must be a real directory"
+            ))
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlink_scratch_root_is_rejected() {
+        use std::os::unix::fs::symlink;
+
+        let parent = tempfile::tempdir().unwrap();
+        let real = parent.path().join("real");
+        std::fs::create_dir(&real).unwrap();
+        let alias = parent.path().join("alias");
+        symlink(&real, &alias).unwrap();
+        assert!(matches!(
+            private_invocation_scratch(&alias),
+            Err(AuthorityAdapterError::InvalidConfig(
+                "verifier scratch root must be a real directory"
+            ))
+        ));
     }
 
     fn request() -> AuthorityAdapterRequestV2 {

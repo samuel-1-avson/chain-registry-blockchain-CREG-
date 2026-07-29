@@ -166,9 +166,10 @@ jobs:
 
       - name: Sign chain spec
         env:
-          SPEC_SIGNING_KEY: "9d91e9e0d82a02b7be8c40a522d899eea9eeffad244323be3e568973211f3a6d"
+          SPEC_SIGNING_KEY: ${{ secrets.SPEC_SIGNING_KEY }}
         run: |
-          SIG=$(cargo run --example sign_chain_spec --package common -- testnet/chain-spec.sepolia.json "$SPEC_SIGNING_KEY")
+          test -n "$SPEC_SIGNING_KEY"
+          SIG=$(cargo run --example sign_chain_spec --package common -- testnet/chain-spec.sepolia.json --key-env SPEC_SIGNING_KEY)
           echo "$SIG" > testnet/chain-spec.sepolia.json.sig
 
       - name: Verify signature

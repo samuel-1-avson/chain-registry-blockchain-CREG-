@@ -1,0 +1,20 @@
+{
+  "manifest_version": 1,
+  "status": "disabled",
+  "signature_domain": "creg-chain-spec-v1",
+  "chain_spec_version": 1,
+  "required_authorities": [
+    "npm_trusted_publisher",
+    "pypi_trusted_publisher"
+  ],
+  "disallowed_signing_pubkeys": [
+    "0437e4adac481519cd6ae66907294c40cfcbf0bdeadd47806f6233be4bd5f82d"
+  ],
+  "guarded_chain_specs": [
+    "testnet/chain-spec.local.json",
+    "testnet/chain-spec.sepolia.json",
+    "testnet/spec-server/chain-spec.json",
+    "testnet/spec-server/chain-spec.sepolia.json"
+  ],
+  "activation": null
+}

@@ -11,6 +11,9 @@ use std::{sync::Arc, time::Duration};
 use tokio::net::TcpListener;
 use tokio::{sync::RwLock, time::timeout};
 
+const E2E_CHAIN_ID: &str = "creg-e2e-1";
+const E2E_STAKING_CONTRACT: &str = "0x1000000000000000000000000000000000000001";
+
 fn make_tarball(path: &str, content: &str) -> Vec<u8> {
     let mut tar_bytes = Vec::new();
     {
@@ -124,6 +127,7 @@ async fn start_test_node() -> (String, tokio::task::JoinHandle<()>) {
     let validator_pubkey_hex = hex::encode(validator_signing_key.verifying_key().as_bytes());
 
     let config = NodeConfig {
+        chain_id: E2E_CHAIN_ID.into(),
         listen_addr: "127.0.0.1:0".into(), // OS assigns a port
         data_dir: dir.path().to_path_buf(),
         node_id: "e2e-node".into(),
@@ -133,7 +137,7 @@ async fn start_test_node() -> (String, tokio::task::JoinHandle<()>) {
         block_interval_secs: 1,
         ipfs_url,
         eth_rpc_url: rpc_url,
-        staking_addr: "0x1000000000000000000000000000000000000001".into(),
+        staking_addr: E2E_STAKING_CONTRACT.into(),
         ..NodeConfig::default()
     };
 
@@ -221,18 +225,58 @@ async fn start_test_node() -> (String, tokio::task::JoinHandle<()>) {
 
 /// Build a minimal signed PublishRequest for testing.
 fn make_request(ecosystem: &str, name: &str, version: &str) -> PublishRequest {
+    use alloy::primitives::{keccak256, Address};
     use ed25519_dalek::{Signer, SigningKey};
+    use k256::ecdsa::SigningKey as K256SigningKey;
     use rand::rngs::OsRng;
 
-    let signing_key = SigningKey::generate(&mut OsRng);
-    let pubkey_hex = hex::encode(signing_key.verifying_key().as_bytes());
+    let ed25519_key = SigningKey::generate(&mut OsRng);
+    let pubkey_hex = hex::encode(ed25519_key.verifying_key().as_bytes());
+    let evm_key = K256SigningKey::random(&mut OsRng);
+    let uncompressed = evm_key.verifying_key().to_encoded_point(false);
+    let hashed = keccak256(&uncompressed.as_bytes()[1..]);
+    let publisher_address = Address::from_slice(&hashed.as_slice()[12..])
+        .to_string()
+        .to_ascii_lowercase();
     let id = PackageId::new(ecosystem, name, version);
 
     let payload = make_tarball("index.js", "console.log('hello world');");
     let content_hash = common::sha256_hex(&payload);
-    let publisher_address = "0x1111111111111111111111111111111111111111".to_string();
-    let msg = common::publish_signature_message(&id, &content_hash, &publisher_address);
-    let sig = signing_key.sign(msg.as_bytes());
+    let submitted_at = Utc::now();
+    let publisher_expires_at = (submitted_at + chrono::Duration::hours(1)).timestamp() as u64;
+    let manifest = PackageManifest::default();
+    let manifest_hash = common::sha256_hex(&serde_json::to_vec(&manifest).unwrap());
+    let source_hash = common::sha256_hex(b"e2e-source");
+    let ownership_claim = format!("{}:{}", id.ecosystem, id.name);
+    let publisher_nonce = format!("e2e-{}", uuid::Uuid::new_v4());
+    let message = common::publish_signature_message_v2(
+        E2E_CHAIN_ID,
+        E2E_STAKING_CONTRACT,
+        &id,
+        &content_hash,
+        &source_hash,
+        &manifest_hash,
+        &pubkey_hex,
+        &publisher_address,
+        &ownership_claim,
+        &publisher_nonce,
+        submitted_at.timestamp(),
+        publisher_expires_at,
+    );
+    let signature = ed25519_key.sign(message.as_bytes());
+    let digest = {
+        let prefix = format!("\x19Ethereum Signed Message:\n{}", message.as_bytes().len());
+        let mut bytes = Vec::with_capacity(prefix.len() + message.len());
+        bytes.extend_from_slice(prefix.as_bytes());
+        bytes.extend_from_slice(message.as_bytes());
+        keccak256(bytes)
+    };
+    let (evm_signature, recovery_id) = evm_key
+        .sign_prehash_recoverable(digest.as_slice())
+        .expect("E2E EVM signature should be produced");
+    let mut evm_signature_bytes = [0u8; 65];
+    evm_signature_bytes[..64].copy_from_slice(&evm_signature.to_bytes());
+    evm_signature_bytes[64] = recovery_id.to_byte() + 27;
 
     PublishRequest {
         id,
@@ -240,9 +284,17 @@ fn make_request(ecosystem: &str, name: &str, version: &str) -> PublishRequest {
         ipfs_cid: format!("bafyDev{}", &common::sha256_hex(b"dev")[..32]),
         publisher_address,
         publisher_pubkey: pubkey_hex,
-        signature: hex::encode(sig.to_bytes()),
-        manifest: PackageManifest::default(),
-        submitted_at: Utc::now(),
+        signature: hex::encode(signature.to_bytes()),
+        manifest,
+        submitted_at,
+        publisher_evm_signature: hex::encode(evm_signature_bytes),
+        publisher_nonce,
+        publisher_expires_at,
+        source_hash,
+        manifest_hash,
+        ownership_claim,
+        publisher_chain_id: E2E_CHAIN_ID.into(),
+        publisher_staking_contract: E2E_STAKING_CONTRACT.into(),
         ..Default::default()
     }
 }

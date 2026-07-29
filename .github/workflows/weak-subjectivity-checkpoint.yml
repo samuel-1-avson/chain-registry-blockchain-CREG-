@@ -1,0 +1,51 @@
+name: Weak-subjectivity checkpoint gate
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - ".github/workflows/weak-subjectivity-checkpoint.yml"
+      - "chain-registry/config/weak-subjectivity/**"
+      - "chain-registry/scripts/verify-weak-subjectivity-checkpoint.mjs"
+      - "chain-registry/scripts/verify-weak-subjectivity-checkpoint.test.mjs"
+      - "chain-registry/crates/common/src/validator_snapshot.rs"
+      - "chain-registry/crates/common/src/lib.rs"
+      - "chain-registry/testnet/OPERATOR.md"
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/weak-subjectivity-checkpoint.yml"
+      - "chain-registry/config/weak-subjectivity/**"
+      - "chain-registry/scripts/verify-weak-subjectivity-checkpoint.mjs"
+      - "chain-registry/scripts/verify-weak-subjectivity-checkpoint.test.mjs"
+      - "chain-registry/crates/common/src/validator_snapshot.rs"
+      - "chain-registry/crates/common/src/lib.rs"
+      - "chain-registry/testnet/OPERATOR.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: chain-registry
+
+jobs:
+  checkpoint-gate:
+    name: Checkpoint publication adversarial tests
+    runs-on: ubuntu-latest
+
+    steps:
+      # actions/checkout v4.4.0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      # actions/setup-node v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+
+      - name: Syntax check
+        run: node --check scripts/verify-weak-subjectivity-checkpoint.mjs
+
+      - name: Run adversarial checkpoint tests
+        run: node --test scripts/verify-weak-subjectivity-checkpoint.test.mjs

@@ -138,6 +138,33 @@ contract RegistryTest is Test {
         assertFalse(governance.isPaused());
     }
 
+    function test_firstPauseIsImmediateButSubsequentPauseHonorsCooldown() public {
+        vm.prank(alice);
+        governance.emergencyPause("first pause");
+        vm.prank(bob);
+        governance.confirmPauseRequest();
+        assertTrue(governance.isPaused());
+
+        vm.prank(alice);
+        uint256 proposalId = governance.submitEmergencyUnpause("resume for cooldown test");
+        vm.prank(alice);
+        governance.vote(proposalId, true);
+        vm.prank(bob);
+        governance.vote(proposalId, true);
+        assertFalse(governance.isPaused());
+
+        vm.prank(alice);
+        vm.expectRevert("Pause cooldown active");
+        governance.emergencyPause("too soon");
+
+        vm.warp(block.timestamp + governance.PAUSE_COOLDOWN());
+        vm.prank(alice);
+        governance.emergencyPause("cooldown elapsed");
+        vm.prank(bob);
+        governance.confirmPauseRequest();
+        assertTrue(governance.isPaused());
+    }
+
     function test_publisherCanStakeAndSubmit() public {
         _stakeAsPublisher(alice);
         _submitPackage(alice);
@@ -189,6 +216,308 @@ contract RegistryTest is Test {
         registry.finalizePackage(CANONICAL, sigs);
     }
 
+    function test_quorumAtOneHundredPercentIsAchievable() public {
+        _stakeAsPublisher(alice);
+        _submitPackage(alice);
+        _joinValidator(bob);
+        _joinValidator(carol);
+
+        vm.prank(address(governance));
+        registry.setQuorum(100);
+
+        ChainRegistry.ValidatorSig[] memory sigs = new ChainRegistry.ValidatorSig[](2);
+        sigs[0] = _makeValidatorSig(bobKey, bob, CANONICAL, CONTENT_HASH, true);
+        sigs[1] = _makeValidatorSig(carolKey, carol, CANONICAL, CONTENT_HASH, true);
+        registry.finalizePackage(CANONICAL, sigs);
+
+        assertEq(uint(registry.getStatus(CANONICAL)), uint(ChainRegistry.PackageStatus.Verified));
+    }
+
+    function test_quorumAtOneHundredPercentRejectsOneOfTwo() public {
+        _stakeAsPublisher(alice);
+        _submitPackage(alice);
+        _joinValidator(bob);
+        _joinValidator(carol);
+
+        vm.prank(address(governance));
+        registry.setQuorum(100);
+
+        ChainRegistry.ValidatorSig[] memory sigs = new ChainRegistry.ValidatorSig[](1);
+        sigs[0] = _makeValidatorSig(bobKey, bob, CANONICAL, CONTENT_HASH, true);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(ChainRegistry.InsufficientQuorum.selector, uint256(1), uint256(2))
+        );
+        registry.finalizePackage(CANONICAL, sigs);
+    }
+
+    function test_exactSeventyFivePercentOfFourIsSufficient() public {
+        uint256 erinKey = uint256(keccak256("erin-validator-key"));
+        uint256 frankKey = uint256(keccak256("frank-validator-key"));
+        address erin = vm.addr(erinKey);
+        address frank = vm.addr(frankKey);
+
+        _stakeAsPublisher(alice);
+        _submitPackage(alice);
+        _joinValidator(bob);
+        _joinValidator(carol);
+        _joinValidator(erin);
+        _joinValidator(frank);
+
+        vm.prank(address(governance));
+        registry.setQuorum(75);
+
+        ChainRegistry.ValidatorSig[] memory sigs = new ChainRegistry.ValidatorSig[](3);
+        sigs[0] = _makeValidatorSig(bobKey, bob, CANONICAL, CONTENT_HASH, true);
+        sigs[1] = _makeValidatorSig(carolKey, carol, CANONICAL, CONTENT_HASH, true);
+        sigs[2] = _makeValidatorSig(erinKey, erin, CANONICAL, CONTENT_HASH, true);
+        registry.finalizePackage(CANONICAL, sigs);
+
+        assertEq(uint(registry.getStatus(CANONICAL)), uint(ChainRegistry.PackageStatus.Verified));
+    }
+
+    function test_quorumConfigurationRejectsOutsideDocumentedRange() public {
+        vm.startPrank(address(governance));
+        vm.expectRevert("Quorum must be 51-100%");
+        registry.setQuorum(50);
+        vm.expectRevert("Quorum must be 51-100%");
+        registry.setQuorum(101);
+        vm.stopPrank();
+    }
+
+    function test_verdictDecisionFlipInvalidatesSignature() public {
+        _stakeAsPublisher(alice);
+        _submitPackage(alice);
+        _joinValidator(bob);
+        _joinValidator(carol);
+
+        ChainRegistry.ValidatorSig[] memory sigs = new ChainRegistry.ValidatorSig[](2);
+        sigs[0] = _makeValidatorSig(bobKey, bob, CANONICAL, CONTENT_HASH, true);
+        sigs[1] = _makeValidatorSig(carolKey, carol, CANONICAL, CONTENT_HASH, true);
+        sigs[0].approved = false;
+
+        vm.expectRevert(abi.encodeWithSelector(ChainRegistry.InvalidSignature.selector, bob));
+        registry.finalizePackage(CANONICAL, sigs);
+    }
+
+    function test_verdictWrongContractDomainRejected() public {
+        _stakeAsPublisher(alice);
+        _submitPackage(alice);
+        _joinValidator(bob);
+        _joinValidator(carol);
+
+        uint64 issuedAt = uint64(block.timestamp);
+        bytes32 wrongDomain = _verdictDomain(block.chainid, address(0xC0FFEE));
+        ChainRegistry.ValidatorSig[] memory sigs = new ChainRegistry.ValidatorSig[](2);
+        sigs[0] = _makeValidatorSigAt(
+            bobKey,
+            bob,
+            CANONICAL,
+            CONTENT_HASH,
+            true,
+            staking.validatorSetEpoch(),
+            issuedAt,
+            issuedAt + registry.MAX_VERDICT_TTL(),
+            wrongDomain
+        );
+        sigs[1] = _makeValidatorSigAt(
+            carolKey,
+            carol,
+            CANONICAL,
+            CONTENT_HASH,
+            true,
+            staking.validatorSetEpoch(),
+            issuedAt,
+            issuedAt + registry.MAX_VERDICT_TTL(),
+            wrongDomain
+        );
+
+        vm.expectRevert(abi.encodeWithSelector(ChainRegistry.InvalidSignature.selector, bob));
+        registry.finalizePackage(CANONICAL, sigs);
+    }
+
+    function test_verdictWrongChainDomainRejected() public {
+        _stakeAsPublisher(alice);
+        _submitPackage(alice);
+        _joinValidator(bob);
+        _joinValidator(carol);
+
+        uint64 issuedAt = uint64(block.timestamp);
+        bytes32 wrongDomain = _verdictDomain(block.chainid + 1, address(registry));
+        ChainRegistry.ValidatorSig[] memory sigs = new ChainRegistry.ValidatorSig[](2);
+        sigs[0] = _makeValidatorSigAt(
+            bobKey,
+            bob,
+            CANONICAL,
+            CONTENT_HASH,
+            true,
+            staking.validatorSetEpoch(),
+            issuedAt,
+            issuedAt + registry.MAX_VERDICT_TTL(),
+            wrongDomain
+        );
+        sigs[1] = _makeValidatorSigAt(
+            carolKey,
+            carol,
+            CANONICAL,
+            CONTENT_HASH,
+            true,
+            staking.validatorSetEpoch(),
+            issuedAt,
+            issuedAt + registry.MAX_VERDICT_TTL(),
+            wrongDomain
+        );
+
+        vm.expectRevert(abi.encodeWithSelector(ChainRegistry.InvalidSignature.selector, bob));
+        registry.finalizePackage(CANONICAL, sigs);
+    }
+
+    function test_verdictQuorumPolicyChangeInvalidatesBundle() public {
+        _stakeAsPublisher(alice);
+        _submitPackage(alice);
+        _joinValidator(bob);
+        _joinValidator(carol);
+
+        ChainRegistry.ValidatorSig[] memory sigs = new ChainRegistry.ValidatorSig[](2);
+        sigs[0] = _makeValidatorSig(bobKey, bob, CANONICAL, CONTENT_HASH, true);
+        sigs[1] = _makeValidatorSig(carolKey, carol, CANONICAL, CONTENT_HASH, true);
+
+        vm.prank(address(governance));
+        registry.setQuorum(75);
+
+        vm.expectRevert(abi.encodeWithSelector(ChainRegistry.InvalidSignature.selector, bob));
+        registry.finalizePackage(CANONICAL, sigs);
+    }
+
+    function test_verdictStaleEpochRejectedWhenActiveCountIsUnchanged() public {
+        _stakeAsPublisher(alice);
+        _submitPackage(alice);
+        _joinValidator(bob);
+        _joinValidator(carol);
+
+        uint256 signedEpoch = staking.validatorSetEpoch();
+        ChainRegistry.ValidatorSig[] memory sigs = new ChainRegistry.ValidatorSig[](2);
+        sigs[0] = _makeValidatorSig(bobKey, bob, CANONICAL, CONTENT_HASH, true);
+        sigs[1] = _makeValidatorSig(carolKey, carol, CANONICAL, CONTENT_HASH, true);
+
+        vm.prank(bob);
+        staking.initiateUnbonding();
+        uint256 replacementKey = uint256(keccak256("replacement-validator-key"));
+        _joinValidator(vm.addr(replacementKey));
+
+        assertEq(staking.activeValidatorCount(), 2, "active count should be unchanged");
+        assertEq(staking.validatorSetEpoch(), signedEpoch + 2, "membership epoch must advance twice");
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ChainRegistry.ValidatorSetEpochMismatch.selector,
+                signedEpoch,
+                signedEpoch + 2
+            )
+        );
+        registry.finalizePackage(CANONICAL, sigs);
+    }
+
+    function test_verdictPrematureIssuedAtRejected() public {
+        _stakeAsPublisher(alice);
+        _submitPackage(alice);
+        _joinValidator(bob);
+        _joinValidator(carol);
+
+        uint64 issuedAt = uint64(block.timestamp + 1);
+        ChainRegistry.ValidatorSig[] memory sigs = new ChainRegistry.ValidatorSig[](1);
+        sigs[0] = _makeValidatorSigAt(
+            bobKey,
+            bob,
+            CANONICAL,
+            CONTENT_HASH,
+            true,
+            staking.validatorSetEpoch(),
+            issuedAt,
+            issuedAt + 1 minutes,
+            registry.verdictDomainSeparator()
+        );
+
+        vm.expectRevert(
+            abi.encodeWithSelector(ChainRegistry.VerdictNotYetValid.selector, issuedAt)
+        );
+        registry.finalizePackage(CANONICAL, sigs);
+    }
+
+    function test_verdictExpiredAtBoundaryRejected() public {
+        _stakeAsPublisher(alice);
+        _submitPackage(alice);
+        _joinValidator(bob);
+        _joinValidator(carol);
+
+        uint64 issuedAt = uint64(block.timestamp);
+        uint64 expiresAt = issuedAt + 1 minutes;
+        ChainRegistry.ValidatorSig[] memory sigs = new ChainRegistry.ValidatorSig[](1);
+        sigs[0] = _makeValidatorSigAt(
+            bobKey,
+            bob,
+            CANONICAL,
+            CONTENT_HASH,
+            true,
+            staking.validatorSetEpoch(),
+            issuedAt,
+            expiresAt,
+            registry.verdictDomainSeparator()
+        );
+        vm.warp(expiresAt);
+
+        vm.expectRevert(abi.encodeWithSelector(ChainRegistry.VerdictExpired.selector, expiresAt));
+        registry.finalizePackage(CANONICAL, sigs);
+    }
+
+    function test_verdictOverlongValidityRejected() public {
+        _stakeAsPublisher(alice);
+        _submitPackage(alice);
+        _joinValidator(bob);
+        _joinValidator(carol);
+
+        uint64 issuedAt = uint64(block.timestamp);
+        uint64 expiresAt = issuedAt + registry.MAX_VERDICT_TTL() + 1;
+        ChainRegistry.ValidatorSig[] memory sigs = new ChainRegistry.ValidatorSig[](1);
+        sigs[0] = _makeValidatorSigAt(
+            bobKey,
+            bob,
+            CANONICAL,
+            CONTENT_HASH,
+            true,
+            staking.validatorSetEpoch(),
+            issuedAt,
+            expiresAt,
+            registry.verdictDomainSeparator()
+        );
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ChainRegistry.InvalidVerdictValidity.selector,
+                issuedAt,
+                expiresAt
+            )
+        );
+        registry.finalizePackage(CANONICAL, sigs);
+    }
+
+    function test_verdictReplayAcrossPackageRejected() public {
+        string memory secondCanonical = "npm:express@4.18.3";
+        _stakeAsPublisher(alice);
+        _submitPackage(alice);
+        vm.prank(alice);
+        registry.submitPackage(secondCanonical, CONTENT_HASH, IPFS_CID);
+        _joinValidator(bob);
+        _joinValidator(carol);
+
+        ChainRegistry.ValidatorSig[] memory sigs = new ChainRegistry.ValidatorSig[](2);
+        sigs[0] = _makeValidatorSig(bobKey, bob, CANONICAL, CONTENT_HASH, true);
+        sigs[1] = _makeValidatorSig(carolKey, carol, CANONICAL, CONTENT_HASH, true);
+        registry.finalizePackage(CANONICAL, sigs);
+
+        vm.expectRevert(abi.encodeWithSelector(ChainRegistry.InvalidSignature.selector, bob));
+        registry.finalizePackage(secondCanonical, sigs);
+    }
+
     function test_withdrawFeesUsesCallForContractRecipients() public {
         FeeReceiver receiver = new FeeReceiver();
         vm.deal(address(registry), 1 ether);
@@ -213,7 +542,14 @@ contract RegistryTest is Test {
         ChainRegistry.ValidatorSig[] memory sigs = new ChainRegistry.ValidatorSig[](2);
         sigs[0] = _makeValidatorSig(bobKey, bob, CANONICAL, CONTENT_HASH, true);
         // Carol's sig is garbled.
-        sigs[1] = ChainRegistry.ValidatorSig({ validator: carol, signature: bytes("bad-sig"), approved: true });
+        sigs[1] = ChainRegistry.ValidatorSig({
+            validator: carol,
+            signature: bytes("bad-sig"),
+            approved: true,
+            validatorSetEpoch: staking.validatorSetEpoch(),
+            issuedAt: uint64(block.timestamp),
+            expiresAt: uint64(block.timestamp + registry.MAX_VERDICT_TTL())
+        });
 
         vm.expectRevert();
         registry.finalizePackage(CANONICAL, sigs);
@@ -321,12 +657,15 @@ contract RegistryTest is Test {
     // ── Staking ───────────────────────────────────────────────────────────────
 
     function test_validatorUnbondingPeriod() public {
+        assertEq(staking.validatorSetEpoch(), 0);
         _joinValidator(bob);
         assertTrue(staking.isActiveValidator(bob));
+        assertEq(staking.validatorSetEpoch(), 1);
 
         vm.prank(bob);
         staking.initiateUnbonding();
         assertFalse(staking.isActiveValidator(bob));
+        assertEq(staking.validatorSetEpoch(), 2);
 
         // Can't withdraw during unbonding period.
         vm.prank(bob);
@@ -337,19 +676,37 @@ contract RegistryTest is Test {
         vm.warp(block.timestamp + 15 days);
         vm.prank(bob);
         staking.withdrawValidatorStake(); // Should succeed now.
+        assertEq(staking.validatorSetEpoch(), 2, "withdrawal must not remove membership twice");
     }
 
     function test_slashAfterThreeOffences() public {
         _joinValidator(bob);
+        uint256 epochBefore = staking.validatorSetEpoch();
 
         // Three slashes auto-eject the validator.
         vm.startPrank(address(registry));
         staking.slash(bob, 1 * 10**18, "Offense 1");
+        assertEq(staking.validatorSetEpoch(), epochBefore, "non-ejecting slash changed epoch");
         staking.slash(bob, 1 * 10**18, "Offense 2");
+        assertEq(staking.validatorSetEpoch(), epochBefore, "non-ejecting slash changed epoch");
         staking.slash(bob, 1 * 10**18, "Offense 3");
         vm.stopPrank();
 
         assertFalse(staking.isActiveValidator(bob));
+        assertEq(staking.validatorSetEpoch(), epochBefore + 1);
+    }
+
+    function test_fullStakeSlashWithdrawsActiveValidatorAndAdvancesEpoch() public {
+        _joinValidator(bob);
+        uint256 epochBefore = staking.validatorSetEpoch();
+        (uint256 stake,,,,,) = staking.validators(bob);
+
+        vm.prank(address(registry));
+        staking.slash(bob, stake, "total stake loss");
+
+        (, Staking.ValidatorState state,,,,) = staking.validators(bob);
+        assertEq(uint8(state), uint8(Staking.ValidatorState.Withdrawn));
+        assertEq(staking.validatorSetEpoch(), epochBefore + 1);
     }
 
     // ── Reputation ───────────────────────────────────────────────────────────
@@ -501,28 +858,67 @@ contract RegistryTest is Test {
         bytes32 contentHash,
         bool approved
     ) internal view returns (ChainRegistry.ValidatorSig memory) {
-        bytes32 digest = keccak256(
-            abi.encodePacked(
-                "\x19Ethereum Signed Message:\n32",
-                keccak256(
-                    abi.encode(
-                        registry.VALIDATOR_SIGNATURE_DOMAIN(),
-                        block.chainid,
-                        address(registry),
-                        staking.activeValidatorCount(),
-                        registry.quorumPct(),
-                        canonical,
-                        contentHash
-                    )
-                )
+        uint64 issuedAt = uint64(block.timestamp);
+        return _makeValidatorSigAt(
+            privKey,
+            validator,
+            canonical,
+            contentHash,
+            approved,
+            staking.validatorSetEpoch(),
+            issuedAt,
+            issuedAt + registry.MAX_VERDICT_TTL(),
+            registry.verdictDomainSeparator()
+        );
+    }
+
+    function _makeValidatorSigAt(
+        uint256 privKey,
+        address validator,
+        string memory canonical,
+        bytes32 contentHash,
+        bool approved,
+        uint256 validatorSetEpoch,
+        uint64 issuedAt,
+        uint64 expiresAt,
+        bytes32 domainSeparator
+    ) internal view returns (ChainRegistry.ValidatorSig memory) {
+        bytes32 structHash = keccak256(
+            abi.encode(
+                registry.VERDICT_TYPEHASH(),
+                keccak256(bytes(canonical)),
+                contentHash,
+                approved,
+                validatorSetEpoch,
+                registry.quorumPct(),
+                issuedAt,
+                expiresAt
             )
         );
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(privKey, digest);
         return ChainRegistry.ValidatorSig({
             validator: validator,
             signature: abi.encodePacked(r, s, v),
-            approved:  approved
+            approved: approved,
+            validatorSetEpoch: validatorSetEpoch,
+            issuedAt: issuedAt,
+            expiresAt: expiresAt
         });
+    }
+
+    function _verdictDomain(uint256 chainId, address verifyingContract)
+        internal view returns (bytes32)
+    {
+        return keccak256(
+            abi.encode(
+                registry.EIP712_DOMAIN_TYPEHASH(),
+                registry.VERDICT_NAME_HASH(),
+                registry.VERDICT_VERSION_HASH(),
+                chainId,
+                verifyingContract
+            )
+        );
     }
 
     function test_batchSubmitPackagesViaAuthorizedRelay() public {

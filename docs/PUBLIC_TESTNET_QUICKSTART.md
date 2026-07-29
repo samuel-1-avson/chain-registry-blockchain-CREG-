@@ -208,10 +208,21 @@ The operator key is server-side only and must never enter a `VITE_*` variable,
 browser bundle, public proxy configuration, URL, or request body.
 `CREG_OPERATOR_PUBKEY` is public verification material and cannot authenticate
 either private authority route.
-Real
-npm/PyPI verifier sidecars, official trust material, reviewed policy/verifier
-artifacts, a signed activation spec, multi-operator rehearsal, and independent
-security review remain release gates.
+
+The validator-local evidence and official-artifact archive has one shared hard
+quota. Operators must explicitly size
+`CREG_NAMESPACE_AUTHORITY_ARCHIVE_MAX_BYTES` (default 10 GiB),
+`CREG_NAMESPACE_AUTHORITY_ARCHIVE_MAX_ENTRIES` (default 100,000), and
+`CREG_NAMESPACE_AUTHORITY_ARCHIVE_MIN_RETENTION_SECS` (default 365 days) for
+each data volume before enabling the private authority routes. A quota
+rejection is fail-closed; do not shorten retention or delete evidence merely
+to force an authority decision through. Monitor remaining bytes and entries,
+exercise pressure-GC and restore procedures, and account for any external
+legal-hold or evidence-retention requirements.
+
+Real production policy/trust material, an npm authentication-mode authority
+signal, reviewed verifier artifacts, a signed activation spec, multi-operator
+rehearsal, and independent security review remain release gates.
 
 Legacy CLI signing and `creg multisig` require the explicit
 `CREG_ALLOW_LEGACY_PUBLISHER_PROOF=true` escape hatch and are only for

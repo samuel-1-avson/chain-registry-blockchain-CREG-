@@ -1,0 +1,63 @@
+name: CR-07 Activation
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - ".github/workflows/cr07-activation.yml"
+      - "chain-registry/config/cr07-activation-manifest.json"
+      - "chain-registry/scripts/validate-cr07-activation.mjs"
+      - "chain-registry/scripts/validate-cr07-activation.test.mjs"
+      - "chain-registry/scripts/verify-authority-trust-candidates.mjs"
+      - "chain-registry/scripts/verify-authority-trust-candidates.test.mjs"
+      - "chain-registry/tools/authority-adapters/scripts/acquire-official-trust-candidates.py"
+      - "chain-registry/tools/authority-adapters/trust-candidates/**"
+      - "chain-registry/crates/common/src/chain_spec.rs"
+      - "chain-registry/testnet/**"
+      - "docs/security/KEY_MANAGEMENT.md"
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/cr07-activation.yml"
+      - "chain-registry/config/cr07-activation-manifest.json"
+      - "chain-registry/scripts/validate-cr07-activation.mjs"
+      - "chain-registry/scripts/validate-cr07-activation.test.mjs"
+      - "chain-registry/scripts/verify-authority-trust-candidates.mjs"
+      - "chain-registry/scripts/verify-authority-trust-candidates.test.mjs"
+      - "chain-registry/tools/authority-adapters/scripts/acquire-official-trust-candidates.py"
+      - "chain-registry/tools/authority-adapters/trust-candidates/**"
+      - "chain-registry/crates/common/src/chain_spec.rs"
+      - "chain-registry/testnet/**"
+      - "docs/security/KEY_MANAGEMENT.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: chain-registry
+
+jobs:
+  activation-gate:
+    name: Signed activation manifest
+    runs-on: ubuntu-latest
+
+    steps:
+      # actions/checkout v4.4.0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      # actions/setup-node v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+
+      - name: Run adversarial gate tests
+        run: |
+          node --test scripts/validate-cr07-activation.test.mjs
+          node --test scripts/verify-authority-trust-candidates.test.mjs
+
+      - name: Validate repository activation state
+        run: |
+          node scripts/validate-cr07-activation.mjs
+          node scripts/verify-authority-trust-candidates.mjs

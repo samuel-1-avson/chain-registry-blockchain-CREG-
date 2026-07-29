@@ -1,7 +1,7 @@
 # Chain Registry (CREG) Technical Whitepaper
 
 > Version: 0.3.0-public-alpha  
-> Date: 2026-07-28\
+> Date: 2026-07-29
 > Network: `creg-testnet-1` on Ethereum Sepolia  
 > Status: Public alpha testnet, not mainnet  
 > Related resources: Public testnet quickstart, Phase scope definitions, Readiness gates status, CREG_SYSTEM_WORKFLOW.md
@@ -18,7 +18,13 @@ CREG is not a promise that malicious code can never pass a registry. It is a pro
 
 ## 1. Executive Summary
 
-Chain Registry is a decentralized package-integrity network for software supply chains. Its first public alpha targets package publishers, developers, validators, and security researchers who want a verifiable package status layer across ecosystems such as npm, PyPI, Cargo, and similar registries.
+Chain Registry is designed as a decentralized package-integrity network for
+software supply chains. Its public alpha targets package publishers,
+developers, validators, and security researchers who want a verifiable package
+status layer across ecosystems such as npm, PyPI, Cargo, and similar
+registries. The recorded public-alpha topology currently has one validator and
+no bootnodes; it is a research deployment with no Byzantine fault tolerance,
+not evidence of operational decentralization.
 
 At scale (thousands of validators), full redundant analysis would be impractical. CREG therefore uses a **hybrid mandatory + voluntary committee model**:
 
@@ -36,9 +42,9 @@ This design bounds CPU, memory, and IPFS load while preserving the core security
 
 **Certified committee authority:** A new validator set is accepted only through a transition signed by a distinct prior-set quorum (`floor(2n/3)+1`). The certificate binds the effective height, prior block/fork anchor, both validator-set hashes, and the next set. Its stable logical transition ID excludes the replaceable signature list, so independently valid quorum subsets converge instead of creating false conflicts; every declared signature on ordinary transitions and descendants is verified and an exact witness digest remains available for audit. A pruned node uses its independently verified configured checkpoint object as the exact trust root and ignores, without peer penalty, a same-ID alternate witness it cannot verify without the preceding set. A committee assignment binds that transition ID, snapshot hash and height, selection randomness, seed, and ordered members; receivers derive the expected randomness from the exact anchor block's VRF output (or its hash fallback) and recompute the assignment rather than trusting the admitting node. Conflicting, replayed, expired, or fork-substituted authority records are rejected. Signed transition certificates propagate peer-to-peer, but every recipient validates the full witness, prior-set quorum, resource bounds, identity uniqueness, and local continuity before accepting ordinary gossip for propagation or persistence.
 
-**Weak subjectivity:** A fresh or rebuilt node may be configured with a known-good signed validator-set checkpoint. Once configured, committee authority is accepted only from a cryptographically continuous certificate history containing that exact checkpoint. Nodes can retrieve certified history from peers, compare canonical block anchors, and persist only an eligible fully validated prefix. A supplied pre-checkpoint prefix is verified from explicit bootstrap authority; if retention has pruned it, the exact independently verified checkpoint is the trust root and all supplied descendants must verify from that set. Security-sensitive local reads repeat this authentication instead of trusting structurally valid disk content. Checkpoint installation validates its entire certified tail before one atomic replacement, removes unsigned compatibility remnants, and leaves the prior file untouched if any descendant is invalid. History writes are serialized, checkpoint ancestry is retained beyond the compatibility pruning cap, and reorg recovery truncates certificates anchored beyond the canonical ancestor. This is a deployment trust anchor, not a centralized validator role. `CREG_REQUIRE_CERTIFIED_COMMITTEES=true` enables fail-closed admission when no checkpoint-anchored authority exists. The public alpha has not yet published a real independently verified checkpoint or completed the live multi-operator long-range/reorg rehearsal; this mode is therefore a readiness control, not a claim that testnet security is complete.
+**Weak subjectivity:** A fresh or rebuilt node may be configured with a known-good signed validator-set checkpoint. Once configured, committee authority is accepted only from a cryptographically continuous certificate history containing that exact checkpoint. Nodes can retrieve certified history from peers, compare canonical block anchors, and persist only an eligible fully validated prefix. A supplied pre-checkpoint prefix is verified from explicit bootstrap authority; if retention has pruned it, the exact independently verified checkpoint is the trust root and all supplied descendants must verify from that set. Security-sensitive local reads repeat this authentication instead of trusting structurally valid disk content. Checkpoint installation validates its entire certified tail before one atomic replacement, removes unsigned compatibility remnants, and leaves the prior file untouched if any descendant is invalid. History writes are serialized, checkpoint ancestry is retained beyond the compatibility pruning cap, and reorg recovery truncates certificates anchored beyond the canonical ancestor. This is a deployment trust anchor, not a centralized validator role. `CREG_REQUIRE_CERTIFIED_COMMITTEES=true` enables fail-closed admission when no checkpoint-anchored authority exists. A repository publication/verification CLI, fail-closed anchor template, operator procedure, and CI gate now pass 11/11 adversarial/CLI tests over supplied quorum, anchor, freshness, evidence-signature, replay, rollback, and lineage inputs. The tool neither queries the chain nor creates a certificate, key, or canonical observation. The public alpha has not published a real independently verified checkpoint or completed the live multi-operator long-range/reorg rehearsal; no real checkpoint or key was fabricated for this evidence.
 
-**Authoritative package namespace ownership (CR-07):** Post-activation first claims use a chain/genesis-bound v4 publisher authorization and a v2 npm/PyPI authority certificate rather than first-submitter ownership. The proposed controller signs a fresh, artifact-independent intent; each attesting validator separately fetches bounded official evidence and artifact bytes, verifies exact intent inclusion through a hash-pinned sidecar outside consensus, and signs a statement bound to the signed-spec policy and a recent canonical validator-set anchor. A preceding-set `floor(2n/3)+1` quorum certificate is retained with the transaction, so consensus, restart, rebuild, and reorg validation remain deterministic and perform no live registry request. Production verifier/trust/policy artifacts, an official npm trusted-publisher authentication-mode signal, a signed activation/checkpoint, operator rehearsal, and independent review remain open gates.
+**Authoritative package namespace ownership (CR-07):** Post-activation first claims use a chain/genesis-bound v4 publisher authorization and a v2 npm/PyPI authority certificate rather than first-submitter ownership. The proposed controller signs a fresh, artifact-independent intent; each attesting validator separately fetches bounded official evidence and artifact bytes, verifies exact intent inclusion through a hash-pinned sidecar outside consensus, and signs a statement bound to the signed-spec policy and a recent canonical validator-set anchor. A preceding-set `floor(2n/3)+1` quorum certificate is retained with the transaction, so consensus, restart, rebuild, and reorg validation remain deterministic and perform no live registry request. Repository controls now include validator-local archive quotas/minimum retention/pressure-GC and an 11/11-tested signed activation-manifest gate whose checked-in state is deliberately disabled. The archive passes 7/7 Windows tests, adapter and lifecycle/API filters pass 10/10 and 6/6, and the complete node suite passes 209/209. Cryptographic npm and PyPI candidate suites pass 20 and 29 tests respectively, each with one deliberately skipped external production fixture. These are not production verifier or rollout evidence: npm lacks an official trusted-publisher authentication-mode signal; PyPI still requires the node's private-temp launch contract and a fresh frozen build; both lack reviewed production trust/policy material, positive fixtures, signed activation, operator rehearsal, and independent review.
 
 Committee selection at admission uses VRF-seeded deterministic ordering further biased by on-chain stake, reputation, and **performance_score** (a moving-average signal of demonstrated analysis reliability, with decay after repeated contributions). The full `AnalysisCommittee` (including `member_performance_at_finalization` snapshot captured at package finalization) is stored immutably in the `ChainRecord` and exposed via CLI (`creg chain-record`) and API. On Verified finalization the pipeline emits `distributeWorkRewards(..., isMandatory[])` to `ValidatorRewards.sol`; successful emission also applies a small performance boost to mandatory participants, closing the incentive/selection feedback loop. Points awarded per contribution are 25 (mandatory) or 10 (voluntary) base, ×1.2 for correct vote, ×(rep/100). Base per-package reward is deliberately low (0.00001 CREG) with correct-vote bonus.
 
@@ -49,12 +55,18 @@ CREG combines:
 - Content-addressed submission (IPFS CIDs + SHA-256) + publisher/validator staking on Sepolia.
 - Multi-stage pipeline (static, sandbox, diff, signals, PGP, reputation, advisory LLM) with deterministic consensus-grade evidence.
 - Hybrid mandatory+voluntary committees (target M=100, VRF-seeded + stake/rep/performance bias, per-eth cap) with at-finalization performance snapshots stored in ChainRecord.
-- PBFT block finality + package vote accumulator; optional L1 anchoring + ZK paths.
+- PBFT block finality + package vote accumulator; Sepolia staking/governance
+  experiments. The legacy L1 batch checkpoint and package-ZK qualification
+  paths are retired.
 - Work-based incentives: analysis rewards via L1 `distributeWorkRewards(..., isMandatory[])` (base 0.00001 CREG + bonuses, points 25/10×1.2, performance decay + L1 feedback) + separate PinningRewards (size×days×rate×popularity×reliability).
 - Treasury-funded (governance mints), with emission counters, treasury addr, `last_incentives_refresh` timestamp, total distributed, pool balance, and pending estimate exposed in runtime config, profiles, /metrics, and refreshed by background task + on-demand.
 - Public alpha with signed specs, documented limits, runbooks, and gates.
 
-Targeted hardenings (ZK circuit content-limb binding enforcement + on-chain assert, bridge merkle/robustness fixes, enforceFinalizeRelays=true default in Registry, BatchOperations notes, gossip/vote guards, etc.) have been applied; full iteration status and micro-step details are tracked in §15 of CREG_SYSTEM_WORKFLOW.md.
+Targeted hardenings include retired ZK qualification with retained circuit
+binding regression checks, bridge parsing/commitment fixes without a validity-
+rollup claim, `enforceFinalizeRelays=true` by default, epoch-bound EIP-712
+contract signatures under active verification, and gossip/vote guards. Full
+status and residual gates are tracked in §15 of CREG_SYSTEM_WORKFLOW.md.
 
 The design goal is practical: a developer should be able to ask, "Was this exact package artifact verified by a quorum of accountable validators, under which rules, with which evidence, and is the content still available?"
 
@@ -175,7 +187,12 @@ CR-07 separates upstream ecosystem verification from deterministic consensus:
    `creg-evidence:sha256:<digest>` and artifact bytes under
    `CREG_DATA_DIR/authority-artifacts/<sha256|sha512>/<prefix>/<digest>.bin`,
    then signs an authority statement bound to a recent canonical block and its
-   authenticated validator-set hash.
+   authenticated validator-set hash. Repository code applies shared byte and
+   entry quotas to the pair, protects it with one process-local mutation lock,
+   collects only oldest retention-eligible content under pressure, and fails
+   closed when capacity cannot be reclaimed. It does not coordinate multiple
+   processes on a shared filesystem or provide deployment capacity alerts,
+   backups/restore, disaster recovery, or legal-retention compliance.
 5. A caller assembles matching signatures from the preceding validator set.
    The `floor(2n/3)+1` certificate is attached to the final v4 first claim or
    recovery authorization. Consensus verifies its policy pins, validity,
@@ -217,14 +234,32 @@ by default. They require
 network and remain unavailable when `CREG_PRODUCTION=true`.
 
 The mechanism is implemented as a fail-closed protocol boundary, not a claim
-of production upstream authority. Reviewed production npm/PyPI verifier
-binaries, official trust material, signed policy bundles, the npm
-authentication-mode signal, a versioned signed activation/checkpoint, live
-operator rehearsal, and independent security review are still required.
+of production upstream authority. The signed activation-manifest gate passes
+11/11 while the checked-in manifest keeps every operational spec disabled.
+Cryptographic npm and PyPI verifier candidates are now checked in: the npm
+suite passes 20 tests with one external production fixture skipped, and the
+PyPI suite passes 29 tests with one external production fixture skipped.
+Same-target self-contained npm SEA and PyPI PyInstaller builds were reproduced
+byte-for-byte locally. Those results do not supply production trust.
+
+The npm verifier remains deliberately unable to return success because
+official npm evidence does not distinguish OIDC trusted publishing from a
+token-based publish that merely requested provenance. The frozen PyPI Windows
+candidate requires a fresh private per-invocation temp directory; the current
+cleared Rust child environment does not yet provide it. Reviewed production
+policy/root material, live positive fixtures, target-platform artifacts, a
+real production-signed activation manifest/spec, operator rehearsal, and
+independent security review are still required.
+
 Production deployment must also place each verifier in an unprivileged,
 network-denied, resource-bounded OS sandbox with immutable executable, policy,
-and trust mounts, close the hash-check-to-launch replacement window, and apply
-archive retention, quota, and reviewed garbage collection.
+and trust mounts and close the hash-check-to-launch replacement window.
+Repository archive quota/retention/pressure-GC controls are implemented.
+Seven focused archive tests pass on Windows; the Unix-only symlink case was not
+exercised on that platform. The complete node suite passes 209/209 and the CLI
+suite passes 41/41; the full Rust workspace/all-target run and post-run rustfmt
+verification remain pending. Shared-filesystem coordination, capacity alerts,
+backup/restore, disaster recovery, and legal-retention review remain external.
 
 ### 5.3 Validation Path
 
@@ -407,7 +442,7 @@ The lifecycle is:
 
 1. An applicant stakes at least the validator minimum and enters `Pending`.
 2. Active validators independently evaluate the applicant against a deterministic rule set: stake present, identity registered, cooldown respected, application not expired, and rule-set version current.
-3. If the applicant passes, each active validator signs an EIP-712 admission attestation over `(applicant, stake, nonce, ruleSetVersion)`.
+3. If the applicant passes, each active validator signs an EIP-712 admission attestation over `(applicant, stake, nonce, ruleSetVersion, validatorSetEpoch)`.
 4. Attestations are broadcast between nodes.
 5. Any node with at least two thirds of the active set can submit the sorted attestation bundle to `Staking.approveByConsensus`.
 6. The contract verifies signer activity, sorted unique signers, signature recovery, nonce freshness, pending state, application timeout, and quorum before activating the validator.
@@ -420,6 +455,7 @@ On-chain invariants include:
 | Applicant stake must meet `minValidatorStake` | Keeps validator admission economically bonded |
 | Application must be inside `APPLICATION_TIMEOUT` | Prevents stale approvals from being replayed later |
 | Nonce must be unused for the applicant | Prevents replay of an old quorum bundle |
+| Signed validator-set epoch must equal the live epoch | Invalidates a bundle after any active membership change, including a remove/add sequence that restores the same count |
 | Signers must be active validators | Prevents inactive or external accounts from counting |
 | Signers must be strictly sorted | Prevents duplicate signers in an O(n) contract check |
 | Each signature must recover to its declared signer | Prevents forged attestations |
@@ -496,7 +532,13 @@ Small cluster behavior is intentionally conservative: a three-validator set requ
 
 ### 9.5 Optional L1 Package Finalization
 
-The Solidity `Registry.finalizePackage` path verifies active validator ECDSA signatures over the package canonical id and content hash. It then requires approvals above `quorumPct`, which defaults to 67%. This path is separate from the local Ed25519 package vote accumulator, but it expresses the same idea at the L1 contract boundary: package finalization must be backed by a threshold of active validators.
+The upgraded Solidity `Registry.finalizePackage` source verifies EIP-712
+`PackageVerdict` signatures. Each signature binds the chain and Registry
+deployment, canonical package key, content hash, approve/reject decision,
+exact monotonic `Staking.validatorSetEpoch`, current `quorumPct`, and an
+`issuedAt`/`expiresAt` interval no longer than 15 minutes. The signer must
+remain active and the signed epoch/policy must still be current. This path is
+separate from the local Ed25519 package vote accumulator.
 
 The contract-level required approvals are:
 
@@ -504,7 +546,11 @@ The contract-level required approvals are:
 required = (activeValidators * quorumPct) / 100 + 1
 ```
 
-The current default `quorumPct` is 67, and governance can update the value within contract bounds.
+The current default `quorumPct` is 67, and governance can update the value
+within contract bounds. Because the policy value is signed, a governance
+change invalidates outstanding verdict bundles. This is a research-alpha ABI
+change: deployed bytecode, signers, and relayers require a coordinated reviewed
+upgrade before this source behavior exists on a network.
 
 ### 9.6 Validator Set
 
@@ -518,11 +564,11 @@ CREG uses Ethereum Sepolia for the public alpha contract layer. The contract sys
 | --- | --- |
 | `CregToken.sol` | ERC-20-like CREG token with hard cap and permit support |
 | `Staking.sol` | Publisher/validator stake, validator lifecycle, unbonding, slashing |
-| `Registry.sol` | L1 package lifecycle, finalize/revoke paths, ZK proof entry points |
+| `Registry.sol` | L1 package lifecycle and EIP-712 finalize/revoke paths; retained ZK entry point reverts |
 | `Governance.sol` | M-of-N governance, emergency pause, controlled administrative execution |
 | `Reputation.sol` | Validator/publisher scoring signals |
 | `Appeal.sol` | On-chain appeal mechanics for contested rejections |
-| `ZKVerifier.sol` / `Groth16Verifier.sol` | Groth16 verification path |
+| `ZKVerifier.sol` / `Groth16Verifier.sol` | Retained experimental Groth16 verifier; not an active package-qualification trust path |
 
 The active Sepolia addresses are published in the active network specifications and summarized in the public quickstart guide. Contract and ZK systems must complete external security review before they are used for mainnet economic claims.
 
@@ -688,13 +734,18 @@ The whitepaper intentionally does not claim a finalized emission schedule or APY
 
 ### 11.8 Fees And Treasury Flows
 
-The current `Registry.sol` includes a ZK validation fee path:
+The current `Registry.sol` retains a legacy `zkValidationFee` storage value for
+ABI and migration analysis:
 
 | Fee | Current value | Asset |
 | --- | ---: | --- |
-| `zkValidationFee` | 0.001 ETH | Sepolia ETH in public alpha |
+| `zkValidationFee` | 0.001 ETH | Legacy configured value; not an active public-alpha package fee |
 
-This fee is paid to the registry contract for ZK proof submission paths and can be withdrawn by governance. It is separate from CREG staking and does not define a general protocol fee model.
+The package ZK qualification entry point now reverts and shipped chain
+specifications set `zk_validation:false`, so users cannot currently pay this
+fee to qualify a package. Any balance already held by the Registry remains
+subject to its governance withdrawal path. This legacy value is separate from
+CREG staking and does not define a general protocol fee model.
 
 The treasury allocation and unminted reserve are intended to support:
 
@@ -772,17 +823,24 @@ The intended future model is:
 
 This path requires additional implementation, audit, key-management design, and operational review before it can be represented as a production privacy feature.
 
-## 15. ZK System
+## 15. ZK Research Surface
 
-CREG uses Groth16 proof infrastructure for two categories:
+The repository retains Groth16 proof infrastructure for research and migration
+analysis:
 
 | Circuit / proof area | Intended role |
 | --- | --- |
-| Package validation attestations | Prove selected package-safety constraints without revealing all package contents |
-| Double-sign evidence | Prove conflicting validator votes for slashing workflows |
-| Rollup batch proofing | Support L1 anchoring of CREG chain state transitions |
+| Package validation attestations | Experimental circuit; not an active package-qualification path |
+| Double-sign evidence | Experimental proof design for conflicting validator votes |
+| Legacy batch proofing | Retired settlement experiment; not a state-transition validity proof |
 
-ZK is powerful but security-sensitive. The current public alpha treats ZK as active infrastructure and experimental proof support, not a substitute for external audit. Trusted setup, verification-key management, circuit constraints, and contract bindings must be reviewed before ZK proofs become a primary production trust root.
+The current package circuit constrains its content and manifest hash limbs, but
+that fact does not prove malware safety or a CREG state transition. The
+Registry qualification and legacy checkpoint entry points revert, and every
+shipped chain specification disables ZK validation. ZK is therefore not a
+public-alpha trust root. Any future use requires a dedicated protocol decision,
+circuit and contract audit, trusted-setup and verification-key review,
+reproducible proving/verifying tests, and precise public-input semantics.
 
 ## 16. Security Model
 
@@ -809,10 +867,11 @@ ZK is powerful but security-sensitive. The current public alpha treats ZK as act
 | Validator cartel above quorum threshold | Reduced by staking, transparency, and diversity; not eliminated |
 | Novel malware missed by scanners | Reduced by defense in depth; not eliminated |
 | L1 contract bug before audit | SEC-401 external audit is open; targeted hardenings applied (ZK content-limb binding + assert, enforceFinalizeRelays default true, bridge parse robustness + safety, Batch notes) |
-| ZK circuit or trusted setup flaw | Requires dedicated ZK audit and key-management review; circuit now binds content/manifest hashes; on-chain assert strengthened to match |
-| Long-range sync attacks | Signed transition history, exact checkpoint matching, canonical-anchor checks, and fail-closed certified mode are implemented; a real published checkpoint and live multi-operator long-range/reorg rehearsal remain required |
+| ZK circuit or trusted setup flaw | Current local Foundry passes 111/111 and the circuit binds content/manifest hashes, but dedicated ZK audit, immutable dependency pinning, reproducibly clean CI, and key-management review remain |
+| Long-range sync attacks | Signed transition history, exact checkpoint matching, canonical-anchor checks, fail-closed certified mode, and an 11/11-tested publication/verification gate are implemented in repository; a real independently verified checkpoint and live multi-operator long-range/reorg rehearsal remain required |
 | IPFS unavailability | Requires redundant pinning and monitoring; PinningRewards + sidecar status now active |
-| Upstream namespace-verifier compromise or ambiguous npm authentication mode | Protocol pins verifier/policy/trust hashes and quorum-certifies observations, but reviewed production artifacts and an official npm trusted-publisher authentication-mode signal remain required |
+| Upstream namespace-verifier compromise or ambiguous npm authentication mode | Protocol pins verifier/policy/trust hashes and quorum-certifies observations, but reviewed production artifacts remain required and the official npm trusted-publisher authentication-mode signal is externally unavailable |
+| Namespace-authority archive exhaustion or unsafe sharing | Repository byte/entry quotas, minimum retention, and pressure-GC fail closed locally; locking is process-local, while deployment sizing/alerts, backups/restore, disaster recovery, shared-filesystem coordination, and legal retention remain external |
 | Legal/regulatory uncertainty | Requires jurisdiction-specific review before token or mainnet programs |
 
 ## 17. Standards And Research Alignment
@@ -893,7 +952,7 @@ For exact dependency versions and transitive packages, consult the project manif
 | [Tendermint-family BFT concepts](https://docs.tendermint.com/master/spec/consensus/consensus.html) | Reference model for validator quorum and finality language | BFT consensus documentation |
 | [Ed25519](https://ed25519.cr.yp.to/) / [ed25519-dalek](https://docs.rs/ed25519-dalek/latest/ed25519_dalek/) | Package signatures, validator votes, PBFT phase signatures | Edwards-curve digital signatures and Rust implementation |
 | [SHA-2](https://csrc.nist.gov/projects/hash-functions) | Content and evidence hashing through `sha2` | NIST hash function family |
-| [Groth16](https://eprint.iacr.org/2016/260) | ZK proof infrastructure for package attestations and rollup paths | zk-SNARK proving system |
+| [Groth16](https://eprint.iacr.org/2016/260) | Retained experimental circuits for package attestations, double-sign evidence, and legacy checkpoint research | zk-SNARK proving system |
 | [BN254](https://eips.ethereum.org/EIPS/eip-196) | Ethereum-compatible pairing curve for Groth16 verifier paths | EVM precompile-supported pairing curve |
 | [arkworks](https://arkworks.rs/) | Rust Groth16, BN254, R1CS, serialization libraries | Rust zkSNARK ecosystem |
 | [Circom](https://docs.circom.io/) | Circuit sources for package and double-sign experiments | ZK circuit language |
@@ -969,11 +1028,11 @@ CREG is an original protocol implementation that composes open protocols, open-s
 
 ## 19. Public Alpha Status
 
-As of 2026-07-28, CREG is in public alpha testnet scope. (See CREG_SYSTEM_WORKFLOW.md §15 for the living architecture improvement log.)
+As of 2026-07-29, CREG is in public alpha testnet scope. (See CREG_SYSTEM_WORKFLOW.md §15 for the living architecture improvement log.)
 
 | Area | Current public-alpha status |
 | --- | --- |
-| Public API | Live at `https://api.testnet.cregnet.dev` |
+| Public API | Intended endpoint `https://api.testnet.cregnet.dev`; fleet may be paused, so operators/users must check `TESTNET_STATUS.md` |
 | Network | `creg-testnet-1` on Sepolia |
 | Release binaries | `v0.1.1-testnet` referenced by public docs |
 | Real sandbox | Public readiness gate passed with `nsjail` profile |
@@ -981,7 +1040,9 @@ As of 2026-07-28, CREG is in public alpha testnet scope. (See CREG_SYSTEM_WORKFL
 | IPFS availability checks | Public readiness gate passed |
 | Incident response runbook | Drafted and linked in docs |
 | External audit | SEC-401 scope ready; vendor/start date TBD |
-| CR-07 namespace authority | Deterministic v4 lifecycle and v2 certificate boundary are implemented in repository source; production npm/PyPI verifier/trust/policy artifacts, npm authentication-mode signal, signed activation/checkpoint, rehearsal, and independent review remain gates |
+| Contract tests | Local pinned-solc Foundry run passes 12 suites and 111 tests (0 failed/skipped), including 1000-run fuzz cases; compiler warnings, immutable dependency pinning, and clean-checkout CI remain |
+| CR-07 namespace authority | Deterministic v4 lifecycle, v2 certificate boundary, local archive limits, real cryptographic verifier candidates, and a disabled-by-default 11/11-tested activation gate are implemented. Node 209/209 and focused adapter/lifecycle/archive tests pass. npm lacks an official authentication-mode signal; PyPI needs the private-temp launch integration/rebuild; production trust/policy, positive fixtures, signed activation, rehearsal, deployment, and independent review remain gates |
+| Weak-subjectivity checkpoint | Publication/verification CLI, fail-closed template, operator procedure, and CI pass 11/11 synthetic adversarial/CLI tests; no real checkpoint/key, independent verification, fleet configuration, or deployment exists |
 | Mainnet | Not launched |
 
 The immediate public-alpha operating principle is simple: invite participation while keeping all public claims bounded by testnet status, known limitations, and audit state.
@@ -1026,9 +1087,15 @@ Key risks:
 - IPFS content must be pinned to remain retrievable.
 - L1 contract and ZK systems are not externally audited yet.
 - Authoritative npm/PyPI ownership is not production-ready until the pinned
-  verifier/trust/policy artifacts, official npm authentication-mode signal,
-  signed activation/checkpoint, operator rehearsal, and independent review are
-  complete.
+  verifier/trust/policy artifacts, a real production-signed activation
+  manifest/spec, operator rehearsal, and independent review are complete; the
+  official npm authentication-mode signal is externally unavailable.
+- Weak-subjectivity release tooling does not replace a real checkpoint,
+  independently controlled verification keys/canonical observations, or the
+  live multi-operator long-range/reorg rehearsal.
+- Namespace-authority archive limits are local repository controls, not
+  shared-filesystem coordination, capacity monitoring, backup/restore,
+  disaster recovery, legal-retention assurance, or deployment evidence.
 - Token parameters are alpha implementation details, not finalized mainnet economics.
 - Regulatory requirements may apply to any future token sale, public distribution, or mainnet launch.
 
@@ -1063,7 +1130,7 @@ The public alpha is already more than a concept: it includes a Rust node, CLI, c
 | Slash low | 2% |
 | Slash medium | 10% |
 | Slash critical | 30% |
-| ZK validation flag | Enabled in current spec (binding enforced) |
+| ZK validation flag | **Disabled in every shipped chain spec**; package qualification is retired |
 | ML validation flag | Enabled in current spec |
 | WASM sandbox flag | Enabled in current spec |
 | Cross-chain flag | Disabled |

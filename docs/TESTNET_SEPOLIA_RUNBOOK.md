@@ -82,7 +82,14 @@ This script:
 3. Signs the spec and writes `chain-spec.sepolia.json.sig`
 4. Verifies the signature
 
-**Signing key:** Use your org’s spec signing key via environment or CI — do not rely on any hardcoded dev key in local scripts for production publishes. For CI, configure `SPEC_SIGNING_KEY` as a GitHub secret and remove local hardcoding before production use.
+**Signing key:** Use a newly generated, independently controlled spec-signing
+key through an approved secret manager. The active scripts require
+`SPEC_SIGNING_KEY` and pass only its environment-variable name to the signing
+tool; raw private-key command arguments are prohibited. The development key
+formerly disclosed in repository scripts is permanently disallowed. Rotate
+`signing.signing_key_pubkey_hex`, recompute the genesis hash, sign the exact
+candidate, and verify it independently before mirroring or publishing. For CI,
+configure `SPEC_SIGNING_KEY` as an environment-protected GitHub secret.
 
 ### 3. Publish spec (operators)
 

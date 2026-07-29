@@ -145,12 +145,39 @@ Anchors: `GET /v1/bridge/anchors`. Reorgs: `GET /v1/reorgs`.
 
 Before enabling certified committee authority, independently verify a signed validator-set transition certificate: its effective height, prior block hash, prior/next validator-set hashes, and distinct `floor(2n/3)+1` prior-set signatures must all match the canonical chain view.
 
-1. Distribute that exact verified certificate out of band as `CREG_WEAK_SUBJECTIVITY_CHECKPOINT`.
-2. Put the single-line JSON value into the node's environment file, keep `CREG_REQUIRE_CERTIFIED_COMMITTEES=false`, and restart one observer canary.
-3. Compare `GET /v1/validator/set-transitions` on the canary and two independent peers. The checkpoint's logical transition ID and every descendant height/set hash must agree. Exact quorum-witness digests may differ when peers received different valid prior-set quorum subsets; verify every witness independently rather than requiring byte-identical signature lists.
-4. Rebuild the canary from an empty node data directory. Verify that it retrieves history only from a peer chain containing the exact configured checkpoint and rejects missing, conflicting, or fork-anchored history.
-5. Validate receipt of `creg/v1/validator-set-transitions`; every peer must independently reject replay conflicts, stale height, invalid quorum, and the wrong canonical-tip anchor.
-6. After a successful fleet rehearsal, enable `CREG_REQUIRE_CERTIFIED_COMMITTEES=true` on one admission canary, verify certified assignment proofs, and roll it out gradually.
+1. Each independent verifier retains its own canonical block observation and prepares the strict anchor format described in [`config/weak-subjectivity/README.md`](../config/weak-subjectivity/README.md). Do not use a block hash copied only from the checkpoint publisher.
+2. On an offline verification host, validate and sign an initial evidence record. Supply an independent Ed25519 evidence key; never reuse a validator, node, chain-spec, or deployment key:
+
+   ```powershell
+   node .\scripts\verify-weak-subjectivity-checkpoint.mjs publish `
+     --checkpoint .\checkpoint.json `
+     --previous-validator-set .\previous-validator-set.json `
+     --canonical-anchor .\canonical-anchor.json `
+     --max-anchor-age-blocks 1000 `
+     --verifier-id independent-operator-1 `
+     --verified-at 2026-07-29T12:00:00Z `
+     --evidence-signing-key X:\offline\checkpoint-evidence-key.pem `
+     --initial-release `
+     --output .\checkpoint-evidence.operator-1.json
+   ```
+
+   The age limit and timestamp above are examples, not network policy. Select and record the approved values for the actual rollout. The command refuses an existing output path.
+3. A second host verifies the record against the verifier key obtained out of band:
+
+   ```powershell
+   node .\scripts\verify-weak-subjectivity-checkpoint.mjs verify-evidence `
+     --evidence .\checkpoint-evidence.operator-1.json `
+     --trusted-verifier-public-key REPLACE_WITH_PINNED_LOWERCASE_ED25519_PUBLIC_KEY
+   ```
+
+   Repeat independently with the required operator set. Compare the logical transition ID and exact checkpoint environment hash in their signed records. The tool validates supplied evidence; it does not query the chain or declare an operator-supplied anchor canonical.
+4. Distribute the exact `checkpoint_env_json` from the approved signed record out of band as `CREG_WEAK_SUBJECTIVITY_CHECKPOINT`. Put that single-line value into the node environment, keep `CREG_REQUIRE_CERTIFIED_COMMITTEES=false`, and restart one observer canary.
+5. Compare `GET /v1/validator/set-transitions` on the canary and two independent peers. The checkpoint's logical transition ID and every descendant height/set hash must agree. Exact quorum-witness digests may differ when peers received different valid prior-set quorum subsets; verify every witness independently rather than requiring byte-identical signature lists.
+6. Rebuild the canary from an empty node data directory. Verify that it retrieves history only from a peer chain containing the exact configured checkpoint and rejects missing, conflicting, or fork-anchored history.
+7. Validate receipt of `creg/v1/validator-set-transitions`; every peer must independently reject replay conflicts, stale height, invalid quorum, and the wrong canonical-tip anchor.
+8. After a successful fleet rehearsal, enable `CREG_REQUIRE_CERTIFIED_COMMITTEES=true` on one admission canary, verify certified assignment proofs, and roll it out gradually.
+
+For a later checkpoint, every verifier supplies its own preceding signed record with `--predecessor-evidence` and its separately pinned signer key with `--trusted-predecessor-public-key`. The release gate rejects exact replay, same-height conflict, rollback, and a transition that does not directly descend from the last published validator authority. Publish every validator-set transition; do not skip an authority transition and then treat an unverified gap as lineage.
 
 The checkpoint is a bootstrap trust anchor, not a privileged validator role or an API override. Do not enable mandatory mode without the verified certificate and rehearsal evidence.
 
@@ -172,11 +199,18 @@ boundary compiles.
 
 ### Preconditions
 
-1. Obtain independently reviewed npm and PyPI verifier executables plus the
-   exact policy and trust-root bundles used to build them.
-2. Hash every executable, policy, and trust-root bundle. Put the authority,
-   adapter ID/version, verifier SHA-256, policy SHA-256, trust-root SHA-256,
-   and activation height in the chain spec consensus parameters.
+1. Obtain independently reviewed npm and PyPI self-contained verifier
+   executables plus the exact policy and trust-root bundles used to build them.
+   The generated Python `creg-pypi-authority-verifier` console launcher is not
+   eligible: its hash does not cover `sidecar.py`, the interpreter, or imported
+   packages. The repository's locked PyInstaller one-file recipe is a build
+   path, not a reviewed release; reproduce and review it separately for every
+   target operating system, architecture, and pinned CPython build.
+2. Hash every complete executable, policy, and trust-root bundle. Put the
+   authority, adapter ID/version, verifier SHA-256, policy SHA-256, trust-root
+   SHA-256, and activation height in the chain spec consensus parameters. If a
+   verifier is a directory or image rather than one self-contained file, stop:
+   the current Rust/config contract cannot pin it and must be extended first.
 3. Regenerate the versioned chain spec and genesis identity, sign it, and
    distribute it through the existing pinned spec-signing key path. Activation
    or policy values supplied only through
@@ -187,27 +221,51 @@ boundary compiles.
    | Variable | Initial rollout guidance |
    |----------|--------------------------|
    | `CREG_NAMESPACE_AUTHORITY_NPM_VERIFIER_PATH` | Empty until the reviewed npm verifier is mounted |
-   | `CREG_NAMESPACE_AUTHORITY_PYPI_VERIFIER_PATH` | Empty until the reviewed PyPI verifier is mounted |
+   | `CREG_NAMESPACE_AUTHORITY_PYPI_VERIFIER_PATH` | Empty until a reviewed self-contained PyPI artifact—not the generated Python console launcher—is mounted |
    | `CREG_NAMESPACE_AUTHORITY_VERIFIER_TIMEOUT_SECS` | Start at `30`; never exceed the protocol cap |
    | `CREG_NAMESPACE_AUTHORITY_MAX_EVIDENCE_BYTES` | Start at `2097152` |
    | `CREG_NAMESPACE_AUTHORITY_MAX_ARTIFACT_BYTES` | Start at `16777216`; hard maximum `67108864` |
    | `CREG_NAMESPACE_AUTHORITY_MAX_RESULT_BYTES` | Start at `65536` |
    | `CREG_NAMESPACE_AUTHORITY_MAX_CONCURRENT_VERIFICATIONS` | Start at `2`; hard maximum `4` |
+   | `CREG_NAMESPACE_AUTHORITY_ARCHIVE_MAX_BYTES` | Shared evidence/artifact quota; default `10737418240` (10 GiB) |
+   | `CREG_NAMESPACE_AUTHORITY_ARCHIVE_MAX_ENTRIES` | Shared file-count quota; default `100000` |
+   | `CREG_NAMESPACE_AUTHORITY_ARCHIVE_MIN_RETENTION_SECS` | Minimum pressure-GC age; default `31536000` (365 days) |
+
+   PyPI v2 hex-encodes both binary inputs. At the protocol hard maxima, the
+   artifact and evidence therefore occupy 144 MiB before JSON metadata; the
+   sidecar reserves a 145 MiB stdin ceiling. If limits are raised above the
+   defaults, size process memory for the canonical request, decoded bytes,
+   archive parser, and Sigstore verifier rather than treating the framing
+   ceiling as a safe memory budget.
 
 5. Run each verifier under a dedicated unprivileged identity and reviewed OS
    sandbox with outbound network denied, explicit CPU/memory/process limits,
    and read-only executable/policy/trust mounts. Hash pinning and an
    environment-cleared subprocess are not an OS sandbox. The deployment must
    also prevent executable replacement between hash verification and launch.
+   Before enabling the PyPI one-file artifact, the node must create a fresh
+   absolute private per-invocation directory below its data-dir scratch root,
+   export only the adapter protocol plus `TEMP`, `TMP`, and `TMPDIR` pointing
+   there, hold the directory through child exit, and remove it afterward. Use
+   mode `0700` or an equivalent service-only ACL; never preserve ambient temp
+   variables or grant write access to the verifier/policy/trust directory.
 6. Confirm that exact accepted evidence is stored below `CREG_DATA_DIR` under
    content-addressed references of the form
    `creg-evidence:sha256:<digest>`. The separately fetched official artifact
    must be stored at
    `authority-artifacts/<sha256|sha512>/<prefix>/<digest>.bin`, using SHA-512
    for npm and SHA-256 for PyPI. Bearer tokens must never enter either archive,
-   logs, or a certificate. Configure capacity alerts, retention, quota, and
-   reviewed garbage collection before accepting public traffic; the
-   repository writer does not supply a production archive quota.
+   logs, or a certificate. The node makes one locked quota decision for the
+   evidence/artifact pair, rejects corrupt existing entries, and rolls back
+   entries newly written by a failed pair operation. Under byte or entry-count
+   pressure it removes the oldest entries only after the configured minimum
+   retention age; the pair currently being attested is protected from that
+   collection. Crash-left `.tmp` entries become eligible after 24 hours.
+   Configure capacity alerts and an independently reviewed backup/legal
+   retention policy before accepting public traffic: this local pressure GC is
+   not an archival-compliance or disaster-recovery system. The mutation lock
+   is process-local; never point two node processes at the same
+   `CREG_DATA_DIR`.
 7. Generate a distinct high-entropy `CREG_OPERATOR_API_KEY` for each operator
    trust domain. Both authority routes require it through `X-Operator-Key` or
    `Authorization: Bearer`; a checked-in sample/default key is not acceptable.

@@ -4,8 +4,8 @@
 //
 // Every active validator independently evaluates a deterministic rule set
 // against each Pending applicant. If all rules pass, the validator signs an
-// EIP-712 attestation binding (applicant, stake, nonce, ruleSetVersion) and
-// broadcasts it to peers. Any node that has collected attestations from
+// EIP-712 attestation binding (applicant, stake, nonce, ruleSetVersion,
+// validatorSetEpoch) and broadcasts it to peers. Any node that has collected attestations from
 // ≥ 2/3 of the active set may submit the aggregated calldata to Staking's
 // `approveByConsensus` — in practice we let the lowest-address signer submit
 // so every node reaches the same conclusion without racing.
@@ -48,6 +48,7 @@ sol!(
         function APPLICATION_TIMEOUT() external view returns (uint256);
         function minValidatorStake() external view returns (uint256);
         function activeValidatorCount() external view returns (uint256);
+        function validatorSetEpoch() external view returns (uint256);
 
         function consensusNonceUsed(address applicant, uint256 nonce)
             external view returns (bool);
@@ -68,8 +69,7 @@ sol!(
 
 const DOMAIN_NAME: &str = "Chain Registry Validator Admission";
 const DOMAIN_VERSION: &str = "1";
-const STRUCT_TYPE: &str =
-    "ValidatorAdmission(address applicant,uint256 stake,uint256 nonce,uint256 ruleSetVersion)";
+const STRUCT_TYPE: &str = "ValidatorAdmission(address applicant,uint256 stake,uint256 nonce,uint256 ruleSetVersion,uint256 validatorSetEpoch)";
 const DOMAIN_TYPE: &str =
     "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)";
 
@@ -88,9 +88,23 @@ fn domain_separator(chain_id: u64, staking_addr: Address) -> B256 {
     keccak256(&encoded)
 }
 
-fn struct_hash(applicant: Address, stake: U256, nonce: U256, rule_set_version: U256) -> B256 {
+fn struct_hash(
+    applicant: Address,
+    stake: U256,
+    nonce: U256,
+    rule_set_version: U256,
+    validator_set_epoch: U256,
+) -> B256 {
     let type_hash = keccak256(STRUCT_TYPE.as_bytes());
-    let encoded = (type_hash, applicant, stake, nonce, rule_set_version).abi_encode();
+    let encoded = (
+        type_hash,
+        applicant,
+        stake,
+        nonce,
+        rule_set_version,
+        validator_set_epoch,
+    )
+        .abi_encode();
     keccak256(&encoded)
 }
 
@@ -101,9 +115,16 @@ fn admission_digest(
     stake: U256,
     nonce: U256,
     rule_set_version: U256,
+    validator_set_epoch: U256,
 ) -> B256 {
     let dsep = domain_separator(chain_id, staking_addr);
-    let shash = struct_hash(applicant, stake, nonce, rule_set_version);
+    let shash = struct_hash(
+        applicant,
+        stake,
+        nonce,
+        rule_set_version,
+        validator_set_epoch,
+    );
     let mut buf = Vec::with_capacity(66);
     buf.extend_from_slice(b"\x19\x01");
     buf.extend_from_slice(dsep.as_slice());
@@ -124,6 +145,8 @@ pub struct AdmissionAttestation {
     pub nonce: String,
     /// Rule-set version the signer evaluated against. Rejected if != on-chain.
     pub rule_set_version: String,
+    /// Exact on-chain active-set membership epoch used for this signature.
+    pub validator_set_epoch: String,
     /// Signer's EVM address.
     pub signer: String,
     /// 65-byte ECDSA signature (r||s||v), hex-encoded with 0x prefix.
@@ -134,6 +157,7 @@ pub struct AdmissionAttestation {
 struct AttestationKey {
     applicant: String,
     nonce: String,
+    validator_set_epoch: String,
 }
 
 impl AdmissionAttestation {
@@ -141,6 +165,7 @@ impl AdmissionAttestation {
         AttestationKey {
             applicant: self.applicant.to_ascii_lowercase(),
             nonce: self.nonce.to_ascii_lowercase(),
+            validator_set_epoch: self.validator_set_epoch.to_ascii_lowercase(),
         }
     }
 }
@@ -189,6 +214,7 @@ pub async fn sign_attestation(
     stake: U256,
     nonce: U256,
     rule_set_version: U256,
+    validator_set_epoch: U256,
 ) -> anyhow::Result<AdmissionAttestation> {
     let signer: PrivateKeySigner = priv_key.parse()?;
     let signer_addr = signer.address();
@@ -199,6 +225,7 @@ pub async fn sign_attestation(
         stake,
         nonce,
         rule_set_version,
+        validator_set_epoch,
     );
     let sig = signer.sign_hash(&digest).await?;
     let sig_bytes: [u8; 65] = sig.as_bytes();
@@ -207,6 +234,7 @@ pub async fn sign_attestation(
         stake: format!("0x{:x}", stake),
         nonce: format!("0x{:x}", nonce),
         rule_set_version: format!("0x{:x}", rule_set_version),
+        validator_set_epoch: format!("0x{:x}", validator_set_epoch),
         signer: format!("0x{:040x}", signer_addr),
         signature: format!("0x{}", hex::encode(sig_bytes)),
     })
@@ -223,9 +251,18 @@ pub fn verify_attestation(
     let stake = parse_u256(&att.stake)?;
     let nonce = parse_u256(&att.nonce)?;
     let rsv = parse_u256(&att.rule_set_version)?;
+    let validator_set_epoch = parse_u256(&att.validator_set_epoch)?;
     let claimed_signer: Address = att.signer.parse()?;
 
-    let digest = admission_digest(chain_id, staking_addr, applicant, stake, nonce, rsv);
+    let digest = admission_digest(
+        chain_id,
+        staking_addr,
+        applicant,
+        stake,
+        nonce,
+        rsv,
+        validator_set_epoch,
+    );
 
     let raw = hex_decode(&att.signature)?;
     if raw.len() != 65 {
@@ -234,6 +271,23 @@ pub fn verify_attestation(
     let sig = alloy::primitives::Signature::try_from(raw.as_slice())?;
     let recovered = sig.recover_address_from_prehash(&digest)?;
     Ok(recovered == claimed_signer)
+}
+
+/// Verify both the signature and its exact active-set membership epoch.
+///
+/// Callers must obtain `expected_validator_set_epoch` from the configured
+/// Staking contract. Treating a missing lookup as a default epoch would reopen
+/// same-size-set replay, so lookup failures are propagated instead.
+pub fn verify_attestation_for_epoch(
+    att: &AdmissionAttestation,
+    chain_id: u64,
+    staking_addr: Address,
+    expected_validator_set_epoch: U256,
+) -> anyhow::Result<bool> {
+    if parse_u256(&att.validator_set_epoch)? != expected_validator_set_epoch {
+        return Ok(false);
+    }
+    verify_attestation(att, chain_id, staking_addr)
 }
 
 fn parse_u256(s: &str) -> anyhow::Result<U256> {
@@ -409,6 +463,10 @@ async fn process_applicant(
         return Ok(());
     }
 
+    // The exact membership epoch is mandatory signing context. An RPC failure
+    // aborts this applicant tick rather than falling back to an epoch or count.
+    let signing_epoch = contract.validatorSetEpoch().call().await?._0;
+
     // ── Sign our own attestation (only if we are currently Active) ─────────
     if we_are_active {
         if let Some(pk) = ctx.bridge_priv.as_deref() {
@@ -420,13 +478,15 @@ async fn process_applicant(
                 stake,
                 nonce,
                 rule_set_version,
+                signing_epoch,
             )
             .await?;
             if store.insert(att.clone()).await {
                 tracing::info!(
-                    "admission: signed attestation for {} at nonce {}",
+                    "admission: signed attestation for {} at nonce {} and validator-set epoch {}",
                     applicant_key,
-                    nonce
+                    nonce,
+                    signing_epoch
                 );
                 broadcast_to_peers(&ctx.peer_urls, &att).await;
             }
@@ -437,13 +497,38 @@ async fn process_applicant(
     let snapshot_key = AttestationKey {
         applicant: applicant_key.to_ascii_lowercase(),
         nonce: format!("0x{:x}", nonce),
+        validator_set_epoch: format!("0x{:x}", signing_epoch),
     };
     let atts = store.snapshot(&snapshot_key).await;
 
-    // Keep only signatures that verify.
+    // A set transition after signing invalidates the entire candidate bundle,
+    // including transitions that return to the same active count.
+    if contract.validatorSetEpoch().call().await?._0 != signing_epoch {
+        return Ok(());
+    }
+
+    // Keep only signatures that verify and match every live application field.
     let verified: Vec<AdmissionAttestation> = atts
         .into_iter()
-        .filter(|a| verify_attestation(a, chain_id, ctx.staking_addr).unwrap_or(false))
+        .filter(|a| {
+            let matches_context = a
+                .applicant
+                .parse::<Address>()
+                .map(|value| value == applicant)
+                .unwrap_or(false)
+                && parse_u256(&a.stake)
+                    .map(|value| value == stake)
+                    .unwrap_or(false)
+                && parse_u256(&a.nonce)
+                    .map(|value| value == nonce)
+                    .unwrap_or(false)
+                && parse_u256(&a.rule_set_version)
+                    .map(|value| value == rule_set_version)
+                    .unwrap_or(false);
+            matches_context
+                && verify_attestation_for_epoch(a, chain_id, ctx.staking_addr, signing_epoch)
+                    .unwrap_or(false)
+        })
         .collect();
 
     // Keep only signers that are currently Active on-chain.
@@ -461,6 +546,11 @@ async fn process_applicant(
 
     // Quorum check: signers * 3 >= active * 2.
     let active_count = contract.activeValidatorCount().call().await?._0;
+    // Bracket the per-signer membership and count reads with the epoch. If the
+    // set changed while those reads were in flight, retry on the next tick.
+    if contract.validatorSetEpoch().call().await?._0 != signing_epoch {
+        return Ok(());
+    }
     if U256::from(filtered.len() as u64) * U256::from(3u64) < active_count * U256::from(2u64) {
         return Ok(());
     }
@@ -553,12 +643,19 @@ async fn broadcast_to_peers(peer_urls: &[String], att: &AdmissionAttestation) {
 
 pub async fn accept_peer_attestation(
     store: &AttestationStore,
-    chain_id: u64,
+    rpc_url: &str,
     staking_addr: Address,
     att: AdmissionAttestation,
 ) -> anyhow::Result<bool> {
-    if !verify_attestation(&att, chain_id, staking_addr)? {
-        anyhow::bail!("signature does not recover to declared signer");
+    let provider = ProviderBuilder::new().on_http(rpc_url.parse()?);
+    let contract = IStakingAdmission::new(staking_addr, &provider);
+    let chain_id = provider.get_chain_id().await?;
+    let current_epoch = contract.validatorSetEpoch().call().await?._0;
+
+    if !verify_attestation_for_epoch(&att, chain_id, staking_addr, current_epoch)? {
+        anyhow::bail!(
+            "signature is invalid or validator-set epoch is not the current on-chain epoch"
+        );
     }
     Ok(store.insert(att).await)
 }
@@ -614,6 +711,7 @@ mod tests {
             U256::from(123u64),
             U256::from(1u64),
             U256::from(1u64),
+            U256::from(7u64),
         )
         .await
         .expect("sign");
@@ -622,9 +720,21 @@ mod tests {
             .signer
             .eq_ignore_ascii_case(&format!("0x{:040x}", signer_addr)));
         assert!(verify_attestation(&att, 31337, staking).unwrap());
+        assert!(verify_attestation_for_epoch(&att, 31337, staking, U256::from(7u64)).unwrap());
+        assert!(
+            !verify_attestation_for_epoch(&att, 31337, staking, U256::from(8u64)).unwrap(),
+            "a cryptographically valid stale-set attestation must fail closed"
+        );
 
         // Flipping the chain_id must break recovery — the digest changes.
         assert!(!verify_attestation(&att, 1, staking).unwrap());
+
+        let mut tampered = att.clone();
+        tampered.validator_set_epoch = "0x8".to_owned();
+        assert!(
+            !verify_attestation(&tampered, 31337, staking).unwrap(),
+            "changing the signed epoch must break recovery"
+        );
     }
 
     #[tokio::test]
@@ -646,6 +756,7 @@ mod tests {
             U256::from(123u64),
             U256::from(1u64),
             U256::from(1u64),
+            U256::from(7u64),
         )
         .await
         .unwrap();
@@ -658,5 +769,47 @@ mod tests {
 
         let snap = store.snapshot(&att.key()).await;
         assert_eq!(snap.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn store_separates_same_signer_across_validator_set_epochs() {
+        let store = AttestationStore::new();
+        let pk = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+        let staking: Address = "0x000000000000000000000000000000000000dEaD"
+            .parse()
+            .unwrap();
+        let applicant: Address = "0x00000000000000000000000000000000000CAFEE"
+            .parse()
+            .unwrap();
+
+        let epoch_7 = sign_attestation(
+            pk,
+            31337,
+            staking,
+            applicant,
+            U256::from(123u64),
+            U256::from(1u64),
+            U256::from(1u64),
+            U256::from(7u64),
+        )
+        .await
+        .unwrap();
+        let epoch_8 = sign_attestation(
+            pk,
+            31337,
+            staking,
+            applicant,
+            U256::from(123u64),
+            U256::from(1u64),
+            U256::from(1u64),
+            U256::from(8u64),
+        )
+        .await
+        .unwrap();
+
+        assert!(store.insert(epoch_7.clone()).await);
+        assert!(store.insert(epoch_8.clone()).await);
+        assert_eq!(store.snapshot(&epoch_7.key()).await.len(), 1);
+        assert_eq!(store.snapshot(&epoch_8.key()).await.len(), 1);
     }
 }

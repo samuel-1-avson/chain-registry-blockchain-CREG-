@@ -158,15 +158,20 @@ An adapter MUST:
    provenance envelope or an operator assertion cannot supply that signal.
    The final CREG v4 authorization separately binds the proof/certificate and
    package bytes.
-5. Record the adapter/verifier version, executable hash, policy hash,
-   trust-root hash, canonical anchor, exact evidence digest, native artifact
-   digest, proof validity interval, and the verified npm authentication-mode
-   signal where applicable. Record local completion time only in the local
-   verifier audit trail. Exact evidence remains referenced as
+5. Record the adapter/verifier version, complete self-contained executable
+   hash, policy hash, trust-root hash, canonical anchor, exact evidence digest,
+   native artifact digest, proof validity interval, and the verified npm
+   authentication-mode signal where applicable. A generated Python launcher
+   hash is insufficient because it does not bind imported code or dependencies.
+   Record local completion time only in the local verifier audit trail. Exact
+   evidence remains referenced as
    `creg-evidence:sha256:<digest>`. Artifact bytes are archived under
    `CREG_DATA_DIR/authority-artifacts/<sha256|sha512>/<prefix>/<digest>.bin`;
    the algorithm/digest pair is their content address. Never persist bearer
-   tokens.
+   tokens. Evidence and artifact writes share one byte/entry quota decision;
+   quota-pressure garbage collection may remove only entries older than the
+   configured minimum retention period and must fail closed when it cannot
+   safely make room.
 
 The sidecar may return `verified_at` so the invoking validator can reject a
 stale or future local result. That completion time is not copied into the
@@ -189,20 +194,49 @@ policy, and trust-root SHA-256 digests. Environment variables cannot safely
 activate or replace these values; a node must fail startup if activation did
 not come from a signature-verified spec.
 
+`verifier_sha256` currently covers one file. That file must therefore be the
+complete reviewed verifier artifact. The generated PyPI Python console launcher
+is forbidden for production. Supporting a directory or container image instead
+requires the Rust/config contract to define, verify, and consensus-pin a
+deterministic bundle/image digest before launch; code imported after the current
+single-file check is otherwise outside the pin.
+
+The PyPI verifier has a locked PyInstaller one-file recipe whose two-clean-build
+gate produces identical bytes on the same target and whose output includes the
+implementation, CPython runtime, and dependencies. Hashes are
+platform/architecture/CPython-build specific and require independent review per
+target. The one-file bootloader also requires a fresh absolute private scratch
+directory: the node must export only the v2 protocol variable and
+`TEMP`/`TMP`/`TMPDIR` pointing to that directory, retain it until the child
+exits, and remove it. The current launcher does not yet implement that contract,
+so the recipe is not activation evidence.
+
 Validator-local environment variables only locate and bound the pinned
 processes:
 
 | Variable | Purpose |
 |----------|---------|
 | `CREG_NAMESPACE_AUTHORITY_NPM_VERIFIER_PATH` | Absolute npm verifier executable path |
-| `CREG_NAMESPACE_AUTHORITY_PYPI_VERIFIER_PATH` | Absolute PyPI verifier executable path |
+| `CREG_NAMESPACE_AUTHORITY_PYPI_VERIFIER_PATH` | Absolute self-contained PyPI verifier artifact path; generated Python launcher is development-only |
 | `CREG_NAMESPACE_AUTHORITY_VERIFIER_TIMEOUT_SECS` | Per-process deadline |
 | `CREG_NAMESPACE_AUTHORITY_MAX_EVIDENCE_BYTES` | Exact input evidence limit |
 | `CREG_NAMESPACE_AUTHORITY_MAX_ARTIFACT_BYTES` | Official artifact-byte limit; default 16 MiB, hard maximum 64 MiB |
 | `CREG_NAMESPACE_AUTHORITY_MAX_RESULT_BYTES` | Canonical verifier-output limit |
 | `CREG_NAMESPACE_AUTHORITY_MAX_CONCURRENT_VERIFICATIONS` | Per-node concurrency bound; default 2, hard maximum 4 |
+| `CREG_NAMESPACE_AUTHORITY_ARCHIVE_MAX_BYTES` | Shared local evidence/artifact byte quota; default 10 GiB |
+| `CREG_NAMESPACE_AUTHORITY_ARCHIVE_MAX_ENTRIES` | Shared local evidence/artifact file quota; default 100000 |
+| `CREG_NAMESPACE_AUTHORITY_ARCHIVE_MIN_RETENTION_SECS` | Minimum age for pressure-GC; default 365 days |
 | `CREG_OPERATOR_API_KEY` | High-entropy service ACL required by both authority POST routes |
 | `CREG_ALLOW_LEGACY_PUBLISHER_PROOF` | Explicit non-production, pre-activation CLI compatibility; default false and ineffective when `CREG_PRODUCTION=true` |
+
+Archive capacity and retention are validator-local availability policy. They
+do not enter authority statements or consensus identity, so independent
+operators may select different values without changing the bytes validators
+sign. A node that cannot retain an incoming pair fails that attestation closed.
+
+The normative signing, artifact, policy, trust, ceremony, rollout, and recovery
+requirements are defined in
+[CR-07 namespace-authority activation specification](./NAMESPACE_AUTHORITY_ACTIVATION.md).
 
 ## Required evidence
 

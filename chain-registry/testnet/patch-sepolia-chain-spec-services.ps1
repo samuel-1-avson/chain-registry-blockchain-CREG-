@@ -58,6 +58,7 @@ $sigPath = Join-Path $scriptDir "chain-spec.sepolia.json.sig"
 if (-not (Test-Path $specPath)) {
     throw "Missing $specPath"
 }
+$signingKeyEnvName = & (Join-Path $scriptDir "require-spec-signing-key.ps1") -SpecPath $specPath
 
 $nodeApiPort = if ($env:CREG_3NODE_NODE3_API_PORT) { $env:CREG_3NODE_NODE3_API_PORT } else { "28182" }
 $ipfsPort = if ($env:CREG_3NODE_IPFS_HOST_PORT) { $env:CREG_3NODE_IPFS_HOST_PORT } else { "15001" }
@@ -133,8 +134,7 @@ $specJson = $spec | ConvertTo-Json -Depth 30 -Compress
 Write-Host "genesis_hash = $($spec.genesis_hash)" -ForegroundColor Green
 
 Write-Host "Signing chain spec..." -ForegroundColor Cyan
-$privkey = "9d91e9e0d82a02b7be8c40a522d899eea9eeffad244323be3e568973211f3a6d"
-$sig = cargo run -q --example sign_chain_spec --package common -- $specPath $privkey 2>&1 | Select-Object -Last 1
+$sig = cargo run -q --example sign_chain_spec --package common -- $specPath --key-env $signingKeyEnvName 2>&1 | Select-Object -Last 1
 Set-Content -Path $sigPath -Value $sig.Trim() -NoNewline
 Write-Host "Wrote $sigPath" -ForegroundColor Green
 

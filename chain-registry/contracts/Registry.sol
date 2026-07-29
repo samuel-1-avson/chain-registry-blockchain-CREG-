@@ -54,8 +54,11 @@ contract ChainRegistry {
 
     struct ValidatorSig {
         address validator;
-        bytes   signature;         // ECDSA sig over domain + set snapshot + subject
+        bytes   signature;         // EIP-712 signature over the complete verdict
         bool    approved;
+        uint256 validatorSetEpoch;
+        uint64  issuedAt;
+        uint64  expiresAt;
     }
 
     struct ZKProofData {
@@ -108,8 +111,17 @@ contract ChainRegistry {
     /// When true, finalizePackage must be called by an authorized relay (testnet hardening).
     bool public enforceFinalizeRelays;
 
-    bytes32 public constant VALIDATOR_SIGNATURE_DOMAIN =
-        keccak256("CREG-REGISTRY-VALIDATOR-SIGNATURE-V2");
+    bytes32 public constant EIP712_DOMAIN_TYPEHASH =
+        keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
+    bytes32 public constant VERDICT_TYPEHASH = keccak256(
+        "PackageVerdict(bytes32 packageKey,bytes32 contentHash,bool approved,uint256 validatorSetEpoch,uint8 quorumPct,uint64 issuedAt,uint64 expiresAt)"
+    );
+    bytes32 public constant VERDICT_NAME_HASH = keccak256("CREG Package Verdict");
+    bytes32 public constant VERDICT_VERSION_HASH = keccak256("3");
+
+    /// Maximum lifetime of a validator verdict. A shorter validity interval is
+    /// allowed; a zero-length or future-dated interval is not.
+    uint64 public constant MAX_VERDICT_TTL = 15 minutes;
 
     /// Per-package validator signature replay guard (canonical key → validator → signed).
     mapping(bytes32 => mapping(address => bool)) public validatorSignedForPackage;
@@ -151,6 +163,10 @@ contract ChainRegistry {
     error NotAuthorizedFinalizeRelay();
     error AlreadyVerified(string canonical);
     error ValidatorAlreadySigned(address validator);
+    error ValidatorSetEpochMismatch(uint256 signedEpoch, uint256 currentEpoch);
+    error VerdictNotYetValid(uint64 issuedAt);
+    error VerdictExpired(uint64 expiresAt);
+    error InvalidVerdictValidity(uint64 issuedAt, uint64 expiresAt);
     error ZKQualificationRetired();
     error LegacyCheckpointingRetired();
 
@@ -315,15 +331,25 @@ contract ChainRegistry {
         if (rec.status == PackageStatus.Verified) revert AlreadyVerified(canonical);
         if (rec.status == PackageStatus.Revoked)  revert AlreadyRevoked(canonical);
 
+        uint256 currentValidatorSetEpoch = staking.validatorSetEpoch();
         uint activeValidators = staking.activeValidatorCount();
-        uint required = (activeValidators * quorumPct) / 100 + 1;
+        // quorumPct is a minimum percentage, so use ceiling division. The
+        // former floor-plus-one expression implemented a strict greater-than
+        // threshold and made 100% quorum impossible (N + 1 signatures).
+        uint required = activeValidators == 0
+            ? 1
+            : (activeValidators * uint256(quorumPct) + 99) / 100;
 
         // Verify each signature and count approvals.
         uint approvals;
-        bytes32 digest = _sigDigest(canonical, rec.contentHash);
 
         for (uint i = 0; i < sigs.length; i++) {
             ValidatorSig calldata s = sigs[i];
+
+            if (s.validatorSetEpoch != currentValidatorSetEpoch) {
+                revert ValidatorSetEpochMismatch(s.validatorSetEpoch, currentValidatorSetEpoch);
+            }
+            _assertVerdictValidity(s.issuedAt, s.expiresAt);
 
             // Validator must be staked and active.
             if (!staking.isActiveValidator(s.validator)) continue;
@@ -332,8 +358,17 @@ contract ChainRegistry {
                 revert ValidatorAlreadySigned(s.validator);
             }
 
-            // Verify a chain/contract/set-domain signature over the exact
-            // package subject. This prevents cross-deployment replay.
+            // EIP-712 binds the chain, this Registry deployment, package
+            // subject, decision, exact validator-set epoch, quorum policy, and
+            // bounded validity interval.
+            bytes32 digest = verdictMessageHash(
+                canonical,
+                rec.contentHash,
+                s.approved,
+                s.validatorSetEpoch,
+                s.issuedAt,
+                s.expiresAt
+            );
             address recovered = _recoverSigner(digest, s.signature);
             if (recovered != s.validator) revert InvalidSignature(s.validator);
 
@@ -539,25 +574,55 @@ contract ChainRegistry {
         return keccak256(abi.encodePacked(canonical));
     }
 
-    function _sigDigest(string memory canonical, bytes32 contentHash)
-        internal view returns (bytes32)
-    {
-        return keccak256(
-            abi.encodePacked(
-                "\x19Ethereum Signed Message:\n32",
-                keccak256(
-                    abi.encode(
-                        VALIDATOR_SIGNATURE_DOMAIN,
-                        block.chainid,
-                        address(this),
-                        staking.activeValidatorCount(),
-                        quorumPct,
-                        canonical,
-                        contentHash
-                    )
-                )
+    /// @notice Return the EIP-712 digest validators sign for a package verdict.
+    /// @dev `validatorSetEpoch` must be the exact current Staking epoch when the
+    /// verdict is submitted; `quorumPct` is read from this Registry so a policy
+    /// change also invalidates an outstanding bundle.
+    function verdictMessageHash(
+        string memory canonical,
+        bytes32 contentHash,
+        bool approved,
+        uint256 validatorSetEpoch,
+        uint64 issuedAt,
+        uint64 expiresAt
+    ) public view returns (bytes32) {
+        bytes32 structHash = keccak256(
+            abi.encode(
+                VERDICT_TYPEHASH,
+                keccak256(bytes(canonical)),
+                contentHash,
+                approved,
+                validatorSetEpoch,
+                quorumPct,
+                issuedAt,
+                expiresAt
             )
         );
+        return keccak256(abi.encodePacked("\x19\x01", verdictDomainSeparator(), structHash));
+    }
+
+    /// @notice EIP-712 domain separator for this chain and Registry deployment.
+    function verdictDomainSeparator() public view returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                EIP712_DOMAIN_TYPEHASH,
+                VERDICT_NAME_HASH,
+                VERDICT_VERSION_HASH,
+                block.chainid,
+                address(this)
+            )
+        );
+    }
+
+    function _assertVerdictValidity(uint64 issuedAt, uint64 expiresAt) internal view {
+        if (
+            expiresAt <= issuedAt
+                || uint256(expiresAt) - uint256(issuedAt) > uint256(MAX_VERDICT_TTL)
+        ) {
+            revert InvalidVerdictValidity(issuedAt, expiresAt);
+        }
+        if (uint256(issuedAt) > block.timestamp) revert VerdictNotYetValid(issuedAt);
+        if (uint256(expiresAt) <= block.timestamp) revert VerdictExpired(expiresAt);
     }
 
     function _assertPackageProofBinding(

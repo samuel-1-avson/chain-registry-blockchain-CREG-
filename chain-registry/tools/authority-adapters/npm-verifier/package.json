@@ -1,0 +1,29 @@
+{
+  "name": "@creg/npm-authority-verifier",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Offline, policy-pinned npm provenance pre-verifier for the CREG authority-adapter v2 boundary",
+  "type": "module",
+  "bin": {
+    "creg-npm-authority-verifier": "bin/creg-npm-authority-verifier.mjs"
+  },
+  "engines": {
+    "node": "^20.17.0 || >=22.9.0"
+  },
+  "scripts": {
+    "build:sea": "node scripts/build-sea.mjs",
+    "test": "node --test --test-reporter=spec",
+    "check": "node --check src/strict-json.mjs && node --check src/archive.mjs && node --check src/sidecar.mjs && node --check src/sea-entry.mjs && node --check bin/creg-npm-authority-verifier.mjs && node --check scripts/build-sea.mjs && npm test",
+    "pack:check": "npm pack --dry-run --ignore-scripts"
+  },
+  "dependencies": {
+    "@sigstore/bundle": "4.0.0",
+    "@sigstore/protobuf-specs": "0.5.1",
+    "@sigstore/verify": "3.1.1",
+    "npm-package-arg": "13.0.2"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.1",
+    "postject": "1.0.0-alpha.6"
+  }
+}

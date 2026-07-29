@@ -1,0 +1,60 @@
+name: Contract CI
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - ".github/workflows/contract-ci.yml"
+      - "chain-registry/contracts/**"
+      - "chain-registry/foundry.toml"
+      - "chain-registry/scripts/bootstrap-foundry-dependencies.sh"
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/contract-ci.yml"
+      - "chain-registry/contracts/**"
+      - "chain-registry/foundry.toml"
+      - "chain-registry/scripts/bootstrap-foundry-dependencies.sh"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+    working-directory: chain-registry
+
+jobs:
+  forge:
+    name: Foundry 1.7.1 / Solc 0.8.24
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        # actions/checkout v4.4.0
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Install pinned Foundry
+        # foundry-rs/foundry-toolchain v1.9.1
+        uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09
+        with:
+          version: v1.7.1
+
+      - name: Install pinned Solidity dependencies
+        run: bash scripts/bootstrap-foundry-dependencies.sh
+
+      - name: Record toolchain
+        run: |
+          forge --version
+          forge config --json
+
+      - name: Compile contracts
+        run: forge build --force --sizes
+
+      - name: Run unit and fuzz suites
+        run: forge test -vvv
+
+      - name: Produce gas report
+        run: forge test --gas-report
