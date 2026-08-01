@@ -91,6 +91,11 @@ jobs:
         shell: pwsh
         run: choco install protoc -y --no-progress
 
+      - name: Install protoc (macOS)
+        if: matrix.os == 'macos-latest'
+        shell: bash
+        run: brew list protobuf >/dev/null 2>&1 || brew install protobuf
+
       - name: Set deterministic build timestamp (Unix)
         if: matrix.os != 'windows-latest'
         shell: bash
