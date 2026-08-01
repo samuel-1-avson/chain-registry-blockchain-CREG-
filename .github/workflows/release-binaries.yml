@@ -66,7 +66,7 @@ jobs:
         include:
           - os: ubuntu-latest
             platform: linux-amd64
-          - os: macos-13
+          - os: macos-latest
             platform: macos-amd64
           - os: windows-latest
             platform: windows-amd64
@@ -85,6 +85,11 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             pkg-config libssl-dev build-essential clang llvm libclang-dev \
             cmake libopenblas-dev protobuf-compiler libprotobuf-dev
+
+      - name: Install protoc (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: choco install protoc -y --no-progress
 
       - name: Set deterministic build timestamp (Unix)
         if: matrix.os != 'windows-latest'
