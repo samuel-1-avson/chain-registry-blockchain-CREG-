@@ -37,6 +37,11 @@ export RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=${ROOT}=/creg"
 build_into() {
   local label="$1"
   local target_dir="$2"
+  # Reuse the exact same target path for both builds. Different target roots
+  # can leak into build-script metadata even with source path remapping; a
+  # clean rebuild at one canonical path tests reproducibility without that
+  # path-dependent noise.
+  rm -rf "$target_dir"
   CARGO_TARGET_DIR="$target_dir" cargo build --locked --release \
     --package chain-registry-cli \
     --package chain-registry-node
@@ -45,9 +50,10 @@ build_into() {
 }
 
 echo "release-assurance: build A (SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH})"
-build_into a "${ROOT}/target-release-assurance-a"
+TARGET_DIR="${ROOT}/target-release-assurance"
+build_into a "$TARGET_DIR"
 echo "release-assurance: build B"
-build_into b "${ROOT}/target-release-assurance-b"
+build_into b "$TARGET_DIR"
 
 if ! cmp -s "$ART/creg-a" "$ART/creg-b"; then
   echo "release-assurance: creg binaries differ between builds" >&2
