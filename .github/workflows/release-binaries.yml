@@ -1,235 +1,299 @@
-# Build and publish native release binaries for chain-registry-node.
-# Crate root: chain-registry/ (monorepo layout).
-
-name: Release Binaries
+name: Release CREG binaries
 
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
   workflow_dispatch:
     inputs:
-      tag:
-        description: 'Tag to build (e.g. v0.1.0-testnet)'
+      version:
+        description: "Release tag to build (for example v0.4.0-testnet)"
         required: true
         type: string
 
 permissions:
-  contents: write
-
-env:
-  CARGO_INCREMENTAL: 0
-  CARGO_NET_RETRY: 10
-  RUST_BACKTRACE: short
+  contents: read
 
 defaults:
   run:
     working-directory: chain-registry
 
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CREG_SPEC_SIGNING_PUBKEY: 3fe87833177b04b0a18600eace041692a35fb2b85f6e14e6734d894a0fd61c01
+  RELEASE_VERSION: ${{ inputs.version || github.ref_name }}
+
 jobs:
-  build-linux:
+  reproducibility:
+    name: Reproducible Linux release build
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
 
-      - name: Install system deps
+      - name: Install native build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             pkg-config libssl-dev build-essential clang llvm libclang-dev \
             cmake libopenblas-dev protobuf-compiler libprotobuf-dev
 
-      - name: Cache Cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            chain-registry/target
-          key: ${{ runner.os }}-cargo-release-${{ hashFiles('chain-registry/Cargo.lock') }}
-
-      - name: Set deterministic timestamp
+      - name: Set deterministic build timestamp
+        shell: bash
         run: echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> "$GITHUB_ENV"
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
+      - name: Build twice and compare release binaries
+        run: bash scripts/release-assurance.sh
 
-      - name: Build explorer UI (rust-embed input)
-        working-directory: chain-registry/explorer
-        run: |
-          if [ -f package-lock.json ]; then npm ci --no-fund --no-audit; else npm install --no-fund --no-audit; fi
-          npm run build
-
-      - name: Build release binaries
-        run: |
-          cargo build --locked --release --package chain-registry-node
-          cargo build --locked --release --package chain-registry-cli
-          strip target/release/creg-node target/release/creg
-
-      - name: Upload artifacts
+      - name: Upload reproducibility evidence
         uses: actions/upload-artifact@v4
         with:
-          name: linux-amd64
-          path: |
-            chain-registry/target/release/creg-node
-            chain-registry/target/release/creg
+          name: release-assurance
+          path: chain-registry/artifacts/release-assurance/sha256sum.txt
+          if-no-files-found: error
+          retention-days: 30
 
-  build-windows:
-    runs-on: windows-latest
-    defaults:
-      run:
-        working-directory: chain-registry
+  build:
+    name: Build ${{ matrix.platform }}
+    needs: reproducibility
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-amd64
+          - os: macos-13
+            platform: macos-amd64
+          - os: windows-latest
+            platform: windows-amd64
+    runs-on: ${{ matrix.os }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install LLVM
-        run: choco install llvm -y
-
-      - name: Install protoc
-        run: choco install protoc -y
-
-      - name: Cache Cargo
-        uses: actions/cache@v4
+      - uses: actions/checkout@v4
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            chain-registry/target
-          key: ${{ runner.os }}-cargo-release-${{ hashFiles('chain-registry/Cargo.lock') }}
+          fetch-depth: 0
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
+      - uses: dtolnay/rust-toolchain@stable
 
-      - name: Build explorer UI (rust-embed input)
-        working-directory: chain-registry/explorer
+      - name: Install Linux native build dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libssl-dev build-essential clang llvm libclang-dev \
+            cmake libopenblas-dev protobuf-compiler libprotobuf-dev
+
+      - name: Set deterministic build timestamp (Unix)
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> "$GITHUB_ENV"
+
+      - name: Set deterministic build timestamp (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: "Add-Content $env:GITHUB_ENV \"SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)\""
+
+      - name: Build CLI and node (Unix)
+        if: matrix.os != 'windows-latest'
         shell: bash
         run: |
-          if [ -f package-lock.json ]; then npm ci --no-fund --no-audit; else npm install --no-fund --no-audit; fi
-          npm run build
+          cargo build --locked --release \
+            --package chain-registry-cli --bin creg \
+            --package chain-registry-node --bin creg-node
 
-      - name: Build node binary
-        run: cargo build --release --package chain-registry-node
+      - name: Build CLI and node (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          cargo build --locked --release `
+            --package chain-registry-cli --bin creg `
+            --package chain-registry-node --bin creg-node
 
-      - name: Build CLI binary
-        run: cargo build --release --package chain-registry-cli
+      - name: Smoke-test binaries and signed chain spec (Unix)
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./target/release/creg --version
+          ./target/release/creg-node --version
+          ./target/release/creg chain-spec validate testnet/chain-spec.sepolia.json \
+            --signature testnet/chain-spec.sepolia.json.sig \
+            --pubkey "$CREG_SPEC_SIGNING_PUBKEY" --require-signature
 
-      - name: Upload artifacts
+      - name: Smoke-test binaries and signed chain spec (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          .\target\release\creg.exe --version
+          .\target\release\creg-node.exe --version
+          .\target\release\creg.exe chain-spec validate testnet\chain-spec.sepolia.json `
+            --signature testnet\chain-spec.sepolia.json.sig `
+            --pubkey $env:CREG_SPEC_SIGNING_PUBKEY --require-signature
+
+      - name: Package Unix release
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf bundle release
+          mkdir -p bundle/testnet release
+          install -m 0755 target/release/creg bundle/creg
+          install -m 0755 target/release/creg-node bundle/creg-node
+          install -m 0644 testnet/chain-spec.sepolia.json bundle/testnet/chain-spec.sepolia.json
+          install -m 0644 testnet/chain-spec.sepolia.json.sig bundle/testnet/chain-spec.sepolia.json.sig
+          tar -czf "release/chain-registry-${RELEASE_VERSION}-${{ matrix.platform }}.tar.gz" -C bundle creg creg-node testnet
+
+      - name: Package Windows release
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $bundle = Join-Path $PWD "bundle"
+          $release = Join-Path $PWD "release"
+          Remove-Item $bundle,$release -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $bundle,$release,"$bundle\testnet" | Out-Null
+          Copy-Item target\release\creg.exe "$bundle\creg.exe"
+          Copy-Item target\release\creg-node.exe "$bundle\creg-node.exe"
+          Copy-Item testnet\chain-spec.sepolia.json "$bundle\testnet\chain-spec.sepolia.json"
+          Copy-Item testnet\chain-spec.sepolia.json.sig "$bundle\testnet\chain-spec.sepolia.json.sig"
+          Compress-Archive -Path "$bundle\*" -DestinationPath "$release\chain-registry-$env:RELEASE_VERSION-${{ matrix.platform }}.zip" -CompressionLevel Optimal
+
+      - name: Upload platform archive
         uses: actions/upload-artifact@v4
         with:
-          name: windows-amd64
-          path: |
-            chain-registry/target/release/creg-node.exe
-            chain-registry/target/release/creg.exe
+          name: release-binary-${{ matrix.platform }}
+          path: chain-registry/release/chain-registry-*
+          if-no-files-found: error
+          retention-days: 30
 
-  build-macos:
-    runs-on: macos-latest
-    defaults:
-      run:
-        working-directory: chain-registry
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install system deps
-        run: brew install protobuf cmake openssl
-
-      - name: Cache Cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            chain-registry/target
-          key: ${{ runner.os }}-cargo-release-${{ hashFiles('chain-registry/Cargo.lock') }}
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Build explorer UI (rust-embed input)
-        working-directory: chain-registry/explorer
-        run: |
-          if [ -f package-lock.json ]; then npm ci --no-fund --no-audit; else npm install --no-fund --no-audit; fi
-          npm run build
-
-      - name: Build node binary
-        run: cargo build --release --package chain-registry-node
-
-      - name: Build CLI binary
-        run: cargo build --release --package chain-registry-cli
-
-      - name: Strip binaries
-        run: |
-          strip target/release/creg-node
-          strip target/release/creg
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-amd64
-          path: |
-            chain-registry/target/release/creg-node
-            chain-registry/target/release/creg
-
-  release:
+  publish:
+    name: Publish signed release
+    needs: [reproducibility, build]
     runs-on: ubuntu-latest
-    needs: [build-linux, build-windows, build-macos]
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
-    defaults:
-      run:
-        working-directory: .
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Download Linux artifacts
+      - name: Download platform archives
         uses: actions/download-artifact@v4
         with:
-          name: linux-amd64
-          path: dist/linux-amd64
+          pattern: release-binary-*
+          path: chain-registry/release
+          merge-multiple: true
 
-      - name: Download Windows artifacts
+      - name: Download reproducibility evidence
         uses: actions/download-artifact@v4
         with:
-          name: windows-amd64
-          path: dist/windows-amd64
+          name: release-assurance
+          path: chain-registry/release-assurance
 
-      - name: Download macOS artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: macos-amd64
-          path: dist/macos-amd64
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3.7.0
 
-      - name: Package binaries
-        env:
-          TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || github.event.inputs.tag }}
+      - name: Create release manifests
+        shell: bash
         run: |
-          mkdir -p release
-          tar -czf "release/chain-registry-${TAG}-linux-amd64.tar.gz" \
-            -C dist/linux-amd64 creg-node creg
-          (cd dist/windows-amd64 && zip -r "../../release/chain-registry-${TAG}-windows-amd64.zip" creg-node.exe creg.exe)
-          tar -czf "release/chain-registry-${TAG}-macos-amd64.tar.gz" \
-            -C dist/macos-amd64 creg-node creg
+          set -euo pipefail
+          (cd release && sha256sum chain-registry-*) > release/SHA256SUMS
+          cp release-assurance/sha256sum.txt release/REPRODUCIBILITY-SHA256SUMS.txt
+          export SPEC_SHA256="$(sha256sum testnet/chain-spec.sepolia.json | cut -d' ' -f1)"
+          export SIG_SHA256="$(sha256sum testnet/chain-spec.sepolia.json.sig | cut -d' ' -f1)"
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, subprocess
+          root = pathlib.Path("release")
+          files = sorted(p.name for p in root.glob("chain-registry-*") if p.is_file())
+          metadata = {
+              "schema_version": 1,
+              "kind": "creg-release-manifest",
+              "version": os.environ["RELEASE_VERSION"],
+              "git_commit": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+              "spec_signing_public_key": os.environ["CREG_SPEC_SIGNING_PUBKEY"],
+              "chain_spec_sha256": os.environ["SPEC_SHA256"],
+              "chain_spec_signature_sha256": os.environ["SIG_SHA256"],
+              "archives": {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in files},
+              "reproducibility_evidence": "REPRODUCIBILITY-SHA256SUMS.txt",
+              "checksum_manifest": "SHA256SUMS",
+              "checksum_signature": "SHA256SUMS.sig",
+              "provenance": "GitHub Artifact Attestations (actions/attest-build-provenance)",
+          }
+          (root / "CREG-RELEASE-MANIFEST.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+          PY
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
+      - name: Sign checksum manifest with Sigstore
+        shell: bash
+        run: |
+          cosign sign-blob --yes \
+            --output-signature release/SHA256SUMS.sig \
+            --bundle release/SHA256SUMS.bundle \
+            release/SHA256SUMS
+
+      - name: Publish provenance attestations
+        uses: actions/attest-build-provenance@v2
         with:
-          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || github.event.inputs.tag }}
-          files: release/*
-          generate_release_notes: true
+          subject-path: |
+            chain-registry/release/chain-registry-*
+
+      - name: Create or update GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! gh release view "$RELEASE_VERSION" >/dev/null 2>&1; then
+            gh release create "$RELEASE_VERSION" \
+              --title "CREG $RELEASE_VERSION" \
+              --generate-notes \
+              --notes "Signed CREG CLI/node binaries for the controlled testnet release. Verify SHA256SUMS.sig and the GitHub Artifact Attestation before installation."
+          fi
+          gh release upload "$RELEASE_VERSION" release/* --clobber
+
+  clean-install-smoke:
+    name: Clean install smoke (${{ matrix.os }})
+    needs: publish
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install and smoke-test on Unix
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        env:
+          CREG_GITHUB_REPO: ${{ github.repository }}
+          INSTALL_DIR: ${{ runner.temp }}/creg-bin
+        run: |
+          set -euo pipefail
+          bash scripts/install-creg.sh --version "$RELEASE_VERSION"
+          export PATH="$INSTALL_DIR:$PATH"
+          creg --version
+          creg-node --version
+          creg chain-spec validate "$INSTALL_DIR/testnet/chain-spec.sepolia.json" \
+            --signature "$INSTALL_DIR/testnet/chain-spec.sepolia.json.sig" \
+            --pubkey "$CREG_SPEC_SIGNING_PUBKEY" --require-signature
+
+      - name: Install and smoke-test on Windows
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        env:
+          CREG_GITHUB_REPO: ${{ github.repository }}
+        run: |
+          $installDir = Join-Path $env:RUNNER_TEMP "creg-bin"
+          .\scripts\install-creg.ps1 -Version $env:RELEASE_VERSION -InstallDir $installDir
+          & (Join-Path $installDir "creg.exe") --version
+          & (Join-Path $installDir "creg-node.exe") --version
+          & (Join-Path $installDir "creg.exe") chain-spec validate `
+            (Join-Path $installDir "testnet\chain-spec.sepolia.json") `
+            --signature (Join-Path $installDir "testnet\chain-spec.sepolia.json.sig") `
+            --pubkey $env:CREG_SPEC_SIGNING_PUBKEY --require-signature
