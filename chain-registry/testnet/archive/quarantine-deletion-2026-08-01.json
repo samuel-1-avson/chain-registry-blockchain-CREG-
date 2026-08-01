@@ -1,0 +1,32 @@
+{
+  "recorded_at": "2026-08-01",
+  "action": "local_quarantine_copies_deleted",
+  "scope": "operator-key-quarantine/2026-08-01",
+  "cryptographic_revocation_claimed": false,
+  "note": "This record contains no private key material. File-system deletion removes the local quarantine copies; on-chain credentials and any external backups require separate revocation/rotation.",
+  "expected_file_count": 22,
+  "expected_paths": [
+    "testnet-sepolia-3node.env",
+    "testnet-secrets/faucet-sepolia-20260530-042329.key",
+    "testnet-secrets/faucet-sepolia-latest.key",
+    "testnet-secrets/governance-signer-sepolia-20260530-043345.key",
+    "testnet-secrets/governance-signer-sepolia-latest.key",
+    "testnet-secrets/publisher-stake-20260530-040213.key",
+    "testnet-secrets/publisher-stake-latest.key",
+    "testnet-secrets/sepolia-authority-20260530-044903.key",
+    "testnet-secrets/sepolia-authority-latest.key",
+    "testnet-secrets/validator-2-20260608-213126.key",
+    "testnet-secrets/validator-2-20260608-213811.key",
+    "testnet-secrets/validator-2-latest.key",
+    "validator-keys/validator-1.env",
+    "validator-keys/validator-2.env",
+    "validator-keys/validator-3.env",
+    "validator-keys/validator-4.env",
+    "validator-keys/validator-5.env",
+    "validator-keys/validator-6.env",
+    "validator-keys/validator-7.env",
+    "validator-keys/validator-8.env",
+    "validator-keys/validator-9.env",
+    "validator-keys/validator-10.env"
+  ]
+}

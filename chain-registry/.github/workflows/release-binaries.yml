@@ -1,0 +1,295 @@
+name: Release CREG binaries
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag to build (for example v0.4.0-testnet)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CREG_SPEC_SIGNING_PUBKEY: 3fe87833177b04b0a18600eace041692a35fb2b85f6e14e6734d894a0fd61c01
+  RELEASE_VERSION: ${{ inputs.version || github.ref_name }}
+
+jobs:
+  reproducibility:
+    name: Reproducible Linux release build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libssl-dev build-essential clang llvm libclang-dev \
+            cmake libopenblas-dev protobuf-compiler libprotobuf-dev
+
+      - name: Set deterministic build timestamp
+        shell: bash
+        run: echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> "$GITHUB_ENV"
+
+      - name: Build twice and compare release binaries
+        run: bash scripts/release-assurance.sh
+
+      - name: Upload reproducibility evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assurance
+          path: artifacts/release-assurance/sha256sum.txt
+          retention-days: 30
+
+  build:
+    name: Build ${{ matrix.platform }}
+    needs: reproducibility
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-amd64
+          - os: macos-13
+            platform: macos-amd64
+          - os: windows-latest
+            platform: windows-amd64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux native build dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libssl-dev build-essential clang llvm libclang-dev \
+            cmake libopenblas-dev protobuf-compiler libprotobuf-dev
+
+      - name: Set deterministic build timestamp (Unix)
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> "$GITHUB_ENV"
+
+      - name: Set deterministic build timestamp (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: "Add-Content $env:GITHUB_ENV \"SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)\""
+
+      - name: Build CLI and node (Unix)
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: |
+          cargo build --locked --release \
+            --package chain-registry-cli --bin creg \
+            --package chain-registry-node --bin creg-node
+
+      - name: Build CLI and node (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          cargo build --locked --release `
+            --package chain-registry-cli --bin creg `
+            --package chain-registry-node --bin creg-node
+
+      - name: Smoke-test binaries and signed chain spec (Unix)
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./target/release/creg --version
+          ./target/release/creg-node --version
+          ./target/release/creg chain-spec validate testnet/chain-spec.sepolia.json \
+            --signature testnet/chain-spec.sepolia.json.sig \
+            --pubkey "$CREG_SPEC_SIGNING_PUBKEY" --require-signature
+
+      - name: Smoke-test binaries and signed chain spec (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          .\target\release\creg.exe --version
+          .\target\release\creg-node.exe --version
+          .\target\release\creg.exe chain-spec validate testnet\chain-spec.sepolia.json `
+            --signature testnet\chain-spec.sepolia.json.sig `
+            --pubkey $env:CREG_SPEC_SIGNING_PUBKEY --require-signature
+
+      - name: Package Unix release
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf bundle release
+          mkdir -p bundle/testnet release
+          install -m 0755 target/release/creg bundle/creg
+          install -m 0755 target/release/creg-node bundle/creg-node
+          install -m 0644 testnet/chain-spec.sepolia.json bundle/testnet/chain-spec.sepolia.json
+          install -m 0644 testnet/chain-spec.sepolia.json.sig bundle/testnet/chain-spec.sepolia.json.sig
+          tar -czf "release/chain-registry-${RELEASE_VERSION}-${{ matrix.platform }}.tar.gz" -C bundle creg creg-node testnet
+
+      - name: Package Windows release
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $bundle = Join-Path $PWD "bundle"
+          $release = Join-Path $PWD "release"
+          Remove-Item $bundle,$release -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $bundle,$release,"$bundle\testnet" | Out-Null
+          Copy-Item target\release\creg.exe "$bundle\creg.exe"
+          Copy-Item target\release\creg-node.exe "$bundle\creg-node.exe"
+          Copy-Item testnet\chain-spec.sepolia.json "$bundle\testnet\chain-spec.sepolia.json"
+          Copy-Item testnet\chain-spec.sepolia.json.sig "$bundle\testnet\chain-spec.sepolia.json.sig"
+          Compress-Archive -Path "$bundle\*" -DestinationPath "$release\chain-registry-$env:RELEASE_VERSION-${{ matrix.platform }}.zip" -CompressionLevel Optimal
+
+      - name: Upload platform archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-binary-${{ matrix.platform }}
+          path: release/chain-registry-*
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: Publish signed release
+    needs: [reproducibility, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download platform archives
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-binary-*
+          path: release
+          merge-multiple: true
+
+      - name: Download reproducibility evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: release-assurance
+          path: release-assurance
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3.7.0
+
+      - name: Create release manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd release && sha256sum chain-registry-*) > release/SHA256SUMS
+          cp release-assurance/sha256sum.txt release/REPRODUCIBILITY-SHA256SUMS.txt
+          export SPEC_SHA256="$(sha256sum testnet/chain-spec.sepolia.json | cut -d' ' -f1)"
+          export SIG_SHA256="$(sha256sum testnet/chain-spec.sepolia.json.sig | cut -d' ' -f1)"
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, subprocess
+          root = pathlib.Path("release")
+          files = sorted(p.name for p in root.glob("chain-registry-*") if p.is_file())
+          hashes = {}
+          for name in files:
+              hashes[name] = hashlib.sha256((root / name).read_bytes()).hexdigest()
+          metadata = {
+              "schema_version": 1,
+              "kind": "creg-release-manifest",
+              "version": os.environ["RELEASE_VERSION"],
+              "git_commit": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+              "spec_signing_public_key": os.environ["CREG_SPEC_SIGNING_PUBKEY"],
+              "chain_spec_sha256": os.environ["SPEC_SHA256"],
+              "chain_spec_signature_sha256": os.environ["SIG_SHA256"],
+              "archives": hashes,
+              "reproducibility_evidence": "REPRODUCIBILITY-SHA256SUMS.txt",
+              "checksum_manifest": "SHA256SUMS",
+              "checksum_signature": "SHA256SUMS.sig",
+              "provenance": "GitHub Artifact Attestations (actions/attest-build-provenance)",
+          }
+          (root / "CREG-RELEASE-MANIFEST.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+          PY
+      - name: Sign checksum manifest with Sigstore
+        shell: bash
+        run: |
+          cosign sign-blob --yes \
+            --output-signature release/SHA256SUMS.sig \
+            --bundle release/SHA256SUMS.bundle \
+            release/SHA256SUMS
+
+      - name: Publish provenance attestations
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "release/chain-registry-*"
+
+      - name: Create or update GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! gh release view "$RELEASE_VERSION" >/dev/null 2>&1; then
+            gh release create "$RELEASE_VERSION" \
+              --title "CREG $RELEASE_VERSION" \
+              --generate-notes \
+              --notes "Signed CREG CLI/node binaries for the controlled testnet release. Verify SHA256SUMS.sig and the GitHub Artifact Attestation before installation."
+          fi
+          gh release upload "$RELEASE_VERSION" release/* --clobber
+
+  clean-install-smoke:
+    name: Clean install smoke (${{ matrix.os }})
+    needs: publish
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install and smoke-test on Unix
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        env:
+          CREG_GITHUB_REPO: ${{ github.repository }}
+          INSTALL_DIR: ${{ runner.temp }}/creg-bin
+        run: |
+          set -euo pipefail
+          bash scripts/install-creg.sh --version "$RELEASE_VERSION"
+          export PATH="$INSTALL_DIR:$PATH"
+          creg --version
+          creg-node --version
+          creg chain-spec validate "$INSTALL_DIR/testnet/chain-spec.sepolia.json" \
+            --signature "$INSTALL_DIR/testnet/chain-spec.sepolia.json.sig" \
+            --pubkey "$CREG_SPEC_SIGNING_PUBKEY" --require-signature
+
+      - name: Install and smoke-test on Windows
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        env:
+          CREG_GITHUB_REPO: ${{ github.repository }}
+        run: |
+          $installDir = Join-Path $env:RUNNER_TEMP "creg-bin"
+          .\scripts\install-creg.ps1 -Version $env:RELEASE_VERSION -InstallDir $installDir
+          & (Join-Path $installDir "creg.exe") --version
+          & (Join-Path $installDir "creg-node.exe") --version
+          & (Join-Path $installDir "creg.exe") chain-spec validate `
+            (Join-Path $installDir "testnet\chain-spec.sepolia.json") `
+            --signature (Join-Path $installDir "testnet\chain-spec.sepolia.json.sig") `
+            --require-signature

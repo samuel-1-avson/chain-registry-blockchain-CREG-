@@ -28,6 +28,7 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
+  CREG_SPEC_SIGNING_PUBKEY: 3fe87833177b04b0a18600eace041692a35fb2b85f6e14e6734d894a0fd61c01
 
 jobs:
   # ============================================================================
@@ -86,6 +87,7 @@ jobs:
           build-args: |
             BUILDKIT_INLINE_CACHE=1
             SOURCE_DATE_EPOCH=${{ env.SOURCE_DATE_EPOCH }}
+            CREG_SPEC_SIGNING_PUBKEY=${{ env.CREG_SPEC_SIGNING_PUBKEY }}
 
   # ============================================================================
   # Build Minimal Image (Fast, No ML/AI)
@@ -130,7 +132,10 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./Dockerfile.minimal
+          # Dockerfile.minimal is not shipped; use the maintained multi-stage
+          # image with the minimal profile argument until a separate slim
+          # feature set is intentionally specified.
+          file: ./Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -141,6 +146,8 @@ jobs:
           sbom: true
           build-args: |
             SOURCE_DATE_EPOCH=${{ env.SOURCE_DATE_EPOCH }}
+            CREG_SPEC_SIGNING_PUBKEY=${{ env.CREG_SPEC_SIGNING_PUBKEY }}
+            PROFILE=minimal
 
   # ============================================================================
   # Security Scanning

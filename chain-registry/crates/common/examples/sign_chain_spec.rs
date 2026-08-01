@@ -21,9 +21,7 @@ fn main() -> anyhow::Result<()> {
             .bytes()
             .enumerate()
             .all(|(index, byte)| {
-                byte.is_ascii_uppercase()
-                    || byte == b'_'
-                    || (index > 0 && byte.is_ascii_digit())
+                byte.is_ascii_uppercase() || byte == b'_' || (index > 0 && byte.is_ascii_digit())
             })
     {
         anyhow::bail!("invalid signing-key environment-variable name");

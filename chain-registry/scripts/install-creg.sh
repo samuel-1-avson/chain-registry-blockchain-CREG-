@@ -25,7 +25,8 @@ mkdir -p "$INSTALL_DIR"
 
 if [[ "$BUILD" -eq 1 ]]; then
   cd "$ROOT"
-  cargo build --release --package chain-registry-cli --package chain-registry-node
+  export CREG_SPEC_SIGNING_PUBKEY="${CREG_SPEC_SIGNING_PUBKEY:-3fe87833177b04b0a18600eace041692a35fb2b85f6e14e6734d894a0fd61c01}"
+  cargo build --locked --release --package chain-registry-cli --package chain-registry-node
   install -m 755 target/release/creg target/release/creg-node "$INSTALL_DIR/"
   echo "Installed to $INSTALL_DIR"
   exit 0
@@ -37,9 +38,11 @@ if [[ -z "$VERSION" ]]; then
 fi
 
 ARCH="$(uname -m)"
-case "$ARCH" in
-  x86_64|amd64) TARBALL="chain-registry-${VERSION}-linux-amd64.tar.gz" ;;
-  *) echo "Unsupported arch: $ARCH"; exit 1 ;;
+OS="$(uname -s)"
+case "$OS:$ARCH" in
+  Linux:x86_64|Linux:amd64) TARBALL="chain-registry-${VERSION}-linux-amd64.tar.gz" ;;
+  Darwin:x86_64|Darwin:amd64) TARBALL="chain-registry-${VERSION}-macos-amd64.tar.gz" ;;
+  *) echo "Unsupported platform: $OS/$ARCH"; exit 1 ;;
 esac
 
 # Override when releases live on a fork: export CREG_GITHUB_REPO=owner/repo
@@ -49,6 +52,20 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 curl -fsSL "$URL" -o "$TMP/$TARBALL"
+curl -fsSL "https://github.com/${GITHUB_REPO}/releases/download/${VERSION}/SHA256SUMS" \
+  -o "$TMP/SHA256SUMS"
+
+EXPECTED="$(awk -v asset="$TARBALL" '$2 == asset || $2 == "*" asset { print $1; exit }' "$TMP/SHA256SUMS")"
+if [[ ! "$EXPECTED" =~ ^[[:xdigit:]]{64}$ ]]; then
+  echo "SHA256SUMS does not contain an entry for $TARBALL" >&2
+  exit 1
+fi
+ACTUAL="$(sha256sum "$TMP/$TARBALL" | awk '{print $1}')"
+if [[ "${ACTUAL,,}" != "${EXPECTED,,}" ]]; then
+  echo "Checksum mismatch for $TARBALL (expected $EXPECTED, got $ACTUAL)" >&2
+  exit 1
+fi
+echo "SHA-256 verified: $ACTUAL"
 tar -xzf "$TMP/$TARBALL" -C "$INSTALL_DIR"
 echo "Installed creg + creg-node to $INSTALL_DIR"
 echo "export PATH=\"$INSTALL_DIR:\$PATH\""

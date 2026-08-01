@@ -1,12 +1,17 @@
 # Chain Registry testnet — operator runbook
 
 **Network:** Sepolia (`creg-testnet-1`, L1 chain id `11155111`)  
-**Current topology:** the checked-in Sepolia specification has one validator
-and no bootnodes. It is a coordinated research alpha and has no Byzantine
-tolerance claim. [TESTNET_SCALE_ARCHITECTURE.md](../../docs/TESTNET_SCALE_ARCHITECTURE.md)
+**Current topology:** the signed fresh-genesis candidate has four validator
+candidates and no verified bootnodes. All four candidate keys are currently
+held by one operator, so this remains a coordinated research alpha with no
+Byzantine-tolerance claim. [TESTNET_SCALE_ARCHITECTURE.md](../../docs/TESTNET_SCALE_ARCHITECTURE.md)
 is a future design, not evidence of independently operated validators.
 
 This runbook is for **maintainers** operating edge services, optional seed validators, and cohort onboarding. External validators follow [VALIDATOR_ONBOARDING_CHECKLIST.md](../../docs/VALIDATOR_ONBOARDING_CHECKLIST.md).
+
+Fresh-genesis key custody and injection are documented in
+[FRESH_GENESIS_KEYS.md](./FRESH_GENESIS_KEYS.md); never place Secret Manager
+private values in a committed or shared environment file.
 
 ---
 
@@ -111,13 +116,23 @@ Reports: `testnet/ipfs-pin-logs/`. Non-zero exit → Scenario 4 in [INCIDENT_RES
 
 ## Distribution (DIST-301)
 
+The repository-controlled release workflow is
+`.github/workflows/release-binaries.yml`. It builds the CLI/node for Linux,
+macOS, and Windows with the pinned spec signer, compares deterministic Linux
+builds, creates `SHA256SUMS`, signs that manifest with Sigstore, and publishes
+GitHub Artifact Attestations. Do not reuse an older testnet tag.
+
 ```bash
-git tag v0.1.2-testnet && git push origin v0.1.2-testnet
+git tag <new-release-tag> && git push origin <new-release-tag>
 ```
 
 ```powershell
-.\testnet\verify-dist-301.ps1 -Version v0.1.2-testnet
+.\testnet\verify-dist-301.ps1 -Version <new-release-tag>
 ```
+
+Verify `SHA256SUMS.sig` and the attestation before distributing an archive.
+The installers also refuse to extract an archive whose SHA-256 entry is
+missing or does not match.
 
 ---
 

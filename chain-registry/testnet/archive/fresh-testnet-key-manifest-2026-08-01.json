@@ -1,0 +1,66 @@
+{
+  "generated_at": "2026-08-01T14:55:00Z",
+  "network": "creg-testnet-fresh-genesis-candidate",
+  "custody": "CREG operator-controlled Google Secret Manager (project gen-lang-client-0022105784)",
+  "private_material_in_repository": false,
+  "spec_signing": {
+    "secret_id": "creg-testnet-spec-signing-key",
+    "public_key": "3fe87833177b04b0a18600eace041692a35fb2b85f6e14e6734d894a0fd61c01",
+    "algorithm": "ed25519",
+    "genesis_hash_current_spec": "0xbca931fadf9ff600c5db30fefa63e709f3ae0d01d65520a407c0b1ad18bd1ec5"
+  },
+  "validators": [
+    {
+      "id": "validator-1",
+      "ed25519_secret_id": "creg-fresh-testnet-validator-1-ed25519",
+      "ed25519_public_key": "cc4157c4443c9fb011df2b650f497e3eadfc1ddda6dc7f4b6732325383108ffc",
+      "evm_secret_id": "creg-fresh-testnet-validator-1-evm",
+      "evm_address": "0x91e4dfc18bf015051676f00f23782d0770b95a7a",
+      "status": "operator-controlled-candidate"
+    },
+    {
+      "id": "validator-2",
+      "ed25519_secret_id": "creg-fresh-testnet-validator-2-ed25519",
+      "ed25519_public_key": "779c9522addbce63f78448fa83bff1e789a4a874c4db25e0f7fe00b3d0429fd9",
+      "evm_secret_id": "creg-fresh-testnet-validator-2-evm",
+      "evm_address": "0x9a33a425953ec36e729e0b7f94b7db0174dbe13b",
+      "status": "operator-controlled-candidate"
+    },
+    {
+      "id": "validator-3",
+      "ed25519_secret_id": "creg-fresh-testnet-validator-3-ed25519",
+      "ed25519_public_key": "7876b26b471f81edd9597354fd023157858f2b02d73a1e7bb0b430c9fc63e6bc",
+      "evm_secret_id": "creg-fresh-testnet-validator-3-evm",
+      "evm_address": "0x5470e9700ed487af787af7a2f8c0dc771d5f3fdd",
+      "status": "operator-controlled-candidate"
+    },
+    {
+      "id": "validator-4",
+      "ed25519_secret_id": "creg-fresh-testnet-validator-4-ed25519",
+      "ed25519_public_key": "f777ca6f1dafbbeb9cbe5a258568c574e7f519a1e58da57c97d28fcf69dd35ff",
+      "evm_secret_id": "creg-fresh-testnet-validator-4-evm",
+      "evm_address": "0xbf10f3553d9ecf43c7bc08a6cff0423a9476892a",
+      "status": "operator-controlled-candidate"
+    }
+  ],
+  "service_secrets": {
+    "deployer": "creg-fresh-testnet-deployer-evm",
+    "governance": "creg-fresh-testnet-governance-evm",
+    "faucet": "creg-fresh-testnet-faucet-evm",
+    "publisher": "creg-fresh-testnet-publisher-evm",
+    "bridge": "creg-fresh-testnet-bridge-evm",
+    "relayer": "creg-fresh-testnet-relayer-evm",
+    "operator_api": "creg-fresh-testnet-operator-api-key"
+  },
+  "genesis_application": {
+    "validator_set_written_to_chain_spec": true,
+    "reason": "The four keys are held by one operator today. Do not present them as independent validators or enable public mandatory mode until each operator accepts separate custody and supplies a signed roster.",
+    "required_before_signing": [
+      "independent operator identity and custody acknowledgement for every validator",
+      "at least two independently operated bootnodes and public multiaddrs",
+      "governance approval of the validator set and deployment addresses",
+      "checkpoint certificate and rehearsal evidence"
+    ]
+  },
+  "retirement_record": "testnet/archive/quarantine-deletion-2026-08-01.json"
+}

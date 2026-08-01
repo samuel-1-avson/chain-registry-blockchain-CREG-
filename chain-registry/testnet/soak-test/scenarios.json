@@ -31,6 +31,48 @@
       "after": "20h",
       "action": "l1_outage",
       "duration": "15m"
+    },
+    {
+      "name": "Signed transition replay",
+      "after": "24h",
+      "action": "transition_replay",
+      "duration": "10m",
+      "evidence": "transition-replay"
+    },
+    {
+      "name": "Checkpoint descendant bootstrap",
+      "after": "28h",
+      "action": "checkpoint_bootstrap",
+      "duration": "20m",
+      "evidence": "checkpoint-bootstrap"
+    },
+    {
+      "name": "Fork and reorg anchor",
+      "after": "32h",
+      "action": "reorg_anchor",
+      "duration": "20m",
+      "evidence": "reorg-anchor"
+    },
+    {
+      "name": "Long-range alternative history",
+      "after": "36h",
+      "action": "long_range_history",
+      "duration": "20m",
+      "evidence": "long-range-history"
+    },
+    {
+      "name": "Rebuilt node from checkpoint",
+      "after": "40h",
+      "action": "rebuilt_node",
+      "duration": "30m",
+      "evidence": "rebuilt-node"
+    },
+    {
+      "name": "Validator process kill and restart",
+      "after": "44h",
+      "action": "process_kill_restart",
+      "duration": "30m",
+      "evidence": "process-kill"
     }
   ]
 }

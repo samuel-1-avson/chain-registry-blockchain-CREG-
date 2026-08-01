@@ -110,8 +110,10 @@ async fn start_test_node() -> (String, tokio::task::JoinHandle<()>) {
     let ipfs_url = spawn_mock_ipfs(payload, StatusCode::OK).await;
     let rpc_url = spawn_mock_staking_rpc(1000).await;
 
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
-    let rules_dir = std::path::PathBuf::from(manifest_dir).join("../../rules");
+    // `CARGO_MANIFEST_DIR` is a compile-time Cargo variable.  Resolve it at
+    // compile time so the runtime test process does not depend on an ambient
+    // environment variable that Cargo never exports.
+    let rules_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../rules");
     std::env::set_var("CREG_YARA_RULES_DIR", rules_dir.to_str().unwrap());
     std::env::set_var("CREG_DEV_SANDBOX", "true");
     std::env::set_var("CREG_TESTNET", "true");

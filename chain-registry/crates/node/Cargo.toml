@@ -2,6 +2,7 @@
 name    = "chain-registry-node"
 version = "0.1.0"
 edition = "2021"
+build = "build.rs"
 
 [lib]
 name = "node"
@@ -68,6 +69,15 @@ rust-embed   = { version = "8.0", optional = true }
 mime_guess   = { version = "2.0", optional = true }
 semver       = "1"
 tempfile      = "3"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
 
 # OpenAPI schema + Swagger UI.
 # utoipa 4 is compatible with axum 0.7; utoipa-swagger-ui 7 exposes the

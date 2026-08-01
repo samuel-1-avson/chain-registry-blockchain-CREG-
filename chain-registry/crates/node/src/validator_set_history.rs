@@ -606,10 +606,12 @@ fn verification_set_at_with_checkpoint(
                     format!("no checkpoint-descended validator authority at height {height}")
                 })
         }
-        _ => Ok(authenticated_at_checked(data_dir, height, trusted_bootstrap)
-            .map_err(|error| format!("validator-set history unavailable: {error}"))?
-            .map(|snapshot| snapshot.validators)
-            .unwrap_or_else(|| trusted_bootstrap.clone())),
+        _ => Ok(
+            authenticated_at_checked(data_dir, height, trusted_bootstrap)
+                .map_err(|error| format!("validator-set history unavailable: {error}"))?
+                .map(|snapshot| snapshot.validators)
+                .unwrap_or_else(|| trusted_bootstrap.clone()),
+        ),
     }
 }
 
@@ -1219,10 +1221,8 @@ mod tests {
     #[test]
     fn authenticated_reader_requires_a_complete_chain_from_the_explicit_bootstrap() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let bootstrap_keys: Vec<_> =
-            (0..4).map(|_| SigningKey::generate(&mut OsRng)).collect();
-        let rotated_keys: Vec<_> =
-            (0..4).map(|_| SigningKey::generate(&mut OsRng)).collect();
+        let bootstrap_keys: Vec<_> = (0..4).map(|_| SigningKey::generate(&mut OsRng)).collect();
+        let rotated_keys: Vec<_> = (0..4).map(|_| SigningKey::generate(&mut OsRng)).collect();
         let final_keys: Vec<_> = (0..4).map(|_| SigningKey::generate(&mut OsRng)).collect();
         let bootstrap = keyed_set(&bootstrap_keys);
         let rotated = keyed_set(&rotated_keys);
@@ -1255,8 +1255,7 @@ mod tests {
             "no unsigned entry is allowed after authenticated authority starts"
         );
 
-        let attacker_keys: Vec<_> =
-            (0..4).map(|_| SigningKey::generate(&mut OsRng)).collect();
+        let attacker_keys: Vec<_> = (0..4).map(|_| SigningKey::generate(&mut OsRng)).collect();
         let attacker_set = keyed_set(&attacker_keys);
         let forged = signed_transition(3, &attacker_set, &attacker_set, &attacker_keys);
         let mut forged_history = valid_history.clone();
@@ -1299,25 +1298,20 @@ mod tests {
     #[test]
     fn checkpoint_install_reconciles_local_forks_and_keeps_only_valid_descendants() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let bootstrap_keys: Vec<_> =
-            (0..4).map(|_| SigningKey::generate(&mut OsRng)).collect();
-        let checkpoint_keys: Vec<_> =
-            (0..4).map(|_| SigningKey::generate(&mut OsRng)).collect();
+        let bootstrap_keys: Vec<_> = (0..4).map(|_| SigningKey::generate(&mut OsRng)).collect();
+        let checkpoint_keys: Vec<_> = (0..4).map(|_| SigningKey::generate(&mut OsRng)).collect();
         let child_keys: Vec<_> = (0..4).map(|_| SigningKey::generate(&mut OsRng)).collect();
-        let grandchild_keys: Vec<_> =
-            (0..4).map(|_| SigningKey::generate(&mut OsRng)).collect();
+        let grandchild_keys: Vec<_> = (0..4).map(|_| SigningKey::generate(&mut OsRng)).collect();
         let fork_keys: Vec<_> = (0..4).map(|_| SigningKey::generate(&mut OsRng)).collect();
         let bootstrap = keyed_set(&bootstrap_keys);
         let checkpoint_set = keyed_set(&checkpoint_keys);
         let child_set = keyed_set(&child_keys);
         let grandchild_set = keyed_set(&grandchild_keys);
         let fork_set = keyed_set(&fork_keys);
-        let checkpoint =
-            signed_transition(5, &bootstrap, &checkpoint_set, &bootstrap_keys);
+        let checkpoint = signed_transition(5, &bootstrap, &checkpoint_set, &bootstrap_keys);
         let child = signed_transition(6, &checkpoint_set, &child_set, &checkpoint_keys);
         let fork = signed_transition(8, &fork_set, &fork_set, &fork_keys);
-        let grandchild =
-            signed_transition(9, &child_set, &grandchild_set, &child_keys);
+        let grandchild = signed_transition(9, &child_set, &grandchild_set, &child_keys);
 
         write_history(
             dir.path(),
@@ -1387,16 +1381,12 @@ mod tests {
     #[test]
     fn checkpoint_install_fails_closed_without_rewriting_an_invalid_descendant() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let bootstrap_keys: Vec<_> =
-            (0..4).map(|_| SigningKey::generate(&mut OsRng)).collect();
-        let checkpoint_keys: Vec<_> =
-            (0..4).map(|_| SigningKey::generate(&mut OsRng)).collect();
+        let bootstrap_keys: Vec<_> = (0..4).map(|_| SigningKey::generate(&mut OsRng)).collect();
+        let checkpoint_keys: Vec<_> = (0..4).map(|_| SigningKey::generate(&mut OsRng)).collect();
         let bootstrap = keyed_set(&bootstrap_keys);
         let checkpoint_set = keyed_set(&checkpoint_keys);
-        let checkpoint =
-            signed_transition(5, &bootstrap, &checkpoint_set, &bootstrap_keys);
-        let mut invalid =
-            signed_transition(6, &checkpoint_set, &checkpoint_set, &checkpoint_keys);
+        let checkpoint = signed_transition(5, &bootstrap, &checkpoint_set, &bootstrap_keys);
+        let mut invalid = signed_transition(6, &checkpoint_set, &checkpoint_set, &checkpoint_keys);
         invalid.transition_signatures.truncate(1);
         write_history(
             dir.path(),

@@ -710,10 +710,7 @@ async fn sync_once(state: Arc<RwLock<NodeState>>) -> anyhow::Result<()> {
         // never reached consensus. (ISSUE-018)
         let (bootstrap_set, data_dir) = {
             let s = state.read().await;
-            (
-                s.validator_set_bootstrap.clone(),
-                s.config.data_dir.clone(),
-            )
+            (s.validator_set_bootstrap.clone(), s.config.data_dir.clone())
         };
         // Verify against the validator set that was active at THIS block's
         // height (ISSUE-050), rooted in the immutable deployment bootstrap

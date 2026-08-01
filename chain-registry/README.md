@@ -24,7 +24,8 @@ This directory is the **public blockchain surface** of the repository — compar
 ## Quick start
 
 ```bash
-cargo build --release -p cli
+cargo build --locked --release --package chain-registry-cli --bin creg \
+  --package chain-registry-node --bin creg-node
 export CREG_NODE_URL=https://api.testnet.cregnet.dev
 ./target/release/creg doctor
 ```

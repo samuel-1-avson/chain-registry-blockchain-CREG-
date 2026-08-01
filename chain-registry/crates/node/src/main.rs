@@ -5,8 +5,8 @@
 
 mod admission_scan;
 mod api;
-mod authority_archive;
 mod authority_adapter;
+mod authority_archive;
 mod block_producer;
 mod block_time;
 mod bridge;
@@ -302,6 +302,25 @@ async fn validate_contract_addresses(config: &config::NodeConfig) -> Result<()> 
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Keep the service binary self-describing for release smoke tests and
+    // operator tooling. These flags must return before loading RPC/spec state.
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|arg| arg == "--version" || arg == "-V") {
+        println!("creg-node {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+    if args.iter().any(|arg| arg == "--help" || arg == "-h") {
+        println!(
+            "Chain Registry node {}\n\nEnvironment-driven service binary.\n\n\
+             Required for a signed testnet: CREG_CHAIN_SPEC_URL and a build-time\n\
+             CREG_SPEC_SIGNING_PUBKEY matching the published chain spec.\n\n\
+             Common endpoints: REST 0.0.0.0:8080, gRPC 0.0.0.0:50051,\n\
+             P2P /ip4/0.0.0.0/tcp/9000.",
+            env!("CARGO_PKG_VERSION")
+        );
+        return Ok(());
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
@@ -355,19 +374,21 @@ async fn main() -> Result<()> {
             .unwrap_or("0000000000000000000000000000000000000000000000000000000000000000");
 
         if pinned_pubkey.chars().all(|c| c == '0') {
-            if spec
-                .consensus_params
-                .namespace_authority_activation_height
-                .is_some()
-            {
-                anyhow::bail!(
-                    "CR-07 namespace authority activation requires a build with a pinned chain-spec signing key"
-                );
-            }
-            tracing::warn!(
-                "CREG_SPEC_SIGNING_PUBKEY is not set â€” skipping spec signature verification (dev build)"
+            anyhow::bail!(
+                "CREG_CHAIN_SPEC_URL is configured but this binary has no pinned CREG_SPEC_SIGNING_PUBKEY; refusing to start without signed-spec verification"
             );
         } else {
+            if !spec
+                .signing
+                .signing_key_pubkey_hex
+                .eq_ignore_ascii_case(pinned_pubkey)
+            {
+                anyhow::bail!(
+                    "chain spec signing key {} does not match the binary-pinned CREG_SPEC_SIGNING_PUBKEY {}",
+                    spec.signing.signing_key_pubkey_hex,
+                    pinned_pubkey
+                );
+            }
             let sig_url = std::env::var("CREG_SPEC_SIGNATURE_URL")
                 .unwrap_or_else(|_| spec.signing.detached_signature_url.clone());
             let sig = chain_spec_boot::fetch_spec_signature(&sig_url)

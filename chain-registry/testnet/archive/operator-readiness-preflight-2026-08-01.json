@@ -1,0 +1,39 @@
+{
+  "record_type": "operator_readiness_preflight",
+  "recorded_at": "2026-08-01",
+  "status": "blocked_external_gates",
+  "not_activation_evidence": true,
+  "not_signed_checkpoint": true,
+  "not_operator_approval": true,
+  "not_live_rehearsal": true,
+  "not_security_review": true,
+  "genesis_validation": {
+    "command": "creg chain-spec validate testnet/chain-spec.sepolia.json",
+    "result": "rejected",
+    "declared": "0x0bb4b1ff2f1d0f86c678f5d31da99b0abf84dca46e29c728321afe55cf0e6660",
+    "computed": "0xddd15847e100e98ac8d85e80f91a4fa1e21f7f936f58aea762434cf590a11e0a"
+  },
+  "signing_key_gate": {
+    "command": "testnet/require-spec-signing-key.ps1",
+    "result": "rejected",
+    "reason": "SPEC_SIGNING_KEY was not supplied from an approved secret manager"
+  },
+  "rehearsal_hook_preflight": {
+    "contacted_validators": false,
+    "scenarios": [
+      {"action": "transition_replay", "hook": "CREG_REHEARSAL_HOOK_TRANSITION_REPLAY", "status": "blocked"},
+      {"action": "checkpoint_bootstrap", "hook": "CREG_REHEARSAL_HOOK_CHECKPOINT_BOOTSTRAP", "status": "blocked"},
+      {"action": "reorg_anchor", "hook": "CREG_REHEARSAL_HOOK_REORG_ANCHOR", "status": "blocked"},
+      {"action": "long_range_history", "hook": "CREG_REHEARSAL_HOOK_LONG_RANGE_HISTORY", "status": "blocked"},
+      {"action": "rebuilt_node", "hook": "CREG_REHEARSAL_HOOK_REBUILT_NODE", "status": "blocked"},
+      {"action": "process_kill_restart", "hook": "CREG_REHEARSAL_HOOK_PROCESS_KILL_RESTART", "status": "blocked"}
+    ]
+  },
+  "remaining_external_approvals": [
+    "independent npm/PyPI trust-root and namespace-policy approval",
+    "independently verified positive cryptographic fixtures",
+    "independent validator and bootnode operators",
+    "live multi-operator rehearsal evidence",
+    "independent security review"
+  ]
+}

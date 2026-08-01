@@ -34,7 +34,11 @@ function Log($msg) { Write-Host "[dist-301] $msg" }
 
 $assets = @(
     "chain-registry-$Version-linux-amd64.tar.gz",
-    "chain-registry-$Version-windows-amd64.zip"
+    "chain-registry-$Version-macos-amd64.tar.gz",
+    "chain-registry-$Version-windows-amd64.zip",
+    "SHA256SUMS",
+    "SHA256SUMS.sig",
+    "SHA256SUMS.bundle"
 )
 
 Log "GitHub repo: $GithubRepo"
@@ -44,17 +48,22 @@ $releaseUrl = "https://api.github.com/repos/$GithubRepo/releases/tags/$Version"
 try {
     $release = Invoke-RestMethod -Uri $releaseUrl -TimeoutSec 30
     Log "Release found: $($release.name) published $($release.published_at)"
+    $missingAssets = @()
     foreach ($name in $assets) {
         $asset = $release.assets | Where-Object { $_.name -eq $name }
         if ($asset) {
             Log "OK asset: $name ($([math]::Round($asset.size / 1MB, 2)) MB)"
         } else {
             Log "MISSING asset: $name"
+            $missingAssets += $name
         }
     }
+    if ($missingAssets.Count -gt 0) {
+        throw "Release is missing required assets: $($missingAssets -join ', ')"
+    }
 } catch {
-    Log "Release not found at $releaseUrl"
-    Log "Create with: git tag $Version && git push origin $Version"
+    Log "Release lookup/asset validation failed: $($_.Exception.Message)"
+    Log "Create or rebuild with: git tag $Version && git push origin $Version"
     Log "Workflow: .github/workflows/release-binaries.yml"
     exit 1
 }

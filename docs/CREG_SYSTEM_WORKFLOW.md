@@ -558,7 +558,7 @@ Deployed addresses are published in `testnet/chain-spec.sepolia.json`:
 | Validator admission | `Staking.approveByConsensus` | ≥ 2/3 active validators |
 | Package evidence | CREG vote accumulator (off-chain) | `floor(2n/3) + 1` |
 | Block PBFT | PBFT engine (off-chain) | `floor(2n/3) + 1` |
-| L1 package finalization | `Registry.finalizePackage` | EIP-712 `PackageVerdict` bound to chain/Registry/package/decision/exact `validatorSetEpoch`/live `quorumPct`/15-minute maximum validity; approvals exceed configured percentage |
+| L1 package finalization | `Registry.finalizePackage` | EIP-712 `PackageVerdict` bound to chain/Registry/package/decision/exact `validatorSetEpoch`/live `quorumPct`/15-minute maximum validity; approvals meet the ceiling-derived quorum |
 
 ### 5.3 Staking Economics
 

@@ -13,7 +13,7 @@ use std::{
     io::Read,
     path::{Path, PathBuf},
     process::Stdio,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use chrono::{DateTime, Utc};
@@ -69,6 +69,8 @@ pub enum AuthorityAdapterError {
     Io(#[source] std::io::Error),
     #[error("authority verifier exceeded its time limit")]
     Timeout,
+    #[error("authority verifier process containment could not be established")]
+    ProcessContainmentUnavailable,
     #[error("authority verifier exited unsuccessfully")]
     VerifierRejected,
     #[error("authority verifier wrote diagnostics on a successful invocation")]
@@ -159,6 +161,7 @@ impl AuthorityAdapterConfig {
         if !metadata.is_file() {
             return Err(AuthorityAdapterError::VerifierUnavailable);
         }
+        ensure_executable_path_is_private(&path)?;
         if sha256_file(&path)? != self.verifier_sha256 {
             return Err(AuthorityAdapterError::VerifierDigestMismatch);
         }
@@ -166,9 +169,45 @@ impl AuthorityAdapterConfig {
     }
 }
 
-fn private_invocation_scratch(
-    root: &Path,
-) -> Result<tempfile::TempDir, AuthorityAdapterError> {
+fn ensure_executable_path_is_private(path: &Path) -> Result<(), AuthorityAdapterError> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut current = path.to_path_buf();
+        loop {
+            let metadata = std::fs::symlink_metadata(&current)
+                .map_err(|_| AuthorityAdapterError::VerifierUnavailable)?;
+            if metadata.file_type().is_symlink() || metadata.permissions().mode() & 0o022 != 0 {
+                return Err(AuthorityAdapterError::VerifierUnavailable);
+            }
+            if !current.pop() {
+                break;
+            }
+            if current.as_os_str().is_empty() || current.parent().is_none() {
+                break;
+            }
+        }
+    }
+    #[cfg(windows)]
+    {
+        // The executable is only accepted from a canonical, non-reparse path;
+        // its parent ACL is protected by the same Windows hardening routine as
+        // the scratch root. This prevents a writable install directory from
+        // turning the digest check into a hash-to-execution TOCTOU.
+        if path.components().any(
+            |component| matches!(component, std::path::Component::Normal(name) if name == ".."),
+        ) {
+            return Err(AuthorityAdapterError::VerifierUnavailable);
+        }
+        harden_windows_directory(
+            path.parent()
+                .ok_or(AuthorityAdapterError::VerifierUnavailable)?,
+        )?;
+    }
+    Ok(())
+}
+
+fn private_invocation_scratch(root: &Path) -> Result<tempfile::TempDir, AuthorityAdapterError> {
     if !root.is_absolute() {
         return Err(AuthorityAdapterError::InvalidConfig(
             "verifier scratch root must be absolute",
@@ -187,6 +226,7 @@ fn private_invocation_scratch(
             "verifier scratch root must be a real directory",
         ));
     }
+    cleanup_stale_invocation_scratch(root)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -194,6 +234,8 @@ fn private_invocation_scratch(
             .map_err(AuthorityAdapterError::Io)?;
     }
     let canonical_root = std::fs::canonicalize(root).map_err(AuthorityAdapterError::Io)?;
+    #[cfg(windows)]
+    harden_windows_directory(&canonical_root)?;
     let scratch = tempfile::Builder::new()
         .prefix("creg-authority-")
         .tempdir_in(canonical_root)
@@ -204,11 +246,226 @@ fn private_invocation_scratch(
         std::fs::set_permissions(scratch.path(), std::fs::Permissions::from_mode(0o700))
             .map_err(AuthorityAdapterError::Io)?;
     }
+    #[cfg(windows)]
+    harden_windows_directory(scratch.path())?;
     Ok(scratch)
 }
 
+const INVOCATION_SCRATCH_PREFIX: &str = "creg-authority-";
+const STALE_INVOCATION_SCRATCH_AGE: Duration = Duration::from_secs(10 * 60);
+
+fn cleanup_stale_invocation_scratch(root: &Path) -> Result<(), AuthorityAdapterError> {
+    let canonical_root = std::fs::canonicalize(root).map_err(AuthorityAdapterError::Io)?;
+    let now = std::time::SystemTime::now();
+    let entries = std::fs::read_dir(&canonical_root).map_err(AuthorityAdapterError::Io)?;
+    for entry in entries {
+        let entry = entry.map_err(AuthorityAdapterError::Io)?;
+        let path = entry.path();
+        let name = entry.file_name();
+        if !name
+            .to_string_lossy()
+            .starts_with(INVOCATION_SCRATCH_PREFIX)
+        {
+            continue;
+        }
+        let metadata = std::fs::symlink_metadata(&path).map_err(AuthorityAdapterError::Io)?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            continue;
+        }
+        let modified = metadata.modified().unwrap_or(now);
+        if now.duration_since(modified).unwrap_or_default() < STALE_INVOCATION_SCRATCH_AGE {
+            continue;
+        }
+        let canonical = match std::fs::canonicalize(&path) {
+            Ok(canonical) => canonical,
+            Err(_) => continue,
+        };
+        if canonical.parent() != Some(canonical_root.as_path()) {
+            continue;
+        }
+        std::fs::remove_dir_all(canonical).map_err(AuthorityAdapterError::Io)?;
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn configure_process_containment(command: &mut Command) {
+    use std::os::unix::process::CommandExt;
+    command.process_group(0);
+}
+
+#[cfg(not(unix))]
+fn configure_process_containment(command: &mut Command) {
+    let _ = command;
+}
+
+#[cfg(unix)]
+struct ProcessTreeGuard {
+    pid: i32,
+}
+
+#[cfg(windows)]
+struct ProcessTreeGuard {
+    job: windows_sys::Win32::Foundation::HANDLE,
+}
+
+#[cfg(windows)]
+// A job handle is an owning kernel handle; moving ownership between Tokio
+// worker threads is safe, while all operations remain serialized by this
+// invocation's future.
+unsafe impl Send for ProcessTreeGuard {}
+#[cfg(windows)]
+unsafe impl Sync for ProcessTreeGuard {}
+
+impl ProcessTreeGuard {
+    fn attach(child: &tokio::process::Child) -> Result<Self, AuthorityAdapterError> {
+        #[cfg(unix)]
+        {
+            let pid = child
+                .id()
+                .ok_or(AuthorityAdapterError::ProcessContainmentUnavailable)?
+                as i32;
+            return Ok(Self { pid });
+        }
+        #[cfg(windows)]
+        {
+            use windows_sys::Win32::{
+                Foundation::{CloseHandle, HANDLE},
+                System::JobObjects::{
+                    AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+                    SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+                    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+                },
+            };
+            let job = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+            if job.is_null() {
+                return Err(AuthorityAdapterError::ProcessContainmentUnavailable);
+            }
+            let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+            limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            let configured = unsafe {
+                SetInformationJobObject(
+                    job,
+                    JobObjectExtendedLimitInformation,
+                    &mut limits as *mut _ as *mut _,
+                    std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                )
+            } != 0;
+            let process_handle = child
+                .raw_handle()
+                .ok_or(AuthorityAdapterError::ProcessContainmentUnavailable)?;
+            let assigned = configured
+                && unsafe { AssignProcessToJobObject(job, process_handle as HANDLE) } != 0;
+            if !assigned {
+                unsafe { CloseHandle(job) };
+                return Err(AuthorityAdapterError::ProcessContainmentUnavailable);
+            }
+            return Ok(Self { job });
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = child;
+            Err(AuthorityAdapterError::ProcessContainmentUnavailable)
+        }
+    }
+
+    async fn terminate(&self, child: &mut tokio::process::Child) {
+        #[cfg(unix)]
+        unsafe {
+            let _ = libc::kill(-self.pid, libc::SIGKILL);
+        }
+        #[cfg(windows)]
+        unsafe {
+            use windows_sys::Win32::System::JobObjects::TerminateJobObject;
+            let _ = TerminateJobObject(self.job, 1);
+        }
+        let _ = child.kill().await;
+    }
+}
+
+#[cfg(windows)]
+impl Drop for ProcessTreeGuard {
+    fn drop(&mut self) {
+        unsafe {
+            windows_sys::Win32::Foundation::CloseHandle(self.job);
+        }
+    }
+}
+
+#[cfg(windows)]
+fn harden_windows_directory(path: &Path) -> Result<(), AuthorityAdapterError> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::{
+        Foundation::LocalFree,
+        Security::{
+            Authorization::{GetNamedSecurityInfoW, SetNamedSecurityInfoW, SE_FILE_OBJECT},
+            GetSecurityDescriptorControl, DACL_SECURITY_INFORMATION,
+            PROTECTED_DACL_SECURITY_INFORMATION, SE_DACL_PROTECTED,
+        },
+    };
+    let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
+    wide.push(0);
+    let mut dacl = std::ptr::null_mut();
+    let mut descriptor = std::ptr::null_mut();
+    let status = unsafe {
+        GetNamedSecurityInfoW(
+            wide.as_ptr(),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut dacl,
+            std::ptr::null_mut(),
+            &mut descriptor,
+        )
+    };
+    if status != 0 || descriptor.is_null() || dacl.is_null() {
+        return Err(AuthorityAdapterError::ProcessContainmentUnavailable);
+    }
+    let protected = unsafe {
+        SetNamedSecurityInfoW(
+            wide.as_mut_ptr(),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            dacl,
+            std::ptr::null(),
+        )
+    };
+    unsafe { LocalFree(descriptor as _) };
+    if protected != 0 {
+        return Err(AuthorityAdapterError::ProcessContainmentUnavailable);
+    }
+    let mut verified_descriptor = std::ptr::null_mut();
+    let verify_status = unsafe {
+        GetNamedSecurityInfoW(
+            wide.as_ptr(),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut verified_descriptor,
+        )
+    };
+    let mut control = 0u16;
+    let mut revision = 0u32;
+    let valid = verify_status == 0
+        && !verified_descriptor.is_null()
+        && unsafe {
+            GetSecurityDescriptorControl(verified_descriptor, &mut control, &mut revision)
+        } != 0;
+    unsafe { LocalFree(verified_descriptor as _) };
+    if !valid || control & SE_DACL_PROTECTED == 0 {
+        return Err(AuthorityAdapterError::ProcessContainmentUnavailable);
+    }
+    Ok(())
+}
+
 async fn join_sidecar_task<T>(
-    task: tokio::task::JoinHandle<std::io::Result<T>>,
+    task: &mut tokio::task::JoinHandle<std::io::Result<T>>,
 ) -> Result<T, AuthorityAdapterError> {
     task.await
         .map_err(|error| {
@@ -444,7 +701,7 @@ impl AuthorityAdapterRequestV2 {
         now: i64,
         max_evidence_bytes: usize,
         max_artifact_bytes: usize,
-    ) -> Result<(Vec<u8>, Vec<u8>), AuthorityAdapterError> {
+    ) -> Result<(), AuthorityAdapterError> {
         if self.schema_version != AUTHORITY_ADAPTER_PROTOCOL_VERSION {
             return Err(AuthorityAdapterError::InvalidRequest(
                 "unsupported request schema version",
@@ -487,9 +744,17 @@ impl AuthorityAdapterRequestV2 {
         {
             return Err(AuthorityAdapterError::EvidenceEncoding);
         }
-        let evidence =
-            hex::decode(&self.evidence_hex).map_err(|_| AuthorityAdapterError::EvidenceEncoding)?;
-        if sha256_hex(&evidence) != self.evidence_sha256 {
+        let evidence_digest = stream_hex_payload_digest(
+            &self.evidence_hex,
+            max_evidence_bytes,
+            HARD_MAX_EVIDENCE_BYTES,
+            ArtifactDigestAlgorithm::Sha256,
+        )
+        .map_err(|error| match error {
+            HexPayloadDigestError::TooLarge => AuthorityAdapterError::EvidenceTooLarge,
+            HexPayloadDigestError::Encoding => AuthorityAdapterError::EvidenceEncoding,
+        })?;
+        if evidence_digest != self.evidence_sha256 {
             return Err(AuthorityAdapterError::EvidenceDigestMismatch);
         }
         let required_algorithm = ArtifactDigestAlgorithm::for_authority(self.authority);
@@ -518,12 +783,20 @@ impl AuthorityAdapterRequestV2 {
         {
             return Err(AuthorityAdapterError::ArtifactEncoding);
         }
-        let artifact =
-            hex::decode(&self.artifact_hex).map_err(|_| AuthorityAdapterError::ArtifactEncoding)?;
-        if self.artifact_digest_algorithm.digest(&artifact) != self.artifact_digest {
+        let artifact_digest = stream_hex_payload_digest(
+            &self.artifact_hex,
+            max_artifact_bytes,
+            HARD_MAX_ARTIFACT_BYTES,
+            self.artifact_digest_algorithm,
+        )
+        .map_err(|error| match error {
+            HexPayloadDigestError::TooLarge => AuthorityAdapterError::ArtifactTooLarge,
+            HexPayloadDigestError::Encoding => AuthorityAdapterError::ArtifactEncoding,
+        })?;
+        if artifact_digest != self.artifact_digest {
             return Err(AuthorityAdapterError::ArtifactDigestMismatch);
         }
-        Ok((evidence, artifact))
+        Ok(())
     }
 }
 
@@ -669,11 +942,21 @@ pub async fn verify_with_sidecar(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    configure_process_containment(&mut command);
     let mut child = match command.spawn() {
         Ok(child) => child,
         Err(error) => {
             scratch.close().map_err(AuthorityAdapterError::Io)?;
             return Err(AuthorityAdapterError::Spawn(error));
+        }
+    };
+    let process_guard = match ProcessTreeGuard::attach(&child) {
+        Ok(guard) => guard,
+        Err(error) => {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            scratch.close().map_err(AuthorityAdapterError::Io)?;
+            return Err(error);
         }
     };
     let mut stdin = child.stdin.take().ok_or_else(|| {
@@ -686,16 +969,25 @@ pub async fn verify_with_sidecar(
         AuthorityAdapterError::Io(std::io::Error::other("verifier stderr unavailable"))
     })?;
 
-    let write = tokio::spawn(async move {
-            stdin.write_all(&input).await?;
-            stdin.shutdown().await
+    let mut write = tokio::spawn(async move {
+        stdin.write_all(&input).await?;
+        stdin.shutdown().await
     });
-    let read_stdout = tokio::spawn(read_limited(stdout, config.max_result_bytes));
-    let read_stderr = tokio::spawn(read_limited(stderr, MAX_STDERR_BYTES));
-    let status = match tokio::time::timeout(config.timeout, child.wait()).await {
-        Ok(status) => status.map_err(AuthorityAdapterError::Io)?,
+    let mut read_stdout = tokio::spawn(read_limited(stdout, config.max_result_bytes));
+    let mut read_stderr = tokio::spawn(read_limited(stderr, MAX_STDERR_BYTES));
+    let deadline = Instant::now() + config.timeout;
+    let run = async {
+        let status = child.wait().await.map_err(AuthorityAdapterError::Io)?;
+        join_sidecar_task(&mut write).await?;
+        let stdout = join_sidecar_task(&mut read_stdout).await?;
+        let stderr = join_sidecar_task(&mut read_stderr).await?;
+        Ok::<_, AuthorityAdapterError>((status, stdout, stderr))
+    };
+    let completed = tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), run).await;
+    let (status, stdout, stderr) = match completed {
+        Ok(result) => result?,
         Err(_) => {
-            let _ = child.kill().await;
+            process_guard.terminate(&mut child).await;
             let _ = child.wait().await;
             write.abort();
             read_stdout.abort();
@@ -707,9 +999,6 @@ pub async fn verify_with_sidecar(
             return Err(AuthorityAdapterError::Timeout);
         }
     };
-    join_sidecar_task(write).await?;
-    let stdout = join_sidecar_task(read_stdout).await?;
-    let stderr = join_sidecar_task(read_stderr).await?;
     scratch.close().map_err(AuthorityAdapterError::Io)?;
     if stdout.len() > config.max_result_bytes {
         return Err(AuthorityAdapterError::ResultTooLarge);
@@ -927,6 +1216,55 @@ async fn read_limited<R: AsyncRead + Unpin>(reader: R, limit: usize) -> std::io:
     Ok(output)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HexPayloadDigestError {
+    TooLarge,
+    Encoding,
+}
+
+/// Hash a bounded lowercase-hex payload without materializing the decoded
+/// bytes. The sidecar still receives the exact hex request, but admission
+/// validation no longer doubles memory for large wheel/tarball evidence.
+fn stream_hex_payload_digest(
+    value: &str,
+    max_bytes: usize,
+    hard_max_bytes: usize,
+    algorithm: ArtifactDigestAlgorithm,
+) -> Result<String, HexPayloadDigestError> {
+    if value.is_empty() || value.len() % 2 != 0 {
+        return Err(HexPayloadDigestError::Encoding);
+    }
+    let byte_len = value.len() / 2;
+    if byte_len > max_bytes || byte_len > hard_max_bytes {
+        return Err(HexPayloadDigestError::TooLarge);
+    }
+    if value != value.to_ascii_lowercase() || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(HexPayloadDigestError::Encoding);
+    }
+    let mut sha256 = (algorithm == ArtifactDigestAlgorithm::Sha256).then(Sha256::new);
+    let mut sha512 = (algorithm == ArtifactDigestAlgorithm::Sha512).then(Sha512::new);
+    for pair in value.as_bytes().chunks_exact(2) {
+        let high = (pair[0] as char)
+            .to_digit(16)
+            .ok_or(HexPayloadDigestError::Encoding)? as u8;
+        let low = (pair[1] as char)
+            .to_digit(16)
+            .ok_or(HexPayloadDigestError::Encoding)? as u8;
+        let byte = (high << 4) | low;
+        if let Some(hasher) = sha256.as_mut() {
+            hasher.update([byte]);
+        }
+        if let Some(hasher) = sha512.as_mut() {
+            hasher.update([byte]);
+        }
+    }
+    Ok(match (sha256, sha512) {
+        (Some(hasher), None) => hex::encode(hasher.finalize()),
+        (None, Some(hasher)) => hex::encode(hasher.finalize()),
+        _ => return Err(HexPayloadDigestError::Encoding),
+    })
+}
+
 fn sha256_file(path: &Path) -> Result<String, AuthorityAdapterError> {
     let mut file = File::open(path).map_err(|_| AuthorityAdapterError::VerifierUnavailable)?;
     let mut hasher = Sha256::new();
@@ -991,6 +1329,101 @@ mod tests {
             max_artifact_bytes: DEFAULT_MAX_ARTIFACT_BYTES,
             max_result_bytes: DEFAULT_MAX_RESULT_BYTES,
         }
+    }
+
+    #[cfg(unix)]
+    fn node_runtime() -> PathBuf {
+        let locator = if cfg!(windows) { "where.exe" } else { "which" };
+        let output = std::process::Command::new(locator)
+            .arg("node")
+            .output()
+            .expect("node runtime locator must be available for sidecar integration test");
+        assert!(output.status.success(), "node runtime is required");
+        let output_text = String::from_utf8_lossy(&output.stdout);
+        let path = output_text
+            .lines()
+            .next()
+            .expect("node runtime locator returned no path")
+            .trim();
+        std::fs::canonicalize(path).expect("node runtime path must be canonical")
+    }
+
+    #[tokio::test]
+    async fn invokes_checked_in_rejection_sidecar_through_the_rust_boundary() {
+        let parent = tempfile::tempdir().unwrap();
+        #[cfg(unix)]
+        let verifier_path;
+        #[cfg(windows)]
+        let verifier_path = {
+            let source = std::fs::canonicalize(
+                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../tools/authority-adapters/pypi-verifier/dist/creg-pypi-authority-verifier.exe"),
+            )
+            .expect("the checked-in Windows sidecar artifact must be present");
+            let install_dir = parent.path().join("verifier");
+            std::fs::create_dir_all(&install_dir).unwrap();
+            let installed = install_dir.join("creg-pypi-authority-verifier.exe");
+            std::fs::copy(source, &installed).unwrap();
+            std::fs::canonicalize(installed).unwrap()
+        };
+        #[cfg(unix)]
+        {
+            let wrapper = parent.path().join(if cfg!(windows) {
+                "rejection-sidecar.cmd"
+            } else {
+                "rejection-sidecar.sh"
+            });
+            let node = node_runtime();
+            let stub = std::fs::canonicalize(
+                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../tools/authority-adapters/src/rejection-stub.mjs"),
+            )
+            .unwrap();
+            let script = if cfg!(windows) {
+                format!(
+                    "@echo off\r\n\"{}\" \"{}\"\r\n",
+                    node.display(),
+                    stub.display()
+                )
+            } else {
+                format!(
+                    "#!/bin/sh\nexec \"{}\" \"{}\"\n",
+                    node.display(),
+                    stub.display()
+                )
+            };
+            std::fs::write(&wrapper, script).unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o700)).unwrap();
+            }
+            verifier_path = std::fs::canonicalize(&wrapper).unwrap();
+        }
+        let mut adapter_config = config();
+        adapter_config.verifier_path = verifier_path;
+        adapter_config.verifier_sha256 = sha256_file(&adapter_config.verifier_path).unwrap();
+        adapter_config.scratch_root = parent.path().join("scratch");
+        let mut live_request = request();
+        let now = Utc::now().timestamp();
+        live_request.challenge.issued_at = now - 10;
+        live_request.challenge.expires_at = now + 300;
+        let signing_key = SigningKey::from_bytes(&[7; 32]);
+        live_request.challenge.next_controller_signature = hex::encode(
+            signing_key
+                .sign(live_request.challenge.signing_message().as_bytes())
+                .to_bytes(),
+        );
+        let error = verify_with_sidecar(&adapter_config, &live_request)
+            .await
+            .expect_err("the checked-in rejection sidecar must never verify authority");
+        assert!(matches!(error, AuthorityAdapterError::VerifierRejected));
+        assert!(
+            std::fs::read_dir(&adapter_config.scratch_root)
+                .map(|entries| entries.count() == 0)
+                .unwrap_or(true),
+            "private invocation scratch must be removed after rejection"
+        );
     }
 
     #[test]

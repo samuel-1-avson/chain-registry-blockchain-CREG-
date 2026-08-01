@@ -3698,8 +3698,9 @@ fn authority_adapter_config(
         DEFAULT_MAX_RESULT_BYTES,
         HARD_MAX_RESULT_BYTES,
     )?;
-    let canonical_data_dir = std::fs::canonicalize(data_dir)
-        .map_err(|error| format!("cannot resolve node data directory for verifier scratch: {error}"))?;
+    let canonical_data_dir = std::fs::canonicalize(data_dir).map_err(|error| {
+        format!("cannot resolve node data directory for verifier scratch: {error}")
+    })?;
     Ok(AuthorityAdapterConfig {
         verifier_path,
         scratch_root: canonical_data_dir.join("authority-verifier-scratch"),
@@ -3746,9 +3747,7 @@ fn authority_archive_policy(
         ));
     }
     if policy.max_entries < 2 {
-        return Err(
-            "CREG_NAMESPACE_AUTHORITY_ARCHIVE_MAX_ENTRIES must be at least 2".to_owned(),
-        );
+        return Err("CREG_NAMESPACE_AUTHORITY_ARCHIVE_MAX_ENTRIES must be at least 2".to_owned());
     }
     Ok(policy)
 }
@@ -3770,6 +3769,7 @@ fn authority_adapter_error_response(error: AuthorityAdapterError) -> Response {
         AuthorityAdapterError::InvalidConfig(_)
         | AuthorityAdapterError::VerifierUnavailable
         | AuthorityAdapterError::VerifierDigestMismatch
+        | AuthorityAdapterError::ProcessContainmentUnavailable
         | AuthorityAdapterError::Spawn(_)
         | AuthorityAdapterError::Timeout
         | AuthorityAdapterError::UnexpectedDiagnostics
@@ -5143,13 +5143,13 @@ mod tests {
         let message = common::validator_set_transition_message(&checkpoint);
         let signer_id = checkpoint.validators.validators[0].id.clone();
         let signer_pubkey = checkpoint.validators.validators[0].pubkey.clone();
-        checkpoint.transition_signatures.push(
-            common::ValidatorSetTransitionSignature {
+        checkpoint
+            .transition_signatures
+            .push(common::ValidatorSetTransitionSignature {
                 validator_id: signer_id,
                 validator_pubkey: signer_pubkey,
                 signature: hex::encode(signing_key.sign(message.as_bytes()).to_bytes()),
-            },
-        );
+            });
         checkpoint
     }
 

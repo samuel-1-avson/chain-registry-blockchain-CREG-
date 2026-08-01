@@ -9,6 +9,7 @@
 
 ARG PROFILE=full
 ARG NETWORK_RETRIES=1
+ARG CREG_SPEC_SIGNING_PUBKEY=3fe87833177b04b0a18600eace041692a35fb2b85f6e14e6734d894a0fd61c01
 
 # ── Stage 1: Build Frontend ───────────────────────────────────────────────────
 FROM node:20-slim AS frontend-builder
@@ -25,6 +26,7 @@ FROM rust:1.90-slim-bookworm AS rust-toolchain
 # Ubuntu 24.04 is required because ort (ONNX Runtime) 2.0.0-rc.12 prebuilt binaries
 # link against glibc 2.38+ symbols (__isoc23_strtoll etc.) not present in Debian 12.
 FROM ubuntu:24.04 AS builder
+ARG CREG_SPEC_SIGNING_PUBKEY
 
 # Install native dependencies for:
 # - OpenSSL (reqwest)
@@ -64,6 +66,7 @@ ENV CLANG_PATH=/usr/bin/clang-17
 ENV PATH="/usr/local/cargo/bin:$PATH"
 ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 ENV CARGO_BUILD_JOBS=1
+ENV CREG_SPEC_SIGNING_PUBKEY=${CREG_SPEC_SIGNING_PUBKEY}
 ARG SOURCE_DATE_EPOCH
 ENV SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}
 ENV CARGO_INCREMENTAL=0

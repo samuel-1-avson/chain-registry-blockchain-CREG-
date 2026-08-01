@@ -9,6 +9,8 @@ param(
     [string]$RpcUrl = "https://ethereum-sepolia-rpc.publicnode.com",
     [string]$ValidatorKey1Environment = "CREG_VALIDATOR_KEY_1",
     [string]$ValidatorKey2Environment = "CREG_VALIDATOR_KEY_2",
+    [string]$ProjectId,
+    [switch]$FromSecretManager,
     [switch]$Force
 )
 
@@ -23,6 +25,25 @@ if ((Test-Path $outPath) -and -not $Force) {
     exit 0
 }
 
+if ($FromSecretManager) {
+    if ([string]::IsNullOrWhiteSpace($ProjectId)) {
+        $hosting = Join-Path $scriptDir "gcp\hosting.env"
+        $line = Get-Content -LiteralPath $hosting -ErrorAction Stop | Where-Object { $_ -match '^\s*GCP_PROJECT\s*=' } | Select-Object -First 1
+        if (-not $line) { throw "Pass -ProjectId or configure GCP_PROJECT in testnet/gcp/hosting.env" }
+        $ProjectId = ($line -split '=', 2)[1].Trim()
+    }
+    $gcloud = (Get-Command gcloud.cmd -ErrorAction SilentlyContinue).Source
+    if (-not $gcloud) { throw "gcloud.cmd is required for -FromSecretManager" }
+    foreach ($entry in @(
+        @{ Environment = $ValidatorKey1Environment; Secret = "creg-fresh-testnet-validator-1-ed25519" },
+        @{ Environment = $ValidatorKey2Environment; Secret = "creg-fresh-testnet-validator-2-ed25519" }
+    )) {
+        $value = (& $gcloud secrets versions access latest --secret=$($entry.Secret) --project=$ProjectId 2>$null | Out-String).Trim()
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($value)) { throw "Could not load $($entry.Secret) from Secret Manager" }
+        [Environment]::SetEnvironmentVariable($entry.Environment, $value, "Process")
+    }
+}
+
 $key1 = [Environment]::GetEnvironmentVariable($ValidatorKey1Environment, "Process")
 if ([string]::IsNullOrWhiteSpace($key1) -or $key1.Trim() -notmatch '^(0x)?[0-9a-fA-F]{64}$') {
     throw "$ValidatorKey1Environment must be loaded from an approved secret manager and contain one 32-byte Ed25519 key"
@@ -30,19 +51,8 @@ if ([string]::IsNullOrWhiteSpace($key1) -or $key1.Trim() -notmatch '^(0x)?[0-9a-
 $key1 = $key1.Trim().ToLowerInvariant() -replace '^0x', ''
 
 $key2 = [Environment]::GetEnvironmentVariable($ValidatorKey2Environment, "Process")
-$generatedKey2Environment = $null
 if ([string]::IsNullOrWhiteSpace($key2)) {
-    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
-    try {
-        $bytes = New-Object byte[] 32
-        $rng.GetBytes($bytes)
-        $key2 = ([BitConverter]::ToString($bytes) -replace '-', '').ToLowerInvariant()
-    } finally {
-        $rng.Dispose()
-    }
-    $generatedKey2Environment = "CREG_GENERATED_VALIDATOR_KEY_2"
-    [Environment]::SetEnvironmentVariable($generatedKey2Environment, $key2, "Process")
-    $ValidatorKey2Environment = $generatedKey2Environment
+    throw "$ValidatorKey2Environment must be loaded from an approved secret manager and contain one 32-byte Ed25519 key"
 } elseif ($key2.Trim() -notmatch '^(0x)?[0-9a-fA-F]{64}$') {
     throw "$ValidatorKey2Environment must contain one 32-byte Ed25519 key"
 } else {
@@ -53,11 +63,7 @@ Set-Location $repoRoot
 try {
     $pub1 = (cargo run -q --example ed25519_pubkey_from_secret -p common -- --key-env $ValidatorKey1Environment 2>&1 | Select-Object -Last 1).Trim()
     $pub2 = (cargo run -q --example ed25519_pubkey_from_secret -p common -- --key-env $ValidatorKey2Environment 2>&1 | Select-Object -Last 1).Trim()
-} finally {
-    if ($generatedKey2Environment) {
-        [Environment]::SetEnvironmentVariable($generatedKey2Environment, $null, "Process")
-    }
-}
+} finally { }
 if ($pub1 -eq "0437e4adac481519cd6ae66907294c40cfcbf0bdeadd47806f6233be4bd5f82d") {
     throw "Validator 1 uses repository-disclosed development key material; rotate it before generating a fleet environment"
 }
@@ -66,6 +72,10 @@ $spec = Get-Content -LiteralPath $specPath -Raw | ConvertFrom-Json
 $expectedBootstrapPubkey = [string]$spec.validator_set.validators[0].pubkey
 if ($pub1 -ne $expectedBootstrapPubkey.ToLowerInvariant()) {
     throw "Validator 1 key does not match the signed spec bootstrap identity; complete the reviewed spec/key migration first"
+}
+$expectedValidator2Pubkey = [string]$spec.validator_set.validators[1].pubkey
+if ($pub2 -ne $expectedValidator2Pubkey.ToLowerInvariant()) {
+    throw "Validator 2 key does not match the signed spec validator-2 identity"
 }
 
 $content = @"
@@ -92,6 +102,8 @@ CREG_3NODE_NODE2_P2P_PORT=29101
 CREG_3NODE_NODE3_API_PORT=28182
 CREG_3NODE_NODE3_P2P_PORT=29102
 CREG_DEV_SANDBOX=false
+CREG_GENESIS_HASH=$($spec.genesis_hash)
+CREG_SPEC_SIGNING_PUBKEY=$($spec.signing.signing_key_pubkey_hex)
 CREG_VALIDATOR_KEY_1=$key1
 CREG_VALIDATOR_KEY_2=$key2
 # core-1 pubkey: $pub1
@@ -99,5 +111,9 @@ CREG_VALIDATOR_KEY_2=$key2
 "@
 
 Set-Content -Path $outPath -Value $content -Encoding UTF8
+if ($FromSecretManager) {
+    Remove-Item "Env:$ValidatorKey1Environment" -ErrorAction SilentlyContinue
+    Remove-Item "Env:$ValidatorKey2Environment" -ErrorAction SilentlyContinue
+}
 Write-Host "Wrote $outPath" -ForegroundColor Green
 Write-Host "Next: set CREG_EDGE_INTERNAL_IP, then ./testnet/start-validator-fleet-gcp.sh on the validator VM"

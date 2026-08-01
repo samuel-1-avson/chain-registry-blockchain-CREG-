@@ -13,14 +13,10 @@
     "complete_system_release_readiness": "not_evaluated"
   },
   "release_readiness": {
-    "status": "blocked",
-    "ready": false,
+    "status": "ready",
+    "ready": true,
     "scope": "signed_sepolia_repository_publication_only",
-    "blockers": [
-      "sepolia_canonical_integrity_invalid",
-      "sepolia_publication_mirrors_diverge",
-      "sepolia_signing_key_unacceptable"
-    ],
+    "blockers": [],
     "complete_system_release_readiness": "not_evaluated"
   },
   "inputs": [
@@ -38,7 +34,7 @@
     },
     {
       "path": "contracts/Registry.sol",
-      "sha256": "8007c1f51ea9c8938fc1354dc5914cc63fd693ad92fc3dcb01cca00dc3bdf408"
+      "sha256": "09be7a0c96caadcea29a706390fb460481b3a40e257eaeb8a9796316d7bec9fe"
     },
     {
       "path": "docker-compose.light.yml",
@@ -74,11 +70,11 @@
     },
     {
       "path": "testnet/.env.example",
-      "sha256": "0035caf565dba20afac47a536cfbf2c9b08d9ca65aaddf4b2c00717cdd541fbf"
+      "sha256": "9d462e11fdf4dc9a2da661a8a705ad53c821182299099cf7625216bf60b5609a"
     },
     {
       "path": "testnet/bootstrap/bootstrap.env.example",
-      "sha256": "4f57c4c258ee5d9bb0bb79e4d7124054a88700cb851a9d0522b786cf9ee17cad"
+      "sha256": "55b8d74e37b1831f74f2d022a9c39cd9937e837cd03d08ac5ad14259a7b93078"
     },
     {
       "path": "testnet/bootstrap/docker-compose.yml",
@@ -94,19 +90,19 @@
     },
     {
       "path": "testnet/chain-spec.sepolia.json",
-      "sha256": "78585e2269babfa18fbd0c7565552d17feb8b88d6e6273fea3af3d3eeab34629"
+      "sha256": "8685d45e96e93971b8b01245f9ac325cbab197678ae49be38ab0aaf86589fec8"
     },
     {
       "path": "testnet/chain-spec.sepolia.json.sig",
-      "sha256": "f04cda66afa36b4e4cdc7b71fd8d6b7fb1766e108950a0f3775f7a56a68760a6"
+      "sha256": "651c2b4a216aa8e0b9a99f593ed050ec17c0c299d4d3d55a02e40ddce0d80b48"
     },
     {
       "path": "testnet/docker-compose.observer-pool.yml",
-      "sha256": "d8c6b5c6a9e5ae9950fc438453d3dd2ca0f747d103bdf13adec2530aafebc908"
+      "sha256": "bb9872d59f5473c183eeb3d3d8f55c29a81dfdfefac8112c18df6d0426d92e78"
     },
     {
       "path": "testnet/docker-compose.validator-fleet.yml",
-      "sha256": "5dead5c83885a7595deade65c6929d937204ed4b9f2678ddd29b1f5c39d9e396"
+      "sha256": "47ec0f98ced766b38ed6f96e3d89bcbcd929a0dd17cbd58fd304ec8096a4279c"
     },
     {
       "path": "testnet/docker-compose.validator.yml",
@@ -122,23 +118,23 @@
     },
     {
       "path": "testnet/sepolia-fleet.env.example",
-      "sha256": "d4ecab68d7a8c8fb350b14bd2eabf0092367352943780524edc1ef8e2e096f11"
+      "sha256": "793dbb1ce1d4e5e71e6c540143af1dc9fa0befb19fb7c67c92fd5e194e066b86"
     },
     {
       "path": "testnet/spec-server/chain-spec.json",
-      "sha256": "ddd5dd8e8aaed33e8a90acaa00715b65e210115b411b25fec3079e2c445c9dfb"
+      "sha256": "8685d45e96e93971b8b01245f9ac325cbab197678ae49be38ab0aaf86589fec8"
     },
     {
       "path": "testnet/spec-server/chain-spec.json.sig",
-      "sha256": "780b781afe8958c635c519267ee1e5ffe22e35b89b885b000a91e3175014e790"
+      "sha256": "651c2b4a216aa8e0b9a99f593ed050ec17c0c299d4d3d55a02e40ddce0d80b48"
     },
     {
       "path": "testnet/spec-server/chain-spec.sepolia.json",
-      "sha256": "d667878b5cc2f495f3ebc20daa025d750c1333e11a95dd028585b8372ed9f3a0"
+      "sha256": "8685d45e96e93971b8b01245f9ac325cbab197678ae49be38ab0aaf86589fec8"
     },
     {
       "path": "testnet/spec-server/chain-spec.sepolia.json.sig",
-      "sha256": "6dfec63c0e88d618abb327979db22a7b94018381d8514dbb5ec7bb4e0ffacd69"
+      "sha256": "651c2b4a216aa8e0b9a99f593ed050ec17c0c299d4d3d55a02e40ddce0d80b48"
     }
   ],
   "chain_specs": [
@@ -240,74 +236,66 @@
     },
     {
       "id": "signed_sepolia_spec_publication",
-      "repository_state": "blocked",
-      "release_ready": false,
-      "blockers": [
-        "sepolia_canonical_integrity_invalid",
-        "sepolia_publication_mirrors_diverge",
-        "sepolia_signing_key_unacceptable"
-      ],
+      "repository_state": "ready",
+      "release_ready": true,
+      "blockers": [],
       "deployed_state": "not_evaluated"
     }
   ],
   "sepolia_publication_integrity": {
-    "status": "blocked",
-    "release_ready": false,
+    "status": "ready",
+    "release_ready": true,
     "readiness_scope": "signed_sepolia_repository_publication_only",
-    "blockers": [
-      "sepolia_canonical_integrity_invalid",
-      "sepolia_publication_mirrors_diverge",
-      "sepolia_signing_key_unacceptable"
-    ],
+    "blockers": [],
     "canonical": {
       "spec_path": "testnet/chain-spec.sepolia.json",
       "signature_path": "testnet/chain-spec.sepolia.json.sig",
-      "declared_genesis_hash": "0x0bb4b1ff2f1d0f86c678f5d31da99b0abf84dca46e29c728321afe55cf0e6660",
-      "computed_genesis_hash": "0xddd15847e100e98ac8d85e80f91a4fa1e21f7f936f58aea762434cf590a11e0a",
-      "genesis_hash_valid": false,
-      "spec_sha256": "78585e2269babfa18fbd0c7565552d17feb8b88d6e6273fea3af3d3eeab34629",
-      "signature_sha256": "f04cda66afa36b4e4cdc7b71fd8d6b7fb1766e108950a0f3775f7a56a68760a6",
-      "spec_byte_length": 2577,
-      "signature_byte_length": 128,
+      "declared_genesis_hash": "0xbca931fadf9ff600c5db30fefa63e709f3ae0d01d65520a407c0b1ad18bd1ec5",
+      "computed_genesis_hash": "0xbca931fadf9ff600c5db30fefa63e709f3ae0d01d65520a407c0b1ad18bd1ec5",
+      "genesis_hash_valid": true,
+      "spec_sha256": "8685d45e96e93971b8b01245f9ac325cbab197678ae49be38ab0aaf86589fec8",
+      "signature_sha256": "651c2b4a216aa8e0b9a99f593ed050ec17c0c299d4d3d55a02e40ddce0d80b48",
+      "spec_byte_length": 3144,
+      "signature_byte_length": 130,
       "signature_format_valid": true,
-      "signature_cryptographically_valid": false,
-      "status": "blocked"
+      "signature_cryptographically_valid": true,
+      "status": "valid"
     },
     "mirrors": [
       {
         "spec_path": "testnet/spec-server/chain-spec.sepolia.json",
         "signature_path": "testnet/spec-server/chain-spec.sepolia.json.sig",
-        "spec_sha256": "d667878b5cc2f495f3ebc20daa025d750c1333e11a95dd028585b8372ed9f3a0",
-        "signature_sha256": "6dfec63c0e88d618abb327979db22a7b94018381d8514dbb5ec7bb4e0ffacd69",
-        "spec_byte_length": 2731,
-        "signature_byte_length": 128,
-        "exact_spec_bytes": false,
-        "exact_signature_bytes": false,
-        "exact_publication_pair": false,
-        "status": "blocked"
+        "spec_sha256": "8685d45e96e93971b8b01245f9ac325cbab197678ae49be38ab0aaf86589fec8",
+        "signature_sha256": "651c2b4a216aa8e0b9a99f593ed050ec17c0c299d4d3d55a02e40ddce0d80b48",
+        "spec_byte_length": 3144,
+        "signature_byte_length": 130,
+        "exact_spec_bytes": true,
+        "exact_signature_bytes": true,
+        "exact_publication_pair": true,
+        "status": "valid"
       },
       {
         "spec_path": "testnet/spec-server/chain-spec.json",
         "signature_path": "testnet/spec-server/chain-spec.json.sig",
-        "spec_sha256": "ddd5dd8e8aaed33e8a90acaa00715b65e210115b411b25fec3079e2c445c9dfb",
-        "signature_sha256": "780b781afe8958c635c519267ee1e5ffe22e35b89b885b000a91e3175014e790",
-        "spec_byte_length": 2729,
+        "spec_sha256": "8685d45e96e93971b8b01245f9ac325cbab197678ae49be38ab0aaf86589fec8",
+        "signature_sha256": "651c2b4a216aa8e0b9a99f593ed050ec17c0c299d4d3d55a02e40ddce0d80b48",
+        "spec_byte_length": 3144,
         "signature_byte_length": 130,
-        "exact_spec_bytes": false,
-        "exact_signature_bytes": false,
-        "exact_publication_pair": false,
-        "status": "blocked"
+        "exact_spec_bytes": true,
+        "exact_signature_bytes": true,
+        "exact_publication_pair": true,
+        "status": "valid"
       }
     ],
-    "mirrors_exact": false,
+    "mirrors_exact": true,
     "signing_key": {
-      "configured_pubkey_hex": "0437e4adac481519cd6ae66907294c40cfcbf0bdeadd47806f6233be4bd5f82d",
-      "repository_disclosed_development_key": true,
+      "configured_pubkey_hex": "3fe87833177b04b0a18600eace041692a35fb2b85f6e14e6734d894a0fd61c01",
+      "repository_disclosed_development_key": false,
       "disclosure_source": "testnet/require-spec-signing-key.ps1",
-      "disallowed_by_activation_manifest": true,
+      "disallowed_by_activation_manifest": false,
       "disallow_source": "config/cr07-activation-manifest.json",
-      "acceptable_for_publication": false,
-      "status": "blocked"
+      "acceptable_for_publication": true,
+      "status": "valid"
     }
   },
   "retirement_contract": {

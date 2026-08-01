@@ -19,7 +19,10 @@ New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 
 if ($BuildFromSource) {
     Write-Host "Building creg + creg-node from source..." -ForegroundColor Cyan
-    cargo build --release --package chain-registry-cli --package chain-registry-node
+    if (-not $env:CREG_SPEC_SIGNING_PUBKEY) {
+        $env:CREG_SPEC_SIGNING_PUBKEY = "3fe87833177b04b0a18600eace041692a35fb2b85f6e14e6734d894a0fd61c01"
+    }
+    cargo build --locked --release --package chain-registry-cli --package chain-registry-node
     Copy-Item "target\release\creg.exe" (Join-Path $InstallDir "creg.exe") -Force
     Copy-Item "target\release\creg-node.exe" (Join-Path $InstallDir "creg-node.exe") -Force
     Write-Host "Installed to $InstallDir" -ForegroundColor Green
@@ -48,11 +51,32 @@ if (-not $githubRepo) {
 $asset = "chain-registry-$Version-windows-amd64.zip"
 $url = "https://github.com/$githubRepo/releases/download/$Version/$asset"
 $zip = Join-Path $env:TEMP $asset
+$checksums = Join-Path $env:TEMP "creg-$Version-SHA256SUMS"
 
 Write-Host "Downloading $url ..." -ForegroundColor Cyan
 Invoke-WebRequest -Uri $url -OutFile $zip
+
+$checksumsUrl = "https://github.com/$githubRepo/releases/download/$Version/SHA256SUMS"
+Write-Host "Downloading checksum manifest ..." -ForegroundColor Cyan
+Invoke-WebRequest -Uri $checksumsUrl -OutFile $checksums
+$checksumPattern = "^\s*([0-9a-fA-F]{64})\s+\*?" + [regex]::Escape($asset) + "\s*$"
+$checksumLine = (Get-Content $checksums -Raw -ErrorAction Stop) -split "`r?`n" |
+    Where-Object { $_ -match $checksumPattern } |
+    Select-Object -First 1
+if (-not $checksumLine) {
+    Remove-Item $zip,$checksums -Force -ErrorAction SilentlyContinue
+    throw "SHA256SUMS does not contain an entry for $asset"
+}
+$null = $checksumLine -match $checksumPattern
+$expectedHash = $matches[1].ToLowerInvariant()
+$actualHash = (Get-FileHash -Path $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($actualHash -ne $expectedHash) {
+    Remove-Item $zip,$checksums -Force -ErrorAction SilentlyContinue
+    throw "Checksum mismatch for $asset (expected $expectedHash, got $actualHash)"
+}
+Write-Host "SHA-256 verified: $actualHash" -ForegroundColor Green
 Expand-Archive -Path $zip -DestinationPath $InstallDir -Force
-Remove-Item $zip -Force
+Remove-Item $zip,$checksums -Force
 
 Write-Host "Installed creg + creg-node to $InstallDir" -ForegroundColor Green
 Write-Host "Add to PATH: `$env:Path += ';$InstallDir'"

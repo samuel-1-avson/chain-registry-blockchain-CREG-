@@ -1,14 +1,16 @@
 # Chain Registry — Start Single Local Node (Windows PowerShell)
-# Usage: ./start-local-node.ps1 [-ValidatorKey <hex>]
+# Usage: ./start-local-node.ps1 [-ValidatorKey <hex>] [-NodeBinary <path>]
 #
 # This starts a single chain-registry node against Sepolia using the signed chain spec.
-# No Docker required. Uses cargo run (debug build).
+# No Docker required. Prefers the packaged release binaries; cargo is a
+# developer-only fallback when no release binary is available.
 
 param(
     [string]$ValidatorKey = "",
     [string]$NodeId = "local-test",
     [string]$DataDir = "./node-data",
     [string]$RpcUrl = "https://ethereum-sepolia-rpc.publicnode.com",
+    [string]$NodeBinary = "",
     [switch]$Validator
 )
 
@@ -19,15 +21,33 @@ Write-Host "══════════════════════�
 Write-Host "  Chain Registry — Local Node Starter" -ForegroundColor Cyan
 Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
 
+# Resolve release binaries when available. Source builds remain a developer
+# fallback, but a clean operator machine should use the packaged binaries.
+$nodeCommand = $null
+$cliCommand = $null
+if ($NodeBinary) {
+    if (-not (Test-Path $NodeBinary)) { throw "Node binary not found: $NodeBinary" }
+    $nodeCommand = (Resolve-Path $NodeBinary).Path
+    $cliCandidate = Join-Path (Split-Path $nodeCommand -Parent) "creg.exe"
+    if (Test-Path $cliCandidate) { $cliCommand = (Resolve-Path $cliCandidate).Path }
+} else {
+    $nodeOnPath = Get-Command creg-node -ErrorAction SilentlyContinue
+    $cliOnPath = Get-Command creg -ErrorAction SilentlyContinue
+    if ($nodeOnPath) { $nodeCommand = $nodeOnPath.Source }
+    if ($cliOnPath) { $cliCommand = $cliOnPath.Source }
+}
+
 # Check prerequisites
 Write-Host "`n[1/5] Checking prerequisites..." -ForegroundColor Yellow
 
 $hasCargo = Get-Command cargo -ErrorAction SilentlyContinue
-if (-not $hasCargo) {
+if (-not $hasCargo -and -not $nodeCommand) {
     Write-Error "Rust/Cargo not found. Install from https://rustup.rs/"
     exit 1
 }
-Write-Host "  ✓ Cargo found: $(cargo --version)"
+if ($hasCargo) { Write-Host "  ✓ Cargo found: $(cargo --version)" }
+if ($nodeCommand) { Write-Host "  ✓ Release node: $nodeCommand" }
+if ($cliCommand) { Write-Host "  ✓ Release CLI:  $cliCommand" }
 
 # Check chain spec exists
 $specPath = "$repoRoot/testnet/chain-spec.sepolia.json"
@@ -40,8 +60,7 @@ Write-Host "  ✓ Chain spec found"
 # Check signature exists
 $sigPath = "$repoRoot/testnet/chain-spec.sepolia.json.sig"
 if (-not (Test-Path $sigPath)) {
-    Write-Warning "Signature file not found: $sigPath"
-    Write-Warning "Node will skip signature verification"
+    throw "Signature file not found: $sigPath. Refusing to start without a signed chain spec."
 }
 
 # Create data directory
@@ -53,7 +72,7 @@ Write-Host "`n[2/5] Configuring environment..." -ForegroundColor Yellow
 
 $env:CARGO_MANIFEST_DIR = "$repoRoot"
 $env:CREG_CHAIN_SPEC_URL = "file:///$($specPath -replace '\\','/')"
-$env:CREG_SPEC_SIGNING_PUBKEY = "0437e4adac481519cd6ae66907294c40cfcbf0bdeadd47806f6233be4bd5f82d"
+$env:CREG_SPEC_SIGNING_PUBKEY = "3fe87833177b04b0a18600eace041692a35fb2b85f6e14e6734d894a0fd61c01"
 $env:CREG_ETH_RPC_URL = $RpcUrl
 $env:CREG_NODE_ID = $NodeId
 $env:CREG_DATA_DIR = (Resolve-Path $DataDir).Path
@@ -67,14 +86,7 @@ if ($Validator -and $ValidatorKey) {
     $env:CREG_VALIDATOR_KEY = $ValidatorKey
     Write-Host "  ✓ Validator mode ENABLED"
 } elseif ($Validator) {
-    Write-Warning "Validator mode requested but no key provided. Generating random key..."
-    # Generate a random key using .NET
-    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
-    $bytes = New-Object byte[] 32
-    $rng.GetBytes($bytes)
-    $hex = [BitConverter]::ToString($bytes) -replace '-',''
-    $env:CREG_VALIDATOR_KEY = $hex.ToLower()
-    Write-Host "  ✓ Generated random validator key: $hex"
+    throw "Validator mode requires -ValidatorKey matching an identity in the signed chain spec."
 } else {
     Write-Host "  ✓ Full node mode (non-validator)"
 }
@@ -86,23 +98,39 @@ Write-Host "  ✓ Node ID: $NodeId"
 # Verify chain spec signature
 Write-Host "`n[3/5] Verifying chain spec..." -ForegroundColor Yellow
 try {
-    $verifyOutput = & cargo run --example verify_chain_spec --package common --quiet -- "$specPath" (Get-Content $sigPath) 2>&1
+    $signature = (Get-Content $sigPath -Raw).Trim()
+    if ($signature -notmatch '^[0-9a-fA-F]{128}$') {
+        throw "Detached signature is not 64-byte hexadecimal"
+    }
+    if ($cliCommand) {
+        $verifyOutput = & $cliCommand chain-spec validate "$specPath" --signature "$sigPath" --pubkey $env:CREG_SPEC_SIGNING_PUBKEY --require-signature 2>&1
+    } else {
+        $verifyOutput = & cargo run --locked --example verify_chain_spec --package common --quiet -- "$specPath" $signature 2>&1
+    }
     if ($LASTEXITCODE -eq 0) {
         Write-Host "  ✓ Chain spec signature VALID" -ForegroundColor Green
     } else {
-        Write-Warning "Chain spec signature verification had issues (non-fatal for local testing)"
+        throw "Chain spec signature verification failed: $($verifyOutput -join ' ')"
     }
 } catch {
-    Write-Warning "Could not verify signature: $_"
+    throw "Refusing to start: chain spec signature verification failed. $_"
 }
 
 # Compute genesis hash
 Write-Host "`n[4/5] Computing genesis hash..." -ForegroundColor Yellow
 try {
-    $genesisHash = & cargo run --example compute_genesis_hash --package common --quiet -- "$specPath" 2>$null
+    if ($cliCommand) {
+        $genesisHash = & $cliCommand chain-spec compute-genesis-hash "$specPath" 2>$null
+    } else {
+        $genesisHash = & cargo run --locked --example compute_genesis_hash --package common --quiet -- "$specPath" 2>$null
+    }
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace(($genesisHash -join ''))) {
+        throw "genesis hash computation failed"
+    }
+    $env:CREG_GENESIS_HASH = ($genesisHash | Select-Object -Last 1).ToString().Trim()
     Write-Host "  ✓ Genesis hash: $genesisHash"
 } catch {
-    Write-Warning "Could not compute genesis hash: $_"
+    throw "Refusing to start: could not compute genesis hash. $_"
 }
 
 # Start node
@@ -114,4 +142,8 @@ Write-Host "  gRPC:    localhost:50051" -ForegroundColor Cyan
 Write-Host "  P2P:     localhost:9000`n" -ForegroundColor Cyan
 
 Set-Location $repoRoot
-cargo run --bin creg-node --package chain-registry-node
+if ($nodeCommand) {
+    & $nodeCommand
+} else {
+    cargo run --locked --bin creg-node --package chain-registry-node
+}

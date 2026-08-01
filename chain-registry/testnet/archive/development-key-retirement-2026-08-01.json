@@ -1,0 +1,34 @@
+{
+  "record_type": "development_signing_key_retirement",
+  "recorded_at": "2026-08-01",
+  "status": "spec_signing_rotation_complete_validator_rotation_external_required",
+  "secret_material_recorded": false,
+  "finding": {
+    "tracked_source": "testnet/archive/3node-lab/init-sepolia-3node-env.ps1",
+    "former_literal_location": "line 25",
+    "affected_role": "development validator-1 / chain-spec signing identity",
+    "public_key_status": "matches the repository-disclosed development signing key and current fixture",
+    "retirement_reason": "private seed was present in tracked source"
+  },
+  "repository_remediation": {
+    "hardcoded_seed_removed": true,
+    "script_requires_injected_key": true,
+    "script_requires_approved_secret_manager": true,
+    "script_parse_check": "passed",
+    "literal_64_hex_scan": "passed",
+    "new_spec_signing_secret": "creg-testnet-spec-signing-key",
+    "new_spec_signing_public_key": "3fe87833177b04b0a18600eace041692a35fb2b85f6e14e6734d894a0fd61c01",
+    "corrected_genesis_hash": "0x80568b6ac6e8694284ce799a8c1b4e7c0f6b1f153f41c78838c7788109d9f5cf",
+    "detached_signature_verified": true,
+    "spec_server_mirror_verified": true,
+    "local_key_copies_quarantined": true,
+    "quarantine_path": "operator-key-quarantine/2026-08-01",
+    "quarantine_file_count": 22
+  },
+  "operator_actions_required": [
+    "replace the compromised validator identity through an authenticated validator-set transition and staking/governance procedure",
+    "publish the rotated key and genesis only after independent review"
+  ],
+  "activation_blocked": true,
+  "validator_identity_still_uses_exposed_key": true
+}

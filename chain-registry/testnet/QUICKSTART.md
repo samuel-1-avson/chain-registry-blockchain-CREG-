@@ -26,6 +26,24 @@ cp .env.example .env
 Linux/macOS: `./start-local-node.sh -n my-node`  
 Windows: `.\start-local-node.ps1 -NodeId my-node`
 
+On a clean operator machine, install the signed release first instead of
+building Rust locally:
+
+```bash
+./scripts/install-creg.sh --version <release-tag>
+```
+
+```powershell
+.\scripts\install-creg.ps1 -Version <release-tag>
+```
+
+Both installers require the release `SHA256SUMS` entry to match before
+extracting an archive. Verify `SHA256SUMS.sig` and the GitHub provenance
+attestation against the release policy before handing the binaries to an
+operator. Once `creg` and `creg-node` are on `PATH`, the local starter prefers
+those packaged binaries automatically; use `-NodeBinary`/`--node-binary` to
+select an explicit path.
+
 ```bash
 curl http://localhost:8080/v1/health
 curl http://localhost:8080/v1/chain/stats | jq

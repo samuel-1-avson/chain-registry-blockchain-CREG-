@@ -160,63 +160,65 @@ test("emits a deterministic repository-only capability matrix", () => {
         "certified_committee_mandatory_mode",
         "staged_compatibility_defaults",
       ],
-      ["signed_sepolia_spec_publication", "blocked"],
+      ["signed_sepolia_spec_publication", "ready"],
     ],
   );
   assert.deepEqual(matrix.release_readiness, {
-    status: "blocked",
-    ready: false,
+    status: "ready",
+    ready: true,
     scope: "signed_sepolia_repository_publication_only",
-    blockers: [
-      "sepolia_canonical_integrity_invalid",
-      "sepolia_publication_mirrors_diverge",
-      "sepolia_signing_key_unacceptable",
-    ],
+    blockers: [],
     complete_system_release_readiness: "not_evaluated",
   });
   const publication = matrix.sepolia_publication_integrity;
-  assert.equal(publication.canonical.genesis_hash_valid, false);
+  assert.equal(publication.canonical.genesis_hash_valid, true);
   assert.equal(
     publication.canonical.signature_cryptographically_valid,
-    false,
+    true,
   );
-  assert.equal(publication.mirrors_exact, false);
+  assert.equal(publication.mirrors_exact, true);
   assert.equal(
     publication.mirrors.every(
       (mirror) =>
-        mirror.exact_spec_bytes === false &&
-        mirror.exact_signature_bytes === false &&
-        mirror.status === "blocked",
+        mirror.exact_spec_bytes === true &&
+        mirror.exact_signature_bytes === true &&
+        mirror.status === "valid",
     ),
     true,
   );
   assert.equal(
     publication.signing_key
       .repository_disclosed_development_key,
-    true,
+    false,
   );
   assert.equal(
     publication.signing_key
       .disallowed_by_activation_manifest,
-    true,
+    false,
   );
   assert.equal(
     publication.signing_key.acceptable_for_publication,
-    false,
+    true,
   );
 });
 
 test("release-readiness enforcement rejects the faithfully reported blockers", () => {
   const root = makeFixture();
+  editJson(root, SEPOLIA_CANONICAL_SPEC_PATH, (spec) => {
+    spec.genesis_hash = "0x" + "0".repeat(64);
+  });
   const matrix = buildCapabilityMatrix({ root });
   assert.throws(
     () => assertReleaseReady(matrix),
-    /sepolia_canonical_integrity_invalid, sepolia_publication_mirrors_diverge, sepolia_signing_key_unacceptable/u,
+    /sepolia_canonical_integrity_invalid, sepolia_publication_mirrors_diverge/u,
   );
 });
 
 test("release-readiness enforcement rejects a forged ready summary", () => {
   const root = makeFixture();
+  editJson(root, SEPOLIA_CANONICAL_SPEC_PATH, (spec) => {
+    spec.genesis_hash = "0x" + "0".repeat(64);
+  });
   const matrix = buildCapabilityMatrix({ root });
   matrix.release_readiness = {
     ...matrix.release_readiness,
@@ -230,7 +232,7 @@ test("release-readiness enforcement rejects a forged ready summary", () => {
   );
 });
 
-test("CLI release-readiness mode exits non-zero without emitting a false ready artifact", () => {
+test("CLI release-readiness mode emits the verified candidate artifact", () => {
   const root = makeFixture();
   const result = spawnSync(
     process.execPath,
@@ -242,12 +244,8 @@ test("CLI release-readiness mode exits non-zero without emitting a false ready a
     ],
     { encoding: "utf8" },
   );
-  assert.equal(result.status, 1);
-  assert.equal(result.stdout, "");
-  assert.match(
-    result.stderr,
-    /release readiness is blocked for signed_sepolia_repository_publication_only/u,
-  );
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, /"status": "ready"/u);
 });
 
 test("release-readiness enforcement accepts a fully consistent ephemeral publication fixture", () => {
@@ -288,6 +286,9 @@ test("reports spec and signature equality independently for each mirror", () => 
     resolve(root, SEPOLIA_CANONICAL_SIGNATURE_PATH),
     resolve(root, firstMirror.signature_path),
   );
+  const [, secondMirror] = SEPOLIA_PUBLICATION_MIRRORS;
+  editText(root, secondMirror.spec_path, (text) => `${text}\n`);
+  editText(root, secondMirror.signature_path, (text) => `${text}00`);
   const publication =
     buildCapabilityMatrix({ root }).sepolia_publication_integrity;
   assert.equal(publication.mirrors[0].exact_spec_bytes, true);
@@ -307,6 +308,7 @@ test("reports spec and signature equality independently for each mirror", () => 
 test("correct genesis alone remains blocked by the invalid signature", () => {
   const root = makeFixture();
   editJson(root, SEPOLIA_CANONICAL_SPEC_PATH, (spec) => {
+    spec.validator_set.validators[0].stake += 1;
     spec.genesis_hash = computeGenesisHash(spec);
   });
   const canonical =
@@ -319,6 +321,10 @@ test("correct genesis alone remains blocked by the invalid signature", () => {
 
 test("a disclosed development key stays blocked if removed from only one denylist", () => {
   const root = makeFixture();
+  editJson(root, SEPOLIA_CANONICAL_SPEC_PATH, (spec) => {
+    spec.signing.signing_key_pubkey_hex =
+      "0437e4adac481519cd6ae66907294c40cfcbf0bdeadd47806f6233be4bd5f82d";
+  });
   editJson(root, CR07_MANIFEST_PATH, (manifest) => {
     manifest.disallowed_signing_pubkeys = [];
   });

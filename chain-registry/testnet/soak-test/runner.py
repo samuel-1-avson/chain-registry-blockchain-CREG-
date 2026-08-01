@@ -19,6 +19,7 @@ import argparse
 import json
 import os
 import random
+import subprocess
 import sys
 import tempfile
 import threading
@@ -66,6 +67,7 @@ class SoakTestRunner:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.metrics_log: List[Dict] = []
         self.events_log: List[Dict] = []
+        self.rehearsal_results: List[Dict] = []
         self.published_count = 0
         self.verified_count = 0
         self._stop_event = threading.Event()
@@ -192,8 +194,69 @@ class SoakTestRunner:
         elif action == "l1_outage":
             self._log_event("WARN", "Simulating L1 RPC outage")
             # TODO: block L1 traffic
+        elif action in {
+            "transition_replay",
+            "checkpoint_bootstrap",
+            "reorg_anchor",
+            "long_range_history",
+            "rebuilt_node",
+            "process_kill_restart",
+        }:
+            self._run_rehearsal_hook(scenario)
         else:
             self._log_event("WARN", f"Unknown scenario action: {action}")
+
+    def _run_rehearsal_hook(self, scenario: dict):
+        """Run an operator-owned rehearsal hook without invoking a shell.
+
+        The repository supplies deterministic protocol tests, not authority to
+        kill processes, partition networks, or rewrite a live node. A live
+        rehearsal therefore requires an explicitly provisioned absolute hook
+        executable. Missing hooks are recorded as BLOCKED evidence rather than
+        silently treated as successful scenarios.
+        """
+        action = scenario["action"]
+        variable = f"CREG_REHEARSAL_HOOK_{action.upper()}"
+        hook = os.environ.get(variable, "").strip()
+        result = {
+            "action": action,
+            "evidence": scenario.get("evidence", action),
+            "hook_variable": variable,
+            "status": "blocked",
+        }
+        if not hook:
+            self._log_event(
+                "ERROR",
+                f"{action} rehearsal is blocked: set {variable} to an operator-owned absolute executable",
+            )
+            self.rehearsal_results.append(result)
+            return
+        hook_path = Path(hook)
+        if not hook_path.is_absolute() or not hook_path.is_file():
+            self._log_event("ERROR", f"{variable} must name an existing absolute executable")
+            result["error"] = "invalid hook path"
+            self.rehearsal_results.append(result)
+            return
+        output_dir = self.output_dir / str(result["evidence"])
+        output_dir.mkdir(parents=True, exist_ok=True)
+        timeout_seconds = int(self._parse_duration(scenario.get("duration", "10m")).total_seconds())
+        try:
+            completed = subprocess.run(
+                [str(hook_path), "--scenario", action, "--output", str(output_dir)],
+                check=False,
+                timeout=timeout_seconds,
+                capture_output=True,
+                text=True,
+            )
+            (output_dir / "hook.stdout.log").write_text(completed.stdout, encoding="utf-8")
+            (output_dir / "hook.stderr.log").write_text(completed.stderr, encoding="utf-8")
+            result["status"] = "pass" if completed.returncode == 0 else "fail"
+            result["returncode"] = completed.returncode
+        except subprocess.TimeoutExpired:
+            result["status"] = "fail"
+            result["error"] = "hook timeout"
+            self._log_event("ERROR", f"{action} rehearsal hook timed out")
+        self.rehearsal_results.append(result)
 
     @staticmethod
     def _parse_duration(s: str) -> timedelta:
@@ -255,6 +318,7 @@ class SoakTestRunner:
             "published_count": self.published_count,
             "metrics_samples": len(self.metrics_log),
             "events": len(self.events_log),
+            "rehearsals": self.rehearsal_results,
             "success_criteria": self._evaluate_success_criteria(),
         }
         with open(report_path, "w") as f:
@@ -303,6 +367,8 @@ class SoakTestRunner:
             overall = "FAIL"
         elif min_validators < 3:
             overall = "FAIL"
+        elif any(item.get("status") != "pass" for item in self.rehearsal_results):
+            overall = "BLOCKED"
 
         results["overall"] = overall
         return results

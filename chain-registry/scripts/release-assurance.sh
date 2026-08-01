@@ -25,6 +25,10 @@ cd "$ROOT"
 mkdir -p "$ART"
 
 export CARGO_INCREMENTAL=0
+if [[ -z "${CREG_SPEC_SIGNING_PUBKEY:-}" || ! "${CREG_SPEC_SIGNING_PUBKEY}" =~ ^[0-9a-fA-F]{64}$ ]]; then
+  echo "release-assurance: CREG_SPEC_SIGNING_PUBKEY must be a 32-byte hexadecimal public key" >&2
+  exit 1
+fi
 if [[ -z "${SOURCE_DATE_EPOCH:-}" ]]; then
   export SOURCE_DATE_EPOCH="$(git log -1 --pretty=%ct)"
 fi

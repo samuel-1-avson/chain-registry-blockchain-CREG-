@@ -1640,17 +1640,15 @@ mod tests {
             },
         )
         .await?;
-        assert!(matches!(
-            acceptance,
-            gossipsub::MessageAcceptance::Ignore
-        ));
+        assert!(matches!(acceptance, gossipsub::MessageAcceptance::Ignore));
 
         let persisted = crate::validator_set_history::load_checked(dir.path())?;
         assert_eq!(persisted.len(), 1);
         assert_eq!(
-            persisted[0].certificate.as_ref().map(
-                common::validator_snapshot_certificate_hash
-            ),
+            persisted[0]
+                .certificate
+                .as_ref()
+                .map(common::validator_snapshot_certificate_hash),
             Some(common::validator_snapshot_certificate_hash(&checkpoint))
         );
         assert_eq!(

@@ -1,6 +1,8 @@
 # Multi-stage build optimized for Windows Docker Desktop
 # Uses pre-built Rust toolchain to avoid network issues
 
+ARG CREG_SPEC_SIGNING_PUBKEY=3fe87833177b04b0a18600eace041692a35fb2b85f6e14e6734d894a0fd61c01
+
 # ── Stage 1: Build Frontend ───────────────────────────────────────────────────
 FROM node:20-slim AS frontend-builder
 WORKDIR /explorer
@@ -12,6 +14,7 @@ RUN npm run build
 # ── Stage 2: Build Rust Backend ───────────────────────────────────────────────
 # Use Rust official image which has toolchain pre-installed
 FROM rust:1.90-bookworm AS builder
+ARG CREG_SPEC_SIGNING_PUBKEY
 
 # Install native dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -34,6 +37,7 @@ ENV CARGO_HOME=/usr/local/cargo
 ENV RUSTUP_HOME=/usr/local/rustup
 ENV PATH="/usr/local/cargo/bin:$PATH"
 ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
+ENV CREG_SPEC_SIGNING_PUBKEY=${CREG_SPEC_SIGNING_PUBKEY}
 # bindgen (librocksdb-sys) on Debian bookworm
 ENV LIBCLANG_PATH=/usr/lib/x86_64-linux-gnu
 
