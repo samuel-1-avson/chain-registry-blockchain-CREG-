@@ -51,6 +51,7 @@ $defaults = @{
     GCP_ALERT_SMTP_PASSWORD = ""
     GCP_STATIC_BUCKET   = ""
     GCP_OBSERVER_MIG_NAME = "creg-observer-pool"
+    GCP_OBSERVER_TEMPLATE_NAME = "creg-observer-pool-template-v3"
     GCP_OBSERVER_MACHINE_TYPE = "e2-medium"
     GCP_OBSERVER_DISK_GB = "30"
     GCP_OBSERVER_TAG = "creg-observers"

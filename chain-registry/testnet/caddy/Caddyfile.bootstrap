@@ -1,0 +1,41 @@
+# Public-service bootstrap layout.
+#
+# This profile deliberately has no validator or observer upstream. It exposes
+# the signed spec, IPFS, explorer UI, and faucet while independently operated
+# validators are being provisioned. CREG API reads return an explicit 503 until
+# an observer pool is attached; this is safer than proxying to a stale node.
+
+{
+	email {$CREG_ACME_EMAIL}
+}
+
+import waitlist.caddy
+import faucet-edge.caddy
+import hub.caddy
+
+http://{$CREG_PUBLIC_API_HOST} {
+	header Content-Type application/json
+	respond `{"error":"observer_unavailable","message":"The validator observer pool is not attached yet."}` 503
+}
+
+{$CREG_PUBLIC_API_HOST} {
+	header Content-Type application/json
+	respond `{"error":"observer_unavailable","message":"The validator observer pool is not attached yet."}` 503
+}
+
+{$CREG_PUBLIC_EXPLORER_HOST} {
+	import sepolia-public-rpc.caddy
+	handle {
+		reverse_proxy 127.0.0.1:{$CREG_3NODE_EXPLORER_PORT} {
+			flush_interval -1
+		}
+	}
+}
+
+{$CREG_PUBLIC_SPEC_HOST} {
+	reverse_proxy 127.0.0.1:{$CREG_3NODE_SPEC_HOST_PORT}
+}
+
+{$CREG_PUBLIC_IPFS_HOST} {
+	reverse_proxy 127.0.0.1:{$CREG_3NODE_IPFS_HOST_PORT}
+}

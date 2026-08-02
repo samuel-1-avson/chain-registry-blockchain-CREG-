@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { API_BASE, NODE_ROUTE_MODE } from '../api/node.js'
+import { API_BASE, NODE_ROUTE_MODE, isObserverUnavailable } from '../api/node.js'
 
 // Connection lifecycle states surfaced to consumers so the UI can render
 // a "connecting / live / stale / offline" banner instead of silently polling.
@@ -52,6 +52,16 @@ export function useSse({ path = DEFAULT_EVENTS_PATH, onEvent, eventTypes = null,
 
     const connect = () => {
       if (cancelled) return
+      // The edge explicitly reports observer_unavailable during bootstrap.
+      // Wait for the shared API backoff window instead of opening an SSE
+      // connection that can only return another 503.
+      if (isObserverUnavailable()) {
+        setState(SSE_STATE.Error)
+        attempt += 1
+        setReconnectAttempt(attempt)
+        reconnectTimer = setTimeout(connect, 30_000)
+        return
+      }
       const url = joinUrl(API_BASE, path)
       setState(SSE_STATE.Connecting)
 

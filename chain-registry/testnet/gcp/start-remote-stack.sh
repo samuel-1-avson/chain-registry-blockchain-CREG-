@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Run on VM after sync-local-repo + push-env.
+# Set CREG_PUBLIC_SERVICES_BOOTSTRAP=true to start spec/IPFS/explorer/faucet
+# before an observer pool or independent validators are online.
 set -euo pipefail
 
 GITHUB_REPO="${GITHUB_REPO:-samuel-1-avson/chain-registry-blockchain-CREG-}"

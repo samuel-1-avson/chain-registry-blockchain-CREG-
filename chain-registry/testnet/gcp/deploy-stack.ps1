@@ -4,6 +4,7 @@
 # Usage:
 #   .\testnet\gcp\deploy-stack.ps1              # default: local sync (HOSTING-301 scripts on disk)
 #   .\testnet\gcp\deploy-stack.ps1 -Source github
+#   .\testnet\gcp\deploy-stack.ps1 -BootstrapOnly # start public services before observers/validators
 
 param(
     [string]$ProjectId = "",
@@ -12,7 +13,8 @@ param(
     [string]$GithubRepo = "",
     [string]$Branch = "",
     [ValidateSet("local", "github")]
-    [string]$Source = "local"
+    [string]$Source = "local",
+    [switch]$BootstrapOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -42,8 +44,12 @@ if (Test-Path -LiteralPath $envFile) {
     }
 }
 
-& (Join-Path $gcpDir "verify-public-services-profile.ps1") -EnvFile $envFile -Target edge
-if ($LASTEXITCODE -ne 0) { throw "Public edge preflight failed; no edge resources were changed." }
+if ($BootstrapOnly) {
+    & (Join-Path $gcpDir "verify-public-services-profile.ps1") -EnvFile $envFile -Target bootstrap
+} else {
+    & (Join-Path $gcpDir "verify-public-services-profile.ps1") -EnvFile $envFile -Target edge
+}
+if (-not $?) { throw "Public edge preflight failed; no edge resources were changed." }
 
 & (Join-Path $gcpDir "push-env.ps1") -ProjectId $ProjectId -Zone $Zone -VmName $VmName -EnvFile $envFile
 
@@ -60,7 +66,13 @@ gcloud compute scp $remoteSh "${VmName}:${remoteDest}" --zone=$Zone --project=$P
 Assert-LastExitCode "upload remote start script"
 
 $envExports = "export GITHUB_REPO='$GithubRepo'; export GITHUB_BRANCH='$Branch';"
-Write-Host "[gcp-deploy] Starting GCP public-services stack on $VmName (first Docker build may take 15-30+ min)..."
+if ($BootstrapOnly) {
+    # Captured by start-cloud-edge-gcp.sh before it sources the env file, so a
+    # stale false value in a copied env cannot silently select observer mode.
+    $envExports += " export CREG_PUBLIC_SERVICES_BOOTSTRAP='true';"
+}
+$mode = if ($BootstrapOnly) { "bootstrap public services (no observer/validator dependency)" } else { "public-services edge" }
+Write-Host "[gcp-deploy] Starting GCP $mode on $VmName (first Docker build may take 15-30+ min)..."
 gcloud compute ssh $VmName --zone=$Zone --project=$ProjectId --tunnel-through-iap --strict-host-key-checking=no --quiet --command="${envExports} bash $remoteDest"
 Assert-LastExitCode "remote stack start"
 

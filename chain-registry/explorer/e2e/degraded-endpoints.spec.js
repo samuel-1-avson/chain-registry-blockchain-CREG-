@@ -73,6 +73,27 @@ function fulfill(route, response) {
 }
 
 test.describe('Degraded endpoint states', () => {
+  test('dashboard explains observer bootstrap instead of showing a raw 503', async ({ page }) => {
+    const unavailable = {
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        error: 'observer_unavailable',
+        message: 'The validator observer pool is not attached yet.',
+      }),
+    }
+    await mockNodeApi(page, {
+      '/v1/public/chain/stats': unavailable,
+      '/v1/chain/stats': unavailable,
+    })
+
+    await page.goto('/')
+
+    await expect(page.getByRole('heading', { name: /live chain data is waiting for an observer/i })).toBeVisible()
+    await expect(page.getByText(/independently operated validator observer/i)).toBeVisible()
+    await expect(page.getByRole('button', { name: /retry observer connection/i })).toBeVisible()
+  })
+
   test('bridge page distinguishes unavailable anchor history from empty data', async ({ page }) => {
     await mockNodeApi(page, {
       '/v1/public/bridge/anchors': { status: 404, contentType: 'text/plain', body: 'not found' },

@@ -5,6 +5,13 @@
 #
 # Usage:
 #   .\testnet\deploy-sepolia.ps1
+#   .\testnet\deploy-sepolia.ps1 -UseProcessEnv
+
+param(
+    # Preserve values injected into this PowerShell process (for example from
+    # Secret Manager). The normal path remains .env.sepolia-authoritative.
+    [switch]$UseProcessEnv
+)
 
 $ErrorActionPreference = "Stop"
 
@@ -30,7 +37,13 @@ if (-not (Test-Path $envFile)) {
 
 Get-Content $envFile | ForEach-Object {
     if ($_ -match '^\s*([^#\s][^=]*)\s*=\s*(.*)\s*$') {
-        [Environment]::SetEnvironmentVariable($matches[1], $matches[2], "Process")
+        $name = $matches[1].Trim()
+        # Secret-manager deployment wrappers inject sensitive values before
+        # invoking this script. Do not let a stale local .env overwrite them.
+        if ($UseProcessEnv -and [Environment]::GetEnvironmentVariable($name, "Process") -ne $null) {
+            return
+        }
+        [Environment]::SetEnvironmentVariable($name, $matches[2], "Process")
     }
 }
 

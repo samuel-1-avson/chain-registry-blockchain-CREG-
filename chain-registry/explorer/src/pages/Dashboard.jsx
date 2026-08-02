@@ -8,7 +8,7 @@ import { Hash } from '../components/Hash.jsx'
 import { TimeAgo } from '../components/TimeAgo.jsx'
 import { SkeletonCard, SkeletonRow } from '../components/Skeleton.jsx'
 import { StatusBadge } from '../components/StatusBadge.jsx'
-import { ErrorState } from '../components/ErrorState.jsx'
+import { ErrorState, NoticeState } from '../components/ErrorState.jsx'
 import { formatNumber, formatWei } from '../utils/format.js'
 
 /* ── Stat card with optional sparkline ─────────────────────────────────────── */
@@ -133,6 +133,31 @@ export default function Dashboard({ recentEvents = [] }) {
   }, [recentEvents, eventFilter])
 
   if (stats.error && !stats.data) {
+    const observerUnavailable = stats.error?.status === 503
+      && /observer_unavailable/i.test(stats.error?.body || '')
+    if (observerUnavailable) {
+      return (
+        <div style={{ display: 'grid', gap: 'var(--space-4)', maxWidth: 720 }}>
+          <NoticeState
+            title="Live chain data is waiting for an observer"
+            variant="warning"
+            description="The public edge is online, but no independently operated validator observer is attached yet. Explorer requests will resume automatically after the observer pool is configured."
+          />
+          <div>
+            <button type="button" onClick={stats.refetch} style={{
+              padding: '8px 14px',
+              background: 'var(--accent-primary)',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 'var(--radius-sm)',
+              cursor: 'pointer',
+              fontSize: 12,
+              fontWeight: 600,
+            }}>Retry observer connection</button>
+          </div>
+        </div>
+      )
+    }
     return <ErrorState error={stats.error} onRetry={stats.refetch} title="Unable to load chain stats" />
   }
 

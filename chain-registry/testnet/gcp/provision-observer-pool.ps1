@@ -39,7 +39,7 @@ if (-not $ProjectId) { $ProjectId = $cfg.GCP_PROJECT }
 if (-not $Region) { $Region = $cfg.GCP_REGION }
 if (-not $Zone) { $Zone = $cfg.GCP_ZONE }
 if (-not $MigName) { $MigName = if ($cfg.GCP_OBSERVER_MIG_NAME) { $cfg.GCP_OBSERVER_MIG_NAME } else { "creg-observer-pool" } }
-if (-not $TemplateName) { $TemplateName = if ($cfg.GCP_OBSERVER_TEMPLATE_NAME) { $cfg.GCP_OBSERVER_TEMPLATE_NAME } else { "creg-observer-pool-template" } }
+if (-not $TemplateName) { $TemplateName = if ($cfg.GCP_OBSERVER_TEMPLATE_NAME) { $cfg.GCP_OBSERVER_TEMPLATE_NAME } else { "creg-observer-pool-template-v3" } }
 if (-not $MachineType) { $MachineType = if ($cfg.GCP_OBSERVER_MACHINE_TYPE) { $cfg.GCP_OBSERVER_MACHINE_TYPE } else { "e2-medium" } }
 if (-not $BootDiskGb) { $BootDiskGb = if ($cfg.GCP_OBSERVER_DISK_GB) { [int]$cfg.GCP_OBSERVER_DISK_GB } else { 30 } }
 if (-not $ObserverTag) { $ObserverTag = if ($cfg.GCP_OBSERVER_TAG) { $cfg.GCP_OBSERVER_TAG } else { "creg-observers" } }
@@ -173,7 +173,16 @@ if ($LASTEXITCODE -ne 0) {
         --template=$TemplateName `
         --size=$MinReplicas | Out-Null
 } else {
-    Log "MIG $MigName exists"
+    $currentTemplate = (gcloud compute instance-groups managed describe $MigName --zone=$Zone --project=$ProjectId --format="value(instanceTemplate.basename())" 2>$null).Trim()
+    if ($currentTemplate -ne $TemplateName) {
+        Log "Updating MIG $MigName template: $currentTemplate -> $TemplateName"
+        gcloud compute instance-groups managed set-instance-template $MigName `
+            --project=$ProjectId `
+            --zone=$Zone `
+            --template=$TemplateName | Out-Null
+    } else {
+        Log "MIG $MigName already uses template $TemplateName"
+    }
 }
 
 if ($MaxReplicas -gt $MinReplicas) {
