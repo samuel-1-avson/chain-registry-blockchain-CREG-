@@ -40,14 +40,14 @@ Start at the [project README](../README.md), then use the sections below.
 | Document | Description |
 |----------|-------------|
 | [TESTNET_SEPOLIA_RUNBOOK.md](./TESTNET_SEPOLIA_RUNBOOK.md) | Sepolia deploy, chain-spec sign/publish |
-| [../chain-registry/testnet/OPERATOR.md](../chain-registry/testnet/OPERATOR.md) | Sepolia validator fleet |
+| [../chain-registry/testnet/OPERATOR.md](../chain-registry/testnet/OPERATOR.md) | External validators + GCP public services |
 | [../chain-registry/testnet/QUICKSTART.md](../chain-registry/testnet/QUICKSTART.md) | Fastest local node path |
 | [../chain-registry/testnet/gcp/README.md](../chain-registry/testnet/gcp/README.md) | GCP scripts (resume/stop testnet, waitlist) |
 | [WAITLIST-ONLY-HOSTING.md](./WAITLIST-ONLY-HOSTING.md) | Waitlist-only phase (testnet paused) |
 | [GCP_PHASE2_RUNBOOK.md](./GCP_PHASE2_RUNBOOK.md) | Observer pool, Cloud Run hub-api, public API LB |
 | [GCP-BUDGET-ARCHITECTURE.md](./GCP-BUDGET-ARCHITECTURE.md) | Cost model |
 | [GCP-RPC-ARCHITECTURE.md](./GCP-RPC-ARCHITECTURE.md) | API/JSON-RPC on GCP |
-| [GCP-VALIDATOR-FLEET.md](./GCP-VALIDATOR-FLEET.md) | Dedicated validator VM |
+| [GCP-VALIDATOR-FLEET.md](./GCP-VALIDATOR-FLEET.md) | Legacy validator-fleet lab (disabled by default) |
 | [HYBRID-LOCAL-VALIDATORS.md](./HYBRID-LOCAL-VALIDATORS.md) | Legacy WireGuard path (deprecated) |
 | [../chain-registry/testnet/README.md](../chain-registry/testnet/README.md) | Testnet directory index |
 | [../chain-registry/DOCKER.md](../chain-registry/DOCKER.md) | Docker compose profiles |

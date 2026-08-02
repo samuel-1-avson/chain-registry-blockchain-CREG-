@@ -1,5 +1,5 @@
-# Fleet layout: validators on creg-validator-vm (VPC); edge services on this VM.
-# API proxies to observer read pool (Phase 2 ILB) or legacy observer on validator VM.
+# Public-services layout: validators run independently; edge services run on this VM.
+# API proxies only to the GCP observer read pool (Phase 2 ILB).
 #
 # Requires: CREG_OBSERVER_API_UPSTREAM (host:port) — set by start-cloud-edge-gcp.sh
 

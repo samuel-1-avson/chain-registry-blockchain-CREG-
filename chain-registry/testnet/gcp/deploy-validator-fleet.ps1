@@ -1,16 +1,21 @@
-# Sync repo + env to creg-validator-vm and start validator fleet.
+# Legacy lab only: sync repo + env to creg-validator-vm and start a
+# co-located maintainer seed fleet. Production validators run independently.
 #
 # Usage:
-#   .\testnet\gcp\deploy-validator-fleet.ps1
+#   .\testnet\gcp\deploy-validator-fleet.ps1 -AllowLegacyMaintainerSeedFleet
 #   .\testnet\gcp\deploy-validator-fleet.ps1 -SkipSync   # env + restart only (faster)
 #   .\testnet\gcp\deploy-validator-fleet.ps1 -FleetBuild # compile on VM (CREG_FLEET_BUILD=1)
 
 param(
     [switch]$SkipSync,
-    [switch]$FleetBuild
+    [switch]$FleetBuild,
+    [switch]$AllowLegacyMaintainerSeedFleet
 )
 
 $ErrorActionPreference = "Stop"
+if (-not $AllowLegacyMaintainerSeedFleet) {
+    throw "GCP validator fleets are disabled. Run validators on independently controlled operator hosts. Use -AllowLegacyMaintainerSeedFleet only for a disposable lab."
+}
 $gcpDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $testnetDir = Split-Path -Parent $gcpDir
 $cfg = & (Join-Path $gcpDir "_Load-HostingEnv.ps1")
@@ -52,7 +57,7 @@ if ($FleetBuild) {
     Log "FleetBuild: remote start sets CREG_FLEET_BUILD=1 (VM compile)"
 }
 # nohup: long Docker builds must survive IAP SSH disconnects.
-$envPrefix = if ($FleetBuild) { "env CREG_FLEET_BUILD=1 " } else { "" }
+$envPrefix = if ($FleetBuild) { "env CREG_FLEET_BUILD=1 CREG_ALLOW_LEGACY_GCP_SEED_FLEET=true " } else { "env CREG_ALLOW_LEGACY_GCP_SEED_FLEET=true " }
 $remoteCmd = "sed -i 's/\r$//' '$remoteStart' && chmod +x '$remoteStart' && nohup ${envPrefix}bash '$remoteStart' > /tmp/creg-fleet-start.log 2>&1 & sleep 2 && tail -n 30 /tmp/creg-fleet-start.log"
 & (Join-Path $gcpDir "ssh-validator-vm.ps1") -Command $remoteCmd
 if ($LASTEXITCODE -ne 0) { throw "remote start failed" }

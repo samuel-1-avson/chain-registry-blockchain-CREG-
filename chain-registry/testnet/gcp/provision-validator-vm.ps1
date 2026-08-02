@@ -15,11 +15,15 @@ param(
     [string]$TestnetTag = "",
     [string]$ValidatorTag = "",
     [string]$GethTag = "",
+    [switch]$AllowLegacyMaintainerSeedFleet,
     [switch]$Confirm,
     [switch]$SkipIfExists
 )
 
 $ErrorActionPreference = "Stop"
+if (-not $AllowLegacyMaintainerSeedFleet) {
+    throw "GCP validator VMs are disabled. Run validators on independently controlled operator hosts. Use -AllowLegacyMaintainerSeedFleet only for a disposable lab."
+}
 $gcpDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $cfg = & (Join-Path $gcpDir "_Load-HostingEnv.ps1")
 

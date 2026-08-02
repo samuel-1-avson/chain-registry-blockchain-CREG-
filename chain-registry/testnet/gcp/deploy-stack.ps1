@@ -1,4 +1,5 @@
-# Clone/pull repo on VM OR sync local tree, then start the public 3-node stack.
+# Clone/pull repo on the edge VM OR sync local tree, then start the GCP
+# public-services stack. Validators run independently outside GCP.
 #
 # Usage:
 #   .\testnet\gcp\deploy-stack.ps1              # default: local sync (HOSTING-301 scripts on disk)
@@ -31,23 +32,20 @@ if (-not $VmName) { $VmName = $cfg.GCP_VM_NAME }
 if (-not $GithubRepo) { $GithubRepo = $cfg.GITHUB_REPO }
 if (-not $Branch) { $Branch = $cfg.GITHUB_BRANCH }
 
-& (Join-Path $gcpDir "push-env.ps1") -ProjectId $ProjectId -Zone $Zone -VmName $VmName
+$fleetEnv = Join-Path $testnetDir "sepolia-fleet.env"
+$legacyEnv = Join-Path $testnetDir "sepolia-3node.env"
+$envFile = if (Test-Path $fleetEnv) { $fleetEnv } else { $legacyEnv }
+if (Test-Path -LiteralPath $envFile) {
+    $legacyValidatorPlacement = Select-String -Path $envFile -Pattern '^\s*(CREG_VALIDATOR_FLEET_MODE|CREG_HYBRID_MODE)\s*=\s*true' -Quiet
+    if ($legacyValidatorPlacement) {
+        throw "Legacy validator placement is disabled. Remove CREG_VALIDATOR_FLEET_MODE/CREG_HYBRID_MODE and configure the external observer upstream."
+    }
+}
 
-$envFile = Join-Path $testnetDir "sepolia-3node.env"
-$fleetMode = $false
-$hybridMode = $false
-if (Test-Path $envFile) {
-    $fleetMode = Select-String -Path $envFile -Pattern '^\s*CREG_VALIDATOR_FLEET_MODE\s*=\s*true' -Quiet
-    $hybridMode = Select-String -Path $envFile -Pattern '^\s*CREG_HYBRID_MODE\s*=\s*true' -Quiet
-}
-$caddyContainer = if ($fleetMode -or $hybridMode) { "creg-cloud-caddy" } else { "creg-3node-caddy" }
-if ($fleetMode) {
-    Write-Host "[gcp-deploy] CREG_VALIDATOR_FLEET_MODE=true - edge stack on $VmName (validators on fleet VM)" -ForegroundColor Cyan
-} elseif ($hybridMode) {
-    Write-Host "[gcp-deploy] CREG_HYBRID_MODE=true - edge-only stack (start validators locally with start-local-validators.ps1)" -ForegroundColor Cyan
-} else {
-    Write-Host "[gcp-deploy] Full 3-node stack on $VmName (default; no separate validator VM required)" -ForegroundColor Cyan
-}
+& (Join-Path $gcpDir "verify-public-services-profile.ps1") -EnvFile $envFile -Target edge
+if ($LASTEXITCODE -ne 0) { throw "Public edge preflight failed; no edge resources were changed." }
+
+& (Join-Path $gcpDir "push-env.ps1") -ProjectId $ProjectId -Zone $Zone -VmName $VmName -EnvFile $envFile
 
 if ($Source -eq "local") {
     & (Join-Path $gcpDir "sync-local-repo.ps1") -ProjectId $ProjectId -Zone $Zone -VmName $VmName
@@ -62,13 +60,10 @@ gcloud compute scp $remoteSh "${VmName}:${remoteDest}" --zone=$Zone --project=$P
 Assert-LastExitCode "upload remote start script"
 
 $envExports = "export GITHUB_REPO='$GithubRepo'; export GITHUB_BRANCH='$Branch';"
-Write-Host "[gcp-deploy] Starting stack on $VmName (first Docker build may take 15-30+ min)..."
+Write-Host "[gcp-deploy] Starting GCP public-services stack on $VmName (first Docker build may take 15-30+ min)..."
 gcloud compute ssh $VmName --zone=$Zone --project=$ProjectId --tunnel-through-iap --strict-host-key-checking=no --quiet --command="${envExports} bash $remoteDest"
 Assert-LastExitCode "remote stack start"
 
 Write-Host ""
 Write-Host "[gcp-deploy] Done. Watch TLS:" -ForegroundColor Cyan
-Write-Host "  .\testnet\gcp\ssh-vm.ps1 -Command 'sudo docker logs -f $caddyContainer'"
-if ($hybridMode) {
-    Write-Host "  Then on this PC (WireGuard up): .\testnet\start-local-validators.ps1" -ForegroundColor Cyan
-}
+Write-Host "  .\testnet\gcp\ssh-vm.ps1 -Command 'sudo docker logs -f creg-cloud-caddy'"

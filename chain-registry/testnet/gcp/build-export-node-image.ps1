@@ -1,4 +1,6 @@
-# Build creg-node:fleet on the validator VM and export /tmp/creg-node-fleet.tgz for observer transfer.
+# LEGACY LAB ONLY — build creg-node:fleet on the retired validator VM and
+# export /tmp/creg-node-fleet.tgz for observer transfer. Prefer signed GHCR
+# observer images or an isolated CI build in the public profile.
 # Run from Windows — do not run build-export-node-image.sh locally unless you have Linux + Docker.
 #
 # Usage:
@@ -14,10 +16,14 @@ param(
     [string]$Tag = "v0.1.2-testnet",
     [switch]$SyncLocal,
     [switch]$SkipCheckout,
-    [switch]$Confirm
+    [switch]$Confirm,
+    [switch]$AllowLegacyMaintainerSeedFleet
 )
 
 $ErrorActionPreference = "Stop"
+if (-not $AllowLegacyMaintainerSeedFleet) {
+    throw "Validator-VM image export is retired. Use a signed observer image or CI build; pass -AllowLegacyMaintainerSeedFleet only for a disposable lab."
+}
 $gcpDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $cfg = & (Join-Path $gcpDir "_Load-HostingEnv.ps1")
 if (-not $ProjectId) { $ProjectId = $cfg.GCP_PROJECT }

@@ -26,22 +26,10 @@ fi
 systemctl enable docker
 systemctl start docker
 
-META=http://metadata.google.internal/computeMetadata/v1/instance/attributes
-HDR=Metadata-Flavor:Google
-
-GITHUB_REPO="$(curl -fs -H "$HDR" "${META}/github-repo" 2>/dev/null || true)"
-GITHUB_BRANCH="$(curl -fs -H "$HDR" "${META}/github-branch" 2>/dev/null || true)"
-GITHUB_REPO="${GITHUB_REPO:-samuel-1-avson/chain-registry-blockchain-CREG-}"
-GITHUB_BRANCH="${GITHUB_BRANCH:-main}"
-
-CLONE_DIR=/opt/chain-registry
-if [[ ! -d "$CLONE_DIR/.git" ]]; then
-  rm -rf "$CLONE_DIR"
-  git clone --depth 1 --branch "$GITHUB_BRANCH" "https://github.com/${GITHUB_REPO}.git" "$CLONE_DIR"
-fi
-
-cd "$CLONE_DIR/chain-registry"
-chmod +x testnet/start-observer-pool-gcp.sh
-./testnet/start-observer-pool-gcp.sh || true
+# Do not clone or execute a mutable branch from instance metadata. The
+# deployment operator must sync a reviewed release, push the private env, and
+# explicitly run start-observer-pool-gcp.sh after the immutable image/preflight
+# gate passes. This bootstrap only installs Docker and leaves the MIG stopped
+# until that controlled rollout.
 
 touch "$MARKER"

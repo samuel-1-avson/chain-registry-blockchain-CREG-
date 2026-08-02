@@ -493,7 +493,7 @@ Optional CI job: `hub-api` tests on PR touching `hub-api/`; Playwright on PR tou
 |-----|--------|
 | [PUBLIC_TESTNET_QUICKSTART.md](./PUBLIC_TESTNET_QUICKSTART.md) | Publisher / validator CLI flows |
 | [TESTNET_PHASE_SCOPE.md](./TESTNET_PHASE_SCOPE.md) | Alpha limits and verified semantics |
-| [GCP-VALIDATOR-FLEET.md](./GCP-VALIDATOR-FLEET.md) | Edge + validator fleet layout |
+| [GCP-VALIDATOR-FLEET.md](./GCP-VALIDATOR-FLEET.md) | Legacy edge + validator-fleet lab layout |
 | [GCP-RPC-ARCHITECTURE.md](./GCP-RPC-ARCHITECTURE.md) | API/RPC ingress |
 | [WAITLIST_FIREBASE_DEPLOY.md](./WAITLIST_FIREBASE_DEPLOY.md) | Separate waitlist product (not hub) |
 | [../chain-registry/testnet/OPERATOR.md](../chain-registry/testnet/OPERATOR.md) | Validator operator runbook |

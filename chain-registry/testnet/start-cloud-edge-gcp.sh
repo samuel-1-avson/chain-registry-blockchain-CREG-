@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
-# GCP edge-only stack: Caddy, explorer, faucet, IPFS, spec, waitlist — no CREG nodes on this VM.
-#
-# Modes (sepolia-3node.env):
-#   CREG_VALIDATOR_FLEET_MODE=true  — validators on creg-validator-vm (production)
-#   CREG_HYBRID_MODE=true           — validators on operator PC via WireGuard (legacy)
+# GCP public-services stack: Caddy, explorer, faucet, IPFS, spec, waitlist.
+# Validators and their keys are operated independently outside GCP.
 #
 # Usage:
 #   ./testnet/start-cloud-edge-gcp.sh
@@ -27,26 +24,27 @@ creg_source_sepolia_env "$ENV_FILE"
 export CREG_CLOUD_CADDYFILE="./caddy/Caddyfile.hybrid"
 export CREG_EXPLORER_NGINX_CONF="./nginx/explorer-hybrid.conf"
 
-if [[ "${CREG_VALIDATOR_FLEET_MODE:-false}" == "true" ]]; then
-  if [[ -z "${CREG_VALIDATOR_VM_INTERNAL_IP:-}" ]]; then
-    echo "Set CREG_VALIDATOR_VM_INTERNAL_IP in sepolia-3node.env" >&2
-    exit 1
-  fi
-  export CREG_CLOUD_CADDYFILE="./caddy/Caddyfile.fleet"
-  observer_host="${CREG_OBSERVER_POOL_LB_IP:-${CREG_VALIDATOR_VM_INTERNAL_IP}}"
-  observer_port="${CREG_3NODE_NODE3_API_PORT:-28182}"
-  export CREG_OBSERVER_API_UPSTREAM="${observer_host}:${observer_port}"
-  FLEET_NGINX="${SCRIPT_DIR}/nginx/explorer-fleet.conf"
-  sed -e "s/@VALIDATOR_IP@/${CREG_VALIDATOR_VM_INTERNAL_IP}/g" \
-    -e "s/@OBSERVER_UPSTREAM@/${CREG_OBSERVER_API_UPSTREAM}/g" \
-    "${SCRIPT_DIR}/nginx/explorer-fleet.conf.template" > "$FLEET_NGINX"
-  export CREG_EXPLORER_NGINX_CONF="./nginx/explorer-fleet.conf"
-  echo "Validator fleet mode — public API -> ${CREG_OBSERVER_API_UPSTREAM} (explorer nginx -> ${CREG_OBSERVER_API_UPSTREAM})"
-elif [[ "${CREG_HYBRID_MODE:-false}" == "true" ]]; then
-  echo "Hybrid mode — API -> WireGuard peer ${CREG_WG_LOCAL_PEER:-10.200.0.2}"
-else
-  echo "Warning: neither CREG_VALIDATOR_FLEET_MODE nor CREG_HYBRID_MODE set; using hybrid Caddy defaults"
+if [[ "${CREG_VALIDATOR_FLEET_MODE:-false}" == "true" || "${CREG_HYBRID_MODE:-false}" == "true" ]]; then
+  echo "CREG_VALIDATOR_FLEET_MODE/CREG_HYBRID_MODE are retired for the GCP public-services profile; validators must run independently." >&2
+  exit 1
 fi
+
+export CREG_CLOUD_CADDYFILE="./caddy/Caddyfile.fleet"
+observer_host="${CREG_OBSERVER_POOL_LB_IP:-}"
+observer_port="${CREG_3NODE_NODE3_API_PORT:-28182}"
+export CREG_OBSERVER_API_UPSTREAM="${CREG_OBSERVER_API_UPSTREAM:-${observer_host:+${observer_host}:${observer_port}}}"
+CREG_OBSERVER_API_UPSTREAM="${CREG_OBSERVER_API_UPSTREAM#http://}"
+CREG_OBSERVER_API_UPSTREAM="${CREG_OBSERVER_API_UPSTREAM#https://}"
+export CREG_OBSERVER_API_UPSTREAM
+if [[ -z "${CREG_OBSERVER_API_UPSTREAM:-}" ]]; then
+  echo "Set CREG_OBSERVER_API_UPSTREAM or CREG_OBSERVER_POOL_LB_IP in sepolia-3node.env; the GCP edge never proxies to a validator VM." >&2
+  exit 1
+fi
+FLEET_NGINX="${SCRIPT_DIR}/nginx/explorer-fleet.conf"
+sed -e "s/@OBSERVER_UPSTREAM@/${CREG_OBSERVER_API_UPSTREAM}/g" \
+  "${SCRIPT_DIR}/nginx/explorer-fleet.conf.template" > "$FLEET_NGINX"
+export CREG_EXPLORER_NGINX_CONF="./nginx/explorer-fleet.conf"
+echo "External-validator mode — public API -> ${CREG_OBSERVER_API_UPSTREAM}"
 
 CADDY_DIR="${SCRIPT_DIR}/caddy"
 if [[ -n "${CREG_PUBLIC_WAITLIST_HOST:-}" ]]; then

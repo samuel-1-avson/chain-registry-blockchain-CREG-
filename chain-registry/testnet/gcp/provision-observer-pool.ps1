@@ -1,6 +1,6 @@
 # GCP-006/007 — Provision observer read pool (MIG + internal TCP load balancer).
 #
-# Moves public API reads off the validator fleet VM onto dedicated observer VMs.
+# Provisions dedicated GCP observer VMs for public API reads from external validators.
 # Edge Caddy uses CREG_OBSERVER_POOL_LB_IP when set (see Caddyfile.fleet).
 #
 # Usage:
@@ -20,7 +20,6 @@ param(
     [int]$MaxReplicas = 3,
     [string]$ObserverTag = "",
     [string]$TestnetTag = "",
-    [string]$ValidatorTag = "",
     [string]$InternalLbName = "",
     [string]$InternalLbIpName = "",
     [int]$ApiPort = 28182,
@@ -45,15 +44,12 @@ if (-not $MachineType) { $MachineType = if ($cfg.GCP_OBSERVER_MACHINE_TYPE) { $c
 if (-not $BootDiskGb) { $BootDiskGb = if ($cfg.GCP_OBSERVER_DISK_GB) { [int]$cfg.GCP_OBSERVER_DISK_GB } else { 30 } }
 if (-not $ObserverTag) { $ObserverTag = if ($cfg.GCP_OBSERVER_TAG) { $cfg.GCP_OBSERVER_TAG } else { "creg-observers" } }
 if (-not $TestnetTag) { $TestnetTag = if ($cfg.GCP_TESTNET_TAG) { $cfg.GCP_TESTNET_TAG } else { "creg-testnet" } }
-if (-not $ValidatorTag) { $ValidatorTag = if ($cfg.GCP_VALIDATOR_TAG) { $cfg.GCP_VALIDATOR_TAG } else { "creg-validators" } }
 if (-not $InternalLbName) { $InternalLbName = if ($cfg.GCP_OBSERVER_ILB_NAME) { $cfg.GCP_OBSERVER_ILB_NAME } else { "creg-observer-api-ilb" } }
 if (-not $InternalLbIpName) { $InternalLbIpName = if ($cfg.GCP_OBSERVER_ILB_IP_NAME) { $cfg.GCP_OBSERVER_ILB_IP_NAME } else { "creg-observer-api-ilb-ip" } }
 if (-not $GithubRepo) { $GithubRepo = $cfg.GITHUB_REPO }
 if (-not $GithubBranch) { $GithubBranch = $cfg.GITHUB_BRANCH }
 
 $fwApi = "creg-observers-allow-api-from-testnet"
-$fwP2pToValidators = "creg-validators-allow-p2p-from-observers"
-$fwP2pFromValidators = "creg-observers-allow-p2p-from-validators"
 $fwIap = "creg-observers-allow-iap-ssh"
 $fwLbHealth = "creg-observers-allow-lb-health-checks"
 $hcName = "creg-observer-api-tcp"
@@ -82,10 +78,10 @@ if (-not $Confirm) {
     Write-Host "  Regional MIG: $MigName ($Zone, $MinReplicas-$MaxReplicas)"
     Write-Host "  Internal TCP LB: $InternalLbName -> port $ApiPort (IP: $InternalLbIpName)"
     Write-Host "  Firewall: tcp:$ApiPort from tag $TestnetTag -> tag $ObserverTag"
-    Write-Host "  Firewall: P2P between tags $ObserverTag and $ValidatorTag"
+    Write-Host "  Outbound P2P: external bootnodes/validators supplied through CREG_VALIDATOR_P2P_SEEDS"
     Write-Host "  Labels: $labelArg"
     Write-Host ""
-    Write-Host "After deploy, set in sepolia-3node.env:" -ForegroundColor Cyan
+    Write-Host "Before deploy, set external peer endpoints in sepolia-fleet.env; after the ILB is created, add:" -ForegroundColor Cyan
     Write-Host "  CREG_OBSERVER_POOL_LB_IP=<internal LB IP>"
     Write-Host "  CREG_3NODE_NODE3_API_PORT=$ApiPort"
     Write-Host "Then redeploy edge stack (deploy-stack.ps1) to refresh Caddy."
@@ -140,10 +136,6 @@ function Ensure-Firewall {
 
 Ensure-Firewall -Name $fwApi -Desc "Observer API from edge VM" `
     -Rules "tcp:$ApiPort" -TargetTag $ObserverTag -SourceTags $TestnetTag -SourceRanges $null
-Ensure-Firewall -Name $fwP2pToValidators -Desc "Validator P2P from observers" `
-    -Rules "tcp:29100-29109" -TargetTag $ValidatorTag -SourceTags $ObserverTag -SourceRanges $null
-Ensure-Firewall -Name $fwP2pFromValidators -Desc "Observer P2P from validators" `
-    -Rules "tcp:29100-29109" -TargetTag $ObserverTag -SourceTags $ValidatorTag -SourceRanges $null
 Ensure-Firewall -Name $fwIap -Desc "IAP SSH to observer pool" `
     -Rules "tcp:22" -TargetTag $ObserverTag -SourceTags $null -SourceRanges "35.235.240.0/20"
 

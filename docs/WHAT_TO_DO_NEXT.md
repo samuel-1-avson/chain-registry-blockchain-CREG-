@@ -46,7 +46,7 @@ cargo test validate_
 |------|----------------|
 | Scale architecture | [TESTNET_SCALE_ARCHITECTURE.md](./TESTNET_SCALE_ARCHITECTURE.md) |
 | Sepolia bootstrap smoke | `testnet.ps1 -RunSmokeTests`, `docker-compose.testnet.yml` |
-| Maintainer seed fleet | `testnet/init-sepolia-fleet-env.ps1`, `testnet/start-validator-fleet-gcp.sh` |
+| GCP observer/public services | `testnet/gcp/verify-public-services-profile.ps1`, `testnet/gcp/deploy-observer-pool.ps1`, `testnet/gcp/deploy-stack.ps1` |
 | Real sandbox | `testnet/sandbox-301-verify.ps1` (`CREG_DEV_SANDBOX=false`) |
 | Load / incentive soak | [testnet/SOAK_TEST.md](../chain-registry/testnet/SOAK_TEST.md) |
 
@@ -125,7 +125,7 @@ Covers stake, dual keys, sandbox policy, scanner profile, registration API, and 
 |-----|---------|
 | [TESTNET_SCALE_ARCHITECTURE.md](./TESTNET_SCALE_ARCHITECTURE.md) | **10k+ validator target topology** |
 | [GENESIS_ALPHA_COHORT_PLAYBOOK.md](./GENESIS_ALPHA_COHORT_PLAYBOOK.md) | Wave 1 cohort (slots 1–10,000) |
-| [testnet/OPERATOR.md](../chain-registry/testnet/OPERATOR.md) | Edge + seed fleet runbook |
+| [testnet/OPERATOR.md](../chain-registry/testnet/OPERATOR.md) | External validators + GCP public-services runbook |
 | [GCP-VALIDATOR-FLEET.md](./GCP-VALIDATOR-FLEET.md) | Optional seed validators on GCP |
 | [SECURITY_OPS_RUNBOOK.md](./SECURITY_OPS_RUNBOOK.md) | Key hygiene |
 

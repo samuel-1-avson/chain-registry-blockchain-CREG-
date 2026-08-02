@@ -18,11 +18,17 @@ fi
 source testnet/_source-sepolia-env.sh
 creg_source_sepolia_env testnet/sepolia-3node.env
 
-observer_host="${CREG_OBSERVER_POOL_LB_IP:-${CREG_VALIDATOR_VM_INTERNAL_IP}}"
+observer_host="${CREG_OBSERVER_POOL_LB_IP:-}"
 observer_port="${CREG_3NODE_NODE3_API_PORT:-28182}"
-export CREG_OBSERVER_API_UPSTREAM="${CREG_OBSERVER_API_UPSTREAM:-${observer_host}:${observer_port}}"
-sed -e "s/@VALIDATOR_IP@/${CREG_VALIDATOR_VM_INTERNAL_IP}/g" \
-  -e "s/@OBSERVER_UPSTREAM@/${CREG_OBSERVER_API_UPSTREAM}/g" \
+export CREG_OBSERVER_API_UPSTREAM="${CREG_OBSERVER_API_UPSTREAM:-${observer_host:+${observer_host}:${observer_port}}}"
+CREG_OBSERVER_API_UPSTREAM="${CREG_OBSERVER_API_UPSTREAM#http://}"
+CREG_OBSERVER_API_UPSTREAM="${CREG_OBSERVER_API_UPSTREAM#https://}"
+export CREG_OBSERVER_API_UPSTREAM
+if [[ -z "${CREG_OBSERVER_API_UPSTREAM:-}" ]]; then
+  echo "Set CREG_OBSERVER_API_UPSTREAM or CREG_OBSERVER_POOL_LB_IP; validators are external to GCP." >&2
+  exit 1
+fi
+sed -e "s/@OBSERVER_UPSTREAM@/${CREG_OBSERVER_API_UPSTREAM}/g" \
   testnet/nginx/explorer-fleet.conf.template > testnet/nginx/explorer-fleet.conf
 
 export COMPOSE_PROFILES=hub

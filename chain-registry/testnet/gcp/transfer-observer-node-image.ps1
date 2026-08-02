@@ -1,4 +1,5 @@
-# After build-export-node-image.sh finishes on creg-validator-vm, copy image to observer and restart.
+# LEGACY LAB ONLY — transfer an image from the retired validator VM. Prefer a
+# signed GHCR digest or an isolated CI artifact for public observers.
 #
 # Usage:
 #   .\testnet\gcp\transfer-observer-node-image.ps1 -Confirm
@@ -8,10 +9,14 @@ param(
     [string]$Zone = "",
     [string]$ValidatorVm = "creg-validator-vm",
     [string]$ObserverVm = "creg-observer-pool-j2q7",
-    [switch]$Confirm
+    [switch]$Confirm,
+    [switch]$AllowLegacyMaintainerSeedFleet
 )
 
 $ErrorActionPreference = "Stop"
+if (-not $AllowLegacyMaintainerSeedFleet) {
+    throw "Validator-VM image transfer is retired. Use a signed observer image; pass -AllowLegacyMaintainerSeedFleet only for a disposable lab."
+}
 $gcpDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $cfg = & (Join-Path $gcpDir "_Load-HostingEnv.ps1")
 if (-not $ProjectId) { $ProjectId = $cfg.GCP_PROJECT }

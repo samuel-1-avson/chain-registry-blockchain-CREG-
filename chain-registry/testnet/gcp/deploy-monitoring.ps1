@@ -1,18 +1,18 @@
-# Deploy Prometheus + Alertmanager on the edge VM and scrape validator fleet /metrics.
+# Deploy Prometheus + Alertmanager on the edge VM and scrape the GCP observer API.
 #
-# Generates testnet/monitoring/prometheus-gcp.yml from the validator fleet internal IP,
+# Generates testnet/monitoring/prometheus-gcp.yml from the observer API upstream,
 # syncs the repo to the edge VM, and starts docker compose.
 #
 # Usage:
 #   .\testnet\gcp\deploy-monitoring.ps1
 #   .\testnet\gcp\deploy-monitoring.ps1 -SkipSync
-#   .\testnet\gcp\deploy-monitoring.ps1 -ValidatorInternalIp 10.128.0.5
+#   .\testnet\gcp\deploy-monitoring.ps1 -ObserverApiUpstream 10.128.0.5:28182
 
 param(
     [string]$ProjectId = "",
     [string]$Zone = "",
     [string]$VmName = "",
-    [string]$ValidatorInternalIp = "",
+    [string]$ObserverApiUpstream = "",
     [switch]$SkipSync
 )
 
@@ -162,44 +162,29 @@ inhibit_rules:
 }
 
 $envFile = Join-Path $testnetDir "sepolia-3node.env"
-$fleetMode = $true
-if (Test-Path $envFile) {
-    $fleetMode = Select-String -Path $envFile -Pattern '^\s*CREG_VALIDATOR_FLEET_MODE\s*=\s*true' -Quiet
-}
-
-if (-not $ValidatorInternalIp) {
-    if (Test-Path $envFile) {
+if (-not $ObserverApiUpstream -and (Test-Path $envFile)) {
+    foreach ($line in Get-Content $envFile) {
+        if ($line -match '^\s*CREG_OBSERVER_API_UPSTREAM\s*=\s*(\S+)') {
+            $ObserverApiUpstream = $matches[1].Trim()
+            break
+        }
+    }
+    if (-not $ObserverApiUpstream) {
         foreach ($line in Get-Content $envFile) {
-            if ($line -match '^\s*CREG_VALIDATOR_VM_INTERNAL_IP\s*=\s*(\S+)') {
-                $ValidatorInternalIp = $matches[1].Trim()
+            if ($line -match '^\s*CREG_OBSERVER_POOL_LB_IP\s*=\s*(\S+)') {
+                $ObserverApiUpstream = "$($matches[1].Trim()):$($cfg.GCP_OBSERVER_API_PORT)"
                 break
             }
         }
     }
-    if (-not $ValidatorInternalIp) {
-        $ipLine = & (Join-Path $gcpDir "get-validator-fleet-internal-ip.ps1") | Where-Object { $_ -match '^CREG_VALIDATOR_VM_INTERNAL_IP=' }
-        if ($ipLine) {
-            $ValidatorInternalIp = ($ipLine -split '=', 2)[1].Trim()
-        }
-    }
 }
 
-if ($fleetMode -and -not $ValidatorInternalIp) {
-    throw "Validator fleet internal IP unknown. Set CREG_VALIDATOR_VM_INTERNAL_IP in sepolia-3node.env or pass -ValidatorInternalIp."
+if (-not $ObserverApiUpstream) {
+    throw "Observer API upstream unknown. Set CREG_OBSERVER_API_UPSTREAM in sepolia-3node.env or pass -ObserverApiUpstream."
 }
 
-$targets = @()
-if ($fleetMode) {
-    $targets = @(
-        "${ValidatorInternalIp}:28180",
-        "${ValidatorInternalIp}:28181",
-        "${ValidatorInternalIp}:28182"
-    )
-    Log "Fleet mode: scraping validator VM $ValidatorInternalIp (28180-28182)"
-} else {
-    $targets = @("127.0.0.1:28180", "127.0.0.1:28181", "127.0.0.1:28182")
-    Log "Co-located stack mode: scraping localhost 28180-28182"
-}
+$targets = @($ObserverApiUpstream -split ',' | ForEach-Object { ($_ -replace '^https?://', '').TrimEnd('/') })
+Log "External-validator mode: scraping observer API $($targets -join ', ')"
 
 $targetYaml = ($targets | ForEach-Object { "          - `"$_`"" }) -join "`n"
 $prometheusPath = Join-Path $monitoringDir "prometheus-gcp.yml"
@@ -225,7 +210,7 @@ scrape_configs:
       - targets:
 $targetYaml
         labels:
-          role: validator-fleet
+          role: observer
     metrics_path: /metrics
     scrape_interval: 15s
     scrape_timeout: 10s

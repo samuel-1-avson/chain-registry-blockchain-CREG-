@@ -23,17 +23,20 @@ if [[ -z "${CREG_EDGE_INTERNAL_IP:-}" ]]; then
   echo "Set CREG_EDGE_INTERNAL_IP in sepolia-3node.env" >&2
   exit 1
 fi
-if [[ -z "${CREG_VALIDATOR_VM_INTERNAL_IP:-}" ]]; then
-  echo "Set CREG_VALIDATOR_VM_INTERNAL_IP in sepolia-3node.env" >&2
+if [[ -z "${CREG_VALIDATOR_P2P_SEEDS:-}" ]]; then
+  echo "Set CREG_VALIDATOR_P2P_SEEDS to independently operated bootnode/validator multiaddrs" >&2
+  exit 1
+fi
+if [[ -z "${CREG_VALIDATOR_HTTP_PEERS:-}" ]]; then
+  echo "Set CREG_VALIDATOR_HTTP_PEERS to independently operated validator API URLs" >&2
   exit 1
 fi
 
 export CREG_IPFS_URL="${CREG_IPFS_URL:-http://${CREG_EDGE_INTERNAL_IP}:${CREG_3NODE_IPFS_HOST_PORT:-15001}}"
 export CREG_CHAIN_SPEC_URL="${CREG_CHAIN_SPEC_URL:-http://${CREG_EDGE_INTERNAL_IP}:${CREG_3NODE_SPEC_HOST_PORT:-18888}/chain-spec.json}"
 
-# Default seeds/peers to validator fleet (override in env for multi-validator layouts).
-export CREG_VALIDATOR_P2P_SEEDS="${CREG_VALIDATOR_P2P_SEEDS:-/ip4/${CREG_VALIDATOR_VM_INTERNAL_IP}/tcp/${CREG_3NODE_NODE1_P2P_PORT:-29100},/ip4/${CREG_VALIDATOR_VM_INTERNAL_IP}/tcp/${CREG_3NODE_NODE2_P2P_PORT:-29101}}"
-export CREG_VALIDATOR_HTTP_PEERS="${CREG_VALIDATOR_HTTP_PEERS:-http://${CREG_VALIDATOR_VM_INTERNAL_IP}:${CREG_3NODE_NODE1_API_PORT:-28180},http://${CREG_VALIDATOR_VM_INTERNAL_IP}:${CREG_3NODE_NODE2_API_PORT:-28181}}"
+# Do not synthesize peers from a GCP validator VM. The configured endpoints are
+# supplied out of band by independently controlled validator operators.
 
 if [[ -z "${CREG_OBSERVER_NODE_ID:-}" ]]; then
   host_id="$(hostname -s 2>/dev/null || hostname)"
@@ -58,6 +61,11 @@ if [[ -n "${CREG_FLEET_BUILD:-}" ]] || [[ -n "${CREG_OBSERVER_BUILD:-}" ]]; then
   use_prebuilt=0
 fi
 
+if [[ "${CREG_REQUIRE_SIGNED_IMAGES:-false}" == "true" && "$use_prebuilt" -eq 1 && "$FLEET_IMAGE" != *@sha256:* ]]; then
+  echo "CREG_REQUIRE_SIGNED_IMAGES=true requires CREG_FLEET_IMAGE to use an immutable @sha256 digest (or explicitly set CREG_OBSERVER_BUILD=1 for a reviewed source build)." >&2
+  exit 1
+fi
+
 if [[ "$use_prebuilt" -eq 1 ]]; then
   echo "=== Pulling observer image: ${FLEET_IMAGE} ==="
   if ! "${DOCKER[@]}" pull "$FLEET_IMAGE" 2>/dev/null; then
@@ -80,9 +88,9 @@ fi
 
 if [[ "$use_prebuilt" -eq 0 ]]; then
   echo "=== Building observer image from synced source (Dockerfile.windows) ==="
-  COMPOSE_BUILD=("${DOCKER[@]}" compose -f "${SCRIPT_DIR}/docker-compose.validator-fleet.yml" --env-file "$ENV_FILE")
-  "${COMPOSE_BUILD[@]}" build creg-node-1
-  built_id="$("${COMPOSE_BUILD[@]}" images -q creg-node-1 2>/dev/null | head -n1)"
+  COMPOSE_BUILD=("${DOCKER[@]}" compose -f "${SCRIPT_DIR}/docker-compose.observer-pool.yml" --env-file "$ENV_FILE")
+  "${COMPOSE_BUILD[@]}" build observer
+  built_id="$("${COMPOSE_BUILD[@]}" images -q observer 2>/dev/null | head -n1)"
   if [[ -n "$built_id" ]]; then
     "${DOCKER[@]}" tag "$built_id" creg-node:fleet
     export CREG_FLEET_IMAGE="creg-node:fleet"
