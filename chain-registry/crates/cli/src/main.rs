@@ -46,7 +46,7 @@ use tracing_subscriber::EnvFilter;
 #[derive(Parser)]
 #[command(
     name = "creg",
-    version = "0.1.0",
+    version = env!("CREG_EFFECTIVE_VERSION"),
     about = "Chain Registry — decentralised, consensus-verified package management"
 )]
 struct Cli {
@@ -423,6 +423,12 @@ enum Commands {
         /// Only check for updates, don't install.
         #[arg(long)]
         check: bool,
+        /// Install only after the release has been verified and explicitly confirmed.
+        #[arg(long)]
+        yes: bool,
+        /// Update to a specific semver release tag (for rollback or rehearsal).
+        #[arg(long, value_name = "VERSION")]
+        version: Option<String>,
     },
 
     /// Multi-signature publish workflow.
@@ -1343,8 +1349,12 @@ async fn run(cli: Cli) -> Result<()> {
             )
             .await?;
         }
-        Commands::Update { check } => {
-            update::run(cli.node_url.as_deref(), check).await?;
+        Commands::Update {
+            check,
+            yes,
+            version,
+        } => {
+            update::run(cli.node_url.as_deref(), check, yes, version.as_deref()).await?;
         }
         Commands::Multisig { command } => match command {
             MultisigCommands::Init {

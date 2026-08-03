@@ -2131,6 +2131,7 @@ dependencies = [
  "reqwest 0.11.27",
  "resolver",
  "scrypt 0.11.0",
+ "semver 1.0.27",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -2148,6 +2149,7 @@ dependencies = [
  "which 6.0.3",
  "whoami 1.6.1",
  "x25519-dalek",
+ "zip 8.5.0",
  "zk-validator",
 ]
 

@@ -51,6 +51,7 @@ dirs       = "5"
 hex        = { workspace = true }
 rand       = { workspace = true }
 flate2     = "1"
+zip        = "8"
 tar        = "0.4"
 colored   = "2"
 dialoguer = "0.11"
@@ -70,6 +71,7 @@ bip39        = { version = "2.0", features = ["rand"] }
 toml         = "0.8"
 urlencoding  = "2.1"
 whoami       = "1"
+semver       = "1"
 
 [dev-dependencies]
 tempfile = "3"

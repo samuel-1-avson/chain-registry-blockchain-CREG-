@@ -306,7 +306,7 @@ async fn main() -> Result<()> {
     // operator tooling. These flags must return before loading RPC/spec state.
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|arg| arg == "--version" || arg == "-V") {
-        println!("creg-node {}", env!("CARGO_PKG_VERSION"));
+        println!("creg-node {}", env!("CREG_EFFECTIVE_VERSION"));
         return Ok(());
     }
     if args.iter().any(|arg| arg == "--help" || arg == "-h") {
@@ -316,7 +316,7 @@ async fn main() -> Result<()> {
              CREG_SPEC_SIGNING_PUBKEY matching the published chain spec.\n\n\
              Common endpoints: REST 0.0.0.0:8080, gRPC 0.0.0.0:50051,\n\
              P2P /ip4/0.0.0.0/tcp/9000.",
-            env!("CARGO_PKG_VERSION")
+            env!("CREG_EFFECTIVE_VERSION")
         );
         return Ok(());
     }
@@ -540,7 +540,7 @@ async fn main() -> Result<()> {
     tracing::info!("â•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—");
     tracing::info!(
         "â•‘    chain-registry node v{}        â•‘",
-        env!("CARGO_PKG_VERSION")
+        env!("CREG_EFFECTIVE_VERSION")
     );
     tracing::info!("â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
     tracing::info!("  listen:      {}", config.listen_addr);
