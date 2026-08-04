@@ -147,6 +147,8 @@ datasets/
 # =============================================================================
 data/
 **/data/
+data-legacy/
+**/data-legacy/
 # Compile-time typosquat baseline (include_str! in validator crate)
 !chain-registry/crates/validator/data/
 !chain-registry/crates/validator/data/typosquat.json
@@ -218,6 +220,8 @@ build/
 # =============================================================================
 node_modules/
 **/node_modules/
+node_modules-stale*/
+**/node_modules-stale*/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

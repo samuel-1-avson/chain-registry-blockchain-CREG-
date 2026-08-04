@@ -692,7 +692,11 @@ async fn api_boundaries() -> impl IntoResponse {
 struct ChainStatsResponse {
     #[serde(flatten)]
     chain: crate::chain_store::ChainStats,
+    chain_id: String,
     genesis_hash: Option<String>,
+    spec_signature_verified: bool,
+    l1_rpc_configured: bool,
+    is_validator: bool,
     validator_count: usize,
     active_validators: usize,
     total_stake: u64,
@@ -722,9 +726,22 @@ async fn chain_stats(State(state): State<SharedState>) -> impl IntoResponse {
         .ok()
         .flatten()
         .map(|b| b.hash());
+    let chain_id = if s.config.chain_id.is_empty() {
+        if s.config.is_testnet {
+            "creg-testnet-1".to_string()
+        } else {
+            "creg-mainnet-1".to_string()
+        }
+    } else {
+        s.config.chain_id.clone()
+    };
     Json(ChainStatsResponse {
         chain: s.chain.stats(),
+        chain_id,
         genesis_hash,
+        spec_signature_verified: s.config.namespace_authority_policy_source_verified,
+        l1_rpc_configured: !s.config.eth_rpc_url.trim().is_empty(),
+        is_validator: s.config.is_validator,
         validator_count: validators.len(),
         active_validators: active_count,
         total_stake,
@@ -751,9 +768,19 @@ struct RuntimeConfigResponse {
     version: String,
     build: String,
     chain_id: String,
+    /// Genesis identity currently applied to this node. This is public
+    /// verification metadata; the node never exposes signing material.
+    genesis_hash: String,
+    /// True only when the active chain-spec policy pins came from a verified
+    /// detached signature during startup.
+    spec_signature_verified: bool,
+    /// Whether an L1 RPC endpoint is configured. The endpoint itself is never
+    /// returned through this public monitoring response.
+    l1_rpc_configured: bool,
     network: String,
     profile: String,
     is_testnet: bool,
+    is_validator: bool,
     registry_address: Option<String>,
     token_contract: Option<String>,
     staking_contract: Option<String>,
@@ -966,9 +993,13 @@ async fn runtime_config(State(state): State<SharedState>) -> impl IntoResponse {
         version: env!("CARGO_PKG_VERSION").to_string(),
         build: format!("v{}", env!("CARGO_PKG_VERSION")),
         chain_id,
+        genesis_hash: s.config.network_genesis_hash.clone(),
+        spec_signature_verified: s.config.namespace_authority_policy_source_verified,
+        l1_rpc_configured: !s.config.eth_rpc_url.trim().is_empty(),
         network: network.to_string(),
         profile: network.to_string(),
         is_testnet: s.config.is_testnet,
+        is_validator: s.config.is_validator,
         registry_address: non_zero_address(&s.config.registry_addr),
         token_contract: non_zero_address(&s.config.token_addr),
         staking_contract: non_zero_address(&s.config.staking_addr),

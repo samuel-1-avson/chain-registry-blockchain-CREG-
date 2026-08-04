@@ -13,6 +13,8 @@ on:
 
 permissions:
   contents: read
+  id-token: write
+  attestations: write
 
 jobs:
   verify:
@@ -22,14 +24,33 @@ jobs:
         working-directory: CREG-Contribution-Arena
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The Arena is tracked as a git submodule.  Checkout must materialize
+          # it before setup-node resolves the lockfile used for npm caching.
+          submodules: recursive
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: CREG-Contribution-Arena/package-lock.json
       - run: npm ci
-      - run: npm audit --omit=dev --audit-level=high
+      - run: npm audit --audit-level=high
       - run: npm run lint
+      - run: npm run check:firebase-app-check
       - run: npm test
       - run: npm run build
+      - run: npm run check:bundle
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
       - run: npm run smoke:preview
+      - run: npm sbom --omit=dev --sbom-format=cyclonedx > dist/arena-sbom.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: contribution-arena-dist-${{ github.sha }}
+          path: CREG-Contribution-Arena/dist
+          if-no-files-found: error
+      - name: Attest the production bundle
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: CREG-Contribution-Arena/dist/arena-sbom.json
