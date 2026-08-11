@@ -1,4 +1,10 @@
-# GCP-008 — Deploy hub-api to Cloud Run (stateless public status API).
+# GCP-008 — Deploy hub-api to Cloud Run (testnet public status API ONLY).
+#
+# IMPORTANT: Contribution Arena must NOT run on Cloud Run.
+# Arena identity, findings, reputation, waitlist, and AI Guide are Firebase-only
+# (project gen-lang-client-0098858574, domain https://contribute.cregnet.dev).
+# The temporary creg-hub-api Cloud Run revision that exposed /api/v1/contributions
+# was deleted on 2026-08-11 for that reason.
 #
 # SQLite (HUB_DB_PATH) is ephemeral on Cloud Run unless you add Cloud SQL later.
 # Phase 2 uses hub-api for /api/health and /api/status/public probes only.
@@ -19,7 +25,8 @@ param(
     [string]$ExplorerHost = "",
     [string]$SpecHost = "",
     [switch]$Confirm,
-    [switch]$SetJoinHostProxy
+    [switch]$SetJoinHostProxy,
+    [switch]$AllowArenaConfusion
 )
 
 $ErrorActionPreference = "Stop"
@@ -45,6 +52,14 @@ function Log($m) { Write-Host "[hub-cloudrun] $m" }
 
 if (-not (Test-Path $hubApiDir)) { throw "Missing hub-api at $hubApiDir" }
 
+if (-not $AllowArenaConfusion) {
+    Write-Host ""
+    Write-Host "Contribution Arena runtime is Firebase Hosting + Functions at https://contribute.cregnet.dev." -ForegroundColor Cyan
+    Write-Host "This script deploys the separate testnet hub-api status service only." -ForegroundColor Cyan
+    Write-Host "Do not treat Cloud Run as the Arena contribution authority." -ForegroundColor Cyan
+    Write-Host ""
+}
+
 if (-not $Confirm) {
     Write-Host ""
     Write-Host "Will deploy hub-api to Cloud Run (GCP-008):" -ForegroundColor Yellow
@@ -52,7 +67,7 @@ if (-not $Confirm) {
     Write-Host "  Image:   $image"
     Write-Host "  Public:  --allow-unauthenticated"
     Write-Host "  Upstreams: https://$ApiHost, https://$FaucetHost, https://$ExplorerHost"
-  if ($SetJoinHostProxy) {
+    if ($SetJoinHostProxy) {
         Write-Host "  Will write CREG_HUB_API_CLOUD_RUN_URL to sepolia-3node.env for join host Caddy"
     }
     Write-Host ""
@@ -103,6 +118,7 @@ gcloud run deploy $ServiceName `
     --concurrency=80 `
     --set-env-vars=$envVars `
     --allow-unauthenticated `
+    --ingress=all `
     --quiet
 
 $serviceUrl = (gcloud run services describe $ServiceName --region=$Region --project=$ProjectId --format="value(status.url)").Trim()
