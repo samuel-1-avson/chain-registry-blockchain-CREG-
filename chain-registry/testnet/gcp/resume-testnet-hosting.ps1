@@ -3,8 +3,9 @@
   Restart full testnet GCP hosting after waitlist-only mode.
 
 .DESCRIPTION
-  Starts validator + Geth VMs, scales observer MIG back to 1, and points to
-  full edge stack scripts. Does not auto-run start-cloud-edge-gcp.sh (run on VM after sync).
+  Starts the optional Geth RPC VM, scales observer MIG back to 1, and points to
+  the GCP public-services stack. Validators are external and are never started
+  by this script. Does not auto-run start-cloud-edge-gcp.sh (run on VM after sync).
 
 .EXAMPLE
   .\resume-testnet-hosting.ps1
@@ -15,7 +16,6 @@ param(
     [string]$ProjectId = "",
     [string]$Zone = "",
     [string]$EdgeVmName = "",
-    [string]$ValidatorVmName = "",
     [string]$GethVmName = "",
     [string]$ObserverMigName = "",
     [int]$ObserverReplicas = 1,
@@ -29,7 +29,6 @@ $cfg = & (Join-Path $gcpDir "_Load-HostingEnv.ps1")
 if (-not $ProjectId) { $ProjectId = $cfg.GCP_PROJECT }
 if (-not $Zone) { $Zone = $cfg.GCP_ZONE }
 if (-not $EdgeVmName) { $EdgeVmName = $cfg.GCP_VM_NAME }
-if (-not $ValidatorVmName) { $ValidatorVmName = $cfg.GCP_VALIDATOR_VM_NAME }
 if (-not $GethVmName) { $GethVmName = $cfg.GCP_SEPOLIA_GETH_VM_NAME }
 if (-not $ObserverMigName) { $ObserverMigName = if ($cfg.GCP_OBSERVER_MIG_NAME) { $cfg.GCP_OBSERVER_MIG_NAME } else { "creg-observer-pool" } }
 
@@ -41,8 +40,8 @@ if (-not (Get-Command gcloud -ErrorAction SilentlyContinue)) {
 if (-not $ProjectId) { throw "Set GCP_PROJECT in hosting.env" }
 
 if (-not $Yes -and -not $WhatIfPreference) {
-    Write-Host "Will start testnet VMs and observer pool. Re-run with -Yes." -ForegroundColor Yellow
-    Write-Host "  Start: $GethVmName, $ValidatorVmName"
+    Write-Host "Will start GCP public services and observer pool. Re-run with -Yes." -ForegroundColor Yellow
+    Write-Host "  Start: $GethVmName (optional internal Sepolia RPC)"
     Write-Host "  MIG:   $ObserverMigName -> $ObserverReplicas"
     Write-Host "  Then:  sync repo + start-cloud-edge-gcp.sh on edge VM"
     exit 0
@@ -59,8 +58,8 @@ function Invoke-Gcloud([string[]]$GcloudArgs) {
 
 gcloud config set project $ProjectId | Out-Null
 
-# Geth before validator (faucet/RPC dependency).
-foreach ($vm in @($GethVmName, $ValidatorVmName)) {
+# Geth before observers (faucet/RPC dependency).
+foreach ($vm in @($GethVmName)) {
     $status = (gcloud compute instances describe $vm --zone=$Zone --project=$ProjectId --format="value(status)" 2>$null)
     if (-not $status) {
         Log "VM $vm not found — skipping"
@@ -101,8 +100,8 @@ Write-Host ""
 Log "Next steps (manual on edge VM):"
 Write-Host "  1. .\sync-local-repo.ps1"
 Write-Host "  2. .\push-env.ps1"
-Write-Host "  3. SSH: ./testnet/start-validator-fleet-gcp.sh  (on $ValidatorVmName)"
-Write-Host "  4. SSH edge: ./testnet/start-cloud-edge-gcp.sh"
-Write-Host "  5. .\verify-fleet-sandbox.ps1"
+Write-Host "  3. Configure CREG_VALIDATOR_P2P_SEEDS and CREG_VALIDATOR_HTTP_PEERS from independent operators"
+Write-Host "  4. SSH: ./testnet/start-observer-pool-gcp.sh (on observer MIG instances)"
+Write-Host "  5. SSH edge: ./testnet/start-cloud-edge-gcp.sh"
 Write-Host ""
 Write-Host "See docs/WAITLIST-ONLY-HOSTING.md — Relaunch checklist"

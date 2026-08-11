@@ -96,8 +96,8 @@ Verified packages cannot be fetched (operator IPFS node down, gateway failing, o
 Sepolia RPC failures break `validator_set_sync`, staking checks, or bridge anchoring.
 
 1. Confirm: node logs show `eth_getLogs` errors or `validator_set_sync_state=degraded`; check provider status page.
-2. Switch `CREG_ETH_RPC` to a backup provider (keep at least one alternate configured; archive-capable required). For the GCP seed fleet this is a `sepolia-fleet.env` update + `deploy-validator-fleet.ps1 -SkipSync`.
-3. Internal geth option: point validators at the internal Sepolia geth VM once its sync is verified (`eth_getCode` at the Registry address) — see `testnet/gcp/deploy-sepolia-geth.ps1`.
+2. Switch `CREG_ETH_RPC` to a backup provider (keep at least one alternate configured; archive-capable required). For GCP observers this is a `sepolia-fleet.env` update followed by `deploy-observer-pool.ps1 -Confirm`.
+3. Internal Geth option: point GCP observers/faucet at the internal Sepolia Geth VM once its sync is verified (`eth_getCode` at the Registry address) — see `testnet/gcp/deploy-sepolia-geth.ps1`. Independent validators must update their own provider configuration.
 4. Validators keep operating on the last finalized validator set during the outage; new registrations and stake changes queue until sync recovers.
 5. Verify recovery: `validator_set_sync_state` healthy, `validator_set_last_finalized_source_block` advancing.
 
@@ -105,9 +105,9 @@ Sepolia RPC failures break `validator_set_sync`, staking checks, or bridge ancho
 
 API, explorer, faucet, spec server, or waitlist down.
 
-1. Identify the failing layer: DNS/Cloudflare → Caddy edge (`creg-testnet-vm`) → upstream service (fleet VM or edge container).
-2. Edge checks: `testnet/gcp/ssh-vm.ps1 -Command "docker ps"`; fleet checks: `testnet/gcp/ssh-validator-vm.ps1 -Command "docker ps"`.
-3. Restart the failed service via the corresponding start script (`start-remote-stack.sh`, `start-validator-fleet-gcp.sh`, `start-remote-waitlist.sh`).
+1. Identify the failing layer: DNS/Cloudflare → Caddy edge (`creg-testnet-vm`) → observer ILB/API or edge container.
+2. Edge checks: `testnet/gcp/ssh-vm.ps1 -Command "docker ps"`; observer checks: IAP SSH to an observer MIG instance and `curl http://127.0.0.1:28182/v1/health`.
+3. Restart the failed GCP service via `start-remote-stack.sh` or `start-observer-pool-gcp.sh`; independent validators are restarted by their own operators.
 4. Spec server outage is consensus-sensitive: nodes fall back to cached chain spec (`CREG_CHAIN_SPEC_OFFLINE` path) — restore before cache-less nodes restart.
 5. Faucet drained or abused: rotate `FAUCET_PRIVATE_KEY` per the security runbook, refund, and consider rate-limit tightening.
 

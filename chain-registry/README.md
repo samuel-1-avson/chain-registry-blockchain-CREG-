@@ -32,6 +32,27 @@ export CREG_NODE_URL=https://api.testnet.cregnet.dev
 
 Full publisher and validator flows: [testnet/QUICKSTART.md](testnet/QUICKSTART.md) and [testnet/OPERATOR.md](testnet/OPERATOR.md).
 
+### Updating an installed CLI
+
+The installed `creg` binary can check the configured GitHub release stream and
+stage a verified platform update without downloading a full source tree:
+
+```bash
+creg update --check       # inspect the newest release; change nothing
+creg update               # show the candidate and require confirmation
+creg update --yes         # verify SHA-256, stage, and install the update
+creg update --version v0.4.1-testnet --yes  # explicit release/rollback rehearsal
+```
+
+The updater selects the current OS/CPU archive, requires a release digest (the
+GitHub asset digest or a matching `SHA256SUMS` entry), stages the `creg` binary,
+and replaces it only after verification. On Windows replacement is deferred to
+a short-lived helper after the running process exits. Set `CREG_GITHUB_REPO`
+to use a controlled fork or mirror. Updates never read or handle validator
+private keys. The command updates the `creg` CLI; a running `creg-node` should
+be upgraded through the operator's service/deployment restart so its data
+directory and validator process are never replaced underneath it.
+
 ---
 
 ## Documentation

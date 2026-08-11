@@ -7,7 +7,7 @@ held by one operator, so this remains a coordinated research alpha with no
 Byzantine-tolerance claim. [TESTNET_SCALE_ARCHITECTURE.md](../../docs/TESTNET_SCALE_ARCHITECTURE.md)
 is a future design, not evidence of independently operated validators.
 
-This runbook is for **maintainers** operating edge services, optional seed validators, and cohort onboarding. External validators follow [VALIDATOR_ONBOARDING_CHECKLIST.md](../../docs/VALIDATOR_ONBOARDING_CHECKLIST.md).
+This runbook is for **maintainers** operating GCP edge/observer services and cohort onboarding. Validators and bootnodes are independently operated outside GCP; external validators follow [VALIDATOR_ONBOARDING_CHECKLIST.md](../../docs/VALIDATOR_ONBOARDING_CHECKLIST.md).
 
 Fresh-genesis key custody and injection are documented in
 [FRESH_GENESIS_KEYS.md](./FRESH_GENESIS_KEYS.md); never place Secret Manager
@@ -21,9 +21,9 @@ private values in a committed or shared environment file.
 |------|-------|---------|
 | **Edge** | `creg-testnet-vm` (public) | TLS, spec server, IPFS, faucet, waitlist/hub proxies |
 | **Observer pool** | GCP MIG (optional) | Public API reads (`api.testnet.cregnet.dev`) |
-| **Seed validators** | `creg-validator-vm` (private VPC) | Optional bootstrap quorum — **not** the validator cap |
+| **Bootnodes** | Independently operated hosts | P2P discovery; not hosted by the GCP edge |
 | **External validators** | Operator-owned hosts | Genesis Alpha cohort — one host per operator |
-| **Sepolia RPC** | `creg-sepolia-geth-vm` (private) | `CREG_ETH_RPC` for fleet and observers |
+| **Sepolia RPC** | `creg-sepolia-geth-vm` (private, optional) | `CREG_ETH_RPC` for GCP observers/faucet; external validators use their own reachable provider |
 
 Cohort waves: [GENESIS_ALPHA_COHORT_PLAYBOOK.md](../../docs/GENESIS_ALPHA_COHORT_PLAYBOOK.md).
 
@@ -43,29 +43,44 @@ to the current wall clock.
 
 ---
 
-## Maintainer seed fleet (optional)
+## GCP public-services layer
 
-Small maintainer fleet on GCP seeds P2P and early quorum while external operators join.
+GCP runs the edge, observer pool, spec server, IPFS, faucet, and optional Sepolia
+RPC. It does not run validator containers or hold validator keys.
 
 ```powershell
 .\testnet\init-sepolia-fleet-env.ps1
 # Set CREG_EDGE_INTERNAL_IP, CREG_ETH_RPC (internal Geth) in testnet/sepolia-fleet.env
+# Set CREG_VALIDATOR_P2P_SEEDS and CREG_VALIDATOR_HTTP_PEERS from independent
+# operators; never copy validator keys to this file or to GCP.
+.\testnet\gcp\verify-public-services-profile.ps1 -Target observer
 ```
 
-On `creg-validator-vm` (Linux):
+On each observer-pool VM (Linux):
 
 ```bash
-./testnet/start-validator-fleet-gcp.sh
+./testnet/start-observer-pool-gcp.sh
 ```
 
-Compose: `docker-compose.validator-fleet.yml` + `docker-compose.fleet-sandbox.yml` (nsjail default).
+Compose: `docker-compose.observer-pool.yml` (read-only observer profile).
 
 Deploy from workstation:
 
 ```powershell
-.\testnet\gcp\deploy-validator-fleet.ps1
-.\testnet\gcp\verify-fleet-sandbox.ps1
+.\testnet\gcp\deploy-observer-pool.ps1 -Confirm
 ```
+
+After the observer ILB has an address, add `CREG_OBSERVER_POOL_LB_IP` (or the
+resolved `CREG_OBSERVER_API_UPSTREAM`) to the deployment env and run the full
+read-only gate before touching the edge:
+
+```powershell
+.\testnet\gcp\verify-public-services-profile.ps1
+```
+
+The gate rejects template values, legacy validator-placement flags, missing
+external peer endpoints, missing operator authentication, and any validator
+private-key material. It does not call GCP or mutate resources.
 
 Detail: [GCP-VALIDATOR-FLEET.md](../../docs/GCP-VALIDATOR-FLEET.md).
 
@@ -91,7 +106,7 @@ Each operator runs **one validator per machine** using `docker-compose.validator
 | Profile | Image | `CREG_DEV_SANDBOX` | Host |
 |---------|-------|-------------------|------|
 | Public validator | `Dockerfile.secure` (nsjail) | `false` | Linux |
-| Maintainer seed fleet | `chain-registry-node-secure:fleet` | `false` (forced by fleet-sandbox overlay) | `creg-validator-vm` |
+| Maintainer seed fleet | `chain-registry-node-secure:fleet` | `false` (legacy lab only) | Not part of public GCP profile |
 | Local Sepolia bootstrap | `docker-compose.testnet.yml` | Sepolia L1 | Local |
 
 ```powershell
@@ -379,7 +394,7 @@ All four remain explicit testnet gates.
 | Task | Command |
 |------|---------|
 | Resume public hosting | `.\testnet\gcp\resume-testnet-hosting.ps1` |
-| Start seed fleet (VM) | `./testnet/start-validator-fleet-gcp.sh` |
+| Start GCP observer/public services | `.\testnet\gcp\deploy-observer-pool.ps1 -Confirm` then `.\testnet\gcp\deploy-stack.ps1` |
 | Hosting verify | `.\testnet\hosting-301-verify.ps1 -BaseDomain testnet.cregnet.dev` |
 | Stop hosting (cost) | `.\testnet\gcp\stop-testnet-hosting.ps1` |
 | Local CI | `cargo test --workspace`; `cd contracts && forge test` |
@@ -391,7 +406,8 @@ All four remain explicit testnet gates.
 Runbook: [gcp/README.md](./gcp/README.md)
 
 ```powershell
-.\testnet\prepare-public-hosting.ps1 -BaseDomain testnet.YOUR_DOMAIN -AcmeEmail you@example.com
+.\testnet\init-sepolia-fleet-env.ps1
+.\testnet\gcp\verify-public-services-profile.ps1
 .\testnet\hosting-301-verify.ps1 -BaseDomain testnet.YOUR_DOMAIN
 ```
 

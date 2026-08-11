@@ -1,9 +1,17 @@
-# Print validator fleet internal IP for sepolia-3node.env.
+# LEGACY LAB ONLY — print the retired validator-fleet VM IP.
+# Production edge/observer config must use independently operated endpoints.
 #
 # Usage:
-#   .\testnet\gcp\get-validator-fleet-internal-ip.ps1
+#   .\testnet\gcp\get-validator-fleet-internal-ip.ps1 -AllowLegacyMaintainerSeedFleet
+
+param(
+    [switch]$AllowLegacyMaintainerSeedFleet
+)
 
 $ErrorActionPreference = "Stop"
+if (-not $AllowLegacyMaintainerSeedFleet) {
+    throw "The GCP validator fleet is retired. Configure CREG_OBSERVER_API_UPSTREAM and external validator peers instead."
+}
 $gcpDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $cfg = & (Join-Path $gcpDir "_Load-HostingEnv.ps1")
 

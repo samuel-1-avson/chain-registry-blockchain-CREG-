@@ -23,6 +23,9 @@ env:
   CARGO_INCREMENTAL: "0"
   CREG_SPEC_SIGNING_PUBKEY: 3fe87833177b04b0a18600eace041692a35fb2b85f6e14e6734d894a0fd61c01
   RELEASE_VERSION: ${{ inputs.version || github.ref_name }}
+  # build.rs embeds this value so the binaries cannot be published under a
+  # tag while still reporting the Cargo package's historical v0.1.0.
+  CREG_RELEASE_VERSION: ${{ inputs.version || github.ref_name }}
 
 jobs:
   reproducibility:
@@ -127,8 +130,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ./target/release/creg --version
-          ./target/release/creg-node --version
+          expected="${RELEASE_VERSION#v}"
+          test "$(./target/release/creg --version)" = "creg ${expected}"
+          test "$(./target/release/creg-node --version)" = "creg-node ${expected}"
           ./target/release/creg chain-spec validate testnet/chain-spec.sepolia.json \
             --signature testnet/chain-spec.sepolia.json.sig \
             --pubkey "$CREG_SPEC_SIGNING_PUBKEY" --require-signature
@@ -137,8 +141,9 @@ jobs:
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
-          .\target\release\creg.exe --version
-          .\target\release\creg-node.exe --version
+          $expected = $env:RELEASE_VERSION.TrimStart('v')
+          if ((& .\target\release\creg.exe --version) -ne "creg $expected") { throw "creg version does not match $env:RELEASE_VERSION" }
+          if ((& .\target\release\creg-node.exe --version) -ne "creg-node $expected") { throw "creg-node version does not match $env:RELEASE_VERSION" }
           .\target\release\creg.exe chain-spec validate testnet\chain-spec.sepolia.json `
             --signature testnet\chain-spec.sepolia.json.sig `
             --pubkey $env:CREG_SPEC_SIGNING_PUBKEY --require-signature

@@ -4,10 +4,11 @@
 
 .DESCRIPTION
   Disaster-recovery backup for the single-zone GCP deployment (the node's
-  authoritative state — RocksDB chain, validator-set cursor, bridge anchor
-  journal, validator registrations — lives on the validator VM's persistent
-  disk). Snapshots are point-in-time and can be restored into a new disk/VM,
-  including in another zone for zonal-outage recovery.
+  public-services state — edge/spec/IPFS data and optional Sepolia Geth data —
+  lives on the selected GCP persistent disks. Validator authoritative state and
+  validator keys are owned by independent operators and are not backed up here.
+  Snapshots are point-in-time and can be restored into a new disk/VM, including
+  in another zone for zonal-outage recovery.
 
   Run on a schedule (Task Scheduler / cron / Cloud Scheduler) and prune old
   snapshots with -RetentionDays. For continuous protection, prefer a GCP
@@ -24,8 +25,10 @@
 param(
     [string]$Project = $env:CREG_GCP_PROJECT,
     [string]$Zone = "us-central1-a",
-    # Disks to snapshot. Defaults to the three CREG testnet VM boot disks.
-    [string[]]$Disks = @("creg-validator-vm", "creg-testnet-vm", "creg-sepolia-geth-vm"),
+    # Disks to snapshot. Defaults to the GCP edge and optional Sepolia RPC VM.
+    # Observer MIG disks are ephemeral/recreated from the signed image; include
+    # a specific persistent disk with -Disks if an operator enables one.
+    [string[]]$Disks = @("creg-testnet-vm", "creg-sepolia-geth-vm"),
     [int]$RetentionDays = 14,
     [switch]$Prune
 )

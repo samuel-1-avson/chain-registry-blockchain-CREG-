@@ -17,4 +17,14 @@ fn main() {
         // operator environment cannot produce a different binary policy.
         println!("cargo:rustc-env=CREG_SPEC_SIGNING_PUBKEY={key}");
     }
+
+    // Keep --version and startup diagnostics aligned with the release tag.
+    // Local builds use the package version; release CI supplies the tag.
+    let version =
+        env::var("CREG_RELEASE_VERSION").unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_string());
+    println!(
+        "cargo:rustc-env=CREG_EFFECTIVE_VERSION={}",
+        version.trim_start_matches('v')
+    );
+    println!("cargo:rerun-if-env-changed=CREG_RELEASE_VERSION");
 }

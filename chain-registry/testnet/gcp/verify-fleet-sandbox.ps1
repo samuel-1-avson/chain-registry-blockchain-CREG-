@@ -1,4 +1,5 @@
-# MAL-001 — Verify the GCP validator fleet runs a real behavioural sandbox.
+# MAL-001 — Verify the retired GCP validator fleet sandbox (legacy lab only).
+# Production validators are independently operated outside GCP.
 #
 # Proves (on creg-validator-vm via IAP SSH):
 #   - creg-fleet-node1/node2 use the chain-registry-node-secure image
@@ -15,10 +16,14 @@
 param(
     [string]$ProjectId = "",
     [string]$Zone = "",
-    [string]$VmName = ""
+    [string]$VmName = "",
+    [switch]$AllowLegacyMaintainerSeedFleet
 )
 
 $ErrorActionPreference = "Stop"
+if (-not $AllowLegacyMaintainerSeedFleet) {
+    throw "GCP validator fleet verification is disabled for the public profile. Pass -AllowLegacyMaintainerSeedFleet only for a disposable lab."
+}
 $gcpDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $testnetDir = Split-Path -Parent $gcpDir
 $cfg = & (Join-Path $gcpDir "_Load-HostingEnv.ps1")

@@ -7,6 +7,23 @@ const NODE_ROUTE_MODE = (import.meta.env.VITE_NODE_ROUTE_MODE || 'auto').toLower
 const LEGACY_FALLBACK_STATUSES = new Set([404, 405, 501])
 const OPTIONAL_ENDPOINT_STATUSES = new Set([401, 403, 404, 405, 501, 503])
 let detectedRouteMode = null
+// During public-services bootstrap every CREG API route intentionally returns
+// 503 until an independently operated observer is attached. Cache that
+// explicit state briefly so a dozen polling hooks do not hammer the edge and
+// fill the browser console with identical failures. A later probe automatically
+// resumes once the observer becomes available.
+const OBSERVER_RETRY_MS = 30_000
+let observerUnavailableUntil = 0
+
+export function isObserverUnavailable() {
+  return Date.now() < observerUnavailableUntil
+}
+
+function markObserverUnavailable(error) {
+  if (error instanceof ApiError && error.status === 503 && /observer_unavailable/i.test(error.body || '')) {
+    observerUnavailableUntil = Date.now() + OBSERVER_RETRY_MS
+  }
+}
 
 export class ApiError extends Error {
   constructor(status, url, body) {
@@ -90,6 +107,9 @@ const joinUrl = (base, path) => {
 
 export async function nodeFetch(path, { signal, method = 'GET', body, headers = {} } = {}) {
   const url = joinUrl(API_BASE, path)
+  if (isObserverUnavailable() && path.startsWith('/v1/')) {
+    throw new ApiError(503, url, '{"error":"observer_unavailable","message":"The validator observer pool is not attached yet.","cached":true}')
+  }
   const init = {
     method,
     headers: { 'Accept': 'application/json', ...headers },
@@ -102,7 +122,9 @@ export async function nodeFetch(path, { signal, method = 'GET', body, headers = 
   const res = await fetch(url, init)
   if (!res.ok) {
     const text = await res.text().catch(() => '')
-    throw new ApiError(res.status, url, text.slice(0, 500))
+    const error = new ApiError(res.status, url, text.slice(0, 500))
+    markObserverUnavailable(error)
+    throw error
   }
   const ct = res.headers.get('content-type') || ''
   if (ct.includes('application/json')) return res.json()

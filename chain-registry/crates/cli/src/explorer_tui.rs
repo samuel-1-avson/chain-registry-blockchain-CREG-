@@ -31,7 +31,8 @@ use ratatui::{
 use serde_json::Value;
 use std::{
     collections::VecDeque,
-    io,
+    fs, io,
+    path::PathBuf,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -254,6 +255,10 @@ struct PackageInfo {
 
 #[derive(Debug, Clone)]
 struct NetworkStats {
+    chain_id: String,
+    genesis_hash: Option<String>,
+    spec_signature_verified: bool,
+    l1_rpc_configured: bool,
     tip_height: u64,
     package_count: u64,
     _block_count: u64,
@@ -262,6 +267,60 @@ struct NetworkStats {
     peer_count: usize,
     bridge_status: String,
     l1_block: u64,
+    finalized_height: u64,
+    finalization_lag: u64,
+    validator_set_source: String,
+    validator_set_sync_state: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PreflightStatus {
+    Pass,
+    Warn,
+    Fail,
+    Pending,
+}
+
+impl PreflightStatus {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Pass => "PASS",
+            Self::Warn => "WARN",
+            Self::Fail => "FAIL",
+            Self::Pending => "PENDING",
+        }
+    }
+
+    fn color(self) -> Color {
+        match self {
+            Self::Pass => Theme::success(),
+            Self::Warn => Theme::warning(),
+            Self::Fail => Theme::error(),
+            Self::Pending => Theme::text_dim(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct PreflightCheck {
+    name: String,
+    status: PreflightStatus,
+    detail: String,
+}
+
+#[derive(Debug, Clone)]
+struct PreflightState {
+    checks: Vec<PreflightCheck>,
+    updated_at: Instant,
+}
+
+impl Default for PreflightState {
+    fn default() -> Self {
+        Self {
+            checks: Vec::new(),
+            updated_at: Instant::now(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -279,6 +338,7 @@ struct MempoolTx {
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum View {
     Overview,
+    Preflight,
     Blocks,
     BlockDetail,
     Validators,
@@ -385,6 +445,14 @@ struct ConsensusState {
 struct RuntimeIdentity {
     node_id: String,
     validator_pubkey: Option<String>,
+    chain_id: String,
+    network: String,
+    genesis_hash: Option<String>,
+    spec_signature_verified: bool,
+    l1_rpc_configured: bool,
+    is_validator: bool,
+    validator_set_source: String,
+    validator_set_sync_state: String,
 }
 
 #[derive(Debug)]
@@ -409,6 +477,7 @@ struct App {
     mempool: Vec<MempoolTx>,
     peer_ids: Vec<String>,
     runtime_identity: Option<RuntimeIdentity>,
+    preflight: PreflightState,
 
     // UI State
     _show_help: bool,
@@ -433,6 +502,15 @@ struct App {
     last_event_at: Instant,
     /// Seconds until the next reconnect attempt (shown in disconnect banner).
     reconnect_in: u64,
+    /// Last successful REST API response, separate from the SSE stream state.
+    last_api_success_at: Option<Instant>,
+    /// Redacted, non-sensitive API failure summary.
+    last_api_error: Option<String>,
+    /// Most recent diagnostics export result.
+    diagnostics_message: Option<String>,
+    /// Validator/operator monitoring is read-only by default. The TUI never
+    /// accepts or stores private keys.
+    read_only: bool,
 
     // Sparkline data for TPS visualization
     tps_history: VecDeque<u64>,
@@ -453,6 +531,10 @@ enum DataUpdate {
     MempoolSnapshot(Vec<MempoolTx>),
     Peers(Vec<String>),
     RuntimeIdentity(RuntimeIdentity),
+    /// REST API responded successfully.
+    ApiHealthy,
+    /// REST API could not be reached; the message is intentionally redacted.
+    ApiError(String),
     /// SSE stream (re-)connected successfully.
     NodeConnected,
     /// SSE stream dropped; UI should show disconnect banner.
@@ -496,6 +578,10 @@ impl App {
             selected_event: 0,
             _selected_tab: 0,
             stats: NetworkStats {
+                chain_id: "unknown".into(),
+                genesis_hash: None,
+                spec_signature_verified: false,
+                l1_rpc_configured: false,
                 tip_height: 0,
                 package_count: 0,
                 _block_count: 0,
@@ -504,6 +590,10 @@ impl App {
                 peer_count: 0,
                 bridge_status: "Unknown".to_string(),
                 l1_block: 0,
+                finalized_height: 0,
+                finalization_lag: 0,
+                validator_set_source: "unknown".into(),
+                validator_set_sync_state: "unknown".into(),
             },
             blocks: VecDeque::with_capacity(MAX_BLOCKS),
             validators: Vec::new(),
@@ -512,6 +602,7 @@ impl App {
             mempool: Vec::new(),
             peer_ids: Vec::new(),
             runtime_identity: None,
+            preflight: PreflightState::default(),
             _show_help: false,
             search_query: String::new(),
             is_searching: false,
@@ -524,6 +615,10 @@ impl App {
             node_connected: false,
             last_event_at: Instant::now(),
             reconnect_in: 0,
+            last_api_success_at: None,
+            last_api_error: None,
+            diagnostics_message: None,
+            read_only: true,
             tps_history: VecDeque::with_capacity(60),
             faucet: FaucetView::new(
                 std::env::var("CREG_FAUCET_URL")
@@ -700,6 +795,7 @@ async fn data_fetcher_loop(app: Arc<RwLock<App>>, api_base: String, tx: mpsc::Se
         if last_stats_refresh.elapsed() >= Duration::from_secs(REFRESH_INTERVAL_SECS) {
             if let Ok(stats) = fetch_stats(&client, &api_base).await {
                 let _ = tx.send(DataUpdate::Stats(stats.clone())).await;
+                let _ = tx.send(DataUpdate::ApiHealthy).await;
 
                 // Fetch new blocks if height changed
                 if stats.tip_height > last_block_height {
@@ -710,6 +806,12 @@ async fn data_fetcher_loop(app: Arc<RwLock<App>>, api_base: String, tx: mpsc::Se
                     }
                     last_block_height = stats.tip_height;
                 }
+            } else {
+                // Keep the UI explicit about REST availability without
+                // forwarding reqwest URLs or credentials into the report.
+                let _ = tx
+                    .send(DataUpdate::ApiError("node REST API unavailable".into()))
+                    .await;
             }
 
             // Fetch validators
@@ -772,6 +874,10 @@ async fn fetch_stats(client: &reqwest::Client, api_base: &str) -> Result<Network
     .await?;
 
     Ok(NetworkStats {
+        chain_id: json["chain_id"].as_str().unwrap_or("unknown").to_string(),
+        genesis_hash: json["genesis_hash"].as_str().map(|s| s.to_string()),
+        spec_signature_verified: json["spec_signature_verified"].as_bool().unwrap_or(false),
+        l1_rpc_configured: json["l1_rpc_configured"].as_bool().unwrap_or(false),
         tip_height: json["tip_height"].as_u64().unwrap_or(0),
         package_count: json["package_count"].as_u64().unwrap_or(0),
         _block_count: json["block_count"].as_u64().unwrap_or(0),
@@ -783,6 +889,16 @@ async fn fetch_stats(client: &reqwest::Client, api_base: &str) -> Result<Network
             .unwrap_or("Unknown")
             .to_string(),
         l1_block: json["l1_block"].as_u64().unwrap_or(0),
+        finalized_height: json["finalized_height"].as_u64().unwrap_or(0),
+        finalization_lag: json["finalization_lag"].as_u64().unwrap_or(0),
+        validator_set_source: json["validator_set_source"]
+            .as_str()
+            .unwrap_or("unknown")
+            .to_string(),
+        validator_set_sync_state: json["validator_set_sync_state"]
+            .as_str()
+            .unwrap_or("unknown")
+            .to_string(),
     })
 }
 
@@ -1023,6 +1139,20 @@ async fn fetch_runtime_config(client: &reqwest::Client, api_base: &str) -> Resul
     Ok(RuntimeIdentity {
         node_id: json["node_id"].as_str().unwrap_or("unknown").to_string(),
         validator_pubkey: json["validator_pubkey"].as_str().map(|s| s.to_string()),
+        chain_id: json["chain_id"].as_str().unwrap_or("unknown").to_string(),
+        network: json["network"].as_str().unwrap_or("unknown").to_string(),
+        genesis_hash: json["genesis_hash"].as_str().map(|s| s.to_string()),
+        spec_signature_verified: json["spec_signature_verified"].as_bool().unwrap_or(false),
+        l1_rpc_configured: json["l1_rpc_configured"].as_bool().unwrap_or(false),
+        is_validator: json["is_validator"].as_bool().unwrap_or(false),
+        validator_set_source: json["validator_set_source"]
+            .as_str()
+            .unwrap_or("unknown")
+            .to_string(),
+        validator_set_sync_state: json["validator_set_sync_state"]
+            .as_str()
+            .unwrap_or("unknown")
+            .to_string(),
     })
 }
 
@@ -1166,6 +1296,213 @@ async fn sse_event_listener(
     }
 }
 
+fn refresh_preflight(app: &mut App) {
+    let mut checks = Vec::with_capacity(9);
+    let identity = app.runtime_identity.as_ref();
+    let spec_verified = identity
+        .map(|id| id.spec_signature_verified)
+        .unwrap_or(app.stats.spec_signature_verified);
+
+    checks.push(PreflightCheck {
+        name: "Signed chain spec".into(),
+        status: if spec_verified {
+            PreflightStatus::Pass
+        } else if identity.is_none() && app.last_api_success_at.is_some() {
+            PreflightStatus::Warn
+        } else if identity.is_some() {
+            PreflightStatus::Fail
+        } else {
+            PreflightStatus::Pending
+        },
+        detail: if spec_verified {
+            "detached signature verified at node startup".into()
+        } else if identity.is_none() && app.last_api_success_at.is_some() {
+            "public API did not expose signature status; operator auth may be required".into()
+        } else if identity.is_some() {
+            "node did not report a verified chain-spec signature".into()
+        } else {
+            "waiting for node API".into()
+        },
+    });
+
+    let genesis_hash = identity
+        .and_then(|id| id.genesis_hash.as_deref())
+        .or(app.stats.genesis_hash.as_deref());
+    match genesis_hash {
+        Some(hash) if !hash.trim().is_empty() => checks.push(PreflightCheck {
+            name: "Genesis identity".into(),
+            status: PreflightStatus::Pass,
+            detail: format!("{}", short_hash(hash)),
+        }),
+        Some(_) => checks.push(PreflightCheck {
+            name: "Genesis identity".into(),
+            status: PreflightStatus::Fail,
+            detail: "node reported an empty genesis hash".into(),
+        }),
+        None => checks.push(PreflightCheck {
+            name: "Genesis identity".into(),
+            status: PreflightStatus::Pending,
+            detail: "waiting for runtime configuration".into(),
+        }),
+    }
+
+    let l1_rpc_configured = identity
+        .map(|id| id.l1_rpc_configured)
+        .unwrap_or(app.stats.l1_rpc_configured);
+    checks.push(PreflightCheck {
+        name: "L1 RPC".into(),
+        status: if l1_rpc_configured {
+            PreflightStatus::Pass
+        } else if identity.is_none() && app.last_api_success_at.is_some() {
+            PreflightStatus::Warn
+        } else if identity.is_some() {
+            PreflightStatus::Warn
+        } else {
+            PreflightStatus::Pending
+        },
+        detail: if l1_rpc_configured {
+            "endpoint configured (URL hidden)".into()
+        } else {
+            "no L1 RPC endpoint reported".into()
+        },
+    });
+
+    let peer_count = app.peer_ids.len().max(app.stats.peer_count);
+    checks.push(PreflightCheck {
+        name: "Peer connectivity".into(),
+        status: if peer_count > 0 {
+            PreflightStatus::Pass
+        } else {
+            PreflightStatus::Warn
+        },
+        detail: if peer_count > 0 {
+            format!("{} peer(s) connected", peer_count)
+        } else {
+            "0 peers; configure independent validator/bootnode seeds".into()
+        },
+    });
+
+    let api_status = if app.last_api_success_at.is_some() {
+        PreflightStatus::Pass
+    } else if app.last_api_error.is_some() {
+        PreflightStatus::Fail
+    } else {
+        PreflightStatus::Pending
+    };
+    checks.push(PreflightCheck {
+        name: "Node REST API".into(),
+        status: api_status,
+        detail: app
+            .last_api_error
+            .clone()
+            .unwrap_or_else(|| "waiting for the first successful response".into()),
+    });
+
+    let consensus_status = match app.consensus_state.as_ref() {
+        Some(consensus) if consensus.fetched_at.elapsed() <= Duration::from_secs(15) => {
+            PreflightStatus::Pass
+        }
+        Some(_) => PreflightStatus::Warn,
+        None => PreflightStatus::Pending,
+    };
+    checks.push(PreflightCheck {
+        name: "Consensus health".into(),
+        status: consensus_status,
+        detail: app
+            .consensus_state
+            .as_ref()
+            .map(|state| format!("round {} / {}", state.round, state.phase))
+            .unwrap_or_else(|| "waiting for consensus snapshot".into()),
+    });
+
+    match identity {
+        Some(id) if id.is_validator => {
+            let has_pubkey = id
+                .validator_pubkey
+                .as_deref()
+                .is_some_and(|key| !key.is_empty());
+            let listed = id.validator_pubkey.as_deref().is_some_and(|key| {
+                app.validators
+                    .iter()
+                    .any(|validator| validator.pub_key == key)
+            });
+            checks.push(PreflightCheck {
+                name: "Validator identity".into(),
+                status: if has_pubkey && listed {
+                    PreflightStatus::Pass
+                } else if has_pubkey {
+                    PreflightStatus::Warn
+                } else {
+                    PreflightStatus::Fail
+                },
+                detail: if !has_pubkey {
+                    "validator mode is enabled but no public key was reported".into()
+                } else if listed {
+                    "public identity is present in the active set".into()
+                } else {
+                    "public identity is configured but not in the observed active set".into()
+                },
+            });
+        }
+        Some(_) => checks.push(PreflightCheck {
+            name: "Validator identity".into(),
+            status: PreflightStatus::Warn,
+            detail: "observer mode; validator signing is disabled".into(),
+        }),
+        None => checks.push(PreflightCheck {
+            name: "Validator identity".into(),
+            status: PreflightStatus::Pending,
+            detail: "waiting for runtime configuration".into(),
+        }),
+    }
+
+    let sync_detail = identity
+        .map(|id| {
+            format!(
+                "{} / {}",
+                id.validator_set_source, id.validator_set_sync_state
+            )
+        })
+        .unwrap_or_else(|| "waiting for validator-set status".into());
+    let sync_status = match identity.map(|id| id.validator_set_sync_state.to_ascii_lowercase()) {
+        Some(state) if ["ready", "synced", "healthy", "active"].contains(&state.as_str()) => {
+            PreflightStatus::Pass
+        }
+        Some(state) if state == "unknown" => PreflightStatus::Pending,
+        Some(_) => PreflightStatus::Warn,
+        None => PreflightStatus::Pending,
+    };
+    checks.push(PreflightCheck {
+        name: "Validator-set sync".into(),
+        status: sync_status,
+        detail: sync_detail,
+    });
+
+    checks.push(PreflightCheck {
+        name: "Action safety".into(),
+        status: PreflightStatus::Pass,
+        detail: "read-only console; validator mutations require authenticated external tooling"
+            .into(),
+    });
+
+    app.preflight = PreflightState {
+        checks,
+        updated_at: Instant::now(),
+    };
+}
+
+fn short_hash(value: &str) -> String {
+    if value.len() <= 18 {
+        value.to_string()
+    } else {
+        format!(
+            "{}…{}",
+            &value[..10],
+            &value[value.len().saturating_sub(8)..]
+        )
+    }
+}
+
 fn apply_data_update(app: &mut App, update: DataUpdate) {
     match update {
         DataUpdate::Stats(stats) => {
@@ -1301,7 +1638,114 @@ fn apply_data_update(app: &mut App, update: DataUpdate) {
         DataUpdate::RuntimeIdentity(identity) => {
             app.runtime_identity = Some(identity);
         }
+        DataUpdate::ApiHealthy => {
+            app.last_api_success_at = Some(Instant::now());
+            app.last_api_error = None;
+        }
+        DataUpdate::ApiError(error) => {
+            app.last_api_error = Some(error);
+        }
     }
+    refresh_preflight(app);
+}
+
+fn export_diagnostics(app: &App) -> Result<PathBuf> {
+    let directory = std::env::var_os("CREG_DIAGNOSTICS_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("diagnostics"));
+    fs::create_dir_all(&directory)?;
+
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0);
+    let path = directory.join(format!("creg-console-{timestamp}.json"));
+
+    let checks: Vec<Value> = app
+        .preflight
+        .checks
+        .iter()
+        .map(|check| {
+            serde_json::json!({
+                "name": check.name,
+                "status": check.status.label(),
+                "detail": check.detail,
+            })
+        })
+        .collect();
+    let identity = app.runtime_identity.as_ref().map(|id| {
+        serde_json::json!({
+            "node_id": id.node_id,
+            "validator_pubkey": id.validator_pubkey,
+            "chain_id": id.chain_id,
+            "network": id.network,
+            "genesis_hash": id.genesis_hash,
+            "spec_signature_verified": id.spec_signature_verified,
+            "l1_rpc_configured": id.l1_rpc_configured,
+            "is_validator": id.is_validator,
+            "validator_set_source": id.validator_set_source,
+            "validator_set_sync_state": id.validator_set_sync_state,
+        })
+    });
+    let events: Vec<Value> = app
+        .events
+        .iter()
+        .take(50)
+        .map(|(at, event_type, message)| {
+            serde_json::json!({
+                "age_seconds": at.elapsed().as_secs(),
+                "type": event_type,
+                "message": message,
+            })
+        })
+        .collect();
+    let consensus = app.consensus_state.as_ref().map(|state| {
+        serde_json::json!({
+            "round": state.round,
+            "phase": state.phase,
+            "proposer": state.proposer,
+            "prepare_votes": state.prepare_votes,
+            "commit_votes": state.commit_votes,
+            "quorum": state.quorum,
+            "total_validators": state.total_validators,
+            "age_seconds": state.fetched_at.elapsed().as_secs(),
+        })
+    });
+    let report = serde_json::json!({
+        "format": "creg-console-diagnostics-v1",
+        "generated_at_unix": timestamp,
+        "read_only": app.read_only,
+        "node_connected": app.node_connected,
+        "reconnect_in_seconds": app.reconnect_in,
+        "api_last_success_age_seconds": app.last_api_success_at.map(|at| at.elapsed().as_secs()),
+        "api_error": app.last_api_error,
+        "stats": {
+            "chain_id": app.stats.chain_id,
+            "genesis_hash": app.stats.genesis_hash,
+            "spec_signature_verified": app.stats.spec_signature_verified,
+            "l1_rpc_configured": app.stats.l1_rpc_configured,
+            "tip_height": app.stats.tip_height,
+            "package_count": app.stats.package_count,
+            "validator_count": app.stats.validator_count,
+            "total_stake": app.stats.total_stake,
+            "peer_count": app.stats.peer_count,
+            "bridge_status": app.stats.bridge_status,
+            "l1_block": app.stats.l1_block,
+            "finalized_height": app.stats.finalized_height,
+            "finalization_lag": app.stats.finalization_lag,
+            "validator_set_source": app.stats.validator_set_source,
+            "validator_set_sync_state": app.stats.validator_set_sync_state,
+        },
+        "peer_ids": app.peer_ids,
+        "runtime_identity": identity,
+        "consensus": consensus,
+        "preflight": checks,
+        "recent_events": events,
+        "operator_auth_configured": operator_api_key().is_some(),
+        "private_keys": "never collected by the console",
+    });
+    fs::write(&path, serde_json::to_vec_pretty(&report)?)?;
+    Ok(path)
 }
 
 // ============================================================================
@@ -1359,6 +1803,22 @@ async fn handle_key(app: &mut App, key: KeyCode) -> bool {
             app.search_query.clear();
             return false;
         }
+        KeyCode::Char('p') | KeyCode::Char('P') => {
+            app.current_view = View::Preflight;
+            return false;
+        }
+        KeyCode::Char('x') | KeyCode::Char('X') => {
+            match export_diagnostics(app) {
+                Ok(path) => {
+                    app.diagnostics_message =
+                        Some(format!("diagnostic report exported to {}", path.display()));
+                }
+                Err(error) => {
+                    app.diagnostics_message = Some(format!("diagnostic export failed: {error}"));
+                }
+            }
+            return false;
+        }
         KeyCode::Char('1') => app.current_view = View::Overview,
         KeyCode::Char('2') => app.current_view = View::Blocks,
         KeyCode::Char('3') => app.current_view = View::Validators,
@@ -1400,6 +1860,17 @@ async fn handle_key(app: &mut App, key: KeyCode) -> bool {
                 if !app.blocks.is_empty() {
                     app.previous_view = Some(app.current_view);
                     app.current_view = View::BlockDetail;
+                }
+            }
+            _ => {}
+        },
+        View::Preflight => match key {
+            KeyCode::Char('x') | KeyCode::Char('X') => {
+                // The global handler normally catches this; retain the local
+                // binding for terminals that send modified key events.
+                if let Ok(path) = export_diagnostics(app) {
+                    app.diagnostics_message =
+                        Some(format!("diagnostic report exported to {}", path.display()));
                 }
             }
             _ => {}
@@ -1654,7 +2125,7 @@ fn draw_ui(f: &mut Frame, app: &App) {
         draw_search_popup(f, app);
     }
 
-    if !app.node_connected {
+    if !app.node_connected || app.last_api_error.is_some() {
         draw_disconnect_banner(f, app);
     }
 }
@@ -1805,6 +2276,8 @@ fn draw_disconnect_banner(f: &mut Frame, app: &App) {
             " ⚠  NODE DISCONNECTED — reconnecting in {}s ",
             app.reconnect_in
         )
+    } else if app.node_connected && app.last_api_error.is_some() {
+        " ⚠  NODE REST API OFFLINE — retrying ".to_string()
     } else {
         " ⚠  NODE DISCONNECTED — reconnecting… ".to_string()
     };
@@ -1814,12 +2287,20 @@ fn draw_disconnect_banner(f: &mut Frame, app: &App) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Red)),
+                .border_style(Style::default().fg(if app.node_connected {
+                    Color::Yellow
+                } else {
+                    Color::Red
+                })),
         )
         .style(
             Style::default()
                 .fg(Color::White)
-                .bg(Color::Red)
+                .bg(if app.node_connected {
+                    Color::Yellow
+                } else {
+                    Color::Red
+                })
                 .add_modifier(Modifier::BOLD),
         )
         .alignment(Alignment::Center);
@@ -1863,15 +2344,23 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
         Theme::warning()
     };
 
+    let bridge = if app.stats.bridge_status.len() > 15 {
+        format!("{}..", &app.stats.bridge_status[..15])
+    } else {
+        app.stats.bridge_status.clone()
+    };
     let status_text = format!(
-        " ● {} Validators  |  Total Stake: {} CREG  |  Bridge: {} ",
+        " ● {} Validators | {} Peers | REST:{} SSE:{} | Stake:{} CREG | Bridge:{} ",
         validator_count,
-        format_number(total_stake),
-        if app.stats.bridge_status.len() > 15 {
-            format!("{}..", &app.stats.bridge_status[..15])
+        app.stats.peer_count,
+        if app.last_api_success_at.is_some() {
+            "OK"
         } else {
-            app.stats.bridge_status.clone()
-        }
+            "WAIT"
+        },
+        if app.node_connected { "ON" } else { "OFF" },
+        format_number(total_stake),
+        bridge,
     );
 
     let status = Paragraph::new(status_text)
@@ -1888,6 +2377,7 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
 fn draw_main_content(f: &mut Frame, app: &App, area: Rect) {
     match app.current_view {
         View::Overview => draw_overview(f, app, area),
+        View::Preflight => draw_preflight(f, app, area),
         View::Blocks => draw_blocks(f, app, area),
         View::BlockDetail => draw_block_detail(f, app, area),
         View::Validators => draw_validators(f, app, area),
@@ -1909,6 +2399,7 @@ fn draw_main_content(f: &mut Frame, app: &App, area: Rect) {
 fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
     let text = match app.current_view {
         View::Overview => " [←/↑/↓/→ or h/j/k/l] Navigate | [Enter/d] Detail | [1-8] Views | [o] Operator | [/] Search | [?] Help | [q] Quit ",
+        View::Preflight => " [p] Preflight | [x] Export diagnostics | [o] Operator | [?] Help | [q] Quit ",
         View::Blocks => " [j/k] Navigate blocks | [Enter/d] Block detail | [b] Back | [?] Help | [q] Quit ",
         View::Validators => " [j/k] Navigate | [Enter/d] Validator detail | [b] Back | [?] Help | [q] Quit ",
         View::Packages => " [j/k] Navigate | [Enter/d] Package detail | [b] Back | [?] Help | [q] Quit ",
@@ -1931,6 +2422,114 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
 // ============================================================================
 // VIEW: OVERVIEW
 // ============================================================================
+
+fn draw_preflight(f: &mut Frame, app: &App, area: Rect) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(5),
+            Constraint::Min(8),
+            Constraint::Length(3),
+        ])
+        .split(area);
+
+    let identity_line = app
+        .runtime_identity
+        .as_ref()
+        .map(|identity| {
+            format!(
+                "chain={}  network={}  node={}  mode={}",
+                identity.chain_id,
+                identity.network,
+                identity.node_id,
+                if identity.is_validator {
+                    "validator"
+                } else {
+                    "observer"
+                }
+            )
+        })
+        .unwrap_or_else(|| {
+            format!(
+                "chain={}  network=unknown  node=unknown  mode=unknown",
+                app.stats.chain_id
+            )
+        });
+    let status_line = format!(
+        "{}  |  SSE: {}  |  REST: {}  |  updated {}s ago",
+        identity_line,
+        if app.node_connected {
+            "connected"
+        } else {
+            "offline"
+        },
+        if app.last_api_success_at.is_some() {
+            "healthy"
+        } else {
+            "waiting"
+        },
+        app.preflight.updated_at.elapsed().as_secs()
+    );
+    let summary = Paragraph::new(status_line)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" STARTUP PREFLIGHT ")
+                .border_style(Style::default().fg(Theme::primary())),
+        )
+        .style(Style::default().fg(Theme::text()))
+        .wrap(Wrap { trim: true });
+    f.render_widget(summary, chunks[0]);
+
+    let rows: Vec<Row> = app
+        .preflight
+        .checks
+        .iter()
+        .map(|check| {
+            Row::new(vec![
+                Cell::from(check.status.label()).style(
+                    Style::default()
+                        .fg(check.status.color())
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Cell::from(check.name.clone()),
+                Cell::from(check.detail.clone()),
+            ])
+        })
+        .collect();
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Length(9),
+            Constraint::Length(24),
+            Constraint::Min(20),
+        ],
+    )
+    .header(
+        Row::new(vec!["Status", "Check", "Detail"]).style(
+            Style::default()
+                .fg(Theme::primary())
+                .add_modifier(Modifier::BOLD),
+        ),
+    )
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Validator readiness checks ")
+            .border_style(Style::default().fg(Theme::secondary())),
+    );
+    f.render_widget(table, chunks[1]);
+
+    let message = app
+        .diagnostics_message
+        .as_deref()
+        .unwrap_or("Read-only monitoring. Press x to export a redacted report; private keys are never collected.");
+    let footer = Paragraph::new(message)
+        .block(Block::default().borders(Borders::ALL))
+        .style(Style::default().fg(Theme::text_dim()))
+        .alignment(Alignment::Center);
+    f.render_widget(footer, chunks[2]);
+}
 
 fn draw_overview(f: &mut Frame, app: &App, area: Rect) {
     let validator_count = app.displayed_validator_count();
@@ -2824,7 +3423,7 @@ fn draw_package_detail(f: &mut Frame, app: &App, area: Rect) {
 fn draw_network(f: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(10), Constraint::Min(0)])
+        .constraints([Constraint::Length(13), Constraint::Min(0)])
         .split(area);
 
     // Network stats
@@ -2848,6 +3447,30 @@ fn draw_network(f: &mut Frame, app: &App, area: Rect) {
             Span::styled(
                 format!("#{}", app.stats.l1_block),
                 Style::default().fg(Theme::warning()),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("Finalized Height: ", Style::default().fg(Theme::text_dim())),
+            Span::styled(
+                format!(
+                    "#{} (lag {})",
+                    app.stats.finalized_height, app.stats.finalization_lag
+                ),
+                Style::default().fg(if app.stats.finalization_lag <= 2 {
+                    Theme::success()
+                } else {
+                    Theme::warning()
+                }),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("Validator Set:    ", Style::default().fg(Theme::text_dim())),
+            Span::styled(
+                format!(
+                    "{} / {}",
+                    app.stats.validator_set_source, app.stats.validator_set_sync_state
+                ),
+                Style::default().fg(Theme::primary()),
             ),
         ]),
     ];
@@ -3108,8 +3731,8 @@ fn draw_operator(f: &mut Frame, app: &App, area: Rect) {
         Line::from(
             "Register ID:        creg testnet register-validator --node-id <id> --pubkey <key>",
         ),
-        Line::from("Stake validator:    creg testnet stake-validator --key 0x<private-key> 100"),
-        Line::from("Stake publisher:    creg testnet stake-publisher --key 0x<private-key> 100"),
+        Line::from("Validator actions:  use an external wallet/CLI; this console stays read-only"),
+        Line::from("Diagnostics:        press p for preflight, x to export a redacted report"),
     ])
     .block(
         Block::default()
@@ -3123,6 +3746,7 @@ fn draw_operator(f: &mut Frame, app: &App, area: Rect) {
     let workflow = Paragraph::new(vec![
         Line::from("This console is the operator surface for validator monitoring."),
         Line::from("Use it to inspect blocks, validator health, packages, peers, and live events."),
+        Line::from("No private key is accepted, stored, or displayed by the console."),
     ])
     .block(
         Block::default()
@@ -3162,6 +3786,9 @@ fn draw_help(f: &mut Frame, _app: &App, area: Rect) {
 ║    6              Mempool view                                               ║
 ║    7              Events log                                                 ║
 ║    8 / o          Operator view                                              ║
+║    p              Validator startup preflight                                ║
+║    x              Export redacted diagnostics                                 ║
+║    9 / c          Consensus and PBFT health                                  ║
 ║    ? or h         Toggle this help                                           ║
 ║                                                                              ║
 ║  SEARCH & FILTER                                                             ║
@@ -3175,6 +3802,7 @@ fn draw_help(f: &mut Frame, _app: &App, area: Rect) {
 ║    Scroll         Navigate lists                                             ║
 ║    Click          Select items (where supported)                             ║
 ║                                                                              ║
+║  Read-only by default; private keys are never collected by this console.     ║
 ║  PRESS ANY KEY TO RETURN...                                                  ║
 ║                                                                              ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
@@ -3635,4 +4263,78 @@ fn draw_metrics(f: &mut Frame, app: &App, area: Rect) {
     ];
     let paragraph = Paragraph::new(text).block(block);
     f.render_widget(paragraph, area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_identity() -> RuntimeIdentity {
+        RuntimeIdentity {
+            node_id: "validator-test-1".into(),
+            validator_pubkey: Some("ab".repeat(32)),
+            chain_id: "creg-testnet-1".into(),
+            network: "testnet".into(),
+            genesis_hash: Some("0x".to_string() + &"12".repeat(32)),
+            spec_signature_verified: true,
+            l1_rpc_configured: true,
+            is_validator: true,
+            validator_set_source: "chain-authoritative".into(),
+            validator_set_sync_state: "ready".into(),
+        }
+    }
+
+    #[test]
+    fn preflight_reports_signed_validator_readiness() {
+        let (sender, _receiver) = mpsc::channel(1);
+        let mut app = App::new("http://127.0.0.1:8080".into(), sender);
+        app.runtime_identity = Some(test_identity());
+        app.last_api_success_at = Some(Instant::now());
+        app.node_connected = true;
+        app.peer_ids.push("peer-1".into());
+        app.consensus_state = Some(ConsensusState {
+            round: 4,
+            phase: "COMMIT".into(),
+            proposer: "validator-test-1".into(),
+            prepare_votes: 2,
+            commit_votes: 2,
+            quorum: 2,
+            total_validators: 2,
+            fetched_at: Instant::now(),
+        });
+        app.validators.push(ValidatorInfo {
+            id: "validator-test-1".into(),
+            alias: "test".into(),
+            stake: 100,
+            reputation: 100,
+            status: "online".into(),
+            is_active: true,
+            pub_key: "ab".repeat(32),
+        });
+        refresh_preflight(&mut app);
+
+        assert!(app
+            .preflight
+            .checks
+            .iter()
+            .all(|check| check.status == PreflightStatus::Pass));
+    }
+
+    #[test]
+    fn diagnostics_export_contains_no_private_key_material() {
+        let (sender, _receiver) = mpsc::channel(1);
+        let mut app = App::new("http://127.0.0.1:8080".into(), sender);
+        app.runtime_identity = Some(test_identity());
+        refresh_preflight(&mut app);
+        let directory = tempfile::tempdir().expect("temporary diagnostics directory");
+        std::env::set_var("CREG_DIAGNOSTICS_DIR", directory.path());
+        let path = export_diagnostics(&app).expect("diagnostics should export");
+        let report = fs::read_to_string(path).expect("diagnostics should be readable");
+        std::env::remove_var("CREG_DIAGNOSTICS_DIR");
+
+        assert!(report.contains("creg-console-diagnostics-v1"));
+        assert!(report.contains("validator_pubkey"));
+        assert!(!report.contains("validator_privkey"));
+        assert!(!report.contains("deadbeef"));
+    }
 }

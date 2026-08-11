@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
-# Build creg-node from synced source and export for observer VM import.
+# LEGACY LAB ONLY — build on the retired validator VM and export for observer
+# import. Public observers must use a signed GHCR digest or isolated CI build.
 set -euo pipefail
+
+if [[ "${CREG_ALLOW_LEGACY_GCP_SEED_FLEET:-false}" != "true" ]]; then
+  echo "Validator-VM image export is retired; use a signed observer image or CI artifact." >&2
+  exit 1
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"

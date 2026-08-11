@@ -1,23 +1,28 @@
 ﻿# GCP Phase 2 runbook (observer pool + public API LB)
 
-Operational guide for **Phase 2** testnet hosting on GCP: internal observer pool (ILB), **Cloud Run hub-api**, and the **public HTTPS load balancer** for `api.testnet.cregnet.dev`. Phase 1 (edge VM, validators, static CDN) remains on `creg-testnet-vm`.
+Operational guide for **Phase 2** public-services hosting on GCP: internal observer pool (ILB), **Cloud Run hub-api**, and the **public HTTPS load balancer** for `api.testnet.cregnet.dev`. Validators are independently operated outside GCP.
 
-**Last updated:** 2026-06-12
+**Last updated:** 2026-08-02
 
 ---
 
 ## Architecture snapshot
 
-| Component | Address / name | Status (2026-06-12) |
+| Component | Address / name | Last recorded state (verify before rollout) |
 |-----------|----------------|---------------------|
-| Edge VM | `creg-testnet-vm` (`35.225.225.20` / `10.128.0.2`) | Caddy upstream `10.128.0.5:28182` (observer ILB) |
-| Observer VM | `creg-observer-pool-j2q7` (`10.128.0.32`) | `creg-node:fleet`; `/v1/health` OK |
-| Observer pool ILB | `10.128.0.5:28182` (internal) | Backend MIG attached; TCP health after LB probe firewall |
-| Cloud Run hub-api | `https://creg-hub-api-wmkf4sobla-uc.a.run.app` | `GET /api/health` OK |
-| Public HTTPS LB | `136.110.145.47` | **HTTP backend** on edge `:80` (LB terminates TLS); do not use HTTPS-to-HTTPS |
+| Edge VM | `creg-testnet-vm` (`35.225.225.20` / `10.128.0.2`) | **TERMINATED** at last read; Caddy upstream must be reverified |
+| Observer VM | `creg-observer-pool-j2q7` (`10.128.0.32`) | MIG target size **0** at last read; no active observer |
+| Observer pool ILB | `10.128.0.5:28182` (internal) | Configured state must be verified after the MIG is resumed |
+| Cloud Run hub-api | `https://creg-hub-api-wmkf4sobla-uc.a.run.app` | Service listed; verify `/api/health` |
+| Public HTTPS LB | `136.110.145.47` | Configuration must be verified; backend should be HTTP edge `:80` |
 | Managed cert | `api.testnet.cregnet.dev` | ACTIVE on LB frontend |
 | Cloud Armor | `setup-cloud-armor.ps1` | **Blocked** - project `SECURITY_POLICIES` quota = 0 |
 | DNS | `api.testnet.cregnet.dev` | Cutover via `set-cloudflare-dns.ps1` → `136.110.145.47` (propagate 2–10 min) |
+
+The addresses and health observations above are historical evidence, not a
+claim that the resources are currently running. Confirm instance, MIG, ILB,
+certificate, and DNS state with the verification commands below before a
+rollout.
 
 State files written by scripts (do not commit secrets):
 
@@ -31,11 +36,11 @@ State files written by scripts (do not commit secrets):
 | Script | Purpose |
 |--------|---------|
 | `provision-observer-pool.ps1` | MIG + internal LB for observer nodes |
-| `deploy-observer-pool.ps1` | Sync repo, push env, `start-observer-pool-gcp.sh` on pool VMs (`CREG_FLEET_BUILD=1` when image missing) |
+| `deploy-observer-pool.ps1` | Sync repo, push env, start the immutable observer image; `-BuildFromSource` is rehearsal-only |
 | `start-observer-pool-gcp.sh` | Sources `sepolia-fleet.env`; optional `CREG_FLEET_BUILD` / `CREG_OBSERVER_BUILD` |
-| `build-export-node-image.sh` | On validator VM: compose build → tag `creg-node:fleet` → `/tmp/creg-node-fleet.tgz` |
+| `build-export-node-image.sh` | Legacy lab image export; not required for the external-validator profile |
 | `import-observer-node-image.sh` | On observer VM: load tarball, restart observer container |
-| `transfer-observer-node-image.ps1` | Validator → local → observer pipeline (use when observer disk is too small to build) |
+| `transfer-observer-node-image.ps1` | Legacy validator-to-observer pipeline; prefer signed GHCR release images or observer-local build |
 | `recreate-caddy-observer-ilb.sh` | Force-recreate edge Caddy with ILB upstream (no full edge rebuild) |
 | `set-cloudflare-dns.ps1` | Grey-cloud A records (e.g. `api` → public LB IP) |
 | `deploy-hub-api-cloudrun.ps1` | Build/push/deploy hub-api to Cloud Run |
@@ -51,6 +56,8 @@ State files written by scripts (do not commit secrets):
 - `CREG_OBSERVER_POOL_LB_IP=10.128.0.5`
 - `CREG_OBSERVER_API_UPSTREAM=10.128.0.5:28182` (required for Caddy compose env interpolation)
 - `CREG_HUB_API_CLOUD_RUN_URL` → Cloud Run hub-api URL
+- `CREG_REQUIRE_SIGNED_IMAGES=true` and an immutable `CREG_FLEET_IMAGE=...@sha256:<digest>`
+  for public observers. A source build is rehearsal-only and must be explicit.
 
 Push with `.\testnet\gcp\push-env.ps1 -VmName creg-testnet-vm -TunnelThroughIap` after edits.
 
@@ -58,13 +65,15 @@ Push with `.\testnet\gcp\push-env.ps1 -VmName creg-testnet-vm -TunnelThroughIap`
 
 ## Recommended order
 
-1. **Observer pool** - `deploy-observer-pool.ps1 -Confirm`; verify `curl http://127.0.0.1:28182/v1/health` on pool VM.
-2. **ILB** - Confirm backend group on `creg-observer-api-backend` and `creg-observers-allow-lb-health-checks` firewall (probe ranges → `28182`).
-3. **Edge** - `push-env` + `recreate-caddy-observer-ilb.sh` (or full `start-cloud-edge-gcp.sh`).
-4. **Hub API** - `deploy-hub-api-cloudrun.ps1`; verify `https://testnet.cregnet.dev/api/health`.
-5. **DNS** - `set-cloudflare-dns.ps1 -StaticIp 136.110.145.47 -RecordNames api`.
-6. **Public LB cert** - Wait for managed cert ACTIVE on `136.110.145.47`.
-7. **Cloud Armor** - After quota increase, `setup-cloud-armor.ps1`.
+1. **Preflight** - run `testnet/gcp/verify-public-services-profile.ps1 -Target observer` after filling the external validator/bootnode endpoints. The check is read-only and must pass before provisioning.
+2. **Observer pool** - `deploy-observer-pool.ps1 -Confirm`; verify `curl http://127.0.0.1:28182/v1/health` on pool VM.
+3. **ILB** - Confirm backend group on `creg-observer-api-backend` and `creg-observers-allow-lb-health-checks` firewall (probe ranges → `28182`).
+4. **Edge preflight** - Add the ILB address to `sepolia-fleet.env`, then run `testnet/gcp/verify-public-services-profile.ps1` before `deploy-stack.ps1`.
+5. **Edge** - `push-env` + `recreate-caddy-observer-ilb.sh` (or full `start-cloud-edge-gcp.sh`).
+6. **Hub API** - `deploy-hub-api-cloudrun.ps1`; verify `https://testnet.cregnet.dev/api/health`.
+7. **DNS** - `set-cloudflare-dns.ps1 -StaticIp 136.110.145.47 -RecordNames api`.
+8. **Public LB cert** - Wait for managed cert ACTIVE on `136.110.145.47`.
+9. **Cloud Armor** - After quota increase, `setup-cloud-armor.ps1`.
 
 ---
 
@@ -88,22 +97,18 @@ gcloud compute backend-services get-health creg-edge-api-backend --global
 
 ## Observer image pipeline
 
-Observer pool VMs may have **~10 GB disk** — local `CREG_FLEET_BUILD` can fail with *no space left on device*. Build on the validator VM (49 GB) and transfer:
+Observer pool VMs may have **~10 GB disk** — local `CREG_OBSERVER_BUILD` can fail with *no space left on device*. Prefer the signed GHCR release image. If a source build is required, build in CI or on a disposable build runner and publish its digest; do not use a validator VM as a build host:
 
 ```powershell
-# 1) On validator VM (after repo sync)
-gcloud compute ssh creg-validator-vm --zone=us-central1-a --tunnel-through-iap `
-  --command="bash ~/creg-hosting/chain-registry-blockchain-CREG-/chain-registry/testnet/gcp/build-export-node-image.sh"
-
-# 2) From workstation — copies tarball validator → observer
-.\testnet\gcp\transfer-observer-node-image.ps1 -Confirm
-
-# 3) Import + restart on observer (or folded into transfer script)
+# Pull the signed release image on each observer VM, or build from the current
+# source in a disposable CI runner and publish its digest before rollout.
 gcloud compute ssh creg-observer-pool-j2q7 --zone=us-central1-a --tunnel-through-iap `
-  --command="bash ~/creg-hosting/chain-registry-blockchain-CREG-/chain-registry/testnet/gcp/import-observer-node-image.sh"
+  --command="bash ~/creg-hosting/chain-registry-blockchain-CREG-/chain-registry/testnet/start-observer-pool-gcp.sh"
 ```
 
-`build-export-node-image.sh` tags **`CREG_FLEET_IMAGE`** / `ghcr.io/chain-registry/chain-registry:latest` (not a stale local `creg-node:fleet` tag). After import, verify public sandbox:
+The legacy `build-export-node-image.sh` path is guarded and is not part of the
+public rollout. After pulling the approved digest (or completing a reviewed
+rehearsal source build), verify the observer sandbox/read-only profile:
 
 ```powershell
 (curl.exe -fsS https://api.testnet.cregnet.dev/v1/health | ConvertFrom-Json).sandbox

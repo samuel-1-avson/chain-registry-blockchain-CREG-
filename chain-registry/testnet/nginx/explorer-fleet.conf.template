@@ -1,5 +1,5 @@
-# Explorer on GCP edge — proxies chain reads to validator fleet over VPC.
-# Generated at start: sed s/@VALIDATOR_IP@/$CREG_VALIDATOR_VM_INTERNAL_IP/g
+# Explorer on GCP edge — proxies chain reads to the GCP observer pool.
+# Validators are independently operated and are never addressed by this public template.
 
 server {
     listen 80;
@@ -7,7 +7,7 @@ server {
     root /usr/share/nginx/html;
     index index.html;
 
-    # Read pool: observer ILB (CREG_OBSERVER_API_UPSTREAM), not validator VM :28182.
+    # Read pool: observer ILB (CREG_OBSERVER_API_UPSTREAM).
     # Use literal proxy_pass targets (no variables) so nginx can reach VPC IPs from the bridge network.
 
     add_header X-Frame-Options "SAMEORIGIN" always;
@@ -46,27 +46,25 @@ server {
     # Operator routes require caller-supplied authentication. Never inject the
     # node's server-side CREG_OPERATOR_API_KEY into public explorer traffic.
     location = /v1/runtime/config {
-        proxy_pass http://@VALIDATOR_IP@:28181/v1/runtime/config;
+        proxy_pass http://@OBSERVER_UPSTREAM@/v1/runtime/config;
         proxy_set_header Host $host;
         proxy_http_version 1.1;
     }
 
     location = /v1/nodes {
-        proxy_pass http://@VALIDATOR_IP@:28181/v1/nodes;
+        proxy_pass http://@OBSERVER_UPSTREAM@/v1/nodes;
         proxy_set_header Host $host;
         proxy_http_version 1.1;
     }
 
     location = /v1/pending {
-        proxy_pass http://@VALIDATOR_IP@:28181/v1/pending;
+        proxy_pass http://@OBSERVER_UPSTREAM@/v1/pending;
         proxy_set_header Host $host;
         proxy_http_version 1.1;
     }
 
     location ^~ /v1/operator/ {
-        proxy_pass http://@VALIDATOR_IP@:28181;
-        proxy_set_header Host $host;
-        proxy_http_version 1.1;
+        return 404;
     }
 
     location /v1/ {

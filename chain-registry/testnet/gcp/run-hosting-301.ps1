@@ -41,8 +41,11 @@ function Step-Check {
     if (-not (Test-Path (Join-Path $gcpDir "hosting.env"))) {
         Write-Host "Tip: copy hosting.env.example -> hosting.env" -ForegroundColor DarkYellow
     }
-    $envFile = Join-Path $testnetDir "sepolia-3node.env"
-    if (Test-Path $envFile) { Log "sepolia-3node.env: present" } else { Log "sepolia-3node.env: MISSING" }
+    $fleetEnv = Join-Path $testnetDir "sepolia-fleet.env"
+    $legacyEnv = Join-Path $testnetDir "sepolia-3node.env"
+    if (Test-Path $fleetEnv) { Log "sepolia-fleet.env: present" }
+    elseif (Test-Path $legacyEnv) { Log "sepolia-3node.env: present" }
+    else { Log "sepolia-fleet.env: MISSING" }
 }
 
 function Step-Provision {
@@ -79,7 +82,8 @@ function Step-Push {
 }
 
 function Step-Deploy {
-    & (Join-Path $gcpDir "deploy-stack.ps1") -PushEnv
+    # deploy-stack.ps1 performs its own fail-closed preflight and env push.
+    & (Join-Path $gcpDir "deploy-stack.ps1")
 }
 
 function Step-Verify {

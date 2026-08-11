@@ -1,17 +1,23 @@
 # Observer read pool — one observer per VM (GCP MIG scales VMs, not containers).
 #
-# Peers with the private validator fleet; serves public read API on host port 28182.
+# Peers with independently operated validators; serves public read API on host port 28182.
 #
 # Prerequisites in sepolia-fleet.env (or exported before compose):
-#   CREG_ETH_RPC, CREG_EDGE_INTERNAL_IP, CREG_VALIDATOR_VM_INTERNAL_IP
-#   CREG_VALIDATOR_P2P_SEEDS — comma seeds to validator fleet P2P
-#   CREG_VALIDATOR_HTTP_PEERS — HTTP peers for sync (validator-1, validator-2)
+#   CREG_ETH_RPC, CREG_EDGE_INTERNAL_IP
+#   CREG_VALIDATOR_P2P_SEEDS — comma-separated external bootnode/validator P2P seeds
+#   CREG_VALIDATOR_HTTP_PEERS — comma-separated external validator HTTP peers
 #
 # Usage (on observer-pool VM):
 #   ./testnet/start-observer-pool-gcp.sh
 
 x-observer-pool-common: &observer-pool-common
   image: ${CREG_FLEET_IMAGE:-ghcr.io/chain-registry/chain-registry:latest}
+  # Only used when CREG_OBSERVER_BUILD/CREG_FLEET_BUILD is explicitly set.
+  # Keeping the build on the observer profile avoids parsing the legacy
+  # validator-fleet compose file (which contains validator-key fields).
+  build:
+    context: ..
+    dockerfile: Dockerfile.windows
   env_file:
     - sepolia-fleet.env
   networks:

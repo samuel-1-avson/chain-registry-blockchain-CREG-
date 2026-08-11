@@ -4,7 +4,7 @@
 
 .DESCRIPTION
   Waitlist-only cost mode:
-    - Stops creg-validator-vm and creg-sepolia-geth-vm (disks retained)
+    - Stops the optional creg-sepolia-geth-vm (disks retained)
     - Scales observer MIG to 0 if present
     - Optionally trims edge Docker to waitlist + Caddy only
 
@@ -20,7 +20,6 @@ param(
     [string]$ProjectId = "",
     [string]$Zone = "",
     [string]$EdgeVmName = "",
-    [string]$ValidatorVmName = "",
     [string]$GethVmName = "",
     [string]$ObserverMigName = "",
     [switch]$SkipEdgeTrim,
@@ -35,7 +34,6 @@ $cfg = & (Join-Path $gcpDir "_Load-HostingEnv.ps1")
 if (-not $ProjectId) { $ProjectId = $cfg.GCP_PROJECT }
 if (-not $Zone) { $Zone = $cfg.GCP_ZONE }
 if (-not $EdgeVmName) { $EdgeVmName = $cfg.GCP_VM_NAME }
-if (-not $ValidatorVmName) { $ValidatorVmName = $cfg.GCP_VALIDATOR_VM_NAME }
 if (-not $GethVmName) { $GethVmName = $cfg.GCP_SEPOLIA_GETH_VM_NAME }
 if (-not $ObserverMigName) { $ObserverMigName = if ($cfg.GCP_OBSERVER_MIG_NAME) { $cfg.GCP_OBSERVER_MIG_NAME } else { "creg-observer-pool" } }
 
@@ -47,16 +45,15 @@ if (-not (Get-Command gcloud -ErrorAction SilentlyContinue)) {
 if (-not $ProjectId) { throw "Set GCP_PROJECT in hosting.env" }
 
 # Estimated monthly savings (see docs/GCP-BUDGET-ARCHITECTURE.md; adjust if machine types differ).
-$estValidator = 196
 $estGeth = 49
 $estObserver = 25
 $estEdgeDocker = 15
-$estTotal = $estValidator + $estGeth + $estObserver + $(if ($SkipEdgeTrim) { 0 } else { $estEdgeDocker })
+$estTotal = $estGeth + $estObserver + $(if ($SkipEdgeTrim) { 0 } else { $estEdgeDocker })
 
 Write-Host ""
 Write-Host "Waitlist-only shutdown plan (project $ProjectId)" -ForegroundColor Cyan
 Write-Host "  KEEP RUNNING: $EdgeVmName (waitlist + Caddy)"
-Write-Host "  STOP VMs:     $ValidatorVmName, $GethVmName"
+Write-Host "  STOP VM:      $GethVmName (if present)"
 Write-Host "  SCALE MIG:    $ObserverMigName -> 0 (if exists)"
 if (-not $SkipEdgeTrim) {
     Write-Host "  EDGE TRIM:    stop explorer/faucet/ipfs/spec/hub/monitoring; keep waitlist + caddy"
@@ -67,7 +64,7 @@ if (-not $SkipHubPause) {
 }
 Write-Host ""
 $edgeSavingsNote = if (-not $SkipEdgeTrim) { ", edge containers ~`$$estEdgeDocker" } else { "" }
-Write-Host "Estimated savings: ~`$$estTotal/month (validator ~`$$estValidator, geth ~`$$estGeth, observer ~`$$estObserver$edgeSavingsNote)" -ForegroundColor Green
+Write-Host "Estimated savings: ~`$$estTotal/month (geth ~`$$estGeth, observer ~`$$estObserver$edgeSavingsNote)" -ForegroundColor Green
 Write-Host "Edge VM compute (~`$98/mo e2-standard-4) + Firebase waitlist project still bill." -ForegroundColor Yellow
 Write-Host ""
 
@@ -98,7 +95,7 @@ function Should-Run([string]$Target, [string]$Action) {
 
 gcloud config set project $ProjectId | Out-Null
 
-foreach ($vm in @($ValidatorVmName, $GethVmName)) {
+foreach ($vm in @($GethVmName)) {
     $status = (gcloud compute instances describe $vm --zone=$Zone --project=$ProjectId --format="value(status)" 2>$null)
     if (-not $status) {
         Log "VM $vm not found - skipping"

@@ -1,7 +1,9 @@
 {
-  "url": "https://creg-hub-api-wmkf4sobla-uc.a.run.app",
-  "image": "us-central1-docker.pkg.dev/gen-lang-client-0022105784/creg-testnet/creg-hub-api:latest",
+  "service": "creg-hub-api",
   "region": "us-central1",
-  "deployedAt": "2026-06-11T08:48:44.1519769Z",
-  "service": "creg-hub-api"
+  "project": "gen-lang-client-0022105784",
+  "status": "deleted",
+  "deletedAt": "2026-08-11T11:33:00Z",
+  "reason": "Contribution Arena must run on Firebase Hosting + Functions at https://contribute.cregnet.dev, not Cloud Run.",
+  "previousUrl": "https://creg-hub-api-wmkf4sobla-uc.a.run.app"
 }

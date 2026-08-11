@@ -141,7 +141,7 @@ topology is described as resilient.
 
 ## 7. Sandbox Verification (MAL-001 — mandatory)
 
-- [ ] Run with a real sandbox engine. Preferred: nsjail secure image (`Dockerfile.secure`, see `testnet/build-3node-secure-image.sh`); fleet operators get this by default from `start-validator-fleet-gcp.sh`.
+- [ ] Run with a real sandbox engine. Preferred: nsjail secure image (`Dockerfile.secure`, see `testnet/build-3node-secure-image.sh`). Each independent operator must verify the engine locally; GCP does not host validator containers.
 - [ ] Verify the engine in-process:
 
 ```bash

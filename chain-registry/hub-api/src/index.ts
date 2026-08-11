@@ -4,6 +4,9 @@ import { HubDatabase } from "./db/index.js";
 import { rateLimit } from "./middleware/rateLimit.js";
 import { sessionMiddleware, type SessionVariables } from "./middleware/session.js";
 import { createAuthRoutes } from "./routes/auth.js";
+import { createContributionRoutes } from "./routes/contributions.js";
+import { ContributionService } from "./contributions/service.js";
+import { SqliteContributionRepository } from "./contributions/sqliteRepository.js";
 
 const IMPLEMENTATION_PHASE = "1";
 
@@ -35,6 +38,10 @@ const statusRateLimitWindowMs = Number(
 const statusRateLimitMax = Number(process.env.HUB_STATUS_RATE_MAX ?? "30");
 const authRateLimitWindowMs = Number(process.env.HUB_AUTH_RATE_WINDOW_MS ?? "60000");
 const authRateLimitMax = Number(process.env.HUB_AUTH_RATE_MAX ?? "20");
+const contributionRateLimitWindowMs = Number(
+  process.env.HUB_CONTRIBUTION_RATE_WINDOW_MS ?? "60000",
+);
+const contributionRateLimitMax = Number(process.env.HUB_CONTRIBUTION_RATE_MAX ?? "40");
 
 type UpstreamProbe = {
   name: string;
@@ -79,6 +86,7 @@ app.get("/api/health", (c) => {
     service: "hub-api",
     phase: IMPLEMENTATION_PHASE,
     db: dbState,
+    arenaAuthority: "firebase",
   };
 
   if (dbState === "ready") {
@@ -119,6 +127,25 @@ authRoutes.use(
 );
 
 app.route("/api/auth", authRoutes);
+
+if (hubDb.getState() === "ready") {
+  const contributionRepository = new SqliteContributionRepository(hubDb.handle);
+  const contributionService = new ContributionService(contributionRepository);
+  const contributionRoutes = createContributionRoutes({
+    db: hubDb,
+    service: contributionService,
+    repository: contributionRepository,
+  });
+  contributionRoutes.use(
+    "*",
+    rateLimit({
+      windowMs: contributionRateLimitWindowMs,
+      max: contributionRateLimitMax,
+      keyPrefix: "contributions",
+    }),
+  );
+  app.route("/api/v1/contributions", contributionRoutes);
+}
 
 app.get(
   "/api/status/public",

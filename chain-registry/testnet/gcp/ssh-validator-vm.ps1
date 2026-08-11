@@ -1,4 +1,5 @@
-# SSH to creg-validator-vm via IAP (no public IP).
+# LEGACY LAB ONLY — SSH to the retired creg-validator-vm via IAP.
+# Production validators are independently operated outside GCP.
 #
 # Usage:
 #   .\testnet\gcp\ssh-validator-vm.ps1
@@ -8,10 +9,15 @@ param(
     [string]$ProjectId = "",
     [string]$Zone = "",
     [string]$VmName = "",
-    [string]$Command = ""
+    [string]$Command = "",
+    [switch]$AllowLegacyMaintainerSeedFleet
 )
 
 $gcpDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ErrorActionPreference = "Stop"
+if (-not $AllowLegacyMaintainerSeedFleet) {
+    throw "GCP validator VMs are retired. Run validators on an independently controlled host, or pass -AllowLegacyMaintainerSeedFleet only for a disposable lab."
+}
 $cfg = & (Join-Path $gcpDir "_Load-HostingEnv.ps1")
 
 if (-not $ProjectId) { $ProjectId = $cfg.GCP_PROJECT }

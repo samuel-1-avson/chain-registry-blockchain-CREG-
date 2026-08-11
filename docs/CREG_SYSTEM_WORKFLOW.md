@@ -1127,7 +1127,7 @@ Rate limiting (`p2p_rate_limit.rs`) applies on ingress.
 |-----------|---------|
 | **`validator_set_sync`** | Keeps runtime validator set aligned with `Staking.sol` (Active / Unbonding / Ejected) |
 | **`consensus_admission`** | Active validators sign and submit admission bundles for new applicants |
-| **`CREG_ETH_RPC`** | Archive-capable Sepolia RPC (Infura/Alchemy recommended; internal Geth on GCP fleet) |
+| **`CREG_ETH_RPC`** | Archive-capable Sepolia RPC (Infura/Alchemy recommended; optional internal Geth for GCP observers/faucet) |
 | **`CREG_VALIDATOR_SET_FINALITY_LAG`** | L1 blocks to wait before applying staking events (default 2 on testnet) |
 | **`CREG_ETH_RPC_FALLBACKS`** | Multi-RPC quorum so one bad RPC cannot skew membership |
 | **Bridge worker** | Optional — batches finalized blocks to L1 via governance (not validator-vote path) |
@@ -1617,7 +1617,7 @@ See source:
 |---------|-------|-------------------|----------|
 | Windows dev | `Dockerfile.windows` | optional `true` | Local development |
 | Credible testnet | `Dockerfile.secure` (nsjail) | `false` | Production validators |
-| GCP fleet | `Dockerfile.secure` | `false` (forced) | Public testnet |
+| GCP observer | Approved immutable release image | `false` | Public read API; validators run independently with `Dockerfile.secure` |
 
 Public validators must never run `CREG_DEV_SANDBOX=true`.
 
@@ -1774,9 +1774,9 @@ long-range/reorg rehearsal.
 |---------|-------|----------|
 | Sepolia stack | `docker-compose.yml` | IPFS, spec-server, node, postgres, indexer, faucet, relayer, explorer |
 | Sepolia bootstrap | `docker-compose.testnet.yml` | Local bootstrap host (Sepolia L1) |
-| Scale testnet | [TESTNET_SCALE_ARCHITECTURE.md](./TESTNET_SCALE_ARCHITECTURE.md) | 10k+ external validators; optional maintainer seed fleet |
+| Scale testnet | [TESTNET_SCALE_ARCHITECTURE.md](./TESTNET_SCALE_ARCHITECTURE.md) | 10k+ external validators; any maintainer seed fleet is legacy lab-only |
 | Per-host validator | `docker-compose.validator.yml` | Multi-machine fleet |
-| GCP fleet | `testnet/gcp/*.ps1`, `docker-compose.validator-fleet.yml` | Public `api.testnet.cregnet.dev` |
+| GCP public services | `testnet/gcp/*.ps1`, `docker-compose.observer-pool.yml` | Edge, observer API, explorer/faucet/spec; validators are external |
 | Kubernetes | `k8s/` | Postgres, IPFS, validators, ingress, monitoring |
 | Secure sandbox | `Dockerfile.secure`, `docker-compose.fleet-sandbox.yml` | Production sandbox (nsjail) |
 
@@ -1851,7 +1851,7 @@ Install script: `chain-registry/scripts/install-creg.sh`
 |----------|---------|
 | `testnet/OPERATOR.md` | NET-301 operator runbook |
 | `docs/TESTNET_SEPOLIA_RUNBOOK.md` | Sepolia deploy and chain-spec |
-| `docs/GCP-VALIDATOR-FLEET.md` | GCP fleet deployment |
+| `docs/GCP-VALIDATOR-FLEET.md` | Legacy GCP fleet lab (disabled by default) |
 | `docs/VALIDATOR_ONBOARDING_CHECKLIST.md` | External validator admission |
 
 ---

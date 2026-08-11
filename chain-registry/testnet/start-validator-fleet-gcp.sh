@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
-# Start validator fleet on creg-validator-vm (Linux, private VPC).
+# Legacy lab-only maintainer seed fleet on creg-validator-vm.
+# Production validators and their keys must run independently outside GCP.
 #
 # Usage:
 #   ./testnet/start-validator-fleet-gcp.sh
 
 set -euo pipefail
+
+if [[ "${CREG_ALLOW_LEGACY_GCP_SEED_FLEET:-false}" != "true" ]]; then
+  echo "GCP validator fleets are disabled. Run validators on independently controlled operator hosts." >&2
+  echo "For a disposable lab only, set CREG_ALLOW_LEGACY_GCP_SEED_FLEET=true explicitly." >&2
+  exit 1
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"

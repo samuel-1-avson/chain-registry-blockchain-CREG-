@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Run on VM after sync-local-repo + push-env.
+# Set CREG_PUBLIC_SERVICES_BOOTSTRAP=true to start spec/IPFS/explorer/faucet
+# before an observer pool or independent validators are online.
 set -euo pipefail
 
 GITHUB_REPO="${GITHUB_REPO:-samuel-1-avson/chain-registry-blockchain-CREG-}"
@@ -24,13 +26,9 @@ if [[ ! -f testnet/sepolia-3node.env ]]; then
   echo "Missing testnet/sepolia-3node.env - run push-env.ps1 from workstation" >&2
   exit 1
 fi
-if [[ ! -f testnet/start-3node-gcp.sh ]]; then
-  echo "Missing testnet/start-3node-gcp.sh - run sync-local-repo.ps1 from workstation" >&2
-  exit 1
-fi
 chmod 600 testnet/sepolia-3node.env
 find testnet -name '*.sh' -exec sed -i 's/\r$//' {} + 2>/dev/null || true
-chmod +x testnet/_source-sepolia-env.sh testnet/start-3node-gcp.sh testnet/start-cloud-edge-gcp.sh testnet/start-validator-fleet-gcp.sh 2>/dev/null || true
+chmod +x testnet/_source-sepolia-env.sh testnet/start-cloud-edge-gcp.sh 2>/dev/null || true
 # Strip UTF-8 BOM in place if push-env ran before normalization (Linux source breaks on BOM).
 if head -c 3 testnet/sepolia-3node.env | grep -q $'^\xEF\xBB\xBF'; then
   echo "Stripping UTF-8 BOM from testnet/sepolia-3node.env ..."
@@ -39,19 +37,12 @@ if head -c 3 testnet/sepolia-3node.env | grep -q $'^\xEF\xBB\xBF'; then
   chmod 600 testnet/sepolia-3node.env
 fi
 wait_for_docker
-CADDY_CONTAINER=creg-3node-caddy
-if grep -qE '^\s*CREG_VALIDATOR_FLEET_MODE\s*=\s*true' testnet/sepolia-3node.env 2>/dev/null; then
-  echo "CREG_VALIDATOR_FLEET_MODE=true — cloud edge only (validators on creg-validator-vm)"
-  CADDY_CONTAINER=creg-cloud-caddy
-  bash testnet/start-cloud-edge-gcp.sh
-elif grep -qE '^\s*CREG_HYBRID_MODE\s*=\s*true' testnet/sepolia-3node.env 2>/dev/null; then
-  echo "CREG_HYBRID_MODE=true — cloud edge only (validators on operator PC)"
-  CADDY_CONTAINER=creg-cloud-caddy
-  bash testnet/start-cloud-edge-gcp.sh
-else
-  echo "Legacy mode — full 3-node stack on edge VM"
-  bash testnet/start-3node-gcp.sh
+if grep -qE '^\s*(CREG_VALIDATOR_FLEET_MODE|CREG_HYBRID_MODE)\s*=\s*true' testnet/sepolia-3node.env 2>/dev/null; then
+  echo "Legacy validator placement is disabled; remove CREG_VALIDATOR_FLEET_MODE/CREG_HYBRID_MODE and configure the external observer upstream." >&2
+  exit 1
 fi
+CADDY_CONTAINER=creg-cloud-caddy
+bash testnet/start-cloud-edge-gcp.sh
 echo ""
 echo "=== Recent Caddy logs ($CADDY_CONTAINER) ==="
 docker logs --tail 40 "$CADDY_CONTAINER" 2>/dev/null || sudo docker logs --tail 40 "$CADDY_CONTAINER" 2>/dev/null || true

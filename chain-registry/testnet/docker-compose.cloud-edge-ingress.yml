@@ -1,7 +1,5 @@
-# Caddy TLS for cloud-edge stack (host network — reaches VPC validator fleet or WireGuard peer).
-#
-# CREG_VALIDATOR_FLEET_MODE=true -> Caddyfile.fleet (VPC validator IP)
-# CREG_HYBRID_MODE=true            -> Caddyfile.hybrid (WireGuard peer)
+# Caddy TLS for the GCP public-services edge. Validators and bootnodes are
+# external operators; Caddyfile.bootstrap intentionally has no node upstream.
 
 services:
   caddy:

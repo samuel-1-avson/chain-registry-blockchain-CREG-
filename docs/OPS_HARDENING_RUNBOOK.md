@@ -27,8 +27,10 @@ The node exposes Prometheus metrics at `GET /metrics`
 | `creg_sandbox_isolated` | 1 when nsjail/gVisor/Docker isolation is active |
 
 ### Wire it up
-1. Add a scrape job labelled `creg-node` pointing at each node's `/metrics`
-   (validators + observers).
+1. Add a scrape job labelled `creg-node` pointing at each GCP observer's
+   `/metrics`. Independent validator operators must run their own scrape and
+   alerting; the GCP Prometheus instance must not be treated as validator
+   custody or availability evidence.
 2. Load the alert rules: `testnet/monitoring/creg-alerts.yml` via
    `rule_files:` in `prometheus.yml`.
 3. Point Alertmanager at your channel. For GCP, run
@@ -68,10 +70,11 @@ These run as separate services and are **not** in the node metrics. Options:
 
 ## 2. Disaster recovery (single-zone GCP)
 
-All authoritative node state lives in `CREG_DATA_DIR` on the validator VM's
-persistent disk:
+Authoritative validator state lives in each independent operator's
+`CREG_DATA_DIR`; GCP does not snapshot validator disks or keys. The GCP backup
+script covers the public edge and optional Sepolia RPC disks:
 
-| File | Produced by |
+| External-validator file | Produced by |
 |------|-------------|
 | `chain.rocksdb/` | block + package store (the chain) |
 | `validator-set-sync.cursor.json` | L1 sync cursor |
@@ -80,28 +83,29 @@ persistent disk:
 | `validator-set-history.json` | height-indexed validator sets (ISSUE-050) |
 | `pending_pool.json` | pre-consensus mempool |
 
-Losing the disk without a backup means rebuilding the chain from peers (if any)
-and re-registering identities. Back it up.
+Each validator operator must back up these files under their own custody. Losing
+one operator's disk means rebuilding from the signed checkpoint and peers; it
+does not require or permit restoring validator state into GCP.
 
 ### Backup
 - On-demand / Windows operator: `testnet/gcp/backup-vm-disks.ps1`
-  (snapshots the validator/edge/geth VM disks; `-Prune -RetentionDays N` to
+  (snapshots the edge/Geth public-service disks; `-Prune -RetentionDays N` to
   age out old snapshots).
 - Preferred for continuous protection: a GCP **resource snapshot schedule**
   attached to the disks (daily, 14-day retention, multi-region storage). The
   script covers on-demand and ad-hoc; the schedule covers unattended.
 
-### Restore
+### Restore GCP public services
 1. `gcloud compute snapshots list --filter labels.app=creg-testnet`.
 2. Create a disk from the snapshot — **in the target zone** (can differ from
    the original for zonal-outage recovery):
-   `gcloud compute disks create creg-validator-restore --source-snapshot <snap> --zone <zone>`.
+   `gcloud compute disks create creg-edge-restore --source-snapshot <snap> --zone <zone>`.
 3. Create/replace the VM using the restored disk (or detach the bad disk and
    attach the restored one), keeping the same `CREG_DATA_DIR` mount path.
-4. Start the node; it resumes from the restored RocksDB + cursors. Validator-set
-   sync re-verifies against L1; identity gossip re-converges.
-5. Verify: `l2-gate-verify.ps1 -Live`, `verify-sepolia-rpc-endpoints.ps1`, and
-   `active_validators >= 2`.
+4. Restore only edge/spec/IPFS or optional Geth service data. Rebuild observers
+   from the approved image and signed checkpoint; do not restore validator keys.
+5. Verify: `hosting-301-verify.ps1`, `verify-sepolia-rpc-endpoints.ps1`, and
+   observer `/v1/health`. Independent operators verify validator continuity.
 
 ### Multi-zone
 The deployment is single-zone (`us-central1-a`). Until true multi-zone HA

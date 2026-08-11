@@ -65,6 +65,25 @@ docker compose --env-file .env.testnet -f docker-compose.testnet.yml up -d --bui
 
 Follow the full checklist — do **not** use the retired 3-node Sepolia lab.
 
+### Public services can start first
+
+The GCP edge is not a validator. It may be bootstrapped before any external
+validator or observer is online so operators can fetch the signed spec and use
+the public services:
+
+```powershell
+.\testnet\gcp\deploy-stack.ps1 -BootstrapOnly
+```
+
+This starts the spec server, IPFS gateway, static explorer, faucet, and TLS
+edge. The explorer UI is available immediately; CREG chain API reads return an
+explicit `503 observer_unavailable` until the observer pool is attached. The
+faucet still needs an approved Sepolia RPC, funded faucet account, and secret
+injection. Once independent validators publish their peer/API endpoints,
+provision the observer pool and run the normal edge deployment. Two independent
+validators are needed for consensus and adversarial-rehearsal evidence, not for
+this public-service bootstrap.
+
 1. [VALIDATOR_ONBOARDING_CHECKLIST.md](../../docs/VALIDATOR_ONBOARDING_CHECKLIST.md)
 2. [GENESIS_ALPHA_COHORT_PLAYBOOK.md](../../docs/GENESIS_ALPHA_COHORT_PLAYBOOK.md) (if invited)
 3. Configure and monitor UTC synchronization with NTP/chrony; live proposals

@@ -1,7 +1,6 @@
-# GCP edge stack — no validator containers on this VM.
-#
-# Production (Option A): validators on creg-validator-vm; set CREG_VALIDATOR_FLEET_MODE=true.
-# Legacy hybrid: validators on operator PC + WireGuard (CREG_HYBRID_MODE=true).
+# GCP public-services stack — no validator containers on this VM. The edge can
+# run in bootstrap mode before observers/validators are online, then switch to
+# the observer-backed fleet configuration once external peers are available.
 #
 # Usage (on creg-testnet-vm):
 #   ./testnet/start-cloud-edge-gcp.sh

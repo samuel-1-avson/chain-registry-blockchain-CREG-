@@ -45,7 +45,7 @@ Maintainers: see [WHAT_TO_DO_NEXT.md](./WHAT_TO_DO_NEXT.md) (not linked from wai
 | Document | Description |
 |----------|-------------|
 | [testnet/QUICKSTART.md](../chain-registry/testnet/QUICKSTART.md) | Fastest path to a local node |
-| [testnet/OPERATOR.md](../chain-registry/testnet/OPERATOR.md) | Sepolia validator fleet overview |
+| [testnet/OPERATOR.md](../chain-registry/testnet/OPERATOR.md) | Sepolia external validators and GCP public-services overview |
 | [testnet/README.md](../chain-registry/testnet/README.md) | Testnet directory index |
 | [DOCKER.md](../chain-registry/DOCKER.md) | Docker Compose profiles |
 

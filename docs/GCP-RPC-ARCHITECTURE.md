@@ -33,7 +33,7 @@ Implemented in `chain-registry/crates/node/src/json_rpc.rs`: `creg_chainId`, `cr
 ```
 Client → api.testnet.cregnet.dev:443
       → Caddy (Caddyfile.fleet on edge VM)
-      → creg-validator-vm:28182 (observer API)
+      → creg-observer-pool:28182 (observer API)
 ```
 
 See `chain-registry/testnet/caddy/Caddyfile`.
@@ -45,7 +45,7 @@ See `chain-registry/testnet/caddy/Caddyfile`.
 | Resource | ID / value | Role |
 |----------|------------|------|
 | Compute Engine | `creg-testnet-vm`, `e2-standard-4` | Edge: Caddy + explorer + faucet + IPFS + spec |
-| Compute Engine | `creg-validator-vm`, `e2-standard-8` | Optional maintainer seed fleet (2–10; external validators are separate) |
+| Compute Engine / MIG | `creg-observer-pool`, `e2-medium` | Public read observers following external validators |
 | Compute Engine | `creg-sepolia-geth-vm`, `e2-standard-2` | Internal Sepolia JSON-RPC |
 | Static IP | `35.225.225.20` | DNS for `*.testnet.cregnet.dev` |
 | Firewall | TCP 22, 80, 443 | TLS on VM |
@@ -84,7 +84,7 @@ CREG_ETH_RPC=https://sepolia.infura.io/v3/YOUR_KEY
 
 #### Phase 1b — Option A: self-hosted Geth (internal only)
 
-No public JSON-RPC; validators on `creg-testnet-vm` call a dedicated VM over the VPC.
+No public JSON-RPC; GCP observers and faucet call a dedicated VM over the VPC. External validators use their own reachable Sepolia provider.
 
 | Item | Value |
 |------|--------|
@@ -103,26 +103,21 @@ Runbook: [GCP-SEPOLIA-GETH-INTERNAL.md](./GCP-SEPOLIA-GETH-INTERNAL.md)
 
 **Cost:** ~+$69/mo (`e2-standard-2` + 100 GB disk).
 
-#### Phase 1c — Option A: dedicated validator fleet VM
+#### Phase 1c — External validator operators
 
-Validators move off the edge VM to private `creg-validator-vm`; edge proxies API over VPC.
+Validators run on independently controlled operator hosts; GCP does not provision or hold validator keys. The edge proxies public reads through the observer pool.
 
 | Item | Value |
 |------|--------|
-| VM | `creg-validator-vm` (`--no-address`, `e2-standard-8`) |
-| Tag | `creg-validators` |
-| API ports | `28180-28189` (host on fleet VM) |
-| Edge env | `CREG_VALIDATOR_FLEET_MODE=true`, `CREG_VALIDATOR_VM_INTERNAL_IP` |
+| Endpoint source | Independently operated validators and bootnodes |
+| Observer API | `CREG_OBSERVER_API_UPSTREAM` / internal observer ILB |
+| Edge env | `CREG_VALIDATOR_P2P_SEEDS`, `CREG_VALIDATOR_HTTP_PEERS` (observer bootstrap only) |
 
-Runbook: [GCP-VALIDATOR-FLEET.md](./GCP-VALIDATOR-FLEET.md)
+Runbook: [GCP_PHASE2_RUNBOOK.md](./GCP_PHASE2_RUNBOOK.md)
 
-```powershell
-.\testnet\gcp\provision-validator-vm.ps1 -Confirm
-.\testnet\gcp\deploy-validator-fleet.ps1
-.\testnet\gcp\deploy-stack.ps1   # edge cutover
-```
-
-**Cost:** ~+$196/mo (validator VM) on top of edge + Geth; **~$280–320/mo** total at 3–10 nodes.
+The former GCP validator-fleet scripts are retained only as explicitly enabled
+legacy lab tooling. The public deployment uses external operator endpoints and
+the observer pool.
 
 ### Phase 2 — Global HTTPS load balancer (HA + DDoS option)
 
@@ -199,7 +194,7 @@ cd chain-registry
 | Doc | Topic |
 |-----|--------|
 | [GCP-BUDGET-ARCHITECTURE.md](./GCP-BUDGET-ARCHITECTURE.md) | Two-project cost model |
-| [GCP-VALIDATOR-FLEET.md](./GCP-VALIDATOR-FLEET.md) | Validator fleet VM (Option A) |
+| [GCP-VALIDATOR-FLEET.md](./GCP-VALIDATOR-FLEET.md) | Legacy validator-fleet lab (disabled by default) |
 | [testnet/gcp/README.md](../chain-registry/testnet/gcp/README.md) | VM + Caddy deploy scripts |
-| [OPERATOR.md](../chain-registry/testnet/OPERATOR.md) | Validator fleet + `CREG_ETH_RPC` |
+| [OPERATOR.md](../chain-registry/testnet/OPERATOR.md) | External validators + GCP public services |
 | [PUBLIC_TESTNET_QUICKSTART.md](./PUBLIC_TESTNET_QUICKSTART.md) | `CREG_NODE_URL` for developers |

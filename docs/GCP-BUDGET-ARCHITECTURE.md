@@ -7,25 +7,26 @@
 
 | Project | ID | What runs here | Monthly target / cap |
 |---------|-----|----------------|----------------------|
-| **Testnet hosting** | `gen-lang-client-0022105784` | Edge VM + validator fleet VM + internal Geth + NAT | **$300** / **$350** |
+| **Testnet hosting** | `gen-lang-client-0022105784` | Edge VM + observer pool + optional internal Geth + NAT | **$300** / **$350** |
 | **Waitlist backend** | `gen-lang-client-0098858574` | Firestore (named DB), `registerWaitlist` Cloud Function, Secret Manager (**Blaze**) | **$10** / **$25** |
 
-**Typical combined spend (maintainer edge + Geth + optional seed fleet):** ~$280–300 (GCP) + ~$0–8 (Firebase) ≈ **~$285–310/month**. External validators run on operator infrastructure — see [TESTNET_SCALE_ARCHITECTURE.md](./TESTNET_SCALE_ARCHITECTURE.md).
+**Typical combined spend (maintainer edge + observers + optional Geth):** ~$180–250 (GCP) + ~$0–8 (Firebase) ≈ **~$185–260/month**. Validators and bootnodes run on independently controlled operator infrastructure — see [TESTNET_SCALE_ARCHITECTURE.md](./TESTNET_SCALE_ARCHITECTURE.md).
 
 ## Architecture (Option A — production)
 
 ```
 Browser → creg-testnet-vm (edge, public IP)
-       → creg-validator-vm (validators, private)
-       → creg-sepolia-geth-vm (Sepolia RPC, private)
+       → creg-observer-pool (read-only observers, private)
+       → creg-sepolia-geth-vm (optional Sepolia RPC, private)
 ```
 
-Runbook: [GCP-VALIDATOR-FLEET.md](./GCP-VALIDATOR-FLEET.md).
+Runbook: [GCP_PHASE2_RUNBOOK.md](./GCP_PHASE2_RUNBOOK.md). The former
+validator-fleet runbook is retained as a guarded legacy lab reference.
 
 | Item | Value |
 |------|--------|
 | Edge VM | `creg-testnet-vm`, `e2-standard-4`, `us-central1-a` |
-| Validator fleet VM | `creg-validator-vm`, `e2-standard-8`, no public IP |
+| Observer pool | `creg-observer-pool` MIG, `e2-medium`, no public IP |
 | Geth VM | `creg-sepolia-geth-vm`, `e2-standard-2`, no public IP |
 | Static IP (edge) | `35.225.225.20` |
 | Firestore database | `ai-studio-6b167dc8-a078-4526-a86b-de2a8722a753` |
@@ -36,13 +37,13 @@ Runbook: [GCP-VALIDATOR-FLEET.md](./GCP-VALIDATOR-FLEET.md).
 | Line item | Est. monthly |
 |-----------|----------------|
 | `creg-testnet-vm` (`e2-standard-4`) | ~$98 |
-| `creg-validator-vm` (`e2-standard-8`) | ~$196 |
+| Observer pool (`e2-medium`, one replica) | ~$25 |
 | `creg-sepolia-geth-vm` (`e2-standard-2`) | ~$49 |
 | Disks (100 + 200 + 100 GB `pd-balanced`) | ~$40 |
 | Cloud NAT + egress | ~$5–15 |
 | Optional snapshots | ~$2–8 |
 
-**At 10 nodes:** same `e2-standard-8` validator VM; scale via compose only (~**$280–320/mo** total GCP).
+**At 10,000+ nodes:** validator compute and bandwidth are borne by independent operators; GCP scales only observers and public read services.
 
 **Primary risk:** internet egress on the edge VM (Cloudflare DNS-only → HTTPS/RPC bytes exit GCP).
 

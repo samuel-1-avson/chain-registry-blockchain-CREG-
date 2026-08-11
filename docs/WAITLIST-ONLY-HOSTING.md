@@ -15,7 +15,10 @@ The waitlist is **not** all on one VM. It is split on purpose:
 
 Legacy (pre-migration): website was Docker on **`creg-testnet-vm`** in project `gen-lang-client-0022105784`.
 
-Everything else in `gen-lang-client-0022105784` (validator VM, Geth VM, observer pool, explorer/faucet/hub containers, hub Cloud Run, API load balancer) is **testnet/hub** and can stay off during the waitlist phase.
+Everything else in `gen-lang-client-0022105784` (optional Geth VM, observer pool,
+explorer/faucet/hub containers, hub Cloud Run, API load balancer) is
+**testnet/hub** and can stay off during the waitlist phase. Validators and
+bootnodes are independent operator infrastructure, not GCP resources.
 
 ```mermaid
 flowchart LR
@@ -38,7 +41,6 @@ flowchart LR
 
 | Resource | Est. savings/mo |
 |----------|-----------------|
-| `creg-validator-vm` | ~$150–196 |
 | `creg-sepolia-geth-vm` | ~$49 |
 | `creg-observer-pool` MIG (scale to 0) | ~$25 |
 | Edge containers: explorer, faucet, IPFS, spec, hub, prometheus | RAM/egress on same VM |
@@ -83,12 +85,12 @@ Expect HTTP `200` and JSON with enrollment count.
 
 ## Relaunch testnet checklist
 
-1. `.\resume-testnet-hosting.ps1 -Yes` — start Geth + validator VMs, scale observer MIG to 1
-2. `.\deploy-observer-pool.ps1 -Confirm` — sync observers
-3. `.\sync-local-repo.ps1` + `.\push-env.ps1` — refresh edge env
-4. On validator VM: `./testnet/start-validator-fleet-gcp.sh`
+1. `.\resume-testnet-hosting.ps1 -Yes` — start optional Geth and scale the observer MIG
+2. Fill external `CREG_VALIDATOR_P2P_SEEDS`/`CREG_VALIDATOR_HTTP_PEERS`, then run `.\gcp\verify-public-services-profile.ps1 -Target observer`
+3. `.\deploy-observer-pool.ps1 -Confirm` — start observers from the approved image digest
+4. Add the observer ILB address, then run `.\gcp\verify-public-services-profile.ps1` and refresh edge env
 5. On edge VM: `./testnet/start-cloud-edge-gcp.sh` (full stack, **not** waitlist-only)
-6. `.\verify-fleet-sandbox.ps1` — smoke tests
+6. Verify external validator health independently and verify the public observer `/v1/health`
 
 ## Do not
 

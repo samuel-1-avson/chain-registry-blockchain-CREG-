@@ -123,7 +123,7 @@ Production layout is documented in:
 - [GCP_PHASE2_RUNBOOK.md](./GCP_PHASE2_RUNBOOK.md) — observer pool + hub
 - [testnet/gcp/README.md](../chain-registry/testnet/gcp/README.md) — resume/stop scripts
 
-**Cost-conscious phase:** Edge + waitlist can run without validator VMs — [WAITLIST-ONLY-HOSTING.md](./WAITLIST-ONLY-HOSTING.md). Resume full testnet when cohort onboarding starts.
+**Cost-conscious phase:** Edge + waitlist can run without validator VMs — [WAITLIST-ONLY-HOSTING.md](./WAITLIST-ONLY-HOSTING.md). Validators are always independently operated; resume GCP observers and public services when cohort onboarding starts.
 
 ---
 

@@ -1,10 +1,10 @@
-# Option A — Dedicated validator fleet VM (VPC)
+# Legacy lab — Dedicated maintainer seed fleet VM (VPC)
 
 > **Updated:** 2026-06-26  
 > **Project:** `gen-lang-client-0022105784`  
-> **Goal:** Optional **maintainer seed validators** on a private GCP VM; **10,000+ external operators** run their own hosts per [TESTNET_SCALE_ARCHITECTURE.md](./TESTNET_SCALE_ARCHITECTURE.md).
+> **Goal:** Optional **maintainer seed validators** on a private GCP VM for a disposable lab only. Production validators and bootnodes run under independent operators; **10,000+ external operators** run their own hosts per [TESTNET_SCALE_ARCHITECTURE.md](./TESTNET_SCALE_ARCHITECTURE.md).
 
-Edge TLS, explorer, faucet, IPFS, and spec stay on `creg-testnet-vm`. Hybrid WireGuard-to-PC is legacy only ([HYBRID-LOCAL-VALIDATORS.md](./HYBRID-LOCAL-VALIDATORS.md)).
+Edge TLS, explorer, faucet, IPFS, and spec stay on `creg-testnet-vm`. The normal public profile uses the observer pool and external validator endpoints. Hybrid WireGuard-to-PC is legacy only ([HYBRID-LOCAL-VALIDATORS.md](./HYBRID-LOCAL-VALIDATORS.md)).
 
 ---
 
@@ -31,8 +31,8 @@ API :28180-28189 (host)         (no public IP)
 | Tier | VM | Tag | Public IP | Role |
 |------|-----|-----|-----------|------|
 | Edge | `creg-testnet-vm` | `creg-testnet` | Yes (static) | TLS ingress, shared services |
-| Seed validator fleet | `creg-validator-vm` | `creg-validators` | **No** | Optional `creg-node-1..N` (2–10 maintainer seeds; not validator cap) |
-| Sepolia RPC | `creg-sepolia-geth-vm` | `creg-sepolia-geth` | **No** | `CREG_ETH_RPC` for validators |
+| Seed validator fleet | `creg-validator-vm` | `creg-validators` | **No** | Legacy lab only; disabled unless explicitly allowed |
+| Sepolia RPC | `creg-sepolia-geth-vm` | `creg-sepolia-geth` | **No** | `CREG_ETH_RPC` for GCP observers/faucet (external validators use their own provider) |
 
 ---
 
@@ -103,7 +103,11 @@ gcloud compute instances describe creg-testnet-vm --zone=us-central1-a --format=
 
 ---
 
-## Rollout steps
+## Rollout steps (legacy lab only)
+
+The repository scripts refuse this path by default. Every provisioning/start
+step requires an explicit legacy override, and the resulting co-located seeds
+must never be presented as independent public validators.
 
 ### 1. Provision validator VM + firewall
 
@@ -114,7 +118,7 @@ cd chain-registry
 
 ### 2. Deploy validator fleet (Docker)
 
-Ensure `testnet/sepolia-fleet.env` has seed validator keys, Geth RPC, and edge IP for IPFS/spec.
+Ensure `testnet/sepolia-fleet.env` has the disposable lab keys, Geth RPC, and edge IP for IPFS/spec.
 
 ```powershell
 .\testnet\gcp\deploy-validator-fleet.ps1
