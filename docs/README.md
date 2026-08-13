@@ -18,6 +18,7 @@ Start at the [project README](../README.md), then use the sections below.
 | [REMEDIATION_BACKLOG.md](./REMEDIATION_BACKLOG.md) | SEC-/REM-/DOC- ticket status |
 | [L2_PUBLIC_ALPHA_GATE_STATUS.md](./L2_PUBLIC_ALPHA_GATE_STATUS.md) | Public-alpha gate checklist |
 | [CREG_SYSTEM_WORKFLOW.md](./CREG_SYSTEM_WORKFLOW.md) | Full system design + §15 iteration log |
+| [ARENA_PROTOCOL_CHANGELOG.md](./ARENA_PROTOCOL_CHANGELOG.md) | Monthly Arena-sourced protocol and docs changes |
 
 ---
 

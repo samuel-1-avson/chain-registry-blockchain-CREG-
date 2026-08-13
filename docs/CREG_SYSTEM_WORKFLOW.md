@@ -37,9 +37,11 @@ Chain Registry (CREG) is designed as a **decentralized package-integrity
 network** for software supply chains. Its target protocol reduces
 single-authority registry trust (npm, PyPI, Cargo, and similar) by requiring
 independently controlled validator consensus over content-addressed packages.
-The recorded public-alpha topology currently has one validator and no
-bootnodes, so it provides neither operational decentralization nor Byzantine
-fault tolerance yet. Two consensus layers—package votes and PBFT blocks—finalize
+The recorded public-alpha topology currently lists four validators
+(`validator-1`…`validator-4`) in `chain-spec.sepolia.json` and empty
+bootnodes. The public GCP fleet is paused, so this is the specified
+topology, not a live multi-node network. It does not yet provide operational
+decentralization or production Byzantine fault tolerance. Two consensus layers—package votes and PBFT blocks—finalize
 records on a local CREG chain. Sepolia contracts currently provide staking and
 governance experiments; the legacy batch checkpoint is retired and is not a
 rollup or state-transition validity proof.

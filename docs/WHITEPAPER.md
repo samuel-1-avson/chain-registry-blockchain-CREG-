@@ -22,9 +22,11 @@ Chain Registry is designed as a decentralized package-integrity network for
 software supply chains. Its public alpha targets package publishers,
 developers, validators, and security researchers who want a verifiable package
 status layer across ecosystems such as npm, PyPI, Cargo, and similar
-registries. The recorded public-alpha topology currently has one validator and
-no bootnodes; it is a research deployment with no Byzantine fault tolerance,
-not evidence of operational decentralization.
+registries. The recorded public-alpha topology currently lists four validators
+(`validator-1`…`validator-4`) in `chain-spec.sepolia.json` and empty bootnodes.
+The public GCP fleet is paused, so this is the specified topology, not a live
+multi-node network. It is a research deployment with no production Byzantine
+fault tolerance, not evidence of operational decentralization.
 
 At scale (thousands of validators), full redundant analysis would be impractical. CREG therefore uses a **hybrid mandatory + voluntary committee model**:
 
