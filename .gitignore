@@ -64,6 +64,18 @@ publisher.key
 *.jks
 *.keystore
 *.asc
+# GCP / Firebase keys (filenames often omit "secret" / "credential")
+**/*-firebase-adminsdk-*.json
+**/serviceAccount*.json
+**/application_default_credentials.json
+gcloud-key.json
+.runtimeconfig.json
+.secret.local
+# Waitlist / operator PII dumps
+*waitlist*.csv
+*registrant*.csv
+*registrations*.csv
+emails.csv
 
 # =============================================================================
 # VALIDATOR KEYS (CRITICAL)

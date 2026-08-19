@@ -142,10 +142,12 @@ field_reassign_with_default = "allow"
 needless_borrow = "allow"
 result_large_err = "allow"
 
+# Keep local target/ small on Windows. Full debug + unpacked PDBs previously
+# grew this workspace past 100 GB (incremental + per-crate .pdb files).
 [profile.dev]
 opt-level = 0
-debug = true
-split-debuginfo = "unpacked"
+debug = 1
+split-debuginfo = "off"
 incremental = true
 
 [profile.dev.package."*"]
