@@ -4,7 +4,7 @@
 > **Version:** Public alpha (`creg-testnet-1`)  
 > **Network:** Ethereum Sepolia (L1 chain id `11155111`)  
 > **Status:** Public alpha testnet — not mainnet  
-> **Last updated:** 2026-07-29 (repository-controlled CR-07 activation/archive gates and weak-subjectivity checkpoint tooling)
+> **Last updated:** 2026-08-19 (quorum n vs M, public-alpha 4-validator topology, retired `submitRollupBatch` wording)
 
 This document describes the complete system workflow of the Chain Registry blockchain: architecture, components, consensus, networking, storage, security, operations, and developer onboarding. It is scoped to the **core blockchain project** (`chain-registry/` workspace, contracts, circuits, testnet) and excludes the waitlist application and contribution arena.
 
@@ -26,6 +26,7 @@ This document describes the complete system workflow of the Chain Registry block
 12. [Testing Strategy and Quality Assurance](#12-testing-strategy-and-quality-assurance)
 13. [Deployment and Operational Considerations](#13-deployment-and-operational-considerations)
 14. [Developer Onboarding Guidelines](#14-developer-onboarding-guidelines)
+15. [Architecture Improvement Roadmap](#15-architecture-improvement-roadmap--iterative-execution)
 
 ---
 
@@ -242,7 +243,7 @@ The workspace (`chain-registry/Cargo.toml`) contains 17 crates:
 | `common` | Shared types: `Block`, `Transaction`, `PackageId`, `ChainRecord` (with embedded `AnalysisCommittee` + `member_performance_at_finalization` snapshot), chain spec |
 | `node` | `creg-node` binary: API, P2P, storage, pipeline orchestration |
 | `consensus` | PBFT engine, vote accumulator, VRF, forced inclusion |
-| `validator` | Three-stage security pipeline (static, sandbox, diff, LLM, PGP) |
+| `validator` | Security pipeline (static, sandbox, diff; optional LLM/PGP) |
 | `cli` | `creg` CLI (publish, install, stake, verify, doctor) |
 | `resolver` | Package trust resolution (cache + node API) |
 | `zk-validator` | Groth16 proof generation/verification (arkworks) |
@@ -357,10 +358,9 @@ flowchart LR
     Validate --> S1[Static Analysis]
     S1 --> S2[Behavioral Sandbox]
     S2 --> S3[Differential Analysis]
-    S3 --> S4[LLM optional advisory]
-    S4 --> S5[PGP optional]
-    S5 --> S6[Reputation HTTP]
-    S6 --> Decision{Deterministic risk + vote}
+    S3 --> Evidence[Consensus-grade evidence]
+    Evidence --> Optional[Optional LLM / PGP / reputation]
+    Optional --> Decision{Deterministic risk + vote}
     Decision -->|Approve| SignVote[Ed25519 sign ValidatorVote]
     Decision -->|Reject| SignReject[Sign reject vote]
     SignVote --> Gossip[Gossip VoteGossip]
@@ -376,7 +376,7 @@ flowchart LR
 | **Static analysis** | `validator/static_analysis.rs` | Regex, entropy, typosquat, YARA-X, pattern files |
 | **Behavioral sandbox** | `validator/sandbox.rs` | nsjail → gVisor → Docker → WASM → fail-closed |
 | **Differential analysis** | `validator/diff.rs` | Compare against prior verified version behavior |
-| **ML deep scan** | `ml-validator/deep_scan.rs` | YARA-X rules, threat-intel hashes |
+| **ML deep scan** | `ml-validator/deep_scan.rs` | YARA-X rules, threat-intel hashes. Feature-flagged; not a required Node-today consensus substage |
 | **LLM review** | `validator/llm.rs` | Advisory only — never sole trust root |
 | **PGP** | `validator/pgp.rs` | Optional detached signature verification |
 | **Reputation** | HTTP API | Context signal, not replacement for evidence |
@@ -435,7 +435,7 @@ sequenceDiagram
     Admission->>Pending: enqueue by canonical id
     Pending->>Pipeline: validator tick (CREG_IS_VALIDATOR)
     Pipeline->>IPFS: fetch tarball
-    Pipeline->>Pipeline: static → sandbox → diff → LLM → PGP → reputation
+    Pipeline->>Pipeline: fetch → static → sandbox → diff → evidence (optional LLM/PGP/reputation)
     Pipeline->>P2P: gossip VoteGossip
     Pipeline->>PBFT: record_prepare / record_commit votes
     PBFT-->>Pipeline: quorum Verified or Rejected
@@ -452,12 +452,14 @@ sequenceDiagram
 
 ### 4.2 Two Consensus Layers
 
+Notation: **n** is the active validator-set size. **M** is the mandatory analysis-committee size (`M = n` when `n ≤ 50`; public alpha is four validators, so M=4). Package votes use **M**. Block PBFT and validator-set certificates use **n**.
+
 CREG uses two related consensus surfaces:
 
 | Layer | Decides | Signature domain | Threshold |
 |-------|---------|------------------|-----------|
-| **Package vote accumulator** | Whether a package becomes verified | `creg-vote-v2` | `floor(2n/3) + 1` |
-| **Block PBFT engine** | Whether a CREG block is finalized | `creg-pbft-v1` | `floor(2n/3) + 1` |
+| **Package vote accumulator** | Whether a package becomes verified | `creg-vote-v2` | `floor(2M/3) + 1` mandatory-committee approvals |
+| **Block PBFT engine** | Whether a CREG block is finalized | `creg-pbft-v1` | `floor(2n/3) + 1` of the validator set |
 
 Package vote message format:
 
@@ -558,8 +560,8 @@ Deployed addresses are published in `testnet/chain-spec.sepolia.json`:
 | Surface | Contract path | Threshold |
 |---------|---------------|-----------|
 | Validator admission | `Staking.approveByConsensus` | ≥ 2/3 active validators |
-| Package evidence | CREG vote accumulator (off-chain) | `floor(2n/3) + 1` |
-| Block PBFT | PBFT engine (off-chain) | `floor(2n/3) + 1` |
+| Package evidence | CREG vote accumulator (off-chain) | `floor(2M/3) + 1` mandatory-committee approvals |
+| Block PBFT | PBFT engine (off-chain) | `floor(2n/3) + 1` of the validator set |
 | L1 package finalization | `Registry.finalizePackage` | EIP-712 `PackageVerdict` bound to chain/Registry/package/decision/exact `validatorSetEpoch`/live `quorumPct`/15-minute maximum validity; approvals meet the ceiling-derived quorum |
 
 ### 5.3 Staking Economics
@@ -965,7 +967,8 @@ Both node types run the same `creg-node` binary. The role is controlled by confi
 | Pending pool | Admits publishes; **drains** pool for analysis | Admits publishes; **does not** drain pool |
 | Security pipeline | Runs full analysis and signs votes | Skipped — no local votes |
 | PBFT | Participates in block PREPARE/COMMIT | Syncs blocks from peers; no voting |
-| Public fleet role | `creg-node-1`, `creg-node-2` (validators) | `creg-node-3` (observer — public API reads) |
+| Public-alpha chain-spec role | `validator-1`…`validator-4` in `chain-spec.sepolia.json` | Not in the recorded 4-validator set; observers are a node type, not a fifth spec validator |
+| Historical GCP lab names | `creg-node-1`, `creg-node-2` (validators) | `creg-node-3` (observer — public API reads). The public GCP fleet is paused. |
 
 Observer nodes keep packages in **pending** until validators reach consensus. If an observer drained the pending pool, packages would disappear from the API without a chain record.
 
@@ -1062,7 +1065,7 @@ sequenceDiagram
     Pool->>VP: ready_for_validation()
     VP->>IPFS: fetch tarball by CID
     VP->>VP: verify SHA-256 content_hash
-    VP->>Val: static → sandbox → diff → LLM → PGP → reputation
+    VP->>Val: fetch → static → sandbox → diff → evidence (optional LLM/PGP/reputation)
     Val-->>VP: vote + findings + evidence_digest + bundle refs
     VP->>VP: Ed25519 sign creg-vote-v2 message
     VP->>P2P: gossip VoteGossip (commit phase)
@@ -1089,7 +1092,7 @@ sequenceDiagram
    creg-vote-v2|<canonical>|<content_hash>|<approved>|<validator_pubkey>|<scanner_profile_digest>|<evidence_digest>
    ```
 5. **Gossip** — Broadcast `VoteGossip` on `creg/v1/votes`; store own vote locally.
-6. **Wait for quorum** — Poll vote accumulator every 500ms until `floor(2n/3)+1` consensus-grade votes agree (timeout: `vote_timeout_ms` from chain spec, default 10s).
+6. **Wait for quorum** — Poll vote accumulator every 500ms until `floor(2M/3)+1` mandatory consensus-grade approvals agree (timeout: `vote_timeout_ms` from chain spec, default 10s). Block PBFT later uses `floor(2n/3)+1` of the validator set.
 7. **Emit finalized tx** — On **Verified**: `Transaction::Publish(ChainRecord)` (now containing the full `analysis_committee` object with the `member_performance_at_finalization` snapshot taken at this moment) with all quorum signatures. On **Rejected**: `Transaction::Revoke`. Send to block producer channel.
 8. **Cleanup** — Remove package from pending pool.
 
@@ -1132,7 +1135,7 @@ Rate limiting (`p2p_rate_limit.rs`) applies on ingress.
 | **`CREG_ETH_RPC`** | Archive-capable Sepolia RPC (Infura/Alchemy recommended; optional internal Geth for GCP observers/faucet) |
 | **`CREG_VALIDATOR_SET_FINALITY_LAG`** | L1 blocks to wait before applying staking events (default 2 on testnet) |
 | **`CREG_ETH_RPC_FALLBACKS`** | Multi-RPC quorum so one bad RPC cannot skew membership |
-| **Bridge worker** | Optional — batches finalized blocks to L1 via governance (not validator-vote path) |
+| **Bridge worker** | Disabled research-only legacy checkpoint path. `Registry.sol` reverts `submitRollupBatch`; not a validator-vote or settlement path |
 
 ### 9.8 Required Validator Configuration
 
@@ -1167,7 +1170,9 @@ creg doctor --node-url "$CREG_NODE_URL"
 
 ### 9.10 Public Fleet Layout (Reference)
 
-On the GCP testnet fleet (`creg-validator-vm`):
+**Recorded public-alpha topology** (authoritative): `chain-spec.sepolia.json` lists four validators (`validator-1`…`validator-4`) and empty bootnodes. The public GCP fleet is paused, so this is the specified set, not a live multi-node network.
+
+**Historical GCP lab** (not the current spec): a three-container layout was used for earlier observer + validator experiments on `creg-validator-vm`:
 
 | Container | Role | Host API port |
 |-----------|------|---------------|
@@ -1175,11 +1180,11 @@ On the GCP testnet fleet (`creg-validator-vm`):
 | `creg-node-2` | Validator | 28181 |
 | `creg-node-3` | Observer (public reads) | 28182 |
 
-Edge Caddy on `creg-testnet-vm` proxies `https://api.testnet.cregnet.dev` to the observer (28182). Validators reach each other over VPC P2P ports 29100–29102.
+When that lab ran, edge Caddy on `creg-testnet-vm` proxied `https://api.testnet.cregnet.dev` to the observer (28182). Validators reached each other over VPC P2P ports 29100–29102. Do not treat those container names as the public-alpha chain-spec identities.
 
 ### 9.11 Analysis Committee Selection (Stake Weighting + Caps)
 
-For public testnets with 10k+ validators, full redundant analysis is replaced by the **hybrid mandatory + voluntary** model.
+The **target-scale** design (classroom example: 10,000 validators) replaces full redundant analysis with the **hybrid mandatory + voluntary** model. That is not the public-alpha chain-spec: `max_validators` is 50, and the recorded topology is four validators. When the active set is ≤50, M equals the full set (public alpha: M=4, package quorum=3).
 
 - **Mandatory core** (target M=100 for large sets, or all for ≤50): Deterministically selected at admission time using `compute_analysis_committee_at_admission`.
 - **Selection algorithm** (VRF-seeded for the next iteration):
@@ -1191,7 +1196,7 @@ For public testnets with 10k+ validators, full redundant analysis is replaced by
   6. Build ordered `members` list while enforcing **per-eth_address cap** (MAX_PER_ETH=4) to prevent concentration by large operators. If cap leaves the list short, continue without cap (or expand later).
   - The VRF output from recent finalized block (see block header `vrf_output`) makes selection unpredictable in advance, similar to proposer selection, while remaining verifiable by all nodes.
 - Only the primary M run the expensive pipeline (sandbox etc.).
-- Voluntary analysts may contribute for liveness, reputation, and extra evidence.
+- Voluntary analysts may contribute for liveness, reputation, and extra evidence. **Public-alpha node today:** only the mandatory committee runs the pipeline and casts votes; `validator_pipeline` does not produce voluntary votes. Voluntary participation remains target design.
 - Quorum anchored to mandatory core (`floor(2M/3)+1` mandatory consensus-grade approvals required). Volunteers supplement.
 - On timeout: expand effective size from the pre-computed ordered list (e.g., +32 steps, capped at ~256).
 - At finalization (after `update_performance_scores` credits the package's contributions), the full `AnalysisCommittee` object — including `performance_bias` and a `member_performance_at_finalization` map (validator_id → performance_score at that exact moment) — is captured and stored inside `ChainRecord.analysis_committee`.
@@ -1267,8 +1272,8 @@ flowchart TD
     subgraph "CREG Off-Chain"
         direction TB
         Submit[Publisher: submitPackage] --> Admit[Admission<br/>compute_analysis_committee_at_admission]
-        Admit --> Select[VRF-seeded selection<br/>weighted = hash / stake / rep / perf<br/>M=100 mandatory + voluntary path]
-        Select --> Analyze[Mandatory + Voluntary Validators<br/>full pipeline: IPFS + sandbox + ML]
+        Admit --> Select[Target-scale VRF selection<br/>weighted = hash / stake / rep / perf<br/>M=100 for large sets; M=n if n≤50]
+        Select --> Analyze[Public-alpha node today: mandatory committee only<br/>fetch + static + sandbox + diff + evidence]
         Analyze --> Vote[Sign vote + evidence<br/>is_mandatory flag set for selected]
         Vote --> Quorum["Quorum reached -> Verified"]
     end
@@ -1665,13 +1670,14 @@ Operators should treat testnet deployments as **alpha** until audit closure and 
 | Vote timeout | 10 seconds | From chain spec |
 | Sync interval | 10 seconds | HTTP peer polling |
 | Max reorg depth | 64 blocks | Automatic recovery limit |
-| Quorum | 67% | `floor(2n/3) + 1` |
+| Package vote quorum | `floor(2M/3) + 1` | Mandatory committee (M=n when n≤50) |
+| Block PBFT quorum | `floor(2n/3) + 1` | Validator set (`quorum_percentage` 67 in spec) |
 
 Linear block sync is adequate for a registry where each block contains a handful of package transactions. State-snapshot sync is noted as a future optimization for very long chains.
 
 ### 11.2 Scalability Considerations
 
-- Validator set capped at 50 (`max_validators` in chain spec)
+- Validator set capped at 50 (`max_validators` in the signed public-alpha chain spec). The 10,000-validator figure in §9.11 is target-scale teaching, not this spec.
 - PBFT complexity scales with validator count; epoch pull distribution for slash pool on large sets
 - PostgreSQL indexer offloads read queries from RocksDB
 - IPFS content addressing scales independently of chain height
@@ -2210,17 +2216,20 @@ For the authoritative long-term view, also consult `DEEP_DIVE_ANALYSIS.md` §5 (
 | **Chain spec** | Signed JSON network parameters verified at node boot |
 | **Mechanical consensus** | Deterministic, machine-checkable agreement over package status |
 | **Pending pool** | Pre-consensus mempool for admitted packages |
+| **n** | Active validator-set size |
+| **M** | Mandatory analysis-committee size (`M = n` when `n ≤ 50`) |
 | **Forced inclusion** | Censorship-resistance for transactions omitted N blocks |
 
 ## Appendix B: Public Alpha Limitations
 
 This is a **public alpha testnet**, not mainnet. Key limitations:
 
-- Coordinated validator set (expanding)
+- Coordinated four-validator public-alpha set (`validator-1`…`validator-4`); not production BFT
 - External security audit open (SEC-401)
 - ZK proofs are experimental infrastructure
 - Cross-chain, insurance, and threshold encryption disabled
-- Checkpoint-attestation bridge mode (not full state validity proof)
+- Legacy L1 batch checkpoint (`submitRollupBatch`) is retired; Registry reverts it
+- Public vulnerability reports: `security@cregnet.dev` (Arena `security.txt`). The signed chain-spec `support.security` field still lists `security@chain-registry.github.io` and is not the guest-facing contact.
 - Abrupt process-kill/chaos recovery still requires an operator rehearsal
 - CR-07 production npm/PyPI verifier/trust/policy artifacts, a real
   production-signed activation manifest/spec, operator rehearsal, and

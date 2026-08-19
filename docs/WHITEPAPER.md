@@ -5,6 +5,8 @@
 > Network: `creg-testnet-1` on Ethereum Sepolia  
 > Status: Public alpha testnet, not mainnet  
 > Related resources: Public testnet quickstart, Phase scope definitions, Readiness gates status, CREG_SYSTEM_WORKFLOW.md
+>
+> Errata 2026-08-19: abstract no longer describes retired L1 anchoring; package quorum is `floor(2M/3)+1`; public-alpha topology remains four validators.
 
 This whitepaper is technical documentation for the Chain Registry public alpha. It is not an offer to sell tokens, investment advice, or a claim of mainnet economic security. The external security audit track, SEC-401, remains open; production and mainnet claims require audit closure, operational hardening, and legal/compliance review.
 
@@ -12,7 +14,7 @@ For the most current architecture details, committee/reward formulas, performanc
 
 ## Abstract
 
-Modern software depends on package registries whose trust model is often centered on publisher accounts, centralized registry infrastructure, and local package-manager policy. Chain Registry (CREG) introduces an evidence-backed, validator-consensus package registry for open software ecosystems. Publishers submit signed, content-addressed packages; validators reproduce security analysis in isolated environments; consensus-grade votes bind the package identifier, content hash, scanner profile, and evidence digest; finalized records are written to a PBFT-backed chain and can be anchored to Ethereum L1.
+Modern software depends on package registries whose trust model is often centered on publisher accounts, centralized registry infrastructure, and local package-manager policy. Chain Registry (CREG) introduces an evidence-backed, validator-consensus package registry for open software ecosystems. Publishers submit signed, content-addressed packages; validators reproduce security analysis in isolated environments; consensus-grade votes bind the package identifier, content hash, scanner profile, and evidence digest; finalized records are written to a PBFT-backed local CREG chain. Sepolia currently hosts staking, governance, and Registry contracts. The legacy L1 batch checkpoint (`submitRollupBatch`) is retired and is not a settlement or anchoring path.
 
 CREG is not a promise that malicious code can never pass a registry. It is a protocol for reducing single-party trust, making package risk evidence transparent, and turning package approval into an auditable, economically accountable network decision.
 
@@ -34,11 +36,11 @@ At scale (thousands of validators), full redundant analysis would be impractical
 - Selection is deterministic and VRF-seeded using a recent finalized block’s `vrf_output` (falling back to tip hash), combined with package identity.
 - The ordered list is further biased by on-chain stake (from `Staking.sol`) and reputation, then capped (max 4 slots per `eth_address`) to limit concentration.
 - Only the mandatory core runs the full security pipeline (fetch + sandbox + static + diff + evidence production). Their votes are required for the primary quorum (`floor(2M/3)+1` consensus-grade mandatory approvals).
-- Any validator may voluntarily run the pipeline and contribute supplementary evidence. Voluntary votes are recorded, improve liveness during expansion, and earn reputation/rewards.
+- Any validator may voluntarily run the pipeline and contribute supplementary evidence. Voluntary votes are recorded, improve liveness during expansion, and earn reputation/rewards. **Public-alpha node today:** only the mandatory committee analyzes and votes; the live `validator_pipeline` does not produce voluntary votes.
 - The committee metadata (size, ordered members, seed, effective size after any expansion) is stored in the `ChainRecord` and exposed via the public API (`GET /v1/packages/:canonical/committee`).
 - On **Verified** finalization on the CREG chain, the validator pipeline emits `distributeWorkRewards` to the `ValidatorRewards` contract on Sepolia (when bridge key and contract address are configured), passing `isMandatory` flags so rewards and reputation reflect participation.
 
-This design bounds CPU, memory, and IPFS load while preserving the core security property: package approval still requires a quorum of staked validators who produced reproducible, evidence-bound votes. The full validator set continues to provide PBFT block finality and L1 economic security.
+This design bounds CPU, memory, and IPFS load while preserving the core security property: package approval still requires a quorum of staked validators who produced reproducible, evidence-bound votes. The full validator set continues to provide PBFT block finality on the local CREG chain. Sepolia staking is the economic experiment for this research deployment, not production L1 security.
 
 **Public alpha caveat:** Committee metadata is computed once at admission, persisted with the pending package, and reused by the expensive-analysis pipeline; validators no longer apply a second independent sampling predicate. Certified mode still requires a published checkpoint, a live multi-operator rehearsal, and external review before it can be represented as production-ready.
 
@@ -55,7 +57,7 @@ Pinning incentives are provided by the separate `PinningRewards.sol` contract (s
 CREG combines:
 
 - Content-addressed submission (IPFS CIDs + SHA-256) + publisher/validator staking on Sepolia.
-- Multi-stage pipeline (static, sandbox, diff, signals, PGP, reputation, advisory LLM) with deterministic consensus-grade evidence.
+- Multi-stage pipeline (fetch, static, sandbox, diff, evidence; optional PGP, reputation, advisory LLM) with deterministic consensus-grade evidence.
 - Hybrid mandatory+voluntary committees (target M=100, VRF-seeded + stake/rep/performance bias, per-eth cap) with at-finalization performance snapshots stored in ChainRecord.
 - PBFT block finality + package vote accumulator; Sepolia staking/governance
   experiments. The legacy L1 batch checkpoint and package-ZK qualification
@@ -276,7 +278,9 @@ CREG uses two related consensus layers:
 | Package vote accumulator | Decides whether a package can become verified | `creg-vote-v2` |
 | Block PBFT engine | Finalizes CREG chain blocks containing package records | `creg-pbft-v1` |
 
-For production-sized validator sets, quorum follows the usual PBFT threshold of `floor(2n/3) + 1`. Small coordinated testnet clusters use explicit configuration where documented; these testnet shortcuts are not mainnet assumptions.
+Notation: **n** is the active validator-set size. **M** is the mandatory analysis-committee size (`M = n` when `n ≤ 50`; public alpha is four validators, so M=4). Package evidence uses **M**. Block PBFT and validator-set certificates use **n**.
+
+For production-sized validator sets, **block PBFT** quorum is `floor(2n/3) + 1`. **Package evidence** quorum is `floor(2M/3) + 1` mandatory-committee approvals. Small coordinated testnet clusters use explicit configuration where documented; these testnet shortcuts are not mainnet assumptions.
 
 ### 5.5 Install And Verify Path
 
@@ -372,8 +376,8 @@ CREG's validator pipeline is designed to make package approval hard to fake and 
 
 ### 8.2 Mandatory vs Voluntary
 - Only the primary mandatory core is required to produce consensus-grade evidence for the package-level quorum.
-- Any validator may voluntarily execute the full pipeline. Voluntary votes are recorded with `is_mandatory=false`, help during committee expansion on timeout, and are eligible for reputation/rewards.
-- This hybrid approach bounds resource usage at 10k+ validators while preserving the requirement for multiple independent, evidence-bound validator opinions.
+- Any validator may voluntarily execute the full pipeline. Voluntary votes are recorded with `is_mandatory=false`, help during committee expansion on timeout, and are eligible for reputation/rewards. **Public-alpha node today:** only the mandatory committee analyzes and votes; `validator_pipeline` does not produce voluntary votes.
+- This hybrid approach is the target-scale bound (classroom example: 10,000 validators). Public-alpha `max_validators` is 50; recorded topology is four validators.
 
 ### 8.3 Admission
 Validators fetch the exact artifact bytes by CID, verify hashes, execute the security pipeline, produce a deterministic risk summary, sign a vote, and gossip it to the validator set. A vote is consensus-grade only when it includes complete bundle refs, a non-degraded scanner profile, and a non-empty evidence digest. Only mandatory core members are obligated to do the heavy work; volunteers may participate freely.
@@ -424,8 +428,8 @@ CREG currently has four consensus surfaces:
 | Surface | What it decides | Primary verifier | Threshold |
 | --- | --- | --- | --- |
 | Validator admission consensus | Whether a pending validator applicant joins the active set | `Staking.approveByConsensus` | At least two thirds of active validators |
-| Package evidence consensus | Whether exact package bytes become verified or rejected | CREG vote accumulator | `floor(2n/3) + 1` assigned validators |
-| Block PBFT finality | Whether a CREG block is finalized into the local chain | PBFT engine | `floor(2n/3) + 1` validators, with strict small-cluster handling |
+| Package evidence consensus | Whether exact package bytes become verified or rejected | CREG vote accumulator | `floor(2M/3) + 1` mandatory-committee approvals |
+| Block PBFT finality | Whether a CREG block is finalized into the local chain | PBFT engine | `floor(2n/3) + 1` of the validator set, with strict small-cluster handling |
 | Optional L1 package finalization | Whether an L1 package record becomes verified | `Registry.finalizePackage` | Contract `quorumPct`, default 67% with a ceiling-derived quorum |
 
 Every canonical CREG child block must have a timestamp strictly later than its
