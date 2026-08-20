@@ -32,26 +32,25 @@ Generate a long random secret locally (do not commit it):
 openssl rand -hex 32
 ```
 
-Store it as a Firebase Functions secret (from repo root or `Creg-waitlist/`):
+Store it as a Firebase Functions secret from the Arena tree (`CREG-Contribution-Arena`):
 
 ```bash
-cd Creg-waitlist
-firebase functions:secrets:set ADMIN_STATS_TOKEN
+cd CREG-Contribution-Arena
+npx firebase functions:secrets:set ADMIN_STATS_TOKEN --project gen-lang-client-0098858574
 # paste the value when prompted
 ```
 
-Redeploy functions so the secret is bound:
+Redeploy the `arena` Functions codebase so the secret is bound (Hosting stays untouched):
 
-```bash
-cd functions
-npm run build
-npm run deploy
+```powershell
+cd CREG-Contribution-Arena
+.\deploy\deploy-firebase-backend.ps1 -Deploy -Confirm:$false
 ```
 
 Local emulator (optional):
 
 ```bash
-# functions/.env (gitignored) — see functions/.env.example
+# CREG-Contribution-Arena/functions/.env (gitignored)
 ADMIN_STATS_TOKEN=your-local-dev-token
 ```
 
@@ -59,7 +58,7 @@ ADMIN_STATS_TOKEN=your-local-dev-token
 
 **Endpoint:** `GET https://us-central1-gen-lang-client-0098858574.cloudfunctions.net/waitlistAdminStats`
 
-**Auth:** prefer header; query param is a fallback.
+**Auth:** `Authorization: Bearer` or `X-Admin-Token` only. Do not put the token in the URL.
 
 ```bash
 export ADMIN_STATS_TOKEN="your-secret-here"
@@ -146,7 +145,7 @@ textPayload=~"\"event\":\"waitlist_registration\""
 
 ## Page views
 
-The SPA calls `waitlistTrackView` once per browser session (`sessionStorage` key `creg_pv`). Counts are stored in Firestore `stats/traffic` and are **not** readable from client SDK (rules only allow public read on `stats/waitlist`).
+The SPA calls `waitlistTrackView` once per browser session (`sessionStorage` key `creg_pv`). Counts are stored in Firestore database `waitlist-prod` at `stats/traffic` and are **not** readable from the client SDK. `firestore.waitlist.rules` allows public read only on `stats/waitlist`. Arena `arena-prod` rules are default-deny and must not grant waitlist public reads.
 
 Optional override URL in `.env`:
 
@@ -156,14 +155,7 @@ VITE_WAITLIST_TRACK_VIEW_URL=https://us-central1-gen-lang-client-0098858574.clou
 
 ## Deploy
 
-From `Creg-waitlist/functions`:
-
-```bash
-npm run build
-npm run deploy
-```
-
-Deploys: `registerWaitlist`, `waitlistPublicStats`, `waitlistAdminStats`, `waitlistTrackView`.
+Waitlist HTTP functions ship in the Arena Functions codebase (`registerWaitlist`, `waitlistPublicStats`, `waitlistAdminStats`, `waitlistTrackView`). Deploy them with the Arena backend script above. Also deploy `firestore.waitlist.rules` to database `waitlist-prod` (see `CREG-Contribution-Arena/firebase.json`).
 
 After deploy, set `VITE_WAITLIST_STATS_URL` / `VITE_WAITLIST_TRACK_VIEW_URL` in production hosting env if you use custom domains or non-default URLs.
 
@@ -171,6 +163,7 @@ After deploy, set `VITE_WAITLIST_STATS_URL` / `VITE_WAITLIST_TRACK_VIEW_URL` in 
 
 - Rotate `ADMIN_STATS_TOKEN` if leaked: `firebase functions:secrets:set ADMIN_STATS_TOKEN` and redeploy.
 - Do not build a public admin UI or share the token in client env vars.
+- Never pass `ADMIN_STATS_TOKEN` as a query parameter; proxies and access logs retain URLs.
 - `waitlistTrackView` is intentionally unauthenticated but only increments anonymous counters; detailed metrics require the admin token.
 
 ## Registration integrity controls
