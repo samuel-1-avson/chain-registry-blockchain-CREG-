@@ -3,7 +3,7 @@
 **Scope document:** [SEC-401-AUDIT-SCOPE.md](./SEC-401-AUDIT-SCOPE.md)  
 **When booked:** Record vendor name and start date in [NEXT_WORK.md](./NEXT_WORK.md) (SEC-401 row).
 
-**Send-ready email:** From `chain-registry/`, run `.\testnet\prepare-sec-401-outreach.ps1 -Tag v0.1.1-testnet -ContactName "Your Name"` to generate [archive/SEC-401-outreach-ready.md](./archive/SEC-401-outreach-ready.md). Send to vendors below; record booking in [NEXT_WORK.md](./NEXT_WORK.md).
+**Send-ready email:** From `chain-registry/`, run `.\testnet\prepare-sec-401-outreach.ps1 -Tag v0.4.3-testnet -ContactName "Your Name"` to generate [archive/SEC-401-outreach-ready.md](./archive/SEC-401-outreach-ready.md). Send to vendors below; record booking in [NEXT_WORK.md](./NEXT_WORK.md). Do not send until VERIFY-401 has a captured aggregate. Cut a later tag if protocol diffs land after `v0.4.3-testnet`.
 
 ---
 
@@ -21,7 +21,7 @@ We are scheduling a **fixed-scope security review** of the Chain Registry testne
 
 **Repository:** https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-  
 **Scope document:** attached `SEC-401-AUDIT-SCOPE.md` (or link to repo `docs/SEC-401-AUDIT-SCOPE.md`)  
-**Commit / tag for review:** `v0.1.1-testnet` (SHA from `prepare-sec-401-outreach.ps1` output — pin before audit starts)
+**Commit / tag for review:** `v0.4.3-testnet` (commit `3eb3a23d691c5aeafaf866a1d531e518c594fa0e`; confirm SHA with `prepare-sec-401-outreach.ps1` before sending)
 
 **In scope (priority order):**
 
@@ -33,7 +33,7 @@ We are scheduling a **fixed-scope security review** of the Chain Registry testne
 
 **Deliverables:** Rolling findings (weeks 2–3), final report with severity + PoC (week 4), optional retest window for P0/P1.
 
-**Environment we provide:** Sepolia RPC access, operator runbook (`chain-registry/testnet/OPERATOR.md`), optional synced node on public API after HOSTING-301.
+**Environment we provide:** Sepolia RPC access, operator runbook (`chain-registry/testnet/OPERATOR.md`). The public API is paused; provision a local node or a dedicated operator endpoint rather than assuming `api.testnet.cregnet.dev`.
 
 Please reply with:
 
@@ -61,7 +61,7 @@ Thank you,
 ## Checklist before sending
 
 - [x] Engineering lead reviewed [SEC-401-AUDIT-SCOPE.md](./SEC-401-AUDIT-SCOPE.md)
-- [x] Auditor baseline tag proposed: `v0.1.1-testnet` (SEC-401 scope pin)
+- [x] Auditor baseline tag proposed: `v0.4.3-testnet` (candidate freeze; regenerate outreach SHA before send)
 - [ ] No production/mainnet secrets in repo or attachments
 - [ ] Sepolia RPC endpoint provisioned (read-only or dedicated key)
 - [ ] Start date recorded in NEXT_WORK when vendor confirms

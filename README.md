@@ -6,9 +6,9 @@
 
 # Chain Registry (CREG)
 
-A decentralized package registry that replaces single-authority trust (npm, PyPI, Cargo, and similar) with **independent validator consensus**. Packages are content-addressed, analyzed through a multi-stage security pipeline, finalized by PBFT quorum, and anchored to Ethereum.
+A decentralized package registry that replaces single-authority trust (npm, PyPI, Cargo, and similar) with **independent validator consensus**. Packages are content-addressed, analyzed through a multi-stage security pipeline, and finalized by PBFT quorum. Sepolia hosts staking, registry, and governance contracts. This is a **public alpha**, not mainnet, and not operational Byzantine fault tolerance.
 
-**Network:** `creg-testnet-1` on Sepolia testnet · **Phase:** public alpha
+**Network:** `creg-testnet-1` on Sepolia · **Phase:** public alpha · **Live status:** [docs/TESTNET_STATUS.md](docs/TESTNET_STATUS.md)
 
 ---
 
@@ -24,7 +24,7 @@ Supply-chain attacks exploit one compromised maintainer or stolen API token. Cha
 2. **Validate** — Validators run a three-stage pipeline (static → sandbox → deep scan).
 3. **Finalize** — A `⌊2n/3⌋+1` PBFT quorum records the verdict on the chain (RocksDB).
 4. **Install** — The `creg` CLI reads **verified** status before delegating to npm/pip/cargo shims.
-5. **Anchor** — State roots can be posted to Ethereum L1 via the Groth16 rollup bridge.
+5. **L1** — Sepolia holds staking, registry, and governance. The legacy Groth16 rollup checkpoint is retired; `zk_validation` is off on the public-alpha spec.
 
 ```mermaid
 flowchart LR
@@ -33,7 +33,7 @@ flowchart LR
     Pipeline --> PBFT[PBFT consensus]
     PBFT --> Chain[(Chain store)]
     Chain --> CLI[creg CLI]
-    Chain --> L1[Ethereum Sepolia]
+    Chain --> L1[Sepolia staking and registry]
 ```
 
 | Layer | Technology |
@@ -48,9 +48,14 @@ flowchart LR
 ---
 
 
-| **Waitlist** | https://waitlist.cregnet.dev |
+## Public surfaces
 
-**Binaries:** [v0.1.2-testnet release](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases/tag/v0.1.2-testnet) (`creg` + `creg-node` for Linux, Windows, macOS).
+| Surface | URL |
+|---------|-----|
+| **Waitlist** | https://waitlist.cregnet.dev |
+| **Contribution Arena** | https://contribute.cregnet.dev | Separate educational/simulation product; not the protocol |
+
+**Binaries:** [v0.4.3-testnet](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases/tag/v0.4.3-testnet) (`creg` + `creg-node` for Linux, Windows, macOS). The public GCP fleet (`api.testnet.cregnet.dev`) is **paused**.
 
 Chain parameters: [`chain-registry/testnet/chain-spec.sepolia.json`](chain-registry/testnet/chain-spec.sepolia.json).
 
@@ -68,7 +73,7 @@ This repo is organized like other public blockchains — **protocol and consensu
 | **ZK circuits** | [circuits/](circuits/) |
 | **Release binaries** | [Releases](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases) |
 
-The alpha waitlist app is a separate product surface: live at [waitlist.cregnet.dev](https://waitlist.cregnet.dev), source in [samuel-1-avson/Creg-waitlist](https://github.com/samuel-1-avson/Creg-waitlist).
+The alpha waitlist is live at [waitlist.cregnet.dev](https://waitlist.cregnet.dev). Contribution Arena is a **separate** educational/simulation product and is not part of the protocol workstream.
 
 ---
 
@@ -88,13 +93,15 @@ The alpha waitlist app is a separate product surface: live at [waitlist.cregnet.
 
 ```bash
 # From GitHub release
-./chain-registry/scripts/install-creg.sh --version v0.1.0-testnet
+./chain-registry/scripts/install-creg.sh --version v0.4.3-testnet
 
 # Or build from source
 cd chain-registry && cargo build --release -p cli
 ```
 
 ```bash
+# Public API may be unreachable while the GCP fleet is paused.
+# Check docs/TESTNET_STATUS.md, or run a local node from chain-registry/testnet/QUICKSTART.md.
 export CREG_NODE_URL=https://api.testnet.cregnet.dev
 creg doctor
 ```
@@ -118,33 +125,33 @@ This repository follows the same pattern as other open blockchains: **protocol c
 | Document | Purpose |
 |----------|---------|
 | [docs/TESTNET_SCALE_ARCHITECTURE.md](docs/TESTNET_SCALE_ARCHITECTURE.md) | Future scale-topology design — not a current deployment claim |
-| [docs/WHAT_TO_DO_NEXT.md](docs/WHAT_TO_DO_NEXT.md) | **Maintainers** — test system, waitlist, Arena, validator onboarding |
+| [docs/WHAT_TO_DO_NEXT.md](docs/WHAT_TO_DO_NEXT.md) | **Maintainers** — protocol testing, waitlist, validator onboarding |
 | [docs/PUBLIC.md](docs/PUBLIC.md) | Public-facing protocol index |
 | [docs/README.md](docs/README.md) | Full maintainer doc index |
 | [WHITEPAPER.md](docs/WHITEPAPER.md) | Public-alpha technical whitepaper |
 | [DEEP_DIVE_ANALYSIS.md](chain-registry/DEEP_DIVE_ANALYSIS.md) | Technical architecture and issue registry |
 | [contracts/README.md](chain-registry/contracts/README.md) | Solidity contract status |
 | [circuits/README.md](circuits/README.md) | ZK circuit build and verification |
-| [CREG-Contribution-Arena/README.md](CREG-Contribution-Arena/README.md) | Contribution Arena product |
+| [CREG-Contribution-Arena/README.md](CREG-Contribution-Arena/README.md) | Separate educational/simulation product — not protocol |
 
 ---
 
-## Status (June 2026)
+## Status (August 2026)
 
 | Milestone | Status |
 |-----------|--------|
-| Sepolia contracts + scale testnet architecture | Live |
-| 2-validator PBFT quorum | Done |
+| Sepolia contracts | Deployed — addresses in `chain-spec.sepolia.json` |
+| Specified validator set | Four coordinated validators; empty bootnodes; not operational BFT |
 | Real sandbox engine | Done |
-| Public HTTPS testnet | Live — `testnet.cregnet.dev` |
-| Binary release `v0.1.0-testnet` | Done |
+| Public GCP fleet | **Paused (cost)** — [TESTNET_STATUS.md](docs/TESTNET_STATUS.md) |
+| Binary release | [v0.4.3-testnet](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases/tag/v0.4.3-testnet) |
 | Public alpha waitlist | Live — [waitlist.cregnet.dev](https://waitlist.cregnet.dev) |
-| Contribution Arena | Alpha — [contribute.cregnet.dev](https://contribute.cregnet.dev) |
+| Contribution Arena | Separate educational/simulation product — [contribute.cregnet.dev](https://contribute.cregnet.dev) |
 | Phase 1 remediation (gossip, batch, relays) | Done — Iteration 6 |
-| Public testnet GCP stack | Resumable — may be stopped during waitlist-only phase |
-| External security audit | Open — scope ready, evidence pack pending |
+| Fresh genesis ceremony | Candidate recorded 2026-08-01/02 — public activation still gated |
+| External security audit | Open — freeze candidate `v0.4.3-testnet` |
 
-This is a **public alpha testnet**, not mainnet. See [TESTNET_PHASE_SCOPE.md](docs/TESTNET_PHASE_SCOPE.md) for participant expectations.
+This is a **public alpha**, not mainnet. See [TESTNET_PHASE_SCOPE.md](docs/TESTNET_PHASE_SCOPE.md) for participant expectations.
 
 ---
 

@@ -1040,7 +1040,7 @@ As of 2026-07-29, CREG is in public alpha testnet scope. (See CREG_SYSTEM_WORKFL
 | --- | --- |
 | Public API | Intended endpoint `https://api.testnet.cregnet.dev`; fleet may be paused, so operators/users must check `TESTNET_STATUS.md` |
 | Network | `creg-testnet-1` on Sepolia |
-| Release binaries | `v0.1.1-testnet` referenced by public docs |
+| Release binaries | `v0.4.3-testnet` |
 | Real sandbox | Public readiness gate passed with `nsjail` profile |
 | Malicious fixture suite | Public readiness gate passed |
 | IPFS availability checks | Public readiness gate passed |

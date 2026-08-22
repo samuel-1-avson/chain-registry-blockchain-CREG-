@@ -1,8 +1,8 @@
 # Next work — prioritized backlog
 
-**Updated:** 2026-07-29
+**Updated:** 2026-08-22
 **Planning hub:** [WHAT_TO_DO_NEXT.md](./WHAT_TO_DO_NEXT.md)  
-**Context:** [REMEDIATION_BACKLOG.md](./REMEDIATION_BACKLOG.md), [WEAKNESSES_GAPS_REMEDIATION_PLAN.md](./WEAKNESSES_GAPS_REMEDIATION_PLAN.md)
+**Context:** [REMEDIATION_BACKLOG.md](./REMEDIATION_BACKLOG.md), [WEAKNESSES_GAPS_REMEDIATION_PLAN.md](./WEAKNESSES_GAPS_REMEDIATION_PLAN.md), [TESTNET_STATUS.md](./TESTNET_STATUS.md)
 
 ---
 
@@ -16,10 +16,15 @@
   activation-manifest, and local contract (111/111) suites pass. The full Rust
   all-target run, rustfmt cleanup, pinned Foundry v1.7.1 run, and document
   regeneration are still active gates.
-- **Network posture:** the recorded one-validator/no-bootnode topology is
-  research alpha and has no Byzantine fault tolerance. The public GCP fleet may
-  be stopped to save cost; see
-  [WAITLIST-ONLY-HOSTING.md](./WAITLIST-ONLY-HOSTING.md).
+- **Network posture:** `chain-spec.sepolia.json` lists four coordinated
+  validators (`validator-1`…`validator-4`) and empty bootnodes. That is the
+  specified public-alpha topology, not a live multi-operator network and not
+  Byzantine fault tolerance. The public GCP fleet is paused; see
+  [WAITLIST-ONLY-HOSTING.md](./WAITLIST-ONLY-HOSTING.md) and
+  [TESTNET_STATUS.md](./TESTNET_STATUS.md).
+- **Out of this workstream:** Contribution Arena is a separate educational
+  and simulation product. Protocol planning here does not include Arena
+  launch, findings routing, or Hub cutover.
 - **Activation posture:** do not enable authoritative recovery or mandatory
   certified committees until the signed activation/checkpoint ceremonies and
   multi-operator rehearsals are complete.
@@ -33,11 +38,11 @@
 | 1 | **VERIFY-401** | active | Finish reproducible repository verification | Complete the current Rust all-target run, private-temp sidecar integration, rustfmt/check, affected reruns, pinned Foundry v1.7.1, and clean CI evidence. |
 | 2 | **CR07-ACTIVATE** | blocked externally | Production namespace-authority package | Reviewed npm/PyPI policy and trust roots, official npm authentication-mode signal, positive fixtures, signed manifest, platform artifacts, and multi-operator rehearsal. |
 | 3 | **HI11-ACTIVATE** | blocked externally | Certified-history activation | Independently verified checkpoint plus replay, partition, reorg, rebuilt-node, long-range, and process-kill rehearsals before mandatory mode. |
-| 4 | **VAL-INDEPENDENCE** | blocked externally | Independent validators and bootnodes | Recruit and verify separately controlled operators/keys/infrastructure; a one-validator topology must not be represented as Byzantine-fault-tolerant. |
-| 5 | **SPEC-ROTATE** | blocked externally | Repair signed Sepolia specification | Rotate repository-disclosed signing/validator material, decide intended genesis/topology, recompute, sign with an approved secret, independently verify, then mirror exact canonical bytes/signature. Current canonical genesis and both static mirrors are invalid/drifted and must not be published. |
-| 6 | **SEC-401** | open | External security audit | Scope: [SEC-401-AUDIT-SCOPE.md](./SEC-401-AUDIT-SCOPE.md). Vendor, independently controlled reviewer, start date, and signed findings remain TBD. |
-| 7 | **DOC-RELEASE** | active | Publish synchronized protocol documents | Regenerate workflow/whitepaper PDFs, synchronize public and Functions mirrors, visually inspect every page, and refresh manifest hashes. |
-| 8 | **TESTNET-RESUME** | gated | Resume public fleet only after operator gates | Use `testnet/gcp/resume-testnet-hosting.ps1` and `hosting-301-verify.ps1` only after spec/key repair, migrations, validators, checkpoint, trust, and rehearsal sign-offs. |
+| 4 | **VAL-INDEPENDENCE** | blocked externally | Independent validators and bootnodes | Recruit and verify separately controlled operators/keys/infrastructure; a four-validator coordinated spec must not be represented as Byzantine-fault-tolerant. |
+| 5 | **SPEC-ROTATE** | superseded | Repair signed Sepolia specification | Fresh-genesis candidate recorded 2026-08-01/02 in `chain-spec.sepolia.json` (genesis 2026-08-02). Remaining work is independent verification and public activation, not another in-repo rotate. |
+| 6 | **SEC-401** | open | External security audit | Scope: [SEC-401-AUDIT-SCOPE.md](./SEC-401-AUDIT-SCOPE.md). Candidate freeze: `v0.4.3-testnet` (`3eb3a23…`). Vendor, start date, and signed findings remain TBD. Cut a later tag only if protocol diffs land after VERIFY-401. |
+| 7 | **DOC-RELEASE** | active | Publish synchronized protocol documents | Public README/PUBLIC/install examples now pin `v0.4.3-testnet`. Still regenerate workflow/whitepaper PDFs and refresh manifest hashes. |
+| 8 | **TESTNET-RESUME** | gated | Resume public fleet only after operator gates | Use `testnet/gcp/resume-testnet-hosting.ps1` and `hosting-301-verify.ps1` only after independent validators, checkpoint, trust, and rehearsal sign-offs. |
 
 ---
 
@@ -50,7 +55,7 @@
 | 10 | **BRIDGE-301** | open | L1 bridge soak | `CREG_BRIDGE_KEY` on validator; batch observed or documented skip + alert. |
 | 11 | **SOAK-301** | open | Incentive/load soak | Run [testnet/SOAK_TEST.md](../chain-registry/testnet/SOAK_TEST.md) and availability/DR drills. |
 | 12 | **SEC-402** | open | Network partition chaos | Run `k8s/55-network-partition-test.yaml`, collect traces, and publish a postmortem. |
-| 13 | **ARENA-HUB** | open | Contribution Arena → Hub API | Apply `002_contribution_arena.sql`; [HUB_INTEGRATION.md](../CREG-Contribution-Arena/docs/HUB_INTEGRATION.md). |
+| 13 | **ISSUE-013** | open | Fail-closed sandbox bypass | Reject `CREG_DEV_SANDBOX` on validator/public profiles; `/v1/health` must surface the flag. |
 
 ---
 
@@ -76,7 +81,9 @@
 | NET-301 | 2026-06-09 | 2-validator PBFT quorum |
 | SANDBOX-301 | 2026-06-10 | Real nsjail sandbox |
 | DIST-301 | 2026-06-10 | `v0.1.0-testnet` / `v0.1.2-testnet` binaries |
-| HOSTING-301 | 2026-06-10 | `testnet.cregnet.dev` (resumable) |
+| DIST-401 | 2026-08-03 | `v0.4.3-testnet` binaries (current public pin) |
+| HOSTING-301 | 2026-06-10 | `testnet.cregnet.dev` (resumable; currently paused) |
+| SPEC-ROTATE | 2026-08-02 | Fresh genesis candidate in `chain-spec.sepolia.json`; public activation still gated |
 | DOC-301 | 2026-06-08 | Doc index rationalization |
 | GAPS-Iter5 | 2026-06-26 | Gossip/PBFT hardening |
 | GAPS-Iter6 | 2026-06-26 | Batch + finalize relay forge tests |
