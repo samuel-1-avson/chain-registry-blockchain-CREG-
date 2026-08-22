@@ -55,7 +55,7 @@
 | 10 | **BRIDGE-301** | open | L1 bridge soak | `CREG_BRIDGE_KEY` on validator; batch observed or documented skip + alert. |
 | 11 | **SOAK-301** | open | Incentive/load soak | Run [testnet/SOAK_TEST.md](../chain-registry/testnet/SOAK_TEST.md) and availability/DR drills. |
 | 12 | **SEC-402** | open | Network partition chaos | Run `k8s/55-network-partition-test.yaml`, collect traces, and publish a postmortem. |
-| 13 | **ISSUE-013** | open | Fail-closed sandbox bypass | Reject `CREG_DEV_SANDBOX` on validator/public profiles; `/v1/health` must surface the flag. |
+| 13 | **ISSUE-013** | done (2026-08-22) | Fail-closed sandbox bypass | Merged in PR #26: crate-level bypass requires `CREG_TESTNET` and blocks public/production profiles. |
 
 ---
 
@@ -89,6 +89,9 @@
 | GAPS-Iter6 | 2026-06-26 | Batch + finalize relay forge tests |
 | HI11-REPO | 2026-07-29 | Certified transitions, gossip validation, checkpoint ancestry, mandatory gate, reorg/retention tests; live activation still pending |
 | CR07-ARCHIVE | 2026-07-29 | Bounded evidence/artifact archive with minimum-retention pressure GC; operational drills still pending |
+| ISSUE-013 | 2026-08-22 | `CREG_DEV_SANDBOX` requires testnet profile; public/production blocked (PR #26) |
+| ISSUE-010 | 2026-08-22 | CrossChain `AxelarAdapter.setChainName` is governance-gated; adapter remains undeployed |
+| ISSUE-015 | 2026-08-22 | WASM WASI stubs gated by `CapabilitySet` / `ResourceLimits`; stdout capture via `fd_write` |
 
 ---
 

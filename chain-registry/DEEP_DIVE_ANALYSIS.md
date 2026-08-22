@@ -443,13 +443,12 @@ Global flags: `--unverified`, `CREG_NODE_URL`, `CREG_GRPC_URL`, `--output json`.
 - **On-chain (Sepolia)**: Deployed `0x21C18341065436Ec680b867ACfd8251fb88a1d28` via `UpgradeSepoliaVRF.s.sol` / `testnet/upgrade-sepolia-vrf.ps1`. Chain spec + Docker spec-server updated (genesis hash `0xa203c2e58f0a13a...`).
 - **Deploy note**: `Registry` still holds the old immutable VRF pointer (`0x63e5...`); governance-driven selection uses chain-spec `contracts.vrf` and direct VRF calls.
 
-### ISSUE-010: CrossChainRegistry Axelar adapter lacks access control
+### ISSUE-010: CrossChainRegistry Axelar adapter lacks access control — **FIXED**
 
-- **Severity**: High
-- **File**: `contracts/CrossChainRegistry.sol:601-603`
-- **Description**: `AxelarAdapter.setChainName` callable by anyone.
-- **Impact**: Chain name spoofing for cross-chain messages if adapter is deployed.
-- **Recommended Fix**: `onlyGovernance` modifier; disable adapter until audited.
+- **Severity**: High (resolved)
+- **File**: `contracts/CrossChainRegistry.sol`, `contracts/test/CrossChainRegistry.t.sol`
+- **Description**: `AxelarAdapter.setChainName` was callable by anyone.
+- **Fix**: Caller must equal `CrossChainRegistry(registry).governance()` or the call reverts `NotGovernance`. Covered by `test_axelarAdapterSetChainNameRequiresGovernance`. Adapter remains undeployed (`cross_chain: false`).
 
 ---
 
@@ -471,13 +470,12 @@ Global flags: `--unverified`, `CREG_NODE_URL`, `CREG_GRPC_URL`, `--output json`.
 - **Impact**: Validators may abstain or downgrade votes inconsistently depending on `CREG_DEGRADED_VALIDATOR_WARN_RATIO`.
 - **Recommended Fix**: Fail closed for Critical-severity paths; uniform policy in `vote_accumulator.rs`.
 
-### ISSUE-013: CREG_DEV_SANDBOX bypass
+### ISSUE-013: CREG_DEV_SANDBOX bypass — **MITIGATED** (2026-08-22)
 
-- **Severity**: Medium
-- **File**: `crates/validator/src/sandbox.rs:245-271`
-- **Description**: Dev flag skips real sandbox execution while emitting synthetic metrics.
-- **Impact**: Accidental enablement in Compose/env leaks unanalyzed packages into vote stage.
-- **Recommended Fix**: Require `CREG_TESTNET=true` alongside dev sandbox; add startup warning banner in API `/v1/health`.
+- **Severity**: Medium (mitigated)
+- **File**: `crates/validator/src/sandbox.rs`
+- **Description**: Dev flag skipped real sandbox execution while emitting synthetic metrics.
+- **Fix**: Bypass is allowed only when `CREG_DEV_SANDBOX` and `CREG_TESTNET` are set and `CREG_PUBLIC_VALIDATOR` / `CREG_PRODUCTION` are not (`dev_sandbox_bypass_allowed`). Covered by `sandbox::tests::test_dev_sandbox_bypass_requires_testnet_and_blocks_public`. Node config already refused bypass without the testnet profile.
 
 ### ISSUE-014: Threshold encryption disabled on testnet spec
 
@@ -487,13 +485,13 @@ Global flags: `--unverified`, `CREG_NODE_URL`, `CREG_GRPC_URL`, `--output json`.
 - **Impact**: Shielded packages do not meet threshold confidentiality goals advertised in docs.
 - **Recommended Fix**: Re-enable after `threshold-encryption` service integration and validator share distribution.
 
-### ISSUE-015: WASM sandbox ignores CapabilitySet and ResourceLimits
+### ISSUE-015: WASM sandbox ignores CapabilitySet and ResourceLimits — **MITIGATED** (2026-08-22)
 
-- **Severity**: Medium
-- **File**: `crates/wasm-sandbox/src/lib.rs:54-64,241-384`
-- **Description**: `SandboxConfig.capabilities` unused; WASI linker stubs return errors instead of capability-driven policy.
-- **Impact**: WASM engine fallback provides weak isolation compared to nsjail/Docker paths.
-- **Recommended Fix**: Wire `capabilities.rs` / `limits.rs` into linker registration; capture stdout via stub `fd_write`.
+- **Severity**: Medium (mitigated)
+- **File**: `crates/wasm-sandbox/src/lib.rs`
+- **Description**: WASI host stubs ignored `CapabilitySet` / `ResourceLimits`; `fd_write` discarded output.
+- **Fix**: Store limits drive wasmtime `StoreLimits` and stack size; syscall budget is enforced. `stdio`/`clock`/`random`/`filesystem-*` gate WASI errno (`ENOTCAPABLE` when denied). `fd_write` captures stdout/stderr when `stdio` is granted. Validator WASM path uses `CapabilitySet::validator()` and `ResourceLimits::strict()`.
+- **Residual**: WASM remains weaker than nsjail/gVisor; filesystem capabilities still refuse path_open (`ENOSYS`) rather than a real preopen.
 
 ### ISSUE-016: Sync lacks historical validator set verification
 
