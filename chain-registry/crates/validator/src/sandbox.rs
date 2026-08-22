@@ -118,8 +118,36 @@ pub async fn fleet_sandbox_from_peers(peer_urls: &[String]) -> Option<SandboxSta
     None
 }
 
+fn env_flag_true(key: &str) -> bool {
+    matches!(
+        std::env::var(key).as_deref(),
+        Ok("true") | Ok("1") | Ok("TRUE")
+    )
+}
+
+/// ISSUE-013: the validator crate must not honor `CREG_DEV_SANDBOX` unless this
+/// is an explicit testnet/dev profile. Public validators and production remain
+/// fail-closed even if the node process missed `NodeConfig` guards.
+fn dev_sandbox_bypass_allowed(
+    dev_sandbox: bool,
+    testnet: bool,
+    public_validator: bool,
+    production: bool,
+) -> bool {
+    dev_sandbox && testnet && !public_validator && !production
+}
+
+fn dev_sandbox_bypass_active() -> bool {
+    dev_sandbox_bypass_allowed(
+        env_flag_true("CREG_DEV_SANDBOX"),
+        env_flag_true("CREG_TESTNET"),
+        env_flag_true("CREG_PUBLIC_VALIDATOR"),
+        env_flag_true("CREG_PRODUCTION"),
+    )
+}
+
 async fn detect_engine_status() -> SandboxStatus {
-    let dev_bypass = std::env::var("CREG_DEV_SANDBOX").as_deref() == Ok("true");
+    let dev_bypass = dev_sandbox_bypass_active();
     if command_ready("nsjail", &["--help"]).await {
         return SandboxStatus {
             engine: "nsjail".into(),
@@ -360,12 +388,12 @@ pub async fn run(
         return Ok(result);
     }
 
-    // ── Dev bypass (operator opt-in via CREG_DEV_SANDBOX=true) ────────────────
-    // Works in release builds too so that the docker-compose dev profile can
-    // run the release image without a real sandbox engine installed. Never
-    // enable this on mainnet validators — it completely skips behavioural
-    // analysis and raises a High-severity finding on every package.
-    if std::env::var("CREG_DEV_SANDBOX").as_deref() == Ok("true") {
+    // ── Dev bypass (ISSUE-013) ────────────────────────────────────────────────
+    // Allowed only for testnet/dev profiles: CREG_DEV_SANDBOX=true AND
+    // CREG_TESTNET=true, and never when CREG_PUBLIC_VALIDATOR or CREG_PRODUCTION
+    // is set. Release images still use this path for local compose without
+    // nsjail. Public/production validators fail closed below.
+    if dev_sandbox_bypass_active() {
         tracing::warn!(
             "CREG_DEV_SANDBOX=true — behavioural analysis is SKIPPED for {}. \
              This is for local development only; NEVER set this flag on a mainnet validator.",
@@ -497,13 +525,13 @@ pub async fn run(
     let _ = std::fs::remove_dir_all(&tmp_dir);
     tracing::error!(
         "No sandboxing engine available (nsjail, gVisor, Docker, WASM) and \
-         CREG_DEV_SANDBOX is not set. Refusing to validate {} — the validator \
-         will abstain from this round. Install nsjail or set CREG_DEV_SANDBOX=true \
-         on non-mainnet deployments.",
+         CREG_DEV_SANDBOX is not allowed. Refusing to validate {} — the validator \
+         will abstain from this round. Install nsjail, or set CREG_DEV_SANDBOX=true \
+         together with CREG_TESTNET=true on non-public deployments.",
         _pkg_id
     );
     anyhow::bail!(
-        "no sandbox engine available for {} and CREG_DEV_SANDBOX is not set; \
+        "no sandbox engine available for {} and CREG_DEV_SANDBOX bypass is not allowed; \
          refusing to vote without behavioural analysis",
         _pkg_id
     )
@@ -1301,6 +1329,15 @@ pub async fn run_multiphase(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_dev_sandbox_bypass_requires_testnet_and_blocks_public() {
+        assert!(dev_sandbox_bypass_allowed(true, true, false, false));
+        assert!(!dev_sandbox_bypass_allowed(true, false, false, false));
+        assert!(!dev_sandbox_bypass_allowed(true, true, true, false));
+        assert!(!dev_sandbox_bypass_allowed(true, true, false, true));
+        assert!(!dev_sandbox_bypass_allowed(false, true, false, false));
+    }
 
     #[test]
     fn test_sanitize_control_characters() {
