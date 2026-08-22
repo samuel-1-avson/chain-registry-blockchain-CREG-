@@ -1,9 +1,9 @@
 # What to do next
 
-**Updated:** 2026-06-26  
-**Audience:** Maintainers planning the next sprint after Iteration 6 (gossip + BatchOperations + finalize relays).
+**Updated:** 2026-08-22  
+**Audience:** Maintainers planning protocol work. Public GCP fleet is paused. Contribution Arena is a separate educational product and is not this workstream.
 
-This is the **single planning entry point**. Use it to choose between full-system testing, product surfaces (waitlist / Contribution Arena), or testnet validator onboarding.
+This is the **single planning entry point**. Use it to choose between full-system testing, product surfaces (waitlist / Contribution Arena), or testnet validator onboarding. Prioritized IDs live in [NEXT_WORK.md](./NEXT_WORK.md).
 
 ---
 
@@ -15,8 +15,8 @@ This is the **single planning entry point**. Use it to choose between full-syste
 | Remediation | **Phase 1 largely closed** | ISSUE-002/003/006/007/008 mitigated or fixed — see [WEAKNESSES_GAPS_REMEDIATION_PLAN.md](./WEAKNESSES_GAPS_REMEDIATION_PLAN.md) §6 |
 | Public testnet stack | **Paused (cost)** | See [TESTNET_STATUS.md](./TESTNET_STATUS.md); resume via [resume-testnet-hosting.ps1](../chain-registry/testnet/gcp/resume-testnet-hosting.ps1) |
 | Waitlist | **Live** | Firebase — [WAITLIST-ONLY-HOSTING.md](./WAITLIST-ONLY-HOSTING.md) |
-| Contribution Arena | **Live (alpha)** | Firebase + optional Hub API — [CREG-Contribution-Arena/README.md](../CREG-Contribution-Arena/README.md) |
-| External audit | **Open** | [SEC-401-AUDIT-SCOPE.md](./SEC-401-AUDIT-SCOPE.md); evidence pack pending |
+| Contribution Arena | **Separate product** | Educational/simulation surface — not protocol work. [CREG-Contribution-Arena/README.md](../CREG-Contribution-Arena/README.md) |
+| External audit | **Open** | Freeze candidate `v0.4.3-testnet` — [SEC-401-AUDIT-SCOPE.md](./SEC-401-AUDIT-SCOPE.md) |
 
 ---
 
@@ -100,7 +100,7 @@ These are **separate product surfaces** from the Rust node. They do not block co
 | Hub API migration | [CREG-Contribution-Arena/docs/HUB_INTEGRATION.md](../CREG-Contribution-Arena/docs/HUB_INTEGRATION.md) |
 | Hub SQL migration | `chain-registry/hub-api/migrations/002_contribution_arena.sql` |
 
-**Suggested improvements:** finish Hub API adapter (replace standalone JSON routes), apply migration in staging, sync whitepaper bundle (`scripts/sync-whitepaper.mjs`), expand quest evidence tied to real testnet tasks.
+**Out of this workstream:** Contribution Arena is a separate educational/simulation product. Do not treat Arena launch, findings, or Hub API cutover as protocol work.
 
 ### B3. Hub API (shared backend)
 

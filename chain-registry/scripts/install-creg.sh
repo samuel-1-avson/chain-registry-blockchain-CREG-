@@ -3,7 +3,7 @@
 #
 # Usage:
 #   ./scripts/install-creg.sh
-#   ./scripts/install-creg.sh --version v0.1.0-testnet
+#   ./scripts/install-creg.sh --version v0.4.3-testnet
 #   ./scripts/install-creg.sh --build
 
 set -euo pipefail

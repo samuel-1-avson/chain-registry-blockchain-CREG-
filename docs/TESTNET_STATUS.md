@@ -1,6 +1,6 @@
 # CREG testnet — live status
 
-> **Last updated:** 2026-08-01
+> **Last updated:** 2026-08-22
 > **Single source of truth** for what is running today. Supersedes stale “phase open” wording in older docs until those pages are refreshed.
 
 ---
@@ -11,7 +11,8 @@
 |---------|--------|-------|
 | **Public GCP fleet** (`api.testnet.cregnet.dev`, validators, IPFS gateway) | **Paused (cost)** | Fleet can stay off until external validators are ready |
 | **Waitlist** | **Live** | Firebase — [WAITLIST-ONLY-HOSTING.md](./WAITLIST-ONLY-HOSTING.md) |
-| **Contribution Arena** | **Live (alpha)** | Firebase + optional Hub API — [CREG-Contribution-Arena/README.md](../CREG-Contribution-Arena/README.md) |
+| **Contribution Arena** | **Separate product (live)** | Educational/simulation only — not protocol work |
+| **Release binaries** | **v0.4.3-testnet** | [GitHub release](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases/tag/v0.4.3-testnet) |
 | **Local / operator nodes** | **Available** | Run your own observer or validator against Sepolia chain spec |
 | **Protocol code & docs** | **Active** | Public alpha; not mainnet |
 

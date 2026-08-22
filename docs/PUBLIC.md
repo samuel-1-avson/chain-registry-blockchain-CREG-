@@ -60,7 +60,7 @@ cargo test --workspace
 cd contracts && forge test
 ```
 
-Release binaries: [v0.1.2-testnet](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases/tag/v0.1.2-testnet).
+Release binaries: [v0.4.3-testnet](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases/tag/v0.4.3-testnet).
 
 ---
 
@@ -80,4 +80,4 @@ Web frontends (explorer, hub) and cloud deploy scripts live elsewhere in the mon
 | Surface | URL | Doc |
 |---------|-----|-----|
 | Waitlist SPA | [waitlist.cregnet.dev](https://waitlist.cregnet.dev) | External [Creg-waitlist](https://github.com/samuel-1-avson/Creg-waitlist) repo |
-| Contribution Arena | [contribute.cregnet.dev](https://contribute.cregnet.dev) | [CREG-Contribution-Arena/README.md](../CREG-Contribution-Arena/README.md) |
+| Contribution Arena | [contribute.cregnet.dev](https://contribute.cregnet.dev) | Separate educational/simulation product — not the protocol workstream |

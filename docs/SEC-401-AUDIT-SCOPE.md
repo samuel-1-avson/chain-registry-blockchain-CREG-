@@ -126,9 +126,9 @@ Auditors receive:
    authorization, separately controlled testnet operators
 
 **Deliverable environment:** local destructive lab plus Sepolia where
-explicitly authorized. No mainnet keys. The currently recorded one-validator,
-zero-bootnode Sepolia topology is research alpha and cannot supply Byzantine
-fault-tolerance evidence.
+explicitly authorized. No mainnet keys. The currently recorded four-validator,
+zero-bootnode Sepolia topology is coordinated research alpha and cannot supply
+Byzantine fault-tolerance evidence. The public GCP fleet is paused.
 
 ---
 
@@ -186,7 +186,7 @@ flowchart LR
 
 Email template and checklist: [SEC-401-VENDOR-OUTREACH.md](./SEC-401-VENDOR-OUTREACH.md)
 
-Generate send-ready copy (pinned tag + SHA): from `chain-registry/`, run `.\testnet\prepare-sec-401-outreach.ps1` → [archive/SEC-401-outreach-ready.md](./archive/SEC-401-outreach-ready.md).
+Generate send-ready copy (pinned tag + SHA): from `chain-registry/`, run `.\testnet\prepare-sec-401-outreach.ps1 -Tag v0.4.3-testnet` → [archive/SEC-401-outreach-ready.md](./archive/SEC-401-outreach-ready.md).
 
 When a vendor confirms, update [NEXT_WORK.md](./NEXT_WORK.md) SEC-401 booking table with vendor name and start date.
 

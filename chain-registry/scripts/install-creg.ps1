@@ -2,7 +2,7 @@
 #
 # Usage:
 #   .\scripts\install-creg.ps1
-#   .\scripts\install-creg.ps1 -Version v0.1.0-testnet
+#   .\scripts\install-creg.ps1 -Version v0.4.3-testnet
 #   .\scripts\install-creg.ps1 -BuildFromSource
 
 param(

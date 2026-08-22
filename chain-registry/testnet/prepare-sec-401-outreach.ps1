@@ -2,10 +2,10 @@
 #
 # Usage:
 #   .\testnet\prepare-sec-401-outreach.ps1
-#   .\testnet\prepare-sec-401-outreach.ps1 -Tag v0.1.0-testnet -ContactName "Samuel" -OutFile ..\..\docs\SEC-401-outreach-ready.md
+#   .\testnet\prepare-sec-401-outreach.ps1 -Tag v0.4.3-testnet -ContactName "Samuel" -OutFile ..\..\docs\SEC-401-outreach-ready.md
 
 param(
-    [string]$Tag = "v0.1.0-testnet",
+    [string]$Tag = "v0.4.3-testnet",
     [string]$GithubRepo = "",
     [string]$ContactName = "",
     [string]$OutFile = ""
