@@ -3,11 +3,11 @@
 //! This crate provides a secure, cross-platform sandbox for validating packages
 //! using WebAssembly.
 //!
-//! The sandbox enforces memory limits via `StoreLimitsBuilder`, CPU limits via
-//! wasmtime epoch-based interruption, and provides no WASI imports by default
-//! (modules that call WASI functions will trap). This makes it suitable as a
-//! fallback when nsjail/gVisor/Docker are unavailable, though production
-//! deployments should still prefer nsjail for the strongest isolation.
+//! The sandbox enforces memory limits via `StoreLimitsBuilder`, wall-clock
+//! timeout via `tokio::time::timeout`, a WASI syscall budget, and capability
+//! gates on `wasi_snapshot_preview1` host stubs (`stdio`, `clock`, `random`,
+//! filesystem). Production deployments should still prefer nsjail for the
+//! strongest isolation.
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -52,31 +52,55 @@ pub struct SandboxConfig {
     pub timeout_secs: u64,
     /// Allowed capabilities
     pub capabilities: CapabilitySet,
+    /// Resource limits enforced on the wasmtime store and WASI stubs
+    pub limits: ResourceLimits,
     /// Environment variables
     pub env_vars: HashMap<String, String>,
 }
 
 impl Default for SandboxConfig {
     fn default() -> Self {
+        let limits = ResourceLimits::default();
         Self {
-            memory_limit: 256 * 1024 * 1024, // 256MB
-            timeout_secs: 30,
+            memory_limit: limits.max_memory,
+            timeout_secs: secs_from_ms(limits.max_time_ms),
             capabilities: CapabilitySet::default(),
+            limits,
             env_vars: HashMap::new(),
         }
     }
+}
+
+fn secs_from_ms(ms: u64) -> u64 {
+    (ms / 1000).max(1)
 }
 
 impl SandboxConfig {
     /// Set memory limit
     pub fn with_memory_limit(mut self, bytes: usize) -> Self {
         self.memory_limit = bytes;
+        self.limits.max_memory = bytes;
         self
     }
 
     /// Set timeout
     pub fn with_timeout_secs(mut self, secs: u64) -> Self {
         self.timeout_secs = secs;
+        self.limits.max_time_ms = secs.saturating_mul(1000);
+        self
+    }
+
+    /// Replace the capability set used by WASI host stubs.
+    pub fn with_capabilities(mut self, capabilities: CapabilitySet) -> Self {
+        self.capabilities = capabilities;
+        self
+    }
+
+    /// Replace resource limits and keep memory/timeout fields in sync.
+    pub fn with_resource_limits(mut self, limits: ResourceLimits) -> Self {
+        self.memory_limit = limits.max_memory;
+        self.timeout_secs = secs_from_ms(limits.max_time_ms);
+        self.limits = limits;
         self
     }
 }
@@ -171,6 +195,96 @@ struct SandboxState {
     /// Exit code communicated by `proc_exit` before the WASM trap fires.
     /// None if the module terminated via a trap rather than a clean exit.
     exit_code: Option<i32>,
+    capabilities: CapabilitySet,
+    stdout: String,
+    stderr: String,
+    syscalls: u64,
+    max_syscalls: u64,
+}
+
+const WASI_ESUCCESS: i32 = 0;
+const WASI_EBADF: i32 = 8;
+const WASI_EFAULT: i32 = 21;
+const WASI_NOSYS: i32 = 52;
+const WASI_NOTCAPABLE: i32 = 63;
+
+fn take_syscall(state: &mut SandboxState) -> i32 {
+    state.syscalls = state.syscalls.saturating_add(1);
+    if state.syscalls > state.max_syscalls {
+        WASI_NOSYS
+    } else {
+        WASI_ESUCCESS
+    }
+}
+
+fn require_cap(state: &SandboxState, cap: &str) -> i32 {
+    if state.capabilities.has(cap) {
+        WASI_ESUCCESS
+    } else {
+        WASI_NOTCAPABLE
+    }
+}
+
+fn guest_memory(caller: &mut wasmtime::Caller<'_, SandboxState>) -> Option<wasmtime::Memory> {
+    caller.get_export("memory")?.into_memory()
+}
+
+fn wasi_fd_write(
+    mut caller: wasmtime::Caller<'_, SandboxState>,
+    fd: i32,
+    iovs: i32,
+    iovs_len: i32,
+    nwritten_ptr: i32,
+) -> i32 {
+    {
+        let state = caller.data_mut();
+        let err = take_syscall(state);
+        if err != WASI_ESUCCESS {
+            return err;
+        }
+        let err = require_cap(state, "stdio");
+        if err != WASI_ESUCCESS {
+            return err;
+        }
+    }
+    if fd != 1 && fd != 2 {
+        return WASI_EBADF;
+    }
+    let Some(memory) = guest_memory(&mut caller) else {
+        return WASI_EBADF;
+    };
+    let data = memory.data(&caller);
+    let mut collected = Vec::new();
+    for i in 0..iovs_len {
+        let base = (iovs as usize).saturating_add((i as usize).saturating_mul(8));
+        if base.saturating_add(8) > data.len() {
+            return WASI_EFAULT;
+        }
+        let ptr = u32::from_le_bytes(data[base..base + 4].try_into().unwrap_or([0; 4])) as usize;
+        let len =
+            u32::from_le_bytes(data[base + 4..base + 8].try_into().unwrap_or([0; 4])) as usize;
+        if ptr.saturating_add(len) > data.len() {
+            return WASI_EFAULT;
+        }
+        collected.extend_from_slice(&data[ptr..ptr + len]);
+    }
+    let text = String::from_utf8_lossy(&collected);
+    {
+        let state = caller.data_mut();
+        if fd == 1 {
+            state.stdout.push_str(&text);
+        } else {
+            state.stderr.push_str(&text);
+        }
+    }
+    let total = collected.len() as u32;
+    let nptr = nwritten_ptr as usize;
+    let data = memory.data_mut(&mut caller);
+    if nptr.saturating_add(4) > data.len() {
+        return WASI_EFAULT;
+    }
+    data[nptr..nptr + 4].copy_from_slice(&total.to_le_bytes());
+    WASI_ESUCCESS
 }
 
 impl WasmSandbox {
@@ -182,9 +296,10 @@ impl WasmSandbox {
     pub fn new(config: SandboxConfig) -> Result<Self, SandboxError> {
         info!("Initializing WASM sandbox");
 
-        let engine_config = wasmtime::Config::new();
+        let mut engine_config = wasmtime::Config::new();
         // No epoch_interruption, no async_support — pure synchronous execution
         // with external timeout enforcement.
+        engine_config.max_wasm_stack(config.limits.max_stack_size);
 
         let engine = Engine::new(&engine_config).map_err(|e| {
             SandboxError::CompilationError(format!("Engine creation failed: {}", e))
@@ -198,6 +313,11 @@ impl WasmSandbox {
         let mut m = HashMap::new();
         m.insert("memory_limit", self.config.memory_limit as u64);
         m.insert("timeout_secs", self.config.timeout_secs);
+        m.insert("max_syscalls", self.config.limits.max_syscalls);
+        m.insert(
+            "max_open_files",
+            u64::from(self.config.limits.max_open_files),
+        );
         m
     }
 
@@ -220,8 +340,15 @@ impl WasmSandbox {
 
         // Clone what we need for the blocking closure
         let engine = self.engine.clone();
-        let memory_limit = self.config.memory_limit;
-        let timeout_duration = Duration::from_secs(self.config.timeout_secs);
+        let memory_limit = self.config.limits.max_memory.max(self.config.memory_limit);
+        let timeout_duration = Duration::from_millis(
+            self.config
+                .limits
+                .max_time_ms
+                .max(self.config.timeout_secs.saturating_mul(1000)),
+        );
+        let capabilities = self.config.capabilities.clone();
+        let max_syscalls = self.config.limits.max_syscalls;
 
         // Run the entire instantiation + execution on a blocking thread
         // so we can enforce timeout externally via tokio::time::timeout.
@@ -234,80 +361,154 @@ impl WasmSandbox {
                 SandboxState {
                     limits,
                     exit_code: None,
+                    capabilities,
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    syscalls: 0,
+                    max_syscalls,
                 },
             );
             store.limiter(|state| &mut state.limits);
 
-            // ── WASI stub linker ──────────────────────────────────────────
+            // ── WASI stub linker (ISSUE-015: capability + resource gated) ─
             let mut linker: wasmtime::Linker<SandboxState> = wasmtime::Linker::new(&engine);
 
-            // fd_write(fd, iovs, iovs_len, nwritten) -> errno
-            let _ = linker.func_wrap(
-                "wasi_snapshot_preview1",
-                "fd_write",
-                |_: wasmtime::Caller<'_, SandboxState>,
-                 _fd: i32,
-                 _iovs: i32,
-                 _iovs_len: i32,
-                 _nwritten: i32|
-                 -> i32 { 8 },
-            );
+            let _ = linker.func_wrap("wasi_snapshot_preview1", "fd_write", wasi_fd_write);
             let _ = linker.func_wrap(
                 "wasi_snapshot_preview1",
                 "fd_read",
-                |_: wasmtime::Caller<'_, SandboxState>,
+                |mut caller: wasmtime::Caller<'_, SandboxState>,
                  _fd: i32,
                  _iovs: i32,
                  _iovs_len: i32,
                  _nread: i32|
-                 -> i32 { 8 },
+                 -> i32 {
+                    let state = caller.data_mut();
+                    let err = take_syscall(state);
+                    if err != WASI_ESUCCESS {
+                        return err;
+                    }
+                    let err = require_cap(state, "stdio");
+                    if err != WASI_ESUCCESS {
+                        return err;
+                    }
+                    WASI_EBADF
+                },
             );
-            let _ = linker.func_wrap(
-                "wasi_snapshot_preview1",
-                "fd_close",
-                |_: wasmtime::Caller<'_, SandboxState>, _fd: i32| -> i32 { 8 },
-            );
+            let denied_fd = |mut caller: wasmtime::Caller<'_, SandboxState>, _fd: i32| -> i32 {
+                let state = caller.data_mut();
+                let err = take_syscall(state);
+                if err != WASI_ESUCCESS {
+                    return err;
+                }
+                let err = require_cap(state, "stdio");
+                if err != WASI_ESUCCESS {
+                    return err;
+                }
+                WASI_EBADF
+            };
+            let _ = linker.func_wrap("wasi_snapshot_preview1", "fd_close", denied_fd);
             let _ = linker.func_wrap(
                 "wasi_snapshot_preview1",
                 "fd_seek",
-                |_: wasmtime::Caller<'_, SandboxState>,
+                |mut caller: wasmtime::Caller<'_, SandboxState>,
                  _fd: i32,
                  _offset: i64,
                  _whence: i32,
                  _newoffset: i32|
-                 -> i32 { 8 },
+                 -> i32 {
+                    let state = caller.data_mut();
+                    let err = take_syscall(state);
+                    if err != WASI_ESUCCESS {
+                        return err;
+                    }
+                    let err = require_cap(state, "stdio");
+                    if err != WASI_ESUCCESS {
+                        return err;
+                    }
+                    WASI_EBADF
+                },
             );
             let _ = linker.func_wrap(
                 "wasi_snapshot_preview1",
                 "fd_fdstat_get",
-                |_: wasmtime::Caller<'_, SandboxState>, _fd: i32, _stat: i32| -> i32 { 8 },
+                |mut caller: wasmtime::Caller<'_, SandboxState>, _fd: i32, _stat: i32| -> i32 {
+                    let state = caller.data_mut();
+                    let err = take_syscall(state);
+                    if err != WASI_ESUCCESS {
+                        return err;
+                    }
+                    let err = require_cap(state, "stdio");
+                    if err != WASI_ESUCCESS {
+                        return err;
+                    }
+                    WASI_EBADF
+                },
             );
             let _ = linker.func_wrap(
                 "wasi_snapshot_preview1",
                 "fd_fdstat_set_flags",
-                |_: wasmtime::Caller<'_, SandboxState>, _fd: i32, _flags: i32| -> i32 { 8 },
+                |mut caller: wasmtime::Caller<'_, SandboxState>, _fd: i32, _flags: i32| -> i32 {
+                    let state = caller.data_mut();
+                    let err = take_syscall(state);
+                    if err != WASI_ESUCCESS {
+                        return err;
+                    }
+                    let err = require_cap(state, "stdio");
+                    if err != WASI_ESUCCESS {
+                        return err;
+                    }
+                    WASI_EBADF
+                },
             );
             let _ = linker.func_wrap(
                 "wasi_snapshot_preview1",
                 "fd_filestat_get",
-                |_: wasmtime::Caller<'_, SandboxState>, _fd: i32, _stat: i32| -> i32 { 8 },
+                |mut caller: wasmtime::Caller<'_, SandboxState>, _fd: i32, _stat: i32| -> i32 {
+                    let state = caller.data_mut();
+                    let err = take_syscall(state);
+                    if err != WASI_ESUCCESS {
+                        return err;
+                    }
+                    let err = require_cap(state, "stdio");
+                    if err != WASI_ESUCCESS {
+                        return err;
+                    }
+                    WASI_EBADF
+                },
             );
             let _ = linker.func_wrap(
                 "wasi_snapshot_preview1",
                 "fd_prestat_get",
-                |_: wasmtime::Caller<'_, SandboxState>, _fd: i32, _prestat: i32| -> i32 { 8 },
+                |mut caller: wasmtime::Caller<'_, SandboxState>, _fd: i32, _prestat: i32| -> i32 {
+                    let state = caller.data_mut();
+                    let err = take_syscall(state);
+                    if err != WASI_ESUCCESS {
+                        return err;
+                    }
+                    WASI_NOTCAPABLE
+                },
             );
             let _ = linker.func_wrap(
                 "wasi_snapshot_preview1",
                 "fd_prestat_dir_name",
-                |_: wasmtime::Caller<'_, SandboxState>, _fd: i32, _path: i32, _len: i32| -> i32 {
-                    8
+                |mut caller: wasmtime::Caller<'_, SandboxState>,
+                 _fd: i32,
+                 _path: i32,
+                 _len: i32|
+                 -> i32 {
+                    let state = caller.data_mut();
+                    let err = take_syscall(state);
+                    if err != WASI_ESUCCESS {
+                        return err;
+                    }
+                    WASI_NOTCAPABLE
                 },
             );
             let _ = linker.func_wrap(
                 "wasi_snapshot_preview1",
                 "path_open",
-                |_: wasmtime::Caller<'_, SandboxState>,
+                |mut caller: wasmtime::Caller<'_, SandboxState>,
                  _: i32,
                  _: i32,
                  _: i32,
@@ -317,61 +518,164 @@ impl WasmSandbox {
                  _: i64,
                  _: i32,
                  _: i32|
-                 -> i32 { 8 },
+                 -> i32 {
+                    let state = caller.data_mut();
+                    let err = take_syscall(state);
+                    if err != WASI_ESUCCESS {
+                        return err;
+                    }
+                    if state.capabilities.has("filesystem-read")
+                        || state.capabilities.has("filesystem-write")
+                    {
+                        return WASI_NOSYS;
+                    }
+                    WASI_NOTCAPABLE
+                },
             );
             let _ = linker.func_wrap(
                 "wasi_snapshot_preview1",
                 "environ_sizes_get",
-                |_: wasmtime::Caller<'_, SandboxState>, _count: i32, _size: i32| -> i32 { 0 },
+                |mut caller: wasmtime::Caller<'_, SandboxState>, _count: i32, _size: i32| -> i32 {
+                    let err = take_syscall(caller.data_mut());
+                    if err != WASI_ESUCCESS {
+                        return err;
+                    }
+                    WASI_ESUCCESS
+                },
             );
             let _ = linker.func_wrap(
                 "wasi_snapshot_preview1",
                 "environ_get",
-                |_: wasmtime::Caller<'_, SandboxState>, _environ: i32, _buf: i32| -> i32 { 0 },
+                |mut caller: wasmtime::Caller<'_, SandboxState>, _environ: i32, _buf: i32| -> i32 {
+                    let err = take_syscall(caller.data_mut());
+                    if err != WASI_ESUCCESS {
+                        return err;
+                    }
+                    WASI_ESUCCESS
+                },
             );
             let _ = linker.func_wrap(
                 "wasi_snapshot_preview1",
                 "args_sizes_get",
-                |_: wasmtime::Caller<'_, SandboxState>, _argc: i32, _size: i32| -> i32 { 0 },
+                |mut caller: wasmtime::Caller<'_, SandboxState>, _argc: i32, _size: i32| -> i32 {
+                    let err = take_syscall(caller.data_mut());
+                    if err != WASI_ESUCCESS {
+                        return err;
+                    }
+                    WASI_ESUCCESS
+                },
             );
             let _ = linker.func_wrap(
                 "wasi_snapshot_preview1",
                 "args_get",
-                |_: wasmtime::Caller<'_, SandboxState>, _argv: i32, _buf: i32| -> i32 { 0 },
+                |mut caller: wasmtime::Caller<'_, SandboxState>, _argv: i32, _buf: i32| -> i32 {
+                    let err = take_syscall(caller.data_mut());
+                    if err != WASI_ESUCCESS {
+                        return err;
+                    }
+                    WASI_ESUCCESS
+                },
             );
             let _ = linker.func_wrap(
                 "wasi_snapshot_preview1",
                 "clock_time_get",
-                |_: wasmtime::Caller<'_, SandboxState>, _id: i32, _prec: i64, _time: i32| -> i32 {
-                    52
+                |mut caller: wasmtime::Caller<'_, SandboxState>,
+                 _id: i32,
+                 _prec: i64,
+                 time_ptr: i32|
+                 -> i32 {
+                    {
+                        let state = caller.data_mut();
+                        let err = take_syscall(state);
+                        if err != WASI_ESUCCESS {
+                            return err;
+                        }
+                        let err = require_cap(state, "clock");
+                        if err != WASI_ESUCCESS {
+                            return err;
+                        }
+                    }
+                    let Some(memory) = guest_memory(&mut caller) else {
+                        return WASI_EBADF;
+                    };
+                    let nanos = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_nanos() as u64)
+                        .unwrap_or(0);
+                    let ptr = time_ptr as usize;
+                    let data = memory.data_mut(&mut caller);
+                    if ptr.saturating_add(8) > data.len() {
+                        return WASI_EFAULT;
+                    }
+                    data[ptr..ptr + 8].copy_from_slice(&nanos.to_le_bytes());
+                    WASI_ESUCCESS
                 },
             );
             let _ = linker.func_wrap(
                 "wasi_snapshot_preview1",
                 "clock_res_get",
-                |_: wasmtime::Caller<'_, SandboxState>, _id: i32, _res: i32| -> i32 { 52 },
+                |mut caller: wasmtime::Caller<'_, SandboxState>, _id: i32, _res: i32| -> i32 {
+                    let state = caller.data_mut();
+                    let err = take_syscall(state);
+                    if err != WASI_ESUCCESS {
+                        return err;
+                    }
+                    require_cap(state, "clock")
+                },
             );
             let _ = linker.func_wrap(
                 "wasi_snapshot_preview1",
                 "random_get",
-                |_: wasmtime::Caller<'_, SandboxState>, _buf: i32, _len: i32| -> i32 { 52 },
+                |mut caller: wasmtime::Caller<'_, SandboxState>, buf: i32, len: i32| -> i32 {
+                    {
+                        let state = caller.data_mut();
+                        let err = take_syscall(state);
+                        if err != WASI_ESUCCESS {
+                            return err;
+                        }
+                        let err = require_cap(state, "random");
+                        if err != WASI_ESUCCESS {
+                            return err;
+                        }
+                    }
+                    let Some(memory) = guest_memory(&mut caller) else {
+                        return WASI_EBADF;
+                    };
+                    let ptr = buf as usize;
+                    let n = (len.max(0)) as usize;
+                    let data = memory.data_mut(&mut caller);
+                    if ptr.saturating_add(n) > data.len() {
+                        return WASI_EFAULT;
+                    }
+                    for b in data[ptr..ptr + n].iter_mut() {
+                        *b = 0xA5;
+                    }
+                    WASI_ESUCCESS
+                },
             );
             let _ = linker.func_wrap(
                 "wasi_snapshot_preview1",
                 "sched_yield",
-                |_: wasmtime::Caller<'_, SandboxState>| -> i32 { 0 },
+                |mut caller: wasmtime::Caller<'_, SandboxState>| -> i32 {
+                    take_syscall(caller.data_mut())
+                },
             );
             let _ = linker.func_wrap(
                 "wasi_snapshot_preview1",
                 "poll_oneoff",
-                |_: wasmtime::Caller<'_, SandboxState>,
+                |mut caller: wasmtime::Caller<'_, SandboxState>,
                  _in: i32,
                  _out: i32,
                  _nsubs: i32,
                  _nevents: i32|
-                 -> i32 { 52 },
+                 -> i32 {
+                    let err = take_syscall(caller.data_mut());
+                    if err != WASI_ESUCCESS {
+                        return err;
+                    }
+                    WASI_NOSYS
+                },
             );
-            // proc_exit: record exit code and bail — MUST NOT call process::exit.
             let _ = linker.func_wrap(
                 "wasi_snapshot_preview1",
                 "proc_exit",
@@ -410,8 +714,8 @@ impl WasmSandbox {
                 Ok(exit_code) => Ok(SandboxResult {
                     success: exit_code == 0,
                     exit_code,
-                    stdout: String::new(),
-                    stderr: String::new(),
+                    stdout: store.data().stdout.clone(),
+                    stderr: store.data().stderr.clone(),
                     resource_usage: ResourceUsage {
                         peak_memory,
                         cpu_time_ms: 0,
@@ -426,8 +730,8 @@ impl WasmSandbox {
                     Ok(SandboxResult {
                         success: code == 0,
                         exit_code: code,
-                        stdout: String::new(),
-                        stderr: String::new(),
+                        stdout: store.data().stdout.clone(),
+                        stderr: store.data().stderr.clone(),
                         resource_usage: ResourceUsage {
                             peak_memory,
                             cpu_time_ms: 0,
@@ -459,10 +763,7 @@ impl WasmSandbox {
                 )))
             }
             Err(_elapsed) => {
-                warn!(
-                    "WASM execution timed out (limit: {}s)",
-                    self.config.timeout_secs
-                );
+                warn!("WASM execution timed out (limit: {:?})", timeout_duration);
                 Err(SandboxError::Timeout(timeout_duration))
             }
         }
@@ -491,6 +792,8 @@ mod tests {
 
         assert_eq!(config.memory_limit, 1024);
         assert_eq!(config.timeout_secs, 10);
+        assert_eq!(config.limits.max_memory, 1024);
+        assert_eq!(config.limits.max_time_ms, 10_000);
     }
 
     #[test]
@@ -499,5 +802,50 @@ mod tests {
 
         assert_eq!(input.package_name, "test-pkg");
         assert_eq!(input.ecosystem, "npm");
+    }
+
+    fn fd_write_wat() -> &'static str {
+        r#"(module
+            (import "wasi_snapshot_preview1" "fd_write"
+                (func $fd_write (param i32 i32 i32 i32) (result i32)))
+            (memory (export "memory") 1)
+            (data (i32.const 8) "hi")
+            (func (export "_start") (result i32)
+                (i32.store (i32.const 0) (i32.const 8))
+                (i32.store (i32.const 4) (i32.const 2))
+                (drop (call $fd_write
+                    (i32.const 1)
+                    (i32.const 0)
+                    (i32.const 1)
+                    (i32.const 16)))
+                (i32.const 0)
+            )
+        )"#
+    }
+
+    #[tokio::test]
+    async fn test_fd_write_captures_stdout_when_stdio_granted() {
+        let wasm = wat::parse_str(fd_write_wat()).expect("wat");
+        let sandbox = WasmSandbox::new(SandboxConfig::default()).expect("sandbox");
+        let result = sandbox
+            .run(&wasm, &SandboxInput::new("t", "1", "wasm"))
+            .await
+            .expect("run");
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(result.stdout, "hi");
+    }
+
+    #[tokio::test]
+    async fn test_fd_write_denied_without_stdio() {
+        let wasm = wat::parse_str(fd_write_wat()).expect("wat");
+        let sandbox =
+            WasmSandbox::new(SandboxConfig::default().with_capabilities(CapabilitySet::empty()))
+                .expect("sandbox");
+        let result = sandbox
+            .run(&wasm, &SandboxInput::new("t", "1", "wasm"))
+            .await
+            .expect("run");
+        assert_eq!(result.exit_code, 0);
+        assert!(result.stdout.is_empty());
     }
 }

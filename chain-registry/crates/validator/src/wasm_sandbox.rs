@@ -100,9 +100,12 @@ pub async fn run_in_wasm(
 
     // ── Configure and Instantiate WasmSandbox ──
     let memory_limit = (config.memory_mb as usize) * 1024 * 1024;
+    let mut limits = wasm_sandbox_crate::ResourceLimits::strict();
+    limits.max_memory = memory_limit;
+    limits.max_time_ms = config.timeout_secs.saturating_mul(1000);
     let wasm_config = wasm_sandbox_crate::SandboxConfig::default()
-        .with_memory_limit(memory_limit)
-        .with_timeout_secs(config.timeout_secs);
+        .with_resource_limits(limits)
+        .with_capabilities(wasm_sandbox_crate::CapabilitySet::validator());
 
     let sandbox = match wasm_sandbox_crate::WasmSandbox::new(wasm_config) {
         Ok(sb) => sb,
