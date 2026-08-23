@@ -12,8 +12,9 @@ service RegistryService {
     
     // Submit a signed package for pending validation.
     // Legacy ZK attestation fields below are retained for wire compatibility
-    // and ignored. Publisher identity uses the dual-domain fields at 18–24;
-    // validator-side evidence remains the qualification authority.
+    // and must be empty/zero; any other value is rejected. Publisher identity
+    // uses the dual-domain fields at 18–24; validator-side evidence remains
+    // the qualification authority.
     rpc SubmitPackage(SubmitRequest) returns (SubmitResponse);
 }
 
@@ -54,9 +55,10 @@ message SubmitRequest {
     string publisher_address = 16;
     string publisher_pubkey = 6;
     string signature = 7;
-    // Deprecated/ignored as of the Phase 0 safety freeze. Legacy ZK package
-    // attestations encoded publisher-selected analysis values and must never
-    // affect admission or qualification. Fields remain for wire compatibility.
+    // Retired as of the Phase 0 safety freeze (ISSUE-011 / CR-02). Legacy ZK
+    // package attestations encoded publisher-selected analysis values. Fields
+    // remain for wire compatibility but must be empty/zero; the node rejects
+    // any other values so leftover placeholder proofs cannot be submitted.
     bytes publisher_attestation_proof = 8;
     uint32 claimed_static_analysis_score = 9;
     bool claimed_sandbox_safe = 10;
