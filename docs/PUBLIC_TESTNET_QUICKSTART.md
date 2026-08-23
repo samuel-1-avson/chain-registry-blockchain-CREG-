@@ -25,9 +25,9 @@ One-page guide for **publishers**, **developers**, and **validators** joining th
 
 | Contract | Address |
 |----------|---------|
-| Staking | `0xf28C63C4Aafd27025E535Ab9ab7B4daC18C96Bc2` |
-| CREG Token | `0x97c21d46B3eac604e92E907D54aA92eEc0Af550b` |
-| Registry | `0x3aCfF05d00AC199412a94326eD8aA874aaA3596c` |
+| Staking | `0xE906ae140987CC2cA711dDa4ee43574d3aDc31b7` |
+| CREG Token | `0xB326dB1C6e457f4AdfBb11f17FDc145ED585b288` |
+| Registry | `0xF232cC6F5C6EfC74C7517B209D15baBd57b817eE` |
 
 Minimum stakes (from chain spec): **1 tCREG** publisher, **100 tCREG** validator.
 
@@ -55,7 +55,7 @@ Use a **separate Ethereum wallet** (not the Ed25519 key file):
 
 ```bash
 export SEPOLIA_RPC_URL=https://sepolia.infura.io/v3/YOUR_KEY
-export CREG_STAKING_ADDR=0xf28C63C4Aafd27025E535Ab9ab7B4daC18C96Bc2
+export CREG_STAKING_ADDR=0xE906ae140987CC2cA711dDa4ee43574d3aDc31b7
 
 # Stake command (approve + stakeAsPublisher)
 creg stake --amount 1 --role publisher \
