@@ -8,3 +8,7 @@
 - **Migration implications:** legacy package records lack this claim and remain incomplete.
 - **Rejected alternatives:** pseudo-SBOM or empty DDC inventory as compliance proof.
 - **Revisit conditions:** ecosystem conformance corpus demonstrates feasible coverage.
+- **In-repo slice (2026-08-23):** first-party `Cargo.lock` inventory and
+  lockfile-bound provenance (`creg supply-chain check`, `creg sbom --workspace`)
+  exist and must not be labeled SLSA. Submitted-package provenance and
+  independent builders remain operational.
