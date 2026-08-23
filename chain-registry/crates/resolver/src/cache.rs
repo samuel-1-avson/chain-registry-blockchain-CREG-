@@ -70,9 +70,10 @@ pub fn set(id: &PackageId, verdict: &TrustVerdict) -> Result<()> {
     Ok(())
 }
 
-/// Clear all entries from the local cache.
+/// Clear all entries from the local cache and the install freshness journal.
 pub fn clear() -> Result<()> {
     db()?.clear()?;
+    crate::freshness::clear_default_store()?;
     Ok(())
 }
 

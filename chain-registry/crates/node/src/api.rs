@@ -146,6 +146,10 @@ fn public_routes(sse_bus: EventBus, ws_bus: EventBus) -> Router<SharedState> {
             get(get_transparency_consistency_proof),
         )
         .route(
+            "/v1/public/transparency/:log_id/latest-event",
+            get(get_transparency_latest_event),
+        )
+        .route(
             "/v1/public/packages/:canonical/intelligence",
             get(get_package_intelligence),
         )
@@ -326,6 +330,10 @@ fn legacy_public_routes(sse_bus: EventBus, ws_bus: EventBus) -> Router<SharedSta
         .route(
             "/v1/transparency/:log_id/consistency/:tree_size",
             get(get_transparency_consistency_proof),
+        )
+        .route(
+            "/v1/transparency/:log_id/latest-event",
+            get(get_transparency_latest_event),
         )
         .route(
             "/v1/packages/:canonical/intelligence",
@@ -2498,6 +2506,55 @@ async fn get_transparency_consistency_proof(
     {
         Ok(proof) => Json(proof).into_response(),
         Err(error) => not_found(error.to_string()),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct TransparencySubjectQuery {
+    #[serde(default)]
+    subject: String,
+}
+
+// Subject lookup returns an unsigned head plus inclusion. Clients must still
+// require independently distributed witnessed SignedTreeHeads before install.
+async fn get_transparency_latest_event(
+    State(state): State<SharedState>,
+    Path(log_id): Path<String>,
+    Query(query): Query<TransparencySubjectQuery>,
+) -> Response {
+    if query.subject.trim().is_empty() {
+        return bad_request("query parameter subject is required");
+    }
+    let state = state.read().await;
+    match state
+        .chain
+        .transparency_latest_event_for_subject(&log_id, &query.subject)
+    {
+        Ok(Some(event)) => {
+            match state
+                .chain
+                .transparency_inclusion_proof(&log_id, event.sequence)
+            {
+                Ok(inclusion) => match state.chain.transparency_tree_head(&log_id) {
+                    Ok(Some(head)) => Json(serde_json::json!({
+                        "event": event,
+                        "inclusion": inclusion,
+                        "head": head,
+                        "install_eligible": false,
+                        "note": "Unsigned head for monitoring only. Clients must require a witnessed SignedTreeHead before install.",
+                    }))
+                    .into_response(),
+                    Ok(None) => not_found(format!("No transparency tree head for log: {log_id}")),
+                    Err(error) => server_err(error.to_string()),
+                },
+                Err(error) => not_found(error.to_string()),
+            }
+        }
+        Ok(None) => not_found(format!(
+            "No transparency event for subject '{}' in log {log_id}",
+            query.subject
+        )),
+        Err(error) => server_err(error.to_string()),
     }
 }
 
@@ -5850,6 +5907,72 @@ mod tests {
         let body_json: serde_json::Value = serde_json::from_slice(&body)?;
         assert_eq!(body_json["result"], "0x0");
         assert_eq!(body_json["id"], 1);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn transparency_latest_event_is_unsigned_and_not_install_eligible() -> anyhow::Result<()>
+    {
+        let (state, _tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
+        {
+            let state = state.read().await;
+            state.chain.append_transparency_event(
+                "creg-test-log",
+                "package-finalized",
+                "npm:log-test@1.0.0",
+                &common::sha256_hex(b"first payload"),
+                "test-fixture",
+                "2026-07-14T00:00:00Z",
+            )?;
+            state.chain.append_transparency_event(
+                "creg-test-log",
+                "revocation",
+                "npm:log-test@1.0.0",
+                &common::sha256_hex(b"second payload"),
+                "test-fixture",
+                "2026-07-14T00:01:00Z",
+            )?;
+        }
+        let event_bus = new_event_bus();
+        let app = router(
+            state,
+            event_bus,
+            RateLimiter::new(RateLimitConfig::default()),
+            AttestationStore::new(),
+            crate::config::CorsConfig::default(),
+            tx_sender,
+            p2p_handle,
+        );
+
+        let missing_subject = app
+            .clone()
+            .oneshot(
+                Request::get("/v1/public/transparency/creg-test-log/latest-event")
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(missing_subject.status(), StatusCode::BAD_REQUEST);
+
+        let response = app
+            .oneshot(
+                Request::get(
+                    "/v1/public/transparency/creg-test-log/latest-event?subject=npm%3Alog-test%401.0.0",
+                )
+                .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await?;
+        let body_json: serde_json::Value = serde_json::from_slice(&body)?;
+        assert_eq!(body_json["install_eligible"], false);
+        assert_eq!(body_json["event"]["kind"], "revocation");
+        assert_eq!(body_json["event"]["sequence"], 1);
+        assert!(body_json["head"]["signature"].is_null());
+        assert!(body_json["note"]
+            .as_str()
+            .unwrap_or("")
+            .contains("Unsigned head"));
 
         Ok(())
     }
