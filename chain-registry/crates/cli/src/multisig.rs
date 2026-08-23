@@ -419,7 +419,7 @@ pub async fn submit(
         ..Default::default()
     };
 
-    let url = format!("{}/v1/publisher/packages", base.trim_end_matches('/'));
+    let url = crate::publish::publisher_packages_url(Some(&base));
     let resp = reqwest::Client::new()
         .post(&url)
         .json(&request)
@@ -528,5 +528,13 @@ mod tests {
         assert!(ensure_legacy_multisig_allowed_for(&[], false).is_err());
         assert!(ensure_legacy_multisig_allowed_for(&[], true).is_ok());
         assert!(ensure_legacy_multisig_allowed_for(&["CREG_CHAIN_ID"], true).is_err());
+    }
+
+    #[test]
+    fn submit_uses_grouped_publisher_packages_route() {
+        assert_eq!(
+            crate::publish::publisher_packages_url(Some("http://localhost:8080/")),
+            "http://localhost:8080/v1/publisher/packages"
+        );
     }
 }

@@ -284,6 +284,7 @@ mod tests {
             evidence_phase: None,
             block_phase: None,
             chain_status: None,
+            publisher: None,
         }
     }
 

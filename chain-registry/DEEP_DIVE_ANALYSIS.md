@@ -392,13 +392,13 @@ Global flags: `--unverified`, `CREG_NODE_URL`, `CREG_GRPC_URL`, `--output json`.
 - **Description**: `batchSubmitPackages` calls `registry.submitPackageFor(msg.sender, ...)` so the staked publisher is recorded; relay must be governance-allowlisted via `setPackageSubmitRelay`.
 - **Fix**: Forge tests `test_batchSubmitPackagesViaAuthorizedRelay`, `test_batchSubmitPackagesRejectsUnstakedPublisher`, `test_batchSubmitPackagesRejectsWithoutRelayAllowlist`; documented in `contracts/README.md`.
 
-### ISSUE-004: Bridge panics on malformed RPC URL at runtime
+### ISSUE-004: Bridge panics on malformed RPC URL at runtime — **MITIGATED** (2026-08-23)
 
-- **Severity**: Critical
-- **File**: `crates/node/src/bridge.rs:85`
-- **Description**: `rpc_url.parse().expect("CREG_ETH_RPC must be a valid URL")` inside the bridge retry loop will panic the task/thread on typoed env vars.
-- **Impact**: Node process crash or bridge task exit; L1 anchoring halts silently after restarts with bad config.
-- **Recommended Fix**: Parse URL once at startup in `config.rs` and propagate `Result`; bridge should log and disable itself like other subsystems.
+- **Severity**: Critical (mitigated)
+- **File**: `crates/node/src/config.rs`, `crates/node/src/main.rs`, `crates/node/src/bridge.rs`
+- **Description**: `rpc_url.parse().expect("CREG_ETH_RPC must be a valid URL")` used to panic the bridge task on a typoed env var.
+- **Fix**: The bridge no longer panics; invalid URLs are retried only on the explicitly gated legacy research path. `NodeConfig::validate()` now rejects non-http(s) / unparseable `CREG_ETH_RPC` values, and `main.rs` treats `CREG_ETH_RPC is invalid` as a hard startup error. Tests: `malformed_eth_rpc_url_is_a_hard_config_error`, `default_eth_rpc_url_is_accepted`.
+- **Residual**: Do not re-enable legacy checkpoint research. Production L1 anchoring remains witnessed-log / Registry finalize, not this bridge.
 
 ---
 
@@ -521,45 +521,42 @@ Global flags: `--unverified`, `CREG_NODE_URL`, `CREG_GRPC_URL`, `--output json`.
 
 ### 4.4 Low Severity
 
-### ISSUE-019: Multisig submit uses legacy REST path
+### ISSUE-019: Multisig submit uses legacy REST path — **MITIGATED** (2026-08-23)
 
-- **Severity**: Low
-- **File**: `crates/cli/src/multisig.rs:359`
-- **Description**: Posts to `/v1/packages` instead of `/v1/publisher/packages`.
-- **Impact**: Both routes call same handler today (`api.rs:203`); future ACL divergence could break multisig.
-- **Recommended Fix**: Align with `publish.rs` URL helper.
+- **Severity**: Low (mitigated)
+- **File**: `crates/cli/src/multisig.rs`, `crates/cli/src/publish.rs`
+- **Description**: Multisig submit historically posted to `/v1/packages` instead of the grouped publisher route.
+- **Fix**: Submit uses `publish::publisher_packages_url` (`/v1/publisher/packages`). Regression: `submit_uses_grouped_publisher_packages_route`.
 
-### ISSUE-020: install.rs policy omits publisher in evaluate()
+### ISSUE-020: install.rs policy omits publisher in evaluate() — **MITIGATED** (2026-08-23)
 
-- **Severity**: Low
-- **File**: `crates/cli/src/install.rs:63`
-- **Description**: Passes empty publisher string to policy evaluation.
-- **Impact**: Publisher allow/deny rules in `policy.toml` never apply on install.
-- **Recommended Fix**: Plumb publisher from resolver verdict record.
+- **Severity**: Low (mitigated)
+- **File**: `crates/cli/src/install.rs`, `crates/cli/src/policy.rs`, `crates/common/src/verdict.rs`, `crates/resolver/src/chain_client.rs`
+- **Description**: Install passed an empty publisher string, so `allowed_publishers` in `policy.toml` never applied.
+- **Fix**: REST package responses map `publisher` onto `TrustVerdict`. gRPC success overlays REST to fill it. `creg install` passes that identity into `PolicyFile::evaluate`. A non-empty allow-list with a missing publisher **fails closed**. Tests: `empty_publisher_fails_closed_when_allowlist_configured`, `matching_publisher_prefix_is_allowed`, `non_matching_publisher_is_blocked`.
+- **Residual**: gRPC `GetVersionResponse` still has no publisher field; overlay depends on REST. Legacy cache entries without publisher also fail closed when an allow-list is set.
 
-### ISSUE-021: chain_store publisher_rotation_nonce O(n) scan
+### ISSUE-021: chain_store publisher_rotation_nonce O(n) scan — **MITIGATED** (2026-08-23)
 
-- **Severity**: Low
-- **File**: `crates/node/src/chain_store.rs:388-407`
-- **Description**: Linear scan of blocks for rotation nonce lookup.
-- **Impact**: Performance degradation at high chain height.
-- **Recommended Fix**: Secondary index CF keyed by `(publisher, nonce)`.
+- **Severity**: Low (mitigated)
+- **File**: `crates/node/src/chain_store.rs`
+- **Description**: Linear reverse scan of every block for rotation nonce / cooldown lookup.
+- **Fix**: `publisher_rotation` RocksDB column family, written on `RotatePublisherKey` insert and cleared+replayed in `rebuild_package_index`. Empty CF on upgrade scans once then persists (including a nonce-0 sentinel). API remains `Option<u64>` with `Some(0)` meaning no rotation recorded. Test: `publisher_rotation_index_is_o1_and_survives_rebuild_and_cf_miss`.
 
-### ISSUE-022: DoubleSign slashing evidence placeholders
+### ISSUE-022: DoubleSign slashing evidence placeholders — **MITIGATED** (2026-08-23)
 
-- **Severity**: Low
-- **File**: `crates/zk-validator/src/slashing.rs:510-533`
-- **Description**: Monitor evidence uses placeholder coordinates and `validator_privkey: "HIDDEN"`.
-- **Impact**: Off-chain evidence export incomplete for slashing pipeline until finalized.
-- **Recommended Fix**: Populate from vote gossip store with redaction policy.
+- **Severity**: Low (mitigated)
+- **File**: `crates/zk-validator/src/slashing.rs`
+- **Description**: Monitor evidence used placeholder coordinates and `validator_privkey: "HIDDEN"` without encoding the gossip signatures.
+- **Fix**: Ed25519 signatures are split as 32-byte R → `r_x` and 32-byte S → `s`. `validator_pubkey_x` is the vote pubkey; `validator_pubkey_y` stays `"0"` (compressed Ed25519). Private keys stay redacted (`HIDDEN`). Test: `test_double_sign_monitor`.
+- **Residual**: Off-chain evidence export only. This is not L1 `ZKSlashingVerifier` deploy.
 
-### ISSUE-023: advanced.rs treats missing sandbox as safe for verify
+### ISSUE-023: advanced.rs treats missing sandbox as safe for verify — **MITIGATED** (2026-08-23)
 
-- **Severity**: Low
-- **File**: `crates/cli/src/advanced.rs:329-332`
-- **Description**: ZK verify path sets sandbox unavailable to `true`.
-- **Impact**: Local CLI verification could pass when sandbox engine missing.
-- **Recommended Fix**: Mirror validator fail-closed semantics.
+- **Severity**: Low (mitigated)
+- **File**: `crates/cli/src/advanced.rs`
+- **Description**: ZK verify path used to treat a missing sandbox engine as `sandbox_safe: true`.
+- **Fix**: `sandbox_declared_safe(Err(_))` returns `false` and logs UNSAFE. Test: `sandbox_unavailable_is_unsafe_not_placeholder_true`.
 
 ### ISSUE-024: Validator set sync disabled when staking address invalid — **MITIGATED** (2026-08-23)
 
@@ -569,13 +566,12 @@ Global flags: `--unverified`, `CREG_NODE_URL`, `CREG_GRPC_URL`, `--output json`.
 - **Fix**: Malformed addresses fail startup for every node. `CREG_IS_VALIDATOR=true` also refuses unset/zero staking so a validator cannot boot in static-spec mode. Observers may still omit staking (sync stays disabled). Compose `docker-compose.validator.yml` already requires `TESTNET_STAKING_ADDR`; k8s validator probes document that a missing address never yields a running pod.
 - **Residual**: Unset staking on a non-validator still uses the spec set. Deployed Sepolia membership is unchanged.
 
-### ISSUE-025: Shamir gf_div silent zero on invalid denominator
+### ISSUE-025: Shamir gf_div silent zero on invalid denominator — **MITIGATED** (2026-08-23)
 
-- **Severity**: Low
-- **File**: `crates/threshold-encryption/src/shamir.rs:202-204`
-- **Description**: Division by zero in GF(2^8) returns 0 instead of error.
-- **Impact**: Corrupted secret reconstruction if duplicate share indices are supplied.
-- **Recommended Fix**: Return `Err` on `b == 0`; validate unique share indices at split time.
+- **Severity**: Low (mitigated)
+- **File**: `crates/threshold-encryption/src/shamir.rs`
+- **Description**: Division by zero in GF(2^8) returned 0, so duplicate share indices could reconstruct garbage.
+- **Fix**: `gf_div` returns `Err(InvalidShare)` when `b == 0`. Reconstruction rejects index 0, duplicate indices, and mismatched share lengths, and propagates Lagrange division errors. Tests: `test_gf_arithmetic`, `duplicate_share_indices_are_rejected`, `share_index_zero_is_rejected`.
 
 ---
 
@@ -599,7 +595,7 @@ Global flags: `--unverified`, `CREG_NODE_URL`, `CREG_GRPC_URL`, `--output json`.
 
 ### 5.3 Priority 3 — Performance & Scalability
 
-1. Index publisher rotation nonces (ISSUE-021).
+1. ~~Index publisher rotation nonces (ISSUE-021).~~ Done — `publisher_rotation` CF with lazy backfill.
 2. Parallelize validator pipeline per-package tasks with backpressure metrics.
 3. Batch L1 submissions with calldata compression; monitor bridge gas on Sepolia.
 4. Remote RocksDB/compaction tuning for indexer lag (`CREG_INDEXER_POLL_INTERVAL_SECS`).

@@ -17,7 +17,8 @@
   at `5868401` (exit 0, including sidecar 2/2), `cargo fmt --all -- --check`,
   and pinned Foundry v1.7.1 `forge test` (129/129) pass locally. Remote GitHub
   Actions is deferred until the billing period resets; do not raise the
-  spending limit. Document regeneration remains.
+  spending limit. PDF regeneration is blocked in this checkout (Arena pipeline
+  absent); do not commit `docs/document-pdfs/`.
 - **Network posture:** `chain-spec.sepolia.json` lists four coordinated
   validators (`validator-1`…`validator-4`) and empty bootnodes. That is the
   specified public-alpha topology, not a live multi-operator network and not
@@ -44,7 +45,7 @@
 | 4 | **VAL-INDEPENDENCE** | blocked externally | Independent validators and bootnodes | Recruit and verify separately controlled operators/keys/infrastructure; a four-validator coordinated spec must not be represented as Byzantine-fault-tolerant. |
 | 5 | **SPEC-ROTATE** | superseded | Repair signed Sepolia specification | Fresh-genesis candidate recorded 2026-08-01/02 in `chain-spec.sepolia.json` (genesis 2026-08-02). Remaining work is independent verification and public activation, not another in-repo rotate. |
 | 6 | **SEC-401** | open | External security audit | Scope: [SEC-401-AUDIT-SCOPE.md](./SEC-401-AUDIT-SCOPE.md). Candidate freeze: `v0.4.3-testnet` (`3eb3a23…`). Vendor, start date, and signed findings remain TBD. Cut a later tag only if protocol diffs land after VERIFY-401. |
-| 7 | **DOC-RELEASE** | active | Publish synchronized protocol documents | Public README/PUBLIC/install examples now pin `v0.4.3-testnet`. Still regenerate workflow/whitepaper PDFs and refresh manifest hashes. |
+| 7 | **DOC-RELEASE** | blocked in this checkout | Publish synchronized protocol documents | Public README/PUBLIC/install examples pin `v0.4.3-testnet`. PDF regen lives in the Contribution Arena `generate:document-pdfs` pipeline, which is **not present** in this workspace (no Arena `package.json`). Untracked `docs/document-pdfs/` must not be committed. Do not treat Arena launch as protocol work. |
 | 8 | **TESTNET-RESUME** | gated | Resume public fleet only after operator gates | Use `testnet/gcp/resume-testnet-hosting.ps1` and `hosting-301-verify.ps1` only after independent validators, checkpoint, trust, and rehearsal sign-offs. |
 
 ---
@@ -53,7 +54,7 @@
 
 | # | ID | Status | Task | Acceptance |
 |---|-----|--------|------|------------|
-| 8 | **EIP712-401** | active | Epoch-bound contract signatures | Finish validator-set epoch binding for verdict and admission signatures, adversarial replay cases, and contract review. |
+| 8 | **EIP712-401** | in-repo complete; review/redeploy open | Epoch-bound contract signatures | Solidity `PackageVerdict` / Staking admission bind `validatorSetEpoch`. Rust `consensus_admission.rs` fetches the live epoch, signs it, and aborts the tick on RPC failure or mid-tick epoch change. Local Foundry v1.7.1 129/129. Remaining: independent contract review, Sepolia ABI/bytecode upgrade, remote Contract CI after billing reset. |
 | 9 | **ARCHIVE-401** | repository complete; ops open | Authority evidence resource controls | Exercise pressure GC/restore; add capacity alerts, shared-filesystem coordination decision, backup, and legal-hold policy. |
 | 10 | **BRIDGE-301** | open | L1 bridge soak | `CREG_BRIDGE_KEY` on validator; batch observed or documented skip + alert. |
 | 11 | **SOAK-301** | open | Incentive/load soak | Run [testnet/SOAK_TEST.md](../chain-registry/testnet/SOAK_TEST.md) and availability/DR drills. |
@@ -102,6 +103,15 @@
 | ISSUE-014 | 2026-08-23 | Spec `threshold_encryption` now fail-closes; Sepolia flag stays false until share collection ships |
 | ISSUE-018 | 2026-08-23 | Appeal publisher/panelist payouts are pull-payment; not yet redeployed on Sepolia |
 | ISSUE-024 | 2026-08-23 | Validators refuse missing/invalid `CREG_STAKING_ADDR`; no silent static-set fallback |
+| ISSUE-019 | 2026-08-23 | Multisig submit uses `publisher_packages_url` (`/v1/publisher/packages`) |
+| ISSUE-020 | 2026-08-23 | Install policy evaluates REST/gRPC-overlay publisher; empty identity fail-closes on allow-list |
+| ISSUE-023 | 2026-08-23 | CLI advanced sandbox miss is UNSAFE (`sandbox_declared_safe(Err) -> false`) |
+| ISSUE-004 | 2026-08-23 | Malformed `CREG_ETH_RPC` is a hard startup error; bridge no longer panics on parse |
+| ISSUE-025 | 2026-08-23 | Shamir `gf_div` errors on zero divisor; reconstruction rejects dup/index-0 shares |
+| ISSUE-021 | 2026-08-23 | Publisher rotation nonce/cooldown uses `publisher_rotation` CF with lazy backfill |
+| ISSUE-022 | 2026-08-23 | Double-sign evidence encodes Ed25519 R\|\|S; private key stays redacted |
+| EIP712-401-RUST | 2026-08-23 | Admission signer binds live `validatorSetEpoch` and fail-closes on RPC/epoch drift |
+| DOC-RELEASE | blocked here | Arena `generate:document-pdfs` pipeline is not in this checkout; do not commit `docs/document-pdfs/` |
 | VERIFY-401-RUST | 2026-08-23 | Workspace all-target Cargo run exit 0 at `b7fabe5` and again at `5868401` after PR #36 |
 | VERIFY-401-SIDECAR | 2026-08-23 | Private-temp launch: host-visible TEMP after env_clear; fixture + local frozen Windows rejection |
 | VERIFY-401-FMT | 2026-08-23 | `cargo fmt --all -- --check` exit 0 at `5868401` (local rustc 1.93.1; CI pin is 1.93.0) |

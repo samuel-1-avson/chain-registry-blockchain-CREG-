@@ -467,6 +467,7 @@ async fn main() -> Result<()> {
                     || e.contains(
                         "CREG_IS_VALIDATOR=true requires a non-zero parseable CREG_STAKING_ADDR",
                     )
+                    || e.contains("CREG_ETH_RPC is invalid")
             })
             .collect();
         if !hard_errors.is_empty() {

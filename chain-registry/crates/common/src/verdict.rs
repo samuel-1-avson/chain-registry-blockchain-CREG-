@@ -27,6 +27,11 @@ pub struct TrustVerdict {
     /// Chain record stage (`pending`, `verified`, `rejected`).
     #[serde(default)]
     pub chain_status: Option<String>,
+    /// Publisher Ed25519 pubkey from the chain record, when the node returned one.
+    /// gRPC success overlays REST to fill this; still missing on REST failure
+    /// and on legacy cache entries.
+    #[serde(default)]
+    pub publisher: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

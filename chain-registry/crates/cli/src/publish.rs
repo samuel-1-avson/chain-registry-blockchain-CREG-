@@ -1199,7 +1199,7 @@ pub(crate) fn canonicalize_publisher_address(publisher_address: &str) -> Result<
     Ok(common::canonical_publisher_address(publisher_address))
 }
 
-fn publisher_packages_url(node_url: Option<&str>) -> String {
+pub(crate) fn publisher_packages_url(node_url: Option<&str>) -> String {
     format!(
         "{}/v1/publisher/packages",
         crate::config_file::effective_node_url(node_url).trim_end_matches('/')
