@@ -1,6 +1,7 @@
 // crates/cli/src/shims/npm.rs
-// This binary is placed in ~/.local/bin/npm (or %LOCALAPPDATA%\creg\bin\npm.cmd).
-// Named-package installs use the same fail-closed gate as `creg install`.
+// PATH shim for npm. Named-package installs and bare `npm install`/`npm ci`
+// (direct package.json dependencies) use the same fail-closed gate as
+// `creg install`.
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -35,10 +36,44 @@ async fn run_verified_install(ecosystem: &str, args: &[String]) -> i32 {
         .collect();
 
     if packages.is_empty() {
+        let include_dev = resolver::npm_manifest::npm_include_dev_dependencies(args);
+        let cwd = match std::env::current_dir() {
+            Ok(dir) => dir,
+            Err(err) => {
+                eprintln!("\x1b[31m✗ BLOCKED\x1b[0m  cannot read working directory ({err})");
+                return 1;
+            }
+        };
+        let deps = match resolver::npm_manifest::read_npm_direct_deps(&cwd, include_dev) {
+            Ok(deps) => deps,
+            Err(err) if allow => {
+                eprintln!(
+                    "\x1b[33m⚠ BREAK-GLASS\x1b[0m  {err} — continuing because {}",
+                    resolver::install_gate::ALLOW_UNVERIFIED_ENV
+                );
+                let forwarded = resolver::install_gate::strip_unverified_flag(args);
+                return run_real_pm(ecosystem, &forwarded[1..]).await;
+            }
+            Err(err) => {
+                eprintln!("\x1b[31m✗ BLOCKED\x1b[0m  {err}");
+                return 1;
+            }
+        };
+        if deps.is_empty() {
+            let forwarded = resolver::install_gate::strip_unverified_flag(args);
+            return run_real_pm(ecosystem, &forwarded[1..]).await;
+        }
         eprintln!(
-            "\x1b[33m⚠\x1b[0m chain-registry: `{ecosystem} {}` with no package arguments is not chain-gated. Use `creg install` for named packages.",
+            "[chain-registry] Checking {} direct npm dependenc{} before `{}`...",
+            deps.len(),
+            if deps.len() == 1 { "y" } else { "ies" },
             args.get(1).map(String::as_str).unwrap_or("install")
         );
+        let specs: Vec<String> = deps.iter().map(|d| d.install_spec()).collect();
+        let spec_refs: Vec<&str> = specs.iter().map(String::as_str).collect();
+        if let Err(code) = gate_packages(ecosystem, &spec_refs, allow).await {
+            return code;
+        }
         let forwarded = resolver::install_gate::strip_unverified_flag(args);
         return run_real_pm(ecosystem, &forwarded[1..]).await;
     }

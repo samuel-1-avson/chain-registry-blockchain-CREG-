@@ -121,8 +121,9 @@ creg setup-shims
 # packages and an unreachable node are refused. Break-glass:
 #   --unverified   or   CREG_ALLOW_UNVERIFIED=true
 # `pip install -r requirements.txt` is also refused unless that break-glass is set.
-# Bare `npm install` / `npm ci` (lockfile sync, no package args) is still not
-# chain-gated. Prefer `creg install` for verified IPFS-backed artifacts.
+# Bare `npm install` / `npm ci` gates **direct** package.json dependencies
+# (exact versions from package-lock.json when present). Transitive lockfile
+# entries are not scanned. Prefer `creg install` for verified IPFS-backed artifacts.
 ```
 
 ### Browse the registry

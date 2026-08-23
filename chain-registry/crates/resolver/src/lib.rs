@@ -6,6 +6,7 @@ pub mod cache;
 mod chain_client;
 pub mod downloader;
 pub mod install_gate;
+pub mod npm_manifest;
 
 use anyhow::Result;
 use chrono::Utc;
