@@ -19,6 +19,7 @@ mod events;
 mod explorer;
 mod finalized_tx;
 mod gossip;
+mod governance_api;
 mod grpc;
 mod intelligence;
 mod json_rpc;
