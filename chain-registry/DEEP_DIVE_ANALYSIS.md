@@ -404,13 +404,13 @@ Global flags: `--unverified`, `CREG_NODE_URL`, `CREG_GRPC_URL`, `--output json`.
 
 ### 4.2 High Severity
 
-### ISSUE-005: Production guard panics when ZK keys missing
+### ISSUE-005: Production guard panics when ZK keys missing — **MITIGATED** (2026-08-23)
 
-- **Severity**: High
-- **File**: `crates/zk-validator/src/lib.rs:158-168`
-- **Description**: With `CREG_PRODUCTION=true`, missing key files trigger `panic!` during `ZkValidator::new()`.
-- **Impact**: Hard node crash on deploy ordering mistakes; correct for security but needs documented startup ordering and health checks.
-- **Recommended Fix**: Fail startup gracefully in `main.rs` with actionable error before spawning tasks; document key provisioning in compose/k8s manifests.
+- **Severity**: High (mitigated)
+- **File**: `crates/zk-validator/src/lib.rs`, `crates/node/src/config.rs`, `crates/node/src/main.rs`
+- **Description**: `ZkValidator::new()` used to `panic!` when `CREG_PRODUCTION=true` and package-circuit key files were missing.
+- **Fix**: Missing or incompatible keys return `ZkError` (no panic, including removal of `Default` `.expect`). `NodeConfig` copies `feature_flags.zk_validation` from the signed spec (env cannot enable it). When that flag is true, production missing keys are a hard startup error and `creg-node` loads keys **before spawning tasks**. Tests: `production_missing_keys_returns_err_instead_of_panic`, `production_zk_validation_requires_package_key_files`, `sepolia_like_config_does_not_require_zk_keys`. Compose/k8s document `CREG_ZK_KEYS_DIR`.
+- **Residual**: Sepolia `zk_validation` stays **false**. This does not re-enable ZK qualification. `CREG_ZK_ENABLED` in compose is unused by `creg-node`.
 
 ### ISSUE-006: Empty gossip payload on JSON serialization failure — **MITIGATED** (2026-06-26, Iteration 5)
 

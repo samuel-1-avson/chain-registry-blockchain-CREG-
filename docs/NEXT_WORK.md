@@ -110,6 +110,7 @@
 | ISSUE-025 | 2026-08-23 | Shamir `gf_div` errors on zero divisor; reconstruction rejects dup/index-0 shares |
 | ISSUE-021 | 2026-08-23 | Publisher rotation nonce/cooldown uses `publisher_rotation` CF with lazy backfill |
 | ISSUE-022 | 2026-08-23 | Double-sign evidence encodes Ed25519 R\|\|S; private key stays redacted |
+| ISSUE-005 | 2026-08-23 | Production missing ZK keys return Err and fail startup; Sepolia zk_validation stays false |
 | EIP712-401-RUST | 2026-08-23 | Admission signer binds live `validatorSetEpoch` and fail-closes on RPC/epoch drift |
 | DOC-RELEASE | blocked here | Arena `generate:document-pdfs` pipeline is not in this checkout; do not commit `docs/document-pdfs/` |
 | VERIFY-401-RUST | 2026-08-23 | Workspace all-target Cargo run exit 0 at `b7fabe5` and again at `5868401` after PR #36 |

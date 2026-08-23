@@ -148,10 +148,20 @@ pub struct ZkValidator {
     verifying_key: Arc<ZkVerifyingKey>,
 }
 
+/// Returns true when `CREG_PRODUCTION` is `1` or `true` (case-insensitive).
+pub fn production_guard_active() -> bool {
+    std::env::var("CREG_PRODUCTION")
+        .map(|v| {
+            let v = v.trim();
+            v == "1" || v.eq_ignore_ascii_case("true")
+        })
+        .unwrap_or(false)
+}
+
 impl ZkValidator {
     /// Default file names for trusted setup keys (bump suffix when public inputs change).
-    const PROVING_KEY_FILE: &'static str = "proving_key_package_v2.bin";
-    const VERIFYING_KEY_FILE: &'static str = "verifying_key_package_v2.bin";
+    pub const PROVING_KEY_FILE: &'static str = "proving_key_package_v2.bin";
+    pub const VERIFYING_KEY_FILE: &'static str = "verifying_key_package_v2.bin";
 
     /// Initialize the ZK validator.
     ///
@@ -159,9 +169,28 @@ impl ZkValidator {
     /// If key files are not found, generates fresh keys and saves them for subsequent
     /// runs. A warning is emitted because the generated keys are NOT from a trusted
     /// ceremony — they are only suitable for development/testing.
+    ///
+    /// Production (`CREG_PRODUCTION=true`) never generates ephemeral keys: missing or
+    /// incompatible files return [`ZkError`] instead of panicking.
     pub fn new() -> Result<Self, ZkError> {
-        let keys_dir = Self::keys_dir();
+        Self::from_keys_dir(Self::keys_dir(), production_guard_active())
+    }
 
+    /// Resolve the key directory from `CREG_ZK_KEYS_DIR` or `<crate>/circuits`.
+    pub fn keys_dir() -> PathBuf {
+        std::env::var("CREG_ZK_KEYS_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("circuits"))
+    }
+
+    /// True when both package-circuit key files exist in `dir`.
+    pub fn package_key_files_present(dir: &Path) -> bool {
+        dir.join(Self::PROVING_KEY_FILE).is_file() && dir.join(Self::VERIFYING_KEY_FILE).is_file()
+    }
+
+    /// Load or generate keys from an explicit directory. Used by tests so
+    /// production-guard coverage does not mutate process-wide env.
+    pub fn from_keys_dir(keys_dir: PathBuf, production: bool) -> Result<Self, ZkError> {
         let pk_path = keys_dir.join(Self::PROVING_KEY_FILE);
         let vk_path = keys_dir.join(Self::VERIFYING_KEY_FILE);
 
@@ -170,6 +199,17 @@ impl ZkValidator {
             let validator = Self::from_key_files(&pk_path, &vk_path)?;
             if validator.smoke_test_keys().is_ok() {
                 return Ok(validator);
+            }
+            if production {
+                return Err(ZkError::InvalidInput(format!(
+                    "PRODUCTION GUARD: ZK key files in '{}' failed smoke verification. \
+                     Refusing to generate ephemeral keys on a production node. \
+                     Replace {} and {} (CREG_ZK_KEYS_DIR) or keep zk_validation disabled \
+                     in the signed chain spec.",
+                    keys_dir.display(),
+                    Self::PROVING_KEY_FILE,
+                    Self::VERIFYING_KEY_FILE,
+                )));
             }
             warn!(
                 "Stale or incompatible ZK keys in {} — regenerating for the current circuit",
@@ -182,15 +222,13 @@ impl ZkValidator {
         // indicates a deployment error; silently falling back to ephemeral keys
         // would invalidate all existing ZK proofs and open the door to proof
         // forgery (since the new ephemeral key is unknown to the network).
-        if std::env::var("CREG_PRODUCTION")
-            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-            .unwrap_or(false)
-        {
+        if production {
             return Err(ZkError::InvalidInput(format!(
                 "PRODUCTION GUARD: ZK trusted setup key files not found in '{}'. \
                  Refusing to generate ephemeral keys on a production node. \
                  Run `creg advanced zk-setup` to generate certified keys, or \
-                 set CREG_ZK_KEYS_DIR to the correct key directory.",
+                 set CREG_ZK_KEYS_DIR to the correct key directory. \
+                 Do not enable zk_validation without those files.",
                 keys_dir.display()
             )));
         }
@@ -223,11 +261,27 @@ impl ZkValidator {
         Ok(validator)
     }
 
-    /// Resolve the key directory from `CREG_ZK_KEYS_DIR` or `<crate>/circuits`.
-    fn keys_dir() -> PathBuf {
-        std::env::var("CREG_ZK_KEYS_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("circuits"))
+    /// Startup-only message when production mode would otherwise mint ephemeral
+    /// package-circuit keys. Empty when ZK is disabled or key files are present.
+    pub fn production_missing_package_keys_error(
+        zk_validation_enabled: bool,
+        production: bool,
+        keys_dir: &Path,
+    ) -> Option<String> {
+        if !zk_validation_enabled || !production {
+            return None;
+        }
+        if Self::package_key_files_present(keys_dir) {
+            return None;
+        }
+        Some(format!(
+            "CREG_PRODUCTION=true but ZK package key files are missing in '{}'. \
+             Place {} and {} there (CREG_ZK_KEYS_DIR), or keep zk_validation false \
+             in the signed chain spec. Ephemeral keys are never generated in production.",
+            keys_dir.display(),
+            Self::PROVING_KEY_FILE,
+            Self::VERIFYING_KEY_FILE,
+        ))
     }
 
     /// Prove + verify once to ensure on-disk keys match the current circuit layout.
@@ -378,12 +432,6 @@ impl ZkValidator {
     }
 }
 
-impl Default for ZkValidator {
-    fn default() -> Self {
-        Self::new().expect("Failed to initialize ZK validator")
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -435,5 +483,41 @@ mod tests {
             .verify_proof(&deserialized, &inputs.public_inputs())
             .unwrap();
         assert!(is_valid);
+    }
+
+    #[test]
+    fn production_missing_keys_returns_err_instead_of_panic() {
+        let dir = std::env::temp_dir().join(format!(
+            "creg-zk-issue-005-missing-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("temp keys dir");
+        let message = match ZkValidator::from_keys_dir(dir.clone(), true) {
+            Ok(_) => panic!("production missing keys must return Err, not mint ephemeral keys"),
+            Err(err) => err.to_string(),
+        };
+        assert!(
+            message.contains("PRODUCTION GUARD"),
+            "expected production guard error, got {message}"
+        );
+        assert!(
+            !ZkValidator::package_key_files_present(&dir),
+            "empty dir must not look like provisioned keys"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn production_startup_error_only_when_zk_validation_enabled() {
+        let dir = std::path::Path::new("/nonexistent-creg-zk-keys");
+        assert!(ZkValidator::production_missing_package_keys_error(false, true, dir).is_none());
+        let err = ZkValidator::production_missing_package_keys_error(true, true, dir)
+            .expect("missing keys must fail closed when zk_validation is on");
+        assert!(err.contains("CREG_PRODUCTION=true but ZK package key files are missing"));
+        assert!(ZkValidator::production_missing_package_keys_error(true, false, dir).is_none());
     }
 }

@@ -221,10 +221,7 @@ fn load_or_generate_keys() -> Result<Arc<(ProvingKey<Bn254>, VerifyingKey<Bn254>
             .map_err(|e| ZkError::SerializationError(e.to_string()))?;
         (pk, vk)
     } else {
-        if std::env::var("CREG_PRODUCTION")
-            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-            .unwrap_or(false)
-        {
+        if crate::production_guard_active() {
             return Err(ZkError::InvalidInput(format!(
                 "PRODUCTION GUARD: Batch ZK key files not found in '{}'. \
                  Refusing to generate ephemeral keys on a production node. \

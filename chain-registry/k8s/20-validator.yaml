@@ -48,6 +48,9 @@ spec:
           # creg-config must include a parseable non-zero CREG_STAKING_ADDR.
           # Validators exit at startup if it is missing or malformed (ISSUE-024);
           # these probes never see a running pod that silently used the static spec set.
+          # ISSUE-005: if the signed spec enables zk_validation, set CREG_ZK_KEYS_DIR to
+          # a volume with proving_key_package_v2.bin and verifying_key_package_v2.bin.
+          # CREG_PRODUCTION=true refuses ephemeral keys. Sepolia zk_validation stays false.
           env:
             - name: CREG_VALIDATOR_KEY
               valueFrom:

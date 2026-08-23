@@ -242,6 +242,10 @@ pub struct NodeConfig {
     /// Testnet mode: allows multiple nodes per machine.
     /// Mainnet (false) enforces a single node per data directory via PID lock.
     pub is_testnet: bool,
+    /// Chain-spec `feature_flags.zk_validation`. Sepolia stays false; this
+    /// field cannot be turned on from env. When true, production nodes refuse
+    /// missing package-circuit keys at startup (ISSUE-005).
+    pub zk_validation: bool,
     /// Chain-spec `feature_flags.threshold_encryption`. When true, shielded
     /// packages must be decrypted with t-of-n shares — single-node X25519 is
     /// refused. Sepolia keeps this false until share distribution ships.
@@ -367,6 +371,7 @@ impl NodeConfig {
             max_peers,
             cors: CorsConfig::from_env(),
             is_testnet: env("CREG_TESTNET", "false") == "true",
+            zk_validation: false,
             threshold_encryption: false,
         };
 
@@ -580,6 +585,14 @@ impl NodeConfig {
             }
         }
 
+        if let Some(error) = zk_validator::ZkValidator::production_missing_package_keys_error(
+            self.zk_validation,
+            zk_validator::production_guard_active(),
+            &zk_validator::ZkValidator::keys_dir(),
+        ) {
+            errors.push(error);
+        }
+
         errors
     }
 
@@ -787,7 +800,9 @@ impl NodeConfig {
         if self.validator_set.validators.is_empty() {
             self.validator_set = spec.to_runtime_validator_set();
         }
-        // Spec is source of truth: env cannot turn threshold encryption on.
+        // Spec is source of truth: env cannot turn ZK qualification or
+        // threshold encryption on.
+        self.zk_validation = spec.feature_flags.zk_validation;
         self.threshold_encryption = spec.feature_flags.threshold_encryption;
     }
 }
@@ -865,6 +880,7 @@ mod tests {
             max_peers: 15,
             cors: CorsConfig::default(),
             is_testnet: true,
+            zk_validation: false,
             threshold_encryption: false,
         }
     }
@@ -1312,5 +1328,56 @@ mod tests {
         spec.feature_flags.threshold_encryption = true;
         cfg.apply_chain_spec(&spec, false);
         assert!(cfg.threshold_encryption);
+    }
+
+    #[test]
+    fn apply_chain_spec_adopts_zk_validation_flag_and_env_cannot_enable_it() {
+        let mut spec: common::ChainSpec =
+            serde_json::from_str(include_str!("../../../testnet/chain-spec.example.json"))
+                .expect("example chain spec parses");
+        assert!(!spec.feature_flags.zk_validation);
+
+        let mut cfg = base_config();
+        cfg.zk_validation = true;
+        cfg.apply_chain_spec(&spec, false);
+        assert!(
+            !cfg.zk_validation,
+            "spec false must clear a stale true; env must not enable ZK"
+        );
+
+        spec.feature_flags.zk_validation = true;
+        cfg.apply_chain_spec(&spec, false);
+        assert!(
+            cfg.zk_validation,
+            "apply_chain_spec must copy a true spec flag (does not change signed Sepolia)"
+        );
+    }
+
+    #[test]
+    fn production_zk_validation_requires_package_key_files() {
+        let dir = std::env::temp_dir().join(format!("creg-node-issue-005-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let missing =
+            zk_validator::ZkValidator::production_missing_package_keys_error(true, true, &dir)
+                .expect("missing keys must fail closed");
+        assert!(missing.contains("CREG_PRODUCTION=true but ZK package key files are missing"));
+        assert!(
+            zk_validator::ZkValidator::production_missing_package_keys_error(false, true, &dir)
+                .is_none()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn sepolia_like_config_does_not_require_zk_keys() {
+        let cfg = base_config();
+        assert!(!cfg.zk_validation);
+        assert!(
+            cfg.validate()
+                .iter()
+                .all(|error| !error.contains("ZK package key files")),
+            "zk_validation false must not demand keys, got {:?}",
+            cfg.validate()
+        );
     }
 }

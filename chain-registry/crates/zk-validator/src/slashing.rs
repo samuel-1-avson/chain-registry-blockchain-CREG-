@@ -155,10 +155,7 @@ fn load_or_generate_keys(keys_dir: &Path) -> Result<Arc<(ProvingKey<Bn254>, Veri
             .context("deserialize double-sign verifying key")?;
         (pk, vk)
     } else {
-        if std::env::var("CREG_PRODUCTION")
-            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-            .unwrap_or(false)
-        {
+        if crate::production_guard_active() {
             anyhow::bail!(
                 "PRODUCTION GUARD: Double-sign ZK keys not found in '{}'. \
                  Refusing to generate ephemeral keys on a production node. \
