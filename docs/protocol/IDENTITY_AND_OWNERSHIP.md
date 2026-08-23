@@ -208,8 +208,10 @@ platform/architecture/CPython-build specific and require independent review per
 target. The one-file bootloader also requires a fresh absolute private scratch
 directory: the node must export only the v2 protocol variable and
 `TEMP`/`TMP`/`TMPDIR` pointing to that directory, retain it until the child
-exits, and remove it. The current launcher does not yet implement that contract,
-so the recipe is not activation evidence.
+exits, and remove it. The launcher implements that contract, including a
+host-visible (non-`\\?\`) Windows temp path the one-file bootloader can use.
+A frozen candidate plus independent review is still required before the recipe
+is activation evidence.
 
 Validator-local environment variables only locate and bound the pinned
 processes:

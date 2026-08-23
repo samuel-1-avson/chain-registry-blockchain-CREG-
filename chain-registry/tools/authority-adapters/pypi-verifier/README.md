@@ -117,9 +117,9 @@ variables or make the executable/policy/trust directory writable.
 The Rust launcher now creates and removes a private per-invocation directory
 below the canonical node data directory, clears the ambient environment, and
 exports only `CREG_AUTHORITY_ADAPTER_PROTOCOL=2` plus `TEMP`, `TMP`, and
-`TMPDIR` pointing to that directory. This closes the Windows PyInstaller
-bootloader failure in the launch design; a freshly rebuilt one-file candidate
-still has to pass the exact Rust invocation and complete target test matrix.
+`TMPDIR` pointing to that directory. Local Windows node-to-frozen rejection
+through that launcher is recorded; a freshly rebuilt one-file candidate still
+has to match the reviewed hash and complete the target test matrix.
 Production activation remains disabled until that evidence exists together
 with an independently reviewed target artifact, production policy/root, live
 positive fixture, signed activation spec, and operator rehearsal. Configure

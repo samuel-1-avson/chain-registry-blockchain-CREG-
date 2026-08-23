@@ -1047,7 +1047,7 @@ As of 2026-07-29, CREG is in public alpha testnet scope. (See CREG_SYSTEM_WORKFL
 | Incident response runbook | Drafted and linked in docs |
 | External audit | SEC-401 scope ready; vendor/start date TBD |
 | Contract tests | Local pinned-solc Foundry run passes 12 suites and 111 tests (0 failed/skipped), including 1000-run fuzz cases; compiler warnings, immutable dependency pinning, and clean-checkout CI remain |
-| CR-07 namespace authority | Deterministic v4 lifecycle, v2 certificate boundary, local archive limits, real cryptographic verifier candidates, and a disabled-by-default 11/11-tested activation gate are implemented. Node 209/209 and focused adapter/lifecycle/archive tests pass. npm lacks an official authentication-mode signal; PyPI needs the private-temp launch integration/rebuild; production trust/policy, positive fixtures, signed activation, rehearsal, deployment, and independent review remain gates |
+| CR-07 namespace authority | Deterministic v4 lifecycle, v2 certificate boundary, local archive limits, real cryptographic verifier candidates, and a disabled-by-default 11/11-tested activation gate are implemented. Node 209/209 and focused adapter/lifecycle/archive tests pass. npm lacks an official authentication-mode signal; PyPI private-temp launch is in-repo (rebuild, review, and activation remain); production trust/policy, positive fixtures, signed activation, rehearsal, deployment, and independent review remain gates |
 | Weak-subjectivity checkpoint | Publication/verification CLI, fail-closed template, operator procedure, and CI pass 11/11 synthetic adversarial/CLI tests; no real checkpoint/key, independent verification, fleet configuration, or deployment exists |
 | Mainnet | Not launched |
 

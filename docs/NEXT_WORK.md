@@ -13,10 +13,10 @@
   disabled pending trust material, a real checkpoint, and independent
   operational evidence.
 - **Verification:** focused node, full node (225/225 lib; 227/227 `creg-node`),
-  CLI (49/49), node E2E (8/8), node integration (11/11), and a 2026-08-23
-  workspace all-target run (`b7fabe5`, exit 0) pass. Pinned Foundry v1.7.1,
-  private-temp sidecar smoke, clean-checkout rustfmt/CI, and document
-  regeneration remain.
+  CLI (49/49), node E2E (8/8), node integration (11/11), a 2026-08-23
+  workspace all-target run (`b7fabe5`, exit 0), and the private-temp sidecar
+  launch tests pass. Pinned Foundry v1.7.1, clean-checkout rustfmt/CI, and
+  document regeneration remain.
 - **Network posture:** `chain-spec.sepolia.json` lists four coordinated
   validators (`validator-1`…`validator-4`) and empty bootnodes. That is the
   specified public-alpha topology, not a live multi-operator network and not
@@ -37,7 +37,7 @@
 
 | # | ID | Status | Task | Acceptance |
 |---|-----|--------|------|------------|
-| 1 | **VERIFY-401** | active | Finish reproducible repository verification | Workspace `cargo test --locked --workspace --all-targets` captured 2026-08-23 at `b7fabe5` (exit 0). Remaining: private-temp sidecar, rustfmt/check on a clean checkout, pinned Foundry v1.7.1, and remote CI. |
+| 1 | **VERIFY-401** | active | Finish reproducible repository verification | Workspace `cargo test --locked --workspace --all-targets` captured 2026-08-23 at `b7fabe5` (exit 0). Private-temp sidecar launch is in-repo (fixture + local frozen Windows rejection). Remaining: workspace rerun after that patch, rustfmt/check on a clean checkout, pinned Foundry v1.7.1, and remote CI. |
 | 2 | **CR07-ACTIVATE** | blocked externally | Production namespace-authority package | Reviewed npm/PyPI policy and trust roots, official npm authentication-mode signal, positive fixtures, signed manifest, platform artifacts, and multi-operator rehearsal. |
 | 3 | **HI11-ACTIVATE** | blocked externally | Certified-history activation | Independently verified checkpoint plus replay, partition, reorg, rebuilt-node, long-range, and process-kill rehearsals before mandatory mode. |
 | 4 | **VAL-INDEPENDENCE** | blocked externally | Independent validators and bootnodes | Recruit and verify separately controlled operators/keys/infrastructure; a four-validator coordinated spec must not be represented as Byzantine-fault-tolerant. |
@@ -100,7 +100,8 @@
 | ISSUE-012 | 2026-08-23 | Deep scan fails closed on corrupt/timeout input; votes carry the actual `degraded-*` scanner version |
 | ISSUE-014 | 2026-08-23 | Spec `threshold_encryption` now fail-closes; Sepolia flag stays false until share collection ships |
 | ISSUE-018 | 2026-08-23 | Appeal publisher/panelist payouts are pull-payment; not yet redeployed on Sepolia |
-| VERIFY-401-RUST | 2026-08-23 | Workspace all-target Cargo run exit 0 at `b7fabe5`; Foundry v1.7.1 and sidecar still open |
+| VERIFY-401-RUST | 2026-08-23 | Workspace all-target Cargo run exit 0 at `b7fabe5`; Foundry v1.7.1 still open |
+| VERIFY-401-SIDECAR | 2026-08-23 | Private-temp launch: host-visible TEMP after env_clear; fixture + local frozen Windows rejection |
 
 ---
 

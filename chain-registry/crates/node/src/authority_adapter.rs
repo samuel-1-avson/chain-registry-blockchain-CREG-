@@ -253,6 +253,66 @@ fn private_invocation_scratch(root: &Path) -> Result<tempfile::TempDir, Authorit
 
 const INVOCATION_SCRATCH_PREFIX: &str = "creg-authority-";
 const STALE_INVOCATION_SCRATCH_AGE: Duration = Duration::from_secs(10 * 60);
+const SIDECAR_PROTOCOL_ENV: &str = "CREG_AUTHORITY_ADAPTER_PROTOCOL";
+const SIDECAR_PROTOCOL_VALUE: &str = "2";
+
+/// PyInstaller and the Windows CRT read TEMP via a DOS path. `fs::canonicalize`
+/// on Windows yields `\\?\` verbatim paths that the one-file bootloader cannot
+/// use, which is the failure mode behind the cleared-environment launch gate.
+fn host_visible_absolute(path: &Path) -> Result<PathBuf, AuthorityAdapterError> {
+    let visible = strip_windows_verbatim_prefix(path);
+    if !visible.is_absolute() {
+        return Err(AuthorityAdapterError::InvalidConfig(
+            "verifier scratch path must be absolute",
+        ));
+    }
+    Ok(visible)
+}
+
+fn strip_windows_verbatim_prefix(path: &Path) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let text = path.to_string_lossy();
+        if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+            return PathBuf::from(format!(r"\\{rest}"));
+        }
+        if let Some(rest) = text.strip_prefix(r"\\?\") {
+            return PathBuf::from(rest);
+        }
+    }
+    path.to_path_buf()
+}
+
+/// Cleared child environment for a hash-pinned sidecar: protocol pin plus one
+/// private absolute scratch directory, and nothing inherited from the node.
+fn sidecar_launch_env_pairs(
+    scratch: &Path,
+) -> Result<Vec<(String, String)>, AuthorityAdapterError> {
+    let temp = host_visible_absolute(scratch)?;
+    let value = temp.to_str().ok_or(AuthorityAdapterError::InvalidConfig(
+        "verifier scratch path must be UTF-8",
+    ))?;
+    Ok(vec![
+        (
+            SIDECAR_PROTOCOL_ENV.to_owned(),
+            SIDECAR_PROTOCOL_VALUE.to_owned(),
+        ),
+        ("TEMP".to_owned(), value.to_owned()),
+        ("TMP".to_owned(), value.to_owned()),
+        ("TMPDIR".to_owned(), value.to_owned()),
+    ])
+}
+
+fn apply_sidecar_launch_env(
+    command: &mut Command,
+    scratch: &Path,
+) -> Result<(), AuthorityAdapterError> {
+    command.env_clear();
+    for (key, value) in sidecar_launch_env_pairs(scratch)? {
+        command.env(key, value);
+    }
+    Ok(())
+}
 
 fn cleanup_stale_invocation_scratch(root: &Path) -> Result<(), AuthorityAdapterError> {
     let canonical_root = std::fs::canonicalize(root).map_err(AuthorityAdapterError::Io)?;
@@ -929,14 +989,9 @@ pub async fn verify_with_sidecar(
     })?;
 
     let scratch = private_invocation_scratch(&config.scratch_root)?;
-    let scratch_path = scratch.path().to_path_buf();
     let mut command = Command::new(&verifier);
+    apply_sidecar_launch_env(&mut command, scratch.path())?;
     command
-        .env_clear()
-        .env("CREG_AUTHORITY_ADAPTER_PROTOCOL", "2")
-        .env("TEMP", &scratch_path)
-        .env("TMP", &scratch_path)
-        .env("TMPDIR", &scratch_path)
         .current_dir(verifier.parent().unwrap_or_else(|| Path::new(".")))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -1348,58 +1403,31 @@ mod tests {
         std::fs::canonicalize(path).expect("node runtime path must be canonical")
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn invokes_checked_in_rejection_sidecar_through_the_rust_boundary() {
         let parent = tempfile::tempdir().unwrap();
-        #[cfg(unix)]
-        let verifier_path;
-        #[cfg(windows)]
-        let verifier_path = {
-            let source = std::fs::canonicalize(
-                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                    .join("../../tools/authority-adapters/pypi-verifier/dist/creg-pypi-authority-verifier.exe"),
-            )
-            .expect("the checked-in Windows sidecar artifact must be present");
-            let install_dir = parent.path().join("verifier");
-            std::fs::create_dir_all(&install_dir).unwrap();
-            let installed = install_dir.join("creg-pypi-authority-verifier.exe");
-            std::fs::copy(source, &installed).unwrap();
-            std::fs::canonicalize(installed).unwrap()
-        };
-        #[cfg(unix)]
+        let wrapper = parent.path().join("rejection-sidecar.sh");
+        let node = node_runtime();
+        let stub = std::fs::canonicalize(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../tools/authority-adapters/src/rejection-stub.mjs"),
+        )
+        .unwrap();
+        std::fs::write(
+            &wrapper,
+            format!(
+                "#!/bin/sh\nexec \"{}\" \"{}\"\n",
+                node.display(),
+                stub.display()
+            ),
+        )
+        .unwrap();
         {
-            let wrapper = parent.path().join(if cfg!(windows) {
-                "rejection-sidecar.cmd"
-            } else {
-                "rejection-sidecar.sh"
-            });
-            let node = node_runtime();
-            let stub = std::fs::canonicalize(
-                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                    .join("../../tools/authority-adapters/src/rejection-stub.mjs"),
-            )
-            .unwrap();
-            let script = if cfg!(windows) {
-                format!(
-                    "@echo off\r\n\"{}\" \"{}\"\r\n",
-                    node.display(),
-                    stub.display()
-                )
-            } else {
-                format!(
-                    "#!/bin/sh\nexec \"{}\" \"{}\"\n",
-                    node.display(),
-                    stub.display()
-                )
-            };
-            std::fs::write(&wrapper, script).unwrap();
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o700)).unwrap();
-            }
-            verifier_path = std::fs::canonicalize(&wrapper).unwrap();
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o700)).unwrap();
         }
+        let verifier_path = std::fs::canonicalize(&wrapper).unwrap();
         let mut adapter_config = config();
         adapter_config.verifier_path = verifier_path;
         adapter_config.verifier_sha256 = sha256_file(&adapter_config.verifier_path).unwrap();
@@ -1456,6 +1484,49 @@ mod tests {
         scratch.close().unwrap();
         assert!(!invocation_path.exists());
         assert!(root.is_dir());
+    }
+
+    #[test]
+    fn sidecar_launch_env_is_exactly_protocol_and_host_visible_temp() {
+        let parent = tempfile::tempdir().unwrap();
+        let root = parent.path().join("authority-verifier-scratch");
+        let scratch = private_invocation_scratch(&root).unwrap();
+        let pairs = sidecar_launch_env_pairs(scratch.path()).unwrap();
+        assert_eq!(
+            pairs
+                .iter()
+                .map(|(key, _)| key.as_str())
+                .collect::<Vec<_>>(),
+            ["CREG_AUTHORITY_ADAPTER_PROTOCOL", "TEMP", "TMP", "TMPDIR"]
+        );
+        assert_eq!(pairs[0].1, "2");
+        let temp = PathBuf::from(&pairs[1].1);
+        assert_eq!(pairs[1].1, pairs[2].1);
+        assert_eq!(pairs[1].1, pairs[3].1);
+        assert!(temp.is_absolute());
+        assert!(temp.is_dir());
+        let canonical_root = std::fs::canonicalize(&root).unwrap();
+        let canonical_temp = std::fs::canonicalize(&temp).unwrap();
+        assert!(
+            canonical_temp.starts_with(&canonical_root),
+            "TEMP {} must stay under scratch root {}",
+            canonical_temp.display(),
+            canonical_root.display()
+        );
+        assert!(temp
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with(INVOCATION_SCRATCH_PREFIX)));
+        #[cfg(windows)]
+        assert!(
+            !temp.to_string_lossy().starts_with(r"\\?\"),
+            "PyInstaller cannot unpack into a verbatim TEMP path: {}",
+            temp.display()
+        );
+        let ambient = std::env::var_os("TEMP").or_else(|| std::env::var_os("TMP"));
+        if let Some(ambient) = ambient {
+            assert_ne!(PathBuf::from(ambient), temp);
+        }
     }
 
     #[test]
