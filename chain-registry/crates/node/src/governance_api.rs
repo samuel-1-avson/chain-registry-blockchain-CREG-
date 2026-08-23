@@ -1,12 +1,18 @@
 // crates/node/src/governance_api.rs
-// Read-only mirror of Governance.sol proposals for the explorer and public API.
+// Public GET mirrors Governance.sol proposals. Writes (submit / vote / execute)
+// are operator-authenticated and signed on L1 by CREG_GOVERNANCE_KEY.
 //
-// This is not token voting and does not submit or vote. Missing L1 config is an
-// honest empty list (HTTP 200). RPC failures are HTTP 503, never HTTP 501.
+// GET: missing L1 config is an honest empty list (HTTP 200). RPC failures are
+// HTTP 503, never HTTP 501.
+// POST: missing operator ACL is 401/503 at the private-API middleware. Missing
+// CREG_GOVERNANCE_KEY is HTTP 503 (not CREG_BRIDGE_KEY). This node does not
+// expose write routes on /v1/public or the legacy GET path.
 
-use alloy::primitives::{Address, B256, U256};
+use alloy::network::EthereumWallet;
+use alloy::primitives::{Address, Bytes, B256, U256};
 use alloy::providers::{Provider, ProviderBuilder};
 use alloy::rpc::types::Filter;
+use alloy::signers::local::PrivateKeySigner;
 use alloy::sol;
 use alloy::sol_types::SolEvent;
 use alloy::transports::http::{Client, Http};
@@ -22,13 +28,19 @@ use crate::SharedState;
 const MAX_PROPOSALS: usize = 100;
 const DEFAULT_LIMIT: usize = 50;
 const L1_TIMEOUT: Duration = Duration::from_secs(12);
+const L1_WRITE_TIMEOUT: Duration = Duration::from_secs(45);
 const PROPOSER_LOG_LOOKBACK_BLOCKS: u64 = 10_000;
+const MAX_DESCRIPTION_CHARS: usize = 4096;
+const MAX_CALLDATA_BYTES: usize = 24 * 1024;
+
+pub const GOVERNANCE_KEY_ENV: &str = "CREG_GOVERNANCE_KEY";
 
 sol!(
     #[sol(rpc)]
     interface IGovernance {
         function proposalCount() external view returns (uint256 _0);
         function threshold() external view returns (uint256 _0);
+        function isSigner(address account) external view returns (bool _0);
         function getProposal(uint256 id) external view returns (
             address target,
             string description,
@@ -37,6 +49,12 @@ sol!(
             uint256 approvalCount,
             uint256 rejectionCount
         );
+        function submit(
+            address target,
+            bytes calldata callData,
+            string calldata description
+        ) external returns (uint256 id);
+        function vote(uint256 id, bool approve) external;
         event ProposalSubmitted(uint256 indexed id, address indexed proposer, string description);
     }
 );
@@ -71,6 +89,41 @@ pub struct GovernanceProposalsBody {
     pub error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct GovernanceSubmitBody {
+    pub target: String,
+    #[serde(default)]
+    pub calldata: Option<String>,
+    #[serde(default)]
+    pub call_data: Option<String>,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct GovernanceVoteBody {
+    pub approve: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct GovernanceWriteBody {
+    pub action: String,
+    pub signer: String,
+    pub tx_hash: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub proposal_id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approved: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct GovernanceWriteErrorBody {
+    error: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message: Option<String>,
 }
 
 pub fn proposal_status_label(status: u8) -> &'static str {
@@ -132,6 +185,17 @@ fn unavailable_body(message: String) -> GovernanceProposalsBody {
     }
 }
 
+fn write_error(status: StatusCode, error: &str, message: impl Into<String>) -> Response {
+    (
+        status,
+        Json(GovernanceWriteErrorBody {
+            error: error.to_string(),
+            message: Some(message.into()),
+        }),
+    )
+        .into_response()
+}
+
 pub async fn handle(state: SharedState, query: GovernanceProposalsQuery) -> Response {
     let limit = query.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_PROPOSALS);
     let (rpc_url, governance_addr) = {
@@ -167,6 +231,402 @@ pub async fn handle(state: SharedState, query: GovernanceProposalsQuery) -> Resp
         )
             .into_response(),
     }
+}
+
+pub async fn handle_submit(state: SharedState, body: GovernanceSubmitBody) -> Response {
+    let parsed = match parse_submit_body(&body) {
+        Ok(parsed) => parsed,
+        Err((status, error, message)) => return write_error(status, error, message),
+    };
+    match prepare_write(&state).await {
+        Ok(ctx) => dispatch_write(ctx, WriteAction::Submit(parsed)).await,
+        Err(response) => response,
+    }
+}
+
+pub async fn handle_vote(state: SharedState, id: u64, body: GovernanceVoteBody) -> Response {
+    match prepare_write(&state).await {
+        Ok(ctx) => {
+            dispatch_write(
+                ctx,
+                WriteAction::Vote {
+                    id,
+                    approve: body.approve,
+                },
+            )
+            .await
+        }
+        Err(response) => response,
+    }
+}
+
+pub async fn handle_execute(state: SharedState, id: u64) -> Response {
+    match prepare_write(&state).await {
+        Ok(ctx) => dispatch_write(ctx, WriteAction::Execute { id }).await,
+        Err(response) => response,
+    }
+}
+
+struct SubmitArgs {
+    target: Address,
+    calldata: Bytes,
+    description: String,
+}
+
+enum WriteAction {
+    Submit(SubmitArgs),
+    Vote { id: u64, approve: bool },
+    Execute { id: u64 },
+}
+
+struct WriteContext {
+    rpc_url: String,
+    governance_addr: Address,
+    signer: PrivateKeySigner,
+}
+
+async fn prepare_write(state: &SharedState) -> Result<WriteContext, Response> {
+    let (rpc_url, governance_addr) = {
+        let s = state.read().await;
+        (
+            s.config.eth_rpc_url.clone(),
+            s.config.governance_addr.clone(),
+        )
+    };
+    if !is_configured(&rpc_url, &governance_addr) {
+        return Err(write_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "governance_l1_unconfigured",
+            "Set CREG_ETH_RPC and CREG_GOVERNANCE_ADDR before submitting, voting, or executing.",
+        ));
+    }
+    let gov_addr: Address = match governance_addr.trim().parse() {
+        Ok(addr) => addr,
+        Err(err) => {
+            return Err(write_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "governance_l1_unconfigured",
+                format!("invalid CREG_GOVERNANCE_ADDR: {err}"),
+            ))
+        }
+    };
+    let signer = match load_governance_signer() {
+        Ok(signer) => signer,
+        Err(response) => return Err(response),
+    };
+    Ok(WriteContext {
+        rpc_url,
+        governance_addr: gov_addr,
+        signer,
+    })
+}
+
+fn load_governance_signer() -> Result<PrivateKeySigner, Response> {
+    let raw = match configured_governance_key() {
+        Some(value) => value,
+        None => {
+            return Err(write_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "governance_signer_unconfigured",
+                format!(
+                    "Set {GOVERNANCE_KEY_ENV} to a Governance.sol signer private key (32 bytes / 64 hex chars). \
+                     CREG_BRIDGE_KEY and CREG_OPERATOR_API_KEY cannot submit or vote."
+                ),
+            ))
+        }
+    };
+    let normalized = match normalize_governance_key(&raw) {
+        Ok(value) => value,
+        Err(message) => {
+            return Err(write_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_governance_key",
+                message,
+            ))
+        }
+    };
+    normalized.parse::<PrivateKeySigner>().map_err(|_| {
+        write_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_governance_key",
+            format!("{GOVERNANCE_KEY_ENV} is not a valid secp256k1 private key."),
+        )
+    })
+}
+
+fn configured_governance_key() -> Option<String> {
+    std::env::var(GOVERNANCE_KEY_ENV)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn normalize_governance_key(raw: &str) -> Result<String, String> {
+    let hex_part = raw.strip_prefix("0x").unwrap_or(raw);
+    if hex_part.len() != 64 || !hex_part.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(format!(
+            "{GOVERNANCE_KEY_ENV} must be 32 bytes (64 hex chars), optional 0x prefix."
+        ));
+    }
+    Ok(format!("0x{hex_part}"))
+}
+
+fn parse_submit_body(
+    body: &GovernanceSubmitBody,
+) -> Result<SubmitArgs, (StatusCode, &'static str, String)> {
+    if body.description.chars().count() > MAX_DESCRIPTION_CHARS {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "invalid_governance_proposal",
+            format!("description must be at most {MAX_DESCRIPTION_CHARS} characters"),
+        ));
+    }
+    if body.description.trim().is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "invalid_governance_proposal",
+            "description must not be empty".into(),
+        ));
+    }
+    let target: Address = body.target.trim().parse().map_err(|err| {
+        (
+            StatusCode::BAD_REQUEST,
+            "invalid_governance_proposal",
+            format!("invalid target address: {err}"),
+        )
+    })?;
+    if target == Address::ZERO {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "invalid_governance_proposal",
+            "target must not be the zero address".into(),
+        ));
+    }
+    let calldata_hex = body
+        .calldata
+        .as_deref()
+        .or(body.call_data.as_deref())
+        .unwrap_or("0x");
+    let calldata = parse_calldata(calldata_hex)?;
+    Ok(SubmitArgs {
+        target,
+        calldata,
+        description: body.description.clone(),
+    })
+}
+
+fn parse_calldata(raw: &str) -> Result<Bytes, (StatusCode, &'static str, String)> {
+    let hex_part = raw.trim().strip_prefix("0x").unwrap_or(raw.trim());
+    if hex_part.is_empty() {
+        return Ok(Bytes::new());
+    }
+    if hex_part.len() % 2 != 0 || !hex_part.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "invalid_governance_proposal",
+            "calldata must be even-length hex, optional 0x prefix".into(),
+        ));
+    }
+    let bytes = hex::decode(hex_part).map_err(|err| {
+        (
+            StatusCode::BAD_REQUEST,
+            "invalid_governance_proposal",
+            format!("invalid calldata hex: {err}"),
+        )
+    })?;
+    if bytes.len() > MAX_CALLDATA_BYTES {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "invalid_governance_proposal",
+            format!("calldata must be at most {MAX_CALLDATA_BYTES} bytes"),
+        ));
+    }
+    Ok(Bytes::from(bytes))
+}
+
+async fn dispatch_write(ctx: WriteContext, action: WriteAction) -> Response {
+    match tokio::time::timeout(L1_WRITE_TIMEOUT, send_governance_tx(ctx, action)).await {
+        Ok(Ok(body)) => (StatusCode::OK, Json(body)).into_response(),
+        Ok(Err(response)) => response,
+        Err(_) => write_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "governance_l1_unavailable",
+            format!(
+                "Governance L1 RPC timed out after {}s",
+                L1_WRITE_TIMEOUT.as_secs()
+            ),
+        ),
+    }
+}
+
+async fn send_governance_tx(
+    ctx: WriteContext,
+    action: WriteAction,
+) -> Result<GovernanceWriteBody, Response> {
+    let signer_addr = ctx.signer.address();
+    let wallet = EthereumWallet::from(ctx.signer);
+    let provider = ProviderBuilder::new()
+        .with_recommended_fillers()
+        .wallet(wallet)
+        .on_http(ctx.rpc_url.trim().parse().map_err(|err| {
+            write_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "governance_l1_unavailable",
+                format!("invalid CREG_ETH_RPC: {err}"),
+            )
+        })?);
+    let contract = IGovernance::new(ctx.governance_addr, &provider);
+
+    let is_signer = contract
+        .isSigner(signer_addr)
+        .call()
+        .await
+        .map_err(|err| {
+            write_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "governance_l1_unavailable",
+                err.to_string(),
+            )
+        })?
+        ._0;
+    if !is_signer {
+        return Err(write_error(
+            StatusCode::FORBIDDEN,
+            "governance_signer_not_authorized",
+            format!("{GOVERNANCE_KEY_ENV} address {signer_addr:#x} is not a Governance.sol signer"),
+        ));
+    }
+
+    match action {
+        WriteAction::Submit(args) => {
+            let next_id = contract
+                .proposalCount()
+                .call()
+                .await
+                .map_err(|err| l1_unavailable(err))?
+                ._0
+                .to::<u64>();
+            let tx_hash = contract
+                .submit(args.target, args.calldata, args.description)
+                .send()
+                .await
+                .map_err(|err| l1_rejected(err))?
+                .watch()
+                .await
+                .map_err(|err| l1_unavailable(err))?;
+            Ok(GovernanceWriteBody {
+                action: "submit".into(),
+                signer: format!("{signer_addr:#x}"),
+                tx_hash: format!("{tx_hash:#x}"),
+                proposal_id: Some(next_id),
+                approved: None,
+                execution: None,
+            })
+        }
+        WriteAction::Vote { id, approve } => {
+            require_pending_proposal(&contract, id).await?;
+            let tx_hash = contract
+                .vote(U256::from(id), approve)
+                .send()
+                .await
+                .map_err(|err| l1_rejected(err))?
+                .watch()
+                .await
+                .map_err(|err| l1_unavailable(err))?;
+            Ok(GovernanceWriteBody {
+                action: "vote".into(),
+                signer: format!("{signer_addr:#x}"),
+                tx_hash: format!("{tx_hash:#x}"),
+                proposal_id: Some(id),
+                approved: Some(approve),
+                execution: approve.then(|| "automatic_on_threshold".to_string()),
+            })
+        }
+        WriteAction::Execute { id } => {
+            require_pending_proposal(&contract, id).await?;
+            let tx_hash = contract
+                .vote(U256::from(id), true)
+                .send()
+                .await
+                .map_err(|err| l1_rejected(err))?
+                .watch()
+                .await
+                .map_err(|err| l1_unavailable(err))?;
+            Ok(GovernanceWriteBody {
+                action: "execute".into(),
+                signer: format!("{signer_addr:#x}"),
+                tx_hash: format!("{tx_hash:#x}"),
+                proposal_id: Some(id),
+                approved: Some(true),
+                execution: Some(
+                    "Governance.sol has no public execute(); this approval vote auto-executes when threshold is met."
+                        .into(),
+                ),
+            })
+        }
+    }
+}
+
+async fn require_pending_proposal<P>(
+    contract: &IGovernance::IGovernanceInstance<Http<Client>, P>,
+    id: u64,
+) -> Result<(), Response>
+where
+    P: Provider<Http<Client>>,
+{
+    let count = contract
+        .proposalCount()
+        .call()
+        .await
+        .map_err(|err| l1_unavailable(err))?
+        ._0
+        .to::<u64>();
+    if id >= count {
+        return Err(write_error(
+            StatusCode::NOT_FOUND,
+            "proposal_not_found",
+            format!("proposal {id} does not exist"),
+        ));
+    }
+    let proposal = contract
+        .getProposal(U256::from(id))
+        .call()
+        .await
+        .map_err(|err| l1_unavailable(err))?;
+    match proposal.status {
+        0 => Ok(()),
+        1 => Err(write_error(
+            StatusCode::CONFLICT,
+            "proposal_already_executed",
+            format!("proposal {id} is already executed"),
+        )),
+        2 => Err(write_error(
+            StatusCode::CONFLICT,
+            "proposal_cancelled",
+            format!("proposal {id} is cancelled"),
+        )),
+        other => Err(write_error(
+            StatusCode::BAD_REQUEST,
+            "proposal_not_pending",
+            format!("proposal {id} has unknown status {other}"),
+        )),
+    }
+}
+
+fn l1_unavailable(err: impl ToString) -> Response {
+    write_error(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "governance_l1_unavailable",
+        err.to_string(),
+    )
+}
+
+fn l1_rejected(err: impl ToString) -> Response {
+    write_error(
+        StatusCode::BAD_REQUEST,
+        "governance_l1_rejected",
+        err.to_string(),
+    )
 }
 
 async fn fetch_l1_proposals(
@@ -315,5 +775,56 @@ mod tests {
             decode_submitted_proposer(&[B256::ZERO, id, topic2]).expect("topics");
         assert_eq!(decoded_id, 7);
         assert_eq!(decoded_addr, format!("{proposer:#x}"));
+    }
+
+    #[test]
+    fn parses_calldata_hex_and_empty() {
+        assert_eq!(parse_calldata("0x").unwrap(), Bytes::new());
+        assert_eq!(parse_calldata("").unwrap(), Bytes::new());
+        assert_eq!(
+            parse_calldata("0xaabb").unwrap(),
+            Bytes::from(vec![0xaa, 0xbb])
+        );
+        assert!(parse_calldata("0xzz").is_err());
+        assert!(parse_calldata("0xabc").is_err());
+    }
+
+    #[test]
+    fn submit_body_rejects_zero_target_and_empty_description() {
+        let zero = parse_submit_body(&GovernanceSubmitBody {
+            target: "0x0000000000000000000000000000000000000000".into(),
+            calldata: Some("0x".into()),
+            call_data: None,
+            description: "ok".into(),
+        });
+        assert!(zero.is_err());
+
+        let empty = parse_submit_body(&GovernanceSubmitBody {
+            target: "0x1111111111111111111111111111111111111111".into(),
+            calldata: None,
+            call_data: None,
+            description: "   ".into(),
+        });
+        assert!(empty.is_err());
+
+        let ok = parse_submit_body(&GovernanceSubmitBody {
+            target: "0x1111111111111111111111111111111111111111".into(),
+            calldata: None,
+            call_data: Some("0xdead".into()),
+            description: "Pause registry".into(),
+        })
+        .expect("valid submit");
+        assert_eq!(ok.calldata, Bytes::from(vec![0xde, 0xad]));
+    }
+
+    #[test]
+    fn governance_key_must_be_64_hex_chars() {
+        assert!(normalize_governance_key("not-a-key").is_err());
+        assert!(normalize_governance_key(&"ab".repeat(31)).is_err());
+        let ok = normalize_governance_key(&"ab".repeat(32)).expect("hex key");
+        assert_eq!(ok, format!("0x{}", "ab".repeat(32)));
+        let prefixed =
+            normalize_governance_key(&format!("0x{}", "cd".repeat(32))).expect("prefixed");
+        assert_eq!(prefixed, format!("0x{}", "cd".repeat(32)));
     }
 }

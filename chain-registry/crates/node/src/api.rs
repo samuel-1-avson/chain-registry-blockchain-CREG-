@@ -256,6 +256,15 @@ fn operator_routes() -> Router<SharedState> {
             "/v1/operator/packages/:canonical/intelligence/generate",
             post(generate_package_intelligence),
         )
+        .route("/v1/operator/governance/proposals", post(governance_submit))
+        .route(
+            "/v1/operator/governance/proposals/:id/vote",
+            post(governance_vote),
+        )
+        .route(
+            "/v1/operator/governance/proposals/:id/execute",
+            post(governance_execute),
+        )
         .layer(axum::middleware::from_fn(private_api_acl_middleware))
 }
 
@@ -455,6 +464,12 @@ const API_ROUTE_BOUNDARIES: &[ApiRouteBoundary] = &[
         category: ApiRouteCategory::Operator,
         security: ApiRouteSecurity::OperatorApiKeyAcl,
         note: "Operational status and diagnostics; requires X-Operator-Key or Authorization bearer ACL.",
+    },
+    ApiRouteBoundary {
+        path: "/v1/operator/governance/*",
+        category: ApiRouteCategory::Operator,
+        security: ApiRouteSecurity::OperatorApiKeyAcl,
+        note: "Submit, vote, and execute Governance.sol actions as CREG_GOVERNANCE_KEY. Public GET lists stay unauthenticated; CREG_BRIDGE_KEY cannot sign these writes.",
     },
     ApiRouteBoundary {
         path: "/v1/internal/*",
@@ -1734,6 +1749,28 @@ async fn governance_proposals(
     Query(query): Query<crate::governance_api::GovernanceProposalsQuery>,
 ) -> impl IntoResponse {
     crate::governance_api::handle(state, query).await
+}
+
+async fn governance_submit(
+    State(state): State<SharedState>,
+    Json(body): Json<crate::governance_api::GovernanceSubmitBody>,
+) -> impl IntoResponse {
+    crate::governance_api::handle_submit(state, body).await
+}
+
+async fn governance_vote(
+    State(state): State<SharedState>,
+    Path(id): Path<u64>,
+    Json(body): Json<crate::governance_api::GovernanceVoteBody>,
+) -> impl IntoResponse {
+    crate::governance_api::handle_vote(state, id, body).await
+}
+
+async fn governance_execute(
+    State(state): State<SharedState>,
+    Path(id): Path<u64>,
+) -> impl IntoResponse {
+    crate::governance_api::handle_execute(state, id).await
 }
 
 // GET /v1/metrics/history?range=1h
@@ -6970,6 +7007,287 @@ mod tests {
         let body_json: Value = serde_json::from_slice(&body)?;
         assert_eq!(body_json["error"], "governance_l1_unavailable");
         assert_eq!(body_json["proposals"].as_array().map(|a| a.len()), Some(0));
+        Ok(())
+    }
+
+    // Anvil account #0 — valid secp256k1 material for signer-parse tests only.
+    const TEST_GOVERNANCE_KEY: &str =
+        "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+    const GOVERNANCE_SUBMIT_BODY: &str = r#"{"target":"0x1111111111111111111111111111111111111111","calldata":"0x","description":"test proposal"}"#;
+
+    async fn governance_write_app(
+        state: SharedState,
+        p2p_handle: crate::p2p::P2PHandle,
+        tx_sender: FinalizedTxSender,
+    ) -> axum::Router {
+        router(
+            state,
+            new_event_bus(),
+            RateLimiter::new(RateLimitConfig::default()),
+            AttestationStore::new(),
+            crate::config::CorsConfig::default(),
+            tx_sender,
+            p2p_handle,
+        )
+    }
+
+    #[tokio::test]
+    async fn governance_writes_reject_missing_and_wrong_operator_credentials() -> anyhow::Result<()>
+    {
+        let _env_lock = api_env_lock().lock().await;
+        let _api_key = EnvRestore::set(OPERATOR_API_KEY_ENV, "gov-write-secret");
+        let _gov_key = EnvRestore::set(
+            crate::governance_api::GOVERNANCE_KEY_ENV,
+            TEST_GOVERNANCE_KEY,
+        );
+        let (state, _tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
+        {
+            let mut s = state.write().await;
+            s.config.eth_rpc_url = "http://127.0.0.1:1".into();
+            s.config.governance_addr = "0x1111111111111111111111111111111111111111".into();
+        }
+        let app = governance_write_app(state, p2p_handle, tx_sender).await;
+
+        let missing = app
+            .clone()
+            .oneshot(
+                Request::post("/v1/operator/governance/proposals")
+                    .header("content-type", "application/json")
+                    .body(Body::from(GOVERNANCE_SUBMIT_BODY))?,
+            )
+            .await?;
+        assert_eq!(missing.status(), StatusCode::UNAUTHORIZED);
+
+        let wrong_header = app
+            .clone()
+            .oneshot(
+                Request::post("/v1/operator/governance/proposals")
+                    .header(OPERATOR_KEY_HEADER, "wrong-secret")
+                    .header("content-type", "application/json")
+                    .body(Body::from(GOVERNANCE_SUBMIT_BODY))?,
+            )
+            .await?;
+        assert_eq!(wrong_header.status(), StatusCode::UNAUTHORIZED);
+
+        let prefix_secret = app
+            .clone()
+            .oneshot(
+                Request::post("/v1/operator/governance/proposals/0/vote")
+                    .header(OPERATOR_KEY_HEADER, "gov-write-secret-extra")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"approve":true}"#))?,
+            )
+            .await?;
+        assert_eq!(prefix_secret.status(), StatusCode::UNAUTHORIZED);
+
+        let wrong_bearer = app
+            .clone()
+            .oneshot(
+                Request::post("/v1/operator/governance/proposals/1/execute")
+                    .header(header::AUTHORIZATION, "Bearer wrong-secret")
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(wrong_bearer.status(), StatusCode::UNAUTHORIZED);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn governance_writes_fail_closed_without_operator_secret() -> anyhow::Result<()> {
+        let _env_lock = api_env_lock().lock().await;
+        let _api_key = EnvRestore::remove(OPERATOR_API_KEY_ENV);
+        let _gov_key = EnvRestore::set(
+            crate::governance_api::GOVERNANCE_KEY_ENV,
+            TEST_GOVERNANCE_KEY,
+        );
+        let (state, _tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
+        let app = governance_write_app(state, p2p_handle, tx_sender).await;
+
+        let response = app
+            .oneshot(
+                Request::post("/v1/operator/governance/proposals")
+                    .header(OPERATOR_KEY_HEADER, "anything")
+                    .header("content-type", "application/json")
+                    .body(Body::from(GOVERNANCE_SUBMIT_BODY))?,
+            )
+            .await?;
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = to_bytes(response.into_body(), usize::MAX).await?;
+        let body_text = String::from_utf8(body.to_vec())?;
+        assert!(body_text.contains(OPERATOR_API_KEY_ENV));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn public_and_legacy_governance_paths_do_not_accept_writes() -> anyhow::Result<()> {
+        let _env_lock = api_env_lock().lock().await;
+        let _api_key = EnvRestore::set(OPERATOR_API_KEY_ENV, "gov-write-secret");
+        let _gov_key = EnvRestore::set(
+            crate::governance_api::GOVERNANCE_KEY_ENV,
+            TEST_GOVERNANCE_KEY,
+        );
+        let (state, _tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
+        let app = governance_write_app(state, p2p_handle, tx_sender).await;
+
+        for path in [
+            "/v1/public/governance/proposals",
+            "/v1/governance/proposals",
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::post(path)
+                        .header(OPERATOR_KEY_HEADER, "gov-write-secret")
+                        .header("content-type", "application/json")
+                        .body(Body::from(GOVERNANCE_SUBMIT_BODY))?,
+                )
+                .await?;
+            assert_eq!(
+                response.status(),
+                StatusCode::METHOD_NOT_ALLOWED,
+                "{path} must not accept POST"
+            );
+        }
+
+        let public_get = app
+            .oneshot(Request::get("/v1/public/governance/proposals").body(Body::empty())?)
+            .await?;
+        assert_ne!(public_get.status(), StatusCode::UNAUTHORIZED);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn governance_writes_do_not_use_bridge_key_and_require_dedicated_signer(
+    ) -> anyhow::Result<()> {
+        let _env_lock = api_env_lock().lock().await;
+        let _api_key = EnvRestore::set(OPERATOR_API_KEY_ENV, "gov-write-secret");
+        let _gov_key = EnvRestore::remove(crate::governance_api::GOVERNANCE_KEY_ENV);
+        let (state, _tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
+        {
+            let mut s = state.write().await;
+            s.config.bridge_privkey = Some(TEST_GOVERNANCE_KEY.into());
+            s.config.eth_rpc_url = "http://127.0.0.1:1".into();
+            s.config.governance_addr = "0x1111111111111111111111111111111111111111".into();
+        }
+        let app = governance_write_app(state, p2p_handle, tx_sender).await;
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::post("/v1/operator/governance/proposals")
+                    .header(OPERATOR_KEY_HEADER, "gov-write-secret")
+                    .header("content-type", "application/json")
+                    .body(Body::from(GOVERNANCE_SUBMIT_BODY))?,
+            )
+            .await?;
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = to_bytes(response.into_body(), usize::MAX).await?;
+        let body_json: Value = serde_json::from_slice(&body)?;
+        assert_eq!(body_json["error"], "governance_signer_unconfigured");
+        let message = body_json["message"].as_str().unwrap_or_default();
+        assert!(message.contains(crate::governance_api::GOVERNANCE_KEY_ENV));
+        assert!(message.contains("CREG_BRIDGE_KEY"));
+
+        let malformed = {
+            let _bad_key = EnvRestore::set(crate::governance_api::GOVERNANCE_KEY_ENV, "deadbeef");
+            app.oneshot(
+                Request::post("/v1/operator/governance/proposals/3/vote")
+                    .header(header::AUTHORIZATION, "Bearer gov-write-secret")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"approve":false}"#))?,
+            )
+            .await?
+        };
+        assert_eq!(malformed.status(), StatusCode::BAD_REQUEST);
+        let malformed_body = to_bytes(malformed.into_body(), usize::MAX).await?;
+        let malformed_json: Value = serde_json::from_slice(&malformed_body)?;
+        assert_eq!(malformed_json["error"], "invalid_governance_key");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn authorized_governance_writes_reach_l1_and_do_not_look_unauthenticated(
+    ) -> anyhow::Result<()> {
+        let _env_lock = api_env_lock().lock().await;
+        let _api_key = EnvRestore::set(OPERATOR_API_KEY_ENV, "gov-write-secret");
+        let _gov_key = EnvRestore::set(
+            crate::governance_api::GOVERNANCE_KEY_ENV,
+            TEST_GOVERNANCE_KEY,
+        );
+        let (state, _tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
+        {
+            let mut s = state.write().await;
+            s.config.eth_rpc_url = "http://127.0.0.1:1".into();
+            s.config.governance_addr = "0x1111111111111111111111111111111111111111".into();
+        }
+        let app = governance_write_app(state, p2p_handle, tx_sender).await;
+
+        let submit = app
+            .clone()
+            .oneshot(
+                Request::post("/v1/operator/governance/proposals")
+                    .header(OPERATOR_KEY_HEADER, "gov-write-secret")
+                    .header("content-type", "application/json")
+                    .body(Body::from(GOVERNANCE_SUBMIT_BODY))?,
+            )
+            .await?;
+        assert_eq!(submit.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let submit_json: Value =
+            serde_json::from_slice(&to_bytes(submit.into_body(), usize::MAX).await?)?;
+        assert_eq!(submit_json["error"], "governance_l1_unavailable");
+
+        let vote = app
+            .clone()
+            .oneshot(
+                Request::post("/v1/operator/governance/proposals/0/vote")
+                    .header(header::AUTHORIZATION, "Bearer gov-write-secret")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"approve":true}"#))?,
+            )
+            .await?;
+        assert_eq!(vote.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_ne!(vote.status(), StatusCode::UNAUTHORIZED);
+
+        let execute = app
+            .oneshot(
+                Request::post("/v1/operator/governance/proposals/0/execute")
+                    .header(OPERATOR_KEY_HEADER, "gov-write-secret")
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(execute.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let execute_json: Value =
+            serde_json::from_slice(&to_bytes(execute.into_body(), usize::MAX).await?)?;
+        assert_eq!(execute_json["error"], "governance_l1_unavailable");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn governance_submit_rejects_invalid_payload_after_auth() -> anyhow::Result<()> {
+        let _env_lock = api_env_lock().lock().await;
+        let _api_key = EnvRestore::set(OPERATOR_API_KEY_ENV, "gov-write-secret");
+        let _gov_key = EnvRestore::set(
+            crate::governance_api::GOVERNANCE_KEY_ENV,
+            TEST_GOVERNANCE_KEY,
+        );
+        let (state, _tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
+        let app = governance_write_app(state, p2p_handle, tx_sender).await;
+
+        let zero_target = app
+            .oneshot(
+                Request::post("/v1/operator/governance/proposals")
+                    .header(OPERATOR_KEY_HEADER, "gov-write-secret")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"target":"0x0000000000000000000000000000000000000000","description":"x"}"#,
+                    ))?,
+            )
+            .await?;
+        assert_eq!(zero_target.status(), StatusCode::BAD_REQUEST);
+        let body_json: Value =
+            serde_json::from_slice(&to_bytes(zero_target.into_body(), usize::MAX).await?)?;
+        assert_eq!(body_json["error"], "invalid_governance_proposal");
         Ok(())
     }
 }

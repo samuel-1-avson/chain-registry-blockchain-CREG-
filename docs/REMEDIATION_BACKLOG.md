@@ -14,7 +14,7 @@ Track security and remediation work from [archive/SECURITY_AND_REMEDIATION_IMPLE
 | SEC-201 | done | 1 | ZKVerifier — 6/6 tests pass (`forge test --match-contract ZKVerifier`) |
 | SEC-102 | done | 1 | `validate_production_security()` fail-fast at node boot |
 | SEC-106 | done | 1 | `creg doctor` PBFT + production safety checks |
-| REM-201 | done | 2 | `GET /v1/governance/proposals` mirrors Governance.sol (ISSUE-017). HTTP 200 empty if unconfigured, 503 on L1 failure. Explorer nav still gated by `VITE_GOVERNANCE_ENABLED`. |
+| REM-201 | done | 2 | `GET /v1/governance/proposals` mirrors Governance.sol (ISSUE-017). Operator submit/vote/execute is GOVERNANCE-API (`CREG_OPERATOR_API_KEY` + `CREG_GOVERNANCE_KEY`). Explorer nav still gated by `VITE_GOVERNANCE_ENABLED`. |
 | REM-103 | done | 2 | JSON cursor sidecar + idempotency/reorg tests; atomic save |
 | REM-210 | done | 2 | [TESTNET_SEPOLIA_RUNBOOK.md](./TESTNET_SEPOLIA_RUNBOOK.md) |
 | SEC-203 | done | 2 | `creg chain-spec validate` — genesis hash + optional `.sig` Ed25519 verify |
