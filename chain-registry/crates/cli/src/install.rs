@@ -35,10 +35,42 @@ pub async fn run(
     let effective_node_ref = effective_node_url.as_deref();
 
     println!("{} Resolving {} ...", "→".cyan(), pkg_id.canonical().bold());
-    let verdict = retry::with_retry("resolve package", 3, Duration::from_millis(500), || {
-        resolver::resolve_id(&pkg_id, effective_node_ref)
+    let verdict = match retry::with_retry("resolve package", 3, Duration::from_millis(500), || {
+        resolver::install_gate::resolve_id_for_install(&pkg_id, effective_node_ref)
     })
-    .await?;
+    .await
+    {
+        Ok(verdict) => verdict,
+        Err(err) if allow_unverified => {
+            println!(
+                "{} chain registry unreachable ({err}); continuing because --unverified / {ALLOW} is set",
+                "⚠".yellow(),
+                ALLOW = resolver::install_gate::ALLOW_UNVERIFIED_ENV
+            );
+            common::TrustVerdict {
+                package: pkg_id.clone(),
+                status: VerdictStatus::Unknown,
+                resolved_at: chrono::Utc::now(),
+                source: common::VerdictSource::Chain {
+                    node_url: effective_node_url
+                        .clone()
+                        .unwrap_or_else(|| "unconfigured".into()),
+                },
+                deterministic_risk: None,
+                evidence_phase: None,
+                block_phase: None,
+                chain_status: None,
+                publisher: None,
+            }
+        }
+        Err(err) => {
+            bail!(
+                "{} chain registry unreachable ({err}). Refusing installation; use --unverified or {ALLOW}=true only as an explicit break-glass exception.",
+                "✗".red().bold(),
+                ALLOW = resolver::install_gate::ALLOW_UNVERIFIED_ENV
+            );
+        }
+    };
 
     // ── C-22: Org-level policy check ─────────────────────────────────────────
     // Load ~/.creg/policy.toml (if it exists) and evaluate the package against
@@ -99,79 +131,29 @@ pub async fn run(
         }
     }
 
-    // ── 3. Trust decision ─────────────────────────────────────────────────────
-    match &verdict.status {
-        VerdictStatus::Verified {
-            block_hash,
-            findings,
-            ipfs_cid: _,
-            content_hash: _,
-        } => {
-            output::print_verdict(&verdict);
-            if !block_hash.is_empty() {
-                println!(
-                    "  {} chain record: block {}",
-                    "✓".green(),
-                    &block_hash[..std::cmp::min(12, block_hash.len())]
-                );
-            }
-
-            // Defense-in-depth: check if findings are severe despite verification
-            let has_severe = findings.iter().any(|f| {
-                matches!(
-                    f.severity,
-                    common::FindingSeverity::Critical | common::FindingSeverity::High
-                )
-            });
-            if has_severe && !allow_unverified {
-                bail!(
-                    "{} Package '{}' has high-severity security findings. Refusing installation; use --unverified only for an explicitly accepted break-glass exception.",
-                    "✗".red().bold(),
-                    pkg_id.canonical()
-                );
+    // ── 3. Trust decision (shared with PATH shims, SHIM-301) ─────────────────
+    output::print_verdict(&verdict);
+    match resolver::install_gate::evaluate_install(&verdict, allow_unverified) {
+        resolver::install_gate::InstallDecision::Allow => {
+            if let VerdictStatus::Verified { block_hash, .. } = &verdict.status {
+                if !block_hash.is_empty() {
+                    println!(
+                        "  {} chain record: block {}",
+                        "✓".green(),
+                        &block_hash[..std::cmp::min(12, block_hash.len())]
+                    );
+                }
             }
         }
-
-        VerdictStatus::Unverified => {
-            output::print_verdict(&verdict);
-            if !allow_unverified {
-                bail!(
-                    "{} Package '{}' is not qualified. Refusing installation; use --unverified only for an explicitly accepted break-glass exception.",
-                    "✗".red().bold(),
-                    pkg_id.canonical()
-                );
-            } else {
-                println!(
-                    "{} installing unverified package (--unverified flag set)",
-                    "⚠".yellow()
-                );
-            }
-        }
-
-        VerdictStatus::Revoked { reason, findings } => {
-            output::print_verdict(&verdict);
-            bail!(
-                "{} Package '{}' is REVOKED and cannot be installed.\n  Reason: {}\n  Findings: {} record(s)",
-                "✗".red().bold(),
-                pkg_id.canonical(),
-                reason,
-                findings.len()
-            );
-        }
-
-        VerdictStatus::Unknown => {
-            output::print_verdict(&verdict);
-            if !allow_unverified {
-                bail!(
-                    "{} Package '{}' is unknown to the chain registry.\n  Use --unverified to install from the original registry.",
-                    "✗".red(),
-                    pkg_id.canonical()
-                );
-            }
+        resolver::install_gate::InstallDecision::AllowUnverified => {
             println!(
-                "{} unknown to chain registry — falling through to original registry",
-                "⚠".yellow()
+                "{} installing unverified package (--unverified / {} break-glass)",
+                "⚠".yellow(),
+                resolver::install_gate::ALLOW_UNVERIFIED_ENV
             );
+        }
+        resolver::install_gate::InstallDecision::Block { message, .. } => {
+            bail!("{} {message}", "✗".red().bold());
         }
     }
 
@@ -260,19 +242,10 @@ fn delegate_to_real_pm(ecosystem: &str, raw_package: &str) -> Result<()> {
         _ => bail!("Unknown ecosystem: {}", ecosystem),
     };
 
-    // Find the real package manager binary, skipping our own shim.
-    // We compare canonical paths to filter out our shim directory.
-    let shim_dir = dirs::home_dir()
-        .unwrap_or_default()
-        .join(".local")
-        .join("bin");
+    // Find the real package manager binary, skipping our own shim directory
+    // (Unix ~/.local/bin or Windows %LOCALAPPDATA%\creg\bin).
     let real_bin = which::which_all(pm_name)?
-        .find(|p| {
-            // Skip binaries in our shim directory
-            p.parent().map_or(true, |parent| {
-                parent.canonicalize().ok() != shim_dir.canonicalize().ok()
-            })
-        })
+        .find(|p| !crate::intercept::path_is_in_shim_dir(p))
         .ok_or_else(|| {
             anyhow::anyhow!(
                 "Real '{}' not found in PATH (only our shim exists)",

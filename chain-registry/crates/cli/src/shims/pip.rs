@@ -1,6 +1,5 @@
 // crates/cli/src/shims/pip.rs
-// PATH shim for `pip install` — identical logic to the npm shim
-// but targets the PyPI ecosystem.
+// PATH shim for `pip install` — same fail-closed gate as `creg install`.
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -21,7 +20,16 @@ fn main() {
 }
 
 async fn run_verified_install(ecosystem: &str, args: &[String]) -> i32 {
-    // pip install pkg1 pkg2 --flag  →  extract package names
+    let allow = resolver::install_gate::shim_allows_unverified(args);
+    if resolver::install_gate::requirement_file_requested(args) && !allow {
+        eprintln!(
+            "\x1b[31m✗ BLOCKED\x1b[0m  pip requirement files are not chain-gated. \
+             Install named packages with `creg install` or set {}=true only as break-glass.",
+            resolver::install_gate::ALLOW_UNVERIFIED_ENV
+        );
+        return 1;
+    }
+
     let packages: Vec<&str> = args[2..]
         .iter()
         .filter(|a| !a.starts_with('-') && !a.ends_with(".txt") && !a.ends_with(".cfg"))
@@ -29,23 +37,29 @@ async fn run_verified_install(ecosystem: &str, args: &[String]) -> i32 {
         .collect();
 
     for pkg in &packages {
-        match resolver::resolve(pkg, Some(ecosystem), None).await {
-            Ok(v) if v.status.is_blocked() => {
+        match resolver::install_gate::gate_shim_package(pkg, ecosystem, allow, None).await {
+            Ok(resolver::install_gate::InstallDecision::Allow) => {
+                eprintln!("\x1b[32m✓ VERIFIED\x1b[0m {pkg}");
+            }
+            Ok(resolver::install_gate::InstallDecision::AllowUnverified) => {
                 eprintln!(
-                    "\x1b[31m✗ BLOCKED\x1b[0m  {} — chain registry: REVOKED",
-                    pkg
+                    "\x1b[33m⚠ BREAK-GLASS\x1b[0m  {pkg} — installing unverified ({})",
+                    resolver::install_gate::ALLOW_UNVERIFIED_ENV
                 );
+            }
+            Ok(resolver::install_gate::InstallDecision::Block { message, .. }) => {
+                eprintln!("\x1b[31m✗ BLOCKED\x1b[0m  {message}");
                 return 1;
             }
-            Ok(v) if !v.status.is_safe() => {
-                eprintln!("\x1b[33m⚠ WARNING\x1b[0m  {} — not chain-verified.", pkg);
+            Err(err) => {
+                eprintln!("\x1b[31m✗ BLOCKED\x1b[0m  {err}");
+                return 1;
             }
-            Ok(_) => eprintln!("\x1b[32m✓ VERIFIED\x1b[0m {}", pkg),
-            Err(e) => eprintln!("\x1b[33m⚠ CHAIN UNREACHABLE\x1b[0m ({}). Continuing.", e),
         }
     }
 
-    run_real("pip", &args[1..]).await
+    let forwarded = resolver::install_gate::strip_unverified_flag(args);
+    run_real("pip", &forwarded[1..]).await
 }
 
 async fn run_real(pm: &str, args: &[String]) -> i32 {
@@ -56,7 +70,7 @@ async fn run_real(pm: &str, args: &[String]) -> i32 {
     }) {
         Some(p) => p,
         None => {
-            eprintln!("chain-registry: real {} not found", pm);
+            eprintln!("chain-registry: real {pm} not found");
             return 127;
         }
     };

@@ -1,6 +1,5 @@
 // crates/cli/src/shims/cargo_shim.rs
-// PATH shim for `cargo add` — intercepts the Cargo ecosystem.
-// Note: named cargo_shim to avoid collision with the Cargo build tool itself.
+// PATH shim for `cargo add` — same fail-closed gate as `creg install`.
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -11,7 +10,6 @@ fn main() {
         .expect("failed to build tokio runtime")
         .block_on(async {
             let sub = args.get(1).map(String::as_str).unwrap_or("");
-            // Only intercept `cargo add` — all other cargo commands pass through.
             if sub != "add" {
                 return run_real(&args[1..]).await;
             }
@@ -22,7 +20,7 @@ fn main() {
 }
 
 async fn run_verified_install(ecosystem: &str, args: &[String]) -> i32 {
-    // cargo add serde tokio --features full
+    let allow = resolver::install_gate::shim_allows_unverified(args);
     let packages: Vec<&str> = args[2..]
         .iter()
         .filter(|a| !a.starts_with('-'))
@@ -30,23 +28,29 @@ async fn run_verified_install(ecosystem: &str, args: &[String]) -> i32 {
         .collect();
 
     for pkg in &packages {
-        match resolver::resolve(pkg, Some(ecosystem), None).await {
-            Ok(v) if v.status.is_blocked() => {
+        match resolver::install_gate::gate_shim_package(pkg, ecosystem, allow, None).await {
+            Ok(resolver::install_gate::InstallDecision::Allow) => {
+                eprintln!("\x1b[32m✓ VERIFIED\x1b[0m {pkg}");
+            }
+            Ok(resolver::install_gate::InstallDecision::AllowUnverified) => {
                 eprintln!(
-                    "\x1b[31m✗ BLOCKED\x1b[0m  {} — chain registry: REVOKED",
-                    pkg
+                    "\x1b[33m⚠ BREAK-GLASS\x1b[0m  {pkg} — installing unverified ({})",
+                    resolver::install_gate::ALLOW_UNVERIFIED_ENV
                 );
+            }
+            Ok(resolver::install_gate::InstallDecision::Block { message, .. }) => {
+                eprintln!("\x1b[31m✗ BLOCKED\x1b[0m  {message}");
                 return 1;
             }
-            Ok(v) if !v.status.is_safe() => {
-                eprintln!("\x1b[33m⚠ WARNING\x1b[0m  {} — not chain-verified.", pkg);
+            Err(err) => {
+                eprintln!("\x1b[31m✗ BLOCKED\x1b[0m  {err}");
+                return 1;
             }
-            Ok(_) => eprintln!("\x1b[32m✓ VERIFIED\x1b[0m {}", pkg),
-            Err(e) => eprintln!("\x1b[33m⚠\x1b[0m chain unreachable ({}). Continuing.", e),
         }
     }
 
-    run_real(&args[1..]).await
+    let forwarded = resolver::install_gate::strip_unverified_flag(args);
+    run_real(&forwarded[1..]).await
 }
 
 async fn run_real(args: &[String]) -> i32 {

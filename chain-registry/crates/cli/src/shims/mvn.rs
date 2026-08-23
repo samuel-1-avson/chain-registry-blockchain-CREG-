@@ -31,12 +31,9 @@ fn main() {
 }
 
 async fn run_verified_build(ecosystem: &str, args: &[String]) -> i32 {
-    // For Maven we can't easily extract package names from the CLI args alone —
-    // they're declared in pom.xml. Parse the pom.xml instead.
     let packages = read_pom_dependencies();
 
     if packages.is_empty() {
-        // No pom.xml or no dependencies — just pass through.
         return run_real(&args[1..]).await;
     }
 
@@ -45,34 +42,32 @@ async fn run_verified_build(ecosystem: &str, args: &[String]) -> i32 {
         packages.len()
     );
 
-    let mut blocked = false;
+    let allow = resolver::install_gate::shim_allows_unverified(args);
     for (group_id, artifact_id, version) in &packages {
-        let canonical = format!("{}:{}", group_id, artifact_id);
-        match resolver::resolve(&canonical, Some(ecosystem), None).await {
-            Ok(v) if v.status.is_blocked() => {
-                eprintln!(
-                    "\x1b[31m✗ BLOCKED\x1b[0m  {}:{} — chain registry: REVOKED",
-                    group_id, artifact_id
-                );
-                blocked = true;
+        let canonical = format!("{group_id}:{artifact_id}@{version}");
+        match resolver::install_gate::gate_shim_package(&canonical, ecosystem, allow, None).await {
+            Ok(resolver::install_gate::InstallDecision::Allow) => {
+                eprintln!("\x1b[32m✓\x1b[0m {group_id}:{artifact_id}");
             }
-            Ok(v) if !v.status.is_safe() => {
+            Ok(resolver::install_gate::InstallDecision::AllowUnverified) => {
                 eprintln!(
-                    "\x1b[33m⚠ WARNING\x1b[0m  {}:{} {} — not chain-verified.",
-                    group_id, artifact_id, version
+                    "\x1b[33m⚠ BREAK-GLASS\x1b[0m  {group_id}:{artifact_id} — installing unverified ({})",
+                    resolver::install_gate::ALLOW_UNVERIFIED_ENV
                 );
             }
-            Ok(_) => eprintln!("\x1b[32m✓\x1b[0m {}:{}", group_id, artifact_id),
-            Err(e) => eprintln!("[chain-registry] chain unreachable ({}). Continuing.", e),
+            Ok(resolver::install_gate::InstallDecision::Block { message, .. }) => {
+                eprintln!("\x1b[31m✗ BLOCKED\x1b[0m  {message}");
+                return 1;
+            }
+            Err(err) => {
+                eprintln!("\x1b[31m✗ BLOCKED\x1b[0m  {err}");
+                return 1;
+            }
         }
     }
 
-    if blocked {
-        eprintln!("[chain-registry] Build blocked due to revoked dependency.");
-        return 1;
-    }
-
-    run_real(&args[1..]).await
+    let forwarded = resolver::install_gate::strip_unverified_flag(args);
+    run_real(&forwarded[1..]).await
 }
 
 /// Parse `pom.xml` in the current directory for dependency entries.
