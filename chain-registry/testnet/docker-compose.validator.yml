@@ -5,7 +5,7 @@
 #
 # Usage:
 #   1. cp .env.example .env
-#   2. Edit .env — set your CREG_NODE_ID, CREG_ETH_RPC_URL, CREG_VALIDATOR_KEY, etc.
+#   2. Edit .env — set your CREG_NODE_ID, CREG_ETH_RPC, CREG_VALIDATOR_KEY, etc.
 #   3. docker compose -f docker-compose.validator.yml up -d
 #   4. docker compose -f docker-compose.validator.yml logs -f
 #
@@ -32,7 +32,8 @@ services:
       # Ensure these are set; .env provides defaults
       CREG_CHAIN_SPEC_URL: ${CREG_CHAIN_SPEC_URL}
       CREG_SPEC_SIGNING_PUBKEY: ${CREG_SPEC_SIGNING_PUBKEY}
-      CREG_ETH_RPC_URL: ${CREG_ETH_RPC_URL}
+      CREG_ETH_RPC: ${CREG_ETH_RPC:-${CREG_ETH_RPC_URL:-}}
+      CREG_ETH_RPC_URL: ${CREG_ETH_RPC_URL:-${CREG_ETH_RPC:-}}
       CREG_NODE_ID: ${CREG_NODE_ID}
       CREG_OPERATOR_API_KEY: ${CREG_OPERATOR_API_KEY:?set a high-entropy server-side operator API key}
       CREG_DATA_DIR: /data
