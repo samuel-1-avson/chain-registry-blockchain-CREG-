@@ -282,59 +282,72 @@ async fn process_package(
     // the selected analyzers.
     let should_analyze = is_validator && is_mandatory;
 
-    let (vote, pgp_fingerprint, findings, analysis_bundles, evidence_digest, deterministic_risk) =
-        if should_analyze {
-            if let Some(privkey) = privkey_opt.as_ref() {
-                tracing::info!(
-                    "[Consensus] Running FULL analysis for {} (set size: {}, this node selected)",
-                    canonical,
-                    assigned_validator_count
-                );
-                match validator::validate_package(
-                    &req,
-                    &tarball,
-                    privkey,
-                    prev_manifest.as_ref(),
-                    prev_sandbox.as_ref(),
-                )
-                .await
-                {
-                    Ok(res) => {
-                        let evidence_digest = res.deterministic_risk.evidence_digest.clone();
-                        let deterministic_risk = res.deterministic_risk.to_common_summary();
-                        (
-                            res.vote,
-                            res.pgp_fingerprint,
-                            res.findings,
-                            res.analysis_bundles.to_refs(),
-                            evidence_digest,
-                            deterministic_risk,
-                        )
-                    }
-                    Err(e) => {
-                        tracing::error!("Validation error for {}: {}", canonical, e);
-                        cleanup(&state, &canonical).await;
-                        return;
-                    }
+    let (
+        vote,
+        pgp_fingerprint,
+        findings,
+        analysis_bundles,
+        evidence_digest,
+        deterministic_risk,
+        ml_model_version,
+    ) = if should_analyze {
+        if let Some(privkey) = privkey_opt.as_ref() {
+            tracing::info!(
+                "[Consensus] Running FULL analysis for {} (set size: {}, this node selected)",
+                canonical,
+                assigned_validator_count
+            );
+            match validator::validate_package(
+                &req,
+                &tarball,
+                privkey,
+                prev_manifest.as_ref(),
+                prev_sandbox.as_ref(),
+            )
+            .await
+            {
+                Ok(res) => {
+                    let evidence_digest = res.deterministic_risk.evidence_digest.clone();
+                    let deterministic_risk = res.deterministic_risk.to_common_summary();
+                    let ml_model_version = if res.ml_model_version.trim().is_empty() {
+                        ml_validator::DeepScanner::default().model_version()
+                    } else {
+                        res.ml_model_version.clone()
+                    };
+                    (
+                        res.vote,
+                        res.pgp_fingerprint,
+                        res.findings,
+                        res.analysis_bundles.to_refs(),
+                        evidence_digest,
+                        deterministic_risk,
+                        ml_model_version,
+                    )
                 }
-            } else {
-                tracing::error!(
-                    "[Consensus] Validator node missing private key — cannot analyze {}",
-                    canonical
-                );
-                cleanup(&state, &canonical).await;
-                return;
+                Err(e) => {
+                    tracing::error!("Validation error for {}: {}", canonical, e);
+                    cleanup(&state, &canonical).await;
+                    return;
+                }
             }
         } else {
-            // Non-validator nodes should NOT cast votes — they observe consensus
-            // results from validators but do not participate in the vote.
-            tracing::info!(
-                "[Consensus] Node is NOT a validator — not participating in consensus for {}",
+            tracing::error!(
+                "[Consensus] Validator node missing private key — cannot analyze {}",
                 canonical
             );
             cleanup(&state, &canonical).await;
             return;
-        };
+        }
+    } else {
+        // Non-validator nodes should NOT cast votes — they observe consensus
+        // results from validators but do not participate in the vote.
+        tracing::info!(
+            "[Consensus] Node is NOT a validator — not participating in consensus for {}",
+            canonical
+        );
+        cleanup(&state, &canonical).await;
+        return;
+    };
 
     // Sampling guard moved earlier; the expensive validate_package is now guarded by `should_analyze`.
 
@@ -377,7 +390,6 @@ async fn process_package(
         let signing_key = SigningKey::from_bytes(&key_arr);
         let validator_pubkey = hex::encode(signing_key.verifying_key().as_bytes());
         let approved = matches!(vote, ValidatorVote::Approve);
-        let ml_model_version = ml_validator::DeepScanner::default().model_version();
         let scanner_profile_digest =
             common::scanner_profile_digest(&ml_model_version, &analysis_bundles);
         let reject_reason = match &vote {

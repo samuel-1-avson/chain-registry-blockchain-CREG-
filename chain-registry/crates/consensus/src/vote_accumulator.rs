@@ -903,7 +903,7 @@ mod tests {
             .is_none());
 
         let mut vote = unsigned_vote("v3", &format!("{:0>64}", "v3"), true);
-        vote.ml_model_version = Some("degraded-no-model".into());
+        vote.ml_model_version = Some("degraded-timeout".into());
         assert!(
             state
                 .record_commit(vote, block_hash, true)

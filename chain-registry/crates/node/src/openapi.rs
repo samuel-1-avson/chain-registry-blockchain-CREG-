@@ -1088,12 +1088,16 @@ pub mod paths {
     )]
     pub async fn bridge_anchors() {}
 
-    /// Governance proposal list mirrored from Governance.sol via the bridge.
+    /// Governance proposal list mirrored from Governance.sol via L1 eth_call.
     #[utoipa::path(
         get,
         path = "/v1/governance/proposals",
         tag = "governance",
-        responses((status = 200, body = [Object])),
+        params(("limit" = Option<usize>, Query, description = "Max proposals (default 50, max 100)")),
+        responses(
+            (status = 200, description = "Proposal list, possibly empty when L1 is unconfigured", body = Object),
+            (status = 503, description = "L1 RPC unavailable"),
+        ),
     )]
     pub async fn governance_proposals() {}
 

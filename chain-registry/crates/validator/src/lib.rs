@@ -36,6 +36,9 @@ pub struct ValidationResult {
     pub findings: Vec<Finding>,
     pub analysis_bundles: bundle::AnalysisBundleSet,
     pub deterministic_risk: risk::RiskSummary,
+    /// Scanner version that actually ran (must be `degraded-*` when the scan
+    /// timed out or failed so quorum filters exclude the vote).
+    pub ml_model_version: String,
 }
 
 /// Run all validator pipeline stages and produce a signed vote.
@@ -273,6 +276,7 @@ pub async fn validate_package(
         findings: report.findings,
         analysis_bundles: report.analysis_bundles,
         deterministic_risk,
+        ml_model_version: report.ml_model_version,
     })
 }
 

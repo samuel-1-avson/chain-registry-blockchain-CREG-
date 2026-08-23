@@ -462,13 +462,13 @@ Global flags: `--unverified`, `CREG_NODE_URL`, `CREG_GRPC_URL`, `--output json`.
 - **Fix**: `creg publish` sends only the retired empty/zero wire form (`retired_publisher_zk_attestation`). gRPC admission **rejects** leftover proof bytes or non-zero claimed scores instead of ignoring them. `creg advanced zk-proof` still exists as a local research command; it derives scores from static analysis/sandbox (fail-closed if sandbox is unavailable) and is labeled as not admission evidence (ADR-009).
 - **Residual**: The package circuit still proves caller-selected inequalities, not that a named scanner ran. Do not re-enable `zk_validation` or L1 qualification from these proofs.
 
-### ISSUE-012: ML deep scan returns mock results on invalid/timeout input
+### ISSUE-012: ML deep scan returns mock results on invalid/timeout input — **MITIGATED** (2026-08-23)
 
-- **Severity**: Medium
-- **File**: `crates/ml-validator/src/deep_scan.rs:326-354`
-- **Description**: `mock_result()` / `timeout_result()` mark `is_mock: true` but still allow pipeline continuation with degraded classification.
-- **Impact**: Validators may abstain or downgrade votes inconsistently depending on `CREG_DEGRADED_VALIDATOR_WARN_RATIO`.
-- **Recommended Fix**: Fail closed for Critical-severity paths; uniform policy in `vote_accumulator.rs`.
+- **Severity**: Medium (mitigated)
+- **File**: `crates/ml-validator/src/deep_scan.rs`, `crates/validator/src/static_analysis.rs`, `crates/node/src/validator_pipeline.rs`
+- **Description**: Extraction failure and scan timeout used to return `Ok` mock results (`is_mock: true`) while the pipeline stamped votes with `DeepScanner::default().model_version()` (`creg-detect-v1.0.0`), so incomplete scans counted toward quorum.
+- **Fix**: Corrupt tarballs return `Err(ExtractionError)` and timeouts return `Err(Timeout)`. Static analysis emits Critical `ML001` and stamps `degraded-timeout` / `degraded-extraction` / `degraded-unavailable` on the vote. `is_consensus_grade_vote` already excludes `degraded*` versions. Valid archives with no matching source files still run tarball-level threat intel (`is_mock: false`).
+- **Residual**: A 30s hung worker thread is not killed; the caller fails closed on timeout. Quorum exclusion remains the uniform policy in `vote_accumulator.rs`.
 
 ### ISSUE-013: CREG_DEV_SANDBOX bypass — **MITIGATED** (2026-08-22)
 
@@ -501,13 +501,13 @@ Global flags: `--unverified`, `CREG_NODE_URL`, `CREG_GRPC_URL`, `--output json`.
 - **Fix**: Sync and reorg recovery resolve authority with `verification_set_at` (bootstrap- or checkpoint-rooted certified history). Both `verify_block_consensus_certificate` and `verify_block_signatures` reject a header whose `validator_set_hash` does not match that historical set. Regression: `historical_sync_uses_set_at_height_not_current_tip`.
 - **Residual**: Live weak-subjectivity checkpoint publication is still **HI11-ACTIVATE** (operational). Without a configured checkpoint, rebuilt nodes trust the deployment bootstrap plus imported certified peer history.
 
-### ISSUE-017: Governance API stub returns 501
+### ISSUE-017: Governance API stub returns 501 — **MITIGATED** (2026-08-23)
 
-- **Severity**: Medium
-- **File**: `crates/node/src/api.rs:1114-1126`
-- **Description**: `/v1/governance/proposals` returns NOT_IMPLEMENTED.
-- **Impact**: Explorer governance pages empty on testnet despite on-chain Governance.sol activity.
-- **Recommended Fix**: Index governance events from L1 or chain transactions.
+- **Severity**: Medium (mitigated)
+- **File**: `crates/node/src/governance_api.rs`, `crates/node/src/api.rs`
+- **Description**: `/v1/governance/proposals` returned HTTP 501 even though `Governance.sol` is deployed.
+- **Fix**: The handler mirrors `proposalCount` / `getProposal` / `threshold` via L1 `eth_call`. Unconfigured RPC or zero `CREG_GOVERNANCE_ADDR` returns HTTP 200 with `source: "unconfigured"` and an empty list. RPC failures return HTTP 503 (`governance_l1_unavailable`), never 501. Proposer addresses are best-effort from recent `ProposalSubmitted` logs.
+- **Residual**: This is a read-only list, not authenticated submit/vote (still P2 **GOVERNANCE-API**). Proposer may be empty when logs are outside the 10k-block lookback. Explorer nav remains gated by `VITE_GOVERNANCE_ENABLED`.
 
 ### ISSUE-018: Appeal contract ETH transfers without reentrancy guard
 
@@ -592,7 +592,7 @@ Global flags: `--unverified`, `CREG_NODE_URL`, `CREG_GRPC_URL`, `--output json`.
 ### 5.2 Priority 2 — Feature Completion
 
 1. ~~Complete VRF.sol callback or remove from active chain spec (ISSUE-009).~~ Done — redeploy VRF on Sepolia for live on-chain fix.
-2. Wire governance proposals API to L1 events (ISSUE-017).
+2. Wire remaining authenticated governance write APIs (P2 **GOVERNANCE-API**). Read-only proposal list is ISSUE-017.
 3. Enable threshold encryption end-to-end when feature flag flips (ISSUE-014).
 4. Integrate `ZKSlashingVerifier` with `SlashingEvidence` workflow.
 5. Finish cross-chain client operational addresses (`cross-chain/src/lib.rs`).

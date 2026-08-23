@@ -123,7 +123,7 @@ export default function Governance() {
     return (
       <EmptyState
         title="Governance disabled"
-        message="On-chain governance is not enabled in this explorer build. The node returns HTTP 501 until governance is wired. Set VITE_GOVERNANCE_ENABLED=true when the feature ships."
+        description="On-chain governance is hidden in this explorer build. Set VITE_GOVERNANCE_ENABLED=true to list proposals mirrored from Governance.sol when the node has CREG_ETH_RPC and CREG_GOVERNANCE_ADDR configured."
       />
     )
   }
@@ -141,6 +141,7 @@ export default function Governance() {
     return list.filter((p) => (p.type || 'other').toLowerCase() === typeFilter)
   }, [data, typeFilter])
   const proposalStatus = getEndpointStatus(data)
+  const unconfigured = data?.source === 'unconfigured'
 
   // Aggregate stats
   const all = data?.proposals || (Array.isArray(data) ? data : [])
@@ -198,12 +199,14 @@ export default function Governance() {
       {loading && !all.length && <SkeletonCard lines={8} />}
       {!loading && proposals.length === 0 && (
         <EmptyState
-          title={proposalStatus ? 'Governance proposals unavailable' : 'No proposals'}
+          title={proposalStatus ? 'Governance proposals unavailable' : unconfigured ? 'Governance not configured' : 'No proposals'}
           description={proposalStatus
-            ? 'This node does not expose governance proposal data yet. The page stays available, but proposals cannot be listed until that endpoint is deployed.'
+            ? 'This node could not reach Governance.sol (HTTP 503) or the endpoint is missing on an older node. The page stays available, but proposals cannot be listed until L1 RPC is healthy.'
+            : unconfigured
+            ? 'This node has no L1 RPC or Governance.sol address. Set CREG_ETH_RPC and CREG_GOVERNANCE_ADDR to list on-chain proposals.'
             : typeFilter !== 'all'
             ? `No "${typeFilter}" proposals found. Try another filter.`
-            : 'No governance activity yet. Proposals are created by validators through on-chain transactions.'}
+            : 'No governance activity yet. Proposals are created by signers through on-chain Governance.sol transactions.'}
         />
       )}
       <div style={{ display: 'grid', gap: 'var(--space-4)' }}>

@@ -44,6 +44,8 @@ pub struct ValidationReport {
     /// `None` when the LLM stage has not yet run.
     pub llm_review: Option<LlmReview>,
     pub deterministic_risk: Option<RiskSummary>,
+    /// Scanner version from Stage 1 deep scan (may be `degraded-*`).
+    pub ml_model_version: String,
 }
 
 impl ValidationReport {
@@ -59,6 +61,7 @@ impl ValidationReport {
             ensemble_score: 0.0,
             llm_review: None,
             deterministic_risk: None,
+            ml_model_version: String::new(),
         }
     }
 
@@ -67,6 +70,7 @@ impl ValidationReport {
         self.deterministic_score = result.deterministic_score;
         self.advisory_score = result.advisory_score;
         self.ensemble_score = result.ensemble_score;
+        self.ml_model_version = result.ml_model_version;
         self.findings.extend(result.findings);
     }
 
