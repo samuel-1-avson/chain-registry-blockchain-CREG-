@@ -171,7 +171,7 @@ fn print_path_instructions(dir: &Path) {
     }
 }
 
-fn default_shim_dir() -> PathBuf {
+pub(crate) fn default_shim_dir() -> PathBuf {
     #[cfg(windows)]
     {
         // %LOCALAPPDATA%\creg\bin  (e.g. C:\Users\Alice\AppData\Local\creg\bin)
@@ -186,5 +186,37 @@ fn default_shim_dir() -> PathBuf {
             .unwrap_or_else(|| PathBuf::from("/tmp"))
             .join(".local")
             .join("bin")
+    }
+}
+
+/// True when `path` is a binary sitting in the CREG shim directory.
+pub(crate) fn path_is_in_shim_dir(path: &Path) -> bool {
+    let Some(parent) = path.parent() else {
+        return false;
+    };
+    match (parent.canonicalize(), default_shim_dir().canonicalize()) {
+        (Ok(parent), Ok(shim)) => parent == shim,
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_shim_dir_is_under_creg_or_local_bin() {
+        let dir = default_shim_dir();
+        let rendered = dir.to_string_lossy().replace('\\', "/").to_lowercase();
+        assert!(
+            rendered.contains("/creg/bin") || rendered.ends_with("/.local/bin"),
+            "unexpected shim dir {rendered}"
+        );
+    }
+
+    #[test]
+    fn path_outside_shim_dir_is_not_filtered() {
+        let outsider = std::env::temp_dir().join("not-a-creg-shim").join("npm");
+        assert!(!path_is_in_shim_dir(&outsider));
     }
 }

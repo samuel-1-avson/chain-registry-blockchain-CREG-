@@ -5,6 +5,7 @@
 pub mod cache;
 mod chain_client;
 pub mod downloader;
+pub mod install_gate;
 
 use anyhow::Result;
 use chrono::Utc;
@@ -59,7 +60,7 @@ pub async fn resolve_id(id: &PackageId, node_url: Option<&str>) -> Result<TrustV
     Ok(verdict)
 }
 
-fn parse_pkg(raw: &str) -> (String, Option<String>) {
+pub(crate) fn parse_pkg(raw: &str) -> (String, Option<String>) {
     // Strip ecosystem prefix if present (e.g. "npm:express" -> "express")
     let mut clean = raw;
     for eco in &["npm:", "pypi:", "cargo:", "rubygems:", "maven:"] {
@@ -85,7 +86,7 @@ fn parse_pkg(raw: &str) -> (String, Option<String>) {
     }
 }
 
-fn default_node_url() -> String {
+pub(crate) fn default_node_url() -> String {
     std::env::var("CREG_NODE_URL").unwrap_or_else(|_| "http://localhost:8080".into())
 }
 

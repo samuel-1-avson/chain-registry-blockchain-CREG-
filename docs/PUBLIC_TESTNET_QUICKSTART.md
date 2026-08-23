@@ -116,8 +116,13 @@ creg verify npm:lodash@4.17.21 --node-url "$CREG_NODE_URL"
 
 ```bash
 creg setup-shims
-# Shims warn on unverified installs but may fall through to npm/pip on chain errors.
-# Prefer `creg install` for verified IPFS-backed installs.
+# Named-package installs (`npm install lodash`, `pip install requests`, …) use
+# the same fail-closed gate as `creg install`. Unverified/unknown/revoked
+# packages and an unreachable node are refused. Break-glass:
+#   --unverified   or   CREG_ALLOW_UNVERIFIED=true
+# `pip install -r requirements.txt` is also refused unless that break-glass is set.
+# Bare `npm install` / `npm ci` (lockfile sync, no package args) is still not
+# chain-gated. Prefer `creg install` for verified IPFS-backed artifacts.
 ```
 
 ### Browse the registry
