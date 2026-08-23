@@ -92,7 +92,7 @@ mod chain_store_tests {
             header: BlockHeader {
                 height: 1,
                 prev_hash: store.tip_hash().unwrap(),
-                merkle_root: "abc".into(),
+                merkle_root: common::merkle_root(&[]),
                 proposer_id: "test-node".into(),
                 timestamp: Utc::now(),
                 validator_set_hash: "dev".into(),
@@ -170,7 +170,7 @@ mod chain_store_tests {
             header: BlockHeader {
                 height: 1,
                 prev_hash: store.tip_hash().unwrap(),
-                merkle_root: "a".into(),
+                merkle_root: common::merkle_root(std::slice::from_ref(&pub_tx)),
                 proposer_id: "t".into(),
                 timestamp: Utc::now(),
                 validator_set_hash: "dev".into(),
@@ -193,7 +193,7 @@ mod chain_store_tests {
             header: BlockHeader {
                 height: 2,
                 prev_hash: block1.hash(),
-                merkle_root: "b".into(),
+                merkle_root: common::merkle_root(std::slice::from_ref(&revoke_tx)),
                 proposer_id: "t".into(),
                 timestamp: Utc::now(),
                 validator_set_hash: "dev".into(),
@@ -369,7 +369,7 @@ mod consensus_tests {
             header: BlockHeader {
                 height,
                 prev_hash: prev.to_string(),
-                merkle_root: "root".into(),
+                merkle_root: common::merkle_root(&[]),
                 proposer_id: proposer_id.to_string(),
                 timestamp: Utc::now(),
                 validator_set_hash: "dev".into(),
