@@ -4,8 +4,9 @@
 > Network: `creg-testnet-1` (Sepolia-anchored public alpha)  
 > Audience: external validator operators joining the CREG testnet
 >
-> **Current reality (2026-07-29):** the checked-in Sepolia topology records
-> one validator and no bootnodes. External admission is not represented as
+> **Current reality (2026-08-23):** the signed Sepolia spec records four
+> coordinated validators (`validator-1`…`validator-4`) and no bootnodes.
+> The public GCP fleet is paused. External admission is not represented as
 > open or complete. This is a recruitment/readiness checklist until operators
 > publish a signed onboarding window and independently verify the live fleet.
 
@@ -51,9 +52,9 @@ the onboarding window; this table is not an authority to transact:
 
 | Contract | Address |
 | --- | --- |
-| Staking | `0xf28C63C4Aafd27025E535Ab9ab7B4daC18C96Bc2` |
-| CREG Token | `0x97c21d46B3eac604e92E907D54aA92eEc0Af550b` |
-| Registry | `0x3aCfF05d00AC199412a94326eD8aA874aaA3596c` |
+| Staking | `0xE906ae140987CC2cA711dDa4ee43574d3aDc31b7` |
+| CREG Token | `0xB326dB1C6e457f4AdfBb11f17FDc145ED585b288` |
+| Registry | `0xF232cC6F5C6EfC74C7517B209D15baBd57b817eE` |
 
 ## 3. Keys
 
@@ -78,9 +79,9 @@ creg stake --amount 100 --role validator \
 - [ ] Register identity (binds EVM address, node ID, Ed25519 pubkey with both signatures):
 
 ```bash
-# POST /v1/validators/register on the public API
-# See /v1/runtime/config → validator_registration_note for the exact payload
-export CREG_NODE_URL=https://api.testnet.cregnet.dev
+# POST /v1/validators/register on a reachable node (the public API is paused).
+# See /v1/runtime/config → validator_registration_note for the exact payload.
+export CREG_NODE_URL=http://127.0.0.1:8080
 ```
 
 - [ ] Request consensus admission (an active validator runs `approveByConsensus`); coordinate via the support channel in `chain-spec.sepolia.json` → `support.issues`.
@@ -99,11 +100,11 @@ export CREG_NODE_URL=https://api.testnet.cregnet.dev
 | `CREG_TESTNET` | `true` |
 | `CREG_DEV_SANDBOX` | **unset or `false`** — never `true` on a public validator |
 | `CREG_CHAIN_SPEC_URL` | Signed spec, e.g. `https://spec.testnet.cregnet.dev/chain-spec.json` |
-| `CREG_SPEC_SIGNING_PUBKEY` | From the operator docs (verifies spec signature) |
+| `CREG_SPEC_SIGNING_PUBKEY` | **Build-time pin only** (`build.rs` / `option_env`). Runtime env is ignored. Confirm the binary was built with `3fe87833177b04b0a18600eace041692a35fb2b85f6e14e6734d894a0fd61c01` |
 | `CREG_P2P_SEEDS` | At least one dialable multiaddr (`CREG_VALIDATOR_P2P_SEEDS` is the fallback name) |
 | `CREG_STAKING_ADDR` | Signed-spec staking contract (validators refuse to boot without a parseable address) |
 | `CREG_YARA_RULES_DIR` | Directory of `.yar`/`.yara` rules (votes are `degraded-yara-missing` if empty) |
-| `CREG_ETH_RPC` | Archive-capable Sepolia RPC |
+| `CREG_ETH_RPC` | Archive-capable Sepolia RPC (`CREG_ETH_RPC_URL` is the fallback name) |
 | `CREG_IPFS_URL` | Local Kubo or operator IPFS API |
 | `CREG_EXPECTED_L1_CHAIN_ID` | `11155111` |
 | `CREG_WEAK_SUBJECTIVITY_CHECKPOINT` | Exact single-line checkpoint certificate independently approved for the onboarding window |

@@ -334,7 +334,7 @@ impl NodeConfig {
                 .collect(),
             p2p_listen: env("CREG_P2P_LISTEN", "/ip4/0.0.0.0/tcp/4001"),
             p2p_seeds: p2p_seeds_from_env(),
-            eth_rpc_url: env("CREG_ETH_RPC", "http://127.0.0.1:8545"),
+            eth_rpc_url: eth_rpc_from_env(),
             registry_addr: env(
                 "CREG_REGISTRY_ADDR",
                 "0x0000000000000000000000000000000000000000",
@@ -892,6 +892,12 @@ fn p2p_seeds_from_env() -> Vec<String> {
         .or_else(|| nonempty_env("CREG_VALIDATOR_P2P_SEEDS"))
         .map(|raw| parse_csv(&raw))
         .unwrap_or_default()
+}
+
+fn eth_rpc_from_env() -> String {
+    nonempty_env("CREG_ETH_RPC")
+        .or_else(|| nonempty_env("CREG_ETH_RPC_URL"))
+        .unwrap_or_else(|| "http://127.0.0.1:8545".to_string())
 }
 
 fn normalize_cors_origin(origin: &str) -> String {
@@ -1528,6 +1534,22 @@ mod tests {
 
         std::env::remove_var("CREG_P2P_SEEDS");
         std::env::remove_var("CREG_VALIDATOR_P2P_SEEDS");
+    }
+
+    #[test]
+    fn eth_rpc_prefers_primary_env_then_url_alias() {
+        std::env::remove_var("CREG_ETH_RPC");
+        std::env::remove_var("CREG_ETH_RPC_URL");
+        assert_eq!(eth_rpc_from_env(), "http://127.0.0.1:8545");
+
+        std::env::set_var("CREG_ETH_RPC_URL", "https://sepolia.example/rpc");
+        assert_eq!(eth_rpc_from_env(), "https://sepolia.example/rpc");
+
+        std::env::set_var("CREG_ETH_RPC", "https://archive.example/rpc");
+        assert_eq!(eth_rpc_from_env(), "https://archive.example/rpc");
+
+        std::env::remove_var("CREG_ETH_RPC");
+        std::env::remove_var("CREG_ETH_RPC_URL");
     }
 
     fn validator_config_with_key() -> NodeConfig {
