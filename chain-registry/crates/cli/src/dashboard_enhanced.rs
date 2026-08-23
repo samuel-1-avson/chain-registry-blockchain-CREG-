@@ -461,7 +461,7 @@ fn draw_main_view(f: &mut Frame, app: &App) {
                 Span::raw(rep),
                 Span::styled(
                     status,
-                    Style::default().fg(if status == "online" || status == "self" {
+                    Style::default().fg(if common::validator_status_is_active(status) {
                         Color::Green
                     } else {
                         Color::Red

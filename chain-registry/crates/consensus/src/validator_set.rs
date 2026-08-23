@@ -103,9 +103,71 @@ impl From<common::ValidatorSet> for ValidatorSet {
                 eth_address: Some(v.eth_address.clone()),
                 stake: v.stake,
                 reputation: v.reputation.try_into().unwrap_or(100),
-                is_active: v.status == "online" || v.status == "self",
+                is_active: common::validator_status_is_active(&v.status),
             });
         }
         vs
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ValidatorInfo, ValidatorSet};
+
+    fn common_validator(id: &str, status: &str) -> common::Validator {
+        common::Validator {
+            id: id.into(),
+            alias: id.into(),
+            pubkey: "11".repeat(32),
+            eth_address: format!("0x{:040}", 1),
+            stake: 100,
+            reputation: 100,
+            status: status.into(),
+            performance_score: 500,
+            contribution_count: 0,
+        }
+    }
+
+    #[test]
+    fn spec_status_active_counts_toward_pbft_quorum() {
+        let common_vs = common::ValidatorSet::new(vec![
+            common_validator("core-1", "active"),
+            common_validator("core-2", "active"),
+            common_validator("core-3", "ACTIVE"),
+            common_validator("core-4", "online"),
+        ]);
+        let vs = ValidatorSet::from(common_vs);
+        assert_eq!(vs.len(), 4);
+        assert!(vs.is_member("core-1"));
+        assert!(vs.is_member("core-3"));
+    }
+
+    #[test]
+    fn offline_and_pending_are_not_pbft_active() {
+        let common_vs = common::ValidatorSet::new(vec![
+            common_validator("core-1", "offline"),
+            common_validator("core-2", "pending"),
+            common_validator("core-3", "jailed"),
+            common_validator("core-4", "self"),
+        ]);
+        let vs = ValidatorSet::from(common_vs);
+        assert_eq!(vs.len(), 1);
+        assert!(vs.is_member("core-4"));
+        assert!(!vs.is_member("core-1"));
+    }
+
+    #[test]
+    fn inactive_flag_excludes_member_even_if_present() {
+        let mut vs = ValidatorSet::new();
+        vs.add(ValidatorInfo {
+            id: "core-1".into(),
+            pubkey: "11".repeat(32),
+            eth_address: None,
+            stake: 100,
+            reputation: 100,
+            is_active: false,
+        });
+        assert_eq!(vs.len(), 0);
+        assert!(!vs.is_member("core-1"));
     }
 }

@@ -5,6 +5,11 @@ use axum::http::{HeaderValue, Method};
 use std::path::PathBuf;
 use uuid::Uuid;
 
+/// Floor applied when overlaying chain-spec `vote_timeout_ms` onto
+/// `vote_timeout_secs`. Matches the behavioural-sandbox wall clock so a
+/// 10s spec timeout cannot expire while analysis is still running.
+pub(crate) const MIN_SPEC_VOTE_TIMEOUT_SECS: u64 = 120;
+
 /// Empty/zero staking means chain-authoritative validator-set sync is off.
 /// A malformed address is never treated as zero.
 pub fn parse_staking_contract_address(raw: &str) -> Result<Option<Address>, String> {
@@ -328,12 +333,7 @@ impl NodeConfig {
                 .map(String::from)
                 .collect(),
             p2p_listen: env("CREG_P2P_LISTEN", "/ip4/0.0.0.0/tcp/4001"),
-            p2p_seeds: std::env::var("CREG_P2P_SEEDS")
-                .unwrap_or_default()
-                .split(',')
-                .filter(|s| !s.is_empty())
-                .map(String::from)
-                .collect(),
+            p2p_seeds: p2p_seeds_from_env(),
             eth_rpc_url: env("CREG_ETH_RPC", "http://127.0.0.1:8545"),
             registry_addr: env(
                 "CREG_REGISTRY_ADDR",
@@ -522,6 +522,10 @@ impl NodeConfig {
             Ok(Some(_)) => {}
         }
 
+        if let Some(error) = self.validator_missing_p2p_seeds_error() {
+            errors.push(error);
+        }
+
         // Validate IPFS URL is a parseable HTTP endpoint.
         if self.ipfs_url.is_empty() {
             errors.push(
@@ -594,6 +598,21 @@ impl NodeConfig {
         }
 
         errors
+    }
+
+    fn validator_missing_p2p_seeds_error(&self) -> Option<String> {
+        if !self.is_validator || !self.p2p_seeds.is_empty() {
+            return None;
+        }
+        if allow_isolated_empty_p2p_seeds(self.is_testnet) {
+            return None;
+        }
+        Some(
+            "CREG_IS_VALIDATOR=true requires at least one dialable P2P seed \
+             (CREG_P2P_SEEDS or CREG_VALIDATOR_P2P_SEEDS). Isolated lab nodes may set \
+             CREG_TESTNET=true and CREG_ALLOW_EMPTY_P2P_SEEDS=true."
+                .into(),
+        )
     }
 
     /// MAL-001: public validators (CREG_PUBLIC_VALIDATOR=true) must not run the
@@ -794,7 +813,11 @@ impl NodeConfig {
         if std::env::var("CREG_VOTE_TIMEOUT_SECS").is_err()
             && spec.consensus_params.vote_timeout_ms > 0
         {
-            self.vote_timeout_secs = spec.consensus_params.vote_timeout_ms.div_ceil(1000).max(1);
+            self.vote_timeout_secs = spec
+                .consensus_params
+                .vote_timeout_ms
+                .div_ceil(1000)
+                .max(MIN_SPEC_VOTE_TIMEOUT_SECS);
         }
         // Validator set from spec (unless env override is non-empty)
         if self.validator_set.validators.is_empty() {
@@ -826,6 +849,38 @@ fn parse_csv(raw: &str) -> Vec<String> {
         }
     }
     values
+}
+
+fn env_flag_true(name: &str) -> bool {
+    std::env::var(name)
+        .ok()
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
+}
+
+pub(crate) fn allow_isolated_empty_p2p_seeds(is_testnet: bool) -> bool {
+    is_testnet
+        && env_flag_true("CREG_ALLOW_EMPTY_P2P_SEEDS")
+        && !env_flag_true("CREG_PUBLIC_VALIDATOR")
+}
+
+fn nonempty_env(name: &str) -> Option<String> {
+    match std::env::var(name) {
+        Ok(value) if !value.trim().is_empty() => Some(value),
+        _ => None,
+    }
+}
+
+fn p2p_seeds_from_env() -> Vec<String> {
+    nonempty_env("CREG_P2P_SEEDS")
+        .or_else(|| nonempty_env("CREG_VALIDATOR_P2P_SEEDS"))
+        .map(|raw| parse_csv(&raw))
+        .unwrap_or_default()
 }
 
 fn normalize_cors_origin(origin: &str) -> String {
@@ -1377,6 +1432,122 @@ mod tests {
                 .iter()
                 .all(|error| !error.contains("ZK package key files")),
             "zk_validation false must not demand keys, got {:?}",
+            cfg.validate()
+        );
+    }
+
+    #[test]
+    fn apply_chain_spec_floors_vote_timeout_to_sandbox_wall_clock() {
+        let previous = std::env::var("CREG_VOTE_TIMEOUT_SECS").ok();
+        std::env::remove_var("CREG_VOTE_TIMEOUT_SECS");
+
+        let spec: common::ChainSpec =
+            serde_json::from_str(include_str!("../../../testnet/chain-spec.example.json"))
+                .expect("example chain spec parses");
+        assert_eq!(spec.consensus_params.vote_timeout_ms, 10_000);
+
+        let mut cfg = base_config();
+        cfg.vote_timeout_secs = 10;
+        cfg.apply_chain_spec(&spec, false);
+        assert_eq!(cfg.vote_timeout_secs, MIN_SPEC_VOTE_TIMEOUT_SECS);
+
+        match previous {
+            Some(value) => std::env::set_var("CREG_VOTE_TIMEOUT_SECS", value),
+            None => std::env::remove_var("CREG_VOTE_TIMEOUT_SECS"),
+        }
+    }
+
+    #[test]
+    fn explicit_vote_timeout_env_is_not_overwritten_by_spec() {
+        std::env::set_var("CREG_VOTE_TIMEOUT_SECS", "15");
+        let spec: common::ChainSpec =
+            serde_json::from_str(include_str!("../../../testnet/chain-spec.example.json"))
+                .expect("example chain spec parses");
+        let mut cfg = base_config();
+        cfg.vote_timeout_secs = 15;
+        cfg.apply_chain_spec(&spec, false);
+        assert_eq!(cfg.vote_timeout_secs, 15);
+        std::env::remove_var("CREG_VOTE_TIMEOUT_SECS");
+    }
+
+    #[test]
+    fn p2p_seeds_prefer_primary_env_then_validator_alias() {
+        std::env::remove_var("CREG_P2P_SEEDS");
+        std::env::remove_var("CREG_VALIDATOR_P2P_SEEDS");
+        assert!(p2p_seeds_from_env().is_empty());
+
+        std::env::set_var(
+            "CREG_VALIDATOR_P2P_SEEDS",
+            "/ip4/1.1.1.1/tcp/1, /ip4/2.2.2.2/tcp/2",
+        );
+        assert_eq!(
+            p2p_seeds_from_env(),
+            vec![
+                "/ip4/1.1.1.1/tcp/1".to_string(),
+                "/ip4/2.2.2.2/tcp/2".to_string()
+            ]
+        );
+
+        std::env::set_var("CREG_P2P_SEEDS", "/ip4/9.9.9.9/tcp/9");
+        assert_eq!(p2p_seeds_from_env(), vec!["/ip4/9.9.9.9/tcp/9".to_string()]);
+
+        std::env::remove_var("CREG_P2P_SEEDS");
+        std::env::remove_var("CREG_VALIDATOR_P2P_SEEDS");
+    }
+
+    fn validator_config_with_key() -> NodeConfig {
+        let mut cfg = base_config();
+        cfg.is_validator = true;
+        cfg.validator_privkey =
+            Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into());
+        cfg
+    }
+
+    #[test]
+    fn validator_without_p2p_seeds_is_rejected_except_isolated_lab() {
+        std::env::remove_var("CREG_ALLOW_EMPTY_P2P_SEEDS");
+        std::env::remove_var("CREG_PUBLIC_VALIDATOR");
+
+        let cfg = validator_config_with_key();
+        assert!(
+            cfg.validate().iter().any(|error| error
+                .contains("CREG_IS_VALIDATOR=true requires at least one dialable P2P seed")),
+            "expected empty-seed hard error, got {:?}",
+            cfg.validate()
+        );
+
+        std::env::set_var("CREG_ALLOW_EMPTY_P2P_SEEDS", "true");
+        assert!(
+            cfg.validate()
+                .iter()
+                .all(|error| !error.contains("dialable P2P seed")),
+            "isolated lab hatch should allow empty seeds, got {:?}",
+            cfg.validate()
+        );
+
+        std::env::set_var("CREG_PUBLIC_VALIDATOR", "true");
+        assert!(
+            cfg.validate()
+                .iter()
+                .any(|error| error.contains("dialable P2P seed")),
+            "public validators must not use the empty-seed hatch, got {:?}",
+            cfg.validate()
+        );
+
+        std::env::remove_var("CREG_ALLOW_EMPTY_P2P_SEEDS");
+        std::env::remove_var("CREG_PUBLIC_VALIDATOR");
+    }
+
+    #[test]
+    fn observer_may_start_without_p2p_seeds() {
+        std::env::remove_var("CREG_ALLOW_EMPTY_P2P_SEEDS");
+        let cfg = base_config();
+        assert!(!cfg.is_validator);
+        assert!(
+            cfg.validate()
+                .iter()
+                .all(|error| !error.contains("dialable P2P seed")),
+            "observers may start with empty seeds, got {:?}",
             cfg.validate()
         );
     }

@@ -60,6 +60,51 @@ fn restore_stale_context_transactions(
     finalized_tx::sync_pending_buffer_depth(pending_txs.len());
 }
 
+async fn drive_pbft_view_changes(state: Arc<RwLock<NodeState>>, p2p_handle: crate::p2p::P2PHandle) {
+    let mut ticker = interval(Duration::from_secs(5));
+    loop {
+        ticker.tick().await;
+        let (signals, node_id, privkey) = {
+            let mut s = state.write().await;
+            let node_id = s.config.node_id.clone();
+            let privkey = s.config.validator_privkey.clone();
+            let _ = s.pbft_engine.cleanup_stale_rounds();
+            let signals = s.pbft_engine.timeout_rounds(&node_id);
+            (signals, node_id, privkey)
+        };
+        let Some(privkey_hex) = privkey else {
+            continue;
+        };
+        let Ok(pk_bytes) = hex::decode(privkey_hex.trim_start_matches("0x")) else {
+            tracing::warn!("Skipping view-change broadcast: validator key is not valid hex");
+            continue;
+        };
+        let Ok(sk) = ed25519_dalek::SigningKey::try_from(pk_bytes.as_slice()) else {
+            tracing::warn!("Skipping view-change broadcast: validator key is not 32 bytes");
+            continue;
+        };
+        use ed25519_dalek::Signer;
+        for signal in signals {
+            let msg = format!("{}:view_change:{}", signal.block_hash, signal.new_view);
+            let gossip = common::GossipMessage::ViewChange {
+                block_hash: signal.block_hash,
+                new_view: signal.new_view,
+                validator_id: node_id.clone(),
+                signature: hex::encode(sk.sign(msg.as_bytes()).to_bytes()),
+            };
+            if let Ok(data) = serde_json::to_vec(&gossip) {
+                let _ = p2p_handle
+                    .sender
+                    .send(crate::p2p::P2PCommand::Broadcast {
+                        topic: crate::p2p::VIEW_CHANGE_TOPIC.into(),
+                        data,
+                    })
+                    .await;
+            }
+        }
+    }
+}
+
 pub async fn run(
     state: Arc<RwLock<NodeState>>,
     rx: finalized_tx::FinalizedTxReceiver,
@@ -84,6 +129,12 @@ pub async fn run(
         block_interval,
         fallback_window_secs
     );
+
+    {
+        let timeout_state = Arc::clone(&state);
+        let timeout_p2p = p2p_handle.clone();
+        tokio::spawn(drive_pbft_view_changes(timeout_state, timeout_p2p));
+    }
 
     let mut last_seen_tip: u64 = {
         let s = state.read().await;
@@ -304,7 +355,7 @@ async fn prepare_proposer_context(
         s.validator_set
             .validators
             .iter()
-            .filter(|v| v.status == "online" || v.status == "self")
+            .filter(|v| common::validator_status_is_active(&v.status))
             .map(|v| {
                 let (vrf_output, vrf_proof) = s
                     .vrf_proofs

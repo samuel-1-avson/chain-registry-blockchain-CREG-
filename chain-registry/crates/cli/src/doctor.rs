@@ -233,7 +233,7 @@ fn append_fleet_consensus_checks(checks: &mut Vec<DoctorCheck>) {
         checks.push(DoctorCheck::pass(
             "Vote timeout",
             false,
-            "unset (defaults to chain-spec vote_timeout_ms or 10s)",
+            "unset (floors chain-spec vote_timeout_ms to at least 120s to match sandbox duration)",
         ));
     }
 }
