@@ -20,6 +20,12 @@ path = "src/bin/dump_openapi.rs"
 name = "creg-indexer"
 path = "src/bin/creg_indexer.rs"
 
+# Test-only sidecar used to prove the cleared-environment private-temp launch
+# contract. It is not a production namespace-authority verifier.
+[[bin]]
+name = "creg-authority-rejection-fixture"
+path = "src/bin/creg_authority_rejection_fixture.rs"
+
 [dependencies]
 common    = { path = "../common" }
 chain-registry-secrets = { path = "../secrets" }

@@ -41,7 +41,7 @@
 | `cargo fmt --all -- --check` | Pending | The pre-format check found format-only diffs; formatting is deferred until the active all-target run finishes |
 | Checkpoint and CR-07 activation validators | Passed (11/11 each) | Disabled-by-default manifests and certificate validation fail closed |
 | npm verifier | Passed (20/20; 1 external production fixture skipped) | Offline registry/provenance cryptography and archive/challenge checks pass; the verifier deliberately cannot return success without an official npm authentication-mode signal |
-| PyPI verifier | Passed (29/29; 1 external production fixture skipped) | Offline PEP 740/Sigstore verification and bounded archive parsing pass; the current Rust cleared environment cannot yet launch the frozen Windows candidate |
+| PyPI verifier | Passed (29/29; 1 external production fixture skipped); private-temp launch in-repo | Offline PEP 740/Sigstore verification and bounded archive parsing pass. Rust now exports a host-visible private TEMP after `env_clear()`. Local frozen Windows rejection through `verify_with_sidecar` is not a rebuilt hash or positive fixture. |
 | Local Foundry v1.6 nightly suite | Passed (111/111 across 12 suites) | Contract tests, including 1,000-run fuzz cases, pass locally; the pinned v1.7.1 clean-CI run is still pending |
 | Contract CI workflow and dependency bootstrap smoke | Passed locally | Workflow pins Foundry/action/dependency revisions; YAML, shell syntax, and clean dependency clone were validated, but no remote CI run is claimed |
 | `creg chain-spec validate testnet/chain-spec.sepolia.json` | Failed closed | Declared genesis `0x0bb4…6660` differs from computed `0xddd1…1e0a`; canonical and two spec-server SHA-256 values also differ. This is a real publication blocker, not a test defect. |
@@ -49,7 +49,7 @@
 
 ## Required next work
 
-1. Finish the current full Rust workspace run, add the private sidecar scratch-directory contract, then rerun rustfmt/check and affected node/workspace tests.
+1. Rerun rustfmt/check and a workspace all-target suite after the private-temp sidecar launch patch, then run the pinned Foundry v1.7.1 suite.
 2. Finish epoch-bound EIP-712 verdict/admission review and run the pinned Foundry v1.7.1 suite.
 3. Add reviewed production npm/PyPI policy and trust material, an official npm authentication-mode signal, live positive fixtures, platform artifacts, and signed activation approval; keep recovery fail closed until every gate passes.
 4. Regenerate and visually verify the workflow/whitepaper PDFs, synchronize public and Functions mirrors, and refresh all manifest hashes.

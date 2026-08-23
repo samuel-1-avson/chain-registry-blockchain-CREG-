@@ -861,12 +861,11 @@ now replace the earlier rejection fixture as implementation artifacts:
   CPython runtime and dependencies.
 
 These are local candidate/build results, not reviewed production releases.
-The PyPI Windows candidate also exposed a real integration gate: the node's
-cleared child environment currently omits the fresh private per-invocation
-`TEMP`/`TMP`/`TMPDIR` that the one-file bootloader requires. Inheriting ambient
-temp state is not an acceptable workaround; the node must create, permission,
-hold, and remove a private scratch directory and pass only those absolute temp
-paths plus the protocol variable.
+The node now creates, permissions, holds, and removes a private per-invocation
+scratch directory and passes only those absolute host-visible temp paths plus
+the protocol variable into a cleared child environment. Inheriting ambient
+temp state remains forbidden. A local Windows one-file rejection through that
+launcher is not a rebuilt hash, positive fixture, or activation.
 The official npm trusted-publisher authentication-mode signal is externally
 unavailable, so npm authority must remain fail-closed. Neither candidate has
 reviewed production policy/root material, a live positive fixture, all target
