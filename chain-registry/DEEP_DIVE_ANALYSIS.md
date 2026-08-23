@@ -493,13 +493,13 @@ Global flags: `--unverified`, `CREG_NODE_URL`, `CREG_GRPC_URL`, `--output json`.
 - **Fix**: Store limits drive wasmtime `StoreLimits` and stack size; syscall budget is enforced. `stdio`/`clock`/`random`/`filesystem-*` gate WASI errno (`ENOTCAPABLE` when denied). `fd_write` captures stdout/stderr when `stdio` is granted. Validator WASM path uses `CapabilitySet::validator()` and `ResourceLimits::strict()`.
 - **Residual**: WASM remains weaker than nsjail/gVisor; filesystem capabilities still refuse path_open (`ENOSYS`) rather than a real preopen.
 
-### ISSUE-016: Sync lacks historical validator set verification
+### ISSUE-016: Sync lacks historical validator set verification — **MITIGATED** (2026-08-23)
 
-- **Severity**: Medium
-- **File**: `crates/node/src/sync.rs:163-166`
-- **Description**: Comment ISSUE-050: sync verifies signatures but not validator-set membership at historical heights.
-- **Impact**: Long-range sync from malicious peer could accept blocks signed by since-ejected validators if set hash checks are incomplete.
-- **Recommended Fix**: Store `validator_set_hash` per height and reject mismatches during `verify_block_signatures`.
+- **Severity**: Medium (mitigated)
+- **File**: `crates/node/src/sync.rs`, `crates/node/src/validator_set_history.rs`
+- **Description**: Long-range sync could accept a backdated block if signatures were checked against the current tip set instead of the set active at that height.
+- **Fix**: Sync and reorg recovery resolve authority with `verification_set_at` (bootstrap- or checkpoint-rooted certified history). Both `verify_block_consensus_certificate` and `verify_block_signatures` reject a header whose `validator_set_hash` does not match that historical set. Regression: `historical_sync_uses_set_at_height_not_current_tip`.
+- **Residual**: Live weak-subjectivity checkpoint publication is still **HI11-ACTIVATE** (operational). Without a configured checkpoint, rebuilt nodes trust the deployment bootstrap plus imported certified peer history.
 
 ### ISSUE-017: Governance API stub returns 501
 
