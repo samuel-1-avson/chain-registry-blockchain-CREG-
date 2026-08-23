@@ -998,21 +998,16 @@ async fn compute_hybrid_committee(
 ///         X25519 ECDH to the validator-set pubkey, HKDF-SHA256-derived wrap
 ///         key, AES-256-GCM wrap of the raw `"<aes_key_hex>:<nonce_hex>"` tuple.
 ///
-/// Production validators must set `CREG_VALIDATOR_PRIVKEY_X25519` to the
-/// hex-encoded 32-byte X25519 secret that matches the publisher-facing
-/// `CREG_VALIDATOR_PUBKEY_X25519`. Without it, only `plain:` bundles work
-/// (which is the local-dev path).
-///
-/// Replaces the prior threshold-encryption path, which tried to parse the
-/// tarball itself as a `threshold_encryption::EncryptedPackage` — that code
-/// never matched the CLI's actual output format, so shielded publishes were
-/// effectively a no-op. Tracked as ISSUE-010.
+/// When the chain spec enables `threshold_encryption`, this path **fails closed**
+/// instead of falling back to single-node X25519 (ISSUE-014). A future t-of-n
+/// upgrade needs share-collection gossip plus `crates/threshold-encryption`.
 async fn decrypt_shielded(
     data: &[u8],
     bundle: &str,
-    _state: &crate::SharedState,
+    state: &crate::SharedState,
 ) -> anyhow::Result<Vec<u8>> {
-    let plaintext = common::decrypt_shielded_package(data, bundle)?;
+    let threshold_encryption = state.read().await.config.threshold_encryption;
+    let plaintext = decrypt_shielded_with_policy(threshold_encryption, data, bundle)?;
     tracing::info!(
         "Shielded package decrypted successfully: {} bytes",
         plaintext.len()
@@ -1020,16 +1015,25 @@ async fn decrypt_shielded(
     Ok(plaintext)
 }
 
+fn decrypt_shielded_with_policy(
+    threshold_encryption: bool,
+    data: &[u8],
+    bundle: &str,
+) -> anyhow::Result<Vec<u8>> {
+    if threshold_encryption {
+        anyhow::bail!(
+            "chain spec enables threshold_encryption but validator share collection is not active; \
+             refusing single-node X25519 fallback"
+        );
+    }
+    common::decrypt_shielded_package(data, bundle)
+}
+
 // Note: The Shamir secret-sharing threshold-decryption path (decrypt_share,
 // broadcast_decryption_share, collect_decryption_shares, reconstruct_key,
-// decrypt_with_key) has been removed. Shielded packages now use single-node
-// X25519 ECIES decryption via decrypt_shielded/parse_key_bundle. A future
-// upgrade to t-of-n threshold decryption would require:
-//   1. A share-collection gossip phase before validation begins.
-//   2. Integration with crates/threshold-encryption/src/lib.rs.
-//   3. A new on-chain share-distribution ceremony at package submission time.
-// Until that work is done, operators should treat the single-node X25519 key
-// as the trust boundary for shielded package confidentiality.
+// decrypt_with_key) is not wired. Shielded packages on Sepolia use experimental
+// single-node X25519 only while `feature_flags.threshold_encryption` is false.
+// Enabling that flag without share distribution fails closed.
 
 #[cfg(test)]
 mod shielded_tests {
@@ -1058,5 +1062,17 @@ mod shielded_tests {
         assert_eq!(got, plaintext);
 
         std::env::remove_var("CREG_VALIDATOR_PRIVKEY_X25519");
+    }
+
+    #[test]
+    fn threshold_flag_refuses_x25519_fallback() {
+        let plaintext = b"must not decrypt when threshold flag is on";
+        let (wire, bundle) = common::encrypt_shielded_package(plaintext, None).unwrap();
+        let err = super::decrypt_shielded_with_policy(true, &wire, &bundle)
+            .expect_err("threshold mode must fail closed without share collection");
+        assert!(err.to_string().contains("refusing single-node X25519"));
+
+        let got = super::decrypt_shielded_with_policy(false, &wire, &bundle).unwrap();
+        assert_eq!(got, plaintext);
     }
 }

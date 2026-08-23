@@ -384,6 +384,17 @@ pub async fn admit_publish_request(
                 .to_string(),
         ));
     }
+    if request.shielded {
+        let threshold_encryption = state.read().await.config.threshold_encryption;
+        if threshold_encryption {
+            return Err(AdmissionError::ShieldedPublishDisabled(
+                "chain spec enables threshold_encryption but t-of-n share collection is not \
+                 deployed; refusing experimental single-node X25519 so confidentiality is not \
+                 over-claimed"
+                    .into(),
+            ));
+        }
+    }
     if options.verify_publisher_auth {
         verify_publish_auth(state, &request).await?;
     }
@@ -1964,6 +1975,34 @@ rule TestMaliciousPayload {{
         .unwrap_err();
 
         assert!(matches!(error, AdmissionError::ShieldedPublishDisabled(_)));
+        assert!(!state.read().await.pending_pool.contains("npm:test@1.0.0"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn admission_rejects_shielded_when_threshold_flag_on_without_shares() -> anyhow::Result<()>
+    {
+        let _guard = env_lock().lock().await;
+        let _enabled = EnvRestore::set("CREG_SHIELDED_PUBLISH_ENABLED", "true");
+        let plaintext = make_tarball("index.js", "module.exports = () => 'threshold-flag';")?;
+        let (wire, bundle) = common::encrypt_shielded_package(&plaintext, None)?;
+        let (state, _tempdir) = make_test_state(1, "http://127.0.0.1:65535".into()).await?;
+        state.write().await.config.threshold_encryption = true;
+        let request = shielded_signed_request(&plaintext, &wire, &bundle, "bafythresholdflag");
+
+        let error = admit_publish_request(
+            &state,
+            request,
+            AdmissionOptions {
+                surface: AdmissionSurface::Rest,
+                verify_publisher_auth: false,
+            },
+        )
+        .await
+        .unwrap_err();
+
+        assert!(matches!(error, AdmissionError::ShieldedPublishDisabled(_)));
+        assert!(error.to_string().contains("threshold_encryption"));
         assert!(!state.read().await.pending_pool.contains("npm:test@1.0.0"));
         Ok(())
     }

@@ -477,13 +477,13 @@ Global flags: `--unverified`, `CREG_NODE_URL`, `CREG_GRPC_URL`, `--output json`.
 - **Description**: Dev flag skipped real sandbox execution while emitting synthetic metrics.
 - **Fix**: Bypass is allowed only when `CREG_DEV_SANDBOX` and `CREG_TESTNET` are set and `CREG_PUBLIC_VALIDATOR` / `CREG_PRODUCTION` are not (`dev_sandbox_bypass_allowed`). Covered by `sandbox::tests::test_dev_sandbox_bypass_requires_testnet_and_blocks_public`. Node config already refused bypass without the testnet profile.
 
-### ISSUE-014: Threshold encryption disabled on testnet spec
+### ISSUE-014: Threshold encryption disabled on testnet spec — **MITIGATED** (2026-08-23)
 
-- **Severity**: Medium
-- **File**: `testnet/chain-spec.sepolia.json` (feature_flags.threshold_encryption: false)
-- **Description**: Shielded publish path uses single-node X25519 (`common::decrypt_shielded_package`); Shamir path removed from pipeline.
-- **Impact**: Shielded packages do not meet threshold confidentiality goals advertised in docs.
-- **Recommended Fix**: Re-enable after `threshold-encryption` service integration and validator share distribution.
+- **Severity**: Medium (mitigated)
+- **File**: `testnet/chain-spec.sepolia.json`, `crates/node/src/config.rs`, `crates/node/src/package_admission.rs`, `crates/node/src/validator_pipeline.rs`
+- **Description**: Shielded publish used single-node X25519 (`common::decrypt_shielded_package`); the chain-spec `threshold_encryption` flag was unused, so flipping it would over-claim t-of-n confidentiality.
+- **Fix**: Sepolia remains `threshold_encryption: false`. The node now copies the spec flag into `NodeConfig`. When the flag is true, admission and decryption **fail closed** instead of falling back to X25519. Experimental shielded publish still requires `CREG_SHIELDED_PUBLISH_ENABLED` while the spec flag is false.
+- **Residual**: t-of-n share gossip and `crates/threshold-encryption` reconstruction are not deployed. Do not flip the Sepolia flag until that ceremony exists. Local `testnet/genesis.json` still lists `threshold_encryption: true` and is not a signed operational spec.
 
 ### ISSUE-015: WASM sandbox ignores CapabilitySet and ResourceLimits — **MITIGATED** (2026-08-22)
 
@@ -509,13 +509,13 @@ Global flags: `--unverified`, `CREG_NODE_URL`, `CREG_GRPC_URL`, `--output json`.
 - **Fix**: The handler mirrors `proposalCount` / `getProposal` / `threshold` via L1 `eth_call`. Unconfigured RPC or zero `CREG_GOVERNANCE_ADDR` returns HTTP 200 with `source: "unconfigured"` and an empty list. RPC failures return HTTP 503 (`governance_l1_unavailable`), never 501. Proposer addresses are best-effort from recent `ProposalSubmitted` logs.
 - **Residual**: This is a read-only list, not authenticated submit/vote (still P2 **GOVERNANCE-API**). Proposer may be empty when logs are outside the 10k-block lookback. Explorer nav remains gated by `VITE_GOVERNANCE_ENABLED`.
 
-### ISSUE-018: Appeal contract ETH transfers without reentrancy guard
+### ISSUE-018: Appeal contract ETH transfers without reentrancy guard — **MITIGATED** (2026-08-23)
 
-- **Severity**: Medium
-- **File**: `contracts/Appeal.sol:214-239`
-- **Description**: Bond payouts use `transfer` without `nonReentrant`.
-- **Impact**: Malicious publisher contract could reenter during appeal resolution.
-- **Recommended Fix**: Apply OpenZeppelin `ReentrancyGuard` and pull-payment pattern.
+- **Severity**: Medium (mitigated)
+- **File**: `contracts/Appeal.sol`, `contracts/test/Appeal.t.sol`
+- **Description**: Publisher and panelist bond payouts used push `.call{value}` during vote resolution, so a malicious recipient could reenter or grief the deciding vote.
+- **Fix**: Untrusted recipients are credited via `pendingWithdrawals` and pull with `withdraw()` (`nonReentrant`, CEI). Governance forfeitures still push to the known `receive()` address. Tests: `test_MaliciousPublisherCannotGriefResolutionOrDoubleWithdraw`, `test_ReentrancyCannotGriefVoteResolution`.
+- **Residual**: Not redeployed to Sepolia (`contracts.appeal` in `chain-spec.sepolia.json`). Pull-payment is in-repo until the next Appeal deploy.
 
 ---
 
@@ -587,13 +587,13 @@ Global flags: `--unverified`, `CREG_NODE_URL`, `CREG_GRPC_URL`, `--output json`.
 2. Remove gossip signature fallbacks (ISSUE-002, ISSUE-006); harden validator key loading at startup.
 3. Disable or repair `BatchOperations.sol` (ISSUE-003).
 4. Unify PBFT gossip validation (ISSUE-007).
-5. Patch Appeal reentrancy and CrossChain adapter ACL (ISSUE-010, ISSUE-018).
+5. Patch remaining CrossChain adapter operational deploy (ISSUE-010 residual). Appeal reentrancy is ISSUE-018.
 
 ### 5.2 Priority 2 — Feature Completion
 
 1. ~~Complete VRF.sol callback or remove from active chain spec (ISSUE-009).~~ Done — redeploy VRF on Sepolia for live on-chain fix.
 2. Wire remaining authenticated governance write APIs (P2 **GOVERNANCE-API**). Read-only proposal list is ISSUE-017.
-3. Enable threshold encryption end-to-end when feature flag flips (ISSUE-014).
+3. Enable threshold encryption end-to-end only after share-distribution ceremony (ISSUE-014 residual).
 4. Integrate `ZKSlashingVerifier` with `SlashingEvidence` workflow.
 5. Finish cross-chain client operational addresses (`cross-chain/src/lib.rs`).
 

@@ -226,6 +226,10 @@ pub struct NodeConfig {
     /// Testnet mode: allows multiple nodes per machine.
     /// Mainnet (false) enforces a single node per data directory via PID lock.
     pub is_testnet: bool,
+    /// Chain-spec `feature_flags.threshold_encryption`. When true, shielded
+    /// packages must be decrypted with t-of-n shares — single-node X25519 is
+    /// refused. Sepolia keeps this false until share distribution ships.
+    pub threshold_encryption: bool,
 }
 
 impl NodeConfig {
@@ -347,6 +351,7 @@ impl NodeConfig {
             max_peers,
             cors: CorsConfig::from_env(),
             is_testnet: env("CREG_TESTNET", "false") == "true",
+            threshold_encryption: false,
         };
 
         if let Ok(secrets) = chain_registry_secrets::SecretsProvider::from_env() {
@@ -746,6 +751,8 @@ impl NodeConfig {
         if self.validator_set.validators.is_empty() {
             self.validator_set = spec.to_runtime_validator_set();
         }
+        // Spec is source of truth: env cannot turn threshold encryption on.
+        self.threshold_encryption = spec.feature_flags.threshold_encryption;
     }
 }
 
@@ -822,6 +829,7 @@ mod tests {
             max_peers: 15,
             cors: CorsConfig::default(),
             is_testnet: true,
+            threshold_encryption: false,
         }
     }
 
@@ -866,6 +874,7 @@ mod tests {
         );
 
         let testnet = base_config();
+        assert!(!testnet.threshold_encryption);
         assert!(
             testnet.validate_production_security().is_empty(),
             "testnet should allow dev bypass env vars"
@@ -1162,5 +1171,25 @@ mod tests {
         assert_eq!(cors.allowed_methods, vec!["GET", "POST", "OPTIONS"]);
         assert!(cors.allow_credentials);
         assert!(cors.validate().is_empty());
+    }
+
+    #[test]
+    fn apply_chain_spec_adopts_threshold_encryption_flag() {
+        let mut spec: common::ChainSpec =
+            serde_json::from_str(include_str!("../../../testnet/chain-spec.example.json"))
+                .expect("example chain spec parses");
+        assert!(!spec.feature_flags.threshold_encryption);
+
+        let mut cfg = base_config();
+        cfg.threshold_encryption = true;
+        cfg.apply_chain_spec(&spec, false);
+        assert!(
+            !cfg.threshold_encryption,
+            "spec false must clear a stale true"
+        );
+
+        spec.feature_flags.threshold_encryption = true;
+        cfg.apply_chain_spec(&spec, false);
+        assert!(cfg.threshold_encryption);
     }
 }
