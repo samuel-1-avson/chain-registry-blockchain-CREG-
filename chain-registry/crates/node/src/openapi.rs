@@ -1101,6 +1101,60 @@ pub mod paths {
     )]
     pub async fn governance_proposals() {}
 
+    /// Submit a Governance.sol proposal as the configured CREG_GOVERNANCE_KEY signer.
+    #[utoipa::path(
+        post,
+        path = "/v1/operator/governance/proposals",
+        tag = "governance",
+        security(("OperatorKey" = []), ("OperatorBearer" = [])),
+        request_body(content = Object, description = "target address, hex calldata, description"),
+        responses(
+            (status = 200, description = "L1 submit transaction accepted", body = Object),
+            (status = 400, description = "Invalid proposal payload or L1 revert", body = ApiError),
+            (status = 401, description = "Missing or invalid operator credentials", body = ApiError),
+            (status = 403, description = "CREG_GOVERNANCE_KEY is not a contract signer", body = ApiError),
+            (status = 503, description = "Operator ACL, signer key, or L1 RPC unavailable", body = ApiError),
+        ),
+    )]
+    pub async fn governance_submit() {}
+
+    /// Vote on a pending Governance.sol proposal as CREG_GOVERNANCE_KEY.
+    #[utoipa::path(
+        post,
+        path = "/v1/operator/governance/proposals/{id}/vote",
+        tag = "governance",
+        security(("OperatorKey" = []), ("OperatorBearer" = [])),
+        params(("id" = u64, Path, description = "Proposal id")),
+        request_body(content = Object, description = "{ \"approve\": true | false }"),
+        responses(
+            (status = 200, description = "L1 vote transaction accepted", body = Object),
+            (status = 401, description = "Missing or invalid operator credentials", body = ApiError),
+            (status = 403, description = "CREG_GOVERNANCE_KEY is not a contract signer", body = ApiError),
+            (status = 404, description = "Proposal does not exist", body = ApiError),
+            (status = 409, description = "Proposal already executed or cancelled", body = ApiError),
+            (status = 503, description = "Operator ACL, signer key, or L1 RPC unavailable", body = ApiError),
+        ),
+    )]
+    pub async fn governance_vote() {}
+
+    /// Approval vote that triggers Governance.sol auto-execute at threshold.
+    #[utoipa::path(
+        post,
+        path = "/v1/operator/governance/proposals/{id}/execute",
+        tag = "governance",
+        security(("OperatorKey" = []), ("OperatorBearer" = [])),
+        params(("id" = u64, Path, description = "Proposal id")),
+        responses(
+            (status = 200, description = "L1 approval vote accepted; execution is automatic at threshold", body = Object),
+            (status = 401, description = "Missing or invalid operator credentials", body = ApiError),
+            (status = 403, description = "CREG_GOVERNANCE_KEY is not a contract signer", body = ApiError),
+            (status = 404, description = "Proposal does not exist", body = ApiError),
+            (status = 409, description = "Proposal already executed or cancelled", body = ApiError),
+            (status = 503, description = "Operator ACL, signer key, or L1 RPC unavailable", body = ApiError),
+        ),
+    )]
+    pub async fn governance_execute() {}
+
     /// Rolling metrics time-series — TPS, block time, validator count, stake, pending depth.
     #[utoipa::path(
         get,
@@ -1331,6 +1385,9 @@ impl Modify for SecurityAddon {
         paths::p2p_status,
         paths::bridge_anchors,
         paths::governance_proposals,
+        paths::governance_submit,
+        paths::governance_vote,
+        paths::governance_execute,
         paths::metrics_history,
         paths::reorgs,
         paths::richlist,

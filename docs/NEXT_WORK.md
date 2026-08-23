@@ -70,7 +70,6 @@
 | 14 | **WITNESSED-LOG** | Replace legacy/local history authority with a witnessed append-only log and prove derived-index completeness. |
 | 15 | **CLIENT-FRESHNESS** | Implement threshold-signed freshness metadata, expiry, anti-rollback state, and witnessed inclusion. |
 | 16 | **SUPPLY-CHAIN-CI** | Add SBOM, artifact provenance, dependency policy, web/E2E CI, and release verification. |
-| 17 | **GOVERNANCE-API** | Complete authenticated governance API and adversarial authorization tests. |
 | 18 | **REM-211+** | Complete resource metrics and Grafana dashboards per [observability/README.md](../chain-registry/observability/README.md). |
 | 19 | **VAL-SCALE** | Expand a verified independent validator cohort in capacity-tested batches; waitlist size is not validator capacity. |
 | 20 | **ZK-CIRCUIT** | Complete circuit/contract review and regenerate setup only if the binding changes; do not restore the retired qualification claim. |
@@ -99,6 +98,7 @@
 | ISSUE-011 | 2026-08-23 | Publisher ZK admission placeholders retired; gRPC rejects leftover 85/`true` proofs |
 | ISSUE-016 | 2026-08-23 | Historical sync verifies `validator_set_hash` against the set at that height; HI-11 checkpoint still operational |
 | ISSUE-017 | 2026-08-23 | `GET /v1/governance/proposals` mirrors Governance.sol; 200 empty if unconfigured, 503 on L1 RPC failure |
+| GOVERNANCE-API | 2026-08-23 | Operator-authenticated submit/vote/execute; `CREG_GOVERNANCE_KEY` required; public POST stays 405 |
 | ISSUE-012 | 2026-08-23 | Deep scan fails closed on corrupt/timeout input; votes carry the actual `degraded-*` scanner version |
 | ISSUE-014 | 2026-08-23 | Spec `threshold_encryption` now fail-closes; Sepolia flag stays false until share collection ships |
 | ISSUE-018 | 2026-08-23 | Appeal publisher/panelist payouts are pull-payment; not yet redeployed on Sepolia |

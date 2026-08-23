@@ -298,6 +298,7 @@ Keep the previous `sepolia-latest.json` and spec in git history for forensics.
 ## Governance and feature flags
 
 - On-chain governance is deployed. `GET /v1/governance/proposals` (and the public alias) mirrors `Governance.sol` when `CREG_ETH_RPC` and `CREG_GOVERNANCE_ADDR` are set; unconfigured nodes return HTTP 200 with an empty list. The explorer nav stays hidden until `VITE_GOVERNANCE_ENABLED=true`.
+- Signer writes are operator-only: `POST /v1/operator/governance/proposals`, `.../:id/vote`, and `.../:id/execute` require `X-Operator-Key` / bearer ACL **and** `CREG_GOVERNANCE_KEY` (a `Governance.sol` signer). `CREG_BRIDGE_KEY` cannot submit or vote. `Governance.sol` auto-executes when the approval threshold is met, so execute is an approval vote. Public and legacy GET paths reject POST (HTTP 405).
 - Spec has `feature_flags.cross_chain: false` — align with [archive/SECURITY_AND_REMEDIATION_IMPLEMENTATION_PLAN.md](./archive/SECURITY_AND_REMEDIATION_IMPLEMENTATION_PLAN.md) decision **D4** before enabling bridge UI.
 
 ---
