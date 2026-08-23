@@ -58,6 +58,14 @@ data:
   # Ethereum Configuration (Sepolia L1 — set RPC via secret overlay in production)
   CREG_ETH_RPC: "https://ethereum-sepolia-rpc.publicnode.com"
   CREG_EXPECTED_L1_CHAIN_ID: "11155111"
+  # Signed Sepolia contracts from testnet/chain-spec.sepolia.json (ISSUE-024).
+  CREG_STAKING_ADDR: "0xE906ae140987CC2cA711dDa4ee43574d3aDc31b7"
+  CREG_REGISTRY_ADDR: "0xF232cC6F5C6EfC74C7517B209D15baBd57b817eE"
+  CREG_TOKEN_ADDR: "0xB326dB1C6e457f4AdfBb11f17FDc145ED585b288"
+  CREG_CHAIN_SPEC_URL: "https://spec.testnet.cregnet.dev/chain-spec.json"
+  CREG_SPEC_SIGNING_PUBKEY: "3fe87833177b04b0a18600eace041692a35fb2b85f6e14e6734d894a0fd61c01"
+  CREG_YARA_RULES_DIR: "/app/rules"
+  CREG_PUBLIC_VALIDATOR: "false"
 ---
 apiVersion: v1
 kind: ConfigMap

@@ -4,7 +4,8 @@
 # Use this file on every validator host when the shared testnet services
 # (IPFS/Postgres/Faucet/Explorer/spec-server) are running elsewhere.
 #
-# Usage:
+# Dockerfile.secure is FROM chain-registry-app:latest. Build the base image first:
+#   docker compose -f docker-compose.validator.yml --profile build build app-image
 #   docker compose --env-file validator.env -f docker-compose.validator.yml up -d --build
 #
 # Required env vars:
@@ -14,22 +15,29 @@
 #   TESTNET_TOKEN_ADDR
 #   TESTNET_STAKING_ADDR   # fail-closed: creg-node will not start as a validator without a parseable staking address
 #   TESTNET_REGISTRY_ADDR
+#   CREG_P2P_SEEDS or CREG_VALIDATOR_P2P_SEEDS  # at least one dialable multiaddr
 
 x-app-image: &app-image
   image: chain-registry-app:latest
+
+x-secure-image: &secure-image
+  image: chain-registry-node-secure:latest
 
 x-validator-env: &validator-env
   CREG_TESTNET: "true"
   CREG_NODE_ID: "${CREG_NODE_ID:-node-1}"
   CREG_DATA_DIR: "/data"
   CREG_IS_VALIDATOR: "${CREG_IS_VALIDATOR:-true}"
+  CREG_PUBLIC_VALIDATOR: "${CREG_PUBLIC_VALIDATOR:-false}"
   CREG_VALIDATOR_KEY: "${CREG_VALIDATOR_KEY:?set CREG_VALIDATOR_KEY in your env file}"
   CREG_OPERATOR_API_KEY: "${CREG_OPERATOR_API_KEY:?set a high-entropy server-side operator API key}"
   CREG_LISTEN: "0.0.0.0:8080"
   CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/9000"
-  CREG_P2P_SEEDS: "${CREG_P2P_SEEDS:-}"
+  CREG_P2P_SEEDS: "${CREG_P2P_SEEDS:-${CREG_VALIDATOR_P2P_SEEDS:-}}"
+  CREG_VALIDATOR_P2P_SEEDS: "${CREG_VALIDATOR_P2P_SEEDS:-}"
+  CREG_CHAIN_SPEC_URL: "${CREG_CHAIN_SPEC_URL:-https://spec.testnet.cregnet.dev/chain-spec.json}"
+  CREG_YARA_RULES_DIR: "${CREG_YARA_RULES_DIR:-/app/rules}"
   CREG_BLOCK_INTERVAL: "${CREG_BLOCK_INTERVAL:-2}"
-  CREG_SINGLE_VALIDATOR_MODE: "${CREG_SINGLE_VALIDATOR_MODE:-false}"
   CREG_DEV_SANDBOX: "${CREG_DEV_SANDBOX:-false}"
   CREG_ETH_RPC: "${CREG_ETH_RPC:?set CREG_ETH_RPC to the Sepolia RPC URL}"
   CREG_IPFS_URL: "${CREG_IPFS_URL:?set CREG_IPFS_URL to the shared IPFS API URL}"
@@ -55,8 +63,7 @@ x-validator-env: &validator-env
   CREG_TOKEN_ADDR: "${TESTNET_TOKEN_ADDR:?set TESTNET_TOKEN_ADDR from the bootstrap host .env.testnet}"
   CREG_STAKING_ADDR: "${TESTNET_STAKING_ADDR:?set TESTNET_STAKING_ADDR from the bootstrap host .env.testnet}"
   CREG_REGISTRY_ADDR: "${TESTNET_REGISTRY_ADDR:?set TESTNET_REGISTRY_ADDR from the bootstrap host .env.testnet}"
-  CREG_ZK_ENABLED: "${CREG_ZK_ENABLED:-true}"
-  # Unused by creg-node unless signed zk_validation is true (Sepolia: false).
+  # Unused by creg-node unless the signed spec sets zk_validation true (Sepolia: false).
   CREG_ZK_KEYS_DIR: "${CREG_ZK_KEYS_DIR:-/app/circuits}"
   CREG_ML_ENABLED: "${CREG_ML_ENABLED:-true}"
   CREG_ML_MODEL_PATH: "/app/models"
@@ -76,13 +83,16 @@ services:
     <<: *app-image
     build:
       context: .
-      dockerfile: ${CREG_DOCKERFILE:-Dockerfile}
+      dockerfile: Dockerfile
     command: ["true"]
     profiles:
       - build
 
   validator:
-    <<: *app-image
+    <<: *secure-image
+    build:
+      context: .
+      dockerfile: ${CREG_DOCKERFILE:-Dockerfile.secure}
     container_name: "${CREG_CONTAINER_NAME:-creg-validator}"
     user: "0:0"
     restart: unless-stopped

@@ -45,14 +45,11 @@ spec:
           image: ghcr.io/chain-registry/chain-registry:minimal
           imagePullPolicy: IfNotPresent
           command: ["/app/creg-node"]
-          args:
-            - "--data-dir=/data"
-            - "--api-addr=0.0.0.0:8080"
-            - "--validator-mode"
-            - "--bootstrap=creg-validator-1:8080"
           ports:
             - containerPort: 8080
               name: http
+            - containerPort: 4001
+              name: p2p
             - containerPort: 50051
               name: grpc
             - containerPort: 9090
@@ -117,6 +114,8 @@ spec:
   ports:
     - port: 8080
       name: http
+    - port: 4001
+      name: p2p
     - port: 50051
       name: grpc
     - port: 9090
@@ -161,14 +160,11 @@ spec:
           image: ghcr.io/chain-registry/chain-registry:minimal
           imagePullPolicy: IfNotPresent
           command: ["/app/creg-node"]
-          args:
-            - "--data-dir=/data"
-            - "--api-addr=0.0.0.0:8080"
-            - "--validator-mode"
-            - "--bootstrap=creg-validator-1:8080"
           ports:
             - containerPort: 8080
               name: http
+            - containerPort: 4001
+              name: p2p
             - containerPort: 50051
               name: grpc
             - containerPort: 9090
@@ -233,6 +229,8 @@ spec:
   ports:
     - port: 8080
       name: http
+    - port: 4001
+      name: p2p
     - port: 50051
       name: grpc
     - port: 9090
@@ -277,14 +275,11 @@ spec:
           image: ghcr.io/chain-registry/chain-registry:minimal
           imagePullPolicy: IfNotPresent
           command: ["/app/creg-node"]
-          args:
-            - "--data-dir=/data"
-            - "--api-addr=0.0.0.0:8080"
-            - "--validator-mode"
-            - "--bootstrap=creg-validator-1:8080"
           ports:
             - containerPort: 8080
               name: http
+            - containerPort: 4001
+              name: p2p
             - containerPort: 50051
               name: grpc
             - containerPort: 9090
@@ -349,6 +344,8 @@ spec:
   ports:
     - port: 8080
       name: http
+    - port: 4001
+      name: p2p
     - port: 50051
       name: grpc
     - port: 9090
@@ -393,14 +390,11 @@ spec:
           image: ghcr.io/chain-registry/chain-registry:minimal
           imagePullPolicy: IfNotPresent
           command: ["/app/creg-node"]
-          args:
-            - "--data-dir=/data"
-            - "--api-addr=0.0.0.0:8080"
-            - "--validator-mode"
-            - "--bootstrap=creg-validator-1:8080"
           ports:
             - containerPort: 8080
               name: http
+            - containerPort: 4001
+              name: p2p
             - containerPort: 50051
               name: grpc
             - containerPort: 9090
@@ -465,6 +459,8 @@ spec:
   ports:
     - port: 8080
       name: http
+    - port: 4001
+      name: p2p
     - port: 50051
       name: grpc
     - port: 9090
@@ -509,14 +505,11 @@ spec:
           image: ghcr.io/chain-registry/chain-registry:minimal
           imagePullPolicy: IfNotPresent
           command: ["/app/creg-node"]
-          args:
-            - "--data-dir=/data"
-            - "--api-addr=0.0.0.0:8080"
-            - "--validator-mode"
-            - "--bootstrap=creg-validator-1:8080"
           ports:
             - containerPort: 8080
               name: http
+            - containerPort: 4001
+              name: p2p
             - containerPort: 50051
               name: grpc
             - containerPort: 9090
@@ -581,6 +574,8 @@ spec:
   ports:
     - port: 8080
       name: http
+    - port: 4001
+      name: p2p
     - port: 50051
       name: grpc
     - port: 9090
