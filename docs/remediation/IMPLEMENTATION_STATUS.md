@@ -1,6 +1,6 @@
 # Remediation implementation status
 
-**As of:** 2026-07-29
+**As of:** 2026-08-23
 
 **Release posture:** research alpha only; no mainnet, production-security, absolute-safety, or validity-rollup claim.
 
@@ -37,20 +37,22 @@
 | Authority archive tests | Passed (7/7 on Windows) | Quota, retention/GC, atomicity, corruption, and cleanup cases pass; the Unix-only symlink case was not exercised on Windows |
 | Complete node suite | Passed (209/209) | Two stale test expectations were corrected and the rerun has zero failures |
 | CLI suite | Passed (41/41, plus five zero-test targets) | CLI tests execute successfully |
-| Full Rust workspace/all-target suite | Failed after partial green execution | CLI 41/41, node library 209/209, and node main 211/211 passed; node E2E passed 4/8 and exposed stale Ed25519-only fixtures. Cargo therefore did not run later workspace targets. Fixtures are being upgraded to valid dual-domain proofs before a full rerun. |
-| `cargo fmt --all -- --check` | Pending | The pre-format check found format-only diffs; formatting is deferred until the active all-target run finishes |
+| Full Rust workspace/all-target suite | Passed locally at `5868401` (2026-08-23) | Exit 0 after PR #36. CLI 49, node lib 225, `creg-node` 227, sidecar launch 2/2, node E2E 8/8, integration 11/11; later workspace crates also green. Validator crate 40 passed / 1 ignored. Extra Windows flags (`CARGO_PROFILE_TEST_DEBUG=0`, `--test-threads=1`) are not the CI command. |
+| `cargo fmt --all -- --check` | Passed locally at `5868401` | rustfmt 1.8.0-stable from rustc 1.93.1. CI toolchain pin is 1.93.0. Untracked PDFs only in the worktree. |
 | Checkpoint and CR-07 activation validators | Passed (11/11 each) | Disabled-by-default manifests and certificate validation fail closed |
 | npm verifier | Passed (20/20; 1 external production fixture skipped) | Offline registry/provenance cryptography and archive/challenge checks pass; the verifier deliberately cannot return success without an official npm authentication-mode signal |
 | PyPI verifier | Passed (29/29; 1 external production fixture skipped); private-temp launch in-repo | Offline PEP 740/Sigstore verification and bounded archive parsing pass. Rust now exports a host-visible private TEMP after `env_clear()`. Local frozen Windows rejection through `verify_with_sidecar` is not a rebuilt hash or positive fixture. |
-| Local Foundry v1.6 nightly suite | Passed (111/111 across 12 suites) | Contract tests, including 1,000-run fuzz cases, pass locally; the pinned v1.7.1 clean-CI run is still pending |
-| Contract CI workflow and dependency bootstrap smoke | Passed locally | Workflow pins Foundry/action/dependency revisions; YAML, shell syntax, and clean dependency clone were validated, but no remote CI run is claimed |
+| Local Foundry v1.6 nightly suite | Passed (111/111 across 12 suites, 2026-07-29) | Historical local pass; superseded for VERIFY-401 by the pinned v1.7.1 row below. |
+| Pinned Foundry v1.7.1 local suite | Passed (129/129 across 12 suites, 2026-08-23) | `testnet/.tools/foundry-v1.7.1/forge.exe test` with Solc 0.8.24, including 1,000-run fuzz cases. Not profile Foundry 1.5.1. Local `contracts/lib` checkouts, not a CI bootstrap clone. |
+| Contract CI workflow and dependency bootstrap smoke | Passed locally (2026-07-29) | Workflow pins Foundry/action/dependency revisions; YAML, shell syntax, and clean dependency clone were validated. Remote Contract CI remains billing-blocked. |
+| Remote GitHub Actions (Rust CI + Contract CI) | Blocked | Jobs do not start: GitHub account payments failed or spending limit. Dispatches at runs 32639316218 and 32639318609. Do not claim remote clean CI. |
 | `creg chain-spec validate testnet/chain-spec.sepolia.json` | Failed closed | Declared genesis `0x0bb4…6660` differs from computed `0xddd1…1e0a`; canonical and two spec-server SHA-256 values also differ. This is a real publication blocker, not a test defect. |
 | Workflow/whitepaper PDFs and manifests | Stale | Markdown changed after the current PDFs; regeneration, mirror synchronization, hash refresh, and all-page visual verification remain required |
 
 ## Required next work
 
-1. Rerun rustfmt/check and a workspace all-target suite after the private-temp sidecar launch patch, then run the pinned Foundry v1.7.1 suite.
-2. Finish epoch-bound EIP-712 verdict/admission review and run the pinned Foundry v1.7.1 suite.
+1. Restore GitHub Actions billing/spending limit, then capture remote Rust CI (fmt, clippy `-D warnings`, `cargo test --workspace --locked` on 1.93.0) and Contract CI (Foundry v1.7.1 from the bootstrap script). Local workspace, rustfmt, and v1.7.1 `forge test` are already recorded in `TEST_EVIDENCE.md`.
+2. Finish epoch-bound EIP-712 verdict/admission review. Local Foundry v1.7.1 now passes 129/129; remote Contract CI remains billing-blocked.
 3. Add reviewed production npm/PyPI policy and trust material, an official npm authentication-mode signal, live positive fixtures, platform artifacts, and signed activation approval; keep recovery fail closed until every gate passes.
 4. Regenerate and visually verify the workflow/whitepaper PDFs, synchronize public and Functions mirrors, and refresh all manifest hashes.
 5. Run a witnessed key/spec migration: select the intended genesis/topology, rotate the disclosed signing/validator material, recompute and sign the exact canonical spec, independently verify it, then copy exact bytes/signature to both static-server names. Do not publish the current artifacts.
