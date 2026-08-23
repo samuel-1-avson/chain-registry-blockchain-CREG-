@@ -434,7 +434,16 @@ async fn main() -> Result<()> {
             }
         }
         tracing::info!("Computed genesis hash: {}", computed_genesis_hash);
-        config.apply_chain_spec(spec, chain_spec_signature_verified);
+        let spec_contract_errors = config.apply_chain_spec(spec, chain_spec_signature_verified);
+        if !spec_contract_errors.is_empty() {
+            for err in &spec_contract_errors {
+                tracing::error!("  ✗ {}", err);
+            }
+            anyhow::bail!(
+                "Cannot start node: CREG_*_ADDR env disagrees with the signed chain spec. \
+                 Unset the stale overrides or set them to the spec addresses."
+            );
+        }
         tracing::info!("Chain spec applied to runtime config");
 
         // Step 5: L1 connectivity probe (already exists; now driven by spec)
@@ -470,6 +479,7 @@ async fn main() -> Result<()> {
                     || e.contains("CREG_ETH_RPC is invalid")
                     || e.contains("CREG_PRODUCTION=true but ZK package key files are missing")
                     || e.contains("CREG_IS_VALIDATOR=true requires at least one dialable P2P seed")
+                    || e.contains("does not match the signed chain spec")
             })
             .collect();
         if !hard_errors.is_empty() {
