@@ -8536,6 +8536,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "sled",
+ "tempfile",
  "tokio",
  "tonic",
  "tracing",

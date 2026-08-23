@@ -98,7 +98,7 @@
 | ISSUE-016 | 2026-08-23 | Historical sync verifies `validator_set_hash` against the set at that height; HI-11 checkpoint still operational |
 | ISSUE-017 | 2026-08-23 | `GET /v1/governance/proposals` mirrors Governance.sol; 200 empty if unconfigured, 503 on L1 RPC failure |
 | GOVERNANCE-API | 2026-08-23 | Operator-authenticated submit/vote/execute; `CREG_GOVERNANCE_KEY` required; public POST stays 405 |
-| SHIM-301 | 2026-08-23 | PATH shims share `creg install` fail-closed gate; 5-minute install cache; `CREG_ALLOW_UNVERIFIED` break-glass |
+| SHIM-301 | 2026-08-23 | PATH shims share `creg install` fail-closed gate; 5-minute install cache; `CREG_ALLOW_UNVERIFIED` break-glass; bare `npm install`/`ci` gates direct package.json deps |
 | ISSUE-012 | 2026-08-23 | Deep scan fails closed on corrupt/timeout input; votes carry the actual `degraded-*` scanner version |
 | ISSUE-014 | 2026-08-23 | Spec `threshold_encryption` now fail-closes; Sepolia flag stays false until share collection ships |
 | ISSUE-018 | 2026-08-23 | Appeal publisher/panelist payouts are pull-payment; not yet redeployed on Sepolia |
