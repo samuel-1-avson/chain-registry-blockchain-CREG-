@@ -11,6 +11,7 @@ Start at the [project README](../README.md), then use the sections below.
 
 | Document | Purpose |
 |----------|---------|
+| [PROTOCOL_PROGRESS.md](./PROTOCOL_PROGRESS.md) | **Shipped vs remaining vs testnet readiness** (as of HEAD `53c8089`) |
 | [TESTNET_STATUS.md](./TESTNET_STATUS.md) | **Fleet live/paused matrix** — single source of truth |
 | [WHAT_TO_DO_NEXT.md](./WHAT_TO_DO_NEXT.md) | **Start here (maintainers)** — four tracks: system test, product surfaces, validator onboarding, audit |
 | [NEXT_WORK.md](./NEXT_WORK.md) | Prioritized IDs (NET-301, SEC-401, …) |

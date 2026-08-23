@@ -1,0 +1,168 @@
+# CREG protocol progress
+
+**As of:** 2026-08-23  
+**HEAD:** `53c8089` (merge of [PR #50](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/pull/50))  
+**Public binary pin:** `v0.4.3-testnet` (`3eb3a23…`) — later protocol diffs (PRs 25–50) are on `main` and are **not** that tag.  
+**Canonical repo:** [samuel-1-avson/chain-registry-blockchain-CREG-](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-)
+
+This page is the **session briefing** for protocol work: what shipped, what improved, what is left, and how ready CREG is for testnet. Live fleet facts stay in [TESTNET_STATUS.md](./TESTNET_STATUS.md). Prioritized IDs stay in [NEXT_WORK.md](./NEXT_WORK.md). Maintainer tracks stay in [WHAT_TO_DO_NEXT.md](./WHAT_TO_DO_NEXT.md).
+
+---
+
+## Testnet readiness (honest)
+
+| Audience | Ready? | Meaning |
+|----------|--------|---------|
+| Maintainer local node | **Yes** | Build and run `creg-node` / `creg` against the signed Sepolia spec. |
+| Self-hosted operator vs spec | **Partial** | You can run a node; there is no public bootnode list to join. |
+| Publisher on `api.testnet.cregnet.dev` | **No** | Public GCP fleet is paused; treat the API as unreachable. |
+| Independent BFT public testnet | **No** | Spec lists four coordinated validators and **empty bootnodes**. Not BFT. |
+| Mainnet / economic security | **No** | Public alpha only. ZK qualification stays off. No signed audit findings. |
+
+**Launch-level shorthand:** software is a coordinated public-alpha stack (past lab-only). The **live public network** is waitlist-only because the fleet is paused. Do not describe CREG as a live public testnet, as Byzantine-fault-tolerant, or as mainnet.
+
+**What “ready for testnet” is not:** more in-repo features. Remaining public-testnet gates are operators, ceremonies, billing, audit vendor, and PDF regeneration.
+
+---
+
+## What shipped (22–23 August 2026)
+
+In-repo fail-closed hardening on `main` through **PRs 25–50**. Remote GitHub Actions still does not start (account billing / spending limit). Do not raise the spending limit. Do not treat failed Actions as a code regression.
+
+### This workstream (PRs 46–50)
+
+| PR | ID | What landed | Must not claim |
+|----|----|-------------|----------------|
+| [#46](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/pull/46) | GOVERNANCE-API | Operator-authenticated submit / vote / execute on `/v1/operator/governance/...`. Requires operator key + `CREG_GOVERNANCE_KEY`. Public POST stays 405. Bridge key cannot submit or vote. | Public unauthenticated governance writes |
+| [#47](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/pull/47) | SHIM-301 | PATH shims share `creg install` fail-closed gate; 5-minute install cache. `--unverified` / `CREG_ALLOW_UNVERIFIED` cannot override revocation. | Transitive npm graph is scanned |
+| [#48](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/pull/48) | npm lockfile | Bare `npm install` / `ci` gates **direct** `package.json` deps (max 200). IPFS tarball fetch remains `creg install` only. | Full lockfile / transitive audit |
+| [#49](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/pull/49) | CLIENT-FRESHNESS | Local anti-rollback journal; freeze / skew / mix-and-match rejection. `verify_witnessed_inclusion` only when log/witness keys are configured. Unsigned `GET /v1/transparency/.../head` is **not** install-eligible. | Independent witness operators (that is WITNESSED-LOG) |
+| [#50](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/pull/50) | SUPPLY-CHAIN-CI | `creg sbom --workspace` inventories `Cargo.lock` (SPDX 2.3 / CycloneDX 1.5). `creg supply-chain check` fail-closes missing checksums, non-crates.io indexes, git sources, banned names. Provenance is lockfile SHA-256. Package `creg sbom` is incomplete without declared deps. No new GitHub Actions job. | SLSA; submitted-package provenance; remote CI |
+
+Policy file: `chain-registry/config/supply-chain/policy.toml`. Implementation: `chain-registry/crates/cli/src/supply_chain.rs`. Point HI-19 docs at [ADR-014](./adr/ADR-014-REPRODUCIBLE-BUILD-DDC.md); do not invent a gitignored supply-chain README.
+
+### Operator / spec honesty (PRs 41–45)
+
+| PR | What landed | Must not claim |
+|----|-------------|----------------|
+| [#41](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/pull/41) | Independent validators can join PBFT and P2P (in-repo path) | Recruited independent operators exist |
+| [#42](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/pull/42) | Validator compose, k8s, fail-closed YARA votes | Live fleet is running |
+| [#43](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/pull/43) | Operator env aligned with the signed Sepolia spec | Public bootnodes |
+| [#44](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/pull/44) | Node refuses env contract addresses that disagree with a signed spec | Sepolia bytecode already matches every in-repo Solidity patch |
+| [#45](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/pull/45) | Compose defaults point at signed Sepolia contracts | Fleet resume |
+
+### DEEP_DIVE / VERIFY pass (PRs 25–40)
+
+Fail-closed residuals through ISSUE-005, plus local VERIFY-401 capture. Highlights: sandbox bypass requires testnet profile; WASM WASI gated; publisher ZK placeholders rejected; historical `validator_set_hash`; governance reads; threshold flag fail-closed; Appeal pull-payment in Solidity; staking address required; CLI publisher / install / sandbox residuals; production ZK keys fail-closed; workspace all-target, rustfmt, Foundry v1.7.1 recorded locally.
+
+Full ID table: [NEXT_WORK.md](./NEXT_WORK.md) completed section.
+
+---
+
+## Improvements (what is better now)
+
+- **Admission and install path:** shims, freshness, anti-rollback, and direct-dep npm gating match `creg install` fail-closed policy more closely than before this pass.
+- **Governance writes:** operator-authenticated; public POST remains 405; bridge key is not a governance key.
+- **Supply chain inventory:** workspace lockfile SBOM + deny policy exist in the CLI. Explicitly **not** SLSA.
+- **Spec honesty:** compose/env cannot silently override signed Sepolia contract addresses.
+- **Join path:** independent validator join is implemented in-repo; recruiting operators is still external.
+- **Local verification:** focused node, CLI, E2E, integration, rustfmt, and Foundry v1.7.1 `forge test` 129/129 passed locally (see [TEST_EVIDENCE.md](./remediation/TEST_EVIDENCE.md)). Extra Windows flags used: `CARGO_PROFILE_TEST_DEBUG=0`, `--test-threads=1`.
+
+---
+
+## What is left
+
+### P0 — still gating a *public* testnet (mostly not in-repo)
+
+| ID | Status | Why it is not a code flip |
+|----|--------|---------------------------|
+| VERIFY-401 remote CI | Deferred | GitHub Actions jobs do not start (billing). Do not raise the spending limit. Local cargo/fmt/forge are not a substitute. |
+| CR07-ACTIVATE | Blocked externally | Needs reviewed npm/PyPI policy, official npm authentication-mode signal, positive fixtures, signed manifest, multi-operator rehearsal. **Do not** set `namespace_authority_activation_height`. |
+| HI11-ACTIVATE | Blocked externally | Needs independently verified checkpoint plus replay / partition / reorg / rebuilt-node / long-range / process-kill rehearsals. **Do not** enable mandatory certified committees. |
+| VAL-INDEPENDENCE | Blocked externally | Recruit separately controlled operators, keys, and infrastructure. Four coordinated spec IDs are not BFT. |
+| TESTNET-RESUME | Gated | `resume-testnet-hosting.ps1` only after the operator gates above. Fleet is paused for cost. |
+| SEC-401 | Open / vendor TBD | Freeze candidate remains `v0.4.3-testnet`. Cut a later tag only if you want auditors on post-tag protocol diffs. |
+| DOC-RELEASE | Blocked in this checkout | Arena `generate:document-pdfs` is **not** in this workspace. Do not commit `docs/document-pdfs/`. |
+
+SPEC-ROTATE is **superseded** as an in-repo rotate. Fresh-genesis candidate is already in `chain-spec.sepolia.json` (genesis 2026-08-02). Remaining work is independent verification and public activation.
+
+### P1 — quality (ops / L1, not another residual queue)
+
+| ID | Status | Remaining |
+|----|--------|-----------|
+| EIP712-401 | In-repo complete | Independent contract review, Sepolia ABI/bytecode upgrade, remote Contract CI after billing reset. |
+| ARCHIVE-401 | Repo complete; ops open | Pressure GC/restore drills, capacity alerts, backup, legal-hold. |
+| BRIDGE-301 | Open | L1 bridge soak or documented skip + alert. |
+| SOAK-301 | Open | Incentive/load soak after a live API exists. |
+| SEC-402 | Open | Network-partition chaos + postmortem after a live API exists. |
+
+### P2 — leftover *in-repo* protocol (do not fake)
+
+| ID | Task | Honest bound |
+|----|------|----------------|
+| **WITNESSED-LOG** | Independent witness operators and signed-head distribution | Do not mint local/self-signed witnesses and call it this item. Unsigned transparency heads stay non-install-eligible. |
+| REM-211+ | Resource metrics / Grafana | Observability polish. |
+| VAL-SCALE | Expand a verified independent cohort | Waitlist size is not validator capacity. |
+| ZK-CIRCUIT | Circuit/contract review only if the binding changes | Do not restore qualification. Sepolia `zk_validation` stays **false**. |
+
+### Do not do from this repo
+
+- Contribution Arena as protocol work (separate educational product).
+- Enable ZK (`zk_validation: true`) or threshold encryption (`threshold_encryption: true`) on the signed Sepolia spec.
+- Flip **CR07-ACTIVATE** / **HI11-ACTIVATE**.
+- Resume the GCP fleet without operator gates.
+- Raise the GitHub Actions spending limit.
+- Commit untracked `docs/document-pdfs/`.
+- `git pull origin main` (ambiguous tag named `main`). Fetch `refs/heads/main` then `merge --ff-only origin/main`.
+
+---
+
+## Network posture (signed spec)
+
+File: `chain-registry/testnet/chain-spec.sepolia.json`
+
+| Field | Value |
+|-------|--------|
+| `chain_id` | `creg-testnet-1` |
+| `phase` | `alpha` |
+| `genesis_time` | 2026-08-02 |
+| `genesis_hash` | `0x4f5492623f277888cc534c2c65ffd8f020baa9b8b1d9ad3a392cbde39792ed24` |
+| Validators | `validator-1` … `validator-4` (coordinated) |
+| `bootnodes` | `[]` |
+| `zk_validation` | `false` |
+| `threshold_encryption` | `false` |
+| `cross_chain` | `false` |
+
+Public waitlist is live (Firebase). Contribution Arena is a separate product.
+
+---
+
+## Local verification snapshot
+
+Recorded 2026-08-23 on Windows; details in [TEST_EVIDENCE.md](./remediation/TEST_EVIDENCE.md).
+
+| Harness | Result |
+|---------|--------|
+| CLI | 49/49 |
+| Node lib | 225/225 |
+| `creg-node` | 227/227 |
+| Node E2E | 8/8 |
+| Node integration | 11/11 |
+| Workspace all-target | exit 0 at `5868401` (includes sidecar 2/2) |
+| `cargo fmt --all -- --check` | exit 0 |
+| Foundry v1.7.1 `forge test` | 129/129 |
+| GitHub Actions | Does not start (billing) |
+
+Later PRs 41–50 added fail-closed patches after that workspace capture. Re-run local suites before treating a new slice as verified. `cargo test -p chain-registry-cli --lib` is expected to fail (no lib); use `--bin creg`.
+
+---
+
+## Suggested next protocol slice
+
+If the goal is **in-repo protocol** without fake witnesses: **WITNESSED-LOG** only with real independent witness operators and signed-head distribution.
+
+If the goal is a **live public testnet**: stop feature work and do **VAL-INDEPENDENCE** (recruit operators) then **TESTNET-RESUME**. GOVERNANCE-API / SHIM / freshness / SBOM do not unsuspend `api.testnet.cregnet.dev`.
+
+---
+
+_Update this file when a protocol PR merges or hosting phase changes. Mirror IDs in [NEXT_WORK.md](./NEXT_WORK.md)._
