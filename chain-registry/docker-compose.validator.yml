@@ -13,7 +13,7 @@
 #   CREG_ETH_RPC
 #   CREG_IPFS_URL
 #   TESTNET_TOKEN_ADDR
-#   TESTNET_STAKING_ADDR   # fail-closed: creg-node will not start as a validator without a parseable staking address
+#   TESTNET_STAKING_ADDR   # must match the signed spec; creg-node refuses a mismatch
 #   TESTNET_REGISTRY_ADDR
 #   CREG_P2P_SEEDS or CREG_VALIDATOR_P2P_SEEDS  # at least one dialable multiaddr
 

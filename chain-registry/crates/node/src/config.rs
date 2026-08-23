@@ -25,6 +25,50 @@ pub fn parse_staking_contract_address(raw: &str) -> Result<Option<Address>, Stri
         .map_err(|error| format!("CREG_STAKING_ADDR is invalid ({trimmed}): {error}"))
 }
 
+fn address_is_unset(raw: &str) -> bool {
+    matches!(parse_staking_contract_address(raw), Ok(None))
+}
+
+fn same_evm_address(left: &str, right: &str) -> bool {
+    match (
+        left.trim().parse::<Address>(),
+        right.trim().parse::<Address>(),
+    ) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => left.trim().eq_ignore_ascii_case(right.trim()),
+    }
+}
+
+/// Adopt the spec address when env is empty/zero. When the spec is signature
+/// verified, a non-zero env that disagrees is a hard error (stale TESTNET_* /
+/// CREG_*_ADDR must not silently override the signed contracts).
+fn adopt_or_reject_spec_contract(
+    current: &mut String,
+    spec_addr: Option<&String>,
+    env_name: &str,
+    signature_verified: bool,
+    errors: &mut Vec<String>,
+) {
+    let Some(spec_addr) = spec_addr else {
+        return;
+    };
+    if address_is_unset(spec_addr) {
+        return;
+    }
+    if address_is_unset(current) {
+        *current = spec_addr.clone();
+        return;
+    }
+    if same_evm_address(current, spec_addr) {
+        return;
+    }
+    if signature_verified {
+        errors.push(format!(
+            "{env_name}={current} does not match the signed chain spec ({spec_addr})"
+        ));
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum NodeMode {
     /// Full mode: Store everything (500GB+, 16GB RAM)
@@ -768,8 +812,14 @@ impl NodeConfig {
         self.validate_genesis_hash_value(raw.as_deref())
     }
 
-    /// Apply a resolved chain spec, with env vars taking precedence.
-    pub fn apply_chain_spec(&mut self, spec: &common::ChainSpec, signature_verified: bool) {
+    /// Apply a resolved chain spec, with env vars taking precedence unless the
+    /// spec is signature-verified and a non-zero env address disagrees.
+    pub fn apply_chain_spec(
+        &mut self,
+        spec: &common::ChainSpec,
+        signature_verified: bool,
+    ) -> Vec<String> {
+        let mut errors = Vec::new();
         if self.chain_id.is_empty() {
             self.chain_id = spec.chain_id.clone();
         }
@@ -784,28 +834,34 @@ impl NodeConfig {
         if self.p2p_seeds.is_empty() {
             self.p2p_seeds = spec.p2p_seeds();
         }
-        // Contract addresses from spec (unless explicitly set via env to non-zero)
-        let zero = "0x0000000000000000000000000000000000000000".to_string();
-        if self.registry_addr == zero || self.registry_addr.is_empty() {
-            if let Some(addr) = spec.contract("registry") {
-                self.registry_addr = addr.clone();
-            }
-        }
-        if self.staking_addr == zero || self.staking_addr.is_empty() {
-            if let Some(addr) = spec.contract("staking") {
-                self.staking_addr = addr.clone();
-            }
-        }
-        if self.governance_addr == zero || self.governance_addr.is_empty() {
-            if let Some(addr) = spec.contract("governance") {
-                self.governance_addr = addr.clone();
-            }
-        }
-        if self.token_addr == zero || self.token_addr.is_empty() {
-            if let Some(addr) = spec.contract("creg_token") {
-                self.token_addr = addr.clone();
-            }
-        }
+        adopt_or_reject_spec_contract(
+            &mut self.registry_addr,
+            spec.contract("registry"),
+            "CREG_REGISTRY_ADDR",
+            signature_verified,
+            &mut errors,
+        );
+        adopt_or_reject_spec_contract(
+            &mut self.staking_addr,
+            spec.contract("staking"),
+            "CREG_STAKING_ADDR",
+            signature_verified,
+            &mut errors,
+        );
+        adopt_or_reject_spec_contract(
+            &mut self.governance_addr,
+            spec.contract("governance"),
+            "CREG_GOVERNANCE_ADDR",
+            signature_verified,
+            &mut errors,
+        );
+        adopt_or_reject_spec_contract(
+            &mut self.token_addr,
+            spec.contract("creg_token"),
+            "CREG_TOKEN_ADDR",
+            signature_verified,
+            &mut errors,
+        );
         // Block interval from spec (unless env override is non-default)
         if self.block_interval_secs == 5 && spec.consensus_params.block_time_seconds != 5 {
             self.block_interval_secs = spec.consensus_params.block_time_seconds;
@@ -827,6 +883,7 @@ impl NodeConfig {
         // threshold encryption on.
         self.zk_validation = spec.feature_flags.zk_validation;
         self.threshold_encryption = spec.feature_flags.threshold_encryption;
+        errors
     }
 }
 
@@ -1509,6 +1566,51 @@ mod tests {
         cfg.apply_chain_spec(&spec, false);
         assert_eq!(cfg.vote_timeout_secs, 15);
         std::env::remove_var("CREG_VOTE_TIMEOUT_SECS");
+    }
+
+    #[test]
+    fn signed_spec_rejects_stale_env_contract_overrides() {
+        let spec: common::ChainSpec =
+            serde_json::from_str(include_str!("../../../testnet/chain-spec.sepolia.json"))
+                .expect("signed sepolia spec parses");
+        let spec_staking = spec.contract("staking").expect("staking").clone();
+        let spec_registry = spec.contract("registry").expect("registry").clone();
+
+        let mut cfg = base_config();
+        cfg.staking_addr = "0xf28C63C4Aafd27025E535Ab9ab7B4daC18C96Bc2".into();
+        cfg.registry_addr = String::new();
+        cfg.governance_addr.clear();
+        cfg.token_addr.clear();
+        let errors = cfg.apply_chain_spec(&spec, true);
+        assert!(
+            errors.iter().any(|e| e.contains("CREG_STAKING_ADDR")
+                && e.contains("does not match the signed chain spec")),
+            "stale staking env must fail closed, got {errors:?}"
+        );
+        assert_eq!(cfg.registry_addr, spec_registry);
+
+        let mut matching = base_config();
+        matching.staking_addr = spec_staking.to_ascii_lowercase();
+        matching.registry_addr = spec_registry.to_ascii_lowercase();
+        matching.governance_addr = spec.contract("governance").unwrap().to_ascii_lowercase();
+        matching.token_addr = spec.contract("creg_token").unwrap().to_ascii_lowercase();
+        let errors = matching.apply_chain_spec(&spec, true);
+        assert!(
+            errors.is_empty(),
+            "checksum-insensitive match must be accepted, got {errors:?}"
+        );
+
+        let mut unsigned = base_config();
+        unsigned.staking_addr = "0xf28C63C4Aafd27025E535Ab9ab7B4daC18C96Bc2".into();
+        let errors = unsigned.apply_chain_spec(&spec, false);
+        assert!(
+            errors.is_empty(),
+            "unsigned overlay keeps env, got {errors:?}"
+        );
+        assert_eq!(
+            unsigned.staking_addr,
+            "0xf28C63C4Aafd27025E535Ab9ab7B4daC18C96Bc2"
+        );
     }
 
     #[test]
