@@ -102,8 +102,14 @@ contract AppealTest is Test {
 
         (,,, Appeal.AppealStatus status,,,) = appeal.getAppeal(id);
         assertEq(uint(status), uint(Appeal.AppealStatus.Approved));
-        // Bond returned to publisher.
-        assertGt(publisher.balance, balBefore);
+        // Bond is credited, not pushed, so a malicious publisher cannot grief resolution.
+        assertEq(appeal.pendingWithdrawals(publisher), 0.1 ether);
+        assertEq(publisher.balance, balBefore);
+
+        vm.prank(publisher);
+        appeal.withdraw();
+        assertEq(publisher.balance, balBefore + 0.1 ether);
+        assertEq(appeal.pendingWithdrawals(publisher), 0);
     }
 
     function test_PanelRejectionSlashesBond() public {
@@ -179,7 +185,7 @@ contract AppealTest is Test {
         assertEq(storedBond, bond);
     }
 
-    function test_ReentrancyBlockedDuringVoteResolution() public {
+    function test_ReentrancyCannotGriefVoteResolution() public {
         ReentrantPanelist reentrant = new ReentrantPanelist(appeal);
         vm.deal(address(reentrant), 1 ether);
 
@@ -194,11 +200,13 @@ contract AppealTest is Test {
         vm.prank(panelist2);
         appeal.vote{value: 0.01 ether}(id, true);
 
-        vm.expectRevert("Panelist bond refund failed");
         reentrant.voteApprove{value: 0.01 ether}(id);
+        (,,, Appeal.AppealStatus status,,,) = appeal.getAppeal(id);
+        assertEq(uint(status), uint(Appeal.AppealStatus.Approved));
+        assertGt(appeal.pendingWithdrawals(address(reentrant)), 0);
     }
 
-    function test_ReentrancyBlockedDuringPublisherBondRefund() public {
+    function test_MaliciousPublisherCannotGriefResolutionOrDoubleWithdraw() public {
         ReentrantPublisher pub = new ReentrantPublisher(appeal);
         vm.deal(address(pub), 2 ether);
 
@@ -210,9 +218,21 @@ contract AppealTest is Test {
         appeal.vote{value: 0.01 ether}(id, true);
 
         pub.armReenter();
-        vm.expectRevert("Bond refund failed");
         vm.prank(panelist3);
         appeal.vote{value: 0.01 ether}(id, true);
+
+        (,,, Appeal.AppealStatus status,,,) = appeal.getAppeal(id);
+        assertEq(uint(status), uint(Appeal.AppealStatus.Approved));
+        assertEq(appeal.pendingWithdrawals(address(pub)), 0.1 ether);
+
+        vm.expectRevert("Withdraw failed");
+        pub.withdrawBond();
+
+        pub.disarm();
+        pub.withdrawBond();
+        assertEq(appeal.pendingWithdrawals(address(pub)), 0);
+        vm.expectRevert(Appeal.NothingToWithdraw.selector);
+        pub.withdrawBond();
     }
 }
 
@@ -237,6 +257,14 @@ contract ReentrantPublisher {
 
     function armReenter() external {
         reenter = true;
+    }
+
+    function disarm() external {
+        reenter = false;
+    }
+
+    function withdrawBond() external {
+        appeal.withdraw();
     }
 
     receive() external payable {

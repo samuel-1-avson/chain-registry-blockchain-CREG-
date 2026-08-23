@@ -27,7 +27,8 @@
   launch, findings routing, or Hub cutover.
 - **Activation posture:** do not enable authoritative recovery or mandatory
   certified committees until the signed activation/checkpoint ceremonies and
-  multi-operator rehearsals are complete.
+  multi-operator rehearsals are complete. ISSUE-014/018 are in-repo fail-closed
+  patches; they do not flip **HI11-ACTIVATE** or **CR07-ACTIVATE**.
 
 ---
 
@@ -96,6 +97,8 @@
 | ISSUE-016 | 2026-08-23 | Historical sync verifies `validator_set_hash` against the set at that height; HI-11 checkpoint still operational |
 | ISSUE-017 | 2026-08-23 | `GET /v1/governance/proposals` mirrors Governance.sol; 200 empty if unconfigured, 503 on L1 RPC failure |
 | ISSUE-012 | 2026-08-23 | Deep scan fails closed on corrupt/timeout input; votes carry the actual `degraded-*` scanner version |
+| ISSUE-014 | 2026-08-23 | Spec `threshold_encryption` now fail-closes; Sepolia flag stays false until share collection ships |
+| ISSUE-018 | 2026-08-23 | Appeal publisher/panelist payouts are pull-payment; not yet redeployed on Sepolia |
 
 ---
 

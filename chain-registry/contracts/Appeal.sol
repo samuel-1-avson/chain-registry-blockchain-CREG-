@@ -77,6 +77,9 @@ contract Appeal {
     /// How long an appeal stays open before it expires.
     uint256 public constant APPEAL_WINDOW = 7 days;
 
+    /// Pull-payment credits for untrusted recipients (publisher and panelists).
+    mapping(address => uint256) public pendingWithdrawals;
+
     // ── Events ────────────────────────────────────────────────────────────────
 
     event AppealSubmitted(uint256 indexed id, string canonical, address publisher, uint256 bond);
@@ -86,6 +89,7 @@ contract Appeal {
     event AppealExpired  (uint256 indexed id, string canonical);
     event PanelistAdded  (address panelist);
     event PanelistRemoved(address panelist);
+    event Withdrawal     (address indexed account, uint256 amount);
 
     // ── Errors ────────────────────────────────────────────────────────────────
 
@@ -96,6 +100,7 @@ contract Appeal {
     error AppealExpiredErr();
     error NotAuthorized();
     error NotGovernance();
+    error NothingToWithdraw();
 
     // ── Constructor ───────────────────────────────────────────────────────────
 
@@ -227,20 +232,28 @@ contract Appeal {
         emit AppealExpired(id, rec.canonical);
     }
 
+    /// @notice Withdraw credited ETH (publisher bond refunds and panelist rewards).
+    /// @dev Pull-payment: untrusted recipients cannot reenter resolution or grief votes.
+    function withdraw() external nonReentrant {
+        uint256 amount = pendingWithdrawals[msg.sender];
+        if (amount == 0) revert NothingToWithdraw();
+        pendingWithdrawals[msg.sender] = 0;
+        (bool ok,) = msg.sender.call{value: amount}("");
+        require(ok, "Withdraw failed");
+        emit Withdrawal(msg.sender, amount);
+    }
+
     // ── Internal resolution ───────────────────────────────────────────────────
 
     function _resolveApproved(uint256 id) internal {
         AppealRecord storage rec = _appeals[id];
         rec.status = AppealStatus.Approved;
 
-        // CEI: clear bond before external transfer so reentrancy cannot double-pay.
+        // Pull-payment: credit the publisher instead of pushing ETH during vote.
         uint256 bond = rec.bond;
         rec.bond = 0;
-        (bool ok,) = rec.publisher.call{value: bond}("");
-        require(ok, "Bond refund failed");
+        _credit(rec.publisher, bond);
 
-        // Distribute panelist bonds: return correct voters' bonds + split
-        // incorrect voters' bonds among correct voters.
         _distributePanelistBonds(rec, true);
 
         emit AppealApproved(id, rec.canonical);
@@ -285,11 +298,15 @@ contract Appeal {
         for (uint256 i = 0; i < rec.voters.length; i++) {
             address v = rec.voters[i];
             if (rec.votedApprove[v] == outcomeApproved) {
-                (bool ok,) = v.call{value: PANELIST_VOTE_BOND + reward}("");
-                require(ok, "Panelist bond refund failed");
+                _credit(v, PANELIST_VOTE_BOND + reward);
             }
             // Incorrect voters' bonds stay in the contract (already accounted for).
         }
+    }
+
+    function _credit(address to, uint256 amount) internal {
+        if (amount == 0 || to == address(0)) return;
+        pendingWithdrawals[to] += amount;
     }
 
     // ── Governance ────────────────────────────────────────────────────────────
