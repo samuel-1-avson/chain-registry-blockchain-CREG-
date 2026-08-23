@@ -469,6 +469,7 @@ async fn main() -> Result<()> {
                     )
                     || e.contains("CREG_ETH_RPC is invalid")
                     || e.contains("CREG_PRODUCTION=true but ZK package key files are missing")
+                    || e.contains("CREG_IS_VALIDATOR=true requires at least one dialable P2P seed")
             })
             .collect();
         if !hard_errors.is_empty() {
@@ -607,8 +608,29 @@ async fn main() -> Result<()> {
     // â”€â”€ Event bus (broadcast channel for SSE clients) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     let event_bus = new_event_bus();
 
-    // â”€â”€ P2P Networking (libp2p) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    let (p2p_node, p2p_handle) = p2p::P2PNode::new(&config.p2p_listen)?;
+    let (dialable_seeds, invalid_seeds) = p2p::parse_p2p_seed_multiaddrs(&config.p2p_seeds);
+    for (seed, error) in &invalid_seeds {
+        tracing::warn!(seed = %seed, error = %error, "Ignoring invalid P2P seed multiaddr");
+    }
+    if config.is_validator
+        && dialable_seeds.is_empty()
+        && !config::allow_isolated_empty_p2p_seeds(config.is_testnet)
+    {
+        anyhow::bail!(
+            "CREG_IS_VALIDATOR=true requires at least one dialable P2P seed \
+             (CREG_P2P_SEEDS or CREG_VALIDATOR_P2P_SEEDS). Isolated lab nodes may set \
+             CREG_TESTNET=true and CREG_ALLOW_EMPTY_P2P_SEEDS=true."
+        );
+    }
+
+    let p2p_identity_path = config.data_dir.join("p2p").join("identity.key");
+    let (p2p_node, p2p_handle) =
+        p2p::P2PNode::with_identity(&config.p2p_listen, Some(&p2p_identity_path))?;
+    tracing::info!(
+        peer_id = %p2p_node.peer_id,
+        identity = %p2p_identity_path.display(),
+        "P2P identity ready"
+    );
 
     // Make the p2p sender available to API/worker code that needs to gossip
     // validator identity registrations fleet-wide.
@@ -665,19 +687,7 @@ async fn main() -> Result<()> {
 
     // Start P2P node in background
     let p2p_handle_for_seeds = p2p_handle.clone();
-    let seeds = config.p2p_seeds.clone();
-    let state_for_seed_redial = Arc::clone(&state);
     tokio::spawn(async move {
-        let mut dialable_seeds = Vec::<libp2p::Multiaddr>::new();
-        for seed in seeds {
-            match seed.parse() {
-                Ok(addr) => dialable_seeds.push(addr),
-                Err(error) => {
-                    tracing::warn!(seed = %seed, error = %error, "Ignoring invalid P2P seed multiaddr");
-                }
-            }
-        }
-
         if dialable_seeds.is_empty() {
             return;
         }

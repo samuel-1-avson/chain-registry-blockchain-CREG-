@@ -3663,7 +3663,7 @@ fn draw_operator(f: &mut Frame, app: &App, area: Rect) {
     let active_validators = app
         .validators
         .iter()
-        .filter(|v| v.is_active || v.status == "online" || v.status == "self")
+        .filter(|v| v.is_active || common::validator_status_is_active(&v.status))
         .count();
 
     let summary = Paragraph::new(vec![

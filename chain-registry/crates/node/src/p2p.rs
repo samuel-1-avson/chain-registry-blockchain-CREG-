@@ -1,23 +1,108 @@
 // crates/node/src/p2p.rs
 // Real decentralized P2P layer using libp2p with rate limiting.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use futures::StreamExt;
 use libp2p::{
-    gossipsub, identify, kad, noise,
+    gossipsub, identify, identity, kad,
+    multiaddr::Protocol,
+    noise,
     swarm::{NetworkBehaviour, SwarmEvent},
     tcp, yamux, Multiaddr, PeerId, Swarm,
 };
+use std::path::Path;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
 use crate::p2p_rate_limit::{P2PRateLimitConfig, P2PRateLimiter};
+
+pub const VIEW_CHANGE_TOPIC: &str = "creg/v1/view-change";
 
 fn gossipsub_heartbeat_interval() -> Duration {
     if cfg!(test) {
         Duration::from_millis(250)
     } else {
         Duration::from_secs(10)
+    }
+}
+
+fn peer_id_from_multiaddr(addr: &Multiaddr) -> Option<PeerId> {
+    addr.iter().find_map(|protocol| match protocol {
+        Protocol::P2p(peer_id) => Some(peer_id),
+        _ => None,
+    })
+}
+
+pub fn parse_p2p_seed_multiaddrs(seeds: &[String]) -> (Vec<Multiaddr>, Vec<(String, String)>) {
+    let mut dialable = Vec::new();
+    let mut invalid = Vec::new();
+    for seed in seeds {
+        match seed.parse::<Multiaddr>() {
+            Ok(addr) => dialable.push(addr),
+            Err(error) => invalid.push((seed.clone(), error.to_string())),
+        }
+    }
+    (dialable, invalid)
+}
+
+fn write_private_file(path: &Path, bytes: &[u8]) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)
+            .with_context(|| format!("create P2P identity {}", path.display()))?;
+        file.write_all(bytes)
+            .with_context(|| format!("write P2P identity {}", path.display()))?;
+        return Ok(());
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::write(path, bytes)
+            .with_context(|| format!("write P2P identity {}", path.display()))?;
+        Ok(())
+    }
+}
+
+pub(crate) fn load_or_create_p2p_identity(path: Option<&Path>) -> Result<identity::Keypair> {
+    let Some(path) = path else {
+        return Ok(identity::Keypair::generate_ed25519());
+    };
+    if path.exists() {
+        let bytes =
+            std::fs::read(path).with_context(|| format!("read P2P identity {}", path.display()))?;
+        return identity::Keypair::from_protobuf_encoding(&bytes).map_err(|error| {
+            anyhow::anyhow!("invalid P2P identity at {}: {error}", path.display())
+        });
+    }
+    let keypair = identity::Keypair::generate_ed25519();
+    let bytes = keypair
+        .to_protobuf_encoding()
+        .map_err(|error| anyhow::anyhow!("encode P2P identity: {error}"))?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("create P2P identity dir {}", parent.display()))?;
+    }
+    write_private_file(path, &bytes)?;
+    Ok(keypair)
+}
+
+fn ingest_kademlia_address(
+    swarm: &mut Swarm<Behaviour>,
+    peer_id: PeerId,
+    addr: Multiaddr,
+    bootstrapped: bool,
+) {
+    swarm.behaviour_mut().kademlia.add_address(&peer_id, addr);
+    if !bootstrapped {
+        if let Err(error) = swarm.behaviour_mut().kademlia.bootstrap() {
+            tracing::debug!(%error, "Kademlia bootstrap deferred until a peer address is known");
+        }
     }
 }
 
@@ -276,7 +361,9 @@ fn report_validation_result(
 }
 
 fn requires_payload_validation_before_acceptance(topic: &str) -> bool {
-    topic.contains("votes") || topic.contains("validator-set-transitions")
+    topic.contains("votes")
+        || topic.contains("validator-set-transitions")
+        || topic.contains("view-change")
 }
 
 fn transition_persistence_failure_acceptance(
@@ -400,9 +487,16 @@ pub enum P2PCommand {
 
 impl P2PNode {
     pub fn new(listen_addr: &str) -> Result<(Self, P2PHandle)> {
+        Self::with_identity(listen_addr, None)
+    }
+
+    pub fn with_identity(
+        listen_addr: &str,
+        identity_path: Option<&Path>,
+    ) -> Result<(Self, P2PHandle)> {
         let (sender, receiver) = mpsc::channel(100);
-        let mut swarm = libp2p::SwarmBuilder::with_new_identity()
-            // ... (rest of the SwarmBuilder remains the same)
+        let keypair = load_or_create_p2p_identity(identity_path)?;
+        let mut swarm = libp2p::SwarmBuilder::with_existing_identity(keypair)
             .with_tokio()
             .with_tcp(
                 tcp::Config::default(),
@@ -434,7 +528,8 @@ impl P2PNode {
                 // ── Kademlia ─────────────────────────────────────────────────
                 let peer_id = key.public().to_peer_id();
                 let store = kad::store::MemoryStore::new(peer_id);
-                let kademlia = kad::Behaviour::new(peer_id, store);
+                let mut kademlia = kad::Behaviour::new(peer_id, store);
+                kademlia.set_mode(Some(kad::Mode::Server));
 
                 // ── Identify ─────────────────────────────────────────────────
                 let identify = identify::Behaviour::new(identify::Config::new(
@@ -482,6 +577,8 @@ impl P2PNode {
         let validator_set_transitions_topic = gossipsub::IdentTopic::new(
             crate::validator_registry_gossip::VALIDATOR_SET_TRANSITIONS_TOPIC,
         );
+        let view_change_topic = gossipsub::IdentTopic::new(VIEW_CHANGE_TOPIC);
+        let mut kad_bootstrapped = false;
 
         self.swarm
             .behaviour_mut()
@@ -507,6 +604,10 @@ impl P2PNode {
             .behaviour_mut()
             .gossipsub
             .subscribe(&validator_set_transitions_topic)?;
+        self.swarm
+            .behaviour_mut()
+            .gossipsub
+            .subscribe(&view_change_topic)?;
 
         loop {
             tokio::select! {
@@ -514,9 +615,21 @@ impl P2PNode {
                     SwarmEvent::Behaviour(BehaviourEvent::Kademlia(kad::Event::OutboundQueryProgressed { result, .. })) => {
                         match result {
                             kad::QueryResult::Bootstrap(Ok(_)) => {
+                                kad_bootstrapped = true;
                                 tracing::info!("Kademlia bootstrap successful");
                             }
                             _ => {}
+                        }
+                    }
+                    SwarmEvent::Behaviour(BehaviourEvent::Identify(identify::Event::Received { peer_id, info })) => {
+                        tracing::debug!(%peer_id, addrs = info.listen_addrs.len(), "Identify received");
+                        for addr in info.listen_addrs {
+                            ingest_kademlia_address(
+                                &mut self.swarm,
+                                peer_id,
+                                addr,
+                                kad_bootstrapped,
+                            );
                         }
                     }
                     SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(gossipsub::Event::Message {
@@ -803,65 +916,116 @@ impl P2PNode {
                         // (block_hash, new_view) pair — preventing a single Byzantine
                         // node from forcing a view-change unilaterally.
                         if topic_str.contains("view-change") {
-                            if let Ok(common::GossipMessage::ViewChange { block_hash, new_view, validator_id, signature }) = serde_json::from_slice(&message.data) {
-                                // Verify Ed25519 signature: message = "{block_hash}:view_change:{new_view}"
-                                let msg = format!("{}:view_change:{}", block_hash, new_view);
-                                let sig_valid: bool = (|| -> Option<bool> {
-                                    // Look up the validator's pubkey from the set
-                                    let s = state.try_read().ok()?;
-                                    let pubkey_hex = s.validator_set.validators
-                                        .iter()
-                                        .find(|v| v.id == validator_id)
-                                        .map(|v| v.pubkey.clone())?;
-                                    let pk_bytes = hex::decode(&pubkey_hex).ok()?;
-                                    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
-                                    let vk = VerifyingKey::try_from(pk_bytes.as_slice()).ok()?;
-                                    let sig_bytes = hex::decode(&signature).ok()?;
-                                    let sig = Signature::try_from(sig_bytes.as_slice()).ok()?;
-                                    vk.verify(msg.as_bytes(), &sig).ok()?;
-                                    Some(true)
-                                })().unwrap_or(false);
-
-                                if !sig_valid {
-                                    tracing::warn!(
-                                        validator_id = %validator_id,
-                                        peer = %peer_id,
-                                        "P2P: dropping ViewChange with invalid signature"
-                                    );
-                                    continue;
-                                }
-
-                                let mut s = state.write().await;
-                                let n = s.validator_set.validators.len();
-                                let threshold = n / 3 + 1;
-
-                                let count = {
-                                    let by_view = s.view_change_certs
-                                        .entry(block_hash.clone())
-                                        .or_default()
-                                        .entry(new_view)
-                                        .or_default();
-                                    by_view.insert(validator_id.clone());
-                                    by_view.len()
-                                };
-
-                                tracing::debug!(
-                                    block_hash = %&block_hash[..block_hash.len().min(12)],
+                            match serde_json::from_slice::<common::GossipMessage>(&message.data) {
+                                Ok(common::GossipMessage::ViewChange {
+                                    block_hash,
                                     new_view,
-                                    validator_id = %validator_id,
-                                    count,
-                                    threshold,
-                                    "ViewChange certificate received"
-                                );
+                                    validator_id,
+                                    signature,
+                                }) => {
+                                    let msg = format!("{}:view_change:{}", block_hash, new_view);
+                                    let accepted = (|| -> Option<()> {
+                                        let s = state.try_read().ok()?;
+                                        let validator = s
+                                            .validator_set
+                                            .validators
+                                            .iter()
+                                            .find(|v| v.id == validator_id)?;
+                                        if !common::validator_status_is_active(&validator.status) {
+                                            return None;
+                                        }
+                                        let pk_bytes = hex::decode(&validator.pubkey).ok()?;
+                                        use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+                                        let vk = VerifyingKey::try_from(pk_bytes.as_slice()).ok()?;
+                                        let sig_bytes = hex::decode(&signature).ok()?;
+                                        let sig = Signature::try_from(sig_bytes.as_slice()).ok()?;
+                                        vk.verify(msg.as_bytes(), &sig).ok()?;
+                                        Some(())
+                                    })()
+                                    .is_some();
 
-                                if count >= threshold {
-                                    tracing::warn!(
+                                    if !accepted {
+                                        tracing::warn!(
+                                            validator_id = %validator_id,
+                                            peer = %peer_id,
+                                            "P2P: dropping ViewChange from inactive member or with invalid signature"
+                                        );
+                                        report_validation_result(
+                                            &mut self.swarm,
+                                            &id,
+                                            &peer_id,
+                                            gossipsub::MessageAcceptance::Reject,
+                                        );
+                                        continue;
+                                    }
+
+                                    report_validation_result(
+                                        &mut self.swarm,
+                                        &id,
+                                        &peer_id,
+                                        gossipsub::MessageAcceptance::Accept,
+                                    );
+
+                                    let mut s = state.write().await;
+                                    let n = s
+                                        .validator_set
+                                        .validators
+                                        .iter()
+                                        .filter(|v| common::validator_status_is_active(&v.status))
+                                        .count();
+                                    let threshold = n / 3 + 1;
+
+                                    let count = {
+                                        let by_view = s
+                                            .view_change_certs
+                                            .entry(block_hash.clone())
+                                            .or_default()
+                                            .entry(new_view)
+                                            .or_default();
+                                        by_view.insert(validator_id.clone());
+                                        by_view.len()
+                                    };
+
+                                    tracing::debug!(
                                         block_hash = %&block_hash[..block_hash.len().min(12)],
                                         new_view,
+                                        validator_id = %validator_id,
                                         count,
                                         threshold,
-                                        "[PBFT] ViewChange quorum reached — view-change to view {} is authorised",
-                                        new_view
+                                        "ViewChange certificate received"
+                                    );
+
+                                    match s.pbft_engine.receive_view_change(
+                                        &block_hash,
+                                        &validator_id,
+                                        new_view,
+                                    ) {
+                                        Ok(applied) if applied => {
+                                            tracing::warn!(
+                                                block_hash = %&block_hash[..block_hash.len().min(12)],
+                                                new_view,
+                                                count,
+                                                threshold,
+                                                "[PBFT] ViewChange quorum reached — applied view {}",
+                                                new_view
+                                            );
+                                        }
+                                        Ok(_) => {}
+                                        Err(error) => {
+                                            tracing::debug!(
+                                                block_hash = %&block_hash[..block_hash.len().min(12)],
+                                                error = %error,
+                                                "ViewChange stored; no matching local PBFT round yet"
+                                            );
+                                        }
+                                    }
+                                }
+                                _ => {
+                                    report_validation_result(
+                                        &mut self.swarm,
+                                        &id,
+                                        &peer_id,
+                                        gossipsub::MessageAcceptance::Reject,
                                     );
                                 }
                             }
@@ -1160,6 +1324,12 @@ impl P2PNode {
                     }
                     SwarmEvent::ConnectionEstablished { peer_id, endpoint, .. } => {
                         tracing::info!("P2P Connection established with {} at {:?}", peer_id, endpoint);
+                        ingest_kademlia_address(
+                            &mut self.swarm,
+                            peer_id,
+                            endpoint.get_remote_address().clone(),
+                            kad_bootstrapped,
+                        );
                     }
                     SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
                         tracing::error!("P2P Outgoing connection error to {:?}: {}", peer_id, error);
@@ -1188,6 +1358,14 @@ impl P2PNode {
                                 }
                             }
                             P2PCommand::Dial { addr } => {
+                                if let Some(peer_id) = peer_id_from_multiaddr(&addr) {
+                                    ingest_kademlia_address(
+                                        &mut self.swarm,
+                                        peer_id,
+                                        addr.clone(),
+                                        kad_bootstrapped,
+                                    );
+                                }
                                 tracing::info!("P2P Dialing {}...", addr);
                                 if let Err(e) = self.swarm.dial(addr) {
                                     tracing::error!("P2P dial failed: {}", e);
@@ -1390,9 +1568,32 @@ mod tests {
         assert!(requires_payload_validation_before_acceptance(
             "creg/v1/votes"
         ));
+        assert!(requires_payload_validation_before_acceptance(
+            VIEW_CHANGE_TOPIC
+        ));
         assert!(!requires_payload_validation_before_acceptance(
             "creg/v1/blocks"
         ));
+    }
+
+    #[test]
+    fn p2p_identity_persists_across_reloads() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("identity.key");
+        let first = load_or_create_p2p_identity(Some(&path)).expect("create identity");
+        let second = load_or_create_p2p_identity(Some(&path)).expect("reload identity");
+        assert_eq!(first.public().to_peer_id(), second.public().to_peer_id());
+        assert!(path.exists());
+    }
+
+    #[test]
+    fn parse_p2p_seed_multiaddrs_skips_invalid() {
+        let (ok, bad) = parse_p2p_seed_multiaddrs(&[
+            "/ip4/127.0.0.1/tcp/4001".into(),
+            "not-a-multiaddr".into(),
+        ]);
+        assert_eq!(ok.len(), 1);
+        assert_eq!(bad.len(), 1);
     }
 
     #[test]

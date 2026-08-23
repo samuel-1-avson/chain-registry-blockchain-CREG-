@@ -423,6 +423,9 @@ impl PbftRound {
     /// Returns `Ok(true)` when the threshold is reached and the view-change
     /// was applied, `Ok(false)` when more votes are still needed.
     pub fn record_view_change(&mut self, validator_id: &str, new_view: u32) -> Result<bool> {
+        if !self.validator_set.is_member(validator_id) {
+            bail!("view-change from non-member validator {}", validator_id);
+        }
         // Byzantine-fault threshold for forcing a view-change: ⌊n/3⌋+1
         // (the smallest set that is guaranteed to contain at least one honest node).
         let n = self.validator_set.len();
@@ -559,16 +562,15 @@ impl PbftEngine {
         }
     }
 
-    /// Check all active rounds for phase timeouts and trigger view-changes
-    /// where needed.  Rounds that exhaust their view-change budget are moved
-    /// to `Failed`.
+    /// Check all active rounds for phase timeouts and emit view-change
+    /// certificates. Local application waits for ⌊n/3⌋+1 certificates so a
+    /// single timed-out node cannot force a view-change unilaterally.
     ///
-    /// Returns `ViewChangeSignal` structs for every round that had a
-    /// view-change triggered.  The caller should broadcast a
-    /// `GossipMessage::ViewChange` for each signal so that peers can
-    /// accumulate certificates and apply the view-change once they reach
-    /// their own ⌊n/3⌋+1 threshold.
-    pub fn timeout_rounds(&mut self) -> Vec<ViewChangeSignal> {
+    /// Returns a `ViewChangeSignal` for every timed-out round this node is
+    /// an active member of. The caller should broadcast
+    /// `GossipMessage::ViewChange` for each signal. Rounds that exhaust their
+    /// view-change budget are moved to `Failed`.
+    pub fn timeout_rounds(&mut self, local_validator_id: &str) -> Vec<ViewChangeSignal> {
         let timed_out: Vec<String> = self
             .rounds
             .iter()
@@ -578,21 +580,27 @@ impl PbftEngine {
 
         let mut signals = Vec::new();
         for hash in timed_out {
+            let preview = hash[..hash.len().min(12)].to_string();
             if let Some(round) = self.rounds.get_mut(&hash) {
-                match round.trigger_view_change() {
-                    Ok(new_view) => {
+                if !round.validator_set.is_member(local_validator_id) {
+                    continue;
+                }
+                let proposed_view = round.view_number.saturating_add(1);
+                match round.record_view_change(local_validator_id, proposed_view) {
+                    Ok(applied) => {
                         tracing::warn!(
-                            "[PBFT] Timeout on block {} — triggered view-change to view {}",
-                            &hash[..12],
-                            new_view
+                            "[PBFT] Timeout on block {} — proposed view-change to view {} (applied={})",
+                            preview,
+                            proposed_view,
+                            applied
                         );
                         signals.push(ViewChangeSignal {
                             block_hash: hash,
-                            new_view,
+                            new_view: proposed_view,
                         });
                     }
                     Err(e) => {
-                        tracing::error!("[PBFT] Round {} abandoned: {}", &hash[..12], e);
+                        tracing::error!("[PBFT] Round {} abandoned: {}", preview, e);
                     }
                 }
             }
@@ -841,5 +849,89 @@ mod tests {
         assert_eq!(rounds[0].phase, "prepare");
         assert_eq!(rounds[0].phase_code, 2);
         assert!(engine.max_non_terminal_phase_age_seconds() >= 0.0);
+    }
+
+    fn four_validator_set() -> ValidatorSet {
+        let mut set = ValidatorSet::new();
+        for i in 0..4u8 {
+            set.add(ValidatorInfo {
+                id: format!("v{i}"),
+                pubkey: hex::encode([i + 1; 32]),
+                eth_address: None,
+                stake: 100,
+                reputation: 100,
+                is_active: true,
+            });
+        }
+        set
+    }
+
+    fn selected_proposer(vs: &ValidatorSet, prev_hash: &str) -> String {
+        let active: Vec<crate::vrf::VrfValidator> = vs
+            .validators
+            .values()
+            .filter(|v| v.is_active)
+            .map(|v| crate::vrf::VrfValidator {
+                id: v.id.clone(),
+                pubkey: v.pubkey.clone(),
+                vrf_output: None,
+                vrf_proof: None,
+            })
+            .collect();
+        crate::vrf::select_proposer_deterministic(&active, prev_hash)
+            .expect("four-validator set has a proposer")
+    }
+
+    #[test]
+    fn timeout_rounds_broadcasts_without_unilateral_view_change() {
+        use super::{PbftConfig, PbftEngine};
+        use std::time::Duration;
+
+        let vs = four_validator_set();
+        let proposer = selected_proposer(&vs, &"11".repeat(32));
+        let mut engine = PbftEngine::with_config(PbftConfig {
+            round_phase_timeout: Duration::from_millis(1),
+            max_view_changes: 3,
+            stale_round_ttl: Duration::from_secs(120),
+            allow_small_cluster_quorum: false,
+        });
+        engine.start_round(test_block(&proposer), vs).unwrap();
+        std::thread::sleep(Duration::from_millis(5));
+
+        let signals = engine.timeout_rounds("v0");
+        assert_eq!(signals.len(), 1);
+        assert_eq!(signals[0].new_view, 1);
+        assert_eq!(engine.observability_snapshot()[0].view_number, 0);
+
+        let applied = engine
+            .receive_view_change(&signals[0].block_hash, "v1", 1)
+            .unwrap();
+        assert!(applied);
+        assert_eq!(engine.observability_snapshot()[0].view_number, 1);
+    }
+
+    #[test]
+    fn timeout_rounds_ignores_non_members() {
+        use super::{PbftConfig, PbftEngine};
+        use std::time::Duration;
+
+        let vs = four_validator_set();
+        let proposer = selected_proposer(&vs, &"11".repeat(32));
+        let mut engine = PbftEngine::with_config(PbftConfig {
+            round_phase_timeout: Duration::from_millis(1),
+            max_view_changes: 3,
+            stale_round_ttl: Duration::from_secs(120),
+            allow_small_cluster_quorum: false,
+        });
+        engine.start_round(test_block(&proposer), vs).unwrap();
+        std::thread::sleep(Duration::from_millis(5));
+        assert!(engine.timeout_rounds("outsider").is_empty());
+    }
+
+    #[test]
+    fn record_view_change_rejects_non_members() {
+        let signing_key = SigningKey::from_bytes(&[7u8; 32]);
+        let mut round = PbftRound::new(test_block("node-1"), validator_set("node-1", &signing_key));
+        assert!(round.record_view_change("outsider", 1).is_err());
     }
 }

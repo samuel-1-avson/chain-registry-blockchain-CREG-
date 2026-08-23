@@ -86,7 +86,7 @@ pub struct Validator {
     pub eth_address: String,
     pub stake: u64,
     pub reputation: u32,
-    pub status: String, // "online", "self", "offline"
+    pub status: String, // "online", "self", "active", "offline"
 
     // --- Performance / resources proxy (for committee selection) ---
     /// 0-1000 composite score reflecting observed ability to successfully and
@@ -130,6 +130,18 @@ impl ValidatorSet {
     pub fn new(validators: Vec<Validator>) -> Self {
         Self { validators }
     }
+}
+
+/// Whether a validator status string counts as PBFT-active.
+///
+/// Signed chain-spec copies use `"active"`. Runtime L1 sync remaps admitted
+/// members to `"online"` / `"self"`. `"offline"`, `"pending"`, and `"jailed"`
+/// stay inactive.
+pub fn validator_status_is_active(status: &str) -> bool {
+    matches!(
+        status.trim().to_ascii_lowercase().as_str(),
+        "online" | "self" | "active"
+    )
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
@@ -189,4 +201,25 @@ pub enum GossipMessage {
     ValidatorSetTransition {
         snapshot: AuthenticatedValidatorSetSnapshot,
     },
+}
+
+#[cfg(test)]
+mod validator_status_tests {
+    use super::validator_status_is_active;
+
+    #[test]
+    fn spec_and_runtime_active_statuses_count() {
+        assert!(validator_status_is_active("active"));
+        assert!(validator_status_is_active("ACTIVE"));
+        assert!(validator_status_is_active(" online "));
+        assert!(validator_status_is_active("self"));
+    }
+
+    #[test]
+    fn inactive_statuses_do_not_count() {
+        assert!(!validator_status_is_active("offline"));
+        assert!(!validator_status_is_active("pending"));
+        assert!(!validator_status_is_active("jailed"));
+        assert!(!validator_status_is_active(""));
+    }
 }

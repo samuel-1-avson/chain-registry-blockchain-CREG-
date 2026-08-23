@@ -248,12 +248,12 @@ pub async fn render(state: Arc<RwLock<NodeState>>) -> String {
         .validator_set
         .validators
         .iter()
-        .filter(|v| v.status == "online" || v.status == "self")
+        .filter(|v| common::validator_status_is_active(&v.status))
         .count();
     metric(
         &mut out,
         "creg_active_validators",
-        "Validators currently eligible for PBFT consensus (status online/self)",
+        "Validators currently eligible for PBFT consensus (status online/self/active)",
         "gauge",
         active_validators as f64,
     );
