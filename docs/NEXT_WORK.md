@@ -93,6 +93,7 @@
 | ISSUE-010 | 2026-08-22 | CrossChain `AxelarAdapter.setChainName` is governance-gated; adapter remains undeployed |
 | ISSUE-015 | 2026-08-22 | WASM WASI stubs gated by `CapabilitySet` / `ResourceLimits`; stdout capture via `fd_write` |
 | ISSUE-011 | 2026-08-23 | Publisher ZK admission placeholders retired; gRPC rejects leftover 85/`true` proofs |
+| ISSUE-016 | 2026-08-23 | Historical sync verifies `validator_set_hash` against the set at that height; HI-11 checkpoint still operational |
 
 ---
 

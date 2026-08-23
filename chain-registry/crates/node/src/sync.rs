@@ -704,17 +704,14 @@ async fn sync_once(state: Arc<RwLock<NodeState>>) -> anyhow::Result<()> {
             import_transition_history_through(&state, transitions, height).await?;
         }
 
-        // Verify that every Publish transaction carries a PBFT quorum of valid
-        // signatures against the current validator set. Without this check a
-        // malicious peer could serve a syntactically-valid block whose payload
-        // never reached consensus. (ISSUE-018)
+        // Verify Publish evidence and the block-level PBFT certificate against
+        // the validator set that was active at THIS block's height (ISSUE-016 /
+        // ISSUE-050), rooted in the immutable deployment bootstrap when no
+        // certified transition covers it.
         let (bootstrap_set, data_dir) = {
             let s = state.read().await;
             (s.validator_set_bootstrap.clone(), s.config.data_dir.clone())
         };
-        // Verify against the validator set that was active at THIS block's
-        // height (ISSUE-050), rooted in the immutable deployment bootstrap
-        // when no certified transition covers it.
         let effective_set = match crate::validator_set_history::verification_set_at(
             &data_dir,
             block.header.height,
@@ -1275,6 +1272,17 @@ async fn attempt_reorg_recovery(
     Ok(true)
 }
 
+fn require_header_matches_validator_set(
+    block: &common::Block,
+    validator_set: &ValidatorSet,
+) -> anyhow::Result<()> {
+    let expected_set_hash = common::canonical_validator_set_hash(validator_set);
+    if block.header.validator_set_hash != expected_set_hash {
+        anyhow::bail!("block validator-set hash does not match authenticated authority");
+    }
+    Ok(())
+}
+
 /// Verify the block-level PBFT COMMIT certificate and every header commitment
 /// before any transaction-specific evidence is considered. This covers blocks
 /// containing governance or validator lifecycle transactions as well as
@@ -1290,10 +1298,7 @@ fn verify_block_consensus_certificate(
         anyhow::bail!("cannot verify block: validator set is empty");
     }
 
-    let expected_set_hash = common::canonical_validator_set_hash(validator_set);
-    if block.header.validator_set_hash != expected_set_hash {
-        anyhow::bail!("block validator-set hash does not match authenticated authority");
-    }
+    require_header_matches_validator_set(block, validator_set)?;
     let expected_merkle_root = common::merkle_root(&block.transactions);
     if block.header.merkle_root != expected_merkle_root {
         anyhow::bail!("block transaction Merkle root is invalid");
@@ -1373,9 +1378,9 @@ fn verify_block_consensus_certificate(
 /// Verify consensus-grade package evidence on every Publish transaction in a block.
 ///
 /// Each `ChainRecord` in the block must carry at least `⌊2n/3⌋ + 1` valid
-/// Ed25519 signatures from validators currently in the active set, where each
-/// signature is over the domain-separated payload produced by
-/// `crate::gossip::canonical_vote_message(...)`.
+/// Ed25519 signatures from validators in the authenticated set for this
+/// height, where each signature is over the domain-separated payload produced
+/// by `crate::gossip::canonical_vote_message(...)`.
 ///
 /// Non-Publish transactions are covered by the block-level PBFT certificate
 /// above and remain subject to their state-transition validation rules.
@@ -1395,6 +1400,7 @@ fn verify_block_signatures(
     if n == 0 {
         anyhow::bail!("cannot verify block: local validator set is empty");
     }
+    require_header_matches_validator_set(block, validator_set)?;
     let quorum = (2 * n / 3) + 1;
 
     // Build a pubkey → validator_id lookup once so per-signature verification
@@ -1662,6 +1668,15 @@ mod tests {
         validator_set: &ValidatorSet,
         signing_keys: &[(&str, SigningKey)],
     ) -> Block {
+        publish_block_at(1, record, validator_set, signing_keys)
+    }
+
+    fn publish_block_at(
+        height: u64,
+        record: ChainRecord,
+        validator_set: &ValidatorSet,
+        signing_keys: &[(&str, SigningKey)],
+    ) -> Block {
         let tx = Transaction::Publish(record);
         let prev_hash = Block::genesis().hash();
         let active: Vec<_> = validator_set
@@ -1678,7 +1693,7 @@ mod tests {
             .expect("test validator set selects a proposer");
         let mut block = Block {
             header: BlockHeader {
-                height: 1,
+                height,
                 prev_hash,
                 merkle_root: merkle_root(std::slice::from_ref(&tx)),
                 proposer_id,
@@ -1688,6 +1703,55 @@ mod tests {
                 vrf_proof: None,
             },
             transactions: vec![tx],
+            pbft_signatures: vec![],
+        };
+        let block_hash = block.hash();
+        block.pbft_signatures = signing_keys
+            .iter()
+            .map(|(validator_id, key)| common::BlockSignature {
+                validator_id: (*validator_id).to_string(),
+                pubkey: hex::encode(key.verifying_key().as_bytes()),
+                signature: hex::encode(
+                    key.sign(
+                        consensus::pbft::pbft_signature_message("commit", &block_hash).as_bytes(),
+                    )
+                    .to_bytes(),
+                ),
+            })
+            .collect();
+        block
+    }
+
+    fn authority_block_at(
+        height: u64,
+        validator_set: &ValidatorSet,
+        signing_keys: &[(&str, SigningKey)],
+    ) -> Block {
+        let prev_hash = Block::genesis().hash();
+        let active: Vec<_> = validator_set
+            .validators
+            .iter()
+            .map(|validator| consensus::vrf::VrfValidator {
+                id: validator.id.clone(),
+                pubkey: validator.pubkey.clone(),
+                vrf_output: None,
+                vrf_proof: None,
+            })
+            .collect();
+        let proposer_id = consensus::vrf::select_proposer_deterministic(&active, &prev_hash)
+            .expect("test validator set selects a proposer");
+        let mut block = Block {
+            header: BlockHeader {
+                height,
+                prev_hash,
+                merkle_root: merkle_root(&[]),
+                proposer_id,
+                timestamp: Utc::now(),
+                validator_set_hash: common::canonical_validator_set_hash(validator_set),
+                vrf_output: None,
+                vrf_proof: None,
+            },
+            transactions: vec![],
             pbft_signatures: vec![],
         };
         let block_hash = block.hash();
@@ -2070,6 +2134,10 @@ mod tests {
         let mut wrong_set_hash = canonical_block.clone();
         wrong_set_hash.header.validator_set_hash = "f".repeat(64);
         assert!(verify_block_consensus_certificate(&wrong_set_hash, &validator_set).is_err());
+        assert!(
+            verify_block_signatures(&wrong_set_hash, &validator_set).is_err(),
+            "ISSUE-016: vote evidence must not accept a header that names a different set"
+        );
 
         let mut duplicate_commit = canonical_block.clone();
         duplicate_commit
@@ -2122,6 +2190,98 @@ mod tests {
                 .to_string()
                 .contains("only 0 valid signatures, need 3"),
             "unexpected sync failure: {error}"
+        );
+    }
+
+    #[test]
+    fn historical_sync_uses_set_at_height_not_current_tip() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let bootstrap_keys: Vec<_> = (11..=14)
+            .map(|byte| SigningKey::from_bytes(&[byte; 32]))
+            .collect();
+        let joining_key = SigningKey::from_bytes(&[15u8; 32]);
+        let bootstrap = validator_set(&bootstrap_keys);
+        let rotated = ValidatorSet::new(vec![
+            validator("validator-1", &bootstrap_keys[1]),
+            validator("validator-2", &bootstrap_keys[2]),
+            validator("validator-3", &bootstrap_keys[3]),
+            validator("validator-4", &joining_key),
+        ]);
+
+        crate::validator_set_history::record(dir.path(), 0, &bootstrap).expect("bootstrap history");
+        crate::validator_set_history::record_authenticated(
+            dir.path(),
+            signed_transition(5, &"a".repeat(64), &bootstrap, &rotated, &bootstrap_keys),
+            &bootstrap,
+        )
+        .expect("certified rotation");
+
+        let historical = crate::validator_set_history::verification_set_at_with_checkpoint(
+            dir.path(),
+            1,
+            &bootstrap,
+            None,
+        )
+        .expect("pre-rotation authority");
+        let current = crate::validator_set_history::verification_set_at_with_checkpoint(
+            dir.path(),
+            5,
+            &bootstrap,
+            None,
+        )
+        .expect("post-rotation authority");
+        assert_eq!(
+            common::canonical_validator_set_hash(&historical),
+            common::canonical_validator_set_hash(&bootstrap)
+        );
+        assert_eq!(
+            common::canonical_validator_set_hash(&current),
+            common::canonical_validator_set_hash(&rotated)
+        );
+
+        let historical_signers = [
+            ("validator-0", bootstrap_keys[0].clone()),
+            ("validator-1", bootstrap_keys[1].clone()),
+            ("validator-2", bootstrap_keys[2].clone()),
+            ("validator-3", bootstrap_keys[3].clone()),
+        ];
+        let current_signers = [
+            ("validator-1", bootstrap_keys[1].clone()),
+            ("validator-2", bootstrap_keys[2].clone()),
+            ("validator-3", bootstrap_keys[3].clone()),
+            ("validator-4", joining_key),
+        ];
+
+        let honest_historical = authority_block_at(1, &historical, &historical_signers);
+        verify_block_consensus_certificate(&honest_historical, &historical)
+            .expect("pre-rotation block verifies against the set at that height");
+        verify_block_signatures(&honest_historical, &historical)
+            .expect("pre-rotation evidence verifies against the set at that height");
+        assert!(
+            verify_block_consensus_certificate(&honest_historical, &current).is_err(),
+            "a later tip set must not re-validate earlier blocks"
+        );
+        assert!(
+            verify_block_signatures(&honest_historical, &current).is_err(),
+            "ISSUE-016: current validators cannot stand in for a historical set"
+        );
+
+        let honest_current = authority_block_at(5, &current, &current_signers);
+        verify_block_consensus_certificate(&honest_current, &current)
+            .expect("post-rotation block verifies against the rotated set");
+        assert!(
+            verify_block_consensus_certificate(&honest_current, &historical).is_err(),
+            "ejected validators must not certify post-rotation blocks"
+        );
+
+        let backdated = authority_block_at(1, &rotated, &current_signers);
+        assert!(
+            verify_block_consensus_certificate(&backdated, &historical).is_err(),
+            "ISSUE-016: a backdated block signed by the current set must fail historical authority"
+        );
+        assert!(
+            verify_block_signatures(&backdated, &historical).is_err(),
+            "ISSUE-016: header validator_set_hash must match the set at the claimed height"
         );
     }
 }

@@ -1,23 +1,18 @@
 // crates/node/src/validator_set_history.rs
 //
-// Height-indexed history of the active validator set (ISSUE-050).
+// Height-indexed history of the active validator set (ISSUE-050 / ISSUE-016).
 //
 // Block signatures must be verified against the validator set that was active
-// AT THE BLOCK'S HEIGHT, not the current set. Otherwise, after a membership
-// rotation, a node re-verifying or reorg-recovering older blocks counts only
-// the signers still in today's set and can wrongly reject a block that had a
-// valid quorum when it was produced.
+// AT THE BLOCK'S HEIGHT, not the current tip set. Otherwise a joining or
+// long-range-syncing node can accept a backdated block signed by today's
+// validators (or by keys that were ejected after the claimed height).
 //
-// This module records a snapshot whenever the set changes (effective from the
-// next block height) and lets the sync/verify path look up the set active at
-// any height. It is persisted to disk so the history survives restarts.
-//
-// SAFETY / SCOPE: lookups are ADDITIVE — callers fall back to the current set
-// when no snapshot covers a height, so behaviour is never stricter than before.
-// A node syncing historical heights it never witnessed (e.g. from genesis
-// across a past rotation) has no snapshot for them and falls back to current,
-// exactly as before. Full reconstruction of pre-join history from L1 staking
-// events is a larger follow-up.
+// Security-sensitive readers use `verification_set_at` / `authenticated_at_checked`:
+// authority is the certified transition chain rooted in the immutable
+// deployment bootstrap, or in a configured weak-subjectivity checkpoint when
+// `height` is at or after that checkpoint. Missing or broken history fails
+// closed. `set_at` / `authenticated_at` remain observational only and must
+// not be used for sync, committee, or admission decisions.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -380,8 +375,11 @@ pub fn select_at(snapshots: &[ValidatorSetSnapshot], height: u64) -> Option<&Val
         .max_by_key(|s| s.effective_from_height)
 }
 
-/// Return the validator set active at `height` from the on-disk history, or
-/// `None` to signal the caller should use its current set (no regression).
+/// Observational lookup of the validator set recorded at `height`.
+///
+/// This does not establish certificate ancestry. Security-sensitive callers
+/// must use `verification_set_at` instead of treating `None` as "use the
+/// current tip set".
 pub fn set_at(data_dir: &Path, height: u64) -> Option<ValidatorSet> {
     set_at_checked(data_dir, height).ok().flatten()
 }
@@ -591,7 +589,7 @@ pub fn verification_set_at(
     verification_set_at_with_checkpoint(data_dir, height, trusted_bootstrap, checkpoint.as_ref())
 }
 
-fn verification_set_at_with_checkpoint(
+pub(crate) fn verification_set_at_with_checkpoint(
     data_dir: &Path,
     height: u64,
     trusted_bootstrap: &ValidatorSet,
