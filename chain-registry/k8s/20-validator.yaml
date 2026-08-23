@@ -45,6 +45,9 @@ spec:
           envFrom:
             - configMapRef:
                 name: creg-config
+          # creg-config must include a parseable non-zero CREG_STAKING_ADDR.
+          # Validators exit at startup if it is missing or malformed (ISSUE-024);
+          # these probes never see a running pod that silently used the static spec set.
           env:
             - name: CREG_VALIDATOR_KEY
               valueFrom:

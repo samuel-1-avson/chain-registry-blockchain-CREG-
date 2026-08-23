@@ -1,8 +1,24 @@
 // crates/node/src/config.rs
 
+use alloy::primitives::Address;
 use axum::http::{HeaderValue, Method};
 use std::path::PathBuf;
 use uuid::Uuid;
+
+/// Empty/zero staking means chain-authoritative validator-set sync is off.
+/// A malformed address is never treated as zero.
+pub fn parse_staking_contract_address(raw: &str) -> Result<Option<Address>, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty()
+        || trimmed.eq_ignore_ascii_case("0x0000000000000000000000000000000000000000")
+    {
+        return Ok(None);
+    }
+    trimmed
+        .parse::<Address>()
+        .map(Some)
+        .map_err(|error| format!("CREG_STAKING_ADDR is invalid ({trimmed}): {error}"))
+}
 
 #[derive(Debug, Clone)]
 pub enum NodeMode {
@@ -488,11 +504,17 @@ impl NodeConfig {
             );
         }
 
-        if is_zero_like(&self.staking_addr) {
-            errors.push(
+        match parse_staking_contract_address(&self.staking_addr) {
+            Err(error) => errors.push(error),
+            Ok(None) if self.is_validator => errors.push(
+                "CREG_IS_VALIDATOR=true requires a non-zero parseable CREG_STAKING_ADDR so validator-set sync cannot fall back to the static spec set."
+                    .into(),
+            ),
+            Ok(None) => errors.push(
                 "CREG_STAKING_ADDR is not set. Validator and publisher staking flows will be unavailable until testnet artifacts are synced."
                     .into(),
-            );
+            ),
+            Ok(Some(_)) => {}
         }
 
         // Validate IPFS URL is a parseable HTTP endpoint.
@@ -949,6 +971,68 @@ mod tests {
                 .any(|e| e.contains("CREG_IS_VALIDATOR=true") && e.contains("not set")),
             "expected missing key error, got: {:?}",
             errors
+        );
+    }
+
+    #[test]
+    fn malformed_staking_addr_is_never_treated_as_zero() {
+        assert!(parse_staking_contract_address("not-an-address").is_err());
+        assert!(parse_staking_contract_address("0x1234").is_err());
+        assert_eq!(parse_staking_contract_address("").unwrap(), None);
+        assert_eq!(
+            parse_staking_contract_address("0x0000000000000000000000000000000000000000").unwrap(),
+            None
+        );
+        assert!(
+            parse_staking_contract_address("0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9")
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn validator_requires_parseable_staking_addr() {
+        let mut cfg = base_config();
+        cfg.is_validator = true;
+        cfg.validator_privkey =
+            Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into());
+        cfg.staking_addr = String::new();
+        let errors = cfg.validate();
+        assert!(
+            errors.iter().any(|e| e.contains(
+                "CREG_IS_VALIDATOR=true requires a non-zero parseable CREG_STAKING_ADDR"
+            )),
+            "expected fail-closed staking error, got: {errors:?}"
+        );
+
+        cfg.staking_addr = "not-an-address".into();
+        let errors = cfg.validate();
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("CREG_STAKING_ADDR is invalid")),
+            "expected invalid staking address error, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn observer_may_start_without_staking_addr() {
+        let mut cfg = base_config();
+        cfg.is_validator = false;
+        cfg.staking_addr = String::new();
+        let errors = cfg.validate();
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("CREG_STAKING_ADDR is not set")),
+            "expected advisory unset warning, got: {errors:?}"
+        );
+        assert!(
+            errors
+                .iter()
+                .all(|e| !e.contains("CREG_STAKING_ADDR is invalid")
+                    && !e.contains("CREG_IS_VALIDATOR=true requires a non-zero parseable")),
+            "observer must not fail-closed on missing staking, got: {errors:?}"
         );
     }
 

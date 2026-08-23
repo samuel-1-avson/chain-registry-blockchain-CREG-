@@ -463,6 +463,10 @@ async fn main() -> Result<()> {
                     || e.contains("CREG_VALIDATOR_SET entry")
                     || e.contains("CREG_NAMESPACE_AUTHORITY")
                     || e.contains("Authoritative namespace")
+                    || e.contains("CREG_STAKING_ADDR is invalid")
+                    || e.contains(
+                        "CREG_IS_VALIDATOR=true requires a non-zero parseable CREG_STAKING_ADDR",
+                    )
             })
             .collect();
         if !hard_errors.is_empty() {
@@ -804,43 +808,43 @@ async fn main() -> Result<()> {
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect();
-        let sync_config = validator_set_sync::SyncConfig {
+        let staking_addr = match config::parse_staking_contract_address(&config.staking_addr) {
+            Ok(addr) => addr,
+            Err(error) => anyhow::bail!("{error}"),
+        };
+        let sync_config = staking_addr.map(|staking_addr| validator_set_sync::SyncConfig {
             eth_rpc_url: config.eth_rpc_url.clone(),
             extra_rpc_urls,
-            staking_addr: config.staking_addr.parse().unwrap_or_else(|_| {
-                tracing::warn!("Invalid staking address; validator set sync disabled");
-                alloy::primitives::Address::ZERO
-            }),
+            staking_addr,
             finality_lag_blocks,
             poll_interval_secs: 30,
             start_block,
-        };
+        });
         {
             let mut state_guard = state.write().await;
-            state_guard.validator_set_sync.enabled =
-                sync_config.staking_addr != alloy::primitives::Address::ZERO;
-            state_guard.validator_set_sync.mode = if state_guard.validator_set_sync.enabled {
+            let enabled = sync_config.is_some();
+            state_guard.validator_set_sync.enabled = enabled;
+            state_guard.validator_set_sync.mode = if enabled {
                 "chain-authoritative".to_string()
             } else {
                 "static".to_string()
             };
-            state_guard.validator_set_sync.state = if state_guard.validator_set_sync.enabled {
+            state_guard.validator_set_sync.state = if enabled {
                 "starting".to_string()
             } else {
                 "disabled".to_string()
             };
-            if !state_guard.validator_set_sync.enabled {
+            if !enabled {
                 state_guard.validator_set_sync.last_error = Some(
-                    "validator-set sync disabled: staking contract address is invalid".to_string(),
+                    "validator-set sync disabled: CREG_STAKING_ADDR is unset or zero".to_string(),
                 );
                 tracing::warn!(
-                    "CRITICAL: Validator set sync is disabled (static mode). \
-                     This node will not participate in decentralized on-chain admission and \
-                     is isolated from the public network."
+                    "Validator set sync is disabled (static spec set). Observer/dev nodes may \
+                     start this way; CREG_IS_VALIDATOR=true refuses a missing or invalid staking address."
                 );
             }
         }
-        if sync_config.staking_addr != alloy::primitives::Address::ZERO {
+        if let Some(sync_config) = sync_config {
             tracing::info!(
                 start_block = ?sync_config.start_block,
                 finality_lag_blocks = sync_config.finality_lag_blocks,

@@ -51,8 +51,8 @@
 
 ## Required next work
 
-1. Restore GitHub Actions billing/spending limit, then capture remote Rust CI (fmt, clippy `-D warnings`, `cargo test --workspace --locked` on 1.93.0) and Contract CI (Foundry v1.7.1 from the bootstrap script). Local workspace, rustfmt, and v1.7.1 `forge test` are already recorded in `TEST_EVIDENCE.md`.
-2. Finish epoch-bound EIP-712 verdict/admission review. Local Foundry v1.7.1 now passes 129/129; remote Contract CI remains billing-blocked.
+1. Remote GitHub Actions is deferred until the billing period resets. Do not raise the spending limit. Local workspace, rustfmt, and Foundry v1.7.1 are recorded in `TEST_EVIDENCE.md`.
+2. Finish epoch-bound EIP-712 verdict/admission review. Local Foundry v1.7.1 now passes 129/129; remote Contract CI remains deferred with billing.
 3. Add reviewed production npm/PyPI policy and trust material, an official npm authentication-mode signal, live positive fixtures, platform artifacts, and signed activation approval; keep recovery fail closed until every gate passes.
 4. Regenerate and visually verify the workflow/whitepaper PDFs, synchronize public and Functions mirrors, and refresh all manifest hashes.
 5. Run a witnessed key/spec migration: select the intended genesis/topology, rotate the disclosed signing/validator material, recompute and sign the exact canonical spec, independently verify it, then copy exact bytes/signature to both static-server names. Do not publish the current artifacts.
