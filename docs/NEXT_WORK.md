@@ -68,7 +68,6 @@
 | # | ID | Task |
 |---|-----|------|
 | 14 | **WITNESSED-LOG** | Replace legacy/local history authority with a witnessed append-only log and prove derived-index completeness. Independent witness operators and signed-head distribution remain. |
-| 16 | **SUPPLY-CHAIN-CI** | Add SBOM, artifact provenance, dependency policy, web/E2E CI, and release verification. |
 | 18 | **REM-211+** | Complete resource metrics and Grafana dashboards per [observability/README.md](../chain-registry/observability/README.md). |
 | 19 | **VAL-SCALE** | Expand a verified independent validator cohort in capacity-tested batches; waitlist size is not validator capacity. |
 | 20 | **ZK-CIRCUIT** | Complete circuit/contract review and regenerate setup only if the binding changes; do not restore the retired qualification claim. |
@@ -99,6 +98,7 @@
 | GOVERNANCE-API | 2026-08-23 | Operator-authenticated submit/vote/execute; `CREG_GOVERNANCE_KEY` required; public POST stays 405 |
 | SHIM-301 | 2026-08-23 | PATH shims share `creg install` fail-closed gate; 5-minute install cache; `CREG_ALLOW_UNVERIFIED` break-glass; bare `npm install`/`ci` gates direct package.json deps |
 | CLIENT-FRESHNESS | 2026-08-23 | Install/shim anti-rollback journal, freeze/skew rejection, and opt-in witnessed inclusion (`verify_witnessed_inclusion`). Unsigned transparency heads stay non-install-eligible. Independent witness ops remain under WITNESSED-LOG. |
+| SUPPLY-CHAIN-CI | 2026-08-23 | Workspace `Cargo.lock` SPDX/CycloneDX inventory, `creg supply-chain check` deny policy, lockfile-bound provenance (explicitly not SLSA). Package `creg sbom` marks incomplete without declared deps. Submitted-package SLSA and web/E2E remain. |
 | ISSUE-012 | 2026-08-23 | Deep scan fails closed on corrupt/timeout input; votes carry the actual `degraded-*` scanner version |
 | ISSUE-014 | 2026-08-23 | Spec `threshold_encryption` now fail-closes; Sepolia flag stays false until share collection ships |
 | ISSUE-018 | 2026-08-23 | Appeal publisher/panelist payouts are pull-payment; not yet redeployed on Sepolia |

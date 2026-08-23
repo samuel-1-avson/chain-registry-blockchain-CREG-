@@ -1,0 +1,18 @@
+# First-party supply-chain policy for the CREG Cargo workspace.
+# Enforced by `creg supply-chain check` and unit tests. This is not cargo-deny
+# and is not SLSA. GitHub Actions remains billing-deferred; run the check locally.
+
+schema_version = 1
+
+[sources]
+allow_registry_index = ["https://github.com/rust-lang/crates.io-index"]
+# Workspace/path crates have no `source` field in Cargo.lock.
+allow_path = true
+allow_git = false
+
+[checksums]
+require_for_registry = true
+
+[bans]
+# Explicit crate names that must not appear in Cargo.lock.
+crate_names = []

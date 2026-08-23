@@ -27,6 +27,7 @@ mod retry;
 mod sbom;
 mod search;
 mod stake;
+mod supply_chain;
 mod testnet;
 mod update;
 mod verify;
@@ -403,10 +404,10 @@ enum Commands {
         command: OsvSnapshotCommands,
     },
 
-    /// Export a Software Bill of Materials (SBOM) for a package.
+    /// Export a Software Bill of Materials (SBOM).
     Sbom {
-        /// Package name
-        package: String,
+        /// Package name (omit when using --workspace)
+        package: Option<String>,
         /// Ecosystem
         #[arg(short, long)]
         ecosystem: Option<String>,
@@ -416,6 +417,18 @@ enum Commands {
         /// Save to this file (defaults to stdout)
         #[arg(long, value_name = "FILE")]
         save: Option<std::path::PathBuf>,
+        /// Inventory every crate in this repo's Cargo.lock (not a registry package)
+        #[arg(long)]
+        workspace: bool,
+        /// Cargo.lock path (workspace mode)
+        #[arg(long)]
+        lockfile: Option<std::path::PathBuf>,
+    },
+
+    /// First-party Cargo.lock policy and provenance (not SLSA).
+    SupplyChain {
+        #[command(subcommand)]
+        command: SupplyChainCommands,
     },
 
     /// Self-update the creg binary.
@@ -597,6 +610,17 @@ enum PolicyCommands {
     },
     /// Print an example policy template
     Init,
+}
+
+#[derive(Subcommand)]
+enum SupplyChainCommands {
+    /// Verify Cargo.lock against config/supply-chain/policy.toml
+    Check {
+        #[arg(long)]
+        lockfile: Option<std::path::PathBuf>,
+        #[arg(long)]
+        policy: Option<std::path::PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1338,17 +1362,26 @@ async fn run(cli: Cli) -> Result<()> {
             ecosystem,
             format,
             save,
+            workspace,
+            lockfile,
         } => {
             let fmt: sbom::SbomFormat = format.parse()?;
             sbom::run(
-                &package,
+                package.as_deref(),
                 ecosystem.as_deref(),
                 fmt,
                 save.as_deref(),
                 cli.node_url.as_deref(),
+                workspace,
+                lockfile.as_deref(),
             )
             .await?;
         }
+        Commands::SupplyChain { command } => match command {
+            SupplyChainCommands::Check { lockfile, policy } => {
+                supply_chain::run_check(lockfile.as_deref(), policy.as_deref())?;
+            }
+        },
         Commands::Update {
             check,
             yes,
