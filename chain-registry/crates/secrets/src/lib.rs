@@ -173,10 +173,8 @@ pub fn validate_production_secrets_policy(is_testnet: bool) -> Vec<String> {
     }
 
     let mut errors = Vec::new();
-    let backend = match std::env::var("CREG_SECRETS_BACKEND") {
-        Ok(v) => v,
-        Err(_) => return errors, // default env — check below
-    };
+    // Unset defaults to env in `parse_backend`; production must fail closed.
+    let backend = std::env::var("CREG_SECRETS_BACKEND").unwrap_or_default();
     let backend = backend.trim().to_ascii_lowercase();
     if backend.is_empty() || backend == "env" || backend == "environment" {
         errors.push(
@@ -219,21 +217,27 @@ pub(crate) fn extract_vault_field(data: &serde_json::Value, role: HotKeyRole) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn production_rejects_env_backend_off_testnet() {
+        let _guard = ENV_LOCK.lock().unwrap();
         std::env::set_var("CREG_SECRETS_BACKEND", "env");
         let errs = validate_production_secrets_policy(false);
-        assert!(!errs.is_empty());
         std::env::remove_var("CREG_SECRETS_BACKEND");
+        assert!(!errs.is_empty());
+        assert!(!validate_production_secrets_policy(false).is_empty());
     }
 
     #[test]
     fn production_allows_vault_backend_off_testnet() {
+        let _guard = ENV_LOCK.lock().unwrap();
         std::env::set_var("CREG_SECRETS_BACKEND", "vault");
         let errs = validate_production_secrets_policy(false);
-        assert!(errs.is_empty());
         std::env::remove_var("CREG_SECRETS_BACKEND");
+        assert!(errs.is_empty());
     }
 
     #[test]
