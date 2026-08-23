@@ -133,7 +133,9 @@ pub async fn run(
 
     // ── 3. Trust decision (shared with PATH shims, SHIM-301) ─────────────────
     output::print_verdict(&verdict);
-    match resolver::install_gate::evaluate_install(&verdict, allow_unverified) {
+    match resolver::install_gate::admit_install_live(&verdict, allow_unverified, effective_node_ref)
+        .await?
+    {
         resolver::install_gate::InstallDecision::Allow => {
             if let VerdictStatus::Verified { block_hash, .. } = &verdict.status {
                 if !block_hash.is_empty() {

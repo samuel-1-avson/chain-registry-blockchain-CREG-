@@ -8,3 +8,8 @@
 - **Migration implications:** clients must migrate before public testnet claims.
 - **Rejected alternatives:** DNS/TLS or local cache as sole trust root.
 - **Revisit conditions:** a reviewed equivalent protocol replaces TUF roles.
+- **In-repo slice (2026-08-23):** install/shim admission persists an
+  anti-rollback journal, expires/skew-checks metadata, and requires
+  `verify_witnessed_inclusion` when log/witness keys are configured. Unsigned
+  node heads stay monitoring-only. Independent witnesses, threshold timestamp
+  roles, and signed-head distribution remain operational.

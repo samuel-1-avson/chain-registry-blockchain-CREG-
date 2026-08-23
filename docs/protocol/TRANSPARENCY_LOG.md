@@ -42,3 +42,10 @@ current node endpoints return unsigned heads/proofs for monitoring and test
 integration; no client may treat them as qualified without independently
 distributed signed heads, configured witness keys, freshness policy, and a
 persisted prior head.
+
+`GET /v1/public/transparency/:log_id/latest-event?subject=` returns the latest
+event for an exact canonical subject plus an inclusion proof and the unsigned
+head. The JSON sets `install_eligible: false`. `creg install` and PATH shims
+always apply the local anti-rollback journal; they call
+`verify_witnessed_inclusion` only when a witness policy is configured, and
+they reject unsigned heads in that mode.

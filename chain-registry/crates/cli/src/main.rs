@@ -962,7 +962,7 @@ async fn run(cli: Cli) -> Result<()> {
         Commands::Cache { clear } => {
             if clear {
                 resolver::cache::clear()?;
-                println!("Verification cache cleared.");
+                println!("Verification cache and freshness journal cleared.");
             } else {
                 resolver::cache::print_entries()?;
             }

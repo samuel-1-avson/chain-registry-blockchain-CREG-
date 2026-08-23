@@ -5,6 +5,7 @@
 pub mod cache;
 mod chain_client;
 pub mod downloader;
+pub mod freshness;
 pub mod install_gate;
 pub mod npm_manifest;
 

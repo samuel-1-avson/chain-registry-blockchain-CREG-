@@ -2168,6 +2168,48 @@ impl ChainStore {
         Ok(proof)
     }
 
+    pub fn transparency_event(&self, sequence: u64) -> Result<Option<TransparencyEvent>> {
+        let cf = self
+            .db
+            .cf_handle(CF_TRANSPARENCY_EVENTS)
+            .context("cf transparency_events")?;
+        match self.db.get_cf(&cf, sequence.to_be_bytes())? {
+            None => Ok(None),
+            Some(bytes) => Ok(Some(
+                serde_json::from_slice(&bytes).context("decode transparency event")?,
+            )),
+        }
+    }
+
+    /// Latest event for an exact canonical subject. The matching tree head is
+    /// still unsigned until independently witnessed; clients must not treat
+    /// this lookup as install-eligible on its own.
+    pub fn transparency_latest_event_for_subject(
+        &self,
+        log_id: &str,
+        subject: &str,
+    ) -> Result<Option<TransparencyEvent>> {
+        let subject = subject.trim();
+        if subject.is_empty() {
+            anyhow::bail!("transparency subject is required");
+        }
+        let _head = self.transparency_tree_head(log_id)?;
+        let cf = self
+            .db
+            .cf_handle(CF_TRANSPARENCY_EVENTS)
+            .context("cf transparency_events")?;
+        let mut latest = None;
+        for item in self.db.iterator_cf(&cf, rocksdb::IteratorMode::Start) {
+            let (_, value) = item?;
+            let event: TransparencyEvent =
+                serde_json::from_slice(&value).context("decode transparency event")?;
+            if event.subject == subject {
+                latest = Some(event);
+            }
+        }
+        Ok(latest)
+    }
+
     pub fn finalized_work_stats(&self) -> Result<FinalizedWorkStats> {
         let cf = self
             .db
@@ -4005,5 +4047,19 @@ mod tests {
             .expect("consistency proof")
             .verify()
             .expect("verify consistency"));
+        let latest = store
+            .transparency_latest_event_for_subject(log_id, "npm:log-test@1.0.0")
+            .expect("latest event")
+            .expect("present");
+        assert_eq!(latest.sequence, 1);
+        assert_eq!(latest.kind, "revocation");
+        assert_eq!(
+            store
+                .transparency_event(1)
+                .expect("event by sequence")
+                .expect("present")
+                .kind,
+            "revocation"
+        );
     }
 }

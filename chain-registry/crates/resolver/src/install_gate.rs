@@ -1,10 +1,12 @@
 // crates/resolver/src/install_gate.rs
-// Shared install admission for `creg install` and PATH shims (SHIM-301).
+// Shared install admission for `creg install` and PATH shims (SHIM-301 +
+// CLIENT-FRESHNESS).
 //
 // Default is fail-closed: unverified, unknown, revoked, stale cache, high-
-// severity findings, and an unreachable node all refuse. `--unverified` or
-// CREG_ALLOW_UNVERIFIED is the only break-glass, and it still cannot override
-// an explicit revocation.
+// severity findings, an unreachable node, revocation rollback, freeze, and
+// (when a witness policy is configured) unsigned/stale/inconsistent tree heads
+// all refuse. `--unverified` or CREG_ALLOW_UNVERIFIED is the only break-glass
+// for unqualified packages; it cannot override revocation or anti-rollback.
 
 use crate::chain_client;
 use crate::{cache, parse_pkg};
@@ -180,6 +182,71 @@ pub async fn resolve_id_for_install(
     Ok(verdict)
 }
 
+/// Apply SHIM-301 status rules plus CLIENT-FRESHNESS anti-rollback and, when a
+/// witness policy is configured, witnessed tree-head inclusion.
+pub async fn admit_install_live(
+    verdict: &TrustVerdict,
+    allow_unverified: bool,
+    node_url: Option<&str>,
+) -> Result<InstallDecision> {
+    use crate::freshness::{
+        admit_with_freshness, evaluate_package_freshness, fetch_witnessed_evidence,
+        load_witness_policy_from_env, FreshnessStore, WitnessPolicyLoad,
+        DEFAULT_MAX_FUTURE_SKEW_SECONDS,
+    };
+
+    let store = FreshnessStore::open_default()?;
+    let now = Utc::now();
+    let policy = load_witness_policy_from_env();
+    let max_skew = Duration::seconds(
+        match &policy {
+            WitnessPolicyLoad::Active(config) => config.policy.maximum_future_skew_seconds,
+            _ => DEFAULT_MAX_FUTURE_SKEW_SECONDS,
+        }
+        .max(0),
+    );
+    if let Some(blocked) = evaluate_package_freshness(
+        store.get_package(&verdict.package.canonical())?.as_ref(),
+        verdict,
+        now,
+        max_skew,
+    ) {
+        return Ok(blocked);
+    }
+
+    let preview = evaluate_install(verdict, allow_unverified);
+    let fetched = match (&policy, &preview) {
+        (WitnessPolicyLoad::Active(config), InstallDecision::Allow) => {
+            let url = node_url
+                .map(String::from)
+                .unwrap_or_else(crate::default_node_url);
+            let previous = store.accepted_head()?;
+            match fetch_witnessed_evidence(
+                config,
+                &verdict.package.canonical(),
+                &url,
+                previous.as_ref(),
+            )
+            .await
+            {
+                Ok(bundle) => Some(bundle),
+                Err(blocked) => return Ok(blocked),
+            }
+        }
+        _ => None,
+    };
+
+    Ok(admit_with_freshness(
+        verdict,
+        allow_unverified,
+        &store,
+        now,
+        &policy,
+        fetched.as_ref(),
+        evaluate_install,
+    ))
+}
+
 /// Gate one package the way `creg install` does. RPC failure is blocked unless
 /// break-glass unverified is set.
 pub async fn gate_shim_package(
@@ -189,7 +256,7 @@ pub async fn gate_shim_package(
     node_url: Option<&str>,
 ) -> Result<InstallDecision> {
     match resolve_for_install(raw, Some(ecosystem), node_url).await {
-        Ok(verdict) => Ok(evaluate_install(&verdict, allow_unverified)),
+        Ok(verdict) => admit_install_live(&verdict, allow_unverified, node_url).await,
         Err(err) => {
             if allow_unverified {
                 Ok(InstallDecision::AllowUnverified)
