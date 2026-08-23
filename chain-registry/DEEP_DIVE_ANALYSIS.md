@@ -561,13 +561,13 @@ Global flags: `--unverified`, `CREG_NODE_URL`, `CREG_GRPC_URL`, `--output json`.
 - **Impact**: Local CLI verification could pass when sandbox engine missing.
 - **Recommended Fix**: Mirror validator fail-closed semantics.
 
-### ISSUE-024: Validator set sync disabled when staking address invalid
+### ISSUE-024: Validator set sync disabled when staking address invalid — **MITIGATED** (2026-08-23)
 
-- **Severity**: Medium
-- **File**: `crates/node/src/main.rs:647-674`
-- **Description**: Invalid `CREG_STAKING_ADDR` parsing sets Address::ZERO and disables chain-authoritative validator set sync, falling back to static spec validators only.
-- **Impact**: Nodes may diverge on validator membership vs L1 staking contract state.
-- **Recommended Fix**: Fail fast on validator nodes when sync disabled; document required staking address in compose health checks.
+- **Severity**: Medium (mitigated)
+- **File**: `crates/node/src/config.rs`, `crates/node/src/main.rs`
+- **Description**: Invalid `CREG_STAKING_ADDR` parsing used to become `Address::ZERO` and disable chain-authoritative validator-set sync, leaving the node on the static spec set.
+- **Fix**: Malformed addresses fail startup for every node. `CREG_IS_VALIDATOR=true` also refuses unset/zero staking so a validator cannot boot in static-spec mode. Observers may still omit staking (sync stays disabled). Compose `docker-compose.validator.yml` already requires `TESTNET_STAKING_ADDR`; k8s validator probes document that a missing address never yields a running pod.
+- **Residual**: Unset staking on a non-validator still uses the spec set. Deployed Sepolia membership is unchanged.
 
 ### ISSUE-025: Shamir gf_div silent zero on invalid denominator
 

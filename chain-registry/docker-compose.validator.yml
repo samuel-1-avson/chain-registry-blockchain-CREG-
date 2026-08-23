@@ -12,7 +12,7 @@
 #   CREG_ETH_RPC
 #   CREG_IPFS_URL
 #   TESTNET_TOKEN_ADDR
-#   TESTNET_STAKING_ADDR
+#   TESTNET_STAKING_ADDR   # fail-closed: creg-node will not start as a validator without a parseable staking address
 #   TESTNET_REGISTRY_ADDR
 
 x-app-image: &app-image

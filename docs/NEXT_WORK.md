@@ -16,8 +16,8 @@
   CLI (49/49), node E2E (8/8), node integration (11/11), workspace all-target
   at `5868401` (exit 0, including sidecar 2/2), `cargo fmt --all -- --check`,
   and pinned Foundry v1.7.1 `forge test` (129/129) pass locally. Remote GitHub
-  Actions is blocked on account billing/spending limit. Document regeneration
-  remains.
+  Actions is deferred until the billing period resets; do not raise the
+  spending limit. Document regeneration remains.
 - **Network posture:** `chain-spec.sepolia.json` lists four coordinated
   validators (`validator-1`…`validator-4`) and empty bootnodes. That is the
   specified public-alpha topology, not a live multi-operator network and not
@@ -38,7 +38,7 @@
 
 | # | ID | Status | Task | Acceptance |
 |---|-----|--------|------|------------|
-| 1 | **VERIFY-401** | active | Finish reproducible repository verification | Local: workspace all-target at `5868401` (exit 0), rustfmt `--check`, Foundry v1.7.1 `forge test` 129/129. Remaining: remote clean CI after GitHub billing/spending limit is restored. Do not claim Actions passed. |
+| 1 | **VERIFY-401** | locally complete; remote CI deferred | Finish reproducible repository verification | Local: workspace all-target at `5868401` (exit 0), rustfmt `--check`, Foundry v1.7.1 `forge test` 129/129. Remote Actions waits for the next GitHub billing period; do not increase the spending limit. |
 | 2 | **CR07-ACTIVATE** | blocked externally | Production namespace-authority package | Reviewed npm/PyPI policy and trust roots, official npm authentication-mode signal, positive fixtures, signed manifest, platform artifacts, and multi-operator rehearsal. |
 | 3 | **HI11-ACTIVATE** | blocked externally | Certified-history activation | Independently verified checkpoint plus replay, partition, reorg, rebuilt-node, long-range, and process-kill rehearsals before mandatory mode. |
 | 4 | **VAL-INDEPENDENCE** | blocked externally | Independent validators and bootnodes | Recruit and verify separately controlled operators/keys/infrastructure; a four-validator coordinated spec must not be represented as Byzantine-fault-tolerant. |
@@ -101,11 +101,12 @@
 | ISSUE-012 | 2026-08-23 | Deep scan fails closed on corrupt/timeout input; votes carry the actual `degraded-*` scanner version |
 | ISSUE-014 | 2026-08-23 | Spec `threshold_encryption` now fail-closes; Sepolia flag stays false until share collection ships |
 | ISSUE-018 | 2026-08-23 | Appeal publisher/panelist payouts are pull-payment; not yet redeployed on Sepolia |
+| ISSUE-024 | 2026-08-23 | Validators refuse missing/invalid `CREG_STAKING_ADDR`; no silent static-set fallback |
 | VERIFY-401-RUST | 2026-08-23 | Workspace all-target Cargo run exit 0 at `b7fabe5` and again at `5868401` after PR #36 |
 | VERIFY-401-SIDECAR | 2026-08-23 | Private-temp launch: host-visible TEMP after env_clear; fixture + local frozen Windows rejection |
 | VERIFY-401-FMT | 2026-08-23 | `cargo fmt --all -- --check` exit 0 at `5868401` (local rustc 1.93.1; CI pin is 1.93.0) |
 | VERIFY-401-FOUNDRY | 2026-08-23 | Pinned Foundry v1.7.1 `forge test` 129/129 locally; not the profile 1.5.1 binary |
-| VERIFY-401-CI | blocked | GitHub Actions jobs do not start: account payments failed or spending limit; see TEST_EVIDENCE |
+| VERIFY-401-CI | deferred | GitHub Actions billing/spending; retry after the next monthly reset. Do not raise the limit. |
 
 ---
 
