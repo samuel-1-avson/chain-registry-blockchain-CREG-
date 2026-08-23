@@ -115,7 +115,7 @@ test.describe('Degraded endpoint states', () => {
     await page.goto('/governance')
 
     await expect(page.getByRole('heading', { name: 'Governance proposals unavailable' })).toBeVisible()
-    await expect(page.getByText(/page stays available, but proposals cannot be listed/i)).toBeVisible()
+    await expect(page.getByText(/proposals cannot be listed until L1 RPC is healthy/i)).toBeVisible()
   })
 
   test('search page surfaces unavailable search index while keeping direct lookup fallback', async ({ page }) => {

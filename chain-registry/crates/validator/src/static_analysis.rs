@@ -42,6 +42,8 @@ pub struct StaticAnalysisResult {
     /// Weighted ensemble score (0–100) combining all analysis signals.
     /// Higher = more dangerous.
     pub ensemble_score: f64,
+    /// Scanner version actually used for the deep scan (may be `degraded-*`).
+    pub ml_model_version: String,
 }
 
 /// A single static-analysis pattern used for substring matching in source text.
@@ -280,7 +282,6 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
     let mut deterministic_findings = Vec::new();
     let mut snippet_llm_findings = Vec::new();
     let mut rule_ml_findings = Vec::new();
-    let mut deep_scan_findings = Vec::new();
 
     // Extract files from the tarball (tar.gz).
     // Oversized files are not scanned but produce an SA013 finding so the
@@ -521,107 +522,12 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
             .await
     };
 
-    match deep_scan_result {
-        Ok(Ok(deep)) => {
-            // If deep scan ran in mock/degraded mode, emit a visible warning finding
-            // so validators and the network are aware ML coverage is not active.
-            if deep.is_mock {
-                deep_scan_findings.push(Finding {
-                    id: "ML001".into(),
-                    title: "ML Deep Scan: Degraded Mode".into(),
-                    severity: FindingSeverity::Medium,
-                    description: format!(
-                        "Multi-layer scan ran in degraded mode (version: {}). \
-                         Detection layers (YARA/OSV/ThreatIntel) may be partially unavailable.",
-                        deep.model_version
-                    ),
-                    file: "deep_scan".into(),
-                    line: None,
-                });
-            }
-
-            let prob = deep.malicious_probability;
-            match deep.classification {
-                ml_validator::ThreatClassification::ConfirmedMalicious => {
-                    deep_scan_findings.push(Finding {
-                        id: "DS003".into(),
-                        title: "AI Deep Scan: Confirmed Malicious".into(),
-                        severity: FindingSeverity::Critical,
-                        description: format!(
-                            "Multi-layer scan (YARA+OSV+ThreatIntel) indicates high probability ({:.2}) of malicious content.",
-                            prob
-                        ),
-                        file: "deep_scan".into(),
-                        line: None,
-                    });
-                }
-                ml_validator::ThreatClassification::LikelyMalicious => {
-                    deep_scan_findings.push(Finding {
-                        id: "DS002".into(),
-                        title: "AI Deep Scan: Likely Malicious".into(),
-                        severity: FindingSeverity::High,
-                        description: format!(
-                            "Multi-layer scan (YARA+OSV+ThreatIntel) indicates likely malicious content (probability: {:.2}).",
-                            prob
-                        ),
-                        file: "deep_scan".into(),
-                        line: None,
-                    });
-                }
-                ml_validator::ThreatClassification::Suspicious => {
-                    deep_scan_findings.push(Finding {
-                        id: "DS001".into(),
-                        title: "AI Deep Scan: Suspicious".into(),
-                        severity: FindingSeverity::Medium,
-                        description: format!(
-                            "Multi-layer scan (YARA+OSV+ThreatIntel) flagged suspicious patterns (probability: {:.2}).",
-                            prob
-                        ),
-                        file: "deep_scan".into(),
-                        line: None,
-                    });
-                }
-                _ => {}
-            }
-        }
-        Ok(Err(e)) => {
-            tracing::warn!(
-                "Deep scan failed: {}; continuing with static analysis only",
-                e
-            );
-            // Emit a finding so the network knows ML was not available
-            deep_scan_findings.push(Finding {
-                id: "ML001".into(),
-                title: "ML Deep Scan: Unavailable".into(),
-                severity: FindingSeverity::Medium,
-                description: format!(
-                    "Multi-layer scan failed: {}. YARA/OSV/ThreatIntel detection was not performed. \
-                     Package was analyzed with static rules only.",
-                    e
-                ),
-                file: "deep_scan".into(),
-                line: None,
-            });
-        }
+    let (deep_scan_findings, ml_model_version) = match deep_scan_result {
+        Ok(inner) => apply_deep_scan_outcome(inner),
         Err(e) => {
-            tracing::warn!(
-                "Deep scan task failed: {}; continuing with static analysis only",
-                e
-            );
-            deep_scan_findings.push(Finding {
-                id: "ML001".into(),
-                title: "ML Deep Scan: Unavailable".into(),
-                severity: FindingSeverity::Medium,
-                description: format!(
-                    "Multi-layer scan task failed: {}. YARA/OSV/ThreatIntel detection was not performed. \
-                     Package was analyzed with static rules only.",
-                    e
-                ),
-                file: "deep_scan".into(),
-                line: None,
-            });
+            apply_deep_scan_outcome(Err(ml_validator::MlError::InferenceError(e.to_string())))
         }
-    }
+    };
 
     let evidence_groups = [
         build_evidence_group(
@@ -673,7 +579,107 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
         deterministic_score,
         advisory_score,
         ensemble_score,
+        ml_model_version,
     })
+}
+
+fn scanner_version_for_error(err: &ml_validator::MlError) -> &'static str {
+    match err {
+        ml_validator::MlError::Timeout => "degraded-timeout",
+        ml_validator::MlError::ExtractionError(_) => "degraded-extraction",
+        _ => "degraded-unavailable",
+    }
+}
+
+fn apply_deep_scan_outcome(
+    result: Result<ml_validator::DeepScanResult, ml_validator::MlError>,
+) -> (Vec<Finding>, String) {
+    match result {
+        Ok(deep) => {
+            let version = if deep.model_version.trim().is_empty() {
+                "creg-detect-v1.0.0".to_string()
+            } else {
+                deep.model_version.clone()
+            };
+            let mut findings = Vec::new();
+            if deep.is_mock || deep.classification.should_abstain() {
+                findings.push(Finding {
+                    id: "ML001".into(),
+                    title: "ML Deep Scan: Incomplete".into(),
+                    severity: FindingSeverity::Critical,
+                    description: format!(
+                        "Multi-layer scan did not complete (version: {version}). \
+                         Incomplete scans fail closed and must not count as consensus-grade coverage."
+                    ),
+                    file: "deep_scan".into(),
+                    line: None,
+                });
+                return (findings, version);
+            }
+
+            let prob = deep.malicious_probability;
+            match deep.classification {
+                ml_validator::ThreatClassification::ConfirmedMalicious => {
+                    findings.push(Finding {
+                        id: "DS003".into(),
+                        title: "AI Deep Scan: Confirmed Malicious".into(),
+                        severity: FindingSeverity::Critical,
+                        description: format!(
+                            "Multi-layer scan (YARA+OSV+ThreatIntel) indicates high probability ({:.2}) of malicious content.",
+                            prob
+                        ),
+                        file: "deep_scan".into(),
+                        line: None,
+                    });
+                }
+                ml_validator::ThreatClassification::LikelyMalicious => {
+                    findings.push(Finding {
+                        id: "DS002".into(),
+                        title: "AI Deep Scan: Likely Malicious".into(),
+                        severity: FindingSeverity::High,
+                        description: format!(
+                            "Multi-layer scan (YARA+OSV+ThreatIntel) indicates likely malicious content (probability: {:.2}).",
+                            prob
+                        ),
+                        file: "deep_scan".into(),
+                        line: None,
+                    });
+                }
+                ml_validator::ThreatClassification::Suspicious => {
+                    findings.push(Finding {
+                        id: "DS001".into(),
+                        title: "AI Deep Scan: Suspicious".into(),
+                        severity: FindingSeverity::Medium,
+                        description: format!(
+                            "Multi-layer scan (YARA+OSV+ThreatIntel) flagged suspicious patterns (probability: {:.2}).",
+                            prob
+                        ),
+                        file: "deep_scan".into(),
+                        line: None,
+                    });
+                }
+                _ => {}
+            }
+            (findings, version)
+        }
+        Err(e) => {
+            tracing::warn!("Deep scan failed closed: {e}");
+            let version = scanner_version_for_error(&e).to_string();
+            (
+                vec![Finding {
+                    id: "ML001".into(),
+                    title: "ML Deep Scan: Unavailable".into(),
+                    severity: FindingSeverity::Critical,
+                    description: format!(
+                        "Multi-layer scan failed: {e}. Package is rejected until a complete YARA/threat-intel scan succeeds."
+                    ),
+                    file: "deep_scan".into(),
+                    line: None,
+                }],
+                version,
+            )
+        }
+    }
 }
 
 /// Checks whether a finding is covered by the publisher's declared manifest.
@@ -746,6 +752,10 @@ fn group_score(id: &str, findings: &[Finding]) -> f64 {
                 75.0
             } else if findings.iter().any(|finding| finding.id == "DS001") {
                 50.0
+            } else if findings.iter().any(|finding| {
+                finding.id == "ML001" && finding.severity == FindingSeverity::Critical
+            }) {
+                100.0
             } else if findings.iter().any(|finding| finding.id == "ML001") {
                 40.0
             } else {
@@ -1234,5 +1244,40 @@ mod tests {
 
         let ratio = (escape_bytes as f64) / (line.len() as f64);
         assert!(ratio < 0.15); // Below 15%, so run() won't add SA014 finding.
+    }
+
+    #[test]
+    fn timeout_and_extraction_errors_fail_closed_as_critical_ml001() {
+        let (findings, version) = apply_deep_scan_outcome(Err(ml_validator::MlError::Timeout));
+        assert_eq!(version, "degraded-timeout");
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].id, "ML001");
+        assert_eq!(findings[0].severity, FindingSeverity::Critical);
+
+        let (findings, version) = apply_deep_scan_outcome(Err(
+            ml_validator::MlError::ExtractionError("corrupt gzip".into()),
+        ));
+        assert_eq!(version, "degraded-extraction");
+        assert_eq!(findings[0].severity, FindingSeverity::Critical);
+        assert!(version.starts_with("degraded"));
+    }
+
+    #[test]
+    fn mock_or_degraded_classification_fails_closed_and_skips_ds_findings() {
+        let deep = ml_validator::DeepScanResult {
+            malicious_probability: 0.0,
+            confidence: 0.0,
+            classification: ml_validator::ThreatClassification::Degraded,
+            attention_regions: None,
+            suspicious_files: Vec::new(),
+            model_version: "degraded-no-model".into(),
+            is_mock: true,
+        };
+        let (findings, version) = apply_deep_scan_outcome(Ok(deep));
+        assert_eq!(version, "degraded-no-model");
+        assert!(findings
+            .iter()
+            .any(|f| f.id == "ML001" && f.severity == FindingSeverity::Critical));
+        assert!(!findings.iter().any(|f| f.id.starts_with("DS")));
     }
 }

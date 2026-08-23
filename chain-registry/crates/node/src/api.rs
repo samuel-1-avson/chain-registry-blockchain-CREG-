@@ -1725,22 +1725,15 @@ async fn bridge_anchors(State(state): State<SharedState>) -> impl IntoResponse {
     }))
 }
 
-// GET /v1/governance/proposals
+// GET /v1/governance/proposals and GET /v1/public/governance/proposals
 //
-// Governance is not yet implemented on-chain. This stub returns an empty
-// list so the explorer page can render gracefully. When on-chain governance
-// arrives (e.g. via a GovernanceProposal transaction variant), this handler
-// will scan the chain for proposal transactions.
-async fn governance_proposals(State(_state): State<SharedState>) -> impl IntoResponse {
-    (
-        StatusCode::NOT_IMPLEMENTED,
-        Json(serde_json::json!({
-            "error": "governance_not_enabled",
-            "proposals": Vec::<serde_json::Value>::new(),
-            "total": 0,
-            "message": "On-chain governance is not enabled on this node. Set VITE_GOVERNANCE_ENABLED=true in the explorer when governance ships.",
-        })),
-    )
+// Mirrors Governance.sol via eth_call. Unconfigured L1 returns HTTP 200 with
+// an empty list. RPC failures return HTTP 503 — never HTTP 501.
+async fn governance_proposals(
+    State(state): State<SharedState>,
+    Query(query): Query<crate::governance_api::GovernanceProposalsQuery>,
+) -> impl IntoResponse {
+    crate::governance_api::handle(state, query).await
 }
 
 // GET /v1/metrics/history?range=1h
@@ -6920,6 +6913,63 @@ mod tests {
             Some("true")
         );
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn governance_proposals_unconfigured_returns_200_empty_not_501() -> anyhow::Result<()> {
+        let (state, _tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
+        {
+            let mut s = state.write().await;
+            s.config.eth_rpc_url.clear();
+            s.config.governance_addr.clear();
+        }
+        let app = router(
+            state,
+            new_event_bus(),
+            RateLimiter::new(RateLimitConfig::default()),
+            AttestationStore::new(),
+            crate::config::CorsConfig::default(),
+            tx_sender,
+            p2p_handle,
+        );
+        let response = app
+            .oneshot(Request::get("/v1/public/governance/proposals").body(Body::empty())?)
+            .await?;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await?;
+        let body_json: Value = serde_json::from_slice(&body)?;
+        assert_eq!(body_json["source"], "unconfigured");
+        assert_eq!(body_json["total"], 0);
+        assert_eq!(body_json["proposals"].as_array().map(|a| a.len()), Some(0));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn governance_proposals_l1_error_returns_503_not_501() -> anyhow::Result<()> {
+        let (state, _tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
+        {
+            let mut s = state.write().await;
+            s.config.eth_rpc_url = "http://127.0.0.1:1".into();
+            s.config.governance_addr = "0x1111111111111111111111111111111111111111".into();
+        }
+        let app = router(
+            state,
+            new_event_bus(),
+            RateLimiter::new(RateLimitConfig::default()),
+            AttestationStore::new(),
+            crate::config::CorsConfig::default(),
+            tx_sender,
+            p2p_handle,
+        );
+        let response = app
+            .oneshot(Request::get("/v1/governance/proposals?limit=5").body(Body::empty())?)
+            .await?;
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = to_bytes(response.into_body(), usize::MAX).await?;
+        let body_json: Value = serde_json::from_slice(&body)?;
+        assert_eq!(body_json["error"], "governance_l1_unavailable");
+        assert_eq!(body_json["proposals"].as_array().map(|a| a.len()), Some(0));
         Ok(())
     }
 }

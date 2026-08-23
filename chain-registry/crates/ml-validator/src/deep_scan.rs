@@ -32,6 +32,8 @@ pub enum MlError {
     ExtractionError(String),
     #[error("Model not found: {0}")]
     ModelNotFound(String),
+    #[error("Deep scan timed out")]
+    Timeout,
 }
 
 /// A file flagged as suspicious by the deep-learning model.
@@ -186,18 +188,11 @@ impl DeepScanner {
         }
 
         // ── Multi-Layer Pipeline ──────────────────────────────────────
-        let files = match extract_source_files(tarball_bytes, &self.ecosystem) {
-            Ok(f) => f,
-            Err(_) => {
-                // If tarball extraction fails, return mock rather than error.
-                // This makes the pipeline resilient to corrupt/empty tarballs.
-                return Ok(mock_result());
-            }
-        };
-
-        if files.is_empty() {
-            return Ok(mock_result());
-        }
+        // Corrupt archives fail closed. A valid archive with no matching
+        // source files still runs tarball-level threat intel rather than
+        // pretending a scanner completed.
+        let files = extract_source_files(tarball_bytes, &self.ecosystem)
+            .map_err(|e| MlError::ExtractionError(e.to_string()))?;
 
         // Layer 1: YARA pattern matching.
         let yara_matches = crate::yara_scanner::scan_files(&files);
@@ -312,44 +307,11 @@ pub fn deep_scan(
                 "Deep-scan inference timed out after {}s",
                 SCAN_TIMEOUT.as_secs()
             );
-            Ok(timeout_result())
+            Err(MlError::Timeout)
         }
         Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(MlError::InferenceError(
             "Deep-scan worker exited before returning a result".into(),
         )),
-    }
-}
-
-/// Produce a degraded result when no model is available or the model is a
-/// placeholder. Carries `is_mock = true` so that the validator pipeline
-/// emits a visible ML001 warning finding.
-fn mock_result() -> DeepScanResult {
-    warn!("ML deep-scan running in DEGRADED mode — no trained ONNX model loaded. Security coverage is limited to rule-based analysis only.");
-    DeepScanResult {
-        malicious_probability: 0.0, // Don't return fake 0.15 — be honest: no data
-        confidence: 0.0,            // Zero confidence — no inference was performed
-        classification: ThreatClassification::Degraded,
-        attention_regions: None,
-        suspicious_files: Vec::new(),
-        model_version: "degraded-no-model".to_string(),
-        is_mock: true,
-    }
-}
-
-/// Produce a degraded result when ONNX inference timed out.
-fn timeout_result() -> DeepScanResult {
-    warn!(
-        "ML deep-scan timed out — inference did not complete within {}s.",
-        SCAN_TIMEOUT.as_secs()
-    );
-    DeepScanResult {
-        malicious_probability: 0.0,
-        confidence: 0.0,
-        classification: ThreatClassification::Degraded,
-        attention_regions: None,
-        suspicious_files: Vec::new(),
-        model_version: "degraded-timeout".to_string(),
-        is_mock: true,
     }
 }
 
@@ -435,30 +397,54 @@ fn is_source_file(path: &str) -> bool {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_mock_result_when_no_source_files() {
-        // With the multi-layer pipeline, passing invalid tarball data
-        // returns a mock result because extract_source_files yields no files.
-        let scanner = DeepScanner::new("/nonexistent/path/model.onnx");
-        let result = scanner.scan(b"dummy tarball bytes").unwrap();
+    fn gzip_tar(files: &[(&str, &str)]) -> Vec<u8> {
+        use flate2::write::GzEncoder;
+        use flate2::Compression;
 
-        // Invalid tarball → no files extracted → mock result.
-        assert!(result.is_mock);
-        assert_eq!(result.classification, ThreatClassification::Degraded);
-        assert_eq!(result.malicious_probability, 0.0);
+        let encoder = GzEncoder::new(Vec::new(), Compression::default());
+        let mut builder = tar::Builder::new(encoder);
+        for (name, content) in files {
+            let bytes = content.as_bytes();
+            let mut header = tar::Header::new_gnu();
+            header.set_size(bytes.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            builder.append_data(&mut header, *name, bytes).unwrap();
+        }
+        builder.into_inner().unwrap().finish().unwrap()
     }
 
     #[test]
-    fn test_onnx_fallback_mock_when_model_missing() {
-        // CREG_FORCE_ONNX is deprecated and ignored, so scanning invalid tarball yields mock result.
+    fn test_invalid_tarball_fails_closed() {
+        let scanner = DeepScanner::new("/nonexistent/path/model.onnx");
+        let err = scanner
+            .scan(b"dummy tarball bytes")
+            .expect_err("corrupt archives must not return a mock-clean result");
+        assert!(matches!(err, MlError::ExtractionError(_)));
+    }
+
+    #[test]
+    fn test_onnx_fallback_still_fails_closed_on_invalid_tarball() {
         std::env::set_var("CREG_FORCE_ONNX", "true");
         let scanner = DeepScanner::new("/nonexistent/path/model.onnx");
-        let result = scanner.scan(b"dummy tarball bytes").unwrap();
+        let err = scanner.scan(b"dummy tarball bytes");
         std::env::remove_var("CREG_FORCE_ONNX");
+        assert!(matches!(err, Err(MlError::ExtractionError(_))));
+    }
 
-        assert!(result.is_mock);
-        assert_eq!(result.classification, ThreatClassification::Degraded);
-        assert!(result.model_version.starts_with("degraded"));
+    #[test]
+    fn test_valid_archive_without_source_files_is_not_mock() {
+        let scanner = DeepScanner::new("/nonexistent/path/model.onnx");
+        let tarball = gzip_tar(&[("README.md", "# no source files")]);
+        let result = scanner.scan(&tarball).expect("valid gzip tar must scan");
+        assert!(!result.is_mock);
+        assert_eq!(result.model_version, "creg-detect-v1.0.0");
+        assert_ne!(result.classification, ThreatClassification::Degraded);
+    }
+
+    #[test]
+    fn test_timeout_error_is_not_mock_ok() {
+        assert_eq!(MlError::Timeout.to_string(), "Deep scan timed out");
     }
 
     #[test]
