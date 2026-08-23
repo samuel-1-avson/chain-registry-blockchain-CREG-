@@ -1,55 +1,27 @@
 //! Advanced validation commands (ZK and ML)
 //!
 //! Provides CLI commands for:
-//! - ZK proof generation and verification
+//! - Local research Groth16 proofs (not used for package admission)
 //! - ML-based threat detection
 //! - WASM sandbox validation
 
 use anyhow::{Context, Result};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tracing::{info, warn};
 
 use ml_validator::{FeatureExtractor, MlValidator};
 use wasm_sandbox::{SandboxConfig, SandboxInput, WasmSandbox};
 use zk_validator::{PackageInputs, ZkValidator};
 
-/// Generate a ZK proof for a package.
-/// Runs real static analysis and sandbox to obtain genuine scores before proof generation.
-pub async fn generate_zk_proof(
-    tarball_path: &PathBuf,
-    _manifest_path: Option<&PathBuf>,
-) -> Result<Vec<u8>> {
-    info!("Generating ZK proof for package...");
+struct LocalCircuitInputs {
+    content_hash: [u8; 32],
+    manifest_hash: [u8; 32],
+    static_analysis_score: u8,
+    sandbox_safe: bool,
+}
 
-    let tarball_bytes = tokio::fs::read(tarball_path)
-        .await
-        .context("Failed to read tarball")?;
-
-    let content_hash = common::sha256(&tarball_bytes);
-
-    // Hash the actual manifest file if present, otherwise hash the tarball itself.
-    let manifest_path_candidate = tarball_path.with_extension("").with_extension("json");
-    let manifest_bytes = tokio::fs::read(&manifest_path_candidate)
-        .await
-        .unwrap_or_else(|_| tarball_bytes.clone());
-    let manifest_hash = common::sha256(&manifest_bytes);
-
-    // --- Stage 1: Real static analysis ---
-    let default_manifest = common::PackageManifest {
-        allowed_network_hosts: vec![],
-        allowed_fs_writes: vec![],
-        spawns_processes: false,
-        description: None,
-        allowed_process_spawns: vec![],
-    };
-    let static_result = validator::static_analysis::run(&tarball_bytes, &default_manifest)
-        .await
-        .context("Static analysis failed")?;
-
-    // Convert findings count into a 0-100 safety score.
-    // Critical finding = -20pts, High = -10pts, Medium = -5pts, Low = -2pts.
-    let penalty: i32 = static_result
-        .findings
+fn static_analysis_safety_score(findings: &[common::Finding]) -> u8 {
+    let penalty: i32 = findings
         .iter()
         .map(|f| match f.severity {
             common::FindingSeverity::Critical => 20i32,
@@ -58,14 +30,55 @@ pub async fn generate_zk_proof(
             common::FindingSeverity::Low => 2i32,
         })
         .sum();
-    let static_analysis_score = (100i32 - penalty).clamp(0, 100) as u8;
+    (100i32 - penalty).clamp(0, 100) as u8
+}
+
+fn sandbox_declared_safe<E: std::fmt::Display>(
+    result: Result<validator::sandbox::SandboxResult, E>,
+) -> bool {
+    match result {
+        Ok(result) => !result
+            .findings
+            .iter()
+            .any(|f| matches!(f.severity, common::FindingSeverity::Critical)),
+        Err(e) => {
+            warn!("Sandbox unavailable, treating as UNSAFE: {}", e);
+            false
+        }
+    }
+}
+
+/// Publisher-local analysis used only as Groth16 public inputs.
+/// These scores are not admission evidence (ISSUE-011 / ADR-009).
+async fn local_publisher_declared_inputs(
+    tarball_path: &Path,
+    tarball_bytes: &[u8],
+) -> Result<LocalCircuitInputs> {
+    let content_hash = common::sha256(tarball_bytes);
+
+    let manifest_path_candidate = tarball_path.with_extension("").with_extension("json");
+    let manifest_bytes = tokio::fs::read(&manifest_path_candidate)
+        .await
+        .unwrap_or_else(|_| tarball_bytes.to_vec());
+    let manifest_hash = common::sha256(&manifest_bytes);
+
+    let default_manifest = common::PackageManifest {
+        allowed_network_hosts: vec![],
+        allowed_fs_writes: vec![],
+        spawns_processes: false,
+        description: None,
+        allowed_process_spawns: vec![],
+    };
+    let static_result = validator::static_analysis::run(tarball_bytes, &default_manifest)
+        .await
+        .context("Static analysis failed")?;
+    let static_analysis_score = static_analysis_safety_score(&static_result.findings);
     info!(
         "Static analysis score: {}/100 ({} findings)",
         static_analysis_score,
         static_result.findings.len()
     );
 
-    // --- Stage 2: Real sandbox check (dev mode if nsjail unavailable) ---
     let pkg_id = common::PackageId {
         ecosystem: "unknown".into(),
         name: tarball_path
@@ -75,26 +88,45 @@ pub async fn generate_zk_proof(
             .to_string(),
         version: "0.0.0".into(),
     };
-    let sandbox_safe =
-        match validator::sandbox::run(&pkg_id, &tarball_bytes, &default_manifest).await {
-            Ok(result) => !result
-                .findings
-                .iter()
-                .any(|f| matches!(f.severity, common::FindingSeverity::Critical)),
-            Err(e) => {
-                warn!("Sandbox unavailable, treating as UNSAFE: {}", e);
-                false
-            }
-        };
+    let sandbox_safe = sandbox_declared_safe(
+        validator::sandbox::run(&pkg_id, tarball_bytes, &default_manifest).await,
+    );
     info!("Sandbox result: sandbox_safe={}", sandbox_safe);
 
-    let validator = ZkValidator::new().context("Failed to initialize ZK validator")?;
-
-    let inputs = PackageInputs::new(
+    Ok(LocalCircuitInputs {
         content_hash,
         manifest_hash,
         static_analysis_score,
         sandbox_safe,
+    })
+}
+
+/// Generate a local research Groth16 proof for a package.
+///
+/// Runs static analysis and sandbox to obtain scores. The circuit still proves
+/// only that those caller-selected values satisfy inequalities — not that a
+/// named scanner ran. `creg publish` does not submit this proof.
+pub async fn generate_zk_proof(
+    tarball_path: &PathBuf,
+    _manifest_path: Option<&PathBuf>,
+) -> Result<Vec<u8>> {
+    info!("Generating local research ZK proof (not used for admission)...");
+    warn!(
+        "ISSUE-011 / ADR-009: Groth16 package proofs are publisher-declared research artifacts; \
+         they are not package-admission evidence."
+    );
+
+    let tarball_bytes = tokio::fs::read(tarball_path)
+        .await
+        .context("Failed to read tarball")?;
+    let derived = local_publisher_declared_inputs(tarball_path, &tarball_bytes).await?;
+
+    let validator = ZkValidator::new().context("Failed to initialize ZK validator")?;
+    let inputs = PackageInputs::new(
+        derived.content_hash,
+        derived.manifest_hash,
+        derived.static_analysis_score,
+        derived.sandbox_safe,
     );
     let proof = validator
         .generate_proof(&inputs)
@@ -104,8 +136,8 @@ pub async fn generate_zk_proof(
     info!(
         "ZK proof generated: {} bytes (score={}, safe={})",
         proof_bytes.len(),
-        static_analysis_score,
-        sandbox_safe
+        derived.static_analysis_score,
+        derived.sandbox_safe
     );
 
     Ok(proof_bytes)
@@ -259,90 +291,40 @@ pub async fn generate_and_save_zk_proof(
         .context("Failed to write ZK proof to file")?;
 
     info!("ZK proof saved to {:?}", output_path);
+    eprintln!(
+        "Note: this Groth16 proof is a local research artifact. `creg publish` does not submit it; \
+         validators analyze independently (ISSUE-011 / ADR-009)."
+    );
     Ok(())
 }
 
-/// Verify a ZK proof file.
-/// Re-runs real static analysis and sandbox on the tarball to derive the
-/// correct public inputs — never uses hardcoded scores.
+/// Verify a local research ZK proof file.
+/// Re-runs static analysis and sandbox on the tarball to derive public inputs.
+/// Never uses hardcoded placeholder scores (ISSUE-011).
 pub async fn verify_zk_proof_file(proof_path: &PathBuf, tarball_path: &PathBuf) -> Result<bool> {
-    info!("Verifying ZK proof from {:?}...", proof_path);
+    info!("Verifying local research ZK proof from {:?}...", proof_path);
 
-    // Read proof
     let proof_bytes = tokio::fs::read(proof_path)
         .await
         .context("Failed to read proof file")?;
     let proof = ZkValidator::deserialize_proof(&proof_bytes)?;
 
-    // Read tarball
     let tarball_bytes = tokio::fs::read(tarball_path)
         .await
         .context("Failed to read tarball")?;
-    let content_hash = common::sha256(&tarball_bytes);
-
-    // Re-derive manifest hash from the companion .json file if present, else hash tarball.
-    let manifest_candidate = tarball_path.with_extension("").with_extension("json");
-    let manifest_bytes = tokio::fs::read(&manifest_candidate)
-        .await
-        .unwrap_or_else(|_| tarball_bytes.clone());
-    let manifest_hash = common::sha256(&manifest_bytes);
-
-    // --- Derive real static analysis score ---
-    let default_manifest = common::PackageManifest {
-        allowed_network_hosts: vec![],
-        allowed_fs_writes: vec![],
-        spawns_processes: false,
-        description: None,
-        allowed_process_spawns: vec![],
-    };
-    let static_result = validator::static_analysis::run(&tarball_bytes, &default_manifest)
-        .await
-        .context("Static analysis failed during proof verification")?;
-    let penalty: i32 = static_result
-        .findings
-        .iter()
-        .map(|f| match f.severity {
-            common::FindingSeverity::Critical => 20i32,
-            common::FindingSeverity::High => 10i32,
-            common::FindingSeverity::Medium => 5i32,
-            common::FindingSeverity::Low => 2i32,
-        })
-        .sum();
-    let static_analysis_score = (100i32 - penalty).clamp(0, 100) as u8;
-
-    // --- Derive real sandbox result ---
-    let pkg_id = common::PackageId {
-        ecosystem: "unknown".into(),
-        name: tarball_path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("package")
-            .to_string(),
-        version: "0.0.0".into(),
-    };
-    let sandbox_safe =
-        match validator::sandbox::run(&pkg_id, &tarball_bytes, &default_manifest).await {
-            Ok(result) => !result
-                .findings
-                .iter()
-                .any(|f| matches!(f.severity, common::FindingSeverity::Critical)),
-            Err(e) => {
-                warn!("Sandbox unavailable during proof verification: {}", e);
-                true
-            }
-        };
+    let derived = local_publisher_declared_inputs(tarball_path, &tarball_bytes).await?;
 
     info!(
         "Derived inputs — score={}, sandbox_safe={}",
-        static_analysis_score, sandbox_safe
+        derived.static_analysis_score, derived.sandbox_safe
     );
 
     let validator = ZkValidator::new()?;
     let inputs = PackageInputs::new(
-        content_hash,
-        manifest_hash,
-        static_analysis_score,
-        sandbox_safe,
+        derived.content_hash,
+        derived.manifest_hash,
+        derived.static_analysis_score,
+        derived.sandbox_safe,
     );
     let is_valid = validator.verify_proof(&proof, &inputs.public_inputs())?;
 
@@ -359,5 +341,27 @@ mod tests {
         let validator = MlValidator::new();
         let info = validator.model_info();
         assert_eq!(info.get("type"), Some(&"rule-based".to_string()));
+    }
+
+    #[test]
+    fn static_analysis_score_is_derived_not_placeholder_85() {
+        assert_eq!(static_analysis_safety_score(&[]), 100);
+        let critical = common::Finding {
+            id: "t".into(),
+            title: "t".into(),
+            severity: common::FindingSeverity::Critical,
+            description: "t".into(),
+            file: "t".into(),
+            line: None,
+        };
+        assert_eq!(static_analysis_safety_score(&[critical]), 80);
+    }
+
+    #[test]
+    fn sandbox_unavailable_is_unsafe_not_placeholder_true() {
+        assert!(!sandbox_declared_safe(Err::<
+            validator::sandbox::SandboxResult,
+            _,
+        >("nsjail missing")));
     }
 }

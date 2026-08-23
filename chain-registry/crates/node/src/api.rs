@@ -5344,7 +5344,7 @@ mod tests {
             publisher_address: req.publisher_address.clone(),
             publisher_pubkey: req.publisher_pubkey.clone(),
             signature: req.signature.clone(),
-            // CR-02: legacy ZK admission attestations are retired and ignored.
+            // CR-02: legacy ZK admission attestations are retired and must be empty.
             publisher_attestation_proof: vec![],
             claimed_static_analysis_score: 0,
             claimed_sandbox_safe: false,

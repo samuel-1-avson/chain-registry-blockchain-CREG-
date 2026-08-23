@@ -124,6 +124,15 @@ fn env_truthy(name: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Retired publisher ZK admission fields (ISSUE-011 / CR-02 / ADR-009).
+///
+/// The package circuit historically accepted caller-selected placeholders
+/// (`score=85`, `sandbox_safe=true`). Publish never generates or submits a
+/// Groth16 attestation; validators perform independent analysis.
+fn retired_publisher_zk_attestation() -> (Vec<u8>, u32, bool) {
+    (Vec::new(), 0, false)
+}
+
 fn whole_second_now() -> chrono::DateTime<Utc> {
     chrono::DateTime::from_timestamp(Utc::now().timestamp(), 0)
         .expect("current Unix time is representable")
@@ -398,9 +407,10 @@ pub async fn run(
     };
 
     // Compute the manifest digest for transport and future evidence binding.
-    // CR-02: publisher-generated ZK attestations are retired. Their safety
-    // inputs were caller assertions and are not generated or submitted here.
+    // CR-02 / ISSUE-011: publisher-generated ZK attestations are retired.
     let manifest_hash_hex = request.manifest_hash.clone();
+    let (publisher_attestation_proof, claimed_static_analysis_score, claimed_sandbox_safe) =
+        retired_publisher_zk_attestation();
 
     // ── 6. Submit via gRPC (Primary High-Speed Tunnel) ────────────────────────
     let grpc_url = resolve_grpc_url(node_url, grpc_url);
@@ -417,9 +427,9 @@ pub async fn run(
             publisher_address: publisher_address.clone(),
             publisher_pubkey: request.publisher_pubkey.clone(),
             signature: request.signature.clone(),
-            publisher_attestation_proof: vec![],
-            claimed_static_analysis_score: 0,
-            claimed_sandbox_safe: false,
+            publisher_attestation_proof,
+            claimed_static_analysis_score,
+            claimed_sandbox_safe,
             publisher_pubkeys: publisher_pubkeys.clone(),
             signatures: signatures.clone(),
             threshold: if publisher_pubkeys.len() >= 2 { 2 } else { 1 },
@@ -457,6 +467,9 @@ pub async fn run(
         match client.submit_package(grpc_req).await {
             Ok(resp) => {
                 println!("\n  ✓ gRPC: {}", resp.into_inner().message);
+                println!(
+                    "    Publisher ZK attestation is not submitted; validators analyze independently."
+                );
                 return Ok(());
             }
             Err(e) => {
@@ -1219,7 +1232,7 @@ fn resolve_grpc_url(node_url: Option<&str>, grpc_url: Option<&str>) -> String {
 mod tests {
     use super::{
         detect_package_id, package_id_from_pyproject, publisher_authorization_config,
-        publisher_packages_url, resolve_grpc_url,
+        publisher_packages_url, resolve_grpc_url, retired_publisher_zk_attestation,
     };
 
     fn source_archive(entries: &[(&str, &str)]) -> Vec<u8> {
@@ -1349,5 +1362,14 @@ version = "1.2.3"
         assert!(publisher_authorization_config("", "", "", false, true)
             .expect("legacy mode")
             .is_none());
+    }
+
+    #[test]
+    fn publish_does_not_submit_placeholder_zk_admission_values() {
+        let (proof, score, sandbox_safe) = retired_publisher_zk_attestation();
+        assert!(proof.is_empty());
+        assert_eq!(score, 0);
+        assert!(!sandbox_safe);
+        assert_ne!(score, 85);
     }
 }

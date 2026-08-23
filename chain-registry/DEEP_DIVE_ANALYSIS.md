@@ -454,13 +454,13 @@ Global flags: `--unverified`, `CREG_NODE_URL`, `CREG_GRPC_URL`, `--output json`.
 
 ### 4.3 Medium Severity
 
-### ISSUE-011: Publisher CLI uses placeholder ZK admission values
+### ISSUE-011: Publisher CLI uses placeholder ZK admission values — **MITIGATED** (2026-08-23)
 
-- **Severity**: Medium
-- **File**: `crates/cli/src/publish.rs:165-169`
-- **Description**: Hardcoded score 85 and `sandbox_safe: true` to satisfy circuit constraints for publisher-side attestation.
-- **Impact**: Misleading if operators assume CLI proof reflects real analysis; validators re-run checks but users may trust client-side proof bytes.
-- **Recommended Fix**: Run `advanced zk` pipeline pre-publish or label attestation as "publisher-declared" in metadata.
+- **Severity**: Medium (mitigated)
+- **File**: `crates/cli/src/publish.rs`, `crates/node/src/grpc/server.rs`, `crates/cli/src/advanced.rs`
+- **Description**: Publish historically generated a Groth16 attestation with hardcoded score 85 and `sandbox_safe: true` so any artifact satisfied the package circuit.
+- **Fix**: `creg publish` sends only the retired empty/zero wire form (`retired_publisher_zk_attestation`). gRPC admission **rejects** leftover proof bytes or non-zero claimed scores instead of ignoring them. `creg advanced zk-proof` still exists as a local research command; it derives scores from static analysis/sandbox (fail-closed if sandbox is unavailable) and is labeled as not admission evidence (ADR-009).
+- **Residual**: The package circuit still proves caller-selected inequalities, not that a named scanner ran. Do not re-enable `zk_validation` or L1 qualification from these proofs.
 
 ### ISSUE-012: ML deep scan returns mock results on invalid/timeout input
 

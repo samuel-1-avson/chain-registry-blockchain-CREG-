@@ -17,6 +17,22 @@ use common::proto::{
     GetVersionResponse, RegistryEvent as ProtoEvent, SubmitRequest, SubmitResponse, WatchRequest,
 };
 
+/// ISSUE-011 / CR-02 / ADR-009: leftover publisher Groth16 fields must be
+/// empty/zero. Ignore-and-admit would still let placeholder proofs ride the
+/// wire; reject so admission cannot be mistaken for ZK qualification.
+fn reject_retired_publisher_zk_attestation(req: &SubmitRequest) -> Result<(), Status> {
+    if req.publisher_attestation_proof.is_empty()
+        && req.claimed_static_analysis_score == 0
+        && !req.claimed_sandbox_safe
+    {
+        return Ok(());
+    }
+    Err(Status::invalid_argument(
+        "publisher ZK attestation fields are retired; send an empty proof, score 0, and \
+         claimed_sandbox_safe=false. Validators perform independent analysis.",
+    ))
+}
+
 fn admission_status(error: crate::package_admission::AdmissionError) -> Status {
     use crate::package_admission::{AdmissionError, PublisherAdmissionError};
 
@@ -94,6 +110,7 @@ impl RegistryService for MyRegistry {
         request: Request<SubmitRequest>,
     ) -> Result<Response<SubmitResponse>, Status> {
         let req = request.into_inner();
+        reject_retired_publisher_zk_attestation(&req)?;
 
         let manifest = if req.manifest_json.trim().is_empty() {
             common::PackageManifest::default()
@@ -184,20 +201,6 @@ impl RegistryService for MyRegistry {
         crate::package_admission::verify_publish_auth(&self.state, &publish_req)
             .await
             .map_err(admission_status)?;
-
-        // CR-02: publisher-generated ZK attestations are retired. Their safety
-        // inputs were caller assertions, not independently measured analysis.
-        // Keep the protobuf fields for wire compatibility but never require,
-        // verify, store, or use them to affect admission or qualification.
-        if !req.publisher_attestation_proof.is_empty()
-            || req.claimed_static_analysis_score != 0
-            || req.claimed_sandbox_safe
-        {
-            tracing::warn!(
-                package = %req.name,
-                "Ignoring retired publisher ZK attestation fields"
-            );
-        }
 
         let receipt = crate::package_admission::admit_publish_request(
             &self.state,
@@ -309,9 +312,9 @@ impl ExplorerService for MyExplorer {
 
 #[cfg(test)]
 mod tests {
-    use super::MyWatcher;
+    use super::{reject_retired_publisher_zk_attestation, MyWatcher};
     use crate::events::{emit, new_event_bus, RegistryEvent};
-    use common::proto::{watch_service_server::WatchService, WatchRequest};
+    use common::proto::{watch_service_server::WatchService, SubmitRequest, WatchRequest};
     use tokio_stream::StreamExt;
     use tonic::Request;
 
@@ -341,5 +344,34 @@ mod tests {
         assert!(event.payload_json.contains("pubkey-123"));
 
         Ok(())
+    }
+
+    #[test]
+    fn retired_zk_attestation_accepts_empty_zero_form() {
+        let req = SubmitRequest {
+            publisher_attestation_proof: vec![],
+            claimed_static_analysis_score: 0,
+            claimed_sandbox_safe: false,
+            ..Default::default()
+        };
+        assert!(reject_retired_publisher_zk_attestation(&req).is_ok());
+    }
+
+    #[test]
+    fn retired_zk_attestation_rejects_placeholder_score_and_proof() {
+        let leftover_score = SubmitRequest {
+            claimed_static_analysis_score: 85,
+            claimed_sandbox_safe: true,
+            ..Default::default()
+        };
+        let err = reject_retired_publisher_zk_attestation(&leftover_score).unwrap_err();
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+        assert!(err.message().contains("retired"));
+
+        let leftover_proof = SubmitRequest {
+            publisher_attestation_proof: vec![0xde, 0xad],
+            ..Default::default()
+        };
+        assert!(reject_retired_publisher_zk_attestation(&leftover_proof).is_err());
     }
 }

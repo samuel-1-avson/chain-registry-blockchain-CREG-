@@ -518,7 +518,7 @@ enum BatchCommands {
 
 #[derive(Subcommand)]
 enum AdvancedCommands {
-    /// Generate ZK proof for a package
+    /// Generate a local research Groth16 proof (not used for package admission)
     ZkProof {
         /// Path to package tarball
         tarball: std::path::PathBuf,
@@ -1233,7 +1233,7 @@ async fn run(cli: Cli) -> Result<()> {
                 );
 
                 if zk {
-                    println!("\n[3/3] ZK proof generation...");
+                    println!("\n[3/3] Local research ZK proof generation (not admission)...");
                     let proof = advanced::generate_zk_proof(&tarball, None).await?;
                     println!("  Proof size: {} bytes", proof.len());
                     if let Some(out_dir) = out_dir {

@@ -92,6 +92,7 @@
 | ISSUE-013 | 2026-08-22 | `CREG_DEV_SANDBOX` requires testnet profile; public/production blocked (PR #26) |
 | ISSUE-010 | 2026-08-22 | CrossChain `AxelarAdapter.setChainName` is governance-gated; adapter remains undeployed |
 | ISSUE-015 | 2026-08-22 | WASM WASI stubs gated by `CapabilitySet` / `ResourceLimits`; stdout capture via `fd_write` |
+| ISSUE-011 | 2026-08-23 | Publisher ZK admission placeholders retired; gRPC rejects leftover 85/`true` proofs |
 
 ---
 
