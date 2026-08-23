@@ -531,6 +531,20 @@ impl NodeConfig {
             ));
         }
 
+        // ISSUE-004: reject malformed L1 RPC URLs at startup instead of
+        // panicking later in the bridge retry loop.
+        match self.eth_rpc_url.parse::<reqwest::Url>() {
+            Ok(url) if matches!(url.scheme(), "http" | "https") => {}
+            Ok(_) => errors.push(format!(
+                "CREG_ETH_RPC is invalid ({}): must be an http:// or https:// URL",
+                self.eth_rpc_url
+            )),
+            Err(error) => errors.push(format!(
+                "CREG_ETH_RPC is invalid ({}): {error}",
+                self.eth_rpc_url
+            )),
+        }
+
         errors.extend(self.cors.validate());
 
         // Block interval sanity check.
@@ -1033,6 +1047,29 @@ mod tests {
                 .all(|e| !e.contains("CREG_STAKING_ADDR is invalid")
                     && !e.contains("CREG_IS_VALIDATOR=true requires a non-zero parseable")),
             "observer must not fail-closed on missing staking, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn malformed_eth_rpc_url_is_a_hard_config_error() {
+        let mut cfg = base_config();
+        cfg.eth_rpc_url = "not-a-url".into();
+        let errors = cfg.validate();
+        assert!(
+            errors.iter().any(|e| e.contains("CREG_ETH_RPC is invalid")),
+            "expected invalid RPC URL error, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn default_eth_rpc_url_is_accepted() {
+        let cfg = base_config();
+        assert!(
+            cfg.validate()
+                .iter()
+                .all(|e| !e.contains("CREG_ETH_RPC is invalid")),
+            "default RPC URL must parse, got: {:?}",
+            cfg.validate()
         );
     }
 

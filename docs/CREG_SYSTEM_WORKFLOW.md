@@ -2132,10 +2132,8 @@ This completes the Tier 1 gossip + ZK polish for this cycle.
 **Tier 1 items worked on (bridge, finalizePackage, BatchOperations context, ZK):**
 
 **Bridge panics/robustness (ISSUE-004 and related):**
-- Reviewed bridge.rs: parse errors now handled with retry loop and logging (no top-level panic on bad CREG_ETH_RPC).
-- Made the internal array last() safe with if let (removed .expect).
-- Added comments on L1 RPC resilience.
-- Ties to reliability of reward emission (L1 hook uses similar RPC) and anchoring.
+- `NodeConfig::validate()` rejects unparseable / non-http(s) `CREG_ETH_RPC`; node startup treats that as a hard error.
+- The legacy research bridge no longer panics on parse; it logs and retries, and remains gated off in production.
 
 **Permissionless finalizePackage (ISSUE-008):**
 - In constructor, set enforceFinalizeRelays = true by default (safer; only allowlisted relays can call unless governance disables).

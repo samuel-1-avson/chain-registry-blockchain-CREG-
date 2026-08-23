@@ -97,17 +97,24 @@ impl PolicyFile {
             ));
         }
 
-        // Publisher whitelist
+        // Publisher whitelist. An empty publisher cannot satisfy a non-empty
+        // allow-list (ISSUE-020): fail closed instead of matching nothing silently.
         if !self.allowed_publishers.is_empty() {
-            let ok = self
-                .allowed_publishers
-                .iter()
-                .any(|p| publisher.starts_with(p.as_str()));
-            if !ok {
-                violations.push(format!(
-                    "Publisher '{}...' is not in the allowed publishers list",
-                    &publisher[..publisher.len().min(12)]
-                ));
+            if publisher.trim().is_empty() {
+                violations.push(
+                    "Publisher identity is unavailable; cannot evaluate allowed_publishers".into(),
+                );
+            } else {
+                let ok = self
+                    .allowed_publishers
+                    .iter()
+                    .any(|p| publisher.starts_with(p.as_str()));
+                if !ok {
+                    violations.push(format!(
+                        "Publisher '{}...' is not in the allowed publishers list",
+                        &publisher[..publisher.len().min(12)]
+                    ));
+                }
             }
         }
 
@@ -264,4 +271,48 @@ pub fn show_policy_init() -> Result<()> {
     );
     println!("{}", content);
     Ok(())
+}
+
+#[cfg(test)]
+mod evaluate_tests {
+    use super::PolicyFile;
+
+    fn policy_with_publisher(prefix: &str) -> PolicyFile {
+        PolicyFile {
+            require_verified: false,
+            allowed_publishers: vec![prefix.into()],
+            ..PolicyFile::default()
+        }
+    }
+
+    #[test]
+    fn empty_publisher_fails_closed_when_allowlist_configured() {
+        let policy = policy_with_publisher("aa");
+        let violations = policy.evaluate("npm:pkg@1.0.0", "verified", "");
+        assert!(
+            violations
+                .iter()
+                .any(|v| v.contains("Publisher identity is unavailable")),
+            "{violations:?}"
+        );
+    }
+
+    #[test]
+    fn matching_publisher_prefix_is_allowed() {
+        let policy = policy_with_publisher("aa");
+        let violations = policy.evaluate("npm:pkg@1.0.0", "verified", "aabbcc");
+        assert!(violations.is_empty(), "{violations:?}");
+    }
+
+    #[test]
+    fn non_matching_publisher_is_blocked() {
+        let policy = policy_with_publisher("aa");
+        let violations = policy.evaluate("npm:pkg@1.0.0", "verified", "bbccdd");
+        assert!(
+            violations
+                .iter()
+                .any(|v| v.contains("not in the allowed publishers")),
+            "{violations:?}"
+        );
+    }
 }

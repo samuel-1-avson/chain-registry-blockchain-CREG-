@@ -48,6 +48,7 @@ pub async fn resolve_id(id: &PackageId, node_url: Option<&str>) -> Result<TrustV
                 evidence_phase: None,
                 block_phase: None,
                 chain_status: None,
+                publisher: None,
             }
         }
     };

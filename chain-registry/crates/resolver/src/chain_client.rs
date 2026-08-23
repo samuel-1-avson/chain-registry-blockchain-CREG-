@@ -36,7 +36,7 @@ pub async fn fetch_verdict(id: &PackageId, node_url: &str) -> Result<TrustVerdic
         Ok(response) => {
             let res: common::proto::GetVersionResponse = response.into_inner();
             if res.found {
-                return Ok(TrustVerdict {
+                let mut verdict = TrustVerdict {
                     package: id.clone(),
                     status: VerdictStatus::Verified {
                         block_hash: String::new(),
@@ -52,7 +52,12 @@ pub async fn fetch_verdict(id: &PackageId, node_url: &str) -> Result<TrustVerdic
                     evidence_phase: None,
                     block_phase: None,
                     chain_status: Some("verified".into()),
-                });
+                    publisher: None,
+                };
+                if let Ok(rest) = fetch_verdict_rest(id, node_url).await {
+                    verdict.publisher = rest.publisher;
+                }
+                return Ok(verdict);
             }
         }
         Err(_) => {
@@ -117,6 +122,7 @@ async fn fetch_verdict_rest(id: &PackageId, node_url: &str) -> Result<TrustVerdi
             evidence_phase: None,
             block_phase: None,
             chain_status: None,
+            publisher: None,
         });
     }
 
@@ -128,7 +134,6 @@ async fn fetch_verdict_rest(id: &PackageId, node_url: &str) -> Result<TrustVerdi
         block_hash: Option<String>,
         content_hash: Option<String>,
         ipfs_cid: Option<String>,
-        #[allow(dead_code)]
         publisher: Option<String>,
         #[allow(dead_code)]
         published_at: Option<String>,
@@ -172,5 +177,9 @@ async fn fetch_verdict_rest(id: &PackageId, node_url: &str) -> Result<TrustVerdi
         evidence_phase: record.evidence_phase,
         block_phase: record.block_phase,
         chain_status: record.chain_status,
+        publisher: record
+            .publisher
+            .map(|p| p.trim().to_string())
+            .filter(|p| !p.is_empty()),
     })
 }

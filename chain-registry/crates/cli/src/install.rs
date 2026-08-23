@@ -56,10 +56,9 @@ pub async fn run(
 
                 if ecosystem_enforced {
                     let status_str = verdict.status.label().to_lowercase();
-                    // Publisher is not yet carried in the verdict; pass empty string.
-                    // Publisher-based policy rules apply when the publisher field is
-                    // populated in a future resolver upgrade.
-                    let mut violations = policy.evaluate(&pkg_id.canonical(), &status_str, "");
+                    let publisher = verdict.publisher.as_deref().unwrap_or("");
+                    let mut violations =
+                        policy.evaluate(&pkg_id.canonical(), &status_str, publisher);
 
                     // block_on_findings: check verified packages for matching severities.
                     if let VerdictStatus::Verified { findings, .. } = &verdict.status {

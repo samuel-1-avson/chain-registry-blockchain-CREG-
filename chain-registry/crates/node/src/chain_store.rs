@@ -60,6 +60,7 @@ const CF_APPLIED_NAMESPACE_LIFECYCLE_NONCES: &str = "applied_namespace_lifecycle
 const CF_APPLIED_PUBLISHER_AUTHORIZATION_NONCES: &str = "applied_publisher_authorization_nonces";
 const CF_NAMESPACE_DELEGATIONS: &str = "namespace_delegations";
 const CF_PUBLISHER_ADMISSION_NONCES: &str = "publisher_admission_nonces";
+const CF_PUBLISHER_ROTATION: &str = "publisher_rotation";
 const CF_FINALIZED_WORK: &str = "finalized_work";
 const CF_FINALIZED_WORK_DEAD_LETTER: &str = "finalized_work_dead_letter";
 const CF_TRANSPARENCY_EVENTS: &str = "transparency_events";
@@ -69,6 +70,13 @@ const CF_REORG_JOURNAL: &str = "reorg_journal";
 const REORG_JOURNAL_KEY: &[u8] = b"active";
 const REORG_FINALIZED_WORK_PREFIX: &[u8] = b"finalized_work\0";
 const MAX_FINALIZED_WORK_RETRIES: u32 = 5;
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct PublisherRotationIndex {
+    nonce: u64,
+    #[serde(default)]
+    timestamp: Option<DateTime<Utc>>,
+}
 
 /// Operational view of the durable finalized-work queue.  Every field is
 /// derived from the persisted queue, so a process restart cannot reset the
@@ -660,6 +668,7 @@ impl ChainStore {
             ),
             ColumnFamilyDescriptor::new(CF_NAMESPACE_DELEGATIONS, Options::default()),
             ColumnFamilyDescriptor::new(CF_PUBLISHER_ADMISSION_NONCES, Options::default()),
+            ColumnFamilyDescriptor::new(CF_PUBLISHER_ROTATION, Options::default()),
             ColumnFamilyDescriptor::new(CF_FINALIZED_WORK, Options::default()),
             ColumnFamilyDescriptor::new(CF_FINALIZED_WORK_DEAD_LETTER, Options::default()),
             ColumnFamilyDescriptor::new(CF_TRANSPARENCY_EVENTS, Options::default()),
@@ -717,6 +726,7 @@ impl ChainStore {
             CF_APPLIED_PUBLISHER_AUTHORIZATION_NONCES,
             CF_NAMESPACE_DELEGATIONS,
             CF_PUBLISHER_ADMISSION_NONCES,
+            CF_PUBLISHER_ROTATION,
             CF_FINALIZED_WORK,
             CF_FINALIZED_WORK_DEAD_LETTER,
             CF_TRANSPARENCY_EVENTS,
@@ -989,6 +999,10 @@ impl ChainStore {
             .db
             .cf_handle(CF_NAMESPACE_DELEGATIONS)
             .context("cf namespace_delegations")?;
+        let cf_publisher_rotation = self
+            .db
+            .cf_handle(CF_PUBLISHER_ROTATION)
+            .context("cf publisher_rotation")?;
         // Clear the existing index.
         let keys: Vec<Box<[u8]>> = self
             .db
@@ -1021,6 +1035,7 @@ impl ChainStore {
         for cf in [
             &cf_applied_publisher_authorization_nonces,
             &cf_namespace_delegations,
+            &cf_publisher_rotation,
         ] {
             let keys: Vec<Box<[u8]>> = self
                 .db
@@ -1186,6 +1201,10 @@ impl ChainStore {
             .db
             .cf_handle(CF_FINALIZED_WORK)
             .context("cf finalized_work")?;
+        let cf_publisher_rotation = self
+            .db
+            .cf_handle(CF_PUBLISHER_ROTATION)
+            .context("cf publisher_rotation")?;
 
         // Use a WriteBatch for atomicity.
         let mut batch = rocksdb::WriteBatch::default();
@@ -1246,6 +1265,7 @@ impl ChainStore {
                 canonical_prefix,
                 old_pubkey,
                 new_pubkey,
+                nonce,
                 ..
             } = tx
             {
@@ -1277,6 +1297,15 @@ impl ChainStore {
                         new_pubkey.as_bytes(),
                     );
                 }
+                let record = PublisherRotationIndex {
+                    nonce: *nonce,
+                    timestamp: Some(block.header.timestamp),
+                };
+                batch.put_cf(
+                    &cf_publisher_rotation,
+                    old_pubkey.as_bytes(),
+                    &serde_json::to_vec(&record)?,
+                );
             }
             if let common::Transaction::NamespaceLifecycle(event) = tx {
                 // Recovery is deliberately fail-closed until an ecosystem
@@ -2276,27 +2305,10 @@ impl ChainStore {
     }
 
     /// Return the last-used rotation nonce for the given publisher pubkey.
-    /// Returns 0 if no rotation has been recorded.
+    /// Returns `Some(0)` if no rotation has been recorded. `None` only if the
+    /// chain tip cannot be read during a cold-index backfill.
     pub fn publisher_rotation_nonce(&self, pubkey: &str) -> Option<u64> {
-        // Scan all blocks in reverse for the most recent RotatePublisherKey
-        // transaction matching this pubkey.  A dedicated CF would be more
-        // efficient at scale, but this is correct for now.
-        let tip = self.tip_height().ok()?;
-        for h in (0..=tip).rev() {
-            if let Ok(Some(block)) = self.get_block_by_height(h) {
-                for tx in &block.transactions {
-                    if let common::Transaction::RotatePublisherKey {
-                        old_pubkey, nonce, ..
-                    } = tx
-                    {
-                        if old_pubkey == pubkey {
-                            return Some(*nonce);
-                        }
-                    }
-                }
-            }
-        }
-        Some(0)
+        Some(self.publisher_rotation_index(pubkey)?.nonce)
     }
 
     /// Return the timestamp of the most recent key rotation by this pubkey.
@@ -2305,19 +2317,53 @@ impl ChainStore {
         &self,
         pubkey: &str,
     ) -> Option<chrono::DateTime<chrono::Utc>> {
+        self.publisher_rotation_index(pubkey)?.timestamp
+    }
+
+    fn publisher_rotation_index(&self, pubkey: &str) -> Option<PublisherRotationIndex> {
+        if let Some(cf) = self.db.cf_handle(CF_PUBLISHER_ROTATION) {
+            if let Ok(Some(bytes)) = self.db.get_cf(&cf, pubkey.as_bytes()) {
+                if let Ok(record) = serde_json::from_slice::<PublisherRotationIndex>(&bytes) {
+                    return Some(record);
+                }
+            }
+        }
+
+        // Empty/new CF on an upgraded store is not "nonce 0". Scan once, then
+        // persist so subsequent lookups are O(1).
         let tip = self.tip_height().ok()?;
+        let mut found = None;
         for h in (0..=tip).rev() {
             if let Ok(Some(block)) = self.get_block_by_height(h) {
                 for tx in &block.transactions {
-                    if let common::Transaction::RotatePublisherKey { old_pubkey, .. } = tx {
+                    if let common::Transaction::RotatePublisherKey {
+                        old_pubkey, nonce, ..
+                    } = tx
+                    {
                         if old_pubkey == pubkey {
-                            return Some(block.header.timestamp);
+                            found = Some(PublisherRotationIndex {
+                                nonce: *nonce,
+                                timestamp: Some(block.header.timestamp),
+                            });
+                            break;
                         }
                     }
                 }
             }
+            if found.is_some() {
+                break;
+            }
         }
-        None
+        let record = found.unwrap_or(PublisherRotationIndex {
+            nonce: 0,
+            timestamp: None,
+        });
+        if let Some(cf) = self.db.cf_handle(CF_PUBLISHER_ROTATION) {
+            if let Ok(bytes) = serde_json::to_vec(&record) {
+                let _ = self.db.put_cf(&cf, pubkey.as_bytes(), bytes);
+            }
+        }
+        Some(record)
     }
 
     // ── Chain stats ───────────────────────────────────────────────────────────
@@ -3239,6 +3285,65 @@ mod tests {
         assert!(reopened
             .consume_publisher_admission_nonce(publisher, "nonce-2", 1_800_000_000)
             .expect("distinct nonce"));
+    }
+
+    #[test]
+    fn publisher_rotation_index_is_o1_and_survives_rebuild_and_cf_miss() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = ChainStore::open(dir.path()).expect("open");
+        let genesis_hash = store.tip_hash().expect("tip hash");
+        let old_pubkey = "aa".repeat(32);
+        let new_pubkey = "bb".repeat(32);
+        let rotation_time = Utc::now();
+        let rotation = Transaction::RotatePublisherKey {
+            canonical_prefix: "npm:rotated-publisher".into(),
+            old_pubkey: old_pubkey.clone(),
+            new_pubkey,
+            sig_from_old: String::new(),
+            sig_from_new: String::new(),
+            timestamp: rotation_time,
+            nonce: 7,
+        };
+        let block1 = block_with_transactions(1, &genesis_hash, "node-a", vec![rotation]);
+        store.insert_block(&block1).expect("insert rotation");
+
+        assert_eq!(store.publisher_rotation_nonce(&old_pubkey), Some(7));
+        assert_eq!(
+            store.publisher_last_rotation_time(&old_pubkey),
+            Some(block1.header.timestamp)
+        );
+        assert_eq!(
+            store.publisher_rotation_nonce("ff".repeat(32).as_str()),
+            Some(0)
+        );
+        assert!(store
+            .publisher_last_rotation_time("ff".repeat(32).as_str())
+            .is_none());
+
+        // Simulate an upgraded DB whose new CF is empty: drop the indexed key
+        // and confirm the first lookup scans once then refills.
+        let cf = store
+            .db
+            .cf_handle(CF_PUBLISHER_ROTATION)
+            .expect("publisher_rotation cf");
+        store
+            .db
+            .delete_cf(&cf, old_pubkey.as_bytes())
+            .expect("drop indexed rotation");
+        assert_eq!(store.publisher_rotation_nonce(&old_pubkey), Some(7));
+        assert_eq!(
+            store.db.get_cf(&cf, old_pubkey.as_bytes()).expect("read"),
+            Some(
+                serde_json::to_vec(&PublisherRotationIndex {
+                    nonce: 7,
+                    timestamp: Some(block1.header.timestamp),
+                })
+                .expect("encode")
+            )
+        );
+
+        store.rebuild_package_index().expect("rebuild");
+        assert_eq!(store.publisher_rotation_nonce(&old_pubkey), Some(7));
     }
 
     #[test]

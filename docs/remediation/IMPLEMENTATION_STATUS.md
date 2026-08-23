@@ -19,7 +19,7 @@
 | Signed Sepolia specification | Blocked; migration required | The canonical spec currently declares a genesis hash that does not match the computed payload, both static-server mirrors differ from the canonical bytes/signature, and its signing public key corresponds to repository-disclosed development key material. Signing scripts now remove literal private keys, require an environment-protected secret by name, reject the disclosed public key, and refuse key/spec mismatch; no replacement spec or signature was fabricated. |
 | Evidence quorum | Implementing | Distinct worker evidence may coexist under one profile/disposition |
 | Publisher liability | Implementing | Staking reserves per-release bond; contract tests added |
-| Contract governance and verdict signatures | Implementing | First-pause/cooldown behavior and fuzz-test defects are fixed. Epoch-bound EIP-712 validator verdict/admission signatures and same-size-set replay tests are in active review. |
+| Contract governance and verdict signatures | In-repo complete; review/redeploy open | First-pause/cooldown behavior and fuzz-test defects are fixed. Epoch-bound EIP-712 validator verdict/admission signatures are in Solidity and the Rust admission signer. Local Foundry v1.7.1 129/129. Independent review and Sepolia upgrade remain. |
 | Pause recovery | Implementing | Paused unpause proposal and emergency revocation paths added; first-pause cooldown regression is fixed |
 | Canonical event history | Design approved | Target is witnessed Merkle history; legacy local chain remains migration input |
 | Client freshness | Not started | TUF-style metadata and witnessed inclusion remain Phase 4 |
@@ -52,9 +52,9 @@
 ## Required next work
 
 1. Remote GitHub Actions is deferred until the billing period resets. Do not raise the spending limit. Local workspace, rustfmt, and Foundry v1.7.1 are recorded in `TEST_EVIDENCE.md`.
-2. Finish epoch-bound EIP-712 verdict/admission review. Local Foundry v1.7.1 now passes 129/129; remote Contract CI remains deferred with billing.
+2. Finish independent EIP-712 contract review and Sepolia Registry/Staking upgrade. In-repo Solidity + Rust admission epoch binding is done; local Foundry v1.7.1 129/129. Remote Contract CI remains deferred with billing.
 3. Add reviewed production npm/PyPI policy and trust material, an official npm authentication-mode signal, live positive fixtures, platform artifacts, and signed activation approval; keep recovery fail closed until every gate passes.
-4. Regenerate and visually verify the workflow/whitepaper PDFs, synchronize public and Functions mirrors, and refresh all manifest hashes.
+4. DOC-RELEASE: regenerate workflow/whitepaper PDFs via the Contribution Arena pipeline when that repo is present. This checkout has no Arena `package.json` / `generate:document-pdfs`. Do not commit untracked `docs/document-pdfs/`.
 5. Run a witnessed key/spec migration: select the intended genesis/topology, rotate the disclosed signing/validator material, recompute and sign the exact canonical spec, independently verify it, then copy exact bytes/signature to both static-server names. Do not publish the current artifacts.
 6. Publish an independently verified validator-set checkpoint and complete live multi-operator replay, partition, reorg, rebuilt-node, long-range, and process-kill rehearsals before mandatory rollout.
 7. Recruit independently controlled validators and bootnodes; the recorded one-validator topology has no Byzantine fault tolerance.

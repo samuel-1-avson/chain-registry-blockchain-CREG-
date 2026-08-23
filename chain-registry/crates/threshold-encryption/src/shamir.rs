@@ -5,6 +5,7 @@
 
 use crate::ThresholdError;
 use rand::Rng;
+use std::collections::HashSet;
 
 /// A single share in Shamir's Secret Sharing
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,14 +80,34 @@ impl ShamirSecretSharing {
             ));
         }
 
+        let mut seen = HashSet::new();
+        for share in shares {
+            if share.index == 0 {
+                return Err(ThresholdError::InvalidShare(
+                    "share index 0 is reserved for the secret".into(),
+                ));
+            }
+            if !seen.insert(share.index) {
+                return Err(ThresholdError::InvalidShare(format!(
+                    "duplicate share index {}",
+                    share.index
+                )));
+            }
+        }
+
         let secret_len = shares[0].value.len();
+        if shares.iter().any(|share| share.value.len() != secret_len) {
+            return Err(ThresholdError::InvalidShare(
+                "share value lengths differ".into(),
+            ));
+        }
         let mut secret = Vec::with_capacity(secret_len);
 
         // For each byte position
         for i in 0..secret_len {
             let points: Vec<(u8, u8)> = shares.iter().map(|s| (s.index, s.value[i])).collect();
 
-            let byte = Self::lagrange_interpolate_at_zero(&points);
+            let byte = Self::lagrange_interpolate_at_zero(&points)?;
             secret.push(byte);
         }
 
@@ -108,7 +129,7 @@ impl ShamirSecretSharing {
 
     /// Lagrange interpolation at x = 0
     /// Given points (x_i, y_i), compute f(0)
-    fn lagrange_interpolate_at_zero(points: &[(u8, u8)]) -> u8 {
+    fn lagrange_interpolate_at_zero(points: &[(u8, u8)]) -> Result<u8, ThresholdError> {
         let mut result = 0u8;
 
         for (i, &(x_i, y_i)) in points.iter().enumerate() {
@@ -122,11 +143,11 @@ impl ShamirSecretSharing {
                 }
             }
 
-            let lagrange_coeff = Self::gf_div(numerator, denominator);
+            let lagrange_coeff = Self::gf_div(numerator, denominator)?;
             result = Self::gf_add(result, Self::gf_mul(y_i, lagrange_coeff));
         }
 
-        result
+        Ok(result)
     }
 
     // ── Galois Field Arithmetic (GF(2^8)) ─────────────────────────────────────
@@ -198,16 +219,21 @@ impl ShamirSecretSharing {
     }
 
     /// Divide two elements in GF(2^8) in **constant time**.
-    /// Returns 0 when dividing by zero (safe fallback for secret sharing).
-    fn gf_div(a: u8, b: u8) -> u8 {
-        if a == 0 || b == 0 {
-            return 0;
+    /// `0 / b` is 0 for nonzero `b`. Division by zero is an error.
+    fn gf_div(a: u8, b: u8) -> Result<u8, ThresholdError> {
+        if b == 0 {
+            return Err(ThresholdError::InvalidShare(
+                "division by zero in GF(2^8)".into(),
+            ));
+        }
+        if a == 0 {
+            return Ok(0);
         }
         let log_a = Self::LOG_TABLE[a as usize] as u16;
         let log_b = Self::LOG_TABLE[b as usize] as u16;
         // (log_a - log_b) mod 255 — add 255 first to avoid underflow.
         let log_diff = (log_a + 255 - log_b) % 255;
-        Self::EXP_TABLE[log_diff as usize]
+        Ok(Self::EXP_TABLE[log_diff as usize])
     }
 
     /// Compute multiplicative inverse in **constant time** using the log/exp table.
@@ -251,7 +277,35 @@ mod tests {
         // Multiplication
         let product = ShamirSecretSharing::gf_mul(0x57, 0x83);
         // Verify with division
-        assert_eq!(ShamirSecretSharing::gf_div(product, 0x83), 0x57);
+        assert_eq!(ShamirSecretSharing::gf_div(product, 0x83).unwrap(), 0x57);
+        assert_eq!(ShamirSecretSharing::gf_div(0, 0x83).unwrap(), 0);
+        assert!(ShamirSecretSharing::gf_div(0x57, 0).is_err());
+    }
+
+    #[test]
+    fn duplicate_share_indices_are_rejected() {
+        let sss = ShamirSecretSharing::new(3, 5);
+        let secret = b"dup-index";
+        let shares = sss.split_secret(secret).unwrap();
+        let bogus = vec![shares[0].clone(), shares[0].clone(), shares[1].clone()];
+        let err = sss.reconstruct_secret(&bogus).unwrap_err();
+        assert!(
+            matches!(err, ThresholdError::InvalidShare(ref message) if message.contains("duplicate")),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn share_index_zero_is_rejected() {
+        let sss = ShamirSecretSharing::new(2, 3);
+        let secret = b"zero";
+        let mut shares = sss.split_secret(secret).unwrap();
+        shares[0].index = 0;
+        let err = sss.reconstruct_secret(&shares[..2]).unwrap_err();
+        assert!(
+            matches!(err, ThresholdError::InvalidShare(ref message) if message.contains("index 0")),
+            "{err:?}"
+        );
     }
 
     #[test]

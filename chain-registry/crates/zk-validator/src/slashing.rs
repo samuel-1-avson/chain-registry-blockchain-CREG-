@@ -503,12 +503,30 @@ impl DoubleSignMonitor {
         None
     }
 
+    /// Encode an Ed25519 signature as 32-byte R into `r_x` and 32-byte S into
+    /// `s`. Affine `r_y` is unused for this wire format and stays `"0"`.
+    fn ed25519_signature_components(signature_hex: &str) -> Signature {
+        let trimmed = signature_hex.trim().trim_start_matches("0x");
+        match hex::decode(trimmed) {
+            Ok(bytes) if bytes.len() == 64 => Signature {
+                r_x: hex::encode(&bytes[..32]),
+                r_y: "0".to_string(),
+                s: hex::encode(&bytes[32..]),
+            },
+            _ => Signature {
+                r_x: String::new(),
+                r_y: "0".to_string(),
+                s: signature_hex.to_string(),
+            },
+        }
+    }
+
     /// Create evidence from two conflicting votes
     fn create_evidence(&self, vote1: &VoteRecord, vote2: &VoteRecord) -> DoubleSignEvidence {
         DoubleSignEvidence {
             public_inputs: DoubleSignPublicInputs {
-                validator_pubkey_x: vote1.pubkey.clone(), // Simplified
-                validator_pubkey_y: "0".to_string(),      // Would be actual Y coordinate
+                validator_pubkey_x: vote1.pubkey.clone(),
+                validator_pubkey_y: "0".to_string(),
                 package_hash: hex::encode(Sha256::digest(vote1.package_canonical.as_bytes())),
                 vote1_hash: hex::encode(Sha256::digest(format!(
                     "{}:{}:{}",
@@ -520,17 +538,9 @@ impl DoubleSignMonitor {
                 ))),
             },
             witness: DoubleSignWitness {
-                validator_privkey: "HIDDEN".to_string(), // Not known by monitor
-                signature1: Signature {
-                    r_x: "0".to_string(),
-                    r_y: "0".to_string(),
-                    s: vote1.signature.clone(),
-                },
-                signature2: Signature {
-                    r_x: "0".to_string(),
-                    r_y: "0".to_string(),
-                    s: vote2.signature.clone(),
-                },
+                validator_privkey: "HIDDEN".to_string(),
+                signature1: Self::ed25519_signature_components(&vote1.signature),
+                signature2: Self::ed25519_signature_components(&vote2.signature),
             },
             validator_address: vote1.validator_id.clone(),
             package_canonical: vote1.package_canonical.clone(),
@@ -674,33 +684,46 @@ mod tests {
         let generator = SlashingProofGenerator::new(ProofConfig::default());
         let mut monitor = DoubleSignMonitor::new(generator);
 
-        // First vote: approve
+        let mut sig1 = Vec::from([0xAAu8; 32]);
+        sig1.extend_from_slice(&[0xBBu8; 32]);
+        let mut sig2 = Vec::from([0xCCu8; 32]);
+        sig2.extend_from_slice(&[0xDDu8; 32]);
+        let pubkey = hex::encode([0x11u8; 32]);
+
         let vote1 = VoteRecord {
             validator_id: "val1".to_string(),
             package_canonical: "npm:test@1.0.0".to_string(),
             approved: true,
             timestamp: 1000,
             block_height: 100,
-            signature: "sig1".to_string(),
-            pubkey: "pubkey1".to_string(),
+            signature: hex::encode(&sig1),
+            pubkey: pubkey.clone(),
         };
 
         let result1 = monitor.record_vote(vote1);
         assert!(result1.is_none()); // No double-sign yet
 
-        // Second vote: reject (conflicting!)
         let vote2 = VoteRecord {
             validator_id: "val1".to_string(),
             package_canonical: "npm:test@1.0.0".to_string(),
-            approved: false, // Different!
+            approved: false,
             timestamp: 1001,
             block_height: 100,
-            signature: "sig2".to_string(),
-            pubkey: "pubkey1".to_string(),
+            signature: hex::encode(&sig2),
+            pubkey: pubkey.clone(),
         };
 
-        let result2 = monitor.record_vote(vote2);
-        assert!(result2.is_some()); // Double-sign detected!
+        let evidence = monitor.record_vote(vote2).expect("double-sign detected");
+        assert_eq!(evidence.public_inputs.validator_pubkey_x, pubkey);
+        assert_eq!(evidence.public_inputs.validator_pubkey_y, "0");
+        assert_eq!(evidence.witness.validator_privkey, "HIDDEN");
+        assert_eq!(evidence.witness.signature1.r_x, hex::encode([0xAAu8; 32]));
+        assert_eq!(evidence.witness.signature1.r_y, "0");
+        assert_eq!(evidence.witness.signature1.s, hex::encode([0xBBu8; 32]));
+        assert_eq!(evidence.witness.signature2.r_x, hex::encode([0xCCu8; 32]));
+        assert_eq!(evidence.witness.signature2.s, hex::encode([0xDDu8; 32]));
+        assert_eq!(evidence.vote1_details.signature_hex, hex::encode(&sig1));
+        assert_eq!(evidence.vote2_details.signature_hex, hex::encode(&sig2));
     }
 
     fn sample_evidence(vote1_hash: &str, vote2_hash: &str) -> DoubleSignEvidence {
