@@ -56,6 +56,8 @@ x-validator-env: &validator-env
   CREG_STAKING_ADDR: "${TESTNET_STAKING_ADDR:?set TESTNET_STAKING_ADDR from the bootstrap host .env.testnet}"
   CREG_REGISTRY_ADDR: "${TESTNET_REGISTRY_ADDR:?set TESTNET_REGISTRY_ADDR from the bootstrap host .env.testnet}"
   CREG_ZK_ENABLED: "${CREG_ZK_ENABLED:-true}"
+  # Unused by creg-node unless signed zk_validation is true (Sepolia: false).
+  CREG_ZK_KEYS_DIR: "${CREG_ZK_KEYS_DIR:-/app/circuits}"
   CREG_ML_ENABLED: "${CREG_ML_ENABLED:-true}"
   CREG_ML_MODEL_PATH: "/app/models"
   CREG_WASM_ENABLED: "${CREG_WASM_ENABLED:-true}"

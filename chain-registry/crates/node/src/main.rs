@@ -468,6 +468,7 @@ async fn main() -> Result<()> {
                         "CREG_IS_VALIDATOR=true requires a non-zero parseable CREG_STAKING_ADDR",
                     )
                     || e.contains("CREG_ETH_RPC is invalid")
+                    || e.contains("CREG_PRODUCTION=true but ZK package key files are missing")
             })
             .collect();
         if !hard_errors.is_empty() {
@@ -519,6 +520,17 @@ async fn main() -> Result<()> {
             "  MAL-001: public validator sandbox engine={} isolated=true",
             sandbox.engine
         );
+    }
+
+    // ISSUE-005: load package-circuit keys before spawning tasks. Sepolia
+    // keeps zk_validation false, so this is a no-op there. Production never
+    // mints ephemeral keys.
+    if config.zk_validation {
+        zk_validator::ZkValidator::new().context(
+            "zk_validation is enabled but ZK package keys could not be loaded. \
+             Set CREG_ZK_KEYS_DIR to proving_key_package_v2.bin and verifying_key_package_v2.bin. \
+             CREG_PRODUCTION refuses ephemeral keys. Do not enable zk_validation without a ceremony.",
+        )?;
     }
 
     // The signed-spec path already verified its canonical genesis hash above.

@@ -139,8 +139,11 @@ services:
       CREG_GOVERNANCE_ADDR: ${CREG_GOVERNANCE_ADDR:-0x9a14F359E2bdBb43F1526743C4A91955F29Ba59A}
       CREG_TOKEN_ADDR: ${CREG_TOKEN_ADDR:-0x97c21d46B3eac604e92E907D54aA92eEc0Af550b}
       CREG_ZK_VERIFIER_ADDR: ${CREG_ZK_VERIFIER_ADDR:-0x0922AE98AF1D809360BDd5D5AAd84f0D823A5cF3}
+      # Unused by creg-node. Qualification follows signed feature_flags.zk_validation
+      # (false on Sepolia). Keys, if that flag is ever enabled, are CREG_ZK_KEYS_DIR.
       CREG_ZK_ENABLED: "true"
       CREG_ZK_CIRCUITS_PATH: "/app/circuits"
+      CREG_ZK_KEYS_DIR: ${CREG_ZK_KEYS_DIR:-/app/circuits}
       CREG_ML_ENABLED: "true"
       CREG_ML_MODEL_PATH: "/app/models"
       CREG_WASM_ENABLED: "true"
