@@ -150,22 +150,18 @@ pub struct FaucetDripOutcome {
 
 fn append_fleet_consensus_checks(checks: &mut Vec<DoctorCheck>) {
     let yara_dir = std::env::var("CREG_YARA_RULES_DIR").unwrap_or_else(|_| "rules".to_string());
-    let yara_ok = std::path::Path::new(&yara_dir).is_dir()
-        && std::fs::read_dir(&yara_dir)
-            .map(|mut entries| entries.next().is_some())
-            .unwrap_or(false);
-    checks.push(if yara_ok {
+    checks.push(if ml_validator::yara_scanner::rules_available() {
         DoctorCheck::pass(
             "YARA rules directory",
             false,
-            format!("{yara_dir} contains rule files"),
+            format!("{yara_dir} has compiled .yar/.yara rules"),
         )
     } else {
         DoctorCheck::fail(
             "YARA rules directory",
-            false,
+            is_validator_host(),
             format!(
-                "CREG_YARA_RULES_DIR={yara_dir} is missing or empty — validators may disagree on scans"
+                "CREG_YARA_RULES_DIR={yara_dir} has no usable .yar/.yara rules — votes would be degraded-yara-missing"
             ),
         )
     });
@@ -282,11 +278,12 @@ async fn run_basic(options: DoctorOptions<'_>) -> Result<()> {
         DoctorCheck::fail("Publisher key", false, key_msg)
     });
 
-    let (nsjail_ok, nsjail_msg) = check_nsjail();
-    checks.push(if nsjail_ok {
-        DoctorCheck::pass("nsjail sandbox", false, nsjail_msg)
+    let sandbox_required = is_validator_host();
+    let (sandbox_ok, sandbox_msg) = check_isolated_sandbox();
+    checks.push(if sandbox_ok {
+        DoctorCheck::pass("Isolated sandbox", sandbox_required, sandbox_msg)
     } else {
-        DoctorCheck::fail("nsjail sandbox", false, nsjail_msg)
+        DoctorCheck::fail("Isolated sandbox", sandbox_required, sandbox_msg)
     });
 
     let (gpg_ok, gpg_msg) = check_gpg();
@@ -1173,22 +1170,60 @@ fn check_publisher_key() -> (bool, String) {
     (false, "No publisher key found. Run: creg keygen".into())
 }
 
-fn check_nsjail() -> (bool, String) {
-    if cfg!(windows) {
+fn is_validator_host() -> bool {
+    matches!(
+        std::env::var("CREG_IS_VALIDATOR").as_deref(),
+        Ok("true") | Ok("1") | Ok("TRUE")
+    )
+}
+
+fn check_isolated_sandbox() -> (bool, String) {
+    let nsjail = which::which("nsjail");
+    let docker = which::which("docker");
+    let is_validator = is_validator_host();
+
+    if let Ok(path) = nsjail {
+        return (true, format!("nsjail at {}", path.display()));
+    }
+    if let Ok(path) = docker {
         return (
             true,
-            "not required on Windows — package sandbox runs on Linux validators (fleet uses nsjail)"
+            format!(
+                "docker at {} (OCI fallback — packages receive SB010 unless nsjail is installed)",
+                path.display()
+            ),
+        );
+    }
+
+    if is_validator {
+        if cfg!(windows) {
+            return (
+                false,
+                "CREG_IS_VALIDATOR=true on native Windows has no isolated engine — \
+                 package votes abstain. Run Linux with nsjail or Dockerfile.secure."
+                    .into(),
+            );
+        }
+        return (
+            false,
+            "CREG_IS_VALIDATOR=true requires nsjail or Docker — \
+             run ./scripts/install-nsjail.sh or use Dockerfile.secure"
                 .into(),
         );
     }
-    match which::which("nsjail") {
-        Ok(p) => (true, format!("found at {}", p.display())),
-        Err(_) => (
-            false,
-            "nsjail not in PATH — run ./scripts/install-nsjail.sh (Linux) or use chain-registry-node-secure Docker image"
+
+    if cfg!(windows) {
+        return (
+            true,
+            "observer on Windows — nsjail not required (this host cannot produce counting votes)"
                 .into(),
-        ),
+        );
     }
+    (
+        false,
+        "nsjail not in PATH — run ./scripts/install-nsjail.sh (Linux) or use Dockerfile.secure"
+            .into(),
+    )
 }
 
 fn check_gpg() -> (bool, String) {

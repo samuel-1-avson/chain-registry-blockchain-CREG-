@@ -245,6 +245,30 @@ pub enum NetworkMode {
     Full,
 }
 
+fn env_u64(name: &str, default: u64) -> u64 {
+    std::env::var(name)
+        .ok()
+        .and_then(|value| value.trim().parse().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or(default)
+}
+
+fn env_u32(name: &str, default: u32) -> u32 {
+    std::env::var(name)
+        .ok()
+        .and_then(|value| value.trim().parse().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or(default)
+}
+
+fn env_path(name: &str) -> Option<PathBuf> {
+    std::env::var(name)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
 impl Default for SandboxConfig {
     fn default() -> Self {
         // Resolve config paths relative to the executable.
@@ -255,12 +279,15 @@ impl Default for SandboxConfig {
         let config_base = exe_dir.clone().map(|d| d.join("config").join("sandbox"));
 
         Self {
-            timeout_secs: 120,
-            memory_mb: 512,
+            timeout_secs: env_u64("CREG_SANDBOX_TIMEOUT", 120),
+            memory_mb: env_u32("CREG_SANDBOX_MEMORY_MB", 512),
             network_mode: NetworkMode::ManifestOnly,
-            nsjail_config_path: config_base.as_ref().map(|d| d.join("nsjail-seccomp.cfg")),
-            docker_seccomp_path: config_base.as_ref().map(|d| d.join("docker-seccomp.json")),
-            rootfs_base_dir: config_base.as_ref().map(|d| d.join("rootfs")),
+            nsjail_config_path: env_path("CREG_SANDBOX_NSJAIL_CONFIG")
+                .or_else(|| config_base.as_ref().map(|d| d.join("nsjail-seccomp.cfg"))),
+            docker_seccomp_path: env_path("CREG_SANDBOX_DOCKER_SECCOMP")
+                .or_else(|| config_base.as_ref().map(|d| d.join("docker-seccomp.json"))),
+            rootfs_base_dir: env_path("CREG_SANDBOX_ROOTFS_DIR")
+                .or_else(|| config_base.as_ref().map(|d| d.join("rootfs"))),
             tarball_hash: None,
         }
     }
@@ -1377,5 +1404,34 @@ mod tests {
         let obs = parse_nsjail_output(&mock_stderr).unwrap();
         // Limit is 500
         assert_eq!(obs.network_hosts.len(), 500);
+    }
+
+    #[test]
+    fn sandbox_config_reads_timeout_and_paths_from_env() {
+        let previous_timeout = std::env::var("CREG_SANDBOX_TIMEOUT").ok();
+        let previous_memory = std::env::var("CREG_SANDBOX_MEMORY_MB").ok();
+        let previous_nsjail = std::env::var("CREG_SANDBOX_NSJAIL_CONFIG").ok();
+        std::env::set_var("CREG_SANDBOX_TIMEOUT", "90");
+        std::env::set_var("CREG_SANDBOX_MEMORY_MB", "256");
+        std::env::set_var("CREG_SANDBOX_NSJAIL_CONFIG", "/tmp/nsjail.cfg");
+
+        let cfg = SandboxConfig::default();
+        assert_eq!(cfg.timeout_secs, 90);
+        assert_eq!(cfg.memory_mb, 256);
+        assert_eq!(
+            cfg.nsjail_config_path.as_deref(),
+            Some(std::path::Path::new("/tmp/nsjail.cfg"))
+        );
+
+        restore_env("CREG_SANDBOX_TIMEOUT", previous_timeout);
+        restore_env("CREG_SANDBOX_MEMORY_MB", previous_memory);
+        restore_env("CREG_SANDBOX_NSJAIL_CONFIG", previous_nsjail);
+    }
+
+    fn restore_env(name: &str, previous: Option<String>) {
+        match previous {
+            Some(value) => std::env::set_var(name, value),
+            None => std::env::remove_var(name),
+        }
     }
 }

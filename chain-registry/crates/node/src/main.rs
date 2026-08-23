@@ -501,7 +501,7 @@ async fn main() -> Result<()> {
              See docs/CREG_LIMITATIONS_PUBLIC_READINESS_PLAN.md (MAL-001)."
         );
     }
-    if config.is_validator && std::env::var("CREG_PUBLIC_VALIDATOR").as_deref() == Ok("true") {
+    if config.is_validator && config::creg_public_validator() {
         let sandbox = validator::sandbox::engine_status().await;
         if sandbox.dev_bypass {
             anyhow::bail!(

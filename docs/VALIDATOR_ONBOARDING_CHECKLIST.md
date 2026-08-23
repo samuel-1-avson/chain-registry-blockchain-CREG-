@@ -100,6 +100,9 @@ export CREG_NODE_URL=https://api.testnet.cregnet.dev
 | `CREG_DEV_SANDBOX` | **unset or `false`** — never `true` on a public validator |
 | `CREG_CHAIN_SPEC_URL` | Signed spec, e.g. `https://spec.testnet.cregnet.dev/chain-spec.json` |
 | `CREG_SPEC_SIGNING_PUBKEY` | From the operator docs (verifies spec signature) |
+| `CREG_P2P_SEEDS` | At least one dialable multiaddr (`CREG_VALIDATOR_P2P_SEEDS` is the fallback name) |
+| `CREG_STAKING_ADDR` | Signed-spec staking contract (validators refuse to boot without a parseable address) |
+| `CREG_YARA_RULES_DIR` | Directory of `.yar`/`.yara` rules (votes are `degraded-yara-missing` if empty) |
 | `CREG_ETH_RPC` | Archive-capable Sepolia RPC |
 | `CREG_IPFS_URL` | Local Kubo or operator IPFS API |
 | `CREG_EXPECTED_L1_CHAIN_ID` | `11155111` |
@@ -156,7 +159,7 @@ A validator running the dev bypass produces SB012 (High) findings on every packa
 
 ## 8. Health Checks
 
-- [ ] API reachable: `curl -fsS http://<node>:8080/healthz` (or your mapped port).
+- [ ] API reachable: `curl -fsS http://<node>:8080/v1/health` (or your mapped port).
 - [ ] P2P connected: peer count > 0 in `/v1/chain/stats`.
 - [ ] `validator_set_sync_state` not `degraded` (if degraded, switch to an archive RPC).
 - [ ] Block height advancing and finalization lag bounded.

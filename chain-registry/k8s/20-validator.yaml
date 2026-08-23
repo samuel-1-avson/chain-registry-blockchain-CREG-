@@ -28,13 +28,12 @@ spec:
           image: ghcr.io/chain-registry/chain-registry:minimal
           imagePullPolicy: IfNotPresent
           command: ["/app/creg-node"]
-          args:
-            - "--data-dir=/data"
-            - "--api-addr=0.0.0.0:8080"
-            - "--validator-mode"
           ports:
             - containerPort: 8080
               name: http
+              protocol: TCP
+            - containerPort: 4001
+              name: p2p
               protocol: TCP
             - containerPort: 50051
               name: grpc
@@ -125,6 +124,9 @@ spec:
     - port: 8080
       targetPort: 8080
       name: http
+    - port: 4001
+      targetPort: 4001
+      name: p2p
     - port: 50051
       targetPort: 50051
       name: grpc

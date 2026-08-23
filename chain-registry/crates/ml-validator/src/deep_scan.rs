@@ -174,9 +174,16 @@ impl DeepScanner {
         self
     }
 
+    pub const SCANNER_VERSION: &str = "creg-detect-v1.0.0";
+    pub const DEGRADED_YARA_MISSING: &str = "degraded-yara-missing";
+
     /// Return the model version string for inclusion in vote messages.
     pub fn model_version(&self) -> String {
-        "creg-detect-v1.0.0".to_string()
+        if crate::yara_scanner::rules_available() {
+            Self::SCANNER_VERSION.to_string()
+        } else {
+            Self::DEGRADED_YARA_MISSING.to_string()
+        }
     }
 
     /// Run the multi-layer scan (default).
@@ -193,6 +200,21 @@ impl DeepScanner {
         // pretending a scanner completed.
         let files = extract_source_files(tarball_bytes, &self.ecosystem)
             .map_err(|e| MlError::ExtractionError(e.to_string()))?;
+
+        if !crate::yara_scanner::rules_available() {
+            warn!(
+                "YARA rules unavailable — vote will be degraded-yara-missing and excluded from quorum"
+            );
+            return Ok(DeepScanResult {
+                malicious_probability: 0.0,
+                confidence: 0.0,
+                classification: ThreatClassification::Degraded,
+                attention_regions: None,
+                suspicious_files: Vec::new(),
+                model_version: Self::DEGRADED_YARA_MISSING.to_string(),
+                is_mock: false,
+            });
+        }
 
         // Layer 1: YARA pattern matching.
         let yara_matches = crate::yara_scanner::scan_files(&files);
@@ -257,7 +279,7 @@ impl DeepScanner {
             classification,
             attention_regions: None,
             suspicious_files,
-            model_version: "creg-detect-v1.0.0".to_string(),
+            model_version: Self::SCANNER_VERSION.to_string(),
             is_mock: false,
         })
     }
@@ -414,6 +436,42 @@ mod tests {
         builder.into_inner().unwrap().finish().unwrap()
     }
 
+    fn temp_rules_dir(suffix: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "creg-yara-{suffix}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&dir).expect("temp rules dir");
+        dir
+    }
+
+    struct YaraDirGuard {
+        previous: Option<String>,
+        dir: std::path::PathBuf,
+    }
+
+    impl YaraDirGuard {
+        fn set(dir: std::path::PathBuf) -> Self {
+            let previous = std::env::var("CREG_YARA_RULES_DIR").ok();
+            std::env::set_var("CREG_YARA_RULES_DIR", dir.as_os_str());
+            Self { previous, dir }
+        }
+    }
+
+    impl Drop for YaraDirGuard {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(value) => std::env::set_var("CREG_YARA_RULES_DIR", value),
+                None => std::env::remove_var("CREG_YARA_RULES_DIR"),
+            }
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
     #[test]
     fn test_invalid_tarball_fails_closed() {
         let scanner = DeepScanner::new("/nonexistent/path/model.onnx");
@@ -434,12 +492,34 @@ mod tests {
 
     #[test]
     fn test_valid_archive_without_source_files_is_not_mock() {
+        let dir = temp_rules_dir("present");
+        std::fs::write(
+            dir.join("dummy.yar"),
+            "rule creg_dummy { condition: false }\n",
+        )
+        .expect("dummy yara rule");
+        let _guard = YaraDirGuard::set(dir);
+
         let scanner = DeepScanner::new("/nonexistent/path/model.onnx");
         let tarball = gzip_tar(&[("README.md", "# no source files")]);
         let result = scanner.scan(&tarball).expect("valid gzip tar must scan");
         assert!(!result.is_mock);
-        assert_eq!(result.model_version, "creg-detect-v1.0.0");
+        assert_eq!(result.model_version, DeepScanner::SCANNER_VERSION);
         assert_ne!(result.classification, ThreatClassification::Degraded);
+    }
+
+    #[test]
+    fn missing_yara_rules_degrades_the_vote_profile() {
+        let dir = temp_rules_dir("missing");
+        let _guard = YaraDirGuard::set(dir);
+
+        let scanner = DeepScanner::new("/nonexistent/path/model.onnx");
+        let tarball = gzip_tar(&[("src/lib.rs", "fn main() {}")]);
+        let result = scanner.scan(&tarball).expect("valid gzip tar must scan");
+        assert_eq!(result.model_version, DeepScanner::DEGRADED_YARA_MISSING);
+        assert_eq!(result.classification, ThreatClassification::Degraded);
+        assert!(result.classification.should_abstain());
+        assert_eq!(scanner.model_version(), DeepScanner::DEGRADED_YARA_MISSING);
     }
 
     #[test]

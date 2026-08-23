@@ -621,12 +621,12 @@ impl NodeConfig {
         if !self.is_validator {
             return Vec::new();
         }
-        if std::env::var("CREG_PUBLIC_VALIDATOR").as_deref() != Ok("true") {
+        if !creg_public_validator() {
             return Vec::new();
         }
 
         let mut errors = Vec::new();
-        if std::env::var("CREG_DEV_SANDBOX").as_deref() == Ok("true") {
+        if env_flag_sandbox("CREG_DEV_SANDBOX") {
             errors.push(
                 "MAL-001: CREG_DEV_SANDBOX=true is forbidden when CREG_PUBLIC_VALIDATOR=true — \
                  public validators must run a real sandbox (nsjail). Use docker-compose.fleet-sandbox.yml \
@@ -863,10 +863,21 @@ fn env_flag_true(name: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Matches `validator::sandbox` (`true` / `1` / `TRUE`) so MAL-001 cannot be
+/// skipped by a truthy spelling the sandbox crate already honors.
+fn env_flag_sandbox(name: &str) -> bool {
+    matches!(
+        std::env::var(name).as_deref(),
+        Ok("true") | Ok("1") | Ok("TRUE")
+    )
+}
+
+pub(crate) fn creg_public_validator() -> bool {
+    env_flag_sandbox("CREG_PUBLIC_VALIDATOR")
+}
+
 pub(crate) fn allow_isolated_empty_p2p_seeds(is_testnet: bool) -> bool {
-    is_testnet
-        && env_flag_true("CREG_ALLOW_EMPTY_P2P_SEEDS")
-        && !env_flag_true("CREG_PUBLIC_VALIDATOR")
+    is_testnet && env_flag_true("CREG_ALLOW_EMPTY_P2P_SEEDS") && !creg_public_validator()
 }
 
 fn nonempty_env(name: &str) -> Option<String> {
@@ -1011,6 +1022,30 @@ mod tests {
         let observer = base_config();
         assert!(observer.validate_mal001_public_validator().is_empty());
 
+        std::env::remove_var("CREG_DEV_SANDBOX");
+    }
+
+    #[test]
+    fn mal001_public_validator_accepts_sandbox_truthy_spellings() {
+        std::env::set_var("CREG_DEV_SANDBOX", "1");
+        std::env::set_var("CREG_PUBLIC_VALIDATOR", "1");
+
+        let mut validator = base_config();
+        validator.is_validator = true;
+        let errors = validator.validate_mal001_public_validator();
+        assert!(
+            errors.iter().any(|e| e.contains("MAL-001")),
+            "CREG_PUBLIC_VALIDATOR=1 must trigger MAL-001, got {errors:?}"
+        );
+
+        std::env::set_var("CREG_PUBLIC_VALIDATOR", "TRUE");
+        let errors = validator.validate_mal001_public_validator();
+        assert!(
+            errors.iter().any(|e| e.contains("MAL-001")),
+            "CREG_PUBLIC_VALIDATOR=TRUE must trigger MAL-001, got {errors:?}"
+        );
+
+        std::env::remove_var("CREG_PUBLIC_VALIDATOR");
         std::env::remove_var("CREG_DEV_SANDBOX");
     }
 
