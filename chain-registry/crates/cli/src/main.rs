@@ -190,7 +190,7 @@ enum Commands {
 
     /// Generate a new Ed25519 keypair for publishing or validator use.
     Keygen {
-        /// Role: "publisher" or "validator"
+        /// Role: publisher | validator | witness | log-signer
         #[arg(default_value = "publisher")]
         role: String,
         /// Output file path (defaults to ~/.creg/<role>.key)

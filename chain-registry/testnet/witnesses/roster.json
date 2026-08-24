@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "as_of": "2026-08-24",
+  "status": "recruiting",
+  "log_id": null,
+  "note": "Pubkey-only candidate roster for WITNESSED-LOG Track B. Empty candidates is expected. Do not invent witnesses, commit private keys, or treat this file as a live witnessed network. log_id is assigned when a log signer is operated.",
+  "log_signer": {
+    "status": "unfilled",
+    "signer_id": null,
+    "public_key_hex": null
+  },
+  "minimum_witnesses_lab": 2,
+  "minimum_witnesses_public_testnet": 4,
+  "candidates": []
+}

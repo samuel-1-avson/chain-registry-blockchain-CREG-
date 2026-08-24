@@ -149,11 +149,113 @@ fn print_derived_eth_address_line(privkey_hex: &str) {
     }
 }
 
+/// Roles that `creg keygen` will write. Witness and log-signer keys are for
+/// WITNESSED-LOG Track B (operators generate on their own machines).
+pub const KEYGEN_ROLES: &[&str] = &["publisher", "validator", "witness", "log-signer"];
+
+/// Normalize and reject unknown keygen roles.
+pub fn normalize_keygen_role(role: &str) -> Result<String> {
+    let normalized = match role.trim().to_ascii_lowercase().as_str() {
+        "log_signer" | "logsigner" => "log-signer".to_string(),
+        other => other.to_string(),
+    };
+    if KEYGEN_ROLES.contains(&normalized.as_str()) {
+        Ok(normalized)
+    } else {
+        anyhow::bail!(
+            "unknown keygen role '{role}'. Use one of: {}",
+            KEYGEN_ROLES.join(", ")
+        )
+    }
+}
+
+/// Walk parents looking for a `.git` directory or file (worktrees).
+fn git_worktree_root(start: &Path) -> Option<PathBuf> {
+    let mut current = start.to_path_buf();
+    loop {
+        let git_marker = current.join(".git");
+        if git_marker.exists() {
+            return Some(current);
+        }
+        if !current.pop() {
+            return None;
+        }
+    }
+}
+
+/// Track B: never write private keys into a git worktree.
+pub fn refuse_in_repo_key_path(path: &Path) -> Result<()> {
+    let parent = path.parent().unwrap_or(path);
+    let search = if parent.exists() {
+        parent
+            .canonicalize()
+            .unwrap_or_else(|_| parent.to_path_buf())
+    } else {
+        parent.to_path_buf()
+    };
+    if let Some(root) = git_worktree_root(&search) {
+        anyhow::bail!(
+            "refusing to write a private key inside the git worktree at {}. Use ~/.creg/<role>.key (default) or another path outside the repository. WITNESSED-LOG Track B keys must never be committed.",
+            root.display()
+        );
+    }
+    Ok(())
+}
+
+fn print_role_next_steps(role: &str, key_path: &Path, pubkey_hex: &str) {
+    match role {
+        "publisher" => {
+            println!("  Next steps:");
+            println!("  1. Stake tokens:  creg stake --amount 0.01eth");
+            println!(
+                "  2. Publish:       creg publish <tarball.tgz> --key {}",
+                key_path.display()
+            );
+        }
+        "validator" => {
+            println!("  Next steps:");
+            println!(
+                "  1. Set env:       export CREG_VALIDATOR_KEY={}",
+                key_path.display()
+            );
+            println!("  2. Stake tokens:  Call staking.joinAsValidator{{value: 1 ether}}()");
+            println!("  3. Start node:    creg-node");
+        }
+        "witness" => {
+            println!("  Next steps (WITNESSED-LOG Track B):");
+            println!("  1. Keep this private key off the git repo and off the log-operator host.");
+            println!("  2. Send ONLY the public key plus a control-domain statement.");
+            println!("     Suggested CREG_TRANSPARENCY_WITNESS_KEYS fragment:");
+            println!("       {{\"<your-org-id>\": \"{pubkey_hex}\"}}");
+            println!(
+                "  3. Record the pubkey as candidate_unapproved in testnet/witnesses/roster.json — never the secret."
+            );
+            println!(
+                "  4. A witness daemon is not on main yet. Holding a key is recruitment, not witnessing."
+            );
+            println!("  Runbook: docs/WITNESS_OPERATOR_ONBOARDING.md");
+        }
+        "log-signer" => {
+            println!("  Next steps (WITNESSED-LOG Track B):");
+            println!("  1. This key signs tree heads. It MUST NOT also be a witness key.");
+            println!("     export CREG_TRANSPARENCY_LOG_PUBKEY={pubkey_hex}");
+            println!("  2. Store the secret on the log-operator machine only.");
+            println!(
+                "  3. The live log-signer process is not on main yet. Keep the key offline until that ships."
+            );
+            println!("  Runbook: docs/WITNESS_KEY_CEREMONY.md");
+        }
+        _ => {}
+    }
+}
+
 /// Generate a new keypair and save it to `output_path`.
 /// If `output_path` is None, defaults to ~/.creg/publisher.key
 pub fn run(output_path: Option<&Path>, role: &str) -> Result<()> {
     use ed25519_dalek::SigningKey;
     use rand::rngs::OsRng;
+
+    let role = normalize_keygen_role(role)?;
 
     let mut secret_bytes = [0u8; 32];
     OsRng.fill_bytes(&mut secret_bytes);
@@ -166,7 +268,8 @@ pub fn run(output_path: Option<&Path>, role: &str) -> Result<()> {
     // ── Save private key ──────────────────────────────────────────────────────
     let key_path = output_path
         .map(PathBuf::from)
-        .unwrap_or_else(|| default_key_path(role));
+        .unwrap_or_else(|| default_key_path(&role));
+    refuse_in_repo_key_path(&key_path)?;
 
     if let Some(parent) = key_path.parent() {
         std::fs::create_dir_all(parent)
@@ -197,30 +300,11 @@ pub fn run(output_path: Option<&Path>, role: &str) -> Result<()> {
     println!("\n  {} keypair generated for role: {}", "✓", role);
     println!("  Private key: {}", key_path.display());
     println!("  Public key:  {} (Ed25519)", pubkey_hex);
-    print_derived_eth_address_line(&privkey_hex);
-    println!();
-
-    match role {
-        "publisher" => {
-            println!("  Next steps:");
-            println!("  1. Stake tokens:  creg stake --amount 0.01eth");
-            println!(
-                "  2. Publish:       creg publish <tarball.tgz> --key {}",
-                key_path.display()
-            );
-        }
-        "validator" => {
-            println!("  Next steps:");
-            println!(
-                "  1. Set env:       export CREG_VALIDATOR_KEY={}",
-                key_path.display()
-            );
-            println!("  2. Stake tokens:  Call staking.joinAsValidator{{value: 1 ether}}()");
-            println!("  3. Start node:    creg-node");
-        }
-        _ => {}
+    if role == "publisher" || role == "validator" {
+        print_derived_eth_address_line(&privkey_hex);
     }
-
+    println!();
+    print_role_next_steps(&role, &key_path, &pubkey_hex);
     println!("  Keep your private key safe and never share it.\n");
 
     Ok(())
@@ -238,6 +322,8 @@ pub fn run_with_mnemonic(output_path: Option<&Path>, role: &str, restore: bool) 
     use ed25519_dalek::SigningKey;
     use hmac::{Hmac, Mac};
     use sha2::Sha512;
+
+    let role = normalize_keygen_role(role)?;
 
     let mnemonic = if restore {
         let phrase = dialoguer::Input::<String>::new()
@@ -270,7 +356,8 @@ pub fn run_with_mnemonic(output_path: Option<&Path>, role: &str, restore: bool) 
     // Save private key
     let key_path = output_path
         .map(PathBuf::from)
-        .unwrap_or_else(|| default_key_path(role));
+        .unwrap_or_else(|| default_key_path(&role));
+    refuse_in_repo_key_path(&key_path)?;
 
     if let Some(parent) = key_path.parent() {
         std::fs::create_dir_all(parent)
@@ -321,8 +408,12 @@ pub fn run_with_mnemonic(output_path: Option<&Path>, role: &str, restore: bool) 
     println!("  {} keypair generated for role: {} (BIP39)", "✓", role);
     println!("  Private key: {}", key_path.display());
     println!("  Public key:  {} (Ed25519)", pubkey_hex);
-    print_derived_eth_address_line(&privkey_hex);
+    if role == "publisher" || role == "validator" {
+        print_derived_eth_address_line(&privkey_hex);
+    }
     println!();
+    print_role_next_steps(&role, &key_path, &pubkey_hex);
+    println!("  Keep your private key safe and never share it.\n");
 
     Ok(())
 }
@@ -333,9 +424,11 @@ pub fn rotate(key_path: Option<&Path>, role: &str) -> Result<()> {
     use ed25519_dalek::SigningKey;
     use rand::rngs::OsRng;
 
+    let role = normalize_keygen_role(role)?;
     let path = key_path
         .map(PathBuf::from)
-        .unwrap_or_else(|| default_key_path(role));
+        .unwrap_or_else(|| default_key_path(&role));
+    refuse_in_repo_key_path(&path)?;
 
     if !path.exists() {
         anyhow::bail!(
@@ -372,7 +465,9 @@ pub fn rotate(key_path: Option<&Path>, role: &str) -> Result<()> {
                 "  Old pubkey:  {} (Ed25519)",
                 hex::encode(old_sk.verifying_key().as_bytes())
             );
-            if derive_eth_address(old_privkey_hex.trim()).is_some() {
+            if derive_eth_address(old_privkey_hex.trim()).is_some()
+                && (role == "publisher" || role == "validator")
+            {
                 print_ed25519_derived_eth_warning();
                 if let Some(eth_addr) = derive_eth_address(old_privkey_hex.trim()) {
                     println!("  Old ETH addr (derived): {}", eth_addr);
@@ -406,14 +501,19 @@ pub fn rotate(key_path: Option<&Path>, role: &str) -> Result<()> {
 
     println!("  {} New key written to {}", "✓".green(), path.display());
     println!("  New pubkey:  {} (Ed25519)", new_pub);
-    print_derived_eth_address_line(&new_priv);
-    println!();
-    println!("  {} Action required:", "⚠".yellow().bold());
-    println!("  Register the new public key on-chain before publishing:");
-    println!(
-        "  creg stake --amount 0 --pubkey {} (re-stake with new key)",
-        new_pub
-    );
+    if role == "publisher" || role == "validator" {
+        print_derived_eth_address_line(&new_priv);
+        println!();
+        println!("  {} Action required:", "⚠".yellow().bold());
+        println!("  Register the new public key on-chain before publishing:");
+        println!(
+            "  creg stake --amount 0 --pubkey {} (re-stake with new key)",
+            new_pub
+        );
+    } else {
+        println!();
+        print_role_next_steps(&role, &path, &new_pub);
+    }
     println!(
         "  The old backup at {} can be deleted once confirmed.",
         backup_path.display()
@@ -444,6 +544,31 @@ mod tests {
         let sk = "0000000000000000000000000000000000000000000000000000000000000001";
         let addr = derive_eth_address(sk).expect("address");
         assert!(addr.starts_with("0x") && addr.len() == 42);
+    }
+
+    #[test]
+    fn keygen_roles_include_witness_and_log_signer() {
+        assert_eq!(normalize_keygen_role("Witness").unwrap(), "witness");
+        assert_eq!(normalize_keygen_role("log_signer").unwrap(), "log-signer");
+        assert!(normalize_keygen_role("committee").is_err());
+    }
+
+    #[test]
+    fn refuse_private_keys_inside_a_git_worktree() {
+        let root = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir(root.path().join(".git")).expect("fake git");
+        let nested = root.path().join("ops");
+        std::fs::create_dir(&nested).expect("ops dir");
+        let key = nested.join("witness.key");
+        let err = refuse_in_repo_key_path(&key).expect_err("must refuse");
+        assert!(err.to_string().contains("git worktree"));
+    }
+
+    #[test]
+    fn allow_private_keys_outside_git() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let key = root.path().join("witness.key");
+        refuse_in_repo_key_path(&key).expect("outside git is allowed");
     }
 }
 

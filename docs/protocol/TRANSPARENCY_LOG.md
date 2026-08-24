@@ -49,3 +49,7 @@ head. The JSON sets `install_eligible: false`. `creg install` and PATH shims
 always apply the local anti-rollback journal; they call
 `verify_witnessed_inclusion` only when a witness policy is configured, and
 they reject unsigned heads in that mode.
+
+Operator recruitment (Track B) is [WITNESS_OPERATOR_ONBOARDING.md](../WITNESS_OPERATOR_ONBOARDING.md).
+The pubkey-only roster at `testnet/witnesses/roster.json` starts empty; filling
+it with keys generated on one laptop is not a witnessed network.
