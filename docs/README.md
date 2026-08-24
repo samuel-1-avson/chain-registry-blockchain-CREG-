@@ -11,7 +11,7 @@ Start at the [project README](../README.md), then use the sections below.
 
 | Document | Purpose |
 |----------|---------|
-| [PROTOCOL_PROGRESS.md](./PROTOCOL_PROGRESS.md) | **Shipped vs remaining vs testnet readiness** (as of HEAD `53c8089`) |
+| [PROTOCOL_PROGRESS.md](./PROTOCOL_PROGRESS.md) | **Shipped vs remaining vs testnet readiness** (as of HEAD `9ebfa8c`) |
 | [TESTNET_STATUS.md](./TESTNET_STATUS.md) | **Fleet live/paused matrix** — single source of truth |
 | [WHAT_TO_DO_NEXT.md](./WHAT_TO_DO_NEXT.md) | **Start here (maintainers)** — four tracks: system test, product surfaces, validator onboarding, audit |
 | [NEXT_WORK.md](./NEXT_WORK.md) | Prioritized IDs (NET-301, SEC-401, …) |
@@ -33,6 +33,7 @@ Start at the [project README](../README.md), then use the sections below.
 | [PUBLIC_TESTNET_QUICKSTART.md](./PUBLIC_TESTNET_QUICKSTART.md) | Publishers, developers, validators |
 | [TESTNET_PHASE_SCOPE.md](./TESTNET_PHASE_SCOPE.md) | Limits, verified semantics, alpha scope |
 | [VALIDATOR_ONBOARDING_CHECKLIST.md](./VALIDATOR_ONBOARDING_CHECKLIST.md) | External validator operators |
+| [WITNESS_OPERATOR_ONBOARDING.md](./WITNESS_OPERATOR_ONBOARDING.md) | Independent transparency-log witnesses (Track B recruiting) |
 | [WALLET_KEY_DERIVATION.md](./WALLET_KEY_DERIVATION.md) | Ed25519 vs Ethereum EOA |
 
 ---

@@ -1,7 +1,7 @@
 # Next work — prioritized backlog
 
-**Updated:** 2026-08-23  
-**HEAD:** `53c8089` (PR #50)  
+**Updated:** 2026-08-24  
+**HEAD:** `9ebfa8c` (PR #51; Track B recruiting in flight)  
 **Progress briefing:** [PROTOCOL_PROGRESS.md](./PROTOCOL_PROGRESS.md)  
 **Planning hub:** [WHAT_TO_DO_NEXT.md](./WHAT_TO_DO_NEXT.md)  
 **Context:** [REMEDIATION_BACKLOG.md](./REMEDIATION_BACKLOG.md), [WEAKNESSES_GAPS_REMEDIATION_PLAN.md](./WEAKNESSES_GAPS_REMEDIATION_PLAN.md), [TESTNET_STATUS.md](./TESTNET_STATUS.md)
@@ -12,8 +12,12 @@
 
 - **In-repo protocol through PR #50:** GOVERNANCE-API, SHIM-301, npm
   direct-dep gate, CLIENT-FRESHNESS, and SUPPLY-CHAIN-CI are on `main`.
-  Useful leftover protocol code is **WITNESSED-LOG** (independent witnesses
-  only — do not mint local stand-ins). Public testnet resume is still
+- **WITNESSED-LOG Track B started (2026-08-24):** recruitment only —
+  [WITNESS_OPERATOR_ONBOARDING.md](./WITNESS_OPERATOR_ONBOARDING.md),
+  [WITNESS_KEY_CEREMONY.md](./WITNESS_KEY_CEREMONY.md), empty
+  `testnet/witnesses/roster.json`. `creg keygen witness` / `log-signer`
+  write keys outside the git worktree. This does **not** close the ID.
+  Do not mint local stand-ins. Public testnet resume is still
   operator work (VAL-INDEPENDENCE, then TESTNET-RESUME).
 - **Protocol hardening:** CR-07 namespace authority and CR-04/HI-11
   validator-history protections are implemented at repository level but remain
@@ -74,7 +78,7 @@
 
 | # | ID | Task |
 |---|-----|------|
-| 14 | **WITNESSED-LOG** | Replace legacy/local history authority with a witnessed append-only log and prove derived-index completeness. Independent witness operators and signed-head distribution remain. |
+| 14 | **WITNESSED-LOG** | Track B recruiting (roster empty). Replace legacy/local history authority with a witnessed append-only log. Independent witness operators, signed-head distribution, and the Track A daemon remain. |
 | 18 | **REM-211+** | Complete resource metrics and Grafana dashboards per [observability/README.md](../chain-registry/observability/README.md). |
 | 19 | **VAL-SCALE** | Expand a verified independent validator cohort in capacity-tested batches; waitlist size is not validator capacity. |
 | 20 | **ZK-CIRCUIT** | Complete circuit/contract review and regenerate setup only if the binding changes; do not restore the retired qualification claim. |

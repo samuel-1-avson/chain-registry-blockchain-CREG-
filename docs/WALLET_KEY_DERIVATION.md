@@ -14,7 +14,11 @@ Generate Ed25519 keys with:
 ```bash
 creg keygen publisher
 creg keygen validator
+creg keygen witness
+creg keygen log-signer
 ```
+
+Witness and log-signer keys are **not** staking keys. Do not send ETH to any derived `0x` address for those roles; the CLI does not print a derived address for them. Secrets must live under `~/.creg/` (or another path **outside** the git worktree). See [WITNESS_KEY_CEREMONY.md](./WITNESS_KEY_CEREMONY.md).
 
 ## Derived `0x` address shown by `creg keygen`
 

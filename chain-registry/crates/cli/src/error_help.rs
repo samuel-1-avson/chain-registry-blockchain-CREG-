@@ -45,6 +45,8 @@ fn print_key_help() {
     eprintln!("  1. Generate a new key:");
     eprintln!("     {}", "creg keygen publisher".cyan());
     eprintln!("     {}", "creg keygen validator".cyan());
+    eprintln!("     {}", "creg keygen witness".cyan());
+    eprintln!("     {}", "creg keygen log-signer".cyan());
     eprintln!();
     eprintln!("  2. Or set environment variable:");
     eprintln!("     {}", "export CREG_PUBLISHER_KEY=/path/to/key".cyan());
