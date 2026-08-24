@@ -12,7 +12,8 @@
 use anyhow::Result;
 use crossterm::{
     event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, MouseEventKind,
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
+        KeyModifiers, MouseEventKind,
     },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -24,7 +25,8 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
-        Block, Borders, Cell, Clear, Gauge, List, ListItem, Paragraph, Row, Sparkline, Table, Wrap,
+        Block, BorderType, Borders, Cell, Clear, Gauge, List, ListItem, Paragraph, Row, Sparkline,
+        Table, Wrap,
     },
     Frame, Terminal,
 };
@@ -32,6 +34,7 @@ use serde_json::Value;
 use std::{
     collections::VecDeque,
     fs, io,
+    io::Write,
     path::PathBuf,
     sync::Arc,
     time::{Duration, Instant},
@@ -127,83 +130,108 @@ const TICK_RATE_MS: u64 = 100;
 const REFRESH_INTERVAL_SECS: u64 = 3;
 const MAX_EVENTS: usize = 200;
 const MAX_BLOCKS: usize = 100;
+const TOAST_SECS: u64 = 4;
+const QUIT_ARM_SECS: u64 = 3;
+const HEADER_HEIGHT: u16 = 3;
+const TAB_HEIGHT: u16 = 3;
+const FOOTER_HEIGHT: u16 = 3;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 static IS_LIGHT_THEME: AtomicBool = AtomicBool::new(false);
+static FORCE_REFRESH: AtomicBool = AtomicBool::new(false);
 
-// Color palette for a cohesive, beautiful look
+/// CREG console palette. Dark is the default operator surface.
 struct Theme;
 impl Theme {
     fn primary() -> Color {
         if IS_LIGHT_THEME.load(Ordering::Relaxed) {
-            Color::Blue
+            Color::Rgb(13, 148, 136)
         } else {
-            Color::Cyan
+            Color::Rgb(45, 212, 191)
         }
     }
     fn secondary() -> Color {
         if IS_LIGHT_THEME.load(Ordering::Relaxed) {
-            Color::Rgb(0, 0, 139)
+            Color::Rgb(3, 105, 161)
         } else {
-            Color::Blue
+            Color::Rgb(56, 189, 248)
         }
     }
     fn success() -> Color {
         if IS_LIGHT_THEME.load(Ordering::Relaxed) {
-            Color::Rgb(0, 100, 0)
+            Color::Rgb(21, 128, 61)
         } else {
-            Color::Green
+            Color::Rgb(74, 222, 128)
         }
     }
     fn warning() -> Color {
         if IS_LIGHT_THEME.load(Ordering::Relaxed) {
-            Color::Rgb(150, 100, 0)
+            Color::Rgb(180, 83, 9)
         } else {
-            Color::Yellow
+            Color::Rgb(251, 191, 36)
         }
     }
     fn error() -> Color {
         if IS_LIGHT_THEME.load(Ordering::Relaxed) {
-            Color::Rgb(139, 0, 0)
+            Color::Rgb(185, 28, 28)
         } else {
-            Color::Red
+            Color::Rgb(248, 113, 113)
         }
     }
     fn accent() -> Color {
         if IS_LIGHT_THEME.load(Ordering::Relaxed) {
-            Color::Magenta
+            Color::Rgb(217, 119, 6)
         } else {
-            Color::Magenta
+            Color::Rgb(251, 191, 36)
         }
     }
     fn text() -> Color {
         if IS_LIGHT_THEME.load(Ordering::Relaxed) {
-            Color::Black
+            Color::Rgb(15, 23, 42)
         } else {
-            Color::White
+            Color::Rgb(226, 232, 240)
         }
     }
     fn text_dim() -> Color {
         if IS_LIGHT_THEME.load(Ordering::Relaxed) {
-            Color::DarkGray
+            Color::Rgb(71, 85, 105)
         } else {
-            Color::Gray
+            Color::Rgb(148, 163, 184)
         }
     }
     fn border() -> Color {
         if IS_LIGHT_THEME.load(Ordering::Relaxed) {
-            Color::Gray
+            Color::Rgb(148, 163, 184)
         } else {
-            Color::DarkGray
+            Color::Rgb(51, 65, 85)
         }
     }
     fn highlight() -> Color {
         if IS_LIGHT_THEME.load(Ordering::Relaxed) {
-            Color::Rgb(200, 220, 255)
+            Color::Rgb(204, 251, 241)
         } else {
-            Color::LightCyan
+            Color::Rgb(19, 78, 74)
         }
     }
+    fn tab_active_fg() -> Color {
+        if IS_LIGHT_THEME.load(Ordering::Relaxed) {
+            Color::Rgb(15, 23, 42)
+        } else {
+            Color::Rgb(15, 23, 42)
+        }
+    }
+}
+
+fn rounded_block(title: impl Into<String>, focused: bool) -> Block<'static> {
+    Block::default()
+        .title(title.into())
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(if focused {
+            Theme::primary()
+        } else {
+            Theme::border()
+        }))
 }
 
 // ============================================================================
@@ -354,6 +382,201 @@ enum View {
     Help,
     Bridge,
     Metrics,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ToastKind {
+    Info,
+    Success,
+    Warn,
+    Error,
+}
+
+#[derive(Debug, Clone)]
+struct Toast {
+    message: String,
+    kind: ToastKind,
+    shown_at: Instant,
+}
+
+#[derive(Debug, Clone, Default)]
+struct PaletteState {
+    open: bool,
+    query: String,
+    selected: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PaletteCommand {
+    id: &'static str,
+    label: &'static str,
+    hint: &'static str,
+}
+
+fn palette_commands() -> &'static [PaletteCommand] {
+    &[
+        PaletteCommand {
+            id: "overview",
+            label: "Go to Overview",
+            hint: "1",
+        },
+        PaletteCommand {
+            id: "blocks",
+            label: "Go to Blocks",
+            hint: "2",
+        },
+        PaletteCommand {
+            id: "validators",
+            label: "Go to Validators",
+            hint: "3",
+        },
+        PaletteCommand {
+            id: "packages",
+            label: "Go to Packages",
+            hint: "4",
+        },
+        PaletteCommand {
+            id: "network",
+            label: "Go to Network",
+            hint: "5",
+        },
+        PaletteCommand {
+            id: "mempool",
+            label: "Go to Mempool",
+            hint: "6",
+        },
+        PaletteCommand {
+            id: "events",
+            label: "Go to Events",
+            hint: "7",
+        },
+        PaletteCommand {
+            id: "operator",
+            label: "Go to Operator",
+            hint: "8",
+        },
+        PaletteCommand {
+            id: "consensus",
+            label: "Go to PBFT consensus",
+            hint: "9",
+        },
+        PaletteCommand {
+            id: "faucet",
+            label: "Go to Faucet",
+            hint: "0",
+        },
+        PaletteCommand {
+            id: "preflight",
+            label: "Go to Preflight",
+            hint: "p",
+        },
+        PaletteCommand {
+            id: "bridge",
+            label: "Go to Bridge",
+            hint: ":",
+        },
+        PaletteCommand {
+            id: "metrics",
+            label: "Go to Metrics",
+            hint: "m",
+        },
+        PaletteCommand {
+            id: "search",
+            label: "Search / filter lists",
+            hint: "/",
+        },
+        PaletteCommand {
+            id: "yank",
+            label: "Copy selection to clipboard",
+            hint: "y",
+        },
+        PaletteCommand {
+            id: "export",
+            label: "Export redacted diagnostics",
+            hint: "x",
+        },
+        PaletteCommand {
+            id: "refresh",
+            label: "Refresh node data now",
+            hint: "r",
+        },
+        PaletteCommand {
+            id: "theme",
+            label: "Toggle light / dark theme",
+            hint: "t",
+        },
+        PaletteCommand {
+            id: "help",
+            label: "Open help",
+            hint: "?",
+        },
+        PaletteCommand {
+            id: "quit",
+            label: "Quit console",
+            hint: "q",
+        },
+    ]
+}
+
+fn filtered_palette_indices(query: &str) -> Vec<usize> {
+    let q = query.trim().to_ascii_lowercase();
+    palette_commands()
+        .iter()
+        .enumerate()
+        .filter(|(_, cmd)| {
+            q.is_empty()
+                || cmd.label.to_ascii_lowercase().contains(&q)
+                || cmd.id.contains(&q)
+                || cmd.hint.to_ascii_lowercase().contains(&q)
+        })
+        .map(|(i, _)| i)
+        .collect()
+}
+
+fn console_tabs() -> &'static [(View, &'static str, &'static str)] {
+    &[
+        (View::Overview, "Overview", "1"),
+        (View::Blocks, "Blocks", "2"),
+        (View::Validators, "Validators", "3"),
+        (View::Packages, "Packages", "4"),
+        (View::Network, "Network", "5"),
+        (View::Mempool, "Pool", "6"),
+        (View::Events, "Events", "7"),
+        (View::Operator, "Ops", "8"),
+        (View::Consensus, "PBFT", "9"),
+        (View::Faucet, "Faucet", "0"),
+        (View::Preflight, "Ready", "p"),
+        (View::Bridge, "Bridge", "-"),
+        (View::Metrics, "Metrics", "m"),
+    ]
+}
+
+fn cycle_tab(current: View, delta: i32) -> View {
+    let tabs = console_tabs();
+    let idx = tabs
+        .iter()
+        .position(|(view, _, _)| *view == current)
+        .unwrap_or(0);
+    let len = tabs.len() as i32;
+    let next = (idx as i32 + delta).rem_euclid(len) as usize;
+    tabs[next].0
+}
+
+fn tab_at_column(column: u16, width: u16) -> Option<View> {
+    let tabs = console_tabs();
+    if width == 0 || tabs.is_empty() {
+        return None;
+    }
+    let cell = (width / tabs.len() as u16).max(1);
+    let idx = (column / cell) as usize;
+    tabs.get(idx).map(|(view, _, _)| *view)
+}
+
+fn is_detail_view(view: View) -> bool {
+    matches!(
+        view,
+        View::BlockDetail | View::ValidatorDetail | View::PackageDetail
+    )
 }
 
 /// State of the Faucet pane's drip flow.
@@ -508,6 +731,10 @@ struct App {
     last_api_error: Option<String>,
     /// Most recent diagnostics export result.
     diagnostics_message: Option<String>,
+    toast: Option<Toast>,
+    palette: PaletteState,
+    quit_armed_at: Option<Instant>,
+    last_width: u16,
     /// Validator/operator monitoring is read-only by default. The TUI never
     /// accepts or stores private keys.
     read_only: bool,
@@ -618,6 +845,10 @@ impl App {
             last_api_success_at: None,
             last_api_error: None,
             diagnostics_message: None,
+            toast: None,
+            palette: PaletteState::default(),
+            quit_armed_at: None,
+            last_width: 120,
             read_only: true,
             tps_history: VecDeque::with_capacity(60),
             faucet: FaucetView::new(
@@ -670,6 +901,77 @@ impl App {
             self.events.pop_back();
         }
     }
+
+    fn push_toast(&mut self, kind: ToastKind, message: impl Into<String>) {
+        let message = message.into();
+        self.diagnostics_message = Some(message.clone());
+        self.toast = Some(Toast {
+            message,
+            kind,
+            shown_at: Instant::now(),
+        });
+    }
+
+    fn expire_overlays(&mut self) {
+        if let Some(toast) = &self.toast {
+            if toast.shown_at.elapsed() >= Duration::from_secs(TOAST_SECS) {
+                self.toast = None;
+            }
+        }
+        if let Some(armed) = self.quit_armed_at {
+            if armed.elapsed() >= Duration::from_secs(QUIT_ARM_SECS) {
+                self.quit_armed_at = None;
+            }
+        }
+    }
+
+    fn matching_packages(&self) -> Vec<usize> {
+        let query = self.search_query.to_ascii_lowercase();
+        self.packages
+            .iter()
+            .enumerate()
+            .filter(|(_, pkg)| {
+                query.is_empty()
+                    || pkg.name.to_ascii_lowercase().contains(&query)
+                    || pkg.ecosystem.to_ascii_lowercase().contains(&query)
+                    || pkg.version.to_ascii_lowercase().contains(&query)
+                    || pkg.publisher.to_ascii_lowercase().contains(&query)
+                    || pkg.status.to_ascii_lowercase().contains(&query)
+            })
+            .map(|(i, _)| i)
+            .collect()
+    }
+
+    fn matching_blocks(&self) -> Vec<usize> {
+        let query = self.search_query.to_ascii_lowercase();
+        self.blocks
+            .iter()
+            .enumerate()
+            .filter(|(_, block)| {
+                query.is_empty()
+                    || block.hash.to_ascii_lowercase().contains(&query)
+                    || block.proposer.to_ascii_lowercase().contains(&query)
+                    || block.height.to_string().contains(&query)
+            })
+            .map(|(i, _)| i)
+            .collect()
+    }
+
+    fn matching_validators(&self) -> Vec<usize> {
+        let query = self.search_query.to_ascii_lowercase();
+        self.validators
+            .iter()
+            .enumerate()
+            .filter(|(_, validator)| {
+                query.is_empty()
+                    || validator.id.to_ascii_lowercase().contains(&query)
+                    || validator.alias.to_ascii_lowercase().contains(&query)
+                    || validator.pub_key.to_ascii_lowercase().contains(&query)
+                    || validator.status.to_ascii_lowercase().contains(&query)
+            })
+            .map(|(i, _)| i)
+            .collect()
+    }
 }
 
 // ============================================================================
@@ -721,7 +1023,12 @@ pub async fn run(node_url: Option<&str>) -> Result<()> {
         // Draw UI
         let app_read = app.read().await;
         terminal.draw(|f| draw_ui(f, &app_read))?;
+        let frame_width = terminal.size().map(|size| size.width).unwrap_or(120);
         drop(app_read);
+        {
+            let mut app_write = app.write().await;
+            app_write.last_width = frame_width;
+        }
 
         // Handle events
         let timeout = tick_rate
@@ -732,7 +1039,7 @@ pub async fn run(node_url: Option<&str>) -> Result<()> {
             match event::read()? {
                 Event::Key(key) if key.kind == KeyEventKind::Press => {
                     let mut app_write = app.write().await;
-                    if handle_key(&mut app_write, key.code).await {
+                    if handle_key(&mut app_write, key).await {
                         break;
                     }
                 }
@@ -753,6 +1060,7 @@ pub async fn run(node_url: Option<&str>) -> Result<()> {
         if last_tick.elapsed() >= tick_rate {
             let mut app_write = app.write().await;
             app_write.tick_count += 1;
+            app_write.expire_overlays();
             last_tick = Instant::now();
             drop(app_write);
         }
@@ -792,7 +1100,9 @@ async fn data_fetcher_loop(app: Arc<RwLock<App>>, api_base: String, tx: mpsc::Se
         }
 
         // Fetch stats periodically
-        if last_stats_refresh.elapsed() >= Duration::from_secs(REFRESH_INTERVAL_SECS) {
+        if last_stats_refresh.elapsed() >= Duration::from_secs(REFRESH_INTERVAL_SECS)
+            || FORCE_REFRESH.swap(false, Ordering::Relaxed)
+        {
             if let Ok(stats) = fetch_stats(&client, &api_base).await {
                 let _ = tx.send(DataUpdate::Stats(stats.clone())).await;
                 let _ = tx.send(DataUpdate::ApiHealthy).await;
@@ -1752,13 +2062,260 @@ fn export_diagnostics(app: &App) -> Result<PathBuf> {
 // INPUT HANDLING
 // ============================================================================
 
-async fn handle_key(app: &mut App, key: KeyCode) -> bool {
-    // Handle search mode first
+fn move_filtered(selected: &mut usize, filtered: &[usize], down: bool) {
+    if filtered.is_empty() {
+        return;
+    }
+    let pos = filtered
+        .iter()
+        .position(|idx| *idx == *selected)
+        .unwrap_or(0);
+    let next = if down {
+        (pos + 1).min(filtered.len() - 1)
+    } else {
+        pos.saturating_sub(1)
+    };
+    *selected = filtered[next];
+}
+
+fn page_filtered(selected: &mut usize, filtered: &[usize], down: bool) {
+    if filtered.is_empty() {
+        return;
+    }
+    let pos = filtered
+        .iter()
+        .position(|idx| *idx == *selected)
+        .unwrap_or(0);
+    let next = if down {
+        (pos + 10).min(filtered.len() - 1)
+    } else {
+        pos.saturating_sub(10)
+    };
+    *selected = filtered[next];
+}
+
+fn snap_to_filter(selected: &mut usize, filtered: &[usize]) {
+    if filtered.is_empty() {
+        return;
+    }
+    if !filtered.contains(selected) {
+        *selected = filtered[0];
+    }
+}
+
+fn request_quit(app: &mut App) -> bool {
+    if is_detail_view(app.current_view) {
+        app.current_view = app.previous_view.unwrap_or(View::Overview);
+        app.previous_view = None;
+        return false;
+    }
+    if app.current_view == View::Help {
+        app.current_view = app.previous_view.unwrap_or(View::Overview);
+        app.previous_view = None;
+        return false;
+    }
+    if let Some(armed) = app.quit_armed_at {
+        if armed.elapsed() < Duration::from_secs(QUIT_ARM_SECS) {
+            return true;
+        }
+    }
+    app.quit_armed_at = Some(Instant::now());
+    app.push_toast(ToastKind::Warn, "Press q again to quit");
+    false
+}
+
+fn open_help(app: &mut App) {
+    if app.current_view == View::Help {
+        app.current_view = app.previous_view.unwrap_or(View::Overview);
+        app.previous_view = None;
+    } else {
+        app.previous_view = Some(app.current_view);
+        app.current_view = View::Help;
+    }
+}
+
+fn export_and_toast(app: &mut App) {
+    match export_diagnostics(app) {
+        Ok(path) => app.push_toast(ToastKind::Success, format!("exported {}", path.display())),
+        Err(error) => app.push_toast(ToastKind::Error, format!("export failed: {error}")),
+    }
+}
+
+fn selection_yank_text(app: &App) -> Option<(String, String)> {
+    match app.current_view {
+        View::Blocks | View::Overview | View::BlockDetail => app
+            .selected_block()
+            .map(|block| (format!("block #{}", block.height), block.hash.clone())),
+        View::Validators | View::ValidatorDetail => app.selected_validator().map(|validator| {
+            (
+                validator.alias.clone(),
+                if validator.pub_key.is_empty() {
+                    validator.id.clone()
+                } else {
+                    validator.pub_key.clone()
+                },
+            )
+        }),
+        View::Packages | View::PackageDetail => app.selected_package().map(|pkg| {
+            (
+                pkg.name.clone(),
+                if pkg.content_hash.is_empty() {
+                    format!("{}@{}", pkg.name, pkg.version)
+                } else {
+                    pkg.content_hash.clone()
+                },
+            )
+        }),
+        _ => Some((
+            "chain".into(),
+            format!("{}#{}", app.stats.chain_id, app.stats.tip_height),
+        )),
+    }
+}
+
+fn encode_base64(input: &[u8]) -> String {
+    const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    let mut i = 0;
+    while i < input.len() {
+        let b0 = input[i];
+        let b1 = if i + 1 < input.len() { input[i + 1] } else { 0 };
+        let b2 = if i + 2 < input.len() { input[i + 2] } else { 0 };
+        let triple = ((b0 as u32) << 16) | ((b1 as u32) << 8) | b2 as u32;
+        out.push(TABLE[((triple >> 18) & 63) as usize] as char);
+        out.push(TABLE[((triple >> 12) & 63) as usize] as char);
+        if i + 1 < input.len() {
+            out.push(TABLE[((triple >> 6) & 63) as usize] as char);
+        } else {
+            out.push('=');
+        }
+        if i + 2 < input.len() {
+            out.push(TABLE[(triple & 63) as usize] as char);
+        } else {
+            out.push('=');
+        }
+        i += 3;
+    }
+    out
+}
+
+fn copy_to_clipboard(text: &str) -> Result<(), String> {
+    if let Ok(mut clipboard) = arboard::Clipboard::new() {
+        if clipboard.set_text(text.to_string()).is_ok() {
+            return Ok(());
+        }
+    }
+    let encoded = encode_base64(text.as_bytes());
+    write!(io::stdout(), "\x1b]52;c;{encoded}\x07").map_err(|err| err.to_string())?;
+    io::stdout().flush().map_err(|err| err.to_string())
+}
+
+fn yank_selection(app: &mut App) {
+    match selection_yank_text(app) {
+        Some((label, text)) if !text.is_empty() => match copy_to_clipboard(&text) {
+            Ok(()) => app.push_toast(ToastKind::Success, format!("copied {label}")),
+            Err(error) => app.push_toast(ToastKind::Error, format!("copy failed: {error}")),
+        },
+        _ => app.push_toast(ToastKind::Warn, "nothing to copy"),
+    }
+}
+
+fn refresh_now(app: &mut App) {
+    FORCE_REFRESH.store(true, Ordering::Relaxed);
+    app.push_toast(ToastKind::Info, "refreshing node data");
+}
+
+fn execute_palette_id(app: &mut App, id: &str) -> bool {
+    app.palette.open = false;
+    app.palette.query.clear();
+    app.palette.selected = 0;
+    match id {
+        "overview" => app.current_view = View::Overview,
+        "blocks" => app.current_view = View::Blocks,
+        "validators" => app.current_view = View::Validators,
+        "packages" => app.current_view = View::Packages,
+        "network" => app.current_view = View::Network,
+        "mempool" => app.current_view = View::Mempool,
+        "events" => app.current_view = View::Events,
+        "operator" => app.current_view = View::Operator,
+        "consensus" => app.current_view = View::Consensus,
+        "faucet" => app.current_view = View::Faucet,
+        "preflight" => app.current_view = View::Preflight,
+        "bridge" => app.current_view = View::Bridge,
+        "metrics" => app.current_view = View::Metrics,
+        "search" => {
+            app.is_searching = true;
+            app.search_query.clear();
+        }
+        "yank" => yank_selection(app),
+        "export" => export_and_toast(app),
+        "refresh" => refresh_now(app),
+        "theme" => {
+            let current = IS_LIGHT_THEME.load(Ordering::Relaxed);
+            IS_LIGHT_THEME.store(!current, Ordering::Relaxed);
+            app.push_toast(
+                ToastKind::Info,
+                if current { "dark theme" } else { "light theme" },
+            );
+        }
+        "help" => open_help(app),
+        "quit" => return request_quit(app),
+        _ => {}
+    }
+    false
+}
+
+async fn handle_key(app: &mut App, key: KeyEvent) -> bool {
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    let code = key.code;
+
+    if app.palette.open {
+        match code {
+            KeyCode::Esc => {
+                app.palette.open = false;
+                app.palette.query.clear();
+            }
+            KeyCode::Enter => {
+                let filtered = filtered_palette_indices(&app.palette.query);
+                if let Some(idx) = filtered.get(app.palette.selected).copied() {
+                    if let Some(cmd) = palette_commands().get(idx) {
+                        return execute_palette_id(app, cmd.id);
+                    }
+                }
+            }
+            KeyCode::Down => {
+                let len = filtered_palette_indices(&app.palette.query).len();
+                if len > 0 {
+                    app.palette.selected = (app.palette.selected + 1) % len;
+                }
+            }
+            KeyCode::Up => {
+                let len = filtered_palette_indices(&app.palette.query).len();
+                if len > 0 {
+                    app.palette.selected = app.palette.selected.checked_sub(1).unwrap_or(len - 1);
+                }
+            }
+            KeyCode::Backspace => {
+                app.palette.query.pop();
+                app.palette.selected = 0;
+            }
+            KeyCode::Char(c) if !ctrl => {
+                app.palette.query.push(c);
+                app.palette.selected = 0;
+            }
+            _ => {}
+        }
+        return false;
+    }
+
     if app.is_searching {
-        match key {
-            KeyCode::Esc => app.is_searching = false,
+        match code {
+            KeyCode::Esc => {
+                app.is_searching = false;
+                app.search_query.clear();
+            }
             KeyCode::Enter => app.is_searching = false,
-            KeyCode::Char(c) => app.search_query.push(c),
+            KeyCode::Char(c) if !ctrl => app.search_query.push(c),
             KeyCode::Backspace => {
                 app.search_query.pop();
             }
@@ -1767,15 +2324,14 @@ async fn handle_key(app: &mut App, key: KeyCode) -> bool {
         return false;
     }
 
-    // Faucet address input takes precedence over global shortcuts.
     if app.current_view == View::Faucet && app.faucet.editing {
-        match key {
+        match code {
             KeyCode::Esc => app.faucet.editing = false,
             KeyCode::Enter => app.faucet.editing = false,
             KeyCode::Backspace => {
                 app.faucet.address_input.pop();
             }
-            KeyCode::Char(c) => {
+            KeyCode::Char(c) if !ctrl => {
                 if app.faucet.address_input.len() < 64 {
                     app.faucet.address_input.push(c);
                 }
@@ -1785,17 +2341,39 @@ async fn handle_key(app: &mut App, key: KeyCode) -> bool {
         return false;
     }
 
-    // Global shortcuts
-    match key {
-        KeyCode::Char('q') | KeyCode::Char('Q') => return true,
-        KeyCode::Char('?') | KeyCode::Char('h') => {
-            if app.current_view == View::Help {
-                app.current_view = app.previous_view.unwrap_or(View::Overview);
-                app.previous_view = None;
-            } else {
-                app.previous_view = Some(app.current_view);
-                app.current_view = View::Help;
+    if app.current_view == View::Help {
+        match code {
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?') | KeyCode::Char('h') => {
+                open_help(app);
             }
+            _ => {}
+        }
+        return false;
+    }
+
+    if (ctrl && matches!(code, KeyCode::Char('p') | KeyCode::Char('k')))
+        || code == KeyCode::Char(':')
+    {
+        app.palette.open = true;
+        app.palette.query.clear();
+        app.palette.selected = 0;
+        return false;
+    }
+
+    if ctrl && matches!(code, KeyCode::Char('y') | KeyCode::Char('c')) {
+        yank_selection(app);
+        return false;
+    }
+
+    match code {
+        KeyCode::Char('q') | KeyCode::Char('Q') => return request_quit(app),
+        KeyCode::Esc if app.quit_armed_at.is_some() => {
+            app.quit_armed_at = None;
+            app.push_toast(ToastKind::Info, "quit cancelled");
+            return false;
+        }
+        KeyCode::Char('?') => {
+            open_help(app);
             return false;
         }
         KeyCode::Char('/') => {
@@ -1803,20 +2381,20 @@ async fn handle_key(app: &mut App, key: KeyCode) -> bool {
             app.search_query.clear();
             return false;
         }
-        KeyCode::Char('p') | KeyCode::Char('P') => {
+        KeyCode::Char('p') => {
             app.current_view = View::Preflight;
             return false;
         }
         KeyCode::Char('x') | KeyCode::Char('X') => {
-            match export_diagnostics(app) {
-                Ok(path) => {
-                    app.diagnostics_message =
-                        Some(format!("diagnostic report exported to {}", path.display()));
-                }
-                Err(error) => {
-                    app.diagnostics_message = Some(format!("diagnostic export failed: {error}"));
-                }
-            }
+            export_and_toast(app);
+            return false;
+        }
+        KeyCode::Char('y') => {
+            yank_selection(app);
+            return false;
+        }
+        KeyCode::Char('r') if app.current_view != View::Faucet => {
+            refresh_now(app);
             return false;
         }
         KeyCode::Char('1') => app.current_view = View::Overview,
@@ -1835,25 +2413,55 @@ async fn handle_key(app: &mut App, key: KeyCode) -> bool {
         KeyCode::Char('0') | KeyCode::Char('F') => {
             app.current_view = View::Faucet;
         }
+        KeyCode::Char('m') => app.current_view = View::Metrics,
+        KeyCode::Tab | KeyCode::Char('l') | KeyCode::Char(']') => {
+            app.current_view = cycle_tab(app.current_view, 1);
+            return false;
+        }
+        KeyCode::BackTab | KeyCode::Char('h') | KeyCode::Char('[') => {
+            app.current_view = cycle_tab(app.current_view, -1);
+            return false;
+        }
         KeyCode::Char('t') | KeyCode::Char('T') => {
             let current = IS_LIGHT_THEME.load(Ordering::Relaxed);
             IS_LIGHT_THEME.store(!current, Ordering::Relaxed);
+            app.push_toast(
+                ToastKind::Info,
+                if current { "dark theme" } else { "light theme" },
+            );
             return false;
         }
         _ => {}
     }
 
-    // View-specific navigation
     match app.current_view {
-        View::Blocks | View::Overview => match key {
+        View::Blocks | View::Overview => match code {
             KeyCode::Down | KeyCode::Char('j') => {
-                if app.selected_block < app.blocks.len().saturating_sub(1) {
-                    app.selected_block += 1;
-                }
+                let filtered = app.matching_blocks();
+                snap_to_filter(&mut app.selected_block, &filtered);
+                move_filtered(&mut app.selected_block, &filtered, true);
             }
             KeyCode::Up | KeyCode::Char('k') => {
-                if app.selected_block > 0 {
-                    app.selected_block -= 1;
+                let filtered = app.matching_blocks();
+                snap_to_filter(&mut app.selected_block, &filtered);
+                move_filtered(&mut app.selected_block, &filtered, false);
+            }
+            KeyCode::PageDown => {
+                let filtered = app.matching_blocks();
+                page_filtered(&mut app.selected_block, &filtered, true);
+            }
+            KeyCode::PageUp => {
+                let filtered = app.matching_blocks();
+                page_filtered(&mut app.selected_block, &filtered, false);
+            }
+            KeyCode::Home | KeyCode::Char('g') => {
+                if let Some(first) = app.matching_blocks().first() {
+                    app.selected_block = *first;
+                }
+            }
+            KeyCode::End | KeyCode::Char('G') => {
+                if let Some(last) = app.matching_blocks().last() {
+                    app.selected_block = *last;
                 }
             }
             KeyCode::Enter | KeyCode::Char('d') => {
@@ -1864,27 +2472,28 @@ async fn handle_key(app: &mut App, key: KeyCode) -> bool {
             }
             _ => {}
         },
-        View::Preflight => match key {
-            KeyCode::Char('x') | KeyCode::Char('X') => {
-                // The global handler normally catches this; retain the local
-                // binding for terminals that send modified key events.
-                if let Ok(path) = export_diagnostics(app) {
-                    app.diagnostics_message =
-                        Some(format!("diagnostic report exported to {}", path.display()));
-                }
-            }
+        View::Preflight => match code {
+            KeyCode::Char('x') | KeyCode::Char('X') => export_and_toast(app),
             _ => {}
         },
-        View::Validators => match key {
+        View::Validators => match code {
             KeyCode::Down | KeyCode::Char('j') => {
-                if app.selected_validator < app.validators.len().saturating_sub(1) {
-                    app.selected_validator += 1;
-                }
+                let filtered = app.matching_validators();
+                snap_to_filter(&mut app.selected_validator, &filtered);
+                move_filtered(&mut app.selected_validator, &filtered, true);
             }
             KeyCode::Up | KeyCode::Char('k') => {
-                if app.selected_validator > 0 {
-                    app.selected_validator -= 1;
-                }
+                let filtered = app.matching_validators();
+                snap_to_filter(&mut app.selected_validator, &filtered);
+                move_filtered(&mut app.selected_validator, &filtered, false);
+            }
+            KeyCode::PageDown => {
+                let filtered = app.matching_validators();
+                page_filtered(&mut app.selected_validator, &filtered, true);
+            }
+            KeyCode::PageUp => {
+                let filtered = app.matching_validators();
+                page_filtered(&mut app.selected_validator, &filtered, false);
             }
             KeyCode::Enter | KeyCode::Char('d') => {
                 if !app.validators.is_empty() {
@@ -1894,16 +2503,24 @@ async fn handle_key(app: &mut App, key: KeyCode) -> bool {
             }
             _ => {}
         },
-        View::Packages => match key {
+        View::Packages => match code {
             KeyCode::Down | KeyCode::Char('j') => {
-                if app.selected_package < app.packages.len().saturating_sub(1) {
-                    app.selected_package += 1;
-                }
+                let filtered = app.matching_packages();
+                snap_to_filter(&mut app.selected_package, &filtered);
+                move_filtered(&mut app.selected_package, &filtered, true);
             }
             KeyCode::Up | KeyCode::Char('k') => {
-                if app.selected_package > 0 {
-                    app.selected_package -= 1;
-                }
+                let filtered = app.matching_packages();
+                snap_to_filter(&mut app.selected_package, &filtered);
+                move_filtered(&mut app.selected_package, &filtered, false);
+            }
+            KeyCode::PageDown => {
+                let filtered = app.matching_packages();
+                page_filtered(&mut app.selected_package, &filtered, true);
+            }
+            KeyCode::PageUp => {
+                let filtered = app.matching_packages();
+                page_filtered(&mut app.selected_package, &filtered, false);
             }
             KeyCode::Enter | KeyCode::Char('d') => {
                 if !app.packages.is_empty() {
@@ -1913,7 +2530,7 @@ async fn handle_key(app: &mut App, key: KeyCode) -> bool {
             }
             _ => {}
         },
-        View::Events => match key {
+        View::Events => match code {
             KeyCode::Down | KeyCode::Char('j') => {
                 if app.selected_event < app.events.len().saturating_sub(1) {
                     app.selected_event += 1;
@@ -1926,14 +2543,14 @@ async fn handle_key(app: &mut App, key: KeyCode) -> bool {
             }
             _ => {}
         },
-        View::BlockDetail | View::ValidatorDetail | View::PackageDetail => match key {
-            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('b') => {
+        View::BlockDetail | View::ValidatorDetail | View::PackageDetail => match code {
+            KeyCode::Esc | KeyCode::Char('b') => {
                 app.current_view = app.previous_view.unwrap_or(View::Overview);
                 app.previous_view = None;
             }
             _ => {}
         },
-        View::Faucet => match key {
+        View::Faucet => match code {
             KeyCode::Char('e') | KeyCode::Char('E') | KeyCode::Char('i') => {
                 app.faucet.editing = true;
             }
@@ -2013,50 +2630,31 @@ fn handle_mouse(app: &mut App, mouse: crossterm::event::MouseEvent) {
     match mouse.kind {
         MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
             let row = mouse.row;
-            if row == 2 || row == 3 || row == 4 {
-                // Approximate header area
-                match mouse.column {
-                    0..=12 => app.current_view = View::Overview,
-                    13..=23 => app.current_view = View::Blocks,
-                    24..=38 => app.current_view = View::Validators,
-                    39..=51 => app.current_view = View::Packages,
-                    52..=63 => app.current_view = View::Network,
-                    64..=75 => app.current_view = View::Mempool,
-                    76..=86 => app.current_view = View::Events,
-                    87..=99 => app.current_view = View::Operator,
-                    100..=113 => app.current_view = View::Consensus,
-                    114..=124 => app.current_view = View::Faucet,
-                    125..=136 => {
-                        app.current_view = View::Overview;
-                        app.is_searching = true;
-                    }
-                    137..=145 => app.current_view = View::Bridge,
-                    146..=160 => app.current_view = View::Metrics,
-                    _ => {}
+            if row >= HEADER_HEIGHT && row < HEADER_HEIGHT + TAB_HEIGHT {
+                if let Some(view) = tab_at_column(mouse.column, app.last_width.max(1)) {
+                    app.current_view = view;
                 }
-            } else if row >= 6 {
-                // Approximate row selection based on current view
-                let index = (row - 6) as usize;
+            } else if row >= HEADER_HEIGHT + TAB_HEIGHT {
+                let index = row.saturating_sub(HEADER_HEIGHT + TAB_HEIGHT + 1) as usize;
                 match app.current_view {
                     View::Blocks | View::Overview => {
                         if index < app.blocks.len() {
                             app.selected_block = index;
-                            app.previous_view = Some(app.current_view);
-                            app.current_view = View::BlockDetail;
                         }
                     }
                     View::Validators => {
                         if index < app.validators.len() {
                             app.selected_validator = index;
-                            app.previous_view = Some(app.current_view);
-                            app.current_view = View::ValidatorDetail;
                         }
                     }
                     View::Packages => {
                         if index < app.packages.len() {
                             app.selected_package = index;
-                            app.previous_view = Some(app.current_view);
-                            app.current_view = View::PackageDetail;
+                        }
+                    }
+                    View::Events => {
+                        if index < app.events.len() {
+                            app.selected_event = index;
                         }
                     }
                     _ => {}
@@ -2073,6 +2671,10 @@ fn handle_mouse(app: &mut App, mouse: crossterm::event::MouseEvent) {
                 if app.selected_validator < app.validators.len().saturating_sub(1) {
                     app.selected_validator += 1;
                 }
+            }
+            View::Packages => {
+                let filtered = app.matching_packages();
+                move_filtered(&mut app.selected_package, &filtered, true);
             }
             View::Events => {
                 if app.selected_event < app.events.len().saturating_sub(1) {
@@ -2091,6 +2693,10 @@ fn handle_mouse(app: &mut App, mouse: crossterm::event::MouseEvent) {
                 if app.selected_validator > 0 {
                     app.selected_validator -= 1;
                 }
+            }
+            View::Packages => {
+                let filtered = app.matching_packages();
+                move_filtered(&mut app.selected_package, &filtered, false);
             }
             View::Events => {
                 if app.selected_event > 0 {
@@ -2111,18 +2717,26 @@ fn draw_ui(f: &mut Frame, app: &App) {
     let main_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3), // Header
-            Constraint::Min(0),    // Main content
-            Constraint::Length(3), // Footer
+            Constraint::Length(HEADER_HEIGHT),
+            Constraint::Length(TAB_HEIGHT),
+            Constraint::Min(0),
+            Constraint::Length(FOOTER_HEIGHT),
         ])
         .split(f.size());
 
     draw_header(f, app, main_chunks[0]);
-    draw_main_content(f, app, main_chunks[1]);
-    draw_footer(f, app, main_chunks[2]);
+    draw_tabs(f, app, main_chunks[1]);
+    draw_main_content(f, app, main_chunks[2]);
+    draw_footer(f, app, main_chunks[3]);
 
     if app.is_searching {
         draw_search_popup(f, app);
+    }
+    if app.palette.open {
+        draw_palette(f, app);
+    }
+    if let Some(toast) = &app.toast {
+        draw_toast(f, toast);
     }
 
     if !app.node_connected || app.last_api_error.is_some() {
@@ -2310,68 +2924,99 @@ fn draw_disconnect_banner(f: &mut Frame, app: &App) {
 fn draw_header(f: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
+        .constraints([Constraint::Percentage(58), Constraint::Percentage(42)])
         .split(area);
 
-    // Title with logo-like styling
+    let pulse = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"][(app.tick_count / 4) as usize % 8];
+    let live = if app.node_connected { pulse } else { "○" };
+    let filter = if app.search_query.is_empty() {
+        String::new()
+    } else {
+        format!("  ·  filter “{}”", app.search_query)
+    };
     let title = format!(
-        " ⛓ CHAIN REGISTRY CONSOLE   |  Height: #{}  |  {} Packages  |  {} Peers ",
+        " CREG  {live}  {}   height {:>6}   pkgs {:>5}   peers {:>3}{filter} ",
+        app.stats.chain_id,
         app.stats.tip_height,
         format_number(app.stats.package_count),
         app.stats.peer_count
     );
 
-    let header = Paragraph::new(title)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Theme::primary())),
-        )
-        .style(
-            Style::default()
-                .fg(Theme::text())
-                .add_modifier(Modifier::BOLD),
-        );
+    let header = Paragraph::new(title).block(rounded_block("", true)).style(
+        Style::default()
+            .fg(Theme::primary())
+            .add_modifier(Modifier::BOLD),
+    );
     f.render_widget(header, chunks[0]);
 
-    // Status indicator
     let validator_count = app.displayed_validator_count();
     let total_stake = app.displayed_total_stake();
-
-    let status_color = if validator_count > 0 {
+    let rest = if app.last_api_success_at.is_some() {
+        "REST ok"
+    } else {
+        "REST wait"
+    };
+    let sse = if app.node_connected {
+        "SSE live"
+    } else {
+        "SSE off"
+    };
+    let mode = if app.read_only {
+        "read-only"
+    } else {
+        "read-write"
+    };
+    let status_text = format!(
+        " {validator_count} vals  ·  {rest}  ·  {sse}  ·  stake {}  ·  {mode} ",
+        format_number(total_stake)
+    );
+    let status_color = if app.node_connected && app.last_api_success_at.is_some() {
         Theme::success()
     } else {
         Theme::warning()
     };
-
-    let bridge = if app.stats.bridge_status.len() > 15 {
-        format!("{}..", &app.stats.bridge_status[..15])
-    } else {
-        app.stats.bridge_status.clone()
-    };
-    let status_text = format!(
-        " ● {} Validators | {} Peers | REST:{} SSE:{} | Stake:{} CREG | Bridge:{} ",
-        validator_count,
-        app.stats.peer_count,
-        if app.last_api_success_at.is_some() {
-            "OK"
-        } else {
-            "WAIT"
-        },
-        if app.node_connected { "ON" } else { "OFF" },
-        format_number(total_stake),
-        bridge,
-    );
-
     let status = Paragraph::new(status_text)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(status_color)),
-        )
+        .block(rounded_block("", false).border_style(Style::default().fg(status_color)))
         .style(Style::default().fg(Theme::text()))
         .alignment(Alignment::Right);
     f.render_widget(status, chunks[1]);
+}
+
+fn draw_tabs(f: &mut Frame, app: &App, area: Rect) {
+    let tabs = console_tabs();
+    let cell = (area.width / tabs.len().max(1) as u16).max(1);
+    let mut spans: Vec<Span> = Vec::new();
+    for (i, (view, label, hint)) in tabs.iter().enumerate() {
+        let active = app.current_view == *view
+            || (is_detail_view(app.current_view)
+                && matches!(
+                    (*view, app.current_view),
+                    (View::Blocks, View::BlockDetail)
+                        | (View::Validators, View::ValidatorDetail)
+                        | (View::Packages, View::PackageDetail)
+                ));
+        let text = if cell >= 12 {
+            format!(" {hint}:{label} ")
+        } else {
+            format!(" {hint} ")
+        };
+        let style = if active {
+            Style::default()
+                .fg(Theme::tab_active_fg())
+                .bg(Theme::primary())
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Theme::text_dim())
+        };
+        spans.push(Span::styled(text, style));
+        if i + 1 < tabs.len() {
+            spans.push(Span::styled("│", Style::default().fg(Theme::border())));
+        }
+    }
+    let tabs_line = Paragraph::new(Line::from(spans))
+        .block(rounded_block(" views  ·  click or 1-0 / Tab ", false))
+        .alignment(Alignment::Left);
+    f.render_widget(tabs_line, area);
 }
 
 fn draw_main_content(f: &mut Frame, app: &App, area: Rect) {
@@ -2398,22 +3043,26 @@ fn draw_main_content(f: &mut Frame, app: &App, area: Rect) {
 
 fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
     let text = match app.current_view {
-        View::Overview => " [←/↑/↓/→ or h/j/k/l] Navigate | [Enter/d] Detail | [1-8] Views | [o] Operator | [/] Search | [?] Help | [q] Quit ",
-        View::Preflight => " [p] Preflight | [x] Export diagnostics | [o] Operator | [?] Help | [q] Quit ",
-        View::Blocks => " [j/k] Navigate blocks | [Enter/d] Block detail | [b] Back | [?] Help | [q] Quit ",
-        View::Validators => " [j/k] Navigate | [Enter/d] Validator detail | [b] Back | [?] Help | [q] Quit ",
-        View::Packages => " [j/k] Navigate | [Enter/d] Package detail | [b] Back | [?] Help | [q] Quit ",
-        View::Events => " [j/k] Scroll | [b] Back | [?] Help | [q] Quit ",
-        View::Operator => " [1-8/o] Switch views | [q] Quit | Browser explorer at http://localhost:3007 ",
-        View::Consensus => " [9/c] Consensus | [r] Refresh | [q] Quit ",
-        View::Faucet => " [e] Edit address | [d/Enter] Drip | [b] Balance | [a] Clear | [Esc] Stop editing | [q] Quit ",
-        View::BlockDetail | View::ValidatorDetail | View::PackageDetail => " [Esc/q/b] Back | [?] Help ",
-        View::Help => " [Any key] Return ",
-        _ => " [←→↑↓] Navigate | [?] Help | [q] Quit ",
+        View::Overview => {
+            " j/k list  ·  Enter detail  ·  Tab views  ·  / filter  ·  : palette  ·  y copy  ·  ? help  ·  q quit "
+        }
+        View::Preflight => " x export  ·  : palette  ·  ? help  ·  q quit ",
+        View::Blocks => " j/k blocks  ·  Enter detail  ·  y copy hash  ·  / filter  ·  ? help  ·  q quit ",
+        View::Validators => " j/k  ·  Enter detail  ·  y copy key  ·  / filter  ·  ? help ",
+        View::Packages => " j/k  ·  Enter detail  ·  y copy digest  ·  / filter  ·  ? help ",
+        View::Events => " j/k scroll  ·  / filter  ·  : palette  ·  ? help ",
+        View::Operator => " read-only operator surface  ·  x export  ·  : palette  ·  ? help ",
+        View::Consensus => " r refresh  ·  9 PBFT  ·  : palette  ·  ? help ",
+        View::Faucet => " e edit  ·  d drip  ·  b balance  ·  a clear  ·  Esc stop editing  ·  q quit ",
+        View::BlockDetail | View::ValidatorDetail | View::PackageDetail => {
+            " Esc/b back  ·  y copy  ·  ? help  ·  q back (twice to quit) "
+        }
+        View::Help => " Esc or ? to close  ·  : command palette ",
+        _ => " Tab next view  ·  : palette  ·  / filter  ·  y copy  ·  r refresh  ·  ? help  ·  q quit ",
     };
 
     let footer = Paragraph::new(text)
-        .block(Block::default().borders(Borders::ALL))
+        .block(rounded_block("", false))
         .style(Style::default().fg(Theme::text_dim()))
         .alignment(Alignment::Center);
     f.render_widget(footer, area);
@@ -2609,6 +3258,7 @@ fn draw_overview(f: &mut Frame, app: &App, area: Rect) {
 fn draw_stat_card(f: &mut Frame, label: &str, value: &str, color: Color, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(color));
 
     let inner = block.inner(area);
@@ -3217,21 +3867,11 @@ fn draw_packages(f: &mut Frame, app: &App, area: Rect) {
         .split(area);
 
     let query = app.search_query.to_ascii_lowercase();
-    let items: Vec<ListItem> = app
-        .packages
+    let matching = app.matching_packages();
+    let items: Vec<ListItem> = matching
         .iter()
-        .enumerate()
-        .filter(|(_i, pkg)| {
-            if query.is_empty() {
-                return true;
-            }
-            pkg.name.to_ascii_lowercase().contains(&query)
-                || pkg.ecosystem.to_ascii_lowercase().contains(&query)
-                || pkg.version.to_ascii_lowercase().contains(&query)
-                || pkg.publisher.to_ascii_lowercase().contains(&query)
-                || pkg.status.to_ascii_lowercase().contains(&query)
-        })
-        .map(|(i, pkg)| {
+        .map(|&i| {
+            let pkg = &app.packages[i];
             let icon = match pkg.status.as_str() {
                 "verified" => "✓",
                 "pending" => "⏳",
@@ -3763,76 +4403,135 @@ fn draw_operator(f: &mut Frame, app: &App, area: Rect) {
 // ============================================================================
 
 fn draw_help(f: &mut Frame, _app: &App, area: Rect) {
-    let text = r#"
-╔══════════════════════════════════════════════════════════════════════════════╗
-║                      CHAIN REGISTRY CONSOLE - HELP                            ║
-╠══════════════════════════════════════════════════════════════════════════════╣
-║                                                                              ║
-║  NAVIGATION                                                                  ║
-║  ─────────                                                                   ║
-║    ←/→ or h/l     Move between columns/tabs                                  ║
-║    ↑/↓ or j/k     Navigate lists                                             ║
-║    Enter or d     Open detail view                                           ║
-║    Esc or b       Go back                                                    ║
-║    q              Quit console                                               ║
-║                                                                              ║
-║  VIEW SHORTCUTS                                                              ║
-║  ─────────────                                                               ║
-║    1              Overview dashboard                                         ║
-║    2              Blocks view                                                ║
-║    3              Validators view                                            ║
-║    4              Packages view                                              ║
-║    5              Network status                                             ║
-║    6              Mempool view                                               ║
-║    7              Events log                                                 ║
-║    8 / o          Operator view                                              ║
-║    p              Validator startup preflight                                ║
-║    x              Export redacted diagnostics                                 ║
-║    9 / c          Consensus and PBFT health                                  ║
-║    ? or h         Toggle this help                                           ║
-║                                                                              ║
-║  SEARCH & FILTER                                                             ║
-║  ──────────────                                                              ║
-║    /              Start search                                               ║
-║    Esc            Cancel search                                              ║
-║    Enter          Confirm search                                             ║
-║                                                                              ║
-║  MOUSE SUPPORT                                                               ║
-║  ─────────────                                                               ║
-║    Scroll         Navigate lists                                             ║
-║    Click          Select items (where supported)                             ║
-║                                                                              ║
-║  Read-only by default; private keys are never collected by this console.     ║
-║  PRESS ANY KEY TO RETURN...                                                  ║
-║                                                                              ║
-╚══════════════════════════════════════════════════════════════════════════════╝
-"#;
-
-    let help = Paragraph::new(text)
-        .block(Block::default())
-        .style(Style::default().fg(Theme::primary()));
-
+    let lines = vec![
+        Line::from(Span::styled(
+            "CREG console",
+            Style::default()
+                .fg(Theme::primary())
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(Span::styled("Move", Style::default().fg(Theme::accent()).add_modifier(Modifier::BOLD))),
+        Line::from("  j/k or arrows     list   ·   Tab / h/l   next/prev view   ·   Enter/d   detail"),
+        Line::from("  Esc/b             back   ·   PgUp/PgDn   page   ·   g / G   top / bottom"),
+        Line::from(""),
+        Line::from(Span::styled("Actions", Style::default().fg(Theme::accent()).add_modifier(Modifier::BOLD))),
+        Line::from("  : or Ctrl+P/K     command palette     ·   /   filter lists     ·   y   copy selection"),
+        Line::from("  r                 refresh now         ·   x   export diagnostics ·   t   theme"),
+        Line::from("  q                 back, or quit after confirm"),
+        Line::from(""),
+        Line::from(Span::styled("Views", Style::default().fg(Theme::accent()).add_modifier(Modifier::BOLD))),
+        Line::from("  1 Overview  2 Blocks  3 Validators  4 Packages  5 Network  6 Mempool  7 Events"),
+        Line::from("  8 Operator  9 PBFT  0 Faucet  p Preflight  m Metrics   ·   click the tab bar"),
+        Line::from(""),
+        Line::from("Read-only: this console never collects private keys. Unsigned /head is not install-eligible."),
+        Line::from("Press Esc or ? to close."),
+    ];
+    let help = Paragraph::new(lines)
+        .block(rounded_block(" help ", true))
+        .style(Style::default().fg(Theme::text()))
+        .wrap(Wrap { trim: false });
     f.render_widget(help, area);
 }
 
-// ============================================================================
-// POPUPS
-// ============================================================================
-
 fn draw_search_popup(f: &mut Frame, app: &App) {
-    let area = centered_rect(60, 20, f.size());
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(" SEARCH ")
-        .border_style(Style::default().fg(Theme::accent()));
-
-    let text = Paragraph::new(format!("Query: {}", app.search_query))
-        .block(block)
-        .style(Style::default().fg(Theme::text()));
-
+    let area = centered_rect(64, 18, f.size());
+    let cursor = if app.tick_count % 12 < 6 { "▌" } else { " " };
+    let text = vec![
+        Line::from(Span::styled(
+            "Filter lists (name, hash, id, status)",
+            Style::default().fg(Theme::text_dim()),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            format!("  {}{}", app.search_query, cursor),
+            Style::default()
+                .fg(Theme::primary())
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Enter apply  ·  Esc clear",
+            Style::default().fg(Theme::text_dim()),
+        )),
+    ];
     f.render_widget(Clear, area);
-    f.render_widget(text, area);
+    f.render_widget(
+        Paragraph::new(text).block(rounded_block(" search ", true)),
+        area,
+    );
+}
+
+fn draw_palette(f: &mut Frame, app: &App) {
+    let area = centered_rect(70, 55, f.size());
+    let filtered = filtered_palette_indices(&app.palette.query);
+    let commands = palette_commands();
+    let mut lines = vec![Line::from(Span::styled(
+        format!("> {}_", app.palette.query),
+        Style::default()
+            .fg(Theme::primary())
+            .add_modifier(Modifier::BOLD),
+    ))];
+    for (visible_idx, cmd_idx) in filtered.iter().enumerate().take(12) {
+        let cmd = &commands[*cmd_idx];
+        let active = visible_idx == app.palette.selected;
+        let marker = if active { "▸" } else { " " };
+        let style = if active {
+            Style::default()
+                .fg(Theme::tab_active_fg())
+                .bg(Theme::primary())
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Theme::text())
+        };
+        lines.push(Line::from(Span::styled(
+            format!(" {marker} {:<28} {:>4}", cmd.label, cmd.hint),
+            style,
+        )));
+    }
+    if filtered.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  no matching commands",
+            Style::default().fg(Theme::text_dim()),
+        )));
+    }
+    f.render_widget(Clear, area);
+    f.render_widget(
+        Paragraph::new(lines).block(rounded_block(
+            " command palette  ·  Enter run  ·  Esc close ",
+            true,
+        )),
+        area,
+    );
+}
+
+fn draw_toast(f: &mut Frame, toast: &Toast) {
+    let area = f.size();
+    let width = 56.min(area.width.saturating_sub(2)).max(20);
+    let toast_area = Rect {
+        x: area.x + area.width.saturating_sub(width + 1),
+        y: area.y + HEADER_HEIGHT + TAB_HEIGHT,
+        width,
+        height: 3,
+    };
+    let color = match toast.kind {
+        ToastKind::Info => Theme::secondary(),
+        ToastKind::Success => Theme::success(),
+        ToastKind::Warn => Theme::warning(),
+        ToastKind::Error => Theme::error(),
+    };
+    f.render_widget(Clear, toast_area);
+    f.render_widget(
+        Paragraph::new(format!(" {} ", toast.message))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(color)),
+            )
+            .style(Style::default().fg(color).add_modifier(Modifier::BOLD)),
+        toast_area,
+    );
 }
 
 // ============================================================================
@@ -4245,24 +4944,33 @@ fn draw_bridge(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_metrics(f: &mut Frame, app: &App, area: Rect) {
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(" CHAIN METRICS ")
-        .border_style(Style::default().fg(Theme::success()));
-
-    let text = vec![
+    let data: Vec<u64> = app.tps_history.iter().copied().collect();
+    let max = data.iter().max().copied().unwrap_or(1).max(1);
+    let sparkline = Sparkline::default()
+        .block(rounded_block(" tx per block ", true))
+        .data(&data)
+        .max(max)
+        .style(Style::default().fg(Theme::success()));
+    let summary = Paragraph::new(vec![
+        Line::from(format!(
+            "Tip height {}  ·  packages {}  ·  lag {}  ·  samples {}",
+            app.stats.tip_height,
+            app.stats.package_count,
+            app.stats.finalization_lag,
+            app.tps_history.len()
+        )),
         Line::from(Span::styled(
-            "Live metrics tracking coming in Sprint 5",
+            "This pane graphs local samples. It is not a hosted metrics stack.",
             Style::default().fg(Theme::text_dim()),
         )),
-        Line::from(format!("TPS History length: {}", app.tps_history.len())),
-        Line::from(format!(
-            "Metric Accumulations: {}",
-            app.metrics_history.len()
-        )),
-    ];
-    let paragraph = Paragraph::new(text).block(block);
-    f.render_widget(paragraph, area);
+    ])
+    .block(rounded_block(" chain metrics ", false));
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(4), Constraint::Min(5)])
+        .split(area);
+    f.render_widget(summary, chunks[0]);
+    f.render_widget(sparkline, chunks[1]);
 }
 
 #[cfg(test)]
@@ -4336,5 +5044,427 @@ mod tests {
         assert!(report.contains("validator_pubkey"));
         assert!(!report.contains("validator_privkey"));
         assert!(!report.contains("deadbeef"));
+    }
+
+    #[test]
+    fn cycle_tab_wraps_around_primary_views() {
+        assert_eq!(cycle_tab(View::Overview, -1), View::Metrics);
+        assert_eq!(cycle_tab(View::Metrics, 1), View::Overview);
+        assert_eq!(cycle_tab(View::Blocks, 1), View::Validators);
+    }
+
+    #[test]
+    fn tab_hit_testing_uses_equal_columns() {
+        let width = console_tabs().len() as u16 * 10;
+        assert_eq!(tab_at_column(0, width), Some(View::Overview));
+        assert_eq!(tab_at_column(width - 1, width), Some(View::Metrics));
+        assert_eq!(tab_at_column(0, 0), None);
+    }
+
+    #[test]
+    fn palette_filter_matches_label_and_hint() {
+        let yank = filtered_palette_indices("copy");
+        assert!(yank.iter().any(|&idx| palette_commands()[idx].id == "yank"));
+        let views = filtered_palette_indices("pbft");
+        assert!(views
+            .iter()
+            .any(|&idx| palette_commands()[idx].id == "consensus"));
+        assert!(filtered_palette_indices("no-such-command").is_empty());
+    }
+
+    #[test]
+    fn filtered_package_navigation_skips_hidden_rows() {
+        let (sender, _receiver) = mpsc::channel(1);
+        let mut app = App::new("http://127.0.0.1:8080".into(), sender);
+        app.packages = vec![
+            PackageInfo {
+                name: "alpha".into(),
+                ecosystem: "npm".into(),
+                version: "1.0.0".into(),
+                status: "verified".into(),
+                publisher: "a".into(),
+                verified_at: None,
+                content_hash: "aa".into(),
+            },
+            PackageInfo {
+                name: "beta".into(),
+                ecosystem: "npm".into(),
+                version: "1.0.0".into(),
+                status: "pending".into(),
+                publisher: "b".into(),
+                verified_at: None,
+                content_hash: "bb".into(),
+            },
+            PackageInfo {
+                name: "alpha-tools".into(),
+                ecosystem: "npm".into(),
+                version: "2.0.0".into(),
+                status: "verified".into(),
+                publisher: "c".into(),
+                verified_at: None,
+                content_hash: "cc".into(),
+            },
+        ];
+        app.search_query = "alpha".into();
+        app.current_view = View::Packages;
+        let filtered = app.matching_packages();
+        assert_eq!(filtered, vec![0, 2]);
+        app.selected_package = 0;
+        move_filtered(&mut app.selected_package, &filtered, true);
+        assert_eq!(app.selected_package, 2);
+        let (label, text) = selection_yank_text(&app).expect("package yank");
+        assert_eq!(label, "alpha-tools");
+        assert_eq!(text, "cc");
+    }
+
+    #[test]
+    fn base64_encoder_round_trip_padding() {
+        assert_eq!(encode_base64(b"f"), "Zg==");
+        assert_eq!(encode_base64(b"fo"), "Zm8=");
+        assert_eq!(encode_base64(b"foo"), "Zm9v");
+    }
+
+    #[test]
+    fn quit_from_detail_goes_back_instead_of_exiting() {
+        let (sender, _receiver) = mpsc::channel(1);
+        let mut app = App::new("http://127.0.0.1:8080".into(), sender);
+        app.current_view = View::PackageDetail;
+        app.previous_view = Some(View::Packages);
+        assert!(!request_quit(&mut app));
+        assert_eq!(app.current_view, View::Packages);
+        assert!(!request_quit(&mut app));
+        assert!(app.quit_armed_at.is_some());
+        assert!(request_quit(&mut app));
+    }
+
+    fn demo_app() -> App {
+        let (sender, _receiver) = mpsc::channel(1);
+        let mut app = App::new("http://127.0.0.1:8080".into(), sender);
+        app.tick_count = 24;
+        app.node_connected = true;
+        app.last_api_success_at = Some(Instant::now());
+        app.last_api_error = None;
+        app.read_only = true;
+        app.runtime_identity = Some(test_identity());
+        app.stats = NetworkStats {
+            chain_id: "creg-testnet-1".into(),
+            genesis_hash: Some("0x".to_string() + &"12".repeat(32)),
+            spec_signature_verified: true,
+            l1_rpc_configured: true,
+            tip_height: 1842,
+            package_count: 128,
+            _block_count: 1842,
+            validator_count: 4,
+            total_stake: 400_000,
+            peer_count: 3,
+            bridge_status: "paused".into(),
+            l1_block: 9_102_441,
+            finalized_height: 1840,
+            finalization_lag: 2,
+            validator_set_source: "chain-authoritative".into(),
+            validator_set_sync_state: "ready".into(),
+        };
+        app.validators = vec![
+            ValidatorInfo {
+                id: "validator-alpha".into(),
+                alias: "alpha".into(),
+                stake: 100_000_000_000,
+                reputation: 99,
+                status: "online".into(),
+                is_active: true,
+                pub_key: "aa".repeat(32),
+            },
+            ValidatorInfo {
+                id: "validator-bravo".into(),
+                alias: "bravo".into(),
+                stake: 100_000_000_000,
+                reputation: 97,
+                status: "online".into(),
+                is_active: true,
+                pub_key: "bb".repeat(32),
+            },
+            ValidatorInfo {
+                id: "validator-charlie".into(),
+                alias: "charlie".into(),
+                stake: 100_000_000_000,
+                reputation: 95,
+                status: "online".into(),
+                is_active: true,
+                pub_key: "cc".repeat(32),
+            },
+            ValidatorInfo {
+                id: "validator-delta".into(),
+                alias: "delta".into(),
+                stake: 100_000_000_000,
+                reputation: 94,
+                status: "online".into(),
+                is_active: true,
+                pub_key: "dd".repeat(32),
+            },
+        ];
+        for height in (1836..=1842).rev() {
+            app.blocks.push_back(BlockInfo {
+                height,
+                hash: format!("0x{:064x}", height * 17),
+                timestamp: "12s ago".into(),
+                proposer: "validator-alpha".into(),
+                tx_count: 3,
+                transactions: vec![TransactionInfo {
+                    _id: format!("tx-{height}"),
+                    tx_type: "PublishPackage".into(),
+                    package_name: Some("creg-sdk".into()),
+                    package_version: Some("0.4.3".into()),
+                    publisher: Some("alpha".into()),
+                    status: "finalized".into(),
+                }],
+                merkle_root: format!("0x{:064x}", height * 31),
+            });
+        }
+        app.packages = vec![
+            PackageInfo {
+                name: "creg-sdk".into(),
+                ecosystem: "npm".into(),
+                version: "0.4.3".into(),
+                status: "verified".into(),
+                publisher: "alpha".into(),
+                verified_at: Some("1h ago".into()),
+                content_hash: "e3b0c44298fc1c149afbf4c8996fb924".into(),
+            },
+            PackageInfo {
+                name: "creg-cli".into(),
+                ecosystem: "cargo".into(),
+                version: "0.1.0".into(),
+                status: "verified".into(),
+                publisher: "bravo".into(),
+                verified_at: Some("3h ago".into()),
+                content_hash: "2c26b46b68ffc68ff99b453c1d304134".into(),
+            },
+            PackageInfo {
+                name: "witness-kit".into(),
+                ecosystem: "npm".into(),
+                version: "0.2.1".into(),
+                status: "pending".into(),
+                publisher: "charlie".into(),
+                verified_at: None,
+                content_hash: "fcde2b2edba56bf408601fb721fe9b5c".into(),
+            },
+            PackageInfo {
+                name: "alpha-tools".into(),
+                ecosystem: "npm".into(),
+                version: "2.0.0".into(),
+                status: "verified".into(),
+                publisher: "delta".into(),
+                verified_at: Some("1d ago".into()),
+                content_hash: "da39a3ee5e6b4b0d3255bfef95601890".into(),
+            },
+        ];
+        app.peer_ids = vec![
+            "12D3KooWAlphaPeer".into(),
+            "12D3KooWBravoPeer".into(),
+            "12D3KooWCharlieP".into(),
+        ];
+        app.consensus_state = Some(ConsensusState {
+            round: 1843,
+            phase: "COMMIT".into(),
+            proposer: "validator-alpha".into(),
+            prepare_votes: 3,
+            commit_votes: 3,
+            quorum: 3,
+            total_validators: 4,
+            fetched_at: Instant::now(),
+        });
+        app.push_event("finalized".into(), "block 1842 committed".into());
+        app.push_event("package".into(), "creg-sdk@0.4.3 verified".into());
+        app.push_event("peer".into(), "validator-delta heartbeat".into());
+        for i in 0..48 {
+            let sample = 4 + ((i * 3) % 9) as u64;
+            app.tps_history.push_back(sample);
+        }
+        refresh_preflight(&mut app);
+        app
+    }
+
+    fn css_color(color: Color, fallback: &str) -> String {
+        match color {
+            Color::Reset => fallback.to_string(),
+            Color::Black => "#020617".into(),
+            Color::Red => "#ef4444".into(),
+            Color::Green => "#22c55e".into(),
+            Color::Yellow => "#eab308".into(),
+            Color::Blue => "#3b82f6".into(),
+            Color::Magenta => "#d946ef".into(),
+            Color::Cyan => "#22d3ee".into(),
+            Color::Gray => "#94a3b8".into(),
+            Color::DarkGray => "#475569".into(),
+            Color::LightRed => "#f87171".into(),
+            Color::LightGreen => "#4ade80".into(),
+            Color::LightYellow => "#facc15".into(),
+            Color::LightBlue => "#38bdf8".into(),
+            Color::LightMagenta => "#e879f9".into(),
+            Color::LightCyan => "#67e8f9".into(),
+            Color::White => "#f8fafc".into(),
+            Color::Rgb(r, g, b) => format!("#{r:02x}{g:02x}{b:02x}"),
+            Color::Indexed(i) => format!("hsl({}, 12%, {}%)", u16::from(i), 20 + (i % 60)),
+        }
+    }
+
+    fn html_escape(symbol: &str) -> String {
+        if symbol.is_empty() || symbol == " " {
+            return "&nbsp;".into();
+        }
+        symbol
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace(' ', "&nbsp;")
+    }
+
+    fn buffer_to_html(buffer: &ratatui::buffer::Buffer, title: &str, light: bool) -> String {
+        let canvas = if light { "#e2e8f0" } else { "#020617" };
+        let ink = if light { "#0f172a" } else { "#e2e8f0" };
+        let area = buffer.area;
+        let mut rows = String::new();
+        for y in 0..area.height {
+            rows.push_str("<div class=\"row\">");
+            let mut skip = 0u16;
+            for x in 0..area.width {
+                if skip > 0 {
+                    skip -= 1;
+                    continue;
+                }
+                let cell = buffer.get(x, y);
+                let mut fg = css_color(cell.fg, ink);
+                let mut bg = css_color(cell.bg, canvas);
+                if cell.modifier.contains(Modifier::REVERSED) {
+                    std::mem::swap(&mut fg, &mut bg);
+                }
+                let mut style = format!("color:{fg};background:{bg}");
+                if cell.modifier.contains(Modifier::BOLD) {
+                    style.push_str(";font-weight:700");
+                }
+                if cell.modifier.contains(Modifier::UNDERLINED) {
+                    style.push_str(";text-decoration:underline");
+                }
+                if cell.modifier.contains(Modifier::DIM) {
+                    style.push_str(";opacity:0.7");
+                }
+                let symbol = cell.symbol();
+                let wide = x + 1 < area.width
+                    && !symbol.is_empty()
+                    && buffer.get(x + 1, y).symbol().is_empty();
+                if wide {
+                    skip = 1;
+                    style.push_str(";width:2ch");
+                }
+                rows.push_str(&format!(
+                    "<span class=\"cell\" style=\"{style}\">{}</span>",
+                    html_escape(symbol)
+                ));
+            }
+            rows.push_str("</div>");
+        }
+        format!(
+            "<!doctype html><html><head><meta charset=\"utf-8\"><title>{title}</title>\
+<style>\
+html,body{{margin:0;background:{canvas};color:{ink};width:max-content;font-family:ui-sans-serif,system-ui,sans-serif}}\
+.wrap{{padding:20px 24px 28px}}\
+.caption{{margin:0 0 12px;font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:#64748b}}\
+.term{{display:inline-block;background:{canvas};border-radius:10px;padding:8px 10px;box-shadow:0 24px 80px rgba(0,0,0,.45);\
+font-family:\"Cascadia Code\",\"JetBrains Mono\",Consolas,ui-monospace,monospace;font-size:10px;line-height:12px}}\
+.row{{display:flex;white-space:nowrap}}\
+.cell{{display:inline-block;width:1ch;height:12px;overflow:hidden}}\
+</style></head><body><div class=\"wrap\"><p class=\"caption\">{title}</p><div class=\"term\">{rows}</div></div></body></html>"
+        )
+    }
+
+    fn render_scene(app: &App, width: u16, height: u16, title: &str, light: bool) -> String {
+        let backend = ratatui::backend::TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).expect("test terminal");
+        terminal
+            .draw(|frame| draw_ui(frame, app))
+            .expect("draw console");
+        buffer_to_html(terminal.backend().buffer(), title, light)
+    }
+
+    fn write_preview(dir: &std::path::Path, name: &str, html: &str) {
+        fs::create_dir_all(dir).expect("preview dir");
+        fs::write(dir.join(name), html).expect("write preview html");
+    }
+
+    #[test]
+    #[ignore]
+    fn render_console_preview_html() {
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/console-preview");
+        fs::create_dir_all(&dir).expect("preview dir");
+        let dir = dir.canonicalize().unwrap_or(dir);
+        IS_LIGHT_THEME.store(false, Ordering::Relaxed);
+
+        let mut app = demo_app();
+        write_preview(
+            &dir,
+            "01-overview.html",
+            &render_scene(&app, 169, 36, "CREG console — Overview", false),
+        );
+
+        app.palette.open = true;
+        app.palette.query = String::new();
+        app.palette.selected = 0;
+        write_preview(
+            &dir,
+            "02-palette.html",
+            &render_scene(
+                &app,
+                169,
+                36,
+                "CREG console — command palette (: / Ctrl+P)",
+                false,
+            ),
+        );
+        app.palette.open = false;
+
+        app.previous_view = Some(View::Overview);
+        app.current_view = View::Help;
+        write_preview(
+            &dir,
+            "03-help.html",
+            &render_scene(&app, 169, 36, "CREG console — help (?)", false),
+        );
+
+        app.current_view = View::Packages;
+        app.previous_view = None;
+        app.search_query = "alpha".into();
+        app.selected_package = 3;
+        app.push_toast(ToastKind::Success, "copied alpha-tools digest");
+        write_preview(
+            &dir,
+            "04-packages-yank.html",
+            &render_scene(
+                &app,
+                169,
+                36,
+                "CREG console — Packages filter + yank toast",
+                false,
+            ),
+        );
+        app.toast = None;
+        app.search_query.clear();
+
+        app.current_view = View::Metrics;
+        write_preview(
+            &dir,
+            "05-metrics.html",
+            &render_scene(&app, 169, 36, "CREG console — Metrics", false),
+        );
+
+        IS_LIGHT_THEME.store(true, Ordering::Relaxed);
+        app.current_view = View::Overview;
+        write_preview(
+            &dir,
+            "06-overview-light.html",
+            &render_scene(&app, 169, 36, "CREG console — Overview (light theme)", true),
+        );
+        IS_LIGHT_THEME.store(false, Ordering::Relaxed);
+
+        eprintln!("console previews written to {}", dir.display());
     }
 }

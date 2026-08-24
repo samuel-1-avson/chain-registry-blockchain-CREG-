@@ -292,9 +292,10 @@ enum Commands {
 
     /// Launch the validator console.
     ///
-    /// This is the single supported terminal UI. Legacy commands remain as
-    /// hidden aliases for compatibility during the consolidation:
-    /// `dashboard`, `dashboard-enhanced`, `dashboard-interactive`, `explorer`.
+    /// Interactive TUI: tab bar, command palette (`:` / Ctrl+P), list filter (`/`),
+    /// copy selection (`y`), and a confirm-to-quit flow. Legacy commands remain as
+    /// hidden aliases: `dashboard`, `dashboard-enhanced`, `dashboard-interactive`,
+    /// `explorer`.
     #[command(
         alias = "dashboard",
         alias = "dashboard-enhanced",
