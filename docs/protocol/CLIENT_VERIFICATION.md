@@ -30,8 +30,11 @@ configured (or `CREG_REQUIRE_WITNESSED_HEAD=true`), a verified install must
 present a witnessed signed tree head, inclusion of the exact subject/digest,
 and a consistency proof from the last accepted head. Unsigned
 `GET /v1/transparency/.../head` bodies are monitoring data and are not
-install-eligible. `--unverified` can skip a missing witnessed head only for
-unqualified packages; it cannot override rollback, freeze, or revocation.
+install-eligible. Independent witnesses publish `WitnessedTreeHead` JSON;
+clients fetch those URLs via `CREG_WITNESS_HEAD_URLS` (comma-separated) or a
+full bundle via `CREG_WITNESSED_EVIDENCE_PATH`. `--unverified` can skip a
+missing witnessed head only for unqualified packages; it cannot override
+rollback, freeze, or revocation.
 
 TUF-style root, snapshot, timestamp, and targets metadata protects client
 updates and rollback/freeze behavior. Cache exceptions require an explicit,

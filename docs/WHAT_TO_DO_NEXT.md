@@ -1,7 +1,7 @@
 # What to do next
 
 **Updated:** 2026-08-24  
-**HEAD:** `9ebfa8c`  
+**HEAD:** `ac8da74`  
 **Audience:** Maintainers planning protocol work. Public GCP fleet is paused. Contribution Arena is a separate educational product and is not this workstream.
 
 This is the **single planning entry point**. Shipped vs remaining vs testnet readiness: [PROTOCOL_PROGRESS.md](./PROTOCOL_PROGRESS.md). Prioritized IDs live in [NEXT_WORK.md](./NEXT_WORK.md). Live fleet: [TESTNET_STATUS.md](./TESTNET_STATUS.md).
@@ -12,8 +12,8 @@ This is the **single planning entry point**. Shipped vs remaining vs testnet rea
 
 | Area | State | Notes |
 |------|--------|-------|
-| Core protocol | **Green locally** | Workspace/fmt/Foundry v1.7.1 129/129 captured locally. Remote Actions deferred (billing). HEAD `9ebfa8c` includes PRs 25–51. |
-| In-repo hardening | **Through PR #51** | GOVERNANCE-API, SHIM-301, CLIENT-FRESHNESS, SUPPLY-CHAIN-CI on main. **WITNESSED-LOG Track B recruiting** (empty pubkey roster). Do not mint local witnesses. |
+| Core protocol | **Green locally** | Workspace/fmt/Foundry v1.7.1 129/129 captured locally. Remote Actions deferred (billing). HEAD `ac8da74` includes PRs 25–52. |
+| In-repo hardening | **Through PR #52** | GOVERNANCE-API, SHIM-301, CLIENT-FRESHNESS, SUPPLY-CHAIN-CI on main. **WITNESSED-LOG** Track A software (`creg witness run`) is in this change; Track B still recruiting (empty pubkey roster). Do not mint local witnesses. |
 | Public testnet stack | **Paused (cost)** | `api.testnet.cregnet.dev` treated as unreachable. Resume is operator work, not another protocol patch. |
 | Waitlist | **Live** | Firebase — [WAITLIST-ONLY-HOSTING.md](./WAITLIST-ONLY-HOSTING.md) |
 | Contribution Arena | **Separate product** | Educational/simulation surface — not protocol work. |

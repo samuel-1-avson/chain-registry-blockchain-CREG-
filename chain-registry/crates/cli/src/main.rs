@@ -11,6 +11,9 @@ mod chain_spec;
 mod config_file;
 mod diff;
 mod doctor;
+mod error_help;
+mod explorer_tui;
+mod faucet_client;
 mod graph;
 mod info;
 mod install;
@@ -32,10 +35,7 @@ mod testnet;
 mod update;
 mod verify;
 mod watch;
-// New UX modules
-mod error_help;
-mod explorer_tui;
-mod faucet_client;
+mod witness;
 mod wizard;
 
 use anyhow::{Context, Result};
@@ -248,6 +248,12 @@ enum Commands {
         /// Output raw JSON.
         #[arg(long)]
         json: bool,
+    },
+
+    /// Independent transparency-log witness (not a validator; does not join PBFT).
+    Witness {
+        #[command(subcommand)]
+        command: WitnessCommands,
     },
 
     /// Stream real-time events from the chain node (SSE).
@@ -485,6 +491,40 @@ enum OsvSnapshotCommands {
         /// Delay between OSV API queries in milliseconds.
         #[arg(long, default_value_t = 250)]
         delay_ms: u64,
+    },
+}
+
+#[derive(Subcommand)]
+enum WitnessCommands {
+    /// Poll a log's signed tree head, detect split-view, and write witnessed-head.json.
+    Run {
+        /// Log node URL (the log operator, not this witness).
+        #[arg(long, env = "CREG_NODE_URL")]
+        node_url: Option<String>,
+        /// Transparency log id.
+        #[arg(long, env = "CREG_TRANSPARENCY_LOG_ID")]
+        log_id: String,
+        /// Log operator Ed25519 public key (hex).
+        #[arg(long, env = "CREG_TRANSPARENCY_LOG_PUBKEY")]
+        log_pubkey: String,
+        /// This operator's witness id (must not equal the log signer id).
+        #[arg(long, env = "CREG_WITNESS_ID")]
+        witness_id: String,
+        /// Path to this operator's witness secret (default ~/.creg/witness.key).
+        #[arg(long, env = "CREG_WITNESS_KEY")]
+        key_path: Option<std::path::PathBuf>,
+        /// Persisted last-accepted head and split-view alert.
+        #[arg(long)]
+        state_path: Option<std::path::PathBuf>,
+        /// Where to write WitnessedTreeHead JSON for clients to fetch.
+        #[arg(long)]
+        out_path: Option<std::path::PathBuf>,
+        /// Fetch, sign, and exit (for tests and systemd oneshot).
+        #[arg(long)]
+        once: bool,
+        /// Poll interval when not --once.
+        #[arg(long, default_value_t = 30)]
+        interval_secs: u64,
     },
 }
 
@@ -1061,6 +1101,36 @@ async fn run(cli: Cli) -> Result<()> {
             )
             .await?;
         }
+        Commands::Witness { command } => match command {
+            WitnessCommands::Run {
+                node_url,
+                log_id,
+                log_pubkey,
+                witness_id,
+                key_path,
+                state_path,
+                out_path,
+                once,
+                interval_secs,
+            } => {
+                let node_url = node_url
+                    .or(cli.node_url)
+                    .or_else(|| std::env::var("CREG_NODE_URL").ok())
+                    .unwrap_or_else(|| "http://127.0.0.1:8080".into());
+                witness::run(witness::WitnessRunArgs {
+                    node_url,
+                    log_id,
+                    log_public_key: log_pubkey,
+                    witness_id,
+                    key_path: key_path.unwrap_or_else(witness::default_witness_key_path),
+                    state_path: state_path.unwrap_or_else(witness::default_state_path),
+                    out_path: out_path.unwrap_or_else(witness::default_out_path),
+                    once,
+                    interval_secs,
+                })
+                .await?;
+            }
+        },
         Commands::Watch {
             filter,
             node_url,

@@ -31,6 +31,8 @@ pub const TRANSPARENCY_MIN_WITNESSES_ENV: &str = "CREG_TRANSPARENCY_MIN_WITNESSE
 pub const TRANSPARENCY_MAX_HEAD_AGE_ENV: &str = "CREG_TRANSPARENCY_MAX_HEAD_AGE_SECONDS";
 pub const TRANSPARENCY_MAX_SKEW_ENV: &str = "CREG_TRANSPARENCY_MAX_FUTURE_SKEW_SECONDS";
 pub const WITNESSED_EVIDENCE_PATH_ENV: &str = "CREG_WITNESSED_EVIDENCE_PATH";
+/// Comma-separated URLs of independent `WitnessedTreeHead` JSON (one per witness).
+pub const WITNESS_HEAD_URLS_ENV: &str = "CREG_WITNESS_HEAD_URLS";
 
 pub const DEFAULT_MAX_HEAD_AGE_SECONDS: i64 = 300;
 pub const DEFAULT_MAX_FUTURE_SKEW_SECONDS: i64 = 60;
@@ -628,17 +630,38 @@ pub async fn fetch_witnessed_evidence(
         })?;
     let base = node_url.trim_end_matches('/');
     let log_id = urlencoding::encode(&config.log_id);
-    let head_url = format!("{base}/v1/public/transparency/{log_id}/head");
-    let head_bytes = get_bytes(&client, &head_url).await?;
-    let witnessed_head = match parse_head_bytes(&head_bytes) {
-        ParsedHead::Witnessed(head) => head,
-        ParsedHead::Unsigned => {
-            return Err(block(
-                "unsigned_head",
-                format!(
-                    "Node at {head_url} returned an unsigned transparency head. Unsigned heads are not install-eligible."
-                ),
-            ));
+
+    let witnessed_head = if let Some(raw) = env_trimmed(WITNESS_HEAD_URLS_ENV) {
+        let mut heads = Vec::new();
+        for url in raw.split(',').map(str::trim).filter(|url| !url.is_empty()) {
+            let bytes = get_bytes(&client, url).await?;
+            let head: WitnessedTreeHead = serde_json::from_slice(&bytes).map_err(|err| {
+                block(
+                    "freshness_unwitnessed",
+                    format!("invalid WitnessedTreeHead from {url}: {err}"),
+                )
+            })?;
+            heads.push(head);
+        }
+        WitnessedTreeHead::merge_from(&heads).map_err(|err| {
+            block(
+                "freshness_unwitnessed",
+                format!("failed to merge independent witness heads: {err}"),
+            )
+        })?
+    } else {
+        let head_url = format!("{base}/v1/public/transparency/{log_id}/head");
+        let head_bytes = get_bytes(&client, &head_url).await?;
+        match parse_head_bytes(&head_bytes) {
+            ParsedHead::Witnessed(head) => head,
+            ParsedHead::Unsigned => {
+                return Err(block(
+                    "unsigned_head",
+                    format!(
+                        "Node at {head_url} returned an unsigned transparency head. Unsigned heads are not install-eligible. Independent witnesses publish WitnessedTreeHead JSON; set {WITNESS_HEAD_URLS_ENV}."
+                    ),
+                ));
+            }
         }
     };
 

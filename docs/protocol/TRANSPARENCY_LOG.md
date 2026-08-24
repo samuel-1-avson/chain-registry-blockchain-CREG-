@@ -37,11 +37,14 @@ of distinct trusted witness signatures. Client verification rejects stale or
 future heads, invalid inclusion, and any update lacking a consistency proof
 from its persisted head.
 
-This is a migration foundation, not a production witness deployment. The
-current node endpoints return unsigned heads/proofs for monitoring and test
-integration; no client may treat them as qualified without independently
-distributed signed heads, configured witness keys, freshness policy, and a
-persisted prior head.
+This is a migration foundation, not a production witness deployment.
+
+When `CREG_TRANSPARENCY_LOG_KEY` is set, `GET /v1/public/transparency/:log_id/signed-head`
+returns a `SignedTreeHead`. Independent operators run `creg witness run`, which
+refuses unsigned `/head` bodies, checks consistency against the last accepted
+head, and writes `WitnessedTreeHead` JSON for clients to fetch from the
+witness’s own URL (`CREG_WITNESS_HEAD_URLS`). Without the log key, signed-head
+is HTTP 503. Unsigned `GET /head` stays monitoring-only.
 
 `GET /v1/public/transparency/:log_id/latest-event?subject=` returns the latest
 event for an exact canonical subject plus an inclusion proof and the unsigned
@@ -52,4 +55,5 @@ they reject unsigned heads in that mode.
 
 Operator recruitment (Track B) is [WITNESS_OPERATOR_ONBOARDING.md](../WITNESS_OPERATOR_ONBOARDING.md).
 The pubkey-only roster at `testnet/witnesses/roster.json` starts empty; filling
-it with keys generated on one laptop is not a witnessed network.
+it with keys generated on one laptop is not a witnessed network. The daemon
+existing does not close WITNESSED-LOG.

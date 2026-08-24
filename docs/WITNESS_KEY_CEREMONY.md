@@ -23,7 +23,16 @@ On a host that will later run the log (not required to be the paused GCP fleet):
 creg keygen log-signer --key-path ~/.creg/log-signer.key
 ```
 
-Record **only** the printed public key. Clients will set `CREG_TRANSPARENCY_LOG_PUBKEY` to that hex. The secret stays on this host. The live signer process is **not on main yet**; keep the key offline until that ships.
+Record **only** the printed public key. Clients will set `CREG_TRANSPARENCY_LOG_PUBKEY` to that hex. The secret stays on this host.
+
+On the log node, load the 32-byte hex secret:
+
+```bash
+export CREG_TRANSPARENCY_LOG_KEY=<32-byte hex>
+export CREG_TRANSPARENCY_LOG_SIGNER_ID=log-operator   # optional; default log-operator
+```
+
+Witnesses poll `GET /v1/public/transparency/<log_id>/signed-head`. Without the key the node returns HTTP 503 (`install_eligible: false`). Unsigned `GET /head` stays monitoring-only and must not be witnessed.
 
 Do not add this pubkey to `CREG_TRANSPARENCY_WITNESS_KEYS`.
 
@@ -35,7 +44,7 @@ Each org, on **their** machine:
 creg keygen witness --key-path ~/.creg/witness.key
 ```
 
-The CLI refuses to write the secret inside a git worktree. Submit the public key through [WITNESS_OPERATOR_ONBOARDING.md](./WITNESS_OPERATOR_ONBOARDING.md). Status in the roster starts as `candidate_unapproved`.
+The CLI refuses to write the secret inside a git worktree. Submit the public key through [WITNESS_OPERATOR_ONBOARDING.md](./WITNESS_OPERATOR_ONBOARDING.md). Status in the roster starts as `candidate_unapproved`. After the key is recorded, run `creg witness run` on that same independent host and serve `witnessed-head.json` from **your** URL.
 
 ## What maintainers commit
 
@@ -45,13 +54,13 @@ Never:
 
 - Commit `*.key` or mnemonics
 - Invent placeholder hex keys
-- Mark WITNESSED-LOG complete because keygen exists
+- Mark WITNESSED-LOG complete because keygen or `creg witness run` exists
 - Set `CREG_REQUIRE_WITNESSED_HEAD=true` on unsigned node `/head`
 
 ## After N ≥ 2 approved pubkeys
 
-1. Publish the pinned client env (`CREG_TRANSPARENCY_LOG_PUBKEY`, `CREG_TRANSPARENCY_WITNESS_KEYS`, `CREG_TRANSPARENCY_MIN_WITNESSES`).
-2. Ship Track A (log signer + witness binary + signed-head URLs) so those keys can be used.
+1. Publish the pinned client env (`CREG_TRANSPARENCY_LOG_PUBKEY`, `CREG_TRANSPARENCY_WITNESS_KEYS`, `CREG_TRANSPARENCY_MIN_WITNESSES`, `CREG_WITNESS_HEAD_URLS`).
+2. Confirm each operator is actually running `creg witness run` on a host the log operator does not control.
 3. Run the split-view drill in the onboarding doc.
 
-That sequence closes Track B. Keygen alone does not.
+That sequence closes Track B. Software on main does not.

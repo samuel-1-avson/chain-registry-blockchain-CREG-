@@ -1,8 +1,8 @@
 # CREG protocol progress
 
 **As of:** 2026-08-24  
-**HEAD:** `9ebfa8c` (merge of [PR #51](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/pull/51))  
-**Public binary pin:** `v0.4.3-testnet` (`3eb3a23…`) — later protocol diffs (PRs 25–50) are on `main` and are **not** that tag.  
+**HEAD:** `ac8da74` (merge of [PR #52](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/pull/52)); this change adds `creg witness run` and log `signed-head`.  
+**Public binary pin:** `v0.4.3-testnet` (`3eb3a23…`) — later protocol diffs (PRs 25–52 plus this daemon) are on `main` and are **not** that tag.  
 **Canonical repo:** [samuel-1-avson/chain-registry-blockchain-CREG-](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-)
 
 This page is the **session briefing** for protocol work: what shipped, what improved, what is left, and how ready CREG is for testnet. Live fleet facts stay in [TESTNET_STATUS.md](./TESTNET_STATUS.md). Prioritized IDs stay in [NEXT_WORK.md](./NEXT_WORK.md). Maintainer tracks stay in [WHAT_TO_DO_NEXT.md](./WHAT_TO_DO_NEXT.md).
@@ -27,9 +27,13 @@ This page is the **session briefing** for protocol work: what shipped, what impr
 
 ## What shipped (22–23 August 2026)
 
-In-repo fail-closed hardening on `main` through **PRs 25–50**. Remote GitHub Actions still does not start (account billing / spending limit). Do not raise the spending limit. Do not treat failed Actions as a code regression.
+In-repo fail-closed hardening on `main` through **PRs 25–52**. Remote GitHub Actions still does not start (account billing / spending limit). Do not raise the spending limit. Do not treat failed Actions as a code regression.
 
-### This workstream (PRs 46–50)
+### WITNESSED-LOG Track A software (this change)
+
+`creg witness run` polls `GET /v1/public/transparency/:log_id/signed-head`, refuses unsigned `/head`, persist-and-fail-closes on split-view/rollback, and writes `WitnessedTreeHead` JSON. The log node signs that endpoint when `CREG_TRANSPARENCY_LOG_KEY` is set (otherwise 503). Clients merge independent JSON URLs via `CREG_WITNESS_HEAD_URLS`. This does **not** close WITNESSED-LOG: roster is empty, and a split-view **drill** is still required.
+
+### This workstream (PRs 46–52)
 
 | PR | ID | What landed | Must not claim |
 |----|----|-------------|----------------|
@@ -38,6 +42,8 @@ In-repo fail-closed hardening on `main` through **PRs 25–50**. Remote GitHub A
 | [#48](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/pull/48) | npm lockfile | Bare `npm install` / `ci` gates **direct** `package.json` deps (max 200). IPFS tarball fetch remains `creg install` only. | Full lockfile / transitive audit |
 | [#49](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/pull/49) | CLIENT-FRESHNESS | Local anti-rollback journal; freeze / skew / mix-and-match rejection. `verify_witnessed_inclusion` only when log/witness keys are configured. Unsigned `GET /v1/transparency/.../head` is **not** install-eligible. | Independent witness operators (that is WITNESSED-LOG) |
 | [#50](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/pull/50) | SUPPLY-CHAIN-CI | `creg sbom --workspace` inventories `Cargo.lock` (SPDX 2.3 / CycloneDX 1.5). `creg supply-chain check` fail-closes missing checksums, non-crates.io indexes, git sources, banned names. Provenance is lockfile SHA-256. Package `creg sbom` is incomplete without declared deps. No new GitHub Actions job. | SLSA; submitted-package provenance; remote CI |
+| [#51](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/pull/51) | PROTOCOL_PROGRESS | Testnet-readiness snapshot and next-work briefing | Public testnet is live |
+| [#52](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/pull/52) | WITNESSED-LOG Track B | Empty pubkey roster, operator onboarding, `creg keygen witness` / `log-signer` (refuse keys in the git worktree) | Independent witnesses exist |
 
 Policy file: `chain-registry/config/supply-chain/policy.toml`. Implementation: `chain-registry/crates/cli/src/supply_chain.rs`. Point HI-19 docs at [ADR-014](./adr/ADR-014-REPRODUCIBLE-BUILD-DDC.md); do not invent a gitignored supply-chain README.
 
@@ -100,7 +106,7 @@ SPEC-ROTATE is **superseded** as an in-repo rotate. Fresh-genesis candidate is a
 
 | ID | Task | Honest bound |
 |----|------|----------------|
-| **WITNESSED-LOG** | Independent witness operators and signed-head distribution | Track B **recruiting** as of 2026-08-24: empty pubkey-only roster, operator onboarding, `creg keygen witness` / `log-signer`. Do not mint local/self-signed witnesses. Unsigned transparency heads stay non-install-eligible. Not closed until N≥2 independent operators and a split-view drill. |
+| **WITNESSED-LOG** | Independent witness operators and signed-head distribution | Track A software is in-repo (`creg witness run`, log `signed-head`, `CREG_WITNESS_HEAD_URLS`). Track B **recruiting**: empty pubkey-only roster. Do not mint local/self-signed witnesses. Unsigned transparency heads stay non-install-eligible. Not closed until N≥2 independent operators and a split-view drill. |
 | REM-211+ | Resource metrics / Grafana | Observability polish. |
 | VAL-SCALE | Expand a verified independent cohort | Waitlist size is not validator capacity. |
 | ZK-CIRCUIT | Circuit/contract review only if the binding changes | Do not restore qualification. Sepolia `zk_validation` stays **false**. |
@@ -159,7 +165,7 @@ Later PRs 41–50 added fail-closed patches after that workspace capture. Re-run
 
 ## Suggested next protocol slice
 
-If the goal is **in-repo protocol** without fake witnesses: **WITNESSED-LOG Track B** — recruit independent operators ([WITNESS_OPERATOR_ONBOARDING.md](./WITNESS_OPERATOR_ONBOARDING.md)). Track A (witness daemon) ships for people who already have keys, not instead of them.
+If the goal is **in-repo protocol** without fake witnesses: **WITNESSED-LOG Track B** — recruit independent operators to run `creg witness run` on hosts the log operator does not control ([WITNESS_OPERATOR_ONBOARDING.md](./WITNESS_OPERATOR_ONBOARDING.md)). The daemon existing is not a witnessed network.
 
 If the goal is a **live public testnet**: stop feature work and do **VAL-INDEPENDENCE** (recruit operators) then **TESTNET-RESUME**. GOVERNANCE-API / SHIM / freshness / SBOM do not unsuspend `api.testnet.cregnet.dev`.
 
