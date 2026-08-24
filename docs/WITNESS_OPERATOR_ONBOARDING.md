@@ -14,11 +14,11 @@ The install client already fail-closes without those signatures (`CREG_TRANSPARE
 |------|--------|
 | Merkle log + inclusion/consistency proofs | In the node (unsigned `/head` is monitoring only) |
 | Client `verify_witnessed_inclusion` | In `creg install` when witness keys are configured |
-| Log-signer process / witness daemon | **Not shipped** (Track A). Generating a key is recruitment, not witnessing |
+| Log signed-head + `creg witness run` | In-repo. Log operator sets `CREG_TRANSPARENCY_LOG_KEY`. Each witness runs the daemon on **their** host |
 | Independent witness organizations | **0** — roster is empty |
 | Public GCP API | Paused. Witnesses do not need `api.testnet.cregnet.dev` |
 
-Do not generate `witness-a` and `witness-b` on one laptop and call this item done. The log signer id cannot count as a witness (`common::transparency_log`).
+Do not generate `witness-a` and `witness-b` on one laptop and call this item done. The log signer id cannot count as a witness (`common::transparency_log`). Shipping the daemon does not close WITNESSED-LOG.
 
 ## Independence bar
 
@@ -63,17 +63,30 @@ Email or PR a **pubkey-only** candidate. Include:
 
 Maintainer records this as `candidate_unapproved` in [`chain-registry/testnet/witnesses/roster.json`](../chain-registry/testnet/witnesses/roster.json). Approval is not automatic.
 
-## 3. After Track A ships (not yet)
+## 3. Run the witness daemon (your VPS)
 
-You will run a witness binary that:
+The log operator (not you) must set `CREG_TRANSPARENCY_LOG_KEY` on the log node so `GET /v1/public/transparency/<log_id>/signed-head` returns a `SignedTreeHead`. Unsigned `GET /head` must not be witnessed.
 
-1. Polls the log’s tree head for a published `log_id`
-2. Verifies consistency against your last accepted head
-3. Signs with your witness key
-4. Publishes the signature on **your** URL (or a file clients fetch via `CREG_WITNESSED_EVIDENCE_PATH`)
-5. Alerts if the log presents two incompatible heads of the same size
+On **your** host:
 
-Until that binary exists, keep the key offline. Do not flip `CREG_REQUIRE_WITNESSED_HEAD` against unsigned `/head` — clients will correctly fail closed and nothing independent is witnessing.
+```bash
+creg witness run \
+  --node-url https://<log-host> \
+  --log-id <id> \
+  --log-pubkey <log-operator-ed25519-hex> \
+  --witness-id <your-org-slug> \
+  --key-path ~/.creg/witness.key \
+  --out-path ~/.creg/witnessed-head.json
+```
+
+- Default poll interval is 30 seconds. `--once` fetches, signs, and exits.
+- Encrypted keys need `CREG_WITNESS_KEY_PASSPHRASE`.
+- State lives in `~/.creg/witness-state.json`. After split-view or rollback the process fail-closes until an operator inspects that file and removes `split_view`.
+- Serve `witnessed-head.json` over **your** HTTPS origin (nginx, Caddy, object storage). Do not publish it from the log operator’s domain.
+
+Clients with a witness policy set `CREG_WITNESS_HEAD_URLS` to a comma-separated list of those independent URLs. They must not treat unsigned node `/head` as install-eligible. Do not flip `CREG_REQUIRE_WITNESSED_HEAD` until at least two independent URLs actually serve matching signed heads.
+
+Do not put this VM in the CREG GCP project or on CREG billing. Own the cloud account; invoice for reimbursement if a stipend is agreed.
 
 ## 4. Split-view drill (closes Track B)
 

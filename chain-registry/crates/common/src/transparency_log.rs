@@ -431,6 +431,29 @@ impl WitnessedTreeHead {
         }
         bail!("tree head lacks the required number of valid independent witness signatures")
     }
+
+    /// Combine signatures from independent witness operators for the same signed head.
+    pub fn merge_from(heads: &[WitnessedTreeHead]) -> Result<WitnessedTreeHead> {
+        let Some(first) = heads.first() else {
+            bail!("no witnessed tree heads to merge");
+        };
+        let mut merged = first.clone();
+        for other in &heads[1..] {
+            if other.signed_head != merged.signed_head {
+                bail!("cannot merge witness signatures for distinct signed tree heads");
+            }
+            for signature in &other.witness_signatures {
+                if !merged
+                    .witness_signatures
+                    .iter()
+                    .any(|existing| existing.witness_id == signature.witness_id)
+                {
+                    merged.witness_signatures.push(signature.clone());
+                }
+            }
+        }
+        Ok(merged)
+    }
 }
 
 /// Verify the complete client trust statement: a particular immutable event
@@ -640,5 +663,71 @@ mod tests {
                 .with_timezone(&Utc),
         )
         .is_err());
+    }
+
+    #[test]
+    fn merge_from_combines_independent_witness_signatures() {
+        let log_key = SigningKey::from_bytes(&[5; 32]);
+        let witness_a = SigningKey::from_bytes(&[6; 32]);
+        let witness_b = SigningKey::from_bytes(&[7; 32]);
+        let head = TreeHead {
+            version: TRANSPARENCY_LOG_VERSION,
+            log_id: "test-log".into(),
+            tree_size: 1,
+            root_hash: leaves(1)[0].clone(),
+            issued_at: "2026-08-24T00:00:00Z".into(),
+        };
+        let signed = sign_tree_head(head, "log-operator", &log_key);
+        let a = sign_witnessed_tree_head(signed.clone(), "org-a", &witness_a);
+        let b = sign_witnessed_tree_head(signed, "org-b", &witness_b);
+        let merged = WitnessedTreeHead::merge_from(&[a, b]).unwrap();
+        assert_eq!(merged.witness_signatures.len(), 2);
+        let mut keys = BTreeMap::new();
+        keys.insert(
+            "org-a".into(),
+            hex::encode(witness_a.verifying_key().as_bytes()),
+        );
+        keys.insert(
+            "org-b".into(),
+            hex::encode(witness_b.verifying_key().as_bytes()),
+        );
+        merged
+            .verify(
+                &hex::encode(log_key.verifying_key().as_bytes()),
+                &WitnessPolicy {
+                    minimum_witnesses: 2,
+                    trusted_witness_keys: keys,
+                },
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn merge_from_rejects_distinct_signed_heads() {
+        let log_key = SigningKey::from_bytes(&[8; 32]);
+        let witness = SigningKey::from_bytes(&[9; 32]);
+        let first = TreeHead {
+            version: TRANSPARENCY_LOG_VERSION,
+            log_id: "test-log".into(),
+            tree_size: 1,
+            root_hash: leaves(1)[0].clone(),
+            issued_at: "2026-08-24T00:00:00Z".into(),
+        };
+        let mut second = first.clone();
+        second.issued_at = "2026-08-24T00:00:01Z".into();
+        let a = sign_witnessed_tree_head(
+            sign_tree_head(first, "log-operator", &log_key),
+            "org-a",
+            &witness,
+        );
+        let b = sign_witnessed_tree_head(
+            sign_tree_head(second, "log-operator", &log_key),
+            "org-b",
+            &witness,
+        );
+        assert!(WitnessedTreeHead::merge_from(&[a, b])
+            .unwrap_err()
+            .to_string()
+            .contains("distinct signed tree heads"));
     }
 }

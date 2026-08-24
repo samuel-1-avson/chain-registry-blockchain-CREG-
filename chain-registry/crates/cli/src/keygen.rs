@@ -231,7 +231,10 @@ fn print_role_next_steps(role: &str, key_path: &Path, pubkey_hex: &str) {
                 "  3. Record the pubkey as candidate_unapproved in testnet/witnesses/roster.json — never the secret."
             );
             println!(
-                "  4. A witness daemon is not on main yet. Holding a key is recruitment, not witnessing."
+                "  4. On your own host (not the log operator's), run `creg witness run` and serve witnessed-head.json over HTTPS."
+            );
+            println!(
+                "     Two identities on one laptop are not independent witnesses. See docs/WITNESS_OPERATOR_ONBOARDING.md."
             );
             println!("  Runbook: docs/WITNESS_OPERATOR_ONBOARDING.md");
         }
@@ -241,7 +244,10 @@ fn print_role_next_steps(role: &str, key_path: &Path, pubkey_hex: &str) {
             println!("     export CREG_TRANSPARENCY_LOG_PUBKEY={pubkey_hex}");
             println!("  2. Store the secret on the log-operator machine only.");
             println!(
-                "  3. The live log-signer process is not on main yet. Keep the key offline until that ships."
+                "  3. On that log node: export CREG_TRANSPARENCY_LOG_KEY=<this 32-byte hex> (optional CREG_TRANSPARENCY_LOG_SIGNER_ID=log-operator)."
+            );
+            println!(
+                "     Witnesses poll GET /v1/public/transparency/<log_id>/signed-head. Unsigned GET /head stays monitoring-only."
             );
             println!("  Runbook: docs/WITNESS_KEY_CEREMONY.md");
         }

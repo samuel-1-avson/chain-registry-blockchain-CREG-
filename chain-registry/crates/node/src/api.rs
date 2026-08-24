@@ -11,7 +11,9 @@ use axum::{
     routing::{delete, get, post},
     Json, Router,
 };
-use common::{PackageStatus, PublishRequest, Transaction, ValidatorIdentity, ValidatorVote};
+use common::{
+    sign_tree_head, PackageStatus, PublishRequest, Transaction, ValidatorIdentity, ValidatorVote,
+};
 use futures::StreamExt;
 use k256::ecdsa::{RecoveryId, Signature as K256Signature, VerifyingKey as K256VerifyingKey};
 use serde::{Deserialize, Serialize};
@@ -136,6 +138,10 @@ fn public_routes(sse_bus: EventBus, ws_bus: EventBus) -> Router<SharedState> {
         .route(
             "/v1/public/transparency/:log_id/head",
             get(get_transparency_head),
+        )
+        .route(
+            "/v1/public/transparency/:log_id/signed-head",
+            get(get_transparency_signed_head),
         )
         .route(
             "/v1/public/transparency/:log_id/inclusion/:sequence",
@@ -323,6 +329,10 @@ fn legacy_public_routes(sse_bus: EventBus, ws_bus: EventBus) -> Router<SharedSta
         .route("/v1/packages/:canonical/revoke", post(revoke_package))
         .route("/v1/packages/:canonical/proof", get(get_proof))
         .route("/v1/transparency/:log_id/head", get(get_transparency_head))
+        .route(
+            "/v1/transparency/:log_id/signed-head",
+            get(get_transparency_signed_head),
+        )
         .route(
             "/v1/transparency/:log_id/inclusion/:sequence",
             get(get_transparency_inclusion_proof),
@@ -2479,6 +2489,60 @@ async fn get_transparency_head(
     let state = state.read().await;
     match state.chain.transparency_tree_head(&log_id) {
         Ok(Some(head)) => Json(head).into_response(),
+        Ok(None) => not_found(format!("No transparency tree head for log: {log_id}")),
+        Err(error) => server_err(error.to_string()),
+    }
+}
+
+fn transparency_log_signer(
+) -> std::result::Result<Option<(String, ed25519_dalek::SigningKey)>, String> {
+    let Ok(raw) = std::env::var("CREG_TRANSPARENCY_LOG_KEY") else {
+        return Ok(None);
+    };
+    if raw.trim().is_empty() {
+        return Ok(None);
+    }
+    let decoded = hex::decode(raw.trim().trim_start_matches("0x"))
+        .map_err(|_| "CREG_TRANSPARENCY_LOG_KEY is not valid hex".to_string())?;
+    let bytes: [u8; 32] = decoded
+        .try_into()
+        .map_err(|_| "CREG_TRANSPARENCY_LOG_KEY must be 32 bytes".to_string())?;
+    let signer_id = std::env::var("CREG_TRANSPARENCY_LOG_SIGNER_ID")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "log-operator".into());
+    Ok(Some((
+        signer_id,
+        ed25519_dalek::SigningKey::from_bytes(&bytes),
+    )))
+}
+
+/// Signed tree heads for witnesses. Unsigned GET /head stays monitoring-only.
+async fn get_transparency_signed_head(
+    State(state): State<SharedState>,
+    Path(log_id): Path<String>,
+) -> Response {
+    let signer = match transparency_log_signer() {
+        Ok(Some(signer)) => signer,
+        Ok(None) => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({
+                    "error": "signed tree heads are not enabled on this node",
+                    "install_eligible": false,
+                    "note": "Unsigned GET /head is monitoring only. Set CREG_TRANSPARENCY_LOG_KEY on the log operator to emit SignedTreeHead for witnesses.",
+                })),
+            )
+                .into_response();
+        }
+        Err(error) => return server_err(error),
+    };
+    let state = state.read().await;
+    match state.chain.transparency_tree_head(&log_id) {
+        Ok(Some(head)) => {
+            let (signer_id, key) = signer;
+            Json(sign_tree_head(head, signer_id, &key)).into_response()
+        }
         Ok(None) => not_found(format!("No transparency tree head for log: {log_id}")),
         Err(error) => server_err(error.to_string()),
     }
@@ -5914,6 +5978,9 @@ mod tests {
     #[tokio::test]
     async fn transparency_latest_event_is_unsigned_and_not_install_eligible() -> anyhow::Result<()>
     {
+        let _env_lock = api_env_lock().lock().await;
+        let _log_key = EnvRestore::remove("CREG_TRANSPARENCY_LOG_KEY");
+        let _signer_id = EnvRestore::remove("CREG_TRANSPARENCY_LOG_SIGNER_ID");
         let (state, _tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
         {
             let state = state.read().await;
@@ -5955,6 +6022,7 @@ mod tests {
         assert_eq!(missing_subject.status(), StatusCode::BAD_REQUEST);
 
         let response = app
+            .clone()
             .oneshot(
                 Request::get(
                     "/v1/public/transparency/creg-test-log/latest-event?subject=npm%3Alog-test%401.0.0",
@@ -5974,6 +6042,62 @@ mod tests {
             .unwrap_or("")
             .contains("Unsigned head"));
 
+        let unsigned_signed_head = app
+            .oneshot(
+                Request::get("/v1/public/transparency/creg-test-log/signed-head")
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(
+            unsigned_signed_head.status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn transparency_signed_head_requires_log_key_and_verifies() -> anyhow::Result<()> {
+        let _env_lock = api_env_lock().lock().await;
+        let log_key = SigningKey::from_bytes(&[9u8; 32]);
+        let pubkey = hex::encode(log_key.verifying_key().as_bytes());
+        let _log_key =
+            EnvRestore::set("CREG_TRANSPARENCY_LOG_KEY", hex::encode(log_key.to_bytes()));
+        let _signer_id = EnvRestore::set("CREG_TRANSPARENCY_LOG_SIGNER_ID", "log-operator");
+        let (state, _tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
+        {
+            let state = state.read().await;
+            state.chain.append_transparency_event(
+                "creg-test-log",
+                "package-finalized",
+                "npm:signed-head@1.0.0",
+                &common::sha256_hex(b"payload"),
+                "test-fixture",
+                "2026-08-24T00:00:00Z",
+            )?;
+        }
+        let event_bus = new_event_bus();
+        let app = router(
+            state,
+            event_bus,
+            RateLimiter::new(RateLimitConfig::default()),
+            AttestationStore::new(),
+            crate::config::CorsConfig::default(),
+            tx_sender,
+            p2p_handle,
+        );
+        let response = app
+            .oneshot(
+                Request::get("/v1/public/transparency/creg-test-log/signed-head")
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await?;
+        let signed: common::SignedTreeHead = serde_json::from_slice(&body)?;
+        common::verify_signed_tree_head(&signed, &pubkey)?;
+        assert_eq!(signed.log_signer_id, "log-operator");
+        assert_eq!(signed.head.log_id, "creg-test-log");
         Ok(())
     }
 

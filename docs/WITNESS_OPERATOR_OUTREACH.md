@@ -32,7 +32,7 @@ This is **not** a validator seat. You do not join PBFT or stake as a committee m
 - A request to resume our GCP fleet
 - Permission to run two witness identities on one host and call the network independent
 
-The witness **daemon** is not shipped yet. Holding a key now is recruitment. We will not flip client `CREG_REQUIRE_WITNESSED_HEAD` against unsigned node heads.
+`creg witness run` exists. Holding a key is still recruitment until you run it on a host we do not control and serve `witnessed-head.json` from **your** HTTPS URL. We will not flip client `CREG_REQUIRE_WITNESSED_HEAD` against unsigned node heads.
 
 Lab bar is two independent witnesses plus a split-view drill. Public-testnet bar is four independent witness organizations.
 
