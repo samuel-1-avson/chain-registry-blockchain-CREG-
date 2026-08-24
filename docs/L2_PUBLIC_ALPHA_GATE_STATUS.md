@@ -2,7 +2,9 @@
 
 > Living tracker for the CREG limitations public readiness plan.  
 > **Target level:** L2 Public Alpha (open waitlist, honest disclaimers — not mainnet).  
-> **Last updated:** 2026-06-26
+> **Last updated:** 2026-08-23 (banner); table rows below are the 2026-06-26 historical capture unless noted.
+
+**2026-08-23 overlay:** the public GCP fleet is **paused**. Treat HOSTING-301 / public HTTPS LB / DNS “Pass” rows as historical evidence from when the fleet was up, not as a claim that `api.testnet.cregnet.dev` is reachable today. Canonical live status: [TESTNET_STATUS.md](./TESTNET_STATUS.md). Protocol shipped vs remaining: [PROTOCOL_PROGRESS.md](./PROTOCOL_PROGRESS.md). Software on `main` through PR #50 is coordinated public-alpha code; the live public network is waitlist-only until VAL-INDEPENDENCE and TESTNET-RESUME.
 
 | Gate | Status | Evidence / next action |
 | --- | --- | --- |

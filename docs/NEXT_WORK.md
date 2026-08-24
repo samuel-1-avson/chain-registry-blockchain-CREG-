@@ -1,6 +1,8 @@
 # Next work — prioritized backlog
 
-**Updated:** 2026-08-23
+**Updated:** 2026-08-23  
+**HEAD:** `53c8089` (PR #50)  
+**Progress briefing:** [PROTOCOL_PROGRESS.md](./PROTOCOL_PROGRESS.md)  
 **Planning hub:** [WHAT_TO_DO_NEXT.md](./WHAT_TO_DO_NEXT.md)  
 **Context:** [REMEDIATION_BACKLOG.md](./REMEDIATION_BACKLOG.md), [WEAKNESSES_GAPS_REMEDIATION_PLAN.md](./WEAKNESSES_GAPS_REMEDIATION_PLAN.md), [TESTNET_STATUS.md](./TESTNET_STATUS.md)
 
@@ -8,6 +10,11 @@
 
 ## Current phase
 
+- **In-repo protocol through PR #50:** GOVERNANCE-API, SHIM-301, npm
+  direct-dep gate, CLIENT-FRESHNESS, and SUPPLY-CHAIN-CI are on `main`.
+  Useful leftover protocol code is **WITNESSED-LOG** (independent witnesses
+  only — do not mint local stand-ins). Public testnet resume is still
+  operator work (VAL-INDEPENDENCE, then TESTNET-RESUME).
 - **Protocol hardening:** CR-07 namespace authority and CR-04/HI-11
   validator-history protections are implemented at repository level but remain
   disabled pending trust material, a real checkpoint, and independent
@@ -95,6 +102,9 @@
 | ISSUE-011 | 2026-08-23 | Publisher ZK admission placeholders retired; gRPC rejects leftover 85/`true` proofs |
 | ISSUE-016 | 2026-08-23 | Historical sync verifies `validator_set_hash` against the set at that height; HI-11 checkpoint still operational |
 | ISSUE-017 | 2026-08-23 | `GET /v1/governance/proposals` mirrors Governance.sol; 200 empty if unconfigured, 503 on L1 RPC failure |
+| VAL-JOIN | 2026-08-23 | Independent validators can join PBFT/P2P in-repo (PR #41); recruiting operators remains VAL-INDEPENDENCE |
+| OPERATOR-PACK | 2026-08-23 | Validator compose, k8s, fail-closed YARA votes (PR #42) |
+| SPEC-OVERRIDE | 2026-08-23 | Node refuses env contract addresses that disagree with a signed spec (PR #44); compose defaults aligned (PR #45) |
 | GOVERNANCE-API | 2026-08-23 | Operator-authenticated submit/vote/execute; `CREG_GOVERNANCE_KEY` required; public POST stays 405 |
 | SHIM-301 | 2026-08-23 | PATH shims share `creg install` fail-closed gate; 5-minute install cache; `CREG_ALLOW_UNVERIFIED` break-glass; bare `npm install`/`ci` gates direct package.json deps |
 | CLIENT-FRESHNESS | 2026-08-23 | Install/shim anti-rollback journal, freeze/skew rejection, and opt-in witnessed inclusion (`verify_witnessed_inclusion`). Unsigned transparency heads stay non-install-eligible. Independent witness ops remain under WITNESSED-LOG. |

@@ -1,7 +1,8 @@
 # CREG testnet — live status
 
-> **Last updated:** 2026-08-22
-> **Single source of truth** for what is running today. Supersedes stale “phase open” wording in older docs until those pages are refreshed.
+> **Last updated:** 2026-08-23  
+> **HEAD:** `53c8089` (PR #50)  
+> **Single source of truth** for what is running today. Protocol work shipped vs remaining: [PROTOCOL_PROGRESS.md](./PROTOCOL_PROGRESS.md). Supersedes stale “phase open” wording in older docs until those pages are refreshed.
 
 ---
 
@@ -9,12 +10,16 @@
 
 | Surface | Status | Notes |
 |---------|--------|-------|
-| **Public GCP fleet** (`api.testnet.cregnet.dev`, validators, IPFS gateway) | **Paused (cost)** | Fleet can stay off until external validators are ready |
+| **Public GCP fleet** (`api.testnet.cregnet.dev`, validators, IPFS gateway) | **Paused (cost)** | Fleet can stay off until independent validators are ready. Treat the public API as unreachable. |
 | **Waitlist** | **Live** | Firebase — [WAITLIST-ONLY-HOSTING.md](./WAITLIST-ONLY-HOSTING.md) |
 | **Contribution Arena** | **Separate product (live)** | Educational/simulation only — not protocol work |
-| **Release binaries** | **v0.4.3-testnet** | [GitHub release](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases/tag/v0.4.3-testnet) |
-| **Local / operator nodes** | **Available** | Run your own observer or validator against Sepolia chain spec |
-| **Protocol code & docs** | **Active** | Public alpha; not mainnet |
+| **Release binaries** | **v0.4.3-testnet** | [GitHub release](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases/tag/v0.4.3-testnet). PRs 25–50 are on `main` and are **not** that tag. |
+| **Local / operator nodes** | **Available** | Run your own observer or validator against the signed Sepolia spec. No public bootnodes. |
+| **Protocol code & docs** | **Active** | Public alpha; not mainnet; not BFT. CR-07 / HI-11 / ZK stay disabled. |
+
+## Readiness verdict (2026-08-23)
+
+Software for a coordinated public-alpha node/CLI/Sepolia stack is on `main` through PR #50 (governance writes, install shims, freshness, workspace SBOM). That does **not** make a live public testnet. Remaining public-testnet gates are operators, ceremonies, GitHub Actions billing, audit vendor, and PDF regeneration — see [PROTOCOL_PROGRESS.md](./PROTOCOL_PROGRESS.md).
 
 ## Readiness gate update (2026-08-01)
 
@@ -94,6 +99,8 @@ See also [WHAT_TO_DO_NEXT.md](./WHAT_TO_DO_NEXT.md) Track A (system verification
 
 | Document | Purpose |
 |----------|---------|
+| [PROTOCOL_PROGRESS.md](./PROTOCOL_PROGRESS.md) | **Shipped vs remaining vs testnet readiness** |
 | [TESTNET_PHASE_SCOPE.md](./TESTNET_PHASE_SCOPE.md) | Alpha limits, package statuses, committee semantics |
 | [PUBLIC_TESTNET_QUICKSTART.md](./PUBLIC_TESTNET_QUICKSTART.md) | Publisher / validator onboarding |
 | [WHAT_TO_DO_NEXT.md](./WHAT_TO_DO_NEXT.md) | Maintainer planning hub |
+| [NEXT_WORK.md](./NEXT_WORK.md) | Prioritized P0/P1/P2 IDs |

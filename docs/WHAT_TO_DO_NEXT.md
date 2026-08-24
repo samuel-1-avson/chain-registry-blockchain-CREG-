@@ -1,9 +1,10 @@
 # What to do next
 
-**Updated:** 2026-08-22  
+**Updated:** 2026-08-23  
+**HEAD:** `53c8089`  
 **Audience:** Maintainers planning protocol work. Public GCP fleet is paused. Contribution Arena is a separate educational product and is not this workstream.
 
-This is the **single planning entry point**. Use it to choose between full-system testing, product surfaces (waitlist / Contribution Arena), or testnet validator onboarding. Prioritized IDs live in [NEXT_WORK.md](./NEXT_WORK.md).
+This is the **single planning entry point**. Shipped vs remaining vs testnet readiness: [PROTOCOL_PROGRESS.md](./PROTOCOL_PROGRESS.md). Prioritized IDs live in [NEXT_WORK.md](./NEXT_WORK.md). Live fleet: [TESTNET_STATUS.md](./TESTNET_STATUS.md).
 
 ---
 
@@ -11,12 +12,13 @@ This is the **single planning entry point**. Use it to choose between full-syste
 
 | Area | State | Notes |
 |------|--------|-------|
-| Core protocol | **Green** | `cargo test` gossip validation; `forge test` 37/37 contracts |
-| Remediation | **Phase 1 largely closed** | ISSUE-002/003/006/007/008 mitigated or fixed — see [WEAKNESSES_GAPS_REMEDIATION_PLAN.md](./WEAKNESSES_GAPS_REMEDIATION_PLAN.md) §6 |
-| Public testnet stack | **Paused (cost)** | See [TESTNET_STATUS.md](./TESTNET_STATUS.md); resume via [resume-testnet-hosting.ps1](../chain-registry/testnet/gcp/resume-testnet-hosting.ps1) |
+| Core protocol | **Green locally** | Workspace/fmt/Foundry v1.7.1 129/129 captured locally. Remote Actions deferred (billing). HEAD `53c8089` includes PRs 25–50. |
+| In-repo hardening | **Through PR #50** | GOVERNANCE-API, SHIM-301, npm direct-dep gate, CLIENT-FRESHNESS, SUPPLY-CHAIN-CI. Next leftover protocol slice: WITNESSED-LOG (real witnesses only). |
+| Public testnet stack | **Paused (cost)** | `api.testnet.cregnet.dev` treated as unreachable. Resume is operator work, not another protocol patch. |
 | Waitlist | **Live** | Firebase — [WAITLIST-ONLY-HOSTING.md](./WAITLIST-ONLY-HOSTING.md) |
-| Contribution Arena | **Separate product** | Educational/simulation surface — not protocol work. [CREG-Contribution-Arena/README.md](../CREG-Contribution-Arena/README.md) |
+| Contribution Arena | **Separate product** | Educational/simulation surface — not protocol work. |
 | External audit | **Open** | Freeze candidate `v0.4.3-testnet` — [SEC-401-AUDIT-SCOPE.md](./SEC-401-AUDIT-SCOPE.md) |
+| CR-07 / HI-11 / ZK | **Implemented, disabled** | Do not flip flags from this repo. |
 
 ---
 
@@ -160,7 +162,7 @@ Legacy (do not use for new onboarding): [HYBRID-LOCAL-VALIDATORS.md](./HYBRID-LO
 
 ---
 
-## Suggested order (June 2026)
+## Suggested order (August 2026)
 
 ```mermaid
 flowchart TD
@@ -180,6 +182,7 @@ flowchart TD
 
 | Need | Document |
 |------|----------|
+| Protocol progress / testnet readiness | [PROTOCOL_PROGRESS.md](./PROTOCOL_PROGRESS.md) |
 | Scale testnet topology | [TESTNET_SCALE_ARCHITECTURE.md](./TESTNET_SCALE_ARCHITECTURE.md) |
 | Maintainer full index | [README.md](./README.md) |
 | Public / external index | [PUBLIC.md](./PUBLIC.md) |
