@@ -60,7 +60,7 @@ cargo test --workspace
 cd contracts && forge test
 ```
 
-Release binaries: [v0.4.3-testnet](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases/tag/v0.4.3-testnet).
+Release binaries: [v0.4.4-testnet](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases/tag/v0.4.4-testnet) (Windows amd64). Linux/macOS archives remain [v0.4.3-testnet](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases/tag/v0.4.3-testnet) until Actions billing resets.
 
 ---
 
