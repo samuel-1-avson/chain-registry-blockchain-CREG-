@@ -55,7 +55,7 @@
 | 4 | **VAL-INDEPENDENCE** | blocked externally | Independent validators and bootnodes | Recruit and verify separately controlled operators/keys/infrastructure; a four-validator coordinated spec must not be represented as Byzantine-fault-tolerant. |
 | 5 | **SPEC-ROTATE** | superseded | Repair signed Sepolia specification | Fresh-genesis candidate recorded 2026-08-01/02 in `chain-spec.sepolia.json` (genesis 2026-08-02). Remaining work is independent verification and public activation, not another in-repo rotate. |
 | 6 | **SEC-401** | open | External security audit | Scope: [SEC-401-AUDIT-SCOPE.md](./SEC-401-AUDIT-SCOPE.md). Candidate freeze: `v0.4.3-testnet` (`3eb3a23…`). Vendor, start date, and signed findings remain TBD. Cut a later tag only if protocol diffs land after VERIFY-401. |
-| 7 | **DOC-RELEASE** | blocked in this checkout | Publish synchronized protocol documents | Public README/PUBLIC/install examples pin `v0.4.3-testnet`. PDF regen lives in the Contribution Arena `generate:document-pdfs` pipeline, which is **not present** in this workspace (no Arena `package.json`). Untracked `docs/document-pdfs/` must not be committed. Do not treat Arena launch as protocol work. |
+| 7 | **DOC-RELEASE** | blocked in this checkout | Publish synchronized protocol documents | Public README/PUBLIC/install examples pin Windows `v0.4.4-testnet`; Linux/macOS still `v0.4.3-testnet`. PDF regen lives in the Contribution Arena `generate:document-pdfs` pipeline, which is **not present** in this workspace (no Arena `package.json`). Untracked `docs/document-pdfs/` must not be committed. Do not treat Arena launch as protocol work. |
 | 8 | **TESTNET-RESUME** | gated | Resume public fleet only after operator gates | Use `testnet/gcp/resume-testnet-hosting.ps1` and `hosting-301-verify.ps1` only after independent validators, checkpoint, trust, and rehearsal sign-offs. |
 
 ---
@@ -91,7 +91,7 @@
 | NET-301 | 2026-06-09 | 2-validator PBFT quorum |
 | SANDBOX-301 | 2026-06-10 | Real nsjail sandbox |
 | DIST-301 | 2026-06-10 | `v0.1.0-testnet` / `v0.1.2-testnet` binaries |
-| DIST-401 | 2026-08-03 | `v0.4.3-testnet` binaries (current public pin) |
+| DIST-401 | 2026-08-25 | `v0.4.4-testnet` Windows binaries (current Windows pin); Linux/macOS still `v0.4.3-testnet` |
 | HOSTING-301 | 2026-06-10 | `testnet.cregnet.dev` (resumable; currently paused) |
 | SPEC-ROTATE | 2026-08-02 | Fresh genesis candidate in `chain-spec.sepolia.json`; public activation still gated |
 | DOC-301 | 2026-06-08 | Doc index rationalization |

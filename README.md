@@ -55,7 +55,7 @@ flowchart LR
 | **Waitlist** | https://waitlist.cregnet.dev |
 | **Contribution Arena** | https://contribute.cregnet.dev | Separate educational/simulation product; not the protocol |
 
-**Binaries:** [v0.4.3-testnet](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases/tag/v0.4.3-testnet) (`creg` + `creg-node` for Linux, Windows, macOS). The public GCP fleet (`api.testnet.cregnet.dev`) is **paused**.
+**Binaries:** [v0.4.4-testnet](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases/tag/v0.4.4-testnet) (Windows amd64: `creg` + `creg-node`, including the console TUI). Linux/macOS archives are still [v0.4.3-testnet](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases/tag/v0.4.3-testnet) until GitHub Actions can run the usual release workflow. The public GCP fleet (`api.testnet.cregnet.dev`) is **paused**.
 
 Chain parameters: [`chain-registry/testnet/chain-spec.sepolia.json`](chain-registry/testnet/chain-spec.sepolia.json).
 
@@ -91,8 +91,13 @@ The alpha waitlist is live at [waitlist.cregnet.dev](https://waitlist.cregnet.de
 
 ## Quick start (developers)
 
+```powershell
+# Windows (current pin)
+.\chain-registry\scripts\install-creg.ps1 -Version v0.4.4-testnet
+```
+
 ```bash
-# From GitHub release
+# Linux/macOS still use the last multi-platform tag, or build from source
 ./chain-registry/scripts/install-creg.sh --version v0.4.3-testnet
 
 # Or build from source
@@ -144,7 +149,7 @@ This repository follows the same pattern as other open blockchains: **protocol c
 | Specified validator set | Four coordinated validators; empty bootnodes; not operational BFT |
 | Real sandbox engine | Done |
 | Public GCP fleet | **Paused (cost)** — [TESTNET_STATUS.md](docs/TESTNET_STATUS.md) |
-| Binary release | [v0.4.3-testnet](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases/tag/v0.4.3-testnet) |
+| Binary release | [v0.4.4-testnet](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases/tag/v0.4.4-testnet) (Windows); Linux/macOS still [v0.4.3-testnet](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases/tag/v0.4.3-testnet) |
 | Public alpha waitlist | Live — [waitlist.cregnet.dev](https://waitlist.cregnet.dev) |
 | Contribution Arena | Separate educational/simulation product — [contribute.cregnet.dev](https://contribute.cregnet.dev) |
 | Phase 1 remediation (gossip, batch, relays) | Done — Iteration 6 |

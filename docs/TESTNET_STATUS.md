@@ -1,7 +1,7 @@
 # CREG testnet — live status
 
-> **Last updated:** 2026-08-23  
-> **HEAD:** `53c8089` (PR #50)  
+> **Last updated:** 2026-08-25  
+> **HEAD:** `7b03dc7` (PR #54)  
 > **Single source of truth** for what is running today. Protocol work shipped vs remaining: [PROTOCOL_PROGRESS.md](./PROTOCOL_PROGRESS.md). Supersedes stale “phase open” wording in older docs until those pages are refreshed.
 
 ---
@@ -13,7 +13,7 @@
 | **Public GCP fleet** (`api.testnet.cregnet.dev`, validators, IPFS gateway) | **Paused (cost)** | Fleet can stay off until independent validators are ready. Treat the public API as unreachable. |
 | **Waitlist** | **Live** | Firebase — [WAITLIST-ONLY-HOSTING.md](./WAITLIST-ONLY-HOSTING.md) |
 | **Contribution Arena** | **Separate product (live)** | Educational/simulation only — not protocol work |
-| **Release binaries** | **v0.4.3-testnet** | [GitHub release](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases/tag/v0.4.3-testnet). PRs 25–50 are on `main` and are **not** that tag. |
+| **Release binaries** | **v0.4.4-testnet** (Windows) | [GitHub release](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases/tag/v0.4.4-testnet). Linux/macOS still [v0.4.3-testnet](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases/tag/v0.4.3-testnet) (Actions billing blocks the multi-platform workflow). |
 | **Local / operator nodes** | **Available** | Run your own observer or validator against the signed Sepolia spec. No public bootnodes. |
 | **Protocol code & docs** | **Active** | Public alpha; not mainnet; not BFT. CR-07 / HI-11 / ZK stay disabled. |
 

@@ -1,8 +1,8 @@
 # CREG protocol progress
 
 **As of:** 2026-08-24  
-**HEAD:** `ac8da74` (merge of [PR #52](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/pull/52)); this change adds `creg witness run` and log `signed-head`.  
-**Public binary pin:** `v0.4.3-testnet` (`3eb3a23…`) — later protocol diffs (PRs 25–52 plus this daemon) are on `main` and are **not** that tag.  
+**HEAD:** `7b03dc7` (merge of [PR #54](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/pull/54)).  
+**Public binary pin:** `v0.4.4-testnet` (Windows amd64 at this tag). Linux/macOS archives remain `v0.4.3-testnet` until GitHub Actions can run `release-binaries`. SEC-401 freeze candidate can stay `v0.4.3-testnet` if a vendor already scoped that tag.  
 **Canonical repo:** [samuel-1-avson/chain-registry-blockchain-CREG-](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-)
 
 This page is the **session briefing** for protocol work: what shipped, what improved, what is left, and how ready CREG is for testnet. Live fleet facts stay in [TESTNET_STATUS.md](./TESTNET_STATUS.md). Prioritized IDs stay in [NEXT_WORK.md](./NEXT_WORK.md). Maintainer tracks stay in [WHAT_TO_DO_NEXT.md](./WHAT_TO_DO_NEXT.md).
