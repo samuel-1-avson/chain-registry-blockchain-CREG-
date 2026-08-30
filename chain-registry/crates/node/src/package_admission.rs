@@ -1121,6 +1121,22 @@ pub(crate) async fn ensure_publisher_staked(
     publisher_address: &str,
 ) -> Result<(), PublisherAdmissionError> {
     let publisher = parse_publisher_address(publisher_address)?;
+
+    // 1. Check in-memory stake cache first (sub-millisecond RAM lookup)
+    {
+        let s = state.read().await;
+        if let Some(staked) = s.get_cached_publisher_stake(&publisher) {
+            if staked == alloy::primitives::U256::ZERO {
+                return Err(PublisherAdmissionError::Unstaked(format!(
+                    "Publisher {} has no on-chain stake and cannot publish",
+                    common::canonical_publisher_address(publisher_address)
+                )));
+            }
+            return Ok(());
+        }
+    }
+
+    // 2. Cache miss or expired: query on-chain via L1 RPC
     let (rpc_url, staking_addr_s) = {
         let s = state.read().await;
         (s.config.eth_rpc_url.clone(), s.config.staking_addr.clone())
@@ -1162,6 +1178,12 @@ pub(crate) async fn ensure_publisher_staked(
             ))
         })?
         ._0;
+
+    // 3. Cache the verified on-chain balance
+    {
+        let mut s = state.write().await;
+        s.set_cached_publisher_stake(publisher, staked);
+    }
 
     if staked == alloy::primitives::U256::ZERO {
         return Err(PublisherAdmissionError::Unstaked(format!(
@@ -1387,6 +1409,7 @@ rule TestMaliciousPayload {{
             total_rewards_distributed: 0,
             rewards_pool_balance: 0,
             last_incentives_refresh: None,
+            publisher_stake_cache: HashMap::new(),
         }));
 
         Ok((state, tempdir))
@@ -2004,6 +2027,50 @@ rule TestMaliciousPayload {{
         assert!(matches!(error, AdmissionError::ShieldedPublishDisabled(_)));
         assert!(error.to_string().contains("threshold_encryption"));
         assert!(!state.read().await.pending_pool.contains("npm:test@1.0.0"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn publisher_stake_cache_hits_and_eviction() -> anyhow::Result<()> {
+        let (state, _tempdir) = make_test_state(100, "http://127.0.0.1:65535".into()).await?;
+        let test_addr = "0x2222222222222222222222222222222222222222";
+        let parsed_addr: Address = test_addr.parse().unwrap();
+
+        // 1. Initial call populates the cache from the mock RPC
+        ensure_publisher_staked(&state, test_addr).await.unwrap();
+        {
+            let s = state.read().await;
+            let cached = s.get_cached_publisher_stake(&parsed_addr);
+            assert_eq!(cached, Some(alloy::primitives::U256::from(100)));
+        }
+
+        // 2. Break the RPC configuration in state to prove subsequent call is served entirely from cache
+        {
+            let mut s = state.write().await;
+            s.config.eth_rpc_url = String::new(); // would fail if RPC called
+        }
+        ensure_publisher_staked(&state, test_addr).await.unwrap();
+
+        // 3. Invalidate cache: now the broken RPC config must trigger Unavailable error
+        {
+            let mut s = state.write().await;
+            s.invalidate_publisher_stake(&parsed_addr);
+        }
+        let err = ensure_publisher_staked(&state, test_addr)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, PublisherAdmissionError::Unavailable(_)));
+
+        // 4. Manually cache zero balance: must return Unstaked error without RPC call
+        {
+            let mut s = state.write().await;
+            s.set_cached_publisher_stake(parsed_addr, alloy::primitives::U256::ZERO);
+        }
+        let err = ensure_publisher_staked(&state, test_addr)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, PublisherAdmissionError::Unstaked(_)));
+
         Ok(())
     }
 }

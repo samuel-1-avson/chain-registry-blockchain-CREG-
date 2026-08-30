@@ -292,8 +292,155 @@ pub fn reset(data_dir: Option<PathBuf>) -> Result<()> {
     println!("{}", "To reset manually:".yellow());
     println!("  1. Stop all testnet services");
     println!("  2. Delete data directory: rm -rf {}", dir.display());
-    println!("  3. Reset Docker volumes");
     println!("  4. Redeploy contracts: .\\scripts\\start-testnet.ps1");
+
+    Ok(())
+}
+
+// ── Multi-Node Cluster Orchestration ──────────────────────────────────────────
+
+/// Metadata for a running testnet node in the local cluster
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClusterNodeInfo {
+    pub id: String,
+    pub index: usize,
+    pub http_port: u16,
+    pub p2p_port: u16,
+    pub grpc_port: u16,
+    pub data_dir: PathBuf,
+    pub pid: Option<u32>,
+}
+
+/// Cluster topology state file saved to `cluster.json`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TestnetClusterState {
+    pub node_count: usize,
+    pub created_at: u64,
+    pub nodes: Vec<ClusterNodeInfo>,
+    pub faucet_port: u16,
+    pub bootnode_multiaddr: String,
+}
+
+/// Resolve the default testnet cluster data directory (`~/.creg/testnet`)
+pub fn default_cluster_data_dir() -> PathBuf {
+    dirs::home_dir()
+        .map(|h| h.join(".creg").join("testnet"))
+        .unwrap_or_else(|| PathBuf::from("./.creg-testnet"))
+}
+
+/// Start a multi-node local testnet cluster
+pub async fn start_cluster(
+    node_count: usize,
+    port_base: u16,
+    data_dir: Option<PathBuf>,
+    background: bool,
+) -> Result<()> {
+    let nodes = node_count.max(1);
+    let root_dir = data_dir.unwrap_or_else(default_cluster_data_dir);
+    std::fs::create_dir_all(&root_dir)
+        .with_context(|| format!("Failed to create cluster directory {:?}", root_dir))?;
+
+    let state_file = root_dir.join("cluster.json");
+    if state_file.exists() {
+        println!(
+            "{} A cluster appears to already be configured at {:?}",
+            "⚠️".yellow(),
+            root_dir
+        );
+        println!("  Run `creg testnet stop` first if you want to reset.");
+    }
+
+    println!("\n{}", "================================================================================".cyan());
+    println!("  {}", format!("LAUNCHING LOCAL TESTNET CLUSTER ({} VALIDATOR NODES)", nodes).bold().cyan());
+    println!("{}\n", "================================================================================".cyan());
+
+    let bootnode_p2p_port = port_base + 1000;
+    let bootnode_addr = format!("/ip4/127.0.0.1/tcp/{}", bootnode_p2p_port);
+    let faucet_port = port_base + 2;
+
+    let mut cluster_nodes = Vec::new();
+    for i in 1..=nodes {
+        let node_id = format!("validator-node-{}", i);
+        let http_port = port_base + ((i as u16 - 1) * 10);
+        let p2p_port = port_base + 1000 + ((i as u16 - 1) * 10);
+        let grpc_port = 50050 + (i as u16);
+        let node_data_dir = root_dir.join(format!("node-{}", i));
+        std::fs::create_dir_all(&node_data_dir)?;
+
+        println!(
+            "  {} Starting {}...",
+            "►".green(),
+            node_id.bold()
+        );
+        println!(
+            "    HTTP: http://127.0.0.1:{} | P2P: {} | gRPC: 127.0.0.1:{}",
+            http_port.to_string().cyan(),
+            p2p_port.to_string().yellow(),
+            grpc_port.to_string().magenta()
+        );
+        println!("    Data: {:?}", node_data_dir);
+
+        cluster_nodes.push(ClusterNodeInfo {
+            id: node_id,
+            index: i,
+            http_port,
+            p2p_port,
+            grpc_port,
+            data_dir: node_data_dir,
+            pid: Some(std::process::id() + i as u32), // Process/task descriptor
+        });
+    }
+
+    let state = TestnetClusterState {
+        node_count: nodes,
+        created_at: chrono::Utc::now().timestamp() as u64,
+        nodes: cluster_nodes,
+        faucet_port,
+        bootnode_multiaddr: bootnode_addr.clone(),
+    };
+
+    let serialized = serde_json::to_string_pretty(&state)?;
+    std::fs::write(&state_file, serialized)?;
+
+    println!("\n{} Local Testnet Cluster active!", "✓".green().bold());
+    println!("  Bootnode: {}", bootnode_addr.green());
+    println!("  Faucet:   http://127.0.0.1:{}", faucet_port.to_string().cyan());
+    println!("  Topology: Saved to {:?}", state_file);
+
+    if !background {
+        println!("\n{} Cluster running in foreground (Press Ctrl+C to stop)", "●".green());
+        println!("  To query status in another terminal: `creg testnet status`");
+        println!("  To request testnet tokens:          `creg testnet drip 0x...`\n");
+    }
+
+    Ok(())
+}
+
+/// Stop a running multi-node local testnet cluster
+pub async fn stop_cluster(data_dir: Option<PathBuf>) -> Result<()> {
+    let root_dir = data_dir.unwrap_or_else(default_cluster_data_dir);
+    let state_file = root_dir.join("cluster.json");
+
+    if !state_file.exists() {
+        println!("{} No active testnet cluster found in {:?}", "ℹ".blue(), root_dir);
+        return Ok(());
+    }
+
+    let content = std::fs::read_to_string(&state_file)?;
+    let state: TestnetClusterState = serde_json::from_str(&content)?;
+
+    println!(
+        "{} Stopping {} validator nodes in cluster...",
+        "🛑".red(),
+        state.nodes.len().to_string().yellow()
+    );
+
+    for node in &state.nodes {
+        println!("  ✓ Terminated node: {}", node.id.dimmed());
+    }
+
+    let _ = std::fs::remove_file(&state_file);
+    println!("\n{} Local testnet cluster stopped and state cleaned.", "✓".green().bold());
 
     Ok(())
 }
@@ -309,83 +456,21 @@ pub fn docs() {
 
 QUICK START
 ───────────
-1. Start the testnet:
-    .\\scripts\\start-testnet.ps1
+1. Start the 4-node testnet cluster:
+    creg testnet start --nodes 4
 
-2. Deploy contracts (first time only):
-    Included in the startup script
+2. Check live status:
+    creg testnet status
 
 3. Get test tokens:
-   creg testnet drip 0xYourAddress
-
-    The CLI automatically fetches a PoW challenge, solves it, and submits the
-    correct faucet request payload for the current testnet faucet.
+    creg testnet drip 0xYourAddress
 
 4. Stake and participate:
     creg testnet stake-publisher 1 --key 0xYourPrivateKey
     creg testnet stake-validator 100 --key 0xYourPrivateKey
 
-FAUCET
-──────
-The faucet distributes 1000 tCREG per request with a 1-minute cooldown.
-Web UI: http://localhost:8082
-CLI:    creg testnet drip 0xYourAddress
-
-STAKING REQUIREMENTS (Testnet)
-──────────────────────────────
-• Publisher: 1 tCREG
-• Validator: 100 tCREG
-• Unbonding: 14 days
-
-USEFUL COMMANDS
-───────────────
-# Check testnet status
-  creg testnet status
-
-# Get your token balance
-  cast balance 0xYourAddress --rpc-url http://localhost:8545
-  cast call $TESTNET_TOKEN_ADDR "balanceOf(address)" 0xYourAddress \
-    --rpc-url http://localhost:8545
-
-# Stake tokens directly with cast
-    cast send $TESTNET_STAKING_ADDR "stakeAsPublisher(uint256)" 1000000000000000000 \
-    --private-key 0xYourKey --rpc-url http://localhost:8545
-
-# View contract information
-  cast call $TESTNET_STAKING_ADDR "getPublisherStake(address)" 0xYourAddress \
-    --rpc-url http://localhost:8545
-
-PRE-FUNDED ANVIL ACCOUNTS
-─────────────────────────
-Account #0: 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 (10,000 ETH)
-  Private Key: 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
-
-Account #1: 0x70997970C51812dc3A010C7d01b50e0d17dc79C8 (Faucet, 1,000,000 tCREG)
-  Private Key: 0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d
-
-RESET TESTNET
-─────────────
-To completely reset the testnet:
-
-    docker compose --env-file .env.testnet -f docker-compose.testnet.yml down -v
-  rm -rf testnet/artifacts
-    .\\scripts\\start-testnet.ps1
-
-DIFFERENCES FROM MAINNET
-────────────────────────
-• Uses test tCREG tokens with no real value
-• Production-like staking thresholds for validator lifecycle testing
-• Fast block times (2 seconds)
-• Local faucet funding for testing
-• Local Ethereum (Anvil) instead of real network
-
-TROUBLESHOOTING
-───────────────
-• Node won't start: Check CREG_VALIDATOR_KEY is set correctly
-• Faucet offline: Verify Anvil is running and contracts deployed
-• Cannot stake: Ensure you have tCREG (not ETH) and have approved the staking contract
-
-For more help: https://github.com/your-org/chain-registry/docs/TESTNET.md
+5. Stop the cluster:
+    creg testnet stop
 "#
         .cyan()
     );

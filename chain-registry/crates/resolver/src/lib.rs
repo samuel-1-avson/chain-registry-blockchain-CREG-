@@ -2,12 +2,15 @@
 // Resolves a package name/ID to a TrustVerdict.
 // Cache-first: checks the local sled DB, then hits the chain node.
 
+pub mod attestation_verifier;
 pub mod cache;
 mod chain_client;
 pub mod downloader;
 pub mod freshness;
 pub mod install_gate;
 pub mod npm_manifest;
+
+pub use attestation_verifier::{SignedPackageAttestation, DEFAULT_MIN_ACCEPTABLE_SCORE};
 
 use anyhow::Result;
 use chrono::Utc;
@@ -132,7 +135,7 @@ pub async fn resolve_verified(
                     id.canonical(),
                     e
                 );
-                Ok(verdict) // Fall back to standard verdict on proof error.
+                Ok(verdict)
             }
         }
     } else {

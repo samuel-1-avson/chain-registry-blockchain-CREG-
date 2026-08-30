@@ -1557,6 +1557,7 @@ mod tests {
             total_rewards_distributed: 0,
             rewards_pool_balance: 0,
             last_incentives_refresh: None,
+            publisher_stake_cache: HashMap::new(),
         })))
     }
 

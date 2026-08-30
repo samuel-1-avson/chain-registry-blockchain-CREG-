@@ -35,6 +35,8 @@ validator    = { path = "../validator" }
 zk-validator = { path = "../zk-validator" }
 ml-validator = { path = "../ml-validator" }
 wasm-sandbox = { path = "../wasm-sandbox" }
+consensus    = { path = "../consensus" }
+cross-chain  = { path = "../cross-chain" }
 tokio      = { workspace = true }
 serde      = { workspace = true }
 serde_json = { workspace = true }

@@ -29,6 +29,8 @@ reqwest = { workspace = true }
 
 # Common crate
 common = { path = "../common" }
+hex = { workspace = true }
+chrono = { workspace = true }
 
 [dev-dependencies]
 tokio-test = "0.4"

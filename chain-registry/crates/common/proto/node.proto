@@ -16,6 +16,9 @@ service RegistryService {
     // uses the dual-domain fields at 18–24; validator-side evidence remains
     // the qualification authority.
     rpc SubmitPackage(SubmitRequest) returns (SubmitResponse);
+
+    // Stream a signed package in binary chunks directly into node storage.
+    rpc StreamPublishPackage(stream PublishChunk) returns (SubmitResponse);
 }
 
 // ── Watch Service ──────────────────────────────────────────────────────────
@@ -91,6 +94,13 @@ message SubmitRequest {
 message SubmitResponse {
     bool accepted = 1;
     string message = 2;
+}
+
+message PublishChunk {
+    oneof payload {
+        SubmitRequest metadata = 1;
+        bytes chunk_data = 2;
+    }
 }
 
 message WatchRequest {

@@ -91,12 +91,37 @@ async fn tick(
     Ok(())
 }
 
+static PIPELINE_SEMAPHORE: std::sync::LazyLock<Arc<tokio::sync::Semaphore>> =
+    std::sync::LazyLock::new(|| {
+        let permits = std::env::var("CREG_MAX_CONCURRENT_VALIDATIONS")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or_else(|| {
+                std::thread::available_parallelism()
+                    .map(|n| (n.get() * 2).max(4))
+                    .unwrap_or(16)
+            });
+        tracing::info!(
+            "Initializing validator pipeline semaphore with {} concurrent permits",
+            permits
+        );
+        Arc::new(tokio::sync::Semaphore::new(permits))
+    });
+
 async fn process_package(
     state: Arc<RwLock<NodeState>>,
     req: PublishRequest,
     tx_out: FinalizedTxSender,
     p2p_handle: crate::p2p::P2PHandle,
 ) {
+    let _permit = match PIPELINE_SEMAPHORE.acquire().await {
+        Ok(permit) => permit,
+        Err(e) => {
+            tracing::error!("Failed to acquire pipeline semaphore permit: {}", e);
+            return;
+        }
+    };
+
     let canonical = req.id.canonical();
     tracing::info!("Processing {}", canonical);
 

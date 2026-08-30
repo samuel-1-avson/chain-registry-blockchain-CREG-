@@ -34,6 +34,18 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use tracing::warn;
 
+pub mod checkpoint_relayer;
+pub mod l1_relayer_service;
+pub mod merkle_proof;
+
+pub use checkpoint_relayer::{CheckpointRelayQueue, L1CheckpointBatch};
+pub use l1_relayer_service::{
+    AnchoredCheckpointReceipt, L1RelayerConfig, L1RelayerService, RelayTxStatus,
+};
+pub use merkle_proof::{
+    build_merkle_tree, generate_inclusion_proof, verify_merkle_path, MerkleInclusionProof,
+};
+
 /// Environment variable prefix for overriding contract addresses per chain.
 /// Example: CREG_CHAIN_ARBITRUM_REGISTRY=0x1234...
 const ENV_PREFIX: &str = "CREG_CHAIN";

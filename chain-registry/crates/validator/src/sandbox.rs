@@ -193,7 +193,7 @@ async fn detect_engine_status() -> SandboxStatus {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SandboxResult {
     pub findings: Vec<Finding>,
     pub observed_network_hosts: Vec<String>,
@@ -204,7 +204,7 @@ pub struct SandboxResult {
 }
 
 /// Execution metrics collected during sandbox run.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct SandboxMetrics {
     /// Which engine was used: "nsjail", "gvisor", "docker", "wasm", "dev-bypass", "none".
     pub engine_used: String,
@@ -305,19 +305,82 @@ static RESULT_CACHE: std::sync::LazyLock<std::sync::Mutex<HashMap<String, Sandbo
 static CANONICAL_STORE: std::sync::LazyLock<std::sync::Mutex<HashMap<String, SandboxResult>>> =
     std::sync::LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
 
+fn sandbox_store_dir() -> PathBuf {
+    if let Ok(dir) = std::env::var("CREG_SANDBOX_STORE_DIR") {
+        if !dir.trim().is_empty() {
+            return PathBuf::from(dir);
+        }
+    }
+    if let Ok(data_dir) = std::env::var("CREG_DATA_DIR") {
+        if !data_dir.trim().is_empty() {
+            return PathBuf::from(data_dir).join("sandbox_history");
+        }
+    }
+    PathBuf::from("data/sandbox_history")
+}
+
+fn canonical_to_filename(canonical: &str) -> String {
+    let sanitized: String = canonical
+        .chars()
+        .map(|c| match c {
+            '/' | '\\' | ':' | '@' | ' ' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            other => other,
+        })
+        .collect();
+    format!("{}.json", sanitized)
+}
+
 /// Persist a sandbox result by canonical for use by the diff stage when the
 /// next version of the same package is processed.
+/// Results are stored both in the fast in-memory cache and durably on disk.
 pub fn store_result(canonical: &str, result: &SandboxResult) {
     if let Ok(mut store) = CANONICAL_STORE.lock() {
         store.insert(canonical.to_string(), result.clone());
     }
+
+    // Persist durably to disk
+    let dir = sandbox_store_dir();
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        tracing::debug!("Could not create sandbox store dir {:?}: {}", dir, e);
+        return;
+    }
+    let file_path = dir.join(canonical_to_filename(canonical));
+    if let Ok(json) = serde_json::to_string_pretty(result) {
+        if let Err(e) = std::fs::write(&file_path, json) {
+            tracing::warn!("Failed to persist sandbox result to {:?}: {}", file_path, e);
+        } else {
+            tracing::debug!("Persisted sandbox result durably for {}", canonical);
+        }
+    }
 }
 
 /// Retrieve a previously stored sandbox result by canonical.
-/// Returns `None` if this is the first time the package has been processed
-/// on this node, or if the node was restarted since the last run.
+/// Checks the fast in-memory cache first, then falls back to reading the
+/// durable disk store if available across node restarts.
 pub fn get_result(canonical: &str) -> Option<SandboxResult> {
-    CANONICAL_STORE.lock().ok()?.get(canonical).cloned()
+    // 1. Check in-memory store
+    if let Ok(store) = CANONICAL_STORE.lock() {
+        if let Some(res) = store.get(canonical) {
+            return Some(res.clone());
+        }
+    }
+
+    // 2. Fall back to disk store
+    let dir = sandbox_store_dir();
+    let file_path = dir.join(canonical_to_filename(canonical));
+    if file_path.exists() {
+        if let Ok(data) = std::fs::read_to_string(&file_path) {
+            if let Ok(res) = serde_json::from_str::<SandboxResult>(&data) {
+                // Populate in-memory store for fast subsequent lookups
+                if let Ok(mut store) = CANONICAL_STORE.lock() {
+                    store.insert(canonical.to_string(), res.clone());
+                }
+                return Some(res);
+            }
+        }
+    }
+
+    None
 }
 
 // ── Cache key helper ────────────────────────────────────────────────────────
@@ -1426,6 +1489,46 @@ mod tests {
         restore_env("CREG_SANDBOX_TIMEOUT", previous_timeout);
         restore_env("CREG_SANDBOX_MEMORY_MB", previous_memory);
         restore_env("CREG_SANDBOX_NSJAIL_CONFIG", previous_nsjail);
+    }
+
+    #[test]
+    fn test_durable_sandbox_store_and_retrieve() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let prev_dir = std::env::var("CREG_SANDBOX_STORE_DIR").ok();
+        std::env::set_var("CREG_SANDBOX_STORE_DIR", temp_dir.path().to_str().unwrap());
+
+        let canonical = "npm:test-pkg@1.2.3";
+        let mock_result = SandboxResult {
+            findings: vec![],
+            observed_network_hosts: vec!["registry.npmjs.org".into()],
+            observed_fs_writes: vec!["/tmp/test.txt".into()],
+            observed_process_spawns: vec!["node".into()],
+            metrics: SandboxMetrics {
+                engine_used: "wasm".into(),
+                wall_time_ms: 42,
+                exit_code: 0,
+                observations_count: 3,
+                findings_count: 0,
+            },
+        };
+
+        store_result(canonical, &mock_result);
+
+        // Verify result is retrievable
+        let loaded = get_result(canonical).expect("should retrieve stored result");
+        assert_eq!(loaded.observed_network_hosts, vec!["registry.npmjs.org"]);
+        assert_eq!(loaded.observed_fs_writes, vec!["/tmp/test.txt"]);
+        assert_eq!(loaded.metrics.engine_used, "wasm");
+
+        // Clear in-memory map to test pure disk loading
+        if let Ok(mut store) = CANONICAL_STORE.lock() {
+            store.clear();
+        }
+
+        let disk_loaded = get_result(canonical).expect("should retrieve from disk after memory clear");
+        assert_eq!(disk_loaded.observed_process_spawns, vec!["node"]);
+
+        restore_env("CREG_SANDBOX_STORE_DIR", prev_dir);
     }
 
     fn restore_env(name: &str, previous: Option<String>) {

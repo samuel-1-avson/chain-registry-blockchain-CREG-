@@ -7,17 +7,25 @@
 // This implementation covers the three PBFT phases:
 //   PRE-PREPARE → PREPARE → COMMIT
 
+pub mod bls_aggregate;
 pub mod evidence_votes;
 pub mod forced_inclusion;
 pub mod pbft;
+pub mod slashing_relay;
 pub mod validator_set;
 pub mod vrf;
 
 // anyhow::Result is unused here
 // common imports are handled within submodules
+pub use bls_aggregate::{
+    aggregate_signatures, verify_aggregate_signature, BlsAggregateSignature, BlsKeypair,
+    BlsPublicKey, BlsSignature,
+};
 pub use evidence_votes::{aggregate_evidence_votes, EvidenceVoteOutcome};
 pub use pbft::{verify_pbft_phase_signature, PbftConfig, PbftEngine, ViewChangeSignal};
+pub use slashing_relay::{EquivocationDetector, EquivocationEvidence, ObservedVote};
 pub use validator_set::ValidatorSet;
 
 pub mod vote_accumulator;
 pub use vote_accumulator::{CommitOutcome, IncomingVote, VoteAccumulator};
+

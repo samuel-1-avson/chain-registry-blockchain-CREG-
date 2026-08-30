@@ -14,7 +14,8 @@ use common::proto::{
 };
 use common::proto::{
     BlockRequest, BlockResponse, ChainStats as ProtoStats, Empty, GetVersionRequest,
-    GetVersionResponse, RegistryEvent as ProtoEvent, SubmitRequest, SubmitResponse, WatchRequest,
+    GetVersionResponse, PublishChunk, RegistryEvent as ProtoEvent, SubmitRequest, SubmitResponse,
+    WatchRequest,
 };
 
 /// ISSUE-011 / CR-02 / ADR-009: leftover publisher Groth16 fields must be
@@ -110,93 +111,7 @@ impl RegistryService for MyRegistry {
         request: Request<SubmitRequest>,
     ) -> Result<Response<SubmitResponse>, Status> {
         let req = request.into_inner();
-        reject_retired_publisher_zk_attestation(&req)?;
-
-        let manifest = if req.manifest_json.trim().is_empty() {
-            common::PackageManifest::default()
-        } else {
-            serde_json::from_str::<common::PackageManifest>(&req.manifest_json)
-                .map_err(|e| Status::invalid_argument(format!("Invalid manifest payload: {}", e)))?
-        };
-
-        let derived_manifest_hash_hex = common::sha256_hex(
-            &serde_json::to_vec(&manifest)
-                .map_err(|e| Status::internal(format!("Serialize manifest: {}", e)))?,
-        );
-        if !req.manifest_hash.trim().is_empty()
-            && !req
-                .manifest_hash
-                .eq_ignore_ascii_case(&derived_manifest_hash_hex)
-        {
-            return Err(Status::invalid_argument(
-                "manifest_hash does not match manifest_json",
-            ));
-        }
-        let pkg_id = common::PackageId::new(&req.ecosystem, &req.name, &req.version);
-        let ownership_proof = if req.ownership_proof_json.trim().is_empty() {
-            None
-        } else {
-            Some(
-                serde_json::from_str(&req.ownership_proof_json).map_err(|error| {
-                    Status::invalid_argument(format!("Invalid ownership proof: {error}"))
-                })?,
-            )
-        };
-        let namespace_authority_certificate =
-            if req.namespace_authority_certificate_json.trim().is_empty() {
-                None
-            } else {
-                Some(
-                    serde_json::from_str(&req.namespace_authority_certificate_json).map_err(
-                        |error| {
-                            Status::invalid_argument(format!(
-                                "Invalid namespace authority certificate: {error}"
-                            ))
-                        },
-                    )?,
-                )
-            };
-        let submitted_at = if req.publisher_issued_at == 0 {
-            if !req.publisher_evm_signature.trim().is_empty() {
-                return Err(Status::invalid_argument(
-                    "publisher_issued_at is required for a dual-key publisher proof",
-                ));
-            }
-            chrono::Utc::now()
-        } else {
-            chrono::DateTime::<chrono::Utc>::from_timestamp(req.publisher_issued_at, 0)
-                .ok_or_else(|| Status::invalid_argument("publisher_issued_at is invalid"))?
-        };
-        let publish_req = common::PublishRequest {
-            id: pkg_id,
-            content_hash: req.content_hash.clone(),
-            ipfs_cid: req.ipfs_cid.clone(),
-            publisher_address: common::canonical_publisher_address(&req.publisher_address),
-            publisher_pubkey: req.publisher_pubkey.clone(),
-            signature: req.signature.clone(),
-            manifest,
-            submitted_at,
-            shielded: req.shielded,
-            key_bundle: (!req.key_bundle.is_empty()).then_some(req.key_bundle.clone()),
-            pgp_signature: (!req.pgp_signature.is_empty()).then_some(req.pgp_signature.clone()),
-            pgp_public_key: (!req.pgp_public_key.is_empty()).then_some(req.pgp_public_key.clone()),
-            publisher_pubkeys: req.publisher_pubkeys.clone(),
-            signatures: req.signatures.clone(),
-            threshold: req.threshold as usize,
-            publisher_evm_signature: req.publisher_evm_signature.clone(),
-            publisher_nonce: req.publisher_nonce.clone(),
-            publisher_expires_at: req.publisher_expires_at,
-            source_hash: req.source_hash.clone(),
-            manifest_hash: derived_manifest_hash_hex,
-            ownership_claim: req.ownership_claim.clone(),
-            publisher_chain_id: req.publisher_chain_id.clone(),
-            publisher_genesis_hash: req.publisher_genesis_hash.clone(),
-            publisher_staking_contract: req.publisher_staking_contract.clone(),
-            publisher_authorization_version: req.publisher_authorization_version as u16,
-            ownership_proof,
-            namespace_authority_certificate,
-            ..Default::default()
-        };
+        let publish_req = parse_submit_request_to_publish_request(req)?;
 
         crate::package_admission::verify_publish_auth(&self.state, &publish_req)
             .await
@@ -207,10 +122,6 @@ impl RegistryService for MyRegistry {
             publish_req,
             crate::package_admission::AdmissionOptions {
                 surface: crate::package_admission::AdmissionSurface::Grpc,
-                // gRPC is a public submission surface too.  Do not bypass
-                // publisher authentication merely because the transport is
-                // internal-looking; callers must satisfy the same admission
-                // policy as REST.
                 verify_publisher_auth: true,
             },
         )
@@ -225,6 +136,172 @@ impl RegistryService for MyRegistry {
             ),
         }))
     }
+
+    async fn stream_publish_package(
+        &self,
+        request: Request<tonic::Streaming<PublishChunk>>,
+    ) -> Result<Response<SubmitResponse>, Status> {
+        let mut stream = request.into_inner();
+        let first_chunk = stream
+            .message()
+            .await?
+            .ok_or_else(|| Status::invalid_argument("Empty publish stream"))?;
+
+        let metadata = match first_chunk.payload {
+            Some(common::proto::publish_chunk::Payload::Metadata(meta)) => meta,
+            _ => {
+                return Err(Status::invalid_argument(
+                    "First stream chunk must contain metadata",
+                ))
+            }
+        };
+
+        let mut publish_req = parse_submit_request_to_publish_request(metadata)?;
+        let mut total_bytes = 0usize;
+        let mut full_payload = Vec::new();
+        const MAX_STREAM_BYTES: usize = 64 * 1024 * 1024; // 64 MB
+
+        while let Some(chunk) = stream.message().await? {
+            if let Some(common::proto::publish_chunk::Payload::ChunkData(bytes)) = chunk.payload {
+                total_bytes = total_bytes.saturating_add(bytes.len());
+                if total_bytes > MAX_STREAM_BYTES {
+                    return Err(Status::invalid_argument(format!(
+                        "Streamed payload exceeds maximum size limit ({} MB)",
+                        MAX_STREAM_BYTES / (1024 * 1024)
+                    )));
+                }
+                full_payload.extend_from_slice(&bytes);
+            }
+        }
+
+        if !full_payload.is_empty() {
+            let actual_hash = common::sha256_hex(&full_payload);
+            if !publish_req.content_hash.trim().is_empty()
+                && !publish_req.content_hash.eq_ignore_ascii_case(&actual_hash)
+            {
+                return Err(Status::invalid_argument(format!(
+                    "Streamed content hash mismatch: declared {}, actual {}",
+                    publish_req.content_hash, actual_hash
+                )));
+            }
+            publish_req.content_hash = actual_hash;
+        }
+
+        crate::package_admission::verify_publish_auth(&self.state, &publish_req)
+            .await
+            .map_err(admission_status)?;
+
+        let receipt = crate::package_admission::admit_publish_request(
+            &self.state,
+            publish_req,
+            crate::package_admission::AdmissionOptions {
+                surface: crate::package_admission::AdmissionSurface::Grpc,
+                verify_publisher_auth: true,
+            },
+        )
+        .await
+        .map_err(admission_status)?;
+
+        Ok(Response::new(SubmitResponse {
+            accepted: true,
+            message: format!(
+                "{} accepted into pending pool via binary stream ({} pending)",
+                receipt.canonical, receipt.pending_count
+            ),
+        }))
+    }
+}
+
+fn parse_submit_request_to_publish_request(
+    req: SubmitRequest,
+) -> Result<common::PublishRequest, Status> {
+    reject_retired_publisher_zk_attestation(&req)?;
+
+    let manifest = if req.manifest_json.trim().is_empty() {
+        common::PackageManifest::default()
+    } else {
+        serde_json::from_str::<common::PackageManifest>(&req.manifest_json)
+            .map_err(|e| Status::invalid_argument(format!("Invalid manifest payload: {}", e)))?
+    };
+
+    let derived_manifest_hash_hex = common::sha256_hex(
+        &serde_json::to_vec(&manifest)
+            .map_err(|e| Status::internal(format!("Serialize manifest: {}", e)))?,
+    );
+    if !req.manifest_hash.trim().is_empty()
+        && !req
+            .manifest_hash
+            .eq_ignore_ascii_case(&derived_manifest_hash_hex)
+    {
+        return Err(Status::invalid_argument(
+            "manifest_hash does not match manifest_json",
+        ));
+    }
+    let pkg_id = common::PackageId::new(&req.ecosystem, &req.name, &req.version);
+    let ownership_proof = if req.ownership_proof_json.trim().is_empty() {
+        None
+    } else {
+        Some(
+            serde_json::from_str(&req.ownership_proof_json).map_err(|error| {
+                Status::invalid_argument(format!("Invalid ownership proof: {error}"))
+            })?,
+        )
+    };
+    let namespace_authority_certificate =
+        if req.namespace_authority_certificate_json.trim().is_empty() {
+            None
+        } else {
+            Some(
+                serde_json::from_str(&req.namespace_authority_certificate_json).map_err(
+                    |error| {
+                        Status::invalid_argument(format!(
+                            "Invalid namespace authority certificate: {error}"
+                        ))
+                    },
+                )?,
+            )
+        };
+    let submitted_at = if req.publisher_issued_at == 0 {
+        if !req.publisher_evm_signature.trim().is_empty() {
+            return Err(Status::invalid_argument(
+                "publisher_issued_at is required for a dual-key publisher proof",
+            ));
+        }
+        chrono::Utc::now()
+    } else {
+        chrono::DateTime::<chrono::Utc>::from_timestamp(req.publisher_issued_at, 0)
+            .ok_or_else(|| Status::invalid_argument("publisher_issued_at is invalid"))?
+    };
+    Ok(common::PublishRequest {
+        id: pkg_id,
+        content_hash: req.content_hash.clone(),
+        ipfs_cid: req.ipfs_cid.clone(),
+        publisher_address: common::canonical_publisher_address(&req.publisher_address),
+        publisher_pubkey: req.publisher_pubkey.clone(),
+        signature: req.signature.clone(),
+        manifest,
+        submitted_at,
+        shielded: req.shielded,
+        key_bundle: (!req.key_bundle.is_empty()).then_some(req.key_bundle.clone()),
+        pgp_signature: (!req.pgp_signature.is_empty()).then_some(req.pgp_signature.clone()),
+        pgp_public_key: (!req.pgp_public_key.is_empty()).then_some(req.pgp_public_key.clone()),
+        publisher_pubkeys: req.publisher_pubkeys.clone(),
+        signatures: req.signatures.clone(),
+        threshold: req.threshold as usize,
+        publisher_evm_signature: req.publisher_evm_signature.clone(),
+        publisher_nonce: req.publisher_nonce.clone(),
+        publisher_expires_at: req.publisher_expires_at,
+        source_hash: req.source_hash.clone(),
+        manifest_hash: derived_manifest_hash_hex,
+        ownership_claim: req.ownership_claim.clone(),
+        publisher_chain_id: req.publisher_chain_id.clone(),
+        publisher_genesis_hash: req.publisher_genesis_hash.clone(),
+        publisher_staking_contract: req.publisher_staking_contract.clone(),
+        publisher_authorization_version: req.publisher_authorization_version as u16,
+        ownership_proof,
+        namespace_authority_certificate,
+        ..Default::default()
+    })
 }
 
 pub struct MyWatcher {
@@ -373,5 +450,59 @@ mod tests {
             ..Default::default()
         };
         assert!(reject_retired_publisher_zk_attestation(&leftover_proof).is_err());
+    }
+
+    #[tokio::test]
+    async fn stream_publish_package_rejects_empty_stream() {
+        use common::proto::registry_service_server::RegistryService;
+        let tempdir = tempfile::tempdir().unwrap();
+        let chain = crate::chain_store::ChainStore::open(tempdir.path()).unwrap();
+        let state = std::sync::Arc::new(tokio::sync::RwLock::new(crate::NodeState {
+            chain,
+            pending_pool: crate::pending_pool::PendingPool::new(),
+            publisher_index: crate::publisher_index::PublisherIndex::new(),
+            validator_set_bootstrap: common::ValidatorSet::default(),
+            validator_set: common::ValidatorSet::default(),
+            package_rounds: std::collections::HashMap::new(),
+            package_committees: std::collections::HashMap::new(),
+            config: crate::config::NodeConfig {
+                data_dir: tempdir.path().to_path_buf(),
+                ..Default::default()
+            },
+            p2p_status: crate::P2PStatus::default(),
+            bridge_status: crate::BridgeStatus::default(),
+            vrf_proofs: std::collections::HashMap::new(),
+            decryption_shares: std::collections::HashMap::new(),
+            validator_registrations: std::collections::HashMap::new(),
+            validator_set_sync: crate::state::ValidatorSetSyncStatus::default(),
+            view_change_certs: std::collections::HashMap::new(),
+            reorgs: Vec::new(),
+            pbft_engine: crate::state::PbftEngine::new(),
+            forced_inclusion_tracker: crate::state::ForcedInclusionTracker::new(),
+            sync_lag_blocks: 0,
+            sync_max_peer_tip: 0,
+            reward_emissions_succeeded: 0,
+            reward_emissions_failed: 0,
+            treasury_balance: 0,
+            pending_rewards_estimate: 0,
+            total_rewards_distributed: 0,
+            rewards_pool_balance: 0,
+            last_incentives_refresh: None,
+            publisher_stake_cache: std::collections::HashMap::new(),
+        }));
+
+        let registry = super::MyRegistry::new(state);
+        use tonic::codec::Codec;
+        let mut codec = tonic::codec::ProstCodec::<
+            common::proto::PublishChunk,
+            common::proto::PublishChunk,
+        >::default();
+        let empty_stream =
+            tonic::Streaming::new_empty(codec.decoder(), tonic::body::BoxBody::default());
+        let err = registry
+            .stream_publish_package(tonic::Request::new(empty_stream))
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
     }
 }

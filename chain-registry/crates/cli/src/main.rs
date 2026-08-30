@@ -20,16 +20,19 @@ mod install;
 mod intercept;
 mod keygen;
 mod lockfile;
+pub mod lockfile_attestation;
 mod multisig;
 mod osv_snapshot;
 mod output;
 mod policy;
 mod publish;
 mod recovery;
+pub mod registry_proxy;
 mod retry;
 mod sbom;
 mod search;
 mod stake;
+pub mod stress_test;
 mod supply_chain;
 mod testnet;
 mod update;
@@ -704,6 +707,42 @@ enum MultisigCommands {
 
 #[derive(Subcommand)]
 enum TestnetCommands {
+    /// Start a local multi-node testnet cluster
+    Start {
+        /// Number of validator nodes to launch (default: 4)
+        #[arg(short, long, default_value = "4")]
+        nodes: usize,
+        /// Base port for cluster services (default: 8080)
+        #[arg(short, long, default_value = "8080")]
+        port_base: u16,
+        /// Cluster data directory (defaults to ~/.creg/testnet)
+        #[arg(long)]
+        data_dir: Option<std::path::PathBuf>,
+        /// Run cluster in background
+        #[arg(long)]
+        background: bool,
+    },
+    /// Stop running local multi-node testnet cluster
+    Stop {
+        /// Cluster data directory
+        #[arg(long)]
+        data_dir: Option<std::path::PathBuf>,
+    },
+    /// Run high-throughput stress test against the testnet pipeline (1,000+ TPS)
+    Stress {
+        /// Target throughput in packages/sec
+        #[arg(short, long, default_value = "1000")]
+        target_tps: usize,
+        /// Test duration in seconds
+        #[arg(short, long, default_value = "5")]
+        duration_secs: u64,
+        /// Concurrent pipeline worker count
+        #[arg(short, long, default_value = "8")]
+        concurrent_clients: usize,
+        /// Target node URL (omitted runs in-process high-throughput consensus benchmark)
+        #[arg(long)]
+        node_url: Option<String>,
+    },
     /// Request test tokens from the faucet
     Drip {
         /// Ethereum address to receive tokens
@@ -1492,6 +1531,31 @@ async fn run(cli: Cli) -> Result<()> {
             chain_spec::run(command).await?;
         }
         Commands::Testnet { command } => match command {
+            TestnetCommands::Start {
+                nodes,
+                port_base,
+                data_dir,
+                background,
+            } => {
+                testnet::start_cluster(nodes, port_base, data_dir, background).await?;
+            }
+            TestnetCommands::Stop { data_dir } => {
+                testnet::stop_cluster(data_dir).await?;
+            }
+            TestnetCommands::Stress {
+                target_tps,
+                duration_secs,
+                concurrent_clients,
+                node_url,
+            } => {
+                let config = stress_test::StressTestConfig {
+                    target_tps,
+                    duration_secs,
+                    concurrent_clients,
+                    node_url,
+                };
+                stress_test::run_stress_test(config).await?;
+            }
             TestnetCommands::Drip {
                 address,
                 faucet_url,

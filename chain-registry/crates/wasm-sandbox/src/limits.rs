@@ -16,6 +16,8 @@ pub struct ResourceLimits {
     pub max_syscalls: u64,
     /// Maximum stack size in bytes
     pub max_stack_size: usize,
+    /// Maximum WASM instruction fuel units
+    pub max_fuel: u64,
 }
 
 impl Default for ResourceLimits {
@@ -27,6 +29,7 @@ impl Default for ResourceLimits {
             max_open_files: 10,
             max_syscalls: 10000,
             max_stack_size: 8 * 1024 * 1024, // 8 MB
+            max_fuel: 500_000_000,           // 500M fuel units
         }
     }
 }
@@ -41,6 +44,7 @@ impl ResourceLimits {
             max_open_files: 5,
             max_syscalls: 1000,
             max_stack_size: 2 * 1024 * 1024, // 2 MB
+            max_fuel: 100_000_000,           // 100M fuel units
         }
     }
 
@@ -53,6 +57,7 @@ impl ResourceLimits {
             max_open_files: 50,
             max_syscalls: 100000,
             max_stack_size: 16 * 1024 * 1024, // 16 MB
+            max_fuel: 2_000_000_000,          // 2B fuel units
         }
     }
 
@@ -65,6 +70,12 @@ impl ResourceLimits {
     /// Set time limit
     pub fn with_time_ms(mut self, ms: u64) -> Self {
         self.max_time_ms = ms;
+        self
+    }
+
+    /// Set fuel limit
+    pub fn with_fuel(mut self, fuel: u64) -> Self {
+        self.max_fuel = fuel;
         self
     }
 }

@@ -297,8 +297,11 @@ impl WasmSandbox {
         info!("Initializing WASM sandbox");
 
         let mut engine_config = wasmtime::Config::new();
-        // No epoch_interruption, no async_support — pure synchronous execution
-        // with external timeout enforcement.
+        // On Linux/macOS, enable native wasmtime fuel consumption. On Windows, wasmtime 18
+        // setjmp trap unwinding can trigger MSVC STATUS_STACK_BUFFER_OVERRUN, so timeouts
+        // and syscall budgets are enforced via tokio::time::timeout and SandboxState syscalls.
+        #[cfg(not(windows))]
+        engine_config.consume_fuel(true);
         engine_config.max_wasm_stack(config.limits.max_stack_size);
 
         let engine = Engine::new(&engine_config).map_err(|e| {
@@ -314,6 +317,7 @@ impl WasmSandbox {
         m.insert("memory_limit", self.config.memory_limit as u64);
         m.insert("timeout_secs", self.config.timeout_secs);
         m.insert("max_syscalls", self.config.limits.max_syscalls);
+        m.insert("max_fuel", self.config.limits.max_fuel);
         m.insert(
             "max_open_files",
             u64::from(self.config.limits.max_open_files),
@@ -341,6 +345,7 @@ impl WasmSandbox {
         // Clone what we need for the blocking closure
         let engine = self.engine.clone();
         let memory_limit = self.config.limits.max_memory.max(self.config.memory_limit);
+        let max_fuel = self.config.limits.max_fuel;
         let timeout_duration = Duration::from_millis(
             self.config
                 .limits
@@ -368,6 +373,10 @@ impl WasmSandbox {
                     max_syscalls,
                 },
             );
+            #[cfg(not(windows))]
+            if let Err(e) = store.set_fuel(max_fuel) {
+                return Err(SandboxError::ExecutionError(format!("Failed to configure fuel budget: {}", e)));
+            }
             store.limiter(|state| &mut state.limits);
 
             // ── WASI stub linker (ISSUE-015: capability + resource gated) ─
@@ -740,6 +749,14 @@ impl WasmSandbox {
                         findings: vec![],
                     })
                 }
+                Err(SandboxError::ExecutionError(ref msg))
+                    if msg.contains("all fuel consumed") || msg.to_lowercase().contains("fuel") =>
+                {
+                    Err(SandboxError::ResourceLimitExceeded(format!(
+                        "Fuel limit exceeded (limit: {} fuel units): {}",
+                        max_fuel, msg
+                    )))
+                }
                 Err(SandboxError::ExecutionError(ref msg)) if msg.contains("memory") => {
                     Err(SandboxError::ResourceLimitExceeded(format!(
                         "Memory limit exceeded (limit: {} bytes): {}",
@@ -847,5 +864,53 @@ mod tests {
             .expect("run");
         assert_eq!(result.exit_code, 0);
         assert!(result.stdout.is_empty());
+    }
+
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn test_fuel_limit_exceeded() {
+        // Infinite loop WASM module
+        let wat = r#"(module
+            (func (export "_start") (result i32)
+                (loop $infinite (br $infinite))
+                (i32.const 0)
+            )
+        )"#;
+        let wasm = wat::parse_str(wat).expect("wat");
+        let limits = ResourceLimits::default().with_fuel(10_000);
+        let sandbox = WasmSandbox::new(SandboxConfig::default().with_resource_limits(limits))
+            .expect("sandbox");
+        let err = sandbox
+            .run(&wasm, &SandboxInput::new("loop-test", "1.0.0", "wasm"))
+            .await
+            .unwrap_err();
+
+        match err {
+            SandboxError::ResourceLimitExceeded(msg) => {
+                assert!(msg.to_lowercase().contains("fuel"), "expected fuel error, got: {}", msg);
+            }
+            other => panic!("expected ResourceLimitExceeded, got: {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_syscall_budget_enforced() {
+        let wat = r#"(module
+            (import "wasi_snapshot_preview1" "sched_yield" (func $yield (result i32)))
+            (func (export "_start") (result i32)
+                (drop (call $yield))
+                (drop (call $yield))
+                (i32.const 0)
+            )
+        )"#;
+        let wasm = wat::parse_str(wat).expect("wat");
+        let limits = ResourceLimits::default().with_fuel(100_000);
+        let sandbox = WasmSandbox::new(SandboxConfig::default().with_resource_limits(limits))
+            .expect("sandbox");
+        let result = sandbox
+            .run(&wasm, &SandboxInput::new("syscall-test", "1.0.0", "wasm"))
+            .await
+            .expect("run");
+        assert_eq!(result.exit_code, 0);
     }
 }

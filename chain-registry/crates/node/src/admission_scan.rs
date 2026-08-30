@@ -137,11 +137,19 @@ pub async fn run_pre_mempool_yara_gate(
         });
     }
 
-    let matches = ml_validator::deep_scan::scan_tarball_with_yara(&payload, &request.id.ecosystem)
-        .map_err(|source| AdmissionScanError::ExtractionFailed {
-            canonical: request.id.canonical(),
-            source,
-        })?;
+    let ecosystem = request.id.ecosystem.clone();
+    let matches = tokio::task::spawn_blocking(move || {
+        ml_validator::deep_scan::scan_tarball_with_yara(&payload, &ecosystem)
+    })
+    .await
+    .map_err(|e| AdmissionScanError::ExtractionFailed {
+        canonical: request.id.canonical(),
+        source: ml_validator::MlError::ExtractionError(e.to_string()),
+    })?
+    .map_err(|source| AdmissionScanError::ExtractionFailed {
+        canonical: request.id.canonical(),
+        source,
+    })?;
 
     let blocking: Vec<_> = matches
         .into_iter()

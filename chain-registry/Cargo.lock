@@ -2133,6 +2133,8 @@ dependencies = [
  "clap_complete",
  "colored",
  "common",
+ "consensus",
+ "cross-chain",
  "crossterm",
  "dialoguer",
  "dirs 5.0.1",
@@ -2184,6 +2186,7 @@ dependencies = [
  "chrono",
  "common",
  "consensus",
+ "cross-chain",
  "db-sync",
  "ed25519-dalek",
  "flate2",
@@ -2499,6 +2502,10 @@ name = "consensus"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ark-bn254",
+ "ark-ec",
+ "ark-ff 0.4.2",
+ "ark-serialize 0.4.2",
  "chrono",
  "common",
  "ed25519-dalek",
@@ -2961,9 +2968,11 @@ name = "cross-chain"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "common",
  "ethers",
  "futures",
+ "hex",
  "reqwest 0.11.27",
  "serde",
  "serde_json",

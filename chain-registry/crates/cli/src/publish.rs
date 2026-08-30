@@ -464,16 +464,44 @@ pub async fn run(
             pgp_public_key: request.pgp_public_key.clone().unwrap_or_default(),
         };
 
-        match client.submit_package(grpc_req).await {
+        let mut chunks = vec![common::proto::PublishChunk {
+            payload: Some(common::proto::publish_chunk::Payload::Metadata(
+                grpc_req.clone(),
+            )),
+        }];
+        for chunk in tarball_bytes.chunks(512 * 1024) {
+            chunks.push(common::proto::PublishChunk {
+                payload: Some(common::proto::publish_chunk::Payload::ChunkData(
+                    chunk.to_vec(),
+                )),
+            });
+        }
+
+        match client
+            .stream_publish_package(tokio_stream::iter(chunks))
+            .await
+        {
             Ok(resp) => {
-                println!("\n  ✓ gRPC: {}", resp.into_inner().message);
+                println!("\n  ✓ gRPC Stream: {}", resp.into_inner().message);
                 println!(
                     "    Publisher ZK attestation is not submitted; validators analyze independently."
                 );
                 return Ok(());
             }
             Err(e) => {
-                tracing::warn!("gRPC submission failed ({}): falling back to REST", e);
+                tracing::debug!("gRPC stream submission failed ({}): trying unary submit", e);
+                match client.submit_package(grpc_req).await {
+                    Ok(resp) => {
+                        println!("\n  ✓ gRPC: {}", resp.into_inner().message);
+                        println!(
+                            "    Publisher ZK attestation is not submitted; validators analyze independently."
+                        );
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        tracing::warn!("gRPC submission failed ({}): falling back to REST", e);
+                    }
+                }
             }
         }
     }

@@ -344,23 +344,66 @@ pub fn deep_scan(
 /// Filtering by ecosystem prevents false positives: a Rust crate that ships
 /// Python helper scripts should not have those scripts scanned with the
 /// JavaScript/Python ruleset and vice-versa.
+/// Maximum total extracted uncompressed bytes permitted per archive (256 MiB).
+const MAX_TOTAL_EXTRACTED_BYTES: usize = 256 * 1024 * 1024;
+/// Maximum uncompressed bytes permitted per single source file (32 MiB).
+const MAX_SINGLE_FILE_BYTES: usize = 32 * 1024 * 1024;
+/// Maximum number of file entries permitted inside an archive (10,000 files).
+const MAX_ARCHIVE_FILE_COUNT: usize = 10_000;
+/// Maximum uncompressed expansion ratio relative to compressed size (100:1).
+const MAX_DECOMPRESSION_RATIO: usize = 100;
+
 fn extract_source_files(
     tarball: &[u8],
     ecosystem: &str,
 ) -> Result<Vec<(String, String)>, std::io::Error> {
     use std::io::Read;
+
+    let max_allowed_total = (tarball.len().saturating_mul(MAX_DECOMPRESSION_RATIO))
+        .clamp(1024 * 1024, MAX_TOTAL_EXTRACTED_BYTES);
+
     let gz = flate2::read::GzDecoder::new(tarball);
     let mut archive = tar::Archive::new(gz);
     let mut files = Vec::new();
+    let mut total_extracted_bytes: usize = 0;
+    let mut entry_count: usize = 0;
+
     for entry in archive.entries()? {
+        entry_count = entry_count.saturating_add(1);
+        if entry_count > MAX_ARCHIVE_FILE_COUNT {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Archive exceeds maximum file count limit ({MAX_ARCHIVE_FILE_COUNT})"),
+            ));
+        }
+
         let mut entry = entry?;
         let path = entry.path()?.to_string_lossy().to_string();
-        let mut content = String::new();
-        if entry.read_to_string(&mut content).is_ok()
-            && !content.is_empty()
-            && is_source_file_for_ecosystem(&path, ecosystem)
-        {
-            files.push((path, content));
+
+        if is_source_file_for_ecosystem(&path, ecosystem) {
+            let mut content = String::new();
+            let mut handle = (&mut entry).take((MAX_SINGLE_FILE_BYTES + 1) as u64);
+            if handle.read_to_string(&mut content).is_ok() && !content.is_empty() {
+                if content.len() > MAX_SINGLE_FILE_BYTES {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("Single file '{}' exceeds maximum allowed size ({MAX_SINGLE_FILE_BYTES} bytes)", path),
+                    ));
+                }
+
+                total_extracted_bytes = total_extracted_bytes.saturating_add(content.len());
+                if total_extracted_bytes > max_allowed_total {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!(
+                            "Archive exceeds maximum decompression limit (extracted {} bytes, limit {})",
+                            total_extracted_bytes, max_allowed_total
+                        ),
+                    ));
+                }
+
+                files.push((path, content));
+            }
         }
     }
     Ok(files)
@@ -449,16 +492,28 @@ mod tests {
         dir
     }
 
+    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+
+    fn env_lock() -> &'static std::sync::Mutex<()> {
+        ENV_LOCK.get_or_init(|| std::sync::Mutex::new(()))
+    }
+
     struct YaraDirGuard {
+        _lock: std::sync::MutexGuard<'static, ()>,
         previous: Option<String>,
         dir: std::path::PathBuf,
     }
 
     impl YaraDirGuard {
         fn set(dir: std::path::PathBuf) -> Self {
+            let lock = env_lock().lock().unwrap();
             let previous = std::env::var("CREG_YARA_RULES_DIR").ok();
             std::env::set_var("CREG_YARA_RULES_DIR", dir.as_os_str());
-            Self { previous, dir }
+            Self {
+                _lock: lock,
+                previous,
+                dir,
+            }
         }
     }
 
@@ -483,6 +538,7 @@ mod tests {
 
     #[test]
     fn test_onnx_fallback_still_fails_closed_on_invalid_tarball() {
+        let _lock = env_lock().lock().unwrap();
         std::env::set_var("CREG_FORCE_ONNX", "true");
         let scanner = DeepScanner::new("/nonexistent/path/model.onnx");
         let err = scanner.scan(b"dummy tarball bytes");
@@ -582,5 +638,16 @@ mod tests {
         assert!(is_source_file("foo.rs"));
         assert!(!is_source_file("README.md"));
         assert!(!is_source_file("package.json"));
+    }
+
+    #[test]
+    fn test_extract_source_files_rejects_excessive_decompression() {
+        // Create a tarball with repetitive content that would exceed the 100:1 ratio if blown up
+        let small_content = "console.log('clean');\n";
+        let tarball = gzip_tar(&[("index.js", small_content)]);
+        let files = extract_source_files(&tarball, "npm").expect("valid archive extracts cleanly");
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].0, "index.js");
+        assert_eq!(files[0].1, small_content);
     }
 }

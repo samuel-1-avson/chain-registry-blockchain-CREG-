@@ -6,8 +6,10 @@
 use std::{
     collections::{hash_map::Entry, HashMap},
     sync::Arc,
+    time::{Duration, Instant},
 };
 
+use alloy::primitives::{Address, U256};
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use tokio::sync::RwLock;
@@ -250,9 +252,34 @@ pub struct NodeState {
     pub total_rewards_distributed: u128,
     pub rewards_pool_balance: u128,
     pub last_incentives_refresh: Option<u64>,
+    /// In-memory cache of publisher staked balances: Address -> (staked_balance, cached_at).
+    pub publisher_stake_cache: HashMap<Address, (U256, Instant)>,
 }
 
+/// Default time-to-live for in-memory publisher stake cache entries.
+pub const PUBLISHER_STAKE_CACHE_TTL: Duration = Duration::from_secs(300);
+
 impl NodeState {
+    /// Retrieve cached publisher stake if present and unexpired.
+    pub fn get_cached_publisher_stake(&self, publisher: &Address) -> Option<U256> {
+        let (staked, cached_at) = self.publisher_stake_cache.get(publisher)?;
+        if cached_at.elapsed() <= PUBLISHER_STAKE_CACHE_TTL {
+            Some(*staked)
+        } else {
+            None
+        }
+    }
+
+    /// Insert or update publisher stake balance in the in-memory cache.
+    pub fn set_cached_publisher_stake(&mut self, publisher: Address, staked: U256) {
+        self.publisher_stake_cache
+            .insert(publisher, (staked, Instant::now()));
+    }
+
+    /// Invalidate/evict cached publisher stake for a specific address.
+    pub fn invalidate_publisher_stake(&mut self, publisher: &Address) {
+        self.publisher_stake_cache.remove(publisher);
+    }
     /// Record a chain reorganization event so it is visible via `/v1/reorgs`
     /// and the explorer Reorgs tab. Newest events are kept at the front.
     pub fn record_reorg(

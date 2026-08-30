@@ -358,6 +358,21 @@ impl PbftRound {
         Ok(false)
     }
 
+    /// Pipelined fast-path helper: If prepare quorum is met and the caller provides
+    /// an auto-commit signature, applies commit and checks if the block reaches immediate finality.
+    pub fn try_fast_commit(
+        &mut self,
+        validator_id: &str,
+        prepare_sig: BlockSignature,
+        commit_sig: BlockSignature,
+    ) -> Result<bool> {
+        let reached_prepare_quorum = self.receive_prepare(validator_id, prepare_sig)?;
+        if reached_prepare_quorum || self.phase == PbftPhase::Commit {
+            return self.receive_commit(validator_id, commit_sig);
+        }
+        Ok(false)
+    }
+
     fn verify_block_signature(
         &self,
         phase: &str,
@@ -542,6 +557,21 @@ impl PbftEngine {
             .get_mut(block_hash)
             .ok_or_else(|| anyhow::anyhow!("No active round for block {}", block_hash))?;
         round.receive_commit(vid, sig)
+    }
+
+    /// Pipelined fast commit directly on active round
+    pub fn try_fast_commit(
+        &mut self,
+        block_hash: &str,
+        vid: &str,
+        prepare_sig: BlockSignature,
+        commit_sig: BlockSignature,
+    ) -> Result<bool> {
+        let round = self
+            .rounds
+            .get_mut(block_hash)
+            .ok_or_else(|| anyhow::anyhow!("No active round for block {}", block_hash))?;
+        round.try_fast_commit(vid, prepare_sig, commit_sig)
     }
 
     pub fn finalised_sigs(&self, block_hash: &str) -> Vec<BlockSignature> {
@@ -933,5 +963,52 @@ mod tests {
         let signing_key = SigningKey::from_bytes(&[7u8; 32]);
         let mut round = PbftRound::new(test_block("node-1"), validator_set("node-1", &signing_key));
         assert!(round.record_view_change("outsider", 1).is_err());
+    }
+
+    #[test]
+    fn test_pipelined_fast_commit() {
+        use super::PbftEngine;
+
+        let k0 = SigningKey::from_bytes(&[1u8; 32]);
+        let k1 = SigningKey::from_bytes(&[2u8; 32]);
+        let k2 = SigningKey::from_bytes(&[3u8; 32]);
+        let k3 = SigningKey::from_bytes(&[4u8; 32]);
+
+        let mut vs = ValidatorSet::new();
+        for (vid, k) in [("v0", &k0), ("v1", &k1), ("v2", &k2), ("v3", &k3)] {
+            vs.add(ValidatorInfo {
+                id: vid.into(),
+                pubkey: hex::encode(k.verifying_key().as_bytes()),
+                eth_address: None,
+                stake: 100,
+                reputation: 100,
+                is_active: true,
+            });
+        }
+
+        let proposer = selected_proposer(&vs, &"11".repeat(32));
+        let mut engine = PbftEngine::new();
+        let hash = engine.start_round(test_block(&proposer), vs).unwrap();
+
+        // v0 prepares
+        engine.prepare(&hash, "v0", signed_block_vote("v0", &k0, "prepare", &hash)).unwrap();
+        // v1 prepares
+        engine.prepare(&hash, "v1", signed_block_vote("v1", &k1, "prepare", &hash)).unwrap();
+
+        // v2 uses try_fast_commit (providing both prepare and commit together)
+        let fast_res = engine.try_fast_commit(
+            &hash,
+            "v2",
+            signed_block_vote("v2", &k2, "prepare", &hash),
+            signed_block_vote("v2", &k2, "commit", &hash),
+        ).unwrap();
+
+        // Reached prepare quorum and recorded commit, but needs 3 commits for finality
+        assert!(!fast_res);
+
+        // v0 and v1 commit
+        engine.commit(&hash, "v0", signed_block_vote("v0", &k0, "commit", &hash)).unwrap();
+        let finalised = engine.commit(&hash, "v1", signed_block_vote("v1", &k1, "commit", &hash)).unwrap();
+        assert!(finalised, "Block should be finalised after 3 commits");
     }
 }

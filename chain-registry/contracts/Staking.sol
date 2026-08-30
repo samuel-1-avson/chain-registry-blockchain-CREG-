@@ -33,6 +33,9 @@ contract Staking {
     /// Slashing severity levels.
     enum Severity { Low, Medium, Critical }
 
+    /// Ecosystem risk tiers for dynamic publisher staking requirements.
+    enum NamespaceTier { Standard, Infrastructure, RootCritical }
+
     // ── Constants ─────────────────────────────────────────────────────────────
 
     /// Minimum CREG stake to publish a package (1 CREG).
@@ -85,6 +88,8 @@ contract Staking {
     mapping(address => uint256)        public publisherStakes;
     mapping(address => uint256)        public publisherReserved;
     mapping(address => ValidatorEntry) public validators;
+    mapping(bytes32 => NamespaceTier)  public namespaceTiers;
+    mapping(NamespaceTier => uint256)  public tierMinimumStakes;
 
     struct ReleaseLiability {
         address publisher;
@@ -138,11 +143,11 @@ contract Staking {
 
     event PublisherStaked        (address indexed publisher, uint256 amount);
     event PublisherUnstaked      (address indexed publisher, uint256 amount);
+    event NamespaceTierSet       (bytes32 indexed namespaceHash, NamespaceTier tier);
+    event TierMinimumStakeSet    (NamespaceTier indexed tier, uint256 minimumStake);
     event PublisherLiabilityReserved(bytes32 indexed packageKey, address indexed publisher, uint256 bond);
     event PublisherLiabilityReleased(bytes32 indexed packageKey, address indexed publisher, uint256 bond);
     event PublisherLiabilitySlashed(bytes32 indexed packageKey, address indexed publisher, uint256 bond, string reason);
-    event ValidatorApplied       (address indexed validator, uint256 stake);
-    event ValidatorApproved      (address indexed validator);
     event ValidatorApprovedByConsensus(address indexed validator, uint256 nonce, uint256 signerCount);
     event ValidatorApplicationExpired (address indexed validator, uint256 refunded);
     event ValidatorRejected      (address indexed validator);
@@ -185,15 +190,14 @@ contract Staking {
     error LiabilityNotFound          ();
     error InvalidSlashAmount         ();
 
-    // ── Constructor ───────────────────────────────────────────────────────────
-
-    /// @param _governance Address that can approve/reject validators and distribute slash pool.
-    /// @param _cregToken  Address of the deployed CregToken contract.
     constructor(address _governance, address _cregToken) {
         owner = msg.sender;
         governance = _governance;
         cregToken  = CregToken(_cregToken);
         emergencyGovernanceEnabled = true;
+        tierMinimumStakes[NamespaceTier.Standard] = 1 * 10**18;
+        tierMinimumStakes[NamespaceTier.Infrastructure] = 3 * 10**18;
+        tierMinimumStakes[NamespaceTier.RootCritical] = 10 * 10**18;
         DOMAIN_SEPARATOR = keccak256(abi.encode(
             keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
             keccak256(bytes("Chain Registry Validator Admission")),
@@ -203,7 +207,25 @@ contract Staking {
         ));
     }
 
-    // ── Initializer ───────────────────────────────────────────────────────────
+    /// @notice Returns the required publisher stake based on the ecosystem risk tier of the namespace.
+    function getRequiredPublisherStake(bytes32 namespaceHash) external view returns (uint256) {
+        NamespaceTier tier = namespaceTiers[namespaceHash];
+        uint256 requiredStake = tierMinimumStakes[tier];
+        return requiredStake > 0 ? requiredStake : minPublisherStake;
+    }
+
+    /// @notice Set the ecosystem risk tier for a namespace.
+    function setNamespaceTier(bytes32 namespaceHash, NamespaceTier tier) external onlyOwner {
+        namespaceTiers[namespaceHash] = tier;
+        emit NamespaceTierSet(namespaceHash, tier);
+    }
+
+    /// @notice Set the minimum stake requirement for a risk tier.
+    function setTierMinimumStake(NamespaceTier tier, uint256 minimumStake) external onlyOwner {
+        require(minimumStake > 0, "Minimum stake must be positive");
+        tierMinimumStakes[tier] = minimumStake;
+        emit TierMinimumStakeSet(tier, minimumStake);
+    }
 
     function setContracts(address _registry, address _reputation) external onlyOwner {
         require(registry == address(0), "Already set");
@@ -214,7 +236,6 @@ contract Staking {
     /// @notice Authorize or revoke an external contract to call slash /
     ///         slashSeverity, in addition to Registry and Governance.
     /// @dev Governance-only. PackageInsurance.resolveClaim depends on this:
-    ///      without an authorization its slash() call reverts (the ACL only
     ///      permitted registry/governance). Authorize the deployed
     ///      PackageInsurance address before enabling the insurance feature.
     function setSlasher(address slasher, bool allowed) external {

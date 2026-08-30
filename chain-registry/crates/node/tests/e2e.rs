@@ -192,6 +192,7 @@ async fn start_test_node() -> (String, tokio::task::JoinHandle<()>) {
         total_rewards_distributed: 0,
         rewards_pool_balance: 0,
         last_incentives_refresh: None,
+        publisher_stake_cache: std::collections::HashMap::new(),
     }));
 
     let limiter = RateLimiter::new(RateLimitConfig::default());

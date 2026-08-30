@@ -686,6 +686,7 @@ async fn main() -> Result<()> {
         total_rewards_distributed: 0,
         rewards_pool_balance: 0,
         last_incentives_refresh: None,
+        publisher_stake_cache: HashMap::new(),
     }));
 
     // Seed the validator-set history with the bootstrap set effective from
