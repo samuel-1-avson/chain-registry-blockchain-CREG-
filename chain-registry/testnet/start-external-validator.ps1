@@ -84,6 +84,7 @@ $envLines = @(
     "CREG_IPFS_URL=https://ipfs.testnet.cregnet.dev",
     "CREG_P2P_LISTEN=/ip4/0.0.0.0/tcp/9000",
     "CREG_P2P_SEEDS=$bootnode",
+    "CREG_PEERS=https://api.testnet.cregnet.dev",
     "CREG_LISTEN=0.0.0.0:8080",
     "RUST_LOG=info,chain_registry_node=debug,consensus=info"
 )
@@ -143,11 +144,11 @@ Write-Host ""
 Write-Host "--- KEY BACKUP NOTICE ---" -ForegroundColor Yellow
 Write-Host "Validator Key:   $validatorKey" -ForegroundColor Yellow
 Write-Host "Save this key string securely! To restore this node anytime, pass:" -ForegroundColor Gray
-Write-Host "  .\testnet\start-external-validator.ps1 -CustomKey $validatorKey" -ForegroundColor Gray
+Write-Host "  .\testnet\start-external-validator.cmd -CustomKey $validatorKey" -ForegroundColor Gray
 Write-Host ""
 Write-Host "--- REMOTE VERIFICATION ---" -ForegroundColor Yellow
-Write-Host "Local query:     curl http://localhost:$($HttpPort)/v1/health" -ForegroundColor Gray
-Write-Host "Remote query:    curl http://<YOUR_SERVER_IP>:$($HttpPort)/v1/health" -ForegroundColor Gray
+Write-Host "Local query:     curl.exe http://localhost:$($HttpPort)/v1/health" -ForegroundColor Gray
+Write-Host "Remote query:    curl.exe http://<YOUR_SERVER_IP>:$($HttpPort)/v1/health" -ForegroundColor Gray
 Write-Host "Global Explorer: https://explorer.testnet.cregnet.dev (Validators Tab)" -ForegroundColor Gray
 Write-Host ""
 Write-Host "--- STAKING FOR REWARDS ---" -ForegroundColor Yellow

@@ -85,6 +85,7 @@ CREG_SPEC_SIGNATURE_URL=https://spec.testnet.cregnet.dev/chain-spec.json.sig
 CREG_IPFS_URL=https://ipfs.testnet.cregnet.dev
 CREG_P2P_LISTEN=/ip4/0.0.0.0/tcp/9000
 CREG_P2P_SEEDS=${BOOTNODE}
+CREG_PEERS=https://api.testnet.cregnet.dev
 CREG_LISTEN=0.0.0.0:8080
 RUST_LOG=info,chain_registry_node=debug,consensus=info
 EOF

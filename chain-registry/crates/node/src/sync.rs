@@ -621,15 +621,13 @@ async fn sync_once(state: Arc<RwLock<NodeState>>) -> anyhow::Result<()> {
             import_transition_history_through(&state, transitions, our_height.saturating_add(1))
                 .await?;
         }
-        record_sync_stall(our_height, &peer_heights);
+        {
+            let mut tracker = SYNC_STALL.lock().expect("sync stall mutex poisoned");
+            tracker.last_height = our_height;
+            tracker.stall_polls = 0;
+        }
         tracing::debug!("Chain is up to date (height {})", our_height);
         return Ok(());
-    }
-
-    {
-        let mut tracker = SYNC_STALL.lock().expect("sync stall mutex poisoned");
-        tracker.last_height = our_height;
-        tracker.stall_polls = 0;
     }
 
     tracing::info!(
@@ -757,6 +755,15 @@ async fn sync_once(state: Arc<RwLock<NodeState>>) -> anyhow::Result<()> {
         }
 
         tracing::info!("Synced block {} ({})", height, &prev_hash[..12]);
+    }
+
+    let end_height = state.read().await.chain.tip_height()?;
+    if end_height == our_height {
+        record_sync_stall(our_height, &peer_heights);
+    } else {
+        let mut tracker = SYNC_STALL.lock().expect("sync stall mutex poisoned");
+        tracker.last_height = end_height;
+        tracker.stall_polls = 0;
     }
 
     Ok(())
