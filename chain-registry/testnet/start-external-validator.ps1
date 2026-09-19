@@ -1,5 +1,5 @@
 # ==============================================================================
-# Chain Registry (CREG) — Independent External Validator Launch Script (Windows)
+# Chain Registry (CREG) -- Independent External Validator Launch Script (Windows)
 # ==============================================================================
 # This script enables ANY independent operator to join the decentralized CREG
 # testnet as a full validator on Windows with Docker Desktop.
@@ -13,7 +13,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 Write-Host "============================================================" -ForegroundColor Cyan
-Write-Host "   Chain Registry (CREG) — External Validator Onboarding    " -ForegroundColor Cyan
+Write-Host "   Chain Registry (CREG) -- External Validator Onboarding    " -ForegroundColor Cyan
 Write-Host "============================================================" -ForegroundColor Cyan
 
 # Check Docker
@@ -54,30 +54,30 @@ if (-not $NodeId) {
     $NodeId = "ext-val-" + (Get-Random -Minimum 1000 -Maximum 9999)
 }
 
-$bootnode = "/ip4/35.225.225.20/tcp/9000/p2p/12D3KooWDro5WW69YcAhFpqNSx9aGho3NdhU5LShjxSZjCFFE5XJ"
+$bootnode = "/ip4/35.225.225.20/tcp/9000/p2p/12D3KooWHrfvaBbsQmXq1L3ZAjmX299ca9pLECT5a2GdxaGGizgY"
 
-$envContent = @"
-CREG_TESTNET=true
-CREG_NODE_ID=$NodeId
-CREG_DATA_DIR=/data
-CREG_IS_VALIDATOR=true
-CREG_NODE_ROLE=validator
-CREG_VALIDATOR_KEY=$validatorKey
-CREG_OPERATOR_API_KEY=$opKey
-CREG_ETH_RPC=$EthRpc
-CREG_EXPECTED_L1_CHAIN_ID=11155111
-CREG_CHAIN_ID=creg-testnet-1
-CREG_STAKING_ADDR=0x30604Aa6f763fbde6aDCffbd8960af3031037331
-CREG_REGISTRY_ADDR=0xD0F465ca185a99E268be0C4FF5A135Bdf89FAF3B
-CREG_CHAIN_SPEC_URL=https://spec.testnet.cregnet.dev/chain-spec.json
-CREG_SPEC_SIGNATURE_URL=https://spec.testnet.cregnet.dev/chain-spec.json.sig
-CREG_IPFS_URL=https://ipfs.testnet.cregnet.dev
-CREG_P2P_LISTEN=/ip4/0.0.0.0/tcp/9000
-CREG_P2P_SEEDS=$bootnode
-CREG_LISTEN=0.0.0.0:8080
-RUST_LOG=info,chain_registry_node=debug,consensus=info
-"@
-
+$envLines = @(
+    "CREG_TESTNET=true",
+    "CREG_NODE_ID=$NodeId",
+    "CREG_DATA_DIR=/data",
+    "CREG_IS_VALIDATOR=true",
+    "CREG_NODE_ROLE=validator",
+    "CREG_VALIDATOR_KEY=$validatorKey",
+    "CREG_OPERATOR_API_KEY=$opKey",
+    "CREG_ETH_RPC=$EthRpc",
+    "CREG_EXPECTED_L1_CHAIN_ID=11155111",
+    "CREG_CHAIN_ID=creg-testnet-1",
+    "CREG_STAKING_ADDR=0x30604Aa6f763fbde6aDCffbd8960af3031037331",
+    "CREG_REGISTRY_ADDR=0xD0F465ca185a99E268be0C4FF5A135Bdf89FAF3B",
+    "CREG_CHAIN_SPEC_URL=https://spec.testnet.cregnet.dev/chain-spec.json",
+    "CREG_SPEC_SIGNATURE_URL=https://spec.testnet.cregnet.dev/chain-spec.json.sig",
+    "CREG_IPFS_URL=https://ipfs.testnet.cregnet.dev",
+    "CREG_P2P_LISTEN=/ip4/0.0.0.0/tcp/9000",
+    "CREG_P2P_SEEDS=$bootnode",
+    "CREG_LISTEN=0.0.0.0:8080",
+    "RUST_LOG=info,chain_registry_node=debug,consensus=info"
+)
+$envContent = $envLines -join [Environment]::NewLine
 [System.IO.File]::WriteAllText($envFile, $envContent)
 
 # Auto-detect available Docker image
@@ -92,26 +92,34 @@ foreach ($cand in $imageCandidates) {
 }
 
 if (-not $chosenImage) {
-    Write-Host "Local validator Docker image not found. Building Dockerfile.local..." -ForegroundColor Yellow
-    docker build -f Dockerfile.local -t chain-registry-node-secure:latest .
+    $chainRegistryDir = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+    $dockerfile = Join-Path $chainRegistryDir "Dockerfile.local"
+    Write-Host "Local validator Docker image not found. Building from $dockerfile..." -ForegroundColor Yellow
+    docker build -f "$dockerfile" -t chain-registry-node-secure:latest "$chainRegistryDir"
     $chosenImage = "chain-registry-node-secure:latest"
 }
 
-Write-Host "`nStarting independent validator container using $chosenImage..." -ForegroundColor Yellow
+Write-Host ""
+Write-Host "Starting independent validator container using $chosenImage..." -ForegroundColor Yellow
 
 # Remove old container if it exists
 docker rm -f "creg-validator-$NodeId" 2>$null | Out-Null
 
-docker run -d `
-    --name "creg-validator-$NodeId" `
-    --restart unless-stopped `
-    --env-file "$envFile" `
-    -p 8080:8080 `
-    -p 9000:9000 `
-    -v "$($dataDir)/chain-data:/data" `
-    $chosenImage | Out-Null
+$dockerArgs = @(
+    "run",
+    "-d",
+    "--name", "creg-validator-$NodeId",
+    "--restart", "unless-stopped",
+    "--env-file", "$envFile",
+    "-p", "8080:8080",
+    "-p", "9000:9000",
+    "-v", "$($dataDir)/chain-data:/data",
+    $chosenImage
+)
+& docker @dockerArgs | Out-Null
 
-Write-Host "`n============================================================" -ForegroundColor Green
+Write-Host ""
+Write-Host "============================================================" -ForegroundColor Green
 Write-Host "   Validator Node Successfully Launched!                    " -ForegroundColor Green
 Write-Host "============================================================" -ForegroundColor Green
 Write-Host "Node ID:        $NodeId" -ForegroundColor Cyan
@@ -120,8 +128,10 @@ Write-Host "Docker Image:   $chosenImage" -ForegroundColor Cyan
 Write-Host "Bootnode Peer:  $bootnode" -ForegroundColor Cyan
 Write-Host "Local RPC:      http://localhost:8080/rpc" -ForegroundColor Cyan
 Write-Host "Local Health:   http://localhost:8080/v1/health" -ForegroundColor Cyan
-Write-Host "`nTo participate in voting and receive block rewards:" -ForegroundColor Yellow
+Write-Host ""
+Write-Host "To participate in voting and receive block rewards:" -ForegroundColor Yellow
 Write-Host "1. Get free test tokens: https://faucet.testnet.cregnet.dev" -ForegroundColor Cyan
 Write-Host "2. Stake 100 tCREG on Sepolia contract: 0x30604Aa6f763fbde6aDCffbd8960af3031037331" -ForegroundColor Cyan
 Write-Host "   (Or run: creg stake 100)" -ForegroundColor Cyan
-Write-Host "3. Monitor your node logs: docker logs -f creg-validator-$NodeId`n" -ForegroundColor Cyan
+Write-Host "3. Monitor your node logs: docker logs -f creg-validator-$NodeId" -ForegroundColor Cyan
+Write-Host ""

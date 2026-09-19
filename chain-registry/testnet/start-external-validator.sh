@@ -51,7 +51,7 @@ fi
 
 NODE_ID="${NODE_ID:-ext-val-$(hostname -s 2>/dev/null || echo $RANDOM)}"
 ETH_RPC="${ETH_RPC:-https://ethereum-sepolia-rpc.publicnode.com}"
-BOOTNODE="/ip4/35.225.225.20/tcp/9000/p2p/12D3KooWDro5WW69YcAhFpqNSx9aGho3NdhU5LShjxSZjCFFE5XJ"
+BOOTNODE="/ip4/35.225.225.20/tcp/9000/p2p/12D3KooWHrfvaBbsQmXq1L3ZAjmX299ca9pLECT5a2GdxaGGizgY"
 
 cat <<EOF > "${ENV_FILE}"
 CREG_TESTNET=true
