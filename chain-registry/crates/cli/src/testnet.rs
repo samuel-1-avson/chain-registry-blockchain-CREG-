@@ -150,9 +150,16 @@ pub async fn status(node_url: Option<&str>) -> Result<()> {
 
 /// Stake as publisher on testnet
 pub async fn stake_publisher(amount_eth: f64, key: &str, rpc_url: Option<&str>) -> Result<()> {
-    let rpc = rpc_url.unwrap_or("http://localhost:8545");
-    let staking = std::env::var("TESTNET_STAKING_ADDR")
-        .context("TESTNET_STAKING_ADDR not set. Run scripts/start-testnet.ps1 first.")?;
+    let rpc = rpc_url
+        .or_else(|| std::env::var("SEPOLIA_RPC_URL").ok().as_deref())
+        .or_else(|| std::env::var("CREG_ETH_RPC").ok().as_deref())
+        .unwrap_or("https://explorer.testnet.cregnet.dev/rpc");
+    let staking = std::env::var("CREG_STAKING_ADDR")
+        .or_else(|_| std::env::var("TESTNET_STAKING_ADDR"))
+        .unwrap_or_else(|_| "0x30604Aa6f763fbde6aDCffbd8960af3031037331".to_string());
+    let token = std::env::var("CREG_TOKEN_ADDR")
+        .or_else(|_| std::env::var("TESTNET_TOKEN_ADDR"))
+        .unwrap_or_else(|_| "0x167Ab975dc95b79727Ed76BD8AAb70463F6499E2".to_string());
 
     if amount_eth < 1.0 {
         bail!("Minimum publisher stake on testnet is 1 tCREG");
@@ -169,7 +176,7 @@ pub async fn stake_publisher(amount_eth: f64, key: &str, rpc_url: Option<&str>) 
     let approve_status = std::process::Command::new("cast")
         .args([
             "send",
-            &std::env::var("TESTNET_TOKEN_ADDR")?,
+            &token,
             "approve(address,uint256)",
             &staking,
             &wei.to_string(),
@@ -179,7 +186,7 @@ pub async fn stake_publisher(amount_eth: f64, key: &str, rpc_url: Option<&str>) 
             rpc,
         ])
         .status()
-        .context("Failed to approve tokens. Is Foundry installed?")?;
+        .context("Failed to run cast. Is Foundry installed? You can also use: .\\testnet\\stake-validator.cmd --key 0x... --amount 1 --role publisher")?;
 
     if !approve_status.success() {
         bail!("Token approval failed");
@@ -216,9 +223,16 @@ pub async fn stake_publisher(amount_eth: f64, key: &str, rpc_url: Option<&str>) 
 
 /// Stake as validator on testnet
 pub async fn stake_validator(amount_eth: f64, key: &str, rpc_url: Option<&str>) -> Result<()> {
-    let rpc = rpc_url.unwrap_or("http://localhost:8545");
-    let staking = std::env::var("TESTNET_STAKING_ADDR")
-        .context("TESTNET_STAKING_ADDR not set. Run scripts/start-testnet.ps1 first.")?;
+    let rpc = rpc_url
+        .or_else(|| std::env::var("SEPOLIA_RPC_URL").ok().as_deref())
+        .or_else(|| std::env::var("CREG_ETH_RPC").ok().as_deref())
+        .unwrap_or("https://explorer.testnet.cregnet.dev/rpc");
+    let staking = std::env::var("CREG_STAKING_ADDR")
+        .or_else(|_| std::env::var("TESTNET_STAKING_ADDR"))
+        .unwrap_or_else(|_| "0x30604Aa6f763fbde6aDCffbd8960af3031037331".to_string());
+    let token = std::env::var("CREG_TOKEN_ADDR")
+        .or_else(|_| std::env::var("TESTNET_TOKEN_ADDR"))
+        .unwrap_or_else(|_| "0x167Ab975dc95b79727Ed76BD8AAb70463F6499E2".to_string());
 
     if amount_eth < 100.0 {
         bail!("Minimum validator stake on testnet is 100 tCREG");
@@ -235,7 +249,7 @@ pub async fn stake_validator(amount_eth: f64, key: &str, rpc_url: Option<&str>) 
     let approve_status = std::process::Command::new("cast")
         .args([
             "send",
-            &std::env::var("TESTNET_TOKEN_ADDR")?,
+            &token,
             "approve(address,uint256)",
             &staking,
             &wei.to_string(),
@@ -245,7 +259,7 @@ pub async fn stake_validator(amount_eth: f64, key: &str, rpc_url: Option<&str>) 
             rpc,
         ])
         .status()
-        .context("Failed to approve tokens")?;
+        .context("Failed to run cast. Is Foundry installed? You can also use: .\\testnet\\stake-validator.cmd --key 0x... --amount 100")?;
 
     if !approve_status.success() {
         bail!("Token approval failed");

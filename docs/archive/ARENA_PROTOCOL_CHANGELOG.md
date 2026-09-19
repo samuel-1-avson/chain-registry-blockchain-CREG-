@@ -6,15 +6,21 @@ Follow-up labels use the form `chain-registry-blockchain-CREG-#N` or a document 
 
 The repo copy lives at `docs/ARENA_PROTOCOL_CHANGELOG.md`. The hosted copy lives at `CREG-Contribution-Arena/public/arena-protocol-changelog.md`. Keep them identical.
 
+## 2026-09
+
+Live external validator onboarding, dual-key identity registration, and Sepolia Staking Hub multisig governance executed.
+
+| Milestone | Resolution | Follow-up | Note |
+|---|---|---|---|
+| External Validator Consensus | Live on `creg-testnet-1` | `chain-registry-blockchain-CREG-#45` | 4 active PBFT consensus validators; tip 0 finalized. |
+| Sepolia Staking Hub Governance | Multisig Proposal #5 Executed | `Staking.sol` at `0x3060...` | 2-of-3 multisig governance (`0x0fC1...`) approves external validator applicants. |
+| Dual-Key Identity Binding | Cryptographic EIP-191 + Ed25519 verification | `crates/node/src/api.rs` | `POST /v1/validators/register` enforces ownership proofs of EVM staker and Ed25519 node key. |
+| Zero-Clone Operator Tooling | Global `creg` CLI & `creg-node` daemon | PATH integration | Precompiled binary workflows without repository cloning. |
+| Technical Whitepaper v0.4.0 | Modernized for live testnet | `docs/WHITEPAPER.md` | Reflects live active multi-validator consensus on Sepolia. |
+
 ## 2026-08
 
-No Arena-sourced protocol changes published yet.
-
-When a maintainer accepts a finding that targets the protocol, they file one allowlisted issue and add a row here in the next monthly update. Document-only follow-ups use a revision id.
-
-| Finding | Resolution | Follow-up | Note |
-|---|---|---|---|
-| — | — | — | First entries appear after accepted protocol or docs work |
+Initial public alpha release and Arena review.
 
 ## How this file is updated
 

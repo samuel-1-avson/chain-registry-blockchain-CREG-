@@ -15,10 +15,14 @@
 !chain-registry/contracts/README.md
 
 # =============================================================================
-# DOCS DIRECTORY
+# DOCS & ARCHIVE DIRECTORIES
 # =============================================================================
 docs/
 **/docs/
+archive/
+**/archive/
+*.audit.md
+*.review.md
 
 # =============================================================================
 # ENVIRONMENT & SECRETS (CRITICAL — NEVER COMMIT)
@@ -469,3 +473,14 @@ playground/
 !/docs/**
 !/docs/**/*.md
 !chain-registry/migrations/README.md
+
+# =============================================================================
+# ARCHIVED DOCUMENTATION (Must come after allow-list)
+# =============================================================================
+/docs/archive/
+/docs/archive/**
+**/archive/
+**/archive/**
+*.audit.md
+*.review.md
+

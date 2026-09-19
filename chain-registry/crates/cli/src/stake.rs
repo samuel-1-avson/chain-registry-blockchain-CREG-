@@ -25,7 +25,10 @@ pub async fn run(
     staking_addr: Option<&str>,
     token_addr: Option<&str>,
 ) -> Result<()> {
-    let rpc = rpc_url.unwrap_or("http://127.0.0.1:8545");
+    let rpc = rpc_url
+        .or_else(|| std::env::var("SEPOLIA_RPC_URL").ok().as_deref())
+        .or_else(|| std::env::var("CREG_ETH_RPC").ok().as_deref())
+        .unwrap_or("https://explorer.testnet.cregnet.dev/rpc");
 
     if amount_tokens <= 0.0 {
         bail!("Stake amount must be greater than 0");
@@ -53,12 +56,10 @@ pub async fn run(
             "TESTNET_STAKING_ADDR",
         ],
     )
-    .context("Staking contract address required. Pass --staking-addr or set CREG_STAKING_ADDR.")?;
+    .unwrap_or_else(|_| "0x30604Aa6f763fbde6aDCffbd8960af3031037331".to_string());
 
-    let token = resolve_addr(token_addr, &["CREG_TOKEN_ADDR", "TESTNET_TOKEN_ADDR"]).context(
-        "CREG token address required for the ERC-20 approve step. \
-         Pass --token-addr or set CREG_TOKEN_ADDR.",
-    )?;
+    let token = resolve_addr(token_addr, &["CREG_TOKEN_ADDR", "TESTNET_TOKEN_ADDR"])
+        .unwrap_or_else(|_| "0x167Ab975dc95b79727Ed76BD8AAb70463F6499E2".to_string());
 
     // Use string-based decimal-to-wei conversion to avoid float precision loss.
     let wei = eth_to_wei_str(amount_tokens);
@@ -108,7 +109,7 @@ pub async fn run(
                 rpc,
             ])
             .status()
-            .context("cast not found — install Foundry: https://getfoundry.sh")?;
+            .context("cast not found — install Foundry: https://getfoundry.sh or use: .\\testnet\\stake-validator.cmd --key 0x... --amount 100")?;
         if !approve.success() {
             bail!("Token approval failed (exit code {:?})", approve.code());
         }
@@ -127,7 +128,7 @@ pub async fn run(
                 rpc,
             ])
             .status()
-            .context("cast not found — install Foundry: https://getfoundry.sh")?;
+            .context("cast not found — install Foundry: https://getfoundry.sh or use: .\\testnet\\stake-validator.cmd --key 0x... --amount 100")?;
 
         if staked.success() {
             println!("\n  ✓ Stake transaction confirmed.");

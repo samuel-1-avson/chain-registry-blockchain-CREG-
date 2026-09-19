@@ -1,34 +1,37 @@
 # Chain Registry (CREG) Technical Whitepaper
 
-> Version: 0.3.0-public-alpha  
-> Date: 2026-07-29
+> Version: 0.4.0-public-testnet  
+> Date: 2026-09-19  
 > Network: `creg-testnet-1` on Ethereum Sepolia  
-> Status: Public alpha testnet, not mainnet  
-> Related resources: Public testnet quickstart, Phase scope definitions, Readiness gates status, CREG_SYSTEM_WORKFLOW.md
+> Status: Live public multi-validator testnet with external consensus  
+> Related resources: Public testnet quickstart, Phase scope definitions, Readiness gates status, CREG_SYSTEM_WORKFLOW.md, Contribution Arena
 >
-> Errata 2026-08-19: abstract no longer describes retired L1 anchoring; package quorum is `floor(2M/3)+1`; public-alpha topology remains four validators.
+> Update 2026-09-19: Active external validator onboarding enabled on Ethereum Sepolia. 2-of-3 multisig governance (`0x0fC1...`) approves staked applicants on Staking Hub (`0x3060...`). Dual cryptographic identity verification (`EVM EIP-191` + `Ed25519`) binds staker wallets to consensus nodes.
 
-This whitepaper is technical documentation for the Chain Registry public alpha. It is not an offer to sell tokens, investment advice, or a claim of mainnet economic security. The external security audit track, SEC-401, remains open; production and mainnet claims require audit closure, operational hardening, and legal/compliance review.
+This whitepaper is technical documentation for the Chain Registry public testnet. It is not an offer to sell tokens, investment advice, or a claim of mainnet economic security. The external security audit track, SEC-401, remains open; production and mainnet claims require audit closure, operational hardening, and legal/compliance review.
 
 For the most current architecture details, committee/reward formulas, performance snapshots, treasury monitoring, and iterative improvement log, see `docs/CREG_SYSTEM_WORKFLOW.md` (especially §9.11–9.12 and §15). This whitepaper provides the high-level protocol description; the workflow document tracks implementation evolution.
 
 ## Abstract
 
-Modern software depends on package registries whose trust model is often centered on publisher accounts, centralized registry infrastructure, and local package-manager policy. Chain Registry (CREG) introduces an evidence-backed, validator-consensus package registry for open software ecosystems. Publishers submit signed, content-addressed packages; validators reproduce security analysis in isolated environments; consensus-grade votes bind the package identifier, content hash, scanner profile, and evidence digest; finalized records are written to a PBFT-backed local CREG chain. Sepolia currently hosts staking, governance, and Registry contracts. The legacy L1 batch checkpoint (`submitRollupBatch`) is retired and is not a settlement or anchoring path.
+Modern software depends on package registries whose trust model is often centered on publisher accounts, centralized registry infrastructure, and local package-manager policy. Chain Registry (CREG) introduces an evidence-backed, validator-consensus package registry for open software ecosystems. Publishers submit signed, content-addressed packages; validators reproduce security analysis in isolated environments; consensus-grade votes bind the package identifier, content hash, scanner profile, and evidence digest; finalized records are written to a PBFT-backed local CREG chain. Sepolia hosts the live Staking Hub, token contracts, and 2-of-3 multisig governance. The legacy L1 batch checkpoint (`submitRollupBatch`) is retired and is not a settlement or anchoring path.
 
 CREG is not a promise that malicious code can never pass a registry. It is a protocol for reducing single-party trust, making package risk evidence transparent, and turning package approval into an auditable, economically accountable network decision.
 
 ## 1. Executive Summary
 
 Chain Registry is designed as a decentralized package-integrity network for
-software supply chains. Its public alpha targets package publishers,
+software supply chains. Its public testnet targets package publishers,
 developers, validators, and security researchers who want a verifiable package
 status layer across ecosystems such as npm, PyPI, Cargo, and similar
-registries. The recorded public-alpha topology currently lists four validators
-(`validator-1`…`validator-4`) in `chain-spec.sepolia.json` and empty bootnodes.
-The public GCP fleet is paused, so this is the specified topology, not a live
-multi-node network. It is a research deployment with no production Byzantine
-fault tolerance, not evidence of operational decentralization.
+registries. The live `creg-testnet-1` network runs an active PBFT consensus
+committee with external validator onboarding enabled. Independent operators
+stake testnet tCREG tokens on Ethereum Sepolia (`Staking.sol` at
+`0x30604Aa6f763fbde6aDCffbd8960af3031037331`), receive approval from the 2-of-3
+multisig governance contract (`0x0fC1448b11D005a30eb6aC2d54e488f7b58c5D4E`),
+and bind their consensus Ed25519 node key via dual cryptographic proofs
+(`POST /v1/validators/register`) before actively participating in block production
+and package verification committees.
 
 At scale (thousands of validators), full redundant analysis would be impractical. CREG therefore uses a **hybrid mandatory + voluntary committee model**:
 
@@ -564,23 +567,23 @@ The signed chain spec contains bootstrap validator information, while validator 
 
 ## 10. Ethereum L1 Contracts
 
-CREG uses Ethereum Sepolia for the public alpha contract layer. The contract system is intended to provide staking, registry status, governance, reputation, and optional proof verification.
+CREG uses Ethereum Sepolia for the public testnet contract layer. The contract system provides staking, registry status, multi-signature governance, reputation, and verification reward distribution.
 
-| Contract | Role |
-| --- | --- |
-| `CregToken.sol` | ERC-20-like CREG token with hard cap and permit support |
-| `Staking.sol` | Publisher/validator stake, validator lifecycle, unbonding, slashing |
-| `Registry.sol` | L1 package lifecycle and EIP-712 finalize/revoke paths; retained ZK entry point reverts |
-| `Governance.sol` | M-of-N governance, emergency pause, controlled administrative execution |
-| `Reputation.sol` | Validator/publisher scoring signals |
-| `Appeal.sol` | On-chain appeal mechanics for contested rejections |
-| `ZKVerifier.sol` / `Groth16Verifier.sol` | Retained experimental Groth16 verifier; not an active package-qualification trust path |
+| Contract | Active Sepolia Address | Role |
+| --- | --- | --- |
+| `Staking.sol` (Staking Hub) | `0x30604Aa6f763fbde6aDCffbd8960af3031037331` | Publisher/validator stake, validator lifecycle, unbonding, slashing |
+| `CregToken.sol` (tCREG) | `0x167Ab975dc95b79727Ed76BD8AAb70463F6499E2` | ERC-20 testnet CREG token with hard cap and permit support |
+| `GovernanceMultisig.sol` | `0x0fC1448b11D005a30eb6aC2d54e488f7b58c5D4E` | 2-of-3 threshold multisig governing validator admission & emergency actions |
+| `Registry.sol` | `0xa59f77f547c87c71101ce6b4ad9dbb2cfa4df714` | L1 package lifecycle and EIP-712 finalize/revoke paths |
+| `Reputation.sol` | Verified Sepolia Deployment | Validator/publisher scoring signals |
+| `ValidatorRewards.sol` | Verified Sepolia Deployment | Work-based incentives distribution |
+| `ZKVerifier.sol` / `Groth16Verifier.sol` | Deployed reference | Retained experimental Groth16 verifier |
 
-The active Sepolia addresses are published in the active network specifications and summarized in the public quickstart guide. Contract and ZK systems must complete external security review before they are used for mainnet economic claims.
+The active Sepolia addresses are enforced in `chain-spec.sepolia.json` and monitored by the runtime observer nodes.
 
 ## 11. Tokenomics And Incentive Design
 
-The CREG token is the economic coordination asset in the current testnet contract system. It is used to bond publishers, bond validators, parameterize participation, slash misconduct, and fund future ecosystem growth. In public alpha, the token is testnet-facing (`tCREG` in user docs) and should not be treated as a finalized mainnet economic instrument.
+The CREG token is the economic coordination asset in the testnet contract system. It is used to bond publishers, bond validators, parameterize participation, slash misconduct, and fund future ecosystem growth. In public testnet, the token is testnet-facing (`tCREG` in user docs) and should not be treated as a finalized mainnet economic instrument.
 
 ### 11.1 Token Purpose
 
@@ -628,8 +631,6 @@ The current token constructor mints 20,000,000 CREG:
 
 Verification incentives are tiny (0.00001 CREG base + 0.000005 correct-vote bonus) precisely to make the entire 42M supply last a very long time. Emission counters (succeeded/failed), treasury address, `last_incentives_refresh` timestamp, total distributed, pool balance, and pending estimate are exposed in runtime config, profile incentives, and Prometheus metrics (`creg_*` gauges); a periodic background task (60s) + on-demand refresh keeps values current for treasury draw monitoring. See CREG_SYSTEM_WORKFLOW.md §9.12 and §15 for current formulas, points (25/10 base ×1.2 correct), performance decay (0.985 after >5), L1 hook, snapshots, and incentive integration.
 
-These are current implementation parameters in the alpha contract tree. They are not a public-sale allocation, not a lockup schedule, and not a promise of future liquidity. A production token launch would require a complete allocation policy, vesting disclosures, jurisdiction-specific legal review, and governance approval.
-
 ### 11.4 Staking Roles And Minimums
 
 CREG distinguishes publisher stake from validator stake:
@@ -638,26 +639,29 @@ CREG distinguishes publisher stake from validator stake:
 | --- | ---: | --- | --- |
 | Publisher | 1 CREG / tCREG | `stakeAsPublisher` | Required before publishing packages |
 | Validator | 100 CREG / tCREG | `applyToBeValidator` | Required before validator admission |
-| Light validator | 50 CREG / tCREG | Contract constant present | Future or specialized role; not the main public-alpha validator path |
+| Light validator | 50 CREG / tCREG | Contract constant present | Future or specialized role; not the main validator path |
 
-Minimum stakes are configurable by governance through `updateMinStakes`. The current public-alpha chain spec mirrors the 1 tCREG publisher minimum and 100 tCREG validator minimum.
+Minimum stakes are configurable by governance through `updateMinStakes`. The current chain spec mirrors the 1 tCREG publisher minimum and 100 tCREG validator minimum.
 
 Publisher staking flow:
 
-1. Publisher approves the staking contract or uses permit-based staking.
-2. Publisher calls `stakeAsPublisher`.
+1. Publisher approves the staking contract (`token.approve(stakingHub, amount)`).
+2. Publisher calls `stakeAsPublisher(amount)`.
 3. Registry admission checks `staking.stakedBalance(publisher) > 0`.
 4. Publisher can submit packages while stake remains bonded.
 5. Governance revocation of a malicious package can slash the publisher.
 
-Validator staking flow:
+Validator onboarding flow:
 
-1. Validator approves the staking contract or uses permit-based staking.
-2. Validator calls `applyToBeValidator` with at least the minimum stake.
-3. Validator enters `Pending`.
-4. Active validators sign admission attestations if deterministic admission rules pass.
-5. `approveByConsensus` activates the validator once two-thirds quorum is verified.
-6. Validator participates in package evidence voting and PBFT block finality.
+1. Operator generates consensus Ed25519 keypair and starts node daemon (`creg-node`).
+2. Operator approves staking contract: `token.approve(0x3060..., 100 tCREG)`.
+3. Operator submits application: `staking.applyToBeValidator(100 tCREG)`. State becomes `Pending`.
+4. Governance Review: 2-of-3 multisig governance signs and executes `Staking.approveValidator(operatorAddress)`. State transitions to `Active`.
+5. Cryptographic Identity Binding: Operator executes `POST /v1/validators/register` with dual cryptographic signatures:
+   - EVM staker signature (EIP-191) proving stake ownership.
+   - Ed25519 signature proving node consensus key ownership.
+   - Timestamped nonce ensuring replay protection.
+6. The node sync worker observes active on-chain status and admits the validator into the live PBFT consensus set and package verification committees.
 
 ### 11.5 Validator Lifecycle
 

@@ -12,7 +12,7 @@ export default function ValidatorList() {
     (s) => nodeApi.validatorRegistrations(s),
     { intervalMs: 8000 },
   )
-  const list = data?.registrations || []
+  const list = Array.isArray(data) ? data : (data?.registrations || [])
   if (error && !list.length) return <ErrorState error={error} onRetry={refetch} title="Could not load validators" />
 
   return (
@@ -36,14 +36,17 @@ export default function ValidatorList() {
             {loading && !list.length
               ? Array.from({ length: 6 }).map((_, i) => <SkeletonRow key={i} cells={5} />)
               : list.map((v, i) => {
-                const addr = (v.evm_address || '').toLowerCase()
+                const addr = (v.identity?.evm_address || v.evm_address || '').toLowerCase()
+                const nodeId = v.identity?.node_id || v.node_id || '—'
+                const status = v.active ? 'Active' : (v.status || v.staking_state || 'Pending')
+                const stakeDisplay = v.stake != null ? `${v.stake} CREG` : '—'
                 return (
                   <tr key={addr || i}>
                     <td><Hash value={addr} kind="validator" start={8} end={6} /></td>
                     <td style={{ color: 'var(--text-secondary)' }}>{v.alias || '—'}</td>
-                    <td style={{ fontFamily: 'var(--font-mono)' }}>{formatWei(v.stake ?? v.amount)} CREG</td>
-                    <td><StatusBadge variant={v.state === 'Active' ? 'success' : v.state === 'Pending' ? 'warning' : 'muted'}>{v.state || '—'}</StatusBadge></td>
-                    <td><Hash value={v.node_id} start={6} end={4} showCopy={false} /></td>
+                    <td style={{ fontFamily: 'var(--font-mono)' }}>{stakeDisplay}</td>
+                    <td><StatusBadge variant={status === 'Active' ? 'success' : 'warning'}>{status}</StatusBadge></td>
+                    <td><Hash value={nodeId} start={6} end={4} showCopy={false} /></td>
                   </tr>
                 )
               })}

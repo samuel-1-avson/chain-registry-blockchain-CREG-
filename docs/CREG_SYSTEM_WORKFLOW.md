@@ -903,14 +903,14 @@ stateDiagram-v2
 
 See **§9 Validator Node System Flow** for the full runtime architecture and per-package processing path. Summary steps:
 
-1. Linux host with Docker or release `creg-node` binary
-2. Generate Ed25519 consensus key: `creg keygen validator`
-3. Prepare secp256k1 EOA with ≥ 100 tCREG
-4. Stake: `creg stake --amount 100 --role validator`
-5. Register identity: `POST /v1/validators/register` (dual signature)
-6. Obtain consensus admission via `approveByConsensus` (2/3 active validators)
-7. Configure node: `CREG_IS_VALIDATOR=true`, real sandbox (`CREG_DEV_SANDBOX=false`)
-8. Verify health: `creg doctor`, `/v1/runtime/config`
+1. Host system with Docker or native `creg-node` binary
+2. Generate Ed25519 consensus key: `creg keygen validator` (stored in `~/.creg-validator/validator.key`)
+3. Prepare secp256k1 EOA with ≥ 100 tCREG on Sepolia
+4. Stake: `creg stake --amount 100 --role validator` (or `.\testnet\stake-validator.cmd`)
+5. Obtain approval via 2-of-3 Multisig Governance (`0x0fC1...`) or `approveByConsensus`
+6. Register identity: `POST /v1/validators/register` with cryptographic dual signatures (`evm_signature` + `ed25519_signature`)
+7. Configure node: `CREG_IS_VALIDATOR=true`, real sandbox (`nsjail` / `Docker`)
+8. Verify health: `creg doctor`, `creg-node --status`, `/v1/runtime/config`
 
 See `docs/VALIDATOR_ONBOARDING_CHECKLIST.md` for the complete checklist.
 
@@ -966,8 +966,8 @@ Both node types run the same `creg-node` binary. The role is controlled by confi
 | Pending pool | Admits publishes; **drains** pool for analysis | Admits publishes; **does not** drain pool |
 | Security pipeline | Runs full analysis and signs votes | Skipped — no local votes |
 | PBFT | Participates in block PREPARE/COMMIT | Syncs blocks from peers; no voting |
-| Public-alpha chain-spec role | `validator-1`…`validator-4` in `chain-spec.sepolia.json` | Not in the recorded 4-validator set; observers are a node type, not a fifth spec validator |
-| Historical GCP lab names | `creg-node-1`, `creg-node-2` (validators) | `creg-node-3` (observer — public API reads). The public GCP fleet is paused. |
+| Testnet topology role | Active consensus validators on `creg-testnet-1` | Non-voting observer / API reads |
+| Live node management | `creg-node --status`, `creg-node --logs` | `creg-node` in observer mode |
 
 Observer nodes keep packages in **pending** until validators reach consensus. If an observer drained the pending pool, packages would disappear from the API without a chain record.
 
@@ -977,24 +977,26 @@ Observer nodes keep packages in **pending** until validators reach consensus. If
 flowchart TD
     A[Generate Ed25519 validator key] --> B["Stake >= 100 tCREG on Sepolia"]
     B --> C["applyToBeValidator -> Pending on L1"]
-    C --> D[Register identity on node API]
-    D --> E[Active validators sign admission attestations]
-    E --> F[approveByConsensus on Staking.sol]
-    F --> G[Configure creg-node CREG_IS_VALIDATOR=true]
-    G --> H[Start node with signed chain spec]
-    H --> I[validator_set_sync picks up Active status]
-    I --> J[Participate in package votes + PBFT]
+    C --> D[2-of-3 Multisig Governance OR Active Validator Consensus]
+    D --> E["Staking.sol state transitions to Active"]
+    E --> F["Dual-Sign Identity Registration (EVM + Ed25519)"]
+    F --> G["POST /v1/validators/register on Node API"]
+    G --> H[Configure creg-node CREG_IS_VALIDATOR=true]
+    H --> I[Start node with signed chain spec]
+    I --> J[validator_set_sync admits node into consensus]
+    J --> K[Participate in package votes + PBFT finality]
 ```
 
-| Step | Action | Where |
-|------|--------|-------|
-| 1 | `creg keygen validator` | Ed25519 consensus key (local) |
-| 2 | `creg stake --amount 100 --role validator` | Sepolia `Staking.sol` via CLI |
-| 3 | `POST /v1/validators/register` | Binds EVM address, node ID, Ed25519 pubkey |
-| 4 | Consensus admission | Active validators submit `approveByConsensus` bundle |
-| 5 | Deploy node | `CREG_IS_VALIDATOR=true`, `CREG_VALIDATOR_KEY`, fleet scanner profile |
+| Step | Action | Description |
+|------|--------|-------------|
+| 1 | `creg keygen validator` | Generate Ed25519 consensus keypair (`validator.key`) |
+| 2 | `stake-validator --stake` | Stake ≥ 100 tCREG on Sepolia `Staking.sol` (`0x30604Aa6f763fbde6aDCffbd8960af3031037331`) |
+| 3 | Governance Approval | 2-of-3 multisig (`0x0fC1448b11D005a30eb6aC2d54e488f7b58c5D4E`) signs `approveValidator` |
+| 4 | Dual-Sign Registration | `register-validator-identity`: dual-sign payload with EVM EIP-191 + Ed25519 |
+| 5 | Node Identity Broadcast | `POST /v1/validators/register` broadcasts registration across P2P gossip |
+| 6 | Consensus Participation | Node joins live committee, signs package votes and PBFT blocks |
 
-Admission requirements (VAL-001): ≥ 100 tCREG stake, dual-signed identity, real sandbox (`nsjail`/`gVisor`/`Docker` — not `CREG_DEV_SANDBOX`), scanner profile matching the fleet digest. Votes from degraded or dev-sandbox nodes do **not** count toward public quorum.
+Admission requirements (VAL-001): ≥ 100 tCREG stake, dual-signed identity proof, real sandbox (`Docker`/`nsjail`), scanner profile matching fleet digest. Votes from degraded or dev-sandbox nodes do **not** count toward public quorum.
 
 See `docs/VALIDATOR_ONBOARDING_CHECKLIST.md` for the operator checklist.
 

@@ -4,11 +4,9 @@
 > Network: `creg-testnet-1` (Sepolia-anchored public alpha)  
 > Audience: external validator operators joining the CREG testnet
 >
-> **Current reality (2026-08-23):** the signed Sepolia spec records four
-> coordinated validators (`validator-1`…`validator-4`) and no bootnodes.
-> The public GCP fleet is paused. External admission is not represented as
-> open or complete. This is a recruitment/readiness checklist until operators
-> publish a signed onboarding window and independently verify the live fleet.
+> **Current status (2026-09-19):** the active Sepolia testnet runs an active
+> consensus committee on `creg-testnet-1`. External validator onboarding is active
+> with on-chain 2-of-3 multisig governance and cryptographic dual-signature identity binding.
 
 This is the single runbook a new validator operator follows to register, stake, configure, and pass health checks. Completing every item in this document is a requirement for participating in public verification quorum.
 
@@ -26,11 +24,11 @@ A validator is admitted to the public testnet validator set when all of the foll
 | --- | --- | --- |
 | Stake | ≥ 100 tCREG staked as validator on the Sepolia Staking contract | `validator_set_sync` reads L1 state; explorer validator page |
 | Identity | EVM address + node ID + Ed25519 pubkey registered and signed | `POST /v1/validators/register` (dual signature) |
-| Consensus admission | Approved via `approveByConsensus` by an active validator | L1 event, then validator-set sync |
+| Consensus admission | Approved via 2-of-3 multisig governance or `approveByConsensus` | L1 event, then validator-set sync |
 | Sandbox | Real behavioural sandbox (nsjail/gVisor/Docker). `CREG_DEV_SANDBOX=true` is **prohibited** | `/v1/runtime/config` → `sandbox_engine`, `sandbox_dev_bypass`; vote metadata |
 | Scanner profile | Scanner ruleset digest matches the fleet profile (`testnet/scanner-fleet.env`) | `creg doctor` profile digest; consensus rejects mismatched evidence |
 | Uptime | Node reachable and participating in rounds (target ≥ 95% during alpha) | Health endpoint polling, vote participation history |
-| Hardware (minimum) | 4 vCPU / 8 GB RAM / 50 GB SSD, Linux with user namespaces enabled (nsjail) | Operator attestation; sandbox verification |
+| Hardware (minimum) | 4 vCPU / 8 GB RAM / 50 GB SSD, Linux or Windows Docker Desktop | Operator attestation; sandbox verification |
 | Key hygiene | Validator Ed25519 key and EOA key stored per [SECURITY_OPS_RUNBOOK.md](./SECURITY_OPS_RUNBOOK.md); never committed | Operator attestation |
 | Independent control | Governance, keys, infrastructure, monitoring, and incident authority disclosed and independently controlled | Two-person review of retained control-domain statement |
 | Certified history | Exact independently verified weak-subjectivity checkpoint and descendant history accepted | Checkpoint evidence plus rebuilt-node rehearsal |
@@ -39,22 +37,21 @@ Votes from nodes that do not meet the sandbox and scanner-profile requirements a
 
 ## 2. Prerequisites
 
-- [ ] Linux host (bare metal, VM, or Docker with Linux containers). Windows hosts are dev-only.
+- [ ] Linux host (bare metal, VM, or Docker) or Windows host with Docker Desktop.
 - [ ] Docker installed, or ability to run a release `creg-node` binary.
-- [ ] Foundry `cast` installed (staking transactions).
-- [ ] Sepolia RPC URL (Infura/Alchemy/QuickNode preferred — public RPCs break `eth_getLogs` validator-set sync).
-- [ ] Sepolia ETH for gas and tCREG for stake (faucet: `creg testnet drip --address 0x...` when the operator faucet is up).
-- [ ] Read [TESTNET_PHASE_SCOPE.md](./TESTNET_PHASE_SCOPE.md) and [PUBLIC_TESTNET_QUICKSTART.md](./PUBLIC_TESTNET_QUICKSTART.md) — understand what "verified" means today.
+- [ ] Staking CLI tool (`creg stake` or `.\testnet\stake-validator.cmd`).
+- [ ] Sepolia RPC URL (e.g. `https://ethereum-sepolia-rpc.publicnode.com` or custom RPC).
+- [ ] Sepolia ETH for gas and tCREG for stake (faucet: `creg testnet drip --address 0x...` or web faucet).
+- [ ] Read [PUBLIC_TESTNET_QUICKSTART.md](./PUBLIC_TESTNET_QUICKSTART.md).
 
-Contract addresses recorded in the current repository Sepolia spec are shown
-below. Verify them against the exact signature-verified chain spec supplied for
-the onboarding window; this table is not an authority to transact:
+Active contract addresses deployed on Ethereum Sepolia:
 
-| Contract | Address |
+| Contract | Active Address |
 | --- | --- |
-| Staking | `0xE906ae140987CC2cA711dDa4ee43574d3aDc31b7` |
-| CREG Token | `0xB326dB1C6e457f4AdfBb11f17FDc145ED585b288` |
-| Registry | `0xF232cC6F5C6EfC74C7517B209D15baBd57b817eE` |
+| Staking Hub | `0x30604Aa6f763fbde6aDCffbd8960af3031037331` |
+| CREG Token (tCREG) | `0x167Ab975dc95b79727Ed76BD8AAb70463F6499E2` |
+| Governance Multisig | `0x0fC1448b11D005a30eb6aC2d54e488f7b58c5D4E` |
+| Registry | `0xa59f77f547c87c71101ce6b4ad9dbb2cfa4df714` |
 
 ## 3. Keys
 

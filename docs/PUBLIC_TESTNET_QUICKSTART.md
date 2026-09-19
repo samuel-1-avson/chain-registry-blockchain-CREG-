@@ -21,13 +21,14 @@ One-page guide for **publishers**, **developers**, and **validators** joining th
 | **Two key types** | **Ed25519** (`creg keygen`) signs packages; **secp256k1 EOA** stakes tCREG on L1. |
 | **Validator UTC clock** | Validator/block-producer hosts must run monitored NTP/chrony. Live PBFT proposals outside the 60-second clock-skew window fail closed. |
 
-**Contract addresses (Sepolia defaults):**
+**Contract addresses (Sepolia active):**
 
 | Contract | Address |
 |----------|---------|
-| Staking | `0xE906ae140987CC2cA711dDa4ee43574d3aDc31b7` |
-| CREG Token | `0xB326dB1C6e457f4AdfBb11f17FDc145ED585b288` |
-| Registry | `0xF232cC6F5C6EfC74C7517B209D15baBd57b817eE` |
+| Staking Hub | `0x30604Aa6f763fbde6aDCffbd8960af3031037331` |
+| CREG Token (tCREG) | `0x167Ab975dc95b79727Ed76BD8AAb70463F6499E2` |
+| Governance Multisig | `0x0fC1448b11D005a30eb6aC2d54e488f7b58c5D4E` |
+| Registry | `0xa59f77f547c87c71101ce6b4ad9dbb2cfa4df714` |
 
 Minimum stakes (from chain spec): **1 tCREG** publisher, **100 tCREG** validator.
 
@@ -55,7 +56,7 @@ Use a **separate Ethereum wallet** (not the Ed25519 key file):
 
 ```bash
 export SEPOLIA_RPC_URL=https://sepolia.infura.io/v3/YOUR_KEY
-export CREG_STAKING_ADDR=0xE906ae140987CC2cA711dDa4ee43574d3aDc31b7
+export CREG_STAKING_ADDR=0x30604Aa6f763fbde6aDCffbd8960af3031037331
 
 # Stake command (approve + stakeAsPublisher)
 creg stake --amount 1 --role publisher \
