@@ -67,6 +67,8 @@ CREG_OPERATOR_API_KEY=$opKey
 CREG_ETH_RPC=$EthRpc
 CREG_EXPECTED_L1_CHAIN_ID=11155111
 CREG_CHAIN_ID=creg-testnet-1
+CREG_STAKING_ADDR=0x30604Aa6f763fbde6aDCffbd8960af3031037331
+CREG_REGISTRY_ADDR=0xD0F465ca185a99E268be0C4FF5A135Bdf89FAF3B
 CREG_CHAIN_SPEC_URL=https://spec.testnet.cregnet.dev/chain-spec.json
 CREG_SPEC_SIGNATURE_URL=https://spec.testnet.cregnet.dev/chain-spec.json.sig
 CREG_IPFS_URL=https://ipfs.testnet.cregnet.dev
@@ -78,7 +80,27 @@ RUST_LOG=info,chain_registry_node=debug,consensus=info
 
 [System.IO.File]::WriteAllText($envFile, $envContent)
 
-Write-Host "`nStarting independent validator container..." -ForegroundColor Yellow
+# Auto-detect available Docker image
+$imageCandidates = @("chain-registry-node-secure:latest", "creg-node:fleet", "creg-node:latest", "creg-node:local-3node", "chain-registry-app:latest")
+$chosenImage = $null
+foreach ($cand in $imageCandidates) {
+    $imgId = docker images -q $cand 2>$null
+    if ($imgId) {
+        $chosenImage = $cand
+        break
+    }
+}
+
+if (-not $chosenImage) {
+    Write-Host "Local validator Docker image not found. Building Dockerfile.local..." -ForegroundColor Yellow
+    docker build -f Dockerfile.local -t chain-registry-node-secure:latest .
+    $chosenImage = "chain-registry-node-secure:latest"
+}
+
+Write-Host "`nStarting independent validator container using $chosenImage..." -ForegroundColor Yellow
+
+# Remove old container if it exists
+docker rm -f "creg-validator-$NodeId" 2>$null | Out-Null
 
 docker run -d `
     --name "creg-validator-$NodeId" `
@@ -87,17 +109,19 @@ docker run -d `
     -p 8080:8080 `
     -p 9000:9000 `
     -v "$($dataDir)/chain-data:/data" `
-    creg-node:local-3node /app/creg-node | Out-Null
+    $chosenImage | Out-Null
 
 Write-Host "`n============================================================" -ForegroundColor Green
 Write-Host "   Validator Node Successfully Launched!                    " -ForegroundColor Green
 Write-Host "============================================================" -ForegroundColor Green
-Write-Host "Node ID:       $NodeId" -ForegroundColor Cyan
-Write-Host "Data Dir:      $dataDir" -ForegroundColor Cyan
-Write-Host "Bootnode Peer: $bootnode" -ForegroundColor Cyan
-Write-Host "Local RPC:     http://localhost:8080/rpc" -ForegroundColor Cyan
-Write-Host "Local Health:  http://localhost:8080/v1/health" -ForegroundColor Cyan
+Write-Host "Node ID:        $NodeId" -ForegroundColor Cyan
+Write-Host "Data Dir:       $dataDir" -ForegroundColor Cyan
+Write-Host "Docker Image:   $chosenImage" -ForegroundColor Cyan
+Write-Host "Bootnode Peer:  $bootnode" -ForegroundColor Cyan
+Write-Host "Local RPC:      http://localhost:8080/rpc" -ForegroundColor Cyan
+Write-Host "Local Health:   http://localhost:8080/v1/health" -ForegroundColor Cyan
 Write-Host "`nTo participate in voting and receive block rewards:" -ForegroundColor Yellow
 Write-Host "1. Get free test tokens: https://faucet.testnet.cregnet.dev" -ForegroundColor Cyan
 Write-Host "2. Stake 100 tCREG on Sepolia contract: 0x30604Aa6f763fbde6aDCffbd8960af3031037331" -ForegroundColor Cyan
+Write-Host "   (Or run: creg stake 100)" -ForegroundColor Cyan
 Write-Host "3. Monitor your node logs: docker logs -f creg-validator-$NodeId`n" -ForegroundColor Cyan

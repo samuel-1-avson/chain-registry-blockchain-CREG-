@@ -64,6 +64,8 @@ CREG_OPERATOR_API_KEY=${OPERATOR_KEY}
 CREG_ETH_RPC=${ETH_RPC}
 CREG_EXPECTED_L1_CHAIN_ID=11155111
 CREG_CHAIN_ID=creg-testnet-1
+CREG_STAKING_ADDR=0x30604Aa6f763fbde6aDCffbd8960af3031037331
+CREG_REGISTRY_ADDR=0xD0F465ca185a99E268be0C4FF5A135Bdf89FAF3B
 CREG_CHAIN_SPEC_URL=https://spec.testnet.cregnet.dev/chain-spec.json
 CREG_SPEC_SIGNATURE_URL=https://spec.testnet.cregnet.dev/chain-spec.json.sig
 CREG_IPFS_URL=https://ipfs.testnet.cregnet.dev
@@ -73,7 +75,25 @@ CREG_LISTEN=0.0.0.0:8080
 RUST_LOG=info,chain_registry_node=debug,consensus=info
 EOF
 
-echo -e "\n${YELLOW}Starting independent validator container...${NC}"
+# Auto-detect available Docker image
+CHOSEN_IMAGE=""
+for candidate in chain-registry-node-secure:latest creg-node:fleet creg-node:latest creg-node:local-3node chain-registry-app:latest; do
+    if docker image inspect "${candidate}" >/dev/null 2>&1; then
+        CHOSEN_IMAGE="${candidate}"
+        break
+    fi
+done
+
+if [ -z "${CHOSEN_IMAGE}" ]; then
+    echo -e "${YELLOW}Local validator Docker image not found. Building Dockerfile.local...${NC}"
+    docker build -f Dockerfile.local -t chain-registry-node-secure:latest .
+    CHOSEN_IMAGE="chain-registry-node-secure:latest"
+fi
+
+echo -e "\n${YELLOW}Starting independent validator container using ${CHOSEN_IMAGE}...${NC}"
+
+# Remove old container if it exists
+docker rm -f "creg-validator-${NODE_ID}" >/dev/null 2>&1 || true
 
 docker run -d \
     --name "creg-validator-${NODE_ID}" \
@@ -82,17 +102,19 @@ docker run -d \
     -p 8080:8080 \
     -p 9000:9000 \
     -v "${DATA_DIR}/chain-data:/data" \
-    creg-node:local-3node /app/creg-node
+    "${CHOSEN_IMAGE}"
 
 echo -e "\n${GREEN}============================================================${NC}"
 echo -e "${GREEN}   Validator Node Successfully Launched!                    ${NC}"
 echo -e "${GREEN}============================================================${NC}"
 echo -e "Node ID:       ${CYAN}${NODE_ID}${NC}"
 echo -e "Data Dir:      ${CYAN}${DATA_DIR}${NC}"
+echo -e "Docker Image:  ${CYAN}${CHOSEN_IMAGE}${NC}"
 echo -e "Bootnode Peer: ${CYAN}${BOOTNODE}${NC}"
 echo -e "Local RPC:     ${CYAN}http://localhost:8080/rpc${NC}"
 echo -e "Local Health:  ${CYAN}http://localhost:8080/v1/health${NC}"
 echo -e "\n${YELLOW}To participate in voting and receive block rewards:${NC}"
 echo -e "1. Get free test tokens: ${CYAN}https://faucet.testnet.cregnet.dev${NC}"
 echo -e "2. Stake 100 tCREG on Sepolia contract: ${CYAN}0x30604Aa6f763fbde6aDCffbd8960af3031037331${NC}"
+echo -e "   (Or run: creg stake 100)"
 echo -e "3. Monitor your node logs: ${CYAN}docker logs -f creg-validator-${NODE_ID}${NC}\n"
