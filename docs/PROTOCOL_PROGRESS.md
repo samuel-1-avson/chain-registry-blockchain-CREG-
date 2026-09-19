@@ -2,7 +2,7 @@
 
 **As of:** 2026-09-19
 **HEAD:** `36b6d49` (external-validator onboarding, staking CLI, and documentation modernization).
-**Public binary pin:** `v0.4.5-testnet` provides Windows, Linux, and macOS archives through the GitHub release. SEC-401 freeze candidate can stay `v0.4.3-testnet` if a vendor already scoped that tag.
+**Public binary pin:** `v0.4.6-testnet` provides Windows, Linux, and macOS archives through the GitHub release. SEC-401 freeze candidate can stay `v0.4.3-testnet` if a vendor already scoped that tag.
 **Canonical repo:** [samuel-1-avson/chain-registry-blockchain-CREG-](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-)
 
 This page is the **session briefing** for protocol work: what shipped, what improved, what is left, and how ready CREG is for testnet. Live fleet facts stay in [TESTNET_STATUS.md](./TESTNET_STATUS.md). Prioritized IDs stay in [NEXT_WORK.md](./NEXT_WORK.md). Maintainer tracks stay in [WHAT_TO_DO_NEXT.md](./WHAT_TO_DO_NEXT.md).

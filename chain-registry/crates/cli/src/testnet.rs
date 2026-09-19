@@ -150,9 +150,11 @@ pub async fn status(node_url: Option<&str>) -> Result<()> {
 
 /// Stake as publisher on testnet
 pub async fn stake_publisher(amount_eth: f64, key: &str, rpc_url: Option<&str>) -> Result<()> {
+    let sepolia_rpc_url = std::env::var("SEPOLIA_RPC_URL").ok();
+    let creg_eth_rpc = std::env::var("CREG_ETH_RPC").ok();
     let rpc = rpc_url
-        .or_else(|| std::env::var("SEPOLIA_RPC_URL").ok().as_deref())
-        .or_else(|| std::env::var("CREG_ETH_RPC").ok().as_deref())
+        .or(sepolia_rpc_url.as_deref())
+        .or(creg_eth_rpc.as_deref())
         .unwrap_or("https://explorer.testnet.cregnet.dev/rpc");
     let staking = std::env::var("CREG_STAKING_ADDR")
         .or_else(|_| std::env::var("TESTNET_STAKING_ADDR"))
@@ -223,9 +225,11 @@ pub async fn stake_publisher(amount_eth: f64, key: &str, rpc_url: Option<&str>) 
 
 /// Stake as validator on testnet
 pub async fn stake_validator(amount_eth: f64, key: &str, rpc_url: Option<&str>) -> Result<()> {
+    let sepolia_rpc_url = std::env::var("SEPOLIA_RPC_URL").ok();
+    let creg_eth_rpc = std::env::var("CREG_ETH_RPC").ok();
     let rpc = rpc_url
-        .or_else(|| std::env::var("SEPOLIA_RPC_URL").ok().as_deref())
-        .or_else(|| std::env::var("CREG_ETH_RPC").ok().as_deref())
+        .or(sepolia_rpc_url.as_deref())
+        .or(creg_eth_rpc.as_deref())
         .unwrap_or("https://explorer.testnet.cregnet.dev/rpc");
     let staking = std::env::var("CREG_STAKING_ADDR")
         .or_else(|_| std::env::var("TESTNET_STAKING_ADDR"))
