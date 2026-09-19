@@ -7,7 +7,10 @@
 
 param(
     [string]$NodeId = "",
-    [string]$EthRpc = "https://ethereum-sepolia-rpc.publicnode.com"
+    [string]$EthRpc = "https://ethereum-sepolia-rpc.publicnode.com",
+    [int]$HttpPort = 8080,
+    [int]$P2pPort = 9000,
+    [string]$CustomKey = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -22,19 +25,30 @@ if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     exit 1
 }
 
-$dataDir = Join-Path $env:USERPROFILE ".creg-validator"
+# Resolve Node ID and isolated Data Directory (allows running multiple nodes on one host)
+if (-not $NodeId) {
+    $NodeId = "ext-val-" + (Get-Random -Minimum 1000 -Maximum 9999)
+    $dataDir = Join-Path $env:USERPROFILE ".creg-validator"
+} else {
+    $dataDir = Join-Path $env:USERPROFILE ".creg-validator-$NodeId"
+}
+
 if (-not (Test-Path $dataDir)) { New-Item -ItemType Directory -Path $dataDir -Force | Out-Null }
 $keyFile = Join-Path $dataDir "validator.key"
 $envFile = Join-Path $dataDir "validator.env"
 
-# Generate or load Validator Key
-if (-not (Test-Path $keyFile)) {
+# Generate, load, or use custom Validator Key
+if ($CustomKey) {
+    $validatorKey = $CustomKey.Trim().ToLower()
+    [System.IO.File]::WriteAllText($keyFile, $validatorKey)
+    Write-Host "[OK] Using custom validator key (saved to $keyFile)" -ForegroundColor Green
+} elseif (-not (Test-Path $keyFile)) {
     Write-Host "Generating new Ed25519 validator consensus key..." -ForegroundColor Yellow
     $bytes = New-Object byte[] 32
     (New-Object System.Security.Cryptography.RNGCryptoServiceProvider).GetBytes($bytes)
     $validatorKey = [System.BitConverter]::ToString($bytes).Replace("-", "").ToLower()
     [System.IO.File]::WriteAllText($keyFile, $validatorKey)
-    Write-Host "[OK] Validator key saved to $keyFile" -ForegroundColor Green
+    Write-Host "[OK] Generated new validator key: $keyFile" -ForegroundColor Green
 } else {
     $validatorKey = (Get-Content $keyFile -Raw).Trim()
     Write-Host "[OK] Loaded existing validator key from $keyFile" -ForegroundColor Green
@@ -48,10 +62,6 @@ if (-not (Test-Path $operatorKeyFile)) {
     [System.IO.File]::WriteAllText($operatorKeyFile, $opKey)
 } else {
     $opKey = (Get-Content $operatorKeyFile -Raw).Trim()
-}
-
-if (-not $NodeId) {
-    $NodeId = "ext-val-" + (Get-Random -Minimum 1000 -Maximum 9999)
 }
 
 $bootnode = "/ip4/35.225.225.20/tcp/9000/p2p/12D3KooWHrfvaBbsQmXq1L3ZAjmX299ca9pLECT5a2GdxaGGizgY"
@@ -111,8 +121,8 @@ $dockerArgs = @(
     "--name", "creg-validator-$NodeId",
     "--restart", "unless-stopped",
     "--env-file", "$envFile",
-    "-p", "8080:8080",
-    "-p", "9000:9000",
+    "-p", "$($HttpPort):8080",
+    "-p", "$($P2pPort):9000",
     "-v", "$($dataDir)/chain-data:/data",
     $chosenImage
 )
@@ -122,16 +132,26 @@ Write-Host ""
 Write-Host "============================================================" -ForegroundColor Green
 Write-Host "   Validator Node Successfully Launched!                    " -ForegroundColor Green
 Write-Host "============================================================" -ForegroundColor Green
-Write-Host "Node ID:        $NodeId" -ForegroundColor Cyan
-Write-Host "Data Dir:       $dataDir" -ForegroundColor Cyan
-Write-Host "Docker Image:   $chosenImage" -ForegroundColor Cyan
-Write-Host "Bootnode Peer:  $bootnode" -ForegroundColor Cyan
-Write-Host "Local RPC:      http://localhost:8080/rpc" -ForegroundColor Cyan
-Write-Host "Local Health:   http://localhost:8080/v1/health" -ForegroundColor Cyan
+Write-Host "Node ID:         $NodeId" -ForegroundColor Cyan
+Write-Host "Data Directory:  $dataDir" -ForegroundColor Cyan
+Write-Host "Key Location:    $keyFile" -ForegroundColor Cyan
+Write-Host "Docker Image:    $chosenImage" -ForegroundColor Cyan
+Write-Host "P2P Port:        $P2pPort (Firewall: OPEN TCP/UDP $P2pPort)" -ForegroundColor Cyan
+Write-Host "HTTP RPC Port:   $HttpPort (Keep private or proxy with TLS)" -ForegroundColor Cyan
+Write-Host "Bootnode Peer:   $bootnode" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "To participate in voting and receive block rewards:" -ForegroundColor Yellow
-Write-Host "1. Get free test tokens: https://faucet.testnet.cregnet.dev" -ForegroundColor Cyan
-Write-Host "2. Stake 100 tCREG on Sepolia contract: 0x30604Aa6f763fbde6aDCffbd8960af3031037331" -ForegroundColor Cyan
-Write-Host "   (Or run: creg stake 100)" -ForegroundColor Cyan
-Write-Host "3. Monitor your node logs: docker logs -f creg-validator-$NodeId" -ForegroundColor Cyan
+Write-Host "--- KEY BACKUP NOTICE ---" -ForegroundColor Yellow
+Write-Host "Validator Key:   $validatorKey" -ForegroundColor Yellow
+Write-Host "Save this key string securely! To restore this node anytime, pass:" -ForegroundColor Gray
+Write-Host "  .\testnet\start-external-validator.ps1 -CustomKey $validatorKey" -ForegroundColor Gray
+Write-Host ""
+Write-Host "--- REMOTE VERIFICATION ---" -ForegroundColor Yellow
+Write-Host "Local query:     curl http://localhost:$($HttpPort)/v1/health" -ForegroundColor Gray
+Write-Host "Remote query:    curl http://<YOUR_SERVER_IP>:$($HttpPort)/v1/health" -ForegroundColor Gray
+Write-Host "Global Explorer: https://explorer.testnet.cregnet.dev (Validators Tab)" -ForegroundColor Gray
+Write-Host ""
+Write-Host "--- STAKING FOR REWARDS ---" -ForegroundColor Yellow
+Write-Host "1. Drip testnet tokens:  creg testnet drip" -ForegroundColor Cyan
+Write-Host "2. Deposit stake (100):  creg stake 100" -ForegroundColor Cyan
+Write-Host "3. Monitor live logs:    docker logs -f creg-validator-$NodeId" -ForegroundColor Cyan
 Write-Host ""
