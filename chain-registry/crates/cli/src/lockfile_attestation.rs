@@ -48,12 +48,21 @@ impl LockfileAttestationReport {
         // Compute Merkle provenance root over dependency hashes
         let mut digests: Vec<String> = entries
             .iter()
-            .map(|e| sha256_hex(format!("{}:{}:{}", e.package_canonical, e.content_hash, e.risk_score).as_bytes()))
+            .map(|e| {
+                sha256_hex(
+                    format!(
+                        "{}:{}:{}",
+                        e.package_canonical, e.content_hash, e.risk_score
+                    )
+                    .as_bytes(),
+                )
+            })
             .collect();
         digests.sort();
 
         let provenance_root = sha256_hex(digests.join(":").as_bytes());
-        let is_ci_compliant = revoked == 0 && (unverified == 0 || (total > 0 && verified * 100 / total >= 95));
+        let is_ci_compliant =
+            revoked == 0 && (unverified == 0 || (total > 0 && verified * 100 / total >= 95));
 
         Self {
             project_name,

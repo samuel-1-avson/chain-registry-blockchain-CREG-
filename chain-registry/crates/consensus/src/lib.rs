@@ -28,4 +28,3 @@ pub use validator_set::ValidatorSet;
 
 pub mod vote_accumulator;
 pub use vote_accumulator::{CommitOutcome, IncomingVote, VoteAccumulator};
-

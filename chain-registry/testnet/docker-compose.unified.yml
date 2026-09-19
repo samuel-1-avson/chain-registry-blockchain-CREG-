@@ -1,0 +1,165 @@
+# ==============================================================================
+# Chain Registry Unified Single-Instance Stack (~$59/mo on GCP e2-standard-2)
+# Consolidates CREG Observer Node, Caddy TLS Gateway, Explorer, Faucet, Spec, and IPFS
+# ==============================================================================
+
+version: "3.8"
+
+networks:
+  creg-unified-net:
+    driver: bridge
+
+volumes:
+  caddy-data:
+  caddy-config:
+  creg-node-data:
+  ipfs-data:
+
+services:
+  # ── Unified Reverse Proxy & TLS (Caddy) ─────────────────────────────────────
+  caddy:
+    image: caddy:2-alpine
+    container_name: creg-unified-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      CREG_ACME_EMAIL: ${ACME_EMAIL:-samuelavson@gmail.com}
+      CREG_PUBLIC_API_HOST: ${CREG_PUBLIC_API_HOST:-api.testnet.cregnet.dev}
+      CREG_PUBLIC_EXPLORER_HOST: ${CREG_PUBLIC_EXPLORER_HOST:-explorer.testnet.cregnet.dev}
+      CREG_PUBLIC_SPEC_HOST: ${CREG_PUBLIC_SPEC_HOST:-spec.testnet.cregnet.dev}
+      CREG_PUBLIC_IPFS_HOST: ${CREG_PUBLIC_IPFS_HOST:-ipfs.testnet.cregnet.dev}
+      CREG_PUBLIC_FAUCET_HOST: ${CREG_PUBLIC_FAUCET_HOST:-faucet.testnet.cregnet.dev}
+      CREG_SEPOLIA_PUBLIC_RPC_UPSTREAM: ${SEPOLIA_RPC_URL:-https://ethereum-sepolia-rpc.publicnode.com}
+      CREG_SEPOLIA_PUBLIC_RPC_UPSTREAM_HOST: ${CREG_SEPOLIA_PUBLIC_RPC_UPSTREAM_HOST:-ethereum-sepolia-rpc.publicnode.com}
+      CREG_3NODE_EXPLORER_PORT: "80"
+      CREG_3NODE_SPEC_HOST_PORT: "80"
+      CREG_3NODE_IPFS_HOST_PORT: "5001"
+      CREG_3NODE_FAUCET_PORT: "8082"
+    volumes:
+      - ./caddy/Caddyfile.unified:/etc/caddy/Caddyfile:ro
+      - ./caddy/waitlist.caddy:/etc/caddy/waitlist.caddy:ro
+      - ./caddy/faucet-edge.caddy:/etc/caddy/faucet-edge.caddy:ro
+      - ./caddy/hub.caddy:/etc/caddy/hub.caddy:ro
+      - ./caddy/sepolia-public-rpc.caddy:/etc/caddy/sepolia-public-rpc.caddy:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - creg-unified-net
+    depends_on:
+      - creg-node
+
+  # ── CREG Blockchain Observer & JSON-RPC Daemon ──────────────────────────────
+  creg-node:
+    image: creg-node:local-3node
+    container_name: creg-unified-node
+    restart: unless-stopped
+    environment:
+      CREG_TESTNET: "true"
+      CREG_DATA_DIR: "/data"
+      CREG_IS_VALIDATOR: "false" # Runs as dedicated public read observer
+      CREG_NODE_ROLE: "observer"
+      CREG_ETH_RPC: "${CREG_ETH_RPC:-${SEPOLIA_RPC_URL:-https://ethereum-sepolia-rpc.publicnode.com}}"
+      CREG_EXPECTED_L1_CHAIN_ID: "11155111"
+      CREG_CHAIN_ID: "${CREG_CHAIN_ID:-creg-testnet-1}"
+      CREG_CHAIN_SPEC_URL: "http://spec-server/chain-spec.json"
+      CREG_SPEC_SIGNATURE_URL: "http://spec-server/chain-spec.json.sig"
+      CREG_OPERATOR_API_KEY: "${CREG_OPERATOR_API_KEY:-0x9f8b4a2e1d7c3b5a8f6e4d2c0b8a6f4e2d0c8b6a4f2e0d8c6b4a2e0d8c6b4a2e}"
+      CREG_TOKEN_ADDR: "${CREG_TOKEN_ADDR:-0x167Ab975dc95b79727Ed76BD8AAb70463F6499E2}"
+      CREG_STAKING_ADDR: "${CREG_STAKING_ADDR:-0x30604Aa6f763fbde6aDCffbd8960af3031037331}"
+      CREG_REGISTRY_ADDR: "${CREG_REGISTRY_ADDR:-0xD0F465ca185a99E268be0C4FF5A135Bdf89FAF3B}"
+      CREG_GOVERNANCE_ADDR: "${CREG_GOVERNANCE_ADDR:-0x122Bc2C704B966C74004506F98F13bf7b5F75b9D}"
+      CREG_ZK_VERIFIER_ADDR: "${CREG_ZK_VERIFIER_ADDR:-0x81e183cab18F1F1d506F2875c28189A5217A949D}"
+      CREG_TRANSPARENCY_LOG_KEY: "${SPEC_SIGNING_KEY:-5d1fd1c74dcdfac4b0aa45805035398831414e081a423962623fead675738b11}"
+      CREG_TRANSPARENCY_LOG_SIGNER_ID: "creg-log-operator-1"
+      CREG_IPFS_URL: "http://ipfs:5001"
+      CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/9000"
+      RUST_LOG: "info,chain_registry_node=debug,consensus=info"
+    volumes:
+      - creg-node-data:/data
+    ports:
+      - "28182:8080" # Exposed internally on host
+      - "9000:9000"  # Public P2P Libp2p Seed / Bootnode
+    networks:
+      creg-unified-net:
+        aliases:
+          - node
+          - creg-node
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/v1/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # ── Sepolia Faucet Service ──────────────────────────────────────────────────
+  faucet:
+    image: creg-node:local-3node
+    container_name: creg-unified-faucet
+    restart: unless-stopped
+    entrypoint: ["/app/faucet"]
+    environment:
+      CREG_SECRETS_BACKEND: env
+      FAUCET_PORT: "8082"
+      FAUCET_RPC_URL: "${SEPOLIA_RPC_URL:-https://ethereum-sepolia-rpc.publicnode.com}"
+      FAUCET_PUBLIC_RPC_URL: "https://${CREG_PUBLIC_API_HOST:-api.testnet.cregnet.dev}/sepolia"
+      FAUCET_PRIVATE_KEY: "${DEPLOYER_KEY:-}"
+      FAUCET_ADDRESS: "${GOVERNANCE_SIGNER_ADDRESS:-0xb0935C6C7b9F024013eE13d9C194683199F07eCC}"
+      FAUCET_TOKEN_CONTRACT: "${CREG_TOKEN_ADDR:-0x167Ab975dc95b79727Ed76BD8AAb70463F6499E2}"
+      FAUCET_CHAIN_ID: "11155111"
+      FAUCET_DRIP_AMOUNT: "1000000000000000000000"
+      FAUCET_COOLDOWN_SECS: "60"
+      FAUCET_EXPLORER_URL: "https://${CREG_PUBLIC_EXPLORER_HOST:-explorer.testnet.cregnet.dev}"
+      RUST_LOG: "info"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    ports:
+      - "8082:8082"
+    networks:
+      - creg-unified-net
+
+  # ── Explorer Web Frontend ───────────────────────────────────────────────────
+  web-explorer:
+    image: chain-registry-web-explorer:3node
+    container_name: creg-unified-explorer
+    restart: unless-stopped
+    environment:
+      VITE_API_BASE: "https://${CREG_PUBLIC_API_HOST:-api.testnet.cregnet.dev}"
+      VITE_NETWORK: "testnet"
+      VITE_SEPOLIA_CREG_TOKEN: "${CREG_TOKEN_ADDR:-0x167Ab975dc95b79727Ed76BD8AAb70463F6499E2}"
+      VITE_SEPOLIA_STAKING_ADDR: "${CREG_STAKING_ADDR:-0x30604Aa6f763fbde6aDCffbd8960af3031037331}"
+      VITE_SEPOLIA_REGISTRY_ADDR: "${CREG_REGISTRY_ADDR:-0xD0F465ca185a99E268be0C4FF5A135Bdf89FAF3B}"
+    networks:
+      - creg-unified-net
+
+  # ── Spec Server ─────────────────────────────────────────────────────────────
+  spec-server:
+    image: nginx:alpine
+    container_name: creg-unified-spec-server
+    restart: unless-stopped
+    volumes:
+      - ./chain-spec.sepolia.json:/usr/share/nginx/html/chain-spec.json:ro
+      - ./chain-spec.sepolia.json.sig:/usr/share/nginx/html/chain-spec.json.sig:ro
+      - ./chain-spec.sepolia.json:/usr/share/nginx/html/chain-spec.sepolia.json:ro
+      - ./chain-spec.sepolia.json.sig:/usr/share/nginx/html/chain-spec.sepolia.json.sig:ro
+      - ./install.sh:/usr/share/nginx/html/install.sh:ro
+      - ./install.ps1:/usr/share/nginx/html/install.ps1:ro
+      - ./dist:/usr/share/nginx/html/dist:ro
+    networks:
+      - creg-unified-net
+
+  # ── IPFS Storage Gateway ────────────────────────────────────────────────────
+  ipfs:
+    image: ipfs/kubo:latest
+    container_name: creg-unified-ipfs
+    restart: unless-stopped
+    volumes:
+      - ipfs-data:/data/ipfs
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - "export IPFS_PATH=/data/ipfs; ipfs init --profile=server 2>/dev/null || true; ipfs config Addresses.API /ip4/0.0.0.0/tcp/5001 2>/dev/null || true; exec ipfs daemon --migrate=true --enable-gc"
+    networks:
+      - creg-unified-net

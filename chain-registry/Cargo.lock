@@ -2127,6 +2127,7 @@ dependencies = [
  "aes-gcm",
  "anyhow",
  "arboard",
+ "base64 0.22.1",
  "bip39",
  "chrono",
  "clap",

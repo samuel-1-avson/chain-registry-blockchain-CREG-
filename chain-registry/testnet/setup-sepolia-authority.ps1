@@ -71,7 +71,7 @@ Set-Content -Path (Join-Path $secretsDir "governance-signer-sepolia-latest.key")
 Set-Content -Path (Join-Path $secretsDir "governance-signer-sepolia-latest.address.txt") -Value $address -Encoding utf8
 try { icacls $authLatest /inheritance:r /grant:r "${env:USERNAME}:(R,W)" | Out-Null } catch { }
 
-$lines = if (Test-Path $envFile) { Get-Content $envFile } else { Get-Content (Join-Path $scriptDir ".env.sepolia.example") }
+$lines = if (Test-Path $envFile) { Get-Content $envFile } elseif (Test-Path (Join-Path $scriptDir ".env.sepolia.example")) { Get-Content (Join-Path $scriptDir ".env.sepolia.example") } else { @() }
 $lines = Set-EnvLine -Lines $lines -Name "DEPLOYER_KEY" -Value $hex
 $lines = Set-EnvLine -Lines $lines -Name "GOVERNANCE_SIGNER_KEY" -Value $hex
 $lines = Set-EnvLine -Lines $lines -Name "GOVERNANCE_SIGNER_ADDRESS" -Value $address

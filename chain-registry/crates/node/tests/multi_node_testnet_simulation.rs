@@ -106,7 +106,9 @@ fn test_multi_node_testnet_cluster_full_simulation() {
 
     let nodes = [&node1, &node2, &node3, &node4];
     for node in &nodes {
-        let addr: Multiaddr = format!("/ip4/192.168.1.{}/tcp/9000", node.id.len()).parse().unwrap();
+        let addr: Multiaddr = format!("/ip4/192.168.1.{}/tcp/9000", node.id.len())
+            .parse()
+            .unwrap();
         assert!(subnet_filter.allow_and_record(&node.peer_id, &addr, true));
         peer_score.record_valid_message(&node.peer_id);
         assert_eq!(peer_score.evaluate_action(&node.peer_id), PeerAction::Allow);
@@ -133,7 +135,10 @@ fn test_multi_node_testnet_cluster_full_simulation() {
         ..Default::default()
     };
     assert_eq!(pub_req.id.canonical(), "npm:auth-guard@1.0.0");
-    println!("  ✓ Package payload ingested: Content Hash = {}", content_hash);
+    println!(
+        "  ✓ Package payload ingested: Content Hash = {}",
+        content_hash
+    );
 
     // ─────────────────────────────────────────────────────────────────────────────
     // 4. Parallel Sandbox Analysis & Multi-Validator Voting
@@ -152,7 +157,10 @@ fn test_multi_node_testnet_cluster_full_simulation() {
 
         votes.push((node.id.clone(), sig));
     }
-    println!("  ✓ 4/4 nodes completed sandbox analysis in {:?}", start_analysis.elapsed());
+    println!(
+        "  ✓ 4/4 nodes completed sandbox analysis in {:?}",
+        start_analysis.elapsed()
+    );
     println!("  ✓ 4 independent BLS signatures produced for PBFT Prepare/Commit");
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -211,7 +219,9 @@ fn test_multi_node_testnet_cluster_full_simulation() {
     // 1. Record prepare votes until 2f+1 quorum is reached (advances to Commit phase)
     for node in &nodes {
         let prep_sig = node.sign_pbft_phase("prepare", &b_hash);
-        let quorum_reached = pbft.prepare(&b_hash, &node.id, prep_sig).expect("prepare vote");
+        let quorum_reached = pbft
+            .prepare(&b_hash, &node.id, prep_sig)
+            .expect("prepare vote");
         if quorum_reached {
             break;
         }
@@ -220,7 +230,9 @@ fn test_multi_node_testnet_cluster_full_simulation() {
     // 2. Record commit votes until 2f+1 quorum is reached (advances to Finalised phase)
     for node in &nodes {
         let commit_sig = node.sign_pbft_phase("commit", &b_hash);
-        let quorum_reached = pbft.commit(&b_hash, &node.id, commit_sig).expect("commit vote");
+        let quorum_reached = pbft
+            .commit(&b_hash, &node.id, commit_sig)
+            .expect("commit vote");
         if quorum_reached {
             break;
         }
@@ -234,7 +246,10 @@ fn test_multi_node_testnet_cluster_full_simulation() {
     let indices = vec![0, 1, 2, 3];
     let agg_sig = aggregate_signatures(&sigs, &indices, 4).expect("BLS aggregation");
 
-    println!("  ✓ PBFT Proposer '{}' selected deterministically", selected_proposer);
+    println!(
+        "  ✓ PBFT Proposer '{}' selected deterministically",
+        selected_proposer
+    );
     println!("  ✓ PBFT Finalized at Height 1 (Quorum: 4/4 >= 2f+1)");
     println!("  ✓ 4 BLS signatures compressed into single Aggregate Signature");
     println!("  ✓ Participant count: {}", agg_sig.participant_count);
@@ -249,20 +264,23 @@ fn test_multi_node_testnet_cluster_full_simulation() {
 
     let merkle_tree = build_merkle_tree(&leaves);
     let root_hash = merkle_tree.last().unwrap()[0].clone();
-    let proof = generate_inclusion_proof(&leaves, &package_id.canonical(), 1).expect("inclusion proof");
+    let proof =
+        generate_inclusion_proof(&leaves, &package_id.canonical(), 1).expect("inclusion proof");
     assert!(verify_merkle_path(&tx2, 1, &proof.audit_path, &root_hash));
 
     let mut relay_queue = CheckpointRelayQueue::new(10);
-    relay_queue.enqueue(L1CheckpointBatch {
-        block_height: 1,
-        block_hash: block_hash.clone(),
-        state_root: root_hash.clone(),
-        transparency_root: root_hash.clone(),
-        package_count: 1,
-        bls_aggregate_signature: Some(agg_sig.aggregate_sig_hex.clone()),
-        participant_bitmask: Some(agg_sig.participant_bitmask.clone()),
-        timestamp: 1724760000,
-    }).expect("enqueue checkpoint");
+    relay_queue
+        .enqueue(L1CheckpointBatch {
+            block_height: 1,
+            block_hash: block_hash.clone(),
+            state_root: root_hash.clone(),
+            transparency_root: root_hash.clone(),
+            package_count: 1,
+            bls_aggregate_signature: Some(agg_sig.aggregate_sig_hex.clone()),
+            participant_bitmask: Some(agg_sig.participant_bitmask.clone()),
+            timestamp: 1724760000,
+        })
+        .expect("enqueue checkpoint");
 
     let popped = relay_queue.pop_next();
     assert!(popped.is_some());
@@ -340,7 +358,9 @@ fn test_multi_node_testnet_cluster_full_simulation() {
     assert!(verified_verdict.status.is_safe());
     assert!(revoked_verdict.status.is_blocked());
 
-    println!("  ✓ Benign Package: Verified on-chain -> Proxy returns HTTP 200 (X-CREG-Trust: Verified)");
+    println!(
+        "  ✓ Benign Package: Verified on-chain -> Proxy returns HTTP 200 (X-CREG-Trust: Verified)"
+    );
     println!("  ✓ Malicious Package: Revoked on-chain -> Proxy returns HTTP 403 Forbidden");
 
     println!("\n================================================================================");

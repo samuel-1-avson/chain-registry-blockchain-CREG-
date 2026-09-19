@@ -15,19 +15,23 @@ $EnvExample = Join-Path $RepoRoot ".env.testnet.example"
 $ComposeFile = Join-Path $RepoRoot "docker-compose.testnet.yml"
 
 function Invoke-TestnetCompose {
-    param([string[]]$Args)
-    & docker compose --env-file $EnvFile -f $ComposeFile @Args
-    if ($LASTEXITCODE -ne 0) {
-        throw "docker compose failed (exit $LASTEXITCODE)"
+    param([string[]]$ComposeArgs)
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    & docker compose --env-file $EnvFile -f $ComposeFile @ComposeArgs
+    $code = $LASTEXITCODE
+    $ErrorActionPreference = $prev
+    if ($code -ne 0) {
+        throw "docker compose failed (exit $code)"
     }
 }
 
 if (-not (Test-Path $EnvFile)) {
     if (-not (Test-Path $EnvExample)) {
-        throw "Missing .env.testnet.example — cannot bootstrap Sepolia testnet env."
+        throw "Missing .env.testnet.example -- cannot bootstrap Sepolia testnet env."
     }
     Copy-Item $EnvExample $EnvFile
-    Write-Host "Created .env.testnet from .env.testnet.example — fill in <CHANGE_ME> keys before production use."
+    Write-Host "Created .env.testnet from .env.testnet.example -- fill in <CHANGE_ME> keys before production use."
 }
 
 if (-not $SkipCleanup) {
@@ -43,7 +47,7 @@ if ($SkipExplorer) {
 Invoke-TestnetCompose $upArgs
 
 Write-Host ""
-Write-Host "Bootstrap host starting. Sepolia L1 — contracts from testnet/chain-spec.sepolia.json"
+Write-Host "Bootstrap host starting. Sepolia L1 -- contracts from testnet/chain-spec.sepolia.json"
 Write-Host "  Node API:      http://localhost:8080/v1/health"
 Write-Host "  Chain spec:    http://localhost:8888/chain-spec.json"
 Write-Host "  Faucet:        http://localhost:8082/health"
@@ -65,8 +69,8 @@ if ($RunSmokeTests) {
         }
     }
     if (-not $healthy) {
-        throw "Node health check failed — see: docker compose --env-file .env.testnet -f docker-compose.testnet.yml logs node-1"
+        throw "Node health check failed -- see: docker compose --env-file .env.testnet -f docker-compose.testnet.yml logs node-1"
     }
     $stats = Invoke-RestMethod -Uri "http://localhost:8080/v1/chain/stats" -TimeoutSec 10
-    Write-Host "Smoke OK — tip height: $($stats.tip_height), packages: $($stats.package_count)"
+    Write-Host "Smoke OK -- tip height: $($stats.tip_height), packages: $($stats.package_count)"
 }

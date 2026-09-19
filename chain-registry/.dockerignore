@@ -42,6 +42,7 @@ hub-api/dist/
 # Test files
 tests/
 **/*_test.rs
+!crates/cli/src/stress_test.rs
 **/*_tests.rs
 
 # CI/CD

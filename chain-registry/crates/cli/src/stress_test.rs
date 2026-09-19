@@ -57,22 +57,49 @@ pub struct StressTestReport {
 
 /// Execute high-throughput stress test
 pub async fn run_stress_test(config: StressTestConfig) -> Result<StressTestReport> {
-    println!("\n{}", "================================================================================".cyan());
-    println!("  {}", "CHAIN REGISTRY HIGH-THROUGHPUT STRESS TEST (1,000+ TPS)".bold().cyan());
-    println!("{}\n", "================================================================================".cyan());
+    println!(
+        "\n{}",
+        "================================================================================".cyan()
+    );
+    println!(
+        "  {}",
+        "CHAIN REGISTRY HIGH-THROUGHPUT STRESS TEST (1,000+ TPS)"
+            .bold()
+            .cyan()
+    );
+    println!(
+        "{}\n",
+        "================================================================================".cyan()
+    );
 
-    println!("  Target Load:      {} requests/second", config.target_tps.to_string().yellow().bold());
-    println!("  Test Duration:    {} seconds", config.duration_secs.to_string().yellow());
-    println!("  Workers:          {} concurrent pipeline lanes", config.concurrent_clients.to_string().cyan());
+    println!(
+        "  Target Load:      {} requests/second",
+        config.target_tps.to_string().yellow().bold()
+    );
+    println!(
+        "  Test Duration:    {} seconds",
+        config.duration_secs.to_string().yellow()
+    );
+    println!(
+        "  Workers:          {} concurrent pipeline lanes",
+        config.concurrent_clients.to_string().cyan()
+    );
     if let Some(url) = &config.node_url {
         println!("  Target Endpoint:  {}", url.dimmed());
     } else {
-        println!("  Target Pipeline:  {}", "In-Memory Full Consensus Engine (Deterministic Bench)".green());
+        println!(
+            "  Target Pipeline:  {}",
+            "In-Memory Full Consensus Engine (Deterministic Bench)".green()
+        );
     }
     println!();
 
     let total_target_items = config.target_tps * config.duration_secs as usize;
-    println!("{} Generating {} synthetic package publish payloads...", "►".green(), total_target_items.to_string().bold());
+    println!(
+        "{} Generating {} synthetic package publish payloads...",
+        "►".green(),
+        total_target_items.to_string().bold()
+    );
 
     let mut payloads = Vec::with_capacity(total_target_items);
     for i in 0..total_target_items {
@@ -100,8 +127,14 @@ pub async fn run_stress_test(config: StressTestConfig) -> Result<StressTestRepor
         payloads.push((req, raw_code.into_bytes()));
     }
 
-    println!("  ✓ {} payloads prepared.\n", payloads.len().to_string().green());
-    println!("{} Starting concurrent admission & consensus execution...", "►".green());
+    println!(
+        "  ✓ {} payloads prepared.\n",
+        payloads.len().to_string().green()
+    );
+    println!(
+        "{} Starting concurrent admission & consensus execution...",
+        "►".green()
+    );
 
     let overall_start = Instant::now();
     let mut latencies = Vec::with_capacity(total_target_items);
@@ -136,7 +169,8 @@ pub async fn run_stress_test(config: StressTestConfig) -> Result<StressTestRepor
             assert_eq!(computed_hash, req.content_hash);
 
             // 2. Admission pool leaf transaction digest
-            let tx_digest = sha256_hex(format!("{}:{}", req.id.canonical(), computed_hash).as_bytes());
+            let tx_digest =
+                sha256_hex(format!("{}:{}", req.id.canonical(), computed_hash).as_bytes());
             leaves.push(tx_digest);
 
             latencies.push(item_start.elapsed());
@@ -152,7 +186,12 @@ pub async fn run_stress_test(config: StressTestConfig) -> Result<StressTestRepor
     let tree = build_merkle_tree(&leaves);
     let root_hash = tree.last().unwrap()[0].clone();
     let proof = generate_inclusion_proof(&leaves, &payloads[0].0.id.canonical(), 0).expect("proof");
-    assert!(verify_merkle_path(&leaves[0], 0, &proof.audit_path, &root_hash));
+    assert!(verify_merkle_path(
+        &leaves[0],
+        0,
+        &proof.audit_path,
+        &root_hash
+    ));
     let merkle_duration = merkle_start.elapsed();
 
     // Measure BLS Multi-Signature aggregation
@@ -188,18 +227,40 @@ pub async fn run_stress_test(config: StressTestConfig) -> Result<StressTestRepor
         p90_latency_ms: p90,
         p99_latency_ms: p99,
         bls_compression_pct: compression_pct,
-        merkle_root_throughput_per_sec: processed as f64 / merkle_duration.as_secs_f64().max(0.0001),
+        merkle_root_throughput_per_sec: processed as f64
+            / merkle_duration.as_secs_f64().max(0.0001),
     };
 
     // Render formatted results table
-    println!("{}", "================================================================================".green());
+    println!(
+        "{}",
+        "================================================================================".green()
+    );
     println!("  {}", "BENCHMARK PERFORMANCE SUMMARY".bold().green());
-    println!("{}", "================================================================================".green());
-    println!("  Total Processed:         {} packages", report.total_packages_processed.to_string().bold().green());
-    println!("  Success Rate:            {}", "100.0% (0 errors, 0 dropped)".green().bold());
-    println!("  Elapsed Time:            {:.3} seconds", report.elapsed_duration.as_secs_f64());
-    println!("  Average Throughput:      {} packages/sec", format!("{:.2}", report.average_tps).bold().cyan());
-    println!("  Peak Sustained TPS:      {} packages/sec", format!("{:.2}", report.peak_tps).bold().yellow());
+    println!(
+        "{}",
+        "================================================================================".green()
+    );
+    println!(
+        "  Total Processed:         {} packages",
+        report.total_packages_processed.to_string().bold().green()
+    );
+    println!(
+        "  Success Rate:            {}",
+        "100.0% (0 errors, 0 dropped)".green().bold()
+    );
+    println!(
+        "  Elapsed Time:            {:.3} seconds",
+        report.elapsed_duration.as_secs_f64()
+    );
+    println!(
+        "  Average Throughput:      {} packages/sec",
+        format!("{:.2}", report.average_tps).bold().cyan()
+    );
+    println!(
+        "  Peak Sustained TPS:      {} packages/sec",
+        format!("{:.2}", report.peak_tps).bold().yellow()
+    );
     println!();
     println!("  Latency Distribution:");
     println!("    • P50 (Median):        {:.3} ms", report.p50_latency_ms);
@@ -207,10 +268,19 @@ pub async fn run_stress_test(config: StressTestConfig) -> Result<StressTestRepor
     println!("    • P99:                 {:.3} ms", report.p99_latency_ms);
     println!();
     println!("  Cryptographic Efficiency:");
-    println!("    • Merkle Throughput:   {:.0} leaves/sec", report.merkle_root_throughput_per_sec);
-    println!("    • BLS Aggregation:     {:.1}% header compression (4 -> 1 signature)", report.bls_compression_pct.max(75.0));
+    println!(
+        "    • Merkle Throughput:   {:.0} leaves/sec",
+        report.merkle_root_throughput_per_sec
+    );
+    println!(
+        "    • BLS Aggregation:     {:.1}% header compression (4 -> 1 signature)",
+        report.bls_compression_pct.max(75.0)
+    );
     println!("    • Root Commitment:     {}", root_hash[..16].yellow());
-    println!("{}\n", "================================================================================".green());
+    println!(
+        "{}\n",
+        "================================================================================".green()
+    );
 
     Ok(report)
 }

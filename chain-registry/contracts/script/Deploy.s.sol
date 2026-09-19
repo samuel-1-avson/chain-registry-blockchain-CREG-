@@ -189,14 +189,16 @@ contract DeployChainRegistry is Script {
     function _writeManifest(address deployer) internal {
         string memory canonicalPath = "contracts/deployments/latest.json";
         string memory testnetPath = "testnet/artifacts/testnet-contracts.json";
-        string memory m = string.concat(
+        string memory p1 = string.concat(
             '{\n',
             '  "deployer":   "', vm.toString(deployer),           '",\n',
             '  "governance": "', vm.toString(address(governance)), '",\n',
             '  "staking":    "', vm.toString(address(staking)),    '",\n',
             '  "reputation": "', vm.toString(address(reputation)), '",\n',
             '  "vrf":        "', vm.toString(address(vrf)),        '",\n',
-            '  "zkVerifier": "', vm.toString(zkVerifier), '",\n',
+            '  "zkVerifier": "', vm.toString(zkVerifier), '",\n'
+        );
+        string memory p2 = string.concat(
             '  "registry":   "', vm.toString(address(registry)),   '",\n',
             '  "appeal":     "', vm.toString(address(appeal)),     '",\n',
             '  "cregToken":  "', vm.toString(address(cregToken)),  '",\n',
@@ -207,6 +209,7 @@ contract DeployChainRegistry is Script {
             '  "deployedAt": "', vm.toString(block.timestamp),     '"\n',
             '}'
         );
+        string memory m = string.concat(p1, p2);
 
         try vm.envString("DEPLOYMENT_MANIFEST_PATH") returns (string memory configuredPath) {
             if (bytes(configuredPath).length > 0) {

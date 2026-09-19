@@ -375,7 +375,10 @@ impl WasmSandbox {
             );
             #[cfg(not(windows))]
             if let Err(e) = store.set_fuel(max_fuel) {
-                return Err(SandboxError::ExecutionError(format!("Failed to configure fuel budget: {}", e)));
+                return Err(SandboxError::ExecutionError(format!(
+                    "Failed to configure fuel budget: {}",
+                    e
+                )));
             }
             store.limiter(|state| &mut state.limits);
 
@@ -887,7 +890,11 @@ mod tests {
 
         match err {
             SandboxError::ResourceLimitExceeded(msg) => {
-                assert!(msg.to_lowercase().contains("fuel"), "expected fuel error, got: {}", msg);
+                assert!(
+                    msg.to_lowercase().contains("fuel"),
+                    "expected fuel error, got: {}",
+                    msg
+                );
             }
             other => panic!("expected ResourceLimitExceeded, got: {:?}", other),
         }

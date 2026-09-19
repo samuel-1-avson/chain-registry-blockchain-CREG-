@@ -261,20 +261,18 @@ mod tests {
             signatures.push(keypairs[idx].sign(message));
         }
 
-        let agg_sig =
-            aggregate_signatures(&signatures, &participating_indices, total_validators)
-                .expect("aggregation");
+        let agg_sig = aggregate_signatures(&signatures, &participating_indices, total_validators)
+            .expect("aggregation");
 
         assert_eq!(agg_sig.participant_count, 5);
 
         // Verification must succeed with correct message
-        let valid =
-            verify_aggregate_signature(&agg_sig, message, &pubkeys).expect("verification");
+        let valid = verify_aggregate_signature(&agg_sig, message, &pubkeys).expect("verification");
         assert!(valid, "Valid aggregate signature should verify");
 
         // Verification must fail with tampered message
-        let invalid = verify_aggregate_signature(&agg_sig, b"wrong-message", &pubkeys)
-            .expect("verification");
+        let invalid =
+            verify_aggregate_signature(&agg_sig, b"wrong-message", &pubkeys).expect("verification");
         assert!(!invalid, "Tampered message should fail verification");
     }
 

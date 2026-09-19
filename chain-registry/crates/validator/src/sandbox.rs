@@ -1525,7 +1525,8 @@ mod tests {
             store.clear();
         }
 
-        let disk_loaded = get_result(canonical).expect("should retrieve from disk after memory clear");
+        let disk_loaded =
+            get_result(canonical).expect("should retrieve from disk after memory clear");
         assert_eq!(disk_loaded.observed_process_spawns, vec!["node"]);
 
         restore_env("CREG_SANDBOX_STORE_DIR", prev_dir);

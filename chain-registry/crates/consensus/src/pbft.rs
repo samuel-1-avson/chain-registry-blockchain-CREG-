@@ -991,24 +991,34 @@ mod tests {
         let hash = engine.start_round(test_block(&proposer), vs).unwrap();
 
         // v0 prepares
-        engine.prepare(&hash, "v0", signed_block_vote("v0", &k0, "prepare", &hash)).unwrap();
+        engine
+            .prepare(&hash, "v0", signed_block_vote("v0", &k0, "prepare", &hash))
+            .unwrap();
         // v1 prepares
-        engine.prepare(&hash, "v1", signed_block_vote("v1", &k1, "prepare", &hash)).unwrap();
+        engine
+            .prepare(&hash, "v1", signed_block_vote("v1", &k1, "prepare", &hash))
+            .unwrap();
 
         // v2 uses try_fast_commit (providing both prepare and commit together)
-        let fast_res = engine.try_fast_commit(
-            &hash,
-            "v2",
-            signed_block_vote("v2", &k2, "prepare", &hash),
-            signed_block_vote("v2", &k2, "commit", &hash),
-        ).unwrap();
+        let fast_res = engine
+            .try_fast_commit(
+                &hash,
+                "v2",
+                signed_block_vote("v2", &k2, "prepare", &hash),
+                signed_block_vote("v2", &k2, "commit", &hash),
+            )
+            .unwrap();
 
         // Reached prepare quorum and recorded commit, but needs 3 commits for finality
         assert!(!fast_res);
 
         // v0 and v1 commit
-        engine.commit(&hash, "v0", signed_block_vote("v0", &k0, "commit", &hash)).unwrap();
-        let finalised = engine.commit(&hash, "v1", signed_block_vote("v1", &k1, "commit", &hash)).unwrap();
+        engine
+            .commit(&hash, "v0", signed_block_vote("v0", &k0, "commit", &hash))
+            .unwrap();
+        let finalised = engine
+            .commit(&hash, "v1", signed_block_vote("v1", &k1, "commit", &hash))
+            .unwrap();
         assert!(finalised, "Block should be finalised after 3 commits");
     }
 }

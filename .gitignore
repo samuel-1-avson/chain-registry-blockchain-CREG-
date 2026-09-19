@@ -26,6 +26,8 @@ docs/
 .env
 .env.*
 !.env.example
+!**/.env.example
+!**/.env.*.example
 *.env
 secrets/
 **/secrets/
@@ -46,10 +48,17 @@ secrets/
 *.pfx
 *.crt
 *.cer
+*.csr
+*.der
+*.p7b
+*.p7c
 *.pub
 *.priv
+*.pk
+*.ppk
 *password*
 *credential*
+*credentials*
 *wallet*
 !chain-registry/explorer/src/pages/WalletPage.jsx
 !chain-registry/hub-web/src/wallet/
@@ -59,18 +68,94 @@ secrets/
 *seed*
 private*
 privkey*
+!chain-registry/contracts/PrivateRegistry.sol
+!**/PrivateRegistry.sol
 publisher.key
 **/publisher.key
+node.key
+**/node.key
+authority.key
+**/authority.key
+relayer.key
+**/relayer.key
+validator.key
+**/validator.key
+witness.key
+**/witness.key
+faucet.key
+**/faucet.key
+hot.key
+**/hot.key
+cold.key
+**/cold.key
+profile.json
+**/profile.json
+.creg/
+**/.creg/
+*.token
+**/*.token
+*.session
+**/*.session
+*.jwt
+*.authtoken
+*.auth_token
 *.jks
 *.keystore
+*.keystore.json
+UTC--*
+utc--*
+**/UTC--*
+**/utc--*
 *.asc
-# GCP / Firebase keys (filenames often omit "secret" / "credential")
+# SSH keys
+id_rsa*
+id_ed25519*
+id_ecdsa*
+id_dsa*
+**/id_rsa*
+**/id_ed25519*
+**/id_ecdsa*
+**/id_dsa*
+# Cloud / Package manager auth
+.npmrc
+**/.npmrc
+.yarnrc
+**/.yarnrc
+.yarnrc.yml
+**/.yarnrc.yml
+.pypirc
+**/.pypirc
+pip.ini
+pip.conf
+**/.cargo/credentials*
+**/.cargo/config.local.toml
 **/*-firebase-adminsdk-*.json
 **/serviceAccount*.json
+**/service-account*.json
+**/service_account*.json
 **/application_default_credentials.json
+**/client_secret*.json
 gcloud-key.json
 .runtimeconfig.json
 .secret.local
+**/.aws/
+**/.azure/
+**/.gcloud/
+**/.kube/
+*.kubeconfig
+*kubeconfig*.yaml
+*kubeconfig*.yml
+# Terraform & Infra secrets
+*.tfvars
+*.tfvars.json
+terraform.tfstate*
+*.vault
+*.vault.yml
+*.vault.yaml
+# Shell History leaks
+*.bash_history
+*.zsh_history
+*.ps_history
 # Waitlist / operator PII dumps
 *waitlist*.csv
 *registrant*.csv
@@ -223,9 +308,12 @@ package/
 packages/
 dist/
 **/dist/
+dist-bin/
+**/dist-bin/
 stress-report-out/
 **/stress-report-out/
 build/
+**/build/
 
 # =============================================================================
 # NODE.JS / NPM (libraries)

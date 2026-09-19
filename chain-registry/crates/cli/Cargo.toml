@@ -75,6 +75,7 @@ toml         = "0.8"
 urlencoding  = "2.1"
 whoami       = "1"
 semver       = "1"
+base64       = "0.22"
 
 [dev-dependencies]
 tempfile = "3"

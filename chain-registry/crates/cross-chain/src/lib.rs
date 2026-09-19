@@ -40,7 +40,7 @@ pub mod merkle_proof;
 
 pub use checkpoint_relayer::{CheckpointRelayQueue, L1CheckpointBatch};
 pub use l1_relayer_service::{
-    AnchoredCheckpointReceipt, L1RelayerConfig, L1RelayerService, RelayTxStatus,
+    AnchoredCheckpointReceipt, L1RelayerConfig, L1RelayerService, RelayTxStatus, RelayerSoakReport,
 };
 pub use merkle_proof::{
     build_merkle_tree, generate_inclusion_proof, verify_merkle_path, MerkleInclusionProof,

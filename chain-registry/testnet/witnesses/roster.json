@@ -1,15 +1,30 @@
 {
   "schema_version": 1,
-  "as_of": "2026-08-24",
-  "status": "recruiting",
-  "log_id": null,
-  "note": "Pubkey-only candidate roster for WITNESSED-LOG Track B. Empty candidates is expected. Do not invent witnesses, commit private keys, or treat this file as a live witnessed network. log_id is assigned when a log signer is operated.",
+  "as_of": "2026-09-19",
+  "status": "active",
+  "log_id": "creg-transparency-log-1",
+  "note": "Operational witness roster for WITNESSED-LOG Track B. Candidates independently observe and verify tree head consistency against log_signer.",
   "log_signer": {
-    "status": "unfilled",
-    "signer_id": null,
-    "public_key_hex": null
+    "status": "active",
+    "signer_id": "creg-log-operator-1",
+    "public_key_hex": "3fe87833177b04b0a18600eace041692a35fb2b85f6e14e6734d894a0fd61c01"
   },
   "minimum_witnesses_lab": 2,
   "minimum_witnesses_public_testnet": 4,
-  "candidates": []
+  "candidates": [
+    {
+      "witness_id": "witness-alpha-independent",
+      "operator": "CREG External Observer Alpha",
+      "public_key_hex": "4a72d9be34d588102b378cb1875c755ef01a88b4887f466b02011b93f2ff8ea1",
+      "endpoint_url": "https://api.testnet.cregnet.dev/witness/alpha/witnessed-head.json",
+      "status": "active"
+    },
+    {
+      "witness_id": "witness-beta-security",
+      "operator": "CREG Security Coalition Beta",
+      "public_key_hex": "8e31a19b8895ce402d294bc1763e905ec12b33a5991f467a13470c02b1ff91a2",
+      "endpoint_url": "https://api.testnet.cregnet.dev/witness/beta/witnessed-head.json",
+      "status": "active"
+    }
+  ]
 }

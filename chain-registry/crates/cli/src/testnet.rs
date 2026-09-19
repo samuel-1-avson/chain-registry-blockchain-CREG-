@@ -124,19 +124,26 @@ pub async fn status(node_url: Option<&str>) -> Result<()> {
         _ => println!("{} Faucet: {}", "●".red(), "Offline".red()),
     }
 
-    // Check explorer
-    match client.get("http://localhost:3000").send().await {
-        Ok(resp) if resp.status().is_success() => {
-            println!("{} Explorer: {}", "●".green(), "Online".green());
-        }
-        _ => println!("{} Explorer: {}", "●".red(), "Offline".red()),
+    // Check explorer (check Docker testnet port 3007 and Vite dev port 3000)
+    let (explorer_online, explorer_url) = if client.get("http://localhost:3007").send().await.map(|r| r.status().is_success()).unwrap_or(false) {
+        (true, "http://localhost:3007")
+    } else if client.get("http://localhost:3000").send().await.map(|r| r.status().is_success()).unwrap_or(false) {
+        (true, "http://localhost:3000")
+    } else {
+        (false, "http://localhost:3007")
+    };
+
+    if explorer_online {
+        println!("{} Explorer: {} ({})", "●".green(), "Online".green(), explorer_url.cyan());
+    } else {
+        println!("{} Explorer: {}", "●".red(), "Offline".red());
     }
 
     println!();
     println!("{}", "URLs:".bold());
-    println!("  Node:    http://localhost:8080");
-    println!("  Faucet:  http://localhost:8082");
-    println!("  Explorer: http://localhost:3000");
+    println!("  Node:     http://localhost:8080");
+    println!("  Faucet:   http://localhost:8082");
+    println!("  Explorer: {}", explorer_url);
 
     Ok(())
 }
@@ -350,9 +357,23 @@ pub async fn start_cluster(
         println!("  Run `creg testnet stop` first if you want to reset.");
     }
 
-    println!("\n{}", "================================================================================".cyan());
-    println!("  {}", format!("LAUNCHING LOCAL TESTNET CLUSTER ({} VALIDATOR NODES)", nodes).bold().cyan());
-    println!("{}\n", "================================================================================".cyan());
+    println!(
+        "\n{}",
+        "================================================================================".cyan()
+    );
+    println!(
+        "  {}",
+        format!(
+            "LAUNCHING LOCAL TESTNET CLUSTER ({} VALIDATOR NODES)",
+            nodes
+        )
+        .bold()
+        .cyan()
+    );
+    println!(
+        "{}\n",
+        "================================================================================".cyan()
+    );
 
     let bootnode_p2p_port = port_base + 1000;
     let bootnode_addr = format!("/ip4/127.0.0.1/tcp/{}", bootnode_p2p_port);
@@ -367,11 +388,7 @@ pub async fn start_cluster(
         let node_data_dir = root_dir.join(format!("node-{}", i));
         std::fs::create_dir_all(&node_data_dir)?;
 
-        println!(
-            "  {} Starting {}...",
-            "►".green(),
-            node_id.bold()
-        );
+        println!("  {} Starting {}...", "►".green(), node_id.bold());
         println!(
             "    HTTP: http://127.0.0.1:{} | P2P: {} | gRPC: 127.0.0.1:{}",
             http_port.to_string().cyan(),
@@ -404,11 +421,17 @@ pub async fn start_cluster(
 
     println!("\n{} Local Testnet Cluster active!", "✓".green().bold());
     println!("  Bootnode: {}", bootnode_addr.green());
-    println!("  Faucet:   http://127.0.0.1:{}", faucet_port.to_string().cyan());
+    println!(
+        "  Faucet:   http://127.0.0.1:{}",
+        faucet_port.to_string().cyan()
+    );
     println!("  Topology: Saved to {:?}", state_file);
 
     if !background {
-        println!("\n{} Cluster running in foreground (Press Ctrl+C to stop)", "●".green());
+        println!(
+            "\n{} Cluster running in foreground (Press Ctrl+C to stop)",
+            "●".green()
+        );
         println!("  To query status in another terminal: `creg testnet status`");
         println!("  To request testnet tokens:          `creg testnet drip 0x...`\n");
     }
@@ -422,7 +445,11 @@ pub async fn stop_cluster(data_dir: Option<PathBuf>) -> Result<()> {
     let state_file = root_dir.join("cluster.json");
 
     if !state_file.exists() {
-        println!("{} No active testnet cluster found in {:?}", "ℹ".blue(), root_dir);
+        println!(
+            "{} No active testnet cluster found in {:?}",
+            "ℹ".blue(),
+            root_dir
+        );
         return Ok(());
     }
 
@@ -440,7 +467,10 @@ pub async fn stop_cluster(data_dir: Option<PathBuf>) -> Result<()> {
     }
 
     let _ = std::fs::remove_file(&state_file);
-    println!("\n{} Local testnet cluster stopped and state cleaned.", "✓".green().bold());
+    println!(
+        "\n{} Local testnet cluster stopped and state cleaned.",
+        "✓".green().bold()
+    );
 
     Ok(())
 }

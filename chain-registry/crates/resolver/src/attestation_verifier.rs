@@ -51,11 +51,7 @@ impl SignedPackageAttestation {
     }
 
     /// Verify that the attestation satisfies minimum safety rules
-    pub fn verify_safety_policy(
-        &self,
-        min_score: u32,
-        min_validator_quorum: usize,
-    ) -> Result<()> {
+    pub fn verify_safety_policy(&self, min_score: u32, min_validator_quorum: usize) -> Result<()> {
         if self.risk_score < min_score {
             bail!(
                 "Package {} risk score {} is below required minimum {}",
@@ -81,11 +77,7 @@ impl SignedPackageAttestation {
     pub fn signing_digest(&self) -> String {
         let payload = format!(
             "creg-attestation-v1:{}:{}:{}:{}:{}",
-            self.canonical,
-            self.content_hash,
-            self.publisher,
-            self.risk_score,
-            self.block_height
+            self.canonical, self.content_hash, self.publisher, self.risk_score, self.block_height
         );
         sha256_hex(payload.as_bytes())
     }

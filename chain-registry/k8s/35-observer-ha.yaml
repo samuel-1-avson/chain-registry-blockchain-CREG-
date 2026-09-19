@@ -1,0 +1,146 @@
+# k8s/35-observer-ha.yaml
+# High-Availability Observer Node Pool Deployment, Service, and PodDisruptionBudget.
+# Dedicated to servicing all external REST, JSON-RPC, and SSE traffic with zero downtime
+# while completely air-gapping validating nodes from public ingress.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: creg-observer
+  namespace: chain-registry
+  labels:
+    app.kubernetes.io/name: creg-observer
+    app.kubernetes.io/component: observer-pool
+    app.kubernetes.io/part-of: chain-registry
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: creg-observer
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: creg-observer
+        app.kubernetes.io/component: observer-pool
+        app.kubernetes.io/part-of: chain-registry
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app.kubernetes.io/name
+                      operator: In
+                      values:
+                        - creg-observer
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: creg-observer-node
+          image: ghcr.io/chain-registry/chain-registry:latest
+          imagePullPolicy: IfNotPresent
+          command: ["/app/creg-node"]
+          ports:
+            - containerPort: 8080
+              name: http
+              protocol: TCP
+            - containerPort: 9000
+              name: p2p
+              protocol: TCP
+            - containerPort: 50051
+              name: grpc
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: creg-config
+          env:
+            - name: CREG_IS_VALIDATOR
+              value: "false"
+            - name: CREG_NODE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: CREG_DATA_DIR
+              value: "/data"
+            - name: CREG_OPERATOR_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: creg-secrets
+                  key: OPERATOR_API_KEY
+                  optional: true
+            - name: RUST_LOG
+              value: "info,chain_registry_node=debug"
+          livenessProbe:
+            httpGet:
+              path: /v1/health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /v1/health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 2
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: 2000m
+              memory: 4Gi
+          volumeMounts:
+            - name: observer-data
+              mountPath: /data
+      volumes:
+        - name: observer-data
+          emptyDir: {}
+---
+# Internal ClusterIP Service for Observer HA Pool
+apiVersion: v1
+kind: Service
+metadata:
+  name: creg-observer-service
+  namespace: chain-registry
+  labels:
+    app.kubernetes.io/name: creg-observer
+    app.kubernetes.io/component: observer-pool
+    app.kubernetes.io/part-of: chain-registry
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: creg-observer
+  ports:
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP
+      name: http
+    - port: 50051
+      targetPort: 50051
+      protocol: TCP
+      name: grpc
+---
+# PodDisruptionBudget ensuring minimum 1 observer replica is always online during maintenance / node drains
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: creg-observer-pdb
+  namespace: chain-registry
+  labels:
+    app.kubernetes.io/name: creg-observer
+    app.kubernetes.io/component: observer-pool
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: creg-observer

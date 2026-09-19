@@ -124,8 +124,14 @@ impl EquivocationDetector {
         evidence: &EquivocationEvidence,
         eth_address: Option<String>,
     ) -> SlashingRelayPayload {
-        let msg1 = format!("creg-pbft-v1:{}:{}", evidence.phase, evidence.vote_a.block_hash);
-        let msg2 = format!("creg-pbft-v1:{}:{}", evidence.phase, evidence.vote_b.block_hash);
+        let msg1 = format!(
+            "creg-pbft-v1:{}:{}",
+            evidence.phase, evidence.vote_a.block_hash
+        );
+        let msg2 = format!(
+            "creg-pbft-v1:{}:{}",
+            evidence.phase, evidence.vote_b.block_hash
+        );
 
         SlashingRelayPayload {
             target_validator_eth_address: eth_address,

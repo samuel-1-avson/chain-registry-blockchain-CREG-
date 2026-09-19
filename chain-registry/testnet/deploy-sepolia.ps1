@@ -10,7 +10,8 @@
 param(
     # Preserve values injected into this PowerShell process (for example from
     # Secret Manager). The normal path remains .env.sepolia-authoritative.
-    [switch]$UseProcessEnv
+    [switch]$UseProcessEnv,
+    [switch]$Resume
 )
 
 $ErrorActionPreference = "Stop"
@@ -100,6 +101,7 @@ Deployer balance is zero. Fund this address with Sepolia ETH before deploying:
   Address: $deployerAddr
 
 Faucets:
+  - https://cloud.google.com/application/web3/faucet/ethereum/sepolia (Google Cloud Web3 Faucet)
   - https://sepolia-faucet.pk910.de (PoW mining faucet)
   - https://www.alchemy.com/faucets/ethereum-sepolia (requires Alchemy account)
   - https://www.infura.io/faucet/sepolia (requires Infura account)
@@ -118,6 +120,10 @@ $forgeArgs = @(
     "--chain-id", "11155111",
     "-vvv"
 )
+if ($Resume) {
+    $forgeArgs += "--resume"
+    Write-Host "Resuming previous deployment sequence..." -ForegroundColor Cyan
+}
 
 & $forge $forgeArgs
 
@@ -142,7 +148,7 @@ if ($env:ETHERSCAN_API_KEY) {
 }
 
 # Read deployment manifest
-$manifestPath = Join-Path $repoRoot "contracts" "deployments" "sepolia-latest.json"
+$manifestPath = Join-Path $repoRoot "contracts\deployments\sepolia-latest.json"
 if (Test-Path $manifestPath) {
     Write-Host ""
     Write-Host "=== Deployment Manifest ===" -ForegroundColor Green

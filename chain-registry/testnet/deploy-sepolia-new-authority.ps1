@@ -11,7 +11,8 @@
 
 param(
     [switch]$SkipFinalize,
-    [switch]$Yes
+    [switch]$Yes,
+    [switch]$Resume
 )
 
 $ErrorActionPreference = "Stop"
@@ -21,7 +22,7 @@ $envFile = Join-Path $scriptDir ".env.sepolia"
 $legacyDeployer = "0xf4c0bdBB681A61Aa0B123E82C04b0d692F53D58e"
 
 if (-not (Test-Path $envFile)) {
-    throw "Missing $envFile — run .\testnet\setup-sepolia-authority.ps1 first"
+    throw "Missing $envFile - run .\testnet\setup-sepolia-authority.ps1 first"
 }
 
 Get-Content $envFile | ForEach-Object {
@@ -59,7 +60,7 @@ Write-Host "Abandons:   $legacyDeployer (old deployer, not used)"
 Write-Host ""
 
 $manifestPath = Join-Path $repoRoot "contracts\deployments\sepolia-latest.json"
-if ((Test-Path $manifestPath) -and -not $Yes) {
+if ((Test-Path $manifestPath) -and -not $Yes -and -not $Resume) {
     $old = Get-Content $manifestPath -Raw | ConvertFrom-Json
     Write-Host "Current manifest deployer: $($old.deployer)" -ForegroundColor Yellow
     Write-Host "This will REPLACE sepolia-latest.json and patch chain-spec.sepolia.json." -ForegroundColor Yellow
@@ -91,7 +92,9 @@ $env:GOVERNANCE_THRESHOLD = "1"
 $env:DEPLOYER_KEY = $env:GOVERNANCE_SIGNER_KEY
 
 Set-Location $repoRoot
-& (Join-Path $scriptDir "deploy-sepolia.ps1")
+$subArgs = @()
+if ($Resume) { $subArgs += "-Resume" }
+& (Join-Path $scriptDir "deploy-sepolia.ps1") @subArgs
 if ($LASTEXITCODE -ne 0) { throw "deploy-sepolia.ps1 failed" }
 
 $newManifest = Get-Content $manifestPath -Raw | ConvertFrom-Json

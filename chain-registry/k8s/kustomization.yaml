@@ -24,6 +24,7 @@ resources:
   
   # Networking
   - 30-api-gateway.yaml
+  - 35-observer-ha.yaml
   # - 40-ingress.yaml  # Uncomment if you have ingress controller
   
   # Optional: Monitoring

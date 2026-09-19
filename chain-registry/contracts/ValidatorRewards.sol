@@ -133,13 +133,20 @@ contract ValidatorRewards {
     /// @param packageWasGood Boolean indicating if the package was actually good (true) or bad/false positive (false)
     /// @param reputationScores Array of reputation scores (0-100) for each validator
     /// @param isMandatory Array indicating if each validator was in the mandatory committee (hybrid model)
+    struct ValidatorWorkItem {
+        address validator;
+        bool approved;
+        uint256 reputationScore;
+        bool isMandatory;
+    }
+
     function distributeWorkRewards(
         string calldata packageCanonical,
         address[] calldata validators,
         bool[] calldata approvals,
         bool packageWasGood,
         uint256[] calldata reputationScores,
-        bool[] calldata isMandatory  // NEW for hybrid
+        bool[] calldata isMandatory
     ) external {
         if (msg.sender != governance && msg.sender != address(staking)) revert NotAuthorized();
         if (validators.length != approvals.length || validators.length != reputationScores.length || validators.length != isMandatory.length) 
@@ -148,37 +155,49 @@ contract ValidatorRewards {
         
         totalPackagesVerified++;
         
-        // Distribute rewards to each validator who did work
         for (uint i = 0; i < validators.length; i++) {
-            _processValidatorReward(
-                validators[i], 
-                approvals[i], 
-                packageWasGood, 
-                reputationScores[i], 
-                packageCanonical
-            );
-            
-            // === HYBRID EMISSION HOOK ===
-            uint8 quality = _computeQualityScore(reputationScores[i], approvals[i], packageWasGood);
-            uint256 points = _calculatePoints(approvals[i], reputationScores[i], isMandatory[i]);
-            emit AnalysisContribution(
-                keccak256(abi.encodePacked(packageCanonical)),
-                validators[i],
-                isMandatory[i],
-                quality,
-                points,
-                block.timestamp,
-                bytes32(0) // evidenceDigest would come from offchain or param in extended version
-            );
+            ValidatorWorkItem memory item = ValidatorWorkItem({
+                validator: validators[i],
+                approved: approvals[i],
+                reputationScore: reputationScores[i],
+                isMandatory: isMandatory[i]
+            });
+            _processOne(item, packageWasGood, packageCanonical);
         }
         
         // Emit committee finalization (simplified; real call would pass sizes)
         emit AnalysisCommitteeFinalized(
-            keccak256(abi.encodePacked(packageCanonical)),
+            keccak256(bytes(packageCanonical)),
             0, // filled by caller in practice
             0,
             0,
             0,
+            bytes32(0)
+        );
+    }
+
+    function _processOne(
+        ValidatorWorkItem memory item,
+        bool packageWasGood,
+        string calldata packageCanonical
+    ) internal {
+        _processValidatorReward(
+            item.validator,
+            item.approved,
+            packageWasGood,
+            item.reputationScore,
+            packageCanonical
+        );
+
+        uint8 quality = _computeQualityScore(item.reputationScore, item.approved, packageWasGood);
+        uint256 points = _calculatePoints(item.approved, item.reputationScore, item.isMandatory);
+        emit AnalysisContribution(
+            keccak256(bytes(packageCanonical)),
+            item.validator,
+            item.isMandatory,
+            quality,
+            points,
+            block.timestamp,
             bytes32(0)
         );
     }

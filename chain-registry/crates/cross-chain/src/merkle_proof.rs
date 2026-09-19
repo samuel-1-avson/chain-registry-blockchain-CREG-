@@ -185,7 +185,11 @@ mod tests {
         for i in 0..leaves.len() {
             let canonical = format!("pkg-odd-{}", i);
             let proof = generate_inclusion_proof(&leaves, &canonical, i).expect("proof generation");
-            assert!(proof.verify(), "Proof for odd leaf {} failed verification", i);
+            assert!(
+                proof.verify(),
+                "Proof for odd leaf {} failed verification",
+                i
+            );
         }
     }
 }

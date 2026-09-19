@@ -501,6 +501,11 @@ fn palette_commands() -> &'static [PaletteCommand] {
             hint: "r",
         },
         PaletteCommand {
+            id: "profile",
+            label: "Show authenticated profile identity",
+            hint: "i",
+        },
+        PaletteCommand {
             id: "theme",
             label: "Toggle light / dark theme",
             hint: "t",
@@ -738,6 +743,8 @@ struct App {
     /// Validator/operator monitoring is read-only by default. The TUI never
     /// accepts or stores private keys.
     read_only: bool,
+    authenticated_wallet: Option<String>,
+    authenticated_pubkey: Option<String>,
 
     // Sparkline data for TPS visualization
     tps_history: VecDeque<u64>,
@@ -850,14 +857,32 @@ impl App {
             quit_armed_at: None,
             last_width: 120,
             read_only: true,
+            authenticated_wallet: {
+                crate::profile::load_active_profile()
+                    .ok()
+                    .flatten()
+                    .map(|p| p.wallet_address)
+            },
+            authenticated_pubkey: {
+                crate::profile::load_active_profile()
+                    .ok()
+                    .flatten()
+                    .map(|p| p.ed25519_pubkey)
+            },
             tps_history: VecDeque::with_capacity(60),
-            faucet: FaucetView::new(
-                std::env::var("CREG_FAUCET_URL")
-                    // Use internal service name "faucet" for container-to-container comms.
-                    .unwrap_or_else(|_| "http://faucet:8082".into())
-                    .trim_end_matches('/')
-                    .to_string(),
-            ),
+            faucet: {
+                let mut f = FaucetView::new(
+                    std::env::var("CREG_FAUCET_URL")
+                        // Use internal service name "faucet" for container-to-container comms.
+                        .unwrap_or_else(|_| "http://faucet:8082".into())
+                        .trim_end_matches('/')
+                        .to_string(),
+                );
+                if let Ok(Some(prof)) = crate::profile::load_active_profile() {
+                    f.address_input = prof.wallet_address;
+                }
+                f
+            },
             bridge_anchors: Vec::new(),
             metrics_history: Vec::new(),
         }
@@ -2250,6 +2275,16 @@ fn execute_palette_id(app: &mut App, id: &str) -> bool {
         "yank" => yank_selection(app),
         "export" => export_and_toast(app),
         "refresh" => refresh_now(app),
+        "profile" => {
+            let msg = match (&app.authenticated_wallet, &app.authenticated_pubkey) {
+                (Some(w), Some(k)) => {
+                    let short_k = if k.len() > 12 { &k[..12] } else { k.as_str() };
+                    format!("Profile: {} | Ed25519: {}…", w, short_k)
+                }
+                _ => "Guest session. Run 'creg login' in terminal to link Web3 wallet.".to_string(),
+            };
+            app.push_toast(ToastKind::Info, msg);
+        }
         "theme" => {
             let current = IS_LIGHT_THEME.load(Ordering::Relaxed);
             IS_LIGHT_THEME.store(!current, Ordering::Relaxed);
@@ -2966,8 +3001,18 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
     } else {
         "read-write"
     };
+    let auth_badge = match &app.authenticated_wallet {
+        Some(w) => {
+            if w.len() > 10 {
+                format!("{}…{}", &w[..6], &w[w.len() - 4..])
+            } else {
+                w.clone()
+            }
+        }
+        None => "guest".to_string(),
+    };
     let status_text = format!(
-        " {validator_count} vals  ·  {rest}  ·  {sse}  ·  stake {}  ·  {mode} ",
+        " id: {auth_badge}  ·  {validator_count} vals  ·  {rest}  ·  {sse}  ·  stake {}  ·  {mode} ",
         format_number(total_stake)
     );
     let status_color = if app.node_connected && app.last_api_success_at.is_some() {
@@ -5065,6 +5110,8 @@ mod tests {
     fn palette_filter_matches_label_and_hint() {
         let yank = filtered_palette_indices("copy");
         assert!(yank.iter().any(|&idx| palette_commands()[idx].id == "yank"));
+        let profile = filtered_palette_indices("profile");
+        assert!(profile.iter().any(|&idx| palette_commands()[idx].id == "profile"));
         let views = filtered_palette_indices("pbft");
         assert!(views
             .iter()

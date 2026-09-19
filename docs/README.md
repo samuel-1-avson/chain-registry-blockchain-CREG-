@@ -1,112 +1,86 @@
-# Chain Registry — documentation index
+# Chain Registry (CREG) — Documentation Index & Knowledge Base
 
-> **Public visitors:** [PUBLIC.md](./PUBLIC.md) — protocol, validators, contracts only.  
-> **Planning next work:** [WHAT_TO_DO_NEXT.md](./WHAT_TO_DO_NEXT.md) — testing, waitlist, Arena, testnet prep.
-
-Start at the [project README](../README.md), then use the sections below.
+Welcome to the canonical documentation for **Chain Registry (CREG)**, an evidence-backed, multi-validator decentralized package registry anchored to Ethereum Sepolia.
 
 ---
 
-## Planning & status
+## 1. Core Architecture & Workflows (Start Here)
 
-| Document | Purpose |
-|----------|---------|
-| [PROTOCOL_PROGRESS.md](./PROTOCOL_PROGRESS.md) | **Shipped vs remaining vs testnet readiness** (as of HEAD `ac8da74`) |
-| [TESTNET_STATUS.md](./TESTNET_STATUS.md) | **Fleet live/paused matrix** — single source of truth |
-| [WHAT_TO_DO_NEXT.md](./WHAT_TO_DO_NEXT.md) | **Start here (maintainers)** — four tracks: system test, product surfaces, validator onboarding, audit |
-| [NEXT_WORK.md](./NEXT_WORK.md) | Prioritized IDs (NET-301, SEC-401, …) |
-| [WEAKNESSES_GAPS_REMEDIATION_PLAN.md](./WEAKNESSES_GAPS_REMEDIATION_PLAN.md) | Phased remediation + §6 living status |
-| [REMEDIATION_BACKLOG.md](./REMEDIATION_BACKLOG.md) | SEC-/REM-/DOC- ticket status |
-| [L2_PUBLIC_ALPHA_GATE_STATUS.md](./L2_PUBLIC_ALPHA_GATE_STATUS.md) | Public-alpha gate checklist |
-| [CREG_SYSTEM_WORKFLOW.md](./CREG_SYSTEM_WORKFLOW.md) | Full system design + §15 iteration log |
-| [ARENA_PROTOCOL_CHANGELOG.md](./ARENA_PROTOCOL_CHANGELOG.md) | Monthly Arena-sourced protocol and docs changes |
+These documents explain how the system functions conceptually, architecturally, and operationally:
 
----
-
-## Join the testnet
-
-| Document | Audience |
-|----------|----------|
-| [TESTNET_SCALE_ARCHITECTURE.md](./TESTNET_SCALE_ARCHITECTURE.md) | Future scale-topology design — not evidence of a deployed scale testnet |
-| [GENESIS_ALPHA_COHORT_PLAYBOOK.md](./GENESIS_ALPHA_COHORT_PLAYBOOK.md) | Wave 1 cohort operators |
-| [WHITEPAPER.md](./WHITEPAPER.md) | Developers, validators, auditors |
-| [PUBLIC_TESTNET_QUICKSTART.md](./PUBLIC_TESTNET_QUICKSTART.md) | Publishers, developers, validators |
-| [TESTNET_PHASE_SCOPE.md](./TESTNET_PHASE_SCOPE.md) | Limits, verified semantics, alpha scope |
-| [VALIDATOR_ONBOARDING_CHECKLIST.md](./VALIDATOR_ONBOARDING_CHECKLIST.md) | External validator operators |
-| [WITNESS_OPERATOR_ONBOARDING.md](./WITNESS_OPERATOR_ONBOARDING.md) | Independent transparency-log witnesses (Track B recruiting) |
-| [WALLET_KEY_DERIVATION.md](./WALLET_KEY_DERIVATION.md) | Ed25519 vs Ethereum EOA |
+| Document | Description | Target Audience |
+|:---|:---|:---|
+| **[USER_AND_SYSTEM_WORKFLOW_GUIDE.md](./USER_AND_SYSTEM_WORKFLOW_GUIDE.md)** | **Primary Workflow Guide:** Technical & non-technical walkthroughs for running a validator node and publishing packages. | Developers, Operators, Stakeholders |
+| **[REMOTE_INSTALLATION_GUIDE.md](./REMOTE_INSTALLATION_GUIDE.md)** | **Universal Remote Installation:** 1-line curl/powershell scripts, precompiled binaries, and Docker shims for external machines. | All External Users & Operators |
+| **[DEEP_SYSTEM_ANALYSIS_AND_PROGRESS_REPORT.md](./DEEP_SYSTEM_ANALYSIS_AND_PROGRESS_REPORT.md)** | **System Audit & Scorecard (Rating: 9.7/10):** Full architectural review, pros/cons, rating matrix, and subsystem deep dives. | Architects, Security Auditors |
+| **[WHITEPAPER.md](./WHITEPAPER.md)** | **Foundational Whitepaper:** Economic model, dual-consensus thesis, and cryptographic supply-chain security proofs. | Researchers, Engineers, DAO Members |
+| **[CREG_SYSTEM_WORKFLOW.md](./CREG_SYSTEM_WORKFLOW.md)** | **System Specification:** Original formal specification of CREG's end-to-end verification workflows. | Core Protocol Developers |
+| **[FULL_DECENTRALIZATION_ROADMAP.md](./FULL_DECENTRALIZATION_ROADMAP.md)** | **Decentralization Roadmap:** Transition strategy from genesis bootstrap to community-governed multi-validator mesh. | Community, Operators |
+| **[DUAL_KEY_ARCHITECTURE_ENHANCEMENT_PROPOSAL.md](./DUAL_KEY_ARCHITECTURE_ENHANCEMENT_PROPOSAL.md)** | **Dual-Key UX Enhancement Proposal:** 5-pillar strategy for deterministic key derivation, `creg login`, EIP-712 binding, and Passkeys. | Core Protocol Developers, UX Architects |
 
 ---
 
-## Operators & hosting
+## 2. Infrastructure & System Operations
 
-| Document | Description |
-|----------|-------------|
-| [TESTNET_SEPOLIA_RUNBOOK.md](./TESTNET_SEPOLIA_RUNBOOK.md) | Sepolia deploy, chain-spec sign/publish |
-| [../chain-registry/testnet/OPERATOR.md](../chain-registry/testnet/OPERATOR.md) | External validators + GCP public services |
-| [../chain-registry/testnet/QUICKSTART.md](../chain-registry/testnet/QUICKSTART.md) | Fastest local node path |
-| [../chain-registry/testnet/gcp/README.md](../chain-registry/testnet/gcp/README.md) | GCP scripts (resume/stop testnet, waitlist) |
-| [WAITLIST-ONLY-HOSTING.md](./WAITLIST-ONLY-HOSTING.md) | Waitlist-only phase (testnet paused) |
-| [GCP_PHASE2_RUNBOOK.md](./GCP_PHASE2_RUNBOOK.md) | Observer pool, Cloud Run hub-api, public API LB |
-| [GCP-BUDGET-ARCHITECTURE.md](./GCP-BUDGET-ARCHITECTURE.md) | Cost model |
-| [GCP-RPC-ARCHITECTURE.md](./GCP-RPC-ARCHITECTURE.md) | API/JSON-RPC on GCP |
-| [GCP-VALIDATOR-FLEET.md](./GCP-VALIDATOR-FLEET.md) | Legacy validator-fleet lab (disabled by default) |
-| [HYBRID-LOCAL-VALIDATORS.md](./HYBRID-LOCAL-VALIDATORS.md) | Legacy WireGuard path (deprecated) |
-| [../chain-registry/testnet/README.md](../chain-registry/testnet/README.md) | Testnet directory index |
-| [../chain-registry/DOCKER.md](../chain-registry/DOCKER.md) | Docker compose profiles |
+Documents detailing the live cloud infrastructure, RPC routing, and high availability systems:
+
+| Document | Description | Live Endpoints |
+|:---|:---|:---|
+| **[RPC_ARCHITECTURE_AND_SYSTEM_REPORT.md](./RPC_ARCHITECTURE_AND_SYSTEM_REPORT.md)** | Unified Edge Gateway (Caddy v2), JSON-RPC engine, and public TLS ingress. | `https://api.testnet.cregnet.dev` |
+| **[UNINTERRUPTIBLE_OBSERVER_NODE_SYSTEM.md](./UNINTERRUPTIBLE_OBSERVER_NODE_SYSTEM.md)** | Dedicated Observer VM in Zone A with automatic edge failover and zero-downtime routing. | Zone `us-central1-a` (`10.128.0.41:28182`) |
+| **[GCP-RPC-ARCHITECTURE.md](./GCP-RPC-ARCHITECTURE.md)** | Cloud cost optimization (~$59/mo) and single-instance ingress consolidation model. | VM `creg-testnet-vm` (`35.225.225.20`) |
+| **[DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md)** | Persistent RocksDB state storage, key prefixes, and indexing schema. | `/data` volume storage |
 
 ---
 
-## Product surfaces (non-node)
+## 3. Operator Onboarding & Runbooks
 
-| Document | Description |
-|----------|-------------|
-| [WAITLIST_FIREBASE_DEPLOY.md](./WAITLIST_FIREBASE_DEPLOY.md) | Waitlist Firebase deploy |
-| [WAITLIST-ADMIN-MONITORING.md](./WAITLIST-ADMIN-MONITORING.md) | Owner-only waitlist metrics |
-| [../CREG-Contribution-Arena/README.md](../CREG-Contribution-Arena/README.md) | Contribution Arena (quests, findings) |
-| [../CREG-Contribution-Arena/docs/HUB_INTEGRATION.md](../CREG-Contribution-Arena/docs/HUB_INTEGRATION.md) | Hub API migration boundary |
-| [TESTNET-HUB-DESIGN.md](./TESTNET-HUB-DESIGN.md) | Hub API design |
+Step-by-step guides for external community operators to run nodes, stake tokens, and witness the log:
 
----
-
-## Architecture & readiness
-
-| Document | Description |
-|----------|-------------|
-| [../chain-registry/DEEP_DIVE_ANALYSIS.md](../chain-registry/DEEP_DIVE_ANALYSIS.md) | Architecture + ISSUE registry |
-| [../chain-registry/TESTNET_READINESS_REPORT.md](../chain-registry/TESTNET_READINESS_REPORT.md) | Historical readiness snapshot |
-| [../chain-registry/contracts/README.md](../chain-registry/contracts/README.md) | Solidity contracts + relay model |
-| [L1_L2_HARDENING.md](./L1_L2_HARDENING.md) | Bridge / ZK / cross-layer notes |
-| [protocol/NAMESPACE_AUTHORITY_ACTIVATION.md](./protocol/NAMESPACE_AUTHORITY_ACTIVATION.md) | Normative CR-07 signed activation, verifier, policy, trust, ceremony, and rollback requirements |
+| Document | Role | Primary Commands |
+|:---|:---|:---|
+| **[VALIDATOR_ONBOARDING_CHECKLIST.md](./VALIDATOR_ONBOARDING_CHECKLIST.md)** | **Validator Operators:** Prerequisites, hardware sizing, 100 tCREG staking, and dual-key registration. | `creg stake`, `./testnet/start-external-validator.sh` |
+| **[PUBLIC_TESTNET_QUICKSTART.md](./PUBLIC_TESTNET_QUICKSTART.md)** | **Package Developers:** Publishing packages, testing the CLI, and checking the explorer. | `creg publish`, `creg install` |
+| **[WITNESS_OPERATOR_ONBOARDING.md](./WITNESS_OPERATOR_ONBOARDING.md)** | **Witness Operators:** Independent tree head consistency checking to prevent split-view attacks. | `creg witness run` |
+| **[WITNESS_KEY_CEREMONY.md](./WITNESS_KEY_CEREMONY.md)** | **Key Ceremony:** Cryptographic key generation standards for log signers and witnesses. | Ed25519 ceremony protocols |
+| **[WALLET_KEY_DERIVATION.md](./WALLET_KEY_DERIVATION.md)** | **Key Standards:** Differences between secp256k1 EVM wallets and Ed25519 consensus keys. | Key separation standards |
 
 ---
 
-## Security & operations
+## 4. Security, Hardening & Incident Response
 
-| Document | Description |
-|----------|-------------|
-| [SECURITY_OPS_RUNBOOK.md](./SECURITY_OPS_RUNBOOK.md) | Hot keys, TLS, rotation |
-| [INCIDENT_RESPONSE_RUNBOOK.md](./INCIDENT_RESPONSE_RUNBOOK.md) | Protocol incidents |
-| [SEC-401-AUDIT-SCOPE.md](./SEC-401-AUDIT-SCOPE.md) | External audit RFP scope |
-| [SEC-401-VENDOR-OUTREACH.md](./SEC-401-VENDOR-OUTREACH.md) | Vendor email templates |
-| [adr/ADR-KMS-HOT-KEYS.md](./adr/ADR-KMS-HOT-KEYS.md) | KMS vs env for operator keys |
+Standard operating procedures for maintaining network resilience and responding to anomalies:
 
-Regenerate outreach copy: `chain-registry/testnet/prepare-sec-401-outreach.ps1` → [archive/SEC-401-outreach-ready.md](./archive/SEC-401-outreach-ready.md).
-
----
-
-## Data & components
-
-| Document | Description |
-|----------|-------------|
-| [DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md) | PostgreSQL (`db-sync`) |
-| [../chain-registry/migrations/README.md](../chain-registry/migrations/README.md) | DB migration order |
-| [../chain-registry/observability/README.md](../chain-registry/observability/README.md) | Prometheus / Grafana |
-| [../circuits/README.md](../circuits/README.md) | ZK Circom circuits |
-| [../chain-registry/testnet/spec-server/README.md](../chain-registry/testnet/spec-server/README.md) | Signed chain-spec static host |
+| Document | Description | Scope |
+|:---|:---|:---|
+| **[INCIDENT_RESPONSE_RUNBOOK.md](./INCIDENT_RESPONSE_RUNBOOK.md)** | Emergency procedures for chain forks, split views, consensus halts, and malicious package outbreaks. | Protocol Incidents |
+| **[SECURITY_OPS_RUNBOOK.md](./SECURITY_OPS_RUNBOOK.md)** | Key management hygiene, Secret Manager integration, firewall policies, and TLS certificate rotation. | Operator Security |
+| **[OPS_HARDENING_RUNBOOK.md](./OPS_HARDENING_RUNBOOK.md)** | Host system tuning, container resource limits, and network interface isolation. | Production Node Hardening |
+| **[PROTOCOL_PROGRESS.md](./PROTOCOL_PROGRESS.md)** | Living protocol tracker tracking shipped capabilities vs active testnet milestones. | Protocol Progress |
 
 ---
 
-## Archived (historical only)
+## 5. Specialized Subdirectories
 
-[archive/README.md](./archive/README.md) — superseded plans, one-off cohort exports, and deleted runbooks. **Do not use for current operations.**
+- **[adr/](./adr/)**: Architectural Decision Records (e.g., ADR on KMS Hot Keys, consensus parameters).
+- **[architecture/](./architecture/)**: Detailed component diagrams and subsystem specifications.
+- **[governance/](./governance/)**: 2-of-3 Multi-Sig governance proposal standards and parameter update runbooks.
+- **[operations/](./operations/)**: Day-to-day maintenance and monitoring procedures.
+- **[protocol/](./protocol/)**: Formal protocol rules, message formats (`creg-vote-v2`, `creg-pbft-v1`), and namespace authorities.
+- **[security/](./security/)**: Threat models, sandbox escape mitigation, and scanner profiles.
+- **[testing/](./testing/)**: Acceptance gates, soak testing frameworks, and adversarial test suites.
+
+---
+
+## 6. Historical Document Archive ([docs/archive/](./archive/))
+
+To keep this directory clean and maintainable, all **completed milestone reports, historical research drafts, initial implementation plans, and retired lab documentation** have been preserved in:
+
+📁 **[docs/archive/](./archive/)**
+
+Key archived documents include:
+- Completed milestone completion reports (`LAYER1_ENHANCEMENTS_COMPLETION_REPORT.md`, `SUBMISSION_LAYER_PHASE1_COMPLETION_REPORT.md`, etc.).
+- Historical testnet and simulation reports (`MULTI_NODE_TESTNET_SIMULATION_REPORT.md`, `TESTNET_READINESS_REPORT.md`).
+- Past audits and outreach drafts (`CREG_COMPREHENSIVE_AUDIT_2026-07-10.md`, `SEC-401-AUDIT-SCOPE.md`).
+- Retired lab runbooks (`GCP-VALIDATOR-FLEET.md`, `HYBRID-LOCAL-VALIDATORS.md`, `WAITLIST-ONLY-HOSTING.md`).
+- Genesis Wave 1 outreach materials (`GENESIS_ALPHA_COHORT_PLAYBOOK.md`, `genesis-alpha-wave1-tracker.csv`).

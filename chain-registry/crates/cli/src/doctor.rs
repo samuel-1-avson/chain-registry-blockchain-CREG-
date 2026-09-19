@@ -271,6 +271,13 @@ async fn run_basic(options: DoctorOptions<'_>) -> Result<()> {
 
     append_remote_node_local_ipfs_warning(&mut checks, &node, &ipfs);
 
+    let (prof_ok, prof_msg) = check_authenticated_profile();
+    checks.push(if prof_ok {
+        DoctorCheck::pass("Authenticated profile", false, prof_msg)
+    } else {
+        DoctorCheck::pass("Authenticated profile", false, prof_msg)
+    });
+
     let (key_ok, key_msg) = check_publisher_key();
     checks.push(if key_ok {
         DoctorCheck::pass("Publisher key", false, key_msg)
@@ -278,12 +285,11 @@ async fn run_basic(options: DoctorOptions<'_>) -> Result<()> {
         DoctorCheck::fail("Publisher key", false, key_msg)
     });
 
-    let sandbox_required = is_validator_host();
-    let (sandbox_ok, sandbox_msg) = check_isolated_sandbox();
-    checks.push(if sandbox_ok {
-        DoctorCheck::pass("Isolated sandbox", sandbox_required, sandbox_msg)
+    let (cfg_ok, cfg_msg) = check_config_file();
+    checks.push(if cfg_ok {
+        DoctorCheck::pass("Config file", false, cfg_msg)
     } else {
-        DoctorCheck::fail("Isolated sandbox", sandbox_required, sandbox_msg)
+        DoctorCheck::fail("Config file", false, cfg_msg)
     });
 
     let (gpg_ok, gpg_msg) = check_gpg();
@@ -293,11 +299,12 @@ async fn run_basic(options: DoctorOptions<'_>) -> Result<()> {
         DoctorCheck::fail("GnuPG", false, gpg_msg)
     });
 
-    let (cfg_ok, cfg_msg) = check_config_file();
-    checks.push(if cfg_ok {
-        DoctorCheck::pass("Config file", false, cfg_msg)
+    let sandbox_required = is_validator_host();
+    let (sandbox_ok, sandbox_msg) = check_isolated_sandbox();
+    checks.push(if sandbox_ok {
+        DoctorCheck::pass("Isolated sandbox", sandbox_required, sandbox_msg)
     } else {
-        DoctorCheck::fail("Config file", false, cfg_msg)
+        DoctorCheck::fail("Isolated sandbox", sandbox_required, sandbox_msg)
     });
 
     let dev_sandbox = std::env::var("CREG_DEV_SANDBOX").as_deref() == Ok("true");
@@ -746,19 +753,28 @@ async fn run_testnet(options: DoctorOptions<'_>) -> Result<()> {
     )
 }
 
-fn print_check(label: &str, note: &str) {
-    if note.is_empty() {
-        print!("  {:<24} ", label);
-    } else {
-        print!("  {:<24} {} ", label, note.dimmed());
-    }
-}
-
-fn print_result(status: &str, msg: &str) {
-    match status {
-        "pass" => println!("{} {}", "✓".green(), msg),
-        "skipped" => println!("{} {}", "•".yellow(), msg.yellow()),
-        _ => println!("{} {}", "✗".red(), msg.red()),
+fn check_category(name: &str) -> &'static str {
+    match name {
+        "Chain node" | "Chain sync" | "IPFS daemon" | "Fleet IPFS" | "Local IPFS" | "Node health" | "Chain stats" => {
+            "Core Connectivity"
+        }
+        "Authenticated profile" | "Publisher key" | "Config file" | "GnuPG" => {
+            "Identity & Credentials"
+        }
+        "Isolated sandbox"
+        | "Dev sandbox bypass"
+        | "Production safety"
+        | "YARA rules directory"
+        | "Scanner profile bundles"
+        | "LLM advisory lane" => "Security & Sandbox",
+        "PBFT small-cluster quorum"
+        | "Vote timeout"
+        | "Bootstrap contracts"
+        | "Faucet health"
+        | "Faucet reserve"
+        | "Explorer frontend"
+        | "Faucet drip" => "Consensus & Network",
+        _ => "Diagnostics",
     }
 }
 
@@ -766,19 +782,51 @@ fn finish_report(title: &str, report: DoctorReport, json: bool) -> Result<()> {
     if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
-        println!("{}", title.bold());
-        println!("{}", "─".repeat(52).dimmed());
-        for check in &report.checks {
-            let note = if check.required { "" } else { "(optional)" };
-            print_check(&check.name, note);
-            print_result(check.status, &check.message);
+        println!("\n{}", title.bold().cyan());
+        println!("{}", "═".repeat(60).dimmed());
+
+        let categories = [
+            "Core Connectivity",
+            "Identity & Credentials",
+            "Security & Sandbox",
+            "Consensus & Network",
+            "Diagnostics",
+        ];
+
+        for cat in &categories {
+            let cat_checks: Vec<_> = report
+                .checks
+                .iter()
+                .filter(|c| check_category(&c.name) == *cat)
+                .collect();
+            if cat_checks.is_empty() {
+                continue;
+            }
+
+            println!("\n{}", format!("[{}]", cat).bold());
+            for check in cat_checks {
+                let icon = match check.status {
+                    "pass" => "✓".green().bold(),
+                    "skipped" => "•".yellow(),
+                    _ => "✗".red().bold(),
+                };
+
+                let note = if !check.required && check.status == "fail" {
+                    " (advisory)".yellow().to_string()
+                } else {
+                    String::new()
+                };
+
+                println!("  {} {:<25} {}{}", icon, check.name, check.message, note);
+            }
         }
-        println!("{}", "─".repeat(52).dimmed());
+
+        println!("\n{}", "═".repeat(60).dimmed());
         if report.ok {
-            println!("{} All checks passed.", "✓".green().bold());
+            println!("{} All checks passed.\n", "✓".green().bold());
         } else {
             println!(
-                "{} Some required checks failed. See above for details.",
+                "{} Some required checks failed. See above for details.\n",
                 "⚠".yellow().bold()
             );
         }
@@ -839,9 +887,13 @@ fn display_address(value: &str) -> String {
 }
 
 async fn get_json<T: DeserializeOwned>(client: &reqwest::Client, url: &str) -> Result<T> {
-    client
-        .get(url)
-        .send()
+    let mut req = client.get(url);
+    if let Ok(key) = std::env::var("CREG_OPERATOR_API_KEY") {
+        if !key.trim().is_empty() {
+            req = req.header("x-operator-key", key.trim());
+        }
+    }
+    req.send()
         .await
         .with_context(|| format!("GET {} failed", url))?
         .error_for_status()
@@ -1167,7 +1219,41 @@ fn check_publisher_key() -> (bool, String) {
         return (true, format!("found at {}", default.display()));
     }
 
-    (false, "No publisher key found. Run: creg keygen".into())
+    (
+        false,
+        "No publisher key found. Run: creg login (or creg keygen)".into(),
+    )
+}
+
+fn check_authenticated_profile() -> (bool, String) {
+    match crate::profile::load_active_profile() {
+        Ok(Some(prof)) => {
+            let key_path = std::path::Path::new(&prof.key_path);
+            let key_exists = key_path.exists();
+            let status = if key_exists {
+                "key verified"
+            } else {
+                "key file missing"
+            };
+            (
+                key_exists,
+                format!(
+                    "EVM {} | Ed25519 {} ({})",
+                    prof.wallet_address,
+                    &prof.ed25519_pubkey[..std::cmp::min(16, prof.ed25519_pubkey.len())],
+                    status
+                ),
+            )
+        }
+        Ok(None) => (
+            false,
+            "No active profile. Run: creg login".into(),
+        ),
+        Err(e) => (
+            false,
+            format!("Error reading profile: {e}"),
+        ),
+    }
 }
 
 fn is_validator_host() -> bool {

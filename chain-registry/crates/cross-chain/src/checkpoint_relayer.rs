@@ -116,8 +116,10 @@ mod tests {
         let batch = L1CheckpointBatch {
             block_height: 1000,
             block_hash: "0x1111222233334444555566667777888899990000111122223333444455556666".into(),
-            state_root: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdef".into(),
-            transparency_root: "0x9876543210987654321098765432109876543210987654321098765432109876".into(),
+            state_root: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdef"
+                .into(),
+            transparency_root: "0x9876543210987654321098765432109876543210987654321098765432109876"
+                .into(),
             package_count: 42,
             bls_aggregate_signature: Some("0xfeedbeef".into()),
             participant_bitmask: Some(vec![0xFF, 0x0F]),

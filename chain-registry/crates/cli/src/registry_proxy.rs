@@ -65,7 +65,9 @@ impl RegistryProxy {
         let trimmed = path.trim_start_matches('/');
 
         // npm pattern: "/@scope/pkg/-/@scope/pkg-1.0.0.tgz" or "/pkg/1.0.0" or "/pkg"
-        if trimmed.starts_with("npm/") || (!trimmed.starts_with("pypi/") && !trimmed.starts_with("crates/")) {
+        if trimmed.starts_with("npm/")
+            || (!trimmed.starts_with("pypi/") && !trimmed.starts_with("crates/"))
+        {
             let pkg_path = trimmed.strip_prefix("npm/").unwrap_or(trimmed);
             let parts: Vec<&str> = pkg_path.split('/').collect();
             if !parts.is_empty() {
@@ -83,7 +85,10 @@ impl RegistryProxy {
 
         // PyPI pattern: "/pypi/requests/json" or "/simple/requests/"
         if trimmed.starts_with("pypi/") || trimmed.starts_with("simple/") {
-            let pkg_path = trimmed.strip_prefix("pypi/").or_else(|| trimmed.strip_prefix("simple/")).unwrap_or(trimmed);
+            let pkg_path = trimmed
+                .strip_prefix("pypi/")
+                .or_else(|| trimmed.strip_prefix("simple/"))
+                .unwrap_or(trimmed);
             let parts: Vec<&str> = pkg_path.split('/').collect();
             if !parts.is_empty() {
                 let name = parts[0];
@@ -101,7 +106,10 @@ impl RegistryProxy {
                 let name = parts[0];
                 let version = parts[1];
                 let id = PackageId::new("cargo", name, version);
-                let upstream = format!("{}/api/v1/crates/{}/{}/download", self.config.upstream_crates, name, version);
+                let upstream = format!(
+                    "{}/api/v1/crates/{}/{}/download",
+                    self.config.upstream_crates, name, version
+                );
                 return Some((id, upstream));
             }
         }
@@ -124,7 +132,9 @@ impl RegistryProxy {
                 status_code: 403,
             },
             VerdictStatus::Verified { findings, .. } => {
-                let has_critical = findings.iter().any(|f| matches!(f.severity, common::FindingSeverity::Critical));
+                let has_critical = findings
+                    .iter()
+                    .any(|f| matches!(f.severity, common::FindingSeverity::Critical));
                 if has_critical && !self.config.allow_unverified {
                     ProxyVerdictOutcome::Block {
                         canonical: canonical.clone(),
@@ -162,27 +172,33 @@ impl RegistryProxy {
 mod tests {
     use super::*;
     use chrono::Utc;
-    use common::{VerdictSource, FindingSeverity};
+    use common::{FindingSeverity, VerdictSource};
 
     #[test]
     fn test_proxy_route_parsing() {
         let proxy = RegistryProxy::new(ProxyConfig::default());
 
         // npm route
-        let (id, upstream) = proxy.parse_request_path("/express/4.18.2").expect("npm parse");
+        let (id, upstream) = proxy
+            .parse_request_path("/express/4.18.2")
+            .expect("npm parse");
         assert_eq!(id.ecosystem, "npm");
         assert_eq!(id.name, "express");
         assert_eq!(id.version, "4.18.2");
         assert!(upstream.contains("registry.npmjs.org"));
 
         // PyPI route
-        let (id2, upstream2) = proxy.parse_request_path("/pypi/requests/json").expect("pypi parse");
+        let (id2, upstream2) = proxy
+            .parse_request_path("/pypi/requests/json")
+            .expect("pypi parse");
         assert_eq!(id2.ecosystem, "pypi");
         assert_eq!(id2.name, "requests");
         assert!(upstream2.contains("pypi.org"));
 
         // Crates route
-        let (id3, upstream3) = proxy.parse_request_path("/crates/serde/1.0.197/download").expect("crates parse");
+        let (id3, upstream3) = proxy
+            .parse_request_path("/crates/serde/1.0.197/download")
+            .expect("crates parse");
         assert_eq!(id3.ecosystem, "cargo");
         assert_eq!(id3.name, "serde");
         assert_eq!(id3.version, "1.0.197");
@@ -202,7 +218,9 @@ mod tests {
                 findings: vec![],
             },
             resolved_at: Utc::now(),
-            source: VerdictSource::Chain { node_url: "http://localhost".into() },
+            source: VerdictSource::Chain {
+                node_url: "http://localhost".into(),
+            },
             deterministic_risk: None,
             evidence_phase: None,
             block_phase: None,
@@ -210,7 +228,14 @@ mod tests {
             publisher: None,
         };
 
-        let res = proxy.evaluate_verdict(&revoked_verdict, "https://registry.npmjs.org/malicious-pkg");
-        assert!(matches!(res, ProxyVerdictOutcome::Block { status_code: 403, .. }));
+        let res =
+            proxy.evaluate_verdict(&revoked_verdict, "https://registry.npmjs.org/malicious-pkg");
+        assert!(matches!(
+            res,
+            ProxyVerdictOutcome::Block {
+                status_code: 403,
+                ..
+            }
+        ));
     }
 }

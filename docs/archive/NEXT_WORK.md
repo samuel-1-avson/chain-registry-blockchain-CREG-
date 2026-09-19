@@ -131,6 +131,7 @@
 | VERIFY-401-FMT | 2026-08-23 | `cargo fmt --all -- --check` exit 0 at `5868401` (local rustc 1.93.1; CI pin is 1.93.0) |
 | VERIFY-401-FOUNDRY | 2026-08-23 | Pinned Foundry v1.7.1 `forge test` 129/129 locally; not the profile 1.5.1 binary |
 | VERIFY-401-CI | deferred | GitHub Actions billing/spending; retry after the next monthly reset. Do not raise the limit. |
+| OBSERVER-HA | 2026-09-19 | Uninterruptible Observer Node System: Local Docker HA cluster, Nginx instant failover, k8s 35-observer-ha.yaml, GCP MIG/ILB audit, creg observer CLI, and zero-downtime failover drill |
 
 ---
 

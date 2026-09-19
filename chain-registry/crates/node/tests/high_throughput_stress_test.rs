@@ -24,7 +24,10 @@ fn test_1000_tps_admission_and_pbft_consensus_burst() {
     println!("================================================================================\n");
 
     let target_items = 1000;
-    println!("  [1/4] Generating {} unique synthetic package payloads...", target_items);
+    println!(
+        "  [1/4] Generating {} unique synthetic package payloads...",
+        target_items
+    );
     let gen_start = Instant::now();
 
     let mut leaves = Vec::with_capacity(target_items);
@@ -64,19 +67,32 @@ fn test_1000_tps_admission_and_pbft_consensus_burst() {
     for idx in [0, 99, 250, 500, 750, 999] {
         let proof = generate_inclusion_proof(&leaves, &packages[idx].0.id.canonical(), idx)
             .expect("inclusion proof");
-        assert!(verify_merkle_path(&leaves[idx], idx, &proof.audit_path, &root_hash));
+        assert!(verify_merkle_path(
+            &leaves[idx],
+            idx,
+            &proof.audit_path,
+            &root_hash
+        ));
     }
     let merkle_duration = merkle_start.elapsed();
     let merkle_tps = target_items as f64 / merkle_duration.as_secs_f64().max(0.0001);
     println!("  ✓ Merkle Root: {}", root_hash);
-    println!("  ✓ Merkle throughput: {:.0} items/sec (computed in {:?})", merkle_tps, merkle_duration);
+    println!(
+        "  ✓ Merkle throughput: {:.0} items/sec (computed in {:?})",
+        merkle_tps, merkle_duration
+    );
 
     // ── 3. PBFT Consensus Quorum (4 Nodes) ───────────────────────────────────
     println!("\n  [3/4] Running PBFT Consensus Quorum with BLS Multi-Signatures...");
     let pbft_start = Instant::now();
 
     let node_keys: Vec<(SigningKey, BlsKeypair)> = (1..=4)
-        .map(|i| (SigningKey::from_bytes(&[i as u8; 32]), BlsKeypair::generate(&mut OsRng)))
+        .map(|i| {
+            (
+                SigningKey::from_bytes(&[i as u8; 32]),
+                BlsKeypair::generate(&mut OsRng),
+            )
+        })
         .collect();
 
     let mut vs = ValidatorSet::new();
@@ -122,7 +138,10 @@ fn test_1000_tps_admission_and_pbft_consensus_burst() {
             pubkey: hex::encode(ed_key.verifying_key().as_bytes()),
             signature: hex::encode(sig.to_bytes()),
         };
-        if pbft.prepare(&b_hash, &format!("validator-node-{}", i + 1), prep_sig).expect("prep") {
+        if pbft
+            .prepare(&b_hash, &format!("validator-node-{}", i + 1), prep_sig)
+            .expect("prep")
+        {
             break;
         }
     }
@@ -135,7 +154,10 @@ fn test_1000_tps_admission_and_pbft_consensus_burst() {
             pubkey: hex::encode(ed_key.verifying_key().as_bytes()),
             signature: hex::encode(sig.to_bytes()),
         };
-        if pbft.commit(&b_hash, &format!("validator-node-{}", i + 1), commit_sig).expect("commit") {
+        if pbft
+            .commit(&b_hash, &format!("validator-node-{}", i + 1), commit_sig)
+            .expect("commit")
+        {
             break;
         }
     }
@@ -152,8 +174,14 @@ fn test_1000_tps_admission_and_pbft_consensus_burst() {
     let agg_sig = aggregate_signatures(&bls_sigs, &indices, 4).expect("BLS aggregation");
     let pbft_duration = pbft_start.elapsed();
 
-    println!("  ✓ PBFT Finalized block covering 1,000 transactions in {:?}", pbft_duration);
-    println!("  ✓ 4 BLS signatures aggregated into single 32-byte signature (signers: {})", agg_sig.participant_count);
+    println!(
+        "  ✓ PBFT Finalized block covering 1,000 transactions in {:?}",
+        pbft_duration
+    );
+    println!(
+        "  ✓ 4 BLS signatures aggregated into single 32-byte signature (signers: {})",
+        agg_sig.participant_count
+    );
 
     // ── 4. Benchmark Performance Metrics ──────────────────────────────────────
     println!("\n  [4/4] Final Load Metrics:");
@@ -162,8 +190,14 @@ fn test_1000_tps_admission_and_pbft_consensus_burst() {
 
     println!("    • Total Processed:     1,000 transactions");
     println!("    • Total Pipeline Time: {:?}", total_time);
-    println!("    • Effective TPS:       {:.2} transactions/sec", effective_tps);
-    println!("    • Peak Throughput:     {:.2} transactions/sec", effective_tps * 1.4);
+    println!(
+        "    • Effective TPS:       {:.2} transactions/sec",
+        effective_tps
+    );
+    println!(
+        "    • Peak Throughput:     {:.2} transactions/sec",
+        effective_tps * 1.4
+    );
     println!("    • Consensus Status:    100% FINALIZED");
 
     println!("\n================================================================================");

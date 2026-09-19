@@ -1,0 +1,149 @@
+# docker-compose.observer-ha.yml
+# High-Availability Observer Cluster with active Nginx load balancer and automated failover.
+# Serves public API queries on port 8090 without risking consensus downtime.
+
+name: creg-observer-ha
+
+services:
+  spec-server:
+    image: nginx:alpine
+    container_name: creg-ha-spec-server
+    volumes:
+      - ./testnet/chain-spec.sepolia.json:/usr/share/nginx/html/chain-spec.json:ro
+      - ./testnet/chain-spec.sepolia.json.sig:/usr/share/nginx/html/chain-spec.json.sig:ro
+      - ./testnet/spec-server/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "${HA_SPEC_PORT:-28888}:80"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/chain-spec.json > /dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  ipfs:
+    image: ipfs/kubo:v0.27.0
+    container_name: creg-ha-ipfs
+    ports:
+      - "${HA_IPFS_SWARM_PORT:-24001}:4001"
+      - "${HA_IPFS_API_PORT:-25001}:5001"
+      - "${HA_IPFS_GATEWAY_PORT:-28081}:8080"
+    volumes:
+      - ha-ipfs-data:/data/ipfs
+    command: ["daemon", "--init", "--init-profile=server", "--routing=dhtclient"]
+    environment:
+      - IPFS_PROFILE=server
+    restart: unless-stopped
+
+  observer-1:
+    image: chain-registry-app:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.windows
+    container_name: creg-ha-observer-1
+    restart: unless-stopped
+    depends_on:
+      spec-server:
+        condition: service_healthy
+      ipfs:
+        condition: service_started
+    environment:
+      CREG_NODE_ID: observer-replica-1
+      CREG_IS_VALIDATOR: "false"
+      CREG_LISTEN: "0.0.0.0:8080"
+      CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/9000"
+      CREG_P2P_SEEDS: ${CREG_P2P_SEEDS:-}
+      CREG_ALLOW_EMPTY_P2P_SEEDS: "true"
+      CREG_DATA_DIR: "/data"
+      CREG_ETH_RPC: ${CREG_ETH_RPC:-${SEPOLIA_RPC_URL:-https://gateway.tenderly.co/public/sepolia}}
+      CREG_EXPECTED_L1_CHAIN_ID: "11155111"
+      CREG_CHAIN_ID: "creg-testnet-1"
+      CREG_TESTNET: "true"
+      CREG_CHAIN_SPEC_URL: "http://spec-server/chain-spec.json"
+      CREG_SPEC_SIGNATURE_URL: "http://spec-server/chain-spec.json.sig"
+      CREG_SPEC_SIGNING_PUBKEY: "3fe87833177b04b0a18600eace041692a35fb2b85f6e14e6734d894a0fd61c01"
+      CREG_IPFS_URL: "http://ipfs:5001"
+      CREG_REGISTRY_ADDR: ${CREG_REGISTRY_ADDR:-0xDcbE00de8904a1D95a5fb0Bc1B154097A5cef754}
+      CREG_STAKING_ADDR: ${CREG_STAKING_ADDR:-0x7B2e4a5B337da4faB93fF3b589BC582057a6850C}
+      CREG_GOVERNANCE_ADDR: ${CREG_GOVERNANCE_ADDR:-0x99b04A2C4bcd447156fbdB4A421fcF5dC6B80A10}
+      CREG_TOKEN_ADDR: ${CREG_TOKEN_ADDR:-0x02348b64895ea27088058191ADf8772353D00417}
+      CREG_ZK_VERIFIER_ADDR: ${CREG_ZK_VERIFIER_ADDR:-0x4cf1b4E6B20F7d6e42A0E28814D1f0C355Afee58}
+      CREG_OPERATOR_API_KEY: ${CREG_OPERATOR_API_KEY:-dev-operator-key-32-chars-minimum-token}
+      RUST_LOG: "info,chain_registry_node=debug"
+    volumes:
+      - observer-1-data:/data
+      - ./circuits:/app/circuits:ro
+      - ./validators:/app/validators:ro
+      - ./models:/app/models:ro
+    ports:
+      - "28181:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  observer-2:
+    image: chain-registry-app:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.windows
+    container_name: creg-ha-observer-2
+    restart: unless-stopped
+    depends_on:
+      spec-server:
+        condition: service_healthy
+      ipfs:
+        condition: service_started
+    environment:
+      CREG_NODE_ID: observer-replica-2
+      CREG_IS_VALIDATOR: "false"
+      CREG_LISTEN: "0.0.0.0:8080"
+      CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/9000"
+      CREG_P2P_SEEDS: ${CREG_P2P_SEEDS:-}
+      CREG_ALLOW_EMPTY_P2P_SEEDS: "true"
+      CREG_DATA_DIR: "/data"
+      CREG_ETH_RPC: ${CREG_ETH_RPC:-${SEPOLIA_RPC_URL:-https://gateway.tenderly.co/public/sepolia}}
+      CREG_EXPECTED_L1_CHAIN_ID: "11155111"
+      CREG_CHAIN_ID: "creg-testnet-1"
+      CREG_TESTNET: "true"
+      CREG_CHAIN_SPEC_URL: "http://spec-server/chain-spec.json"
+      CREG_SPEC_SIGNATURE_URL: "http://spec-server/chain-spec.json.sig"
+      CREG_SPEC_SIGNING_PUBKEY: "3fe87833177b04b0a18600eace041692a35fb2b85f6e14e6734d894a0fd61c01"
+      CREG_IPFS_URL: "http://ipfs:5001"
+      CREG_REGISTRY_ADDR: ${CREG_REGISTRY_ADDR:-0xDcbE00de8904a1D95a5fb0Bc1B154097A5cef754}
+      CREG_STAKING_ADDR: ${CREG_STAKING_ADDR:-0x7B2e4a5B337da4faB93fF3b589BC582057a6850C}
+      CREG_GOVERNANCE_ADDR: ${CREG_GOVERNANCE_ADDR:-0x99b04A2C4bcd447156fbdB4A421fcF5dC6B80A10}
+      CREG_TOKEN_ADDR: ${CREG_TOKEN_ADDR:-0x02348b64895ea27088058191ADf8772353D00417}
+      CREG_ZK_VERIFIER_ADDR: ${CREG_ZK_VERIFIER_ADDR:-0x4cf1b4E6B20F7d6e42A0E28814D1f0C355Afee58}
+      CREG_OPERATOR_API_KEY: ${CREG_OPERATOR_API_KEY:-dev-operator-key-32-chars-minimum-token}
+      RUST_LOG: "info,chain_registry_node=debug"
+    volumes:
+      - observer-2-data:/data
+      - ./circuits:/app/circuits:ro
+      - ./validators:/app/validators:ro
+      - ./models:/app/models:ro
+    ports:
+      - "28182:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  observer-lb:
+    image: nginx:alpine
+    container_name: creg-ha-observer-lb
+    restart: unless-stopped
+    ports:
+      - "8090:80"
+    volumes:
+      - ./nginx-observer-lb.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - observer-1
+      - observer-2
+
+volumes:
+  ha-ipfs-data:
+  observer-1-data:
+  observer-2-data:

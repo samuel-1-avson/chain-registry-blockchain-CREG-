@@ -12,33 +12,43 @@
 
 **Typical combined spend (maintainer edge + observers + optional Geth):** ~$180–250 (GCP) + ~$0–8 (Firebase) ≈ **~$185–260/month**. Validators and bootnodes run on independently controlled operator infrastructure — see [TESTNET_SCALE_ARCHITECTURE.md](./TESTNET_SCALE_ARCHITECTURE.md).
 
-## Architecture (Option A — production)
+## Architecture Options
+
+### Option 1: Unified Single-Instance Architecture (Recommended: ~$59/month)
+
+Consolidates the entire testnet stack onto a single lean `e2-standard-2` VM running Caddy, CREG observer node, Explorer, and Faucet in lightweight containers. Upstream Sepolia L1 is proxied via Caddy to a free-tier provider ($0/mo).
 
 ```
-Browser → creg-testnet-vm (edge, public IP)
-       → creg-observer-pool (read-only observers, private)
-       → creg-sepolia-geth-vm (optional Sepolia RPC, private)
+Browser / Client ──► creg-testnet-vm (e2-standard-2, public IP 35.225.225.20)
+                          │
+                          ▼
+                       Caddy (TLS)
+                          ├──► /rpc, /v1/* ──► CREG Observer Node (:8080)
+                          ├──► /sepolia   ──► Upstream Sepolia Proxy ($0/mo)
+                          └──► /          ──► Explorer & Faucet (:80, :8082)
 ```
 
-Runbook: [GCP_PHASE2_RUNBOOK.md](./GCP_PHASE2_RUNBOOK.md). The former
-validator-fleet runbook is retained as a guarded legacy lab reference.
+| Line item | Est. monthly |
+|-----------|----------------|
+| `creg-testnet-vm` (`e2-standard-2`, 2 vCPU, 8 GB RAM) | ~$49 |
+| Boot disk (50 GB `pd-balanced`) | ~$5 |
+| Static IP + light egress | ~$5 |
+| Upstream Sepolia RPC (QuickNode/Alchemy free tier) | $0 |
+| **Total Unified Stack Monthly Spend** | **~$59/month** |
 
-| Item | Value |
-|------|--------|
-| Edge VM | `creg-testnet-vm`, `e2-standard-4`, `us-central1-a` |
-| Observer pool | `creg-observer-pool` MIG, `e2-medium`, no public IP |
-| Geth VM | `creg-sepolia-geth-vm`, `e2-standard-2`, no public IP |
-| Static IP (edge) | `35.225.225.20` |
-| Firestore database | `ai-studio-6b167dc8-a078-4526-a86b-de2a8722a753` |
-| Callable function | `registerWaitlist` (Node 20, `us-central1`) |
+Deploy script: `chain-registry/testnet/gcp/deploy-unified-stack.ps1`
 
-## VM cost drivers (0022105784, Option A)
+---
+
+### Option 2: Legacy 3-Tier Multi-VM Architecture (~$150–$160/month)
+
+Separates edge routing from an observer managed instance group (MIG):
 
 | Line item | Est. monthly |
 |-----------|----------------|
 | `creg-testnet-vm` (`e2-standard-4`) | ~$98 |
 | Observer pool (`e2-medium`, one replica) | ~$25 |
-| `creg-sepolia-geth-vm` (`e2-standard-2`) | ~$49 |
+| Optional `creg-sepolia-geth-vm` (`e2-standard-2`) | ~$49 |
 | Disks (100 + 200 + 100 GB `pd-balanced`) | ~$40 |
 | Cloud NAT + egress | ~$5–15 |
 | Optional snapshots | ~$2–8 |

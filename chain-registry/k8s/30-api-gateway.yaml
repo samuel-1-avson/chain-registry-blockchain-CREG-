@@ -1,4 +1,4 @@
-# API Gateway Service - Exposes validator-1 to external traffic
+# API Gateway Service - Exposes observer pool to external traffic
 apiVersion: v1
 kind: Service
 metadata:
@@ -11,8 +11,7 @@ metadata:
 spec:
   type: LoadBalancer  # Change to NodePort if no LB available
   selector:
-    app.kubernetes.io/name: creg-validator
-    app.kubernetes.io/instance: validator-1
+    app.kubernetes.io/name: creg-observer
   ports:
     - port: 80
       targetPort: 8080
@@ -35,8 +34,7 @@ metadata:
 spec:
   type: NodePort
   selector:
-    app.kubernetes.io/name: creg-validator
-    app.kubernetes.io/instance: validator-1
+    app.kubernetes.io/name: creg-observer
   ports:
     - port: 8080
       targetPort: 8080

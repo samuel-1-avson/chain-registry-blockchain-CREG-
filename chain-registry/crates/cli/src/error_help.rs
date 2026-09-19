@@ -41,17 +41,18 @@ fn print_node_connection_help() {
 }
 
 fn print_key_help() {
-    eprintln!("\n{}", "Key Setup Required:".bold());
-    eprintln!("  1. Generate a new key:");
+    eprintln!("\n{}", "Key & Identity Setup:".bold());
+    eprintln!("  1. Connect with your Web3 Wallet (Recommended — Dual-Key Architecture):");
+    eprintln!("     {}", "creg login".cyan().bold());
+    eprintln!();
+    eprintln!("  2. Check your active authenticated profile:");
+    eprintln!("     {}", "creg profile".cyan());
+    eprintln!();
+    eprintln!("  3. Or generate a standalone offline key (Offline / CI dev):");
     eprintln!("     {}", "creg keygen publisher".cyan());
     eprintln!("     {}", "creg keygen validator".cyan());
-    eprintln!("     {}", "creg keygen witness".cyan());
-    eprintln!("     {}", "creg keygen log-signer".cyan());
     eprintln!();
-    eprintln!("  2. Or set environment variable:");
-    eprintln!("     {}", "export CREG_PUBLISHER_KEY=/path/to/key".cyan());
-    eprintln!();
-    eprintln!("  3. Run the setup wizard:");
+    eprintln!("  4. Run the interactive setup wizard:");
     eprintln!("     {}", "creg init".cyan());
 }
 
@@ -60,32 +61,27 @@ fn print_stake_help() {
     eprintln!("  • Publisher minimum: 1 CREG");
     eprintln!("  • Validator minimum: 100 CREG");
     eprintln!();
-    eprintln!("  1. Stake as publisher:");
-    eprintln!("     {}", "creg stake 1 --key-file /path/to/key".cyan());
+    eprintln!("  1. Stake with active authenticated profile:");
+    eprintln!("     {}", "creg stake 1".cyan());
+    eprintln!("     {}", "creg stake 100 --role validator".cyan());
     eprintln!();
-    eprintln!("  2. Stake as validator:");
-    eprintln!(
-        "     {}",
-        "creg stake 100 --role validator --key-file /path/to/key".cyan()
-    );
+    eprintln!("  2. Request testnet tokens from faucet:");
+    eprintln!("     {}", "creg testnet drip".cyan());
     eprintln!();
-    eprintln!("  3. Check your balance:");
-    eprintln!("     {}", "cast balance $ADDRESS --rpc-url $RPC".cyan());
+    eprintln!("  3. Connect wallet if not yet authenticated:");
+    eprintln!("     {}", "creg login".cyan());
 }
 
 fn print_ipfs_help() {
     eprintln!("\n{}", "IPFS Setup Required:".bold());
-    eprintln!("  1. Install IPFS:");
+    eprintln!("  1. Use the live testnet IPFS gateway:");
     eprintln!(
         "     {}",
-        "https://docs.ipfs.io/install/".cyan().underline()
+        "export CREG_IPFS_URL=https://ipfs.testnet.cregnet.dev".cyan()
     );
     eprintln!();
-    eprintln!("  2. Start IPFS daemon:");
+    eprintln!("  2. Or run a local IPFS daemon:");
     eprintln!("     {}", "ipfs daemon".cyan());
-    eprintln!();
-    eprintln!("  3. Or use public gateway (slower):");
-    eprintln!("     {}", "export CREG_IPFS_URL=https://ipfs.io".cyan());
 }
 
 fn print_docker_help() {

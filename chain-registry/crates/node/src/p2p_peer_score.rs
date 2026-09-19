@@ -158,10 +158,7 @@ impl PeerScoreTracker {
 
     /// Get current score for a peer
     pub fn get_score(&self, peer_id: &PeerId) -> f64 {
-        self.scores
-            .get(peer_id)
-            .map(|m| m.score)
-            .unwrap_or(10.0)
+        self.scores.get(peer_id).map(|m| m.score).unwrap_or(10.0)
     }
 
     /// Clean up metrics for stale peers not seen in 1 hour

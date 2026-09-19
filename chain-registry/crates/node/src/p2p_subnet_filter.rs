@@ -112,7 +112,11 @@ impl SubnetConnectionFilter {
         let regular_peer_count = self
             .active_connections
             .get(&subnet)
-            .map(|set| set.iter().filter(|p| !self.bonded_validators.contains(p)).count())
+            .map(|set| {
+                set.iter()
+                    .filter(|p| !self.bonded_validators.contains(p))
+                    .count()
+            })
             .unwrap_or(0);
 
         if regular_peer_count >= self.max_per_subnet {

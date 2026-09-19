@@ -243,7 +243,7 @@ contract DeploySepolia is Script {
             string("contracts/deployments/sepolia-latest.json")
         );
 
-        string memory m = string.concat(
+        string memory p1 = string.concat(
             '{\n',
             '  "chainId":    "', vm.toString(block.chainid),       '",\n',
             '  "deployedAt": "', vm.toString(block.timestamp),     '",\n',
@@ -251,7 +251,9 @@ contract DeploySepolia is Script {
             '  "governance": "', vm.toString(address(governance)), '",\n',
             '  "staking":    "', vm.toString(address(staking)),    '",\n',
             '  "stakingDeployBlock": "', vm.toString(stakingDeployBlock), '",\n',
-            '  "reputation": "', vm.toString(address(reputation)), '",\n',
+            '  "reputation": "', vm.toString(address(reputation)), '",\n'
+        );
+        string memory p2 = string.concat(
             '  "vrf":        "', vm.toString(address(vrf)),        '",\n',
             '  "zkVerifier": "', vm.toString(address(zkVerifier)), '",\n',
             '  "registry":   "', vm.toString(address(registry)),   '",\n',
@@ -261,6 +263,7 @@ contract DeploySepolia is Script {
             '  "pinningRewards": "', vm.toString(address(pinningRewards)), '"\n',
             '}'
         );
+        string memory m = string.concat(p1, p2);
 
         try vm.createDir("contracts/deployments", true) {} catch {}
         try vm.writeFile(outputPath, m) {

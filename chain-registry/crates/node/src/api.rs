@@ -690,12 +690,15 @@ async fn health(State(state): State<SharedState>) -> impl IntoResponse {
     }
     Json(serde_json::json!({
         "status":  "ok",
+        "node_id": s.config.node_id,
+        "is_validator": s.config.is_validator,
         "version": env!("CARGO_PKG_VERSION"),
         "validator_set_sync": s.validator_set_sync.clone(),
         "sandbox": sandbox,
         "sync": {
             "lag_blocks": s.sync_lag_blocks,
             "max_peer_tip": s.sync_max_peer_tip,
+            "healthy": s.sync_lag_blocks <= 10,
         },
     }))
 }

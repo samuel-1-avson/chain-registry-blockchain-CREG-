@@ -148,6 +148,8 @@ contract Staking {
     event PublisherLiabilityReserved(bytes32 indexed packageKey, address indexed publisher, uint256 bond);
     event PublisherLiabilityReleased(bytes32 indexed packageKey, address indexed publisher, uint256 bond);
     event PublisherLiabilitySlashed(bytes32 indexed packageKey, address indexed publisher, uint256 bond, string reason);
+    event ValidatorApplied       (address indexed validator, uint256 amount);
+    event ValidatorApproved      (address indexed validator);
     event ValidatorApprovedByConsensus(address indexed validator, uint256 nonce, uint256 signerCount);
     event ValidatorApplicationExpired (address indexed validator, uint256 refunded);
     event ValidatorRejected      (address indexed validator);

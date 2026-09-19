@@ -5,6 +5,7 @@
 
 mod advanced;
 mod audit;
+mod auth;
 mod batch;
 mod blocks;
 mod chain_spec;
@@ -22,11 +23,14 @@ mod keygen;
 mod lockfile;
 pub mod lockfile_attestation;
 mod multisig;
+mod observer;
 mod osv_snapshot;
 mod output;
 mod policy;
+mod profile;
 mod publish;
 mod recovery;
+mod relayer_cli;
 pub mod registry_proxy;
 mod retry;
 mod sbom;
@@ -143,8 +147,9 @@ enum Commands {
         #[arg(short, long)]
         manifest: Option<std::path::PathBuf>,
         /// Path to file containing publisher's Ed25519 private key (hex-encoded).
+        /// Defaults to active profile key if omitted.
         #[arg(short, long = "key-file", env = "CREG_KEY_FILE")]
-        key: std::path::PathBuf,
+        key: Option<std::path::PathBuf>,
         /// Paths to additional Ed25519 private key files for 2-of-3 multi-sig publishing.
         #[arg(long = "extra-key-file")]
         extra_keys: Vec<std::path::PathBuf>,
@@ -152,8 +157,9 @@ enum Commands {
         #[arg(long, hide = true)]
         shield: bool,
         /// Publisher EVM address with active on-chain stake.
+        /// Defaults to active profile wallet address if omitted.
         #[arg(long, env = "CREG_PUBLISHER_ADDRESS")]
-        publisher_address: String,
+        publisher_address: Option<String>,
         /// IPFS API URL for upload/pin. Overrides `CREG_IPFS_URL` and config file.
         #[arg(long, env = "CREG_IPFS_URL")]
         ipfs_url: Option<String>,
@@ -473,6 +479,109 @@ enum Commands {
     ChainSpec {
         #[command(subcommand)]
         command: chain_spec::ChainSpecCommands,
+    },
+
+    /// High-Availability Observer pool operations and failover verification
+    Observer {
+        #[command(subcommand)]
+        command: ObserverCommands,
+    },
+
+    /// Ethereum L1 State Root Relayer and checkpoint operations
+    Relayer {
+        #[command(subcommand)]
+        command: RelayerCommands,
+    },
+
+    /// Authenticate your Ethereum wallet (MetaMask) and derive CREG consensus identity.
+    Login {
+        /// Ethereum private key (hex) for headless/CI login without a browser.
+        #[arg(long)]
+        private_key: Option<String>,
+
+        /// Base64 or JSON authorization token from the Web bridge.
+        #[arg(long)]
+        token: Option<String>,
+
+        /// Local callback port for browser OAuth loopback (defaults to 18888).
+        #[arg(long, default_value_t = 18888)]
+        port: u16,
+
+        /// Do not automatically open the browser; print the URL only.
+        #[arg(long)]
+        no_browser: bool,
+    },
+
+    /// Log out and clear the active authenticated profile.
+    Logout,
+
+    /// View or manage your authenticated CREG profile.
+    Profile {
+        #[command(subcommand)]
+        command: Option<ProfileCommands>,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum ProfileCommands {
+    /// Show the active authenticated profile.
+    Show,
+    /// Clear the active authenticated profile.
+    Clear,
+}
+
+#[derive(Subcommand)]
+enum RelayerCommands {
+    /// Run soak test anchoring PBFT state roots to Ethereum Sepolia contracts
+    Soak {
+        /// Number of finalized checkpoints to anchor
+        #[arg(short, long, default_value = "100")]
+        count: usize,
+        /// Starting block height
+        #[arg(short, long, default_value = "1")]
+        start_height: u64,
+        /// Sepolia JSON-RPC URL
+        #[arg(
+            long,
+            env = "CREG_SEPOLIA_RPC_URL",
+            default_value = "https://ethereum-sepolia-rpc.publicnode.com"
+        )]
+        rpc_url: String,
+        /// Sepolia Registry contract address
+        #[arg(
+            long,
+            env = "CREG_L1_REGISTRY_ADDRESS",
+            default_value = "0xF232cC6F5C6EfC74C7517B209D15baBd57b817eE"
+        )]
+        contract: String,
+        /// Broadcast live to Ethereum Sepolia (default is safe dry-run simulation)
+        #[arg(long)]
+        broadcast: bool,
+        /// Output raw JSON report
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum ObserverCommands {
+    /// Probe observer load balancer and replica pool status
+    Status {
+        /// Load Balancer URL (defaults to http://localhost:8090)
+        #[arg(long, default_value = "http://localhost:8090")]
+        lb_url: String,
+        /// Direct observer replica URLs (comma-separated or multiple flags)
+        #[arg(short, long, value_delimiter = ',')]
+        replicas: Vec<String>,
+    },
+    /// Run burst query drill against the observer load balancer to verify continuous routing
+    Probe {
+        /// Load Balancer URL (defaults to http://localhost:8090)
+        #[arg(long, default_value = "http://localhost:8090")]
+        lb_url: String,
+        /// Number of queries to dispatch
+        #[arg(short, long, default_value = "100")]
+        count: usize,
     },
 }
 
@@ -817,8 +926,27 @@ enum RecoveryAction {
     },
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
+    let builder = std::thread::Builder::new()
+        .name("creg-main".into())
+        .stack_size(16 * 1024 * 1024);
+
+    let handler = builder.spawn(|| {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .thread_stack_size(16 * 1024 * 1024)
+            .build()
+            .expect("Failed to build Tokio runtime");
+        rt.block_on(async_main())
+    })?;
+
+    match handler.join() {
+        Ok(res) => res,
+        Err(panic) => std::panic::resume_unwind(panic),
+    }
+}
+
+async fn async_main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
         .with_target(false)
@@ -826,7 +954,7 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
-    if let Err(e) = run(cli).await {
+    if let Err(e) = Box::pin(run(cli)).await {
         error_help::print_error_with_help(&e.to_string());
         std::process::exit(1);
     }
@@ -1003,9 +1131,10 @@ async fn run(cli: Cli) -> Result<()> {
             ipfs_url,
             offline,
         } => {
-            let key_content = std::fs::read_to_string(&key)
-                .with_context(|| format!("Cannot read key file: {}", key.display()))?;
-            let key_str = key_content.trim();
+            let (key_str, resolved_publisher_address) = profile::resolve_publisher_credentials(
+                key.as_deref(),
+                publisher_address.as_deref(),
+            )?;
             let extra_key_strs: Vec<String> = extra_keys
                 .iter()
                 .map(|p| {
@@ -1018,9 +1147,9 @@ async fn run(cli: Cli) -> Result<()> {
                 publish::sign_offline(
                     &tarball,
                     manifest.as_deref(),
-                    key_str,
+                    &key_str,
                     &extra_key_strs,
-                    &publisher_address,
+                    &resolved_publisher_address,
                     shield,
                     ipfs_url.as_deref(),
                     &output_path,
@@ -1030,9 +1159,9 @@ async fn run(cli: Cli) -> Result<()> {
                 publish::run(
                     &tarball,
                     manifest.as_deref(),
-                    key_str,
+                    &key_str,
                     &extra_key_strs,
-                    &publisher_address,
+                    &resolved_publisher_address,
                     cli.node_url.as_deref(),
                     cli.grpc_url.as_deref(),
                     ipfs_url.as_deref(),
@@ -1044,6 +1173,72 @@ async fn run(cli: Cli) -> Result<()> {
         Commands::SubmitSigned { signed_file } => {
             publish::submit_signed(&signed_file, cli.node_url.as_deref()).await?;
         }
+        Commands::Login {
+            private_key,
+            token,
+            port,
+            no_browser,
+        } => {
+            let node_url = config_file::effective_node_url(cli.node_url.as_deref());
+
+            let identity = if let Some(ref tok) = token {
+                println!("  Verifying authorization token...");
+                auth::derive_from_token(
+                    tok,
+                    auth::DEFAULT_CHAIN_ID,
+                    auth::DEFAULT_VERIFYING_CONTRACT,
+                )?
+            } else if let Some(ref pk) = private_key {
+                println!("  Deriving CREG identity from provided Ethereum private key...");
+                auth::derive_from_private_key(
+                    pk,
+                    auth::DEFAULT_CHAIN_ID,
+                    auth::DEFAULT_VERIFYING_CONTRACT,
+                )?
+            } else {
+                auth::start_loopback_auth(
+                    port,
+                    no_browser,
+                    auth::DEFAULT_CHAIN_ID,
+                    auth::DEFAULT_VERIFYING_CONTRACT,
+                )
+                .await?
+            };
+
+            let prof = profile::save_identity(&identity, &node_url)?;
+            println!();
+            println!("  {} Authentication successful!", "✓".green().bold());
+            profile::print_profile(&prof);
+            println!("  You can now publish packages without any key flags:");
+            println!("    {}", "creg publish <tarball.tgz>".cyan());
+            println!();
+        }
+        Commands::Logout => {
+            if profile::clear_profile()? {
+                println!("  {} Successfully logged out. Active profile removed.", "✓".green());
+            } else {
+                println!("  No active profile found. You are already logged out.");
+            }
+        }
+        Commands::Profile { command } => match command.unwrap_or(ProfileCommands::Show) {
+            ProfileCommands::Show => {
+                if let Some(prof) = profile::load_active_profile()? {
+                    profile::print_profile(&prof);
+                } else {
+                    println!();
+                    println!("  No active authenticated profile found.");
+                    println!("  To link your Ethereum wallet, run: {}", "creg login".cyan().bold());
+                    println!();
+                }
+            }
+            ProfileCommands::Clear => {
+                if profile::clear_profile()? {
+                    println!("  {} Active profile cleared.", "✓".green());
+                } else {
+                    println!("  No profile found to clear.");
+                }
+            }
+        },
         Commands::Recovery { action } => match action {
             RecoveryAction::Split {
                 key,
@@ -1584,6 +1779,26 @@ async fn run(cli: Cli) -> Result<()> {
             }
             TestnetCommands::Reset { data_dir } => {
                 testnet::reset(data_dir)?;
+            }
+        },
+        Commands::Observer { command } => match command {
+            ObserverCommands::Status { lb_url, replicas } => {
+                observer::status(&lb_url, &replicas).await?;
+            }
+            ObserverCommands::Probe { lb_url, count } => {
+                observer::probe_drill(&lb_url, count).await?;
+            }
+        },
+        Commands::Relayer { command } => match command {
+            RelayerCommands::Soak {
+                count,
+                start_height,
+                rpc_url,
+                contract,
+                broadcast,
+                json,
+            } => {
+                relayer_cli::soak(count, start_height, &rpc_url, &contract, !broadcast, json).await?;
             }
         },
     }

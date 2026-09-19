@@ -1,0 +1,103 @@
+# ==============================================================================
+# Chain Registry (CREG) — Independent External Validator Launch Script (Windows)
+# ==============================================================================
+# This script enables ANY independent operator to join the decentralized CREG
+# testnet as a full validator on Windows with Docker Desktop.
+# ==============================================================================
+
+param(
+    [string]$NodeId = "",
+    [string]$EthRpc = "https://ethereum-sepolia-rpc.publicnode.com"
+)
+
+$ErrorActionPreference = "Stop"
+
+Write-Host "============================================================" -ForegroundColor Cyan
+Write-Host "   Chain Registry (CREG) — External Validator Onboarding    " -ForegroundColor Cyan
+Write-Host "============================================================" -ForegroundColor Cyan
+
+# Check Docker
+if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+    Write-Error "Docker is not found. Please install and start Docker Desktop."
+    exit 1
+}
+
+$dataDir = Join-Path $env:USERPROFILE ".creg-validator"
+if (-not (Test-Path $dataDir)) { New-Item -ItemType Directory -Path $dataDir -Force | Out-Null }
+$keyFile = Join-Path $dataDir "validator.key"
+$envFile = Join-Path $dataDir "validator.env"
+
+# Generate or load Validator Key
+if (-not (Test-Path $keyFile)) {
+    Write-Host "Generating new Ed25519 validator consensus key..." -ForegroundColor Yellow
+    $bytes = New-Object byte[] 32
+    (New-Object System.Security.Cryptography.RNGCryptoServiceProvider).GetBytes($bytes)
+    $validatorKey = [System.BitConverter]::ToString($bytes).Replace("-", "").ToLower()
+    [System.IO.File]::WriteAllText($keyFile, $validatorKey)
+    Write-Host "[OK] Validator key saved to $keyFile" -ForegroundColor Green
+} else {
+    $validatorKey = (Get-Content $keyFile -Raw).Trim()
+    Write-Host "[OK] Loaded existing validator key from $keyFile" -ForegroundColor Green
+}
+
+$operatorKeyFile = Join-Path $dataDir "operator_api.key"
+if (-not (Test-Path $operatorKeyFile)) {
+    $opBytes = New-Object byte[] 32
+    (New-Object System.Security.Cryptography.RNGCryptoServiceProvider).GetBytes($opBytes)
+    $opKey = [System.BitConverter]::ToString($opBytes).Replace("-", "").ToLower()
+    [System.IO.File]::WriteAllText($operatorKeyFile, $opKey)
+} else {
+    $opKey = (Get-Content $operatorKeyFile -Raw).Trim()
+}
+
+if (-not $NodeId) {
+    $NodeId = "ext-val-" + (Get-Random -Minimum 1000 -Maximum 9999)
+}
+
+$bootnode = "/ip4/35.225.225.20/tcp/9000/p2p/12D3KooWDro5WW69YcAhFpqNSx9aGho3NdhU5LShjxSZjCFFE5XJ"
+
+$envContent = @"
+CREG_TESTNET=true
+CREG_NODE_ID=$NodeId
+CREG_DATA_DIR=/data
+CREG_IS_VALIDATOR=true
+CREG_NODE_ROLE=validator
+CREG_VALIDATOR_KEY=$validatorKey
+CREG_OPERATOR_API_KEY=$opKey
+CREG_ETH_RPC=$EthRpc
+CREG_EXPECTED_L1_CHAIN_ID=11155111
+CREG_CHAIN_ID=creg-testnet-1
+CREG_CHAIN_SPEC_URL=https://spec.testnet.cregnet.dev/chain-spec.json
+CREG_SPEC_SIGNATURE_URL=https://spec.testnet.cregnet.dev/chain-spec.json.sig
+CREG_IPFS_URL=https://ipfs.testnet.cregnet.dev
+CREG_P2P_LISTEN=/ip4/0.0.0.0/tcp/9000
+CREG_P2P_SEEDS=$bootnode
+CREG_LISTEN=0.0.0.0:8080
+RUST_LOG=info,chain_registry_node=debug,consensus=info
+"@
+
+[System.IO.File]::WriteAllText($envFile, $envContent)
+
+Write-Host "`nStarting independent validator container..." -ForegroundColor Yellow
+
+docker run -d `
+    --name "creg-validator-$NodeId" `
+    --restart unless-stopped `
+    --env-file "$envFile" `
+    -p 8080:8080 `
+    -p 9000:9000 `
+    -v "$($dataDir)/chain-data:/data" `
+    creg-node:local-3node /app/creg-node | Out-Null
+
+Write-Host "`n============================================================" -ForegroundColor Green
+Write-Host "   Validator Node Successfully Launched!                    " -ForegroundColor Green
+Write-Host "============================================================" -ForegroundColor Green
+Write-Host "Node ID:       $NodeId" -ForegroundColor Cyan
+Write-Host "Data Dir:      $dataDir" -ForegroundColor Cyan
+Write-Host "Bootnode Peer: $bootnode" -ForegroundColor Cyan
+Write-Host "Local RPC:     http://localhost:8080/rpc" -ForegroundColor Cyan
+Write-Host "Local Health:  http://localhost:8080/v1/health" -ForegroundColor Cyan
+Write-Host "`nTo participate in voting and receive block rewards:" -ForegroundColor Yellow
+Write-Host "1. Get free test tokens: https://faucet.testnet.cregnet.dev" -ForegroundColor Cyan
+Write-Host "2. Stake 100 tCREG on Sepolia contract: 0x30604Aa6f763fbde6aDCffbd8960af3031037331" -ForegroundColor Cyan
+Write-Host "3. Monitor your node logs: docker logs -f creg-validator-$NodeId`n" -ForegroundColor Cyan

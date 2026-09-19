@@ -1,0 +1,104 @@
+# ==============================================================================
+# Unified CREG + Sepolia RPC Caddy Gateway
+# Runs on a single cost-optimized GCP VM (e2-standard-2, ~$59/month)
+# Serves both CREG native blockchain JSON-RPC and upstream Sepolia L1 RPC.
+# ==============================================================================
+
+{
+	email {$CREG_ACME_EMAIL}
+}
+
+import waitlist.caddy
+import hub.caddy
+
+# ── Unified API & RPC Gateway ──────────────────────────────────────────────────
+# Serves both api.testnet.cregnet.dev and rpc.testnet.cregnet.dev
+{$CREG_PUBLIC_API_HOST}, rpc.testnet.cregnet.dev {
+	encode zstd gzip
+
+	# 1. Sepolia L1 Proxy (POST /sepolia) -> Upstream QuickNode/Alchemy/Publicnode
+	handle_path /sepolia* {
+		@jsonrpc_post method POST
+		handle @jsonrpc_post {
+			reverse_proxy {$CREG_SEPOLIA_PUBLIC_RPC_UPSTREAM:https://ethereum-sepolia-rpc.publicnode.com} {
+				header_up Host {$CREG_SEPOLIA_PUBLIC_RPC_UPSTREAM_HOST:ethereum-sepolia-rpc.publicnode.com}
+				flush_interval -1
+			}
+		}
+		header Content-Type application/json
+		respond `{"service":"CREG Unified L1 RPC Gateway","network":"sepolia","chainId":"0xaa36a7","numericChainId":11155111,"usage":"POST JSON-RPC 2.0 eth_* methods here"}` 200
+	}
+
+	# 2. CREG Blockchain JSON-RPC (POST /rpc or POST /jsonrpc) -> Dedicated Observer VM
+	@creg_rpc_path path /rpc* /jsonrpc*
+	handle @creg_rpc_path {
+		@jsonrpc_post method POST
+		handle @jsonrpc_post {
+			reverse_proxy 10.128.0.41:28182 creg-node:8080 {
+				lb_policy first
+				fail_duration 5s
+				max_fails 2
+				flush_interval -1
+			}
+		}
+		header Content-Type application/json
+		respond `{"service":"CREG Blockchain JSON-RPC","network":"creg-testnet","methods":["creg_chainId","creg_blockNumber","creg_getBlockByNumber","creg_health"],"sepoliaL1Gateway":"https://{$CREG_PUBLIC_API_HOST}/sepolia"}` 200
+	}
+
+	# 3. CREG Node REST API (/v1/*) & Health -> Dedicated Observer VM
+	handle /v1/* {
+		reverse_proxy 10.128.0.41:28182 creg-node:8080 {
+			lb_policy first
+			fail_duration 5s
+			max_fails 2
+			flush_interval -1
+		}
+	}
+	handle /health {
+		rewrite * /v1/health
+		reverse_proxy 10.128.0.41:28182 creg-node:8080 {
+			lb_policy first
+			fail_duration 5s
+			max_fails 2
+			flush_interval -1
+		}
+	}
+
+	# Default API root response
+	handle {
+		header Content-Type application/json
+		respond `{"name":"Chain Registry Unified API Gateway","version":"1.0.0","endpoints":{"creg_rpc":"/rpc","sepolia_l1_rpc":"/sepolia","rest_api":"/v1","health":"/v1/health"}}` 200
+	}
+}
+
+# ── Explorer Frontend & Backward-Compatible Wallet RPC ────────────────────────
+{$CREG_PUBLIC_EXPLORER_HOST} {
+	encode zstd gzip
+	import sepolia-public-rpc.caddy
+	handle {
+		reverse_proxy web-explorer:80 {
+			flush_interval -1
+		}
+	}
+}
+
+# ── Spec Server ───────────────────────────────────────────────────────────────
+{$CREG_PUBLIC_SPEC_HOST} {
+	reverse_proxy spec-server:80
+}
+
+# ── IPFS Gateway ──────────────────────────────────────────────────────────────
+{$CREG_PUBLIC_IPFS_HOST} {
+	reverse_proxy ipfs:5001
+}
+
+# ── Faucet Service ────────────────────────────────────────────────────────────
+{$CREG_PUBLIC_FAUCET_HOST} {
+	import sepolia-public-rpc.caddy
+	handle {
+		reverse_proxy faucet:8082 {
+			flush_interval -1
+		}
+	}
+}
+

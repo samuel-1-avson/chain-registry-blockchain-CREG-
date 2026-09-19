@@ -66,21 +66,38 @@ Budget context: [GCP-BUDGET-ARCHITECTURE.md](./GCP-BUDGET-ARCHITECTURE.md).
 
 **Cost:** ~$122/mo (VM + disk + light egress)
 
-### Phase 1 — Dedicated Sepolia RPC (recommended next)
+### Phase 1 — Dedicated Sepolia RPC (QuickNode / Alchemy / Infura / Internal Geth)
 
 Validators and `validator_set_sync` should not share a rate-limited public RPC.
 
-1. Create Infura or Alchemy Sepolia project key.
-2. Set in `chain-registry/testnet/sepolia-fleet.env`:
+> [!NOTE]
+> **Google Cloud Blockchain RPC Status:** Google Cloud officially placed **Blockchain Node Engine** and **Blockchain RPC** into *limited support* on June 15, 2026, and scheduled full shutdown for December 15, 2026 (disabling new endpoint creation and removing `/blockchain-rpc` from the console). Google Cloud officially recommends migrating to **QuickNode** (Google Cloud Web3 partner).
+
+Recommended options for dedicated Sepolia RPC:
+
+1. **QuickNode (Google Cloud Recommended Partner)**:
+   - Create a free Sepolia endpoint at [quicknode.com](https://www.quicknode.com)
+   - Format: `https://[instance].ethereum-sepolia.quiknode.pro/[api_key]/`
+2. **Alchemy / Infura**:
+   - Create a free Sepolia app on [alchemy.com](https://www.alchemy.com) or [infura.io](https://www.infura.io)
+   - Format: `https://eth-sepolia.g.alchemy.com/v2/YOUR_KEY` or `https://sepolia.infura.io/v3/YOUR_KEY`
+3. **Internal Geth on GCP Compute Engine (Self-hosted Option)**:
+   - See [GCP-SEPOLIA-GETH-INTERNAL.md](./GCP-SEPOLIA-GETH-INTERNAL.md)
+   - No external API rate limits or third-party dependencies.
+4. **Current Public Testnet Fallback**:
+   - `https://ethereum-sepolia-rpc.publicnode.com` (free, already configured and working for deployment)
+
+Configure your selected endpoint in `chain-registry/testnet/.env.sepolia` and `chain-registry/testnet/sepolia-fleet.env`:
 
 ```env
-SEPOLIA_RPC_URL=https://sepolia.infura.io/v3/YOUR_KEY
-CREG_ETH_RPC=https://sepolia.infura.io/v3/YOUR_KEY
+SEPOLIA_RPC_URL=https://...
+CREG_ETH_RPC=https://...
 ```
 
-3. Re-deploy: `.\testnet\gcp\deploy-stack.ps1`
-
-**Cost:** +$0–50/mo depending on provider tier (often $0 on free tier for testnet).
+Verify the endpoint before deploying:
+```powershell
+.\testnet\verify-sepolia-rpc.ps1
+```
 
 #### Phase 1b — Option A: self-hosted Geth (internal only)
 
@@ -170,12 +187,13 @@ gcloud compute backend-services create creg-api-backend --global \
 
 | GCP service | CREG REST/JSON-RPC | CREG gRPC | Sepolia eth_* |
 |-------------|-------------------|-----------|---------------|
+| **Blockchain RPC** | N/A (EVM only) | N/A | **Best fit** (managed EIP-1474, native to GCP) |
 | **Compute Engine + Caddy** | Best fit today | Internal only | N/A |
 | **External HTTPS LB** | Good for HA | No (use TCP LB) | N/A |
 | **Cloud Run** | Poor (stateless) | Poor | N/A |
 | **GKE** | Possible, high ops cost | Possible | Possible sidecar |
 | **API Gateway** | REST subset only | No | No |
-| **Blockchain Node Engine** | N/A | N/A | Check Sepolia support / pricing |
+| **Blockchain Node Engine** | N/A | N/A | Dedicated node (higher ops/cost) |
 
 ---
 

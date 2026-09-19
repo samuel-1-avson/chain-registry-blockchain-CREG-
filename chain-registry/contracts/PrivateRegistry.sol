@@ -393,6 +393,36 @@ contract PrivateRegistry {
     ///      validator's share or substitute an arbitrary value without having
     ///      the corresponding private key. The recovered signer must equal
     ///      msg.sender; any mismatch reverts with InvalidShareSignature.
+    function _verifyShareSignature(
+        bytes32 orgId,
+        bytes32 packageKey,
+        bytes calldata share
+    ) internal view {
+        bytes32 shareValue;
+        bytes32 sigR;
+        bytes32 sigS;
+        uint8   sigV;
+        assembly {
+            shareValue := calldataload(share.offset)
+            sigR       := calldataload(add(share.offset, 32))
+            sigS       := calldataload(add(share.offset, 64))
+            sigV       := byte(0, calldataload(add(share.offset, 96)))
+        }
+        if (sigV < 27) sigV += 27;
+
+        bytes32 commitment = keccak256(
+            abi.encodePacked(orgId, packageKey, shareValue, msg.sender)
+        );
+        bytes32 ethHash = keccak256(
+            abi.encodePacked("\x19Ethereum Signed Message:\n32", commitment)
+        );
+
+        address recovered = ecrecover(ethHash, sigV, sigR, sigS);
+        if (recovered == address(0) || recovered != msg.sender) {
+            revert InvalidShareSignature(msg.sender, recovered);
+        }
+    }
+
     function submitDecryptionShare(
         bytes32 orgId,
         bytes32 packageKey,
@@ -413,37 +443,9 @@ contract PrivateRegistry {
         require(share.length >= 97, "Share too short: need 32-byte value + 65-byte sig");
 
         // Verify the submitter has a registered public key in the org.
-        bytes memory validatorPubKey = organizations[orgId].validatorPublicKeys[msg.sender];
-        require(validatorPubKey.length > 0, "Validator has no registered public key");
+        require(organizations[orgId].validatorPublicKeys[msg.sender].length > 0, "Validator has no registered public key");
 
-        // Parse share components.
-        bytes32 shareValue;
-        bytes32 sigR;
-        bytes32 sigS;
-        uint8   sigV;
-        assembly {
-            // share is calldata; share.offset points to the raw bytes
-            shareValue := calldataload(share.offset)
-            sigR       := calldataload(add(share.offset, 32))
-            sigS       := calldataload(add(share.offset, 64))
-            // v is the first byte after s (byte 96)
-            sigV := byte(0, calldataload(add(share.offset, 96)))
-        }
-        // Ethereum ecrecover expects v in {27, 28}.
-        if (sigV < 27) sigV += 27;
-
-        // Commitment: binds shareValue to this exact (orgId, packageKey, submitter) tuple.
-        bytes32 commitment = keccak256(
-            abi.encodePacked(orgId, packageKey, shareValue, msg.sender)
-        );
-        bytes32 ethHash = keccak256(
-            abi.encodePacked("\x19Ethereum Signed Message:\n32", commitment)
-        );
-
-        address recovered = ecrecover(ethHash, sigV, sigR, sigS);
-        if (recovered == address(0) || recovered != msg.sender) {
-            revert InvalidShareSignature(msg.sender, recovered);
-        }
+        _verifyShareSignature(orgId, packageKey, share);
 
         // Store the share on-chain so it can be retrieved for reconstruction.
         decryptionShares[packageKey][msg.sender] = share;
