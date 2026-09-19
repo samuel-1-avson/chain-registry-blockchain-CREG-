@@ -10,9 +10,9 @@ import { privateKeyToAccount } from 'viem/accounts'
 // ============================================
 
 const API_BASE = import.meta.env.VITE_API_BASE || ''
-const SEPOLIA_CREG_TOKEN = import.meta.env.VITE_SEPOLIA_CREG_TOKEN || null
-const SEPOLIA_STAKING_ADDR = import.meta.env.VITE_SEPOLIA_STAKING_ADDR || null
-const SEPOLIA_REGISTRY_ADDR = import.meta.env.VITE_SEPOLIA_REGISTRY_ADDR || null
+const SEPOLIA_CREG_TOKEN = import.meta.env.VITE_SEPOLIA_CREG_TOKEN || '0x167Ab975dc95b79727Ed76BD8AAb70463F6499E2'
+const SEPOLIA_STAKING_ADDR = import.meta.env.VITE_SEPOLIA_STAKING_ADDR || '0x30604Aa6f763fbde6aDCffbd8960af3031037331'
+const SEPOLIA_REGISTRY_ADDR = import.meta.env.VITE_SEPOLIA_REGISTRY_ADDR || '0xD0F465ca185a99E268be0C4FF5A135Bdf89FAF3B'
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 const NETWORK_PROFILE_ID = 'sepolia'
 const DEFAULT_VALIDATOR_REGISTRATION_MODE = 'staking-plus-identity-sync'
