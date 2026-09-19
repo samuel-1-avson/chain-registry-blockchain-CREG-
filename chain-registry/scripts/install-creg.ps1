@@ -7,13 +7,13 @@
 #   irm https://spec.testnet.cregnet.dev/install.ps1 | iex
 #
 # Options:
-#   .\scripts\install-creg.ps1 -Version v0.4.4-testnet
+#   .\scripts\install-creg.ps1 -Version v0.4.5-testnet
 #   .\scripts\install-creg.ps1 -BuildFromSource
 #   .\scripts\install-creg.ps1 -InstallDir "C:\Custom\Path"
 # ==============================================================================
 
 param(
-    [string]$Version = "v0.4.4-testnet",
+    [string]$Version = "v0.4.5-testnet",
     [switch]$BuildFromSource,
     [string]$InstallDir = "$env:USERPROFILE\.creg\bin",
     [string]$ConfigDir = "$env:USERPROFILE\.creg"
@@ -70,6 +70,7 @@ $ghUrl = "https://github.com/$githubRepo/releases/download/$Version/$asset"
 
 $zip = Join-Path $env:TEMP $asset
 $checksums = Join-Path $env:TEMP "creg-$Version-SHA256SUMS"
+$checksumUrl = $null
 
 Write-Host "Fetching CREG $Version for Windows (x86_64)..." -ForegroundColor Cyan
 
@@ -78,51 +79,51 @@ try {
     Write-Host "Connecting to CREG Testnet CDN ($specUrl)..." -ForegroundColor DarkGray
     Invoke-WebRequest -Uri $specUrl -OutFile $zip -UseBasicParsing
     $downloaded = $true
+    $checksumUrl = "$specHost/dist/SHA256SUMS"
     Write-Host "[OK] Downloaded package from CREG Testnet CDN" -ForegroundColor Green
 } catch {
     Write-Host "CDN fallback to GitHub Releases ($ghUrl)..." -ForegroundColor DarkGray
     try {
         Invoke-WebRequest -Uri $ghUrl -OutFile $zip -UseBasicParsing
         $downloaded = $true
+        $checksumUrl = "https://github.com/$githubRepo/releases/download/$Version/SHA256SUMS"
         Write-Host "[OK] Downloaded package from GitHub Releases" -ForegroundColor Green
     } catch {
         throw "Failed to download CREG Windows package from both CDN and GitHub Releases: $($_.Exception.Message)"
     }
 }
 
-# Checksums verification
-$checksumUrl = "$specHost/dist/SHA256SUMS"
+# Checksums verification: require the manifest from the same source as the
+# archive so a newer GitHub fallback cannot be checked against a stale CDN file.
 try {
     Invoke-WebRequest -Uri $checksumUrl -OutFile $checksums -UseBasicParsing
 } catch {
-    try {
-        Invoke-WebRequest -Uri "https://github.com/$githubRepo/releases/download/$Version/SHA256SUMS" -OutFile $checksums -UseBasicParsing
-    } catch {
-        $checksums = $null
-    }
+    Remove-Item $zip -Force -ErrorAction SilentlyContinue
+    throw "Failed to download SHA256SUMS for ${asset}: $($_.Exception.Message)"
 }
 
-if ($checksums -and (Test-Path $checksums)) {
-    $checksumPattern = "^\s*([0-9a-fA-F]{64})\s+\*?" + [regex]::Escape($asset) + "\s*$"
-    $checksumLine = (Get-Content $checksums -Raw -ErrorAction SilentlyContinue) -split "`r?`n" |
-        Where-Object { $_ -match $checksumPattern } |
-        Select-Object -First 1
-    if ($checksumLine) {
-        $null = $checksumLine -match $checksumPattern
-        $expectedHash = $matches[1].ToLowerInvariant()
-        $actualHash = (Get-FileHash -Path $zip -Algorithm SHA256).Hash.ToLowerInvariant()
-        if ($actualHash -ne $expectedHash) {
-            Remove-Item $zip -Force -ErrorAction SilentlyContinue
-            throw "Security Error: Checksum mismatch for $asset (expected $expectedHash, got $actualHash)"
-        }
-        Write-Host "[OK] SHA-256 integrity verified: $actualHash" -ForegroundColor Green
-    }
+$checksumPattern = "^\s*([0-9a-fA-F]{64})\s+\*?" + [regex]::Escape($asset) + "\s*$"
+$checksumLine = (Get-Content $checksums -Raw -ErrorAction SilentlyContinue) -split "`r?`n" |
+    Where-Object { $_ -match $checksumPattern } |
+    Select-Object -First 1
+if (-not $checksumLine) {
+    Remove-Item $zip -Force -ErrorAction SilentlyContinue
+    throw "Security Error: SHA256SUMS does not contain an entry for $asset"
 }
+
+$null = $checksumLine -match $checksumPattern
+$expectedHash = $matches[1].ToLowerInvariant()
+$actualHash = (Get-FileHash -Path $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($actualHash -ne $expectedHash) {
+    Remove-Item $zip -Force -ErrorAction SilentlyContinue
+    throw "Security Error: Checksum mismatch for $asset (expected $expectedHash, got $actualHash)"
+}
+Write-Host "[OK] SHA-256 integrity verified: $actualHash" -ForegroundColor Green
 
 Write-Host "Extracting binaries to $InstallDir ..." -ForegroundColor Cyan
 Expand-Archive -Path $zip -DestinationPath $InstallDir -Force
 Remove-Item $zip -Force -ErrorAction SilentlyContinue
-if ($checksums -and (Test-Path $checksums)) {
+if (Test-Path $checksums) {
     Remove-Item $checksums -Force -ErrorAction SilentlyContinue
 }
 

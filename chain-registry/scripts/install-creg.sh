@@ -8,7 +8,7 @@
 #   curl -fsSL https://spec.testnet.cregnet.dev/install.sh | bash
 #
 # Options:
-#   --version <tag>      Install specific version (e.g., v0.4.4-testnet)
+#   --version <tag>      Install specific version (e.g., v0.4.5-testnet)
 #   --install-dir <dir>  Target directory (default: $HOME/.creg/bin)
 #   --build              Compile from local source using Cargo (requires Rust)
 #   --docker             Install Docker wrapper shim for creg
@@ -17,7 +17,7 @@
 
 set -euo pipefail
 
-DEFAULT_VERSION="v0.4.4-testnet"
+DEFAULT_VERSION="v0.4.5-testnet"
 SPEC_HOST="https://spec.testnet.cregnet.dev"
 GITHUB_REPO="${CREG_GITHUB_REPO:-samuel-1-avson/chain-registry-blockchain-CREG-}"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.creg/bin}"
@@ -37,7 +37,7 @@ while [[ $# -gt 0 ]]; do
     -h|--help)
       echo "CREG Installer Usage:"
       echo "  curl -fsSL https://spec.testnet.cregnet.dev/install.sh | bash"
-      echo "  curl -fsSL https://spec.testnet.cregnet.dev/install.sh | bash -s -- --version v0.4.4-testnet"
+      echo "  curl -fsSL https://spec.testnet.cregnet.dev/install.sh | bash -s -- --version v0.4.5-testnet"
       echo "  curl -fsSL https://spec.testnet.cregnet.dev/install.sh | bash -s -- --docker"
       echo "  ./scripts/install-creg.sh --build"
       exit 0
@@ -142,15 +142,15 @@ GH_URL="https://github.com/${GITHUB_REPO}/releases/download/${VERSION}/${TARBALL
 echo -e "${CYAN}Fetching CREG ${VERSION} for ${OS}/${ARCH}...${NC}"
 
 DOWNLOAD_SUCCESS=0
+CHECKSUM_URL=""
 if curl -fsSL "$SPEC_URL" -o "$TMP/$TARBALL" 2>/dev/null; then
   echo -e "${GREEN}✓ Downloaded package from CREG Testnet CDN${NC}"
   DOWNLOAD_SUCCESS=1
-  # Download checksums
-  curl -fsSL "${SPEC_HOST}/dist/SHA256SUMS" -o "$TMP/SHA256SUMS" 2>/dev/null || true
+  CHECKSUM_URL="${SPEC_HOST}/dist/SHA256SUMS"
 elif curl -fsSL "$GH_URL" -o "$TMP/$TARBALL" 2>/dev/null; then
   echo -e "${GREEN}✓ Downloaded package from GitHub Releases${NC}"
   DOWNLOAD_SUCCESS=1
-  curl -fsSL "https://github.com/${GITHUB_REPO}/releases/download/${VERSION}/SHA256SUMS" -o "$TMP/SHA256SUMS" 2>/dev/null || true
+  CHECKSUM_URL="https://github.com/${GITHUB_REPO}/releases/download/${VERSION}/SHA256SUMS"
 fi
 
 if [[ "$DOWNLOAD_SUCCESS" -ne 1 ]]; then
@@ -164,29 +164,35 @@ if [[ "$DOWNLOAD_SUCCESS" -ne 1 ]]; then
   fi
 fi
 
-# Verify Checksum if SHA256SUMS is available
-if [[ -f "$TMP/SHA256SUMS" ]]; then
-  EXPECTED="$(awk -v asset="$TARBALL" '$2 == asset || $2 == "*" asset { print $1; exit }' "$TMP/SHA256SUMS" || true)"
-  if [[ -n "$EXPECTED" && "$EXPECTED" =~ ^[[:xdigit:]]{64}$ ]]; then
-    if command -v sha256sum >/dev/null 2>&1; then
-      ACTUAL="$(sha256sum "$TMP/$TARBALL" | awk '{print $1}')"
-    elif command -v shasum >/dev/null 2>&1; then
-      ACTUAL="$(shasum -a 256 "$TMP/$TARBALL" | awk '{print $1}')"
-    else
-      ACTUAL=""
-    fi
-
-    if [[ -n "$ACTUAL" ]]; then
-      if [[ "${ACTUAL,,}" != "${EXPECTED,,}" ]]; then
-        echo -e "${RED}Security Error: Checksum mismatch for $TARBALL!${NC}" >&2
-        echo -e "Expected: $EXPECTED" >&2
-        echo -e "Actual:   $ACTUAL" >&2
-        exit 1
-      fi
-      echo -e "${GREEN}✓ SHA-256 integrity verified: ${ACTUAL}${NC}"
-    fi
-  fi
+# Verify the checksum manifest from the same source as the archive. A GitHub
+# fallback must not be checked against a stale CDN manifest.
+if ! curl -fsSL "$CHECKSUM_URL" -o "$TMP/SHA256SUMS"; then
+  echo -e "${RED}Security Error: failed to download SHA256SUMS for $TARBALL.${NC}" >&2
+  exit 1
 fi
+
+EXPECTED="$(awk -v asset="$TARBALL" '$2 == asset || $2 == "*" asset { print $1; exit }' "$TMP/SHA256SUMS" || true)"
+if [[ -z "$EXPECTED" || ! "$EXPECTED" =~ ^[[:xdigit:]]{64}$ ]]; then
+  echo -e "${RED}Security Error: SHA256SUMS has no valid entry for $TARBALL.${NC}" >&2
+  exit 1
+fi
+
+if command -v sha256sum >/dev/null 2>&1; then
+  ACTUAL="$(sha256sum "$TMP/$TARBALL" | awk '{print $1}')"
+elif command -v shasum >/dev/null 2>&1; then
+  ACTUAL="$(shasum -a 256 "$TMP/$TARBALL" | awk '{print $1}')"
+else
+  echo -e "${RED}Security Error: SHA-256 utility is required to install a release binary.${NC}" >&2
+  exit 1
+fi
+
+if [[ "${ACTUAL,,}" != "${EXPECTED,,}" ]]; then
+  echo -e "${RED}Security Error: Checksum mismatch for $TARBALL!${NC}" >&2
+  echo -e "Expected: $EXPECTED" >&2
+  echo -e "Actual:   $ACTUAL" >&2
+  exit 1
+fi
+echo -e "${GREEN}✓ SHA-256 integrity verified: ${ACTUAL}${NC}"
 
 # Extract binaries
 tar -xzf "$TMP/$TARBALL" -C "$INSTALL_DIR"
