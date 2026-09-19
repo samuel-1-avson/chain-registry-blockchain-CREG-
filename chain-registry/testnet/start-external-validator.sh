@@ -24,14 +24,14 @@ if ! command -v docker >/dev/null 2>&1; then
     exit 1
 fi
 
-NODE_ID="${NODE_ID:-ext-val-$(hostname -s 2>/dev/null || echo $RANDOM)}"
+NODE_ID="${NODE_ID:-ext-val-primary}"
 ETH_RPC="${ETH_RPC:-https://ethereum-sepolia-rpc.publicnode.com}"
 HTTP_PORT="${HTTP_PORT:-8080}"
 P2P_PORT="${P2P_PORT:-9000}"
 CUSTOM_KEY="${CUSTOM_KEY:-}"
 
 # Isolated data dir per node ID to allow running multiple nodes on one host
-if [ "${NODE_ID}" = "ext-val" ]; then
+if [ "${NODE_ID}" = "ext-val-primary" ]; then
     DATA_DIR="${HOME}/.creg-validator"
 else
     DATA_DIR="${HOME}/.creg-validator-${NODE_ID}"

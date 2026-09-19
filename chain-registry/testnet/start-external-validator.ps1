@@ -27,7 +27,7 @@ if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
 
 # Resolve Node ID and isolated Data Directory (allows running multiple nodes on one host)
 if (-not $NodeId) {
-    $NodeId = "ext-val-" + (Get-Random -Minimum 1000 -Maximum 9999)
+    $NodeId = "ext-val-primary"
     $dataDir = Join-Path $env:USERPROFILE ".creg-validator"
 } else {
     $dataDir = Join-Path $env:USERPROFILE ".creg-validator-$NodeId"
