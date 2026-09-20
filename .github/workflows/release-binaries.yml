@@ -236,7 +236,7 @@ jobs:
               "reproducibility_evidence": "REPRODUCIBILITY-SHA256SUMS.txt",
               "checksum_manifest": "SHA256SUMS",
               "checksum_signature": "SHA256SUMS.sig",
-              "provenance": "GitHub Artifact Attestations (actions/attest-build-provenance)",
+              "provenance": "Sigstore keyless checksum signature bundle (SHA256SUMS.bundle); GitHub Artifact Attestation for public repositories",
           }
           (root / "CREG-RELEASE-MANIFEST.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
           PY
@@ -250,6 +250,10 @@ jobs:
             release/SHA256SUMS
 
       - name: Publish provenance attestations
+        # GitHub does not support artifact attestations for user-owned private
+        # repositories. The Sigstore checksum signature above remains required
+        # for every release, regardless of repository visibility.
+        if: github.event.repository.private == false
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: |
@@ -265,7 +269,7 @@ jobs:
             gh release create "$RELEASE_VERSION" \
               --title "CREG $RELEASE_VERSION" \
               --generate-notes \
-              --notes "Signed CREG CLI/node binaries for the controlled testnet release. Verify SHA256SUMS.sig and the GitHub Artifact Attestation before installation."
+              --notes "Signed CREG CLI/node binaries for the controlled testnet release. Verify SHA256SUMS using SHA256SUMS.sig and SHA256SUMS.bundle before installation."
           fi
           gh release upload "$RELEASE_VERSION" release/* --clobber
 
