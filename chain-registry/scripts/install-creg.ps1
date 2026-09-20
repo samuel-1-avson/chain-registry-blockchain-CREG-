@@ -7,19 +7,52 @@
 #   irm https://spec.testnet.cregnet.dev/install.ps1 | iex
 #
 # Options:
-#   .\scripts\install-creg.ps1 -Version v0.4.7-testnet
+#   .\scripts\install-creg.ps1 -Version v0.4.8-testnet
 #   .\scripts\install-creg.ps1 -BuildFromSource
 #   .\scripts\install-creg.ps1 -InstallDir "C:\Custom\Path"
 # ==============================================================================
 
 param(
-    [string]$Version = "v0.4.7-testnet",
+    [string]$Version = "v0.4.8-testnet",
     [switch]$BuildFromSource,
     [string]$InstallDir = "$env:USERPROFILE\.creg\bin",
     [string]$ConfigDir = "$env:USERPROFILE\.creg"
 )
 
 $ErrorActionPreference = "Stop"
+
+function Invoke-CregDownload {
+    param(
+        [Parameter(Mandatory = $true)][string]$Uri,
+        [Parameter(Mandatory = $true)][string]$OutFile,
+        [switch]$GitHubRelease
+    )
+
+    if (-not $GitHubRelease -or -not $env:CREG_GITHUB_TOKEN) {
+        Invoke-WebRequest -Uri $Uri -OutFile $OutFile -UseBasicParsing
+        return
+    }
+
+    $assetName = [System.IO.Path]::GetFileName(([Uri]$Uri).AbsolutePath)
+    $apiHeaders = @{
+        Authorization = "Bearer $env:CREG_GITHUB_TOKEN"
+        Accept        = "application/vnd.github+json"
+        'User-Agent'  = "creg-installer"
+    }
+    $release = Invoke-RestMethod `
+        -Uri "https://api.github.com/repos/$githubRepo/releases/tags/$Version" `
+        -Headers $apiHeaders
+    $releaseAsset = $release.assets | Where-Object { $_.name -eq $assetName } | Select-Object -First 1
+    if (-not $releaseAsset) {
+        throw "GitHub release $Version does not contain asset $assetName"
+    }
+
+    Invoke-WebRequest -Uri $releaseAsset.url -OutFile $OutFile -UseBasicParsing -Headers @{
+        Authorization = "Bearer $env:CREG_GITHUB_TOKEN"
+        Accept        = "application/octet-stream"
+        'User-Agent'  = "creg-installer"
+    }
+}
 
 Write-Host "============================================================" -ForegroundColor Cyan
 Write-Host "   Chain Registry (CREG) -- Windows Remote Installer        " -ForegroundColor Cyan
@@ -75,17 +108,19 @@ $checksumUrl = $null
 Write-Host "Fetching CREG $Version for Windows (x86_64)..." -ForegroundColor Cyan
 
 $downloaded = $false
+$downloadedFromGitHub = $false
 try {
     Write-Host "Connecting to CREG Testnet CDN ($specUrl)..." -ForegroundColor DarkGray
-    Invoke-WebRequest -Uri $specUrl -OutFile $zip -UseBasicParsing
+    Invoke-CregDownload -Uri $specUrl -OutFile $zip
     $downloaded = $true
     $checksumUrl = "$specHost/dist/SHA256SUMS"
     Write-Host "[OK] Downloaded package from CREG Testnet CDN" -ForegroundColor Green
 } catch {
     Write-Host "CDN fallback to GitHub Releases ($ghUrl)..." -ForegroundColor DarkGray
     try {
-        Invoke-WebRequest -Uri $ghUrl -OutFile $zip -UseBasicParsing
+        Invoke-CregDownload -Uri $ghUrl -OutFile $zip -GitHubRelease
         $downloaded = $true
+        $downloadedFromGitHub = $true
         $checksumUrl = "https://github.com/$githubRepo/releases/download/$Version/SHA256SUMS"
         Write-Host "[OK] Downloaded package from GitHub Releases" -ForegroundColor Green
     } catch {
@@ -96,7 +131,7 @@ try {
 # Checksums verification: require the manifest from the same source as the
 # archive so a newer GitHub fallback cannot be checked against a stale CDN file.
 try {
-    Invoke-WebRequest -Uri $checksumUrl -OutFile $checksums -UseBasicParsing
+    Invoke-CregDownload -Uri $checksumUrl -OutFile $checksums -GitHubRelease:$downloadedFromGitHub
 } catch {
     Remove-Item $zip -Force -ErrorAction SilentlyContinue
     throw "Failed to download SHA256SUMS for ${asset}: $($_.Exception.Message)"

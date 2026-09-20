@@ -291,6 +291,7 @@ jobs:
         shell: bash
         env:
           CREG_GITHUB_REPO: ${{ github.repository }}
+          CREG_GITHUB_TOKEN: ${{ github.token }}
           INSTALL_DIR: ${{ runner.temp }}/creg-bin
         run: |
           set -euo pipefail
@@ -307,6 +308,7 @@ jobs:
         shell: pwsh
         env:
           CREG_GITHUB_REPO: ${{ github.repository }}
+          CREG_GITHUB_TOKEN: ${{ github.token }}
         run: |
           $installDir = Join-Path $env:RUNNER_TEMP "creg-bin"
           .\scripts\install-creg.ps1 -Version $env:RELEASE_VERSION -InstallDir $installDir

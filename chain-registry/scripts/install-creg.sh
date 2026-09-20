@@ -8,7 +8,7 @@
 #   curl -fsSL https://spec.testnet.cregnet.dev/install.sh | bash
 #
 # Options:
-#   --version <tag>      Install specific version (e.g., v0.4.7-testnet)
+#   --version <tag>      Install specific version (e.g., v0.4.8-testnet)
 #   --install-dir <dir>  Target directory (default: $HOME/.creg/bin)
 #   --build              Compile from local source using Cargo (requires Rust)
 #   --docker             Install Docker wrapper shim for creg
@@ -17,15 +17,60 @@
 
 set -euo pipefail
 
-DEFAULT_VERSION="v0.4.7-testnet"
+DEFAULT_VERSION="v0.4.8-testnet"
 SPEC_HOST="https://spec.testnet.cregnet.dev"
 GITHUB_REPO="${CREG_GITHUB_REPO:-samuel-1-avson/chain-registry-blockchain-CREG-}"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.creg/bin}"
 CONFIG_DIR="${CONFIG_DIR:-$HOME/.creg}"
+INSTALLER_SOURCE="${BASH_SOURCE[0]:-$0}"
 VERSION="${DEFAULT_VERSION}"
 BUILD=0
 USE_DOCKER=0
 MODIFY_PATH=1
+
+download_github_release() {
+  local url="$1"
+  local destination="$2"
+  if [[ -n "${CREG_GITHUB_TOKEN:-}" ]]; then
+    local python_bin
+    if ! command -v python3 >/dev/null 2>&1; then
+      if ! command -v python >/dev/null 2>&1; then
+        echo "Private GitHub release downloads require Python to resolve the release asset." >&2
+        return 1
+      fi
+      python_bin="python"
+    else
+      python_bin="python3"
+    fi
+    local asset_name="${url##*/}"
+    local release_api_url="https://api.github.com/repos/${GITHUB_REPO}/releases/tags/${VERSION}"
+    local asset_api_url
+
+    asset_api_url="$(curl -fsSL \
+      -H "Authorization: Bearer ${CREG_GITHUB_TOKEN}" \
+      -H "Accept: application/vnd.github+json" \
+      "$release_api_url" | "$python_bin" -c '
+import json
+import sys
+
+asset_name = sys.argv[1]
+for asset in json.load(sys.stdin).get("assets", []):
+    if asset.get("name") == asset_name:
+        print(asset["url"])
+        break
+else:
+    raise SystemExit(f"release asset not found: {asset_name}")
+' "$asset_name")" || return 1
+
+    [[ -n "$asset_api_url" ]] || return 1
+    curl -fsSL \
+      -H "Authorization: Bearer ${CREG_GITHUB_TOKEN}" \
+      -H "Accept: application/octet-stream" \
+      "$asset_api_url" -o "$destination"
+  else
+    curl -fsSL "$url" -o "$destination"
+  fi
+}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -37,7 +82,7 @@ while [[ $# -gt 0 ]]; do
     -h|--help)
       echo "CREG Installer Usage:"
       echo "  curl -fsSL https://spec.testnet.cregnet.dev/install.sh | bash"
-      echo "  curl -fsSL https://spec.testnet.cregnet.dev/install.sh | bash -s -- --version v0.4.7-testnet"
+      echo "  curl -fsSL https://spec.testnet.cregnet.dev/install.sh | bash -s -- --version v0.4.8-testnet"
       echo "  curl -fsSL https://spec.testnet.cregnet.dev/install.sh | bash -s -- --docker"
       echo "  ./scripts/install-creg.sh --build"
       exit 0
@@ -124,7 +169,7 @@ case "$OS:$ARCH" in
     echo -e "${YELLOW}Notice: Direct binary not precompiled for $OS/$ARCH.${NC}"
     if command -v docker >/dev/null 2>&1; then
       echo -e "${GREEN}Detected Docker. Installing Docker CLI wrapper instead...${NC}"
-      exec "$0" --docker
+      exec bash "$INSTALLER_SOURCE" --docker --version "$VERSION" --install-dir "$INSTALL_DIR" --no-modify-path
     else
       echo -e "${RED}Please install Docker or install Rust to build from source via 'cargo build'.${NC}"
       exit 1
@@ -143,21 +188,23 @@ echo -e "${CYAN}Fetching CREG ${VERSION} for ${OS}/${ARCH}...${NC}"
 
 DOWNLOAD_SUCCESS=0
 CHECKSUM_URL=""
+CHECKSUM_FROM_GITHUB=0
 if curl -fsSL "$SPEC_URL" -o "$TMP/$TARBALL" 2>/dev/null; then
   echo -e "${GREEN}✓ Downloaded package from CREG Testnet CDN${NC}"
   DOWNLOAD_SUCCESS=1
   CHECKSUM_URL="${SPEC_HOST}/dist/SHA256SUMS"
-elif curl -fsSL "$GH_URL" -o "$TMP/$TARBALL" 2>/dev/null; then
+elif download_github_release "$GH_URL" "$TMP/$TARBALL" 2>/dev/null; then
   echo -e "${GREEN}✓ Downloaded package from GitHub Releases${NC}"
   DOWNLOAD_SUCCESS=1
   CHECKSUM_URL="https://github.com/${GITHUB_REPO}/releases/download/${VERSION}/SHA256SUMS"
+  CHECKSUM_FROM_GITHUB=1
 fi
 
 if [[ "$DOWNLOAD_SUCCESS" -ne 1 ]]; then
   echo -e "${YELLOW}Direct binary download not available for ${TARBALL}.${NC}"
   if command -v docker >/dev/null 2>&1; then
     echo -e "${CYAN}Falling back to Docker CLI wrapper installation...${NC}"
-    exec "$0" --docker
+    exec bash "$INSTALLER_SOURCE" --docker --version "$VERSION" --install-dir "$INSTALL_DIR" --no-modify-path
   else
     echo -e "${RED}Failed to download ${TARBALL}. Check network connection or specify valid --version.${NC}"
     exit 1
@@ -166,7 +213,12 @@ fi
 
 # Verify the checksum manifest from the same source as the archive. A GitHub
 # fallback must not be checked against a stale CDN manifest.
-if ! curl -fsSL "$CHECKSUM_URL" -o "$TMP/SHA256SUMS"; then
+if [[ "$CHECKSUM_FROM_GITHUB" -eq 1 ]]; then
+  if ! download_github_release "$CHECKSUM_URL" "$TMP/SHA256SUMS"; then
+    echo -e "${RED}Security Error: failed to download SHA256SUMS for $TARBALL.${NC}" >&2
+    exit 1
+  fi
+elif ! curl -fsSL "$CHECKSUM_URL" -o "$TMP/SHA256SUMS"; then
   echo -e "${RED}Security Error: failed to download SHA256SUMS for $TARBALL.${NC}" >&2
   exit 1
 fi

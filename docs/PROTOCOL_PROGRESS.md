@@ -2,7 +2,7 @@
 
 **As of:** 2026-09-20
 **HEAD:** `9173c37` (merge; observer framing, signed-spec Registry, truthful Arena docs).
-**Public binary pin:** `v0.4.7-testnet` provides Windows, Linux, and macOS archives through the GitHub release. SEC-401 freeze candidate can stay `v0.4.3-testnet` if a vendor already scoped that tag.
+**Public binary pin:** `v0.4.8-testnet` provides Windows, Linux, and macOS archives through the GitHub release. SEC-401 freeze candidate can stay `v0.4.3-testnet` if a vendor already scoped that tag.
 **Canonical repo:** [samuel-1-avson/chain-registry-blockchain-CREG-](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-)
 
 This page is the **session briefing** for protocol work: what shipped, what improved, what is left, and how ready CREG is for testnet. Historical fleet facts: [TESTNET_STATUS.md](./archive/TESTNET_STATUS.md) (2026-08-25 snapshot). Archived tracks: [NEXT_WORK.md](./archive/NEXT_WORK.md), [WHAT_TO_DO_NEXT.md](./archive/WHAT_TO_DO_NEXT.md).
