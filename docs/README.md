@@ -12,11 +12,11 @@ These documents explain how the system functions conceptually, architecturally, 
 |:---|:---|:---|
 | **[USER_AND_SYSTEM_WORKFLOW_GUIDE.md](./USER_AND_SYSTEM_WORKFLOW_GUIDE.md)** | **Primary Workflow Guide:** Technical & non-technical walkthroughs for running a validator node and publishing packages. | Developers, Operators, Stakeholders |
 | **[REMOTE_INSTALLATION_GUIDE.md](./REMOTE_INSTALLATION_GUIDE.md)** | **Universal Remote Installation:** 1-line curl/powershell scripts, precompiled binaries, and Docker shims for external machines. | All External Users & Operators |
-| **[DEEP_SYSTEM_ANALYSIS_AND_PROGRESS_REPORT.md](./DEEP_SYSTEM_ANALYSIS_AND_PROGRESS_REPORT.md)** | **System Audit & Scorecard (Rating: 9.7/10):** Full architectural review, pros/cons, rating matrix, and subsystem deep dives. | Architects, Security Auditors |
+| **[DEEP_SYSTEM_ANALYSIS_AND_PROGRESS_REPORT.md](./archive/DEEP_SYSTEM_ANALYSIS_AND_PROGRESS_REPORT.md)** (archived 2026-09-19) | **System Audit & Scorecard (Rating: 9.7/10):** Full architectural review, pros/cons, rating matrix, and subsystem deep dives. | Architects, Security Auditors |
 | **[WHITEPAPER.md](./WHITEPAPER.md)** | **Foundational Whitepaper:** Economic model, dual-consensus thesis, and cryptographic supply-chain security proofs. | Researchers, Engineers, DAO Members |
 | **[CREG_SYSTEM_WORKFLOW.md](./CREG_SYSTEM_WORKFLOW.md)** | **System Specification:** Original formal specification of CREG's end-to-end verification workflows. | Core Protocol Developers |
 | **[FULL_DECENTRALIZATION_ROADMAP.md](./FULL_DECENTRALIZATION_ROADMAP.md)** | **Decentralization Roadmap:** Transition strategy from genesis bootstrap to community-governed multi-validator mesh. | Community, Operators |
-| **[DUAL_KEY_ARCHITECTURE_ENHANCEMENT_PROPOSAL.md](./DUAL_KEY_ARCHITECTURE_ENHANCEMENT_PROPOSAL.md)** | **Dual-Key UX Enhancement Proposal:** 5-pillar strategy for deterministic key derivation, `creg login`, EIP-712 binding, and Passkeys. | Core Protocol Developers, UX Architects |
+| **[DUAL_KEY_ARCHITECTURE_ENHANCEMENT_PROPOSAL.md](./archive/DUAL_KEY_ARCHITECTURE_ENHANCEMENT_PROPOSAL.md)** (archived 2026-09-19) | **Dual-Key UX Enhancement Proposal:** 5-pillar strategy for deterministic key derivation, `creg login`, EIP-712 binding, and Passkeys. | Core Protocol Developers, UX Architects |
 
 ---
 
@@ -26,9 +26,9 @@ Documents detailing the live cloud infrastructure, RPC routing, and high availab
 
 | Document | Description | Live Endpoints |
 |:---|:---|:---|
-| **[RPC_ARCHITECTURE_AND_SYSTEM_REPORT.md](./RPC_ARCHITECTURE_AND_SYSTEM_REPORT.md)** | Unified Edge Gateway (Caddy v2), JSON-RPC engine, and public TLS ingress. | `https://api.testnet.cregnet.dev` |
+| **[RPC_ARCHITECTURE_AND_SYSTEM_REPORT.md](./archive/RPC_ARCHITECTURE_AND_SYSTEM_REPORT.md)** (archived 2026-09-19) | Unified Edge Gateway (Caddy v2), JSON-RPC engine, and public TLS ingress. | `https://api.testnet.cregnet.dev` |
 | **[UNINTERRUPTIBLE_OBSERVER_NODE_SYSTEM.md](./UNINTERRUPTIBLE_OBSERVER_NODE_SYSTEM.md)** | Dedicated Observer VM in Zone A with automatic edge failover and zero-downtime routing. | Zone `us-central1-a` (`10.128.0.41:28182`) |
-| **[GCP-RPC-ARCHITECTURE.md](./GCP-RPC-ARCHITECTURE.md)** | Cloud cost optimization (~$59/mo) and single-instance ingress consolidation model. | VM `creg-testnet-vm` (`35.225.225.20`) |
+| **[GCP-RPC-ARCHITECTURE.md](./archive/GCP-RPC-ARCHITECTURE.md)** (archived 2026-09-19) | Cloud cost optimization (~$59/mo) and single-instance ingress consolidation model. | VM `creg-testnet-vm` (`35.225.225.20`) |
 | **[DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md)** | Persistent RocksDB state storage, key prefixes, and indexing schema. | `/data` volume storage |
 
 ---
@@ -84,3 +84,4 @@ Key archived documents include:
 - Past audits and outreach drafts (`CREG_COMPREHENSIVE_AUDIT_2026-07-10.md`, `SEC-401-AUDIT-SCOPE.md`).
 - Retired lab runbooks (`GCP-VALIDATOR-FLEET.md`, `HYBRID-LOCAL-VALIDATORS.md`, `WAITLIST-ONLY-HOSTING.md`).
 - Genesis Wave 1 outreach materials (`GENESIS_ALPHA_COHORT_PLAYBOOK.md`, `genesis-alpha-wave1-tracker.csv`).
+- Former live references archived 2026-09-19 (`TESTNET_STATUS.md`, `TESTNET_PHASE_SCOPE.md`, `WHAT_TO_DO_NEXT.md`, `NEXT_WORK.md`, `PUBLIC.md`, `TESTNET_SCALE_ARCHITECTURE.md`); current protocol briefing is [`PROTOCOL_PROGRESS.md`](./PROTOCOL_PROGRESS.md).

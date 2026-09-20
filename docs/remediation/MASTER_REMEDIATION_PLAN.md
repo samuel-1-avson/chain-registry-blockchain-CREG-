@@ -2,7 +2,7 @@
 
 **Status:** active — Phase 0 safety freeze
 
-**Primary baseline:** [comprehensive audit](../CREG_COMPREHENSIVE_AUDIT_2026-07-10.md)
+**Primary baseline:** [comprehensive audit](../archive/CREG_COMPREHENSIVE_AUDIT_2026-07-10.md)
 
 ## Scope and decision
 

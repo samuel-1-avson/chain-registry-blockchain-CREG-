@@ -196,4 +196,4 @@ Operator onboarding is complete when:
    control domain sign off. Repository documentation alone cannot supply this
    evidence.
 
-Maintainers record completion in [NEXT_WORK.md](./NEXT_WORK.md) (VAL-002 row) — completion by at least one non-core operator is an L2 Public Alpha gate.
+Maintainers record completion in [PROTOCOL_PROGRESS.md](./PROTOCOL_PROGRESS.md) ([NEXT_WORK.md](./archive/NEXT_WORK.md) archived 2026-09-19; VAL-002 row) — completion by at least one non-core operator is an L2 Public Alpha gate.

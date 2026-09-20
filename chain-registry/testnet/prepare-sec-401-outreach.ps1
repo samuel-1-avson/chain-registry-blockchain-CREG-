@@ -79,7 +79,7 @@ Thank you,
 
 ---
 Attachments: docs/SEC-401-AUDIT-SCOPE.md (or link above)
-After booking: record vendor + start date in docs/NEXT_WORK.md (SEC-401 row)
+After booking: record vendor + start date in docs/archive/NEXT_WORK.md (SEC-401 row; archived 2026-09-19)
 '@ -replace '\{\{REPO_URL\}\}', $repoUrl `
      -replace '\{\{SCOPE_URL\}\}', $scopeUrl `
      -replace '\{\{TAG\}\}', $Tag `

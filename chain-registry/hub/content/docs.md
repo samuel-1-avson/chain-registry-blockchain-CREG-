@@ -16,7 +16,7 @@ Operator guides and developer quickstarts for the CREG Sepolia testnet (`creg-te
 | Topic | Link |
 |-------|------|
 | Public testnet quickstart | [PUBLIC_TESTNET_QUICKSTART.md](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/blob/main/docs/PUBLIC_TESTNET_QUICKSTART.md) |
-| Phase scope & limits | [TESTNET_PHASE_SCOPE.md](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/blob/main/docs/TESTNET_PHASE_SCOPE.md) |
+| Phase scope & limits | [TESTNET_PHASE_SCOPE.md](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/blob/main/docs/archive/TESTNET_PHASE_SCOPE.md) |
 | Sepolia operator runbook | [TESTNET_SEPOLIA_RUNBOOK.md](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/blob/main/docs/TESTNET_SEPOLIA_RUNBOOK.md) |
 | Wallet & key types | [WALLET_KEY_DERIVATION.md](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/blob/main/docs/WALLET_KEY_DERIVATION.md) |
 | Readiness report | [TESTNET_READINESS_REPORT.md](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/blob/main/chain-registry/TESTNET_READINESS_REPORT.md) |

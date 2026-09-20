@@ -4,7 +4,7 @@
 > **Version:** Public alpha (`creg-testnet-1`)  
 > **Network:** Ethereum Sepolia (L1 chain id `11155111`)  
 > **Status:** Public alpha testnet — not mainnet  
-> **Last updated:** 2026-08-19 (quorum n vs M, observer-not-validator topology, retired `submitRollupBatch` wording)
+> **Last updated:** 2026-09-20 (status re-verified; links repaired after the 2026-09-19 docs archive pass; §15 catch-up entry)
 
 This document describes the complete system workflow of the Chain Registry blockchain: architecture, components, consensus, networking, storage, security, operations, and developer onboarding. It is scoped to the **core blockchain project** (`chain-registry/` workspace, contracts, circuits, testnet) and excludes the waitlist application and contribution arena.
 
@@ -41,7 +41,7 @@ independently controlled validator consensus over content-addressed packages.
 The recorded public-alpha topology currently lists four foundation observer identities
 (`validator-1`…`validator-4`) in `chain-spec.sepolia.json` with two listed
 bootnodes. The public API is reachable but served a fresh empty chain at last
-check (tip 0, no peers, 2026-09-19), so this is the specified topology, not an
+check (tip 0, no peers, 2026-09-20), so this is the specified topology, not an
 operating multi-node BFT network, and no active validators have been observed. It does not yet provide operational
 decentralization or production Byzantine fault tolerance. Two consensus layers—package votes and PBFT blocks—finalize
 records on a local CREG chain. Sepolia contracts currently provide staking and
@@ -1172,7 +1172,7 @@ creg doctor --node-url "$CREG_NODE_URL"
 
 ### 9.10 Public Fleet Layout (Reference)
 
-**Recorded public-alpha topology** (authoritative): `chain-spec.sepolia.json` lists four foundation observer identities (`validator-1`…`validator-4`) and two bootnodes. The public API is reachable but served a fresh empty chain at last check (tip 0, no peers, 2026-09-19), so this is the specified set, not an operating multi-node BFT network; validator committees (M = min(active,100)) form from L1-admitted operators.
+**Recorded public-alpha topology** (authoritative): `chain-spec.sepolia.json` lists four foundation observer identities (`validator-1`…`validator-4`) and two bootnodes. The public API is reachable but served a fresh empty chain at last check (tip 0, no peers, 2026-09-20), so this is the specified set, not an operating multi-node BFT network; validator committees (M = min(active,100)) form from L1-admitted operators.
 
 **Historical GCP lab** (not the current spec): a three-container layout was used for earlier observer + validator experiments on `creg-validator-vm`:
 
@@ -1784,7 +1784,7 @@ long-range/reorg rehearsal.
 |---------|-------|----------|
 | Sepolia stack | `docker-compose.yml` | IPFS, spec-server, node, postgres, indexer, faucet, relayer, explorer |
 | Sepolia bootstrap | `docker-compose.testnet.yml` | Local bootstrap host (Sepolia L1) |
-| Scale testnet | [TESTNET_SCALE_ARCHITECTURE.md](./TESTNET_SCALE_ARCHITECTURE.md) | 10k+ external validators; any maintainer seed fleet is legacy lab-only |
+| Scale testnet | [TESTNET_SCALE_ARCHITECTURE.md](./archive/TESTNET_SCALE_ARCHITECTURE.md) (archived design) | 10k+ external validators; any maintainer seed fleet is legacy lab-only |
 | Per-host validator | `docker-compose.validator.yml` | Multi-machine fleet |
 | GCP public services | `testnet/gcp/*.ps1`, `docker-compose.observer-pool.yml` | Edge, observer API, explorer/faucet/spec; validators are external |
 | Kubernetes | `k8s/` | Postgres, IPFS, validators, ingress, monitoring |
@@ -1926,9 +1926,9 @@ cd contracts && forge test
 
 | Document | Audience |
 |----------|----------|
-| `docs/PUBLIC.md` | Curated public documentation index |
+| `docs/README.md` | Documentation index |
 | `docs/PUBLIC_TESTNET_QUICKSTART.md` | Publishers and developers |
-| `docs/TESTNET_PHASE_SCOPE.md` | Testnet expectations and limits |
+| `docs/archive/TESTNET_PHASE_SCOPE.md` | Testnet expectations and limits (archived 2026-09-19) |
 | `docs/VALIDATOR_ONBOARDING_CHECKLIST.md` | Validator operators |
 | `docs/WHITEPAPER.md` | Auditors and researchers |
 | `DEEP_DIVE_ANALYSIS.md` | Deep technical analysis |
@@ -2086,7 +2086,7 @@ Iter 1 complete. Focus: making §9.12 incentives observable and sidecar-deployab
 
 Incentives monitoring is now more complete and observable.
 
-**New dedicated plan created:** `docs/WEAKNESSES_GAPS_REMEDIATION_PLAN.md` (2026-06-26) covering the five main gaps from the system rating:
+**New dedicated plan created:** `docs/archive/WEAKNESSES_GAPS_REMEDIATION_PLAN.md` (2026-06-26; archived 2026-09-19) covering the five main gaps from the system rating:
 - External audit acceleration
 - Remaining DEEP_DIVE code items (gossip, BatchOperations, finalize relays)
 - Legacy bridge/ZK retirement cleanup and any future cross-layer protocol design
@@ -2198,6 +2198,8 @@ Update log will reflect.
 - **DEEP_DIVE:** ISSUE-003 → fixed; ISSUE-008 → mitigated (allowlist default, replay guards).
 - **Deferred:** Per-package nonce in `_sigDigest` (optional; allowlist model is documented default for testnet).
 
+**Catch-up note (2026-09-20):** this §15 log was not updated per-iteration during 2026-08/09. The authoritative record for that window is `docs/PROTOCOL_PROGRESS.md` plus git history: PRs 25–52 fail-closed hardening (governance writes, install shims, freshness, SBOM, witnessed-log tracks), external validator onboarding enabled on Sepolia, Arena `0.4.0-public-testnet` deployed 2026-09-20, and the docs archive pass of 2026-09-19.
+
 Subsequent iterations will be logged here with links to changes.
 
 For the authoritative long-term view, also consult `DEEP_DIVE_ANALYSIS.md` §5 (Improvement Roadmap) and §6 (Strengths & Positive Observations).
@@ -2224,7 +2226,7 @@ For the authoritative long-term view, also consult `DEEP_DIVE_ANALYSIS.md` §5 (
 
 This is a **public alpha testnet**, not mainnet. Key limitations:
 
-- Four foundation observer nodes (`validator-1`…`validator-4`), non-voting; no active validators observed; not production BFT
+- Spec lists four foundation observer identities (`validator-1`…`validator-4`), non-voting; no active validators observed; not production BFT
 - External security audit open (SEC-401)
 - ZK proofs are experimental infrastructure
 - Cross-chain, insurance, and threshold encryption disabled
@@ -2243,8 +2245,8 @@ This is a **public alpha testnet**, not mainnet. Key limitations:
   still open
 - No economic guarantees or mainnet token commitments
 
-See `docs/TESTNET_PHASE_SCOPE.md` for participant expectations.
+See `docs/archive/TESTNET_PHASE_SCOPE.md` (archived 2026-09-19) for historical participant expectations.
 
 ---
 
-*This document is derived from the CREG codebase, whitepaper, and operator documentation as of 2026-07-29. For protocol authority, refer to `docs/WHITEPAPER.md`. For implementation gaps, refer to `chain-registry/DEEP_DIVE_ANALYSIS.md`.*
+*This document is derived from the CREG codebase, whitepaper, and operator documentation as of 2026-09-20. For protocol authority, refer to `docs/WHITEPAPER.md`. For implementation gaps, refer to `chain-registry/DEEP_DIVE_ANALYSIS.md`.*

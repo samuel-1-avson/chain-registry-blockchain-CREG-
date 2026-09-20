@@ -5,7 +5,7 @@ Versioned quest and journey copy for the CREG testnet join portal (`join.testnet
 ## Layout (Phase 2+)
 
 - `*.yaml` — quest definitions (`id`, `path`, `title`, `order`, `verification`, `prerequisites`)
-- Shared, publish, and validate paths per [TESTNET-HUB-DESIGN.md](../../../docs/TESTNET-HUB-DESIGN.md)
+- Shared, publish, and validate paths per [TESTNET-HUB-DESIGN.md](../../../../docs/archive/TESTNET-HUB-DESIGN.md)
 
 ## Phase 0
 

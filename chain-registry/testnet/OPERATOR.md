@@ -4,13 +4,13 @@
 **Current topology:** the signed fresh-genesis candidate has four validator
 candidates and no verified bootnodes. All four candidate keys are currently
 held by one operator, so this remains a coordinated research alpha with no
-Byzantine-tolerance claim. [TESTNET_SCALE_ARCHITECTURE.md](../../docs/TESTNET_SCALE_ARCHITECTURE.md)
+Byzantine-tolerance claim. [TESTNET_SCALE_ARCHITECTURE.md](../../docs/archive/TESTNET_SCALE_ARCHITECTURE.md) (archived 2026-09-19)
 is a future design, not evidence of independently operated validators.
 
 This runbook is for **maintainers** operating GCP edge/observer services and cohort onboarding. Validators and bootnodes are independently operated outside GCP; external validators follow [VALIDATOR_ONBOARDING_CHECKLIST.md](../../docs/VALIDATOR_ONBOARDING_CHECKLIST.md).
 
-Fresh-genesis key custody and injection are documented in
-[FRESH_GENESIS_KEYS.md](./FRESH_GENESIS_KEYS.md); never place Secret Manager
+Fresh-genesis keys are held in Google Secret Manager
+(ceremony record: [fresh-genesis-ceremony-2026-08-01.json](./archive/fresh-genesis-ceremony-2026-08-01.json)); never place Secret Manager
 private values in a committed or shared environment file.
 
 ---
@@ -25,9 +25,9 @@ private values in a committed or shared environment file.
 | **External validators** | Operator-owned hosts | Genesis Alpha cohort — one host per operator |
 | **Sepolia RPC** | `creg-sepolia-geth-vm` (private, optional) | `CREG_ETH_RPC` for GCP observers/faucet; external validators use their own reachable provider |
 
-Cohort waves: [GENESIS_ALPHA_COHORT_PLAYBOOK.md](../../docs/GENESIS_ALPHA_COHORT_PLAYBOOK.md).
+Cohort waves: [GENESIS_ALPHA_COHORT_PLAYBOOK.md](../../docs/archive/GENESIS_ALPHA_COHORT_PLAYBOOK.md) (archived 2026-09-19).
 
-**Retired:** Sepolia `docker-compose.3node.yml` lab — archived under [archive/3node-lab/](./archive/3node-lab/README.md). Do not use for new work.
+**Retired:** Sepolia `docker-compose.3node.yml` lab — archived under [archive/3node-lab/](./archive/3node-lab/). Do not use for new work.
 
 ---
 
@@ -82,7 +82,7 @@ The gate rejects template values, legacy validator-placement flags, missing
 external peer endpoints, missing operator authentication, and any validator
 private-key material. It does not call GCP or mutate resources.
 
-Detail: [GCP-VALIDATOR-FLEET.md](../../docs/GCP-VALIDATOR-FLEET.md).
+Detail: [GCP-VALIDATOR-FLEET.md](../../docs/archive/GCP-VALIDATOR-FLEET.md) (archived 2026-09-19).
 
 ---
 
@@ -92,10 +92,10 @@ Each operator runs **one validator per machine** using `docker-compose.validator
 
 | Step | Reference |
 |------|-----------|
-| Cohort invite | [GENESIS_ALPHA_COHORT_PLAYBOOK.md](../../docs/GENESIS_ALPHA_COHORT_PLAYBOOK.md) |
+| Cohort invite | [GENESIS_ALPHA_COHORT_PLAYBOOK.md](../../docs/archive/GENESIS_ALPHA_COHORT_PLAYBOOK.md) (archived 2026-09-19) |
 | Full checklist | [VALIDATOR_ONBOARDING_CHECKLIST.md](../../docs/VALIDATOR_ONBOARDING_CHECKLIST.md) |
 | Publisher/dev flows | [PUBLIC_TESTNET_QUICKSTART.md](../../docs/PUBLIC_TESTNET_QUICKSTART.md) |
-| Alpha limits | [TESTNET_PHASE_SCOPE.md](../../docs/TESTNET_PHASE_SCOPE.md) |
+| Alpha limits | [TESTNET_PHASE_SCOPE.md](../../docs/archive/TESTNET_PHASE_SCOPE.md) (archived 2026-09-19) |
 
 **NET-301 acceptance (scale):** L1 shows ≥2 active staked validators from **independent operators**, `CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM` unset on public hosts, publish reaches `verified` with PBFT quorum — not single-validator override.
 
@@ -403,7 +403,7 @@ All four remain explicit testnet gates.
 
 ## Public hosting (HOSTING-301)
 
-Runbook: [gcp/README.md](./gcp/README.md)
+Runbook: [gcp/](./gcp/) scripts (no README yet)
 
 ```powershell
 .\testnet\init-sepolia-fleet-env.ps1
@@ -415,7 +415,7 @@ Runbook: [gcp/README.md](./gcp/README.md)
 
 ## References
 
-- [TESTNET_SCALE_ARCHITECTURE.md](../../docs/TESTNET_SCALE_ARCHITECTURE.md)
-- [TESTNET_SEPOLIA_RUNBOOK.md](../../docs/TESTNET_SEPOLIA_RUNBOOK.md)
-- [WHAT_TO_DO_NEXT.md](../../docs/WHAT_TO_DO_NEXT.md)
-- [GCP-VALIDATOR-FLEET.md](../../docs/GCP-VALIDATOR-FLEET.md)
+- [TESTNET_SCALE_ARCHITECTURE.md](../../docs/archive/TESTNET_SCALE_ARCHITECTURE.md) (archived 2026-09-19)
+- [TESTNET_SEPOLIA_RUNBOOK.md](../../docs/archive/TESTNET_SEPOLIA_RUNBOOK.md) (archived 2026-09-19)
+- [WHAT_TO_DO_NEXT.md](../../docs/archive/WHAT_TO_DO_NEXT.md) (archived 2026-09-19)
+- [GCP-VALIDATOR-FLEET.md](../../docs/archive/GCP-VALIDATOR-FLEET.md) (archived 2026-09-19)

@@ -68,4 +68,4 @@ try {
 }
 
 Log "All required RPC checks passed."
-Log "Sepolia L1 RPC is separate - set SEPOLIA_RPC_URL in sepolia-3node.env (see docs/GCP-RPC-ARCHITECTURE.md)."
+Log "Sepolia L1 RPC is separate - set SEPOLIA_RPC_URL in sepolia-3node.env (see docs/archive/GCP-RPC-ARCHITECTURE.md; archived 2026-09-19)."

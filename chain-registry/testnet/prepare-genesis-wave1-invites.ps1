@@ -35,7 +35,7 @@ if ($rows.Count -eq 0) {
 $repoUrl = "https://github.com/$GithubRepo"
 $releaseUrl = "$repoUrl/releases/tag/$Release"
 $quickstartUrl = "$repoUrl/blob/main/docs/PUBLIC_TESTNET_QUICKSTART.md"
-$scopeUrl = "$repoUrl/blob/main/docs/TESTNET_PHASE_SCOPE.md"
+$scopeUrl = "$repoUrl/blob/main/docs/archive/TESTNET_PHASE_SCOPE.md"
 
 $template = @'
 Hi there,

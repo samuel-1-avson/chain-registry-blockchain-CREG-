@@ -3,7 +3,7 @@
 > **Report date:** 2026-06-08 (progress addendum **2026-06-09**)  
 > **Network:** `creg-testnet-1` on Ethereum **Sepolia** (L1 chain id `11155111`)  
 > **Scope:** Readiness assessment for public testnet launch.  
-> **Status:** Historical snapshot below; **current planning** is in [docs/WHAT_TO_DO_NEXT.md](../docs/WHAT_TO_DO_NEXT.md) and [docs/TESTNET_SCALE_ARCHITECTURE.md](../docs/TESTNET_SCALE_ARCHITECTURE.md). The retired 3-node Sepolia lab is archived under `testnet/archive/3node-lab/`.
+> **Status:** Historical snapshot below; **planning at the time** was in [docs/archive/WHAT_TO_DO_NEXT.md](../docs/archive/WHAT_TO_DO_NEXT.md) and [docs/archive/TESTNET_SCALE_ARCHITECTURE.md](../docs/archive/TESTNET_SCALE_ARCHITECTURE.md). Current briefing: [docs/PROTOCOL_PROGRESS.md](../docs/PROTOCOL_PROGRESS.md). The retired 3-node Sepolia lab is archived under `testnet/archive/3node-lab/`.
 
 ### Progress since this report (2026-06-09)
 
@@ -16,9 +16,9 @@
 | Waitlist — `waitlist.cregnet.dev` + Firebase `registerWaitlist` | **Done** 2026-06-09 |
 | SEC-401 — external audit | **Open** — scope ready, evidence pack pending |
 | Phase 1 remediation (Iter 5–6) | **Done** — gossip, batch, finalize relays |
-| Doc planning hub | [WHAT_TO_DO_NEXT.md](../docs/WHAT_TO_DO_NEXT.md) |
+| Doc planning hub | [WHAT_TO_DO_NEXT.md](../docs/archive/WHAT_TO_DO_NEXT.md) (archived 2026-09-19) |
 
-**Revised lens (June 2026):** Coordinated public alpha is **live**. Remaining P0 before broad external stake: **SEC-401 audit**. See [TESTNET_PHASE_SCOPE.md](../docs/TESTNET_PHASE_SCOPE.md) for participant expectations.
+**Revised lens (June 2026):** Coordinated public alpha is **live**. Remaining P0 before broad external stake: **SEC-401 audit**. See [TESTNET_PHASE_SCOPE.md](../docs/archive/TESTNET_PHASE_SCOPE.md) (archived 2026-09-19) for participant expectations.
 
 ---
 
@@ -248,7 +248,7 @@ Prioritized, with rough effort. **P0 = launch-blocking.**
 
 - `DEEP_DIVE_ANALYSIS.md` — architecture, subsystem behavior, original 25-issue registry.
 - `testnet/OPERATOR.md` — current 3-node Sepolia operator runbook.
-- `docs/TESTNET_PHASE_SCOPE.md` — declared single-observer phase + NET-301 milestone.
+- `docs/archive/TESTNET_PHASE_SCOPE.md` — declared single-observer phase + NET-301 milestone.
 - `docs/PUBLIC_TESTNET_QUICKSTART.md` — publisher / developer / validator quickstart (added 2026-06-08).
 - Live soak: `testnet/soak-3node-consensus.ps1` (published package, `tip_height=2` parity, `validator_set_sync=synced`, `peer_count=2`).
 - Security re-verification: 9 FIXED / 2 PARTIAL / 3 OPEN against current tree (file:line confirmed).

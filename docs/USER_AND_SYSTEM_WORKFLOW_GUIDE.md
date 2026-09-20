@@ -481,4 +481,4 @@ To prevent central authority takeover, CREG enforces four structural decentraliz
 - **Cryptographic Genesis Spec:** [https://spec.testnet.cregnet.dev/chain-spec.json](https://spec.testnet.cregnet.dev/chain-spec.json)
 - **CREG Native JSON-RPC:** `https://api.testnet.cregnet.dev/rpc`
 - **Sepolia L1 Ingress Proxy:** `https://api.testnet.cregnet.dev/sepolia`
-- **Onboarding Runbook:** [docs/VALIDATOR_ONBOARDING_CHECKLIST.md](file:///c:/Users/samue/OneDrive/Desktop/projects/chain-registry-blockchain-CREG-/docs/VALIDATOR_ONBOARDING_CHECKLIST.md)
+- **Onboarding Runbook:** [docs/VALIDATOR_ONBOARDING_CHECKLIST.md](./VALIDATOR_ONBOARDING_CHECKLIST.md)

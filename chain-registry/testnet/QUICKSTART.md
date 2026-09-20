@@ -85,7 +85,7 @@ validators are needed for consensus and adversarial-rehearsal evidence, not for
 this public-service bootstrap.
 
 1. [VALIDATOR_ONBOARDING_CHECKLIST.md](../../docs/VALIDATOR_ONBOARDING_CHECKLIST.md)
-2. [GENESIS_ALPHA_COHORT_PLAYBOOK.md](../../docs/GENESIS_ALPHA_COHORT_PLAYBOOK.md) (if invited)
+2. [GENESIS_ALPHA_COHORT_PLAYBOOK.md](../../docs/archive/GENESIS_ALPHA_COHORT_PLAYBOOK.md) (archived 2026-09-19; if invited)
 3. Configure and monitor UTC synchronization with NTP/chrony; live proposals
    outside the protocol's 60-second clock-skew window fail closed.
 4. Deploy with `docker-compose.validator.yml` or release `creg-node`
@@ -188,4 +188,4 @@ genesis, staking address, and controller identity instead.
 
 1. Developers: Path A or B, then [PUBLIC_TESTNET_QUICKSTART.md](../../docs/PUBLIC_TESTNET_QUICKSTART.md)
 2. Validators: Path C when cohort invites open
-3. Maintainers: [OPERATOR.md](./OPERATOR.md) and [gcp/README.md](./gcp/README.md)
+3. Maintainers: [OPERATOR.md](./OPERATOR.md) and [gcp/](./gcp/) scripts (no README yet)

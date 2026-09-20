@@ -61,10 +61,10 @@ Core docs are kept in root, docs/, testnet/, and observability/ (see docs/archiv
 
 Key references:
 - [DEEP_DIVE_ANALYSIS.md](DEEP_DIVE_ANALYSIS.md) — architecture and issue registry
-- [../docs/WHAT_TO_DO_NEXT.md](../docs/WHAT_TO_DO_NEXT.md) — maintainer planning hub
+- [../docs/PROTOCOL_PROGRESS.md](../docs/PROTOCOL_PROGRESS.md) — current maintainer briefing ([WHAT_TO_DO_NEXT.md](../docs/archive/WHAT_TO_DO_NEXT.md) archived 2026-09-19)
 - [testnet/QUICKSTART.md](testnet/QUICKSTART.md)
 - [testnet/OPERATOR.md](testnet/OPERATOR.md)
-- [testnet/gcp/README.md](testnet/gcp/README.md)
+- [testnet/gcp/](testnet/gcp/) — GCP scripts (no README yet)
 - [DOCKER.md](DOCKER.md)
 - [contracts/README.md](contracts/README.md)
 

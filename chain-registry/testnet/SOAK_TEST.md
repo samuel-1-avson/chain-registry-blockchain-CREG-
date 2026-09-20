@@ -5,10 +5,10 @@
 > **Regions:** EU Central, US East, US West (minimum 2 regions)  
 > **L1:** Sepolia testnet  
 
-For the current P0 launch execution path, use
-[`../docs/PUBLIC_TESTNET_DEPLOYMENT_AND_SOAK_RUNBOOK.md`](../docs/PUBLIC_TESTNET_DEPLOYMENT_AND_SOAK_RUNBOOK.md)
-with the live tracker in
-[`../docs/PUBLIC_TESTNET_INFRASTRUCTURE_CHECKLIST.md`](../docs/PUBLIC_TESTNET_INFRASTRUCTURE_CHECKLIST.md).
+There is no separate P0 launch runbook or live tracker in this tree:
+the referenced deployment runbook and infrastructure checklist were never committed.
+Current protocol briefing:
+[`../../docs/PROTOCOL_PROGRESS.md`](../../docs/PROTOCOL_PROGRESS.md).
 This file remains the detailed scenario catalog and failure-response reference.
 
 ---

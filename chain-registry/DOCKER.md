@@ -21,7 +21,7 @@ Complete Docker setup for running the Chain Registry blockchain with all new fea
 
 ## 📌 Current Status
 
-The repo's live operational status is tracked in [TESTNET_READINESS_REPORT.md](TESTNET_READINESS_REPORT.md) and [../docs/NEXT_WORK.md](../docs/NEXT_WORK.md).
+The repo's live operational status is tracked in [TESTNET_READINESS_REPORT.md](TESTNET_READINESS_REPORT.md) and [../docs/archive/NEXT_WORK.md](../docs/archive/NEXT_WORK.md) (archived 2026-09-19).
 
 Current Docker model (Sepolia L1 only):
 

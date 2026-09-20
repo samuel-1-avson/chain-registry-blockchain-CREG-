@@ -8,7 +8,7 @@
 
 A decentralized package registry that replaces single-authority trust (npm, PyPI, Cargo, and similar) with **independent validator consensus**. Packages are content-addressed, analyzed through a multi-stage security pipeline, and finalized by PBFT quorum. Sepolia hosts staking, registry, and governance contracts. This is a **public alpha**, not mainnet, and not operational Byzantine fault tolerance.
 
-**Network:** `creg-testnet-1` on Sepolia · **Phase:** public alpha · **Live status:** [docs/TESTNET_STATUS.md](docs/TESTNET_STATUS.md)
+**Network:** `creg-testnet-1` on Sepolia · **Phase:** public alpha · **Live status:** API reachable with an empty chain (tip 0, no peers, observed 2026-09-20) — see [status](#status-september-2026); historical fleet snapshot: [2026-08-25](docs/archive/TESTNET_STATUS.md)
 
 ---
 
@@ -55,7 +55,7 @@ flowchart LR
 | **Waitlist** | https://waitlist.cregnet.dev |
 | **Contribution Arena** | https://contribute.cregnet.dev | Separate educational/simulation product; not the protocol |
 
-**Binaries:** [v0.4.7-testnet](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases/tag/v0.4.7-testnet) provides signed `creg` and `creg-node` archives for Windows amd64, Linux amd64, and macOS amd64. The public GCP fleet (`api.testnet.cregnet.dev`) is **paused**.
+**Binaries:** [v0.4.7-testnet](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases/tag/v0.4.7-testnet) provides signed `creg` and `creg-node` archives for Windows amd64, Linux amd64, and macOS amd64. The public API (`api.testnet.cregnet.dev`) is reachable but serves a fresh empty chain (tip 0, no peers, no validators — observed 2026-09-20), not a live network.
 
 Chain parameters: [`chain-registry/testnet/chain-spec.sepolia.json`](chain-registry/testnet/chain-spec.sepolia.json).
 
@@ -69,7 +69,7 @@ This repo is organized like other public blockchains — **protocol and consensu
 |-----------------|-------|
 | **Repository** | [chain-registry-blockchain-CREG-](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-) |
 | **Whitepaper** | [docs/WHITEPAPER.md](docs/WHITEPAPER.md) |
-| **Public documentation** | [docs/PUBLIC.md](docs/PUBLIC.md) |
+| **Public documentation** | [docs/README.md](docs/README.md) |
 | **ZK circuits** | [circuits/](circuits/) |
 | **Release binaries** | [Releases](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases) |
 
@@ -83,9 +83,9 @@ The alpha waitlist is live at [waitlist.cregnet.dev](https://waitlist.cregnet.de
 |----------|------------|
 | **Publishers & developers** | [docs/PUBLIC_TESTNET_QUICKSTART.md](docs/PUBLIC_TESTNET_QUICKSTART.md) |
 | **Validators & node operators** | [docs/VALIDATOR_ONBOARDING_CHECKLIST.md](docs/VALIDATOR_ONBOARDING_CHECKLIST.md) |
-| **Maintainers (what's next)** | [docs/WHAT_TO_DO_NEXT.md](docs/WHAT_TO_DO_NEXT.md) |
+| **Maintainers (what's next)** | [docs/PROTOCOL_PROGRESS.md](docs/PROTOCOL_PROGRESS.md) (current briefing; [WHAT_TO_DO_NEXT.md](docs/archive/WHAT_TO_DO_NEXT.md) archived 2026-09-19) |
 | **Auditors & researchers** | [chain-registry/DEEP_DIVE_ANALYSIS.md](chain-registry/DEEP_DIVE_ANALYSIS.md) |
-| **Testnet expectations** | [docs/TESTNET_PHASE_SCOPE.md](docs/TESTNET_PHASE_SCOPE.md) |
+| **Testnet expectations** | [docs/archive/TESTNET_PHASE_SCOPE.md](docs/archive/TESTNET_PHASE_SCOPE.md) (archived 2026-09-19) |
 
 ---
 
@@ -105,8 +105,8 @@ cd chain-registry && cargo build --release -p cli
 ```
 
 ```bash
-# Public API may be unreachable while the GCP fleet is paused.
-# Check docs/TESTNET_STATUS.md, or run a local node from chain-registry/testnet/QUICKSTART.md.
+# Public API serves an empty chain (tip 0, no peers, 2026-09-20), not a live network.
+# For a live network, run a local node from chain-registry/testnet/QUICKSTART.md.
 export CREG_NODE_URL=https://api.testnet.cregnet.dev
 creg doctor
 ```
@@ -121,7 +121,7 @@ This repository follows the same pattern as other open blockchains: **protocol c
 |------|----------|
 | [`chain-registry/`](chain-registry/) | Rust workspace, contracts, testnet compose, CLI — **[start here](chain-registry/README.md)** |
 | [`circuits/`](circuits/) | ZK Groth16 circuits (Circom) |
-| [`docs/PUBLIC.md`](docs/PUBLIC.md) | Curated public documentation index |
+| [`docs/README.md`](docs/README.md) | Documentation index |
 
 ---
 
@@ -129,9 +129,9 @@ This repository follows the same pattern as other open blockchains: **protocol c
 
 | Document | Purpose |
 |----------|---------|
-| [docs/TESTNET_SCALE_ARCHITECTURE.md](docs/TESTNET_SCALE_ARCHITECTURE.md) | Future scale-topology design — not a current deployment claim |
-| [docs/WHAT_TO_DO_NEXT.md](docs/WHAT_TO_DO_NEXT.md) | **Maintainers** — protocol testing, waitlist, validator onboarding |
-| [docs/PUBLIC.md](docs/PUBLIC.md) | Public-facing protocol index |
+| [docs/archive/TESTNET_SCALE_ARCHITECTURE.md](docs/archive/TESTNET_SCALE_ARCHITECTURE.md) | Future scale-topology design (archived 2026-09-19) — not a current deployment claim |
+| [docs/PROTOCOL_PROGRESS.md](docs/PROTOCOL_PROGRESS.md) | **Maintainers** — current protocol briefing ([WHAT_TO_DO_NEXT.md](docs/archive/WHAT_TO_DO_NEXT.md) archived 2026-09-19) |
+| [docs/README.md](docs/README.md) | Documentation index |
 | [docs/README.md](docs/README.md) | Full maintainer doc index |
 | [WHITEPAPER.md](docs/WHITEPAPER.md) | Public-alpha technical whitepaper |
 | [DEEP_DIVE_ANALYSIS.md](chain-registry/DEEP_DIVE_ANALYSIS.md) | Technical architecture and issue registry |
@@ -141,22 +141,22 @@ This repository follows the same pattern as other open blockchains: **protocol c
 
 ---
 
-## Status (August 2026)
+## Status (September 2026)
 
 | Milestone | Status |
 |-----------|--------|
 | Sepolia contracts | Deployed — addresses in `chain-spec.sepolia.json` |
 | Specified validator set | Four foundation observer identities (non-voting); two listed bootnodes; not operational BFT |
 | Real sandbox engine | Done |
-| Public GCP fleet | **Paused (cost)** — [TESTNET_STATUS.md](docs/TESTNET_STATUS.md) |
+| Public API | Reachable, serves a fresh empty chain (tip 0, no peers, no validators, observed 2026-09-20) — not a live network. Last fleet snapshot: [2026-08-25](docs/archive/TESTNET_STATUS.md) |
 | Binary release | [v0.4.7-testnet](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases/tag/v0.4.7-testnet) (Windows, Linux, and macOS) |
 | Public alpha waitlist | Live — [waitlist.cregnet.dev](https://waitlist.cregnet.dev) |
-| Contribution Arena | Separate educational/simulation product — [contribute.cregnet.dev](https://contribute.cregnet.dev) |
+| Contribution Arena | Separate educational/simulation product — [contribute.cregnet.dev](https://contribute.cregnet.dev) (`0.4.0-public-testnet` deployed 2026-09-20) |
 | Phase 1 remediation (gossip, batch, relays) | Done — Iteration 6 |
-| Fresh genesis ceremony | Candidate recorded 2026-08-01/02 — public activation still gated |
+| Genesis | Spec `genesis_time` 2026-09-19 (`0x9d9e…`); live API serves a different empty chain (`0x0683…`). No public activation published |
 | External security audit | Open — freeze candidate `v0.4.3-testnet` |
 
-This is a **public alpha**, not mainnet. See [TESTNET_PHASE_SCOPE.md](docs/TESTNET_PHASE_SCOPE.md) for participant expectations.
+This is a **public alpha**, not mainnet. Historical participant expectations: [TESTNET_PHASE_SCOPE.md](docs/archive/TESTNET_PHASE_SCOPE.md) (archived 2026-09-19).
 
 ---
 

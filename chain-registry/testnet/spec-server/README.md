@@ -20,7 +20,7 @@ copy chain-spec.sepolia.json spec-server\chain-spec.sepolia.json
 copy chain-spec.sepolia.json.sig spec-server\chain-spec.sepolia.json.sig
 ```
 
-Full procedure: [docs/TESTNET_SEPOLIA_RUNBOOK.md](../../../docs/TESTNET_SEPOLIA_RUNBOOK.md).
+Full procedure: [docs/archive/TESTNET_SEPOLIA_RUNBOOK.md](../../../docs/archive/TESTNET_SEPOLIA_RUNBOOK.md) (archived 2026-09-19).
 
 ## Verify independently
 

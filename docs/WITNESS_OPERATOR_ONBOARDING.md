@@ -97,7 +97,7 @@ Two processes, two control domains. The log (or a test fixture) serves two incom
 | Document | Role |
 |----------|------|
 | [WITNESS_KEY_CEREMONY.md](./WITNESS_KEY_CEREMONY.md) | Log-signer vs witness keys |
-| [WITNESS_OPERATOR_OUTREACH.md](./WITNESS_OPERATOR_OUTREACH.md) | Invite text |
+| [WITNESS_OPERATOR_OUTREACH.md](./archive/WITNESS_OPERATOR_OUTREACH.md) (archived 2026-09-19) | Invite text |
 | [CLIENT_VERIFICATION.md](./protocol/CLIENT_VERIFICATION.md) | What `creg install` already checks |
 | [TRANSPARENCY_LOG.md](./protocol/TRANSPARENCY_LOG.md) | Log semantics |
 | [VALIDATOR_ONBOARDING_CHECKLIST.md](./VALIDATOR_ONBOARDING_CHECKLIST.md) | Different role — do not mix |

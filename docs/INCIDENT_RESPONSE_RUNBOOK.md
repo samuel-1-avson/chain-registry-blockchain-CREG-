@@ -2,7 +2,7 @@
 
 > Track: MAIN-003 (public alpha gate)  
 > Scope: CREG public testnet (`creg-testnet-1`) — node fleet, contracts on Sepolia, IPFS, explorer, faucet, spec server, waitlist  
-> Companion docs: [SECURITY_OPS_RUNBOOK.md](./SECURITY_OPS_RUNBOOK.md), [VALIDATOR_ONBOARDING_CHECKLIST.md](./VALIDATOR_ONBOARDING_CHECKLIST.md), [CREG_LIMITATIONS_PUBLIC_READINESS_PLAN.md](./CREG_LIMITATIONS_PUBLIC_READINESS_PLAN.md)
+> Companion docs: [SECURITY_OPS_RUNBOOK.md](./SECURITY_OPS_RUNBOOK.md), [VALIDATOR_ONBOARDING_CHECKLIST.md](./VALIDATOR_ONBOARDING_CHECKLIST.md), [CREG_LIMITATIONS_PUBLIC_READINESS_PLAN.md](./archive/CREG_LIMITATIONS_PUBLIC_READINESS_PLAN.md) (archived 2026-09-19)
 
 ## Severity Levels
 
@@ -20,7 +20,7 @@ Roles (alpha-scale): **Incident lead** (maintainer on point), **Operator** (infr
 2. **Contain** — stop ongoing harm first (revoke, pause, isolate). Do not destroy evidence: snapshot logs/state before restarting containers.
 3. **Communicate** — post user-facing status (explorer banner / GitHub issue / waitlist email for broad impact). Never overclaim; state what is known.
 4. **Remediate** — fix root cause, redeploy, verify health.
-5. **Post-mortem** — within 5 days: timeline, root cause, what failed, follow-up tasks filed in [NEXT_WORK.md](./NEXT_WORK.md) or [REMEDIATION_BACKLOG.md](./REMEDIATION_BACKLOG.md).
+5. **Post-mortem** — within 5 days: timeline, root cause, what failed, follow-up tasks filed in [PROTOCOL_PROGRESS.md](./PROTOCOL_PROGRESS.md) ([NEXT_WORK.md](./archive/NEXT_WORK.md) and [REMEDIATION_BACKLOG.md](./archive/REMEDIATION_BACKLOG.md) archived 2026-09-19).
 
 Evidence to preserve in every incident: container logs (`docker logs`), node data-dir snapshots if state-related, relevant L1 tx hashes, package IDs/CIDs, vote records (evidence digests), and the incident timeline.
 

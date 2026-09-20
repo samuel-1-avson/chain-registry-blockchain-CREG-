@@ -1,6 +1,6 @@
 # Master remediation tracker
 
-**Baseline audit:** [CREG Comprehensive Audit, 2026-07-10](../CREG_COMPREHENSIVE_AUDIT_2026-07-10.md)
+**Baseline audit:** [CREG Comprehensive Audit, 2026-07-10](../archive/CREG_COMPREHENSIVE_AUDIT_2026-07-10.md)
 
 **Last assessed:** 2026-07-29
 

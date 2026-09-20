@@ -1,10 +1,12 @@
 # Chain Registry (CREG) Technical Whitepaper
 
 > Version: 0.4.0-public-testnet  
-> Date: 2026-09-19  
+> Date: 2026-09-20  
 > Network: `creg-testnet-1` on Ethereum Sepolia  
-> Status: Public alpha — external validator onboarding enabled on Sepolia; public endpoint reachable with a freshly rebooted empty chain (tip 0, no peers observed 2026-09-19). Not production BFT  
+> Status: Public alpha — external validator onboarding enabled on Sepolia; public endpoint reachable with a freshly rebooted empty chain (tip 0, no peers observed 2026-09-20). Not production BFT  
 > Related resources: Public testnet quickstart, Phase scope definitions, Readiness gates status, CREG_SYSTEM_WORKFLOW.md, Contribution Arena
+>
+> Update 2026-09-20: Status re-verified (empty chain, tip 0, no peers); release pin updated to `v0.4.7-testnet`; document links repaired after the 2026-09-19 docs archive pass.
 >
 > Update 2026-09-19: Active external validator onboarding enabled on Ethereum Sepolia. 2-of-3 multisig governance (`0x0fC1...`) approves staked applicants on Staking Hub (`0x3060...`). Dual cryptographic identity verification (`EVM EIP-191` + `Ed25519`) binds staker wallets to consensus nodes.
 
@@ -24,8 +26,10 @@ Chain Registry is designed as a decentralized package-integrity network for
 software supply chains. Its public testnet targets package publishers,
 developers, validators, and security researchers who want a verifiable package
 status layer across ecosystems such as npm, PyPI, Cargo, and similar
-registries. The live `creg-testnet-1` network runs four foundation observer nodes (non-voting)
-and enables external validator onboarding. Independent operators
+registries. The `creg-testnet-1` spec lists four foundation observer identities (non-voting;
+`validator-1`…`validator-4` in `chain-spec.sepolia.json`) and two bootnodes, and
+external validator onboarding is enabled. No active validators have been observed on the
+public endpoint, which serves a freshly rebooted empty chain (tip 0, no peers, 2026-09-20). Independent operators
 stake testnet tCREG tokens on Ethereum Sepolia (`Staking.sol` at
 `0x30604Aa6f763fbde6aDCffbd8960af3031037331`), receive approval from the 2-of-3
 multisig governance contract (`0x0fC1448b11D005a30eb6aC2d54e488f7b58c5D4E`),
@@ -1038,19 +1042,19 @@ CREG is an original protocol implementation that composes open protocols, open-s
 
 ## 19. Public Alpha Status
 
-As of 2026-07-29, CREG is in public alpha testnet scope. (See CREG_SYSTEM_WORKFLOW.md §15 for the living architecture improvement log.)
+As of 2026-09-20, CREG is in public alpha testnet scope. (See CREG_SYSTEM_WORKFLOW.md §15 for the living architecture improvement log.)
 
 | Area | Current public-alpha status |
 | --- | --- |
-| Public API | Intended endpoint `https://api.testnet.cregnet.dev`; fleet may be paused, so operators/users must check `TESTNET_STATUS.md` |
+| Public API | `https://api.testnet.cregnet.dev` is reachable and serves a fresh empty chain (tip 0, no peers, 0 validators, observed 2026-09-20) — not a live network. Historical fleet snapshot: `archive/TESTNET_STATUS.md` (2026-08-25) |
 | Network | `creg-testnet-1` on Sepolia |
-| Release binaries | `v0.4.3-testnet` |
+| Release binaries | `v0.4.7-testnet` (Windows, Linux, and macOS archives) |
 | Real sandbox | Public readiness gate passed with `nsjail` profile |
 | Malicious fixture suite | Public readiness gate passed |
 | IPFS availability checks | Public readiness gate passed |
 | Incident response runbook | Drafted and linked in docs |
 | External audit | SEC-401 scope ready; vendor/start date TBD |
-| Contract tests | Local pinned-solc Foundry run passes 12 suites and 111 tests (0 failed/skipped), including 1000-run fuzz cases; compiler warnings, immutable dependency pinning, and clean-checkout CI remain |
+| Contract tests | Local Foundry run recorded 129/129 passing in 2026-08 (see `PROTOCOL_PROGRESS.md` verification snapshot); compiler warnings, immutable dependency pinning, and clean-checkout CI remain |
 | CR-07 namespace authority | Deterministic v4 lifecycle, v2 certificate boundary, local archive limits, real cryptographic verifier candidates, and a disabled-by-default 11/11-tested activation gate are implemented. Node 209/209 and focused adapter/lifecycle/archive tests pass. npm lacks an official authentication-mode signal; PyPI private-temp launch is in-repo (rebuild, review, and activation remain); production trust/policy, positive fixtures, signed activation, rehearsal, deployment, and independent review remain gates |
 | Weak-subjectivity checkpoint | Publication/verification CLI, fail-closed template, operator procedure, and CI pass 11/11 synthetic adversarial/CLI tests; no real checkpoint/key, independent verification, fleet configuration, or deployment exists |
 | Mainnet | Not launched |

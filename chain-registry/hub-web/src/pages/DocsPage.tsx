@@ -5,7 +5,7 @@ export function DocsPage() {
     ["Public testnet quickstart", EXTERNAL_LINKS.docs, "Publisher, developer, and validator first steps"],
     [
       "Phase scope and limits",
-      "https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/blob/main/docs/TESTNET_PHASE_SCOPE.md",
+      "https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/blob/main/docs/archive/TESTNET_PHASE_SCOPE.md",
       "What public alpha means today",
     ],
     [

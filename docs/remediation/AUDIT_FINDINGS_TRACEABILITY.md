@@ -1,6 +1,6 @@
 # Audit findings traceability
 
-**Baseline:** [`CREG_COMPREHENSIVE_AUDIT_2026-07-10.md`](../CREG_COMPREHENSIVE_AUDIT_2026-07-10.md)  
+**Baseline:** [`CREG_COMPREHENSIVE_AUDIT_2026-07-10.md`](../archive/CREG_COMPREHENSIVE_AUDIT_2026-07-10.md)  
 **Last assessed:** 2026-07-29
 **Status vocabulary:** Not started, Investigating, Confirmed, Design approved, Implementing, Test incomplete, Fixed, Independently reviewed, Accepted residual risk, Deferred with justification, Removed.
 

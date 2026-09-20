@@ -78,7 +78,7 @@ Load once at process startup; reuse existing `warn_hot_key_from_env` only when b
 
 ## Testnet operator guidance
 
-1. Keep using `.env` for Sepolia reuse ([TESTNET_SEPOLIA_RUNBOOK.md](../TESTNET_SEPOLIA_RUNBOOK.md)); set `CREG_TESTNET=true` on the node.
+1. Keep using `.env` for Sepolia reuse ([TESTNET_SEPOLIA_RUNBOOK.md](../archive/TESTNET_SEPOLIA_RUNBOOK.md)); set `CREG_TESTNET=true` on the node.
 2. For shared labs, stand up Vault dev mode, store three keys under separate paths, set `CREG_SECRETS_BACKEND=vault`.
 3. Run the rotation procedure in [SECURITY_OPS_RUNBOOK.md](../SECURITY_OPS_RUNBOOK.md) after any exposure.
 
@@ -100,5 +100,5 @@ Before mainnet sign-off:
 ## References
 
 - [archive/SECURITY_AND_REMEDIATION_IMPLEMENTATION_PLAN.md](../archive/SECURITY_AND_REMEDIATION_IMPLEMENTATION_PLAN.md) — Epic 3.4
-- [REMEDIATION_BACKLOG.md](../REMEDIATION_BACKLOG.md) (SEC-301a/b)
+- [REMEDIATION_BACKLOG.md](../archive/REMEDIATION_BACKLOG.md) (SEC-301a/b; archived 2026-09-19)
 - `chain-registry/crates/common/src/hot_key.rs` — SEC-101b warnings

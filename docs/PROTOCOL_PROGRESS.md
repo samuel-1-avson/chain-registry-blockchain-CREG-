@@ -1,11 +1,11 @@
 # CREG protocol progress
 
-**As of:** 2026-09-19
-**HEAD:** `36b6d49` (external-validator onboarding, staking CLI, and documentation modernization).
+**As of:** 2026-09-20
+**HEAD:** `9173c37` (merge; observer framing, signed-spec Registry, truthful Arena docs).
 **Public binary pin:** `v0.4.7-testnet` provides Windows, Linux, and macOS archives through the GitHub release. SEC-401 freeze candidate can stay `v0.4.3-testnet` if a vendor already scoped that tag.
 **Canonical repo:** [samuel-1-avson/chain-registry-blockchain-CREG-](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-)
 
-This page is the **session briefing** for protocol work: what shipped, what improved, what is left, and how ready CREG is for testnet. Live fleet facts stay in [TESTNET_STATUS.md](./TESTNET_STATUS.md). Prioritized IDs stay in [NEXT_WORK.md](./NEXT_WORK.md). Maintainer tracks stay in [WHAT_TO_DO_NEXT.md](./WHAT_TO_DO_NEXT.md).
+This page is the **session briefing** for protocol work: what shipped, what improved, what is left, and how ready CREG is for testnet. Historical fleet facts: [TESTNET_STATUS.md](./archive/TESTNET_STATUS.md) (2026-08-25 snapshot). Archived tracks: [NEXT_WORK.md](./archive/NEXT_WORK.md), [WHAT_TO_DO_NEXT.md](./archive/WHAT_TO_DO_NEXT.md).
 
 ---
 
@@ -15,11 +15,11 @@ This page is the **session briefing** for protocol work: what shipped, what impr
 |----------|--------|---------|
 | Maintainer local node | **Yes** | Build and run `creg-node` / `creg` against the signed Sepolia spec. |
 | Self-hosted operator vs spec | **Partial** | You can run a node; there is no public bootnode list to join. |
-| Publisher on `api.testnet.cregnet.dev` | **No** | Public GCP fleet is paused; treat the API as unreachable. |
-| Independent BFT public testnet | **No** | Spec lists four coordinated validators and **empty bootnodes**. Not BFT. |
+| Publisher on `api.testnet.cregnet.dev` | **No** | API reachable but serves a fresh empty chain (tip 0, no peers, no validators, observed 2026-09-20); not a live network. |
+| Independent BFT public testnet | **No** | Spec lists four non-voting observer identities and two bootnodes on one GCP host. Not BFT. |
 | Mainnet / economic security | **No** | Public alpha only. ZK qualification stays off. No signed audit findings. |
 
-**Launch-level shorthand:** software is a coordinated public-alpha stack (past lab-only). The **live public network** is waitlist-only because the fleet is paused. Do not describe CREG as a live public testnet, as Byzantine-fault-tolerant, or as mainnet.
+**Launch-level shorthand:** software is a coordinated public-alpha stack (past lab-only). There is **no live public network**: the API serves an empty chain with no peers (2026-09-20). Do not describe CREG as a live public testnet, as Byzantine-fault-tolerant, or as mainnet.
 
 **What “ready for testnet” is not:** more in-repo features. Remaining public-testnet gates are operators, ceremonies, billing, audit vendor, and PDF regeneration.
 
@@ -61,7 +61,7 @@ Policy file: `chain-registry/config/supply-chain/policy.toml`. Implementation: `
 
 Fail-closed residuals through ISSUE-005, plus local VERIFY-401 capture. Highlights: sandbox bypass requires testnet profile; WASM WASI gated; publisher ZK placeholders rejected; historical `validator_set_hash`; governance reads; threshold flag fail-closed; Appeal pull-payment in Solidity; staking address required; CLI publisher / install / sandbox residuals; production ZK keys fail-closed; workspace all-target, rustfmt, Foundry v1.7.1 recorded locally.
 
-Full ID table: [NEXT_WORK.md](./NEXT_WORK.md) completed section.
+Full ID table: [NEXT_WORK.md](./archive/NEXT_WORK.md) completed section (archived 2026-09-19).
 
 ---
 
@@ -86,11 +86,11 @@ Full ID table: [NEXT_WORK.md](./NEXT_WORK.md) completed section.
 | CR07-ACTIVATE | Blocked externally | Needs reviewed npm/PyPI policy, official npm authentication-mode signal, positive fixtures, signed manifest, multi-operator rehearsal. **Do not** set `namespace_authority_activation_height`. |
 | HI11-ACTIVATE | Blocked externally | Needs independently verified checkpoint plus replay / partition / reorg / rebuilt-node / long-range / process-kill rehearsals. **Do not** enable mandatory certified committees. |
 | VAL-INDEPENDENCE | Blocked externally | Recruit separately controlled operators, keys, and infrastructure. Four coordinated spec IDs are not BFT. |
-| TESTNET-RESUME | Gated | `resume-testnet-hosting.ps1` only after the operator gates above. Fleet is paused for cost. |
+| TESTNET-RESUME | Gated | `resume-testnet-hosting.ps1` only after the operator gates above. API currently serves a fresh empty chain (tip 0, no peers, 2026-09-20), not a live network. |
 | SEC-401 | Open / vendor TBD | Freeze candidate remains `v0.4.3-testnet`. Cut a later tag only if you want auditors on post-tag protocol diffs. |
-| DOC-RELEASE | Blocked in this checkout | Arena `generate:document-pdfs` is **not** in this workspace. Do not commit `docs/document-pdfs/`. |
+| DOC-RELEASE | Run after doc edits | Arena `generate:document-pdfs` exists in the `CREG-Contribution-Arena` submodule; regenerate PDFs plus `sync:whitepaper` / `sync-knowledge` after doc edits. Do not commit `docs/document-pdfs/`. |
 
-SPEC-ROTATE is **superseded** as an in-repo rotate. Fresh-genesis candidate is already in `chain-spec.sepolia.json` (genesis 2026-08-02). Remaining work is independent verification and public activation.
+SPEC-ROTATE is **superseded** as an in-repo rotate. `chain-spec.sepolia.json` carries `genesis_time` 2026-09-19 (`0x9d9e…`); the live API serves a different empty chain (`0x0683…`). Remaining work is independent verification and public activation.
 
 ### P1 — quality (ops / L1, not another residual queue)
 
@@ -116,7 +116,7 @@ SPEC-ROTATE is **superseded** as an in-repo rotate. Fresh-genesis candidate is a
 - Contribution Arena as protocol work (separate educational product).
 - Enable ZK (`zk_validation: true`) or threshold encryption (`threshold_encryption: true`) on the signed Sepolia spec.
 - Flip **CR07-ACTIVATE** / **HI11-ACTIVATE**.
-- Resume the GCP fleet without operator gates.
+- Treat the current empty-chain API as a live network, or resume fleet operations without operator gates.
 - Raise the GitHub Actions spending limit.
 - Commit untracked `docs/document-pdfs/`.
 - `git pull origin main` (ambiguous tag named `main`). Fetch `refs/heads/main` then `merge --ff-only origin/main`.
@@ -167,8 +167,8 @@ Later PRs 41–50 added fail-closed patches after that workspace capture. Re-run
 
 If the goal is **in-repo protocol** without fake witnesses: **WITNESSED-LOG Track B** — recruit independent operators to run `creg witness run` on hosts the log operator does not control ([WITNESS_OPERATOR_ONBOARDING.md](./WITNESS_OPERATOR_ONBOARDING.md)). The daemon existing is not a witnessed network.
 
-If the goal is a **live public testnet**: stop feature work and do **VAL-INDEPENDENCE** (recruit operators) then **TESTNET-RESUME**. GOVERNANCE-API / SHIM / freshness / SBOM do not unsuspend `api.testnet.cregnet.dev`.
+If the goal is a **live public testnet**: stop feature work and do **VAL-INDEPENDENCE** (recruit operators) then **TESTNET-RESUME**. GOVERNANCE-API / SHIM / freshness / SBOM do not turn `api.testnet.cregnet.dev` (empty chain, no peers) into a live network.
 
 ---
 
-_Update this file when a protocol PR merges or hosting phase changes. Mirror IDs in [NEXT_WORK.md](./NEXT_WORK.md)._
+_Update this file when a protocol PR merges or hosting phase changes. [NEXT_WORK.md](./archive/NEXT_WORK.md) is archived; track new IDs here._

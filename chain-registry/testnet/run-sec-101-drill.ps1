@@ -116,7 +116,7 @@ Log "  1. Stop affected service"
 Log "  2. Rotate key in vault / .env (never commit)"
 Log "  3. Restart with CREG_TESTNET=true"
 Log "  4. Re-run this script and confirm fingerprint changed"
-Log "  5. Record sign-off in docs/NEXT_WORK.md (SEC-101-ops)"
+Log "  5. Record sign-off in docs/archive/NEXT_WORK.md (SEC-101-ops; archived 2026-09-19)"
 Log ""
 
 if ($WhatIf) {
