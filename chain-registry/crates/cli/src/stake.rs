@@ -25,9 +25,11 @@ pub async fn run(
     staking_addr: Option<&str>,
     token_addr: Option<&str>,
 ) -> Result<()> {
+    let sepolia_rpc_url = std::env::var("SEPOLIA_RPC_URL").ok();
+    let creg_eth_rpc = std::env::var("CREG_ETH_RPC").ok();
     let rpc = rpc_url
-        .or_else(|| std::env::var("SEPOLIA_RPC_URL").ok().as_deref())
-        .or_else(|| std::env::var("CREG_ETH_RPC").ok().as_deref())
+        .or(sepolia_rpc_url.as_deref())
+        .or(creg_eth_rpc.as_deref())
         .unwrap_or("https://explorer.testnet.cregnet.dev/rpc");
 
     if amount_tokens <= 0.0 {

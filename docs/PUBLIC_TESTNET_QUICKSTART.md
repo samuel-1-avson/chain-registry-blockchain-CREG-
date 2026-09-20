@@ -28,7 +28,7 @@ One-page guide for **publishers**, **developers**, and **validators** joining th
 | Staking Hub | `0x30604Aa6f763fbde6aDCffbd8960af3031037331` |
 | CREG Token (tCREG) | `0x167Ab975dc95b79727Ed76BD8AAb70463F6499E2` |
 | Governance Multisig | `0x0fC1448b11D005a30eb6aC2d54e488f7b58c5D4E` |
-| Registry | `0xa59f77f547c87c71101ce6b4ad9dbb2cfa4df714` |
+| Registry | `0xD0F465ca185a99E268be0C4FF5A135Bdf89FAF3B` |
 
 Minimum stakes (from chain spec): **1 tCREG** publisher, **100 tCREG** validator.
 

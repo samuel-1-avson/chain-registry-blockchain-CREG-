@@ -3,7 +3,7 @@
 > Version: 0.4.0-public-testnet  
 > Date: 2026-09-19  
 > Network: `creg-testnet-1` on Ethereum Sepolia  
-> Status: Live public multi-validator testnet with external consensus  
+> Status: Public alpha — external validator onboarding enabled on Sepolia; public endpoint reachable with a freshly rebooted empty chain (tip 0, no peers observed 2026-09-19). Not production BFT  
 > Related resources: Public testnet quickstart, Phase scope definitions, Readiness gates status, CREG_SYSTEM_WORKFLOW.md, Contribution Arena
 >
 > Update 2026-09-19: Active external validator onboarding enabled on Ethereum Sepolia. 2-of-3 multisig governance (`0x0fC1...`) approves staked applicants on Staking Hub (`0x3060...`). Dual cryptographic identity verification (`EVM EIP-191` + `Ed25519`) binds staker wallets to consensus nodes.
@@ -24,8 +24,8 @@ Chain Registry is designed as a decentralized package-integrity network for
 software supply chains. Its public testnet targets package publishers,
 developers, validators, and security researchers who want a verifiable package
 status layer across ecosystems such as npm, PyPI, Cargo, and similar
-registries. The live `creg-testnet-1` network runs an active PBFT consensus
-committee with external validator onboarding enabled. Independent operators
+registries. The live `creg-testnet-1` network runs four foundation observer nodes (non-voting)
+and enables external validator onboarding. Independent operators
 stake testnet tCREG tokens on Ethereum Sepolia (`Staking.sol` at
 `0x30604Aa6f763fbde6aDCffbd8960af3031037331`), receive approval from the 2-of-3
 multisig governance contract (`0x0fC1448b11D005a30eb6aC2d54e488f7b58c5D4E`),
@@ -281,7 +281,7 @@ CREG uses two related consensus layers:
 | Package vote accumulator | Decides whether a package can become verified | `creg-vote-v2` |
 | Block PBFT engine | Finalizes CREG chain blocks containing package records | `creg-pbft-v1` |
 
-Notation: **n** is the active validator-set size. **M** is the mandatory analysis-committee size (`M = n` when `n ≤ 50`; public alpha is four validators, so M=4). Package evidence uses **M**. Block PBFT and validator-set certificates use **n**.
+Notation: **n** is the active validator-set size. **M** is the mandatory analysis-committee size (`M = n` when `n ≤ 50`, capped at 100 above that; the spec's four named identities are non-voting observers, not the committee). Package evidence uses **M**. Block PBFT and validator-set certificates use **n**.
 
 For production-sized validator sets, **block PBFT** quorum is `floor(2n/3) + 1`. **Package evidence** quorum is `floor(2M/3) + 1` mandatory-committee approvals. Small coordinated testnet clusters use explicit configuration where documented; these testnet shortcuts are not mainnet assumptions.
 
@@ -380,7 +380,7 @@ CREG's validator pipeline is designed to make package approval hard to fake and 
 ### 8.2 Mandatory vs Voluntary
 - Only the primary mandatory core is required to produce consensus-grade evidence for the package-level quorum.
 - Any validator may voluntarily execute the full pipeline. Voluntary votes are recorded with `is_mandatory=false`, help during committee expansion on timeout, and are eligible for reputation/rewards. **Public-alpha node today:** only the mandatory committee analyzes and votes; `validator_pipeline` does not produce voluntary votes.
-- This hybrid approach is the target-scale bound (classroom example: 10,000 validators). Public-alpha `max_validators` is 50; recorded topology is four validators.
+- This hybrid approach is the target-scale bound (classroom example: 10,000 validators). Public-alpha `max_validators` is 50; the four recorded identities are non-voting observers.
 
 ### 8.3 Admission
 Validators fetch the exact artifact bytes by CID, verify hashes, execute the security pipeline, produce a deterministic risk summary, sign a vote, and gossip it to the validator set. A vote is consensus-grade only when it includes complete bundle refs, a non-degraded scanner profile, and a non-empty evidence digest. Only mandatory core members are obligated to do the heavy work; volunteers may participate freely.
@@ -574,7 +574,7 @@ CREG uses Ethereum Sepolia for the public testnet contract layer. The contract s
 | `Staking.sol` (Staking Hub) | `0x30604Aa6f763fbde6aDCffbd8960af3031037331` | Publisher/validator stake, validator lifecycle, unbonding, slashing |
 | `CregToken.sol` (tCREG) | `0x167Ab975dc95b79727Ed76BD8AAb70463F6499E2` | ERC-20 testnet CREG token with hard cap and permit support |
 | `GovernanceMultisig.sol` | `0x0fC1448b11D005a30eb6aC2d54e488f7b58c5D4E` | 2-of-3 threshold multisig governing validator admission & emergency actions |
-| `Registry.sol` | `0xa59f77f547c87c71101ce6b4ad9dbb2cfa4df714` | L1 package lifecycle and EIP-712 finalize/revoke paths |
+| `Registry.sol` | `0xD0F465ca185a99E268be0C4FF5A135Bdf89FAF3B` | L1 package lifecycle and EIP-712 finalize/revoke paths |
 | `Reputation.sol` | Verified Sepolia Deployment | Validator/publisher scoring signals |
 | `ValidatorRewards.sol` | Verified Sepolia Deployment | Work-based incentives distribution |
 | `ZKVerifier.sol` / `Groth16Verifier.sol` | Deployed reference | Retained experimental Groth16 verifier |

@@ -7,13 +7,13 @@
 #   irm https://spec.testnet.cregnet.dev/install.ps1 | iex
 #
 # Options:
-#   .\scripts\install-creg.ps1 -Version v0.4.5-testnet
+#   .\scripts\install-creg.ps1 -Version v0.4.7-testnet
 #   .\scripts\install-creg.ps1 -BuildFromSource
 #   .\scripts\install-creg.ps1 -InstallDir "C:\Custom\Path"
 # ==============================================================================
 
 param(
-    [string]$Version = "v0.4.5-testnet",
+    [string]$Version = "v0.4.7-testnet",
     [switch]$BuildFromSource,
     [string]$InstallDir = "$env:USERPROFILE\.creg\bin",
     [string]$ConfigDir = "$env:USERPROFILE\.creg"

@@ -4,7 +4,7 @@
 > **Version:** Public alpha (`creg-testnet-1`)  
 > **Network:** Ethereum Sepolia (L1 chain id `11155111`)  
 > **Status:** Public alpha testnet — not mainnet  
-> **Last updated:** 2026-08-19 (quorum n vs M, public-alpha 4-validator topology, retired `submitRollupBatch` wording)
+> **Last updated:** 2026-08-19 (quorum n vs M, observer-not-validator topology, retired `submitRollupBatch` wording)
 
 This document describes the complete system workflow of the Chain Registry blockchain: architecture, components, consensus, networking, storage, security, operations, and developer onboarding. It is scoped to the **core blockchain project** (`chain-registry/` workspace, contracts, circuits, testnet) and excludes the waitlist application and contribution arena.
 
@@ -38,10 +38,11 @@ Chain Registry (CREG) is designed as a **decentralized package-integrity
 network** for software supply chains. Its target protocol reduces
 single-authority registry trust (npm, PyPI, Cargo, and similar) by requiring
 independently controlled validator consensus over content-addressed packages.
-The recorded public-alpha topology currently lists four validators
-(`validator-1`…`validator-4`) in `chain-spec.sepolia.json` and empty
-bootnodes. The public GCP fleet is paused, so this is the specified
-topology, not a live multi-node network. It does not yet provide operational
+The recorded public-alpha topology currently lists four foundation observer identities
+(`validator-1`…`validator-4`) in `chain-spec.sepolia.json` with two listed
+bootnodes. The public API is reachable but served a fresh empty chain at last
+check (tip 0, no peers, 2026-09-19), so this is the specified topology, not an
+operating multi-node BFT network, and no active validators have been observed. It does not yet provide operational
 decentralization or production Byzantine fault tolerance. Two consensus layers—package votes and PBFT blocks—finalize
 records on a local CREG chain. Sepolia contracts currently provide staking and
 governance experiments; the legacy batch checkpoint is retired and is not a
@@ -121,9 +122,9 @@ On the public alpha, **verified** means the queried node's chain store has accep
 chain-registry/                    # Root repository
 ├── README.md                      # Project overview
 ├── docs/                          # Public documentation
-│   ├── WHITEPAPER.md              # Technical whitepaper v0.3.0-public-alpha
+│   ├── WHITEPAPER.md              # Technical whitepaper v0.4.0-public-testnet
 │   ├── PUBLIC_TESTNET_QUICKSTART.md
-│   ├── TESTNET_PHASE_SCOPE.md
+│   ├── archive/                     # Superseded scope/status docs
 │   └── CREG_SYSTEM_WORKFLOW.md    # This document
 ├── circuits/                      # Circom Groth16 ZK circuits
 └── chain-registry/                # Core protocol workspace (Rust)
@@ -452,7 +453,7 @@ sequenceDiagram
 
 ### 4.2 Two Consensus Layers
 
-Notation: **n** is the active validator-set size. **M** is the mandatory analysis-committee size (`M = n` when `n ≤ 50`; public alpha is four validators, so M=4). Package votes use **M**. Block PBFT and validator-set certificates use **n**.
+Notation: **n** is the active validator-set size. **M** is the mandatory analysis-committee size (`M = n` when `n ≤ 50`, capped at 100 above that; the spec's four named identities are non-voting observers, not the committee). Package votes use **M**. Block PBFT and validator-set certificates use **n**.
 
 CREG uses two related consensus surfaces:
 
@@ -1171,7 +1172,7 @@ creg doctor --node-url "$CREG_NODE_URL"
 
 ### 9.10 Public Fleet Layout (Reference)
 
-**Recorded public-alpha topology** (authoritative): `chain-spec.sepolia.json` lists four validators (`validator-1`…`validator-4`) and empty bootnodes. The public GCP fleet is paused, so this is the specified set, not a live multi-node network.
+**Recorded public-alpha topology** (authoritative): `chain-spec.sepolia.json` lists four foundation observer identities (`validator-1`…`validator-4`) and two bootnodes. The public API is reachable but served a fresh empty chain at last check (tip 0, no peers, 2026-09-19), so this is the specified set, not an operating multi-node BFT network; validator committees (M = min(active,100)) form from L1-admitted operators.
 
 **Historical GCP lab** (not the current spec): a three-container layout was used for earlier observer + validator experiments on `creg-validator-vm`:
 
@@ -1185,7 +1186,7 @@ When that lab ran, edge Caddy on `creg-testnet-vm` proxied `https://api.testnet.
 
 ### 9.11 Analysis Committee Selection (Stake Weighting + Caps)
 
-The **target-scale** design (classroom example: 10,000 validators) replaces full redundant analysis with the **hybrid mandatory + voluntary** model. That is not the public-alpha chain-spec: `max_validators` is 50, and the recorded topology is four validators. When the active set is ≤50, M equals the full set (public alpha: M=4, package quorum=3).
+The **target-scale** design (classroom example: 10,000 validators) replaces full redundant analysis with the **hybrid mandatory + voluntary** model. That is not the public-alpha deployment: `max_validators` is 50, and the four recorded identities are non-voting observers. When the active set is ≤50, M equals the full set (a hypothetical 4-active lab gives M=4, package quorum=3).
 
 - **Mandatory core** (target M=100 for large sets, or all for ≤50): Deterministically selected at admission time using `compute_analysis_committee_at_admission`.
 - **Selection algorithm** (VRF-seeded for the next iteration):
@@ -2223,7 +2224,7 @@ For the authoritative long-term view, also consult `DEEP_DIVE_ANALYSIS.md` §5 (
 
 This is a **public alpha testnet**, not mainnet. Key limitations:
 
-- Coordinated four-validator public-alpha set (`validator-1`…`validator-4`); not production BFT
+- Four foundation observer nodes (`validator-1`…`validator-4`), non-voting; no active validators observed; not production BFT
 - External security audit open (SEC-401)
 - ZK proofs are experimental infrastructure
 - Cross-chain, insurance, and threshold encryption disabled

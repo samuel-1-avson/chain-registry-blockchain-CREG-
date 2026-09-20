@@ -4,19 +4,19 @@ Monthly operator record of Arena-sourced changes to CREG (protocol, spec, or pub
 
 Follow-up labels use the form `chain-registry-blockchain-CREG-#N` or a document revision id. They are not outbound repository links.
 
-The repo copy lives at `docs/ARENA_PROTOCOL_CHANGELOG.md`. The hosted copy lives at `CREG-Contribution-Arena/public/arena-protocol-changelog.md`. Keep them identical.
+The repo copy lives at `docs/archive/ARENA_PROTOCOL_CHANGELOG.md`. The hosted copy lives at `CREG-Contribution-Arena/public/arena-protocol-changelog.md`. Keep them identical.
 
 ## 2026-09
 
-Live external validator onboarding, dual-key identity registration, and Sepolia Staking Hub multisig governance executed.
+External validator onboarding path, dual-key identity registration, and Sepolia Staking Hub multisig governance implemented.
 
 | Milestone | Resolution | Follow-up | Note |
 |---|---|---|---|
-| External Validator Consensus | Live on `creg-testnet-1` | `chain-registry-blockchain-CREG-#45` | 4 active PBFT consensus validators; tip 0 finalized. |
-| Sepolia Staking Hub Governance | Multisig Proposal #5 Executed | `Staking.sol` at `0x3060...` | 2-of-3 multisig governance (`0x0fC1...`) approves external validator applicants. |
+| External Validator Consensus | Specified on `creg-testnet-1` | `chain-registry-blockchain-CREG-#45` | 4 foundation observer nodes (non-voting); no active validators observed at tip 0 (2026-09-19). |
+| Sepolia Staking Hub Governance | Multisig-gated admission implemented | `Staking.sol` at `0x3060...` | 2-of-3 multisig (`0x0fC1...`) designated to approve external validator applicants. |
 | Dual-Key Identity Binding | Cryptographic EIP-191 + Ed25519 verification | `crates/node/src/api.rs` | `POST /v1/validators/register` enforces ownership proofs of EVM staker and Ed25519 node key. |
 | Zero-Clone Operator Tooling | Global `creg` CLI & `creg-node` daemon | PATH integration | Precompiled binary workflows without repository cloning. |
-| Technical Whitepaper v0.4.0 | Modernized for live testnet | `docs/WHITEPAPER.md` | Reflects live active multi-validator consensus on Sepolia. |
+| Technical Whitepaper v0.4.0 | Updated for Sepolia onboarding | `docs/WHITEPAPER.md` | Documents the onboarding path and the observed testnet status. |
 
 ## 2026-08
 

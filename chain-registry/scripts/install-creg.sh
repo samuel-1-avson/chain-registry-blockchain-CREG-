@@ -8,7 +8,7 @@
 #   curl -fsSL https://spec.testnet.cregnet.dev/install.sh | bash
 #
 # Options:
-#   --version <tag>      Install specific version (e.g., v0.4.5-testnet)
+#   --version <tag>      Install specific version (e.g., v0.4.7-testnet)
 #   --install-dir <dir>  Target directory (default: $HOME/.creg/bin)
 #   --build              Compile from local source using Cargo (requires Rust)
 #   --docker             Install Docker wrapper shim for creg
@@ -17,7 +17,7 @@
 
 set -euo pipefail
 
-DEFAULT_VERSION="v0.4.5-testnet"
+DEFAULT_VERSION="v0.4.7-testnet"
 SPEC_HOST="https://spec.testnet.cregnet.dev"
 GITHUB_REPO="${CREG_GITHUB_REPO:-samuel-1-avson/chain-registry-blockchain-CREG-}"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.creg/bin}"
@@ -37,7 +37,7 @@ while [[ $# -gt 0 ]]; do
     -h|--help)
       echo "CREG Installer Usage:"
       echo "  curl -fsSL https://spec.testnet.cregnet.dev/install.sh | bash"
-      echo "  curl -fsSL https://spec.testnet.cregnet.dev/install.sh | bash -s -- --version v0.4.5-testnet"
+      echo "  curl -fsSL https://spec.testnet.cregnet.dev/install.sh | bash -s -- --version v0.4.7-testnet"
       echo "  curl -fsSL https://spec.testnet.cregnet.dev/install.sh | bash -s -- --docker"
       echo "  ./scripts/install-creg.sh --build"
       exit 0

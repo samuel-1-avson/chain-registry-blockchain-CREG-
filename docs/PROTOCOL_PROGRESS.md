@@ -2,7 +2,7 @@
 
 **As of:** 2026-09-19
 **HEAD:** `36b6d49` (external-validator onboarding, staking CLI, and documentation modernization).
-**Public binary pin:** `v0.4.5-testnet` provides Windows, Linux, and macOS archives through the GitHub release. SEC-401 freeze candidate can stay `v0.4.3-testnet` if a vendor already scoped that tag.
+**Public binary pin:** `v0.4.7-testnet` provides Windows, Linux, and macOS archives through the GitHub release. SEC-401 freeze candidate can stay `v0.4.3-testnet` if a vendor already scoped that tag.
 **Canonical repo:** [samuel-1-avson/chain-registry-blockchain-CREG-](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-)
 
 This page is the **session briefing** for protocol work: what shipped, what improved, what is left, and how ready CREG is for testnet. Live fleet facts stay in [TESTNET_STATUS.md](./TESTNET_STATUS.md). Prioritized IDs stay in [NEXT_WORK.md](./NEXT_WORK.md). Maintainer tracks stay in [WHAT_TO_DO_NEXT.md](./WHAT_TO_DO_NEXT.md).
@@ -131,10 +131,10 @@ File: `chain-registry/testnet/chain-spec.sepolia.json`
 |-------|--------|
 | `chain_id` | `creg-testnet-1` |
 | `phase` | `alpha` |
-| `genesis_time` | 2026-08-02 |
-| `genesis_hash` | `0x4f5492623f277888cc534c2c65ffd8f020baa9b8b1d9ad3a392cbde39792ed24` |
-| Validators | `validator-1` … `validator-4` (coordinated) |
-| `bootnodes` | `[]` |
+| `genesis_time` | 2026-09-19T11:36:08Z |
+| `genesis_hash` | `0x9d9e86adb5bbf4f6e16c04e9825ab99c209bf44c1c7560968111e859a5e594ae` |
+| Spec identities | `validator-1` … `validator-4` (foundation observers, non-voting) |
+| `bootnodes` | 2 listed (same GCP host) |
 | `zk_validation` | `false` |
 | `threshold_encryption` | `false` |
 | `cross_chain` | `false` |

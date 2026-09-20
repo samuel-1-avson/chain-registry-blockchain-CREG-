@@ -5,11 +5,19 @@ on:
     paths:
       - "CREG-Contribution-Arena/**"
       - ".github/workflows/contribution-arena-ci.yml"
+      - "docs/WHITEPAPER.md"
+      - "docs/CREG_SYSTEM_WORKFLOW.md"
+      - "docs/archive/ARENA_PROTOCOL_CHANGELOG.md"
+      - "chain-registry/testnet/chain-spec.sepolia.json"
   push:
     branches: [main]
     paths:
       - "CREG-Contribution-Arena/**"
       - ".github/workflows/contribution-arena-ci.yml"
+      - "docs/WHITEPAPER.md"
+      - "docs/CREG_SYSTEM_WORKFLOW.md"
+      - "docs/archive/ARENA_PROTOCOL_CHANGELOG.md"
+      - "chain-registry/testnet/chain-spec.sepolia.json"
 
 permissions:
   contents: read
@@ -36,6 +44,7 @@ jobs:
       - run: npm ci
       - run: npm --prefix functions ci
       - run: npm audit --audit-level=high
+      - run: npm run check:spec-constants
       - run: npm run lint
       - run: npm run check:firebase-app-check
       - run: npm test
@@ -51,6 +60,7 @@ jobs:
       - run: npm run check:route-bundles
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
+      - run: npm run test:a11y
       - run: npm run smoke:preview
       - run: npm sbom --omit=dev --sbom-format=cyclonedx > dist/arena-sbom.json
       - uses: actions/upload-artifact@v4
@@ -63,3 +73,28 @@ jobs:
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: CREG-Contribution-Arena/dist/arena-sbom.json
+
+  docs-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: CREG-Contribution-Arena/package-lock.json
+      - run: npm ci
+        working-directory: CREG-Contribution-Arena
+      - run: npm run check:spec-constants
+        working-directory: CREG-Contribution-Arena
+      - run: node scripts/sync-whitepaper.mjs && node functions/scripts/sync-knowledge.mjs
+        working-directory: CREG-Contribution-Arena
+      - run: npm run verify:docs
+        working-directory: CREG-Contribution-Arena
+      - run: git diff --exit-code -- CREG-Contribution-Arena/public/whitepaper CREG-Contribution-Arena/functions/knowledge CREG-Contribution-Arena/src/lib/sepoliaSpec.generated.ts
+      - run: npx playwright install --with-deps chromium
+        working-directory: CREG-Contribution-Arena
+      - run: npm run generate:document-pdfs
+        working-directory: CREG-Contribution-Arena
