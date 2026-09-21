@@ -552,9 +552,9 @@ Deployed addresses are published in `testnet/chain-spec.sepolia.json`:
 | `ValidatorRewards.sol` | Validator reward distribution |
 | `SlashingEvidence.sol` | Double-sign and evidence slashing |
 | `PinningRewards.sol` | Pinning incentive scaffolding |
-| `BatchOperations.sol` | Batch contract operations |
+| `BatchOperations.sol` | Batch contract operations (no protocol fee; max 50 items per call) |
 
-**Planned but not active:** `CrossChainRegistry.sol` (`cross_chain: false`), `PrivateRegistry` (not in tree).
+**Not active on the public testnet:** `CrossChainRegistry.sol` (`cross_chain: false`). `PrivateRegistry.sol` (enterprise private registries with threshold encryption) is in-repo and `private_registries` is enabled in the chain spec; no Sepolia deployment is recorded in `contracts/deployments/sepolia-latest.json`.
 
 ### 5.2 Four Consensus Surfaces on L1
 
@@ -571,8 +571,11 @@ Deployed addresses are published in `testnet/chain-spec.sepolia.json`:
 |------|---------------|---------------|
 | Publisher | 1 tCREG | `stakeAsPublisher` |
 | Validator | 100 tCREG | `applyToBeValidator` |
+| Light validator | 50 tCREG | `minLightValidatorStake` (future/specialized role) |
 
 **Validator lifecycle states:** `None` → `Pending` → `Active` → `Unbonding` → `Withdrawn` (or `Rejected` / `Expired`).
+
+**Lifecycle parameters:** `APPLICATION_TIMEOUT` 7 days, `UNBONDING_PERIOD` 14 days, `RESTAKE_COOLDOWN` 7 days; `MAX_SLASH_COUNT` 3 auto-ejects into unbonding.
 
 **Slashing tiers:**
 
@@ -583,6 +586,8 @@ Deployed addresses are published in `testnet/chain-spec.sepolia.json`:
 | Critical | 30% |
 
 Slashed tokens enter a `slashPool` redistributable to honest active validators weighted by reputation.
+
+**Committee randomness is dual-stack:** on-chain `VRF.sol` (Chainlink VRF, Fisher-Yates assignment, 7 validators per package by default) plus node-side VRF-seeded proposer and committee selection from block header `vrf_output`/`vrf_proof`.
 
 ### 5.4 Feature Flags (Testnet)
 
@@ -878,10 +883,9 @@ signed with production-controlled keys do not yet exist. Production deployment
 must additionally isolate each verifier as an unprivileged, network-denied,
 resource-bounded process with immutable executable/policy/trust mounts and
 close the hash-check-to-launch replacement window. Seven focused archive tests
-pass on Windows; the Unix-only symlink case was not exercised there. The
-complete node suite passes 209/209 and the CLI suite passes 41/41; the current
-full Rust workspace/all-target run and post-run rustfmt verification remain
-pending.
+pass on Windows; the Unix-only symlink case was not exercised there. The 2026-08-23
+workspace snapshot (commit `5868401`) records CLI 49/49, node library 225/225,
+`creg-node` 227/227, node E2E 8/8, and node integration 11/11, with workspace all-target exit 0 (including sidecar launch 2/2) and `cargo fmt --check` exit 0.
 
 ### 8.2 Transaction Lifecycle
 
@@ -1641,8 +1645,8 @@ Documented in `DEEP_DIVE_ANALYSIS.md`:
 - The current ZK circuit constrains content and manifest hash limbs as public
   inputs; the older unconstrained-hash finding applies only to superseded
   implementations. ZK qualification nevertheless remains retired from the
-  production package-admission path. The current local Foundry suite passes
-  111/111, but immutable dependency pinning, a reproducibly clean CI checkout,
+  production package-admission path. Foundry v1.7.1 `forge test` passed 129/129
+  locally on 2026-08-23, but immutable dependency pinning, a reproducibly clean CI checkout,
   and independent circuit review remain.
 - Simplified VRF (not full RFC 9381)
 - Bridge proof mode is checkpoint-attestation, not full state transition validity
@@ -1746,11 +1750,11 @@ Runbooks in `docs/`:
 
 Toolchain pinned to Rust 1.93.0 for deterministic fmt/clippy gates.
 
-The 2026-07-29 local contract run used pinned `solc` 0.8.24 and Foundry
-1.6.0-nightly: all 12 suites and 111 tests passed with 0 failed/skipped,
-including 1000-run fuzz cases and the first-pause cooldown regression. This is
-current local evidence, not reproducibly clean CI: compiler warnings,
-immutable dependency/toolchain pinning, and clean-checkout execution remain
+The latest local contract run (2026-08-23) used pinned `solc` 0.8.24 and Foundry
+v1.7.1: all 12 suites and 129 tests passed with 0 failed/skipped, including
+1000-run fuzz cases. The earlier 2026-07-29 run (Foundry 1.6.0-nightly, 111/111)
+is superseded history. This is local evidence, not reproducibly clean CI:
+compiler warnings, immutable dependency/toolchain pinning, and clean-checkout execution remain
 open.
 
 ### 12.3 Quality Policies
@@ -1763,8 +1767,8 @@ open.
 
 ### 12.4 Readiness Gates
 
-Documented in `TESTNET_READINESS_REPORT.md` and
-`L2_PUBLIC_ALPHA_GATE_STATUS.md`. External security audit (SEC-401) remains
+Documented in `docs/archive/TESTNET_READINESS_REPORT.md` and
+`docs/archive/L2_PUBLIC_ALPHA_GATE_STATUS.md`. External security audit (SEC-401) remains
 open. Repository activation/checkpoint release tooling and local authority
 archive limits are implemented, but they do not satisfy rollout gates. CR-07
 remains gated on reviewed production npm/PyPI verifier/trust/policy artifacts,
@@ -1804,11 +1808,13 @@ Shared: IPFS, chain-spec nginx, P2P ports 29100–29102.
 
 | Service | URL |
 |---------|-----|
-| API | `https://api.testnet.cregnet.dev` |
-| IPFS | `https://ipfs.testnet.cregnet.dev` |
+| API | `https://api.testnet.cregnet.dev` (metrics at `/metrics`, per spec `services`) |
+| IPFS gateway / API | `https://ipfs.testnet.cregnet.dev` (both spec `services` entries share this host) |
 | Explorer | `https://explorer.testnet.cregnet.dev` |
-| Chain spec | `https://spec.testnet.cregnet.dev/chain-spec.json` |
+| Chain spec | `https://spec.testnet.cregnet.dev/chain-spec.json` (detached signature `chain-spec.json.sig`, the only spec-server URL carried in the signed spec `signing` block) |
 | Faucet | `https://faucet.testnet.cregnet.dev` |
+
+These public endpoints take no API key; operator-only routes use server-side `CREG_OPERATOR_API_KEY` (§13.4).
 
 ### 13.4 Key Environment Variables
 
@@ -1860,8 +1866,8 @@ Install script: `chain-registry/scripts/install-creg.sh`
 | Document | Purpose |
 |----------|---------|
 | `testnet/OPERATOR.md` | NET-301 operator runbook |
-| `docs/TESTNET_SEPOLIA_RUNBOOK.md` | Sepolia deploy and chain-spec |
-| `docs/GCP-VALIDATOR-FLEET.md` | Legacy GCP fleet lab (disabled by default) |
+| `docs/archive/TESTNET_SEPOLIA_RUNBOOK.md` | Sepolia deploy and chain-spec (archived 2026-09-19) |
+| `docs/archive/GCP-VALIDATOR-FLEET.md` | Legacy GCP fleet lab (disabled by default; archived 2026-09-19) |
 | `docs/VALIDATOR_ONBOARDING_CHECKLIST.md` | External validator admission |
 
 ---

@@ -1,10 +1,12 @@
 # Chain Registry (CREG) Technical Whitepaper
 
 > Version: 0.4.0-public-testnet  
-> Date: 2026-09-20  
+> Date: 2026-09-21  
 > Network: `creg-testnet-1` on Ethereum Sepolia  
 > Status: Public alpha — external validator onboarding enabled on Sepolia; public endpoint reachable with a freshly rebooted empty chain (tip 0, no peers observed 2026-09-20). Not production BFT  
 > Related resources: Public testnet quickstart, Phase scope definitions, Readiness gates status, CREG_SYSTEM_WORKFLOW.md, Contribution Arena
+>
+> Update 2026-09-21: Governance corrected to deployed `Governance.sol` (`0x122B...`); contract table completed (Appeal, VRF, PinningRewards); `zkValidationFee` corrected to 0 with a full fee table; verification counts updated to the 2026-08-23 snapshot; §8 numbering deduplicated; release pin updated to `v0.4.8-testnet`.
 >
 > Update 2026-09-20: Status re-verified (empty chain, tip 0, no peers); release pin updated to `v0.4.7-testnet`; document links repaired after the 2026-09-19 docs archive pass.
 >
@@ -16,7 +18,7 @@ For the most current architecture details, committee/reward formulas, performanc
 
 ## Abstract
 
-Modern software depends on package registries whose trust model is often centered on publisher accounts, centralized registry infrastructure, and local package-manager policy. Chain Registry (CREG) introduces an evidence-backed, validator-consensus package registry for open software ecosystems. Publishers submit signed, content-addressed packages; validators reproduce security analysis in isolated environments; consensus-grade votes bind the package identifier, content hash, scanner profile, and evidence digest; finalized records are written to a PBFT-backed local CREG chain. Sepolia hosts the live Staking Hub, token contracts, and 2-of-3 multisig governance. The legacy L1 batch checkpoint (`submitRollupBatch`) is retired and is not a settlement or anchoring path.
+Modern software depends on package registries whose trust model is often centered on publisher accounts, centralized registry infrastructure, and local package-manager policy. Chain Registry (CREG) introduces an evidence-backed, validator-consensus package registry for open software ecosystems. Publishers submit signed, content-addressed packages; validators reproduce security analysis in isolated environments; consensus-grade votes bind the package identifier, content hash, scanner profile, and evidence digest; finalized records are written to a PBFT-backed local CREG chain. Sepolia hosts the live Staking Hub, token contracts, and `Governance.sol` M-of-N multisig governance. The legacy L1 batch checkpoint (`submitRollupBatch`) is retired and is not a settlement or anchoring path.
 
 CREG is not a promise that malicious code can never pass a registry. It is a protocol for reducing single-party trust, making package risk evidence transparent, and turning package approval into an auditable, economically accountable network decision.
 
@@ -31,8 +33,8 @@ registries. The `creg-testnet-1` spec lists four foundation observer identities 
 external validator onboarding is enabled. No active validators have been observed on the
 public endpoint, which serves a freshly rebooted empty chain (tip 0, no peers, 2026-09-20). Independent operators
 stake testnet tCREG tokens on Ethereum Sepolia (`Staking.sol` at
-`0x30604Aa6f763fbde6aDCffbd8960af3031037331`), receive approval from the 2-of-3
-multisig governance contract (`0x0fC1448b11D005a30eb6aC2d54e488f7b58c5D4E`),
+`0x30604Aa6f763fbde6aDCffbd8960af3031037331`), receive approval from the
+multisig governance contract (`Governance.sol` at `0x122Bc2C704B966C74004506F98F13bf7b5F75b9D`),
 and bind their consensus Ed25519 node key via dual cryptographic proofs
 (`POST /v1/validators/register`) before actively participating in block production
 and package verification committees.
@@ -267,9 +269,9 @@ network-denied, resource-bounded OS sandbox with immutable executable, policy,
 and trust mounts and close the hash-check-to-launch replacement window.
 Repository archive quota/retention/pressure-GC controls are implemented.
 Seven focused archive tests pass on Windows; the Unix-only symlink case was not
-exercised on that platform. The complete node suite passes 209/209 and the CLI
-suite passes 41/41; the full Rust workspace/all-target run and post-run rustfmt
-verification remain pending. Shared-filesystem coordination, capacity alerts,
+exercised on that platform. The 2026-08-23 workspace snapshot (commit `5868401`)
+records CLI 49/49, node library 225/225, `creg-node` 227/227, node E2E 8/8,
+node integration 11/11, workspace all-target exit 0 (including sidecar launch 2/2), and `cargo fmt --check` exit 0. Shared-filesystem coordination, capacity alerts,
 backup/restore, disaster recovery, and legal-retention review remain external.
 
 ### 5.3 Validation Path
@@ -389,7 +391,7 @@ CREG's validator pipeline is designed to make package approval hard to fake and 
 ### 8.3 Admission
 Validators fetch the exact artifact bytes by CID, verify hashes, execute the security pipeline, produce a deterministic risk summary, sign a vote, and gossip it to the validator set. A vote is consensus-grade only when it includes complete bundle refs, a non-degraded scanner profile, and a non-empty evidence digest. Only mandatory core members are obligated to do the heavy work; volunteers may participate freely.
 
-### 8.1 Admission
+
 
 Before a package enters consensus, admission checks include:
 
@@ -400,29 +402,29 @@ Before a package enters consensus, admission checks include:
 - Rate limits and operator API controls.
 - Pre-mempool rule gates for high-risk patterns.
 
-### 8.2 Static Analysis
+### 8.4 Static Analysis
 
 Static analysis examines package contents for dangerous APIs, install hooks, obfuscation, credential exfiltration patterns, typosquatting signals, ecosystem-specific files, high-entropy blobs, pinned vulnerability advisories, and scanner rule matches. Consensus-relevant analysis uses pinned or local data where possible so different validators can reproduce results.
 
-### 8.3 Behavioral Sandbox
+### 8.5 Behavioral Sandbox
 
 The sandbox stage executes package behavior under controlled isolation. The preferred public profile uses `nsjail`; fallback engines include gVisor, Docker, and WASM where configured. The public alpha gate requires `CREG_DEV_SANDBOX=false` for public validators and health reporting of the active sandbox engine.
 
 Sandbox evidence can include observed network hosts, filesystem writes, process spawns, timeouts, and manifest violations.
 
-### 8.4 Differential Analysis
+### 8.6 Differential Analysis
 
 Validators compare a new version against prior verified behavior. A package update that adds a new network beacon, install script, filesystem write, or obfuscated code path can receive elevated risk even if each behavior is not independently conclusive.
 
-### 8.5 Vulnerability And Malware Signals
+### 8.7 Vulnerability And Malware Signals
 
 The validator stack supports YARA-style rules, threat-intel hashes, and OSV advisory data. Live external lookups are kept out of the deterministic consensus path unless they are pinned or otherwise made reproducible. This aligns with the principle that consensus should not depend on inconsistent third-party responses.
 
-### 8.6 PGP, Reputation, And Publisher Context
+### 8.8 PGP, Reputation, And Publisher Context
 
 CREG can verify detached PGP signatures and track publisher/validator reputation. Reputation influences review context, but it does not replace package-specific evidence.
 
-### 8.7 LLM-Assisted Review
+### 8.9 LLM-Assisted Review
 
 LLM analysis can summarize semantic risk, explain suspicious files, and help human reviewers triage packages. It is advisory. LLM output is not the trust root for package approval, and public surfaces must label it separately from deterministic consensus findings.
 
@@ -565,6 +567,8 @@ change invalidates outstanding verdict bundles. This is a research-alpha ABI
 change: deployed bytecode, signers, and relayers require a coordinated reviewed
 upgrade before this source behavior exists on a network.
 
+Separately, `PinningRewards.sol` is deployed on Sepolia (`0x4621...D66b`) but its address is not pinned in the signed `chain-spec.sepolia.json` contract map; the §10 row is the deployment record until the spec is updated.
+
 ### 9.6 Validator Set
 
 The signed chain spec contains bootstrap validator information, while validator admission and validator-set sync connect to L1 staking state. Validator admission can be approved by governance in emergency paths or by validator consensus under the staking contract's consensus admission rules.
@@ -577,13 +581,28 @@ CREG uses Ethereum Sepolia for the public testnet contract layer. The contract s
 | --- | --- | --- |
 | `Staking.sol` (Staking Hub) | `0x30604Aa6f763fbde6aDCffbd8960af3031037331` | Publisher/validator stake, validator lifecycle, unbonding, slashing |
 | `CregToken.sol` (tCREG) | `0x167Ab975dc95b79727Ed76BD8AAb70463F6499E2` | ERC-20 testnet CREG token with hard cap and permit support |
-| `GovernanceMultisig.sol` | `0x0fC1448b11D005a30eb6aC2d54e488f7b58c5D4E` | 2-of-3 threshold multisig governing validator admission & emergency actions |
+| `Governance.sol` | `0x122Bc2C704B966C74004506F98F13bf7b5F75b9D` | Canonical M-of-N multisig governing validator admission, proposals & emergency actions (deploy default threshold 2) |
 | `Registry.sol` | `0xD0F465ca185a99E268be0C4FF5A135Bdf89FAF3B` | L1 package lifecycle and EIP-712 finalize/revoke paths |
-| `Reputation.sol` | Verified Sepolia Deployment | Validator/publisher scoring signals |
-| `ValidatorRewards.sol` | Verified Sepolia Deployment | Work-based incentives distribution |
+| `Reputation.sol` | `0xeb4933741A59768027d5b4f86c6834350ADF3E06` | Validator/publisher scoring signals (0–100, new accounts start at 50) |
+| `ValidatorRewards.sol` | `0x11eb80abA89fb3fAB63d39900c2c644B5893a604` | Work-based incentives distribution |
+| `Appeal.sol` | `0x6A63d6b67e0b7d96B010ABb9CC4aF6AE378a0631` | Appeal bonds, panel votes, pull-payment refunds |
+| `VRF.sol` | `0xbfC05c7efD553922096ea632D9e75D8D10057ec4` | Chainlink VRF committee randomness (7 validators per package by default) |
+| `PinningRewards.sol` | `0x46212D928b9Fa1f793B197710d617a4f453eD66b` | Pinning incentives (deployed; not pinned in the signed chain spec) |
 | `ZKVerifier.sol` / `Groth16Verifier.sol` | Deployed reference | Retained experimental Groth16 verifier |
 
-The active Sepolia addresses are enforced in `chain-spec.sepolia.json` and monitored by the runtime observer nodes.
+The active Sepolia addresses are enforced in `chain-spec.sepolia.json` and monitored by the runtime observer nodes, except `PinningRewards.sol`, which is deployed but not yet pinned in the spec.
+
+### 10.1 Committee Randomness (VRF)
+
+`VRF.sol` requests Chainlink VRF random words and assigns a per-package committee with a Fisher-Yates shuffle over the active validator set. `validatorsPerPackage` defaults to 7 and is governance-adjustable from 3 to 50. Node block headers separately carry `vrf_output`/`vrf_proof` for proposer and committee seeding, so randomness is dual-stack: on-chain VRF plus node-side VRF-seeded selection.
+
+### 10.2 Reputation Scoring
+
+`Reputation.sol` scores each account from 0 to 100 from recorded approvals, rejections, and weighted mistakes; new accounts start at 50. Scores feed committee weighting, slash-pool redistribution, and review context, but never replace package-specific evidence.
+
+### 10.3 Appeals
+
+`Appeal.sol` lets a publisher bond 0.1 ETH to reopen a rejected package before a governance-approved panel. Panelists post 0.01 ETH per vote; 3 agreeing votes resolve the appeal within a 7-day window. Winning publishers and correct panelists withdraw via pull-payment; forfeited bonds go to governance.
 
 ## 11. Tokenomics And Incentive Design
 
@@ -613,7 +632,7 @@ The current `CregToken.sol` contract defines a hard-capped token supply:
 | Decimals | 18 |
 | Maximum supply | 42,000,000 CREG |
 | Initial minted supply | 20,000,000 CREG |
-| Remaining mint capacity | Up to ~12,500,000 CREG (governance-controlled) |
+| Remaining mint capacity | Up to 22,000,000 CREG (governance-controlled) |
 | Mint authority | Contract owner/governance only |
 | Burn support | Token holders can burn their own CREG |
 | Permit support | EIP-712-style `permit` for allowance setting |
@@ -660,7 +679,7 @@ Validator onboarding flow:
 1. Operator generates consensus Ed25519 keypair and starts node daemon (`creg-node`).
 2. Operator approves staking contract: `token.approve(0x3060..., 100 tCREG)`.
 3. Operator submits application: `staking.applyToBeValidator(100 tCREG)`. State becomes `Pending`.
-4. Governance Review: 2-of-3 multisig governance signs and executes `Staking.approveValidator(operatorAddress)`. State transitions to `Active`.
+4. Governance Review: Multisig governance signs and executes `Staking.approveValidator(operatorAddress)`. State transitions to `Active`.
 5. Cryptographic Identity Binding: Operator executes `POST /v1/validators/register` with dual cryptographic signatures:
    - EVM staker signature (EIP-191) proving stake ownership.
    - Ed25519 signature proving node consensus key ownership.
@@ -748,18 +767,33 @@ The whitepaper intentionally does not claim a finalized emission schedule or APY
 
 ### 11.8 Fees And Treasury Flows
 
-The current `Registry.sol` retains a legacy `zkValidationFee` storage value for
+The current `Registry.sol` retains a legacy `zkValidationFee` storage value (constructor default 0; governance-adjustable) for
 ABI and migration analysis:
 
 | Fee | Current value | Asset |
 | --- | ---: | --- |
-| `zkValidationFee` | 0.001 ETH | Legacy configured value; not an active public-alpha package fee |
+| `zkValidationFee` | 0 | Legacy configured value; not an active public-alpha package fee |
 
 The package ZK qualification entry point now reverts and shipped chain
 specifications set `zk_validation:false`, so users cannot currently pay this
 fee to qualify a package. Any balance already held by the Registry remains
 subject to its governance withdrawal path. This legacy value is separate from
 CREG staking and does not define a general protocol fee model.
+
+Protocol fees and staking minima as deployed (`v0.4.8-testnet` contract sources):
+
+| Item | Value | Notes |
+| --- | ---: | --- |
+| Batch operations | No protocol fee | `BatchOperations.sol`; max 50 items per call |
+| Publisher minimum stake | 1 CREG | `minPublisherStake` |
+| Validator minimum stake | 100 CREG | `minValidatorStake` |
+| Light validator minimum stake | 50 CREG | `minLightValidatorStake`; future/specialized role |
+| Appeal bond | 0.1 ETH | `MIN_APPEAL_BOND`; refunded on success |
+| Panelist vote bond | 0.01 ETH | `PANELIST_VOTE_BOND`; correct voters split losers' bonds |
+| Insurance base premium | 1% of coverage | 100 bps `basePremiumRate`, risk-adjusted; `insurance` flag disabled |
+| Pinning minimum stake | 1000 CREG | `PinningRewards.MIN_STAKE` |
+| Pinning reward rate | 0.01 CREG per GB per day | `rewardPerGBPerDay`, governance-adjustable |
+| Analysis reward base | 0.00001 CREG per package | Plus correct-vote bonus; see §11.7 |
 
 The treasury allocation and unminted reserve are intended to support:
 
@@ -881,7 +915,7 @@ reproducible proving/verifying tests, and precise public-input semantics.
 | Validator cartel above quorum threshold | Reduced by staking, transparency, and diversity; not eliminated |
 | Novel malware missed by scanners | Reduced by defense in depth; not eliminated |
 | L1 contract bug before audit | SEC-401 external audit is open; targeted hardenings applied (ZK content-limb binding + assert, enforceFinalizeRelays default true, bridge parse robustness + safety, Batch notes) |
-| ZK circuit or trusted setup flaw | Current local Foundry passes 111/111 and the circuit binds content/manifest hashes, but dedicated ZK audit, immutable dependency pinning, reproducibly clean CI, and key-management review remain |
+| ZK circuit or trusted setup flaw | Foundry v1.7.1 `forge test` passed 129/129 locally on 2026-08-23 and the circuit binds content/manifest hashes, but dedicated ZK audit, immutable dependency pinning, reproducibly clean CI, and key-management review remain |
 | Long-range sync attacks | Signed transition history, exact checkpoint matching, canonical-anchor checks, fail-closed certified mode, and an 11/11-tested publication/verification gate are implemented in repository; a real independently verified checkpoint and live multi-operator long-range/reorg rehearsal remain required |
 | IPFS unavailability | Requires redundant pinning and monitoring; PinningRewards + sidecar status now active |
 | Upstream namespace-verifier compromise or ambiguous npm authentication mode | Protocol pins verifier/policy/trust hashes and quorum-certifies observations, but reviewed production artifacts remain required and the official npm trusted-publisher authentication-mode signal is externally unavailable |
@@ -1048,14 +1082,14 @@ As of 2026-09-20, CREG is in public alpha testnet scope. (See CREG_SYSTEM_WORKFL
 | --- | --- |
 | Public API | `https://api.testnet.cregnet.dev` is reachable and serves a fresh empty chain (tip 0, no peers, 0 validators, observed 2026-09-20) — not a live network. Historical fleet snapshot: `archive/TESTNET_STATUS.md` (2026-08-25) |
 | Network | `creg-testnet-1` on Sepolia |
-| Release binaries | `v0.4.7-testnet` (Windows, Linux, and macOS archives) |
+| Release binaries | `v0.4.8-testnet` (Windows, Linux, and macOS archives) |
 | Real sandbox | Public readiness gate passed with `nsjail` profile |
 | Malicious fixture suite | Public readiness gate passed |
 | IPFS availability checks | Public readiness gate passed |
 | Incident response runbook | Drafted and linked in docs |
 | External audit | SEC-401 scope ready; vendor/start date TBD |
 | Contract tests | Local Foundry run recorded 129/129 passing in 2026-08 (see `PROTOCOL_PROGRESS.md` verification snapshot); compiler warnings, immutable dependency pinning, and clean-checkout CI remain |
-| CR-07 namespace authority | Deterministic v4 lifecycle, v2 certificate boundary, local archive limits, real cryptographic verifier candidates, and a disabled-by-default 11/11-tested activation gate are implemented. Node 209/209 and focused adapter/lifecycle/archive tests pass. npm lacks an official authentication-mode signal; PyPI private-temp launch is in-repo (rebuild, review, and activation remain); production trust/policy, positive fixtures, signed activation, rehearsal, deployment, and independent review remain gates |
+| CR-07 namespace authority | Deterministic v4 lifecycle, v2 certificate boundary, local archive limits, real cryptographic verifier candidates, and a disabled-by-default 11/11-tested activation gate are implemented. The 2026-08-23 snapshot (commit `5868401`) records CLI 49/49, node lib 225/225, `creg-node` 227/227, E2E 8/8, and integration 11/11 with workspace all-target exit 0. npm lacks an official authentication-mode signal; PyPI private-temp launch is in-repo (rebuild, review, and activation remain); production trust/policy, positive fixtures, signed activation, rehearsal, deployment, and independent review remain gates |
 | Weak-subjectivity checkpoint | Publication/verification CLI, fail-closed template, operator procedure, and CI pass 11/11 synthetic adversarial/CLI tests; no real checkpoint/key, independent verification, fleet configuration, or deployment exists |
 | Mainnet | Not launched |
 
@@ -1130,12 +1164,13 @@ The public alpha is already more than a concept: it includes a Rust node, CLI, c
 | Sepolia chain id | `11155111` |
 | Block time target | 5 seconds |
 | Vote timeout | 10 seconds |
-| Quorum percentage | 67 (enforceFinalizeRelays=true by default in Registry constructor) |
+| Quorum percentage | 67% with ceiling-derived quorum (`setQuorum` bounds 51–100); `enforceFinalizeRelays=true` by default |
 | Token max supply | 42,000,000 CREG (hard cap) |
 | Initial minted supply | 20,000,000 CREG |
 | Unminted capped reserve | Up to 22,000,000 CREG |
 | Publisher minimum stake | 1 tCREG |
 | Validator minimum stake | 100 tCREG |
+| Light validator minimum stake | 50 tCREG |
 | Mandatory committee target (large sets) | ~100 (M=100), VRF-seeded + stake/rep/performance weighted, per-eth cap=4 |
 | Validator application timeout | 7 days |
 | Validator unbonding | 14 days |
@@ -1147,6 +1182,7 @@ The public alpha is already more than a concept: it includes a Rust node, CLI, c
 | ZK validation flag | **Disabled in every shipped chain spec**; package qualification is retired |
 | ML validation flag | Enabled in current spec |
 | WASM sandbox flag | Enabled in current spec |
+| Private registries flag | Enabled in current spec |
 | Cross-chain flag | Disabled |
 | Insurance flag | Disabled |
 | Threshold encryption flag | Disabled |

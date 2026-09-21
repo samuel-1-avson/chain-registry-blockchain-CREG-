@@ -148,7 +148,7 @@ Scripts already exist:
   attach it to the global HTTPS LB backend.
 
 **Status:** blocked on the Cloud Armor quota grant (per
-`L2_PUBLIC_ALPHA_GATE_STATUS.md`). Once granted: run the quota script, then the
+`docs/archive/L2_PUBLIC_ALPHA_GATE_STATUS.md`). Once granted: run the quota script, then the
 setup script, then verify the policy is attached to the `api.*` LB backend.
 Until then the public edge relies on Caddy/nginx rate limits and the node's own
 P2P/REST rate limiting.
