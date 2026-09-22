@@ -119,6 +119,7 @@ docker rm -f "creg-validator-${NODE_ID}" >/dev/null 2>&1 || true
 docker run -d \
     --name "creg-validator-${NODE_ID}" \
     --restart unless-stopped \
+    --user "$(id -u):$(id -g)" \
     --env-file "${ENV_FILE}" \
     -p "${HTTP_PORT}:8080" \
     -p "${P2P_PORT}:9000" \
