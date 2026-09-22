@@ -37,6 +37,9 @@ else
     DATA_DIR="${HOME}/.creg-validator-${NODE_ID}"
 fi
 mkdir -p "${DATA_DIR}"
+# Pre-create the chain data dir as the host user: if Docker daemon creates it on
+# first mount it lands root-owned and the node cannot open its RocksDB store.
+mkdir -p "${DATA_DIR}/chain-data"
 ENV_FILE="${DATA_DIR}/validator.env"
 
 # Generate, load, or use custom Validator Key

@@ -34,6 +34,9 @@ if (-not $NodeId) {
 }
 
 if (-not (Test-Path $dataDir)) { New-Item -ItemType Directory -Path $dataDir -Force | Out-Null }
+# Pre-create the chain data dir: if the Docker daemon creates it on first mount it
+# can land with ownership the node user cannot write, breaking the RocksDB store.
+if (-not (Test-Path (Join-Path $dataDir "chain-data"))) { New-Item -ItemType Directory -Path (Join-Path $dataDir "chain-data") -Force | Out-Null }
 $keyFile = Join-Path $dataDir "validator.key"
 $envFile = Join-Path $dataDir "validator.env"
 
