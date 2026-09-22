@@ -65,7 +65,10 @@ else
     OPERATOR_KEY=$(cat "${DATA_DIR}/operator_api.key" | tr -d '\r\n ')
 fi
 
-BOOTNODE="/ip4/35.225.225.20/tcp/9000/p2p/12D3KooWHrfvaBbsQmXq1L3ZAjmX299ca9pLECT5a2GdxaGGizgY"
+# Bootnode seed: override with BOOTNODE="<multiaddr>" — the default below is only
+# correct while the published chain spec lists that peer. A stale ID here means
+# the node can never join the mesh (it rejects the handshake on peer-ID mismatch).
+BOOTNODE="${BOOTNODE:-/ip4/35.225.225.20/tcp/9000/p2p/12D3KooWHrfvaBbsQmXq1L3ZAjmX299ca9pLECT5a2GdxaGGizgY}"
 
 cat <<EOF > "${ENV_FILE}"
 CREG_TESTNET=true
@@ -87,6 +90,7 @@ CREG_P2P_LISTEN=/ip4/0.0.0.0/tcp/9000
 CREG_P2P_SEEDS=${BOOTNODE}
 CREG_PEERS=https://api.testnet.cregnet.dev
 CREG_LISTEN=0.0.0.0:8080
+CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM=${PBFT_SMALL_QUORUM:-true}
 RUST_LOG=info,chain_registry_node=debug,consensus=info
 EOF
 
@@ -102,8 +106,8 @@ done
 if [ -z "${CHOSEN_IMAGE}" ]; then
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     CHAIN_REGISTRY_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-    echo -e "${YELLOW}Local validator Docker image not found. Building from ${CHAIN_REGISTRY_DIR}/Dockerfile.local...${NC}"
-    docker build -f "${CHAIN_REGISTRY_DIR}/Dockerfile.local" -t chain-registry-node-secure:latest "${CHAIN_REGISTRY_DIR}"
+    echo -e "${YELLOW}Local validator Docker image not found. Building from ${CHAIN_REGISTRY_DIR}/Dockerfile (multi-stage, no host toolchain needed; takes a while on first run)...${NC}"
+    docker build -f "${CHAIN_REGISTRY_DIR}/Dockerfile" -t chain-registry-node-secure:latest "${CHAIN_REGISTRY_DIR}"
     CHOSEN_IMAGE="chain-registry-node-secure:latest"
 fi
 

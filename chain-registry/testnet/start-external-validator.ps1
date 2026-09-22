@@ -64,7 +64,10 @@ if (-not (Test-Path $operatorKeyFile)) {
     $opKey = (Get-Content $operatorKeyFile -Raw).Trim()
 }
 
-$bootnode = "/ip4/35.225.225.20/tcp/9000/p2p/12D3KooWHrfvaBbsQmXq1L3ZAjmX299ca9pLECT5a2GdxaGGizgY"
+# Bootnode seed: override with $env:BOOTNODE — the default below is only correct
+# while the published chain spec lists that peer. A stale ID means the node can
+# never join the mesh (handshake rejected on peer-ID mismatch).
+$bootnode = if ($env:BOOTNODE) { $env:BOOTNODE } else { "/ip4/35.225.225.20/tcp/9000/p2p/12D3KooWHrfvaBbsQmXq1L3ZAjmX299ca9pLECT5a2GdxaGGizgY" }
 
 $envLines = @(
     "CREG_TESTNET=true",
@@ -86,6 +89,7 @@ $envLines = @(
     "CREG_P2P_SEEDS=$bootnode",
     "CREG_PEERS=https://api.testnet.cregnet.dev",
     "CREG_LISTEN=0.0.0.0:8080",
+    "CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM=$(if ($env:PBFT_SMALL_QUORUM) { $env:PBFT_SMALL_QUORUM } else { 'true' })",
     "RUST_LOG=info,chain_registry_node=debug,consensus=info"
 )
 $envContent = $envLines -join [Environment]::NewLine
@@ -104,8 +108,8 @@ foreach ($cand in $imageCandidates) {
 
 if (-not $chosenImage) {
     $chainRegistryDir = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-    $dockerfile = Join-Path $chainRegistryDir "Dockerfile.local"
-    Write-Host "Local validator Docker image not found. Building from $dockerfile..." -ForegroundColor Yellow
+    $dockerfile = Join-Path $chainRegistryDir "Dockerfile"
+    Write-Host "Local validator Docker image not found. Building from $dockerfile (multi-stage, no host toolchain needed; takes a while on first run)..." -ForegroundColor Yellow
     docker build -f "$dockerfile" -t chain-registry-node-secure:latest "$chainRegistryDir"
     $chosenImage = "chain-registry-node-secure:latest"
 }
