@@ -9,7 +9,7 @@
 
 ARG PROFILE=full
 ARG NETWORK_RETRIES=1
-ARG CREG_SPEC_SIGNING_PUBKEY=3fe87833177b04b0a18600eace041692a35fb2b85f6e14e6734d894a0fd61c01
+ARG CREG_SPEC_SIGNING_PUBKEY=51ff9f3e37f8c82dbf49aea2f80d00aaf75acace5a148c0526187c8d1cae73bd
 
 # ── Stage 1: Build Frontend ───────────────────────────────────────────────────
 FROM node:20-slim AS frontend-builder
