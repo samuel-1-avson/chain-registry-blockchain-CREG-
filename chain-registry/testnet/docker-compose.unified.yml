@@ -128,6 +128,8 @@ services:
     container_name: creg-unified-explorer
     restart: unless-stopped
     environment:
+      # NOTE: VITE_* bake in at image build time; these runtime values are inert.
+      # The UI calls same-origin relative /v1/*, which nginx proxies to the node.
       VITE_API_BASE: "https://${CREG_PUBLIC_API_HOST:-api.testnet.cregnet.dev}"
       VITE_NETWORK: "testnet"
       VITE_SEPOLIA_CREG_TOKEN: "${CREG_TOKEN_ADDR:-0x167Ab975dc95b79727Ed76BD8AAb70463F6499E2}"
