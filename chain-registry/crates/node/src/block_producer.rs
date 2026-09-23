@@ -334,8 +334,10 @@ async fn prepare_proposer_context(
             .map(|v| v.pubkey.clone());
 
         // Commit to the complete canonical validator authority, not only the
-        // validator IDs. Stake/key/status substitutions must change the block
-        // header commitment and be detected by syncing nodes.
+        // validator IDs. Stake/key substitutions and active/inactive flips must
+        // change the block header commitment and be detected by syncing nodes.
+        // Node-local liveness labels ("self"/"online") are normalized by the
+        // canonical hash and do not affect it.
         let validator_set_hash = common::canonical_validator_set_hash(&s.validator_set);
 
         (

@@ -45,6 +45,15 @@ pub fn canonical_validator_set_hash(set: &ValidatorSet) -> String {
                 .cmp(&right.pubkey.to_ascii_lowercase())
         })
     });
+    // Normalize node-local liveness labels before hashing. Chain-authoritative
+    // sync marks the local member "self" and every other member "online", so
+    // raw status strings always differ across nodes even for identical sets.
+    // Only the active/inactive distinction is consensus-meaningful.
+    for validator in validators.iter_mut() {
+        if crate::validator_status_is_active(&validator.status) {
+            validator.status = "active".to_string();
+        }
+    }
     sha256_hex(&serde_json::to_vec(&validators).expect("validator set serializes"))
 }
 
@@ -260,6 +269,60 @@ mod tests {
             performance_score: 500,
             contribution_count: 0,
         }
+    }
+
+    #[test]
+    fn canonical_hash_ignores_node_local_liveness_labels() {
+        let key_a = SigningKey::generate(&mut OsRng);
+        let key_b = SigningKey::generate(&mut OsRng);
+        // Node A's view: itself "self", peer "online".
+        let view_a = ValidatorSet::new(vec![
+            Validator {
+                status: "self".into(),
+                ..validator("validator-1", &key_a)
+            },
+            Validator {
+                status: "online".into(),
+                ..validator("validator-2", &key_b)
+            },
+        ]);
+        // Node B's view: mirrored labels.
+        let view_b = ValidatorSet::new(vec![
+            Validator {
+                status: "online".into(),
+                ..validator("validator-1", &key_a)
+            },
+            Validator {
+                status: "self".into(),
+                ..validator("validator-2", &key_b)
+            },
+        ]);
+        // Spec bootstrap view: "active" everywhere.
+        let view_spec = ValidatorSet::new(vec![
+            Validator {
+                status: "active".into(),
+                ..validator("validator-1", &key_a)
+            },
+            Validator {
+                status: "active".into(),
+                ..validator("validator-2", &key_b)
+            },
+        ]);
+        let hash_a = canonical_validator_set_hash(&view_a);
+        assert_eq!(hash_a, canonical_validator_set_hash(&view_b));
+        assert_eq!(hash_a, canonical_validator_set_hash(&view_spec));
+        // A genuinely inactive member must still change the commitment.
+        let view_jailed = ValidatorSet::new(vec![
+            Validator {
+                status: "active".into(),
+                ..validator("validator-1", &key_a)
+            },
+            Validator {
+                status: "jailed".into(),
+                ..validator("validator-2", &key_b)
+            },
+        ]);
+        assert_ne!(hash_a, canonical_validator_set_hash(&view_jailed));
     }
 
     #[test]
