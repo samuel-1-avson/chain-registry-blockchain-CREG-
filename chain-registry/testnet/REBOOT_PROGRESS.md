@@ -80,7 +80,16 @@ No secrets in this file: pubkeys, peer IDs, addresses, and IPs only.
   `signing key 3fe8… does not match the binary-pinned …51ff…`, proving the
   new pin is active. Dockerfile root fix queued post-reboot.
 - Draft spec `signing.signing_key_pubkey_hex` updated to the new key
-  `51ff9f3e…73bd`; versions/timestamps/hash finalize at signing time.
+  `51ff9f3e…73bd`, then finalized as `chain-spec.sepolia.json`:
+  `genesis_time` 2026-09-23T06:54:48Z, Sepolia anchor 11784761,
+  genesis hash `0x66aa3c35…95e0f` (repo CLI), detached sig `4306fc43…b4af0e`
+  (user-signed on main VM, verified `✓ Ed25519 signature valid` +
+  tamper control fails closed). Code-verified: spec_version must stay 1,
+  2 validators → PBFT quorum exactly 2, P2P identity in
+  `/data/p2p/identity.key` (preserve on wipe), seeds comma-separated.
+- Validator launch scripts (`.sh`/`.ps1`) now prefer `creg-node:genesis2`
+  and default the seed to the main observer (was a stale dead peer);
+  unified compose node + faucet moved to `creg-node:genesis2`.
 - Mystery processes solved: `35.224.170.75` = Cloud NAT egress (no box);
   `154.162.92.123` dialer = old local `ext-val-primary` container (stopped,
   Sept-19 key backed up); `fervent_dhawan` = stray debug container (removed);
@@ -94,10 +103,12 @@ No secrets in this file: pubkeys, peer IDs, addresses, and IPs only.
    files + unique untracked installers; moved aside, fresh clone of
    `418521c`, carried over `.env.sepolia` + installers.
 2. **`creg-node:genesis2` image** (done): pin-patched + boot-verified (see above).
-3. **Distribute image** to validator-1, local, `10.128.0.41` (save/scp/load).
-4. **Finalize spec**: head block, `genesis_time`, computed hash, `validate`.
-5. **Sign + publish** spec + `.sig` via spec-server.
+3. **Distribute image** to validator-1 + local (done, `db25478b3f19`);
+   `10.128.0.41` gets it at restart.
+4. **Finalize spec** (done): timestamps, height 11784761, hash `0x66aa…e0f`.
+5. **Sign + publish** (signed ✓, committed; publish = main-VM `git pull`).
 6. **Coordinated restart** of all 4 nodes (wipes preserve `p2p/identity.key`).
+   Order: main observer → validator-1 → validator-2 → private observer.
 7. **Verify**: 5s blocks, climbing tip, explorer fills, both validators register
    (`register-validator.js`), validator-2 L1 staking, 3rd validator on quota.
 
