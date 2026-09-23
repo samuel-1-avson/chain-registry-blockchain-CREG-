@@ -52,7 +52,7 @@ services:
 
   # ── CREG Blockchain Observer & JSON-RPC Daemon ──────────────────────────────
   creg-node:
-    image: creg-node:local-3node
+    image: creg-node:genesis2
     container_name: creg-unified-node
     restart: unless-stopped
     environment:
@@ -94,7 +94,7 @@ services:
 
   # ── Sepolia Faucet Service ──────────────────────────────────────────────────
   faucet:
-    image: creg-node:local-3node
+    image: creg-node:genesis2
     container_name: creg-unified-faucet
     restart: unless-stopped
     entrypoint: ["/app/faucet"]

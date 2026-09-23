@@ -70,7 +70,7 @@ if (-not (Test-Path $operatorKeyFile)) {
 # Bootnode seed: override with $env:BOOTNODE — the default below is only correct
 # while the published chain spec lists that peer. A stale ID means the node can
 # never join the mesh (handshake rejected on peer-ID mismatch).
-$bootnode = if ($env:BOOTNODE) { $env:BOOTNODE } else { "/ip4/35.225.225.20/tcp/9000/p2p/12D3KooWHrfvaBbsQmXq1L3ZAjmX299ca9pLECT5a2GdxaGGizgY" }
+$bootnode = if ($env:BOOTNODE) { $env:BOOTNODE } else { "/ip4/35.225.225.20/tcp/9000/p2p/12D3KooWSUsWkwq8vhF7UyfGPoTAJkt6ESXuDaLKZNcR9myF8UXx" }
 
 $envLines = @(
     "CREG_TESTNET=true",
@@ -99,7 +99,7 @@ $envContent = $envLines -join [Environment]::NewLine
 [System.IO.File]::WriteAllText($envFile, $envContent)
 
 # Auto-detect available Docker image
-$imageCandidates = @("chain-registry-node-secure:latest", "creg-node:fleet", "creg-node:latest", "creg-node:local-3node", "chain-registry-app:latest")
+$imageCandidates = @("creg-node:genesis2", "chain-registry-node-secure:latest", "creg-node:fleet", "creg-node:latest", "creg-node:local-3node", "chain-registry-app:latest")
 $chosenImage = $null
 foreach ($cand in $imageCandidates) {
     $imgId = docker images -q $cand 2>$null

@@ -71,7 +71,7 @@ fi
 # Bootnode seed: override with BOOTNODE="<multiaddr>" — the default below is only
 # correct while the published chain spec lists that peer. A stale ID here means
 # the node can never join the mesh (it rejects the handshake on peer-ID mismatch).
-BOOTNODE="${BOOTNODE:-/ip4/35.225.225.20/tcp/9000/p2p/12D3KooWHrfvaBbsQmXq1L3ZAjmX299ca9pLECT5a2GdxaGGizgY}"
+BOOTNODE="${BOOTNODE:-/ip4/35.225.225.20/tcp/9000/p2p/12D3KooWSUsWkwq8vhF7UyfGPoTAJkt6ESXuDaLKZNcR9myF8UXx}"
 
 cat <<EOF > "${ENV_FILE}"
 CREG_TESTNET=true
@@ -99,7 +99,7 @@ EOF
 
 # Auto-detect available Docker image
 CHOSEN_IMAGE=""
-for candidate in chain-registry-node-secure:latest creg-node:fleet creg-node:latest creg-node:local-3node chain-registry-app:latest; do
+for candidate in creg-node:genesis2 chain-registry-node-secure:latest creg-node:fleet creg-node:latest creg-node:local-3node chain-registry-app:latest; do
     if docker image inspect "${candidate}" >/dev/null 2>&1; then
         CHOSEN_IMAGE="${candidate}"
         break
