@@ -40,6 +40,7 @@ pub use osv_snapshot::{
 
 pub mod osv_client;
 pub mod osv_snapshot;
+pub mod scanner_profile;
 pub mod threat_intel;
 pub mod yara_scanner;
 

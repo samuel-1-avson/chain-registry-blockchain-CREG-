@@ -6,6 +6,7 @@
 
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
+use sha2::{Digest, Sha256};
 use tracing::{debug, info, warn};
 
 /// A single YARA match found during scanning.
@@ -33,7 +34,16 @@ static COMPILED_RULES: OnceLock<Mutex<RulesCache>> = OnceLock::new();
 
 struct RulesCache {
     dir: Option<PathBuf>,
+    digest: Option<String>,
     rules: Option<yara_x::Rules>,
+}
+
+#[derive(Debug, Clone)]
+pub struct YaraRulesStatus {
+    pub available: bool,
+    pub digest: String,
+    pub files: usize,
+    pub error: Option<String>,
 }
 
 /// Return the rules directory path, overridable via `CREG_YARA_RULES_DIR`.
@@ -41,6 +51,46 @@ fn rules_dir() -> PathBuf {
     std::env::var("CREG_YARA_RULES_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from(DEFAULT_RULES_DIR))
+}
+
+fn rules_digest(dir: &PathBuf) -> Result<(String, usize), String> {
+    let entries = std::fs::read_dir(dir)
+        .map_err(|error| format!("cannot read YARA rules directory: {error}"))?;
+    let mut paths = entries
+        .map(|entry| {
+            entry
+                .map(|entry| entry.path())
+                .map_err(|error| format!("cannot inspect YARA rules directory entry: {error}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .filter(|path| {
+            matches!(
+                path.extension().and_then(|extension| extension.to_str()),
+                Some("yar" | "yara")
+            )
+        })
+        .collect::<Vec<_>>();
+    paths.sort();
+    if paths.is_empty() {
+        return Err("no .yar or .yara files found".to_string());
+    }
+
+    let mut hasher = Sha256::new();
+    hasher.update(b"creg-yara-rule-bundle-v1\0");
+    for path in &paths {
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| "YARA rule filename is not valid UTF-8".to_string())?;
+        let source = std::fs::read(path)
+            .map_err(|error| format!("cannot read YARA rule {}: {error}", path.display()))?;
+        hasher.update((name.len() as u64).to_be_bytes());
+        hasher.update(name.as_bytes());
+        hasher.update((source.len() as u64).to_be_bytes());
+        hasher.update(source);
+    }
+    Ok((hex::encode(hasher.finalize()), paths.len()))
 }
 
 /// Compile all `.yar` / `.yara` files from the rules directory.
@@ -68,8 +118,13 @@ fn compile_rules(dir: &PathBuf) -> Option<yara_x::Rules> {
         }
     };
 
-    for entry in entries.flatten() {
-        let path = entry.path();
+    let mut paths = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .collect::<Vec<_>>();
+    paths.sort();
+    let mut failed = false;
+    for path in paths {
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
         if ext != "yar" && ext != "yara" {
             continue;
@@ -78,17 +133,21 @@ fn compile_rules(dir: &PathBuf) -> Option<yara_x::Rules> {
             Ok(source) => {
                 if let Err(e) = compiler.add_source(source.as_str()) {
                     warn!("Failed to compile YARA rule '{}': {}", path.display(), e);
+                    failed = true;
                 } else {
                     loaded += 1;
                 }
             }
-            Err(e) => warn!("Failed to read YARA rule '{}': {}", path.display(), e),
+            Err(e) => {
+                warn!("Failed to read YARA rule '{}': {}", path.display(), e);
+                failed = true;
+            }
         }
     }
 
-    if loaded == 0 {
+    if loaded == 0 || failed {
         warn!(
-            "No YARA rules loaded from '{}' — YARA scanning disabled",
+            "YARA bundle is incomplete or has no rules in '{}' — YARA scanning disabled",
             dir.display()
         );
         return None;
@@ -110,9 +169,20 @@ fn rules_cache() -> &'static Mutex<RulesCache> {
     COMPILED_RULES.get_or_init(|| {
         Mutex::new(RulesCache {
             dir: None,
+            digest: None,
             rules: None,
         })
     })
+}
+
+fn ensure_compiled(dir: &PathBuf, digest: &str) -> bool {
+    let mut cache = rules_cache().lock().expect("YARA rules cache poisoned");
+    if cache.dir.as_ref() != Some(dir) || cache.digest.as_deref() != Some(digest) {
+        cache.rules = compile_rules(dir);
+        cache.dir = Some(dir.clone());
+        cache.digest = Some(digest.to_string());
+    }
+    cache.rules.is_some()
 }
 
 /// Whether a non-empty YARA rule bundle was loaded successfully.
@@ -121,12 +191,33 @@ fn rules_cache() -> &'static Mutex<RulesCache> {
 /// enter the pending pool.
 pub fn rules_available() -> bool {
     let dir = rules_dir();
-    let mut cache = rules_cache().lock().expect("YARA rules cache poisoned");
-    if cache.dir.as_ref() != Some(&dir) {
-        cache.rules = compile_rules(&dir);
-        cache.dir = Some(dir);
+    let Ok((digest, _)) = rules_digest(&dir) else {
+        return false;
+    };
+    ensure_compiled(&dir, &digest)
+}
+
+/// Return a content digest for the exact, successfully compiled YARA bundle.
+pub fn rules_status() -> YaraRulesStatus {
+    let dir = rules_dir();
+    let (digest, files) = match rules_digest(&dir) {
+        Ok(status) => status,
+        Err(error) => {
+            return YaraRulesStatus {
+                available: false,
+                digest: String::new(),
+                files: 0,
+                error: Some(error),
+            };
+        }
+    };
+    let available = ensure_compiled(&dir, &digest);
+    YaraRulesStatus {
+        available,
+        digest,
+        files,
+        error: (!available).then(|| "one or more YARA rule files failed to compile".to_string()),
     }
-    cache.rules.is_some()
 }
 
 /// Scan extracted source files with YARA rules.
@@ -136,11 +227,13 @@ pub fn rules_available() -> bool {
 /// first).
 pub fn scan_files(files: &[(String, String)]) -> Vec<YaraMatch> {
     let dir = rules_dir();
-    let mut cache = rules_cache().lock().expect("YARA rules cache poisoned");
-    if cache.dir.as_ref() != Some(&dir) {
-        cache.rules = compile_rules(&dir);
-        cache.dir = Some(dir);
+    let Ok((digest, _)) = rules_digest(&dir) else {
+        return Vec::new();
+    };
+    if !ensure_compiled(&dir, &digest) {
+        return Vec::new();
     }
+    let mut cache = rules_cache().lock().expect("YARA rules cache poisoned");
 
     let Some(rules) = cache.rules.as_ref() else {
         return Vec::new();

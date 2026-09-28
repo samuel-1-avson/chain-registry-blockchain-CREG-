@@ -49,10 +49,14 @@ pub fn canonical_validator_set_hash(set: &ValidatorSet) -> String {
     // sync marks the local member "self" and every other member "online", so
     // raw status strings always differ across nodes even for identical sets.
     // Only the active/inactive distinction is consensus-meaningful.
+    // Eth addresses and pubkeys are case-insensitive identities: reconcile
+    // lowercases them while history/spec snapshots keep original case.
     for validator in validators.iter_mut() {
         if crate::validator_status_is_active(&validator.status) {
             validator.status = "active".to_string();
         }
+        validator.eth_address = validator.eth_address.to_ascii_lowercase();
+        validator.pubkey = validator.pubkey.to_ascii_lowercase();
     }
     sha256_hex(&serde_json::to_vec(&validators).expect("validator set serializes"))
 }
@@ -112,7 +116,8 @@ fn is_lower_hex_hash(value: &str) -> bool {
     is_lower_hex(value, 64)
 }
 
-fn validate_validator_identities(set: &ValidatorSet) -> Result<(), &'static str> {
+/// Validate bootstrap membership without inventing a validator-set transition.
+pub fn validate_validator_identities(set: &ValidatorSet) -> Result<(), &'static str> {
     use std::collections::HashSet;
 
     if set.validators.is_empty() {
@@ -323,6 +328,22 @@ mod tests {
             },
         ]);
         assert_ne!(hash_a, canonical_validator_set_hash(&view_jailed));
+        // History/spec snapshots keep original hex case while reconcile
+        // lowercases: both spellings must hash identically.
+        let mut mixed = validator("validator-2", &key_b);
+        mixed.eth_address = "0xF4C0bdBB681A61Aa0B123E82C04b0D692F53d58E".into();
+        mixed.pubkey = hex::encode(key_b.verifying_key().as_bytes()).to_ascii_uppercase();
+        mixed.status = "active".into();
+        let mut lowered = validator("validator-2", &key_b);
+        lowered.eth_address = mixed.eth_address.to_ascii_lowercase();
+        lowered.pubkey = lowered.pubkey.to_ascii_lowercase();
+        lowered.status = "online".into();
+        let view_mixed = ValidatorSet::new(vec![validator("validator-1", &key_a), mixed]);
+        let view_lowered = ValidatorSet::new(vec![validator("validator-1", &key_a), lowered]);
+        assert_eq!(
+            canonical_validator_set_hash(&view_mixed),
+            canonical_validator_set_hash(&view_lowered)
+        );
     }
 
     #[test]

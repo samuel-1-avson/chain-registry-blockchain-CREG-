@@ -3,6 +3,11 @@ name    = "common"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = []
+# New-chain consensus encoding; never enable when replaying legacy chains.
+phase-c-canonical-transactions = []
+
 [dependencies]
 serde      = { workspace = true }
 serde_json = { workspace = true }

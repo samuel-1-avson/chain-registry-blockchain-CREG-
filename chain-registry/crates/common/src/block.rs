@@ -20,8 +20,13 @@ pub struct Block {
 impl Block {
     /// Compute the block hash over the serialized header.
     pub fn hash(&self) -> String {
-        let header_bytes =
-            serde_json::to_vec(&self.header).expect("BlockHeader must be serializable");
+        // The view-change certificate authorizes the view and leader but is
+        // proof material rather than block identity. Keep it out of the block
+        // digest so the prepare certificate it carries can refer to prior
+        // block hashes without recursively hashing certificates.
+        let mut header = self.header.clone();
+        header.view_change_certificate.clear();
+        let header_bytes = serde_json::to_vec(&header).expect("BlockHeader must be serializable");
         sha256_hex(&header_bytes)
     }
 
@@ -39,10 +44,27 @@ impl Block {
                 validator_set_hash: "0".repeat(64),
                 vrf_output: None,
                 vrf_proof: None,
+                view_number: 0,
+                view_change_certificate: vec![],
             },
             transactions: vec![],
             pbft_signatures: vec![],
         }
+    }
+}
+
+impl Block {
+    /// Bind Phase C's consensus parent to its verified signed spec. Old
+    /// view-change votes and signing locks cannot address this new height one.
+    pub fn genesis_for_phase_c(spec_genesis_hash: &str) -> anyhow::Result<Self> {
+        let identity = spec_genesis_hash.trim_start_matches("0x");
+        if identity.len() != 64 || !identity.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            anyhow::bail!("Phase C genesis requires a verified SHA-256 spec identity");
+        }
+        let mut genesis = Self::genesis();
+        genesis.header.proposer_id = "genesis-phase-c-sorted-json-v1".into();
+        genesis.header.validator_set_hash = identity.to_ascii_lowercase();
+        Ok(genesis)
     }
 }
 
@@ -64,6 +86,140 @@ pub struct BlockHeader {
     /// VRF proof (hex signature) proving the proposer's legitimacy.
     #[serde(default)]
     pub vrf_proof: Option<String>,
+    /// PBFT view in which this proposal was authorized. Omitted from legacy
+    /// view-zero serialization to preserve existing block hashes.
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub view_number: u32,
+    /// Quorum of validator view-change votes authorizing this view. This is
+    /// carried with the header for historical verification but excluded from
+    /// `Block::hash()`; each vote signs the height, parent, view, and any
+    /// prepared certificate it reports.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub view_change_certificate: Vec<ViewChangeVote>,
+}
+
+fn is_zero_u32(value: &u32) -> bool {
+    *value == 0
+}
+
+/// Header commitments used by a prepared certificate. It deliberately omits
+/// the view-change certificate, which is proof material and not part of the
+/// block hash.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PreparedBlockHeader {
+    pub height: u64,
+    pub prev_hash: String,
+    pub merkle_root: String,
+    pub proposer_id: String,
+    pub timestamp: DateTime<Utc>,
+    pub validator_set_hash: String,
+    #[serde(default)]
+    pub vrf_output: Option<String>,
+    #[serde(default)]
+    pub vrf_proof: Option<String>,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub view_number: u32,
+}
+
+impl From<&BlockHeader> for PreparedBlockHeader {
+    fn from(header: &BlockHeader) -> Self {
+        Self {
+            height: header.height,
+            prev_hash: header.prev_hash.clone(),
+            merkle_root: header.merkle_root.clone(),
+            proposer_id: header.proposer_id.clone(),
+            timestamp: header.timestamp,
+            validator_set_hash: header.validator_set_hash.clone(),
+            vrf_output: header.vrf_output.clone(),
+            vrf_proof: header.vrf_proof.clone(),
+            view_number: header.view_number,
+        }
+    }
+}
+
+/// Proof that a value reached PBFT PREPARE quorum in an earlier view.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PreparedCertificate {
+    pub header: PreparedBlockHeader,
+    /// PBFT view in which this immutable block reached PREPARE quorum.
+    #[serde(default)]
+    pub prepared_view: u32,
+    /// Authorization proof carried by the original proposal, if any.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub original_view_change_certificate: Vec<ViewChangeVote>,
+    /// Signed proof that the immutable block was carried into a later view.
+    /// Required when `prepared_view` exceeds the original header view.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reproposal_proof: Option<Box<ReproposalProof>>,
+    pub transactions: Vec<Transaction>,
+    pub prepare_signatures: Vec<BlockSignature>,
+}
+
+/// Replacement-primary authorization for retransmitting an immutable block.
+/// The proof is outside the block hash but bound to it by `leader_signature`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReproposalProof {
+    pub target_view: u32,
+    pub leader_id: String,
+    pub view_change_certificate: Vec<ViewChangeVote>,
+    pub leader_signature: String,
+}
+
+impl PreparedCertificate {
+    /// Reconstruct the exact value that was prepared. The view-change proof is
+    /// deliberately outside the block hash and is supplied by a later leader.
+    pub fn block(&self) -> Block {
+        Block {
+            header: BlockHeader {
+                height: self.header.height,
+                prev_hash: self.header.prev_hash.clone(),
+                merkle_root: self.header.merkle_root.clone(),
+                proposer_id: self.header.proposer_id.clone(),
+                timestamp: self.header.timestamp,
+                validator_set_hash: self.header.validator_set_hash.clone(),
+                vrf_output: self.header.vrf_output.clone(),
+                vrf_proof: self.header.vrf_proof.clone(),
+                view_number: self.header.view_number,
+                view_change_certificate: self.original_view_change_certificate.clone(),
+            },
+            transactions: self.transactions.clone(),
+            pbft_signatures: Vec::new(),
+        }
+    }
+}
+
+/// One validator's signed request to move a height/parent pair to a new view.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ViewChangeVote {
+    pub height: u64,
+    pub prev_hash: String,
+    pub new_view: u32,
+    pub validator_id: String,
+    pub prepared: Option<PreparedCertificate>,
+    pub signature: String,
+}
+
+impl ViewChangeVote {
+    /// Prepared signatures are ordered by validator ID. Phase C also sorts
+    /// nested map keys throughout the prepared value and its proof ancestry.
+    pub fn signing_message(&self) -> String {
+        let mut prepared = self.prepared.clone();
+        if let Some(certificate) = prepared.as_mut() {
+            certificate
+                .prepare_signatures
+                .sort_by(|a, b| a.validator_id.cmp(&b.validator_id));
+        }
+        let bytes = crate::consensus_json_bytes(&(
+            "creg-pbft-view-change-v1",
+            self.height,
+            &self.prev_hash,
+            self.new_view,
+            &self.validator_id,
+            prepared,
+        ))
+        .expect("view-change signing payload must be serializable");
+        sha256_hex(&bytes)
+    }
 }
 
 /// A signature from a validator explicitly voting for a block in PBFT.
@@ -163,11 +319,11 @@ impl Transaction {
     }
 }
 
-/// Canonical SHA-256 hash of a transaction (serde_json bytes), matching
-/// the leaf hash used by [`merkle_root`].
+/// SHA-256 leaf hash used by both durable work and [`merkle_root`]. Phase C
+/// canonicalizes nested map keys. Ordinary builds retain the legacy encoding.
 pub fn transaction_hash(tx: &Transaction) -> String {
     sha256_hex(
-        serde_json::to_vec(tx)
+        crate::consensus_json_bytes(tx)
             .expect("transaction must be serializable")
             .as_slice(),
     )
@@ -184,16 +340,7 @@ pub fn merkle_root(txs: &[Transaction]) -> String {
     if txs.is_empty() {
         return sha256_hex(b"empty");
     }
-    let mut hashes: Vec<String> = txs
-        .iter()
-        .map(|tx| {
-            sha256_hex(
-                serde_json::to_vec(tx)
-                    .expect("transaction must be serializable")
-                    .as_slice(),
-            )
-        })
-        .collect();
+    let mut hashes: Vec<String> = txs.iter().map(transaction_hash).collect();
 
     while hashes.len() > 1 {
         if hashes.len() % 2 != 0 {
@@ -206,4 +353,52 @@ pub fn merkle_root(txs: &[Transaction]) -> String {
             .collect();
     }
     hashes.remove(0)
+}
+
+#[cfg(test)]
+mod view_hash_tests {
+    use super::*;
+
+    #[derive(Serialize)]
+    struct LegacyHeader {
+        height: u64,
+        prev_hash: String,
+        merkle_root: String,
+        proposer_id: String,
+        timestamp: DateTime<Utc>,
+        validator_set_hash: String,
+        vrf_output: Option<String>,
+        vrf_proof: Option<String>,
+    }
+
+    #[test]
+    fn view_zero_preserves_legacy_hash_and_view_certificate_is_proof_only() {
+        let block = Block::genesis();
+        let legacy = LegacyHeader {
+            height: block.header.height,
+            prev_hash: block.header.prev_hash.clone(),
+            merkle_root: block.header.merkle_root.clone(),
+            proposer_id: block.header.proposer_id.clone(),
+            timestamp: block.header.timestamp,
+            validator_set_hash: block.header.validator_set_hash.clone(),
+            vrf_output: block.header.vrf_output.clone(),
+            vrf_proof: block.header.vrf_proof.clone(),
+        };
+        let legacy_hash = sha256_hex(&serde_json::to_vec(&legacy).unwrap());
+        assert_eq!(block.hash(), legacy_hash);
+
+        let mut with_certificate = block.clone();
+        with_certificate.header.view_change_certificate.push(ViewChangeVote {
+            height: 1,
+            prev_hash: "11".repeat(32),
+            new_view: 1,
+            validator_id: "validator-1".into(),
+            prepared: None,
+            signature: "proof-bytes".into(),
+        });
+        assert_eq!(block.hash(), with_certificate.hash());
+
+        with_certificate.header.view_number = 1;
+        assert_ne!(block.hash(), with_certificate.hash());
+    }
 }

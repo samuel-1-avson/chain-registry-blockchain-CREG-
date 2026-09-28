@@ -22,7 +22,9 @@ pub use bls_aggregate::{
     BlsPublicKey, BlsSignature,
 };
 pub use evidence_votes::{aggregate_evidence_votes, EvidenceVoteOutcome};
-pub use pbft::{verify_pbft_phase_signature, PbftConfig, PbftEngine, ViewChangeSignal};
+pub use pbft::{
+    verify_pbft_phase_signature, OwnVoteForRebroadcast, PbftConfig, PbftEngine, ViewChangeSignal,
+};
 pub use slashing_relay::{EquivocationDetector, EquivocationEvidence, ObservedVote};
 pub use validator_set::ValidatorSet;
 

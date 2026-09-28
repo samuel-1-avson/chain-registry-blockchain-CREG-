@@ -69,9 +69,12 @@ pub fn run_build(
         let key = osv_client::cache_key(info);
         eprintln!("[{}/{}] {}", idx + 1, keys.len(), key);
         let result = osv_client::query(info);
-        if result.queried && !result.vulnerabilities.is_empty() {
-            entries.insert(key, result.vulnerabilities);
+        if !result.queried {
+            bail!("OSV query did not succeed for {key}; refusing to write an incomplete snapshot");
         }
+        // Store a present key with an empty list when OSV successfully found
+        // no advisories. Missing keys remain distinguishable from clean results.
+        entries.insert(key, result.vulnerabilities);
         if delay > Duration::ZERO && idx + 1 < keys.len() {
             thread::sleep(delay);
         }
@@ -80,7 +83,7 @@ pub fn run_build(
     let snapshot = OsvSnapshot {
         epoch: epoch.to_string(),
         schema: SCHEMA_V1.to_string(),
-        source: "creg osv-snapshot build".into(),
+        source: "https://api.osv.dev/v1/query".into(),
         built_at: Utc::now().to_rfc3339(),
         entries,
     };

@@ -2,23 +2,24 @@
 # ==============================================================================
 # Chain Registry (CREG) — Universal Remote Installer
 # ==============================================================================
-# Installs `creg` (CLI) and `creg-node` (Validator / Node Daemon).
+# Installs the Phase C CLI. Validator nodes use the reviewed node deployment.
 #
 # Quick remote install (Linux / macOS):
 #   curl -fsSL https://spec.testnet.cregnet.dev/install.sh | bash
 #
 # Options:
-#   --version <tag>      Install specific version (e.g., v0.4.8-testnet)
+#   --version <tag>      Install specific version (e.g., v0.4.9-testnet)
 #   --install-dir <dir>  Target directory (default: $HOME/.creg/bin)
 #   --build              Compile from local source using Cargo (requires Rust)
-#   --docker             Install Docker wrapper shim for creg
+#   --docker             Use a reviewed CREG_CLI_IMAGE pinned by digest
 #   --no-modify-path     Do not append PATH export to ~/.bashrc or ~/.zshrc
 # ==============================================================================
 
 set -euo pipefail
 
-DEFAULT_VERSION="v0.4.8-testnet"
-SPEC_HOST="https://spec.testnet.cregnet.dev"
+DEFAULT_VERSION="v0.4.9-testnet"
+SPEC_HOST="${CREG_SPEC_HOST:-https://spec.testnet.cregnet.dev}"
+[[ "$SPEC_HOST" == https://* ]] || { echo 'CREG_SPEC_HOST must use HTTPS' >&2; exit 1; }
 GITHUB_REPO="${CREG_GITHUB_REPO:-samuel-1-avson/chain-registry-blockchain-CREG-}"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.creg/bin}"
 CONFIG_DIR="${CONFIG_DIR:-$HOME/.creg}"
@@ -82,7 +83,7 @@ while [[ $# -gt 0 ]]; do
     -h|--help)
       echo "CREG Installer Usage:"
       echo "  curl -fsSL https://spec.testnet.cregnet.dev/install.sh | bash"
-      echo "  curl -fsSL https://spec.testnet.cregnet.dev/install.sh | bash -s -- --version v0.4.8-testnet"
+      echo "  curl -fsSL https://spec.testnet.cregnet.dev/install.sh | bash -s -- --version v0.4.9-testnet"
       echo "  curl -fsSL https://spec.testnet.cregnet.dev/install.sh | bash -s -- --docker"
       echo "  ./scripts/install-creg.sh --build"
       exit 0
@@ -127,8 +128,9 @@ if [[ "$BUILD" -eq 1 ]]; then
   echo -e "${YELLOW}Compiling CREG from source (${REPO_ROOT})...${NC}"
   cd "$REPO_ROOT"
   export CREG_SPEC_SIGNING_PUBKEY="${CREG_SPEC_SIGNING_PUBKEY:-3fe87833177b04b0a18600eace041692a35fb2b85f6e14e6734d894a0fd61c01}"
-  cargo build --locked --release --package chain-registry-cli --package chain-registry-node
-  install -m 755 target/release/creg target/release/creg-node "$INSTALL_DIR/"
+  export CREG_RELEASE_VERSION="$VERSION"
+  cargo build --locked --release --package chain-registry-cli --bin creg --features common/phase-c-canonical-transactions
+  install -m 755 target/release/creg "$INSTALL_DIR/"
   echo -e "${GREEN}✓ Successfully built and installed to $INSTALL_DIR${NC}"
   exit 0
 fi
@@ -139,13 +141,39 @@ if [[ "$USE_DOCKER" -eq 1 ]]; then
     echo -e "${RED}Error: Docker is not installed on this machine.${NC}" >&2
     exit 1
   fi
-  cat << 'EOF' > "$INSTALL_DIR/creg"
-#!/usr/bin/env bash
-exec docker run --rm -it \
-  -v "$HOME/.creg:/root/.creg" \
+  CLI_IMAGE="${CREG_CLI_IMAGE:-}"
+  if [[ ! "$CLI_IMAGE" =~ ^[a-zA-Z0-9./:_-]+@sha256:[a-f0-9]{64}$ ]]; then
+    echo -e "${RED}No reviewed Docker CLI image was selected. Set CREG_CLI_IMAGE to the release's immutable digest or use the native Linux amd64 installer.${NC}" >&2
+    exit 1
+  fi
+  docker pull "$CLI_IMAGE" >/dev/null
+  IMAGE_VERSION="$(docker run --rm --entrypoint creg "$CLI_IMAGE" --version)"
+  if [[ "$IMAGE_VERSION" != "creg ${VERSION#v}" ]]; then
+    echo -e "${RED}Docker CLI version mismatch: expected ${VERSION#v}, got $IMAGE_VERSION.${NC}" >&2
+    exit 1
+  fi
+  TMP="$(mktemp -d)"
+  trap 'rm -rf "$TMP"' EXIT
+  curl -fsSL "${SPEC_HOST}/phase-c/r7/chain-spec.json" -o "$TMP/chain-spec.sepolia.json"
+  curl -fsSL "${SPEC_HOST}/phase-c/r7/chain-spec.json.sig" -o "$TMP/chain-spec.sepolia.json.sig"
+  docker run --rm --entrypoint creg -v "$TMP:/verified-spec:ro" "$CLI_IMAGE" \
+    chain-spec validate /verified-spec/chain-spec.sepolia.json \
+    --signature /verified-spec/chain-spec.sepolia.json.sig --require-signature \
+    --pubkey 3fe87833177b04b0a18600eace041692a35fb2b85f6e14e6734d894a0fd61c01
+  install -m 644 "$TMP/chain-spec.sepolia.json" "$CONFIG_DIR/chain-spec.sepolia.json"
+  install -m 644 "$TMP/chain-spec.sepolia.json.sig" "$CONFIG_DIR/chain-spec.sepolia.json.sig"
+  printf '#!/usr/bin/env bash\nCLI_IMAGE=%q\nCLI_CONFIG_DIR=%q\n' "$CLI_IMAGE" "$CONFIG_DIR" > "$INSTALL_DIR/creg"
+  cat << 'EOF' >> "$INSTALL_DIR/creg"
+tty_flags=()
+[[ -t 0 && -t 1 ]] && tty_flags=(-it)
+exec docker run --rm "${tty_flags[@]}" --entrypoint creg \
+  -v "$CLI_CONFIG_DIR:/root/.creg" \
   -v "$(pwd):/work" \
+  -e CREG_NODE_URL="${CREG_NODE_URL:-https://api.testnet.cregnet.dev}" \
+  -e CREG_CHAIN_SPEC_PATH=/root/.creg/chain-spec.sepolia.json \
+  -e CREG_CHAIN_SPEC_SIG_PATH=/root/.creg/chain-spec.sepolia.json.sig \
   -w /work \
-  ghcr.io/samuel-1-avson/chain-registry:latest creg "$@"
+  "$CLI_IMAGE" "$@"
 EOF
   chmod 755 "$INSTALL_DIR/creg"
   echo -e "${GREEN}✓ Installed Docker-based creg CLI shim to $INSTALL_DIR/creg${NC}"
@@ -161,17 +189,17 @@ case "$OS:$ARCH" in
   Linux:x86_64|Linux:amd64)
     TARBALL="chain-registry-${VERSION}-linux-amd64.tar.gz"
     ;;
-  Darwin:x86_64|Darwin:amd64|Darwin:arm64)
+  Darwin:x86_64|Darwin:amd64)
     # macOS binary or fallback to docker
     TARBALL="chain-registry-${VERSION}-macos-amd64.tar.gz"
     ;;
   *)
     echo -e "${YELLOW}Notice: Direct binary not precompiled for $OS/$ARCH.${NC}"
-    if command -v docker >/dev/null 2>&1; then
+    if command -v docker >/dev/null 2>&1 && [[ -n "${CREG_CLI_IMAGE:-}" ]]; then
       echo -e "${GREEN}Detected Docker. Installing Docker CLI wrapper instead...${NC}"
       exec bash "$INSTALLER_SOURCE" --docker --version "$VERSION" --install-dir "$INSTALL_DIR" --no-modify-path
     else
-      echo -e "${RED}Please install Docker or install Rust to build from source via 'cargo build'.${NC}"
+      echo -e "${RED}No native release exists for this platform. Use --build with Rust, or --docker with a reviewed CREG_CLI_IMAGE digest.${NC}"
       exit 1
     fi
     ;;
@@ -202,7 +230,7 @@ fi
 
 if [[ "$DOWNLOAD_SUCCESS" -ne 1 ]]; then
   echo -e "${YELLOW}Direct binary download not available for ${TARBALL}.${NC}"
-  if command -v docker >/dev/null 2>&1; then
+  if command -v docker >/dev/null 2>&1 && [[ -n "${CREG_CLI_IMAGE:-}" ]]; then
     echo -e "${CYAN}Falling back to Docker CLI wrapper installation...${NC}"
     exec bash "$INSTALLER_SOURCE" --docker --version "$VERSION" --install-dir "$INSTALL_DIR" --no-modify-path
   else
@@ -246,14 +274,31 @@ if [[ "${ACTUAL,,}" != "${EXPECTED,,}" ]]; then
 fi
 echo -e "${GREEN}✓ SHA-256 integrity verified: ${ACTUAL}${NC}"
 
-# Extract binaries
-tar -xzf "$TMP/$TARBALL" -C "$INSTALL_DIR"
-chmod 755 "$INSTALL_DIR/creg"* 2>/dev/null || true
+# Validate the staged binary and spec before replacing an existing installation.
+mkdir "$TMP/bin"
+tar -xzf "$TMP/$TARBALL" -C "$TMP/bin"
+chmod 755 "$TMP/bin/creg"
+ACTUAL_VERSION="$("$TMP/bin/creg" --version)"
+if [[ "$ACTUAL_VERSION" != "creg ${VERSION#v}" ]]; then
+  echo -e "${RED}Release version mismatch: expected ${VERSION#v}, got $ACTUAL_VERSION.${NC}" >&2
+  exit 1
+fi
 
 # Fetch testnet chain-spec so the user is immediately configured
 echo -e "${CYAN}Syncing signed testnet chain specification...${NC}"
-curl -fsSL "${SPEC_HOST}/chain-spec.sepolia.json" -o "$CONFIG_DIR/chain-spec.sepolia.json" 2>/dev/null || true
-curl -fsSL "${SPEC_HOST}/chain-spec.sepolia.json.sig" -o "$CONFIG_DIR/chain-spec.sepolia.json.sig" 2>/dev/null || true
+curl -fsSL "${SPEC_HOST}/phase-c/r7/chain-spec.json" -o "$TMP/chain-spec.sepolia.json"
+curl -fsSL "${SPEC_HOST}/phase-c/r7/chain-spec.json.sig" -o "$TMP/chain-spec.sepolia.json.sig"
+"$TMP/bin/creg" chain-spec validate "$TMP/chain-spec.sepolia.json" \
+  --signature "$TMP/chain-spec.sepolia.json.sig" --require-signature \
+  --pubkey 3fe87833177b04b0a18600eace041692a35fb2b85f6e14e6734d894a0fd61c01
+install -m 755 "$TMP/bin/creg" "$INSTALL_DIR/creg"
+install -m 644 "$TMP/chain-spec.sepolia.json" "$CONFIG_DIR/chain-spec.sepolia.json"
+install -m 644 "$TMP/chain-spec.sepolia.json.sig" "$CONFIG_DIR/chain-spec.sepolia.json.sig"
+mkdir -p "$INSTALL_DIR/testnet"
+install -m 644 "$TMP/chain-spec.sepolia.json" "$INSTALL_DIR/testnet/chain-spec.sepolia.json"
+install -m 644 "$TMP/chain-spec.sepolia.json.sig" "$INSTALL_DIR/testnet/chain-spec.sepolia.json.sig"
+export CREG_CHAIN_SPEC_PATH="$CONFIG_DIR/chain-spec.sepolia.json"
+export CREG_CHAIN_SPEC_SIG_PATH="$CONFIG_DIR/chain-spec.sepolia.json.sig"
 
 # Configure default config.toml pointing to public decentralized testnet
 CONFIG_FILE="$CONFIG_DIR/config.toml"
@@ -272,7 +317,7 @@ format = "Text"
 progress = true
 
 [ipfs]
-url = "https://spec.testnet.cregnet.dev/ipfs"
+url = "https://ipfs.testnet.cregnet.dev"
 timeout = 120
 EOF
   echo -e "${GREEN}✓ Preconfigured public testnet endpoint (https://api.testnet.cregnet.dev)${NC}"
@@ -301,6 +346,10 @@ if [[ "$MODIFY_PATH" -eq 1 ]]; then
       echo -e "export CREG_NODE_URL=\"https://api.testnet.cregnet.dev\"" >> "$SHELL_PROFILE"
       echo -e "${GREEN}✓ Added $INSTALL_DIR and CREG_NODE_URL to $SHELL_PROFILE${NC}"
       PATH_CONFIGURED=1
+    fi
+    if ! grep -qs 'export CREG_CHAIN_SPEC_PATH=' "$SHELL_PROFILE"; then
+      printf '\nexport CREG_CHAIN_SPEC_PATH=%q\n' "$CREG_CHAIN_SPEC_PATH" >> "$SHELL_PROFILE"
+      printf 'export CREG_CHAIN_SPEC_SIG_PATH=%q\n' "$CREG_CHAIN_SPEC_SIG_PATH" >> "$SHELL_PROFILE"
     fi
   fi
 fi

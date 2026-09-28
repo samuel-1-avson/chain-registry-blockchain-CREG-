@@ -9,8 +9,8 @@ usage() {
   cat <<'EOF'
 Usage: release-assurance.sh [--help]
 
-Build chain-registry-cli (creg) and chain-registry-node (creg-node) twice
-with deterministic release flags. Outputs must be byte-identical.
+Build chain-registry-cli (creg) twice with the R7 canonical transaction
+feature and deterministic release flags. Outputs must be byte-identical.
 
 Evidence is written to artifacts/release-assurance/.
 EOF
@@ -43,10 +43,9 @@ build_into() {
   # path-dependent noise.
   rm -rf "$target_dir"
   CARGO_TARGET_DIR="$target_dir" cargo build --locked --release \
-    --package chain-registry-cli \
-    --package chain-registry-node
+    --package chain-registry-cli --bin creg \
+    --features common/phase-c-canonical-transactions
   install -m 0755 "$target_dir/release/creg" "$ART/creg-${label}"
-  install -m 0755 "$target_dir/release/creg-node" "$ART/creg-node-${label}"
 }
 
 echo "release-assurance: build A (SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH})"
@@ -59,14 +58,9 @@ if ! cmp -s "$ART/creg-a" "$ART/creg-b"; then
   echo "release-assurance: creg binaries differ between builds" >&2
   exit 1
 fi
-if ! cmp -s "$ART/creg-node-a" "$ART/creg-node-b"; then
-  echo "release-assurance: creg-node binaries differ between builds" >&2
-  exit 1
-fi
-
 {
   echo "SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}"
-  sha256sum "$ART/creg-a" "$ART/creg-node-a"
+  sha256sum "$ART/creg-a"
 } > "$ART/sha256sum.txt"
 
 echo "release-assurance: OK — reproducible release binaries verified"

@@ -97,7 +97,7 @@ pub(crate) fn default_node_url() -> String {
 
 pub mod light_client;
 
-use light_client::{verify_package, Checkpoint};
+use light_client::Checkpoint;
 
 /// Resolve a package using light-client SPV verification.
 /// Provides stronger guarantees than trusting the node's verdict directly,
@@ -110,35 +110,6 @@ pub async fn resolve_verified(
     let url = node_url.map(String::from).unwrap_or_else(|| {
         std::env::var("CREG_NODE_URL").unwrap_or_else(|_| "http://localhost:8080".into())
     });
-    let cp = checkpoint.cloned().unwrap_or_else(Checkpoint::genesis);
-
-    // First get the standard verdict (fast path via cache).
     let verdict = resolve_id(id, Some(&url)).await?;
-
-    // If verified, additionally validate via Merkle proof.
-    if verdict.status.is_safe() {
-        match verify_package(&id.canonical(), &url, &cp).await {
-            Ok(true) => Ok(verdict),
-            Ok(false) => {
-                tracing::warn!(
-                    "Light-client proof failed for {} — downgrading to Unknown",
-                    id.canonical()
-                );
-                Ok(common::TrustVerdict {
-                    status: common::VerdictStatus::Unknown,
-                    ..verdict
-                })
-            }
-            Err(e) => {
-                tracing::warn!(
-                    "Light-client proof error for {}: {} — using standard verdict",
-                    id.canonical(),
-                    e
-                );
-                Ok(verdict)
-            }
-        }
-    } else {
-        Ok(verdict)
-    }
+    light_client::verify_verdict(verdict, &url, checkpoint).await
 }

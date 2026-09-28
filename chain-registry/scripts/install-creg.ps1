@@ -1,22 +1,23 @@
 # ==============================================================================
 # Chain Registry (CREG) -- Universal Remote Installer for Windows
 # ==============================================================================
-# Installs `creg.exe` (CLI) and `creg-node.exe` (Validator / Daemon).
+# Installs the Phase C CLI. Validator nodes use the reviewed node deployment.
 #
 # Quick remote install (PowerShell):
 #   irm https://spec.testnet.cregnet.dev/install.ps1 | iex
 #
 # Options:
-#   .\scripts\install-creg.ps1 -Version v0.4.8-testnet
+#   .\scripts\install-creg.ps1 -Version v0.4.9-testnet
 #   .\scripts\install-creg.ps1 -BuildFromSource
 #   .\scripts\install-creg.ps1 -InstallDir "C:\Custom\Path"
 # ==============================================================================
 
 param(
-    [string]$Version = "v0.4.8-testnet",
+    [string]$Version = "v0.4.9-testnet",
     [switch]$BuildFromSource,
     [string]$InstallDir = "$env:USERPROFILE\.creg\bin",
-    [string]$ConfigDir = "$env:USERPROFILE\.creg"
+    [string]$ConfigDir = "$env:USERPROFILE\.creg",
+    [switch]$NoModifyEnvironment
 )
 
 $ErrorActionPreference = "Stop"
@@ -77,21 +78,21 @@ if ($BuildFromSource) {
         throw "-BuildFromSource specified but not running inside the chain-registry repository."
     }
     Set-Location $repoRoot
-    Write-Host "Building creg + creg-node from source..." -ForegroundColor Cyan
+    Write-Host "Building creg from source..." -ForegroundColor Cyan
     if (-not $env:CREG_SPEC_SIGNING_PUBKEY) {
         $env:CREG_SPEC_SIGNING_PUBKEY = "3fe87833177b04b0a18600eace041692a35fb2b85f6e14e6734d894a0fd61c01"
     }
-    cargo build --locked --release --package chain-registry-cli --package chain-registry-node
+    $env:CREG_RELEASE_VERSION = $Version
+    cargo build --locked --release --package chain-registry-cli --bin creg --features common/phase-c-canonical-transactions
+    if ($LASTEXITCODE -ne 0) { throw 'CLI compilation failed; installation was not changed.' }
     Copy-Item "target\release\creg.exe" (Join-Path $InstallDir "creg.exe") -Force
-    if (Test-Path "target\release\creg-node.exe") {
-        Copy-Item "target\release\creg-node.exe" (Join-Path $InstallDir "creg-node.exe") -Force
-    }
     Write-Host "Installed to $InstallDir" -ForegroundColor Green
     exit 0
 }
 
 # ── Strategy 2: Precompiled binary download ───────────────────────────────────
-$specHost = "https://spec.testnet.cregnet.dev"
+$specHost = if ($env:CREG_SPEC_HOST) { $env:CREG_SPEC_HOST.TrimEnd('/') } else { "https://spec.testnet.cregnet.dev" }
+if (-not $specHost.StartsWith('https://', [StringComparison]::OrdinalIgnoreCase)) { throw 'CREG_SPEC_HOST must use HTTPS' }
 $githubRepo = $env:CREG_GITHUB_REPO
 if (-not $githubRepo) {
     $githubRepo = "samuel-1-avson/chain-registry-blockchain-CREG-"
@@ -155,8 +156,10 @@ if ($actualHash -ne $expectedHash) {
 }
 Write-Host "[OK] SHA-256 integrity verified: $actualHash" -ForegroundColor Green
 
-Write-Host "Extracting binaries to $InstallDir ..." -ForegroundColor Cyan
-Expand-Archive -Path $zip -DestinationPath $InstallDir -Force
+Write-Host "Validating staged binary and signed specification..." -ForegroundColor Cyan
+$stageDir = Join-Path ([System.IO.Path]::GetTempPath()) ('creg-install-' + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $stageDir | Out-Null
+Expand-Archive -Path $zip -DestinationPath $stageDir
 Remove-Item $zip -Force -ErrorAction SilentlyContinue
 if (Test-Path $checksums) {
     Remove-Item $checksums -Force -ErrorAction SilentlyContinue
@@ -165,11 +168,35 @@ if (Test-Path $checksums) {
 # Fetch signed testnet chain spec
 Write-Host "Syncing testnet chain specification..." -ForegroundColor Cyan
 try {
-    Invoke-WebRequest -Uri "$specHost/chain-spec.sepolia.json" -OutFile (Join-Path $ConfigDir "chain-spec.sepolia.json") -UseBasicParsing
-    Invoke-WebRequest -Uri "$specHost/chain-spec.sepolia.json.sig" -OutFile (Join-Path $ConfigDir "chain-spec.sepolia.json.sig") -UseBasicParsing
+    Invoke-WebRequest -Uri "$specHost/phase-c/r7/chain-spec.json" -OutFile (Join-Path $stageDir "chain-spec.sepolia.json") -UseBasicParsing
+    Invoke-WebRequest -Uri "$specHost/phase-c/r7/chain-spec.json.sig" -OutFile (Join-Path $stageDir "chain-spec.sepolia.json.sig") -UseBasicParsing
 } catch {
-    Write-Host "Warning: Could not sync chain-spec directly from spec server: $($_.Exception.Message)" -ForegroundColor Yellow
+    throw "Could not download the required signed chain specification: $($_.Exception.Message)"
 }
+$stagedCli = Join-Path $stageDir 'creg.exe'
+$stagedSpec = Join-Path $stageDir 'chain-spec.sepolia.json'
+$stagedSignature = Join-Path $stageDir 'chain-spec.sepolia.json.sig'
+$stagedVersion = & $stagedCli --version
+if ($LASTEXITCODE -ne 0 -or $stagedVersion.Trim() -ne ('creg ' + $Version.TrimStart('v'))) {
+    throw "Release version mismatch: requested $Version, received $stagedVersion. Existing installation was not changed."
+}
+& $stagedCli chain-spec validate $stagedSpec --signature $stagedSignature --require-signature --pubkey 3fe87833177b04b0a18600eace041692a35fb2b85f6e14e6734d894a0fd61c01
+if ($LASTEXITCODE -ne 0) { throw 'Signed chain-spec verification failed; installation is not configured.' }
+$installedCli = Join-Path $InstallDir 'creg.exe'
+$installedSpec = Join-Path $ConfigDir 'chain-spec.sepolia.json'
+$installedSignature = Join-Path $ConfigDir 'chain-spec.sepolia.json.sig'
+Copy-Item -LiteralPath $stagedCli -Destination $installedCli -Force
+Copy-Item -LiteralPath $stagedSpec -Destination $installedSpec -Force
+Copy-Item -LiteralPath $stagedSignature -Destination $installedSignature -Force
+$installedTestnetDir = Join-Path $InstallDir 'testnet'
+New-Item -ItemType Directory -Force -Path $installedTestnetDir | Out-Null
+Copy-Item -LiteralPath $stagedSpec -Destination (Join-Path $installedTestnetDir 'chain-spec.sepolia.json') -Force
+Copy-Item -LiteralPath $stagedSignature -Destination (Join-Path $installedTestnetDir 'chain-spec.sepolia.json.sig') -Force
+# Only remove the precisely named installer staging directory under system temp.
+$resolvedStage = [System.IO.Path]::GetFullPath($stageDir)
+$resolvedTemp = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath()).TrimEnd('\') + '\'
+if (-not $resolvedStage.StartsWith($resolvedTemp, [StringComparison]::OrdinalIgnoreCase)) { throw 'Installer staging path escaped system temp.' }
+Remove-Item -LiteralPath $resolvedStage -Recurse -Force
 
 # Configure default config.toml pointing to public decentralized testnet
 $configFile = Join-Path $ConfigDir "config.toml"
@@ -188,28 +215,34 @@ format = "Text"
 progress = true
 
 [ipfs]
-url = "https://spec.testnet.cregnet.dev/ipfs"
+url = "https://ipfs.testnet.cregnet.dev"
 timeout = 120
 '@ | Out-File -FilePath $configFile -Encoding utf8
     Write-Host "[OK] Preconfigured public testnet endpoint (https://api.testnet.cregnet.dev)" -ForegroundColor Green
 }
 
 # Set persistent User Environment Variable CREG_NODE_URL
-[Environment]::SetEnvironmentVariable("CREG_NODE_URL", "https://api.testnet.cregnet.dev", "User")
+if (-not $NoModifyEnvironment) {
+    [Environment]::SetEnvironmentVariable("CREG_NODE_URL", "https://api.testnet.cregnet.dev", "User")
+    [Environment]::SetEnvironmentVariable("CREG_CHAIN_SPEC_PATH", $installedSpec, "User")
+    [Environment]::SetEnvironmentVariable("CREG_CHAIN_SPEC_SIG_PATH", $installedSignature, "User")
+}
 $env:CREG_NODE_URL = "https://api.testnet.cregnet.dev"
+$env:CREG_CHAIN_SPEC_PATH = $installedSpec
+$env:CREG_CHAIN_SPEC_SIG_PATH = $installedSignature
 
 # Update Windows Environment Path
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-if ($userPath -notmatch [regex]::Escape($InstallDir)) {
-    $newUserPath = if ($userPath) { "$userPath;$InstallDir" } else { $InstallDir }
+if (-not $NoModifyEnvironment) {
+    $remainingPaths = @($userPath -split ';' | Where-Object { $_ -and $_.TrimEnd('\', '/') -ine $InstallDir.TrimEnd('\', '/') })
+    $newUserPath = (@($InstallDir) + $remainingPaths) -join ';'
     [Environment]::SetEnvironmentVariable("Path", $newUserPath, "User")
-    Write-Host "[OK] Added $InstallDir to User Environment PATH" -ForegroundColor Green
+    Write-Host "[OK] Put $InstallDir first in User Environment PATH" -ForegroundColor Green
 }
 
 # Update current session Path
-if ($env:Path -notmatch [regex]::Escape($InstallDir)) {
-    $env:Path = "$env:Path;$InstallDir"
-}
+$remainingSessionPaths = @($env:Path -split ';' | Where-Object { $_ -and $_.TrimEnd('\', '/') -ine $InstallDir.TrimEnd('\', '/') })
+$env:Path = (@($InstallDir) + $remainingSessionPaths) -join ';'
 
 Write-Host ""
 Write-Host "============================================================" -ForegroundColor Green

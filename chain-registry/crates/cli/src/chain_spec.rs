@@ -129,6 +129,7 @@ pub fn validate_spec(
             );
         }
     }
+    spec.validate_consensus_identity()?;
 
     let sig_path = resolve_signature_path(path, signature);
     match (&sig_path, require_signature, skip_signature) {
@@ -160,6 +161,8 @@ pub fn validate_spec(
     println!("  chain_id:      {}", spec.chain_id);
     println!("  network:       {:?}", spec.network);
     println!("  genesis_hash:  {}", computed);
+    println!("  block_zero:    {}", spec.canonical_genesis_block()?.hash());
+    println!("  encoding:      {:?}", spec.consensus_params.consensus_encoding);
     println!("  validators:    {}", spec.validator_set.validators.len());
     println!("  l1.chain_id:   {}", spec.l1.chain_id);
     Ok(())

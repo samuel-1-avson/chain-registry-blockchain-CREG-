@@ -1,4 +1,4 @@
-name: Release CREG binaries
+name: Release CREG CLI binaries
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release tag to build (for example v0.4.0-testnet)"
+        description: "Release tag to build (for example v0.4.9-testnet)"
         required: true
         type: string
 
@@ -29,7 +29,7 @@ env:
 
 jobs:
   reproducibility:
-    name: Reproducible Linux release build
+    name: Reproducible Linux CLI build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -89,16 +89,6 @@ jobs:
             pkg-config libssl-dev build-essential clang llvm libclang-dev \
             cmake libopenblas-dev protobuf-compiler libprotobuf-dev
 
-      - name: Install protoc (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        run: choco install protoc -y --no-progress
-
-      - name: Install protoc (macOS)
-        if: matrix.os == 'macos-latest'
-        shell: bash
-        run: brew list protobuf >/dev/null 2>&1 || brew install protobuf
-
       - name: Set deterministic build timestamp (Unix)
         if: matrix.os != 'windows-latest'
         shell: bash
@@ -109,21 +99,21 @@ jobs:
         shell: pwsh
         run: "Add-Content $env:GITHUB_ENV \"SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)\""
 
-      - name: Build CLI and node (Unix)
+      - name: Build CLI (Unix)
         if: matrix.os != 'windows-latest'
         shell: bash
         run: |
           cargo build --locked --release \
             --package chain-registry-cli --bin creg \
-            --package chain-registry-node --bin creg-node
+            --features common/phase-c-canonical-transactions
 
-      - name: Build CLI and node (Windows)
+      - name: Build CLI (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
           cargo build --locked --release `
             --package chain-registry-cli --bin creg `
-            --package chain-registry-node --bin creg-node
+            --features common/phase-c-canonical-transactions
 
       - name: Smoke-test binaries and signed chain spec (Unix)
         if: matrix.os != 'windows-latest'
@@ -132,9 +122,8 @@ jobs:
           set -euo pipefail
           expected="${RELEASE_VERSION#v}"
           test "$(./target/release/creg --version)" = "creg ${expected}"
-          test "$(./target/release/creg-node --version)" = "creg-node ${expected}"
-          ./target/release/creg chain-spec validate testnet/chain-spec.sepolia.json \
-            --signature testnet/chain-spec.sepolia.json.sig \
+          ./target/release/creg chain-spec validate testnet/phase-c/r7/chain-spec.json \
+            --signature testnet/phase-c/r7/chain-spec.json.sig \
             --pubkey "$CREG_SPEC_SIGNING_PUBKEY" --require-signature
 
       - name: Smoke-test binaries and signed chain spec (Windows)
@@ -143,9 +132,8 @@ jobs:
         run: |
           $expected = $env:RELEASE_VERSION.TrimStart('v')
           if ((& .\target\release\creg.exe --version) -ne "creg $expected") { throw "creg version does not match $env:RELEASE_VERSION" }
-          if ((& .\target\release\creg-node.exe --version) -ne "creg-node $expected") { throw "creg-node version does not match $env:RELEASE_VERSION" }
-          .\target\release\creg.exe chain-spec validate testnet\chain-spec.sepolia.json `
-            --signature testnet\chain-spec.sepolia.json.sig `
+          .\target\release\creg.exe chain-spec validate testnet\phase-c\r7\chain-spec.json `
+            --signature testnet\phase-c\r7\chain-spec.json.sig `
             --pubkey $env:CREG_SPEC_SIGNING_PUBKEY --require-signature
 
       - name: Package Unix release
@@ -156,10 +144,9 @@ jobs:
           rm -rf bundle release
           mkdir -p bundle/testnet release
           install -m 0755 target/release/creg bundle/creg
-          install -m 0755 target/release/creg-node bundle/creg-node
-          install -m 0644 testnet/chain-spec.sepolia.json bundle/testnet/chain-spec.sepolia.json
-          install -m 0644 testnet/chain-spec.sepolia.json.sig bundle/testnet/chain-spec.sepolia.json.sig
-          tar -czf "release/chain-registry-${RELEASE_VERSION}-${{ matrix.platform }}.tar.gz" -C bundle creg creg-node testnet
+          install -m 0644 testnet/phase-c/r7/chain-spec.json bundle/testnet/chain-spec.sepolia.json
+          install -m 0644 testnet/phase-c/r7/chain-spec.json.sig bundle/testnet/chain-spec.sepolia.json.sig
+          tar -czf "release/chain-registry-${RELEASE_VERSION}-${{ matrix.platform }}.tar.gz" -C bundle creg testnet
 
       - name: Package Windows release
         if: matrix.os == 'windows-latest'
@@ -170,9 +157,8 @@ jobs:
           Remove-Item $bundle,$release -Recurse -Force -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force -Path $bundle,$release,"$bundle\testnet" | Out-Null
           Copy-Item target\release\creg.exe "$bundle\creg.exe"
-          Copy-Item target\release\creg-node.exe "$bundle\creg-node.exe"
-          Copy-Item testnet\chain-spec.sepolia.json "$bundle\testnet\chain-spec.sepolia.json"
-          Copy-Item testnet\chain-spec.sepolia.json.sig "$bundle\testnet\chain-spec.sepolia.json.sig"
+          Copy-Item testnet\phase-c\r7\chain-spec.json "$bundle\testnet\chain-spec.sepolia.json"
+          Copy-Item testnet\phase-c\r7\chain-spec.json.sig "$bundle\testnet\chain-spec.sepolia.json.sig"
           Compress-Archive -Path "$bundle\*" -DestinationPath "$release\chain-registry-$env:RELEASE_VERSION-${{ matrix.platform }}.zip" -CompressionLevel Optimal
 
       - name: Upload platform archive
@@ -218,8 +204,8 @@ jobs:
           set -euo pipefail
           (cd release && sha256sum chain-registry-*) > release/SHA256SUMS
           cp release-assurance/sha256sum.txt release/REPRODUCIBILITY-SHA256SUMS.txt
-          export SPEC_SHA256="$(sha256sum testnet/chain-spec.sepolia.json | cut -d' ' -f1)"
-          export SIG_SHA256="$(sha256sum testnet/chain-spec.sepolia.json.sig | cut -d' ' -f1)"
+          export SPEC_SHA256="$(sha256sum testnet/phase-c/r7/chain-spec.json | cut -d' ' -f1)"
+          export SIG_SHA256="$(sha256sum testnet/phase-c/r7/chain-spec.json.sig | cut -d' ' -f1)"
           python3 - <<'PY'
           import hashlib, json, os, pathlib, subprocess
           root = pathlib.Path("release")
@@ -267,9 +253,10 @@ jobs:
           set -euo pipefail
           if ! gh release view "$RELEASE_VERSION" >/dev/null 2>&1; then
             gh release create "$RELEASE_VERSION" \
+              --target "$GITHUB_SHA" \
               --title "CREG $RELEASE_VERSION" \
               --generate-notes \
-              --notes "Signed CREG CLI/node binaries for the controlled testnet release. Verify SHA256SUMS using SHA256SUMS.sig and SHA256SUMS.bundle before installation."
+              --notes "Signed CREG CLI binaries for the R7 controlled testnet. The R7 chain spec and detached signature are included. Verify SHA256SUMS using SHA256SUMS.sig and SHA256SUMS.bundle before installation."
           fi
           gh release upload "$RELEASE_VERSION" release/* --clobber
 
@@ -298,7 +285,6 @@ jobs:
           bash scripts/install-creg.sh --version "$RELEASE_VERSION"
           export PATH="$INSTALL_DIR:$PATH"
           creg --version
-          creg-node --version
           creg chain-spec validate "$INSTALL_DIR/testnet/chain-spec.sepolia.json" \
             --signature "$INSTALL_DIR/testnet/chain-spec.sepolia.json.sig" \
             --pubkey "$CREG_SPEC_SIGNING_PUBKEY" --require-signature
@@ -313,7 +299,6 @@ jobs:
           $installDir = Join-Path $env:RUNNER_TEMP "creg-bin"
           .\scripts\install-creg.ps1 -Version $env:RELEASE_VERSION -InstallDir $installDir
           & (Join-Path $installDir "creg.exe") --version
-          & (Join-Path $installDir "creg-node.exe") --version
           & (Join-Path $installDir "creg.exe") chain-spec validate `
             (Join-Path $installDir "testnet\chain-spec.sepolia.json") `
             --signature (Join-Path $installDir "testnet\chain-spec.sepolia.json.sig") `

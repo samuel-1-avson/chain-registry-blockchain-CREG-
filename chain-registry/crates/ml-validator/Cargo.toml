@@ -5,6 +5,10 @@ edition = "2021"
 authors = ["Chain Registry Team"]
 description = "Machine learning-based threat detection for package validation"
 
+[features]
+default = []
+phase-c-real-fleet = []
+
 [dependencies]
 
 # Feature extraction

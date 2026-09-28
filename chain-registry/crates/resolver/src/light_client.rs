@@ -8,8 +8,9 @@
 //   4. Verifies the Merkle inclusion proof that the package transaction
 //      is actually inside the claimed block.
 //
-// This provides cryptographic assurance that the verdict is genuine without
-// downloading the full chain — the same security model as Bitcoin SPV wallets.
+// Phase C derives authority from a pinned, signed chain spec and certified
+// validator-set transitions. Publication inclusion does not prove freshness
+// or the absence of a later revocation; the install freshness gate handles those.
 
 use anyhow::{bail, Context, Result};
 use common::{sha256_hex, Block, BlockHeader};
@@ -30,13 +31,67 @@ pub struct Checkpoint {
 }
 
 impl Checkpoint {
-    /// Hardcoded genesis checkpoint — always valid.
+    /// Historical genesis only. Phase C callers use the authenticated spec.
     pub fn genesis() -> Self {
         Self {
             height: 0,
             hash: Block::genesis().hash(),
         }
     }
+
+    pub fn from_verified_spec(spec: &common::ChainSpec) -> Result<Self> {
+        Ok(Self { height: 0, hash: spec.canonical_genesis_block()?.hash() })
+    }
+}
+
+/// Load the trust root independently of a node's proof response. The binary
+/// pins the signer; environment configuration selects the signed network.
+async fn load_verified_chain_spec() -> Result<common::ChainSpec> {
+    let pinned = option_env!("CREG_SPEC_SIGNING_PUBKEY")
+        .filter(|key| !key.trim().is_empty())
+        .context("Phase C client has no binary-pinned chain-spec signer")?;
+    let (raw, signature) = if let Ok(path) = std::env::var("CREG_CHAIN_SPEC_PATH") {
+        let signature_path = std::env::var("CREG_CHAIN_SPEC_SIG_PATH")
+            .unwrap_or_else(|_| format!("{path}.sig"));
+        (std::fs::read_to_string(&path).context("read configured chain spec")?,
+         std::fs::read_to_string(signature_path).context("read chain-spec signature")?)
+    } else {
+        let url = std::env::var("CREG_CHAIN_SPEC_URL")
+            .context("Phase C verification requires CREG_CHAIN_SPEC_URL or CREG_CHAIN_SPEC_PATH")?;
+        let spec_url = reqwest::Url::parse(&url)?;
+        if spec_url.scheme() != "https" { bail!("chain-spec URL must use HTTPS"); }
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(8))
+            .redirect(reqwest::redirect::Policy::none()).build()?;
+        let raw = client.get(spec_url).send().await?.error_for_status()?.text().await?;
+        let spec: common::ChainSpec = serde_json::from_str(&raw)?;
+        let signature_url = reqwest::Url::parse(&spec.signing.detached_signature_url)?;
+        if signature_url.scheme() != "https" { bail!("chain-spec signature URL must use HTTPS"); }
+        let signature = client.get(signature_url).send().await?.error_for_status()?.text().await?;
+        (raw, signature)
+    };
+    let spec: common::ChainSpec = serde_json::from_str(&raw)?;
+    if spec.signing.signing_key_pubkey_hex.trim_start_matches("0x").to_ascii_lowercase()
+        != pinned.trim_start_matches("0x").to_ascii_lowercase() {
+        bail!("chain-spec signer differs from the binary pin");
+    }
+    spec.verify_signature(signature.trim(), pinned)?;
+    spec.validate_consensus_identity()?;
+    if let Ok(expected) = std::env::var("CREG_CHAIN_ID") {
+        if spec.chain_id != expected { bail!("signed chain ID differs from configured pin"); }
+    }
+    if let Ok(expected) = std::env::var("CREG_GENESIS_HASH") {
+        if spec.genesis_hash.trim_start_matches("0x") != expected.trim_start_matches("0x") {
+            bail!("signed genesis differs from configured pin");
+        }
+    }
+    Ok(spec)
+}
+
+pub async fn default_checkpoint() -> Result<Checkpoint> {
+    if common::compiled_consensus_encoding().is_some() {
+        Checkpoint::from_verified_spec(&load_verified_chain_spec().await?)
+    } else { Ok(Checkpoint::genesis()) }
 }
 
 // ── Merkle inclusion proof ────────────────────────────────────────────────────
@@ -79,6 +134,9 @@ impl MerkleProof {
 
 /// Compute a deterministic hash of the active validator set matching node's block_producer logic.
 pub fn compute_validator_set_hash(validators: &[common::Validator]) -> String {
+    if common::compiled_consensus_encoding().is_some() {
+        return common::canonical_validator_set_hash(&common::ValidatorSet::new(validators.to_vec()));
+    }
     let mut sorted_ids: Vec<&str> = validators.iter().map(|v| v.id.as_str()).collect();
     sorted_ids.sort_unstable();
     let mut hasher = Sha256::new();
@@ -107,12 +165,18 @@ pub fn verify_pbft_consensus(
     }
 
     // 2. Compute quorum threshold
-    let n = active_validators.len();
+    common::validate_validator_identities(&common::ValidatorSet::new(active_validators.to_vec()))
+        .map_err(anyhow::Error::msg)?;
+    let active: Vec<_> = active_validators.iter()
+        .filter(|v| common::validator_status_is_active(&v.status)).collect();
+    let n = active.len();
     if n == 0 {
         bail!("Active validator set is empty");
     }
 
-    let allow_small_cluster_quorum = std::env::var("CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM")
+    let phase_c = common::compiled_consensus_encoding().is_some();
+    if phase_c && n < 4 { bail!("Phase C requires at least four active validators"); }
+    let allow_small_cluster_quorum = !phase_c && std::env::var("CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM")
         .map(|v| v == "true" || v == "1")
         .unwrap_or(false);
 
@@ -122,7 +186,7 @@ pub fn verify_pbft_consensus(
     };
 
     // 3. Verify signatures
-    let validator_pubkeys: std::collections::HashMap<String, String> = active_validators
+    let validator_pubkeys: std::collections::HashMap<String, String> = active
         .iter()
         .map(|v| {
             (
@@ -206,7 +270,8 @@ pub fn verify_header(
     expected_hash: &str,
     expected_height: u64,
 ) -> Result<()> {
-    let computed = sha256_hex(&serde_json::to_vec(header).context("Failed to serialise header")?);
+    let computed = Block { header: header.clone(), transactions: Vec::new(),
+        pbft_signatures: Vec::new() }.hash();
 
     if computed != expected_hash {
         bail!(
@@ -277,8 +342,11 @@ pub fn verify_header_chain(
 /// Response from the chain node's light-client endpoint.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LightClientResponse {
-    /// The package's status string.
+    /// Proof verification status. This describes inclusion, not current install safety.
     pub status: String,
+    /// Current package lifecycle state, which can be revoked after publication.
+    #[serde(default)]
+    pub package_status: String,
     /// The block hash that contains this package record.
     pub block_hash: String,
     /// The block header at that height.
@@ -293,6 +361,12 @@ pub struct LightClientResponse {
     /// Active validator set at the block height (or current).
     #[serde(default)]
     pub active_validators: Vec<common::Validator>,
+    /// Exact leaf payload: binds the requested package and download identity.
+    #[serde(default)]
+    pub proven_transaction: Option<common::Transaction>,
+    /// Quorum-certified authority transitions following signed bootstrap.
+    #[serde(default)]
+    pub validator_set_history: Vec<common::AuthenticatedValidatorSetSnapshot>,
 }
 
 /// Fetch and cryptographically verify a package verdict using SPV-style proof.
@@ -302,6 +376,22 @@ pub async fn verify_package(
     node_url: &str,
     checkpoint: &Checkpoint,
 ) -> Result<bool> {
+    Ok(verify_package_record(canonical, node_url, Some(checkpoint)).await?.is_some())
+}
+
+async fn verify_package_record(
+    canonical: &str,
+    node_url: &str,
+    checkpoint: Option<&Checkpoint>,
+) -> Result<Option<(common::ChainRecord, String)>> {
+    let spec = if common::compiled_consensus_encoding().is_some() {
+        Some(load_verified_chain_spec().await?)
+    } else { None };
+    let genesis = match &spec {
+        Some(spec) => Checkpoint::from_verified_spec(spec)?,
+        None => Checkpoint::genesis(),
+    };
+    let checkpoint = checkpoint.unwrap_or(&genesis);
     let encoded = urlencoding::encode(canonical);
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(8))
@@ -345,7 +435,17 @@ pub async fn verify_package(
         .context("Invalid JSON from light-client proof endpoint")?;
 
     if resp.status != "verified" {
-        return Ok(false);
+        return Ok(None);
+    }
+
+    let transaction = resp.proven_transaction.as_ref()
+        .context("proof omitted the exact package transaction")?;
+    if common::transaction_hash(transaction) != resp.proof.tx_hash {
+        bail!("proof transaction does not match its Merkle leaf");
+    }
+    let record = transaction.published_record().context("proof leaf is not a publication")?;
+    if record.id.canonical() != canonical || !matches!(record.status, common::PackageStatus::Verified) {
+        bail!("proof publication does not match the requested verified package");
     }
 
     // 1. Verify the Merkle proof — package tx is inside the block.
@@ -365,11 +465,27 @@ pub async fn verify_package(
         resp.block_header.height,
     )?;
 
+    // Authenticate all ancestry from the signed genesis before using it to
+    // bind a transition's fork anchor. Caller checkpoints must lie on this path.
+    if spec.is_some() {
+        verify_header_chain(&resp.header_chain, &genesis)?;
+        let checkpoint_matches = if checkpoint.height == 0 {
+            checkpoint.hash == genesis.hash
+        } else {
+            resp.header_chain.iter().any(|(header, hash)|
+                header.height == checkpoint.height && hash == &checkpoint.hash)
+        };
+        if !checkpoint_matches { bail!("checkpoint is outside the signed-genesis ancestry"); }
+    }
+    let authority = match &spec {
+        Some(spec) => authenticated_proof_authority(spec, &resp, &genesis)?,
+        None => common::ValidatorSet::new(resp.active_validators.clone()),
+    };
     // Verify PBFT consensus validator signatures and quorums.
     verify_pbft_consensus(
         &resp.block_hash,
         &resp.block_header,
-        &resp.active_validators,
+        &authority.validators,
         &resp.pbft_signatures,
     )?;
 
@@ -411,7 +527,52 @@ pub async fn verify_package(
         hash_prefix(&resp.block_hash)
     );
 
-    Ok(true)
+    Ok(Some((record.clone(), resp.block_hash)))
+}
+
+fn authenticated_proof_authority(
+    spec: &common::ChainSpec,
+    response: &LightClientResponse,
+    genesis: &Checkpoint,
+) -> Result<common::ValidatorSet> {
+    let mut authority = spec.to_runtime_validator_set();
+    let mut last_height = 0;
+    for transition in &response.validator_set_history {
+        let height = transition.effective_from_height;
+        if height <= last_height || height > response.block_header.height {
+            bail!("proof authority history is unordered or extends beyond the proof block");
+        }
+        transition.validate_against(&authority).map_err(anyhow::Error::msg)?;
+        let parent = if height == 1 { Some(genesis.hash.as_str()) } else {
+            response.header_chain.iter().find(|(header, _)| header.height == height - 1)
+                .map(|(_, hash)| hash.as_str())
+        }.context("proof authority transition has no ancestry anchor")?;
+        if parent != transition.previous_block_hash {
+            bail!("proof authority transition belongs to a different fork");
+        }
+        authority = transition.validators.clone();
+        last_height = height;
+    }
+    Ok(authority)
+}
+
+/// Replace positive endpoint/cache data with fields committed by the proven
+/// transaction. Freshness and revocation checks remain required separately.
+pub async fn verify_verdict(
+    mut verdict: common::TrustVerdict,
+    node_url: &str,
+    checkpoint: Option<&Checkpoint>,
+) -> Result<common::TrustVerdict> {
+    if !verdict.status.is_safe() { return Ok(verdict); }
+    let (record, block_hash) = verify_package_record(&verdict.package.canonical(), node_url, checkpoint)
+        .await?.context("node did not provide a verified publication proof")?;
+    verdict.status = common::VerdictStatus::Verified {
+        block_hash, content_hash: record.content_hash, ipfs_cid: record.ipfs_cid,
+        findings: record.findings,
+    };
+    verdict.publisher = Some(record.publisher_pubkey);
+    verdict.deterministic_risk = Some(record.deterministic_risk);
+    Ok(verdict)
 }
 
 // ── Light client endpoint on the node side ─────────────────────────────────
@@ -434,7 +595,7 @@ pub fn build_merkle_proof(block: &Block, tx_index: usize) -> Result<MerkleProof>
     let leaves: Vec<String> = block
         .transactions
         .iter()
-        .map(|tx| sha256_hex(&serde_json::to_vec(tx).unwrap_or_default()))
+        .map(common::transaction_hash)
         .collect();
 
     let tx_hash = leaves[tx_index].clone();
@@ -513,6 +674,8 @@ mod tests {
                 validator_set_hash: "dev".into(),
                 vrf_output: None,
                 vrf_proof: None,
+                view_number: 0,
+                view_change_certificate: vec![],
             },
             transactions: txs,
             pbft_signatures: vec![],
@@ -550,6 +713,8 @@ mod tests {
                 validator_set_hash: "dev".into(),
                 vrf_output: None,
                 vrf_proof: None,
+                view_number: 0,
+                view_change_certificate: vec![],
             },
             transactions: vec![],
             pbft_signatures: vec![],
@@ -572,6 +737,8 @@ mod tests {
             validator_set_hash: "dev".into(),
             vrf_output: None,
             vrf_proof: None,
+            view_number: 0,
+            view_change_certificate: vec![],
         };
 
         assert!(verify_header_chain(&[(header, "bad-hash".into())], &genesis).is_err());
@@ -622,6 +789,8 @@ mod tests {
             validator_set_hash: val_set_hash.clone(),
             vrf_output: None,
             vrf_proof: None,
+            view_number: 0,
+            view_change_certificate: vec![],
         };
 
         let block_hash =

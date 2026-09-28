@@ -163,7 +163,8 @@ pub async fn resolve_id_for_install(
     node_url: Option<&str>,
 ) -> Result<TrustVerdict> {
     if let Some(cached) = cache::get(id)? {
-        if install_cache_usable(&cached, Utc::now()) {
+        if install_cache_usable(&cached, Utc::now())
+            && (common::compiled_consensus_encoding().is_none() || cached.status.is_blocked()) {
             tracing::debug!("install cache hit for {}", id.canonical());
             return Ok(cached);
         }
@@ -178,6 +179,9 @@ pub async fn resolve_id_for_install(
         .unwrap_or_else(|| crate::default_node_url());
 
     let verdict = chain_client::fetch_verdict(id, &url).await?;
+    let verdict = if common::compiled_consensus_encoding().is_some() {
+        crate::light_client::verify_verdict(verdict, &url, None).await?
+    } else { verdict };
     cache::set(id, &verdict)?;
     Ok(verdict)
 }

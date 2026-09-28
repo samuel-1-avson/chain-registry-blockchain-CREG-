@@ -15,14 +15,10 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 use tracing::{debug, info, warn};
 
-/// Compiled-in seed database.  Provides a baseline of well-known malicious
-/// package hashes so validators are not completely blind on first boot.
-/// Operators should supplement this with a full threat database via
-/// `CREG_THREAT_DB_PATH` or the `record_threat` API.
-const SEED_THREATS_JSON: &str = include_str!("bootstrap_threats.json");
-
 /// Minimum useful DB size below which we emit a persistent warning.
 const MIN_USEFUL_DB_SIZE: usize = 100;
+
+pub const THREAT_DB_SCHEMA_V1: &str = "creg-threat-db-v1";
 
 /// Default path for the known-malicious hash database.
 const DEFAULT_DB_PATH: &str = "data/known_malicious_hashes.json";
@@ -41,8 +37,28 @@ pub struct ThreatEntry {
 /// The in-memory threat intel database.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ThreatDatabase {
+    #[serde(default)]
+    pub schema: String,
+    #[serde(default)]
+    pub source: String,
+    #[serde(default)]
+    pub source_response_sha256: String,
+    #[serde(default)]
+    pub built_at: String,
     /// Map from SHA-256 hex hash → threat entry.
+    #[serde(default)]
     pub entries: HashMap<String, ThreatEntry>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ThreatDatabaseStatus {
+    pub available: bool,
+    pub digest: String,
+    pub source: String,
+    pub source_response_sha256: String,
+    pub built_at: String,
+    pub entries: usize,
+    pub error: Option<String>,
 }
 
 /// Result of a threat-intel lookup.
@@ -88,87 +104,138 @@ fn db_path() -> PathBuf {
 /// Loaded database singleton.
 static THREAT_DB: OnceLock<ThreatDatabase> = OnceLock::new();
 
-/// Parse the compiled-in seed database, returning an empty database on
-/// parse failure (should never happen — the file is checked at compile time).
-fn seed_database() -> ThreatDatabase {
-    match serde_json::from_str::<ThreatDatabase>(SEED_THREATS_JSON) {
-        Ok(db) => {
-            info!(
-                "Loaded {} compiled-in seed threat-intel entries",
-                db.entries.len()
-            );
-            db
-        }
-        Err(e) => {
-            warn!(
-                "Failed to parse compiled-in seed_threats.json: {} — proceeding without seeds",
-                e
-            );
-            ThreatDatabase::default()
-        }
-    }
-}
-
 fn load_database() -> ThreatDatabase {
-    // Always start from the compiled-in seed so validators are not blind on
-    // first boot before an operator-supplied database is deployed.
-    let mut db = seed_database();
     let path = db_path();
 
     if !path.exists() {
         warn!(
             path = %path.display(),
-            seed_entries = db.entries.len(),
-            "Threat intel database not found — running on seed data only. \
-             Set CREG_THREAT_DB_PATH or use `record_threat` to populate a full database. \
-             The validator will accept packages that would be blocked by a complete database."
+            "Operator threat-intelligence snapshot is missing; no built-in sample hashes are used"
         );
-        return db;
+        return ThreatDatabase::default();
     }
 
-    match std::fs::read_to_string(&path) {
+    let db = match std::fs::read_to_string(&path) {
         Ok(json) => match serde_json::from_str::<ThreatDatabase>(&json) {
-            Ok(on_disk) => {
-                // Merge: on-disk entries take precedence over seed entries so
-                // that operators can override or retract seed entries.
-                let added = on_disk.entries.len();
-                db.entries.extend(on_disk.entries);
-                info!(
-                    path = %path.display(),
-                    seed_entries = db.entries.len() - added,
-                    disk_entries = added,
-                    total = db.entries.len(),
-                    "Threat intel database loaded"
-                );
+            Ok(db) => {
+                info!(path = %path.display(), entries = db.entries.len(), "Operator threat-intel snapshot loaded");
+                db
             }
             Err(e) => {
                 warn!(
                     path = %path.display(),
                     error = %e,
-                    "Failed to parse threat intel database — falling back to seed entries only"
+                    "Failed to parse operator threat-intel snapshot; using an empty database"
                 );
+                ThreatDatabase::default()
             }
         },
         Err(e) => {
             warn!(
                 path = %path.display(),
                 error = %e,
-                "Failed to read threat intel database — falling back to seed entries only"
+                "Failed to read operator threat-intel snapshot; using an empty database"
             );
+            ThreatDatabase::default()
         }
-    }
+    };
+    warn_if_small(&db);
+    db
+}
 
+/// Inspect the configured snapshot without changing its contents.
+pub fn database_status() -> ThreatDatabaseStatus {
+    let path = db_path();
+    let bytes = match std::fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            return ThreatDatabaseStatus {
+                available: false,
+                digest: String::new(),
+                source: String::new(),
+                source_response_sha256: String::new(),
+                built_at: String::new(),
+                entries: 0,
+                error: Some(format!("cannot read configured threat database: {error}")),
+            };
+        }
+    };
+    let digest = sha256_hex(&bytes);
+    let db = match serde_json::from_slice::<ThreatDatabase>(&bytes) {
+        Ok(db) => db,
+        Err(error) => {
+            return ThreatDatabaseStatus {
+                available: false,
+                digest,
+                source: String::new(),
+                source_response_sha256: String::new(),
+                built_at: String::new(),
+                entries: 0,
+                error: Some(format!("invalid threat database JSON: {error}")),
+            };
+        }
+    };
+    let invalid_hashes = db
+        .entries
+        .keys()
+        .filter(|hash| {
+            hash.len() != 64
+                || !hash
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit())
+                || hash.bytes().any(|byte| byte.is_ascii_uppercase())
+        })
+        .count();
+    let invalid_entries = db
+        .entries
+        .values()
+        .filter(|entry| {
+            entry.label.trim().is_empty()
+                || !(1..=5).contains(&entry.threat_level)
+                || entry.source.trim().is_empty()
+        })
+        .count();
+    let error = if db.schema != THREAT_DB_SCHEMA_V1 {
+        Some(format!("unsupported or missing threat database schema '{}'", db.schema))
+    } else if db.built_at.trim().is_empty() {
+        Some("threat database build-time provenance is required".to_string())
+    } else if !db.source.starts_with("https://mb-api.abuse.ch/api/v1/") {
+        Some("threat database source is not the Abuse.ch MalwareBazaar API".to_string())
+    } else if db.source_response_sha256.len() != 64
+        || !db
+            .source_response_sha256
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    {
+        Some("threat database has no valid digest for its captured source response".to_string())
+    } else if invalid_hashes != 0 || invalid_entries != 0 {
+        Some(format!(
+            "threat database has {invalid_hashes} malformed SHA-256 keys and {invalid_entries} invalid entries"
+        ))
+    } else if db.entries.len() < MIN_USEFUL_DB_SIZE {
+        Some(format!("threat database has {} entries; at least {MIN_USEFUL_DB_SIZE} are required", db.entries.len()))
+    } else {
+        None
+    };
+    ThreatDatabaseStatus {
+        available: error.is_none(),
+        digest,
+        source: db.source,
+        source_response_sha256: db.source_response_sha256,
+        built_at: db.built_at,
+        entries: db.entries.len(),
+        error,
+    }
+}
+
+fn warn_if_small(db: &ThreatDatabase) {
     if db.entries.len() < MIN_USEFUL_DB_SIZE {
         warn!(
             entries = db.entries.len(),
             minimum = MIN_USEFUL_DB_SIZE,
-            "Threat intel database is below minimum useful size. \
-             Many malicious packages will go undetected. \
-             Obtain a full database from your threat-intelligence provider."
+            "Threat intel database is below minimum useful size"
         );
     }
-
-    db
 }
 
 fn get_db() -> &'static ThreatDatabase {

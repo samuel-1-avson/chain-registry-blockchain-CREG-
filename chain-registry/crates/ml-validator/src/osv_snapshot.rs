@@ -10,7 +10,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
@@ -24,7 +23,6 @@ pub const SCHEMA_V1: &str = "creg-osv-snapshot-v1";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OsvSnapshot {
     pub epoch: String,
-    #[serde(default = "default_schema")]
     pub schema: String,
     #[serde(default)]
     pub source: String,
@@ -34,8 +32,17 @@ pub struct OsvSnapshot {
     pub entries: HashMap<String, Vec<OsvVulnerability>>,
 }
 
-fn default_schema() -> String {
-    SCHEMA_V1.to_string()
+#[derive(Debug, Clone)]
+pub struct OsvSnapshotStatus {
+    pub enabled: bool,
+    pub available: bool,
+    pub digest: String,
+    pub epoch: String,
+    pub source: String,
+    pub built_at: String,
+    pub lookups: usize,
+    pub records: usize,
+    pub error: Option<String>,
 }
 
 impl OsvSnapshot {
@@ -54,7 +61,7 @@ impl OsvSnapshot {
 struct SnapshotCache {
     path: PathBuf,
     epoch: String,
-    mtime: Option<SystemTime>,
+    digest: String,
     snapshot: Option<Arc<OsvSnapshot>>,
 }
 
@@ -106,6 +113,104 @@ pub fn snapshot_available() -> bool {
     loaded_snapshot().is_some()
 }
 
+/// Inspect the pinned OSV data and its source provenance without using live HTTP.
+pub fn snapshot_status() -> OsvSnapshotStatus {
+    if !osv_consensus_enabled() {
+        return OsvSnapshotStatus {
+            enabled: false,
+            available: false,
+            digest: String::new(),
+            epoch: bundle_epoch(),
+            source: String::new(),
+            built_at: String::new(),
+            lookups: 0,
+            records: 0,
+            error: Some("consensus OSV snapshot is disabled".to_string()),
+        };
+    }
+    let path = snapshot_path();
+    let bytes = match std::fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            return OsvSnapshotStatus {
+                enabled: true,
+                available: false,
+                digest: String::new(),
+                epoch: bundle_epoch(),
+                source: String::new(),
+                built_at: String::new(),
+                lookups: 0,
+                records: 0,
+                error: Some(format!("cannot read OSV snapshot: {error}")),
+            };
+        }
+    };
+    let digest = crate::threat_intel::sha256_hex(&bytes);
+    let snapshot = match OsvSnapshot::from_json_bytes(&bytes) {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            return OsvSnapshotStatus {
+                enabled: true,
+                available: false,
+                digest,
+                epoch: bundle_epoch(),
+                source: String::new(),
+                built_at: String::new(),
+                lookups: 0,
+                records: 0,
+                error: Some(error),
+            };
+        }
+    };
+    let records = snapshot.entries.values().map(Vec::len).sum();
+    let invalid_keys = snapshot
+        .entries
+        .keys()
+        .filter(|key| {
+            let Some((ecosystem, package_version)) = key.split_once(':') else {
+                return true;
+            };
+            let Some((package, version)) = package_version.rsplit_once('@') else {
+                return true;
+            };
+            ecosystem.trim().is_empty() || package.trim().is_empty() || version.trim().is_empty()
+        })
+        .count();
+    let invalid_vulnerabilities = snapshot
+        .entries
+        .values()
+        .flatten()
+        .filter(|vulnerability| vulnerability.id.trim().is_empty())
+        .count();
+    let expected_epoch = bundle_epoch();
+    let error = if snapshot.schema != SCHEMA_V1 {
+        Some(format!("unsupported OSV snapshot schema '{}'", snapshot.schema))
+    } else if snapshot.epoch != expected_epoch {
+        Some(format!("OSV snapshot epoch '{}' does not match configured epoch '{expected_epoch}'", snapshot.epoch))
+    } else if snapshot.source != "https://api.osv.dev/v1/query" || snapshot.built_at.trim().is_empty() {
+        Some("OSV snapshot must identify the official OSV query API and its build time".to_string())
+    } else if snapshot.entries.is_empty() {
+        Some("OSV snapshot contains no successfully queried package versions".to_string())
+    } else if invalid_keys != 0 || invalid_vulnerabilities != 0 {
+        Some(format!(
+            "OSV snapshot has {invalid_keys} malformed package keys and {invalid_vulnerabilities} advisories without IDs"
+        ))
+    } else {
+        None
+    };
+    OsvSnapshotStatus {
+        enabled: true,
+        available: error.is_none(),
+        digest,
+        epoch: snapshot.epoch,
+        source: snapshot.source,
+        built_at: snapshot.built_at,
+        lookups: snapshot.entries.len(),
+        records,
+        error,
+    }
+}
+
 /// Clear cached snapshot (tests).
 #[cfg(test)]
 pub fn reset_snapshot_cache_for_tests() {
@@ -114,10 +219,10 @@ pub fn reset_snapshot_cache_for_tests() {
     }
 }
 
-fn file_mtime(path: &Path) -> Option<SystemTime> {
-    std::fs::metadata(path)
+fn file_digest(path: &Path) -> Option<String> {
+    std::fs::read(path)
         .ok()
-        .and_then(|meta| meta.modified().ok())
+        .map(|bytes| crate::threat_intel::sha256_hex(&bytes))
 }
 
 fn load_snapshot_from_disk(path: &Path, expected_epoch: &str) -> Option<Arc<OsvSnapshot>> {
@@ -177,14 +282,14 @@ fn loaded_snapshot() -> Option<Arc<OsvSnapshot>> {
 
     let path = snapshot_path();
     let epoch = bundle_epoch();
-    let mtime = file_mtime(&path);
+    let digest = file_digest(&path)?;
 
     let mut cache = snapshot_cache().lock().ok()?;
 
     let cache_valid = cache.snapshot.is_some()
         && cache.path == path
         && cache.epoch == epoch
-        && cache.mtime == mtime;
+        && cache.digest == digest;
 
     if cache_valid {
         return cache.snapshot.clone();
@@ -193,7 +298,7 @@ fn loaded_snapshot() -> Option<Arc<OsvSnapshot>> {
     let snapshot = load_snapshot_from_disk(&path, &epoch);
     cache.path = path;
     cache.epoch = epoch;
-    cache.mtime = mtime;
+    cache.digest = digest;
     cache.snapshot = snapshot.clone();
     snapshot
 }
@@ -201,10 +306,12 @@ fn loaded_snapshot() -> Option<Arc<OsvSnapshot>> {
 /// Lookup vulnerabilities for a package inside an already-loaded snapshot.
 pub fn lookup_in_snapshot(snapshot: &OsvSnapshot, info: &PackageInfo) -> OsvResult {
     let key = OsvSnapshot::entry_key(info);
-    let vulnerabilities = snapshot.entries.get(&key).cloned().unwrap_or_default();
-    OsvResult {
-        queried: true,
-        vulnerabilities,
+    match snapshot.entries.get(&key) {
+        Some(vulnerabilities) => OsvResult {
+            queried: true,
+            vulnerabilities: vulnerabilities.clone(),
+        },
+        None => OsvResult::unavailable(),
     }
 }
 
@@ -322,7 +429,7 @@ mod tests {
         )
         .unwrap();
         let result = lookup_in_snapshot(&snapshot, &sample_info());
-        assert!(result.queried);
+        assert!(!result.queried);
         assert!(result.vulnerabilities.is_empty());
     }
 

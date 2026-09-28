@@ -3,6 +3,7 @@
 
 pub mod block;
 pub mod chain_spec;
+pub mod consensus_encoding;
 pub mod error;
 pub mod feature_flags;
 pub mod hot_key;
@@ -21,6 +22,7 @@ pub mod proto {
 
 pub use block::*;
 pub use chain_spec::*;
+pub use consensus_encoding::*;
 pub use error::*;
 pub use feature_flags::*;
 pub use hot_key::*;
@@ -145,8 +147,34 @@ pub fn validator_status_is_active(status: &str) -> bool {
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct SignedRevocationRequest {
+    pub chain_id: String,
+    pub genesis_hash: String,
+    pub package_canonical: String,
+    pub reason: String,
+    pub revoker_pubkey: String,
+    pub signature: String,
+    #[serde(default)]
+    pub signature_version: u8,
+}
+
+impl SignedRevocationRequest {
+    pub fn signing_message(&self) -> String {
+        if self.signature_version == 1 {
+            format!("creg-revoke-v1:{}:{}:{}:revoke:{}", self.chain_id, self.genesis_hash,
+                self.package_canonical, self.reason)
+        } else {
+            format!("{}:revoke:{}", self.package_canonical, self.reason)
+        }
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub enum GossipMessage {
     PublishRequest(PublishRequest),
+    /// Original owner/validator proof is independently checked by every peer.
+    /// Delivery IDs change on retries; the signed request and transaction do not.
+    RevocationRequest { request: SignedRevocationRequest, delivery_id: String },
     VrfProof {
         validator_id: String,
         pubkey: String,
@@ -154,23 +182,21 @@ pub enum GossipMessage {
         output: String,
         proof: String,
     },
-    /// A validator's view-change certificate, broadcast when a PBFT round
-    /// times out.  Peers accumulate these and only execute the view-change
-    /// locally once they have seen ⌊n/3⌋+1 certificates for the same
-    /// (block_hash, new_view) pair, preventing a single Byzantine node from
-    /// forcing a view-change.
-    ViewChange {
-        /// Hex-encoded hash of the block this round is for.
-        block_hash: String,
-        /// The new view number being proposed.
-        new_view: u32,
-        /// ID of the validator requesting the view-change.
-        validator_id: String,
-        /// Ed25519 signature over `"{block_hash}:view_change:{new_view}"`.
-        signature: String,
-    },
+    /// A validator's signed view-change vote. Peers apply the view only after
+    /// verifying a PBFT quorum for the same height, parent, and target view.
+    ViewChange { vote: ViewChangeVote },
     PbftPrePrepare {
         block: Block,
+    },
+    /// Quorum-authorized replacement primary retransmits the exact block that
+    /// reached PREPARE quorum. The envelope is signed and excluded from the
+    /// immutable block hash.
+    PbftRepropose {
+        block: Block,
+        target_view: u32,
+        leader_id: String,
+        view_change_certificate: Vec<ViewChangeVote>,
+        leader_signature: String,
     },
     PbftPrepare {
         block_hash: String,

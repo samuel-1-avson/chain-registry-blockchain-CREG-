@@ -158,7 +158,28 @@ impl DeepScanner {
                 "CREG_FORCE_ONNX=true is DEPRECATED and ignored. The legacy ONNX path has been retired. Defaulting to the YARA-X rule-based scanning waterfall."
             );
         }
-        tracing::info!("ML deep-scan: ONNX model not required (rule-based YARA-X pipeline active)");
+        let profile = crate::scanner_profile::current();
+        if profile.strict_phase_c && !profile.ready {
+            return Err(MlError::ModelNotFound(format!(
+                "Phase C scanner profile {} is incomplete: {}",
+                profile.digest,
+                profile.errors.join("; ")
+            )));
+        }
+        tracing::info!(
+            scanner_profile_digest = %profile.digest,
+            yara_digest = %profile.yara_digest,
+            threat_intel_digest = %profile.threat_intel_digest,
+            threat_intel_source = %profile.threat_intel_source,
+            threat_intel_built_at = %profile.threat_intel_built_at,
+            osv_digest = %profile.osv_digest,
+            osv_epoch = %profile.osv_epoch,
+            osv_source = %profile.osv_source,
+            osv_built_at = %profile.osv_built_at,
+            osv_lookups = profile.osv_lookups,
+            scanner_version = %profile.scanner_version,
+            "Deterministic package-analysis profile inspected"
+        );
         Ok(())
     }
 
@@ -179,15 +200,23 @@ impl DeepScanner {
 
     /// Return the model version string for inclusion in vote messages.
     pub fn model_version(&self) -> String {
-        if crate::yara_scanner::rules_available() {
-            Self::SCANNER_VERSION.to_string()
-        } else {
-            Self::DEGRADED_YARA_MISSING.to_string()
-        }
+        crate::scanner_profile::current().scanner_version
     }
 
     /// Run the multi-layer scan (default).
     pub fn scan(&self, tarball_bytes: &[u8]) -> Result<DeepScanResult, MlError> {
+        let profile = crate::scanner_profile::current();
+        if profile.strict_phase_c && !profile.ready {
+            return Ok(DeepScanResult {
+                malicious_probability: 0.0,
+                confidence: 0.0,
+                classification: ThreatClassification::Degraded,
+                attention_regions: None,
+                suspicious_files: Vec::new(),
+                model_version: profile.scanner_version,
+                is_mock: false,
+            });
+        }
         if std::env::var("CREG_FORCE_ONNX").unwrap_or_default() == "true" {
             tracing::warn!(
                 "CREG_FORCE_ONNX=true is DEPRECATED and ignored. Legacy ONNX scan is retired. Running YARA-X multi-layer scan."
@@ -279,7 +308,7 @@ impl DeepScanner {
             classification,
             attention_regions: None,
             suspicious_files,
-            model_version: Self::SCANNER_VERSION.to_string(),
+            model_version: profile.scanner_version,
             is_mock: false,
         })
     }

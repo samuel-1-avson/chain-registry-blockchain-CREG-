@@ -295,8 +295,8 @@ struct NetworkStats {
     peer_count: usize,
     bridge_status: String,
     l1_block: u64,
-    finalized_height: u64,
-    finalization_lag: u64,
+    finalized_height: Option<u64>,
+    finalization_lag: Option<u64>,
     validator_set_source: String,
     validator_set_sync_state: String,
 }
@@ -753,6 +753,7 @@ struct App {
     faucet: FaucetView,
     bridge_anchors: Vec<serde_json::Value>,
     metrics_history: Vec<serde_json::Value>,
+    metrics_history_status: String,
 }
 
 #[derive(Debug)]
@@ -777,6 +778,11 @@ enum DataUpdate {
     },
     /// Live PBFT round snapshot.
     Consensus(ConsensusState),
+    /// Server-retained Prometheus samples for the selected chain.
+    MetricsHistory {
+        samples: Vec<serde_json::Value>,
+        status: String,
+    },
     /// Faucet health/reserve snapshot.
     FaucetHealth {
         healthy: bool,
@@ -824,8 +830,8 @@ impl App {
                 peer_count: 0,
                 bridge_status: "Unknown".to_string(),
                 l1_block: 0,
-                finalized_height: 0,
-                finalization_lag: 0,
+                finalized_height: None,
+                finalization_lag: None,
                 validator_set_source: "unknown".into(),
                 validator_set_sync_state: "unknown".into(),
             },
@@ -885,6 +891,7 @@ impl App {
             },
             bridge_anchors: Vec::new(),
             metrics_history: Vec::new(),
+            metrics_history_status: "waiting for the metrics collector".into(),
         }
     }
 
@@ -1004,11 +1011,7 @@ impl App {
 // ============================================================================
 
 pub async fn run(node_url: Option<&str>) -> Result<()> {
-    let api_base = node_url
-        .map(String::from)
-        .unwrap_or_else(|| {
-            std::env::var("CREG_NODE_URL").unwrap_or_else(|_| "http://localhost:8080".into())
-        })
+    let api_base = crate::config_file::effective_node_url(node_url)
         .trim_end_matches('/')
         .to_string();
 
@@ -1108,9 +1111,11 @@ pub async fn run(node_url: Option<&str>) -> Result<()> {
 // ============================================================================
 
 async fn data_fetcher_loop(app: Arc<RwLock<App>>, api_base: String, tx: mpsc::Sender<DataUpdate>) {
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder().timeout(Duration::from_secs(15)).build().expect("HTTP client");
     let mut last_stats_refresh = Instant::now();
-    let mut last_block_height: u64 = 0;
+    let mut last_metrics_refresh: Option<Instant> = None;
+    let mut last_block_height: Option<u64> = None;
+    let mut last_genesis_hash: Option<String> = None;
     let faucet_base = app.read().await.faucet.base.clone();
     let mut faucet_network_fetched = false;
     let mut runtime_config_fetched = false;
@@ -1129,17 +1134,25 @@ async fn data_fetcher_loop(app: Arc<RwLock<App>>, api_base: String, tx: mpsc::Se
             || FORCE_REFRESH.swap(false, Ordering::Relaxed)
         {
             if let Ok(stats) = fetch_stats(&client, &api_base).await {
+                if stats.genesis_hash != last_genesis_hash {
+                    last_block_height = None;
+                    last_genesis_hash = stats.genesis_hash.clone();
+                }
                 let _ = tx.send(DataUpdate::Stats(stats.clone())).await;
                 let _ = tx.send(DataUpdate::ApiHealthy).await;
 
                 // Fetch new blocks if height changed
-                if stats.tip_height > last_block_height {
-                    for h in (last_block_height.saturating_add(1)..=stats.tip_height).rev() {
+                if last_block_height != Some(stats.tip_height) {
+                    let start = stats.tip_height.saturating_sub(49);
+                    let mut complete = true;
+                    for h in start..=stats.tip_height {
                         if let Ok(block) = fetch_block(&client, &api_base, h).await {
                             let _ = tx.send(DataUpdate::Block(block)).await;
+                        } else {
+                            complete = false;
                         }
                     }
-                    last_block_height = stats.tip_height;
+                    if complete { last_block_height = Some(stats.tip_height); }
                 }
             } else {
                 // Keep the UI explicit about REST availability without
@@ -1195,6 +1208,37 @@ async fn data_fetcher_loop(app: Arc<RwLock<App>>, api_base: String, tx: mpsc::Se
             last_stats_refresh = Instant::now();
         }
 
+        if last_metrics_refresh
+            .map(|last| last.elapsed() >= Duration::from_secs(30))
+            .unwrap_or(true)
+        {
+            let update = match get_json_with_fallback(
+                &client,
+                format!("{}/v1/public/metrics/history?range=1h", api_base),
+                None,
+                ApiRouteScope::Public,
+            )
+            .await
+            {
+                Ok(json) => DataUpdate::MetricsHistory {
+                    samples: json["samples"]
+                        .as_array()
+                        .cloned()
+                        .unwrap_or_default(),
+                    status: json["status"]
+                        .as_str()
+                        .unwrap_or("collector unavailable")
+                        .to_string(),
+                },
+                Err(_) => DataUpdate::MetricsHistory {
+                    samples: Vec::new(),
+                    status: "collector unavailable".into(),
+                },
+            };
+            let _ = tx.send(update).await;
+            last_metrics_refresh = Some(Instant::now());
+        }
+
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
 }
@@ -1224,8 +1268,8 @@ async fn fetch_stats(client: &reqwest::Client, api_base: &str) -> Result<Network
             .unwrap_or("Unknown")
             .to_string(),
         l1_block: json["l1_block"].as_u64().unwrap_or(0),
-        finalized_height: json["finalized_height"].as_u64().unwrap_or(0),
-        finalization_lag: json["finalization_lag"].as_u64().unwrap_or(0),
+        finalized_height: json.get("finalization_source").and_then(|_| json["finalized_height"].as_u64()),
+        finalization_lag: json.get("finalization_source").and_then(|_| json["finalization_lag"].as_u64()),
         validator_set_source: json["validator_set_source"]
             .as_str()
             .unwrap_or("unknown")
@@ -1251,18 +1295,19 @@ async fn fetch_block(client: &reqwest::Client, api_base: &str, height: u64) -> R
         .as_array()
         .map(|arr| {
             arr.iter()
-                .map(|t| TransactionInfo {
-                    _id: t["id"]["canonical"]
-                        .as_str()
-                        .unwrap_or("unknown")
-                        .to_string(),
+                .map(|t| {
+                    let record = t.get("record").unwrap_or(t);
+                    let id = &record["id"];
+                    TransactionInfo {
+                    _id: t["package_canonical"].as_str().map(str::to_string).unwrap_or_else(|| format!("{}:{}@{}", id["ecosystem"].as_str().unwrap_or("?"), id["name"].as_str().unwrap_or("?"), id["version"].as_str().unwrap_or("?"))),
                     tx_type: t["type"].as_str().unwrap_or("unknown").to_string(),
-                    package_name: t["id"]["name"].as_str().map(|s| s.to_string()),
-                    package_version: t["id"]["version"].as_str().map(|s| s.to_string()),
-                    publisher: t["publisher_pubkey"]
+                    package_name: id["name"].as_str().map(|s| s.to_string()),
+                    package_version: id["version"].as_str().map(|s| s.to_string()),
+                    publisher: record["publisher_pubkey"]
                         .as_str()
                         .map(|s| s[..8.min(s.len())].to_string()),
-                    status: t["status"].as_str().unwrap_or("pending").to_string(),
+                    status: if t["type"] == "revoke" { "revoked" } else { record["status"].as_str().unwrap_or("unknown") }.to_string(),
+                    }
                 })
                 .collect()
         })
@@ -1285,12 +1330,12 @@ async fn fetch_block(client: &reqwest::Client, api_base: &str, height: u64) -> R
 async fn fetch_validators(client: &reqwest::Client, api_base: &str) -> Result<Vec<ValidatorInfo>> {
     let json = get_json_with_fallback(
         client,
-        format!("{}/v1/operator/nodes", api_base),
-        Some(format!("{}/v1/nodes", api_base)),
-        ApiRouteScope::Operator,
+        format!("{}/v1/validator/consensus/state", api_base),
+        Some(format!("{}/v1/consensus/state", api_base)),
+        ApiRouteScope::Validator,
     )
     .await?;
-    let validators = json.as_array().cloned().unwrap_or_default();
+    let validators = json["validators"].as_array().cloned().unwrap_or_default();
 
     Ok(validators
         .iter()
@@ -1300,7 +1345,7 @@ async fn fetch_validators(client: &reqwest::Client, api_base: &str) -> Result<Ve
             stake: v["stake"].as_u64().unwrap_or(0),
             reputation: v["reputation"].as_u64().unwrap_or(50) as u8,
             status: v["status"].as_str().unwrap_or("unknown").to_string(),
-            is_active: v["is_active"].as_bool().unwrap_or(false),
+            is_active: true,
             pub_key: v["pubkey"].as_str().unwrap_or("").to_string(),
         })
         .collect())
@@ -1352,7 +1397,7 @@ async fn fetch_pending_packages(
                     continue;
                 }
                 // canonical is e.g. "npm/express@4.18.0"
-                let parts: Vec<&str> = canonical.splitn(2, '/').collect();
+                let parts: Vec<&str> = canonical.splitn(2, ':').collect();
                 let ecosystem = parts.first().copied().unwrap_or("?").to_string();
                 let name_ver = parts.get(1).copied().unwrap_or(canonical);
                 let (pkg_name, version) = if let Some(pos) = name_ver.rfind('@') {
@@ -1365,13 +1410,13 @@ async fn fetch_pending_packages(
                     ecosystem,
                     version: version.to_string(),
                     status: v["status"].as_str().unwrap_or("verified").to_string(),
-                    publisher: v["publisher_pubkey"]
+                    publisher: v["publisher"]
                         .as_str()
                         .unwrap_or("")
                         .chars()
                         .take(16)
                         .collect(),
-                    verified_at: v["verified_at"].as_str().map(|s| s.to_string()),
+                    verified_at: v["published_at"].as_str().map(|s| s.to_string()),
                     content_hash: v["content_hash"].as_str().unwrap_or("").to_string(),
                 });
             }
@@ -1396,11 +1441,11 @@ async fn fetch_pending_packages(
                 // Skip if already present from the verified list.
                 if packages
                     .iter()
-                    .any(|p| format!("{}/{}@{}", p.ecosystem, p.name, p.version) == canonical)
+                    .any(|p| format!("{}:{}@{}", p.ecosystem, p.name, p.version) == canonical)
                 {
                     continue;
                 }
-                let parts: Vec<&str> = canonical.splitn(2, '/').collect();
+                let parts: Vec<&str> = canonical.splitn(2, ':').collect();
                 let ecosystem = parts.first().copied().unwrap_or("?").to_string();
                 let name_ver = parts.get(1).copied().unwrap_or(&canonical);
                 let (pkg_name, version) = if let Some(pos) = name_ver.rfind('@') {
@@ -1446,7 +1491,7 @@ async fn fetch_mempool(client: &reqwest::Client, api_base: &str) -> Result<Vec<M
                 continue;
             }
             // Parse "npm/express@4.18.0" → ecosystem + name + version
-            let (ecosystem, rest) = canonical.split_once('/').unwrap_or(("unknown", canonical));
+            let (ecosystem, rest) = canonical.split_once(':').unwrap_or(("unknown", canonical));
             let (_name, _version) = rest.rsplit_once('@').unwrap_or((rest, "?"));
             txs.push(MempoolTx {
                 id: canonical.to_string(),
@@ -1463,6 +1508,24 @@ async fn fetch_mempool(client: &reqwest::Client, api_base: &str) -> Result<Vec<M
 /// Tries `/v1/consensus/state`; if that returns an error or is not implemented,
 /// derives a best-effort snapshot from `/v1/chain/stats` and `/v1/validators`.
 async fn fetch_runtime_config(client: &reqwest::Client, api_base: &str) -> Result<RuntimeIdentity> {
+    if operator_api_key().is_none() {
+        let stats = get_json_with_fallback(client,
+            format!("{api_base}/v1/public/chain/stats"), Some(format!("{api_base}/v1/chain/stats")), ApiRouteScope::Public).await?;
+        let health = get_json_with_fallback(client,
+            format!("{api_base}/v1/public/health"), Some(format!("{api_base}/v1/health")), ApiRouteScope::Public).await?;
+        return Ok(RuntimeIdentity {
+            node_id: health["node_id"].as_str().unwrap_or("unknown").into(),
+            validator_pubkey: None,
+            chain_id: stats["chain_id"].as_str().unwrap_or("unknown").into(),
+            network: "unknown".into(),
+            genesis_hash: stats["genesis_hash"].as_str().map(str::to_string),
+            spec_signature_verified: stats["spec_signature_verified"].as_bool().unwrap_or(false),
+            l1_rpc_configured: stats["l1_rpc_configured"].as_bool().unwrap_or(false),
+            is_validator: health["is_validator"].as_bool().unwrap_or(false),
+            validator_set_source: stats["validator_set_source"].as_str().unwrap_or("unknown").into(),
+            validator_set_sync_state: stats["validator_set_sync_state"].as_str().unwrap_or("unknown").into(),
+        });
+    }
     let json = get_json_with_fallback(
         client,
         format!("{}/v1/operator/runtime/config", api_base),
@@ -1502,19 +1565,21 @@ async fn fetch_consensus_state(client: &reqwest::Client, api_base: &str) -> Resu
     .await
     {
         let total = json["total_validators"].as_u64().unwrap_or(0) as usize;
+        let round = json["active_rounds"].as_array().and_then(|rounds| rounds.first());
+        let round_data = round.unwrap_or(&json);
         return Ok(ConsensusState {
-            round: json["round"].as_u64().unwrap_or(0),
-            phase: json["phase"].as_str().unwrap_or("UNKNOWN").to_uppercase(),
-            proposer: json["proposer"]
+            round: round_data["height"].as_u64().or_else(|| round_data["round"].as_u64()).unwrap_or(0),
+            phase: round_data["phase"].as_str().unwrap_or(if round.is_some() { "UNKNOWN" } else { "IDLE" }).to_uppercase(),
+            proposer: round_data["proposer"]
                 .as_str()
                 .unwrap_or("unknown")
                 .chars()
                 .take(16)
                 .collect::<String>()
                 + "…",
-            prepare_votes: json["prepare_votes"].as_u64().unwrap_or(0) as usize,
-            commit_votes: json["commit_votes"].as_u64().unwrap_or(0) as usize,
-            quorum: total * 2 / 3 + 1,
+            prepare_votes: round_data["prepare_votes"].as_u64().unwrap_or(0) as usize,
+            commit_votes: round_data["commit_votes"].as_u64().unwrap_or(0) as usize,
+            quorum: json["quorum"].as_u64().unwrap_or((total * 2 / 3 + 1) as u64) as usize,
             total_validators: total,
             fetched_at: Instant::now(),
         });
@@ -1535,8 +1600,8 @@ async fn fetch_consensus_state(client: &reqwest::Client, api_base: &str) -> Resu
 
     Ok(ConsensusState {
         round: tip.saturating_add(1),
-        phase: "PREPARE".to_string(), // best-effort — no real phase data
-        proposer: "(VRF-selected)".to_string(),
+        phase: "UNAVAILABLE".to_string(),
+        proposer: "unknown".to_string(),
         prepare_votes: 0,
         commit_votes: 0,
         quorum,
@@ -1717,7 +1782,7 @@ fn refresh_preflight(app: &mut App) {
         },
     });
 
-    let api_status = if app.last_api_success_at.is_some() {
+    let api_status = if rest_api_ready(app) {
         PreflightStatus::Pass
     } else if app.last_api_error.is_some() {
         PreflightStatus::Fail
@@ -1727,10 +1792,15 @@ fn refresh_preflight(app: &mut App) {
     checks.push(PreflightCheck {
         name: "Node REST API".into(),
         status: api_status,
-        detail: app
-            .last_api_error
-            .clone()
-            .unwrap_or_else(|| "waiting for the first successful response".into()),
+        detail: if rest_api_ready(app) {
+            "live response received".into()
+        } else if let Some(error) = &app.last_api_error {
+            error.clone()
+        } else if app.last_api_success_at.is_some() {
+            "last successful response is stale".into()
+        } else {
+            "waiting for the first successful response".into()
+        },
     });
 
     let consensus_status = match app.consensus_state.as_ref() {
@@ -1756,22 +1826,29 @@ fn refresh_preflight(app: &mut App) {
                 .validator_pubkey
                 .as_deref()
                 .is_some_and(|key| !key.is_empty());
-            let listed = id.validator_pubkey.as_deref().is_some_and(|key| {
+            let listed_by_key = id.validator_pubkey.as_deref().is_some_and(|key| {
                 app.validators
                     .iter()
                     .any(|validator| validator.pub_key == key)
             });
+            let listed_by_node_id = app
+                .validators
+                .iter()
+                .any(|validator| validator.id == id.node_id && validator.is_active);
+            let listed = if has_pubkey { listed_by_key } else { listed_by_node_id };
             checks.push(PreflightCheck {
                 name: "Validator identity".into(),
                 status: if has_pubkey && listed {
                     PreflightStatus::Pass
-                } else if has_pubkey {
-                    PreflightStatus::Warn
                 } else {
-                    PreflightStatus::Fail
+                    PreflightStatus::Warn
                 },
                 detail: if !has_pubkey {
-                    "validator mode is enabled but no public key was reported".into()
+                    if listed_by_node_id {
+                        "node ID matches an active validator; operator-only key details are unavailable".into()
+                    } else {
+                        "operator-only key details are unavailable; node ID is not in the active validator set".into()
+                    }
                 } else if listed {
                     "public identity is present in the active set".into()
                 } else {
@@ -1838,9 +1915,18 @@ fn short_hash(value: &str) -> String {
     }
 }
 
+fn rest_api_ready(app: &App) -> bool {
+    app.last_api_error.is_none()
+        && app.last_api_success_at.is_some_and(|at| at.elapsed() <= Duration::from_secs(15))
+}
+
 fn apply_data_update(app: &mut App, update: DataUpdate) {
     match update {
         DataUpdate::Stats(stats) => {
+            if stats.genesis_hash != app.stats.genesis_hash {
+                app.blocks.clear();
+                app.tps_history.clear();
+            }
             app.stats = stats;
         }
         DataUpdate::Block(block) => {
@@ -1884,6 +1970,10 @@ fn apply_data_update(app: &mut App, update: DataUpdate) {
         }
         DataUpdate::Consensus(state) => {
             app.consensus_state = Some(state);
+        }
+        DataUpdate::MetricsHistory { samples, status } => {
+            app.metrics_history = samples;
+            app.metrics_history_status = status;
         }
         DataUpdate::FaucetHealth {
             healthy,
@@ -2920,13 +3010,18 @@ fn draw_disconnect_banner(f: &mut Frame, app: &App) {
         height: 3,
     };
 
-    let msg = if app.reconnect_in > 0 {
+    let rest_ready = rest_api_ready(app);
+    let msg = if rest_ready && !app.node_connected && app.reconnect_in > 0 {
+        " ⚠ EVENT STREAM RETRYING — REST API ONLINE ".to_string()
+    } else if app.reconnect_in > 0 {
         format!(
             " ⚠  NODE DISCONNECTED — reconnecting in {}s ",
             app.reconnect_in
         )
-    } else if app.node_connected && app.last_api_error.is_some() {
+    } else if app.node_connected && !rest_ready {
         " ⚠  NODE REST API OFFLINE — retrying ".to_string()
+    } else if rest_ready && !app.node_connected {
+        " ⚠ EVENT STREAM CONNECTING — REST API ONLINE ".to_string()
     } else {
         " ⚠  NODE DISCONNECTED — reconnecting… ".to_string()
     };
@@ -2936,17 +3031,17 @@ fn draw_disconnect_banner(f: &mut Frame, app: &App) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(if app.node_connected {
-                    Color::Yellow
-                } else {
+        .border_style(Style::default().fg(if rest_ready {
+            Color::Yellow
+        } else {
                     Color::Red
                 })),
         )
         .style(
             Style::default()
                 .fg(Color::White)
-                .bg(if app.node_connected {
-                    Color::Yellow
+            .bg(if rest_ready {
+                Color::Yellow
                 } else {
                     Color::Red
                 })
@@ -2963,7 +3058,8 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
         .split(area);
 
     let pulse = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"][(app.tick_count / 4) as usize % 8];
-    let live = if app.node_connected { pulse } else { "○" };
+    let rest_ready = rest_api_ready(app);
+    let live = if rest_ready { pulse } else { "○" };
     let filter = if app.search_query.is_empty() {
         String::new()
     } else {
@@ -2986,8 +3082,10 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
 
     let validator_count = app.displayed_validator_count();
     let total_stake = app.displayed_total_stake();
-    let rest = if app.last_api_success_at.is_some() {
+    let rest = if rest_ready {
         "REST ok"
+    } else if app.last_api_error.is_some() {
+        "REST down"
     } else {
         "REST wait"
     };
@@ -3015,7 +3113,7 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
         " id: {auth_badge}  ·  {validator_count} vals  ·  {rest}  ·  {sse}  ·  stake {}  ·  {mode} ",
         format_number(total_stake)
     );
-    let status_color = if app.node_connected && app.last_api_success_at.is_some() {
+    let status_color = if rest_ready {
         Theme::success()
     } else {
         Theme::warning()
@@ -3724,7 +3822,7 @@ fn draw_validators_preview(f: &mut Frame, app: &App, area: Rect) {
 
             Row::new(vec![
                 Cell::from(v.id.chars().take(20).collect::<String>()),
-                Cell::from(format!("{}", v.stake / 1_000_000_000)),
+                Cell::from(v.stake.to_string()),
                 Cell::from(format!("{}", v.reputation)).style(Style::default().fg(status_color)),
             ])
         })
@@ -4139,9 +4237,9 @@ fn draw_network(f: &mut Frame, app: &App, area: Rect) {
             Span::styled(
                 format!(
                     "#{} (lag {})",
-                    app.stats.finalized_height, app.stats.finalization_lag
+                    app.stats.finalized_height.map(|h| h.to_string()).unwrap_or_else(|| "unknown".into()), app.stats.finalization_lag.map(|h| h.to_string()).unwrap_or_else(|| "unknown".into())
                 ),
-                Style::default().fg(if app.stats.finalization_lag <= 2 {
+                Style::default().fg(if app.stats.finalization_lag.is_some_and(|lag| lag <= 2) {
                     Theme::success()
                 } else {
                     Theme::warning()
@@ -4196,10 +4294,9 @@ fn draw_mempool(f: &mut Frame, app: &App, area: Rect) {
         .split(area);
 
     // Header with count
-    let header_text = format!(
-        " {} pending transactions waiting for validator consensus",
-        app.mempool.len()
-    );
+    let header_text = if operator_api_key().is_none() {
+        " Pending details require operator credentials; count is available in public chain stats".to_string()
+    } else { format!(" {} pending transactions waiting for validator consensus", app.mempool.len()) };
     let header = Paragraph::new(header_text)
         .style(Style::default().fg(Theme::text()))
         .block(
@@ -4989,33 +5086,45 @@ fn draw_bridge(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_metrics(f: &mut Frame, app: &App, area: Rect) {
-    let data: Vec<u64> = app.tps_history.iter().copied().collect();
-    let max = data.iter().max().copied().unwrap_or(1).max(1);
-    let sparkline = Sparkline::default()
-        .block(rounded_block(" tx per block ", true))
-        .data(&data)
-        .max(max)
+    let heights: Vec<u64> = app
+        .metrics_history
+        .iter()
+        .filter_map(|sample| sample["height"].as_u64())
+        .collect();
+    let height_max = heights.iter().max().copied().unwrap_or(1).max(1);
+    let tx_data: Vec<u64> = app.tps_history.iter().copied().collect();
+    let tx_max = tx_data.iter().max().copied().unwrap_or(1).max(1);
+    let height_sparkline = Sparkline::default()
+        .block(rounded_block(" retained chain height ", true))
+        .data(&heights)
+        .max(height_max)
         .style(Style::default().fg(Theme::success()));
+    let tx_sparkline = Sparkline::default()
+        .block(rounded_block(" tx in recently fetched blocks (live only) ", true))
+        .data(&tx_data)
+        .max(tx_max)
+        .style(Style::default().fg(Theme::text_dim()));
     let summary = Paragraph::new(vec![
         Line::from(format!(
-            "Tip height {}  ·  packages {}  ·  lag {}  ·  samples {}",
+            "Tip {}  ·  packages {}  ·  validators {}  ·  retained samples {}",
             app.stats.tip_height,
             app.stats.package_count,
-            app.stats.finalization_lag,
-            app.tps_history.len()
+            app.stats.validator_count,
+            app.metrics_history.len()
         )),
         Line::from(Span::styled(
-            "This pane graphs local samples. It is not a hosted metrics stack.",
+            format!("Prometheus history: {}", app.metrics_history_status),
             Style::default().fg(Theme::text_dim()),
         )),
     ])
     .block(rounded_block(" chain metrics ", false));
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(4), Constraint::Min(5)])
+        .constraints([Constraint::Length(4), Constraint::Min(5), Constraint::Length(4)])
         .split(area);
     f.render_widget(summary, chunks[0]);
-    f.render_widget(sparkline, chunks[1]);
+    f.render_widget(height_sparkline, chunks[1]);
+    f.render_widget(tx_sparkline, chunks[2]);
 }
 
 #[cfg(test)]
@@ -5206,8 +5315,8 @@ mod tests {
             peer_count: 3,
             bridge_status: "paused".into(),
             l1_block: 9_102_441,
-            finalized_height: 1840,
-            finalization_lag: 2,
+            finalized_height: Some(1840),
+            finalization_lag: Some(2),
             validator_set_source: "chain-authoritative".into(),
             validator_set_sync_state: "ready".into(),
         };

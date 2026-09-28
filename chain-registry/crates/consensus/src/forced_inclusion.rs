@@ -79,6 +79,13 @@ impl ForcedInclusionTracker {
         }
     }
 
+    /// Retire work that can no longer form a valid new proposal. The caller
+    /// must preserve the transaction and its rejection reason durably first.
+    /// This does not claim that the transaction was included in a block.
+    pub fn retire_ineligible(&mut self, tx_hash: &str) {
+        self.pending.remove(tx_hash);
+    }
+
     /// Return all transactions that have exceeded the forced-inclusion
     /// deadline at the given block height.
     pub fn forced_transactions(&self, current_height: u64) -> Vec<&PendingTransaction> {

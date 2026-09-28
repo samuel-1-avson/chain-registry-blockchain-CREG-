@@ -592,9 +592,9 @@ enum OsvSnapshotCommands {
         /// Snapshot epoch (must match CREG_OSV_SNAPSHOT_EPOCH on validators).
         #[arg(long, default_value = "osv-epoch-0")]
         epoch: String,
-        /// Output path (`-` for stdout). Defaults to stdout when omitted.
-        #[arg(short, long, value_name = "FILE")]
-        output: Option<std::path::PathBuf>,
+        /// Snapshot file path (`-` for stdout). The CLI-wide `--output` selects the display format.
+        #[arg(short = 'o', long = "snapshot-output", value_name = "FILE")]
+        snapshot_output: Option<std::path::PathBuf>,
         /// Package list file (`ecosystem:name@version` per line).
         #[arg(long, value_name = "FILE")]
         packages: Option<std::path::PathBuf>,
@@ -1650,13 +1650,13 @@ async fn run(cli: Cli) -> Result<()> {
         Commands::OsvSnapshot { command } => match command {
             OsvSnapshotCommands::Build {
                 epoch,
-                output,
+                snapshot_output,
                 packages,
                 package_keys,
                 delay_ms,
             } => osv_snapshot::run_build(
                 &epoch,
-                output.as_deref(),
+                snapshot_output.as_deref(),
                 packages.as_deref(),
                 &package_keys,
                 delay_ms,

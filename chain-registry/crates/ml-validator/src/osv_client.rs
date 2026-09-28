@@ -196,10 +196,7 @@ pub fn query(info: &PackageInfo) -> OsvResult {
                     }
                 } else {
                     debug!("OSV returned status {} for {}", resp.status(), key);
-                    OsvResult {
-                        queried: true,
-                        vulnerabilities: Vec::new(),
-                    }
+                    OsvResult::unavailable()
                 }
             }
             Err(e) => {

@@ -12,7 +12,7 @@ use colored::Colorize;
 
 pub async fn run(filter: Option<&str>, node_url: Option<&str>, ci_mode: bool) -> Result<()> {
     let url = format!(
-        "{}/v1/events",
+        "{}/v1/public/events",
         node_url
             .map(String::from)
             .unwrap_or_else(|| {
@@ -38,7 +38,7 @@ pub async fn run(filter: Option<&str>, node_url: Option<&str>, ci_mode: bool) ->
     println!("{}", "─".repeat(60).dimmed());
 
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(300))
+        .connect_timeout(std::time::Duration::from_secs(15))
         .build()?;
 
     let mut retry_count = 0u32;
@@ -91,7 +91,7 @@ pub async fn run(filter: Option<&str>, node_url: Option<&str>, ci_mode: bool) ->
             }
         };
 
-        let mut buffer = String::new();
+        let mut buffer = Vec::new();
 
         loop {
             // Read chunks from the SSE stream.
@@ -133,14 +133,16 @@ pub async fn run(filter: Option<&str>, node_url: Option<&str>, ci_mode: bool) ->
                 }
             };
 
-            buffer.push_str(&String::from_utf8_lossy(&chunk));
+            buffer.extend_from_slice(&chunk);
 
-            // SSE messages are separated by double newlines.
-            while let Some(end) = buffer.find("\n\n") {
-                let message = buffer[..end].to_string();
-                buffer = buffer[end + 2..].to_string();
+            // Keep partial UTF-8 bytes and support standard SSE line endings.
+            while let Some((end, separator_len)) = sse_frame_end(&buffer) {
+                let frame: Vec<u8> = buffer.drain(..end + separator_len).collect();
+                let Ok(message) = std::str::from_utf8(&frame[..end]) else {
+                    continue;
+                };
 
-                if let Some(event) = parse_sse(&message) {
+                if let Some(event) = parse_sse(message) {
                     if should_display(&event, filter) {
                         render_event(&event);
                         if ci_mode && is_critical_event(&event) {
@@ -159,6 +161,18 @@ pub async fn run(filter: Option<&str>, node_url: Option<&str>, ci_mode: bool) ->
     Ok(())
 }
 
+fn sse_frame_end(buffer: &[u8]) -> Option<(usize, usize)> {
+    [b"\n\n".as_slice(), b"\r\n\r\n".as_slice(), b"\r\r".as_slice()]
+        .into_iter()
+        .filter_map(|separator| {
+            buffer
+                .windows(separator.len())
+                .position(|window| window == separator)
+                .map(|end| (end, separator.len()))
+        })
+        .min_by_key(|(end, _)| *end)
+}
+
 #[derive(Debug)]
 struct SseEvent {
     kind: String,
@@ -166,30 +180,62 @@ struct SseEvent {
 }
 
 fn parse_sse(raw: &str) -> Option<SseEvent> {
-    let mut kind = String::new();
+    let mut event_name = String::new();
     let mut data = String::new();
 
     for line in raw.lines() {
-        if let Some(rest) = line.strip_prefix("event: ") {
-            kind = rest.trim().to_string();
-        } else if let Some(rest) = line.strip_prefix("data: ") {
-            data = rest.trim().to_string();
+        if let Some(rest) = line.strip_prefix("event:") {
+            event_name = rest.trim().to_string();
+        } else if let Some(rest) = line.strip_prefix("data:") {
+            if !data.is_empty() {
+                data.push('\n');
+            }
+            data.push_str(rest.strip_prefix(' ').unwrap_or(rest));
         } else if line.starts_with(':') {
             // SSE comment / heartbeat — skip.
         }
     }
 
-    if kind.is_empty() || data.is_empty() {
+    if data.is_empty() {
         return None;
     }
 
-    let json: serde_json::Value = serde_json::from_str(&data).ok()?;
-    Some(SseEvent { kind, data: json })
+    let envelope: serde_json::Value = serde_json::from_str(&data).ok()?;
+    let kind = envelope
+        .get("kind")
+        .and_then(serde_json::Value::as_str)
+        .filter(|kind| !kind.is_empty())
+        .unwrap_or(&event_name)
+        .to_ascii_lowercase();
+    if kind.is_empty() {
+        return None;
+    }
+
+    // The node sends { kind, ts, payload }, while the terminal renderer and
+    // package filter consume the event fields directly. Flatten the envelope
+    // and keep its timestamp so named events reach the same presentation path.
+    let event_data = match envelope.get("payload") {
+        Some(serde_json::Value::Object(payload)) => {
+            let mut flattened = payload.clone();
+            if !flattened.contains_key("ts") {
+                if let Some(timestamp) = envelope.get("ts") {
+                    flattened.insert("ts".to_string(), timestamp.clone());
+                }
+            }
+            serde_json::Value::Object(flattened)
+        }
+        _ => envelope,
+    };
+
+    Some(SseEvent {
+        kind,
+        data: event_data,
+    })
 }
 
 fn is_critical_event(event: &SseEvent) -> bool {
     // In CI mode, any rejected or revoked package event is critical.
-    matches!(event.kind.as_str(), "PackageRejected" | "PackageRevoked")
+    matches!(event.kind.as_str(), "package_rejected" | "package_revoked")
 }
 
 fn should_display(event: &SseEvent, filter: Option<&str>) -> bool {
@@ -203,6 +249,13 @@ fn should_display(event: &SseEvent, filter: Option<&str>) -> bool {
     if f.starts_with("pkg:") {
         return canonical.contains(&f[4..]);
     }
+    match f.to_ascii_lowercase().as_str() {
+        "" | "all" => return true,
+        "packages" => return event.kind.starts_with("package_"),
+        "blocks" => return event.kind == "block_produced",
+        "votes" => return event.kind == "validator_voted",
+        _ => {}
+    }
     // Filter by event kind.
     event.kind.to_lowercase().contains(&f.to_lowercase())
 }
@@ -212,7 +265,7 @@ fn render_event(event: &SseEvent) {
         .data
         .get("ts")
         .and_then(|v| v.as_str())
-        .map(|s| &s[11..19]) // HH:MM:SS
+        .and_then(|s| s.get(11..19)) // HH:MM:SS
         .unwrap_or("?");
 
     let canonical = event
@@ -222,7 +275,7 @@ fn render_event(event: &SseEvent) {
         .unwrap_or("");
 
     match event.kind.as_str() {
-        "PackageVerified" => {
+        "package_verified" => {
             let block = event
                 .data
                 .get("block_hash")
@@ -245,7 +298,7 @@ fn render_event(event: &SseEvent) {
             );
         }
 
-        "PackageSubmitted" => {
+        "package_submitted" => {
             let publisher = event
                 .data
                 .get("publisher_pubkey")
@@ -260,7 +313,7 @@ fn render_event(event: &SseEvent) {
             );
         }
 
-        "PackageRejected" => {
+        "package_rejected" => {
             let reason = event
                 .data
                 .get("reason")
@@ -275,7 +328,7 @@ fn render_event(event: &SseEvent) {
             );
         }
 
-        "PackageRevoked" => {
+        "package_revoked" => {
             let reason = event
                 .data
                 .get("reason")
@@ -290,7 +343,7 @@ fn render_event(event: &SseEvent) {
             );
         }
 
-        "BlockProduced" => {
+        "block_produced" => {
             let height = event
                 .data
                 .get("height")
@@ -316,7 +369,7 @@ fn render_event(event: &SseEvent) {
             );
         }
 
-        "ValidatorVoted" => {
+        "validator_voted" => {
             let vid = event
                 .data
                 .get("validator_id")

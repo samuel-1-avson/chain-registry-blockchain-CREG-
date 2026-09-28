@@ -5,7 +5,7 @@
 use anyhow::Result;
 use colored::Colorize;
 use common::{PackageId, VerdictStatus};
-use resolver::light_client::{verify_package, Checkpoint};
+use resolver::light_client::{default_checkpoint, verify_package, Checkpoint};
 
 pub async fn run(
     package: &str,
@@ -14,8 +14,23 @@ pub async fn run(
     checkpoint: Option<&str>,
     json_out: bool,
 ) -> Result<()> {
+    let (qualified_eco, package) = match package.split_once(':') {
+        Some((eco, rest)) if !eco.is_empty() && !rest.is_empty() => (Some(eco), rest),
+        _ => (None, package),
+    };
+    if let (Some(qualified), Some(requested)) = (qualified_eco, ecosystem) {
+        anyhow::ensure!(
+            qualified == requested,
+            "package ecosystem {qualified} conflicts with --ecosystem {requested}"
+        );
+    }
     let (name, version) = parse_pkg(package);
-    let eco = ecosystem.unwrap_or_else(|| detect_eco());
+    anyhow::ensure!(!name.is_empty(), "package name is empty");
+    anyhow::ensure!(version.as_deref() != Some(""), "package version is empty");
+    let eco = qualified_eco
+        .or(ecosystem)
+        .map(str::to_owned)
+        .unwrap_or_else(|| detect_eco().to_owned());
     let id = PackageId::new(eco, &name, version.as_deref().unwrap_or("latest"));
 
     let url = node_url.map(String::from).unwrap_or_else(|| {
@@ -28,7 +43,7 @@ pub async fn run(
             let raw = std::fs::read_to_string(path)?;
             serde_json::from_str::<Checkpoint>(&raw)?
         }
-        None => Checkpoint::genesis(),
+        None => default_checkpoint().await?,
     };
 
     println!(

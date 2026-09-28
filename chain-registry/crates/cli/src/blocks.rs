@@ -6,27 +6,25 @@ use colored::Colorize;
 use serde_json::Value;
 
 pub async fn run(node_url: Option<&str>, limit: usize) -> Result<()> {
-    let api_base = node_url
-        .map(String::from)
-        .unwrap_or_else(|| {
-            std::env::var("CREG_NODE_URL").unwrap_or_else(|_| "http://localhost:8080".into())
-        })
+    anyhow::ensure!(limit > 0 && limit <= 100, "Block limit must be between 1 and 100");
+    let api_base = crate::config_file::effective_node_url(node_url)
         .trim_end_matches('/')
         .to_string();
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(15)).build()?;
 
     // 1. Get chain stats
     let stats: Value = client
         .get(format!("{}/v1/chain/stats", api_base))
         .send()
         .await?
+        .error_for_status()?
         .json()
         .await
         .context("Failed to fetch chain stats")?;
 
-    let tip = stats["tip_height"].as_u64().unwrap_or(0);
-    let pkg_count = stats["package_count"].as_u64().unwrap_or(0);
+    let tip = stats["tip_height"].as_u64().context("Chain stats missing tip_height")?;
+    let pkg_count = stats["package_count"].as_u64().context("Chain stats missing package_count")?;
 
     println!(
         "\n{} {} {}",
@@ -35,11 +33,12 @@ pub async fn run(node_url: Option<&str>, limit: usize) -> Result<()> {
         "⛓".bold()
     );
     println!(
-        "{} Height: {} | Verified Packages: {}\n",
+        "{} Height: {} | Packages: {}\n",
         "→".cyan(),
         tip.to_string().yellow(),
         pkg_count.to_string().yellow()
     );
+    println!("Chain: {} | Genesis: {}\n", stats["chain_id"].as_str().unwrap_or("unknown"), stats["genesis_hash"].as_str().unwrap_or("unknown"));
 
     println!(
         "{:<8} {:<18} {:<10} {:<30}",
@@ -50,15 +49,16 @@ pub async fn run(node_url: Option<&str>, limit: usize) -> Result<()> {
     // 2. Fetch blocks
     let start = tip.saturating_sub(limit as u64 - 1);
     for h in (start..=tip).rev() {
-        if let Ok(res) = client
+        let block = client
             .get(format!("{}/v1/blocks/{}", api_base, h))
             .send()
             .await
-        {
-            if let Ok(block) = res.json::<Value>().await {
-                render_block(&block);
-            }
-        }
+            .with_context(|| format!("Failed to fetch block {h}"))?
+            .error_for_status()
+            .with_context(|| format!("Block {h} request failed"))?
+            .json::<Value>().await?;
+        anyhow::ensure!(block["header"]["height"].as_u64() == Some(h), "Invalid block response for height {h}");
+        render_block(&block);
     }
 
     Ok(())
@@ -99,12 +99,13 @@ fn render_block(block: &Value) {
 fn render_tx(tx: &Value) {
     let tx_type = tx["type"].as_str().unwrap_or("unknown");
     match tx_type {
-        "publish" => {
-            let eco = tx["id"]["ecosystem"].as_str().unwrap_or("?");
-            let name = tx["id"]["name"].as_str().unwrap_or("?");
-            let ver = tx["id"]["version"].as_str().unwrap_or("?");
+        "publish" | "publish_authorized_v1" => {
+            let record = tx.get("record").unwrap_or(tx);
+            let eco = record["id"]["ecosystem"].as_str().unwrap_or("?");
+            let name = record["id"]["name"].as_str().unwrap_or("?");
+            let ver = record["id"]["version"].as_str().unwrap_or("?");
             let canonical = format!("{}:{}@{}", eco, name, ver);
-            let status = tx["status"].as_str().unwrap_or("?");
+            let status = record["status"].as_str().unwrap_or("?");
             let color_status = if status == "Verified" {
                 "Verified".green()
             } else {
