@@ -22,119 +22,119 @@
   "inputs": [
     {
       "path": ".env.example",
-      "sha256": "f69e88ea20ffa8b709c9150712eb528d9f8a9b627bed2db21c0131880c1311aa"
+      "sha256": "ab192d167189a3b6eca03b643948fd2043fc1775e4aa4fecd77e6146be517419"
     },
     {
       "path": "config/cr07-activation-manifest.json",
-      "sha256": "7cf47961bf83ce5f9d5da1e1953fc6a6a328365918af81652c88abd2e6da441e"
+      "sha256": "21bf92d0c0f66d43856fa32534b925887612daf8bbf8e0cd0f9b0bd3941253ef"
     },
     {
       "path": "config/weak-subjectivity/canonical-anchor.example.json",
-      "sha256": "7d58172b6fd19b97968e3ef0aa8a1c28a8a54f80ecd35be019e7acdb2683c279"
+      "sha256": "42402795edbe25d05e8cf72a61deafb82c9440fceee793585df9c7eb4bfc4a42"
     },
     {
       "path": "contracts/Registry.sol",
-      "sha256": "09be7a0c96caadcea29a706390fb460481b3a40e257eaeb8a9796316d7bec9fe"
+      "sha256": "1086ef4a6f2366fc2269156cc194606aac0dc0c78926d9e8e6f29984553be399"
     },
     {
       "path": "docker-compose.light.yml",
-      "sha256": "59ed1ce66f99680cb953c0bc80efce56c7f161ac4c3449eb599a01a10eedd7be"
+      "sha256": "a0ca5426565e3340624462fc9bf05f43dace6f3379ced8a848c96499ce9c2bd5"
     },
     {
       "path": "docker-compose.prod.yml",
-      "sha256": "1e53fcbdded477d10190bc30906a652c322d81ab20a32ed8bb41097eef95bc08"
+      "sha256": "b49b8af797f568e31cf1306edf1a390bc6314a3f201ad7c87dc541d519378c6a"
     },
     {
       "path": "docker-compose.testnet.yml",
-      "sha256": "b72daa38b04a6c3826bbc597de58f502865a2ddee5406eeb87b4b3a2d865918e"
+      "sha256": "8635d0554be1b0437549e7eb6d822ad56d2ad78633cfe92bb264ff814ec56204"
     },
     {
       "path": "docker-compose.validator.yml",
-      "sha256": "704875545149261023684af815626ffe088ffe5a9f2b1f00359da9ec22d2cf7e"
+      "sha256": "d7ba64e5c1b38281565a7efc6682e4da487cac9d2bdc3ec9686e15d0aadde7d0"
     },
     {
       "path": "docker-compose.yml",
-      "sha256": "dceb7e01a51dc5c5ebf2a01eda28b8b8b234776a95b6a24b91470f2eb8f4bda8"
+      "sha256": "663eea19a710609c24958b8435aa59fa0ebef9156cb1d5b96ae692bfbbfad1d8"
     },
     {
       "path": "k8s/01-configmap.yaml",
-      "sha256": "71f12eaca282d1bf82799388f5ae2e1aa0034d5034ffb1abad1d6f77f7f0406f"
+      "sha256": "ceade37019db39b43f9eb2810466b1e5a4b6984761cbc4bd81692460fb75d6e6"
     },
     {
       "path": "scripts/generate-capability-matrix.mjs",
-      "sha256": "d4fc4c42b586af8413ac8dac28dfd8be21f9448307e297cc6424c09b93a48bdb"
+      "sha256": "3c5849e675e57acf914875cb3f5ba1a486978874a614d0798e8a4da0421c62ba"
     },
     {
       "path": "scripts/validate-cr07-activation.mjs",
-      "sha256": "72da911f0575d6e59363190ba3b107f44ce7ec7e7d0c4f11db830f06c6d7fd1e"
+      "sha256": "7034b7ff6e751e37b92be65f257b81129483756480126bb6e17c0b39bbd2f1cc"
     },
     {
       "path": "testnet/.env.example",
-      "sha256": "9d462e11fdf4dc9a2da661a8a705ad53c821182299099cf7625216bf60b5609a"
+      "sha256": "e2a833d469a1e615ad6bd39fd143de87df1296b54aedf91a2868450e91b7aa46"
     },
     {
       "path": "testnet/bootstrap/bootstrap.env.example",
-      "sha256": "55b8d74e37b1831f74f2d022a9c39cd9937e837cd03d08ac5ad14259a7b93078"
+      "sha256": "21834857f475d05bfcb46f761e0681107267de3649323e2eafe214f255ca3dae"
     },
     {
       "path": "testnet/bootstrap/docker-compose.yml",
-      "sha256": "554d5fd61d9afe8e1c81b07c910eff4775a0db8cbb9e46e9994f4a95fe87159a"
+      "sha256": "943ae835fe9e9e7f7f5a2254965178ef7655e7ebd23991e62f67173f4f2366b1"
     },
     {
       "path": "testnet/chain-spec.example.json",
-      "sha256": "3dd7872f8ed700e0be4c5f4f46d070373f9d5175ed4240fd9d988fb185042917"
+      "sha256": "cea4b4bd943783e5bd9bb50685930daf86a920f15f81b7ca2eb688748af85cc6"
     },
     {
       "path": "testnet/chain-spec.local.json",
-      "sha256": "bcfe39d36aba5cfdee6e1df0788976f94871dcd3972c6bd5a8d0d3caca7e9e6a"
+      "sha256": "008505be144eba0ebf7bacb083f3290571a990c5478387e30f0a2b949b4b0238"
     },
     {
       "path": "testnet/chain-spec.sepolia.json",
-      "sha256": "8685d45e96e93971b8b01245f9ac325cbab197678ae49be38ab0aaf86589fec8"
+      "sha256": "5b0deaa89b7d7f2ed1ad913454e0a8d3cfd06ab4e165b9271001c0f46525a433"
     },
     {
       "path": "testnet/chain-spec.sepolia.json.sig",
-      "sha256": "651c2b4a216aa8e0b9a99f593ed050ec17c0c299d4d3d55a02e40ddce0d80b48"
+      "sha256": "eefd0d6dab2edca353f6daa7001b93ecd9c6246171cf83f02df04b52c8b05642"
     },
     {
       "path": "testnet/docker-compose.observer-pool.yml",
-      "sha256": "bb9872d59f5473c183eeb3d3d8f55c29a81dfdfefac8112c18df6d0426d92e78"
+      "sha256": "0f75d090876dcbe55874951178cb05e107e41425bb698e9812246f2316483768"
     },
     {
       "path": "testnet/docker-compose.validator-fleet.yml",
-      "sha256": "47ec0f98ced766b38ed6f96e3d89bcbcd929a0dd17cbd58fd304ec8096a4279c"
+      "sha256": "7b51c0f4da2485f55744c618318e4ed2f93085619d028bda5ef494f22b1aa759"
     },
     {
       "path": "testnet/docker-compose.validator.yml",
-      "sha256": "a687404cac0f8bee1de30ee1e67cd9007df264590c7e2e0bea0be5b9e9ec8b8f"
+      "sha256": "843381f9431cb80b43f3c37d4a0efdf0a28a0e43295333a6bb4c2f3c3966a4ef"
     },
     {
       "path": "testnet/genesis.json",
-      "sha256": "faad4111069744b2dfc5e39045bdd9453423764f80281dc1662e26dc3c0a121d"
+      "sha256": "34bc7e8d280c402d3c42fcfb7306770a9dde989df9591039af863c73fb6edc49"
     },
     {
       "path": "testnet/require-spec-signing-key.ps1",
-      "sha256": "64b6a1446272f0e5e82fe4bfee80acbef39425adfb8c4aba2756aa88e58738ca"
+      "sha256": "b0c094977899f51fe8bd1055e64ad011ff42e0335977bc1cf2a977311d2fdbd5"
     },
     {
       "path": "testnet/sepolia-fleet.env.example",
-      "sha256": "793dbb1ce1d4e5e71e6c540143af1dc9fa0befb19fb7c67c92fd5e194e066b86"
+      "sha256": "c6120484839d725c3add53f1123a092ac96d40d92c27be2a08125dff048ff900"
     },
     {
       "path": "testnet/spec-server/chain-spec.json",
-      "sha256": "8685d45e96e93971b8b01245f9ac325cbab197678ae49be38ab0aaf86589fec8"
+      "sha256": "5b0deaa89b7d7f2ed1ad913454e0a8d3cfd06ab4e165b9271001c0f46525a433"
     },
     {
       "path": "testnet/spec-server/chain-spec.json.sig",
-      "sha256": "651c2b4a216aa8e0b9a99f593ed050ec17c0c299d4d3d55a02e40ddce0d80b48"
+      "sha256": "eefd0d6dab2edca353f6daa7001b93ecd9c6246171cf83f02df04b52c8b05642"
     },
     {
       "path": "testnet/spec-server/chain-spec.sepolia.json",
-      "sha256": "8685d45e96e93971b8b01245f9ac325cbab197678ae49be38ab0aaf86589fec8"
+      "sha256": "5b0deaa89b7d7f2ed1ad913454e0a8d3cfd06ab4e165b9271001c0f46525a433"
     },
     {
       "path": "testnet/spec-server/chain-spec.sepolia.json.sig",
-      "sha256": "651c2b4a216aa8e0b9a99f593ed050ec17c0c299d4d3d55a02e40ddce0d80b48"
+      "sha256": "eefd0d6dab2edca353f6daa7001b93ecd9c6246171cf83f02df04b52c8b05642"
     }
   ],
   "chain_specs": [
@@ -250,12 +250,12 @@
     "canonical": {
       "spec_path": "testnet/chain-spec.sepolia.json",
       "signature_path": "testnet/chain-spec.sepolia.json.sig",
-      "declared_genesis_hash": "0xbca931fadf9ff600c5db30fefa63e709f3ae0d01d65520a407c0b1ad18bd1ec5",
-      "computed_genesis_hash": "0xbca931fadf9ff600c5db30fefa63e709f3ae0d01d65520a407c0b1ad18bd1ec5",
+      "declared_genesis_hash": "0x66aa3c354eb981498026cca5a665e5630e488c3ed81236455396c383f5595e0f",
+      "computed_genesis_hash": "0x66aa3c354eb981498026cca5a665e5630e488c3ed81236455396c383f5595e0f",
       "genesis_hash_valid": true,
-      "spec_sha256": "8685d45e96e93971b8b01245f9ac325cbab197678ae49be38ab0aaf86589fec8",
-      "signature_sha256": "651c2b4a216aa8e0b9a99f593ed050ec17c0c299d4d3d55a02e40ddce0d80b48",
-      "spec_byte_length": 3144,
+      "spec_sha256": "5b0deaa89b7d7f2ed1ad913454e0a8d3cfd06ab4e165b9271001c0f46525a433",
+      "signature_sha256": "eefd0d6dab2edca353f6daa7001b93ecd9c6246171cf83f02df04b52c8b05642",
+      "spec_byte_length": 3051,
       "signature_byte_length": 130,
       "signature_format_valid": true,
       "signature_cryptographically_valid": true,
@@ -265,9 +265,9 @@
       {
         "spec_path": "testnet/spec-server/chain-spec.sepolia.json",
         "signature_path": "testnet/spec-server/chain-spec.sepolia.json.sig",
-        "spec_sha256": "8685d45e96e93971b8b01245f9ac325cbab197678ae49be38ab0aaf86589fec8",
-        "signature_sha256": "651c2b4a216aa8e0b9a99f593ed050ec17c0c299d4d3d55a02e40ddce0d80b48",
-        "spec_byte_length": 3144,
+        "spec_sha256": "5b0deaa89b7d7f2ed1ad913454e0a8d3cfd06ab4e165b9271001c0f46525a433",
+        "signature_sha256": "eefd0d6dab2edca353f6daa7001b93ecd9c6246171cf83f02df04b52c8b05642",
+        "spec_byte_length": 3051,
         "signature_byte_length": 130,
         "exact_spec_bytes": true,
         "exact_signature_bytes": true,
@@ -277,9 +277,9 @@
       {
         "spec_path": "testnet/spec-server/chain-spec.json",
         "signature_path": "testnet/spec-server/chain-spec.json.sig",
-        "spec_sha256": "8685d45e96e93971b8b01245f9ac325cbab197678ae49be38ab0aaf86589fec8",
-        "signature_sha256": "651c2b4a216aa8e0b9a99f593ed050ec17c0c299d4d3d55a02e40ddce0d80b48",
-        "spec_byte_length": 3144,
+        "spec_sha256": "5b0deaa89b7d7f2ed1ad913454e0a8d3cfd06ab4e165b9271001c0f46525a433",
+        "signature_sha256": "eefd0d6dab2edca353f6daa7001b93ecd9c6246171cf83f02df04b52c8b05642",
+        "spec_byte_length": 3051,
         "signature_byte_length": 130,
         "exact_spec_bytes": true,
         "exact_signature_bytes": true,
@@ -289,7 +289,7 @@
     ],
     "mirrors_exact": true,
     "signing_key": {
-      "configured_pubkey_hex": "3fe87833177b04b0a18600eace041692a35fb2b85f6e14e6734d894a0fd61c01",
+      "configured_pubkey_hex": "51ff9f3e37f8c82dbf49aea2f80d00aaf75acace5a148c0526187c8d1cae73bd",
       "repository_disclosed_development_key": false,
       "disclosure_source": "testnet/require-spec-signing-key.ps1",
       "disallowed_by_activation_manifest": false,
