@@ -1,0 +1,42 @@
+# Candidate public faucet release. Promote only after the real private claim gate passes.
+name: creg-public-faucet
+services:
+  faucet-db:
+    image: postgres@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    container_name: creg-unified-faucet-db
+    restart: unless-stopped
+    env_file: /var/lib/creg/public-faucet-r25/postgres.env
+    volumes:
+      - faucet-data:/var/lib/postgresql/data
+    networks:
+      public-edge:
+        aliases: [faucet-db]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U faucet -d creg_faucet"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  faucet:
+    image: us-central1-docker.pkg.dev/gen-lang-client-0022105784/creg-testnet/creg-faucet@sha256:d44533abf09a14a47f1b0470a8fe888b90bc699babc554d7cbcad5df38212259
+    container_name: creg-faucet-public-r29
+    restart: unless-stopped
+    env_file: /var/lib/creg/public-faucet-r29/faucet.env
+    ports:
+      - 127.0.0.1:18082:8082
+    depends_on:
+      faucet-db:
+        condition: service_healthy
+    networks:
+      public-edge:
+        aliases: [faucet]
+
+networks:
+  public-edge:
+    external: true
+    name: testnet_creg-unified-net
+
+volumes:
+  faucet-data:
+    external: true
+    name: testnet_faucet-postgres-data

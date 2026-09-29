@@ -1,0 +1,20 @@
+{
+  "verified_at_utc": "2026-09-29T20:06:36.493662+00:00",
+  "public_url": "https://faucet.testnet.cregnet.dev/",
+  "public_http_status": 200,
+  "image": "us-central1-docker.pkg.dev/gen-lang-client-0022105784/creg-testnet/creg-faucet@sha256:11ac1d09ccd2c65fa56fb3fac63568b6f2302aa81ae601d1a22d7b18225d6550",
+  "chain_id": 11155111,
+  "token_contract": "0xbC2a72107C6765364D0A822a88A6e6C61f30EAa6",
+  "production_ledger_reconciled": true,
+  "restart_recovery_confirmed": true,
+  "token_claims_enabled": false,
+  "native_drips_enabled": false,
+  "reconciled_through_block": 11809184,
+  "faucet_balance_wei": "8000000000000000000000",
+  "total_supply_wei": "20000000000000000000000000",
+  "canonical_transfer_rows": 3,
+  "funding_rows": 1,
+  "database_backup": "/var/lib/creg/public-faucet-r26/production-before-reconciliation-20260929T200519Z.dump",
+  "database_backup_sha256": "08e01dad061bee55b438b66fa41c2935579cd4035ed42a65469b84cc2c81a69e",
+  "database_container_and_volume_preserved": true
+}

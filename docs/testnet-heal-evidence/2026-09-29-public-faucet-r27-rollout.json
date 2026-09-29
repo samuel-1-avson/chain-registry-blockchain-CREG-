@@ -1,0 +1,43 @@
+{
+  "verified_at_utc": "2026-09-29T20:34:01.618808+00:00",
+  "public_url": "https://faucet.testnet.cregnet.dev/",
+  "public_http_status": 200,
+  "image": "us-central1-docker.pkg.dev/gen-lang-client-0022105784/creg-testnet/creg-faucet@sha256:2f5a942b0f551ef0751de900f75ea4a1089a84dba4873681907c654f73e5dec0",
+  "production_database_container_and_volume_preserved": true,
+  "production_database_backup": "/var/lib/creg/public-faucet-r27/production-before-r27-20260929T203229Z.dump",
+  "production_database_backup_sha256": "b7605c5f22d53963e4904436869027d264d94fa4fa689acd5013f62af19ec4fb",
+  "private_restart_recovery_confirmed": true,
+  "requests_mocked": false,
+  "on_chain_transaction_sent": false,
+  "supply": {
+    "block_hash": "0xbe42c7bbcef3cbe875f0ecaa884bdb45cd024ec49f30ebe43fb29a23bca654d1",
+    "block_number": 11809705,
+    "chain_id": 11155111,
+    "faucet": {
+      "address": "0x721c8dbd8208ca9dbdcc12ae9339225458608b81",
+      "balance_wei": "8000000000000000000000"
+    },
+    "faucet_allocation_status": "pending_governed_policy",
+    "governance": {
+      "address": "0x0ab4db22a9902b8ef678abd408889af22277d24e",
+      "balance_wei": "0"
+    },
+    "max_outstanding_supply_wei": "42000000000000000000000000",
+    "other_holders_wei": "2000000000000000000000",
+    "reconciled_at": "2026-09-29 20:33:44.255263+00",
+    "remaining_mint_capacity_wei": "22000000000000000000000000",
+    "source": "verified_production_ledger_and_exact_block_sepolia_reads",
+    "staking": {
+      "address": "0x61c00ebe7c46f0bce63942f7e15bcc434dfc9b7c",
+      "balance_wei": "410000000000000000000"
+    },
+    "status": "available",
+    "token_claims_enabled": false,
+    "token_contract": "0xbc2a72107c6765364d0a822a88a6e6c61f30eaa6",
+    "total_supply_wei": "20000000000000000000000000",
+    "treasury": {
+      "address": "0x3a3206d683441aa91cca7cd5757b1f0ca463213a",
+      "balance_wei": "19989590000000000000000000"
+    }
+  }
+}

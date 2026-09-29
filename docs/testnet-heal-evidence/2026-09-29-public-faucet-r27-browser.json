@@ -1,0 +1,9 @@
+{
+  "http_status": 200,
+  "total": "20,000,000 tCREG",
+  "treasury": "19,989,590 tCREG",
+  "faucet": "8,000 tCREG",
+  "allocation": "Verified on Sepolia at one finalized block. Faucet allocation: awaiting governance approval.",
+  "claim_disabled": true,
+  "errors": []
+}

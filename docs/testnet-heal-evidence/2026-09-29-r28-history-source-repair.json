@@ -1,0 +1,70 @@
+{
+  "verified_at_utc": "2026-09-29T21:45:04.774708+00:00",
+  "status": "safe_history_advanced_with_fresh_finalized_rpc",
+  "recent_history_source": "CREG Sepolia proxy",
+  "deployment_receipt_source": "Routescan archive",
+  "claims_remain_closed": true,
+  "supply": {
+    "block_hash": "0x66eb16ab2417956bf0ce2a7e3c1399e8d4b4ca070030c908994e356461d9cab9",
+    "block_number": 11810216,
+    "chain_id": 11155111,
+    "faucet": {
+      "address": "0x721c8dbd8208ca9dbdcc12ae9339225458608b81",
+      "balance_wei": "100000000000000000000000"
+    },
+    "faucet_allocation_status": "staged_not_open",
+    "governance": {
+      "address": "0x0ab4db22a9902b8ef678abd408889af22277d24e",
+      "balance_wei": "0"
+    },
+    "max_outstanding_supply_wei": "42000000000000000000000000",
+    "other_holders_wei": "2000000000000000000000",
+    "reconciled_at": "2026-09-29 21:45:00.38897+00",
+    "remaining_mint_capacity_wei": "22000000000000000000000000",
+    "source": "verified_production_ledger_and_exact_block_sepolia_reads",
+    "staking": {
+      "address": "0x61c00ebe7c46f0bce63942f7e15bcc434dfc9b7c",
+      "balance_wei": "410000000000000000000"
+    },
+    "status": "available",
+    "token_claims_enabled": false,
+    "token_contract": "0xbc2a72107c6765364d0a822a88a6e6c61f30eaa6",
+    "total_supply_wei": "20000000000000000000000000",
+    "treasury": {
+      "address": "0x3a3206d683441aa91cca7cd5757b1f0ca463213a",
+      "balance_wei": "19897590000000000000000000"
+    }
+  },
+  "stats": {
+    "cooldown_seconds": 86400,
+    "drip_amount": "100000000000000000000",
+    "faucet_address": "0x721C8dBD8208CA9dBdcC12AE9339225458608B81",
+    "faucet_balance": "100000000000000000000000",
+    "faucet_balance_formatted": "100000.00",
+    "faucet_native_balance": "3152514559215597841",
+    "faucet_native_balance_formatted": "3.1525",
+    "ledger_reconciled": true,
+    "max_balance": "1000000000000000000000",
+    "native_drip_amount": "0",
+    "native_max_balance": "1000000000000000000",
+    "stats": {
+      "last_drip": "2026-09-27T21:15:36Z",
+      "total_distributed": "2000000000000000000000",
+      "total_drips": 2,
+      "total_native_distributed": "0",
+      "unique_addresses": 2,
+      "unresolved_claims": 0
+    },
+    "stats_scope": "confirmed_receipts_and_canonical_logs_recorded_in_postgres",
+    "status": "available",
+    "token_address_lifetime_cap_wei": "100000000000000000000",
+    "token_allocation_wei": "1000000000000000000000000",
+    "token_claim_policy_ready": true,
+    "token_claims_enabled": false,
+    "token_contract": "0xbC2a72107C6765364D0A822a88A6e6C61f30EAa6",
+    "token_daily_cap_wei": "50000000000000000000000",
+    "token_distribution_open": false,
+    "token_hot_wallet_float_wei": "100000000000000000000000"
+  },
+  "on_chain_transaction_sent": false
+}

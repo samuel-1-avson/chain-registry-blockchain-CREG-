@@ -1,0 +1,11 @@
+{
+  "http_status": 200,
+  "drip": "100",
+  "lifetime": "100 tCREG",
+  "daily": "50,000 tCREG",
+  "allocation": "1,000,000 tCREG",
+  "float": "100,000 tCREG",
+  "status": "The faucet policy is staged. Claims remain paused until funding and final release checks are complete.",
+  "claims_disabled": true,
+  "errors": []
+}

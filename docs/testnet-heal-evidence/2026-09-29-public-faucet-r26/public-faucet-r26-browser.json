@@ -1,0 +1,14 @@
+{
+  "verified_at_utc": "2026-09-29T20:09:00.905Z",
+  "public_url": "https://faucet.testnet.cregnet.dev",
+  "http_status": 200,
+  "chain_id": 11155111,
+  "ledger_reconciled": true,
+  "token_claims_enabled": false,
+  "native_drips_enabled": false,
+  "claim_button_disabled": true,
+  "observed_confirmed_drips": 2,
+  "page_errors": [],
+  "requests_mocked": false,
+  "on_chain_transaction_sent": false
+}

@@ -55,6 +55,17 @@ tests/
 .env.local
 .env.*.local
 
+# Never send local testnet credentials or generated fleet environment files to
+# the Docker builder (including its persistent BuildKit cache).
+testnet/.env
+testnet/**/*.env
+testnet/sepolia-fleet.env
+testnet/secrets/
+testnet/**/*.key
+testnet/**/*.pem
+testnet/**/*.p12
+testnet/**/*.pfx
+
 # Docker files (not needed in context)
 Dockerfile*
 docker-compose*.yml

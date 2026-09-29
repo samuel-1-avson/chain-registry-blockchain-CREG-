@@ -1,0 +1,32 @@
+{
+  "status": "passed",
+  "submitted_at_utc": "2026-09-29T21:50:32Z",
+  "network": "Sepolia",
+  "chain_id": 11155111,
+  "token": "0xbc2a72107c6765364d0a822a88a6e6c61f30eaa6",
+  "faucet": "0x721c8dbd8208ca9dbdcc12ae9339225458608b81",
+  "recipient": "0x67420a75fa0950bb955145f2ff37bfc65cc1b09f",
+  "recipient_key_secret_name": "creg-phase-c-r29-acceptance-evm",
+  "recipient_before_wei": "0",
+  "faucet_before_wei": "100000000000000000000000",
+  "expected_claim_wei": "100000000000000000000",
+  "private_candidate_only": true,
+  "public_claims_open": false,
+  "requests_mocked": false,
+  "claim_response": {
+    "success": true,
+    "message": "Sent 100 tCREG.",
+    "tx_hash": "0x5196a4e24186c0bae8af3530ac2f76afcdd4f7dbc5efe9befae960e8b7d6777b",
+    "amount": "100 tCREG",
+    "cooldown_seconds": 86400,
+    "token_tx_hash": "0x5196a4e24186c0bae8af3530ac2f76afcdd4f7dbc5efe9befae960e8b7d6777b",
+    "token_amount": "100"
+  },
+  "token_tx_hash": "0x5196a4e24186c0bae8af3530ac2f76afcdd4f7dbc5efe9befae960e8b7d6777b",
+  "receipt_block_number": 11810329,
+  "recipient_after_wei": "100000000000000000000",
+  "faucet_after_wei": "99900000000000000000000",
+  "private_candidate_restart": "passed",
+  "durable_claim_row": "1|100000000000000000000|confirmed",
+  "unresolved_claims_after_restart": 0
+}

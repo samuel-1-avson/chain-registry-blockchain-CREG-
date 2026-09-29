@@ -1,0 +1,15 @@
+{
+  "observed_at_utc": "2026-09-29T21:51:55.881Z",
+  "network": "Sepolia",
+  "token_contract": "0xbC2a72107C6765364D0A822a88A6e6C61f30EAa6",
+  "faucet_address": "0x721C8dBD8208CA9dBdcC12AE9339225458608B81",
+  "faucet_balance_wei": "99900000000000000000000",
+  "refill_trigger_wei": "25000000000000000000000",
+  "working_balance_limit_wei": "100000000000000000000000",
+  "refill_due": false,
+  "proposed_top_up_wei": "0",
+  "token_claims_enabled": false,
+  "ledger_reconciled": true,
+  "read_only": true,
+  "on_chain_transaction_sent": false
+}

@@ -1,0 +1,28 @@
+{
+  "recorded_at_utc": "2026-09-29T21:45:25.822397+00:00",
+  "status": "classified_after_safe_sepolia_reconciliation",
+  "transaction_hash": "0x11f797c1d4514973ee88770f359ce63dcafa22c27de8996c909f12d9f713df21",
+  "safe_block_number": 11810216,
+  "safe_block_hash": "0x66eb16ab2417956bf0ce2a7e3c1399e8d4b4ca070030c908994e356461d9cab9",
+  "live_balance_wei": "100000000000000000000000",
+  "total_supply_wei": "20000000000000000000000000",
+  "confirmed_claims_wei": "2000000000000000000000",
+  "database": {
+    "watermark": 11810216,
+    "recorded_balance_wei": "100000000000000000000000",
+    "funding": [
+      {
+        "tx_hash": "0x39894f356780e065fd9f3d676a458a6d639b8e69a8d7a71b48de860cc530537f",
+        "amount_wei": "10000000000000000000000",
+        "classification": "approved_seed_20260927"
+      },
+      {
+        "tx_hash": "0x11f797c1d4514973ee88770f359ce63dcafa22c27de8996c909f12d9f713df21",
+        "amount_wei": "92000000000000000000000",
+        "classification": "approved_r28_working_balance_20260929"
+      }
+    ]
+  },
+  "token_claims_remain_closed": true,
+  "on_chain_transaction_sent": false
+}

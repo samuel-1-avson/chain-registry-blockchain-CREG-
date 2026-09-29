@@ -1,0 +1,103 @@
+{
+  "verified_at_utc": "2026-09-29T22:17:04.616895+00:00",
+  "status": "public_r29_open_after_real_claim_and_safe_import",
+  "public_url": "https://faucet.testnet.cregnet.dev/",
+  "production_database_container_and_volume_preserved": true,
+  "production_database_backup": "/var/lib/creg/public-faucet-r29/production-before-r29-public-20260929T221636Z.dump",
+  "claim": {
+    "status": "passed",
+    "submitted_at_utc": "2026-09-29T21:50:32Z",
+    "network": "Sepolia",
+    "chain_id": 11155111,
+    "token": "0xbc2a72107c6765364d0a822a88a6e6c61f30eaa6",
+    "faucet": "0x721c8dbd8208ca9dbdcc12ae9339225458608b81",
+    "recipient": "0x67420a75fa0950bb955145f2ff37bfc65cc1b09f",
+    "recipient_key_secret_name": "creg-phase-c-r29-acceptance-evm",
+    "recipient_before_wei": "0",
+    "faucet_before_wei": "100000000000000000000000",
+    "expected_claim_wei": "100000000000000000000",
+    "private_candidate_only": true,
+    "public_claims_open": false,
+    "requests_mocked": false,
+    "claim_response": {
+      "success": true,
+      "message": "Sent 100 tCREG.",
+      "tx_hash": "0x5196a4e24186c0bae8af3530ac2f76afcdd4f7dbc5efe9befae960e8b7d6777b",
+      "amount": "100 tCREG",
+      "cooldown_seconds": 86400,
+      "token_tx_hash": "0x5196a4e24186c0bae8af3530ac2f76afcdd4f7dbc5efe9befae960e8b7d6777b",
+      "token_amount": "100"
+    },
+    "token_tx_hash": "0x5196a4e24186c0bae8af3530ac2f76afcdd4f7dbc5efe9befae960e8b7d6777b",
+    "receipt_block_number": 11810329,
+    "recipient_after_wei": "100000000000000000000",
+    "faucet_after_wei": "99900000000000000000000",
+    "private_candidate_restart": "passed",
+    "durable_claim_row": "1|100000000000000000000|confirmed",
+    "unresolved_claims_after_restart": 0
+  },
+  "supply": {
+    "block_hash": "0x01fd3327bb24a717f91350588b60bd1c7a4c4f6779d7e70d3a0193b6024b13ea",
+    "block_number": 11810376,
+    "chain_id": 11155111,
+    "faucet": {
+      "address": "0x721c8dbd8208ca9dbdcc12ae9339225458608b81",
+      "balance_wei": "99900000000000000000000"
+    },
+    "faucet_allocation_status": "open",
+    "governance": {
+      "address": "0x0ab4db22a9902b8ef678abd408889af22277d24e",
+      "balance_wei": "0"
+    },
+    "max_outstanding_supply_wei": "42000000000000000000000000",
+    "other_holders_wei": "2100000000000000000000",
+    "reconciled_at": "2026-09-29 22:16:59.827949+00",
+    "remaining_mint_capacity_wei": "22000000000000000000000000",
+    "source": "verified_production_ledger_and_exact_block_sepolia_reads",
+    "staking": {
+      "address": "0x61c00ebe7c46f0bce63942f7e15bcc434dfc9b7c",
+      "balance_wei": "410000000000000000000"
+    },
+    "status": "available",
+    "token_claims_enabled": true,
+    "token_contract": "0xbc2a72107c6765364d0a822a88a6e6c61f30eaa6",
+    "total_supply_wei": "20000000000000000000000000",
+    "treasury": {
+      "address": "0x3a3206d683441aa91cca7cd5757b1f0ca463213a",
+      "balance_wei": "19897590000000000000000000"
+    }
+  },
+  "stats": {
+    "cooldown_seconds": 86400,
+    "drip_amount": "100000000000000000000",
+    "faucet_address": "0x721C8dBD8208CA9dBdcC12AE9339225458608B81",
+    "faucet_balance": "99900000000000000000000",
+    "faucet_balance_formatted": "99900.00",
+    "faucet_native_balance": "3152455253647793443",
+    "faucet_native_balance_formatted": "3.1525",
+    "ledger_reconciled": true,
+    "max_balance": "1000000000000000000000",
+    "native_drip_amount": "0",
+    "native_max_balance": "1000000000000000000",
+    "stats": {
+      "last_drip": "2026-09-29T21:50:36Z",
+      "total_distributed": "2100000000000000000000",
+      "total_drips": 3,
+      "total_native_distributed": "0",
+      "unique_addresses": 3,
+      "unresolved_claims": 0
+    },
+    "stats_scope": "confirmed_receipts_and_canonical_logs_recorded_in_postgres",
+    "status": "available",
+    "token_address_lifetime_cap_wei": "100000000000000000000",
+    "token_allocation_wei": "1000000000000000000000000",
+    "token_claim_policy_ready": true,
+    "token_claims_enabled": true,
+    "token_contract": "0xbC2a72107C6765364D0A822a88A6e6C61f30EAa6",
+    "token_daily_cap_wei": "50000000000000000000000",
+    "token_distribution_open": true,
+    "token_hot_wallet_float_wei": "100000000000000000000000"
+  },
+  "requests_mocked": false,
+  "new_on_chain_transaction_sent_by_promotion": false
+}

@@ -1,0 +1,53 @@
+{
+  "status": "prepared_read_only_not_approved_not_signed_not_broadcast",
+  "prepared_at_utc": "2026-09-29T21:02:06.151Z",
+  "chain_id": 11155111,
+  "snapshot_block": 11810086,
+  "rpc_url": "https://api.testnet.cregnet.dev/sepolia",
+  "token_contract": "0xbC2a72107C6765364D0A822a88A6e6C61f30EAa6",
+  "token_code_keccak256": "0xee4ee60af45e022c2673e37e21781b5d88d97164e768ad1d65293122aa1d2b16",
+  "token_owner": "0x0AB4Db22A9902B8Ef678aBd408889af22277d24E",
+  "treasury": "0x3A3206D683441AA91cCA7CD5757B1F0ca463213A",
+  "faucet": "0x721C8dBD8208CA9dBdcC12AE9339225458608B81",
+  "total_supply_tcreg": "20000000.0",
+  "cap_tcreg": "42000000.0",
+  "treasury_balance_before_tcreg": "19989590.0",
+  "faucet_balance_before_tcreg": "8000.0",
+  "faucet_balance_after_tcreg": "100000.0",
+  "approved_policy_candidate": {
+    "drip_tcreg": "100",
+    "cumulative_distribution_cap_tcreg": "1000000",
+    "daily_distribution_cap_tcreg": "50000",
+    "address_lifetime_cap_tcreg": "100",
+    "hot_wallet_float_tcreg": "100000",
+    "refill_trigger_tcreg": "25000",
+    "native_eth_drip": "0",
+    "distribution_open": false
+  },
+  "top_up_amount_tcreg": "92000.0",
+  "top_up_amount_wei": "92000000000000000000000",
+  "treasury_eth_before": "0.192677832881128004",
+  "gas_limit_ceiling": "100000",
+  "gas_budget_eth": "0.001",
+  "max_fee_per_gas_wei_under_budget": "10000000000",
+  "suggested_max_fee_per_gas_wei_at_preparation": "2197089762",
+  "transaction": {
+    "chainId": 11155111,
+    "from": "0x3A3206D683441AA91cCA7CD5757B1F0ca463213A",
+    "to": "0xbC2a72107C6765364D0A822a88A6e6C61f30EAa6",
+    "data": "0xa9059cbb000000000000000000000000721c8dbd8208ca9dbdcc12ae9339225458608b8100000000000000000000000000000000000000000000137b547a731c01800000",
+    "value_wei": "0",
+    "pending_nonce_at_preparation": 27
+  },
+  "signing_secret_name": "creg-phase-c-treasury-v2-evm",
+  "secret_project": "gen-lang-client-0022105784",
+  "recheck_before_execution": [
+    "chain ID and token code hash",
+    "treasury signer address and token ownership",
+    "pending nonce and both token balances",
+    "actual gas estimate and bounded fee",
+    "faucet production ledger, current claims, and approved policy status"
+  ],
+  "requests_mocked": false,
+  "on_chain_transaction_sent": false
+}

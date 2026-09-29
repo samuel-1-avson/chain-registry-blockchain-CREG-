@@ -1,0 +1,46 @@
+{
+  "observed_at_utc": "2026-09-29T20:16:03.023Z",
+  "chain_id": 11155111,
+  "block_number": 11809855,
+  "token_contract": "0xbC2a72107C6765364D0A822a88A6e6C61f30EAa6",
+  "total_supply_tcreg": "20000000",
+  "accounted_supply_tcreg": "20000000",
+  "unaccounted_supply_tcreg": "0",
+  "holders": {
+    "treasury": {
+      "address": "0x3A3206D683441AA91cCA7CD5757B1F0ca463213A",
+      "balance_tcreg": "19989590"
+    },
+    "faucet": {
+      "address": "0x721C8dBD8208CA9dBdcC12AE9339225458608B81",
+      "balance_tcreg": "8000"
+    },
+    "governance": {
+      "address": "0x0AB4Db22A9902B8Ef678aBd408889af22277d24E",
+      "balance_tcreg": "0"
+    },
+    "staking": {
+      "address": "0x61c00EBe7C46f0bcE63942F7E15Bcc434DFC9B7C",
+      "balance_tcreg": "410"
+    },
+    "validator_1": {
+      "address": "0x91e4dfc18bf015051676f00f23782d0770b95a7a",
+      "balance_tcreg": "1000"
+    },
+    "recipient_2": {
+      "address": "0x5f424b4ec88073fd461eb194833681a31adfa311",
+      "balance_tcreg": "1000"
+    },
+    "validator_rewards": {
+      "address": "0xf616699ff68E2a310549fa4280475589B0EB0E49",
+      "balance_tcreg": "0"
+    },
+    "pinning_rewards": {
+      "address": "0xC35C52315492e5A062f3280829Ba714442216B46",
+      "balance_tcreg": "0"
+    }
+  },
+  "data_source": "https://api.testnet.cregnet.dev/sepolia",
+  "requests_mocked": false,
+  "on_chain_transaction_sent": false
+}

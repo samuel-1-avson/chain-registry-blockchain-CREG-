@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#0c0d11">
-    <meta name="description" content="Request free tCREG test tokens and native gas ETH for the Chain Registry Sepolia testnet.">
+    <meta name="description" content="View Chain Registry Sepolia testnet faucet status, balances, and token claim availability.">
     <title>CREG Testnet Faucet</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💧</text></svg>">
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -351,6 +351,10 @@
             cursor: pointer;
         }
         .network-row .value:hover { color: var(--accent-primary-light); }
+        .supply-info .value { cursor: default; }
+        .supply-info .label a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+        .supply-note { color: var(--text-tertiary); font-size: 12px; line-height: 1.55; margin: 0 0 8px; }
+        .supply-info .network-row.total { border-bottom: 1px solid var(--border); margin-bottom: 4px; font-weight: 600; }
 
         .next-steps {
             margin-top: 20px;
@@ -390,19 +394,27 @@
         <div class="header">
             <div class="logo">💧</div>
             <h1 class="title">CREG Testnet Faucet</h1>
-            <p class="subtitle">Get free test tokens and native gas for the Chain Registry testnet</p>
+            <p class="subtitle">Chain Registry testnet token and network information</p>
         </div>
 
         <div class="info-box">
             <h3>ℹ️ Testnet Information</h3>
             <p>
-                • Receive <span id="dripAmountInfo">1000</span> tCREG per request<br>
-                • Receive <span id="nativeDripAmountInfo">0.1</span> ETH for gas per request<br>
-                • <span id="cooldownInfo">60</span>s cooldown between requests<br>
-                • Maximum balance: <span id="maxBalanceInfo">10,000</span> tCREG and <span id="nativeMaxBalanceInfo">1.0</span> ETH<br>
+                • tCREG per request: <span id="dripAmountInfo">—</span><br>
+                • Lifetime tCREG per wallet: <span id="policyLifetime">—</span><br>
+                • Daily faucet distribution cap: <span id="policyDaily">—</span><br>
+                • Cumulative distribution cap: <span id="policyAllocation">—</span><br>
+                • Faucet working balance limit: <span id="policyFloat">—</span><br>
+                • Sepolia ETH per request: <span id="nativeDripAmountInfo">—</span><br>
+                • Cooldown between requests: <span id="cooldownInfo">—</span>s<br>
+                • Maximum balance: <span id="maxBalanceInfo">—</span> tCREG and <span id="nativeMaxBalanceInfo">—</span> ETH<br>
                 • Gas on EVM testnets is paid in native testnet ETH, not in ERC-20 tokens<br>
                 • For testing purposes only
             </p>
+        </div>
+
+        <div id="claimStatus" class="message error" role="status" aria-live="polite" style="display:block; margin-bottom:20px;">
+            Checking live faucet availability…
         </div>
 
         <!-- Wallet connect (optional — auto-fills address) -->
@@ -437,8 +449,8 @@
                 <label for="address">Ethereum Address</label>
                 <input type="text" id="address" placeholder="0x..." autocomplete="off" required>
             </div>
-            <button type="submit" class="btn" id="submitBtn">
-                <span>Request Test Tokens + Gas</span>
+            <button type="submit" class="btn" id="submitBtn" disabled>
+                <span>Checking availability…</span>
             </button>
         </form>
 
@@ -446,20 +458,20 @@
 
         <div class="stats">
             <div class="stat">
-                <div class="stat-value" id="dripAmount">1000</div>
+                <div class="stat-value" id="dripAmount">—</div>
                 <div class="stat-label">tCREG per drip</div>
             </div>
             <div class="stat">
-                <div class="stat-value" id="nativeDripAmount">0.1</div>
+                <div class="stat-value" id="nativeDripAmount">—</div>
                 <div class="stat-label">ETH gas per drip</div>
             </div>
             <div class="stat">
-                <div class="stat-value" id="cooldown">60s</div>
+                <div class="stat-value" id="cooldown">—</div>
                 <div class="stat-label">Cooldown</div>
             </div>
             <div class="stat">
-                <div class="stat-value" id="totalDrips">0</div>
-                <div class="stat-label">Total Drips</div>
+                <div class="stat-value" id="totalDrips">—</div>
+                <div class="stat-label">Confirmed Drips in Ledger</div>
             </div>
             <div class="stat">
                 <div class="stat-value" id="faucetBalance">—</div>
@@ -471,12 +483,28 @@
             </div>
         </div>
 
+        <!-- Verified Sepolia supply and custody, separate from the faucet budget. -->
+        <div class="network-info supply-info" id="supplyInfo">
+            <h4>🪙 Where the tCREG supply is held</h4>
+            <p class="supply-note" id="supplyStatus">Loading the verified Sepolia supply snapshot…</p>
+            <div class="network-row total"><span class="label">Total minted supply</span><span class="value" id="totalSupply">—</span></div>
+            <div class="network-row"><span class="label"><a id="treasurySupplyLink" target="_blank" rel="noopener noreferrer">Treasury wallet ↗</a></span><span class="value" id="treasurySupply">—</span></div>
+            <div class="network-row"><span class="label"><a id="governanceSupplyLink" target="_blank" rel="noopener noreferrer">Governance reserve ↗</a></span><span class="value" id="governanceSupply">—</span></div>
+            <div class="network-row"><span class="label"><a id="faucetSupplyLink" target="_blank" rel="noopener noreferrer">Faucet wallet ↗</a></span><span class="value" id="faucetSupply">—</span></div>
+            <div class="network-row"><span class="label"><a id="stakingSupplyLink" target="_blank" rel="noopener noreferrer">Staking contract ↗</a></span><span class="value" id="stakingSupply">—</span></div>
+            <div class="network-row"><span class="label">Other holders</span><span class="value" id="otherSupply">—</span></div>
+            <div class="network-row"><span class="label">Contract supply cap</span><span class="value" id="maxSupply">—</span></div>
+            <div class="network-row"><span class="label">Remaining mint capacity</span><span class="value" id="remainingSupply">—</span></div>
+            <p class="supply-note" id="supplyBlock" style="margin-top:8px"></p>
+            <p class="supply-note">The total minted supply is held across these wallets and contracts. The faucet can distribute only its own wallet balance under an approved allocation.</p>
+        </div>
+
         <!-- Network configuration -->
         <div class="network-info" id="networkInfo">
             <h4>🔗 Network Configuration</h4>
             <div class="network-row">
                 <span class="label">Chain ID</span>
-                <span class="value" id="chainId" onclick="copyText(this)">31337</span>
+                <span class="value" id="chainId" onclick="copyText(this)">—</span>
             </div>
             <div class="network-row">
                 <span class="label">RPC URL</span>
@@ -500,7 +528,7 @@
         <div class="next-steps">
             <h4>🚀 Next Steps</h4>
             <ol>
-                <li>Get testnet ETH for gas and tCREG for app operations above</li>
+                <li>Use Sepolia ETH for gas; request tCREG here when claims reopen</li>
                 <li>Open the <a href="/" id="explorerLink" target="_blank">Chain Registry Explorer</a></li>
                 <li>Connect your wallet and stake as a publisher or validator</li>
             </ol>
@@ -516,6 +544,7 @@
         const form = document.getElementById('faucetForm');
         const submitBtn = document.getElementById('submitBtn');
         const messageEl = document.getElementById('message');
+        const claimStatusEl = document.getElementById('claimStatus');
         const addressInput = document.getElementById('address');
         const addressGroup = document.getElementById('addressGroup');
         const walletButtons = document.getElementById('walletButtons');
@@ -523,6 +552,22 @@
         const balanceDisplay = document.getElementById('balanceDisplay');
 
         let connectedAddress = null;
+        let networkInfo = null;
+        let claimsAvailable = false;
+        let nativeDripEnabled = false;
+
+        function updateClaimAvailability(available, reason) {
+            claimsAvailable = available;
+            submitBtn.disabled = !available;
+            submitBtn.innerHTML = '<span>' + (available
+                ? (nativeDripEnabled ? 'Request Test Tokens + Gas' : 'Request Test Tokens')
+                : 'Claims Paused') + '</span>';
+            claimStatusEl.className = 'message ' + (available ? 'success' : 'error');
+            claimStatusEl.style.display = 'block';
+            claimStatusEl.textContent = available
+                ? 'Token claims are open on the live Sepolia testnet.'
+                : reason;
+        }
 
         // ── Wallet connection (optional — auto-fills address) ─────
 
@@ -536,19 +581,30 @@
                 const addr = accounts && accounts[0];
                 if (!addr) { showMessage('No account returned from MetaMask.', 'error'); return; }
 
-                const targetChainId = '0x7a69'; // 31337
+                const info = networkInfo || await fetch('/api/network').then((response) => {
+                    if (!response.ok) throw new Error('Network details are unavailable');
+                    return response.json();
+                });
+                const chainId = Number(info.chain_id);
+                if (!Number.isSafeInteger(chainId) || chainId <= 0) {
+                    throw new Error('The faucet did not provide a valid chain ID');
+                }
+                const targetChainId = '0x' + chainId.toString(16);
                 try {
                     await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: targetChainId }] });
                 } catch (switchErr) {
                     if (switchErr.code === 4902 || (switchErr.message || '').includes('Unrecognized')) {
-                        const rpc = document.getElementById('rpcUrl').textContent;
+                        const rpc = info.rpc_url;
+                        if (!/^https:\/\//i.test(rpc || '')) {
+                            throw new Error('A public HTTPS RPC URL is required to add this network');
+                        }
                         await window.ethereum.request({
                             method: 'wallet_addEthereumChain',
                             params: [{
                                 chainId: targetChainId,
-                                chainName: 'CREG Testnet (Anvil)',
+                                chainName: info.chain_name || 'CREG Testnet',
                                 nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
-                                rpcUrls: [rpc || 'http://127.0.0.1:8545'],
+                                rpcUrls: [rpc],
                             }],
                         });
                     }
@@ -607,12 +663,40 @@
             try {
                 const response = await fetch('/api/stats');
                 const data = await response.json();
+                if (!response.ok || data.status !== 'available') {
+                    updateClaimAvailability(false, 'Faucet status is unavailable. Claims cannot be requested right now.');
+                    for (const id of ['dripAmount', 'nativeDripAmount', 'cooldown', 'totalDrips', 'faucetBalance', 'faucetNativeBalance', 'tokenContract']) {
+                        const element = document.getElementById(id);
+                        if (element) element.textContent = 'Unavailable';
+                    }
+                    for (const id of ['dripAmountInfo', 'nativeDripAmountInfo', 'cooldownInfo', 'maxBalanceInfo', 'nativeMaxBalanceInfo',
+                        'policyLifetime', 'policyDaily', 'policyAllocation', 'policyFloat']) {
+                        const element = document.getElementById(id);
+                        if (element) element.textContent = 'Unavailable';
+                    }
+                    return;
+                }
                 const drip = parseInt(data.drip_amount) / 1e18;
                 const nativeDrip = parseInt(data.native_drip_amount || '0') / 1e18;
+                nativeDripEnabled = nativeDrip > 0;
+                updateClaimAvailability(data.token_claims_enabled === true,
+                    data.token_claim_policy_ready === true && data.token_distribution_open === false
+                        ? 'The faucet policy is staged. Claims remain paused until funding and final release checks are complete.'
+                        : 'Token claims are paused while the governed allocation is being finalized. Live balances and network details remain available.');
                 document.getElementById('dripAmount').textContent = drip.toLocaleString();
                 document.getElementById('dripAmountInfo').textContent = drip.toLocaleString();
-                document.getElementById('nativeDripAmount').textContent = nativeDrip.toLocaleString(undefined, { maximumFractionDigits: 4 });
-                document.getElementById('nativeDripAmountInfo').textContent = nativeDrip.toLocaleString(undefined, { maximumFractionDigits: 4 });
+                for (const [id, value] of Object.entries({
+                    policyLifetime: data.token_address_lifetime_cap_wei,
+                    policyDaily: data.token_daily_cap_wei,
+                    policyAllocation: data.token_allocation_wei,
+                    policyFloat: data.token_hot_wallet_float_wei,
+                })) {
+                    document.getElementById(id).textContent = value ? formatTokenWei(value) + ' tCREG' : 'Pending';
+                }
+                document.getElementById('nativeDripAmount').textContent = nativeDripEnabled
+                    ? nativeDrip.toLocaleString(undefined, { maximumFractionDigits: 4 }) : 'Disabled';
+                document.getElementById('nativeDripAmountInfo').textContent = nativeDripEnabled
+                    ? nativeDrip.toLocaleString(undefined, { maximumFractionDigits: 4 }) : 'Disabled';
                 document.getElementById('cooldown').textContent = data.cooldown_seconds + 's';
                 document.getElementById('cooldownInfo').textContent = data.cooldown_seconds;
                 if (data.max_balance) document.getElementById('maxBalanceInfo').textContent = (parseInt(data.max_balance) / 1e18).toLocaleString();
@@ -627,7 +711,63 @@
                         parseFloat(data.faucet_native_balance_formatted).toLocaleString(undefined, { maximumFractionDigits: 4 });
                 }
                 if (data.token_contract) document.getElementById('tokenContract').textContent = data.token_contract;
-            } catch (e) { console.error('Failed to load stats:', e); }
+            } catch (e) {
+                updateClaimAvailability(false, 'Faucet status is unavailable. Claims cannot be requested right now.');
+                console.error('Failed to load stats:', e);
+            }
+        }
+
+        function formatTokenWei(value) {
+            const raw = BigInt(value);
+            const unit = 1000000000000000000n;
+            const whole = raw / unit;
+            const fraction = (raw % unit).toString().padStart(18, '0').replace(/0+$/, '');
+            return whole.toLocaleString() + (fraction ? '.' + fraction : '');
+        }
+
+        async function loadSupply() {
+            const fields = ['totalSupply', 'treasurySupply', 'governanceSupply', 'faucetSupply',
+                'stakingSupply', 'otherSupply', 'maxSupply', 'remainingSupply'];
+            try {
+                const response = await fetch('/api/supply');
+                if (!response.ok) throw new Error('Supply endpoint unavailable');
+                const data = await response.json();
+                if (data.status !== 'available' || data.chain_id !== 11155111) {
+                    throw new Error('Verified Sepolia supply is unavailable');
+                }
+                const values = {
+                    totalSupply: data.total_supply_wei,
+                    treasurySupply: data.treasury.balance_wei,
+                    governanceSupply: data.governance.balance_wei,
+                    faucetSupply: data.faucet.balance_wei,
+                    stakingSupply: data.staking.balance_wei,
+                    otherSupply: data.other_holders_wei,
+                    maxSupply: data.max_outstanding_supply_wei,
+                    remainingSupply: data.remaining_mint_capacity_wei,
+                };
+                for (const [id, value] of Object.entries(values)) {
+                    document.getElementById(id).textContent = formatTokenWei(value) + ' tCREG';
+                }
+                for (const [name, id] of Object.entries({
+                    treasury: 'treasurySupplyLink', governance: 'governanceSupplyLink',
+                    faucet: 'faucetSupplyLink', staking: 'stakingSupplyLink',
+                })) {
+                    document.getElementById(id).href = 'https://sepolia.etherscan.io/address/' + data[name].address;
+                }
+                document.getElementById('supplyStatus').textContent =
+                    'Verified on Sepolia at one finalized block. Faucet allocation: ' +
+                    (data.faucet_allocation_status === 'open' ? 'active'
+                        : data.faucet_allocation_status === 'staged_not_open' ? 'staged; claims paused'
+                            : 'awaiting governance approval') + '.';
+                document.getElementById('supplyBlock').textContent = 'Sepolia block #' +
+                    Number(data.block_number).toLocaleString() + ' · Token ' + data.token_contract;
+            } catch (error) {
+                for (const id of fields) document.getElementById(id).textContent = 'Unavailable';
+                document.getElementById('supplyStatus').textContent =
+                    'Verified supply data is temporarily unavailable; balances are not shown.';
+                document.getElementById('supplyBlock').textContent = '';
+                console.error('Failed to load verified supply:', error);
+            }
         }
 
         async function loadNetworkInfo() {
@@ -635,6 +775,7 @@
                 const res = await fetch('/api/network');
                 if (!res.ok) return;
                 const info = await res.json();
+                networkInfo = info;
                 if (info.chain_id) document.getElementById('chainId').textContent = info.chain_id;
                 if (info.rpc_url) document.getElementById('rpcUrl').textContent = info.rpc_url;
                 if (info.token_contract) document.getElementById('tokenContract').textContent = info.token_contract;
@@ -648,6 +789,7 @@
         }
 
         loadStats();
+        loadSupply();
         loadNetworkInfo();
 
         // ── PoW Mining (SHA-256 via Web Crypto) ──────────────────
@@ -674,6 +816,10 @@
 
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
+            if (!claimsAvailable) {
+                showMessage('Token claims are currently paused.', 'error');
+                return;
+            }
             const address = connectedAddress || addressInput.value.trim();
             if (!address.match(/^0x[a-fA-F0-9]{40}$/)) {
                 showMessage('Please enter a valid Ethereum address (0x followed by 40 hex characters).', 'error');
@@ -723,12 +869,14 @@
         // ── Helpers ───────────────────────────────────────────────
 
         function setLoading(loading) {
-            submitBtn.disabled = loading;
+            submitBtn.disabled = loading || !claimsAvailable;
             if (loading) {
                 submitBtn.innerHTML = '<div class="spinner"></div><span>Processing...</span>';
                 submitBtn.classList.add('loading');
             } else {
-                submitBtn.innerHTML = '<span>Request Test Tokens + Gas</span>';
+                submitBtn.innerHTML = '<span>' + (claimsAvailable
+                    ? (nativeDripEnabled ? 'Request Test Tokens + Gas' : 'Request Test Tokens')
+                    : 'Claims Paused') + '</span>';
                 submitBtn.classList.remove('loading');
             }
         }

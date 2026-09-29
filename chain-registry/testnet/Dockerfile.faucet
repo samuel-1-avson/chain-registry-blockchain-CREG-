@@ -1,12 +1,16 @@
 # Dockerfile for Testnet Faucet Service
-FROM rust:1.90-slim-bookworm as builder
+FROM rust:1.90-slim-bookworm@sha256:64232e656c058f4468e8d024e990acff04f0fd5a5c0a88a574dc37773d7325c9 AS builder
 
 WORKDIR /app
 
 # Install dependencies
 RUN apt-get update && apt-get install -y \
+    build-essential \
+    cmake \
+    perl \
     pkg-config \
     libssl-dev \
+    protobuf-compiler \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy all workspace files
@@ -17,7 +21,7 @@ COPY crates ./crates
 RUN cargo build --release -p faucet
 
 # Runtime stage
-FROM debian:bookworm-slim
+FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251
 
 RUN apt-get update && apt-get install -y \
     ca-certificates \
@@ -29,9 +33,10 @@ WORKDIR /app
 # Copy binary
 COPY --from=builder /app/target/release/faucet /usr/local/bin/faucet
 
-EXPOSE 8081
+EXPOSE 8082
+USER 65532:65532
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8081/health || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
+    CMD curl -f http://localhost:8082/health || exit 1
 
 CMD ["faucet"]

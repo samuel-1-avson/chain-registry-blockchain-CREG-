@@ -1,0 +1,19 @@
+{
+  "timestamp_utc": "2026-09-27T20:07:25.022Z",
+  "approval": "User approved exact 10,000 tCREG transfer and maximum 0.001 Sepolia ETH gas",
+  "chain_id": 11155111,
+  "token": "0xbC2a72107C6765364D0A822a88A6e6C61f30EAa6",
+  "from": "0x3A3206D683441AA91cCA7CD5757B1F0ca463213A",
+  "recipient": "0x721C8dBD8208CA9dBdcC12AE9339225458608B81",
+  "amount": "10000",
+  "nonce": 26,
+  "gas_limit": "65105",
+  "max_fee_per_gas": "2089866658",
+  "status": "confirmed",
+  "transaction_hash": "0x39894f356780e065fd9f3d676a458a6d639b8e69a8d7a71b48de860cc530537f",
+  "block_number": 11795622,
+  "confirmations": 2,
+  "gas_used": "51691",
+  "gas_cost_eth": "0.00005622218395355",
+  "recipient_tokens_atomic": "10000000000000000000000"
+}

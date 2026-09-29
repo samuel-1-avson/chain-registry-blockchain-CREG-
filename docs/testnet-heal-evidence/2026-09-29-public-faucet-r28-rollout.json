@@ -1,0 +1,52 @@
+{
+  "verified_at_utc": "2026-09-29T21:08:48.374562+00:00",
+  "public_url": "https://faucet.testnet.cregnet.dev/",
+  "public_http_status": 200,
+  "image": "us-central1-docker.pkg.dev/gen-lang-client-0022105784/creg-testnet/creg-faucet@sha256:d44533abf09a14a47f1b0470a8fe888b90bc699babc554d7cbcad5df38212259",
+  "production_database_container_and_volume_preserved": true,
+  "production_database_backup": "/var/lib/creg/public-faucet-r28/production-before-r28-20260929T210659Z.dump",
+  "production_database_backup_sha256": "f68fbb07c199d56d4271a4e27558e1f07580143848e8b060c175000fef8d27f6",
+  "private_restart_recovery_confirmed": true,
+  "requests_mocked": false,
+  "on_chain_transaction_sent": false,
+  "policy": {
+    "drip_amount_wei": "100000000000000000000",
+    "allocation_wei": "1000000000000000000000000",
+    "daily_cap_wei": "50000000000000000000000",
+    "address_lifetime_cap_wei": "100000000000000000000",
+    "hot_wallet_float_wei": "100000000000000000000000",
+    "distribution_open": false,
+    "confirmed_distributed_wei": "2000000000000000000000"
+  },
+  "supply": {
+    "block_hash": "0xbe42c7bbcef3cbe875f0ecaa884bdb45cd024ec49f30ebe43fb29a23bca654d1",
+    "block_number": 11809705,
+    "chain_id": 11155111,
+    "faucet": {
+      "address": "0x721c8dbd8208ca9dbdcc12ae9339225458608b81",
+      "balance_wei": "8000000000000000000000"
+    },
+    "faucet_allocation_status": "staged_not_open",
+    "governance": {
+      "address": "0x0ab4db22a9902b8ef678abd408889af22277d24e",
+      "balance_wei": "0"
+    },
+    "max_outstanding_supply_wei": "42000000000000000000000000",
+    "other_holders_wei": "2000000000000000000000",
+    "reconciled_at": "2026-09-29 21:08:30.684975+00",
+    "remaining_mint_capacity_wei": "22000000000000000000000000",
+    "source": "verified_production_ledger_and_exact_block_sepolia_reads",
+    "staking": {
+      "address": "0x61c00ebe7c46f0bce63942f7e15bcc434dfc9b7c",
+      "balance_wei": "410000000000000000000"
+    },
+    "status": "available",
+    "token_claims_enabled": false,
+    "token_contract": "0xbc2a72107c6765364d0a822a88a6e6c61f30eaa6",
+    "total_supply_wei": "20000000000000000000000000",
+    "treasury": {
+      "address": "0x3a3206d683441aa91cca7cd5757b1f0ca463213a",
+      "balance_wei": "19989590000000000000000000"
+    }
+  }
+}
