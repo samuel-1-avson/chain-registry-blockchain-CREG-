@@ -941,7 +941,7 @@ impl PublisherAuthorizationV1 {
                     .unwrap_or_default()
             || !is_canonical_single_line(&self.ipfs_cid)
             || (!self.key_bundle_sha256.is_empty() && !is_lower_hex_sha256(&self.key_bundle_sha256))
-            || (self.shielded != !self.key_bundle_sha256.is_empty())
+            || (self.shielded == self.key_bundle_sha256.is_empty())
             || self.pgp_signature_sha256 != record.pgp_signature_sha256
             || self.pgp_public_key_sha256 != record.pgp_public_key_sha256
             || (!self.pgp_signature_sha256.is_empty()
