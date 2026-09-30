@@ -256,11 +256,9 @@ pub async fn probe_drill(lb_url: &str, count: usize) -> Result<()> {
     println!("  Failures:           {}", failures.to_string().red());
     println!("  Survival Rate:      {:.2}%", success_rate);
 
-    if !latencies.is_empty() {
+    if let (Some(min), Some(max)) = (latencies.iter().min(), latencies.iter().max()) {
         let sum: u128 = latencies.iter().sum();
         let avg = sum / latencies.len() as u128;
-        let min = latencies.iter().min().unwrap();
-        let max = latencies.iter().max().unwrap();
         println!(
             "  Latency:            min: {}ms | avg: {}ms | max: {}ms",
             min.to_string().cyan(),

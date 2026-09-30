@@ -285,7 +285,7 @@ pub fn derive_from_token(
     let digest = compute_derivation_digest(&payload.wallet, chain_id, verifying_contract)?;
     let recovered = recover_signer(&digest, &sig_bytes)?;
 
-    if recovered.to_ascii_lowercase() != payload.wallet.to_ascii_lowercase() {
+    if !recovered.eq_ignore_ascii_case(&payload.wallet) {
         anyhow::bail!(
             "Token signature mismatch: expected wallet {}, but signature belongs to {}",
             payload.wallet,
@@ -512,7 +512,7 @@ async fn accept_auth_loop(
                 }
             };
 
-            if recovered.to_ascii_lowercase() != payload.wallet.to_ascii_lowercase() {
+            if !recovered.eq_ignore_ascii_case(&payload.wallet) {
                 let err_res = "HTTP/1.1 401 Unauthorized\r\n\
                     Access-Control-Allow-Origin: *\r\n\
                     Access-Control-Allow-Private-Network: true\r\n\

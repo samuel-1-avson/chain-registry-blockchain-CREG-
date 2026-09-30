@@ -184,7 +184,11 @@ pub async fn run_stress_test(config: StressTestConfig) -> Result<StressTestRepor
     // Measure Merkle Tree construction & proof generation for the entire batch
     let merkle_start = Instant::now();
     let tree = build_merkle_tree(&leaves);
-    let root_hash = tree.last().unwrap()[0].clone();
+    let root_hash = tree
+        .last()
+        .and_then(|level| level.first())
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("benchmark produced an empty Merkle tree"))?;
     let proof = generate_inclusion_proof(&leaves, &payloads[0].0.id.canonical(), 0).expect("proof");
     assert!(verify_merkle_path(
         &leaves[0],
