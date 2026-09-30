@@ -194,7 +194,7 @@ pub fn verify_aggregate_signature(
 
 /// Convert a list of indices into a compact byte bitmask
 pub fn indices_to_bitmask(indices: &[usize], total_count: usize) -> Vec<u8> {
-    let num_bytes = (total_count + 7) / 8;
+    let num_bytes = total_count.div_ceil(8);
     let mut bitmask = vec![0u8; num_bytes];
     for &idx in indices {
         if idx < total_count {

@@ -86,6 +86,7 @@ jobs:
             cmake libopenblas-dev protobuf-compiler libprotobuf-dev
 
       - name: Cache Cargo
+        id: cargo-cache
         uses: actions/cache@v4
         with:
           path: |
@@ -106,6 +107,16 @@ jobs:
         env:
           # Unreachable on purpose -> tests use their offline fallback path.
           CREG_NODE_URL: "http://127.0.0.1:19999"
+
+      - name: Retain dependency cache after failed diagnostics
+        if: failure() && steps.cargo-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            chain-registry/target
+          key: ${{ runner.os }}-cargo-1.93.0-${{ hashFiles('chain-registry/Cargo.lock') }}
 
   phase-c-recovery:
     name: Phase C production build and durable recovery

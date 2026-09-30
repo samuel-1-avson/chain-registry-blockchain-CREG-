@@ -1805,7 +1805,9 @@ async fn verify_indexed_transfer_receipts(
                 anyhow::bail!("indexed Transfer log block hash does not match its receipt");
             }
         }
-        if !canonical_hashes.contains_key(&receipt_block) {
+        if let std::collections::hash_map::Entry::Vacant(entry) =
+            canonical_hashes.entry(receipt_block)
+        {
             let canonical_block = rpc_request(
                 client,
                 config.history_rpc_url(),
@@ -1827,7 +1829,7 @@ async fn verify_indexed_transfer_receipts(
             if canonical_number != receipt_block || canonical_hash != receipt_block_hash {
                 anyhow::bail!("Transfer receipt does not match the canonical block header");
             }
-            canonical_hashes.insert(receipt_block, canonical_hash);
+            entry.insert(canonical_hash);
         }
         let receipt_logs = receipt
             .get("logs")
