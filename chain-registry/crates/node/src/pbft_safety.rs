@@ -826,6 +826,7 @@ fn verify_signature(pubkey: &str, message: &str, signature: &str) -> Result<()> 
 #[cfg(test)]
 mod tests {
     use super::{PbftSigningJournal, PbftVotePhase};
+    use common::ViewChangeVote;
     use ed25519_dalek::{Signer, SigningKey};
     use tempfile::tempdir;
 
