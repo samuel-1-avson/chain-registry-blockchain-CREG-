@@ -93,12 +93,11 @@ async fn load_verified_chain_spec() -> Result<common::ChainSpec> {
         (raw, signature)
     };
     let spec: common::ChainSpec = serde_json::from_str(&raw)?;
-    if spec
+    if !spec
         .signing
         .signing_key_pubkey_hex
         .trim_start_matches("0x")
-        .to_ascii_lowercase()
-        != pinned.trim_start_matches("0x").to_ascii_lowercase()
+        .eq_ignore_ascii_case(pinned.trim_start_matches("0x"))
     {
         bail!("chain-spec signer differs from the binary pin");
     }
