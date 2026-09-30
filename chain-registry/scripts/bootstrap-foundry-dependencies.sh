@@ -10,7 +10,7 @@ OPENZEPPELIN_REPOSITORY="https://github.com/OpenZeppelin/openzeppelin-contracts.
 OPENZEPPELIN_COMMIT="dc44c9f1a4c3b10af99492eed84f83ed244203f6"
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-library_root="${project_root}/contracts/lib"
+library_root="${project_root}/lib"
 mkdir -p "${library_root}"
 
 install_dependency() {

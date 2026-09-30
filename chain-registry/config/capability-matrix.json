@@ -82,11 +82,11 @@
     },
     {
       "path": "testnet/chain-spec.example.json",
-      "sha256": "cea4b4bd943783e5bd9bb50685930daf86a920f15f81b7ca2eb688748af85cc6"
+      "sha256": "3dd7872f8ed700e0be4c5f4f46d070373f9d5175ed4240fd9d988fb185042917"
     },
     {
       "path": "testnet/chain-spec.local.json",
-      "sha256": "008505be144eba0ebf7bacb083f3290571a990c5478387e30f0a2b949b4b0238"
+      "sha256": "bcfe39d36aba5cfdee6e1df0788976f94871dcd3972c6bd5a8d0d3caca7e9e6a"
     },
     {
       "path": "testnet/chain-spec.sepolia.json",
@@ -94,7 +94,7 @@
     },
     {
       "path": "testnet/chain-spec.sepolia.json.sig",
-      "sha256": "eefd0d6dab2edca353f6daa7001b93ecd9c6246171cf83f02df04b52c8b05642"
+      "sha256": "84d20bb03e6b9776ab697bdc612865a4ea93786bdefaefb1f2a82d4d2a9afce9"
     },
     {
       "path": "testnet/docker-compose.observer-pool.yml",
@@ -126,7 +126,7 @@
     },
     {
       "path": "testnet/spec-server/chain-spec.json.sig",
-      "sha256": "eefd0d6dab2edca353f6daa7001b93ecd9c6246171cf83f02df04b52c8b05642"
+      "sha256": "84d20bb03e6b9776ab697bdc612865a4ea93786bdefaefb1f2a82d4d2a9afce9"
     },
     {
       "path": "testnet/spec-server/chain-spec.sepolia.json",
@@ -134,7 +134,7 @@
     },
     {
       "path": "testnet/spec-server/chain-spec.sepolia.json.sig",
-      "sha256": "eefd0d6dab2edca353f6daa7001b93ecd9c6246171cf83f02df04b52c8b05642"
+      "sha256": "84d20bb03e6b9776ab697bdc612865a4ea93786bdefaefb1f2a82d4d2a9afce9"
     }
   ],
   "chain_specs": [
@@ -254,9 +254,9 @@
       "computed_genesis_hash": "0x66aa3c354eb981498026cca5a665e5630e488c3ed81236455396c383f5595e0f",
       "genesis_hash_valid": true,
       "spec_sha256": "5b0deaa89b7d7f2ed1ad913454e0a8d3cfd06ab4e165b9271001c0f46525a433",
-      "signature_sha256": "eefd0d6dab2edca353f6daa7001b93ecd9c6246171cf83f02df04b52c8b05642",
+      "signature_sha256": "84d20bb03e6b9776ab697bdc612865a4ea93786bdefaefb1f2a82d4d2a9afce9",
       "spec_byte_length": 3051,
-      "signature_byte_length": 130,
+      "signature_byte_length": 129,
       "signature_format_valid": true,
       "signature_cryptographically_valid": true,
       "status": "valid"
@@ -266,9 +266,9 @@
         "spec_path": "testnet/spec-server/chain-spec.sepolia.json",
         "signature_path": "testnet/spec-server/chain-spec.sepolia.json.sig",
         "spec_sha256": "5b0deaa89b7d7f2ed1ad913454e0a8d3cfd06ab4e165b9271001c0f46525a433",
-        "signature_sha256": "eefd0d6dab2edca353f6daa7001b93ecd9c6246171cf83f02df04b52c8b05642",
+        "signature_sha256": "84d20bb03e6b9776ab697bdc612865a4ea93786bdefaefb1f2a82d4d2a9afce9",
         "spec_byte_length": 3051,
-        "signature_byte_length": 130,
+        "signature_byte_length": 129,
         "exact_spec_bytes": true,
         "exact_signature_bytes": true,
         "exact_publication_pair": true,
@@ -278,9 +278,9 @@
         "spec_path": "testnet/spec-server/chain-spec.json",
         "signature_path": "testnet/spec-server/chain-spec.json.sig",
         "spec_sha256": "5b0deaa89b7d7f2ed1ad913454e0a8d3cfd06ab4e165b9271001c0f46525a433",
-        "signature_sha256": "eefd0d6dab2edca353f6daa7001b93ecd9c6246171cf83f02df04b52c8b05642",
+        "signature_sha256": "84d20bb03e6b9776ab697bdc612865a4ea93786bdefaefb1f2a82d4d2a9afce9",
         "spec_byte_length": 3051,
-        "signature_byte_length": 130,
+        "signature_byte_length": 129,
         "exact_spec_bytes": true,
         "exact_signature_bytes": true,
         "exact_publication_pair": true,
