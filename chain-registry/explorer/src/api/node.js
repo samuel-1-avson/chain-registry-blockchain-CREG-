@@ -2,11 +2,13 @@
 // Prefer grouped route prefixes and only fall back to legacy aliases when the
 // node clearly does not implement the grouped endpoint yet.
 
+import { normalizeStats, normalizeBlock, normalizeBlocks, normalizeTransaction } from './normalize.js'
+
 const API_BASE = import.meta.env.VITE_API_BASE || ''
 const NODE_ROUTE_MODE = (import.meta.env.VITE_NODE_ROUTE_MODE || 'auto').toLowerCase()
 const LEGACY_FALLBACK_STATUSES = new Set([404, 405, 501])
 const OPTIONAL_ENDPOINT_STATUSES = new Set([401, 403, 404, 405, 501, 503])
-let detectedRouteMode = null
+const legacyEndpoints = new Set()
 // During public-services bootstrap every CREG API route intentionally returns
 // 503 until an independently operated observer is attached. Cache that
 // explicit state briefly so a dozen polling hooks do not hammer the edge and
@@ -47,8 +49,8 @@ function isLegacyFallbackEligible(error) {
   return error instanceof ApiError && LEGACY_FALLBACK_STATUSES.has(error.status)
 }
 
-function shouldPreferLegacyRoutes() {
-  return NODE_ROUTE_MODE === 'legacy' || detectedRouteMode === 'legacy'
+function shouldPreferLegacyRoutes(path) {
+  return NODE_ROUTE_MODE === 'legacy' || legacyEndpoints.has(path.split('?')[0])
 }
 
 function isOptionalEndpointUnavailable(error) {
@@ -65,7 +67,7 @@ async function scopedNodeFetch(path, options = {}) {
 }
 
 async function groupedNodeFetch(groupedPath, legacyPath, options = {}) {
-  if (legacyPath && shouldPreferLegacyRoutes()) {
+  if (legacyPath && shouldPreferLegacyRoutes(groupedPath)) {
     return scopedNodeFetch(legacyPath, options)
   }
 
@@ -77,7 +79,7 @@ async function groupedNodeFetch(groupedPath, legacyPath, options = {}) {
     return await scopedNodeFetch(groupedPath, options)
   } catch (error) {
     if (!legacyPath || !isLegacyFallbackEligible(error)) throw error
-    detectedRouteMode = 'legacy'
+    legacyEndpoints.add(groupedPath.split('?')[0])
     return scopedNodeFetch(legacyPath, options)
   }
 }
@@ -133,8 +135,15 @@ export async function nodeFetch(path, { signal, method = 'GET', body, headers = 
 
 export const nodeApi = {
   health: () => groupedNodeFetch('/v1/public/health', '/v1/health'),
-  chainStats: (signal) => groupedNodeFetch('/v1/public/chain/stats', '/v1/chain/stats', { signal }),
-  runtimeConfig: (signal) => optionalGroupedNodeFetch(
+  chainStats: (signal) => groupedNodeFetch('/v1/public/chain/stats', '/v1/chain/stats', { signal }).then(normalizeStats),
+  runtimeConfig: async (signal) => {
+    const [health, stats] = await Promise.all([
+      groupedNodeFetch('/v1/public/health', '/v1/health', { signal }),
+      groupedNodeFetch('/v1/public/chain/stats', '/v1/chain/stats', { signal }),
+    ])
+    return { ...health, ...stats }
+  },
+  operatorRuntimeConfig: (signal) => optionalGroupedNodeFetch(
     '/v1/operator/runtime/config',
     '/v1/runtime/config',
     () => ({}),
@@ -151,19 +160,28 @@ export const nodeApi = {
     if (before != null) q.set('before_height', String(before))
     else if (after != null) q.set('after_height', String(after))
     else q.set('offset', String(offset))
-    return groupedNodeFetch(`/v1/public/blocks?${q.toString()}`, `/v1/blocks?${q.toString()}`, { signal })
+    return groupedNodeFetch(`/v1/public/blocks?${q.toString()}`, `/v1/blocks?${q.toString()}`, { signal }).then(async (payload) => {
+      // Older observers omit genesis from the list while serving /blocks/0.
+      if (payload.tip_height === 0 && payload.blocks?.length === 0 && offset === 0 && before == null && after == null && limit > 0) {
+        return { ...payload, blocks: [await nodeApi.blockByHeight(0, signal)] }
+      }
+      return normalizeBlocks(payload)
+    })
   },
-  blockByHeight: (height, signal) => groupedNodeFetch(`/v1/public/blocks/${height}`, `/v1/blocks/${height}`, { signal }),
-  blockByHash: (hash, signal) => groupedNodeFetch(`/v1/public/blocks/hash/${hash}`, `/v1/blocks/hash/${hash}`, { signal }),
+  blockByHeight: (height, signal) => groupedNodeFetch(`/v1/public/blocks/${height}`, `/v1/blocks/${height}`, { signal }).then(normalizeBlock),
+  blockByHash: (hash, signal) => groupedNodeFetch(`/v1/public/blocks/hash/${hash}`, `/v1/blocks/hash/${hash}`, { signal }).then(normalizeBlock),
 
   transaction: (canonical, signal) => groupedNodeFetch(
     `/v1/public/transactions/${encodeURIComponent(canonical)}`,
     `/v1/transactions/${encodeURIComponent(canonical)}`,
     { signal },
-  ),
+  ).then((payload) => ({ ...payload, transaction: normalizeTransaction(payload.transaction || payload) })),
 
   packages: ({ limit = 20, offset = 0 } = {}, signal) =>
-    groupedNodeFetch(`/v1/public/packages?limit=${limit}&offset=${offset}`, `/v1/packages?limit=${limit}&offset=${offset}`, { signal }),
+    groupedNodeFetch(`/v1/public/packages?limit=${limit}&offset=${offset}`, `/v1/packages?limit=${limit}&offset=${offset}`, { signal }).then(payload => {
+      const project = item => ({ ...item, timestamp: item.published_at ?? item.timestamp })
+      return Array.isArray(payload) ? payload.map(project) : { ...payload, packages: (payload.packages || []).map(project) }
+    }),
   package: (canonical, signal) =>
     groupedNodeFetch(`/v1/public/packages/${encodeURIComponent(canonical)}`, `/v1/packages/${encodeURIComponent(canonical)}`, { signal }),
   packageProof: (canonical, signal) =>
@@ -184,7 +202,7 @@ export const nodeApi = {
     () => ({ count: 0, packages: [] }),
     {
       feature: 'Pending pool',
-      message: 'Pending pool data requires operator credentials on this node.',
+      message: 'The count above comes from public chain statistics. Individual pending items require operator credentials.',
     },
     { signal, scope: 'operator' },
   ),
@@ -209,7 +227,18 @@ export const nodeApi = {
     { signal, scope: 'operator' },
   ),
   bridgeStatus: (signal) => groupedNodeFetch('/v1/public/bridge/status', '/v1/bridge/status', { signal }),
-  validatorRegistrations: (signal) => groupedNodeFetch('/v1/validator/registrations', '/v1/validators/registrations', { signal }),
+  validatorRegistrations: async (signal) => {
+    const [registrations, consensus] = await Promise.all([
+      groupedNodeFetch('/v1/validator/registrations', '/v1/validators/registrations', { signal }),
+      groupedNodeFetch('/v1/validator/consensus/state', '/v1/consensus/state', { signal }),
+    ])
+    const list = Array.isArray(registrations) ? registrations : (registrations.registrations || [])
+    const active = (consensus.validators || []).map(v => {
+      const registration = list.find(r => (r.identity?.node_id || r.node_id) === v.id)
+      return { ...registration, ...v, node_id: v.id, active: true }
+    })
+    return [...active, ...list.filter(r => !active.some(v => v.node_id === (r.identity?.node_id || r.node_id)))]
+  },
   validatorProfile: (address, signal) =>
     groupedNodeFetch(`/v1/public/validators/${encodeURIComponent(address)}`, `/v1/validators/${encodeURIComponent(address)}`, { signal }),
   consensusState: (signal) => groupedNodeFetch('/v1/validator/consensus/state', '/v1/consensus/state', { signal }),
@@ -309,17 +338,17 @@ export const nodeApi = {
       { signal },
     ),
 
-  /** Metrics time-series — graceful fallback if endpoint not deployed. */
+  /** Durable public metrics history from the node's Prometheus collector. */
   metricsHistory: ({ range = '1h' } = {}, signal) =>
     optionalGroupedNodeFetch(
-      `/v1/operator/metrics/history?range=${range}`,
-      `/v1/metrics/history?range=${range}`,
-      () => ({ samples: [] }),
+      `/v1/public/metrics/history?range=${encodeURIComponent(range)}`,
+      null,
+      () => ({ status: 'unavailable', samples: [] }),
       {
         feature: 'Metrics history',
-        message: 'Historical metrics require operator credentials on this node.',
+        message: 'This node does not provide historical metrics through the public API. The collector and history route must be connected to the same chain before charts can appear.',
       },
-      { signal, scope: 'operator' },
+      { signal },
     ),
 
   /** Chain Reorganizations. */
@@ -336,8 +365,8 @@ export const nodeApi = {
     ),
 
   /** Rich List of top accounts. */
-  richList: (signal) =>
-    optionalGroupedNodeFetch(
+  richList: async (signal) => {
+    const data = await optionalGroupedNodeFetch(
       '/v1/public/richlist',
       '/v1/richlist',
       () => [],
@@ -346,7 +375,14 @@ export const nodeApi = {
         message: 'This node does not expose rich-list data yet.',
       },
       { signal },
-    ),
+    )
+    if (Array.isArray(data) && data.length === 0 && !getEndpointStatus(data)) {
+      const consensus = await nodeApi.consensusState(signal)
+      return (consensus.validators || []).map(v => ({ ...v, active: true,
+        identity: { node_id: v.id }, stake: v.stake }))
+    }
+    return data
+  },
 }
 
 export { API_BASE }

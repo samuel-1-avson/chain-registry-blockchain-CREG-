@@ -163,12 +163,8 @@ compose_run() {
   env "${COMPOSE_ENV[@]}" "${COMPOSE[@]}" "$@"
 }
 
-if [[ "${CREG_SKIP_FAUCET_BUILD:-false}" == "true" || "${CREG_SKIP_FAUCET_BUILD:-false}" == "1" ]]; then
-  echo "=== Reusing the already-built faucet image (explicit skip) ==="
-else
-  echo "=== Building faucet image (creg-node) ==="
-  compose_run build faucet
-fi
+echo "=== Pulling the pinned standalone faucet image ==="
+compose_run pull faucet
 
 echo "=== Stopping legacy full-stack containers if present ==="
 "${DOCKER[@]}" rm -f creg-3node-node1 creg-3node-node2 creg-3node-node3 creg-3node-caddy \
@@ -182,9 +178,6 @@ if [[ ${#stale_ids[@]} -gt 0 ]]; then
   "${DOCKER[@]}" rm -f "${stale_ids[@]}" 2>/dev/null || true
 fi
 UP_ARGS=(up -d --remove-orphans --force-recreate)
-if [[ "${CREG_SKIP_FAUCET_BUILD:-false}" != "true" && "${CREG_SKIP_FAUCET_BUILD:-false}" != "1" ]]; then
-  UP_ARGS+=(--build)
-fi
 if [[ -n "${CREG_HUB_API_CLOUD_RUN_URL:-}" ]]; then
   UP_ARGS+=(--scale hub-api=0)
 fi

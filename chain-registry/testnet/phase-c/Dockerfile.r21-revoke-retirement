@@ -1,0 +1,19 @@
+FROM creg-node:recovery-diagnostic-builder-r18 AS builder
+WORKDIR /build
+COPY ["crates/common/src/lib.rs", "/build/crates/common/src/lib.rs"]
+COPY ["crates/node/src/block_producer.rs", "crates/node/src/state.rs", "crates/node/src/sync.rs", "crates/node/src/pending_pool.rs", "crates/node/src/api.rs", "crates/node/src/p2p.rs", "crates/node/src/main.rs", "crates/node/src/lib.rs", "crates/node/src/revocation_gossip.rs", "/build/crates/node/src/"]
+RUN --mount=type=cache,id=creg-phase-c-release,target=/build/target,sharing=locked \
+    env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS \
+    LIBCLANG_PATH=/usr/lib/llvm-17/lib LLVM_CONFIG_PATH=/usr/bin/llvm-config-17 \
+    CLANG_PATH=/usr/bin/clang-17 CARGO_BUILD_JOBS=1 RUST_BACKTRACE=1 \
+    cargo build --release --locked --package chain-registry-node --bin creg-node --bin creg_recovery_inspect --features phase-c-real-fleet && \
+    cp /build/target/release/creg-node /build/output/creg-node && \
+    cp /build/target/release/creg_recovery_inspect /build/output/creg_recovery_inspect
+
+FROM creg-node:phase-c-secure-r20-durable-revocation-delivery
+LABEL org.opencontainers.image.version="phase-c-r21-revoke-retirement"
+USER root
+COPY --from=builder --chown=creg:creg /build/output/creg-node /app/creg-node
+COPY --from=builder --chown=creg:creg /build/output/creg_recovery_inspect /app/creg_recovery_inspect
+USER creg
+ENTRYPOINT ["/app/creg-node"]

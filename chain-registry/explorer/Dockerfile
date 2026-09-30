@@ -44,8 +44,12 @@ RUN apk add --no-cache wget curl
 # Copy built assets
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# Copy nginx config with API proxy, security headers, and SPA fallback
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+# Render only deployment variables; nginx request variables must remain intact.
+ENV CREG_NODE_UPSTREAM=node:8080 \
+    CREG_SEPOLIA_RPC_UPSTREAM=https://api.testnet.cregnet.dev/sepolia \
+    CREG_SEPOLIA_RPC_HOST=api.testnet.cregnet.dev \
+    NGINX_ENVSUBST_FILTER=^CREG_
+COPY nginx.conf /etc/nginx/templates/default.conf.template
 
 EXPOSE 80
 

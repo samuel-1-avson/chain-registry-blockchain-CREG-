@@ -598,7 +598,9 @@ pub async fn run(state: Arc<RwLock<NodeState>>) {
 
 async fn sync_once(state: Arc<RwLock<NodeState>>) -> anyhow::Result<()> {
     let (our_height, peer_urls) = {
-        let s = state.read().await;
+        let mut s = state.write().await;
+        s.reconcile_committed_pending_packages()?;
+        s.reconcile_committed_pbft_rounds()?;
         (s.chain.tip_height()?, s.config.peers.clone())
     };
 
@@ -1294,7 +1296,7 @@ fn require_header_matches_validator_set(
 /// before any transaction-specific evidence is considered. This covers blocks
 /// containing governance or validator lifecycle transactions as well as
 /// package publications.
-fn verify_block_consensus_certificate(
+pub(crate) fn verify_block_consensus_certificate(
     block: &common::Block,
     validator_set: &ValidatorSet,
 ) -> anyhow::Result<()> {
@@ -1319,10 +1321,18 @@ fn verify_block_consensus_certificate(
         .pre_prepare(&block.header.proposer_id)
         .map_err(|error| anyhow::anyhow!("invalid PBFT pre-prepare: {error}"))?;
 
-    let allow_small_cluster_quorum = std::env::var("CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM")
-        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
-        .unwrap_or(false);
-    let validator_count = validator_set.validators.len();
+    let allow_small_cluster_quorum = !cfg!(feature = "phase-c-real-fleet")
+        && std::env::var("CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM")
+            .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+    let validator_count = validator_set
+        .validators
+        .iter()
+        .filter(|validator| common::validator_status_is_active(&validator.status))
+        .count();
+    if cfg!(feature = "phase-c-real-fleet") && validator_count < 4 {
+        anyhow::bail!("Phase C block verification requires at least four active validators");
+    }
     let quorum = if validator_count == 3 && allow_small_cluster_quorum {
         2
     } else {
@@ -1345,7 +1355,7 @@ fn verify_block_consensus_certificate(
                     signature.validator_id
                 )
             })?;
-        if validator.status != "online" && validator.status != "self" {
+        if !common::validator_status_is_active(&validator.status) {
             anyhow::bail!(
                 "PBFT certificate names inactive validator {}",
                 signature.validator_id
@@ -1392,7 +1402,7 @@ fn verify_block_consensus_certificate(
 /// Non-Publish transactions are covered by the block-level PBFT certificate
 /// above and remain subject to their state-transition validation rules.
 ///   * Single-validator deployments still require the one validator's signature.
-fn verify_block_signatures(
+pub(crate) fn verify_block_signatures(
     block: &common::Block,
     validator_set: &ValidatorSet,
 ) -> anyhow::Result<()> {
@@ -1403,7 +1413,11 @@ fn verify_block_signatures(
         return Ok(());
     }
 
-    let n = validator_set.validators.len();
+    let n = validator_set
+        .validators
+        .iter()
+        .filter(|validator| common::validator_status_is_active(&validator.status))
+        .count();
     if n == 0 {
         anyhow::bail!("cannot verify block: local validator set is empty");
     }
@@ -1415,6 +1429,7 @@ fn verify_block_signatures(
     let known: std::collections::HashMap<String, &common::Validator> = validator_set
         .validators
         .iter()
+        .filter(|validator| common::validator_status_is_active(&validator.status))
         .map(|v| (v.pubkey.to_ascii_lowercase(), v))
         .collect();
 
@@ -1453,7 +1468,10 @@ fn verify_block_signatures(
             }
 
             let pubkey_key = sig.validator_pubkey.to_ascii_lowercase();
-            if !known.contains_key(&pubkey_key) {
+            if !known
+                .get(&pubkey_key)
+                .is_some_and(|validator| validator.id == sig.validator_id)
+            {
                 tracing::debug!(
                     "sync: tx {} carries signature from unknown validator pubkey {} — ignored",
                     tx_idx,
@@ -1708,6 +1726,8 @@ mod tests {
                 validator_set_hash: common::canonical_validator_set_hash(validator_set),
                 vrf_output: None,
                 vrf_proof: None,
+                view_number: 0,
+                view_change_certificate: vec![],
             },
             transactions: vec![tx],
             pbft_signatures: vec![],
@@ -1757,6 +1777,8 @@ mod tests {
                 validator_set_hash: common::canonical_validator_set_hash(validator_set),
                 vrf_output: None,
                 vrf_proof: None,
+                view_number: 0,
+                view_change_certificate: vec![],
             },
             transactions: vec![],
             pbft_signatures: vec![],

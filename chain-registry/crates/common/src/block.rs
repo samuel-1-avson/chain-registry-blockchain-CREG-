@@ -388,14 +388,17 @@ mod view_hash_tests {
         assert_eq!(block.hash(), legacy_hash);
 
         let mut with_certificate = block.clone();
-        with_certificate.header.view_change_certificate.push(ViewChangeVote {
-            height: 1,
-            prev_hash: "11".repeat(32),
-            new_view: 1,
-            validator_id: "validator-1".into(),
-            prepared: None,
-            signature: "proof-bytes".into(),
-        });
+        with_certificate
+            .header
+            .view_change_certificate
+            .push(ViewChangeVote {
+                height: 1,
+                prev_hash: "11".repeat(32),
+                new_view: 1,
+                validator_id: "validator-1".into(),
+                prepared: None,
+                signature: "proof-bytes".into(),
+            });
         assert_eq!(block.hash(), with_certificate.hash());
 
         with_certificate.header.view_number = 1;

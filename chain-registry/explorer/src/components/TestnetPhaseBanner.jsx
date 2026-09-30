@@ -7,10 +7,14 @@ const DEV_SANDBOX_CAVEAT = import.meta.env.VITE_DEV_SANDBOX_CAVEAT === 'true'
 /**
  * Shown on alpha / lab testnets so users know quorum and sandbox limitations.
  */
-export function TestnetPhaseBanner() {
-  if (!PHASE && !SINGLE_VALIDATOR && !DEV_SANDBOX_CAVEAT) return null
+export function TestnetPhaseBanner({ chainStats }) {
+  const legacyChain = chainStats?.chain_id === 'creg-testnet-1'
+  if (!PHASE && !SINGLE_VALIDATOR && !DEV_SANDBOX_CAVEAT && !legacyChain) return null
 
   const lines = []
+  if (legacyChain) {
+    lines.push('Legacy testnet chain is displayed. The newer candidate chain has not been published to this explorer.')
+  }
   if (PHASE) {
     lines.push(`Testnet phase: ${PHASE}`)
   }

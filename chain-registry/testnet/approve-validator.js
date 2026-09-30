@@ -28,8 +28,9 @@ const RPC_URL = process.env.SEPOLIA_RPC_URL || 'https://explorer.testnet.cregnet
 const GOV_ADDR = '0x122Bc2C704B966C74004506F98F13bf7b5F75b9D';
 const STAKING_ADDR = '0x30604Aa6f763fbde6aDCffbd8960af3031037331';
 
-const SIGNER1_KEY = '0xeb7241a78401a63568fee5a4b70fad8df10e5bdef858dc9a41f14464495bf695';
-const SIGNER2_KEY = '0x7f7117e3d6aa668a2e0729e582194061b523c97670a60c7f428faaaf04d5862a';
+// Supply two distinct, current governance signer keys at runtime. Never commit them.
+const SIGNER1_KEY = process.env.CREG_GOV_SIGNER1_KEY;
+const SIGNER2_KEY = process.env.CREG_GOV_SIGNER2_KEY;
 
 const APPLICANT_ADDR = process.argv[2] || '0x5f424b4ec88073fd461eb194833681a31adfa311';
 
@@ -50,6 +51,10 @@ const STAKING_ABI = [
 ];
 
 async function main() {
+    if (!/^0x[0-9a-fA-F]{64}$/.test(SIGNER1_KEY || '') ||
+        !/^0x[0-9a-fA-F]{64}$/.test(SIGNER2_KEY || '')) {
+        throw new Error('Set CREG_GOV_SIGNER1_KEY and CREG_GOV_SIGNER2_KEY to two current governance signer keys.');
+    }
     console.log('\x1b[36m============================================================\x1b[0m');
     console.log('\x1b[36m   CREG Governance Multi-Sig Validator Approval (Sepolia)   \x1b[0m');
     console.log('\x1b[36m============================================================\x1b[0m');
@@ -61,9 +66,13 @@ async function main() {
     const provider = new ethers.JsonRpcProvider(RPC_URL);
     const signer1 = new ethers.Wallet(SIGNER1_KEY, provider);
     const signer2 = new ethers.Wallet(SIGNER2_KEY, provider);
+    if (signer1.address === signer2.address) throw new Error('Governance signer keys must be distinct.');
 
     const gov = new ethers.Contract(GOV_ADDR, GOV_ABI, provider);
     const staking = new ethers.Contract(STAKING_ADDR, STAKING_ABI, provider);
+    if (!await gov.isSigner(signer1.address) || !await gov.isSigner(signer2.address)) {
+        throw new Error('Both runtime keys must belong to current governance signers.');
+    }
 
     // 1. Verify current applicant state
     const entry = await staking.validators(APPLICANT_ADDR);

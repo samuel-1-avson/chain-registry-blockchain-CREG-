@@ -7,6 +7,7 @@
 # ==============================================================================
 
 set -euo pipefail
+umask 077
 
 CYAN='\033[0;36m'
 GREEN='\033[0;32m'
@@ -93,9 +94,10 @@ CREG_P2P_LISTEN=/ip4/0.0.0.0/tcp/9000
 CREG_P2P_SEEDS=${BOOTNODE}
 CREG_PEERS=https://api.testnet.cregnet.dev
 CREG_LISTEN=0.0.0.0:8080
-CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM=${PBFT_SMALL_QUORUM:-true}
+CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM=false
 RUST_LOG=info,chain_registry_node=debug,consensus=info
 EOF
+chmod 600 "${ENV_FILE}"
 
 # Auto-detect available Docker image
 CHOSEN_IMAGE=""
@@ -141,9 +143,8 @@ echo -e "HTTP RPC Port:   ${CYAN}${HTTP_PORT} (Keep private or proxy with TLS)${
 echo -e "Bootnode Peer:   ${CYAN}${BOOTNODE}${NC}"
 echo -e ""
 echo -e "${YELLOW}--- KEY BACKUP NOTICE ---${NC}"
-echo -e "Validator Key:   ${YELLOW}${VALIDATOR_KEY}${NC}"
-echo -e "Save this key string securely! To restore this node anytime, pass:"
-echo -e "  CUSTOM_KEY=\"${VALIDATOR_KEY}\" ./testnet/start-external-validator.sh"
+echo -e "Back up ${DATA_DIR}/validator.key through the operator's secret storage."
+echo -e "Do not print or paste the private key into terminal history."
 echo -e ""
 echo -e "${YELLOW}--- REMOTE VERIFICATION ---${NC}"
 echo -e "Local query:     curl http://localhost:${HTTP_PORT}/v1/health"

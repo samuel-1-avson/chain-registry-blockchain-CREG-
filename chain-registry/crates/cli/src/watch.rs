@@ -162,15 +162,19 @@ pub async fn run(filter: Option<&str>, node_url: Option<&str>, ci_mode: bool) ->
 }
 
 fn sse_frame_end(buffer: &[u8]) -> Option<(usize, usize)> {
-    [b"\n\n".as_slice(), b"\r\n\r\n".as_slice(), b"\r\r".as_slice()]
-        .into_iter()
-        .filter_map(|separator| {
-            buffer
-                .windows(separator.len())
-                .position(|window| window == separator)
-                .map(|end| (end, separator.len()))
-        })
-        .min_by_key(|(end, _)| *end)
+    [
+        b"\n\n".as_slice(),
+        b"\r\n\r\n".as_slice(),
+        b"\r\r".as_slice(),
+    ]
+    .into_iter()
+    .filter_map(|separator| {
+        buffer
+            .windows(separator.len())
+            .position(|window| window == separator)
+            .map(|end| (end, separator.len()))
+    })
+    .min_by_key(|(end, _)| *end)
 }
 
 #[derive(Debug)]

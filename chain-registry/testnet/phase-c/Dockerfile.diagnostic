@@ -1,0 +1,16 @@
+# Rebuild the node crate from the pinned Phase C builder artifact while
+# retaining the inspected nsjail runtime and its signed-spec public key.
+FROM creg-node:phase-c-builder-r2 AS compiler
+COPY crates/node/src/block_producer.rs /build/crates/node/src/block_producer.rs
+RUN env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS \
+    LIBCLANG_PATH=/usr/lib/llvm-17/lib \
+    LLVM_CONFIG_PATH=/usr/bin/llvm-config-17 \
+    CLANG_PATH=/usr/bin/clang-17 \
+    CARGO_BUILD_JOBS=1 RUST_BACKTRACE=1 \
+    cargo build --release --locked --package chain-registry-node --bin creg-node --features phase-c-real-fleet
+
+FROM creg-node:phase-c-secure-r2
+USER root
+COPY --from=compiler --chown=creg:creg /build/target/release/creg-node /app/creg-node
+USER creg
+ENTRYPOINT ["/app/creg-node"]

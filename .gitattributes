@@ -1,0 +1,3 @@
+# Keep source, workflows, and documentation identical across Windows and Linux.
+* text=auto eol=lf
+*.sig -text

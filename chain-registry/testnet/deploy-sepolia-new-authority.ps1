@@ -137,6 +137,6 @@ Write-Host ""
 Write-Host "Done. Authority wallet controls deploy + governance (threshold 1)." -ForegroundColor Green
 Write-Host "  fund publisher: .\testnet\fund-publisher-sepolia.ps1  (uses DEPLOYER_KEY)"
 Write-Host "  sync faucet:    .\testnet\sync-sepolia-faucet-env.ps1"
-Write-Host "  faucet mint:    .\testnet\fund-sepolia-faucet-governance.ps1"
+Write-Host "  faucet release: .\testnet\fund-sepolia-faucet-governance.ps1 -FaucetAllocationCreg <approved-tranche> -SubmitProposal"
 Write-Host "  start faucet:   .\testnet\start-sepolia-faucet.ps1"
 Write-Host "  do NOT use register-governance-signer-sepolia.ps1 for this path"

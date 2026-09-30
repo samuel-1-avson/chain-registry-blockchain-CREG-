@@ -4,15 +4,14 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { createPublicClient, createWalletClient, custom, http, isAddress, parseUnits, formatUnits } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
+import { normalizeStats } from './api/normalize.js'
+import { readPublicChainConfig } from './api/public-config.js'
 
 // ============================================
 // CONFIGURATION
 // ============================================
 
 const API_BASE = import.meta.env.VITE_API_BASE || ''
-const SEPOLIA_CREG_TOKEN = import.meta.env.VITE_SEPOLIA_CREG_TOKEN || '0x167Ab975dc95b79727Ed76BD8AAb70463F6499E2'
-const SEPOLIA_STAKING_ADDR = import.meta.env.VITE_SEPOLIA_STAKING_ADDR || '0x30604Aa6f763fbde6aDCffbd8960af3031037331'
-const SEPOLIA_REGISTRY_ADDR = import.meta.env.VITE_SEPOLIA_REGISTRY_ADDR || '0xD0F465ca185a99E268be0C4FF5A135Bdf89FAF3B'
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 const NETWORK_PROFILE_ID = 'sepolia'
 const DEFAULT_VALIDATOR_REGISTRATION_MODE = 'staking-plus-identity-sync'
@@ -44,9 +43,9 @@ const buildSepoliaNetworkProfile = (origin) => ({
   rpcUrl: buildSepoliaRpcUrl(origin),
   faucetUrl: import.meta.env.VITE_SEPOLIA_FAUCET_URL || 'https://sepolia-faucet.pk910.de/',
   blockExplorerUrl: import.meta.env.VITE_SEPOLIA_BLOCK_EXPLORER_URL || 'https://sepolia.etherscan.io',
-  tokenContract: SEPOLIA_CREG_TOKEN,
-  stakingContract: SEPOLIA_STAKING_ADDR,
-  registryAddress: SEPOLIA_REGISTRY_ADDR,
+  tokenContract: null,
+  stakingContract: null,
+  registryAddress: null,
   validatorRegistrationMode: 'public-testnet',
   validatorRegistrationNote: 'Sepolia is the Chain Registry public testnet. Stake tCREG, register validator identity with the node, and use the in-app faucet for test tokens.',
   directFunding: true,
@@ -401,8 +400,8 @@ function App({ initialView = 'blocks', initialShowPublishForm = false, embedded 
   const [validatorRegistrationLoading, setValidatorRegistrationLoading] = useState(false)
   const [validatorRegistrationResult, setValidatorRegistrationResult] = useState(null)
   const [runtimeConfig, setRuntimeConfig] = useState({
-    tokenContract: normalizeContractAddress(SEPOLIA_CREG_TOKEN),
-    stakingContract: normalizeContractAddress(SEPOLIA_STAKING_ADDR),
+    tokenContract: null,
+    stakingContract: null,
     registryAddress: null,
     isTestnet: IS_TESTNET,
     validatorRegistrationMode: DEFAULT_VALIDATOR_REGISTRATION_MODE,
@@ -442,10 +441,14 @@ function App({ initialView = 'blocks', initialShowPublishForm = false, embedded 
   const pollTimerRef = useRef(null)
   const pollDelayRef = useRef(5000)
   const blocksRef = useRef([])
+  const chainIdentityRef = useRef(null)
 
   const activeNetworkProfile = useMemo(
-    () => buildSepoliaNetworkProfile(explorerOrigin),
-    [explorerOrigin],
+    () => ({ ...buildSepoliaNetworkProfile(explorerOrigin),
+      tokenContract: runtimeConfig.tokenContract,
+      stakingContract: runtimeConfig.stakingContract,
+      registryAddress: runtimeConfig.registryAddress }),
+    [explorerOrigin, runtimeConfig.tokenContract, runtimeConfig.stakingContract, runtimeConfig.registryAddress],
   )
 
   useEffect(() => {
@@ -664,72 +667,70 @@ function App({ initialView = 'blocks', initialShowPublishForm = false, embedded 
   // Fetch data
   const fetchData = useCallback(async () => {
     try {
-      const [statsRes, nodesRes, p2pRes, bridgeRes, runtimeRes, validatorRegistrationsRes] = await Promise.all([
-        fetch(`${API_BASE}/v1/chain/stats`),
-        fetch(`${API_BASE}/v1/nodes`),
-        fetch(`${API_BASE}/v1/p2p/status`),
-        fetch(`${API_BASE}/v1/bridge/status`),
-        fetch(`${API_BASE}/v1/runtime/config`).catch(() => null),
-        fetch(`${API_BASE}/v1/validators/registrations`).catch(() => null)
+      const [statsRes, consensusRes, bridgeRes, validatorRegistrationsRes] = await Promise.all([
+        fetch(`${API_BASE}/v1/public/chain/stats`),
+        fetch(`${API_BASE}/v1/validator/consensus/state`),
+        fetch(`${API_BASE}/v1/public/bridge/status`),
+        fetch(`${API_BASE}/v1/validator/registrations`).catch(() => null)
       ])
 
-      const primaryResponses = [statsRes, nodesRes, p2pRes, bridgeRes, runtimeRes, validatorRegistrationsRes].filter(Boolean)
+      const primaryResponses = [statsRes, consensusRes, bridgeRes, validatorRegistrationsRes].filter(Boolean)
       if (primaryResponses.some((response) => response.status === 429)) {
         throw new Error('429 rate limit exceeded')
       }
       
       if (statsRes.ok) {
-        const statsData = await statsRes.json()
+        const statsData = normalizeStats(await statsRes.json())
+        const chainIdentity = `${statsData.chain_id}:${statsData.genesis_hash}`
+        if (chainIdentityRef.current !== chainIdentity) {
+          chainIdentityRef.current = chainIdentity
+          blocksRef.current = []
+          setBlocks([])
+          setEvents([])
+        }
         setStats(statsData)
+        setPendingPackages({ count: Number.isSafeInteger(statsData.pending_tx_count) ? statsData.pending_tx_count : null,
+          packages: [], details_available: false })
+        setP2pStatus({ peer_count: statsData.peer_count, peers: [], protocols: [], details_available: false })
+        try {
+          const config = await readPublicChainConfig(statsData)
+          setRuntimeConfig({ ...config, validatorRegistrationMode: DEFAULT_VALIDATOR_REGISTRATION_MODE,
+            validatorRegistrationNote: DEFAULT_VALIDATOR_REGISTRATION_NOTE })
+        } catch (error) {
+          setRuntimeConfig({ tokenContract: null, stakingContract: null, registryAddress: null,
+            configurationError: error.message })
+        }
         await refreshRecentBlocks(statsData.tip_height)
+      } else {
+        throw new Error(`Chain stats unavailable (HTTP ${statsRes.status})`)
       }
 
-      if (nodesRes.ok) setNodes(await nodesRes.json())
-      if (p2pRes.ok) setP2pStatus(await p2pRes.json())
+      if (consensusRes.ok) {
+        const consensus = await consensusRes.json()
+        const validators = await Promise.all((consensus.validators || []).map(async (validator) => {
+          try {
+            const profileRes = await fetch(`${API_BASE}/v1/public/validators/${encodeURIComponent(validator.id)}`)
+            const profile = profileRes.ok ? await profileRes.json() : {}
+            return { ...profile, ...validator, type: 'validator' }
+          } catch {
+            return { ...validator, type: 'validator' }
+          }
+        }))
+        setNodes(validators)
+      } else {
+        setNodes([])
+      }
       if (bridgeRes.ok) setBridgeStatus(await bridgeRes.json())
       if (validatorRegistrationsRes?.ok) setValidatorRegistrations(await validatorRegistrationsRes.json())
-      if (runtimeRes?.ok) {
-        const runtimeContentType = runtimeRes.headers.get('content-type') || ''
-        if (runtimeContentType.includes('application/json')) {
-          try {
-            const runtimeData = await runtimeRes.json()
-            setRuntimeConfig({
-              tokenContract: normalizeContractAddress(runtimeData.token_contract),
-              stakingContract: normalizeContractAddress(runtimeData.staking_contract),
-              registryAddress: normalizeContractAddress(runtimeData.registry_address),
-              isTestnet: runtimeData.is_testnet !== false,
-              validatorRegistrationMode: runtimeData.validator_registration_mode || DEFAULT_VALIDATOR_REGISTRATION_MODE,
-              validatorRegistrationNote: runtimeData.validator_registration_note || DEFAULT_VALIDATOR_REGISTRATION_NOTE,
-            })
-          } catch (runtimeError) {
-            console.warn('Ignoring invalid runtime config payload:', runtimeError)
-          }
-        } else {
-          console.warn('Ignoring non-JSON runtime config response')
-        }
-      }
-
-      // Fetch pending packages (mempool)
-      try {
-        const pendingRes = await fetch(`${API_BASE}/v1/pending`)
-        if (pendingRes.status === 429) {
-          throw new Error('429 rate limit exceeded')
-        }
-        if (pendingRes.ok) setPendingPackages(await pendingRes.json())
-      } catch (e) {
-        if (`${e?.message || ''}`.includes('429')) {
-          throw e
-        }
-        /* endpoint may not exist yet */
-      }
 
       // Fetch finalized/verified packages so they stay visible after leaving
       // the pending pool (packages disappear from /v1/pending once committed).
       try {
-        const pkgRes = await fetch(`${API_BASE}/v1/packages?offset=0&limit=20`)
+        const pkgRes = await fetch(`${API_BASE}/v1/public/packages?offset=0&limit=20`)
         if (pkgRes.ok) {
           const pkgData = await pkgRes.json()
-          setPackageList(pkgData)
+          const packages = (pkgData.packages || []).map((pkg) => ({ ...pkg, timestamp: pkg.published_at ?? pkg.timestamp }))
+          setPackageList({ ...pkgData, packages })
         }
       } catch (e) { /* non-fatal */ }
 
@@ -775,6 +776,17 @@ function App({ initialView = 'blocks', initialShowPublishForm = false, embedded 
     const MAX_RETRIES = 20
     let retryTimeout = null
     let countdownInterval = null
+    let disposed = false
+    const eventTypes = ['package_submitted', 'package_verified', 'package_rejected', 'package_revoked', 'block_produced', 'validator_voted']
+
+    const handleNodeEvent = (event) => {
+      try {
+        const payload = JSON.parse(event.data)
+        const parsedTime = Date.parse(payload.timestamp || '')
+        const receivedAt = Number.isFinite(parsedTime) ? parsedTime : Date.now()
+        setEvents((previous) => [{ ...payload, receivedAt }, ...previous].slice(0, 100))
+      } catch { /* Ignore malformed event payloads; the stream stays connected. */ }
+    }
 
     const startCountdown = (delaySecs) => {
       setSseReconnectIn(delaySecs)
@@ -788,25 +800,20 @@ function App({ initialView = 'blocks', initialShowPublishForm = false, embedded 
     }
 
     const initSSE = () => {
+      if (disposed) return
       const es = new EventSource(`${API_BASE}/v1/events`)
       es.onopen = () => {
+        if (disposed) return
         retryCount = 0
         setSseConnected(true)
         setSseReconnectIn(0)
         if (countdownInterval) clearInterval(countdownInterval)
       }
-      es.onmessage = (e) => {
-        try {
-          const ev = JSON.parse(e.data)
-          setEvents(prev => {
-            const newEvents = [{ ...ev, receivedAt: Date.now() }, ...prev]
-            return newEvents.slice(0, 100)
-          })
-        } catch (err) {}
-      }
+      eventTypes.forEach((type) => es.addEventListener(type, handleNodeEvent))
       es.onerror = () => {
         es.close()
         setSseConnected(false)
+        if (disposed) return
         if (retryCount < MAX_RETRIES) {
           const delaySecs = Math.min(Math.pow(2, retryCount), 30)
           retryCount++
@@ -819,6 +826,7 @@ function App({ initialView = 'blocks', initialShowPublishForm = false, embedded 
 
     initSSE()
     return () => {
+      disposed = true
       sseRef.current?.close()
       if (retryTimeout) clearTimeout(retryTimeout)
       if (countdownInterval) clearInterval(countdownInterval)
@@ -1932,7 +1940,7 @@ function App({ initialView = 'blocks', initialShowPublishForm = false, embedded 
                 <div className="stat-icon">🌐</div>
                 <span className="stat-label">Peers</span>
               </div>
-              <div className="stat-value">{(p2pStatus.peers || []).length}</div>
+              <div className="stat-value">{p2pStatus.peer_count ?? (p2pStatus.peers || []).length}</div>
             </div>
           </>
         )}
@@ -2332,12 +2340,18 @@ function App({ initialView = 'blocks', initialShowPublishForm = false, embedded 
 
                 <div className="detail-section">
                   <div className="detail-section-title">Pending Packages ({pendingPackages.count})</div>
-                  {pendingPackages.packages?.length === 0 ? (
+                  {!pendingPackages.details_available ? (
                     <EmptyState
                       icon="📦"
-                      title="No pending packages"
-                      description="Packages awaiting verification will appear here"
+                      title={pendingPackages.count === 0 ? 'No pending packages' : 'Pending package details unavailable'}
+                      description={pendingPackages.count === 0
+                        ? 'The live chain reports no pending analysis items.'
+                        : pendingPackages.count == null
+                          ? 'The live node does not expose the pending item count.'
+                          : `The live node reports ${pendingPackages.count} pending analysis items; item details require operator access.`}
                     />
+                  ) : pendingPackages.packages?.length === 0 ? (
+                    <EmptyState icon="📦" title="No pending packages" description="The pending package list is empty." />
                   ) : (
                     <div className="peer-list">
                       {pendingPackages.packages?.map((pkg, idx) => (
@@ -2752,8 +2766,11 @@ function App({ initialView = 'blocks', initialShowPublishForm = false, embedded 
             {view === 'p2p' && (
               <div style={{ padding: 'var(--space-4)' }}>
                 <div className="detail-section">
-                  <div className="detail-section-title">Connected Peers ({(p2pStatus.peers || []).length})</div>
-                  {(p2pStatus.peers || []).length === 0 ? (
+                  <div className="detail-section-title">Connected Peers ({p2pStatus.peer_count ?? (p2pStatus.peers || []).length})</div>
+                  {p2pStatus.details_available === false ? (
+                    <EmptyState icon="🌐" title="Peer details require operator access"
+                      description={`${p2pStatus.peer_count ?? 'The public API does not report'} connected-peer count is available, but node addresses and protocol details are protected.`} />
+                  ) : (p2pStatus.peers || []).length === 0 ? (
                     <EmptyState 
                       icon="🌐" 
                       title="No peers connected" 

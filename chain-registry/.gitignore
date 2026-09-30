@@ -17,6 +17,7 @@
 !testnet/README.md
 !testnet/OPERATOR.md
 !testnet/QUICKSTART.md
+!testnet/VALIDATOR-RUNBOOK.md
 !testnet/gcp-public-hosting.md
 !testnet/SOAK_TEST.md
 !testnet/bootstrap/README.md
@@ -294,6 +295,7 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 package-lock.json
+!explorer/package-lock.json
 !hub-web/package-lock.json
 !hub-api/package-lock.json
 !tools/authority-adapters/npm-verifier/package-lock.json

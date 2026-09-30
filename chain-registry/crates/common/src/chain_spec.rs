@@ -183,11 +183,19 @@ impl ChainSpec {
     /// must match the embedded declaration even when no environment pin exists.
     pub fn validate_consensus_identity(&self) -> anyhow::Result<()> {
         if self.spec_version != CURRENT_SPEC_VERSION {
-            anyhow::bail!("unsupported chain-spec schema version {}", self.spec_version);
+            anyhow::bail!(
+                "unsupported chain-spec schema version {}",
+                self.spec_version
+            );
         }
-        if self.consensus_params.consensus_encoding.as_deref() != crate::compiled_consensus_encoding() {
-            anyhow::bail!("signed consensus encoding {:?} does not match this build {:?}",
-                self.consensus_params.consensus_encoding, crate::compiled_consensus_encoding());
+        if self.consensus_params.consensus_encoding.as_deref()
+            != crate::compiled_consensus_encoding()
+        {
+            anyhow::bail!(
+                "signed consensus encoding {:?} does not match this build {:?}",
+                self.consensus_params.consensus_encoding,
+                crate::compiled_consensus_encoding()
+            );
         }
         if !crate::is_canonical_single_line(&self.chain_id) || self.chain_id.is_empty() {
             anyhow::bail!("signed chain ID is not canonical");
@@ -198,17 +206,25 @@ impl ChainSpec {
         let bootstrap = self.to_runtime_validator_set();
         crate::validate_validator_identities(&bootstrap).map_err(anyhow::Error::msg)?;
         if crate::compiled_consensus_encoding().is_some()
-            && bootstrap.validators.iter().filter(|v| crate::validator_status_is_active(&v.status)).count() < 4 {
+            && bootstrap
+                .validators
+                .iter()
+                .filter(|v| crate::validator_status_is_active(&v.status))
+                .count()
+                < 4
+        {
             anyhow::bail!("Phase C requires at least four distinct active validator identities");
         }
         if crate::compiled_consensus_encoding().is_some() {
             let mut addresses = std::collections::HashSet::new();
             for validator in &bootstrap.validators {
                 let address = validator.eth_address.to_ascii_lowercase();
-                if address.len() != 42 || !address.starts_with("0x")
+                if address.len() != 42
+                    || !address.starts_with("0x")
                     || !address[2..].bytes().all(|byte| byte.is_ascii_hexdigit())
                     || address[2..].bytes().all(|byte| byte == b'0')
-                    || !addresses.insert(address) {
+                    || !addresses.insert(address)
+                {
                     anyhow::bail!("Phase C bootstrap requires distinct, nonzero EVM identities");
                 }
                 if crate::validator_status_is_active(&validator.status) && validator.stake == 0 {
@@ -262,7 +278,10 @@ impl ChainSpec {
             },
             // Legacy genesis bytes remain unchanged. The new scheme also
             // commits to status/reputation and all other authority fields.
-            authority_hash: self.consensus_params.consensus_encoding.as_ref()
+            authority_hash: self
+                .consensus_params
+                .consensus_encoding
+                .as_ref()
                 .map(|_| crate::canonical_validator_set_hash(&self.to_runtime_validator_set())),
         };
 

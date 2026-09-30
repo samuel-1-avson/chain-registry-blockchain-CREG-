@@ -87,12 +87,15 @@ pub fn current() -> ScannerProfileStatus {
     if strict_phase_c {
         match expected_digest.as_deref() {
             Some(expected) if expected == digest => {}
-            Some(_) => errors.push("runtime scanner profile does not match CREG_SCANNER_PROFILE_DIGEST".to_string()),
-            None => errors.push("CREG_SCANNER_PROFILE_DIGEST must pin the reviewed scanner profile".to_string()),
+            Some(_) => errors.push(
+                "runtime scanner profile does not match CREG_SCANNER_PROFILE_DIGEST".to_string(),
+            ),
+            None => errors.push(
+                "CREG_SCANNER_PROFILE_DIGEST must pin the reviewed scanner profile".to_string(),
+            ),
         }
     }
-    let ready = errors.is_empty()
-        && (!strict_phase_c || (threat.available && osv.available));
+    let ready = errors.is_empty() && (!strict_phase_c || (threat.available && osv.available));
     let scanner_version = if !yara.available {
         "degraded-yara-missing".to_string()
     } else if strict_phase_c && !ready {

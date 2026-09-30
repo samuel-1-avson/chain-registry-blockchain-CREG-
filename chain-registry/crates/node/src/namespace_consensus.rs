@@ -251,36 +251,52 @@ fn validate_authorized_publish(
     let current = controller_for(chain, controllers, &namespace)?;
     match current {
         None => {
-            let certificate = authorization
-                .authority_certificate
-                .as_ref()
-                .ok_or_else(|| {
-                    anyhow::anyhow!("first namespace claim lacks authority certificate")
-                })?;
-            validate_authority_certificate(
-                chain,
-                block.header.height,
-                config,
-                certificate,
-                NamespaceAuthorityPurpose::Claim,
-                reference_time,
-            )?;
+            // Before CR-07 activation, a publisher may establish a namespace
+            // without upstream authority. Keep the signed v4 authorization in
+            // the block and mark that controller as non-authoritative. After
+            // activation, a first claim needs the quorum certificate.
+            let certificate_digest = if config.is_active_at(block.header.height) {
+                let certificate =
+                    authorization
+                        .authority_certificate
+                        .as_ref()
+                        .ok_or_else(|| {
+                            anyhow::anyhow!("first namespace claim lacks authority certificate")
+                        })?;
+                validate_authority_certificate(
+                    chain,
+                    block.header.height,
+                    config,
+                    certificate,
+                    NamespaceAuthorityPurpose::Claim,
+                    reference_time,
+                )?;
+                certificate.digest()
+            } else {
+                if authorization.authority_certificate.is_some() {
+                    anyhow::bail!("pre-activation claim must not assert upstream authority");
+                }
+                String::new()
+            };
             let state = NamespaceControllerState {
                 schema_version: 1,
                 namespace: namespace.clone(),
                 root_ed25519_pubkey: authorization.publisher_ed25519_pubkey.clone(),
                 root_evm_address: authorization.publisher_address.clone(),
-                authoritative: true,
+                authoritative: config.is_active_at(block.header.height),
                 sequence: 0,
                 last_lifecycle_nonce: 0,
                 previous_event_hash: String::new(),
-                authority_certificate_digest: certificate.digest(),
+                authority_certificate_digest: certificate_digest,
                 updated_at_height: block.header.height,
             };
             controllers.insert(namespace.clone(), Some(state.clone()));
             effects.controllers.insert(namespace, state);
         }
         Some(state) if state.root_ed25519_pubkey == authorization.publisher_ed25519_pubkey => {
+            if config.is_active_at(block.header.height) && !state.authoritative {
+                anyhow::bail!("pre-activation controller needs certified authority migration");
+            }
             if authorization.authority_certificate.is_some() {
                 anyhow::bail!("established controller publish must not replay a claim certificate");
             }

@@ -1,31 +1,25 @@
-# Example Prometheus config for GCP public services.
-# Copy or generate via:
-#   .\testnet\gcp\deploy-monitoring.ps1
-#
-# Replace OBSERVER_API_UPSTREAM with the observer API address.
+# Phase C R7 candidate metrics source. The observer container must be joined
+# to the monitoring_default Docker network before Prometheus is started.
+# This profile intentionally omits Alertmanager so restoring metrics cannot
+# send notifications or depend on external alert receivers.
 
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
   external_labels:
-    cluster: creg-testnet-gcp
-    environment: public-alpha
-
-alerting:
-  alertmanagers:
-    - static_configs:
-        - targets: ["alertmanager:9093"]
-
-rule_files:
-  - "alerts.yml"
+    cluster: creg-phase-c
+    environment: candidate-r7
 
 scrape_configs:
-  - job_name: creg-node
+  - job_name: creg-phase-c-r7-primary-observer
     static_configs:
       - targets:
-          - "OBSERVER_API_UPSTREAM"
+          - "creg-phase-c-r7-o1:8080"
         labels:
+          chain_id: "creg-phase-c-testnet-2026-09-26-r7"
+          network_genesis_hash: "1852b9a86dd3b53e7b2de4a774723a4fe48e862f9c61d14e5917b42b21055234"
           role: observer
+          metrics_source: explorer-primary
     metrics_path: /metrics
     scrape_interval: 15s
     scrape_timeout: 10s

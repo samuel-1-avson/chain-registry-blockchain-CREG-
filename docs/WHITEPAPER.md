@@ -1,12 +1,16 @@
 # Chain Registry (CREG) Technical Whitepaper
 
 > Version: 0.4.0-public-testnet  
-> Date: 2026-09-21  
-> Network: `creg-testnet-1` on Ethereum Sepolia  
-> Status: Public alpha — external validator onboarding enabled on Sepolia; public endpoint reachable with a freshly rebooted empty chain (tip 0, no peers observed 2026-09-20). Not production BFT  
+> Date: 2026-09-30
+> Network: `creg-phase-c-testnet-2026-09-26-r7` on Ethereum Sepolia
+> Status: Public R7 testnet; four active validators and finalized height 20 observed on 2026-09-30. Remaining economic and acceptance work is tracked in `CREG-TOKENOMICS-IMPLEMENTATION-PLAN.md` and `TESTNET-HEAL-STATUS.md`.
 > Related resources: Public testnet quickstart, Phase scope definitions, Readiness gates status, CREG_SYSTEM_WORKFLOW.md, Contribution Arena
 >
+> Update 2026-09-30: Public explorer/API routing now serves R7. The R29 faucet has a reconciled ledger, bounded 100 tCREG claims, and 99,900 tCREG at the observed check. Outstanding token supply is 20,000,000 tCREG; the 42,000,000 target still requires the reviewed issuance work. Historical deployment addresses and observations below retain their stated dates; the signed R7 spec and tokenomics inventory identify the current deployment.
+>
 > Update 2026-09-21: Governance corrected to deployed `Governance.sol` (`0x122B...`); contract table completed (Appeal, VRF, PinningRewards); `zkValidationFee` corrected to 0 with a full fee table; verification counts updated to the 2026-08-23 snapshot; §8 numbering deduplicated; release pin updated to `v0.4.8-testnet`.
+>
+> Deployment note 2026-09-25: The next testnet acceptance target is four active validators on independent hosts plus four separate non-voting observer hosts. Validator acceptance requires real package analysis and 3-of-4 package and block quorum; simulated or degraded evidence is insufficient. The older four foundation identities mentioned below were described as observers, while the checked-in 2026-09-23 chain spec contains two active validators. See `docs/TESTNET-HEAL-STATUS.md` §14 for the proposed host layout and remaining live evidence.
 >
 > Update 2026-09-20: Status re-verified (empty chain, tip 0, no peers); release pin updated to `v0.4.7-testnet`; document links repaired after the 2026-09-19 docs archive pass.
 >
@@ -28,10 +32,11 @@ Chain Registry is designed as a decentralized package-integrity network for
 software supply chains. Its public testnet targets package publishers,
 developers, validators, and security researchers who want a verifiable package
 status layer across ecosystems such as npm, PyPI, Cargo, and similar
-registries. The `creg-testnet-1` spec lists four foundation observer identities (non-voting;
+registries. The 2026-09-20 `creg-testnet-1` snapshot described four foundation observer identities (non-voting;
 `validator-1`…`validator-4` in `chain-spec.sepolia.json`) and two bootnodes, and
-external validator onboarding is enabled. No active validators have been observed on the
-public endpoint, which serves a freshly rebooted empty chain (tip 0, no peers, 2026-09-20). Independent operators
+external validator onboarding was enabled. At that check, no active validators
+were observed on the public endpoint, which served a freshly rebooted empty
+chain (tip 0, no peers, 2026-09-20). Independent operators
 stake testnet tCREG tokens on Ethereum Sepolia (`Staking.sol` at
 `0x30604Aa6f763fbde6aDCffbd8960af3031037331`), receive approval from the
 multisig governance contract (`Governance.sol` at `0x122Bc2C704B966C74004506F98F13bf7b5F75b9D`),
@@ -287,7 +292,7 @@ CREG uses two related consensus layers:
 | Package vote accumulator | Decides whether a package can become verified | `creg-vote-v2` |
 | Block PBFT engine | Finalizes CREG chain blocks containing package records | `creg-pbft-v1` |
 
-Notation: **n** is the active validator-set size. **M** is the mandatory analysis-committee size (`M = n` when `n ≤ 50`, capped at 100 above that; the spec's four named identities are non-voting observers, not the committee). Package evidence uses **M**. Block PBFT and validator-set certificates use **n**.
+Notation: **n** is the active validator-set size. **M** is the mandatory analysis-committee size (`M = n` when `n ≤ 50`, capped at 100 above that; the four identities described in the 2026-09-20 snapshot were non-voting observers, not the committee). Package evidence uses **M**. Block PBFT and validator-set certificates use **n**.
 
 For production-sized validator sets, **block PBFT** quorum is `floor(2n/3) + 1`. **Package evidence** quorum is `floor(2M/3) + 1` mandatory-committee approvals. Small coordinated testnet clusters use explicit configuration where documented; these testnet shortcuts are not mainnet assumptions.
 
@@ -386,7 +391,7 @@ CREG's validator pipeline is designed to make package approval hard to fake and 
 ### 8.2 Mandatory vs Voluntary
 - Only the primary mandatory core is required to produce consensus-grade evidence for the package-level quorum.
 - Any validator may voluntarily execute the full pipeline. Voluntary votes are recorded with `is_mandatory=false`, help during committee expansion on timeout, and are eligible for reputation/rewards. **Public-alpha node today:** only the mandatory committee analyzes and votes; `validator_pipeline` does not produce voluntary votes.
-- This hybrid approach is the target-scale bound (classroom example: 10,000 validators). Public-alpha `max_validators` is 50; the four recorded identities are non-voting observers.
+- This hybrid approach is the target-scale bound (classroom example: 10,000 validators). Public-alpha `max_validators` is 50; the four identities described in the 2026-09-20 snapshot were non-voting observers.
 
 ### 8.3 Admission
 Validators fetch the exact artifact bytes by CID, verify hashes, execute the security pipeline, produce a deterministic risk summary, sign a vote, and gossip it to the validator set. A vote is consensus-grade only when it includes complete bundle refs, a non-degraded scanner profile, and a non-empty evidence digest. Only mandatory core members are obligated to do the heavy work; volunteers may participate freely.
@@ -541,7 +546,7 @@ The PBFT round has three main phases:
 | PREPARE | Validators verify and sign the block hash | Quorum moves the round to COMMIT |
 | COMMIT | Validators commit to the prepared block | Quorum finalizes and stores the block |
 
-PBFT view changes use a separate threshold of `floor(n/3) + 1` view-change certificates for a new view. This prevents a single faulty validator from forcing view changes unilaterally while still allowing progress when the proposer stalls.
+For a PBFT validator set of `n = 3f + 1`, a replacement proposer must carry a new-view certificate with `2f + 1` signed view-change messages (3-of-4 when `n = 4`) and preserve the highest prepared value. The lower `f + 1` threshold can prompt another replica to send its own view-change message; it does not certify a new view or authorize backup leadership. A local timeout alone can only initiate a signed view-change vote.
 
 Small cluster behavior is intentionally conservative: a three-validator set requires unanimity for the usual PBFT safety model unless an explicit local/testnet flag opts into a 2-of-3 bootstrap quorum. That shortcut is not a mainnet security assumption.
 

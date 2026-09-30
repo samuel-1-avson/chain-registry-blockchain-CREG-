@@ -17,10 +17,10 @@ use axum::{
     Router,
 };
 use chrono::Utc;
-use dashmap::DashMap;
 use k256::ecdsa::{RecoveryId, Signature as K256Signature, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sled::transaction::{ConflictableTransactionError, Transactional};
 use std::{collections::HashMap, fs, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tokio::time::sleep;
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
@@ -116,10 +116,7 @@ struct AppState {
     config: RelayerConfig,
     policy: LoadedPolicy,
     http_client: reqwest::Client,
-    statuses: DashMap<String, RequestStatusRecord>,
-    sponsor_nonces: DashMap<String, u64>,
-    wallet_daily_counts: DashMap<String, DailyCounter>,
-    ip_daily_counts: DashMap<String, DailyCounter>,
+    journal: sled::Tree,
 }
 
 #[derive(Clone)]
@@ -163,13 +160,13 @@ struct LoadedActionPolicy {
     max_amount_wei: U256,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Deserialize, Serialize)]
 struct DailyCounter {
     day: String,
     count: u64,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct RequestStatusRecord {
     request_id: String,
@@ -451,22 +448,31 @@ async fn main() -> anyhow::Result<()> {
     );
     info!("  RPC:             {}", config.rpc_url);
 
+    let journal = open_durable_journal(&config.data_dir)?;
     let state = Arc::new(AppState {
         config: config.clone(),
         policy,
         http_client,
-        statuses: DashMap::new(),
-        sponsor_nonces: DashMap::new(),
-        wallet_daily_counts: DashMap::new(),
-        ip_daily_counts: DashMap::new(),
+        journal,
     });
 
-    // Restore sponsor nonces so a relayer restart cannot reset the per-owner
-    // nonce to 0 and accept a stale/replayed sponsored-stake intent.
-    let restored = load_sponsor_nonces(&config.data_dir);
+    let restored = load_request_statuses(&state.journal)?;
     let restored_count = restored.len();
-    for (key, value) in restored {
-        state.sponsor_nonces.insert(key, value);
+    for mut record in restored {
+        if record.status == "submitting" && record.tx_hash.is_none() {
+            record.status = "reconciliation_required".to_string();
+            record.message = "Relayer restarted before the broadcast result was durably recorded. This request is held for transaction reconciliation; its nonce and quota remain reserved.".to_string();
+            record.updated_at = Utc::now().to_rfc3339();
+            persist_status_record(&state.journal, &record).map_err(anyhow::Error::msg)?;
+        } else if matches!(record.status.as_str(), "submitted" | "timed_out") {
+            if let Some(tx_hash) = record.tx_hash.clone() {
+                tokio::spawn(watch_request_receipt(
+                    Arc::clone(&state),
+                    record.request_id.clone(),
+                    tx_hash,
+                ));
+            }
+        }
     }
     info!("  Data dir:        {}", config.data_dir);
     info!("  Trust proxy hdr: {}", config.trust_proxy);
@@ -620,7 +626,7 @@ async fn sponsor_request(
     };
 
     if let Err(message) = check_quota(
-        &state.wallet_daily_counts,
+        &state.journal,
         &wallet_quota_key(prepared.owner, prepared.action),
         state.policy.chain.daily_wallet_quota,
     ) {
@@ -637,7 +643,7 @@ async fn sponsor_request(
             .into_response();
     }
     if let Err(message) = check_quota(
-        &state.ip_daily_counts,
+        &state.journal,
         &ip_quota_key(state.config.active_chain_id, &client_ip),
         state.policy.chain.daily_ip_quota,
     ) {
@@ -655,7 +661,23 @@ async fn sponsor_request(
     }
 
     let owner_nonce_key = sponsor_nonce_key(state.config.active_chain_id, prepared.owner);
-    let expected_nonce = current_nonce(&state.sponsor_nonces, &owner_nonce_key);
+    let expected_nonce = match current_nonce(&state.journal, &owner_nonce_key) {
+        Ok(value) => value,
+        Err(message) => {
+            error!("Durable relayer nonce read failed: {}", message);
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(SponsorResponse {
+                    success: false,
+                    request_id: String::new(),
+                    status: "unavailable".to_string(),
+                    tx_hash: None,
+                    message: "Durable relayer state is unavailable.".to_string(),
+                }),
+            )
+                .into_response();
+        }
+    };
     let provided_nonce = match parse_u64(&request.intent_message.relayer_nonce, "relayer nonce") {
         Ok(value) => value,
         Err(message) => {
@@ -776,67 +798,101 @@ async fn sponsor_request(
             .into_response();
     }
 
-    state
-        .sponsor_nonces
-        .insert(owner_nonce_key, expected_nonce + 1);
-    persist_sponsor_nonces(&state);
-    record_quota(
-        &state.wallet_daily_counts,
-        &wallet_quota_key(prepared.owner, prepared.action),
-    );
-    record_quota(
-        &state.ip_daily_counts,
-        &ip_quota_key(state.config.active_chain_id, &client_ip),
-    );
-
     let request_id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
-    state.statuses.insert(
-        request_id.clone(),
-        RequestStatusRecord {
-            request_id: request_id.clone(),
-            status: "submitting".to_string(),
-            action: prepared.action.as_str().to_string(),
-            owner: prepared.owner.to_string(),
-            chain_id: state.config.active_chain_id,
-            tx_hash: None,
-            block_number: None,
-            message: format!(
-                "Submitting sponsored {} transaction.",
-                prepared.action.as_str()
-            ),
-            created_at: now.clone(),
-            updated_at: now,
-        },
-    );
+    let initial_record = RequestStatusRecord {
+        request_id: request_id.clone(),
+        status: "submitting".to_string(),
+        action: prepared.action.as_str().to_string(),
+        owner: prepared.owner.to_string(),
+        chain_id: state.config.active_chain_id,
+        tx_hash: None,
+        block_number: None,
+        message: format!(
+            "Submitting sponsored {} transaction.",
+            prepared.action.as_str()
+        ),
+        created_at: now.clone(),
+        updated_at: now,
+    };
+    let wallet_key = wallet_quota_key(prepared.owner, prepared.action);
+    let ip_key = ip_quota_key(state.config.active_chain_id, &client_ip);
+    if let Err(message) = reserve_sponsorship(
+        &state.journal,
+        &owner_nonce_key,
+        expected_nonce,
+        &wallet_key,
+        state.policy.chain.daily_wallet_quota,
+        &ip_key,
+        state.policy.chain.daily_ip_quota,
+        &initial_record,
+    ) {
+        let status = if message == "QUOTA_REACHED" {
+            StatusCode::TOO_MANY_REQUESTS
+        } else if message.starts_with("NONCE_CONFLICT:") {
+            StatusCode::CONFLICT
+        } else {
+            error!(
+                "Failed to atomically reserve sponsored request: {}",
+                message
+            );
+            StatusCode::SERVICE_UNAVAILABLE
+        };
+        let detail = if let Some(actual) = message.strip_prefix("NONCE_CONFLICT:") {
+            format!("Relayer nonce advanced to {} while this request was being verified; request a new quote.", actual)
+        } else if message == "QUOTA_REACHED" {
+            "Daily sponsorship quota has been reached.".to_string()
+        } else {
+            "Durable relayer state is unavailable; no transaction was submitted.".to_string()
+        };
+        return (
+            status,
+            Json(SponsorResponse {
+                success: false,
+                request_id: String::new(),
+                status: "rejected".to_string(),
+                tx_hash: None,
+                message: detail,
+            }),
+        )
+            .into_response();
+    }
 
     let tx_hash = match send_sponsored_transaction(&state, &prepared, &permit_signature).await {
         Ok(hash) => hash,
         Err(err) => {
             let (status_code, friendly) = classify_send_error(&err);
-            update_status(
+            if let Err(storage_error) = update_status(
                 &state,
                 &request_id,
-                "failed",
-                &format!("Relayer send failed: {}", friendly),
+                "reconciliation_required",
+                &format!(
+                    "Broadcast result is uncertain after the RPC error: {}",
+                    friendly
+                ),
                 None,
                 None,
-            );
+            ) {
+                error!(
+                    "Could not persist ambiguous sponsor result {}: {}",
+                    request_id, storage_error
+                );
+            }
             return (
                 status_code,
                 Json(SponsorResponse {
                     success: false,
                     request_id,
-                    status: "failed".to_string(),
+                    status: "reconciliation_required".to_string(),
                     tx_hash: None,
-                    message: friendly,
+                    message: format!("{} The reserved nonce will not be reused until this request is reconciled.", friendly),
                 }),
             )
                 .into_response();
         }
     };
 
-    update_status(
+    if let Err(storage_error) = update_status(
         &state,
         &request_id,
         "submitted",
@@ -846,7 +902,23 @@ async fn sponsor_request(
         ),
         Some(tx_hash.clone()),
         None,
-    );
+    ) {
+        error!(
+            "Transaction {} was submitted but its durable status update failed: {}",
+            tx_hash, storage_error
+        );
+        return (
+            StatusCode::ACCEPTED,
+            Json(SponsorResponse {
+                success: true,
+                request_id,
+                status: "submitted_reconciliation_required".to_string(),
+                tx_hash: Some(tx_hash),
+                message: "Transaction was submitted. Durable status storage needs operator reconciliation; use the returned transaction hash.".to_string(),
+            }),
+        )
+            .into_response();
+    }
 
     tokio::spawn(watch_request_receipt(
         Arc::clone(&state),
@@ -874,9 +946,25 @@ async fn get_status(
     State(state): State<Arc<AppState>>,
     Path(request_id): Path<String>,
 ) -> impl IntoResponse {
-    match state.statuses.get(&request_id) {
-        Some(status) => (StatusCode::OK, Json(status.clone())).into_response(),
-        None => (
+    match state.journal.get(request_storage_key(&request_id)) {
+        Ok(Some(bytes)) => match serde_json::from_slice::<RequestStatusRecord>(&bytes) {
+            Ok(status) => (StatusCode::OK, Json(status)).into_response(),
+            Err(error) => {
+                error!(
+                    "Stored relayer request {} is unreadable: {}",
+                    request_id, error
+                );
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({
+                        "error": "Stored relayer request state is unreadable.",
+                        "requestId": request_id,
+                    })),
+                )
+                    .into_response()
+            }
+        },
+        Ok(None) => (
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({
                 "error": "Unknown relayer request id.",
@@ -884,6 +972,17 @@ async fn get_status(
             })),
         )
             .into_response(),
+        Err(error) => {
+            error!("Failed to read relayer request {}: {}", request_id, error);
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({
+                    "error": "Durable relayer status storage is unavailable.",
+                    "requestId": request_id,
+                })),
+            )
+                .into_response()
+        }
     }
 }
 
@@ -931,21 +1030,21 @@ async fn build_quote(
     }
 
     check_quota(
-        &state.wallet_daily_counts,
+        &state.journal,
         &wallet_quota_key(owner, action),
         chain.daily_wallet_quota,
     )?;
     check_quota(
-        &state.ip_daily_counts,
+        &state.journal,
         &ip_quota_key(state.config.active_chain_id, client_ip),
         chain.daily_ip_quota,
     )?;
 
     let permit_nonce = fetch_token_nonce(state, token_contract, owner).await?;
     let relayer_nonce = current_nonce(
-        &state.sponsor_nonces,
+        &state.journal,
         &sponsor_nonce_key(state.config.active_chain_id, owner),
-    );
+    )?;
     let permit_deadline = U256::from(
         (Utc::now().timestamp() as u64) + state.policy.replay_protection.max_expiry_seconds,
     );
@@ -1185,45 +1284,198 @@ fn build_cors(allowed_origins: &[String]) -> CorsLayer {
     }
 }
 
-fn sponsor_nonces_path(data_dir: &str) -> PathBuf {
-    PathBuf::from(data_dir).join("sponsor-nonces.json")
+fn request_storage_key(request_id: &str) -> Vec<u8> {
+    format!("request:{}", request_id).into_bytes()
 }
 
-/// Load the persisted per-owner sponsor nonce map. Missing/unparseable file
-/// yields an empty map (we start from 0, matching first-boot behaviour).
-fn load_sponsor_nonces(data_dir: &str) -> HashMap<String, u64> {
-    match fs::read(sponsor_nonces_path(data_dir)) {
-        Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_default(),
-        Err(_) => HashMap::new(),
-    }
-}
-
-/// Persist the sponsor nonce map atomically (temp file + rename). Best-effort:
-/// a write failure is logged but does not fail the request that already
-/// validated and is about to be submitted.
-fn persist_sponsor_nonces(state: &AppState) {
-    let map: HashMap<String, u64> = state
-        .sponsor_nonces
-        .iter()
-        .map(|entry| (entry.key().clone(), *entry.value()))
-        .collect();
-    let path = sponsor_nonces_path(&state.config.data_dir);
-    let bytes = match serde_json::to_vec_pretty(&map) {
-        Ok(b) => b,
-        Err(e) => {
-            error!("Failed to serialize sponsor nonces: {}", e);
-            return;
+fn current_nonce(journal: &sled::Tree, key: &str) -> Result<u64, String> {
+    let storage_key = format!("nonce:{}", key);
+    match journal
+        .get(storage_key.as_bytes())
+        .map_err(|error| error.to_string())?
+    {
+        Some(value) => {
+            let bytes: [u8; 8] = value
+                .as_ref()
+                .try_into()
+                .map_err(|_| "Stored relayer nonce has an invalid encoding.".to_string())?;
+            Ok(u64::from_be_bytes(bytes))
         }
+        None => Ok(0),
+    }
+}
+
+fn check_quota(journal: &sled::Tree, key: &str, limit: u64) -> Result<(), String> {
+    let storage_key = format!("quota:{}", key);
+    let Some(bytes) = journal
+        .get(storage_key.as_bytes())
+        .map_err(|error| error.to_string())?
+    else {
+        return Ok(());
     };
-    let _ = fs::create_dir_all(&state.config.data_dir);
-    let tmp = path.with_extension("json.tmp");
-    if let Err(e) = fs::write(&tmp, &bytes) {
-        error!("Failed to write sponsor nonce journal: {}", e);
-        return;
+    let counter: DailyCounter = serde_json::from_slice(&bytes)
+        .map_err(|_| "Stored relayer quota has an invalid encoding.".to_string())?;
+    let today = Utc::now().format("%Y-%m-%d").to_string();
+    if counter.day == today && counter.count >= limit {
+        return Err(format!("Daily quota reached for {}.", key));
     }
-    if let Err(e) = fs::rename(&tmp, &path) {
-        error!("Failed to persist sponsor nonce journal: {}", e);
+    Ok(())
+}
+
+fn persist_status_record(journal: &sled::Tree, record: &RequestStatusRecord) -> Result<(), String> {
+    let bytes = serde_json::to_vec(record).map_err(|error| error.to_string())?;
+    journal
+        .insert(request_storage_key(&record.request_id), bytes)
+        .map_err(|error| error.to_string())?;
+    journal.flush().map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn load_request_statuses(journal: &sled::Tree) -> anyhow::Result<Vec<RequestStatusRecord>> {
+    let mut records = Vec::new();
+    for entry in journal.scan_prefix(b"request:") {
+        let (_, bytes) = entry?;
+        records.push(serde_json::from_slice::<RequestStatusRecord>(&bytes)?);
     }
+    Ok(records)
+}
+
+fn open_durable_journal(data_dir: &str) -> anyhow::Result<sled::Tree> {
+    let directory = PathBuf::from(data_dir);
+    fs::create_dir_all(&directory)?;
+    let db = sled::open(directory.join("relayer-state.db"))?;
+    let journal = db.open_tree("state")?;
+
+    match journal.get(b"meta:schema")? {
+        Some(version) if version.as_ref() == b"1" => {}
+        Some(_) => {
+            anyhow::bail!("Unsupported relayer journal schema; refusing to reset durable state.")
+        }
+        None => {
+            journal.insert(b"meta:schema", b"1")?;
+            journal.flush()?;
+        }
+    }
+
+    // Migrate the former nonce file once. An unreadable or conflicting legacy
+    // journal stops startup instead of silently restoring nonce zero.
+    if journal.get(b"meta:legacy-nonces-migrated")?.is_none() {
+        let legacy_path = directory.join("sponsor-nonces.json");
+        if legacy_path.exists() {
+            let bytes = fs::read(&legacy_path)?;
+            let legacy: HashMap<String, u64> = serde_json::from_slice(&bytes)?;
+            for (key, value) in legacy {
+                let storage_key = format!("nonce:{}", key);
+                let encoded = value.to_be_bytes();
+                match journal.get(storage_key.as_bytes())? {
+                    Some(existing) if existing.as_ref() != encoded.as_slice() => {
+                        anyhow::bail!("Legacy relayer nonce conflicts with the durable journal; operator review is required.");
+                    }
+                    Some(_) => {}
+                    None => {
+                        journal.insert(storage_key.as_bytes(), encoded.as_slice())?;
+                    }
+                }
+            }
+        }
+        journal.insert(b"meta:legacy-nonces-migrated", b"1")?;
+        journal.flush()?;
+    }
+    Ok(journal)
+}
+
+fn reserve_sponsorship(
+    journal: &sled::Tree,
+    owner_nonce_key: &str,
+    expected_nonce: u64,
+    wallet_quota_key: &str,
+    wallet_quota_limit: u64,
+    ip_quota_key: &str,
+    ip_quota_limit: u64,
+    initial_record: &RequestStatusRecord,
+) -> Result<(), String> {
+    let nonce_key = format!("nonce:{}", owner_nonce_key).into_bytes();
+    let wallet_key = format!("quota:{}", wallet_quota_key).into_bytes();
+    let ip_key = format!("quota:{}", ip_quota_key).into_bytes();
+    let request_key = request_storage_key(&initial_record.request_id);
+    let request_bytes = serde_json::to_vec(initial_record).map_err(|error| error.to_string())?;
+    let today = Utc::now().format("%Y-%m-%d").to_string();
+    let next_nonce = expected_nonce
+        .checked_add(1)
+        .ok_or_else(|| "Relayer nonce is exhausted.".to_string())?;
+
+    let transaction: Result<(), sled::transaction::TransactionError<String>> =
+        journal.transaction(|tree| {
+            if tree.get(&request_key)?.is_some() {
+                return Err(ConflictableTransactionError::Abort(
+                    "Request identifier collision.".to_string(),
+                ));
+            }
+
+            let actual_nonce = match tree.get(&nonce_key)? {
+                Some(value) => {
+                    let bytes: [u8; 8] = value.as_ref().try_into().map_err(|_| {
+                        ConflictableTransactionError::Abort(
+                            "Stored relayer nonce has an invalid encoding.".to_string(),
+                        )
+                    })?;
+                    u64::from_be_bytes(bytes)
+                }
+                None => 0,
+            };
+            if actual_nonce != expected_nonce {
+                return Err(ConflictableTransactionError::Abort(format!(
+                    "NONCE_CONFLICT:{}",
+                    actual_nonce
+                )));
+            }
+
+            let read_counter = |key: &[u8], limit: u64| {
+                let count = match tree.get(key)? {
+                    Some(bytes) => {
+                        let counter: DailyCounter =
+                            serde_json::from_slice(&bytes).map_err(|_| {
+                                ConflictableTransactionError::Abort(
+                                    "Stored relayer quota has an invalid encoding.".to_string(),
+                                )
+                            })?;
+                        if counter.day == today && counter.count >= limit {
+                            return Err(ConflictableTransactionError::Abort(
+                                "QUOTA_REACHED".to_string(),
+                            ));
+                        }
+                        if counter.day == today {
+                            counter.count
+                        } else {
+                            0
+                        }
+                    }
+                    None => 0,
+                };
+                Ok(count)
+            };
+            let wallet_count = read_counter(&wallet_key, wallet_quota_limit)?;
+            let ip_count = read_counter(&ip_key, ip_quota_limit)?;
+            let wallet_next = serde_json::to_vec(&DailyCounter {
+                day: today.clone(),
+                count: wallet_count.saturating_add(1),
+            })
+            .map_err(|error| ConflictableTransactionError::Abort(error.to_string()))?;
+            let ip_next = serde_json::to_vec(&DailyCounter {
+                day: today.clone(),
+                count: ip_count.saturating_add(1),
+            })
+            .map_err(|error| ConflictableTransactionError::Abort(error.to_string()))?;
+
+            tree.insert(nonce_key.as_slice(), next_nonce.to_be_bytes().as_slice())?;
+            tree.insert(wallet_key.as_slice(), wallet_next)?;
+            tree.insert(ip_key.as_slice(), ip_next)?;
+            tree.insert(request_key.as_slice(), request_bytes.as_slice())?;
+            Ok(())
+        });
+    transaction.map_err(|error| error.to_string())?;
+    journal.flush().map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 async fn send_sponsored_transaction(
@@ -1295,14 +1547,19 @@ async fn watch_request_receipt(state: Arc<AppState>, request_id: String, tx_hash
                 } else {
                     "Sponsored transaction reverted on-chain."
                 };
-                update_status(
+                if let Err(error) = update_status(
                     &state,
                     &request_id,
                     status,
                     message,
                     Some(tx_hash.clone()),
                     receipt.block_number.clone(),
-                );
+                ) {
+                    error!(
+                        "Failed to persist receipt status for {}: {}",
+                        request_id, error
+                    );
+                }
                 return;
             }
             Ok(None) => sleep(Duration::from_secs(2)).await,
@@ -1313,14 +1570,19 @@ async fn watch_request_receipt(state: Arc<AppState>, request_id: String, tx_hash
         }
     }
 
-    update_status(
+    if let Err(error) = update_status(
         &state,
         &request_id,
         "timed_out",
         "Timed out while waiting for the sponsored transaction receipt.",
         Some(tx_hash),
         None,
-    );
+    ) {
+        error!(
+            "Failed to persist timeout status for {}: {}",
+            request_id, error
+        );
+    }
 }
 
 fn update_status(
@@ -1330,18 +1592,25 @@ fn update_status(
     message: &str,
     tx_hash: Option<String>,
     block_number: Option<String>,
-) {
-    if let Some(mut entry) = state.statuses.get_mut(request_id) {
-        entry.status = status.to_string();
-        entry.message = message.to_string();
-        if tx_hash.is_some() {
-            entry.tx_hash = tx_hash;
-        }
-        if block_number.is_some() {
-            entry.block_number = block_number;
-        }
-        entry.updated_at = Utc::now().to_rfc3339();
+) -> Result<(), String> {
+    let key = request_storage_key(request_id);
+    let bytes = state
+        .journal
+        .get(&key)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("request {} is missing from durable storage", request_id))?;
+    let mut record: RequestStatusRecord = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("request {} is unreadable: {}", request_id, error))?;
+    record.status = status.to_string();
+    record.message = message.to_string();
+    if tx_hash.is_some() {
+        record.tx_hash = tx_hash;
     }
+    if block_number.is_some() {
+        record.block_number = block_number;
+    }
+    record.updated_at = Utc::now().to_rfc3339();
+    persist_status_record(&state.journal, &record)
 }
 
 fn load_policy(policy_path: &str, active_chain_id: u64) -> anyhow::Result<LoadedPolicy> {
@@ -1662,41 +1931,6 @@ fn ip_quota_key(chain_id: u64, ip: &str) -> String {
 
 fn sponsor_nonce_key(chain_id: u64, owner: Address) -> String {
     format!("{}:{}", chain_id, owner)
-}
-
-fn current_nonce(store: &DashMap<String, u64>, key: &str) -> u64 {
-    store.get(key).map(|entry| *entry).unwrap_or(0)
-}
-
-fn check_quota(store: &DashMap<String, DailyCounter>, key: &str, limit: u64) -> Result<(), String> {
-    let today = Utc::now().format("%Y-%m-%d").to_string();
-    if let Some(counter) = store.get(key) {
-        if counter.day == today && counter.count >= limit {
-            return Err(format!("Daily quota reached for {}.", key));
-        }
-    }
-    Ok(())
-}
-
-fn record_quota(store: &DashMap<String, DailyCounter>, key: &str) {
-    let today = Utc::now().format("%Y-%m-%d").to_string();
-    let next_count = store
-        .get(key)
-        .map(|entry| {
-            if entry.day == today {
-                entry.count + 1
-            } else {
-                1
-            }
-        })
-        .unwrap_or(1);
-    store.insert(
-        key.to_string(),
-        DailyCounter {
-            day: today,
-            count: next_count,
-        },
-    );
 }
 
 /// Resolve the client IP used for per-IP quotas. Proxy headers

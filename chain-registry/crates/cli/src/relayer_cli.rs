@@ -20,7 +20,8 @@ pub async fn soak(
     if !json_output {
         println!(
             "\n{}",
-            "================================================================================".cyan()
+            "================================================================================"
+                .cyan()
         );
         println!(
             "  {}",
@@ -30,15 +31,22 @@ pub async fn soak(
         );
         println!(
             "{}\n",
-            "================================================================================".cyan()
+            "================================================================================"
+                .cyan()
         );
 
         println!("{}", "1. Relayer Pipeline Configuration".bold().yellow());
         println!("  Target Contract:     {}", contract_address.cyan());
         println!("  Sepolia RPC URL:     {}", rpc_url.cyan());
         println!("  Target Chain ID:     {}", "11155111 (Sepolia)".cyan());
-        println!("  Checkpoints to Soak: {}", count.to_string().bold().green());
-        println!("  Starting Height:     #{}", start_height.to_string().bold());
+        println!(
+            "  Checkpoints to Soak: {}",
+            count.to_string().bold().green()
+        );
+        println!(
+            "  Starting Height:     #{}",
+            start_height.to_string().bold()
+        );
         println!(
             "  Execution Mode:      {}",
             if dry_run {
@@ -70,7 +78,12 @@ pub async fn soak(
     let service = L1RelayerService::new(config, queue);
 
     if !json_output {
-        println!("{}", "2. Executing Checkpoint Anchoring Stream...".bold().yellow());
+        println!(
+            "{}",
+            "2. Executing Checkpoint Anchoring Stream..."
+                .bold()
+                .yellow()
+        );
     }
 
     let start_ts = Instant::now();
@@ -84,7 +97,10 @@ pub async fn soak(
     }
 
     // Display sample receipts
-    println!("\n{}", "3. Sample Anchored Checkpoint Receipts".bold().yellow());
+    println!(
+        "\n{}",
+        "3. Sample Anchored Checkpoint Receipts".bold().yellow()
+    );
     println!(
         "  {:<8} {:<18} {:<18} {:<18} {:<10}",
         "HEIGHT".bold(),
@@ -93,7 +109,10 @@ pub async fn soak(
         "TX HASH".bold(),
         "STATUS".bold()
     );
-    println!("  {}", "------------------------------------------------------------------------".dimmed());
+    println!(
+        "  {}",
+        "------------------------------------------------------------------------".dimmed()
+    );
 
     let display_count = report.receipts.len().min(8);
     for r in &report.receipts[..display_count] {
@@ -130,7 +149,12 @@ pub async fn soak(
     }
 
     // Telemetry and Summary
-    println!("\n{}", "4. Soak Verification & Performance Telemetry".bold().yellow());
+    println!(
+        "\n{}",
+        "4. Soak Verification & Performance Telemetry"
+            .bold()
+            .yellow()
+    );
     let success_rate = (report.successful_batches as f64 / report.total_batches as f64) * 100.0;
 
     println!("  Checkpoints Submitted:     {}", report.total_batches);
@@ -139,7 +163,10 @@ pub async fn soak(
         report.successful_batches.to_string().green().bold(),
         success_rate
     );
-    println!("  Failed / Dropped:          {}", report.failed_batches.to_string().bold());
+    println!(
+        "  Failed / Dropped:          {}",
+        report.failed_batches.to_string().bold()
+    );
     println!(
         "  Block Height Range:        #{} -> #{}",
         report.start_height, report.end_height
@@ -159,7 +186,9 @@ pub async fn soak(
     );
     println!(
         "  Anchoring Throughput:      {} checkpoints/sec",
-        format!("{:.1}", report.throughput_anchors_per_sec).green().bold()
+        format!("{:.1}", report.throughput_anchors_per_sec)
+            .green()
+            .bold()
     );
 
     println!(

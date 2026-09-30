@@ -6,7 +6,12 @@
 //   - Block announcements:  10 per minute (block propagation)
 //   - General messages:     100 per minute (other gossip)
 //
-// Violating peers are temporarily banned and their messages dropped.
+// Over-limit messages are dropped. Automatic bans are DISABLED by default:
+// the limiter cannot reliably tell validators from attackers (it compares
+// libp2p peer IDs against validator IDs, which never match), so auto-ban
+// escalates into banning honest validators and stalling consensus.
+// Enable explicitly with `auto_ban` / CREG_P2P_AUTO_BAN only once validator
+// recognition is fixed. Manual bans via `ban_peer` always work.
 
 use libp2p::PeerId;
 use std::{
@@ -28,6 +33,10 @@ pub struct P2PRateLimitConfig {
     pub window: Duration,
     /// Ban duration for violating peers.
     pub ban_duration: Duration,
+    /// Whether over-limit peers are automatically banned (escalating).
+    /// Defaults to false: drops alone shed load without risking a ban
+    /// death-spiral against honest validators.
+    pub auto_ban: bool,
 }
 
 impl Default for P2PRateLimitConfig {
@@ -38,6 +47,7 @@ impl Default for P2PRateLimitConfig {
             general_limit: 100,
             window: Duration::from_secs(60),
             ban_duration: Duration::from_secs(300), // 5 minute ban
+            auto_ban: false,
         }
     }
 }
@@ -185,7 +195,7 @@ impl P2PRateLimiter {
             multiplier,
         );
 
-        if !allowed && !is_validator {
+        if !allowed && !is_validator && self.config.auto_ban {
             // First violation - ban the peer (validators are exempt from auto-bans)
             let ban_duration = self.config.ban_duration * (bucket.violation_count + 1);
             bucket.ban(ban_duration);
@@ -218,7 +228,7 @@ impl P2PRateLimiter {
             multiplier,
         );
 
-        if !allowed && !is_validator {
+        if !allowed && !is_validator && self.config.auto_ban {
             let ban_duration = self.config.ban_duration * (bucket.violation_count + 1);
             bucket.ban(ban_duration);
             tracing::warn!(
@@ -250,7 +260,7 @@ impl P2PRateLimiter {
             multiplier,
         );
 
-        if !allowed && !is_validator {
+        if !allowed && !is_validator && self.config.auto_ban {
             let ban_duration = self.config.ban_duration * (bucket.violation_count + 1);
             bucket.ban(ban_duration);
             tracing::warn!(
@@ -391,6 +401,7 @@ mod tests {
         let limiter = P2PRateLimiter::new(P2PRateLimitConfig {
             vote_limit: 3,
             ban_duration: Duration::from_secs(1), // Short ban for testing
+            auto_ban: true,                       // Opt into auto-ban for this test
             ..Default::default()
         });
         let peer = test_peer();
@@ -403,6 +414,43 @@ mod tests {
         // Next message should be blocked and peer banned
         assert!(!limiter.check_vote(peer, &[]));
         assert!(limiter.is_banned(peer));
+    }
+
+    #[test]
+    fn over_limit_drops_without_ban_by_default() {
+        let limiter = P2PRateLimiter::new(P2PRateLimitConfig {
+            vote_limit: 2,
+            ..Default::default()
+        });
+        let peer = test_peer();
+
+        for _ in 0..2 {
+            assert!(limiter.check_vote(peer, &[]));
+        }
+
+        // Over-limit messages are dropped but the peer is NOT auto-banned:
+        // auto-ban escalated into banning honest validators on testnet.
+        assert!(!limiter.check_vote(peer, &[]));
+        assert!(!limiter.is_banned(peer));
+    }
+
+    #[test]
+    fn all_buckets_skip_auto_ban_by_default() {
+        let limiter = P2PRateLimiter::new(P2PRateLimitConfig {
+            vote_limit: 1,
+            block_limit: 1,
+            general_limit: 1,
+            ..Default::default()
+        });
+        let peer = test_peer();
+
+        assert!(limiter.check_vote(peer, &[]));
+        assert!(limiter.check_block(peer, &[]));
+        assert!(limiter.check_general(peer, &[]));
+        assert!(!limiter.check_vote(peer, &[]));
+        assert!(!limiter.check_block(peer, &[]));
+        assert!(!limiter.check_general(peer, &[]));
+        assert!(!limiter.is_banned(peer));
     }
 
     #[test]

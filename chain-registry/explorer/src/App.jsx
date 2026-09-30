@@ -76,9 +76,18 @@ function ExplorerShell() {
   const eventsRef = useRef(events)
   eventsRef.current = events
 
-  const handleEvent = useCallback((payload) => {
-    if (!payload || typeof payload !== 'object') return
-    const stamped = { ...payload, ts: Date.now(), ...(payload.ts ? {} : {}) }
+  const handleEvent = useCallback((event, eventType) => {
+    if (!event || typeof event !== 'object') return
+    const payload = event.payload && typeof event.payload === 'object'
+      ? event.payload
+      : event
+    const kind = eventType || event.kind || event.type || 'event'
+    const stamped = {
+      ...payload,
+      kind,
+      type: kind,
+      ts: payload.ts || event.ts || new Date().toISOString(),
+    }
     setEvents((prev) => {
       const next = [stamped, ...prev]
       if (next.length > EVENT_BUFFER_CAP) next.length = EVENT_BUFFER_CAP
@@ -114,7 +123,7 @@ function ExplorerShell() {
             <Route path="/publisher/:pubkey" element={<PublisherProfile />} />
             <Route path="/pending" element={<Pending />} />
             <Route path="/consensus" element={<Consensus />} />
-            <Route path="/events" element={<EventsFeed events={events} />} />
+            <Route path="/events" element={<EventsFeed events={events} sseState={sse.state} />} />
             <Route path="/network" element={<Network />} />
             <Route path="/bridge" element={<Bridge />} />
             <Route path="/governance" element={<Governance />} />

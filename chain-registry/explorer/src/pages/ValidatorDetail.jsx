@@ -8,7 +8,7 @@ import { SkeletonCard, SkeletonRow } from '../components/Skeleton.jsx'
 import { ErrorState, EmptyState } from '../components/ErrorState.jsx'
 import { StatusBadge } from '../components/StatusBadge.jsx'
 import { ShareButton } from '../components/ShareButton.jsx'
-import { formatWei, formatNumber, isEvmAddress } from '../utils/format.js'
+import { formatNumber, isEvmAddress } from '../utils/format.js'
 import {
   AreaChart,
   Area,
@@ -35,27 +35,10 @@ function PerfCard({ label, value, hint, variant }) {
   )
 }
 
-/* ── Uptime gauge ──────────────────────────────────────────────────────────── */
-function UptimeBar({ label, pct }) {
-  const p = Math.max(0, Math.min(100, pct))
-  const color = p >= 95 ? 'var(--accent-success)' : p >= 80 ? 'var(--accent-warning)' : 'var(--accent-error)'
-  return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-tertiary)', marginBottom: 4 }}>
-        <span>{label}</span>
-        <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>{p.toFixed(1)}%</span>
-      </div>
-      <div style={{ height: 6, background: 'var(--bg-elevated)', borderRadius: 3, overflow: 'hidden' }}>
-        <div style={{ width: `${p}%`, height: '100%', background: color, borderRadius: 3, transition: 'width .3s' }} />
-      </div>
-    </div>
-  )
-}
-
 export default function ValidatorDetail() {
   const { addr } = useParams()
   const address = (addr || '').toLowerCase()
-  const valid = isEvmAddress(address)
+  const valid = isEvmAddress(address) || /^[a-zA-Z0-9_-]{1,128}$/.test(address)
 
   const profile = useFetch((s) => nodeApi.validatorProfile(address, s), {
     enabled: valid,
@@ -63,13 +46,13 @@ export default function ValidatorDetail() {
   })
   // Fetch address activity for slashing history and proposal stats
   const txs = useFetch((s) => nodeApi.addressTransactions(address, { limit: 200, scan: 1000 }, s), {
-    enabled: valid,
+    enabled: isEvmAddress(address),
     deps: [address],
   })
 
   const p = profile.data || {}
   const reg = p.registration || null
-  const proposals = p.recent_proposals || []
+  const proposals = (p.recent_proposals || []).map(b => ({ ...b, height: b.header?.height ?? b.height, timestamp: b.header?.timestamp ?? b.timestamp }))
   const allTxs = txs.data?.transactions || []
 
   // Keep hook order stable even when the page switches to an early error state.
@@ -97,11 +80,9 @@ export default function ValidatorDetail() {
     return <ErrorState error={profile.error} onRetry={profile.refetch} title="Validator not found" />
   }
 
-  // Estimate uptime from proposals vs total blocks
-  const totalScanned = txs.data?.scanned_blocks || 0
-  const proposalCount = allTxs.filter((t) => t.kind === 'propose').length
-  const uptime7d = totalScanned > 0 ? Math.min(100, (proposalCount / Math.max(1, totalScanned / 10)) * 100) : null
-  const voteCount = allTxs.filter((t) => t.kind === 'vote' || t.kind === 'consensus-vote').length
+  const totalScanned = p.scanned_blocks ?? txs.data?.scanned_blocks
+  const proposalCount = proposals.length
+  const activityAddress = isEvmAddress(p.eth_address) ? p.eth_address : isEvmAddress(address) ? address : null
 
   return (
     <div style={{ display: 'grid', gap: 'var(--space-6)' }}>
@@ -111,7 +92,7 @@ export default function ValidatorDetail() {
           <h1 style={{ margin: 0, fontSize: 18, fontFamily: 'var(--font-mono)', wordBreak: 'break-all' }}>{address}</h1>
           <p style={{ color: 'var(--text-tertiary)', fontSize: 12, marginTop: 4 }}>
             Validator profile ·{' '}
-            <Link to={`/address/${address}`} style={{ color: 'var(--accent-primary-light)' }}>full activity →</Link>
+            {activityAddress && <Link to={`/address/${activityAddress}`} style={{ color: 'var(--accent-primary-light)' }}>full activity →</Link>}
           </p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -126,10 +107,10 @@ export default function ValidatorDetail() {
       <section>
         <h2 style={{ margin: '0 0 var(--space-3) 0', fontSize: 15 }}>Performance</h2>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 'var(--space-3)' }}>
-          <PerfCard label="Blocks proposed" value={formatNumber(proposals.length)} hint={`in scan window`} variant="success" />
+          <PerfCard label="Recent proposals" value={formatNumber(proposals.length)} hint="bounded proposal window" variant="success" />
           <PerfCard
             label="Stake"
-            value={`${formatWei(p.stake)} CREG`}
+            value={`${formatNumber(p.stake)} CREG`}
             variant={p.in_active_set ? 'success' : 'muted'}
           />
           <PerfCard label="Reputation" value={formatNumber(p.reputation ?? 0)} variant={p.reputation >= 80 ? 'success' : p.reputation >= 50 ? 'warning' : 'error'} />
@@ -140,7 +121,7 @@ export default function ValidatorDetail() {
       {/* ── Uptime + sparkline ── */}
       <section className="ce-card" style={{ display: 'grid', gap: 'var(--space-4)' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <h2 style={{ margin: 0, fontSize: 15 }}>Uptime & proposals</h2>
+          <h2 style={{ margin: 0, fontSize: 15 }}>Proposals & availability</h2>
         </div>
         {proposalSparkData.length > 1 && (
           <div style={{ height: 120, width: '100%', margin: '16px 0' }}>
@@ -162,12 +143,12 @@ export default function ValidatorDetail() {
             </ResponsiveContainer>
           </div>
         )}
-        {uptime7d != null && <UptimeBar label="Estimated uptime (scan window)" pct={uptime7d} />}
+        <p style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>Uptime measurements are unavailable. Proposal counts do not measure uptime.</p>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 'var(--space-3)' }}>
-          <MiniStat label="Proposals scanned" value={proposalCount} />
-          <MiniStat label="Votes observed" value={voteCount} />
-          <MiniStat label="Blocks scanned" value={formatNumber(totalScanned)} />
-          <MiniStat label="Slashing events" value={slashEvents.length} accent={slashEvents.length > 0 ? 'error' : undefined} />
+          <MiniStat label="Proposals shown" value={proposalCount} />
+          <MiniStat label="Vote history" value="Unavailable" />
+          <MiniStat label="Blocks scanned" value={totalScanned == null ? '—' : formatNumber(totalScanned)} />
+          <MiniStat label="Slashing events" value={isEvmAddress(address) && txs.data ? slashEvents.length : '—'} accent={slashEvents.length > 0 ? 'error' : undefined} />
         </div>
       </section>
 

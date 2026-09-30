@@ -41,7 +41,10 @@ pub fn keccak256(data: &[u8]) -> [u8; 32] {
 }
 
 pub fn encode_address(addr_hex: &str) -> Result<[u8; 32]> {
-    let clean = addr_hex.trim().strip_prefix("0x").unwrap_or(addr_hex.trim());
+    let clean = addr_hex
+        .trim()
+        .strip_prefix("0x")
+        .unwrap_or(addr_hex.trim());
     let bytes = hex::decode(clean).context("Invalid Ethereum address hex")?;
     if bytes.len() != 20 {
         anyhow::bail!("EVM address must be 20 bytes, got {}", bytes.len());
@@ -93,8 +96,7 @@ pub fn compute_derivation_digest(
         verifying_contract,
     )?;
 
-    let struct_typehash =
-        keccak256(b"DeriveIdentity(string action,address wallet,string salt)");
+    let struct_typehash = keccak256(b"DeriveIdentity(string action,address wallet,string salt)");
     let action_hash = keccak256(EIP712_ACTION.as_bytes());
     let wallet_bytes = encode_address(wallet_address)?;
     let salt_hash = keccak256(EIP712_SALT.as_bytes());
@@ -198,7 +200,10 @@ pub fn derive_from_private_key(
     use k256::ecdsa::SigningKey as K256SigningKey;
     use k256::elliptic_curve::sec1::ToEncodedPoint;
 
-    let clean = privkey_hex.trim().strip_prefix("0x").unwrap_or(privkey_hex.trim());
+    let clean = privkey_hex
+        .trim()
+        .strip_prefix("0x")
+        .unwrap_or(privkey_hex.trim());
     let priv_bytes = hex::decode(clean).context("Invalid private key hex string")?;
     let signing_key = K256SigningKey::from_bytes(priv_bytes.as_slice().into())
         .map_err(|e| anyhow::anyhow!("Invalid secp256k1 private key: {e}"))?;
@@ -273,8 +278,8 @@ pub fn derive_from_token(
         anyhow::bail!("Invalid token format: payload must be JSON, Base64, or Hex");
     };
 
-    let payload: AuthTokenPayload = serde_json::from_slice(&json_bytes)
-        .context("Failed to parse authorization token JSON")?;
+    let payload: AuthTokenPayload =
+        serde_json::from_slice(&json_bytes).context("Failed to parse authorization token JSON")?;
 
     let sig_bytes = parse_signature_bytes(&payload.signature)?;
     let digest = compute_derivation_digest(&payload.wallet, chain_id, verifying_contract)?;
@@ -315,16 +320,33 @@ pub async fn start_loopback_auth(
     );
 
     println!();
-    println!("{}", "╭────────────────────────────────────────────────────────────╮".cyan());
-    println!("{}", "│   CREG Wallet Authentication                               │".cyan().bold());
-    println!("{}", "│   Opening browser to connect your Ethereum wallet...       │".cyan());
-    println!("{}", "╰────────────────────────────────────────────────────────────╯".cyan());
+    println!(
+        "{}",
+        "╭────────────────────────────────────────────────────────────╮".cyan()
+    );
+    println!(
+        "{}",
+        "│   CREG Wallet Authentication                               │"
+            .cyan()
+            .bold()
+    );
+    println!(
+        "{}",
+        "│   Opening browser to connect your Ethereum wallet...       │".cyan()
+    );
+    println!(
+        "{}",
+        "╰────────────────────────────────────────────────────────────╯".cyan()
+    );
     println!();
     println!("  If the browser did not open automatically, visit:");
     println!("  {}", login_url.underline());
     println!();
     println!("  Waiting for browser authorization...");
-    println!("  {}", "(Tip: If your browser cannot reach localhost, copy the token and paste it here)".dimmed());
+    println!(
+        "  {}",
+        "(Tip: If your browser cannot reach localhost, copy the token and paste it here)".dimmed()
+    );
 
     if !no_browser {
         if let Err(e) = open_browser(&login_url) {
@@ -455,26 +477,23 @@ async fn accept_auth_loop(
                 }
             };
 
-            let digest = match compute_derivation_digest(
-                &payload.wallet,
-                chain_id,
-                verifying_contract,
-            ) {
-                Ok(d) => d,
-                Err(e) => {
-                    let err_res = format!(
-                        "HTTP/1.1 500 Internal Error\r\n\
+            let digest =
+                match compute_derivation_digest(&payload.wallet, chain_id, verifying_contract) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        let err_res = format!(
+                            "HTTP/1.1 500 Internal Error\r\n\
                         Access-Control-Allow-Origin: *\r\n\
                         Access-Control-Allow-Private-Network: true\r\n\
                         Content-Type: application/json\r\n\
                         Connection: close\r\n\r\n\
                         {{\"error\":\"{}\"}}",
-                        e
-                    );
-                    let _ = socket.write_all(err_res.as_bytes()).await;
-                    continue;
-                }
-            };
+                            e
+                        );
+                        let _ = socket.write_all(err_res.as_bytes()).await;
+                        continue;
+                    }
+                };
 
             let recovered = match recover_signer(&digest, &sig_bytes) {
                 Ok(r) => r,
@@ -567,10 +586,10 @@ mod tests {
     #[test]
     fn test_deterministic_private_key_derivation() {
         let privkey = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
-        let id1 = derive_from_private_key(privkey, DEFAULT_CHAIN_ID, DEFAULT_VERIFYING_CONTRACT)
-            .unwrap();
-        let id2 = derive_from_private_key(privkey, DEFAULT_CHAIN_ID, DEFAULT_VERIFYING_CONTRACT)
-            .unwrap();
+        let id1 =
+            derive_from_private_key(privkey, DEFAULT_CHAIN_ID, DEFAULT_VERIFYING_CONTRACT).unwrap();
+        let id2 =
+            derive_from_private_key(privkey, DEFAULT_CHAIN_ID, DEFAULT_VERIFYING_CONTRACT).unwrap();
 
         // Anvil account #0 standard address
         assert_eq!(

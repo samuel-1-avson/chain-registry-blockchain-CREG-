@@ -118,6 +118,8 @@ fn test_1000_tps_admission_and_pbft_consensus_burst() {
             validator_set_hash: vs.set_hash(),
             vrf_output: None,
             vrf_proof: None,
+            view_number: 0,
+            view_change_certificate: vec![],
         },
         transactions: vec![Transaction::Revoke {
             package_canonical: "npm:stress-anchor@1.0.0".into(),

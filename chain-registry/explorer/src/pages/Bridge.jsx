@@ -13,7 +13,7 @@ import { formatNumber } from '../utils/format.js'
 
 /* ── Commit timeline node ──────────────────────────────────────────────────── */
 function CommitNode({ anchor, isLatest }) {
-  const l1Url = import.meta.env.VITE_L1_EXPLORER_URL || 'https://etherscan.io'
+  const l1Url = import.meta.env.VITE_L1_EXPLORER_URL || 'https://sepolia.etherscan.io'
 
   return (
     <div style={{

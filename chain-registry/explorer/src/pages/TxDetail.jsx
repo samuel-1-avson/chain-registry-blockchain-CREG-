@@ -108,7 +108,7 @@ export default function TxDetail() {
   const t = data.transaction || data
   const blockHeight = data.block_height ?? t.block_height
   const blockHash = data.block_hash ?? t.block_hash
-  const status = t.status || (blockHeight != null ? (t.finalized ? 'finalized' : 'included') : 'pending')
+  const status = t.type === 'revoke' ? 'revoked' : (blockHeight != null ? 'finalized' : 'pending')
 
   return (
     <div style={{ display: 'grid', gap: 'var(--space-6)' }}>

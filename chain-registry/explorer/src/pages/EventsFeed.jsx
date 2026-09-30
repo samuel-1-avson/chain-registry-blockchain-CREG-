@@ -31,7 +31,7 @@ const KIND_COLOR = {
  *  - JSON/compact view toggle
  *  - Export to JSON
  */
-export default function EventsFeed({ events = [] }) {
+export default function EventsFeed({ events = [], sseState }) {
   const [filter, setFilter] = useState('')
   const [kind, setKind] = useState('all')
   const [autoScroll, setAutoScroll] = useState(true)
@@ -172,7 +172,12 @@ export default function EventsFeed({ events = [] }) {
 
       {/* Events list */}
       {filtered.length === 0 ? (
-        <EmptyState title="No events match" description="Relax the filter or wait for the next event." />
+        <EmptyState
+          title={displayEvents.length === 0 ? 'No new events since opening this explorer' : 'No events match'}
+          description={displayEvents.length === 0
+            ? 'This live feed does not replay earlier blocks or transactions. Open Blocks or Packages for finalized history.'
+            : 'Relax the filter or wait for the next event.'}
+        />
       ) : (
         <div
           ref={listRef}
@@ -189,7 +194,9 @@ export default function EventsFeed({ events = [] }) {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-tertiary)' }}>
         <span>
           {paused && <StatusBadge variant="warning">Paused</StatusBadge>}
-          {!paused && autoScroll && <StatusBadge variant="success" pulse>Live</StatusBadge>}
+          {!paused && sseState === 'live' && <StatusBadge variant="success" pulse>Connected</StatusBadge>}
+          {!paused && sseState === 'stale' && <StatusBadge variant="warning">Idle</StatusBadge>}
+          {!paused && sseState === 'error' && <StatusBadge variant="error">Reconnecting</StatusBadge>}
           {' '}Buffer: {displayEvents.length} events
         </span>
         <span>Showing: {Math.min(filtered.length, 500)} / {filtered.length}</span>

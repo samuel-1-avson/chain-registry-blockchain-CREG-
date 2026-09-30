@@ -5,7 +5,10 @@
 
 use crate::ValidatorSet;
 use anyhow::{bail, Result};
-use common::{Block, BlockSignature, PreparedCertificate, PreparedBlockHeader, ReproposalProof, ViewChangeVote};
+use common::{
+    Block, BlockSignature, PreparedBlockHeader, PreparedCertificate, ReproposalProof,
+    ViewChangeVote,
+};
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
@@ -554,8 +557,7 @@ pub fn verify_prepared_certificate(
     if header.height != vote.height || header.prev_hash != vote.prev_hash {
         bail!("prepared certificate is for a different height or parent");
     }
-    if certificate.prepared_view < header.view_number
-        || certificate.prepared_view >= vote.new_view
+    if certificate.prepared_view < header.view_number || certificate.prepared_view >= vote.new_view
     {
         bail!("prepared certificate view must be lower than the target view");
     }
@@ -578,19 +580,15 @@ pub fn verify_prepared_certificate(
     {
         bail!("original view proof does not preserve the prepared block hash");
     }
-    let selected = selected_proposer_for_view(
-        validator_set,
-        &header.prev_hash,
-        header.view_number,
-    )?;
+    let selected =
+        selected_proposer_for_view(validator_set, &header.prev_hash, header.view_number)?;
     if header.proposer_id != selected {
         bail!("prepared block has an unauthorized original proposer");
     }
     if certificate.prepared_view > header.view_number {
-        let proof = certificate
-            .reproposal_proof
-            .as_deref()
-            .ok_or_else(|| anyhow::anyhow!("later prepared view lacks a signed reproposal proof"))?;
+        let proof = certificate.reproposal_proof.as_deref().ok_or_else(|| {
+            anyhow::anyhow!("later prepared view lacks a signed reproposal proof")
+        })?;
         if proof.target_view != certificate.prepared_view {
             bail!("reproposal proof targets a different prepared view");
         }
@@ -616,10 +614,19 @@ pub fn verify_prepared_certificate(
         {
             bail!("prepared certificate public key does not match validator authority");
         }
-        verify_pbft_phase_signature("prepare", &block_hash, &validator.pubkey, &signature.signature)?;
+        verify_pbft_phase_signature(
+            "prepare",
+            &block_hash,
+            &validator.pubkey,
+            &signature.signature,
+        )?;
     }
     if seen.len() < quorum {
-        bail!("prepared certificate has {}/{} PREPARE signatures", seen.len(), quorum);
+        bail!(
+            "prepared certificate has {}/{} PREPARE signatures",
+            seen.len(),
+            quorum
+        );
     }
     Ok(())
 }
@@ -637,12 +644,8 @@ pub fn verify_view_change_vote(
         .get(&vote.validator_id)
         .filter(|validator| validator.is_active)
         .ok_or_else(|| anyhow::anyhow!("view-change vote is from an inactive validator"))?;
-    verify_message_signature(
-        &validator.pubkey,
-        &vote.signing_message(),
-        &vote.signature,
-    )
-    .map_err(|error| anyhow::anyhow!("invalid view-change signature: {error}"))?;
+    verify_message_signature(&validator.pubkey, &vote.signing_message(), &vote.signature)
+        .map_err(|error| anyhow::anyhow!("invalid view-change signature: {error}"))?;
     if let Some(prepared) = &vote.prepared {
         verify_prepared_certificate(vote, prepared, validator_set, allow_small_cluster_quorum)?;
     }
@@ -701,7 +704,11 @@ pub fn verify_view_change_certificate(
         }
     }
     if seen.len() < quorum {
-        bail!("view-change certificate has {}/{} votes", seen.len(), quorum);
+        bail!(
+            "view-change certificate has {}/{} votes",
+            seen.len(),
+            quorum
+        );
     }
     Ok(highest)
 }
@@ -718,21 +725,15 @@ pub fn verify_reproposal_proof(
     let mut check_header = block.header.clone();
     check_header.view_number = proof.target_view;
     check_header.view_change_certificate = proof.view_change_certificate.clone();
-    let highest = verify_view_change_certificate(
-        &check_header,
-        validator_set,
-        allow_small_cluster_quorum,
-    )?
-    .ok_or_else(|| anyhow::anyhow!("reproposal proof has no prepared value"))?;
+    let highest =
+        verify_view_change_certificate(&check_header, validator_set, allow_small_cluster_quorum)?
+            .ok_or_else(|| anyhow::anyhow!("reproposal proof has no prepared value"))?;
     let hash = block.hash();
     if highest.block().hash() != hash {
         bail!("reproposal proof changed the highest prepared block hash");
     }
-    let selected = selected_proposer_for_view(
-        validator_set,
-        &block.header.prev_hash,
-        proof.target_view,
-    )?;
+    let selected =
+        selected_proposer_for_view(validator_set, &block.header.prev_hash, proof.target_view)?;
     if proof.leader_id != selected {
         bail!("reproposal proof has an unauthorized replacement primary");
     }
@@ -771,7 +772,11 @@ impl PbftEngine {
             PreparedCertificate {
                 header: PreparedBlockHeader::from(&round.block.header),
                 prepared_view: round.view_number,
-                original_view_change_certificate: round.block.header.view_change_certificate.clone(),
+                original_view_change_certificate: round
+                    .block
+                    .header
+                    .view_change_certificate
+                    .clone(),
                 reproposal_proof: round.reproposal_proof.clone().map(Box::new),
                 transactions: round.block.transactions.clone(),
                 prepare_signatures,
@@ -780,7 +785,9 @@ impl PbftEngine {
     }
 
     pub fn round_validator_set(&self, block_hash: &str) -> Option<ValidatorSet> {
-        self.rounds.get(block_hash).map(|round| round.validator_set.clone())
+        self.rounds
+            .get(block_hash)
+            .map(|round| round.validator_set.clone())
     }
 
     /// Reconstruct a prepared round after restart from its durable full block
@@ -827,7 +834,11 @@ impl PbftEngine {
             let validator_id = signature.validator_id.clone();
             self.prepare(&block_hash, &validator_id, signature)?;
         }
-        if self.rounds.get(&block_hash).is_none_or(|round| round.phase != PbftPhase::Commit) {
+        if self
+            .rounds
+            .get(&block_hash)
+            .is_none_or(|round| round.phase != PbftPhase::Commit)
+        {
             bail!("recovered prepared round did not enter COMMIT phase");
         }
         Ok(())
@@ -892,8 +903,7 @@ impl PbftEngine {
                 .and_then(|votes| votes.first().map(|vote| vote.new_view))
                 .unwrap_or(0);
             if proposal_view > current_view {
-                self.certified_views
-                    .insert(context, proposal_certificate);
+                self.certified_views.insert(context, proposal_certificate);
             }
         }
         self.rounds.insert(hash.clone(), round);
@@ -928,11 +938,8 @@ impl PbftEngine {
         if highest.block().hash() != hash {
             bail!("reproposal changed the highest prepared block hash");
         }
-        let selected = selected_proposer_for_view(
-            &validator_set,
-            &block.header.prev_hash,
-            target_view,
-        )?;
+        let selected =
+            selected_proposer_for_view(&validator_set, &block.header.prev_hash, target_view)?;
         if leader_id != selected {
             bail!("reproposal is not signed by the selected replacement primary");
         }
@@ -961,7 +968,8 @@ impl PbftEngine {
         {
             bail!("reproposal targets a stale certified PBFT view");
         }
-        let mut candidate = PbftRound::with_config(block.clone(), validator_set, self.config.clone());
+        let mut candidate =
+            PbftRound::with_config(block.clone(), validator_set, self.config.clone());
         candidate.pre_prepare(&block.header.proposer_id)?;
         if let Some(round) = self.rounds.get_mut(&hash) {
             if round.phase == PbftPhase::Finalised {
@@ -1082,7 +1090,10 @@ impl PbftEngine {
         let mut commits = HashMap::new();
         for signature in &block.pbft_signatures {
             round.verify_block_signature("commit", &signature.validator_id, signature)?;
-            if commits.insert(signature.validator_id.clone(), signature.clone()).is_some() {
+            if commits
+                .insert(signature.validator_id.clone(), signature.clone())
+                .is_some()
+            {
                 bail!("canonical PBFT reconciliation rejects duplicate COMMIT signers");
             }
         }
@@ -1130,7 +1141,12 @@ impl PbftEngine {
             .rounds
             .iter()
             .filter(|(_, r)| r.is_phase_timed_out())
-            .map(|(_, round)| (round.block.header.height, round.block.header.prev_hash.clone()))
+            .map(|(_, round)| {
+                (
+                    round.block.header.height,
+                    round.block.header.prev_hash.clone(),
+                )
+            })
             .collect();
 
         let mut signals = Vec::new();
@@ -1226,7 +1242,11 @@ impl PbftEngine {
                 PreparedCertificate {
                     header: PreparedBlockHeader::from(&round.block.header),
                     prepared_view: round.view_number,
-                    original_view_change_certificate: round.block.header.view_change_certificate.clone(),
+                    original_view_change_certificate: round
+                        .block
+                        .header
+                        .view_change_certificate
+                        .clone(),
                     reproposal_proof: round.reproposal_proof.clone().map(Box::new),
                     transactions: round.block.transactions.clone(),
                     prepare_signatures,
@@ -1360,7 +1380,12 @@ impl PbftEngine {
             .rounds
             .values()
             .filter(|round| round.phase == PbftPhase::Finalised)
-            .map(|round| (round.block.header.height, round.block.header.prev_hash.clone()))
+            .map(|round| {
+                (
+                    round.block.header.height,
+                    round.block.header.prev_hash.clone(),
+                )
+            })
             .collect();
         let stale: Vec<String> = self
             .rounds
@@ -1500,7 +1525,7 @@ fn transaction_package_canonical(tx: &common::Transaction) -> Option<String> {
 mod tests {
     use super::{
         pbft_signature_message, quorum_threshold, selected_proposer_for_view, PbftPhase, PbftRound,
-        PreparedCertificate, PreparedBlockHeader,
+        PreparedBlockHeader, PreparedCertificate,
     };
     use crate::validator_set::{ValidatorInfo, ValidatorSet};
     use common::{Block, BlockSignature};
@@ -1661,7 +1686,11 @@ mod tests {
         mut vote: common::ViewChangeVote,
         signing_key: &SigningKey,
     ) -> common::ViewChangeVote {
-        vote.signature = hex::encode(signing_key.sign(vote.signing_message().as_bytes()).to_bytes());
+        vote.signature = hex::encode(
+            signing_key
+                .sign(vote.signing_message().as_bytes())
+                .to_bytes(),
+        );
         vote
     }
 
@@ -1715,7 +1744,9 @@ mod tests {
             stale_round_ttl: Duration::from_secs(120),
             allow_small_cluster_quorum: false,
         });
-        engine.start_round(test_block(&proposer), vs.clone()).unwrap();
+        engine
+            .start_round(test_block(&proposer), vs.clone())
+            .unwrap();
         std::thread::sleep(Duration::from_millis(5));
 
         let signals = engine.timeout_rounds("v0");
@@ -1978,7 +2009,9 @@ mod tests {
         let block = test_block("node-1");
         let block_hash = block.hash();
         let mut engine = PbftEngine::new();
-        engine.start_round(block.clone(), authority.clone()).unwrap();
+        engine
+            .start_round(block.clone(), authority.clone())
+            .unwrap();
         assert!(engine
             .prepare(
                 &block_hash,
@@ -1987,7 +2020,12 @@ mod tests {
             )
             .unwrap());
 
-        assert_eq!(engine.start_round(block.clone(), authority.clone()).unwrap(), block_hash);
+        assert_eq!(
+            engine
+                .start_round(block.clone(), authority.clone())
+                .unwrap(),
+            block_hash
+        );
         assert_eq!(engine.observability_snapshot()[0].phase, "commit");
 
         let mut conflicting = block;

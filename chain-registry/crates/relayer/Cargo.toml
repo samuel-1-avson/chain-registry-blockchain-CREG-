@@ -25,6 +25,7 @@ reqwest = { workspace = true }
 alloy = { workspace = true }
 hex = { workspace = true }
 dashmap = "5.5"
+sled = { workspace = true }
 k256 = { version = "0.13", features = ["ecdsa"] }
 [lints]
 workspace = true

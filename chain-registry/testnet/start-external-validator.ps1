@@ -92,7 +92,7 @@ $envLines = @(
     "CREG_P2P_SEEDS=$bootnode",
     "CREG_PEERS=https://api.testnet.cregnet.dev",
     "CREG_LISTEN=0.0.0.0:8080",
-    "CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM=$(if ($env:PBFT_SMALL_QUORUM) { $env:PBFT_SMALL_QUORUM } else { 'true' })",
+    "CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM=false",
     "RUST_LOG=info,chain_registry_node=debug,consensus=info"
 )
 $envContent = $envLines -join [Environment]::NewLine
@@ -149,9 +149,7 @@ Write-Host "HTTP RPC Port:   $HttpPort (Keep private or proxy with TLS)" -Foregr
 Write-Host "Bootnode Peer:   $bootnode" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "--- KEY BACKUP NOTICE ---" -ForegroundColor Yellow
-Write-Host "Validator Key:   $validatorKey" -ForegroundColor Yellow
-Write-Host "Save this key string securely! To restore this node anytime, pass:" -ForegroundColor Gray
-Write-Host "  .\testnet\start-external-validator.cmd -CustomKey $validatorKey" -ForegroundColor Gray
+Write-Host "Validator key is stored at $keyFile; back it up securely without copying it into logs or chat." -ForegroundColor Yellow
 Write-Host ""
 Write-Host "--- REMOTE VERIFICATION ---" -ForegroundColor Yellow
 Write-Host "Local query:     curl.exe http://localhost:$($HttpPort)/v1/health" -ForegroundColor Gray

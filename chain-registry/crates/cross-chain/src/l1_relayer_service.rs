@@ -226,7 +226,10 @@ impl L1RelayerService {
                 state_root,
                 transparency_root,
                 package_count: 5 + (i % 20),
-                bls_aggregate_signature: Some(format!("0xblssig{}", sha256_hex(height.to_string().as_bytes()))),
+                bls_aggregate_signature: Some(format!(
+                    "0xblssig{}",
+                    sha256_hex(height.to_string().as_bytes())
+                )),
                 participant_bitmask: Some(vec![0b11111111, 0b11110000]),
                 timestamp: Utc::now().timestamp() as u64,
             };

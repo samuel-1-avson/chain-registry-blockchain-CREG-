@@ -264,6 +264,17 @@ pub async fn render(state: Arc<RwLock<NodeState>>) -> String {
         "gauge",
         s.validator_set.validators.len() as f64,
     );
+    metric(
+        &mut out,
+        "creg_total_stake",
+        "Total stake in the chain-authoritative validator set (native CREG units)",
+        "gauge",
+        s.validator_set
+            .validators
+            .iter()
+            .map(|validator| validator.stake)
+            .sum::<u64>() as f64,
+    );
 
     metric(
         &mut out,
@@ -384,6 +395,13 @@ pub async fn render(state: Arc<RwLock<NodeState>>) -> String {
         "counter",
         s.reward_emissions_failed as f64,
     );
+    metric(
+        &mut out,
+        "creg_reward_emissions_skipped",
+        "Reward jobs skipped because the authorized durable dispatcher is unavailable",
+        "counter",
+        s.reward_emissions_skipped as f64,
+    );
     if let Some(treasury) = &s.config.treasury_addr {
         labeled_metric(
             &mut out,
@@ -457,6 +475,82 @@ pub async fn render(state: Arc<RwLock<NodeState>>) -> String {
         &[
             ("engine", sandbox.engine.as_str()),
             ("degraded", if sandbox.degraded { "true" } else { "false" }),
+        ],
+        1.0,
+    );
+
+    // Deterministic analysis assets are identified by their actual content
+    // digests. Phase C startup rejects an incomplete profile; these metrics
+    // let operators compare the four validator hosts before package votes.
+    let scanner = ml_validator::scanner_profile::current();
+    metric(
+        &mut out,
+        "creg_scanner_profile_ready",
+        "1 when the local scanner profile satisfies its compiled release requirements",
+        "gauge",
+        if scanner.ready { 1.0 } else { 0.0 },
+    );
+    metric(
+        &mut out,
+        "creg_scanner_yara_ready",
+        "1 when all files in the YARA rule bundle compile successfully",
+        "gauge",
+        if scanner.yara_available { 1.0 } else { 0.0 },
+    );
+    metric(
+        &mut out,
+        "creg_scanner_threat_intel_ready",
+        "1 when the provenance-bearing SHA-256 threat snapshot is valid",
+        "gauge",
+        if scanner.threat_intel_available {
+            1.0
+        } else {
+            0.0
+        },
+    );
+    metric(
+        &mut out,
+        "creg_scanner_osv_ready",
+        "1 when the configured pinned OSV snapshot is valid",
+        "gauge",
+        if scanner.osv_available { 1.0 } else { 0.0 },
+    );
+    metric(
+        &mut out,
+        "creg_scanner_yara_rule_files",
+        "Number of YARA rule files bound into the local scanner profile",
+        "gauge",
+        scanner.yara_files as f64,
+    );
+    metric(
+        &mut out,
+        "creg_scanner_threat_intel_entries",
+        "Number of SHA-256 entries in the configured threat-intelligence snapshot",
+        "gauge",
+        scanner.threat_intel_entries as f64,
+    );
+    metric(
+        &mut out,
+        "creg_scanner_osv_lookups",
+        "Number of package versions successfully queried in the pinned OSV snapshot",
+        "gauge",
+        scanner.osv_lookups as f64,
+    );
+    metric(
+        &mut out,
+        "creg_scanner_osv_records",
+        "Number of vulnerability records in the configured OSV snapshot",
+        "gauge",
+        scanner.osv_records as f64,
+    );
+    labeled_metric(
+        &mut out,
+        "creg_scanner_profile_info",
+        "Content identity of the local deterministic scanner inputs (value is always 1)",
+        "gauge",
+        &[
+            ("profile_digest", scanner.digest.as_str()),
+            ("scanner_version", scanner.scanner_version.as_str()),
         ],
         1.0,
     );

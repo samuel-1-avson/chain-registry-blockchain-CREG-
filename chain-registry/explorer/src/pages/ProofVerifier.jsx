@@ -64,7 +64,7 @@ export default function ProofVerifier() {
         <div>
           <h1 style={{ margin: 0, fontSize: 20 }}>Proof verifier</h1>
           <p style={{ color: 'var(--text-tertiary)', fontSize: 12, marginTop: 4 }}>
-            Verify Merkle inclusion proofs for on-chain packages — light-client compatible.
+            Check whether a publication transaction is included in a block. This view does not establish current install safety or independently verify the block's quorum certificate.
           </p>
         </div>
         <ShareButton />
@@ -129,6 +129,13 @@ export default function ProofVerifier() {
 
           {/* Proof fields */}
           <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
+            {normalizedProof.packageStatus && (
+              <Row k="Current package status" v={
+                <StatusBadge variant={normalizedProof.packageStatus === 'revoked' ? 'error' : 'success'}>
+                  {normalizedProof.packageStatus}
+                </StatusBadge>
+              } />
+            )}
             {normalizedProof.merkleRoot && <Row k="Merkle root" v={<Hash value={normalizedProof.merkleRoot} full showCopy />} />}
             {normalizedProof.leafHash && <Row k="Leaf hash" v={<Hash value={normalizedProof.leafHash} full showCopy />} />}
             {normalizedProof.blockHash && <Row k="Block hash" v={<Hash value={normalizedProof.blockHash} kind="block-hash" full showCopy />} />}
@@ -217,8 +224,7 @@ export default function ProofVerifier() {
           <h2 style={{ margin: '0 0 var(--space-3) 0', fontSize: 14 }}>How it works</h2>
           <div style={{ display: 'grid', gap: 8, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
             <p style={{ margin: 0 }}>
-              Every package published to the Chain Registry is committed into a Merkle tree.
-              The root hash of this tree is anchored to L1 via the bridge, creating an immutable proof of inclusion.
+              A package publication is committed into its block's Merkle root. This proves historical inclusion only; a later revocation does not erase that proof.
             </p>
             <ol style={{ margin: 0, paddingLeft: 20, display: 'grid', gap: 4 }}>
               <li>Enter a package canonical (e.g., <code>npm/express@4.18.0</code>) above</li>
@@ -227,7 +233,7 @@ export default function ProofVerifier() {
               <li>Compare the recomputed root against <code>proof.expected_root</code> and <code>block_header.merkle_root</code></li>
             </ol>
             <p style={{ margin: 0, color: 'var(--text-tertiary)', fontSize: 11 }}>
-              This verification can be performed by any light client without downloading the full chain.
+              Use the CLI light-client verifier for signed-spec ancestry, validator-set authority and quorum checks. A valid inclusion proof does not mean a package is currently safe to install.
             </p>
           </div>
         </section>
@@ -245,6 +251,7 @@ function normalizeProofResponse(proofResponse) {
   if (proofResponse.proof && proofResponse.block_header) {
     return {
       canonical: proofResponse.canonical,
+      packageStatus: proofResponse.package_status || proofResponse.current_package_status,
       blockHash: proofResponse.block_hash,
       blockHeight: proofResponse.block_header.height,
       blockMerkleRoot: proofResponse.block_header.merkle_root,
@@ -256,6 +263,7 @@ function normalizeProofResponse(proofResponse) {
 
   return {
     canonical: proofResponse.canonical,
+    packageStatus: proofResponse.package_status || proofResponse.current_package_status,
     blockHash: proofResponse.block_hash,
     blockHeight: proofResponse.block_height,
     blockMerkleRoot: proofResponse.block_merkle_root,
@@ -288,7 +296,8 @@ async function sha256Hex(input) {
 async function verifyMerkleProof(proof) {
   if (!proof) return { valid: false, message: 'No proof data' }
   if (!proof.merkleRoot) return { valid: false, message: 'Proof missing expected Merkle root' }
-  if (!proof.path || proof.path.length === 0) return { valid: false, message: 'Proof missing path' }
+  // A block containing one transaction has an empty sibling path.
+  if (!Array.isArray(proof.path)) return { valid: false, message: 'Proof missing path' }
   if (!proof.leafHash) return { valid: false, message: 'Proof missing leaf hash' }
 
   const pathValid = proof.path.every((node) => {

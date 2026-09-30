@@ -1,0 +1,17 @@
+FROM creg-node:recovery-diagnostic-builder-r16 AS builder
+WORKDIR /build
+RUN --mount=type=cache,id=creg-phase-c-release,target=/build/target,sharing=locked \
+    env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS CARGO_BUILD_JOBS=1 \
+    cargo build --release --locked --package faucet --package chain-registry-relayer \
+    --features common/phase-c-canonical-transactions && \
+    cp /build/target/release/faucet /build/output/faucet && \
+    cp /build/target/release/creg-relayer /build/output/creg-relayer
+
+FROM creg-node:phase-c-secure-r16-committed-events
+USER root
+COPY --from=builder --chown=creg:creg /build/output/faucet /app/faucet
+COPY --from=builder --chown=creg:creg /build/output/creg-relayer /app/creg-relayer
+USER creg
+HEALTHCHECK NONE
+# Each service deployment supplies its own explicit entrypoint, protected
+# environment and persistent storage. This image contains no service keys.

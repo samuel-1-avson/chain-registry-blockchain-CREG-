@@ -683,8 +683,12 @@ impl PersistentRateLimiter {
             Ok((
                 row.get(0),
                 row.get(1),
-                balance.parse::<u128>().context("invalid stored faucet balance")?,
-                supply.parse::<u128>().context("invalid stored total supply")?,
+                balance
+                    .parse::<u128>()
+                    .context("invalid stored faucet balance")?,
+                supply
+                    .parse::<u128>()
+                    .context("invalid stored total supply")?,
                 row.get(4),
             ))
         })
@@ -1081,7 +1085,9 @@ async fn routescan_rpc_request(
         let mut query = url.query_pairs_mut();
         match method {
             "eth_blockNumber" => {
-                query.append_pair("module", "proxy").append_pair("action", method);
+                query
+                    .append_pair("module", "proxy")
+                    .append_pair("action", method);
             }
             "eth_getBlockByNumber" => {
                 let tag = text_param(0, "a block tag")?;
@@ -1145,7 +1151,9 @@ async fn routescan_rpc_request(
                         .append_pair("address", &holder)
                         .append_pair("blockno", &block_number.to_string());
                 } else {
-                    anyhow::bail!("Routescan history supports only ERC-20 balanceOf and totalSupply calls");
+                    anyhow::bail!(
+                        "Routescan history supports only ERC-20 balanceOf and totalSupply calls"
+                    );
                 }
             }
             _ => anyhow::bail!("Routescan read endpoint does not support {method}"),
@@ -1156,7 +1164,10 @@ async fn routescan_rpc_request(
     tokio::time::sleep(Duration::from_millis(600)).await;
     let body: serde_json::Value = client
         .get(url)
-        .header(reqwest::header::USER_AGENT, "creg-faucet-ledger-reconciler/1")
+        .header(
+            reqwest::header::USER_AGENT,
+            "creg-faucet-ledger-reconciler/1",
+        )
         .send()
         .await
         .with_context(|| format!("send {method} request to Routescan"))?
@@ -1620,7 +1631,10 @@ async fn indexer_logs_for_range(
             tokio::time::sleep(Duration::from_millis(600)).await;
             let response = client
                 .get(url.clone())
-                .header(reqwest::header::USER_AGENT, "creg-faucet-ledger-reconciler/1")
+                .header(
+                    reqwest::header::USER_AGENT,
+                    "creg-faucet-ledger-reconciler/1",
+                )
                 .send()
                 .await;
             match response {
@@ -1629,8 +1643,12 @@ async fn indexer_logs_for_range(
                         || response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS)
                         && attempt < 3 =>
                 {
-                    tokio::time::sleep(Duration::from_millis(if attempt == 1 { 500 } else { 1_000 }))
-                        .await;
+                    tokio::time::sleep(Duration::from_millis(if attempt == 1 {
+                        500
+                    } else {
+                        1_000
+                    }))
+                    .await;
                 }
                 Ok(response) if !response.status().is_success() => {
                     anyhow::bail!(
@@ -1645,8 +1663,12 @@ async fn indexer_logs_for_range(
                         .context("decode faucet Transfer history indexer response")?;
                 }
                 Err(_) if attempt < 3 => {
-                    tokio::time::sleep(Duration::from_millis(if attempt == 1 { 500 } else { 1_000 }))
-                        .await;
+                    tokio::time::sleep(Duration::from_millis(if attempt == 1 {
+                        500
+                    } else {
+                        1_000
+                    }))
+                    .await;
                 }
                 Err(_) => anyhow::bail!(
                     "request faucet Transfer history from configured indexer failed after retries"
@@ -1679,7 +1701,9 @@ async fn indexer_logs_for_range(
         // dense ranges so a truncated response can never be accepted as full.
         if logs.len() >= MAX_LOGS_PER_QUERY {
             if start == end {
-                anyhow::bail!("faucet Transfer history exceeds the indexer's per-block result limit");
+                anyhow::bail!(
+                    "faucet Transfer history exceeds the indexer's per-block result limit"
+                );
             }
             let middle = start + (end - start) / 2;
             ranges.push((middle.saturating_add(1), end));
@@ -1717,7 +1741,9 @@ async fn verify_indexed_transfer_receipts(
         )
         .await?;
         if receipt.is_null() {
-            anyhow::bail!("indexer returned a Transfer log whose transaction receipt is unavailable");
+            anyhow::bail!(
+                "indexer returned a Transfer log whose transaction receipt is unavailable"
+            );
         }
         if parse_rpc_hex_u64(
             receipt
@@ -1774,8 +1800,7 @@ async fn verify_indexed_transfer_receipts(
         if receipt_block != expected_block {
             anyhow::bail!("indexed Transfer log does not match its canonical receipt block");
         }
-        if let Some(indexer_block_hash) = log.get("blockHash").and_then(serde_json::Value::as_str)
-        {
+        if let Some(indexer_block_hash) = log.get("blockHash").and_then(serde_json::Value::as_str) {
             if !indexer_block_hash.eq_ignore_ascii_case(&receipt_block_hash) {
                 anyhow::bail!("indexed Transfer log block hash does not match its receipt");
             }
@@ -1839,12 +1864,17 @@ async fn verify_indexed_transfer_receipts(
             .and_then(serde_json::Value::as_array)
             .context("receipt Transfer log has no topics")?;
         if expected_topics.len() != receipt_topics.len()
-            || expected_topics.iter().zip(receipt_topics).any(|(expected, actual)| {
-                expected
-                    .as_str()
-                    .zip(actual.as_str())
-                    .map_or(true, |(expected, actual)| !expected.eq_ignore_ascii_case(actual))
-            })
+            || expected_topics
+                .iter()
+                .zip(receipt_topics)
+                .any(|(expected, actual)| {
+                    expected
+                        .as_str()
+                        .zip(actual.as_str())
+                        .map_or(true, |(expected, actual)| {
+                            !expected.eq_ignore_ascii_case(actual)
+                        })
+                })
         {
             anyhow::bail!("indexed Transfer log topics do not match its receipt");
         }
@@ -1990,7 +2020,9 @@ async fn scan_faucet_transfer_history(
                     .and_then(serde_json::Value::as_str)
                     .context("Transfer log has no block hash")?;
                 if !log_hash.eq_ignore_ascii_case(&canonical_hash) {
-                    anyhow::bail!("faucet Transfer indexer log does not match the canonical block hash");
+                    anyhow::bail!(
+                        "faucet Transfer indexer log does not match the canonical block hash"
+                    );
                 }
             }
         }
@@ -2007,7 +2039,9 @@ async fn scan_faucet_transfer_history(
             "Transfer block number",
         )?;
         if block_number < from_block || block_number > through_block {
-            anyhow::bail!("faucet Transfer indexer returned a log outside the requested block range");
+            anyhow::bail!(
+                "faucet Transfer indexer returned a log outside the requested block range"
+            );
         }
         let block_time = *block_times
             .get(&block_number)
@@ -2024,7 +2058,9 @@ async fn scan_faucet_transfer_history(
                 || existing.to_address != transfer.to_address
                 || existing.amount_wei != transfer.amount_wei
             {
-                anyhow::bail!("conflicting duplicate faucet Transfer log returned by history sources");
+                anyhow::bail!(
+                    "conflicting duplicate faucet Transfer log returned by history sources"
+                );
             }
         }
     }
@@ -3418,9 +3454,9 @@ async fn handle_drip(
 
 fn supply_holder_address(configured: &str, name: &str) -> anyhow::Result<String> {
     let value = configured.trim();
-    value
-        .parse::<Address>()
-        .with_context(|| format!("invalid or missing {name} address for public supply reporting"))?;
+    value.parse::<Address>().with_context(|| {
+        format!("invalid or missing {name} address for public supply reporting")
+    })?;
     Ok(value.to_ascii_lowercase())
 }
 
@@ -3431,10 +3467,7 @@ async fn supply_holder_balance(
     holder_address: &str,
     block_tag: &str,
 ) -> anyhow::Result<u128> {
-    let data = format!(
-        "0x70a08231{:0>64}",
-        holder_address.trim_start_matches("0x")
-    );
+    let data = format!("0x70a08231{:0>64}", holder_address.trim_start_matches("0x"));
     eth_call_u128(client, config, token_address, &data, block_tag).await
 }
 
@@ -3481,7 +3514,8 @@ async fn load_verified_public_supply(state: &AppState) -> anyhow::Result<serde_j
         supply_holder_balance(&client, config, &token, &treasury, &block_tag).await?;
     let governance_balance =
         supply_holder_balance(&client, config, &token, &governance, &block_tag).await?;
-    let staking_balance = supply_holder_balance(&client, config, &token, &staking, &block_tag).await?;
+    let staking_balance =
+        supply_holder_balance(&client, config, &token, &staking, &block_tag).await?;
     let named_balance = [
         treasury_balance,
         faucet_balance,
@@ -3527,7 +3561,9 @@ async fn get_supply(State(state): State<Arc<AppState>>) -> impl IntoResponse {
                 Some(value) => (StatusCode::OK, JsonResponse(value.clone())),
                 None => (
                     StatusCode::BAD_GATEWAY,
-                    JsonResponse(serde_json::json!({ "status": "unavailable", "error": "verified Sepolia supply data is temporarily unavailable" })),
+                    JsonResponse(
+                        serde_json::json!({ "status": "unavailable", "error": "verified Sepolia supply data is temporarily unavailable" }),
+                    ),
                 ),
             };
         }
@@ -3542,7 +3578,9 @@ async fn get_supply(State(state): State<Arc<AppState>>) -> impl IntoResponse {
             *cache = Some((Instant::now(), None));
             (
                 StatusCode::BAD_GATEWAY,
-                JsonResponse(serde_json::json!({ "status": "unavailable", "error": "verified Sepolia supply data is temporarily unavailable" })),
+                JsonResponse(
+                    serde_json::json!({ "status": "unavailable", "error": "verified Sepolia supply data is temporarily unavailable" }),
+                ),
             )
         }
     }
@@ -3725,8 +3763,7 @@ async fn health_check(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         ),
     );
     let token_result = token_result.unwrap_or_else(|_| Err("RPC request timed out".to_string()));
-    let native_result =
-        native_result.unwrap_or_else(|_| Err("RPC request timed out".to_string()));
+    let native_result = native_result.unwrap_or_else(|_| Err("RPC request timed out".to_string()));
     match (token_result, native_result) {
         (Ok(faucet_balance), Ok(faucet_native_balance)) => {
             let token_funded = faucet_balance >= state.config.drip_amount;

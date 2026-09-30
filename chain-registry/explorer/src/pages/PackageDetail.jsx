@@ -25,16 +25,24 @@ export default function PackageDetail() {
 
   const p = data
   const risk = p.deterministic_risk
+  const packageStatus = typeof p.status === 'string' ? p.status.toLowerCase() : ''
+  const isRevoked = p.revoked === true || packageStatus === 'revoked'
 
   return (
     <div style={{ display: 'grid', gap: 'var(--space-6)' }}>
       <header>
         <h1 style={{ margin: 0, fontSize: 18, fontFamily: 'var(--font-mono)', wordBreak: 'break-all' }}>{canonical}</h1>
         <div style={{ display: 'flex', gap: 'var(--space-2)', marginTop: 'var(--space-2)', flexWrap: 'wrap' }}>
-          {p.revoked && <StatusBadge variant="error">Revoked</StatusBadge>}
-          {p.status && <StatusBadge variant="neutral">{p.status}</StatusBadge>}
+          {p.status && <StatusBadge variant={isRevoked ? 'error' : packageStatus === 'verified' ? 'success' : 'neutral'}>
+            {isRevoked ? 'Revoked' : p.status}
+          </StatusBadge>}
           {risk?.band && <StatusBadge variant="warning">Risk: {risk.band}</StatusBadge>}
         </div>
+        {isRevoked && p.revocation_reason && (
+          <p role="status" style={{ color: 'var(--accent-error)', fontSize: 12, marginTop: 'var(--space-2)' }}>
+            Revocation reason: {p.revocation_reason}
+          </p>
+        )}
       </header>
 
       <nav style={{ display: 'flex', gap: 'var(--space-2)', borderBottom: '1px solid var(--border-subtle)', paddingBottom: 'var(--space-2)' }}>

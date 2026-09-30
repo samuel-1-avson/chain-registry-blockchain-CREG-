@@ -125,10 +125,18 @@ impl PendingPool {
         let encoded = serde_json::to_string_pretty(&snapshot)?;
 
         let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, &encoded)?;
+        use std::io::Write;
+        let mut output = std::fs::File::create(&tmp)?;
+        output.write_all(encoded.as_bytes())?;
+        output.sync_all()?;
+        drop(output);
         if let Err(error) = std::fs::rename(&tmp, path) {
             let _ = std::fs::remove_file(&tmp);
             return Err(error.into());
+        }
+        #[cfg(unix)]
+        if let Some(parent) = path.parent() {
+            std::fs::File::open(parent)?.sync_all()?;
         }
         Ok(())
     }
@@ -260,11 +268,30 @@ impl PendingPool {
 
     /// Remove a package from the pool (after it's been verified or rejected).
     pub fn remove(&mut self, canonical: &str) -> Option<PendingEntry> {
-        let removed = self.entries.remove(canonical);
-        if removed.is_some() {
-            self.persist();
+        match self.remove_durable(canonical) {
+            Ok(removed) => removed,
+            Err(error) => {
+                tracing::warn!(
+                    "[PendingPool] Durable removal failed for {}: {}",
+                    canonical,
+                    error
+                );
+                None
+            }
         }
-        removed
+    }
+
+    /// Persist retirement before reporting success; keep the in-memory entry
+    /// available for retry if storage fails.
+    pub fn remove_durable(&mut self, canonical: &str) -> anyhow::Result<Option<PendingEntry>> {
+        let removed = self.entries.remove(canonical);
+        if let Some(entry) = removed.as_ref() {
+            if let Err(error) = self.persist_result() {
+                self.entries.insert(canonical.to_owned(), entry.clone());
+                return Err(error);
+            }
+        }
+        Ok(removed)
     }
 
     /// Returns entries ready for validation (not in progress, or stuck > 5 min).

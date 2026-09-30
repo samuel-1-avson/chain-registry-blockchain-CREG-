@@ -40,7 +40,10 @@ impl Checkpoint {
     }
 
     pub fn from_verified_spec(spec: &common::ChainSpec) -> Result<Self> {
-        Ok(Self { height: 0, hash: spec.canonical_genesis_block()?.hash() })
+        Ok(Self {
+            height: 0,
+            hash: spec.canonical_genesis_block()?.hash(),
+        })
     }
 }
 
@@ -51,34 +54,60 @@ async fn load_verified_chain_spec() -> Result<common::ChainSpec> {
         .filter(|key| !key.trim().is_empty())
         .context("Phase C client has no binary-pinned chain-spec signer")?;
     let (raw, signature) = if let Ok(path) = std::env::var("CREG_CHAIN_SPEC_PATH") {
-        let signature_path = std::env::var("CREG_CHAIN_SPEC_SIG_PATH")
-            .unwrap_or_else(|_| format!("{path}.sig"));
-        (std::fs::read_to_string(&path).context("read configured chain spec")?,
-         std::fs::read_to_string(signature_path).context("read chain-spec signature")?)
+        let signature_path =
+            std::env::var("CREG_CHAIN_SPEC_SIG_PATH").unwrap_or_else(|_| format!("{path}.sig"));
+        (
+            std::fs::read_to_string(&path).context("read configured chain spec")?,
+            std::fs::read_to_string(signature_path).context("read chain-spec signature")?,
+        )
     } else {
         let url = std::env::var("CREG_CHAIN_SPEC_URL")
             .context("Phase C verification requires CREG_CHAIN_SPEC_URL or CREG_CHAIN_SPEC_PATH")?;
         let spec_url = reqwest::Url::parse(&url)?;
-        if spec_url.scheme() != "https" { bail!("chain-spec URL must use HTTPS"); }
+        if spec_url.scheme() != "https" {
+            bail!("chain-spec URL must use HTTPS");
+        }
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(8))
-            .redirect(reqwest::redirect::Policy::none()).build()?;
-        let raw = client.get(spec_url).send().await?.error_for_status()?.text().await?;
+            .redirect(reqwest::redirect::Policy::none())
+            .build()?;
+        let raw = client
+            .get(spec_url)
+            .send()
+            .await?
+            .error_for_status()?
+            .text()
+            .await?;
         let spec: common::ChainSpec = serde_json::from_str(&raw)?;
         let signature_url = reqwest::Url::parse(&spec.signing.detached_signature_url)?;
-        if signature_url.scheme() != "https" { bail!("chain-spec signature URL must use HTTPS"); }
-        let signature = client.get(signature_url).send().await?.error_for_status()?.text().await?;
+        if signature_url.scheme() != "https" {
+            bail!("chain-spec signature URL must use HTTPS");
+        }
+        let signature = client
+            .get(signature_url)
+            .send()
+            .await?
+            .error_for_status()?
+            .text()
+            .await?;
         (raw, signature)
     };
     let spec: common::ChainSpec = serde_json::from_str(&raw)?;
-    if spec.signing.signing_key_pubkey_hex.trim_start_matches("0x").to_ascii_lowercase()
-        != pinned.trim_start_matches("0x").to_ascii_lowercase() {
+    if spec
+        .signing
+        .signing_key_pubkey_hex
+        .trim_start_matches("0x")
+        .to_ascii_lowercase()
+        != pinned.trim_start_matches("0x").to_ascii_lowercase()
+    {
         bail!("chain-spec signer differs from the binary pin");
     }
     spec.verify_signature(signature.trim(), pinned)?;
     spec.validate_consensus_identity()?;
     if let Ok(expected) = std::env::var("CREG_CHAIN_ID") {
-        if spec.chain_id != expected { bail!("signed chain ID differs from configured pin"); }
+        if spec.chain_id != expected {
+            bail!("signed chain ID differs from configured pin");
+        }
     }
     if let Ok(expected) = std::env::var("CREG_GENESIS_HASH") {
         if spec.genesis_hash.trim_start_matches("0x") != expected.trim_start_matches("0x") {
@@ -91,7 +120,9 @@ async fn load_verified_chain_spec() -> Result<common::ChainSpec> {
 pub async fn default_checkpoint() -> Result<Checkpoint> {
     if common::compiled_consensus_encoding().is_some() {
         Checkpoint::from_verified_spec(&load_verified_chain_spec().await?)
-    } else { Ok(Checkpoint::genesis()) }
+    } else {
+        Ok(Checkpoint::genesis())
+    }
 }
 
 // ── Merkle inclusion proof ────────────────────────────────────────────────────
@@ -135,7 +166,9 @@ impl MerkleProof {
 /// Compute a deterministic hash of the active validator set matching node's block_producer logic.
 pub fn compute_validator_set_hash(validators: &[common::Validator]) -> String {
     if common::compiled_consensus_encoding().is_some() {
-        return common::canonical_validator_set_hash(&common::ValidatorSet::new(validators.to_vec()));
+        return common::canonical_validator_set_hash(&common::ValidatorSet::new(
+            validators.to_vec(),
+        ));
     }
     let mut sorted_ids: Vec<&str> = validators.iter().map(|v| v.id.as_str()).collect();
     sorted_ids.sort_unstable();
@@ -167,18 +200,23 @@ pub fn verify_pbft_consensus(
     // 2. Compute quorum threshold
     common::validate_validator_identities(&common::ValidatorSet::new(active_validators.to_vec()))
         .map_err(anyhow::Error::msg)?;
-    let active: Vec<_> = active_validators.iter()
-        .filter(|v| common::validator_status_is_active(&v.status)).collect();
+    let active: Vec<_> = active_validators
+        .iter()
+        .filter(|v| common::validator_status_is_active(&v.status))
+        .collect();
     let n = active.len();
     if n == 0 {
         bail!("Active validator set is empty");
     }
 
     let phase_c = common::compiled_consensus_encoding().is_some();
-    if phase_c && n < 4 { bail!("Phase C requires at least four active validators"); }
-    let allow_small_cluster_quorum = !phase_c && std::env::var("CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM")
-        .map(|v| v == "true" || v == "1")
-        .unwrap_or(false);
+    if phase_c && n < 4 {
+        bail!("Phase C requires at least four active validators");
+    }
+    let allow_small_cluster_quorum = !phase_c
+        && std::env::var("CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM")
+            .map(|v| v == "true" || v == "1")
+            .unwrap_or(false);
 
     let quorum = match n {
         3 if allow_small_cluster_quorum => 2,
@@ -270,8 +308,12 @@ pub fn verify_header(
     expected_hash: &str,
     expected_height: u64,
 ) -> Result<()> {
-    let computed = Block { header: header.clone(), transactions: Vec::new(),
-        pbft_signatures: Vec::new() }.hash();
+    let computed = Block {
+        header: header.clone(),
+        transactions: Vec::new(),
+        pbft_signatures: Vec::new(),
+    }
+    .hash();
 
     if computed != expected_hash {
         bail!(
@@ -376,7 +418,9 @@ pub async fn verify_package(
     node_url: &str,
     checkpoint: &Checkpoint,
 ) -> Result<bool> {
-    Ok(verify_package_record(canonical, node_url, Some(checkpoint)).await?.is_some())
+    Ok(verify_package_record(canonical, node_url, Some(checkpoint))
+        .await?
+        .is_some())
 }
 
 async fn verify_package_record(
@@ -386,7 +430,9 @@ async fn verify_package_record(
 ) -> Result<Option<(common::ChainRecord, String)>> {
     let spec = if common::compiled_consensus_encoding().is_some() {
         Some(load_verified_chain_spec().await?)
-    } else { None };
+    } else {
+        None
+    };
     let genesis = match &spec {
         Some(spec) => Checkpoint::from_verified_spec(spec)?,
         None => Checkpoint::genesis(),
@@ -438,13 +484,19 @@ async fn verify_package_record(
         return Ok(None);
     }
 
-    let transaction = resp.proven_transaction.as_ref()
+    let transaction = resp
+        .proven_transaction
+        .as_ref()
         .context("proof omitted the exact package transaction")?;
     if common::transaction_hash(transaction) != resp.proof.tx_hash {
         bail!("proof transaction does not match its Merkle leaf");
     }
-    let record = transaction.published_record().context("proof leaf is not a publication")?;
-    if record.id.canonical() != canonical || !matches!(record.status, common::PackageStatus::Verified) {
+    let record = transaction
+        .published_record()
+        .context("proof leaf is not a publication")?;
+    if record.id.canonical() != canonical
+        || !matches!(record.status, common::PackageStatus::Verified)
+    {
         bail!("proof publication does not match the requested verified package");
     }
 
@@ -472,10 +524,13 @@ async fn verify_package_record(
         let checkpoint_matches = if checkpoint.height == 0 {
             checkpoint.hash == genesis.hash
         } else {
-            resp.header_chain.iter().any(|(header, hash)|
-                header.height == checkpoint.height && hash == &checkpoint.hash)
+            resp.header_chain.iter().any(|(header, hash)| {
+                header.height == checkpoint.height && hash == &checkpoint.hash
+            })
         };
-        if !checkpoint_matches { bail!("checkpoint is outside the signed-genesis ancestry"); }
+        if !checkpoint_matches {
+            bail!("checkpoint is outside the signed-genesis ancestry");
+        }
     }
     let authority = match &spec {
         Some(spec) => authenticated_proof_authority(spec, &resp, &genesis)?,
@@ -542,11 +597,19 @@ fn authenticated_proof_authority(
         if height <= last_height || height > response.block_header.height {
             bail!("proof authority history is unordered or extends beyond the proof block");
         }
-        transition.validate_against(&authority).map_err(anyhow::Error::msg)?;
-        let parent = if height == 1 { Some(genesis.hash.as_str()) } else {
-            response.header_chain.iter().find(|(header, _)| header.height == height - 1)
+        transition
+            .validate_against(&authority)
+            .map_err(anyhow::Error::msg)?;
+        let parent = if height == 1 {
+            Some(genesis.hash.as_str())
+        } else {
+            response
+                .header_chain
+                .iter()
+                .find(|(header, _)| header.height == height - 1)
                 .map(|(_, hash)| hash.as_str())
-        }.context("proof authority transition has no ancestry anchor")?;
+        }
+        .context("proof authority transition has no ancestry anchor")?;
         if parent != transition.previous_block_hash {
             bail!("proof authority transition belongs to a different fork");
         }
@@ -563,11 +626,17 @@ pub async fn verify_verdict(
     node_url: &str,
     checkpoint: Option<&Checkpoint>,
 ) -> Result<common::TrustVerdict> {
-    if !verdict.status.is_safe() { return Ok(verdict); }
-    let (record, block_hash) = verify_package_record(&verdict.package.canonical(), node_url, checkpoint)
-        .await?.context("node did not provide a verified publication proof")?;
+    if !verdict.status.is_safe() {
+        return Ok(verdict);
+    }
+    let (record, block_hash) =
+        verify_package_record(&verdict.package.canonical(), node_url, checkpoint)
+            .await?
+            .context("node did not provide a verified publication proof")?;
     verdict.status = common::VerdictStatus::Verified {
-        block_hash, content_hash: record.content_hash, ipfs_cid: record.ipfs_cid,
+        block_hash,
+        content_hash: record.content_hash,
+        ipfs_cid: record.ipfs_cid,
         findings: record.findings,
     };
     verdict.publisher = Some(record.publisher_pubkey);

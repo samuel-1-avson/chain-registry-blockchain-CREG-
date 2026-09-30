@@ -5,7 +5,8 @@
 # Prerequisite: chain-registry-app:latest (build via Dockerfile or Dockerfile.windows).
 # nsjail is compiled on the same base image so glibc matches the runtime.
 
-FROM chain-registry-app:latest AS nsjail-builder
+ARG CREG_BASE_IMAGE=chain-registry-app:latest
+FROM ${CREG_BASE_IMAGE} AS nsjail-builder
 USER root
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
@@ -22,7 +23,7 @@ WORKDIR /build/nsjail
 RUN git clone --depth 1 https://github.com/google/nsjail.git . && \
     make -j"$(nproc)"
 
-FROM chain-registry-app:latest AS secure-node
+FROM ${CREG_BASE_IMAGE} AS secure-node
 
 USER root
 # Runtime libs for nsjail (Ubuntu 24.04 vs Debian bookworm package names differ).

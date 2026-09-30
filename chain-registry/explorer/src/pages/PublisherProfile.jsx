@@ -8,7 +8,7 @@ import { SkeletonCard, SkeletonRow } from '../components/Skeleton.jsx'
 import { ErrorState, EmptyState, NoticeState } from '../components/ErrorState.jsx'
 import { StatusBadge } from '../components/StatusBadge.jsx'
 import { ShareButton } from '../components/ShareButton.jsx'
-import { formatNumber, formatWei } from '../utils/format.js'
+import { formatNumber } from '../utils/format.js'
 
 const STATUS_VARIANT = {
   verified: 'success',
@@ -93,7 +93,7 @@ export default function PublisherProfile() {
             <Stat label="Packages" value={formatNumber(data.total_packages)} />
             <Stat label="Verified" value={formatNumber(data.verified_count)} />
             <Stat label="Revoked" value={formatNumber(data.revoked_count)} />
-            <Stat label="Stake" value={`${formatWei(data.stake_wei || 0)} CREG`} />
+            <Stat label="Stake" value="Unavailable" hint="Publisher index does not contain a live L1 stake reading" />
           </div>
           <Row
             label="First seen"

@@ -1,0 +1,196 @@
+# Multi-stage build — produces a minimal runtime image (~80 MB).
+# Updated for Chain Registry v0.3.0 with TUI Explorer and Enhanced Web UI
+#
+# Build profiles (controlled via --build-arg PROFILE=):
+#   full      — (default) All features including ML/AI/ZK/WASM
+#   minimal   — Fast build without ML/AI features
+#
+# For flaky networks pass --build-arg NETWORK_RETRIES=3
+
+ARG PROFILE=full
+ARG NETWORK_RETRIES=1
+ARG CREG_SPEC_SIGNING_PUBKEY=51ff9f3e37f8c82dbf49aea2f80d00aaf75acace5a148c0526187c8d1cae73bd
+ARG CREG_NODE_FEATURES=default
+
+# ── Stage 1: Build Frontend ───────────────────────────────────────────────────
+FROM node:20-slim AS frontend-builder
+WORKDIR /explorer
+COPY explorer/package*.json explorer/.npmrc* ./
+RUN if [ -f package-lock.json ]; then npm ci --no-fund --no-audit || npm ci --no-fund --no-audit; else npm install --no-fund --no-audit || npm install --no-fund --no-audit; fi
+COPY explorer/ ./
+RUN npm run build
+
+# ── Stage 2: Rust Toolchain ──────────────────────────────────────────────────
+FROM rust:1.90-slim-bookworm AS rust-toolchain
+
+# ── Stage 3: Build Rust Backend ───────────────────────────────────────────────
+# Ubuntu 24.04 is required because ort (ONNX Runtime) 2.0.0-rc.12 prebuilt binaries
+# link against glibc 2.38+ symbols (__isoc23_strtoll etc.) not present in Debian 12.
+FROM ubuntu:24.04 AS builder
+ARG CREG_SPEC_SIGNING_PUBKEY
+ARG CREG_NODE_FEATURES
+
+# Install native dependencies for:
+# - OpenSSL (reqwest)
+# - ZK proofs (arkworks needs build tools)
+# - ML/ONNX (math libraries)
+# - WASM (wasmtime dependencies)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    pkg-config \
+    libssl-dev \
+    build-essential \
+    clang-17 \
+    llvm-17 \
+    llvm-17-dev \
+    libclang-17-dev \
+    libclang1-17 \
+    cmake \
+    libopenblas-dev \
+    protobuf-compiler \
+    libprotobuf-dev \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# bindgen (librocksdb-sys) expects clang/llvm-config on PATH.
+RUN ln -sf /usr/bin/clang-17 /usr/bin/clang && \
+    ln -sf /usr/bin/llvm-config-17 /usr/bin/llvm-config
+
+# Reuse the official Rust 1.90 toolchain while keeping the Ubuntu 24.04 builder.
+COPY --from=rust-toolchain /usr/local/cargo /usr/local/cargo
+COPY --from=rust-toolchain /usr/local/rustup /usr/local/rustup
+ENV CARGO_HOME=/usr/local/cargo
+ENV RUSTUP_HOME=/usr/local/rustup
+ENV LIBCLANG_PATH=/usr/lib/llvm-17/lib
+ENV LLVM_CONFIG_PATH=/usr/bin/llvm-config-17
+ENV CLANG_PATH=/usr/bin/clang-17
+ENV PATH="/usr/local/cargo/bin:$PATH"
+ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
+ENV CARGO_BUILD_JOBS=1
+ENV CREG_SPEC_SIGNING_PUBKEY=${CREG_SPEC_SIGNING_PUBKEY}
+ARG SOURCE_DATE_EPOCH=0
+ENV SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}
+ENV CARGO_INCREMENTAL=0
+# Do not set RUSTFLAGS globally — remap-path-prefix breaks librocksdb-sys bindgen/libclang.
+
+RUN mkdir -p "$CARGO_HOME" && \
+  printf '[net]\nretry = 10\ngit-fetch-with-cli = true\n\n[http]\nmultiplexing = false\ntimeout = 600\n\n[registries.crates-io]\nprotocol = "sparse"\n' > "$CARGO_HOME/config.toml"
+
+RUN cargo --version && rustc --version && \
+    test -e "${LIBCLANG_PATH}/libclang.so.1" -o -e "${LIBCLANG_PATH}/libclang.so"
+
+WORKDIR /build
+
+# Copy the built frontend into the expected location for rust-embed
+COPY --from=frontend-builder /explorer/dist /build/explorer/dist
+
+# Cache dependency layer separately from source.
+COPY Cargo.toml ./
+COPY Cargo.lock ./
+
+# Core crates
+COPY crates/common/Cargo.toml   crates/common/
+COPY crates/cli/Cargo.toml      crates/cli/
+COPY crates/resolver/Cargo.toml crates/resolver/
+COPY crates/validator/Cargo.toml crates/validator/
+COPY crates/consensus/Cargo.toml crates/consensus/
+COPY crates/node/Cargo.toml     crates/node/
+COPY crates/faucet/Cargo.toml   crates/faucet/
+COPY crates/relayer/Cargo.toml  crates/relayer/
+
+# Build-script inputs required for dependency caching.
+COPY crates/common/build.rs     crates/common/
+COPY crates/common/proto/       crates/common/proto/
+
+# Phase 1: Advanced Validation crates
+COPY crates/zk-validator/Cargo.toml     crates/zk-validator/
+COPY crates/ml-validator/Cargo.toml     crates/ml-validator/
+COPY crates/wasm-sandbox/Cargo.toml     crates/wasm-sandbox/
+
+# Phase 2: Enterprise crates
+COPY crates/threshold-encryption/Cargo.toml crates/threshold-encryption/
+COPY crates/cross-chain/Cargo.toml        crates/cross-chain/
+
+# Phase 3: Ecosystem crates
+COPY crates/insurance/Cargo.toml        crates/insurance/
+COPY crates/db-sync/Cargo.toml          crates/db-sync/
+COPY crates/ipfs-pinner/Cargo.toml      crates/ipfs-pinner/
+COPY crates/secrets/Cargo.toml          crates/secrets/
+
+# Stub sources so Cargo can resolve dependencies before we copy real code.
+RUN mkdir -p crates/common/src     && echo "pub fn _stub() {}" > crates/common/src/lib.rs
+RUN mkdir -p crates/cli/src        && echo "fn main() {}"      > crates/cli/src/main.rs
+RUN mkdir -p crates/resolver/src   && echo "pub fn _stub() {}" > crates/resolver/src/lib.rs
+RUN mkdir -p crates/validator/src  && echo "pub fn _stub() {}" > crates/validator/src/lib.rs
+RUN mkdir -p crates/consensus/src  && echo "pub fn _stub() {}" > crates/consensus/src/lib.rs
+RUN mkdir -p crates/node/src       && echo "fn main() {}"      > crates/node/src/main.rs
+RUN mkdir -p crates/relayer/src    && echo "fn main() {}"      > crates/relayer/src/main.rs
+
+# Phase 1 stubs
+RUN mkdir -p crates/zk-validator/src     && echo "pub fn _stub() {}" > crates/zk-validator/src/lib.rs
+RUN mkdir -p crates/ml-validator/src     && echo "pub fn _stub() {}" > crates/ml-validator/src/lib.rs
+RUN mkdir -p crates/wasm-sandbox/src     && echo "pub fn _stub() {}" > crates/wasm-sandbox/src/lib.rs
+
+# Phase 2 stubs
+RUN mkdir -p crates/threshold-encryption/src && echo "pub fn _stub() {}" > crates/threshold-encryption/src/lib.rs
+RUN mkdir -p crates/cross-chain/src        && echo "pub fn _stub() {}" > crates/cross-chain/src/lib.rs
+
+# Phase 3 stubs
+RUN mkdir -p crates/insurance/src        && echo "pub fn _stub() {}" > crates/insurance/src/lib.rs
+RUN mkdir -p crates/db-sync/src          && echo "pub fn _stub() {}" > crates/db-sync/src/lib.rs
+RUN mkdir -p crates/ipfs-pinner/src      && echo "pub fn _stub() {}" > crates/ipfs-pinner/src/lib.rs
+
+# Faucet stub
+RUN mkdir -p crates/faucet/src           && echo "fn main() {}"      > crates/faucet/src/main.rs
+RUN mkdir -p crates/secrets/src          && echo "pub fn _stub() {}" > crates/secrets/src/lib.rs
+
+# Pre-fetch dependencies with retries so transient registry DNS issues do not
+# fail the image build early.
+RUN cargo fetch --locked || (sleep 5 && cargo fetch --locked) || (sleep 10 && cargo fetch --locked)
+
+# Avoid a speculative workspace prebuild here. The stub-source phase can leave
+# unusable target artifacts for librocksdb-sys before the real sources land.
+
+# Copy real source and build properly.
+COPY crates/ crates/
+COPY circuits/ circuits/
+COPY contracts/ contracts/
+COPY models/ models/
+COPY testnet/ testnet/
+COPY config/ config/
+COPY rules/ rules/
+COPY validators/ validators/
+COPY docker-compose*.yml ./
+
+# Persist native and Rust artifacts across source edits and image cleanup.
+# Refresh source timestamps only after acquiring the shared target-cache lock.
+# A cached touch layer can predate artifacts produced by another build and let
+# Cargo reuse an executable compiled from different source contents.
+RUN --mount=type=cache,id=creg-phase-c-release,target=/build/target,sharing=locked \
+    find crates -type f -name '*.rs' -exec touch {} + && \
+    env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS \
+    LIBCLANG_PATH=/usr/lib/llvm-17/lib LLVM_CONFIG_PATH=/usr/bin/llvm-config-17 \
+    CLANG_PATH=/usr/bin/clang-17 CARGO_BUILD_JOBS=1 RUST_BACKTRACE=1 \
+    cargo build --release --locked --package chain-registry-node --bin creg-node --bin creg_recovery_inspect --features phase-c-real-fleet && \
+    mkdir -p /build/output && cp /build/target/release/creg-node /build/output/creg-node
+
+# Keep the offline recovery inspector in a separate target so operators can
+# inspect a stopped RocksDB copy without adding the tool to the node runtime.
+FROM builder AS recovery-diagnostic
+RUN --mount=type=cache,id=creg-phase-c-release,target=/build/target,sharing=locked \
+    cp /build/target/release/creg_recovery_inspect /build/output/creg_recovery_inspect
+
+FROM builder AS builder-with-cli
+RUN --mount=type=cache,id=creg-phase-c-release,target=/build/target,sharing=locked \
+    find crates/cli -type f -name '*.rs' -exec touch {} + && \
+    env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS CARGO_BUILD_JOBS=1 \
+    cargo build --release --locked --package chain-registry-cli --features common/phase-c-canonical-transactions && \
+    cp /build/target/release/creg /build/output/creg
+
+FROM us-central1-docker.pkg.dev/gen-lang-client-0022105784/creg-testnet/creg-node@sha256:ca4d04e77e9680cb878800f2ea72c1ce7dac6bb3575a55c9921a7314975fb1ef
+USER root
+COPY --from=builder-with-cli --chown=creg:creg /build/output/creg-node /app/creg-node
+COPY --from=builder-with-cli --chown=creg:creg /build/output/creg /app/creg
+USER creg
+ENTRYPOINT ["/app/creg-node"]

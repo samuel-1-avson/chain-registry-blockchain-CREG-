@@ -1,0 +1,18 @@
+FROM creg-node:recovery-diagnostic-builder-20260926 AS builder
+WORKDIR /build
+COPY crates/node/src/block_producer.rs /build/crates/node/src/block_producer.rs
+COPY crates/node/src/main.rs /build/crates/node/src/main.rs
+RUN --mount=type=cache,id=creg-phase-c-release,target=/build/target,sharing=locked \
+    env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS \
+    LIBCLANG_PATH=/usr/lib/llvm-17/lib LLVM_CONFIG_PATH=/usr/bin/llvm-config-17 \
+    CLANG_PATH=/usr/bin/clang-17 CARGO_BUILD_JOBS=1 RUST_BACKTRACE=1 \
+    cargo build --release --locked --package chain-registry-node --bin creg-node --features phase-c-real-fleet && \
+    cp /build/target/release/creg-node /build/output/creg-node
+
+FROM us-central1-docker.pkg.dev/gen-lang-client-0022105784/creg-testnet/creg-node@sha256:ca4d04e77e9680cb878800f2ea72c1ce7dac6bb3575a55c9921a7314975fb1ef
+LABEL org.opencontainers.image.version="phase-c-r12-bounded-l1-rpc-retry"
+USER root
+COPY --from=builder --chown=creg:creg /build/output/creg-node /app/creg-node
+COPY --from=builder --chown=creg:creg /build/output/creg /app/creg
+USER creg
+ENTRYPOINT ["/app/creg-node"]

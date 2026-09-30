@@ -1,0 +1,19 @@
+name: creg-public-explorer-r26
+services:
+  explorer:
+    image: us-central1-docker.pkg.dev/gen-lang-client-0022105784/creg-testnet/creg-web-explorer@sha256:9df577975d1646289e5c1a58fd90cf48b89bfaac41f59122b02d3e7aec44d792
+    container_name: creg-explorer-public-r26
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3027:80"
+    environment:
+      CREG_NODE_UPSTREAM: creg-node:8080
+      CREG_SEPOLIA_RPC_UPSTREAM: https://api.testnet.cregnet.dev/sepolia
+      CREG_SEPOLIA_RPC_HOST: api.testnet.cregnet.dev
+    networks:
+      public-services:
+        aliases: [web-explorer]
+networks:
+  public-services:
+    external: true
+    name: testnet_creg-unified-net

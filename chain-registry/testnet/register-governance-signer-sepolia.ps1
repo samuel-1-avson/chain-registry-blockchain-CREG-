@@ -157,5 +157,5 @@ if ($RemoveLegacySigner) {
 
 Write-Host ""
 Write-Host "Done. Verify: .\testnet\check-governance-signer.ps1" -ForegroundColor Green
-Write-Host "Then:      .\testnet\fund-sepolia-faucet-governance.ps1"
+Write-Host "Then:      preview an approved tranche with .\testnet\fund-sepolia-faucet-governance.ps1 -FaucetAllocationCreg <approved-tranche>"
 Write-Host ""

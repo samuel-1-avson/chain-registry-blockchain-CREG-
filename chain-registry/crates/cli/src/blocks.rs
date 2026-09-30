@@ -6,12 +6,17 @@ use colored::Colorize;
 use serde_json::Value;
 
 pub async fn run(node_url: Option<&str>, limit: usize) -> Result<()> {
-    anyhow::ensure!(limit > 0 && limit <= 100, "Block limit must be between 1 and 100");
+    anyhow::ensure!(
+        limit > 0 && limit <= 100,
+        "Block limit must be between 1 and 100"
+    );
     let api_base = crate::config_file::effective_node_url(node_url)
         .trim_end_matches('/')
         .to_string();
 
-    let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(15)).build()?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()?;
 
     // 1. Get chain stats
     let stats: Value = client
@@ -23,8 +28,12 @@ pub async fn run(node_url: Option<&str>, limit: usize) -> Result<()> {
         .await
         .context("Failed to fetch chain stats")?;
 
-    let tip = stats["tip_height"].as_u64().context("Chain stats missing tip_height")?;
-    let pkg_count = stats["package_count"].as_u64().context("Chain stats missing package_count")?;
+    let tip = stats["tip_height"]
+        .as_u64()
+        .context("Chain stats missing tip_height")?;
+    let pkg_count = stats["package_count"]
+        .as_u64()
+        .context("Chain stats missing package_count")?;
 
     println!(
         "\n{} {} {}",
@@ -38,7 +47,11 @@ pub async fn run(node_url: Option<&str>, limit: usize) -> Result<()> {
         tip.to_string().yellow(),
         pkg_count.to_string().yellow()
     );
-    println!("Chain: {} | Genesis: {}\n", stats["chain_id"].as_str().unwrap_or("unknown"), stats["genesis_hash"].as_str().unwrap_or("unknown"));
+    println!(
+        "Chain: {} | Genesis: {}\n",
+        stats["chain_id"].as_str().unwrap_or("unknown"),
+        stats["genesis_hash"].as_str().unwrap_or("unknown")
+    );
 
     println!(
         "{:<8} {:<18} {:<10} {:<30}",
@@ -56,8 +69,12 @@ pub async fn run(node_url: Option<&str>, limit: usize) -> Result<()> {
             .with_context(|| format!("Failed to fetch block {h}"))?
             .error_for_status()
             .with_context(|| format!("Block {h} request failed"))?
-            .json::<Value>().await?;
-        anyhow::ensure!(block["header"]["height"].as_u64() == Some(h), "Invalid block response for height {h}");
+            .json::<Value>()
+            .await?;
+        anyhow::ensure!(
+            block["header"]["height"].as_u64() == Some(h),
+            "Invalid block response for height {h}"
+        );
         render_block(&block);
     }
 

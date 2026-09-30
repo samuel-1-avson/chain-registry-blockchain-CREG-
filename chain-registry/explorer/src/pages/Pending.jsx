@@ -1,29 +1,36 @@
 import React from 'react'
 import { Link } from 'react-router-dom'
-import { nodeApi } from '../api/node.js'
+import { nodeApi, getEndpointStatus } from '../api/node.js'
+import { useChainStats } from '../hooks/useStats.js'
 import { usePolling } from '../hooks/usePolling.js'
 import { Hash } from '../components/Hash.jsx'
 import { TimeAgo } from '../components/TimeAgo.jsx'
 import { SkeletonRow } from '../components/Skeleton.jsx'
-import { ErrorState, EmptyState } from '../components/ErrorState.jsx'
+import { ErrorState, EmptyState, EndpointStatusNotice } from '../components/ErrorState.jsx'
 import { StatusBadge } from '../components/StatusBadge.jsx'
 
 export default function Pending() {
   const { data, error, loading, refetch } = usePolling((s) => nodeApi.pending(s), { intervalMs: 3000 })
+  const chain = useChainStats(5000)
+  const unavailable = getEndpointStatus(data)
   const items = (data?.packages || []).map((item) => (
     typeof item === 'string' ? { canonical: item } : item
   ))
+  const publicPendingCount = chain.data?.pending_tx_count
+  const publicPoolIsEmpty = publicPendingCount === 0
 
-  if (error && !items.length) return <ErrorState error={error} onRetry={refetch} title="Could not load mempool" />
+  if (error && !items.length && !publicPoolIsEmpty) return <ErrorState error={error} onRetry={refetch} title="Could not load mempool" />
 
   return (
     <div style={{ display: 'grid', gap: 'var(--space-4)' }}>
       <header style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
         <h1 style={{ margin: 0, fontSize: 20 }}>Pending pool</h1>
-        <StatusBadge variant="info" pulse>{items.length} waiting</StatusBadge>
+        <StatusBadge variant="info" pulse>{chain.data?.pending_tx_count ?? '—'} waiting</StatusBadge>
       </header>
-      {!loading && !items.length ? (
-        <EmptyState title="Mempool is empty" description="No pending transactions - the chain is caught up." />
+      {publicPoolIsEmpty ? (
+        <EmptyState title="Pending pool is empty" description="Public chain statistics report no packages awaiting consensus." />
+      ) : unavailable ? <EndpointStatusNotice status={unavailable} /> : !loading && !items.length ? (
+        <EmptyState title="Pending package pool is empty" description="This node reports no packages awaiting analysis." />
       ) : (
         <div className="ce-card" style={{ padding: 0, overflow: 'hidden' }}>
           <table className="ce-table">

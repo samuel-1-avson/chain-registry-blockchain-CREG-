@@ -1,0 +1,18 @@
+# Builder OCI index: a9085eaa4564d7b1890f9506d56da1ed56ca25f14b26109a181e5d16e9bd646b
+# Secure runtime OCI index: 71eff57882c0f7f11377430a5a84d1a7773786b49cc654020381c235443b0beb
+FROM creg-node:phase-c-builder-r2 AS compiler
+COPY crates/consensus/src/forced_inclusion.rs /build/crates/consensus/src/forced_inclusion.rs
+COPY crates/node/src/chain_store.rs /build/crates/node/src/chain_store.rs
+COPY crates/node/src/block_producer.rs /build/crates/node/src/block_producer.rs
+RUN env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS \
+    LIBCLANG_PATH=/usr/lib/llvm-17/lib \
+    LLVM_CONFIG_PATH=/usr/bin/llvm-config-17 \
+    CLANG_PATH=/usr/bin/clang-17 \
+    CARGO_BUILD_JOBS=1 RUST_BACKTRACE=1 \
+    cargo build --release --locked --package chain-registry-node --bin creg-node --features phase-c-real-fleet
+
+FROM creg-node:phase-c-secure-r2
+USER root
+COPY --from=compiler --chown=creg:creg /build/target/release/creg-node /app/creg-node
+USER creg
+ENTRYPOINT ["/app/creg-node"]

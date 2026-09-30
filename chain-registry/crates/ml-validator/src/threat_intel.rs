@@ -180,9 +180,7 @@ pub fn database_status() -> ThreatDatabaseStatus {
         .keys()
         .filter(|hash| {
             hash.len() != 64
-                || !hash
-                    .bytes()
-                    .all(|byte| byte.is_ascii_hexdigit())
+                || !hash.bytes().all(|byte| byte.is_ascii_hexdigit())
                 || hash.bytes().any(|byte| byte.is_ascii_uppercase())
         })
         .count();
@@ -196,7 +194,10 @@ pub fn database_status() -> ThreatDatabaseStatus {
         })
         .count();
     let error = if db.schema != THREAT_DB_SCHEMA_V1 {
-        Some(format!("unsupported or missing threat database schema '{}'", db.schema))
+        Some(format!(
+            "unsupported or missing threat database schema '{}'",
+            db.schema
+        ))
     } else if db.built_at.trim().is_empty() {
         Some("threat database build-time provenance is required".to_string())
     } else if !db.source.starts_with("https://mb-api.abuse.ch/api/v1/") {
@@ -213,7 +214,10 @@ pub fn database_status() -> ThreatDatabaseStatus {
             "threat database has {invalid_hashes} malformed SHA-256 keys and {invalid_entries} invalid entries"
         ))
     } else if db.entries.len() < MIN_USEFUL_DB_SIZE {
-        Some(format!("threat database has {} entries; at least {MIN_USEFUL_DB_SIZE} are required", db.entries.len()))
+        Some(format!(
+            "threat database has {} entries; at least {MIN_USEFUL_DB_SIZE} are required",
+            db.entries.len()
+        ))
     } else {
         None
     };

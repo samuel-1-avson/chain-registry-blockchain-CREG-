@@ -34,7 +34,7 @@ import hub.caddy
 	handle @creg_rpc_path {
 		@jsonrpc_post method POST
 		handle @jsonrpc_post {
-			reverse_proxy 10.128.0.41:28182 creg-node:8080 {
+			reverse_proxy {$CREG_PUBLIC_NODE_UPSTREAM:creg-phase-c-r7-o1:8080} {
 				lb_policy first
 				fail_duration 5s
 				max_fails 2
@@ -47,7 +47,7 @@ import hub.caddy
 
 	# 3. CREG Node REST API (/v1/*) & Health -> Dedicated Observer VM
 	handle /v1/* {
-		reverse_proxy 10.128.0.41:28182 creg-node:8080 {
+		reverse_proxy {$CREG_PUBLIC_NODE_UPSTREAM:creg-phase-c-r7-o1:8080} {
 			lb_policy first
 			fail_duration 5s
 			max_fails 2
@@ -56,12 +56,16 @@ import hub.caddy
 	}
 	handle /health {
 		rewrite * /v1/health
-		reverse_proxy 10.128.0.41:28182 creg-node:8080 {
+		reverse_proxy {$CREG_PUBLIC_NODE_UPSTREAM:creg-phase-c-r7-o1:8080} {
 			lb_policy first
 			fail_duration 5s
 			max_fails 2
 			flush_interval -1
 		}
+	}
+
+	handle /metrics {
+		reverse_proxy {$CREG_PUBLIC_NODE_UPSTREAM:creg-phase-c-r7-o1:8080}
 	}
 
 	# Default API root response
@@ -76,7 +80,7 @@ import hub.caddy
 	encode zstd gzip
 	import sepolia-public-rpc.caddy
 	handle {
-		reverse_proxy web-explorer:80 {
+		reverse_proxy creg-explorer-public-r27-stage:80 {
 			flush_interval -1
 		}
 	}
@@ -84,12 +88,34 @@ import hub.caddy
 
 # ── Spec Server ───────────────────────────────────────────────────────────────
 {$CREG_PUBLIC_SPEC_HOST} {
-	reverse_proxy spec-server:80
+	# Compatibility for previously installed CLI configurations using this API base.
+	handle_path /ipfs/* {
+		reverse_proxy ipfs:5001
+	}
+	# Make the signed R7 spec the default for new clients and existing root-URL
+	# installers. The legacy spec remains available from the preserved old host.
+	handle /chain-spec.json {
+		rewrite * /phase-c/r7/chain-spec.json
+		reverse_proxy spec-server:80
+	}
+	handle /chain-spec.json.sig {
+		rewrite * /phase-c/r7/chain-spec.json.sig
+		reverse_proxy spec-server:80
+	}
+	handle {
+		reverse_proxy spec-server:80
+	}
 }
 
 # ── IPFS Gateway ──────────────────────────────────────────────────────────────
 {$CREG_PUBLIC_IPFS_HOST} {
-	reverse_proxy ipfs:5001
+	@ipfs_content path /ipfs/* /ipns/*
+	handle @ipfs_content {
+		reverse_proxy ipfs:8080
+	}
+	handle {
+		reverse_proxy ipfs:5001
+	}
 }
 
 # ── Faucet Service ────────────────────────────────────────────────────────────
@@ -101,4 +127,3 @@ import hub.caddy
 		}
 	}
 }
-

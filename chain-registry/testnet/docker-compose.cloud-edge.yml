@@ -75,12 +75,8 @@ services:
     restart: unless-stopped
 
   faucet:
-    image: creg-node:local-3node
+    image: us-central1-docker.pkg.dev/gen-lang-client-0022105784/creg-testnet/creg-faucet@sha256:360c124090e5c3a5c448a69e9838bb2c1755ed18f6d32732bff6498d4cdd5ed5
     container_name: creg-cloud-faucet
-    build:
-      context: ..
-      dockerfile: Dockerfile.windows
-    entrypoint: ["/app/faucet"]
     environment:
       CREG_SECRETS_BACKEND: env
       FAUCET_PORT: "8082"
@@ -92,9 +88,15 @@ services:
       FAUCET_ADDRESS: ${FAUCET_ADDRESS:-}
       FAUCET_TOKEN_CONTRACT: ${CREG_TOKEN_ADDR:-0xB326dB1C6e457f4AdfBb11f17FDc145ED585b288}
       FAUCET_CHAIN_ID: "11155111"
+      FAUCET_RECONCILIATION_RPC_URL: "${FAUCET_RECONCILIATION_RPC_URL:-https://ethereum-sepolia-rpc.publicnode.com}"
+      FAUCET_DEPLOYMENT_RECEIPT_RPC_URL: "${FAUCET_DEPLOYMENT_RECEIPT_RPC_URL:-https://1rpc.io/sepolia}"
+      FAUCET_TOKEN_DEPLOYMENT_TX_HASH: "${FAUCET_TOKEN_DEPLOYMENT_TX_HASH:-0xb5e4229aef0b76de4b8528283243f4fb668df3820556675452c11b9afc3cb516}"
+      FAUCET_TOKEN_DEPLOYMENT_BLOCK: "${FAUCET_TOKEN_DEPLOYMENT_BLOCK:-11781432}"
+      FAUCET_RECONCILIATION_CONFIRMATIONS: "${FAUCET_RECONCILIATION_CONFIRMATIONS:-64}"
       FAUCET_DRIP_AMOUNT: "1000000000000000000000"
       FAUCET_NATIVE_DRIP_AMOUNT: ${FAUCET_NATIVE_DRIP_AMOUNT:-0}
       FAUCET_COOLDOWN_SECS: "60"
+      FAUCET_PG_URL: "postgresql://faucet:${FAUCET_DB_PASSWORD:?URL-safe faucet database password required}@faucet-db:5432/creg_faucet"
       FAUCET_POW_DISABLED: ${FAUCET_POW_DISABLED:-false}
       FAUCET_EXPLORER_URL: ${CREG_PUBLIC_EXPLORER_URL:-https://${CREG_PUBLIC_EXPLORER_HOST}}
       RUST_LOG: info
@@ -102,6 +104,9 @@ services:
       - "${CREG_3NODE_FAUCET_PORT:-8082}:8082"
     networks:
       - creg-cloud-edge
+    depends_on:
+      faucet-db:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8082/health || exit 1"]
@@ -109,6 +114,26 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+
+  # Durable rate-limit state stays on the public-services host and survives
+  # faucet image/container replacement. No database port is published.
+  faucet-db:
+    image: postgres:16-alpine
+    container_name: creg-cloud-faucet-db
+    environment:
+      POSTGRES_DB: creg_faucet
+      POSTGRES_USER: faucet
+      POSTGRES_PASSWORD: "${FAUCET_DB_PASSWORD:?URL-safe faucet database password required}"
+    volumes:
+      - faucet-db-data:/var/lib/postgresql/data
+    networks:
+      - creg-cloud-edge
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U faucet -d creg_faucet"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   web-explorer:
     image: chain-registry-web-explorer:3node
@@ -217,3 +242,4 @@ networks:
 volumes:
   cloud-ipfs-data:
   cloud-hub-db-data:
+  faucet-db-data:

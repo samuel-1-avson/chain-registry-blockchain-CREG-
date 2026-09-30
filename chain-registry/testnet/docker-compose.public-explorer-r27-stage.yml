@@ -1,0 +1,19 @@
+name: creg-public-explorer-r27-stage
+services:
+  explorer:
+    image: us-central1-docker.pkg.dev/gen-lang-client-0022105784/creg-testnet/creg-web-explorer@sha256:03a2e5338eb21062b339d70961fc0e30aea4e6fc3d9700c563bcf58af37a6699
+    container_name: creg-explorer-public-r27-stage
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3029:80"
+    environment:
+      CREG_NODE_UPSTREAM: creg-phase-c-r7-o1:8080
+      CREG_SEPOLIA_RPC_UPSTREAM: https://api.testnet.cregnet.dev/sepolia
+      CREG_SEPOLIA_RPC_HOST: api.testnet.cregnet.dev
+    networks:
+      public-services:
+        aliases: [web-explorer-r27-stage]
+networks:
+  public-services:
+    external: true
+    name: testnet_creg-unified-net

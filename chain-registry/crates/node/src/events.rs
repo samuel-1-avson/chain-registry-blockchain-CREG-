@@ -21,7 +21,13 @@ use axum::{
 use chrono::Utc;
 use futures::stream::{self, Stream};
 use serde::{Deserialize, Serialize};
-use std::{convert::Infallible, fmt, sync::Arc, time::Duration};
+use std::{
+    collections::{HashSet, VecDeque},
+    convert::Infallible,
+    fmt,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 use tokio::sync::broadcast;
 use tokio_stream::StreamExt;
 
@@ -84,7 +90,7 @@ impl RegistryEvent {
             ts: Utc::now().to_rfc3339(),
             payload: serde_json::json!({
                 "canonical":       canonical,
-                "block_hash":      &block_hash[..block_hash.len().min(12)],
+                "block_hash":      block_hash,
                 "validator_count": validator_count,
             }),
         }
@@ -119,7 +125,7 @@ impl RegistryEvent {
             ts: Utc::now().to_rfc3339(),
             payload: serde_json::json!({
                 "height":   height,
-                "hash":     &hash[..hash.len().min(12)],
+                "hash":     hash,
                 "tx_count": tx_count,
             }),
         }
@@ -136,6 +142,15 @@ impl RegistryEvent {
             }),
         }
     }
+
+    pub fn with_committed_block(mut self, block: &common::Block) -> Self {
+        if let Some(payload) = self.payload.as_object_mut() {
+            payload.insert("height".into(), block.header.height.into());
+            payload.insert("block_hash".into(), block.hash().into());
+            payload.insert("block_phase".into(), "committed".into());
+        }
+        self
+    }
 }
 
 /// Shared broadcast sender — clone this to emit events from anywhere in the node.
@@ -149,6 +164,44 @@ pub fn new_event_bus() -> EventBus {
 /// Emit an event, silently ignoring errors if no subscribers are connected.
 pub fn emit(bus: &EventBus, event: RegistryEvent) {
     let _ = bus.send(event);
+}
+
+/// Per-process notifications shared by every clone of the canonical store.
+/// Installed after startup replay, so historical blocks are never announced
+/// as new commits. This is a live feed; it is not a durable event archive.
+pub(crate) struct RuntimeEventEmitter {
+    bus: EventBus,
+    recent_commits: Mutex<(HashSet<String>, VecDeque<String>)>,
+}
+
+impl RuntimeEventEmitter {
+    pub(crate) fn new(bus: EventBus) -> Self {
+        Self {
+            bus,
+            recent_commits: Mutex::new((HashSet::new(), VecDeque::new())),
+        }
+    }
+
+    pub(crate) fn emit(&self, event: RegistryEvent) {
+        emit(&self.bus, event);
+    }
+
+    pub(crate) fn first_notification_for_commit(&self, hash: &str) -> bool {
+        let mut recent = self
+            .recent_commits
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if !recent.0.insert(hash.to_owned()) {
+            return false;
+        }
+        recent.1.push_back(hash.to_owned());
+        while recent.1.len() > EVENT_CHANNEL_CAPACITY {
+            if let Some(expired) = recent.1.pop_front() {
+                recent.0.remove(&expired);
+            }
+        }
+        true
+    }
 }
 
 // ── WebSocket handler ─────────────────────────────────────────────────────────

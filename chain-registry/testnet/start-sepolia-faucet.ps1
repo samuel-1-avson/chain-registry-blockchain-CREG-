@@ -34,7 +34,7 @@ if ($cast -and $env:FAUCET_ADDRESS) {
     Write-Host "  ETH:  $($eth.Trim())"
     Write-Host "  CREG: $($creg.Trim())"
     if ($creg -match '^\s*0\s*$' -or ($creg.Trim() -eq '0')) {
-        Write-Host "  WARNING: zero CREG on token $($env:FAUCET_TOKEN_CONTRACT) - run fund-sepolia-faucet-governance.ps1" -ForegroundColor Yellow
+        Write-Host "  WARNING: zero CREG on token $($env:FAUCET_TOKEN_CONTRACT) - an approved Governance reserve tranche is required" -ForegroundColor Yellow
     }
     if ($eth -match '^\s*0\s*$' -or ($eth.Trim() -eq '0')) {
         Write-Host "  WARNING: zero ETH - drips will fail; run fund-sepolia-faucet-eth.ps1" -ForegroundColor Yellow

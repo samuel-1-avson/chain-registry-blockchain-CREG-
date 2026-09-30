@@ -14,7 +14,7 @@ use axum::{
 use common::{
     sign_tree_head, PackageStatus, PublishRequest, Transaction, ValidatorIdentity, ValidatorVote,
 };
-use futures::StreamExt;
+use futures::{future::join_all, StreamExt};
 use k256::ecdsa::{RecoveryId, Signature as K256Signature, VerifyingKey as K256VerifyingKey};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -132,6 +132,7 @@ fn public_routes(sse_bus: EventBus, ws_bus: EventBus) -> Router<SharedState> {
     Router::new()
         .route("/v1/public/health", get(health))
         .route("/v1/public/chain/stats", get(chain_stats))
+        .route("/v1/public/metrics/history", get(metrics_history))
         .route("/v1/public/packages", get(list_packages))
         .route("/v1/public/packages/:canonical", get(get_package))
         .route("/v1/public/packages/:canonical/proof", get(get_proof))
@@ -744,6 +745,7 @@ struct ChainStatsResponse {
     publisher_count: usize,
     finalized_height: u64,
     finalization_lag: u64,
+    finalization_source: &'static str,
     validator_set_source: String,
     validator_set_sync_state: String,
     validator_set_last_finalized_source_block: Option<u64>,
@@ -791,8 +793,11 @@ async fn chain_stats(State(state): State<SharedState>) -> impl IntoResponse {
         l1_block: finalized,
         pending_tx_count: s.pending_pool.len(),
         publisher_count: s.publisher_index.publisher_count(),
-        finalized_height: finalized,
-        finalization_lag: tip.saturating_sub(finalized),
+        // Canonical CREG blocks are stored only after commit validation. L1
+        // checkpoint height belongs in l1_block, never in CREG finality.
+        finalized_height: tip,
+        finalization_lag: 0,
+        finalization_source: "creg-canonical-store",
         validator_set_source: s.validator_set_sync.mode.clone(),
         validator_set_sync_state: s.validator_set_sync.state.clone(),
         validator_set_last_finalized_source_block: s.validator_set_sync.last_finalized_source_block,
@@ -844,6 +849,7 @@ struct RuntimeConfigResponse {
     // Incentive emission counters (see §9.12 and §15)
     reward_emissions_succeeded: u64,
     reward_emissions_failed: u64,
+    reward_emissions_skipped: u64,
     treasury_balance: u128,
     pending_rewards_estimate: u128,
     total_rewards_distributed: u128,
@@ -1065,6 +1071,7 @@ async fn runtime_config(State(state): State<SharedState>) -> impl IntoResponse {
         sandbox_dev_bypass: sandbox.dev_bypass,
         reward_emissions_succeeded: s.reward_emissions_succeeded,
         reward_emissions_failed: s.reward_emissions_failed,
+        reward_emissions_skipped: s.reward_emissions_skipped,
         treasury_balance: treasury_bal,
         pending_rewards_estimate: pending_est,
         total_rewards_distributed: s.total_rewards_distributed,
@@ -1724,9 +1731,8 @@ async fn bridge_status(State(state): State<SharedState>) -> impl IntoResponse {
 // GET /v1/bridge/anchors
 //
 // Returns the persisted anchor commit journal (newest first) with real L1
-// transaction hashes. Falls back to a synthesized entry from the live bridge
-// status only when the journal is empty (e.g. node restarted mid-flight on
-// a data dir written by an older build).
+// transaction hashes. Missing historical records cannot be reconstructed from
+// current bridge status or the current time.
 async fn bridge_anchors(State(state): State<SharedState>) -> impl IntoResponse {
     let s = state.read().await;
 
@@ -1740,24 +1746,11 @@ async fn bridge_anchors(State(state): State<SharedState>) -> impl IntoResponse {
         }));
     }
 
-    let bs = &s.bridge_status;
-    let mut anchors: Vec<serde_json::Value> = Vec::new();
-
-    // Synthesise the latest anchor from current bridge state
-    if bs.last_finalized_eth_block > 0 {
-        anchors.push(serde_json::json!({
-            "l2_height": s.chain.stats().tip_height,
-            "l1_block": bs.last_finalized_eth_block,
-            "state_root": bs.current_state_root,
-            "l1_tx_hash": serde_json::Value::Null,
-            "committed_at": chrono::Utc::now().to_rfc3339(),
-            "gas_used": serde_json::Value::Null,
-        }));
-    }
-
     Json(serde_json::json!({
-        "anchors": anchors,
-        "total": anchors.len(),
+        "anchors": [],
+        "total": 0,
+        "proof_mode": s.bridge_status.proof_mode,
+        "note": "No persisted anchor records. Current bridge status is not historical evidence.",
     }))
 }
 
@@ -1794,11 +1787,10 @@ async fn governance_execute(
     crate::governance_api::handle_execute(state, id).await
 }
 
-// GET /v1/metrics/history?range=1h
-//
-// Time-series metrics endpoint. Currently returns an empty sample set.
-// When a metrics accumulator is added to the node, this will return
-// historical chain stats at regular intervals.
+// GET /v1/public/metrics/history?range=1h
+// Read durable samples from the local Prometheus collector. The query is
+// constrained to this node's signed network identity and the configured
+// primary observer scrape target.
 #[derive(Deserialize)]
 struct MetricsHistoryParams {
     #[serde(default = "default_metrics_range")]
@@ -1809,14 +1801,255 @@ fn default_metrics_range() -> String {
 }
 
 async fn metrics_history(
-    State(_state): State<SharedState>,
+    State(state): State<SharedState>,
     Query(params): Query<MetricsHistoryParams>,
-) -> impl IntoResponse {
-    Json(serde_json::json!({
-        "range": params.range,
-        "samples": Vec::<serde_json::Value>::new(),
-        "note": "Server-side metrics accumulation is planned for Sprint 5.",
-    }))
+) -> Response {
+    let (range_seconds, step_seconds) = match metrics_history_range(&params.range) {
+        Some(value) => value,
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "invalid_metrics_range",
+                    "allowed": ["5m", "30m", "1h", "6h", "24h", "7d"],
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    let (chain_id, network_genesis_hash) = {
+        let node = state.read().await;
+        (
+            node.config.chain_id.clone(),
+            node.config.network_genesis_hash.clone(),
+        )
+    };
+    if chain_id.is_empty() || network_genesis_hash.is_empty() {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "error": "metrics_history_unavailable",
+                "message": "This node has no verified network identity for selecting history.",
+            })),
+        )
+            .into_response();
+    }
+
+    let prometheus_url = std::env::var("CREG_PROMETHEUS_URL")
+        .unwrap_or_else(|_| "http://creg-gcp-prometheus:9090".to_string());
+    let prometheus_url = prometheus_url.trim_end_matches('/');
+    let end_seconds = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let start_seconds = end_seconds.saturating_sub(range_seconds);
+    let client = match reqwest::Client::builder()
+        .timeout(StdDuration::from_secs(6))
+        .build()
+    {
+        Ok(client) => client,
+        Err(_) => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({
+                    "error": "metrics_history_unavailable",
+                    "message": "Could not initialize the local metrics collector client.",
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    let queries = METRICS_HISTORY_SERIES.iter().map(|(metric, field)| {
+        query_prometheus_history(
+            &client,
+            prometheus_url,
+            metric,
+            field,
+            &chain_id,
+            &network_genesis_hash,
+            start_seconds,
+            end_seconds,
+            step_seconds,
+        )
+    });
+    let results = join_all(queries).await;
+    let mut samples =
+        std::collections::BTreeMap::<i64, serde_json::Map<String, serde_json::Value>>::new();
+    let mut queried_series = 0usize;
+    for result in results {
+        let points = match result {
+            Ok(points) => points,
+            Err(_) => {
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(serde_json::json!({
+                        "error": "metrics_history_unavailable",
+                        "message": "The local Prometheus collector did not return a complete history response.",
+                    })),
+                )
+                    .into_response();
+            }
+        };
+        if !points.is_empty() {
+            queried_series += 1;
+        }
+        for (timestamp_ms, field, value) in points {
+            samples
+                .entry(timestamp_ms)
+                .or_insert_with(|| {
+                    let mut sample = serde_json::Map::new();
+                    sample.insert(
+                        "timestamp_ms".to_string(),
+                        serde_json::Value::from(timestamp_ms),
+                    );
+                    sample
+                })
+                .insert(field, serde_json::json!(value));
+        }
+    }
+
+    if samples.is_empty() {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "error": "metrics_history_warming",
+                "message": "The collector is reachable, but it has not stored a scrape for this network yet.",
+                "range": params.range,
+                "chain_id": chain_id,
+                "network_genesis_hash": network_genesis_hash,
+            })),
+        )
+            .into_response();
+    }
+
+    let history: Vec<serde_json::Value> = samples
+        .into_values()
+        .map(serde_json::Value::Object)
+        .collect();
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "status": "ready",
+            "collector": "prometheus",
+            "range": params.range,
+            "step_seconds": step_seconds,
+            "chain_id": chain_id,
+            "network_genesis_hash": network_genesis_hash,
+            "sample_count": history.len(),
+            "queried_series": queried_series,
+            "samples": history,
+        })),
+    )
+        .into_response()
+}
+
+const METRICS_HISTORY_SERIES: [(&str, &str); 7] = [
+    ("creg_chain_tip_height", "height"),
+    ("creg_validator_set_total", "validator_count"),
+    ("creg_active_validators", "active_validators"),
+    ("creg_package_count", "package_count"),
+    ("creg_pending_pool_size", "pending_tx_count"),
+    ("creg_publisher_count", "publisher_count"),
+    ("creg_total_stake", "total_stake"),
+];
+
+fn metrics_history_range(range: &str) -> Option<(u64, u64)> {
+    match range {
+        "5m" => Some((5 * 60, 15)),
+        "30m" => Some((30 * 60, 30)),
+        "1h" => Some((60 * 60, 30)),
+        "6h" => Some((6 * 60 * 60, 2 * 60)),
+        "24h" => Some((24 * 60 * 60, 5 * 60)),
+        "7d" => Some((7 * 24 * 60 * 60, 15 * 60)),
+        _ => None,
+    }
+}
+
+async fn query_prometheus_history(
+    client: &reqwest::Client,
+    prometheus_url: &str,
+    metric: &'static str,
+    field: &'static str,
+    chain_id: &str,
+    network_genesis_hash: &str,
+    start_seconds: u64,
+    end_seconds: u64,
+    step_seconds: u64,
+) -> Result<Vec<(i64, String, f64)>, String> {
+    let chain_id = promql_escape_label_value(chain_id);
+    let network_genesis_hash = promql_escape_label_value(network_genesis_hash);
+    let query = format!(
+        "{metric}{{chain_id=\"{chain_id}\",network_genesis_hash=\"{network_genesis_hash}\",metrics_source=\"explorer-primary\"}}"
+    );
+    let response = client
+        .get(format!("{prometheus_url}/api/v1/query_range"))
+        .query(&[
+            ("query", query.as_str()),
+            ("start", &start_seconds.to_string()),
+            ("end", &end_seconds.to_string()),
+            ("step", &step_seconds.to_string()),
+        ])
+        .send()
+        .await
+        .map_err(|_| "prometheus request failed".to_string())?;
+    let response = response
+        .error_for_status()
+        .map_err(|_| "prometheus returned an error status".to_string())?;
+    let body: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|_| "prometheus returned invalid JSON".to_string())?;
+    if body.get("status").and_then(|value| value.as_str()) != Some("success") {
+        return Err("prometheus query was not successful".to_string());
+    }
+
+    let mut points = Vec::new();
+    if let Some(series) = body
+        .get("data")
+        .and_then(|data| data.get("result"))
+        .and_then(|result| result.as_array())
+    {
+        for item in series {
+            let Some(values) = item.get("values").and_then(|values| values.as_array()) else {
+                continue;
+            };
+            for pair in values {
+                let Some(pair) = pair.as_array() else {
+                    continue;
+                };
+                let timestamp = pair.first().and_then(|value| {
+                    value
+                        .as_f64()
+                        .or_else(|| value.as_str().and_then(|text| text.parse::<f64>().ok()))
+                });
+                let value = pair.get(1).and_then(|value| {
+                    value
+                        .as_str()
+                        .and_then(|text| text.parse::<f64>().ok())
+                        .or_else(|| value.as_f64())
+                });
+                if let (Some(timestamp), Some(value)) = (timestamp, value) {
+                    if timestamp.is_finite() && value.is_finite() {
+                        points.push((
+                            (timestamp * 1000.0).round() as i64,
+                            field.to_string(),
+                            value,
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    Ok(points)
+}
+
+fn promql_escape_label_value(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
 }
 
 // GET /v1/packages?offset=0&limit=50&ecosystem=npm&status=verified
@@ -2250,7 +2483,7 @@ async fn generate_package_intelligence(
 async fn submit_package(
     State(state): State<SharedState>,
     Extension(p2p_handle): Extension<crate::p2p::P2PHandle>,
-    Extension(event_bus): Extension<events::EventBus>,
+    Extension(_event_bus): Extension<events::EventBus>,
     Json(request): Json<PublishRequest>,
 ) -> Response {
     let canonical = request.id.canonical();
@@ -2283,11 +2516,6 @@ async fn submit_package(
         "{} added to pending pool ({} pending)",
         receipt.canonical,
         receipt.pending_count
-    );
-
-    events::emit(
-        &event_bus,
-        events::RegistryEvent::package_submitted(&receipt.canonical, &request.publisher_pubkey),
     );
 
     (
@@ -2355,12 +2583,19 @@ struct RevokeReq {
     revoker_pubkey: String,
     /// Hex-encoded Ed25519 signature of `"{canonical}:revoke:{reason}"`.
     signature: String,
+    #[serde(default)]
+    signature_version: u8,
+    #[serde(default)]
+    chain_id: Option<String>,
+    #[serde(default)]
+    genesis_hash: Option<String>,
 }
 
 async fn revoke_package(
     State(state): State<SharedState>,
-    Extension(event_bus): Extension<EventBus>,
+    Extension(_event_bus): Extension<EventBus>,
     Extension(tx_sender): Extension<FinalizedTxSender>,
+    Extension(p2p_handle): Extension<crate::p2p::P2PHandle>,
     Path(canonical): Path<String>,
     Json(req): Json<RevokeReq>,
 ) -> Response {
@@ -2371,7 +2606,29 @@ async fn revoke_package(
         .to_string();
 
     // ── 1. Verify Ed25519 signature ───────────────────────────────────────────
-    let sig_msg = format!("{}:revoke:{}", canonical, req.reason);
+    if req.signature_version > 1
+        || (req.signature_version == 1 && (req.chain_id.is_none() || req.genesis_hash.is_none()))
+    {
+        return bad_request("Chain-bound revocation requires its chain ID and genesis hash");
+    }
+    let (chain_id, genesis_hash, is_validator_node) = {
+        let s = state.read().await;
+        let genesis = match s.chain.get_block_by_height(0) {
+            Ok(Some(block)) => block.hash(),
+            _ => return server_err("Canonical genesis is unavailable".to_owned()),
+        };
+        (s.config.chain_id.clone(), genesis, s.config.is_validator)
+    };
+    let proof = common::SignedRevocationRequest {
+        chain_id: req.chain_id.clone().unwrap_or(chain_id),
+        genesis_hash: req.genesis_hash.clone().unwrap_or(genesis_hash),
+        package_canonical: canonical.clone(),
+        reason: req.reason.clone(),
+        revoker_pubkey: req.revoker_pubkey.clone(),
+        signature: req.signature.clone(),
+        signature_version: req.signature_version,
+    };
+    let sig_msg = proof.signing_message();
     let sig_valid: Result<(), _> = (|| {
         let pk_bytes = hex::decode(&req.revoker_pubkey)
             .map_err(|_| anyhow::anyhow!("revoker_pubkey is not valid hex"))?;
@@ -2398,11 +2655,9 @@ async fn revoke_package(
     let (is_authorised, package_record) = {
         let s = state.read().await;
 
-        let is_validator = s
-            .validator_set
-            .validators
-            .iter()
-            .any(|v| v.pubkey == req.revoker_pubkey);
+        let is_validator = s.validator_set.validators.iter().any(|v| {
+            v.pubkey == req.revoker_pubkey && common::validator_status_is_active(&v.status)
+        });
         let package_record = match s.chain.get_package(&canonical) {
             Ok(record) => record,
             Err(e) => return server_err(e.to_string()),
@@ -2438,24 +2693,28 @@ async fn revoke_package(
                 revoked_by: req.revoker_pubkey.clone(),
                 evidence_hash: record.content_hash.clone(),
             };
-            if let Err(error) =
-                crate::finalized_tx::persist_and_notify(&state, &tx_sender, tx).await
-            {
-                return server_err(format!("Failed to persist revocation work: {}", error));
+            match crate::revocation_gossip::admit(&state, &proof).await {
+                Ok(false) => {
+                    return Json(serde_json::json!({ "status": "already_committed",
+                    "message": "Package is already revoked on the canonical chain" }))
+                    .into_response()
+                }
+                Ok(true) => {}
+                Err(error) => return bad_request(format!("Revocation was not admitted: {error}")),
+            }
+            if is_validator_node && tx_sender.send(tx).await.is_err() {
+                tracing::warn!(
+                    "Revocation notification unavailable; durable producer queue retained"
+                );
+            }
+            if let Err(error) = crate::revocation_gossip::broadcast(&p2p_handle, proof).await {
+                tracing::warn!(%error, "Revocation delivery deferred; durable signed proof retained");
             }
             tracing::info!(
                 canonical = %canonical,
                 revoker = %&req.revoker_pubkey[..req.revoker_pubkey.len().min(16)],
                 reason = %req.reason,
                 "Package revocation queued"
-            );
-            events::emit(
-                &event_bus,
-                events::RegistryEvent::package_revoked(
-                    &canonical,
-                    &req.reason,
-                    &req.revoker_pubkey,
-                ),
             );
             Json(serde_json::json!({
                 "status": "queued",
@@ -2475,7 +2734,12 @@ async fn get_proof(State(state): State<SharedState>, Path(canonical): Path<Strin
         .to_string();
     let s = state.read().await;
 
-    match crate::proof::build_proof(&canonical, &s.chain, &s.validator_set.validators) {
+    match crate::proof::build_proof(
+        &canonical,
+        &s.chain,
+        &s.validator_set_bootstrap,
+        &s.config.data_dir,
+    ) {
         Ok(Some(proof)) => Json(proof).into_response(),
         Ok(None) => not_found(format!("No proof available for: {}", canonical)),
         Err(e) => server_err(e.to_string()),
@@ -2712,7 +2976,11 @@ async fn list_blocks_paginated(
     };
 
     match s.chain.list_blocks(offset, limit) {
-        Ok(blocks) => {
+        Ok(mut blocks) => {
+            blocks.retain(|b| {
+                params.before_height.is_none_or(|h| b.header.height < h)
+                    && params.after_height.is_none_or(|h| b.header.height > h)
+            });
             let mut next_before_height = next_before;
             if next_before_height.is_none() && params.before_height.is_some() {
                 next_before_height = blocks.last().map(|b| b.header.height);
@@ -2939,7 +3207,7 @@ fn tx_touches_address(tx: &Transaction, addr: &str) -> bool {
         }
         Transaction::ValidatorLeave { validator_id } => validator_id.to_ascii_lowercase() == addr,
         Transaction::PublishAuthorizedV1 { authorization, .. } => {
-            authorization.publisher_address == addr
+            authorization.publisher_address.eq_ignore_ascii_case(addr)
         }
         Transaction::NamespaceLifecycleV2(event) => event.next_controller_evm_address == addr,
         // Publish / ownership lifecycle events use Ed25519 pubkeys, not EVM addresses — skip here.
@@ -2980,12 +3248,21 @@ async fn get_address(State(state): State<SharedState>, Path(address): Path<Strin
 
     let mut blocks_proposed = 0u32;
     let mut tx_count = 0u32;
+    let proposer_id = active
+        .as_ref()
+        .map(|v| v.id.as_str())
+        .unwrap_or(&normalized);
     for b in &blocks {
-        if b.header.proposer_id.to_ascii_lowercase() == normalized {
+        if b.header.proposer_id.eq_ignore_ascii_case(proposer_id) {
             blocks_proposed += 1;
         }
         for tx in &b.transactions {
-            if tx_touches_address(tx, &normalized) {
+            if tx_touches_address(tx, &normalized)
+                || active.as_ref().is_some_and(|v| {
+                    tx_touches_address(tx, &v.id.to_ascii_lowercase())
+                        || tx_touches_address(tx, &v.pubkey.to_ascii_lowercase())
+                })
+            {
                 tx_count += 1;
             }
         }
@@ -2993,11 +3270,13 @@ async fn get_address(State(state): State<SharedState>, Path(address): Path<Strin
 
     Json(serde_json::json!({
         "address": normalized,
-        "is_validator": registration.is_some(),
+        "is_validator": registration.is_some() || active.is_some(),
         "is_active_validator": active.is_some(),
         "validator": registration,
         "active_status": active.as_ref().map(|v| v.status.clone()),
         "stake": active.as_ref().map(|v| v.stake.to_string()),
+        "stake_unit": "CREG",
+        "node_id": active.as_ref().map(|v| v.id.clone()),
         "reputation": active.as_ref().map(|v| v.reputation),
         "blocks_proposed": blocks_proposed,
         "tx_count": tx_count,
@@ -3039,10 +3318,16 @@ async fn get_address_transactions(
     let scanned_blocks = blocks.len() as u64;
 
     let mut results: Vec<serde_json::Value> = Vec::new();
+    let active = s
+        .validator_set
+        .validators
+        .iter()
+        .find(|v| v.eth_address.eq_ignore_ascii_case(&normalized));
+    let proposer_id = active.map(|v| v.id.as_str()).unwrap_or(&normalized);
     for b in &blocks {
         let block_hash = b.hash();
         let ts = b.header.timestamp.to_rfc3339();
-        let proposer_match = b.header.proposer_id.to_ascii_lowercase() == normalized;
+        let proposer_match = b.header.proposer_id.eq_ignore_ascii_case(proposer_id);
         if proposer_match {
             results.push(serde_json::json!({
                 "block_height": b.header.height,
@@ -3054,7 +3339,12 @@ async fn get_address_transactions(
             }));
         }
         for (idx, tx) in b.transactions.iter().enumerate() {
-            if tx_touches_address(tx, &normalized) {
+            if tx_touches_address(tx, &normalized)
+                || active.is_some_and(|v| {
+                    tx_touches_address(tx, &v.id.to_ascii_lowercase())
+                        || tx_touches_address(tx, &v.pubkey.to_ascii_lowercase())
+                })
+            {
                 results.push(serde_json::json!({
                     "block_height": b.header.height,
                     "block_hash": block_hash,
@@ -3138,9 +3428,13 @@ async fn get_validator_profile(
         };
 
     let blocks = s.chain.list_blocks(0, 500).unwrap_or_default();
+    let proposer_id = active
+        .as_ref()
+        .map(|v| v.id.as_str())
+        .unwrap_or(&normalized);
     let recent_proposals: Vec<serde_json::Value> = blocks
         .iter()
-        .filter(|b| b.header.proposer_id.to_ascii_lowercase() == normalized)
+        .filter(|b| b.header.proposer_id.eq_ignore_ascii_case(proposer_id))
         .take(25)
         .map(|b| block_to_json(b))
         .collect();
@@ -3150,11 +3444,17 @@ async fn get_validator_profile(
         "registration": registration,
         "in_active_set": in_active_set,
         "stake": stake,
+        "stake_unit": "CREG",
         "reputation": reputation,
         "status": status,
         "performance_score": performance_score,
         "contribution_count": contribution_count,
         "recent_proposals": recent_proposals,
+        "scanned_blocks": blocks.len(),
+        "proposal_limit": 25,
+        "node_id": active.as_ref().map(|v| v.id.clone()),
+        "eth_address": active.as_ref().map(|v| v.eth_address.clone()),
+        "pubkey": active.as_ref().map(|v| v.pubkey.clone()),
         "incentives": {
             "validator_rewards_contract": s.config.validator_rewards_addr.clone(),
             "treasury_addr": s.config.treasury_addr.clone(),
@@ -3304,6 +3604,27 @@ async fn search_handler(
         || (!q.starts_with("0x") && !q.chars().all(|c| c.is_ascii_digit()) && !q.contains('@'))
     {
         let q_lower = q.to_ascii_lowercase();
+        // Package names are the primary free-text search target. The scan is
+        // bounded; direct canonical lookup above remains available for older
+        // entries beyond this window.
+        if let Ok((packages, _)) = s.chain.list_packages(0, 1000, None, None) {
+            for record in packages {
+                if matches.len() >= MAX_RESULTS {
+                    break;
+                }
+                let canonical = record.id.canonical();
+                if canonical.to_ascii_lowercase().contains(&q_lower)
+                    && !matches.iter().any(|m| m.title == canonical)
+                {
+                    matches.push(SearchMatch {
+                        kind: "package",
+                        href: format!("/package/{}", urlencoding::encode(&canonical)),
+                        title: canonical,
+                        subtitle: "committed package".into(),
+                    });
+                }
+            }
+        }
         // Scan validator aliases
         for (key, reg) in s.validator_registrations.iter() {
             if matches.len() >= MAX_RESULTS {
@@ -3719,6 +4040,8 @@ async fn submit_namespace_lifecycle_inner(
                         ),
                         vrf_output: None,
                         vrf_proof: None,
+                        view_number: 0,
+                        view_change_certificate: vec![],
                     },
                     transactions: vec![tx.clone()],
                     pbft_signatures: vec![],
@@ -4539,7 +4862,7 @@ pub struct VoteMessage {
 
 async fn receive_vote(
     State(state): State<SharedState>,
-    Extension(event_bus): Extension<EventBus>,
+    Extension(_event_bus): Extension<EventBus>,
     Json(vote): Json<VoteMessage>,
 ) -> Response {
     // ── Authenticate: verify the vote is from a known validator ──────────────
@@ -4722,15 +5045,6 @@ async fn receive_vote(
 
     s.record_package_vote(vote.consensus_subject.clone(), sig);
 
-    events::emit(
-        &event_bus,
-        events::RegistryEvent::validator_voted(
-            &vote.validator_id,
-            &vote.consensus_subject,
-            vote.approved,
-        ),
-    );
-
     Json(serde_json::json!({ "status": "accepted" })).into_response()
 }
 
@@ -4745,23 +5059,15 @@ pub struct AuditSubmission {
 
 async fn submit_audit(
     Path(id): Path<u64>,
-    Json(audit): Json<AuditSubmission>,
+    Json(_audit): Json<AuditSubmission>,
 ) -> impl IntoResponse {
-    tracing::info!(
-        "Received AAA audit for appeal {}: approved={}",
-        id,
-        audit.approved
-    );
-
-    // In a production node, this would:
-    // 1. Verify the AI model's signature/proof.
-    // 2. Submit the submitAIVerdict() transaction to the Appeal.sol contract.
-    // 3. Update the local chain store if the block producer picks it up.
-
-    Json(serde_json::json!({
-        "status":  "submitted",
-        "message": "AI verdict received and queued for on-chain finalization."
-    }))
+    // No model-proof verifier, deployed Appeal transaction path, or durable
+    // outbox is wired here. Do not acknowledge a submission that cannot run.
+    (StatusCode::NOT_IMPLEMENTED, Json(serde_json::json!({
+        "status": "unavailable",
+        "appeal_id": id,
+        "error": "Audit finalization is unavailable until the real proof verifier and Appeal contract delivery are configured"
+    }))).into_response()
 }
 
 // GET /metrics  (Prometheus text format)
@@ -5273,6 +5579,7 @@ mod tests {
             sync_max_peer_tip: 0,
             reward_emissions_succeeded: 0,
             reward_emissions_failed: 0,
+            reward_emissions_skipped: 0,
             treasury_balance: 0,
             pending_rewards_estimate: 0,
             total_rewards_distributed: 0,
@@ -6515,6 +6822,8 @@ mod tests {
                     validator_set_hash: common::canonical_validator_set_hash(&state.validator_set),
                     vrf_output: None,
                     vrf_proof: None,
+                    view_number: 0,
+                    view_change_certificate: vec![],
                 },
                 transactions: Vec::new(),
                 pbft_signatures: Vec::new(),

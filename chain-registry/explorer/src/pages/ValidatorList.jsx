@@ -36,7 +36,7 @@ export default function ValidatorList() {
             {loading && !list.length
               ? Array.from({ length: 6 }).map((_, i) => <SkeletonRow key={i} cells={5} />)
               : list.map((v, i) => {
-                const addr = (v.identity?.evm_address || v.evm_address || '').toLowerCase()
+                const addr = (v.identity?.evm_address || v.evm_address || v.node_id || '').toLowerCase()
                 const nodeId = v.identity?.node_id || v.node_id || '—'
                 const status = v.active ? 'Active' : (v.status || v.staking_state || 'Pending')
                 const stakeDisplay = v.stake != null ? `${v.stake} CREG` : '—'

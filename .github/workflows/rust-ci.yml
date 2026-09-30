@@ -48,6 +48,7 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  CARGO_BUILD_JOBS: 2
 
 defaults:
   run:
@@ -105,6 +106,45 @@ jobs:
         env:
           # Unreachable on purpose -> tests use their offline fallback path.
           CREG_NODE_URL: "http://127.0.0.1:19999"
+
+  phase-c-recovery:
+    name: Phase C production build and durable recovery
+    runs-on: ubuntu-latest
+    env:
+      CARGO_PROFILE_DEV_DEBUG: 0
+      CARGO_PROFILE_TEST_DEBUG: 0
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (pinned)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.93.0"
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libssl-dev build-essential clang llvm libclang-dev \
+            cmake libopenblas-dev protobuf-compiler libprotobuf-dev
+
+      - name: Cache production recovery dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            chain-registry/target
+          key: ${{ runner.os }}-phase-c-recovery-1.93.0-${{ hashFiles('chain-registry/Cargo.lock') }}
+
+      - name: Compile real fleet node binaries
+        run: cargo check --locked --package chain-registry-node --bins --features phase-c-real-fleet
+
+      - name: Verify durable PBFT signing recovery
+        run: cargo test --locked --package chain-registry-node --features phase-c-real-fleet --lib pbft_safety::tests
+
+      - name: Verify relayer validation
+        run: cargo test --locked --package chain-registry-relayer --bin creg-relayer
 
   consensus-finalization-smoke:
     name: Testnet consensus smoke

@@ -184,10 +184,18 @@ pub fn snapshot_status() -> OsvSnapshotStatus {
         .count();
     let expected_epoch = bundle_epoch();
     let error = if snapshot.schema != SCHEMA_V1 {
-        Some(format!("unsupported OSV snapshot schema '{}'", snapshot.schema))
+        Some(format!(
+            "unsupported OSV snapshot schema '{}'",
+            snapshot.schema
+        ))
     } else if snapshot.epoch != expected_epoch {
-        Some(format!("OSV snapshot epoch '{}' does not match configured epoch '{expected_epoch}'", snapshot.epoch))
-    } else if snapshot.source != "https://api.osv.dev/v1/query" || snapshot.built_at.trim().is_empty() {
+        Some(format!(
+            "OSV snapshot epoch '{}' does not match configured epoch '{expected_epoch}'",
+            snapshot.epoch
+        ))
+    } else if snapshot.source != "https://api.osv.dev/v1/query"
+        || snapshot.built_at.trim().is_empty()
+    {
         Some("OSV snapshot must identify the official OSV query API and its build time".to_string())
     } else if snapshot.entries.is_empty() {
         Some("OSV snapshot contains no successfully queried package versions".to_string())

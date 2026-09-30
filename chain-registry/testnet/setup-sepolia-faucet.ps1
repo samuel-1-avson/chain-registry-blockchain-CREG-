@@ -1,11 +1,11 @@
 # Create a NEW Sepolia CREG faucet wallet + env file. Does not use the lost deployer key.
 #
-# The old faucet pool (20M CREG at 0xf4c0bdBB681A61Aa0B123E82C04b0d692F53D58e) stays on-chain
-# but is deprecated — funds cannot be moved without that private key.
+# The public faucet is a bounded hot wallet. Any tCREG allocation must follow the
+# reviewed Governance reserve process; do not fund it from the full treasury balance.
 #
 # Usage:
 #   .\testnet\setup-sepolia-faucet.ps1
-#   .\testnet\fund-sepolia-faucet-governance.ps1   # needs governance signer key(s)
+#   .\testnet\fund-sepolia-faucet-governance.ps1 -FaucetAllocationCreg <approved-tranche>
 #   .\testnet\start-sepolia-faucet.ps1
 #   # drip to publisher: open http://localhost:8082 or .\testnet\drip-sepolia-faucet.ps1 -Address 0x...
 
@@ -50,9 +50,15 @@ Set-Content -Path (Join-Path $secretsDir "faucet-sepolia-$ts.address.txt") -Valu
 
 try { icacls $keyLatest /inheritance:r /grant:r "${env:USERNAME}:(R,W)" | Out-Null } catch { }
 
-$spec = Get-Content (Join-Path $scriptDir "chain-spec.sepolia.json") -Raw | ConvertFrom-Json
-$token = $spec.contracts.creg_token
+$deploymentManifest = Get-Content (Join-Path $scriptDir "phase-c\deployment-manifest.json") -Raw | ConvertFrom-Json
+$token = $deploymentManifest.cregToken
+$deploymentTxHash = $deploymentManifest.cregTokenDeploymentTxHash
+$deploymentBlock = $deploymentManifest.cregTokenDeploymentBlock
+if ($token -notmatch '^0x[a-fA-F0-9]{40}$' -or $deploymentTxHash -notmatch '^0x[a-fA-F0-9]{64}$' -or $deploymentBlock -notmatch '^\d+$') {
+    throw "Phase C deployment manifest is missing the selected token address or verified deployment coordinates"
+}
 $rpc = "https://ethereum-sepolia-rpc.publicnode.com"
+$receiptRpc = "https://1rpc.io/sepolia"
 $deprecated = "0xf4c0bdBB681A61Aa0B123E82C04b0d692F53D58e"
 
 @"
@@ -64,6 +70,11 @@ FAUCET_PRIVATE_KEY=$hex
 FAUCET_ADDRESS=$address
 FAUCET_TOKEN_CONTRACT=$token
 FAUCET_CHAIN_ID=11155111
+FAUCET_RECONCILIATION_RPC_URL=$rpc
+FAUCET_DEPLOYMENT_RECEIPT_RPC_URL=$receiptRpc
+FAUCET_TOKEN_DEPLOYMENT_TX_HASH=$deploymentTxHash
+FAUCET_TOKEN_DEPLOYMENT_BLOCK=$deploymentBlock
+FAUCET_RECONCILIATION_CONFIRMATIONS=64
 FAUCET_DRIP_AMOUNT=1000000000000000000000
 FAUCET_NATIVE_DRIP_AMOUNT=0
 FAUCET_COOLDOWN_SECS=300
@@ -92,9 +103,9 @@ Write-Host "  1) Back up $keyLatest to a password manager"
 Write-Host "  2) Fund NEW faucet with Sepolia ETH (gas for drips):"
 Write-Host "     .\testnet\fund-sepolia-faucet-eth.ps1"
 Write-Host "     (or https://www.alchemy.com/faucets/ethereum-sepolia)"
-Write-Host "  3) Mint CREG into the new faucet via governance:"
-Write-Host "     .\testnet\fund-sepolia-faucet-governance.ps1"
-Write-Host "     (set GOVERNANCE_SIGNER_KEY in testnet\.env.sepolia - must be a governance signer)"
+Write-Host "  3) After the reserve and faucet tranche are approved, preview the Governance transfer:"
+Write-Host "     .\testnet\fund-sepolia-faucet-governance.ps1 -FaucetAllocationCreg <approved-tranche>"
+Write-Host "     (execution also requires the approved tranche setting and threshold governance signers)"
 Write-Host "  4) Start faucet:"
 Write-Host "     .\testnet\start-sepolia-faucet.ps1"
 Write-Host "  5) Drip to your publisher, then stake:"

@@ -1111,7 +1111,10 @@ pub async fn run(node_url: Option<&str>) -> Result<()> {
 // ============================================================================
 
 async fn data_fetcher_loop(app: Arc<RwLock<App>>, api_base: String, tx: mpsc::Sender<DataUpdate>) {
-    let client = reqwest::Client::builder().timeout(Duration::from_secs(15)).build().expect("HTTP client");
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .expect("HTTP client");
     let mut last_stats_refresh = Instant::now();
     let mut last_metrics_refresh: Option<Instant> = None;
     let mut last_block_height: Option<u64> = None;
@@ -1152,7 +1155,9 @@ async fn data_fetcher_loop(app: Arc<RwLock<App>>, api_base: String, tx: mpsc::Se
                             complete = false;
                         }
                     }
-                    if complete { last_block_height = Some(stats.tip_height); }
+                    if complete {
+                        last_block_height = Some(stats.tip_height);
+                    }
                 }
             } else {
                 // Keep the UI explicit about REST availability without
@@ -1221,10 +1226,7 @@ async fn data_fetcher_loop(app: Arc<RwLock<App>>, api_base: String, tx: mpsc::Se
             .await
             {
                 Ok(json) => DataUpdate::MetricsHistory {
-                    samples: json["samples"]
-                        .as_array()
-                        .cloned()
-                        .unwrap_or_default(),
+                    samples: json["samples"].as_array().cloned().unwrap_or_default(),
                     status: json["status"]
                         .as_str()
                         .unwrap_or("collector unavailable")
@@ -1268,8 +1270,12 @@ async fn fetch_stats(client: &reqwest::Client, api_base: &str) -> Result<Network
             .unwrap_or("Unknown")
             .to_string(),
         l1_block: json["l1_block"].as_u64().unwrap_or(0),
-        finalized_height: json.get("finalization_source").and_then(|_| json["finalized_height"].as_u64()),
-        finalization_lag: json.get("finalization_source").and_then(|_| json["finalization_lag"].as_u64()),
+        finalized_height: json
+            .get("finalization_source")
+            .and_then(|_| json["finalized_height"].as_u64()),
+        finalization_lag: json
+            .get("finalization_source")
+            .and_then(|_| json["finalization_lag"].as_u64()),
         validator_set_source: json["validator_set_source"]
             .as_str()
             .unwrap_or("unknown")
@@ -1299,14 +1305,29 @@ async fn fetch_block(client: &reqwest::Client, api_base: &str, height: u64) -> R
                     let record = t.get("record").unwrap_or(t);
                     let id = &record["id"];
                     TransactionInfo {
-                    _id: t["package_canonical"].as_str().map(str::to_string).unwrap_or_else(|| format!("{}:{}@{}", id["ecosystem"].as_str().unwrap_or("?"), id["name"].as_str().unwrap_or("?"), id["version"].as_str().unwrap_or("?"))),
-                    tx_type: t["type"].as_str().unwrap_or("unknown").to_string(),
-                    package_name: id["name"].as_str().map(|s| s.to_string()),
-                    package_version: id["version"].as_str().map(|s| s.to_string()),
-                    publisher: record["publisher_pubkey"]
-                        .as_str()
-                        .map(|s| s[..8.min(s.len())].to_string()),
-                    status: if t["type"] == "revoke" { "revoked" } else { record["status"].as_str().unwrap_or("unknown") }.to_string(),
+                        _id: t["package_canonical"]
+                            .as_str()
+                            .map(str::to_string)
+                            .unwrap_or_else(|| {
+                                format!(
+                                    "{}:{}@{}",
+                                    id["ecosystem"].as_str().unwrap_or("?"),
+                                    id["name"].as_str().unwrap_or("?"),
+                                    id["version"].as_str().unwrap_or("?")
+                                )
+                            }),
+                        tx_type: t["type"].as_str().unwrap_or("unknown").to_string(),
+                        package_name: id["name"].as_str().map(|s| s.to_string()),
+                        package_version: id["version"].as_str().map(|s| s.to_string()),
+                        publisher: record["publisher_pubkey"]
+                            .as_str()
+                            .map(|s| s[..8.min(s.len())].to_string()),
+                        status: if t["type"] == "revoke" {
+                            "revoked"
+                        } else {
+                            record["status"].as_str().unwrap_or("unknown")
+                        }
+                        .to_string(),
                     }
                 })
                 .collect()
@@ -1509,10 +1530,20 @@ async fn fetch_mempool(client: &reqwest::Client, api_base: &str) -> Result<Vec<M
 /// derives a best-effort snapshot from `/v1/chain/stats` and `/v1/validators`.
 async fn fetch_runtime_config(client: &reqwest::Client, api_base: &str) -> Result<RuntimeIdentity> {
     if operator_api_key().is_none() {
-        let stats = get_json_with_fallback(client,
-            format!("{api_base}/v1/public/chain/stats"), Some(format!("{api_base}/v1/chain/stats")), ApiRouteScope::Public).await?;
-        let health = get_json_with_fallback(client,
-            format!("{api_base}/v1/public/health"), Some(format!("{api_base}/v1/health")), ApiRouteScope::Public).await?;
+        let stats = get_json_with_fallback(
+            client,
+            format!("{api_base}/v1/public/chain/stats"),
+            Some(format!("{api_base}/v1/chain/stats")),
+            ApiRouteScope::Public,
+        )
+        .await?;
+        let health = get_json_with_fallback(
+            client,
+            format!("{api_base}/v1/public/health"),
+            Some(format!("{api_base}/v1/health")),
+            ApiRouteScope::Public,
+        )
+        .await?;
         return Ok(RuntimeIdentity {
             node_id: health["node_id"].as_str().unwrap_or("unknown").into(),
             validator_pubkey: None,
@@ -1522,8 +1553,14 @@ async fn fetch_runtime_config(client: &reqwest::Client, api_base: &str) -> Resul
             spec_signature_verified: stats["spec_signature_verified"].as_bool().unwrap_or(false),
             l1_rpc_configured: stats["l1_rpc_configured"].as_bool().unwrap_or(false),
             is_validator: health["is_validator"].as_bool().unwrap_or(false),
-            validator_set_source: stats["validator_set_source"].as_str().unwrap_or("unknown").into(),
-            validator_set_sync_state: stats["validator_set_sync_state"].as_str().unwrap_or("unknown").into(),
+            validator_set_source: stats["validator_set_source"]
+                .as_str()
+                .unwrap_or("unknown")
+                .into(),
+            validator_set_sync_state: stats["validator_set_sync_state"]
+                .as_str()
+                .unwrap_or("unknown")
+                .into(),
         });
     }
     let json = get_json_with_fallback(
@@ -1565,11 +1602,19 @@ async fn fetch_consensus_state(client: &reqwest::Client, api_base: &str) -> Resu
     .await
     {
         let total = json["total_validators"].as_u64().unwrap_or(0) as usize;
-        let round = json["active_rounds"].as_array().and_then(|rounds| rounds.first());
+        let round = json["active_rounds"]
+            .as_array()
+            .and_then(|rounds| rounds.first());
         let round_data = round.unwrap_or(&json);
         return Ok(ConsensusState {
-            round: round_data["height"].as_u64().or_else(|| round_data["round"].as_u64()).unwrap_or(0),
-            phase: round_data["phase"].as_str().unwrap_or(if round.is_some() { "UNKNOWN" } else { "IDLE" }).to_uppercase(),
+            round: round_data["height"]
+                .as_u64()
+                .or_else(|| round_data["round"].as_u64())
+                .unwrap_or(0),
+            phase: round_data["phase"]
+                .as_str()
+                .unwrap_or(if round.is_some() { "UNKNOWN" } else { "IDLE" })
+                .to_uppercase(),
             proposer: round_data["proposer"]
                 .as_str()
                 .unwrap_or("unknown")
@@ -1579,7 +1624,9 @@ async fn fetch_consensus_state(client: &reqwest::Client, api_base: &str) -> Resu
                 + "…",
             prepare_votes: round_data["prepare_votes"].as_u64().unwrap_or(0) as usize,
             commit_votes: round_data["commit_votes"].as_u64().unwrap_or(0) as usize,
-            quorum: json["quorum"].as_u64().unwrap_or((total * 2 / 3 + 1) as u64) as usize,
+            quorum: json["quorum"]
+                .as_u64()
+                .unwrap_or((total * 2 / 3 + 1) as u64) as usize,
             total_validators: total,
             fetched_at: Instant::now(),
         });
@@ -1835,7 +1882,11 @@ fn refresh_preflight(app: &mut App) {
                 .validators
                 .iter()
                 .any(|validator| validator.id == id.node_id && validator.is_active);
-            let listed = if has_pubkey { listed_by_key } else { listed_by_node_id };
+            let listed = if has_pubkey {
+                listed_by_key
+            } else {
+                listed_by_node_id
+            };
             checks.push(PreflightCheck {
                 name: "Validator identity".into(),
                 status: if has_pubkey && listed {
@@ -1917,7 +1968,9 @@ fn short_hash(value: &str) -> String {
 
 fn rest_api_ready(app: &App) -> bool {
     app.last_api_error.is_none()
-        && app.last_api_success_at.is_some_and(|at| at.elapsed() <= Duration::from_secs(15))
+        && app
+            .last_api_success_at
+            .is_some_and(|at| at.elapsed() <= Duration::from_secs(15))
 }
 
 fn apply_data_update(app: &mut App, update: DataUpdate) {
@@ -3031,17 +3084,17 @@ fn draw_disconnect_banner(f: &mut Frame, app: &App) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-        .border_style(Style::default().fg(if rest_ready {
-            Color::Yellow
-        } else {
+                .border_style(Style::default().fg(if rest_ready {
+                    Color::Yellow
+                } else {
                     Color::Red
                 })),
         )
         .style(
             Style::default()
                 .fg(Color::White)
-            .bg(if rest_ready {
-                Color::Yellow
+                .bg(if rest_ready {
+                    Color::Yellow
                 } else {
                     Color::Red
                 })
@@ -4237,7 +4290,14 @@ fn draw_network(f: &mut Frame, app: &App, area: Rect) {
             Span::styled(
                 format!(
                     "#{} (lag {})",
-                    app.stats.finalized_height.map(|h| h.to_string()).unwrap_or_else(|| "unknown".into()), app.stats.finalization_lag.map(|h| h.to_string()).unwrap_or_else(|| "unknown".into())
+                    app.stats
+                        .finalized_height
+                        .map(|h| h.to_string())
+                        .unwrap_or_else(|| "unknown".into()),
+                    app.stats
+                        .finalization_lag
+                        .map(|h| h.to_string())
+                        .unwrap_or_else(|| "unknown".into())
                 ),
                 Style::default().fg(if app.stats.finalization_lag.is_some_and(|lag| lag <= 2) {
                     Theme::success()
@@ -4295,8 +4355,14 @@ fn draw_mempool(f: &mut Frame, app: &App, area: Rect) {
 
     // Header with count
     let header_text = if operator_api_key().is_none() {
-        " Pending details require operator credentials; count is available in public chain stats".to_string()
-    } else { format!(" {} pending transactions waiting for validator consensus", app.mempool.len()) };
+        " Pending details require operator credentials; count is available in public chain stats"
+            .to_string()
+    } else {
+        format!(
+            " {} pending transactions waiting for validator consensus",
+            app.mempool.len()
+        )
+    };
     let header = Paragraph::new(header_text)
         .style(Style::default().fg(Theme::text()))
         .block(
@@ -5100,7 +5166,10 @@ fn draw_metrics(f: &mut Frame, app: &App, area: Rect) {
         .max(height_max)
         .style(Style::default().fg(Theme::success()));
     let tx_sparkline = Sparkline::default()
-        .block(rounded_block(" tx in recently fetched blocks (live only) ", true))
+        .block(rounded_block(
+            " tx in recently fetched blocks (live only) ",
+            true,
+        ))
         .data(&tx_data)
         .max(tx_max)
         .style(Style::default().fg(Theme::text_dim()));
@@ -5120,7 +5189,11 @@ fn draw_metrics(f: &mut Frame, app: &App, area: Rect) {
     .block(rounded_block(" chain metrics ", false));
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(4), Constraint::Min(5), Constraint::Length(4)])
+        .constraints([
+            Constraint::Length(4),
+            Constraint::Min(5),
+            Constraint::Length(4),
+        ])
         .split(area);
     f.render_widget(summary, chunks[0]);
     f.render_widget(height_sparkline, chunks[1]);
@@ -5220,7 +5293,9 @@ mod tests {
         let yank = filtered_palette_indices("copy");
         assert!(yank.iter().any(|&idx| palette_commands()[idx].id == "yank"));
         let profile = filtered_palette_indices("profile");
-        assert!(profile.iter().any(|&idx| palette_commands()[idx].id == "profile"));
+        assert!(profile
+            .iter()
+            .any(|&idx| palette_commands()[idx].id == "profile"));
         let views = filtered_palette_indices("pbft");
         assert!(views
             .iter()

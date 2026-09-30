@@ -9,7 +9,7 @@ import { ErrorState, EmptyState } from '../components/ErrorState.jsx'
 import { StatusBadge } from '../components/StatusBadge.jsx'
 import { ShareButton } from '../components/ShareButton.jsx'
 import { CursorPager } from '../components/Pagination.jsx'
-import { formatWei, formatNumber, isEvmAddress } from '../utils/format.js'
+import { formatNumber, isEvmAddress } from '../utils/format.js'
 
 const KIND_VARIANT = {
   publish: 'success',
@@ -30,7 +30,7 @@ function RoleBadges({ profile, txList }) {
   // Check for publisher activity
   const hasPublish = txList.some((t) => t.kind === 'publish' || t.kind === 'rotate-key')
   if (hasPublish) roles.push({ label: 'Publisher', variant: 'info' })
-  const hasGovernance = txList.some((t) => t.kind === 'governance-vote' || t.kind === 'propose')
+  const hasGovernance = txList.some((t) => t.kind === 'governance-vote')
   if (hasGovernance) roles.push({ label: 'Governance voter', variant: 'warning' })
   if (roles.length === 0) roles.push({ label: 'Account', variant: 'muted' })
 
@@ -45,7 +45,7 @@ function RoleBadges({ profile, txList }) {
 
 /* ── L1 Etherscan link ─────────────────────────────────────────────────────── */
 function EtherscanLink({ address }) {
-  const base = import.meta.env.VITE_L1_EXPLORER_URL || 'https://etherscan.io'
+  const base = import.meta.env.VITE_L1_EXPLORER_URL || 'https://sepolia.etherscan.io'
   return (
     <a
       href={`${base}/address/${address}`}
@@ -160,7 +160,7 @@ export default function AddressPage() {
 
           {/* Stake info */}
           <div style={{ padding: 'var(--space-3)', background: 'var(--bg-elevated)', borderRadius: 'var(--radius-sm)', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 'var(--space-3)' }}>
-            <MiniStat label="Stake" value={`${p.stake ? formatWei(p.stake) : reg ? formatWei(reg.stake) : '0'} CREG`} />
+            <MiniStat label="Stake" value={`${p.stake != null ? formatNumber(p.stake) : reg?.stake != null ? formatNumber(reg.stake) : '—'} CREG`} />
             <MiniStat label="Reputation" value={p.reputation ?? reg?.reputation ?? '—'} />
             <MiniStat label="Blocks proposed" value={formatNumber(p.blocks_proposed ?? 0)} />
             <MiniStat label="Txs (recent)" value={formatNumber(p.tx_count ?? 0)} />

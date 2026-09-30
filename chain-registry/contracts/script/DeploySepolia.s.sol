@@ -14,7 +14,9 @@ import "../ValidatorRewards.sol";
 import "../PinningRewards.sol";
 
 /// @notice Deploys the full chain-registry contract suite to Sepolia.
-/// @dev Uses the production ZKVerifier (not DevZKVerifier).
+/// @dev Optional VRF and ZK components remain unset until real coordinator
+///      configuration and a real verifying key are supplied. No placeholder
+///      verifier or coordinator is deployed by this script.
 ///      Run with:
 ///        forge script contracts/script/DeploySepolia.s.sol:DeploySepolia \
 ///          --rpc-url $SEPOLIA_RPC_URL --broadcast --verify -vvvv
@@ -52,16 +54,16 @@ contract DeploySepolia is Script {
 
         governance = new Governance(signers, threshold);
         reputation = new Reputation(address(governance));
-        vrf        = new VRF(address(1), bytes32(0), 0, address(governance));
+        // Registry stores the VRF address but does not call it in this alpha
+        // deployment. Four validators all join the mandatory committee.
+        vrf        = VRF(address(0));
 
-        // CregToken: deployer gets initial supply for faucet seeding and ops.
+        // CregToken: initial supply remains with the deployer until separate
+        // allocations are approved and transferred under the tokenomics policy.
         cregToken = new CregToken(deployer, deployer, deployer, deployer);
 
-        // Fund the faucet address with 20M tCREG.
-        address faucetAddr = vm.envOr("FAUCET_ADDRESS", address(0));
-        if (faucetAddr != address(0)) {
-            cregToken.transfer(faucetAddr, 20_000_000 ether);
-        }
+        // Faucet funding is a separate policy and governance gate. The deploy
+        // script never transfers the initial supply to a public hot wallet.
 
         staking    = new Staking(address(governance), address(cregToken));
         stakingDeployBlock = block.number;
@@ -73,17 +75,9 @@ contract DeploySepolia is Script {
         );
         pinningRewards = new PinningRewards(address(cregToken));
 
-        // Production ZKVerifier for Sepolia.
-        zkVerifier = new ZKVerifier(
-            [uint256(1), uint256(2)],
-            [uint256(3), uint256(4)],
-            [uint256(5), uint256(6)],
-            [uint256(7), uint256(8)],
-            [uint256(9), uint256(10)],
-            [uint256(11), uint256(12)],
-            [uint256(13), uint256(14)],
-            new uint256[2][](0)
-        );
+        // No ZK verification key ceremony has been completed for this alpha.
+        // Registry.zkValidationEnabled starts false and must remain false.
+        zkVerifier = ZKVerifier(address(0));
 
         registry   = new ChainRegistry(
             address(staking),
@@ -150,6 +144,10 @@ contract DeploySepolia is Script {
     }
 
     function _seedFirstValidator(uint256 deployerKey, address deployer) internal {
+        if (governance.threshold() != 1) {
+            console.log("Seed skipped: multisig admission requires a separate approved proposal");
+            return;
+        }
         uint256 bridgeKey;
         try vm.envUint("CREG_BRIDGE_KEY") returns (uint256 k) {
             bridgeKey = k;
@@ -191,6 +189,10 @@ contract DeploySepolia is Script {
     /// @dev ISSUE-008: enable finalize relay allowlist on testnet so only the chain
     ///      node bridge (or configured relayer) may call finalizePackage.
     function _configureFinalizeRelay(uint256 deployerKey) internal {
+        if (governance.threshold() != 1) {
+            console.log("Finalize relay setup deferred: multisig requires co-signed proposal");
+            return;
+        }
         if (!vm.envOr("ENFORCE_FINALIZE_RELAYS", true)) {
             console.log("Finalize relay enforcement skipped (ENFORCE_FINALIZE_RELAYS=false)");
             return;

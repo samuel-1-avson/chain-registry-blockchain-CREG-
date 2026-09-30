@@ -635,6 +635,12 @@ pub async fn admit_publish_request(
                 ));
             }
         }
+        state
+            .chain
+            .emit_registry_event(crate::events::RegistryEvent::package_submitted(
+                &canonical,
+                &request.publisher_pubkey,
+            ));
         state.pending_pool.len()
     };
 
@@ -1404,6 +1410,7 @@ rule TestMaliciousPayload {{
             sync_max_peer_tip: 0,
             reward_emissions_succeeded: 0,
             reward_emissions_failed: 0,
+            reward_emissions_skipped: 0,
             treasury_balance: 0,
             pending_rewards_estimate: 0,
             total_rewards_distributed: 0,

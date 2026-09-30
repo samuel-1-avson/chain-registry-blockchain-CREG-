@@ -32,7 +32,7 @@ export function Layout({ children, sseState, reconnectAttempt, chainStats }) {
       <a href="#main-content" className="explorer-skip">
         Skip to main content
       </a>
-      <TestnetPhaseBanner />
+      <TestnetPhaseBanner chainStats={chainStats} />
       <header className="explorer-header">
         <div className="explorer-header-inner">
           <Link to="/" className="explorer-brand">

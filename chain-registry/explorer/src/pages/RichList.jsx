@@ -85,7 +85,7 @@ export default function RichList() {
                   <tr key={act.identity?.evm_address || `r-${i}`}>
                     <td style={{ color: 'var(--text-secondary)' }}>{i + 1}</td>
                     <td>
-                      <Hash value={act.identity?.evm_address} full link />
+                      <Hash value={act.identity?.evm_address || act.identity?.node_id} kind="validator" full link />
                     </td>
                     <td>
                       {act.alias && <span style={{ color: 'var(--accent-primary-light)', fontWeight: 500 }}>{act.alias}</span>}

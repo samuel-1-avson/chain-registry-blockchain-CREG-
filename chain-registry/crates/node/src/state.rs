@@ -245,6 +245,8 @@ pub struct NodeState {
     pub reward_emissions_succeeded: u64,
     /// Failed L1 reward emissions (including tx send/watch errors)
     pub reward_emissions_failed: u64,
+    /// Reward jobs skipped because no finalized durable dispatcher is configured.
+    pub reward_emissions_skipped: u64,
     // Live treasury / incentives values (populated via small L1 queries for monitoring)
     pub treasury_balance: u128,
     pub pending_rewards_estimate: u128,
@@ -312,11 +314,24 @@ impl NodeState {
         vote: common::ValidatorSignature,
     ) {
         let subject = subject.into();
+        let repeated = self.package_rounds.get(&subject).is_some_and(|round| {
+            round.signatures().iter().any(|previous| {
+                previous.validator_id == vote.validator_id && previous.signature == vote.signature
+            })
+        });
+        let event = crate::events::RegistryEvent::validator_voted(
+            &vote.validator_id,
+            &subject,
+            matches!(&vote.vote, common::ValidatorVote::Approve),
+        );
         match self.package_rounds.entry(subject.clone()) {
             Entry::Occupied(mut entry) => entry.get_mut().record_vote(vote),
             Entry::Vacant(entry) => {
                 entry.insert(PackageRound::from_vote(subject, vote));
             }
+        }
+        if !repeated {
+            self.chain.emit_registry_event(event);
         }
     }
 
@@ -328,8 +343,114 @@ impl NodeState {
         self.package_rounds.remove(subject);
     }
 
-    /// Apply forced-inclusion bookkeeping after a block is committed locally.
+    /// Reconcile only rounds whose exact block is already canonically stored.
+    /// Future or conflicting prepared values remain retained for recovery.
+    pub(crate) fn reconcile_committed_pbft_rounds(&mut self) -> anyhow::Result<usize> {
+        let tip = self.chain.tip_height()?;
+        let mut reconciled = 0;
+        for round in self.pbft_engine.observability_snapshot() {
+            if round.block_height > tip || round.phase == "finalised" {
+                continue;
+            }
+            let block = self
+                .chain
+                .get_block_by_height(round.block_height)?
+                .ok_or_else(|| anyhow::anyhow!("canonical PBFT reconciliation block is missing"))?;
+            if block.hash() != round.block_hash {
+                if round.phase == "failed" && round.prepare_count < round.quorum {
+                    continue;
+                }
+                anyhow::bail!(
+                    "retained PBFT round conflicts with canonical height {}",
+                    round.block_height
+                );
+            }
+            let authority = crate::validator_set_history::verification_set_at(
+                &self.config.data_dir,
+                block.header.height,
+                &self.validator_set_bootstrap,
+            )
+            .map_err(anyhow::Error::msg)?;
+            crate::sync::verify_block_consensus_certificate(&block, &authority)?;
+            if self.pbft_engine.observe_finalized_block(&block)? {
+                reconciled += 1;
+            }
+        }
+        self.pbft_engine.cleanup_stale_rounds();
+        Ok(reconciled)
+    }
+
+    /// Observers do not run the validator pipeline's admission cleanup.
+    /// Retire an admission only when its exact artifact and publisher appear
+    /// in a certified block still mapped to the local canonical chain.
+    pub(crate) fn reconcile_committed_pending_packages(&mut self) -> anyhow::Result<usize> {
+        let mut retired = 0;
+        for canonical in self.pending_pool.all_canonicals() {
+            let Some(entry) = self.pending_pool.get(&canonical) else {
+                continue;
+            };
+            let request = entry.request.clone();
+            let Some(record) = self.chain.get_package(&canonical)? else {
+                continue;
+            };
+            if record.status == common::PackageStatus::Pending
+                || record.content_hash != request.content_hash
+            {
+                continue;
+            }
+            let Some(block) = self.chain.get_block_by_hash(&record.block_hash)? else {
+                continue;
+            };
+            if self
+                .chain
+                .get_block_by_height(block.header.height)?
+                .is_none_or(|stored| stored.hash() != block.hash())
+            {
+                continue;
+            }
+            let contains_admission =
+                block
+                    .transactions
+                    .iter()
+                    .any(|transaction| match transaction {
+                        common::Transaction::Publish(published)
+                        | common::Transaction::PublishAuthorizedV1 {
+                            record: published, ..
+                        } => {
+                            published.id.canonical() == canonical
+                                && published.content_hash == request.content_hash
+                                && published.publisher_pubkey == request.publisher_pubkey
+                        }
+                        _ => false,
+                    });
+            if !contains_admission {
+                continue;
+            }
+            let authority = crate::validator_set_history::verification_set_at(
+                &self.config.data_dir,
+                block.header.height,
+                &self.validator_set_bootstrap,
+            )
+            .map_err(anyhow::Error::msg)?;
+            crate::sync::verify_block_consensus_certificate(&block, &authority)?;
+            if self.pending_pool.remove_durable(&canonical)?.is_some() {
+                self.clear_package_round(&canonical);
+                retired += 1;
+                tracing::info!(canonical = %canonical, block_hash = %block.hash(),
+                    "Retired pending admission already committed on the canonical chain");
+            }
+        }
+        Ok(retired)
+    }
+
+    /// Apply bookkeeping and reconcile certified PBFT finality after persistence.
     pub fn on_block_committed(&mut self, block: &common::Block) {
+        if let Err(error) = self.reconcile_committed_pending_packages() {
+            tracing::error!(error = %error, "Canonical admission retirement failed; retry pending");
+        }
+        if let Err(error) = self.reconcile_committed_pbft_rounds() {
+            tracing::error!(error = %error, "[PBFT] canonical round reconciliation failed; retained evidence unchanged");
+        }
         let hashes = common::block_transaction_hashes(block);
         self.forced_inclusion_tracker.mark_included(&hashes);
         if let Some(evidence) = self.forced_inclusion_tracker.check_block(
@@ -344,6 +465,7 @@ impl NodeState {
                 "[CENSORSHIP] Forced-inclusion transactions omitted from block"
             );
         }
+        self.chain.emit_committed_events(block);
     }
 }
 

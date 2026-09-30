@@ -3,10 +3,6 @@
 // PBFT consensus → writes finalised Transaction to the channel.
 
 use crate::{finalized_tx::FinalizedTxSender, NodeState};
-use alloy::network::EthereumWallet;
-use alloy::providers::ProviderBuilder;
-use alloy::signers::local::PrivateKeySigner;
-use alloy::sol;
 use chrono::Utc;
 use common::{ChainRecord, PackageStatus, PublishRequest, Transaction, ValidatorVote};
 use consensus::{aggregate_evidence_votes, EvidenceVoteOutcome};
@@ -14,21 +10,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{interval, Duration};
-
-// L1 interface for reward distribution (via bridge or direct if signer available)
-sol!(
-    #[sol(rpc)]
-    interface IValidatorRewards {
-        function distributeWorkRewards(
-            string calldata packageCanonical,
-            address[] calldata validators,
-            bool[] calldata approvals,
-            bool packageWasGood,
-            uint256[] calldata reputationScores,
-            bool[] calldata isMandatory
-        ) external;
-    }
-);
 
 const POLL_INTERVAL_SECS: u64 = 1;
 const VOTE_POLL_MS: u64 = 500;
@@ -681,46 +662,18 @@ async fn process_package(
                 analysis_committee: Some(committee_for_record),
                 ..Default::default()
             };
-            // Full reward emission hook for hybrid analysis committee
-            // Wires the actual L1 distributeWorkRewards call (via alloy provider + bridge key if configured)
-            let is_mand_flags: Vec<bool> = final_sigs.iter().map(|s| s.is_mandatory).collect();
+            // This path runs before canonical block finality. Reward sends are
+            // held until a durable, governance-authorized dispatcher can bind
+            // them to the finalized record and recover their receipts.
+            {
+                let mut s = state.write().await;
+                s.reward_emissions_skipped = s.reward_emissions_skipped.saturating_add(1);
+            }
             tracing::info!(
                 target: "reward_emission",
-                "HOOK: distribute hybrid rewards for {} total_sigs={} is_mand_flags={:?}",
-                canonical, final_sigs.len(), is_mand_flags
+                canonical = %canonical,
+                "Reward dispatch skipped pending canonical finality and an authorized durable dispatcher"
             );
-
-            match try_emit_l1_rewards(
-                state.clone(),
-                &canonical,
-                &final_sigs,
-                &is_mand_flags,
-                &committee,
-            )
-            .await
-            {
-                Ok(_) => {
-                    {
-                        let mut s = state.write().await;
-                        s.reward_emissions_succeeded =
-                            s.reward_emissions_succeeded.saturating_add(1);
-                    }
-                    tracing::info!(
-                        target: "reward_emission",
-                        "L1 reward emission hook completed successfully for {}", canonical
-                    );
-                }
-                Err(e) => {
-                    {
-                        let mut s = state.write().await;
-                        s.reward_emissions_failed = s.reward_emissions_failed.saturating_add(1);
-                    }
-                    tracing::warn!(
-                        target: "reward_emission",
-                        "L1 reward emission failed for {}: {}", canonical, e
-                    );
-                }
-            }
 
             let transaction = if req.publisher_authorization_version == 4 {
                 let authorization = common::PublisherAuthorizationV1::from_publish_request(&req);
@@ -872,115 +825,6 @@ async fn fetch_from_ipfs(cid: &str, ipfs_url: &str) -> anyhow::Result<Vec<u8>> {
     }
 
     Ok(bytes)
-}
-
-/// Tries to call L1 ValidatorRewards.distributeWorkRewards using the node's bridge key (if configured)
-/// This wires the actual call "via the bridge" style (using the same eth_rpc and signer pattern as staking/bridge).
-async fn try_emit_l1_rewards(
-    state: Arc<RwLock<NodeState>>,
-    canonical: &str,
-    final_sigs: &[common::ValidatorSignature],
-    is_mand_flags: &[bool],
-    committee: &common::AnalysisCommittee,
-) -> anyhow::Result<()> {
-    let (eth_rpc, bridge_key_opt, rewards_addr) = {
-        let s = state.read().await;
-        (
-            s.config.eth_rpc_url.clone(),
-            s.config.bridge_privkey.clone(),
-            s.config.validator_rewards_addr.clone(),
-        )
-    };
-
-    if rewards_addr == "0x0000000000000000000000000000000000000000" || bridge_key_opt.is_none() {
-        tracing::debug!(target: "reward_emission", "L1 rewards addr or bridge key not configured; skipping actual call for {}", canonical);
-        return Ok(());
-    }
-
-    let bridge_key = bridge_key_opt.unwrap();
-
-    // Map CREG validator_id to EVM address from validator_set (populated from registrations/staking)
-    let s = state.read().await;
-    let validators: Vec<alloy::primitives::Address> = final_sigs
-        .iter()
-        .map(|sig| {
-            s.validator_set
-                .validators
-                .iter()
-                .find(|v| v.id == sig.validator_id)
-                .and_then(|v| v.eth_address.parse::<alloy::primitives::Address>().ok())
-                .unwrap_or(alloy::primitives::Address::ZERO)
-        })
-        .collect();
-
-    let approvs: Vec<bool> = final_sigs
-        .iter()
-        .map(|s| matches!(s.vote, common::ValidatorVote::Approve))
-        .collect();
-    let package_was_good = true; // Verified path
-    let reps: Vec<alloy::primitives::U256> = final_sigs
-        .iter()
-        .map(|_| alloy::primitives::U256::from(50u64))
-        .collect();
-    let mand: Vec<bool> = is_mand_flags.to_vec();
-
-    // Setup provider with wallet for tx submission (same as bridge)
-    let signer: PrivateKeySigner = bridge_key.parse()?;
-    let wallet = EthereumWallet::from(signer);
-    let provider = ProviderBuilder::new()
-        .with_recommended_fillers()
-        .wallet(wallet)
-        .on_http(eth_rpc.parse()?);
-
-    let rewards = IValidatorRewards::new(rewards_addr.parse()?, &provider);
-
-    // Send the tx (state-changing)
-    let pending = rewards
-        .distributeWorkRewards(
-            canonical.to_string(),
-            validators,
-            approvs,
-            package_was_good,
-            reps,
-            mand,
-        )
-        .send()
-        .await?;
-
-    let tx_hash = pending.watch().await?;
-    tracing::info!(target: "reward_emission", "L1 distributeWorkRewards tx sent for {}: {}", canonical, tx_hash);
-
-    // Extend L1 emission to feed performance signals: successful on-chain reward confirms
-    // the contribution quality, boosting performance_score for mandatory participants.
-    // This ties L1 economic confirmation back to CREG-side committee selection bias.
-    let mut boosted = 0u32;
-    {
-        let mut s = state.write().await;
-        for (i, sig) in final_sigs.iter().enumerate() {
-            if is_mand_flags.get(i).copied().unwrap_or(false) {
-                if let Some(v) = s
-                    .validator_set
-                    .validators
-                    .iter_mut()
-                    .find(|vv| vv.id == sig.validator_id)
-                {
-                    // Small boost for L1-confirmed rewarded mandatory work (decays via other logic)
-                    let before = v.performance_score;
-                    v.performance_score = (v.performance_score.saturating_add(3)).min(1000);
-                    if v.performance_score > before {
-                        boosted += 1;
-                    }
-                }
-            }
-        }
-    }
-    tracing::info!(
-        target: "reward_emission",
-        "L1 emission feedback: boosted performance_score for {} mandatory validators for {}",
-        boosted, canonical
-    );
-
-    Ok(())
 }
 
 /// Compute the hybrid analysis committee for a package.

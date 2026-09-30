@@ -755,9 +755,8 @@ async fn run_testnet(options: DoctorOptions<'_>) -> Result<()> {
 
 fn check_category(name: &str) -> &'static str {
     match name {
-        "Chain node" | "Chain sync" | "IPFS daemon" | "Fleet IPFS" | "Local IPFS" | "Node health" | "Chain stats" => {
-            "Core Connectivity"
-        }
+        "Chain node" | "Chain sync" | "IPFS daemon" | "Fleet IPFS" | "Local IPFS"
+        | "Node health" | "Chain stats" => "Core Connectivity",
         "Authenticated profile" | "Publisher key" | "Config file" | "GnuPG" => {
             "Identity & Credentials"
         }
@@ -1245,14 +1244,8 @@ fn check_authenticated_profile() -> (bool, String) {
                 ),
             )
         }
-        Ok(None) => (
-            false,
-            "No active profile. Run: creg login".into(),
-        ),
-        Err(e) => (
-            false,
-            format!("Error reading profile: {e}"),
-        ),
+        Ok(None) => (false, "No active profile. Run: creg login".into()),
+        Err(e) => (false, format!("Error reading profile: {e}")),
     }
 }
 

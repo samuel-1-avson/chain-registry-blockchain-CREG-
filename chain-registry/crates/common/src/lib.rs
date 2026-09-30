@@ -161,8 +161,10 @@ pub struct SignedRevocationRequest {
 impl SignedRevocationRequest {
     pub fn signing_message(&self) -> String {
         if self.signature_version == 1 {
-            format!("creg-revoke-v1:{}:{}:{}:revoke:{}", self.chain_id, self.genesis_hash,
-                self.package_canonical, self.reason)
+            format!(
+                "creg-revoke-v1:{}:{}:{}:revoke:{}",
+                self.chain_id, self.genesis_hash, self.package_canonical, self.reason
+            )
         } else {
             format!("{}:revoke:{}", self.package_canonical, self.reason)
         }
@@ -174,7 +176,10 @@ pub enum GossipMessage {
     PublishRequest(PublishRequest),
     /// Original owner/validator proof is independently checked by every peer.
     /// Delivery IDs change on retries; the signed request and transaction do not.
-    RevocationRequest { request: SignedRevocationRequest, delivery_id: String },
+    RevocationRequest {
+        request: SignedRevocationRequest,
+        delivery_id: String,
+    },
     VrfProof {
         validator_id: String,
         pubkey: String,
@@ -184,7 +189,9 @@ pub enum GossipMessage {
     },
     /// A validator's signed view-change vote. Peers apply the view only after
     /// verifying a PBFT quorum for the same height, parent, and target view.
-    ViewChange { vote: ViewChangeVote },
+    ViewChange {
+        vote: ViewChangeVote,
+    },
     PbftPrePrepare {
         block: Block,
     },

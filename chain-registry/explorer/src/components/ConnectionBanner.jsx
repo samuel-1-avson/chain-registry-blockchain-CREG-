@@ -5,7 +5,7 @@ const MESSAGES = {
   [SSE_STATE.Idle]: null,
   [SSE_STATE.Connecting]: { variant: 'info', label: 'Connecting live feed…' },
   [SSE_STATE.Live]: null,
-  [SSE_STATE.Stale]: { variant: 'warning', label: 'Live feed idle — no events for 30 s' },
+  [SSE_STATE.Stale]: { variant: 'info', label: 'Live feed connected — no new events in 30 s' },
   [SSE_STATE.Error]: { variant: 'error', label: 'Live feed offline — attempting to reconnect' },
 }
 

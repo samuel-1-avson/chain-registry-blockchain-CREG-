@@ -21,10 +21,12 @@ pub async fn persist_and_notify(
         let state = state.read().await;
         state.chain.enqueue_finalized_work(&tx)?
     };
-    sender
-        .send(tx)
-        .await
-        .map_err(|_| anyhow::anyhow!("finalized-work notification channel closed"))?;
+    if inserted {
+        sender
+            .send(tx)
+            .await
+            .map_err(|_| anyhow::anyhow!("finalized-work notification channel closed"))?;
+    }
     Ok(inserted)
 }
 

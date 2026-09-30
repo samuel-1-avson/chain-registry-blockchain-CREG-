@@ -1,0 +1,19 @@
+# CLI compilation baseline for the Ubuntu 22.04 production host (glibc 2.35).
+# Build node images separately; their accepted Ubuntu 24.04 runtime is unchanged.
+FROM rust:1.90-slim-bookworm@sha256:64232e656c058f4468e8d024e990acff04f0fd5a5c0a88a574dc37773d7325c9 AS rust-toolchain
+FROM ubuntu:22.04@sha256:b8b6ee6aa931ecd9d0d952abc34dc0e5f7c6a30c6bb71b079fe399fde0329c02 AS builder
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    ca-certificates curl git build-essential pkg-config libssl-dev \
+    cmake perl protobuf-compiler libprotobuf-dev libopenblas-dev \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=rust-toolchain /usr/local/cargo /usr/local/cargo
+COPY --from=rust-toolchain /usr/local/rustup /usr/local/rustup
+ENV PATH=/usr/local/cargo/bin:$PATH \
+    RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/build/cargo \
+    CARGO_TARGET_DIR=/build/target \
+    CARGO_INCREMENTAL=0 \
+    CARGO_BUILD_JOBS=1 \
+    CREG_SPEC_SIGNING_PUBKEY=3fe87833177b04b0a18600eace041692a35fb2b85f6e14e6734d894a0fd61c01
+WORKDIR /workspace/chain-registry
+CMD ["cargo", "build", "--release", "--locked", "--package", "chain-registry-cli", "--bin", "creg", "--features", "common/phase-c-canonical-transactions"]

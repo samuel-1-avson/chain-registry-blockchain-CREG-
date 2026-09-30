@@ -1,15 +1,17 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useMemo, useState } from 'react'
 import {
   ResponsiveContainer, AreaChart, Area, LineChart, Line,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from 'recharts'
 import { nodeApi } from '../api/node.js'
 import { useChainStats } from '../hooks/useStats.js'
+import { EndpointStatusNotice, ErrorState, NoticeState } from '../components/ErrorState.jsx'
 import { usePolling } from '../hooks/usePolling.js'
 import { SkeletonCard } from '../components/Skeleton.jsx'
 import { StatusBadge } from '../components/StatusBadge.jsx'
 import { ShareButton } from '../components/ShareButton.jsx'
 import { formatNumber } from '../utils/format.js'
+import { getEndpointStatus } from '../api/node.js'
 
 /* ── Chart theme (respects CSS variables) ──────────────────────────────────── */
 const CHART_COLORS = {
@@ -31,7 +33,7 @@ const tooltipStyle = {
 }
 
 /* ── Time-range selector ───────────────────────────────────────────────────── */
-const TIME_RANGES = ['5m', '30m', '1h', '6h', '24h']
+const TIME_RANGES = ['5m', '30m', '1h', '6h', '24h', '7d']
 
 function TimeRangeSelector({ active, onChange }) {
   return (
@@ -70,44 +72,28 @@ function ChartCard({ title, children, height = 240 }) {
   )
 }
 
-/* ── Data accumulator ──────────────────────────────────────────────────────── */
-const MAX_SAMPLES = 360 // ~30 min at 5s intervals
-const RANGE_SAMPLES = { '5m': 60, '30m': 360, '1h': 720, '6h': 4320, '24h': 17280 }
-
 export default function Metrics() {
   const stats = useChainStats(5000)
   const [range, setRange] = useState('30m')
-  const samplesRef = useRef([])
-  const [chartData, setChartData] = useState([])
-
-  // Accumulate stats over time
-  useEffect(() => {
-    const s = stats.data
-    if (!s) return
-    const now = Date.now()
-    const sample = {
-      ts: now,
-      time: new Date(now).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-      height: s.current_height ?? 0,
-      validators: s.validator_count ?? 0,
-      activeValidators: s.active_validators ?? s.validator_count ?? 0,
-      packages: s.package_count ?? 0,
-      pending: s.pending_tx_count ?? 0,
-      publishers: s.publisher_count ?? 0,
-      totalStake: Number(s.total_stake ?? 0),
-      finalizationLag: s.finalization_lag ?? 0,
-    }
-
-    const buf = samplesRef.current
-    buf.push(sample)
-    // Trim to max buffer
-    if (buf.length > MAX_SAMPLES) buf.splice(0, buf.length - MAX_SAMPLES)
-
-    // Apply time range filter
-    const rangeCount = RANGE_SAMPLES[range] || MAX_SAMPLES
-    const visible = buf.slice(-Math.min(rangeCount, buf.length))
-    setChartData([...visible])
-  }, [stats.data, range])
+  const history = usePolling(
+    (signal) => nodeApi.metricsHistory({ range }, signal),
+    { intervalMs: 30_000, deps: [range] },
+  )
+  const chartData = useMemo(() => (history.data?.samples || []).flatMap((sample) => {
+    const ts = Number(sample.timestamp_ms)
+    if (!Number.isFinite(ts)) return []
+    return [{
+      ts,
+      time: new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      height: sample.height == null ? null : Number(sample.height),
+      validators: sample.validator_count == null ? null : Number(sample.validator_count),
+      activeValidators: sample.active_validators == null ? null : Number(sample.active_validators),
+      packages: sample.package_count == null ? null : Number(sample.package_count),
+      pending: sample.pending_tx_count == null ? null : Number(sample.pending_tx_count),
+      publishers: sample.publisher_count == null ? null : Number(sample.publisher_count),
+      totalStake: sample.total_stake == null ? null : Number(sample.total_stake),
+    }]
+  }), [history.data])
 
   // Compute deltas for TPS chart
   const tpsData = useMemo(() => {
@@ -125,6 +111,9 @@ export default function Metrics() {
   }, [chartData])
 
   const latestStats = stats.data || {}
+  const historyStatus = getEndpointStatus(history.data)
+
+  if (stats.error && !stats.data) return <ErrorState error={stats.error} onRetry={stats.refetch} title="Chain metrics unavailable" />
 
   return (
     <div style={{ display: 'grid', gap: 'var(--space-6)' }}>
@@ -133,7 +122,9 @@ export default function Metrics() {
         <div>
           <h1 style={{ margin: 0, fontSize: 20 }}>Metrics</h1>
           <p style={{ color: 'var(--text-tertiary)', fontSize: 12, marginTop: 4 }}>
-            Real-time chain performance and health — {chartData.length} samples collected
+            {history.data?.status === 'ready'
+              ? `Durable Prometheus history · ${chartData.length} stored samples · ${history.data.step_seconds}s resolution`
+              : 'Durable history from server-side Prometheus scrapes'}
           </p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -152,14 +143,20 @@ export default function Metrics() {
         <LiveTile label="Publishers" value={formatNumber(latestStats.publisher_count)} color={CHART_COLORS.muted} />
       </section>
 
-      {chartData.length < 3 ? (
+      {historyStatus && <EndpointStatusNotice status={historyStatus} title="Historical metrics unavailable" />}
+      {history.error && !history.data && (
+        <NoticeState title="Historical metrics unavailable" description="The public history request failed. Live statistics above still come from this chain; no historical samples have been inferred." />
+      )}
+      {!historyStatus && !history.error && chartData.length < 3 ? (
         <div className="ce-card" style={{ textAlign: 'center', padding: 'var(--space-8)' }}>
           <p style={{ color: 'var(--text-tertiary)', fontSize: 13 }}>
-            📊 Collecting data… Charts will appear after a few polling cycles (~15 seconds).
+            {history.loading
+              ? 'Loading retained samples from the metrics collector…'
+              : 'Collector is connected. Historical charts appear after it has stored enough real scrapes.'}
           </p>
           <SkeletonCard lines={6} />
         </div>
-      ) : (
+      ) : !historyStatus && !history.error && chartData.length >= 3 ? (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: 'var(--space-4)' }}>
           {/* Chain height */}
           <ChartCard title="Chain height">
@@ -215,15 +212,15 @@ export default function Metrics() {
             </ResponsiveContainer>
           </ChartCard>
 
-          {/* Finalization lag */}
-          <ChartCard title="Finalization lag (blocks)">
+          {/* Total stake */}
+          <ChartCard title="Chain-authoritative total stake (CREG)">
             <ResponsiveContainer>
               <AreaChart data={chartData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                 <XAxis dataKey="time" tick={{ fontSize: 10, fill: 'var(--text-tertiary)' }} />
                 <YAxis tick={{ fontSize: 10, fill: 'var(--text-tertiary)' }} />
                 <Tooltip {...tooltipStyle} />
-                <Area type="monotone" dataKey="finalizationLag" stroke={CHART_COLORS.error} fill={CHART_COLORS.error} fillOpacity={0.1} strokeWidth={2} />
+                <Area type="monotone" dataKey="totalStake" stroke={CHART_COLORS.error} fill={CHART_COLORS.error} fillOpacity={0.1} strokeWidth={2} />
               </AreaChart>
             </ResponsiveContainer>
           </ChartCard>
@@ -241,7 +238,7 @@ export default function Metrics() {
             </ResponsiveContainer>
           </ChartCard>
         </div>
-      )}
+      ) : null}
     </div>
   )
 }

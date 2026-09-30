@@ -47,9 +47,9 @@ Write-Host "threshold:    $($threshRaw.Trim())"
 Write-Host "signers[0]:   $(if ($signer0 -match '(0x[a-fA-F0-9]{40})') { $matches[1] } else { '?' })"
 Write-Host ""
 if ($isRaw -match 'true') {
-    Write-Host "OK - you can run .\testnet\fund-sepolia-faucet-governance.ps1" -ForegroundColor Green
+    Write-Host "OK - use the read-only faucet allocation preview with the approved tranche amount." -ForegroundColor Green
 } else {
-    Write-Host "This key is NOT a governance signer. Mint via governance will fail." -ForegroundColor Yellow
-    Write-Host "Ask whoever controls the deployer/signer wallet, or get CREG sent directly to your publisher/faucet address."
+    Write-Host "This key is NOT a governance signer. It cannot approve a Governance faucet allocation." -ForegroundColor Yellow
+    Write-Host "Ask a current Governance signer to review and approve the intended allocation. Do not bypass the approved faucet funding process."
 }
 Write-Host ""

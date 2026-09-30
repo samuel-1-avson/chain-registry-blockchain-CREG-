@@ -27,11 +27,13 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,woff2}'],
         navigateFallback: '/index.html',
-        navigateFallbackDenylist: [/^\/v1\//, /^\/rpc$/, /^\/rpc\//, /^\/api-docs/],
+        navigateFallbackDenylist: [/^\/v1\//, /^\/api\//, /^\/rpc$/, /^\/rpc\//, /^\/api-docs/],
+        // Live chain responses must never survive a reset at the same URL.
+        // Keep offline caching for static assets only.
         runtimeCaching: [
           {
             urlPattern: /^https?:\/\/[^/]+\/v1\/chain\/stats$/,
-            handler: 'StaleWhileRevalidate',
+            handler: 'NetworkOnly',
             options: {
               cacheName: 'api-chain-stats',
               expiration: { maxEntries: 4, maxAgeSeconds: 60 },
@@ -39,7 +41,7 @@ export default defineConfig({
           },
           {
             urlPattern: /^https?:\/\/[^/]+\/v1\/blocks(\?.*)?$/,
-            handler: 'StaleWhileRevalidate',
+            handler: 'NetworkOnly',
             options: {
               cacheName: 'api-blocks-list',
               expiration: { maxEntries: 20, maxAgeSeconds: 300 },
@@ -47,7 +49,7 @@ export default defineConfig({
           },
           {
             urlPattern: /^https?:\/\/[^/]+\/v1\/blocks\/\d+$/,
-            handler: 'CacheFirst',
+            handler: 'NetworkOnly',
             options: {
               cacheName: 'api-block-detail',
               expiration: { maxEntries: 200, maxAgeSeconds: 86400 },
@@ -66,16 +68,33 @@ export default defineConfig({
     host: true,
     proxy: {
       '/v1/relayer': {
-        target: 'http://127.0.0.1:8083',
+        target: process.env.CREG_RELAYER_URL || process.env.CREG_NODE_URL || 'https://api.testnet.cregnet.dev',
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/v1\/relayer/, '/v1/relayer')
+        secure: true,
       },
-      '/v1': 'http://127.0.0.1:8080',
-      '/api-docs': 'http://127.0.0.1:8080',
-      '/rpc': {
-        target: 'http://127.0.0.1:8545',
+      '/api/': {
+        target: process.env.CREG_FAUCET_URL || 'https://faucet.testnet.cregnet.dev',
         changeOrigin: true,
-        rewrite: () => '/',
+        secure: true,
+      },
+      '/v1': process.env.CREG_NODE_URL || 'http://127.0.0.1:8080',
+      '/api-docs': process.env.CREG_NODE_URL || 'http://127.0.0.1:8080',
+      '/chain-spec.json': {
+        target: 'https://spec.testnet.cregnet.dev',
+        changeOrigin: true,
+        secure: true,
+      },
+      '/phase-c': {
+        target: 'https://spec.testnet.cregnet.dev',
+        changeOrigin: true,
+        secure: true,
+      },
+      '/rpc': {
+        // Match the deployed explorer's real Sepolia RPC route. A local Anvil
+        // endpoint is not part of the real-node explorer workflow.
+        target: 'https://explorer.testnet.cregnet.dev',
+        changeOrigin: true,
+        secure: true,
       },
     },
   }

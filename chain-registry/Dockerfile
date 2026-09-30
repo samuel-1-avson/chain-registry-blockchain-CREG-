@@ -10,6 +10,7 @@
 ARG PROFILE=full
 ARG NETWORK_RETRIES=1
 ARG CREG_SPEC_SIGNING_PUBKEY=51ff9f3e37f8c82dbf49aea2f80d00aaf75acace5a148c0526187c8d1cae73bd
+ARG CREG_NODE_FEATURES=default
 
 # ── Stage 1: Build Frontend ───────────────────────────────────────────────────
 FROM node:20-slim AS frontend-builder
@@ -27,6 +28,7 @@ FROM rust:1.90-slim-bookworm AS rust-toolchain
 # link against glibc 2.38+ symbols (__isoc23_strtoll etc.) not present in Debian 12.
 FROM ubuntu:24.04 AS builder
 ARG CREG_SPEC_SIGNING_PUBKEY
+ARG CREG_NODE_FEATURES
 
 # Install native dependencies for:
 # - OpenSSL (reqwest)
@@ -170,7 +172,7 @@ RUN env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS \
     LLVM_CONFIG_PATH=/usr/bin/llvm-config-17 \
     CLANG_PATH=/usr/bin/clang-17 \
     CARGO_BUILD_JOBS=1 RUST_BACKTRACE=1 \
-    cargo build --release --locked --package chain-registry-node --bin creg-node --bin creg-indexer
+    cargo build --release --locked --package chain-registry-node --bin creg-node --bin creg-indexer --features "$CREG_NODE_FEATURES"
 
 # Build CLI tools (includes TUI explorer)
 RUN env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS \

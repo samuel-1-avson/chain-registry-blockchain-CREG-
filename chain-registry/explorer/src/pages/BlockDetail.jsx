@@ -169,7 +169,7 @@ export default function BlockDetail() {
               <tbody>
                 {txs.map((t, i) => {
                   const canonical = t.canonical
-                  const txStatus = t.status || (isFinalized ? 'finalized' : 'included')
+                  const txStatus = t.type === 'revoke' ? 'revoked' : (isFinalized ? 'finalized' : 'included')
                   return (
                     <tr key={canonical || t.hash || i}>
                       <td style={{ color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)' }}>{i}</td>

@@ -6,6 +6,8 @@
 > **Status:** Public alpha testnet — not mainnet  
 > **Last updated:** 2026-09-20 (status re-verified; links repaired after the 2026-09-19 docs archive pass; §15 catch-up entry)
 
+> **2026-09-25 deployment note:** The next testnet acceptance target is four independently hosted active validators and four independently hosted non-voting observers, using real package analysis and 3-of-4 package/block finality. The older topology descriptions below are historical snapshots; the checked-in 2026-09-23 chain spec contains two active validators. See §12.3 and `docs/TESTNET-HEAL-STATUS.md` §14.
+
 This document describes the complete system workflow of the Chain Registry blockchain: architecture, components, consensus, networking, storage, security, operations, and developer onboarding. It is scoped to the **core blockchain project** (`chain-registry/` workspace, contracts, circuits, testnet) and excludes the waitlist application and contribution arena.
 
 ---
@@ -38,11 +40,11 @@ Chain Registry (CREG) is designed as a **decentralized package-integrity
 network** for software supply chains. Its target protocol reduces
 single-authority registry trust (npm, PyPI, Cargo, and similar) by requiring
 independently controlled validator consensus over content-addressed packages.
-The recorded public-alpha topology currently lists four foundation observer identities
+The 2026-09-20 recorded public-alpha topology listed four foundation observer identities
 (`validator-1`…`validator-4`) in `chain-spec.sepolia.json` with two listed
-bootnodes. The public API is reachable but served a fresh empty chain at last
-check (tip 0, no peers, 2026-09-20), so this is the specified topology, not an
-operating multi-node BFT network, and no active validators have been observed. It does not yet provide operational
+bootnodes. The public API was reachable but served a fresh empty chain at that
+check (tip 0, no peers, 2026-09-20), so this was the specified topology, not an
+operating multi-node BFT network, and no active validators were observed then. That snapshot did not provide operational
 decentralization or production Byzantine fault tolerance. Two consensus layers—package votes and PBFT blocks—finalize
 records on a local CREG chain. Sepolia contracts currently provide staking and
 governance experiments; the legacy batch checkpoint is retired and is not a
@@ -453,7 +455,7 @@ sequenceDiagram
 
 ### 4.2 Two Consensus Layers
 
-Notation: **n** is the active validator-set size. **M** is the mandatory analysis-committee size (`M = n` when `n ≤ 50`, capped at 100 above that; the spec's four named identities are non-voting observers, not the committee). Package votes use **M**. Block PBFT and validator-set certificates use **n**.
+Notation: **n** is the active validator-set size. **M** is the mandatory analysis-committee size (`M = n` when `n ≤ 50`, capped at 100 above that; the four identities described in the 2026-09-20 snapshot were non-voting observers, not the committee). Package votes use **M**. Block PBFT and validator-set certificates use **n**.
 
 CREG uses two related consensus surfaces:
 
@@ -1176,7 +1178,7 @@ creg doctor --node-url "$CREG_NODE_URL"
 
 ### 9.10 Public Fleet Layout (Reference)
 
-**Recorded public-alpha topology** (authoritative): `chain-spec.sepolia.json` lists four foundation observer identities (`validator-1`…`validator-4`) and two bootnodes. The public API is reachable but served a fresh empty chain at last check (tip 0, no peers, 2026-09-20), so this is the specified set, not an operating multi-node BFT network; validator committees (M = min(active,100)) form from L1-admitted operators.
+**Recorded 2026-09-20 public-alpha topology:** the then-current `chain-spec.sepolia.json` was described as listing four foundation observer identities (`validator-1`…`validator-4`) and two bootnodes. The public API served a fresh empty chain at that check (tip 0, no peers). This is historical evidence, not proof of an operating multi-node BFT network; validator committees (M = min(active,100)) form from L1-admitted operators. The checked-in 2026-09-23 chain spec now lists two active validators, and the next acceptance target is the four-validator/four-observer topology in §12.3.
 
 **Historical GCP lab** (not the current spec): a three-container layout was used for earlier observer + validator experiments on `creg-validator-vm`:
 
@@ -1190,7 +1192,7 @@ When that lab ran, edge Caddy on `creg-testnet-vm` proxied `https://api.testnet.
 
 ### 9.11 Analysis Committee Selection (Stake Weighting + Caps)
 
-The **target-scale** design (classroom example: 10,000 validators) replaces full redundant analysis with the **hybrid mandatory + voluntary** model. That is not the public-alpha deployment: `max_validators` is 50, and the four recorded identities are non-voting observers. When the active set is ≤50, M equals the full set (a hypothetical 4-active lab gives M=4, package quorum=3).
+The **target-scale** design (classroom example: 10,000 validators) replaces full redundant analysis with the **hybrid mandatory + voluntary** model. That is not the public-alpha deployment: `max_validators` is 50, and the four identities described in the 2026-09-20 snapshot were non-voting observers. When the active set is ≤50, M equals the full set (a four-active deployment gives M=4, package quorum=3).
 
 - **Mandatory core** (target M=100 for large sets, or all for ≤50): Deterministically selected at admission time using `compute_analysis_committee_at_admission`.
 - **Selection algorithm** (VRF-seeded for the next iteration):
@@ -1636,7 +1638,7 @@ Public validators must never run `CREG_DEV_SANDBOX=true`.
 
 ### 10.5 PBFT Safety Assumptions
 
-Safety depends on fewer than one-third of validator voting power being Byzantine, plus network assumptions for timely view changes. View-change certificates require `floor(n/3) + 1` participants.
+Safety depends on fewer than one-third of validator voting power being Byzantine, plus network assumptions for timely view changes. For `n = 3f + 1`, a new-view certificate requires `2f + 1` distinct signed view-change messages (3-of-4 for the next four-validator deployment), including any prepared-value evidence needed for safe carryover. The smaller `f + 1` threshold is only an early trigger for replicas to send their own view-change messages; it does not authorize a replacement proposer.
 
 ### 10.6 Known Implementation Gaps (Alpha)
 
@@ -1761,7 +1763,14 @@ open.
 
 - Node binary denies `clippy::unwrap_used` in production paths
 - Malicious fixture corpus for regression testing
-- NET-301 acceptance: ≥2 validators, PBFT quorum, publish reaches verified
+- Historical NET-301 lab gate: ≥2 validators, PBFT quorum, publish reaches
+  verified. This is not the acceptance gate for the next public testnet repair.
+- Next real-network acceptance: four active validators on four independent
+  hosts, four non-voting observers on four other independent hosts, a real
+  package analysis pipeline and sandbox, 3-of-4 package and block finality,
+  identical h1/h2 hashes on all validators, and h1/h2 sync on all observers.
+  Simulated nodes, mock data, mock votes, and degraded scanner output do not
+  satisfy this gate. See `docs/TESTNET-HEAL-STATUS.md` §14 for host placement.
 - SANDBOX-301: real sandbox engine required for public validators
 - IPFS-001/002: pinning and availability checks
 
@@ -1794,7 +1803,7 @@ long-range/reorg rehearsal.
 | Kubernetes | `k8s/` | Postgres, IPFS, validators, ingress, monitoring |
 | Secure sandbox | `Dockerfile.secure`, `docker-compose.fleet-sandbox.yml` | Production sandbox (nsjail) |
 
-### 13.2 NET-301 Lab Topology
+### 13.2 Historical NET-301 Lab Topology
 
 | Node | Role | `CREG_NODE_ID` |
 |------|------|----------------|
@@ -1803,6 +1812,14 @@ long-range/reorg rehearsal.
 | node3 | Observer | `observer-1` |
 
 Shared: IPFS, chain-spec nginx, P2P ports 29100–29102.
+
+The next live repair uses a separate eight-host topology: four voting
+validators (laptop, existing GCP validator VM, and two new GCP VMs in other
+regions) plus four non-voting observers, each on a separate host. The current
+proposal uses seven GCP VMs under one account. It provides real machine and
+regional separation while independent operators remain a later milestone.
+The historical lab topology above does not establish that deployment's
+readiness.
 
 ### 13.3 Public Testnet Endpoints
 
@@ -2232,7 +2249,7 @@ For the authoritative long-term view, also consult `DEEP_DIVE_ANALYSIS.md` §5 (
 
 This is a **public alpha testnet**, not mainnet. Key limitations:
 
-- Spec lists four foundation observer identities (`validator-1`…`validator-4`), non-voting; no active validators observed; not production BFT
+- The 2026-09-20 snapshot described four foundation observer identities (`validator-1`…`validator-4`), non-voting; no active validators were observed then. This is not proof of current production BFT or of the next four-validator/four-observer target.
 - External security audit open (SEC-401)
 - ZK proofs are experimental infrastructure
 - Cross-chain, insurance, and threshold encryption disabled

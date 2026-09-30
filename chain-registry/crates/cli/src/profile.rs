@@ -96,15 +96,46 @@ pub fn clear_profile() -> Result<bool> {
 
 pub fn print_profile(profile: &Profile) {
     println!();
-    println!("{}", "╭────────────────────────────────────────────────────────────╮".cyan());
-    println!("{}", "│   Active CREG Authenticated Profile                        │".cyan().bold());
-    println!("{}", "╰────────────────────────────────────────────────────────────╯".cyan());
+    println!(
+        "{}",
+        "╭────────────────────────────────────────────────────────────╮".cyan()
+    );
+    println!(
+        "{}",
+        "│   Active CREG Authenticated Profile                        │"
+            .cyan()
+            .bold()
+    );
+    println!(
+        "{}",
+        "╰────────────────────────────────────────────────────────────╯".cyan()
+    );
     println!();
-    println!("  {:<22} {}", "EVM Staking Wallet:".bold(), profile.wallet_address.green());
-    println!("  {:<22} {}", "Ed25519 Pubkey:".bold(), profile.ed25519_pubkey.cyan());
-    println!("  {:<22} {}", "Consensus Key File:".bold(), profile.key_path.display());
-    println!("  {:<22} {}", "Network RPC URL:".bold(), profile.network_url);
-    println!("  {:<22} {}", "Authenticated At:".bold(), profile.created_at.dimmed());
+    println!(
+        "  {:<22} {}",
+        "EVM Staking Wallet:".bold(),
+        profile.wallet_address.green()
+    );
+    println!(
+        "  {:<22} {}",
+        "Ed25519 Pubkey:".bold(),
+        profile.ed25519_pubkey.cyan()
+    );
+    println!(
+        "  {:<22} {}",
+        "Consensus Key File:".bold(),
+        profile.key_path.display()
+    );
+    println!(
+        "  {:<22} {}",
+        "Network RPC URL:".bold(),
+        profile.network_url
+    );
+    println!(
+        "  {:<22} {}",
+        "Authenticated At:".bold(),
+        profile.created_at.dimmed()
+    );
     println!();
 }
 
@@ -130,7 +161,9 @@ pub fn resolve_publisher_credentials(
     } else if let Some(ref prof) = active_profile {
         if prof.key_path.exists() {
             std::fs::read_to_string(&prof.key_path)
-                .with_context(|| format!("Cannot read profile key file: {}", prof.key_path.display()))?
+                .with_context(|| {
+                    format!("Cannot read profile key file: {}", prof.key_path.display())
+                })?
                 .trim()
                 .to_string()
         } else {
@@ -177,7 +210,8 @@ mod tests {
     fn test_profile_serialization() {
         let profile = Profile {
             wallet_address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266".to_string(),
-            ed25519_pubkey: "abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234".to_string(),
+            ed25519_pubkey: "abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234"
+                .to_string(),
             key_path: PathBuf::from("/tmp/test.key"),
             network_url: "https://api.testnet.cregnet.dev".to_string(),
             created_at: "2026-09-19T00:00:00Z".to_string(),

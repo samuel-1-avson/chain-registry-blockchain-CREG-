@@ -1,0 +1,8 @@
+FROM ubuntu:24.04
+
+# Export the read-only RocksDB inspector compiled by Dockerfile.full-repair.
+# The shared Cargo cache keeps the binary outside the node runtime image.
+RUN --mount=type=cache,id=creg-phase-c-release,target=/build/target,sharing=locked \
+    install -D -m 0755 /build/target/release/creg_recovery_inspect /usr/local/bin/creg_recovery_inspect
+
+ENTRYPOINT ["/usr/local/bin/creg_recovery_inspect"]

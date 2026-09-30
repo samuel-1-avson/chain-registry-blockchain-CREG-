@@ -1,0 +1,9 @@
+{
+  "genesisHash": "0x13677af7d23547816190c0d98704abaf1daf793d444fefae838b14a89c285a67",
+  "binarySha256": "10309c933367a5193a30ee2279e0c3bf6d27ecfafd788593a2618c3b41a5f8bf",
+  "tarSha256": "98cbb61b0a0346b88bef113772edce0170741b5e6d9b1bf788f0063ba866634c",
+  "configDigest": "sha256:6c6861bc4c8efc6870cea646abc880c383cff1fb57267c699438844611ff543d",
+  "chainId": "creg-phase-c-testnet-2026-09-26",
+  "manifestDigest": "sha256:19547548efc38221f411c089a5ca3eeaf620eb0ee336c445b7b308174c0b96ff",
+  "indexDigest": "sha256:ca4d04e77e9680cb878800f2ea72c1ce7dac6bb3575a55c9921a7314975fb1ef"
+}

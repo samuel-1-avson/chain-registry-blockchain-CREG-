@@ -9,7 +9,7 @@ import { TimeAgo } from '../components/TimeAgo.jsx'
 import { SkeletonCard, SkeletonRow } from '../components/Skeleton.jsx'
 import { StatusBadge } from '../components/StatusBadge.jsx'
 import { ErrorState, NoticeState } from '../components/ErrorState.jsx'
-import { formatNumber, formatWei } from '../utils/format.js'
+import { formatNumber } from '../utils/format.js'
 
 /* ── Stat card with optional sparkline ─────────────────────────────────────── */
 function StatCard({ label, value, hint, variant = 'default', sparkData, animateValue }) {
@@ -103,15 +103,19 @@ export default function Dashboard({ recentEvents = [] }) {
     if (!s) return
     if (s.validator_count != null) validatorSpark.push(s.validator_count)
 
-    // TPS estimate: delta tx_count / delta time between polls
+    // Count actual transactions in the fetched block window. If the window
+    // does not cover the whole interval, leave throughput unavailable.
     const h = s.current_height
     if (prevHeight.current != null && h != null && h !== prevHeight.current) {
       const dtMs = Date.now() - (prevHeightTime.current || Date.now())
       const dtSec = Math.max(1, dtMs / 1000)
       const newBlocks = h - prevHeight.current
-      const txPerBlock = (s.package_count || 0) / Math.max(1, h) // rough average
-      const tps = (newBlocks * txPerBlock) / dtSec
-      tpsSpark.push(Math.round(tps * 100) / 100)
+      const list = blocks.data?.blocks || []
+      const included = list.filter(b => b.height > prevHeight.current && b.height <= h)
+      if (included.length === newBlocks) {
+        const count = included.reduce((sum, b) => sum + (b.transactions?.length || 0), 0)
+        tpsSpark.push(Math.round(count / dtSec * 100) / 100)
+      }
     }
     prevHeight.current = h
     prevHeightTime.current = Date.now()
@@ -164,7 +168,15 @@ export default function Dashboard({ recentEvents = [] }) {
   const s = stats.data || {}
   const latest = Array.isArray(blocks.data) ? blocks.data : (blocks.data?.blocks || [])
   const packageList = pkgs.data?.packages || (Array.isArray(pkgs.data) ? pkgs.data : [])
-  const finLag = s.finalization_lag ?? (s.current_height != null && s.finalized_height != null ? s.current_height - s.finalized_height : null)
+  // Older public nodes omit the finality source marker, so normalizeStats
+  // withholds their aggregate finalized_height. Genesis is safe to display
+  // when the actual block endpoint explicitly marks block zero finalized.
+  const finalizedHeight = s.finalized_height ?? (
+    s.current_height === 0 && latest.some((block) => block.height === 0 && block.finalized === true)
+      ? 0
+      : null
+  )
+  const finLag = s.finalization_lag ?? (s.current_height != null && finalizedHeight != null ? s.current_height - finalizedHeight : null)
 
   return (
     <div style={{ display: 'grid', gap: 'var(--space-6)' }}>
@@ -180,7 +192,7 @@ export default function Dashboard({ recentEvents = [] }) {
           />
           <StatCard
             label="Finalized"
-            value={s.finalized_height ?? '—'}
+            value={finalizedHeight ?? '—'}
             hint={finLag != null ? <FinalizationLag lag={finLag} /> : ''}
           />
           <StatCard
@@ -191,7 +203,7 @@ export default function Dashboard({ recentEvents = [] }) {
           />
           <StatCard
             label="Total stake"
-            value={s.total_stake_native ? formatWei(s.total_stake_native) : formatNumber(s.total_stake)}
+            value={formatNumber(s.total_stake_native ?? s.total_stake)}
             hint="CREG"
             animateValue
           />
@@ -337,7 +349,7 @@ export default function Dashboard({ recentEvents = [] }) {
                 <Row k="Build" v={cfg.data.version ?? cfg.data.build ?? '—'} />
                 <Row k="Chain ID" v={cfg.data.chain_id ?? '—'} />
                 <Row k="Network" v={cfg.data.network ?? cfg.data.profile ?? '—'} />
-                <Row k="Testnet" v={cfg.data.is_testnet ? 'Yes' : 'No'} />
+                <Row k="Testnet" v={cfg.data.is_testnet == null ? '—' : cfg.data.is_testnet ? 'Yes' : 'No'} />
               </div>
             ) : <p style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>Loading…</p>}
           </div>

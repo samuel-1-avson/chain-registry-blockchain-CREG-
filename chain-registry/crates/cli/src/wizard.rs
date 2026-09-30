@@ -9,12 +9,17 @@ use std::path::PathBuf;
 pub async fn run() -> Result<()> {
     println!("\n{}", "🎉 Welcome to Chain Registry!".bold().cyan());
     println!("{}", "═".repeat(60).dimmed());
-    println!("\nThis wizard will guide you through setting up Chain Registry in a few simple steps.\n");
+    println!(
+        "\nThis wizard will guide you through setting up Chain Registry in a few simple steps.\n"
+    );
 
     // Detect existing authenticated profile
     let existing_profile = crate::profile::load_active_profile().ok().flatten();
     if let Some(ref prof) = existing_profile {
-        println!("  {} Active authenticated profile detected:", "✓".green().bold());
+        println!(
+            "  {} Active authenticated profile detected:",
+            "✓".green().bold()
+        );
         println!("    • EVM Wallet:      {}", prof.wallet_address.cyan());
         println!("    • Consensus Key:   {}", prof.ed25519_pubkey.dimmed());
         println!("    • Network RPC:     {}", prof.network_url.dimmed());
@@ -113,7 +118,10 @@ pub async fn run() -> Result<()> {
 
         println!("\n  Staking {} CREG...", stake_amount);
         println!("  {}", "✓ Stake parameters recorded".green());
-        println!("  To submit on-chain stake when ready, run: {}", format!("creg stake {}", stake_amount).cyan());
+        println!(
+            "  To submit on-chain stake when ready, run: {}",
+            format!("creg stake {}", stake_amount).cyan()
+        );
     }
 
     // Step 6: Start node
@@ -231,8 +239,8 @@ async fn configure_publisher_identity() -> Result<()> {
 }
 
 async fn run_doctor_check(is_validator: bool) -> Result<bool> {
-    let node_target = std::env::var("CREG_NODE_URL")
-        .unwrap_or_else(|_| "https://api.testnet.cregnet.dev".into());
+    let node_target =
+        std::env::var("CREG_NODE_URL").unwrap_or_else(|_| "https://api.testnet.cregnet.dev".into());
 
     let node_ok = check_node_endpoint(&node_target).await;
 
@@ -247,7 +255,11 @@ async fn run_doctor_check(is_validator: bool) -> Result<bool> {
         );
         println!(
             "  {} {}",
-            if docker_ok { "✓".green() } else { "✗".red() },
+            if docker_ok {
+                "✓".green()
+            } else {
+                "✗".red()
+            },
             "Docker daemon".dimmed()
         );
         println!(

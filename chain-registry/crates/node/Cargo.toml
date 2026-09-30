@@ -20,6 +20,7 @@ path = "src/bin/dump_openapi.rs"
 name = "creg-indexer"
 path = "src/bin/creg_indexer.rs"
 
+
 # Test-only sidecar used to prove the cleared-environment private-temp launch
 # contract. It is not a production namespace-authority verifier.
 [[bin]]
@@ -96,6 +97,7 @@ windows-sys = { version = "0.61.2", features = [
 default = []
 embedded-explorer = ["dep:rust-embed", "dep:mime_guess"]
 tls = ["axum-server"]
+phase-c-real-fleet = ["common/phase-c-canonical-transactions", "ml-validator/phase-c-real-fleet"]
 
 [[test]]
 name = "multi_node_testnet_simulation"

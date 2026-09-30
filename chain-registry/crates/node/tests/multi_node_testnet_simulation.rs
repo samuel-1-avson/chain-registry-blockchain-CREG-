@@ -204,6 +204,8 @@ fn test_multi_node_testnet_cluster_full_simulation() {
             validator_set_hash: vs.set_hash(),
             vrf_output: None,
             vrf_proof: None,
+            view_number: 0,
+            view_change_certificate: vec![],
         },
         transactions: vec![Transaction::Revoke {
             package_canonical: package_id.canonical(),

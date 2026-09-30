@@ -14,6 +14,7 @@ volumes:
   caddy-config:
   creg-node-data:
   ipfs-data:
+  faucet-postgres-data:
 
 services:
   # ── Unified Reverse Proxy & TLS (Caddy) ─────────────────────────────────────
@@ -75,6 +76,7 @@ services:
       CREG_TRANSPARENCY_LOG_SIGNER_ID: "creg-log-operator-1"
       CREG_IPFS_URL: "http://ipfs:5001"
       CREG_P2P_LISTEN: "/ip4/0.0.0.0/tcp/9000"
+      CREG_PEERS: "http://10.142.0.4:8080"
       RUST_LOG: "info,chain_registry_node=debug,consensus=info"
     volumes:
       - creg-node-data:/data
@@ -94,24 +96,34 @@ services:
 
   # ── Sepolia Faucet Service ──────────────────────────────────────────────────
   faucet:
-    image: creg-node:genesis2
+    image: us-central1-docker.pkg.dev/gen-lang-client-0022105784/creg-testnet/creg-faucet@sha256:360c124090e5c3a5c448a69e9838bb2c1755ed18f6d32732bff6498d4cdd5ed5
     container_name: creg-unified-faucet
     restart: unless-stopped
-    entrypoint: ["/app/faucet"]
     environment:
       CREG_SECRETS_BACKEND: env
       FAUCET_PORT: "8082"
       FAUCET_RPC_URL: "${SEPOLIA_RPC_URL:-https://ethereum-sepolia-rpc.publicnode.com}"
       FAUCET_PUBLIC_RPC_URL: "https://${CREG_PUBLIC_API_HOST:-api.testnet.cregnet.dev}/sepolia"
-      FAUCET_PRIVATE_KEY: "${DEPLOYER_KEY:-}"
-      FAUCET_ADDRESS: "${GOVERNANCE_SIGNER_ADDRESS:-0xb0935C6C7b9F024013eE13d9C194683199F07eCC}"
-      FAUCET_TOKEN_CONTRACT: "${CREG_TOKEN_ADDR:-0x167Ab975dc95b79727Ed76BD8AAb70463F6499E2}"
+      # Supply the dedicated faucet key from the protected deployment
+      # environment. An empty key must fail compose validation before launch.
+      FAUCET_PRIVATE_KEY: "${FAUCET_PRIVATE_KEY:?Dedicated faucet signing key required}"
+      FAUCET_ADDRESS: "${FAUCET_ADDRESS:?Dedicated faucet address required}"
+      FAUCET_TOKEN_CONTRACT: "${CREG_TOKEN_ADDR:?Token contract from the selected signed spec required}"
       FAUCET_CHAIN_ID: "11155111"
+      FAUCET_RECONCILIATION_RPC_URL: "${FAUCET_RECONCILIATION_RPC_URL:-https://ethereum-sepolia-rpc.publicnode.com}"
+      FAUCET_DEPLOYMENT_RECEIPT_RPC_URL: "${FAUCET_DEPLOYMENT_RECEIPT_RPC_URL:-https://1rpc.io/sepolia}"
+      FAUCET_TOKEN_DEPLOYMENT_TX_HASH: "${FAUCET_TOKEN_DEPLOYMENT_TX_HASH:-0xb5e4229aef0b76de4b8528283243f4fb668df3820556675452c11b9afc3cb516}"
+      FAUCET_TOKEN_DEPLOYMENT_BLOCK: "${FAUCET_TOKEN_DEPLOYMENT_BLOCK:-11781432}"
+      FAUCET_RECONCILIATION_CONFIRMATIONS: "${FAUCET_RECONCILIATION_CONFIRMATIONS:-64}"
       FAUCET_DRIP_AMOUNT: "1000000000000000000000"
       FAUCET_NATIVE_DRIP_AMOUNT: "${FAUCET_NATIVE_DRIP_AMOUNT:-0}"
       FAUCET_COOLDOWN_SECS: "60"
+      FAUCET_PG_URL: "postgresql://faucet:${FAUCET_DB_PASSWORD:?URL-safe faucet database password required}@faucet-db:5432/creg_faucet"
       FAUCET_EXPLORER_URL: "https://${CREG_PUBLIC_EXPLORER_HOST:-explorer.testnet.cregnet.dev}"
       RUST_LOG: "info"
+    depends_on:
+      faucet-db:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
       interval: 30s
@@ -122,19 +134,36 @@ services:
     networks:
       - creg-unified-net
 
+  # Persistent cooldown store. It is reachable only on the private Docker
+  # network and its data survives faucet/container upgrades in this volume.
+  faucet-db:
+    image: postgres:16-alpine
+    container_name: creg-unified-faucet-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: creg_faucet
+      POSTGRES_USER: faucet
+      POSTGRES_PASSWORD: "${FAUCET_DB_PASSWORD:?URL-safe faucet database password required}"
+    volumes:
+      - faucet-postgres-data:/var/lib/postgresql/data
+    networks:
+      - creg-unified-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U faucet -d creg_faucet"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   # ── Explorer Web Frontend ───────────────────────────────────────────────────
   web-explorer:
-    image: chain-registry-web-explorer:3node
+    image: us-central1-docker.pkg.dev/gen-lang-client-0022105784/creg-testnet/creg-web-explorer@sha256:090ba37ef9f0ee228d40d9f296d7fdafde1ef224f66f6015500c13d7f9dae6c7
     container_name: creg-unified-explorer
     restart: unless-stopped
     environment:
-      # NOTE: VITE_* bake in at image build time; these runtime values are inert.
-      # The UI calls same-origin relative /v1/*, which nginx proxies to the node.
+      # Chain contracts come from the signed spec matching the live node identity.
+      # Same-origin /v1/* and /rpc routes are served by nginx.
       VITE_API_BASE: "https://${CREG_PUBLIC_API_HOST:-api.testnet.cregnet.dev}"
       VITE_NETWORK: "testnet"
-      VITE_SEPOLIA_CREG_TOKEN: "${CREG_TOKEN_ADDR:-0x167Ab975dc95b79727Ed76BD8AAb70463F6499E2}"
-      VITE_SEPOLIA_STAKING_ADDR: "${CREG_STAKING_ADDR:-0x30604Aa6f763fbde6aDCffbd8960af3031037331}"
-      VITE_SEPOLIA_REGISTRY_ADDR: "${CREG_REGISTRY_ADDR:-0xD0F465ca185a99E268be0C4FF5A135Bdf89FAF3B}"
     networks:
       - creg-unified-net
 
@@ -148,6 +177,7 @@ services:
       - ./chain-spec.sepolia.json.sig:/usr/share/nginx/html/chain-spec.json.sig:ro
       - ./chain-spec.sepolia.json:/usr/share/nginx/html/chain-spec.sepolia.json:ro
       - ./chain-spec.sepolia.json.sig:/usr/share/nginx/html/chain-spec.sepolia.json.sig:ro
+      - ./phase-c:/usr/share/nginx/html/phase-c:ro
       - ./install.sh:/usr/share/nginx/html/install.sh:ro
       - ./install.ps1:/usr/share/nginx/html/install.ps1:ro
       - ./dist:/usr/share/nginx/html/dist:ro

@@ -30,11 +30,13 @@ mod openapi;
 mod p2p;
 mod p2p_rate_limit;
 mod package_admission;
+mod pbft_safety;
 mod pending_pool;
 mod pidlock;
 mod proof;
 mod publisher_index;
 mod rate_limit;
+mod revocation_gossip;
 mod state;
 mod sync;
 mod validator_pipeline;
@@ -165,6 +167,58 @@ fn wei_to_creg_u64(value: alloy::primitives::U256) -> u64 {
 /// misconfiguration when copying contract addresses between environments.
 ///
 /// Skipped when the env var is unset, so local Anvil dev keeps working.
+fn build_rpc_validation_client() -> Result<reqwest::Client> {
+    // Bound external RPC waits so startup can retry or fail closed instead of
+    // leaving a live process without an API listener indefinitely.
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .context("failed to build bounded L1 RPC client")
+}
+
+async fn fetch_l1_chain_id(client: &reqwest::Client, rpc_url: &str) -> Result<u64> {
+    let response: serde_json::Value = client
+        .post(rpc_url)
+        .json(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "eth_chainId",
+            "params": [],
+            "id": 1,
+        }))
+        .send()
+        .await?
+        .json()
+        .await?;
+    if response.get("error").is_some() {
+        anyhow::bail!("eth_chainId returned a JSON-RPC error");
+    }
+    let raw = response
+        .get("result")
+        .and_then(|value| value.as_str())
+        .ok_or_else(|| anyhow::anyhow!("eth_chainId returned no result"))?;
+    u64::from_str_radix(raw.trim_start_matches("0x"), 16)
+        .map_err(|_| anyhow::anyhow!("eth_chainId returned a non-hex result"))
+}
+
+async fn fetch_l1_chain_id_with_retry(client: &reqwest::Client, rpc_url: &str) -> Result<u64> {
+    for attempt in 1..=10 {
+        match fetch_l1_chain_id(client, rpc_url).await {
+            Ok(observed) => return Ok(observed),
+            Err(_) if attempt < 10 => {
+                tracing::warn!(
+                    "L1 chain ID probe failed (attempt {}/10); retrying after bounded request timeout",
+                    attempt
+                );
+                sleep(Duration::from_secs(2)).await;
+            }
+            Err(_) => {
+                anyhow::bail!("L1 chain ID probe failed after ten bounded attempts")
+            }
+        }
+    }
+    anyhow::bail!("L1 chain ID probe did not complete")
+}
+
 async fn validate_l1_chain_id(rpc_url: &str, expected_from_spec: Option<u64>) -> Result<()> {
     let expected = if let Some(spec_id) = expected_from_spec {
         spec_id
@@ -180,26 +234,11 @@ async fn validate_l1_chain_id(rpc_url: &str, expected_from_spec: Option<u64>) ->
         }
     };
 
-    let client = reqwest::Client::new();
-    let response: serde_json::Value = client
-        .post(rpc_url)
-        .json(&serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "eth_chainId",
-            "params": [],
-            "id": 1,
-        }))
-        .send()
-        .await?
-        .json()
-        .await?;
-
-    let raw = response
-        .get("result")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| anyhow::anyhow!("eth_chainId returned no result from {}", rpc_url))?;
-    let observed = u64::from_str_radix(raw.trim_start_matches("0x"), 16)
-        .map_err(|_| anyhow::anyhow!("eth_chainId returned non-hex value {:?}", raw))?;
+    // A stalled L1 RPC must not leave a process waiting without an API or
+    // restart forever on a transient timeout. Retry a bounded probe and fail
+    // closed after the full retry budget.
+    let client = build_rpc_validation_client()?;
+    let observed = fetch_l1_chain_id_with_retry(&client, rpc_url).await?;
 
     if observed != expected {
         anyhow::bail!(
@@ -265,16 +304,14 @@ async fn validate_contract_addresses(config: &config::NodeConfig) -> Result<()> 
         return Ok(());
     }
 
-    let client = reqwest::Client::new();
+    let client = build_rpc_validation_client()?;
     for attempt in 1..=10 {
         let mut errors = Vec::new();
         for (name, address) in &configured_contracts {
             match fetch_contract_code(&client, &config.eth_rpc_url, address).await {
                 Ok(code) if code != "0x" && code != "0x0" => {}
                 Ok(_) => errors.push(format!("{}={} has no deployed bytecode", name, address)),
-                Err(error) => {
-                    errors.push(format!("{}={} validation failed: {}", name, address, error))
-                }
+                Err(_) => errors.push(format!("{} bytecode request failed", name)),
             }
         }
 
@@ -284,8 +321,7 @@ async fn validate_contract_addresses(config: &config::NodeConfig) -> Result<()> 
 
         if attempt == 10 {
             anyhow::bail!(
-                "Configured contract address validation failed against {}: {}",
-                config.eth_rpc_url,
+                "Configured contract bytecode validation failed after ten bounded attempts: {}",
                 errors.join("; ")
             );
         }
@@ -330,6 +366,22 @@ async fn main() -> Result<()> {
         .init();
 
     let mut config = config::NodeConfig::load().await;
+    if cfg!(feature = "phase-c-real-fleet") != common::compiled_consensus_encoding().is_some() {
+        anyhow::bail!(
+            "the Phase C node profile and common consensus codec must be enabled together"
+        );
+    }
+    #[cfg(feature = "phase-c-real-fleet")]
+    crate::block_producer::validate_commit_capture_arm(&config)?;
+    {
+        let scanner = ml_validator::deep_scan::DeepScanner::default();
+        if let Err(error) = scanner.validate_at_startup() {
+            if cfg!(feature = "phase-c-real-fleet") {
+                return Err(error.into());
+            }
+            tracing::warn!("Scanner profile inspection: {}", error);
+        }
+    }
 
     // â”€â”€ Chain Spec Boot Validation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Replaces the "read N envs and pray" model with a single fetched, signed,
@@ -409,6 +461,9 @@ async fn main() -> Result<()> {
                 common::CURRENT_SPEC_VERSION
             );
         }
+
+        spec.validate_consensus_identity()
+            .context("signed chain-spec consensus identity is unsupported or inconsistent")?;
 
         // Step 4: Pinning checks
         if let Some(expected) = &pinned_chain_id {
@@ -579,7 +634,44 @@ async fn main() -> Result<()> {
     tracing::info!("  peers:       {}", config.peers.len());
 
     // â”€â”€ Open persistent storage â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    let chain = chain_store::ChainStore::open(&config.data_dir)?;
+    let chain = if cfg!(feature = "phase-c-real-fleet") {
+        if chain_spec.is_none() {
+            anyhow::bail!("Phase C consensus requires a verified signed chain spec");
+        }
+        chain_store::ChainStore::open_phase_c(&config.data_dir, &config.network_genesis_hash)?
+    } else {
+        chain_store::ChainStore::open(&config.data_dir)?
+    };
+    if config.is_validator {
+        let genesis = chain
+            .get_block_by_height(0)?
+            .context("validator startup cannot load the canonical genesis block")?;
+        let private_key_hex = config
+            .validator_privkey
+            .as_deref()
+            .context("validator startup has no PBFT signing key")?;
+        let private_key_bytes = hex::decode(private_key_hex.trim_start_matches("0x"))
+            .context("validator PBFT signing key is not valid hex")?;
+        let signing_key = ed25519_dalek::SigningKey::try_from(private_key_bytes.as_slice())
+            .context("validator PBFT signing key must contain 32 bytes")?;
+        let validator_pubkey = hex::encode(signing_key.verifying_key().as_bytes());
+        if cfg!(feature = "phase-c-real-fleet")
+            && !config.validator_set.validators.iter().any(|validator| {
+                validator.id == config.node_id
+                    && validator.pubkey == validator_pubkey
+                    && common::validator_status_is_active(&validator.status)
+            })
+        {
+            anyhow::bail!(
+                "local Phase C signing identity is outside the signed active bootstrap set"
+            );
+        }
+        chain.initialize_pbft_safety_journal(
+            &genesis.hash(),
+            &config.node_id,
+            &validator_pubkey,
+        )?;
+    }
     chain.configure_namespace_consensus(
         namespace_consensus::NamespaceConsensusConfig::from_node_config(&config),
     )?;
@@ -591,6 +683,110 @@ async fn main() -> Result<()> {
     let chain_for_sync = chain.clone();
     let tip = chain.tip_height()?;
     tracing::info!("  chain tip:   height={}", tip);
+    let mut pbft_engine = crate::state::PbftEngine::new();
+    if cfg!(feature = "phase-c-real-fleet") && pbft_engine.allow_small_cluster_quorum() {
+        anyhow::bail!("Phase C cannot enable a reduced small-cluster quorum");
+    }
+    if config.is_validator {
+        let tip_hash = chain.tip_hash()?;
+        let journal = chain.pbft_safety_journal()?;
+        for (block, certificate) in journal.recovered_prepared()? {
+            let height = block.header.height;
+            let authority = validator_set_history::verification_set_at(
+                &config.data_dir,
+                height,
+                &config.validator_set,
+            )
+            .map_err(anyhow::Error::msg)?;
+            let pbft_authority: consensus::ValidatorSet = authority.into();
+            let next_view = certificate
+                .prepared_view
+                .checked_add(1)
+                .context("recovered prepared view has no successor")?;
+            let vote_context = common::ViewChangeVote {
+                height,
+                prev_hash: block.header.prev_hash.clone(),
+                new_view: next_view,
+                validator_id: config.node_id.clone(),
+                prepared: None,
+                signature: String::new(),
+            };
+            consensus::pbft::verify_prepared_certificate(
+                &vote_context,
+                &certificate,
+                &pbft_authority,
+                pbft_engine.allow_small_cluster_quorum(),
+            )?;
+            if height <= tip {
+                let canonical = chain
+                    .get_block_by_height(height)?
+                    .context("recovered prepared height is absent from the canonical chain")?;
+                if canonical.hash() != block.hash() {
+                    anyhow::bail!(
+                        "recovered prepared value conflicts with finalized chain history"
+                    );
+                }
+            } else if height == tip.saturating_add(1) && block.header.prev_hash == tip_hash {
+                pbft_engine.restore_prepared(block, certificate, pbft_authority)?;
+                tracing::warn!(height, "Recovered durable PBFT prepared round");
+            } else {
+                anyhow::bail!("recovered prepared value cannot be attached to the canonical tip");
+            }
+        }
+        for (height, prev_hash, block_hash, signature) in journal.recovered_commits()? {
+            if height <= tip {
+                let canonical = chain
+                    .get_block_by_height(height)?
+                    .context("recovered COMMIT height is absent from canonical history")?;
+                if canonical.hash() != block_hash || canonical.header.prev_hash != prev_hash {
+                    anyhow::bail!("recovered COMMIT conflicts with finalized chain history");
+                }
+                continue;
+            }
+            if height != tip.saturating_add(1) || prev_hash != tip_hash {
+                anyhow::bail!("recovered COMMIT cannot be attached to the canonical tip");
+            }
+            let vote = common::BlockSignature {
+                validator_id: config.node_id.clone(),
+                pubkey: journal.validator_pubkey().to_owned(),
+                signature,
+            };
+            pbft_engine
+                .commit(&block_hash, &config.node_id, vote)
+                .context("recovered COMMIT has no matching durable prepared round")?;
+            tracing::warn!(
+                event = "pbft_local_commit_recovered",
+                validator_id = %config.node_id,
+                chain_id = %config.chain_id,
+                genesis_hash = %config.network_genesis_hash,
+                height,
+                parent_hash = %prev_hash,
+                block_hash = %block_hash,
+                "Recovered durable local PBFT COMMIT before P2P and sync services start"
+            );
+        }
+        for vote in journal.recovered_view_change_votes()? {
+            let authority = validator_set_history::verification_set_at(
+                &config.data_dir,
+                vote.height,
+                &config.validator_set,
+            )
+            .map_err(anyhow::Error::msg)?;
+            let pbft_authority: consensus::ValidatorSet = authority.into();
+            consensus::pbft::verify_view_change_vote(
+                &vote,
+                &pbft_authority,
+                pbft_engine.allow_small_cluster_quorum(),
+            )?;
+            if vote.height <= tip {
+                continue;
+            }
+            if vote.height != tip.saturating_add(1) || vote.prev_hash != tip_hash {
+                anyhow::bail!("recovered view-change vote cannot be attached to the canonical tip");
+            }
+            pbft_engine.receive_view_change(vote, &pbft_authority)?;
+        }
+    }
 
     // â”€â”€ Rebuild publisher index from chain history â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     let mut publisher_index = PublisherIndex::new();
@@ -617,6 +813,7 @@ async fn main() -> Result<()> {
 
     // â”€â”€ Event bus (broadcast channel for SSE clients) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     let event_bus = new_event_bus();
+    chain.attach_event_bus(Arc::clone(&event_bus))?;
 
     let (dialable_seeds, invalid_seeds) = p2p::parse_p2p_seed_multiaddrs(&config.p2p_seeds);
     for (seed, error) in &invalid_seeds {
@@ -675,12 +872,13 @@ async fn main() -> Result<()> {
         },
         view_change_certs: HashMap::new(),
         reorgs: Vec::new(),
-        pbft_engine: crate::state::PbftEngine::new(),
+        pbft_engine,
         forced_inclusion_tracker,
         sync_lag_blocks: 0,
         sync_max_peer_tip: 0,
         reward_emissions_succeeded: 0,
         reward_emissions_failed: 0,
+        reward_emissions_skipped: 0,
         treasury_balance: 0,
         pending_rewards_estimate: 0,
         total_rewards_distributed: 0,
@@ -717,6 +915,10 @@ async fn main() -> Result<()> {
     });
 
     tokio::spawn(p2p_node.run(Arc::clone(&state), Arc::clone(&event_bus)));
+    tokio::spawn(revocation_gossip::run(
+        Arc::clone(&state),
+        p2p_handle.clone(),
+    ));
 
     // â”€â”€ Validator identity registrations: restore + periodic re-broadcast â”€â”€â”€â”€â”€â”€
     // Reapply persisted registrations so a restart keeps every known validator
@@ -786,13 +988,6 @@ async fn main() -> Result<()> {
     tokio::spawn(sync::run(Arc::clone(&state)));
 
     // â”€â”€ ML model existence check (T6) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    {
-        let scanner = ml_validator::deep_scan::DeepScanner::default();
-        if let Err(e) = scanner.validate_at_startup() {
-            tracing::warn!("ML model validation: {}", e);
-        }
-    }
-
     tokio::spawn(validator_pipeline::run(
         Arc::clone(&state),
         tx_sender.clone(),

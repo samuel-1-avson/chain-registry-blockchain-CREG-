@@ -16,7 +16,7 @@ use sled;
 use std::{
     collections::{BTreeMap, HashSet},
     path::{Path, PathBuf},
-    sync::{Arc, Condvar, Mutex},
+    sync::{Arc, Condvar, Mutex, OnceLock},
 };
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -70,6 +70,7 @@ const CF_REORG_JOURNAL: &str = "reorg_journal";
 const REORG_JOURNAL_KEY: &[u8] = b"active";
 const REORG_FINALIZED_WORK_PREFIX: &[u8] = b"finalized_work\0";
 const MAX_FINALIZED_WORK_RETRIES: u32 = 5;
+const PBFT_JOURNAL_BINDING_KEY: &[u8] = b"meta/pbft-journal-binding-v1";
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct PublisherRotationIndex {
@@ -131,9 +132,14 @@ fn namespace_lifecycle_nonce_key(
 #[derive(Clone)]
 pub struct ChainStore {
     db: Arc<DB>,
+    canonical_genesis: Arc<Block>,
     /// Parent directory of `chain.rocksdb`. Reorg checkpoints must be created
     /// on this filesystem because RocksDB uses hard links for immutable SSTs.
     data_dir: Arc<PathBuf>,
+    /// Independent durable PBFT signing locks. This database is deliberately
+    /// outside `chain.rocksdb` so reorg recovery cannot roll votes backward.
+    pbft_safety_journal: Arc<OnceLock<Arc<crate::pbft_safety::PbftSigningJournal>>>,
+    runtime_events: Arc<OnceLock<crate::events::RuntimeEventEmitter>>,
     namespace_consensus:
         Arc<std::sync::RwLock<crate::namespace_consensus::NamespaceConsensusConfig>>,
     /// RocksDB does not provide a conditional put through this wrapper. This
@@ -272,7 +278,133 @@ pub(crate) struct ReorgMutationGuard {
     mutation: StoreMutationGuard,
 }
 
+fn finalized_work_transaction_summary(transaction: &Transaction) -> serde_json::Value {
+    let (kind, canonical, publisher, nonce, expires_at, chain_id) = match transaction {
+        Transaction::Publish(record) => (
+            "publish",
+            Some(record.id.canonical()),
+            Some(record.publisher_pubkey.clone()),
+            None,
+            None,
+            None,
+        ),
+        Transaction::PublishAuthorizedV1 {
+            record,
+            authorization,
+        } => (
+            "publish_authorized_v1",
+            Some(record.id.canonical()),
+            Some(authorization.publisher_address.clone()),
+            Some(authorization.nonce.clone()),
+            Some(authorization.expires_at),
+            Some(authorization.chain_id.clone()),
+        ),
+        Transaction::Revoke {
+            package_canonical, ..
+        } => (
+            "revoke",
+            Some(package_canonical.clone()),
+            None,
+            None,
+            None,
+            None,
+        ),
+        _ => ("other", None, None, None, None, None),
+    };
+    serde_json::json!({
+        "type": kind,
+        "canonical": canonical,
+        "publisher": publisher,
+        "publisher_nonce": nonce,
+        "publisher_authorization_expires_at": expires_at,
+        "authorization_chain_id": chain_id,
+    })
+}
+
 impl ChainStore {
+    /// Attach live notifications after the canonical startup replay completes.
+    pub fn attach_event_bus(&self, bus: crate::events::EventBus) -> Result<()> {
+        self.runtime_events
+            .set(crate::events::RuntimeEventEmitter::new(bus))
+            .map_err(|_| anyhow::anyhow!("runtime event bus was already attached"))
+    }
+
+    pub(crate) fn emit_registry_event(&self, event: crate::events::RegistryEvent) {
+        if let Some(emitter) = self.runtime_events.get() {
+            emitter.emit(event);
+        }
+    }
+
+    pub(crate) fn emit_committed_events(&self, block: &Block) {
+        let Some(emitter) = self.runtime_events.get() else {
+            return;
+        };
+        if block.header.height == 0 || self.tip_height().ok() != Some(block.header.height) {
+            return;
+        }
+        let hash = block.hash();
+        match self.get_block_by_height(block.header.height) {
+            Ok(Some(canonical)) if canonical.hash() == hash => {}
+            _ => {
+                tracing::warn!(
+                    height = block.header.height,
+                    "Skipped event for a block absent from the canonical store"
+                );
+                return;
+            }
+        }
+        if !emitter.first_notification_for_commit(&hash) {
+            return;
+        }
+        emitter.emit(
+            crate::events::RegistryEvent::block_produced(
+                block.header.height,
+                &hash,
+                block.transactions.len(),
+            )
+            .with_committed_block(block),
+        );
+        for transaction in &block.transactions {
+            let event = if let Some(record) = transaction.published_record() {
+                let validator_count = record
+                    .validator_signatures
+                    .iter()
+                    .map(|signature| &signature.validator_id)
+                    .collect::<HashSet<_>>()
+                    .len();
+                crate::events::RegistryEvent::package_verified(
+                    &record.id.canonical(),
+                    &hash,
+                    validator_count,
+                )
+            } else if let Transaction::Revoke {
+                package_canonical,
+                reason,
+                revoked_by,
+                ..
+            } = transaction
+            {
+                match self.get_package(package_canonical) {
+                    Ok(Some(_)) => crate::events::RegistryEvent::package_revoked(
+                        package_canonical,
+                        reason,
+                        revoked_by,
+                    ),
+                    Ok(None) => {
+                        crate::events::RegistryEvent::package_rejected(package_canonical, reason)
+                    }
+                    Err(error) => {
+                        tracing::warn!(canonical = %package_canonical, %error, "Could not classify committed package event");
+                        continue;
+                    }
+                }
+            } else {
+                continue;
+            };
+            emitter.emit(event.with_committed_block(block));
+        }
+    }
+
     pub fn configure_namespace_consensus(
         &self,
         config: crate::namespace_consensus::NamespaceConsensusConfig,
@@ -640,6 +772,14 @@ impl ChainStore {
     }
 
     pub fn open(data_dir: &Path) -> Result<Self> {
+        Self::open_with_genesis(data_dir, Block::genesis())
+    }
+
+    pub fn open_phase_c(data_dir: &Path, spec_genesis_hash: &str) -> Result<Self> {
+        Self::open_with_genesis(data_dir, Block::genesis_for_phase_c(spec_genesis_hash)?)
+    }
+
+    fn open_with_genesis(data_dir: &Path, genesis: Block) -> Result<Self> {
         std::fs::create_dir_all(data_dir)?;
 
         let db_path = data_dir.join("chain.rocksdb");
@@ -681,7 +821,10 @@ impl ChainStore {
 
         let store = Self {
             db: Arc::new(db),
+            canonical_genesis: Arc::new(genesis),
             data_dir: Arc::new(data_dir.to_path_buf()),
+            pbft_safety_journal: Arc::new(OnceLock::new()),
+            runtime_events: Arc::new(OnceLock::new()),
             namespace_consensus: Arc::new(std::sync::RwLock::new(Default::default())),
             publisher_admission_nonce_lock: Arc::new(std::sync::Mutex::new(())),
             transparency_log_lock: Arc::new(std::sync::Mutex::new(())),
@@ -697,9 +840,18 @@ impl ChainStore {
 
         // Write the genesis block if the chain is empty.
         if store.tip_height()? == 0 && store.block_count() == 0 {
-            let genesis = Block::genesis();
-            store.insert_block(&genesis)?;
+            store.insert_block(&store.canonical_genesis)?;
             tracing::info!("Chain initialised with genesis block");
+        }
+        let stored_genesis = store
+            .get_block_by_height(0)?
+            .context("canonical genesis block is missing")?;
+        if serde_json::to_value(&stored_genesis)?
+            != serde_json::to_value(&*store.canonical_genesis)?
+        {
+            anyhow::bail!(
+                "chain storage belongs to another genesis; preserve its data and signing journal"
+            );
         }
 
         Ok(store)
@@ -737,9 +889,12 @@ impl ChainStore {
         let db = DB::open_cf_for_read_only(&opts, &db_path, cfs, false)
             .context("Failed to open RocksDB in read-only mode")?;
 
-        let store = Self {
+        let mut store = Self {
             db: Arc::new(db),
+            canonical_genesis: Arc::new(Block::genesis()),
             data_dir: Arc::new(data_dir.to_path_buf()),
+            pbft_safety_journal: Arc::new(OnceLock::new()),
+            runtime_events: Arc::new(OnceLock::new()),
             namespace_consensus: Arc::new(std::sync::RwLock::new(Default::default())),
             publisher_admission_nonce_lock: Arc::new(std::sync::Mutex::new(())),
             transparency_log_lock: Arc::new(std::sync::Mutex::new(())),
@@ -752,7 +907,71 @@ impl ChainStore {
                 "chain has an incomplete reorg journal; open it read-write to recover first"
             );
         }
+        store.canonical_genesis = Arc::new(
+            store
+                .get_block_by_height(0)?
+                .context("read-only chain has no canonical genesis")?,
+        );
         Ok(store)
+    }
+
+    pub fn initialize_pbft_safety_journal(
+        &self,
+        genesis_hash: &str,
+        validator_id: &str,
+        validator_pubkey: &str,
+    ) -> Result<()> {
+        if self.pbft_safety_journal.get().is_some() {
+            anyhow::bail!("PBFT safety journal was already initialized");
+        }
+        let binding = serde_json::to_vec(&(
+            genesis_hash.trim_start_matches("0x").to_ascii_lowercase(),
+            validator_id,
+            validator_pubkey
+                .trim_start_matches("0x")
+                .to_ascii_lowercase(),
+        ))?;
+        let existing_binding = self.db.get(PBFT_JOURNAL_BINDING_KEY)?;
+        if existing_binding
+            .as_deref()
+            .is_some_and(|bytes| bytes != binding.as_slice())
+        {
+            anyhow::bail!("chain storage is bound to another PBFT signing identity");
+        }
+        let existing_journal = self.data_dir.join("pbft-safety.rocksdb").exists();
+        let journal = if existing_binding.is_some() || existing_journal {
+            crate::pbft_safety::PbftSigningJournal::open_existing(
+                &self.data_dir,
+                genesis_hash,
+                validator_id,
+                validator_pubkey,
+            )?
+        } else {
+            if self.tip_height()? != 0 || self.block_count() != 1 {
+                anyhow::bail!("nonempty validator chain lacks its original signing journal; refusing to recreate locks");
+            }
+            crate::pbft_safety::PbftSigningJournal::open(
+                &self.data_dir,
+                genesis_hash,
+                validator_id,
+                validator_pubkey,
+            )?
+        };
+        // No caller may sign until both durable anchors exist. A crash before
+        // this write leaves an existing journal that is verified on restart.
+        let mut options = WriteOptions::default();
+        options.set_sync(true);
+        self.db
+            .put_opt(PBFT_JOURNAL_BINDING_KEY, binding, &options)?;
+        self.pbft_safety_journal
+            .set(Arc::new(journal))
+            .map_err(|_| anyhow::anyhow!("PBFT safety journal initialization raced"))
+    }
+
+    pub fn pbft_safety_journal(&self) -> Result<Arc<crate::pbft_safety::PbftSigningJournal>> {
+        self.pbft_safety_journal.get().cloned().context(
+            "PBFT signing is blocked because its durable safety journal is not initialized",
+        )
     }
 
     /// Migrate data from a legacy sled database into this RocksDB store.
@@ -905,6 +1124,9 @@ impl ChainStore {
         let mut expected_height = common_ancestor.saturating_add(1);
         let mut expected_parent = ancestor.hash();
         for block in candidate_blocks {
+            if let Some(journal) = self.pbft_safety_journal.get() {
+                journal.validate_canonical_block(block)?;
+            }
             if block.header.height != expected_height {
                 anyhow::bail!(
                     "reorg candidate height {} does not continue expected height {}",
@@ -932,8 +1154,11 @@ impl ChainStore {
             .create_checkpoint(&checkpoint_path)
             .context("create RocksDB reorg checkpoint")?;
 
-        let preflight =
-            ChainStore::open(checkpoint_root.path()).context("open isolated reorg checkpoint")?;
+        let preflight = ChainStore::open_with_genesis(
+            checkpoint_root.path(),
+            (*self.canonical_genesis).clone(),
+        )
+        .context("open isolated reorg checkpoint")?;
         preflight.configure_namespace_consensus(self.namespace_consensus_config()?)?;
         let validation = (|| -> Result<()> {
             preflight.rollback_to_height(common_ancestor)?;
@@ -1080,18 +1305,25 @@ impl ChainStore {
     }
 
     fn insert_block_inner(&self, block: &Block) -> Result<()> {
+        if let Some(journal) = self.pbft_safety_journal.get() {
+            journal.validate_canonical_block(block)?;
+        }
         let hash = block.hash();
         let bytes = serde_json::to_vec(block)?;
         // PBFT certificates attest the header hash but are not themselves
         // committed by it. Different honest quorum subsets or signature order
         // therefore describe the same canonical payload. Idempotence compares
-        // exactly the header and transaction body, while preserving the first
-        // accepted certificate encoding.
-        let canonical_payload = serde_json::to_value((&block.header, &block.transactions))?;
+        // the hash-bound header and transaction body, while preserving the
+        // first accepted certificate encoding, including view-change witnesses.
+        let mut identity_header = block.header.clone();
+        identity_header.view_change_certificate.clear();
+        let canonical_payload = serde_json::to_value((&identity_header, &block.transactions))?;
         let existing_at_height = self.get_block_by_height(block.header.height)?;
         if let Some(existing) = existing_at_height.as_ref() {
+            let mut existing_header = existing.header.clone();
+            existing_header.view_change_certificate.clear();
             if existing.hash() != hash
-                || serde_json::to_value((&existing.header, &existing.transactions))?
+                || serde_json::to_value((&existing_header, &existing.transactions))?
                     != canonical_payload
             {
                 anyhow::bail!(
@@ -1102,9 +1334,8 @@ impl ChainStore {
         }
 
         if block.header.height == 0 {
-            let genesis = Block::genesis();
-            if serde_json::to_value(block)? != serde_json::to_value(&genesis)?
-                || block.hash() != genesis.hash()
+            if serde_json::to_value(block)? != serde_json::to_value(&*self.canonical_genesis)?
+                || block.hash() != self.canonical_genesis.hash()
             {
                 anyhow::bail!("height zero must contain the exact canonical genesis block");
             }
@@ -1379,7 +1610,8 @@ impl ChainStore {
             batch.put_cf(&cf_applied_namespace_lifecycle_nonces, key.as_bytes(), b"");
         }
 
-        self.db.write(batch)?;
+        // Inclusion and queue acknowledgement share one synchronous commit.
+        self.db.write_opt(batch, &Self::reorg_write_options())?;
 
         tracing::info!(
             "Block {} inserted (height {})",
@@ -1418,7 +1650,7 @@ impl ChainStore {
     /// `tip_height - offset`.  Used for paginated API responses.
     pub fn list_blocks(&self, offset: u64, limit: u64) -> Result<Vec<Block>> {
         let tip = self.tip_height()?;
-        if tip == 0 {
+        if offset > tip || limit == 0 {
             return Ok(vec![]);
         }
         let start_height = tip.saturating_sub(offset);
@@ -1770,6 +2002,13 @@ impl ChainStore {
         if self.db.get_cf(&cf, work_id.as_bytes())?.is_some() {
             return Ok(false);
         }
+        let dead_cf = self
+            .db
+            .cf_handle(CF_FINALIZED_WORK_DEAD_LETTER)
+            .context("cf finalized_work_dead_letter")?;
+        if self.db.get_cf(&dead_cf, work_id.as_bytes())?.is_some() {
+            return Ok(false);
+        }
         let envelope = FinalizedWorkEnvelope {
             schema_version: 2,
             transaction: tx.clone(),
@@ -1780,7 +2019,12 @@ impl ChainStore {
             next_attempt_at: None,
         };
         let encoded = serde_json::to_vec(&envelope).context("serialize finalized work")?;
-        self.db.put_cf(&cf, work_id.as_bytes(), encoded)?;
+        self.db.put_cf_opt(
+            &cf,
+            work_id.as_bytes(),
+            encoded,
+            &Self::reorg_write_options(),
+        )?;
         Ok(true)
     }
 
@@ -1826,7 +2070,7 @@ impl ChainStore {
         let mut batch = rocksdb::WriteBatch::default();
         batch.put_cf(&nonce_cf, nonce_key.as_bytes(), b"");
         batch.put_cf(&work_cf, work_id.as_bytes(), encoded);
-        self.db.write(batch)?;
+        self.db.write_opt(batch, &Self::reorg_write_options())?;
         Ok(true)
     }
 
@@ -2010,6 +2254,11 @@ impl ChainStore {
             let envelope = Self::decode_finalized_work(&value)?;
             if Self::is_finalized_work_ready(&envelope, now)? {
                 let id = String::from_utf8(key.to_vec()).context("invalid finalized work key")?;
+                if cfg!(feature = "phase-c-real-fleet")
+                    && id != transaction_hash(&envelope.transaction)
+                {
+                    anyhow::bail!("finalized work key {id} does not match its Phase C transaction; preserve this store for recovery");
+                }
                 work.push((id, envelope.transaction));
                 if work.len() == limit {
                     break;
@@ -2024,6 +2273,32 @@ impl ChainStore {
     /// an in-memory capacity bound across restarts.
     pub fn pending_ready_finalized_work(&self, limit: usize) -> Result<Vec<(String, Transaction)>> {
         self.pending_ready_finalized_work_at(limit, Utc::now())
+    }
+
+    /// Best-effort notification and forced delivery obey the same durable
+    /// retry deadline as hydration. Missing records remain valid for work
+    /// received only through gossip. Explicit reorg requeue creates an active
+    /// envelope and takes precedence over older dead-letter evidence.
+    pub fn is_finalized_work_deliverable(&self, transaction: &Transaction) -> Result<bool> {
+        let work_id = transaction_hash(transaction);
+        let work_cf = self
+            .db
+            .cf_handle(CF_FINALIZED_WORK)
+            .context("cf finalized_work")?;
+        if let Some(bytes) = self.db.get_cf(&work_cf, work_id.as_bytes())? {
+            let envelope = Self::decode_finalized_work(&bytes)?;
+            if cfg!(feature = "phase-c-real-fleet")
+                && work_id != transaction_hash(&envelope.transaction)
+            {
+                anyhow::bail!("finalized work payload does not match its Phase C key");
+            }
+            return Self::is_finalized_work_ready(&envelope, Utc::now());
+        }
+        let dead_cf = self
+            .db
+            .cf_handle(CF_FINALIZED_WORK_DEAD_LETTER)
+            .context("cf finalized_work_dead_letter")?;
+        Ok(self.db.get_cf(&dead_cf, work_id.as_bytes())?.is_none())
     }
 
     fn transparency_leaves(&self) -> Result<Vec<String>> {
@@ -2239,6 +2514,97 @@ impl ChainStore {
         Ok(stats)
     }
 
+    /// Return a read-only, signature-redacted diagnostic view of active and
+    /// dead-lettered finalized work. This is used by offline operator tooling;
+    /// it never opens the store for mutation or returns publisher signatures.
+    pub fn finalized_work_diagnostics(&self) -> Result<serde_json::Value> {
+        let active_cf = self
+            .db
+            .cf_handle(CF_FINALIZED_WORK)
+            .context("cf finalized_work")?;
+        let dead_cf = self
+            .db
+            .cf_handle(CF_FINALIZED_WORK_DEAD_LETTER)
+            .context("cf finalized_work_dead_letter")?;
+
+        let mut active = Vec::new();
+        for item in self
+            .db
+            .iterator_cf(&active_cf, rocksdb::IteratorMode::Start)
+        {
+            let (key, value) = item?;
+            let work_id = String::from_utf8(key.to_vec()).context("invalid finalized work key")?;
+            let envelope = Self::decode_finalized_work(&value)?;
+            active.push(serde_json::json!({
+                "work_id": work_id,
+                "enqueued_at": envelope.enqueued_at,
+                "submitted_at_height": envelope.submitted_at_height,
+                "retry_count": envelope.retry_count,
+                "last_error": envelope.last_error,
+                "next_attempt_at": envelope.next_attempt_at,
+                "transaction": self.finalized_work_transaction_diagnostics(&envelope.transaction)?,
+            }));
+        }
+
+        let mut dead_letters = Vec::new();
+        for item in self.db.iterator_cf(&dead_cf, rocksdb::IteratorMode::Start) {
+            let (key, value) = item?;
+            let work_id = String::from_utf8(key.to_vec()).context("invalid dead-letter key")?;
+            let record: serde_json::Value = serde_json::from_slice(&value)
+                .context("decode finalized-work dead-letter record")?;
+            let transaction = record
+                .get("transaction")
+                .cloned()
+                .map(serde_json::from_value::<Transaction>)
+                .transpose()
+                .context("decode dead-letter transaction")?;
+            dead_letters.push(serde_json::json!({
+                "work_id": work_id,
+                "reason": record.get("reason"),
+                "terminal_reason": record.get("terminal_reason"),
+                "dead_lettered_at": record.get("dead_lettered_at"),
+                "enqueued_at": record.get("enqueued_at"),
+                "retry_count": record.get("retry_count"),
+                "last_error": record.get("last_error"),
+                "source": record.get("source"),
+                "transaction": transaction
+                    .as_ref()
+                    .map(|tx| self.finalized_work_transaction_diagnostics(tx))
+                    .transpose()?,
+            }));
+        }
+
+        Ok(serde_json::json!({
+            "schema": "creg-finalized-work-diagnostics-v1",
+            "mode": "read-only",
+            "publisher_signatures_included": false,
+            "active_count": active.len(),
+            "dead_letter_count": dead_letters.len(),
+            "active": active,
+            "dead_letters": dead_letters,
+        }))
+    }
+
+    fn finalized_work_transaction_diagnostics(
+        &self,
+        transaction: &Transaction,
+    ) -> Result<serde_json::Value> {
+        let mut summary = finalized_work_transaction_summary(transaction);
+        if let Transaction::PublishAuthorizedV1 { authorization, .. } = transaction {
+            let nonce_key = crate::namespace_consensus::publisher_authorization_nonce_key(
+                &authorization.publisher_address,
+                &authorization.nonce,
+            );
+            let now = Utc::now().timestamp();
+            summary["authorization_nonce_applied"] =
+                serde_json::json!(self.is_publisher_authorization_nonce_applied(&nonce_key)?);
+            summary["authorization_expired_now"] =
+                serde_json::json!(i128::from(authorization.expires_at) <= i128::from(now));
+            summary["authorization_expires_at"] = serde_json::json!(authorization.expires_at);
+        }
+        Ok(summary)
+    }
+
     pub fn finalized_work_depths(&self) -> Result<(u64, u64)> {
         let active = self.finalized_work_stats()?.active_depth;
         let dead_cf = self
@@ -2292,8 +2658,60 @@ impl ChainStore {
         let mut batch = rocksdb::WriteBatch::default();
         batch.put_cf(&dead_cf, work_id.as_bytes(), serde_json::to_vec(&record)?);
         batch.delete_cf(&work_cf, work_id.as_bytes());
-        self.db.write(batch)?;
+        self.db.write_opt(batch, &Self::reorg_write_options())?;
         Ok(true)
+    }
+
+    /// Preserve an unprepared transaction that cannot be proposed again,
+    /// including work delivered only through gossip or forced inclusion.
+    /// Callers must not use this to change a quorum-prepared block.
+    pub fn dead_letter_unprepared_transaction(
+        &self,
+        transaction: &Transaction,
+        reason: &str,
+    ) -> Result<()> {
+        let _mutation = self.ensure_no_active_reorg()?;
+        let work_id = transaction_hash(transaction);
+        let work_cf = self
+            .db
+            .cf_handle(CF_FINALIZED_WORK)
+            .context("cf finalized_work")?;
+        let dead_cf = self
+            .db
+            .cf_handle(CF_FINALIZED_WORK_DEAD_LETTER)
+            .context("cf finalized_work_dead_letter")?;
+        let mut record = if let Some(bytes) = self.db.get_cf(&dead_cf, work_id.as_bytes())? {
+            serde_json::from_slice::<serde_json::Value>(&bytes)
+                .context("invalid existing dead-letter record")?
+        } else if let Some(bytes) = self.db.get_cf(&work_cf, work_id.as_bytes())? {
+            let envelope = Self::decode_finalized_work(&bytes)?;
+            serde_json::json!({
+                "work_id": work_id,
+                "reason": reason,
+                "dead_lettered_at": Utc::now().to_rfc3339(),
+                "enqueued_at": envelope.enqueued_at,
+                "retry_count": envelope.retry_count,
+                "last_error": envelope.last_error,
+                "transaction": envelope.transaction,
+            })
+        } else {
+            serde_json::json!({
+                "work_id": work_id,
+                "reason": reason,
+                "dead_lettered_at": Utc::now().to_rfc3339(),
+                "source": "ephemeral_or_forced",
+                "transaction": transaction,
+            })
+        };
+        let object = record
+            .as_object_mut()
+            .context("dead-letter record must be an object")?;
+        object.insert("terminal_reason".into(), serde_json::json!(reason));
+        let mut batch = rocksdb::WriteBatch::default();
+        batch.put_cf(&dead_cf, work_id.as_bytes(), serde_json::to_vec(&record)?);
+        batch.delete_cf(&work_cf, work_id.as_bytes());
+        self.db.write_opt(batch, &Self::reorg_write_options())?;
+        Ok(())
     }
 
     /// Record a failed delivery and preserve the distinction between a queued
@@ -2335,14 +2753,18 @@ impl ChainStore {
             let mut batch = rocksdb::WriteBatch::default();
             batch.put_cf(&dead_cf, work_id.as_bytes(), serde_json::to_vec(&record)?);
             batch.delete_cf(&cf, work_id.as_bytes());
-            self.db.write(batch)?;
+            self.db.write_opt(batch, &Self::reorg_write_options())?;
             return Ok(FinalizedWorkFailureOutcome::DeadLettered);
         }
         let delay_secs = (1u64 << envelope.retry_count.min(8)).min(300);
         envelope.next_attempt_at =
             Some((chrono::Utc::now() + chrono::Duration::seconds(delay_secs as i64)).to_rfc3339());
-        self.db
-            .put_cf(&cf, work_id.as_bytes(), serde_json::to_vec(&envelope)?)?;
+        self.db.put_cf_opt(
+            &cf,
+            work_id.as_bytes(),
+            serde_json::to_vec(&envelope)?,
+            &Self::reorg_write_options(),
+        )?;
         Ok(FinalizedWorkFailureOutcome::Retrying)
     }
 
@@ -2595,6 +3017,8 @@ mod tests {
                 validator_set_hash: "test".into(),
                 vrf_output: None,
                 vrf_proof: None,
+                view_number: 0,
+                view_change_certificate: vec![],
             },
             transactions,
             pbft_signatures: vec![],

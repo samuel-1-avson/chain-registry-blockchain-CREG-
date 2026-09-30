@@ -4,9 +4,9 @@
 //! extracted source files against them.  This replaces the custom ONNX
 //! model approach — no training data is required.
 
+use sha2::{Digest, Sha256};
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
-use sha2::{Digest, Sha256};
 use tracing::{debug, info, warn};
 
 /// A single YARA match found during scanning.

@@ -1155,16 +1155,17 @@ pub mod paths {
     )]
     pub async fn governance_execute() {}
 
-    /// Rolling metrics time-series — TPS, block time, validator count, stake, pending depth.
+    /// Durable Prometheus time-series filtered to this node's signed network identity.
     #[utoipa::path(
         get,
-        path = "/v1/metrics/history",
+        path = "/v1/public/metrics/history",
         tag = "system",
-        params(
-            ("series" = Option<String>, Query, description = "Comma-separated series names"),
-            ("window" = Option<String>, Query, description = "Lookback window (e.g. 1h, 24h)"),
+        params(("range" = Option<String>, Query, description = "Lookback window: 5m, 30m, 1h, 6h, 24h, or 7d (default 1h)")),
+        responses(
+            (status = 200, description = "Stored samples returned from the real Prometheus collector", body = Object),
+            (status = 400, description = "Unsupported history range", body = ApiError),
+            (status = 503, description = "Collector unavailable or history is warming", body = ApiError),
         ),
-        responses((status = 200, body = Object)),
     )]
     pub async fn metrics_history() {}
 

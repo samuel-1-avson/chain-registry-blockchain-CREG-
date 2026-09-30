@@ -1,0 +1,124 @@
+{
+  "captured_at_utc": "2026-09-30T04:56:21.1465416Z",
+  "source": "direct reads from live public R7 and Sepolia-backed faucet APIs",
+  "responses": [
+    {
+      "url": "https://explorer.testnet.cregnet.dev/v1/public/chain/stats",
+      "http_status": 200,
+      "body": {
+        "tip_height": 20,
+        "tip_hash": "730b01c1a67a4796a16f599169e4ebf77e01d2e8ce92d1e4fb3715a7c4354285",
+        "package_count": 8,
+        "block_count": 21,
+        "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+        "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+        "spec_signature_verified": true,
+        "l1_rpc_configured": true,
+        "is_validator": false,
+        "validator_count": 4,
+        "active_validators": 4,
+        "total_stake": 400,
+        "total_stake_native": "400",
+        "peer_count": 2,
+        "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+        "l1_block": 0,
+        "pending_tx_count": 0,
+        "publisher_count": 1,
+        "finalized_height": 20,
+        "finalization_lag": 0,
+        "finalization_source": "creg-canonical-store",
+        "validator_set_source": "chain-authoritative",
+        "validator_set_sync_state": "synced",
+        "validator_set_last_finalized_source_block": 11812431
+      }
+    },
+    {
+      "url": "https://faucet.testnet.cregnet.dev/health",
+      "http_status": 200,
+      "body": {
+        "faucet": "online",
+        "faucet_balance": "99900000000000000000000",
+        "faucet_native_balance": "3152455253647793443",
+        "ledger_reconciled": true,
+        "mode": "real",
+        "native_drips_available": true,
+        "status": "healthy",
+        "token_claims_enabled": true,
+        "token_distribution_open": true,
+        "token_drips_available": true,
+        "token_policy_ready": true,
+        "token_wallet_funded": true
+      }
+    },
+    {
+      "url": "https://faucet.testnet.cregnet.dev/api/stats",
+      "http_status": 200,
+      "body": {
+        "cooldown_seconds": 86400,
+        "drip_amount": "100000000000000000000",
+        "faucet_address": "0x721C8dBD8208CA9dBdcC12AE9339225458608B81",
+        "faucet_balance": "99900000000000000000000",
+        "faucet_balance_formatted": "99900.00",
+        "faucet_native_balance": "3152455253647793443",
+        "faucet_native_balance_formatted": "3.1525",
+        "ledger_reconciled": true,
+        "max_balance": "1000000000000000000000",
+        "native_drip_amount": "0",
+        "native_max_balance": "1000000000000000000",
+        "stats": {
+          "last_drip": "2026-09-29T21:50:36Z",
+          "total_distributed": "2100000000000000000000",
+          "total_drips": 3,
+          "total_native_distributed": "0",
+          "unique_addresses": 3,
+          "unresolved_claims": 0
+        },
+        "stats_scope": "confirmed_receipts_and_canonical_logs_recorded_in_postgres",
+        "status": "available",
+        "token_address_lifetime_cap_wei": "100000000000000000000",
+        "token_allocation_wei": "1000000000000000000000000",
+        "token_claim_policy_ready": true,
+        "token_claims_enabled": true,
+        "token_contract": "0xbC2a72107C6765364D0A822a88A6e6C61f30EAa6",
+        "token_daily_cap_wei": "50000000000000000000000",
+        "token_distribution_open": true,
+        "token_hot_wallet_float_wei": "100000000000000000000000"
+      }
+    },
+    {
+      "url": "https://faucet.testnet.cregnet.dev/api/supply",
+      "http_status": 200,
+      "body": {
+        "block_hash": "0x604e2bf6af2a87006f0742de235df95b52ceb360cad15d0a6887cfe1cfe2f1e8",
+        "block_number": 11812337,
+        "chain_id": 11155111,
+        "faucet": {
+          "address": "0x721c8dbd8208ca9dbdcc12ae9339225458608b81",
+          "balance_wei": "99900000000000000000000"
+        },
+        "faucet_allocation_status": "open",
+        "governance": {
+          "address": "0x0ab4db22a9902b8ef678abd408889af22277d24e",
+          "balance_wei": "0"
+        },
+        "max_outstanding_supply_wei": "42000000000000000000000000",
+        "other_holders_wei": "2100000000000000000000",
+        "reconciled_at": "2026-09-30 04:55:34.992327+00",
+        "remaining_mint_capacity_wei": "22000000000000000000000000",
+        "source": "verified_production_ledger_and_exact_block_sepolia_reads",
+        "staking": {
+          "address": "0x61c00ebe7c46f0bce63942f7e15bcc434dfc9b7c",
+          "balance_wei": "410000000000000000000"
+        },
+        "status": "available",
+        "token_claims_enabled": true,
+        "token_contract": "0xbc2a72107c6765364d0a822a88a6e6c61f30eaa6",
+        "total_supply_wei": "20000000000000000000000000",
+        "treasury": {
+          "address": "0x3a3206d683441aa91cca7cd5757b1f0ca463213a",
+          "balance_wei": "19897590000000000000000000"
+        }
+      }
+    }
+  ]
+}

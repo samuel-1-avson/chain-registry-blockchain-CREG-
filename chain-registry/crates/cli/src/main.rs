@@ -30,8 +30,8 @@ mod policy;
 mod profile;
 mod publish;
 mod recovery;
-mod relayer_cli;
 pub mod registry_proxy;
+mod relayer_cli;
 mod retry;
 mod sbom;
 mod search;
@@ -1215,7 +1215,10 @@ async fn run(cli: Cli) -> Result<()> {
         }
         Commands::Logout => {
             if profile::clear_profile()? {
-                println!("  {} Successfully logged out. Active profile removed.", "✓".green());
+                println!(
+                    "  {} Successfully logged out. Active profile removed.",
+                    "✓".green()
+                );
             } else {
                 println!("  No active profile found. You are already logged out.");
             }
@@ -1227,7 +1230,10 @@ async fn run(cli: Cli) -> Result<()> {
                 } else {
                     println!();
                     println!("  No active authenticated profile found.");
-                    println!("  To link your Ethereum wallet, run: {}", "creg login".cyan().bold());
+                    println!(
+                        "  To link your Ethereum wallet, run: {}",
+                        "creg login".cyan().bold()
+                    );
                     println!();
                 }
             }
@@ -1798,7 +1804,8 @@ async fn run(cli: Cli) -> Result<()> {
                 broadcast,
                 json,
             } => {
-                relayer_cli::soak(count, start_height, &rpc_url, &contract, !broadcast, json).await?;
+                relayer_cli::soak(count, start_height, &rpc_url, &contract, !broadcast, json)
+                    .await?;
             }
         },
     }

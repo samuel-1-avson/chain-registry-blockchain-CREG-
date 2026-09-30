@@ -167,6 +167,9 @@ fn validate_pbft_pre_prepare_block(
     tip_timestamp: chrono::DateTime<chrono::Utc>,
     now: chrono::DateTime<chrono::Utc>,
 ) -> anyhow::Result<()> {
+    if block.header.view_number > 0 && !crate::block_producer::PBFT_VIEW_CHANGE_READY {
+        anyhow::bail!("PBFT replacement leadership is disabled pending safety recovery");
+    }
     if block.header.height != tip_height.saturating_add(1) {
         anyhow::bail!("PBFT proposal is not for the next canonical height");
     }
@@ -213,6 +216,102 @@ fn sign_pbft_phase(
     let signature = hex::encode(sk.sign(message.as_bytes()).to_bytes());
     let pubkey = hex::encode(sk.verifying_key().as_bytes());
     (signature, pubkey)
+}
+
+async fn sign_and_record_commit(
+    state: &mut crate::NodeState,
+    block_hash: &str,
+    validator_id: &str,
+    signing_key: &ed25519_dalek::SigningKey,
+) -> anyhow::Result<(common::GossipMessage, bool)> {
+    let (height, prev_hash, view_number) = state
+        .pbft_engine
+        .round_context(block_hash)
+        .ok_or_else(|| anyhow::anyhow!("COMMIT has no PBFT round context"))?;
+    let (prepared_block, certificate) = state
+        .pbft_engine
+        .prepared_certificate(block_hash)
+        .ok_or_else(|| anyhow::anyhow!("COMMIT has no prepared certificate"))?;
+    let authority = state
+        .pbft_engine
+        .round_validator_set(block_hash)
+        .ok_or_else(|| anyhow::anyhow!("COMMIT has no validator authority"))?;
+    let journal = state.chain.pbft_safety_journal()?;
+    journal.record_prepared(
+        &prepared_block,
+        &certificate,
+        &authority,
+        state.pbft_engine.allow_small_cluster_quorum(),
+    )?;
+    let (signature, pubkey) = sign_pbft_phase(signing_key, "commit", block_hash);
+    let vote = common::BlockSignature {
+        validator_id: validator_id.to_owned(),
+        pubkey,
+        signature: signature.clone(),
+    };
+    let signing_message = consensus::pbft::pbft_signature_message("commit", block_hash);
+    journal.record_decision(
+        crate::pbft_safety::PbftVotePhase::Commit,
+        height,
+        &prev_hash,
+        view_number,
+        block_hash,
+        &signing_message,
+        &signature,
+    )?;
+    tracing::info!(
+        event = "pbft_local_commit_durable",
+        signing_path = "p2p_follower",
+        node_id = %validator_id,
+        chain_id = %state.config.chain_id,
+        genesis_hash = %state.config.network_genesis_hash,
+        height,
+        parent_hash = %prev_hash,
+        block_hash = %block_hash,
+        view_number,
+        "Local PBFT COMMIT durably persisted before consensus application or gossip"
+    );
+    #[cfg(feature = "phase-c-real-fleet")]
+    crate::block_producer::pause_after_durable_commit_if_armed(
+        state,
+        &prepared_block,
+        block_hash,
+        view_number,
+    )
+    .await?;
+    let finalized = state.pbft_engine.commit(block_hash, validator_id, vote)?;
+    Ok((
+        common::GossipMessage::PbftCommit {
+            block_hash: block_hash.to_owned(),
+            validator_id: validator_id.to_owned(),
+            signature,
+        },
+        finalized,
+    ))
+}
+
+fn apply_finalized_pbft_block(
+    state: &mut crate::NodeState,
+    block_hash: &str,
+) -> anyhow::Result<()> {
+    let block = state
+        .pbft_engine
+        .get_finalised_block(block_hash)
+        .ok_or_else(|| anyhow::anyhow!("finalized PBFT round has no block"))?;
+    let outcome = state.chain.insert_block_with_outcome(&block)?;
+    if let Some(replaced) = outcome.replaced_hash {
+        state.record_reorg(1, vec![replaced], outcome.hash.clone());
+    }
+    state.publisher_index.apply_block(&block);
+    state.on_block_committed(&block);
+    let data_dir = state.config.data_dir.clone();
+    let ipfs_url = if state.config.ipfs_url.is_empty() {
+        None
+    } else {
+        Some(state.config.ipfs_url.clone())
+    };
+    crate::intelligence::schedule_for_block(&block, data_dir, ipfs_url);
+    Ok(())
 }
 
 fn validate_vote_gossip_message(
@@ -549,7 +648,19 @@ impl P2PNode {
         let peer_id = *swarm.local_peer_id();
         swarm.listen_on(listen_addr.parse()?)?;
 
-        let rate_limiter = P2PRateLimiter::new(P2PRateLimitConfig::default());
+        let mut rate_limit_config = P2PRateLimitConfig::default();
+        // Auto-ban stays off unless explicitly enabled: the limiter cannot
+        // reliably recognize validators yet, and auto-ban escalated into
+        // banning honest validators and stalling consensus on testnet.
+        rate_limit_config.auto_ban = matches!(
+            std::env::var("CREG_P2P_AUTO_BAN")
+                .unwrap_or_default()
+                .trim()
+                .to_ascii_lowercase()
+                .as_str(),
+            "1" | "true" | "yes" | "on"
+        );
+        let rate_limiter = P2PRateLimiter::new(rate_limit_config);
 
         Ok((
             Self {
@@ -608,6 +719,10 @@ impl P2PNode {
             .behaviour_mut()
             .gossipsub
             .subscribe(&view_change_topic)?;
+        self.swarm
+            .behaviour_mut()
+            .gossipsub
+            .subscribe(&gossipsub::IdentTopic::new(crate::revocation_gossip::TOPIC))?;
 
         loop {
             tokio::select! {
@@ -700,6 +815,7 @@ impl P2PNode {
                             && matches!(
                                 serde_json::from_slice::<common::GossipMessage>(&message.data),
                                 Ok(common::GossipMessage::PbftPrePrepare { .. })
+                                    | Ok(common::GossipMessage::PbftRepropose { .. })
                             );
                         if !requires_payload_validation_before_acceptance(topic_str)
                             && !defer_pre_prepare_validation
@@ -724,7 +840,9 @@ impl P2PNode {
                                     Ok(()) => {
                                         let mut s = state.write().await;
                                         if !s.pending_pool.contains(&canonical) {
-                                            s.pending_pool.insert(req.clone());
+                                            if !s.pending_pool.insert(req.clone()) {
+                                                continue;
+                                            }
                                             // Wire committee at "admission" for gossip path too
                                             let tip = s.chain.tip_hash().unwrap_or_default();
                                             let recent_vrf = s.chain.get_block_by_hash(&tip)
@@ -763,7 +881,14 @@ impl P2PNode {
                                                 tracing::warn!("P2P: dropping {} because certified committee authority is required", canonical);
                                                 continue;
                                             }
-                                            s.pending_pool.set_analysis_committee(&canonical, committee);
+                                            if let Err(error) = s.pending_pool.set_analysis_committee_durable(&canonical, committee) {
+                                                s.pending_pool.remove(&canonical);
+                                                tracing::warn!(%error, "P2P: could not persist committee for {}", canonical);
+                                                continue;
+                                            }
+                                            crate::events::emit(&event_bus, crate::events::RegistryEvent::package_submitted(
+                                                &canonical, &req.publisher_pubkey,
+                                            ));
                                             tracing::info!("Received {} via gossip", canonical);
                                         }
                                     }
@@ -908,114 +1033,113 @@ impl P2PNode {
                             continue;
                         }
 
-                        // ── View-change certificates ───────────────────────────
-                        // A validator broadcasts a ViewChange message when its local
-                        // round times out.  We verify the Ed25519 signature and
-                        // accumulate the certificate.  A view-change is only logged
-                        // as ready once ⌊n/3⌋+1 certificates are seen for the same
-                        // (block_hash, new_view) pair — preventing a single Byzantine
-                        // node from forcing a view-change unilaterally.
+                        if topic_str == crate::revocation_gossip::TOPIC {
+                            let result = match serde_json::from_slice::<common::GossipMessage>(&message.data) {
+                                Ok(common::GossipMessage::RevocationRequest { request, delivery_id })
+                                    if delivery_id.len() <= 128 => crate::revocation_gossip::admit(&state, &request).await,
+                                _ => Err(anyhow::anyhow!("invalid revocation gossip envelope")),
+                            };
+                            let acceptance = if result.is_ok() { gossipsub::MessageAcceptance::Accept }
+                                else { gossipsub::MessageAcceptance::Ignore };
+                            if let Err(error) = result { tracing::debug!(%error, "Revocation proof not admitted; sender will retry"); }
+                            report_validation_result(&mut self.swarm, &id, &peer_id, acceptance);
+                            continue;
+                        }
+
+                        // ── PBFT view-change votes ──────────────────────────────
                         if topic_str.contains("view-change") {
+                            if !crate::block_producer::PBFT_VIEW_CHANGE_READY {
+                                report_validation_result(
+                                    &mut self.swarm,
+                                    &id,
+                                    &peer_id,
+                                    gossipsub::MessageAcceptance::Reject,
+                                );
+                                continue;
+                            }
                             match serde_json::from_slice::<common::GossipMessage>(&message.data) {
-                                Ok(common::GossipMessage::ViewChange {
-                                    block_hash,
-                                    new_view,
-                                    validator_id,
-                                    signature,
-                                }) => {
-                                    let msg = format!("{}:view_change:{}", block_hash, new_view);
-                                    let accepted = (|| -> Option<()> {
-                                        let s = state.try_read().ok()?;
-                                        let validator = s
-                                            .validator_set
-                                            .validators
-                                            .iter()
-                                            .find(|v| v.id == validator_id)?;
-                                        if !common::validator_status_is_active(&validator.status) {
-                                            return None;
-                                        }
-                                        let pk_bytes = hex::decode(&validator.pubkey).ok()?;
-                                        use ed25519_dalek::{Signature, Verifier, VerifyingKey};
-                                        let vk = VerifyingKey::try_from(pk_bytes.as_slice()).ok()?;
-                                        let sig_bytes = hex::decode(&signature).ok()?;
-                                        let sig = Signature::try_from(sig_bytes.as_slice()).ok()?;
-                                        vk.verify(msg.as_bytes(), &sig).ok()?;
-                                        Some(())
-                                    })()
-                                    .is_some();
-
-                                    if !accepted {
-                                        tracing::warn!(
-                                            validator_id = %validator_id,
-                                            peer = %peer_id,
-                                            "P2P: dropping ViewChange from inactive member or with invalid signature"
-                                        );
-                                        report_validation_result(
-                                            &mut self.swarm,
-                                            &id,
-                                            &peer_id,
-                                            gossipsub::MessageAcceptance::Reject,
-                                        );
-                                        continue;
-                                    }
-
-                                    report_validation_result(
-                                        &mut self.swarm,
-                                        &id,
-                                        &peer_id,
-                                        gossipsub::MessageAcceptance::Accept,
-                                    );
-
-                                    let mut s = state.write().await;
-                                    let n = s
-                                        .validator_set
-                                        .validators
-                                        .iter()
-                                        .filter(|v| common::validator_status_is_active(&v.status))
-                                        .count();
-                                    let threshold = n / 3 + 1;
-
-                                    let count = {
-                                        let by_view = s
-                                            .view_change_certs
-                                            .entry(block_hash.clone())
-                                            .or_default()
-                                            .entry(new_view)
-                                            .or_default();
-                                        by_view.insert(validator_id.clone());
-                                        by_view.len()
+                                Ok(common::GossipMessage::ViewChange { vote }) => {
+                                    let (data_dir, bootstrap) = {
+                                        let s = state.read().await;
+                                        (s.config.data_dir.clone(), s.validator_set_bootstrap.clone())
                                     };
-
-                                    tracing::debug!(
-                                        block_hash = %&block_hash[..block_hash.len().min(12)],
-                                        new_view,
-                                        validator_id = %validator_id,
-                                        count,
-                                        threshold,
-                                        "ViewChange certificate received"
-                                    );
-
-                                    match s.pbft_engine.receive_view_change(
-                                        &block_hash,
-                                        &validator_id,
-                                        new_view,
+                                    let authority = match crate::validator_set_history::verification_set_at(
+                                        &data_dir,
+                                        vote.height,
+                                        &bootstrap,
                                     ) {
-                                        Ok(applied) if applied => {
-                                            tracing::warn!(
-                                                block_hash = %&block_hash[..block_hash.len().min(12)],
-                                                new_view,
-                                                count,
-                                                threshold,
-                                                "[PBFT] ViewChange quorum reached — applied view {}",
-                                                new_view
-                                            );
-                                        }
-                                        Ok(_) => {}
+                                        Ok(authority) => authority,
                                         Err(error) => {
-                                            tracing::debug!(
-                                                block_hash = %&block_hash[..block_hash.len().min(12)],
+                                            tracing::warn!(
+                                                height = vote.height,
                                                 error = %error,
-                                                "ViewChange stored; no matching local PBFT round yet"
+                                                "Rejected view-change without authenticated validator authority"
+                                            );
+                                            report_validation_result(
+                                                &mut self.swarm,
+                                                &id,
+                                                &peer_id,
+                                                gossipsub::MessageAcceptance::Reject,
+                                            );
+                                            continue;
+                                        }
+                                    };
+                                    let pbft_authority: consensus::ValidatorSet = authority.into();
+                                    let (result, validator_id, new_view, height) = {
+                                        let mut s = state.write().await;
+                                        let validator_id = vote.validator_id.clone();
+                                        let new_view = vote.new_view;
+                                        let height = vote.height;
+                                        let result = (|| -> anyhow::Result<_> {
+                                            let tip_height = s.chain.tip_height()?;
+                                            let tip_hash = s.chain.tip_hash()?;
+                                            if vote.height != tip_height.saturating_add(1)
+                                                || vote.prev_hash != tip_hash
+                                            {
+                                                anyhow::bail!("view-change vote is not for the next canonical height");
+                                            }
+                                            if s.config.is_validator {
+                                                s.chain.pbft_safety_journal()?.record_received_view_change(
+                                                    &vote,
+                                                    &pbft_authority,
+                                                    s.pbft_engine.allow_small_cluster_quorum(),
+                                                )?;
+                                            }
+                                            s.pbft_engine.receive_view_change(vote, &pbft_authority)
+                                        })();
+                                        (result, validator_id, new_view, height)
+                                    };
+                                    match result {
+                                        Ok(certificate) => {
+                                            report_validation_result(
+                                                &mut self.swarm,
+                                                &id,
+                                                &peer_id,
+                                                gossipsub::MessageAcceptance::Accept,
+                                            );
+                                            if let Some(certificate) = certificate {
+                                                tracing::warn!(
+                                                    height,
+                                                    view = new_view,
+                                                    validators = certificate.len(),
+                                                    "[PBFT] Applied quorum-certified view change"
+                                                );
+                                            }
+                                        }
+                                        Err(error) => {
+                                            tracing::warn!(
+                                                height,
+                                                new_view,
+                                                validator_id = %validator_id,
+                                                peer = %peer_id,
+                                                error = %error,
+                                                "Rejected invalid PBFT view-change vote"
+                                            );
+                                            report_validation_result(
+                                                &mut self.swarm,
+                                                &id,
+                                                &peer_id,
+                                                gossipsub::MessageAcceptance::Reject,
                                             );
                                         }
                                     }
@@ -1053,15 +1177,6 @@ impl P2PNode {
 
                                     record_validated_vote_gossip(&state, &vote).await;
 
-                                    crate::events::emit(&event_bus, crate::events::RegistryEvent {
-                                        kind: crate::events::EventKind::ValidatorVoted,
-                                        ts: chrono::Utc::now().to_rfc3339(),
-                                        payload: serde_json::json!({
-                                            "validator_id": vote.validator_id,
-                                            "consensus_subject": vote.consensus_subject,
-                                            "approved": vote.approved,
-                                        }),
-                                    });
                                 }
                                 Err(error) => {
                                     report_validation_result(
@@ -1088,12 +1203,60 @@ impl P2PNode {
                         // ── PBFT Block Consensus ───────────────────────────────────────────────
                         if topic_str.contains("blocks") {
                             if let Ok(msg) = serde_json::from_slice::<common::GossipMessage>(&message.data) {
+                                let reproposal = match &msg {
+                                    common::GossipMessage::PbftRepropose {
+                                        target_view,
+                                        leader_id,
+                                        view_change_certificate,
+                                        leader_signature,
+                                        ..
+                                    } => Some((
+                                        *target_view,
+                                        leader_id.clone(),
+                                        view_change_certificate.clone(),
+                                        leader_signature.clone(),
+                                    )),
+                                    _ => None,
+                                };
                                 match msg {
-                                    common::GossipMessage::PbftPrePrepare { block } => {
+                                    common::GossipMessage::PbftPrePrepare { block }
+                                    | common::GossipMessage::PbftRepropose { block, .. } => {
+                                        if reproposal.is_some()
+                                            && !crate::block_producer::PBFT_VIEW_CHANGE_READY
+                                        {
+                                            report_validation_result(
+                                                &mut self.swarm,
+                                                &id,
+                                                &peer_id,
+                                                gossipsub::MessageAcceptance::Reject,
+                                            );
+                                            continue;
+                                        }
                                         let mut s = state.write().await;
-                                        let vs = s.validator_set.clone();
                                         let tip_height = s.chain.tip_height().unwrap_or(0);
                                         let tip_hash = s.chain.tip_hash().unwrap_or_default();
+                                        let vs = match crate::validator_set_history::verification_set_at(
+                                            &s.config.data_dir,
+                                            block.header.height,
+                                            &s.validator_set_bootstrap,
+                                        ) {
+                                            Ok(authority) => authority,
+                                            Err(error) => {
+                                                tracing::warn!(
+                                                    peer = %peer_id,
+                                                    height = block.header.height,
+                                                    error = %error,
+                                                    "Rejected PBFT pre-prepare because authenticated validator history is unavailable"
+                                                );
+                                                report_validation_result(
+                                                    &mut self.swarm,
+                                                    &id,
+                                                    &peer_id,
+                                                    gossipsub::MessageAcceptance::Reject,
+                                                );
+                                                continue;
+                                            }
+                                        };
                                         let Some(tip_timestamp) = s
                                             .chain
                                             .get_block_by_height(tip_height)
@@ -1114,13 +1277,33 @@ impl P2PNode {
                                             );
                                             continue;
                                         };
+                                        let now = chrono::Utc::now();
+                                        if reproposal.is_some()
+                                            && block.header.timestamp > now + chrono::Duration::seconds(60)
+                                        {
+                                            tracing::warn!(peer = %peer_id, "Rejected prepared reproposal with a future block timestamp");
+                                            report_validation_result(
+                                                &mut self.swarm,
+                                                &id,
+                                                &peer_id,
+                                                gossipsub::MessageAcceptance::Reject,
+                                            );
+                                            continue;
+                                        }
+                                        // A quorum-prepared immutable block may be older than
+                                        // the live proposal window when the new leader sends it.
+                                        let validation_now = if reproposal.is_some() {
+                                            block.header.timestamp
+                                        } else {
+                                            now
+                                        };
                                         if let Err(error) = validate_pbft_pre_prepare_block(
                                             &block,
                                             &vs,
                                             tip_height,
                                             &tip_hash,
                                             tip_timestamp,
-                                            chrono::Utc::now(),
+                                            validation_now,
                                         ) {
                                             tracing::warn!(
                                                 peer = %peer_id,
@@ -1137,6 +1320,17 @@ impl P2PNode {
                                         }
                                         let namespace_config =
                                             crate::namespace_consensus::NamespaceConsensusConfig::from_node_config(&s.config);
+                                        if let Err(error) = crate::sync::verify_block_signatures(&block, &vs) {
+                                            tracing::warn!(peer = %peer_id, error = %error,
+                                                "Rejected PBFT pre-prepare without valid package approvals");
+                                            report_validation_result(
+                                                &mut self.swarm,
+                                                &id,
+                                                &peer_id,
+                                                gossipsub::MessageAcceptance::Reject,
+                                            );
+                                            continue;
+                                        }
                                         if let Err(error) = crate::namespace_consensus::validate_block(
                                             &s.chain,
                                             &block,
@@ -1155,15 +1349,110 @@ impl P2PNode {
                                             );
                                             continue;
                                         }
-                                        report_validation_result(
-                                            &mut self.swarm,
-                                            &id,
-                                            &peer_id,
-                                            gossipsub::MessageAcceptance::Accept,
-                                        );
-                                        if let Err(e) = s.pbft_engine.start_round(block.clone(), vs.into()) {
-                                            tracing::warn!("Failed to start PBFT round: {}", e);
+                                        // Vote lock: at most one proposal per height. A second,
+                                        // different proposal at an already-open height is
+                                        // rejected so this validator never votes twice and two
+                                        // proposals can never both reach quorum.
+                                        let incoming_hash = block.hash();
+                                        if let Some((locked_hash, phase)) = s
+                                            .pbft_engine
+                                            .non_terminal_round_at_height(block.header.height)
+                                        {
+                                            if locked_hash != incoming_hash {
+                                                tracing::warn!(
+                                                    peer = %peer_id,
+                                                    height = block.header.height,
+                                                    phase = phase.as_str(),
+                                                    locked = %locked_hash[..locked_hash.len().min(12)],
+                                                    incoming = %incoming_hash[..incoming_hash.len().min(12)],
+                                                    "Rejected second PBFT proposal at locked height"
+                                                );
+                                                report_validation_result(
+                                                    &mut self.swarm,
+                                                    &id,
+                                                    &peer_id,
+                                                    gossipsub::MessageAcceptance::Reject,
+                                                );
+                                                continue;
+                                            }
+                                            // Same proposal re-received (gossip duplicate): accept
+                                            // but keep the existing round and its votes instead of
+                                            // restarting it.
+                                            let active_view = s
+                                                .pbft_engine
+                                                .round_context(&incoming_hash)
+                                                .map(|(_, _, view)| view)
+                                                .unwrap_or(block.header.view_number);
+                                            if reproposal
+                                                .as_ref()
+                                                .is_none_or(|(target_view, _, _, _)| *target_view <= active_view)
+                                            {
+                                                report_validation_result(
+                                                    &mut self.swarm,
+                                                    &id,
+                                                    &peer_id,
+                                                    gossipsub::MessageAcceptance::Accept,
+                                                );
+                                                continue;
+                                            }
+                                        }
+                                        // Header validation and PBFT quorum use the
+                                        // same authenticated authority snapshot.
+                                        let start_result = (|| -> anyhow::Result<String> {
+                                            if let Some((target_view, leader_id, certificate, leader_signature)) = &reproposal {
+                                                let authority: consensus::ValidatorSet = vs.clone().into();
+                                                if s.config.is_validator {
+                                                    let journal = s.chain.pbft_safety_journal()?;
+                                                    for vote in certificate {
+                                                        journal.record_received_view_change(
+                                                            vote,
+                                                            &authority,
+                                                            s.pbft_engine.allow_small_cluster_quorum(),
+                                                        )?;
+                                                    }
+                                                }
+                                                s.pbft_engine.repropose_prepared(
+                                                    block.clone(),
+                                                    authority,
+                                                    *target_view,
+                                                    leader_id,
+                                                    certificate.clone(),
+                                                    leader_signature,
+                                                )
+                                            } else {
+                                                if block.header.view_number > 0 && s.config.is_validator {
+                                                    let journal = s.chain.pbft_safety_journal()?;
+                                                    let authority: consensus::ValidatorSet = vs.clone().into();
+                                                    for vote in &block.header.view_change_certificate {
+                                                        journal.record_received_view_change(
+                                                            vote,
+                                                            &authority,
+                                                            s.pbft_engine.allow_small_cluster_quorum(),
+                                                        )?;
+                                                    }
+                                                }
+                                                s.pbft_engine.start_round(block.clone(), vs.clone().into())
+                                            }
+                                        })();
+                                        if let Err(error) = start_result {
+                                            tracing::warn!(
+                                                peer = %peer_id,
+                                                error = %error,
+                                                "Rejected PBFT pre-prepare that failed consensus validation"
+                                            );
+                                            report_validation_result(
+                                                &mut self.swarm,
+                                                &id,
+                                                &peer_id,
+                                                gossipsub::MessageAcceptance::Reject,
+                                            );
                                         } else {
+                                            report_validation_result(
+                                                &mut self.swarm,
+                                                &id,
+                                                &peer_id,
+                                                gossipsub::MessageAcceptance::Accept,
+                                            );
                                             // Sign the block and broadcast PREPARE
                                             if let Some(our_id) = s.config.node_id.clone().into() {
                                                 if let Some(our_privkey_hex) = &s.config.validator_privkey {
@@ -1173,12 +1462,50 @@ impl P2PNode {
                                                             use ed25519_dalek::Signer;
                                                             let (signature, pubkey) = sign_pbft_phase(&sk, "prepare", &bh);
                                                             let sig_obj = common::BlockSignature { validator_id: our_id.clone(), pubkey: pubkey.clone(), signature: signature.clone() };
-                                                            let _ = s.pbft_engine.prepare(&bh, &our_id, sig_obj);
-
-                                                            let prep_msg = common::GossipMessage::PbftPrepare { block_hash: bh, validator_id: our_id, signature };
-                                                            if let Ok(data) = serde_json::to_vec(&prep_msg) {
-                                                                let topic = libp2p::gossipsub::IdentTopic::new("creg/v1/blocks");
-                                                                let _ = self.swarm.behaviour_mut().gossipsub.publish(topic, data);
+                                                            let signing_message = consensus::pbft::pbft_signature_message("prepare", &bh);
+                                                            let durable = s.chain.pbft_safety_journal().and_then(|journal| {
+                                                                journal.record_decision(
+                                                                    crate::pbft_safety::PbftVotePhase::Prepare,
+                                                                    block.header.height,
+                                                                    &block.header.prev_hash,
+                                                                    s.pbft_engine
+                                                                        .round_context(&bh)
+                                                                        .map(|(_, _, view)| view)
+                                                                        .unwrap_or(block.header.view_number),
+                                                                    &bh,
+                                                                    &signing_message,
+                                                                    &signature,
+                                                                )
+                                                            });
+                                                            if let Err(error) = durable {
+                                                                tracing::error!(block_hash = %bh, error = %error, "Refusing to broadcast PREPARE without a durable vote lock");
+                                                            } else {
+                                                                match s.pbft_engine.prepare(&bh, &our_id, sig_obj) {
+                                                                    Ok(prepare_quorum) => {
+                                                                        let prep_msg = common::GossipMessage::PbftPrepare { block_hash: bh.clone(), validator_id: our_id.clone(), signature };
+                                                                        if let Ok(data) = serde_json::to_vec(&prep_msg) {
+                                                                            let topic = libp2p::gossipsub::IdentTopic::new("creg/v1/blocks");
+                                                                            let _ = self.swarm.behaviour_mut().gossipsub.publish(topic, data);
+                                                                        }
+                                                                        if prepare_quorum {
+                                                                            match sign_and_record_commit(&mut s, &bh, &our_id, &sk).await {
+                                                                                Ok((commit_msg, finalized)) => {
+                                                                                    if finalized {
+                                                                                        if let Err(error) = apply_finalized_pbft_block(&mut s, &bh) {
+                                                                                            tracing::error!(block_hash = %bh, error = %error, "Failed to apply locally finalized PBFT block");
+                                                                                        }
+                                                                                    }
+                                                                                    if let Ok(data) = serde_json::to_vec(&commit_msg) {
+                                                                                        let topic = libp2p::gossipsub::IdentTopic::new("creg/v1/blocks");
+                                                                                        let _ = self.swarm.behaviour_mut().gossipsub.publish(topic, data);
+                                                                                    }
+                                                                                }
+                                                                                Err(error) => tracing::error!(block_hash = %bh, error = %error, "Refusing COMMIT after prepared reproposal"),
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                    Err(error) => tracing::warn!(block_hash = %bh, error = %error, "Refusing to broadcast rejected local PBFT PREPARE"),
+                                                                }
                                                             }
                                                         } else {
                                                             tracing::warn!("Failed to parse own validator key for Prepare sign on {}", bh);
@@ -1220,25 +1547,24 @@ impl P2PNode {
                                         };
                                         let mut s = state.write().await;
                                         if let Ok(true) = s.pbft_engine.prepare(&block_hash, &validator_id, sig) {
-                                            // Broadcast PbftCommit
-                                            if let Some(our_id) = s.config.node_id.clone().into() {
-                                                if let Some(our_privkey_hex) = &s.config.validator_privkey {
-                                                    if let Ok(pk_bytes) = hex::decode(our_privkey_hex) {
-                                                        if let Ok(sk) = ed25519_dalek::SigningKey::try_from(pk_bytes.as_slice()) {
-                                                            let (commit_sig, pubkey) = sign_pbft_phase(&sk, "commit", &block_hash);
-                                                            let sig_obj = common::BlockSignature { validator_id: our_id.clone(), pubkey: pubkey.clone(), signature: commit_sig.clone() };
-                                                            let _ = s.pbft_engine.commit(&block_hash, &our_id, sig_obj);
-
-                                                            let commit_msg = common::GossipMessage::PbftCommit { block_hash: block_hash.clone(), validator_id: our_id, signature: commit_sig };
-                                                            if let Ok(data) = serde_json::to_vec(&commit_msg) {
-                                                                let topic = libp2p::gossipsub::IdentTopic::new("creg/v1/blocks");
-                                                                let _ = self.swarm.behaviour_mut().gossipsub.publish(topic, data);
+                                            if let Some(private_key_hex) = &s.config.validator_privkey {
+                                                if let Ok(key_bytes) = hex::decode(private_key_hex) {
+                                                    if let Ok(signing_key) = ed25519_dalek::SigningKey::try_from(key_bytes.as_slice()) {
+                                                        let our_id = s.config.node_id.clone();
+                                                        match sign_and_record_commit(&mut s, &block_hash, &our_id, &signing_key).await {
+                                                            Ok((commit_msg, finalized)) => {
+                                                                if finalized {
+                                                                    if let Err(error) = apply_finalized_pbft_block(&mut s, &block_hash) {
+                                                                        tracing::error!(block_hash = %block_hash, error = %error, "Failed to apply locally finalized PBFT block");
+                                                                    }
+                                                                }
+                                                                if let Ok(data) = serde_json::to_vec(&commit_msg) {
+                                                                    let topic = libp2p::gossipsub::IdentTopic::new("creg/v1/blocks");
+                                                                    let _ = self.swarm.behaviour_mut().gossipsub.publish(topic, data);
+                                                                }
                                                             }
-                                                        } else {
-                                                            tracing::warn!("Failed to parse own validator key for Commit sign on {}", block_hash);
+                                                            Err(error) => tracing::error!(block_hash = %block_hash, error = %error, "Refusing COMMIT without durable PBFT safety state"),
                                                         }
-                                                    } else {
-                                                        tracing::warn!("Failed to hex-decode own validator key for Commit sign on {}", block_hash);
                                                     }
                                                 }
                                             }
@@ -1308,13 +1634,7 @@ impl P2PNode {
                                             }
                                         }
                                     }
-                                    _ => {
-                                        crate::events::emit(&event_bus, crate::events::RegistryEvent {
-                                            kind: crate::events::EventKind::BlockProduced,
-                                            ts: chrono::Utc::now().to_rfc3339(),
-                                            payload: serde_json::json!({ "p2p_message": String::from_utf8_lossy(&message.data).to_string() }),
-                                        });
-                                    }
+                                    _ => {}
                                 }
                             }
                         }
@@ -1552,6 +1872,7 @@ mod tests {
             sync_max_peer_tip: 0,
             reward_emissions_succeeded: 0,
             reward_emissions_failed: 0,
+            reward_emissions_skipped: 0,
             treasury_balance: 0,
             pending_rewards_estimate: 0,
             total_rewards_distributed: 0,
@@ -1980,6 +2301,8 @@ mod tests {
                 validator_set_hash: common::canonical_validator_set_hash(&validator_set),
                 vrf_output: None,
                 vrf_proof: None,
+                view_number: 0,
+                view_change_certificate: vec![],
             },
             transactions: Vec::new(),
             pbft_signatures: Vec::new(),
@@ -2041,6 +2364,8 @@ mod tests {
                 validator_set_hash: common::canonical_validator_set_hash(&validator_set),
                 vrf_output: None,
                 vrf_proof: None,
+                view_number: 0,
+                view_change_certificate: vec![],
             },
             transactions: Vec::new(),
             pbft_signatures: Vec::new(),

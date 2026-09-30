@@ -125,16 +125,33 @@ pub async fn status(node_url: Option<&str>) -> Result<()> {
     }
 
     // Check explorer (check Docker testnet port 3007 and Vite dev port 3000)
-    let (explorer_online, explorer_url) = if client.get("http://localhost:3007").send().await.map(|r| r.status().is_success()).unwrap_or(false) {
+    let (explorer_online, explorer_url) = if client
+        .get("http://localhost:3007")
+        .send()
+        .await
+        .map(|r| r.status().is_success())
+        .unwrap_or(false)
+    {
         (true, "http://localhost:3007")
-    } else if client.get("http://localhost:3000").send().await.map(|r| r.status().is_success()).unwrap_or(false) {
+    } else if client
+        .get("http://localhost:3000")
+        .send()
+        .await
+        .map(|r| r.status().is_success())
+        .unwrap_or(false)
+    {
         (true, "http://localhost:3000")
     } else {
         (false, "http://localhost:3007")
     };
 
     if explorer_online {
-        println!("{} Explorer: {} ({})", "●".green(), "Online".green(), explorer_url.cyan());
+        println!(
+            "{} Explorer: {} ({})",
+            "●".green(),
+            "Online".green(),
+            explorer_url.cyan()
+        );
     } else {
         println!("{} Explorer: {}", "●".red(), "Offline".red());
     }

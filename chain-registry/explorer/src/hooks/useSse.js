@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { API_BASE, NODE_ROUTE_MODE, isObserverUnavailable } from '../api/node.js'
+import { API_BASE, NODE_ROUTE_MODE, isObserverUnavailable, nodeFetch, ApiError } from '../api/node.js'
 
 // Connection lifecycle states surfaced to consumers so the UI can render
 // a "connecting / live / stale / offline" banner instead of silently polling.
@@ -23,8 +23,10 @@ const joinUrl = (base, path) => {
  * Returns { state, lastEventAt, reconnectAttempt }.
  */
 const DEFAULT_EVENTS_PATH = NODE_ROUTE_MODE === 'legacy' ? '/v1/events' : '/v1/public/events'
+const REGISTRY_EVENTS = ['package_submitted', 'package_verified', 'package_rejected',
+  'package_revoked', 'block_produced', 'validator_voted']
 
-export function useSse({ path = DEFAULT_EVENTS_PATH, onEvent, eventTypes = null, enabled = true } = {}) {
+export function useSse({ path = DEFAULT_EVENTS_PATH, onEvent, eventTypes = REGISTRY_EVENTS, enabled = true } = {}) {
   const [state, setState] = useState(enabled ? SSE_STATE.Connecting : SSE_STATE.Idle)
   const [lastEventAt, setLastEventAt] = useState(null)
   const [reconnectAttempt, setReconnectAttempt] = useState(0)
@@ -41,16 +43,19 @@ export function useSse({ path = DEFAULT_EVENTS_PATH, onEvent, eventTypes = null,
     let attempt = 0
     let reconnectTimer = null
     let staleTimer = null
+    let lastActivityAt = 0
+    let resolvedPath = path
 
     const handlePayload = (raw, type) => {
       setLastEventAt(Date.now())
+      lastActivityAt = Date.now()
       setState(SSE_STATE.Live)
       let parsed
       try { parsed = JSON.parse(raw) } catch { parsed = raw }
       onEventRef.current?.(parsed, type)
     }
 
-    const connect = () => {
+    const connect = async () => {
       if (cancelled) return
       // The edge explicitly reports observer_unavailable during bootstrap.
       // Wait for the shared API backoff window instead of opening an SSE
@@ -62,7 +67,16 @@ export function useSse({ path = DEFAULT_EVENTS_PATH, onEvent, eventTypes = null,
         reconnectTimer = setTimeout(connect, 30_000)
         return
       }
-      const url = joinUrl(API_BASE, path)
+      // Probe a finite public endpoint to select the event route. EventSource
+      // does not expose HTTP status codes to its error callback.
+      if (NODE_ROUTE_MODE === 'auto' && path === '/v1/public/events') {
+        try { await nodeFetch('/v1/public/health') }
+        catch (error) {
+          if (error instanceof ApiError && [404, 405, 501].includes(error.status)) resolvedPath = '/v1/events'
+        }
+      }
+      if (cancelled) return
+      const url = joinUrl(API_BASE, resolvedPath)
       setState(SSE_STATE.Connecting)
 
       es = new EventSource(url)
@@ -72,6 +86,7 @@ export function useSse({ path = DEFAULT_EVENTS_PATH, onEvent, eventTypes = null,
         setReconnectAttempt(0)
         setState(SSE_STATE.Live)
         setLastEventAt(Date.now())
+        lastActivityAt = Date.now()
       }
       es.onmessage = (evt) => handlePayload(evt.data, 'message')
       if (Array.isArray(eventTypes)) {
@@ -94,8 +109,8 @@ export function useSse({ path = DEFAULT_EVENTS_PATH, onEvent, eventTypes = null,
     staleTimer = setInterval(() => {
       setState((prev) => {
         if (prev !== SSE_STATE.Live) return prev
-        if (!lastEventAt) return prev
-        if (Date.now() - lastEventAt > 30_000) return SSE_STATE.Stale
+        if (!lastActivityAt) return prev
+        if (Date.now() - lastActivityAt > 30_000) return SSE_STATE.Stale
         return prev
       })
     }, 5_000)
