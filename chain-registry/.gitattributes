@@ -1,3 +1,8 @@
+* text=auto eol=lf
+# Signed publication artifacts must retain the exact bytes stored in Git.
+testnet/chain-spec*.json -text
+testnet/spec-server/chain-spec*.json -text
+*.sig -text
 *.sh text eol=lf
 testnet/**/*.env text eol=lf
 testnet/gcp/*.sh text eol=lf
