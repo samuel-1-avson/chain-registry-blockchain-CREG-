@@ -37,6 +37,23 @@ fn install_verifier(source: &Path, parent: &Path) -> PathBuf {
     std::fs::canonicalize(installed).unwrap()
 }
 
+fn private_test_parent() -> tempfile::TempDir {
+    #[cfg(unix)]
+    {
+        let home = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .expect("the Unix test runner provides a home directory");
+        tempfile::Builder::new()
+            .prefix("creg-authority-sidecar-")
+            .tempdir_in(home)
+            .unwrap()
+    }
+    #[cfg(not(unix))]
+    {
+        tempfile::tempdir().unwrap()
+    }
+}
+
 fn adapter_config(
     verifier_path: PathBuf,
     scratch_root: PathBuf,
@@ -155,7 +172,7 @@ fn frozen_pypi_verifier() -> Option<PathBuf> {
 
 #[tokio::test]
 async fn rust_launcher_gives_fixture_a_private_temp_scratch() {
-    let parent = tempfile::tempdir().unwrap();
+    let parent = private_test_parent();
     let source = rejection_fixture_path();
     let verifier = install_verifier(&source, parent.path());
     let config = adapter_config(
@@ -175,7 +192,7 @@ async fn rust_launcher_gives_frozen_pypi_verifier_a_private_temp_scratch() {
         );
         return;
     };
-    let parent = tempfile::tempdir().unwrap();
+    let parent = private_test_parent();
     let verifier = install_verifier(&source, parent.path());
     let config = adapter_config(
         verifier,
