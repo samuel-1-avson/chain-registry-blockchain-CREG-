@@ -385,7 +385,7 @@ impl ProcessTreeGuard {
                 .id()
                 .ok_or(AuthorityAdapterError::ProcessContainmentUnavailable)?
                 as i32;
-            return Ok(Self { pid });
+            Ok(Self { pid })
         }
         #[cfg(windows)]
         {

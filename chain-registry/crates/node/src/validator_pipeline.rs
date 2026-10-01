@@ -541,7 +541,7 @@ async fn process_package(
         }
 
         // Hybrid expansion: after primary timeout, expand eligible committee
-        if i as u64 > (vote_timeout_secs * 1000 / VOTE_POLL_MS) / 2 {
+        if i > (vote_timeout_secs * 1000 / VOTE_POLL_MS) / 2 {
             let mut sw = state.write().await;
             if let Some(c) = sw.package_committees.get_mut(&canonical) {
                 if c.effective_size < (c.members.len() as u32).min(256) {

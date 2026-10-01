@@ -59,7 +59,7 @@ fn write_private_file(path: &Path, bytes: &[u8]) -> Result<()> {
             .with_context(|| format!("create P2P identity {}", path.display()))?;
         file.write_all(bytes)
             .with_context(|| format!("write P2P identity {}", path.display()))?;
-        return Ok(());
+        Ok(())
     }
     #[cfg(not(unix))]
     {

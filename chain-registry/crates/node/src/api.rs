@@ -3382,11 +3382,7 @@ async fn get_validator_profile(
     let registration = s
         .validator_registrations
         .get(&normalized)
-        .cloned()
-        .or_else(|| {
-            // try find registration by id? but registrations keyed by evm, fallback empty
-            None
-        });
+        .cloned();
     let active = s
         .validator_set
         .validators

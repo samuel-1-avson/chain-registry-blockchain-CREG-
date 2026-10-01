@@ -1024,7 +1024,6 @@ async fn prepare_proposer_context(
     .map_err(anyhow::Error::msg)?;
     let pbft_authority = authority.clone().into();
     let (view_number, view_change_certificate, prepared_certificate) = certified_view
-        .map(|(view, certificate, prepared)| (view, certificate, prepared))
         .unwrap_or((0, Vec::new(), None));
     let prepared_transactions = prepared_certificate
         .as_ref()

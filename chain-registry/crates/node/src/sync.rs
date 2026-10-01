@@ -1470,7 +1470,7 @@ pub(crate) fn verify_block_signatures(
             let pubkey_key = sig.validator_pubkey.to_ascii_lowercase();
             if !known
                 .get(&pubkey_key)
-                .is_some_and(|validator| validator.id == sig.validator_id)
+                .is_none_or(|validator| validator.id != sig.validator_id)
             {
                 tracing::debug!(
                     "sync: tx {} carries signature from unknown validator pubkey {} — ignored",
