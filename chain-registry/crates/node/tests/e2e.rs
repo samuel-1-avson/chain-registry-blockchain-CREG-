@@ -152,6 +152,9 @@ async fn start_test_node() -> (String, tokio::task::JoinHandle<()>) {
     };
 
     let event_bus = new_event_bus();
+    chain
+        .attach_event_bus(Arc::clone(&event_bus))
+        .expect("E2E chain event bus attaches before serving");
     let (tx_s, tx_r) = finalized_tx::channel();
 
     // Create a no-op P2P handle (the real P2P stack requires a live network).
