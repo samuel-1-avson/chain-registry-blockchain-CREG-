@@ -127,6 +127,14 @@ async fn start_test_node() -> (String, tokio::task::JoinHandle<()>) {
     };
     let validator_privkey_hex = hex::encode(validator_signing_key.to_bytes());
     let validator_pubkey_hex = hex::encode(validator_signing_key.verifying_key().as_bytes());
+    let genesis_hash = chain
+        .get_block_by_height(0)
+        .expect("E2E chain can read its genesis")
+        .expect("E2E chain starts with genesis")
+        .hash();
+    chain
+        .initialize_pbft_safety_journal(&genesis_hash, "e2e-node", &validator_pubkey_hex)
+        .expect("E2E validator safety journal initializes before signing");
 
     let config = NodeConfig {
         chain_id: E2E_CHAIN_ID.into(),
