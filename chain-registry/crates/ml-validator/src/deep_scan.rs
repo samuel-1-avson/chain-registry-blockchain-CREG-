@@ -195,7 +195,7 @@ impl DeepScanner {
         self
     }
 
-    pub const SCANNER_VERSION: &str = "creg-detect-v1.0.0";
+    pub const SCANNER_VERSION: &str = crate::scanner_profile::SCANNER_VERSION;
     pub const DEGRADED_YARA_MISSING: &str = "degraded-yara-missing";
 
     /// Return the model version string for inclusion in vote messages.
@@ -589,7 +589,10 @@ mod tests {
         let tarball = gzip_tar(&[("README.md", "# no source files")]);
         let result = scanner.scan(&tarball).expect("valid gzip tar must scan");
         assert!(!result.is_mock);
-        assert_eq!(result.model_version, DeepScanner::SCANNER_VERSION);
+        assert_eq!(result.model_version, scanner.model_version());
+        assert!(result
+            .model_version
+            .starts_with(DeepScanner::SCANNER_VERSION));
         assert_ne!(result.classification, ThreatClassification::Degraded);
     }
 

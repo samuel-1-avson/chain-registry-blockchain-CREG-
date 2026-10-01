@@ -2,7 +2,7 @@
 
 use crate::{osv_snapshot, threat_intel, yara_scanner};
 
-const SCANNER_VERSION: &str = "creg-deterministic-scanner-v1.1.0";
+pub const SCANNER_VERSION: &str = "creg-deterministic-scanner-v1.1.0";
 
 #[derive(Debug, Clone)]
 pub struct ScannerProfileStatus {
