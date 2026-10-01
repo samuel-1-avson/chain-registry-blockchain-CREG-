@@ -176,7 +176,7 @@ async fn start_test_node() -> (String, tokio::task::JoinHandle<()>) {
         chain,
         pending_pool: PendingPool::new(),
         publisher_index: PublisherIndex::new(),
-        validator_set_bootstrap: common::ValidatorSet::default(),
+        validator_set_bootstrap: validator_set.clone(),
         validator_set,
         package_rounds: std::collections::HashMap::new(),
         package_committees: std::collections::HashMap::new(),
