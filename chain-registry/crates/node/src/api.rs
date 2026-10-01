@@ -3379,10 +3379,7 @@ async fn get_validator_profile(
     let s = state.read().await;
 
     // Support either EVM address or node id for lookup
-    let registration = s
-        .validator_registrations
-        .get(&normalized)
-        .cloned();
+    let registration = s.validator_registrations.get(&normalized).cloned();
     let active = s
         .validator_set
         .validators
