@@ -526,7 +526,9 @@ fn merkle_root(leaves: &[[u8; 32]]) -> [u8; 32] {
     while current.len() > 1 {
         if current.len() % 2 != 0 {
             // Duplicate last leaf for odd length (standard Merkle padding).
-            current.push(*current.last().unwrap());
+            if let Some(last) = current.last().copied() {
+                current.push(last);
+            }
         }
         let mut next = Vec::with_capacity(current.len() / 2);
         for pair in current.chunks(2) {
