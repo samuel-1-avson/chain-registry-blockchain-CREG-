@@ -1,0 +1,2 @@
+29c74f98461436747c1f7ea9578c52dc2058edffab4d991736f2aeebae0d7963  creg-explorer-testnet-r29.tar.gz
+a66a9e88e2cf87b25361836100b4a0da15a7e8bbeceb0b5da6d815521b1c5c49  testnet-r29-release-manifest.json

@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "release": {
+    "name": "R7 source repairs and R29 faucet",
+    "tag": "testnet-r29",
+    "channel": "testnet prerelease",
+    "prepared_at_utc": "2026-10-01T18:31:46Z",
+    "source_repository": "https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-",
+    "source_ref": "refs/heads/main",
+    "source_commit": "73b005444fd77e95dcc3229116c757734d89b570"
+  },
+  "validation": {
+    "workflow": "Rust CI",
+    "run_id": 36904100863,
+    "run_url": "https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/actions/runs/36904100863",
+    "completed_at_utc": "2026-10-01T18:16:00Z",
+    "result": "passed",
+    "checks": {
+      "formatting": "passed",
+      "clippy_deny_warnings": "passed",
+      "workspace_tests": "passed",
+      "phase_c_production_build": "passed",
+      "durable_pbft_signing_recovery": "passed",
+      "relayer_validation": "passed",
+      "security_freeze_regression_guard": "passed",
+      "testnet_consensus_smoke": "skipped"
+    }
+  },
+  "artifacts": [
+    {
+      "name": "creg-explorer-testnet-r29.tar.gz",
+      "kind": "explorer production bundle",
+      "source_commit": "9d8bd71fdb33ad315641a69916a27f3f1a3204a4",
+      "sha256": "29c74f98461436747c1f7ea9578c52dc2058edffab4d991736f2aeebae0d7963",
+      "size_bytes": 501464,
+      "digest_verified_from": "GitHub release asset metadata"
+    }
+  ],
+  "operational_snapshot": {
+    "captured_at_utc": "2026-09-30T05:36:47.390041Z",
+    "evidence_file": "docs/testnet-heal-evidence/2026-09-30-source-release/prepublication-public-checks.json",
+    "note": "Historical point-in-time evidence, not a live service health check at publication time.",
+    "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+    "finalized_height": 20,
+    "block_count_including_genesis": 21,
+    "active_validators": 4,
+    "pending_transactions": 0,
+    "faucet_ledger_reconciled": true,
+    "faucet_token_balance_tcreg": "99900.00",
+    "faucet_distributed_tcreg": "2100.00",
+    "faucet_unresolved_claims": 0
+  },
+  "scope": {
+    "fleet_rollout_performed": false,
+    "chain_reset_performed": false,
+    "token_mint_or_funding_performed": false,
+    "contract_migration_performed": false,
+    "cli_installer_included": false
+  },
+  "limitations": [
+    "The private Contribution Arena submodule workflow is not verified because its repository access is not available to the default GitHub Actions token.",
+    "The testnet consensus smoke job was skipped in this Rust CI run.",
+    "This source prerelease and its explorer artifact do not constitute a production fleet rollout or public cutover.",
+    "The separate CLI installer release is v0.4.9-testnet."
+  ]
+}
