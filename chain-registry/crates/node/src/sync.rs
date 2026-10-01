@@ -1468,7 +1468,7 @@ pub(crate) fn verify_block_signatures(
             }
 
             let pubkey_key = sig.validator_pubkey.to_ascii_lowercase();
-            if !known
+            if known
                 .get(&pubkey_key)
                 .is_none_or(|validator| validator.id != sig.validator_id)
             {
