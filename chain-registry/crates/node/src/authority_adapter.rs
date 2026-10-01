@@ -1445,7 +1445,11 @@ mod tests {
         let error = verify_with_sidecar(&adapter_config, &live_request)
             .await
             .expect_err("the checked-in rejection sidecar must never verify authority");
-        assert!(matches!(error, AuthorityAdapterError::VerifierRejected));
+        let is_rejected = matches!(&error, AuthorityAdapterError::VerifierRejected);
+        assert!(
+            is_rejected,
+            "unexpected rejection-sidecar result: {error:?}"
+        );
         assert!(
             std::fs::read_dir(&adapter_config.scratch_root)
                 .map(|entries| entries.count() == 0)

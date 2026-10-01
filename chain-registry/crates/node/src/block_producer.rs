@@ -1520,7 +1520,7 @@ mod tests {
             chain,
             pending_pool: PendingPool::new(),
             publisher_index: PublisherIndex::new(),
-            validator_set_bootstrap: ValidatorSet::default(),
+            validator_set_bootstrap: ValidatorSet::new(validators.clone()),
             validator_set: ValidatorSet::new(validators),
             package_rounds: std::collections::HashMap::new(),
             package_committees: std::collections::HashMap::new(),
@@ -1666,7 +1666,7 @@ mod tests {
         );
         let err = gate.err().unwrap();
         assert!(
-            err.to_string().contains("not its turn"),
+            err.to_string().contains("authorizes rank"),
             "unexpected error: {err}"
         );
         assert_eq!(pending_txs.len(), 1, "buffer must retain the transaction");
@@ -1689,6 +1689,18 @@ mod tests {
                 "validator-b",
                 &secondary_sk,
             ));
+            let pubkey = s
+                .validator_set
+                .validators
+                .iter()
+                .find(|validator| validator.id == rank0)
+                .expect("ranked proposer must belong to the test validator set")
+                .pubkey
+                .clone();
+            let genesis_hash = s.chain.tip_hash().expect("test chain has genesis");
+            s.chain
+                .initialize_pbft_safety_journal(&genesis_hash, &rank0, &pubkey)
+                .expect("test proposer safety journal initializes before signing");
         }
 
         let mut pending_txs = vec![sample_publish_tx("committed")];

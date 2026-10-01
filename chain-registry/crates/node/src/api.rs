@@ -6591,6 +6591,7 @@ mod tests {
     #[tokio::test]
     async fn rest_revoke_package_queues_transaction_via_router_sender() -> anyhow::Result<()> {
         let (state, _tempdir, p2p_handle, tx_sender, tx_receiver) = make_test_state(0).await?;
+        state.write().await.config.is_validator = true;
         let (signing_key, publisher_pubkey) = make_keypair();
         let record = ChainRecord {
             id: PackageId::new("npm", "test", "1.0.0"),
