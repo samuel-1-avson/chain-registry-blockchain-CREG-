@@ -1406,7 +1406,13 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn invokes_checked_in_rejection_sidecar_through_the_rust_boundary() {
-        let parent = tempfile::tempdir().unwrap();
+        let home = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .expect("the Unix test runner provides a home directory");
+        let parent = tempfile::Builder::new()
+            .prefix("creg-authority-sidecar-")
+            .tempdir_in(home)
+            .unwrap();
         let wrapper = parent.path().join("rejection-sidecar.sh");
         let node = node_runtime();
         let stub = std::fs::canonicalize(

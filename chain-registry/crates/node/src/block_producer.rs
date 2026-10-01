@@ -1462,8 +1462,11 @@ mod tests {
         BridgeStatus, NodeState, P2PStatus,
     };
     use chrono::Utc;
-    use common::{ChainRecord, PackageId, PackageStatus, Transaction, Validator, ValidatorSet};
-    use ed25519_dalek::SigningKey;
+    use common::{
+        AnalysisBundleRefs, ChainRecord, DeterministicRiskSummary, PackageId, PackageStatus,
+        Transaction, Validator, ValidatorSet, ValidatorSignature, ValidatorVote,
+    };
+    use ed25519_dalek::{Signer, SigningKey};
     use rand::rngs::OsRng;
     use tempfile::TempDir;
 
@@ -1479,6 +1482,58 @@ mod tests {
             status: PackageStatus::Verified,
             ..Default::default()
         })
+    }
+
+    fn signed_publish_tx(name: &str, validators: &[(&str, &SigningKey)]) -> Transaction {
+        let Transaction::Publish(mut record) = sample_publish_tx(name) else {
+            unreachable!("sample publish helper returns a publish transaction");
+        };
+        record.content_hash = common::sha256_hex(b"proposer-test-package-bytes");
+        let canonical = record.id.canonical();
+        let content_hash = record.content_hash.clone();
+        let model_version = "creg-detect-v1.0.0".to_string();
+        let analysis_bundles = AnalysisBundleRefs {
+            policy_bundle_id: "policy-v1".into(),
+            feature_schema_id: "features-v1".into(),
+            expert_bundle_id: "experts-v1".into(),
+            embedding_model_id: "embeddings-v1".into(),
+            index_epoch: "index-epoch-1".into(),
+            threshold_profile_id: "thresholds-v1".into(),
+            llm_prompt_profile_id: "llm-prompt-v1".into(),
+            osv_snapshot_epoch: "osv-off".into(),
+        };
+        record.validator_signatures = validators
+            .iter()
+            .map(|(validator_id, signing_key)| {
+                let validator_pubkey = hex::encode(signing_key.verifying_key().as_bytes());
+                let evidence_digest = common::sha256_hex(
+                    format!("{canonical}:{content_hash}:proposer-test-evidence").as_bytes(),
+                );
+                let scanner_profile =
+                    common::scanner_profile_digest(&model_version, &analysis_bundles);
+                let message = crate::gossip::canonical_vote_message(
+                    &canonical,
+                    &content_hash,
+                    true,
+                    &validator_pubkey,
+                    &scanner_profile,
+                    &evidence_digest,
+                );
+                ValidatorSignature {
+                    validator_id: (*validator_id).into(),
+                    validator_pubkey,
+                    signature: hex::encode(signing_key.sign(message.as_bytes()).to_bytes()),
+                    vote: ValidatorVote::Approve,
+                    signed_at: Utc::now(),
+                    ml_model_version: model_version.clone(),
+                    analysis_bundles: analysis_bundles.clone(),
+                    evidence_digest,
+                    deterministic_risk: DeterministicRiskSummary::default(),
+                    is_mandatory: true,
+                }
+            })
+            .collect();
+        Transaction::Publish(record)
     }
 
     async fn two_validator_state(
@@ -1703,7 +1758,10 @@ mod tests {
                 .expect("test proposer safety journal initializes before signing");
         }
 
-        let mut pending_txs = vec![sample_publish_tx("committed")];
+        let mut pending_txs = vec![signed_publish_tx(
+            "committed",
+            &[("validator-a", &primary_sk), ("validator-b", &secondary_sk)],
+        )];
         let ctx = prepare_proposer_context(Arc::clone(&state), &p2p, 0)
             .await
             .unwrap_or_else(|e| {
