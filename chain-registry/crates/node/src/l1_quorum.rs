@@ -22,6 +22,24 @@
 
 use std::collections::HashMap;
 
+/// Number of responses needed to form a strict majority of configured
+/// endpoints. A majority of only the responders is insufficient: if four
+/// providers are configured, two matching answers and two timeouts are not a
+/// quorum.
+pub fn configured_quorum_size(configured: usize) -> usize {
+    if configured == 0 {
+        0
+    } else {
+        configured / 2 + 1
+    }
+}
+
+/// Whether the successful responses include a strict majority of all
+/// configured endpoints.
+pub fn has_configured_quorum(responders: usize, configured: usize) -> bool {
+    configured > 0 && responders >= configured_quorum_size(configured)
+}
+
 /// Combine per-endpoint head block numbers into a single conservative height.
 ///
 /// * 0 values  → `None` (all endpoints failed; caller should mark degraded).
@@ -39,6 +57,14 @@ pub fn aggregate_height(values: &[u64]) -> Option<u64> {
             Some(sorted[sorted.len() / 2])
         }
     }
+}
+
+/// Combine head heights only when a strict majority of configured endpoints
+/// answered. Height aggregation remains conservative after the quorum check.
+pub fn aggregate_height_with_quorum(values: &[u64], configured: usize) -> Option<u64> {
+    has_configured_quorum(values.len(), configured)
+        .then(|| aggregate_height(values))
+        .flatten()
 }
 
 /// Return the block hash agreed by a STRICT majority of responders
@@ -59,6 +85,40 @@ pub fn majority_hash(hashes: &[String]) -> Option<String> {
     } else {
         None
     }
+}
+
+/// Return a block hash only when it has a strict majority of all configured
+/// endpoints. The responder count must itself reach that configured quorum.
+pub fn majority_hash_with_quorum(hashes: &[String], configured: usize) -> Option<String> {
+    if !has_configured_quorum(hashes.len(), configured) {
+        return None;
+    }
+
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    for hash in hashes {
+        *counts.entry(hash.trim().to_ascii_lowercase()).or_default() += 1;
+    }
+    let (best, count) = counts.into_iter().max_by_key(|(_, count)| *count)?;
+    (count >= configured_quorum_size(configured)).then_some(best)
+}
+
+/// Return a cloned response only when the exact value has a strict majority
+/// of all configured endpoints.
+pub fn identical_response_with_quorum<T: Clone + PartialEq>(
+    responses: &[T],
+    configured: usize,
+) -> Option<T> {
+    if !has_configured_quorum(responses.len(), configured) {
+        return None;
+    }
+    responses.iter().find_map(|candidate| {
+        (responses
+            .iter()
+            .filter(|response| *response == candidate)
+            .count()
+            >= configured_quorum_size(configured))
+        .then(|| candidate.clone())
+    })
 }
 
 #[cfg(test)]
@@ -104,5 +164,65 @@ mod tests {
     fn majority_hash_no_winner_on_three_way_tie() {
         let tie = vec!["0xaa".to_string(), "0xbb".to_string(), "0xcc".to_string()];
         assert_eq!(majority_hash(&tie), None);
+    }
+
+    #[test]
+    fn configured_quorum_counts_failed_endpoints() {
+        assert_eq!(configured_quorum_size(0), 0);
+        assert_eq!(configured_quorum_size(1), 1);
+        assert_eq!(configured_quorum_size(3), 2);
+        assert_eq!(configured_quorum_size(4), 3);
+
+        assert!(!has_configured_quorum(2, 4));
+        assert!(has_configured_quorum(3, 4));
+    }
+
+    #[test]
+    fn aggregate_height_requires_configured_quorum() {
+        assert_eq!(aggregate_height_with_quorum(&[10], 3), None);
+        assert_eq!(aggregate_height_with_quorum(&[10, 12], 3), Some(10));
+        assert_eq!(aggregate_height_with_quorum(&[10, 12], 4), None);
+        assert_eq!(aggregate_height_with_quorum(&[10, 12, 11], 4), Some(11));
+    }
+
+    #[test]
+    fn majority_hash_requires_quorum_of_configured_endpoints() {
+        assert_eq!(
+            majority_hash_with_quorum(&["0xaa".to_string(), "0xaa".to_string()], 3),
+            Some("0xaa".to_string())
+        );
+        // Two matching responses are not a strict majority of four configured
+        // providers, even when the other two did not answer.
+        assert_eq!(
+            majority_hash_with_quorum(
+                &["0xaa".to_string(), "0xaa".to_string(), "0xbb".to_string()],
+                4
+            ),
+            None
+        );
+        assert_eq!(
+            majority_hash_with_quorum(
+                &["0xaa".to_string(), "0xaa".to_string(), "0xbb".to_string()],
+                3
+            ),
+            Some("0xaa".to_string())
+        );
+    }
+
+    #[test]
+    fn identical_rpc_responses_require_configured_quorum() {
+        assert_eq!(
+            identical_response_with_quorum(&["same", "same", "different"], 3),
+            Some("same")
+        );
+        assert_eq!(
+            identical_response_with_quorum(&["same", "same", "same", "different"], 4),
+            Some("same")
+        );
+        assert_eq!(
+            identical_response_with_quorum(&["same", "same", "different"], 4),
+            None
+        );
+        assert_eq!(identical_response_with_quorum::<&str>(&[], 0), None);
     }
 }

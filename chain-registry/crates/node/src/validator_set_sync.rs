@@ -317,10 +317,18 @@ impl SyncConfig {
     /// inflate the apparent quorum.
     fn rpc_endpoints(&self) -> Vec<String> {
         let mut endpoints = Vec::with_capacity(1 + self.extra_rpc_urls.len());
-        endpoints.push(self.eth_rpc_url.clone());
-        for url in &self.extra_rpc_urls {
-            let url = url.trim().to_string();
-            if !url.is_empty() && !endpoints.iter().any(|e| e == &url) {
+        let mut hosts = Vec::with_capacity(1 + self.extra_rpc_urls.len());
+        for raw_url in std::iter::once(&self.eth_rpc_url).chain(self.extra_rpc_urls.iter()) {
+            let url = raw_url.trim().to_string();
+            if url.is_empty() {
+                continue;
+            }
+            let host = reqwest::Url::parse(&url)
+                .ok()
+                .and_then(|parsed| parsed.host_str().map(str::to_ascii_lowercase))
+                .unwrap_or_else(|| url.to_ascii_lowercase());
+            if !hosts.contains(&host) {
+                hosts.push(host);
                 endpoints.push(url);
             }
         }
@@ -335,20 +343,14 @@ async fn fetch_latest_block_quorum(
     endpoints: &[String],
 ) -> anyhow::Result<u64> {
     let mut heights = Vec::with_capacity(endpoints.len());
-    let mut last_err: Option<String> = None;
     for ep in endpoints {
         match fetch_latest_block(client, ep).await {
             Ok(h) => heights.push(h),
-            Err(e) => last_err = Some(e.to_string()),
+            Err(_) => {}
         }
     }
-    crate::l1_quorum::aggregate_height(&heights).ok_or_else(|| {
-        anyhow::anyhow!(
-            "no L1 RPC endpoint returned a block number ({} tried): {}",
-            endpoints.len(),
-            last_err.unwrap_or_else(|| "unknown error".into())
-        )
-    })
+    crate::l1_quorum::aggregate_height_with_quorum(&heights, endpoints.len())
+        .ok_or_else(|| anyhow::anyhow!("L1 RPC endpoints did not reach configured height quorum"))
 }
 
 /// Fetch a block hash from the first endpoint that answers (failover). Used
@@ -358,18 +360,12 @@ async fn fetch_block_hash_failover(
     endpoints: &[String],
     block_number: u64,
 ) -> anyhow::Result<String> {
-    let mut last_err: Option<String> = None;
-    for ep in endpoints {
-        match fetch_block_hash(client, ep, block_number).await {
-            Ok(h) => return Ok(h),
-            Err(e) => last_err = Some(e.to_string()),
-        }
+    match fetch_block_hash_quorum(client, endpoints, block_number).await {
+        HashQuorum::Agreed(hash) => Ok(hash),
+        HashQuorum::NoMajority | HashQuorum::Unavailable => Err(anyhow::anyhow!(
+            "configured L1 RPC quorum did not agree on block {block_number} hash"
+        )),
     }
-    Err(anyhow::anyhow!(
-        "no L1 RPC endpoint returned block {} hash: {}",
-        block_number,
-        last_err.unwrap_or_else(|| "unknown error".into())
-    ))
 }
 
 /// Outcome of a quorum block-hash read used for reorg detection.
@@ -400,30 +396,33 @@ async fn fetch_block_hash_quorum(
     if hashes.is_empty() {
         return HashQuorum::Unavailable;
     }
-    match crate::l1_quorum::majority_hash(&hashes) {
+    match crate::l1_quorum::majority_hash_with_quorum(&hashes, endpoints.len()) {
         Some(h) => HashQuorum::Agreed(h),
         None => HashQuorum::NoMajority,
     }
 }
 
-/// Fetch staking deltas from the first endpoint that succeeds (failover).
-/// Logs are deterministic within the already quorum-confirmed finalized range,
-/// so failover (rather than cross-endpoint set agreement) is the right trade.
-async fn fetch_deltas_failover(
+/// Fetch staking deltas from all configured providers and require an identical
+/// response from a strict majority of the configured endpoints. A successful
+/// block-height/hash quorum alone cannot detect a provider that silently omits
+/// validator events.
+async fn fetch_deltas_quorum(
     client: &reqwest::Client,
     endpoints: &[String],
     staking_addr: &alloy::primitives::Address,
     from_block: u64,
     to_block: u64,
 ) -> anyhow::Result<Vec<ValidatorSetDelta>> {
-    let mut last_err: Option<anyhow::Error> = None;
+    let mut responses: Vec<Vec<ValidatorSetDelta>> = Vec::new();
     for ep in endpoints {
-        match fetch_deltas(client, ep, staking_addr, from_block, to_block).await {
-            Ok(deltas) => return Ok(deltas),
-            Err(e) => last_err = Some(e),
+        if let Ok(mut deltas) = fetch_deltas(client, ep, staking_addr, from_block, to_block).await {
+            deltas.sort_by_key(|delta| (delta.block_height, delta.log_index));
+            responses.push(deltas);
         }
     }
-    Err(last_err.unwrap_or_else(|| anyhow::anyhow!("no L1 RPC endpoint returned staking logs")))
+    crate::l1_quorum::identical_response_with_quorum(&responses, endpoints.len()).ok_or_else(|| {
+        anyhow::anyhow!("configured L1 RPC endpoints did not reach staking-log quorum")
+    })
 }
 
 /// Mode for the worker. See module docstring for the phasing plan.
@@ -438,7 +437,7 @@ pub enum SyncMode {
 }
 
 /// Worker state mirrored to `validator-set-sync.cursor.json` on each apply.
-#[derive(Default, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct WorkerState {
     /// Highest `(block_height, log_index)` we've consumed. None on first run.
     pub cursor: Option<(u64, u32)>,
@@ -683,18 +682,17 @@ async fn fetch_block_hash(
     rpc_url: &str,
     block_number: u64,
 ) -> anyhow::Result<String> {
-    let resp: serde_json::Value = client
-        .post(rpc_url)
-        .json(&serde_json::json!({
+    let resp = post_rpc_json(
+        client,
+        rpc_url,
+        serde_json::json!({
             "jsonrpc": "2.0",
             "method": "eth_getBlockByNumber",
             "params": [format!("0x{:x}", block_number), false],
             "id": 1,
-        }))
-        .send()
-        .await?
-        .json()
-        .await?;
+        }),
+    )
+    .await?;
 
     resp["result"]["hash"]
         .as_str()
@@ -723,7 +721,7 @@ async fn rebuild_worker_state(
     };
 
     if from_block <= safe_block {
-        let mut deltas = fetch_deltas_failover(
+        let mut deltas = fetch_deltas_quorum(
             client,
             &endpoints,
             &config.staking_addr,
@@ -763,7 +761,9 @@ pub async fn run(
     mode: SyncMode,
     state: Arc<RwLock<NodeState>>,
 ) -> anyhow::Result<()> {
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()?;
     let endpoints = config.rpc_endpoints();
     if endpoints.len() > 1 {
         tracing::info!(
@@ -824,10 +824,15 @@ pub async fn run(
             Err(e) => {
                 update_sync_status(&state, |status| {
                     status.state = "degraded".to_string();
-                    status.last_error = Some(e.to_string());
+                    status.last_error =
+                        Some("configured L1 RPC height quorum unavailable".to_string());
                 })
                 .await;
-                tracing::warn!("validator_set_sync: failed to fetch latest block: {}", e);
+                tracing::warn!(
+                    target: "validator_set_sync",
+                    error = %e,
+                    "configured L1 RPC height quorum unavailable"
+                );
                 continue;
             }
         };
@@ -868,16 +873,38 @@ pub async fn run(
                     }
                 }
                 HashQuorum::NoMajority => {
-                    // Endpoints disagree with no majority — inconclusive. Do NOT
-                    // rebuild on the word of a possibly-divergent single RPC.
+                    // No strict majority of configured providers agreed. Do
+                    // not process logs or advance the cursor until a later
+                    // poll can authenticate the current cursor.
+                    update_sync_status(&state, |status| {
+                        status.state = "degraded".to_string();
+                        status.last_error = Some(
+                            "configured L1 RPC quorum unavailable for cursor hash".to_string(),
+                        );
+                    })
+                    .await;
                     tracing::warn!(
                         target: "validator_set_sync",
                         cursor_block,
-                        "L1 endpoints disagree on cursor block hash with no majority; \
-                         skipping reorg check this poll"
+                        "configured L1 RPC quorum unavailable for cursor hash; skipping poll"
                     );
+                    continue;
                 }
-                HashQuorum::Unavailable => {}
+                HashQuorum::Unavailable => {
+                    update_sync_status(&state, |status| {
+                        status.state = "degraded".to_string();
+                        status.last_error = Some(
+                            "configured L1 RPC quorum unavailable for cursor hash".to_string(),
+                        );
+                    })
+                    .await;
+                    tracing::warn!(
+                        target: "validator_set_sync",
+                        cursor_block,
+                        "configured L1 RPC quorum unavailable for cursor hash; skipping poll"
+                    );
+                    continue;
+                }
             }
         }
 
@@ -900,7 +927,7 @@ pub async fn run(
             continue;
         }
 
-        match fetch_deltas_failover(
+        match fetch_deltas_quorum(
             &client,
             &endpoints,
             &config.staking_addr,
@@ -911,6 +938,7 @@ pub async fn run(
         {
             Ok(mut deltas) => {
                 deltas.sort_by_key(|delta| (delta.block_height, delta.log_index));
+                let mut next_worker_state = worker_state.clone();
                 for delta in deltas {
                     match mode {
                         SyncMode::Shadow => {
@@ -919,15 +947,10 @@ pub async fn run(
                                 "[shadow] delta: {:?} addr={} block={}",
                                 delta.kind, delta.addr, delta.block_height
                             );
-                            apply_delta(&mut worker_state, &delta);
+                            apply_delta(&mut next_worker_state, &delta);
                         }
                         SyncMode::ChainAuthoritative => {
-                            apply_delta(&mut worker_state, &delta);
-                            if let Err(e) =
-                                reconcile_state_from_worker(Arc::clone(&state), &worker_state).await
-                            {
-                                tracing::error!("Failed to apply delta to state: {}", e);
-                            }
+                            apply_delta(&mut next_worker_state, &delta);
                         }
                     }
                 }
@@ -935,20 +958,78 @@ pub async fn run(
                 // deltas were observed. Without this, a chain with sparse or zero
                 // staking events would re-walk the full block range on every poll
                 // and on every restart (defeats REM-103 cursor persistence).
-                let need_advance = worker_state
+                let need_advance = next_worker_state
                     .cursor
                     .map(|(h, _)| h < safe_block)
                     .unwrap_or(true);
                 if need_advance {
-                    worker_state.cursor = Some((safe_block, u32::MAX));
+                    next_worker_state.cursor = Some((safe_block, u32::MAX));
                 }
-                if let Some((height, _)) = worker_state.cursor {
-                    worker_state.cursor_block_hash =
-                        Some(fetch_block_hash_failover(&client, &endpoints, height).await?);
+
+                if let Some((height, _)) = next_worker_state.cursor {
+                    match fetch_block_hash_quorum(&client, &endpoints, height).await {
+                        HashQuorum::Agreed(hash) => {
+                            next_worker_state.cursor_block_hash = Some(hash);
+                        }
+                        HashQuorum::NoMajority | HashQuorum::Unavailable => {
+                            update_sync_status(&state, |status| {
+                                status.state = "degraded".to_string();
+                                status.last_error = Some(
+                                    "configured L1 RPC quorum unavailable for next cursor hash"
+                                        .to_string(),
+                                );
+                                status.cursor_block = worker_state.cursor.map(|(height, _)| height);
+                                status.cursor_log_index =
+                                    worker_state.cursor.map(|(_, index)| index);
+                                status.cursor_block_hash = worker_state.cursor_block_hash.clone();
+                            })
+                            .await;
+                            tracing::warn!(
+                                target: "validator_set_sync",
+                                cursor_block = height,
+                                "configured L1 RPC quorum unavailable for next cursor hash; \
+                                 retaining the previous cursor"
+                            );
+                            continue;
+                        }
+                    }
                 }
-                if let Err(e) = save_cursor(&state, &worker_state).await {
-                    tracing::warn!("Failed to save validator set sync cursor: {}", e);
+
+                if matches!(mode, SyncMode::ChainAuthoritative) {
+                    if let Err(error) =
+                        reconcile_state_from_worker(Arc::clone(&state), &next_worker_state).await
+                    {
+                        update_sync_status(&state, |status| {
+                            status.state = "degraded".to_string();
+                            status.last_error =
+                                Some("failed to reconcile authoritative validator set".to_string());
+                        })
+                        .await;
+                        tracing::error!(
+                            target: "validator_set_sync",
+                            error = %error,
+                            "failed to reconcile authoritative validator set; retaining cursor"
+                        );
+                        continue;
+                    }
                 }
+
+                if let Err(error) = save_cursor(&state, &next_worker_state).await {
+                    update_sync_status(&state, |status| {
+                        status.state = "degraded".to_string();
+                        status.last_error =
+                            Some("failed to persist validator-set sync cursor".to_string());
+                    })
+                    .await;
+                    tracing::error!(
+                        target: "validator_set_sync",
+                        error = %error,
+                        "failed to persist validator-set sync cursor; retaining in-memory cursor"
+                    );
+                    continue;
+                }
+
+                worker_state = next_worker_state;
                 update_sync_status(&state, |status| {
                     status.state = "synced".to_string();
                     status.cursor_block = worker_state.cursor.map(|(height, _)| height);
@@ -961,37 +1042,78 @@ pub async fn run(
             Err(e) => {
                 update_sync_status(&state, |status| {
                     status.state = "degraded".to_string();
-                    status.last_error = Some(e.to_string());
+                    status.last_error = Some("L1 staking-event read failed".to_string());
                     status.cursor_block = worker_state.cursor.map(|(height, _)| height);
                     status.cursor_log_index = worker_state.cursor.map(|(_, idx)| idx);
                     status.cursor_block_hash = worker_state.cursor_block_hash.clone();
                 })
                 .await;
-                tracing::warn!("validator_set_sync: failed to fetch deltas: {}", e);
+                tracing::warn!(
+                    target: "validator_set_sync",
+                    error = %e,
+                    "validator_set_sync: L1 staking-event read failed"
+                );
             }
         }
     }
 }
 
 async fn fetch_latest_block(client: &reqwest::Client, rpc_url: &str) -> anyhow::Result<u64> {
-    let resp: serde_json::Value = client
-        .post(rpc_url)
-        .json(&serde_json::json!({
+    let resp = post_rpc_json(
+        client,
+        rpc_url,
+        serde_json::json!({
             "jsonrpc": "2.0",
             "method": "eth_blockNumber",
             "params": [],
             "id": 1,
-        }))
-        .send()
-        .await?
-        .json()
-        .await?;
+        }),
+    )
+    .await?;
 
     let hex = resp["result"]
         .as_str()
         .ok_or_else(|| anyhow::anyhow!("eth_blockNumber returned no result"))?;
     u64::from_str_radix(hex.trim_start_matches("0x"), 16)
-        .map_err(|e| anyhow::anyhow!("invalid block number: {}", e))
+        .map_err(|_| anyhow::anyhow!("invalid L1 block number"))
+}
+
+/// Send one JSON-RPC request without exposing a credential-bearing URL or
+/// provider response body through error strings that reach node logs or API
+/// status.
+async fn post_rpc_json(
+    client: &reqwest::Client,
+    rpc_url: &str,
+    request: serde_json::Value,
+) -> anyhow::Result<serde_json::Value> {
+    let response = client
+        .post(rpc_url)
+        .json(&request)
+        .send()
+        .await
+        .map_err(|_| anyhow::anyhow!("L1 RPC transport failure"))?;
+    let status = response.status();
+    if !status.is_success() {
+        if status.as_u16() == 429 {
+            anyhow::bail!("L1 RPC rate limited (HTTP 429)");
+        }
+        anyhow::bail!("L1 RPC returned HTTP {}", status.as_u16());
+    }
+    let response: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|_| anyhow::anyhow!("L1 RPC response was not valid JSON"))?;
+    if let Some(error) = response.get("error") {
+        let message = error["message"]
+            .as_str()
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if message.contains("rate") || message.contains("limit") || message.contains("too many") {
+            anyhow::bail!("L1 RPC rate limited");
+        }
+        anyhow::bail!("L1 JSON-RPC method returned an error");
+    }
+    Ok(response)
 }
 
 /// Max blocks per `eth_getLogs` call. Public Sepolia RPCs often cap range (e.g. 10k–50k).
@@ -1060,9 +1182,8 @@ async fn fetch_deltas_chunk(
                     attempt = attempt + 1,
                     from_block,
                     to_block,
-                    "eth_getLogs transient failure, retrying in {}ms: {}",
-                    delay_ms,
-                    e
+                    "eth_getLogs transient rate limit, retrying in {}ms",
+                    delay_ms
                 );
                 tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
                 delay_ms = delay_ms.saturating_mul(2);
@@ -1119,9 +1240,10 @@ async fn fetch_deltas_chunk_once(
         ),
     ];
 
-    let resp: serde_json::Value = client
-        .post(rpc_url)
-        .json(&serde_json::json!({
+    let resp = post_rpc_json(
+        client,
+        rpc_url,
+        serde_json::json!({
             "jsonrpc": "2.0",
             "method": "eth_getLogs",
             "params": [{
@@ -1131,15 +1253,10 @@ async fn fetch_deltas_chunk_once(
                 "topics": [topics],
             }],
             "id": 1,
-        }))
-        .send()
-        .await?
-        .json()
-        .await?;
+        }),
+    )
+    .await?;
 
-    if let Some(err) = resp.get("error") {
-        anyhow::bail!("eth_getLogs RPC error: {}", err);
-    }
     let logs = resp["result"]
         .as_array()
         .ok_or_else(|| {
@@ -1191,7 +1308,7 @@ async fn fetch_deltas_chunk_once(
         match decode(log_view) {
             Ok(Some(delta)) => deltas.push(delta),
             Ok(None) => {}
-            Err(e) => tracing::warn!("Failed to decode log: {}", e),
+            Err(_) => anyhow::bail!("L1 staking log did not match the configured event schema"),
         }
     }
 
@@ -1270,6 +1387,26 @@ mod tests {
 
     fn b256_zero() -> B256 {
         B256::ZERO
+    }
+
+    #[test]
+    fn rpc_endpoints_count_provider_hosts_not_api_key_variants() {
+        let config = SyncConfig {
+            eth_rpc_url: "https://provider-one.invalid/rpc?key=first".into(),
+            extra_rpc_urls: vec![
+                "https://provider-one.invalid/sepolia?key=second".into(),
+                "https://provider-two.invalid/rpc".into(),
+            ],
+            ..SyncConfig::default()
+        };
+
+        assert_eq!(
+            config.rpc_endpoints(),
+            vec![
+                "https://provider-one.invalid/rpc?key=first".to_string(),
+                "https://provider-two.invalid/rpc".to_string(),
+            ]
+        );
     }
 
     /// Encode an event the way the wire would carry it. alloy's

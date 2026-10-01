@@ -1,6 +1,6 @@
 param(
     [string]$EvidencePath = (Join-Path (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path 'docs/testnet-heal-evidence/2026-09-26-phase-c-scanner-readiness-r9/fleet-runtime-readiness.json'),
-    [string]$ScannerProfileDigest = '648dfd39a02da6dd8c42f2342146208efeae1f435e18d2fcd71317828062fb0f',
+    [string]$ScannerProfileDigest = '7e1d95f9c8423778211944a1dea46674d8cbd3f0aee3b0eea6b5250f11d009cd',
     [switch]$LocalStateFromHealth,
     [ValidateSet('v1', 'v2', 'v3', 'v4', 'o1', 'o2', 'o3', 'o4')] [string[]]$Slots = @()
 )
@@ -36,12 +36,34 @@ $fleet = @(
 $remoteTemplate = @'
 python3 - <<'PY'
 import datetime, json, subprocess, urllib.request
+from urllib.parse import urlsplit
 base = 'http://127.0.0.1:PORT'
 record = {'captured_at_utc': datetime.datetime.now(datetime.timezone.utc).isoformat()}
 try:
-    result = subprocess.run(['sudo', 'docker', 'inspect', 'creg-phase-c-r7-SLOT', '--format', '{{.State.Status}} {{.State.Running}} {{.RestartCount}}'], check=True, capture_output=True, text=True)
-    status, running, restarts = result.stdout.strip().split()
-    record['container_state'] = {'Status': status, 'Running': running == 'true', 'RestartCount': int(restarts)}
+    result = subprocess.run(['sudo', 'docker', 'inspect', 'creg-phase-c-r7-SLOT'], check=True, capture_output=True, text=True)
+    container = json.loads(result.stdout)[0]
+    record['container_state'] = {
+        'Status': container.get('State', {}).get('Status'),
+        'Running': container.get('State', {}).get('Running') is True,
+        'RestartCount': container.get('RestartCount'),
+    }
+    record['image_id'] = container.get('Image')
+    record['image_ref'] = container.get('Config', {}).get('Image')
+    labels = container.get('Config', {}).get('Labels') or {}
+    record['source_revision'] = labels.get('org.opencontainers.image.revision')
+    env = {}
+    for entry in container.get('Config', {}).get('Env') or []:
+        key, separator, value = entry.partition('=')
+        if separator:
+            env[key] = value
+    rpc_urls = [env.get('CREG_ETH_RPC', '')]
+    rpc_urls.extend(env.get('CREG_ETH_RPC_FALLBACKS', '').split(','))
+    record['rpc_provider_hosts'] = sorted({
+        parsed.hostname.lower()
+        for value in rpc_urls if value.strip()
+        for parsed in [urlsplit(value.strip())]
+        if parsed.hostname
+    })
     for field, path in [('health', '/v1/public/health'), ('stats', '/v1/public/chain/stats'), ('metrics', '/metrics'), ('pbft', '/v1/consensus/pbft')]:
         with urllib.request.urlopen(base + path, timeout=15) as response:
             payload = response.read().decode('utf8')
@@ -68,9 +90,30 @@ foreach ($hostInfo in $fleet) {
                 if ($record.health.status -ne 'ok') { throw 'Local API health did not confirm the validator is serving.' }
                 $record.container_state = @{ Status = 'running'; Running = $true; RestartCount = $null; source = 'live node health endpoint' }
             } else {
-                $stateJson = (& docker inspect 'creg-phase-c-r7-v1' --format '{{json .State}}' 2>$null | Out-String).Trim()
+                $inspectJson = (& docker inspect 'creg-phase-c-r7-v1' 2>$null | Out-String).Trim()
                 if ($LASTEXITCODE -ne 0) { throw 'Candidate container is not inspectable.' }
-                $record.container_state = $stateJson | ConvertFrom-Json -AsHashtable
+                $container = @($inspectJson | ConvertFrom-Json -AsHashtable)[0]
+                $record.container_state = $container.State
+                $record.container_state.RestartCount = $container.RestartCount
+                $record.image_id = $container.Image
+                    $record.image_ref = $container.Config.Image
+                    $labels = $container.Config.Labels
+                    if ($labels) { $record.source_revision = $labels['org.opencontainers.image.revision'] }
+                $envMap = @{}
+                foreach ($entry in $container.Config.Env) {
+                    $separator = $entry.IndexOf('=')
+                    if ($separator -gt 0) { $envMap[$entry.Substring(0, $separator)] = $entry.Substring($separator + 1) }
+                }
+                $rpcUrls = @([string]$envMap['CREG_ETH_RPC']) + @(([string]$envMap['CREG_ETH_RPC_FALLBACKS']).Split(','))
+                $rpcHosts = @()
+                foreach ($rpcUrl in $rpcUrls) {
+                    if ([string]::IsNullOrWhiteSpace($rpcUrl)) { continue }
+                    try {
+                        $rpcHost = ([Uri]$rpcUrl.Trim()).Host.ToLowerInvariant()
+                        if ($rpcHost -and $rpcHost -notin $rpcHosts) { $rpcHosts += $rpcHost }
+                    } catch { }
+                }
+                $record.rpc_provider_hosts = @($rpcHosts | Sort-Object)
             }
             $record.stats = Invoke-RestMethod -Uri "$base/v1/public/chain/stats" -TimeoutSec 15
             $record.pbft = Invoke-RestMethod -Uri "$base/v1/consensus/pbft" -TimeoutSec 15
@@ -97,6 +140,10 @@ foreach ($hostInfo in $fleet) {
     foreach ($key in @('Slot', 'Role', 'Name', 'Project', 'Zone', 'Port')) {
         if ($hostInfo.ContainsKey($key)) { $record[$key.ToLowerInvariant()] = $hostInfo[$key] }
     }
+    $rpcProviderHosts = @($record.rpc_provider_hosts | Where-Object {
+        -not [string]::IsNullOrWhiteSpace([string]$_)
+    } | Sort-Object -Unique)
+    $record.rpc_provider_hosts = $rpcProviderHosts
     $checks = [ordered]@{
         container_running = $record.container_state.Running -eq $true
         scanner_ready = $record.metrics -match '(?m)^creg_scanner_profile_ready 1\s*$'
@@ -105,6 +152,7 @@ foreach ($hostInfo in $fleet) {
         threat_feed_entries_100 = $record.metrics -match '(?m)^creg_scanner_threat_intel_entries 100\s*$'
         osv_ready = $record.metrics -match '(?m)^creg_scanner_osv_ready 1\s*$'
         scanner_profile_matches = $record.metrics -match ('profile_digest="' + $expectedProfile + '"')
+        l1_rpc_provider_quorum_configured = $hostInfo.Role -ne 'validator' -or $rpcProviderHosts.Count -ge 3
         signature_verified = $record.stats.spec_signature_verified -eq $true
         chain_id_matches = $record.stats.chain_id -eq 'creg-phase-c-testnet-2026-09-26-r7'
         genesis_matches = ($record.stats.genesis_hash -replace '^0x', '') -eq $expectedGenesisBlock
@@ -113,6 +161,19 @@ foreach ($hostInfo in $fleet) {
         live_peers = $record.stats.peer_count -gt 0
     }
     if ($hostInfo.Role -eq 'validator') {
+        $sync = $record.health.validator_set_sync
+        $lastPoll = [DateTimeOffset]::MinValue
+        $pollParsed = [DateTimeOffset]::TryParse([string]$sync.last_poll_at, [ref]$lastPoll)
+        $pollAgeSeconds = if ($pollParsed) { ([DateTimeOffset]::UtcNow - $lastPoll.ToUniversalTime()).TotalSeconds } else { [double]::PositiveInfinity }
+        $checks.validator_set_sync_current =
+            $sync.enabled -eq $true -and
+            $sync.mode -eq 'chain-authoritative' -and
+            $sync.state -eq 'synced' -and
+            [string]::IsNullOrWhiteSpace([string]$sync.last_error) -and
+            $null -ne $sync.cursor_block -and
+            $null -ne $sync.last_finalized_source_block -and
+            [long]$sync.cursor_block -ge [long]$sync.last_finalized_source_block -and
+            $pollAgeSeconds -ge -30 -and $pollAgeSeconds -le 120
         $checks.validator_sandbox_isolated = $record.health.sandbox.isolated -eq $true
         $checks.validator_sandbox_nsjail = $record.health.sandbox.engine -eq 'nsjail'
         $checks.validator_dev_bypass_disabled = $record.health.sandbox.dev_bypass -eq $false
@@ -140,13 +201,23 @@ foreach ($hostInfo in $fleet) {
     $failed = @($checks.Keys | Where-Object { $checks[$_] -ne $true }) -join ','
     "$($hostInfo.Slot): ready=$($record.ready); recovery_clear=$($record.recovery_clear); failed checks=$failed"
 }
+$slotOrder = @{ v1 = 0; v2 = 1; v3 = 2; v4 = 3; o1 = 4; o2 = 5; o3 = 6; o4 = 7 }
+$records = @($records | Sort-Object { $slotOrder[$_.slot] })
+$presentTips = @($records | Where-Object { $null -ne $_.stats } | ForEach-Object {
+    '{0}|{1}|{2}|{3}' -f $_.stats.chain_id, $_.stats.genesis_hash, $_.stats.tip_height, $_.stats.tip_hash
+} | Select-Object -Unique)
+$allEightSharedTip = $records.Count -eq 8 -and $presentTips.Count -eq 1 -and
+    @($records | Where-Object { $null -eq $_.stats }).Count -eq 0
+$imageIds = @($records | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.image_id) } | ForEach-Object image_id | Select-Object -Unique)
 $evidence = [ordered]@{
     schema = 'creg-phase-c-real-fleet-readiness-v1'
     captured_at_utc = [DateTime]::UtcNow.ToString('o')
     scanner_profile_digest = $expectedProfile
-    all_eight_ready = $records.Count -eq 8 -and @($records | Where-Object { -not $_.ready }).Count -eq 0
+    all_eight_ready = $records.Count -eq 8 -and @($records | Where-Object { -not $_.ready }).Count -eq 0 -and $allEightSharedTip
     all_eight_recovery_clear = $records.Count -eq 8 -and @($records | Where-Object { -not $_.recovery_clear }).Count -eq 0
     all_eight_pbft_clear = $records.Count -eq 8 -and @($records | Where-Object { -not $_.pbft_clear }).Count -eq 0
+    all_eight_shared_finalized_tip = $allEightSharedTip
+    image_ids_aligned = $records.Count -eq 8 -and $imageIds.Count -eq 1 -and @($records | Where-Object { [string]::IsNullOrWhiteSpace([string]$_.image_id) }).Count -eq 0
     public_cutover = $false
     nodes = $records
 }

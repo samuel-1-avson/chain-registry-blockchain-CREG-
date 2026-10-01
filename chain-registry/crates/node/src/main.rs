@@ -1082,14 +1082,28 @@ async fn main() -> Result<()> {
             );
             let sync_state = Arc::clone(&state);
             tokio::spawn(async move {
-                if let Err(e) = validator_set_sync::run(
-                    sync_config,
-                    validator_set_sync::SyncMode::ChainAuthoritative,
-                    sync_state,
-                )
-                .await
-                {
-                    tracing::error!("Validator set sync worker crashed: {}", e);
+                loop {
+                    if let Err(error) = validator_set_sync::run(
+                        sync_config.clone(),
+                        validator_set_sync::SyncMode::ChainAuthoritative,
+                        Arc::clone(&sync_state),
+                    )
+                    .await
+                    {
+                        {
+                            let mut state_guard = sync_state.write().await;
+                            state_guard.validator_set_sync.state = "degraded".to_string();
+                            state_guard.validator_set_sync.last_error = Some(
+                                "validator-set sync worker stopped; retry scheduled".to_string(),
+                            );
+                        }
+                        tracing::error!(
+                            target: "validator_set_sync",
+                            error = %error,
+                            "validator-set sync worker stopped; retrying in 30 seconds"
+                        );
+                        tokio::time::sleep(Duration::from_secs(30)).await;
+                    }
                 }
             });
         }
