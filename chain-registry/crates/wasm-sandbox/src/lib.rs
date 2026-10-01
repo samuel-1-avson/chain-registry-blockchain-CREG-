@@ -711,9 +711,20 @@ impl WasmSandbox {
                     SandboxError::ExecutionError(format!("No entry point (_start/main): {}", e))
                 })?;
 
-            let call_result = func
-                .call(&mut store, ())
-                .map_err(|e| SandboxError::ExecutionError(e.to_string()));
+            let call_result = func.call(&mut store, ()).map_err(|e| {
+                // Wasmtime attaches its WebAssembly backtrace as the outer
+                // error context. Displaying that context can hide the actual
+                // trap name, so classify fuel exhaustion from the typed trap
+                // instead of relying only on its formatted message.
+                if e.downcast_ref::<wasmtime::Trap>() == Some(&wasmtime::Trap::OutOfFuel) {
+                    SandboxError::ResourceLimitExceeded(format!(
+                        "Fuel limit exceeded (limit: {} fuel units): {}",
+                        max_fuel, e
+                    ))
+                } else {
+                    SandboxError::ExecutionError(e.to_string())
+                }
+            });
 
             // Measure peak memory
             let memories: Vec<wasmtime::Memory> = instance
