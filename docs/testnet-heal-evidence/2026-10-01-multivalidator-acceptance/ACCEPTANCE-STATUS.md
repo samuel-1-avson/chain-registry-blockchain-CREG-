@@ -33,15 +33,15 @@ All four observers passed the capture checks. Validators 1–3 have fresh chain-
 
 Docker Desktop's Linux engine was stopped. Restarting Docker Desktop brought the existing V1 container back without rebuilding or replacing its image. V1 became healthy, reconnected to two peers, and reported the same h20 hash. No node data was removed, no chain reset was performed, and no package transaction was submitted.
 
-## Work in progress
+## Source validation
 
-The local source now hardens L1 sync recovery: configured-endpoint quorum is required for heights and hashes, staking-event responses must match across a configured quorum, cursor changes are staged until the next cursor hash is quorum-confirmed, RPC errors are sanitized, and the worker retries after an unexpected exit. The readiness capture now checks L1 sync freshness, provider-host count, common finalized tip, and image alignment.
+Commit `b89bf4b7775874bb998c579a2c1d80886848aac1` is pushed to `main`. It hardens L1 sync recovery: configured-endpoint quorum is required for heights and hashes, staking-event responses must match across a configured quorum, cursor changes are staged until the next cursor hash is quorum-confirmed, RPC errors are sanitized, and the worker retries after an unexpected exit. The readiness capture checks L1 sync freshness, provider-host count, common finalized tip, and image alignment.
 
-Eight pure quorum tests pass, the changed Rust files pass `rustfmt --check`, and the PowerShell capture script parses. The Windows Rust build could not finish because `librocksdb-sys` needs `libclang.dll`. The code changes are not in the running images and have not passed a Linux build yet.
+The GitHub Actions Rust CI run `36942708963` passed formatting, Clippy, and the full workspace test suite. Its Phase C build/recovery job compiled the real-fleet node binaries and passed durable PBFT signing recovery and relayer validation. The CR-07 activation workflow `36942708982` also passed. The focused eight quorum tests and local formatting checks passed. These source checks do not mean the code is in the running images: the deployed fleet still has divergent older image IDs.
 
 ## Required before the real package acceptance
 
-1. Configure two additional independent Sepolia RPC providers alongside the current endpoint for V1–V4. Keep the API URLs in Secret Manager; supply secret **names only** for deployment configuration.
+1. Configure two additional independent, adequately provisioned Sepolia RPC providers alongside the current endpoint for V1–V4. Keep the API URLs in Secret Manager; provide secret **names only** for deployment configuration. The public 1RPC tier is limited to 200 requests/day and is unsuitable for this validator sync workload; see the [provider review](RPC-PROVIDER-REVIEW.md).
 2. Build and validate the hardened node image, then recover V4's validator-set cursor and verify all four validator sync heartbeats are current.
 3. Submit the previously approved benign test package only after all four validators pass the readiness gate. Require three validator votes, identical h21 hashes from all four validators, and h21 convergence on all four observers.
 4. Preserve that acceptance evidence, then roll the verified image through the fleet with per-node health, chain-tip, recovery, PBFT, and artifact-digest checks.
