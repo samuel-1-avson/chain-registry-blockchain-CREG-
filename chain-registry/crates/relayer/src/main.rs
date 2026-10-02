@@ -2,9 +2,10 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 use alloy::{
-    network::EthereumWallet,
+    network::{EthereumWallet, TransactionBuilder},
     primitives::{keccak256, Address, B256, U256},
-    providers::ProviderBuilder,
+    providers::{Provider, ProviderBuilder},
+    rpc::types::TransactionRequest,
     signers::local::PrivateKeySigner,
     sol,
     sol_types::SolValue,
@@ -798,6 +799,24 @@ async fn sponsor_request(
             .into_response();
     }
 
+    let transaction =
+        match prepare_sponsored_transaction(&state, &prepared, &permit_signature).await {
+            Ok(transaction) => transaction,
+            Err(message) => {
+                return (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    Json(SponsorResponse {
+                        success: false,
+                        request_id: String::new(),
+                        status: "rejected".to_string(),
+                        tx_hash: None,
+                        message,
+                    }),
+                )
+                    .into_response();
+            }
+        };
+
     let request_id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
     let initial_record = RequestStatusRecord {
@@ -858,7 +877,7 @@ async fn sponsor_request(
             .into_response();
     }
 
-    let tx_hash = match send_sponsored_transaction(&state, &prepared, &permit_signature).await {
+    let tx_hash = match send_sponsored_transaction(&state, transaction).await {
         Ok(hash) => hash,
         Err(err) => {
             let (status_code, friendly) = classify_send_error(&err);
@@ -1098,6 +1117,10 @@ fn validate_sponsor_request(
     state: &AppState,
     request: &SponsorRequest,
 ) -> Result<ValidatedActionRequest, String> {
+    if !state.policy.chain.enabled {
+        return Err("Sponsored transactions are disabled by relayer policy.".to_string());
+    }
+
     let action = SponsoredActionKind::from_key(&request.action)
         .ok_or_else(|| format!("Unsupported sponsored action: {}", request.action))?;
     let intent_action = SponsoredActionKind::from_code(request.intent_message.action)
@@ -1478,32 +1501,33 @@ fn reserve_sponsorship(
     Ok(())
 }
 
-async fn send_sponsored_transaction(
+fn validate_sponsored_gas(estimated_gas: u64, maximum_gas: u64) -> Result<(), String> {
+    if estimated_gas == 0 || maximum_gas == 0 {
+        return Err("Sponsored transaction gas estimate or policy limit is invalid.".to_string());
+    }
+    if estimated_gas > maximum_gas {
+        return Err("Sponsored transaction exceeds the relayer gas policy limit.".to_string());
+    }
+    Ok(())
+}
+
+async fn prepare_sponsored_transaction(
     state: &AppState,
     prepared: &ValidatedActionRequest,
     permit_signature: &ParsedSignatureParts,
-) -> Result<String, String> {
-    let signer: PrivateKeySigner = state
-        .config
-        .private_key
-        .parse()
-        .map_err(|e| format!("Invalid relayer private key: {}", e))?;
-    let wallet = EthereumWallet::from(signer);
-    let provider = ProviderBuilder::new()
-        .with_recommended_fillers()
-        .wallet(wallet)
-        .on_http(
-            state
-                .config
-                .rpc_url
-                .parse()
-                .map_err(|e| format!("Invalid relayer RPC URL: {}", e))?,
-        );
+) -> Result<TransactionRequest, String> {
+    let provider = ProviderBuilder::new().on_http(
+        state
+            .config
+            .rpc_url
+            .parse()
+            .map_err(|_| "Relayer RPC configuration is invalid.".to_string())?,
+    );
 
     let contract = IStakingSponsored::new(prepared.staking_contract, &provider);
     let deadline = prepared.permit_deadline;
 
-    let pending_tx = match prepared.action {
+    let mut transaction = match prepared.action {
         SponsoredActionKind::Publisher => contract
             .stakeAsPublisherWithPermit(
                 prepared.owner,
@@ -1513,9 +1537,8 @@ async fn send_sponsored_transaction(
                 permit_signature.r,
                 permit_signature.s,
             )
-            .send()
-            .await
-            .map_err(|e| format!("Failed to submit sponsored publisher stake: {}", e))?,
+            .from(state.config.relayer_address)
+            .into_transaction_request(),
         SponsoredActionKind::Validator => contract
             .applyToBeValidatorWithPermit(
                 prepared.owner,
@@ -1525,10 +1548,44 @@ async fn send_sponsored_transaction(
                 permit_signature.r,
                 permit_signature.s,
             )
-            .send()
-            .await
-            .map_err(|e| format!("Failed to submit sponsored validator application: {}", e))?,
+            .from(state.config.relayer_address)
+            .into_transaction_request(),
     };
+
+    let estimated_gas = provider.estimate_gas(&transaction).await.map_err(|_| {
+        "Unable to estimate sponsored transaction gas; no transaction was submitted.".to_string()
+    })?;
+    validate_sponsored_gas(estimated_gas, state.policy.chain.max_gas_per_request)?;
+    // Keep the checked calldata/sender and an explicit policy ceiling so the
+    // signing provider cannot replace the estimate with an uncapped gas limit.
+    transaction.set_gas_limit(state.policy.chain.max_gas_per_request);
+    Ok(transaction)
+}
+
+async fn send_sponsored_transaction(
+    state: &AppState,
+    transaction: TransactionRequest,
+) -> Result<String, String> {
+    let signer: PrivateKeySigner = state
+        .config
+        .private_key
+        .parse()
+        .map_err(|_| "Relayer signing configuration is invalid.".to_string())?;
+    let wallet = EthereumWallet::from(signer);
+    let provider = ProviderBuilder::new()
+        .with_recommended_fillers()
+        .wallet(wallet)
+        .on_http(
+            state
+                .config
+                .rpc_url
+                .parse()
+                .map_err(|_| "Relayer RPC configuration is invalid.".to_string())?,
+        );
+    let pending_tx = provider.send_transaction(transaction).await.map_err(|_| {
+        "Failed to submit sponsored transaction; its broadcast result requires reconciliation."
+            .to_string()
+    })?;
 
     Ok(pending_tx.tx_hash().to_string())
 }
@@ -2068,5 +2125,93 @@ mod tests {
             ),
             Some(SponsoredActionKind::Validator)
         );
+    }
+
+    #[tokio::test]
+    async fn disabled_policy_rejects_direct_sponsor_without_reserving_state() {
+        let db = sled::Config::new().temporary(true).open().unwrap();
+        let state = Arc::new(AppState {
+            config: RelayerConfig {
+                port: 8083,
+                rpc_url: "invalid-rpc-configuration".to_string(),
+                private_key: String::new(),
+                policy_path: String::new(),
+                relayer_address: Address::ZERO,
+                active_chain_id: 11155111,
+                data_dir: String::new(),
+                trust_proxy: false,
+                allowed_origins: Vec::new(),
+            },
+            policy: LoadedPolicy {
+                mode: "testnet-only".to_string(),
+                signature: LoadedSignaturePolicy {
+                    scheme: "eip712".to_string(),
+                    domain_name: String::new(),
+                    domain_version: "1".to_string(),
+                },
+                replay_protection: LoadedReplayProtection {
+                    nonce_scope: "wallet-and-chain".to_string(),
+                    max_expiry_seconds: 300,
+                },
+                chain: LoadedChainPolicy {
+                    id: 11155111,
+                    label: "private-policy-label".to_string(),
+                    enabled: false,
+                    daily_wallet_quota: 10,
+                    daily_ip_quota: 40,
+                    max_gas_per_request: 500000,
+                    allow_contracts: Vec::new(),
+                    actions: HashMap::new(),
+                },
+            },
+            http_client: reqwest::Client::new(),
+            journal: db.open_tree("state").unwrap(),
+        });
+        for action in ["publisher", "validator"] {
+            let request = serde_json::from_value(serde_json::json!({
+                "action": action,
+                "permitMessage": {
+                    "owner": "", "spender": "", "value": "", "nonce": "", "deadline": ""
+                },
+                "intentMessage": {
+                    "owner": "", "tokenContract": "", "stakingContract": "", "action": 0,
+                    "amount": "", "permitNonce": "", "permitDeadline": "", "relayerNonce": "", "expiresAt": ""
+                },
+                "permitSignature": "", "intentSignature": ""
+            }))
+            .unwrap();
+            let response = sponsor_request(
+                State(Arc::clone(&state)),
+                ConnectInfo("127.0.0.1:12345".parse().unwrap()),
+                HeaderMap::new(),
+                Json(request),
+            )
+            .await
+            .into_response();
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            let body = axum::body::to_bytes(response.into_body(), 4096)
+                .await
+                .unwrap();
+            let payload: Value = serde_json::from_slice(&body).unwrap();
+            assert_eq!(payload["status"], "rejected");
+            assert_eq!(payload["requestId"], "");
+            assert_eq!(
+                payload["message"],
+                "Sponsored transactions are disabled by relayer policy."
+            );
+            assert!(state.journal.is_empty());
+        }
+    }
+
+    #[test]
+    fn sponsored_gas_policy_accepts_boundary_and_rejects_excess_or_invalid_values() {
+        assert!(validate_sponsored_gas(499999, 500000).is_ok());
+        assert!(validate_sponsored_gas(500000, 500000).is_ok());
+        assert_eq!(
+            validate_sponsored_gas(500001, 500000).unwrap_err(),
+            "Sponsored transaction exceeds the relayer gas policy limit."
+        );
+        assert!(validate_sponsored_gas(0, 500000).is_err());
+        assert!(validate_sponsored_gas(21000, 0).is_err());
     }
 }

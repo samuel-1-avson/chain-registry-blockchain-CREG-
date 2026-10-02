@@ -1,0 +1,56 @@
+{
+  "schema": "creg-real-upstream-archive-static-review-v1",
+  "captured_at_utc": "2026-10-02T08:11:26.230527+00:00",
+  "canonical": "npm:has-flag@4.0.0",
+  "archive_bytes": 2206,
+  "archive_sha256": "77a7eb1411d927bb8a5ca7069dbe168886d63c88f446f0b81500a2cf23ddb5b1",
+  "registry_sha512_integrity": "sha512-EykJT/Q1KjTWctppgIAgfSO0tKVuZUjhgMr17kqTumMl6Afv3EISleU7qZUzoXDFTAHTDC4NOoG/ZxU3EvlMPQ==",
+  "registry_sha1_verified": true,
+  "registry_sha512_verified": true,
+  "registry_identity_verified": true,
+  "archive_inventory_matches_registry": true,
+  "unpacked_bytes": 4419,
+  "files": [
+    {
+      "path": "package/package.json",
+      "bytes": 696,
+      "sha256": "3fef4b52efbeabeadfffd5994e90b1025eb24263286e34170675956637d368b1",
+      "regular_file": true
+    },
+    {
+      "path": "package/index.d.ts",
+      "bytes": 684,
+      "sha256": "1f2e0d7173b86a8a84c9a6acd319b89d48e1411b5024e6eb03dc1551b30f392d",
+      "regular_file": true
+    },
+    {
+      "path": "package/index.js",
+      "bytes": 330,
+      "sha256": "e9e921d4734fee9405bef5886c010c80a8f10fe958e5d71bd5d8eed5e616e78d",
+      "regular_file": true
+    },
+    {
+      "path": "package/license",
+      "bytes": 1109,
+      "sha256": "48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0",
+      "regular_file": true
+    },
+    {
+      "path": "package/readme.md",
+      "bytes": 1600,
+      "sha256": "e9f8f4e5c1e63047b8d491d0218e47d1512017af38d3b9cfab7b81e8e0a0cbcd",
+      "regular_file": true
+    }
+  ],
+  "license": "MIT",
+  "declared_scripts": {
+    "test": "xo && ava && tsd"
+  },
+  "install_and_publish_lifecycle_hooks": {},
+  "runtime_dependencies": {},
+  "optional_dependencies": {},
+  "source_summary": "Single CommonJS function examines a caller-supplied argv array or process.argv, normalizes the requested flag prefix, and compares flag position with the double-dash terminator. No package files were extracted or executed.",
+  "package_executed": false,
+  "chain_submission_performed": false,
+  "scanner_deployed": false
+}

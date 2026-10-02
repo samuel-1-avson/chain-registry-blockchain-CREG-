@@ -1,0 +1,193 @@
+{
+  "schema": "creg-r7-v4-sync-recovery-v1",
+  "before": {
+    "captured_at_utc": "2026-10-02T08:11:24.332232+00:00",
+    "container_id": "d5f714e2062ef52758f44a33646e7f637ac3a5feb17990e25e1077ab3c01273a",
+    "image_id": "sha256:704cd7dfb89a048c146a3de502416c31a6f77c0e3f493a98f4fe3098c732046c",
+    "running": true,
+    "mounts": [
+      [
+        "/var/lib/creg/phase-c-r7/data",
+        "/data",
+        true
+      ],
+      [
+        "/var/lib/creg/phase-c-r7/scanner-r14-ansi-regex-live",
+        "/scanner",
+        false
+      ],
+      [
+        "/var/run/docker.sock",
+        "/var/run/docker.sock",
+        true
+      ]
+    ],
+    "identity_sha256": "c287fdb093e8f8a2458ad36206ee50c3918cbb41b4e5c5795f5f77d834f8f575",
+    "environment_sha256": "7852062b67544361ccb1e61a66a14d394a9a1073c9c221e9049e08ab081afb1c",
+    "container_environment_sha256": "366c6f779ffc24d5ec4783d5655f66da7d2e93c7731cef17c3bbac8f4e685bbc",
+    "journal_present": true,
+    "small_cluster_quorum_disabled": true,
+    "health": {
+      "status": "ok",
+      "node_id": "validator-4",
+      "is_validator": true,
+      "version": "0.1.0",
+      "validator_set_sync": {
+        "enabled": true,
+        "mode": "chain-authoritative",
+        "state": "syncing",
+        "last_finalized_source_block": 11808034,
+        "cursor_block": 11808024,
+        "cursor_log_index": 4294967295,
+        "cursor_block_hash": "0x0dc4d9287635a58dc22988d8fb6bb2850138be8d0fed25789a9b76f724c1f06b",
+        "last_poll_at": "2026-09-29T14:03:48.927714014+00:00",
+        "last_error": null
+      },
+      "sandbox": {
+        "engine": "nsjail",
+        "dev_bypass": false,
+        "isolated": true,
+        "degraded": false,
+        "note": "kernel namespaces + seccomp-BPF (primary engine)"
+      },
+      "sync": {
+        "lag_blocks": 0,
+        "max_peer_tip": 20,
+        "healthy": true
+      }
+    },
+    "stats": {
+      "tip_height": 20,
+      "tip_hash": "730b01c1a67a4796a16f599169e4ebf77e01d2e8ce92d1e4fb3715a7c4354285",
+      "package_count": 8,
+      "block_count": 21,
+      "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+      "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+      "spec_signature_verified": true,
+      "l1_rpc_configured": true,
+      "is_validator": true,
+      "validator_count": 4,
+      "active_validators": 4,
+      "total_stake": 400,
+      "total_stake_native": "400",
+      "peer_count": 2,
+      "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+      "l1_block": 0,
+      "pending_tx_count": 0,
+      "publisher_count": 1,
+      "finalized_height": 20,
+      "finalization_lag": 0,
+      "finalization_source": "creg-canonical-store",
+      "validator_set_source": "chain-authoritative",
+      "validator_set_sync_state": "syncing",
+      "validator_set_last_finalized_source_block": 11808034
+    },
+    "pbft": {
+      "active_round_count": 0,
+      "max_non_terminal_phase_age_seconds": 0.0,
+      "rounds": []
+    },
+    "queues": {
+      "creg_pending_block_txs": 0.0,
+      "creg_durable_finalized_work_depth": 0.0,
+      "creg_forced_inclusion_pending": 0.0,
+      "creg_durable_finalized_work_dead_letter_depth": 12.0
+    }
+  },
+  "restart_performed": true,
+  "passed": true,
+  "after": {
+    "captured_at_utc": "2026-10-02T08:11:30.704639+00:00",
+    "container_id": "d5f714e2062ef52758f44a33646e7f637ac3a5feb17990e25e1077ab3c01273a",
+    "image_id": "sha256:704cd7dfb89a048c146a3de502416c31a6f77c0e3f493a98f4fe3098c732046c",
+    "running": true,
+    "mounts": [
+      [
+        "/var/lib/creg/phase-c-r7/data",
+        "/data",
+        true
+      ],
+      [
+        "/var/lib/creg/phase-c-r7/scanner-r14-ansi-regex-live",
+        "/scanner",
+        false
+      ],
+      [
+        "/var/run/docker.sock",
+        "/var/run/docker.sock",
+        true
+      ]
+    ],
+    "identity_sha256": "c287fdb093e8f8a2458ad36206ee50c3918cbb41b4e5c5795f5f77d834f8f575",
+    "environment_sha256": "7852062b67544361ccb1e61a66a14d394a9a1073c9c221e9049e08ab081afb1c",
+    "container_environment_sha256": "366c6f779ffc24d5ec4783d5655f66da7d2e93c7731cef17c3bbac8f4e685bbc",
+    "journal_present": true,
+    "small_cluster_quorum_disabled": true,
+    "health": {
+      "status": "ok",
+      "node_id": "validator-4",
+      "is_validator": true,
+      "version": "0.1.0",
+      "validator_set_sync": {
+        "enabled": true,
+        "mode": "chain-authoritative",
+        "state": "synced",
+        "last_finalized_source_block": 11827708,
+        "cursor_block": 11827708,
+        "cursor_log_index": 4294967295,
+        "cursor_block_hash": "0x72c5b344d382be46d541e02006125fb068de24bf3b0d6f0356c2a014a5836f20",
+        "last_poll_at": "2026-10-02T08:11:28.498051691+00:00",
+        "last_error": null
+      },
+      "sandbox": {
+        "engine": "nsjail",
+        "dev_bypass": false,
+        "isolated": true,
+        "degraded": false,
+        "note": "kernel namespaces + seccomp-BPF (primary engine)"
+      },
+      "sync": {
+        "lag_blocks": 0,
+        "max_peer_tip": 0,
+        "healthy": true
+      }
+    },
+    "stats": {
+      "tip_height": 20,
+      "tip_hash": "730b01c1a67a4796a16f599169e4ebf77e01d2e8ce92d1e4fb3715a7c4354285",
+      "package_count": 8,
+      "block_count": 21,
+      "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+      "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+      "spec_signature_verified": true,
+      "l1_rpc_configured": true,
+      "is_validator": true,
+      "validator_count": 4,
+      "active_validators": 4,
+      "total_stake": 400,
+      "total_stake_native": "400",
+      "peer_count": 0,
+      "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+      "l1_block": 0,
+      "pending_tx_count": 0,
+      "publisher_count": 1,
+      "finalized_height": 20,
+      "finalization_lag": 0,
+      "finalization_source": "creg-canonical-store",
+      "validator_set_source": "chain-authoritative",
+      "validator_set_sync_state": "synced",
+      "validator_set_last_finalized_source_block": 11827708
+    },
+    "pbft": {
+      "active_round_count": 0,
+      "max_non_terminal_phase_age_seconds": 0.0,
+      "rounds": []
+    },
+    "queues": {
+      "creg_pending_block_txs": 0.0,
+      "creg_durable_finalized_work_depth": 0.0,
+      "creg_forced_inclusion_pending": 0.0,
+      "creg_durable_finalized_work_dead_letter_depth": 12.0
+    }
+  }
+}

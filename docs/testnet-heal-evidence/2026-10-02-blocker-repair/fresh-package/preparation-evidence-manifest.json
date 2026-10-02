@@ -1,0 +1,72 @@
+{
+  "schema": "creg-real-package-preparation-evidence-manifest-v1",
+  "captured_at_utc": "2026-10-02T08:15:16.981097+00:00",
+  "canonical": "npm:has-flag@4.0.0",
+  "status": "prepared_not_signed_or_submitted",
+  "files": [
+    {
+      "path": "archive-static-review.json",
+      "bytes": 2079,
+      "sha256": "6e82bffe0b447ac300e5cfa57d337a9f2c58d6661f53f7c4f5a9679906ddc312"
+    },
+    {
+      "path": "chain-absence-review.json",
+      "bytes": 3819,
+      "sha256": "cf9f4b525f19d5233dce6a37ae80ce8cf81c4cfe1d889a2d75d61fbf4eeebdbb"
+    },
+    {
+      "path": "osv-query.json",
+      "bytes": 92,
+      "sha256": "cafec22db4c9d4bd04b16ce6b9ec813b5b7cc9453bddb42fe02a516c4af809d8"
+    },
+    {
+      "path": "osv-response.json",
+      "bytes": 2,
+      "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    },
+    {
+      "path": "package-absence-at-h20.json",
+      "bytes": 21670,
+      "sha256": "1c470bc43ff6f4ff0fc74a4d17f5004215352b58e608b28d52093521684a2a9a"
+    },
+    {
+      "path": "package-absence-helper.log",
+      "bytes": 563,
+      "sha256": "48383caf5b376edf4800f9eec829b8a02cc30692820ca41394b58a34ccb64dac"
+    },
+    {
+      "path": "package.tgz",
+      "bytes": 2206,
+      "sha256": "77a7eb1411d927bb8a5ca7069dbe168886d63c88f446f0b81500a2cf23ddb5b1"
+    },
+    {
+      "path": "PREPARATION-REVIEW.md",
+      "bytes": 3680,
+      "sha256": "e62549659dff4595bf695aca3898da90c9f35e9b09f32d0e25f355c72fc096b6"
+    },
+    {
+      "path": "registry.json",
+      "bytes": 2497,
+      "sha256": "0a45ddada39d4474160dbf7234843ef3d76afa404b9287dab32d92be0d734345"
+    },
+    {
+      "path": "review.json",
+      "bytes": 1431,
+      "sha256": "4685c892e2635b9ebfea6cb710cdd92447760ebf7cbd1ba88ee448f8a1f21aca"
+    }
+  ],
+  "unchanged_helpers": [
+    {
+      "path": "chain-registry/testnet/phase-c/prepare-next-real-package.cjs",
+      "sha256": "50f4d32ab437b7ba49449388e67c9211b77b1a51309b96bb282ba5f03c514e41"
+    },
+    {
+      "path": "chain-registry/testnet/phase-c/capture-r7-package-absence-at-tip.ps1",
+      "sha256": "227452bc94a4934c7040fabb51fd6ec3c8d0988a2a85240a0bc954fbebf9f768"
+    }
+  ],
+  "package_absent_on_all_eight_at_h20": true,
+  "scanner_coverage_for_candidate_deployed": false,
+  "publisher_signing_performed": false,
+  "chain_submission_performed": false
+}

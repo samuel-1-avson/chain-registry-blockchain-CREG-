@@ -1,0 +1,9 @@
+v1: absent=True; shared_tip=True; profile=True
+v2: absent=True; shared_tip=True; profile=True
+v3: absent=True; shared_tip=True; profile=True
+v4: absent=True; shared_tip=True; profile=True
+o1: absent=True; shared_tip=True; profile=True
+o2: absent=True; shared_tip=True; profile=True
+o3: absent=True; shared_tip=True; profile=True
+o4: absent=True; shared_tip=True; profile=True
+All eight real nodes confirm npm:has-flag@4.0.0 is absent at shared h20. Evidence: docs/testnet-heal-evidence/2026-10-02-blocker-repair/fresh-package/package-absence-at-h20.json

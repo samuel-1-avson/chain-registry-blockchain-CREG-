@@ -1,0 +1,12 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 17.74s
+warning: the following packages contain code that will be rejected by a future version of Rust: proc-macro-error2 v2.0.1
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+     Running unittests src\main.rs (target\debug\deps\creg_relayer-1bfbc74a9bd7440a.exe)
+
+running 4 tests
+test tests::infer_action_kind_maps_sponsored_helpers ... ok
+test tests::env_placeholder_substitution_replaces_known_values ... ok
+test tests::sponsored_gas_policy_accepts_boundary_and_rejects_excess_or_invalid_values ... ok
+test tests::disabled_policy_rejects_direct_sponsor_without_reserving_state ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s

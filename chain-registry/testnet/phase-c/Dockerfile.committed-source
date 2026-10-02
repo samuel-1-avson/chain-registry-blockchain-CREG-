@@ -1,0 +1,114 @@
+# Build only with build-committed-candidate.ps1's git-archive context.
+# The helper supplies the source revision, manifest digest and commit timestamp.
+FROM rust:1.93.0-slim-bookworm@sha256:776861219cd851131c1cec3bbd7cbeb16b99a794048097eb69ad9682a8ed0d57 AS rust-toolchain
+
+# The existing Phase C ONNX dependency needs Ubuntu 24.04's glibc.
+FROM ubuntu:24.04@sha256:a853f94d226358a79c740cfc7bce0c289748f3fe3488d921d038ccd752c61b60 AS native-builder
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    ca-certificates curl pkg-config libssl-dev build-essential \
+    clang-17 llvm-17 llvm-17-dev libclang-17-dev libclang1-17 \
+    cmake libopenblas-dev protobuf-compiler libprotobuf-dev git \
+    && rm -rf /var/lib/apt/lists/*
+RUN ln -sf /usr/bin/clang-17 /usr/bin/clang && \
+    ln -sf /usr/bin/llvm-config-17 /usr/bin/llvm-config
+COPY --from=rust-toolchain /usr/local/cargo /usr/local/cargo
+COPY --from=rust-toolchain /usr/local/rustup /usr/local/rustup
+ENV CARGO_HOME=/usr/local/cargo \
+    RUSTUP_HOME=/usr/local/rustup \
+    PATH="/usr/local/cargo/bin:$PATH" \
+    LIBCLANG_PATH=/usr/lib/llvm-17/lib \
+    LLVM_CONFIG_PATH=/usr/bin/llvm-config-17 \
+    CLANG_PATH=/usr/bin/clang-17 \
+    CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse \
+    CARGO_BUILD_JOBS=1 \
+    CARGO_INCREMENTAL=0 \
+    CREG_SPEC_SIGNING_PUBKEY=3fe87833177b04b0a18600eace041692a35fb2b85f6e14e6734d894a0fd61c01
+RUN printf '[net]\nretry = 10\ngit-fetch-with-cli = true\n\n[http]\nmultiplexing = false\ntimeout = 600\n\n[registries.crates-io]\nprotocol = "sparse"\n' > "$CARGO_HOME/config.toml"
+RUN rustc --version && cargo --version && \
+    rustc --version | grep '^rustc 1\.93\.0 ' && \
+    test -e "${LIBCLANG_PATH}/libclang.so.1"
+WORKDIR /build
+
+FROM native-builder AS source-builder
+ARG SOURCE_REVISION
+ARG SOURCE_MANIFEST_SHA256
+ARG SOURCE_DATE_EPOCH
+ARG CARGO_TARGET_CACHE_ID
+ENV SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}
+COPY Cargo.toml Cargo.lock docker-compose.yml docker-compose.light.yml ./
+COPY crates/ crates/
+COPY testnet/ testnet/
+COPY BUILD-SOURCE-MANIFEST.json BUILD-SOURCE-FILES.sha256 ./
+# Validate all archived inputs again inside the actual Linux build context.
+RUN test -n "$SOURCE_REVISION" && test -n "$SOURCE_DATE_EPOCH" && \
+    test -n "$CARGO_TARGET_CACHE_ID" && \
+    printf '%s  BUILD-SOURCE-MANIFEST.json\n' "$SOURCE_MANIFEST_SHA256" | sha256sum -c - && \
+    sha256sum --quiet -c BUILD-SOURCE-FILES.sha256
+RUN --mount=type=cache,id=creg-phase-c-cargo-registry-rust193,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=creg-phase-c-cargo-git-rust193,target=/usr/local/cargo/git,sharing=locked \
+    cargo fetch --locked
+
+FROM source-builder AS node-builder
+# The cache identity includes the full source manifest, compiler and recipe.
+# Keep exported binaries in an image layer rather than relying on cache lifetime.
+RUN --mount=type=cache,id=creg-phase-c-cargo-registry-rust193,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=creg-phase-c-cargo-git-rust193,target=/usr/local/cargo/git,sharing=locked \
+    --mount=type=cache,id=${CARGO_TARGET_CACHE_ID},target=/build/target,sharing=locked \
+    env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS \
+    cargo build --release --locked --package chain-registry-node \
+        --bin creg-node --features phase-c-real-fleet && \
+    install -D -m 0755 /build/target/release/creg-node /build/output/creg-node
+
+FROM node-builder AS cli-builder
+RUN --mount=type=cache,id=creg-phase-c-cargo-registry-rust193,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=creg-phase-c-cargo-git-rust193,target=/usr/local/cargo/git,sharing=locked \
+    --mount=type=cache,id=${CARGO_TARGET_CACHE_ID},target=/build/target,sharing=locked \
+    env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS \
+    cargo build --release --locked --package chain-registry-cli \
+        --bin creg --features common/phase-c-canonical-transactions && \
+    /build/target/release/creg chain-spec validate \
+        /build/testnet/phase-c/r7/chain-spec.json \
+        --signature /build/testnet/phase-c/r7/chain-spec.json.sig \
+        --pubkey "$CREG_SPEC_SIGNING_PUBKEY" --require-signature && \
+    install -D -m 0755 /build/target/release/creg /build/output/creg
+
+FROM node-builder AS inspector-builder
+RUN --mount=type=cache,id=creg-phase-c-cargo-registry-rust193,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=creg-phase-c-cargo-git-rust193,target=/usr/local/cargo/git,sharing=locked \
+    --mount=type=cache,id=${CARGO_TARGET_CACHE_ID},target=/build/target,sharing=locked \
+    env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS \
+    cargo build --release --locked --package chain-registry-node \
+        --bin creg_recovery_inspect --features phase-c-real-fleet && \
+    install -D -m 0755 /build/target/release/creg_recovery_inspect /build/output/creg_recovery_inspect
+
+# Preserve the accepted secure runtime and its existing assets/settings.
+FROM us-central1-docker.pkg.dev/gen-lang-client-0022105784/creg-testnet/creg-node@sha256:ca4d04e77e9680cb878800f2ea72c1ce7dac6bb3575a55c9921a7314975fb1ef AS labeled-runtime
+ARG SOURCE_REVISION
+ARG SOURCE_MANIFEST_SHA256
+ARG SOURCE_DATE_EPOCH
+LABEL org.opencontainers.image.revision="${SOURCE_REVISION}" \
+    org.opencontainers.image.base.name="us-central1-docker.pkg.dev/gen-lang-client-0022105784/creg-testnet/creg-node" \
+    org.opencontainers.image.base.digest="sha256:ca4d04e77e9680cb878800f2ea72c1ce7dac6bb3575a55c9921a7314975fb1ef" \
+    dev.creg.source-manifest.sha256="${SOURCE_MANIFEST_SHA256}" \
+    dev.creg.source-date-epoch="${SOURCE_DATE_EPOCH}" \
+    dev.creg.rust-version="1.93.0" \
+    dev.creg.node-features="phase-c-real-fleet" \
+    dev.creg.cli-features="common/phase-c-canonical-transactions" \
+    dev.creg.spec-signing-pubkey="3fe87833177b04b0a18600eace041692a35fb2b85f6e14e6734d894a0fd61c01"
+USER root
+COPY --from=source-builder --chown=creg:creg /build/BUILD-SOURCE-MANIFEST.json /app/BUILD-SOURCE-MANIFEST.json
+USER creg
+
+FROM labeled-runtime AS recovery-inspector
+USER root
+COPY --from=inspector-builder --chown=creg:creg /build/output/creg_recovery_inspect /app/creg_recovery_inspect
+USER creg
+ENTRYPOINT ["/app/creg_recovery_inspect"]
+
+# Keep node-cli last so it is also the default build target.
+FROM labeled-runtime AS node-cli
+USER root
+COPY --from=cli-builder --chown=creg:creg /build/output/creg-node /app/creg-node
+COPY --from=cli-builder --chown=creg:creg /build/output/creg /app/creg
+USER creg
+ENTRYPOINT ["/app/creg-node"]

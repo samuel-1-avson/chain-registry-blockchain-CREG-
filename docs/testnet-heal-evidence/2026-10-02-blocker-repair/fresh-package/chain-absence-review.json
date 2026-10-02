@@ -1,0 +1,100 @@
+{
+  "schema": "creg-real-package-absence-independent-review-v1",
+  "reviewed_at_utc": "2026-10-02T08:15:16.947939+00:00",
+  "canonical": "npm:has-flag@4.0.0",
+  "source_evidence": "package-absence-at-h20.json",
+  "source_evidence_sha256": "1c470bc43ff6f4ff0fc74a4d17f5004215352b58e608b28d52093521684a2a9a",
+  "passed": true,
+  "node_count": 8,
+  "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+  "expected_height": 20,
+  "expected_hash": "730b01c1a67a4796a16f599169e4ebf77e01d2e8ce92d1e4fb3715a7c4354285",
+  "actual_genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+  "scanner_profile_digest": "7e1d95f9c8423778211944a1dea46674d8cbd3f0aee3b0eea6b5250f11d009cd",
+  "nodes": [
+    {
+      "slot": "v1",
+      "captured_at_utc": "2026-10-02T08:12:11.8313545Z",
+      "package_http_status": 404,
+      "tip_height": 20,
+      "finalized_height": 20,
+      "tip_hash": "730b01c1a67a4796a16f599169e4ebf77e01d2e8ce92d1e4fb3715a7c4354285",
+      "actual_genesis_matches": true,
+      "scanner_profile_matches": true
+    },
+    {
+      "slot": "v2",
+      "captured_at_utc": "2026-10-02T08:12:25.693759+00:00",
+      "package_http_status": 404,
+      "tip_height": 20,
+      "finalized_height": 20,
+      "tip_hash": "730b01c1a67a4796a16f599169e4ebf77e01d2e8ce92d1e4fb3715a7c4354285",
+      "actual_genesis_matches": true,
+      "scanner_profile_matches": true
+    },
+    {
+      "slot": "v3",
+      "captured_at_utc": "2026-10-02T08:12:36.403291+00:00",
+      "package_http_status": 404,
+      "tip_height": 20,
+      "finalized_height": 20,
+      "tip_hash": "730b01c1a67a4796a16f599169e4ebf77e01d2e8ce92d1e4fb3715a7c4354285",
+      "actual_genesis_matches": true,
+      "scanner_profile_matches": true
+    },
+    {
+      "slot": "v4",
+      "captured_at_utc": "2026-10-02T08:12:51.830822+00:00",
+      "package_http_status": 404,
+      "tip_height": 20,
+      "finalized_height": 20,
+      "tip_hash": "730b01c1a67a4796a16f599169e4ebf77e01d2e8ce92d1e4fb3715a7c4354285",
+      "actual_genesis_matches": true,
+      "scanner_profile_matches": true
+    },
+    {
+      "slot": "o1",
+      "captured_at_utc": "2026-10-02T08:13:01.639354+00:00",
+      "package_http_status": 404,
+      "tip_height": 20,
+      "finalized_height": 20,
+      "tip_hash": "730b01c1a67a4796a16f599169e4ebf77e01d2e8ce92d1e4fb3715a7c4354285",
+      "actual_genesis_matches": true,
+      "scanner_profile_matches": true
+    },
+    {
+      "slot": "o2",
+      "captured_at_utc": "2026-10-02T08:13:12.045749+00:00",
+      "package_http_status": 404,
+      "tip_height": 20,
+      "finalized_height": 20,
+      "tip_hash": "730b01c1a67a4796a16f599169e4ebf77e01d2e8ce92d1e4fb3715a7c4354285",
+      "actual_genesis_matches": true,
+      "scanner_profile_matches": true
+    },
+    {
+      "slot": "o3",
+      "captured_at_utc": "2026-10-02T08:13:24.740419+00:00",
+      "package_http_status": 404,
+      "tip_height": 20,
+      "finalized_height": 20,
+      "tip_hash": "730b01c1a67a4796a16f599169e4ebf77e01d2e8ce92d1e4fb3715a7c4354285",
+      "actual_genesis_matches": true,
+      "scanner_profile_matches": true
+    },
+    {
+      "slot": "o4",
+      "captured_at_utc": "2026-10-02T08:13:37.365757+00:00",
+      "package_http_status": 404,
+      "tip_height": 20,
+      "finalized_height": 20,
+      "tip_hash": "730b01c1a67a4796a16f599169e4ebf77e01d2e8ce92d1e4fb3715a7c4354285",
+      "actual_genesis_matches": true,
+      "scanner_profile_matches": true
+    }
+  ],
+  "limits": [
+    "Absence/readiness is a time-stamped observation and must be refreshed immediately before publication.",
+    "This absence check does not waive the separate RPC provider, validator-set sync, image rollout or scanner coverage gates."
+  ]
+}
