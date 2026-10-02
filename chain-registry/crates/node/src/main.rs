@@ -485,9 +485,16 @@ async fn main() -> Result<()> {
             }
             let sig_url = std::env::var("CREG_SPEC_SIGNATURE_URL")
                 .unwrap_or_else(|_| spec.signing.detached_signature_url.clone());
-            let sig = chain_spec_boot::fetch_spec_signature(&sig_url)
-                .await
-                .map_err(|e| anyhow::anyhow!("Failed to fetch spec signature: {}", e))?;
+            let signature_path =
+                std::env::var_os("CREG_CHAIN_SPEC_SIG_PATH").map(std::path::PathBuf::from);
+            let sig = chain_spec_boot::resolve_spec_signature(
+                &sig_url,
+                &config.data_dir,
+                spec_offline,
+                signature_path.as_deref(),
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to resolve spec signature: {}", e))?;
             spec.verify_signature(&sig, pinned_pubkey)
                 .map_err(|e| anyhow::anyhow!("Spec signature invalid: {}", e))?;
             chain_spec_signature_verified = true;
