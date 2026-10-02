@@ -141,30 +141,22 @@ pub async fn run(state: Arc<RwLock<NodeState>>) {
             s.config.eth_rpc_url.clone()
         };
 
-        let parsed_url = match rpc_url.parse() {
-            Ok(url) => url,
-            Err(e) => {
-                tracing::error!(
-                    "Invalid CREG_ETH_RPC URL {:?}: {} — retrying in 5s",
-                    rpc_url,
-                    e
-                );
+        let provider = match crate::rpc_failover::build_l1_provider(&rpc_url) {
+            Ok(provider) => provider,
+            Err(error) => {
+                tracing::error!("Invalid Ethereum RPC configuration: {error} — retrying in 5s");
                 sleep(Duration::from_secs(5)).await;
                 continue;
             }
         };
 
-        match ProviderBuilder::new()
-            .on_http(parsed_url)
-            .get_chain_id()
-            .await
-        {
+        match provider.get_chain_id().await {
             Ok(id) => {
                 tracing::info!("Connected to Ethereum RPC (Chain ID: {})", id);
                 rpc_ready = true;
             }
             Err(_) => {
-                tracing::warn!("Waiting for Ethereum RPC at {}...", rpc_url);
+                tracing::warn!("Waiting for a configured Ethereum RPC endpoint...");
                 sleep(Duration::from_secs(5)).await;
             }
         }
@@ -225,10 +217,11 @@ async fn tick(state: Arc<RwLock<NodeState>>, last_height: &mut u64) -> anyhow::R
     // ── Setup Ethereum Provider ───────────────────────────────────────────────
     let signer: PrivateKeySigner = priv_key.parse()?;
     let wallet = EthereumWallet::from(signer);
+    let base_provider = crate::rpc_failover::build_l1_provider(&rpc_url)?;
     let provider = ProviderBuilder::new()
         .with_recommended_fillers()
         .wallet(wallet)
-        .on_http(rpc_url.parse()?);
+        .on_provider(base_provider);
 
     let contract_addr = registry_addr.parse()?;
     let contract = IRegistry::new(contract_addr, &provider);

@@ -359,7 +359,7 @@ async fn tick(state: &SharedState, store: &AttestationStore) -> anyhow::Result<(
 
     // Build a fresh (read-only) provider per tick — cheap and sidesteps the
     // generic-lifetime gymnastics of sharing a typed provider across helpers.
-    let provider = ProviderBuilder::new().on_http(ctx.rpc_url.parse()?);
+    let provider = crate::rpc_failover::build_l1_provider(&ctx.rpc_url)?;
     let contract = IStakingAdmission::new(ctx.staking_addr, &provider);
     let chain_id = provider.get_chain_id().await?;
     let rule_set_version = contract.RULE_SET_VERSION().call().await?._0;
@@ -412,7 +412,7 @@ async fn process_applicant(
     applicant_key: &str,
 ) -> anyhow::Result<()> {
     let applicant: Address = applicant_key.parse()?;
-    let provider = ProviderBuilder::new().on_http(ctx.rpc_url.parse()?);
+    let provider = crate::rpc_failover::build_l1_provider(&ctx.rpc_url)?;
     let contract = IStakingAdmission::new(ctx.staking_addr, &provider);
 
     let v = contract.validators(applicant).call().await?;
@@ -588,10 +588,11 @@ async fn submit_consensus_approval(
     }
     let signer: PrivateKeySigner = priv_key.parse()?;
     let wallet = EthereumWallet::from(signer);
+    let base_provider = crate::rpc_failover::build_l1_provider(&rpc_url)?;
     let provider = ProviderBuilder::new()
         .with_recommended_fillers()
         .wallet(wallet)
-        .on_http(rpc_url.parse()?);
+        .on_provider(base_provider);
     let contract = IStakingAdmission::new(staking_addr, &provider);
 
     let signers: Vec<Address> = filtered.iter().map(|(a, _)| *a).collect();
@@ -647,7 +648,7 @@ pub async fn accept_peer_attestation(
     staking_addr: Address,
     att: AdmissionAttestation,
 ) -> anyhow::Result<bool> {
-    let provider = ProviderBuilder::new().on_http(rpc_url.parse()?);
+    let provider = crate::rpc_failover::build_l1_provider(rpc_url)?;
     let contract = IStakingAdmission::new(staking_addr, &provider);
     let chain_id = provider.get_chain_id().await?;
     let current_epoch = contract.validatorSetEpoch().call().await?._0;

@@ -65,7 +65,7 @@ wasmtime      = { version = "18", features = ["async", "cranelift"] }
 wasmtime-wasi = "18"
 
 # Ethereum/EVM dependencies
-alloy         = { version = "0.6", features = ["full"] }
+alloy         = { version = "0.6", features = ["full", "json-rpc"] }
 alloy-sol-types = "0.6"
 
 # Web/HTTP dependencies

@@ -7,7 +7,9 @@ param(
     [string]$ScannerBundlePath = 'C:\Users\samue\CREG-backups\phase-c-scanner\bundle-r9',
     [string]$ScannerProfileDigest = '648dfd39a02da6dd8c42f2342146208efeae1f435e18d2fcd71317828062fb0f',
     [string]$OsvSnapshotEpoch = 'osv-2026-09-26-phase-c-r8',
-    [string]$ValidatorSecretProject = 'gen-lang-client-0022105784'
+    [string]$ValidatorSecretProject = 'gen-lang-client-0022105784',
+    [string]$RpcSecretProject = 'fiffi-500411',
+    [string]$RpcProfileSecret = 'creg-sepolia-rpc-profile'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -24,10 +26,103 @@ if ($spec.signing.detached_signature_url -ne "$SpecBaseUrl/chain-spec.json.sig" 
 if ($spec.validator_set.validators.Count -ne 4 -or $spec.bootnodes.Count -ne 2) {
     throw 'The r7 spec must contain four validators and two bootnodes.'
 }
+$stakingAddress = [string]$spec.contracts.staking
+if ($stakingAddress -notmatch '^0x[0-9a-fA-F]{40}$') {
+    throw 'The r7 signed spec must contain a valid Sepolia staking contract address.'
+}
 if ($ScannerProfileDigest -notmatch '^[0-9a-f]{64}$' -or
     $OsvSnapshotEpoch -notmatch '^[A-Za-z0-9._-]{1,128}$') {
     throw 'Invalid pinned scanner profile or OSV epoch.'
 }
+
+function Read-SecretValue([string]$Project, [string]$Secret) {
+    $value = (& gcloud secrets versions access latest "--secret=$Secret" "--project=$Project" 2>$null | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($value)) {
+        throw "Could not securely read required secret $Secret from project $Project."
+    }
+    return $value
+}
+
+function Invoke-Rpc([string]$Url, [string]$Method, [object[]]$Params) {
+    $body = @{ jsonrpc = '2.0'; id = 1; method = $Method; params = $Params } | ConvertTo-Json -Depth 8 -Compress
+    try {
+        $response = Invoke-RestMethod -Uri $Url -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 20
+    } catch {
+        throw "Configured Sepolia RPC provider failed $Method."
+    }
+    if ($response.error -or ($null -eq $response.result -and $Method -ne 'eth_getLogs')) {
+        throw "Configured Sepolia RPC provider rejected $Method."
+    }
+    return [pscustomobject]@{ Result = $response.result }
+}
+
+$rpcProfileRaw = Read-SecretValue -Project $RpcSecretProject -Secret $RpcProfileSecret
+try { $rpcProfile = $rpcProfileRaw | ConvertFrom-Json } catch { throw 'The saved R7 RPC profile secret is not valid JSON.' }
+$rpcPrimary = [string]$rpcProfile.primary
+$rpcFallbacks = @($rpcProfile.fallbacks | ForEach-Object { [string]$_ })
+$gethUrl = [string]$rpcProfile.geth_url
+if ($rpcFallbacks.Count -ne 2 -or [string]::IsNullOrWhiteSpace($gethUrl)) {
+    throw 'The R7 RPC profile requires a primary, two fallbacks, and its self-hosted Geth endpoint.'
+}
+$rpcUrls = @($rpcPrimary) + $rpcFallbacks
+$rpcUriList = @()
+foreach ($rpcUrl in $rpcUrls) {
+    $parsed = $null
+    if (-not [Uri]::TryCreate($rpcUrl, [UriKind]::Absolute, [ref]$parsed) -or $parsed.Scheme -notin @('https', 'http')) {
+        throw 'Every R7 Sepolia RPC endpoint must be a valid HTTP(S) URL.'
+    }
+    $rpcUriList += $parsed
+}
+$rpcHosts = @($rpcUriList | ForEach-Object { $_.Host.ToLowerInvariant() })
+$gethUri = $null
+$isGethUriValid = [Uri]::TryCreate($gethUrl, [UriKind]::Absolute, [ref]$gethUri)
+$gethAddress = $null
+$isGethIp = $isGethUriValid -and [System.Net.IPAddress]::TryParse($gethUri.Host, [ref]$gethAddress)
+$httpUrls = @($rpcUriList | Where-Object { $_.Scheme -eq 'http' } | ForEach-Object { $_.AbsoluteUri.TrimEnd('/') })
+if (@($rpcHosts | Select-Object -Unique).Count -ne 3 -or
+    $rpcPrimary -ne 'https://ethereum-sepolia-rpc.publicnode.com' -or
+    ($rpcFallbacks -notcontains 'https://sepolia.gateway.tenderly.co') -or
+    ($rpcFallbacks -notcontains $gethUrl) -or
+    -not $isGethIp -or $gethUri.Scheme -ne 'http' -or $gethUri.Port -ne 8545 -or
+    $httpUrls.Count -ne 1 -or $httpUrls[0] -ne $gethUrl.TrimEnd('/')) {
+    throw 'The R7 RPC profile must contain PublicNode, Tenderly and its HTTP-IP-filtered GCP Geth endpoint.'
+}
+
+# Verify live provider agreement before writing private node environments.
+# URLs, including any Google API key, are never written to the console.
+$heads = @()
+foreach ($rpcUrl in $rpcUrls) {
+    $chainHex = [string](Invoke-Rpc -Url $rpcUrl -Method 'eth_chainId' -Params @()).Result
+    if ($chainHex -ne '0xaa36a7') { throw 'An RPC provider returned a non-Sepolia chain ID.' }
+    $headHex = [string](Invoke-Rpc -Url $rpcUrl -Method 'eth_blockNumber' -Params @()).Result
+    $heads += [Convert]::ToInt64($headHex.Substring(2), 16)
+}
+if (($heads | Measure-Object -Maximum).Maximum - ($heads | Measure-Object -Minimum).Minimum -gt 64) {
+    throw 'The self-hosted Sepolia RPC is more than 64 blocks behind the public providers.'
+}
+$commonBlock = [long](($heads | Measure-Object -Minimum).Minimum) - 2
+if ($commonBlock -lt 50) { throw 'Sepolia RPC providers returned an invalid common block height.' }
+$commonHex = '0x' + [Convert]::ToString($commonBlock, 16)
+$fromHex = '0x' + [Convert]::ToString(($commonBlock - 49), 16)
+$blockHashes = @()
+$stakingLogs = @()
+foreach ($rpcUrl in $rpcUrls) {
+    $block = (Invoke-Rpc -Url $rpcUrl -Method 'eth_getBlockByNumber' -Params @($commonHex, $false)).Result
+    $blockHashes += ([string]$block.hash).ToLowerInvariant()
+    $logs = @((Invoke-Rpc -Url $rpcUrl -Method 'eth_getLogs' -Params @(@{
+        fromBlock = $fromHex
+        toBlock = $commonHex
+        address = $stakingAddress
+    })).Result)
+    $stakingLogs += ,(@($logs | ForEach-Object {
+        '{0}:{1}:{2}:{3}:{4}' -f $_.blockNumber, $_.logIndex, $_.transactionHash, $_.data, ($_.topics -join ',')
+    } | Sort-Object) -join '|')
+}
+if (@($blockHashes | Select-Object -Unique).Count -ne 1 -or
+    @($stakingLogs | Select-Object -Unique).Count -ne 1) {
+    throw 'Sepolia RPC providers did not agree on the common block and staking logs.'
+}
+"R7 RPC readiness: three distinct providers agree on Sepolia block $commonBlock and a 50-block staking-log range."
 
 $bundle = (Resolve-Path -LiteralPath $ScannerBundlePath).Path
 $profileOutput = @(& (Join-Path $PSScriptRoot 'compute-scanner-profile.ps1') `
@@ -145,7 +240,8 @@ foreach ($slot in $slots) {
     $lines.Add('CREG_DATA_DIR=/data')
     $lines.Add("CREG_IS_VALIDATOR=$($slot.Validator.ToString().ToLowerInvariant())")
     $lines.Add("CREG_NODE_ROLE=$role")
-    $lines.Add('CREG_ETH_RPC=https://ethereum-sepolia-rpc.publicnode.com')
+    $lines.Add("CREG_ETH_RPC=$rpcPrimary")
+    $lines.Add("CREG_ETH_RPC_FALLBACKS=$($rpcFallbacks -join ',')")
     $lines.Add('CREG_EXPECTED_L1_CHAIN_ID=11155111')
     $lines.Add("CREG_CHAIN_ID=$($spec.chain_id)")
     $lines.Add("CREG_GENESIS_HASH=$($spec.genesis_hash)")

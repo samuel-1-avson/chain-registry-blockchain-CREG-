@@ -37,6 +37,7 @@ mod proof;
 mod publisher_index;
 mod rate_limit;
 mod revocation_gossip;
+mod rpc_failover;
 mod state;
 mod sync;
 mod validator_pipeline;
@@ -47,10 +48,7 @@ mod validator_set_history;
 mod chain_spec_boot;
 mod validator_set_sync;
 
-use alloy::{
-    providers::{Provider, ProviderBuilder},
-    sol,
-};
+use alloy::{providers::Provider, sol};
 use anyhow::{Context, Result};
 use chrono::Utc;
 use common::ValidatorIdentity;
@@ -220,6 +218,7 @@ async fn fetch_l1_chain_id_with_retry(client: &reqwest::Client, rpc_url: &str) -
 }
 
 async fn validate_l1_chain_id(rpc_url: &str, expected_from_spec: Option<u64>) -> Result<()> {
+    let endpoints = crate::rpc_failover::configured_rpc_urls(rpc_url)?;
     let expected = if let Some(spec_id) = expected_from_spec {
         spec_id
     } else {
@@ -234,23 +233,46 @@ async fn validate_l1_chain_id(rpc_url: &str, expected_from_spec: Option<u64>) ->
         }
     };
 
-    // A stalled L1 RPC must not leave a process waiting without an API or
-    // restart forever on a transient timeout. Retry a bounded probe and fail
-    // closed after the full retry budget.
+    // Verify the endpoint set against the signed L1 chain ID. An unavailable
+    // endpoint is tolerated only while a strict majority remains reachable; a
+    // responding endpoint on a different chain always fails closed.
     let client = build_rpc_validation_client()?;
-    let observed = fetch_l1_chain_id_with_retry(&client, rpc_url).await?;
-
-    if observed != expected {
+    let probes = futures::future::join_all(
+        endpoints
+            .iter()
+            .map(|url| fetch_l1_chain_id_with_retry(&client, url)),
+    )
+    .await;
+    let quorum = endpoints.len() / 2 + 1;
+    let mut matching = 0usize;
+    let mut offline = 0usize;
+    for (index, result) in probes.into_iter().enumerate() {
+        match result {
+            Ok(observed) if observed == expected => matching += 1,
+            Ok(observed) => {
+                let host = reqwest::Url::parse(&endpoints[index])
+                    .ok()
+                    .and_then(|parsed| parsed.host_str().map(ToOwned::to_owned))
+                    .unwrap_or_else(|| format!("endpoint-{}", index + 1));
+                anyhow::bail!(
+                    "L1 RPC endpoint {host} reports chain id {observed}, but the signed configuration requires {expected}"
+                );
+            }
+            Err(_) => offline += 1,
+        }
+    }
+    if matching < quorum {
         anyhow::bail!(
-            "L1 chain id mismatch â€” CREG_ETH_RPC ({}) reports chain id {} but \
-             CREG_EXPECTED_L1_CHAIN_ID is {}. Refusing to start; this would \
-             settle bridge transactions on the wrong network.",
-            rpc_url,
-            observed,
-            expected
+            "only {matching} of {} configured L1 RPC endpoints report the signed chain id {expected}; strict majority requires {quorum} ({offline} offline)",
+            endpoints.len()
         );
     }
-    tracing::info!("  L1 chain id: {} (verified)", observed);
+    tracing::info!(
+        "  L1 chain id: {} verified by {}/{} configured RPC endpoints",
+        expected,
+        matching,
+        endpoints.len()
+    );
     Ok(())
 }
 
@@ -259,28 +281,47 @@ async fn fetch_contract_code(
     rpc_url: &str,
     address: &str,
 ) -> Result<String> {
-    let response: serde_json::Value = client
-        .post(rpc_url)
-        .json(&serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "eth_getCode",
-            "params": [address, "latest"],
-            "id": 1,
-        }))
-        .send()
-        .await?
-        .json()
-        .await?;
+    let endpoints = crate::rpc_failover::configured_rpc_urls(rpc_url)?;
+    let mut last_error = None;
+    for (index, endpoint) in endpoints.iter().enumerate() {
+        let response = client
+            .post(endpoint)
+            .json(&serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "eth_getCode",
+                "params": [address, "latest"],
+                "id": 1,
+            }))
+            .send()
+            .await;
+        let response: serde_json::Value = match response {
+            Ok(response) => match response.json().await {
+                Ok(response) => response,
+                Err(_) => {
+                    last_error = Some(format!("endpoint {} returned invalid JSON", index + 1));
+                    continue;
+                }
+            },
+            Err(_) => {
+                last_error = Some(format!("endpoint {} could not be reached", index + 1));
+                continue;
+            }
+        };
 
-    if let Some(error) = response.get("error") {
-        anyhow::bail!("eth_getCode failed for {}: {}", address, error);
+        if response.get("error").is_some() {
+            last_error = Some(format!("endpoint {} returned an RPC error", index + 1));
+            continue;
+        }
+        if let Some(code) = response.get("result").and_then(|value| value.as_str()) {
+            return Ok(code.to_string());
+        }
+        last_error = Some(format!("endpoint {} omitted the code result", index + 1));
     }
 
-    response
-        .get("result")
-        .and_then(|value| value.as_str())
-        .map(|value| value.to_string())
-        .ok_or_else(|| anyhow::anyhow!("missing eth_getCode result for {}", address))
+    anyhow::bail!(
+        "eth_getCode failed for {address} on configured L1 RPC endpoints: {}",
+        last_error.unwrap_or_else(|| "no endpoint is configured".into())
+    )
 }
 
 async fn validate_contract_addresses(config: &config::NodeConfig) -> Result<()> {
@@ -1031,12 +1072,11 @@ async fn main() -> Result<()> {
         }
         // Additional independent L1 RPC endpoints for quorum reads, so one
         // stale/compromised RPC cannot skew the validator set. Comma-separated.
-        let extra_rpc_urls: Vec<String> = std::env::var("CREG_ETH_RPC_FALLBACKS")
-            .unwrap_or_default()
-            .split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
+        let extra_rpc_urls: Vec<String> =
+            crate::rpc_failover::configured_rpc_urls(&config.eth_rpc_url)?
+                .into_iter()
+                .skip(1)
+                .collect();
         let staking_addr = match config::parse_staking_contract_address(&config.staking_addr) {
             Ok(addr) => addr,
             Err(error) => anyhow::bail!("{error}"),
@@ -1243,7 +1283,7 @@ async fn sync_validator_registrations_once(state: &SharedState) -> Result<()> {
         return Ok(());
     }
 
-    let provider = ProviderBuilder::new().on_http(rpc_url.parse()?);
+    let provider = crate::rpc_failover::build_l1_provider(&rpc_url)?;
     let staking = IStakingRead::new(staking_addr.parse()?, &provider);
     let mut updates = Vec::with_capacity(registrations.len());
 

@@ -4,8 +4,8 @@ param(
     [string]$Revision = 'a19fce7dcbd917fa1650212485807ab1b7bae1c1',
     [ValidatePattern('^[a-z0-9][a-z0-9._/-]*:[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127}$')]
     [string]$ImageTag = 'creg-node:phase-c-a19fce7-rust193',
-    [ValidateSet('node-cli', 'recovery-inspector')]
-    [string]$Target = 'node-cli',
+    [ValidateSet('node-runtime', 'node-cli', 'recovery-inspector')]
+    [string]$Target = 'node-runtime',
     [string]$StagingDirectory = '',
     [string]$EvidenceDirectory = '',
     [switch]$Build
@@ -82,7 +82,11 @@ $phaseCFiles = @(
 $phaseCRecipeName = 'Dockerfile.committed-source'
 $phaseCRecipe = Join-Path $PSScriptRoot $phaseCRecipeName
 Copy-Item -LiteralPath $phaseCRecipe -Destination (Join-Path $phaseCContext $phaseCRecipeName)
-$phaseCCloudBuildName = 'cloudbuild-committed-candidate.yaml'
+$phaseCCloudBuildName = if ($Target -eq 'node-runtime') {
+    'cloudbuild-node-candidate.yaml'
+} else {
+    'cloudbuild-committed-candidate.yaml'
+}
 $phaseCCloudBuild = Join-Path $PSScriptRoot $phaseCCloudBuildName
 Copy-Item -LiteralPath $phaseCCloudBuild -Destination (Join-Path $phaseCContext $phaseCCloudBuildName)
 $phaseCManifest = [ordered]@{

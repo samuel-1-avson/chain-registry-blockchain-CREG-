@@ -15,7 +15,7 @@ use alloy::rpc::types::Filter;
 use alloy::signers::local::PrivateKeySigner;
 use alloy::sol;
 use alloy::sol_types::SolEvent;
-use alloy::transports::http::{Client, Http};
+use alloy::transports::Transport;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
@@ -465,16 +465,18 @@ async fn send_governance_tx(
 ) -> Result<GovernanceWriteBody, Response> {
     let signer_addr = ctx.signer.address();
     let wallet = EthereumWallet::from(ctx.signer);
-    let provider = ProviderBuilder::new()
-        .with_recommended_fillers()
-        .wallet(wallet)
-        .on_http(ctx.rpc_url.trim().parse().map_err(|err| {
+    let base_provider =
+        crate::rpc_failover::build_l1_provider(ctx.rpc_url.trim()).map_err(|err| {
             write_error(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "governance_l1_unavailable",
-                format!("invalid CREG_ETH_RPC: {err}"),
+                format!("invalid CREG_ETH_RPC configuration: {err}"),
             )
-        })?);
+        })?;
+    let provider = ProviderBuilder::new()
+        .with_recommended_fillers()
+        .wallet(wallet)
+        .on_provider(base_provider);
     let contract = IGovernance::new(ctx.governance_addr, &provider);
 
     let is_signer = contract
@@ -567,12 +569,13 @@ async fn send_governance_tx(
     }
 }
 
-async fn require_pending_proposal<P>(
-    contract: &IGovernance::IGovernanceInstance<Http<Client>, P>,
+async fn require_pending_proposal<T, P>(
+    contract: &IGovernance::IGovernanceInstance<T, P>,
     id: u64,
 ) -> Result<(), Response>
 where
-    P: Provider<Http<Client>>,
+    T: Transport + Clone,
+    P: Provider<T>,
 {
     let count = contract
         .proposalCount()
@@ -638,7 +641,7 @@ async fn fetch_l1_proposals(
         .trim()
         .parse()
         .map_err(|e| anyhow::anyhow!("invalid CREG_GOVERNANCE_ADDR: {e}"))?;
-    let provider = ProviderBuilder::new().on_http(rpc_url.trim().parse()?);
+    let provider = crate::rpc_failover::build_l1_provider(rpc_url.trim())?;
     let contract = IGovernance::new(gov_addr, &provider);
 
     let count = contract.proposalCount().call().await?._0.to::<u64>();
@@ -694,8 +697,8 @@ async fn fetch_l1_proposals(
     })
 }
 
-async fn proposal_proposers(
-    provider: &impl Provider<Http<Client>>,
+async fn proposal_proposers<T: Transport + Clone>(
+    provider: &impl Provider<T>,
     gov_addr: Address,
 ) -> HashMap<u64, String> {
     let mut proposers = HashMap::new();

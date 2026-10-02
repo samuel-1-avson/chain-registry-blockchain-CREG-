@@ -31,6 +31,7 @@ pub mod pending_pool;
 pub mod publisher_index;
 pub mod rate_limit;
 pub mod revocation_gossip;
+pub mod rpc_failover;
 pub mod state;
 pub mod validator_pipeline;
 pub mod validator_registry_gossip;

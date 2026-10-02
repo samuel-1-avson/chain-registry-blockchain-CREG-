@@ -1,6 +1,5 @@
 use alloy::{
     primitives::{keccak256, Address},
-    providers::ProviderBuilder,
     sol,
 };
 use anyhow::Context;
@@ -1167,11 +1166,11 @@ pub(crate) async fn ensure_publisher_staked(
         )
     })?;
 
-    let provider = ProviderBuilder::new().on_http(rpc_url.parse().map_err(|_| {
+    let provider = crate::rpc_failover::build_l1_provider(&rpc_url).map_err(|_| {
         PublisherAdmissionError::Unavailable(
             "Publisher stake enforcement unavailable: CREG_ETH_RPC is invalid".into(),
         )
-    })?);
+    })?;
     let staking = IPublisherStakingRead::new(staking_addr, &provider);
     let staked = staking
         .stakedBalance(publisher)

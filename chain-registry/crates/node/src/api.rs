@@ -887,7 +887,6 @@ async fn query_treasury_balance(
     treasury_addr: &str,
 ) -> anyhow::Result<u128> {
     use alloy::primitives::Address;
-    use alloy::providers::ProviderBuilder;
     use alloy::sol;
 
     sol! {
@@ -897,7 +896,7 @@ async fn query_treasury_balance(
         }
     }
 
-    let provider = ProviderBuilder::new().on_http(rpc_url.parse()?);
+    let provider = crate::rpc_failover::build_l1_provider(rpc_url)?;
     let token: Address = token_addr.parse()?;
     let treasury: Address = treasury_addr.parse()?;
 
@@ -911,7 +910,6 @@ async fn query_total_rewards_distributed(
     rewards_addr: &str,
 ) -> anyhow::Result<u128> {
     use alloy::primitives::Address;
-    use alloy::providers::ProviderBuilder;
     use alloy::sol;
 
     sol! {
@@ -921,7 +919,7 @@ async fn query_total_rewards_distributed(
         }
     }
 
-    let provider = ProviderBuilder::new().on_http(rpc_url.parse()?);
+    let provider = crate::rpc_failover::build_l1_provider(rpc_url)?;
     let contract = IValidatorRewards::new(rewards_addr.parse()?, &provider);
     let val = contract.totalRewardsDistributed().call().await?._0;
     Ok(val.to::<u128>())
@@ -929,7 +927,6 @@ async fn query_total_rewards_distributed(
 
 async fn query_rewards_pool(rpc_url: &str, pinning_addr: &str) -> anyhow::Result<u128> {
     use alloy::primitives::Address;
-    use alloy::providers::ProviderBuilder;
     use alloy::sol;
 
     sol! {
@@ -939,7 +936,7 @@ async fn query_rewards_pool(rpc_url: &str, pinning_addr: &str) -> anyhow::Result
         }
     }
 
-    let provider = ProviderBuilder::new().on_http(rpc_url.parse()?);
+    let provider = crate::rpc_failover::build_l1_provider(rpc_url)?;
     let contract = IPinningRewards::new(pinning_addr.parse()?, &provider);
     let val = contract.rewardsPool().call().await?._0;
     Ok(val.to::<u128>())

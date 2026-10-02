@@ -105,6 +105,14 @@ COPY --from=inspector-builder --chown=creg:creg /build/output/creg_recovery_insp
 USER creg
 ENTRYPOINT ["/app/creg_recovery_inspect"]
 
+# Node-only rollout target. It avoids rebuilding the unchanged CLI when a
+# validator/runtime repair only changes creg-node.
+FROM labeled-runtime AS node-runtime
+USER root
+COPY --from=node-builder --chown=creg:creg /build/output/creg-node /app/creg-node
+USER creg
+ENTRYPOINT ["/app/creg-node"]
+
 # Keep node-cli last so it is also the default build target.
 FROM labeled-runtime AS node-cli
 USER root

@@ -1,16 +1,18 @@
-# Sepolia execution client — JSON-RPC for CREG_ETH_RPC (internal VPC only).
-# Deployed on creg-sepolia-geth-vm via testnet/gcp/deploy-sepolia-geth.ps1
+# Real Sepolia execution + consensus clients for the R7 RPC provider.
+# JSON-RPC is source-IP restricted by GCP. Engine API and Beacon API stay local.
+# Set RPC_EXTERNAL_IP to the reserved public IP of the GCP VM.
 
 services:
   geth:
-    image: ethereum/client-go:stable
-    container_name: creg-sepolia-geth
+    image: ethereum/client-go@sha256:6606aa1c7b6354d57581952604e7ab5a49689aeee9aebf668c81b6d3225395f1
+    container_name: creg-sepolia-rpc
     restart: unless-stopped
-    # Published on VM NIC; VPC access restricted by firewall (creg-testnet tag only).
     ports:
       - "8545:8545"
+      - "30303:30303/tcp"
+      - "30303:30303/udp"
     volumes:
-      - geth-data:/root/.ethereum
+      - /mnt/disks/sepolia-rpc:/root/.ethereum
     command:
       - --sepolia
       - --syncmode=snap
@@ -19,11 +21,53 @@ services:
       - --http.port=8545
       - --http.api=eth,net,web3
       - --http.vhosts=*
-      - --authrpc.addr=127.0.0.1
+      - --authrpc.addr=0.0.0.0
       - --authrpc.port=8551
+      - --authrpc.jwtsecret=/root/.ethereum/sepolia/geth/jwtsecret
+      - --authrpc.vhosts=*
+      - --port=30303
+      - --nat=extip:${RPC_EXTERNAL_IP}
       - --metrics
       - --metrics.addr=127.0.0.1
       - --metrics.port=6060
+    networks:
+      - creg-rpc
 
-volumes:
-  geth-data:
+  lighthouse:
+    image: sigp/lighthouse@sha256:3e5f0609c74b824d3cb1049920169114d99fd7bc9082b996b3adae3d4e9ef8dc
+    container_name: creg-sepolia-beacon
+    restart: unless-stopped
+    depends_on:
+      - geth
+    entrypoint: ["lighthouse"]
+    ports:
+      - "127.0.0.1:5052:5052"
+      - "9000:9000/tcp"
+      - "9000:9000/udp"
+    volumes:
+      - /mnt/disks/sepolia-rpc/lighthouse:/root/.lighthouse
+      - /mnt/disks/sepolia-rpc/sepolia/geth/jwtsecret:/jwtsecret:ro
+    command:
+      - beacon_node
+      - --network=sepolia
+      - --datadir=/root/.lighthouse
+      - --execution-endpoint=http://creg-sepolia-rpc:8551
+      - --execution-jwt=/jwtsecret
+      - --checkpoint-sync-url=https://checkpoint-sync.sepolia.ethpandaops.io
+      - --checkpoint-sync-url-timeout=300
+      - --http
+      - --http-address=0.0.0.0
+      - --http-port=5052
+      - --listen-address=0.0.0.0
+      - --port=9000
+      - --discovery-port=9000
+      - --enr-address=${RPC_EXTERNAL_IP}
+      - --enr-tcp-port=9000
+      - --enr-udp-port=9000
+    networks:
+      - creg-rpc
+
+networks:
+  creg-rpc:
+    name: creg-rpc
+    driver: bridge
