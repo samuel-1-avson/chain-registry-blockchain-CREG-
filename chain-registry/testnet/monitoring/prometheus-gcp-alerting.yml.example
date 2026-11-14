@@ -1,0 +1,68 @@
+# Opt-in alerting profile for the R7 fleet.
+#
+# prometheus-gcp.yml.example deliberately evaluates no rules and has no
+# Alertmanager, so restoring metrics cannot send notifications. That is why the
+# October-November 2026 L1 sync failure (validator-set cursor ~300k blocks
+# behind, faucet claims disabled) raised no alert for six weeks.
+#
+# To enable alerting:
+#   1. Generate alertmanager-gcp.yml from alertmanager-gcp.yml.example with a
+#      real Slack webhook and/or PagerDuty routing key (keep it gitignored).
+#   2. Copy this file to prometheus-gcp.yml and replace the placeholder targets
+#      with each node's private metrics address. Do not expose /metrics publicly.
+#   3. Validate before restarting:
+#        promtool check config prometheus-gcp.yml
+#        promtool check rules creg-alerts.yml
+#   4. docker compose -f docker-compose.monitoring.yml up -d
+#   5. Fire a test alert (amtool alert add CregTest severity=warning) and
+#      confirm a human receives it.
+#
+# Every node is scraped under job "creg-node" because creg-alerts.yml keys its
+# CregNodeDown rule on that job name. Validators must be scraped individually:
+# an observer alone cannot show that a validator is offline.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: creg-phase-c
+    environment: candidate-r7
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+scrape_configs:
+  - job_name: creg-node
+    metrics_path: /metrics
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    static_configs:
+      - targets: ["creg-phase-c-r7-o1:8080"]
+        labels:
+          node: O1
+          role: observer
+          chain_id: "creg-phase-c-testnet-2026-09-26-r7"
+      # Replace each placeholder with the node's private address and port.
+      - targets: ["O2_PRIVATE_ADDRESS:8080"]
+        labels: { node: O2, role: observer, chain_id: "creg-phase-c-testnet-2026-09-26-r7" }
+      - targets: ["O3_PRIVATE_ADDRESS:8080"]
+        labels: { node: O3, role: observer, chain_id: "creg-phase-c-testnet-2026-09-26-r7" }
+      - targets: ["O4_PRIVATE_ADDRESS:8080"]
+        labels: { node: O4, role: observer, chain_id: "creg-phase-c-testnet-2026-09-26-r7" }
+      - targets: ["V1_PRIVATE_ADDRESS:8080"]
+        labels: { node: V1, role: validator, chain_id: "creg-phase-c-testnet-2026-09-26-r7" }
+      - targets: ["V2_PRIVATE_ADDRESS:8080"]
+        labels: { node: V2, role: validator, chain_id: "creg-phase-c-testnet-2026-09-26-r7" }
+      - targets: ["V3_PRIVATE_ADDRESS:8080"]
+        labels: { node: V3, role: validator, chain_id: "creg-phase-c-testnet-2026-09-26-r7" }
+      - targets: ["V4_PRIVATE_ADDRESS:8080"]
+        labels: { node: V4, role: validator, chain_id: "creg-phase-c-testnet-2026-09-26-r7" }
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

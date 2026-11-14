@@ -19,25 +19,64 @@ groups:
           summary: "CREG node {{ $labels.instance }} is down"
           description: "Prometheus cannot scrape /metrics for 2m."
 
+      # Blocks are produced only when finalized work exists, so "tip has not
+      # moved" alone is normal on an idle chain. Stalled means work is waiting
+      # and the tip still does not move.
       - alert: CregBlockProductionStalled
-        expr: delta(creg_chain_tip_height[15m]) == 0 and creg_active_validators >= 1
+        expr: >
+          delta(creg_chain_tip_height[15m]) == 0
+          and (creg_pending_block_txs > 0 or creg_durable_finalized_work_ready_depth > 0)
+          and creg_active_validators >= 1
         for: 15m
         labels:
           severity: critical
         annotations:
-          summary: "No new L2 blocks in 15m on {{ $labels.instance }}"
-          description: "Tip height has not advanced while validators are active — proposer stalled or consensus stuck."
+          summary: "Finalized work is waiting but no new block in 15m on {{ $labels.instance }}"
+          description: "Pending block transactions or ready durable work exist while the tip is not advancing — proposer stalled or PBFT stuck."
+
+      - alert: CregDurableWorkAging
+        expr: creg_durable_finalized_work_oldest_age_seconds > 1800
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Durable finalized work older than 30m on {{ $labels.instance }}"
+          description: "The oldest persisted work item has waited {{ $value | humanizeDuration }} for block inclusion."
+
+      - alert: CregChainIdle
+        expr: creg_chain_tip_age_seconds > 86400
+        for: 1h
+        labels:
+          severity: info
+        annotations:
+          summary: "No CREG block in over 24h on {{ $labels.instance }}"
+          description: "The chain is idle (no finalized work). Not an outage by itself, but consensus liveness is untested until the next block; consider a canary publish."
 
   - name: creg-consensus
     rules:
-      - alert: CregPbftQuorumAtRisk
-        expr: creg_active_validators < 2
+      # PBFT quorum is floor(2n/3)+1 (3 of 4 today). Below quorum, no block
+      # can finalize.
+      - alert: CregPbftQuorumLost
+        expr: creg_active_validators < floor(2 * creg_validator_set_total / 3) + 1
         for: 5m
         labels:
           severity: critical
         annotations:
           summary: "Active validators below PBFT quorum on {{ $labels.instance }}"
-          description: "creg_active_validators={{ $value }}; NET-301 requires >= 2 active validators for fault tolerance."
+          description: "creg_active_validators={{ $value }} is below floor(2n/3)+1 of the validator set; blocks cannot finalize."
+
+      # With n=4 any single offline validator removes all remaining fault
+      # tolerance: one more failure halts finality.
+      - alert: CregPbftFaultMarginConsumed
+        expr: >
+          creg_active_validators < creg_validator_set_total
+          and creg_active_validators >= floor(2 * creg_validator_set_total / 3) + 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "A validator is offline on {{ $labels.instance }}"
+          description: "{{ $value }} of the validator set is active; PBFT still has quorum but its remaining fault margin is reduced."
 
       - alert: CregL2ReorgObserved
         expr: delta(creg_reorg_events_total[1h]) > 0
@@ -65,6 +104,21 @@ groups:
           severity: warning
         annotations:
           summary: "L1 validator-set sync reporting an error on {{ $labels.instance }}"
+
+      # The 2026-10/11 failure: heights were readable but historical
+      # eth_getLogs failed ("pruned history"), so the cursor stopped while the
+      # finalized source block kept advancing. ~300 Sepolia blocks is ~1h.
+      - alert: CregValidatorSetCursorLagging
+        expr: >
+          creg_validator_set_sync_enabled == 1
+          and creg_validator_set_sync_cursor_block > 0
+          and (creg_validator_set_sync_last_finalized_source_block - creg_validator_set_sync_cursor_block) > 300
+        for: 30m
+        labels:
+          severity: critical
+        annotations:
+          summary: "L1 validator-set cursor is {{ $value }} blocks behind on {{ $labels.instance }}"
+          description: "Staking events are not being applied. Check that every configured RPC serves full historical eth_getLogs from the staking deployment block."
 
       - alert: CregValidatorSetReorgChurn
         expr: creg_validator_set_sync_state_code == 2

@@ -8,7 +8,7 @@
 
 A decentralized package registry that replaces single-authority trust (npm, PyPI, Cargo, and similar) with **independent validator consensus**. Packages are content-addressed, analyzed through a multi-stage security pipeline, and finalized by PBFT quorum. Sepolia hosts staking, registry, and governance contracts. This is a **public alpha**, not mainnet, and not operational Byzantine fault tolerance.
 
-**Network:** `creg-testnet-1` on Sepolia · **Phase:** public alpha · **Live status:** API reachable with an empty chain (tip 0, no peers, observed 2026-09-20) — see [status](#status-september-2026); historical fleet snapshot: [2026-08-25](docs/archive/TESTNET_STATUS.md)
+**Network:** `creg-phase-c-testnet-2026-09-26-r7` on Sepolia · **Phase:** public alpha · **Live status (observed 2026-11-14):** the public API serves the R7 chain at finalized height 20 with four active validators, all run by the maintainer; no new block since 2026-09-29, L1 validator-set sync degraded, faucet claims paused — see [status](#status-november-2026) and the [2026-11-14 audit](docs/CREG-DEEP-DIVE-AUDIT-2026-11-14.md)
 
 ---
 
@@ -55,9 +55,9 @@ flowchart LR
 | **Waitlist** | https://waitlist.cregnet.dev |
 | **Contribution Arena** | https://contribute.cregnet.dev | Separate educational/simulation product; not the protocol |
 
-**Binaries:** [v0.4.8-testnet](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases/tag/v0.4.8-testnet) provides signed `creg` and `creg-node` archives for Windows amd64, Linux amd64, and macOS amd64. The public API (`api.testnet.cregnet.dev`) is reachable but serves a fresh empty chain (tip 0, no peers, no validators — observed 2026-09-20), not a live network.
+**Binaries:** [v0.4.8-testnet](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases/tag/v0.4.8-testnet) provides signed `creg` and `creg-node` archives for Windows amd64, Linux amd64, and macOS amd64. [v0.4.9-testnet](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases/tag/v0.4.9-testnet) is the corrected R7-aware CLI release ([release status](docs/RELEASE-STATUS-2026-10-01.md)). The public API (`api.testnet.cregnet.dev`) serves the R7 chain (observed 2026-11-14), but every package published so far has been revoked and the network has no independent operators.
 
-Chain parameters: [`chain-registry/testnet/chain-spec.sepolia.json`](chain-registry/testnet/chain-spec.sepolia.json).
+Chain parameters (live R7 network): [`chain-registry/testnet/phase-c/r7/chain-spec.json`](chain-registry/testnet/phase-c/r7/chain-spec.json) and its detached signature. The older [`chain-spec.sepolia.json`](chain-registry/testnet/chain-spec.sepolia.json) describes the retired `creg-testnet-1` network and its earlier contract addresses.
 
 ---
 
@@ -105,8 +105,8 @@ cd chain-registry && cargo build --release -p cli
 ```
 
 ```bash
-# Public API serves an empty chain (tip 0, no peers, 2026-09-20), not a live network.
-# For a live network, run a local node from chain-registry/testnet/QUICKSTART.md.
+# Public API serves the maintainer-run R7 chain (observed 2026-11-14).
+# To run your own node, see chain-registry/testnet/QUICKSTART.md.
 export CREG_NODE_URL=https://api.testnet.cregnet.dev
 creg doctor
 ```
@@ -130,7 +130,8 @@ This repository follows the same pattern as other open blockchains: **protocol c
 | Document | Purpose |
 |----------|---------|
 | [docs/archive/TESTNET_SCALE_ARCHITECTURE.md](docs/archive/TESTNET_SCALE_ARCHITECTURE.md) | Future scale-topology design (archived 2026-09-19) — not a current deployment claim |
-| [docs/PROTOCOL_PROGRESS.md](docs/PROTOCOL_PROGRESS.md) | **Maintainers** — current protocol briefing ([WHAT_TO_DO_NEXT.md](docs/archive/WHAT_TO_DO_NEXT.md) archived 2026-09-19) |
+| [docs/CREG-DEEP-DIVE-AUDIT-2026-11-14.md](docs/CREG-DEEP-DIVE-AUDIT-2026-11-14.md) | **Current** — audit, live state, testnet readiness and the recommended implementation route |
+| [docs/PROTOCOL_PROGRESS.md](docs/PROTOCOL_PROGRESS.md) | **Maintainers** — protocol briefing as of 2026-09-20 (live-network sections superseded by the 2026-11-14 audit) |
 | [docs/README.md](docs/README.md) | Documentation index |
 | [docs/README.md](docs/README.md) | Full maintainer doc index |
 | [WHITEPAPER.md](docs/WHITEPAPER.md) | Public-alpha technical whitepaper |
@@ -141,19 +142,22 @@ This repository follows the same pattern as other open blockchains: **protocol c
 
 ---
 
-## Status (September 2026)
+## Status (November 2026)
+
+Live values below were read from the public API, explorer and faucet on 2026-11-14. The full assessment is in [docs/CREG-DEEP-DIVE-AUDIT-2026-11-14.md](docs/CREG-DEEP-DIVE-AUDIT-2026-11-14.md).
 
 | Milestone | Status |
 |-----------|--------|
-| Sepolia contracts | Deployed — addresses in `chain-spec.sepolia.json` |
-| Specified validator set | Four foundation observer identities (non-voting); two listed bootnodes; not operational BFT |
-| Real sandbox engine | Done |
-| Public API | Reachable, serves a fresh empty chain (tip 0, no peers, no validators, observed 2026-09-20) — not a live network. Last fleet snapshot: [2026-08-25](docs/archive/TESTNET_STATUS.md) |
+| Sepolia contracts | Fresh Phase C deployment — addresses in [`phase-c/r7/chain-spec.json`](chain-registry/testnet/phase-c/r7/chain-spec.json) and [`deployment-manifest.json`](chain-registry/testnet/phase-c/deployment-manifest.json) |
+| Validator set | Four voting validators (3-of-4 PBFT) and four non-voting observers on separate hosts, **all operated by the maintainer** (one validator runs on a laptop). Real finality, but not independent Byzantine fault tolerance |
+| Real sandbox engine | Done (nsjail on validators, no development bypass) |
+| Public API | Serves R7 at finalized h20; last block 2026-09-29; 8 packages published, all revoked; validator-set sync `degraded` because the configured Sepolia RPC returns `pruned history unavailable` for historical logs |
+| Faucet | Online, but token claims are paused until its Sepolia transfer ledger reconciles |
 | Binary release | [v0.4.8-testnet](https://github.com/samuel-1-avson/chain-registry-blockchain-CREG-/releases/tag/v0.4.8-testnet) (Windows, Linux, and macOS) |
 | Public alpha waitlist | Live — [waitlist.cregnet.dev](https://waitlist.cregnet.dev) |
 | Contribution Arena | Separate educational/simulation product — [contribute.cregnet.dev](https://contribute.cregnet.dev) (`0.4.0-public-testnet` deployed 2026-09-20) |
 | Phase 1 remediation (gossip, batch, relays) | Done — Iteration 6 |
-| Genesis | Spec `genesis_time` 2026-09-19 (`0x9d9e…`); live API serves a different empty chain (`0x0683…`). No public activation published |
+| Genesis | R7 `genesis_time` 2026-09-26; signed network identity `0x1852b9a8…`; block-zero hash `0f2a3b10…` (served by the live API) |
 | External security audit | Open — freeze candidate `v0.4.3-testnet` |
 
 This is a **public alpha**, not mainnet. Historical participant expectations: [TESTNET_PHASE_SCOPE.md](docs/archive/TESTNET_PHASE_SCOPE.md) (archived 2026-09-19).

@@ -1,5 +1,11 @@
 # observability/alertmanager.yml
-# Local-safe Alertmanager routing. External receivers can be layered on later.
+# Local-safe Alertmanager routing for the developer stack.
+#
+# WARNING: the receivers below are intentionally EMPTY, so alerts routed here
+# are not delivered anywhere — the "Slack" and "email" comments describe the
+# intended routing only. For the GCP testnet use
+# testnet/monitoring/alertmanager-gcp.yml.example with real receivers and
+# testnet/monitoring/prometheus-gcp-alerting.yml.example.
 
 global:
   resolve_timeout: 5m

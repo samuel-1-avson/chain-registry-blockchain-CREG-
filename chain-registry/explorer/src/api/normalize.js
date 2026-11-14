@@ -21,12 +21,20 @@ export function normalizeTransaction(tx) {
     package_status: packageStatus, status: tx.type === 'revoke' ? 'revoked' : packageStatus }
 }
 
+// The block list and block detail endpoints return full blocks without a
+// `tx_count` field, so derive it from the transactions actually returned.
+export function blockTxCount(block) {
+  if (Array.isArray(block.transactions)) return block.transactions.length
+  return Number.isSafeInteger(block.tx_count) ? block.tx_count : 0
+}
+
 export function normalizeBlock(block) {
   const header = block.header || block
   return { ...block, height: header.height, timestamp: header.timestamp,
     prev_hash: header.prev_hash, merkle_root: header.merkle_root,
     producer: header.proposer_id ?? block.producer,
     votes: block.pbft_signatures ?? block.votes ?? [],
+    tx_count: blockTxCount(block),
     transactions: (block.transactions || []).map(normalizeTransaction) }
 }
 

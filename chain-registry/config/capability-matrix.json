@@ -22,7 +22,7 @@
   "inputs": [
     {
       "path": ".env.example",
-      "sha256": "bbccf4194e8c08823b645c8a64633c9a3201f9f53bfb6e951a0508640aa8f709"
+      "sha256": "17915208c1fb231a3722bda2c923a40b2455aa44b227857085103ea0dbea7b30"
     },
     {
       "path": "config/cr07-activation-manifest.json",
@@ -70,7 +70,7 @@
     },
     {
       "path": "testnet/.env.example",
-      "sha256": "de14e0bccec7d0fe479e0fe8075870fef0dc73f48fc6cab65d870ea3fbe89812"
+      "sha256": "4cc7ccbdc7ef2002931412915d05d57283ac76d3316c9ef1da2f69e2d3cc22bc"
     },
     {
       "path": "testnet/bootstrap/bootstrap.env.example",
@@ -118,7 +118,7 @@
     },
     {
       "path": "testnet/sepolia-fleet.env.example",
-      "sha256": "105cd6deacc6255e5d25efda8063b3b73b6f5762776ad2cd44869d0cbc3e2be6"
+      "sha256": "ed202d5976c856be58cc6a0f556ff3a758cde2ab39cd84a6373c0614432b816f"
     },
     {
       "path": "testnet/spec-server/chain-spec.json",
