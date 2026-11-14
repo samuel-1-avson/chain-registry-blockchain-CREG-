@@ -133,11 +133,15 @@ contract Staking {
     // the pool and lets each validator pull their share, bounding worst-case gas
     // per transaction to O(1). See `commitSlashPoolEpoch` / `claimSlashPoolShare`.
     uint256 public slashPoolEpoch;
-    uint256 public slashPoolEpochAmount;
+    uint256 public slashPoolEpochAmount;      // Unclaimed remainder of the current epoch
     uint256 public slashPoolEpochTotalWeight;
     mapping(uint256 => mapping(address => bool)) public slashPoolClaimed;
+    uint256 public slashPoolEpochTotal;       // Amount snapshotted when the epoch was committed
 
     address[] private _validatorList;
+    // Each address appears in `_validatorList` at most once, however many times
+    // it re-applies (AUD-07); counting loops read the current state.
+    mapping(address => bool) private _inValidatorList;
 
     // ── Events ────────────────────────────────────────────────────────────────
 
@@ -422,7 +426,10 @@ contract Staking {
             ejectedAt:   0,
             appliedAt:   block.timestamp
         });
-        _validatorList.push(validator);
+        if (!_inValidatorList[validator]) {
+            _inValidatorList[validator] = true;
+            _validatorList.push(validator);
+        }
         emit ValidatorApplied(validator, amount);
     }
 
@@ -808,10 +815,14 @@ contract Staking {
     ///      `claimSlashPoolShare()`, bounding worst-case per-tx gas to O(1) and
     ///      eliminating the gas-exhaustion risk of `distributeSlashPool` at
     ///      large validator counts.
+    ///      Any amount still unclaimed from the previous epoch (unclaimed
+    ///      shares and rounding dust) is carried into the new epoch, so it can
+    ///      never block distribution (AUD-08). Shares not claimed before the
+    ///      next commit are forfeited to that next epoch.
     function commitSlashPoolEpoch() external {
         if (msg.sender != governance) revert NotAuthorized();
-        require(slashPoolEpochAmount == 0, "previous epoch not fully claimed");
-        require(slashPool > 0, "slash pool is empty");
+        uint256 amount = slashPool + slashPoolEpochAmount;
+        require(amount > 0, "slash pool is empty");
 
         uint256 totalWeight;
         for (uint i = 0; i < _validatorList.length; i++) {
@@ -823,11 +834,12 @@ contract Staking {
         require(totalWeight > 0, "No reputation weight");
 
         slashPoolEpoch++;
-        slashPoolEpochAmount = slashPool;
+        slashPoolEpochTotal = amount;
+        slashPoolEpochAmount = amount;
         slashPoolEpochTotalWeight = totalWeight;
         slashPool = 0;
 
-        emit SlashPoolEpochCommitted(slashPoolEpoch, slashPoolEpochAmount, totalWeight);
+        emit SlashPoolEpochCommitted(slashPoolEpoch, amount, totalWeight);
     }
 
     /// @notice Claim the caller's share of the current slash-pool epoch.
@@ -842,16 +854,19 @@ contract Staking {
         uint256 score = uint256(reputation.scoreOf(msg.sender));
         require(score > 0, "no reputation weight");
 
-        uint256 share = (slashPoolEpochAmount * score) / slashPoolEpochTotalWeight;
+        // Shares are computed from the committed snapshot, not the shrinking
+        // remainder, so the payout does not depend on claim order (AUD-08).
+        // The cap keeps the epoch solvent if reputation weights changed after
+        // the commit.
+        uint256 share = (slashPoolEpochTotal * score) / slashPoolEpochTotalWeight;
+        if (share > slashPoolEpochAmount) share = slashPoolEpochAmount;
         require(share > 0, "share rounds to zero");
 
         slashPoolClaimed[epoch][msg.sender] = true;
         validators[msg.sender].stake += share;
 
-        // Drain the snapshot so it can be re-committed later. We subtract the
-        // claimed amount rather than zeroing so that later claimants can still
-        // draw from the same epoch; the epoch becomes re-committable only when
-        // `slashPoolEpochAmount` returns to zero via claims or rounding dust.
+        // Track the unclaimed remainder; whatever is left when governance
+        // commits the next epoch is carried into it.
         if (share >= slashPoolEpochAmount) {
             slashPoolEpochAmount = 0;
         } else {

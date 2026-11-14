@@ -430,14 +430,21 @@ contract ChainRegistry {
         rec.status            = PackageStatus.Revoked;
         rec.revocationReason  = reason;
 
-        // Release the package-specific liability. Governance revocations slash
-        // the reserved bond; publisher-initiated revocations release it.
-        try staking.resolvePublisherLiability(key, isGov, reason) {} catch {}
-        // Apply any additional severity slash after resolving the reserved
-        // release bond, so the two accounting paths cannot double-spend or
-        // underflow the reservation.
         if (isGov) {
+            // Governance revocations slash the reserved release bond, then
+            // apply the severity slash. Resolving the bond first keeps the two
+            // accounting paths from double-spending or underflowing the
+            // reservation.
+            try staking.resolvePublisherLiability(key, true, reason) {} catch {}
             staking.slashSeverity(rec.publisher, severity, reason);
+        } else {
+            // A publisher revoking its own release keeps the bond reserved for
+            // the full liability window (AUD-09). Otherwise a publisher could
+            // pre-empt a pending governance revocation and withdraw the stake at
+            // risk. Governance can still slash it with
+            // Staking.resolvePublisherLiability; after the window it is
+            // released by Staking.releaseMaturedPublisherLiability.
+            try staking.markPackageFinalized(key) {} catch {}
         }
 
         emit PackageRevoked(key, canonical, reason);
