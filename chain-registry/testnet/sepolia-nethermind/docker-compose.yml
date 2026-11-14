@@ -1,0 +1,100 @@
+# Second CREG-run Sepolia node: Nethermind (execution) + Teku (consensus).
+# Reference definition. deploy-sepolia-nethermind.ps1 runs the same containers
+# with plain `docker run`, as deploy-r7-sepolia-rpc.ps1 does for Geth.
+#
+# Client diversity with the first node (Geth + Lighthouse, us-west1): a bug in
+# one client cannot decide a quorum read on its own.
+#
+# JSON-RPC (8545) is reachable only through the creg-sepolia-rpc-allow-clients
+# firewall rule. The Engine API stays on the Docker network; the Teku REST API
+# is bound to localhost.
+#
+# History: CREG only needs Sepolia receipts from the R7 Staking deployment
+# (block 11,781,426). The ancient barriers stop Nethermind downloading older
+# bodies and receipts; eth_getLogs below the barrier returns an error rather
+# than an empty result. Set both barriers to 0 for full history.
+#
+# Set NODE_EXTERNAL_IP to the VM's reserved public IPv4.
+
+services:
+  nethermind:
+    image: nethermind/nethermind@sha256:57df9bfaaf4d577919b35a2c7b1582ee5bd1812b36a812bdf8ac88ff7dba524d # 2.2.2
+    container_name: creg-sepolia-nethermind
+    restart: unless-stopped
+    ports:
+      - "8545:8545"
+      - "30303:30303/tcp"
+      - "30303:30303/udp"
+    volumes:
+      - /mnt/disks/sepolia-nethermind/nethermind:/data
+      - /mnt/disks/sepolia-nethermind/jwtsecret:/jwtsecret:ro
+    command:
+      - --config
+      - sepolia
+      - --data-dir
+      - /data
+      - --JsonRpc.Enabled
+      - "true"
+      - --JsonRpc.Host
+      - 0.0.0.0
+      - --JsonRpc.Port
+      - "8545"
+      - --JsonRpc.EnabledModules
+      - "[Eth,Net,Web3]"
+      - --JsonRpc.EngineHost
+      - 0.0.0.0
+      - --JsonRpc.EnginePort
+      - "8551"
+      - --JsonRpc.JwtSecretFile
+      - /jwtsecret
+      - --Network.ExternalIp
+      - ${NODE_EXTERNAL_IP}
+      - --Network.P2PPort
+      - "30303"
+      - --Network.DiscoveryPort
+      - "30303"
+      - --Network.MaxActivePeers
+      - "25"
+      - --Sync.AncientBodiesBarrier
+      - "11780000"
+      - --Sync.AncientReceiptsBarrier
+      - "11780000"
+    networks:
+      - creg-rpc
+
+  teku:
+    image: consensys/teku@sha256:4560398cf9a0b208a4a4a12ebc2051d820b67df51092a54154031dacc57f2ac6 # 26.10.3
+    container_name: creg-sepolia-teku
+    restart: unless-stopped
+    depends_on:
+      - nethermind
+    ports:
+      - "127.0.0.1:5051:5051"
+      - "9000:9000/tcp"
+      - "9000:9000/udp"
+    volumes:
+      - /mnt/disks/sepolia-nethermind/teku:/data
+      - /mnt/disks/sepolia-nethermind/jwtsecret:/jwtsecret:ro
+    command:
+      - --network=sepolia
+      - --data-path=/data
+      - --ee-endpoint=http://creg-sepolia-nethermind:8551
+      - --ee-jwt-secret-file=/jwtsecret
+      # First start only, from CREG's own Lighthouse (fetch-beacon-initial-state.ps1).
+      - --initial-state=/data/initial-state.ssz
+      - --rest-api-enabled=true
+      - --rest-api-interface=0.0.0.0
+      - --rest-api-port=5051
+      - --rest-api-host-allowlist=localhost,127.0.0.1
+      - --p2p-port=9000
+      - --p2p-advertised-ip=${NODE_EXTERNAL_IP}
+      # Teku rejects an upper bound below its default lower bound (64).
+      - --p2p-peer-lower-bound=40
+      - --p2p-peer-upper-bound=50
+    networks:
+      - creg-rpc
+
+networks:
+  creg-rpc:
+    name: creg-rpc
+    driver: bridge
