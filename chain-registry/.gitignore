@@ -22,6 +22,7 @@
 !testnet/SOAK_TEST.md
 !testnet/bootstrap/README.md
 !testnet/spec-server/README.md
+!testnet/sepolia-nethermind/README.md
 !k8s/README.md
 !hub/content/**/*.md
 !config/weak-subjectivity/README.md
