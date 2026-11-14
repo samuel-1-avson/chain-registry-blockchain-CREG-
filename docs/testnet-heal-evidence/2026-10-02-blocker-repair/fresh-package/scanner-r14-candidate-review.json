@@ -1,0 +1,16 @@
+{
+  "schema": "creg-real-scanner-r14-candidate-v1",
+  "captured_at_utc": "2026-10-02T08:34:11.858796Z",
+  "status": "prepared_not_deployed",
+  "canonical": "npm:has-flag@4.0.0",
+  "baseline_profile_digest": "7e1d95f9c8423778211944a1dea46674d8cbd3f0aee3b0eea6b5250f11d009cd",
+  "new_profile_digest": "a3ade0c43214471df0bee22ec46631fc3d7a1eb330ec4edbc926cb0f8d198e19",
+  "osv_epoch": "osv-2026-10-02-phase-c-has-flag-r15",
+  "osv_response_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+  "osv_advisory_count": 0,
+  "osv_snapshot_sha256": "a08c7efdc9f0cdd5a0dfb3d1dac5a43cfe756212ce4bbd6ad874f0de75d019b8",
+  "threat_database_sha256": "c97381b9df48722a1f591c8f81c87e4d9695c0b89877e6b609e883abf7e4a723",
+  "yara_bundle_sha256": "2ec033d1446c6280f46d7d74467f78223c67c9abe45c282080db78cfe3177766",
+  "coverage_count": 9,
+  "node_restarts_or_publication": false
+}

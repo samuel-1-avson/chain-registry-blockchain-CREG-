@@ -1,0 +1,72 @@
+{
+  "schema": "creg-rpc-resilience-progress-v1",
+  "captured_at_utc": "2026-10-02T14:07:47Z",
+  "source": {
+    "commit": "f19b2e621a92339540ba87a9b60962afcc0aa40c",
+    "branch": "main",
+    "source_changes_committed": true
+  },
+  "secret_manager_profile": {
+    "project": "fiffi-500411",
+    "name": "creg-sepolia-rpc-profile",
+    "version": 1,
+    "provider_hosts": [
+      "ethereum-sepolia-rpc.publicnode.com",
+      "sepolia.gateway.tenderly.co",
+      "35.252.232.71"
+    ],
+    "provider_host_count": 3,
+    "public_iam_principal_present": false,
+    "applied_to_node_environments": false
+  },
+  "providers": {
+    "network": "Sepolia",
+    "chain_id": "0xaa36a7",
+    "publicnode": {
+      "head": 11829478,
+      "common_height": 11829413,
+      "common_block_hash": "0x0513a3b102780a552805baec2ab692534258e60fbf7d09b30a96ff63fdbfc64e"
+    },
+    "tenderly": {
+      "head": 11829477,
+      "common_height": 11829413,
+      "common_block_hash": "0x0513a3b102780a552805baec2ab692534258e60fbf7d09b30a96ff63fdbfc64e"
+    },
+    "geth": {
+      "vm": "creg-sepolia-rpc",
+      "project": "fiffi-500411",
+      "zone": "us-west1-b",
+      "chain_id": "0xaa36a7",
+      "execution_head": "0x0",
+      "peer_count": 50,
+      "sync_current_block": "0x53cc65",
+      "sync_highest_block": "0xb4807e",
+      "accepted_as_provider": false
+    },
+    "common_block_hash_and_staking_logs_verified_across_all_three": false
+  },
+  "cloud_build": {
+    "project": "gen-lang-client-0022105784",
+    "region": "us-central1",
+    "build_id": "a77052cf-72a8-4233-bad9-74722feb736d",
+    "image_tag": "us-central1-docker.pkg.dev/gen-lang-client-0022105784/creg-testnet/creg-node:phase-c-rpc-r31-rust193-f19b2e621a92",
+    "target": "node-runtime",
+    "rust_version": "1.93.0",
+    "status": "WORKING",
+    "version_and_binary_hash_checks": "QUEUED",
+    "deployed": false
+  },
+  "github_actions": {
+    "rust_ci": "passed",
+    "phase_c_production_recovery_workflow": "passed",
+    "durable_pbft_signing_recovery": "passed",
+    "relayer_validation": "passed",
+    "repository_capability_matrix": "failed_stale_generated_file_non_release_gate"
+  },
+  "deployment": {
+    "validator_or_observer_environment_changed": false,
+    "node_containers_restarted_or_replaced": false,
+    "chain_reset": false,
+    "production_cutover": false
+  }
+}

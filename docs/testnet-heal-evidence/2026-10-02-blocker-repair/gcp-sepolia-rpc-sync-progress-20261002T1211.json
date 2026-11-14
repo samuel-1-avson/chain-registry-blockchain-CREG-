@@ -1,0 +1,41 @@
+{
+  "captured_at_utc": "2026-10-02T12:11:30Z",
+  "project": "fiffi-500411",
+  "resource": {
+    "name": "creg-sepolia-rpc",
+    "zone": "us-west1-b",
+    "external_ipv4": "35.252.232.71"
+  },
+  "geth": {
+    "version": "1.17.6-stable",
+    "chain_id": "0xaa36a7",
+    "execution_head": "0x0",
+    "execution_peer_count": 50,
+    "syncing": true,
+    "reported_sync_current_block": "0x3aebfb",
+    "reported_highest_block": "0xb47dc3",
+    "readiness": "not accepted; eth_blockNumber is zero and sync is ongoing"
+  },
+  "public_rpc_comparison": {
+    "publicnode": {
+      "chain_id": "0xaa36a7",
+      "head": "0xb47eb0"
+    },
+    "tenderly": {
+      "chain_id": "0xaa36a7",
+      "head": "0xb47eb0"
+    },
+    "shared_block_hash_and_staking_logs_verified_with_geth": false
+  },
+  "source_changes": {
+    "read_failover_added": true,
+    "compiled": false,
+    "deployed": false
+  },
+  "fleet_changes": {
+    "validator_rpc_profiles_changed": false,
+    "observer_rpc_profiles_changed": false,
+    "node_containers_restarted": false,
+    "chain_reset_performed": false
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "schema": "creg-rpc-failover-build-and-sync-check-v1",
+  "captured_at_utc": "2026-10-02T13:28:14Z",
+  "project": "fiffi-500411",
+  "build": {
+    "command": "cargo check --manifest-path chain-registry/crates/node/Cargo.toml --locked --offline --features phase-c-real-fleet",
+    "rustc": "1.98.1",
+    "result": "passed",
+    "exit_code": 0,
+    "exact_image_toolchain_verified": false,
+    "deployment_pinned_rustc": "1.93.0",
+    "dependency_lockfile_updated_for_alloy_json_rpc_feature": true,
+    "warnings": [
+      "proc-macro-error2 v2.0.1 and sqlx-postgres v0.7.4 report future-incompatibility notices"
+    ]
+  },
+  "source_checks": {
+    "rpc_failover_rustfmt_check": "passed",
+    "git_diff_check": "passed",
+    "tests_added_or_run": false,
+    "rpc_failover_transport_scope": "node crate; safe read transport errors retry configured endpoints; transaction submissions and stateful filters are not retried",
+    "remaining_direct_client_crates": [
+      "relayer",
+      "faucet",
+      "ipfs-pinner"
+    ]
+  },
+  "rpc": {
+    "network": "Sepolia",
+    "chain_id": "0xaa36a7",
+    "gcp_vm": "creg-sepolia-rpc",
+    "gcp_zone": "us-west1-b",
+    "gcp_execution_head": "0x0",
+    "gcp_peer_count": 50,
+    "geth_syncing": true,
+    "geth_current_block": "0x4c2626",
+    "geth_highest_block": "0xb47f7e",
+    "publicnode_head": "0xb48022",
+    "publicnode_chain_id": "0xaa36a7",
+    "common_block_hash_and_staking_logs_verified": false
+  },
+  "deployment": {
+    "rpc_secrets_or_profiles_changed": false,
+    "validator_or_observer_configuration_changed": false,
+    "node_containers_restarted_or_replaced": false,
+    "cloud_build_api_enabled": false,
+    "chain_reset": false,
+    "production_cutover": false
+  },
+  "llvm_dependency": {
+    "release": "LLVM 23.1.2 Windows x86_64",
+    "archive_sha256": "ceaee048142fece144752c6f6431cb0905a7a6160f78ab8cf5cf0b6216f99418",
+    "github_attestation_verified": true,
+    "extracted_dlls": 6,
+    "install_scope": "user-local runtime folder; no system PATH or machine install"
+  }
+}

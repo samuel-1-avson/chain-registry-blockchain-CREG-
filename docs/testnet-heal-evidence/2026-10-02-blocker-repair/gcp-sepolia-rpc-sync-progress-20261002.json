@@ -1,0 +1,49 @@
+{
+  "captured_at_utc": "2026-10-02T11:32:30Z",
+  "project": "fiffi-500411",
+  "resource": {
+    "name": "creg-sepolia-rpc",
+    "region": "us-west1",
+    "zone": "us-west1-b",
+    "external_ipv4": "35.252.232.71",
+    "machine_type": "e2-standard-4",
+    "persistent_data_disk": "creg-sepolia-rpc-data"
+  },
+  "geth": {
+    "version": "1.17.6-stable",
+    "chain_id": "0xaa36a7",
+    "execution_head": "0x0",
+    "execution_peer_count": 42,
+    "syncing": true,
+    "highest_block_at_probe": "0xb47dc3",
+    "chain_download_percent_from_geth_log": 11.72,
+    "state_download_percent_from_geth_log": 2.56,
+    "state_downloaded_gib_from_geth_log": 6.67,
+    "estimated_remaining_at_probe": "chain about 38 minutes; state about 4 hours 15 minutes",
+    "readiness": "not accepted; execution head remains zero while chain and state sync continue"
+  },
+  "lighthouse": {
+    "version": "8.3.0-rc.0",
+    "head_slot": "11267249",
+    "is_syncing": false,
+    "is_optimistic": true,
+    "el_offline": false
+  },
+  "public_rpc_comparison": {
+    "publicnode": {
+      "chain_id": "0xaa36a7",
+      "head": "0xb47de4"
+    },
+    "tenderly": {
+      "chain_id": "0xaa36a7",
+      "head": "0xb47de4"
+    },
+    "matching_block_hash_and_staking_logs_verified": false
+  },
+  "fleet_changes": {
+    "validator_rpc_profiles_changed": false,
+    "observer_rpc_profiles_changed": false,
+    "node_containers_restarted": false,
+    "chain_reset_performed": false
+  }
+}

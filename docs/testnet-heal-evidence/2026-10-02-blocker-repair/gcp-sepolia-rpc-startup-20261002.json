@@ -1,0 +1,96 @@
+{
+  "captured_at_utc": "2026-10-02T11:21:30.6196489Z",
+  "project": "fiffi-500411",
+  "resource": {
+    "name": "creg-sepolia-rpc",
+    "region": "us-west1",
+    "zone": "us-west1-b",
+    "machine_type": "e2-standard-4",
+    "vcpus": 4,
+    "memory_gib": 16,
+    "internal_ipv4": "10.96.3.3",
+    "external_ipv4": "35.252.232.71",
+    "persistent_data_disk": {
+      "name": "creg-sepolia-rpc-data",
+      "type": "pd-balanced",
+      "size_gib": 400,
+      "auto_delete": false
+    },
+    "estimated_monthly_list_price_usd": 150,
+    "estimate_excludes": ["network_egress", "taxes"],
+    "credits_applied_or_remaining": "not verified"
+  },
+  "network": {
+    "vpc": "creg-fleet-vpc",
+    "rpc_tcp_port": 8545,
+    "rpc_sources": [
+      "validator-3 static egress IP",
+      "validator-4 static egress IP",
+      "observer-3 static egress IP",
+      "observer-4 static egress IP",
+      "operator laptop current public IPv4 /32",
+      "private fleet range 10.96.0.0/16"
+    ],
+    "execution_p2p": "tcp+udp 30303 from public peers",
+    "beacon_p2p": "tcp+udp 9000 from public peers",
+    "operator_ssh": "IAP only"
+  },
+  "clients": {
+    "execution": {
+      "client": "Geth",
+      "version": "1.17.6-stable",
+      "image": "ethereum/client-go@sha256:6606aa1c7b6354d57581952604e7ab5a49689aeee9aebf668c81b6d3225395f1",
+      "chain_id": "0xaa36a7",
+      "rpc_head_at_capture": 0,
+      "p2p_peers_at_capture": 12,
+      "header_sync_log": {
+        "downloaded": 2193408,
+        "remaining": 9635206,
+        "estimated_time_at_capture": "about 15 minutes for header sync; body/state sync remains"
+      },
+      "acceptance": "not ready; execution head has not caught up"
+    },
+    "consensus": {
+      "client": "Lighthouse",
+      "version": "8.3.0-rc.0",
+      "image": "sigp/lighthouse@sha256:3e5f0609c74b824d3cb1049920169114d99fd7bc9082b996b3adae3d4e9ef8dc",
+      "beacon_head_slot_at_capture": 11267204,
+      "beacon_peer_count_at_capture": 20,
+      "is_syncing": false,
+      "is_optimistic": true,
+      "finalized_epoch": 352098,
+      "finalized_root": "0x98055963bcb5b35162fd39b2c34429a87f9b3956906d1b0c5e6f44cc0ebaefd0",
+      "historical_backfill_remaining_slots_at_capture": 1055776,
+      "historical_backfill_eta_at_capture": "about 2 days 6 hours"
+    }
+  },
+  "independent_beacon_checkpoint_verification": {
+    "ethpandaops_finalized_epoch": 352098,
+    "ethpandaops_finalized_root": "0x98055963bcb5b35162fd39b2c34429a87f9b3956906d1b0c5e6f44cc0ebaefd0",
+    "chainsafe_finalized_epoch": 352098,
+    "chainsafe_finalized_root": "0x98055963bcb5b35162fd39b2c34429a87f9b3956906d1b0c5e6f44cc0ebaefd0",
+    "matches_lighthouse_finality": true
+  },
+  "public_rpc_comparison": {
+    "publicnode": {
+      "chain_id": "0xaa36a7",
+      "block": 11828651
+    },
+    "tenderly": {
+      "chain_id": "0xaa36a7",
+      "block": 11828651
+    },
+    "geth": {
+      "chain_id": "0xaa36a7",
+      "block": 0
+    },
+    "shared_block_hash_and_staking_logs_verified": false
+  },
+  "rollout": {
+    "r7_node_environments_changed": false,
+    "validator_or_observer_containers_changed": false,
+    "chain_reset_performed": false,
+    "provider_profile_secret_created": false,
+    "rpc_quorum_acceptance": false
+  }
+}
