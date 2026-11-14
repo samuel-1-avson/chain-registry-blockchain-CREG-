@@ -34,7 +34,7 @@
     },
     {
       "path": "contracts/Registry.sol",
-      "sha256": "40189ad37ad99a4e54018a7f775e8cc7822b0c833467ce29fcdb08aabcae4333"
+      "sha256": "f18942abaf245176a4d7c03b62ea326d4db0e74d9866bceef02a93fc06a5b65f"
     },
     {
       "path": "docker-compose.light.yml",
