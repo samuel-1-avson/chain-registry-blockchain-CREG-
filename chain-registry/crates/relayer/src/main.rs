@@ -4,7 +4,7 @@
 use alloy::{
     network::{EthereumWallet, TransactionBuilder},
     primitives::{keccak256, Address, B256, U256},
-    providers::{Provider, ProviderBuilder},
+    providers::{Provider, ProviderBuilder, RootProvider},
     rpc::types::TransactionRequest,
     signers::local::PrivateKeySigner,
     sol,
@@ -18,6 +18,7 @@ use axum::{
     Router,
 };
 use chrono::Utc;
+use common::l1_rpc::FailoverTransport;
 use k256::ecdsa::{RecoveryId, Signature as K256Signature, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -74,7 +75,7 @@ struct RelayerConfig {
 
 impl RelayerConfig {
     async fn from_env(
-        http_client: &reqwest::Client,
+        _http_client: &reqwest::Client,
     ) -> anyhow::Result<(Self, chain_registry_secrets::SecretsProvider)> {
         let secrets = chain_registry_secrets::SecretsProvider::from_env()?;
         let private_key = secrets
@@ -84,7 +85,7 @@ impl RelayerConfig {
         let relayer_address = signer.address();
 
         let rpc_url = env_string("RELAYER_RPC_URL", "http://localhost:8545");
-        let active_chain_id = fetch_chain_id(http_client, &rpc_url).await?;
+        let active_chain_id = fetch_chain_id(&rpc_url).await?;
 
         let allowed_origins: Vec<String> = env_string("RELAYER_ALLOWED_ORIGINS", "")
             .split(',')
@@ -1516,13 +1517,8 @@ async fn prepare_sponsored_transaction(
     prepared: &ValidatedActionRequest,
     permit_signature: &ParsedSignatureParts,
 ) -> Result<TransactionRequest, String> {
-    let provider = ProviderBuilder::new().on_http(
-        state
-            .config
-            .rpc_url
-            .parse()
-            .map_err(|_| "Relayer RPC configuration is invalid.".to_string())?,
-    );
+    let provider = l1_read_provider(&state.config.rpc_url)
+        .map_err(|_| "Relayer RPC configuration is invalid.".to_string())?;
 
     let contract = IStakingSponsored::new(prepared.staking_contract, &provider);
     let deadline = prepared.permit_deadline;
@@ -1887,14 +1883,28 @@ fn normalize_recovery_id(v: u8) -> Result<RecoveryId, String> {
     RecoveryId::from_byte(normalized).ok_or_else(|| format!("Invalid recovery id: {}", normalized))
 }
 
-async fn fetch_chain_id(http_client: &reqwest::Client, rpc_url: &str) -> anyhow::Result<u64> {
-    let response: RpcEnvelope<String> =
-        rpc_call(http_client, rpc_url, "eth_chainId", serde_json::json!([])).await?;
+/// Read-only L1 provider over `RELAYER_RPC_URL` plus the comma-separated
+/// `RELAYER_RPC_FALLBACKS`. The chain ID (which binds the EIP-712 domain) and
+/// contract reads need a strict majority of the configured endpoints to
+/// agree; gas estimates fail over. Signed submissions do not use this
+/// provider: they go to the primary once (`send_sponsored_transaction`).
+fn l1_read_provider(rpc_url: &str) -> anyhow::Result<RootProvider<FailoverTransport>> {
+    let urls = common::l1_rpc::parse_rpc_endpoints(
+        rpc_url,
+        &std::env::var("RELAYER_RPC_FALLBACKS").unwrap_or_default(),
+        "RELAYER_RPC_URL",
+        "RELAYER_RPC_FALLBACKS",
+    )?;
+    common::l1_rpc::build_provider_from_urls(&urls)
+}
 
-    let result = response
-        .result
-        .ok_or_else(|| anyhow::anyhow!("Missing chainId result from RPC"))?;
-    parse_hex_u64(&result).map_err(anyhow::Error::msg)
+async fn fetch_chain_id(rpc_url: &str) -> anyhow::Result<u64> {
+    l1_read_provider(rpc_url)?
+        .get_chain_id()
+        .await
+        .map_err(|_| {
+            anyhow::anyhow!("configured relayer RPC endpoints did not agree on a chain ID")
+        })
 }
 
 async fn fetch_gas_price(http_client: &reqwest::Client, rpc_url: &str) -> Result<U256, String> {
@@ -1935,13 +1945,8 @@ async fn fetch_token_nonce(
     token_contract: Address,
     owner: Address,
 ) -> Result<U256, String> {
-    let provider = ProviderBuilder::new().on_http(
-        state
-            .config
-            .rpc_url
-            .parse()
-            .map_err(|e| format!("Invalid relayer RPC URL: {}", e))?,
-    );
+    let provider = l1_read_provider(&state.config.rpc_url)
+        .map_err(|e| format!("Invalid relayer RPC configuration: {e}"))?;
     let contract = IERC20PermitRead::new(token_contract, &provider);
     contract
         .nonces(owner)

@@ -3,12 +3,13 @@
 use alloy::{
     network::EthereumWallet,
     primitives::{Address, U256},
-    providers::ProviderBuilder,
+    providers::{ProviderBuilder, RootProvider},
     signers::local::PrivateKeySigner,
     sol,
 };
 use anyhow::{Context, Result};
 use async_trait::async_trait;
+use common::l1_rpc::FailoverTransport;
 
 sol!(
     #[sol(rpc)]
@@ -50,6 +51,9 @@ sol!(
     }
 );
 
+/// Signing provider over the shared L1 transport: contract view calls need a
+/// strict majority of the configured endpoints to agree, and transactions go
+/// to the primary once.
 macro_rules! build_provider {
     ($client:expr) => {{
         let signer = $client.parse_operator_signer()?;
@@ -57,11 +61,7 @@ macro_rules! build_provider {
         ProviderBuilder::new()
             .with_recommended_fillers()
             .wallet(wallet)
-            .on_http(
-                $client.rpc_url.parse().with_context(|| {
-                    format!("Invalid pinning rewards RPC URL: {}", $client.rpc_url)
-                })?,
-            )
+            .on_provider($client.l1_provider()?)
     }};
 }
 
@@ -142,6 +142,7 @@ pub trait PinningContract: Send + Sync {
 /// Client implementation using Alloy
 pub struct PinningRewardsClient {
     rpc_url: String,
+    fallback_rpc_urls: Vec<String>,
     contract_address: String,
     operator_key: String,
 }
@@ -150,9 +151,28 @@ impl PinningRewardsClient {
     pub fn new(rpc_url: String, contract_address: String, operator_key: String) -> Self {
         Self {
             rpc_url,
+            fallback_rpc_urls: Vec::new(),
             contract_address,
             operator_key,
         }
+    }
+
+    /// Add independent fallback endpoints. Contract reads then need a strict
+    /// majority of all configured endpoints (configure none, or at least two
+    /// fallbacks for a quorum of three).
+    pub fn with_fallback_rpc_urls(mut self, fallback_rpc_urls: Vec<String>) -> Self {
+        self.fallback_rpc_urls = fallback_rpc_urls;
+        self
+    }
+
+    fn l1_provider(&self) -> Result<RootProvider<FailoverTransport>> {
+        let urls = common::l1_rpc::parse_rpc_endpoints(
+            &self.rpc_url,
+            &self.fallback_rpc_urls.join(","),
+            "pinning rewards RPC URL",
+            "pinning rewards fallback RPC URLs",
+        )?;
+        common::l1_rpc::build_provider_from_urls(&urls)
     }
 
     fn parse_contract_address(&self) -> Result<Address> {

@@ -499,7 +499,7 @@ flowchart TD
 | ID | Sev | Area | Title | Evidence | Conf. |
 |----|-----|------|-------|----------|-------|
 | AUD-01 | **High** | Infra/L1 | L1 history RPC failure: validator-set sync degraded ~42 days (faucet closed, likely same cause) | `/v1/health`, `/api/stats` | Sync: confirmed [LIVE]; faucet link: inferred |
-| AUD-02 | **High** | Node/L1 | "Failover" RPC is first-success; security-critical reads trust one provider | `rpc_failover.rs:52-85`, `package_admission.rs:1169` | Confirmed [CODE] |
+| AUD-02 | **High** | Node/L1 | "Failover" RPC is first-success; security-critical reads trust one provider | `rpc_failover.rs:52-85`, `package_admission.rs:1169` | Confirmed [CODE]; fixed in source for node, faucet, relayer and pinner (§12.2). Takes effect only with three or more providers configured |
 | AUD-03 | **High** | CI/Build | Production feature path (`phase-c-real-fleet`) not covered by the full test suite | `node/Cargo.toml:96-100`, `rust-ci.yml:105-158` | Confirmed [CODE] |
 | AUD-04 | **High** | Economics | No slashing wired; equivocation detector is dead code | `slashing_relay.rs:53`; no node callers | Confirmed [CODE] |
 | AUD-05 | **High** (mainnet: Critical) | Contracts | Governance executes immediately with no timelock; emergency admission path | `Governance.sol:394-403`; `Staking.sol:433-465` | Confirmed [CODE] |
@@ -1052,7 +1052,7 @@ git status --short && git diff --stat
 |---|------|--------|-------|
 | 0.1 | Triage (git state, Cloud Build `f50a2977`, Geth VM) | **Not possible here** — needs a working shell and cloud access | — |
 | 0.2 | Full-history RPC provider | **Your decision** (a paid tier or the finished Geth node). Configuration is documented | `.env.example` (`CREG_ETH_RPC_FALLBACKS`) |
-| 0.3 | Quorum reads for security-relevant L1 reads (AUD-02) | **Done and tested** (10/10 new tests, full suites green) | `crates/node/src/rpc_failover.rs` |
+| 0.3 | Quorum reads for security-relevant L1 reads (AUD-02) | **Done and tested** for the node, then extended to the faucet, relayer, pinner and the node's startup bytecode check (see §12.2 and §12.5) | `crates/common/src/l1_rpc.rs`, `crates/node/src/rpc_failover.rs` |
 | 0.4 | Observer canary rollout | **Not started** — needs a built image and your go-ahead | — |
 | 0.5 | Heartbeat / liveness signal (AUD-14) | **Observability version done and tested** (tip-age metric with 2 unit tests + idle/stall alerts). A protocol heartbeat block was **deliberately not implemented**: it changes block production and chain growth, so it needs a protocol decision, compilation and a rehearsal | `crates/node/src/metrics.rs`, `creg-alerts.yml` |
 | 0.6 | Alerts (AUD-26) | **Rules fixed; opt-in alerting profile added.** Turning notifications on needs a webhook | `testnet/monitoring/` |
@@ -1077,7 +1077,33 @@ Normalisation lowercases hex and reduces logs to their identifying fields, so ho
 - With **two**, both must agree on every quorum read, so one outage blocks admission. Configure one or at least three.
 - `eth_call` at `latest` can briefly disagree across providers right after a state change; those reads now fail closed and are retried (a publisher sees "stake enforcement unavailable" for a moment instead of a possibly wrong answer).
 - Quorum methods now cost one request per provider, which matters on rate-limited free tiers.
-- Not covered: the separate `relayer`, `faucet` and `ipfs-pinner` crates, and the startup bytecode probe in `main.rs` (`fetch_contract_code`), which still use their own first-success paths.
+- The `relayer`, `faucet` and `ipfs-pinner` crates and the node's startup bytecode probe were not covered at first. A follow-up extended quorum reads to them; see the next paragraph.
+
+**Quorum reads in the other services (follow-up, same day).** The transport moved from `crates/node/src/rpc_failover.rs` into `crates/common/src/l1_rpc.rs`, behind a new `l1-rpc` feature, so the node, faucet, relayer and pinner share one implementation and one set of tests. The node's `rpc_failover` keeps its API (`build_l1_provider`, `configured_rpc_urls`) as a thin wrapper, so no node call site changed. A second entry point, `routed_json_call`, applies the same policy to services that speak raw JSON-RPC.
+
+| Service | Now under quorum | New setting |
+|---------|------------------|-------------|
+| Node startup | Bytecode check for the configured contracts (`fetch_contract_code`), which took the first answer | `CREG_ETH_RPC_FALLBACKS` (existing) |
+| Faucet ledger reconciliation | Historical faucet balance and total supply, token bytecode, chain ID and, when no indexer is configured, Transfer log scans. Block reads fail over | `FAUCET_RECONCILIATION_RPC_FALLBACKS` |
+| Faucet balance checks | Recipient and faucet balances (token and native) used for caps, float and health | `FAUCET_RPC_FALLBACKS` |
+| Relayer | Chain ID at startup (it binds the EIP-712 domain) and permit-nonce reads. Gas estimates fail over | `RELAYER_RPC_FALLBACKS` |
+| IPFS pinner | All contract view calls | `PinningRewardsClient::with_fallback_rpc_urls` |
+
+For the faucet this is about availability as well as integrity. With three history endpoints, one provider serving pruned logs is outvoted instead of keeping reconciliation (and so token claims) closed. It also can no longer make reconciliation pass on its own.
+
+Other changes made along the way:
+- Faucet `/balance` and drip errors no longer include the transport error text. That text can contain the RPC URL, and the URL can contain a provider API key.
+- The Routescan adapter now returns `eth_call` values as one 32-byte ABI word, the same encoding a JSON-RPC provider returns, so the two can agree in a quorum.
+- With no fallbacks configured, behaviour is unchanged, except that faucet, relayer and pinner reads now have bounded timeouts (5 s connect, 15 s total).
+- The three settings are documented in `.env.example` and passed through by `docker-compose.yml`, `docker-compose.testnet.yml`, `docker-compose.prod.yml`, `testnet/docker-compose.cloud-edge.yml` and `testnet/docker-compose.unified.yml`, with empty defaults.
+
+Still not under quorum, deliberately or for now:
+- Transaction submission: primary only, by design.
+- Faucet receipt lookups (already fail over across the history, live and deployment-receipt URLs).
+- Faucet indexer log discovery (`FAUCET_RECONCILIATION_INDEXER_URL`), which is cross-checked against receipts, canonical block hashes and balances.
+- Block-by-number reads: honest providers return different optional fields, so these fail over.
+- The relayer's gas-price and receipt polling.
+- The pinner is a library that no binary uses yet.
 
 Tests added in the same file: method routing, batch routing, log normalisation (extras and case), the exact October failure (one provider returns no logs while two return them), configured-endpoint denominators, and three end-to-end tests against local JSON-RPC stubs (majority chain ID wins, no quorum fails closed, non-security reads still fail over).
 
@@ -1160,6 +1186,13 @@ git worktree remove --force C:\Users\samue\.cargo-targets\capmatrix-wt
 | Explorer `npm run test:unit` | **3/3 pass** | |
 | Alert rules | **Structure pass** | All 15 rules parse with valid severities and balanced expressions, and every referenced metric is exported by the node. Not checked by `promtool` (not installed; no Prometheus image cached) |
 | Capability matrix `--check` | **Pass** after regeneration from an LF checkout | Changes 3 digests: the edited `.env.example`, plus `testnet/.env.example` and `testnet/sepolia-fleet.env.example`, which were already stale at `HEAD` |
+| Follow-up: `common::l1_rpc` tests | **20/20 pass** | The 10 transport tests moved from the node, plus endpoint parsing, the raw JSON-RPC router (a pruned provider is outvoted, no quorum fails closed without naming endpoints, side effects go to the primary only) and a contract-code quorum test against local stubs |
+| Follow-up: faucet | **4/4 pass**, its first tests | Endpoint-set selection, error naming, indexer word encoding, and a pruned provider outvoted through the faucet's own `rpc_request` against local stubs |
+| Follow-up: relayer, pinner, node library | **Pass** (4, 4 and 272) | The node library total is 10 lower because its transport tests moved to `common` |
+| Follow-up: `cargo fmt --check`; Clippy on `common`, faucet, relayer, pinner and node (`--all-targets -D warnings`); `phase-c-real-fleet` check | **Pass** | Same two pre-existing lints allowed as above |
+| Follow-up: full workspace `cargo test` | **Pass — 1,028 passed, 0 failed, 2 ignored** | 4 more than before (the faucet tests). The 20 transport tests in the node's two test targets moved into `common` |
+| Follow-up: `Cargo.lock` | 5 lines added | New dependency edges for `common` only; no version changed |
+| Follow-up: capability matrix | **Regenerate before merging** | `.env.example`, `docker-compose.yml`, `docker-compose.prod.yml` and `docker-compose.testnet.yml` are hashed inputs; regenerate from an LF checkout (§12.4) |
 
 **Not covered here:** CI's exact toolchain (Rust 1.93.0 is not installed locally; 1.98.1 was used), Linux, the Foundry contract suite (no contract changed), the explorer production build, and any deployment.
 

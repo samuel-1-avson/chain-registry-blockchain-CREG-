@@ -2460,9 +2460,12 @@ name = "common"
 version = "0.1.0"
 dependencies = [
  "aes-gcm",
+ "alloy",
  "anyhow",
+ "axum",
  "chrono",
  "ed25519-dalek",
+ "futures",
  "hex",
  "prost",
  "prost-types",
@@ -2471,8 +2474,10 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "thiserror 1.0.69",
+ "tokio",
  "tonic",
  "tonic-build",
+ "tower 0.4.13",
  "tracing",
  "uuid 1.22.0",
  "x25519-dalek",

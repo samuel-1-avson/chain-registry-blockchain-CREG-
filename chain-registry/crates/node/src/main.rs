@@ -276,52 +276,20 @@ async fn validate_l1_chain_id(rpc_url: &str, expected_from_spec: Option<u64>) ->
     Ok(())
 }
 
-async fn fetch_contract_code(
-    client: &reqwest::Client,
-    rpc_url: &str,
-    address: &str,
-) -> Result<String> {
-    let endpoints = crate::rpc_failover::configured_rpc_urls(rpc_url)?;
-    let mut last_error = None;
-    for (index, endpoint) in endpoints.iter().enumerate() {
-        let response = client
-            .post(endpoint)
-            .json(&serde_json::json!({
-                "jsonrpc": "2.0",
-                "method": "eth_getCode",
-                "params": [address, "latest"],
-                "id": 1,
-            }))
-            .send()
-            .await;
-        let response: serde_json::Value = match response {
-            Ok(response) => match response.json().await {
-                Ok(response) => response,
-                Err(_) => {
-                    last_error = Some(format!("endpoint {} returned invalid JSON", index + 1));
-                    continue;
-                }
-            },
-            Err(_) => {
-                last_error = Some(format!("endpoint {} could not be reached", index + 1));
-                continue;
-            }
-        };
-
-        if response.get("error").is_some() {
-            last_error = Some(format!("endpoint {} returned an RPC error", index + 1));
-            continue;
-        }
-        if let Some(code) = response.get("result").and_then(|value| value.as_str()) {
-            return Ok(code.to_string());
-        }
-        last_error = Some(format!("endpoint {} omitted the code result", index + 1));
-    }
-
-    anyhow::bail!(
-        "eth_getCode failed for {address} on configured L1 RPC endpoints: {}",
-        last_error.unwrap_or_else(|| "no endpoint is configured".into())
-    )
+/// Read deployed bytecode through the shared L1 transport, so the answer must
+/// be agreed by a strict majority of the configured endpoints. One provider
+/// can neither hide a deployed contract nor invent one.
+async fn fetch_contract_code(rpc_url: &str, address: &str) -> Result<alloy::primitives::Bytes> {
+    let parsed: alloy::primitives::Address = address
+        .trim()
+        .parse()
+        .with_context(|| format!("{address} is not a valid contract address"))?;
+    let provider = crate::rpc_failover::build_l1_provider(rpc_url)?;
+    provider.get_code_at(parsed).await.map_err(|_| {
+        anyhow::anyhow!(
+            "eth_getCode for {address} failed or did not reach quorum on the configured L1 RPC endpoints"
+        )
+    })
 }
 
 async fn validate_contract_addresses(config: &config::NodeConfig) -> Result<()> {
@@ -345,12 +313,11 @@ async fn validate_contract_addresses(config: &config::NodeConfig) -> Result<()> 
         return Ok(());
     }
 
-    let client = build_rpc_validation_client()?;
     for attempt in 1..=10 {
         let mut errors = Vec::new();
         for (name, address) in &configured_contracts {
-            match fetch_contract_code(&client, &config.eth_rpc_url, address).await {
-                Ok(code) if code != "0x" && code != "0x0" => {}
+            match fetch_contract_code(&config.eth_rpc_url, address).await {
+                Ok(code) if !code.is_empty() => {}
                 Ok(_) => errors.push(format!("{}={} has no deployed bytecode", name, address)),
                 Err(_) => errors.push(format!("{} bytecode request failed", name)),
             }
