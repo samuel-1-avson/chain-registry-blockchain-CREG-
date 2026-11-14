@@ -5,6 +5,7 @@
 // Local chain (RocksDB):
 //   creg_chain_tip_height      — height index of the tip block (genesis alone => 0)
 //   creg_chain_blocks_stored   — count of blocks in local storage (genesis alone => 1)
+//   creg_chain_tip_age_seconds — seconds since the tip block's header timestamp
 //   creg_package_count, creg_pending_pool_size, creg_publisher_count
 //
 // PBFT block consensus:
@@ -60,6 +61,19 @@ pub async fn render(state: Arc<RwLock<NodeState>>) -> String {
         "gauge",
         stats.block_count as f64,
     );
+
+    // Blocks are produced only when finalized work exists, so a large tip age
+    // alone means "idle". Alert rules pair it with the pending-work gauges to
+    // tell an idle chain from a stalled one.
+    if let Ok(Some(tip)) = s.chain.get_block_by_height(stats.tip_height) {
+        metric(
+            &mut out,
+            "creg_chain_tip_age_seconds",
+            "Seconds since the local tip block's header timestamp",
+            "gauge",
+            tip_age_seconds(tip.header.timestamp, chrono::Utc::now()) as f64,
+        );
+    }
 
     metric(
         &mut out,
@@ -558,6 +572,17 @@ pub async fn render(state: Arc<RwLock<NodeState>>) -> String {
     out
 }
 
+/// Seconds between the tip block's header timestamp and `now`, clamped at zero
+/// so a proposer clock slightly ahead of ours never reports a negative age.
+fn tip_age_seconds(
+    tip_timestamp: chrono::DateTime<chrono::Utc>,
+    now: chrono::DateTime<chrono::Utc>,
+) -> i64 {
+    now.signed_duration_since(tip_timestamp)
+        .num_seconds()
+        .max(0)
+}
+
 /// Numeric encoding for alert rules (e.g. `== 4` for synced).
 pub fn validator_set_sync_state_code(state: &str) -> i32 {
     match state {
@@ -612,5 +637,25 @@ mod tests {
     #[test]
     fn escape_label_quotes() {
         assert_eq!(escape_label(r#"a"b"#), r#"a\"b"#);
+    }
+
+    fn utc(text: &str) -> chrono::DateTime<chrono::Utc> {
+        chrono::DateTime::parse_from_rfc3339(text)
+            .expect("valid RFC 3339 timestamp")
+            .with_timezone(&chrono::Utc)
+    }
+
+    #[test]
+    fn tip_age_counts_seconds_since_the_tip_block() {
+        let tip = utc("2026-09-29T00:00:00Z");
+        let now = utc("2026-09-30T00:00:30Z");
+        assert_eq!(tip_age_seconds(tip, now), 86_430);
+    }
+
+    #[test]
+    fn tip_age_is_never_negative_under_clock_skew() {
+        let now = utc("2026-09-30T00:00:00Z");
+        let tip = now + chrono::Duration::seconds(5);
+        assert_eq!(tip_age_seconds(tip, now), 0);
     }
 }

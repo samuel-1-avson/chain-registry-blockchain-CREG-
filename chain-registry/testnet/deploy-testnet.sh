@@ -47,6 +47,21 @@ fi
 BLOCK_NUMBER=$(cast block-number --rpc-url "$RPC_URL")
 echo -e "${GREEN}✓ Connected to Ethereum (block $BLOCK_NUMBER)${NC}"
 
+# This script uses the public Anvil default accounts (deployer #0 and faucet
+# #1). Their private keys are published, so anything they deploy or receive on
+# a shared network can be taken over by anyone. Refuse any node that is not
+# Anvil. A chain-ID check is not enough: an Anvil fork reports the forked ID.
+CLIENT_VERSION=$(cast client --rpc-url "$RPC_URL" 2>/dev/null || true)
+case "$CLIENT_VERSION" in
+    anvil*) ;;
+    *)
+        echo -e "${RED}Error: $RPC_URL is not a local Anvil node (client: ${CLIENT_VERSION:-unknown}).${NC}"
+        echo "This script uses the public Anvil default keys and is for local development only."
+        echo "For Sepolia, use testnet/deploy-sepolia.sh with a freshly generated DEPLOYER_KEY."
+        exit 1
+        ;;
+esac
+
 # Get deployer balance
 BALANCE=$(cast balance "$DEPLOYER_ADDR" --rpc-url "$RPC_URL")
 echo -e "${GREEN}✓ Deployer balance: $BALANCE${NC}"

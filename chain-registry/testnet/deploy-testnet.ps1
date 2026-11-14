@@ -88,6 +88,19 @@ try {
 
 Write-Host "$Green`u{2713} Connected to Ethereum (block $blockNumber)$NC"
 
+# This script uses the public Anvil default accounts (deployer #0 and faucet
+# #1). Their private keys are published, so anything they deploy or receive on
+# a shared network can be taken over by anyone. Refuse any node that is not
+# Anvil. A chain-ID check is not enough: an Anvil fork reports the forked ID.
+$clientVersion = (cast client --rpc-url $RpcUrl 2>$null | Out-String).Trim()
+if ($LASTEXITCODE -ne 0 -or -not $clientVersion.StartsWith("anvil")) {
+    if (-not $clientVersion) { $clientVersion = "unknown" }
+    Write-Host "$Red Error: $RpcUrl is not a local Anvil node (client: $clientVersion).$NC"
+    Write-Host "This script uses the public Anvil default keys and is for local development only."
+    Write-Host "For Sepolia, use testnet\deploy-sepolia.ps1 with a freshly generated deployer key."
+    exit 1
+}
+
 # Get deployer balance
 try {
     $balance = cast balance $DeployerAddr --rpc-url $RpcUrl 2>$null

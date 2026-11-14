@@ -1,5 +1,12 @@
 # CREG protocol progress
 
+> **Superseded for live-network status (2026-11-14).** Statements below that the
+> API serves an empty chain (tip 0) or that GitHub Actions does not start are out
+> of date: the public API serves the R7 chain at h20 and Rust CI runs. See
+> [CREG-DEEP-DIVE-AUDIT-2026-11-14.md](./CREG-DEEP-DIVE-AUDIT-2026-11-14.md) for
+> current state, findings and the implementation route. The PR history and
+> "do not" rules below remain valid.
+
 **As of:** 2026-09-20
 **HEAD:** `9173c37` (merge; observer framing, signed-spec Registry, truthful Arena docs).
 **Public binary pin:** `v0.4.8-testnet` provides Windows, Linux, and macOS archives through the GitHub release. SEC-401 freeze candidate can stay `v0.4.3-testnet` if a vendor already scoped that tag.
