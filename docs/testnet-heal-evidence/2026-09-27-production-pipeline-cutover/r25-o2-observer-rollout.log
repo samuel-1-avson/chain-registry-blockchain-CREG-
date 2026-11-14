@@ -1,0 +1,14 @@
+{"stage": "preflight", "node": "observer-2", "height": 14, "hash": "2ece0610b4b808ee5382704b702917dd6f2f3f75d6eeb2a8585aaa9e270507aa", "profile": "f397fac29df29438f0ee15580547def5fe66a03af60153d22993f4a7af9fce8c", "ready": true}
+{"schema": "creg-real-r25-o2-observer-rollout-v1", "captured_at_utc": "2026-09-27T22:41:15Z", "node_id": "observer-2", "image_id": "sha256:2a553f1cb8b2ea6c63bf99649c57e0291698e3ac01da5de80863760afcc07a70", "node_binary_sha256": "24925bf0df62ed9fafe4565f9969ba83c0beefbbd6725abbd8814f99ea04cf07", "height": 14, "block_hash": "2ece0610b4b808ee5382704b702917dd6f2f3f75d6eeb2a8585aaa9e270507aa", "scanner_profile_digest": "f397fac29df29438f0ee15580547def5fe66a03af60153d22993f4a7af9fce8c", "checks": {"signed_r7_h14": true, "observer_role": true, "four_real_validators": true, "live_peers": false, "sandbox_isolated": true, "scanner_ready": true, "queues_clear": true, "pbft_clear": true}, "passed": false, "preserved_container": "creg-phase-c-r7-o2-r22-before-r25", "public_chain_cutover": false}
+R25 O2 acceptance failed; preserved state requires review
+
+Recommendation: To check for possible causes of SSH connectivity issues and get
+recommendations, rerun the ssh command with the --troubleshoot option.
+
+gcloud compute ssh creg-observer-vm --project=gen-lang-client-0022105784 --zone=us-central1-a --troubleshoot
+
+Or, to investigate an IAP tunneling issue:
+
+gcloud compute ssh creg-observer-vm --project=gen-lang-client-0022105784 --zone=us-central1-a --troubleshoot --tunnel-through-iap
+
+ERROR: (gcloud.compute.ssh) [C:\Users\samue\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\sdk\plink.exe] exited with return code [1].

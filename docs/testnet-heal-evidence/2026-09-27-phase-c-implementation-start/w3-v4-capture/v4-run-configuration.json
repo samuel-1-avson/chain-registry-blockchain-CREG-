@@ -1,0 +1,74 @@
+{
+  "container_name": "creg-phase-c-r7-v4",
+  "container_id": "c7c86f3c75c9bf92160d62dcd593774def7ceb68db6d20cc63eddc92bc3a01a9",
+  "state": "running",
+  "image_id": "sha256:8731cc85c73e6267e2e00014e8df50aef3f4d60ce6cfcaddb8fd0a3584eb2ad9",
+  "configured_image": "creg-node:phase-c-secure-r22-commit-capture",
+  "restart_policy": "unless-stopped",
+  "network_mode": "default",
+  "port_bindings": {
+    "8080/tcp": [
+      {
+        "HostIp": "",
+        "HostPort": "8080"
+      }
+    ],
+    "9000/tcp": [
+      {
+        "HostIp": "",
+        "HostPort": "9000"
+      }
+    ]
+  },
+  "privileged": true,
+  "group_add": [
+    "111"
+  ],
+  "binds": [
+    "/var/run/docker.sock:/var/run/docker.sock"
+  ],
+  "mounts": [
+    {
+      "source": "/var/run/docker.sock",
+      "destination": "/var/run/docker.sock",
+      "rw": true
+    },
+    {
+      "source": "/var/lib/creg/phase-c-r7/data",
+      "destination": "/data",
+      "rw": true
+    },
+    {
+      "source": "/var/lib/creg/phase-c-r7/scanner-r11-osv-kleur",
+      "destination": "/scanner",
+      "rw": false
+    }
+  ],
+  "node_env_file_sha256": "c37b9d363172638aa18271df57ead06caff2f82abc2ae6e64e573bfdb88be8ae",
+  "env_file_matches_container": true,
+  "capture_vars_in_container": [],
+  "selected_nonsecret_env": {
+    "CREG_NODE_ID": "validator-4",
+    "CREG_NODE_ROLE": "validator",
+    "CREG_CHAIN_ID": "creg-phase-c-testnet-2026-09-26-r7",
+    "CREG_GENESIS_HASH": "0x1852b9a86dd3b53e7b2de4a774723a4fe48e862f9c61d14e5917b42b21055234",
+    "CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM": "false",
+    "CREG_SCANNER_PROFILE_DIGEST": "f397fac29df29438f0ee15580547def5fe66a03af60153d22993f4a7af9fce8c"
+  },
+  "scanner_metrics": [
+    "creg_scanner_profile_ready 1",
+    "creg_scanner_yara_ready 1",
+    "creg_scanner_threat_intel_ready 1",
+    "creg_scanner_osv_ready 1",
+    "creg_scanner_yara_rule_files 1",
+    "creg_scanner_threat_intel_entries 100",
+    "creg_scanner_osv_lookups 5",
+    "creg_scanner_osv_records 0",
+    "creg_scanner_profile_info{profile_digest=\"f397fac29df29438f0ee15580547def5fe66a03af60153d22993f4a7af9fce8c\",scanner_version=\"creg-deterministic-scanner-v1.1.0+sha256:f397fac29df29438f0ee15580547def5fe66a03af60153d22993f4a7af9fce8c\"} 1"
+  ],
+  "data_and_env_paths": {
+    "data": "/var/lib/creg/phase-c-r7/data",
+    "scanner": "/var/lib/creg/phase-c-r7/scanner-r11-osv-kleur",
+    "env": "/var/lib/creg/phase-c-r7/node.env"
+  }
+}

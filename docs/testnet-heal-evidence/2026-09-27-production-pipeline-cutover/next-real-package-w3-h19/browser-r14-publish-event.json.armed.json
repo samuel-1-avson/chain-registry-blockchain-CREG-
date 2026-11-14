@@ -1,0 +1,12 @@
+{
+  "capturedAt": "2026-09-28T08:10:31.587Z",
+  "canonical": "npm:ansi-regex@6.1.0",
+  "afterHeight": 18,
+  "connections": [
+    {
+      "url": "http://127.0.0.1:3008/v1/public/events",
+      "opened": true,
+      "errors": 0
+    }
+  ]
+}

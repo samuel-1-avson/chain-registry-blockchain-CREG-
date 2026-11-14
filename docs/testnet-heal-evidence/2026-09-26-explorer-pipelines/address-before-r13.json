@@ -1,0 +1,21 @@
+{
+  "address": "0x91e4dfc18bf015051676f00f23782d0770b95a7a",
+  "profile": {
+    "address": "0x91e4dfc18bf015051676f00f23782d0770b95a7a",
+    "is_validator": false,
+    "is_active_validator": true,
+    "validator": null,
+    "active_status": "self",
+    "stake": "100",
+    "reputation": 100,
+    "blocks_proposed": 0,
+    "tx_count": 0,
+    "scanned_blocks": 5
+  },
+  "transactions": {
+    "address": "0x91e4dfc18bf015051676f00f23782d0770b95a7a",
+    "transactions": [],
+    "scanned_blocks": 5,
+    "total": 0
+  }
+}

@@ -1,0 +1,123 @@
+{
+  "capturedAt": "2026-09-27T06:49:07.395Z",
+  "dataSource": "live Phase C candidate node through the real Vite proxy; no fixtures or intercepted responses",
+  "explorerUrl": "http://127.0.0.1:3007",
+  "candidateNodeUrl": "https://api.testnet.cregnet.dev",
+  "operation": "publish",
+  "canonical": "npm:kleur@4.1.5",
+  "startingHeight": 12,
+  "probeError": null,
+  "checks": {
+    "stream_opened": true,
+    "submitted": true,
+    "verified": true,
+    "block_produced": true,
+    "event_rendered_in_web_explorer": true,
+    "no_page_errors": true
+  },
+  "connections": [
+    {
+      "url": "http://127.0.0.1:3007/v1/public/events",
+      "opened": true,
+      "errors": 0
+    }
+  ],
+  "events": [
+    {
+      "type": "package_submitted",
+      "data": {
+        "kind": "package_submitted",
+        "ts": "2026-09-27T06:49:01.950715747+00:00",
+        "payload": {
+          "canonical": "npm:kleur@4.1.5",
+          "publisher_pubkey": "863906af03a385de"
+        }
+      },
+      "receivedAt": "2026-09-27T06:49:01.954Z"
+    },
+    {
+      "type": "validator_voted",
+      "data": {
+        "kind": "validator_voted",
+        "ts": "2026-09-27T06:49:03.322079720+00:00",
+        "payload": {
+          "validator_id": "validator-1",
+          "canonical": "npm:kleur@4.1.5",
+          "approved": true
+        }
+      },
+      "receivedAt": "2026-09-27T06:49:03.324Z"
+    },
+    {
+      "type": "validator_voted",
+      "data": {
+        "kind": "validator_voted",
+        "ts": "2026-09-27T06:49:04.119398702+00:00",
+        "payload": {
+          "validator_id": "validator-3",
+          "canonical": "npm:kleur@4.1.5",
+          "approved": true
+        }
+      },
+      "receivedAt": "2026-09-27T06:49:04.120Z"
+    },
+    {
+      "type": "validator_voted",
+      "data": {
+        "kind": "validator_voted",
+        "ts": "2026-09-27T06:49:04.623509356+00:00",
+        "payload": {
+          "validator_id": "validator-2",
+          "canonical": "npm:kleur@4.1.5",
+          "approved": true
+        }
+      },
+      "receivedAt": "2026-09-27T06:49:04.624Z"
+    },
+    {
+      "type": "validator_voted",
+      "data": {
+        "kind": "validator_voted",
+        "ts": "2026-09-27T06:49:06.079359490+00:00",
+        "payload": {
+          "validator_id": "validator-4",
+          "canonical": "npm:kleur@4.1.5",
+          "approved": true
+        }
+      },
+      "receivedAt": "2026-09-27T06:49:06.080Z"
+    },
+    {
+      "type": "block_produced",
+      "data": {
+        "kind": "block_produced",
+        "ts": "2026-09-27T06:49:06.858786087+00:00",
+        "payload": {
+          "height": 13,
+          "hash": "8448cce76d7258f051cf9632d2ef7181da1321f5d19a3b5d00f00f8975aa2993",
+          "tx_count": 1,
+          "block_hash": "8448cce76d7258f051cf9632d2ef7181da1321f5d19a3b5d00f00f8975aa2993",
+          "block_phase": "committed"
+        }
+      },
+      "receivedAt": "2026-09-27T06:49:06.859Z"
+    },
+    {
+      "type": "package_verified",
+      "data": {
+        "kind": "package_verified",
+        "ts": "2026-09-27T06:49:06.858884736+00:00",
+        "payload": {
+          "canonical": "npm:kleur@4.1.5",
+          "block_hash": "8448cce76d7258f051cf9632d2ef7181da1321f5d19a3b5d00f00f8975aa2993",
+          "validator_count": 3,
+          "height": 13,
+          "block_phase": "committed"
+        }
+      },
+      "receivedAt": "2026-09-27T06:49:06.860Z"
+    }
+  ],
+  "renderedText": "Live events\n7 of 7\n🔗\nShare\nAll types (7)\nblock_produced (1)\npackage_submitted (1)\npackage_verified (1)\nvalidator_voted (4)\n⏸ Pause\n↕ Auto-scroll\n≡ Compact\n⇩ Export\nall (7)\nblock_produced (1)\npackage_submitted (1)\npackage_verified (1)\nvalidator_voted (4)\nPACKAGE_VERIFIED\n#13\nnpm:kleur@4.1.5\n0s ago\nBLOCK_PRODUCED\n#13\n0s ago\nVALIDATOR_VOTED\nnpm:kleur@4.1.5\n0s ago\nVALIDATOR_VOTED\nnpm:kleur@4.1.5\n2s ago\nVALIDATOR_VOTED\nnpm:kleur@4.1.5\n2s ago\nVALIDATOR_VOTED\nnpm:kleur@4.1.5\n3s ago\nPACKAGE_SUBMITTED\nnpm:kleur@4.1.5\n4s ago\nLIVE Buffer: 7 events\nShowing: 7 / 7",
+  "pageErrors": []
+}

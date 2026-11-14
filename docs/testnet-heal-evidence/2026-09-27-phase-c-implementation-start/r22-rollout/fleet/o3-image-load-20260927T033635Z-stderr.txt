@@ -1,0 +1,2 @@
+Error: No such image: us-central1-docker.pkg.dev/gen-lang-client-0022105784/creg-testnet/creg-node@sha256:ca4d04e77e9680cb878800f2ea72c1ce7dac6bb3575a55c9921a7314975fb1ef
+bash: line 1: test: =: unary operator expected

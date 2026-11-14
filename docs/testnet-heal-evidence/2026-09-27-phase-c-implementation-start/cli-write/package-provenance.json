@@ -1,0 +1,34 @@
+{
+  "schema": "creg-real-package-provenance-v1",
+  "captured_at_utc": "2026-09-27T04:50:42.700501Z",
+  "source": "https://registry.npmjs.org/kleur/4.1.5",
+  "canonical": "npm:kleur@4.1.5",
+  "name": "kleur",
+  "version": "4.1.5",
+  "description": "The fastest Node.js library for formatting terminal text with ANSI colors~!",
+  "tarball_url": "https://registry.npmjs.org/kleur/-/kleur-4.1.5.tgz",
+  "registry_integrity": "sha512-o+NO+8WrRiQEE4/7nwRJhN1HWpVmJm511pBHUxPLtp0BUISzlBplORYSmTclCnJvQq2tKu/sgl3xVpkc7ZWuQQ==",
+  "verified_integrity": "sha512-o+NO+8WrRiQEE4/7nwRJhN1HWpVmJm511pBHUxPLtp0BUISzlBplORYSmTclCnJvQq2tKu/sgl3xVpkc7ZWuQQ==",
+  "sha256": "0d99562acf82fca4afce2a57b687289a524ac6755dcaf1fdf82a147473091469",
+  "tarball_bytes": 6153,
+  "dependencies": null,
+  "dev_dependencies": {
+    "esm": "3.2.25",
+    "uvu": "0.3.3"
+  },
+  "registry_scripts": {
+    "test": "uvu -r esm -i utils -i xyz",
+    "build": "node build"
+  },
+  "osv_query_endpoint": "https://api.osv.dev/v1/query",
+  "osv_query_package": {
+    "ecosystem": "npm",
+    "name": "kleur"
+  },
+  "osv_query_version": "4.1.5",
+  "osv_captured_at_utc": "2026-09-27T04:55:30.8425789Z",
+  "osv_vulnerabilities": [],
+  "scanner_profile_digest": "d09a9d2450e6e691bc71bee591b1101aa14d8b0feb6f6088ab6819f48e1a6be4",
+  "catalog_absent_at_capture": true,
+  "osv_vulnerability_count": 0
+}

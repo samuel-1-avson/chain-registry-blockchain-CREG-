@@ -1,0 +1,266 @@
+#0 building with "desktop-linux" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 934B 0.0s done
+#1 DONE 0.1s
+
+#2 [internal] load metadata for docker.io/library/creg-node:phase-c-secure-r16-committed-events
+#2 DONE 0.2s
+
+#3 [internal] load metadata for docker.io/library/creg-node:recovery-diagnostic-builder-r16
+#3 DONE 0.2s
+
+#4 [internal] load .dockerignore
+#4 transferring context: 2B done
+#4 DONE 0.0s
+
+#5 [stage-1 1/3] FROM docker.io/library/creg-node:phase-c-secure-r16-committed-events@sha256:08fe32ee3bcff2d9e66daea80212803f8389ce56403cd1bbd0528d84b52793af
+#5 resolve docker.io/library/creg-node:phase-c-secure-r16-committed-events@sha256:08fe32ee3bcff2d9e66daea80212803f8389ce56403cd1bbd0528d84b52793af 0.0s done
+#5 ...
+
+#6 [builder 1/3] FROM docker.io/library/creg-node:recovery-diagnostic-builder-r16@sha256:6e35c9b5e6ce808240b5fdc00633aca51e82a1f7cee47da065e51e21ace69d89
+#6 resolve docker.io/library/creg-node:recovery-diagnostic-builder-r16@sha256:6e35c9b5e6ce808240b5fdc00633aca51e82a1f7cee47da065e51e21ace69d89 0.1s done
+#6 DONE 0.1s
+
+#7 [builder 2/3] WORKDIR /build
+#7 CACHED
+
+#5 [stage-1 1/3] FROM docker.io/library/creg-node:phase-c-secure-r16-committed-events@sha256:08fe32ee3bcff2d9e66daea80212803f8389ce56403cd1bbd0528d84b52793af
+#5 DONE 0.8s
+
+#8 [builder 3/3] RUN --mount=type=cache,id=creg-phase-c-release,target=/build/target,sharing=locked     env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS CARGO_BUILD_JOBS=1     cargo build --release --locked --package faucet --package chain-registry-relayer     --features common/phase-c-canonical-transactions &&     cp /build/target/release/faucet /build/output/faucet &&     cp /build/target/release/creg-relayer /build/output/creg-relayer
+#8 7.775    Compiling serde_core v1.0.228
+#8 14.19    Compiling serde v1.0.228
+#8 14.79    Compiling typenum v1.19.0
+#8 15.78    Compiling bytes v1.11.1
+#8 16.54    Compiling generic-array v0.14.7
+#8 17.05    Compiling crypto-common v0.1.7
+#8 17.17    Compiling const-oid v0.9.6
+#8 17.40    Compiling smallvec v1.15.1
+#8 17.54    Compiling block-buffer v0.10.4
+#8 17.63    Compiling digest v0.10.7
+#8 17.80    Compiling parking_lot_core v0.9.12
+#8 18.03    Compiling crunchy v0.2.4
+#8 18.29    Compiling parking_lot v0.12.5
+#8 18.91    Compiling tokio v1.50.0
+#8 32.98    Compiling tiny-keccak v2.0.2
+#8 33.19    Compiling signature v2.2.0
+#8 33.27    Compiling der v0.7.10
+#8 35.23    Compiling futures-task v0.3.32
+#8 35.31    Compiling futures-util v0.3.32
+#8 37.90    Compiling spki v0.7.3
+#8 38.05    Compiling sha2 v0.10.9
+#8 38.95    Compiling ff v0.13.1
+#8 39.03    Compiling sec1 v0.7.3
+#8 39.50    Compiling group v0.13.0
+#8 39.61    Compiling pkcs8 v0.10.2
+#8 40.39    Compiling hmac v0.12.1
+#8 40.47    Compiling crypto-bigint v0.5.5
+#8 41.99    Compiling elliptic-curve v0.13.8
+#8 42.24    Compiling rfc6979 v0.4.0
+#8 42.31    Compiling arrayvec v0.7.6
+#8 42.46    Compiling hashbrown v0.15.5
+#8 42.96    Compiling alloy-rlp v0.3.13
+#8 43.16    Compiling ecdsa v0.16.9
+#8 43.52    Compiling tokio-util v0.7.18
+#8 44.48    Compiling k256 v0.13.4
+#8 46.55    Compiling ruint v1.17.2
+#8 47.17    Compiling const-hex v1.18.1
+#8 47.43    Compiling indexmap v2.13.0
+#8 47.89    Compiling alloy-primitives v0.8.26
+#8 49.78    Compiling serde_json v1.0.149
+#8 49.87    Compiling http v1.4.0
+#8 51.45    Compiling stable_deref_trait v1.2.1
+#8 51.49    Compiling yoke v0.8.1
+#8 54.13    Compiling zerovec v0.11.5
+#8 55.01    Compiling displaydoc v0.2.5
+#8 55.65    Compiling winnow v0.7.15
+#8 57.29    Compiling hashbrown v0.16.1
+#8 58.40    Compiling alloy-sol-type-parser v0.8.26
+#8 59.44    Compiling memchr v2.8.0
+#8 60.45    Compiling alloy-json-abi v0.8.26
+#8 61.18    Compiling http-body v1.0.1
+#8 61.25    Compiling alloy-sol-macro-input v0.8.26
+#8 61.76    Compiling tinystr v0.8.2
+#8 63.80    Compiling bitflags v2.11.0
+#8 64.00    Compiling icu_locale_core v2.1.1
+#8 66.30    Compiling alloy-sol-macro-expander v0.8.26
+#8 68.74    Compiling zerotrie v0.2.3
+#8 69.04    Compiling potential_utf v0.1.4
+#8 69.13    Compiling cmake v0.1.58
+#8 69.35    Compiling fs_extra v1.3.0
+#8 69.51    Compiling aws-lc-sys v0.39.1
+#8 70.05    Compiling icu_collections v2.1.1
+#8 70.55    Compiling icu_provider v2.1.1
+#8 70.79    Compiling alloy-sol-macro v0.8.26
+#8 73.93    Compiling sync_wrapper v1.0.2
+#8 73.97    Compiling h2 v0.4.13
+#8 81.92    Compiling alloy-sol-types v0.8.26
+#8 165.5    Compiling hyper v1.8.1
+#8 169.5    Compiling icu_normalizer v2.1.1
+#8 170.4    Compiling icu_properties v2.1.2
+#8 172.2    Compiling tower v0.5.3
+#8 172.9    Compiling aws-lc-rs v1.16.2
+#8 173.2    Compiling idna_adapter v1.2.1
+#8 173.2    Compiling hyper-util v0.1.20
+#8 175.6    Compiling http-body-util v0.1.3
+#8 175.8    Compiling idna v1.1.0
+#8 177.8    Compiling either v1.15.0
+#8 177.9    Compiling getrandom v0.3.4
+#8 177.9    Compiling itertools v0.14.0
+#8 179.1    Compiling ring v0.17.9
+#8 182.2    Compiling openssl v0.10.76
+#8 189.1    Compiling url v2.5.8
+#8 190.9    Compiling ahash v0.8.12
+#8 191.0    Compiling rustls v0.23.37
+#8 191.0    Compiling serde_urlencoded v0.7.1
+#8 191.2    Compiling prost-derive v0.13.5
+#8 192.3    Compiling rustls-webpki v0.103.10
+#8 194.5    Compiling native-tls v0.2.18
+#8 195.1    Compiling alloy-json-rpc v0.6.4
+#8 196.3    Compiling tokio-native-tls v0.3.1
+#8 212.5    Compiling c-kzg v1.0.3
+#8 212.9    Compiling alloy-eip7702 v0.4.2
+#8 213.3    Compiling alloy-serde v0.6.4
+#8 214.1    Compiling alloy-eip2930 v0.1.0
+#8 214.4    Compiling tokio-stream v0.1.18
+#8 214.8    Compiling alloy-eips v0.6.4
+#8 215.8    Compiling getrandom v0.4.2
+#8 216.0    Compiling rand_core v0.10.1
+#8 216.1    Compiling alloy-consensus v0.6.4
+#8 218.8    Compiling tokio-rustls v0.26.4
+#8 219.1    Compiling alloy-transport v0.6.4
+#8 220.1    Compiling futures-executor v0.3.32
+#8 220.4    Compiling hybrid-array v0.4.10
+#8 220.9    Compiling semver v1.0.27
+#8 221.1    Compiling regex-syntax v0.8.10
+#8 222.4    Compiling prettyplease v0.2.37
+#8 222.6    Compiling regex-automata v0.4.14
+#8 224.1    Compiling rustc_version v0.4.1
+#8 224.3    Compiling itertools v0.13.0
+#8 225.1    Compiling futures v0.3.32
+#8 225.2    Compiling alloy-network-primitives v0.6.4
+#8 225.5    Compiling hashbrown v0.14.5
+#8 226.1    Compiling prost v0.13.5
+#8 226.3    Compiling num-traits v0.2.19
+#8 226.4    Compiling sha1 v0.10.6
+#8 226.7    Compiling cmov v0.5.3
+#8 226.9    Compiling tungstenite v0.24.0
+#8 230.1    Compiling tower-http v0.6.8
+#8 230.7    Compiling ctutils v0.4.2
+#8 231.0    Compiling petgraph v0.6.5
+#8 232.2    Compiling alloy-pubsub v0.6.4
+#8 235.6    Compiling prost-types v0.13.5
+#8 236.4    Compiling alloy-rpc-types-eth v0.6.4
+#8 239.2    Compiling curve25519-dalek v4.1.3
+#8 239.4    Compiling regex v1.12.3
+#8 240.2    Compiling crypto-common v0.2.1
+#8 241.1    Compiling block-buffer v0.12.0
+#8 241.2    Compiling hyper-tls v0.6.0
+#8 241.4    Compiling http v0.2.12
+#8 242.7    Compiling inout v0.1.4
+#8 242.7    Compiling const-oid v0.10.2
+#8 242.9    Compiling interprocess v2.4.0
+#8 243.8    Compiling digest v0.11.2
+#8 243.9    Compiling prost-build v0.13.5
+#8 244.7    Compiling cipher v0.4.4
+#8 244.8    Compiling reqwest v0.12.28
+#8 256.8    Compiling tokio-tungstenite v0.24.0
+#8 257.0    Compiling alloy-signer v0.6.4
+#8 257.2    Compiling universal-hash v0.5.1
+#8 257.3    Compiling num_enum_derive v0.7.6
+#8 257.9    Compiling cpufeatures v0.3.0
+#8 257.9    Compiling chrono v0.4.44
+#8 260.5    Compiling polyval v0.6.2
+#8 262.7    Compiling num_enum v0.7.6
+#8 262.7    Compiling alloy-network v0.6.4
+#8 264.7    Compiling alloy-transport-ws v0.6.4
+#8 268.1    Compiling alloy-transport-http v0.6.4
+#8 269.7    Compiling tonic-build v0.12.3
+#8 270.3    Compiling alloy-transport-ipc v0.6.4
+#8 272.3    Compiling http-body v0.4.6
+#8 272.4    Compiling h2 v0.3.27
+#8 279.4    Compiling axum-core v0.4.5
+#8 281.3    Compiling serde_path_to_error v0.1.20
+#8 281.6    Compiling hashbrown v0.13.2
+#8 281.9    Compiling schnellru v0.2.4
+#8 282.1    Compiling axum v0.7.9
+#8 286.6    Compiling hyper v0.14.32
+#8 291.3    Compiling alloy-rpc-client v0.6.4
+#8 298.1    Compiling common v0.1.0 (/build/crates/common)
+#8 299.0    Compiling alloy-chains v0.1.69
+#8 299.9    Compiling ghash v0.5.1
+#8 300.0    Compiling tower v0.4.13
+#8 301.7    Compiling chacha20 v0.10.0
+#8 301.9    Compiling aes v0.8.4
+#8 302.6    Compiling ctr v0.9.2
+#8 302.8    Compiling dashmap v6.1.0
+#8 303.3    Compiling hyper-timeout v0.5.2
+#8 303.4    Compiling alloy-dyn-abi v0.8.26
+#8 306.0    Compiling lru v0.12.5
+#8 306.1    Compiling ed25519 v2.2.3
+#8 306.2    Compiling aead v0.5.2
+#8 316.7    Compiling aes-gcm v0.10.3
+#8 316.8    Compiling ed25519-dalek v2.2.0
+#8 317.1    Compiling alloy-provider v0.6.4
+#8 320.2    Compiling tonic v0.12.3
+#8 327.2    Compiling rand v0.10.1
+#8 327.8    Compiling hyper-tls v0.5.0
+#8 329.3    Compiling x25519-dalek v2.0.1
+#8 329.4    Compiling sha2 v0.11.0
+#8 330.4    Compiling hmac v0.13.0
+#8 330.5    Compiling md-5 v0.11.0
+#8 330.7    Compiling uuid v1.22.0
+#8 331.0    Compiling raw-cpuid v11.6.0
+#8 333.0    Compiling siphasher v1.0.2
+#8 333.1    Compiling lazy_static v1.5.0
+#8 333.1    Compiling fallible-iterator v0.2.0
+#8 333.4    Compiling postgres-protocol v0.6.11
+#8 334.3    Compiling reqwest v0.11.27
+#8 345.4    Compiling sharded-slab v0.1.7
+#8 345.8    Compiling phf_shared v0.13.1
+#8 346.0    Compiling quanta v0.12.6
+#8 355.7    Compiling alloy-contract v0.6.4
+#8 356.7    Compiling matchers v0.2.0
+#8 356.7    Compiling alloy-core v0.8.26
+#8 356.8    Compiling alloy-signer-local v0.6.4
+#8 357.0    Compiling alloy-rpc-types v0.6.4
+#8 357.0    Compiling crossbeam-epoch v0.9.18
+#8 357.3    Compiling metrics v0.23.1
+#8 357.7    Compiling rustls-native-certs v0.8.3
+#8 358.2    Compiling http-range-header v0.4.2
+#8 358.4    Compiling sketches-ddsketch v0.2.2
+#8 358.6    Compiling metrics-util v0.17.0
+#8 359.5    Compiling tracing-subscriber v0.3.23
+#8 363.3    Compiling tower-http v0.5.2
+#8 364.5    Compiling hyper-rustls v0.27.7
+#8 365.1    Compiling alloy v0.6.4
+#8 365.2    Compiling chain-registry-secrets v0.1.0 (/build/crates/secrets)
+#8 365.7    Compiling phf v0.13.1
+#8 365.8    Compiling postgres-types v0.2.13
+#8 366.7    Compiling dashmap v5.5.3
+#8 367.1    Compiling whoami v2.1.1
+#8 367.8    Compiling tokio-postgres v0.7.17
+#8 373.6    Compiling metrics-exporter-prometheus v0.15.3
+#8 385.7    Compiling faucet v0.1.0 (/build/crates/faucet)
+#8 421.0    Compiling chain-registry-relayer v0.1.0 (/build/crates/relayer)
+#8 452.6     Finished `release` profile [optimized] target(s) in 7m 30s
+#8 DONE 454.5s
+
+#9 [stage-1 2/3] COPY --from=builder --chown=creg:creg /build/output/faucet /app/faucet
+#9 DONE 0.2s
+
+#10 [stage-1 3/3] COPY --from=builder --chown=creg:creg /build/output/creg-relayer /app/creg-relayer
+#10 DONE 0.1s
+
+#11 exporting to image
+#11 exporting layers
+#11 exporting layers 0.6s done
+#11 exporting manifest sha256:7c18a2f5d888da29bfbd617f17f264b1c750ee234eba8d8c1de66d78fce245b4 0.0s done
+#11 exporting config sha256:6341f9eafcf46be8c08d93907fecd920c549ed660dcc01d88affb089c56f81c5 0.0s done
+#11 naming to docker.io/library/creg-services:phase-c-r17-real-services done
+#11 unpacking to docker.io/library/creg-services:phase-c-r17-real-services
+#11 unpacking to docker.io/library/creg-services:phase-c-r17-real-services 0.3s done
+#11 DONE 1.0s
+
+View build details: docker-desktop://dashboard/build/desktop-linux/desktop-linux/mzd1ddr5ym2x4k7euthf97xk8

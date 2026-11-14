@@ -1,0 +1,7 @@
+{
+  "timestamp_utc": "2026-09-26T08:16:26.5505459Z",
+  "status": "built",
+  "image_tag": "creg-node:phase-c-secure-r9-review",
+  "detail": "Release compilation succeeded. r9 CLI validated the signed r7 spec and built the real pinned OSV snapshot; real scanner profile and real-host acceptance remain pending.",
+  "public_cutover": "pending"
+}

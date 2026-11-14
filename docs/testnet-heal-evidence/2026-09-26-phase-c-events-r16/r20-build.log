@@ -1,0 +1,90 @@
+#0 building with "desktop-linux" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile.r20-durable-revocation-delivery
+#1 transferring dockerfile: 1.55kB 0.0s done
+#1 DONE 0.1s
+
+#2 [internal] load metadata for docker.io/library/creg-node:phase-c-secure-r12-bounded-l1-retry
+#2 ...
+
+#3 [internal] load metadata for docker.io/library/creg-node:recovery-diagnostic-builder-r18
+#3 DONE 0.1s
+
+#4 [internal] load metadata for docker.io/library/creg-node:phase-c-secure-r18-canonical-round-recovery
+#4 DONE 0.1s
+
+#2 [internal] load metadata for docker.io/library/creg-node:phase-c-secure-r12-bounded-l1-retry
+#2 DONE 0.2s
+
+#5 [internal] load .dockerignore
+#5 transferring context: 2B done
+#5 DONE 0.0s
+
+#6 [internal] load build context
+#6 DONE 0.0s
+
+#7 [cli 1/1] FROM docker.io/library/creg-node:phase-c-secure-r18-canonical-round-recovery@sha256:cee77b5210ad67a91f5d6e5ccbf2b5ec914ccf53268f8294b261bc7a37c7f49a
+#7 resolve docker.io/library/creg-node:phase-c-secure-r18-canonical-round-recovery@sha256:cee77b5210ad67a91f5d6e5ccbf2b5ec914ccf53268f8294b261bc7a37c7f49a 0.0s done
+#7 DONE 0.1s
+
+#8 [stage-2 1/4] FROM docker.io/library/creg-node:phase-c-secure-r12-bounded-l1-retry@sha256:f0b693dc567fc3430f22db881581c55a253e75c8f84a5a0f2d6a82d4460d0736
+#8 resolve docker.io/library/creg-node:phase-c-secure-r12-bounded-l1-retry@sha256:f0b693dc567fc3430f22db881581c55a253e75c8f84a5a0f2d6a82d4460d0736 0.1s done
+#8 DONE 0.1s
+
+#9 [builder 1/5] FROM docker.io/library/creg-node:recovery-diagnostic-builder-r18@sha256:ffbaaf09f810702f18a018780512cf900ae2cae384996180d655519a47ff09d2
+#9 resolve docker.io/library/creg-node:recovery-diagnostic-builder-r18@sha256:ffbaaf09f810702f18a018780512cf900ae2cae384996180d655519a47ff09d2 0.1s done
+#9 DONE 0.1s
+
+#10 [builder 2/5] WORKDIR /build
+#10 CACHED
+
+#6 [internal] load build context
+#6 transferring context: 607.44kB 0.1s done
+#6 DONE 0.2s
+
+#11 [builder 3/5] COPY [crates/common/src/lib.rs, /build/crates/common/src/lib.rs]
+#11 DONE 0.1s
+
+#12 [builder 4/5] COPY [crates/node/src/state.rs, crates/node/src/sync.rs, crates/node/src/pending_pool.rs, crates/node/src/api.rs, crates/node/src/p2p.rs, crates/node/src/main.rs, crates/node/src/lib.rs, crates/node/src/revocation_gossip.rs, /build/crates/node/src/]
+#12 DONE 0.2s
+
+#13 [builder 5/5] RUN --mount=type=cache,id=creg-phase-c-release,target=/build/target,sharing=locked     env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS     LIBCLANG_PATH=/usr/lib/llvm-17/lib LLVM_CONFIG_PATH=/usr/bin/llvm-config-17     CLANG_PATH=/usr/bin/clang-17 CARGO_BUILD_JOBS=1 RUST_BACKTRACE=1     cargo build --release --locked --package chain-registry-node --bin creg-node --bin creg_recovery_inspect --features phase-c-real-fleet &&     cp /build/target/release/creg-node /build/output/creg-node &&     cp /build/target/release/creg_recovery_inspect /build/output/creg_recovery_inspect
+#13 6.202    Compiling common v0.1.0 (/build/crates/common)
+#13 16.87    Compiling ml-validator v0.1.0 (/build/crates/ml-validator)
+#13 27.04    Compiling wasm-sandbox v0.1.0 (/build/crates/wasm-sandbox)
+#13 27.93    Compiling resolver v0.1.0 (/build/crates/resolver)
+#13 33.16    Compiling validator v0.1.0 (/build/crates/validator)
+#13 43.16    Compiling zk-validator v0.1.0 (/build/crates/zk-validator)
+#13 61.11    Compiling db-sync v0.1.0 (/build/crates/db-sync)
+#13 61.65    Compiling cross-chain v0.1.0 (/build/crates/cross-chain)
+#13 63.02    Compiling consensus v0.1.0 (/build/crates/consensus)
+#13 72.33    Compiling threshold-encryption v0.1.0 (/build/crates/threshold-encryption)
+#13 75.34    Compiling chain-registry-secrets v0.1.0 (/build/crates/secrets)
+#13 75.96    Compiling chain-registry-node v0.1.0 (/build/crates/node)
+#13 398.1     Finished `release` profile [optimized] target(s) in 6m 36s
+#13 398.1 warning: the following packages contain code that will be rejected by a future version of Rust: sqlx-postgres v0.7.4
+#13 398.2 note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+#13 DONE 400.2s
+
+#14 [stage-2 2/4] COPY --from=cli --chown=creg:creg /app/creg /app/creg
+#14 CACHED
+
+#15 [stage-2 3/4] COPY --from=builder --chown=creg:creg /build/output/creg-node /app/creg-node
+#15 DONE 0.7s
+
+#16 [stage-2 4/4] COPY --from=builder --chown=creg:creg /build/output/creg_recovery_inspect /app/creg_recovery_inspect
+#16 DONE 0.2s
+
+#17 exporting to image
+#17 exporting layers
+#17 exporting layers 3.6s done
+#17 exporting manifest sha256:bab86216d97025693705b0b5e00a7ce55fc647ee47a27862a37b9c8316fd8ea6 0.0s done
+#17 exporting config sha256:8c152eb077f14743d1aa83c0224fc779f88997383597872b9db676d774083101 0.0s done
+#17 exporting attestation manifest sha256:e95b321fa3712f5569e093fbf3a1652e17151317a36795ab672d82962fc23370 0.0s done
+#17 exporting manifest list sha256:f6ca255a37d86b0f93c2a57aee6233e4ef1bce16df14f0590e23ec6705dd8391 0.0s done
+#17 naming to docker.io/library/creg-node:phase-c-secure-r20-durable-revocation-delivery done
+#17 unpacking to docker.io/library/creg-node:phase-c-secure-r20-durable-revocation-delivery
+#17 unpacking to docker.io/library/creg-node:phase-c-secure-r20-durable-revocation-delivery 1.2s done
+#17 DONE 4.9s
+
+View build details: docker-desktop://dashboard/build/desktop-linux/desktop-linux/jpvi80j695m0puq2x8wxs8uuc

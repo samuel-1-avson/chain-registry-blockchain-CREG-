@@ -1,0 +1,11 @@
+{
+  "work_id": "52d1bdd74854d98089711e7809328bea9118f85db2619548165c539bca836681",
+  "transaction": {
+    "type": "revoke",
+    "package_canonical": "npm:toidentifier@1.0.1",
+    "reason": "Phase C live revocation after shared publication",
+    "revoked_by": "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d",
+    "evidence_hash": "186fcc77488de327daf911d362d4e773bab9909f1df2a5f0c20b875205b92e08"
+  },
+  "source": "actual accepted owner request queued on V1; identity reproduced with the consensus encoder"
+}

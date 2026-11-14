@@ -1,0 +1,138 @@
+{
+  "error": "ENOSPC: no space left on device, write",
+  "records": [
+    {
+      "route": "/",
+      "main": "CHAIN HEIGHT\n4\ngenesis 0f2a3b1093…\nFINALIZED\n4\n0 BLOCKS BEHIND\nVALIDATORS\n4\n4 active\nTOTAL STAKE\n0.0000\nCREG\nPACKAGES\n1\n1 publishers\nPENDING TXS\n0\nLatest blocks\nView all →\nHEIGHT\tHASH\tTXS\tPRODUCER\tAGE\n#4\t\n0797e8…bf47e0\n⧉\n\t0\t\nvalidator-1\n⧉\n\t1h ago\n#3\t\n1fcd54…1362c3\n⧉\n\t0\t\nvalidator-4\n⧉\n\t1h ago\n#2\t\n6d1d4d…b3681e\n⧉\n\t0\t\nvalidator-2\n⧉\n\t2h ago\n#1\t\n0121be…16f436\n⧉\n\t0\t\nvalidator-4\n⧉\n\t2h ago\n#0\t\n0f2a3b…66eed4\n⧉\n\t0\t\ngenesi…n-v1\n⧉\n\t999d ago\nLive events\nOpen feed →\nALL\nBLOCK\nTX\nVOTE\nBRIDGE\nPACKAGE\n\nWaiting for events…\n\nRECENT PACKAGES\nView all →\nnpm:is-number@7.0.0\nREVOKED\nBRIDGE STATUS\nL1 chain\n—\nLast anchor\n—\nBridge signer\n—\nSync status\nLEGACY CHECKPOINTING DISABLED BY PHASE 0 SAFETY FREEZE\nRUNTIME\nBuild\n0.1.0\nChain ID\ncreg-phase-c-testnet-2026-09-26-r7\nNetwork\n—\nTestnet\n—",
+      "subscriptions": [
+        "package_submitted",
+        "package_verified",
+        "package_rejected",
+        "package_revoked",
+        "block_produced",
+        "validator_voted"
+      ]
+    },
+    {
+      "route": "/blocks",
+      "main": "Blocks\ntip: #4\nshowing 5\n● Live\nHEIGHT\tHASH\tTXS\tPRODUCER\tSTATUS\tAGE\n#4\t\n0797e80b…bf47e0\n⧉\n\t0\t\nvalidator-1\n⧉\n\tFINALIZED\t1h ago\n#3\t\n1fcd541e…1362c3\n⧉\n\t0\t\nvalidator-4\n⧉\n\tFINALIZED\t1h ago\n#2\t\n6d1d4da2…b3681e\n⧉\n\t0\t\nvalidator-2\n⧉\n\tFINALIZED\t2h ago\n#1\t\n0121be9b…16f436\n⧉\n\t0\t\nvalidator-4\n⧉\n\tFINALIZED\t2h ago\n#0\t\n0f2a3b10…66eed4\n⧉\n\t0\t\ngenesi…n-v1\n⧉\n\tFINALIZED\t999d ago\n← Newer blocks\nOlder blocks →",
+      "subscriptions": [
+        "package_submitted",
+        "package_verified",
+        "package_rejected",
+        "package_revoked",
+        "block_produced",
+        "validator_voted"
+      ]
+    },
+    {
+      "route": "/block/4",
+      "main": "Block #4\nFINALIZED\n🔗\nShare\n← Prev\nNext →\n\nKeyboard: ← previous · → next\n\nHASH\n0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0\n⧉\nPREVIOUS\n1fcd541e428fec047d1b518ed314fcc1370cd56aef505157b71821e2561362c3\n⧉\nTIMESTAMP\n2026-09-26T10:37:54Z 1h ago\nPRODUCER\nvalidator-1\n⧉\nTX COUNT\n1\nSIZE\n—\nConsensus\nVOTES\n3\nQUORUM\n—\nSTATUS\nFinalized\nSIGNERS\nvalidato…or-4\nvalidato…or-1\nvalidato…or-3\nTransactions (1)\n#\tCANONICAL\tPUBLISHER\tSTATUS\n0\tnpm:is-number@7.0.0\t\n863906…047d\n⧉\n\tREVOKED\nRaw JSON",
+      "subscriptions": [
+        "package_submitted",
+        "package_verified",
+        "package_rejected",
+        "package_revoked",
+        "block_produced",
+        "validator_voted"
+      ]
+    },
+    {
+      "route": "/validators",
+      "main": "Validators\n4 total\nADDRESS\tALIAS\tSTAKE\tSTATUS\tNODE\n\nvalidator-3\n⧉\n\tPhase C validator-3\t100 CREG\tACTIVE\t\nvalidator-3\n\n\nvalidator-1\n⧉\n\tPhase C validator-1\t100 CREG\tACTIVE\t\nvalidator-1\n\n\nvalidator-2\n⧉\n\tPhase C validator-2\t100 CREG\tACTIVE\t\nvalidator-2\n\n\nvalidator-4\n⧉\n\tPhase C validator-4\t100 CREG\tACTIVE\t\nvalidator-4",
+      "subscriptions": [
+        "package_submitted",
+        "package_verified",
+        "package_rejected",
+        "package_revoked",
+        "block_produced",
+        "validator_voted"
+      ]
+    },
+    {
+      "route": "/validator/validator-1",
+      "main": "validator-1\n\nValidator profile · full activity →\n\n🔗\nShare\nACTIVE IN SET\nPerformance\nRECENT PROPOSALS\n1\nbounded proposal window\nSTAKE\n100 CREG\nREPUTATION\n100\nSTATUS\nself\nProposals & availability\n\nUptime measurements are unavailable. Proposal counts do not measure uptime.\n\nPROPOSALS SHOWN\n1\nVOTE HISTORY\nUnavailable\nBLOCKS SCANNED\n5\nSLASHING EVENTS\n—\nIdentity\nALIAS\n—\nRecent proposals\n1\nHEIGHT\tHASH\tTXS\tAGE\n#4\t\n0797e80b…bf47e0\n⧉\n\t1\t1h ago",
+      "subscriptions": [
+        "package_submitted",
+        "package_verified",
+        "package_rejected",
+        "package_revoked",
+        "block_produced",
+        "validator_voted"
+      ]
+    },
+    {
+      "route": "/consensus",
+      "main": "PBFT consensus\nVALIDATORS4/4 online\nQUORUM3 of 4\nACTIVE ROUNDS0\nPENDING POOL0\nNo active rounds\n\nNo PBFT rounds in flight — chain is at tip.",
+      "subscriptions": [
+        "package_submitted",
+        "package_verified",
+        "package_rejected",
+        "package_revoked",
+        "block_produced",
+        "validator_voted"
+      ]
+    },
+    {
+      "route": "/network",
+      "main": "Network\nPEERS\n2\nLISTEN ADDR\n—\nPUBKEY\n—\nNode list unavailable\nNetwork topology requires operator credentials on this node.\nEndpoint: /v1/operator/nodes (401)",
+      "subscriptions": [
+        "package_submitted",
+        "package_verified",
+        "package_rejected",
+        "package_revoked",
+        "block_produced",
+        "validator_voted"
+      ]
+    },
+    {
+      "route": "/pending",
+      "main": "Pending pool\n0 WAITING\nPending pool unavailable\nPending pool data requires operator credentials on this node.\nEndpoint: /v1/operator/pending (401)",
+      "subscriptions": [
+        "package_submitted",
+        "package_verified",
+        "package_rejected",
+        "package_revoked",
+        "block_produced",
+        "validator_voted"
+      ]
+    },
+    {
+      "route": "/metrics",
+      "main": "Metrics\n\nLive chain observations collected in this browser session — 1 samples\n\n5m\n30m\n1h\n6h\n24h\n🔗\nShare\nCHAIN HEIGHT\n4\nVALIDATORS\n4 / 4\nPACKAGES\n1\nPENDING TXS\n0\nFINALIZATION LAG\n0 blocks\nPUBLISHERS\n1\n\n📊 Collecting data… Charts will appear after a few polling cycles (~15 seconds).",
+      "subscriptions": [
+        "package_submitted",
+        "package_verified",
+        "package_rejected",
+        "package_revoked",
+        "block_produced",
+        "validator_voted"
+      ]
+    },
+    {
+      "route": "/bridge",
+      "main": "L1 Checkpoint Anchoring\nUNKNOWN\nDISABLED\n🔗\nShare\n\nVerified L2 batches are anchored to Ethereum as checkpoint attestations signed by the bridge operator and approved by governance. State roots are computed off-chain by PBFT validators — anchors are not validity proofs.\n\nHEALTH\nDegraded\nSYNC STATUS\nLegacy checkpointing disabled by Phase 0 safety freeze\nLAST ANCHOR\n—\nL1 CHAIN\n—\nCOMMIT CADENCE\n—\nAnchor configuration\nREGISTRY CONTRACT\n0x23c7FB8e6fd932C1078Ff76244470557E5e6bd99\n⧉\nSIGNER ADDRESS\n—\nCURRENT STATE ROOT\n—\nLAST ANCHOR L1 TX\n—\nLAST ANCHOR BLOCK\n0\nFINALIZED L1 BLOCK\n—\nANCHORS RECORDED\n0\nAnchor history\n0 commits\nNo anchor history\n\nThe bridge hasn't committed any state to L1 yet.",
+      "subscriptions": [
+        "package_submitted",
+        "package_verified",
+        "package_rejected",
+        "package_revoked",
+        "block_produced",
+        "validator_voted"
+      ]
+    },
+    {
+      "route": "/events",
+      "main": "Live events\n0 of 0\n🔗\nShare\nAll types (0)\n⏸ Pause\n↕ Auto-scroll\n≡ Compact\n⇩ Export\nNo events match\n\nRelax the filter or wait for the next event.\n\nLIVE Buffer: 0 events\nShowing: 0 / 0",
+      "subscriptions": [
+        "package_submitted",
+        "package_verified",
+        "package_rejected",
+        "package_revoked",
+        "block_produced",
+        "validator_voted"
+      ]
+    }
+  ],
+  "errors": []
+}

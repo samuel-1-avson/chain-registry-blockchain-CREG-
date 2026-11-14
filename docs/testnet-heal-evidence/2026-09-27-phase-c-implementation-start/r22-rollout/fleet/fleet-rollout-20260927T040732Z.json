@@ -1,0 +1,17 @@
+{
+  "schema": "creg-real-r22-fleet-rollout-v1",
+  "run_id": "20260927T040732Z",
+  "started_at_utc": "2026-09-27T04:07:32.3217407Z",
+  "image_id": "sha256:2b472a089fe6ac651edfbae51b616456ed335f35992c0374f10c1ea80ce6caa3",
+  "image_tag": "creg-node:phase-c-secure-r22-commit-capture",
+  "registry_image_ref": "us-central1-docker.pkg.dev/gen-lang-client-0022105784/creg-testnet/creg-node@sha256:2b472a089fe6ac651edfbae51b616456ed335f35992c0374f10c1ea80ce6caa3",
+  "scanner_profile_digest": "d09a9d2450e6e691bc71bee591b1101aa14d8b0feb6f6088ab6819f48e1a6be4",
+  "public_cutover": false,
+  "requested_slots": [
+    "o3"
+  ],
+  "nodes": [],
+  "passed": false,
+  "failure": "Pinned private-registry pull/verification failed on o3. WARNING! Your password will be stored unencrypted in /run/creg-registry-auth.1MUMiJ/config.json.\r\nConfigure a credential helper to remove this warning. See\r\nhttps://docs.docker.com/engine/reference/commandline/login/#credentials-store\r\n\r\n\r\nRecommendation: To check for possible causes of SSH connectivity issues and get\r\nrecommendations, rerun the ssh command with the --troubleshoot option.\r\n\r\ngcloud compute ssh creg-observer-3 --project=fiffi-500411 --zone=us-west1-b --troubleshoot\r\n\r\nOr, to investigate an IAP tunneling issue:\r\n\r\ngcloud compute ssh creg-observer-3 --project=fiffi-500411 --zone=us-west1-b --troubleshoot --tunnel-through-iap\r\n\r\nERROR: (gcloud.compute.ssh) [C:\\Users\\samue\\AppData\\Local\\Google\\Cloud SDK\\google-cloud-sdk\\bin\\sdk\\plink.exe] exited with return code [1].",
+  "completed_at_utc": "2026-09-27T04:10:04.1143481Z"
+}

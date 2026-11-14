@@ -1,0 +1,40 @@
+{
+  "capturedAt": "2026-09-27T19:44:11.873Z",
+  "deployment": "public explorer R24 dashboard stake and genesis finality correction",
+  "base": "https://explorer.testnet.cregnet.dev/",
+  "image": "us-central1-docker.pkg.dev/gen-lang-client-0022105784/creg-testnet/creg-web-explorer@sha256:090ba37ef9f0ee228d40d9f296d7fdafde1ef224f66f6015500c13d7f9dae6c7",
+  "rootStatus": 200,
+  "chainStats": {
+    "tip_height": 0,
+    "tip_hash": "068364cf778ede5a0b1c814c59b0314f9a8598a959fa5a8e08ea78bc1b296b53",
+    "package_count": 0,
+    "block_count": 1,
+    "chain_id": "creg-testnet-1",
+    "genesis_hash": "068364cf778ede5a0b1c814c59b0314f9a8598a959fa5a8e08ea78bc1b296b53",
+    "spec_signature_verified": true,
+    "l1_rpc_configured": true,
+    "is_validator": false,
+    "validator_count": 2,
+    "active_validators": 2,
+    "total_stake": 200,
+    "total_stake_native": "200",
+    "peer_count": 1,
+    "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+    "l1_block": 0,
+    "pending_tx_count": 4,
+    "publisher_count": 0,
+    "finalized_height": 0,
+    "finalization_lag": 0,
+    "validator_set_source": "chain-authoritative",
+    "validator_set_sync_state": "synced",
+    "validator_set_last_finalized_source_block": 11795501
+  },
+  "genesisBlockFinalized": true,
+  "dashboardText": "Skip to main content\nC\nChain Registry\n#0\n⌕\n/\n☀\nDashboard\nBlocks\nPending\nValidators\nPackages\nConsensus\nBridge\nEvents\nNetwork\nMetrics\nRich List\nReorgs\nProof\nWallet\nPublish\nCHAIN HEIGHT\n0\ngenesis 068364cf77…\nFINALIZED\n0\n0 BLOCKS BEHIND\nVALIDATORS\n2\n2 active\nTOTAL STAKE\n200\nCREG\nPACKAGES\n0\nPENDING TXS\n4\nLatest blocks\nView all →\nHEIGHT\tHASH\tTXS\tPRODUCER\tAGE\n#0\t\n068364…296b53\n⧉\n\t0\t\ngenesis\n⧉\n\t1000d ago\nLive events\nOpen feed →\nALL\nBLOCK\nTX\nVOTE\nBRIDGE\nPACKAGE\n\nWaiting for events…\n\nRECENT PACKAGES\nView all →\n\nNo packages yet.\n\nBRIDGE STATUS\nL1 chain\n—\nLast anchor\n—\nBridge signer\n—\nSync status\nLEGACY CHECKPOINTING DISABLED BY PHASE 0 SAFETY FREEZE\nRUNTIME\nBuild\n0.1.0\nChain ID\ncreg-testnet-1\nNetwork\n—\nTestnet\n—\nChain Registry Explorer — deep-linkable, keyboard-accessible, open-source\nAbout",
+  "checks": {
+    "showsNativeStake200": true,
+    "showsGenesisFinalized0": true,
+    "pageErrors": [],
+    "serverErrors": []
+  }
+}

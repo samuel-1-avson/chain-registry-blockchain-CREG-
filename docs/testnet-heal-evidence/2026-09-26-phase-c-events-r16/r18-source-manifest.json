@@ -1,0 +1,50 @@
+{
+  "captured_at_utc": "2026-09-26T19:18:47.2029232Z",
+  "context": "C:\\Users\\samue\\CREG-backups\\phase-c-build-r18-round-recovery",
+  "files": [
+    {
+      "path": "crates/node/src/api.rs",
+      "sha256": "326b985f3539e1646b131d9757a27ae88e7f0364d198f2a572654d5b12a86005"
+    },
+    {
+      "path": "crates/node/src/block_producer.rs",
+      "sha256": "9f3c0eadaa609f83d1befc409a7b352e77820506167288dc039898c58ec9cfd6"
+    },
+    {
+      "path": "crates/node/src/chain_store.rs",
+      "sha256": "ebb5282d0c2ea52b1004516e0050ba90c6328d520a6719ad0ac429a82e52d014"
+    },
+    {
+      "path": "crates/node/src/events.rs",
+      "sha256": "5879616dfb02c456239d44c8b360d4db04260deaf6eabbb2a64aa2308f4bf0ed"
+    },
+    {
+      "path": "crates/node/src/main.rs",
+      "sha256": "cfdc8d3b2b8bd8865e4a481506f07e090cf2746557e60fa0e7a486172f3915e1"
+    },
+    {
+      "path": "crates/node/src/p2p.rs",
+      "sha256": "c49f5b23db149618cfbf51cb8e1ff1ab4dd77855d08390e76bc7aa40cc5eb27d"
+    },
+    {
+      "path": "crates/node/src/package_admission.rs",
+      "sha256": "39719549b611620d76f7dae23571fa69dc7f9010f38b857a1dc1bc90b571a912"
+    },
+    {
+      "path": "crates/node/src/state.rs",
+      "sha256": "006219b31876b8d9298e9b835b034fad078abc4e18e4fce0939b508c88b620ed"
+    },
+    {
+      "path": "crates/node/src/sync.rs",
+      "sha256": "bac7af6b0b1125b489de630eddb4b50e78301c0d053d3110df3bec97fff40f1c"
+    },
+    {
+      "path": "crates/consensus/src/pbft.rs",
+      "sha256": "4ced30795785403b712c0d650c22a1b5a343e054dbd19b7631e1700712b7647c"
+    },
+    {
+      "path": "testnet/phase-c/Dockerfile.r18-canonical-round-recovery",
+      "sha256": "1add2bd964b069b59965052e66279e0df21da4e64050d7717084be0ec162c2ab"
+    }
+  ]
+}

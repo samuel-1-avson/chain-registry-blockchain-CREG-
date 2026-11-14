@@ -1,0 +1,23 @@
+{
+  "derived_from": "actual canonical tip and signed R7 roster using consensus vrf::rank_proposers",
+  "ranking": [
+    {
+      "id": "validator-1",
+      "score": "22255c0e8efbd4972807797a073f8753462e32808743291fc4edfe0fc24f09a3"
+    },
+    {
+      "id": "validator-3",
+      "score": "2f5c358534703d5d7415aff585e06bb446f165dcc08863b44c96fc12707b43cd"
+    },
+    {
+      "id": "validator-4",
+      "score": "a60acc71342f99cbbbfdb9104ad57f0fafc7dad0c31eac8cf5d78132bb7541ac"
+    },
+    {
+      "id": "validator-2",
+      "score": "a90e02c5ea83082afd8d028ec3e52deff5c86da71bb8db794b43acc8e6e0b53d"
+    }
+  ],
+  "parent_hash": "daab438828a678aee3aa2eebf041f5147bc6f76fed837a207e6a1f4747d427cf",
+  "height": 6
+}

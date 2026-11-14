@@ -1,0 +1,71 @@
+#0 building with "desktop-linux" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile.r19-canonical-admission-retirement
+#1 transferring dockerfile: 1.34kB done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/creg-node:phase-c-secure-r18-canonical-round-recovery
+#2 DONE 0.0s
+
+#3 [internal] load metadata for docker.io/library/creg-node:recovery-diagnostic-builder-r18
+#3 DONE 0.0s
+
+#4 [internal] load metadata for docker.io/library/creg-node:phase-c-secure-r12-bounded-l1-retry
+#4 DONE 0.0s
+
+#5 [internal] load .dockerignore
+#5 transferring context: 2B done
+#5 DONE 0.0s
+
+#6 [stage-2 1/4] FROM docker.io/library/creg-node:phase-c-secure-r12-bounded-l1-retry@sha256:f0b693dc567fc3430f22db881581c55a253e75c8f84a5a0f2d6a82d4460d0736
+#6 resolve docker.io/library/creg-node:phase-c-secure-r12-bounded-l1-retry@sha256:f0b693dc567fc3430f22db881581c55a253e75c8f84a5a0f2d6a82d4460d0736 0.0s done
+#6 CACHED
+
+#7 [internal] load build context
+#7 transferring context: 123.76kB 0.0s done
+#7 DONE 0.1s
+
+#8 [builder 1/4] FROM docker.io/library/creg-node:recovery-diagnostic-builder-r18@sha256:ffbaaf09f810702f18a018780512cf900ae2cae384996180d655519a47ff09d2
+#8 resolve docker.io/library/creg-node:recovery-diagnostic-builder-r18@sha256:ffbaaf09f810702f18a018780512cf900ae2cae384996180d655519a47ff09d2 0.0s done
+#8 ...
+
+#9 [cli 1/1] FROM docker.io/library/creg-node:phase-c-secure-r18-canonical-round-recovery@sha256:cee77b5210ad67a91f5d6e5ccbf2b5ec914ccf53268f8294b261bc7a37c7f49a
+#9 resolve docker.io/library/creg-node:phase-c-secure-r18-canonical-round-recovery@sha256:cee77b5210ad67a91f5d6e5ccbf2b5ec914ccf53268f8294b261bc7a37c7f49a 0.0s done
+#9 DONE 0.9s
+
+#10 [stage-2 2/4] COPY --from=cli --chown=creg:creg /app/creg /app/creg
+#10 DONE 0.1s
+
+#8 [builder 1/4] FROM docker.io/library/creg-node:recovery-diagnostic-builder-r18@sha256:ffbaaf09f810702f18a018780512cf900ae2cae384996180d655519a47ff09d2
+#8 DONE 1.1s
+
+#11 [builder 2/4] WORKDIR /build
+#11 DONE 0.0s
+
+#12 [builder 3/4] COPY [crates/node/src/state.rs, crates/node/src/sync.rs, crates/node/src/pending_pool.rs, /build/crates/node/src/]
+#12 DONE 0.1s
+
+#13 [builder 4/4] RUN --mount=type=cache,id=creg-phase-c-release,target=/build/target,sharing=locked     env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS     LIBCLANG_PATH=/usr/lib/llvm-17/lib LLVM_CONFIG_PATH=/usr/bin/llvm-config-17     CLANG_PATH=/usr/bin/clang-17 CARGO_BUILD_JOBS=1 RUST_BACKTRACE=1     cargo build --release --locked --package chain-registry-node --bin creg-node --bin creg_recovery_inspect --features phase-c-real-fleet &&     cp /build/target/release/creg-node /build/output/creg-node &&     cp /build/target/release/creg_recovery_inspect /build/output/creg_recovery_inspect
+#13 4.522    Compiling chain-registry-node v0.1.0 (/build/crates/node)
+#13 393.0     Finished `release` profile [optimized] target(s) in 6m 32s
+#13 393.0 warning: the following packages contain code that will be rejected by a future version of Rust: sqlx-postgres v0.7.4
+#13 393.1 note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+#13 DONE 400.7s
+
+#14 [stage-2 3/4] COPY --from=builder --chown=creg:creg /build/output/creg-node /app/creg-node
+#14 DONE 2.0s
+
+#15 [stage-2 4/4] COPY --from=builder --chown=creg:creg /build/output/creg_recovery_inspect /app/creg_recovery_inspect
+#15 DONE 1.0s
+
+#16 exporting to image
+#16 exporting layers
+#16 exporting layers 4.6s done
+#16 exporting manifest sha256:8e248cb2b69400e73c87f296c8f0d2efed86b017d8708a8b25dc6f1a57fb78a6 0.0s done
+#16 exporting config sha256:c4696a797f2fe280c31d88ea657c642541c6246cb3732cd421c36aa49117d053 0.0s done
+#16 naming to docker.io/library/creg-node:phase-c-secure-r19-canonical-admission-retirement done
+#16 unpacking to docker.io/library/creg-node:phase-c-secure-r19-canonical-admission-retirement
+#16 unpacking to docker.io/library/creg-node:phase-c-secure-r19-canonical-admission-retirement 3.1s done
+#16 DONE 8.0s
+
+View build details: docker-desktop://dashboard/build/desktop-linux/desktop-linux/j6a36tms46lmykavdn9mvyow6

@@ -1,0 +1,36 @@
+[
+  {
+    "id": "escape-html@1.0.3",
+    "name": "escape-html",
+    "version": "1.0.3",
+    "size": 1917,
+    "unpackedSize": 3660,
+    "shasum": "0258eae4d3d0c0974de1c169188ef0051d1d1988",
+    "integrity": "sha512-NiSupZ4OeuGwr68lGIeym/ksIZMJodUGOSCZ/FSnTxcrekbvqrgdUxlJOMpijaKZVjAJrWrGs/6Jy8OMuyj9ow==",
+    "filename": "escape-html-1.0.3.tgz",
+    "files": [
+      {
+        "path": "LICENSE",
+        "size": 1157,
+        "mode": 438
+      },
+      {
+        "path": "Readme.md",
+        "size": 707,
+        "mode": 438
+      },
+      {
+        "path": "index.js",
+        "size": 1362,
+        "mode": 438
+      },
+      {
+        "path": "package.json",
+        "size": 434,
+        "mode": 438
+      }
+    ],
+    "entryCount": 4,
+    "bundled": []
+  }
+]

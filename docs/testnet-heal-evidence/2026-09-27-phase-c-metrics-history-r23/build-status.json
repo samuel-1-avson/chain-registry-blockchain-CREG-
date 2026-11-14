@@ -1,0 +1,56 @@
+{
+  "timestamp_utc": "2026-09-27T17:06:36.5466505Z",
+  "status": "staged_on_r7_o1_and_verified",
+  "image_tag": "creg-node:phase-c-secure-r23-metrics-history",
+  "registry_digest": "us-central1-docker.pkg.dev/gen-lang-client-0022105784/creg-testnet/creg-node@sha256:ef21b958b5e3e4f09e1c87290d3d9a50f23b5350d207e5af9982dd1cf5413708",
+  "node_sha256": "b6cab56f893b13cb0340834d7f69a9c23eb80f12d139186fb1056e5ce2e12972",
+  "cli_sha256": "b987ba41fe68efde6b33cad2f6a7e8d4784402902094b6b78e0742a19d0705b7",
+  "target": {
+    "slot": "o1",
+    "role": "observer",
+    "vm": "creg-testnet-vm",
+    "project": "gen-lang-client-0022105784",
+    "zone": "us-central1-b"
+  },
+  "metrics_api": {
+    "status": "passed",
+    "collector": "prometheus",
+    "five_minute_samples": 20,
+    "series": 7,
+    "direct_prometheus_height": 14,
+    "api_height": 14,
+    "labels_verified": true
+  },
+  "web_metrics_page": {
+    "status": "passed",
+    "thirty_minute_samples": 60,
+    "series": 7,
+    "charts_rendered": 8,
+    "page_errors": 0,
+    "screenshot": "metrics-page-r23.png"
+  },
+  "cli_metrics_view": {
+    "status": "passed",
+    "history": "ready",
+    "retained_samples": 120,
+    "tip_height": 14,
+    "transcript": "cli-metrics-r23.txt"
+  },
+  "fleet_after_stage": {
+    "all_eight_ready": true,
+    "all_eight_recovery_clear": true,
+    "all_eight_pbft_clear": true
+  },
+  "o1_state": {
+    "healthy": true,
+    "peers": 2,
+    "tip_height": 14,
+    "tip_hash": "2ece0610b4b808ee5382704b702917dd6f2f3f75d6eeb2a8585aaa9e270507aa",
+    "data_mount_preserved": true,
+    "scanner_mount_read_only": true,
+    "r22_container_preserved": true
+  },
+  "initial_post_start_check": "First readiness assertion ran before P2P peers had reconnected; the guard retained R23 and the stopped R22 container. Delayed verification passed after two peers connected. Guard now waits for peer readiness.",
+  "chain_reset": false,
+  "public_cutover": false
+}

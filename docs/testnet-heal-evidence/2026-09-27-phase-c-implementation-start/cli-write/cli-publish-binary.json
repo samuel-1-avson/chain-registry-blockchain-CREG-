@@ -1,0 +1,15 @@
+{
+  "schema": "creg-cli-w2-binary-identity-v1",
+  "publish_and_event_watcher_binary": {
+    "path": "chain-registry/target/release/creg.exe",
+    "sha256": "f16b2465922a98e743990724f092561f1b8f4d1f6eb231371dd86461b3d5bf1f",
+    "evidence": "cli-publish.log and cli-watch-publish.log",
+    "first_event_utc": "2026-09-27T06:49:01Z"
+  },
+  "signed_spec_proof_binary": {
+    "path": "chain-registry/target/release/creg.exe",
+    "sha256": "2132ae16c83739a6a29b8ea66b8ce547e5ab912437f14b7b6b2718421b86f5fc",
+    "build_record": "cli-build-r7-signer.json",
+    "embedded_signer": "R7 spec signing.signing_key_pubkey_hex"
+  }
+}

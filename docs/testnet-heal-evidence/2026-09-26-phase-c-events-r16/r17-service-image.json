@@ -1,0 +1,13 @@
+{
+  "image_tag": "creg-services:phase-c-r17-real-services",
+  "compilation": "passed",
+  "accepted_image_ids": [
+    "sha256:7c18a2f5d888da29bfbd617f17f264b1c750ee234eba8d8c1de66d78fce245b4",
+    "sha256:6341f9eafcf46be8c08d93907fecd920c549ed660dcc01d88affb089c56f81c5"
+  ],
+  "schema": "creg-real-service-build-r17-v1",
+  "captured_at_utc": "2026-09-26T19:24:49.8139657Z",
+  "public_cutover": false,
+  "funding": "not checked",
+  "deployment": "pending"
+}

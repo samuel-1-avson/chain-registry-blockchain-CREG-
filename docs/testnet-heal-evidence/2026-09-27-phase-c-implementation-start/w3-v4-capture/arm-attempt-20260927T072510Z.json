@@ -1,0 +1,32 @@
+{
+  "schema": "creg-r22-v4-commit-capture-arm-attempt-v1",
+  "started_at_utc": "2026-09-27T07:25:10Z",
+  "result": "failed_startup_and_automatic_rollback",
+  "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+  "pre_attempt_tip": {
+    "height": 13,
+    "hash": "8448cce76d7258f051cf9632d2ef7181da1321f5d19a3b5d00f00f8975aa2993"
+  },
+  "reviewed_image": "sha256:8731cc85c73e6267e2e00014e8df50aef3f4d60ce6cfcaddb8fd0a3584eb2ad9",
+  "failed_replacement": {
+    "container_id": "6c47ab6eee4e56f4683e7d7958acf1bbc94daa54a3a7781189295d83612aeb8e",
+    "status_after_rollback": "exited",
+    "restart_count": 13
+  },
+  "startup_error": "durable COMMIT capture target does not match this signed chain identity",
+  "cause": "The initial capture helper supplied the signed-spec genesis identity with a 0x prefix, while NodeConfig canonicalizes the value by removing that prefix before comparing it.",
+  "automatic_rollback": {
+    "original_container_id": "c7c86f3c75c9bf92160d62dcd593774def7ceb68db6d20cc63eddc92bc3a01a9",
+    "status": "running",
+    "restart_count": 0,
+    "health_node_id": "validator-4",
+    "tip_height": 13,
+    "tip_hash": "8448cce76d7258f051cf9632d2ef7181da1321f5d19a3b5d00f00f8975aa2993"
+  },
+  "chain_write_submitted": false,
+  "revocation_submitted": false,
+  "chain_reset": false,
+  "public_cutover": false,
+  "correction": "The helper now supplies the normalized 64-character signed-spec genesis identity and checks the environment value after normalization.",
+  "fresh_pre_retry_fleet_evidence": "pre-arm-fleet-retry-0730.json"
+}

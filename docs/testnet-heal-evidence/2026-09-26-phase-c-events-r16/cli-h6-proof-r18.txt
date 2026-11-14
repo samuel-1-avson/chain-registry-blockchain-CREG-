@@ -1,0 +1,6 @@
+
+  → Light-client verification for npm:toidentifier@1.0.1
+  · Node:       http://host.docker.internal:18080
+  · Checkpoint: height=0
+  · Fetching Merkle proof...{"canonical":"npm:toidentifier@1.0.1","verified":true,"proof":"merkle-inclusion-verified"}
+

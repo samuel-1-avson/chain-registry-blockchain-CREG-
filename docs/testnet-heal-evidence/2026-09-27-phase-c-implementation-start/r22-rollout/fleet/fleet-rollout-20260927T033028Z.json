@@ -1,0 +1,19 @@
+{
+  "schema": "creg-real-r22-fleet-rollout-v1",
+  "run_id": "20260927T033028Z",
+  "started_at_utc": "2026-09-27T03:30:28.7879384Z",
+  "image_id": "sha256:2b472a089fe6ac651edfbae51b616456ed335f35992c0374f10c1ea80ce6caa3",
+  "image_tag": "creg-node:phase-c-secure-r22-commit-capture",
+  "scanner_profile_digest": "d09a9d2450e6e691bc71bee591b1101aa14d8b0feb6f6088ab6819f48e1a6be4",
+  "base_image_id": "sha256:ca4d04e77e9680cb878800f2ea72c1ce7dac6bb3575a55c9921a7314975fb1ef",
+  "public_cutover": false,
+  "requested_slots": [
+    "o2",
+    "o3",
+    "o4"
+  ],
+  "nodes": [],
+  "passed": false,
+  "failure": "Could not retrieve the independent node-side evidence for o2.",
+  "completed_at_utc": "2026-09-27T03:32:56.0231216Z"
+}

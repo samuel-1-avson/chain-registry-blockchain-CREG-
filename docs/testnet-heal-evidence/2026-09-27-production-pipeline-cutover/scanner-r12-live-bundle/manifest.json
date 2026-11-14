@@ -1,0 +1,38 @@
+{
+  "schema": "creg-scanner-bundle-manifest-v1",
+  "generated_at_utc": "2026-09-27T23:11:56.545292Z",
+  "malwarebazaar_source": "https://mb-api.abuse.ch/api/v1/?query=get_recent&selector=100",
+  "malwarebazaar_response_sha256": "e8524c9c65c58b1d89a675d7a879a753f15f3bd22a0bb3012f8410947ade2854",
+  "threat_database_sha256": "5b3aeb024b6e6bb0b82257aae81cb680b8d2aaff48b7753056493559e43861b1",
+  "osv_source": "https://api.osv.dev/v1/query",
+  "osv_epoch": "osv-2026-09-27-phase-c-escape-string-regexp-r12-live",
+  "osv_snapshot_sha256": "981e3388bc2b79b71daebb63f0c467bd11e06ff481766e9b9f12615de7d77928",
+  "yara_bundle_sha256": "2ec033d1446c6280f46d7d74467f78223c67c9abe45c282080db78cfe3177766",
+  "scanner_profile_digest": "e067b8fc4aee823203a8a8204d2b57a4a097798d739d338bf8a45b4ff7b5ceb2",
+  "osv_coverage": [
+    {
+      "key": "npm:escape-html@1.0.3",
+      "vulnerability_count": 0
+    },
+    {
+      "key": "npm:is-number@7.0.0",
+      "vulnerability_count": 0
+    },
+    {
+      "key": "npm:ms@2.1.3",
+      "vulnerability_count": 0
+    },
+    {
+      "key": "npm:toidentifier@1.0.1",
+      "vulnerability_count": 0
+    },
+    {
+      "key": "npm:kleur@4.1.5",
+      "vulnerability_count": 0
+    },
+    {
+      "key": "npm:escape-string-regexp@5.0.0",
+      "vulnerability_count": 0
+    }
+  ]
+}

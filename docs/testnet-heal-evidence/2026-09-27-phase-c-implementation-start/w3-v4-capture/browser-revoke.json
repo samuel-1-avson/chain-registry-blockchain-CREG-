@@ -1,0 +1,59 @@
+{
+  "capturedAt": "2026-09-27T07:48:36.364Z",
+  "dataSource": "live Phase C candidate node through the real Vite proxy; no fixtures or intercepted responses",
+  "explorerUrl": "http://127.0.0.1:3007",
+  "candidateNodeUrl": "http://127.0.0.1:18080",
+  "operation": "revoke",
+  "canonical": "npm:kleur@4.1.5",
+  "startingHeight": 13,
+  "probeError": null,
+  "checks": {
+    "stream_opened": true,
+    "revoked": true,
+    "block_produced": true,
+    "event_rendered_in_web_explorer": true,
+    "no_page_errors": true
+  },
+  "connections": [
+    {
+      "url": "http://127.0.0.1:3007/v1/public/events",
+      "opened": true,
+      "errors": 0
+    }
+  ],
+  "events": [
+    {
+      "type": "block_produced",
+      "data": {
+        "kind": "block_produced",
+        "ts": "2026-09-27T07:48:35.833268107+00:00",
+        "payload": {
+          "height": 14,
+          "hash": "2ece0610b4b808ee5382704b702917dd6f2f3f75d6eeb2a8585aaa9e270507aa",
+          "tx_count": 1,
+          "block_hash": "2ece0610b4b808ee5382704b702917dd6f2f3f75d6eeb2a8585aaa9e270507aa",
+          "block_phase": "committed"
+        }
+      },
+      "receivedAt": "2026-09-27T07:48:35.835Z"
+    },
+    {
+      "type": "package_revoked",
+      "data": {
+        "kind": "package_revoked",
+        "ts": "2026-09-27T07:48:35.833749726+00:00",
+        "payload": {
+          "canonical": "npm:kleur@4.1.5",
+          "reason": "Phase C live revocation after shared publication",
+          "revoked_by": "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d",
+          "height": 14,
+          "block_hash": "2ece0610b4b808ee5382704b702917dd6f2f3f75d6eeb2a8585aaa9e270507aa",
+          "block_phase": "committed"
+        }
+      },
+      "receivedAt": "2026-09-27T07:48:35.838Z"
+    }
+  ],
+  "renderedText": "Live events\n2 of 2\n🔗\nShare\nAll types (2)\nblock_produced (1)\npackage_revoked (1)\n⏸ Pause\n↕ Auto-scroll\n≡ Compact\n⇩ Export\nall (2)\nblock_produced (1)\npackage_revoked (1)\nPACKAGE_REVOKED\n#14\nnpm:kleur@4.1.5\n0s ago\nBLOCK_PRODUCED\n#14\n0s ago\nLIVE Buffer: 2 events\nShowing: 2 / 2",
+  "pageErrors": []
+}

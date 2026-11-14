@@ -1,0 +1,7 @@
+{
+  "timestamp_utc": "2026-09-26T06:22:52.3805743Z",
+  "status": "failed",
+  "image_tag": "creg-node:phase-c-secure-r6-review",
+  "detail": "Reviewed source changed: crates/cli/src/chain_spec.rs. Refresh the source review before rebuilding.",
+  "public_cutover": "pending"
+}

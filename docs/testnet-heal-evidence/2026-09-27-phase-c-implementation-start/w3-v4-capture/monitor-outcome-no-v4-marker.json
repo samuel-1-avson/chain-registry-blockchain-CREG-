@@ -1,0 +1,49 @@
+{
+  "schema": "creg-r22-v4-durable-commit-monitor-outcome-v1",
+  "monitor_armed_at_utc": "2026-09-27T07:44:57.471317+00:00",
+  "monitor_stopped_at_utc": "2026-09-27T08:01:05Z",
+  "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+  "height": 14,
+  "canonical": "npm:kleur@4.1.5",
+  "block_hash": "2ece0610b4b808ee5382704b702917dd6f2f3f75d6eeb2a8585aaa9e270507aa",
+  "proposer": "validator-3",
+  "commit_signers": [
+    "validator-1",
+    "validator-2",
+    "validator-3"
+  ],
+  "v4_capture_markers_observed": {
+    "pbft_local_commit_durable": false,
+    "phase_c_durable_commit_capture_paused": false,
+    "pbft_local_commit_recovered": false
+  },
+  "v4_killed": false,
+  "v4_after_block": {
+    "container_id": "d33854e25c4f65c193313d5bb3ab83911ba79899fb1e9733a0b13ac15a03be62",
+    "image_id": "sha256:8731cc85c73e6267e2e00014e8df50aef3f4d60ce6cfcaddb8fd0a3584eb2ad9",
+    "tip_height": 14,
+    "tip_hash": "2ece0610b4b808ee5382704b702917dd6f2f3f75d6eeb2a8585aaa9e270507aa",
+    "pbft_clear": true
+  },
+  "all_eight_after_block": {
+    "captured_at_utc": "2026-09-27T07:56:45Z",
+    "ready": true,
+    "recovery_clear": true,
+    "pbft_clear": true,
+    "shared_tip_height": 14,
+    "shared_tip_hash": "2ece0610b4b808ee5382704b702917dd6f2f3f75d6eeb2a8585aaa9e270507aa",
+    "evidence": "post-revoke-fleet-0750.json"
+  },
+  "event_capture": {
+    "cli_watch": "passed",
+    "browser_stream_and_render": "passed",
+    "revocation_signature_version": 1,
+    "owner_signature_verified_by_node": true
+  },
+  "result": "w3_not_passed_v4_specific_local_commit_boundary_not_reached",
+  "reason": "R22 pauses after a locally produced COMMIT. h14 was proposed by validator-3 and its three COMMIT signers were validator-1, validator-2 and validator-3. No V4-specific durable marker or pause was observed, so the monitor was stopped without killing V4.",
+  "implementation_gap": "The follower P2P sign-and-record-COMMIT path persists votes separately and has no matching capture marker or pause hook. The next W3 design must instrument the follower path after synchronous journal persistence and before the in-memory PBFT COMMIT is applied.",
+  "revocation_finalized": true,
+  "chain_reset": false,
+  "public_cutover": false
+}

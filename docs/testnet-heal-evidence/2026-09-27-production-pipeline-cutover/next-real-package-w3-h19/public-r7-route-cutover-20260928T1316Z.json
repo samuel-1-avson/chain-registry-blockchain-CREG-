@@ -1,0 +1,105 @@
+{
+  "schema": "creg-r7-public-route-cutover-v1",
+  "captured_at_utc": "2026-09-28T13:16:00Z",
+  "scope": "Sepolia testnet public routes; not mainnet",
+  "decision": "User directed that R7 become the public production testnet chain.",
+  "cutover": {
+    "edge_host": "creg-testnet-vm",
+    "project": "gen-lang-client-0022105784",
+    "zone": "us-central1-b",
+    "method": "Validated and hot-reloaded Caddy; no node/container restart",
+    "active_config_sha256": "fe3568e061944d996a99a23cad4882a551de8ba17435e01156fb58c0b0d122af",
+    "previous_config_sha256": "3b9a2b76fe6ffa23541fc8040ba26c45da58d929b04fec6cd36041c2b81f37be",
+    "rollback_backup": "/home/samue/creg-hosting/chain-registry-blockchain-CREG-/chain-registry/testnet/caddy/Caddyfile.unified.pre-r7-cutover-20260928T1306Z",
+    "candidate_validation": "passed",
+    "hot_reload": "passed"
+  },
+  "fleet_preflight": {
+    "evidence": "fleet-pre-public-r7-cutover-20260928.json",
+    "captured_at_utc": "2026-09-28T13:03:12.9291954Z",
+    "all_eight_ready": true,
+    "all_eight_recovery_clear": true,
+    "all_eight_pbft_clear": true,
+    "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+    "shared_height": 20,
+    "shared_tip_hash": "730b01c1a67a4796a16f599169e4ebf77e01d2e8ce92d1e4fb3715a7c4354285",
+    "active_validators": 4,
+    "pending_transactions": 0,
+    "scanner_profile_digest": "7e1d95f9c8423778211944a1dea46674d8cbd3f0aee3b0eea6b5250f11d009cd"
+  },
+  "dead_letter_review": {
+    "evidence": "../dead-letter-review-r14-20260928/dead-letter-review.json",
+    "status": "reviewed_terminal_duplicates_preserved",
+    "validator_depths": { "v1": 13, "v2": 11, "v3": 10, "v4": 10 },
+    "active_work": 0,
+    "unapplied_publish_nonces": 0,
+    "unexpected_reasons": 0,
+    "action": "Retain all 44 terminal records for audit; do not replay, acknowledge, or delete them."
+  },
+  "public_checks": {
+    "api_stats": {
+      "url": "https://api.testnet.cregnet.dev/v1/public/chain/stats",
+      "http_status": 200
+    },
+    "explorer_stats": {
+      "url": "https://explorer.testnet.cregnet.dev/v1/public/chain/stats",
+      "http_status": 200
+    },
+    "json_rpc": {
+      "url": "https://api.testnet.cregnet.dev/rpc",
+      "chain_id_http_status": 200,
+      "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+      "block_number_http_status": 200,
+      "block_number_hex": "0x14"
+    },
+    "explorer_frontend": {
+      "url": "https://explorer.testnet.cregnet.dev/",
+      "http_status": 200,
+      "served_asset": "/assets/index-CcTZWJaL.js"
+    },
+    "metrics_history": {
+      "url": "https://explorer.testnet.cregnet.dev/v1/public/metrics/history?range=30m",
+      "http_status": 200,
+      "collector": "prometheus",
+      "sample_count": 61,
+      "queried_series": 7
+    },
+    "default_chain_spec": {
+      "url": "https://spec.testnet.cregnet.dev/chain-spec.json",
+      "signature_url": "https://spec.testnet.cregnet.dev/chain-spec.json.sig",
+      "http_status": 200,
+      "signature_http_status": 200,
+      "spec_sha256": "331897F5A3F89FE902E4A7D814A9245EF50B384E22CC3D8DC946B4B45ED39E9F",
+      "signature_sha256": "76511B24146A7EA17FD039AC2996656D5CED33D6F5ACC379470A92251F1EF2B6",
+      "spec_and_signature_match_nested_r7_paths": true,
+      "linux_cli_candidate_sha256": "067bd43243eb45f33a40ae802b573f929e80e619bb73ddde45f4b4b82482b4ca",
+      "signature_validation": "passed with R27 Linux CLI candidate"
+    },
+    "faucet_health": {
+      "url": "https://faucet.testnet.cregnet.dev/health",
+      "http_status": 200,
+      "mode": "real",
+      "status": "healthy"
+    }
+  },
+  "public_chain": {
+    "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+    "finalized_height": 20,
+    "block_count_including_genesis": 21,
+    "tip_hash": "730b01c1a67a4796a16f599169e4ebf77e01d2e8ce92d1e4fb3715a7c4354285",
+    "block_zero_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+    "spec_genesis_hash": "1852b9a86dd3b53e7b2de4a774723a4fe48e862f9c61d14e5917b42b21055234",
+    "active_validators": 4,
+    "package_count": 8,
+    "pending_transactions": 0
+  },
+  "known_release_gaps": [
+    "The currently installed Windows CLI on the operator laptop rejects the R7 consensus encoding because it is an older build. The corrected CLI has not yet been distributed as the public default.",
+    "A fresh active-package publish, matching all-validator proof and named public CLI/browser event capture remain open.",
+    "W5 relayer persistence/recovery and authorized durable reward dispatch still need real transaction and restart acceptance.",
+    "The final W7 acceptance dossier and user-facing release notes remain open."
+  ],
+  "chain_reset": false,
+  "validator_or_observer_containers_restarted": false,
+  "gcp_vms_stopped_or_deleted": false
+}

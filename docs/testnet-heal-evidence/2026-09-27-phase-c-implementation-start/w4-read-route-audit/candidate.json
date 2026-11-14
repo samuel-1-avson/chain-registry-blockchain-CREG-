@@ -1,0 +1,1429 @@
+{
+  "base": "http://127.0.0.1:18080",
+  "capturedAt": "2026-09-27T00:47:10.476Z",
+  "requests": [
+    {
+      "path": "/",
+      "status": 404,
+      "contentType": "text/plain; charset=utf-8",
+      "payload": "Explorer UI is not embedded in this build. Serve static files externally or rebuild with --features embedded-explorer."
+    },
+    {
+      "path": "/v1/public/health",
+      "status": 200,
+      "contentType": "application/json",
+      "payload": {
+        "status": "ok",
+        "node_id": "validator-1",
+        "is_validator": true,
+        "version": "0.1.0",
+        "validator_set_sync": {
+          "enabled": true,
+          "mode": "chain-authoritative",
+          "state": "synced",
+          "last_finalized_source_block": 11789840,
+          "cursor_block": 11789840,
+          "cursor_log_index": 4294967295,
+          "cursor_block_hash": "0x3434849f1c5f5ecec2f7636775333731f15f26c1b0a6b878831094439885763c",
+          "last_poll_at": "2026-09-27T00:46:52.796182408+00:00",
+          "last_error": null
+        },
+        "sandbox": {
+          "engine": "nsjail",
+          "dev_bypass": false,
+          "isolated": true,
+          "degraded": false,
+          "note": "kernel namespaces + seccomp-BPF (primary engine)"
+        },
+        "sync": {
+          "lag_blocks": 0,
+          "max_peer_tip": 12,
+          "healthy": true
+        }
+      }
+    },
+    {
+      "path": "/v1/public/chain/stats",
+      "status": 200,
+      "contentType": "application/json",
+      "payload": {
+        "tip_height": 12,
+        "tip_hash": "a329eb216ce1fd18e1f5510333cb683db34ca6e789b5a3ef229dabe2af08fc7d",
+        "package_count": 4,
+        "block_count": 13,
+        "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+        "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+        "spec_signature_verified": true,
+        "l1_rpc_configured": true,
+        "is_validator": true,
+        "validator_count": 4,
+        "active_validators": 4,
+        "total_stake": 400,
+        "total_stake_native": "400",
+        "peer_count": 2,
+        "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+        "l1_block": 0,
+        "pending_tx_count": 0,
+        "publisher_count": 1,
+        "finalized_height": 12,
+        "finalization_lag": 0,
+        "finalization_source": "creg-canonical-store",
+        "validator_set_source": "chain-authoritative",
+        "validator_set_sync_state": "synced",
+        "validator_set_last_finalized_source_block": 11789840
+      }
+    },
+    {
+      "path": "/v1/chain/stats",
+      "status": 200,
+      "contentType": "application/json",
+      "payload": {
+        "tip_height": 12,
+        "tip_hash": "a329eb216ce1fd18e1f5510333cb683db34ca6e789b5a3ef229dabe2af08fc7d",
+        "package_count": 4,
+        "block_count": 13,
+        "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+        "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+        "spec_signature_verified": true,
+        "l1_rpc_configured": true,
+        "is_validator": true,
+        "validator_count": 4,
+        "active_validators": 4,
+        "total_stake": 400,
+        "total_stake_native": "400",
+        "peer_count": 2,
+        "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+        "l1_block": 0,
+        "pending_tx_count": 0,
+        "publisher_count": 1,
+        "finalized_height": 12,
+        "finalization_lag": 0,
+        "finalization_source": "creg-canonical-store",
+        "validator_set_source": "chain-authoritative",
+        "validator_set_sync_state": "synced",
+        "validator_set_last_finalized_source_block": 11789840
+      }
+    },
+    {
+      "path": "/v1/public/blocks?limit=5",
+      "status": 200,
+      "contentType": "application/json",
+      "payload": {
+        "blocks": [
+          {
+            "header": {
+              "height": 12,
+              "prev_hash": "a87ff93fbdb2ea01549125a9f0a20c717049f0e8f8e28b952078cbf66b2117f3",
+              "merkle_root": "b0f7ba8247b77d0647ad2d6f3e6feafbf2117b156abc2e2e29c411a2bd767c17",
+              "proposer_id": "validator-4",
+              "timestamp": "2026-09-26T22:51:24Z",
+              "validator_set_hash": "ad5c4491938c5410d22b896290f3603ccec7abf3393bd5364bcea7674c109e98",
+              "vrf_output": "ecbc357cacaec1cd26b0697365b4a307816e0f3fa674e35f892f0682662ca137",
+              "vrf_proof": "0570661a870315d9776ac33cf1c30f021705fb4696fd603afa86b5d950d9ef81837595aa266877d03845a31a024f9c0b0950828c6bb5dbbe3cbb220ce371820a"
+            },
+            "transactions": [
+              {
+                "type": "revoke",
+                "package_canonical": "npm:ms@2.1.3",
+                "reason": "Phase C live revocation after shared publication",
+                "revoked_by": "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d",
+                "evidence_hash": "f6616e15e530ed552f9daa2d3ce71963947c6bc7c98c9b64fd3e673fd02622c6"
+              }
+            ],
+            "pbft_signatures": [
+              {
+                "validator_id": "validator-4",
+                "pubkey": "f777ca6f1dafbbeb9cbe5a258568c574e7f519a1e58da57c97d28fcf69dd35ff",
+                "signature": "43b0322e8dd2def3912c5028c613c476202e85401148fb520329497d730193eae8bc9a1e96ded2dd61ddc8ae6a5175a9ec3c5cc8293dfaafb13245a733788c0a"
+              },
+              {
+                "validator_id": "validator-3",
+                "pubkey": "7876b26b471f81edd9597354fd023157858f2b02d73a1e7bb0b430c9fc63e6bc",
+                "signature": "e0b2c4c0b32bd2f6caaf1544d709ba02a5450c3a3c7731023cb6cff3be014f9e951709a8ad744eff1640f38f05fc041a2f7795e02fbcaea6e5a4c347650ce90a"
+              },
+              {
+                "validator_id": "validator-1",
+                "pubkey": "cc4157c4443c9fb011df2b650f497e3eadfc1ddda6dc7f4b6732325383108ffc",
+                "signature": "16884c14469ded40c65ad88a4dd1a7a2b467a1cf8d3082e475a3d5e63b15b55c4bef1d18b88b26dfa85d92d2c8efa593f988b4a1ea8a3b3e42a405455412250c"
+              }
+            ],
+            "hash": "a329eb216ce1fd18e1f5510333cb683db34ca6e789b5a3ef229dabe2af08fc7d",
+            "finalized": true
+          },
+          {
+            "header": {
+              "height": 11,
+              "prev_hash": "990091981261dce3160614e37e7b2faab4934d1d1f99101adcc9d37727b6e9d1",
+              "merkle_root": "f9c35ed006fb438fb8fb2c0273d494bb2e2437165f7bd34b8299131f7771365a",
+              "proposer_id": "validator-1",
+              "timestamp": "2026-09-26T22:39:03Z",
+              "validator_set_hash": "ad5c4491938c5410d22b896290f3603ccec7abf3393bd5364bcea7674c109e98",
+              "vrf_output": "02eb9846ac708b8de38656e73f1c5da5be536c7a478a65d19f3bf91e3517a604",
+              "vrf_proof": "6bea6d73913d9fdb48451506627d515daac28f6f74e08dab34b58db833ca51137cafba8b12f4640acfb7a9b7a1b35ba1239b3377fdc93ca07c8c23d4eda3d204"
+            },
+            "transactions": [
+              {
+                "type": "publish_authorized_v1",
+                "record": {
+                  "id": {
+                    "ecosystem": "npm",
+                    "name": "ms",
+                    "version": "2.1.3"
+                  },
+                  "content_hash": "f6616e15e530ed552f9daa2d3ce71963947c6bc7c98c9b64fd3e673fd02622c6",
+                  "ipfs_cid": "QmYbRCUBFbxPZWpXcd1qg9BhYpbrUq6rhpAevR6jn6QMXc",
+                  "publisher_pubkey": "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d",
+                  "block_hash": "pending",
+                  "published_at": "2026-09-26T22:39:02.770746752Z",
+                  "validator_signatures": [
+                    {
+                      "validator_id": "validator-3",
+                      "validator_pubkey": "7876b26b471f81edd9597354fd023157858f2b02d73a1e7bb0b430c9fc63e6bc",
+                      "signature": "a9ab9abc71d445dd6a67f6a67cd181c28aab6014d06719d42796c10f075a8e3ffa2bd230afb7be34ed32d1cc0bf477ef20628b0014dd5badd26fb5f9c4855b03",
+                      "vote": "Approve",
+                      "signed_at": "2026-09-26T22:39:01.431614782Z",
+                      "ml_model_version": "creg-deterministic-scanner-v1.1.0+sha256:d09a9d2450e6e691bc71bee591b1101aa14d8b0feb6f6088ab6819f48e1a6be4",
+                      "analysis_bundles": {
+                        "policy_bundle_id": "policy-v1",
+                        "feature_schema_id": "features-v1",
+                        "expert_bundle_id": "experts-v1",
+                        "embedding_model_id": "embeddings-v1",
+                        "index_epoch": "index-epoch-0",
+                        "threshold_profile_id": "thresholds-v1",
+                        "llm_prompt_profile_id": "llm-prompt-v1",
+                        "osv_snapshot_epoch": "osv-2026-09-26-phase-c-r10-event-check"
+                      },
+                      "evidence_digest": "8d7120bcc1886e90ab1eecd5251733b4c1c7af34bc27718651427f5ff17019e5",
+                      "deterministic_risk": {
+                        "score": 43,
+                        "deterministic_score": 18,
+                        "advisory_score": 30,
+                        "band": "guarded",
+                        "disposition": "accept",
+                        "deterministic_findings": 1,
+                        "advisory_findings": 2,
+                        "critical_findings": 0,
+                        "high_findings": 0,
+                        "medium_findings": 1,
+                        "low_findings": 0,
+                        "reasons": [
+                          "[DS001] AI Deep Scan: Suspicious",
+                          "Publisher reputation delta -100 increases deterministic risk"
+                        ]
+                      },
+                      "is_mandatory": true
+                    },
+                    {
+                      "validator_id": "validator-1",
+                      "validator_pubkey": "cc4157c4443c9fb011df2b650f497e3eadfc1ddda6dc7f4b6732325383108ffc",
+                      "signature": "85e941f41074f68a186b6499eb4395a64acf1bc564edaa995e924ba572d2716fe4ee9310fcd177b8fa502aa86b01c9c8dad923473fa73ba8ceb35d154af73c06",
+                      "vote": "Approve",
+                      "signed_at": "2026-09-26T22:39:01.765274880Z",
+                      "ml_model_version": "creg-deterministic-scanner-v1.1.0+sha256:d09a9d2450e6e691bc71bee591b1101aa14d8b0feb6f6088ab6819f48e1a6be4",
+                      "analysis_bundles": {
+                        "policy_bundle_id": "policy-v1",
+                        "feature_schema_id": "features-v1",
+                        "expert_bundle_id": "experts-v1",
+                        "embedding_model_id": "embeddings-v1",
+                        "index_epoch": "index-epoch-0",
+                        "threshold_profile_id": "thresholds-v1",
+                        "llm_prompt_profile_id": "llm-prompt-v1",
+                        "osv_snapshot_epoch": "osv-2026-09-26-phase-c-r10-event-check"
+                      },
+                      "evidence_digest": "8d7120bcc1886e90ab1eecd5251733b4c1c7af34bc27718651427f5ff17019e5",
+                      "deterministic_risk": {
+                        "score": 43,
+                        "deterministic_score": 18,
+                        "advisory_score": 30,
+                        "band": "guarded",
+                        "disposition": "accept",
+                        "deterministic_findings": 1,
+                        "advisory_findings": 2,
+                        "critical_findings": 0,
+                        "high_findings": 0,
+                        "medium_findings": 1,
+                        "low_findings": 0,
+                        "reasons": [
+                          "[DS001] AI Deep Scan: Suspicious",
+                          "Publisher reputation delta -100 increases deterministic risk"
+                        ]
+                      },
+                      "is_mandatory": true
+                    },
+                    {
+                      "validator_id": "validator-2",
+                      "validator_pubkey": "779c9522addbce63f78448fa83bff1e789a4a874c4db25e0f7fe00b3d0429fd9",
+                      "signature": "71583592d81e5d5093034d635498d780ab1dfe942d638d977f0ba92287a47944380cd560ccfbdfd7a21230ae12ce4670bcdc7cc2f2c6e4ada0178ff7ada8de04",
+                      "vote": "Approve",
+                      "signed_at": "2026-09-26T22:39:02.566916098Z",
+                      "ml_model_version": "creg-deterministic-scanner-v1.1.0+sha256:d09a9d2450e6e691bc71bee591b1101aa14d8b0feb6f6088ab6819f48e1a6be4",
+                      "analysis_bundles": {
+                        "policy_bundle_id": "policy-v1",
+                        "feature_schema_id": "features-v1",
+                        "expert_bundle_id": "experts-v1",
+                        "embedding_model_id": "embeddings-v1",
+                        "index_epoch": "index-epoch-0",
+                        "threshold_profile_id": "thresholds-v1",
+                        "llm_prompt_profile_id": "llm-prompt-v1",
+                        "osv_snapshot_epoch": "osv-2026-09-26-phase-c-r10-event-check"
+                      },
+                      "evidence_digest": "8d7120bcc1886e90ab1eecd5251733b4c1c7af34bc27718651427f5ff17019e5",
+                      "deterministic_risk": {
+                        "score": 43,
+                        "deterministic_score": 18,
+                        "advisory_score": 30,
+                        "band": "guarded",
+                        "disposition": "accept",
+                        "deterministic_findings": 1,
+                        "advisory_findings": 2,
+                        "critical_findings": 0,
+                        "high_findings": 0,
+                        "medium_findings": 1,
+                        "low_findings": 0,
+                        "reasons": [
+                          "[DS001] AI Deep Scan: Suspicious",
+                          "Publisher reputation delta -100 increases deterministic risk"
+                        ]
+                      },
+                      "is_mandatory": true
+                    }
+                  ],
+                  "status": "Verified",
+                  "shielded": false,
+                  "key_bundle": null,
+                  "pgp_fingerprint": null,
+                  "pgp_signature_sha256": "",
+                  "pgp_public_key_sha256": "",
+                  "findings": [
+                    {
+                      "id": "OSV001",
+                      "title": "Pinned OSV snapshot unavailable",
+                      "severity": "Medium",
+                      "description": "Consensus OSV is enabled but the local pinned snapshot is missing, unreadable, or epoch-mismatched. Known CVEs were not checked.",
+                      "file": "osv_snapshot",
+                      "line": null
+                    },
+                    {
+                      "id": "DS001",
+                      "title": "AI Deep Scan: Suspicious",
+                      "severity": "Medium",
+                      "description": "Multi-layer scan (YARA+OSV+ThreatIntel) flagged suspicious patterns (probability: 0.35).",
+                      "file": "deep_scan",
+                      "line": null
+                    },
+                    {
+                      "id": "LLM-SKIP",
+                      "title": "LLM Stage 4 skipped",
+                      "severity": "Low",
+                      "description": "The LLM-assisted review stage (Stage 4) was not executed: CREG_LLM_ENABLED is not set — LLM stage skipped. Set CREG_LLM_ENABLED=true and configure at least one provider key (ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY, or CREG_OLLAMA_URL) to enable deep LLM analysis.. Static analysis, sandbox, and ML stages still ran. Enable CREG_LLM_ENABLED=true and configure a provider key to activate deep semantic analysis.",
+                      "file": "llm-review",
+                      "line": null
+                    }
+                  ],
+                  "analysis_bundles": {
+                    "policy_bundle_id": "policy-v1",
+                    "feature_schema_id": "features-v1",
+                    "expert_bundle_id": "experts-v1",
+                    "embedding_model_id": "embeddings-v1",
+                    "index_epoch": "index-epoch-0",
+                    "threshold_profile_id": "thresholds-v1",
+                    "llm_prompt_profile_id": "llm-prompt-v1",
+                    "osv_snapshot_epoch": "osv-2026-09-26-phase-c-r10-event-check"
+                  },
+                  "evidence_digest": "8d7120bcc1886e90ab1eecd5251733b4c1c7af34bc27718651427f5ff17019e5",
+                  "deterministic_risk": {
+                    "score": 43,
+                    "deterministic_score": 18,
+                    "advisory_score": 30,
+                    "band": "guarded",
+                    "disposition": "accept",
+                    "deterministic_findings": 1,
+                    "advisory_findings": 2,
+                    "critical_findings": 0,
+                    "high_findings": 0,
+                    "medium_findings": 1,
+                    "low_findings": 0,
+                    "reasons": [
+                      "[DS001] AI Deep Scan: Suspicious",
+                      "Publisher reputation delta -100 increases deterministic risk"
+                    ]
+                  },
+                  "access_count": 0,
+                  "last_accessed": null,
+                  "threshold": 1,
+                  "publisher_pubkeys": [
+                    "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d"
+                  ],
+                  "manifest": {
+                    "allowed_network_hosts": [],
+                    "allowed_fs_writes": [],
+                    "spawns_processes": false,
+                    "allowed_process_spawns": [],
+                    "description": "Benign live Phase C package"
+                  },
+                  "analysis_committee_size": 4,
+                  "analysis_selection_seed": "66353061326633313861646632653539366633623866346432383232613531396538633038333737306164323932376666343636373435336663386338626335",
+                  "analysis_effective_size": 4,
+                  "analysis_mandatory_contributed": 3,
+                  "analysis_committee": {
+                    "size": 4,
+                    "members": [
+                      "validator-2",
+                      "validator-3",
+                      "validator-4",
+                      "validator-1"
+                    ],
+                    "seed": "66353061326633313861646632653539366633623866346432383232613531396538633038333737306164323932376666343636373435336663386338626335",
+                    "effective_size": 4,
+                    "performance_bias": true,
+                    "member_performance_at_finalization": {
+                      "validator-2": 465,
+                      "validator-3": 465,
+                      "validator-1": 465,
+                      "validator-4": 500
+                    },
+                    "validator_snapshot_hash": "ad5c4491938c5410d22b896290f3603ccec7abf3393bd5364bcea7674c109e98",
+                    "validator_snapshot_height": 0,
+                    "validator_snapshot_anchor_block_hash": "990091981261dce3160614e37e7b2faab4934d1d1f99101adcc9d37727b6e9d1",
+                    "validator_snapshot_certificate_hash": "",
+                    "selection_randomness": "2c523d848f827415f692ee02ec3f4bd1535c8340568542855482cc1c772d0cba",
+                    "assignment_proof": "ea4b384de6339079b2b2806c65bbbfb272e2d9a60bcc2ce0dc7dc3d2095ba05b"
+                  }
+                },
+                "authorization": {
+                  "schema_version": 1,
+                  "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+                  "genesis_hash": "1852b9a86dd3b53e7b2de4a774723a4fe48e862f9c61d14e5917b42b21055234",
+                  "staking_contract": "0x61c00ebe7c46f0bce63942f7e15bcc434dfc9b7c",
+                  "publisher_address": "0xa40d79527314efd4964d49c4a0673c87b612348b",
+                  "publisher_ed25519_pubkey": "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d",
+                  "publisher_ed25519_signature": "",
+                  "publisher_evm_signature": "9bb08586af96cd9a8465e4da19caf7db7251177b37ad2ed28a4a9dce7c0026ed689f1cd26382dd91001cb7a150c2621cc6b0018a64ce987edd8c373f8a12a68d1b",
+                  "nonce": "e4d500b4932f3d980335e0ec40187682",
+                  "issued_at": 1790462329,
+                  "expires_at": 1790465929,
+                  "source_hash": "f6616e15e530ed552f9daa2d3ce71963947c6bc7c98c9b64fd3e673fd02622c6",
+                  "manifest_hash": "f9caf7705678fa2561edeb7d8c10e59b16013a3b54fb6db99524344432d1444b",
+                  "ipfs_cid": "QmYbRCUBFbxPZWpXcd1qg9BhYpbrUq6rhpAevR6jn6QMXc",
+                  "shielded": false,
+                  "key_bundle_sha256": "",
+                  "pgp_signature_sha256": "",
+                  "pgp_public_key_sha256": "",
+                  "ownership_claim": "npm:ms",
+                  "threshold": 1,
+                  "publisher_pubkeys": [
+                    "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d"
+                  ],
+                  "signatures": [
+                    "0aa9a39f2608aa0d6aa776a4079fd8bb25a97cae6b42bc0bf2b5e44f96377b8f5d3d9e963c641c9cf878669c23b1931c4dca36678d201e5081cb0ed5abedee0a"
+                  ],
+                  "ownership_proof": null,
+                  "authority_certificate": null
+                }
+              }
+            ],
+            "pbft_signatures": [
+              {
+                "validator_id": "validator-3",
+                "pubkey": "7876b26b471f81edd9597354fd023157858f2b02d73a1e7bb0b430c9fc63e6bc",
+                "signature": "4cc1ebf566ec6383703f278f6bd6580d097169c237e539b2b2141536bab00ce5161bea379c2b6c6ca135ba2736b98a4ba8bfed5fbbfbeecf2f3cd44f4cdbfe09"
+              },
+              {
+                "validator_id": "validator-2",
+                "pubkey": "779c9522addbce63f78448fa83bff1e789a4a874c4db25e0f7fe00b3d0429fd9",
+                "signature": "3cc46f27f8a15d05539b6bd59e2105867d8e97939ad7f397b4c18492d0bfe9490c5e16fd0837ce070ee6803e06a060506029c42ba82d88008fe96adaeab2c102"
+              },
+              {
+                "validator_id": "validator-1",
+                "pubkey": "cc4157c4443c9fb011df2b650f497e3eadfc1ddda6dc7f4b6732325383108ffc",
+                "signature": "b1842bd1eaa65d94869acdd2a9004013203b1fcaa099f6e991739efd2afaf28f900a274b9ef320a63364d0c0db177b608394e7c74925410a47941fa985926a00"
+              }
+            ],
+            "hash": "a87ff93fbdb2ea01549125a9f0a20c717049f0e8f8e28b952078cbf66b2117f3",
+            "finalized": true
+          },
+          {
+            "header": {
+              "height": 10,
+              "prev_hash": "e0b40d52f7626f46a0bcf85040ec2c34dc1d576af0b1e7d65396d31c325f0837",
+              "merkle_root": "b8bce8fc59fd2846e9113f0c78fc69e4ef654294c0df82274f7bf95e16540363",
+              "proposer_id": "validator-1",
+              "timestamp": "2026-09-26T22:15:48Z",
+              "validator_set_hash": "ad5c4491938c5410d22b896290f3603ccec7abf3393bd5364bcea7674c109e98",
+              "vrf_output": "2c523d848f827415f692ee02ec3f4bd1535c8340568542855482cc1c772d0cba",
+              "vrf_proof": "ad47e917efa99558185608b87c0164f0f662e6aff77febe93d9e11604ca50a1eec7b3fc740fad8728c2644b9da9b59d5dd721ef18052ed49235498f7092d6006"
+            },
+            "transactions": [
+              {
+                "type": "revoke",
+                "package_canonical": "npm:escape-html@1.0.3",
+                "reason": "Phase C live revocation after shared publication",
+                "revoked_by": "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d",
+                "evidence_hash": "a101155c3cbdfb1e4f98f2f83c8b5e392db6accfa606df0eba8b87a5762b0366"
+              }
+            ],
+            "pbft_signatures": [
+              {
+                "validator_id": "validator-4",
+                "pubkey": "f777ca6f1dafbbeb9cbe5a258568c574e7f519a1e58da57c97d28fcf69dd35ff",
+                "signature": "70a72ef48e5c8ae9fb12235e34301e4431898955732b8117a3b37ed0ccf4afa28341ed1876bc16dcf39d6698ce12af8f054b64cfb860e3e0dd6ff58c0cbb9403"
+              },
+              {
+                "validator_id": "validator-1",
+                "pubkey": "cc4157c4443c9fb011df2b650f497e3eadfc1ddda6dc7f4b6732325383108ffc",
+                "signature": "a0ec78fa624c05c27301dca17fc8a5068e85ebd398cbb88178af15109b37949ec17e6244bc16b05df212afa4ec3b349b861df38fcb0a5afb1b1280359e4a0809"
+              },
+              {
+                "validator_id": "validator-3",
+                "pubkey": "7876b26b471f81edd9597354fd023157858f2b02d73a1e7bb0b430c9fc63e6bc",
+                "signature": "b72672d8972dea682e3daa5cc80839dfed07201a786d074da23fff85871cf79eb04d9180afc67e4415d4a54df65c135e48ec5534ecc39e84a250e6cd3c1e0204"
+              }
+            ],
+            "hash": "990091981261dce3160614e37e7b2faab4934d1d1f99101adcc9d37727b6e9d1",
+            "finalized": true
+          },
+          {
+            "header": {
+              "height": 9,
+              "prev_hash": "1ba1f9f9a61b59fbf32a8bebad14b393f3ab3ef070892e88ef97bf5cb4d4e846",
+              "merkle_root": "52d1bdd74854d98089711e7809328bea9118f85db2619548165c539bca836681",
+              "proposer_id": "validator-1",
+              "timestamp": "2026-09-26T21:19:55Z",
+              "validator_set_hash": "ad5c4491938c5410d22b896290f3603ccec7abf3393bd5364bcea7674c109e98",
+              "vrf_output": "49a98b457551a3f55e658b984103aaa0cc4eb22c6ebc3e8561ab34da8201f48b",
+              "vrf_proof": "9ca22ddedafed0d7278bf36110bd1066a0a1ce1c2d871a4bb2cdf1cfdce237c03739e9b04d4386e66fc8eb55961f27a76aa1e40393ccf3e57b5ebc62d338820f"
+            },
+            "transactions": [
+              {
+                "type": "revoke",
+                "package_canonical": "npm:toidentifier@1.0.1",
+                "reason": "Phase C live revocation after shared publication",
+                "revoked_by": "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d",
+                "evidence_hash": "186fcc77488de327daf911d362d4e773bab9909f1df2a5f0c20b875205b92e08"
+              }
+            ],
+            "pbft_signatures": [
+              {
+                "validator_id": "validator-1",
+                "pubkey": "cc4157c4443c9fb011df2b650f497e3eadfc1ddda6dc7f4b6732325383108ffc",
+                "signature": "4e79a97bf12d177cd18efacf08f61fe7ccdc7798834cab5d8cbbe6a73ec2ce01e0da5a3e5ea6aa7d159751868950bade9d8631df2e12df64988c60ac004b370f"
+              },
+              {
+                "validator_id": "validator-2",
+                "pubkey": "779c9522addbce63f78448fa83bff1e789a4a874c4db25e0f7fe00b3d0429fd9",
+                "signature": "f57b8c849700df861d085dccad9f4ffdb713d91dd393d36e37645f43ba5df03da477be800fe759ea0bf4305ed52d5270f7ec02662d5af834feb1dad9c3211904"
+              },
+              {
+                "validator_id": "validator-4",
+                "pubkey": "f777ca6f1dafbbeb9cbe5a258568c574e7f519a1e58da57c97d28fcf69dd35ff",
+                "signature": "ee5992cde8d0bdb5071f2623fff58c893ed6f37340dc7f80b5a90cd78c0889d5ef41f83b01fb05b531adaea66a395efc30c0749ea9bdc99ff51fe43df4eeae04"
+              }
+            ],
+            "hash": "e0b40d52f7626f46a0bcf85040ec2c34dc1d576af0b1e7d65396d31c325f0837",
+            "finalized": true
+          },
+          {
+            "header": {
+              "height": 8,
+              "prev_hash": "e7d0f50b235ab10a3be6dea22334e9daa532a45b96f075037e49db64fc341fd7",
+              "merkle_root": "52d1bdd74854d98089711e7809328bea9118f85db2619548165c539bca836681",
+              "proposer_id": "validator-3",
+              "timestamp": "2026-09-26T21:19:52Z",
+              "validator_set_hash": "ad5c4491938c5410d22b896290f3603ccec7abf3393bd5364bcea7674c109e98",
+              "vrf_output": "a7f73e137f4fc840bc823faea58ccd15bb6aedd6c113ddaafc60c0fa373a4921",
+              "vrf_proof": "b864e95ad1bfad0dfbe323bec9e8365b766ae3e75ed93b0cf85ff4062c05d9d61c7f9e6e44bf0ed25c6bb3fec90695d864ad3c97abc8092a19caff854fda6e0f",
+              "view_number": 2,
+              "view_change_certificate": [
+                {
+                  "height": 8,
+                  "prev_hash": "e7d0f50b235ab10a3be6dea22334e9daa532a45b96f075037e49db64fc341fd7",
+                  "new_view": 2,
+                  "validator_id": "validator-1",
+                  "prepared": null,
+                  "signature": "09651d5dfb678ca9b974444f80dbe0b42602d6468477a17e7835155197a309034058b4c9802d6a9d4cb0fd88306552ed3b38960008294ded9e92e5b2df5faf0c"
+                },
+                {
+                  "height": 8,
+                  "prev_hash": "e7d0f50b235ab10a3be6dea22334e9daa532a45b96f075037e49db64fc341fd7",
+                  "new_view": 2,
+                  "validator_id": "validator-2",
+                  "prepared": null,
+                  "signature": "ee1982c54d1a1b62bcfd0044bbda194095f067cf356447fde6b8dc494a54aa8d154458cb49c45da80e2c42e156c21089a95a07d8bd9f04dfaec5c728e83b7804"
+                },
+                {
+                  "height": 8,
+                  "prev_hash": "e7d0f50b235ab10a3be6dea22334e9daa532a45b96f075037e49db64fc341fd7",
+                  "new_view": 2,
+                  "validator_id": "validator-3",
+                  "prepared": null,
+                  "signature": "8a3a2f52b37cdf5e36112f50c1a56cb038b575bf5490e1ef0b92fb573644a8210ed415b957da69314181278813b3e180de4c78ef2f1244f46b7d8512fcf1ed00"
+                }
+              ]
+            },
+            "transactions": [
+              {
+                "type": "revoke",
+                "package_canonical": "npm:toidentifier@1.0.1",
+                "reason": "Phase C live revocation after shared publication",
+                "revoked_by": "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d",
+                "evidence_hash": "186fcc77488de327daf911d362d4e773bab9909f1df2a5f0c20b875205b92e08"
+              }
+            ],
+            "pbft_signatures": [
+              {
+                "validator_id": "validator-3",
+                "pubkey": "7876b26b471f81edd9597354fd023157858f2b02d73a1e7bb0b430c9fc63e6bc",
+                "signature": "e23103ad1cb8380839a68118d67f0ad2b24ca1e983aa5caa1dc513dba2912d353e86aa1be12518a420f6b2c06ffe832ebd218f132e036d7458a4879f8f7be703"
+              },
+              {
+                "validator_id": "validator-2",
+                "pubkey": "779c9522addbce63f78448fa83bff1e789a4a874c4db25e0f7fe00b3d0429fd9",
+                "signature": "1d5e8915efcc85770f98c034b66da62922b3c61e58d30388a583b71c65440a338df647363fe78778f9cb4e88dbe378a2ab4a63e73381f0f958077c9413231305"
+              },
+              {
+                "validator_id": "validator-1",
+                "pubkey": "cc4157c4443c9fb011df2b650f497e3eadfc1ddda6dc7f4b6732325383108ffc",
+                "signature": "6a8b22ca1281f16397a43e525606cb238a08a20d97b18c553c4899bfa68d9d9fd3ffda4279e42472223e9b099475adaa06e17f4c1f0e0ac4d5f32623e60bb00b"
+              }
+            ],
+            "hash": "1ba1f9f9a61b59fbf32a8bebad14b393f3ab3ef070892e88ef97bf5cb4d4e846",
+            "finalized": true
+          }
+        ],
+        "tip_height": 12,
+        "offset": 0,
+        "limit": 5,
+        "next_before_height": null,
+        "next_after_height": null
+      }
+    },
+    {
+      "path": "/v1/public/blocks/0",
+      "status": 200,
+      "contentType": "application/json",
+      "payload": {
+        "header": {
+          "height": 0,
+          "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "merkle_root": "0000000000000000000000000000000000000000000000000000000000000000",
+          "proposer_id": "genesis-phase-c-sorted-json-v1",
+          "timestamp": "2024-01-01T00:00:00Z",
+          "validator_set_hash": "1852b9a86dd3b53e7b2de4a774723a4fe48e862f9c61d14e5917b42b21055234",
+          "vrf_output": null,
+          "vrf_proof": null
+        },
+        "transactions": [],
+        "pbft_signatures": [],
+        "hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+        "finalized": true
+      }
+    },
+    {
+      "path": "/v1/public/blocks/1",
+      "status": 200,
+      "contentType": "application/json",
+      "payload": {
+        "header": {
+          "height": 1,
+          "prev_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+          "merkle_root": "6888e192fbec959ef6c457138b584d8ac6d2b0e4783991fada58d66eb6e82a33",
+          "proposer_id": "validator-4",
+          "timestamp": "2026-09-26T10:28:13Z",
+          "validator_set_hash": "ad5c4491938c5410d22b896290f3603ccec7abf3393bd5364bcea7674c109e98",
+          "vrf_output": "c1d5c3b9623cb99c495d1b32d04bf4c2ae9b8e79c8df2ec7a9c7dde99d904463",
+          "vrf_proof": "bc92c75e17edd6b476de7b9aa952b9dcd1cce58f8c7942609bdf952f0f30b3f121503f66a18c9405789075bef9adba0c7a850f1b791e6477f4164440d54b4a0f"
+        },
+        "transactions": [
+          {
+            "type": "publish_authorized_v1",
+            "record": {
+              "id": {
+                "ecosystem": "npm",
+                "name": "is-number",
+                "version": "7.0.0"
+              },
+              "content_hash": "7b75c1057198cf97696909a9bee176c9c5e9bcb5b03bf3ecef2f484defadd51e",
+              "ipfs_cid": "QmQ8kbWCkjk77RxP3GMCG7WiSj43WP2ZUBWxmttA2bscn6",
+              "publisher_pubkey": "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d",
+              "block_hash": "pending",
+              "published_at": "2026-09-26T10:28:10.494663442Z",
+              "validator_signatures": [
+                {
+                  "validator_id": "validator-3",
+                  "validator_pubkey": "7876b26b471f81edd9597354fd023157858f2b02d73a1e7bb0b430c9fc63e6bc",
+                  "signature": "cff87a1d7fe868a552d3d8bcc36fded579f06ae55d4a7630a9fc1a67a19f77d84e46d7567dd5d73010cee6b3dcf0ff5f4675a27154e5b4c2397cf3765821c707",
+                  "vote": "Approve",
+                  "signed_at": "2026-09-26T10:28:08.995693489Z",
+                  "ml_model_version": "creg-deterministic-scanner-v1.1.0+sha256:648dfd39a02da6dd8c42f2342146208efeae1f435e18d2fcd71317828062fb0f",
+                  "analysis_bundles": {
+                    "policy_bundle_id": "policy-v1",
+                    "feature_schema_id": "features-v1",
+                    "expert_bundle_id": "experts-v1",
+                    "embedding_model_id": "embeddings-v1",
+                    "index_epoch": "index-epoch-0",
+                    "threshold_profile_id": "thresholds-v1",
+                    "llm_prompt_profile_id": "llm-prompt-v1",
+                    "osv_snapshot_epoch": "osv-2026-09-26-phase-c-r8"
+                  },
+                  "evidence_digest": "4eb664d53c44551f6ddcf04c8943874d97da0c6b760e617886508e8340377b0a",
+                  "deterministic_risk": {
+                    "score": 2,
+                    "deterministic_score": 0,
+                    "advisory_score": 0,
+                    "band": "low",
+                    "disposition": "accept",
+                    "deterministic_findings": 0,
+                    "advisory_findings": 1,
+                    "critical_findings": 0,
+                    "high_findings": 0,
+                    "medium_findings": 0,
+                    "low_findings": 0,
+                    "reasons": [
+                      "Publisher reputation delta -10 increases deterministic risk"
+                    ]
+                  },
+                  "is_mandatory": true
+                },
+                {
+                  "validator_id": "validator-1",
+                  "validator_pubkey": "cc4157c4443c9fb011df2b650f497e3eadfc1ddda6dc7f4b6732325383108ffc",
+                  "signature": "16324512505d364b5ad4572816a600767b9eafe6fe8fb32263378c6324f2ea024c97626a84c1c6680a893e499893b368c48efc6bd1a6e8afdcbc7da4db7bc500",
+                  "vote": "Approve",
+                  "signed_at": "2026-09-26T10:28:08.995819183Z",
+                  "ml_model_version": "creg-deterministic-scanner-v1.1.0+sha256:648dfd39a02da6dd8c42f2342146208efeae1f435e18d2fcd71317828062fb0f",
+                  "analysis_bundles": {
+                    "policy_bundle_id": "policy-v1",
+                    "feature_schema_id": "features-v1",
+                    "expert_bundle_id": "experts-v1",
+                    "embedding_model_id": "embeddings-v1",
+                    "index_epoch": "index-epoch-0",
+                    "threshold_profile_id": "thresholds-v1",
+                    "llm_prompt_profile_id": "llm-prompt-v1",
+                    "osv_snapshot_epoch": "osv-2026-09-26-phase-c-r8"
+                  },
+                  "evidence_digest": "4eb664d53c44551f6ddcf04c8943874d97da0c6b760e617886508e8340377b0a",
+                  "deterministic_risk": {
+                    "score": 2,
+                    "deterministic_score": 0,
+                    "advisory_score": 0,
+                    "band": "low",
+                    "disposition": "accept",
+                    "deterministic_findings": 0,
+                    "advisory_findings": 1,
+                    "critical_findings": 0,
+                    "high_findings": 0,
+                    "medium_findings": 0,
+                    "low_findings": 0,
+                    "reasons": [
+                      "Publisher reputation delta -10 increases deterministic risk"
+                    ]
+                  },
+                  "is_mandatory": true
+                },
+                {
+                  "validator_id": "validator-2",
+                  "validator_pubkey": "779c9522addbce63f78448fa83bff1e789a4a874c4db25e0f7fe00b3d0429fd9",
+                  "signature": "a59b23d1ed50af1e2b051e7136e475e7a6713469109cc6594d0b72c7e7479dbaab708e05fc9de7b60ba9e1c270ee5bbbc28476d11dcf047bd7b7d5e734bd1f02",
+                  "vote": "Approve",
+                  "signed_at": "2026-09-26T10:28:09.565335676Z",
+                  "ml_model_version": "creg-deterministic-scanner-v1.1.0+sha256:648dfd39a02da6dd8c42f2342146208efeae1f435e18d2fcd71317828062fb0f",
+                  "analysis_bundles": {
+                    "policy_bundle_id": "policy-v1",
+                    "feature_schema_id": "features-v1",
+                    "expert_bundle_id": "experts-v1",
+                    "embedding_model_id": "embeddings-v1",
+                    "index_epoch": "index-epoch-0",
+                    "threshold_profile_id": "thresholds-v1",
+                    "llm_prompt_profile_id": "llm-prompt-v1",
+                    "osv_snapshot_epoch": "osv-2026-09-26-phase-c-r8"
+                  },
+                  "evidence_digest": "4eb664d53c44551f6ddcf04c8943874d97da0c6b760e617886508e8340377b0a",
+                  "deterministic_risk": {
+                    "score": 2,
+                    "deterministic_score": 0,
+                    "advisory_score": 0,
+                    "band": "low",
+                    "disposition": "accept",
+                    "deterministic_findings": 0,
+                    "advisory_findings": 1,
+                    "critical_findings": 0,
+                    "high_findings": 0,
+                    "medium_findings": 0,
+                    "low_findings": 0,
+                    "reasons": [
+                      "Publisher reputation delta -10 increases deterministic risk"
+                    ]
+                  },
+                  "is_mandatory": true
+                }
+              ],
+              "status": "Verified",
+              "shielded": false,
+              "key_bundle": null,
+              "pgp_fingerprint": null,
+              "pgp_signature_sha256": "",
+              "pgp_public_key_sha256": "",
+              "findings": [
+                {
+                  "id": "LLM-SKIP",
+                  "title": "LLM Stage 4 skipped",
+                  "severity": "Low",
+                  "description": "The LLM-assisted review stage (Stage 4) was not executed: CREG_LLM_ENABLED is not set — LLM stage skipped. Set CREG_LLM_ENABLED=true and configure at least one provider key (ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY, or CREG_OLLAMA_URL) to enable deep LLM analysis.. Static analysis, sandbox, and ML stages still ran. Enable CREG_LLM_ENABLED=true and configure a provider key to activate deep semantic analysis.",
+                  "file": "llm-review",
+                  "line": null
+                }
+              ],
+              "analysis_bundles": {
+                "policy_bundle_id": "policy-v1",
+                "feature_schema_id": "features-v1",
+                "expert_bundle_id": "experts-v1",
+                "embedding_model_id": "embeddings-v1",
+                "index_epoch": "index-epoch-0",
+                "threshold_profile_id": "thresholds-v1",
+                "llm_prompt_profile_id": "llm-prompt-v1",
+                "osv_snapshot_epoch": "osv-2026-09-26-phase-c-r8"
+              },
+              "evidence_digest": "4eb664d53c44551f6ddcf04c8943874d97da0c6b760e617886508e8340377b0a",
+              "deterministic_risk": {
+                "score": 2,
+                "deterministic_score": 0,
+                "advisory_score": 0,
+                "band": "low",
+                "disposition": "accept",
+                "deterministic_findings": 0,
+                "advisory_findings": 1,
+                "critical_findings": 0,
+                "high_findings": 0,
+                "medium_findings": 0,
+                "low_findings": 0,
+                "reasons": [
+                  "Publisher reputation delta -10 increases deterministic risk"
+                ]
+              },
+              "access_count": 0,
+              "last_accessed": null,
+              "threshold": 1,
+              "publisher_pubkeys": [
+                "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d"
+              ],
+              "manifest": {
+                "allowed_network_hosts": [],
+                "allowed_fs_writes": [],
+                "spawns_processes": false,
+                "allowed_process_spawns": [],
+                "description": "Benign live Phase C package"
+              },
+              "analysis_committee_size": 4,
+              "analysis_selection_seed": "35646264346363396434396563366536656233313838653935353464353430333538613731646364343836376264653062316439333337656534383836613461",
+              "analysis_effective_size": 4,
+              "analysis_mandatory_contributed": 3,
+              "analysis_committee": {
+                "size": 4,
+                "members": [
+                  "validator-2",
+                  "validator-4",
+                  "validator-3",
+                  "validator-1"
+                ],
+                "seed": "35646264346363396434396563366536656233313838653935353464353430333538613731646364343836376264653062316439333337656534383836613461",
+                "effective_size": 4,
+                "performance_bias": true,
+                "member_performance_at_finalization": {
+                  "validator-1": 465,
+                  "validator-4": 500,
+                  "validator-2": 465,
+                  "validator-3": 465
+                },
+                "validator_snapshot_hash": "ad5c4491938c5410d22b896290f3603ccec7abf3393bd5364bcea7674c109e98",
+                "validator_snapshot_height": 0,
+                "validator_snapshot_anchor_block_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+                "validator_snapshot_certificate_hash": "",
+                "selection_randomness": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+                "assignment_proof": "f198fd522904c1fd313cc283de8d060984586b1ac5e525b10aa1b3ab68d653e3"
+              }
+            },
+            "authorization": {
+              "schema_version": 1,
+              "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+              "genesis_hash": "1852b9a86dd3b53e7b2de4a774723a4fe48e862f9c61d14e5917b42b21055234",
+              "staking_contract": "0x61c00ebe7c46f0bce63942f7e15bcc434dfc9b7c",
+              "publisher_address": "0xa40d79527314efd4964d49c4a0673c87b612348b",
+              "publisher_ed25519_pubkey": "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d",
+              "publisher_ed25519_signature": "",
+              "publisher_evm_signature": "b93115ae1ca0b7b5f62812c8856cae996dd5f2fa32859f116a66c2519d8f11185aacddea960a1be3a9ac484fac6dd7d19f38097fe8db71e394485a0b6f2d11bd1c",
+              "nonce": "340b9947ed2423a06df933695eea9f73",
+              "issued_at": 1790418218,
+              "expires_at": 1790421818,
+              "source_hash": "7b75c1057198cf97696909a9bee176c9c5e9bcb5b03bf3ecef2f484defadd51e",
+              "manifest_hash": "f9caf7705678fa2561edeb7d8c10e59b16013a3b54fb6db99524344432d1444b",
+              "ipfs_cid": "QmQ8kbWCkjk77RxP3GMCG7WiSj43WP2ZUBWxmttA2bscn6",
+              "shielded": false,
+              "key_bundle_sha256": "",
+              "pgp_signature_sha256": "",
+              "pgp_public_key_sha256": "",
+              "ownership_claim": "npm:is-number",
+              "threshold": 1,
+              "publisher_pubkeys": [
+                "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d"
+              ],
+              "signatures": [
+                "dd30b59559798876e00e55d66445d3181e1449aadcbbf35d72895c381324cfa006b39d086b9294448f81a9b8c250486882556d69c31cb0b570435a8c7f468708"
+              ],
+              "ownership_proof": null,
+              "authority_certificate": null
+            }
+          }
+        ],
+        "pbft_signatures": [
+          {
+            "validator_id": "validator-1",
+            "pubkey": "cc4157c4443c9fb011df2b650f497e3eadfc1ddda6dc7f4b6732325383108ffc",
+            "signature": "82a7ccfbc75fe2cd2034d6b76297a5ae7a0906c9990cee1fbadc4ea1eb4727583e02995761016b39c85f8ea6b18235853f905cc00ef970e2472f3252e1277e09"
+          },
+          {
+            "validator_id": "validator-2",
+            "pubkey": "779c9522addbce63f78448fa83bff1e789a4a874c4db25e0f7fe00b3d0429fd9",
+            "signature": "23ed288077d09d31d8f79346445463fe0a4d2a77a5372f05136d878271a7ca626c349fc3175cfcfe356ab6ab6e9d07ca62d969c0f58685b2e83e86b6a092d600"
+          },
+          {
+            "validator_id": "validator-4",
+            "pubkey": "f777ca6f1dafbbeb9cbe5a258568c574e7f519a1e58da57c97d28fcf69dd35ff",
+            "signature": "9a6493a71a5fad3afd721d72ac44c2b6a453db86bf0acf966967532fed1759cbbb3d2ef2e9d23dce893f2be39c63c4925e864286bd6d809fce18ad15af8d3d09"
+          }
+        ],
+        "hash": "0121be9bb637aec634cd5f081fb903ee4749875d8225683f057af005ae16f436",
+        "finalized": true
+      }
+    },
+    {
+      "path": "/v1/public/blocks/4",
+      "status": 200,
+      "contentType": "application/json",
+      "payload": {
+        "header": {
+          "height": 4,
+          "prev_hash": "1fcd541e428fec047d1b518ed314fcc1370cd56aef505157b71821e2561362c3",
+          "merkle_root": "4d3fc86cb21686d049082a794efd304c631fcee71c55ca7a5c0ee77a9e6c2246",
+          "proposer_id": "validator-1",
+          "timestamp": "2026-09-26T10:37:54Z",
+          "validator_set_hash": "ad5c4491938c5410d22b896290f3603ccec7abf3393bd5364bcea7674c109e98",
+          "vrf_output": "2c871b70e0d43ad84bdd58966edb2a076b26c894f2d1a2550a2563eacaa1818f",
+          "vrf_proof": "0c5239f464844f675236aeba41077b7d4d333bd11ece7f6b3fa43bda39e7c550b9e198196bec3beeeecdcd0dac9ef8f34d0262635900373a1b5e38b61b24b00d"
+        },
+        "transactions": [
+          {
+            "type": "revoke",
+            "package_canonical": "npm:is-number@7.0.0",
+            "reason": "Phase C live revocation after shared publication",
+            "revoked_by": "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d",
+            "evidence_hash": "7b75c1057198cf97696909a9bee176c9c5e9bcb5b03bf3ecef2f484defadd51e"
+          }
+        ],
+        "pbft_signatures": [
+          {
+            "validator_id": "validator-4",
+            "pubkey": "f777ca6f1dafbbeb9cbe5a258568c574e7f519a1e58da57c97d28fcf69dd35ff",
+            "signature": "11c0d5d7b42489364ec5f0adac52b1a862598f53e06bd77093e2b69c323ed580b0744a9cfbb7151502ded6d48fd16dc7b4bf8b42773a3cfc0f9144598bfcef05"
+          },
+          {
+            "validator_id": "validator-1",
+            "pubkey": "cc4157c4443c9fb011df2b650f497e3eadfc1ddda6dc7f4b6732325383108ffc",
+            "signature": "ae8e415fe0f4e382a5b93c4d3fcb6dd0f09ed947fc23db2ad92104f30f33ad62f67665fa25b9e524e3dfeb27641a703f4e5388226c82fa31195ff39265c73f05"
+          },
+          {
+            "validator_id": "validator-3",
+            "pubkey": "7876b26b471f81edd9597354fd023157858f2b02d73a1e7bb0b430c9fc63e6bc",
+            "signature": "038d3e785c165d8aab2714f4a1872aebdb613961edf60661bf0ceb6a92ece9b3932c89849a05133943a26b30f7aed95aa3fac1755467af87ddfe939301785000"
+          }
+        ],
+        "hash": "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0",
+        "finalized": true
+      }
+    },
+    {
+      "path": "/v1/public/packages?limit=5",
+      "status": 200,
+      "contentType": "application/json",
+      "payload": {
+        "packages": [
+          {
+            "canonical": "npm:escape-html@1.0.3",
+            "ecosystem": "npm",
+            "name": "escape-html",
+            "version": "1.0.3",
+            "status": "revoked",
+            "publisher": "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d",
+            "published_at": "2026-09-26T18:01:33.580621692+00:00",
+            "analysis_bundles": {
+              "policy_bundle_id": "policy-v1",
+              "feature_schema_id": "features-v1",
+              "expert_bundle_id": "experts-v1",
+              "embedding_model_id": "embeddings-v1",
+              "index_epoch": "index-epoch-0",
+              "threshold_profile_id": "thresholds-v1",
+              "llm_prompt_profile_id": "llm-prompt-v1",
+              "osv_snapshot_epoch": "osv-2026-09-26-phase-c-r9-write-check"
+            },
+            "evidence_digest": "9212a04d954350f086f701ddb4c10530b229682ad726fc7384e48708cf32a0d9",
+            "deterministic_risk": {
+              "score": 31,
+              "deterministic_score": 18,
+              "advisory_score": 0,
+              "band": "guarded",
+              "disposition": "accept",
+              "deterministic_findings": 1,
+              "advisory_findings": 1,
+              "critical_findings": 0,
+              "high_findings": 0,
+              "medium_findings": 1,
+              "low_findings": 0,
+              "reasons": [
+                "[DS001] AI Deep Scan: Suspicious",
+                "Publisher reputation delta -40 increases deterministic risk"
+              ]
+            }
+          },
+          {
+            "canonical": "npm:is-number@7.0.0",
+            "ecosystem": "npm",
+            "name": "is-number",
+            "version": "7.0.0",
+            "status": "revoked",
+            "publisher": "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d",
+            "published_at": "2026-09-26T10:28:10.494663442+00:00",
+            "analysis_bundles": {
+              "policy_bundle_id": "policy-v1",
+              "feature_schema_id": "features-v1",
+              "expert_bundle_id": "experts-v1",
+              "embedding_model_id": "embeddings-v1",
+              "index_epoch": "index-epoch-0",
+              "threshold_profile_id": "thresholds-v1",
+              "llm_prompt_profile_id": "llm-prompt-v1",
+              "osv_snapshot_epoch": "osv-2026-09-26-phase-c-r8"
+            },
+            "evidence_digest": "4eb664d53c44551f6ddcf04c8943874d97da0c6b760e617886508e8340377b0a",
+            "deterministic_risk": {
+              "score": 2,
+              "deterministic_score": 0,
+              "advisory_score": 0,
+              "band": "low",
+              "disposition": "accept",
+              "deterministic_findings": 0,
+              "advisory_findings": 1,
+              "critical_findings": 0,
+              "high_findings": 0,
+              "medium_findings": 0,
+              "low_findings": 0,
+              "reasons": [
+                "Publisher reputation delta -10 increases deterministic risk"
+              ]
+            }
+          },
+          {
+            "canonical": "npm:ms@2.1.3",
+            "ecosystem": "npm",
+            "name": "ms",
+            "version": "2.1.3",
+            "status": "revoked",
+            "publisher": "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d",
+            "published_at": "2026-09-26T22:39:02.770746752+00:00",
+            "analysis_bundles": {
+              "policy_bundle_id": "policy-v1",
+              "feature_schema_id": "features-v1",
+              "expert_bundle_id": "experts-v1",
+              "embedding_model_id": "embeddings-v1",
+              "index_epoch": "index-epoch-0",
+              "threshold_profile_id": "thresholds-v1",
+              "llm_prompt_profile_id": "llm-prompt-v1",
+              "osv_snapshot_epoch": "osv-2026-09-26-phase-c-r10-event-check"
+            },
+            "evidence_digest": "8d7120bcc1886e90ab1eecd5251733b4c1c7af34bc27718651427f5ff17019e5",
+            "deterministic_risk": {
+              "score": 43,
+              "deterministic_score": 18,
+              "advisory_score": 30,
+              "band": "guarded",
+              "disposition": "accept",
+              "deterministic_findings": 1,
+              "advisory_findings": 2,
+              "critical_findings": 0,
+              "high_findings": 0,
+              "medium_findings": 1,
+              "low_findings": 0,
+              "reasons": [
+                "[DS001] AI Deep Scan: Suspicious",
+                "Publisher reputation delta -100 increases deterministic risk"
+              ]
+            }
+          },
+          {
+            "canonical": "npm:toidentifier@1.0.1",
+            "ecosystem": "npm",
+            "name": "toidentifier",
+            "version": "1.0.1",
+            "status": "revoked",
+            "publisher": "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d",
+            "published_at": "2026-09-26T19:49:24.058595506+00:00",
+            "analysis_bundles": {
+              "policy_bundle_id": "policy-v1",
+              "feature_schema_id": "features-v1",
+              "expert_bundle_id": "experts-v1",
+              "embedding_model_id": "embeddings-v1",
+              "index_epoch": "index-epoch-0",
+              "threshold_profile_id": "thresholds-v1",
+              "llm_prompt_profile_id": "llm-prompt-v1",
+              "osv_snapshot_epoch": "osv-2026-09-26-phase-c-r10-event-check"
+            },
+            "evidence_digest": "3406cd14398269e21c3e397e8c6fe791f46bcf3e65687591a6eef132244e1184",
+            "deterministic_risk": {
+              "score": 8,
+              "deterministic_score": 0,
+              "advisory_score": 0,
+              "band": "low",
+              "disposition": "accept",
+              "deterministic_findings": 0,
+              "advisory_findings": 1,
+              "critical_findings": 0,
+              "high_findings": 0,
+              "medium_findings": 0,
+              "low_findings": 0,
+              "reasons": [
+                "Publisher reputation delta -40 increases deterministic risk"
+              ]
+            }
+          }
+        ],
+        "total": 4,
+        "offset": 0,
+        "limit": 5
+      }
+    },
+    {
+      "path": "/v1/public/packages/npm%3Ais-number%407.0.0",
+      "status": 200,
+      "contentType": "application/json",
+      "payload": {
+        "canonical": "npm:is-number@7.0.0",
+        "status": "revoked",
+        "evidence_phase": "quorum-reached",
+        "block_phase": "committed",
+        "chain_status": "rejected",
+        "block_hash": "0121be9bb637aec634cd5f081fb903ee4749875d8225683f057af005ae16f436",
+        "content_hash": "7b75c1057198cf97696909a9bee176c9c5e9bcb5b03bf3ecef2f484defadd51e",
+        "ipfs_cid": "QmQ8kbWCkjk77RxP3GMCG7WiSj43WP2ZUBWxmttA2bscn6",
+        "publisher": "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d",
+        "published_at": "2026-09-26T10:28:10.494663442+00:00",
+        "revocation_reason": "Phase C live revocation after shared publication",
+        "analysis_bundles": {
+          "policy_bundle_id": "policy-v1",
+          "feature_schema_id": "features-v1",
+          "expert_bundle_id": "experts-v1",
+          "embedding_model_id": "embeddings-v1",
+          "index_epoch": "index-epoch-0",
+          "threshold_profile_id": "thresholds-v1",
+          "llm_prompt_profile_id": "llm-prompt-v1",
+          "osv_snapshot_epoch": "osv-2026-09-26-phase-c-r8"
+        },
+        "evidence_digest": "4eb664d53c44551f6ddcf04c8943874d97da0c6b760e617886508e8340377b0a",
+        "deterministic_risk": {
+          "score": 2,
+          "deterministic_score": 0,
+          "advisory_score": 0,
+          "band": "low",
+          "disposition": "accept",
+          "deterministic_findings": 0,
+          "advisory_findings": 1,
+          "critical_findings": 0,
+          "high_findings": 0,
+          "medium_findings": 0,
+          "low_findings": 0,
+          "reasons": [
+            "Publisher reputation delta -10 increases deterministic risk"
+          ]
+        },
+        "analysis_committee": {
+          "size": 4,
+          "members": [
+            {
+              "id": "validator-2",
+              "performance_score_at_finalization": 465
+            },
+            {
+              "id": "validator-4",
+              "performance_score_at_finalization": 500
+            },
+            {
+              "id": "validator-3",
+              "performance_score_at_finalization": 465
+            },
+            {
+              "id": "validator-1",
+              "performance_score_at_finalization": 465
+            }
+          ],
+          "seed": "35646264346363396434396563366536656233313838653935353464353430333538613731646364343836376264653062316439333337656534383836613461",
+          "effective_size": 4,
+          "performance_bias": true,
+          "member_performance_at_finalization": {
+            "validator-4": 500,
+            "validator-2": 465,
+            "validator-3": 465,
+            "validator-1": 465
+          }
+        }
+      }
+    },
+    {
+      "path": "/v1/public/packages/npm%3Ais-number%407.0.0/proof",
+      "status": 404,
+      "contentType": "application/json",
+      "payload": {
+        "error": "No proof available for: npm:is-number@7.0.0"
+      }
+    },
+    {
+      "path": "/v1/public/packages/npm%3Ais-number%407.0.0/intelligence",
+      "status": 200,
+      "contentType": "application/json",
+      "payload": {
+        "canonical": "npm:is-number@7.0.0",
+        "content_hash": "7b75c1057198cf97696909a9bee176c9c5e9bcb5b03bf3ecef2f484defadd51e",
+        "status": "pending",
+        "message": "Intelligence report not generated yet. Enable CREG_INTELLIGENCE_ENABLED on a node with IPFS access."
+      }
+    },
+    {
+      "path": "/v1/public/transactions/npm%3Ais-number%407.0.0",
+      "status": 200,
+      "contentType": "application/json",
+      "payload": {
+        "transaction": {
+          "type": "revoke",
+          "package_canonical": "npm:is-number@7.0.0",
+          "reason": "Phase C live revocation after shared publication",
+          "revoked_by": "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d",
+          "evidence_hash": "7b75c1057198cf97696909a9bee176c9c5e9bcb5b03bf3ecef2f484defadd51e"
+        },
+        "block_height": 4,
+        "block_hash": "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0"
+      }
+    },
+    {
+      "path": "/v1/validator/registrations",
+      "status": 200,
+      "contentType": "application/json",
+      "payload": []
+    },
+    {
+      "path": "/v1/validator/consensus/state",
+      "status": 200,
+      "contentType": "application/json",
+      "payload": {
+        "total_validators": 4,
+        "quorum": 3,
+        "active_rounds": [],
+        "pending_count": 0,
+        "validators": [
+          {
+            "id": "validator-3",
+            "alias": "Phase C validator-3",
+            "stake": 100,
+            "reputation": 100,
+            "status": "online"
+          },
+          {
+            "id": "validator-1",
+            "alias": "Phase C validator-1",
+            "stake": 100,
+            "reputation": 100,
+            "status": "self"
+          },
+          {
+            "id": "validator-2",
+            "alias": "Phase C validator-2",
+            "stake": 100,
+            "reputation": 100,
+            "status": "online"
+          },
+          {
+            "id": "validator-4",
+            "alias": "Phase C validator-4",
+            "stake": 100,
+            "reputation": 100,
+            "status": "online"
+          }
+        ]
+      }
+    },
+    {
+      "path": "/v1/operator/runtime/config",
+      "status": 401,
+      "contentType": "application/json",
+      "payload": {
+        "error": "private API credentials are missing or invalid"
+      }
+    },
+    {
+      "path": "/v1/operator/nodes",
+      "status": 401,
+      "contentType": "application/json",
+      "payload": {
+        "error": "private API credentials are missing or invalid"
+      }
+    },
+    {
+      "path": "/v1/operator/pending",
+      "status": 401,
+      "contentType": "application/json",
+      "payload": {
+        "error": "private API credentials are missing or invalid"
+      }
+    },
+    {
+      "path": "/v1/operator/p2p/status",
+      "status": 401,
+      "contentType": "application/json",
+      "payload": {
+        "error": "private API credentials are missing or invalid"
+      }
+    },
+    {
+      "path": "/v1/operator/metrics/history?range=1h",
+      "status": 401,
+      "contentType": "application/json",
+      "payload": {
+        "error": "private API credentials are missing or invalid"
+      }
+    },
+    {
+      "path": "/v1/public/bridge/status",
+      "status": 200,
+      "contentType": "application/json",
+      "payload": {
+        "last_finalized_eth_block": 0,
+        "registry_address": "0x23c7FB8e6fd932C1078Ff76244470557E5e6bd99",
+        "bridge_sync_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+        "current_state_root": "",
+        "last_anchor_tx_hash": null,
+        "last_anchor_at": null,
+        "finalized_l1_block": null,
+        "proof_mode": "disabled",
+        "anchor_count": 0
+      }
+    },
+    {
+      "path": "/v1/public/bridge/anchors",
+      "status": 200,
+      "contentType": "application/json",
+      "payload": {
+        "anchors": [],
+        "total": 0,
+        "proof_mode": "disabled",
+        "note": "No persisted anchor records. Current bridge status is not historical evidence."
+      }
+    },
+    {
+      "path": "/v1/public/governance/proposals",
+      "status": 200,
+      "contentType": "application/json",
+      "payload": {
+        "proposals": [
+          {
+            "id": 4,
+            "title": "Phase C authorize package relay 0xb0cBe3b30F05c60E5BFD122F57F19C20826C45EE",
+            "description": "Phase C authorize package relay 0xb0cBe3b30F05c60E5BFD122F57F19C20826C45EE",
+            "status": "executed",
+            "target": "0x23c7fb8e6fd932c1078ff76244470557e5e6bd99",
+            "proposer": "0x6323f9780edf77763cf77401e559711372d76b8c",
+            "votes_yea": 2,
+            "votes_nay": 0,
+            "quorum": 2,
+            "submitted_at": 1790367564,
+            "created_at": "2026-09-25T20:19:24+00:00"
+          },
+          {
+            "id": 3,
+            "title": "Phase C admit 0xbF10f3553D9eCf43C7BC08A6cFf0423A9476892A",
+            "description": "Phase C admit 0xbF10f3553D9eCf43C7BC08A6cFf0423A9476892A",
+            "status": "executed",
+            "target": "0x61c00ebe7c46f0bce63942f7e15bcc434dfc9b7c",
+            "proposer": "0x6323f9780edf77763cf77401e559711372d76b8c",
+            "votes_yea": 2,
+            "votes_nay": 0,
+            "quorum": 2,
+            "submitted_at": 1790366988,
+            "created_at": "2026-09-25T20:09:48+00:00"
+          },
+          {
+            "id": 2,
+            "title": "Phase C admit 0x5470e9700Ed487Af787AF7a2F8C0dC771D5F3FDd",
+            "description": "Phase C admit 0x5470e9700Ed487Af787AF7a2F8C0dC771D5F3FDd",
+            "status": "executed",
+            "target": "0x61c00ebe7c46f0bce63942f7e15bcc434dfc9b7c",
+            "proposer": "0x6323f9780edf77763cf77401e559711372d76b8c",
+            "votes_yea": 2,
+            "votes_nay": 0,
+            "quorum": 2,
+            "submitted_at": 1790366928,
+            "created_at": "2026-09-25T20:08:48+00:00"
+          },
+          {
+            "id": 1,
+            "title": "Phase C admit 0x9A33a425953eC36e729e0b7f94B7db0174DBE13B",
+            "description": "Phase C admit 0x9A33a425953eC36e729e0b7f94B7db0174DBE13B",
+            "status": "executed",
+            "target": "0x61c00ebe7c46f0bce63942f7e15bcc434dfc9b7c",
+            "proposer": "0x6323f9780edf77763cf77401e559711372d76b8c",
+            "votes_yea": 2,
+            "votes_nay": 0,
+            "quorum": 2,
+            "submitted_at": 1790366868,
+            "created_at": "2026-09-25T20:07:48+00:00"
+          },
+          {
+            "id": 0,
+            "title": "Phase C admit 0x91e4dfC18bF015051676f00f23782d0770b95a7a",
+            "description": "Phase C admit 0x91e4dfC18bF015051676f00f23782d0770b95a7a",
+            "status": "executed",
+            "target": "0x61c00ebe7c46f0bce63942f7e15bcc434dfc9b7c",
+            "proposer": "0x6323f9780edf77763cf77401e559711372d76b8c",
+            "votes_yea": 2,
+            "votes_nay": 0,
+            "quorum": 2,
+            "submitted_at": 1790366820,
+            "created_at": "2026-09-25T20:07:00+00:00"
+          }
+        ],
+        "total": 5,
+        "source": "l1"
+      }
+    },
+    {
+      "path": "/v1/public/search?q=is-number",
+      "status": 200,
+      "contentType": "application/json",
+      "payload": {
+        "matches": [
+          {
+            "kind": "package",
+            "href": "/package/npm%3Ais-number%407.0.0",
+            "title": "npm:is-number@7.0.0",
+            "subtitle": "committed package"
+          }
+        ]
+      }
+    },
+    {
+      "path": "/v1/public/reorgs",
+      "status": 200,
+      "contentType": "application/json",
+      "payload": []
+    },
+    {
+      "path": "/v1/public/richlist",
+      "status": 200,
+      "contentType": "application/json",
+      "payload": []
+    }
+  ]
+}

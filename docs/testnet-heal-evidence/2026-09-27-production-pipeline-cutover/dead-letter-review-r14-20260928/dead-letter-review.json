@@ -1,0 +1,456 @@
+{
+  "schema": "creg-r14-validator-dead-letter-review-v1",
+  "captured_at_utc": "2026-09-28T08:02:16.2881929Z",
+  "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+  "height": 18,
+  "block_hash": "ec64471b8f9c58eb2d9b958db765a98871cb444e032143d313d65b3ab80cd76c",
+  "scanner_profile_digest": "7e1d95f9c8423778211944a1dea46674d8cbd3f0aee3b0eea6b5250f11d009cd",
+  "inspector_sha256": "83a0c7adf487e463510a8ff891bb41767d6c3f99ef8cbff13378f57db5ab58e5",
+  "snapshot_method": "Read-only best-effort copies of each validator chain store while nodes remained online; every dead-letter count was matched against a fresh live Prometheus metric.",
+  "publisher_signatures_included": false,
+  "all_four_active_depth_zero": true,
+  "all_four_dead_letter_counts_match_live_metrics": true,
+  "all_publish_nonces_already_applied": true,
+  "all_reasons_classified": true,
+  "status": "reviewed_terminal_duplicates_preserved",
+  "action": "Keep all terminal records for audit; do not replay, acknowledge, or delete them. Active work and forced-inclusion queues remain empty.",
+  "public_cutover": false,
+  "nodes": [
+    {
+      "slot": "v1",
+      "observed_live_dead_letter_depth": 13,
+      "inspected_dead_letter_count": 13,
+      "active_count": 0,
+      "publish_nonce_not_applied": 0,
+      "unexpected_reason_count": 0,
+      "depth_matches_live_metric": true,
+      "categories": [
+        {
+          "reason": "publisher authorization nonce is already committed on this chain",
+          "transaction_type": "publish_authorized_v1",
+          "canonical": "npm:escape-html@1.0.3",
+          "count": 1,
+          "work_ids": [
+            "05ee3e125b8d0f13081e17acb89d94442867afc5520034e4a5f59943ae949d9e"
+          ]
+        },
+        {
+          "reason": "publisher authorization nonce is already committed on this chain",
+          "transaction_type": "publish_authorized_v1",
+          "canonical": "npm:escape-string-regexp@5.0.0",
+          "count": 1,
+          "work_ids": [
+            "d036b1ab0bbc6dafabf8ff5684d287523170f157e3f7117c658d19576df52343"
+          ]
+        },
+        {
+          "reason": "publisher authorization nonce is already committed on this chain",
+          "transaction_type": "publish_authorized_v1",
+          "canonical": "npm:has-flag@5.0.1",
+          "count": 1,
+          "work_ids": [
+            "d8285eee9f4cd917fe2a744ad77fe1635e1f68732d37095fb8d8011122eaf6f1"
+          ]
+        },
+        {
+          "reason": "publisher authorization nonce is already committed on this chain",
+          "transaction_type": "publish_authorized_v1",
+          "canonical": "npm:is-number@7.0.0",
+          "count": 2,
+          "work_ids": [
+            "6888e192fbec959ef6c457138b584d8ac6d2b0e4783991fada58d66eb6e82a33",
+            "fd44e48ea8601b1ab00e8ece79b230148f4bf18b2c0f5ffc47c285e261bba230"
+          ]
+        },
+        {
+          "reason": "publisher authorization nonce is already committed on this chain",
+          "transaction_type": "publish_authorized_v1",
+          "canonical": "npm:kleur@4.1.5",
+          "count": 1,
+          "work_ids": [
+            "0a39a4c7ad0226610704eceeb07435dd26deaee22299a47e1a6bf4e201573afa"
+          ]
+        },
+        {
+          "reason": "publisher authorization nonce is already committed on this chain",
+          "transaction_type": "publish_authorized_v1",
+          "canonical": "npm:ms@2.1.3",
+          "count": 1,
+          "work_ids": [
+            "f9c35ed006fb438fb8fb2c0273d494bb2e2437165f7bd34b8299131f7771365a"
+          ]
+        },
+        {
+          "reason": "publisher authorization nonce is already committed on this chain",
+          "transaction_type": "publish_authorized_v1",
+          "canonical": "npm:toidentifier@1.0.1",
+          "count": 1,
+          "work_ids": [
+            "8345b36c848854c51419e045cf589ffd6718cdb08a14c58dbd05d48d61031713"
+          ]
+        },
+        {
+          "reason": "revocation target is already revoked on this chain",
+          "transaction_type": "revoke",
+          "canonical": "npm:escape-html@1.0.3",
+          "count": 1,
+          "work_ids": [
+            "b8bce8fc59fd2846e9113f0c78fc69e4ef654294c0df82274f7bf95e16540363"
+          ]
+        },
+        {
+          "reason": "revocation target is already revoked on this chain",
+          "transaction_type": "revoke",
+          "canonical": "npm:escape-string-regexp@5.0.0",
+          "count": 1,
+          "work_ids": [
+            "6908976e836de174ef09a8a9b16a49e5cd1071cdd18206d0f0fd2d267d170793"
+          ]
+        },
+        {
+          "reason": "revocation target is already revoked on this chain",
+          "transaction_type": "revoke",
+          "canonical": "npm:has-flag@5.0.1",
+          "count": 1,
+          "work_ids": [
+            "859a9e6141da1e2c699334d986d20b4b8583eb082f7adeaafe409a4c0fb29e9e"
+          ]
+        },
+        {
+          "reason": "revocation target is already revoked on this chain",
+          "transaction_type": "revoke",
+          "canonical": "npm:kleur@4.1.5",
+          "count": 1,
+          "work_ids": [
+            "233bd3c24a0e037ef0ca141d59b8e49143252259a4df1e23c55cf91a7b777d4a"
+          ]
+        },
+        {
+          "reason": "revocation target is already revoked on this chain",
+          "transaction_type": "revoke",
+          "canonical": "npm:ms@2.1.3",
+          "count": 1,
+          "work_ids": [
+            "b0f7ba8247b77d0647ad2d6f3e6feafbf2117b156abc2e2e29c411a2bd767c17"
+          ]
+        }
+      ],
+      "snapshot_path": "C:\\Users\\samue\\CREG-backups\\phase-c-candidate-r7\\v1\\diagnostics-r14-live-copy-20260928"
+    },
+    {
+      "slot": "v2",
+      "observed_live_dead_letter_depth": 11,
+      "inspected_dead_letter_count": 11,
+      "active_count": 0,
+      "publish_nonce_not_applied": 0,
+      "unexpected_reason_count": 0,
+      "depth_matches_live_metric": true,
+      "categories": [
+        {
+          "reason": "publisher authorization nonce is already committed on this chain",
+          "transaction_type": "publish_authorized_v1",
+          "canonical": "npm:escape-html@1.0.3",
+          "count": 1,
+          "work_ids": [
+            "cec5e6f469cee9f1bf52489aa9f806a36a54ce324bf6fbf7fc05c3f68884e721"
+          ]
+        },
+        {
+          "reason": "publisher authorization nonce is already committed on this chain",
+          "transaction_type": "publish_authorized_v1",
+          "canonical": "npm:escape-string-regexp@5.0.0",
+          "count": 1,
+          "work_ids": [
+            "d61f21ce871e24a8f2183410dc91153c5f5f2e2b35dc3036482937711483ad72"
+          ]
+        },
+        {
+          "reason": "publisher authorization nonce is already committed on this chain",
+          "transaction_type": "publish_authorized_v1",
+          "canonical": "npm:has-flag@5.0.1",
+          "count": 1,
+          "work_ids": [
+            "143a33d907e07c669d83cdeb880269ceb12108def2e90d239b0330dc74790fc7"
+          ]
+        },
+        {
+          "reason": "publisher authorization nonce is already committed on this chain",
+          "transaction_type": "publish_authorized_v1",
+          "canonical": "npm:is-number@7.0.0",
+          "count": 1,
+          "work_ids": [
+            "ecbaa6ac3868919cf9b132dceb74310c6014b7068d90e8343985f36fa44f08f1"
+          ]
+        },
+        {
+          "reason": "publisher authorization nonce is already committed on this chain",
+          "transaction_type": "publish_authorized_v1",
+          "canonical": "npm:kleur@4.1.5",
+          "count": 1,
+          "work_ids": [
+            "20830cc73d70460e4498c2dc5a275956aed8c043cc2f261b05431bb6c7416e21"
+          ]
+        },
+        {
+          "reason": "publisher authorization nonce is already committed on this chain",
+          "transaction_type": "publish_authorized_v1",
+          "canonical": "npm:ms@2.1.3",
+          "count": 1,
+          "work_ids": [
+            "ebd334047f010945642b0b765b52d922cc76602c360c93c0eb51b1b5cf45457b"
+          ]
+        },
+        {
+          "reason": "publisher authorization nonce is already committed on this chain",
+          "transaction_type": "publish_authorized_v1",
+          "canonical": "npm:toidentifier@1.0.1",
+          "count": 1,
+          "work_ids": [
+            "d001673bd48ecb6f829878fff7db51b7f4e1db7788e034db0904242f5eeafd47"
+          ]
+        },
+        {
+          "reason": "revocation target is already revoked on this chain",
+          "transaction_type": "revoke",
+          "canonical": "npm:escape-html@1.0.3",
+          "count": 1,
+          "work_ids": [
+            "b8bce8fc59fd2846e9113f0c78fc69e4ef654294c0df82274f7bf95e16540363"
+          ]
+        },
+        {
+          "reason": "revocation target is already revoked on this chain",
+          "transaction_type": "revoke",
+          "canonical": "npm:escape-string-regexp@5.0.0",
+          "count": 1,
+          "work_ids": [
+            "6908976e836de174ef09a8a9b16a49e5cd1071cdd18206d0f0fd2d267d170793"
+          ]
+        },
+        {
+          "reason": "revocation target is already revoked on this chain",
+          "transaction_type": "revoke",
+          "canonical": "npm:has-flag@5.0.1",
+          "count": 1,
+          "work_ids": [
+            "859a9e6141da1e2c699334d986d20b4b8583eb082f7adeaafe409a4c0fb29e9e"
+          ]
+        },
+        {
+          "reason": "revocation target is already revoked on this chain",
+          "transaction_type": "revoke",
+          "canonical": "npm:ms@2.1.3",
+          "count": 1,
+          "work_ids": [
+            "b0f7ba8247b77d0647ad2d6f3e6feafbf2117b156abc2e2e29c411a2bd767c17"
+          ]
+        }
+      ],
+      "snapshot_path": "C:\\Users\\samue\\CREG-backups\\phase-c-candidate-r7\\diagnostics-r14-live-copy-20260928\\v2"
+    },
+    {
+      "slot": "v3",
+      "observed_live_dead_letter_depth": 10,
+      "inspected_dead_letter_count": 10,
+      "active_count": 0,
+      "publish_nonce_not_applied": 0,
+      "unexpected_reason_count": 0,
+      "depth_matches_live_metric": true,
+      "categories": [
+        {
+          "reason": "publisher authorization nonce is already committed on this chain",
+          "transaction_type": "publish_authorized_v1",
+          "canonical": "npm:escape-html@1.0.3",
+          "count": 1,
+          "work_ids": [
+            "1f7d9afe6adfdffe456fbbbf32d5ef876f47f231f3c9122d6c7aec3d29846a65"
+          ]
+        },
+        {
+          "reason": "publisher authorization nonce is already committed on this chain",
+          "transaction_type": "publish_authorized_v1",
+          "canonical": "npm:escape-string-regexp@5.0.0",
+          "count": 1,
+          "work_ids": [
+            "dfd9663802dc9a2e87b216e210cd0ed6abfabf0e198d96d6c60b8af4e7465118"
+          ]
+        },
+        {
+          "reason": "publisher authorization nonce is already committed on this chain",
+          "transaction_type": "publish_authorized_v1",
+          "canonical": "npm:has-flag@5.0.1",
+          "count": 1,
+          "work_ids": [
+            "0782bea42edb669a92a46dae262b5993a9677e71dec74c0c72fe37728b925ffd"
+          ]
+        },
+        {
+          "reason": "publisher authorization nonce is already committed on this chain",
+          "transaction_type": "publish_authorized_v1",
+          "canonical": "npm:is-number@7.0.0",
+          "count": 1,
+          "work_ids": [
+            "089d7fdd8308d6588563b5a30b41c900b79d8f0c16c908a5cd849b1e195e5b1e"
+          ]
+        },
+        {
+          "reason": "publisher authorization nonce is already committed on this chain",
+          "transaction_type": "publish_authorized_v1",
+          "canonical": "npm:kleur@4.1.5",
+          "count": 1,
+          "work_ids": [
+            "79fdf5a14fa12ab3f3501963684ab684e9e02776121f536c4e69632483f3a28e"
+          ]
+        },
+        {
+          "reason": "publisher authorization nonce is already committed on this chain",
+          "transaction_type": "publish_authorized_v1",
+          "canonical": "npm:ms@2.1.3",
+          "count": 1,
+          "work_ids": [
+            "41968741c9877a2531fc4553d0ade58b30fe4bd0fb01ce692367dc7bcd346cce"
+          ]
+        },
+        {
+          "reason": "publisher authorization nonce is already committed on this chain",
+          "transaction_type": "publish_authorized_v1",
+          "canonical": "npm:toidentifier@1.0.1",
+          "count": 1,
+          "work_ids": [
+            "843a3abeaba99abc61d76bcf0d6382355877671bb7e4ff0551e8622c5d9b78a2"
+          ]
+        },
+        {
+          "reason": "revocation target is already revoked on this chain",
+          "transaction_type": "revoke",
+          "canonical": "npm:escape-html@1.0.3",
+          "count": 1,
+          "work_ids": [
+            "b8bce8fc59fd2846e9113f0c78fc69e4ef654294c0df82274f7bf95e16540363"
+          ]
+        },
+        {
+          "reason": "revocation target is already revoked on this chain",
+          "transaction_type": "revoke",
+          "canonical": "npm:has-flag@5.0.1",
+          "count": 1,
+          "work_ids": [
+            "859a9e6141da1e2c699334d986d20b4b8583eb082f7adeaafe409a4c0fb29e9e"
+          ]
+        },
+        {
+          "reason": "revocation target is already revoked on this chain",
+          "transaction_type": "revoke",
+          "canonical": "npm:ms@2.1.3",
+          "count": 1,
+          "work_ids": [
+            "b0f7ba8247b77d0647ad2d6f3e6feafbf2117b156abc2e2e29c411a2bd767c17"
+          ]
+        }
+      ],
+      "snapshot_path": "C:\\Users\\samue\\CREG-backups\\phase-c-candidate-r7\\diagnostics-r14-live-copy-20260928\\v3"
+    },
+    {
+      "slot": "v4",
+      "observed_live_dead_letter_depth": 10,
+      "inspected_dead_letter_count": 10,
+      "active_count": 0,
+      "publish_nonce_not_applied": 0,
+      "unexpected_reason_count": 0,
+      "depth_matches_live_metric": true,
+      "categories": [
+        {
+          "reason": "publisher authorization nonce is already committed on this chain",
+          "transaction_type": "publish_authorized_v1",
+          "canonical": "npm:escape-html@1.0.3",
+          "count": 1,
+          "work_ids": [
+            "d3837320d9813e71671c06c8b10972fe2a23b45d24fe63d3d26ea4c14fa75b87"
+          ]
+        },
+        {
+          "reason": "publisher authorization nonce is already committed on this chain",
+          "transaction_type": "publish_authorized_v1",
+          "canonical": "npm:escape-string-regexp@5.0.0",
+          "count": 1,
+          "work_ids": [
+            "44c433e3816ad1b5e6b903bcfb1fbc38fe4c1589d00e771cf7b88ba6dc66fcd6"
+          ]
+        },
+        {
+          "reason": "publisher authorization nonce is already committed on this chain",
+          "transaction_type": "publish_authorized_v1",
+          "canonical": "npm:has-flag@5.0.1",
+          "count": 1,
+          "work_ids": [
+            "bc4728a7e1c107848fafbd2c5583aea853b90fdc20b9dc66cee9da4400f5377a"
+          ]
+        },
+        {
+          "reason": "publisher authorization nonce is already committed on this chain",
+          "transaction_type": "publish_authorized_v1",
+          "canonical": "npm:is-number@7.0.0",
+          "count": 1,
+          "work_ids": [
+            "6888e192fbec959ef6c457138b584d8ac6d2b0e4783991fada58d66eb6e82a33"
+          ]
+        },
+        {
+          "reason": "publisher authorization nonce is already committed on this chain",
+          "transaction_type": "publish_authorized_v1",
+          "canonical": "npm:ms@2.1.3",
+          "count": 1,
+          "work_ids": [
+            "0860311b14f9d90ac42f760f8bd8d0ea04dcea4b5f555cc5eb275136aacb0090"
+          ]
+        },
+        {
+          "reason": "publisher authorization nonce is already committed on this chain",
+          "transaction_type": "publish_authorized_v1",
+          "canonical": "npm:toidentifier@1.0.1",
+          "count": 1,
+          "work_ids": [
+            "0043efbb83e75879a774e51e1cf8ab8beebbb119159ea3525ddca33053fc2e36"
+          ]
+        },
+        {
+          "reason": "revocation target is already revoked on this chain",
+          "transaction_type": "revoke",
+          "canonical": "npm:escape-html@1.0.3",
+          "count": 1,
+          "work_ids": [
+            "b8bce8fc59fd2846e9113f0c78fc69e4ef654294c0df82274f7bf95e16540363"
+          ]
+        },
+        {
+          "reason": "revocation target is already revoked on this chain",
+          "transaction_type": "revoke",
+          "canonical": "npm:escape-string-regexp@5.0.0",
+          "count": 1,
+          "work_ids": [
+            "6908976e836de174ef09a8a9b16a49e5cd1071cdd18206d0f0fd2d267d170793"
+          ]
+        },
+        {
+          "reason": "revocation target is already revoked on this chain",
+          "transaction_type": "revoke",
+          "canonical": "npm:has-flag@5.0.1",
+          "count": 1,
+          "work_ids": [
+            "859a9e6141da1e2c699334d986d20b4b8583eb082f7adeaafe409a4c0fb29e9e"
+          ]
+        },
+        {
+          "reason": "revocation target is already revoked on this chain",
+          "transaction_type": "revoke",
+          "canonical": "npm:ms@2.1.3",
+          "count": 1,
+          "work_ids": [
+            "b0f7ba8247b77d0647ad2d6f3e6feafbf2117b156abc2e2e29c411a2bd767c17"
+          ]
+        }
+      ],
+      "snapshot_path": "C:\\Users\\samue\\CREG-backups\\phase-c-candidate-r7\\diagnostics-r14-live-copy-20260928\\v4"
+    }
+  ]
+}

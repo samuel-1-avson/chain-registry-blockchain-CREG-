@@ -1,0 +1,7 @@
+{
+  "timestamp_utc": "2026-09-26T11:39:50.6552955Z",
+  "status": "failed",
+  "image_tag": "creg-node:phase-c-secure-r10-explorer",
+  "detail": "Reviewed Docker build exited with code -1.",
+  "public_cutover": "pending"
+}

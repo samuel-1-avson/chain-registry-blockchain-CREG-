@@ -1,0 +1,7 @@
+{
+  "captured_at_utc": "2026-09-27T21:04:23.2294307Z",
+  "rejected_exit_code": 1,
+  "existing_binary_spec_signature_config_unchanged": true,
+  "artifact": "retained first real incompatible candidate",
+  "status": "passed"
+}

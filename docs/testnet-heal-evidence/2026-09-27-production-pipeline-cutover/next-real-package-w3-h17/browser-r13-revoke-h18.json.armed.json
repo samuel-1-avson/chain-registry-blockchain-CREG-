@@ -1,0 +1,12 @@
+{
+  "capturedAt": "2026-09-28T03:01:04.671Z",
+  "canonical": "npm:has-flag@5.0.1",
+  "afterHeight": 17,
+  "connections": [
+    {
+      "url": "http://127.0.0.1:3008/v1/public/events",
+      "opened": true,
+      "errors": 0
+    }
+  ]
+}

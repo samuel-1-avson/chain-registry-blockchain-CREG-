@@ -1,0 +1,19 @@
+{
+  "package": {
+    "ecosystem": "npm",
+    "name": "kleur",
+    "version": "4.1.5"
+  },
+  "status": "Unknown",
+  "resolved_at": "2026-09-27T06:42:15.797962500Z",
+  "source": {
+    "Chain": {
+      "node_url": "http://127.0.0.1:18080"
+    }
+  },
+  "deterministic_risk": null,
+  "evidence_phase": null,
+  "block_phase": null,
+  "chain_status": null,
+  "publisher": null
+}

@@ -1,0 +1,7 @@
+{
+  "package": {
+    "ecosystem": "npm",
+    "name": "escape-string-regexp"
+  },
+  "version": "5.0.0"
+}

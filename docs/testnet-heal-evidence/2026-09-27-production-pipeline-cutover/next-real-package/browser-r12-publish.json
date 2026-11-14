@@ -1,0 +1,93 @@
+{
+  "capturedAt": "2026-09-28T00:36:42.038Z",
+  "dataSource": "live Phase C candidate node through the real Vite proxy; no fixtures or intercepted responses",
+  "explorerUrl": "http://127.0.0.1:3008",
+  "candidateNodeUrl": "http://127.0.0.1:18080",
+  "operation": "publish",
+  "canonical": "npm:escape-string-regexp@5.0.0",
+  "startingHeight": 14,
+  "probeError": "page.waitForFunction: Timeout 900000ms exceeded.",
+  "checks": {
+    "stream_opened": true,
+    "submitted": true,
+    "verified": false,
+    "block_produced": false,
+    "event_rendered_in_web_explorer": false,
+    "no_page_errors": true
+  },
+  "connections": [
+    {
+      "url": "http://127.0.0.1:3008/v1/public/events",
+      "opened": true,
+      "errors": 0
+    }
+  ],
+  "events": [
+    {
+      "type": "package_submitted",
+      "data": {
+        "kind": "package_submitted",
+        "ts": "2026-09-28T00:24:21.765980838+00:00",
+        "payload": {
+          "canonical": "npm:escape-string-regexp@5.0.0",
+          "publisher_pubkey": "863906af03a385de"
+        }
+      },
+      "receivedAt": "2026-09-28T00:24:21.772Z"
+    },
+    {
+      "type": "validator_voted",
+      "data": {
+        "kind": "validator_voted",
+        "ts": "2026-09-28T00:24:23.251159225+00:00",
+        "payload": {
+          "validator_id": "validator-1",
+          "canonical": "npm:escape-string-regexp@5.0.0",
+          "approved": true
+        }
+      },
+      "receivedAt": "2026-09-28T00:24:23.252Z"
+    },
+    {
+      "type": "validator_voted",
+      "data": {
+        "kind": "validator_voted",
+        "ts": "2026-09-28T00:24:23.735902672+00:00",
+        "payload": {
+          "validator_id": "validator-3",
+          "canonical": "npm:escape-string-regexp@5.0.0",
+          "approved": true
+        }
+      },
+      "receivedAt": "2026-09-28T00:24:23.736Z"
+    },
+    {
+      "type": "validator_voted",
+      "data": {
+        "kind": "validator_voted",
+        "ts": "2026-09-28T00:24:24.159846032+00:00",
+        "payload": {
+          "validator_id": "validator-2",
+          "canonical": "npm:escape-string-regexp@5.0.0",
+          "approved": true
+        }
+      },
+      "receivedAt": "2026-09-28T00:24:24.160Z"
+    },
+    {
+      "type": "validator_voted",
+      "data": {
+        "kind": "validator_voted",
+        "ts": "2026-09-28T00:24:26.346985416+00:00",
+        "payload": {
+          "validator_id": "validator-4",
+          "canonical": "npm:escape-string-regexp@5.0.0",
+          "approved": true
+        }
+      },
+      "receivedAt": "2026-09-28T00:24:26.347Z"
+    }
+  ],
+  "renderedText": "Live events\n5 of 5\n🔗\nShare\nAll types (5)\npackage_submitted (1)\nvalidator_voted (4)\n⏸ Pause\n↕ Auto-scroll\n≡ Compact\n⇩ Export\nall (5)\npackage_submitted (1)\nvalidator_voted (4)\nVALIDATOR_VOTED\nnpm:escape-string-regexp@5.0.0\n12m ago\nVALIDATOR_VOTED\nnpm:escape-string-regexp@5.0.0\n12m ago\nVALIDATOR_VOTED\nnpm:escape-string-regexp@5.0.0\n12m ago\nVALIDATOR_VOTED\nnpm:escape-string-regexp@5.0.0\n12m ago\nPACKAGE_SUBMITTED\nnpm:escape-string-regexp@5.0.0\n12m ago\nLIVE Buffer: 5 events\nShowing: 5 / 5",
+  "pageErrors": []
+}

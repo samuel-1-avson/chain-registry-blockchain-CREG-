@@ -1,0 +1,3 @@
+creg-observer-vm,us-central1-a,e2-medium,RUNNING,10.128.0.41,
+creg-testnet-vm,us-central1-b,e2-medium,RUNNING,10.128.0.37,35.225.225.20
+creg-validator-1,us-east1-b,e2-medium,RUNNING,10.142.0.4,34.74.35.254

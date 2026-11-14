@@ -1,0 +1,19 @@
+{
+  "installed_at": "2026-09-26T13:22:39.6603495Z",
+  "source": "C:\\Users\\samue\\OneDrive\\Desktop\\projects\\chain-registry-blockchain-CREG-\\chain-registry\\target\\release\\creg.exe",
+  "source_sha256": "de45f5811ccc062efb09040f7bcf7d898c336c9d3ff893e5c5ab072e122ef831",
+  "installed": [
+    {
+      "path": "C:/Users/samue/.cargo/bin/creg.exe",
+      "old_sha256": "bdabd1698821af9ff9ad1fe53678a7e82a8c10041acbdc82aa63c359d81f344c",
+      "new_sha256": "de45f5811ccc062efb09040f7bcf7d898c336c9d3ff893e5c5ab072e122ef831",
+      "backup": "C:/Users/samue/.cargo/bin/creg.exe.pre-explorer-r15-20260926.bak"
+    },
+    {
+      "path": "C:/Users/samue/.creg/bin/creg.exe",
+      "old_sha256": "bdabd1698821af9ff9ad1fe53678a7e82a8c10041acbdc82aa63c359d81f344c",
+      "new_sha256": "de45f5811ccc062efb09040f7bcf7d898c336c9d3ff893e5c5ab072e122ef831",
+      "backup": "C:/Users/samue/.creg/bin/creg.exe.pre-explorer-r15-20260926.bak"
+    }
+  ]
+}

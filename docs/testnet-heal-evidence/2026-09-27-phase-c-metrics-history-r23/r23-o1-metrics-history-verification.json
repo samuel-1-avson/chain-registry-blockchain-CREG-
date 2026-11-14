@@ -1,0 +1,85 @@
+{
+  "schema": "creg-phase-c-r23-o1-metrics-history-verification-v1",
+  "captured_at_utc": "2026-09-27T16:49:35.883614+00:00",
+  "target": {
+    "slot": "o1",
+    "role": "observer",
+    "vm": "creg-testnet-vm",
+    "project": "gen-lang-client-0022105784",
+    "zone": "us-central1-b"
+  },
+  "chain": {
+    "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+    "block_genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+    "network_genesis_hash": "1852b9a86dd3b53e7b2de4a774723a4fe48e862f9c61d14e5917b42b21055234",
+    "tip_height": 14,
+    "tip_hash": "2ece0610b4b808ee5382704b702917dd6f2f3f75d6eeb2a8585aaa9e270507aa",
+    "finalized_height": 14,
+    "signature_verified": true,
+    "validators": 4,
+    "active_validators": 4,
+    "peers": 2
+  },
+  "image": {
+    "ref": "us-central1-docker.pkg.dev/gen-lang-client-0022105784/creg-testnet/creg-node:phase-c-secure-r23-metrics-history",
+    "repo_digest": "us-central1-docker.pkg.dev/gen-lang-client-0022105784/creg-testnet/creg-node@sha256:ef21b958b5e3e4f09e1c87290d3d9a50f23b5350d207e5af9982dd1cf5413708",
+    "image_id": "sha256:ef21b958b5e3e4f09e1c87290d3d9a50f23b5350d207e5af9982dd1cf5413708",
+    "previous_image_id": "sha256:2b472a089fe6ac651edfbae51b616456ed335f35992c0374f10c1ea80ce6caa3",
+    "node_sha256": "b6cab56f893b13cb0340834d7f69a9c23eb80f12d139186fb1056e5ce2e12972",
+    "cli_sha256": "b987ba41fe68efde6b33cad2f6a7e8d4784402902094b6b78e0742a19d0705b7"
+  },
+  "preserved_container": "creg-phase-c-r7-o1-r22-preserved-r23-metrics-history-20260927T164425Z",
+  "preserved_r22_state": "exited",
+  "data_identity_sha256": "0ffe4b0e2f482e649c7e8e4619e83bade5ca653025514bb7432c47731f362b6d",
+  "node_environment_sha256": "25d83c084c5fe7bc7756007d856e4dbea59b4c1c513b5b5a022adac3af28771e",
+  "networks": [
+    "bridge",
+    "monitoring_default"
+  ],
+  "scanner": {
+    "profile_digest": "f397fac29df29438f0ee15580547def5fe66a03af60153d22993f4a7af9fce8c",
+    "ready": true
+  },
+  "queues": {
+    "creg_pending_block_txs": 0.0,
+    "creg_durable_finalized_work_depth": 0.0,
+    "creg_durable_finalized_work_ready_depth": 0.0,
+    "creg_durable_finalized_work_dead_letter_depth": 0.0,
+    "creg_forced_inclusion_pending": 0.0
+  },
+  "pbft_clear": true,
+  "metrics_history": {
+    "http": 200,
+    "collector": "prometheus",
+    "status": "ready",
+    "range": "5m",
+    "sample_count": 20,
+    "queried_series": 7,
+    "fields": [
+      "active_validators",
+      "height",
+      "package_count",
+      "pending_tx_count",
+      "publisher_count",
+      "total_stake",
+      "validator_count"
+    ],
+    "latest_sample_timestamp_ms": 1790527775000,
+    "latest_height": 14
+  },
+  "direct_prometheus_cross_check": {
+    "series_count": 1,
+    "labels": {
+      "__name__": "creg_chain_tip_height",
+      "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+      "instance": "creg-phase-c-r7-o1:8080",
+      "job": "creg-phase-c-r7-primary-observer",
+      "metrics_source": "explorer-primary",
+      "network_genesis_hash": "1852b9a86dd3b53e7b2de4a774723a4fe48e862f9c61d14e5917b42b21055234",
+      "role": "observer"
+    },
+    "latest_height": 14
+  },
+  "public_cutover": false,
+  "chain_reset": false
+}

@@ -1,0 +1,84 @@
+{
+  "schema": "creg-r7-package-shared-finality-v1",
+  "captured_at_utc": "2026-09-28T00:43:50.2534907Z",
+  "canonical": "npm:escape-string-regexp@5.0.0",
+  "finalized_height": 15,
+  "block_hash": "27a3d44c2b58b3cb6ced5b1e118108ba762f3d3a5ef30ed5da4236faf63d19bb",
+  "content_hash": "c8b662afe8aa2b852ecc27d766e584a502f8351fbbd890611f2509bf083d28e6",
+  "ipfs_cid": "QmPd9113MRYJUsTTrWXMdawzBPU12fD1yU1Rcte7nk33Wc",
+  "all_eight_verified": true,
+  "nodes": [
+    {
+      "slot": "v1",
+      "host": "operator-laptop",
+      "status": "verified",
+      "canonical": "npm:escape-string-regexp@5.0.0",
+      "block_hash": "27a3d44c2b58b3cb6ced5b1e118108ba762f3d3a5ef30ed5da4236faf63d19bb",
+      "content_hash": "c8b662afe8aa2b852ecc27d766e584a502f8351fbbd890611f2509bf083d28e6",
+      "ipfs_cid": "QmPd9113MRYJUsTTrWXMdawzBPU12fD1yU1Rcte7nk33Wc"
+    },
+    {
+      "slot": "v2",
+      "host": "creg-validator-1",
+      "status": "verified",
+      "canonical": "npm:escape-string-regexp@5.0.0",
+      "block_hash": "27a3d44c2b58b3cb6ced5b1e118108ba762f3d3a5ef30ed5da4236faf63d19bb",
+      "content_hash": "c8b662afe8aa2b852ecc27d766e584a502f8351fbbd890611f2509bf083d28e6",
+      "ipfs_cid": "QmPd9113MRYJUsTTrWXMdawzBPU12fD1yU1Rcte7nk33Wc"
+    },
+    {
+      "slot": "v3",
+      "host": "creg-validator-3",
+      "status": "verified",
+      "canonical": "npm:escape-string-regexp@5.0.0",
+      "block_hash": "27a3d44c2b58b3cb6ced5b1e118108ba762f3d3a5ef30ed5da4236faf63d19bb",
+      "content_hash": "c8b662afe8aa2b852ecc27d766e584a502f8351fbbd890611f2509bf083d28e6",
+      "ipfs_cid": "QmPd9113MRYJUsTTrWXMdawzBPU12fD1yU1Rcte7nk33Wc"
+    },
+    {
+      "slot": "v4",
+      "host": "creg-validator-4",
+      "status": "verified",
+      "canonical": "npm:escape-string-regexp@5.0.0",
+      "block_hash": "27a3d44c2b58b3cb6ced5b1e118108ba762f3d3a5ef30ed5da4236faf63d19bb",
+      "content_hash": "c8b662afe8aa2b852ecc27d766e584a502f8351fbbd890611f2509bf083d28e6",
+      "ipfs_cid": "QmPd9113MRYJUsTTrWXMdawzBPU12fD1yU1Rcte7nk33Wc"
+    },
+    {
+      "slot": "o1",
+      "host": "creg-testnet-vm",
+      "status": "verified",
+      "canonical": "npm:escape-string-regexp@5.0.0",
+      "block_hash": "27a3d44c2b58b3cb6ced5b1e118108ba762f3d3a5ef30ed5da4236faf63d19bb",
+      "content_hash": "c8b662afe8aa2b852ecc27d766e584a502f8351fbbd890611f2509bf083d28e6",
+      "ipfs_cid": "QmPd9113MRYJUsTTrWXMdawzBPU12fD1yU1Rcte7nk33Wc"
+    },
+    {
+      "slot": "o2",
+      "host": "creg-observer-vm",
+      "status": "verified",
+      "canonical": "npm:escape-string-regexp@5.0.0",
+      "block_hash": "27a3d44c2b58b3cb6ced5b1e118108ba762f3d3a5ef30ed5da4236faf63d19bb",
+      "content_hash": "c8b662afe8aa2b852ecc27d766e584a502f8351fbbd890611f2509bf083d28e6",
+      "ipfs_cid": "QmPd9113MRYJUsTTrWXMdawzBPU12fD1yU1Rcte7nk33Wc"
+    },
+    {
+      "slot": "o3",
+      "host": "creg-observer-3",
+      "status": "verified",
+      "canonical": "npm:escape-string-regexp@5.0.0",
+      "block_hash": "27a3d44c2b58b3cb6ced5b1e118108ba762f3d3a5ef30ed5da4236faf63d19bb",
+      "content_hash": "c8b662afe8aa2b852ecc27d766e584a502f8351fbbd890611f2509bf083d28e6",
+      "ipfs_cid": "QmPd9113MRYJUsTTrWXMdawzBPU12fD1yU1Rcte7nk33Wc"
+    },
+    {
+      "slot": "o4",
+      "host": "creg-observer-4",
+      "status": "verified",
+      "canonical": "npm:escape-string-regexp@5.0.0",
+      "block_hash": "27a3d44c2b58b3cb6ced5b1e118108ba762f3d3a5ef30ed5da4236faf63d19bb",
+      "content_hash": "c8b662afe8aa2b852ecc27d766e584a502f8351fbbd890611f2509bf083d28e6",
+      "ipfs_cid": "QmPd9113MRYJUsTTrWXMdawzBPU12fD1yU1Rcte7nk33Wc"
+    }
+  ]
+}

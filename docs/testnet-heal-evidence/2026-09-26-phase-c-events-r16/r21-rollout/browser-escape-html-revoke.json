@@ -1,0 +1,27 @@
+{
+  "capturedAt": "2026-09-26T22:15:43.349Z",
+  "dataSource": "live Phase C candidate node through the real Vite proxy; no fixtures or intercepted responses",
+  "explorerUrl": "http://127.0.0.1:3008",
+  "candidateNodeUrl": "https://api.testnet.cregnet.dev",
+  "operation": "revoke",
+  "canonical": "npm:escape-html@1.0.3",
+  "startingHeight": 9,
+  "probeError": "page.waitForFunction: Timeout 360000ms exceeded.",
+  "checks": {
+    "stream_opened": true,
+    "revoked": false,
+    "block_produced": false,
+    "event_rendered_in_web_explorer": false,
+    "no_page_errors": true
+  },
+  "connections": [
+    {
+      "url": "http://127.0.0.1:3008/v1/public/events",
+      "opened": true,
+      "errors": 0
+    }
+  ],
+  "events": [],
+  "renderedText": "Live events\n0 of 0\n🔗\nShare\nAll types (0)\n⏸ Pause\n↕ Auto-scroll\n≡ Compact\n⇩ Export\nNo events match\n\nRelax the filter or wait for the next event.\n\nLIVE Buffer: 0 events\nShowing: 0 / 0",
+  "pageErrors": []
+}

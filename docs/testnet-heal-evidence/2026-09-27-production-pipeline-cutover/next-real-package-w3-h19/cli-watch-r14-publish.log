@@ -1,0 +1,9 @@
+→ Connecting to event stream at http://host.docker.internal:18080/v1/public/events
+→ Filter: pkg:ansi-regex@6.1.0
+────────────────────────────────────────────────────────────
+08:11:35 ↑ SUBMITTED npm:ansi-regex@6.1.0 by 863906af03a385de...
+08:11:36 ◈ VOTE      ✓ validator-1 on npm:ansi-regex@6.1.0
+08:11:37 ◈ VOTE      ✓ validator-3 on npm:ansi-regex@6.1.0
+08:11:37 ◈ VOTE      ✓ validator-2 on npm:ansi-regex@6.1.0
+08:11:39 ◈ VOTE      ✓ validator-4 on npm:ansi-regex@6.1.0
+08:11:42 ✓ VERIFIED  npm:ansi-regex@6.1.0 block e31b9e7440523d31a66b468e53115ec7cfbbd370e42dd8b1d9439d9a50eeea8b validators 3

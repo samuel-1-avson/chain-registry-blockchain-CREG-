@@ -1,0 +1,816 @@
+{
+  "schema": "creg-phase-c-real-fleet-readiness-v1",
+  "captured_at_utc": "2026-09-26T18:54:33.5190477Z",
+  "scanner_profile_digest": "dd52b5f77776aa0cad9cb25a4a308f9ef3755c1d3addec44073a5a322ee2e4fb",
+  "all_eight_ready": true,
+  "all_eight_recovery_clear": true,
+  "public_cutover": false,
+  "nodes": [
+    {
+      "checks": {
+        "container_running": true,
+        "scanner_ready": true,
+        "yara_ready": true,
+        "threat_feed_ready": true,
+        "threat_feed_entries_100": true,
+        "osv_ready": true,
+        "scanner_profile_matches": true,
+        "signature_verified": true,
+        "chain_id_matches": true,
+        "genesis_matches": true,
+        "four_active_validators": true,
+        "role_matches": true,
+        "live_peers": true,
+        "validator_sandbox_isolated": true,
+        "validator_sandbox_nsjail": true,
+        "validator_dev_bypass_disabled": true
+      },
+      "captured_at_utc": "2026-09-26T18:53:12.9443587Z",
+      "name": "operator laptop",
+      "stats": {
+        "tip_height": 5,
+        "tip_hash": "daab438828a678aee3aa2eebf041f5147bc6f76fed837a207e6a1f4747d427cf",
+        "package_count": 2,
+        "block_count": 6,
+        "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+        "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+        "spec_signature_verified": true,
+        "l1_rpc_configured": true,
+        "is_validator": true,
+        "validator_count": 4,
+        "active_validators": 4,
+        "total_stake": 400,
+        "total_stake_native": "400",
+        "peer_count": 2,
+        "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+        "l1_block": 0,
+        "pending_tx_count": 0,
+        "publisher_count": 1,
+        "finalized_height": 5,
+        "finalization_lag": 0,
+        "finalization_source": "creg-canonical-store",
+        "validator_set_source": "chain-authoritative",
+        "validator_set_sync_state": "synced",
+        "validator_set_last_finalized_source_block": 11788081
+      },
+      "port": 18080,
+      "health": {
+        "status": "ok",
+        "node_id": "validator-1",
+        "is_validator": true,
+        "version": "0.1.0",
+        "validator_set_sync": {
+          "enabled": true,
+          "mode": "chain-authoritative",
+          "state": "synced",
+          "last_finalized_source_block": 11788081,
+          "cursor_block": 11788081,
+          "cursor_log_index": 4294967295,
+          "cursor_block_hash": "0x09d8dd09781017b751d2c9e6d61f19f23fbde13c916f69ab8ccdf28f973e234e",
+          "last_poll_at": "2026-09-26T18:53:07.554288235+00:00",
+          "last_error": null
+        },
+        "sandbox": {
+          "engine": "nsjail",
+          "dev_bypass": false,
+          "isolated": true,
+          "degraded": false,
+          "note": "kernel namespaces + seccomp-BPF (primary engine)"
+        },
+        "sync": {
+          "lag_blocks": 0,
+          "max_peer_tip": 0,
+          "healthy": true
+        }
+      },
+      "recovery_queue": {
+        "pending_block_txs": 0.0,
+        "durable_finalized_work_depth": 0.0,
+        "durable_finalized_work_ready_depth": 0.0,
+        "durable_finalized_work_dead_letter_depth": 3.0,
+        "forced_inclusion_pending": 0.0
+      },
+      "ready": true,
+      "recovery_clear": true,
+      "slot": "v1",
+      "container_state": {
+        "Status": "running",
+        "Running": true,
+        "Paused": false,
+        "Restarting": false,
+        "OOMKilled": false,
+        "Dead": false,
+        "Pid": 7182,
+        "ExitCode": 0,
+        "Error": "",
+        "StartedAt": "2026-09-26T17:46:34.000866038Z",
+        "FinishedAt": "2026-09-26T17:46:33.607163443Z",
+        "Health": {
+          "Status": "healthy",
+          "FailingStreak": 0,
+          "Log": [
+            {
+              "Start": "2026-09-26T18:51:51.023973751Z",
+              "End": "2026-09-26T18:51:51.137402621Z",
+              "ExitCode": 0,
+              "Output": "  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\n                                 Dload  Upload   Total   Spent    Left  Speed\n\r  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0\r100   610  100   610    0     0  73379      0 --:--:-- --:--:-- --:--:-- 76250\n{\"status\":\"ok\",\"node_id\":\"validator-1\",\"is_validator\":true,\"version\":\"0.1.0\",\"validator_set_sync\":{\"enabled\":true,\"mode\":\"chain-authoritative\",\"state\":\"synced\",\"last_finalized_source_block\":11788074,\"cursor_block\":11788074,\"cursor_log_index\":4294967295,\"cursor_block_hash\":\"0x6c5bbf95b1d9b9096b758fb193b52382feae1b82fc3f479235f6f97a47e9e548\",\"last_poll_at\":\"2026-09-26T18:51:37.564477248+00:00\",\"last_error\":null},\"sandbox\":{\"engine\":\"nsjail\",\"dev_bypass\":false,\"isolated\":true,\"degraded\":false,\"note\":\"kernel namespaces + seccomp-BPF (primary engine)\"},\"sync\":{\"lag_blocks\":0,\"max_peer_tip\":0,\"healthy\":true}}"
+            },
+            {
+              "Start": "2026-09-26T18:52:11.14331573Z",
+              "End": "2026-09-26T18:52:11.321697983Z",
+              "ExitCode": 0,
+              "Output": "  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\n                                 Dload  Upload   Total   Spent    Left  Speed\n\r  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0\r100   610  100   610    0     0   103k      0 --:--:-- --:--:-- --:--:--  119k\n{\"status\":\"ok\",\"node_id\":\"validator-1\",\"is_validator\":true,\"version\":\"0.1.0\",\"validator_set_sync\":{\"enabled\":true,\"mode\":\"chain-authoritative\",\"state\":\"synced\",\"last_finalized_source_block\":11788076,\"cursor_block\":11788076,\"cursor_log_index\":4294967295,\"cursor_block_hash\":\"0x8375a227d8f3c8f9da116f7e84c406d098ba31623bff26b587c715b3cc536e64\",\"last_poll_at\":\"2026-09-26T18:52:07.562005433+00:00\",\"last_error\":null},\"sandbox\":{\"engine\":\"nsjail\",\"dev_bypass\":false,\"isolated\":true,\"degraded\":false,\"note\":\"kernel namespaces + seccomp-BPF (primary engine)\"},\"sync\":{\"lag_blocks\":0,\"max_peer_tip\":0,\"healthy\":true}}"
+            },
+            {
+              "Start": "2026-09-26T18:52:31.320365888Z",
+              "End": "2026-09-26T18:52:31.84254321Z",
+              "ExitCode": 0,
+              "Output": "  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\n                                 Dload  Upload   Total   Spent    Left  Speed\n\r  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0\r100   610  100   610    0     0  63258      0 --:--:-- --:--:-- --:--:-- 67777\n{\"status\":\"ok\",\"node_id\":\"validator-1\",\"is_validator\":true,\"version\":\"0.1.0\",\"validator_set_sync\":{\"enabled\":true,\"mode\":\"chain-authoritative\",\"state\":\"synced\",\"last_finalized_source_block\":11788076,\"cursor_block\":11788076,\"cursor_log_index\":4294967295,\"cursor_block_hash\":\"0x8375a227d8f3c8f9da116f7e84c406d098ba31623bff26b587c715b3cc536e64\",\"last_poll_at\":\"2026-09-26T18:52:07.562005433+00:00\",\"last_error\":null},\"sandbox\":{\"engine\":\"nsjail\",\"dev_bypass\":false,\"isolated\":true,\"degraded\":false,\"note\":\"kernel namespaces + seccomp-BPF (primary engine)\"},\"sync\":{\"lag_blocks\":0,\"max_peer_tip\":0,\"healthy\":true}}"
+            },
+            {
+              "Start": "2026-09-26T18:52:51.849090012Z",
+              "End": "2026-09-26T18:52:51.907433885Z",
+              "ExitCode": 0,
+              "Output": "  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\n                                 Dload  Upload   Total   Spent    Left  Speed\n\r  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0\r100   610  100   610    0     0   213k      0 --:--:-- --:--:-- --:--:--  297k\n{\"status\":\"ok\",\"node_id\":\"validator-1\",\"is_validator\":true,\"version\":\"0.1.0\",\"validator_set_sync\":{\"enabled\":true,\"mode\":\"chain-authoritative\",\"state\":\"synced\",\"last_finalized_source_block\":11788079,\"cursor_block\":11788079,\"cursor_log_index\":4294967295,\"cursor_block_hash\":\"0xe1907b7f59b29df21998d853b44001fe8b1fd97acbd3c818768c00444ce7424f\",\"last_poll_at\":\"2026-09-26T18:52:37.600459157+00:00\",\"last_error\":null},\"sandbox\":{\"engine\":\"nsjail\",\"dev_bypass\":false,\"isolated\":true,\"degraded\":false,\"note\":\"kernel namespaces + seccomp-BPF (primary engine)\"},\"sync\":{\"lag_blocks\":0,\"max_peer_tip\":0,\"healthy\":true}}"
+            },
+            {
+              "Start": "2026-09-26T18:53:11.906891321Z",
+              "End": "2026-09-26T18:53:11.973856885Z",
+              "ExitCode": 0,
+              "Output": "  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\n                                 Dload  Upload   Total   Spent    Left  Speed\n\r  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0\r100   610  100   610    0     0   281k      0 --:--:-- --:--:-- --:--:--  297k\n{\"status\":\"ok\",\"node_id\":\"validator-1\",\"is_validator\":true,\"version\":\"0.1.0\",\"validator_set_sync\":{\"enabled\":true,\"mode\":\"chain-authoritative\",\"state\":\"synced\",\"last_finalized_source_block\":11788081,\"cursor_block\":11788081,\"cursor_log_index\":4294967295,\"cursor_block_hash\":\"0x09d8dd09781017b751d2c9e6d61f19f23fbde13c916f69ab8ccdf28f973e234e\",\"last_poll_at\":\"2026-09-26T18:53:07.554288235+00:00\",\"last_error\":null},\"sandbox\":{\"engine\":\"nsjail\",\"dev_bypass\":false,\"isolated\":true,\"degraded\":false,\"note\":\"kernel namespaces + seccomp-BPF (primary engine)\"},\"sync\":{\"lag_blocks\":0,\"max_peer_tip\":0,\"healthy\":true}}"
+            }
+          ]
+        }
+      },
+      "role": "validator",
+      "metrics": "# HELP creg_chain_tip_height Height index of the local chain tip (only genesis => 0; not Sepolia block number)\n# TYPE creg_chain_tip_height gauge\ncreg_chain_tip_height 5\n\n# HELP creg_chain_blocks_stored Blocks stored in the local chain DB (genesis at height 0 counts as 1)\n# TYPE creg_chain_blocks_stored gauge\ncreg_chain_blocks_stored 6\n\n# HELP creg_chain_height DEPRECATED: use creg_chain_tip_height (same value)\n# TYPE creg_chain_height gauge\ncreg_chain_height 5\n\n# HELP creg_block_count DEPRECATED: use creg_chain_blocks_stored (same value)\n# TYPE creg_block_count gauge\ncreg_block_count 6\n\n# HELP creg_package_count Total verified packages on chain\n# TYPE creg_package_count gauge\ncreg_package_count 2\n\n# HELP creg_pending_pool_size Packages currently awaiting consensus\n# TYPE creg_pending_pool_size gauge\ncreg_pending_pool_size 0\n\n# HELP creg_publisher_count Unique publishers tracked\n# TYPE creg_publisher_count gauge\ncreg_publisher_count 1\n\n# HELP creg_pending_block_txs Finalized transactions buffered awaiting block production\n# TYPE creg_pending_block_txs gauge\ncreg_pending_block_txs 0\n\n# HELP creg_durable_finalized_work_depth Persisted finalized work awaiting durable block inclusion\n# TYPE creg_durable_finalized_work_depth gauge\ncreg_durable_finalized_work_depth 0\n\n# HELP creg_durable_finalized_work_ready_depth Persisted finalized work currently eligible for production\n# TYPE creg_durable_finalized_work_ready_depth gauge\ncreg_durable_finalized_work_ready_depth 0\n\n# HELP creg_durable_finalized_work_deferred_depth Persisted finalized work waiting for retry backoff\n# TYPE creg_durable_finalized_work_deferred_depth gauge\ncreg_durable_finalized_work_deferred_depth 0\n\n# HELP creg_durable_finalized_work_retrying_depth Persisted finalized work with one or more failed deliveries\n# TYPE creg_durable_finalized_work_retrying_depth gauge\ncreg_durable_finalized_work_retrying_depth 0\n\n# HELP creg_durable_finalized_work_retry_attempts Sum of recorded retry attempts across active durable work\n# TYPE creg_durable_finalized_work_retry_attempts gauge\ncreg_durable_finalized_work_retry_attempts 0\n\n# HELP creg_durable_finalized_work_oldest_age_seconds Age of the oldest persisted finalized work item\n# TYPE creg_durable_finalized_work_oldest_age_seconds gauge\ncreg_durable_finalized_work_oldest_age_seconds 0\n\n# HELP creg_durable_finalized_work_dead_letter_depth Finalized work retained for operator review\n# TYPE creg_durable_finalized_work_dead_letter_depth gauge\ncreg_durable_finalized_work_dead_letter_depth 3\n\n# HELP creg_node_info Static node information\n# TYPE creg_node_info gauge\ncreg_node_info{node_id=\"validator-1\",version=\"0.1.0\"} 1\n\n# HELP creg_validator_set_sync_enabled 1 when chain-authoritative validator set sync is enabled\n# TYPE creg_validator_set_sync_enabled gauge\ncreg_validator_set_sync_enabled 1\n\n# HELP creg_validator_set_sync_state_code Sync state enum: 0=disabled 1=syncing 2=reorg-replaying 3=degraded 4=synced\n# TYPE creg_validator_set_sync_state_code gauge\ncreg_validator_set_sync_state_code 4\n\n# HELP creg_validator_set_sync_last_finalized_source_block Last L1 block height applied to the authoritative validator set (0 if unknown)\n# TYPE creg_validator_set_sync_last_finalized_source_block gauge\ncreg_validator_set_sync_last_finalized_source_block 11788081\n\n# HELP creg_validator_set_sync_cursor_block L1 log cursor block height (0 if unknown)\n# TYPE creg_validator_set_sync_cursor_block gauge\ncreg_validator_set_sync_cursor_block 11788081\n\n# HELP creg_validator_set_sync_has_error 1 when validator_set_sync.last_error is set\n# TYPE creg_validator_set_sync_has_error gauge\ncreg_validator_set_sync_has_error 0\n\n# HELP creg_validator_set_sync_info Validator set sync mode and state (value is always 1 when labeled series is present)\n# TYPE creg_validator_set_sync_info gauge\ncreg_validator_set_sync_info{mode=\"chain-authoritative\",state=\"synced\"} 1\n\n# HELP creg_active_validators Validators currently eligible for PBFT consensus (status online/self/active)\n# TYPE creg_active_validators gauge\ncreg_active_validators 4\n\n# HELP creg_validator_set_total Total validators in the active set (any status)\n# TYPE creg_validator_set_total gauge\ncreg_validator_set_total 4\n\n# HELP creg_reorg_events_total L2 chain reorganizations recorded since start (retained window)\n# TYPE creg_reorg_events_total gauge\ncreg_reorg_events_total 0\n\n# HELP creg_gossip_votes_rejected_total Gossip vote messages rejected before mesh propagation\n# TYPE creg_gossip_votes_rejected_total counter\ncreg_gossip_votes_rejected_total 0\n\n# HELP creg_gossip_pbft_rejected_total PBFT Prepare/Commit gossip messages rejected at validation boundary\n# TYPE creg_gossip_pbft_rejected_total counter\ncreg_gossip_pbft_rejected_total 0\n\n# HELP creg_pbft_active_rounds Number of PBFT block rounds currently tracked\n# TYPE creg_pbft_active_rounds gauge\ncreg_pbft_active_rounds 2\n\n# HELP creg_pbft_max_round_age_seconds Maximum phase age across non-terminal PBFT rounds\n# TYPE creg_pbft_max_round_age_seconds gauge\ncreg_pbft_max_round_age_seconds 0\n\n# HELP creg_pbft_round_phase PBFT block round phase (1=pre_prepare 2=prepare 3=commit 4=finalised 5=failed)\n# TYPE creg_pbft_round_phase gauge\ncreg_pbft_round_phase{block_hash=\"9029e0c47b76\",phase=\"failed\"} 5\n\n# HELP creg_pbft_round_age_seconds Seconds since the PBFT round entered its current phase\n# TYPE creg_pbft_round_age_seconds gauge\ncreg_pbft_round_age_seconds{block_hash=\"9029e0c47b76\"} 3062.709516738\n\n# HELP creg_pbft_round_phase PBFT block round phase (1=pre_prepare 2=prepare 3=commit 4=finalised 5=failed)\n# TYPE creg_pbft_round_phase gauge\ncreg_pbft_round_phase{block_hash=\"daab438828a6\",phase=\"finalised\"} 4\n\n# HELP creg_pbft_round_age_seconds Seconds since the PBFT round entered its current phase\n# TYPE creg_pbft_round_age_seconds gauge\ncreg_pbft_round_age_seconds{block_hash=\"daab438828a6\"} 3033.599685036\n\n# HELP creg_sync_lag_blocks Blocks behind the highest known peer tip\n# TYPE creg_sync_lag_blocks gauge\ncreg_sync_lag_blocks 0\n\n# HELP creg_forced_inclusion_pending Finalized transactions awaiting block inclusion (forced-inclusion tracker)\n# TYPE creg_forced_inclusion_pending gauge\ncreg_forced_inclusion_pending 0\n\n# HELP creg_bridge_anchor_count Number of L2->L1 checkpoint anchors committed (persisted journal length)\n# TYPE creg_bridge_anchor_count gauge\ncreg_bridge_anchor_count 0\n\n# HELP creg_bridge_last_anchor_eth_block L1 block of the most recent checkpoint anchor (0 if none yet)\n# TYPE creg_bridge_last_anchor_eth_block gauge\ncreg_bridge_last_anchor_eth_block 0\n\n# HELP creg_bridge_finalized_l1_block Most recent L1 block tagged finalized as observed by the bridge (0 if unknown)\n# TYPE creg_bridge_finalized_l1_block gauge\ncreg_bridge_finalized_l1_block 0\n\n# HELP creg_reward_emissions_succeeded Number of successful L1 distributeWorkRewards calls (Verified packages)\n# TYPE creg_reward_emissions_succeeded counter\ncreg_reward_emissions_succeeded 1\n\n# HELP creg_reward_emissions_failed Number of failed L1 reward emission attempts\n# TYPE creg_reward_emissions_failed counter\ncreg_reward_emissions_failed 0\n\n# HELP creg_treasury_balance Current balance of the configured treasury address (in token units, from background L1 cache)\n# TYPE creg_treasury_balance gauge\ncreg_treasury_balance 0\n\n# HELP creg_pending_rewards_estimate Estimated pending rewards across system (from state, via background L1 cache)\n# TYPE creg_pending_rewards_estimate gauge\ncreg_pending_rewards_estimate 0\n\n# HELP creg_total_rewards_distributed Total rewards distributed via ValidatorRewards (from background L1 cache)\n# TYPE creg_total_rewards_distributed gauge\ncreg_total_rewards_distributed 0\n\n# HELP creg_rewards_pool_balance Current PinningRewards pool balance (from background L1 cache)\n# TYPE creg_rewards_pool_balance gauge\ncreg_rewards_pool_balance 0\n\n# HELP creg_last_incentives_refresh Unix timestamp of last background incentives refresh (0 if never)\n# TYPE creg_last_incentives_refresh gauge\ncreg_last_incentives_refresh 1790448757\n\n# HELP creg_sandbox_dev_bypass 1 when CREG_DEV_SANDBOX=true (behavioural analysis skipped); must be 0 on public validators\n# TYPE creg_sandbox_dev_bypass gauge\ncreg_sandbox_dev_bypass 0\n\n# HELP creg_sandbox_isolated 1 when the active sandbox engine runs packages with real isolation\n# TYPE creg_sandbox_isolated gauge\ncreg_sandbox_isolated 1\n\n# HELP creg_sandbox_info Sandbox engine selected for behavioural analysis (value is always 1)\n# TYPE creg_sandbox_info gauge\ncreg_sandbox_info{engine=\"nsjail\",degraded=\"false\"} 1\n\n# HELP creg_scanner_profile_ready 1 when the local scanner profile satisfies its compiled release requirements\n# TYPE creg_scanner_profile_ready gauge\ncreg_scanner_profile_ready 1\n\n# HELP creg_scanner_yara_ready 1 when all files in the YARA rule bundle compile successfully\n# TYPE creg_scanner_yara_ready gauge\ncreg_scanner_yara_ready 1\n\n# HELP creg_scanner_threat_intel_ready 1 when the provenance-bearing SHA-256 threat snapshot is valid\n# TYPE creg_scanner_threat_intel_ready gauge\ncreg_scanner_threat_intel_ready 1\n\n# HELP creg_scanner_osv_ready 1 when the configured pinned OSV snapshot is valid\n# TYPE creg_scanner_osv_ready gauge\ncreg_scanner_osv_ready 1\n\n# HELP creg_scanner_yara_rule_files Number of YARA rule files bound into the local scanner profile\n# TYPE creg_scanner_yara_rule_files gauge\ncreg_scanner_yara_rule_files 1\n\n# HELP creg_scanner_threat_intel_entries Number of SHA-256 entries in the configured threat-intelligence snapshot\n# TYPE creg_scanner_threat_intel_entries gauge\ncreg_scanner_threat_intel_entries 100\n\n# HELP creg_scanner_osv_lookups Number of package versions successfully queried in the pinned OSV snapshot\n# TYPE creg_scanner_osv_lookups gauge\ncreg_scanner_osv_lookups 2\n\n# HELP creg_scanner_osv_records Number of vulnerability records in the configured OSV snapshot\n# TYPE creg_scanner_osv_records gauge\ncreg_scanner_osv_records 0\n\n# HELP creg_scanner_profile_info Content identity of the local deterministic scanner inputs (value is always 1)\n# TYPE creg_scanner_profile_info gauge\ncreg_scanner_profile_info{profile_digest=\"dd52b5f77776aa0cad9cb25a4a308f9ef3755c1d3addec44073a5a322ee2e4fb\",scanner_version=\"creg-deterministic-scanner-v1.1.0+sha256:dd52b5f77776aa0cad9cb25a4a308f9ef3755c1d3addec44073a5a322ee2e4fb\"} 1\n\n"
+    },
+    {
+      "captured_at_utc": "2026-09-26T18:53:24.434964+00:00",
+      "container_state": {
+        "Status": "running",
+        "Running": true,
+        "RestartCount": 0
+      },
+      "health": {
+        "status": "ok",
+        "node_id": "validator-2",
+        "is_validator": true,
+        "version": "0.1.0",
+        "validator_set_sync": {
+          "enabled": true,
+          "mode": "chain-authoritative",
+          "state": "synced",
+          "last_finalized_source_block": 11788080,
+          "cursor_block": 11788080,
+          "cursor_log_index": 4294967295,
+          "cursor_block_hash": "0x4ac998fac937d0a5c5f2ee37e3e63a6c5378a5a8b446d0af36665cd87a492722",
+          "last_poll_at": "2026-09-26T18:52:55.131229788+00:00",
+          "last_error": null
+        },
+        "sandbox": {
+          "engine": "nsjail",
+          "dev_bypass": false,
+          "isolated": true,
+          "degraded": false,
+          "note": "kernel namespaces + seccomp-BPF (primary engine)"
+        },
+        "sync": {
+          "lag_blocks": 0,
+          "max_peer_tip": 5,
+          "healthy": true
+        }
+      },
+      "stats": {
+        "tip_height": 5,
+        "tip_hash": "daab438828a678aee3aa2eebf041f5147bc6f76fed837a207e6a1f4747d427cf",
+        "package_count": 2,
+        "block_count": 6,
+        "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+        "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+        "spec_signature_verified": true,
+        "l1_rpc_configured": true,
+        "is_validator": true,
+        "validator_count": 4,
+        "active_validators": 4,
+        "total_stake": 400,
+        "total_stake_native": "400",
+        "peer_count": 2,
+        "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+        "l1_block": 0,
+        "pending_tx_count": 0,
+        "publisher_count": 1,
+        "finalized_height": 5,
+        "finalization_lag": 0,
+        "finalization_source": "creg-canonical-store",
+        "validator_set_source": "chain-authoritative",
+        "validator_set_sync_state": "synced",
+        "validator_set_last_finalized_source_block": 11788080
+      },
+      "metrics": "creg_chain_tip_height 5\ncreg_chain_blocks_stored 6\ncreg_chain_height 5\ncreg_block_count 6\ncreg_package_count 2\ncreg_pending_pool_size 0\ncreg_publisher_count 1\ncreg_pending_block_txs 0\ncreg_durable_finalized_work_depth 0\ncreg_durable_finalized_work_ready_depth 0\ncreg_durable_finalized_work_deferred_depth 0\ncreg_durable_finalized_work_retrying_depth 0\ncreg_durable_finalized_work_retry_attempts 0\ncreg_durable_finalized_work_oldest_age_seconds 0\ncreg_durable_finalized_work_dead_letter_depth 2\ncreg_node_info{node_id=\"validator-2\",version=\"0.1.0\"} 1\ncreg_validator_set_sync_enabled 1\ncreg_validator_set_sync_state_code 4\ncreg_validator_set_sync_last_finalized_source_block 11788080\ncreg_validator_set_sync_cursor_block 11788080\ncreg_validator_set_sync_has_error 0\ncreg_validator_set_sync_info{mode=\"chain-authoritative\",state=\"synced\"} 1\ncreg_active_validators 4\ncreg_validator_set_total 4\ncreg_reorg_events_total 0\ncreg_gossip_votes_rejected_total 0\ncreg_gossip_pbft_rejected_total 0\ncreg_pbft_active_rounds 2\ncreg_pbft_max_round_age_seconds 0\ncreg_pbft_round_phase{block_hash=\"9029e0c47b76\",phase=\"failed\"} 5\ncreg_pbft_round_age_seconds{block_hash=\"9029e0c47b76\"} 3073.582072683\ncreg_pbft_round_phase{block_hash=\"daab438828a6\",phase=\"finalised\"} 4\ncreg_pbft_round_age_seconds{block_hash=\"daab438828a6\"} 3044.726024145\ncreg_sync_lag_blocks 0\ncreg_forced_inclusion_pending 0\ncreg_bridge_anchor_count 0\ncreg_bridge_last_anchor_eth_block 0\ncreg_bridge_finalized_l1_block 0\ncreg_reward_emissions_succeeded 1\ncreg_reward_emissions_failed 0\ncreg_treasury_balance 0\ncreg_pending_rewards_estimate 0\ncreg_total_rewards_distributed 0\ncreg_rewards_pool_balance 0\ncreg_last_incentives_refresh 1790448774\ncreg_sandbox_dev_bypass 0\ncreg_sandbox_isolated 1\ncreg_sandbox_info{engine=\"nsjail\",degraded=\"false\"} 1\ncreg_scanner_profile_ready 1\ncreg_scanner_yara_ready 1\ncreg_scanner_threat_intel_ready 1\ncreg_scanner_osv_ready 1\ncreg_scanner_yara_rule_files 1\ncreg_scanner_threat_intel_entries 100\ncreg_scanner_osv_lookups 2\ncreg_scanner_osv_records 0\ncreg_scanner_profile_info{profile_digest=\"dd52b5f77776aa0cad9cb25a4a308f9ef3755c1d3addec44073a5a322ee2e4fb\",scanner_version=\"creg-deterministic-scanner-v1.1.0+sha256:dd52b5f77776aa0cad9cb25a4a308f9ef3755c1d3addec44073a5a322ee2e4fb\"} 1",
+      "slot": "v2",
+      "role": "validator",
+      "name": "creg-validator-1",
+      "project": "gen-lang-client-0022105784",
+      "zone": "us-east1-b",
+      "port": 18080,
+      "checks": {
+        "container_running": true,
+        "scanner_ready": true,
+        "yara_ready": true,
+        "threat_feed_ready": true,
+        "threat_feed_entries_100": true,
+        "osv_ready": true,
+        "scanner_profile_matches": true,
+        "signature_verified": true,
+        "chain_id_matches": true,
+        "genesis_matches": true,
+        "four_active_validators": true,
+        "role_matches": true,
+        "live_peers": true,
+        "validator_sandbox_isolated": true,
+        "validator_sandbox_nsjail": true,
+        "validator_dev_bypass_disabled": true
+      },
+      "ready": true,
+      "recovery_queue": {
+        "pending_block_txs": 0.0,
+        "durable_finalized_work_depth": 0.0,
+        "durable_finalized_work_ready_depth": 0.0,
+        "durable_finalized_work_dead_letter_depth": 2.0,
+        "forced_inclusion_pending": 0.0
+      },
+      "recovery_clear": true
+    },
+    {
+      "captured_at_utc": "2026-09-26T18:53:33.679218+00:00",
+      "container_state": {
+        "Status": "running",
+        "Running": true,
+        "RestartCount": 0
+      },
+      "health": {
+        "status": "ok",
+        "node_id": "validator-3",
+        "is_validator": true,
+        "version": "0.1.0",
+        "validator_set_sync": {
+          "enabled": true,
+          "mode": "chain-authoritative",
+          "state": "synced",
+          "last_finalized_source_block": 11788082,
+          "cursor_block": 11788082,
+          "cursor_log_index": 4294967295,
+          "cursor_block_hash": "0xcaf2a35b283bc5833f6075fbb9acd304a12a240048436fc3b184ed93ffcfef97",
+          "last_poll_at": "2026-09-26T18:53:13.044028442+00:00",
+          "last_error": null
+        },
+        "sandbox": {
+          "engine": "nsjail",
+          "dev_bypass": false,
+          "isolated": true,
+          "degraded": false,
+          "note": "kernel namespaces + seccomp-BPF (primary engine)"
+        },
+        "sync": {
+          "lag_blocks": 0,
+          "max_peer_tip": 5,
+          "healthy": true
+        }
+      },
+      "stats": {
+        "tip_height": 5,
+        "tip_hash": "daab438828a678aee3aa2eebf041f5147bc6f76fed837a207e6a1f4747d427cf",
+        "package_count": 2,
+        "block_count": 6,
+        "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+        "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+        "spec_signature_verified": true,
+        "l1_rpc_configured": true,
+        "is_validator": true,
+        "validator_count": 4,
+        "active_validators": 4,
+        "total_stake": 400,
+        "total_stake_native": "400",
+        "peer_count": 7,
+        "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+        "l1_block": 0,
+        "pending_tx_count": 0,
+        "publisher_count": 1,
+        "finalized_height": 5,
+        "finalization_lag": 0,
+        "finalization_source": "creg-canonical-store",
+        "validator_set_source": "chain-authoritative",
+        "validator_set_sync_state": "synced",
+        "validator_set_last_finalized_source_block": 11788082
+      },
+      "metrics": "creg_chain_tip_height 5\ncreg_chain_blocks_stored 6\ncreg_chain_height 5\ncreg_block_count 6\ncreg_package_count 2\ncreg_pending_pool_size 0\ncreg_publisher_count 1\ncreg_pending_block_txs 0\ncreg_durable_finalized_work_depth 0\ncreg_durable_finalized_work_ready_depth 0\ncreg_durable_finalized_work_deferred_depth 0\ncreg_durable_finalized_work_retrying_depth 0\ncreg_durable_finalized_work_retry_attempts 0\ncreg_durable_finalized_work_oldest_age_seconds 0\ncreg_durable_finalized_work_dead_letter_depth 2\ncreg_node_info{node_id=\"validator-3\",version=\"0.1.0\"} 1\ncreg_validator_set_sync_enabled 1\ncreg_validator_set_sync_state_code 4\ncreg_validator_set_sync_last_finalized_source_block 11788082\ncreg_validator_set_sync_cursor_block 11788082\ncreg_validator_set_sync_has_error 0\ncreg_validator_set_sync_info{mode=\"chain-authoritative\",state=\"synced\"} 1\ncreg_active_validators 4\ncreg_validator_set_total 4\ncreg_reorg_events_total 0\ncreg_gossip_votes_rejected_total 0\ncreg_gossip_pbft_rejected_total 0\ncreg_pbft_active_rounds 2\ncreg_pbft_max_round_age_seconds 0\ncreg_pbft_round_phase{block_hash=\"9029e0c47b76\",phase=\"failed\"} 5\ncreg_pbft_round_age_seconds{block_hash=\"9029e0c47b76\"} 3082.766938601\ncreg_pbft_round_phase{block_hash=\"daab438828a6\",phase=\"finalised\"} 4\ncreg_pbft_round_age_seconds{block_hash=\"daab438828a6\"} 3053.689920379\ncreg_sync_lag_blocks 0\ncreg_forced_inclusion_pending 0\ncreg_bridge_anchor_count 0\ncreg_bridge_last_anchor_eth_block 0\ncreg_bridge_finalized_l1_block 0\ncreg_reward_emissions_succeeded 1\ncreg_reward_emissions_failed 0\ncreg_treasury_balance 0\ncreg_pending_rewards_estimate 0\ncreg_total_rewards_distributed 0\ncreg_rewards_pool_balance 0\ncreg_last_incentives_refresh 1790448793\ncreg_sandbox_dev_bypass 0\ncreg_sandbox_isolated 1\ncreg_sandbox_info{engine=\"nsjail\",degraded=\"false\"} 1\ncreg_scanner_profile_ready 1\ncreg_scanner_yara_ready 1\ncreg_scanner_threat_intel_ready 1\ncreg_scanner_osv_ready 1\ncreg_scanner_yara_rule_files 1\ncreg_scanner_threat_intel_entries 100\ncreg_scanner_osv_lookups 2\ncreg_scanner_osv_records 0\ncreg_scanner_profile_info{profile_digest=\"dd52b5f77776aa0cad9cb25a4a308f9ef3755c1d3addec44073a5a322ee2e4fb\",scanner_version=\"creg-deterministic-scanner-v1.1.0+sha256:dd52b5f77776aa0cad9cb25a4a308f9ef3755c1d3addec44073a5a322ee2e4fb\"} 1",
+      "slot": "v3",
+      "role": "validator",
+      "name": "creg-validator-3",
+      "project": "fiffi-500411",
+      "zone": "europe-west1-b",
+      "port": 8080,
+      "checks": {
+        "container_running": true,
+        "scanner_ready": true,
+        "yara_ready": true,
+        "threat_feed_ready": true,
+        "threat_feed_entries_100": true,
+        "osv_ready": true,
+        "scanner_profile_matches": true,
+        "signature_verified": true,
+        "chain_id_matches": true,
+        "genesis_matches": true,
+        "four_active_validators": true,
+        "role_matches": true,
+        "live_peers": true,
+        "validator_sandbox_isolated": true,
+        "validator_sandbox_nsjail": true,
+        "validator_dev_bypass_disabled": true
+      },
+      "ready": true,
+      "recovery_queue": {
+        "pending_block_txs": 0.0,
+        "durable_finalized_work_depth": 0.0,
+        "durable_finalized_work_ready_depth": 0.0,
+        "durable_finalized_work_dead_letter_depth": 2.0,
+        "forced_inclusion_pending": 0.0
+      },
+      "recovery_clear": true
+    },
+    {
+      "captured_at_utc": "2026-09-26T18:53:47.973271+00:00",
+      "container_state": {
+        "Status": "running",
+        "Running": true,
+        "RestartCount": 0
+      },
+      "health": {
+        "status": "ok",
+        "node_id": "validator-4",
+        "is_validator": true,
+        "version": "0.1.0",
+        "validator_set_sync": {
+          "enabled": true,
+          "mode": "chain-authoritative",
+          "state": "synced",
+          "last_finalized_source_block": 11788083,
+          "cursor_block": 11788083,
+          "cursor_log_index": 4294967295,
+          "cursor_block_hash": "0xf8c15436e18b96e0d9caa07feb31ba41b3f6abeefe2733f67acf4101597ce0b8",
+          "last_poll_at": "2026-09-26T18:53:25.926258890+00:00",
+          "last_error": null
+        },
+        "sandbox": {
+          "engine": "nsjail",
+          "dev_bypass": false,
+          "isolated": true,
+          "degraded": false,
+          "note": "kernel namespaces + seccomp-BPF (primary engine)"
+        },
+        "sync": {
+          "lag_blocks": 0,
+          "max_peer_tip": 5,
+          "healthy": true
+        }
+      },
+      "stats": {
+        "tip_height": 5,
+        "tip_hash": "daab438828a678aee3aa2eebf041f5147bc6f76fed837a207e6a1f4747d427cf",
+        "package_count": 2,
+        "block_count": 6,
+        "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+        "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+        "spec_signature_verified": true,
+        "l1_rpc_configured": true,
+        "is_validator": true,
+        "validator_count": 4,
+        "active_validators": 4,
+        "total_stake": 400,
+        "total_stake_native": "400",
+        "peer_count": 2,
+        "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+        "l1_block": 0,
+        "pending_tx_count": 0,
+        "publisher_count": 1,
+        "finalized_height": 5,
+        "finalization_lag": 0,
+        "finalization_source": "creg-canonical-store",
+        "validator_set_source": "chain-authoritative",
+        "validator_set_sync_state": "synced",
+        "validator_set_last_finalized_source_block": 11788083
+      },
+      "metrics": "creg_chain_tip_height 5\ncreg_chain_blocks_stored 6\ncreg_chain_height 5\ncreg_block_count 6\ncreg_package_count 2\ncreg_pending_pool_size 0\ncreg_publisher_count 1\ncreg_pending_block_txs 0\ncreg_durable_finalized_work_depth 0\ncreg_durable_finalized_work_ready_depth 0\ncreg_durable_finalized_work_deferred_depth 0\ncreg_durable_finalized_work_retrying_depth 0\ncreg_durable_finalized_work_retry_attempts 0\ncreg_durable_finalized_work_oldest_age_seconds 0\ncreg_durable_finalized_work_dead_letter_depth 2\ncreg_node_info{node_id=\"validator-4\",version=\"0.1.0\"} 1\ncreg_validator_set_sync_enabled 1\ncreg_validator_set_sync_state_code 4\ncreg_validator_set_sync_last_finalized_source_block 11788083\ncreg_validator_set_sync_cursor_block 11788083\ncreg_validator_set_sync_has_error 0\ncreg_validator_set_sync_info{mode=\"chain-authoritative\",state=\"synced\"} 1\ncreg_active_validators 4\ncreg_validator_set_total 4\ncreg_reorg_events_total 0\ncreg_gossip_votes_rejected_total 0\ncreg_gossip_pbft_rejected_total 0\ncreg_pbft_active_rounds 2\ncreg_pbft_max_round_age_seconds 3067.519801352\ncreg_pbft_round_phase{block_hash=\"9029e0c47b76\",phase=\"failed\"} 5\ncreg_pbft_round_age_seconds{block_hash=\"9029e0c47b76\"} 3097.2348897\ncreg_pbft_round_phase{block_hash=\"daab438828a6\",phase=\"commit\"} 3\ncreg_pbft_round_age_seconds{block_hash=\"daab438828a6\"} 3067.5197784\ncreg_sync_lag_blocks 0\ncreg_forced_inclusion_pending 0\ncreg_bridge_anchor_count 0\ncreg_bridge_last_anchor_eth_block 0\ncreg_bridge_finalized_l1_block 0\ncreg_reward_emissions_succeeded 1\ncreg_reward_emissions_failed 0\ncreg_treasury_balance 0\ncreg_pending_rewards_estimate 0\ncreg_total_rewards_distributed 0\ncreg_rewards_pool_balance 0\ncreg_last_incentives_refresh 1790448775\ncreg_sandbox_dev_bypass 0\ncreg_sandbox_isolated 1\ncreg_sandbox_info{engine=\"nsjail\",degraded=\"false\"} 1\ncreg_scanner_profile_ready 1\ncreg_scanner_yara_ready 1\ncreg_scanner_threat_intel_ready 1\ncreg_scanner_osv_ready 1\ncreg_scanner_yara_rule_files 1\ncreg_scanner_threat_intel_entries 100\ncreg_scanner_osv_lookups 2\ncreg_scanner_osv_records 0\ncreg_scanner_profile_info{profile_digest=\"dd52b5f77776aa0cad9cb25a4a308f9ef3755c1d3addec44073a5a322ee2e4fb\",scanner_version=\"creg-deterministic-scanner-v1.1.0+sha256:dd52b5f77776aa0cad9cb25a4a308f9ef3755c1d3addec44073a5a322ee2e4fb\"} 1",
+      "slot": "v4",
+      "role": "validator",
+      "name": "creg-validator-4",
+      "project": "fiffi-500411",
+      "zone": "asia-southeast1-b",
+      "port": 8080,
+      "checks": {
+        "container_running": true,
+        "scanner_ready": true,
+        "yara_ready": true,
+        "threat_feed_ready": true,
+        "threat_feed_entries_100": true,
+        "osv_ready": true,
+        "scanner_profile_matches": true,
+        "signature_verified": true,
+        "chain_id_matches": true,
+        "genesis_matches": true,
+        "four_active_validators": true,
+        "role_matches": true,
+        "live_peers": true,
+        "validator_sandbox_isolated": true,
+        "validator_sandbox_nsjail": true,
+        "validator_dev_bypass_disabled": true
+      },
+      "ready": true,
+      "recovery_queue": {
+        "pending_block_txs": 0.0,
+        "durable_finalized_work_depth": 0.0,
+        "durable_finalized_work_ready_depth": 0.0,
+        "durable_finalized_work_dead_letter_depth": 2.0,
+        "forced_inclusion_pending": 0.0
+      },
+      "recovery_clear": true
+    },
+    {
+      "captured_at_utc": "2026-09-26T18:53:57.435272+00:00",
+      "container_state": {
+        "Status": "running",
+        "Running": true,
+        "RestartCount": 0
+      },
+      "health": {
+        "status": "ok",
+        "node_id": "observer-1",
+        "is_validator": false,
+        "version": "0.1.0",
+        "validator_set_sync": {
+          "enabled": true,
+          "mode": "chain-authoritative",
+          "state": "synced",
+          "last_finalized_source_block": 11788083,
+          "cursor_block": 11788083,
+          "cursor_log_index": 4294967295,
+          "cursor_block_hash": "0xf8c15436e18b96e0d9caa07feb31ba41b3f6abeefe2733f67acf4101597ce0b8",
+          "last_poll_at": "2026-09-26T18:53:31.494749353+00:00",
+          "last_error": null
+        },
+        "sandbox": {
+          "engine": "nsjail",
+          "dev_bypass": false,
+          "isolated": true,
+          "degraded": false,
+          "note": "kernel namespaces + seccomp-BPF (primary engine)"
+        },
+        "sync": {
+          "lag_blocks": 0,
+          "max_peer_tip": 5,
+          "healthy": true
+        }
+      },
+      "stats": {
+        "tip_height": 5,
+        "tip_hash": "daab438828a678aee3aa2eebf041f5147bc6f76fed837a207e6a1f4747d427cf",
+        "package_count": 2,
+        "block_count": 6,
+        "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+        "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+        "spec_signature_verified": true,
+        "l1_rpc_configured": true,
+        "is_validator": false,
+        "validator_count": 4,
+        "active_validators": 4,
+        "total_stake": 400,
+        "total_stake_native": "400",
+        "peer_count": 2,
+        "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+        "l1_block": 0,
+        "pending_tx_count": 2,
+        "publisher_count": 1,
+        "finalized_height": 5,
+        "finalization_lag": 0,
+        "finalization_source": "creg-canonical-store",
+        "validator_set_source": "chain-authoritative",
+        "validator_set_sync_state": "synced",
+        "validator_set_last_finalized_source_block": 11788083
+      },
+      "metrics": "creg_chain_tip_height 5\ncreg_chain_blocks_stored 6\ncreg_chain_height 5\ncreg_block_count 6\ncreg_package_count 2\ncreg_pending_pool_size 2\ncreg_publisher_count 1\ncreg_pending_block_txs 0\ncreg_durable_finalized_work_depth 0\ncreg_durable_finalized_work_ready_depth 0\ncreg_durable_finalized_work_deferred_depth 0\ncreg_durable_finalized_work_retrying_depth 0\ncreg_durable_finalized_work_retry_attempts 0\ncreg_durable_finalized_work_oldest_age_seconds 0\ncreg_durable_finalized_work_dead_letter_depth 0\ncreg_node_info{node_id=\"observer-1\",version=\"0.1.0\"} 1\ncreg_validator_set_sync_enabled 1\ncreg_validator_set_sync_state_code 4\ncreg_validator_set_sync_last_finalized_source_block 11788083\ncreg_validator_set_sync_cursor_block 11788083\ncreg_validator_set_sync_has_error 0\ncreg_validator_set_sync_info{mode=\"chain-authoritative\",state=\"synced\"} 1\ncreg_active_validators 4\ncreg_validator_set_total 4\ncreg_reorg_events_total 0\ncreg_gossip_votes_rejected_total 0\ncreg_gossip_pbft_rejected_total 0\ncreg_pbft_active_rounds 1\ncreg_pbft_max_round_age_seconds 3077.152640489\ncreg_pbft_round_phase{block_hash=\"daab438828a6\",phase=\"commit\"} 3\ncreg_pbft_round_age_seconds{block_hash=\"daab438828a6\"} 3077.152638939\ncreg_sync_lag_blocks 0\ncreg_forced_inclusion_pending 0\ncreg_bridge_anchor_count 0\ncreg_bridge_last_anchor_eth_block 0\ncreg_bridge_finalized_l1_block 0\ncreg_reward_emissions_succeeded 0\ncreg_reward_emissions_failed 0\ncreg_treasury_balance 0\ncreg_pending_rewards_estimate 0\ncreg_total_rewards_distributed 0\ncreg_rewards_pool_balance 0\ncreg_last_incentives_refresh 1790448811\ncreg_sandbox_dev_bypass 0\ncreg_sandbox_isolated 1\ncreg_sandbox_info{engine=\"nsjail\",degraded=\"false\"} 1\ncreg_scanner_profile_ready 1\ncreg_scanner_yara_ready 1\ncreg_scanner_threat_intel_ready 1\ncreg_scanner_osv_ready 1\ncreg_scanner_yara_rule_files 1\ncreg_scanner_threat_intel_entries 100\ncreg_scanner_osv_lookups 2\ncreg_scanner_osv_records 0\ncreg_scanner_profile_info{profile_digest=\"dd52b5f77776aa0cad9cb25a4a308f9ef3755c1d3addec44073a5a322ee2e4fb\",scanner_version=\"creg-deterministic-scanner-v1.1.0+sha256:dd52b5f77776aa0cad9cb25a4a308f9ef3755c1d3addec44073a5a322ee2e4fb\"} 1",
+      "slot": "o1",
+      "role": "observer",
+      "name": "creg-testnet-vm",
+      "project": "gen-lang-client-0022105784",
+      "zone": "us-central1-b",
+      "port": 18080,
+      "checks": {
+        "container_running": true,
+        "scanner_ready": true,
+        "yara_ready": true,
+        "threat_feed_ready": true,
+        "threat_feed_entries_100": true,
+        "osv_ready": true,
+        "scanner_profile_matches": true,
+        "signature_verified": true,
+        "chain_id_matches": true,
+        "genesis_matches": true,
+        "four_active_validators": true,
+        "role_matches": true,
+        "live_peers": true
+      },
+      "ready": true,
+      "recovery_queue": {
+        "pending_block_txs": 0.0,
+        "durable_finalized_work_depth": 0.0,
+        "durable_finalized_work_ready_depth": 0.0,
+        "durable_finalized_work_dead_letter_depth": 0.0,
+        "forced_inclusion_pending": 0.0
+      },
+      "recovery_clear": true
+    },
+    {
+      "captured_at_utc": "2026-09-26T18:54:08.098113+00:00",
+      "container_state": {
+        "Status": "running",
+        "Running": true,
+        "RestartCount": 0
+      },
+      "health": {
+        "status": "ok",
+        "node_id": "observer-2",
+        "is_validator": false,
+        "version": "0.1.0",
+        "validator_set_sync": {
+          "enabled": true,
+          "mode": "chain-authoritative",
+          "state": "synced",
+          "last_finalized_source_block": 11788084,
+          "cursor_block": 11788084,
+          "cursor_log_index": 4294967295,
+          "cursor_block_hash": "0x937065a579ae5c3e1c81675fce90e2cecb2c6d49b872eeff590c5193836d3612",
+          "last_poll_at": "2026-09-26T18:53:46.471197460+00:00",
+          "last_error": null
+        },
+        "sandbox": {
+          "engine": "nsjail",
+          "dev_bypass": false,
+          "isolated": true,
+          "degraded": false,
+          "note": "kernel namespaces + seccomp-BPF (primary engine)"
+        },
+        "sync": {
+          "lag_blocks": 0,
+          "max_peer_tip": 5,
+          "healthy": true
+        }
+      },
+      "stats": {
+        "tip_height": 5,
+        "tip_hash": "daab438828a678aee3aa2eebf041f5147bc6f76fed837a207e6a1f4747d427cf",
+        "package_count": 2,
+        "block_count": 6,
+        "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+        "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+        "spec_signature_verified": true,
+        "l1_rpc_configured": true,
+        "is_validator": false,
+        "validator_count": 4,
+        "active_validators": 4,
+        "total_stake": 400,
+        "total_stake_native": "400",
+        "peer_count": 2,
+        "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+        "l1_block": 0,
+        "pending_tx_count": 2,
+        "publisher_count": 1,
+        "finalized_height": 5,
+        "finalization_lag": 0,
+        "finalization_source": "creg-canonical-store",
+        "validator_set_source": "chain-authoritative",
+        "validator_set_sync_state": "synced",
+        "validator_set_last_finalized_source_block": 11788084
+      },
+      "metrics": "creg_chain_tip_height 5\ncreg_chain_blocks_stored 6\ncreg_chain_height 5\ncreg_block_count 6\ncreg_package_count 2\ncreg_pending_pool_size 2\ncreg_publisher_count 1\ncreg_pending_block_txs 0\ncreg_durable_finalized_work_depth 0\ncreg_durable_finalized_work_ready_depth 0\ncreg_durable_finalized_work_deferred_depth 0\ncreg_durable_finalized_work_retrying_depth 0\ncreg_durable_finalized_work_retry_attempts 0\ncreg_durable_finalized_work_oldest_age_seconds 0\ncreg_durable_finalized_work_dead_letter_depth 0\ncreg_node_info{node_id=\"observer-2\",version=\"0.1.0\"} 1\ncreg_validator_set_sync_enabled 1\ncreg_validator_set_sync_state_code 4\ncreg_validator_set_sync_last_finalized_source_block 11788084\ncreg_validator_set_sync_cursor_block 11788084\ncreg_validator_set_sync_has_error 0\ncreg_validator_set_sync_info{mode=\"chain-authoritative\",state=\"synced\"} 1\ncreg_active_validators 4\ncreg_validator_set_total 4\ncreg_reorg_events_total 0\ncreg_gossip_votes_rejected_total 0\ncreg_gossip_pbft_rejected_total 0\ncreg_pbft_active_rounds 1\ncreg_pbft_max_round_age_seconds 0\ncreg_pbft_round_phase{block_hash=\"daab438828a6\",phase=\"finalised\"} 4\ncreg_pbft_round_age_seconds{block_hash=\"daab438828a6\"} 3087.911069265\ncreg_sync_lag_blocks 0\ncreg_forced_inclusion_pending 0\ncreg_bridge_anchor_count 0\ncreg_bridge_last_anchor_eth_block 0\ncreg_bridge_finalized_l1_block 0\ncreg_reward_emissions_succeeded 0\ncreg_reward_emissions_failed 0\ncreg_treasury_balance 0\ncreg_pending_rewards_estimate 0\ncreg_total_rewards_distributed 0\ncreg_rewards_pool_balance 0\ncreg_last_incentives_refresh 1790448826\ncreg_sandbox_dev_bypass 0\ncreg_sandbox_isolated 1\ncreg_sandbox_info{engine=\"nsjail\",degraded=\"false\"} 1\ncreg_scanner_profile_ready 1\ncreg_scanner_yara_ready 1\ncreg_scanner_threat_intel_ready 1\ncreg_scanner_osv_ready 1\ncreg_scanner_yara_rule_files 1\ncreg_scanner_threat_intel_entries 100\ncreg_scanner_osv_lookups 2\ncreg_scanner_osv_records 0\ncreg_scanner_profile_info{profile_digest=\"dd52b5f77776aa0cad9cb25a4a308f9ef3755c1d3addec44073a5a322ee2e4fb\",scanner_version=\"creg-deterministic-scanner-v1.1.0+sha256:dd52b5f77776aa0cad9cb25a4a308f9ef3755c1d3addec44073a5a322ee2e4fb\"} 1",
+      "slot": "o2",
+      "role": "observer",
+      "name": "creg-observer-vm",
+      "project": "gen-lang-client-0022105784",
+      "zone": "us-central1-a",
+      "port": 8080,
+      "checks": {
+        "container_running": true,
+        "scanner_ready": true,
+        "yara_ready": true,
+        "threat_feed_ready": true,
+        "threat_feed_entries_100": true,
+        "osv_ready": true,
+        "scanner_profile_matches": true,
+        "signature_verified": true,
+        "chain_id_matches": true,
+        "genesis_matches": true,
+        "four_active_validators": true,
+        "role_matches": true,
+        "live_peers": true
+      },
+      "ready": true,
+      "recovery_queue": {
+        "pending_block_txs": 0.0,
+        "durable_finalized_work_depth": 0.0,
+        "durable_finalized_work_ready_depth": 0.0,
+        "durable_finalized_work_dead_letter_depth": 0.0,
+        "forced_inclusion_pending": 0.0
+      },
+      "recovery_clear": true
+    },
+    {
+      "captured_at_utc": "2026-09-26T18:54:20.896409+00:00",
+      "container_state": {
+        "Status": "running",
+        "Running": true,
+        "RestartCount": 0
+      },
+      "health": {
+        "status": "ok",
+        "node_id": "observer-3",
+        "is_validator": false,
+        "version": "0.1.0",
+        "validator_set_sync": {
+          "enabled": true,
+          "mode": "chain-authoritative",
+          "state": "synced",
+          "last_finalized_source_block": 11788086,
+          "cursor_block": 11788086,
+          "cursor_log_index": 4294967295,
+          "cursor_block_hash": "0xb1bf773d3a806fd9c1cf3b004fff037660fe9970ff4c4bf29fcfbd683a744f2a",
+          "last_poll_at": "2026-09-26T18:54:05.675000077+00:00",
+          "last_error": null
+        },
+        "sandbox": {
+          "engine": "nsjail",
+          "dev_bypass": false,
+          "isolated": true,
+          "degraded": false,
+          "note": "kernel namespaces + seccomp-BPF (primary engine)"
+        },
+        "sync": {
+          "lag_blocks": 0,
+          "max_peer_tip": 5,
+          "healthy": true
+        }
+      },
+      "stats": {
+        "tip_height": 5,
+        "tip_hash": "daab438828a678aee3aa2eebf041f5147bc6f76fed837a207e6a1f4747d427cf",
+        "package_count": 2,
+        "block_count": 6,
+        "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+        "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+        "spec_signature_verified": true,
+        "l1_rpc_configured": true,
+        "is_validator": false,
+        "validator_count": 4,
+        "active_validators": 4,
+        "total_stake": 400,
+        "total_stake_native": "400",
+        "peer_count": 2,
+        "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+        "l1_block": 0,
+        "pending_tx_count": 2,
+        "publisher_count": 1,
+        "finalized_height": 5,
+        "finalization_lag": 0,
+        "finalization_source": "creg-canonical-store",
+        "validator_set_source": "chain-authoritative",
+        "validator_set_sync_state": "synced",
+        "validator_set_last_finalized_source_block": 11788086
+      },
+      "metrics": "creg_chain_tip_height 5\ncreg_chain_blocks_stored 6\ncreg_chain_height 5\ncreg_block_count 6\ncreg_package_count 2\ncreg_pending_pool_size 2\ncreg_publisher_count 1\ncreg_pending_block_txs 0\ncreg_durable_finalized_work_depth 0\ncreg_durable_finalized_work_ready_depth 0\ncreg_durable_finalized_work_deferred_depth 0\ncreg_durable_finalized_work_retrying_depth 0\ncreg_durable_finalized_work_retry_attempts 0\ncreg_durable_finalized_work_oldest_age_seconds 0\ncreg_durable_finalized_work_dead_letter_depth 0\ncreg_node_info{node_id=\"observer-3\",version=\"0.1.0\"} 1\ncreg_validator_set_sync_enabled 1\ncreg_validator_set_sync_state_code 4\ncreg_validator_set_sync_last_finalized_source_block 11788086\ncreg_validator_set_sync_cursor_block 11788086\ncreg_validator_set_sync_has_error 0\ncreg_validator_set_sync_info{mode=\"chain-authoritative\",state=\"synced\"} 1\ncreg_active_validators 4\ncreg_validator_set_total 4\ncreg_reorg_events_total 0\ncreg_gossip_votes_rejected_total 0\ncreg_gossip_pbft_rejected_total 0\ncreg_pbft_active_rounds 1\ncreg_pbft_max_round_age_seconds 3100.698005217\ncreg_pbft_round_phase{block_hash=\"daab438828a6\",phase=\"commit\"} 3\ncreg_pbft_round_age_seconds{block_hash=\"daab438828a6\"} 3100.698003196\ncreg_sync_lag_blocks 0\ncreg_forced_inclusion_pending 0\ncreg_bridge_anchor_count 0\ncreg_bridge_last_anchor_eth_block 0\ncreg_bridge_finalized_l1_block 0\ncreg_reward_emissions_succeeded 0\ncreg_reward_emissions_failed 0\ncreg_treasury_balance 0\ncreg_pending_rewards_estimate 0\ncreg_total_rewards_distributed 0\ncreg_rewards_pool_balance 0\ncreg_last_incentives_refresh 1790448845\ncreg_sandbox_dev_bypass 0\ncreg_sandbox_isolated 1\ncreg_sandbox_info{engine=\"nsjail\",degraded=\"false\"} 1\ncreg_scanner_profile_ready 1\ncreg_scanner_yara_ready 1\ncreg_scanner_threat_intel_ready 1\ncreg_scanner_osv_ready 1\ncreg_scanner_yara_rule_files 1\ncreg_scanner_threat_intel_entries 100\ncreg_scanner_osv_lookups 2\ncreg_scanner_osv_records 0\ncreg_scanner_profile_info{profile_digest=\"dd52b5f77776aa0cad9cb25a4a308f9ef3755c1d3addec44073a5a322ee2e4fb\",scanner_version=\"creg-deterministic-scanner-v1.1.0+sha256:dd52b5f77776aa0cad9cb25a4a308f9ef3755c1d3addec44073a5a322ee2e4fb\"} 1",
+      "slot": "o3",
+      "role": "observer",
+      "name": "creg-observer-3",
+      "project": "fiffi-500411",
+      "zone": "us-west1-b",
+      "port": 8080,
+      "checks": {
+        "container_running": true,
+        "scanner_ready": true,
+        "yara_ready": true,
+        "threat_feed_ready": true,
+        "threat_feed_entries_100": true,
+        "osv_ready": true,
+        "scanner_profile_matches": true,
+        "signature_verified": true,
+        "chain_id_matches": true,
+        "genesis_matches": true,
+        "four_active_validators": true,
+        "role_matches": true,
+        "live_peers": true
+      },
+      "ready": true,
+      "recovery_queue": {
+        "pending_block_txs": 0.0,
+        "durable_finalized_work_depth": 0.0,
+        "durable_finalized_work_ready_depth": 0.0,
+        "durable_finalized_work_dead_letter_depth": 0.0,
+        "forced_inclusion_pending": 0.0
+      },
+      "recovery_clear": true
+    },
+    {
+      "captured_at_utc": "2026-09-26T18:54:33.221124+00:00",
+      "container_state": {
+        "Status": "running",
+        "Running": true,
+        "RestartCount": 0
+      },
+      "health": {
+        "status": "ok",
+        "node_id": "observer-4",
+        "is_validator": false,
+        "version": "0.1.0",
+        "validator_set_sync": {
+          "enabled": true,
+          "mode": "chain-authoritative",
+          "state": "synced",
+          "last_finalized_source_block": 11788088,
+          "cursor_block": 11788088,
+          "cursor_log_index": 4294967295,
+          "cursor_block_hash": "0x745d19f375fa0c78f64ce5c7e2b6fec3b8c1c5803a24b0e163ca56051d1bc00e",
+          "last_poll_at": "2026-09-26T18:54:27.754176616+00:00",
+          "last_error": null
+        },
+        "sandbox": {
+          "engine": "nsjail",
+          "dev_bypass": false,
+          "isolated": true,
+          "degraded": false,
+          "note": "kernel namespaces + seccomp-BPF (primary engine)"
+        },
+        "sync": {
+          "lag_blocks": 0,
+          "max_peer_tip": 5,
+          "healthy": true
+        }
+      },
+      "stats": {
+        "tip_height": 5,
+        "tip_hash": "daab438828a678aee3aa2eebf041f5147bc6f76fed837a207e6a1f4747d427cf",
+        "package_count": 2,
+        "block_count": 6,
+        "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+        "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+        "spec_signature_verified": true,
+        "l1_rpc_configured": true,
+        "is_validator": false,
+        "validator_count": 4,
+        "active_validators": 4,
+        "total_stake": 400,
+        "total_stake_native": "400",
+        "peer_count": 7,
+        "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+        "l1_block": 0,
+        "pending_tx_count": 2,
+        "publisher_count": 1,
+        "finalized_height": 5,
+        "finalization_lag": 0,
+        "finalization_source": "creg-canonical-store",
+        "validator_set_source": "chain-authoritative",
+        "validator_set_sync_state": "synced",
+        "validator_set_last_finalized_source_block": 11788088
+      },
+      "metrics": "creg_chain_tip_height 5\ncreg_chain_blocks_stored 6\ncreg_chain_height 5\ncreg_block_count 6\ncreg_package_count 2\ncreg_pending_pool_size 2\ncreg_publisher_count 1\ncreg_pending_block_txs 0\ncreg_durable_finalized_work_depth 0\ncreg_durable_finalized_work_ready_depth 0\ncreg_durable_finalized_work_deferred_depth 0\ncreg_durable_finalized_work_retrying_depth 0\ncreg_durable_finalized_work_retry_attempts 0\ncreg_durable_finalized_work_oldest_age_seconds 0\ncreg_durable_finalized_work_dead_letter_depth 0\ncreg_node_info{node_id=\"observer-4\",version=\"0.1.0\"} 1\ncreg_validator_set_sync_enabled 1\ncreg_validator_set_sync_state_code 4\ncreg_validator_set_sync_last_finalized_source_block 11788088\ncreg_validator_set_sync_cursor_block 11788088\ncreg_validator_set_sync_has_error 0\ncreg_validator_set_sync_info{mode=\"chain-authoritative\",state=\"synced\"} 1\ncreg_active_validators 4\ncreg_validator_set_total 4\ncreg_reorg_events_total 0\ncreg_gossip_votes_rejected_total 0\ncreg_gossip_pbft_rejected_total 0\ncreg_pbft_active_rounds 1\ncreg_pbft_max_round_age_seconds 3112.885268384\ncreg_pbft_round_phase{block_hash=\"daab438828a6\",phase=\"commit\"} 3\ncreg_pbft_round_age_seconds{block_hash=\"daab438828a6\"} 3112.885266894\ncreg_sync_lag_blocks 0\ncreg_forced_inclusion_pending 0\ncreg_bridge_anchor_count 0\ncreg_bridge_last_anchor_eth_block 0\ncreg_bridge_finalized_l1_block 0\ncreg_reward_emissions_succeeded 0\ncreg_reward_emissions_failed 0\ncreg_treasury_balance 0\ncreg_pending_rewards_estimate 0\ncreg_total_rewards_distributed 0\ncreg_rewards_pool_balance 0\ncreg_last_incentives_refresh 1790448867\ncreg_sandbox_dev_bypass 0\ncreg_sandbox_isolated 1\ncreg_sandbox_info{engine=\"nsjail\",degraded=\"false\"} 1\ncreg_scanner_profile_ready 1\ncreg_scanner_yara_ready 1\ncreg_scanner_threat_intel_ready 1\ncreg_scanner_osv_ready 1\ncreg_scanner_yara_rule_files 1\ncreg_scanner_threat_intel_entries 100\ncreg_scanner_osv_lookups 2\ncreg_scanner_osv_records 0\ncreg_scanner_profile_info{profile_digest=\"dd52b5f77776aa0cad9cb25a4a308f9ef3755c1d3addec44073a5a322ee2e4fb\",scanner_version=\"creg-deterministic-scanner-v1.1.0+sha256:dd52b5f77776aa0cad9cb25a4a308f9ef3755c1d3addec44073a5a322ee2e4fb\"} 1",
+      "slot": "o4",
+      "role": "observer",
+      "name": "creg-observer-4",
+      "project": "fiffi-500411",
+      "zone": "africa-south1-a",
+      "port": 8080,
+      "checks": {
+        "container_running": true,
+        "scanner_ready": true,
+        "yara_ready": true,
+        "threat_feed_ready": true,
+        "threat_feed_entries_100": true,
+        "osv_ready": true,
+        "scanner_profile_matches": true,
+        "signature_verified": true,
+        "chain_id_matches": true,
+        "genesis_matches": true,
+        "four_active_validators": true,
+        "role_matches": true,
+        "live_peers": true
+      },
+      "ready": true,
+      "recovery_queue": {
+        "pending_block_txs": 0.0,
+        "durable_finalized_work_depth": 0.0,
+        "durable_finalized_work_ready_depth": 0.0,
+        "durable_finalized_work_dead_letter_depth": 0.0,
+        "forced_inclusion_pending": 0.0
+      },
+      "recovery_clear": true
+    }
+  ]
+}

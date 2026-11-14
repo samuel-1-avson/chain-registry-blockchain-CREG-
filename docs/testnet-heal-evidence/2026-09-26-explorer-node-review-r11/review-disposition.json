@@ -1,0 +1,8 @@
+{
+  "captured_at_utc": "2026-09-26T11:48:28.7459535Z",
+  "node_api": "Real V1 canonical finality and scanner checks passed",
+  "linux_cli": "Superseded: real output retained old Verified Packages label",
+  "cause": "Source timestamps were touched in a prior Docker layer before acquisition of mutable Cargo cache",
+  "follow_up": "r12 refreshes source after target-cache lock; verify Linux CLI executable against real endpoint",
+  "public_cutover": "pending"
+}

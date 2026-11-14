@@ -1,0 +1,14 @@
+{
+  "epoch": "osv-2026-09-27-phase-c-escape-string-regexp-r12-live",
+  "schema": "creg-osv-snapshot-v1",
+  "source": "https://api.osv.dev/v1/query",
+  "built_at": "2026-09-27T23:11:56.545292Z",
+  "entries": {
+    "npm:escape-html@1.0.3": [],
+    "npm:is-number@7.0.0": [],
+    "npm:ms@2.1.3": [],
+    "npm:toidentifier@1.0.1": [],
+    "npm:kleur@4.1.5": [],
+    "npm:escape-string-regexp@5.0.0": []
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "schema": "creg-real-r22-fleet-rollout-v1",
+  "run_id": "20260927T043314Z",
+  "started_at_utc": "2026-09-27T04:33:15.2186860Z",
+  "image_id": "sha256:2b472a089fe6ac651edfbae51b616456ed335f35992c0374f10c1ea80ce6caa3",
+  "image_tag": "creg-node:phase-c-secure-r22-commit-capture",
+  "registry_image_ref": "us-central1-docker.pkg.dev/gen-lang-client-0022105784/creg-testnet/creg-node@sha256:2b472a089fe6ac651edfbae51b616456ed335f35992c0374f10c1ea80ce6caa3",
+  "scanner_profile_digest": "d09a9d2450e6e691bc71bee591b1101aa14d8b0feb6f6088ab6819f48e1a6be4",
+  "public_cutover": false,
+  "requested_slots": [
+    "v3"
+  ],
+  "nodes": [
+    {
+      "slot": "v3",
+      "role": "validator",
+      "host": "creg-validator-3",
+      "project": "fiffi-500411",
+      "zone": "europe-west1-b",
+      "prior_image_id": "sha256:d2b83a6525314b17434bc98c5bf05181db4fd6d73c962eabd2b5407968dfa95c",
+      "image_id": "sha256:8731cc85c73e6267e2e00014e8df50aef3f4d60ce6cfcaddb8fd0a3584eb2ad9",
+      "startup_marker_count": 0,
+      "readiness_passed": true,
+      "already_running_r22": false,
+      "distribution_mode": "artifact-registry-digest",
+      "node_evidence": "v3-rollout-20260927T043314Z.json",
+      "preflight_evidence": "preflight-before-v3-20260927T043314Z.json",
+      "postflight_evidence": "preflight-after-v3-20260927T043314Z.json",
+      "all_eight_postflight_ready": true
+    }
+  ],
+  "passed": true,
+  "completed_at_utc": "2026-09-27T04:37:36.8665585Z"
+}

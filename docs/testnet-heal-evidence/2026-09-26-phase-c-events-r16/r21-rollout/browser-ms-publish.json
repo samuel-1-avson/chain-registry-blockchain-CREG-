@@ -1,0 +1,123 @@
+{
+  "capturedAt": "2026-09-26T22:40:14.592Z",
+  "dataSource": "live Phase C candidate node through the real Vite proxy; no fixtures or intercepted responses",
+  "explorerUrl": "http://127.0.0.1:3008",
+  "candidateNodeUrl": "http://127.0.0.1:18080",
+  "operation": "publish",
+  "canonical": "npm:ms@2.1.3",
+  "startingHeight": 10,
+  "probeError": null,
+  "checks": {
+    "stream_opened": true,
+    "submitted": true,
+    "verified": true,
+    "block_produced": true,
+    "event_rendered_in_web_explorer": true,
+    "no_page_errors": true
+  },
+  "connections": [
+    {
+      "url": "http://127.0.0.1:3008/v1/public/events",
+      "opened": true,
+      "errors": 0
+    }
+  ],
+  "events": [
+    {
+      "type": "package_submitted",
+      "data": {
+        "kind": "package_submitted",
+        "ts": "2026-09-26T22:38:59.809479150+00:00",
+        "payload": {
+          "canonical": "npm:ms@2.1.3",
+          "publisher_pubkey": "863906af03a385de"
+        }
+      },
+      "receivedAt": "2026-09-26T22:38:59.818Z"
+    },
+    {
+      "type": "validator_voted",
+      "data": {
+        "kind": "validator_voted",
+        "ts": "2026-09-26T22:39:01.431617567+00:00",
+        "payload": {
+          "validator_id": "validator-3",
+          "canonical": "npm:ms@2.1.3",
+          "approved": true
+        }
+      },
+      "receivedAt": "2026-09-26T22:39:01.435Z"
+    },
+    {
+      "type": "validator_voted",
+      "data": {
+        "kind": "validator_voted",
+        "ts": "2026-09-26T22:39:01.765280331+00:00",
+        "payload": {
+          "validator_id": "validator-1",
+          "canonical": "npm:ms@2.1.3",
+          "approved": true
+        }
+      },
+      "receivedAt": "2026-09-26T22:39:01.768Z"
+    },
+    {
+      "type": "validator_voted",
+      "data": {
+        "kind": "validator_voted",
+        "ts": "2026-09-26T22:39:02.566920105+00:00",
+        "payload": {
+          "validator_id": "validator-2",
+          "canonical": "npm:ms@2.1.3",
+          "approved": true
+        }
+      },
+      "receivedAt": "2026-09-26T22:39:02.569Z"
+    },
+    {
+      "type": "validator_voted",
+      "data": {
+        "kind": "validator_voted",
+        "ts": "2026-09-26T22:39:04.429169243+00:00",
+        "payload": {
+          "validator_id": "validator-4",
+          "canonical": "npm:ms@2.1.3",
+          "approved": true
+        }
+      },
+      "receivedAt": "2026-09-26T22:39:04.431Z"
+    },
+    {
+      "type": "block_produced",
+      "data": {
+        "kind": "block_produced",
+        "ts": "2026-09-26T22:40:14.050578980+00:00",
+        "payload": {
+          "height": 11,
+          "hash": "a87ff93fbdb2ea01549125a9f0a20c717049f0e8f8e28b952078cbf66b2117f3",
+          "tx_count": 1,
+          "block_hash": "a87ff93fbdb2ea01549125a9f0a20c717049f0e8f8e28b952078cbf66b2117f3",
+          "block_phase": "committed"
+        }
+      },
+      "receivedAt": "2026-09-26T22:40:14.051Z"
+    },
+    {
+      "type": "package_verified",
+      "data": {
+        "kind": "package_verified",
+        "ts": "2026-09-26T22:40:14.051037384+00:00",
+        "payload": {
+          "canonical": "npm:ms@2.1.3",
+          "block_hash": "a87ff93fbdb2ea01549125a9f0a20c717049f0e8f8e28b952078cbf66b2117f3",
+          "validator_count": 3,
+          "height": 11,
+          "block_phase": "committed"
+        }
+      },
+      "receivedAt": "2026-09-26T22:40:14.051Z"
+    }
+  ],
+  "renderedText": "Live events\n7 of 7\n🔗\nShare\nAll types (7)\nblock_produced (1)\npackage_submitted (1)\npackage_verified (1)\nvalidator_voted (4)\n⏸ Pause\n↕ Auto-scroll\n≡ Compact\n⇩ Export\nall (7)\nblock_produced (1)\npackage_submitted (1)\npackage_verified (1)\nvalidator_voted (4)\nPACKAGE_VERIFIED\n#11\nnpm:ms@2.1.3\n0s ago\nBLOCK_PRODUCED\n#11\n0s ago\nVALIDATOR_VOTED\nnpm:ms@2.1.3\n1m ago\nVALIDATOR_VOTED\nnpm:ms@2.1.3\n1m ago\nVALIDATOR_VOTED\nnpm:ms@2.1.3\n1m ago\nVALIDATOR_VOTED\nnpm:ms@2.1.3\n1m ago\nPACKAGE_SUBMITTED\nnpm:ms@2.1.3\n1m ago\nLIVE Buffer: 7 events\nShowing: 7 / 7",
+  "pageErrors": []
+}

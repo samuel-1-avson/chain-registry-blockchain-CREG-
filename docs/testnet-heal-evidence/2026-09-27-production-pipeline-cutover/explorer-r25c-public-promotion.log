@@ -1,0 +1,5 @@
+ Container creg-explorer-public-r25 Creating 
+ Container creg-explorer-public-r25 Created 
+ Container creg-explorer-public-r25 Starting 
+ Container creg-explorer-public-r25 Started 
+{"status": "passed", "frontend": "r25_verified_rpc", "chain_id": "creg-testnet-1", "height": 0, "chain_cutover": false}

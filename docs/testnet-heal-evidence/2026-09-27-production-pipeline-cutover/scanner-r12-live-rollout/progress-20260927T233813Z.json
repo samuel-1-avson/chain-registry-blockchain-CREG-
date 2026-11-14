@@ -1,0 +1,50 @@
+{
+  "schema": "creg-real-r12-scanner-fleet-rollout-v1",
+  "run_id": "20260927T233813Z",
+  "started_at_utc": "2026-09-27T23:39:24.7165324Z",
+  "old_profile": "f397fac29df29438f0ee15580547def5fe66a03af60153d22993f4a7af9fce8c",
+  "new_profile": "e067b8fc4aee823203a8a8204d2b57a4a097798d739d338bf8a45b4ff7b5ceb2",
+  "osv_epoch": "osv-2026-09-27-phase-c-escape-string-regexp-r12-live",
+  "requested_slots": [
+    "o1",
+    "o2",
+    "o3",
+    "o4",
+    "v2",
+    "v3",
+    "v4"
+  ],
+  "nodes": [
+    {
+      "slot": "v2",
+      "host": "creg-validator-1",
+      "role": "validator",
+      "image_id": "sha256:2b472a089fe6ac651edfbae51b616456ed335f35992c0374f10c1ea80ce6caa3",
+      "scanner_profile_digest": "e067b8fc4aee823203a8a8204d2b57a4a097798d739d338bf8a45b4ff7b5ceb2",
+      "dead_letter_depth": 7.0,
+      "report": "v2-rollout-20260927T233813Z.json"
+    },
+    {
+      "slot": "v3",
+      "host": "creg-validator-3",
+      "role": "validator",
+      "image_id": "sha256:8731cc85c73e6267e2e00014e8df50aef3f4d60ce6cfcaddb8fd0a3584eb2ad9",
+      "scanner_profile_digest": "e067b8fc4aee823203a8a8204d2b57a4a097798d739d338bf8a45b4ff7b5ceb2",
+      "dead_letter_depth": 7.0,
+      "report": "v3-rollout-20260927T233813Z.json"
+    },
+    {
+      "slot": "v4",
+      "host": "creg-validator-4",
+      "role": "validator",
+      "image_id": "sha256:704cd7dfb89a048c146a3de502416c31a6f77c0e3f493a98f4fe3098c732046c",
+      "scanner_profile_digest": "e067b8fc4aee823203a8a8204d2b57a4a097798d739d338bf8a45b4ff7b5ceb2",
+      "dead_letter_depth": 6.0,
+      "report": "v4-rollout-20260927T233813Z.json"
+    }
+  ],
+  "passed": true,
+  "public_cutover": false,
+  "completed_at_utc": "2026-09-27T23:46:45.9580358Z",
+  "final_readiness": "readiness-complete-20260927T233813Z.json"
+}

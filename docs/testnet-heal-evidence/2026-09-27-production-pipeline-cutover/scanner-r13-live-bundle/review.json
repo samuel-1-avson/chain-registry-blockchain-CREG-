@@ -1,0 +1,18 @@
+{
+  "schema": "creg-real-scanner-r13-candidate-v1",
+  "captured_at_utc": "2026-09-28T01:29:42.517227Z",
+  "status": "prepared_not_deployed",
+  "canonical": "npm:has-flag@5.0.1",
+  "new_profile_digest": "8c7f011ab71a9a695ce1364e9958a2906f02645849c3567fc5691206a93c296e",
+  "old_profile_digest": "e067b8fc4aee823203a8a8204d2b57a4a097798d739d338bf8a45b4ff7b5ceb2",
+  "osv_epoch": "osv-2026-09-28-phase-c-has-flag-r13-live",
+  "osv_response_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+  "osv_advisory_count": 0,
+  "osv_snapshot_sha256": "642c35a82a9296c36bfc5b79c152b3a78651d7c50d646206bc004620caa0925a",
+  "malwarebazaar_response_sha256": "5310f2a3d3da86f24e53d4c3162ac293af9b3e616b0f6debf83d653a92c7f347",
+  "malwarebazaar_records": 100,
+  "threat_database_sha256": "c97381b9df48722a1f591c8f81c87e4d9695c0b89877e6b609e883abf7e4a723",
+  "yara_bundle_sha256": "2ec033d1446c6280f46d7d74467f78223c67c9abe45c282080db78cfe3177766",
+  "coverage_count": 7,
+  "node_restarts_or_publication": false
+}

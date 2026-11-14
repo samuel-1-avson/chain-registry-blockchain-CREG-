@@ -1,0 +1,8 @@
+
+  → Light-client verification for npm:escape-string-regexp@5.0.0
+  · Node:       http://host.docker.internal:18080
+  · Checkpoint: height=0
+  · Fetching Merkle proof...
+  ✓ npm:escape-string-regexp@5.0.0 — Merkle proof verified ✓     
+  Package is cryptographically confirmed on chain.
+

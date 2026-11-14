@@ -1,0 +1,6 @@
+{
+  "timestamp_utc": "2026-09-26T08:20:36.5639192Z",
+  "status": "superseded-cli-option-conflict",
+  "image_id": "sha256:4a69216e1b71bc129fb83f8f2cdfc1a4da7f6b31133d4eee43ee0d0dbc828865",
+  "detail": "The r8 image built, but its first snapshot command hit a Clap type collision between the global --output format and snapshot --output path. No snapshot was written and no node was started. r9 renamed the path option to --snapshot-output and successfully built the real OSV snapshot."
+}

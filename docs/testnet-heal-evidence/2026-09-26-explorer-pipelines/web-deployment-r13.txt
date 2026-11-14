@@ -1,0 +1,8 @@
+/var/tmp/web-release-r13.tar.gz: OK
+2930e251f85aee6dfebe908f0d0a89dd90e197df6cec67cef40b97e680a0137d
+{"preflight": true, "chain_id": "creg-testnet-1", "height": 0}
+creg-unified-explorer
+9d4b239bb639f9243db970123ddbf6f599e652324f81b9b1b6826f665e0094cb
+okcreg-explorer-pipelines-review
+sha256:d2bcef4f75806f18edd8d189b8c059eaaa89ea9e2669f3bedfa5f6cb9af657da running
+Web release applied. Public node and default chain spec unchanged.

@@ -1,0 +1,26 @@
+{
+  "slot": "observer-4",
+  "image_id": "sha256:8731cc85c73e6267e2e00014e8df50aef3f4d60ce6cfcaddb8fd0a3584eb2ad9",
+  "node_binary_sha256": "c7ef1d3e8bb9b34e2e0e4e255bf47f751ecaada4d0617f9ac5a4dbedb262a5b1",
+  "height": 16,
+  "block_hash": "4bd594d71b4fc8bc785c34b1e46291518328233c8aed616171efd9add073e260",
+  "peer_count": 7,
+  "scanner_profile_digest": "8c7f011ab71a9a695ce1364e9958a2906f02645849c3567fc5691206a93c296e",
+  "dead_letter_depth": 0.0,
+  "checks": {
+    "image_preserved": true,
+    "new_running_healthy": true,
+    "old_container_stopped": true,
+    "data_and_scanner_mounts": true,
+    "same_identity_and_env": true,
+    "signed_r7_h16": true,
+    "four_validator_roster": true,
+    "role_and_peers": true,
+    "scanner_profile": true,
+    "queues_clear": true,
+    "dead_letters_preserved": true,
+    "pbft_clear": true
+  },
+  "passed": true,
+  "preserved_container": "creg-phase-c-r7-o4-r12-before-r13-20260928T015055Z"
+}

@@ -1,0 +1,51 @@
+{
+  "schema": "creg-r21-v4-prepared-crash-recovery-verified-v1",
+  "captured_at_utc": "2026-09-26T23:20:51Z",
+  "target_height": 11,
+  "prepared_block_hash": "a87ff93fbdb2ea01549125a9f0a20c717049f0e8f8e28b952078cbf66b2117f3",
+  "image_id": "sha256:d2b83a6525314b17434bc98c5bf05181db4fd6d73c962eabd2b5407968dfa95c",
+  "restart_method": "The V4 Docker container was SIGKILLed while three other validators remained online. Docker left the manually killed container stopped; the operator started that same container. The GCP VM stayed RUNNING.",
+  "prepared_round_before_kill": {
+    "block_height": 11,
+    "phase": "commit",
+    "prepare_count": 4,
+    "commit_count": 1,
+    "quorum": 3,
+    "view_number": 2,
+    "observed_at_utc": "2026-09-26T22:40:15.044193+00:00",
+    "killed_at_utc": "2026-09-26T22:40:15.492293+00:00"
+  },
+  "recovery_logs": [
+    {
+      "at_utc": "2026-09-26T22:44:44.574995Z",
+      "message": "PREPARE quorum reached; moving to COMMIT"
+    },
+    {
+      "at_utc": "2026-09-26T22:44:44.575377Z",
+      "message": "Recovered durable PBFT prepared round at height 11"
+    },
+    {
+      "at_utc": "2026-09-26T22:44:47.637859Z",
+      "message": "Synced certified canonical block 11 with hash a87ff93fbdb2ea01549125a9f0a20c717049f0e8f8e28b952078cbf66b2117f3"
+    }
+  ],
+  "scope_and_limits": {
+    "prepared_value_recovered": true,
+    "canonical_h11_reconciled": true,
+    "local_durable_commit_recovery_observed": false,
+    "other_validators_online": ["validator-1", "validator-2", "validator-3"],
+    "no_two_validator_window": true,
+    "signer_journal_manipulated": false,
+    "gcp_vm_restarted": false,
+    "public_cutover": false
+  },
+  "subsequent_state": {
+    "height": 12,
+    "block_hash": "a329eb216ce1fd18e1f5510333cb683db34ca6e789b5a3ef229dabe2af08fc7d",
+    "commit_signers": ["validator-4", "validator-3", "validator-1"],
+    "current_pbft_active_rounds": 0,
+    "current_container_running": true,
+    "current_image_is_r21": true
+  },
+  "passed": true
+}

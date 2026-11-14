@@ -1,0 +1,36 @@
+{
+  "captured_at_utc": "2026-09-27T21:05:52.680Z",
+  "status": "prepared_for_review_not_published",
+  "canonical": "npm:escape-string-regexp@5.0.0",
+  "registry_url": "https://registry.npmjs.org/escape-string-regexp/5.0.0",
+  "archive_url": "https://registry.npmjs.org/escape-string-regexp/-/escape-string-regexp-5.0.0.tgz",
+  "archive_bytes": 1964,
+  "archive_sha256": "c8b662afe8aa2b852ecc27d766e584a502f8351fbbd890611f2509bf083d28e6",
+  "registry_sha512_integrity": "sha512-/veY75JbMK4j1yjvuUxuVsiS/hr/4iHs9FTT6cgTexxdE0Ly/glccBAkloH/DofkjRbZU3bnoj38mOmhkZ0lHw==",
+  "metadata_sha256": "2803d60c9c4c40f117eaaf087b756887d708dd701e9e225a07c218101d85f767",
+  "osv_source": "https://api.osv.dev/v1/query",
+  "osv_query": {
+    "package": {
+      "ecosystem": "npm",
+      "name": "escape-string-regexp"
+    },
+    "version": "5.0.0"
+  },
+  "osv_response_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+  "osv_advisory_count": 0,
+  "declared_license": "MIT",
+  "declared_scripts": {
+    "test": "xo && ava && tsd"
+  },
+  "declared_dependencies": {},
+  "prerequisites": [
+    "Confirm canonical ID absent from R7",
+    "Review exact archive contents",
+    "Add genuine OSV response to a new pinned scanner profile",
+    "Roll out and verify the profile on all eight nodes",
+    "Use actual publisher authorization and stake",
+    "Complete reviewed node rollout before the V4 crash capture"
+  ],
+  "fleet_changed": false,
+  "package_executed_or_published": false
+}

@@ -1,0 +1,8 @@
+{
+  "timestamp_utc": "2026-09-26T11:39:52.8584318Z",
+  "image_tag": "creg-node:phase-c-secure-r11-explorer",
+  "image_id": "sha256:05978c62203533998ea7d3fc35919d3f115b1d57875a0c03bb2949e392a508cc",
+  "source_manifest": "source-manifest.json",
+  "real_host_acceptance": "pending",
+  "public_cutover": "pending"
+}

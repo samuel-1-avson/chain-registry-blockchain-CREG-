@@ -1,0 +1,31 @@
+{
+  "schema": "creg-v1-docker-network-recovery-v1",
+  "captured_at_utc": "2026-09-28T07:18:08.8691116Z",
+  "docker_engine_version": "29.7.2",
+  "container": {
+    "running": true,
+    "health": "healthy",
+    "image": "sha256:2b472a089fe6ac651edfbae51b616456ed335f35992c0374f10c1ea80ce6caa3",
+    "restart_policy": "unless-stopped",
+    "data_mount": "C:\\Users\\samue\\.creg-phase-c\\r7\\v1\\data"
+  },
+  "node": {
+    "id": "validator-1",
+    "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+    "height": 18,
+    "tip_hash": "ec64471b8f9c58eb2d9b958db765a98871cb444e032143d313d65b3ab80cd76c",
+    "peers": 2,
+    "active_validators": 4,
+    "scanner_profile": "8c7f011ab71a9a695ce1364e9958a2906f02645849c3567fc5691206a93c296e"
+  },
+  "container_namespace_egress": {
+    "validator3_p2p_9000": true,
+    "observer4_p2p_9000": true,
+    "public_1_1_1_1_443": true
+  },
+  "runtime_directories_preserved_as": {
+    "docker_run": "C:\\Users\\samue\\AppData\\Local\\Docker\\run-stale-20260928T071611Z",
+    "docker_secrets_engine": "C:\\Users\\samue\\AppData\\Local\\docker-secrets-engine-stale-20260928T071611Z"
+  },
+  "chain_reset": false
+}

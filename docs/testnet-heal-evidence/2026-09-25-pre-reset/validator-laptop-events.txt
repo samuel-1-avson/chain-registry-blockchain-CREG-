@@ -1,0 +1,160 @@
+[2m2026-09-25T06:58:30.855617Z[0m [32m INFO[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Cleaned up 1 stale rounds
+[2m2026-09-25T06:58:30.855659Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] ViewChange quorum reached (1/1) for view=1 — executing view-change
+[2m2026-09-25T06:58:30.855665Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] VIEW-CHANGE #1 (view=1)
+[2m2026-09-25T06:58:30.855668Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Timeout on block 2416f664ffe2 — proposed view-change to view 1 (applied=true)
+[2m2026-09-25T06:58:30.856965Z[0m [32m INFO[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] PRE-PREPARE: block c4cc63482285 from validator-2
+[2m2026-09-25T06:58:30.857082Z[0m [32m INFO[0m [2mcreg_node::block_producer[0m[2m:[0m [PBFT] Proposer created block c4cc63482285 at height 2 (1 tx) — starting round
+[2m2026-09-25T06:58:35.854836Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] ViewChange quorum reached (1/1) for view=3 — executing view-change
+[2m2026-09-25T06:58:35.854872Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] VIEW-CHANGE #3 (view=3)
+[2m2026-09-25T06:58:35.854876Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Timeout on block 6ac112586bad — proposed view-change to view 3 (applied=true)
+[2m2026-09-25T06:58:35.854883Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] ViewChange quorum reached (1/1) for view=4 — executing view-change
+[2m2026-09-25T06:58:35.854888Z[0m [31mERROR[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Round cd6a5512197d abandoned: View-change limit (3) exhausted — round abandoned
+[2m2026-09-25T06:58:35.854894Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] ViewChange quorum reached (1/1) for view=3 — executing view-change
+[2m2026-09-25T06:58:35.854896Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] VIEW-CHANGE #3 (view=3)
+[2m2026-09-25T06:58:35.854901Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Timeout on block 25774534bd0f — proposed view-change to view 3 (applied=true)
+[2m2026-09-25T06:58:35.854930Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] ViewChange quorum reached (1/1) for view=4 — executing view-change
+[2m2026-09-25T06:58:35.854933Z[0m [31mERROR[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Round a5c8bdcee385 abandoned: View-change limit (3) exhausted — round abandoned
+[2m2026-09-25T06:58:35.854937Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] ViewChange quorum reached (1/1) for view=2 — executing view-change
+[2m2026-09-25T06:58:35.854939Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] VIEW-CHANGE #2 (view=2)
+[2m2026-09-25T06:58:35.854941Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Timeout on block ae724d8bc0c4 — proposed view-change to view 2 (applied=true)
+[2m2026-09-25T06:58:35.854945Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] ViewChange quorum reached (1/1) for view=1 — executing view-change
+[2m2026-09-25T06:58:35.854948Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] VIEW-CHANGE #1 (view=1)
+[2m2026-09-25T06:58:35.854949Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Timeout on block fffb031cf713 — proposed view-change to view 1 (applied=true)
+[2m2026-09-25T06:58:35.855574Z[0m [32m INFO[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] PRE-PREPARE: block 5668ebf7ad0c from validator-2
+[2m2026-09-25T06:58:35.855723Z[0m [32m INFO[0m [2mcreg_node::block_producer[0m[2m:[0m [PBFT] Proposer created block 5668ebf7ad0c at height 2 (1 tx) — starting round
+[2m2026-09-25T06:58:35.855819Z[0m [33m WARN[0m [2mlibp2p_gossipsub::behaviour[0m[2m:[0m Not publishing a message that has already been published 3132353630333830333939343434373932393136
+[2m2026-09-25T06:58:40.855627Z[0m [32m INFO[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Cleaned up 2 stale rounds
+[2m2026-09-25T06:58:40.855675Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] ViewChange quorum reached (1/1) for view=3 — executing view-change
+[2m2026-09-25T06:58:40.855681Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] VIEW-CHANGE #3 (view=3)
+[2m2026-09-25T06:58:40.855684Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Timeout on block c1d1aa706c2f — proposed view-change to view 3 (applied=true)
+[2m2026-09-25T06:58:40.855689Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] ViewChange quorum reached (1/1) for view=4 — executing view-change
+[2m2026-09-25T06:58:40.855692Z[0m [31mERROR[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Round 3e1c595c4e37 abandoned: View-change limit (3) exhausted — round abandoned
+[2m2026-09-25T06:58:40.855697Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] ViewChange quorum reached (1/1) for view=1 — executing view-change
+[2m2026-09-25T06:58:40.855701Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] VIEW-CHANGE #1 (view=1)
+[2m2026-09-25T06:58:40.855703Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Timeout on block 75a28f3c5b5b — proposed view-change to view 1 (applied=true)
+[2m2026-09-25T06:58:40.855706Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] ViewChange quorum reached (1/1) for view=2 — executing view-change
+[2m2026-09-25T06:58:40.855708Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] VIEW-CHANGE #2 (view=2)
+[2m2026-09-25T06:58:40.855710Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Timeout on block 1291a90764b6 — proposed view-change to view 2 (applied=true)
+[2m2026-09-25T06:58:40.855713Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] ViewChange quorum reached (1/1) for view=2 — executing view-change
+[2m2026-09-25T06:58:40.855715Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] VIEW-CHANGE #2 (view=2)
+[2m2026-09-25T06:58:40.855716Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Timeout on block 9e8120859f55 — proposed view-change to view 2 (applied=true)
+[2m2026-09-25T06:58:40.856262Z[0m [32m INFO[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] PRE-PREPARE: block a2e0fcf72d12 from validator-2
+[2m2026-09-25T06:58:40.856384Z[0m [32m INFO[0m [2mcreg_node::block_producer[0m[2m:[0m [PBFT] Proposer created block a2e0fcf72d12 at height 2 (1 tx) — starting round
+[2m2026-09-25T06:58:40.856449Z[0m [33m WARN[0m [2mlibp2p_gossipsub::behaviour[0m[2m:[0m Not publishing a message that has already been published 3132353630333830333939343434373932393136
+[2m2026-09-25T06:58:45.855841Z[0m [32m INFO[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Cleaned up 1 stale rounds
+[2m2026-09-25T06:58:45.855882Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] ViewChange quorum reached (1/1) for view=1 — executing view-change
+[2m2026-09-25T06:58:45.855890Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] VIEW-CHANGE #1 (view=1)
+[2m2026-09-25T06:58:45.855893Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Timeout on block 57876dc9d61d — proposed view-change to view 1 (applied=true)
+[2m2026-09-25T06:58:45.855897Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] ViewChange quorum reached (1/1) for view=4 — executing view-change
+[2m2026-09-25T06:58:45.855900Z[0m [31mERROR[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Round 42c4af8ada5e abandoned: View-change limit (3) exhausted — round abandoned
+[2m2026-09-25T06:58:45.855905Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] ViewChange quorum reached (1/1) for view=2 — executing view-change
+[2m2026-09-25T06:58:45.855908Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] VIEW-CHANGE #2 (view=2)
+[2m2026-09-25T06:58:45.855910Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Timeout on block e983d0ef5b66 — proposed view-change to view 2 (applied=true)
+[2m2026-09-25T06:58:45.855915Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] ViewChange quorum reached (1/1) for view=3 — executing view-change
+[2m2026-09-25T06:58:45.855919Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] VIEW-CHANGE #3 (view=3)
+[2m2026-09-25T06:58:45.855922Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Timeout on block bef97072da7d — proposed view-change to view 3 (applied=true)
+[2m2026-09-25T06:58:45.855927Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] ViewChange quorum reached (1/1) for view=3 — executing view-change
+[2m2026-09-25T06:58:45.855929Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] VIEW-CHANGE #3 (view=3)
+[2m2026-09-25T06:58:45.855932Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Timeout on block a94e3dfe2e97 — proposed view-change to view 3 (applied=true)
+[2m2026-09-25T06:58:45.855938Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] ViewChange quorum reached (1/1) for view=4 — executing view-change
+[2m2026-09-25T06:58:45.855941Z[0m [31mERROR[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Round 580d4d3334df abandoned: View-change limit (3) exhausted — round abandoned
+[2m2026-09-25T06:58:45.856431Z[0m [33m WARN[0m [2mlibp2p_gossipsub::behaviour[0m[2m:[0m Not publishing a message that has already been published 3132353630333830333939343434373932393136
+[2m2026-09-25T06:58:45.856575Z[0m [32m INFO[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] PRE-PREPARE: block 7cde023e5e1e from validator-2
+[2m2026-09-25T06:58:45.856740Z[0m [32m INFO[0m [2mcreg_node::block_producer[0m[2m:[0m [PBFT] Proposer created block 7cde023e5e1e at height 2 (1 tx) — starting round
+[2m2026-09-25T06:58:50.855612Z[0m [32m INFO[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Cleaned up 2 stale rounds
+[2m2026-09-25T06:58:50.855653Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] ViewChange quorum reached (1/1) for view=1 — executing view-change
+[2m2026-09-25T06:58:50.855660Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] VIEW-CHANGE #1 (view=1)
+[2m2026-09-25T06:58:50.855662Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Timeout on block 501718ccfb8b — proposed view-change to view 1 (applied=true)
+[2m2026-09-25T06:58:50.856170Z[0m [32m INFO[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] PRE-PREPARE: block d686f43e4546 from validator-2
+[2m2026-09-25T06:58:50.856300Z[0m [32m INFO[0m [2mcreg_node::block_producer[0m[2m:[0m [PBFT] Proposer created block d686f43e4546 at height 2 (1 tx) — starting round
+[2m2026-09-25T06:58:50.856369Z[0m [33m WARN[0m [2mlibp2p_gossipsub::behaviour[0m[2m:[0m Not publishing a message that has already been published 3132353630333830333939343434373932393136
+[2m2026-09-25T06:58:55.854778Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] ViewChange quorum reached (1/1) for view=2 — executing view-change
+[2m2026-09-25T06:58:55.854806Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] VIEW-CHANGE #2 (view=2)
+[2m2026-09-25T06:58:55.854811Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Timeout on block f23a4a0903eb — proposed view-change to view 2 (applied=true)
+[2m2026-09-25T06:58:55.854821Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] ViewChange quorum reached (1/1) for view=4 — executing view-change
+[2m2026-09-25T06:58:55.854826Z[0m [31mERROR[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Round 2e28db36024e abandoned: View-change limit (3) exhausted — round abandoned
+[2m2026-09-25T06:58:55.854834Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] ViewChange quorum reached (1/1) for view=1 — executing view-change
+[2m2026-09-25T06:58:55.854837Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] VIEW-CHANGE #1 (view=1)
+[2m2026-09-25T06:58:55.854839Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Timeout on block 7e2f373d4fc2 — proposed view-change to view 1 (applied=true)
+[2m2026-09-25T06:58:55.854844Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] ViewChange quorum reached (1/1) for view=3 — executing view-change
+[2m2026-09-25T06:58:55.854846Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] VIEW-CHANGE #3 (view=3)
+[2m2026-09-25T06:58:55.854848Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Timeout on block b4a43d1a9316 — proposed view-change to view 3 (applied=true)
+[2m2026-09-25T06:58:55.855699Z[0m [32m INFO[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] PRE-PREPARE: block c55bc54acf9c from validator-2
+[2m2026-09-25T06:58:55.855852Z[0m [32m INFO[0m [2mcreg_node::block_producer[0m[2m:[0m [PBFT] Proposer created block c55bc54acf9c at height 2 (1 tx) — starting round
+[2m2026-09-25T06:58:55.855951Z[0m [33m WARN[0m [2mlibp2p_gossipsub::behaviour[0m[2m:[0m Not publishing a message that has already been published 3132353630333830333939343434373932393136
+[2m2026-09-25T06:59:00.854141Z[0m [32m INFO[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Cleaned up 1 stale rounds
+[2m2026-09-25T06:59:00.854226Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] ViewChange quorum reached (1/1) for view=1 — executing view-change
+[2m2026-09-25T06:59:00.854236Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] VIEW-CHANGE #1 (view=1)
+[2m2026-09-25T06:59:00.854242Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Timeout on block 5f50b508b320 — proposed view-change to view 1 (applied=true)
+[2m2026-09-25T06:59:00.854249Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] ViewChange quorum reached (1/1) for view=2 — executing view-change
+[2m2026-09-25T06:59:00.854252Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] VIEW-CHANGE #2 (view=2)
+[2m2026-09-25T06:59:00.854255Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Timeout on block 834f622710e0 — proposed view-change to view 2 (applied=true)
+[2m2026-09-25T06:59:00.854261Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] ViewChange quorum reached (1/1) for view=4 — executing view-change
+[2m2026-09-25T06:59:00.854267Z[0m [31mERROR[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Round cdceef5b191e abandoned: View-change limit (3) exhausted — round abandoned
+[2m2026-09-25T06:59:00.854279Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] ViewChange quorum reached (1/1) for view=2 — executing view-change
+[2m2026-09-25T06:59:00.854281Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] VIEW-CHANGE #2 (view=2)
+[2m2026-09-25T06:59:00.854283Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Timeout on block 2416f664ffe2 — proposed view-change to view 2 (applied=true)
+[2m2026-09-25T06:59:00.854290Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] ViewChange quorum reached (1/1) for view=3 — executing view-change
+[2m2026-09-25T06:59:00.854293Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] VIEW-CHANGE #3 (view=3)
+[2m2026-09-25T06:59:00.854297Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Timeout on block 55767500770c — proposed view-change to view 3 (applied=true)
+[2m2026-09-25T06:59:00.855622Z[0m [32m INFO[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] PRE-PREPARE: block d47c8712fe1e from validator-2
+[2m2026-09-25T06:59:00.855725Z[0m [32m INFO[0m [2mcreg_node::block_producer[0m[2m:[0m [PBFT] Proposer created block d47c8712fe1e at height 2 (1 tx) — starting round
+[2m2026-09-25T06:59:00.855780Z[0m [33m WARN[0m [2mlibp2p_gossipsub::behaviour[0m[2m:[0m Not publishing a message that has already been published 3132353630333830333939343434373932393136
+[2m2026-09-25T06:59:05.853011Z[0m [32m INFO[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Cleaned up 1 stale rounds
+[2m2026-09-25T06:59:05.853071Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] ViewChange quorum reached (1/1) for view=1 — executing view-change
+[2m2026-09-25T06:59:05.853078Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] VIEW-CHANGE #1 (view=1)
+[2m2026-09-25T06:59:05.853081Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Timeout on block c4cc63482285 — proposed view-change to view 1 (applied=true)
+[2m2026-09-25T06:59:05.853656Z[0m [33m WARN[0m [2mlibp2p_gossipsub::behaviour[0m[2m:[0m Not publishing a message that has already been published 3132353630333830333939343434373932393136
+[2m2026-09-25T06:59:05.853724Z[0m [32m INFO[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] PRE-PREPARE: block 399272ea0b9a from validator-2
+[2m2026-09-25T06:59:05.853850Z[0m [32m INFO[0m [2mcreg_node::block_producer[0m[2m:[0m [PBFT] Proposer created block 399272ea0b9a at height 2 (1 tx) — starting round
+[2m2026-09-25T06:59:10.853907Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] ViewChange quorum reached (1/1) for view=4 — executing view-change
+[2m2026-09-25T06:59:10.853945Z[0m [31mERROR[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Round 6ac112586bad abandoned: View-change limit (3) exhausted — round abandoned
+[2m2026-09-25T06:59:10.854053Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] ViewChange quorum reached (1/1) for view=4 — executing view-change
+[2m2026-09-25T06:59:10.854059Z[0m [31mERROR[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Round 25774534bd0f abandoned: View-change limit (3) exhausted — round abandoned
+[2m2026-09-25T06:59:10.854064Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] ViewChange quorum reached (1/1) for view=3 — executing view-change
+[2m2026-09-25T06:59:10.854067Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] VIEW-CHANGE #3 (view=3)
+[2m2026-09-25T06:59:10.854069Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Timeout on block ae724d8bc0c4 — proposed view-change to view 3 (applied=true)
+[2m2026-09-25T06:59:10.854073Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] ViewChange quorum reached (1/1) for view=2 — executing view-change
+[2m2026-09-25T06:59:10.854075Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] VIEW-CHANGE #2 (view=2)
+[2m2026-09-25T06:59:10.854077Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Timeout on block fffb031cf713 — proposed view-change to view 2 (applied=true)
+[2m2026-09-25T06:59:10.854081Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] ViewChange quorum reached (1/1) for view=1 — executing view-change
+[2m2026-09-25T06:59:10.854083Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] VIEW-CHANGE #1 (view=1)
+[2m2026-09-25T06:59:10.854085Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Timeout on block 5668ebf7ad0c — proposed view-change to view 1 (applied=true)
+[2m2026-09-25T06:59:10.854737Z[0m [32m INFO[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] PRE-PREPARE: block 5f1f884be6b9 from validator-2
+[2m2026-09-25T06:59:10.854906Z[0m [32m INFO[0m [2mcreg_node::block_producer[0m[2m:[0m [PBFT] Proposer created block 5f1f884be6b9 at height 2 (1 tx) — starting round
+[2m2026-09-25T06:59:10.855000Z[0m [33m WARN[0m [2mlibp2p_gossipsub::behaviour[0m[2m:[0m Not publishing a message that has already been published 3132353630333830333939343434373932393136
+[2m2026-09-25T06:59:15.853128Z[0m [32m INFO[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Cleaned up 2 stale rounds
+[2m2026-09-25T06:59:15.853244Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] ViewChange quorum reached (1/1) for view=1 — executing view-change
+[2m2026-09-25T06:59:15.853257Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] VIEW-CHANGE #1 (view=1)
+[2m2026-09-25T06:59:15.853262Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Timeout on block a2e0fcf72d12 — proposed view-change to view 1 (applied=true)
+[2m2026-09-25T06:59:15.853270Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] ViewChange quorum reached (1/1) for view=4 — executing view-change
+[2m2026-09-25T06:59:15.853276Z[0m [31mERROR[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Round c1d1aa706c2f abandoned: View-change limit (3) exhausted — round abandoned
+[2m2026-09-25T06:59:15.853286Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] ViewChange quorum reached (1/1) for view=2 — executing view-change
+[2m2026-09-25T06:59:15.853290Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] VIEW-CHANGE #2 (view=2)
+[2m2026-09-25T06:59:15.853292Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Timeout on block 75a28f3c5b5b — proposed view-change to view 2 (applied=true)
+[2m2026-09-25T06:59:15.853297Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] ViewChange quorum reached (1/1) for view=3 — executing view-change
+[2m2026-09-25T06:59:15.853299Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] VIEW-CHANGE #3 (view=3)
+[2m2026-09-25T06:59:15.853301Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Timeout on block 1291a90764b6 — proposed view-change to view 3 (applied=true)
+[2m2026-09-25T06:59:15.853306Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] ViewChange quorum reached (1/1) for view=3 — executing view-change
+[2m2026-09-25T06:59:15.853309Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] VIEW-CHANGE #3 (view=3)
+[2m2026-09-25T06:59:15.853311Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Timeout on block 9e8120859f55 — proposed view-change to view 3 (applied=true)
+[2m2026-09-25T06:59:15.854143Z[0m [32m INFO[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] PRE-PREPARE: block 52df5d2fb557 from validator-2
+[2m2026-09-25T06:59:15.854278Z[0m [32m INFO[0m [2mcreg_node::block_producer[0m[2m:[0m [PBFT] Proposer created block 52df5d2fb557 at height 2 (1 tx) — starting round
+[2m2026-09-25T06:59:15.854332Z[0m [33m WARN[0m [2mlibp2p_gossipsub::behaviour[0m[2m:[0m Not publishing a message that has already been published 3132353630333830333939343434373932393136
+[2m2026-09-25T06:59:20.853859Z[0m [32m INFO[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Cleaned up 1 stale rounds
+[2m2026-09-25T06:59:20.853922Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] ViewChange quorum reached (1/1) for view=2 — executing view-change
+[2m2026-09-25T06:59:20.853928Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] VIEW-CHANGE #2 (view=2)
+[2m2026-09-25T06:59:20.853931Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Timeout on block 57876dc9d61d — proposed view-change to view 2 (applied=true)
+[2m2026-09-25T06:59:20.853938Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] ViewChange quorum reached (1/1) for view=3 — executing view-change
+[2m2026-09-25T06:59:20.853940Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] VIEW-CHANGE #3 (view=3)
+[2m2026-09-25T06:59:20.853941Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Timeout on block e983d0ef5b66 — proposed view-change to view 3 (applied=true)
+[2m2026-09-25T06:59:20.853947Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] ViewChange quorum reached (1/1) for view=4 — executing view-change
+[2m2026-09-25T06:59:20.853953Z[0m [31mERROR[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Round bef97072da7d abandoned: View-change limit (3) exhausted — round abandoned
+[2m2026-09-25T06:59:20.853960Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] ViewChange quorum reached (1/1) for view=1 — executing view-change
+[2m2026-09-25T06:59:20.853965Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] VIEW-CHANGE #1 (view=1)
+[2m2026-09-25T06:59:20.853967Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Timeout on block 7cde023e5e1e — proposed view-change to view 1 (applied=true)
+[2m2026-09-25T06:59:20.853973Z[0m [33m WARN[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] ViewChange quorum reached (1/1) for view=4 — executing view-change
+[2m2026-09-25T06:59:20.853975Z[0m [31mERROR[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] Round a94e3dfe2e97 abandoned: View-change limit (3) exhausted — round abandoned
+[2m2026-09-25T06:59:20.855337Z[0m [32m INFO[0m [2mconsensus::pbft[0m[2m:[0m [PBFT] PRE-PREPARE: block cc45f7fda0b9 from validator-2
+[2m2026-09-25T06:59:20.855440Z[0m [32m INFO[0m [2mcreg_node::block_producer[0m[2m:[0m [PBFT] Proposer created block cc45f7fda0b9 at height 2 (1 tx) — starting round
+[2m2026-09-25T06:59:20.855492Z[0m [33m WARN[0m [2mlibp2p_gossipsub::behaviour[0m[2m:[0m Not publishing a message that has already been published 3132353630333830333939343434373932393136

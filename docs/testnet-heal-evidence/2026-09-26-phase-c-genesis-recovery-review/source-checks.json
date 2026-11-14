@@ -1,0 +1,15 @@
+{
+  "timestamp_utc": "2026-09-26T06:04:47.7343324Z",
+  "rust_parse": "passed",
+  "powershell_parse": "passed",
+  "diff_check": "passed",
+  "compilation": "passed (reviewed Linux node and CLI release image)",
+  "tests_run": false,
+  "resolver_phase_c_cargo_check": "passed (cargo check --locked --package resolver --features common/phase-c-canonical-transactions)",
+  "resolver_check_completed_utc": "2026-09-26T06:19:17.4435945Z",
+  "consensus_phase_c_cargo_check": "passed (cargo check --locked --package consensus --features common/phase-c-canonical-transactions)",
+  "consensus_check_completed_utc": "2026-09-26T06:22:34.5307404Z",
+  "final_review_revision": 2,
+  "reviewed_cli_signed_spec_validation": "passed",
+  "completed_utc": "2026-09-26T06:35:42.3728352Z"
+}

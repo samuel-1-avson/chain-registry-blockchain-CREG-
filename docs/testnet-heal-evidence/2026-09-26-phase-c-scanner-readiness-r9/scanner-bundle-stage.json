@@ -1,0 +1,108 @@
+{
+  "schema": "creg-phase-c-scanner-stage-v1",
+  "captured_at_utc": "2026-09-26T09:41:29.9806588Z",
+  "secret_manager_secret_name": "abusech-malwarebazaar-auth-key",
+  "credential_value_recorded": false,
+  "malwarebazaar_query": "get_recent selector=100",
+  "malwarebazaar_unique_sha256_records": 100,
+  "malwarebazaar_response_sha256": "59217e0f3351528410efe04580879cdb44ff2322689fb770a34b641aa4733211",
+  "threat_database_sha256": "5e3a7beac3c5b7a5d766c30ff024509bc1df23b3f7c5d74349cc54ed6bc960ef",
+  "osv_snapshot_epoch": "osv-2026-09-26-phase-c-r8",
+  "osv_snapshot_sha256": "39d74eb091cbe986073f3a711c2f25f3be6975dbb38e2083e5fe5e445e7d4ade",
+  "yara_rule_bundle_sha256": "2ec033d1446c6280f46d7d74467f78223c67c9abe45c282080db78cfe3177766",
+  "scanner_profile_digest": "648dfd39a02da6dd8c42f2342146208efeae1f435e18d2fcd71317828062fb0f",
+  "remote_asset_directory": "/var/lib/creg/phase-c-r7/scanner",
+  "staged_files_read_only": true,
+  "hosts": [
+    {
+      "verified": "local bundle hash reproduced",
+      "role": "validator",
+      "slot": "V1",
+      "host": "operator laptop",
+      "node": "validator-1"
+    },
+    {
+      "project": "gen-lang-client-0022105784",
+      "host": "creg-validator-1",
+      "role": "validator",
+      "node": "validator-2",
+      "verified": "remote asset file hashes match",
+      "zone": "us-east1-b",
+      "slot": "V2"
+    },
+    {
+      "project": "fiffi-500411",
+      "host": "creg-validator-3",
+      "role": "validator",
+      "node": "validator-3",
+      "verified": "remote asset file hashes match",
+      "zone": "europe-west1-b",
+      "slot": "V3"
+    },
+    {
+      "project": "fiffi-500411",
+      "host": "creg-validator-4",
+      "role": "validator",
+      "node": "validator-4",
+      "verified": "remote asset file hashes match",
+      "zone": "asia-southeast1-b",
+      "slot": "V4"
+    },
+    {
+      "project": "gen-lang-client-0022105784",
+      "host": "creg-testnet-vm",
+      "role": "observer",
+      "node": "observer-1",
+      "verified": "remote asset file hashes match",
+      "zone": "us-central1-b",
+      "slot": "O1"
+    },
+    {
+      "project": "gen-lang-client-0022105784",
+      "host": "creg-observer-vm",
+      "role": "observer",
+      "node": "observer-2",
+      "verified": "remote asset file hashes match",
+      "zone": "us-central1-a",
+      "slot": "O2"
+    },
+    {
+      "project": "fiffi-500411",
+      "host": "creg-observer-3",
+      "role": "observer",
+      "node": "observer-3",
+      "verified": "remote asset file hashes match",
+      "zone": "us-west1-b",
+      "slot": "O3"
+    },
+    {
+      "project": "fiffi-500411",
+      "host": "creg-observer-4",
+      "role": "observer",
+      "node": "observer-4",
+      "verified": "remote asset file hashes match",
+      "zone": "africa-south1-a",
+      "slot": "O4"
+    }
+  ],
+  "r7_spec_url": "https://spec.testnet.cregnet.dev/phase-c/r7/chain-spec.json",
+  "runtime_scanner_readiness": "passed on four validators and four observers; see fleet-runtime-readiness.json",
+  "candidate_containers_started": true,
+  "r7_spec_http_status": 200,
+  "public_chain_reset_or_cutover": false,
+  "r7_signature_matches_local": true,
+  "r7_signature_file_sha256": "76511b24146a7ea17fd039ac2996656d5ced33d6f5acc379470a92251f1ef2b6",
+  "r7_spec_chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+  "validator_signing_keys_match_r7_roster": true,
+  "r7_private_node_environments_prepared": true,
+  "r7_launch_scripts_added": true,
+  "r7_signature_http_status": 200,
+  "r7_spec_genesis_hash": "0x1852b9a86dd3b53e7b2de4a774723a4fe48e862f9c61d14e5917b42b21055234",
+  "r7_spec_file_sha256": "331897f5a3f89fe902e4a7d814a9245ef50b384e22cc3d8dc946b4b45ed39e9f",
+  "r7_p2p_identities_match_preserved_r4": true,
+  "r7_bootnode_identities_match_signed_spec": true,
+  "r9_image_distributed_to_seven_gcp_hosts": true,
+  "r9_image_index_digest": "sha256:cf9fda37887e0d8c6125280c07bdb36737e495e75d070b80abcc722187180d33",
+  "r9_image_config_digest": "sha256:e25b3470e0372b22c5bb98a91cb40a9449051d51cddd366ff8f957cd983f447b",
+  "r9_image_archive_gzip_sha256": "eb3c72394ae8c0ac8f59872dd85bb8bed80b4487a72b0f95024677d9d8a2ac95"
+}

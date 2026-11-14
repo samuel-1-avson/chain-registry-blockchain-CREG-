@@ -1,0 +1,22 @@
+============================================================
+   Chain Registry (CREG) -- Windows Remote Installer        
+============================================================
+Fetching CREG v0.1.0-testnet-r25 for Windows (x86_64)...
+Connecting to CREG Testnet CDN (https://spec.testnet.cregnet.dev/phase-c/r7/release-r25/dist/chain-registry-v0.1.0-testnet-r25-windows-amd64.zip)...
+[OK] Downloaded package from CREG Testnet CDN
+[OK] SHA-256 integrity verified: 7b990d8db846fdfc9380fe262a0cffd0d5624ca8ee1455531807d43265419bd4
+Extracting binaries to E:\creg-phase-c-build-20260927\cli-r25-installer-check/bin ...
+Syncing testnet chain specification...
+
+✗ Error: signed consensus encoding Some("creg-sorted-json-v1") does not match this build None
+
+Need help?
+  • Run the setup wizard: creg init
+  • Check system health: creg doctor
+  • View documentation: https://docs.creg.dev
+  • Get command help: creg --help
+Exception: C:\Users\samue\OneDrive\Desktop\projects\chain-registry-blockchain-CREG-\chain-registry\scripts\install-creg.ps1:179
+Line |
+ 179 |  … DE -ne 0) { throw 'Signed chain-spec verification failed; installatio …
+     |                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     | Signed chain-spec verification failed; installation is not configured.

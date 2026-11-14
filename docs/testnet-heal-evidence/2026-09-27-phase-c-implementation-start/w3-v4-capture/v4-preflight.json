@@ -1,0 +1,184 @@
+{
+  "schema": "creg-r22-v4-w3-readiness-inventory-v1",
+  "captured_at_utc": "2026-09-27T07:10:23.85575+00:00",
+  "slot": "v4",
+  "node_name": "creg-validator-4",
+  "project": "fiffi-500411",
+  "zone": "asia-southeast1-b",
+  "container_name": "creg-phase-c-r7-v4",
+  "container_id": "c7c86f3c75c9bf92160d62dcd593774def7ceb68db6d20cc63eddc92bc3a01a9",
+  "container_running": true,
+  "restart_count": 0,
+  "restart_policy": "unless-stopped",
+  "image_id": "sha256:8731cc85c73e6267e2e00014e8df50aef3f4d60ce6cfcaddb8fd0a3584eb2ad9",
+  "configured_image": "creg-node:phase-c-secure-r22-commit-capture",
+  "repo_digests": [
+    "us-central1-docker.pkg.dev/gen-lang-client-0022105784/creg-testnet/creg-node@sha256:2b472a089fe6ac651edfbae51b616456ed335f35992c0374f10c1ea80ce6caa3"
+  ],
+  "mounts": [
+    {
+      "source": "/var/run/docker.sock",
+      "destination": "/var/run/docker.sock",
+      "rw": true
+    },
+    {
+      "source": "/var/lib/creg/phase-c-r7/data",
+      "destination": "/data",
+      "rw": true
+    },
+    {
+      "source": "/var/lib/creg/phase-c-r7/scanner-r11-osv-kleur",
+      "destination": "/scanner",
+      "rw": false
+    }
+  ],
+  "selected_environment": {
+    "CREG_NODE_ID": "validator-4",
+    "CREG_NODE_ROLE": "validator",
+    "CREG_CHAIN_ID": "creg-phase-c-testnet-2026-09-26-r7",
+    "CREG_GENESIS_HASH": "0x1852b9a86dd3b53e7b2de4a774723a4fe48e862f9c61d14e5917b42b21055234",
+    "CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM": "false",
+    "CREG_SCANNER_PROFILE_DIGEST": "f397fac29df29438f0ee15580547def5fe66a03af60153d22993f4a7af9fce8c"
+  },
+  "node_env_sha256": "c37b9d363172638aa18271df57ead06caff2f82abc2ae6e64e573bfdb88be8ae",
+  "chain_store_present": true,
+  "signer_journal_present": true,
+  "p2p_identity_present": true,
+  "health": {
+    "status": "ok",
+    "node_id": "validator-4",
+    "is_validator": true,
+    "version": "0.1.0",
+    "validator_set_sync": {
+      "enabled": true,
+      "mode": "chain-authoritative",
+      "state": "synced",
+      "last_finalized_source_block": 11791744,
+      "cursor_block": 11791744,
+      "cursor_log_index": 4294967295,
+      "cursor_block_hash": "0x571993e26037893da6576665c7f9cc65e420d37f060bf67413a175185a59d22e",
+      "last_poll_at": "2026-09-27T07:10:18.688368538+00:00",
+      "last_error": null
+    },
+    "sandbox": {
+      "engine": "nsjail",
+      "dev_bypass": false,
+      "isolated": true,
+      "degraded": false,
+      "note": "kernel namespaces + seccomp-BPF (primary engine)"
+    },
+    "sync": {
+      "lag_blocks": 0,
+      "max_peer_tip": 13,
+      "healthy": true
+    }
+  },
+  "stats": {
+    "tip_height": 13,
+    "tip_hash": "8448cce76d7258f051cf9632d2ef7181da1321f5d19a3b5d00f00f8975aa2993",
+    "package_count": 5,
+    "block_count": 14,
+    "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+    "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+    "spec_signature_verified": true,
+    "l1_rpc_configured": true,
+    "is_validator": true,
+    "validator_count": 4,
+    "active_validators": 4,
+    "total_stake": 400,
+    "total_stake_native": "400",
+    "peer_count": 2,
+    "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+    "l1_block": 0,
+    "pending_tx_count": 0,
+    "publisher_count": 1,
+    "finalized_height": 13,
+    "finalization_lag": 0,
+    "finalization_source": "creg-canonical-store",
+    "validator_set_source": "chain-authoritative",
+    "validator_set_sync_state": "synced",
+    "validator_set_last_finalized_source_block": 11791744
+  },
+  "pbft": {
+    "active_round_count": 0,
+    "max_non_terminal_phase_age_seconds": 0.0,
+    "rounds": []
+  },
+  "package": {
+    "canonical": "npm:kleur@4.1.5",
+    "status": "verified",
+    "evidence_phase": "quorum-reached",
+    "block_phase": "committed",
+    "chain_status": "verified",
+    "block_hash": "8448cce76d7258f051cf9632d2ef7181da1321f5d19a3b5d00f00f8975aa2993",
+    "content_hash": "0d99562acf82fca4afce2a57b687289a524ac6755dcaf1fdf82a147473091469",
+    "ipfs_cid": "QmSEhmMVab63QT8AhTvqwXozKEj3PkQG5vE95nzs8PAju8",
+    "publisher": "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d",
+    "published_at": "2026-09-27T06:49:08.491685688+00:00",
+    "revocation_reason": null,
+    "analysis_bundles": {
+      "policy_bundle_id": "policy-v1",
+      "feature_schema_id": "features-v1",
+      "expert_bundle_id": "experts-v1",
+      "embedding_model_id": "embeddings-v1",
+      "index_epoch": "index-epoch-0",
+      "threshold_profile_id": "thresholds-v1",
+      "llm_prompt_profile_id": "llm-prompt-v1",
+      "osv_snapshot_epoch": "osv-2026-09-27-phase-c-kleur-r11"
+    },
+    "evidence_digest": "93d2cd8d38228ec0b2b02bbbfe5d5e320b2f5cbe19a461f344adf1eb34af6db2",
+    "deterministic_risk": {
+      "score": 55,
+      "deterministic_score": 26,
+      "advisory_score": 0,
+      "band": "elevated",
+      "disposition": "review",
+      "deterministic_findings": 5,
+      "advisory_findings": 1,
+      "critical_findings": 0,
+      "high_findings": 0,
+      "medium_findings": 1,
+      "low_findings": 4,
+      "reasons": [
+        "[DS001] AI Deep Scan: Suspicious",
+        "[SA005] Reads environment variables (potential credential harvesting)",
+        "[SA005] Reads environment variables (potential credential harvesting)",
+        "[SA005] Reads environment variables (potential credential harvesting)",
+        "[SA005] Reads environment variables (potential credential harvesting)",
+        "Publisher reputation delta -100 increases deterministic risk"
+      ]
+    },
+    "analysis_committee": {
+      "size": 4,
+      "members": [
+        {
+          "id": "validator-1",
+          "performance_score_at_finalization": 465
+        },
+        {
+          "id": "validator-4",
+          "performance_score_at_finalization": 500
+        },
+        {
+          "id": "validator-2",
+          "performance_score_at_finalization": 465
+        },
+        {
+          "id": "validator-3",
+          "performance_score_at_finalization": 465
+        }
+      ],
+      "seed": "36386531663863336263396433333064343336383862643937303833623035366339373230393335346231643836346436616632653463356131336635363133",
+      "effective_size": 4,
+      "performance_bias": true,
+      "member_performance_at_finalization": {
+        "validator-2": 465,
+        "validator-1": 465,
+        "validator-4": 500,
+        "validator-3": 465
+      }
+    }
+  },
+  "container_binary_version_output": "creg-node 0.1.0",
+  "commit_capture_arm_unset": true
+}

@@ -1,0 +1,43 @@
+{
+  "id": {
+    "ecosystem": "npm",
+    "name": "escape-string-regexp",
+    "version": "5.0.0"
+  },
+  "content_hash": "c8b662afe8aa2b852ecc27d766e584a502f8351fbbd890611f2509bf083d28e6",
+  "ipfs_cid": "QmPd9113MRYJUsTTrWXMdawzBPU12fD1yU1Rcte7nk33Wc",
+  "publisher_address": "0xa40d79527314efd4964d49c4a0673c87b612348b",
+  "publisher_pubkey": "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d",
+  "signature": "",
+  "manifest": {
+    "allowed_network_hosts": [],
+    "allowed_fs_writes": [],
+    "spawns_processes": false,
+    "allowed_process_spawns": [],
+    "description": "Benign live Phase C package"
+  },
+  "submitted_at": "2026-09-28T00:19:52Z",
+  "shielded": false,
+  "key_bundle": null,
+  "pgp_signature": null,
+  "pgp_public_key": null,
+  "threshold": 1,
+  "publisher_pubkeys": [
+    "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d"
+  ],
+  "signatures": [
+    "c5c27c0a0c37c3a5cf5e341bdd163431a263080a3861d9d153962ead0d2708544125874fc3e2157bdc72d510f1a966f51931da10076a7e4978c1e059cf39170c"
+  ],
+  "publisher_evm_signature": "721c2ecf766275005ab98003776583fb079ece1af365d6fb4da78a319f5df6da00ccf10bb25eea721ed57a446a8c43ee5150e499d77ca0224616d63a827e79661c",
+  "publisher_nonce": "237e065b280dbfefbcd2c0c34901af3b",
+  "publisher_expires_at": 1790558392,
+  "source_hash": "c8b662afe8aa2b852ecc27d766e584a502f8351fbbd890611f2509bf083d28e6",
+  "manifest_hash": "f9caf7705678fa2561edeb7d8c10e59b16013a3b54fb6db99524344432d1444b",
+  "ownership_claim": "npm:escape-string-regexp",
+  "publisher_chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+  "publisher_genesis_hash": "1852b9a86dd3b53e7b2de4a774723a4fe48e862f9c61d14e5917b42b21055234",
+  "publisher_staking_contract": "0x61c00ebe7c46f0bce63942f7e15bcc434dfc9b7c",
+  "publisher_authorization_version": 4,
+  "ownership_proof": null,
+  "namespace_authority_certificate": null
+}

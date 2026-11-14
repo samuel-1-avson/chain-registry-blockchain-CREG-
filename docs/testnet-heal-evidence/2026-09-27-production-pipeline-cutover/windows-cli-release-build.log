@@ -1,0 +1,10 @@
+   Compiling common v0.1.0 (C:\Users\samue\OneDrive\Desktop\projects\chain-registry-blockchain-CREG-\chain-registry\crates\common)
+   Compiling ml-validator v0.1.0 (C:\Users\samue\OneDrive\Desktop\projects\chain-registry-blockchain-CREG-\chain-registry\crates\ml-validator)
+   Compiling wasm-sandbox v0.1.0 (C:\Users\samue\OneDrive\Desktop\projects\chain-registry-blockchain-CREG-\chain-registry\crates\wasm-sandbox)
+   Compiling resolver v0.1.0 (C:\Users\samue\OneDrive\Desktop\projects\chain-registry-blockchain-CREG-\chain-registry\crates\resolver)
+   Compiling zk-validator v0.1.0 (C:\Users\samue\OneDrive\Desktop\projects\chain-registry-blockchain-CREG-\chain-registry\crates\zk-validator)
+   Compiling validator v0.1.0 (C:\Users\samue\OneDrive\Desktop\projects\chain-registry-blockchain-CREG-\chain-registry\crates\validator)
+   Compiling cross-chain v0.1.0 (C:\Users\samue\OneDrive\Desktop\projects\chain-registry-blockchain-CREG-\chain-registry\crates\cross-chain)
+   Compiling consensus v0.1.0 (C:\Users\samue\OneDrive\Desktop\projects\chain-registry-blockchain-CREG-\chain-registry\crates\consensus)
+   Compiling chain-registry-cli v0.1.0 (C:\Users\samue\OneDrive\Desktop\projects\chain-registry-blockchain-CREG-\chain-registry\crates\cli)
+    Finished `release` profile [optimized] target(s) in 6m 06s

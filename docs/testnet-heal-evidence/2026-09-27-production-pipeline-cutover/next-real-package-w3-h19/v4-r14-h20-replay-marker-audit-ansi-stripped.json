@@ -1,0 +1,15 @@
+{
+  "schema": "creg-v4-local-commit-replay-audit-v1",
+  "captured_at_utc": "2026-09-28T09:49:39.7146341Z",
+  "source_log": "v4-r14-h20-restart-window.log",
+  "expected_height": 20,
+  "expected_block_hash": "730b01c1a67a4796a16f599169e4ebf77e01d2e8ce92d1e4fb3715a7c4354285",
+  "durable_commit_marker_found": true,
+  "durable_commit_line": "2026-09-28T09:15:30.276707071Z 2026-09-28T09:15:30.276500Z  WARN creg_node: Recovered durable local PBFT COMMIT before P2P and sync services start event=\"pbft_local_commit_recovered\" validator_id=validator-4 chain_id=creg-phase-c-testnet-2026-09-26-r7 genesis_hash=1852b9a86dd3b53e7b2de4a774723a4fe48e862f9c61d14e5917b42b21055234 height=20 parent_hash=e31b9e7440523d31a66b468e53115ec7cfbbd370e42dd8b1d9439d9a50eeea8b block_hash=730b01c1a67a4796a16f599169e4ebf77e01d2e8ce92d1e4fb3715a7c4354285",
+  "first_p2p_listener_line": "2026-09-28T09:15:30.449803167Z 2026-09-28T09:15:30.449674Z  INFO creg_node::p2p: P2P node listening on /ip4/127.0.0.1/tcp/9000",
+  "peer_sync_line": "2026-09-28T09:16:19.226581312Z 2026-09-28T09:16:19.225962Z  INFO creg_node::sync: Chain sync: our height=19 peer height=20 — fetching 1 blocks",
+  "canonical_block_insert_line": "2026-09-28T09:16:19.451817373Z 2026-09-28T09:16:19.451618Z  INFO creg_node::chain_store: Block 730b01c1a67a inserted (height 20)",
+  "durable_commit_precedes_p2p": true,
+  "durable_commit_precedes_peer_sync": true,
+  "verdict": "passed"
+}

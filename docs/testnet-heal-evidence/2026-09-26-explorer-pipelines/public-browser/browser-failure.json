@@ -1,0 +1,97 @@
+{
+  "error": "The expression evaluated to a falsy value:\n\n  assert.ok(records[0].subscriptions.includes('block_produced'))\n",
+  "records": [
+    {
+      "route": "/",
+      "main": "CHAIN HEIGHT\n0\ngenesis 068364cf77…\nFINALIZED\n—\nVALIDATORS\n2\n2 active\nTOTAL STAKE\n0.0000\nCREG\nPACKAGES\n0\nPENDING TXS\n4\nLatest blocks\nView all →\nHEIGHT\tHASH\tTXS\tPRODUCER\tAGE\n#0\t\n068364…296b53\n⧉\n\t0\t\ngenesis\n⧉\n\t999d ago\nLive events\nOpen feed →\nALL\nBLOCK\nTX\nVOTE\nBRIDGE\nPACKAGE\n\nWaiting for events…\n\nRECENT PACKAGES\nView all →\n\nNo packages yet.\n\nBRIDGE STATUS\nL1 chain\n—\nLast anchor\n—\nBridge signer\n—\nSync status\nLEGACY CHECKPOINTING DISABLED BY PHASE 0 SAFETY FREEZE\nRUNTIME\n\nLoading…",
+      "subscriptions": []
+    },
+    {
+      "route": "/blocks",
+      "main": "Blocks\ntip: #0\nshowing 1\n● Live\nHEIGHT\tHASH\tTXS\tPRODUCER\tSTATUS\tAGE\n#0\t\n068364cf…296b53\n⧉\n\t0\t\ngenesis\n⧉\n\tFINALIZED\t999d ago\n← Newer blocks\nOlder blocks →",
+      "subscriptions": [
+        "package_submitted",
+        "package_verified",
+        "package_rejected",
+        "package_revoked",
+        "block_produced",
+        "validator_voted"
+      ]
+    },
+    {
+      "route": "/block/0",
+      "main": "Block #0\nFINALIZED\n🔗\nShare\n← Prev\nNext →\n\nKeyboard: ← previous · → next\n\nHASH\n068364cf778ede5a0b1c814c59b0314f9a8598a959fa5a8e08ea78bc1b296b53\n⧉\nPREVIOUS\n0000000000000000000000000000000000000000000000000000000000000000\n⧉\nTIMESTAMP\n2024-01-01T00:00:00Z 999d ago\nPRODUCER\ngenesis\n⧉\nTX COUNT\n0\nSIZE\n—\nConsensus\nVOTES\n0\nQUORUM\n—\nSTATUS\nFinalized\nRaw JSON",
+      "subscriptions": []
+    },
+    {
+      "route": "/validators",
+      "main": "Validators\n2 total\nADDRESS\tALIAS\tSTAKE\tSTATUS\tNODE\n\nvalidator-1\n⧉\n\tGenesis validator-1 (us-east1-b)\t100 CREG\tACTIVE\t\nvalidator-1\n\n\nvalidator-2\n⧉\n\tGenesis validator-2 (local)\t100 CREG\tACTIVE\t\nvalidator-2",
+      "subscriptions": [
+        "package_submitted",
+        "package_verified",
+        "package_rejected",
+        "package_revoked",
+        "block_produced",
+        "validator_voted"
+      ]
+    },
+    {
+      "route": "/validator/validator-1",
+      "main": "validator-1\n\nValidator profile · full activity →\n\n🔗\nShare\nACTIVE IN SET\nPerformance\nBLOCKS PROPOSED\n0\nin scan window\nSTAKE\n100 CREG\nREPUTATION\n100\nSTATUS\nonline\nUptime & proposals\nPROPOSALS SCANNED\n0\nVOTES OBSERVED\n0\nBLOCKS SCANNED\n0\nSLASHING EVENTS\n0\nIdentity\nALIAS\n—\nRecent proposals\n0\nHEIGHT\tHASH\tTXS\tAGE\nNo recent proposals in the scan window.",
+      "subscriptions": []
+    },
+    {
+      "route": "/consensus",
+      "main": "PBFT consensus\nVALIDATORS2/2 online\nQUORUM2 of 2\nACTIVE ROUNDS0\nPENDING POOL4\nNo active rounds\n\nNo PBFT rounds in flight — chain is at tip.",
+      "subscriptions": []
+    },
+    {
+      "route": "/network",
+      "main": "Network\nPEERS\n1\nLISTEN ADDR\n—\nPUBKEY\n—\nNode list unavailable\nNetwork topology requires operator credentials on this node.\nEndpoint: /v1/operator/nodes (401)",
+      "subscriptions": []
+    },
+    {
+      "route": "/pending",
+      "main": "Pending pool\n4 WAITING\nPending pool unavailable\nPending pool data requires operator credentials on this node.\nEndpoint: /v1/operator/pending (401)",
+      "subscriptions": []
+    },
+    {
+      "route": "/metrics",
+      "main": "Metrics\n\nLive chain observations collected in this browser session — 1 samples\n\n5m\n30m\n1h\n6h\n24h\n🔗\nShare\nCHAIN HEIGHT\n0\nVALIDATORS\n2 / 2\nPACKAGES\n0\nPENDING TXS\n4\nFINALIZATION LAG\n— blocks\nPUBLISHERS\n0\n\n📊 Collecting data… Charts will appear after a few polling cycles (~15 seconds).",
+      "subscriptions": [
+        "package_submitted",
+        "package_verified",
+        "package_rejected",
+        "package_revoked",
+        "block_produced",
+        "validator_voted"
+      ]
+    },
+    {
+      "route": "/bridge",
+      "main": "L1 Checkpoint Anchoring\nUNKNOWN\nDISABLED\n🔗\nShare\n\nVerified L2 batches are anchored to Ethereum as checkpoint attestations signed by the bridge operator and approved by governance. State roots are computed off-chain by PBFT validators — anchors are not validity proofs.\n\nHEALTH\nDegraded\nSYNC STATUS\nLegacy checkpointing disabled by Phase 0 safety freeze\nLAST ANCHOR\n—\nL1 CHAIN\n—\nCOMMIT CADENCE\n—\nAnchor configuration\nREGISTRY CONTRACT\n0xD0F465ca185a99E268be0C4FF5A135Bdf89FAF3B\n⧉\nSIGNER ADDRESS\n—\nCURRENT STATE ROOT\n—\nLAST ANCHOR L1 TX\n—\nLAST ANCHOR BLOCK\n0\nFINALIZED L1 BLOCK\n—\nANCHORS RECORDED\n0\nAnchor history\n0 commits\nNo anchor history\n\nThe bridge hasn't committed any state to L1 yet.",
+      "subscriptions": []
+    },
+    {
+      "route": "/events",
+      "main": "Live events\n0 of 0\n🔗\nShare\nAll types (0)\n⏸ Pause\n↕ Auto-scroll\n≡ Compact\n⇩ Export\nNo events match\n\nRelax the filter or wait for the next event.\n\nLIVE Buffer: 0 events\nShowing: 0 / 0",
+      "subscriptions": []
+    },
+    {
+      "route": "/richlist",
+      "main": "💰\nRich List\nTop Accounts by Stake (2)\nRANK\tADDRESS\tALIAS\tSTATUS\tSTAKE (CREG)\t% SHARE\n1\t\nvalidator-1\n⧉\n\tGenesis validator-1 (us-east1-b)\tONLINE\t100\t50.00%\n2\t\nvalidator-2\n⧉\n\tGenesis validator-2 (local)\tONLINE\t100\t50.00%",
+      "subscriptions": []
+    },
+    {
+      "route": "/reorgs",
+      "main": "🔀\nChain Reorganizations\nTotal forks detected: 0\nNo chain reorganizations detected\n\nNo chain reorganizations detected on this node yet.",
+      "subscriptions": []
+    },
+    {
+      "route": "/proof",
+      "main": "Proof verifier\n\nVerify Merkle inclusion proofs for on-chain packages — light-client compatible.\n\n🔗\nShare\nFetch proof by package\n⇩ Fetch proof\nOr paste proof JSON\nHow it works\n\nEvery package published to the Chain Registry is committed into a Merkle tree. The root hash of this tree is anchored to L1 via the bridge, creating an immutable proof of inclusion.\n\nEnter a package canonical (e.g., npm/express@4.18.0) above\nThe verifier fetches the Merkle proof from the node\nRecompute hashes along the proof path using each proof.path[].is_right direction bit\nCompare the recomputed root against proof.expected_root and block_header.merkle_root\n\nThis verification can be performed by any light client without downloading the full chain.",
+      "subscriptions": []
+    }
+  ],
+  "errors": []
+}

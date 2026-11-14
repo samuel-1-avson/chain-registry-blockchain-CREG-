@@ -1,0 +1,5 @@
+error: unrecognized subcommand 'package'
+
+Usage: creg.exe [OPTIONS] <COMMAND>
+
+For more information, try '--help'.

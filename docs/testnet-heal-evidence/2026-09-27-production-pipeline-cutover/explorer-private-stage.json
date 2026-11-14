@@ -1,0 +1,82 @@
+{
+  "timestamp_utc": "2026-09-27T20:12:20Z",
+  "status": "private_candidate_verified",
+  "public_cutover": false,
+  "stats": {
+    "tip_height": 14,
+    "tip_hash": "2ece0610b4b808ee5382704b702917dd6f2f3f75d6eeb2a8585aaa9e270507aa",
+    "package_count": 5,
+    "block_count": 15,
+    "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+    "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+    "spec_signature_verified": true,
+    "l1_rpc_configured": true,
+    "is_validator": false,
+    "validator_count": 4,
+    "active_validators": 4,
+    "total_stake": 400,
+    "total_stake_native": "400",
+    "peer_count": 2,
+    "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+    "l1_block": 0,
+    "pending_tx_count": 0,
+    "publisher_count": 1,
+    "finalized_height": 14,
+    "finalization_lag": 0,
+    "finalization_source": "creg-canonical-store",
+    "validator_set_source": "chain-authoritative",
+    "validator_set_sync_state": "synced",
+    "validator_set_last_finalized_source_block": 11795641
+  },
+  "history": {
+    "status": "ready",
+    "collector": "prometheus",
+    "range": "30m",
+    "step_seconds": 30,
+    "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+    "network_genesis_hash": "1852b9a86dd3b53e7b2de4a774723a4fe48e862f9c61d14e5917b42b21055234",
+    "sample_count": 61,
+    "queried_series": 7
+  },
+  "operator_without_credential": 401,
+  "tip_block": {
+    "header": {
+      "height": 14,
+      "prev_hash": "8448cce76d7258f051cf9632d2ef7181da1321f5d19a3b5d00f00f8975aa2993",
+      "merkle_root": "233bd3c24a0e037ef0ca141d59b8e49143252259a4df1e23c55cf91a7b777d4a",
+      "proposer_id": "validator-3",
+      "timestamp": "2026-09-27T07:48:37Z",
+      "validator_set_hash": "ad5c4491938c5410d22b896290f3603ccec7abf3393bd5364bcea7674c109e98",
+      "vrf_output": "8591c7271d45edf209513a65148d13fd16ff9b9fd40382d013f5d1eab73e432d",
+      "vrf_proof": "aa36b86b604500798a48cb79e786bcada29f2729095a9a3f8bdf36d6b8050138d0682f92264691498175e9140e03f0fff70d10332f67e76aa6fd9012e7750405"
+    },
+    "transactions": [
+      {
+        "type": "revoke",
+        "package_canonical": "npm:kleur@4.1.5",
+        "reason": "Phase C live revocation after shared publication",
+        "revoked_by": "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d",
+        "evidence_hash": "0d99562acf82fca4afce2a57b687289a524ac6755dcaf1fdf82a147473091469"
+      }
+    ],
+    "pbft_signatures": [
+      {
+        "validator_id": "validator-4",
+        "pubkey": "f777ca6f1dafbbeb9cbe5a258568c574e7f519a1e58da57c97d28fcf69dd35ff",
+        "signature": "3635ec1f5965798812770d5f35123ae0a00a1475ae760a2688ad8740db74162661e60ac0cde954cd92cd85043e8d8fb783f23c0acafc78268e4864346eed0e08"
+      },
+      {
+        "validator_id": "validator-1",
+        "pubkey": "cc4157c4443c9fb011df2b650f497e3eadfc1ddda6dc7f4b6732325383108ffc",
+        "signature": "2ab0578d8b2c1058d2d6acbb1fd2ee4fa1efb74c7a01a24720edf546e1d36ba222ad165a4acce134354224b9e54bebe88b19648252982718317e1662c2696501"
+      },
+      {
+        "validator_id": "validator-2",
+        "pubkey": "779c9522addbce63f78448fa83bff1e789a4a874c4db25e0f7fe00b3d0429fd9",
+        "signature": "9641781c3317bf8e13a849958339c8b2b4dd07aeff421c144e20ce3a03f0fbec3ecd2d080e1bb2149951b688e51289a8e4ebe0dae5da5c6e7538096691fb5a03"
+      }
+    ],
+    "hash": "2ece0610b4b808ee5382704b702917dd6f2f3f75d6eeb2a8585aaa9e270507aa",
+    "finalized": true
+  }
+}

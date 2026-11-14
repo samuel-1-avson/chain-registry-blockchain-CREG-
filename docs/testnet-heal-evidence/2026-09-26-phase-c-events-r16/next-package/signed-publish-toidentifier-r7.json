@@ -1,0 +1,43 @@
+{
+  "id": {
+    "ecosystem": "npm",
+    "name": "toidentifier",
+    "version": "1.0.1"
+  },
+  "content_hash": "186fcc77488de327daf911d362d4e773bab9909f1df2a5f0c20b875205b92e08",
+  "ipfs_cid": "QmYwfMkzQMonkSaCjvQkmFV3WmYH37hAUCbABbPReqz9Vh",
+  "publisher_address": "0xa40d79527314efd4964d49c4a0673c87b612348b",
+  "publisher_pubkey": "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d",
+  "signature": "",
+  "manifest": {
+    "allowed_network_hosts": [],
+    "allowed_fs_writes": [],
+    "spawns_processes": false,
+    "allowed_process_spawns": [],
+    "description": "Benign real npm package for committed event and recovery acceptance"
+  },
+  "submitted_at": "2026-09-26T19:48:03Z",
+  "shielded": false,
+  "key_bundle": null,
+  "pgp_signature": null,
+  "pgp_public_key": null,
+  "threshold": 1,
+  "publisher_pubkeys": [
+    "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d"
+  ],
+  "signatures": [
+    "ca4f0989a17929425adb9d0a80ee8326ccaf05c175ceb3a6b6dd900b5cc3930bd053e21dd1b4cc8bb9e0444eee81b008c2cb6f5a17f6bab03d3fdbb33e002507"
+  ],
+  "publisher_evm_signature": "b078bb3f7f962a9c0f88acfec664d03d2d9bfb463d41b46d3c08669502d7847b4c102ec9e206fc58738926fc9d799961929772053df801a0e2e99ba257a3349a1b",
+  "publisher_nonce": "de716abd2a3b0c6679f46ab51c918849",
+  "publisher_expires_at": 1790455683,
+  "source_hash": "186fcc77488de327daf911d362d4e773bab9909f1df2a5f0c20b875205b92e08",
+  "manifest_hash": "0e4ddf22e1980b29377e9a437c7b0d89c2ed053fcaf8599440278aac0bd93491",
+  "ownership_claim": "npm:toidentifier",
+  "publisher_chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+  "publisher_genesis_hash": "1852b9a86dd3b53e7b2de4a774723a4fe48e862f9c61d14e5917b42b21055234",
+  "publisher_staking_contract": "0x61c00ebe7c46f0bce63942f7e15bcc434dfc9b7c",
+  "publisher_authorization_version": 4,
+  "ownership_proof": null,
+  "namespace_authority_certificate": null
+}

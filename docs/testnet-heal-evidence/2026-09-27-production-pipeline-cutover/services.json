@@ -1,0 +1,390 @@
+{
+  "timestamp_utc": "2026-09-27T20:42:04Z",
+  "services": [
+    {
+      "name": "creg-unified-caddy",
+      "image": "caddy:2-alpine",
+      "image_id": "sha256:77c07d5ebfa5be9fd6c820d2094ae662c9e7eeb9bf98346b7f639900263ee2a2",
+      "status": "running",
+      "restart_count": 0,
+      "restart_policy": "unless-stopped",
+      "networks": [
+        "testnet_creg-unified-net"
+      ],
+      "ports": {
+        "2019/tcp": null,
+        "443/tcp": [
+          {
+            "HostIp": "0.0.0.0",
+            "HostPort": "443"
+          },
+          {
+            "HostIp": "::",
+            "HostPort": "443"
+          }
+        ],
+        "443/udp": null,
+        "80/tcp": [
+          {
+            "HostIp": "0.0.0.0",
+            "HostPort": "80"
+          },
+          {
+            "HostIp": "::",
+            "HostPort": "80"
+          }
+        ]
+      },
+      "mounts": [
+        {
+          "type": "bind",
+          "source": "/home/samue/creg-hosting/chain-registry-blockchain-CREG-/chain-registry/testnet/caddy/sepolia-public-rpc.caddy",
+          "destination": "/etc/caddy/sepolia-public-rpc.caddy",
+          "writable": false
+        },
+        {
+          "type": "volume",
+          "source": "/var/lib/docker/volumes/testnet_caddy-data/_data",
+          "destination": "/data",
+          "writable": true
+        },
+        {
+          "type": "volume",
+          "source": "/var/lib/docker/volumes/testnet_caddy-config/_data",
+          "destination": "/config",
+          "writable": true
+        },
+        {
+          "type": "bind",
+          "source": "/home/samue/creg-hosting/chain-registry-blockchain-CREG-/chain-registry/testnet/caddy/Caddyfile.unified",
+          "destination": "/etc/caddy/Caddyfile",
+          "writable": false
+        },
+        {
+          "type": "bind",
+          "source": "/home/samue/creg-hosting/chain-registry-blockchain-CREG-/chain-registry/testnet/caddy/waitlist.caddy",
+          "destination": "/etc/caddy/waitlist.caddy",
+          "writable": false
+        },
+        {
+          "type": "bind",
+          "source": "/home/samue/creg-hosting/chain-registry-blockchain-CREG-/chain-registry/testnet/caddy/faucet-edge.caddy",
+          "destination": "/etc/caddy/faucet-edge.caddy",
+          "writable": false
+        },
+        {
+          "type": "bind",
+          "source": "/home/samue/creg-hosting/chain-registry-blockchain-CREG-/chain-registry/testnet/caddy/hub.caddy",
+          "destination": "/etc/caddy/hub.caddy",
+          "writable": false
+        }
+      ]
+    },
+    {
+      "name": "creg-unified-spec-server",
+      "image": "nginx:alpine",
+      "image_id": "sha256:8b1e78743a03dbb2c95171cc58639fef29abc8816598e27fb910ed2e621e589a",
+      "status": "running",
+      "restart_count": 0,
+      "restart_policy": "unless-stopped",
+      "networks": [
+        "testnet_creg-unified-net"
+      ],
+      "ports": {
+        "80/tcp": null
+      },
+      "mounts": [
+        {
+          "type": "bind",
+          "source": "/home/samue/creg-hosting/chain-registry-blockchain-CREG-/chain-registry/testnet/chain-spec.sepolia.json",
+          "destination": "/usr/share/nginx/html/chain-spec.json",
+          "writable": false
+        },
+        {
+          "type": "bind",
+          "source": "/home/samue/creg-hosting/chain-registry-blockchain-CREG-/chain-registry/testnet/chain-spec.sepolia.json.sig",
+          "destination": "/usr/share/nginx/html/chain-spec.json.sig",
+          "writable": false
+        },
+        {
+          "type": "bind",
+          "source": "/home/samue/creg-hosting/chain-registry-blockchain-CREG-/chain-registry/testnet/chain-spec.sepolia.json",
+          "destination": "/usr/share/nginx/html/chain-spec.sepolia.json",
+          "writable": false
+        },
+        {
+          "type": "bind",
+          "source": "/home/samue/creg-hosting/chain-registry-blockchain-CREG-/chain-registry/testnet/chain-spec.sepolia.json.sig",
+          "destination": "/usr/share/nginx/html/chain-spec.sepolia.json.sig",
+          "writable": false
+        },
+        {
+          "type": "bind",
+          "source": "/home/samue/creg-hosting/chain-registry-blockchain-CREG-/chain-registry/testnet/phase-c",
+          "destination": "/usr/share/nginx/html/phase-c",
+          "writable": false
+        },
+        {
+          "type": "bind",
+          "source": "/home/samue/creg-hosting/chain-registry-blockchain-CREG-/chain-registry/testnet/install.sh",
+          "destination": "/usr/share/nginx/html/install.sh",
+          "writable": false
+        },
+        {
+          "type": "bind",
+          "source": "/home/samue/creg-hosting/chain-registry-blockchain-CREG-/chain-registry/testnet/install.ps1",
+          "destination": "/usr/share/nginx/html/install.ps1",
+          "writable": false
+        },
+        {
+          "type": "bind",
+          "source": "/home/samue/creg-hosting/chain-registry-blockchain-CREG-/chain-registry/testnet/dist",
+          "destination": "/usr/share/nginx/html/dist",
+          "writable": false
+        }
+      ]
+    },
+    {
+      "name": "creg-unified-ipfs",
+      "image": "ipfs/kubo:latest",
+      "image_id": "sha256:8907cb0cc1ad5798f6bb1bb1341a800990c268e021cedfa317e8aa1a33864214",
+      "status": "running",
+      "restart_count": 0,
+      "restart_policy": "unless-stopped",
+      "networks": [
+        "testnet_creg-unified-net"
+      ],
+      "ports": {
+        "4001/tcp": null,
+        "4001/udp": null,
+        "5001/tcp": null,
+        "8080/tcp": null,
+        "8081/tcp": null
+      },
+      "mounts": [
+        {
+          "type": "volume",
+          "source": "/var/lib/docker/volumes/testnet_ipfs-data/_data",
+          "destination": "/data/ipfs",
+          "writable": true
+        }
+      ]
+    },
+    {
+      "name": "creg-explorer-public-r24-canary",
+      "image": "us-central1-docker.pkg.dev/gen-lang-client-0022105784/creg-testnet/creg-web-explorer@sha256:090ba37ef9f0ee228d40d9f296d7fdafde1ef224f66f6015500c13d7f9dae6c7",
+      "image_id": "sha256:090ba37ef9f0ee228d40d9f296d7fdafde1ef224f66f6015500c13d7f9dae6c7",
+      "status": "running",
+      "restart_count": 0,
+      "restart_policy": "unless-stopped",
+      "networks": [
+        "testnet_creg-unified-net"
+      ],
+      "ports": {
+        "80/tcp": [
+          {
+            "HostIp": "127.0.0.1",
+            "HostPort": "3024"
+          }
+        ]
+      },
+      "mounts": []
+    },
+    {
+      "name": "creg-explorer-public-r25-canary",
+      "image": "us-central1-docker.pkg.dev/gen-lang-client-0022105784/creg-testnet/creg-web-explorer@sha256:c398d8ac46abfba2996993aadaaebccd9663523b1fd59841fa3f11705a17e7e1",
+      "image_id": "sha256:c398d8ac46abfba2996993aadaaebccd9663523b1fd59841fa3f11705a17e7e1",
+      "status": "running",
+      "restart_count": 0,
+      "restart_policy": "unless-stopped",
+      "networks": [
+        "testnet_creg-unified-net"
+      ],
+      "ports": {
+        "80/tcp": [
+          {
+            "HostIp": "127.0.0.1",
+            "HostPort": "3025"
+          }
+        ]
+      },
+      "mounts": []
+    },
+    {
+      "name": "creg-unified-node",
+      "image": "creg-node:genesis2",
+      "image_id": "sha256:167ffc8122d464266eb35f374d865b0936e4e4bf5352d34acc124b1a6bad8ae9",
+      "status": "running",
+      "restart_count": 0,
+      "restart_policy": "unless-stopped",
+      "networks": [
+        "testnet_creg-unified-net"
+      ],
+      "ports": {
+        "50051/tcp": null,
+        "8080/tcp": [
+          {
+            "HostIp": "0.0.0.0",
+            "HostPort": "28182"
+          },
+          {
+            "HostIp": "::",
+            "HostPort": "28182"
+          }
+        ],
+        "8084/tcp": null,
+        "9000/tcp": [
+          {
+            "HostIp": "0.0.0.0",
+            "HostPort": "9000"
+          },
+          {
+            "HostIp": "::",
+            "HostPort": "9000"
+          }
+        ]
+      },
+      "mounts": [
+        {
+          "type": "volume",
+          "source": "/var/lib/docker/volumes/testnet_creg-node-data/_data",
+          "destination": "/data",
+          "writable": true
+        }
+      ]
+    },
+    {
+      "name": "creg-faucet-public-r25",
+      "image": "us-central1-docker.pkg.dev/gen-lang-client-0022105784/creg-testnet/creg-faucet@sha256:360c124090e5c3a5c448a69e9838bb2c1755ed18f6d32732bff6498d4cdd5ed5",
+      "image_id": "sha256:360c124090e5c3a5c448a69e9838bb2c1755ed18f6d32732bff6498d4cdd5ed5",
+      "status": "running",
+      "restart_count": 0,
+      "restart_policy": "unless-stopped",
+      "networks": [
+        "testnet_creg-unified-net"
+      ],
+      "ports": {
+        "8082/tcp": [
+          {
+            "HostIp": "127.0.0.1",
+            "HostPort": "18082"
+          }
+        ]
+      },
+      "mounts": []
+    },
+    {
+      "name": "creg-unified-faucet-db",
+      "image": "postgres@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea",
+      "image_id": "sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea",
+      "status": "running",
+      "restart_count": 0,
+      "restart_policy": "unless-stopped",
+      "networks": [
+        "testnet_creg-unified-net"
+      ],
+      "ports": {
+        "5432/tcp": null
+      },
+      "mounts": [
+        {
+          "type": "volume",
+          "source": "/var/lib/docker/volumes/testnet_faucet-postgres-data/_data",
+          "destination": "/var/lib/postgresql/data",
+          "writable": true
+        }
+      ]
+    },
+    {
+      "name": "creg-phase-c-r7-o1",
+      "image": "us-central1-docker.pkg.dev/gen-lang-client-0022105784/creg-testnet/creg-node:phase-c-secure-r23-metrics-history",
+      "image_id": "sha256:ef21b958b5e3e4f09e1c87290d3d9a50f23b5350d207e5af9982dd1cf5413708",
+      "status": "running",
+      "restart_count": 0,
+      "restart_policy": "unless-stopped",
+      "networks": [
+        "bridge",
+        "monitoring_default",
+        "testnet_creg-unified-net"
+      ],
+      "ports": {
+        "50051/tcp": null,
+        "8080/tcp": [
+          {
+            "HostIp": "0.0.0.0",
+            "HostPort": "18080"
+          },
+          {
+            "HostIp": "::",
+            "HostPort": "18080"
+          }
+        ],
+        "8084/tcp": null,
+        "9000/tcp": [
+          {
+            "HostIp": "0.0.0.0",
+            "HostPort": "9001"
+          },
+          {
+            "HostIp": "::",
+            "HostPort": "9001"
+          }
+        ]
+      },
+      "mounts": [
+        {
+          "type": "bind",
+          "source": "/var/lib/creg/phase-c-r7/data",
+          "destination": "/data",
+          "writable": true
+        },
+        {
+          "type": "bind",
+          "source": "/var/lib/creg/phase-c-r7/scanner-r11-osv-kleur",
+          "destination": "/scanner",
+          "writable": false
+        }
+      ]
+    },
+    {
+      "name": "creg-gcp-prometheus",
+      "image": "prom/prometheus:v2.51.0",
+      "image_id": "sha256:5ccad477d0057e62a7cd1981ffcc43785ac10c5a35522dc207466ff7e7ec845f",
+      "status": "running",
+      "restart_count": 0,
+      "restart_policy": "unless-stopped",
+      "networks": [
+        "monitoring_default"
+      ],
+      "ports": {
+        "9090/tcp": [
+          {
+            "HostIp": "127.0.0.1",
+            "HostPort": "9090"
+          }
+        ]
+      },
+      "mounts": [
+        {
+          "type": "bind",
+          "source": "/home/samue/creg-hosting/chain-registry-blockchain-CREG-/chain-registry/testnet/monitoring/prometheus-gcp.yml",
+          "destination": "/etc/prometheus/prometheus.yml",
+          "writable": false
+        },
+        {
+          "type": "bind",
+          "source": "/home/samue/creg-hosting/chain-registry-blockchain-CREG-/chain-registry/testnet/monitoring/creg-alerts.yml",
+          "destination": "/etc/prometheus/alerts.yml",
+          "writable": false
+        },
+        {
+          "type": "volume",
+          "source": "/var/lib/docker/volumes/monitoring_prometheus-gcp-data/_data",
+          "destination": "/prometheus",
+          "writable": true
+        }
+      ]
+    }
+  ],
+  "signing_keys_included": false
+}

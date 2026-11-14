@@ -1,0 +1,60 @@
+{
+  "schema": "creg-real-r21-v1-h12-http-sync-recovery-v1",
+  "captured_at_utc": "2026-09-26T23:01:43.2433001Z",
+  "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+  "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+  "tip_height": 12,
+  "tip_hash": "a329eb216ce1fd18e1f5510333cb683db34ca6e789b5a3ef229dabe2af08fc7d",
+  "expected_h12_hash": "a329eb216ce1fd18e1f5510333cb683db34ca6e789b5a3ef229dabe2af08fc7d",
+  "pbft": {
+    "active_round_count": 0,
+    "max_non_terminal_phase_age_seconds": 0.0,
+    "rounds": []
+  },
+  "health": {
+    "status": "ok",
+    "node_id": "validator-1",
+    "is_validator": true,
+    "version": "0.1.0",
+    "validator_set_sync": {
+      "enabled": true,
+      "mode": "chain-authoritative",
+      "state": "synced",
+      "last_finalized_source_block": 11789315,
+      "cursor_block": 11789315,
+      "cursor_log_index": 4294967295,
+      "cursor_block_hash": "0x6df16e4e297687803178ac8a0bc4acf4eb236c9fcbbfab0fd1c2c692287ab82b",
+      "last_poll_at": "2026-09-26T23:01:38.594778440+00:00",
+      "last_error": null
+    },
+    "sandbox": {
+      "engine": "nsjail",
+      "dev_bypass": false,
+      "isolated": true,
+      "degraded": false,
+      "note": "kernel namespaces + seccomp-BPF (primary engine)"
+    },
+    "sync": {
+      "lag_blocks": 0,
+      "max_peer_tip": 12,
+      "healthy": true
+    }
+  },
+  "samples": [
+    {
+      "at": "2026-09-26T23:01:43.2031884Z",
+      "tip": 12,
+      "active_pbft": 0,
+      "unresolved": 0
+    }
+  ],
+  "checks": {
+    "h12_canonical": true,
+    "pbft_clear": true,
+    "sync_lag_zero": true,
+    "peer_count": 2,
+    "pending_tx_count": 0,
+    "durable_work_depth": "0",
+    "dlq_depth": "7"
+  }
+}

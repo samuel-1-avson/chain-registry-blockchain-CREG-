@@ -1,0 +1,6 @@
+{
+  "allowed_fs_writes": [],
+  "description": "Benign real npm package for committed event and recovery acceptance",
+  "spawns_processes": false,
+  "allowed_network_hosts": []
+}

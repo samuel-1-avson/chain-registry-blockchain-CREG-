@@ -1,0 +1,1034 @@
+{
+  "schema": "creg-real-fleet-finality-observation-v1",
+  "captured_at_utc": "2026-09-26T10:31:37.3175813Z",
+  "canonical": "npm:is-number@7.0.0",
+  "shared_h1": true,
+  "revoke_submitted": false,
+  "public_cutover": false,
+  "nodes": [
+    {
+      "captured_at_utc": "2026-09-26T10:30:33.1246+00:00",
+      "stats": {
+        "tip_height": 2,
+        "tip_hash": "6d1d4da2fb62b88af608b070d2a28fe1a2b41d29475d88061dabb87df6b3681e",
+        "package_count": 1,
+        "block_count": 3,
+        "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+        "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+        "spec_signature_verified": true,
+        "l1_rpc_configured": true,
+        "is_validator": false,
+        "validator_count": 4,
+        "active_validators": 4,
+        "total_stake": 400,
+        "total_stake_native": "400",
+        "peer_count": 2,
+        "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+        "l1_block": 0,
+        "pending_tx_count": 1,
+        "publisher_count": 1,
+        "finalized_height": 0,
+        "finalization_lag": 2,
+        "validator_set_source": "chain-authoritative",
+        "validator_set_sync_state": "synced",
+        "validator_set_last_finalized_source_block": 11785653
+      },
+      "pbft": {
+        "active_round_count": 2,
+        "max_non_terminal_phase_age_seconds": 36.609055822,
+        "rounds": [
+          {
+            "block_hash": "0121be9bb637aec634cd5f081fb903ee4749875d8225683f057af005ae16f436",
+            "block_height": 1,
+            "phase": "finalised",
+            "phase_code": 4,
+            "phase_age_seconds": 78.328301419,
+            "prepare_count": 4,
+            "commit_count": 3,
+            "quorum": 3,
+            "validator_count": 4,
+            "view_number": 2,
+            "view_change_count": 0
+          },
+          {
+            "block_hash": "6d1d4da2fb62b88af608b070d2a28fe1a2b41d29475d88061dabb87df6b3681e",
+            "block_height": 2,
+            "phase": "commit",
+            "phase_code": 3,
+            "phase_age_seconds": 36.609029613,
+            "prepare_count": 3,
+            "commit_count": 0,
+            "quorum": 3,
+            "validator_count": 4,
+            "view_number": 1,
+            "view_change_count": 1
+          }
+        ]
+      },
+      "package": {
+        "canonical": "npm:is-number@7.0.0",
+        "status": "verified",
+        "evidence_phase": "quorum-reached",
+        "block_phase": "committed",
+        "chain_status": "verified",
+        "block_hash": "0121be9bb637aec634cd5f081fb903ee4749875d8225683f057af005ae16f436",
+        "content_hash": "7b75c1057198cf97696909a9bee176c9c5e9bcb5b03bf3ecef2f484defadd51e",
+        "ipfs_cid": "QmQ8kbWCkjk77RxP3GMCG7WiSj43WP2ZUBWxmttA2bscn6",
+        "publisher": "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d",
+        "published_at": "2026-09-26T10:28:10.494663442+00:00",
+        "revocation_reason": null,
+        "analysis_bundles": {
+          "policy_bundle_id": "policy-v1",
+          "feature_schema_id": "features-v1",
+          "expert_bundle_id": "experts-v1",
+          "embedding_model_id": "embeddings-v1",
+          "index_epoch": "index-epoch-0",
+          "threshold_profile_id": "thresholds-v1",
+          "llm_prompt_profile_id": "llm-prompt-v1",
+          "osv_snapshot_epoch": "osv-2026-09-26-phase-c-r8"
+        },
+        "evidence_digest": "4eb664d53c44551f6ddcf04c8943874d97da0c6b760e617886508e8340377b0a",
+        "deterministic_risk": {
+          "score": 2,
+          "deterministic_score": 0,
+          "advisory_score": 0,
+          "band": "low",
+          "disposition": "accept",
+          "deterministic_findings": 0,
+          "advisory_findings": 1,
+          "critical_findings": 0,
+          "high_findings": 0,
+          "medium_findings": 0,
+          "low_findings": 0,
+          "reasons": [
+            "Publisher reputation delta -10 increases deterministic risk"
+          ]
+        },
+        "analysis_committee": {
+          "size": 4,
+          "members": [
+            {
+              "id": "validator-2",
+              "performance_score_at_finalization": 465
+            },
+            {
+              "id": "validator-4",
+              "performance_score_at_finalization": 500
+            },
+            {
+              "id": "validator-3",
+              "performance_score_at_finalization": 465
+            },
+            {
+              "id": "validator-1",
+              "performance_score_at_finalization": 465
+            }
+          ],
+          "seed": "35646264346363396434396563366536656233313838653935353464353430333538613731646364343836376264653062316439333337656534383836613461",
+          "effective_size": 4,
+          "performance_bias": true,
+          "member_performance_at_finalization": {
+            "validator-4": 500,
+            "validator-2": 465,
+            "validator-1": 465,
+            "validator-3": 465
+          }
+        }
+      },
+      "slot": "o1"
+    },
+    {
+      "captured_at_utc": "2026-09-26T10:30:42.935028+00:00",
+      "stats": {
+        "tip_height": 2,
+        "tip_hash": "6d1d4da2fb62b88af608b070d2a28fe1a2b41d29475d88061dabb87df6b3681e",
+        "package_count": 1,
+        "block_count": 3,
+        "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+        "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+        "spec_signature_verified": true,
+        "l1_rpc_configured": true,
+        "is_validator": false,
+        "validator_count": 4,
+        "active_validators": 4,
+        "total_stake": 400,
+        "total_stake_native": "400",
+        "peer_count": 2,
+        "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+        "l1_block": 0,
+        "pending_tx_count": 1,
+        "publisher_count": 1,
+        "finalized_height": 0,
+        "finalization_lag": 2,
+        "validator_set_source": "chain-authoritative",
+        "validator_set_sync_state": "synced",
+        "validator_set_last_finalized_source_block": 11785655
+      },
+      "pbft": {
+        "active_round_count": 2,
+        "max_non_terminal_phase_age_seconds": 46.425970595,
+        "rounds": [
+          {
+            "block_hash": "0121be9bb637aec634cd5f081fb903ee4749875d8225683f057af005ae16f436",
+            "block_height": 1,
+            "phase": "finalised",
+            "phase_code": 4,
+            "phase_age_seconds": 88.137391251,
+            "prepare_count": 4,
+            "commit_count": 3,
+            "quorum": 3,
+            "validator_count": 4,
+            "view_number": 2,
+            "view_change_count": 0
+          },
+          {
+            "block_hash": "6d1d4da2fb62b88af608b070d2a28fe1a2b41d29475d88061dabb87df6b3681e",
+            "block_height": 2,
+            "phase": "commit",
+            "phase_code": 3,
+            "phase_age_seconds": 46.425966387,
+            "prepare_count": 3,
+            "commit_count": 0,
+            "quorum": 3,
+            "validator_count": 4,
+            "view_number": 1,
+            "view_change_count": 1
+          }
+        ]
+      },
+      "package": {
+        "canonical": "npm:is-number@7.0.0",
+        "status": "verified",
+        "evidence_phase": "quorum-reached",
+        "block_phase": "committed",
+        "chain_status": "verified",
+        "block_hash": "0121be9bb637aec634cd5f081fb903ee4749875d8225683f057af005ae16f436",
+        "content_hash": "7b75c1057198cf97696909a9bee176c9c5e9bcb5b03bf3ecef2f484defadd51e",
+        "ipfs_cid": "QmQ8kbWCkjk77RxP3GMCG7WiSj43WP2ZUBWxmttA2bscn6",
+        "publisher": "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d",
+        "published_at": "2026-09-26T10:28:10.494663442+00:00",
+        "revocation_reason": null,
+        "analysis_bundles": {
+          "policy_bundle_id": "policy-v1",
+          "feature_schema_id": "features-v1",
+          "expert_bundle_id": "experts-v1",
+          "embedding_model_id": "embeddings-v1",
+          "index_epoch": "index-epoch-0",
+          "threshold_profile_id": "thresholds-v1",
+          "llm_prompt_profile_id": "llm-prompt-v1",
+          "osv_snapshot_epoch": "osv-2026-09-26-phase-c-r8"
+        },
+        "evidence_digest": "4eb664d53c44551f6ddcf04c8943874d97da0c6b760e617886508e8340377b0a",
+        "deterministic_risk": {
+          "score": 2,
+          "deterministic_score": 0,
+          "advisory_score": 0,
+          "band": "low",
+          "disposition": "accept",
+          "deterministic_findings": 0,
+          "advisory_findings": 1,
+          "critical_findings": 0,
+          "high_findings": 0,
+          "medium_findings": 0,
+          "low_findings": 0,
+          "reasons": [
+            "Publisher reputation delta -10 increases deterministic risk"
+          ]
+        },
+        "analysis_committee": {
+          "size": 4,
+          "members": [
+            {
+              "id": "validator-2",
+              "performance_score_at_finalization": 465
+            },
+            {
+              "id": "validator-4",
+              "performance_score_at_finalization": 500
+            },
+            {
+              "id": "validator-3",
+              "performance_score_at_finalization": 465
+            },
+            {
+              "id": "validator-1",
+              "performance_score_at_finalization": 465
+            }
+          ],
+          "seed": "35646264346363396434396563366536656233313838653935353464353430333538613731646364343836376264653062316439333337656534383836613461",
+          "effective_size": 4,
+          "performance_bias": true,
+          "member_performance_at_finalization": {
+            "validator-1": 465,
+            "validator-3": 465,
+            "validator-4": 500,
+            "validator-2": 465
+          }
+        }
+      },
+      "slot": "o2"
+    },
+    {
+      "captured_at_utc": "2026-09-26T10:30:53.882967+00:00",
+      "stats": {
+        "tip_height": 2,
+        "tip_hash": "6d1d4da2fb62b88af608b070d2a28fe1a2b41d29475d88061dabb87df6b3681e",
+        "package_count": 1,
+        "block_count": 3,
+        "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+        "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+        "spec_signature_verified": true,
+        "l1_rpc_configured": true,
+        "is_validator": false,
+        "validator_count": 4,
+        "active_validators": 4,
+        "total_stake": 400,
+        "total_stake_native": "400",
+        "peer_count": 2,
+        "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+        "l1_block": 0,
+        "pending_tx_count": 1,
+        "publisher_count": 1,
+        "finalized_height": 0,
+        "finalization_lag": 2,
+        "validator_set_source": "chain-authoritative",
+        "validator_set_sync_state": "synced",
+        "validator_set_last_finalized_source_block": 11785656
+      },
+      "pbft": {
+        "active_round_count": 2,
+        "max_non_terminal_phase_age_seconds": 58.073320583,
+        "rounds": [
+          {
+            "block_hash": "0121be9bb637aec634cd5f081fb903ee4749875d8225683f057af005ae16f436",
+            "block_height": 1,
+            "phase": "finalised",
+            "phase_code": 4,
+            "phase_age_seconds": 99.031287193,
+            "prepare_count": 4,
+            "commit_count": 3,
+            "quorum": 3,
+            "validator_count": 4,
+            "view_number": 2,
+            "view_change_count": 0
+          },
+          {
+            "block_hash": "6d1d4da2fb62b88af608b070d2a28fe1a2b41d29475d88061dabb87df6b3681e",
+            "block_height": 2,
+            "phase": "prepare",
+            "phase_code": 2,
+            "phase_age_seconds": 58.073317053,
+            "prepare_count": 2,
+            "commit_count": 0,
+            "quorum": 3,
+            "validator_count": 4,
+            "view_number": 1,
+            "view_change_count": 1
+          }
+        ]
+      },
+      "package": {
+        "canonical": "npm:is-number@7.0.0",
+        "status": "verified",
+        "evidence_phase": "quorum-reached",
+        "block_phase": "committed",
+        "chain_status": "verified",
+        "block_hash": "0121be9bb637aec634cd5f081fb903ee4749875d8225683f057af005ae16f436",
+        "content_hash": "7b75c1057198cf97696909a9bee176c9c5e9bcb5b03bf3ecef2f484defadd51e",
+        "ipfs_cid": "QmQ8kbWCkjk77RxP3GMCG7WiSj43WP2ZUBWxmttA2bscn6",
+        "publisher": "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d",
+        "published_at": "2026-09-26T10:28:10.494663442+00:00",
+        "revocation_reason": null,
+        "analysis_bundles": {
+          "policy_bundle_id": "policy-v1",
+          "feature_schema_id": "features-v1",
+          "expert_bundle_id": "experts-v1",
+          "embedding_model_id": "embeddings-v1",
+          "index_epoch": "index-epoch-0",
+          "threshold_profile_id": "thresholds-v1",
+          "llm_prompt_profile_id": "llm-prompt-v1",
+          "osv_snapshot_epoch": "osv-2026-09-26-phase-c-r8"
+        },
+        "evidence_digest": "4eb664d53c44551f6ddcf04c8943874d97da0c6b760e617886508e8340377b0a",
+        "deterministic_risk": {
+          "score": 2,
+          "deterministic_score": 0,
+          "advisory_score": 0,
+          "band": "low",
+          "disposition": "accept",
+          "deterministic_findings": 0,
+          "advisory_findings": 1,
+          "critical_findings": 0,
+          "high_findings": 0,
+          "medium_findings": 0,
+          "low_findings": 0,
+          "reasons": [
+            "Publisher reputation delta -10 increases deterministic risk"
+          ]
+        },
+        "analysis_committee": {
+          "size": 4,
+          "members": [
+            {
+              "id": "validator-2",
+              "performance_score_at_finalization": 465
+            },
+            {
+              "id": "validator-4",
+              "performance_score_at_finalization": 500
+            },
+            {
+              "id": "validator-3",
+              "performance_score_at_finalization": 465
+            },
+            {
+              "id": "validator-1",
+              "performance_score_at_finalization": 465
+            }
+          ],
+          "seed": "35646264346363396434396563366536656233313838653935353464353430333538613731646364343836376264653062316439333337656534383836613461",
+          "effective_size": 4,
+          "performance_bias": true,
+          "member_performance_at_finalization": {
+            "validator-3": 465,
+            "validator-2": 465,
+            "validator-1": 465,
+            "validator-4": 500
+          }
+        }
+      },
+      "slot": "o3"
+    },
+    {
+      "captured_at_utc": "2026-09-26T10:31:05.44085+00:00",
+      "stats": {
+        "tip_height": 2,
+        "tip_hash": "6d1d4da2fb62b88af608b070d2a28fe1a2b41d29475d88061dabb87df6b3681e",
+        "package_count": 1,
+        "block_count": 3,
+        "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+        "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+        "spec_signature_verified": true,
+        "l1_rpc_configured": true,
+        "is_validator": false,
+        "validator_count": 4,
+        "active_validators": 4,
+        "total_stake": 400,
+        "total_stake_native": "400",
+        "peer_count": 7,
+        "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+        "l1_block": 0,
+        "pending_tx_count": 1,
+        "publisher_count": 1,
+        "finalized_height": 0,
+        "finalization_lag": 2,
+        "validator_set_source": "chain-authoritative",
+        "validator_set_sync_state": "synced",
+        "validator_set_last_finalized_source_block": 11785658
+      },
+      "pbft": {
+        "active_round_count": 2,
+        "max_non_terminal_phase_age_seconds": 0.0,
+        "rounds": [
+          {
+            "block_hash": "0121be9bb637aec634cd5f081fb903ee4749875d8225683f057af005ae16f436",
+            "block_height": 1,
+            "phase": "finalised",
+            "phase_code": 4,
+            "phase_age_seconds": 110.548939503,
+            "prepare_count": 4,
+            "commit_count": 3,
+            "quorum": 3,
+            "validator_count": 4,
+            "view_number": 2,
+            "view_change_count": 0
+          },
+          {
+            "block_hash": "6d1d4da2fb62b88af608b070d2a28fe1a2b41d29475d88061dabb87df6b3681e",
+            "block_height": 2,
+            "phase": "finalised",
+            "phase_code": 4,
+            "phase_age_seconds": 69.581803265,
+            "prepare_count": 3,
+            "commit_count": 3,
+            "quorum": 3,
+            "validator_count": 4,
+            "view_number": 1,
+            "view_change_count": 1
+          }
+        ]
+      },
+      "package": {
+        "canonical": "npm:is-number@7.0.0",
+        "status": "verified",
+        "evidence_phase": "quorum-reached",
+        "block_phase": "committed",
+        "chain_status": "verified",
+        "block_hash": "0121be9bb637aec634cd5f081fb903ee4749875d8225683f057af005ae16f436",
+        "content_hash": "7b75c1057198cf97696909a9bee176c9c5e9bcb5b03bf3ecef2f484defadd51e",
+        "ipfs_cid": "QmQ8kbWCkjk77RxP3GMCG7WiSj43WP2ZUBWxmttA2bscn6",
+        "publisher": "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d",
+        "published_at": "2026-09-26T10:28:10.494663442+00:00",
+        "revocation_reason": null,
+        "analysis_bundles": {
+          "policy_bundle_id": "policy-v1",
+          "feature_schema_id": "features-v1",
+          "expert_bundle_id": "experts-v1",
+          "embedding_model_id": "embeddings-v1",
+          "index_epoch": "index-epoch-0",
+          "threshold_profile_id": "thresholds-v1",
+          "llm_prompt_profile_id": "llm-prompt-v1",
+          "osv_snapshot_epoch": "osv-2026-09-26-phase-c-r8"
+        },
+        "evidence_digest": "4eb664d53c44551f6ddcf04c8943874d97da0c6b760e617886508e8340377b0a",
+        "deterministic_risk": {
+          "score": 2,
+          "deterministic_score": 0,
+          "advisory_score": 0,
+          "band": "low",
+          "disposition": "accept",
+          "deterministic_findings": 0,
+          "advisory_findings": 1,
+          "critical_findings": 0,
+          "high_findings": 0,
+          "medium_findings": 0,
+          "low_findings": 0,
+          "reasons": [
+            "Publisher reputation delta -10 increases deterministic risk"
+          ]
+        },
+        "analysis_committee": {
+          "size": 4,
+          "members": [
+            {
+              "id": "validator-2",
+              "performance_score_at_finalization": 465
+            },
+            {
+              "id": "validator-4",
+              "performance_score_at_finalization": 500
+            },
+            {
+              "id": "validator-3",
+              "performance_score_at_finalization": 465
+            },
+            {
+              "id": "validator-1",
+              "performance_score_at_finalization": 465
+            }
+          ],
+          "seed": "35646264346363396434396563366536656233313838653935353464353430333538613731646364343836376264653062316439333337656534383836613461",
+          "effective_size": 4,
+          "performance_bias": true,
+          "member_performance_at_finalization": {
+            "validator-3": 465,
+            "validator-1": 465,
+            "validator-2": 465,
+            "validator-4": 500
+          }
+        }
+      },
+      "slot": "o4"
+    },
+    {
+      "package": {
+        "canonical": "npm:is-number@7.0.0",
+        "status": "verified",
+        "evidence_phase": "quorum-reached",
+        "block_phase": "committed",
+        "chain_status": "verified",
+        "block_hash": "0121be9bb637aec634cd5f081fb903ee4749875d8225683f057af005ae16f436",
+        "content_hash": "7b75c1057198cf97696909a9bee176c9c5e9bcb5b03bf3ecef2f484defadd51e",
+        "ipfs_cid": "QmQ8kbWCkjk77RxP3GMCG7WiSj43WP2ZUBWxmttA2bscn6",
+        "publisher": "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d",
+        "published_at": "2026-09-26T10:28:10.494663442+00:00",
+        "revocation_reason": null,
+        "analysis_bundles": {
+          "policy_bundle_id": "policy-v1",
+          "feature_schema_id": "features-v1",
+          "expert_bundle_id": "experts-v1",
+          "embedding_model_id": "embeddings-v1",
+          "index_epoch": "index-epoch-0",
+          "threshold_profile_id": "thresholds-v1",
+          "llm_prompt_profile_id": "llm-prompt-v1",
+          "osv_snapshot_epoch": "osv-2026-09-26-phase-c-r8"
+        },
+        "evidence_digest": "4eb664d53c44551f6ddcf04c8943874d97da0c6b760e617886508e8340377b0a",
+        "deterministic_risk": {
+          "score": 2,
+          "deterministic_score": 0,
+          "advisory_score": 0,
+          "band": "low",
+          "disposition": "accept",
+          "deterministic_findings": 0,
+          "advisory_findings": 1,
+          "critical_findings": 0,
+          "high_findings": 0,
+          "medium_findings": 0,
+          "low_findings": 0,
+          "reasons": [
+            "Publisher reputation delta -10 increases deterministic risk"
+          ]
+        },
+        "analysis_committee": {
+          "size": 4,
+          "members": [
+            {
+              "id": "validator-2",
+              "performance_score_at_finalization": 465
+            },
+            {
+              "id": "validator-4",
+              "performance_score_at_finalization": 500
+            },
+            {
+              "id": "validator-3",
+              "performance_score_at_finalization": 465
+            },
+            {
+              "id": "validator-1",
+              "performance_score_at_finalization": 465
+            }
+          ],
+          "seed": "35646264346363396434396563366536656233313838653935353464353430333538613731646364343836376264653062316439333337656534383836613461",
+          "effective_size": 4,
+          "performance_bias": true,
+          "member_performance_at_finalization": {
+            "validator-4": 500,
+            "validator-3": 465,
+            "validator-1": 465,
+            "validator-2": 465
+          }
+        }
+      },
+      "slot": "v1",
+      "pbft": {
+        "active_round_count": 2,
+        "max_non_terminal_phase_age_seconds": 0.0,
+        "rounds": [
+          {
+            "block_hash": "0121be9bb637aec634cd5f081fb903ee4749875d8225683f057af005ae16f436",
+            "block_height": 1,
+            "phase": "finalised",
+            "phase_code": 4,
+            "phase_age_seconds": 111.140069367,
+            "prepare_count": 4,
+            "commit_count": 3,
+            "quorum": 3,
+            "validator_count": 4,
+            "view_number": 2,
+            "view_change_count": 0
+          },
+          {
+            "block_hash": "6d1d4da2fb62b88af608b070d2a28fe1a2b41d29475d88061dabb87df6b3681e",
+            "block_height": 2,
+            "phase": "finalised",
+            "phase_code": 4,
+            "phase_age_seconds": 70.181837116,
+            "prepare_count": 3,
+            "commit_count": 3,
+            "quorum": 3,
+            "validator_count": 4,
+            "view_number": 1,
+            "view_change_count": 1
+          }
+        ]
+      },
+      "captured_at_utc": "2026-09-26T10:31:06.0514484Z",
+      "stats": {
+        "tip_height": 2,
+        "tip_hash": "6d1d4da2fb62b88af608b070d2a28fe1a2b41d29475d88061dabb87df6b3681e",
+        "package_count": 1,
+        "block_count": 3,
+        "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+        "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+        "spec_signature_verified": true,
+        "l1_rpc_configured": true,
+        "is_validator": true,
+        "validator_count": 4,
+        "active_validators": 4,
+        "total_stake": 400,
+        "total_stake_native": "400",
+        "peer_count": 2,
+        "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+        "l1_block": 0,
+        "pending_tx_count": 0,
+        "publisher_count": 1,
+        "finalized_height": 0,
+        "finalization_lag": 2,
+        "validator_set_source": "chain-authoritative",
+        "validator_set_sync_state": "synced",
+        "validator_set_last_finalized_source_block": 11785656
+      }
+    },
+    {
+      "captured_at_utc": "2026-09-26T10:31:14.938907+00:00",
+      "stats": {
+        "tip_height": 2,
+        "tip_hash": "6d1d4da2fb62b88af608b070d2a28fe1a2b41d29475d88061dabb87df6b3681e",
+        "package_count": 1,
+        "block_count": 3,
+        "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+        "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+        "spec_signature_verified": true,
+        "l1_rpc_configured": true,
+        "is_validator": true,
+        "validator_count": 4,
+        "active_validators": 4,
+        "total_stake": 400,
+        "total_stake_native": "400",
+        "peer_count": 2,
+        "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+        "l1_block": 0,
+        "pending_tx_count": 0,
+        "publisher_count": 1,
+        "finalized_height": 0,
+        "finalization_lag": 2,
+        "validator_set_source": "chain-authoritative",
+        "validator_set_sync_state": "synced",
+        "validator_set_last_finalized_source_block": 11785658
+      },
+      "pbft": {
+        "active_round_count": 2,
+        "max_non_terminal_phase_age_seconds": 0.0,
+        "rounds": [
+          {
+            "block_hash": "0121be9bb637aec634cd5f081fb903ee4749875d8225683f057af005ae16f436",
+            "block_height": 1,
+            "phase": "finalised",
+            "phase_code": 4,
+            "phase_age_seconds": 120.153628071,
+            "prepare_count": 4,
+            "commit_count": 3,
+            "quorum": 3,
+            "validator_count": 4,
+            "view_number": 2,
+            "view_change_count": 0
+          },
+          {
+            "block_hash": "6d1d4da2fb62b88af608b070d2a28fe1a2b41d29475d88061dabb87df6b3681e",
+            "block_height": 2,
+            "phase": "finalised",
+            "phase_code": 4,
+            "phase_age_seconds": 78.946219449,
+            "prepare_count": 4,
+            "commit_count": 3,
+            "quorum": 3,
+            "validator_count": 4,
+            "view_number": 1,
+            "view_change_count": 1
+          }
+        ]
+      },
+      "package": {
+        "canonical": "npm:is-number@7.0.0",
+        "status": "verified",
+        "evidence_phase": "quorum-reached",
+        "block_phase": "committed",
+        "chain_status": "verified",
+        "block_hash": "0121be9bb637aec634cd5f081fb903ee4749875d8225683f057af005ae16f436",
+        "content_hash": "7b75c1057198cf97696909a9bee176c9c5e9bcb5b03bf3ecef2f484defadd51e",
+        "ipfs_cid": "QmQ8kbWCkjk77RxP3GMCG7WiSj43WP2ZUBWxmttA2bscn6",
+        "publisher": "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d",
+        "published_at": "2026-09-26T10:28:10.494663442+00:00",
+        "revocation_reason": null,
+        "analysis_bundles": {
+          "policy_bundle_id": "policy-v1",
+          "feature_schema_id": "features-v1",
+          "expert_bundle_id": "experts-v1",
+          "embedding_model_id": "embeddings-v1",
+          "index_epoch": "index-epoch-0",
+          "threshold_profile_id": "thresholds-v1",
+          "llm_prompt_profile_id": "llm-prompt-v1",
+          "osv_snapshot_epoch": "osv-2026-09-26-phase-c-r8"
+        },
+        "evidence_digest": "4eb664d53c44551f6ddcf04c8943874d97da0c6b760e617886508e8340377b0a",
+        "deterministic_risk": {
+          "score": 2,
+          "deterministic_score": 0,
+          "advisory_score": 0,
+          "band": "low",
+          "disposition": "accept",
+          "deterministic_findings": 0,
+          "advisory_findings": 1,
+          "critical_findings": 0,
+          "high_findings": 0,
+          "medium_findings": 0,
+          "low_findings": 0,
+          "reasons": [
+            "Publisher reputation delta -10 increases deterministic risk"
+          ]
+        },
+        "analysis_committee": {
+          "size": 4,
+          "members": [
+            {
+              "id": "validator-2",
+              "performance_score_at_finalization": 465
+            },
+            {
+              "id": "validator-4",
+              "performance_score_at_finalization": 500
+            },
+            {
+              "id": "validator-3",
+              "performance_score_at_finalization": 465
+            },
+            {
+              "id": "validator-1",
+              "performance_score_at_finalization": 465
+            }
+          ],
+          "seed": "35646264346363396434396563366536656233313838653935353464353430333538613731646364343836376264653062316439333337656534383836613461",
+          "effective_size": 4,
+          "performance_bias": true,
+          "member_performance_at_finalization": {
+            "validator-3": 465,
+            "validator-2": 465,
+            "validator-4": 500,
+            "validator-1": 465
+          }
+        }
+      },
+      "slot": "v2"
+    },
+    {
+      "captured_at_utc": "2026-09-26T10:31:24.20494+00:00",
+      "stats": {
+        "tip_height": 2,
+        "tip_hash": "6d1d4da2fb62b88af608b070d2a28fe1a2b41d29475d88061dabb87df6b3681e",
+        "package_count": 1,
+        "block_count": 3,
+        "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+        "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+        "spec_signature_verified": true,
+        "l1_rpc_configured": true,
+        "is_validator": true,
+        "validator_count": 4,
+        "active_validators": 4,
+        "total_stake": 400,
+        "total_stake_native": "400",
+        "peer_count": 7,
+        "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+        "l1_block": 0,
+        "pending_tx_count": 0,
+        "publisher_count": 1,
+        "finalized_height": 0,
+        "finalization_lag": 2,
+        "validator_set_source": "chain-authoritative",
+        "validator_set_sync_state": "synced",
+        "validator_set_last_finalized_source_block": 11785659
+      },
+      "pbft": {
+        "active_round_count": 1,
+        "max_non_terminal_phase_age_seconds": 0.0,
+        "rounds": [
+          {
+            "block_hash": "6d1d4da2fb62b88af608b070d2a28fe1a2b41d29475d88061dabb87df6b3681e",
+            "block_height": 2,
+            "phase": "finalised",
+            "phase_code": 4,
+            "phase_age_seconds": 88.356443124,
+            "prepare_count": 3,
+            "commit_count": 3,
+            "quorum": 3,
+            "validator_count": 4,
+            "view_number": 1,
+            "view_change_count": 1
+          }
+        ]
+      },
+      "package": {
+        "canonical": "npm:is-number@7.0.0",
+        "status": "verified",
+        "evidence_phase": "quorum-reached",
+        "block_phase": "committed",
+        "chain_status": "verified",
+        "block_hash": "0121be9bb637aec634cd5f081fb903ee4749875d8225683f057af005ae16f436",
+        "content_hash": "7b75c1057198cf97696909a9bee176c9c5e9bcb5b03bf3ecef2f484defadd51e",
+        "ipfs_cid": "QmQ8kbWCkjk77RxP3GMCG7WiSj43WP2ZUBWxmttA2bscn6",
+        "publisher": "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d",
+        "published_at": "2026-09-26T10:28:10.494663442+00:00",
+        "revocation_reason": null,
+        "analysis_bundles": {
+          "policy_bundle_id": "policy-v1",
+          "feature_schema_id": "features-v1",
+          "expert_bundle_id": "experts-v1",
+          "embedding_model_id": "embeddings-v1",
+          "index_epoch": "index-epoch-0",
+          "threshold_profile_id": "thresholds-v1",
+          "llm_prompt_profile_id": "llm-prompt-v1",
+          "osv_snapshot_epoch": "osv-2026-09-26-phase-c-r8"
+        },
+        "evidence_digest": "4eb664d53c44551f6ddcf04c8943874d97da0c6b760e617886508e8340377b0a",
+        "deterministic_risk": {
+          "score": 2,
+          "deterministic_score": 0,
+          "advisory_score": 0,
+          "band": "low",
+          "disposition": "accept",
+          "deterministic_findings": 0,
+          "advisory_findings": 1,
+          "critical_findings": 0,
+          "high_findings": 0,
+          "medium_findings": 0,
+          "low_findings": 0,
+          "reasons": [
+            "Publisher reputation delta -10 increases deterministic risk"
+          ]
+        },
+        "analysis_committee": {
+          "size": 4,
+          "members": [
+            {
+              "id": "validator-2",
+              "performance_score_at_finalization": 465
+            },
+            {
+              "id": "validator-4",
+              "performance_score_at_finalization": 500
+            },
+            {
+              "id": "validator-3",
+              "performance_score_at_finalization": 465
+            },
+            {
+              "id": "validator-1",
+              "performance_score_at_finalization": 465
+            }
+          ],
+          "seed": "35646264346363396434396563366536656233313838653935353464353430333538613731646364343836376264653062316439333337656534383836613461",
+          "effective_size": 4,
+          "performance_bias": true,
+          "member_performance_at_finalization": {
+            "validator-1": 465,
+            "validator-3": 465,
+            "validator-4": 500,
+            "validator-2": 465
+          }
+        }
+      },
+      "slot": "v3"
+    },
+    {
+      "captured_at_utc": "2026-09-26T10:31:36.407175+00:00",
+      "stats": {
+        "tip_height": 2,
+        "tip_hash": "6d1d4da2fb62b88af608b070d2a28fe1a2b41d29475d88061dabb87df6b3681e",
+        "package_count": 1,
+        "block_count": 3,
+        "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+        "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+        "spec_signature_verified": true,
+        "l1_rpc_configured": true,
+        "is_validator": true,
+        "validator_count": 4,
+        "active_validators": 4,
+        "total_stake": 400,
+        "total_stake_native": "400",
+        "peer_count": 2,
+        "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+        "l1_block": 0,
+        "pending_tx_count": 0,
+        "publisher_count": 1,
+        "finalized_height": 0,
+        "finalization_lag": 2,
+        "validator_set_source": "chain-authoritative",
+        "validator_set_sync_state": "synced",
+        "validator_set_last_finalized_source_block": 11785659
+      },
+      "pbft": {
+        "active_round_count": 1,
+        "max_non_terminal_phase_age_seconds": 0.0,
+        "rounds": [
+          {
+            "block_hash": "6d1d4da2fb62b88af608b070d2a28fe1a2b41d29475d88061dabb87df6b3681e",
+            "block_height": 2,
+            "phase": "finalised",
+            "phase_code": 4,
+            "phase_age_seconds": 100.34157424,
+            "prepare_count": 3,
+            "commit_count": 3,
+            "quorum": 3,
+            "validator_count": 4,
+            "view_number": 1,
+            "view_change_count": 1
+          }
+        ]
+      },
+      "package": {
+        "canonical": "npm:is-number@7.0.0",
+        "status": "verified",
+        "evidence_phase": "quorum-reached",
+        "block_phase": "committed",
+        "chain_status": "verified",
+        "block_hash": "0121be9bb637aec634cd5f081fb903ee4749875d8225683f057af005ae16f436",
+        "content_hash": "7b75c1057198cf97696909a9bee176c9c5e9bcb5b03bf3ecef2f484defadd51e",
+        "ipfs_cid": "QmQ8kbWCkjk77RxP3GMCG7WiSj43WP2ZUBWxmttA2bscn6",
+        "publisher": "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d",
+        "published_at": "2026-09-26T10:28:10.494663442+00:00",
+        "revocation_reason": null,
+        "analysis_bundles": {
+          "policy_bundle_id": "policy-v1",
+          "feature_schema_id": "features-v1",
+          "expert_bundle_id": "experts-v1",
+          "embedding_model_id": "embeddings-v1",
+          "index_epoch": "index-epoch-0",
+          "threshold_profile_id": "thresholds-v1",
+          "llm_prompt_profile_id": "llm-prompt-v1",
+          "osv_snapshot_epoch": "osv-2026-09-26-phase-c-r8"
+        },
+        "evidence_digest": "4eb664d53c44551f6ddcf04c8943874d97da0c6b760e617886508e8340377b0a",
+        "deterministic_risk": {
+          "score": 2,
+          "deterministic_score": 0,
+          "advisory_score": 0,
+          "band": "low",
+          "disposition": "accept",
+          "deterministic_findings": 0,
+          "advisory_findings": 1,
+          "critical_findings": 0,
+          "high_findings": 0,
+          "medium_findings": 0,
+          "low_findings": 0,
+          "reasons": [
+            "Publisher reputation delta -10 increases deterministic risk"
+          ]
+        },
+        "analysis_committee": {
+          "size": 4,
+          "members": [
+            {
+              "id": "validator-2",
+              "performance_score_at_finalization": 465
+            },
+            {
+              "id": "validator-4",
+              "performance_score_at_finalization": 500
+            },
+            {
+              "id": "validator-3",
+              "performance_score_at_finalization": 465
+            },
+            {
+              "id": "validator-1",
+              "performance_score_at_finalization": 465
+            }
+          ],
+          "seed": "35646264346363396434396563366536656233313838653935353464353430333538613731646364343836376264653062316439333337656534383836613461",
+          "effective_size": 4,
+          "performance_bias": true,
+          "member_performance_at_finalization": {
+            "validator-3": 465,
+            "validator-4": 500,
+            "validator-2": 465,
+            "validator-1": 465
+          }
+        }
+      },
+      "slot": "v4"
+    }
+  ],
+  "observed_h1_hash": "0121be9bb637aec634cd5f081fb903ee4749875d8225683f057af005ae16f436",
+  "h2_observed_empty_block": true
+}

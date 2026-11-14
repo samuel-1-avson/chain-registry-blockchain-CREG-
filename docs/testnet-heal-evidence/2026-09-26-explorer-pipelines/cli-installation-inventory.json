@@ -1,0 +1,14 @@
+[
+  {
+    "path": "C:/Users/samue/.cargo/bin/creg.exe",
+    "sha256": "c171e5a2b46dd3232087e20657edde3c7e729cac01408ee5e0ff034e5a8272df"
+  },
+  {
+    "path": "C:/Users/samue/.creg/bin/creg.exe",
+    "sha256": "b150c7d14189df50132bbbdcd542ae7a593c1ba07b2a25c4dfdb24c388b194d3"
+  },
+  {
+    "path": "chain-registry/target/debug/creg.exe",
+    "sha256": "db6d77f2a6cede2983b875eac2238adedd894664146f9c1adddd7427198bf011"
+  }
+]

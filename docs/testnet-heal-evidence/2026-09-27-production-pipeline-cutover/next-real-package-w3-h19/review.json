@@ -1,0 +1,37 @@
+{
+  "captured_at_utc": "2026-09-28T06:00:51.916Z",
+  "status": "prepared_for_review_not_published",
+  "canonical": "npm:ansi-regex@6.1.0",
+  "registry_url": "https://registry.npmjs.org/ansi-regex/6.1.0",
+  "archive_url": "https://registry.npmjs.org/ansi-regex/-/ansi-regex-6.1.0.tgz",
+  "archive_bytes": 2658,
+  "archive_sha256": "046f6fe17602b686aa522de193d6046a75e557933365ba51e3e3d8e1fa694f3c",
+  "registry_sha512_integrity": "sha512-7HSX4QQb4CspciLpVFwyRe79O3xsIZDDLER21kERQ71oaPodF8jL725AgJMFAYbooIqolJoRLuM81SpeUkpkvA==",
+  "metadata_sha256": "01bbae22fb1b818d185032a659ccc74994c35006b8f3e06cade4a35ebd73182d",
+  "osv_source": "https://api.osv.dev/v1/query",
+  "osv_query": {
+    "package": {
+      "ecosystem": "npm",
+      "name": "ansi-regex"
+    },
+    "version": "6.1.0"
+  },
+  "osv_response_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+  "osv_advisory_count": 0,
+  "declared_license": "MIT",
+  "declared_scripts": {
+    "test": "xo && ava && tsd",
+    "view-supported": "node fixtures/view-codes.js"
+  },
+  "declared_dependencies": {},
+  "prerequisites": [
+    "Confirm canonical ID absent from R7",
+    "Review exact archive contents",
+    "Add genuine OSV response to a new pinned scanner profile",
+    "Roll out and verify the profile on all eight nodes",
+    "Use actual publisher authorization and stake",
+    "Complete reviewed node rollout before the V4 crash capture"
+  ],
+  "fleet_changed": false,
+  "package_executed_or_published": false
+}

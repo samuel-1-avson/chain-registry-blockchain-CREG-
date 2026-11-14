@@ -1,0 +1,18 @@
+→ Connecting to event stream at http://host.docker.internal:18080/v1/events
+→ Filter: all
+────────────────────────────────────────────────────────────
+19:49:21 ↑ SUBMITTED npm:toidentifier@1.0.1 by 863906af03a385de...
+19:49:23 ◈ VOTE      ✓ validator-1 on npm:toidentifier@1.0.1
+19:49:23 ◈ VOTE      ✓ validator-3 on npm:toidentifier@1.0.1
+19:49:23 ◈ VOTE      ✓ validator-2 on npm:toidentifier@1.0.1
+19:49:25 ◈ VOTE      ✓ validator-4 on npm:toidentifier@1.0.1
+19:49:55 ▣ BLOCK     #6 d8814d091c8a50c2c7bfd535b7524d09bfce17b8c63b6b72c33699b8e52f9fb6 (1 tx)
+19:49:55 ✓ VERIFIED  npm:toidentifier@1.0.1 block d8814d091c8a50c2c7bfd535b7524d09bfce17b8c63b6b72c33699b8e52f9fb6 validators 3
+✗ Stream error: request or response body error: error reading a body from connection: unexpected EOF during chunk size line
+↻ Reconnecting in 1s... (1/10)
+✗ Connection failed: error sending request for url (http://host.docker.internal:18080/v1/events): error trying to connect: tcp connect error: Connection refused (os error 111)
+↻ Reconnecting in 2s... (2/10)
+✗ Connection failed: error sending request for url (http://host.docker.internal:18080/v1/events): operation was canceled: connection closed before message completed
+↻ Reconnecting in 4s... (3/10)
+✗ Connection failed: error sending request for url (http://host.docker.internal:18080/v1/events): connection closed before message completed
+↻ Reconnecting in 8s... (4/10)

@@ -1,0 +1,43 @@
+{
+  "captured_at_utc": "2026-09-28T00:07:32Z",
+  "public_frontend_image": "sha256:ae0d80a7bd6f5534d4814dffdf613b66c4fee31843bfec69f713ce4319fbe122",
+  "public_frontend_compose": "chain-registry/testnet/docker-compose.public-explorer.yml",
+  "public_chain_cutover": false,
+  "pending_user_input": "Limited read-only R7 release versus full release after mandatory gates; no answer received",
+  "all_eight_ready": true,
+  "all_eight_recovery_clear": true,
+  "all_eight_pbft_clear": true,
+  "builds": [
+    {
+      "container": "creg-r25-follower-release-build",
+      "running": false,
+      "started_at": "2026-09-27T20:34:44.717699855Z",
+      "exit_code": 0
+    },
+    {
+      "container": "creg-r25-portable-cli-build",
+      "running": false,
+      "started_at": "2026-09-27T20:49:18.434876496Z",
+      "exit_code": 0
+    }
+  ],
+  "node_image_digest": "sha256:2a553f1cb8b2ea6c63bf99649c57e0291698e3ac01da5de80863760afcc07a70",
+  "node_canary_observer_2": "passed_after_peer_reconnection; initial startup check retained as failed",
+  "node_canary_validator_4": "passed; existing signing journal, identity, h14, scanner and six terminal records preserved",
+  "fleet_after_r25_v4_rollout": "all_eight_ready_and_recovery_clear_at_h14",
+  "scanner_r12_candidate": "deployed to all eight real nodes; final readiness passed at shared h14 with queues and PBFT clear; profile e067b8fc4aee823203a8a8204d2b57a4a097798d739d338bf8a45b4ff7b5ceb2",
+  "linux_cli_ubuntu22_host_read": "passed; first binary superseded by canonical verify fix",
+  "linux_cli_canonical_rebuild": {
+    "running": false,
+    "exit_code": 0,
+    "sha256": "95569797c4c0c3d767641cc7df07307874da4673fc32daa7f25ceb63776f2c69",
+    "bytes": 67270408,
+    "maximum_required_glibc": "2.34",
+    "real_o1_acceptance": "passed; canonical ID resolved and real h14/h13 records read"
+  },
+  "fresh_package_cli_browser_event_and_positive_proof": "pending; next live acceptance task",
+  "v4_durable_commit_replay": "pending",
+  "source_freeze_check": "build-source-freeze-check.json",
+  "next_source_repairs": "SERVICE-REPAIR-REVIEW.md",
+  "funding_approved_and_executed": "0x39894f356780e065fd9f3d676a458a6d639b8e69a8d7a71b48de860cc530537f"
+}

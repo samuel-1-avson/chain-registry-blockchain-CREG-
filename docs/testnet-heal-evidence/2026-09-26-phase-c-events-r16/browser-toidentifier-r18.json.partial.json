@@ -1,0 +1,76 @@
+{
+  "capturedAt": "2026-09-26T19:49:54.167Z",
+  "connections": [
+    {
+      "url": "http://127.0.0.1:3007/v1/public/events",
+      "opened": true,
+      "errors": 0
+    }
+  ],
+  "events": [
+    {
+      "type": "package_submitted",
+      "data": {
+        "kind": "package_submitted",
+        "ts": "2026-09-26T19:49:21.484515156+00:00",
+        "payload": {
+          "canonical": "npm:toidentifier@1.0.1",
+          "publisher_pubkey": "863906af03a385de"
+        }
+      },
+      "receivedAt": "2026-09-26T19:49:21.496Z"
+    },
+    {
+      "type": "validator_voted",
+      "data": {
+        "kind": "validator_voted",
+        "ts": "2026-09-26T19:49:23.556361926+00:00",
+        "payload": {
+          "validator_id": "validator-1",
+          "canonical": "npm:toidentifier@1.0.1",
+          "approved": true
+        }
+      },
+      "receivedAt": "2026-09-26T19:49:23.563Z"
+    },
+    {
+      "type": "validator_voted",
+      "data": {
+        "kind": "validator_voted",
+        "ts": "2026-09-26T19:49:23.782469841+00:00",
+        "payload": {
+          "validator_id": "validator-3",
+          "canonical": "npm:toidentifier@1.0.1",
+          "approved": true
+        }
+      },
+      "receivedAt": "2026-09-26T19:49:23.787Z"
+    },
+    {
+      "type": "validator_voted",
+      "data": {
+        "kind": "validator_voted",
+        "ts": "2026-09-26T19:49:23.973371603+00:00",
+        "payload": {
+          "validator_id": "validator-2",
+          "canonical": "npm:toidentifier@1.0.1",
+          "approved": true
+        }
+      },
+      "receivedAt": "2026-09-26T19:49:23.978Z"
+    },
+    {
+      "type": "validator_voted",
+      "data": {
+        "kind": "validator_voted",
+        "ts": "2026-09-26T19:49:25.829750265+00:00",
+        "payload": {
+          "validator_id": "validator-4",
+          "canonical": "npm:toidentifier@1.0.1",
+          "approved": true
+        }
+      },
+      "receivedAt": "2026-09-26T19:49:25.836Z"
+    }
+  ]
+}

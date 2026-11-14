@@ -1,0 +1,11 @@
+{
+  "timestamp_utc": "2026-09-27T20:50:27.7109102Z",
+  "status": "windows_canonical_build_verified_pending_cold_install",
+  "binary_sha256": "7f6eb939015356fdc454f635efa428cbadd3f62c89bcbdc0f06ee5672b04b01b",
+  "archive_sha256": "56bd4b75517ba2a99bb367131a76212f5606ef0724507e67927e452856b845e0",
+  "effective_version": "0.1.0-testnet-r25",
+  "cargo_package_version": "0.1.0",
+  "build_features": "common/phase-c-canonical-transactions",
+  "signed_spec_validated": true,
+  "failed_archive_preserved": true
+}

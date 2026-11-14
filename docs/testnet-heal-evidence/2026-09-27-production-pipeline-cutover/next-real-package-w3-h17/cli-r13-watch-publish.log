@@ -1,0 +1,9 @@
+→ Connecting to event stream at http://host.docker.internal:18080/v1/public/events
+→ Filter: pkg:has-flag
+────────────────────────────────────────────────────────────
+02:17:01 ↑ SUBMITTED npm:has-flag@5.0.1 by 863906af03a385de...
+02:17:02 ◈ VOTE      ✓ validator-1 on npm:has-flag@5.0.1
+02:17:03 ◈ VOTE      ✓ validator-2 on npm:has-flag@5.0.1
+02:17:03 ◈ VOTE      ✓ validator-3 on npm:has-flag@5.0.1
+02:17:05 ◈ VOTE      ✓ validator-4 on npm:has-flag@5.0.1
+02:41:44 ✓ VERIFIED  npm:has-flag@5.0.1 block 7c3364858873b00dcb8eef4875c2f1eaa85ade32648850177bd12dcb5f7627d7 validators 3

@@ -1,0 +1,17 @@
+{
+  "captured_at_utc": "2026-09-28T06:44:08.8944538Z",
+  "slot": "o1",
+  "status": "preflight_blocked_no_changes",
+  "reason": "Rollout preflight expected pbft-safety.rocksdb on an observer. Observer-1 does not host the validator signing journal; the helper was corrected to require this directory only on validators.",
+  "verified": {
+    "scanner_profile": "8c7f011ab71a9a695ce1364e9958a2906f02645849c3567fc5691206a93c296e",
+    "container_running": true,
+    "image_id": "sha256:ef21b958b5e3e4f09e1c87290d3d9a50f23b5350d207e5af9982dd1cf5413708",
+    "new_scanner_installed": false,
+    "p2p_identity_present": true,
+    "node_env_changed": false,
+    "chain_data_present": true,
+    "container_restarted": false,
+    "pbft_signer_journal_present": false
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "captured_at_utc": "2026-09-26T19:30:47.145Z",
+  "network": "real Ethereum Sepolia",
+  "chain_id": 11155111,
+  "token_contract": "0xbC2a72107C6765364D0A822a88A6e6C61f30EAa6",
+  "wallets": [
+    {
+      "role": "faucet",
+      "secret_id": "creg-fresh-testnet-faucet-evm",
+      "address": "0x721C8dBD8208CA9dBdcC12AE9339225458608B81",
+      "native_wei": "78870784004713162",
+      "token_wei": "0"
+    },
+    {
+      "role": "relayer",
+      "secret_id": "creg-fresh-testnet-relayer-evm",
+      "address": "0xAc0C6a6fc3c0D4f5c772414fC94594fFb7D928ce",
+      "native_wei": "0",
+      "token_wei": "0"
+    },
+    {
+      "role": "treasury",
+      "address": "0x3A3206D683441AA91cCA7CD5757B1F0ca463213A",
+      "native_wei": "192734055065081554",
+      "token_wei": "19999590000000000000000000"
+    }
+  ],
+  "secret_values_included": false,
+  "transactions_broadcast": false,
+  "public_cutover": false
+}

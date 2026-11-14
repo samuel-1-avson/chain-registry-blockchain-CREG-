@@ -1,0 +1,98 @@
+{
+  "schema": "creg-real-r22-o1-scanner-r11-postflight-v1",
+  "slot": "o1",
+  "image_id": "sha256:2b472a089fe6ac651edfbae51b616456ed335f35992c0374f10c1ea80ce6caa3",
+  "repo_digests": [
+    "creg-node@sha256:2b472a089fe6ac651edfbae51b616456ed335f35992c0374f10c1ea80ce6caa3"
+  ],
+  "node_binary_sha256": "c7ef1d3e8bb9b34e2e0e4e255bf47f751ecaada4d0617f9ac5a4dbedb262a5b1",
+  "scanner_profile_digest": "f397fac29df29438f0ee15580547def5fe66a03af60153d22993f4a7af9fce8c",
+  "scanner_epoch": "osv-2026-09-27-phase-c-kleur-r11",
+  "stats": {
+    "tip_height": 12,
+    "tip_hash": "a329eb216ce1fd18e1f5510333cb683db34ca6e789b5a3ef229dabe2af08fc7d",
+    "package_count": 4,
+    "block_count": 13,
+    "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+    "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+    "spec_signature_verified": true,
+    "l1_rpc_configured": true,
+    "is_validator": false,
+    "validator_count": 4,
+    "active_validators": 4,
+    "total_stake": 400,
+    "total_stake_native": "400",
+    "peer_count": 2,
+    "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+    "l1_block": 0,
+    "pending_tx_count": 0,
+    "publisher_count": 1,
+    "finalized_height": 12,
+    "finalization_lag": 0,
+    "finalization_source": "creg-canonical-store",
+    "validator_set_source": "chain-authoritative",
+    "validator_set_sync_state": "synced",
+    "validator_set_last_finalized_source_block": 11791404
+  },
+  "health": {
+    "status": "ok",
+    "node_id": "observer-1",
+    "is_validator": false,
+    "version": "0.1.0",
+    "validator_set_sync": {
+      "enabled": true,
+      "mode": "chain-authoritative",
+      "state": "synced",
+      "last_finalized_source_block": 11791404,
+      "cursor_block": 11791404,
+      "cursor_log_index": 4294967295,
+      "cursor_block_hash": "0xecafbfc1cc8ec51615b323c360b15223a38d027849fea40766bc3917b7953b74",
+      "last_poll_at": "2026-09-27T06:02:00.296947076+00:00",
+      "last_error": null
+    },
+    "sandbox": {
+      "engine": "nsjail",
+      "dev_bypass": false,
+      "isolated": true,
+      "degraded": false,
+      "note": "kernel namespaces + seccomp-BPF (primary engine)"
+    },
+    "sync": {
+      "lag_blocks": 0,
+      "max_peer_tip": 12,
+      "healthy": true
+    }
+  },
+  "checks": {
+    "same_pinned_r22_image": true,
+    "node_binary_sha256": true,
+    "chain_h12_and_package_count": true,
+    "observer_role_and_peers": true,
+    "scanner_profile_ready": true,
+    "scanner_epoch_and_coverage": true,
+    "old_container_preserved": true,
+    "data_and_identity_source_preserved": true,
+    "scanner_mount_read_only": true,
+    "queues_clear": true,
+    "pbft_clear": true
+  },
+  "passed": true,
+  "public_cutover": false,
+  "captured_at_utc": "2026-09-27T06:00:06.6915702Z",
+  "fleet_readiness_capture": "readiness-after-o1-20260927T055853Z.json",
+  "fleet_checks": {
+    "container_running": true,
+    "scanner_ready": true,
+    "yara_ready": true,
+    "threat_feed_ready": true,
+    "threat_feed_entries_100": true,
+    "osv_ready": true,
+    "scanner_profile_matches": false,
+    "signature_verified": true,
+    "chain_id_matches": true,
+    "genesis_matches": true,
+    "four_active_validators": true,
+    "role_matches": true,
+    "live_peers": true
+  }
+}

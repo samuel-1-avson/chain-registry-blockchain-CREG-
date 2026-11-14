@@ -1,0 +1,13 @@
+{
+  "schema": "creg-real-revoke-admission-v1",
+  "submitted_at_utc": "2026-09-26T10:37:14.3183144Z",
+  "shared_publication_quorum_verified_before_revoke": true,
+  "publication_height": 1,
+  "empty_intermediate_height": 2,
+  "canonical": "npm:is-number@7.0.0",
+  "exit_code": 0,
+  "response": "HTTP 200 {\"status\":\"queued\",\"message\":\"Revocation will be included in the next block\",\"revoked_by\":\"863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d\"}",
+  "shared_revoke_finality": true,
+  "revocation_height": 4,
+  "revocation_hash": "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0"
+}

@@ -1,0 +1,28 @@
+{
+  "status": "passed",
+  "health": {
+    "faucet": "online",
+    "faucet_balance": "9000000000000000000000",
+    "faucet_native_balance": "78819664051081092",
+    "mode": "real",
+    "native_drips_available": true,
+    "status": "healthy",
+    "token_drips_available": true
+  },
+  "durable_address_count": 1,
+  "services": {
+    "creg-faucet-public-r25": {
+      "image": "us-central1-docker.pkg.dev/gen-lang-client-0022105784/creg-testnet/creg-faucet@sha256:360c124090e5c3a5c448a69e9838bb2c1755ed18f6d32732bff6498d4cdd5ed5",
+      "state": "running",
+      "compose_project": "creg-public-faucet",
+      "restart_policy": "unless-stopped"
+    },
+    "creg-unified-faucet-db": {
+      "image": "postgres@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea",
+      "state": "running",
+      "compose_project": "creg-public-faucet",
+      "restart_policy": "unless-stopped"
+    }
+  },
+  "other_services_recreated": false
+}

@@ -1,0 +1,634 @@
+{
+  "status": "verified",
+  "block_hash": "8448cce76d7258f051cf9632d2ef7181da1321f5d19a3b5d00f00f8975aa2993",
+  "block_header": {
+    "height": 13,
+    "prev_hash": "a329eb216ce1fd18e1f5510333cb683db34ca6e789b5a3ef229dabe2af08fc7d",
+    "merkle_root": "54d76b0f1255b554395bf077365e011f5ea0dca3dabc40bb485ae26fa4cba568",
+    "proposer_id": "validator-4",
+    "timestamp": "2026-09-27T06:49:08Z",
+    "validator_set_hash": "ad5c4491938c5410d22b896290f3603ccec7abf3393bd5364bcea7674c109e98",
+    "vrf_output": "adef6532374e16f330976452c6e994684d69bbf633c5e35325be7383b10a64bb",
+    "vrf_proof": "1c7aaf450c81cd5eb0abe2dd599b5e6e8b93d4cb91a39a0b06c3579f131225df23c4291aab21909c9126c5da661ce54fa19c221f409e9fd004d2e1e137337902"
+  },
+  "proof": {
+    "tx_hash": "54d76b0f1255b554395bf077365e011f5ea0dca3dabc40bb485ae26fa4cba568",
+    "path": [],
+    "expected_root": "54d76b0f1255b554395bf077365e011f5ea0dca3dabc40bb485ae26fa4cba568"
+  },
+  "header_chain": [
+    [
+      {
+        "height": 1,
+        "prev_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+        "merkle_root": "6888e192fbec959ef6c457138b584d8ac6d2b0e4783991fada58d66eb6e82a33",
+        "proposer_id": "validator-4",
+        "timestamp": "2026-09-26T10:28:13Z",
+        "validator_set_hash": "ad5c4491938c5410d22b896290f3603ccec7abf3393bd5364bcea7674c109e98",
+        "vrf_output": "c1d5c3b9623cb99c495d1b32d04bf4c2ae9b8e79c8df2ec7a9c7dde99d904463",
+        "vrf_proof": "bc92c75e17edd6b476de7b9aa952b9dcd1cce58f8c7942609bdf952f0f30b3f121503f66a18c9405789075bef9adba0c7a850f1b791e6477f4164440d54b4a0f"
+      },
+      "0121be9bb637aec634cd5f081fb903ee4749875d8225683f057af005ae16f436"
+    ],
+    [
+      {
+        "height": 2,
+        "prev_hash": "0121be9bb637aec634cd5f081fb903ee4749875d8225683f057af005ae16f436",
+        "merkle_root": "2e1cfa82b035c26cbbbdae632cea070514eb8b773f616aaeaf668e2f0be8f10d",
+        "proposer_id": "validator-2",
+        "timestamp": "2026-09-26T10:29:55Z",
+        "validator_set_hash": "ad5c4491938c5410d22b896290f3603ccec7abf3393bd5364bcea7674c109e98",
+        "vrf_output": "8bd242ab4f479f06baf5163e71f1c70a9fae21e726fd5d1e868bb51cbbb9af22",
+        "vrf_proof": "f6efd13441b6060090bfc1d035d4b181dbf222ddfffa86ef3a5b93852189075ca5178028e264b79a929d4dc2eba66f8bf1b053659d49542b0a13dbdd87840700",
+        "view_number": 1,
+        "view_change_certificate": [
+          {
+            "height": 2,
+            "prev_hash": "0121be9bb637aec634cd5f081fb903ee4749875d8225683f057af005ae16f436",
+            "new_view": 1,
+            "validator_id": "validator-2",
+            "prepared": null,
+            "signature": "9fbeda8c61d5415ff68fbe306c8da8ef8d4a4df15817609d33bec087253ae435bccf8bf175ebe107911a1b88f9fc66f7ddf184c257717eb09d57bcf1e04ea80f"
+          },
+          {
+            "height": 2,
+            "prev_hash": "0121be9bb637aec634cd5f081fb903ee4749875d8225683f057af005ae16f436",
+            "new_view": 1,
+            "validator_id": "validator-3",
+            "prepared": null,
+            "signature": "2ccd62f187592e2bf1d90fad1eef39da87c738de2e8bd3b0e4fda6418c34fe03d2f08f194664674a52a3d67ab98f64b273404c52c0bdf07fd7af846a96d84503"
+          },
+          {
+            "height": 2,
+            "prev_hash": "0121be9bb637aec634cd5f081fb903ee4749875d8225683f057af005ae16f436",
+            "new_view": 1,
+            "validator_id": "validator-4",
+            "prepared": null,
+            "signature": "36e7a998c07e8b8188d39025d488551f3de197f608ad2377c68c284419d9682877e866c1c089282e6ed4c1ddf6ac0e1d305ecb5a9ffb3e9e84dcfb6374a9030b"
+          }
+        ]
+      },
+      "6d1d4da2fb62b88af608b070d2a28fe1a2b41d29475d88061dabb87df6b3681e"
+    ],
+    [
+      {
+        "height": 3,
+        "prev_hash": "6d1d4da2fb62b88af608b070d2a28fe1a2b41d29475d88061dabb87df6b3681e",
+        "merkle_root": "2e1cfa82b035c26cbbbdae632cea070514eb8b773f616aaeaf668e2f0be8f10d",
+        "proposer_id": "validator-4",
+        "timestamp": "2026-09-26T10:37:48Z",
+        "validator_set_hash": "ad5c4491938c5410d22b896290f3603ccec7abf3393bd5364bcea7674c109e98",
+        "vrf_output": "00fcaebb41e9ca13d8cd6be7fb66606f692aab1e18d39a99f707c36b9e5192fb",
+        "vrf_proof": "1be5a4f65860b6912f30f4b557d4e02deb24a72d88619691553dacff7ed48819591b08db52c1ab9b9cca7e5b6fd892a1f0d400816bdadd7fd929d526770fe901",
+        "view_number": 1,
+        "view_change_certificate": [
+          {
+            "height": 3,
+            "prev_hash": "6d1d4da2fb62b88af608b070d2a28fe1a2b41d29475d88061dabb87df6b3681e",
+            "new_view": 1,
+            "validator_id": "validator-1",
+            "prepared": null,
+            "signature": "526afe163a5dcc2d785ecae146eac9deeba3c2e5aee4361bc70e67dd2dd7cbac651f91a0896fd72656d63f66e71abb326bf8d18980085c763e6dd8b09f30cc0b"
+          },
+          {
+            "height": 3,
+            "prev_hash": "6d1d4da2fb62b88af608b070d2a28fe1a2b41d29475d88061dabb87df6b3681e",
+            "new_view": 1,
+            "validator_id": "validator-3",
+            "prepared": null,
+            "signature": "231e7e6ca5584ec6ff079be6623c320937ee8f0529c7886130da20829a7059f35e905895e5384f356212f45579f12ed138eb44dd2d9466287f11b51442b1d907"
+          },
+          {
+            "height": 3,
+            "prev_hash": "6d1d4da2fb62b88af608b070d2a28fe1a2b41d29475d88061dabb87df6b3681e",
+            "new_view": 1,
+            "validator_id": "validator-4",
+            "prepared": null,
+            "signature": "9bde577bcbe04f439f90004b4b38618d27eea4f13dc8f83e518d5701df5737e0eb1bfed6b34a60220c6817b8c56eb7d1723cd64bafd7646c70610b528eaaa20d"
+          }
+        ]
+      },
+      "1fcd541e428fec047d1b518ed314fcc1370cd56aef505157b71821e2561362c3"
+    ],
+    [
+      {
+        "height": 4,
+        "prev_hash": "1fcd541e428fec047d1b518ed314fcc1370cd56aef505157b71821e2561362c3",
+        "merkle_root": "4d3fc86cb21686d049082a794efd304c631fcee71c55ca7a5c0ee77a9e6c2246",
+        "proposer_id": "validator-1",
+        "timestamp": "2026-09-26T10:37:54Z",
+        "validator_set_hash": "ad5c4491938c5410d22b896290f3603ccec7abf3393bd5364bcea7674c109e98",
+        "vrf_output": "2c871b70e0d43ad84bdd58966edb2a076b26c894f2d1a2550a2563eacaa1818f",
+        "vrf_proof": "0c5239f464844f675236aeba41077b7d4d333bd11ece7f6b3fa43bda39e7c550b9e198196bec3beeeecdcd0dac9ef8f34d0262635900373a1b5e38b61b24b00d"
+      },
+      "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0"
+    ],
+    [
+      {
+        "height": 5,
+        "prev_hash": "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0",
+        "merkle_root": "05ee3e125b8d0f13081e17acb89d94442867afc5520034e4a5f59943ae949d9e",
+        "proposer_id": "validator-1",
+        "timestamp": "2026-09-26T18:01:37Z",
+        "validator_set_hash": "ad5c4491938c5410d22b896290f3603ccec7abf3393bd5364bcea7674c109e98",
+        "vrf_output": "1009227e46a0640a969b38ab3878414a08f810e508fc6ea934b660ea7e076419",
+        "vrf_proof": "75272921b3689eca23e7b1178c1afc81f1ebdceb48eafe21ec654e93736e7100660fe63ac3e68acbabf3b3e84e4300914b5fc847cd608c283b2295d46c60e30a"
+      },
+      "daab438828a678aee3aa2eebf041f5147bc6f76fed837a207e6a1f4747d427cf"
+    ],
+    [
+      {
+        "height": 6,
+        "prev_hash": "daab438828a678aee3aa2eebf041f5147bc6f76fed837a207e6a1f4747d427cf",
+        "merkle_root": "8345b36c848854c51419e045cf589ffd6718cdb08a14c58dbd05d48d61031713",
+        "proposer_id": "validator-1",
+        "timestamp": "2026-09-26T19:49:25Z",
+        "validator_set_hash": "ad5c4491938c5410d22b896290f3603ccec7abf3393bd5364bcea7674c109e98",
+        "vrf_output": "c21acc49dc7981b1a3fe81fbf2f1f213746991610bcc68a06f25eec58dbe4ba4",
+        "vrf_proof": "a8fa077117a92de99a7960af60a9a76b2548b39fd3ddeb171864bcd3b642e97f656613863018dfa22f54a30fa8a04a3ad63cee582c4e01edcdc3914ac4b63c08"
+      },
+      "d8814d091c8a50c2c7bfd535b7524d09bfce17b8c63b6b72c33699b8e52f9fb6"
+    ],
+    [
+      {
+        "height": 7,
+        "prev_hash": "d8814d091c8a50c2c7bfd535b7524d09bfce17b8c63b6b72c33699b8e52f9fb6",
+        "merkle_root": "52d1bdd74854d98089711e7809328bea9118f85db2619548165c539bca836681",
+        "proposer_id": "validator-2",
+        "timestamp": "2026-09-26T21:17:36Z",
+        "validator_set_hash": "ad5c4491938c5410d22b896290f3603ccec7abf3393bd5364bcea7674c109e98",
+        "vrf_output": "c9d5f71df44b53fa219b31e88df29db6c3097a31423ae77df9149eceab75d299",
+        "vrf_proof": "6493d5043d8472bf665e5d20a2203540efcf53a1ddd795b5443b532057159c4e6639e28100ceda3de23f0885d6da2ebe29bf7684951d2e98ad70dc8a9d64000c"
+      },
+      "e7d0f50b235ab10a3be6dea22334e9daa532a45b96f075037e49db64fc341fd7"
+    ],
+    [
+      {
+        "height": 8,
+        "prev_hash": "e7d0f50b235ab10a3be6dea22334e9daa532a45b96f075037e49db64fc341fd7",
+        "merkle_root": "52d1bdd74854d98089711e7809328bea9118f85db2619548165c539bca836681",
+        "proposer_id": "validator-3",
+        "timestamp": "2026-09-26T21:19:52Z",
+        "validator_set_hash": "ad5c4491938c5410d22b896290f3603ccec7abf3393bd5364bcea7674c109e98",
+        "vrf_output": "a7f73e137f4fc840bc823faea58ccd15bb6aedd6c113ddaafc60c0fa373a4921",
+        "vrf_proof": "b864e95ad1bfad0dfbe323bec9e8365b766ae3e75ed93b0cf85ff4062c05d9d61c7f9e6e44bf0ed25c6bb3fec90695d864ad3c97abc8092a19caff854fda6e0f",
+        "view_number": 2,
+        "view_change_certificate": [
+          {
+            "height": 8,
+            "prev_hash": "e7d0f50b235ab10a3be6dea22334e9daa532a45b96f075037e49db64fc341fd7",
+            "new_view": 2,
+            "validator_id": "validator-1",
+            "prepared": null,
+            "signature": "09651d5dfb678ca9b974444f80dbe0b42602d6468477a17e7835155197a309034058b4c9802d6a9d4cb0fd88306552ed3b38960008294ded9e92e5b2df5faf0c"
+          },
+          {
+            "height": 8,
+            "prev_hash": "e7d0f50b235ab10a3be6dea22334e9daa532a45b96f075037e49db64fc341fd7",
+            "new_view": 2,
+            "validator_id": "validator-2",
+            "prepared": null,
+            "signature": "ee1982c54d1a1b62bcfd0044bbda194095f067cf356447fde6b8dc494a54aa8d154458cb49c45da80e2c42e156c21089a95a07d8bd9f04dfaec5c728e83b7804"
+          },
+          {
+            "height": 8,
+            "prev_hash": "e7d0f50b235ab10a3be6dea22334e9daa532a45b96f075037e49db64fc341fd7",
+            "new_view": 2,
+            "validator_id": "validator-3",
+            "prepared": null,
+            "signature": "8a3a2f52b37cdf5e36112f50c1a56cb038b575bf5490e1ef0b92fb573644a8210ed415b957da69314181278813b3e180de4c78ef2f1244f46b7d8512fcf1ed00"
+          }
+        ]
+      },
+      "1ba1f9f9a61b59fbf32a8bebad14b393f3ab3ef070892e88ef97bf5cb4d4e846"
+    ],
+    [
+      {
+        "height": 9,
+        "prev_hash": "1ba1f9f9a61b59fbf32a8bebad14b393f3ab3ef070892e88ef97bf5cb4d4e846",
+        "merkle_root": "52d1bdd74854d98089711e7809328bea9118f85db2619548165c539bca836681",
+        "proposer_id": "validator-1",
+        "timestamp": "2026-09-26T21:19:55Z",
+        "validator_set_hash": "ad5c4491938c5410d22b896290f3603ccec7abf3393bd5364bcea7674c109e98",
+        "vrf_output": "49a98b457551a3f55e658b984103aaa0cc4eb22c6ebc3e8561ab34da8201f48b",
+        "vrf_proof": "9ca22ddedafed0d7278bf36110bd1066a0a1ce1c2d871a4bb2cdf1cfdce237c03739e9b04d4386e66fc8eb55961f27a76aa1e40393ccf3e57b5ebc62d338820f"
+      },
+      "e0b40d52f7626f46a0bcf85040ec2c34dc1d576af0b1e7d65396d31c325f0837"
+    ],
+    [
+      {
+        "height": 10,
+        "prev_hash": "e0b40d52f7626f46a0bcf85040ec2c34dc1d576af0b1e7d65396d31c325f0837",
+        "merkle_root": "b8bce8fc59fd2846e9113f0c78fc69e4ef654294c0df82274f7bf95e16540363",
+        "proposer_id": "validator-1",
+        "timestamp": "2026-09-26T22:15:48Z",
+        "validator_set_hash": "ad5c4491938c5410d22b896290f3603ccec7abf3393bd5364bcea7674c109e98",
+        "vrf_output": "2c523d848f827415f692ee02ec3f4bd1535c8340568542855482cc1c772d0cba",
+        "vrf_proof": "ad47e917efa99558185608b87c0164f0f662e6aff77febe93d9e11604ca50a1eec7b3fc740fad8728c2644b9da9b59d5dd721ef18052ed49235498f7092d6006"
+      },
+      "990091981261dce3160614e37e7b2faab4934d1d1f99101adcc9d37727b6e9d1"
+    ],
+    [
+      {
+        "height": 11,
+        "prev_hash": "990091981261dce3160614e37e7b2faab4934d1d1f99101adcc9d37727b6e9d1",
+        "merkle_root": "f9c35ed006fb438fb8fb2c0273d494bb2e2437165f7bd34b8299131f7771365a",
+        "proposer_id": "validator-1",
+        "timestamp": "2026-09-26T22:39:03Z",
+        "validator_set_hash": "ad5c4491938c5410d22b896290f3603ccec7abf3393bd5364bcea7674c109e98",
+        "vrf_output": "02eb9846ac708b8de38656e73f1c5da5be536c7a478a65d19f3bf91e3517a604",
+        "vrf_proof": "6bea6d73913d9fdb48451506627d515daac28f6f74e08dab34b58db833ca51137cafba8b12f4640acfb7a9b7a1b35ba1239b3377fdc93ca07c8c23d4eda3d204"
+      },
+      "a87ff93fbdb2ea01549125a9f0a20c717049f0e8f8e28b952078cbf66b2117f3"
+    ],
+    [
+      {
+        "height": 12,
+        "prev_hash": "a87ff93fbdb2ea01549125a9f0a20c717049f0e8f8e28b952078cbf66b2117f3",
+        "merkle_root": "b0f7ba8247b77d0647ad2d6f3e6feafbf2117b156abc2e2e29c411a2bd767c17",
+        "proposer_id": "validator-4",
+        "timestamp": "2026-09-26T22:51:24Z",
+        "validator_set_hash": "ad5c4491938c5410d22b896290f3603ccec7abf3393bd5364bcea7674c109e98",
+        "vrf_output": "ecbc357cacaec1cd26b0697365b4a307816e0f3fa674e35f892f0682662ca137",
+        "vrf_proof": "0570661a870315d9776ac33cf1c30f021705fb4696fd603afa86b5d950d9ef81837595aa266877d03845a31a024f9c0b0950828c6bb5dbbe3cbb220ce371820a"
+      },
+      "a329eb216ce1fd18e1f5510333cb683db34ca6e789b5a3ef229dabe2af08fc7d"
+    ],
+    [
+      {
+        "height": 13,
+        "prev_hash": "a329eb216ce1fd18e1f5510333cb683db34ca6e789b5a3ef229dabe2af08fc7d",
+        "merkle_root": "54d76b0f1255b554395bf077365e011f5ea0dca3dabc40bb485ae26fa4cba568",
+        "proposer_id": "validator-4",
+        "timestamp": "2026-09-27T06:49:08Z",
+        "validator_set_hash": "ad5c4491938c5410d22b896290f3603ccec7abf3393bd5364bcea7674c109e98",
+        "vrf_output": "adef6532374e16f330976452c6e994684d69bbf633c5e35325be7383b10a64bb",
+        "vrf_proof": "1c7aaf450c81cd5eb0abe2dd599b5e6e8b93d4cb91a39a0b06c3579f131225df23c4291aab21909c9126c5da661ce54fa19c221f409e9fd004d2e1e137337902"
+      },
+      "8448cce76d7258f051cf9632d2ef7181da1321f5d19a3b5d00f00f8975aa2993"
+    ]
+  ],
+  "pbft_signatures": [
+    {
+      "validator_id": "validator-2",
+      "pubkey": "779c9522addbce63f78448fa83bff1e789a4a874c4db25e0f7fe00b3d0429fd9",
+      "signature": "b780d75e47f8aa1bd61b8973f28b5c5a6ad7e4a0530d2521c7caa87e6e995d12931dd254ae9af1e51d1197479314010888349852e1588552c276bae58b9a3f02"
+    },
+    {
+      "validator_id": "validator-3",
+      "pubkey": "7876b26b471f81edd9597354fd023157858f2b02d73a1e7bb0b430c9fc63e6bc",
+      "signature": "077039b3cf0f9398b210133002c8a39f4d0fffcdd968ce92ec24fe7d80bb33da667ce5b5ae503f1e306fc67ab9aca641d1d1e6556e94c947dc58711c36d2f70c"
+    },
+    {
+      "validator_id": "validator-1",
+      "pubkey": "cc4157c4443c9fb011df2b650f497e3eadfc1ddda6dc7f4b6732325383108ffc",
+      "signature": "3ca1ff7edcc7b6b5b2ff507a22180f3c0cdd551ee43c7c0c6fbfa56fc7ef79f92b33cf5a3c69999183b0a3b2262699ac4c5606c877153e48956d37a0c4f4ed0c"
+    }
+  ],
+  "active_validators": [
+    {
+      "id": "validator-1",
+      "alias": "Phase C validator-1",
+      "pubkey": "cc4157c4443c9fb011df2b650f497e3eadfc1ddda6dc7f4b6732325383108ffc",
+      "eth_address": "0x91e4dfc18bf015051676f00f23782d0770b95a7a",
+      "stake": 100,
+      "reputation": 100,
+      "status": "active",
+      "performance_score": 500,
+      "contribution_count": 0
+    },
+    {
+      "id": "validator-2",
+      "alias": "Phase C validator-2",
+      "pubkey": "779c9522addbce63f78448fa83bff1e789a4a874c4db25e0f7fe00b3d0429fd9",
+      "eth_address": "0x9a33a425953ec36e729e0b7f94b7db0174dbe13b",
+      "stake": 100,
+      "reputation": 100,
+      "status": "active",
+      "performance_score": 500,
+      "contribution_count": 0
+    },
+    {
+      "id": "validator-3",
+      "alias": "Phase C validator-3",
+      "pubkey": "7876b26b471f81edd9597354fd023157858f2b02d73a1e7bb0b430c9fc63e6bc",
+      "eth_address": "0x5470e9700ed487af787af7a2f8c0dc771d5f3fdd",
+      "stake": 100,
+      "reputation": 100,
+      "status": "active",
+      "performance_score": 500,
+      "contribution_count": 0
+    },
+    {
+      "id": "validator-4",
+      "alias": "Phase C validator-4",
+      "pubkey": "f777ca6f1dafbbeb9cbe5a258568c574e7f519a1e58da57c97d28fcf69dd35ff",
+      "eth_address": "0xbf10f3553d9ecf43c7bc08a6cff0423a9476892a",
+      "stake": 100,
+      "reputation": 100,
+      "status": "active",
+      "performance_score": 500,
+      "contribution_count": 0
+    }
+  ],
+  "proven_transaction": {
+    "type": "publish_authorized_v1",
+    "record": {
+      "id": {
+        "ecosystem": "npm",
+        "name": "kleur",
+        "version": "4.1.5"
+      },
+      "content_hash": "0d99562acf82fca4afce2a57b687289a524ac6755dcaf1fdf82a147473091469",
+      "ipfs_cid": "QmSEhmMVab63QT8AhTvqwXozKEj3PkQG5vE95nzs8PAju8",
+      "publisher_pubkey": "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d",
+      "block_hash": "pending",
+      "published_at": "2026-09-27T06:49:08.491685688Z",
+      "validator_signatures": [
+        {
+          "validator_id": "validator-1",
+          "validator_pubkey": "cc4157c4443c9fb011df2b650f497e3eadfc1ddda6dc7f4b6732325383108ffc",
+          "signature": "50ee527718a6f74fc95bdc90f1306d3c2da03f3138275a0bed14bc8176f62ec35876e630de2858703ebfb719768746ab779f5df3294673312a13a9388b4af704",
+          "vote": "Approve",
+          "signed_at": "2026-09-27T06:49:06.533806459Z",
+          "ml_model_version": "creg-deterministic-scanner-v1.1.0+sha256:f397fac29df29438f0ee15580547def5fe66a03af60153d22993f4a7af9fce8c",
+          "analysis_bundles": {
+            "policy_bundle_id": "policy-v1",
+            "feature_schema_id": "features-v1",
+            "expert_bundle_id": "experts-v1",
+            "embedding_model_id": "embeddings-v1",
+            "index_epoch": "index-epoch-0",
+            "threshold_profile_id": "thresholds-v1",
+            "llm_prompt_profile_id": "llm-prompt-v1",
+            "osv_snapshot_epoch": "osv-2026-09-27-phase-c-kleur-r11"
+          },
+          "evidence_digest": "93d2cd8d38228ec0b2b02bbbfe5d5e320b2f5cbe19a461f344adf1eb34af6db2",
+          "deterministic_risk": {
+            "score": 55,
+            "deterministic_score": 26,
+            "advisory_score": 0,
+            "band": "elevated",
+            "disposition": "review",
+            "deterministic_findings": 5,
+            "advisory_findings": 1,
+            "critical_findings": 0,
+            "high_findings": 0,
+            "medium_findings": 1,
+            "low_findings": 4,
+            "reasons": [
+              "[DS001] AI Deep Scan: Suspicious",
+              "[SA005] Reads environment variables (potential credential harvesting)",
+              "[SA005] Reads environment variables (potential credential harvesting)",
+              "[SA005] Reads environment variables (potential credential harvesting)",
+              "[SA005] Reads environment variables (potential credential harvesting)",
+              "Publisher reputation delta -100 increases deterministic risk"
+            ]
+          },
+          "is_mandatory": true
+        },
+        {
+          "validator_id": "validator-3",
+          "validator_pubkey": "7876b26b471f81edd9597354fd023157858f2b02d73a1e7bb0b430c9fc63e6bc",
+          "signature": "5b2efc9ed1eeeecf1d96a4bbc283c4ed4777543dee7c10367e0c17df6e4560ff27ffff7dcd93888d3021de3a027101b05ff5078e77f4b2478e2b15e1c6fcef0f",
+          "vote": "Approve",
+          "signed_at": "2026-09-27T06:49:07.430207053Z",
+          "ml_model_version": "creg-deterministic-scanner-v1.1.0+sha256:f397fac29df29438f0ee15580547def5fe66a03af60153d22993f4a7af9fce8c",
+          "analysis_bundles": {
+            "policy_bundle_id": "policy-v1",
+            "feature_schema_id": "features-v1",
+            "expert_bundle_id": "experts-v1",
+            "embedding_model_id": "embeddings-v1",
+            "index_epoch": "index-epoch-0",
+            "threshold_profile_id": "thresholds-v1",
+            "llm_prompt_profile_id": "llm-prompt-v1",
+            "osv_snapshot_epoch": "osv-2026-09-27-phase-c-kleur-r11"
+          },
+          "evidence_digest": "93d2cd8d38228ec0b2b02bbbfe5d5e320b2f5cbe19a461f344adf1eb34af6db2",
+          "deterministic_risk": {
+            "score": 55,
+            "deterministic_score": 26,
+            "advisory_score": 0,
+            "band": "elevated",
+            "disposition": "review",
+            "deterministic_findings": 5,
+            "advisory_findings": 1,
+            "critical_findings": 0,
+            "high_findings": 0,
+            "medium_findings": 1,
+            "low_findings": 4,
+            "reasons": [
+              "[DS001] AI Deep Scan: Suspicious",
+              "[SA005] Reads environment variables (potential credential harvesting)",
+              "[SA005] Reads environment variables (potential credential harvesting)",
+              "[SA005] Reads environment variables (potential credential harvesting)",
+              "[SA005] Reads environment variables (potential credential harvesting)",
+              "Publisher reputation delta -100 increases deterministic risk"
+            ]
+          },
+          "is_mandatory": true
+        },
+        {
+          "validator_id": "validator-2",
+          "validator_pubkey": "779c9522addbce63f78448fa83bff1e789a4a874c4db25e0f7fe00b3d0429fd9",
+          "signature": "fe2f30e996403eb98156ca0e43a8439a2742cce202fcc66bd52fad0d99a166704da1bca8b0cc8b33464b2114e15f44f2ae00cb0b40a349b79c8164ccbafa9106",
+          "vote": "Approve",
+          "signed_at": "2026-09-27T06:49:07.639461247Z",
+          "ml_model_version": "creg-deterministic-scanner-v1.1.0+sha256:f397fac29df29438f0ee15580547def5fe66a03af60153d22993f4a7af9fce8c",
+          "analysis_bundles": {
+            "policy_bundle_id": "policy-v1",
+            "feature_schema_id": "features-v1",
+            "expert_bundle_id": "experts-v1",
+            "embedding_model_id": "embeddings-v1",
+            "index_epoch": "index-epoch-0",
+            "threshold_profile_id": "thresholds-v1",
+            "llm_prompt_profile_id": "llm-prompt-v1",
+            "osv_snapshot_epoch": "osv-2026-09-27-phase-c-kleur-r11"
+          },
+          "evidence_digest": "93d2cd8d38228ec0b2b02bbbfe5d5e320b2f5cbe19a461f344adf1eb34af6db2",
+          "deterministic_risk": {
+            "score": 55,
+            "deterministic_score": 26,
+            "advisory_score": 0,
+            "band": "elevated",
+            "disposition": "review",
+            "deterministic_findings": 5,
+            "advisory_findings": 1,
+            "critical_findings": 0,
+            "high_findings": 0,
+            "medium_findings": 1,
+            "low_findings": 4,
+            "reasons": [
+              "[DS001] AI Deep Scan: Suspicious",
+              "[SA005] Reads environment variables (potential credential harvesting)",
+              "[SA005] Reads environment variables (potential credential harvesting)",
+              "[SA005] Reads environment variables (potential credential harvesting)",
+              "[SA005] Reads environment variables (potential credential harvesting)",
+              "Publisher reputation delta -100 increases deterministic risk"
+            ]
+          },
+          "is_mandatory": true
+        }
+      ],
+      "status": "Verified",
+      "shielded": false,
+      "key_bundle": null,
+      "pgp_fingerprint": null,
+      "pgp_signature_sha256": "",
+      "pgp_public_key_sha256": "",
+      "findings": [
+        {
+          "id": "SA005",
+          "title": "Reads environment variables (potential credential harvesting)",
+          "severity": "Low",
+          "description": "Reads environment variables (potential credential harvesting)",
+          "file": "package/colors.js",
+          "line": 3
+        },
+        {
+          "id": "SA005",
+          "title": "Reads environment variables (potential credential harvesting)",
+          "severity": "Low",
+          "description": "Reads environment variables (potential credential harvesting)",
+          "file": "package/index.js",
+          "line": 5
+        },
+        {
+          "id": "SA005",
+          "title": "Reads environment variables (potential credential harvesting)",
+          "severity": "Low",
+          "description": "Reads environment variables (potential credential harvesting)",
+          "file": "package/colors.mjs",
+          "line": 3
+        },
+        {
+          "id": "SA005",
+          "title": "Reads environment variables (potential credential harvesting)",
+          "severity": "Low",
+          "description": "Reads environment variables (potential credential harvesting)",
+          "file": "package/index.mjs",
+          "line": 5
+        },
+        {
+          "id": "DS001",
+          "title": "AI Deep Scan: Suspicious",
+          "severity": "Medium",
+          "description": "Multi-layer scan (YARA+OSV+ThreatIntel) flagged suspicious patterns (probability: 0.36).",
+          "file": "deep_scan",
+          "line": null
+        },
+        {
+          "id": "LLM-SKIP",
+          "title": "LLM Stage 4 skipped",
+          "severity": "Low",
+          "description": "The LLM-assisted review stage (Stage 4) was not executed: CREG_LLM_ENABLED is not set — LLM stage skipped. Set CREG_LLM_ENABLED=true and configure at least one provider key (ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY, or CREG_OLLAMA_URL) to enable deep LLM analysis.. Static analysis, sandbox, and ML stages still ran. Enable CREG_LLM_ENABLED=true and configure a provider key to activate deep semantic analysis.",
+          "file": "llm-review",
+          "line": null
+        }
+      ],
+      "analysis_bundles": {
+        "policy_bundle_id": "policy-v1",
+        "feature_schema_id": "features-v1",
+        "expert_bundle_id": "experts-v1",
+        "embedding_model_id": "embeddings-v1",
+        "index_epoch": "index-epoch-0",
+        "threshold_profile_id": "thresholds-v1",
+        "llm_prompt_profile_id": "llm-prompt-v1",
+        "osv_snapshot_epoch": "osv-2026-09-27-phase-c-kleur-r11"
+      },
+      "evidence_digest": "93d2cd8d38228ec0b2b02bbbfe5d5e320b2f5cbe19a461f344adf1eb34af6db2",
+      "deterministic_risk": {
+        "score": 55,
+        "deterministic_score": 26,
+        "advisory_score": 0,
+        "band": "elevated",
+        "disposition": "review",
+        "deterministic_findings": 5,
+        "advisory_findings": 1,
+        "critical_findings": 0,
+        "high_findings": 0,
+        "medium_findings": 1,
+        "low_findings": 4,
+        "reasons": [
+          "[DS001] AI Deep Scan: Suspicious",
+          "[SA005] Reads environment variables (potential credential harvesting)",
+          "[SA005] Reads environment variables (potential credential harvesting)",
+          "[SA005] Reads environment variables (potential credential harvesting)",
+          "[SA005] Reads environment variables (potential credential harvesting)",
+          "Publisher reputation delta -100 increases deterministic risk"
+        ]
+      },
+      "access_count": 0,
+      "last_accessed": null,
+      "threshold": 1,
+      "publisher_pubkeys": [
+        "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d"
+      ],
+      "manifest": {
+        "allowed_network_hosts": [],
+        "allowed_fs_writes": [],
+        "spawns_processes": false,
+        "allowed_process_spawns": [],
+        "description": "kleur 4.1.5 formats terminal text with ANSI colors."
+      },
+      "analysis_committee_size": 4,
+      "analysis_selection_seed": "36386531663863336263396433333064343336383862643937303833623035366339373230393335346231643836346436616632653463356131336635363133",
+      "analysis_effective_size": 4,
+      "analysis_mandatory_contributed": 3,
+      "analysis_committee": {
+        "size": 4,
+        "members": [
+          "validator-1",
+          "validator-4",
+          "validator-2",
+          "validator-3"
+        ],
+        "seed": "36386531663863336263396433333064343336383862643937303833623035366339373230393335346231643836346436616632653463356131336635363133",
+        "effective_size": 4,
+        "performance_bias": true,
+        "member_performance_at_finalization": {
+          "validator-3": 465,
+          "validator-2": 465,
+          "validator-1": 465,
+          "validator-4": 500
+        },
+        "validator_snapshot_hash": "ad5c4491938c5410d22b896290f3603ccec7abf3393bd5364bcea7674c109e98",
+        "validator_snapshot_height": 0,
+        "validator_snapshot_anchor_block_hash": "a329eb216ce1fd18e1f5510333cb683db34ca6e789b5a3ef229dabe2af08fc7d",
+        "validator_snapshot_certificate_hash": "",
+        "selection_randomness": "ecbc357cacaec1cd26b0697365b4a307816e0f3fa674e35f892f0682662ca137",
+        "assignment_proof": "f388350b827838a07fa9b2b53357a0606e8f8a5b6886d35c7a5657c63c0a6c2b"
+      }
+    },
+    "authorization": {
+      "schema_version": 1,
+      "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+      "genesis_hash": "1852b9a86dd3b53e7b2de4a774723a4fe48e862f9c61d14e5917b42b21055234",
+      "staking_contract": "0x61c00ebe7c46f0bce63942f7e15bcc434dfc9b7c",
+      "publisher_address": "0xa40d79527314efd4964d49c4a0673c87b612348b",
+      "publisher_ed25519_pubkey": "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d",
+      "publisher_ed25519_signature": "",
+      "publisher_evm_signature": "92c127347b1a45277b26d7629cdf013d663ea8fbb3bd66158c97279397216216436de58cb9bba13d760cc3ebe2e75153d58776c58d45f9b29cc903ba9ce7bc371c",
+      "nonce": "25f94b7c24ced5ce2ce014889ba959c8",
+      "issued_at": 1790491738,
+      "expires_at": 1790495338,
+      "source_hash": "0d99562acf82fca4afce2a57b687289a524ac6755dcaf1fdf82a147473091469",
+      "manifest_hash": "f0c0f903f459e5dcaca6ea1e5e467b3352a2eb61f223c953e24984de9f42a7f5",
+      "ipfs_cid": "QmSEhmMVab63QT8AhTvqwXozKEj3PkQG5vE95nzs8PAju8",
+      "shielded": false,
+      "key_bundle_sha256": "",
+      "pgp_signature_sha256": "",
+      "pgp_public_key_sha256": "",
+      "ownership_claim": "npm:kleur",
+      "threshold": 1,
+      "publisher_pubkeys": [
+        "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d"
+      ],
+      "signatures": [
+        "9c76db03381548ed51b4d2bbc864431d3a0d56cb33fecbbec87f2c25ebf1754861bf7c3a069ace5a2a7c6e633b2e09f44e09bbb7a1b5b4b329b1ef5c49285207"
+      ],
+      "ownership_proof": null,
+      "authority_certificate": null
+    }
+  },
+  "validator_set_history": []
+}

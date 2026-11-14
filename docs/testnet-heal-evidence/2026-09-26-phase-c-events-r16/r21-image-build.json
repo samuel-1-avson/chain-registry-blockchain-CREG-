@@ -1,0 +1,33 @@
+{
+  "schema": "creg-phase-c-node-image-build-v1",
+  "captured_at_utc": "2026-09-26 21:46:20 UTC",
+  "image_tag": "creg-node:phase-c-secure-r21-revoke-retirement",
+  "compilation": "passed",
+  "build_command": "docker build --file testnet/phase-c/Dockerfile.r21-revoke-retirement --tag creg-node:phase-c-secure-r21-revoke-retirement .",
+  "build_exit_code": 0,
+  "base_image": "creg-node:phase-c-secure-r20-durable-revocation-delivery",
+  "base_image_id": "sha256:f6ca255a37d86b0f93c2a57aee6233e4ef1bce16df14f0590e23ec6705dd8391",
+  "image_id": "sha256:374eadc62ee9652ee0869efb22ad02ddb0bd8184e11a752a4b4bb303179d9423",
+  "config_id": "sha256:d2b83a6525314b17434bc98c5bf05181db4fd6d73c962eabd2b5407968dfa95c",
+  "platform_manifest_id": "sha256:60ff1bc767ac84ae119a35b2ac864ebe08e0e4978a788315c3759cafe7d827fd",
+  "accepted_image_ids": [
+    "sha256:374eadc62ee9652ee0869efb22ad02ddb0bd8184e11a752a4b4bb303179d9423",
+    "sha256:d2b83a6525314b17434bc98c5bf05181db4fd6d73c962eabd2b5407968dfa95c",
+    "sha256:60ff1bc767ac84ae119a35b2ac864ebe08e0e4978a788315c3759cafe7d827fd"
+  ],
+  "platform": "linux/amd64",
+  "source_files": {
+    "chain-registry/crates/node/src/block_producer.rs": "c391d0dd10ff14805cca41fde455747a2dcfa81c6843b30aab93bf3fb2a6120a",
+    "chain-registry/testnet/phase-c/Dockerfile.r21-revoke-retirement": "9c5f1b90c54856beee4d349d11fcc3c4ce30d11ba43290905fbc1e0d11df9e8f",
+    "chain-registry/testnet/phase-c/rollout-r21-linux-node.sh": "08c40360f09f16ab483f6311f8c93c1937735a169c59700445c7a5dc36dd1a91"
+  },
+  "archive_path": "C:\\Users\\samue\\CREG-backups\\phase-c-candidate-r7\\r21-20260926\\creg-node-r21.tar.gz",
+  "archive_bytes": 552290354,
+  "archive_sha256": "8af0626f93102ba952f0352fdf0a792122a7b0f019ec2213d7736b8716207306",
+  "archive_roundtrip_verified": true,
+  "delta_archive_path": "C:\\Users\\samue\\CREG-backups\\phase-c-candidate-r7\\r21-20260926\\creg-node-r21-delta.tar.gz",
+  "delta_archive_bytes": 44078372,
+  "delta_archive_sha256": "2bfdc2c71ba5451dde2a0ad5a8938c78738ab74e684e590b7a7bf7240a9b73ff",
+  "delta_base_image": "creg-node:phase-c-secure-r20-durable-revocation-delivery",
+  "public_cutover": false
+}

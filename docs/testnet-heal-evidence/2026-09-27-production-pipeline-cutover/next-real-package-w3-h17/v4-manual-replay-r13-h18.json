@@ -1,0 +1,38 @@
+{
+  "schema": "creg-r25-v4-manual-start-durable-replay-r13-h18-v1",
+  "captured_at_utc": "2026-09-28T03:07:05.983068+00:00",
+  "container_id": "50f153e3721a67abbef2873a06356a5ea54e32950eb6300abd61405d7f38c50b",
+  "image_id": "sha256:704cd7dfb89a048c146a3de502416c31a6f77c0e3f493a98f4fe3098c732046c",
+  "restart_count": 0,
+  "manual_start_required": true,
+  "height": 18,
+  "block_hash": "ec64471b8f9c58eb2d9b958db765a98871cb444e032143d313d65b3ab80cd76c",
+  "parent_hash": "7c3364858873b00dcb8eef4875c2f1eaa85ade32648850177bd12dcb5f7627d7",
+  "kill": {
+    "started_at_utc": "2026-09-28T03:02:28.487854+00:00",
+    "completed_at_utc": "2026-09-28T03:02:28.946985+00:00",
+    "exit_code": 0,
+    "container_id": "50f153e3721a67abbef2873a06356a5ea54e32950eb6300abd61405d7f38c50b",
+    "signal": "SIGKILL",
+    "stdout": "creg-phase-c-r7-v4",
+    "stderr": ""
+  },
+  "markers": {
+    "pbft_local_commit_durable": "2026-09-28T03:01:58.484143915Z 2026-09-28T03:01:58.483946Z  INFO creg_node::p2p: Local PBFT COMMIT durably persisted before consensus application or gossip event=\"pbft_local_commit_durable\" signing_path=\"p2p_follower\" node_id=validator-4 chain_id=creg-phase-c-testnet-2026-09-26-r7 genesis_hash=1852b9a86dd3b53e7b2de4a774723a4fe48e862f9c61d14e5917b42b21055234 height=18 parent_hash=7c3364858873b00dcb8eef4875c2f1eaa85ade32648850177bd12dcb5f7627d7 block_hash=ec64471b8f9c58eb2d9b958db765a98871cb444e032143d313d65b3ab80cd76c view_number=0",
+    "phase_c_durable_commit_capture_paused": "2026-09-28T03:01:58.484193366Z 2026-09-28T03:01:58.484004Z  WARN creg_node::block_producer: Durable local COMMIT is held before in-memory application and peer broadcast event=\"phase_c_durable_commit_capture_paused\" node_id=validator-4 chain_id=creg-phase-c-testnet-2026-09-26-r7 genesis_hash=1852b9a86dd3b53e7b2de4a774723a4fe48e862f9c61d14e5917b42b21055234 height=18 parent_hash=7c3364858873b00dcb8eef4875c2f1eaa85ade32648850177bd12dcb5f7627d7 block_hash=ec64471b8f9c58eb2d9b958db765a98871cb444e032143d313d65b3ab80cd76c view_number=0 package_canonical=npm:has-flag@5.0.1 pause_ms=30000",
+    "pbft_local_commit_recovered": "2026-09-28T03:03:57.083962118Z 2026-09-28T03:03:57.083747Z  WARN creg_node: Recovered durable local PBFT COMMIT before P2P and sync services start event=\"pbft_local_commit_recovered\" validator_id=validator-4 chain_id=creg-phase-c-testnet-2026-09-26-r7 genesis_hash=1852b9a86dd3b53e7b2de4a774723a4fe48e862f9c61d14e5917b42b21055234 height=18 parent_hash=7c3364858873b00dcb8eef4875c2f1eaa85ade32648850177bd12dcb5f7627d7 block_hash=ec64471b8f9c58eb2d9b958db765a98871cb444e032143d313d65b3ab80cd76c"
+  },
+  "checks": {
+    "exact_durable_and_pause_markers": true,
+    "exact_sigkill_completed": true,
+    "same_container_running_after_manual_start": true,
+    "same_block_recovered_after_kill": true,
+    "recovery_before_p2p_sync_start": true,
+    "canonical_h18_and_revocation": true,
+    "validator_healthy": true,
+    "scanner_r13_ready": true,
+    "queues_and_pbft_clear": true,
+    "journal_preserved": true
+  },
+  "passed": true
+}

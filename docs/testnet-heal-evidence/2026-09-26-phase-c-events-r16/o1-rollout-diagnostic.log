@@ -1,0 +1,74 @@
++ set -euo pipefail
++ slot=o1
++ role=observer
++ api_port=18080
++ p2p_port=9001
++ new_image_id=sha256:08fe32ee3bcff2d9e66daea80212803f8389ce56403cd1bbd0528d84b52793af
++ case "$slot:$role" in
++ case "$api_port:$p2p_port" in
++ [[ sha256:08fe32ee3bcff2d9e66daea80212803f8389ce56403cd1bbd0528d84b52793af =~ ^sha256:[a-f0-9]{64}$ ]]
++ image=creg-node:phase-c-secure-r16-committed-events
++ container=creg-phase-c-r7-o1
++ preserved=creg-phase-c-r7-o1-r12-osv-r9-preserved-for-r16
++ base=/var/lib/creg/phase-c-r7
++ data_dir=/var/lib/creg/phase-c-r7/data
++ old_scanner=/var/lib/creg/phase-c-r7/scanner-r10-osv-r9
++ new_scanner=/var/lib/creg/phase-c-r7/scanner-r16-osv-r10
++ env_path=/var/lib/creg/phase-c-r7/node.env
++ env_backup=/var/lib/creg/phase-c-r7/node.env.r12-osv-r9-preserved-for-r16
++ snapshot_dir=/var/lib/creg/phase-c-r7/diagnostics-r16-h5
++ identity=/var/lib/creg/phase-c-r7/data/p2p/identity.key
++ api=http://127.0.0.1:18080
++ old_profile=dd52b5f77776aa0cad9cb25a4a308f9ef3755c1d3addec44073a5a322ee2e4fb
++ new_profile=d09a9d2450e6e691bc71bee591b1101aa14d8b0feb6f6088ab6819f48e1a6be4
++ new_epoch=osv-2026-09-26-phase-c-r10-event-check
++ new_osv_sha=eda8108603d2d674fcdc385635f2e7ac3091a044322214d1c1568b79de8986b9
++ sudo test -f /var/lib/creg/phase-c-r7/node.env
++ sudo test -f /var/lib/creg/phase-c-r7/data/p2p/identity.key
++ sudo test -d /var/lib/creg/phase-c-r7/data/chain.rocksdb
++ sudo test -d /var/lib/creg/phase-c-r7/scanner-r10-osv-r9
++ [[ observer == validator ]]
++ for target in "$new_scanner" "$env_backup" "$snapshot_dir"
++ sudo test -e /var/lib/creg/phase-c-r7/scanner-r16-osv-r10
++ for target in "$new_scanner" "$env_backup" "$snapshot_dir"
++ sudo test -e /var/lib/creg/phase-c-r7/node.env.r12-osv-r9-preserved-for-r16
++ for target in "$new_scanner" "$env_backup" "$snapshot_dir"
++ sudo test -e /var/lib/creg/phase-c-r7/diagnostics-r16-h5
++ sudo docker container inspect creg-phase-c-r7-o1-r12-osv-r9-preserved-for-r16
++ sudo grep -Fxq CREG_SCANNER_PROFILE_DIGEST=dd52b5f77776aa0cad9cb25a4a308f9ef3755c1d3addec44073a5a322ee2e4fb /var/lib/creg/phase-c-r7/node.env
++ sudo grep -Fxq CREG_OSV_SNAPSHOT_EPOCH=osv-2026-09-26-phase-c-r9-write-check /var/lib/creg/phase-c-r7/node.env
++ sudo grep -Fxq CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM=false /var/lib/creg/phase-c-r7/node.env
++ sudo grep -Fxq CREG_NODE_ROLE=observer /var/lib/creg/phase-c-r7/node.env
+++ sudo docker inspect creg-phase-c-r7-o1 --format '{{.State.Status}}'
++ [[ running == running ]]
+++ sudo docker inspect creg-phase-c-r7-o1 --format '{{.Image}}'
++ old_image=sha256:f0b693dc567fc3430f22db881581c55a253e75c8f84a5a0f2d6a82d4460d0736
++ case "$old_image" in
+++ sudo docker image inspect creg-node:phase-c-secure-r16-committed-events --format '{{.Id}}'
++ [[ sha256:08fe32ee3bcff2d9e66daea80212803f8389ce56403cd1bbd0528d84b52793af == \s\h\a\2\5\6\:\0\8\f\e\3\2\e\e\3\b\c\f\f\2\d\9\e\6\6\d\a\e\a\8\0\2\1\2\8\0\3\f\8\3\8\9\c\e\5\6\4\0\3\c\d\1\b\b\d\0\5\2\8\d\8\4\b\5\2\7\9\3\a\f ]]
+++ sudo docker inspect creg-phase-c-r7-o1 --format '{{range .Mounts}}{{println .Source .Destination}}{{end}}'
++ mounts='/var/lib/creg/phase-c-r7/data /data
+/var/lib/creg/phase-c-r7/scanner-r10-osv-r9 /scanner'
++ grep -Fxq '/var/lib/creg/phase-c-r7/data /data'
++ grep -Fxq '/var/lib/creg/phase-c-r7/scanner-r10-osv-r9 /scanner'
++ printf '%s  %s\n' eda8108603d2d674fcdc385635f2e7ac3091a044322214d1c1568b79de8986b9 /tmp/creg-osv-snapshot-r16.json
++ sha256sum -c -
++ printf '%s  %s\n' c5901bfe95fb6bebb8285202bddb0604514f73739443669215e044a7ae66deaa /var/lib/creg/phase-c-r7/scanner-r10-osv-r9/osv_snapshot.json
++ sudo sha256sum -c -
++ printf '%s  %s\n' 5e3a7beac3c5b7a5d766c30ff024509bc1df23b3f7c5d74349cc54ed6bc960ef /var/lib/creg/phase-c-r7/scanner-r10-osv-r9/known_malicious_hashes.json
++ sudo sha256sum -c -
++ printf '%s  %s\n' 217b121bc5943e61d483de8f15d89be9bb91b7b1d3e18d5f18b8396f59f2683e /var/lib/creg/phase-c-r7/scanner-r10-osv-r9/rules/supply_chain.yar
++ sudo sha256sum -c -
++ check_live dd52b5f77776aa0cad9cb25a4a308f9ef3755c1d3addec44073a5a322ee2e4fb
++ python3 - http://127.0.0.1:18080 dd52b5f77776aa0cad9cb25a4a308f9ef3755c1d3addec44073a5a322ee2e4fb observer
+
+Recommendation: To check for possible causes of SSH connectivity issues and get
+recommendations, rerun the ssh command with the --troubleshoot option.
+
+gcloud compute ssh creg-testnet-vm --project=gen-lang-client-0022105784 --zone=us-central1-b --troubleshoot
+
+Or, to investigate an IAP tunneling issue:
+
+gcloud compute ssh creg-testnet-vm --project=gen-lang-client-0022105784 --zone=us-central1-b --troubleshoot --tunnel-through-iap
+
+ERROR: (gcloud.compute.ssh) [C:\Users\samue\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\sdk\plink.exe] exited with return code [1].

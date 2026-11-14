@@ -1,0 +1,13 @@
+Starting guarded R18 replacement on o3.
+R18 replacement passed on o3; data, identity and signer journal preserved.
+Starting guarded R18 replacement on o4.
+R18 replacement passed on o4; data, identity and signer journal preserved.
+Starting guarded R18 replacement on v2.
+R18 replacement passed on v2; data, identity and signer journal preserved.
+Starting guarded R18 replacement on v3.
+R18 replacement passed on v3; data, identity and signer journal preserved.
+Starting guarded R18 replacement on v4.
+R18 replacement passed on v4; data, identity and signer journal preserved.
+Starting guarded R18 replacement on v1.
+V1 R18 replacement and read-only queue review passed.
+R18 replacement passed on v1; data, identity and signer journal preserved.

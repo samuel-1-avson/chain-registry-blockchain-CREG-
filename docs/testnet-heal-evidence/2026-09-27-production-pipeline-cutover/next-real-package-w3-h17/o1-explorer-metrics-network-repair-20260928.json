@@ -1,0 +1,38 @@
+{
+  "captured_at_utc": "2026-09-28T03:54:43Z",
+  "public_explorer": {
+    "chain_id": "creg-testnet-1",
+    "tip_height": 0,
+    "tip_hash": "068364cf778ede5a0b1c814c59b0314f9a8598a959fa5a8e08ea78bc1b296b53",
+    "validator_count": 2
+  },
+  "public_api": {
+    "chain_id": "creg-testnet-1",
+    "tip_height": 0,
+    "tip_hash": "068364cf778ede5a0b1c814c59b0314f9a8598a959fa5a8e08ea78bc1b296b53",
+    "validator_count": 2
+  },
+  "candidate_explorer": {
+    "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+    "tip_height": 18,
+    "tip_hash": "ec64471b8f9c58eb2d9b958db765a98871cb444e032143d313d65b3ab80cd76c",
+    "finalized_height": 18,
+    "spec_signature_verified": true
+  },
+  "candidate_metrics": {
+    "status": "ready",
+    "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+    "sample_count": 11,
+    "queried_series": 7
+  },
+  "o1_networks": [
+    "bridge",
+    "monitoring_default",
+    "testnet_creg-unified-net"
+  ],
+  "faucet": {
+    "status": "healthy",
+    "token_drips_available": true
+  },
+  "public_chain_cutover": false
+}

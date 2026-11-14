@@ -1,0 +1,75 @@
+{
+  "canonical": "npm:kleur@4.1.5",
+  "status": "verified",
+  "evidence_phase": "quorum-reached",
+  "block_phase": "committed",
+  "chain_status": "verified",
+  "block_hash": "8448cce76d7258f051cf9632d2ef7181da1321f5d19a3b5d00f00f8975aa2993",
+  "content_hash": "0d99562acf82fca4afce2a57b687289a524ac6755dcaf1fdf82a147473091469",
+  "ipfs_cid": "QmSEhmMVab63QT8AhTvqwXozKEj3PkQG5vE95nzs8PAju8",
+  "publisher": "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d",
+  "published_at": "2026-09-27T06:49:08.491685688+00:00",
+  "revocation_reason": null,
+  "analysis_bundles": {
+    "policy_bundle_id": "policy-v1",
+    "feature_schema_id": "features-v1",
+    "expert_bundle_id": "experts-v1",
+    "embedding_model_id": "embeddings-v1",
+    "index_epoch": "index-epoch-0",
+    "threshold_profile_id": "thresholds-v1",
+    "llm_prompt_profile_id": "llm-prompt-v1",
+    "osv_snapshot_epoch": "osv-2026-09-27-phase-c-kleur-r11"
+  },
+  "evidence_digest": "93d2cd8d38228ec0b2b02bbbfe5d5e320b2f5cbe19a461f344adf1eb34af6db2",
+  "deterministic_risk": {
+    "score": 55,
+    "deterministic_score": 26,
+    "advisory_score": 0,
+    "band": "elevated",
+    "disposition": "review",
+    "deterministic_findings": 5,
+    "advisory_findings": 1,
+    "critical_findings": 0,
+    "high_findings": 0,
+    "medium_findings": 1,
+    "low_findings": 4,
+    "reasons": [
+      "[DS001] AI Deep Scan: Suspicious",
+      "[SA005] Reads environment variables (potential credential harvesting)",
+      "[SA005] Reads environment variables (potential credential harvesting)",
+      "[SA005] Reads environment variables (potential credential harvesting)",
+      "[SA005] Reads environment variables (potential credential harvesting)",
+      "Publisher reputation delta -100 increases deterministic risk"
+    ]
+  },
+  "analysis_committee": {
+    "size": 4,
+    "members": [
+      {
+        "id": "validator-1",
+        "performance_score_at_finalization": 465
+      },
+      {
+        "id": "validator-4",
+        "performance_score_at_finalization": 500
+      },
+      {
+        "id": "validator-2",
+        "performance_score_at_finalization": 465
+      },
+      {
+        "id": "validator-3",
+        "performance_score_at_finalization": 465
+      }
+    ],
+    "seed": "36386531663863336263396433333064343336383862643937303833623035366339373230393335346231643836346436616632653463356131336635363133",
+    "effective_size": 4,
+    "performance_bias": true,
+    "member_performance_at_finalization": {
+      "validator-1": 465,
+      "validator-3": 465,
+      "validator-2": 465,
+      "validator-4": 500
+    }
+  }
+}

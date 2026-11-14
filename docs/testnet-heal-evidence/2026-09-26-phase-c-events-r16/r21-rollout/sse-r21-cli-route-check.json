@@ -1,0 +1,55 @@
+{
+  "schema": "creg-real-r21-sse-endpoint-and-cli-check-v1",
+  "captured_at_utc": "2026-09-26T23:42:00Z",
+  "candidate_node": "V1 operator laptop, http://127.0.0.1:18080",
+  "sse_endpoints": [
+    {
+      "path": "/v1/events",
+      "http_status": 200,
+      "content_type": "text/event-stream",
+      "live_frames_observed": ["heartbeat", "ping"],
+      "observation_seconds": 18,
+      "client_ended_stream_at_deadline": true
+    },
+    {
+      "path": "/v1/public/events",
+      "http_status": 200,
+      "content_type": "text/event-stream",
+      "live_frames_observed": ["heartbeat", "ping"],
+      "observation_seconds": 18,
+      "client_ended_stream_at_deadline": true
+    }
+  ],
+  "cli": {
+    "build_command": "cargo build -p chain-registry-cli --bin creg",
+    "build_exit_code": 0,
+    "command": "creg watch --node-url http://127.0.0.1:18080",
+    "configured_path": "/v1/public/events",
+    "connection_message_observed": true,
+    "retry_or_stream_error_observed": false,
+    "connected_observation_seconds": 15,
+    "operator_stopped_watch": true,
+    "named_event_rendered": false,
+    "note": "The live stream does not replay earlier events. A named event still needs to be captured in CLI output during a future real transaction."
+  },
+  "public_explorer_and_cli_read": {
+    "explorer_http_status": 200,
+    "api_chain_id": "creg-testnet-1",
+    "api_tip_height": 0,
+    "api_genesis_hash": "068364cf778ede5a0b1c814c59b0314f9a8598a959fa5a8e08ea78bc1b296b53",
+    "api_validator_count": 2,
+    "cli_blocks_command_exit_code": 0,
+    "cli_reports_same_chain_height_and_genesis": true
+  },
+  "public_cli_event_stream": {
+    "node_url": "https://api.testnet.cregnet.dev",
+    "path": "/v1/public/events",
+    "connection_message_observed": true,
+    "retry_or_stream_error_observed": false,
+    "connected_observation_seconds": 15,
+    "operator_stopped_watch": true,
+    "named_event_rendered": false
+  },
+  "public_cutover": false,
+  "chain_reset": false
+}

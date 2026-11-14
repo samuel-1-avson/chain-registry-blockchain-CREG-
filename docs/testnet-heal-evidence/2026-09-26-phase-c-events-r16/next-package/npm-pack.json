@@ -1,0 +1,41 @@
+[
+  {
+    "id": "toidentifier@1.0.1",
+    "name": "toidentifier",
+    "version": "1.0.1",
+    "size": 2347,
+    "unpackedSize": 4685,
+    "shasum": "3be34321a88a820ed1bd80dfaa33e479fbb8dd35",
+    "integrity": "sha512-o5sSPKEkg/DIQNmH43V0/uerLrpzVedkUh8tGNvaeXpfpuwjKenlSox/2O/BTlZUtEe+JG7s5YhEz608PlAHRA==",
+    "filename": "toidentifier-1.0.1.tgz",
+    "files": [
+      {
+        "path": "HISTORY.md",
+        "size": 128,
+        "mode": 420
+      },
+      {
+        "path": "LICENSE",
+        "size": 1108,
+        "mode": 420
+      },
+      {
+        "path": "README.md",
+        "size": 1803,
+        "mode": 420
+      },
+      {
+        "path": "index.js",
+        "size": 504,
+        "mode": 420
+      },
+      {
+        "path": "package.json",
+        "size": 1142,
+        "mode": 420
+      }
+    ],
+    "entryCount": 5,
+    "bundled": []
+  }
+]

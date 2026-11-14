@@ -1,0 +1,81 @@
+{
+  "schema": "creg-real-r22-scanner-r11-rollout-v1",
+  "run_id": "20260927T061430Z",
+  "started_at_utc": "2026-09-27T06:14:30.9760981Z",
+  "requested_slots": [
+    "o1",
+    "o2",
+    "o3",
+    "o4",
+    "v2",
+    "v3",
+    "v4"
+  ],
+  "old_profile": "d09a9d2450e6e691bc71bee591b1101aa14d8b0feb6f6088ab6819f48e1a6be4",
+  "new_profile": "f397fac29df29438f0ee15580547def5fe66a03af60153d22993f4a7af9fce8c",
+  "osv_epoch": "osv-2026-09-27-phase-c-kleur-r11",
+  "osv_snapshot_sha256": "452b326cc8d7bea568f21e2fd0d42d9b45503f481a8efe26a174ecb09cabe930",
+  "manifest_sha256": "bbaca082dbcece3fd4ef808b17057a27e7862135921bf694a1d2ff458518d932",
+  "public_cutover": false,
+  "nodes": [
+    {
+      "slot": "o1",
+      "already_on_new_profile": true,
+      "fleet_state": "fresh eight-node capture",
+      "scanner_profile_digest": "f397fac29df29438f0ee15580547def5fe66a03af60153d22993f4a7af9fce8c"
+    },
+    {
+      "slot": "o2",
+      "already_on_new_profile": true,
+      "fleet_state": "fresh eight-node capture",
+      "scanner_profile_digest": "f397fac29df29438f0ee15580547def5fe66a03af60153d22993f4a7af9fce8c"
+    },
+    {
+      "slot": "o3",
+      "host": "creg-observer-3",
+      "role": "observer",
+      "image_id": "sha256:8731cc85c73e6267e2e00014e8df50aef3f4d60ce6cfcaddb8fd0a3584eb2ad9",
+      "dead_letters_preserved": 0,
+      "rollout_evidence": "o3-rollout-20260927T061430Z.json",
+      "fleet_postflight": "readiness-after-o3-20260927T061430Z.json"
+    },
+    {
+      "slot": "o4",
+      "host": "creg-observer-4",
+      "role": "observer",
+      "image_id": "sha256:8731cc85c73e6267e2e00014e8df50aef3f4d60ce6cfcaddb8fd0a3584eb2ad9",
+      "dead_letters_preserved": 0,
+      "rollout_evidence": "o4-rollout-20260927T061430Z.json",
+      "fleet_postflight": "readiness-after-o4-20260927T061430Z.json"
+    },
+    {
+      "slot": "v2",
+      "host": "creg-validator-1",
+      "role": "validator",
+      "image_id": "sha256:2b472a089fe6ac651edfbae51b616456ed335f35992c0374f10c1ea80ce6caa3",
+      "dead_letters_preserved": 6,
+      "rollout_evidence": "v2-rollout-20260927T061430Z.json",
+      "fleet_postflight": "readiness-after-v2-20260927T061430Z.json"
+    },
+    {
+      "slot": "v3",
+      "host": "creg-validator-3",
+      "role": "validator",
+      "image_id": "sha256:8731cc85c73e6267e2e00014e8df50aef3f4d60ce6cfcaddb8fd0a3584eb2ad9",
+      "dead_letters_preserved": 6,
+      "rollout_evidence": "v3-rollout-20260927T061430Z.json",
+      "fleet_postflight": "readiness-after-v3-20260927T061430Z.json"
+    },
+    {
+      "slot": "v4",
+      "host": "creg-validator-4",
+      "role": "validator",
+      "image_id": "sha256:8731cc85c73e6267e2e00014e8df50aef3f4d60ce6cfcaddb8fd0a3584eb2ad9",
+      "dead_letters_preserved": 6,
+      "rollout_evidence": "v4-rollout-20260927T061430Z.json",
+      "fleet_postflight": "readiness-after-v4-20260927T061430Z.json"
+    }
+  ],
+  "passed": true,
+  "completed_at_utc": "2026-09-27T06:29:51.4517963Z"
+}

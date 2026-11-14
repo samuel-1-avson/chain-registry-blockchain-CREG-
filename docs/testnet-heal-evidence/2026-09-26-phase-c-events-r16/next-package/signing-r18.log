@@ -1,0 +1,8 @@
+  ✓ Signed publish request written to /submission/signed-publish-toidentifier-r7.json
+    Package: npm:toidentifier@1.0.1
+    Address: 0xa40d79527314efd4964d49c4a0673c87b612348b
+    Pubkey:  863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d
+
+  Submit from a networked machine with:
+    creg submit-signed /submission/signed-publish-toidentifier-r7.json
+Real npm artifact pinned and signed; authorization context verified. Not submitted.

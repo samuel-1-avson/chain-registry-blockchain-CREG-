@@ -1,0 +1,32 @@
+{
+  "capturedAt": "2026-09-28T08:49:49.733Z",
+  "dataSource": "live Phase C candidate node through the real Vite proxy; no fixtures or intercepted responses",
+  "explorerUrl": "http://127.0.0.1:3008",
+  "candidateNodeUrl": "https://api.testnet.cregnet.dev",
+  "operation": "revoke",
+  "canonical": "npm:ansi-regex@6.1.0",
+  "startingHeight": 19,
+  "probeError": "page.waitForFunction: Timeout 900000ms exceeded.",
+  "checks": {
+    "stream_opened": true,
+    "revoked": false,
+    "block_produced": false,
+    "event_rendered_in_web_explorer": false,
+    "no_page_errors": true
+  },
+  "connections": [
+    {
+      "url": "http://127.0.0.1:3008/v1/public/events",
+      "opened": true,
+      "errors": 1
+    },
+    {
+      "url": "http://127.0.0.1:3008/v1/public/events",
+      "opened": false,
+      "errors": 1
+    }
+  ],
+  "events": [],
+  "renderedText": "Live events\n0 of 0\n🔗\nShare\nAll types (0)\n⏸ Pause\n↕ Auto-scroll\n≡ Compact\n⇩ Export\nNo new events since opening this explorer\n\nThis live feed does not replay earlier blocks or transactions. Open Blocks or Packages for finalized history.\n\nRECONNECTING Buffer: 0 events\nShowing: 0 / 0",
+  "pageErrors": []
+}

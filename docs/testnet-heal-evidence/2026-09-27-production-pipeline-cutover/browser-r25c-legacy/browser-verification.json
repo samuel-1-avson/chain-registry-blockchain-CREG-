@@ -1,0 +1,13 @@
+{
+  "captured_at_utc": "2026-09-27T21:23:28.417Z",
+  "base_url": "http://127.0.0.1:3026",
+  "expected_chain": "creg-testnet-1",
+  "expected_height": 0,
+  "javascript_errors": [],
+  "http_5xx": [],
+  "routes": [],
+  "writes_performed": false,
+  "response_interception_used": false,
+  "status": "failed",
+  "error": "Error: apiRequestContext.get: connect ECONNREFUSED 127.0.0.1:3026\nCall log:\n\u001b[2m  - → GET http://127.0.0.1:3026/v1/chain/stats\u001b[22m\n\u001b[2m    - user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36\u001b[22m\n\u001b[2m    - accept: */*\u001b[22m\n\u001b[2m    - accept-encoding: gzip,deflate,br\u001b[22m\n"
+}

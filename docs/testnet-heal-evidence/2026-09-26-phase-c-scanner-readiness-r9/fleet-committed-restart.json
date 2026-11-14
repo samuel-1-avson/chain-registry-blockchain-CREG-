@@ -1,0 +1,578 @@
+{
+  "schema": "creg-real-fleet-committed-restart-v1",
+  "captured_at_utc": "2026-09-26T10:43:47.3783905Z",
+  "all_eight_passed": false,
+  "prepared_inflight_restart_tested": false,
+  "nodes": [
+    {
+      "captured_at_utc": "2026-09-26T10:41:36.876605+00:00",
+      "before_started_at": "2026-09-26T10:23:07.62807378Z",
+      "after_started_at": "2026-09-26T10:41:36.596976487Z",
+      "before_tip_hash": "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0",
+      "last_capture_error": "Remote end closed connection without response",
+      "stats": {
+        "tip_height": 4,
+        "tip_hash": "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0",
+        "package_count": 1,
+        "block_count": 5,
+        "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+        "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+        "spec_signature_verified": true,
+        "l1_rpc_configured": true,
+        "is_validator": false,
+        "validator_count": 4,
+        "active_validators": 4,
+        "total_stake": 400,
+        "total_stake_native": "400",
+        "peer_count": 2,
+        "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+        "l1_block": 0,
+        "pending_tx_count": 1,
+        "publisher_count": 1,
+        "finalized_height": 0,
+        "finalization_lag": 4,
+        "validator_set_source": "chain-authoritative",
+        "validator_set_sync_state": "synced",
+        "validator_set_last_finalized_source_block": 11785711
+      },
+      "package_state": {
+        "canonical": "npm:is-number@7.0.0",
+        "status": "revoked",
+        "block_phase": "committed",
+        "block_hash": "0121be9bb637aec634cd5f081fb903ee4749875d8225683f057af005ae16f436",
+        "revocation_reason": "Phase C live revocation after shared publication"
+      },
+      "health": {
+        "status": "ok",
+        "node_id": "observer-1",
+        "is_validator": false,
+        "version": "0.1.0",
+        "validator_set_sync": {
+          "enabled": true,
+          "mode": "chain-authoritative",
+          "state": "synced",
+          "last_finalized_source_block": 11785711,
+          "cursor_block": 11785711,
+          "cursor_log_index": 4294967295,
+          "cursor_block_hash": "0x19e4f1246b29ad381dd80e125184e8a598ba10541f03e1e1f48bd7a437294e5f",
+          "last_poll_at": "2026-09-26T10:41:37.727211570+00:00",
+          "last_error": null
+        },
+        "sandbox": {
+          "engine": "nsjail",
+          "dev_bypass": false,
+          "isolated": true,
+          "degraded": false,
+          "note": "kernel namespaces + seccomp-BPF (primary engine)"
+        },
+        "sync": {
+          "lag_blocks": 0,
+          "max_peer_tip": 4,
+          "healthy": true
+        }
+      },
+      "checks": {
+        "process_restarted": true,
+        "same_tip": true,
+        "same_chain": true,
+        "same_package_state": true,
+        "four_validators": true,
+        "live_peers": true,
+        "scanner_ready": true,
+        "retired_queue_empty": true,
+        "no_unfinished_pbft_round": true
+      },
+      "passed": true,
+      "slot": "o1"
+    },
+    {
+      "captured_at_utc": "2026-09-26T10:41:53.576825+00:00",
+      "before_started_at": "2026-09-26T10:22:56.71957088Z",
+      "after_started_at": "2026-09-26T10:41:53.270765791Z",
+      "before_tip_hash": "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0",
+      "last_capture_error": "[Errno 104] Connection reset by peer",
+      "stats": {
+        "tip_height": 4,
+        "tip_hash": "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0",
+        "package_count": 1,
+        "block_count": 5,
+        "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+        "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+        "spec_signature_verified": true,
+        "l1_rpc_configured": true,
+        "is_validator": false,
+        "validator_count": 4,
+        "active_validators": 4,
+        "total_stake": 400,
+        "total_stake_native": "400",
+        "peer_count": 2,
+        "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+        "l1_block": 0,
+        "pending_tx_count": 1,
+        "publisher_count": 1,
+        "finalized_height": 0,
+        "finalization_lag": 4,
+        "validator_set_source": "chain-authoritative",
+        "validator_set_sync_state": "synced",
+        "validator_set_last_finalized_source_block": 11785712
+      },
+      "package_state": {
+        "canonical": "npm:is-number@7.0.0",
+        "status": "revoked",
+        "block_phase": "committed",
+        "block_hash": "0121be9bb637aec634cd5f081fb903ee4749875d8225683f057af005ae16f436",
+        "revocation_reason": "Phase C live revocation after shared publication"
+      },
+      "health": {
+        "status": "ok",
+        "node_id": "observer-2",
+        "is_validator": false,
+        "version": "0.1.0",
+        "validator_set_sync": {
+          "enabled": true,
+          "mode": "chain-authoritative",
+          "state": "synced",
+          "last_finalized_source_block": 11785712,
+          "cursor_block": 11785712,
+          "cursor_log_index": 4294967295,
+          "cursor_block_hash": "0x6cdd4e8cd5b1b7e7b04477e122f86b375f86e9183bafa8f9d2e64ac98b702e22",
+          "last_poll_at": "2026-09-26T10:41:54.753724355+00:00",
+          "last_error": null
+        },
+        "sandbox": {
+          "engine": "nsjail",
+          "dev_bypass": false,
+          "isolated": true,
+          "degraded": false,
+          "note": "kernel namespaces + seccomp-BPF (primary engine)"
+        },
+        "sync": {
+          "lag_blocks": 0,
+          "max_peer_tip": 4,
+          "healthy": true
+        }
+      },
+      "checks": {
+        "process_restarted": true,
+        "same_tip": true,
+        "same_chain": true,
+        "same_package_state": true,
+        "four_validators": true,
+        "live_peers": true,
+        "scanner_ready": true,
+        "retired_queue_empty": true,
+        "no_unfinished_pbft_round": true
+      },
+      "passed": true,
+      "slot": "o2"
+    },
+    {
+      "captured_at_utc": "2026-09-26T10:42:12.853354+00:00",
+      "before_started_at": "2026-09-26T10:22:45.570398639Z",
+      "after_started_at": "2026-09-26T10:42:12.838986179Z",
+      "before_tip_hash": "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0",
+      "last_capture_error": "Remote end closed connection without response",
+      "stats": {
+        "tip_height": 4,
+        "tip_hash": "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0",
+        "package_count": 1,
+        "block_count": 5,
+        "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+        "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+        "spec_signature_verified": true,
+        "l1_rpc_configured": true,
+        "is_validator": false,
+        "validator_count": 4,
+        "active_validators": 4,
+        "total_stake": 400,
+        "total_stake_native": "400",
+        "peer_count": 2,
+        "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+        "l1_block": 0,
+        "pending_tx_count": 1,
+        "publisher_count": 1,
+        "finalized_height": 0,
+        "finalization_lag": 4,
+        "validator_set_source": "chain-authoritative",
+        "validator_set_sync_state": "synced",
+        "validator_set_last_finalized_source_block": 11785714
+      },
+      "package_state": {
+        "canonical": "npm:is-number@7.0.0",
+        "status": "revoked",
+        "block_phase": "committed",
+        "block_hash": "0121be9bb637aec634cd5f081fb903ee4749875d8225683f057af005ae16f436",
+        "revocation_reason": "Phase C live revocation after shared publication"
+      },
+      "health": {
+        "status": "ok",
+        "node_id": "observer-3",
+        "is_validator": false,
+        "version": "0.1.0",
+        "validator_set_sync": {
+          "enabled": true,
+          "mode": "chain-authoritative",
+          "state": "synced",
+          "last_finalized_source_block": 11785714,
+          "cursor_block": 11785714,
+          "cursor_log_index": 4294967295,
+          "cursor_block_hash": "0x2db6355a8f40f0e3e80d64915c665c89d4b6d28cae1a344deb1f0a34343eb480",
+          "last_poll_at": "2026-09-26T10:42:14.387519848+00:00",
+          "last_error": null
+        },
+        "sandbox": {
+          "engine": "nsjail",
+          "dev_bypass": false,
+          "isolated": true,
+          "degraded": false,
+          "note": "kernel namespaces + seccomp-BPF (primary engine)"
+        },
+        "sync": {
+          "lag_blocks": 0,
+          "max_peer_tip": 4,
+          "healthy": true
+        }
+      },
+      "checks": {
+        "process_restarted": true,
+        "same_tip": true,
+        "same_chain": true,
+        "same_package_state": true,
+        "four_validators": true,
+        "live_peers": true,
+        "scanner_ready": true,
+        "retired_queue_empty": true,
+        "no_unfinished_pbft_round": true
+      },
+      "passed": true,
+      "slot": "o3"
+    },
+    {
+      "captured_at_utc": "2026-09-26T10:42:34.185953+00:00",
+      "before_started_at": "2026-09-26T10:20:27.267192852Z",
+      "after_started_at": "2026-09-26T10:42:34.175902541Z",
+      "before_tip_hash": "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0",
+      "last_capture_error": "[Errno 104] Connection reset by peer",
+      "stats": {
+        "tip_height": 4,
+        "tip_hash": "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0",
+        "package_count": 1,
+        "block_count": 5,
+        "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+        "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+        "spec_signature_verified": true,
+        "l1_rpc_configured": true,
+        "is_validator": false,
+        "validator_count": 4,
+        "active_validators": 4,
+        "total_stake": 400,
+        "total_stake_native": "400",
+        "peer_count": 3,
+        "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+        "l1_block": 0,
+        "pending_tx_count": 1,
+        "publisher_count": 1,
+        "finalized_height": 0,
+        "finalization_lag": 4,
+        "validator_set_source": "chain-authoritative",
+        "validator_set_sync_state": "synced",
+        "validator_set_last_finalized_source_block": 11785716
+      },
+      "package_state": {
+        "canonical": "npm:is-number@7.0.0",
+        "status": "revoked",
+        "block_phase": "committed",
+        "block_hash": "0121be9bb637aec634cd5f081fb903ee4749875d8225683f057af005ae16f436",
+        "revocation_reason": "Phase C live revocation after shared publication"
+      },
+      "health": {
+        "status": "ok",
+        "node_id": "observer-4",
+        "is_validator": false,
+        "version": "0.1.0",
+        "validator_set_sync": {
+          "enabled": true,
+          "mode": "chain-authoritative",
+          "state": "synced",
+          "last_finalized_source_block": 11785716,
+          "cursor_block": 11785716,
+          "cursor_log_index": 4294967295,
+          "cursor_block_hash": "0x1ce0058b08ceb3ab77690ef2ad83461eb095a4e3208309b01202aaf3acc7f3cb",
+          "last_poll_at": "2026-09-26T10:42:37.224781883+00:00",
+          "last_error": null
+        },
+        "sandbox": {
+          "engine": "nsjail",
+          "dev_bypass": false,
+          "isolated": true,
+          "degraded": false,
+          "note": "kernel namespaces + seccomp-BPF (primary engine)"
+        },
+        "sync": {
+          "lag_blocks": 0,
+          "max_peer_tip": 4,
+          "healthy": true
+        }
+      },
+      "checks": {
+        "process_restarted": true,
+        "same_tip": true,
+        "same_chain": true,
+        "same_package_state": true,
+        "four_validators": true,
+        "live_peers": true,
+        "scanner_ready": true,
+        "retired_queue_empty": true,
+        "no_unfinished_pbft_round": true
+      },
+      "passed": true,
+      "slot": "o4"
+    },
+    {
+      "package_state": {
+        "canonical": "npm:is-number@7.0.0",
+        "status": "revoked",
+        "block_phase": "committed",
+        "block_hash": "0121be9bb637aec634cd5f081fb903ee4749875d8225683f057af005ae16f436",
+        "revocation_reason": "Phase C live revocation after shared publication"
+      },
+      "stats": {
+        "tip_height": 4,
+        "tip_hash": "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0",
+        "package_count": 1,
+        "block_count": 5,
+        "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+        "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+        "spec_signature_verified": true,
+        "l1_rpc_configured": true,
+        "is_validator": true,
+        "validator_count": 4,
+        "active_validators": 4,
+        "total_stake": 400,
+        "total_stake_native": "400",
+        "peer_count": 2,
+        "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+        "l1_block": 0,
+        "pending_tx_count": 0,
+        "publisher_count": 1,
+        "finalized_height": 0,
+        "finalization_lag": 4,
+        "validator_set_source": "chain-authoritative",
+        "validator_set_sync_state": "synced",
+        "validator_set_last_finalized_source_block": 11785716
+      },
+      "after_started_at": "2026-09-26T10:42:44.069375916Z",
+      "checks": {
+        "process_restarted": true,
+        "same_tip": true,
+        "same_chain": true,
+        "same_package_state": true,
+        "four_validators": true,
+        "live_peers": true,
+        "scanner_ready": true,
+        "retired_queue_empty": true,
+        "no_unfinished_pbft_round": true,
+        "isolated_sandbox": true
+      },
+      "passed": true,
+      "before_tip_hash": "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0",
+      "slot": "v1",
+      "before_started_at": "2026-09-26T10:22:04.948417662Z",
+      "captured_at_utc": "2026-09-26T10:42:44.6667214Z",
+      "health": {
+        "status": "ok",
+        "node_id": "validator-1",
+        "is_validator": true,
+        "version": "0.1.0",
+        "validator_set_sync": {
+          "enabled": true,
+          "mode": "chain-authoritative",
+          "state": "synced",
+          "last_finalized_source_block": 11785716,
+          "cursor_block": 11785716,
+          "cursor_log_index": 4294967295,
+          "cursor_block_hash": "0x1ce0058b08ceb3ab77690ef2ad83461eb095a4e3208309b01202aaf3acc7f3cb",
+          "last_poll_at": "2026-09-26T10:42:48.089717283+00:00",
+          "last_error": null
+        },
+        "sandbox": {
+          "engine": "nsjail",
+          "dev_bypass": false,
+          "isolated": true,
+          "degraded": false,
+          "note": "kernel namespaces + seccomp-BPF (primary engine)"
+        },
+        "sync": {
+          "lag_blocks": 0,
+          "max_peer_tip": 0,
+          "healthy": true
+        }
+      },
+      "last_capture_error": "An error occurred while sending the request."
+    },
+    {
+      "captured_at_utc": "2026-09-26T10:43:05.213046+00:00",
+      "before_started_at": "2026-09-26T10:22:31.972296979Z",
+      "after_started_at": "2026-09-26T10:43:04.824939949Z",
+      "before_tip_hash": "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0",
+      "last_capture_error": "[Errno 104] Connection reset by peer",
+      "stats": {
+        "tip_height": 4,
+        "tip_hash": "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0",
+        "package_count": 1,
+        "block_count": 5,
+        "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+        "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+        "spec_signature_verified": true,
+        "l1_rpc_configured": true,
+        "is_validator": true,
+        "validator_count": 4,
+        "active_validators": 4,
+        "total_stake": 400,
+        "total_stake_native": "400",
+        "peer_count": 2,
+        "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+        "l1_block": 0,
+        "pending_tx_count": 0,
+        "publisher_count": 1,
+        "finalized_height": 0,
+        "finalization_lag": 4,
+        "validator_set_source": "chain-authoritative",
+        "validator_set_sync_state": "synced",
+        "validator_set_last_finalized_source_block": 11785718
+      },
+      "package_state": {
+        "canonical": "npm:is-number@7.0.0",
+        "status": "revoked",
+        "block_phase": "committed",
+        "block_hash": "0121be9bb637aec634cd5f081fb903ee4749875d8225683f057af005ae16f436",
+        "revocation_reason": "Phase C live revocation after shared publication"
+      },
+      "health": {
+        "status": "ok",
+        "node_id": "validator-2",
+        "is_validator": true,
+        "version": "0.1.0",
+        "validator_set_sync": {
+          "enabled": true,
+          "mode": "chain-authoritative",
+          "state": "synced",
+          "last_finalized_source_block": 11785718,
+          "cursor_block": 11785718,
+          "cursor_log_index": 4294967295,
+          "cursor_block_hash": "0xe1b2086e566464c5fc9d0caf00cf8456cbf97386acd361cf78b37e79a22ddcab",
+          "last_poll_at": "2026-09-26T10:43:06.533877846+00:00",
+          "last_error": null
+        },
+        "sandbox": {
+          "engine": "nsjail",
+          "dev_bypass": false,
+          "isolated": true,
+          "degraded": false,
+          "note": "kernel namespaces + seccomp-BPF (primary engine)"
+        },
+        "sync": {
+          "lag_blocks": 0,
+          "max_peer_tip": 4,
+          "healthy": true
+        }
+      },
+      "checks": {
+        "process_restarted": true,
+        "same_tip": true,
+        "same_chain": true,
+        "same_package_state": true,
+        "four_validators": true,
+        "live_peers": true,
+        "scanner_ready": true,
+        "retired_queue_empty": true,
+        "no_unfinished_pbft_round": true,
+        "isolated_sandbox": true
+      },
+      "passed": true,
+      "slot": "v2"
+    },
+    {
+      "captured_at_utc": "2026-09-26T10:43:22.456845+00:00",
+      "before_started_at": "2026-09-26T10:20:12.61313191Z",
+      "after_started_at": "2026-09-26T10:43:22.445987623Z",
+      "before_tip_hash": "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0",
+      "last_capture_error": "[Errno 104] Connection reset by peer",
+      "stats": {
+        "tip_height": 4,
+        "tip_hash": "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0",
+        "package_count": 1,
+        "block_count": 5,
+        "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+        "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+        "spec_signature_verified": true,
+        "l1_rpc_configured": true,
+        "is_validator": true,
+        "validator_count": 4,
+        "active_validators": 4,
+        "total_stake": 400,
+        "total_stake_native": "400",
+        "peer_count": 7,
+        "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+        "l1_block": 0,
+        "pending_tx_count": 0,
+        "publisher_count": 1,
+        "finalized_height": 0,
+        "finalization_lag": 4,
+        "validator_set_source": "chain-authoritative",
+        "validator_set_sync_state": "synced",
+        "validator_set_last_finalized_source_block": 11785719
+      },
+      "package_state": {
+        "canonical": "npm:is-number@7.0.0",
+        "status": "revoked",
+        "block_phase": "committed",
+        "block_hash": "0121be9bb637aec634cd5f081fb903ee4749875d8225683f057af005ae16f436",
+        "revocation_reason": "Phase C live revocation after shared publication"
+      },
+      "health": {
+        "status": "ok",
+        "node_id": "validator-3",
+        "is_validator": true,
+        "version": "0.1.0",
+        "validator_set_sync": {
+          "enabled": true,
+          "mode": "chain-authoritative",
+          "state": "synced",
+          "last_finalized_source_block": 11785719,
+          "cursor_block": 11785719,
+          "cursor_log_index": 4294967295,
+          "cursor_block_hash": "0x2ce9c1092e487f5424f843afb7d777196aad9076ded98eae04200e4570b9cf55",
+          "last_poll_at": "2026-09-26T10:43:23.925146048+00:00",
+          "last_error": null
+        },
+        "sandbox": {
+          "engine": "nsjail",
+          "dev_bypass": false,
+          "isolated": true,
+          "degraded": false,
+          "note": "kernel namespaces + seccomp-BPF (primary engine)"
+        },
+        "sync": {
+          "lag_blocks": 0,
+          "max_peer_tip": 4,
+          "healthy": true
+        }
+      },
+      "checks": {
+        "process_restarted": true,
+        "same_tip": true,
+        "same_chain": true,
+        "same_package_state": true,
+        "four_validators": true,
+        "live_peers": true,
+        "scanner_ready": true,
+        "retired_queue_empty": false,
+        "no_unfinished_pbft_round": true,
+        "isolated_sandbox": true
+      },
+      "passed": false,
+      "slot": "v3"
+    }
+  ]
+}

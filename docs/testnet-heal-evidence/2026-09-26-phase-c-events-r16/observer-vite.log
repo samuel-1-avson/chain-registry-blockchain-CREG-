@@ -1,0 +1,7 @@
+
+  VITE v8.3.1  ready in 603 ms
+
+  ➜  Local:   http://127.0.0.1:3008/
+8:03:21 PM [vite] (client) [optimizer] bundling dependencies...
+8:03:59 PM [vite] (client) [console.warn] ⚠️ React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+8:03:59 PM [vite] (client) [console.warn] ⚠️ React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.

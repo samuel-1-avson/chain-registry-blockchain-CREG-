@@ -1,0 +1,5 @@
+{
+  "text": "Skip to main content\n💧\nCREG Testnet Faucet\n\nGet free test tokens and native gas for the Chain Registry testnet\n\nℹ️ Testnet Information\n\n• Receive 1,000 tCREG per request\n• Receive 0 ETH for gas per request\n• 60s cooldown between requests\n• Maximum balance: 10,000 tCREG and 1 ETH\n• Gas on EVM testnets is paid in native testnet ETH, not in ERC-20 tokens\n• For testing purposes only\n\n🦊 MetaMask\n⌨️ Paste Address\nRequest Test Tokens + Gas\n1,000\nTCREG PER DRIP\n0\nETH GAS PER DRIP\n60s\nCOOLDOWN\n1\nTOTAL DRIPS\n8,000\nTCREG RESERVE\n0.0788\nETH GAS RESERVE\n🔗 Network Configuration\nChain ID\n11155111\nRPC URL\nhttps://api.testnet.cregnet.dev/sepolia\nToken Contract\n0xbC2a72107C6765364D0A822a88A6e6C61f30EAa6\nCurrency\nETH (native gas)\nToken\ntCREG (ERC-20)\n🚀 Next Steps\nGet testnet ETH for gas and tCREG for app operations above\nOpen the Chain Registry Explorer\nConnect your wallet and stake as a publisher or validator\n\nPart of the Chain Registry ecosystem\n\nTestnet Only • Not Real Value",
+  "errors": [],
+  "serverErrors": []
+}

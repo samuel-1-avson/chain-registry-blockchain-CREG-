@@ -1,0 +1,22 @@
+{
+  "schema": "creg-r16-reviewed-image-v1",
+  "captured_at_utc": "2026-09-26T18:56:50.5257436Z",
+  "image_tag": "creg-node:phase-c-secure-r16-committed-events",
+  "accepted_image_ids": [
+    "sha256:40b0cf0c6038ea6ad3bfba8059eb835631f1aa7182ab91768b7a687ac8735a80",
+    "sha256:08fe32ee3bcff2d9e66daea80212803f8389ce56403cd1bbd0528d84b52793af"
+  ],
+  "compilation": "passed",
+  "archive_path": "C:\\Users\\samue\\CREG-backups\\phase-c-build-r16-events\\creg-node-r16.tar.gz",
+  "archive_sha256": "e7678c288a1b7f68c524c86545c6b4d5909cdcb9f8066ead2fcd386a2cd0a53f",
+  "archive_bytes": 508140852,
+  "real_h5_cli_proof": "passed with signed R7 spec and writable isolated cache",
+  "candidate_rollout": "pending",
+  "real_event_acceptance": "pending",
+  "public_cutover": false,
+  "delta_archive_path": "C:\\Users\\samue\\CREG-backups\\phase-c-build-r16-events\\creg-node-r16-delta.tar.gz",
+  "delta_archive_sha256": "15941369faa97940521ec7e6783d60249c600a799b61da031766ed6845f332de",
+  "delta_archive_bytes": 66573907,
+  "delta_archive_requires_accepted_r12_base": true,
+  "delta_import_verified_on": "o3 real host; exact config digest 40b0cf0c6038ea6ad3bfba8059eb835631f1aa7182ab91768b7a687ac8735a80"
+}

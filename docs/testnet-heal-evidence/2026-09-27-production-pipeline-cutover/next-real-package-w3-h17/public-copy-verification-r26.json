@@ -1,0 +1,13 @@
+{
+  "captured_at_utc": "2026-09-28T04:08:14.228Z",
+  "public_frontend": "r26",
+  "public_chain_cutover": false,
+  "errors": [],
+  "checks": {
+    "legacy_banner": true,
+    "metrics_unavailable_honest": true,
+    "events_live_only_notice": true,
+    "pending_operator_boundary": true,
+    "network_operator_boundary": true
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "capturedAt": "2026-09-28T01:11:41.572Z",
+  "dataSource": "live Phase C candidate node through the real Vite proxy; no fixtures or intercepted responses",
+  "explorerUrl": "http://127.0.0.1:3008",
+  "candidateNodeUrl": "https://api.testnet.cregnet.dev",
+  "operation": "revoke",
+  "canonical": "npm:escape-string-regexp@5.0.0",
+  "startingHeight": 15,
+  "probeError": null,
+  "checks": {
+    "stream_opened": true,
+    "revoked": true,
+    "block_produced": true,
+    "event_rendered_in_web_explorer": true,
+    "no_page_errors": true
+  },
+  "connections": [
+    {
+      "url": "http://127.0.0.1:3008/v1/public/events",
+      "opened": true,
+      "errors": 0
+    }
+  ],
+  "events": [
+    {
+      "type": "block_produced",
+      "data": {
+        "kind": "block_produced",
+        "ts": "2026-09-28T01:11:41.039330364+00:00",
+        "payload": {
+          "height": 16,
+          "hash": "4bd594d71b4fc8bc785c34b1e46291518328233c8aed616171efd9add073e260",
+          "tx_count": 1,
+          "block_hash": "4bd594d71b4fc8bc785c34b1e46291518328233c8aed616171efd9add073e260",
+          "block_phase": "committed"
+        }
+      },
+      "receivedAt": "2026-09-28T01:11:41.041Z"
+    },
+    {
+      "type": "package_revoked",
+      "data": {
+        "kind": "package_revoked",
+        "ts": "2026-09-28T01:11:41.039521871+00:00",
+        "payload": {
+          "canonical": "npm:escape-string-regexp@5.0.0",
+          "reason": "Phase C live revocation after shared publication",
+          "revoked_by": "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d",
+          "height": 16,
+          "block_hash": "4bd594d71b4fc8bc785c34b1e46291518328233c8aed616171efd9add073e260",
+          "block_phase": "committed"
+        }
+      },
+      "receivedAt": "2026-09-28T01:11:41.044Z"
+    }
+  ],
+  "renderedText": "Live events\n2 of 2\n🔗\nShare\nAll types (2)\nblock_produced (1)\npackage_revoked (1)\n⏸ Pause\n↕ Auto-scroll\n≡ Compact\n⇩ Export\nall (2)\nblock_produced (1)\npackage_revoked (1)\nPACKAGE_REVOKED\n#16\nnpm:escape-string-regexp@5.0.0\n0s ago\nBLOCK_PRODUCED\n#16\n0s ago\nLIVE Buffer: 2 events\nShowing: 2 / 2",
+  "pageErrors": []
+}

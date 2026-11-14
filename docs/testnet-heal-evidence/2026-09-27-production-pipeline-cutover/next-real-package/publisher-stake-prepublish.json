@@ -1,0 +1,10 @@
+{
+  "captured_at_utc": "2026-09-28T00:19:45.2813436Z",
+  "network": "Sepolia",
+  "chain_id": 11155111,
+  "block": 11796872,
+  "staking_contract": "0x61c00EBe7C46f0bcE63942F7E15Bcc434DFC9B7C",
+  "publisher": "0xa40D79527314efD4964D49c4a0673C87b612348B",
+  "publisher_stake_creg": "10.0",
+  "read_only": true
+}

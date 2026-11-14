@@ -1,0 +1,86 @@
+{
+  "schema": "creg-phase-c-queue-recovery-review-v1",
+  "captured_at_utc": "2026-09-26T15:13:23Z",
+  "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+  "tip_height": 4,
+  "tip_hash": "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0",
+  "diagnostic_mode": "read-only copied RocksDB; publisher signatures omitted",
+  "snapshots": [
+    {
+      "slot": "v1",
+      "archive_sha256": "f0800a921f6955dd2b07f146d16b488c4026522da55769e051f6ce8916a1eb20",
+      "archive_bytes": 84431,
+      "scope": "chain.rocksdb only; PBFT signing journal not copied or modified"
+    },
+    {
+      "slot": "v2",
+      "archive_sha256": "fd280b85debd8f4b91fe843131c5d9515817ca3c8125199857c53299cf96a8f0",
+      "archive_bytes": 60596,
+      "scope": "chain.rocksdb only; PBFT signing journal not copied or modified"
+    },
+    {
+      "slot": "v3",
+      "archive_sha256": "1878eb4f1b743e88723c1ff00ca8c494d89b2746bd4a7d8cb8fbf7d0ae7623a8",
+      "archive_bytes": 58595,
+      "scope": "chain.rocksdb only; PBFT signing journal not copied or modified"
+    },
+    {
+      "slot": "v4",
+      "archive_sha256": "9eba13a587228fba62d37a3f6e1fa2b5f938a03035e884c68da7fb85d3da25e7",
+      "archive_bytes": 29485,
+      "scope": "chain.rocksdb only; PBFT signing journal not copied or modified"
+    }
+  ],
+  "v3_retained_work": {
+    "work_id": "089d7fdd8308d6588563b5a30b41c900b79d8f0c16c908a5cd849b1e195e5b1e",
+    "type": "publish_authorized_v1",
+    "canonical": "npm:is-number@7.0.0",
+    "publisher": "0xa40d79527314efd4964d49c4a0673c87b612348b",
+    "publisher_nonce": "340b9947ed2423a06df933695eea9f73",
+    "authorization_nonce_applied": true,
+    "authorization_expired_at_review": true,
+    "chain_id_matches": true,
+    "decision": "terminal; preserve original payload in the dead-letter record and remove it from pending and forced-inclusion queues only when no PBFT prepared value or durable lock protects the next height"
+  },
+  "dead_letters": {
+    "v1": [
+      {
+        "work_id": "6888e192fbec959ef6c457138b584d8ac6d2b0e4783991fada58d66eb6e82a33",
+        "source": "ephemeral_or_forced"
+      },
+      {
+        "work_id": "fd44e48ea8601b1ab00e8ece79b230148f4bf18b2c0f5ffc47c285e261bba230",
+        "source": "durable"
+      }
+    ],
+    "v2": [
+      {
+        "work_id": "ecbaa6ac3868919cf9b132dceb74310c6014b7068d90e8343985f36fa44f08f1",
+        "source": "durable"
+      }
+    ],
+    "v4": [
+      {
+        "work_id": "6888e192fbec959ef6c457138b584d8ac6d2b0e4783991fada58d66eb6e82a33",
+        "source": "ephemeral_or_forced"
+      }
+    ],
+    "common_terminal_reason": "publisher authorization nonce is already committed on this chain",
+    "authorization_expired_at_review": true
+  },
+  "restart_checks": {
+    "v1": {"same_tip": true, "health_ok": true, "peers_after_recovery": 2},
+    "v2": {"same_tip": true, "health_ok": true, "peers_after_recovery": 2},
+    "v3": {"same_tip": true, "health_ok": true, "peers_after_recovery": 2, "terminal_work_still_pending_until_repaired_image": true},
+    "v4": {
+      "same_tip": true,
+      "health_ok": true,
+      "peers_after_recovery": 2,
+      "pbft_before": "h4 commit, 2 of 3 commits",
+      "pbft_after": "no in-memory rounds",
+      "separate_signing_journal_preserved": true
+    }
+  },
+  "deployment": "r10 source repair under compilation; no candidate node has received the repair image yet",
+  "public_cutover": false
+}

@@ -1,0 +1,112 @@
+{
+  "schema": "creg-real-fleet-pre-restart-safety-v1",
+  "captured_at_utc": "2026-09-26T16:39:21.9995879Z",
+  "node_count": 8,
+  "all_nodes_safe": true,
+  "nodes": [
+    {
+      "slot": "o1",
+      "ready_capture_tip": "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0",
+      "round_count": 0,
+      "active_round_count": 0,
+      "active_rounds": [],
+      "checks": {
+        "readiness_capture_matches_h4": true,
+        "no_active_pbft_round": true,
+        "recovery_clear": true
+      },
+      "passed": true
+    },
+    {
+      "slot": "o2",
+      "ready_capture_tip": "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0",
+      "round_count": 0,
+      "active_round_count": 0,
+      "active_rounds": [],
+      "checks": {
+        "readiness_capture_matches_h4": true,
+        "no_active_pbft_round": true,
+        "recovery_clear": true
+      },
+      "passed": true
+    },
+    {
+      "slot": "o3",
+      "ready_capture_tip": "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0",
+      "round_count": 0,
+      "active_round_count": 0,
+      "active_rounds": [],
+      "checks": {
+        "readiness_capture_matches_h4": true,
+        "no_active_pbft_round": true,
+        "recovery_clear": true
+      },
+      "passed": true
+    },
+    {
+      "slot": "o4",
+      "ready_capture_tip": "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0",
+      "round_count": 0,
+      "active_round_count": 0,
+      "active_rounds": [],
+      "checks": {
+        "readiness_capture_matches_h4": true,
+        "no_active_pbft_round": true,
+        "recovery_clear": true
+      },
+      "passed": true
+    },
+    {
+      "slot": "v1",
+      "ready_capture_tip": "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0",
+      "round_count": 0,
+      "active_round_count": 0,
+      "active_rounds": [],
+      "checks": {
+        "readiness_capture_matches_h4": true,
+        "no_active_pbft_round": true,
+        "recovery_clear": true
+      },
+      "passed": true
+    },
+    {
+      "slot": "v2",
+      "ready_capture_tip": "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0",
+      "round_count": 0,
+      "active_round_count": 0,
+      "active_rounds": [],
+      "checks": {
+        "readiness_capture_matches_h4": true,
+        "no_active_pbft_round": true,
+        "recovery_clear": true
+      },
+      "passed": true
+    },
+    {
+      "slot": "v3",
+      "ready_capture_tip": "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0",
+      "round_count": 0,
+      "active_round_count": 0,
+      "active_rounds": [],
+      "checks": {
+        "readiness_capture_matches_h4": true,
+        "no_active_pbft_round": true,
+        "recovery_clear": true
+      },
+      "passed": true
+    },
+    {
+      "slot": "v4",
+      "ready_capture_tip": "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0",
+      "round_count": 0,
+      "active_round_count": 0,
+      "active_rounds": [],
+      "checks": {
+        "readiness_capture_matches_h4": true,
+        "no_active_pbft_round": true,
+        "recovery_clear": true
+      },
+      "passed": true
+    }
+  ]
+}

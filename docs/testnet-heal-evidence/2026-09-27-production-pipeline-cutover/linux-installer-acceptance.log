@@ -1,0 +1,19 @@
+[0;36m============================================================[0m
+[0;36m   Chain Registry (CREG) — Universal Remote Installer       [0m
+[0;36m============================================================[0m
+[0;36mFetching CREG v0.1.0-testnet-r25 for Linux/x86_64...[0m
+[0;32m✓ Downloaded package from CREG Testnet CDN[0m
+[0;32m✓ SHA-256 integrity verified: c3c44eb40b2cd2751352ff77af7d136813116823d72f226cbec19e6abe00d72a[0m
+[0;36mSyncing signed testnet chain specification...[0m
+/home/samue/creg-r25-installer-check/bin/creg: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.39' not found (required by /home/samue/creg-r25-installer-check/bin/creg)
+
+Recommendation: To check for possible causes of SSH connectivity issues and get
+recommendations, rerun the ssh command with the --troubleshoot option.
+
+gcloud compute ssh creg-testnet-vm --project=gen-lang-client-0022105784 --zone=us-central1-b --troubleshoot
+
+Or, to investigate an IAP tunneling issue:
+
+gcloud compute ssh creg-testnet-vm --project=gen-lang-client-0022105784 --zone=us-central1-b --troubleshoot --tunnel-through-iap
+
+ERROR: (gcloud.compute.ssh) [C:\Users\samue\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\sdk\plink.exe] exited with return code [1].

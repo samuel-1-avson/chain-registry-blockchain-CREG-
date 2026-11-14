@@ -1,0 +1,42 @@
+[
+  {
+    "path": "crates/common/src/lib.rs",
+    "sha256": "c531ea42036790e5217dc6ebdf6968eb97d3b9009ddd06909f097f023fda30cd"
+  },
+  {
+    "path": "crates/node/src/state.rs",
+    "sha256": "f682f8a0dc8d0b38724f386de0c97fe357947bc649e50ecaae1ae371d468d6b4"
+  },
+  {
+    "path": "crates/node/src/sync.rs",
+    "sha256": "274c7deb0fb37fbc92a69faf3973b3eeeb550be8ca0004b695e4fff3281dcbe4"
+  },
+  {
+    "path": "crates/node/src/pending_pool.rs",
+    "sha256": "a7dc54fe9a5a891886190087109e3dc5330e15d42d72a0ca3c9a733632199af0"
+  },
+  {
+    "path": "crates/node/src/api.rs",
+    "sha256": "292d7a12474a32b176d1b9876b4fb1775921d60d976015425fd48c222684700d"
+  },
+  {
+    "path": "crates/node/src/p2p.rs",
+    "sha256": "1b05b2ac2bbfd67b922b11a8cfc49fb73de7a553c360949d83bdf00f7de9141c"
+  },
+  {
+    "path": "crates/node/src/main.rs",
+    "sha256": "d491a8150eea10455728010f1443c004692bdadc4a7d0309a979155666458e94"
+  },
+  {
+    "path": "crates/node/src/lib.rs",
+    "sha256": "fc3c75742cf1e454cd189885918c66d4027f957fbff67f06f44e94ae89abe413"
+  },
+  {
+    "path": "crates/node/src/revocation_gossip.rs",
+    "sha256": "d41a54580c0346b0c8b54f9818b7ca1553f24e3e49fdb9b5bbcb3c9da2b6aea1"
+  },
+  {
+    "path": "testnet/phase-c/Dockerfile.r20-durable-revocation-delivery",
+    "sha256": "0a4bb8e2e9c8f15fe59a96fd52c2f61bc13b2256832bdcf71941b933757481ac"
+  }
+]

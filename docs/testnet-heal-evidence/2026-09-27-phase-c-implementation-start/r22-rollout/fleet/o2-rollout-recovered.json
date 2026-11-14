@@ -1,0 +1,100 @@
+{
+  "schema": "creg-real-r22-node-rollout-v1",
+  "slot": "o2",
+  "role": "observer",
+  "node_id": "observer-2",
+  "image_id": "sha256:2b472a089fe6ac651edfbae51b616456ed335f35992c0374f10c1ea80ce6caa3",
+  "prior_image_id": "sha256:374eadc62ee9652ee0869efb22ad02ddb0bd8184e11a752a4b4bb303179d9423",
+  "completed_at_utc": "2026-09-27T03:32:49Z",
+  "p2p_identity_sha256": "602c79f9b4fd0d1b63c9a59b5a44fa91c1a3f03e470a78f5203b80065745e177",
+  "node_env_sha256": "292dbb79b4f61d9300634c3ec666e94ba44e1f48beed0c0502750c5752670326",
+  "p2p_identity_preserved": true,
+  "node_env_preserved": true,
+  "chain_store_preserved": true,
+  "signer_journal_preserved": false,
+  "startup_markers": [],
+  "startup_marker_count": 0,
+  "passed": true,
+  "result": {
+    "checks": {
+      "image_digest": true,
+      "chain_identity": true,
+      "genesis_preserved": true,
+      "h12_preserved": true,
+      "four_validator_roster": true,
+      "connected_peers": true,
+      "correct_role": true,
+      "scanner_profile_ready": true,
+      "yara_ready": true,
+      "threat_feed_ready": true,
+      "osv_ready": true,
+      "queues_clear": true,
+      "terminal_records_preserved": true,
+      "pbft_clear": true
+    },
+    "stats": {
+      "tip_height": 12,
+      "tip_hash": "a329eb216ce1fd18e1f5510333cb683db34ca6e789b5a3ef229dabe2af08fc7d",
+      "package_count": 4,
+      "block_count": 13,
+      "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+      "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+      "spec_signature_verified": true,
+      "l1_rpc_configured": true,
+      "is_validator": false,
+      "validator_count": 4,
+      "active_validators": 4,
+      "total_stake": 400,
+      "total_stake_native": "400",
+      "peer_count": 2,
+      "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+      "l1_block": 0,
+      "pending_tx_count": 0,
+      "publisher_count": 1,
+      "finalized_height": 12,
+      "finalization_lag": 0,
+      "finalization_source": "creg-canonical-store",
+      "validator_set_source": "chain-authoritative",
+      "validator_set_sync_state": "synced",
+      "validator_set_last_finalized_source_block": 11790664
+    },
+    "health": {
+      "status": "ok",
+      "node_id": "observer-2",
+      "is_validator": false,
+      "version": "0.1.0",
+      "validator_set_sync": {
+        "enabled": true,
+        "mode": "chain-authoritative",
+        "state": "synced",
+        "last_finalized_source_block": 11790664,
+        "cursor_block": 11790664,
+        "cursor_log_index": 4294967295,
+        "cursor_block_hash": "0x8281f3d4b8b34839c14f47cd5cac9d7511e17d2ed05c6d32f185fab29b6fccd4",
+        "last_poll_at": "2026-09-27T03:32:43.634028876+00:00",
+        "last_error": null
+      },
+      "sandbox": {
+        "engine": "nsjail",
+        "dev_bypass": false,
+        "isolated": true,
+        "degraded": false,
+        "note": "kernel namespaces + seccomp-BPF (primary engine)"
+      },
+      "sync": {
+        "lag_blocks": 0,
+        "max_peer_tip": 12,
+        "healthy": true
+      }
+    },
+    "pbft_clear": true,
+    "queues": {
+      "creg_pending_block_txs": 0.0,
+      "creg_durable_finalized_work_depth": 0.0,
+      "creg_durable_finalized_work_ready_depth": 0.0,
+      "creg_durable_finalized_work_dead_letter_depth": 0.0,
+      "creg_forced_inclusion_pending": 0.0
+    }
+  },
+  "public_cutover": false
+}

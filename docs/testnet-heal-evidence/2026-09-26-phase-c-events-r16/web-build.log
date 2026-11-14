@@ -1,0 +1,38 @@
+
+> explorer@1.0.0 build
+> vite build
+
+vite v8.3.1 building client environment for production...
+transforming...
+✓ 1386 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/registerSW.js                    0.13 kB
+dist/manifest.webmanifest             0.38 kB
+dist/index.html                       1.27 kB │ gzip:   0.62 kB
+dist/assets/index-B3jIR-XU.css       32.52 kB │ gzip:   6.13 kB
+dist/assets/ccip-wxgVO9jx.js          2.83 kB │ gzip:   1.30 kB
+dist/assets/dist-BD5UuyBd.js         12.33 kB │ gzip:   4.58 kB
+dist/assets/dist-CcXEY26m.js        134.33 kB │ gzip:  42.54 kB
+dist/assets/index.es-B-oCoSq4.js    375.32 kB │ gzip: 112.30 kB
+dist/assets/index-yanlVH-v.js     1,161.98 kB │ gzip: 332.09 kB
+
+✓ built in 5.51s
+[plugin builtin:vite-reporter] 
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+
+PWA v1.3.0
+mode      generateSW
+precache  11 entries (1680.96 KiB)
+files generated
+  dist/sw.js
+  dist/workbox-2900516f.js
+[PLUGIN_TIMINGS] JavaScript callbacks ran for 20.4s. The build took 5.5s. Callbacks such as `closeBundle` run after the build ends, so callback time can be more than build time.
+The slowest callbacks, timed inside each callback (the wait before a callback starts is excluded, the time it awaits is included):
+  - plugin vite-plugin-pwa:build closeBundle (100%, 19.1s, 1 call)
+Additional callback time came from callbacks under 1s.
+See https://rolldown.rs/reference/InputOptions.checks#bundlertimings for more details.
+

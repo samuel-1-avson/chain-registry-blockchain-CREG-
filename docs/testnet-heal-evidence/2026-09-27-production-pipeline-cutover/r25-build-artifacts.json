@@ -1,0 +1,47 @@
+{
+  "captured_at_utc": "2026-09-27T23:44:18.0483606Z",
+  "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+  "node": {
+    "build_exit_code": 0,
+    "feature": "phase-c-real-fleet",
+    "sha256": "24925bf0df62ed9fafe4565f9969ba83c0beefbbd6725abbd8814f99ea04cf07",
+    "bytes": 104372664,
+    "image_base": "sha256:ef21b958b5e3e4f09e1c87290d3d9a50f23b5350d207e5af9982dd1cf5413708",
+    "image_digest": "sha256:2a553f1cb8b2ea6c63bf99649c57e0291698e3ac01da5de80863760afcc07a70",
+    "archive_loaded_config_id": "sha256:704cd7dfb89a048c146a3de502416c31a6f77c0e3f493a98f4fe3098c732046c",
+    "o2_observer_canary": "passed_after_peer_reconnection",
+    "o2_preserved_prior_container": "creg-phase-c-r7-o2-r22-before-r25",
+    "validators_deployed": 0,
+    "v4_durable_commit_replay_proven": false
+  },
+  "linux_cli_pre_canonical_fix": {
+    "build_exit_code": 0,
+    "sha256": "684d36165c1facd8921891fe51b456cee9f842e4136f1c5b7f107ae783ecebc6",
+    "bytes": 67267216,
+    "builder": "Ubuntu 22.04, glibc 2.35",
+    "maximum_required_glibc": "2.34",
+    "real_ubuntu_22_04_vm_execution": "passed",
+    "real_r7_block_read": "h14 and h13",
+    "release_status": "superseded_by_canonical_package_id_fix"
+  },
+  "linux_cli_canonical_rebuild": {
+    "build_exit_code": 0,
+    "sha256": "95569797c4c0c3d767641cc7df07307874da4673fc32daa7f25ceb63776f2c69",
+    "bytes": 67270408,
+    "builder": "Ubuntu 22.04, glibc 2.35",
+    "maximum_required_glibc": "2.34",
+    "real_ubuntu_22_04_vm_execution": "passed --version",
+    "build_log": "linux-portable-cli-canonical-rebuild-02.log"
+  },
+  "windows_cli_canonical_rebuild": "pending",
+  "public_r7_cutover": false,
+  "linux_cli_real_node_acceptance": {
+    "binary_staged": "/tmp/creg-r25-canonical-cli-95569797",
+    "node": "observer-1",
+    "version": "creg 0.1.0-testnet-r25",
+    "real_r7_block_read": "passed; height 14 and packages 5; h14 revoke and h13 publish records shown",
+    "canonical_verify": "npm:kleur@4.1.5 returned exact canonical ID and real on-chain Revoked status",
+    "positive_merkle_proof": "not demonstrated because the package is revoked",
+    "deployment": "staged executable on O1 only; release package not published"
+  }
+}

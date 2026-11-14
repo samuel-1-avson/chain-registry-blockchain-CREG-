@@ -1,0 +1,173 @@
+{
+  "schema": "creg-r25-v4-durable-commit-disarm-v1",
+  "captured_at_utc": "2026-09-28T03:08:00.861083+00:00",
+  "node_id": "validator-4",
+  "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+  "signed_spec_genesis_identity": "1852b9a86dd3b53e7b2de4a774723a4fe48e862f9c61d14e5917b42b21055234",
+  "height": 18,
+  "canonical": "npm:has-flag@5.0.1",
+  "block_hash": "ec64471b8f9c58eb2d9b958db765a98871cb444e032143d313d65b3ab80cd76c",
+  "armed_container_id": "50f153e3721a67abbef2873a06356a5ea54e32950eb6300abd61405d7f38c50b",
+  "image_id": "sha256:704cd7dfb89a048c146a3de502416c31a6f77c0e3f493a98f4fe3098c732046c",
+  "preserved_armed_container": "creg-phase-c-r7-v4-w3-h18-arm-preserved-20260928T030739-238206Z",
+  "identity_sha256_before": "c287fdb093e8f8a2458ad36206ee50c3918cbb41b4e5c5795f5f77d834f8f575",
+  "preflight": {
+    "armed_r25_v4_running": true,
+    "exact_capture_arm_present": true,
+    "r7_h18_shared_tip": true,
+    "four_validator_roster": true,
+    "package_revoked": true,
+    "v4_healthy": true,
+    "pbft_clear": true,
+    "r13_profile_ready": true,
+    "queues_clear": true,
+    "identity_and_signer_journal_present": true
+  },
+  "pre_disarm_stats": {
+    "tip_height": 18,
+    "tip_hash": "ec64471b8f9c58eb2d9b958db765a98871cb444e032143d313d65b3ab80cd76c",
+    "package_count": 7,
+    "block_count": 19,
+    "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+    "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+    "spec_signature_verified": true,
+    "l1_rpc_configured": true,
+    "is_validator": true,
+    "validator_count": 4,
+    "active_validators": 4,
+    "total_stake": 400,
+    "total_stake_native": "400",
+    "peer_count": 2,
+    "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+    "l1_block": 0,
+    "pending_tx_count": 0,
+    "publisher_count": 1,
+    "finalized_height": 18,
+    "finalization_lag": 0,
+    "finalization_source": "creg-canonical-store",
+    "validator_set_source": "chain-authoritative",
+    "validator_set_sync_state": "synced",
+    "validator_set_last_finalized_source_block": 11797716
+  },
+  "pre_disarm_health": {
+    "status": "ok",
+    "node_id": "validator-4",
+    "is_validator": true,
+    "version": "0.1.0",
+    "validator_set_sync": {
+      "enabled": true,
+      "mode": "chain-authoritative",
+      "state": "synced",
+      "last_finalized_source_block": 11797716,
+      "cursor_block": 11797716,
+      "cursor_log_index": 4294967295,
+      "cursor_block_hash": "0xc1ae6ccf8c479c21ac56af43ee135daf70fc4ef7a60a74c21b25310e4ae494ad",
+      "last_poll_at": "2026-09-28T03:07:27.258474418+00:00",
+      "last_error": null
+    },
+    "sandbox": {
+      "engine": "nsjail",
+      "dev_bypass": false,
+      "isolated": true,
+      "degraded": false,
+      "note": "kernel namespaces + seccomp-BPF (primary engine)"
+    },
+    "sync": {
+      "lag_blocks": 0,
+      "max_peer_tip": 18,
+      "healthy": true
+    }
+  },
+  "pre_disarm_package_status": "revoked",
+  "pre_disarm_pbft": {
+    "active_round_count": 0,
+    "max_non_terminal_phase_age_seconds": 0.0,
+    "rounds": []
+  },
+  "hook_log_lines": [
+    "2026-09-28T03:01:58.484143915Z 2026-09-28T03:01:58.483946Z  INFO creg_node::p2p: Local PBFT COMMIT durably persisted before consensus application or gossip event=\"pbft_local_commit_durable\" signing_path=\"p2p_follower\" node_id=validator-4 chain_id=creg-phase-c-testnet-2026-09-26-r7 genesis_hash=1852b9a86dd3b53e7b2de4a774723a4fe48e862f9c61d14e5917b42b21055234 height=18 parent_hash=7c3364858873b00dcb8eef4875c2f1eaa85ade32648850177bd12dcb5f7627d7 block_hash=ec64471b8f9c58eb2d9b958db765a98871cb444e032143d313d65b3ab80cd76c view_number=0",
+    "2026-09-28T03:01:58.484193366Z 2026-09-28T03:01:58.484004Z  WARN creg_node::block_producer: Durable local COMMIT is held before in-memory application and peer broadcast event=\"phase_c_durable_commit_capture_paused\" node_id=validator-4 chain_id=creg-phase-c-testnet-2026-09-26-r7 genesis_hash=1852b9a86dd3b53e7b2de4a774723a4fe48e862f9c61d14e5917b42b21055234 height=18 parent_hash=7c3364858873b00dcb8eef4875c2f1eaa85ade32648850177bd12dcb5f7627d7 block_hash=ec64471b8f9c58eb2d9b958db765a98871cb444e032143d313d65b3ab80cd76c view_number=0 package_canonical=npm:has-flag@5.0.1 pause_ms=30000",
+    "2026-09-28T03:02:28.485438944Z 2026-09-28T03:02:28.485085Z  WARN creg_node::block_producer: Durable COMMIT capture pause elapsed event=\"phase_c_durable_commit_capture_resumed\" node_id=validator-4 height=18 block_hash=ec64471b8f9c58eb2d9b958db765a98871cb444e032143d313d65b3ab80cd76c"
+  ],
+  "controlled_crash_performed": false,
+  "replay_observed": false,
+  "result": "disarmed_h18_shared_fleet_healthy_replay_unproven",
+  "unarmed_container_id": "dc48ee5e1debc81fb7f2fc9da83f2fae08ae543dda62a7b628076780d916c928",
+  "post_disarm_stats": {
+    "tip_height": 18,
+    "tip_hash": "ec64471b8f9c58eb2d9b958db765a98871cb444e032143d313d65b3ab80cd76c",
+    "package_count": 7,
+    "block_count": 19,
+    "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+    "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+    "spec_signature_verified": true,
+    "l1_rpc_configured": true,
+    "is_validator": true,
+    "validator_count": 4,
+    "active_validators": 4,
+    "total_stake": 400,
+    "total_stake_native": "400",
+    "peer_count": 2,
+    "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+    "l1_block": 0,
+    "pending_tx_count": 0,
+    "publisher_count": 1,
+    "finalized_height": 18,
+    "finalization_lag": 0,
+    "finalization_source": "creg-canonical-store",
+    "validator_set_source": "chain-authoritative",
+    "validator_set_sync_state": "synced",
+    "validator_set_last_finalized_source_block": 11797717
+  },
+  "post_disarm_health": {
+    "status": "ok",
+    "node_id": "validator-4",
+    "is_validator": true,
+    "version": "0.1.0",
+    "validator_set_sync": {
+      "enabled": true,
+      "mode": "chain-authoritative",
+      "state": "synced",
+      "last_finalized_source_block": 11797717,
+      "cursor_block": 11797717,
+      "cursor_log_index": 4294967295,
+      "cursor_block_hash": "0x326e7540fd8be391cbf5103bd2c8679f567f8827d0206d9d53bceb72d02f5e4e",
+      "last_poll_at": "2026-09-28T03:07:43.007672096+00:00",
+      "last_error": null
+    },
+    "sandbox": {
+      "engine": "nsjail",
+      "dev_bypass": false,
+      "isolated": true,
+      "degraded": false,
+      "note": "kernel namespaces + seccomp-BPF (primary engine)"
+    },
+    "sync": {
+      "lag_blocks": 0,
+      "max_peer_tip": 18,
+      "healthy": true
+    }
+  },
+  "post_disarm_pbft": {
+    "active_round_count": 0,
+    "max_non_terminal_phase_age_seconds": 0.0,
+    "rounds": []
+  },
+  "post_disarm_package_status": "revoked",
+  "identity_sha256_after": "c287fdb093e8f8a2458ad36206ee50c3918cbb41b4e5c5795f5f77d834f8f575",
+  "post_disarm_checks": {
+    "new_r25_container_running_healthy": true,
+    "capture_arm_unset": true,
+    "same_data_and_read_only_scanner": true,
+    "same_h18_canonical_tip": true,
+    "v4_healthy_and_peered": true,
+    "package_remains_revoked": true,
+    "pbft_clear": true,
+    "r13_profile_ready": true,
+    "queues_clear": true,
+    "identity_unchanged_and_journal_present": true
+  },
+  "durable_commit_marker_seen": true,
+  "pause_marker_seen": true,
+  "pause_elapsed_normally": true
+}

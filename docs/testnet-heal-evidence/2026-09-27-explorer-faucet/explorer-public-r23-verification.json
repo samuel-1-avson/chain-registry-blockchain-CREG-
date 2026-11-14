@@ -1,0 +1,61 @@
+{
+  "capturedAt": "2026-09-27T18:44:30.080Z",
+  "deployment": "public explorer r23 fixes",
+  "base": "https://explorer.testnet.cregnet.dev",
+  "containerImage": "sha256:a7fad718d6cbe38633b5cc338898782259102115bf221e97dbab9d3830ffc360",
+  "dataSource": "real public API/node, no fixtures or response interception",
+  "chain": {
+    "chain_id": "creg-testnet-1",
+    "tip_height": 0,
+    "genesis_hash": "068364cf778ede5a0b1c814c59b0314f9a8598a959fa5a8e08ea78bc1b296b53"
+  },
+  "routes": [
+    {
+      "route": "/",
+      "title": "Chain Registry Explorer",
+      "text": "CHAIN HEIGHT\n0\ngenesis 068364cf77…\nFINALIZED\n—\nVALIDATORS\n2\n2 active\nTOTAL STAKE\n0.0000\nCREG\nPACKAGES\n0\nPENDING TXS\n4\nLatest blocks\nView all →\nHEIGHT\tHASH\tTXS\tPRODUCER\tAGE\n#0\t\n068364…296b53\n⧉\n\t0\t\ngenesis\n⧉\n\t1000d ago\nLive events\nOpen feed →\nALL\nBLOCK\nTX\nVOTE\nBRIDGE\nPACKAGE\n\nWaiti"
+    },
+    {
+      "route": "/blocks",
+      "title": "Chain Registry Explorer",
+      "text": "Blocks\ntip: #0\nshowing 1\n● Live\nHEIGHT\tHASH\tTXS\tPRODUCER\tSTATUS\tAGE\n#0\t\n068364cf…296b53\n⧉\n\t0\t\ngenesis\n⧉\n\tFINALIZED\t1000d ago\n← Newer blocks\nOlder blocks →"
+    },
+    {
+      "route": "/validators",
+      "title": "Chain Registry Explorer",
+      "text": "Validators\n2 total\nADDRESS\tALIAS\tSTAKE\tSTATUS\tNODE\n\nvalidator-1\n⧉\n\tGenesis validator-1 (us-east1-b)\t100 CREG\tACTIVE\t\nvalidator-1\n\n\nvalidator-2\n⧉\n\tGenesis validator-2 (local)\t100 CREG\tACTIVE\t\nvalidator-2"
+    },
+    {
+      "route": "/metrics",
+      "title": "Chain Registry Explorer",
+      "text": "Metrics\n\nDurable history from server-side Prometheus scrapes\n\n5m\n30m\n1h\n6h\n24h\n7d\n🔗\nShare\nCHAIN HEIGHT\n0\nVALIDATORS\n2 / 2\nPACKAGES\n0\nPENDING TXS\n4\nFINALIZATION LAG\n— blocks\nPUBLISHERS\n0\nHistorical metrics unavailable\nServer-side metric history is unavailable until the real Prome"
+    },
+    {
+      "route": "/network",
+      "title": "Chain Registry Explorer",
+      "text": "Network\nPEERS\n1\nLISTEN ADDR\n—\nPUBKEY\n—\nNode list unavailable\nNetwork topology requires operator credentials on this node.\nEndpoint: /v1/operator/nodes (401)"
+    },
+    {
+      "route": "/proof",
+      "title": "Chain Registry Explorer",
+      "text": "Proof verifier\n\nCheck whether a publication transaction is included in a block. This view does not establish current install safety or independently verify the block's quorum certificate.\n\n🔗\nShare\nFetch proof by package\n⇩ Fetch proof\nOr paste proof JSON\nHow it works\n\nA package p"
+    },
+    {
+      "route": "/wallet",
+      "title": "Chain Registry Explorer",
+      "text": "Wallet & Stake\nEthereum SepoliaChain ID 11155111\nPublic Ethereum testnet for Chain Registry.\nConnect Wallet\nConnect MetaMask\nWalletConnect\nConnects to Ethereum Sepolia (Chain 11155111)"
+    },
+    {
+      "route": "/about",
+      "title": "Chain Registry Explorer",
+      "text": "About this chain\n\nProtocol identity, contract addresses, and runtime configuration.\n\nCHAIN ID\ncreg-testnet-1\nNETWORK\n—\nVERSION\n0.1.0\nGENESIS HASH\n068364cf778ede5a0b1c814c59b0314f9a8598a959fa5a8e08ea78bc1b296b53\n⧉\nVALIDATOR COUNT\n2\nExplorer\n\nThis explorer ships as a deep-linkable "
+    }
+  ],
+  "checks": {
+    "chainStatsHttp": 200,
+    "metricsHistoryHttp": 401,
+    "relayerPolicyHttp": 404,
+    "pageErrors": [],
+    "serverErrors": []
+  }
+}

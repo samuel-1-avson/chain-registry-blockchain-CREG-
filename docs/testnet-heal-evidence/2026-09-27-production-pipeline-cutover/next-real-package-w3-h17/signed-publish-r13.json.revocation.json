@@ -1,0 +1,8 @@
+{
+  "reason": "Phase C live revocation after shared publication",
+  "revoker_pubkey": "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d",
+  "signature": "d0de6ae1ae359c8bd718bb3586aa206f79baf93b3a9f3dc75dd65b575731cc2543e85e4f4722ca7685afc1f344bcac405341fd10508ed4bd5d42bc402cb64e02",
+  "signature_version": 1,
+  "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+  "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4"
+}

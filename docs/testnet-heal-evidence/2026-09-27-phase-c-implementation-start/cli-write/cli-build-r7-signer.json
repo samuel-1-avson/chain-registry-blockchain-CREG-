@@ -1,0 +1,8 @@
+{
+  "path": "C:\\Users\\samue\\OneDrive\\Desktop\\projects\\chain-registry-blockchain-CREG-\\chain-registry\\target\\release\\creg.exe",
+  "last_write_utc": "2026-09-27T06:59:54.4113294Z",
+  "sha256": "2132ae16c83739a6a29b8ea66b8ce547e5ab912437f14b7b6b2718421b86f5fc",
+  "spec_signer_pubkey": "3fe87833177b04b0a18600eace041692a35fb2b85f6e14e6734d894a0fd61c01",
+  "feature": "common/phase-c-canonical-transactions",
+  "build": "cargo build --locked --release --package chain-registry-cli"
+}

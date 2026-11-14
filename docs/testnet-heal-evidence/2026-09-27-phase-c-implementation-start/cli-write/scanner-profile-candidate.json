@@ -1,0 +1,45 @@
+{
+  "schema": "creg-scanner-profile-candidate-v1",
+  "captured_at_utc": "2026-09-27T04:55:30.8425789Z",
+  "prior_epoch": "osv-2026-09-26-phase-c-r10-event-check",
+  "prior_snapshot_sha256": "eda8108603d2d674fcdc385635f2e7ac3091a044322214d1c1568b79de8986b9",
+  "prior_entry_keys": [
+    "npm:escape-html@1.0.3",
+    "npm:toidentifier@1.0.1",
+    "npm:is-number@7.0.0"
+  ],
+  "prior_computed_profile": "d09a9d2450e6e691bc71bee591b1101aa14d8b0feb6f6088ab6819f48e1a6be4",
+  "expected_current_profile": "d09a9d2450e6e691bc71bee591b1101aa14d8b0feb6f6088ab6819f48e1a6be4",
+  "new_epoch": "osv-2026-09-27-phase-c-kleur-r11",
+  "new_snapshot_sha256": "452b326cc8d7bea568f21e2fd0d42d9b45503f481a8efe26a174ecb09cabe930",
+  "new_profile_digest": "f397fac29df29438f0ee15580547def5fe66a03af60153d22993f4a7af9fce8c",
+  "coverage": [
+    {
+      "key": "npm:escape-html@1.0.3",
+      "vulnerability_count": 0
+    },
+    {
+      "key": "npm:is-number@7.0.0",
+      "vulnerability_count": 0
+    },
+    {
+      "key": "npm:ms@2.1.3",
+      "vulnerability_count": 0
+    },
+    {
+      "key": "npm:toidentifier@1.0.1",
+      "vulnerability_count": 0
+    },
+    {
+      "key": "npm:kleur@4.1.5",
+      "vulnerability_count": 0
+    }
+  ],
+  "all_queries_succeeded": true,
+  "candidate_key_present": true,
+  "candidate_vulnerability_count": 0,
+  "yara_sha256": "2ec033d1446c6280f46d7d74467f78223c67c9abe45c282080db78cfe3177766",
+  "threat_sha256": "5e3a7beac3c5b7a5d766c30ff024509bc1df23b3f7c5d74349cc54ed6bc960ef",
+  "osv_snapshot_sha256": "452b326cc8d7bea568f21e2fd0d42d9b45503f481a8efe26a174ecb09cabe930",
+  "bundle_directory": "C:\\Users\\samue\\OneDrive\\Desktop\\projects\\chain-registry-blockchain-CREG-\\docs\\testnet-heal-evidence\\2026-09-27-phase-c-implementation-start\\cli-write\\scanner-bundle"
+}

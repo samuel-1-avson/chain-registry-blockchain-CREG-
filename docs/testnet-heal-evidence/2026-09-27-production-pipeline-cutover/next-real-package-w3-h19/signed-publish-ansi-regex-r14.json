@@ -1,0 +1,43 @@
+{
+  "id": {
+    "ecosystem": "npm",
+    "name": "ansi-regex",
+    "version": "6.1.0"
+  },
+  "content_hash": "046f6fe17602b686aa522de193d6046a75e557933365ba51e3e3d8e1fa694f3c",
+  "ipfs_cid": "QmaKQyhX5fEqeLyB1LBC39G3FjQRnbyrScnMfEejShYvdC",
+  "publisher_address": "0xa40d79527314efd4964d49c4a0673c87b612348b",
+  "publisher_pubkey": "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d",
+  "signature": "",
+  "manifest": {
+    "allowed_network_hosts": [],
+    "allowed_fs_writes": [],
+    "spawns_processes": false,
+    "allowed_process_spawns": [],
+    "description": "Pure ANSI escape-sequence matcher; no runtime dependencies or install scripts."
+  },
+  "submitted_at": "2026-09-28T08:07:09Z",
+  "shielded": false,
+  "key_bundle": null,
+  "pgp_signature": null,
+  "pgp_public_key": null,
+  "threshold": 1,
+  "publisher_pubkeys": [
+    "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d"
+  ],
+  "signatures": [
+    "0dad4d0c4c3e34c9b94baf03d25af727b790be93d5a93c467fedc2cfc4845ea901557a9cebae0bcd19397434e32d3bbbd245d1dcfea6593715c91a0c49a4f308"
+  ],
+  "publisher_evm_signature": "eb28675a25b1d930155531ae1a8808af40ee2a60e9ff1f32518d9f8af8caf22a3b6f73f1717c7e57abea0df3aa6467ca0ad34aa5920adbaf6945ba6fabe3ee691c",
+  "publisher_nonce": "5b82c60fa658fab568660a7ac6baa974",
+  "publisher_expires_at": 1790586429,
+  "source_hash": "046f6fe17602b686aa522de193d6046a75e557933365ba51e3e3d8e1fa694f3c",
+  "manifest_hash": "f256aab22bc38fa027756f6ff607c94d4a8cdb4c9dd2da5bbfc44a13e92c1678",
+  "ownership_claim": "npm:ansi-regex",
+  "publisher_chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+  "publisher_genesis_hash": "1852b9a86dd3b53e7b2de4a774723a4fe48e862f9c61d14e5917b42b21055234",
+  "publisher_staking_contract": "0x61c00ebe7c46f0bce63942f7e15bcc434dfc9b7c",
+  "publisher_authorization_version": 4,
+  "ownership_proof": null,
+  "namespace_authority_certificate": null
+}

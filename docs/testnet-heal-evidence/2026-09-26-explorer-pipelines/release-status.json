@@ -1,0 +1,33 @@
+{
+  "captured_at_utc": "2026-09-26T13:32:01.2758173Z",
+  "public_web_image": "chain-registry-web-explorer:pipelines-r14-20260926",
+  "public_web_image_id": "sha256:1e9b0b54d4bd66b83c3bea3452db371005b4d3bd835bf5571fa27e81824dd244",
+  "public_web_routes_verified": 8,
+  "public_api_routes_verified_before_r14": 22,
+  "candidate_web_routes_verified": 17,
+  "public_chain_id": "creg-testnet-1",
+  "public_height": 0,
+  "candidate_chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+  "candidate_height": 4,
+  "cli_windows_sha256": "de45f5811ccc062efb09040f7bcf7d898c336c9d3ff893e5c5ab072e122ef831",
+  "cli_release": "R15 installed at both local Windows command paths; real public and candidate API reads verified",
+  "cli_installer_release": "pending",
+  "node_image": "V1 runs phase-c-secure-r13-explorer; seven candidate hosts remain on r9; public node unchanged",
+  "node_build": "r13 built and running on V1",
+  "node_deployment": "V1 r13; seven candidate hosts r9; public legacy node unchanged",
+  "fleet_capture": "fleet-final-r15.json",
+  "fleet_all_eight_online_scanner_ready": true,
+  "fleet_all_eight_recovery_clear": false,
+  "v3_pending_block_txs": 1,
+  "v3_durable_finalized_work_depth": 1,
+  "v3_forced_inclusion_pending": 1,
+  "validator_dead_letter_depths": {
+    "v1": 2,
+    "v2": 1,
+    "v3": 0,
+    "v4": 1
+  },
+  "public_cutover": "pending",
+  "chain_reset_performed": false,
+  "swagger_operations_verified": 44
+}

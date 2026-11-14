@@ -1,0 +1,7 @@
+{
+  "timestamp_utc": "2026-09-26T11:55:51.2093016Z",
+  "status": "built",
+  "image_tag": "creg-node:phase-c-secure-r12-explorer",
+  "detail": "Compilation succeeded; signed-spec compatibility and real-host acceptance remain pending.",
+  "public_cutover": "pending"
+}

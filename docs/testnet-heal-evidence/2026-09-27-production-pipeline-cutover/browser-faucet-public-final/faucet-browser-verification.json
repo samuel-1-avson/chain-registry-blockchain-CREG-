@@ -1,0 +1,57 @@
+{
+  "timestamp_utc": "2026-09-27T20:48:50.362Z",
+  "base": "https://faucet.testnet.cregnet.dev",
+  "status": "passed",
+  "endpoints": {
+    "/health": {
+      "faucet": "online",
+      "faucet_balance": "9000000000000000000000",
+      "faucet_native_balance": "78819664051081092",
+      "mode": "real",
+      "native_drips_available": true,
+      "status": "healthy",
+      "token_drips_available": true
+    },
+    "/api/network": {
+      "chain_id": 11155111,
+      "chain_name": "CREG Testnet (Sepolia)",
+      "currency": "ETH",
+      "explorer_url": "https://explorer.testnet.cregnet.dev",
+      "gas_note": "Gas on EVM testnets is paid in the native testnet ETH for that chain, not in ERC-20 tokens.",
+      "native_currency_symbol": "ETH",
+      "rpc_url": "https://api.testnet.cregnet.dev/sepolia",
+      "token_contract": "0xbC2a72107C6765364D0A822a88A6e6C61f30EAa6",
+      "token_symbol": "tCREG"
+    },
+    "/api/stats": {
+      "cooldown_seconds": 60,
+      "drip_amount": "1000000000000000000000",
+      "faucet_address": "0x721C8dBD8208CA9dBdcC12AE9339225458608B81",
+      "faucet_balance": "9000000000000000000000",
+      "faucet_balance_formatted": "9000.00",
+      "faucet_native_balance": "78819664051081092",
+      "faucet_native_balance_formatted": "0.0788",
+      "max_balance": "10000000000000000000000",
+      "native_drip_amount": "0",
+      "native_max_balance": "1000000000000000000",
+      "stats": {
+        "last_drip": null,
+        "total_distributed": "0",
+        "total_drips": 0,
+        "total_native_distributed": "0",
+        "unique_addresses": 0
+      },
+      "token_contract": "0xbC2a72107C6765364D0A822a88A6e6C61f30EAa6"
+    },
+    "/api/challenge": {
+      "challenge": "4d4cae54f0db42c454ca04abdb179d8f",
+      "difficulty": 20,
+      "ttl_secs": 120
+    }
+  },
+  "rpc_chain_id": 11155111,
+  "errors": [],
+  "serverErrors": [],
+  "body": "Skip to main content\n💧\nCREG Testnet Faucet\n\nGet free test tokens and native gas for the Chain Registry testnet\n\nℹ️ Testnet Information\n\n• Receive 1,000 tCREG per request\n• Receive 0 ETH for gas per request\n• 60s cooldown between requests\n• Maximum balance: 10,000 tCREG and 1 ETH\n• Gas on EVM testnets is paid in native testnet ETH, not in ERC-20 tokens\n• For testing purposes only\n\n🦊 MetaMask\n⌨️ Paste Address\nRequest Test Tokens + Gas\n1,000\nTCREG PER DRIP\n0\nETH GAS PER DRIP\n60s\nCOOLDOWN\n0\nTOTAL DRIPS\n9,000\nTCREG RESERVE\n0.0788\nETH GAS RESERVE\n🔗 Network Configuration\nChain ID\n11155111\nRPC URL\nhttps://api.testnet.cregnet.dev/sepolia\nToken Contract\n0xbC2a72107C6765364D0A822a88A6e6C61f30EAa6\nCurrency\nETH (native gas)\nToken\ntCREG (ERC-20)\n🚀 Next Steps\nGet testnet ETH for gas and tCREG for app operations above\nOpen the Chain Registry Explorer\nConnect your wallet and stake as a publisher or validator\n\nPart of the Chain Registry ecosystem\n\nTestnet Only • Not Real Value",
+  "requests_mocked": false
+}

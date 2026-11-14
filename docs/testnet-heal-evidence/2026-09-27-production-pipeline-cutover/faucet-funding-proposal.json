@@ -1,0 +1,43 @@
+{
+  "timestamp_utc": "2026-09-27T20:05:04.753Z",
+  "status": "prepared_not_signed_or_broadcast",
+  "chain_id": 11155111,
+  "rpc": "https://ethereum-sepolia-rpc.publicnode.com",
+  "token": "0xbC2a72107C6765364D0A822a88A6e6C61f30EAa6",
+  "token_code_keccak256": "0xee4ee60af45e022c2673e37e21781b5d88d97164e768ad1d65293122aa1d2b16",
+  "token_owner": "0x0AB4Db22A9902B8Ef678aBd408889af22277d24E",
+  "treasury": "0x3A3206D683441AA91cCA7CD5757B1F0ca463213A",
+  "recipient": "0x721C8dBD8208CA9dBdcC12AE9339225458608B81",
+  "token_amount": "10000",
+  "token_amount_atomic": "10000000000000000000000",
+  "standard_drips": 10,
+  "treasury_tokens_before": "19999590.0",
+  "faucet_tokens_before": "0.0",
+  "treasury_eth_before": "0.192734055065081554",
+  "gas_budget_eth": "0.001",
+  "estimated_gas": "52084",
+  "gas_limit": "65105",
+  "max_fee_per_gas_policy_wei": "15359803394",
+  "current_suggested_max_fee_per_gas_wei": "1897694742",
+  "transaction": {
+    "chainId": 11155111,
+    "from": "0x3A3206D683441AA91cCA7CD5757B1F0ca463213A",
+    "to": "0xbC2a72107C6765364D0A822a88A6e6C61f30EAa6",
+    "data": "0xa9059cbb000000000000000000000000721c8dbd8208ca9dbdcc12ae9339225458608b8100000000000000000000000000000000000000000000021e19e0c9bab2400000",
+    "value": "0",
+    "nonce": 26
+  },
+  "read_only_eth_call": "transfer returns true",
+  "requires_specific_funding_approval": true,
+  "signing_secret_name": "creg-phase-c-treasury-v2-evm",
+  "secret_project": "gen-lang-client-0022105784",
+  "recheck_before_execution": [
+    "chain ID",
+    "derived signer equals treasury",
+    "token code and owner",
+    "pending nonce",
+    "balances",
+    "gas budget",
+    "recipient"
+  ]
+}

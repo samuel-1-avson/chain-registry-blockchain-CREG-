@@ -1,0 +1,22 @@
+{
+  "schema": "creg-phase-c-reviewed-image-build-v1",
+  "captured_at_utc": "2026-09-26T15:27:00Z",
+  "image_tag": "creg-node:phase-c-secure-r10-queue-retirement",
+  "build_status": "release compiled successfully",
+  "platform": "linux/amd64",
+  "image_index_digest": "sha256:9d69096f38c82ba3eca9103777ea2fd88860546d2fa2cd019c89696f9ec12d21",
+  "platform_manifest_digest": "sha256:fb5115d07033085e0e4d953e8ee8dc6a5608dac5e021b625eeb8d7425b0dd1eb",
+  "config_digest": "sha256:250f9d897c653d25422b3c36657416fa5c68f9f615c9f7165c6c6d28e7e912f1",
+  "distribution_archive_sha256": "08d3bfa5d110d6fa7b2610dd459efd2de44bfb251d8eb4e566779da097000e46",
+  "distribution_archive_bytes": 417524050,
+  "builder_base_image_id": "sha256:5f5864652afc9d1791ae7c125b632fd9e8d342fca76a14e44be4a4e4769425e7",
+  "runtime_base": "us-central1-docker.pkg.dev/gen-lang-client-0022105784/creg-testnet/creg-node@sha256:ca4d04e77e9680cb878800f2ea72c1ce7dac6bb3575a55c9921a7314975fb1ef",
+  "source_manifest": "source-manifest.json",
+  "focused_source_sha256": {
+    "crates/node/src/block_producer.rs": "9f3c0eadaa609f83d1befc409a7b352e77820506167288dc039898c58ec9cfd6",
+    "testnet/phase-c/Dockerfile.r10-queue-retirement": "649c9004c1102bdfd06b2d8ea7f4f63ecc0dd8ab51d926248ea3c37d139071f1"
+  },
+  "source_change_summary": "All validators now preserve expired or nonce-consumed unprepared durable and forced-inclusion transactions in dead-letter storage before removing them from active queues; cleanup is blocked by a live round, certified prepared value or durable prepared/COMMIT lock.",
+  "real_host_acceptance": "pending",
+  "public_cutover": false
+}

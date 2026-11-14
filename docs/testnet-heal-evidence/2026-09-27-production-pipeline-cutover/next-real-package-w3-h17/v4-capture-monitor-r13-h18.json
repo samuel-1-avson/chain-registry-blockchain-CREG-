@@ -1,0 +1,62 @@
+{
+  "schema": "creg-r25-v4-durable-commit-crash-capture-v1",
+  "armed_at_utc": "2026-09-28T03:00:58.646701+00:00",
+  "node_id": "validator-4",
+  "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+  "signed_spec_genesis_identity": "1852b9a86dd3b53e7b2de4a774723a4fe48e862f9c61d14e5917b42b21055234",
+  "runtime_network_genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+  "height": 18,
+  "canonical": "npm:has-flag@5.0.1",
+  "container_id": "50f153e3721a67abbef2873a06356a5ea54e32950eb6300abd61405d7f38c50b",
+  "image_id": "sha256:704cd7dfb89a048c146a3de502416c31a6f77c0e3f493a98f4fe3098c732046c",
+  "initial_restart_count": 0,
+  "pre_capture_stats": {
+    "tip_height": 17,
+    "tip_hash": "7c3364858873b00dcb8eef4875c2f1eaa85ade32648850177bd12dcb5f7627d7",
+    "package_count": 7,
+    "block_count": 18,
+    "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+    "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+    "spec_signature_verified": true,
+    "l1_rpc_configured": true,
+    "is_validator": true,
+    "validator_count": 4,
+    "active_validators": 4,
+    "total_stake": 400,
+    "total_stake_native": "400",
+    "peer_count": 2,
+    "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+    "l1_block": 0,
+    "pending_tx_count": 0,
+    "publisher_count": 1,
+    "finalized_height": 17,
+    "finalization_lag": 0,
+    "finalization_source": "creg-canonical-store",
+    "validator_set_source": "chain-authoritative",
+    "validator_set_sync_state": "synced",
+    "validator_set_last_finalized_source_block": 11797682
+  },
+  "durable_marker": {
+    "observed_at_utc": "2026-09-28T03:01:58.484637+00:00",
+    "block_hash": "ec64471b8f9c58eb2d9b958db765a98871cb444e032143d313d65b3ab80cd76c",
+    "line": "2026-09-28T03:01:58.484143915Z 2026-09-28T03:01:58.483946Z  INFO creg_node::p2p: Local PBFT COMMIT durably persisted before consensus application or gossip event=\"pbft_local_commit_durable\" signing_path=\"p2p_follower\" node_id=validator-4 chain_id=creg-phase-c-testnet-2026-09-26-r7 genesis_hash=1852b9a86dd3b53e7b2de4a774723a4fe48e862f9c61d14e5917b42b21055234 height=18 parent_hash=7c3364858873b00dcb8eef4875c2f1eaa85ade32648850177bd12dcb5f7627d7 block_hash=ec64471b8f9c58eb2d9b958db765a98871cb444e032143d313d65b3ab80cd76c view_number=0",
+    "matching_pause_hash": "ec64471b8f9c58eb2d9b958db765a98871cb444e032143d313d65b3ab80cd76c"
+  },
+  "pause_marker": {
+    "observed_at_utc": "2026-09-28T03:02:28.486462+00:00",
+    "block_hash": "ec64471b8f9c58eb2d9b958db765a98871cb444e032143d313d65b3ab80cd76c",
+    "line": "2026-09-28T03:01:58.484193366Z 2026-09-28T03:01:58.484004Z  WARN creg_node::block_producer: Durable local COMMIT is held before in-memory application and peer broadcast event=\"phase_c_durable_commit_capture_paused\" node_id=validator-4 chain_id=creg-phase-c-testnet-2026-09-26-r7 genesis_hash=1852b9a86dd3b53e7b2de4a774723a4fe48e862f9c61d14e5917b42b21055234 height=18 parent_hash=7c3364858873b00dcb8eef4875c2f1eaa85ade32648850177bd12dcb5f7627d7 block_hash=ec64471b8f9c58eb2d9b958db765a98871cb444e032143d313d65b3ab80cd76c view_number=0 package_canonical=npm:has-flag@5.0.1 pause_ms=30000"
+  },
+  "kill": {
+    "started_at_utc": "2026-09-28T03:02:28.487854+00:00",
+    "completed_at_utc": "2026-09-28T03:02:28.946985+00:00",
+    "exit_code": 0,
+    "container_id": "50f153e3721a67abbef2873a06356a5ea54e32950eb6300abd61405d7f38c50b",
+    "signal": "SIGKILL",
+    "stdout": "creg-phase-c-r7-v4",
+    "stderr": ""
+  },
+  "recovery_marker": null,
+  "recovered_tip": null,
+  "result": "recovery_marker_not_observed"
+}

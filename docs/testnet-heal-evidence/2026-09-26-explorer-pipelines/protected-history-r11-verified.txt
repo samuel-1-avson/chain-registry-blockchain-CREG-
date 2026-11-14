@@ -1,0 +1,2 @@
+{"error":"metrics_history_unavailable","range":"1h","message":"No server-side metrics accumulator is configured. Use live chain stats."}
+HTTP_STATUS:501

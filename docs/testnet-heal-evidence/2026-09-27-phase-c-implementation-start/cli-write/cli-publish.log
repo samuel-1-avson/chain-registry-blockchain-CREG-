@@ -1,0 +1,9 @@
+  tarball:  C:\Users\samue\OneDrive\Desktop\projects\chain-registry-blockchain-CREG-\docs\testnet-heal-evidence\2026-09-27-phase-c-implementation-start\cli-write\kleur-4.1.5.tgz
+  sha256:   0d99562acf82fca4afce2a57b687289a524ac6755dcaf1fdf82a147473091469
+  IPFS CID: QmSEhmMVab63QT8AhTvqwXozKEj3PkQG5vE95nzs8PAju8
+  package:  npm:kleur@4.1.5
+  Submitting via gRPC to http://127.0.0.1:50051 ...
+
+  ✓ Package submitted to pending pool.
+    It will receive named, independently signed evidence.
+    No result is an absolute safety guarantee. Use `creg status npm:kleur@4.1.5` to check.

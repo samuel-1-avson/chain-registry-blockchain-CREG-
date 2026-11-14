@@ -1,0 +1,25 @@
+{
+  "schema": "creg-real-r12-scanner-fleet-rollout-v1",
+  "run_id": "20260927T232317Z",
+  "started_at_utc": "2026-09-27T23:25:43.4900724Z",
+  "old_profile": "f397fac29df29438f0ee15580547def5fe66a03af60153d22993f4a7af9fce8c",
+  "new_profile": "e067b8fc4aee823203a8a8204d2b57a4a097798d739d338bf8a45b4ff7b5ceb2",
+  "osv_epoch": "osv-2026-09-27-phase-c-escape-string-regexp-r12-live",
+  "requested_slots": [
+    "o1"
+  ],
+  "nodes": [
+    {
+      "slot": "o1",
+      "host": "creg-testnet-vm",
+      "role": "observer",
+      "image_id": "sha256:ef21b958b5e3e4f09e1c87290d3d9a50f23b5350d207e5af9982dd1cf5413708",
+      "scanner_profile_digest": "e067b8fc4aee823203a8a8204d2b57a4a097798d739d338bf8a45b4ff7b5ceb2",
+      "dead_letter_depth": 0.0,
+      "report": "o1-rollout-20260927T232317Z.json"
+    }
+  ],
+  "passed": true,
+  "public_cutover": false,
+  "completed_at_utc": "2026-09-27T23:28:16.5604052Z"
+}

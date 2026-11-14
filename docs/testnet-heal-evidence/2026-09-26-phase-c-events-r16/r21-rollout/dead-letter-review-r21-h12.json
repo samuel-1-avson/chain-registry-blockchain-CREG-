@@ -1,0 +1,81 @@
+{
+  "schema": "creg-r21-h12-dead-letter-review-v1",
+  "captured_at_utc": "2026-09-26T23:20:51Z",
+  "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+  "tip_height": 12,
+  "tip_hash": "a329eb216ce1fd18e1f5510333cb683db34ca6e789b5a3ef229dabe2af08fc7d",
+  "source_evidence": {
+    "prior_item_level_review": "../dead-letter-review-r21.json",
+    "current_fleet_state": "fleet-r7-h12-after-v1-recovery.json",
+    "current_validator_logs": [
+      "V1 local Docker logs",
+      "V2 creg-validator-1 logs",
+      "V3 creg-validator-3 logs",
+      "V4 creg-validator-4 logs"
+    ]
+  },
+  "prior_review": {
+    "tip_height": 9,
+    "dead_letters": 13,
+    "active_work": 0,
+    "finding": "Every item-level reviewed record was an already-applied or expired publisher authorization. V3 work 089d7fdd8308d6588563b5a30b41c900b79d8f0c16c908a5cd849b1e195e5b1 for npm:is-number@7.0.0 remained preserved as a terminal dead letter.",
+    "replay_attempted": false
+  },
+  "current_counts": {
+    "validators": {
+      "v1": { "dead_letters": 7, "active_work": 0 },
+      "v2": { "dead_letters": 6, "active_work": 0 },
+      "v3": { "dead_letters": 6, "active_work": 0 },
+      "v4": { "dead_letters": 6, "active_work": 0 }
+    },
+    "observers": {
+      "o1": { "dead_letters": 0, "active_work": 0 },
+      "o2": { "dead_letters": 0, "active_work": 0 },
+      "o3": { "dead_letters": 0, "active_work": 0 },
+      "o4": { "dead_letters": 0, "active_work": 0 }
+    },
+    "total_validator_dead_letters": 25,
+    "new_since_h9": 12,
+    "new_entries_per_validator": 3
+  },
+  "new_terminal_work": [
+    {
+      "height": 10,
+      "canonical": "npm:escape-html@1.0.3",
+      "operation": "revoke",
+      "work_id": "b8bce8fc59fd2846e9113f0c78fc69e4ef654294c0df82274f7bf95e16540363",
+      "reason": "revocation target is already revoked on this chain",
+      "observed_on": ["v1", "v2", "v3", "v4"]
+    },
+    {
+      "height": 11,
+      "canonical": "npm:ms@2.1.3",
+      "operation": "publish_authorized_v1",
+      "work_id_by_validator": {
+        "v1": "f9c35ed006fb438fb8fb2c0273d494bb2e2437165f7bd34b8299131f7771365a",
+        "v2": "ebd334047f010945642b0b765b52d922cc76602c360c93c0eb51b1b5cf45457b",
+        "v3": "41968741c9877a2531fc4553d0ade58b30fe4bd0fb01ce692367dc7bcd346cce",
+        "v4": "0860311b14f9d90ac42f760f8bd8d0ea04dcea4b5f555cc5eb275136aacb0090"
+      },
+      "reason": "publisher authorization nonce is already committed on this chain",
+      "observed_on": ["v1", "v2", "v3", "v4"]
+    },
+    {
+      "height": 12,
+      "canonical": "npm:ms@2.1.3",
+      "operation": "revoke",
+      "work_id": "b0f7ba8247b77d0647ad2d6f3e6feafbf2117b156abc2e2e29c411a2bd767c17",
+      "reason": "revocation target is already revoked on this chain",
+      "observed_on": ["v1", "v2", "v3", "v4"]
+    }
+  ],
+  "acceptance": {
+    "active_finalized_work_all_validators": true,
+    "pending_and_ready_queue_depths_zero": true,
+    "all_new_dead_letters_are_terminal_chain_duplicates": true,
+    "v3_original_work_preserved": true,
+    "replay_or_deletion_attempted": false,
+    "public_cutover": false
+  },
+  "review_note": "The h9 report contains item-level snapshots for its 13 records. The h10-h12 additions are identified from each validator's R21 terminal-retirement log and reconciled with the live per-node dead-letter metrics."
+}

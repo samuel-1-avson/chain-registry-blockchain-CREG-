@@ -1,0 +1,18 @@
+{
+  "timestamp_utc": "2026-09-27T20:40:12.9891007Z",
+  "status": "held_after_failed_cold_installer_checks",
+  "release_tag": "v0.1.0-testnet-r25",
+  "package_version": "0.1.0",
+  "windows_cli_sha256": "7604fbbcbefc1e1acb35740be49dc6dcef51335b2655e5ceb22664fe7ae4d914",
+  "linux_cli_sha256": "b987ba41fe68efde6b33cad2f6a7e8d4784402902094b6b78e0742a19d0705b7",
+  "linux_artifact_matches_accepted_r23_image": true,
+  "artifacts": [
+    "c3c44eb40b2cd2751352ff77af7d136813116823d72f226cbec19e6abe00d72a  chain-registry-v0.1.0-testnet-r25-linux-amd64.tar.gz",
+    "7b990d8db846fdfc9380fe262a0cffd0d5624ca8ee1455531807d43265419bd4  chain-registry-v0.1.0-testnet-r25-windows-amd64.zip"
+  ],
+  "node_binaries_included": false,
+  "public_default_installer_changed": false,
+  "source_manifest": "cli-release-source-manifest.json",
+  "windows_failure": "first binary omitted common/phase-c-canonical-transactions; corrected build is staged separately",
+  "linux_failure": "GLIBC_2.39 unavailable on actual Ubuntu 22.04 host; portable rebuild in progress"
+}

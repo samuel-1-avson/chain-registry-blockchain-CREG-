@@ -1,0 +1,33 @@
+{
+  "error": "0x91e4dfc18bf015051676f00f23782d0770b95a7a\n↗ View on L1 Explorer\n🔗\nShare\nVALIDATOR\n· scanned last 5 blocks\nADDRESS\n0x91e4dfc18bf015051676f00f23782d0770b95a7a\n⧉\nVALIDATOR\nACTIVE IN SET\nSTAKE\n100 CREG\nREPUTATION\n100\nBLOCKS PROPOSED\n1\nTXS (RECENT)\n0\nVALIDATOR PAGE\nView validator detail →\nActivity\nALL\nPROPOSE\nPUBLISH\nREVOKE\nSLASH\nVALIDATOR-JOIN\nVALIDATOR-LEAVE\nROTATE-KEY\n1 events\nHEIGHT\tKIND\tCANONICAL\tTIME\n#4\tPROPOSE\t—\t1h ago",
+  "records": [
+    {
+      "route": "/packages",
+      "main": "Packages\n1 total\nCANONICAL\tVERSION\tPUBLISHER\tAGE\nnpm:is-number@7.0.0\t7.0.0\t\n863906…047d\n⧉\n\t2h ago",
+      "l1Links": []
+    }
+  ],
+  "errors": [],
+  "failedRequests": [
+    {
+      "url": "http://127.0.0.1:3007/v1/public/chain/stats",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "url": "http://127.0.0.1:3007/v1/public/packages?limit=20&offset=0",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "url": "http://127.0.0.1:3007/v1/public/chain/stats",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "url": "http://127.0.0.1:3007/v1/public/addresses/0x91e4dfc18bf015051676f00f23782d0770b95a7a",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "url": "http://127.0.0.1:3007/v1/public/addresses/0x91e4dfc18bf015051676f00f23782d0770b95a7a/transactions?limit=200&scan=500",
+      "error": "net::ERR_ABORTED"
+    }
+  ]
+}

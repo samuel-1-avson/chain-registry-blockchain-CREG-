@@ -1,0 +1,7 @@
+{
+  "allowed_network_hosts": [],
+  "allowed_fs_writes": [],
+  "spawns_processes": false,
+  "allowed_process_spawns": [],
+  "description": "kleur 4.1.5 formats terminal text with ANSI colors."
+}

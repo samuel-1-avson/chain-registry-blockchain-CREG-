@@ -1,0 +1,58 @@
+[
+  {
+    "slot": "v1",
+    "node_id": "validator-1",
+    "checks": {
+      "identity": true,
+      "signed_chain": true,
+      "shared_tip": true,
+      "four_active_validators": true,
+      "peer_connected": true,
+      "queues_clear": true,
+      "pbft_clear": true
+    },
+    "ready": true
+  },
+  {
+    "slot": "v2",
+    "node_id": "validator-2",
+    "checks": {
+      "health": true,
+      "signed_chain": true,
+      "shared_tip": true,
+      "four_active_validators": true,
+      "peer_connected": true,
+      "queues_clear": true,
+      "pbft_clear": true
+    },
+    "ready": true
+  },
+  {
+    "slot": "v3",
+    "node_id": "validator-3",
+    "checks": {
+      "health": true,
+      "signed_chain": true,
+      "shared_tip": true,
+      "four_active_validators": true,
+      "peer_connected": true,
+      "queues_clear": true,
+      "pbft_clear": true
+    },
+    "ready": true
+  },
+  {
+    "slot": "v4",
+    "node_id": "validator-4",
+    "checks": {
+      "health": true,
+      "signed_chain": true,
+      "shared_tip": true,
+      "four_active_validators": true,
+      "peer_connected": true,
+      "queues_clear": true,
+      "pbft_clear": true
+    },
+    "ready": true
+  }
+]

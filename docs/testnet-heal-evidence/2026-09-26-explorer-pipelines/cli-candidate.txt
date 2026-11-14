@@ -1,0 +1,13 @@
+
+⛓ Chain Registry Explorer ⛓
+→ Height: 4 | Packages: 1
+
+Chain: creg-phase-c-testnet-2026-09-26-r7 | Genesis: 0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4
+
+HEIGHT   PROPOSER           TXS        CONTENT / EVENTS              
+────────────────────────────────────────────────────────────────────────────────
+#4               validator-1        1          ⚡ REVOKED npm:is-number@7.0.0 (Phase C live revocation after shared publication)
+#3               validator-4        0          Empty Block
+#2               validator-2        0          Empty Block
+#1               validator-4        1          📦 npm:is-number@7.0.0 [Verified]
+#0               genesis-phase-c-sorted-json-v1 0          Empty Block

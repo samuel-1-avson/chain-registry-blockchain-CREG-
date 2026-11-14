@@ -1,0 +1,81 @@
+{
+  "captured_at_utc": "2026-09-28T09:54:14Z",
+  "status": "r27_r7_stage_passed",
+  "public_cutover": false,
+  "image": "sha256:03a2e5338eb21062b339d70961fc0e30aea4e6fc3d9700c563bcf58af37a6699",
+  "stats": {
+    "tip_height": 20,
+    "tip_hash": "730b01c1a67a4796a16f599169e4ebf77e01d2e8ce92d1e4fb3715a7c4354285",
+    "package_count": 8,
+    "block_count": 21,
+    "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+    "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+    "spec_signature_verified": true,
+    "l1_rpc_configured": true,
+    "is_validator": false,
+    "validator_count": 4,
+    "active_validators": 4,
+    "total_stake": 400,
+    "total_stake_native": "400",
+    "peer_count": 2,
+    "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+    "l1_block": 0,
+    "pending_tx_count": 0,
+    "publisher_count": 1,
+    "finalized_height": 20,
+    "finalization_lag": 0,
+    "finalization_source": "creg-canonical-store",
+    "validator_set_source": "chain-authoritative",
+    "validator_set_sync_state": "synced",
+    "validator_set_last_finalized_source_block": 11799742
+  },
+  "history": {
+    "status": "ready",
+    "collector": "prometheus",
+    "range": "30m",
+    "step_seconds": 30,
+    "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+    "network_genesis_hash": "1852b9a86dd3b53e7b2de4a774723a4fe48e862f9c61d14e5917b42b21055234",
+    "sample_count": 61,
+    "queried_series": 7
+  },
+  "consensus": {
+    "total_validators": 4,
+    "quorum": 3,
+    "active_rounds": [],
+    "pending_count": 0,
+    "validators": [
+      {
+        "id": "validator-3",
+        "alias": "Phase C validator-3",
+        "stake": 100,
+        "reputation": 100,
+        "status": "online"
+      },
+      {
+        "id": "validator-1",
+        "alias": "Phase C validator-1",
+        "stake": 100,
+        "reputation": 100,
+        "status": "online"
+      },
+      {
+        "id": "validator-2",
+        "alias": "Phase C validator-2",
+        "stake": 100,
+        "reputation": 100,
+        "status": "online"
+      },
+      {
+        "id": "validator-4",
+        "alias": "Phase C validator-4",
+        "stake": 100,
+        "reputation": 100,
+        "status": "online"
+      }
+    ]
+  },
+  "signed_spec_chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+  "signed_spec_genesis": "0x1852b9a86dd3b53e7b2de4a774723a4fe48e862f9c61d14e5917b42b21055234",
+  "operator_unauthenticated_status": 401
+}

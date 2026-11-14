@@ -1,0 +1,23 @@
+{
+  "captured_at_utc": "2026-09-28T11:05:09Z",
+  "public_explorer_chain_stats": {
+    "url": "https://explorer.testnet.cregnet.dev/v1/public/chain/stats",
+    "http_status": 200,
+    "body": "{\"tip_height\":0,\"tip_hash\":\"068364cf778ede5a0b1c814c59b0314f9a8598a959fa5a8e08ea78bc1b296b53\",\"package_count\":0,\"block_count\":1,\"chain_id\":\"creg-testnet-1\",\"genesis_hash\":\"068364cf778ede5a0b1c814c59b0314f9a8598a959fa5a8e08ea78bc1b296b53\",\"spec_signature_verified\":true,\"l1_rpc_configured\":true,\"is_validator\":false,\"validator_count\":2,\"active_validators\":2,\"total_stake\":200,\"total_stake_native\":\"200\",\"peer_count\":1,\"bridge_status\":\"Legacy checkpointing disabled by Phase 0 safety freeze\",\"l1_block\":0,\"pending_tx_count\":4,\"publisher_count\":0,\"finalized_height\":0,\"finalization_lag\":0,\"validator_set_source\":\"chain-authoritative\",\"validator_set_sync_state\":\"synced\",\"validator_set_last_finalized_source_block\":11800098}"
+  },
+  "staged_r7_chain_stats": {
+    "url": "http://127.0.0.1:3030/v1/chain/stats",
+    "http_status": 200,
+    "body": "{\"tip_height\":20,\"tip_hash\":\"730b01c1a67a4796a16f599169e4ebf77e01d2e8ce92d1e4fb3715a7c4354285\",\"package_count\":8,\"block_count\":21,\"chain_id\":\"creg-phase-c-testnet-2026-09-26-r7\",\"genesis_hash\":\"0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4\",\"spec_signature_verified\":true,\"l1_rpc_configured\":true,\"is_validator\":false,\"validator_count\":4,\"active_validators\":4,\"total_stake\":400,\"total_stake_native\":\"400\",\"peer_count\":2,\"bridge_status\":\"Legacy checkpointing disabled by Phase 0 safety freeze\",\"l1_block\":0,\"pending_tx_count\":0,\"publisher_count\":1,\"finalized_height\":20,\"finalization_lag\":0,\"finalization_source\":\"creg-canonical-store\",\"validator_set_source\":\"chain-authoritative\",\"validator_set_sync_state\":\"synced\",\"validator_set_last_finalized_source_block\":11800097}"
+  },
+  "public_metrics_history_status": {
+    "url": "https://explorer.testnet.cregnet.dev/v1/public/metrics/history?range=30m",
+    "http_status": 404,
+    "body": "Response status code does not indicate success: 404 (Not Found)."
+  },
+  "public_faucet_health": {
+    "url": "https://faucet.testnet.cregnet.dev/health",
+    "http_status": 200,
+    "body": "{\"faucet\":\"online\",\"faucet_balance\":\"8000000000000000000000\",\"faucet_native_balance\":\"78764559215597841\",\"mode\":\"real\",\"native_drips_available\":true,\"status\":\"healthy\",\"token_drips_available\":true}"
+  }
+}

@@ -1,0 +1,75 @@
+{
+  "captured_at_utc": "2026-09-27T21:03:01.399Z",
+  "status": "read_only_inventory",
+  "chain_id": 11155111,
+  "block": 11795897,
+  "rpc": "https://api.testnet.cregnet.dev/sepolia",
+  "roles": {
+    "token_owner": "0x0AB4Db22A9902B8Ef678aBd408889af22277d24E",
+    "treasury": "0x3A3206D683441AA91cCA7CD5757B1F0ca463213A",
+    "staking_owner": "0x3A3206D683441AA91cCA7CD5757B1F0ca463213A",
+    "staking_governance": "0x0AB4Db22A9902B8Ef678aBd408889af22277d24E",
+    "rewards_governance": "0x0AB4Db22A9902B8Ef678aBd408889af22277d24E",
+    "rewards_treasury": "0x3A3206D683441AA91cCA7CD5757B1F0ca463213A",
+    "rewards_staking": "0x61c00EBe7C46f0bcE63942F7E15Bcc434DFC9B7C",
+    "rewards_token": "0xbC2a72107C6765364D0A822a88A6e6C61f30EAa6"
+  },
+  "balances": {
+    "treasury": {
+      "address": "0x3A3206D683441AA91cCA7CD5757B1F0ca463213A",
+      "creg": "19989590.0",
+      "sepolia_eth": "0.192677832881128004",
+      "code_keccak256": null
+    },
+    "faucet": {
+      "address": "0x721C8dBD8208CA9dBdcC12AE9339225458608B81",
+      "creg": "9000.0",
+      "sepolia_eth": "0.078819664051081092",
+      "code_keccak256": null
+    },
+    "validator_rewards": {
+      "address": "0xf616699ff68E2a310549fa4280475589B0EB0E49",
+      "creg": "0.0",
+      "sepolia_eth": "0.0",
+      "code_keccak256": "0xc7a08d714c12df96b86bc49213b04f56a480cc68cd25b90fca5cd9cc052740b6"
+    }
+  },
+  "validators": [
+    {
+      "id": "validator-1",
+      "address": "0x91e4dfc18bf015051676f00f23782d0770b95a7a",
+      "active_on_l1": true,
+      "publisher_stake_creg": "0.0",
+      "pending_reward_creg": "0.0",
+      "reward_packages": "0"
+    },
+    {
+      "id": "validator-2",
+      "address": "0x9a33a425953ec36e729e0b7f94b7db0174dbe13b",
+      "active_on_l1": true,
+      "publisher_stake_creg": "0.0",
+      "pending_reward_creg": "0.0",
+      "reward_packages": "0"
+    },
+    {
+      "id": "validator-3",
+      "address": "0x5470e9700ed487af787af7a2f8c0dc771d5f3fdd",
+      "active_on_l1": true,
+      "publisher_stake_creg": "0.0",
+      "pending_reward_creg": "0.0",
+      "reward_packages": "0"
+    },
+    {
+      "id": "validator-4",
+      "address": "0xbf10f3553d9ecf43c7bc08a6cff0423a9476892a",
+      "active_on_l1": true,
+      "publisher_stake_creg": "0.0",
+      "pending_reward_creg": "0.0",
+      "reward_packages": "0"
+    }
+  ],
+  "rewards_total_distributed_creg": "0.0",
+  "treasury_allowance_to_rewards_creg": "115792089237316195423570985008687907853269984665640564039457.584007913129639935",
+  "rewards_total_packages": "0",
+  "signing_or_funding_performed": false
+}

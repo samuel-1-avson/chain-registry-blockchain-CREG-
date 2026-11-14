@@ -1,0 +1,89 @@
+{
+  "schema": "creg-real-fleet-pre-restart-safety-v1",
+  "captured_at_utc": "2026-09-26T15:44:07.0208277Z",
+  "all_eight_safe": true,
+  "tip_height": 4,
+  "tip_hash": "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0",
+  "nodes": [
+    {
+      "peer_count": 2,
+      "unfinished_rounds": [],
+      "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+      "tip_hash": "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0",
+      "tip_height": 4,
+      "active_round_count": 0,
+      "role": "validator",
+      "slot": "v1"
+    },
+    {
+      "tip_height": 4,
+      "tip_hash": "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0",
+      "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+      "peer_count": 2,
+      "active_round_count": 0,
+      "unfinished_rounds": [],
+      "slot": "v2",
+      "role": "validator"
+    },
+    {
+      "tip_height": 4,
+      "tip_hash": "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0",
+      "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+      "peer_count": 7,
+      "active_round_count": 0,
+      "unfinished_rounds": [],
+      "slot": "v3",
+      "role": "validator"
+    },
+    {
+      "tip_height": 4,
+      "tip_hash": "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0",
+      "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+      "peer_count": 2,
+      "active_round_count": 0,
+      "unfinished_rounds": [],
+      "slot": "v4",
+      "role": "validator"
+    },
+    {
+      "tip_height": 4,
+      "tip_hash": "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0",
+      "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+      "peer_count": 2,
+      "active_round_count": 0,
+      "unfinished_rounds": [],
+      "slot": "o1",
+      "role": "observer"
+    },
+    {
+      "tip_height": 4,
+      "tip_hash": "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0",
+      "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+      "peer_count": 2,
+      "active_round_count": 0,
+      "unfinished_rounds": [],
+      "slot": "o2",
+      "role": "observer"
+    },
+    {
+      "tip_height": 4,
+      "tip_hash": "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0",
+      "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+      "peer_count": 2,
+      "active_round_count": 0,
+      "unfinished_rounds": [],
+      "slot": "o3",
+      "role": "observer"
+    },
+    {
+      "tip_height": 4,
+      "tip_hash": "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0",
+      "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+      "peer_count": 7,
+      "active_round_count": 0,
+      "unfinished_rounds": [],
+      "slot": "o4",
+      "role": "observer"
+    }
+  ]
+}

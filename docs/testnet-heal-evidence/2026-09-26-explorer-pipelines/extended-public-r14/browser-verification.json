@@ -1,0 +1,55 @@
+{
+  "capturedAt": "2026-09-26T12:58:01.089Z",
+  "base": "https://explorer.testnet.cregnet.dev",
+  "chainId": "creg-testnet-1",
+  "height": 0,
+  "mode": "fixed",
+  "verified": true,
+  "dataSource": "Live real HTTP responses; no intercepts or fixtures",
+  "records": [
+    {
+      "route": "/packages",
+      "main": "No packages yet\n\nOnce publishers start shipping, their canonical hashes will appear here.",
+      "l1Links": []
+    },
+    {
+      "route": "/address/0x5f424b4ec88073fd461eb194833681a31adfa311",
+      "main": "0x5f424b4ec88073fd461eb194833681a31adfa311\n↗ View on L1 Explorer\n🔗\nShare\nVALIDATOR\n· scanned last 0 blocks\nADDRESS\n0x5f424b4ec88073fd461eb194833681a31adfa311\n⧉\nVALIDATOR\nACTIVE IN SET\nSTAKE\n100 CREG\nREPUTATION\n100\nBLOCKS PROPOSED\n0\nTXS (RECENT)\n0\nVALIDATOR PAGE\nView validator detail →\nActivity\nALL\nPROPOSE\nPUBLISH\nREVOKE\nSLASH\nVALIDATOR-JOIN\nVALIDATOR-LEAVE\nROTATE-KEY\n0 events\nHEIGHT\tKIND\tCANONICAL\tTIME\nNo activity in the scan window.",
+      "l1Links": [
+        "https://sepolia.etherscan.io/address/0x5f424b4ec88073fd461eb194833681a31adfa311"
+      ]
+    },
+    {
+      "route": "/validator/0x5f424b4ec88073fd461eb194833681a31adfa311",
+      "main": "0x5f424b4ec88073fd461eb194833681a31adfa311\n\nValidator profile · full activity →\n\n🔗\nShare\nACTIVE IN SET\nPerformance\nRECENT PROPOSALS\n0\nbounded proposal window\nSTAKE\n100 CREG\nREPUTATION\n100\nSTATUS\nonline\nProposals & availability\n\nUptime measurements are unavailable. Proposal counts do not measure uptime.\n\nPROPOSALS SHOWN\n0\nVOTE HISTORY\nUnavailable\nBLOCKS SCANNED\n0\nSLASHING EVENTS\n0\nIdentity\nALIAS\n—\nRecent proposals\n0\nHEIGHT\tHASH\tTXS\tAGE\nNo recent proposals in the scan window.",
+      "l1Links": []
+    },
+    {
+      "route": "/search?q=is-number",
+      "main": "Search results\n\nQuery: is-number\n\nNo matches\n\nTry searching for:\n\nA block height — e.g. 42\nAn EVM address — e.g. 0x1234…abcd\nA block or tx hash — e.g. 0xabcdef… (64 hex)\nA package — e.g. npm/express@4.18.0\n\nTip: Use ↑↓ arrow keys to navigate results, Enter to open.",
+      "l1Links": []
+    },
+    {
+      "route": "/governance",
+      "main": "Governance disabled\n\nOn-chain governance is hidden in this explorer build. Set VITE_GOVERNANCE_ENABLED=true to list proposals mirrored from Governance.sol when the node has CREG_ETH_RPC and CREG_GOVERNANCE_ADDR configured.",
+      "l1Links": []
+    },
+    {
+      "route": "/wallet",
+      "main": "Wallet & Stake\nEthereum SepoliaChain ID 11155111\nPublic Ethereum testnet for Chain Registry.\nConnect Wallet\nConnect MetaMask\nWalletConnect\nConnects to Ethereum Sepolia (Chain 11155111)",
+      "l1Links": []
+    },
+    {
+      "route": "/publisher",
+      "main": "Packages (0 on-chain)\n📦\n➕ Publish\nPublish a Package\n✕\nnpm\npypi\ncargo\ngo\nSubmit Package\nPENDING PACKAGES (4)\n📦\nPending package details unavailable\nThe live node reports 4 pending analysis items; item details require operator access.",
+      "l1Links": []
+    },
+    {
+      "route": "/about",
+      "main": "About this chain\n\nProtocol identity, contract addresses, and runtime configuration.\n\nCHAIN ID\ncreg-testnet-1\nNETWORK\n—\nVERSION\n0.1.0\nGENESIS HASH\n068364cf778ede5a0b1c814c59b0314f9a8598a959fa5a8e08ea78bc1b296b53\n⧉\nVALIDATOR COUNT\n2\nExplorer\n\nThis explorer ships as a deep-linkable SPA. Every page has a stable URL — copy and share any block, transaction, address, or package. The refactor follows the plan in docs/EXPLORER_DEEP_DIVE.md.\n\nDevelopers & API\n\nThe node exposes a high-performance REST API. For a complete interactive reference of all available endpoints, queries, and data models, please visit the integrated Swagger UI.\n\nOpen Swagger UI ↗",
+      "l1Links": []
+    }
+  ],
+  "errors": [],
+  "failedRequests": []
+}

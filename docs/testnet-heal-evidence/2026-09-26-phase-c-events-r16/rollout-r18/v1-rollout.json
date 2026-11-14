@@ -1,0 +1,226 @@
+{
+  "schema": "creg-real-r18-rollout-v1",
+  "captured_at_utc": "2026-09-26T19:42:16.4853126Z",
+  "slot": "v1",
+  "prior_image": "sha256:f0b693dc567fc3430f22db881581c55a253e75c8f84a5a0f2d6a82d4460d0736",
+  "image_id": "sha256:cee77b5210ad67a91f5d6e5ccbf2b5ec914ccf53268f8294b261bc7a37c7f49a",
+  "preserved_container": "creg-phase-c-r7-v1-r12-osv-r9-preserved-for-r18",
+  "before": {
+    "passed": true,
+    "health": {
+      "status": "ok",
+      "node_id": "validator-1",
+      "is_validator": true,
+      "version": "0.1.0",
+      "validator_set_sync": {
+        "enabled": true,
+        "mode": "chain-authoritative",
+        "state": "synced",
+        "last_finalized_source_block": 11788322,
+        "cursor_block": 11788322,
+        "cursor_log_index": 4294967295,
+        "cursor_block_hash": "0xc850cebff4b807aa2ca4ad9be651d0407aff239e352e097135f21108599b3474",
+        "last_poll_at": "2026-09-26T19:41:37.312260119+00:00",
+        "last_error": null
+      },
+      "sandbox": {
+        "engine": "nsjail",
+        "dev_bypass": false,
+        "isolated": true,
+        "degraded": false,
+        "note": "kernel namespaces + seccomp-BPF (primary engine)"
+      },
+      "sync": {
+        "lag_blocks": 0,
+        "max_peer_tip": 0,
+        "healthy": true
+      }
+    },
+    "checks": {
+      "same_h5": true,
+      "signed_chain": true,
+      "four_validators": true,
+      "scanner_ready": true,
+      "queues_clear": true,
+      "no_active_pbft": true,
+      "peers_connected": true,
+      "real_isolated_sandbox": true
+    },
+    "stats": {
+      "tip_height": 5,
+      "tip_hash": "daab438828a678aee3aa2eebf041f5147bc6f76fed837a207e6a1f4747d427cf",
+      "package_count": 2,
+      "block_count": 6,
+      "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+      "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+      "spec_signature_verified": true,
+      "l1_rpc_configured": true,
+      "is_validator": true,
+      "validator_count": 4,
+      "active_validators": 4,
+      "total_stake": 400,
+      "total_stake_native": "400",
+      "peer_count": 2,
+      "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+      "l1_block": 0,
+      "pending_tx_count": 0,
+      "publisher_count": 1,
+      "finalized_height": 5,
+      "finalization_lag": 0,
+      "finalization_source": "creg-canonical-store",
+      "validator_set_source": "chain-authoritative",
+      "validator_set_sync_state": "synced",
+      "validator_set_last_finalized_source_block": 11788322
+    }
+  },
+  "after": {
+    "passed": true,
+    "health": {
+      "status": "ok",
+      "node_id": "validator-1",
+      "is_validator": true,
+      "version": "0.1.0",
+      "validator_set_sync": {
+        "enabled": true,
+        "mode": "chain-authoritative",
+        "state": "synced",
+        "last_finalized_source_block": 11788324,
+        "cursor_block": 11788324,
+        "cursor_log_index": 4294967295,
+        "cursor_block_hash": "0x231f7bc91edc279539e52288028149a3b2de0d49bd9c06dc7882ec2247d1c676",
+        "last_poll_at": "2026-09-26T19:42:10.450297928+00:00",
+        "last_error": null
+      },
+      "sandbox": {
+        "engine": "nsjail",
+        "dev_bypass": false,
+        "isolated": true,
+        "degraded": false,
+        "note": "kernel namespaces + seccomp-BPF (primary engine)"
+      },
+      "sync": {
+        "lag_blocks": 0,
+        "max_peer_tip": 0,
+        "healthy": true
+      }
+    },
+    "checks": {
+      "same_h5": true,
+      "signed_chain": true,
+      "four_validators": true,
+      "scanner_ready": true,
+      "queues_clear": true,
+      "no_active_pbft": true,
+      "peers_connected": true,
+      "real_isolated_sandbox": true
+    },
+    "stats": {
+      "tip_height": 5,
+      "tip_hash": "daab438828a678aee3aa2eebf041f5147bc6f76fed837a207e6a1f4747d427cf",
+      "package_count": 2,
+      "block_count": 6,
+      "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+      "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+      "spec_signature_verified": true,
+      "l1_rpc_configured": true,
+      "is_validator": true,
+      "validator_count": 4,
+      "active_validators": 4,
+      "total_stake": 400,
+      "total_stake_native": "400",
+      "peer_count": 2,
+      "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+      "l1_block": 0,
+      "pending_tx_count": 0,
+      "publisher_count": 1,
+      "finalized_height": 5,
+      "finalization_lag": 0,
+      "finalization_source": "creg-canonical-store",
+      "validator_set_source": "chain-authoritative",
+      "validator_set_sync_state": "synced",
+      "validator_set_last_finalized_source_block": 11788324
+    }
+  },
+  "queue_review": {
+    "schema": "creg-finalized-work-diagnostics-v1",
+    "mode": "read-only",
+    "publisher_signatures_included": false,
+    "active_count": 0,
+    "dead_letter_count": 3,
+    "active": [],
+    "dead_letters": [
+      {
+        "work_id": "05ee3e125b8d0f13081e17acb89d94442867afc5520034e4a5f59943ae949d9e",
+        "reason": "publisher authorization nonce is already committed on this chain",
+        "terminal_reason": "publisher authorization nonce is already committed on this chain",
+        "dead_lettered_at": "2026-09-26T18:02:42.738509396+00:00",
+        "enqueued_at": null,
+        "retry_count": null,
+        "last_error": null,
+        "source": "ephemeral_or_forced",
+        "transaction": {
+          "type": "publish_authorized_v1",
+          "canonical": "npm:escape-html@1.0.3",
+          "publisher": "0xa40d79527314efd4964d49c4a0673c87b612348b",
+          "publisher_nonce": "3b98f0f96cfe876ce9b51fde1eec7768",
+          "publisher_authorization_expires_at": 1790449273,
+          "authorization_chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+          "authorization_nonce_applied": true,
+          "authorization_expired_now": true,
+          "authorization_expires_at": 1790449273
+        }
+      },
+      {
+        "work_id": "6888e192fbec959ef6c457138b584d8ac6d2b0e4783991fada58d66eb6e82a33",
+        "reason": "publisher authorization nonce is already committed on this chain",
+        "terminal_reason": "publisher authorization nonce is already committed on this chain",
+        "dead_lettered_at": "2026-09-26T10:29:19.089713440+00:00",
+        "enqueued_at": null,
+        "retry_count": null,
+        "last_error": null,
+        "source": "ephemeral_or_forced",
+        "transaction": {
+          "type": "publish_authorized_v1",
+          "canonical": "npm:is-number@7.0.0",
+          "publisher": "0xa40d79527314efd4964d49c4a0673c87b612348b",
+          "publisher_nonce": "340b9947ed2423a06df933695eea9f73",
+          "publisher_authorization_expires_at": 1790421818,
+          "authorization_chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+          "authorization_nonce_applied": true,
+          "authorization_expired_now": true,
+          "authorization_expires_at": 1790421818
+        }
+      },
+      {
+        "work_id": "fd44e48ea8601b1ab00e8ece79b230148f4bf18b2c0f5ffc47c285e261bba230",
+        "reason": "publisher authorization nonce is already committed on this chain",
+        "terminal_reason": "publisher authorization nonce is already committed on this chain",
+        "dead_lettered_at": "2026-09-26T10:29:19.092491402+00:00",
+        "enqueued_at": "2026-09-26T10:28:09.603117141+00:00",
+        "retry_count": 0,
+        "last_error": null,
+        "source": null,
+        "transaction": {
+          "type": "publish_authorized_v1",
+          "canonical": "npm:is-number@7.0.0",
+          "publisher": "0xa40d79527314efd4964d49c4a0673c87b612348b",
+          "publisher_nonce": "340b9947ed2423a06df933695eea9f73",
+          "publisher_authorization_expires_at": 1790421818,
+          "authorization_chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+          "authorization_nonce_applied": true,
+          "authorization_expired_now": true,
+          "authorization_expires_at": 1790421818
+        }
+      }
+    ]
+  },
+  "checks": {
+    "live_readiness": true,
+    "pinned_image": true,
+    "p2p_identity_preserved": true,
+    "signer_journal_preserved": true,
+    "prior_container_preserved": true
+  },
+  "passed": true,
+  "public_cutover": false
+}

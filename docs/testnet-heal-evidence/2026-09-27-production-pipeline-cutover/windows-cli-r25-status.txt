@@ -1,0 +1,5 @@
+
+  ▶ REVOKED npm:kleur@4.1.5
+  reason: Phase C live revocation after shared publication
+  risk: band elevated — deterministic score 26 (0 critical, 0 high)
+  llm: score 0 with 1 finding(s) (advisory only — not part of consensus)

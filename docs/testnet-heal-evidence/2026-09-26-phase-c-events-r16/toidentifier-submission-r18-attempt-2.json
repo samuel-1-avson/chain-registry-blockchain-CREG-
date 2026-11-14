@@ -1,0 +1,9 @@
+{
+  "public_cutover": false,
+  "body": "{\"status\":\"accepted\",\"canonical\":\"npm:toidentifier@1.0.1\",\"message\":\"Package submitted. Validator pipeline will pick it up shortly.\"}",
+  "real_artifact_sha256": "186fcc77488de327daf911d362d4e773bab9909f1df2a5f0c20b875205b92e08",
+  "status_code": 202,
+  "endpoint": "/v1/publisher/packages",
+  "canonical": "npm:toidentifier@1.0.1",
+  "submitted_at_utc": "2026-09-26T19:49:21.5514165Z"
+}

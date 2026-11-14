@@ -1,0 +1,19 @@
+{
+  "schema": "creg-real-publisher-sepolia-preflight-v1",
+  "captured_at_utc": "2026-09-27T05:10:10.9291039Z",
+  "rpc_endpoint_value_recorded": false,
+  "transactions_broadcast": false,
+  "result": {
+    "chain_id": 11155111,
+    "publisher_address": "0xa40d79527314efd4964d49c4a0673c87b612348b",
+    "staking_contract": "0x61c00EBe7C46f0bcE63942F7E15Bcc434DFC9B7C",
+    "contract_code_present": true,
+    "staked_balance_wei": "10000000000000000000",
+    "minimum_publisher_stake_wei": "1000000000000000000",
+    "meets_minimum": true,
+    "rpc_endpoint_value_recorded": false,
+    "transactions_broadcast": false
+  },
+  "ed25519_key_matches_reviewed_publisher": true,
+  "ed25519_public_key": "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d"
+}

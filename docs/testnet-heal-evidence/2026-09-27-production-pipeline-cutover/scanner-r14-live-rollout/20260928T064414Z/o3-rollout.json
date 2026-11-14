@@ -1,0 +1,36 @@
+{
+  "stage": "postflight",
+  "captured_at_utc": "2026-09-28T06:48:42.003616+00:00",
+  "node_id": "observer-3",
+  "image_id": "sha256:8731cc85c73e6267e2e00014e8df50aef3f4d60ce6cfcaddb8fd0a3584eb2ad9",
+  "node_binary_sha256": "c7ef1d3e8bb9b34e2e0e4e255bf47f751ecaada4d0617f9ac5a4dbedb262a5b1",
+  "height": 18,
+  "block_hash": "ec64471b8f9c58eb2d9b958db765a98871cb444e032143d313d65b3ab80cd76c",
+  "scanner_profile_digest": "7e1d95f9c8423778211944a1dea46674d8cbd3f0aee3b0eea6b5250f11d009cd",
+  "dead_letter_depth": 0.0,
+  "network_names": [
+    "bridge"
+  ],
+  "history_status": null,
+  "history_samples": null,
+  "checks": {
+    "image_unchanged": true,
+    "old_container_preserved_stopped": true,
+    "data_and_scanner_mounts": true,
+    "identity_and_signer_journal_paths_preserved": true,
+    "signed_r7_tip_unchanged": true,
+    "four_validators_and_live_peer": true,
+    "health_and_role": true,
+    "package_still_absent": true,
+    "r14_profile_ready": true,
+    "threat_feed_ready": true,
+    "queues_clear": true,
+    "dead_letters_preserved": true,
+    "pbft_clear": true,
+    "network_attachments_preserved": true,
+    "o1_durable_history_ready": true,
+    "restart_policy_preserved": true
+  },
+  "passed": true,
+  "preserved_container": "creg-phase-c-r7-o3-r13-before-r14-20260928T064815Z"
+}

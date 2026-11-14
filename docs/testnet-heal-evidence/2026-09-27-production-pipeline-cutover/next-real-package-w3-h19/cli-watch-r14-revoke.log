@@ -1,0 +1,4 @@
+→ Connecting to event stream at http://127.0.0.1:8080/v1/public/events
+→ Filter: pkg:ansi-regex@6.1.0
+────────────────────────────────────────────────────────────
+09:16:13 ⊘ REVOKED   npm:ansi-regex@6.1.0 — Phase C live revocation after shared publication

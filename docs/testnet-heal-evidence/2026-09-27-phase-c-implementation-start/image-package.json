@@ -1,0 +1,18 @@
+{
+  "schema": "creg-phase-c-r22-image-package-v1",
+  "image_tag": "creg-node:phase-c-secure-r22-commit-capture",
+  "image_id": "sha256:2b472a089fe6ac651edfbae51b616456ed335f35992c0374f10c1ea80ce6caa3",
+  "platform": "linux/amd64",
+  "full_archive_path": "C:\\Users\\samue\\CREG-backups\\phase-c-build-r22-commit-capture\\creg-node-r22.tar.gz",
+  "full_archive_bytes": 441624627,
+  "full_archive_sha256": "91f6bb5cfd8652b47aecadfff617d3101d56e42435ad0734a85969c5691b3fa0",
+  "full_archive_raw_sha256": "f90e3978016d4dcfbe6b8c37795988366c66e082cd402fc05acd2c4f7d71a0ba",
+  "full_archive_roundtrip_verified": true,
+  "delta_archive_path": "C:\\Users\\samue\\CREG-backups\\phase-c-build-r22-commit-capture\\creg-node-r22-delta.tar.gz",
+  "delta_archive_bytes": 57798180,
+  "delta_archive_sha256": "7a22f6ee711ae1240734d739714836ca7249c00aa3e3560bfb5f3ea5d35e54bb",
+  "delta_requires_exact_base": "us-central1-docker.pkg.dev/gen-lang-client-0022105784/creg-testnet/creg-node@sha256:ca4d04e77e9680cb878800f2ea72c1ce7dac6bb3575a55c9921a7314975fb1ef",
+  "base_layer_count": 22,
+  "base_layers_shared_with_r21_candidate": true,
+  "deployments_started": false
+}

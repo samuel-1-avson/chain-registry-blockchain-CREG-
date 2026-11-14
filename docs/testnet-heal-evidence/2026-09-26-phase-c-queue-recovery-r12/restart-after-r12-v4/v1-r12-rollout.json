@@ -1,0 +1,120 @@
+{
+  "schema": "creg-real-r12-local-validator-rollout-v1",
+  "captured_at_utc": "2026-09-26T16:55:12.9883660Z",
+  "slot": "v1",
+  "image_id": "sha256:f0b693dc567fc3430f22db881581c55a253e75c8f84a5a0f2d6a82d4460d0736",
+  "image_tag_id": "sha256:f0b693dc567fc3430f22db881581c55a253e75c8f84a5a0f2d6a82d4460d0736",
+  "configured_image": "creg-node:phase-c-secure-r12-bounded-l1-retry",
+  "previous_container": "creg-phase-c-r7-v1-r13-preserved",
+  "previous_container_state": "exited",
+  "mounts": [
+    {
+      "Type": "bind",
+      "Source": "C:\\Users\\samue\\.creg-phase-c\\r7\\v1\\data",
+      "Destination": "/data",
+      "RW": true
+    },
+    {
+      "Type": "bind",
+      "Source": "C:\\Users\\samue\\CREG-backups\\phase-c-scanner\\bundle-r9",
+      "Destination": "/scanner",
+      "RW": false
+    },
+    {
+      "Type": "bind",
+      "Source": "/var/run/docker.sock",
+      "Destination": "/var/run/docker.sock",
+      "RW": true
+    }
+  ],
+  "p2p_identity_sha256": "a4569f0bab8632764dd080d25f1dc830082b760b71b58e487374efee4b7f82d6",
+  "stats": {
+    "tip_height": 4,
+    "tip_hash": "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0",
+    "package_count": 1,
+    "block_count": 5,
+    "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+    "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+    "spec_signature_verified": true,
+    "l1_rpc_configured": true,
+    "is_validator": true,
+    "validator_count": 4,
+    "active_validators": 4,
+    "total_stake": 400,
+    "total_stake_native": "400",
+    "peer_count": 2,
+    "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+    "l1_block": 0,
+    "pending_tx_count": 0,
+    "publisher_count": 1,
+    "finalized_height": 4,
+    "finalization_lag": 0,
+    "finalization_source": "creg-canonical-store",
+    "validator_set_source": "chain-authoritative",
+    "validator_set_sync_state": "synced",
+    "validator_set_last_finalized_source_block": 11787494
+  },
+  "package_state": {
+    "canonical": "npm:is-number@7.0.0",
+    "status": "revoked",
+    "block_phase": "committed",
+    "block_hash": "0121be9bb637aec634cd5f081fb903ee4749875d8225683f057af005ae16f436",
+    "revocation_reason": "Phase C live revocation after shared publication"
+  },
+  "health": {
+    "status": "ok",
+    "node_id": "validator-1",
+    "is_validator": true,
+    "version": "0.1.0",
+    "validator_set_sync": {
+      "enabled": true,
+      "mode": "chain-authoritative",
+      "state": "synced",
+      "last_finalized_source_block": 11787494,
+      "cursor_block": 11787494,
+      "cursor_log_index": 4294967295,
+      "cursor_block_hash": "0xb99e30c5af354c2d11cbd79cd4d314c368e266d125856ae3bd241b01078bd311",
+      "last_poll_at": "2026-09-26T16:55:09.686904991+00:00",
+      "last_error": null
+    },
+    "sandbox": {
+      "engine": "nsjail",
+      "dev_bypass": false,
+      "isolated": true,
+      "degraded": false,
+      "note": "kernel namespaces + seccomp-BPF (primary engine)"
+    },
+    "sync": {
+      "lag_blocks": 0,
+      "max_peer_tip": 0,
+      "healthy": true
+    }
+  },
+  "scanner_asset_checks": {
+    "known_malicious_hashes": true,
+    "osv_snapshot": true,
+    "yara_rules": true
+  },
+  "checks": {
+    "container_running": true,
+    "image_tag": true,
+    "image_pinned": true,
+    "prior_r13_container_preserved": true,
+    "persistent_data_mount": true,
+    "scanner_readonly_mount": true,
+    "p2p_identity_present": true,
+    "signing_journal_present": true,
+    "same_tip": true,
+    "same_chain": true,
+    "validator_roster": true,
+    "peers_connected": true,
+    "package_state": true,
+    "scanner_ready": true,
+    "queue_clear": true,
+    "no_unfinished_pbft_round": true,
+    "isolated_sandbox": true,
+    "scanner_assets_pinned": true
+  },
+  "passed": true,
+  "public_cutover": false
+}

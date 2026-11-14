@@ -1,0 +1,408 @@
+{
+  "base": "https://explorer.testnet.cregnet.dev",
+  "capturedAt": "2026-09-26T11:22:38.834Z",
+  "requests": [
+    {
+      "path": "/",
+      "status": 200,
+      "contentType": "text/html",
+      "payload": "<!doctype html>\r\n<html lang=\"en\">\r\n  <head>\r\n    <meta charset=\"UTF-8\" />\r\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\r\n    <meta name=\"theme-color\" content=\"#0c0d11\" />\r\n    <meta name=\"description\" content=\"Explore the Chain Registry testnet — blocks, validators, packages, bridge activity, and on-chain governance.\" />\r\n    <link rel=\"icon\" type=\"image/svg+xml\" href=\"/pwa-icon.svg\" />\r\n    <link rel=\"apple-touch-icon\" href=\"/pwa-icon.svg\" />\r\n    <link rel=\"preconnect\" href=\"https://fonts.googleapis.com\" />\r\n    <link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin />\r\n    <link\r\n      href=\"https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;0,6..72,700;1,6..72,400&display=swap\"\r\n      rel=\"stylesheet\"\r\n    />\r\n    <title>Chain Registry Explorer</title>\r\n    <script type=\"module\" crossorigin src=\"/assets/index-DuC7Rt7G.js\"></script>\n    <link rel=\"stylesheet\" crossorigin href=\"/assets/index-B3jIR-XU.css\">\n  <link rel=\"manifest\" href=\"/manifest.webmanifest\"><script id=\"vite-plugin-pwa:register-sw\" src=\"/registerSW.js\"></script></head>\r\n  <body>\r\n    <div id=\"root\"></div>\r\r\n  </body>\r\n</html>\r\n"
+    },
+    {
+      "path": "/v1/public/health",
+      "status": 200,
+      "contentType": "application/json",
+      "payload": {
+        "status": "ok",
+        "node_id": "13f1d9fa-b4ed-4929-8a98-fb4b3f20ad75",
+        "is_validator": false,
+        "version": "0.1.0",
+        "validator_set_sync": {
+          "enabled": true,
+          "mode": "chain-authoritative",
+          "state": "synced",
+          "last_finalized_source_block": 11785909,
+          "cursor_block": 11785909,
+          "cursor_log_index": 4294967295,
+          "cursor_block_hash": "0x935e02036c2c708fcc488305e3ed67648d77991af9f4d762cf2b642738cb97e4",
+          "last_poll_at": "2026-09-26T11:22:25.373940524+00:00",
+          "last_error": null
+        },
+        "sandbox": {
+          "engine": "docker",
+          "dev_bypass": false,
+          "isolated": true,
+          "degraded": true,
+          "note": "OCI container fallback — packages receive SB010 (degraded isolation)"
+        },
+        "sync": {
+          "lag_blocks": 2,
+          "max_peer_tip": 2,
+          "healthy": true
+        }
+      }
+    },
+    {
+      "path": "/v1/public/chain/stats",
+      "status": 200,
+      "contentType": "application/json",
+      "payload": {
+        "tip_height": 0,
+        "tip_hash": "068364cf778ede5a0b1c814c59b0314f9a8598a959fa5a8e08ea78bc1b296b53",
+        "package_count": 0,
+        "block_count": 1,
+        "chain_id": "creg-testnet-1",
+        "genesis_hash": "068364cf778ede5a0b1c814c59b0314f9a8598a959fa5a8e08ea78bc1b296b53",
+        "spec_signature_verified": true,
+        "l1_rpc_configured": true,
+        "is_validator": false,
+        "validator_count": 2,
+        "active_validators": 2,
+        "total_stake": 200,
+        "total_stake_native": "200",
+        "peer_count": 1,
+        "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+        "l1_block": 0,
+        "pending_tx_count": 4,
+        "publisher_count": 0,
+        "finalized_height": 0,
+        "finalization_lag": 0,
+        "validator_set_source": "chain-authoritative",
+        "validator_set_sync_state": "synced",
+        "validator_set_last_finalized_source_block": 11785909
+      }
+    },
+    {
+      "path": "/v1/chain/stats",
+      "status": 200,
+      "contentType": "application/json",
+      "payload": {
+        "tip_height": 0,
+        "tip_hash": "068364cf778ede5a0b1c814c59b0314f9a8598a959fa5a8e08ea78bc1b296b53",
+        "package_count": 0,
+        "block_count": 1,
+        "chain_id": "creg-testnet-1",
+        "genesis_hash": "068364cf778ede5a0b1c814c59b0314f9a8598a959fa5a8e08ea78bc1b296b53",
+        "spec_signature_verified": true,
+        "l1_rpc_configured": true,
+        "is_validator": false,
+        "validator_count": 2,
+        "active_validators": 2,
+        "total_stake": 200,
+        "total_stake_native": "200",
+        "peer_count": 1,
+        "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+        "l1_block": 0,
+        "pending_tx_count": 4,
+        "publisher_count": 0,
+        "finalized_height": 0,
+        "finalization_lag": 0,
+        "validator_set_source": "chain-authoritative",
+        "validator_set_sync_state": "synced",
+        "validator_set_last_finalized_source_block": 11785909
+      }
+    },
+    {
+      "path": "/v1/public/blocks?limit=5",
+      "status": 200,
+      "contentType": "application/json",
+      "payload": {
+        "blocks": [],
+        "tip_height": 0,
+        "offset": 0,
+        "limit": 5,
+        "next_before_height": null,
+        "next_after_height": null
+      }
+    },
+    {
+      "path": "/v1/public/blocks/0",
+      "status": 200,
+      "contentType": "application/json",
+      "payload": {
+        "header": {
+          "height": 0,
+          "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "merkle_root": "0000000000000000000000000000000000000000000000000000000000000000",
+          "proposer_id": "genesis",
+          "timestamp": "2024-01-01T00:00:00Z",
+          "validator_set_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "vrf_output": null,
+          "vrf_proof": null
+        },
+        "transactions": [],
+        "pbft_signatures": [],
+        "hash": "068364cf778ede5a0b1c814c59b0314f9a8598a959fa5a8e08ea78bc1b296b53",
+        "finalized": true
+      }
+    },
+    {
+      "path": "/v1/public/blocks/1",
+      "status": 404,
+      "contentType": "application/json",
+      "payload": {
+        "error": "No block at height 1"
+      }
+    },
+    {
+      "path": "/v1/public/blocks/4",
+      "status": 404,
+      "contentType": "application/json",
+      "payload": {
+        "error": "No block at height 4"
+      }
+    },
+    {
+      "path": "/v1/public/packages?limit=5",
+      "status": 200,
+      "contentType": "application/json",
+      "payload": {
+        "packages": [],
+        "total": 0,
+        "offset": 0,
+        "limit": 5
+      }
+    },
+    {
+      "path": "/v1/public/packages/npm%3Ais-number%407.0.0",
+      "status": 404,
+      "contentType": "application/json",
+      "payload": {
+        "error": "Package not found: npm:is-number@7.0.0"
+      }
+    },
+    {
+      "path": "/v1/public/packages/npm%3Ais-number%407.0.0/proof",
+      "status": 404,
+      "contentType": "application/json",
+      "payload": {
+        "error": "No proof available for: npm:is-number@7.0.0"
+      }
+    },
+    {
+      "path": "/v1/public/packages/npm%3Ais-number%407.0.0/intelligence",
+      "status": 200,
+      "contentType": "application/json",
+      "payload": {
+        "canonical": "npm:is-number@7.0.0",
+        "status": "pending",
+        "message": "Intelligence report not generated yet. Enable CREG_INTELLIGENCE_ENABLED on a node with IPFS access."
+      }
+    },
+    {
+      "path": "/v1/public/transactions/npm%3Ais-number%407.0.0",
+      "status": 404,
+      "contentType": "application/json",
+      "payload": {
+        "error": "Transaction not found: npm:is-number@7.0.0"
+      }
+    },
+    {
+      "path": "/v1/validator/registrations",
+      "status": 200,
+      "contentType": "application/json",
+      "payload": []
+    },
+    {
+      "path": "/v1/validator/consensus/state",
+      "status": 200,
+      "contentType": "application/json",
+      "payload": {
+        "total_validators": 2,
+        "quorum": 2,
+        "active_rounds": [],
+        "pending_count": 4,
+        "validators": [
+          {
+            "id": "validator-1",
+            "alias": "Genesis validator-1 (us-east1-b)",
+            "stake": 100,
+            "reputation": 100,
+            "status": "online"
+          },
+          {
+            "id": "validator-2",
+            "alias": "Genesis validator-2 (local)",
+            "stake": 100,
+            "reputation": 100,
+            "status": "online"
+          }
+        ]
+      }
+    },
+    {
+      "path": "/v1/operator/runtime/config",
+      "status": 401,
+      "contentType": "application/json",
+      "payload": {
+        "error": "private API credentials are missing or invalid"
+      }
+    },
+    {
+      "path": "/v1/operator/nodes",
+      "status": 401,
+      "contentType": "application/json",
+      "payload": {
+        "error": "private API credentials are missing or invalid"
+      }
+    },
+    {
+      "path": "/v1/operator/pending",
+      "status": 401,
+      "contentType": "application/json",
+      "payload": {
+        "error": "private API credentials are missing or invalid"
+      }
+    },
+    {
+      "path": "/v1/operator/p2p/status",
+      "status": 401,
+      "contentType": "application/json",
+      "payload": {
+        "error": "private API credentials are missing or invalid"
+      }
+    },
+    {
+      "path": "/v1/operator/metrics/history?range=1h",
+      "status": 401,
+      "contentType": "application/json",
+      "payload": {
+        "error": "private API credentials are missing or invalid"
+      }
+    },
+    {
+      "path": "/v1/public/bridge/status",
+      "status": 200,
+      "contentType": "application/json",
+      "payload": {
+        "last_finalized_eth_block": 0,
+        "registry_address": "0xD0F465ca185a99E268be0C4FF5A135Bdf89FAF3B",
+        "bridge_sync_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+        "current_state_root": "",
+        "last_anchor_tx_hash": null,
+        "last_anchor_at": null,
+        "finalized_l1_block": null,
+        "proof_mode": "disabled",
+        "anchor_count": 0
+      }
+    },
+    {
+      "path": "/v1/public/bridge/anchors",
+      "status": 200,
+      "contentType": "application/json",
+      "payload": {
+        "anchors": [],
+        "total": 0
+      }
+    },
+    {
+      "path": "/v1/public/governance/proposals",
+      "status": 200,
+      "contentType": "application/json",
+      "payload": {
+        "proposals": [
+          {
+            "id": 5,
+            "title": "Approve external validator 0x5f424b4ec88073fd461eb194833681a31adfa311",
+            "description": "Approve external validator 0x5f424b4ec88073fd461eb194833681a31adfa311",
+            "status": "executed",
+            "target": "0x30604aa6f763fbde6adcffbd8960af3031037331",
+            "proposer": "",
+            "votes_yea": 2,
+            "votes_nay": 0,
+            "quorum": 2,
+            "submitted_at": 1789848876,
+            "created_at": "2026-09-19T20:14:36+00:00"
+          },
+          {
+            "id": 4,
+            "title": "Set Multi-Sig Threshold to 2-of-3",
+            "description": "Set Multi-Sig Threshold to 2-of-3",
+            "status": "executed",
+            "target": "0x122bc2c704b966c74004506f98f13bf7b5f75b9d",
+            "proposer": "",
+            "votes_yea": 1,
+            "votes_nay": 0,
+            "quorum": 2,
+            "submitted_at": 1789825920,
+            "created_at": "2026-09-19T13:52:00+00:00"
+          },
+          {
+            "id": 3,
+            "title": "Add Co-Signer Beta (0xa70671fA9cED635B78AA168e30536a1d9e916db1)",
+            "description": "Add Co-Signer Beta (0xa70671fA9cED635B78AA168e30536a1d9e916db1)",
+            "status": "executed",
+            "target": "0x122bc2c704b966c74004506f98f13bf7b5f75b9d",
+            "proposer": "",
+            "votes_yea": 1,
+            "votes_nay": 0,
+            "quorum": 2,
+            "submitted_at": 1789825884,
+            "created_at": "2026-09-19T13:51:24+00:00"
+          },
+          {
+            "id": 2,
+            "title": "Add Co-Signer Alpha (0x3CaAA79460D86EA3A4684d8c5a54610F815aee3b)",
+            "description": "Add Co-Signer Alpha (0x3CaAA79460D86EA3A4684d8c5a54610F815aee3b)",
+            "status": "executed",
+            "target": "0x122bc2c704b966c74004506f98f13bf7b5f75b9d",
+            "proposer": "",
+            "votes_yea": 1,
+            "votes_nay": 0,
+            "quorum": 2,
+            "submitted_at": 1789825860,
+            "created_at": "2026-09-19T13:51:00+00:00"
+          },
+          {
+            "id": 1,
+            "title": "mint Sepolia faucet reserve",
+            "description": "mint Sepolia faucet reserve",
+            "status": "executed",
+            "target": "0x167ab975dc95b79727ed76bd8aab70463f6499e2",
+            "proposer": "",
+            "votes_yea": 1,
+            "votes_nay": 0,
+            "quorum": 2,
+            "submitted_at": 1789818396,
+            "created_at": "2026-09-19T11:46:36+00:00"
+          },
+          {
+            "id": 0,
+            "title": "mint Sepolia faucet reserve",
+            "description": "mint Sepolia faucet reserve",
+            "status": "executed",
+            "target": "0x167ab975dc95b79727ed76bd8aab70463f6499e2",
+            "proposer": "",
+            "votes_yea": 1,
+            "votes_nay": 0,
+            "quorum": 2,
+            "submitted_at": 1789818336,
+            "created_at": "2026-09-19T11:45:36+00:00"
+          }
+        ],
+        "total": 6,
+        "source": "l1"
+      }
+    },
+    {
+      "path": "/v1/public/search?q=is-number",
+      "status": 200,
+      "contentType": "application/json",
+      "payload": {
+        "matches": []
+      }
+    },
+    {
+      "path": "/v1/public/reorgs",
+      "status": 200,
+      "contentType": "application/json",
+      "payload": []
+    },
+    {
+      "path": "/v1/public/richlist",
+      "status": 200,
+      "contentType": "application/json",
+      "payload": []
+    }
+  ]
+}

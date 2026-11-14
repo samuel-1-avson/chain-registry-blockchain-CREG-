@@ -1,0 +1,9 @@
+
+⛓ Chain Registry Explorer ⛓
+→ Height: 0 | Packages: 0
+
+Chain: creg-testnet-1 | Genesis: 068364cf778ede5a0b1c814c59b0314f9a8598a959fa5a8e08ea78bc1b296b53
+
+HEIGHT   PROPOSER           TXS        CONTENT / EVENTS              
+────────────────────────────────────────────────────────────────────────────────
+#0               genesis            0          Empty Block

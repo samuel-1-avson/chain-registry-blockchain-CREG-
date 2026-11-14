@@ -1,0 +1,219 @@
+{
+  "schema": "creg-real-fleet-block-quorum-check-v1",
+  "checked_at_utc": "2026-09-26T10:36:50.840Z",
+  "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+  "shared_finality": true,
+  "quorum": 3,
+  "validator_count": 4,
+  "node_count": 8,
+  "nodes": [
+    {
+      "slot": "v1",
+      "captured_at_utc": "2026-09-26T10:35:35.7886559Z",
+      "blocks": [
+        {
+          "height": 1,
+          "hash": "0121be9bb637aec634cd5f081fb903ee4749875d8225683f057af005ae16f436",
+          "commit_signers": [
+            "validator-1",
+            "validator-2",
+            "validator-4"
+          ],
+          "transaction_count": 1
+        },
+        {
+          "height": 2,
+          "hash": "6d1d4da2fb62b88af608b070d2a28fe1a2b41d29475d88061dabb87df6b3681e",
+          "commit_signers": [
+            "validator-1",
+            "validator-2",
+            "validator-3"
+          ],
+          "transaction_count": 0
+        }
+      ]
+    },
+    {
+      "slot": "v2",
+      "captured_at_utc": "2026-09-26T10:35:44.794809+00:00",
+      "blocks": [
+        {
+          "height": 1,
+          "hash": "0121be9bb637aec634cd5f081fb903ee4749875d8225683f057af005ae16f436",
+          "commit_signers": [
+            "validator-1",
+            "validator-2",
+            "validator-3"
+          ],
+          "transaction_count": 1
+        },
+        {
+          "height": 2,
+          "hash": "6d1d4da2fb62b88af608b070d2a28fe1a2b41d29475d88061dabb87df6b3681e",
+          "commit_signers": [
+            "validator-1",
+            "validator-2",
+            "validator-4"
+          ],
+          "transaction_count": 0
+        }
+      ]
+    },
+    {
+      "slot": "v3",
+      "captured_at_utc": "2026-09-26T10:36:03.998940+00:00",
+      "blocks": [
+        {
+          "height": 1,
+          "hash": "0121be9bb637aec634cd5f081fb903ee4749875d8225683f057af005ae16f436",
+          "commit_signers": [
+            "validator-3",
+            "validator-4",
+            "validator-2"
+          ],
+          "transaction_count": 1
+        },
+        {
+          "height": 2,
+          "hash": "6d1d4da2fb62b88af608b070d2a28fe1a2b41d29475d88061dabb87df6b3681e",
+          "commit_signers": [
+            "validator-2",
+            "validator-3",
+            "validator-1"
+          ],
+          "transaction_count": 0
+        }
+      ]
+    },
+    {
+      "slot": "v4",
+      "captured_at_utc": "2026-09-26T10:36:28.226435+00:00",
+      "blocks": [
+        {
+          "height": 1,
+          "hash": "0121be9bb637aec634cd5f081fb903ee4749875d8225683f057af005ae16f436",
+          "commit_signers": [
+            "validator-2",
+            "validator-4",
+            "validator-3"
+          ],
+          "transaction_count": 1
+        },
+        {
+          "height": 2,
+          "hash": "6d1d4da2fb62b88af608b070d2a28fe1a2b41d29475d88061dabb87df6b3681e",
+          "commit_signers": [
+            "validator-1",
+            "validator-4",
+            "validator-2"
+          ],
+          "transaction_count": 0
+        }
+      ]
+    },
+    {
+      "slot": "o1",
+      "captured_at_utc": "2026-09-26T10:34:13.831062+00:00",
+      "blocks": [
+        {
+          "height": 1,
+          "hash": "0121be9bb637aec634cd5f081fb903ee4749875d8225683f057af005ae16f436",
+          "commit_signers": [
+            "validator-2",
+            "validator-4",
+            "validator-1"
+          ],
+          "transaction_count": 1
+        },
+        {
+          "height": 2,
+          "hash": "6d1d4da2fb62b88af608b070d2a28fe1a2b41d29475d88061dabb87df6b3681e",
+          "commit_signers": [
+            "validator-2",
+            "validator-3",
+            "validator-1"
+          ],
+          "transaction_count": 0
+        }
+      ]
+    },
+    {
+      "slot": "o2",
+      "captured_at_utc": "2026-09-26T10:34:33.463350+00:00",
+      "blocks": [
+        {
+          "height": 1,
+          "hash": "0121be9bb637aec634cd5f081fb903ee4749875d8225683f057af005ae16f436",
+          "commit_signers": [
+            "validator-4",
+            "validator-2",
+            "validator-1"
+          ],
+          "transaction_count": 1
+        },
+        {
+          "height": 2,
+          "hash": "6d1d4da2fb62b88af608b070d2a28fe1a2b41d29475d88061dabb87df6b3681e",
+          "commit_signers": [
+            "validator-2",
+            "validator-3",
+            "validator-1"
+          ],
+          "transaction_count": 0
+        }
+      ]
+    },
+    {
+      "slot": "o3",
+      "captured_at_utc": "2026-09-26T10:34:54.361713+00:00",
+      "blocks": [
+        {
+          "height": 1,
+          "hash": "0121be9bb637aec634cd5f081fb903ee4749875d8225683f057af005ae16f436",
+          "commit_signers": [
+            "validator-1",
+            "validator-2",
+            "validator-4"
+          ],
+          "transaction_count": 1
+        },
+        {
+          "height": 2,
+          "hash": "6d1d4da2fb62b88af608b070d2a28fe1a2b41d29475d88061dabb87df6b3681e",
+          "commit_signers": [
+            "validator-2",
+            "validator-3",
+            "validator-1"
+          ],
+          "transaction_count": 0
+        }
+      ]
+    },
+    {
+      "slot": "o4",
+      "captured_at_utc": "2026-09-26T10:35:20.097437+00:00",
+      "blocks": [
+        {
+          "height": 1,
+          "hash": "0121be9bb637aec634cd5f081fb903ee4749875d8225683f057af005ae16f436",
+          "commit_signers": [
+            "validator-2",
+            "validator-1",
+            "validator-4"
+          ],
+          "transaction_count": 1
+        },
+        {
+          "height": 2,
+          "hash": "6d1d4da2fb62b88af608b070d2a28fe1a2b41d29475d88061dabb87df6b3681e",
+          "commit_signers": [
+            "validator-3",
+            "validator-2",
+            "validator-1"
+          ],
+          "transaction_count": 0
+        }
+      ]
+    }
+  ]
+}

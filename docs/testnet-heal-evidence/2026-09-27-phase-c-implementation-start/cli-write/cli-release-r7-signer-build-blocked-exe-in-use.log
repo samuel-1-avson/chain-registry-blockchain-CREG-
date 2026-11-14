@@ -1,0 +1,6 @@
+   Compiling resolver v0.1.0 (C:\Users\samue\OneDrive\Desktop\projects\chain-registry-blockchain-CREG-\chain-registry\crates\resolver)
+   Compiling chain-registry-cli v0.1.0 (C:\Users\samue\OneDrive\Desktop\projects\chain-registry-blockchain-CREG-\chain-registry\crates\cli)
+error: failed to remove file `C:\Users\samue\OneDrive\Desktop\projects\chain-registry-blockchain-CREG-\chain-registry\target\release\creg.exe`
+
+Caused by:
+  Access is denied. (os error 5)

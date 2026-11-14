@@ -1,0 +1,508 @@
+{
+  "schema": "creg-threat-db-v1",
+  "source": "https://mb-api.abuse.ch/api/v1/?query=get_recent&selector=100",
+  "source_response_sha256": "59217e0f3351528410efe04580879cdb44ff2322689fb770a34b641aa4733211",
+  "built_at": "2026-09-26T09:06:57.5957878Z",
+  "entries": {
+    "583f87e0a6904dab8661b229597f4d104123ae4767ce91dbed043680b28e1d90": {
+      "label": "QuasarRAT",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "4b0a27f87114f86dd472e1875a23cb752462e12107f0a3fdbfd0651a8cd0f3ba": {
+      "label": "QuasarRAT",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "9adbe5d4e4e62f23be4a1e41b3fbb3174a99fbb504a10bf89247283397a984d5": {
+      "label": "exe",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "694142f37316d248d50aa44993db0cabb8aa73c6121104e6100157f74da9f40a": {
+      "label": "exe",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "1e9dad6b11073051c8d6a956cc2ce0424b2dd0e0363242528b4b19d43a9e0abc": {
+      "label": "exe",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "1361df434c1ad412796735e6f4972d8e6f612ca7542846acc621a070f81cdb5d": {
+      "label": "exe",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "dee973c503207ef734c1f6891736979139e8b8fa778d4aa74d7466574d3ced83": {
+      "label": "exe",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "12e425666f6084ac1c237d1d3f0307daa49ff7343752c0ee94b4008f90ded9ff": {
+      "label": "exe",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "70378d73b119897dfb1c9e7b0f8e920d7de8955ed84b26ec289eda48819d0ca5": {
+      "label": "SheetRAT",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "b46d97dfbfe9d009a0a02056afae097c73a40ba4962df5bf3d79b5cb7cf7cb99": {
+      "label": "SheetRAT",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "2e770af3d707c8c1b3bf157ab6d540c1d7e1044ddb0175bde03c35d1b955558b": {
+      "label": "BlakcSeeStealer",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "3c110de70db7225573f6bd937a7704423bce6c03fad5fac3ea3fb5bacf130d50": {
+      "label": "exe",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "5526c38e200565565c8cdb97611f8b1bdbdc18b1dbe3d148c981248c530e50f8": {
+      "label": "PureLogsStealer",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "22fd7dfee6b80307f31c9a5703365bb52962f62bb93e60435b75b3fd63d6cc21": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "9f61aa13aa61ca482428f5777a8cb47315ca4ceafe2da3e3f72eaf4d23142bfc": {
+      "label": "SheetRAT",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "625a869e2b1fe76bf8ef6855b869f268cc9a6249106d68f490fc5b16401f410b": {
+      "label": "exe",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "caa7b39f276cf0820540a97689e91bd9592ca5778843be27556ed21d65caed9a": {
+      "label": "exe",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "b2e471b0a47e73d3e8ef6312c4ba128dd302c0463137965d43ad795ff5d28506": {
+      "label": "exe",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "746344b2d22e052f8a419ff4be9adf8d37be2aa2d31d4d8ef9874841907675da": {
+      "label": "exe",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "bb52bc9cbedb720fecc8e88bb52864c1d3b7ef3523d8a71d8054c4e535be0609": {
+      "label": "elf",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "096883c5150763868cb21eed9febd18798da93c2f4e49279909962bf307c7dc2": {
+      "label": "elf",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "0daebbb868ce3484dd011f9fd8dc21f78e7258a57de4581c85286667e8458db4": {
+      "label": "elf",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "f199ace71f848063f12c85c33956b27f06b0799935d81b9107c3b6afeb2885cc": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "8af14f8ca5fc9156a2e33a6d4060559e8c9bd0cba44e5b8e1c0f140a997bbc43": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "8d8e2f3c28b3e482ffa3eff4232cfd8dae9a1ccb29aebf393f682800245980bc": {
+      "label": "elf",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "87029ad67962129014304e1916e30435f43b8ee4e86efd36747c2906856bfacd": {
+      "label": "elf",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "be0c23d94d35369045deeb2c0d28cab1955aa3a32b3895ec4e9eae5acb5f705e": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "653000c660d2c32e23052671137a9232c9f0de1695ddc80cf38b7d3ce04f4079": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "4b172ff9292751bdbe434d6b95342d206218fe94a2c2f995f371cc0b1b1c9e74": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "ea55fa3a9aea8ae8a48ee68835f48079c668c2a916960318a65da7726269d2ee": {
+      "label": "AMOS",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "9ba32a60f0178c7c93d5ebfb66ad21529e3cbc72d832c6507cf9b8def07b2bf9": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "fa9f0192002ecb176ac0641df0e8262a218977353cbeb3b3adf10853623036fa": {
+      "label": "VShell",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "547fbe3cc48e6ed9bf0f60274bf1c777ea0f33e52e013f98bcb6f1cd6a961432": {
+      "label": "VShell",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "8d6a56359b9d9f1b3cf4253d99e34c69c4d9424e8e411c2813c36942848b038a": {
+      "label": "VShell",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "1ae4727d19b1a2f97f7943fe17ed4f69db3d7d04433e991de15edf4d58e097fa": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "79be2d8fb508c158666f749dadecfd126eefa661f30fd34469ca4729d1307c48": {
+      "label": "CoinMiner",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "db9b6f286dd659e02840f027311c76ce795de408a8c7f4e6d948f483803dad32": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "3b46e51bf7a7e5b6eec8afde90268cc229c55b222b8803a56ac552923da53626": {
+      "label": "macho",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "382c87cba23f730b14b608ddf35fc8b81635df453c4a47ca9cea6e116b7b1a70": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "2a6fd3e81be2f50c31dd68220432bf773e0d0c0025bc65e26aac1c9b284e6f85": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "852362fa76563a2e21e0d4aae96fa569584d1ae199b2ffc4ace7fd3da0cbed1c": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "12e504def16c01bdc9ce0bc96aee6f7ff89a4ac8a32dbc7ef392f40ebdf4e5b5": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "f3e47b57d1b7ebefda144086a70150055f1d04ba3874f69ba985afc3eadc0fc0": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "1e1e4e3e9ee2ebb328fe29dfd8a477f7ac96511a1ff2338416c01d9bd3d2a0ae": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "1ee1d9cde9b629e2681680acfce8d2661d61f493fec138971b8bd950659a35be": {
+      "label": "sh",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "40b497bc232886341613fdcfd84adaf326aba1336bf42b2ad2cab26f8fc00d9d": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "390c9f48b89d1f54a383d15d4cec088f819279b05bd30791a0615d455b77aad4": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "85c1c0c799283c82484171c16c6db905b8062127a0d78bf3dcc851241ee362d8": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "2b50950bc4cd30e6c1e5c2273dbe4655919f298ce4251ec1c7658f52ae12b00f": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "c93e9dad6d61090731831745766049057d98848d21e0f9e9d4c4272c6085f5a6": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "e35c59c2dd0a6641f7a514c453ebfe56ee5275b21e377649944610b8949069df": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "ca78659b89e991579bfc2cf489e725918e2326efd72f5df891ffdc9fcd166ac5": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "79af101b4ef565a38c39f1d11632eedc12624d6d667bf4d3c3f185d12634253e": {
+      "label": "WannaCry",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "066814a33f2c1ded4c19b93f4105b924718189cdfe2ab2118926054cea13708b": {
+      "label": "exe",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "29f2b87388550030cda1575dc26b04ea62417d9abb5920da3dab763268b26d1b": {
+      "label": "exe",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "acdee6537570cd1e56fe936c7aa1c8f4134d0d47b63c48a0e3e11c651462c93e": {
+      "label": "VShell",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "76a7ee3b91d02870cdfbd0651f8689e8f206f035215a9b6efe975fb1ca51a693": {
+      "label": "VShell",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "60d18a0c9029b527e71a0b54600d8c7feab14190e9b911fd2bc18e75bd7b60ff": {
+      "label": "Snowlight",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "1275a7f29d16dfb2eacbbce75af3828f7ec3ee310ed2837886cedd2ebd44ce60": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "c9556f5cd6c797569b4d10665ad7e93bbb0372d9a88d72fb3c25f34c1ae3cb63": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "b1f9678a31daee808a3e6ba6f05a60baf111710d211da60df05f5f5da360a415": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "f455be7600086c8accc8831bd73127c12c3b043c8445ba3d1a8e44d7435f31b1": {
+      "label": "exe",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "7ed13c9bd64e4ef6925ce87b7c755d46ddb96bca4ac6258ac745f4d89eec2bea": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "f7c82f04667015cb380a414414f534fe1f29fd36a453f40ea79ad91ea58e9b8c": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "c8376c31869870e87c50f4f970838daedfe70677c48c1eb67f29064b31a36307": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "fe4e6a481688b6914cbdff78c9587590a888c49e9d0cb8cbb3f8939464a76cec": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "56f4225d79227c24923300a559191b997af719ae892043ff5928de46f4f17a62": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "a3fb5baf7066c03614dd41abe499dcb924c5e79964aef21d08262d4123e5173d": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "b083df8c6bc1f8129547a16b1d0636d81761ab9829fe523add12486196c9c4bd": {
+      "label": "SalatStealer",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "f6f9259f4f0a13d736a9a250590b9ed1b6fcd0835be3814636ed9dda624e2e6a": {
+      "label": "SalatStealer",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "619426f9df9c32a4f9688a999e17b0efa0cb63fbde90c623cf23024fee911dd0": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "379f067cc2b638ceb07b704e5cd17fcc9c83bd167a3011f4362d7d2de960580b": {
+      "label": "Vidar",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "b649264314556511a4778ecc3355c5a25c91463b8f19cc4585bea04b02afb39c": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "2d7b1a5c6f2bcbb70906f5e9e1f71850baceff3ae1080fd8c9c53cd02932bdf5": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "a7dde17a333f7344350789712568892abe2c42f32d92ccc16df6efa5ee23e4f7": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "b885a737f49cf9b725386314bafbe60c819bdfbddd7a7ad791eb740be983d38a": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "5dbe2f29deaedd9a67ef6531b28b8dc039759593adc8befeb0dbb17812aea0e3": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "9b1642f61650b33a28fe381638c3b23c62e362919505987345adb141d61b5b50": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "611d58ad89e75d997e073763cdd49e2a56f7e86339929d2e697355c48642338b": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "99196751e81347ac4953ed11b3176b2a841fd38230aa5149b801547f1f4359cf": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "831dce2312f20594302602c164b6d1338fe709f7e66a8fc9dd19e133275c49d3": {
+      "label": "elf",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "6d4480eb5a7de25c11bb78c15c1d8c441de533be22a68f66ef4bd269da533c9c": {
+      "label": "elf",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "fce5670cbf09e56bbe90e92b74a80e8cdce5bb060b47974b1541a8dcccc221bd": {
+      "label": "elf",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "7403983906ac1ed86c6b03684912eb12d67bd1c354e4e348c0a8f5d042d4f89c": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "785e2dda4c552619064b7ace8222eef182a40d8972556444d0019dd97001ff47": {
+      "label": "exe",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "f812787ea9523256c777d96662d729ca203361dd9bcf29180c808c3f8ada576f": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "e81c12d06c18a8d44fe9058339c4d3b1962ed4755f8d5de7082423bcf3d3b46c": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "6693113d4997e1ea4598022d2af595894d58b7124e6aa3eb4202793c9f8b6e95": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "4b8eb77223ce0044d266f55d0a748d5fbf867dd7bd7fd89ad9693232e79ef6bb": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "cab97645f8ecf0f472ad0b32a35bb97c7261d704a25642ec7a8fee4fd8045ac2": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "86b55e10570fb781814109cc2a191ed48f3ac9a59a3cc1aaa3da47b3c469cc00": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "84d4ea5df3286d493c6774bee44220eb5b00e3a114ca4242a9e9a9fdd5da4525": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "52b787aa76d8318a8603092e2c35d1ab946bab1ccb1dbc34c998406d5ccaf72a": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "8d83c03f3f7ecc1f5959777509e50be9af4dd026753136a453783ad011b13df4": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "a3c964b776312cfe37275cd15b2bc08473b9f0326e24a7d4519285c4fcdf7b6a": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "21f8dbfdfd6806c4f1c882ebf6f53bd147ba1b7011a4528d9a1fe3506de141bc": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "eb0cd52a079f83a68b9505637d83c49efd6826962b82c654e46405ed59ea5d6c": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "16d7ee5d4727b276ba3dc51229f0a0897dd1a88fee5b3f2b172f181b58c8768b": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "3627bbf4c4bcb835fc728173781f84211e57300318a6beaa13f64116a18c14d9": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    },
+    "8f85a62cad85d46d212461252690f9728f194df53a24983743bd26b3778f889e": {
+      "label": "Mirai",
+      "threat_level": 5,
+      "source": "MalwareBazaar (abuse.ch)"
+    }
+  }
+}

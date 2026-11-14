@@ -1,0 +1,204 @@
+{
+  "capturedAt": "2026-09-28T04:02:32.339Z",
+  "base": "http://127.0.0.1:13028",
+  "stats": {
+    "tip_height": 18,
+    "tip_hash": "ec64471b8f9c58eb2d9b958db765a98871cb444e032143d313d65b3ab80cd76c",
+    "package_count": 7,
+    "block_count": 19,
+    "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+    "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+    "spec_signature_verified": true,
+    "l1_rpc_configured": true,
+    "is_validator": false,
+    "validator_count": 4,
+    "active_validators": 4,
+    "total_stake": 400,
+    "total_stake_native": "400",
+    "peer_count": 2,
+    "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+    "l1_block": 0,
+    "pending_tx_count": 0,
+    "publisher_count": 1,
+    "finalized_height": 18,
+    "finalization_lag": 0,
+    "finalization_source": "creg-canonical-store",
+    "validator_set_source": "chain-authoritative",
+    "validator_set_sync_state": "synced",
+    "validator_set_last_finalized_source_block": 11797986,
+    "current_height": 18
+  },
+  "verified": true,
+  "dataSource": "live real node, no intercepted or fixture responses",
+  "records": [
+    {
+      "route": "/",
+      "main": "CHAIN HEIGHT\n18\ngenesis 0f2a3b1093…\nFINALIZED\n18\n0 BLOCKS BEHIND\nVALIDATORS\n4\n4 active\nTOTAL STAKE\n400\nCREG\nPACKAGES\n7\n1 publishers\nPENDING TXS\n0\nLatest blocks\nView all →\nHEIGHT\tHASH\tTXS\tPRODUCER\tAGE\n#18\t\nec6447…0cd76c\n⧉\n\t0\t\nvalidator-4\n⧉\n\t1h ago\n#17\t\n7c3364…7627d7\n⧉\n\t0\t\nvalidator-2\n⧉\n\t1h ago\n#16\t\n4bd594…73e260\n⧉\n\t0\t\nvalidator-3\n⧉\n\t2h ago\n#15\t\n27a3d4…3d19bb\n⧉\n\t0\t\nvalidator-1\n⧉\n\t3h ago\n#14\t\n2ece06…0507aa\n⧉\n\t0\t\nvalidator-3\n⧉\n\t20h ago\n#13\t\n8448cc…aa2993\n⧉\n\t0\t\nvalidator-4\n⧉\n\t21h ago\n#12\t\na329eb…08fc7d\n⧉\n\t0\t\nvalidator-4\n⧉\n\t1d ago\n#11\t\na87ff9…2117f3\n⧉\n\t0\t\nvalidator-1\n⧉\n\t1d ago\n#10\t\n990091…b6e9d1\n⧉\n\t0\t\nvalidator-1\n⧉\n\t1d ago\n#9\t\ne0b40d…5f0837\n⧉\n\t0\t\nvalidator-1\n⧉\n\t1d ago\nLive events\nOpen feed →\nALL\nBLOCK\nTX\nVOTE\nBRIDGE\nPACKAGE\n\nWaiting for events…\n\nRECENT PACKAGES\nView all →\nnpm:escape-html@1.0.3\nREVOKED\nnpm:escape-string-regexp@5.0.0\nREVOKED\nnpm:has-flag@5.0.1\nREVOKED\nnpm:is-number@7.0.0\nREVOKED\nnpm:kleur@4.1.5\nREVOKED\nBRIDGE STATUS\nL1 chain\n—\nLast anchor\n—\nBridge signer\n—\nSync status\nLEGACY CHECKPOINTING DISABLED BY PHASE 0 SAFETY FREEZE\nRUNTIME\nBuild\n0.1.0\nChain ID\ncreg-phase-c-testnet-2026-09-26-r7\nNetwork\n—\nTestnet\n—",
+      "subscriptions": [
+        "package_submitted",
+        "package_verified",
+        "package_rejected",
+        "package_revoked",
+        "block_produced",
+        "validator_voted"
+      ]
+    },
+    {
+      "route": "/blocks",
+      "main": "Blocks\ntip: #18\nshowing 19\n● Live\nHEIGHT\tHASH\tTXS\tPRODUCER\tSTATUS\tAGE\n#18\t\nec64471b…0cd76c\n⧉\n\t0\t\nvalidator-4\n⧉\n\tFINALIZED\t1h ago\n#17\t\n7c336485…7627d7\n⧉\n\t0\t\nvalidator-2\n⧉\n\tFINALIZED\t1h ago\n#16\t\n4bd594d7…73e260\n⧉\n\t0\t\nvalidator-3\n⧉\n\tFINALIZED\t2h ago\n#15\t\n27a3d44c…3d19bb\n⧉\n\t0\t\nvalidator-1\n⧉\n\tFINALIZED\t3h ago\n#14\t\n2ece0610…0507aa\n⧉\n\t0\t\nvalidator-3\n⧉\n\tFINALIZED\t20h ago\n#13\t\n8448cce7…aa2993\n⧉\n\t0\t\nvalidator-4\n⧉\n\tFINALIZED\t21h ago\n#12\t\na329eb21…08fc7d\n⧉\n\t0\t\nvalidator-4\n⧉\n\tFINALIZED\t1d ago\n#11\t\na87ff93f…2117f3\n⧉\n\t0\t\nvalidator-1\n⧉\n\tFINALIZED\t1d ago\n#10\t\n99009198…b6e9d1\n⧉\n\t0\t\nvalidator-1\n⧉\n\tFINALIZED\t1d ago\n#9\t\ne0b40d52…5f0837\n⧉\n\t0\t\nvalidator-1\n⧉\n\tFINALIZED\t1d ago\n#8\t\n1ba1f9f9…d4e846\n⧉\n\t0\t\nvalidator-3\n⧉\n\tFINALIZED\t1d ago\n#7\t\ne7d0f50b…341fd7\n⧉\n\t0\t\nvalidator-2\n⧉\n\tFINALIZED\t1d ago\n#6\t\nd8814d09…2f9fb6\n⧉\n\t0\t\nvalidator-1\n⧉\n\tFINALIZED\t1d ago\n#5\t\ndaab4388…d427cf\n⧉\n\t0\t\nvalidator-1\n⧉\n\tFINALIZED\t1d ago\n#4\t\n0797e80b…bf47e0\n⧉\n\t0\t\nvalidator-1\n⧉\n\tFINALIZED\t1d ago\n#3\t\n1fcd541e…1362c3\n⧉\n\t0\t\nvalidator-4\n⧉\n\tFINALIZED\t1d ago\n#2\t\n6d1d4da2…b3681e\n⧉\n\t0\t\nvalidator-2\n⧉\n\tFINALIZED\t1d ago\n#1\t\n0121be9b…16f436\n⧉\n\t0\t\nvalidator-4\n⧉\n\tFINALIZED\t1d ago\n#0\t\n0f2a3b10…66eed4\n⧉\n\t0\t\ngenesi…n-v1\n⧉\n\tFINALIZED\t1001d ago\n← Newer blocks\nOlder blocks →",
+      "subscriptions": [
+        "package_submitted",
+        "package_verified",
+        "package_rejected",
+        "package_revoked",
+        "block_produced",
+        "validator_voted"
+      ]
+    },
+    {
+      "route": "/block/18",
+      "main": "Block #18\nFINALIZED\n🔗\nShare\n← Prev\nNext →\n\nKeyboard: ← previous · → next\n\nHASH\nec64471b8f9c58eb2d9b958db765a98871cb444e032143d313d65b3ab80cd76c\n⧉\nPREVIOUS\n7c3364858873b00dcb8eef4875c2f1eaa85ade32648850177bd12dcb5f7627d7\n⧉\nTIMESTAMP\n2026-09-28T03:01:58Z 1h ago\nPRODUCER\nvalidator-4\n⧉\nTX COUNT\n1\nSIZE\n—\nConsensus\nVOTES\n3\nQUORUM\n—\nSTATUS\nFinalized\nSIGNERS\nvalidato…or-1\nvalidato…or-3\nvalidato…or-2\nTransactions (1)\n#\tCANONICAL\tPUBLISHER\tSTATUS\n0\tnpm:has-flag@5.0.1\t\n863906…047d\n⧉\n\tREVOKED\nRaw JSON",
+      "subscriptions": [
+        "package_submitted",
+        "package_verified",
+        "package_rejected",
+        "package_revoked",
+        "block_produced",
+        "validator_voted"
+      ]
+    },
+    {
+      "route": "/validators",
+      "main": "Validators\n4 total\nADDRESS\tALIAS\tSTAKE\tSTATUS\tNODE\n\nvalidator-3\n⧉\n\tPhase C validator-3\t100 CREG\tACTIVE\t\nvalidator-3\n\n\nvalidator-1\n⧉\n\tPhase C validator-1\t100 CREG\tACTIVE\t\nvalidator-1\n\n\nvalidator-2\n⧉\n\tPhase C validator-2\t100 CREG\tACTIVE\t\nvalidator-2\n\n\nvalidator-4\n⧉\n\tPhase C validator-4\t100 CREG\tACTIVE\t\nvalidator-4",
+      "subscriptions": [
+        "package_submitted",
+        "package_verified",
+        "package_rejected",
+        "package_revoked",
+        "block_produced",
+        "validator_voted"
+      ]
+    },
+    {
+      "route": "/validator/validator-1",
+      "main": "validator-1\n\nValidator profile · full activity →\n\n🔗\nShare\nACTIVE IN SET\nPerformance\nRECENT PROPOSALS\n7\nbounded proposal window\nSTAKE\n100 CREG\nREPUTATION\n100\nSTATUS\nonline\nProposals & availability\n\nUptime measurements are unavailable. Proposal counts do not measure uptime.\n\nPROPOSALS SHOWN\n7\nVOTE HISTORY\nUnavailable\nBLOCKS SCANNED\n19\nSLASHING EVENTS\n—\nIdentity\nALIAS\n—\nRecent proposals\n7\nHEIGHT\tHASH\tTXS\tAGE\n#15\t\n27a3d44c…3d19bb\n⧉\n\t1\t3h ago\n#11\t\na87ff93f…2117f3\n⧉\n\t1\t1d ago\n#10\t\n99009198…b6e9d1\n⧉\n\t1\t1d ago\n#9\t\ne0b40d52…5f0837\n⧉\n\t1\t1d ago\n#6\t\nd8814d09…2f9fb6\n⧉\n\t1\t1d ago\n#5\t\ndaab4388…d427cf\n⧉\n\t1\t1d ago\n#4\t\n0797e80b…bf47e0\n⧉\n\t1\t1d ago",
+      "subscriptions": [
+        "package_submitted",
+        "package_verified",
+        "package_rejected",
+        "package_revoked",
+        "block_produced",
+        "validator_voted"
+      ]
+    },
+    {
+      "route": "/consensus",
+      "main": "PBFT consensus\nVALIDATORS4/4 online\nQUORUM3 of 4\nACTIVE ROUNDS0\nPENDING POOL0\nNo active rounds\n\nNo PBFT rounds in flight — chain is at tip.",
+      "subscriptions": [
+        "package_submitted",
+        "package_verified",
+        "package_rejected",
+        "package_revoked",
+        "block_produced",
+        "validator_voted"
+      ]
+    },
+    {
+      "route": "/network",
+      "main": "Network\nPEERS\n2\nLISTEN ADDR\n—\nPUBKEY\n—\nNode list unavailable\nNetwork topology requires operator credentials on this node.\nEndpoint: /v1/operator/nodes (401)",
+      "subscriptions": [
+        "package_submitted",
+        "package_verified",
+        "package_rejected",
+        "package_revoked",
+        "block_produced",
+        "validator_voted"
+      ]
+    },
+    {
+      "route": "/pending",
+      "main": "Pending pool\n0 WAITING\nPending pool unavailable\nThe count above comes from public chain statistics. Individual pending items require operator credentials.\nEndpoint: /v1/operator/pending (401)",
+      "subscriptions": [
+        "package_submitted",
+        "package_verified",
+        "package_rejected",
+        "package_revoked",
+        "block_produced",
+        "validator_voted"
+      ]
+    },
+    {
+      "route": "/metrics",
+      "main": "Metrics\n\nDurable Prometheus history · 26 stored samples · 30s resolution\n\n5m\n30m\n1h\n6h\n24h\n7d\n🔗\nShare\nCHAIN HEIGHT\n18\nVALIDATORS\n4 / 4\nPACKAGES\n7\nPENDING TXS\n0\nFINALIZATION LAG\n0 blocks\nPUBLISHERS\n1\nCHAIN HEIGHT\n03:51:19 AM\n03:53:49 AM\n03:56:19 AM\n03:58:49 AM\n04:02:19 AM\n18\nBLOCK PRODUCTION RATE (BLOCKS/MIN)\n03:51:19 AM\n03:53:49 AM\n03:56:19 AM\n03:58:49 AM\n04:02:19 AM\n0\n1\n2\n3\n4\nVALIDATORS (ACTIVE VS TOTAL)\nActiveTotal\n03:51:19 AM\n03:53:49 AM\n03:56:19 AM\n03:58:49 AM\n04:02:19 AM\n0\n1\n2\n3\n4\nPENDING POOL SIZE\n03:51:19 AM\n03:53:49 AM\n03:56:19 AM\n03:58:49 AM\n04:02:19 AM\n0\n1\n2\n3\n4\nCHAIN-AUTHORITATIVE TOTAL STAKE (CREG)\n03:51:19 AM\n03:53:49 AM\n03:56:19 AM\n03:58:49 AM\n04:02:19 AM\n0\n100\n200\n300\n400\nTOTAL PACKAGES REGISTERED\n03:51:19 AM\n03:53:49 AM\n03:56:19 AM\n03:58:49 AM\n04:02:19 AM\n7",
+      "subscriptions": [
+        "package_submitted",
+        "package_verified",
+        "package_rejected",
+        "package_revoked",
+        "block_produced",
+        "validator_voted"
+      ]
+    },
+    {
+      "route": "/bridge",
+      "main": "L1 Checkpoint Anchoring\nUNKNOWN\nDISABLED\n🔗\nShare\n\nVerified L2 batches are anchored to Ethereum as checkpoint attestations signed by the bridge operator and approved by governance. State roots are computed off-chain by PBFT validators — anchors are not validity proofs.\n\nHEALTH\nDegraded\nSYNC STATUS\nLegacy checkpointing disabled by Phase 0 safety freeze\nLAST ANCHOR\n—\nL1 CHAIN\n—\nCOMMIT CADENCE\n—\nAnchor configuration\nREGISTRY CONTRACT\n0x23c7FB8e6fd932C1078Ff76244470557E5e6bd99\n⧉\nSIGNER ADDRESS\n—\nCURRENT STATE ROOT\n—\nLAST ANCHOR L1 TX\n—\nLAST ANCHOR BLOCK\n0\nFINALIZED L1 BLOCK\n—\nANCHORS RECORDED\n0\nAnchor history\n0 commits\nNo anchor history\n\nThe bridge hasn't committed any state to L1 yet.",
+      "subscriptions": [
+        "package_submitted",
+        "package_verified",
+        "package_rejected",
+        "package_revoked",
+        "block_produced",
+        "validator_voted"
+      ]
+    },
+    {
+      "route": "/events",
+      "main": "Live events\n0 of 0\n🔗\nShare\nAll types (0)\n⏸ Pause\n↕ Auto-scroll\n≡ Compact\n⇩ Export\nNo new events since opening this explorer\n\nThis live feed does not replay earlier blocks or transactions. Open Blocks or Packages for finalized history.\n\nCONNECTED Buffer: 0 events\nShowing: 0 / 0",
+      "subscriptions": [
+        "package_submitted",
+        "package_verified",
+        "package_rejected",
+        "package_revoked",
+        "block_produced",
+        "validator_voted"
+      ]
+    },
+    {
+      "route": "/richlist",
+      "main": "💰\nRich List\nTop Accounts by Stake (4)\nRANK\tADDRESS\tALIAS\tSTATUS\tSTAKE (CREG)\t% SHARE\n1\t\nvalidator-3\n⧉\n\tPhase C validator-3\tONLINE\t100\t25.00%\n2\t\nvalidator-1\n⧉\n\tPhase C validator-1\tONLINE\t100\t25.00%\n3\t\nvalidator-2\n⧉\n\tPhase C validator-2\tONLINE\t100\t25.00%\n4\t\nvalidator-4\n⧉\n\tPhase C validator-4\tONLINE\t100\t25.00%",
+      "subscriptions": [
+        "package_submitted",
+        "package_verified",
+        "package_rejected",
+        "package_revoked",
+        "block_produced",
+        "validator_voted"
+      ]
+    },
+    {
+      "route": "/reorgs",
+      "main": "🔀\nChain Reorganizations\nTotal forks detected: 0\nNo chain reorganizations detected\n\nNo chain reorganizations detected on this node yet.",
+      "subscriptions": [
+        "package_submitted",
+        "package_verified",
+        "package_rejected",
+        "package_revoked",
+        "block_produced",
+        "validator_voted"
+      ]
+    },
+    {
+      "route": "/proof",
+      "main": "Proof verifier\n\nCheck whether a publication transaction is included in a block. This view does not establish current install safety or independently verify the block's quorum certificate.\n\n🔗\nShare\nFetch proof by package\n⇩ Fetch proof\nOr paste proof JSON\nHow it works\n\nA package publication is committed into its block's Merkle root. This proves historical inclusion only; a later revocation does not erase that proof.\n\nEnter a package canonical (e.g., npm/express@4.18.0) above\nThe verifier fetches the Merkle proof from the node\nRecompute hashes along the proof path using each proof.path[].is_right direction bit\nCompare the recomputed root against proof.expected_root and block_header.merkle_root\n\nUse the CLI light-client verifier for signed-spec ancestry, validator-set authority and quorum checks. A valid inclusion proof does not mean a package is currently safe to install.",
+      "subscriptions": [
+        "package_submitted",
+        "package_verified",
+        "package_rejected",
+        "package_revoked",
+        "block_produced",
+        "validator_voted"
+      ]
+    }
+  ],
+  "errors": []
+}

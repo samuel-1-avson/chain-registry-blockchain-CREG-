@@ -1,0 +1,11 @@
+{
+  "timestamp_utc": "2026-09-26T06:35:56.9824071Z",
+  "image_tag": "creg-node:phase-c-secure-r7-review",
+  "image_id": "sha256:54d0bc72f2b13497443befe12e75356e675ceb19329e66ceef72fa7bd200fce1",
+  "archive_path": "C:\\Users\\samue\\CREG-backups\\phase-c-reviewed-r7\\phase-c-secure-r7-review.tar",
+  "archive_sha256": "d61d83871aa7f0e7ec353b2b0ee9aea396b17512afd9ad85b14fa1fd0f1fd16f",
+  "archive_bytes": 419497472,
+  "source_manifest_sha256": "efc67d208b17339adf28aaab1c70915acfb90233bd5eaefd352c2f644de2d2f2",
+  "real_host_acceptance": "pending",
+  "public_cutover": "pending"
+}

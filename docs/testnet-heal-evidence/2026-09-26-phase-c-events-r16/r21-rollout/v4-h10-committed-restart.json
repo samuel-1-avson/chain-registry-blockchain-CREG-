@@ -1,0 +1,215 @@
+{
+  "schema": "creg-r21-v4-h10-committed-restart-v1",
+  "captured_at_utc": "2026-09-26T22:27:50.289707+00:00",
+  "restart_method": "docker restart only; GCP VM left RUNNING",
+  "other_validators_required_online": [
+    "validator-1",
+    "validator-2",
+    "validator-3"
+  ],
+  "before_stats": {
+    "tip_height": 10,
+    "tip_hash": "990091981261dce3160614e37e7b2faab4934d1d1f99101adcc9d37727b6e9d1",
+    "package_count": 3,
+    "block_count": 11,
+    "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+    "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+    "spec_signature_verified": true,
+    "l1_rpc_configured": true,
+    "is_validator": true,
+    "validator_count": 4,
+    "active_validators": 4,
+    "total_stake": 400,
+    "total_stake_native": "400",
+    "peer_count": 2,
+    "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+    "l1_block": 0,
+    "pending_tx_count": 0,
+    "publisher_count": 1,
+    "finalized_height": 10,
+    "finalization_lag": 0,
+    "finalization_source": "creg-canonical-store",
+    "validator_set_source": "chain-authoritative",
+    "validator_set_sync_state": "syncing",
+    "validator_set_last_finalized_source_block": 11789144
+  },
+  "container_image": "sha256:d2b83a6525314b17434bc98c5bf05181db4fd6d73c962eabd2b5407968dfa95c",
+  "container_started_at_before": "2026-09-26T22:26:40.888687417Z",
+  "container_state_after": {
+    "Status": "running",
+    "Running": true,
+    "Paused": false,
+    "Restarting": false,
+    "OOMKilled": false,
+    "Dead": false,
+    "Pid": 81613,
+    "ExitCode": 0,
+    "Error": "",
+    "StartedAt": "2026-09-26T22:27:46.096107348Z",
+    "FinishedAt": "2026-09-26T22:27:45.29925241Z",
+    "Health": {
+      "Status": "starting",
+      "FailingStreak": 0,
+      "Log": [
+        {
+          "Start": "2026-09-26T22:26:15.269948311Z",
+          "End": "2026-09-26T22:26:15.3240775Z",
+          "ExitCode": 0,
+          "Output": "  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\n                                 Dload  Upload   Total   Spent    Left  Speed\n\r  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0\r100   611  100   611    0     0   605k      0 --:--:-- --:--:-- --:--:--  596k\n{\"status\":\"ok\",\"node_id\":\"validator-4\",\"is_validator\":true,\"version\":\"0.1.0\",\"validator_set_sync\":{\"enabled\":true,\"mode\":\"chain-authoritative\",\"state\":\"synced\",\"last_finalized_source_block\":11789138,\"cursor_block\":11789138,\"cursor_log_index\":4294967295,\"cursor_block_hash\":\"0x77df5e7c33871702148c125dd5884f043840a8508299a8df5db03efed006a721\",\"last_poll_at\":\"2026-09-26T22:26:01.491454404+00:00\",\"last_error\":null},\"sandbox\":{\"engine\":\"nsjail\",\"dev_bypass\":false,\"isolated\":true,\"degraded\":false,\"note\":\"kernel namespaces + seccomp-BPF (primary engine)\"},\"sync\":{\"lag_blocks\":0,\"max_peer_tip\":10,\"healthy\":true}}"
+        },
+        {
+          "Start": "2026-09-26T22:26:35.331225749Z",
+          "End": "2026-09-26T22:26:35.39202477Z",
+          "ExitCode": 0,
+          "Output": "  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\n                                 Dload  Upload   Total   Spent    Left  Speed\n\r  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0\r100   611  100   611    0     0   493k      0 --:--:-- --:--:-- --:--:--  596k\n{\"status\":\"ok\",\"node_id\":\"validator-4\",\"is_validator\":true,\"version\":\"0.1.0\",\"validator_set_sync\":{\"enabled\":true,\"mode\":\"chain-authoritative\",\"state\":\"synced\",\"last_finalized_source_block\":11789140,\"cursor_block\":11789140,\"cursor_log_index\":4294967295,\"cursor_block_hash\":\"0x24cb421bff981f176fc05b427c15b774118d8025944f2a2672bea4c1dadfcc73\",\"last_poll_at\":\"2026-09-26T22:26:31.491501622+00:00\",\"last_error\":null},\"sandbox\":{\"engine\":\"nsjail\",\"dev_bypass\":false,\"isolated\":true,\"degraded\":false,\"note\":\"kernel namespaces + seccomp-BPF (primary engine)\"},\"sync\":{\"lag_blocks\":0,\"max_peer_tip\":10,\"healthy\":true}}"
+        },
+        {
+          "Start": "2026-09-26T22:27:00.890870734Z",
+          "End": "2026-09-26T22:27:00.946552607Z",
+          "ExitCode": 0,
+          "Output": "  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\n                                 Dload  Upload   Total   Spent    Left  Speed\n\r  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0\r100   611  100   611    0     0   532k      0 --:--:-- --:--:-- --:--:--  596k\n{\"status\":\"ok\",\"node_id\":\"validator-4\",\"is_validator\":true,\"version\":\"0.1.0\",\"validator_set_sync\":{\"enabled\":true,\"mode\":\"chain-authoritative\",\"state\":\"synced\",\"last_finalized_source_block\":11789141,\"cursor_block\":11789141,\"cursor_log_index\":4294967295,\"cursor_block_hash\":\"0x89cf9316ae8fcc1922bbd409bf942e1eec1ed40357527e55b5a022cd4a28a675\",\"last_poll_at\":\"2026-09-26T22:26:43.555174081+00:00\",\"last_error\":null},\"sandbox\":{\"engine\":\"nsjail\",\"dev_bypass\":false,\"isolated\":true,\"degraded\":false,\"note\":\"kernel namespaces + seccomp-BPF (primary engine)\"},\"sync\":{\"lag_blocks\":0,\"max_peer_tip\":10,\"healthy\":true}}"
+        },
+        {
+          "Start": "2026-09-26T22:27:20.952425985Z",
+          "End": "2026-09-26T22:27:21.021281522Z",
+          "ExitCode": 0,
+          "Output": "  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\n                                 Dload  Upload   Total   Spent    Left  Speed\n\r  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0\r100   612  100   612    0     0   520k      0 --:--:-- --:--:-- --:--:--  597k\n{\"status\":\"ok\",\"node_id\":\"validator-4\",\"is_validator\":true,\"version\":\"0.1.0\",\"validator_set_sync\":{\"enabled\":true,\"mode\":\"chain-authoritative\",\"state\":\"syncing\",\"last_finalized_source_block\":11789144,\"cursor_block\":11789141,\"cursor_log_index\":4294967295,\"cursor_block_hash\":\"0x89cf9316ae8fcc1922bbd409bf942e1eec1ed40357527e55b5a022cd4a28a675\",\"last_poll_at\":\"2026-09-26T22:27:13.555603770+00:00\",\"last_error\":null},\"sandbox\":{\"engine\":\"nsjail\",\"dev_bypass\":false,\"isolated\":true,\"degraded\":false,\"note\":\"kernel namespaces + seccomp-BPF (primary engine)\"},\"sync\":{\"lag_blocks\":0,\"max_peer_tip\":10,\"healthy\":true}}"
+        },
+        {
+          "Start": "2026-09-26T22:27:41.026582419Z",
+          "End": "2026-09-26T22:27:41.096376879Z",
+          "ExitCode": 0,
+          "Output": "  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\n                                 Dload  Upload   Total   Spent    Left  Speed\n\r  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0\r100   611  100   611    0     0   609k      0 --:--:-- --:--:-- --:--:--  596k\n{\"status\":\"ok\",\"node_id\":\"validator-4\",\"is_validator\":true,\"version\":\"0.1.0\",\"validator_set_sync\":{\"enabled\":true,\"mode\":\"chain-authoritative\",\"state\":\"synced\",\"last_finalized_source_block\":11789144,\"cursor_block\":11789144,\"cursor_log_index\":4294967295,\"cursor_block_hash\":\"0x64b181e6180d5cd77f037651dc41a3b2d8b6dcfa3546aebadb887bea016f6508\",\"last_poll_at\":\"2026-09-26T22:27:13.555603770+00:00\",\"last_error\":null},\"sandbox\":{\"engine\":\"nsjail\",\"dev_bypass\":false,\"isolated\":true,\"degraded\":false,\"note\":\"kernel namespaces + seccomp-BPF (primary engine)\"},\"sync\":{\"lag_blocks\":0,\"max_peer_tip\":10,\"healthy\":true}}"
+        }
+      ]
+    }
+  },
+  "container_started_at_after": "2026-09-26T22:27:46.096107348Z",
+  "p2p_identity_sha256_before": "c287fdb093e8f8a2458ad36206ee50c3918cbb41b4e5c5795f5f77d834f8f575",
+  "p2p_identity_sha256_after": "c287fdb093e8f8a2458ad36206ee50c3918cbb41b4e5c5795f5f77d834f8f575",
+  "after_stats": {
+    "tip_height": 10,
+    "tip_hash": "990091981261dce3160614e37e7b2faab4934d1d1f99101adcc9d37727b6e9d1",
+    "package_count": 3,
+    "block_count": 11,
+    "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+    "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+    "spec_signature_verified": true,
+    "l1_rpc_configured": true,
+    "is_validator": true,
+    "validator_count": 4,
+    "active_validators": 4,
+    "total_stake": 400,
+    "total_stake_native": "400",
+    "peer_count": 0,
+    "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+    "l1_block": 0,
+    "pending_tx_count": 0,
+    "publisher_count": 1,
+    "finalized_height": 10,
+    "finalization_lag": 0,
+    "finalization_source": "creg-canonical-store",
+    "validator_set_source": "chain-authoritative",
+    "validator_set_sync_state": "synced",
+    "validator_set_last_finalized_source_block": 11789147
+  },
+  "health_after": {
+    "status": "ok",
+    "node_id": "validator-4",
+    "is_validator": true,
+    "version": "0.1.0",
+    "validator_set_sync": {
+      "enabled": true,
+      "mode": "chain-authoritative",
+      "state": "synced",
+      "last_finalized_source_block": 11789147,
+      "cursor_block": 11789147,
+      "cursor_log_index": 4294967295,
+      "cursor_block_hash": "0x9df9032ddb1df9d13b0bf31209452c440de17780aabecd7023538cea75df013d",
+      "last_poll_at": "2026-09-26T22:27:48.761780205+00:00",
+      "last_error": null
+    },
+    "sandbox": {
+      "engine": "nsjail",
+      "dev_bypass": false,
+      "isolated": true,
+      "degraded": false,
+      "note": "kernel namespaces + seccomp-BPF (primary engine)"
+    },
+    "sync": {
+      "lag_blocks": 0,
+      "max_peer_tip": 0,
+      "healthy": true
+    }
+  },
+  "pbft_after": {
+    "active_round_count": 0,
+    "max_non_terminal_phase_age_seconds": 0.0,
+    "rounds": []
+  },
+  "block10_after": {
+    "header": {
+      "height": 10,
+      "prev_hash": "e0b40d52f7626f46a0bcf85040ec2c34dc1d576af0b1e7d65396d31c325f0837",
+      "merkle_root": "b8bce8fc59fd2846e9113f0c78fc69e4ef654294c0df82274f7bf95e16540363",
+      "proposer_id": "validator-1",
+      "timestamp": "2026-09-26T22:15:48Z",
+      "validator_set_hash": "ad5c4491938c5410d22b896290f3603ccec7abf3393bd5364bcea7674c109e98",
+      "vrf_output": "2c523d848f827415f692ee02ec3f4bd1535c8340568542855482cc1c772d0cba",
+      "vrf_proof": "ad47e917efa99558185608b87c0164f0f662e6aff77febe93d9e11604ca50a1eec7b3fc740fad8728c2644b9da9b59d5dd721ef18052ed49235498f7092d6006"
+    },
+    "transactions": [
+      {
+        "type": "revoke",
+        "package_canonical": "npm:escape-html@1.0.3",
+        "reason": "Phase C live revocation after shared publication",
+        "revoked_by": "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d",
+        "evidence_hash": "a101155c3cbdfb1e4f98f2f83c8b5e392db6accfa606df0eba8b87a5762b0366"
+      }
+    ],
+    "pbft_signatures": [
+      {
+        "validator_id": "validator-3",
+        "pubkey": "7876b26b471f81edd9597354fd023157858f2b02d73a1e7bb0b430c9fc63e6bc",
+        "signature": "b72672d8972dea682e3daa5cc80839dfed07201a786d074da23fff85871cf79eb04d9180afc67e4415d4a54df65c135e48ec5534ecc39e84a250e6cd3c1e0204"
+      },
+      {
+        "validator_id": "validator-1",
+        "pubkey": "cc4157c4443c9fb011df2b650f497e3eadfc1ddda6dc7f4b6732325383108ffc",
+        "signature": "a0ec78fa624c05c27301dca17fc8a5068e85ebd398cbb88178af15109b37949ec17e6244bc16b05df212afa4ec3b349b861df38fcb0a5afb1b1280359e4a0809"
+      },
+      {
+        "validator_id": "validator-4",
+        "pubkey": "f777ca6f1dafbbeb9cbe5a258568c574e7f519a1e58da57c97d28fcf69dd35ff",
+        "signature": "70a72ef48e5c8ae9fb12235e34301e4431898955732b8117a3b37ed0ccf4afa28341ed1876bc16dcf39d6698ce12af8f054b64cfb860e3e0dd6ff58c0cbb9403"
+      }
+    ],
+    "hash": "990091981261dce3160614e37e7b2faab4934d1d1f99101adcc9d37727b6e9d1",
+    "finalized": true
+  },
+  "queue_metrics_after": {
+    "creg_pending_block_txs": 0.0,
+    "creg_durable_finalized_work_depth": 0.0,
+    "creg_durable_finalized_work_ready_depth": 0.0,
+    "creg_pbft_active_rounds": 0.0,
+    "creg_forced_inclusion_pending": 0.0
+  },
+  "checks": {
+    "same_chain_id": true,
+    "signed_chain_identity": true,
+    "same_genesis": true,
+    "same_h10_tip": true,
+    "h10_block_finalized": true,
+    "single_escape_html_revoke": true,
+    "v4_is_validator": true,
+    "four_validator_roster": true,
+    "r21_image_preserved": true,
+    "manual_restart_observed": true,
+    "p2p_identity_preserved": true,
+    "scanner_ready": true,
+    "queues_and_pbft_clear": true,
+    "no_unresolved_pbft_rounds": true
+  },
+  "passed": true,
+  "completed_at_utc": "2026-09-26T22:27:50.289771+00:00"
+}

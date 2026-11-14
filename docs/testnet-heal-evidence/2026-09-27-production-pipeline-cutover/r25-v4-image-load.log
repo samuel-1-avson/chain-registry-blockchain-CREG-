@@ -1,0 +1,12 @@
+/tmp/creg-node-r25-full.tar.gz: OK
+
+Recommendation: To check for possible causes of SSH connectivity issues and get
+recommendations, rerun the ssh command with the --troubleshoot option.
+
+gcloud compute ssh creg-validator-4 --project=fiffi-500411 --zone=asia-southeast1-b --troubleshoot
+
+Or, to investigate an IAP tunneling issue:
+
+gcloud compute ssh creg-validator-4 --project=fiffi-500411 --zone=asia-southeast1-b --troubleshoot --tunnel-through-iap
+
+ERROR: (gcloud.compute.ssh) [C:\Users\samue\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\sdk\plink.exe] exited with return code [1].

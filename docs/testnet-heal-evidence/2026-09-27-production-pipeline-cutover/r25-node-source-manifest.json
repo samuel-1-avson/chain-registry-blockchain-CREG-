@@ -1,0 +1,920 @@
+{
+  "timestamp_utc": "2026-09-27T20:17:54.3697479Z",
+  "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+  "build_feature": "phase-c-real-fleet",
+  "status": "compiling",
+  "files": [
+    {
+      "path": "chain-registry/.cargo\\config.toml",
+      "sha256": "8b7353df575212a87fe4382d5b4c2cf308bdf8e0f6008a2bea385f8fb19679ba"
+    },
+    {
+      "path": "chain-registry/Cargo.lock",
+      "sha256": "8d43ae7e0ea1425a762064885a6a4fc001ffb642750dab5858038da0c5bf9b83"
+    },
+    {
+      "path": "chain-registry/Cargo.toml",
+      "sha256": "b0852530ae217d21fec27a4e904756437973c824aaa59b9deb5fea1329d3d868"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\build.rs",
+      "sha256": "986cc2f473aae8fffdd3e5e893e3eea460ebd879346c6acbf2386bbcb03bc75c"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\Cargo.toml",
+      "sha256": "41e21ffc3b99a6d7c5a7508a97c177d408c2d592c1aa5c7b4b6005254f01ecb6"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\examples\\sign_validator_identity.rs",
+      "sha256": "d67f5bfb191c717b468517338e480d78d02ebc572ce3b77a3341ec563b4a2a58"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\advanced.rs",
+      "sha256": "37610fedf926b284c0412a6350d221243168a302db491a93518b9939167bd59c"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\audit.rs",
+      "sha256": "fe7e7ed6ef21f06ac64e23cdc3f8231222e94a48c86bca5cdb8cb18978ce23a8"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\auth.rs",
+      "sha256": "1f414723cbea9b74374e3aecf8087303a9e0089dba90fccc145f44ee017969da"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\batch.rs",
+      "sha256": "b50d015bf79202b2bd67fddb06ce40281a93462ee2486f014b8d7fd53a911500"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\blocks.rs",
+      "sha256": "7c45ca54949f19c294d72411c87ac394f9580cd3fc2377f6e39525ce794df8f6"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\chain_spec.rs",
+      "sha256": "c3e79a756f340d8a41d80a41cb2178b3b5865c7b4b1772d11813e0431253ca9c"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\config_file.rs",
+      "sha256": "0bf5e949b9e6179b44fafddb58d5cdd2039417cfc55da8febf846901470311ad"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\config.rs",
+      "sha256": "13f8498b35077075f0e3253e84f1e0335fd455c44e8d13d94ebc73e9df1465af"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\dashboard_enhanced.rs",
+      "sha256": "f1cba5aeffe8e3e9b29e7c94e76d928d6cd4f65eeeb99c278b676408c3ccfe3e"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\diff.rs",
+      "sha256": "bce97e87cde8fdf080d80adeda168430e70e3802790e77fc456570adb836eaab"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\doctor.rs",
+      "sha256": "c5cd70eef0c62cb1ec8e5cdbd747a9c8276c1a5af762843dfa3ceeba756d985a"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\error_help.rs",
+      "sha256": "6e245c805562785827a0b30c9de9fb32e360bc06045d5451d876a609c7dbb270"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\explorer_tui.rs",
+      "sha256": "204f9e73a043b32fda3ae73adcb38193f078467c539e7ed36a63d8c9473c1391"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\faucet_client.rs",
+      "sha256": "18e27ab810698dc736dd4351599542ca4bed3ccce934147f38185bcaffad3c93"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\graph.rs",
+      "sha256": "e5ea558993908d40b63ed571c9422da5c2996a58533d67e8cc2615c078937ba5"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\info.rs",
+      "sha256": "a7d8229dfc8798257c904ed653894d339dfadde21c74c744624f6f89cf807723"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\install.rs",
+      "sha256": "903526909a2df2036029ee95f3f08663bd0ebd192298896e52ba7718a98f7147"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\intercept.rs",
+      "sha256": "fdde669e35d79725ae99b8cc5383100991774cd37b73246a4bfbfd6befd9bf2d"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\keygen.rs",
+      "sha256": "ccb5ca9c8bbab8193c295f4607e6ba477ecfc9b1ef4c829865b8776b325a7bfd"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\lockfile_attestation.rs",
+      "sha256": "a82b64f7f0a48ed9bd2299e9bceb6a2753833fadbf01b557621eeb5f4972dedd"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\lockfile.rs",
+      "sha256": "bfe89ee491b1a892bdf028933aea01f588aa43947aecc6d8b10a158b1d69d691"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\main.rs",
+      "sha256": "5e01d3a97c26ed1696463ae0e3840c255f80b6480dd9dd21d59c93df5eca425c"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\multisig.rs",
+      "sha256": "6ad7c71a654a44346e45f569770c5e0a5f3534a2670baf5b622563e6a06ec7ba"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\observer.rs",
+      "sha256": "1490b21534efbf4d4aea7b5d1eec2d3877cea1363e973dc98552fa111f018edd"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\osv_snapshot.rs",
+      "sha256": "8227e07f49f5438bb2f10fb5f699ef3b15d973520d878fb67dc8973604f71447"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\output.rs",
+      "sha256": "1f7524bad57e53119d5d61bb4084fbd1532ccf17cb2f6c393ea0567c5137a588"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\policy.rs",
+      "sha256": "997a61d4d5189f8781b517d3bfc73f530351a04233e07d00090855d2c3793f9c"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\profile.rs",
+      "sha256": "207593f09bf6471a128099b72f8371e2d8aad2f3aa6a3ad6578d00c6de1a3e4f"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\publish.rs",
+      "sha256": "3351414a43356a6d7828b50c309a117165fb89f5a9b749991bbce08b155a5209"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\recovery.rs",
+      "sha256": "a0a52e2254f16d54020267f612e3d13bfd89db7a987fadbadc7773e4fdd386ae"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\registry_proxy.rs",
+      "sha256": "0c1d30023a582cf94a1159d6572498a3d7d395ed6f4e99dc4018ebbe962d820a"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\relayer_cli.rs",
+      "sha256": "0d04fa638c7c2ab3571d206d780610d3f7edab85eb850449ea23619f152d845f"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\retry.rs",
+      "sha256": "fe0005c5b9310fa67d8d7d7e0fb1757db453f9fbe0ff2052032a1b75f043d013"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\sbom.rs",
+      "sha256": "f91dc840bba567250f25fc7bda67ef224b95941cf2161900ff9c2a4040442dbe"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\search.rs",
+      "sha256": "ebe4d96812c88db05faf5a289f1ed00c0185690f83b47708cb03013e2d13c28d"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\shims\\cargo_shim.rs",
+      "sha256": "c52b811300847631a53fb7651b49a26b4f1a28f2906d2e4b64440084b89b5ddb"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\shims\\gem.rs",
+      "sha256": "e78917014218779c9b78779977e8940269d629260ef0f9bab2500c3daf963c7c"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\shims\\mvn.rs",
+      "sha256": "9a3275566bc179b8932489ad68038c2123b022c64c9b02bfcc3f740759897f0d"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\shims\\npm.rs",
+      "sha256": "9044d34279f51f5161c4b78530e13d22cd84a673fa8a3882c0803528ed7a44fc"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\shims\\pip.rs",
+      "sha256": "d8d502c191696bb287d9617f6aaf3a0bbf999b8708dbe451d5372d3115acb4a7"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\stake.rs",
+      "sha256": "ee3d3ae47c02e5e87f6b680c854dcac490dc768dfd509f629e4fc994be7928fa"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\stress_test.rs",
+      "sha256": "310025d108d76179fce2f7ef8128eb0be0bb45f35a05172d6e9254f6ab2278a6"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\supply_chain.rs",
+      "sha256": "f9918a262ab19820499a92c0a73ef3ac349565ebe30bc584555388974d2380da"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\testnet.rs",
+      "sha256": "126693360d77c4e3c5c3cfecda5af688438927cde76ec7d03c02c9328722e2e4"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\update.rs",
+      "sha256": "71e31cd0036af2b767758ba982c9245e09680cfdcd3626357a709da6198d0466"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\verify.rs",
+      "sha256": "a521f107a38a3134b768db003807e52bf3392063b650349b26927a7048f67bff"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\watch.rs",
+      "sha256": "c58629bc5833574d18737f0746ac38e1301ab899cf2f0dc359abf8394a685039"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\witness.rs",
+      "sha256": "d5667509c5f05c8669d45a3f765474cf05d668b7b8264b1c98b76cab134f0572"
+    },
+    {
+      "path": "chain-registry/crates\\cli\\src\\wizard.rs",
+      "sha256": "20934369a6e92e00e846dee84dc899c2284a3b002a92e285851e176672f7e9ab"
+    },
+    {
+      "path": "chain-registry/crates\\common\\build.rs",
+      "sha256": "99108a57569160279d8e803dd2aeac1df1559d9cba81905f58e8757a5b9edbc6"
+    },
+    {
+      "path": "chain-registry/crates\\common\\Cargo.toml",
+      "sha256": "ddc96e07609df843b026e44af38dea99abfc2ed8d338af93a861aca557007734"
+    },
+    {
+      "path": "chain-registry/crates\\common\\examples\\compute_genesis_hash.rs",
+      "sha256": "e4f952f04bbe91667f05ba896ee457bedf97746757b95737e8cc820b4921cd05"
+    },
+    {
+      "path": "chain-registry/crates\\common\\examples\\sign_chain_spec.rs",
+      "sha256": "0dc23de2a7fef03ffb7fe7e442edb2a65443f72a2ac435e03561deb36ee8e458"
+    },
+    {
+      "path": "chain-registry/crates\\common\\examples\\verify_chain_spec.rs",
+      "sha256": "7fd48e0a03a661b6635ded8df63e836d9ebd489fa789d1064690759e772f0612"
+    },
+    {
+      "path": "chain-registry/crates\\common\\proto\\node.proto",
+      "sha256": "1f5fac423027a1a73debb798ef8ea384d95c854f1b5e42414a7d95a2f97e3eb7"
+    },
+    {
+      "path": "chain-registry/crates\\common\\src\\block.rs",
+      "sha256": "2c98067e7c7bcb565004aba077574efea59b8d72e938853470dec93ad4ef5163"
+    },
+    {
+      "path": "chain-registry/crates\\common\\src\\chain_spec.rs",
+      "sha256": "358d6c2b5912e9b4590defb3f1d3a9f5b362a3ef9203d5732e099297d5326b42"
+    },
+    {
+      "path": "chain-registry/crates\\common\\src\\consensus_encoding.rs",
+      "sha256": "67df0e6d3e50dfa3bdb7b64ce6d63e64fef868769d67a69516458072e5a94c96"
+    },
+    {
+      "path": "chain-registry/crates\\common\\src\\error.rs",
+      "sha256": "8fa4a11726252d3d6260b8fa165f5523b15db0685b808ad0a63a98fb478ee5bd"
+    },
+    {
+      "path": "chain-registry/crates\\common\\src\\feature_flags.rs",
+      "sha256": "f8891b6af9bf478073f1efb7021f9411d12ba90d5bea191e67afa72fbb85a3a5"
+    },
+    {
+      "path": "chain-registry/crates\\common\\src\\hot_key.rs",
+      "sha256": "c951b73a21661f50e1d50905c66a46f53c7c18b6324dba020b7c7b49e18b7659"
+    },
+    {
+      "path": "chain-registry/crates\\common\\src\\intelligence.rs",
+      "sha256": "55f721bd4887ef9c939e8d021b3c3daed4b7662b112829b420b59ed87f02961c"
+    },
+    {
+      "path": "chain-registry/crates\\common\\src\\lib.rs",
+      "sha256": "c531ea42036790e5217dc6ebdf6968eb97d3b9009ddd06909f097f023fda30cd"
+    },
+    {
+      "path": "chain-registry/crates\\common\\src\\ownership.rs",
+      "sha256": "9a14bc77d6081023d57518dc170273994b4f271736e9fcaf19631dc6d0a88dd8"
+    },
+    {
+      "path": "chain-registry/crates\\common\\src\\package.rs",
+      "sha256": "f246f0f10b1e1f26eb350af381c4010578f4a6830d1a5f320048d786671af664"
+    },
+    {
+      "path": "chain-registry/crates\\common\\src\\shielded_wire.rs",
+      "sha256": "c54e53566f143b0a01489a70164806b141e7a3f8aa456ff85a1464cfa1433d1b"
+    },
+    {
+      "path": "chain-registry/crates\\common\\src\\transparency_log.rs",
+      "sha256": "17a3ef5e49371fda364c92ced0d873a15c04499b82fbed92944937f8950a7f6e"
+    },
+    {
+      "path": "chain-registry/crates\\common\\src\\validator_snapshot.rs",
+      "sha256": "5dc675da192d94f6185e48c519ea143514c8335565c905ddae598b1888a54177"
+    },
+    {
+      "path": "chain-registry/crates\\common\\src\\verdict.rs",
+      "sha256": "86e615559cec9cd9750106dbe04d8a352384bf6e0a6ecb0c87c54bbf74fa2a1b"
+    },
+    {
+      "path": "chain-registry/crates\\consensus\\Cargo.toml",
+      "sha256": "16a9640b90a73c9c1f3709b046905715074a7beaf733a03b76b993c1d4f12119"
+    },
+    {
+      "path": "chain-registry/crates\\consensus\\src\\bls_aggregate.rs",
+      "sha256": "ad5a03727ae946b68fdce7d82c4c66057577f3debc53f6e4d1d530072cab21ee"
+    },
+    {
+      "path": "chain-registry/crates\\consensus\\src\\evidence_votes.rs",
+      "sha256": "2eece461de1d228a6a4ba241c7f0288ba78524af746394172c99129e3298ac98"
+    },
+    {
+      "path": "chain-registry/crates\\consensus\\src\\forced_inclusion.rs",
+      "sha256": "445bf8b8deb38faa5f41e1f7410f94ec6d02de40887bf6e41be9bf390de7855e"
+    },
+    {
+      "path": "chain-registry/crates\\consensus\\src\\lib.rs",
+      "sha256": "5252046aad05279a444e029a5e9776a16fd06b98e6f149366ccbc6e2652f3178"
+    },
+    {
+      "path": "chain-registry/crates\\consensus\\src\\pbft.rs",
+      "sha256": "4ced30795785403b712c0d650c22a1b5a343e054dbd19b7631e1700712b7647c"
+    },
+    {
+      "path": "chain-registry/crates\\consensus\\src\\slashing_relay.rs",
+      "sha256": "658e5cf7063b42718fa1bdcc80a1a6ada93010158018beb2521d8478abef1604"
+    },
+    {
+      "path": "chain-registry/crates\\consensus\\src\\validator_set.rs",
+      "sha256": "8939e5392fe9a22449de904cc0b51a1b982c4be43a387462c20f5ade30bc05fb"
+    },
+    {
+      "path": "chain-registry/crates\\consensus\\src\\vote_accumulator.rs",
+      "sha256": "c9b0051a43af3de16beafe9567f403896cd7ca82f830c0b4905d9cfdd652be69"
+    },
+    {
+      "path": "chain-registry/crates\\consensus\\src\\vrf.rs",
+      "sha256": "e6ec212aae5dd7221bd44e7201ae548612a494d4b51779a25f7349dc8461b5af"
+    },
+    {
+      "path": "chain-registry/crates\\cross-chain\\Cargo.toml",
+      "sha256": "06c8ca2ad41ec064608bc2b5c6ee2d73c941670a718e5d9afc20d17e9d45df3e"
+    },
+    {
+      "path": "chain-registry/crates\\cross-chain\\src\\checkpoint_relayer.rs",
+      "sha256": "cfb752f57fa2fa24928820cd0cee3c5094a8ef297868193693a1970c7d9bef2a"
+    },
+    {
+      "path": "chain-registry/crates\\cross-chain\\src\\l1_relayer_service.rs",
+      "sha256": "dad2a8350841ae6ee738ab44ad1fc6d908f402955303b5ffd2b8ca58951b930e"
+    },
+    {
+      "path": "chain-registry/crates\\cross-chain\\src\\lib.rs",
+      "sha256": "ca2ac1a1404b1055196032c6e70fd8fc17b79ab9d0d3d90526a99163221c1adf"
+    },
+    {
+      "path": "chain-registry/crates\\cross-chain\\src\\merkle_proof.rs",
+      "sha256": "604b9593e1659f5269e7210680bd3e9800613df803909f14bc84a2827a6b5956"
+    },
+    {
+      "path": "chain-registry/crates\\db-sync\\Cargo.toml",
+      "sha256": "8059e35485238c789b0a6296d2928dedc7317383b14555c6f9e28f9edf9e42df"
+    },
+    {
+      "path": "chain-registry/crates\\db-sync\\src\\lib.rs",
+      "sha256": "6718b478b4f18988c3df8065203223f207ac84ff2e7c1ce8dadea9aaa9eca7e0"
+    },
+    {
+      "path": "chain-registry/crates\\db-sync\\src\\schema.rs",
+      "sha256": "39ed8fb383d1ca8a0b27aed69eedd64fa7c253dbe96080be08cc1258bf1f12ac"
+    },
+    {
+      "path": "chain-registry/crates\\db-sync\\src\\sync_worker.rs",
+      "sha256": "c95643936eb43a9f70615b931baf501121b2fe4eabaf8027482bb0d3da50e55d"
+    },
+    {
+      "path": "chain-registry/crates\\faucet\\Cargo.toml",
+      "sha256": "4a84290748d8589c50e68ca2f88d9f70193645cbf678a3827a7b1b4fa2f5cdaa"
+    },
+    {
+      "path": "chain-registry/crates\\faucet\\src\\faucet.html",
+      "sha256": "5d52ae1ad3c1b140015b7d844690124bbc6d803c262e05240a47b026d696c6e5"
+    },
+    {
+      "path": "chain-registry/crates\\faucet\\src\\main.rs",
+      "sha256": "cdb07e3106cfffee58ade17e5227c0e8a93284d8731862b1b788829f6cdeeb54"
+    },
+    {
+      "path": "chain-registry/crates\\insurance\\Cargo.toml",
+      "sha256": "0b5d7a63f36cec2507c451655c7bcf0d9affa8c11c0f7980a05c170ef6587a33"
+    },
+    {
+      "path": "chain-registry/crates\\insurance\\src\\claims.rs",
+      "sha256": "4cfaf33b99bf6bf6103e21c446c64d52328f7bb5f36ce0072b57ac59f99f79b0"
+    },
+    {
+      "path": "chain-registry/crates\\insurance\\src\\lib.rs",
+      "sha256": "8082c3634a57abb2a6e53932bd54329f71eccd0da7581b9e25182fc4506e73ce"
+    },
+    {
+      "path": "chain-registry/crates\\insurance\\src\\risk_model.rs",
+      "sha256": "be67864902c5d1ad433baae5e3ee2d91fb4bc1a46a358702f9836f3796ccf710"
+    },
+    {
+      "path": "chain-registry/crates\\ipfs-pinner\\Cargo.toml",
+      "sha256": "bf5478ba02f453bf1687ed0562975089f8aa4bdfeb130707afcba58281debf2a"
+    },
+    {
+      "path": "chain-registry/crates\\ipfs-pinner\\src\\contract.rs",
+      "sha256": "454c2fab5c21505796b053c4c59cc6262c052dc6c67ec242b6a282ad429b00c2"
+    },
+    {
+      "path": "chain-registry/crates\\ipfs-pinner\\src\\lib.rs",
+      "sha256": "6beed92991a878e0ea448eb9dd2cd642b6bbf72789f3a38994ed97682be9b012"
+    },
+    {
+      "path": "chain-registry/crates\\ipfs-pinner\\src\\pinner.rs",
+      "sha256": "1d665b7444f7d0d00156f2a18ba3a4e9f87a53e761c17c033d50baa2c9943f4e"
+    },
+    {
+      "path": "chain-registry/crates\\ipfs-pinner\\src\\verifier.rs",
+      "sha256": "3525a86a410ab3ea35aedf836179558c712988a74cc1b058a99bd81f338b0138"
+    },
+    {
+      "path": "chain-registry/crates\\ml-validator\\Cargo.toml",
+      "sha256": "1c255e4018b2a2e5a9b6740acf8e776c506a26186bf6b1b00695022637da826c"
+    },
+    {
+      "path": "chain-registry/crates\\ml-validator\\src\\deep_scan.rs",
+      "sha256": "e3eda9d881d7e7f67448f8d67b930bde7312b664c413a81ca808da2ffe4e7d5d"
+    },
+    {
+      "path": "chain-registry/crates\\ml-validator\\src\\features.rs",
+      "sha256": "9ec08be86f39869f00381874a0a117712f6c7b4a45aad9400aa2a272e5159b03"
+    },
+    {
+      "path": "chain-registry/crates\\ml-validator\\src\\lib.rs",
+      "sha256": "a8e7f483375c9321b7e6aac1cbf29e01063568068cc5141d0038c2b8ac75abd7"
+    },
+    {
+      "path": "chain-registry/crates\\ml-validator\\src\\osv_client.rs",
+      "sha256": "fd0a5a0f66f48c4b85f91485ff2890543ac7a36f74f14951ff58cda5531322bb"
+    },
+    {
+      "path": "chain-registry/crates\\ml-validator\\src\\osv_snapshot.rs",
+      "sha256": "982db64fe5576c77702b94804e3f89bab56221c77f1170c6549fef2af82cd8ee"
+    },
+    {
+      "path": "chain-registry/crates\\ml-validator\\src\\scanner_profile.rs",
+      "sha256": "2984ab328e6fb0e5a97fad86498fec3fb11899c5e4f301543bb2d794c431f49c"
+    },
+    {
+      "path": "chain-registry/crates\\ml-validator\\src\\threat_intel.rs",
+      "sha256": "cdb2a1323c8a700995e6dc652572d7a60ddffbcf9eef38a1c0b0a7648d419e84"
+    },
+    {
+      "path": "chain-registry/crates\\ml-validator\\src\\yara_scanner.rs",
+      "sha256": "796d13fc0429c4a09d0f870d9badcad4e271f2e56150e53d0e264e125622dc03"
+    },
+    {
+      "path": "chain-registry/crates\\node\\build.rs",
+      "sha256": "064499e08929f583ffcda40e2fd44ef651e4b03633d5b420496c1a6d9ac5100c"
+    },
+    {
+      "path": "chain-registry/crates\\node\\Cargo.toml",
+      "sha256": "ddc1b09696bbc03a1fec624fc54b5aa538e9a20172d8e157d7d22967f61260eb"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\admission_scan.rs",
+      "sha256": "e186bf5b4c3a2f72b5945a4712ff3b7b881cf579cf690003d67ba714e9e8ee2f"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\api.rs",
+      "sha256": "fa726229a51949ac7a8a5628add7ae0492c822af2d85ff8b73b7940106535368"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\authority_adapter.rs",
+      "sha256": "50b5f4517a0c5e262110a0fb1d0f5b24691e3b7a9723d8a51889aba5ef453dec"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\authority_archive.rs",
+      "sha256": "1fc6ce35d26cff448887ab7fffd465a319d8b50cdac876babec611cc573eb532"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\bin\\creg_authority_rejection_fixture.rs",
+      "sha256": "f82a55c1b24d10c7e62fcf083fe04d016b9569d37dc16d7dcb080b312f53608d"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\bin\\creg_indexer.rs",
+      "sha256": "c02b0b5febfc4ef90f51be79d98946c0c1705a3382364c3dd0935df973706eb9"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\bin\\creg_recovery_inspect.rs",
+      "sha256": "5f83d607d70ae150437d4b8559b0828001fb2c4bae3db8aa2539d20c2f1a3ee2"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\bin\\dump_openapi.rs",
+      "sha256": "ba8638801a45ad48132685ae852e5c6452a563d311c8c92ad4f000062555a38b"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\block_producer.rs",
+      "sha256": "6704cce5834505a27bbc5358e305e3f5d658661ac51a98302fd6a7ded1a5353c"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\block_time.rs",
+      "sha256": "2bdee87b7526127eace147fcaba6aea60d67c28378f9fae38db90493c707bb48"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\bridge_anchors.rs",
+      "sha256": "b1d2eac68c37336064ac2905f16d69f181661edfff6a2ca19d4fb4bb5b8d5d87"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\bridge.rs",
+      "sha256": "fb1288916e9f758d404e6f9da0677c0bcf42c86e98f4671b2aac5d3913fa8d34"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\chain_spec_boot.rs",
+      "sha256": "78a5e352b7a50fe32b63edb96ac2a7cb7874bf050edd4d865f02f211a634c034"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\chain_store.rs",
+      "sha256": "ebb5282d0c2ea52b1004516e0050ba90c6328d520a6719ad0ac429a82e52d014"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\config.rs",
+      "sha256": "b6e94ca5361bd9f9ae5cefbe01432c5027b74f1733b654c1d80171fa9ef0b447"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\consensus_admission.rs",
+      "sha256": "78e7b8dc0922ce57382372fcc0f64a1ad9ec21c9183d67990b79e7ad43bbccec"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\db_sync_proxy.rs",
+      "sha256": "fa44c76b0e2495092fcd02b9e5886fbca1bac9686835c42bff8eca64cda1454b"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\events.rs",
+      "sha256": "5879616dfb02c456239d44c8b360d4db04260deaf6eabbb2a64aa2308f4bf0ed"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\explorer.rs",
+      "sha256": "332bf29d35c0d6616f76be0ee31c7839420acaa7187e9d9b005e82916309e799"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\finalized_tx.rs",
+      "sha256": "1b7fb4d9e217097de9fd5deb12fe15ed0b934ac31c17299708739c69edc48f81"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\gossip.rs",
+      "sha256": "69cc4bad793cf04bb4ce72ef685a871158298dd99bfcb9d066aeff5d6f7ed488"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\governance_api.rs",
+      "sha256": "49db07695a11dd75848da2e140c25ae181b960d9b495793b03068e0af039695b"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\grpc\\mod.rs",
+      "sha256": "d269fa4620afd4b7ed31adc8fd7311a63fe93740cbfb2086551861cd56853dcf"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\grpc\\server.rs",
+      "sha256": "8ca34ca155ae74d9cd55c68bf1ba38266ff624095379a7b33522abdd2edb2d2a"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\intelligence\\mod.rs",
+      "sha256": "92cf98bb9d1e61cf8693058acfdb21a8dcfcd05970300ac3663a982464eb3c3d"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\intelligence\\store.rs",
+      "sha256": "3d88d1796b33ff85744a93360bc14f330beae095178ed0a411ece9a6cf7df7d5"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\intelligence\\worker.rs",
+      "sha256": "a0fe7c84902b1082e3bf3fbc307dfacb3482b3b9eb5223a35af8fe5db09a8b62"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\json_rpc.rs",
+      "sha256": "f6392e15d137088f115e13bdb3067209041d7aa1ab672f22060a7f6f53a6079b"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\l1_quorum.rs",
+      "sha256": "f17496e7bbc012b8975e12a5ccac40b4426bb23d2e8809571389e8fc656c3cb3"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\lib.rs",
+      "sha256": "fc3c75742cf1e454cd189885918c66d4027f957fbff67f06f44e94ae89abe413"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\main.rs",
+      "sha256": "b07b72152502a8844d35193792814f97552318ff5a8e8237b69288da458da330"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\metrics.rs",
+      "sha256": "c0fe9b5682b89e5924b27790bbbed2a975400370345db8d750c5f345298e8947"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\namespace_consensus.rs",
+      "sha256": "fba541555baa27dabf70085e3e560b579816c2c414e957d5454df37eed079fd4"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\openapi.rs",
+      "sha256": "7734e9de448926749adcef3a389acc4b59b867f20b314334462d3888978493fc"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\p2p_bootnodes.rs",
+      "sha256": "8c6c90283af8295cbc501b74013ec0014807dd40b0fe89e1a456a97982413f84"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\p2p_peer_score.rs",
+      "sha256": "de563e3d788cf7db20aa318cab9dc48cecaae7c498ccda989fd2c037ff208a7c"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\p2p_rate_limit.rs",
+      "sha256": "36d964f408eb88a319df410410d4cf950e1610876427610fe2b28f618532e7bc"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\p2p_subnet_filter.rs",
+      "sha256": "1a055e778ed7dd8a392b02e72cabdcc93c797f7c36828bf3a53165f8bbbbe0cf"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\p2p.rs",
+      "sha256": "173b044388abc37468f9c5f404c3c338980981ea42b9639cd8d841f102d97285"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\package_admission.rs",
+      "sha256": "39719549b611620d76f7dae23571fa69dc7f9010f38b857a1dc1bc90b571a912"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\pbft_safety.rs",
+      "sha256": "bc45872098350dae57fad6e48d3a3ea2dbc40bc0550a038c89418b807636de7a"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\pending_pool.rs",
+      "sha256": "a7dc54fe9a5a891886190087109e3dc5330e15d42d72a0ca3c9a733632199af0"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\pidlock.rs",
+      "sha256": "ffa9f169994eba13b47322d539b9fe2105b3b22397454678d4c71e95fbf42ef1"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\proof.rs",
+      "sha256": "9ccca9c8bf5a856fe949817ccb3b78b72f6b4e0a29fe955436f17a0ea783bfcd"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\publisher_index.rs",
+      "sha256": "97f472a59eaa35f4e829f0dfafc8d56e9feeed2b054ec6aee76ddd3fbaa81c97"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\rate_limit.rs",
+      "sha256": "ca955698d9f1be510adb0c53bcfd4b543bfddcb018d5bb59af2d0d4642bbf678"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\revocation_gossip.rs",
+      "sha256": "d41a54580c0346b0c8b54f9818b7ca1553f24e3e49fdb9b5bbcb3c9da2b6aea1"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\state.rs",
+      "sha256": "f682f8a0dc8d0b38724f386de0c97fe357947bc649e50ecaae1ae371d468d6b4"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\sync.rs",
+      "sha256": "274c7deb0fb37fbc92a69faf3973b3eeeb550be8ca0004b695e4fff3281dcbe4"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\validator_pipeline.rs",
+      "sha256": "da1558c319d57ad2973f61f92bff7a5b4edbccafa30b20ac15f1b77f06a96f6d"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\validator_registry_gossip.rs",
+      "sha256": "0fa360582fb280e7462d9a085ca9875e99699b4c01ac9191f87455a3e5d79a4c"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\validator_set_history.rs",
+      "sha256": "563c6451c6aeeeea3baf2e6edc6fd427e11beb03e8b71cdd731bd51209e08fe6"
+    },
+    {
+      "path": "chain-registry/crates\\node\\src\\validator_set_sync.rs",
+      "sha256": "90fff048e64b1800c87d8770d78e4bb614dbcfadf6e92c25e86a1bf550ea36a2"
+    },
+    {
+      "path": "chain-registry/crates\\node\\tests\\authority_sidecar_launch.rs",
+      "sha256": "7cde27b44b18812e7f517d6f2de25ddbe17a8baa9c4f3067e15dc383a5a12e35"
+    },
+    {
+      "path": "chain-registry/crates\\node\\tests\\e2e.rs",
+      "sha256": "25ce24bc6a6697d0d69a30d85894a91ea0127e293a515c6465332f2b048816d6"
+    },
+    {
+      "path": "chain-registry/crates\\node\\tests\\high_throughput_stress_test.rs",
+      "sha256": "c3ea98e7730a56e6b3d23a19e511526992ce78ccadeeb6c3cd878dc10f049ba7"
+    },
+    {
+      "path": "chain-registry/crates\\node\\tests\\integration.rs",
+      "sha256": "c24ac1e0d034e934928240580132234130f862827854893054f8e857d422c687"
+    },
+    {
+      "path": "chain-registry/crates\\node\\tests\\multi_node_testnet_simulation.rs",
+      "sha256": "c9ae22eef8d8bd6e2ac8e709436e07bcce87aa45dd80a0d113850615e5616bcb"
+    },
+    {
+      "path": "chain-registry/crates\\relayer\\Cargo.toml",
+      "sha256": "8bd9afb1a998040e5a69f4ef98aabac7a73907223cd74b98498a5d6886e90de5"
+    },
+    {
+      "path": "chain-registry/crates\\relayer\\src\\main.rs",
+      "sha256": "776bac5963adf9c63cda03876e3d9fb4d211a033efe793818591e147175b100c"
+    },
+    {
+      "path": "chain-registry/crates\\resolver\\Cargo.toml",
+      "sha256": "68e5a03b85751c894bc3d8bbb811ff9ec157b39c86ffd942eff801afe05821c1"
+    },
+    {
+      "path": "chain-registry/crates\\resolver\\src\\attestation_verifier.rs",
+      "sha256": "c1a59d11eb26c5d2aef5602be9095f3b2d04ad77ed3bcf392750cc9c49a0e9a3"
+    },
+    {
+      "path": "chain-registry/crates\\resolver\\src\\cache.rs",
+      "sha256": "f3e69de0569f43cd5ee46254ee0f31aa8ed9ddb78a43d4aa126427eaca176c90"
+    },
+    {
+      "path": "chain-registry/crates\\resolver\\src\\chain_client.rs",
+      "sha256": "faaba85bf1fd9d117207b9c910534849bb48ba632ad8ec89f772ee19a29c8a5f"
+    },
+    {
+      "path": "chain-registry/crates\\resolver\\src\\downloader.rs",
+      "sha256": "4d165e3e55bd3c91a36e8c3a6cb49ad70cd23e7bbd5445e259e869034edc60cd"
+    },
+    {
+      "path": "chain-registry/crates\\resolver\\src\\freshness.rs",
+      "sha256": "3079ec51622d28bb4048660bdf8009d7ff62f6e64ddeaf0b7329feaad3cc489b"
+    },
+    {
+      "path": "chain-registry/crates\\resolver\\src\\install_gate.rs",
+      "sha256": "c1e996be095340ab3dc7153d42d9831da3cde2001a5c5f9039460f7e10aac9b3"
+    },
+    {
+      "path": "chain-registry/crates\\resolver\\src\\lib.rs",
+      "sha256": "79bbf04d6c531d1fe87c79503c0b0aafbfeb4d3fac0658c632eb71bb6d06a5b3"
+    },
+    {
+      "path": "chain-registry/crates\\resolver\\src\\light_client.rs",
+      "sha256": "f582000045b0b8d1ebab9e277c99c6d7769fbfbbb83a7282556ded66811f066e"
+    },
+    {
+      "path": "chain-registry/crates\\resolver\\src\\npm_manifest.rs",
+      "sha256": "38c5c500ced62660a6e9bca3f0e2b1dbd1de99bea03daaa3dbca150424c74216"
+    },
+    {
+      "path": "chain-registry/crates\\secrets\\Cargo.toml",
+      "sha256": "73ab91bb4ec639f178632f1d8755fa0653653d0087335f985718da9a8853e804"
+    },
+    {
+      "path": "chain-registry/crates\\secrets\\src\\env.rs",
+      "sha256": "f7dc5e19e6a6facff0df4de6ed5aadfc808dd7ad34b47a089271b0b81b738b78"
+    },
+    {
+      "path": "chain-registry/crates\\secrets\\src\\lib.rs",
+      "sha256": "c275095d954497c2029bb87002d34534344e3fdea6c94c7bf3469bc1b5c39f24"
+    },
+    {
+      "path": "chain-registry/crates\\secrets\\src\\vault.rs",
+      "sha256": "3d49ab35c30cbcebf600a61fb7f5ef8942fb11290ae9d26243bc3be7197f1a16"
+    },
+    {
+      "path": "chain-registry/crates\\threshold-encryption\\Cargo.toml",
+      "sha256": "d2e19f41e7758a61db2bcf2f9ddb143284311c0ce5fa55c71dbdb2fc67b9e353"
+    },
+    {
+      "path": "chain-registry/crates\\threshold-encryption\\src\\access_control.rs",
+      "sha256": "0abb4cf109f25b89d6152ba79058555249f4eb4d2194487121ab5c4f23253799"
+    },
+    {
+      "path": "chain-registry/crates\\threshold-encryption\\src\\distribution.rs",
+      "sha256": "5ef0b133991bc18fa95400a37c4c8472af1e0b1e8195a23d03d72b0cdccff63c"
+    },
+    {
+      "path": "chain-registry/crates\\threshold-encryption\\src\\lib.rs",
+      "sha256": "12f923b645a83a4ed3205b1d802ed9654f47fbe76e7101346495c8ee80422b38"
+    },
+    {
+      "path": "chain-registry/crates\\threshold-encryption\\src\\service.rs",
+      "sha256": "be643d1c1859a25934110805f87e87fea481d65132021df72dbecc179adc6ab5"
+    },
+    {
+      "path": "chain-registry/crates\\threshold-encryption\\src\\shamir.rs",
+      "sha256": "eea44aa38036b87b872654cace5f20c826017881d5992f1e95d8b8784beeb11c"
+    },
+    {
+      "path": "chain-registry/crates\\threshold-encryption\\tests\\e2e.rs",
+      "sha256": "aa222c6943275214f05a6783990c85abb736d30b83f973b4c384a4a3e83dd0a4"
+    },
+    {
+      "path": "chain-registry/crates\\validator\\Cargo.toml",
+      "sha256": "4d05a52ab39853c5aaa2a7ab0f9c31610066a2461244829145e99a73442a41e0"
+    },
+    {
+      "path": "chain-registry/crates\\validator\\data\\typosquat.json",
+      "sha256": "75566fdf99997a2bb7b5b974d3c451d0c77f15add8b3425925f2ba31048b1c9f"
+    },
+    {
+      "path": "chain-registry/crates\\validator\\src\\bundle.rs",
+      "sha256": "63c73a701c22a0c87f0592e07b7e5c3d1fa613c2ef2b0614bd068dcffa300ff2"
+    },
+    {
+      "path": "chain-registry/crates\\validator\\src\\diff.rs",
+      "sha256": "aaeed54b6b568c522d9e2360ac34380900485d34b9834a139ff0dc57028442f3"
+    },
+    {
+      "path": "chain-registry/crates\\validator\\src\\intelligence\\mod.rs",
+      "sha256": "934d69ce67ec9a9f6995d376bf47ddedcc93e101530a7cb0e1b0b8a0e470f5ee"
+    },
+    {
+      "path": "chain-registry/crates\\validator\\src\\lib.rs",
+      "sha256": "0061909e3ea9346d4b660c169383d3163d5cdeb99bec59d4fcd18dbcddbdeb6d"
+    },
+    {
+      "path": "chain-registry/crates\\validator\\src\\llm.rs",
+      "sha256": "b3317ff72eefbc4797fdead271172ec94cae02af124bcde3fe3b4d73b3802e39"
+    },
+    {
+      "path": "chain-registry/crates\\validator\\src\\llm\\cache.rs",
+      "sha256": "07bae6972cd4c6c575a1401bff5d274b6de4e3ad36223e5c37530c5e6f3aae3a"
+    },
+    {
+      "path": "chain-registry/crates\\validator\\src\\llm\\context.rs",
+      "sha256": "5e2496e29c007f4a06a3e0d77a0f57d769a2e451a41bb03210ab53ade53b42ed"
+    },
+    {
+      "path": "chain-registry/crates\\validator\\src\\llm\\escalation.rs",
+      "sha256": "2ec8313766807b0e80db73fdaf03a22450d61b88330ad25ba6ba6b3b16183a9a"
+    },
+    {
+      "path": "chain-registry/crates\\validator\\src\\llm\\reviewer.rs",
+      "sha256": "9bd068cdce8e5b2264977e19194c530a3f1fc9b562f1484ea46a8c1f1ff98cbc"
+    },
+    {
+      "path": "chain-registry/crates\\validator\\src\\pgp.rs",
+      "sha256": "0b0b96c2b4e0d89337199504afe541af573340556722cd89382d51290be800c4"
+    },
+    {
+      "path": "chain-registry/crates\\validator\\src\\report.rs",
+      "sha256": "b1b6a679cdad6777bf01443054c11aa3002947944e9953e604b8f01e893b2c12"
+    },
+    {
+      "path": "chain-registry/crates\\validator\\src\\reputation.rs",
+      "sha256": "37ca74b7538692f4920d748a0ed5a582dc4fae30982376158ae280db64a9a3a4"
+    },
+    {
+      "path": "chain-registry/crates\\validator\\src\\risk.rs",
+      "sha256": "eb1e7da8b3767fce2dbec4682aca7251b784715b6e5b5d7cc84c1a3feed42daf"
+    },
+    {
+      "path": "chain-registry/crates\\validator\\src\\sandbox.rs",
+      "sha256": "c6bdc071312dd52a87d17a7963db95e72cd9ba76a1ca81579fc4d57da32f18c0"
+    },
+    {
+      "path": "chain-registry/crates\\validator\\src\\static_analysis.rs",
+      "sha256": "7962d9f874be7537d898f1cfd2b7621392c802620ce2d74ab43191ce14eac6a3"
+    },
+    {
+      "path": "chain-registry/crates\\validator\\src\\typosquat.rs",
+      "sha256": "4292da73f68be9d91ba513a3baa22925e8d38cf218fb64cbda7bb6d76558b193"
+    },
+    {
+      "path": "chain-registry/crates\\validator\\src\\wasm_sandbox.rs",
+      "sha256": "a3ef907381a703254537652aa05005eac0636c51375a28ca24833e36732f7d58"
+    },
+    {
+      "path": "chain-registry/crates\\validator\\tests\\malicious_fixtures.rs",
+      "sha256": "b06f88462f9845cc914168a77fed7139006d116317f7331095f048f59e9116a6"
+    },
+    {
+      "path": "chain-registry/crates\\wasm-sandbox\\Cargo.toml",
+      "sha256": "7d1b2c151bb031b86eea14d51b9d765e68fc5cce9c3708ca4038ee7463b43cfd"
+    },
+    {
+      "path": "chain-registry/crates\\wasm-sandbox\\src\\capabilities.rs",
+      "sha256": "751108e7a0bf2d5ae62ae8dcee2d1018705c7002738b205b9f64645d148c66a3"
+    },
+    {
+      "path": "chain-registry/crates\\wasm-sandbox\\src\\lib.rs",
+      "sha256": "34531598e79a6b3cfad9a2954395f629909035dd1d29e35064b71b663ee662b7"
+    },
+    {
+      "path": "chain-registry/crates\\wasm-sandbox\\src\\limits.rs",
+      "sha256": "bad2fbaac33adb73f24169170dcefce1018cb461d1e6cb3428c1c3421f4a1869"
+    },
+    {
+      "path": "chain-registry/crates\\zk-validator\\Cargo.toml",
+      "sha256": "26ebab0ee3753b2c9ad6c5308cc89c479f3d980b33bf335eb6654a57f8588d30"
+    },
+    {
+      "path": "chain-registry/crates\\zk-validator\\src\\batch.rs",
+      "sha256": "4fccf215824f0a2a8cbc29e44926785e0b07ef33ff0c464289e2b2b640ef1409"
+    },
+    {
+      "path": "chain-registry/crates\\zk-validator\\src\\circuits.rs",
+      "sha256": "ab626f97e0e2adef5571c198485cf74ed4bb164ac229185d42d3c6ac933ce425"
+    },
+    {
+      "path": "chain-registry/crates\\zk-validator\\src\\constraints.rs",
+      "sha256": "9069dda5407aed9d1393cf816ab409fe188e52b37863dd4331acebd051c69224"
+    },
+    {
+      "path": "chain-registry/crates\\zk-validator\\src\\lib.rs",
+      "sha256": "0ad99dc4f1123e3c54974c2fe37615296263b8fc4cfa8697bc38ffb8cae326b2"
+    },
+    {
+      "path": "chain-registry/crates\\zk-validator\\src\\slashing.rs",
+      "sha256": "f2b548745349e56cd8dd6465b8771cfa0a5dbd4bd0d486612f3f889791cc83a3"
+    }
+  ]
+}

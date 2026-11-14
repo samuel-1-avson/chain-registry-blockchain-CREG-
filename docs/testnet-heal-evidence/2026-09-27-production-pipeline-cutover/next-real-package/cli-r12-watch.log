@@ -1,0 +1,17 @@
+→ Connecting to event stream at http://host.docker.internal:18080/v1/public/events
+→ Filter: pkg:escape-string-regexp@5.0.0
+────────────────────────────────────────────────────────────
+00:24:21 ↑ SUBMITTED npm:escape-string-regexp@5.0.0 by 863906af03a385de...
+00:24:23 ◈ VOTE      ✓ validator-1 on npm:escape-string-regexp@5.0.0
+00:24:23 ◈ VOTE      ✓ validator-3 on npm:escape-string-regexp@5.0.0
+00:24:24 ◈ VOTE      ✓ validator-2 on npm:escape-string-regexp@5.0.0
+00:24:26 ◈ VOTE      ✓ validator-4 on npm:escape-string-regexp@5.0.0
+00:39:02 ✓ VERIFIED  npm:escape-string-regexp@5.0.0 block 27a3d44c2b58b3cb6ced5b1e118108ba762f3d3a5ef30ed5da4236faf63d19bb validators 3
+01:11:41 ⊘ REVOKED   npm:escape-string-regexp@5.0.0 — Phase C live revocation after shared publication
+✗ Stream error: request or response body error: error reading a body from connection: unexpected EOF during chunk size line
+↻ Reconnecting in 1s... (1/10)
+✗ Connection failed: error sending request for url (http://host.docker.internal:18080/v1/public/events): operation was canceled: connection was not ready
+↻ Reconnecting in 2s... (2/10)
+✗ Connection failed: error sending request for url (http://host.docker.internal:18080/v1/public/events): connection closed before message completed
+↻ Reconnecting in 4s... (3/10)
+time="2026-09-28T07:08:36Z" level=error msg="error waiting for container: unexpected EOF"

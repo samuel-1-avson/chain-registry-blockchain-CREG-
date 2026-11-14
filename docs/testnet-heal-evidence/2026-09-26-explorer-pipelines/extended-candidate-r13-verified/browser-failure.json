@@ -1,0 +1,21 @@
+{
+  "error": "ENOSPC: no space left on device, write",
+  "records": [
+    {
+      "route": "/packages",
+      "main": "Packages\n1 total\nCANONICAL\tVERSION\tPUBLISHER\tAGE\nnpm:is-number@7.0.0\t7.0.0\t\n863906…047d\n⧉\n\t2h ago",
+      "l1Links": []
+    }
+  ],
+  "errors": [],
+  "failedRequests": [
+    {
+      "url": "http://127.0.0.1:3007/v1/public/chain/stats",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "url": "http://127.0.0.1:3007/v1/public/packages?limit=20&offset=0",
+      "error": "net::ERR_ABORTED"
+    }
+  ]
+}

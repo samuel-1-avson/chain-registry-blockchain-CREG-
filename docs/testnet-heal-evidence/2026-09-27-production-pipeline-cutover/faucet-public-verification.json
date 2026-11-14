@@ -1,0 +1,28 @@
+{
+  "timestamp_utc": "2026-09-27T20:20:02Z",
+  "status": "public_promoted_verified",
+  "root_http_status": 200,
+  "health": {
+    "faucet": "online",
+    "faucet_balance": "9000000000000000000000",
+    "faucet_native_balance": "78819664051081092",
+    "mode": "real",
+    "native_drips_available": true,
+    "status": "healthy",
+    "token_drips_available": true
+  },
+  "network": {
+    "chain_id": 11155111,
+    "chain_name": "CREG Testnet (Sepolia)",
+    "currency": "ETH",
+    "explorer_url": "https://explorer.testnet.cregnet.dev",
+    "gas_note": "Gas on EVM testnets is paid in the native testnet ETH for that chain, not in ERC-20 tokens.",
+    "native_currency_symbol": "ETH",
+    "rpc_url": "https://api.testnet.cregnet.dev/sepolia",
+    "token_contract": "0xbC2a72107C6765364D0A822a88A6e6C61f30EAa6",
+    "token_symbol": "tCREG"
+  },
+  "real_challenge_issued": true,
+  "prior_container_preserved": true,
+  "chain_cutover": false
+}

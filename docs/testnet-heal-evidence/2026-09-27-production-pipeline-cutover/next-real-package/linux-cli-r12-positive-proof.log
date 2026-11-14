@@ -1,0 +1,8 @@
+
+✗ Error: Phase C verification requires CREG_CHAIN_SPEC_URL or CREG_CHAIN_SPEC_PATH
+
+Need help?
+  • Run the setup wizard: creg init
+  • Check system health: creg doctor
+  • View documentation: https://docs.creg.dev
+  • Get command help: creg --help

@@ -1,0 +1,34 @@
+============================================================
+   Chain Registry (CREG) -- Windows Remote Installer        
+============================================================
+Fetching CREG v0.1.0-testnet-r25 for Windows (x86_64)...
+Connecting to CREG Testnet CDN (https://spec.testnet.cregnet.dev/phase-c/r7/release-r25-windows-fixed/dist/chain-registry-v0.1.0-testnet-r25-windows-amd64.zip)...
+[OK] Downloaded package from CREG Testnet CDN
+[OK] SHA-256 integrity verified: 56bd4b75517ba2a99bb367131a76212f5606ef0724507e67927e452856b845e0
+Validating staged binary and signed specification...
+Syncing testnet chain specification...
+✓ Ed25519 signature valid (C:\Users\samue\AppData\Local\Temp\creg-install-55e6f7600b83476a8c7cfbcdf9c5ceb8\chain-spec.sepolia.json.sig)
+✓ Spec is valid
+  chain_id:      creg-phase-c-testnet-2026-09-26-r7
+  network:       Testnet
+  genesis_hash:  0x1852b9a86dd3b53e7b2de4a774723a4fe48e862f9c61d14e5917b42b21055234
+  block_zero:    0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4
+  encoding:      Some("creg-sorted-json-v1")
+  validators:    4
+  l1.chain_id:   11155111
+
+============================================================
+   Chain Registry (CREG) Installation Complete!             
+============================================================
+Binary Location : E:\creg-phase-c-build-20260927\cli-r25-canonical-installer-check\bin\creg.exe
+Chain Spec      : E:\creg-phase-c-build-20260927\cli-r25-canonical-installer-check\config\chain-spec.sepolia.json
+Active Network  : https://api.testnet.cregnet.dev
+
+Installed Version : creg 0.1.0-testnet-r25
+
+Next steps:
+  creg --help                   View available commands
+  creg blocks                   View live blockchain blocks on testnet
+  creg keygen                   Create an Ed25519 identity keypair
+  creg init                     Interactive setup wizard
+============================================================

@@ -1,0 +1,76 @@
+{
+  "capturedAt": "2026-09-28T00:36:40.674Z",
+  "connections": [
+    {
+      "url": "http://127.0.0.1:3008/v1/public/events",
+      "opened": true,
+      "errors": 0
+    }
+  ],
+  "events": [
+    {
+      "type": "package_submitted",
+      "data": {
+        "kind": "package_submitted",
+        "ts": "2026-09-28T00:24:21.765980838+00:00",
+        "payload": {
+          "canonical": "npm:escape-string-regexp@5.0.0",
+          "publisher_pubkey": "863906af03a385de"
+        }
+      },
+      "receivedAt": "2026-09-28T00:24:21.772Z"
+    },
+    {
+      "type": "validator_voted",
+      "data": {
+        "kind": "validator_voted",
+        "ts": "2026-09-28T00:24:23.251159225+00:00",
+        "payload": {
+          "validator_id": "validator-1",
+          "canonical": "npm:escape-string-regexp@5.0.0",
+          "approved": true
+        }
+      },
+      "receivedAt": "2026-09-28T00:24:23.252Z"
+    },
+    {
+      "type": "validator_voted",
+      "data": {
+        "kind": "validator_voted",
+        "ts": "2026-09-28T00:24:23.735902672+00:00",
+        "payload": {
+          "validator_id": "validator-3",
+          "canonical": "npm:escape-string-regexp@5.0.0",
+          "approved": true
+        }
+      },
+      "receivedAt": "2026-09-28T00:24:23.736Z"
+    },
+    {
+      "type": "validator_voted",
+      "data": {
+        "kind": "validator_voted",
+        "ts": "2026-09-28T00:24:24.159846032+00:00",
+        "payload": {
+          "validator_id": "validator-2",
+          "canonical": "npm:escape-string-regexp@5.0.0",
+          "approved": true
+        }
+      },
+      "receivedAt": "2026-09-28T00:24:24.160Z"
+    },
+    {
+      "type": "validator_voted",
+      "data": {
+        "kind": "validator_voted",
+        "ts": "2026-09-28T00:24:26.346985416+00:00",
+        "payload": {
+          "validator_id": "validator-4",
+          "canonical": "npm:escape-string-regexp@5.0.0",
+          "approved": true
+        }
+      },
+      "receivedAt": "2026-09-28T00:24:26.347Z"
+    }
+  ]
+}

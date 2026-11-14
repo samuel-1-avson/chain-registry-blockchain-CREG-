@@ -1,0 +1,5 @@
+
+  → Light-client verification for npm:npm:kleur@4.1.5
+  · Node:       http://127.0.0.1:3025
+  · Checkpoint: height=0
+{"canonical":"npm:npm:kleur@4.1.5","verified":false,"status":"Unknown"}

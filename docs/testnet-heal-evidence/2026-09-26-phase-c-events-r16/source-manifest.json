@@ -1,0 +1,58 @@
+{
+  "captured_at_utc": "2026-09-26T18:25:35.7631903Z",
+  "image_tag": "creg-node:phase-c-secure-r16-committed-events",
+  "builder_image_id": "sha256:6e35c9b5e6ce808240b5fdc00633aca51e82a1f7cee47da065e51e21ace69d89",
+  "runtime_base_id": "sha256:f0b693dc567fc3430f22db881581c55a253e75c8f84a5a0f2d6a82d4460d0736",
+  "base_source_files_compared": 222,
+  "overlay_files": 9,
+  "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+  "baseline_tip_height": 5,
+  "baseline_tip_hash": "daab438828a678aee3aa2eebf041f5147bc6f76fed837a207e6a1f4747d427cf",
+  "consensus_or_storage_schema_change": false,
+  "compilation": "passed",
+  "real_event_acceptance": "pending",
+  "public_cutover": false,
+  "files": [
+    {
+      "path": "crates/cli/src/watch.rs",
+      "sha256": "d432534da57d8aca05747e6aad670ca05acce67738d2e55a2b2bef66b9b115de"
+    },
+    {
+      "path": "crates/node/src/api.rs",
+      "sha256": "326b985f3539e1646b131d9757a27ae88e7f0364d198f2a572654d5b12a86005"
+    },
+    {
+      "path": "crates/node/src/block_producer.rs",
+      "sha256": "9f3c0eadaa609f83d1befc409a7b352e77820506167288dc039898c58ec9cfd6"
+    },
+    {
+      "path": "crates/node/src/chain_store.rs",
+      "sha256": "ebb5282d0c2ea52b1004516e0050ba90c6328d520a6719ad0ac429a82e52d014"
+    },
+    {
+      "path": "crates/node/src/events.rs",
+      "sha256": "5879616dfb02c456239d44c8b360d4db04260deaf6eabbb2a64aa2308f4bf0ed"
+    },
+    {
+      "path": "crates/node/src/main.rs",
+      "sha256": "cfdc8d3b2b8bd8865e4a481506f07e090cf2746557e60fa0e7a486172f3915e1"
+    },
+    {
+      "path": "crates/node/src/p2p.rs",
+      "sha256": "c49f5b23db149618cfbf51cb8e1ff1ab4dd77855d08390e76bc7aa40cc5eb27d"
+    },
+    {
+      "path": "crates/node/src/package_admission.rs",
+      "sha256": "39719549b611620d76f7dae23571fa69dc7f9010f38b857a1dc1bc90b571a912"
+    },
+    {
+      "path": "crates/node/src/state.rs",
+      "sha256": "1cd81cb09e88b96ab7d947f7ffc9b9c1304a101ec0486941c1f9d0412d89cf7a"
+    }
+  ],
+  "dockerfile_sha256": "de9b556b34b312cfe7bfeb948ce9445b0ede5d55c8b17509018e0f4403189d9a",
+  "builder_recovery": "Frozen full-source rebuild after deletion of the original builder",
+  "cli_consensus_encoding": "creg-sorted-json-v1; signed R7 spec required for proof validation",
+  "original_deleted_builder_image_id": "sha256:5f5864652afc9d1791ae7c125b632fd9e8d342fca76a14e44be4a4e4769425e7",
+  "compiled_at_utc": "2026-09-26T18:54:46.2903963Z"
+}

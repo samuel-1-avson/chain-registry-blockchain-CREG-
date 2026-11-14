@@ -1,0 +1,14 @@
+{
+  "captured_at_utc": "2026-09-28T06:45:42Z",
+  "status": "passed",
+  "checks": {
+    "signed_r7_o1": true,
+    "real_history": true,
+    "private_explorer_same_tip": true
+  },
+  "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+  "height": 18,
+  "hash": "ec64471b8f9c58eb2d9b958db765a98871cb444e032143d313d65b3ab80cd76c",
+  "history_samples": 61,
+  "public_chain_cutover": false
+}

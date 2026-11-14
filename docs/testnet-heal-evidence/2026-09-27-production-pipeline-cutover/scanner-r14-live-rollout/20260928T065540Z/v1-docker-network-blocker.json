@@ -1,0 +1,36 @@
+{
+  "schema": "creg-v1-docker-egress-blocker-v1",
+  "captured_at_utc": "2026-09-28T07:05:41.2526788Z",
+  "node_id": "validator-1",
+  "health": "ok",
+  "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+  "height": 18,
+  "tip_hash": "ec64471b8f9c58eb2d9b958db765a98871cb444e032143d313d65b3ab80cd76c",
+  "active_validators": 4,
+  "validator_count": 4,
+  "peer_count": 0,
+  "scanner_profile": "8c7f011ab71a9a695ce1364e9958a2906f02645849c3567fc5691206a93c296e",
+  "queues": {
+    "pending_txs": 0.0,
+    "durable_work": 0.0,
+    "ready_work": 0.0,
+    "forced_inclusion": 0.0
+  },
+  "pbft_clear": true,
+  "persistent_data": {
+    "chain_store": true,
+    "signer_store": true,
+    "p2p_identity": true
+  },
+  "docker_restart_policy": "unless-stopped per reviewed R13 local rollout command",
+  "network_diagnostics": {
+    "windows_host_to_validator3_p2p_9000": true,
+    "windows_host_to_observer4_p2p_9000": true,
+    "v1_container_namespace_to_validator3_p2p_9000": false,
+    "v1_container_namespace_to_observer4_p2p_9000": false,
+    "v1_container_namespace_to_public_1_1_1_1_443": false,
+    "v1_container_p2p_listener_9000": true,
+    "docker_named_pipe_engine_api_unresponsive": true
+  },
+  "cloud_validator_precheck": "V2,V3,V4 passed; V1 peer_connected failed"
+}

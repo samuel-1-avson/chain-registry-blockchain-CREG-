@@ -1,0 +1,16 @@
+{
+  "capturedAt": "2026-09-28T08:49:49.089Z",
+  "connections": [
+    {
+      "url": "http://127.0.0.1:3008/v1/public/events",
+      "opened": true,
+      "errors": 1
+    },
+    {
+      "url": "http://127.0.0.1:3008/v1/public/events",
+      "opened": false,
+      "errors": 0
+    }
+  ],
+  "events": []
+}

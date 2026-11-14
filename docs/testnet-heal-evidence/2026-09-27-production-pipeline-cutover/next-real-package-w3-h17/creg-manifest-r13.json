@@ -1,0 +1,1 @@
+{"allowed_network_hosts":[],"allowed_fs_writes":[],"spawns_processes":false,"description":"Pure argument flag helper; no network, filesystem writes, or child processes."}

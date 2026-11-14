@@ -1,0 +1,9 @@
+v1: ready=True; recovery_clear=False; failed checks=
+v2: ready=True; recovery_clear=True; failed checks=
+v3: ready=True; recovery_clear=True; failed checks=
+v4: ready=True; recovery_clear=True; failed checks=
+o1: ready=True; recovery_clear=True; failed checks=
+o2: ready=True; recovery_clear=True; failed checks=
+o3: ready=True; recovery_clear=True; failed checks=
+o4: ready=True; recovery_clear=True; failed checks=
+Fleet evidence saved; all eight ready=True; all eight recovery clear=False

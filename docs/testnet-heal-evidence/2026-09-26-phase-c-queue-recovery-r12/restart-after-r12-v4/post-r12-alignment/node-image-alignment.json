@@ -1,0 +1,379 @@
+{
+  "schema": "creg-real-r12-fleet-image-alignment-v1",
+  "captured_at_utc": "2026-09-26T17:12:52.0168186Z",
+  "image_tag": "creg-node:phase-c-secure-r12-bounded-l1-retry",
+  "accepted_image_ids": [
+    "sha256:e4790446f65de6e1404200bfe8d3a2e444cb80a997a16cdef969da2bfd62e2dd",
+    "sha256:f0b693dc567fc3430f22db881581c55a253e75c8f84a5a0f2d6a82d4460d0736"
+  ],
+  "all_eight_aligned": true,
+  "public_cutover": false,
+  "nodes": [
+    {
+      "slot": "v1",
+      "role": "validator",
+      "state": "running",
+      "container_image_id": "sha256:f0b693dc567fc3430f22db881581c55a253e75c8f84a5a0f2d6a82d4460d0736",
+      "tag_image_id": "sha256:f0b693dc567fc3430f22db881581c55a253e75c8f84a5a0f2d6a82d4460d0736",
+      "configured_image": "creg-node:phase-c-secure-r12-bounded-l1-retry",
+      "mounts": [
+        {
+          "source": "/var/run/docker.sock",
+          "destination": "/var/run/docker.sock",
+          "rw": true
+        },
+        {
+          "source": "C:\\Users\\samue\\.creg-phase-c\\r7\\v1\\data",
+          "destination": "/data",
+          "rw": true
+        },
+        {
+          "source": "C:\\Users\\samue\\CREG-backups\\phase-c-scanner\\bundle-r9",
+          "destination": "/scanner",
+          "rw": false
+        }
+      ],
+      "p2p_identity_sha256": "a4569f0bab8632764dd080d25f1dc830082b760b71b58e487374efee4b7f82d6",
+      "signing_journal_present": true,
+      "preserved_prior_containers": [
+        "creg-phase-c-r7-v1-r13-preserved"
+      ],
+      "chain": {
+        "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+        "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+        "tip_height": 4,
+        "tip_hash": "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0",
+        "peer_count": 2
+      },
+      "checks": {
+        "container_running": true,
+        "same_r12_image_family": true,
+        "persistent_data_mounted": true,
+        "scanner_mounted_readonly": true,
+        "p2p_identity_present": true,
+        "preserved_previous_container": true,
+        "signer_journal_present": true,
+        "chain_tip_retained": true
+      },
+      "passed": true
+    },
+    {
+      "slot": "v2",
+      "role": "validator",
+      "state": "running",
+      "container_image_id": "sha256:f0b693dc567fc3430f22db881581c55a253e75c8f84a5a0f2d6a82d4460d0736",
+      "tag_image_id": "sha256:f0b693dc567fc3430f22db881581c55a253e75c8f84a5a0f2d6a82d4460d0736",
+      "configured_image": "creg-node:phase-c-secure-r12-bounded-l1-retry",
+      "mounts": [
+        {
+          "source": "/var/lib/creg/phase-c-r7/data",
+          "destination": "/data",
+          "rw": true
+        },
+        {
+          "source": "/var/lib/creg/phase-c-r7/scanner",
+          "destination": "/scanner",
+          "rw": false
+        },
+        {
+          "source": "/var/run/docker.sock",
+          "destination": "/var/run/docker.sock",
+          "rw": true
+        }
+      ],
+      "p2p_identity_sha256": "5fb2adf194eeb1b1b505db99b5d8c5b51b774ee2f186550ae2992ecfc9efaf54",
+      "signing_journal_present": true,
+      "preserved_prior_containers": [
+        "creg-phase-c-r7-v2-r9-preserved"
+      ],
+      "chain": {
+        "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+        "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+        "tip_height": 4,
+        "tip_hash": "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0",
+        "peer_count": 2
+      },
+      "checks": {
+        "container_running": true,
+        "same_r12_image_family": true,
+        "persistent_data_mounted": true,
+        "scanner_mounted_readonly": true,
+        "p2p_identity_present": true,
+        "preserved_previous_container": true,
+        "signer_journal_present": true,
+        "chain_tip_retained": true
+      },
+      "passed": true
+    },
+    {
+      "slot": "v3",
+      "role": "validator",
+      "state": "running",
+      "container_image_id": "sha256:e4790446f65de6e1404200bfe8d3a2e444cb80a997a16cdef969da2bfd62e2dd",
+      "tag_image_id": "sha256:e4790446f65de6e1404200bfe8d3a2e444cb80a997a16cdef969da2bfd62e2dd",
+      "configured_image": "creg-node:phase-c-secure-r12-bounded-l1-retry",
+      "mounts": [
+        {
+          "source": "/var/run/docker.sock",
+          "destination": "/var/run/docker.sock",
+          "rw": true
+        },
+        {
+          "source": "/var/lib/creg/phase-c-r7/data",
+          "destination": "/data",
+          "rw": true
+        },
+        {
+          "source": "/var/lib/creg/phase-c-r7/scanner",
+          "destination": "/scanner",
+          "rw": false
+        }
+      ],
+      "p2p_identity_sha256": "51ecad0f0cecc46cf734e7593e638c93289e58bcff44756ba7693f94b8f53005",
+      "signing_journal_present": true,
+      "preserved_prior_containers": [
+        "creg-phase-c-r7-v3-r10-preserved",
+        "creg-phase-c-r7-v3-r9-preserved"
+      ],
+      "chain": {
+        "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+        "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+        "tip_height": 4,
+        "tip_hash": "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0",
+        "peer_count": 7
+      },
+      "checks": {
+        "container_running": true,
+        "same_r12_image_family": true,
+        "persistent_data_mounted": true,
+        "scanner_mounted_readonly": true,
+        "p2p_identity_present": true,
+        "preserved_previous_container": true,
+        "signer_journal_present": true,
+        "chain_tip_retained": true
+      },
+      "passed": true
+    },
+    {
+      "slot": "v4",
+      "role": "validator",
+      "state": "running",
+      "container_image_id": "sha256:e4790446f65de6e1404200bfe8d3a2e444cb80a997a16cdef969da2bfd62e2dd",
+      "tag_image_id": "sha256:e4790446f65de6e1404200bfe8d3a2e444cb80a997a16cdef969da2bfd62e2dd",
+      "configured_image": "creg-node:phase-c-secure-r12-bounded-l1-retry",
+      "mounts": [
+        {
+          "source": "/var/lib/creg/phase-c-r7/data",
+          "destination": "/data",
+          "rw": true
+        },
+        {
+          "source": "/var/lib/creg/phase-c-r7/scanner",
+          "destination": "/scanner",
+          "rw": false
+        },
+        {
+          "source": "/var/run/docker.sock",
+          "destination": "/var/run/docker.sock",
+          "rw": true
+        }
+      ],
+      "p2p_identity_sha256": "c287fdb093e8f8a2458ad36206ee50c3918cbb41b4e5c5795f5f77d834f8f575",
+      "signing_journal_present": true,
+      "preserved_prior_containers": [
+        "creg-phase-c-r7-v4-r11-preserved",
+        "creg-phase-c-r7-v4-r9-preserved"
+      ],
+      "chain": {
+        "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+        "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+        "tip_height": 4,
+        "tip_hash": "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0",
+        "peer_count": 2
+      },
+      "checks": {
+        "container_running": true,
+        "same_r12_image_family": true,
+        "persistent_data_mounted": true,
+        "scanner_mounted_readonly": true,
+        "p2p_identity_present": true,
+        "preserved_previous_container": true,
+        "signer_journal_present": true,
+        "chain_tip_retained": true
+      },
+      "passed": true
+    },
+    {
+      "slot": "o1",
+      "role": "observer",
+      "state": "running",
+      "container_image_id": "sha256:f0b693dc567fc3430f22db881581c55a253e75c8f84a5a0f2d6a82d4460d0736",
+      "tag_image_id": "sha256:f0b693dc567fc3430f22db881581c55a253e75c8f84a5a0f2d6a82d4460d0736",
+      "configured_image": "creg-node:phase-c-secure-r12-bounded-l1-retry",
+      "mounts": [
+        {
+          "source": "/var/lib/creg/phase-c-r7/data",
+          "destination": "/data",
+          "rw": true
+        },
+        {
+          "source": "/var/lib/creg/phase-c-r7/scanner",
+          "destination": "/scanner",
+          "rw": false
+        }
+      ],
+      "p2p_identity_sha256": "0ffe4b0e2f482e649c7e8e4619e83bade5ca653025514bb7432c47731f362b6d",
+      "signing_journal_present": null,
+      "preserved_prior_containers": [
+        "creg-phase-c-r7-o1-r9-preserved"
+      ],
+      "chain": {
+        "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+        "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+        "tip_height": 4,
+        "tip_hash": "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0",
+        "peer_count": 2
+      },
+      "checks": {
+        "container_running": true,
+        "same_r12_image_family": true,
+        "persistent_data_mounted": true,
+        "scanner_mounted_readonly": true,
+        "p2p_identity_present": true,
+        "preserved_previous_container": true,
+        "signer_journal_present": true,
+        "chain_tip_retained": true
+      },
+      "passed": true
+    },
+    {
+      "slot": "o2",
+      "role": "observer",
+      "state": "running",
+      "container_image_id": "sha256:f0b693dc567fc3430f22db881581c55a253e75c8f84a5a0f2d6a82d4460d0736",
+      "tag_image_id": "sha256:f0b693dc567fc3430f22db881581c55a253e75c8f84a5a0f2d6a82d4460d0736",
+      "configured_image": "creg-node:phase-c-secure-r12-bounded-l1-retry",
+      "mounts": [
+        {
+          "source": "/var/lib/creg/phase-c-r7/data",
+          "destination": "/data",
+          "rw": true
+        },
+        {
+          "source": "/var/lib/creg/phase-c-r7/scanner",
+          "destination": "/scanner",
+          "rw": false
+        }
+      ],
+      "p2p_identity_sha256": "602c79f9b4fd0d1b63c9a59b5a44fa91c1a3f03e470a78f5203b80065745e177",
+      "signing_journal_present": null,
+      "preserved_prior_containers": [
+        "creg-phase-c-r7-o2-r9-preserved"
+      ],
+      "chain": {
+        "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+        "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+        "tip_height": 4,
+        "tip_hash": "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0",
+        "peer_count": 2
+      },
+      "checks": {
+        "container_running": true,
+        "same_r12_image_family": true,
+        "persistent_data_mounted": true,
+        "scanner_mounted_readonly": true,
+        "p2p_identity_present": true,
+        "preserved_previous_container": true,
+        "signer_journal_present": true,
+        "chain_tip_retained": true
+      },
+      "passed": true
+    },
+    {
+      "slot": "o3",
+      "role": "observer",
+      "state": "running",
+      "container_image_id": "sha256:e4790446f65de6e1404200bfe8d3a2e444cb80a997a16cdef969da2bfd62e2dd",
+      "tag_image_id": "sha256:e4790446f65de6e1404200bfe8d3a2e444cb80a997a16cdef969da2bfd62e2dd",
+      "configured_image": "creg-node:phase-c-secure-r12-bounded-l1-retry",
+      "mounts": [
+        {
+          "source": "/var/lib/creg/phase-c-r7/scanner",
+          "destination": "/scanner",
+          "rw": false
+        },
+        {
+          "source": "/var/lib/creg/phase-c-r7/data",
+          "destination": "/data",
+          "rw": true
+        }
+      ],
+      "p2p_identity_sha256": "c6b66fdb73711239545b7736d1bbcbdc9593325cfe3e33d7809f2824b6868e6f",
+      "signing_journal_present": null,
+      "preserved_prior_containers": [
+        "creg-phase-c-r7-o3-r9-preserved"
+      ],
+      "chain": {
+        "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+        "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+        "tip_height": 4,
+        "tip_hash": "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0",
+        "peer_count": 2
+      },
+      "checks": {
+        "container_running": true,
+        "same_r12_image_family": true,
+        "persistent_data_mounted": true,
+        "scanner_mounted_readonly": true,
+        "p2p_identity_present": true,
+        "preserved_previous_container": true,
+        "signer_journal_present": true,
+        "chain_tip_retained": true
+      },
+      "passed": true
+    },
+    {
+      "slot": "o4",
+      "role": "observer",
+      "state": "running",
+      "container_image_id": "sha256:e4790446f65de6e1404200bfe8d3a2e444cb80a997a16cdef969da2bfd62e2dd",
+      "tag_image_id": "sha256:e4790446f65de6e1404200bfe8d3a2e444cb80a997a16cdef969da2bfd62e2dd",
+      "configured_image": "creg-node:phase-c-secure-r12-bounded-l1-retry",
+      "mounts": [
+        {
+          "source": "/var/lib/creg/phase-c-r7/data",
+          "destination": "/data",
+          "rw": true
+        },
+        {
+          "source": "/var/lib/creg/phase-c-r7/scanner",
+          "destination": "/scanner",
+          "rw": false
+        }
+      ],
+      "p2p_identity_sha256": "d51f6d4f8e315133781df2d2356f93889da2af0c6cb3cc91e8e753da1b45d40e",
+      "signing_journal_present": null,
+      "preserved_prior_containers": [
+        "creg-phase-c-r7-o4-r9-preserved"
+      ],
+      "chain": {
+        "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+        "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+        "tip_height": 4,
+        "tip_hash": "0797e80bf476d30b47fe2331e3274e55dc0c37d35ffbe6420001945bffbf47e0",
+        "peer_count": 7
+      },
+      "checks": {
+        "container_running": true,
+        "same_r12_image_family": true,
+        "persistent_data_mounted": true,
+        "scanner_mounted_readonly": true,
+        "p2p_identity_present": true,
+        "preserved_previous_container": true,
+        "signer_journal_present": true,
+        "chain_tip_retained": true
+      },
+      "passed": true
+    }
+  ]
+}

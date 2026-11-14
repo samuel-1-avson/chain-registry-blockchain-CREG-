@@ -1,0 +1,9 @@
+✓ Ed25519 signature valid (/review/chain-spec.json.sig)
+✓ Spec is valid
+  chain_id:      creg-phase-c-testnet-2026-09-26-r7
+  network:       Testnet
+  genesis_hash:  0x1852b9a86dd3b53e7b2de4a774723a4fe48e862f9c61d14e5917b42b21055234
+  block_zero:    0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4
+  encoding:      Some("creg-sorted-json-v1")
+  validators:    4
+  l1.chain_id:   11155111

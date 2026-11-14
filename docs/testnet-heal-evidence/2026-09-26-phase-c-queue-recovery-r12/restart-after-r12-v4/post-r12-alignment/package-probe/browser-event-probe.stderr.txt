@@ -1,0 +1,11 @@
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+page.waitForFunction: Timeout 360000ms exceeded.
+    at C:\Users\samue\OneDrive\Desktop\projects\chain-registry-blockchain-CREG-\chain-registry\explorer\scripts\capture-real-explorer-events.mjs:44:14 {
+  log: [],
+  name: 'TimeoutError'
+}
+
+Node.js v24.20.0

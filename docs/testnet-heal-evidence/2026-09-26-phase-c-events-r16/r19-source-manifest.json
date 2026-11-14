@@ -1,0 +1,22 @@
+{
+  "files": [
+    {
+      "path": "crates/node/src/state.rs",
+      "sha256": "f682f8a0dc8d0b38724f386de0c97fe357947bc649e50ecaae1ae371d468d6b4"
+    },
+    {
+      "path": "crates/node/src/sync.rs",
+      "sha256": "274c7deb0fb37fbc92a69faf3973b3eeeb550be8ca0004b695e4fff3281dcbe4"
+    },
+    {
+      "path": "crates/node/src/pending_pool.rs",
+      "sha256": "a7dc54fe9a5a891886190087109e3dc5330e15d42d72a0ca3c9a733632199af0"
+    },
+    {
+      "path": "testnet/phase-c/Dockerfile.r19-canonical-admission-retirement",
+      "sha256": "002662c3175cca300c6a551ec15ff141d0989e5cbc5f05ccab71d748cff86667"
+    }
+  ],
+  "captured_at_utc": "2026-09-26T19:47:34.5622827Z",
+  "context": "C:\\Users\\samue\\CREG-backups\\phase-c-build-r19-admission-retirement"
+}

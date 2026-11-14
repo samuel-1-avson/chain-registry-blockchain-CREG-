@@ -1,0 +1,67 @@
+{
+  "schema": "creg-osv-source-captures-v1",
+  "captured_at_utc": "2026-09-27T04:55:30.8425789Z",
+  "source": "https://api.osv.dev/v1/query",
+  "queries": [
+    {
+      "key": "npm:escape-html@1.0.3",
+      "request": {
+        "package": {
+          "ecosystem": "npm",
+          "name": "escape-html"
+        },
+        "version": "1.0.3"
+      },
+      "response": {},
+      "vulnerability_count": 0
+    },
+    {
+      "key": "npm:is-number@7.0.0",
+      "request": {
+        "package": {
+          "ecosystem": "npm",
+          "name": "is-number"
+        },
+        "version": "7.0.0"
+      },
+      "response": {},
+      "vulnerability_count": 0
+    },
+    {
+      "key": "npm:ms@2.1.3",
+      "request": {
+        "package": {
+          "ecosystem": "npm",
+          "name": "ms"
+        },
+        "version": "2.1.3"
+      },
+      "response": {},
+      "vulnerability_count": 0
+    },
+    {
+      "key": "npm:toidentifier@1.0.1",
+      "request": {
+        "package": {
+          "ecosystem": "npm",
+          "name": "toidentifier"
+        },
+        "version": "1.0.1"
+      },
+      "response": {},
+      "vulnerability_count": 0
+    },
+    {
+      "key": "npm:kleur@4.1.5",
+      "request": {
+        "package": {
+          "ecosystem": "npm",
+          "name": "kleur"
+        },
+        "version": "4.1.5"
+      },
+      "response": {},
+      "vulnerability_count": 0
+    }
+  ]
+}

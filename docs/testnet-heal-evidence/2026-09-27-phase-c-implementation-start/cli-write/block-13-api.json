@@ -1,0 +1,332 @@
+{
+  "header": {
+    "height": 13,
+    "prev_hash": "a329eb216ce1fd18e1f5510333cb683db34ca6e789b5a3ef229dabe2af08fc7d",
+    "merkle_root": "54d76b0f1255b554395bf077365e011f5ea0dca3dabc40bb485ae26fa4cba568",
+    "proposer_id": "validator-4",
+    "timestamp": "2026-09-27T06:49:08Z",
+    "validator_set_hash": "ad5c4491938c5410d22b896290f3603ccec7abf3393bd5364bcea7674c109e98",
+    "vrf_output": "adef6532374e16f330976452c6e994684d69bbf633c5e35325be7383b10a64bb",
+    "vrf_proof": "1c7aaf450c81cd5eb0abe2dd599b5e6e8b93d4cb91a39a0b06c3579f131225df23c4291aab21909c9126c5da661ce54fa19c221f409e9fd004d2e1e137337902"
+  },
+  "transactions": [
+    {
+      "type": "publish_authorized_v1",
+      "record": {
+        "id": {
+          "ecosystem": "npm",
+          "name": "kleur",
+          "version": "4.1.5"
+        },
+        "content_hash": "0d99562acf82fca4afce2a57b687289a524ac6755dcaf1fdf82a147473091469",
+        "ipfs_cid": "QmSEhmMVab63QT8AhTvqwXozKEj3PkQG5vE95nzs8PAju8",
+        "publisher_pubkey": "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d",
+        "block_hash": "pending",
+        "published_at": "2026-09-27T06:49:08.491685688Z",
+        "validator_signatures": [
+          {
+            "validator_id": "validator-1",
+            "validator_pubkey": "cc4157c4443c9fb011df2b650f497e3eadfc1ddda6dc7f4b6732325383108ffc",
+            "signature": "50ee527718a6f74fc95bdc90f1306d3c2da03f3138275a0bed14bc8176f62ec35876e630de2858703ebfb719768746ab779f5df3294673312a13a9388b4af704",
+            "vote": "Approve",
+            "signed_at": "2026-09-27T06:49:06.533806459Z",
+            "ml_model_version": "creg-deterministic-scanner-v1.1.0+sha256:f397fac29df29438f0ee15580547def5fe66a03af60153d22993f4a7af9fce8c",
+            "analysis_bundles": {
+              "policy_bundle_id": "policy-v1",
+              "feature_schema_id": "features-v1",
+              "expert_bundle_id": "experts-v1",
+              "embedding_model_id": "embeddings-v1",
+              "index_epoch": "index-epoch-0",
+              "threshold_profile_id": "thresholds-v1",
+              "llm_prompt_profile_id": "llm-prompt-v1",
+              "osv_snapshot_epoch": "osv-2026-09-27-phase-c-kleur-r11"
+            },
+            "evidence_digest": "93d2cd8d38228ec0b2b02bbbfe5d5e320b2f5cbe19a461f344adf1eb34af6db2",
+            "deterministic_risk": {
+              "score": 55,
+              "deterministic_score": 26,
+              "advisory_score": 0,
+              "band": "elevated",
+              "disposition": "review",
+              "deterministic_findings": 5,
+              "advisory_findings": 1,
+              "critical_findings": 0,
+              "high_findings": 0,
+              "medium_findings": 1,
+              "low_findings": 4,
+              "reasons": [
+                "[DS001] AI Deep Scan: Suspicious",
+                "[SA005] Reads environment variables (potential credential harvesting)",
+                "[SA005] Reads environment variables (potential credential harvesting)",
+                "[SA005] Reads environment variables (potential credential harvesting)",
+                "[SA005] Reads environment variables (potential credential harvesting)",
+                "Publisher reputation delta -100 increases deterministic risk"
+              ]
+            },
+            "is_mandatory": true
+          },
+          {
+            "validator_id": "validator-3",
+            "validator_pubkey": "7876b26b471f81edd9597354fd023157858f2b02d73a1e7bb0b430c9fc63e6bc",
+            "signature": "5b2efc9ed1eeeecf1d96a4bbc283c4ed4777543dee7c10367e0c17df6e4560ff27ffff7dcd93888d3021de3a027101b05ff5078e77f4b2478e2b15e1c6fcef0f",
+            "vote": "Approve",
+            "signed_at": "2026-09-27T06:49:07.430207053Z",
+            "ml_model_version": "creg-deterministic-scanner-v1.1.0+sha256:f397fac29df29438f0ee15580547def5fe66a03af60153d22993f4a7af9fce8c",
+            "analysis_bundles": {
+              "policy_bundle_id": "policy-v1",
+              "feature_schema_id": "features-v1",
+              "expert_bundle_id": "experts-v1",
+              "embedding_model_id": "embeddings-v1",
+              "index_epoch": "index-epoch-0",
+              "threshold_profile_id": "thresholds-v1",
+              "llm_prompt_profile_id": "llm-prompt-v1",
+              "osv_snapshot_epoch": "osv-2026-09-27-phase-c-kleur-r11"
+            },
+            "evidence_digest": "93d2cd8d38228ec0b2b02bbbfe5d5e320b2f5cbe19a461f344adf1eb34af6db2",
+            "deterministic_risk": {
+              "score": 55,
+              "deterministic_score": 26,
+              "advisory_score": 0,
+              "band": "elevated",
+              "disposition": "review",
+              "deterministic_findings": 5,
+              "advisory_findings": 1,
+              "critical_findings": 0,
+              "high_findings": 0,
+              "medium_findings": 1,
+              "low_findings": 4,
+              "reasons": [
+                "[DS001] AI Deep Scan: Suspicious",
+                "[SA005] Reads environment variables (potential credential harvesting)",
+                "[SA005] Reads environment variables (potential credential harvesting)",
+                "[SA005] Reads environment variables (potential credential harvesting)",
+                "[SA005] Reads environment variables (potential credential harvesting)",
+                "Publisher reputation delta -100 increases deterministic risk"
+              ]
+            },
+            "is_mandatory": true
+          },
+          {
+            "validator_id": "validator-2",
+            "validator_pubkey": "779c9522addbce63f78448fa83bff1e789a4a874c4db25e0f7fe00b3d0429fd9",
+            "signature": "fe2f30e996403eb98156ca0e43a8439a2742cce202fcc66bd52fad0d99a166704da1bca8b0cc8b33464b2114e15f44f2ae00cb0b40a349b79c8164ccbafa9106",
+            "vote": "Approve",
+            "signed_at": "2026-09-27T06:49:07.639461247Z",
+            "ml_model_version": "creg-deterministic-scanner-v1.1.0+sha256:f397fac29df29438f0ee15580547def5fe66a03af60153d22993f4a7af9fce8c",
+            "analysis_bundles": {
+              "policy_bundle_id": "policy-v1",
+              "feature_schema_id": "features-v1",
+              "expert_bundle_id": "experts-v1",
+              "embedding_model_id": "embeddings-v1",
+              "index_epoch": "index-epoch-0",
+              "threshold_profile_id": "thresholds-v1",
+              "llm_prompt_profile_id": "llm-prompt-v1",
+              "osv_snapshot_epoch": "osv-2026-09-27-phase-c-kleur-r11"
+            },
+            "evidence_digest": "93d2cd8d38228ec0b2b02bbbfe5d5e320b2f5cbe19a461f344adf1eb34af6db2",
+            "deterministic_risk": {
+              "score": 55,
+              "deterministic_score": 26,
+              "advisory_score": 0,
+              "band": "elevated",
+              "disposition": "review",
+              "deterministic_findings": 5,
+              "advisory_findings": 1,
+              "critical_findings": 0,
+              "high_findings": 0,
+              "medium_findings": 1,
+              "low_findings": 4,
+              "reasons": [
+                "[DS001] AI Deep Scan: Suspicious",
+                "[SA005] Reads environment variables (potential credential harvesting)",
+                "[SA005] Reads environment variables (potential credential harvesting)",
+                "[SA005] Reads environment variables (potential credential harvesting)",
+                "[SA005] Reads environment variables (potential credential harvesting)",
+                "Publisher reputation delta -100 increases deterministic risk"
+              ]
+            },
+            "is_mandatory": true
+          }
+        ],
+        "status": "Verified",
+        "shielded": false,
+        "key_bundle": null,
+        "pgp_fingerprint": null,
+        "pgp_signature_sha256": "",
+        "pgp_public_key_sha256": "",
+        "findings": [
+          {
+            "id": "SA005",
+            "title": "Reads environment variables (potential credential harvesting)",
+            "severity": "Low",
+            "description": "Reads environment variables (potential credential harvesting)",
+            "file": "package/colors.js",
+            "line": 3
+          },
+          {
+            "id": "SA005",
+            "title": "Reads environment variables (potential credential harvesting)",
+            "severity": "Low",
+            "description": "Reads environment variables (potential credential harvesting)",
+            "file": "package/index.js",
+            "line": 5
+          },
+          {
+            "id": "SA005",
+            "title": "Reads environment variables (potential credential harvesting)",
+            "severity": "Low",
+            "description": "Reads environment variables (potential credential harvesting)",
+            "file": "package/colors.mjs",
+            "line": 3
+          },
+          {
+            "id": "SA005",
+            "title": "Reads environment variables (potential credential harvesting)",
+            "severity": "Low",
+            "description": "Reads environment variables (potential credential harvesting)",
+            "file": "package/index.mjs",
+            "line": 5
+          },
+          {
+            "id": "DS001",
+            "title": "AI Deep Scan: Suspicious",
+            "severity": "Medium",
+            "description": "Multi-layer scan (YARA+OSV+ThreatIntel) flagged suspicious patterns (probability: 0.36).",
+            "file": "deep_scan",
+            "line": null
+          },
+          {
+            "id": "LLM-SKIP",
+            "title": "LLM Stage 4 skipped",
+            "severity": "Low",
+            "description": "The LLM-assisted review stage (Stage 4) was not executed: CREG_LLM_ENABLED is not set — LLM stage skipped. Set CREG_LLM_ENABLED=true and configure at least one provider key (ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY, or CREG_OLLAMA_URL) to enable deep LLM analysis.. Static analysis, sandbox, and ML stages still ran. Enable CREG_LLM_ENABLED=true and configure a provider key to activate deep semantic analysis.",
+            "file": "llm-review",
+            "line": null
+          }
+        ],
+        "analysis_bundles": {
+          "policy_bundle_id": "policy-v1",
+          "feature_schema_id": "features-v1",
+          "expert_bundle_id": "experts-v1",
+          "embedding_model_id": "embeddings-v1",
+          "index_epoch": "index-epoch-0",
+          "threshold_profile_id": "thresholds-v1",
+          "llm_prompt_profile_id": "llm-prompt-v1",
+          "osv_snapshot_epoch": "osv-2026-09-27-phase-c-kleur-r11"
+        },
+        "evidence_digest": "93d2cd8d38228ec0b2b02bbbfe5d5e320b2f5cbe19a461f344adf1eb34af6db2",
+        "deterministic_risk": {
+          "score": 55,
+          "deterministic_score": 26,
+          "advisory_score": 0,
+          "band": "elevated",
+          "disposition": "review",
+          "deterministic_findings": 5,
+          "advisory_findings": 1,
+          "critical_findings": 0,
+          "high_findings": 0,
+          "medium_findings": 1,
+          "low_findings": 4,
+          "reasons": [
+            "[DS001] AI Deep Scan: Suspicious",
+            "[SA005] Reads environment variables (potential credential harvesting)",
+            "[SA005] Reads environment variables (potential credential harvesting)",
+            "[SA005] Reads environment variables (potential credential harvesting)",
+            "[SA005] Reads environment variables (potential credential harvesting)",
+            "Publisher reputation delta -100 increases deterministic risk"
+          ]
+        },
+        "access_count": 0,
+        "last_accessed": null,
+        "threshold": 1,
+        "publisher_pubkeys": [
+          "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d"
+        ],
+        "manifest": {
+          "allowed_network_hosts": [],
+          "allowed_fs_writes": [],
+          "spawns_processes": false,
+          "allowed_process_spawns": [],
+          "description": "kleur 4.1.5 formats terminal text with ANSI colors."
+        },
+        "analysis_committee_size": 4,
+        "analysis_selection_seed": "36386531663863336263396433333064343336383862643937303833623035366339373230393335346231643836346436616632653463356131336635363133",
+        "analysis_effective_size": 4,
+        "analysis_mandatory_contributed": 3,
+        "analysis_committee": {
+          "size": 4,
+          "members": [
+            "validator-1",
+            "validator-4",
+            "validator-2",
+            "validator-3"
+          ],
+          "seed": "36386531663863336263396433333064343336383862643937303833623035366339373230393335346231643836346436616632653463356131336635363133",
+          "effective_size": 4,
+          "performance_bias": true,
+          "member_performance_at_finalization": {
+            "validator-4": 500,
+            "validator-2": 465,
+            "validator-3": 465,
+            "validator-1": 465
+          },
+          "validator_snapshot_hash": "ad5c4491938c5410d22b896290f3603ccec7abf3393bd5364bcea7674c109e98",
+          "validator_snapshot_height": 0,
+          "validator_snapshot_anchor_block_hash": "a329eb216ce1fd18e1f5510333cb683db34ca6e789b5a3ef229dabe2af08fc7d",
+          "validator_snapshot_certificate_hash": "",
+          "selection_randomness": "ecbc357cacaec1cd26b0697365b4a307816e0f3fa674e35f892f0682662ca137",
+          "assignment_proof": "f388350b827838a07fa9b2b53357a0606e8f8a5b6886d35c7a5657c63c0a6c2b"
+        }
+      },
+      "authorization": {
+        "schema_version": 1,
+        "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+        "genesis_hash": "1852b9a86dd3b53e7b2de4a774723a4fe48e862f9c61d14e5917b42b21055234",
+        "staking_contract": "0x61c00ebe7c46f0bce63942f7e15bcc434dfc9b7c",
+        "publisher_address": "0xa40d79527314efd4964d49c4a0673c87b612348b",
+        "publisher_ed25519_pubkey": "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d",
+        "publisher_ed25519_signature": "",
+        "publisher_evm_signature": "92c127347b1a45277b26d7629cdf013d663ea8fbb3bd66158c97279397216216436de58cb9bba13d760cc3ebe2e75153d58776c58d45f9b29cc903ba9ce7bc371c",
+        "nonce": "25f94b7c24ced5ce2ce014889ba959c8",
+        "issued_at": 1790491738,
+        "expires_at": 1790495338,
+        "source_hash": "0d99562acf82fca4afce2a57b687289a524ac6755dcaf1fdf82a147473091469",
+        "manifest_hash": "f0c0f903f459e5dcaca6ea1e5e467b3352a2eb61f223c953e24984de9f42a7f5",
+        "ipfs_cid": "QmSEhmMVab63QT8AhTvqwXozKEj3PkQG5vE95nzs8PAju8",
+        "shielded": false,
+        "key_bundle_sha256": "",
+        "pgp_signature_sha256": "",
+        "pgp_public_key_sha256": "",
+        "ownership_claim": "npm:kleur",
+        "threshold": 1,
+        "publisher_pubkeys": [
+          "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d"
+        ],
+        "signatures": [
+          "9c76db03381548ed51b4d2bbc864431d3a0d56cb33fecbbec87f2c25ebf1754861bf7c3a069ace5a2a7c6e633b2e09f44e09bbb7a1b5b4b329b1ef5c49285207"
+        ],
+        "ownership_proof": null,
+        "authority_certificate": null
+      }
+    }
+  ],
+  "pbft_signatures": [
+    {
+      "validator_id": "validator-2",
+      "pubkey": "779c9522addbce63f78448fa83bff1e789a4a874c4db25e0f7fe00b3d0429fd9",
+      "signature": "b780d75e47f8aa1bd61b8973f28b5c5a6ad7e4a0530d2521c7caa87e6e995d12931dd254ae9af1e51d1197479314010888349852e1588552c276bae58b9a3f02"
+    },
+    {
+      "validator_id": "validator-3",
+      "pubkey": "7876b26b471f81edd9597354fd023157858f2b02d73a1e7bb0b430c9fc63e6bc",
+      "signature": "077039b3cf0f9398b210133002c8a39f4d0fffcdd968ce92ec24fe7d80bb33da667ce5b5ae503f1e306fc67ab9aca641d1d1e6556e94c947dc58711c36d2f70c"
+    },
+    {
+      "validator_id": "validator-1",
+      "pubkey": "cc4157c4443c9fb011df2b650f497e3eadfc1ddda6dc7f4b6732325383108ffc",
+      "signature": "3ca1ff7edcc7b6b5b2ff507a22180f3c0cdd551ee43c7c0c6fbfa56fc7ef79f92b33cf5a3c69999183b0a3b2262699ac4c5606c877153e48956d37a0c4f4ed0c"
+    }
+  ],
+  "hash": "8448cce76d7258f051cf9632d2ef7181da1321f5d19a3b5d00f00f8975aa2993",
+  "finalized": true
+}

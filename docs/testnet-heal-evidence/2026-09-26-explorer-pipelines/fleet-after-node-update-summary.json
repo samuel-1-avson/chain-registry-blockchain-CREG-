@@ -1,0 +1,58 @@
+[
+  {
+    "slot": "v1",
+    "ready": true,
+    "height": 4,
+    "pending_block": "0",
+    "forced": "0"
+  },
+  {
+    "slot": "v2",
+    "ready": true,
+    "height": 4,
+    "pending_block": "0",
+    "forced": "0"
+  },
+  {
+    "slot": "v3",
+    "ready": true,
+    "height": 4,
+    "pending_block": "1",
+    "forced": "1"
+  },
+  {
+    "slot": "v4",
+    "ready": true,
+    "height": 4,
+    "pending_block": "0",
+    "forced": "0"
+  },
+  {
+    "slot": "o1",
+    "ready": true,
+    "height": 4,
+    "pending_block": "0",
+    "forced": "0"
+  },
+  {
+    "slot": "o2",
+    "ready": true,
+    "height": 4,
+    "pending_block": "0",
+    "forced": "0"
+  },
+  {
+    "slot": "o3",
+    "ready": true,
+    "height": 4,
+    "pending_block": "0",
+    "forced": "0"
+  },
+  {
+    "slot": "o4",
+    "ready": true,
+    "height": 4,
+    "pending_block": "0",
+    "forced": "0"
+  }
+]

@@ -1,0 +1,25 @@
+{
+  "image_tag": "creg-node:phase-c-secure-r18-canonical-round-recovery",
+  "image_id": "sha256:cee77b5210ad67a91f5d6e5ccbf2b5ec914ccf53268f8294b261bc7a37c7f49a",
+  "required_base_image": "creg-node:phase-c-secure-r12-bounded-l1-retry",
+  "required_base_image_id": "sha256:f0b693dc567fc3430f22db881581c55a253e75c8f84a5a0f2d6a82d4460d0736",
+  "base_layers_omitted": 24,
+  "archive_path": "C:\\Users\\samue\\CREG-backups\\phase-c-build-r18-round-recovery\\creg-node-r18.tar.gz",
+  "archive_bytes": 552165134,
+  "archive_sha256": "35736bc50c34be45dde3f153612b9ec712e974d592adfebcf604448d8d3ac3b3",
+  "archive_raw_sha256": "f71b2542c7aee6bd30496010f28be31b73812e06f07db18d880dde6d1816bb54",
+  "archive_roundtrip_verified": true,
+  "delta_archive_path": "C:\\Users\\samue\\CREG-backups\\phase-c-build-r18-round-recovery\\creg-node-r18-delta.tar.gz",
+  "delta_archive_bytes": 110596089,
+  "delta_archive_sha256": "ae0a5da9d03c9f237bc3e591c948496b568b247207026fd33cf1dd0a6410d1fd",
+  "delta_archive_requires_accepted_r12_base": true,
+  "schema": "creg-r18-reviewed-image-v1",
+  "captured_at_utc": "2026-09-26T19:27:47.6661354Z",
+  "compilation": "passed",
+  "accepted_image_ids": [
+    "sha256:cee77b5210ad67a91f5d6e5ccbf2b5ec914ccf53268f8294b261bc7a37c7f49a",
+    "sha256:dd07eef4a657707fdad696b1b4cc7397ee2589b82e3511c892ff3a806f3dcb03"
+  ],
+  "candidate_rollout": "pending",
+  "public_cutover": false
+}

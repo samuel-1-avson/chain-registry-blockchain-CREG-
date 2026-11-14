@@ -1,0 +1,6 @@
+
+  → Light-client verification for npm:escape-html@1.0.3
+  · Node:       http://host.docker.internal:18080
+  · Checkpoint: height=0
+  · Fetching Merkle proof...{"canonical":"npm:escape-html@1.0.3","verified":true,"proof":"merkle-inclusion-verified"}
+

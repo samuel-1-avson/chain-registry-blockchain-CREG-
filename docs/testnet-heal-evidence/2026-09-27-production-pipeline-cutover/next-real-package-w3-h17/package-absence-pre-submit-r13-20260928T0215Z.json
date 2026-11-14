@@ -1,0 +1,589 @@
+{
+  "schema": "creg-r7-real-package-absence-v1",
+  "captured_at_utc": "2026-09-28T02:16:06.0956577Z",
+  "canonical": "npm:has-flag@5.0.1",
+  "scanner_profile_digest": "8c7f011ab71a9a695ce1364e9958a2906f02645849c3567fc5691206a93c296e",
+  "all_eight_absent": true,
+  "all_eight_same_h16": true,
+  "all_eight_r13_ready": true,
+  "passed": true,
+  "public_cutover": false,
+  "nodes": [
+    {
+      "slot": "v1",
+      "captured_at_utc": "2026-09-28T02:14:54.3438693Z",
+      "package_http_status": 404,
+      "package_body": "{\"error\":\"Package not found: npm:has-flag@5.0.1\"}",
+      "stats": {
+        "tip_height": 16,
+        "tip_hash": "4bd594d71b4fc8bc785c34b1e46291518328233c8aed616171efd9add073e260",
+        "package_count": 6,
+        "block_count": 17,
+        "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+        "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+        "spec_signature_verified": true,
+        "l1_rpc_configured": true,
+        "is_validator": true,
+        "validator_count": 4,
+        "active_validators": 4,
+        "total_stake": 400,
+        "total_stake_native": "400",
+        "peer_count": 2,
+        "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+        "l1_block": 0,
+        "pending_tx_count": 0,
+        "publisher_count": 1,
+        "finalized_height": 16,
+        "finalization_lag": 0,
+        "finalization_source": "creg-canonical-store",
+        "validator_set_source": "chain-authoritative",
+        "validator_set_sync_state": "synced",
+        "validator_set_last_finalized_source_block": 11797452
+      },
+      "health": {
+        "status": "ok",
+        "node_id": "validator-1",
+        "is_validator": true,
+        "version": "0.1.0",
+        "validator_set_sync": {
+          "enabled": true,
+          "mode": "chain-authoritative",
+          "state": "synced",
+          "last_finalized_source_block": 11797452,
+          "cursor_block": 11797452,
+          "cursor_log_index": 4294967295,
+          "cursor_block_hash": "0x66200b9d8aa97ddc91dcdb7477eeb38d321e00bcd4a3f14ffbb0155a1ccaf901",
+          "last_poll_at": "2026-09-28T02:14:40.706532928+00:00",
+          "last_error": null
+        },
+        "sandbox": {
+          "engine": "nsjail",
+          "dev_bypass": false,
+          "isolated": true,
+          "degraded": false,
+          "note": "kernel namespaces + seccomp-BPF (primary engine)"
+        },
+        "sync": {
+          "lag_blocks": 0,
+          "max_peer_tip": 16,
+          "healthy": true
+        }
+      },
+      "scanner_profile_matches": true,
+      "role": "validator",
+      "expected_node_id": "validator-1",
+      "checks": {
+        "package_absent": true,
+        "signed_r7": true,
+        "shared_h16": true,
+        "correct_role": true,
+        "r13_scanner": true
+      },
+      "passed": true
+    },
+    {
+      "slot": "v2",
+      "captured_at_utc": "2026-09-28T02:15:03.886563+00:00",
+      "package_http_status": 404,
+      "package_body": "{\"error\":\"Package not found: npm:has-flag@5.0.1\"}",
+      "stats": {
+        "tip_height": 16,
+        "tip_hash": "4bd594d71b4fc8bc785c34b1e46291518328233c8aed616171efd9add073e260",
+        "package_count": 6,
+        "block_count": 17,
+        "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+        "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+        "spec_signature_verified": true,
+        "l1_rpc_configured": true,
+        "is_validator": true,
+        "validator_count": 4,
+        "active_validators": 4,
+        "total_stake": 400,
+        "total_stake_native": "400",
+        "peer_count": 2,
+        "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+        "l1_block": 0,
+        "pending_tx_count": 0,
+        "publisher_count": 1,
+        "finalized_height": 16,
+        "finalization_lag": 0,
+        "finalization_source": "creg-canonical-store",
+        "validator_set_source": "chain-authoritative",
+        "validator_set_sync_state": "synced",
+        "validator_set_last_finalized_source_block": 11797453
+      },
+      "health": {
+        "status": "ok",
+        "node_id": "validator-2",
+        "is_validator": true,
+        "version": "0.1.0",
+        "validator_set_sync": {
+          "enabled": true,
+          "mode": "chain-authoritative",
+          "state": "synced",
+          "last_finalized_source_block": 11797453,
+          "cursor_block": 11797453,
+          "cursor_log_index": 4294967295,
+          "cursor_block_hash": "0xee624c055d083808db2e121728f68acaa2a85350d8c2b29814d20802bdceca54",
+          "last_poll_at": "2026-09-28T02:14:49.918373941+00:00",
+          "last_error": null
+        },
+        "sandbox": {
+          "engine": "nsjail",
+          "dev_bypass": false,
+          "isolated": true,
+          "degraded": false,
+          "note": "kernel namespaces + seccomp-BPF (primary engine)"
+        },
+        "sync": {
+          "lag_blocks": 0,
+          "max_peer_tip": 16,
+          "healthy": true
+        }
+      },
+      "scanner_profile_matches": true,
+      "role": "validator",
+      "expected_node_id": "validator-2",
+      "checks": {
+        "package_absent": true,
+        "signed_r7": true,
+        "shared_h16": true,
+        "correct_role": true,
+        "r13_scanner": true
+      },
+      "passed": true
+    },
+    {
+      "slot": "v3",
+      "captured_at_utc": "2026-09-28T02:15:12.987538+00:00",
+      "package_http_status": 404,
+      "package_body": "{\"error\":\"Package not found: npm:has-flag@5.0.1\"}",
+      "stats": {
+        "tip_height": 16,
+        "tip_hash": "4bd594d71b4fc8bc785c34b1e46291518328233c8aed616171efd9add073e260",
+        "package_count": 6,
+        "block_count": 17,
+        "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+        "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+        "spec_signature_verified": true,
+        "l1_rpc_configured": true,
+        "is_validator": true,
+        "validator_count": 4,
+        "active_validators": 4,
+        "total_stake": 400,
+        "total_stake_native": "400",
+        "peer_count": 7,
+        "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+        "l1_block": 0,
+        "pending_tx_count": 0,
+        "publisher_count": 1,
+        "finalized_height": 16,
+        "finalization_lag": 0,
+        "finalization_source": "creg-canonical-store",
+        "validator_set_source": "chain-authoritative",
+        "validator_set_sync_state": "synced",
+        "validator_set_last_finalized_source_block": 11797454
+      },
+      "health": {
+        "status": "ok",
+        "node_id": "validator-3",
+        "is_validator": true,
+        "version": "0.1.0",
+        "validator_set_sync": {
+          "enabled": true,
+          "mode": "chain-authoritative",
+          "state": "synced",
+          "last_finalized_source_block": 11797454,
+          "cursor_block": 11797454,
+          "cursor_log_index": 4294967295,
+          "cursor_block_hash": "0x6627a9444c1e3c24e8230ed88531857a9f15a01335790bbe06788f189f3fa301",
+          "last_poll_at": "2026-09-28T02:15:07.731572188+00:00",
+          "last_error": null
+        },
+        "sandbox": {
+          "engine": "nsjail",
+          "dev_bypass": false,
+          "isolated": true,
+          "degraded": false,
+          "note": "kernel namespaces + seccomp-BPF (primary engine)"
+        },
+        "sync": {
+          "lag_blocks": 0,
+          "max_peer_tip": 16,
+          "healthy": true
+        }
+      },
+      "scanner_profile_matches": true,
+      "role": "validator",
+      "expected_node_id": "validator-3",
+      "checks": {
+        "package_absent": true,
+        "signed_r7": true,
+        "shared_h16": true,
+        "correct_role": true,
+        "r13_scanner": true
+      },
+      "passed": true
+    },
+    {
+      "slot": "v4",
+      "captured_at_utc": "2026-09-28T02:15:27.143905+00:00",
+      "package_http_status": 404,
+      "package_body": "{\"error\":\"Package not found: npm:has-flag@5.0.1\"}",
+      "stats": {
+        "tip_height": 16,
+        "tip_hash": "4bd594d71b4fc8bc785c34b1e46291518328233c8aed616171efd9add073e260",
+        "package_count": 6,
+        "block_count": 17,
+        "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+        "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+        "spec_signature_verified": true,
+        "l1_rpc_configured": true,
+        "is_validator": true,
+        "validator_count": 4,
+        "active_validators": 4,
+        "total_stake": 400,
+        "total_stake_native": "400",
+        "peer_count": 2,
+        "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+        "l1_block": 0,
+        "pending_tx_count": 0,
+        "publisher_count": 1,
+        "finalized_height": 16,
+        "finalization_lag": 0,
+        "finalization_source": "creg-canonical-store",
+        "validator_set_source": "chain-authoritative",
+        "validator_set_sync_state": "synced",
+        "validator_set_last_finalized_source_block": 11797454
+      },
+      "health": {
+        "status": "ok",
+        "node_id": "validator-4",
+        "is_validator": true,
+        "version": "0.1.0",
+        "validator_set_sync": {
+          "enabled": true,
+          "mode": "chain-authoritative",
+          "state": "synced",
+          "last_finalized_source_block": 11797454,
+          "cursor_block": 11797454,
+          "cursor_log_index": 4294967295,
+          "cursor_block_hash": "0x6627a9444c1e3c24e8230ed88531857a9f15a01335790bbe06788f189f3fa301",
+          "last_poll_at": "2026-09-28T02:15:07.555190183+00:00",
+          "last_error": null
+        },
+        "sandbox": {
+          "engine": "nsjail",
+          "dev_bypass": false,
+          "isolated": true,
+          "degraded": false,
+          "note": "kernel namespaces + seccomp-BPF (primary engine)"
+        },
+        "sync": {
+          "lag_blocks": 0,
+          "max_peer_tip": 16,
+          "healthy": true
+        }
+      },
+      "scanner_profile_matches": true,
+      "role": "validator",
+      "expected_node_id": "validator-4",
+      "checks": {
+        "package_absent": true,
+        "signed_r7": true,
+        "shared_h16": true,
+        "correct_role": true,
+        "r13_scanner": true
+      },
+      "passed": true
+    },
+    {
+      "slot": "o1",
+      "captured_at_utc": "2026-09-28T02:15:35.734079+00:00",
+      "package_http_status": 404,
+      "package_body": "{\"error\":\"Package not found: npm:has-flag@5.0.1\"}",
+      "stats": {
+        "tip_height": 16,
+        "tip_hash": "4bd594d71b4fc8bc785c34b1e46291518328233c8aed616171efd9add073e260",
+        "package_count": 6,
+        "block_count": 17,
+        "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+        "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+        "spec_signature_verified": true,
+        "l1_rpc_configured": true,
+        "is_validator": false,
+        "validator_count": 4,
+        "active_validators": 4,
+        "total_stake": 400,
+        "total_stake_native": "400",
+        "peer_count": 2,
+        "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+        "l1_block": 0,
+        "pending_tx_count": 0,
+        "publisher_count": 1,
+        "finalized_height": 16,
+        "finalization_lag": 0,
+        "finalization_source": "creg-canonical-store",
+        "validator_set_source": "chain-authoritative",
+        "validator_set_sync_state": "synced",
+        "validator_set_last_finalized_source_block": 11797454
+      },
+      "health": {
+        "status": "ok",
+        "node_id": "observer-1",
+        "is_validator": false,
+        "version": "0.1.0",
+        "validator_set_sync": {
+          "enabled": true,
+          "mode": "chain-authoritative",
+          "state": "synced",
+          "last_finalized_source_block": 11797454,
+          "cursor_block": 11797454,
+          "cursor_log_index": 4294967295,
+          "cursor_block_hash": "0x6627a9444c1e3c24e8230ed88531857a9f15a01335790bbe06788f189f3fa301",
+          "last_poll_at": "2026-09-28T02:15:07.751930273+00:00",
+          "last_error": null
+        },
+        "sandbox": {
+          "engine": "nsjail",
+          "dev_bypass": false,
+          "isolated": true,
+          "degraded": false,
+          "note": "kernel namespaces + seccomp-BPF (primary engine)"
+        },
+        "sync": {
+          "lag_blocks": 0,
+          "max_peer_tip": 16,
+          "healthy": true
+        }
+      },
+      "scanner_profile_matches": true,
+      "role": "observer",
+      "expected_node_id": "observer-1",
+      "checks": {
+        "package_absent": true,
+        "signed_r7": true,
+        "shared_h16": true,
+        "correct_role": true,
+        "r13_scanner": true
+      },
+      "passed": true
+    },
+    {
+      "slot": "o2",
+      "captured_at_utc": "2026-09-28T02:15:44.502307+00:00",
+      "package_http_status": 404,
+      "package_body": "{\"error\":\"Package not found: npm:has-flag@5.0.1\"}",
+      "stats": {
+        "tip_height": 16,
+        "tip_hash": "4bd594d71b4fc8bc785c34b1e46291518328233c8aed616171efd9add073e260",
+        "package_count": 6,
+        "block_count": 17,
+        "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+        "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+        "spec_signature_verified": true,
+        "l1_rpc_configured": true,
+        "is_validator": false,
+        "validator_count": 4,
+        "active_validators": 4,
+        "total_stake": 400,
+        "total_stake_native": "400",
+        "peer_count": 2,
+        "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+        "l1_block": 0,
+        "pending_tx_count": 0,
+        "publisher_count": 1,
+        "finalized_height": 16,
+        "finalization_lag": 0,
+        "finalization_source": "creg-canonical-store",
+        "validator_set_source": "chain-authoritative",
+        "validator_set_sync_state": "synced",
+        "validator_set_last_finalized_source_block": 11797456
+      },
+      "health": {
+        "status": "ok",
+        "node_id": "observer-2",
+        "is_validator": false,
+        "version": "0.1.0",
+        "validator_set_sync": {
+          "enabled": true,
+          "mode": "chain-authoritative",
+          "state": "synced",
+          "last_finalized_source_block": 11797456,
+          "cursor_block": 11797456,
+          "cursor_log_index": 4294967295,
+          "cursor_block_hash": "0x479bce03ffd06413f41f762b634d99939e21c508916dc7bcb95d2c35992e5ded",
+          "last_poll_at": "2026-09-28T02:15:28.324006399+00:00",
+          "last_error": null
+        },
+        "sandbox": {
+          "engine": "nsjail",
+          "dev_bypass": false,
+          "isolated": true,
+          "degraded": false,
+          "note": "kernel namespaces + seccomp-BPF (primary engine)"
+        },
+        "sync": {
+          "lag_blocks": 0,
+          "max_peer_tip": 16,
+          "healthy": true
+        }
+      },
+      "scanner_profile_matches": true,
+      "role": "observer",
+      "expected_node_id": "observer-2",
+      "checks": {
+        "package_absent": true,
+        "signed_r7": true,
+        "shared_h16": true,
+        "correct_role": true,
+        "r13_scanner": true
+      },
+      "passed": true
+    },
+    {
+      "slot": "o3",
+      "captured_at_utc": "2026-09-28T02:15:55.522832+00:00",
+      "package_http_status": 404,
+      "package_body": "{\"error\":\"Package not found: npm:has-flag@5.0.1\"}",
+      "stats": {
+        "tip_height": 16,
+        "tip_hash": "4bd594d71b4fc8bc785c34b1e46291518328233c8aed616171efd9add073e260",
+        "package_count": 6,
+        "block_count": 17,
+        "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+        "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+        "spec_signature_verified": true,
+        "l1_rpc_configured": true,
+        "is_validator": false,
+        "validator_count": 4,
+        "active_validators": 4,
+        "total_stake": 400,
+        "total_stake_native": "400",
+        "peer_count": 2,
+        "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+        "l1_block": 0,
+        "pending_tx_count": 0,
+        "publisher_count": 1,
+        "finalized_height": 16,
+        "finalization_lag": 0,
+        "finalization_source": "creg-canonical-store",
+        "validator_set_source": "chain-authoritative",
+        "validator_set_sync_state": "synced",
+        "validator_set_last_finalized_source_block": 11797456
+      },
+      "health": {
+        "status": "ok",
+        "node_id": "observer-3",
+        "is_validator": false,
+        "version": "0.1.0",
+        "validator_set_sync": {
+          "enabled": true,
+          "mode": "chain-authoritative",
+          "state": "synced",
+          "last_finalized_source_block": 11797456,
+          "cursor_block": 11797456,
+          "cursor_log_index": 4294967295,
+          "cursor_block_hash": "0x479bce03ffd06413f41f762b634d99939e21c508916dc7bcb95d2c35992e5ded",
+          "last_poll_at": "2026-09-28T02:15:35.966177930+00:00",
+          "last_error": null
+        },
+        "sandbox": {
+          "engine": "nsjail",
+          "dev_bypass": false,
+          "isolated": true,
+          "degraded": false,
+          "note": "kernel namespaces + seccomp-BPF (primary engine)"
+        },
+        "sync": {
+          "lag_blocks": 0,
+          "max_peer_tip": 16,
+          "healthy": true
+        }
+      },
+      "scanner_profile_matches": true,
+      "role": "observer",
+      "expected_node_id": "observer-3",
+      "checks": {
+        "package_absent": true,
+        "signed_r7": true,
+        "shared_h16": true,
+        "correct_role": true,
+        "r13_scanner": true
+      },
+      "passed": true
+    },
+    {
+      "slot": "o4",
+      "captured_at_utc": "2026-09-28T02:16:06.441672+00:00",
+      "package_http_status": 404,
+      "package_body": "{\"error\":\"Package not found: npm:has-flag@5.0.1\"}",
+      "stats": {
+        "tip_height": 16,
+        "tip_hash": "4bd594d71b4fc8bc785c34b1e46291518328233c8aed616171efd9add073e260",
+        "package_count": 6,
+        "block_count": 17,
+        "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+        "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+        "spec_signature_verified": true,
+        "l1_rpc_configured": true,
+        "is_validator": false,
+        "validator_count": 4,
+        "active_validators": 4,
+        "total_stake": 400,
+        "total_stake_native": "400",
+        "peer_count": 7,
+        "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+        "l1_block": 0,
+        "pending_tx_count": 0,
+        "publisher_count": 1,
+        "finalized_height": 16,
+        "finalization_lag": 0,
+        "finalization_source": "creg-canonical-store",
+        "validator_set_source": "chain-authoritative",
+        "validator_set_sync_state": "synced",
+        "validator_set_last_finalized_source_block": 11797458
+      },
+      "health": {
+        "status": "ok",
+        "node_id": "observer-4",
+        "is_validator": false,
+        "version": "0.1.0",
+        "validator_set_sync": {
+          "enabled": true,
+          "mode": "chain-authoritative",
+          "state": "synced",
+          "last_finalized_source_block": 11797458,
+          "cursor_block": 11797458,
+          "cursor_log_index": 4294967295,
+          "cursor_block_hash": "0x4b26ced469b62247d8f548917077ade1ccb4fcb5cd9ab36ae5745b737b5f6b25",
+          "last_poll_at": "2026-09-28T02:16:00.198209667+00:00",
+          "last_error": null
+        },
+        "sandbox": {
+          "engine": "nsjail",
+          "dev_bypass": false,
+          "isolated": true,
+          "degraded": false,
+          "note": "kernel namespaces + seccomp-BPF (primary engine)"
+        },
+        "sync": {
+          "lag_blocks": 0,
+          "max_peer_tip": 16,
+          "healthy": true
+        }
+      },
+      "scanner_profile_matches": true,
+      "role": "observer",
+      "expected_node_id": "observer-4",
+      "checks": {
+        "package_absent": true,
+        "signed_r7": true,
+        "shared_h16": true,
+        "correct_role": true,
+        "r13_scanner": true
+      },
+      "passed": true
+    }
+  ]
+}

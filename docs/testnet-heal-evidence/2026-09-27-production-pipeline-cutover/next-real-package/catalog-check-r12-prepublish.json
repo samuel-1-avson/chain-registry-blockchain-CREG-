@@ -1,0 +1,56 @@
+{
+  "schema": "creg-r7-candidate-absence-v1",
+  "captured_at_utc": "2026-09-28T00:17:13.6326059Z",
+  "canonical": "npm:escape-string-regexp@5.0.0",
+  "all_eight_absent": true,
+  "nodes": [
+    {
+      "slot": "v1",
+      "host": "operator-laptop",
+      "status": 404,
+      "body": "Package not found"
+    },
+    {
+      "slot": "v2",
+      "host": "creg-validator-1",
+      "status": 404,
+      "body": "{\"error\":\"Package not found: npm:escape-string-regexp@5.0.0\"}"
+    },
+    {
+      "slot": "v3",
+      "host": "creg-validator-3",
+      "status": 404,
+      "body": "{\"error\":\"Package not found: npm:escape-string-regexp@5.0.0\"}"
+    },
+    {
+      "slot": "v4",
+      "host": "creg-validator-4",
+      "status": 404,
+      "body": "{\"error\":\"Package not found: npm:escape-string-regexp@5.0.0\"}"
+    },
+    {
+      "slot": "o1",
+      "host": "creg-testnet-vm",
+      "status": 404,
+      "body": "{\"error\":\"Package not found: npm:escape-string-regexp@5.0.0\"}"
+    },
+    {
+      "slot": "o2",
+      "host": "creg-observer-vm",
+      "status": 404,
+      "body": "{\"error\":\"Package not found: npm:escape-string-regexp@5.0.0\"}"
+    },
+    {
+      "slot": "o3",
+      "host": "creg-observer-3",
+      "status": 404,
+      "body": "{\"error\":\"Package not found: npm:escape-string-regexp@5.0.0\"}"
+    },
+    {
+      "slot": "o4",
+      "host": "creg-observer-4",
+      "status": 404,
+      "body": "{\"error\":\"Package not found: npm:escape-string-regexp@5.0.0\"}"
+    }
+  ]
+}

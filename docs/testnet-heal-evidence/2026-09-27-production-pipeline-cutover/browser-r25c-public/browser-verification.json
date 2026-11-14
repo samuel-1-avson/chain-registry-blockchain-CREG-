@@ -1,0 +1,109 @@
+{
+  "captured_at_utc": "2026-09-27T21:29:31.516Z",
+  "base_url": "https://explorer.testnet.cregnet.dev",
+  "expected_chain": "creg-testnet-1",
+  "expected_height": 0,
+  "javascript_errors": [],
+  "http_5xx": [],
+  "routes": [
+    {
+      "path": "/",
+      "http_status": 200,
+      "rendered_text": "Skip to main content\nC\nChain Registry\n#0\n⌕\n/\n☀\nDashboard\nBlocks\nPending\nValidators\nPackages\nConsensus\nBridge\nEvents\nNetwork\nMetrics\nRich List\nReorgs\nProof\nWallet\nPublish\nCHAIN HEIGHT\n0\ngenesis 068364cf77…\nFINALIZED\n0\n0 BLOCKS BEHIND\nVALIDATORS\n2\n2 active\nTOTAL STAKE\n200\nCREG\nPACKAGES\n0\nPENDING TXS\n4\nLatest blocks\nView all →\nHEIGHT\tHASH\tTXS\tPRODUCER\tAGE\n#0\t\n068364…296b53\n⧉\n\t0\t\ngenesis\n⧉\n\t1000d ago\nLive events\nOpen feed →\nALL\nBLOCK\nTX\nVOTE\nBRIDGE\nPACKAGE\n\nWaiting for events…\n\nRECENT PACKAGES\nView all →\n\nNo packages yet.\n\nBRIDGE STATUS\nL1 chain\n—\nLast anchor\n—\nBridge signer\n—\nSync status\nLEGACY CHECKPOINTING DISABLED BY PHASE 0 SAFETY FREEZE\nRUNTIME\nBuild\n0.1.0\nChain ID\ncreg-testnet-1\nNetwork\n—\nTestnet\n—\nChain Registry Explorer — deep-linkable, keyboard-accessible, open-source\nAbout"
+    },
+    {
+      "path": "/blocks",
+      "http_status": 200,
+      "rendered_text": "Skip to main content\nC\nChain Registry\n#0\n⌕\n/\n☀\nDashboard\nBlocks\nPending\nValidators\nPackages\nConsensus\nBridge\nEvents\nNetwork\nMetrics\nRich List\nReorgs\nProof\nWallet\nPublish\nBlocks\ntip: #0\nshowing 1\n● Live\nHEIGHT\tHASH\tTXS\tPRODUCER\tSTATUS\tAGE\n#0\t\n068364cf…296b53\n⧉\n\t0\t\ngenesis\n⧉\n\tFINALIZED\t1000d ago\n← Newer blocks\nOlder blocks →\nChain Registry Explorer — deep-linkable, keyboard-accessible, open-source\nAbout"
+    },
+    {
+      "path": "/validators",
+      "http_status": 200,
+      "rendered_text": "Skip to main content\nC\nChain Registry\n#0\n⌕\n/\n☀\nDashboard\nBlocks\nPending\nValidators\nPackages\nConsensus\nBridge\nEvents\nNetwork\nMetrics\nRich List\nReorgs\nProof\nWallet\nPublish\nValidators\n2 total\nADDRESS\tALIAS\tSTAKE\tSTATUS\tNODE\n\nvalidator-1\n⧉\n\tGenesis validator-1 (us-east1-b)\t100 CREG\tACTIVE\t\nvalidator-1\n\n\nvalidator-2\n⧉\n\tGenesis validator-2 (local)\t100 CREG\tACTIVE\t\nvalidator-2\nChain Registry Explorer — deep-linkable, keyboard-accessible, open-source\nAbout"
+    },
+    {
+      "path": "/packages",
+      "http_status": 200,
+      "rendered_text": "Skip to main content\nC\nChain Registry\n#0\n⌕\n/\n☀\nDashboard\nBlocks\nPending\nValidators\nPackages\nConsensus\nBridge\nEvents\nNetwork\nMetrics\nRich List\nReorgs\nProof\nWallet\nPublish\nNo packages yet\n\nOnce publishers start shipping, their canonical hashes will appear here.\n\nChain Registry Explorer — deep-linkable, keyboard-accessible, open-source\nAbout"
+    },
+    {
+      "path": "/consensus",
+      "http_status": 200,
+      "rendered_text": "Skip to main content\nC\nChain Registry\n#0\n⌕\n/\n☀\nDashboard\nBlocks\nPending\nValidators\nPackages\nConsensus\nBridge\nEvents\nNetwork\nMetrics\nRich List\nReorgs\nProof\nWallet\nPublish\nPBFT consensus\nVALIDATORS2/2 online\nQUORUM2 of 2\nACTIVE ROUNDS0\nPENDING POOL4\nNo active rounds\n\nNo PBFT rounds in flight — chain is at tip.\n\nChain Registry Explorer — deep-linkable, keyboard-accessible, open-source\nAbout"
+    },
+    {
+      "path": "/bridge",
+      "http_status": 200,
+      "rendered_text": "Skip to main content\nC\nChain Registry\n#0\n⌕\n/\n☀\nDashboard\nBlocks\nPending\nValidators\nPackages\nConsensus\nBridge\nEvents\nNetwork\nMetrics\nRich List\nReorgs\nProof\nWallet\nPublish\nL1 Checkpoint Anchoring\nUNKNOWN\nDISABLED\n🔗\nShare\n\nVerified L2 batches are anchored to Ethereum as checkpoint attestations signed by the bridge operator and approved by governance. State roots are computed off-chain by PBFT validators — anchors are not validity proofs.\n\nHEALTH\nDegraded\nSYNC STATUS\nLegacy checkpointing disabled by Phase 0 safety freeze\nLAST ANCHOR\n—\nL1 CHAIN\n—\nCOMMIT CADENCE\n—\nAnchor configuration\nREGISTRY CONTRACT\n0xD0F465ca185a99E268be0C4FF5A135Bdf89FAF3B\n⧉\nSIGNER ADDRESS\n—\nCURRENT STATE ROOT\n—\nLAST ANCHOR L1 TX\n—\nLAST ANCHOR BLOCK\n0\nFINALIZED L1 BLOCK\n—\nANCHORS RECORDED\n0\nAnchor history\n0 commits\nNo anchor history\n\nThe bridge hasn't committed any state to L1 yet.\n\nChain Registry Explorer — deep-linkable, keyboard-accessible, open-source\nAbout"
+    },
+    {
+      "path": "/events",
+      "http_status": 200,
+      "rendered_text": "Skip to main content\nC\nChain Registry\n#0\n⌕\n/\n☀\nDashboard\nBlocks\nPending\nValidators\nPackages\nConsensus\nBridge\nEvents\nNetwork\nMetrics\nRich List\nReorgs\nProof\nWallet\nPublish\nLive events\n0 of 0\n🔗\nShare\nAll types (0)\n⏸ Pause\n↕ Auto-scroll\n≡ Compact\n⇩ Export\nNo events match\n\nRelax the filter or wait for the next event.\n\nLIVE Buffer: 0 events\nShowing: 0 / 0\nChain Registry Explorer — deep-linkable, keyboard-accessible, open-source\nAbout"
+    },
+    {
+      "path": "/network",
+      "http_status": 200,
+      "rendered_text": "Skip to main content\nC\nChain Registry\n#0\n⌕\n/\n☀\nDashboard\nBlocks\nPending\nValidators\nPackages\nConsensus\nBridge\nEvents\nNetwork\nMetrics\nRich List\nReorgs\nProof\nWallet\nPublish\nNetwork\nPEERS\n1\nLISTEN ADDR\n—\nPUBKEY\n—\nNode list unavailable\nNetwork topology requires operator credentials on this node.\nEndpoint: /v1/operator/nodes (401)\nChain Registry Explorer — deep-linkable, keyboard-accessible, open-source\nAbout"
+    },
+    {
+      "path": "/metrics",
+      "http_status": 200,
+      "rendered_text": "Skip to main content\nC\nChain Registry\n#0\n⌕\n/\n☀\nDashboard\nBlocks\nPending\nValidators\nPackages\nConsensus\nBridge\nEvents\nNetwork\nMetrics\nRich List\nReorgs\nProof\nWallet\nPublish\nMetrics\n\nDurable history from server-side Prometheus scrapes\n\n5m\n30m\n1h\n6h\n24h\n7d\n🔗\nShare\nCHAIN HEIGHT\n0\nVALIDATORS\n2 / 2\nPACKAGES\n0\nPENDING TXS\n4\nFINALIZATION LAG\n— blocks\nPUBLISHERS\n0\nHistorical metrics unavailable\nServer-side metric history is unavailable until the real Prometheus collector is connected.\nEndpoint: /v1/public/metrics/history?range=30m (404)\nChain Registry Explorer — deep-linkable, keyboard-accessible, open-source\nAbout"
+    },
+    {
+      "path": "/richlist",
+      "http_status": 200,
+      "rendered_text": "Skip to main content\nC\nChain Registry\n#0\n⌕\n/\n☀\nDashboard\nBlocks\nPending\nValidators\nPackages\nConsensus\nBridge\nEvents\nNetwork\nMetrics\nRich List\nReorgs\nProof\nWallet\nPublish\n💰\nRich List\nTop Accounts by Stake (2)\nRANK\tADDRESS\tALIAS\tSTATUS\tSTAKE (CREG)\t% SHARE\n1\t\nvalidator-1\n⧉\n\tGenesis validator-1 (us-east1-b)\tONLINE\t100\t50.00%\n2\t\nvalidator-2\n⧉\n\tGenesis validator-2 (local)\tONLINE\t100\t50.00%\nChain Registry Explorer — deep-linkable, keyboard-accessible, open-source\nAbout"
+    },
+    {
+      "path": "/reorgs",
+      "http_status": 200,
+      "rendered_text": "Skip to main content\nC\nChain Registry\n#0\n⌕\n/\n☀\nDashboard\nBlocks\nPending\nValidators\nPackages\nConsensus\nBridge\nEvents\nNetwork\nMetrics\nRich List\nReorgs\nProof\nWallet\nPublish\n🔀\nChain Reorganizations\nTotal forks detected: 0\nNo chain reorganizations detected\n\nNo chain reorganizations detected on this node yet.\n\nChain Registry Explorer — deep-linkable, keyboard-accessible, open-source\nAbout"
+    },
+    {
+      "path": "/proof",
+      "http_status": 200,
+      "rendered_text": "Skip to main content\nC\nChain Registry\n#0\n⌕\n/\n☀\nDashboard\nBlocks\nPending\nValidators\nPackages\nConsensus\nBridge\nEvents\nNetwork\nMetrics\nRich List\nReorgs\nProof\nWallet\nPublish\nProof verifier\n\nCheck whether a publication transaction is included in a block. This view does not establish current install safety or independently verify the block's quorum certificate.\n\n🔗\nShare\nFetch proof by package\n⇩ Fetch proof\nOr paste proof JSON\nHow it works\n\nA package publication is committed into its block's Merkle root. This proves historical inclusion only; a later revocation does not erase that proof.\n\nEnter a package canonical (e.g., npm/express@4.18.0) above\nThe verifier fetches the Merkle proof from the node\nRecompute hashes along the proof path using each proof.path[].is_right direction bit\nCompare the recomputed root against proof.expected_root and block_header.merkle_root\n\nUse the CLI light-client verifier for signed-spec ancestry, validator-set authority and quorum checks. A valid inclusion proof does not mean a package is currently safe to install.\n\nChain Registry Explorer — deep-linkable, keyboard-accessible, open-source\nAbout"
+    },
+    {
+      "path": "/wallet",
+      "http_status": 200,
+      "rendered_text": "Skip to main content\nC\nChain Registry\n#0\n⌕\n/\n☀\nDashboard\nBlocks\nPending\nValidators\nPackages\nConsensus\nBridge\nEvents\nNetwork\nMetrics\nRich List\nReorgs\nProof\nWallet\nPublish\nWallet & Stake\nEthereum SepoliaChain ID 11155111\nPublic Ethereum testnet for Chain Registry.\nConnect Wallet\nConnect MetaMask\nWalletConnect\nConnects to Ethereum Sepolia (Chain 11155111)\nChain Registry Explorer — deep-linkable, keyboard-accessible, open-source\nAbout"
+    },
+    {
+      "path": "/publish",
+      "http_status": 200,
+      "rendered_text": "Skip to main content\nC\nChain Registry\n#0\n⌕\n/\n☀\nDashboard\nBlocks\nPending\nValidators\nPackages\nConsensus\nBridge\nEvents\nNetwork\nMetrics\nRich List\nReorgs\nProof\nWallet\nPublish\n404\n\nNo route matches /publish.\n\n← Back to dashboard\nChain Registry Explorer — deep-linkable, keyboard-accessible, open-source\nAbout"
+    }
+  ],
+  "writes_performed": false,
+  "response_interception_used": false,
+  "node_stats": {
+    "tip_height": 0,
+    "tip_hash": "068364cf778ede5a0b1c814c59b0314f9a8598a959fa5a8e08ea78bc1b296b53",
+    "package_count": 0,
+    "block_count": 1,
+    "chain_id": "creg-testnet-1",
+    "genesis_hash": "068364cf778ede5a0b1c814c59b0314f9a8598a959fa5a8e08ea78bc1b296b53",
+    "spec_signature_verified": true,
+    "l1_rpc_configured": true,
+    "is_validator": false,
+    "validator_count": 2,
+    "active_validators": 2,
+    "total_stake": 200,
+    "total_stake_native": "200",
+    "peer_count": 1,
+    "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+    "l1_block": 0,
+    "pending_tx_count": 4,
+    "publisher_count": 0,
+    "finalized_height": 0,
+    "finalization_lag": 0,
+    "validator_set_source": "chain-authoritative",
+    "validator_set_sync_state": "synced",
+    "validator_set_last_finalized_source_block": 11796027
+  },
+  "sepolia_rpc_chain_id": 11155111,
+  "status": "passed"
+}

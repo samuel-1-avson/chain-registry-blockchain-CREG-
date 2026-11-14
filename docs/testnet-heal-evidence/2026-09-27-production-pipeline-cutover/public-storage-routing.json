@@ -1,0 +1,18 @@
+{
+  "timestamp_utc": "2026-09-27T20:35:41Z",
+  "status": "passed",
+  "ipfs": {
+    "cid": "QmUrMstFUhR3dvynxTaZwRg3nNYrGVgh4P95UR2QgAeBjz",
+    "bytes": 1917,
+    "sha256": "a101155c3cbdfb1e4f98f2f83c8b5e392db6accfa606df0eba8b87a5762b0366",
+    "content_gateway_http_status": 200,
+    "legacy_installer_ipfs_api_http_status": 200
+  },
+  "public_metrics": {
+    "http_status": 200,
+    "format": "Prometheus text",
+    "chain_id": "creg-testnet-1"
+  },
+  "faucet_healthy": true,
+  "public_chain_changed": false
+}

@@ -1,0 +1,32 @@
+{
+  "captured_at_utc": "2026-09-28T04:09:11Z",
+  "status": "passed",
+  "image": "us-central1-docker.pkg.dev/gen-lang-client-0022105784/creg-testnet/creg-web-explorer@sha256:9df577975d1646289e5c1a58fd90cf48b89bfaac41f59122b02d3e7aec44d792",
+  "public_frontend": "r26",
+  "public_chain_cutover": false,
+  "public_chain": {
+    "chain_id": "creg-testnet-1",
+    "tip_height": 0,
+    "tip_hash": "068364cf778ede5a0b1c814c59b0314f9a8598a959fa5a8e08ea78bc1b296b53",
+    "validator_count": 2
+  },
+  "private_candidate": {
+    "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+    "tip_height": 18,
+    "tip_hash": "ec64471b8f9c58eb2d9b958db765a98871cb444e032143d313d65b3ab80cd76c",
+    "finalized_height": 18
+  },
+  "private_metrics": {
+    "status": "ready",
+    "sample_count": 40,
+    "queried_series": 7
+  },
+  "rpc_chain_id": "0xaa36a7",
+  "faucet": {
+    "status": "healthy",
+    "token_drips_available": true
+  },
+  "browser_routes_public": 14,
+  "browser_errors_public": 0,
+  "prior_r25_detached_for_rollback": true
+}

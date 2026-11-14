@@ -1,0 +1,14 @@
+{
+  "schema": "creg-real-publish-admission-v1",
+  "submitted_at_utc": "2026-09-26T10:28:06.4715509Z",
+  "canonical": "npm:is-number@7.0.0",
+  "target": "candidate V1",
+  "http_status": 202,
+  "response": {
+    "status": "accepted",
+    "canonical": "npm:is-number@7.0.0",
+    "message": "Package submitted. Validator pipeline will pick it up shortly."
+  },
+  "shared_h1_confirmed": true,
+  "publication_hash": "0121be9bb637aec634cd5f081fb903ee4749875d8225683f057af005ae16f436"
+}

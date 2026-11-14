@@ -1,0 +1,15 @@
+{
+  "schema": "creg-real-package-provenance-v1",
+  "captured_at_utc": "2026-09-26T10:17:58.7614686Z",
+  "canonical": "npm:is-number@7.0.0",
+  "metadata_url": "https://registry.npmjs.org/is-number/7.0.0",
+  "tarball_url": "https://registry.npmjs.org/is-number/-/is-number-7.0.0.tgz",
+  "upstream_integrity": "sha512-41Cifkg6e8TylSpdtTpeLVMqvSBEVzTttHvERD741+pnZ8ANv0004MRL43QKPDlK9cGvNp6NZWZUBlbGXYxxng==",
+  "integrity_verified": true,
+  "tarball_sha256": "7b75c1057198cf97696909a9bee176c9c5e9bcb5b03bf3ecef2f484defadd51e",
+  "tarball_bytes": 3730,
+  "submitted": true,
+  "shared_publication_height": 1,
+  "shared_revocation_height": 4,
+  "ipfs_cid": "QmQ8kbWCkjk77RxP3GMCG7WiSj43WP2ZUBWxmttA2bscn6"
+}

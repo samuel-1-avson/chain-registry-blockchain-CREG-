@@ -1,0 +1,180 @@
+{
+  "checks": {
+    "same_h6": true,
+    "chain_identity": true,
+    "four_validators": true,
+    "scanner_ready": true,
+    "queues_clear": true,
+    "retained_rounds_safe": true,
+    "admissions_retired": true,
+    "canonical_commit_certificate": true,
+    "peers_connected": true,
+    "correct_role": true
+  },
+  "passed": true,
+  "stats": {
+    "tip_height": 6,
+    "tip_hash": "d8814d091c8a50c2c7bfd535b7524d09bfce17b8c63b6b72c33699b8e52f9fb6",
+    "package_count": 3,
+    "block_count": 7,
+    "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+    "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+    "spec_signature_verified": true,
+    "l1_rpc_configured": true,
+    "is_validator": false,
+    "validator_count": 4,
+    "active_validators": 4,
+    "total_stake": 400,
+    "total_stake_native": "400",
+    "peer_count": 2,
+    "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+    "l1_block": 0,
+    "pending_tx_count": 0,
+    "publisher_count": 1,
+    "finalized_height": 6,
+    "finalization_lag": 0,
+    "finalization_source": "creg-canonical-store",
+    "validator_set_source": "chain-authoritative",
+    "validator_set_sync_state": "synced",
+    "validator_set_last_finalized_source_block": 11788550
+  },
+  "health": {
+    "status": "ok",
+    "node_id": "observer-3",
+    "is_validator": false,
+    "version": "0.1.0",
+    "validator_set_sync": {
+      "enabled": true,
+      "mode": "chain-authoritative",
+      "state": "synced",
+      "last_finalized_source_block": 11788550,
+      "cursor_block": 11788550,
+      "cursor_log_index": 4294967295,
+      "cursor_block_hash": "0x292f139584ef8b25ff21d8812892ede6f54b4308b6ea1b85ac9074b365f0ca20",
+      "last_poll_at": "2026-09-26T20:27:18.714287548+00:00",
+      "last_error": null
+    },
+    "sandbox": {
+      "engine": "nsjail",
+      "dev_bypass": false,
+      "isolated": true,
+      "degraded": false,
+      "note": "kernel namespaces + seccomp-BPF (primary engine)"
+    },
+    "sync": {
+      "lag_blocks": 0,
+      "max_peer_tip": 6,
+      "healthy": true
+    }
+  },
+  "pbft": {
+    "active_round_count": 0,
+    "max_non_terminal_phase_age_seconds": 0.0,
+    "rounds": []
+  },
+  "retained_rounds": [],
+  "canonical_commit_signers": [
+    "validator-2",
+    "validator-3",
+    "validator-4"
+  ],
+  "schema": "creg-real-r20-rollout-v1",
+  "captured_at_utc": "2026-09-26T20:27:24.063452+00:00",
+  "slot": "o3",
+  "prior_image": "sha256:dd07eef4a657707fdad696b1b4cc7397ee2589b82e3511c892ff3a806f3dcb03",
+  "image_id": "sha256:8c152eb077f14743d1aa83c0224fc779f88997383597872b9db676d774083101",
+  "preserved_container": "creg-phase-c-r7-o3-r18-osv-r10-preserved-for-r20",
+  "p2p_identity_preserved": true,
+  "signer_journal_untouched": true,
+  "queue_review": {
+    "schema": "creg-finalized-work-diagnostics-v1",
+    "mode": "read-only",
+    "publisher_signatures_included": false,
+    "active_count": 0,
+    "dead_letter_count": 0,
+    "active": [],
+    "dead_letters": []
+  },
+  "before": {
+    "checks": {
+      "same_h6": true,
+      "chain_identity": true,
+      "four_validators": true,
+      "scanner_ready": true,
+      "queues_clear": true,
+      "retained_rounds_safe": true,
+      "admissions_retired": true,
+      "canonical_commit_certificate": true,
+      "peers_connected": true,
+      "correct_role": true
+    },
+    "passed": true,
+    "stats": {
+      "tip_height": 6,
+      "tip_hash": "d8814d091c8a50c2c7bfd535b7524d09bfce17b8c63b6b72c33699b8e52f9fb6",
+      "package_count": 3,
+      "block_count": 7,
+      "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+      "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+      "spec_signature_verified": true,
+      "l1_rpc_configured": true,
+      "is_validator": false,
+      "validator_count": 4,
+      "active_validators": 4,
+      "total_stake": 400,
+      "total_stake_native": "400",
+      "peer_count": 2,
+      "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+      "l1_block": 0,
+      "pending_tx_count": 3,
+      "publisher_count": 1,
+      "finalized_height": 6,
+      "finalization_lag": 0,
+      "finalization_source": "creg-canonical-store",
+      "validator_set_source": "chain-authoritative",
+      "validator_set_sync_state": "synced",
+      "validator_set_last_finalized_source_block": 11788548
+    },
+    "health": {
+      "status": "ok",
+      "node_id": "observer-3",
+      "is_validator": false,
+      "version": "0.1.0",
+      "validator_set_sync": {
+        "enabled": true,
+        "mode": "chain-authoritative",
+        "state": "synced",
+        "last_finalized_source_block": 11788548,
+        "cursor_block": 11788548,
+        "cursor_log_index": 4294967295,
+        "cursor_block_hash": "0xa2e4ba9f157b4aae9cc3aa7e4563766a73842658b8e378bae5b6d26457ce8aa5",
+        "last_poll_at": "2026-09-26T20:26:59.954911747+00:00",
+        "last_error": null
+      },
+      "sandbox": {
+        "engine": "nsjail",
+        "dev_bypass": false,
+        "isolated": true,
+        "degraded": false,
+        "note": "kernel namespaces + seccomp-BPF (primary engine)"
+      },
+      "sync": {
+        "lag_blocks": 0,
+        "max_peer_tip": 6,
+        "healthy": true
+      }
+    },
+    "pbft": {
+      "active_round_count": 0,
+      "max_non_terminal_phase_age_seconds": 0.0,
+      "rounds": []
+    },
+    "retained_rounds": [],
+    "canonical_commit_signers": [
+      "validator-2",
+      "validator-3",
+      "validator-4"
+    ]
+  },
+  "public_cutover": false
+}

@@ -1,0 +1,7 @@
+→ Connecting to event stream at http://host.docker.internal:18081/v1/events
+→ Filter: all
+────────────────────────────────────────────────────────────
+✗ Stream error: request or response body error: error reading a body from connection: unexpected EOF during chunk size line
+↻ Reconnecting in 1s... (1/10)
+✗ Connection failed: error sending request for url (http://host.docker.internal:18081/v1/events): connection closed before message completed
+↻ Reconnecting in 2s... (2/10)

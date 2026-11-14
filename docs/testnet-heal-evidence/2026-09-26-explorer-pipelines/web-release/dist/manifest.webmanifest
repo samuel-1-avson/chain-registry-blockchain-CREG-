@@ -1,0 +1,1 @@
+{"name":"Chain Registry Explorer","short_name":"CRegExplorer","description":"Block explorer for the Chain Registry L1 - blocks, validators, packages, bridge, governance.","start_url":"/","display":"standalone","background_color":"#0a0b0f","theme_color":"#0a0b0f","lang":"en","scope":"/","icons":[{"src":"pwa-icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]}

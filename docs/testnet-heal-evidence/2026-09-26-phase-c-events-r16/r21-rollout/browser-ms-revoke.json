@@ -1,0 +1,59 @@
+{
+  "capturedAt": "2026-09-26T23:01:16.050Z",
+  "dataSource": "live Phase C candidate node through the real Vite proxy; no fixtures or intercepted responses",
+  "explorerUrl": "http://127.0.0.1:3008",
+  "candidateNodeUrl": "http://127.0.0.1:18080",
+  "operation": "revoke",
+  "canonical": "npm:ms@2.1.3",
+  "startingHeight": 11,
+  "probeError": null,
+  "checks": {
+    "stream_opened": true,
+    "revoked": true,
+    "block_produced": true,
+    "event_rendered_in_web_explorer": true,
+    "no_page_errors": true
+  },
+  "connections": [
+    {
+      "url": "http://127.0.0.1:3008/v1/public/events",
+      "opened": true,
+      "errors": 0
+    }
+  ],
+  "events": [
+    {
+      "type": "block_produced",
+      "data": {
+        "kind": "block_produced",
+        "ts": "2026-09-26T23:01:15.479938664+00:00",
+        "payload": {
+          "height": 12,
+          "hash": "a329eb216ce1fd18e1f5510333cb683db34ca6e789b5a3ef229dabe2af08fc7d",
+          "tx_count": 1,
+          "block_hash": "a329eb216ce1fd18e1f5510333cb683db34ca6e789b5a3ef229dabe2af08fc7d",
+          "block_phase": "committed"
+        }
+      },
+      "receivedAt": "2026-09-26T23:01:15.492Z"
+    },
+    {
+      "type": "package_revoked",
+      "data": {
+        "kind": "package_revoked",
+        "ts": "2026-09-26T23:01:15.480663614+00:00",
+        "payload": {
+          "canonical": "npm:ms@2.1.3",
+          "reason": "Phase C live revocation after shared publication",
+          "revoked_by": "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d",
+          "height": 12,
+          "block_hash": "a329eb216ce1fd18e1f5510333cb683db34ca6e789b5a3ef229dabe2af08fc7d",
+          "block_phase": "committed"
+        }
+      },
+      "receivedAt": "2026-09-26T23:01:15.505Z"
+    }
+  ],
+  "renderedText": "Live events\n2 of 2\n🔗\nShare\nAll types (2)\nblock_produced (1)\npackage_revoked (1)\n⏸ Pause\n↕ Auto-scroll\n≡ Compact\n⇩ Export\nall (2)\nblock_produced (1)\npackage_revoked (1)\nPACKAGE_REVOKED\n#12\nnpm:ms@2.1.3\n0s ago\nBLOCK_PRODUCED\n#12\n0s ago\nLIVE Buffer: 2 events\nShowing: 2 / 2",
+  "pageErrors": []
+}

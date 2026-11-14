@@ -1,0 +1,76 @@
+{
+  "capturedAt": "2026-09-26T22:40:11.648Z",
+  "connections": [
+    {
+      "url": "http://127.0.0.1:3008/v1/public/events",
+      "opened": true,
+      "errors": 0
+    }
+  ],
+  "events": [
+    {
+      "type": "package_submitted",
+      "data": {
+        "kind": "package_submitted",
+        "ts": "2026-09-26T22:38:59.809479150+00:00",
+        "payload": {
+          "canonical": "npm:ms@2.1.3",
+          "publisher_pubkey": "863906af03a385de"
+        }
+      },
+      "receivedAt": "2026-09-26T22:38:59.818Z"
+    },
+    {
+      "type": "validator_voted",
+      "data": {
+        "kind": "validator_voted",
+        "ts": "2026-09-26T22:39:01.431617567+00:00",
+        "payload": {
+          "validator_id": "validator-3",
+          "canonical": "npm:ms@2.1.3",
+          "approved": true
+        }
+      },
+      "receivedAt": "2026-09-26T22:39:01.435Z"
+    },
+    {
+      "type": "validator_voted",
+      "data": {
+        "kind": "validator_voted",
+        "ts": "2026-09-26T22:39:01.765280331+00:00",
+        "payload": {
+          "validator_id": "validator-1",
+          "canonical": "npm:ms@2.1.3",
+          "approved": true
+        }
+      },
+      "receivedAt": "2026-09-26T22:39:01.768Z"
+    },
+    {
+      "type": "validator_voted",
+      "data": {
+        "kind": "validator_voted",
+        "ts": "2026-09-26T22:39:02.566920105+00:00",
+        "payload": {
+          "validator_id": "validator-2",
+          "canonical": "npm:ms@2.1.3",
+          "approved": true
+        }
+      },
+      "receivedAt": "2026-09-26T22:39:02.569Z"
+    },
+    {
+      "type": "validator_voted",
+      "data": {
+        "kind": "validator_voted",
+        "ts": "2026-09-26T22:39:04.429169243+00:00",
+        "payload": {
+          "validator_id": "validator-4",
+          "canonical": "npm:ms@2.1.3",
+          "approved": true
+        }
+      },
+      "receivedAt": "2026-09-26T22:39:04.431Z"
+    }
+  ]
+}

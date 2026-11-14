@@ -1,0 +1,345 @@
+{
+  "schema": "creg-phase-c-stopped-copy-dead-letter-review-r21-v1",
+  "captured_at_utc": "2026-09-26 21:40:59 UTC",
+  "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+  "tip_height": 9,
+  "tip_hash": "e0b40d52f7626f46a0bcf85040ec2c34dc1d576af0b1e7d65396d31c325f0837",
+  "inspection_mode": "read-only stopped-copy RocksDB inspection; publisher signatures excluded",
+  "counts": {
+    "active_work": 0,
+    "dead_letters": 13
+  },
+  "findings": [
+    "V3 original work 089d7fdd8308d6588563b5a30b41c900b79d8f0c16c908a5cd849b1e195e5b1e for npm:is-number@7.0.0 is preserved as dead letter; its publisher authorization nonce is already applied.",
+    "Every reviewed dead letter is a publish authorization whose nonce is already applied on the canonical chain. Preserve all records; none is eligible for replay.",
+    "V4 had one ephemeral in-memory pending item before the coordinated stop, while its persisted finalized-work queue was empty. The item did not appear in the stopped RocksDB copy."
+  ],
+  "duplicate_revoke_blocks": [
+    {
+      "height": 7,
+      "hash": "e7d0f50b235ab10a3be6dea22334e9daa532a45b96f075037e49db64fc341fd7",
+      "commit_signers": 3,
+      "transaction_hash": "52d1bdd74854d98089711e7809328bea9118f85db2619548165c539bca836681"
+    },
+    {
+      "height": 8,
+      "hash": "1ba1f9f9a61b59fbf32a8bebad14b393f3ab3ef070892e88ef97bf5cb4d4e846",
+      "commit_signers": 3,
+      "transaction_hash": "52d1bdd74854d98089711e7809328bea9118f85db2619548165c539bca836681"
+    },
+    {
+      "height": 9,
+      "hash": "e0b40d52f7626f46a0bcf85040ec2c34dc1d576af0b1e7d65396d31c325f0837",
+      "commit_signers": 3,
+      "transaction_hash": "52d1bdd74854d98089711e7809328bea9118f85db2619548165c539bca836681"
+    }
+  ],
+  "nodes": [
+    {
+      "slot": "v2",
+      "active_count": 0,
+      "dead_letter_count": 3,
+      "active": [],
+      "dead_letters": [
+        {
+          "work_id": "cec5e6f469cee9f1bf52489aa9f806a36a54ce324bf6fbf7fc05c3f68884e721",
+          "reason": "publisher authorization nonce is already committed on this chain",
+          "terminal_reason": "publisher authorization nonce is already committed on this chain",
+          "dead_lettered_at": "2026-09-26T18:02:44.982040608+00:00",
+          "enqueued_at": "2026-09-26T18:01:34.033442881+00:00",
+          "retry_count": 0,
+          "last_error": null,
+          "source": null,
+          "transaction": {
+            "type": "publish_authorized_v1",
+            "canonical": "npm:escape-html@1.0.3",
+            "publisher": "0xa40d79527314efd4964d49c4a0673c87b612348b",
+            "publisher_nonce": "3b98f0f96cfe876ce9b51fde1eec7768",
+            "publisher_authorization_expires_at": 1790449273,
+            "authorization_chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+            "authorization_nonce_applied": true,
+            "authorization_expired_now": true,
+            "authorization_expires_at": 1790449273
+          }
+        },
+        {
+          "work_id": "d001673bd48ecb6f829878fff7db51b7f4e1db7788e034db0904242f5eeafd47",
+          "reason": "publisher authorization nonce is already committed on this chain",
+          "terminal_reason": "publisher authorization nonce is already committed on this chain",
+          "dead_lettered_at": "2026-09-26T19:50:01.655801221+00:00",
+          "enqueued_at": "2026-09-26T19:49:24.657482466+00:00",
+          "retry_count": 0,
+          "last_error": null,
+          "source": null,
+          "transaction": {
+            "type": "publish_authorized_v1",
+            "canonical": "npm:toidentifier@1.0.1",
+            "publisher": "0xa40d79527314efd4964d49c4a0673c87b612348b",
+            "publisher_nonce": "de716abd2a3b0c6679f46ab51c918849",
+            "publisher_authorization_expires_at": 1790455683,
+            "authorization_chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+            "authorization_nonce_applied": true,
+            "authorization_expired_now": true,
+            "authorization_expires_at": 1790455683
+          }
+        },
+        {
+          "work_id": "ecbaa6ac3868919cf9b132dceb74310c6014b7068d90e8343985f36fa44f08f1",
+          "reason": "publisher authorization nonce is already committed on this chain",
+          "terminal_reason": "publisher authorization nonce is already committed on this chain",
+          "dead_lettered_at": "2026-09-26T10:29:55.549200135+00:00",
+          "enqueued_at": "2026-09-26T10:28:09.217052354+00:00",
+          "retry_count": 0,
+          "last_error": null,
+          "source": null,
+          "transaction": {
+            "type": "publish_authorized_v1",
+            "canonical": "npm:is-number@7.0.0",
+            "publisher": "0xa40d79527314efd4964d49c4a0673c87b612348b",
+            "publisher_nonce": "340b9947ed2423a06df933695eea9f73",
+            "publisher_authorization_expires_at": 1790421818,
+            "authorization_chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+            "authorization_nonce_applied": true,
+            "authorization_expired_now": true,
+            "authorization_expires_at": 1790421818
+          }
+        }
+      ]
+    },
+    {
+      "slot": "v3",
+      "active_count": 0,
+      "dead_letter_count": 3,
+      "active": [],
+      "dead_letters": [
+        {
+          "work_id": "089d7fdd8308d6588563b5a30b41c900b79d8f0c16c908a5cd849b1e195e5b1e",
+          "reason": "publisher authorization nonce is already committed on this chain",
+          "terminal_reason": "publisher authorization nonce is already committed on this chain",
+          "dead_lettered_at": "2026-09-26T15:39:14.284554047+00:00",
+          "enqueued_at": "2026-09-26T10:28:09.630011711+00:00",
+          "retry_count": 0,
+          "last_error": null,
+          "source": null,
+          "transaction": {
+            "type": "publish_authorized_v1",
+            "canonical": "npm:is-number@7.0.0",
+            "publisher": "0xa40d79527314efd4964d49c4a0673c87b612348b",
+            "publisher_nonce": "340b9947ed2423a06df933695eea9f73",
+            "publisher_authorization_expires_at": 1790421818,
+            "authorization_chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+            "authorization_nonce_applied": true,
+            "authorization_expired_now": true,
+            "authorization_expires_at": 1790421818
+          }
+        },
+        {
+          "work_id": "1f7d9afe6adfdffe456fbbbf32d5ef876f47f231f3c9122d6c7aec3d29846a65",
+          "reason": "publisher authorization nonce is already committed on this chain",
+          "terminal_reason": "publisher authorization nonce is already committed on this chain",
+          "dead_lettered_at": "2026-09-26T18:02:43.040567401+00:00",
+          "enqueued_at": "2026-09-26T18:01:34.056462803+00:00",
+          "retry_count": 0,
+          "last_error": null,
+          "source": null,
+          "transaction": {
+            "type": "publish_authorized_v1",
+            "canonical": "npm:escape-html@1.0.3",
+            "publisher": "0xa40d79527314efd4964d49c4a0673c87b612348b",
+            "publisher_nonce": "3b98f0f96cfe876ce9b51fde1eec7768",
+            "publisher_authorization_expires_at": 1790449273,
+            "authorization_chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+            "authorization_nonce_applied": true,
+            "authorization_expired_now": true,
+            "authorization_expires_at": 1790449273
+          }
+        },
+        {
+          "work_id": "843a3abeaba99abc61d76bcf0d6382355877671bb7e4ff0551e8622c5d9b78a2",
+          "reason": "publisher authorization nonce is already committed on this chain",
+          "terminal_reason": "publisher authorization nonce is already committed on this chain",
+          "dead_lettered_at": "2026-09-26T19:50:00.757926784+00:00",
+          "enqueued_at": "2026-09-26T19:49:24.745540051+00:00",
+          "retry_count": 0,
+          "last_error": null,
+          "source": null,
+          "transaction": {
+            "type": "publish_authorized_v1",
+            "canonical": "npm:toidentifier@1.0.1",
+            "publisher": "0xa40d79527314efd4964d49c4a0673c87b612348b",
+            "publisher_nonce": "de716abd2a3b0c6679f46ab51c918849",
+            "publisher_authorization_expires_at": 1790455683,
+            "authorization_chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+            "authorization_nonce_applied": true,
+            "authorization_expired_now": true,
+            "authorization_expires_at": 1790455683
+          }
+        }
+      ]
+    },
+    {
+      "slot": "v4",
+      "active_count": 0,
+      "dead_letter_count": 3,
+      "active": [],
+      "dead_letters": [
+        {
+          "work_id": "0043efbb83e75879a774e51e1cf8ab8beebbb119159ea3525ddca33053fc2e36",
+          "reason": "publisher authorization nonce is already committed on this chain",
+          "terminal_reason": "publisher authorization nonce is already committed on this chain",
+          "dead_lettered_at": "2026-09-26T19:50:00.117467338+00:00",
+          "enqueued_at": "2026-09-26T19:49:25.903638931+00:00",
+          "retry_count": 0,
+          "last_error": null,
+          "source": null,
+          "transaction": {
+            "type": "publish_authorized_v1",
+            "canonical": "npm:toidentifier@1.0.1",
+            "publisher": "0xa40d79527314efd4964d49c4a0673c87b612348b",
+            "publisher_nonce": "de716abd2a3b0c6679f46ab51c918849",
+            "publisher_authorization_expires_at": 1790455683,
+            "authorization_chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+            "authorization_nonce_applied": true,
+            "authorization_expired_now": true,
+            "authorization_expires_at": 1790455683
+          }
+        },
+        {
+          "work_id": "6888e192fbec959ef6c457138b584d8ac6d2b0e4783991fada58d66eb6e82a33",
+          "reason": "publisher authorization nonce is already committed on this chain",
+          "terminal_reason": "publisher authorization nonce is already committed on this chain",
+          "dead_lettered_at": "2026-09-26T10:37:48.570775102+00:00",
+          "enqueued_at": null,
+          "retry_count": null,
+          "last_error": null,
+          "source": "ephemeral_or_forced",
+          "transaction": {
+            "type": "publish_authorized_v1",
+            "canonical": "npm:is-number@7.0.0",
+            "publisher": "0xa40d79527314efd4964d49c4a0673c87b612348b",
+            "publisher_nonce": "340b9947ed2423a06df933695eea9f73",
+            "publisher_authorization_expires_at": 1790421818,
+            "authorization_chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+            "authorization_nonce_applied": true,
+            "authorization_expired_now": true,
+            "authorization_expires_at": 1790421818
+          }
+        },
+        {
+          "work_id": "d3837320d9813e71671c06c8b10972fe2a23b45d24fe63d3d26ea4c14fa75b87",
+          "reason": "publisher authorization nonce is already committed on this chain",
+          "terminal_reason": "publisher authorization nonce is already committed on this chain",
+          "dead_lettered_at": "2026-09-26T18:02:55.924240477+00:00",
+          "enqueued_at": "2026-09-26T18:01:35.747916598+00:00",
+          "retry_count": 0,
+          "last_error": null,
+          "source": null,
+          "transaction": {
+            "type": "publish_authorized_v1",
+            "canonical": "npm:escape-html@1.0.3",
+            "publisher": "0xa40d79527314efd4964d49c4a0673c87b612348b",
+            "publisher_nonce": "3b98f0f96cfe876ce9b51fde1eec7768",
+            "publisher_authorization_expires_at": 1790449273,
+            "authorization_chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+            "authorization_nonce_applied": true,
+            "authorization_expired_now": true,
+            "authorization_expires_at": 1790449273
+          }
+        }
+      ]
+    },
+    {
+      "slot": "v1",
+      "active_count": 0,
+      "dead_letter_count": 4,
+      "active": [],
+      "dead_letters": [
+        {
+          "work_id": "05ee3e125b8d0f13081e17acb89d94442867afc5520034e4a5f59943ae949d9e",
+          "reason": "publisher authorization nonce is already committed on this chain",
+          "terminal_reason": "publisher authorization nonce is already committed on this chain",
+          "dead_lettered_at": "2026-09-26T18:02:42.738509396+00:00",
+          "enqueued_at": null,
+          "retry_count": null,
+          "last_error": null,
+          "source": "ephemeral_or_forced",
+          "transaction": {
+            "type": "publish_authorized_v1",
+            "canonical": "npm:escape-html@1.0.3",
+            "publisher": "0xa40d79527314efd4964d49c4a0673c87b612348b",
+            "publisher_nonce": "3b98f0f96cfe876ce9b51fde1eec7768",
+            "publisher_authorization_expires_at": 1790449273,
+            "authorization_chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+            "authorization_nonce_applied": true,
+            "authorization_expired_now": true,
+            "authorization_expires_at": 1790449273
+          }
+        },
+        {
+          "work_id": "6888e192fbec959ef6c457138b584d8ac6d2b0e4783991fada58d66eb6e82a33",
+          "reason": "publisher authorization nonce is already committed on this chain",
+          "terminal_reason": "publisher authorization nonce is already committed on this chain",
+          "dead_lettered_at": "2026-09-26T10:29:19.089713440+00:00",
+          "enqueued_at": null,
+          "retry_count": null,
+          "last_error": null,
+          "source": "ephemeral_or_forced",
+          "transaction": {
+            "type": "publish_authorized_v1",
+            "canonical": "npm:is-number@7.0.0",
+            "publisher": "0xa40d79527314efd4964d49c4a0673c87b612348b",
+            "publisher_nonce": "340b9947ed2423a06df933695eea9f73",
+            "publisher_authorization_expires_at": 1790421818,
+            "authorization_chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+            "authorization_nonce_applied": true,
+            "authorization_expired_now": true,
+            "authorization_expires_at": 1790421818
+          }
+        },
+        {
+          "work_id": "8345b36c848854c51419e045cf589ffd6718cdb08a14c58dbd05d48d61031713",
+          "reason": "publisher authorization nonce is already committed on this chain",
+          "terminal_reason": "publisher authorization nonce is already committed on this chain",
+          "dead_lettered_at": "2026-09-26T19:50:00.401950052+00:00",
+          "enqueued_at": null,
+          "retry_count": null,
+          "last_error": null,
+          "source": "ephemeral_or_forced",
+          "transaction": {
+            "type": "publish_authorized_v1",
+            "canonical": "npm:toidentifier@1.0.1",
+            "publisher": "0xa40d79527314efd4964d49c4a0673c87b612348b",
+            "publisher_nonce": "de716abd2a3b0c6679f46ab51c918849",
+            "publisher_authorization_expires_at": 1790455683,
+            "authorization_chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+            "authorization_nonce_applied": true,
+            "authorization_expired_now": true,
+            "authorization_expires_at": 1790455683
+          }
+        },
+        {
+          "work_id": "fd44e48ea8601b1ab00e8ece79b230148f4bf18b2c0f5ffc47c285e261bba230",
+          "reason": "publisher authorization nonce is already committed on this chain",
+          "terminal_reason": "publisher authorization nonce is already committed on this chain",
+          "dead_lettered_at": "2026-09-26T10:29:19.092491402+00:00",
+          "enqueued_at": "2026-09-26T10:28:09.603117141+00:00",
+          "retry_count": 0,
+          "last_error": null,
+          "source": null,
+          "transaction": {
+            "type": "publish_authorized_v1",
+            "canonical": "npm:is-number@7.0.0",
+            "publisher": "0xa40d79527314efd4964d49c4a0673c87b612348b",
+            "publisher_nonce": "340b9947ed2423a06df933695eea9f73",
+            "publisher_authorization_expires_at": 1790421818,
+            "authorization_chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+            "authorization_nonce_applied": true,
+            "authorization_expired_now": true,
+            "authorization_expires_at": 1790421818
+          }
+        }
+      ]
+    }
+  ],
+  "public_cutover": false
+}

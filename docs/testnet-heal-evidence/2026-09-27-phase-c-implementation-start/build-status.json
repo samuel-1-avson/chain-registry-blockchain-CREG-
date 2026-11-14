@@ -1,0 +1,7 @@
+{
+  "timestamp_utc": "2026-09-27T01:25:30.7161209Z",
+  "status": "built",
+  "image_tag": "creg-node:phase-c-secure-r22-commit-capture",
+  "detail": "Compilation succeeded; signed-spec compatibility and real-host acceptance remain pending.",
+  "public_cutover": "pending"
+}

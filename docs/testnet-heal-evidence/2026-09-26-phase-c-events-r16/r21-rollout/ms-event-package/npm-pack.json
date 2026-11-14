@@ -1,0 +1,36 @@
+[
+  {
+    "id": "ms@2.1.3",
+    "name": "ms",
+    "version": "2.1.3",
+    "size": 2967,
+    "unpackedSize": 6721,
+    "shasum": "574c8138ce1d2b5861f0b44579dbadd60c6615b2",
+    "integrity": "sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==",
+    "filename": "ms-2.1.3.tgz",
+    "files": [
+      {
+        "path": "index.js",
+        "size": 3024,
+        "mode": 420
+      },
+      {
+        "path": "license.md",
+        "size": 1079,
+        "mode": 420
+      },
+      {
+        "path": "package.json",
+        "size": 732,
+        "mode": 420
+      },
+      {
+        "path": "readme.md",
+        "size": 1886,
+        "mode": 420
+      }
+    ],
+    "entryCount": 4,
+    "bundled": []
+  }
+]

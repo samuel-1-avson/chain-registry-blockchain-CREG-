@@ -1,0 +1,70 @@
+{
+  "canonical": "npm:is-number@7.0.0",
+  "status": "revoked",
+  "evidence_phase": "quorum-reached",
+  "block_phase": "committed",
+  "chain_status": "rejected",
+  "block_hash": "0121be9bb637aec634cd5f081fb903ee4749875d8225683f057af005ae16f436",
+  "content_hash": "7b75c1057198cf97696909a9bee176c9c5e9bcb5b03bf3ecef2f484defadd51e",
+  "ipfs_cid": "QmQ8kbWCkjk77RxP3GMCG7WiSj43WP2ZUBWxmttA2bscn6",
+  "publisher": "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d",
+  "published_at": "2026-09-26T10:28:10.494663442+00:00",
+  "revocation_reason": "Phase C live revocation after shared publication",
+  "analysis_bundles": {
+    "policy_bundle_id": "policy-v1",
+    "feature_schema_id": "features-v1",
+    "expert_bundle_id": "experts-v1",
+    "embedding_model_id": "embeddings-v1",
+    "index_epoch": "index-epoch-0",
+    "threshold_profile_id": "thresholds-v1",
+    "llm_prompt_profile_id": "llm-prompt-v1",
+    "osv_snapshot_epoch": "osv-2026-09-26-phase-c-r8"
+  },
+  "evidence_digest": "4eb664d53c44551f6ddcf04c8943874d97da0c6b760e617886508e8340377b0a",
+  "deterministic_risk": {
+    "score": 2,
+    "deterministic_score": 0,
+    "advisory_score": 0,
+    "band": "low",
+    "disposition": "accept",
+    "deterministic_findings": 0,
+    "advisory_findings": 1,
+    "critical_findings": 0,
+    "high_findings": 0,
+    "medium_findings": 0,
+    "low_findings": 0,
+    "reasons": [
+      "Publisher reputation delta -10 increases deterministic risk"
+    ]
+  },
+  "analysis_committee": {
+    "size": 4,
+    "members": [
+      {
+        "id": "validator-2",
+        "performance_score_at_finalization": 465
+      },
+      {
+        "id": "validator-4",
+        "performance_score_at_finalization": 500
+      },
+      {
+        "id": "validator-3",
+        "performance_score_at_finalization": 465
+      },
+      {
+        "id": "validator-1",
+        "performance_score_at_finalization": 465
+      }
+    ],
+    "seed": "35646264346363396434396563366536656233313838653935353464353430333538613731646364343836376264653062316439333337656534383836613461",
+    "effective_size": 4,
+    "performance_bias": true,
+    "member_performance_at_finalization": {
+      "validator-3": 465,
+      "validator-1": 465,
+      "validator-4": 500,
+      "validator-2": 465
+    }
+  }
+}

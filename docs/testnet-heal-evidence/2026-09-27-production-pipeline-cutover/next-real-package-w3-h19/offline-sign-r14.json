@@ -1,0 +1,28 @@
+{
+  "schema": "creg-r14-real-linux-cli-offline-publish-v1",
+  "captured_at_utc": "2026-09-28T08:07:10.2909077Z",
+  "canonical": "npm:ansi-regex@6.1.0",
+  "cli_path": "E:\\creg-phase-c-build-20260927\\portable-cli-r25-target\\release\\creg",
+  "cli_sha256": "95569797c4c0c3d767641cc7df07307874da4673fc32daa7f25ceb63776f2c69",
+  "runtime_image_id": "sha256:2b472a089fe6ac651edfbae51b616456ed335f35992c0374f10c1ea80ce6caa3",
+  "archive_sha256": "046f6fe17602b686aa522de193d6046a75e557933365ba51e3e3d8e1fa694f3c",
+  "scanner_profile_digest": "7e1d95f9c8423778211944a1dea46674d8cbd3f0aee3b0eea6b5250f11d009cd",
+  "ipfs_cid": "QmaKQyhX5fEqeLyB1LBC39G3FjQRnbyrScnMfEejShYvdC",
+  "publisher_address": "0xa40d79527314efd4964d49c4a0673c87b612348b",
+  "publisher_pubkey": "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d",
+  "publisher_authorization_version": 4,
+  "signed_request_sha256": "7ae4ecae227784d841ddad3a3d43d171f3e9b19db8fa383c60a14a72f93912af",
+  "checks": {
+    "exact_package": true,
+    "actual_archive_hash": true,
+    "signed_r7_domain": true,
+    "staking_contract": true,
+    "authorization_v4": true,
+    "publisher_identity_present": true,
+    "ipfs_cid_present": true
+  },
+  "real_ipfs_pin_created": true,
+  "offline_signature_created": true,
+  "chain_submission_performed": false,
+  "public_cutover": false
+}

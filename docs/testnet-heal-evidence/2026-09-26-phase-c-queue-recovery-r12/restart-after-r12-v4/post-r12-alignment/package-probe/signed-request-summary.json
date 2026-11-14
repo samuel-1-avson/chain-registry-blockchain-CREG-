@@ -1,0 +1,13 @@
+{
+  "captured_at_utc": "2026-09-26T18:01:13.5330884Z",
+  "canonical": "npm:escape-html@1.0.3",
+  "tarball_sha256": "a101155c3cbdfb1e4f98f2f83c8b5e392db6accfa606df0eba8b87a5762b0366",
+  "ipfs_cid": "QmUrMstFUhR3dvynxTaZwRg3nNYrGVgh4P95UR2QgAeBjz",
+  "publisher_chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+  "publisher_genesis_hash": "1852b9a86dd3b53e7b2de4a774723a4fe48e862f9c61d14e5917b42b21055234",
+  "publisher_staking_contract": "0x61c00ebe7c46f0bce63942f7e15bcc434dfc9b7c",
+  "publisher_authorization_version": 4,
+  "publisher_nonce_present": true,
+  "publisher_evm_signature_present": true,
+  "signed_request_path": "docs\\testnet-heal-evidence\\2026-09-26-phase-c-queue-recovery-r12\\restart-after-r12-v4\\post-r12-alignment\\package-probe\\signed-publish-escape-html-r7.json"
+}

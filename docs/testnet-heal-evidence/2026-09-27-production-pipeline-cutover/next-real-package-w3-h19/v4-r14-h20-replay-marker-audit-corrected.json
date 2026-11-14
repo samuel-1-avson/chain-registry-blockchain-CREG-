@@ -1,0 +1,23 @@
+{
+  "schema": "creg-v4-durable-commit-replay-log-audit-v1",
+  "captured_at_utc": "2026-09-28T09:33:33.0152745Z",
+  "node": "validator-4",
+  "height": 20,
+  "block_hash": "730b01c1a67a4796a16f599169e4ebf77e01d2e8ce92d1e4fb3715a7c4354285",
+  "source_log": "docs\\testnet-heal-evidence\\2026-09-27-production-pipeline-cutover\\next-real-package-w3-h19\\v4-r14-h20-restart-window.log",
+  "monitor_result": "recovery_marker_not_observed",
+  "monitor_result_explained_by": "Independent timestamped Docker log query contains the exact recovery marker; monitor matcher returned a false negative.",
+  "recovery_marker_timestamp": null,
+  "first_p2p_timestamp": "2026-09-28T09:15:30.450776904Z",
+  "first_sync_timestamp": "2026-09-28T09:16:19.226581312Z",
+  "recovery_marker_line": null,
+  "p2p_line": "2026-09-28T09:15:30.450776904Z \u001b[2m2026-09-28T09:15:30.450661Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mcreg_node::p2p\u001b[0m\u001b[2m:\u001b[0m P2P Dialing /ip4/34.156.122.19/tcp/9000/p2p/12D3KooW9ygmUCoS7BPxkJRxz8trK7nxDwidTJU7DMe8VBqXs8W8...",
+  "sync_line": "2026-09-28T09:16:19.226581312Z \u001b[2m2026-09-28T09:16:19.225962Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mcreg_node::sync\u001b[0m\u001b[2m:\u001b[0m Chain sync: our height=19 peer height=20 — fetching 1 blocks",
+  "checks": {
+    "recovered_commit_marker_present": false,
+    "height_hash_and_identity_match": false,
+    "marker_precedes_p2p": true,
+    "marker_precedes_sync": true
+  },
+  "passed": false
+}

@@ -1,0 +1,12 @@
+{
+  "capturedAt": "2026-09-28T01:10:46.534Z",
+  "canonical": "npm:escape-string-regexp@5.0.0",
+  "afterHeight": 15,
+  "connections": [
+    {
+      "url": "http://127.0.0.1:3008/v1/public/events",
+      "opened": true,
+      "errors": 0
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "timestamp_utc": "2026-09-26T08:16:26.522383Z",
+  "image_tag": "creg-node:phase-c-secure-r9-review",
+  "image_id": "sha256:cf9fda37887e0d8c6125280c07bdb36737e495e75d070b80abcc722187180d33",
+  "source_manifest": "source-manifest.json",
+  "real_host_acceptance": "partial: eight-host scanner and publish/revoke finality passed; restart queue-retirement failed on V3",
+  "public_cutover": "pending",
+  "acceptance_evidence": "README.md"
+}

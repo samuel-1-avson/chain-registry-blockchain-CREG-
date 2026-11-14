@@ -1,0 +1,21 @@
+{
+  "installed_at": "2026-09-26T13:08:26.7386309Z",
+  "source": "C:\\Users\\samue\\OneDrive\\Desktop\\projects\\chain-registry-blockchain-CREG-\\chain-registry\\target\\release\\creg.exe",
+  "source_sha256": "bdabd1698821af9ff9ad1fe53678a7e82a8c10041acbdc82aa63c359d81f344c",
+  "installed": [
+    {
+      "path": "C:/Users/samue/.cargo/bin/creg.exe",
+      "old_sha256": "c171e5a2b46dd3232087e20657edde3c7e729cac01408ee5e0ff034e5a8272df",
+      "new_sha256": "bdabd1698821af9ff9ad1fe53678a7e82a8c10041acbdc82aa63c359d81f344c",
+      "backup": "C:/Users/samue/.cargo/bin/creg.exe.pre-explorer-r14-20260926.bak",
+      "shell_wrapper": null
+    },
+    {
+      "path": "C:/Users/samue/.creg/bin/creg.exe",
+      "old_sha256": "b150c7d14189df50132bbbdcd542ae7a593c1ba07b2a25c4dfdb24c388b194d3",
+      "new_sha256": "bdabd1698821af9ff9ad1fe53678a7e82a8c10041acbdc82aa63c359d81f344c",
+      "backup": "C:/Users/samue/.creg/bin/creg.exe.pre-explorer-r14-20260926.bak",
+      "shell_wrapper": "C:\\Users\\samue\\.creg\\bin\\creg-container-wrapper.sh"
+    }
+  ]
+}

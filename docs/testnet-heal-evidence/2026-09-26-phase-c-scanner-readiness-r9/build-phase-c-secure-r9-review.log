@@ -1,0 +1,302 @@
+#0 building with "desktop-linux" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile.full-repair
+#1 transferring dockerfile: 8.69kB 0.0s done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/ubuntu:24.04
+#2 ...
+
+#3 [auth] library/node:pull token for registry-1.docker.io
+#3 DONE 0.0s
+
+#4 [auth] library/rust:pull token for registry-1.docker.io
+#4 DONE 0.0s
+
+#5 [auth] library/ubuntu:pull token for registry-1.docker.io
+#5 DONE 0.0s
+
+#6 [internal] load metadata for us-central1-docker.pkg.dev/gen-lang-client-0022105784/creg-testnet/creg-node@sha256:ca4d04e77e9680cb878800f2ea72c1ce7dac6bb3575a55c9921a7314975fb1ef
+#6 ...
+
+#2 [internal] load metadata for docker.io/library/ubuntu:24.04
+#2 DONE 2.1s
+
+#7 [internal] load metadata for docker.io/library/rust:1.90-slim-bookworm
+#7 DONE 3.2s
+
+#8 [internal] load metadata for docker.io/library/node:20-slim
+#8 DONE 3.2s
+
+#6 [internal] load metadata for us-central1-docker.pkg.dev/gen-lang-client-0022105784/creg-testnet/creg-node@sha256:ca4d04e77e9680cb878800f2ea72c1ce7dac6bb3575a55c9921a7314975fb1ef
+#6 ...
+
+#9 [auth] gen-lang-client-0022105784/creg-testnet/creg-node:pull token for us-central1-docker.pkg.dev
+#9 DONE 0.0s
+
+#6 [internal] load metadata for us-central1-docker.pkg.dev/gen-lang-client-0022105784/creg-testnet/creg-node@sha256:ca4d04e77e9680cb878800f2ea72c1ce7dac6bb3575a55c9921a7314975fb1ef
+#6 DONE 5.5s
+
+#10 [internal] load .dockerignore
+#10 transferring context: 1.78kB done
+#10 DONE 0.0s
+
+#11 [internal] load build context
+#11 DONE 0.0s
+
+#12 [frontend-builder 1/6] FROM docker.io/library/node:20-slim@sha256:2cf067cfed83d5ea958367df9f966191a942351a2df77d6f0193e162b5febfc0
+#12 resolve docker.io/library/node:20-slim@sha256:2cf067cfed83d5ea958367df9f966191a942351a2df77d6f0193e162b5febfc0 0.0s done
+#12 DONE 0.0s
+
+#13 [rust-toolchain 1/1] FROM docker.io/library/rust:1.90-slim-bookworm@sha256:64232e656c058f4468e8d024e990acff04f0fd5a5c0a88a574dc37773d7325c9
+#13 resolve docker.io/library/rust:1.90-slim-bookworm@sha256:64232e656c058f4468e8d024e990acff04f0fd5a5c0a88a574dc37773d7325c9 0.0s done
+#13 DONE 0.0s
+
+#14 [stage-3 1/3] FROM us-central1-docker.pkg.dev/gen-lang-client-0022105784/creg-testnet/creg-node@sha256:ca4d04e77e9680cb878800f2ea72c1ce7dac6bb3575a55c9921a7314975fb1ef
+#14 resolve us-central1-docker.pkg.dev/gen-lang-client-0022105784/creg-testnet/creg-node@sha256:ca4d04e77e9680cb878800f2ea72c1ce7dac6bb3575a55c9921a7314975fb1ef 0.0s done
+#14 DONE 0.0s
+
+#15 [builder  1/60] FROM docker.io/library/ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3
+#15 resolve docker.io/library/ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3 0.0s done
+#15 DONE 0.0s
+
+#11 [internal] load build context
+#11 transferring context: 110.46kB 0.1s done
+#11 DONE 0.1s
+
+#16 [frontend-builder 6/6] RUN npm run build
+#16 CACHED
+
+#17 [builder 11/60] COPY Cargo.lock ./
+#17 CACHED
+
+#18 [builder 22/60] COPY crates/zk-validator/Cargo.toml     crates/zk-validator/
+#18 CACHED
+
+#19 [frontend-builder 2/6] WORKDIR /explorer
+#19 CACHED
+
+#20 [builder 38/60] RUN mkdir -p crates/zk-validator/src     && echo "pub fn _stub() {}" > crates/zk-validator/src/lib.rs
+#20 CACHED
+
+#21 [builder 10/60] COPY Cargo.toml ./
+#21 CACHED
+
+#22 [frontend-builder 3/6] COPY explorer/package*.json explorer/.npmrc* ./
+#22 CACHED
+
+#23 [builder 13/60] COPY crates/cli/Cargo.toml      crates/cli/
+#23 CACHED
+
+#24 [builder 25/60] COPY crates/threshold-encryption/Cargo.toml crates/threshold-encryption/
+#24 CACHED
+
+#25 [builder 26/60] COPY crates/cross-chain/Cargo.toml        crates/cross-chain/
+#25 CACHED
+
+#26 [builder 17/60] COPY crates/node/Cargo.toml     crates/node/
+#26 CACHED
+
+#27 [builder 30/60] COPY crates/secrets/Cargo.toml          crates/secrets/
+#27 CACHED
+
+#28 [builder 14/60] COPY crates/resolver/Cargo.toml crates/resolver/
+#28 CACHED
+
+#29 [builder 24/60] COPY crates/wasm-sandbox/Cargo.toml     crates/wasm-sandbox/
+#29 CACHED
+
+#30 [builder  8/60] WORKDIR /build
+#30 CACHED
+
+#31 [builder  6/60] RUN mkdir -p "/usr/local/cargo" &&   printf '[net]\nretry = 10\ngit-fetch-with-cli = true\n\n[http]\nmultiplexing = false\ntimeout = 600\n\n[registries.crates-io]\nprotocol = "sparse"\n' > "/usr/local/cargo/config.toml"
+#31 CACHED
+
+#32 [builder 34/60] RUN mkdir -p crates/validator/src  && echo "pub fn _stub() {}" > crates/validator/src/lib.rs
+#32 CACHED
+
+#33 [builder 41/60] RUN mkdir -p crates/threshold-encryption/src && echo "pub fn _stub() {}" > crates/threshold-encryption/src/lib.rs
+#33 CACHED
+
+#34 [frontend-builder 5/6] COPY explorer/ ./
+#34 CACHED
+
+#35 [builder 27/60] COPY crates/insurance/Cargo.toml        crates/insurance/
+#35 CACHED
+
+#36 [builder 20/60] COPY crates/common/build.rs     crates/common/
+#36 CACHED
+
+#37 [builder 33/60] RUN mkdir -p crates/resolver/src   && echo "pub fn _stub() {}" > crates/resolver/src/lib.rs
+#37 CACHED
+
+#38 [builder  2/60] RUN apt-get update && apt-get install -y --no-install-recommends     ca-certificates     curl     pkg-config     libssl-dev     build-essential     clang-17     llvm-17     llvm-17-dev     libclang-17-dev     libclang1-17     cmake     libopenblas-dev     protobuf-compiler     libprotobuf-dev     git     && rm -rf /var/lib/apt/lists/*
+#38 CACHED
+
+#39 [builder 37/60] RUN mkdir -p crates/relayer/src    && echo "fn main() {}"      > crates/relayer/src/main.rs
+#39 CACHED
+
+#40 [builder 12/60] COPY crates/common/Cargo.toml   crates/common/
+#40 CACHED
+
+#41 [builder  5/60] COPY --from=rust-toolchain /usr/local/rustup /usr/local/rustup
+#41 CACHED
+
+#42 [builder 28/60] COPY crates/db-sync/Cargo.toml          crates/db-sync/
+#42 CACHED
+
+#43 [builder  4/60] COPY --from=rust-toolchain /usr/local/cargo /usr/local/cargo
+#43 CACHED
+
+#44 [builder 16/60] COPY crates/consensus/Cargo.toml crates/consensus/
+#44 CACHED
+
+#45 [builder  3/60] RUN ln -sf /usr/bin/clang-17 /usr/bin/clang &&     ln -sf /usr/bin/llvm-config-17 /usr/bin/llvm-config
+#45 CACHED
+
+#46 [builder 46/60] RUN mkdir -p crates/faucet/src           && echo "fn main() {}"      > crates/faucet/src/main.rs
+#46 CACHED
+
+#47 [builder  7/60] RUN cargo --version && rustc --version &&     test -e "/usr/lib/llvm-17/lib/libclang.so.1" -o -e "/usr/lib/llvm-17/lib/libclang.so"
+#47 CACHED
+
+#48 [builder  9/60] COPY --from=frontend-builder /explorer/dist /build/explorer/dist
+#48 CACHED
+
+#49 [builder 42/60] RUN mkdir -p crates/cross-chain/src        && echo "pub fn _stub() {}" > crates/cross-chain/src/lib.rs
+#49 CACHED
+
+#50 [builder 32/60] RUN mkdir -p crates/cli/src        && echo "fn main() {}"      > crates/cli/src/main.rs
+#50 CACHED
+
+#51 [builder 29/60] COPY crates/ipfs-pinner/Cargo.toml      crates/ipfs-pinner/
+#51 CACHED
+
+#52 [builder 44/60] RUN mkdir -p crates/db-sync/src          && echo "pub fn _stub() {}" > crates/db-sync/src/lib.rs
+#52 CACHED
+
+#53 [builder 47/60] RUN mkdir -p crates/secrets/src          && echo "pub fn _stub() {}" > crates/secrets/src/lib.rs
+#53 CACHED
+
+#54 [builder 15/60] COPY crates/validator/Cargo.toml crates/validator/
+#54 CACHED
+
+#55 [builder 39/60] RUN mkdir -p crates/ml-validator/src     && echo "pub fn _stub() {}" > crates/ml-validator/src/lib.rs
+#55 CACHED
+
+#56 [builder 35/60] RUN mkdir -p crates/consensus/src  && echo "pub fn _stub() {}" > crates/consensus/src/lib.rs
+#56 CACHED
+
+#57 [builder 21/60] COPY crates/common/proto/       crates/common/proto/
+#57 CACHED
+
+#58 [builder 23/60] COPY crates/ml-validator/Cargo.toml     crates/ml-validator/
+#58 CACHED
+
+#59 [builder 40/60] RUN mkdir -p crates/wasm-sandbox/src     && echo "pub fn _stub() {}" > crates/wasm-sandbox/src/lib.rs
+#59 CACHED
+
+#60 [builder 45/60] RUN mkdir -p crates/ipfs-pinner/src      && echo "pub fn _stub() {}" > crates/ipfs-pinner/src/lib.rs
+#60 CACHED
+
+#61 [builder 43/60] RUN mkdir -p crates/insurance/src        && echo "pub fn _stub() {}" > crates/insurance/src/lib.rs
+#61 CACHED
+
+#62 [builder 36/60] RUN mkdir -p crates/node/src       && echo "fn main() {}"      > crates/node/src/main.rs
+#62 CACHED
+
+#63 [builder 18/60] COPY crates/faucet/Cargo.toml   crates/faucet/
+#63 CACHED
+
+#64 [builder 19/60] COPY crates/relayer/Cargo.toml  crates/relayer/
+#64 CACHED
+
+#65 [frontend-builder 4/6] RUN if [ -f package-lock.json ]; then npm ci --no-fund --no-audit || npm ci --no-fund --no-audit; else npm install --no-fund --no-audit || npm install --no-fund --no-audit; fi
+#65 CACHED
+
+#66 [builder 31/60] RUN mkdir -p crates/common/src     && echo "pub fn _stub() {}" > crates/common/src/lib.rs
+#66 CACHED
+
+#67 [builder 48/60] RUN cargo fetch --locked || (sleep 5 && cargo fetch --locked) || (sleep 10 && cargo fetch --locked)
+#67 CACHED
+
+#68 [builder 49/60] COPY crates/ crates/
+#68 DONE 0.2s
+
+#69 [builder 50/60] COPY circuits/ circuits/
+#69 DONE 0.0s
+
+#70 [builder 51/60] COPY contracts/ contracts/
+#70 DONE 0.1s
+
+#71 [builder 52/60] COPY models/ models/
+#71 DONE 0.0s
+
+#72 [builder 53/60] COPY testnet/ testnet/
+#72 DONE 2.6s
+
+#73 [builder 54/60] COPY config/ config/
+#73 DONE 0.1s
+
+#74 [builder 55/60] COPY rules/ rules/
+#74 DONE 0.0s
+
+#75 [builder 56/60] COPY validators/ validators/
+#75 DONE 0.0s
+
+#76 [builder 57/60] COPY docker-compose*.yml ./
+#76 DONE 0.0s
+
+#77 [builder 58/60] RUN touch crates/*/src/*.rs
+#77 DONE 1.0s
+
+#78 [builder 59/60] RUN --mount=type=cache,id=creg-phase-c-release,target=/build/target,sharing=locked     env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS     LIBCLANG_PATH=/usr/lib/llvm-17/lib LLVM_CONFIG_PATH=/usr/bin/llvm-config-17     CLANG_PATH=/usr/bin/clang-17 CARGO_BUILD_JOBS=1 RUST_BACKTRACE=1     cargo build --release --locked --package chain-registry-node --bin creg-node --features phase-c-real-fleet &&     mkdir -p /build/output && cp /build/target/release/creg-node /build/output/creg-node
+#78 3.753    Compiling common v0.1.0 (/build/crates/common)
+#78 14.81    Compiling ml-validator v0.1.0 (/build/crates/ml-validator)
+#78 24.17    Compiling wasm-sandbox v0.1.0 (/build/crates/wasm-sandbox)
+#78 24.91    Compiling validator v0.1.0 (/build/crates/validator)
+#78 34.29    Compiling resolver v0.1.0 (/build/crates/resolver)
+#78 39.35    Compiling zk-validator v0.1.0 (/build/crates/zk-validator)
+#78 56.40    Compiling db-sync v0.1.0 (/build/crates/db-sync)
+#78 56.76    Compiling cross-chain v0.1.0 (/build/crates/cross-chain)
+#78 58.09    Compiling consensus v0.1.0 (/build/crates/consensus)
+#78 66.95    Compiling threshold-encryption v0.1.0 (/build/crates/threshold-encryption)
+#78 69.86    Compiling chain-registry-secrets v0.1.0 (/build/crates/secrets)
+#78 70.38    Compiling chain-registry-node v0.1.0 (/build/crates/node)
+#78 383.8     Finished `release` profile [optimized] target(s) in 6m 23s
+#78 383.8 warning: the following packages contain code that will be rejected by a future version of Rust: sqlx-postgres v0.7.4
+#78 383.9 note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+#78 DONE 386.5s
+
+#79 [builder 60/60] RUN --mount=type=cache,id=creg-phase-c-release,target=/build/target,sharing=locked     env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS CARGO_BUILD_JOBS=1     cargo build --release --locked --package chain-registry-cli --features common/phase-c-canonical-transactions &&     cp /build/target/release/creg /build/output/creg
+#79 3.064    Compiling common v0.1.0 (/build/crates/common)
+#79 13.27    Compiling ml-validator v0.1.0 (/build/crates/ml-validator)
+#79 22.97    Compiling wasm-sandbox v0.1.0 (/build/crates/wasm-sandbox)
+#79 23.75    Compiling resolver v0.1.0 (/build/crates/resolver)
+#79 29.02    Compiling zk-validator v0.1.0 (/build/crates/zk-validator)
+#79 45.88    Compiling validator v0.1.0 (/build/crates/validator)
+#79 55.62    Compiling cross-chain v0.1.0 (/build/crates/cross-chain)
+#79 56.89    Compiling consensus v0.1.0 (/build/crates/consensus)
+#79 66.65    Compiling chain-registry-cli v0.1.0 (/build/crates/cli)
+#79 250.4     Finished `release` profile [optimized] target(s) in 4m 09s
+#79 DONE 252.2s
+
+#80 [stage-3 2/3] COPY --from=builder --chown=creg:creg /build/output/creg-node /app/creg-node
+#80 CACHED
+
+#81 [stage-3 3/3] COPY --from=builder --chown=creg:creg /build/output/creg /app/creg
+#81 DONE 0.4s
+
+#82 exporting to image
+#82 exporting layers
+#82 exporting layers 1.9s done
+#82 exporting manifest sha256:f4e6ec9a73fb8e2e6c6f04108ad36e4fc916910bcd2583c8097c179a60f7608c 0.0s done
+#82 exporting config sha256:e25b3470e0372b22c5bb98a91cb40a9449051d51cddd366ff8f957cd983f447b 0.0s done
+#82 exporting attestation manifest sha256:4cbf1a97eccc2b7f343248ea3c4f55911d32a4bf3cbba52d7df3fc1052bf81a6 0.0s done
+#82 exporting manifest list sha256:cf9fda37887e0d8c6125280c07bdb36737e495e75d070b80abcc722187180d33 0.0s done
+#82 naming to docker.io/library/creg-node:phase-c-secure-r9-review done
+#82 unpacking to docker.io/library/creg-node:phase-c-secure-r9-review
+#82 unpacking to docker.io/library/creg-node:phase-c-secure-r9-review 0.5s done
+#82 DONE 2.6s
+
+View build details: docker-desktop://dashboard/build/desktop-linux/desktop-linux/5kzcnwb98hc79ocfq6i4pvfvm

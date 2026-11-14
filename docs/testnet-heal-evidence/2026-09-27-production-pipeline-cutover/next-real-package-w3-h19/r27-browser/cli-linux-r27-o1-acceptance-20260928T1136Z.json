@@ -1,0 +1,44 @@
+{
+  "captured_at_utc": "2026-09-28T11:36:12Z",
+  "candidate": {
+    "version": "creg 0.1.0",
+    "sha256": "067bd43243eb45f33a40ae802b573f929e80e619bb73ddde45f4b4b82482b4ca",
+    "bytes": 67269488,
+    "builder": "creg-cli:portable-ubuntu22-builder",
+    "build_command": "cargo build --locked --release --package chain-registry-cli --bin creg --features common/phase-c-canonical-transactions",
+    "host_path": "E:\\creg-phase-c-build-20260927\\creg-linux-amd64-candidate-r27",
+    "o1_temporary_path": "/tmp/creg-linux-amd64-candidate-r27"
+  },
+  "o1": {
+    "instance": "creg-testnet-vm",
+    "project": "gen-lang-client-0022105784",
+    "zone": "us-central1-b",
+    "node_id": "observer-1",
+    "node_url": "http://127.0.0.1:18080",
+    "sha256_matches_local_build": true,
+    "read_only_block_query": {
+      "passed": true,
+      "height": 20,
+      "tip_hash": "730b01c1a67a4796a16f599169e4ebf77e01d2e8ce92d1e4fb3715a7c4354285",
+      "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+      "block_zero_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+      "output": "#20 validator-4; one transaction: REVOKED npm:ansi-regex@6.1.0"
+    },
+    "signed_spec": {
+      "url": "https://spec.testnet.cregnet.dev/phase-c/r7/chain-spec.json",
+      "signature_url": "https://spec.testnet.cregnet.dev/phase-c/r7/chain-spec.json.sig",
+      "local_signature_validation": "passed",
+      "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+      "genesis_hash": "1852b9a86dd3b53e7b2de4a774723a4fe48e862f9c61d14e5917b42b21055234"
+    },
+    "canonical_package_lookup": {
+      "package_id": "npm:ansi-regex@6.1.0",
+      "result": "REVOKED",
+      "command_exit_code": 0,
+      "positive_active_package_proof": "not demonstrated; this package is revoked"
+    }
+  },
+  "temporary_copy_on_o2": "removed",
+  "installed_cli_or_node_changed": false,
+  "public_cutover": false
+}

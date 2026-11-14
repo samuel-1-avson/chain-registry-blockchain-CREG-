@@ -1,0 +1,5 @@
+→ Connecting to event stream at http://127.0.0.1:18080/v1/public/events
+→ Filter: all
+────────────────────────────────────────────────────────────
+07:48:35 ▣ BLOCK     #14 2ece0610b4b808ee5382704b702917dd6f2f3f75d6eeb2a8585aaa9e270507aa (1 tx)
+07:48:35 ⊘ REVOKED   npm:kleur@4.1.5 — Phase C live revocation after shared publication

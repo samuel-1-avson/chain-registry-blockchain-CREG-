@@ -1,0 +1,39 @@
+{
+  "package": {
+    "ecosystem": "npm",
+    "name": "is-number",
+    "version": "7.0.0"
+  },
+  "status": {
+    "Revoked": {
+      "reason": "Phase C live revocation after shared publication",
+      "findings": []
+    }
+  },
+  "resolved_at": "2026-09-26T17:17:41.600119300Z",
+  "source": {
+    "Chain": {
+      "node_url": "http://127.0.0.1:18080"
+    }
+  },
+  "deterministic_risk": {
+    "score": 2,
+    "deterministic_score": 0,
+    "advisory_score": 0,
+    "band": "low",
+    "disposition": "accept",
+    "deterministic_findings": 0,
+    "advisory_findings": 1,
+    "critical_findings": 0,
+    "high_findings": 0,
+    "medium_findings": 0,
+    "low_findings": 0,
+    "reasons": [
+      "Publisher reputation delta -10 increases deterministic risk"
+    ]
+  },
+  "evidence_phase": "quorum-reached",
+  "block_phase": "committed",
+  "chain_status": "rejected",
+  "publisher": "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d"
+}

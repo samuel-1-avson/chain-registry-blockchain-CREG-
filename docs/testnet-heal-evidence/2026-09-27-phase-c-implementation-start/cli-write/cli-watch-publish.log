@@ -1,0 +1,10 @@
+→ Connecting to event stream at http://127.0.0.1:18080/v1/public/events
+→ Filter: all
+────────────────────────────────────────────────────────────
+06:49:01 ↑ SUBMITTED npm:kleur@4.1.5 by 863906af03a385de...
+06:49:03 ◈ VOTE      ✓ validator-1 on npm:kleur@4.1.5
+06:49:04 ◈ VOTE      ✓ validator-3 on npm:kleur@4.1.5
+06:49:04 ◈ VOTE      ✓ validator-2 on npm:kleur@4.1.5
+06:49:06 ◈ VOTE      ✓ validator-4 on npm:kleur@4.1.5
+06:49:06 ▣ BLOCK     #13 8448cce76d7258f051cf9632d2ef7181da1321f5d19a3b5d00f00f8975aa2993 (1 tx)
+06:49:06 ✓ VERIFIED  npm:kleur@4.1.5 block 8448cce76d7258f051cf9632d2ef7181da1321f5d19a3b5d00f00f8975aa2993 validators 3

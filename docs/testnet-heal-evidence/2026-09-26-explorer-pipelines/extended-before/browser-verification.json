@@ -1,0 +1,141 @@
+{
+  "capturedAt": "2026-09-26T11:50:07.604Z",
+  "base": "http://127.0.0.1:3007",
+  "chainId": "creg-phase-c-testnet-2026-09-26-r7",
+  "height": 4,
+  "mode": "capture",
+  "verified": true,
+  "dataSource": "Live real HTTP responses; no intercepts or fixtures",
+  "records": [
+    {
+      "route": "/packages",
+      "main": "Packages\n1 total\nCANONICAL\tVERSION\tPUBLISHER\tAGE\nnpm:is-number@7.0.0\t7.0.0\t\n863906…047d\n⧉\n\t—",
+      "l1Links": []
+    },
+    {
+      "route": "/address/0x91e4dfc18bf015051676f00f23782d0770b95a7a",
+      "main": "0x91e4dfc18bf015051676f00f23782d0770b95a7a\n↗ View on L1 Explorer\n🔗\nShare\nVALIDATOR\n· scanned last 5 blocks\nADDRESS\n0x91e4dfc18bf015051676f00f23782d0770b95a7a\n⧉\nVALIDATOR\nACTIVE IN SET\nSTAKE\n0.0000 CREG\nREPUTATION\n100\nBLOCKS PROPOSED\n0\nTXS (RECENT)\n0\nVALIDATOR PAGE\nView validator detail →\nActivity\nALL\nPROPOSE\nPUBLISH\nREVOKE\nSLASH\nVALIDATOR-JOIN\nVALIDATOR-LEAVE\nROTATE-KEY\n0 events\nHEIGHT\tKIND\tCANONICAL\tTIME\nNo activity in the scan window.",
+      "l1Links": [
+        "https://etherscan.io/address/0x91e4dfc18bf015051676f00f23782d0770b95a7a"
+      ]
+    },
+    {
+      "route": "/validator/0x91e4dfc18bf015051676f00f23782d0770b95a7a",
+      "main": "0x91e4dfc18bf015051676f00f23782d0770b95a7a\n\nValidator profile · full activity →\n\n🔗\nShare\nACTIVE IN SET\nPerformance\nBLOCKS PROPOSED\n1\nin scan window\nSTAKE\n100 CREG\nREPUTATION\n100\nSTATUS\nself\nUptime & proposals\nEstimated uptime (scan window)\n0.0%\nPROPOSALS SCANNED\n0\nVOTES OBSERVED\n0\nBLOCKS SCANNED\n5\nSLASHING EVENTS\n0\nIdentity\nALIAS\n—\nRecent proposals\n1\nHEIGHT\tHASH\tTXS\tAGE\n#4\t\n0797e80b…bf47e0\n⧉\n\t1\t1h ago",
+      "l1Links": []
+    },
+    {
+      "route": "/search?q=is-number",
+      "main": "Search results\n\nQuery: is-number1 result\n\n📦 PACKAGES (1)\n📦\nnpm:is-number@7.0.0\ncommitted package\nPACKAGE\n\nTip: Use ↑↓ arrow keys to navigate results, Enter to open.",
+      "l1Links": []
+    },
+    {
+      "route": "/governance",
+      "main": "Governance disabled\n\nOn-chain governance is hidden in this explorer build. Set VITE_GOVERNANCE_ENABLED=true to list proposals mirrored from Governance.sol when the node has CREG_ETH_RPC and CREG_GOVERNANCE_ADDR configured.",
+      "l1Links": []
+    },
+    {
+      "route": "/wallet",
+      "main": "Wallet & Stake\nEthereum SepoliaChain ID 11155111\nPublic Ethereum testnet for Chain Registry.\nConnect Wallet\nConnect MetaMask\nWalletConnect\nConnect\nConnects to Ethereum Sepolia (Chain 11155111)",
+      "l1Links": []
+    },
+    {
+      "route": "/publisher",
+      "main": "Packages (1 on-chain)\n📦\n➕ Publish\nPublish a Package\n✕\nnpm\npypi\ncargo\ngo\nSubmit Package\nON-CHAIN PACKAGES (1 TOTAL)\n🔍\nPACKAGE\tVERSION\tSTATUS\tPUBLISHER\tPUBLISHED\nnpm:is-number\t7.0.0\tREVOKED\t863906af...047d\t1h ago\n← Previous\nShowing 1–1 of 1\nNext →\nPENDING PACKAGES (0)\n📦\nNo pending packages\nPackages awaiting verification will appear here",
+      "l1Links": []
+    },
+    {
+      "route": "/about",
+      "main": "About this chain\n\nProtocol identity, contract addresses, and runtime configuration.\n\nCHAIN ID\ncreg-phase-c-testnet-2026-09-26-r7\nNETWORK\n—\nVERSION\n0.1.0\nGENESIS HASH\n0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4\n⧉\nVALIDATOR COUNT\n4\nExplorer\n\nThis explorer ships as a deep-linkable SPA. Every page has a stable URL — copy and share any block, transaction, address, or package. The refactor follows the plan in docs/EXPLORER_DEEP_DIVE.md.\n\nDevelopers & API\n\nThe node exposes a high-performance REST API. For a complete interactive reference of all available endpoints, queries, and data models, please visit the integrated Swagger UI.\n\nOpen Swagger UI ↗",
+      "l1Links": []
+    },
+    {
+      "route": "/publisher/863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d",
+      "main": "Publisher Profile\n\nPublic-key identity, package history, and rotation-facing activity.\n\n🔗\nShare\nPUBLISHER KEY\n863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d\n⧉\nPACKAGES\n1\nVERIFIED\n0\nREVOKED\n1\nSTAKE\n0 CREG\nFIRST SEEN\n1h ago\nROTATION SURFACE\nREVOCATIONS PRESENT\nPackages\n1 total\nPACKAGE\tVERSION\tSTATUS\tPUBLISHED\nnpm:is-number@7.0.0\t7.0.0\tREVOKED\t—",
+      "l1Links": []
+    }
+  ],
+  "errors": [],
+  "failedRequests": [
+    {
+      "url": "http://127.0.0.1:3007/v1/public/chain/stats",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "url": "http://127.0.0.1:3007/v1/public/packages?limit=20&offset=0",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "url": "http://127.0.0.1:3007/v1/public/chain/stats",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "url": "http://127.0.0.1:3007/v1/public/addresses/0x91e4dfc18bf015051676f00f23782d0770b95a7a",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "url": "http://127.0.0.1:3007/v1/public/addresses/0x91e4dfc18bf015051676f00f23782d0770b95a7a/transactions?limit=200&scan=500",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "url": "http://127.0.0.1:3007/v1/public/chain/stats",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "url": "http://127.0.0.1:3007/v1/public/validators/0x91e4dfc18bf015051676f00f23782d0770b95a7a",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "url": "http://127.0.0.1:3007/v1/public/addresses/0x91e4dfc18bf015051676f00f23782d0770b95a7a/transactions?limit=200&scan=1000",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "url": "http://127.0.0.1:3007/v1/public/chain/stats",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "url": "http://127.0.0.1:3007/v1/public/search?q=is-number",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "url": "http://127.0.0.1:3007/v1/public/chain/stats",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "url": "http://127.0.0.1:3007/v1/public/chain/stats",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "url": "http://127.0.0.1:3007/v1/public/chain/stats",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "url": "http://127.0.0.1:3007/v1/public/chain/stats",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "url": "http://127.0.0.1:3007/v1/public/health",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "url": "http://127.0.0.1:3007/v1/public/chain/stats",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "url": "http://127.0.0.1:3007/v1/public/chain/stats",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "url": "http://127.0.0.1:3007/v1/public/chain/stats",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "url": "http://127.0.0.1:3007/v1/public/publishers/863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "url": "http://127.0.0.1:3007/v1/public/packages?limit=200&offset=0",
+      "error": "net::ERR_ABORTED"
+    }
+  ]
+}

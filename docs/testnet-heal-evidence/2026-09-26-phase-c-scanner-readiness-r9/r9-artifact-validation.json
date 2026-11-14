@@ -1,0 +1,17 @@
+{
+  "timestamp_utc": "2026-09-26T08:20:36.5184425Z",
+  "image_id": "sha256:cf9fda37887e0d8c6125280c07bdb36737e495e75d070b80abcc722187180d33",
+  "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+  "genesis_hash": "0x1852b9a86dd3b53e7b2de4a774723a4fe48e862f9c61d14e5917b42b21055234",
+  "spec_signature": "valid",
+  "spec_publication": "pending",
+  "osv_source": "https://api.osv.dev/v1/query",
+  "osv_epoch": "osv-2026-09-26-phase-c-r8",
+  "osv_package": "npm:is-number@7.0.0",
+  "osv_entry_present": true,
+  "osv_advisories": 0,
+  "osv_snapshot_sha256": "39d74eb091cbe986073f3a711c2f25f3be6975dbb38e2083e5fe5e445e7d4ade",
+  "scanner_profile": "blocked: real MalwareBazaar snapshot and profile digest pending",
+  "real_host_acceptance": "pending",
+  "public_cutover": "pending"
+}

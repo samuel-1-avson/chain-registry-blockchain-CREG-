@@ -1,0 +1,8 @@
+{
+  "captured_at_utc": "2026-09-26T12:00:30.2522595Z",
+  "node_compilation": "passed",
+  "linux_cli": "Real Linux CLI now matches reviewed source; Packages label and h0-h4 publication/revocation passed",
+  "cache_repair": "Source refresh moved inside the locked mutable Cargo cache operation",
+  "deployment": "Superseded by the r13 address and Swagger batch; no r12 node deployed",
+  "public_cutover": "pending"
+}

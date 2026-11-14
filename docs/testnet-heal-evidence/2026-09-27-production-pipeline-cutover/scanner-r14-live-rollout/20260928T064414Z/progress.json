@@ -1,0 +1,74 @@
+{
+  "schema": "creg-real-r14-scanner-fleet-rollout-v1",
+  "run_id": "20260928T064414Z",
+  "started_at_utc": "2026-09-28T06:44:14.2354124Z",
+  "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+  "starting_height": 18,
+  "starting_hash": "ec64471b8f9c58eb2d9b958db765a98871cb444e032143d313d65b3ab80cd76c",
+  "canonical": "npm:ansi-regex@6.1.0",
+  "old_profile": "8c7f011ab71a9a695ce1364e9958a2906f02645849c3567fc5691206a93c296e",
+  "new_profile": "7e1d95f9c8423778211944a1dea46674d8cbd3f0aee3b0eea6b5250f11d009cd",
+  "requested_slots": [
+    "o1",
+    "o2",
+    "o3",
+    "o4",
+    "v2",
+    "v3",
+    "v4"
+  ],
+  "nodes": [
+    {
+      "slot": "o1",
+      "role": "observer",
+      "host": "creg-testnet-vm",
+      "image_id": "sha256:ef21b958b5e3e4f09e1c87290d3d9a50f23b5350d207e5af9982dd1cf5413708",
+      "result": "passed",
+      "report": "o1-rollout.json"
+    },
+    {
+      "slot": "o2",
+      "role": "observer",
+      "host": "creg-observer-vm",
+      "image_id": "sha256:2a553f1cb8b2ea6c63bf99649c57e0291698e3ac01da5de80863760afcc07a70",
+      "result": "passed",
+      "report": "o2-rollout.json"
+    },
+    {
+      "slot": "o3",
+      "role": "observer",
+      "host": "creg-observer-3",
+      "image_id": "sha256:8731cc85c73e6267e2e00014e8df50aef3f4d60ce6cfcaddb8fd0a3584eb2ad9",
+      "result": "passed",
+      "report": "o3-rollout.json"
+    },
+    {
+      "slot": "o4",
+      "role": "observer",
+      "host": "creg-observer-4",
+      "image_id": "sha256:8731cc85c73e6267e2e00014e8df50aef3f4d60ce6cfcaddb8fd0a3584eb2ad9",
+      "result": "passed",
+      "report": "o4-rollout.json"
+    },
+    {
+      "slot": "v2",
+      "role": "validator",
+      "host": "creg-validator-1",
+      "image_id": "sha256:2b472a089fe6ac651edfbae51b616456ed335f35992c0374f10c1ea80ce6caa3",
+      "result": "passed",
+      "report": "v2-rollout.json"
+    },
+    {
+      "slot": "v3",
+      "role": "validator",
+      "host": "creg-validator-3",
+      "image_id": "sha256:8731cc85c73e6267e2e00014e8df50aef3f4d60ce6cfcaddb8fd0a3584eb2ad9",
+      "result": "passed",
+      "report": "v3-rollout.json"
+    }
+  ],
+  "remote_rollout_complete": false,
+  "v1_pending_local_docker_recovery": true,
+  "full_fleet_acceptance": false,
+  "public_cutover": false
+}

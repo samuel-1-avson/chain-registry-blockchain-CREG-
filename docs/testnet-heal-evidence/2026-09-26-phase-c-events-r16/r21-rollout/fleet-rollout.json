@@ -1,0 +1,101 @@
+{
+  "schema": "creg-phase-c-r21-fleet-rollout-v1",
+  "captured_at_utc": "2026-09-26T21:59:25.9391743Z",
+  "image_tag": "creg-node:phase-c-secure-r21-revoke-retirement",
+  "image_manifest_id": "sha256:374eadc62ee9652ee0869efb22ad02ddb0bd8184e11a752a4b4bb303179d9423",
+  "image_config_id": "sha256:d2b83a6525314b17434bc98c5bf05181db4fd6d73c962eabd2b5407968dfa95c",
+  "image_platform_manifest_id": "sha256:60ff1bc767ac84ae119a35b2ac864ebe08e0e4978a788315c3759cafe7d827fd",
+  "archive_delta_sha256": "2bfdc2c71ba5451dde2a0ad5a8938c78738ab74e684e590b7a7bf7240a9b73ff",
+  "accepted_runtime_image_ids": [
+    "sha256:374eadc62ee9652ee0869efb22ad02ddb0bd8184e11a752a4b4bb303179d9423",
+    "sha256:d2b83a6525314b17434bc98c5bf05181db4fd6d73c962eabd2b5407968dfa95c",
+    "sha256:60ff1bc767ac84ae119a35b2ac864ebe08e0e4978a788315c3759cafe7d827fd"
+  ],
+  "runtime_ids_are_docker_manifest_or_config_representations": true,
+  "fleet_readiness": {
+    "evidence": "fleet-readiness.json",
+    "all_eight_ready": true,
+    "all_eight_recovery_clear": true,
+    "all_eight_pbft_clear": true,
+    "shared_tip_height": 9,
+    "shared_tip_hash": "e0b40d52f7626f46a0bcf85040ec2c34dc1d576af0b1e7d65396d31c325f0837",
+    "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+    "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+    "scanner_profile_digest": "d09a9d2450e6e691bc71bee591b1101aa14d8b0feb6f6088ab6819f48e1a6be4"
+  },
+  "node_images": [
+    {
+      "slot": "v1",
+      "image_id": "sha256:374eadc62ee9652ee0869efb22ad02ddb0bd8184e11a752a4b4bb303179d9423",
+      "container_running": true
+    },
+    {
+      "slot": "v2",
+      "image_id": "sha256:374eadc62ee9652ee0869efb22ad02ddb0bd8184e11a752a4b4bb303179d9423",
+      "container_running": true
+    },
+    {
+      "slot": "v3",
+      "image_id": "sha256:d2b83a6525314b17434bc98c5bf05181db4fd6d73c962eabd2b5407968dfa95c",
+      "container_running": true
+    },
+    {
+      "slot": "v4",
+      "image_id": "sha256:d2b83a6525314b17434bc98c5bf05181db4fd6d73c962eabd2b5407968dfa95c",
+      "container_running": true
+    },
+    {
+      "slot": "o1",
+      "image_id": "sha256:374eadc62ee9652ee0869efb22ad02ddb0bd8184e11a752a4b4bb303179d9423",
+      "container_running": true
+    },
+    {
+      "slot": "o2",
+      "image_id": "sha256:374eadc62ee9652ee0869efb22ad02ddb0bd8184e11a752a4b4bb303179d9423",
+      "container_running": true
+    },
+    {
+      "slot": "o3",
+      "image_id": "sha256:d2b83a6525314b17434bc98c5bf05181db4fd6d73c962eabd2b5407968dfa95c",
+      "container_running": true
+    },
+    {
+      "slot": "o4",
+      "image_id": "sha256:d2b83a6525314b17434bc98c5bf05181db4fd6d73c962eabd2b5407968dfa95c",
+      "container_running": true
+    }
+  ],
+  "v4_committed_state_restart": {
+    "old_r20_container": "creg-phase-c-r7-v4-r20-before-r21",
+    "old_container_state": "exited",
+    "r21_started_at": "2026-09-26T21:53:28.612005358Z",
+    "chain_tip_preserved": true,
+    "pbft_clear": true,
+    "signer_journal_preserved": true,
+    "p2p_identity_preserved": true
+  },
+  "billable_gcp_vms": [
+    {
+      "name": "creg-validator-3",
+      "zone": "europe-west1-b",
+      "status": "RUNNING"
+    },
+    {
+      "name": "creg-observer-3",
+      "zone": "us-west1-b",
+      "status": "RUNNING"
+    },
+    {
+      "name": "creg-validator-4",
+      "zone": "asia-southeast1-b",
+      "status": "RUNNING"
+    },
+    {
+      "name": "creg-observer-4",
+      "zone": "africa-south1-a",
+      "status": "RUNNING"
+    }
+  ],
+  "all_four_billable_gcp_vms_still_running": true,
+  "public_cutover": false
+}

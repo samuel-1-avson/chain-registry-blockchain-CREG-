@@ -1,0 +1,33 @@
+{
+  "captured_at": "2026-09-27T16:55:14.055Z",
+  "url": "http://127.0.0.1:3007/metrics",
+  "real_node_api": "R7 O1 through the temporary SSH/IAP tunnel",
+  "api_http": 200,
+  "collector": "prometheus",
+  "history_status": "ready",
+  "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+  "network_genesis_hash": "1852b9a86dd3b53e7b2de4a774723a4fe48e862f9c61d14e5917b42b21055234",
+  "sample_count": 60,
+  "queried_series": 7,
+  "observed_fields": [
+    "active_validators",
+    "height",
+    "package_count",
+    "pending_tx_count",
+    "publisher_count",
+    "total_stake",
+    "validator_count"
+  ],
+  "latest_height": 14,
+  "chart_headings": [
+    "Chain height",
+    "Block production rate (blocks/min)",
+    "Validators (active vs total)",
+    "Pending pool size",
+    "Chain-authoritative total stake (CREG)",
+    "Total packages registered"
+  ],
+  "rendered_chart_count": 8,
+  "page_errors": [],
+  "screenshot": "C:\\Users\\samue\\OneDrive\\Desktop\\projects\\chain-registry-blockchain-CREG-\\docs\\testnet-heal-evidence\\2026-09-27-phase-c-metrics-history-r23\\metrics-page-r23.png"
+}

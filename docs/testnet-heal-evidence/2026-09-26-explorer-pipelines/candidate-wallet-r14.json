@@ -1,0 +1,50 @@
+{
+  "capturedAt": "2026-09-26T12:47:49.574Z",
+  "base": "http://127.0.0.1:3007",
+  "expectedChain": "creg-phase-c-testnet-2026-09-26-r7",
+  "liveStats": {
+    "status": 200,
+    "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+    "height": 4,
+    "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+    "spec_signature_verified": true
+  },
+  "spec": {
+    "path": "/phase-c/r7/chain-spec.json",
+    "status": 200,
+    "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+    "token": "0xbC2a72107C6765364D0A822a88A6e6C61f30EAa6",
+    "staking": "0x61c00EBe7C46f0bcE63942F7E15Bcc434DFC9B7C",
+    "registry": "0x23c7FB8e6fd932C1078Ff76244470557E5e6bd99"
+  },
+  "rpc": {
+    "status": 200,
+    "chain_id": "0xaa36a7"
+  },
+  "pageErrors": [],
+  "failedRequests": [
+    {
+      "url": "http://127.0.0.1:3007/v1/public/chain/stats",
+      "error": "net::ERR_ABORTED"
+    }
+  ],
+  "browserSpecResponses": [
+    {
+      "path": "/phase-c/r7/chain-spec.json",
+      "status": 200,
+      "chain_id": "creg-phase-c-testnet-2026-09-26-r7"
+    },
+    {
+      "path": "/phase-c/r7/chain-spec.json",
+      "status": 200,
+      "chain_id": "creg-phase-c-testnet-2026-09-26-r7"
+    },
+    {
+      "path": "/phase-c/r7/chain-spec.json",
+      "status": 200,
+      "chain_id": "creg-phase-c-testnet-2026-09-26-r7"
+    }
+  ],
+  "verified": true,
+  "source": "Live HTTP/API and Sepolia RPC responses, no interception or fixtures"
+}

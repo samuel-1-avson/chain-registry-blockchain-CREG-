@@ -1,0 +1,12 @@
+{
+  "capturedAt": "2026-09-27T07:47:09.788Z",
+  "canonical": "npm:kleur@4.1.5",
+  "afterHeight": 13,
+  "connections": [
+    {
+      "url": "http://127.0.0.1:3007/v1/public/events",
+      "opened": true,
+      "errors": 0
+    }
+  ]
+}

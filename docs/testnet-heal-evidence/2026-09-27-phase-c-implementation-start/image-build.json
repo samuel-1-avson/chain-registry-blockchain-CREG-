@@ -1,0 +1,8 @@
+{
+  "timestamp_utc": "2026-09-27T01:25:30.6586824Z",
+  "image_tag": "creg-node:phase-c-secure-r22-commit-capture",
+  "image_id": "sha256:2b472a089fe6ac651edfbae51b616456ed335f35992c0374f10c1ea80ce6caa3",
+  "source_manifest": "source-manifest.json",
+  "real_host_acceptance": "pending",
+  "public_cutover": "pending"
+}

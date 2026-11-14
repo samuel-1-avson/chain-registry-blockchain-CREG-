@@ -1,0 +1,11 @@
+{
+  "schema": "creg-phase-c-private-image-publication-v1",
+  "verified_at_utc": "2026-09-27T02:49:00Z",
+  "tag": "us-central1-docker.pkg.dev/gen-lang-client-0022105784/creg-testnet/creg-node:phase-c-secure-r22-commit-capture",
+  "digest_ref": "us-central1-docker.pkg.dev/gen-lang-client-0022105784/creg-testnet/creg-node@sha256:2b472a089fe6ac651edfbae51b616456ed335f35992c0374f10c1ea80ce6caa3",
+  "image_id": "sha256:2b472a089fe6ac651edfbae51b616456ed335f35992c0374f10c1ea80ce6caa3",
+  "platform": "linux/amd64",
+  "publication_scope": "private Artifact Registry in project gen-lang-client-0022105784",
+  "validator_rollout_started": false,
+  "public_cutover": false
+}

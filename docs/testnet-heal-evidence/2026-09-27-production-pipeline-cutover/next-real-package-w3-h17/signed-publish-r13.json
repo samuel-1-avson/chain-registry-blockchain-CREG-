@@ -1,0 +1,43 @@
+{
+  "id": {
+    "ecosystem": "npm",
+    "name": "has-flag",
+    "version": "5.0.1"
+  },
+  "content_hash": "b1b9152724e4946f3ee7202ef5c316825ffc498384cb5870dc021d141c7d916b",
+  "ipfs_cid": "QmUPnTdZiLKJjZwWqR9vuzXYcT9Qae4TRBrPwJDHwJaEvN",
+  "publisher_address": "0xa40d79527314efd4964d49c4a0673c87b612348b",
+  "publisher_pubkey": "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d",
+  "signature": "",
+  "manifest": {
+    "allowed_network_hosts": [],
+    "allowed_fs_writes": [],
+    "spawns_processes": false,
+    "allowed_process_spawns": [],
+    "description": "Pure argument flag helper; no network, filesystem writes, or child processes."
+  },
+  "submitted_at": "2026-09-28T02:14:24Z",
+  "shielded": false,
+  "key_bundle": null,
+  "pgp_signature": null,
+  "pgp_public_key": null,
+  "threshold": 1,
+  "publisher_pubkeys": [
+    "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d"
+  ],
+  "signatures": [
+    "c887a73539bc68d4e3f2ece9f4c1b65d1dd5cb13a722322a0f829100a193d8f33c12fbbacb2a6e170909571b2ac40d6c9857fb9559c51afde8ab803eb70a9c07"
+  ],
+  "publisher_evm_signature": "2c770b6ac42fd8c71cd8203b43175c100ef400c98efd2ec7240ebf79785cd71161d7ee716c9927948678cb1a1ece149765867e92a18a0759641c0c055877c0bd1c",
+  "publisher_nonce": "776c350008b8a00444a4c2c9b8f7e406",
+  "publisher_expires_at": 1790565264,
+  "source_hash": "b1b9152724e4946f3ee7202ef5c316825ffc498384cb5870dc021d141c7d916b",
+  "manifest_hash": "7e1a2473f118ad1c525e573904e5b6c7f1f34e7c92cb10ea040301e80cd1f606",
+  "ownership_claim": "npm:has-flag",
+  "publisher_chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+  "publisher_genesis_hash": "1852b9a86dd3b53e7b2de4a774723a4fe48e862f9c61d14e5917b42b21055234",
+  "publisher_staking_contract": "0x61c00ebe7c46f0bce63942f7e15bcc434dfc9b7c",
+  "publisher_authorization_version": 4,
+  "ownership_proof": null,
+  "namespace_authority_certificate": null
+}

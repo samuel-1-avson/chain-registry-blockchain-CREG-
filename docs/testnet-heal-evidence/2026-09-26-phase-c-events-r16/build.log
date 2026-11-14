@@ -1,0 +1,32 @@
+#0 building with "desktop-linux" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 1.67kB 0.0s done
+#1 DONE 0.1s
+
+#2 [internal] load metadata for docker.io/library/creg-node:recovery-diagnostic-builder-20260926
+#2 ...
+
+#3 [internal] load metadata for docker.io/library/creg-node:phase-c-secure-r12-bounded-l1-retry
+#3 DONE 0.2s
+
+#2 [internal] load metadata for docker.io/library/creg-node:recovery-diagnostic-builder-20260926
+#2 ...
+
+#4 [auth] library/creg-node:pull token for registry-1.docker.io
+#4 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/creg-node:recovery-diagnostic-builder-20260926
+#2 ERROR: pull access denied, repository does not exist or may require authorization: server message: insufficient_scope: authorization failed
+------
+ > [internal] load metadata for docker.io/library/creg-node:recovery-diagnostic-builder-20260926:
+------
+Dockerfile:1
+--------------------
+   1 | >>> FROM creg-node:recovery-diagnostic-builder-20260926 AS builder
+   2 |     WORKDIR /build
+   3 |     COPY ["crates/node/src/api.rs", "crates/node/src/block_producer.rs", "crates/node/src/chain_store.rs", "crates/node/src/events.rs", "crates/node/src/main.rs", "crates/node/src/p2p.rs", "crates/node/src/package_admission.rs", "crates/node/src/state.rs", "/build/crates/node/src/"]
+--------------------
+ERROR: failed to build: failed to solve: creg-node:recovery-diagnostic-builder-20260926: failed to resolve source metadata for docker.io/library/creg-node:recovery-diagnostic-builder-20260926: pull access denied, repository does not exist or may require authorization: server message: insufficient_scope: authorization failed
+
+View build details: docker-desktop://dashboard/build/desktop-linux/desktop-linux/uc40ascnguiosyb406lcpdelu

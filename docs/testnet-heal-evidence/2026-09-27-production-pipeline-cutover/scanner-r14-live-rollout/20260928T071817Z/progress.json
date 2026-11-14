@@ -1,0 +1,32 @@
+{
+  "schema": "creg-real-r14-scanner-fleet-rollout-v1",
+  "run_id": "20260928T071817Z",
+  "started_at_utc": "2026-09-28T07:18:17.0185474Z",
+  "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+  "starting_height": 18,
+  "starting_hash": "ec64471b8f9c58eb2d9b958db765a98871cb444e032143d313d65b3ab80cd76c",
+  "canonical": "npm:ansi-regex@6.1.0",
+  "old_profile": "8c7f011ab71a9a695ce1364e9958a2906f02645849c3567fc5691206a93c296e",
+  "new_profile": "7e1d95f9c8423778211944a1dea46674d8cbd3f0aee3b0eea6b5250f11d009cd",
+  "requested_slots": [
+    "v4"
+  ],
+  "nodes": [
+    {
+      "slot": "v4",
+      "role": "validator",
+      "host": "creg-validator-4",
+      "image_id": "sha256:704cd7dfb89a048c146a3de502416c31a6f77c0e3f493a98f4fe3098c732046c",
+      "result": "passed",
+      "report": "v4-rollout.json"
+    }
+  ],
+  "remote_rollout_complete": true,
+  "v1_pending_local_docker_recovery": true,
+  "full_fleet_acceptance": false,
+  "public_cutover": false,
+  "completed_at_utc": "2026-09-28T07:21:00.5259866Z",
+  "remote_nodes": [
+    "v4"
+  ]
+}

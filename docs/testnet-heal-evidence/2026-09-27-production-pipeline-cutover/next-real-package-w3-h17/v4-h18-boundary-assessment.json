@@ -1,0 +1,24 @@
+{
+  "schema": "creg-v4-h18-capture-boundary-assessment-v1",
+  "captured_at_utc": "2026-09-28T03:18:46.6739132Z",
+  "height": 18,
+  "block_hash": "ec64471b8f9c58eb2d9b958db765a98871cb444e032143d313d65b3ab80cd76c",
+  "pause_utc": "2026-09-28T03:01:58.4841934+00:00",
+  "pause_resumed_utc": "2026-09-28T03:02:28.4854389+00:00",
+  "sigkill_started_utc": "2026-09-28T03:02:28.4878540+00:00",
+  "replay_marker_utc": "2026-09-28T03:03:57.0839621+00:00",
+  "seconds_from_pause_to_sigkill": 30.003661,
+  "milliseconds_from_resume_to_sigkill": 2.415,
+  "durable_marker_seen": true,
+  "sigkill_completed": true,
+  "manual_start_required": true,
+  "same_commit_recovered_on_start": true,
+  "pre_application_crash_proven": false,
+  "reason": "Pause resumed before SIGKILL began; the monitor delayed reading a buffered log line and incorrectly relied on Docker automatic restart.",
+  "supersedes_scope": "The read-only replay witness passes only same-COMMIT startup replay, not the pre-application crash acceptance gate.",
+  "supporting_artifacts": [
+    "v4-capture-monitor-r13-h18.json",
+    "v4-manual-replay-r13-h18.json",
+    "v4-disarm-r13-h18.json"
+  ]
+}

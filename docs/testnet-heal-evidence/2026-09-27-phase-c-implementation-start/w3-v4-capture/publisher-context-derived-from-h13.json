@@ -1,0 +1,15 @@
+{
+  "id": {
+    "ecosystem": "npm",
+    "name": "kleur",
+    "version": "4.1.5"
+  },
+  "publisher_pubkey": "863906af03a385de4f72fe8aab23ec7aaf6a3253bf43e08245d996d5b4b4047d",
+  "evidence_origin": {
+    "block_height": 13,
+    "block_hash": "8448cce76d7258f051cf9632d2ef7181da1321f5d19a3b5d00f00f8975aa2993",
+    "source": "docs/testnet-heal-evidence/2026-09-27-phase-c-implementation-start/cli-write/block-13-api.json",
+    "package_proof": "docs/testnet-heal-evidence/2026-09-27-phase-c-implementation-start/cli-write/package-proof-api.json",
+    "note": "Revocation owner context derived from the finalized publication; original CLI in-memory request was not persisted."
+  }
+}

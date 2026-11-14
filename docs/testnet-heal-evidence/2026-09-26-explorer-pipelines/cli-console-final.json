@@ -1,0 +1,99 @@
+{
+  "format": "creg-console-diagnostics-v1",
+  "generated_at_unix": 1790422223,
+  "read_only": true,
+  "node_connected": true,
+  "reconnect_in_seconds": 0,
+  "api_last_success_age_seconds": 6,
+  "api_error": null,
+  "stats": {
+    "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+    "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+    "spec_signature_verified": true,
+    "l1_rpc_configured": true,
+    "tip_height": 4,
+    "package_count": 1,
+    "validator_count": 4,
+    "total_stake": 400,
+    "peer_count": 2,
+    "bridge_status": "Legacy checkpointing disabled by Phase 0 safety freeze",
+    "l1_block": 0,
+    "finalized_height": null,
+    "finalization_lag": null,
+    "validator_set_source": "chain-authoritative",
+    "validator_set_sync_state": "synced"
+  },
+  "peer_ids": [],
+  "runtime_identity": {
+    "node_id": "validator-1",
+    "validator_pubkey": null,
+    "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+    "network": "unknown",
+    "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+    "spec_signature_verified": true,
+    "l1_rpc_configured": true,
+    "is_validator": true,
+    "validator_set_source": "chain-authoritative",
+    "validator_set_sync_state": "synced"
+  },
+  "consensus": {
+    "round": 0,
+    "phase": "IDLE",
+    "proposer": "unknown…",
+    "prepare_votes": 0,
+    "commit_votes": 0,
+    "quorum": 3,
+    "total_validators": 4,
+    "age_seconds": 6
+  },
+  "preflight": [
+    {
+      "name": "Signed chain spec",
+      "status": "PASS",
+      "detail": "detached signature verified at node startup"
+    },
+    {
+      "name": "Genesis identity",
+      "status": "PASS",
+      "detail": "0f2a3b1093…3766eed4"
+    },
+    {
+      "name": "L1 RPC",
+      "status": "PASS",
+      "detail": "endpoint configured (URL hidden)"
+    },
+    {
+      "name": "Peer connectivity",
+      "status": "PASS",
+      "detail": "2 peer(s) connected"
+    },
+    {
+      "name": "Node REST API",
+      "status": "PASS",
+      "detail": "waiting for the first successful response"
+    },
+    {
+      "name": "Consensus health",
+      "status": "PASS",
+      "detail": "round 0 / IDLE"
+    },
+    {
+      "name": "Validator identity",
+      "status": "FAIL",
+      "detail": "validator mode is enabled but no public key was reported"
+    },
+    {
+      "name": "Validator-set sync",
+      "status": "PASS",
+      "detail": "chain-authoritative / synced"
+    },
+    {
+      "name": "Action safety",
+      "status": "PASS",
+      "detail": "read-only console; validator mutations require authenticated external tooling"
+    }
+  ],
+  "recent_events": [],
+  "operator_auth_configured": false,
+  "private_keys": "never collected by the console"
+}

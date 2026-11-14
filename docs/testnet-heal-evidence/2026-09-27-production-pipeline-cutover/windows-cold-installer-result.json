@@ -1,0 +1,13 @@
+{
+  "captured_at_utc": "2026-09-27T20:57:15.8436257Z",
+  "installer": "passed",
+  "version": "creg 0.1.0-testnet-r25",
+  "sha256": "7f6eb939015356fdc454f635efa428cbadd3f62c89bcbdc0f06ee5672b04b01b",
+  "status_exit": 0,
+  "verify_exit": 0,
+  "endpoint": "http://127.0.0.1:3025",
+  "public_default": "still legacy, candidate tested explicitly",
+  "user_environment_modified": false,
+  "proof_performed": false,
+  "proof_limitation": "All existing packages are revoked. verify with canonical ID discovered npm:npm parsing defect; name@version correctly returns revoked without a proof."
+}

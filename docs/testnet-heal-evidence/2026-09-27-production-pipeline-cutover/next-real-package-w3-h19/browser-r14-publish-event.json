@@ -1,0 +1,123 @@
+{
+  "capturedAt": "2026-09-28T08:11:43.221Z",
+  "dataSource": "live Phase C candidate node through the real Vite proxy; no fixtures or intercepted responses",
+  "explorerUrl": "http://127.0.0.1:3008",
+  "candidateNodeUrl": "http://127.0.0.1:18080",
+  "operation": "publish",
+  "canonical": "npm:ansi-regex@6.1.0",
+  "startingHeight": 18,
+  "probeError": null,
+  "checks": {
+    "stream_opened": true,
+    "submitted": true,
+    "verified": true,
+    "block_produced": true,
+    "event_rendered_in_web_explorer": true,
+    "no_page_errors": true
+  },
+  "connections": [
+    {
+      "url": "http://127.0.0.1:3008/v1/public/events",
+      "opened": true,
+      "errors": 0
+    }
+  ],
+  "events": [
+    {
+      "type": "package_submitted",
+      "data": {
+        "kind": "package_submitted",
+        "ts": "2026-09-28T08:11:35.127082794+00:00",
+        "payload": {
+          "canonical": "npm:ansi-regex@6.1.0",
+          "publisher_pubkey": "863906af03a385de"
+        }
+      },
+      "receivedAt": "2026-09-28T08:11:35.129Z"
+    },
+    {
+      "type": "validator_voted",
+      "data": {
+        "kind": "validator_voted",
+        "ts": "2026-09-28T08:11:36.325171254+00:00",
+        "payload": {
+          "validator_id": "validator-1",
+          "canonical": "npm:ansi-regex@6.1.0",
+          "approved": true
+        }
+      },
+      "receivedAt": "2026-09-28T08:11:36.326Z"
+    },
+    {
+      "type": "validator_voted",
+      "data": {
+        "kind": "validator_voted",
+        "ts": "2026-09-28T08:11:37.311565489+00:00",
+        "payload": {
+          "validator_id": "validator-3",
+          "canonical": "npm:ansi-regex@6.1.0",
+          "approved": true
+        }
+      },
+      "receivedAt": "2026-09-28T08:11:37.312Z"
+    },
+    {
+      "type": "validator_voted",
+      "data": {
+        "kind": "validator_voted",
+        "ts": "2026-09-28T08:11:37.703411225+00:00",
+        "payload": {
+          "validator_id": "validator-2",
+          "canonical": "npm:ansi-regex@6.1.0",
+          "approved": true
+        }
+      },
+      "receivedAt": "2026-09-28T08:11:37.704Z"
+    },
+    {
+      "type": "validator_voted",
+      "data": {
+        "kind": "validator_voted",
+        "ts": "2026-09-28T08:11:39.708242041+00:00",
+        "payload": {
+          "validator_id": "validator-4",
+          "canonical": "npm:ansi-regex@6.1.0",
+          "approved": true
+        }
+      },
+      "receivedAt": "2026-09-28T08:11:39.709Z"
+    },
+    {
+      "type": "block_produced",
+      "data": {
+        "kind": "block_produced",
+        "ts": "2026-09-28T08:11:42.692886765+00:00",
+        "payload": {
+          "height": 19,
+          "hash": "e31b9e7440523d31a66b468e53115ec7cfbbd370e42dd8b1d9439d9a50eeea8b",
+          "tx_count": 1,
+          "block_hash": "e31b9e7440523d31a66b468e53115ec7cfbbd370e42dd8b1d9439d9a50eeea8b",
+          "block_phase": "committed"
+        }
+      },
+      "receivedAt": "2026-09-28T08:11:42.694Z"
+    },
+    {
+      "type": "package_verified",
+      "data": {
+        "kind": "package_verified",
+        "ts": "2026-09-28T08:11:42.692997517+00:00",
+        "payload": {
+          "canonical": "npm:ansi-regex@6.1.0",
+          "block_hash": "e31b9e7440523d31a66b468e53115ec7cfbbd370e42dd8b1d9439d9a50eeea8b",
+          "validator_count": 3,
+          "height": 19,
+          "block_phase": "committed"
+        }
+      },
+      "receivedAt": "2026-09-28T08:11:42.694Z"
+    }
+  ],
+  "renderedText": "Live events\n7 of 7\n🔗\nShare\nAll types (7)\nblock_produced (1)\npackage_submitted (1)\npackage_verified (1)\nvalidator_voted (4)\n⏸ Pause\n↕ Auto-scroll\n≡ Compact\n⇩ Export\nall (7)\nblock_produced (1)\npackage_submitted (1)\npackage_verified (1)\nvalidator_voted (4)\nPACKAGE_VERIFIED\n#19\nnpm:ansi-regex@6.1.0\n0s ago\nBLOCK_PRODUCED\n#19\n0s ago\nVALIDATOR_VOTED\nnpm:ansi-regex@6.1.0\n2s ago\nVALIDATOR_VOTED\nnpm:ansi-regex@6.1.0\n5s ago\nVALIDATOR_VOTED\nnpm:ansi-regex@6.1.0\n5s ago\nVALIDATOR_VOTED\nnpm:ansi-regex@6.1.0\n6s ago\nPACKAGE_SUBMITTED\nnpm:ansi-regex@6.1.0\n7s ago\nCONNECTED Buffer: 7 events\nShowing: 7 / 7",
+  "pageErrors": []
+}

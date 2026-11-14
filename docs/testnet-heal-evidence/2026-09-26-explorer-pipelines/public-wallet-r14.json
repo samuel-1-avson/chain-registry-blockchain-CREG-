@@ -1,0 +1,40 @@
+{
+  "capturedAt": "2026-09-26T12:57:39.135Z",
+  "base": "https://explorer.testnet.cregnet.dev",
+  "expectedChain": "creg-testnet-1",
+  "liveStats": {
+    "status": 200,
+    "chain_id": "creg-testnet-1",
+    "height": 0,
+    "genesis_hash": "068364cf778ede5a0b1c814c59b0314f9a8598a959fa5a8e08ea78bc1b296b53",
+    "spec_signature_verified": true
+  },
+  "spec": {
+    "path": "/chain-spec.json",
+    "status": 200,
+    "chain_id": "creg-testnet-1",
+    "token": "0x167Ab975dc95b79727Ed76BD8AAb70463F6499E2",
+    "staking": "0x30604Aa6f763fbde6aDCffbd8960af3031037331",
+    "registry": "0xD0F465ca185a99E268be0C4FF5A135Bdf89FAF3B"
+  },
+  "rpc": {
+    "status": 200,
+    "chain_id": "0xaa36a7"
+  },
+  "pageErrors": [],
+  "failedRequests": [],
+  "browserSpecResponses": [
+    {
+      "path": "/chain-spec.json",
+      "status": 200,
+      "chain_id": "creg-testnet-1"
+    },
+    {
+      "path": "/chain-spec.json",
+      "status": 200,
+      "chain_id": "creg-testnet-1"
+    }
+  ],
+  "verified": true,
+  "source": "Live HTTP/API and Sepolia RPC responses, no interception or fixtures"
+}

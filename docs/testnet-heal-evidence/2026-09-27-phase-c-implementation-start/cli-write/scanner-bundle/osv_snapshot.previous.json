@@ -1,0 +1,11 @@
+{
+  "epoch": "osv-2026-09-26-phase-c-r10-event-check",
+  "schema": "creg-osv-snapshot-v1",
+  "source": "https://api.osv.dev/v1/query",
+  "built_at": "2026-09-26T18:34:29.725565600+00:00",
+  "entries": {
+    "npm:escape-html@1.0.3": [],
+    "npm:toidentifier@1.0.1": [],
+    "npm:is-number@7.0.0": []
+  }
+}
