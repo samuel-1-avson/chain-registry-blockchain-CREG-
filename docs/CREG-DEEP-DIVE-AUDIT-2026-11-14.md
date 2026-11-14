@@ -1192,7 +1192,7 @@ git worktree remove --force C:\Users\samue\.cargo-targets\capmatrix-wt
 | Follow-up: `cargo fmt --check`; Clippy on `common`, faucet, relayer, pinner and node (`--all-targets -D warnings`); `phase-c-real-fleet` check | **Pass** | Same two pre-existing lints allowed as above |
 | Follow-up: full workspace `cargo test` | **Pass — 1,028 passed, 0 failed, 2 ignored** | 4 more than before (the faucet tests). The 20 transport tests in the node's two test targets moved into `common` |
 | Follow-up: `Cargo.lock` | 5 lines added | New dependency edges for `common` only; no version changed |
-| Follow-up: capability matrix | **Regenerate before merging** | `.env.example`, `docker-compose.yml`, `docker-compose.prod.yml` and `docker-compose.testnet.yml` are hashed inputs; regenerate from an LF checkout (§12.4) |
+| Follow-up: capability matrix `--check` | **Pass** after regeneration from an LF checkout | Exactly 4 digests changed, all edited in this change: `.env.example`, `docker-compose.yml`, `docker-compose.prod.yml`, `docker-compose.testnet.yml` |
 
 **Not covered here:** CI's exact toolchain (Rust 1.93.0 is not installed locally; 1.98.1 was used), Linux, the Foundry contract suite (no contract changed), the explorer production build, and any deployment.
 
