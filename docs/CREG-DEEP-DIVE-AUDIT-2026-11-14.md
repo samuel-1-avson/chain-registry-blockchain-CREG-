@@ -504,9 +504,9 @@ flowchart TD
 | AUD-04 | **High** | Economics | No slashing wired; equivocation detector is dead code | `slashing_relay.rs:53`; no node callers | Confirmed [CODE] |
 | AUD-05 | **High** (mainnet: Critical) | Contracts | Governance executes immediately with no timelock; emergency admission path | `Governance.sol:394-403`; `Staking.sol:433-465` | Confirmed [CODE] |
 | AUD-06 | **High** | Decentralization | Single operator controls all 8 nodes; validator on a laptop | docs | [DOC] |
-| AUD-07 | Medium-High | Contracts | `_validatorList` never de-duplicated; double-counting; unbounded growth | `Staking.sol:425,576-580,621-627` | [CODE]; PoC needed |
-| AUD-08 | Medium | Contracts | `claimSlashPoolShare` uses a decaying pool; order-dependent; can block next epoch | `Staking.sol:845,858,813` | [CODE]; no tests |
-| AUD-09 | Medium | Contracts | Publisher self-revoke releases bond without slash | `Registry.sol:426-435` | [CODE] |
+| AUD-07 | Medium-High | Contracts | `_validatorList` never de-duplicated; double-counting; unbounded growth | `Staking.sol:425,576-580,621-627` | **Confirmed by PoC test; fixed in source** (§12.7) |
+| AUD-08 | Medium | Contracts | `claimSlashPoolShare` uses a decaying pool; order-dependent; can block next epoch | `Staking.sol:845,858,813` | **Confirmed by PoC test; fixed in source** (§12.7) |
+| AUD-09 | Medium | Contracts | Publisher self-revoke releases bond without slash | `Registry.sol:426-435` | **Confirmed by PoC test; fixed in source** (§12.7) |
 | AUD-10 | Medium | Contracts | Silent `try/catch` hides accounting failures | `Registry.sol:395,435,462` | [CODE] |
 | AUD-11 | Medium | Secrets | Keys in OneDrive-synced tree; private-key literal in `.env.example`; two deploy scripts could use Anvil keys against a non-local RPC | see detail | [CODE] |
 | AUD-12 | Medium | Scanner | Per-package manual profile; weak detection; high false positives; misleading "AI" label | `deep_scan.rs:264-268` | [CODE][LIVE] |
@@ -1164,6 +1164,46 @@ git worktree remove --force C:\Users\samue\.cargo-targets\capmatrix-wt
 **Not covered here:** CI's exact toolchain (Rust 1.93.0 is not installed locally; 1.98.1 was used), Linux, the Foundry contract suite (no contract changed), the explorer production build, and any deployment.
 
 **New observation during the run (AUD-27):** the `faucet` crate (≈3,900 lines, which moves real Sepolia tokens) ran **0 tests**. Its reconciliation and claim logic has no automated coverage.
+
+### 12.6 Sepolia RPC node: triage and repair (2026-11-14)
+
+Read-only triage first, then two changes the operator approved.
+
+**What was wrong**
+- The VM `creg-sepolia-rpc` was **shut down from 2026-10-05 18:45 UTC until 2026-11-14 09:09 UTC** (39 days). Geth had reached the chain head around 5 October.
+- After the restart, the Lighthouse beacon refused to start every ~64 s: *"current head state is outside the weak subjectivity period … purge your db and checkpoint sync."* Without a beacon, Geth was frozen at block 11,850,628, about 282,000 blocks behind.
+- The data disk was 97% full (34 GB free of 1 TB).
+- The RPC firewall allowlist (`creg-sepolia-rpc-allow-clients`) still holds the operator laptop's 2 October IP, so the RPC is unreachable from the laptop. It was queried over IAP SSH instead.
+- The R32 candidate image build `f50a2977` **succeeded** on 2026-10-02 (digest `sha256:705b26f6…`) and was never deployed. It predates PR #57.
+
+**What was changed**
+1. **Beacon reset** (equivalent to `lighthouse --purge-db`). Deleted only `chain_db`, `freezer_db` and `blobs_db` (≈14 GB) and kept the node's network identity. Geth data was untouched. The beacon checkpoint-synced from the configured ethpandaops endpoint within a minute and reports `Synced` at the head.
+2. **Disk grown online 1,024 → 1,124 GB** (filesystem now 130 GB free). The approved +500 GB was refused by the `us-west1` `SSD_TOTAL_GB` quota (1,200 GB, 1,094 used), so +100 GB was the most that fit.
+
+**State at 14:01 UTC:** Geth importing at about 14,000 blocks/hour, about 18 hours from the head. Geth uses about 0.15 GB per 1,000 blocks, so the remaining catch-up needs about 38 GB plus the beacon's ~20-week history back-fill.
+
+**Still to do:** confirm Geth reaches the head; compare its block hashes and staking logs with Tenderly; request a larger SSD quota if more growth is wanted; decide on operator access (refresh the allowlist or use IAP port-forwarding); build a new image including PR #57 before the observer canary.
+
+### 12.7 Contract fixes for AUD-07, AUD-08, AUD-09 (2026-11-14)
+
+Proof-of-concept tests in `contracts/test/AuditFindings.t.sol` asserted the intended behaviour and **all five failed against the original contracts**, confirming the findings:
+
+| Test | Failure before the fix |
+|------|------------------------|
+| `test_AUD07_reappliedValidatorIsCountedOnce` | `6 != 5` — a validator that re-applied was counted twice |
+| `test_AUD07_reapplicationsDoNotRaiseAdmissionQuorum` | `InsufficientQuorum(4, 5)` — 4 of 5 distinct validators could not admit an applicant |
+| `test_AUD08_equalWeightsReceiveEqualShares` | Second claimer got 18.75 instead of 25 |
+| `test_AUD08_nextEpochCanBeCommittedAfterAllClaims` | `previous epoch not fully claimed` after every validator claimed |
+| `test_AUD09_selfRevocationKeepsTheBondReserved` | Available stake back to 2 CREG — the 1 CREG bond was released |
+
+**Fixes**
+- **AUD-07 (`Staking.sol`).** `_validatorList` is now de-duplicated with an `_inValidatorList` mapping, so re-applying never adds a second entry. Counting loops still read current state. The O(n) loops remain (gas concern with many distinct applicants); a cached active counter is a follow-up.
+- **AUD-08 (`Staking.sol`).** `commitSlashPoolEpoch` snapshots the epoch total (`slashPoolEpochTotal`) and carries any unclaimed remainder into the next epoch instead of reverting. `claimSlashPoolShare` computes shares from the snapshot, capped by the remainder for solvency. **Behaviour change:** shares not claimed before governance commits the next epoch are forfeited to it.
+- **AUD-09 (`Registry.sol`).** A publisher's self-revocation keeps the release bond reserved and starts the 30-day liability window; it no longer releases the bond. Governance can still slash it through `Staking.resolvePublisherLiability`, and anyone can release it after the window with `releaseMaturedPublisherLiability`. Governance revocation is unchanged. **Behaviour change** for publishers who self-revoke.
+
+**Verification (Foundry 1.6.0-nightly, Solc 0.8.24, `via_ir`):** the 8 audit tests pass (the 5 above plus three behaviour tests: governance can slash after a self-revocation, the bond releases after the window, and an unclaimed remainder carries over). The full suite passes **137/137**, including the 1,000-run fuzz tests. `forge build --sizes` passes: `Staking` 15,589 B (8,987 B margin), `ChainRegistry` 14,487 B. CI pins Foundry v1.7.1, which is not installed locally.
+
+**Not done:** these fixes are in source only. The R7 Sepolia contracts still have the original code. Deploying them is a contract migration (new addresses, re-signed spec, fleet rollout) — see W7 in the tokenomics plan. On the live R7 contracts, no validator has re-applied yet and the slash pool has never been used, so the bugs have not been triggered. `config/capability-matrix.json` hashes `contracts/Registry.sol` and must be regenerated (from an LF checkout) once these changes are committed.
 
 ---
 
