@@ -25,13 +25,9 @@ use std::collections::HashMap;
 /// Number of responses needed to form a strict majority of configured
 /// endpoints. A majority of only the responders is insufficient: if four
 /// providers are configured, two matching answers and two timeouts are not a
-/// quorum.
+/// quorum. The rule is shared with the L1 transport in `common::l1_rpc`.
 pub fn configured_quorum_size(configured: usize) -> usize {
-    if configured == 0 {
-        0
-    } else {
-        configured / 2 + 1
-    }
+    common::l1_rpc::configured_quorum_size(configured)
 }
 
 /// Whether the successful responses include a strict majority of all

@@ -103,6 +103,7 @@ services:
       CREG_SECRETS_BACKEND: env
       FAUCET_PORT: "8082"
       FAUCET_RPC_URL: "${SEPOLIA_RPC_URL:-https://ethereum-sepolia-rpc.publicnode.com}"
+      FAUCET_RPC_FALLBACKS: "${FAUCET_RPC_FALLBACKS:-}"
       FAUCET_PUBLIC_RPC_URL: "https://${CREG_PUBLIC_API_HOST:-api.testnet.cregnet.dev}/sepolia"
       # Supply the dedicated faucet key from the protected deployment
       # environment. An empty key must fail compose validation before launch.
@@ -111,6 +112,7 @@ services:
       FAUCET_TOKEN_CONTRACT: "${CREG_TOKEN_ADDR:?Token contract from the selected signed spec required}"
       FAUCET_CHAIN_ID: "11155111"
       FAUCET_RECONCILIATION_RPC_URL: "${FAUCET_RECONCILIATION_RPC_URL:-https://ethereum-sepolia-rpc.publicnode.com}"
+      FAUCET_RECONCILIATION_RPC_FALLBACKS: "${FAUCET_RECONCILIATION_RPC_FALLBACKS:-}"
       FAUCET_DEPLOYMENT_RECEIPT_RPC_URL: "${FAUCET_DEPLOYMENT_RECEIPT_RPC_URL:-https://1rpc.io/sepolia}"
       FAUCET_TOKEN_DEPLOYMENT_TX_HASH: "${FAUCET_TOKEN_DEPLOYMENT_TX_HASH:-0xb5e4229aef0b76de4b8528283243f4fb668df3820556675452c11b9afc3cb516}"
       FAUCET_TOKEN_DEPLOYMENT_BLOCK: "${FAUCET_TOKEN_DEPLOYMENT_BLOCK:-11781432}"

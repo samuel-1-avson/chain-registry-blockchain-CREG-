@@ -7,8 +7,14 @@ edition = "2021"
 default = []
 # New-chain consensus encoding; never enable when replaying legacy chains.
 phase-c-canonical-transactions = []
+# Shared Ethereum JSON-RPC transport with configured-endpoint quorum reads
+# (`common::l1_rpc`). Enabled by the services that read Sepolia.
+l1-rpc = ["dep:alloy", "dep:futures", "dep:tower"]
 
 [dependencies]
+alloy      = { workspace = true, optional = true }
+futures    = { workspace = true, optional = true }
+tower      = { workspace = true, optional = true }
 serde      = { workspace = true }
 serde_json = { workspace = true }
 sha2       = { workspace = true }
@@ -28,6 +34,10 @@ x25519-dalek = { version = "2.0", features = ["static_secrets"] }
 
 [build-dependencies]
 tonic-build = "0.12"
+
+[dev-dependencies]
+axum       = { workspace = true }
+tokio      = { workspace = true }
 
 [lints]
 workspace = true

@@ -28,7 +28,7 @@ name = "creg-authority-rejection-fixture"
 path = "src/bin/creg_authority_rejection_fixture.rs"
 
 [dependencies]
-common    = { path = "../common" }
+common    = { path = "../common", features = ["l1-rpc"] }
 chain-registry-secrets = { path = "../secrets" }
 validator = { path = "../validator" }
 ml-validator = { path = "../ml-validator" }

@@ -60,12 +60,18 @@ struct FaucetConfig {
     native_max_balance: u128,
     /// Ethereum RPC URL
     rpc_url: String,
+    /// Comma-separated independent fallbacks for `rpc_url`. Balance reads
+    /// then need a strict majority of all configured endpoints to agree.
+    rpc_fallbacks: String,
     /// Initial R7 treasury holder, governance reserve, and staking contract.
     /// Public supply reporting is unavailable until these are configured.
     treasury_address: String,
     governance_address: String,
     staking_address: String,
     reconciliation_rpc_url: String,
+    /// Comma-separated independent fallbacks for `reconciliation_rpc_url`.
+    /// Ledger history reads then need a strict majority to agree.
+    reconciliation_rpc_fallbacks: String,
     deployment_receipt_rpc_url: String,
     reconciliation_indexer_url: String,
     /// Faucet private key (must have tokens to distribute)
@@ -120,10 +126,12 @@ impl FaucetConfig {
                     1_000_000_000_000_000_000,
                 ), // 1 ETH
                 rpc_url: env_string("FAUCET_RPC_URL", "http://localhost:8545"),
+                rpc_fallbacks: env_string("FAUCET_RPC_FALLBACKS", ""),
                 treasury_address: env_string("FAUCET_TREASURY_ADDRESS", ""),
                 governance_address: env_string("FAUCET_GOVERNANCE_ADDRESS", ""),
                 staking_address: env_string("FAUCET_STAKING_ADDRESS", ""),
                 reconciliation_rpc_url: env_string("FAUCET_RECONCILIATION_RPC_URL", ""),
+                reconciliation_rpc_fallbacks: env_string("FAUCET_RECONCILIATION_RPC_FALLBACKS", ""),
                 deployment_receipt_rpc_url: env_string("FAUCET_DEPLOYMENT_RECEIPT_RPC_URL", ""),
                 reconciliation_indexer_url: env_string(
                     "FAUCET_RECONCILIATION_INDEXER_URL",
@@ -177,6 +185,53 @@ impl FaucetConfig {
         } else {
             &self.reconciliation_rpc_url
         }
+    }
+
+    /// Endpoints for live balance reads: `FAUCET_RPC_URL` plus
+    /// `FAUCET_RPC_FALLBACKS`.
+    fn live_rpc_endpoints(&self) -> anyhow::Result<Vec<String>> {
+        common::l1_rpc::parse_rpc_endpoints(
+            &self.rpc_url,
+            &self.rpc_fallbacks,
+            "FAUCET_RPC_URL",
+            "FAUCET_RPC_FALLBACKS",
+        )
+    }
+
+    /// Endpoints for ledger reconciliation reads.
+    fn history_rpc_endpoints(&self) -> anyhow::Result<Vec<String>> {
+        history_rpc_endpoints(
+            &self.rpc_url,
+            &self.rpc_fallbacks,
+            &self.reconciliation_rpc_url,
+            &self.reconciliation_rpc_fallbacks,
+        )
+    }
+}
+
+/// History reads use the reconciliation endpoint set when
+/// `FAUCET_RECONCILIATION_RPC_URL` is configured, and otherwise the live
+/// endpoint set, matching `FaucetConfig::history_rpc_url`.
+fn history_rpc_endpoints(
+    rpc_url: &str,
+    rpc_fallbacks: &str,
+    reconciliation_rpc_url: &str,
+    reconciliation_rpc_fallbacks: &str,
+) -> anyhow::Result<Vec<String>> {
+    if reconciliation_rpc_url.trim().is_empty() {
+        common::l1_rpc::parse_rpc_endpoints(
+            rpc_url,
+            rpc_fallbacks,
+            "FAUCET_RPC_URL",
+            "FAUCET_RPC_FALLBACKS",
+        )
+    } else {
+        common::l1_rpc::parse_rpc_endpoints(
+            reconciliation_rpc_url,
+            reconciliation_rpc_fallbacks,
+            "FAUCET_RECONCILIATION_RPC_URL",
+            "FAUCET_RECONCILIATION_RPC_FALLBACKS",
+        )
     }
 }
 
@@ -1198,7 +1253,7 @@ async fn routescan_rpc_request(
             .context("Routescan historical contract state is not a decimal string")?
             .parse::<u128>()
             .context("Routescan historical contract state is not a valid uint128")?;
-        return Ok(serde_json::Value::String(format!("0x{decimal:x}")));
+        return Ok(serde_json::Value::String(abi_uint_word(decimal)));
     }
     if let Some(encoded) = result.as_str() {
         if encoded.trim_start().starts_with('{') {
@@ -1207,6 +1262,12 @@ async fn routescan_rpc_request(
         }
     }
     Ok(result)
+}
+
+/// Encode a uint the way `eth_call` returns it (one 32-byte ABI word), so an
+/// indexer-backed endpoint and a JSON-RPC endpoint give comparable answers.
+fn abi_uint_word(value: u128) -> String {
+    format!("0x{value:064x}")
 }
 
 async fn rpc_request(
@@ -1241,6 +1302,26 @@ async fn rpc_request(
     body.get("result")
         .cloned()
         .with_context(|| format!("{method} RPC response has no result"))
+}
+
+/// Ledger reconciliation read over the history endpoint set. With one
+/// endpoint this is exactly `rpc_request`. With fallbacks configured, logs,
+/// historical balances and supply, bytecode and chain ID must be agreed by a
+/// strict majority of the configured endpoints, so one provider serving
+/// pruned or wrong history can neither block reconciliation on its own nor
+/// make it pass; block reads fail over.
+async fn history_rpc_request(
+    client: &reqwest::Client,
+    config: &FaucetConfig,
+    method: &str,
+    params: serde_json::Value,
+) -> anyhow::Result<serde_json::Value> {
+    let endpoints = config.history_rpc_endpoints()?;
+    common::l1_rpc::routed_json_call(&endpoints, method, |endpoint| {
+        let params = params.clone();
+        async move { rpc_request(client, &endpoint, method, params).await }
+    })
+    .await
 }
 
 async fn rpc_request_with_receipt_fallback(
@@ -1396,10 +1477,9 @@ async fn finalized_chain_height(
     client: &reqwest::Client,
     config: &FaucetConfig,
 ) -> anyhow::Result<(u64, String)> {
-    let rpc_url = config.history_rpc_url();
-    let finalized = rpc_request(
+    let finalized = history_rpc_request(
         client,
-        rpc_url,
+        config,
         "eth_getBlockByNumber",
         serde_json::json!(["finalized", false]),
     )
@@ -1415,9 +1495,9 @@ async fn finalized_chain_height(
         .and_then(serde_json::Value::as_str)
         .context("finalized block has no hash")?
         .to_ascii_lowercase();
-    let latest = rpc_request(
+    let latest = history_rpc_request(
         client,
-        rpc_url,
+        config,
         "eth_getBlockByNumber",
         serde_json::json!(["latest", false]),
     )
@@ -1428,9 +1508,9 @@ async fn finalized_chain_height(
     )?;
     let confirmation_height = latest_number.saturating_sub(config.reconciliation_confirmations);
     if confirmation_height < finalized_number {
-        let block = rpc_request(
+        let block = history_rpc_request(
             client,
-            rpc_url,
+            config,
             "eth_getBlockByNumber",
             serde_json::json!([format!("0x{confirmation_height:x}"), false]),
         )
@@ -1513,9 +1593,9 @@ async fn verify_token_deployment(
     if receipt_hash != tx_hash.to_ascii_lowercase() {
         anyhow::bail!("deployment receipt transaction hash does not match configuration");
     }
-    let code = rpc_request(
+    let code = history_rpc_request(
         client,
-        config.history_rpc_url(),
+        config,
         "eth_getCode",
         serde_json::json!([token_address, "latest"]),
     )
@@ -1527,13 +1607,7 @@ async fn verify_token_deployment(
         anyhow::bail!("configured token contract has no deployed bytecode");
     }
     let chain_id = parse_rpc_hex_u64(
-        &rpc_request(
-            client,
-            config.history_rpc_url(),
-            "eth_chainId",
-            serde_json::json!([]),
-        )
-        .await?,
+        &history_rpc_request(client, config, "eth_chainId", serde_json::json!([])).await?,
         "RPC chain ID",
     )?;
     if chain_id != config.chain_id {
@@ -1549,9 +1623,9 @@ async fn eth_call_u128(
     data: &str,
     block_tag: &str,
 ) -> anyhow::Result<u128> {
-    let result = rpc_request(
+    let result = history_rpc_request(
         client,
-        config.history_rpc_url(),
+        config,
         "eth_call",
         serde_json::json!([{"to": to, "data": data}, block_tag]),
     )
@@ -1808,9 +1882,9 @@ async fn verify_indexed_transfer_receipts(
         if let std::collections::hash_map::Entry::Vacant(entry) =
             canonical_hashes.entry(receipt_block)
         {
-            let canonical_block = rpc_request(
+            let canonical_block = history_rpc_request(
                 client,
-                config.history_rpc_url(),
+                config,
                 "eth_getBlockByNumber",
                 serde_json::json!([format!("0x{receipt_block:x}"), false]),
             )
@@ -1922,9 +1996,9 @@ async fn scan_faucet_transfer_history(
                 serde_json::json!([ERC20_TRANSFER_TOPIC, faucet_topic, null]),
                 serde_json::json!([ERC20_TRANSFER_TOPIC, null, faucet_topic]),
             ] {
-                let logs = rpc_request(
+                let logs = history_rpc_request(
                     client,
-                    config.history_rpc_url(),
+                    config,
                     "eth_getLogs",
                     serde_json::json!([{
                         "address": token_address,
@@ -1988,9 +2062,9 @@ async fn scan_faucet_transfer_history(
     block_numbers.dedup();
     let mut block_times = HashMap::new();
     for number in block_numbers {
-        let block = rpc_request(
+        let block = history_rpc_request(
             client,
-            config.history_rpc_url(),
+            config,
             "eth_getBlockByNumber",
             serde_json::json!([format!("0x{number:x}"), false]),
         )
@@ -2115,9 +2189,9 @@ async fn reconcile_faucet_ledger(state: &AppState) -> anyhow::Result<()> {
                 "RPC finalized height moved behind the saved faucet reconciliation watermark"
             );
         }
-        let saved_block = rpc_request(
+        let saved_block = history_rpc_request(
             &client,
-            config.history_rpc_url(),
+            config,
             "eth_getBlockByNumber",
             serde_json::json!([format!("0x{cursor_block:x}"), false]),
         )
@@ -2872,52 +2946,40 @@ async fn get_token_balance(config: &FaucetConfig, address: &str) -> Result<u128,
     let holder = parse_address(address, "holder address")?;
     let token_addr = parse_address(&config.token_contract, "token contract")?;
 
-    // Read-only provider — no wallet or nonce management needed for view calls.
-    let provider = ProviderBuilder::new().on_http(
-        config
-            .rpc_url
-            .parse()
-            .map_err(|e| format!("Invalid RPC URL for balance check: {e}"))?,
-    );
+    // Read-only provider over FAUCET_RPC_URL and FAUCET_RPC_FALLBACKS. With
+    // fallbacks, the balance must be agreed by a strict majority of them.
+    let provider = live_read_provider(config)?;
 
     let token = IERC20::new(token_addr, provider);
+    // These strings reach public responses, so they never include the
+    // transport error: it can contain an endpoint URL with an API key.
     let ret = token
         .balanceOf(holder)
         .call()
         .await
-        .map_err(|e| format!("balanceOf({address}) call failed: {e}"))?;
+        .map_err(|_| format!("balanceOf({address}) failed or did not reach RPC quorum"))?;
 
     // Realistic token supplies (≤ 10^26 wei) fit well within u128 (≤ 3.4 × 10^38).
-    Ok(ret._0.to::<u128>())
+    u128::try_from(ret._0).map_err(|_| format!("balanceOf({address}) exceeds u128"))
 }
 
 async fn get_native_balance(config: &FaucetConfig, address: &str) -> Result<u128, String> {
-    let response: serde_json::Value = reqwest::Client::new()
-        .post(&config.rpc_url)
-        .json(&serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "eth_getBalance",
-            "params": [address, "latest"],
-            "id": 1
-        }))
-        .send()
-        .await
-        .map_err(|e| format!("Native balance check failed: {}", e))?
-        .json()
-        .await
-        .map_err(|e| format!("Native balance response decode failed: {}", e))?;
+    let holder = parse_address(address, "holder address")?;
+    let provider = live_read_provider(config)?;
+    let balance = provider.get_balance(holder).await.map_err(|_| {
+        format!("Native balance check for {address} failed or did not reach RPC quorum")
+    })?;
+    u128::try_from(balance).map_err(|_| format!("Native balance of {address} exceeds u128"))
+}
 
-    if let Some(err) = response.get("error") {
-        return Err(format!("Native balance check failed: {}", err));
-    }
-
-    let result = response
-        .get("result")
-        .and_then(|value| value.as_str())
-        .ok_or_else(|| "Native balance check failed: missing result".to_string())?;
-
-    u128::from_str_radix(result.trim_start_matches("0x"), 16)
-        .map_err(|e| format!("Failed to parse native balance: {}", e))
+fn live_read_provider(
+    config: &FaucetConfig,
+) -> Result<alloy::providers::RootProvider<common::l1_rpc::FailoverTransport>, String> {
+    let endpoints = config
+        .live_rpc_endpoints()
+        .map_err(|err| format!("Invalid faucet RPC configuration: {err}"))?;
+    common::l1_rpc::build_provider_from_urls(&endpoints)
+        .map_err(|_| "Could not construct the faucet RPC client".to_string())
 }
 
 /// Issue a proof-of-work challenge. Client must find a nonce such that
@@ -3498,9 +3560,9 @@ async fn load_verified_public_supply(state: &AppState) -> anyhow::Result<serde_j
         .timeout(Duration::from_secs(12))
         .build()
         .context("construct supply read client")?;
-    let canonical = rpc_request(
+    let canonical = history_rpc_request(
         &client,
-        config.history_rpc_url(),
+        config,
         "eth_getBlockByNumber",
         serde_json::json!([block_tag.clone(), false]),
     )
@@ -4060,4 +4122,142 @@ fn client_ip_from_request(
     }
 
     client.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::{json, Value};
+
+    #[test]
+    fn history_reads_use_the_reconciliation_endpoint_set_when_configured() {
+        let live = history_rpc_endpoints(
+            "https://live.example",
+            "https://live-fallback.example",
+            "",
+            "https://history-fallback.example",
+        )
+        .expect("live endpoints");
+        assert_eq!(
+            live,
+            ["https://live.example/", "https://live-fallback.example/"]
+        );
+
+        let history = history_rpc_endpoints(
+            "https://live.example",
+            "https://live-fallback.example",
+            "https://history.example/sepolia",
+            "https://history-fallback.example, https://history-third.example",
+        )
+        .expect("history endpoints");
+        assert_eq!(
+            history,
+            [
+                "https://history.example/sepolia",
+                "https://history-fallback.example/",
+                "https://history-third.example/"
+            ]
+        );
+    }
+
+    #[test]
+    fn history_endpoint_errors_name_the_setting() {
+        let error = history_rpc_endpoints("https://live.example", "", "https://h.example", "nope")
+            .expect_err("invalid fallback");
+        assert_eq!(
+            error.to_string(),
+            "FAUCET_RECONCILIATION_RPC_FALLBACKS entry 1 is not a valid URL"
+        );
+    }
+
+    #[test]
+    fn indexer_contract_state_is_encoded_like_eth_call() {
+        let word = abi_uint_word(42);
+        assert_eq!(word.len(), 66);
+        assert_eq!(word, format!("0x{}2a", "0".repeat(62)));
+        assert_eq!(
+            parse_rpc_hex_u128(&json!(word), "test word").expect("parse"),
+            42
+        );
+        // A JSON-RPC provider returns the same word; quorum compares the
+        // normalised forms, so an indexer-backed endpoint can agree with it.
+        assert_eq!(
+            common::l1_rpc::normalize_rpc_value(json!(abi_uint_word(u128::MAX))),
+            common::l1_rpc::normalize_rpc_value(json!(format!(
+                "0x{}{}",
+                "0".repeat(32),
+                "F".repeat(32)
+            )))
+        );
+    }
+
+    /// Start a JSON-RPC stub that answers every request with `result`.
+    async fn spawn_rpc_stub(result: Value) -> String {
+        let app = Router::new().route(
+            "/",
+            post(move |Json(body): Json<Value>| {
+                let result = result.clone();
+                async move {
+                    let id = body.get("id").cloned().unwrap_or(Value::Null);
+                    JsonResponse(json!({ "jsonrpc": "2.0", "id": id, "result": result }))
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind RPC stub");
+        let address = listener.local_addr().expect("RPC stub address");
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        format!("http://{address}/")
+    }
+
+    fn transfer_log() -> Value {
+        json!({
+            "address": "0x61c00ebe7c46f0bce63942f7e15bcc434dfc9b7c",
+            "blockHash": "0xab",
+            "blockNumber": "0xb3c568",
+            "data": "0x01",
+            "logIndex": "0x1",
+            "removed": false,
+            "topics": [ERC20_TRANSFER_TOPIC],
+            "transactionHash": "0x01",
+            "transactionIndex": "0x0"
+        })
+    }
+
+    #[tokio::test]
+    async fn faucet_history_logs_outvote_a_pruned_provider() {
+        // The October 2026 outage: one provider returned no Transfer logs for
+        // a range the other providers still served.
+        let endpoints = [
+            spawn_rpc_stub(json!([])).await,
+            spawn_rpc_stub(json!([transfer_log()])).await,
+            spawn_rpc_stub(json!([transfer_log()])).await,
+        ];
+        let client = reqwest::Client::new();
+        let params = json!([{ "fromBlock": "0x1", "toBlock": "0x2" }]);
+        let logs = common::l1_rpc::routed_json_call(&endpoints, "eth_getLogs", |endpoint| {
+            let params = params.clone();
+            let client = &client;
+            async move { rpc_request(client, &endpoint, "eth_getLogs", params).await }
+        })
+        .await
+        .expect("two of three providers agree");
+        assert_eq!(logs, json!([transfer_log()]));
+
+        // Without a majority the read fails closed instead of trusting the
+        // primary's empty answer.
+        let split = [endpoints[0].clone(), endpoints[1].clone()];
+        assert!(
+            common::l1_rpc::routed_json_call(&split, "eth_getLogs", |endpoint| {
+                let params = params.clone();
+                let client = &client;
+                async move { rpc_request(client, &endpoint, "eth_getLogs", params).await }
+            })
+            .await
+            .is_err()
+        );
+    }
 }

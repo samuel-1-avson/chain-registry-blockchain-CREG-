@@ -22,7 +22,7 @@ alloy = { workspace = true }
 alloy-sol-types = { workspace = true }
 
 # Internal
-common = { path = "../common" }
+common = { path = "../common", features = ["l1-rpc"] }
 
 [dev-dependencies]
 tokio-test = "0.4"

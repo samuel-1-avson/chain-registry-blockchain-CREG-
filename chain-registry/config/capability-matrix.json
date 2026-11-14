@@ -22,7 +22,7 @@
   "inputs": [
     {
       "path": ".env.example",
-      "sha256": "17915208c1fb231a3722bda2c923a40b2455aa44b227857085103ea0dbea7b30"
+      "sha256": "e2106bff1591a4e5ce037dca1391cef41ac92cfd9d5db5d4c26dfe3dc9baaa3e"
     },
     {
       "path": "config/cr07-activation-manifest.json",
@@ -42,11 +42,11 @@
     },
     {
       "path": "docker-compose.prod.yml",
-      "sha256": "55e49d60c91e7e14fe415c260af7c49dbbd8133c693da3490c65da3411f7ac77"
+      "sha256": "df2173926249741d6df6fd4c1f5ce8137c6d34537e3e2f316600a18603e5a191"
     },
     {
       "path": "docker-compose.testnet.yml",
-      "sha256": "f549005b03855221b975eb4d0627bbcfd5809a41d2c00daff3d5c9309f3eb22d"
+      "sha256": "00c996d43ac2f26f294aa2947657ac0a504341fde1902dc021e2b718dc22ce30"
     },
     {
       "path": "docker-compose.validator.yml",
@@ -54,7 +54,7 @@
     },
     {
       "path": "docker-compose.yml",
-      "sha256": "33edd4fe8db097619cfa50f57608ecde3839f5b6399ab974ea8f812853411cab"
+      "sha256": "4206fbc2e52c500bd1cf7bd0e1297cf0847dbd79ef3c9d26458c7bd84eead6c7"
     },
     {
       "path": "k8s/01-configmap.yaml",
