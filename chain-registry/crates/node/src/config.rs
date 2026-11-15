@@ -974,6 +974,18 @@ fn env(key: &str, default: &str) -> String {
 mod tests {
     use super::*;
 
+    /// Tests that change process-global environment variables must not run at
+    /// the same time: two of them toggling CREG_PUBLIC_VALIDATOR made
+    /// `mal001_public_validator_accepts_sandbox_truthy_spellings` fail
+    /// intermittently. Hold this guard for the whole test.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn env_guard() -> std::sync::MutexGuard<'static, ()> {
+        ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     fn base_config() -> NodeConfig {
         NodeConfig {
             chain_id: "creg-test-1".into(),
@@ -1030,6 +1042,7 @@ mod tests {
 
     #[test]
     fn production_security_env_guards() {
+        let _env = env_guard();
         std::env::set_var("CREG_DEV_SANDBOX", "true");
         std::env::set_var("CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM", "true");
         std::env::set_var("CREG_SECRETS_BACKEND", "env");
@@ -1068,6 +1081,7 @@ mod tests {
 
     #[test]
     fn mal001_public_validator_rejects_dev_sandbox() {
+        let _env = env_guard();
         std::env::set_var("CREG_DEV_SANDBOX", "true");
         std::env::set_var("CREG_PUBLIC_VALIDATOR", "true");
 
@@ -1090,6 +1104,7 @@ mod tests {
 
     #[test]
     fn mal001_public_validator_accepts_sandbox_truthy_spellings() {
+        let _env = env_guard();
         std::env::set_var("CREG_DEV_SANDBOX", "1");
         std::env::set_var("CREG_PUBLIC_VALIDATOR", "1");
 
@@ -1536,6 +1551,7 @@ mod tests {
 
     #[test]
     fn apply_chain_spec_floors_vote_timeout_to_sandbox_wall_clock() {
+        let _env = env_guard();
         let previous = std::env::var("CREG_VOTE_TIMEOUT_SECS").ok();
         std::env::remove_var("CREG_VOTE_TIMEOUT_SECS");
 
@@ -1557,6 +1573,7 @@ mod tests {
 
     #[test]
     fn explicit_vote_timeout_env_is_not_overwritten_by_spec() {
+        let _env = env_guard();
         std::env::set_var("CREG_VOTE_TIMEOUT_SECS", "15");
         let spec: common::ChainSpec =
             serde_json::from_str(include_str!("../../../testnet/chain-spec.example.json"))
@@ -1615,6 +1632,7 @@ mod tests {
 
     #[test]
     fn p2p_seeds_prefer_primary_env_then_validator_alias() {
+        let _env = env_guard();
         std::env::remove_var("CREG_P2P_SEEDS");
         std::env::remove_var("CREG_VALIDATOR_P2P_SEEDS");
         assert!(p2p_seeds_from_env().is_empty());
@@ -1640,6 +1658,7 @@ mod tests {
 
     #[test]
     fn eth_rpc_prefers_primary_env_then_url_alias() {
+        let _env = env_guard();
         std::env::remove_var("CREG_ETH_RPC");
         std::env::remove_var("CREG_ETH_RPC_URL");
         assert_eq!(eth_rpc_from_env(), "http://127.0.0.1:8545");
@@ -1664,6 +1683,7 @@ mod tests {
 
     #[test]
     fn validator_without_p2p_seeds_is_rejected_except_isolated_lab() {
+        let _env = env_guard();
         std::env::remove_var("CREG_ALLOW_EMPTY_P2P_SEEDS");
         std::env::remove_var("CREG_PUBLIC_VALIDATOR");
 
@@ -1699,6 +1719,7 @@ mod tests {
 
     #[test]
     fn observer_may_start_without_p2p_seeds() {
+        let _env = env_guard();
         std::env::remove_var("CREG_ALLOW_EMPTY_P2P_SEEDS");
         let cfg = base_config();
         assert!(!cfg.is_validator);
