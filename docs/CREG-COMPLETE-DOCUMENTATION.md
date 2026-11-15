@@ -831,7 +831,7 @@ A governance **emergency** approve/reject path exists and can be disabled perman
 
 Slashed tokens go to a **slash pool** (they are not burned) and can be redistributed to honest active validators. Validators stay slashable while unbonding, so they cannot misbehave and instantly exit.
 
-> **Not wired.** The node has an `EquivocationDetector` for double-signing, but no code path calls it, and nothing in the node triggers slashing. Today a validator that double-signs suffers no automatic penalty. Wiring detect → evidence → governance-executed slash is the top economic-security task (§18).
+> **Not wired.** Nothing in the running node detects double-signing or triggers a slash. Today a validator that double-signs suffers no automatic penalty and leaves no record. A corrected, tested detector that produces self-contained, independently verifiable evidence now exists in the `consensus` crate (source only, not connected to the node), and the full design (what is slashable, how evidence reaches `Staking.slashSeverity`, rollout) is [ADR-016](./adr/ADR-016-EQUIVOCATION-SLASHING.md). Wiring detection into the node is the next step (§18).
 
 ### 6.9 Requirements and configuration
 
@@ -1504,7 +1504,7 @@ The **faucet** (PostgreSQL-backed, fail-closed, reconciles against Sepolia trans
 - **Governance immediacy** — no timelock; any two compromised signers act at once.
 - **Economic enforcement** — no slashing, rewards or fees in operation.
 - **External audit** — contracts, consensus and sandbox have not had an independent review.
-- **Hardening gaps** — one shared operator API key; permissive CORS on faucet and relayer; the faucet admin token is compared without a constant-time check; the dependency audit in CI is advisory only. (Ed25519 consensus signatures are now verified with `verify_strict` in source, which rejects weak keys; this is not yet deployed, and a mixed fleet only disagrees on signatures honest signers never produce.)
+- **Hardening gaps** — one shared operator API key; permissive CORS on faucet and relayer; the dependency audit in CI is advisory only. (Ed25519 consensus signatures are now verified with `verify_strict` in source, which rejects weak keys; this is not yet deployed, and a mixed fleet only disagrees on signatures honest signers never produce.)
 
 ---
 
@@ -1652,7 +1652,7 @@ The audit recommends five phases. Operator recruiting and the external audit are
 |---|---|---|---|
 | **0 — Unblock** | 1 | Restore L1 history and make failure loud | Paid or self-hosted full-history RPC; quorum reads deployed; heartbeat or canary; alerts to a human; explorer and docs fixes; secrets cleanup; reopen faucet. *Progress: quorum-read code merged and canary-tested on observer-3; explorer and alert fixes merged; full-history providers still to be configured* |
 | **1 — Converge** | 2–3 | One tested image on every node | CI runs the production feature set; `cargo audit`/`deny`; staged rollout; move the laptop validator to a server; accept the durable-COMMIT drill; one-command release pipeline |
-| **2 — Harden** | 3–6 | Close economic and contract gaps | Contract migration with the AUD fixes; governance timelock; wire equivocation slashing; reward contract v2; epoch-signed scanner snapshots; published false-positive and false-negative rates; fuzzing |
+| **2 — Harden** | 3–6 | Close economic and contract gaps | Contract migration with the AUD fixes; governance timelock; wire equivocation slashing ([ADR-016](./adr/ADR-016-EQUIVOCATION-SLASHING.md)); reward contract v2; epoch-signed scanner snapshots; published false-positive and false-negative rates; fuzzing |
 | **3 — Decentralize** | 4–10 | Real BFT | ≥ 3 independent operators; **7 validators** (quorum 5, tolerate 2); ≥ 2 independent witnesses; ≥ 4 DNS-named bootnodes; chaos suite; 14-day soak |
 | **4 — Launch** | ~10–12 | Public testnet | External audit on a frozen tag; bug bounty; go/no-go checklist |
 
