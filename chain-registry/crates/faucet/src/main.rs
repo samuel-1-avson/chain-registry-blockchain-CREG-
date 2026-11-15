@@ -3944,6 +3944,20 @@ async fn health_check(State(state): State<Arc<AppState>>) -> impl IntoResponse {
 
 // ── Admin endpoints ───────────────────────────────────────────────────────────
 
+/// Compare two secrets without an early exit on the first differing byte.
+/// Both sides are hashed first, so the comparison always covers 32 bytes and
+/// reveals neither where nor how far the values agree, nor the secret's length.
+fn secrets_match(provided: &str, expected: &str) -> bool {
+    use sha2::{Digest, Sha256};
+    let provided = Sha256::digest(provided.as_bytes());
+    let expected = Sha256::digest(expected.as_bytes());
+    provided
+        .iter()
+        .zip(expected.iter())
+        .fold(0u8, |difference, (a, b)| difference | (a ^ b))
+        == 0
+}
+
 /// Verify the `Authorization: Bearer <token>` header against `FAUCET_ADMIN_TOKEN`.
 /// Returns `Err((status, json))` when authentication fails so handlers can
 /// `return err` immediately.
@@ -3963,7 +3977,7 @@ fn check_admin_auth(
         .get("authorization")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    if provided != format!("Bearer {}", token) {
+    if !secrets_match(provided, &format!("Bearer {}", token)) {
         return Err((
             StatusCode::UNAUTHORIZED,
             axum::response::Json(serde_json::json!({"error": "Unauthorized"})),
@@ -4112,6 +4126,11 @@ fn env_u128(key: &str, default: u128) -> u128 {
 
 fn env_optional_u128(key: &str) -> anyhow::Result<Option<u128>> {
     match std::env::var(key) {
+        // An empty value means "not configured", exactly like an unset one and
+        // like `env_optional_u64`. `.env.example` and the compose files ship
+        // these budgets empty until governance approves them, and that must
+        // keep token claims disabled rather than stop the service starting.
+        Ok(value) if value.trim().is_empty() => Ok(None),
         Ok(value) => value
             .parse::<u128>()
             .map(Some)
@@ -4786,6 +4805,11 @@ mod tests {
         let wei_key = "FAUCET_TEST_ENV_OPTIONAL_WEI";
         std::env::remove_var(wei_key);
         assert_eq!(env_optional_u128(wei_key).unwrap(), None);
+        // Shipped empty in .env.example: unconfigured, not an error.
+        std::env::set_var(wei_key, "");
+        assert_eq!(env_optional_u128(wei_key).unwrap(), None);
+        std::env::set_var(wei_key, "  ");
+        assert_eq!(env_optional_u128(wei_key).unwrap(), None);
         std::env::set_var(wei_key, "100000000000000000000");
         assert_eq!(env_optional_u128(wei_key).unwrap(), Some(100 * WEI));
         std::env::set_var(wei_key, "-1");
@@ -4862,6 +4886,26 @@ mod tests {
         let (status, _) = check_admin_auth(&HeaderMap::new()).unwrap_err();
         assert_eq!(status, StatusCode::UNAUTHORIZED);
         std::env::remove_var(key);
+    }
+
+    #[test]
+    fn secret_comparison_matches_only_identical_values() {
+        assert!(secrets_match("Bearer secret", "Bearer secret"));
+        assert!(secrets_match("", ""));
+        for other in [
+            "Bearer secreT",
+            "Bearer secre",
+            "Bearer secret ",
+            "bearer secret",
+            "",
+        ] {
+            assert!(
+                !secrets_match(other, "Bearer secret"),
+                "{other:?} must not match"
+            );
+        }
+        // A prefix or an extension of the real value is not the real value.
+        assert!(!secrets_match("Bearer secret-and-more", "Bearer secret"));
     }
 
     #[test]
