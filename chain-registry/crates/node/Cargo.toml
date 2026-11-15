@@ -36,7 +36,6 @@ consensus = { path = "../consensus" }
 resolver  = { path = "../resolver" }
 zk-validator = { path = "../zk-validator" }
 db-sync   = { path = "../db-sync" }
-cross-chain = { path = "../cross-chain" }
 threshold-encryption = { path = "../threshold-encryption" }
 
 tokio        = { workspace = true }
@@ -83,6 +82,12 @@ tempfile      = "3"
 # `axum` feature that lets us mount Swagger directly onto our Router.
 utoipa             = { version = "4", features = ["axum_extras", "chrono"] }
 utoipa-swagger-ui  = { version = "7", features = ["axum"] }
+
+# cross-chain is a retired, flag-off feature (`cross_chain: false` in the signed
+# spec). Only the simulation and stress tests use it, so it must not compile
+# into the production node binary.
+[dev-dependencies]
+cross-chain = { path = "../cross-chain" }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = [
