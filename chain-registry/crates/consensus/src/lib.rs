@@ -25,7 +25,7 @@ pub use evidence_votes::{aggregate_evidence_votes, EvidenceVoteOutcome};
 pub use pbft::{
     verify_pbft_phase_signature, OwnVoteForRebroadcast, PbftConfig, PbftEngine, ViewChangeSignal,
 };
-pub use slashing_relay::{EquivocationDetector, EquivocationEvidence, ObservedVote};
+pub use slashing_relay::{EquivocationDetector, EquivocationEvidence, SignedVote, VotePhase};
 pub use validator_set::ValidatorSet;
 
 pub mod vote_accumulator;
