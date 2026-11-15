@@ -278,6 +278,15 @@ fn retire_ineligible_unprepared_work(
     s: &mut NodeState,
     pending_txs: &mut Vec<Transaction>,
 ) -> anyhow::Result<usize> {
+    // Observers never sign, so they have no PBFT signing journal and no
+    // prepared or commit lock to protect. Without this guard every observer
+    // failed at the journal lookup below on every tick and logged the same
+    // "durable safety journal is not initialized" warning each block interval
+    // (136,649 times on one observer). It also never retired anything, so
+    // returning early keeps observer behavior unchanged.
+    if !s.config.is_validator {
+        return Ok(0);
+    }
     let tip_height = s.chain.tip_height()?;
     let prev_hash = s.chain.tip_hash()?;
     let height = tip_height.saturating_add(1);
@@ -1686,6 +1695,46 @@ mod tests {
             pending.iter().map(transaction_hash).collect::<Vec<_>>(),
             expected_hashes
         );
+    }
+
+    #[tokio::test]
+    async fn observer_cleanup_is_a_no_op_without_a_signing_journal() {
+        let (state, _dir, _primary_sk, _secondary_sk) =
+            two_validator_state("validator-a", "validator-b").await;
+        let mut pending_txs = vec![sample_publish_tx("buffered")];
+
+        let mut s = state.write().await;
+        s.config.is_validator = false;
+        // Observers never initialize a signing journal.
+        assert!(s.chain.pbft_safety_journal().is_err());
+
+        let retired = retire_ineligible_unprepared_work(&mut s, &mut pending_txs)
+            .expect("an observer must not fail the cleanup tick");
+        assert_eq!(retired, 0);
+        assert_eq!(
+            pending_txs.len(),
+            1,
+            "observer cleanup must keep its buffer"
+        );
+    }
+
+    #[tokio::test]
+    async fn validator_cleanup_still_fails_closed_without_a_signing_journal() {
+        let (state, _dir, _primary_sk, _secondary_sk) =
+            two_validator_state("validator-a", "validator-b").await;
+        let mut pending_txs = vec![sample_publish_tx("buffered")];
+
+        let mut s = state.write().await;
+        s.config.is_validator = true;
+        assert!(s.chain.pbft_safety_journal().is_err());
+
+        let error = retire_ineligible_unprepared_work(&mut s, &mut pending_txs)
+            .expect_err("a validator without a journal must not retire work");
+        assert!(
+            error.to_string().contains("PBFT signing is blocked"),
+            "unexpected error: {error}"
+        );
+        assert_eq!(pending_txs.len(), 1, "failed cleanup must keep the buffer");
     }
 
     #[tokio::test]
