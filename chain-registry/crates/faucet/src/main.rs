@@ -2451,11 +2451,59 @@ impl AppState {
     }
 
     fn token_claims_enabled(&self) -> bool {
-        self.config.token_distribution_open
-            && self.config.token_claim_policy_ready()
-            && self.ledger_reconciled()
-            && !self.is_paused.load(Ordering::Acquire)
+        token_claims_gate(
+            self.config.token_distribution_open,
+            self.config.token_claim_policy_ready(),
+            self.ledger_reconciled(),
+            self.is_paused.load(Ordering::Acquire),
+        )
     }
+}
+
+/// Every condition must hold before a claim can move tokens: the operator has
+/// opened distribution, the governed budget is complete and consistent, the
+/// ledger reconciled against on-chain history, and the faucet is not paused.
+fn token_claims_gate(
+    distribution_open: bool,
+    policy_ready: bool,
+    ledger_reconciled: bool,
+    paused: bool,
+) -> bool {
+    distribution_open && policy_ready && ledger_reconciled && !paused
+}
+
+/// A drip must not carry a recipient over the cap, so the balance *after* the
+/// transfer is checked. Arithmetic overflow counts as over the cap.
+fn post_balance_within_cap(balance: u128, drip: u128, cap: u128) -> bool {
+    balance
+        .checked_add(drip)
+        .is_some_and(|post_balance| post_balance <= cap)
+}
+
+/// Whether the faucet's own wallet can serve a token claim.
+#[derive(Debug, PartialEq, Eq)]
+enum HotWalletState {
+    /// Within the approved float and able to pay one drip.
+    Serviceable,
+    /// Holds more than the governed hot-wallet float; reconcile before serving.
+    AboveApprovedFloat,
+    /// Cannot pay one drip.
+    OutOfFunds,
+}
+
+fn hot_wallet_state(balance: u128, approved_float: u128, drip: u128) -> HotWalletState {
+    if balance > approved_float {
+        HotWalletState::AboveApprovedFloat
+    } else if balance >= drip {
+        HotWalletState::Serviceable
+    } else {
+        HotWalletState::OutOfFunds
+    }
+}
+
+/// Recipient addresses are lowercased by the caller before this check.
+fn is_valid_recipient(address: &str) -> bool {
+    address.starts_with("0x") && address.len() == 42 && address.parse::<Address>().is_ok()
 }
 
 /// A proof-of-work challenge issued to clients.
@@ -3109,13 +3157,7 @@ async fn handle_drip(
     }
 
     // Validate address format
-    if !address.starts_with("0x") || address.len() != 42 {
-        return (
-            StatusCode::BAD_REQUEST,
-            JsonResponse(DripResponse::error("Invalid Ethereum address format")),
-        );
-    }
-    if address.parse::<Address>().is_err() {
+    if !is_valid_recipient(&address) {
         return (
             StatusCode::BAD_REQUEST,
             JsonResponse(DripResponse::error("Invalid Ethereum address format")),
@@ -3164,15 +3206,21 @@ async fn handle_drip(
 
     // Check the resulting balance, not only the pre-transfer balance. This
     // prevents a fixed drip from carrying a recipient over the configured cap.
-    let should_send_token = token_balance
-        .checked_add(state.config.drip_amount)
-        .is_some_and(|post_balance| post_balance <= state.config.max_balance);
+    let should_send_token = post_balance_within_cap(
+        token_balance,
+        state.config.drip_amount,
+        state.config.max_balance,
+    );
     let should_send_native = if state.config.native_drip_amount == 0 {
         false
     } else {
-        native_balance
-            .and_then(|balance| balance.checked_add(state.config.native_drip_amount))
-            .is_some_and(|post_balance| post_balance <= state.config.native_max_balance)
+        native_balance.is_some_and(|balance| {
+            post_balance_within_cap(
+                balance,
+                state.config.native_drip_amount,
+                state.config.native_max_balance,
+            )
+        })
     };
 
     if should_send_token && !state.token_claims_enabled() {
@@ -3186,28 +3234,29 @@ async fn handle_drip(
 
     if should_send_token {
         match get_token_balance(&state.config, &state.config.faucet_address).await {
-            Ok(faucet_balance)
-                if faucet_balance
-                    <= state.config.token_hot_wallet_float_wei.unwrap_or_default()
-                    && faucet_balance >= state.config.drip_amount => {}
-            Ok(faucet_balance)
-                if faucet_balance > state.config.token_hot_wallet_float_wei.unwrap_or_default() =>
-            {
-                return (
+            Ok(faucet_balance) => match hot_wallet_state(
+                faucet_balance,
+                state.config.token_hot_wallet_float_wei.unwrap_or_default(),
+                state.config.drip_amount,
+            ) {
+                HotWalletState::Serviceable => {}
+                HotWalletState::AboveApprovedFloat => {
+                    return (
                         StatusCode::SERVICE_UNAVAILABLE,
                         JsonResponse(DripResponse::error(
                             "Faucet balance exceeds the approved hot-wallet float; reconcile it with Governance before serving claims.",
                         )),
                     );
-            }
-            Ok(_) => {
-                return (
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    JsonResponse(DripResponse::error(
-                        "Faucet is out of tCREG. An operator must fund the faucet wallet before more token drips are possible.",
-                    )),
-                );
-            }
+                }
+                HotWalletState::OutOfFunds => {
+                    return (
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        JsonResponse(DripResponse::error(
+                            "Faucet is out of tCREG. An operator must fund the faucet wallet before more token drips are possible.",
+                        )),
+                    );
+                }
+            },
             Err(err) => {
                 error!("Could not read faucet token balance before drip: {}", err);
                 return (
@@ -4258,6 +4307,631 @@ mod tests {
             })
             .await
             .is_err()
+        );
+    }
+
+    // ── Policy, validation and decoding tests (AUD-27) ───────────────────────
+    //
+    // The faucet signs real token transfers. These tests cover every rule that
+    // does not need PostgreSQL or a live chain: the claim gate and governed
+    // budgets, post-transfer balance caps, the hot-wallet float, proof-of-work,
+    // trusted-proxy client IP handling, log decoding and strict parsing.
+
+    const WEI: u128 = 1_000_000_000_000_000_000;
+    const FAUCET_ADDRESS: &str = "0x721c8dbd8208ca9dbdcc12ae9339225458608b81";
+    const TEST_TOKEN: &str = "0xbc2a72107c6765364d0a822a88a6e6c61f30eaa6";
+
+    fn test_config() -> FaucetConfig {
+        FaucetConfig {
+            drip_amount: 100 * WEI,
+            native_drip_amount: 0,
+            cooldown_secs: 60,
+            ip_cooldown_secs: 60,
+            max_balance: 10_000 * WEI,
+            native_max_balance: WEI,
+            rpc_url: "https://rpc.example".into(),
+            rpc_fallbacks: String::new(),
+            treasury_address: String::new(),
+            governance_address: String::new(),
+            staking_address: String::new(),
+            reconciliation_rpc_url: String::new(),
+            reconciliation_rpc_fallbacks: String::new(),
+            deployment_receipt_rpc_url: String::new(),
+            reconciliation_indexer_url: String::new(),
+            faucet_key: String::new(),
+            token_contract: TEST_TOKEN.into(),
+            chain_id: SEPOLIA_CHAIN_ID,
+            token_deployment_tx_hash: String::new(),
+            token_deployment_block: None,
+            reconciliation_confirmations: 64,
+            faucet_address: FAUCET_ADDRESS.into(),
+            trusted_proxy_cidrs: Vec::new(),
+            token_allocation_wei: Some(1_000_000 * WEI),
+            token_daily_cap_wei: Some(50_000 * WEI),
+            token_address_lifetime_cap_wei: Some(100 * WEI),
+            token_hot_wallet_float_wei: Some(100_000 * WEI),
+            token_distribution_open: true,
+        }
+    }
+
+    #[test]
+    fn token_policy_needs_every_governed_budget() {
+        assert!(test_config().token_claim_policy_ready());
+
+        for unset in 0..4 {
+            let mut config = test_config();
+            match unset {
+                0 => config.token_allocation_wei = None,
+                1 => config.token_daily_cap_wei = None,
+                2 => config.token_address_lifetime_cap_wei = None,
+                _ => config.token_hot_wallet_float_wei = None,
+            }
+            assert!(
+                !config.token_claim_policy_ready(),
+                "an unset budget (case {unset}) must keep token claims closed"
+            );
+        }
+    }
+
+    #[test]
+    fn token_policy_rejects_inconsistent_budgets() {
+        let mutations: [(&str, fn(&mut FaucetConfig)); 6] = [
+            ("zero drip", |c| c.drip_amount = 0),
+            ("daily cap above the allocation", |c| {
+                c.token_daily_cap_wei = Some(2_000_000 * WEI)
+            }),
+            ("float above the allocation", |c| {
+                c.token_hot_wallet_float_wei = Some(2_000_000 * WEI)
+            }),
+            ("daily cap below one drip", |c| {
+                c.token_daily_cap_wei = Some(99 * WEI)
+            }),
+            ("address cap below one drip", |c| {
+                c.token_address_lifetime_cap_wei = Some(99 * WEI)
+            }),
+            ("float below one drip", |c| {
+                c.token_hot_wallet_float_wei = Some(99 * WEI)
+            }),
+        ];
+        for (name, mutate) in mutations {
+            let mut config = test_config();
+            mutate(&mut config);
+            assert!(
+                !config.token_claim_policy_ready(),
+                "{name} must keep token claims closed"
+            );
+        }
+    }
+
+    #[test]
+    fn token_policy_accepts_budgets_equal_to_one_drip() {
+        let mut config = test_config();
+        let drip = config.drip_amount;
+        config.token_allocation_wei = Some(drip);
+        config.token_daily_cap_wei = Some(drip);
+        config.token_address_lifetime_cap_wei = Some(drip);
+        config.token_hot_wallet_float_wei = Some(drip);
+        assert!(config.token_claim_policy_ready());
+    }
+
+    #[test]
+    fn claims_open_for_exactly_one_gate_combination() {
+        // bit 0 open, bit 1 policy ready, bit 2 ledger reconciled, bit 3 NOT paused
+        let open: Vec<u8> = (0u8..16)
+            .filter(|bits| {
+                token_claims_gate(bits & 1 != 0, bits & 2 != 0, bits & 4 != 0, bits & 8 == 0)
+            })
+            .collect();
+        assert_eq!(
+            open,
+            vec![0b1111],
+            "only open + policy + reconciled + not paused may serve claims"
+        );
+        assert!(!token_claims_gate(true, true, false, false));
+        assert!(!token_claims_gate(true, true, true, true));
+    }
+
+    #[test]
+    fn drips_are_checked_against_the_balance_after_the_transfer() {
+        let drip = 100 * WEI;
+        let cap = 10_000 * WEI;
+        assert!(post_balance_within_cap(0, drip, cap));
+        assert!(
+            post_balance_within_cap(9_900 * WEI, drip, cap),
+            "landing exactly on the cap is allowed"
+        );
+        assert!(
+            !post_balance_within_cap(9_901 * WEI, drip, cap),
+            "a recipient below the cap must not finish above it"
+        );
+        assert!(!post_balance_within_cap(cap, drip, cap));
+        assert!(
+            !post_balance_within_cap(u128::MAX, 1, u128::MAX),
+            "overflow must never turn into permission"
+        );
+        assert!(post_balance_within_cap(u128::MAX - 1, 1, u128::MAX));
+    }
+
+    #[test]
+    fn hot_wallet_must_sit_inside_the_approved_float() {
+        let float = 100_000 * WEI;
+        let drip = 100 * WEI;
+        assert_eq!(
+            hot_wallet_state(float, float, drip),
+            HotWalletState::Serviceable
+        );
+        assert_eq!(
+            hot_wallet_state(float + 1, float, drip),
+            HotWalletState::AboveApprovedFloat
+        );
+        assert_eq!(
+            hot_wallet_state(drip, float, drip),
+            HotWalletState::Serviceable
+        );
+        assert_eq!(
+            hot_wallet_state(drip - 1, float, drip),
+            HotWalletState::OutOfFunds
+        );
+        assert_eq!(hot_wallet_state(0, float, drip), HotWalletState::OutOfFunds);
+        // An unset float reads as zero, so a funded wallet is never served.
+        assert_eq!(
+            hot_wallet_state(drip, 0, drip),
+            HotWalletState::AboveApprovedFloat
+        );
+    }
+
+    #[test]
+    fn recipient_addresses_must_be_well_formed() {
+        assert!(is_valid_recipient(FAUCET_ADDRESS));
+        for bad in [
+            "",
+            "0x",
+            "721c8dbd8208ca9dbdcc12ae9339225458608b81",
+            "0x721c8dbd8208ca9dbdcc12ae9339225458608b8",
+            "0x721c8dbd8208ca9dbdcc12ae9339225458608b811",
+            "0xzzzc8dbd8208ca9dbdcc12ae9339225458608b81",
+        ] {
+            assert!(!is_valid_recipient(bad), "{bad:?} must be rejected");
+        }
+    }
+
+    /// Independent leading-zero-bit count over SHA-256(challenge || nonce).
+    fn leading_zero_bits(challenge: &str, nonce: &str) -> u32 {
+        use sha2::{Digest, Sha256};
+        let hash = Sha256::digest(format!("{challenge}{nonce}").as_bytes());
+        let mut bits = 0;
+        for byte in hash.iter() {
+            if *byte == 0 {
+                bits += 8;
+            } else {
+                bits += byte.leading_zeros();
+                break;
+            }
+        }
+        bits
+    }
+
+    #[test]
+    fn proof_of_work_agrees_with_an_independent_count() {
+        let challenge = "creg-faucet-test-challenge";
+        for nonce in (0u32..2_000).map(|n| n.to_string()) {
+            let bits = leading_zero_bits(challenge, &nonce);
+            for difficulty in [0u8, 1, 4, 8, 12, 16] {
+                assert_eq!(
+                    verify_pow(challenge, &nonce, difficulty),
+                    bits >= u32::from(difficulty),
+                    "nonce {nonce} has {bits} leading zero bits, difficulty {difficulty}"
+                );
+            }
+        }
+
+        // A real solution at the production-style check, found by search.
+        let solved = (0u32..200_000)
+            .map(|n| n.to_string())
+            .find(|nonce| leading_zero_bits(challenge, nonce) >= 12)
+            .expect("a 12-bit solution exists within 200,000 attempts");
+        assert!(verify_pow(challenge, &solved, 12));
+        assert!(!verify_pow("another-challenge", &solved, 255));
+    }
+
+    fn headers_with_forwarded_for(value: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-forwarded-for", value.parse().unwrap());
+        headers
+    }
+
+    fn cidrs(values: &[&str]) -> Vec<IpNet> {
+        values.iter().map(|value| value.parse().unwrap()).collect()
+    }
+
+    #[test]
+    fn forwarded_for_from_an_untrusted_peer_is_ignored() {
+        let peer: IpAddr = "203.0.113.9".parse().unwrap();
+        let spoofed = headers_with_forwarded_for("198.51.100.1");
+        assert_eq!(
+            client_ip_from_request(peer, &spoofed, &cidrs(&["10.0.0.0/8"])),
+            "203.0.113.9"
+        );
+        assert_eq!(client_ip_from_request(peer, &spoofed, &[]), "203.0.113.9");
+    }
+
+    #[test]
+    fn a_trusted_proxy_reports_the_client_and_a_forged_prefix_is_ignored() {
+        let proxy: IpAddr = "10.0.0.5".parse().unwrap();
+        let trusted = cidrs(&["10.0.0.0/8"]);
+        // The client forged 9.9.9.9; the proxy appended the real address.
+        let headers = headers_with_forwarded_for("9.9.9.9, 203.0.113.7");
+        assert_eq!(
+            client_ip_from_request(proxy, &headers, &trusted),
+            "203.0.113.7"
+        );
+    }
+
+    #[test]
+    fn chains_of_trusted_proxies_are_skipped() {
+        let proxy: IpAddr = "10.0.0.5".parse().unwrap();
+        let headers = headers_with_forwarded_for("198.51.100.20, 10.1.2.3");
+        assert_eq!(
+            client_ip_from_request(proxy, &headers, &cidrs(&["10.0.0.0/8"])),
+            "198.51.100.20"
+        );
+    }
+
+    #[test]
+    fn a_trusted_peer_without_a_usable_header_is_the_client() {
+        let proxy: IpAddr = "10.0.0.5".parse().unwrap();
+        let trusted = cidrs(&["10.0.0.0/8"]);
+        assert_eq!(
+            client_ip_from_request(proxy, &HeaderMap::new(), &trusted),
+            "10.0.0.5"
+        );
+        let garbage = headers_with_forwarded_for("not-an-ip, also-bad");
+        assert_eq!(
+            client_ip_from_request(proxy, &garbage, &trusted),
+            "10.0.0.5"
+        );
+    }
+
+    #[test]
+    fn ipv6_clients_behind_a_trusted_proxy_are_supported() {
+        let proxy: IpAddr = "fd00::1".parse().unwrap();
+        let headers = headers_with_forwarded_for("2001:db8::7");
+        assert_eq!(
+            client_ip_from_request(proxy, &headers, &cidrs(&["fd00::/8"])),
+            "2001:db8::7"
+        );
+    }
+
+    fn address_topic(address: &str) -> String {
+        format!("0x{:0>64}", address.trim_start_matches("0x"))
+    }
+
+    fn token_transfer_log(from: &str, to: &str, amount: u128) -> Value {
+        json!({
+            "address": TEST_TOKEN.to_ascii_uppercase().replacen("0X", "0x", 1),
+            "topics": [ERC20_TRANSFER_TOPIC, address_topic(from), address_topic(to)],
+            "data": abi_uint_word(amount),
+            "transactionHash": "0xABCD",
+            "blockHash": "0xBEEF",
+            "blockNumber": "0xb3c568",
+            "logIndex": "0x2",
+            "removed": false
+        })
+    }
+
+    #[test]
+    fn transfer_logs_decode_to_normalised_chain_transfers() {
+        let to = "0x1111111111111111111111111111111111111111";
+        let log = token_transfer_log(FAUCET_ADDRESS, to, 100 * WEI);
+        let transfer = decode_transfer_log(&log, TEST_TOKEN, Utc::now())
+            .expect("a valid log decodes")
+            .expect("a faucet token transfer is returned");
+        assert_eq!(transfer.tx_hash, "0xabcd");
+        assert_eq!(transfer.block_hash, "0xbeef");
+        assert_eq!(transfer.block_number, 11_781_480);
+        assert_eq!(transfer.log_index, 2);
+        assert_eq!(transfer.from_address, FAUCET_ADDRESS);
+        assert_eq!(transfer.to_address, to);
+        assert_eq!(transfer.amount_wei, (100 * WEI).to_string());
+    }
+
+    #[test]
+    fn unrelated_logs_are_skipped_not_misread() {
+        let to = "0x1111111111111111111111111111111111111111";
+
+        let mut other_token = token_transfer_log(FAUCET_ADDRESS, to, WEI);
+        other_token["address"] = json!("0x2222222222222222222222222222222222222222");
+        assert!(decode_transfer_log(&other_token, TEST_TOKEN, Utc::now())
+            .unwrap()
+            .is_none());
+
+        // An ERC-721 Transfer has four topics and must not be read as ERC-20.
+        let mut nft = token_transfer_log(FAUCET_ADDRESS, to, WEI);
+        nft["topics"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!(address_topic("0x01")));
+        assert!(decode_transfer_log(&nft, TEST_TOKEN, Utc::now())
+            .unwrap()
+            .is_none());
+
+        let mut other_event = token_transfer_log(FAUCET_ADDRESS, to, WEI);
+        other_event["topics"][0] = json!(format!("0x{}", "ab".repeat(32)));
+        assert!(decode_transfer_log(&other_event, TEST_TOKEN, Utc::now())
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn malformed_or_reorged_transfer_logs_are_errors() {
+        let to = "0x1111111111111111111111111111111111111111";
+        let valid = token_transfer_log(FAUCET_ADDRESS, to, WEI);
+
+        let mut removed = valid.clone();
+        removed["removed"] = json!(true);
+        assert!(
+            decode_transfer_log(&removed, TEST_TOKEN, Utc::now()).is_err(),
+            "a removed log in finalized history must fail reconciliation"
+        );
+
+        for field in [
+            "topics",
+            "data",
+            "transactionHash",
+            "blockHash",
+            "blockNumber",
+            "logIndex",
+        ] {
+            let mut broken = valid.clone();
+            broken.as_object_mut().unwrap().remove(field);
+            assert!(
+                decode_transfer_log(&broken, TEST_TOKEN, Utc::now()).is_err(),
+                "a log without {field} must be an error"
+            );
+        }
+
+        let mut short_topic = valid.clone();
+        short_topic["topics"][1] = json!("0x1234");
+        assert!(decode_transfer_log(&short_topic, TEST_TOKEN, Utc::now()).is_err());
+
+        let mut huge_index = valid;
+        huge_index["logIndex"] = json!("0xffffffffffffffff");
+        assert!(
+            decode_transfer_log(&huge_index, TEST_TOKEN, Utc::now()).is_err(),
+            "values that do not fit a Postgres BIGINT must be rejected"
+        );
+    }
+
+    #[test]
+    fn address_topics_round_trip_and_reject_bad_input() {
+        let topic = indexed_address_topic("0x721C8dBD8208CA9dBdcC12AE9339225458608B81").unwrap();
+        assert_eq!(topic.len(), 66);
+        assert_eq!(topic_address(&topic).unwrap(), FAUCET_ADDRESS);
+
+        assert!(indexed_address_topic("0x1234").is_err());
+        assert!(indexed_address_topic(&format!("0x{}", "g".repeat(40))).is_err());
+        assert!(topic_address("0x1234").is_err());
+        assert!(
+            topic_address(&"11".repeat(32)).is_err(),
+            "0x prefix required"
+        );
+    }
+
+    #[test]
+    fn hex_quantities_parse_strictly() {
+        assert_eq!(
+            parse_rpc_hex_u64(&json!("0xb3c568"), "n").unwrap(),
+            11_781_480
+        );
+        assert_eq!(parse_rpc_hex_u64(&json!("ff"), "n").unwrap(), 255);
+        assert!(parse_rpc_hex_u64(&json!(255), "n").is_err());
+        assert!(parse_rpc_hex_u64(&json!("0x"), "n").is_err());
+        assert!(parse_rpc_hex_u64(&json!("0x1ffffffffffffffff"), "n").is_err());
+
+        assert_eq!(parse_rpc_hex_u128(&json!("0x"), "n").unwrap(), 0);
+        assert_eq!(parse_rpc_hex_u128(&json!("0x64"), "n").unwrap(), 100);
+        assert!(parse_rpc_hex_u128(&json!(null), "n").is_err());
+        assert!(parse_rpc_hex_u128(&json!(format!("0x1{}", "0".repeat(32))), "n").is_err());
+        let error = parse_rpc_hex_u64(&json!("zz"), "block number").unwrap_err();
+        assert!(error.to_string().contains("block number"));
+    }
+
+    #[test]
+    fn supply_holder_addresses_are_validated_and_lowercased() {
+        assert_eq!(
+            supply_holder_address("  0x721C8DBD8208CA9DBDCC12AE9339225458608B81 ", "treasury")
+                .unwrap(),
+            FAUCET_ADDRESS
+        );
+        let error = supply_holder_address("", "governance").unwrap_err();
+        assert!(error.to_string().contains("governance"));
+        assert!(supply_holder_address("0x1234", "staking").is_err());
+    }
+
+    #[test]
+    fn parse_address_names_the_failing_field() {
+        assert!(parse_address(FAUCET_ADDRESS, "recipient").is_ok());
+        let error = parse_address("nope", "recipient").unwrap_err();
+        assert!(error.starts_with("Invalid recipient:"), "{error}");
+    }
+
+    #[test]
+    fn chain_names_cover_known_networks() {
+        assert_eq!(
+            chain_display_name(SEPOLIA_CHAIN_ID),
+            "CREG Testnet (Sepolia)"
+        );
+        assert_eq!(chain_display_name(31337), "CREG Testnet (Anvil)");
+        assert_eq!(chain_display_name(1), "CREG Testnet");
+    }
+
+    #[test]
+    fn env_bool_accepts_only_true_or_false() {
+        let key = "FAUCET_TEST_ENV_BOOL";
+        std::env::remove_var(key);
+        assert!(!env_bool(key, false).unwrap());
+        assert!(env_bool(key, true).unwrap());
+        std::env::set_var(key, "TRUE");
+        assert!(env_bool(key, false).unwrap());
+        std::env::set_var(key, "false");
+        assert!(!env_bool(key, true).unwrap());
+        std::env::set_var(key, "yes");
+        let error = env_bool(key, false).unwrap_err();
+        assert!(error.to_string().contains(key));
+        std::env::remove_var(key);
+    }
+
+    #[test]
+    fn optional_budgets_fail_loudly_on_bad_values() {
+        let wei_key = "FAUCET_TEST_ENV_OPTIONAL_WEI";
+        std::env::remove_var(wei_key);
+        assert_eq!(env_optional_u128(wei_key).unwrap(), None);
+        std::env::set_var(wei_key, "100000000000000000000");
+        assert_eq!(env_optional_u128(wei_key).unwrap(), Some(100 * WEI));
+        std::env::set_var(wei_key, "-1");
+        assert!(env_optional_u128(wei_key).is_err());
+        std::env::set_var(wei_key, "1.5");
+        assert!(env_optional_u128(wei_key).is_err());
+        std::env::remove_var(wei_key);
+
+        let block_key = "FAUCET_TEST_ENV_OPTIONAL_BLOCK";
+        std::env::remove_var(block_key);
+        assert_eq!(env_optional_u64(block_key).unwrap(), None);
+        std::env::set_var(block_key, "  ");
+        assert_eq!(env_optional_u64(block_key).unwrap(), None);
+        std::env::set_var(block_key, "11781426");
+        assert_eq!(env_optional_u64(block_key).unwrap(), Some(11_781_426));
+        std::env::set_var(block_key, "latest");
+        assert!(env_optional_u64(block_key).is_err());
+        std::env::remove_var(block_key);
+    }
+
+    #[test]
+    fn defaulted_env_numbers_fall_back_on_garbage() {
+        let key = "FAUCET_TEST_ENV_NUMBER";
+        std::env::remove_var(key);
+        assert_eq!(env_u64(key, 60), 60);
+        assert_eq!(env_u128(key, 7), 7);
+        assert_eq!(env_u16(key, 8080), 8080);
+        std::env::set_var(key, "42");
+        assert_eq!(env_u64(key, 60), 42);
+        assert_eq!(env_u128(key, 7), 42);
+        assert_eq!(env_u16(key, 8080), 42);
+        std::env::set_var(key, "not-a-number");
+        assert_eq!(env_u64(key, 60), 60);
+        std::env::remove_var(key);
+    }
+
+    #[test]
+    fn trusted_proxy_cidrs_parse_and_name_the_bad_entry() {
+        let key = "FAUCET_TEST_ENV_CIDRS";
+        std::env::remove_var(key);
+        assert!(env_ipnets(key).unwrap().is_empty());
+        std::env::set_var(key, " 10.0.0.0/8 , ,172.16.0.0/12,fd00::/8 ");
+        assert_eq!(env_ipnets(key).unwrap().len(), 3);
+        std::env::set_var(key, "10.0.0.0/8,10.0.0.0/99");
+        let error = env_ipnets(key).unwrap_err().to_string();
+        assert!(
+            error.contains(key) && error.contains("10.0.0.0/99"),
+            "{error}"
+        );
+        std::env::remove_var(key);
+    }
+
+    #[test]
+    fn admin_endpoints_need_the_configured_bearer_token() {
+        let key = "FAUCET_ADMIN_TOKEN";
+        let bearer = |value: &str| {
+            let mut headers = HeaderMap::new();
+            headers.insert("authorization", value.parse().unwrap());
+            headers
+        };
+
+        // No token configured: the admin surface is disabled, even for a
+        // request that presents a bearer header.
+        std::env::remove_var(key);
+        let (status, _) = check_admin_auth(&bearer("Bearer secret")).unwrap_err();
+        assert_eq!(status, StatusCode::FORBIDDEN);
+
+        std::env::set_var(key, "secret");
+        assert!(check_admin_auth(&bearer("Bearer secret")).is_ok());
+        for wrong in ["Bearer other", "secret", "bearer secret", "Bearer secret "] {
+            let (status, _) = check_admin_auth(&bearer(wrong)).unwrap_err();
+            assert_eq!(status, StatusCode::UNAUTHORIZED, "{wrong:?}");
+        }
+        let (status, _) = check_admin_auth(&HeaderMap::new()).unwrap_err();
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        std::env::remove_var(key);
+    }
+
+    #[test]
+    fn amounts_serialise_as_strings_so_javascript_keeps_precision() {
+        let stats = FaucetStats {
+            total_drips: 1,
+            total_distributed: u128::MAX,
+            total_native_distributed: 0,
+            unique_addresses: 1,
+            last_drip: None,
+            unresolved_claims: 0,
+        };
+        let value = serde_json::to_value(&stats).unwrap();
+        assert_eq!(
+            value["total_distributed"],
+            "340282366920938463463374607431768211455"
+        );
+        assert_eq!(value["total_native_distributed"], "0");
+    }
+
+    /// Start a stub that answers every request with `body` unchanged.
+    async fn spawn_raw_stub(body: Value) -> String {
+        let app = Router::new().route(
+            "/",
+            post(move || {
+                let body = body.clone();
+                async move { JsonResponse(body) }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind raw stub");
+        let address = listener.local_addr().expect("raw stub address");
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        format!("http://{address}/")
+    }
+
+    #[tokio::test]
+    async fn rpc_errors_and_missing_results_are_failures_not_values() {
+        let client = reqwest::Client::new();
+
+        let pruned = spawn_raw_stub(json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "error": { "code": 4444, "message": "pruned history unavailable" }
+        }))
+        .await;
+        let error = rpc_request(&client, &pruned, "eth_getLogs", json!([]))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("eth_getLogs RPC error"), "{error}");
+        assert!(error.contains("pruned history unavailable"), "{error}");
+
+        let no_result = spawn_raw_stub(json!({ "jsonrpc": "2.0", "id": 1 })).await;
+        assert!(
+            rpc_request(&client, &no_result, "eth_call", json!([]))
+                .await
+                .is_err(),
+            "a response with neither result nor error must not read as success"
+        );
+
+        let ok = spawn_raw_stub(json!({ "jsonrpc": "2.0", "id": 1, "result": "0x2a" })).await;
+        assert_eq!(
+            rpc_request(&client, &ok, "eth_blockNumber", json!([]))
+                .await
+                .unwrap(),
+            json!("0x2a")
         );
     }
 }
