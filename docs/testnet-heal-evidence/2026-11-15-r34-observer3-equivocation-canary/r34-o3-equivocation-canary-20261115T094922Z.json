@@ -1,0 +1,88 @@
+{
+  "checks": {
+    "new_image_running": true,
+    "node_binary_matches_build": true,
+    "signed_chain_and_genesis": true,
+    "chain_not_behind": true,
+    "packages_kept": true,
+    "four_validators": true,
+    "observer_with_peers": true,
+    "scanner_profile_unchanged": true,
+    "queues_clear": true,
+    "pbft_clear": true,
+    "p2p_identity_unchanged": true,
+    "env_file_unchanged": true,
+    "detection_flag_on_container": true,
+    "detection_startup_log": true,
+    "detection_metric_enabled": true,
+    "no_evidence_metric": true,
+    "no_persist_failures": true,
+    "evidence_endpoint_enabled_and_empty": true
+  },
+  "passed": true,
+  "informational": {
+    "equivocation_tracked_votes": 0.0,
+    "equivocation_pending_votes": 0.0,
+    "equivocation_votes_rejected_total": 0.0,
+    "journal_warning_lines_since_start": 0,
+    "error_lines_since_start": 0,
+    "log_lines_since_start": 61,
+    "validator_set_sync_state_code": 3.0,
+    "chain_tip_age_seconds": 4149266.0
+  },
+  "stats": {
+    "chain_id": "creg-phase-c-testnet-2026-09-26-r7",
+    "tip_height": 20,
+    "tip_hash": "730b01c1a67a4796a16f599169e4ebf77e01d2e8ce92d1e4fb3715a7c4354285",
+    "finalized_height": 20,
+    "package_count": 8,
+    "peer_count": 2,
+    "validator_count": 4,
+    "active_validators": 4,
+    "spec_signature_verified": true,
+    "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4"
+  },
+  "equivocation_endpoint": {
+    "detection_enabled": true,
+    "count": 0,
+    "tracked_votes": 0,
+    "pending_votes": 0,
+    "cached_headers": 0,
+    "stats": {
+      "votes_observed": 0,
+      "votes_rejected": 0,
+      "votes_unresolved_dropped": 0,
+      "headers_ignored": 0,
+      "persist_failures": 0
+    },
+    "evidence": []
+  },
+  "queues": {
+    "creg_pending_block_txs": 0.0,
+    "creg_durable_finalized_work_depth": 0.0,
+    "creg_durable_finalized_work_ready_depth": 0.0,
+    "creg_durable_finalized_work_dead_letter_depth": 0.0,
+    "creg_forced_inclusion_pending": 0.0
+  },
+  "image_id": "sha256:7b954e40529abe4ed7b3b01e94ed5a7732f69a2a97bbc3dcfc7f50e525ac8249",
+  "node_binary_sha256": "2171ba8162ba54c93cf242a5838a934deb7ead3bc9dc9690865799260323f466",
+  "schema": "creg-r34-observer3-equivocation-canary-v1",
+  "slot": "o3",
+  "role": "observer",
+  "source_revision": "d67e9204e5963bcc981e7e51290d011e0b957052",
+  "pre": {
+    "tip_height": 20,
+    "tip_hash": "730b01c1a67a4796a16f599169e4ebf77e01d2e8ce92d1e4fb3715a7c4354285",
+    "finalized_height": 20,
+    "package_count": 8,
+    "genesis_hash": "0f2a3b109318f0979807f3d921f72775b2a37ce4eb28415a62d9f53b3766eed4",
+    "profile_digest": "7e1d95f9c8423778211944a1dea46674d8cbd3f0aee3b0eea6b5250f11d009cd"
+  },
+  "preserved_container": "creg-phase-c-r7-o3-r33-before-r34",
+  "data_backup": "/var/lib/creg/phase-c-r7/data-before-r34-20261115T094922Z",
+  "equivocation_detection": "enabled via docker -e; node.env unchanged",
+  "slashing": false,
+  "rpc_configuration_changed": false,
+  "validator_rollout": false,
+  "captured_at_utc": "2026-11-15T09:49:34Z"
+}

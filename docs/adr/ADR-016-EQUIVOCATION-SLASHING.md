@@ -1,6 +1,6 @@
 # ADR-016: Equivocation slashing (detect, prove, penalize)
 
-- **Status:** Proposed. Increments 1 (detector and evidence) and 2 (detection wired into the node, opt-in, no penalty) are implemented; increment 2 is ready for the observer-3 canary in section 11. Penalties need the decisions in section 9.
+- **Status:** Proposed. Increments 1 (detector and evidence) and 2 (detection wired into the node, opt-in, no penalty) are implemented. Increment 2 has run on observer-3 since 2026-11-15 (section 11, steps 1–4 passed); it has not yet seen PBFT traffic because the chain is idle. Penalties need the decisions in section 9.
 - **Context/problem (AUD-04):** validators bond 100 tCREG, and `Staking.sol` can slash, but nothing connects a double-sign to a slash. The node has no code path that calls a slashing function, so a validator that signs two conflicting blocks today loses nothing and leaves no record. Economic security is decorative until this exists.
 - **Options:** (a) node auto-slashes with a hot key; (b) detect and publish evidence, penalize through Governance; (c) detect and publish evidence, penalize through a validator-confirmed slasher contract; (d) prove the offense on-chain (Ed25519 verifier or ZK).
 - **Decision:** (b) now, (c) with the batched contract migration, (d) only if mainnet needs trustless proof. Detection is permissionless and runs on every node, observers included; evidence is self-contained and independently verifiable; penalties stay a governed decision until a contract can enforce them mechanically.
@@ -115,7 +115,7 @@ Code: `node/src/equivocation_monitor.rs`, hooks in `node/src/p2p.rs`, state meth
 ## 10. Increments
 
 1. **Done:** detector and evidence in `consensus`, with tests.
-2. **Done in source:** detection wired into the node (proposal cache, hooks, file persistence, metrics, API, alerts), opt-in and detection only. Next: the observer-3 canary in section 11, then the other observers, then validators.
+2. **Done, canary running:** detection wired into the node (proposal cache, hooks, file persistence, metrics, API, alerts), opt-in and detection only. Running on observer-3 since 2026-11-15 (section 11). Next: PBFT traffic and a day of watching on observer-3, then the other observers, then validators.
 3. `creg evidence verify` CLI, explorer view, operator runbook.
 4. Governed-slash drill on a Sepolia fork; publish the operator guidance in section 2.
 5. With the batched contract migration: redesign `SlashingEvidence`, authorize it as a slasher, and run the confirmation flow.
@@ -136,3 +136,16 @@ The same pattern as the r33 smoke test (`docs/testnet-heal-evidence/2026-11-14-r
 6. **Optional drill (staging only):** run a second instance with a copy of one validator's key so it double-signs, and confirm observer-3 records exactly one piece of evidence that `verify()` accepts.
 
 **Rollback** needs no data step: unset the variable, or swap back to the previous container. The evidence directory is plain files that older binaries ignore, and no column family was added to the chain database.
+
+### 11.1 Canary result (2026-11-15)
+
+Evidence: [`docs/testnet-heal-evidence/2026-11-15-r34-observer3-equivocation-canary/`](../testnet-heal-evidence/2026-11-15-r34-observer3-equivocation-canary/README.md).
+
+| Step | Outcome |
+|---|---|
+| 1. Build | Done. Cloud Build `841d0700…` from `d67e9204`; registry digest `47503cb1…`, config digest `7b954e40…`, `/app/creg-node` `2171ba81…`, checked at every hop. |
+| 2. Back up | Done. r33 container kept stopped as `creg-phase-c-r7-o3-r33-before-r34`; data copy `data-before-r34-20261115T094922Z`, checked with `diff -r`. |
+| 3. Start | Done at 09:49 UTC. The flag is passed with `docker run -e`, so `node.env` is unchanged byte for byte. |
+| 4. Check | Passed. Startup log line, `creg_equivocation_detection_enabled 1`, `creg_equivocation_evidence 0`, endpoint enabled and empty, and every r33 readiness check. 0 ERROR lines; the observer journal warning (125 lines in r33's last 10 minutes) no longer appears. |
+| 5. Watch | **Open.** The chain is idle, so the detector has observed 0 votes. Needs one canary publish for a PBFT round, then at least a day of watching. |
+| 6. Drill | Not run (optional, staging only). |

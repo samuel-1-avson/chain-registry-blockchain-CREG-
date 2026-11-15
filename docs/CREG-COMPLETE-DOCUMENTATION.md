@@ -831,7 +831,7 @@ A governance **emergency** approve/reject path exists and can be disabled perman
 
 Slashed tokens go to a **slash pool** (they are not burned) and can be redistributed to honest active validators. Validators stay slashable while unbonding, so they cannot misbehave and instantly exit.
 
-> **Detection only, and not yet running.** Nothing in the live fleet detects double-signing or triggers a slash today, so a validator that double-signs suffers no penalty and leaves no record. In source, the node can now detect it: started with `CREG_EQUIVOCATION_DETECTION=true`, it records self-contained, independently verifiable evidence, serves it at `/v1/public/evidence/equivocation`, exports metrics and raises a critical alert. It never slashes. The design, the penalty paths and the observer-3 canary procedure are in [ADR-016](./adr/ADR-016-EQUIVOCATION-SLASHING.md) (§18).
+> **Detection only, on one observer.** Nothing triggers a slash today, so a validator that double-signs suffers no penalty. Detection itself now exists: a node started with `CREG_EQUIVOCATION_DETECTION=true` records self-contained, independently verifiable evidence, serves it at `/v1/public/evidence/equivocation`, exports metrics and raises a critical alert. It never slashes. Since 2026-11-15 it runs on **observer-3 only** (the r34 image). Because the chain is idle, it has not yet seen a PBFT round. The design, the penalty paths and the observer-3 canary procedure are in [ADR-016](./adr/ADR-016-EQUIVOCATION-SLASHING.md) (§18).
 
 ### 6.9 Requirements and configuration
 
@@ -1492,7 +1492,7 @@ The **faucet** (PostgreSQL-backed, fail-closed, reconciles against Sepolia trans
 | API compromise | Client-side Merkle and signature verification; fail-closed install | **[LIVE]** |
 | Malicious or buggy L1 RPC | Quorum reads across providers | **[BUILT]** — in the r33 image, running on one canary observer; only effective once three or more providers are configured (with one provider behavior is unchanged) |
 | Split-view by the log operator | Transparency log plus independent witnesses | **[BUILT]** — no witnesses yet |
-| Validator equivocation penalty | Slashing | **[DESIGN]** — not wired |
+| Validator equivocation penalty | Detection with verifiable evidence, then slashing | Detection **[BUILT]**, running on one canary observer (r34) since 2026-11-15; slashing **[DESIGN]**, not wired |
 | Sandbox escape | nsjail/gVisor, no network, fail-closed ladder | **[LIVE]**, audit pending |
 | Sybil validators | Stake, committee caps, 2/3 admission | **[LIVE]** at small scale |
 | Namespace squatting on npm or PyPI names | CR-07 authority proofs from upstream registries | **[BUILT]**, disabled |
@@ -1600,7 +1600,8 @@ Runbooks live in `docs/` (`SECURITY_OPS_RUNBOOK.md`, `OPS_HARDENING_RUNBOOK.md`,
 | Independent operators | **None** | One operator runs all 8 nodes |
 | Witnessed transparency log | **Software only** | No witnesses enrolled |
 | L1 validator-set sync | **Failing** | Cursor ~300,000 Sepolia blocks behind; pruned-history errors |
-| Redundant L1 RPC | **Canary only** | Quorum-read code (PRs #57–#59) runs in the r33 image on observer-3 since 2026-11-14, but that node still has a single provider, so behavior is unchanged. The rest of the fleet runs older images. |
+| Redundant L1 RPC | **Canary only** | Quorum-read code (PRs #57–#59) runs on observer-3 since 2026-11-14 (r33, now r34), but that node still has a single provider, so behavior is unchanged. The rest of the fleet runs older images. |
+| Equivocation detection | **Canary only** | Runs on observer-3 since 2026-11-15 (r34, detection only). No PBFT traffic yet, so 0 votes observed. |
 | Rewards, slashing, fees | **Not live** | See §7 |
 | External security audit | **Not started** | |
 
@@ -1615,7 +1616,15 @@ All progress after 2026-10-02 depended on one blocker: free public RPC tiers pru
 - That observer still has **one** RPC provider, so validator-set sync is still degraded (cursor at Sepolia block 11,850,628 against a finalized head above 12,135,000) and the chain tip is about 47 days old.
 - Provisioning scripts and a runbook for a **second self-run Sepolia node** (Nethermind plus Teku) were added as another full-history source; its sync state is not recorded here.
 - Contract fixes AUD-07, AUD-08 and AUD-09 exist in source only; the R7 contracts on Sepolia still run the original code.
-- A follow-up code batch is in source and not deployed: strict Ed25519 verification for consensus signatures (AUD-19), about 30 new faucet tests (AUD-27), golden-vector tests that pin block, transaction, Merkle and view-change hashes and the signed vote and PBFT message formats in both encodings, a fix that stops observers logging the "durable safety journal is not initialized" warning every block interval, CI that lints and tests the production feature set, and non-blocking `cargo-deny` and Dependabot configuration.
+- A follow-up code batch adds:
+  - strict Ed25519 verification for consensus signatures (AUD-19);
+  - about 30 new faucet tests (AUD-27);
+  - golden-vector tests that pin block, transaction, Merkle and view-change hashes, and the signed vote and PBFT message formats, in both encodings;
+  - a fix that stops observers logging the "durable safety journal is not initialized" warning every block interval;
+  - opt-in equivocation detection (ADR-016);
+  - CI that lints and tests the production feature set;
+  - non-blocking `cargo-deny` and Dependabot configuration.
+- On 2026-11-15 the node part of that batch was built as the **r34 image** and canaried on **observer-3 only**, with detection turned on. Every r33 readiness check and every detection check passed, with 0 ERROR lines, and the journal warning stopped. See [the r34 evidence](./testnet-heal-evidence/2026-11-15-r34-observer3-equivocation-canary/README.md). The faucet changes and the other seven nodes are not deployed.
 
 The remaining sequence is: configure two full-history providers, confirm all three agree on chain ID, block hashes and the Staking log set, point observer-3 at them, confirm validator-set sync reaches `synced`, then roll out to the other observers and to validators one at a time while preserving their signing journals.
 
