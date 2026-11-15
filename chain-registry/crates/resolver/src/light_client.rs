@@ -14,7 +14,7 @@
 
 use anyhow::{bail, Context, Result};
 use common::{sha256_hex, Block, BlockHeader};
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature, VerifyingKey};
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -270,7 +270,7 @@ pub fn verify_pbft_consensus(
         })?;
 
         verifying_key
-            .verify(message.as_bytes(), &signature)
+            .verify_strict(message.as_bytes(), &signature)
             .map_err(|e| {
                 anyhow::anyhow!(
                     "Cryptographic signature verification failed for {}: {}",

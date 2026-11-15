@@ -318,7 +318,7 @@ fn validate_vote_gossip_message(
     message: &[u8],
     validator_set: &common::ValidatorSet,
 ) -> Result<crate::gossip::VoteGossip, VoteValidationError> {
-    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+    use ed25519_dalek::{Signature, VerifyingKey};
 
     let vote = serde_json::from_slice::<crate::gossip::VoteGossip>(message)
         .map_err(|_| VoteValidationError::Malformed)?;
@@ -398,7 +398,7 @@ fn validate_vote_gossip_message(
     };
 
     verifying_key
-        .verify(message.as_bytes(), &signature)
+        .verify_strict(message.as_bytes(), &signature)
         .map_err(|_| VoteValidationError::SignatureVerificationFailed)?;
 
     Ok(vote)

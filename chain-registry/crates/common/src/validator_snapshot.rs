@@ -203,7 +203,7 @@ impl AuthenticatedValidatorSetSnapshot {
     }
 
     pub fn validate_against(&self, previous: &ValidatorSet) -> Result<(), &'static str> {
-        use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+        use ed25519_dalek::{Signature, VerifyingKey};
         use std::collections::{HashMap, HashSet};
 
         self.validate_structure()?;
@@ -243,7 +243,10 @@ impl AuthenticatedValidatorSetSnapshot {
             let Ok(signature) = Signature::try_from(signature_bytes.as_slice()) else {
                 return Err("validator-set transition signature is malformed");
             };
-            if pubkey.verify(message.as_bytes(), &signature).is_err() {
+            if pubkey
+                .verify_strict(message.as_bytes(), &signature)
+                .is_err()
+            {
                 return Err("validator-set transition signature is invalid");
             }
         }

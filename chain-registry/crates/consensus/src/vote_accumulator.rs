@@ -23,7 +23,7 @@
 
 use chrono::{DateTime, Utc};
 use common::{ValidatorSignature, ValidatorVote};
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -214,7 +214,7 @@ impl PackageVoteState {
             &vote.evidence_digest,
         );
 
-        if let Err(e) = verifying_key.verify(message.as_bytes(), &signature) {
+        if let Err(e) = verifying_key.verify_strict(message.as_bytes(), &signature) {
             return SignatureVerification::Invalid(format!("Ed25519 verification failed: {}", e));
         }
 

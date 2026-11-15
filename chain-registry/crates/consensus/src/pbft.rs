@@ -56,13 +56,18 @@ pub fn reproposal_signing_message(
 }
 
 /// Verify an Ed25519 PBFT phase signature against a validator pubkey.
+///
+/// Verification is strict (`verify_strict`): it additionally rejects weak
+/// (small-order) public keys and signature points, which plain `verify`
+/// accepts. Honest signers never produce them, so a quorum of honest
+/// validators is unaffected.
 pub fn verify_pbft_phase_signature(
     phase: &str,
     block_hash: &str,
     pubkey_hex: &str,
     signature_hex: &str,
 ) -> Result<()> {
-    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+    use ed25519_dalek::{Signature, VerifyingKey};
 
     let expected_pubkey = pubkey_hex.trim_start_matches("0x").to_ascii_lowercase();
     let pubkey_bytes = hex::decode(&expected_pubkey)
@@ -77,7 +82,7 @@ pub fn verify_pbft_phase_signature(
 
     let message = pbft_signature_message(phase, block_hash);
     verifying_key
-        .verify(message.as_bytes(), &signature)
+        .verify_strict(message.as_bytes(), &signature)
         .map_err(|e| anyhow::anyhow!("Invalid PBFT {} signature: {}", phase, e))
 }
 
@@ -537,13 +542,13 @@ fn prepared_block_hash(header: &PreparedBlockHeader) -> Result<String> {
 }
 
 fn verify_message_signature(pubkey_hex: &str, message: &str, signature_hex: &str) -> Result<()> {
-    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+    use ed25519_dalek::{Signature, VerifyingKey};
 
     let pubkey = hex::decode(pubkey_hex.trim_start_matches("0x"))?;
     let key = VerifyingKey::try_from(pubkey.as_slice())?;
     let signature = hex::decode(signature_hex.trim_start_matches("0x"))?;
     let signature = Signature::try_from(signature.as_slice())?;
-    key.verify(message.as_bytes(), &signature)?;
+    key.verify_strict(message.as_bytes(), &signature)?;
     Ok(())
 }
 

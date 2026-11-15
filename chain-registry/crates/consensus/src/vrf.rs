@@ -75,14 +75,17 @@ pub fn prove(seed: &[u8], privkey_hex: &str) -> Result<(String, String)> {
 /// Verify a VRF proof: checks that `proof` is a valid Ed25519 signature over `seed`
 /// by `pubkey_hex` and that `sha256(proof) == output_hex`.
 pub fn verify(seed: &[u8], pubkey_hex: &str, output_hex: &str, proof_hex: &str) -> Result<()> {
-    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+    use ed25519_dalek::{Signature, VerifyingKey};
     let pk_bytes = hex::decode(pubkey_hex)?;
     let vk = VerifyingKey::try_from(pk_bytes.as_slice())
         .map_err(|_| anyhow::anyhow!("Invalid Ed25519 public key"))?;
     let sig_bytes = hex::decode(proof_hex)?;
     let sig = Signature::try_from(sig_bytes.as_slice())
         .map_err(|_| anyhow::anyhow!("Invalid Ed25519 signature"))?;
-    vk.verify(seed, &sig)
+    // Strict verification: the VRF output is sha256(signature), so accepting
+    // more than one valid encoding of a signature would let a proposer grind
+    // its own selection output.
+    vk.verify_strict(seed, &sig)
         .map_err(|_| anyhow::anyhow!("VRF proof verification failed"))?;
     if sha256_hex(&sig_bytes) != output_hex {
         anyhow::bail!("VRF output does not match proof");

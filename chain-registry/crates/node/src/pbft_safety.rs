@@ -5,7 +5,7 @@
 
 use anyhow::{bail, Context, Result};
 use common::{Block, PreparedCertificate, ViewChangeVote};
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature, VerifyingKey};
 use rocksdb::{Options, WriteOptions, DB};
 use serde::{Deserialize, Serialize};
 use std::{path::Path, sync::Mutex};
@@ -819,7 +819,7 @@ fn verify_signature(pubkey: &str, message: &str, signature: &str) -> Result<()> 
     let key_bytes = hex::decode(pubkey).context("decode PBFT validator public key")?;
     let key =
         VerifyingKey::try_from(key_bytes.as_slice()).context("parse PBFT validator public key")?;
-    key.verify(message.as_bytes(), &signature)
+    key.verify_strict(message.as_bytes(), &signature)
         .context("verify PBFT signing decision")
 }
 
