@@ -16,6 +16,11 @@
 //
 // L1 validator set sync (Sepolia staking logs):
 //   creg_validator_set_sync_*    — mirrors /v1/health.validator_set_sync
+//
+// Equivocation detection (ADR-016, detection only):
+//   creg_equivocation_detection_enabled, creg_equivocation_evidence,
+//   creg_equivocation_tracked_votes, creg_equivocation_pending_votes,
+//   creg_equivocation_votes_rejected_total, creg_equivocation_persist_failures_total
 
 use crate::NodeState;
 use std::sync::Arc;
@@ -97,6 +102,52 @@ pub async fn render(state: Arc<RwLock<NodeState>>) -> String {
         "Unique publishers tracked",
         "gauge",
         s.publisher_index.publisher_count() as f64,
+    );
+
+    // Equivocation detection (ADR-016, detection only). Any non-zero evidence
+    // count means a validator signed two conflicting PBFT blocks.
+    let equivocation = &s.equivocation;
+    metric(
+        &mut out,
+        "creg_equivocation_detection_enabled",
+        "1 when this node runs equivocation detection (CREG_EQUIVOCATION_DETECTION)",
+        "gauge",
+        if equivocation.is_enabled() { 1.0 } else { 0.0 },
+    );
+    metric(
+        &mut out,
+        "creg_equivocation_evidence",
+        "Distinct equivocation offenses with verified evidence on this node",
+        "gauge",
+        equivocation.evidence_count() as f64,
+    );
+    metric(
+        &mut out,
+        "creg_equivocation_tracked_votes",
+        "First PBFT votes remembered per slot by the equivocation detector",
+        "gauge",
+        equivocation.tracked_votes() as f64,
+    );
+    metric(
+        &mut out,
+        "creg_equivocation_pending_votes",
+        "PBFT votes waiting for the header of the block they name",
+        "gauge",
+        equivocation.pending_votes() as f64,
+    );
+    metric(
+        &mut out,
+        "creg_equivocation_votes_rejected_total",
+        "PBFT votes the equivocation detector refused (signature or header mismatch)",
+        "counter",
+        equivocation.stats().votes_rejected as f64,
+    );
+    metric(
+        &mut out,
+        "creg_equivocation_persist_failures_total",
+        "Equivocation evidence that could not be written to disk",
+        "counter",
+        equivocation.stats().persist_failures as f64,
     );
 
     metric(

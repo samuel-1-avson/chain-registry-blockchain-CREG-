@@ -175,6 +175,14 @@ fn public_routes(sse_bus: EventBus, ws_bus: EventBus) -> Router<SharedState> {
         .route("/v1/public/bridge/anchors", get(bridge_anchors))
         .route("/v1/public/governance/proposals", get(governance_proposals))
         .route("/v1/public/reorgs", get(reorgs))
+        .route(
+            "/v1/public/evidence/equivocation",
+            get(list_equivocation_evidence),
+        )
+        .route(
+            "/v1/public/evidence/equivocation/:evidence_id",
+            get(get_equivocation_evidence),
+        )
         .route("/v1/public/richlist", get(richlist))
         .route("/v1/public/search", get(search_handler))
         .route(
@@ -5088,6 +5096,40 @@ async fn reorgs(State(state): State<SharedState>) -> impl IntoResponse {
     Json(reorgs).into_response()
 }
 
+/// GET /v1/public/evidence/equivocation — evidence that a validator signed two
+/// conflicting PBFT blocks, as observed by this node (ADR-016, detection only).
+/// Each entry is self-contained and can be verified without trusting this node.
+async fn list_equivocation_evidence(State(state): State<SharedState>) -> impl IntoResponse {
+    let s = state.read().await;
+    let monitor = &s.equivocation;
+    Json(serde_json::json!({
+        "detection_enabled": monitor.is_enabled(),
+        "count": monitor.evidence_count(),
+        "tracked_votes": monitor.tracked_votes(),
+        "pending_votes": monitor.pending_votes(),
+        "cached_headers": monitor.cached_headers(),
+        "stats": monitor.stats(),
+        "evidence": monitor.evidence(),
+    }))
+    .into_response()
+}
+
+/// GET /v1/public/evidence/equivocation/:evidence_id
+async fn get_equivocation_evidence(
+    State(state): State<SharedState>,
+    Path(evidence_id): Path<String>,
+) -> impl IntoResponse {
+    let s = state.read().await;
+    match s.equivocation.get(&evidence_id) {
+        Some(evidence) => Json(evidence.clone()).into_response(),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "unknown equivocation evidence id" })),
+        )
+            .into_response(),
+    }
+}
+
 /// GET /v1/richlist — Top staked accounts
 #[utoipa::path(
     get,
@@ -5576,6 +5618,7 @@ mod tests {
             rewards_pool_balance: 0,
             last_incentives_refresh: None,
             publisher_stake_cache: HashMap::new(),
+            equivocation: crate::equivocation_monitor::EquivocationMonitor::disabled(),
         }));
 
         Ok((state, tempdir, p2p_handle, tx_sender, tx_receiver))
@@ -5634,6 +5677,90 @@ mod tests {
                 signature: hex::encode(signing_key.sign(message.as_bytes()).to_bytes()),
             });
         checkpoint
+    }
+
+    #[tokio::test]
+    async fn equivocation_evidence_is_served_and_verifiable_by_clients() -> anyhow::Result<()> {
+        let (state, tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
+        {
+            let mut s = state.write().await;
+            s.equivocation = crate::equivocation_monitor::EquivocationMonitor::new(
+                true,
+                Some(
+                    tempdir
+                        .path()
+                        .join(crate::equivocation_monitor::EVIDENCE_DIR),
+                ),
+            );
+            // Two different proposals for the next height, and one validator
+            // PREPARE-signing both of them.
+            let mut first = common::Block::genesis().header;
+            first.height = s.chain.tip_height()? + 1;
+            first.prev_hash = s.chain.tip_hash()?;
+            first.merkle_root = common::sha256_hex(b"first");
+            let mut second = first.clone();
+            second.merkle_root = common::sha256_hex(b"second");
+            s.observe_proposal_for_equivocation(&first);
+            s.observe_proposal_for_equivocation(&second);
+
+            let key = SigningKey::from_bytes(&[7u8; 32]);
+            for header in [&first, &second] {
+                let block_hash = consensus::slashing_relay::header_hash(header);
+                let message = consensus::pbft::pbft_signature_message("prepare", &block_hash);
+                let signature = common::BlockSignature {
+                    validator_id: "validator-1".into(),
+                    pubkey: hex::encode(key.verifying_key().as_bytes()),
+                    signature: hex::encode(key.sign(message.as_bytes()).to_bytes()),
+                };
+                s.observe_vote_for_equivocation(
+                    consensus::slashing_relay::VotePhase::Prepare,
+                    &block_hash,
+                    &signature,
+                );
+            }
+            assert_eq!(s.equivocation.evidence_count(), 1);
+        }
+
+        let app = router(
+            state,
+            new_event_bus(),
+            RateLimiter::new(RateLimitConfig::default()),
+            AttestationStore::new(),
+            crate::config::CorsConfig::default(),
+            tx_sender,
+            p2p_handle,
+        );
+        let response = app
+            .clone()
+            .oneshot(Request::get("/v1/public/evidence/equivocation").body(Body::empty())?)
+            .await?;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await?)?;
+        assert_eq!(body["detection_enabled"], true);
+        assert_eq!(body["count"], 1);
+
+        // A client verifies the served evidence without trusting this node.
+        let served: consensus::slashing_relay::EquivocationEvidence =
+            serde_json::from_value(body["evidence"][0].clone())?;
+        served.verify()?;
+
+        let one = app
+            .clone()
+            .oneshot(
+                Request::get(format!(
+                    "/v1/public/evidence/equivocation/{}",
+                    served.evidence_id
+                ))
+                .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(one.status(), StatusCode::OK);
+        let missing = app
+            .oneshot(Request::get("/v1/public/evidence/equivocation/00").body(Body::empty())?)
+            .await?;
+        assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+        Ok(())
     }
 
     #[tokio::test]

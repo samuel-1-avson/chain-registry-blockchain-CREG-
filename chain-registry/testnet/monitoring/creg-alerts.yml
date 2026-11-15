@@ -86,6 +86,25 @@ groups:
           summary: "L2 chain reorganization recorded on {{ $labels.instance }}"
           description: "{{ $value }} reorg event(s) in the last hour — inspect /v1/reorgs."
 
+      # Equivocation (ADR-016, detection only): a validator signed two
+      # conflicting PBFT blocks. Stays firing until the offense is handled
+      # and the alert is silenced; nothing is slashed automatically.
+      - alert: CregEquivocationDetected
+        expr: creg_equivocation_evidence > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "Validator equivocation recorded on {{ $labels.instance }}"
+          description: "{{ $value }} offense(s) with verified evidence. Fetch /v1/public/evidence/equivocation, verify it independently, then follow the governed-slash procedure in ADR-016."
+
+      - alert: CregEquivocationEvidenceNotPersisted
+        expr: increase(creg_equivocation_persist_failures_total[15m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Equivocation evidence could not be saved on {{ $labels.instance }}"
+          description: "Evidence is held in memory only and would be lost on restart. Check disk space and permissions under the node data directory (equivocation-evidence/)."
+
   - name: creg-l1-sync
     rules:
       - alert: CregValidatorSetSyncDegraded

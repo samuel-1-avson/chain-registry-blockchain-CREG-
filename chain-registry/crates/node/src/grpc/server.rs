@@ -490,6 +490,7 @@ mod tests {
             rewards_pool_balance: 0,
             last_incentives_refresh: None,
             publisher_stake_cache: std::collections::HashMap::new(),
+            equivocation: crate::equivocation_monitor::EquivocationMonitor::disabled(),
         }));
 
         let registry = super::MyRegistry::new(state);

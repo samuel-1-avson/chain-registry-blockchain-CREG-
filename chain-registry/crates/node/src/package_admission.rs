@@ -1416,6 +1416,7 @@ rule TestMaliciousPayload {{
             rewards_pool_balance: 0,
             last_incentives_refresh: None,
             publisher_stake_cache: HashMap::new(),
+            equivocation: crate::equivocation_monitor::EquivocationMonitor::disabled(),
         }));
 
         Ok((state, tempdir))

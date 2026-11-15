@@ -1233,6 +1233,10 @@ impl P2PNode {
                                             continue;
                                         }
                                         let mut s = state.write().await;
+                                        // Detection only (ADR-016): keep the header before any
+                                        // check below can reject the proposal, so a vote for a
+                                        // conflicting proposal can still be proven.
+                                        s.observe_proposal_for_equivocation(&block.header);
                                         let tip_height = s.chain.tip_height().unwrap_or(0);
                                         let tip_hash = s.chain.tip_hash().unwrap_or_default();
                                         let vs = match crate::validator_set_history::verification_set_at(
@@ -1546,6 +1550,13 @@ impl P2PNode {
                                             }
                                         };
                                         let mut s = state.write().await;
+                                        // Detection only (ADR-016), before the engine can
+                                        // suppress a second vote from the same validator.
+                                        s.observe_vote_for_equivocation(
+                                            consensus::slashing_relay::VotePhase::Prepare,
+                                            &block_hash,
+                                            &sig,
+                                        );
                                         if let Ok(true) = s.pbft_engine.prepare(&block_hash, &validator_id, sig) {
                                             if let Some(private_key_hex) = &s.config.validator_privkey {
                                                 if let Ok(key_bytes) = hex::decode(private_key_hex) {
@@ -1599,6 +1610,13 @@ impl P2PNode {
                                             }
                                         };
                                         let mut s = state.write().await;
+                                        // Detection only (ADR-016), before the engine can
+                                        // suppress a second vote from the same validator.
+                                        s.observe_vote_for_equivocation(
+                                            consensus::slashing_relay::VotePhase::Commit,
+                                            &block_hash,
+                                            &sig,
+                                        );
                                         if let Ok(true) = s.pbft_engine.commit(&block_hash, &validator_id, sig) {
                                             // Finalized!
                                             tracing::info!("[PBFT] Block {} finalised by quorum", &block_hash[..12]);
@@ -1879,6 +1897,7 @@ mod tests {
             rewards_pool_balance: 0,
             last_incentives_refresh: None,
             publisher_stake_cache: HashMap::new(),
+            equivocation: crate::equivocation_monitor::EquivocationMonitor::disabled(),
         })))
     }
 

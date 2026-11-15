@@ -256,6 +256,9 @@ pub struct NodeState {
     pub last_incentives_refresh: Option<u64>,
     /// In-memory cache of publisher staked balances: Address -> (staked_balance, cached_at).
     pub publisher_stake_cache: HashMap<Address, (U256, Instant)>,
+    /// Detection-only watch for validators signing conflicting PBFT votes
+    /// (ADR-016). Disabled unless `CREG_EQUIVOCATION_DETECTION` is set.
+    pub equivocation: crate::equivocation_monitor::EquivocationMonitor,
 }
 
 /// Default time-to-live for in-memory publisher stake cache entries.
@@ -466,6 +469,44 @@ impl NodeState {
             );
         }
         self.chain.emit_committed_events(block);
+        self.equivocation.prune(block.header.height);
+    }
+
+    /// Detection only (ADR-016): remember a PBFT proposal header seen on the
+    /// wire. Call before validation, so proposals PBFT rejects are kept too.
+    pub fn observe_proposal_for_equivocation(&mut self, header: &common::BlockHeader) {
+        if !self.equivocation.is_enabled() {
+            return;
+        }
+        let tip_height = self.chain.tip_height().unwrap_or(0);
+        let evidence = self.equivocation.observe_header(header, tip_height);
+        report_equivocation(&evidence);
+    }
+
+    /// Detection only (ADR-016): record a PBFT vote that ingress validated.
+    pub fn observe_vote_for_equivocation(
+        &mut self,
+        phase: consensus::slashing_relay::VotePhase,
+        block_hash: &str,
+        signature: &common::BlockSignature,
+    ) {
+        if !self.equivocation.is_enabled() {
+            return;
+        }
+        let evidence = self.equivocation.observe_vote(phase, block_hash, signature);
+        report_equivocation(&evidence);
+    }
+}
+
+fn report_equivocation(evidence: &[consensus::slashing_relay::EquivocationEvidence]) {
+    for evidence in evidence {
+        tracing::error!(
+            validator = %evidence.validator_id,
+            phase = evidence.phase.as_str(),
+            height = evidence.height,
+            evidence_id = %evidence.evidence_id,
+            "[EQUIVOCATION] validator signed two conflicting blocks; evidence recorded (detection only, no slash)"
+        );
     }
 }
 

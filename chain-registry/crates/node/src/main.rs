@@ -15,6 +15,7 @@ mod chain_store;
 mod config;
 mod consensus_admission;
 mod db_sync_proxy;
+mod equivocation_monitor;
 mod events;
 mod explorer;
 mod finalized_tx;
@@ -900,6 +901,7 @@ async fn main() -> Result<()> {
         rewards_pool_balance: 0,
         last_incentives_refresh: None,
         publisher_stake_cache: HashMap::new(),
+        equivocation: crate::equivocation_monitor::EquivocationMonitor::from_env(&config.data_dir),
     }));
 
     // Seed the validator-set history with the bootstrap set effective from

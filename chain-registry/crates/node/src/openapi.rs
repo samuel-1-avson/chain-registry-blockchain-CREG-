@@ -1178,6 +1178,31 @@ pub mod paths {
     )]
     pub async fn reorgs() {}
 
+    /// Equivocation evidence observed by this node (ADR-016, detection only).
+    /// Lists self-contained proofs that a validator signed two conflicting PBFT
+    /// blocks, plus detector counters. `detection_enabled` is false unless the
+    /// node runs with `CREG_EQUIVOCATION_DETECTION=true`.
+    #[utoipa::path(
+        get,
+        path = "/v1/public/evidence/equivocation",
+        tag = "system",
+        responses((status = 200, body = Object)),
+    )]
+    pub async fn list_equivocation_evidence() {}
+
+    /// One piece of equivocation evidence by its deterministic id.
+    #[utoipa::path(
+        get,
+        path = "/v1/public/evidence/equivocation/{evidence_id}",
+        tag = "system",
+        params(("evidence_id" = String, Path, description = "64-hex evidence id")),
+        responses(
+            (status = 200, body = Object),
+            (status = 404, description = "No evidence with that id on this node"),
+        ),
+    )]
+    pub async fn get_equivocation_evidence() {}
+
     /// Top addresses by staked / native balance.
     #[utoipa::path(
         get,
@@ -1391,6 +1416,8 @@ impl Modify for SecurityAddon {
         paths::governance_execute,
         paths::metrics_history,
         paths::reorgs,
+        paths::list_equivocation_evidence,
+        paths::get_equivocation_evidence,
         paths::richlist,
         paths::submit_package,
         paths::revoke_package,
