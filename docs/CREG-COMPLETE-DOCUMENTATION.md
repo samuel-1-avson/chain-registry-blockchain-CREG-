@@ -831,7 +831,7 @@ A governance **emergency** approve/reject path exists and can be disabled perman
 
 Slashed tokens go to a **slash pool** (they are not burned) and can be redistributed to honest active validators. Validators stay slashable while unbonding, so they cannot misbehave and instantly exit.
 
-> **Not wired.** Nothing in the running node detects double-signing or triggers a slash. Today a validator that double-signs suffers no automatic penalty and leaves no record. A corrected, tested detector that produces self-contained, independently verifiable evidence now exists in the `consensus` crate (source only, not connected to the node), and the full design (what is slashable, how evidence reaches `Staking.slashSeverity`, rollout) is [ADR-016](./adr/ADR-016-EQUIVOCATION-SLASHING.md). Wiring detection into the node is the next step (§18).
+> **Detection only, and not yet running.** Nothing in the live fleet detects double-signing or triggers a slash today, so a validator that double-signs suffers no penalty and leaves no record. In source, the node can now detect it: started with `CREG_EQUIVOCATION_DETECTION=true`, it records self-contained, independently verifiable evidence, serves it at `/v1/public/evidence/equivocation`, exports metrics and raises a critical alert. It never slashes. The design, the penalty paths and the observer-3 canary procedure are in [ADR-016](./adr/ADR-016-EQUIVOCATION-SLASHING.md) (§18).
 
 ### 6.9 Requirements and configuration
 
@@ -1547,7 +1547,7 @@ Port **8080** by default. Routes are grouped by trust level; older unprefixed al
 
 | Group | Examples | Access |
 |---|---|---|
-| `/v1/public/*` | `chain/stats`, `health`, `packages`, `packages/:canonical`, `packages/:canonical/proof`, `blocks`, `blocks/:height`, `blocks/hash/:hash`, `transactions/:canonical`, `publishers/:pubkey`, `addresses/:address`, `validators/:address`, `search`, `metrics/history`, `bridge/status`, `governance/proposals`, `reorgs`, `richlist` | Open reads |
+| `/v1/public/*` | `chain/stats`, `health`, `packages`, `packages/:canonical`, `packages/:canonical/proof`, `blocks`, `blocks/:height`, `blocks/hash/:hash`, `transactions/:canonical`, `publishers/:pubkey`, `addresses/:address`, `validators/:address`, `search`, `metrics/history`, `bridge/status`, `governance/proposals`, `reorgs`, `richlist`, `evidence/equivocation`, `evidence/equivocation/:evidence_id` | Open reads |
 | `/v1/publisher/*` | `POST packages`, `POST rotate-key`, namespace lifecycle | Signed by the publisher |
 | `/v1/validator/*` | `POST register`, `POST consensus/vote`, `GET consensus/state`, `GET consensus/pbft`, `GET set-transitions` | Validator-facing |
 | `/v1/operator/*` | `runtime/config`, `nodes`, `p2p/status`, `pending`, governance proposals | Operator API key (**fails closed** with 503 if unset) |
@@ -1574,7 +1574,7 @@ Other surfaces: **JSON-RPC** (`creg_chainId`, `creg_blockNumber`, `creg_getBlock
 |---|---|
 | **Health** | `/v1/health`, `/v1/chain/stats`, `/v1/runtime/config`; `creg doctor` |
 | **Metrics** | Prometheus scrapes every node; Grafana dashboards. New gauge `creg_chain_tip_age_seconds` shows time since the last block |
-| **Alerts** | Rules for block production stalled (only with pending work), idle chain, PBFT quorum lost, fault margin consumed (any validator inactive), validator-set cursor lagging, node down. Notifications need a configured Slack or PagerDuty receiver |
+| **Alerts** | Rules for block production stalled (only with pending work), idle chain, PBFT quorum lost, fault margin consumed (any validator inactive), validator-set cursor lagging, node down, equivocation detected (on nodes running detection). Notifications need a configured Slack or PagerDuty receiver |
 | **Idle versus stalled** | The chain makes no heartbeat blocks, so use tip age combined with pending-work metrics, or run a synthetic publish canary |
 | **Key management** | Hot keys from a secret manager; never in repo, OneDrive-synced folders or shell history |
 | **Rollouts** | Canary one observer first, then observers, then validators one at a time while **preserving signing journals** |
