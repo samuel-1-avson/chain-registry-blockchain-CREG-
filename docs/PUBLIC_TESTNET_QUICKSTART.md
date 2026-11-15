@@ -1,6 +1,6 @@
 # Public Testnet Quickstart
 
-> **Fleet status:** The public API (`api.testnet.cregnet.dev`) is reachable but serves a fresh empty chain (tip 0, no peers — observed 2026-09-20), not a live network. Historical snapshot: [TESTNET_STATUS.md](./archive/TESTNET_STATUS.md) (2026-08-25). Local nodes and operator-run endpoints still work.
+> **Status (2026-11-14):** The public API (`api.testnet.cregnet.dev`) serves the maintainer-run R7 chain (`creg-phase-c-testnet-2026-09-26-r7`, four validators, all run by one operator). It is idle at height 20, every package published so far is revoked, the faucet's token claims are paused, and validator-set sync from Sepolia is degraded. Treat this guide as the intended flow; see [CREG-COMPLETE-DOCUMENTATION.md](./CREG-COMPLETE-DOCUMENTATION.md) §17 for the current state and Appendix B for command syntax. Local nodes and operator-run endpoints still work.
 
 One-page guide for **publishers**, **developers**, and **validators** joining the Chain Registry Sepolia testnet (`creg-testnet-1`).
 
@@ -21,14 +21,16 @@ One-page guide for **publishers**, **developers**, and **validators** joining th
 | **Two key types** | **Ed25519** (`creg keygen`) signs packages; **secp256k1 EOA** stakes tCREG on L1. |
 | **Validator UTC clock** | Validator/block-producer hosts must run monitored NTP/chrony. Live PBFT proposals outside the 60-second clock-skew window fail closed. |
 
-**Contract addresses (Sepolia active):**
+**Contract addresses (Sepolia, R7 network — from the signed `testnet/phase-c/r7/chain-spec.json`):**
 
 | Contract | Address |
 |----------|---------|
-| Staking Hub | `0x30604Aa6f763fbde6aDCffbd8960af3031037331` |
-| CREG Token (tCREG) | `0x167Ab975dc95b79727Ed76BD8AAb70463F6499E2` |
-| Governance Multisig | `0x0fC1448b11D005a30eb6aC2d54e488f7b58c5D4E` |
-| Registry | `0xD0F465ca185a99E268be0C4FF5A135Bdf89FAF3B` |
+| Staking | `0x61c00EBe7C46f0bcE63942F7E15Bcc434DFC9B7C` |
+| CREG Token (tCREG) | `0xbC2a72107C6765364D0A822a88A6e6C61f30EAa6` |
+| Governance (2-of-3) | `0x0AB4Db22A9902B8Ef678aBd408889af22277d24E` |
+| Registry | `0x23c7FB8e6fd932C1078Ff76244470557E5e6bd99` |
+
+The addresses of the retired `creg-testnet-1` network (`0x3060…7331`, `0x167A…99E2`, `0x0fC1…5D4E`, `0xD0F4…AF3B`) no longer apply.
 
 Minimum stakes (from chain spec): **1 tCREG** publisher, **100 tCREG** validator.
 
@@ -47,7 +49,7 @@ curl -sSf https://install.cregnet.dev/creg.sh | sh
 ### 2. Generate an Ed25519 publish key
 
 ```bash
-creg keygen publisher --out ~/.creg/publisher.key
+creg keygen publisher --key-path ~/.creg/publisher.key
 ```
 
 ### 3. Fund and stake (Sepolia tCREG)
@@ -56,11 +58,12 @@ Use a **separate Ethereum wallet** (not the Ed25519 key file):
 
 ```bash
 export SEPOLIA_RPC_URL=https://sepolia.infura.io/v3/YOUR_KEY
-export CREG_STAKING_ADDR=0x30604Aa6f763fbde6aDCffbd8960af3031037331
+export CREG_STAKING_ADDR=0x61c00EBe7C46f0bcE63942F7E15Bcc434DFC9B7C
+export CREG_TOKEN_ADDR=0xbC2a72107C6765364D0A822a88A6e6C61f30EAa6
 
-# Stake command (approve + stakeAsPublisher)
-creg stake --amount 1 --role publisher \
-  --key ~/.creg/publisher-eoa.key \
+# Stake command (approve + stakeAsPublisher). The amount is positional.
+creg stake 1 --role publisher \
+  --key-file ~/.creg/publisher-eoa.key \
   --rpc-url "$SEPOLIA_RPC_URL"
 ```
 
@@ -78,9 +81,10 @@ export CREG_IPFS_URL=https://ipfs.testnet.cregnet.dev
 
 creg publish ./my-package-1.0.0.tgz \
   --key-file ~/.creg/publisher.key \
-  --publisher-address 0xYourPublisherAddress \
-  --ecosystem npm
+  --publisher-address 0xYourPublisherAddress
 ```
+
+`creg publish --help` lists every option (manifest, offline signing, IPFS URL).
 
 You can override IPFS per command: `creg publish ... --ipfs-url https://ipfs.testnet.cregnet.dev`
 
@@ -149,8 +153,8 @@ At public-testnet scale CREG uses a **hybrid mandatory + voluntary analysis comm
 1. Stake **≥ 100 tCREG** and apply on L1:
 
 ```bash
-creg stake --amount 100 --role validator \
-  --key ~/.creg/validator-eoa.key \
+creg stake 100 --role validator \
+  --key-file ~/.creg/validator-eoa.key \
   --rpc-url "$SEPOLIA_RPC_URL"
 ```
 

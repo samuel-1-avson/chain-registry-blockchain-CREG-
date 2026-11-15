@@ -1,5 +1,7 @@
 # Chain Registry (CREG): Comprehensive User & System Workflow Guide
 
+> **Status notice (2026-11-14):** This guide was written for the earlier `creg-testnet-1` network and has not been updated for R7 (`creg-phase-c-testnet-2026-09-26-r7`). Known out-of-date items: the contract addresses in §6 (retired network; current addresses are in [CREG-COMPLETE-DOCUMENTATION.md](./CREG-COMPLETE-DOCUMENTATION.md) Appendix C), `creg stake --amount …` (the amount is positional: `creg stake 1 --role publisher`), `creg keygen … --key-path`, `creg validator register` (identity registration is `POST /v1/validators/register` or `testnet/register-validator-identity.sh`), the claim that state roots are anchored to Sepolia's `Registry.sol` (retired; `submitRollupBatch` reverts), and the claim that validators currently receive work rewards (reward dispatch is not live). For a current, status-tagged description use the complete documentation: publisher flow §9, validator flow §10, consumer flow §11, current status §17.
+
 **Network:** `creg-testnet-1` (Ethereum Sepolia Anchor)  
 **Target Audience:** Software Developers, Node Operators, Security Engineers, and Stakeholders  
 **Scope:** Technical and Non-Technical workflows for running a Validator Node and Publishing Packages

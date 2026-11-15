@@ -10,7 +10,9 @@ These documents explain how the system functions conceptually, architecturally, 
 
 | Document | Description | Target Audience |
 |:---|:---|:---|
-| **[USER_AND_SYSTEM_WORKFLOW_GUIDE.md](./USER_AND_SYSTEM_WORKFLOW_GUIDE.md)** | **Primary Workflow Guide:** Technical & non-technical walkthroughs for running a validator node and publishing packages. | Developers, Operators, Stakeholders |
+| **[CREG-COMPLETE-DOCUMENTATION.md](./CREG-COMPLETE-DOCUMENTATION.md)** | **Complete Documentation (start here):** system architecture, workflow, blockchain structure, consensus, validator architecture, tokenomics, publisher / validator / consumer flows, security model, status and roadmap. Every capability is tagged Live, Built, Design or Retired. | Everyone |
+| **[CREG-DEEP-DIVE-AUDIT-2026-11-14.md](./CREG-DEEP-DIVE-AUDIT-2026-11-14.md)** | **Current audit:** live state, findings register (AUD-01…27), ratings and the recommended implementation route. | Maintainers, Auditors |
+| **[USER_AND_SYSTEM_WORKFLOW_GUIDE.md](./USER_AND_SYSTEM_WORKFLOW_GUIDE.md)** | **Workflow Guide (predates R7; see its status notice):** walkthroughs for running a validator node and publishing packages. | Developers, Operators, Stakeholders |
 | **[REMOTE_INSTALLATION_GUIDE.md](./REMOTE_INSTALLATION_GUIDE.md)** | **Universal Remote Installation:** 1-line curl/powershell scripts, precompiled binaries, and Docker shims for external machines. | All External Users & Operators |
 | **[DEEP_SYSTEM_ANALYSIS_AND_PROGRESS_REPORT.md](./archive/DEEP_SYSTEM_ANALYSIS_AND_PROGRESS_REPORT.md)** (archived 2026-09-19) | **System Audit & Scorecard (Rating: 9.7/10):** Full architectural review, pros/cons, rating matrix, and subsystem deep dives. | Architects, Security Auditors |
 | **[WHITEPAPER.md](./WHITEPAPER.md)** | **Foundational Whitepaper:** Economic model, dual-consensus thesis, and cryptographic supply-chain security proofs. | Researchers, Engineers, DAO Members |

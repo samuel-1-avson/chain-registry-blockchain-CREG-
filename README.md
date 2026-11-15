@@ -130,6 +130,7 @@ This repository follows the same pattern as other open blockchains: **protocol c
 | Document | Purpose |
 |----------|---------|
 | [docs/archive/TESTNET_SCALE_ARCHITECTURE.md](docs/archive/TESTNET_SCALE_ARCHITECTURE.md) | Future scale-topology design (archived 2026-09-19) — not a current deployment claim |
+| [docs/CREG-COMPLETE-DOCUMENTATION.md](docs/CREG-COMPLETE-DOCUMENTATION.md) | **Start here** — architecture, workflow, validator architecture, tokenomics, blockchain structure and the publisher, validator and consumer flows, with a Live/Built/Design/Retired tag on every capability |
 | [docs/CREG-DEEP-DIVE-AUDIT-2026-11-14.md](docs/CREG-DEEP-DIVE-AUDIT-2026-11-14.md) | **Current** — audit, live state, testnet readiness and the recommended implementation route |
 | [docs/PROTOCOL_PROGRESS.md](docs/PROTOCOL_PROGRESS.md) | **Maintainers** — protocol briefing as of 2026-09-20 (live-network sections superseded by the 2026-11-14 audit) |
 | [docs/README.md](docs/README.md) | Documentation index |

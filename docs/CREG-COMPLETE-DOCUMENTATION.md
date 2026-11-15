@@ -1504,7 +1504,7 @@ The **faucet** (PostgreSQL-backed, fail-closed, reconciles against Sepolia trans
 - **Governance immediacy** — no timelock; any two compromised signers act at once.
 - **Economic enforcement** — no slashing, rewards or fees in operation.
 - **External audit** — contracts, consensus and sandbox have not had an independent review.
-- **Hardening gaps** — `verify` rather than `verify_strict` for Ed25519 in PBFT; one shared operator API key; permissive CORS on faucet and relayer; no dependency audit in CI.
+- **Hardening gaps** — one shared operator API key; permissive CORS on faucet and relayer; the faucet admin token is compared without a constant-time check; the dependency audit in CI is advisory only. (Ed25519 consensus signatures are now verified with `verify_strict` in source, which rejects weak keys; this is not yet deployed, and a mixed fleet only disagrees on signatures honest signers never produce.)
 
 ---
 
@@ -1615,6 +1615,7 @@ All progress after 2026-10-02 depended on one blocker: free public RPC tiers pru
 - That observer still has **one** RPC provider, so validator-set sync is still degraded (cursor at Sepolia block 11,850,628 against a finalized head above 12,135,000) and the chain tip is about 47 days old.
 - Provisioning scripts and a runbook for a **second self-run Sepolia node** (Nethermind plus Teku) were added as another full-history source; its sync state is not recorded here.
 - Contract fixes AUD-07, AUD-08 and AUD-09 exist in source only; the R7 contracts on Sepolia still run the original code.
+- A follow-up code batch is in source and not deployed: strict Ed25519 verification for consensus signatures (AUD-19), about 30 new faucet tests (AUD-27), golden-vector tests that pin block, transaction, Merkle and view-change hashes and the signed vote and PBFT message formats in both encodings, a fix that stops observers logging the "durable safety journal is not initialized" warning every block interval, CI that lints and tests the production feature set, and non-blocking `cargo-deny` and Dependabot configuration.
 
 The remaining sequence is: configure two full-history providers, confirm all three agree on chain ID, block hashes and the Staking log set, point observer-3 at them, confirm validator-set sync reaches `synced`, then roll out to the other observers and to validators one at a time while preserving their signing journals.
 

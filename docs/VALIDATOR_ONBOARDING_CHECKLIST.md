@@ -4,9 +4,14 @@
 > Network: `creg-testnet-1` (Sepolia-anchored public alpha)  
 > Audience: external validator operators joining the CREG testnet
 >
-> **Current status (2026-09-19):** the active Sepolia testnet runs an active
-> consensus committee on `creg-testnet-1`. External validator onboarding is active
-> with on-chain 2-of-3 multisig governance and cryptographic dual-signature identity binding.
+> **Current status (2026-11-14):** the live network is the R7 testnet
+> (`creg-phase-c-testnet-2026-09-26-r7`) with four validators, all run by one
+> operator. The onboarding path below is documented but **has not yet been
+> rehearsed with an independent operator**, and admission needs a two-thirds
+> attestation quorum from the existing validators. Validator-set sync from
+> Sepolia is currently degraded (pruned RPC history), so use an RPC with full
+> log history. See [CREG-COMPLETE-DOCUMENTATION.md](./CREG-COMPLETE-DOCUMENTATION.md)
+> §10 and §17.
 
 This is the single runbook a new validator operator follows to register, stake, configure, and pass health checks. Completing every item in this document is a requirement for participating in public verification quorum.
 
@@ -44,20 +49,24 @@ Votes from nodes that do not meet the sandbox and scanner-profile requirements a
 - [ ] Sepolia ETH for gas and tCREG for stake (faucet: `creg testnet drip --address 0x...` or web faucet).
 - [ ] Read [PUBLIC_TESTNET_QUICKSTART.md](./PUBLIC_TESTNET_QUICKSTART.md).
 
-Active contract addresses deployed on Ethereum Sepolia:
+Active contract addresses on Ethereum Sepolia for the R7 network (from the signed
+`testnet/phase-c/r7/chain-spec.json`; always confirm against the spec you boot with):
 
 | Contract | Active Address |
 | --- | --- |
-| Staking Hub | `0x30604Aa6f763fbde6aDCffbd8960af3031037331` |
-| CREG Token (tCREG) | `0x167Ab975dc95b79727Ed76BD8AAb70463F6499E2` |
-| Governance Multisig | `0x0fC1448b11D005a30eb6aC2d54e488f7b58c5D4E` |
-| Registry | `0xD0F465ca185a99E268be0C4FF5A135Bdf89FAF3B` |
+| Staking | `0x61c00EBe7C46f0bcE63942F7E15Bcc434DFC9B7C` |
+| CREG Token (tCREG) | `0xbC2a72107C6765364D0A822a88A6e6C61f30EAa6` |
+| Governance (2-of-3) | `0x0AB4Db22A9902B8Ef678aBd408889af22277d24E` |
+| Registry | `0x23c7FB8e6fd932C1078Ff76244470557E5e6bd99` |
+
+Addresses from the retired `creg-testnet-1` network (`0x3060…7331`, `0x167A…99E2`,
+`0x0fC1…5D4E`, `0xD0F4…AF3B`) no longer apply.
 
 ## 3. Keys
 
 Two distinct key types — do not mix them (see [WALLET_KEY_DERIVATION.md](./WALLET_KEY_DERIVATION.md)):
 
-- [ ] **Ed25519 consensus key** — generate with `creg keygen validator --out ~/.creg/validator.key`. Signs votes and identity registration.
+- [ ] **Ed25519 consensus key** — generate with `creg keygen validator --key-path ~/.creg/validator.key`. Signs votes and identity registration.
 - [ ] **secp256k1 EOA** — a normal Ethereum wallet. Holds tCREG, signs staking transactions.
 - [ ] Both keys stored outside the repo, never in shell history or compose files committed to git.
 - [ ] Backup of both keys in a secure location (loss of the Ed25519 key requires re-registration; loss of the EOA strands the stake).
@@ -68,8 +77,8 @@ Two distinct key types — do not mix them (see [WALLET_KEY_DERIVATION.md](./WAL
 
 ```bash
 export SEPOLIA_RPC_URL=https://sepolia.infura.io/v3/YOUR_KEY
-creg stake --amount 100 --role validator \
-  --key ~/.creg/validator-eoa.key \
+creg stake 100 --role validator \
+  --key-file ~/.creg/validator-eoa.key \
   --rpc-url "$SEPOLIA_RPC_URL"
 ```
 
@@ -93,10 +102,10 @@ export CREG_NODE_URL=http://127.0.0.1:8080
 | `CREG_IS_VALIDATOR` | `true` |
 | `CREG_VALIDATOR_KEY` | Ed25519 private key (hex) |
 | `CREG_NODE_ID` | Your registered node ID |
-| `CREG_CHAIN_ID` | `creg-testnet-1` |
+| `CREG_CHAIN_ID` | `creg-phase-c-testnet-2026-09-26-r7` (adopted from the signed spec) |
 | `CREG_TESTNET` | `true` |
 | `CREG_DEV_SANDBOX` | **unset or `false`** — never `true` on a public validator |
-| `CREG_CHAIN_SPEC_URL` | Signed spec, e.g. `https://spec.testnet.cregnet.dev/chain-spec.json` |
+| `CREG_CHAIN_SPEC_URL` | Signed spec, e.g. `https://spec.testnet.cregnet.dev/phase-c/r7/chain-spec.json` |
 | `CREG_SPEC_SIGNING_PUBKEY` | **Build-time pin only** (`build.rs` / `option_env`). Runtime env is ignored. Confirm the binary was built with `3fe87833177b04b0a18600eace041692a35fb2b85f6e14e6734d894a0fd61c01` |
 | `CREG_P2P_SEEDS` | At least one dialable multiaddr (`CREG_VALIDATOR_P2P_SEEDS` is the fallback name) |
 | `CREG_STAKING_ADDR` | Signed-spec staking contract (validators refuse to boot without a parseable address) |
