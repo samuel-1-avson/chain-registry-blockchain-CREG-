@@ -1,0 +1,26 @@
+# Dependency update PRs.
+#
+# Cargo is limited to Cargo.lock updates (security and compatible releases) so
+# manifest version bumps and the pinned Rust toolchain stay deliberate. Review
+# consensus-critical crates (ed25519-dalek, libp2p, rocksdb, alloy, sha2) on a
+# canary before merging.
+version: 2
+updates:
+  - package-ecosystem: "cargo"
+    directory: "/chain-registry"
+    schedule:
+      interval: "weekly"
+    versioning-strategy: "lockfile-only"
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: "npm"
+    directory: "/chain-registry/explorer"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5

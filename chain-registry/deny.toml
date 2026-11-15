@@ -1,0 +1,33 @@
+# cargo-deny policy for the CREG workspace.
+#
+# CI runs `cargo deny --workspace check advisories bans sources` from this
+# directory (see the `dependency-audit` job in .github/workflows/rust-ci.yml).
+# The job is advisory until the existing findings are triaged. Licenses are not
+# checked yet: add a [licenses] allow-list before adding `licenses` to the CI
+# command.
+
+[graph]
+# Audit what ships in the default feature set.
+all-features = false
+
+[advisories]
+version = 2
+# Yanked releases are reported but do not fail the check.
+yanked = "warn"
+# Record a RUSTSEC id here, with a reason and a review date, when a finding is
+# reviewed and accepted. Leave empty otherwise.
+ignore = []
+
+[bans]
+# The workspace pulls several duplicate versions through libp2p, alloy and
+# arkworks. Report them without failing.
+multiple-versions = "warn"
+wildcards = "allow"
+highlight = "all"
+
+[sources]
+# Only crates.io, and no git dependencies (none exist today).
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

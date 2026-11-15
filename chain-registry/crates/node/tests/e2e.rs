@@ -324,6 +324,10 @@ async fn e2e_health_check() {
 }
 
 #[tokio::test]
+#[cfg_attr(
+    feature = "phase-c-real-fleet",
+    ignore = "Phase C requires at least four active validators; this harness runs one. Needs a four-validator fixture (AUD-03)."
+)]
 async fn e2e_submit_and_verify_package() {
     let (url, _handle) = start_test_node().await;
 
@@ -369,6 +373,10 @@ async fn e2e_submit_and_verify_package() {
 }
 
 #[tokio::test]
+#[cfg_attr(
+    feature = "phase-c-real-fleet",
+    ignore = "Phase C requires at least four active validators; this harness runs one. Needs a four-validator fixture (AUD-03)."
+)]
 async fn e2e_duplicate_submission_rejected() {
     let (url, _handle) = start_test_node().await;
     let request = make_request("npm", "e2e-dup-pkg", "2.0.0");
@@ -413,6 +421,10 @@ async fn e2e_invalid_signature_rejected() {
 }
 
 #[tokio::test]
+#[cfg_attr(
+    feature = "phase-c-real-fleet",
+    ignore = "Phase C requires at least four active validators; this harness runs one. Needs a four-validator fixture (AUD-03)."
+)]
 async fn e2e_chain_stats_increase_after_verification() {
     let (url, _handle) = start_test_node().await;
 

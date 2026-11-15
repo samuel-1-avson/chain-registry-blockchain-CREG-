@@ -131,6 +131,7 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.93.0"
+          components: clippy
 
       - name: Install build dependencies
         run: |
@@ -154,8 +155,45 @@ jobs:
       - name: Verify durable PBFT signing recovery
         run: cargo test --locked --package chain-registry-node --features phase-c-real-fleet --lib pbft_safety::tests
 
+      # The fleet runs the `phase-c-real-fleet` build, which switches the
+      # consensus encoding. The default `rust` job tests the other encoding, so
+      # without these steps the code that production runs was only compiled.
+      - name: Lint the production feature set (deny warnings)
+        run: cargo clippy --locked --package chain-registry-node --all-targets --features phase-c-real-fleet -- -D warnings
+
+      # Single-threaded: several node tests mutate process-global environment
+      # variables (for example CREG_PUBLIC_VALIDATOR) and race when parallel.
+      # Four tests assume the legacy build (fewer than four validators) and are
+      # marked `ignore` under this feature with the reason; see AUD-03.
+      - name: Test the production feature set (node, all targets)
+        run: cargo test --locked --package chain-registry-node --features phase-c-real-fleet -- --test-threads=1
+        env:
+          # Unreachable on purpose -> tests use their offline fallback path.
+          CREG_NODE_URL: "http://127.0.0.1:19999"
+
+      - name: Consensus golden vectors under the Phase C encoding
+        run: cargo test --locked --package common --features phase-c-canonical-transactions --test consensus_golden_vectors
+
       - name: Verify relayer validation
         run: cargo test --locked --package chain-registry-relayer --bin creg-relayer
+
+  dependency-audit:
+    name: Dependency advisories and sources (cargo-deny)
+    runs-on: ubuntu-latest
+    # Advisory for now: the workspace pins old crates (wasmtime 18, sled) that
+    # are likely to carry findings. Triage them, then remove this line so the
+    # job becomes a gate.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+
+      - name: Check advisories, bans and sources
+        run: cargo deny --workspace check advisories bans sources
 
   consensus-finalization-smoke:
     name: Testnet consensus smoke
