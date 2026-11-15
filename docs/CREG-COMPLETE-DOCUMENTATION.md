@@ -1597,13 +1597,25 @@ Runbooks live in `docs/` (`SECURITY_OPS_RUNBOOK.md`, `OPS_HARDENING_RUNBOOK.md`,
 | Certified view change | **Proven** | Recovered through view changes |
 | Durable COMMIT crash-replay on a validator | **Not proven** | Drill armed repeatedly, never accepted |
 | Partition, chaos and soak testing | **Not done** | Open work items |
-| Independent operators | **None** | One operator runs all 8 nodes |
+| Independent operators | **None** | One operator runs all 8 nodes; two of the four validators run on the operator PC |
 | Witnessed transparency log | **Software only** | No witnesses enrolled |
 | L1 validator-set sync | **Failing** | Cursor ~300,000 Sepolia blocks behind; pruned-history errors |
 | Redundant L1 RPC | **Canary only** | Quorum-read code (PRs #57–#59) runs on observer-3 since 2026-11-14 (r33, now r34), but that node still has a single provider, so behavior is unchanged. The rest of the fleet runs older images. |
 | Equivocation detection | **Canary only** | Runs on observer-3 since 2026-11-15 (r34, detection only). No PBFT traffic yet, so 0 votes observed. |
 | Rewards, slashing, fees | **Not live** | See §7 |
 | External security audit | **Not started** | |
+
+**Where the nodes run (2026-11-15):**
+
+| Slot | Runs on | State |
+|---|---|---|
+| v1 (validator-1) | Operator PC (Docker Desktop) | Running; down 2026-10-02 to 2026-11-15, then restored with its original key from Secret Manager |
+| v2 (validator-2) | Operator PC (Docker Desktop); moved from GCP VM `creg-validator-1` on 2026-11-15, VM deleted | Running |
+| v3 (validator-3) | GCP `creg-validator-3`, `europe-west1-b` | Running |
+| v4 (validator-4) | GCP `creg-validator-4`, `asia-southeast1-b` | Running |
+| o1–o4 | GCP (`us-central1-b`, `us-central1-a`, `us-west1-b`, `africa-south1-a`) | Running; o3 on r34 |
+
+> **Two of the four validators run on one PC.** While the PC is on, all four sign and the chain survives one more outage. While it is off or asleep, only two sign and the chain cannot finalize. See [the v2 move record](./testnet-heal-evidence/2026-11-15-v2-moved-to-operator-pc/README.md) and [the v1 restore record](./testnet-heal-evidence/2026-11-15-v1-restored-on-operator-pc/README.md).
 
 ### 17.2 Why the network has been idle
 

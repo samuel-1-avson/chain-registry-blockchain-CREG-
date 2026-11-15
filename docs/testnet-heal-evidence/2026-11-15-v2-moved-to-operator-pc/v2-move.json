@@ -1,0 +1,38 @@
+{
+  "schema": "creg-r7-v2-move-to-operator-pc-v1",
+  "node_id": "validator-2",
+  "validator_pubkey": "779c9522addbce63f78448fa83bff1e789a4a874c4db25e0f7fe00b3d0429fd9",
+  "libp2p_peer_id": "12D3KooWChgcSfZ7erY2BaXPy8e4PPLvtBEBWZ2eD21P9RQxkxCk",
+  "from": "GCP VM creg-validator-1 (gen-lang-client-0022105784, us-east1-b)",
+  "to": "operator PC, Docker Desktop, container creg-phase-c-r7-v2",
+  "vm_container_stopped_utc": "2026-11-15T10:57:38Z",
+  "pc_container_started_utc": "2026-11-15T10:58:43Z",
+  "pc_readiness_passed_utc": "2026-11-15T10:59:04Z",
+  "image_id": "sha256:2b472a089fe6ac651edfbae51b616456ed335f35992c0374f10c1ea80ce6caa3",
+  "node_binary_sha256": "c7ef1d3e8bb9b34e2e0e4e255bf47f751ecaada4d0617f9ac5a4dbedb262a5b1",
+  "image_unchanged_from_vm": true,
+  "ports": {"api": "18080 -> 8080", "p2p": "9001 -> 9000"},
+  "state_moved": ["data (chain.rocksdb, pbft-safety.rocksdb signing journal, p2p identity)", "node.env", "scanner-r14-ansi-regex-live"],
+  "package_hash_matched_both_ends": true,
+  "p2p_identity_unchanged": true,
+  "validator_key_unchanged": true,
+  "package_removed_from_vm": true,
+  "readiness_checks": {
+    "image": true, "docker_healthy": true, "validator_2": true, "chain": true, "tip": true,
+    "four_validators": true, "peers": true, "scanner": true, "queues": true, "pbft": true,
+    "sandbox": true, "identity": true
+  },
+  "error_log_lines": 0,
+  "seen_by_peers": {
+    "creg-phase-c-r7-v3": "connected",
+    "creg-phase-c-r7-o4": "connected",
+    "creg-phase-c-r7-v4": "no direct connection; reaches v2 through v3 and o4",
+    "creg-phase-c-r7-o3": "no direct connection"
+  },
+  "signing_from_pc_proven": false,
+  "signing_note": "The chain has had no PBFT round since late September, so signing from the PC is shown only by the next block.",
+  "vm_snapshot": {"name": "creg-validator-1-v2-moved-20261115", "status": "READY", "disk_gb": 30, "stored_bytes": 10027690880, "location": "us", "taken_utc": "2026-11-15T11:13:07Z"},
+  "vm_deleted_utc": "2026-11-15T11:13:26Z",
+  "vm_boot_disk_deleted": true,
+  "vm_ephemeral_ip_released": "34.23.56.23"
+}
