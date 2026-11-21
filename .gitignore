@@ -15,6 +15,7 @@
 !chain-registry/README.md
 !chain-registry/migrations/README.md
 !chain-registry/contracts/README.md
+!chain-registry/crates/common/tests/vectors/README.md
 
 # =============================================================================
 # DOCS & ARCHIVE DIRECTORIES
@@ -338,6 +339,7 @@ package-lock.json
 !Creg-waitlist/functions/package-lock.json
 !chain-registry/hub-web/package-lock.json
 !chain-registry/hub-api/package-lock.json
+!chain-registry/scripts/hybrid-verifier/package-lock.json
 yarn.lock
 **/yarn.lock
 .npm/

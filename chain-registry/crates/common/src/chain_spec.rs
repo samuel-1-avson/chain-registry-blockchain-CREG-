@@ -294,8 +294,11 @@ impl ChainSpec {
     pub fn verify_signature(&self, signature_hex: &str, pubkey_hex: &str) -> anyhow::Result<()> {
         use crate::crypto::{PublicKey, Signature, SignatureScheme, VerifyMode};
 
-        let Some(scheme) = SignatureScheme::from_id(&self.signing.signature_algorithm) else {
-            anyhow::bail!("unsupported spec signature algorithm");
+        let scheme = match SignatureScheme::from_id(&self.signing.signature_algorithm) {
+            Some(SignatureScheme::Ed25519) => SignatureScheme::Ed25519,
+            Some(SignatureScheme::HybridEd25519MlDsa44V1) | None => {
+                anyhow::bail!("unsupported spec signature algorithm");
+            }
         };
 
         let pubkey_bytes = hex::decode(pubkey_hex.trim_start_matches("0x"))
@@ -631,6 +634,20 @@ mod tests {
         let seeds = spec.p2p_seeds();
         assert_eq!(seeds.len(), 1);
         assert!(seeds[0].contains("bootnode-1"));
+    }
+
+    #[test]
+    fn verify_signature_rejects_hybrid_spec_until_increment_5() {
+        let mut spec = test_spec();
+        spec.signing.signature_algorithm = crate::crypto::SignatureScheme::HybridEd25519MlDsa44V1
+            .id()
+            .to_string();
+        let err = spec
+            .verify_signature(&"00".repeat(2484), &"00".repeat(1344))
+            .expect_err("hybrid chain-spec verification is out of scope for increment 2");
+        assert!(err
+            .to_string()
+            .contains("unsupported spec signature algorithm"));
     }
 
     // ── Sepolia chain-spec ↔ on-chain Staking.sol drift guard ────────────────

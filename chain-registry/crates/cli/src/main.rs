@@ -197,14 +197,17 @@ enum Commands {
         clear: bool,
     },
 
-    /// Generate a new Ed25519 keypair for publishing or validator use.
+    /// Generate a new keypair for publishing, validator, witness, or log-signer use.
     Keygen {
         /// Role: publisher | validator | witness | log-signer
         #[arg(default_value = "publisher")]
         role: String,
-        /// Output file path (defaults to ~/.creg/<role>.key)
+        /// Output file path (defaults to ~/.creg/<role>.key, or ~/.creg/<role>.hybrid.key for hybrid)
         #[arg(short = 'k', long = "key-path")]
         key_path: Option<std::path::PathBuf>,
+        /// Signature scheme: ed25519 (default) | hybrid | hybrid-ed25519-mldsa44-v1
+        #[arg(long, default_value = "ed25519")]
+        scheme: String,
         /// Rotate an existing key instead of generating a fresh one.
         #[arg(long)]
         rotate: bool,
@@ -1275,20 +1278,34 @@ async fn run(cli: Cli) -> Result<()> {
         Commands::Keygen {
             role,
             key_path,
+            scheme,
             rotate,
             mnemonic,
             restore,
-        } => {
-            if rotate {
-                keygen::rotate(key_path.as_deref(), &role)?;
-            } else if mnemonic {
-                keygen::run_with_mnemonic(key_path.as_deref(), &role, false)?;
-            } else if restore {
-                keygen::run_with_mnemonic(key_path.as_deref(), &role, true)?;
-            } else {
-                keygen::run(key_path.as_deref(), &role)?;
+        } => match keygen::parse_keygen_scheme(&scheme)? {
+            common::crypto::SignatureScheme::Ed25519 => {
+                if rotate {
+                    keygen::rotate(key_path.as_deref(), &role)?;
+                } else if mnemonic {
+                    keygen::run_with_mnemonic(key_path.as_deref(), &role, false)?;
+                } else if restore {
+                    keygen::run_with_mnemonic(key_path.as_deref(), &role, true)?;
+                } else {
+                    keygen::run(key_path.as_deref(), &role)?;
+                }
             }
-        }
+            common::crypto::SignatureScheme::HybridEd25519MlDsa44V1 => {
+                if mnemonic || restore {
+                    anyhow::bail!(
+                        "BIP-39 mnemonic derivation is Ed25519-only; hybrid keys generate independent OS-random Ed25519 and ML-DSA-44 seeds (ADR-017 §4)."
+                    );
+                }
+                if rotate {
+                    anyhow::bail!("--rotate is not yet supported for --scheme hybrid");
+                }
+                keygen::run_hybrid(key_path.as_deref(), &role)?;
+            }
+        },
         Commands::Lockfile { clear, dir, diff } => {
             let d = dir.unwrap_or_else(|| {
                 std::env::current_dir().expect("cannot determine current directory")

@@ -53,8 +53,21 @@ If the file is from `creg keygen`, the command **refuses** to run and points her
 3. Register validator identity on the node with your **real** `evm_address` and Ed25519 pubkey.
 4. Wait for `validator_set_sync.state = synced` on `/v1/health`.
 
+## Hybrid post-quantum keys (ADR-017)
+
+Generate a hybrid Ed25519 + ML-DSA-44 keypair with:
+
+```bash
+creg keygen <role> --scheme hybrid
+```
+
+- **Key file v2 (`~/.creg/<role>.hybrid.key`):** written to a separate path from `~/.creg/<role>.key` so existing Ed25519 keys are never overwritten. The v2 JSON payload is `{"version": 2, "scheme": "hybrid-ed25519-mldsa44-v1", "ed25519_seed": "<64 hex>", "mldsa44_seed": "<64 hex>"}` (compact single-line JSON with 64 lowercase hex characters per seed) and uses the same `CREG-ENC-V1` AES-256-GCM encryption and in-repo refusal as Ed25519 keygen.
+- **Independent seeds and no derived `0x` address:** `creg keygen --scheme hybrid` draws independent OS-random Ed25519 and ML-DSA-44 seeds and does **not** print a derived `0x` ETH address. ML-DSA-44 seeds are never derived from Ed25519 seeds, BIP-39 mnemonics (`--mnemonic` / `--restore` are rejected for hybrid), or EIP-712 wallet signatures.
+- **Staking and current scope:** operators still use a separate secp256k1 wallet for gas and staking transactions; existing readers (`creg publish`, `creg witness`, `creg-node`) remain Ed25519 until ADR-017 increments 4–5.
+
 ## Related docs
 
+- [ADR-017-HYBRID-POST-QUANTUM-SIGNATURES.md](./adr/ADR-017-HYBRID-POST-QUANTUM-SIGNATURES.md) — hybrid Ed25519 + ML-DSA-44 design and rollout
 - [SECURITY_OPS_RUNBOOK.md](./SECURITY_OPS_RUNBOOK.md) — hot keys and env vars
 - [TESTNET_SEPOLIA_RUNBOOK.md](./archive/TESTNET_SEPOLIA_RUNBOOK.md) (archived 2026-09-19) — Sepolia deploy and node boot
 - [TESTNET_SEPOLIA_RUNBOOK.md](./archive/TESTNET_SEPOLIA_RUNBOOK.md) (archived 2026-09-19) — Sepolia reuse checklist

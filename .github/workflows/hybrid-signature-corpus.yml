@@ -1,0 +1,66 @@
+name: Hybrid signature differential corpus
+
+# Verifies that the pinned JS hybrid-ed25519-mldsa44-v1 verifier matches the
+# Rust-generated differential corpus and NIST ACVP ML-DSA-44 vectors.
+# The Rust side (`cargo test --locked --workspace`) runs in `.github/workflows/rust-ci.yml`.
+# Note: GitHub Actions is currently billing-deferred; run the commands below locally.
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - ".github/workflows/hybrid-signature-corpus.yml"
+      - "chain-registry/crates/common/src/crypto.rs"
+      - "chain-registry/crates/common/tests/hybrid_differential_corpus.rs"
+      - "chain-registry/crates/common/tests/vectors/**"
+      - "chain-registry/scripts/hybrid-verifier/**"
+      - "chain-registry/scripts/verify-hybrid-corpus.mjs"
+      - "chain-registry/scripts/verify-hybrid-corpus.test.mjs"
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/hybrid-signature-corpus.yml"
+      - "chain-registry/crates/common/src/crypto.rs"
+      - "chain-registry/crates/common/tests/hybrid_differential_corpus.rs"
+      - "chain-registry/crates/common/tests/vectors/**"
+      - "chain-registry/scripts/hybrid-verifier/**"
+      - "chain-registry/scripts/verify-hybrid-corpus.mjs"
+      - "chain-registry/scripts/verify-hybrid-corpus.test.mjs"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: chain-registry
+
+jobs:
+  hybrid-differential-corpus:
+    name: JS verifier & Rust/JS differential corpus
+    runs-on: ubuntu-latest
+
+    steps:
+      # actions/checkout v4.4.0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      # actions/setup-node v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: "chain-registry/scripts/hybrid-verifier/package-lock.json"
+
+      - name: Install pinned verifier dependencies
+        run: npm ci --prefix scripts/hybrid-verifier --ignore-scripts
+
+      - name: Syntax check verifier and corpus runner
+        run: |
+          node --check scripts/hybrid-verifier/verifier.mjs
+          node --check scripts/verify-hybrid-corpus.mjs
+
+      - name: Run JS verifier & adversarial corpus tests
+        run: node --test scripts/verify-hybrid-corpus.test.mjs
+
+      - name: Verify differential corpus and ACVP ML-DSA-44 sigVer vectors
+        run: node scripts/verify-hybrid-corpus.mjs

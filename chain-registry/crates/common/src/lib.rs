@@ -9,6 +9,7 @@ pub mod error;
 pub mod feature_flags;
 pub mod hot_key;
 pub mod intelligence;
+pub mod keyfile;
 #[cfg(feature = "l1-rpc")]
 pub mod l1_rpc;
 pub mod ownership;

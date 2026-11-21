@@ -28,6 +28,7 @@
 !config/weak-subjectivity/README.md
 !tools/authority-adapters/README.md
 !tools/authority-adapters/pypi-verifier/README.md
+!crates/common/tests/vectors/README.md
 !tools/authority-adapters/npm-verifier/README.md
 
 # =============================================================================
@@ -300,6 +301,7 @@ package-lock.json
 !hub-web/package-lock.json
 !hub-api/package-lock.json
 !tools/authority-adapters/npm-verifier/package-lock.json
+!scripts/hybrid-verifier/package-lock.json
 yarn.lock
 .npm/
 .yarn/

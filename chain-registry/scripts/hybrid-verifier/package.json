@@ -1,0 +1,19 @@
+{
+  "name": "@creg/hybrid-verifier",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pinned JS verifier for CREG hybrid-ed25519-mldsa44-v1 signatures (ADR-017)",
+  "type": "module",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "test": "node --test ../verify-hybrid-corpus.test.mjs",
+    "verify": "node ../verify-hybrid-corpus.mjs"
+  },
+  "dependencies": {
+    "@noble/curves": "2.4.0",
+    "@noble/hashes": "2.4.0",
+    "@noble/post-quantum": "0.7.1"
+  }
+}

@@ -522,9 +522,161 @@ pub fn rotate(key_path: Option<&Path>, role: &str) -> Result<()> {
     Ok(())
 }
 
+/// Parse the `--scheme` CLI flag for `creg keygen`.
+pub fn parse_keygen_scheme(scheme: &str) -> Result<common::crypto::SignatureScheme> {
+    match scheme.trim().to_ascii_lowercase().as_str() {
+        "ed25519" => Ok(common::crypto::SignatureScheme::Ed25519),
+        "hybrid" | "hybrid-ed25519-mldsa44-v1" => {
+            Ok(common::crypto::SignatureScheme::HybridEd25519MlDsa44V1)
+        }
+        _ => anyhow::bail!(
+            "unknown signature scheme '{scheme}'. Supported schemes: ed25519, hybrid, hybrid-ed25519-mldsa44-v1"
+        ),
+    }
+}
+
+/// Resolve the default key file path for a normalized role and signature scheme.
+///
+/// Hybrid keys use `<role>.hybrid.key` so live Ed25519 `<role>.key` files are
+/// never overwritten.
+pub fn default_key_path_for_scheme(role: &str, scheme: common::crypto::SignatureScheme) -> PathBuf {
+    match scheme {
+        common::crypto::SignatureScheme::Ed25519 => default_key_path(role),
+        common::crypto::SignatureScheme::HybridEd25519MlDsa44V1 => dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".creg")
+            .join(format!("{role}.hybrid.key")),
+    }
+}
+
+/// Write a v2 hybrid key file (plaintext compact JSON or `CREG-ENC-V1` encrypted).
+pub fn write_hybrid_key_file(
+    key_path: &Path,
+    signing_key: &common::crypto::SigningKey,
+    passphrase: &str,
+) -> Result<()> {
+    use common::keyfile::KeyFileV2;
+
+    refuse_in_repo_key_path(key_path)?;
+
+    if let Some(parent) = key_path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("Cannot create key directory: {}", parent.display()))?;
+        }
+    }
+
+    let key_file =
+        KeyFileV2::from_signing_key(signing_key).context("Failed to build v2 hybrid key file")?;
+    let json = key_file
+        .to_json()
+        .context("Failed to serialize v2 hybrid key file")?;
+
+    if passphrase.is_empty() {
+        write_key_file(key_path, json.as_str())?;
+    } else {
+        let encrypted = encrypt_key(json.as_str(), passphrase)?;
+        write_key_file(key_path, &encrypted)?;
+    }
+
+    Ok(())
+}
+
+/// Format the terminal summary for a newly generated hybrid keypair.
+///
+/// Never derives or prints an Ethereum `0x` address for hybrid keys (ADR-017 §4).
+pub fn format_hybrid_keygen_summary(
+    role: &str,
+    key_path: &Path,
+    pubkey: &common::crypto::PublicKey,
+) -> String {
+    let ed25519_pk_hex = hex::encode(pubkey.ed25519_bytes());
+    let mldsa44_line = match pubkey.mldsa44_bytes() {
+        Some(mldsa44_pk) => format!(
+            "{} ({} bytes)",
+            common::sha256_hex(&mldsa44_pk),
+            mldsa44_pk.len()
+        ),
+        None => "unavailable (non-hybrid key)".to_string(),
+    };
+    let key_id = pubkey.key_id();
+    let v2 = common::keyfile::KEYFILE_V2_VERSION;
+
+    format!(
+        "\n  ✓ keypair generated for role: {role}\n  \
+         Scheme: {} (key file v{v2})\n  \
+         Private key: {}\n  \
+         Ed25519 public key: {ed25519_pk_hex}\n  \
+         ML-DSA-44 public key (SHA-256): {mldsa44_line}\n  \
+         Key ID: {key_id}\n\n  \
+         Note: existing signers (creg publish, creg witness, creg-node) stay Ed25519 until increments 4–5.\n  \
+         Keep your private key safe and never share it.\n\n",
+        pubkey.scheme().id(),
+        key_path.display(),
+    )
+}
+
+/// Generate a keypair for the requested signature scheme and write it to `output_path`.
+pub fn run_with_scheme(
+    output_path: Option<&Path>,
+    role: &str,
+    scheme: common::crypto::SignatureScheme,
+) -> Result<()> {
+    match scheme {
+        common::crypto::SignatureScheme::Ed25519 => run(output_path, role),
+        common::crypto::SignatureScheme::HybridEd25519MlDsa44V1 => run_hybrid(output_path, role),
+    }
+}
+
+/// Generate a new hybrid Ed25519 + ML-DSA-44 keypair and save it as a v2 key file.
+/// If `output_path` is None, defaults to ~/.creg/<role>.hybrid.key.
+pub fn run_hybrid(output_path: Option<&Path>, role: &str) -> Result<()> {
+    use common::crypto::{SignatureScheme, SigningKey};
+    use rand::rngs::OsRng;
+
+    let role = normalize_keygen_role(role)?;
+
+    let key_path = output_path.map(PathBuf::from).unwrap_or_else(|| {
+        default_key_path_for_scheme(&role, SignatureScheme::HybridEd25519MlDsa44V1)
+    });
+    refuse_in_repo_key_path(&key_path)?;
+
+    let signing_key = SigningKey::generate(SignatureScheme::HybridEd25519MlDsa44V1, &mut OsRng);
+
+    // Prompt for encryption passphrase.
+    let passphrase = dialoguer::Password::new()
+        .with_prompt("Enter passphrase to encrypt the private key (empty for no encryption)")
+        .allow_empty_password(true)
+        .with_confirmation("Confirm passphrase", "Passphrases do not match")
+        .interact()
+        .context("Failed to read passphrase")?;
+
+    write_hybrid_key_file(&key_path, &signing_key, &passphrase)?;
+
+    if passphrase.is_empty() {
+        println!("  {} Private key saved (unencrypted)", "⚠".yellow());
+    } else {
+        println!(
+            "  {} Private key saved (AES-256-GCM encrypted)",
+            "✓".green()
+        );
+    }
+
+    let pubkey = signing_key.public_key();
+    print!(
+        "{}",
+        format_hybrid_keygen_summary(&role, &key_path, &pubkey)
+    );
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use common::crypto::{SignatureScheme, SigningKey, VerifyMode};
+    use common::keyfile::{KeyFileError, KeyFileV2, KEYFILE_V2_VERSION};
+    use rand::rngs::OsRng;
 
     #[test]
     fn detects_ed25519_secret_shape() {
@@ -569,6 +721,195 @@ mod tests {
         let root = tempfile::tempdir().expect("tempdir");
         let key = root.path().join("witness.key");
         refuse_in_repo_key_path(&key).expect("outside git is allowed");
+    }
+
+    #[test]
+    fn parse_keygen_scheme_accepts_ed25519_and_hybrid_and_rejects_unknown() {
+        assert_eq!(
+            parse_keygen_scheme("ed25519").expect("ed25519"),
+            SignatureScheme::Ed25519
+        );
+        assert_eq!(
+            parse_keygen_scheme("  ED25519 ").expect("trimmed ed25519"),
+            SignatureScheme::Ed25519
+        );
+        assert_eq!(
+            parse_keygen_scheme("hybrid").expect("hybrid"),
+            SignatureScheme::HybridEd25519MlDsa44V1
+        );
+        assert_eq!(
+            parse_keygen_scheme("hybrid-ed25519-mldsa44-v1").expect("full hybrid id"),
+            SignatureScheme::HybridEd25519MlDsa44V1
+        );
+
+        for invalid in ["", "mldsa44", "rsa", "dilithium", "ed25519-only", "v2"] {
+            let err = parse_keygen_scheme(invalid).expect_err("unknown scheme must fail");
+            assert!(err.to_string().contains("unknown signature scheme"));
+        }
+    }
+
+    #[test]
+    fn default_hybrid_key_path_does_not_collide_with_ed25519_key_path() {
+        for role in KEYGEN_ROLES {
+            let ed_path = default_key_path_for_scheme(role, SignatureScheme::Ed25519);
+            let legacy_ed_path = default_key_path(role);
+            let hybrid_path =
+                default_key_path_for_scheme(role, SignatureScheme::HybridEd25519MlDsa44V1);
+
+            assert_eq!(ed_path, legacy_ed_path);
+            assert_ne!(ed_path, hybrid_path);
+            assert_eq!(ed_path.parent(), hybrid_path.parent());
+            assert_eq!(
+                ed_path.file_name().and_then(|n| n.to_str()),
+                Some(format!("{role}.key").as_str())
+            );
+            assert_eq!(
+                hybrid_path.file_name().and_then(|n| n.to_str()),
+                Some(format!("{role}.hybrid.key").as_str())
+            );
+        }
+    }
+
+    #[test]
+    fn hybrid_key_file_unencrypted_roundtrip_and_strict_parse() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("publisher.hybrid.key");
+        let sk = SigningKey::generate(SignatureScheme::HybridEd25519MlDsa44V1, &mut OsRng);
+
+        write_hybrid_key_file(&path, &sk, "").expect("write unencrypted hybrid key");
+
+        let raw = std::fs::read_to_string(&path).expect("read key file");
+        assert!(!raw.starts_with(ENC_HEADER));
+        assert_eq!(raw.lines().count(), 1);
+
+        let parsed = KeyFileV2::parse_json(&raw).expect("strict parse v2 json");
+        assert_eq!(parsed.version(), KEYFILE_V2_VERSION);
+        assert_eq!(parsed.ed25519_seed().as_slice(), &sk.ed25519_seed());
+        assert_eq!(
+            parsed.mldsa44_seed().as_slice(),
+            sk.mldsa44_seed().expect("hybrid mldsa44 seed").as_slice()
+        );
+
+        let restored = parsed.to_signing_key();
+        assert_eq!(restored.public_key(), sk.public_key());
+        assert_eq!(restored.key_id(), sk.key_id());
+
+        let msg = b"creg-keygen-unencrypted-roundtrip";
+        let sig = restored.sign(msg);
+        sk.public_key()
+            .verify(msg, &sig, VerifyMode::Strict)
+            .expect("restored hybrid key verifies");
+
+        // decrypt_key_file with empty passphrase also returns the single-line JSON.
+        let via_decrypt = decrypt_key_file(&path, "").expect("read unencrypted via decrypt");
+        assert_eq!(via_decrypt, raw.trim());
+
+        // Strict parser rejects wrong version and unknown fields.
+        let wrong_version = raw.replace("\"version\":2", "\"version\":1");
+        assert!(matches!(
+            KeyFileV2::parse_json(&wrong_version),
+            Err(KeyFileError::UnsupportedVersion {
+                expected: 2,
+                actual: 1
+            })
+        ));
+        let extra_field = raw.replacen("{", "{\"extra\":true,", 1);
+        assert!(matches!(
+            KeyFileV2::parse_json(&extra_field),
+            Err(KeyFileError::Json(_))
+        ));
+    }
+
+    #[test]
+    fn hybrid_key_file_encrypted_creg_enc_v1_roundtrip() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("validator.hybrid.key");
+        let sk = SigningKey::generate(SignatureScheme::HybridEd25519MlDsa44V1, &mut OsRng);
+        let passphrase = "correct-horse-battery-staple";
+
+        write_hybrid_key_file(&path, &sk, passphrase).expect("write encrypted hybrid key");
+
+        let raw = std::fs::read_to_string(&path).expect("read encrypted key file");
+        let lines: Vec<&str> = raw.trim().lines().collect();
+        assert_eq!(lines.len(), 4);
+        assert_eq!(lines[0], ENC_HEADER);
+
+        // No plaintext seed or JSON key leak on disk.
+        let ed_seed_hex = hex::encode(sk.ed25519_seed());
+        let pq_seed_hex = hex::encode(sk.mldsa44_seed().expect("hybrid mldsa44 seed").as_slice());
+        assert!(!raw.contains(&ed_seed_hex));
+        assert!(!raw.contains(&pq_seed_hex));
+        assert!(!raw.contains("ed25519_seed"));
+        assert!(!raw.contains("mldsa44_seed"));
+        assert!(!raw.contains("hybrid-ed25519-mldsa44-v1"));
+
+        // Wrong passphrase must fail.
+        assert!(decrypt_key_file(&path, "wrong-passphrase").is_err());
+        assert!(decrypt_key_file(&path, "").is_err());
+
+        // Correct passphrase round-trips cleanly.
+        let decrypted = decrypt_key_file(&path, passphrase).expect("decrypt hybrid key");
+        let parsed = KeyFileV2::parse_json(&decrypted).expect("parse decrypted v2 json");
+        let restored = parsed.to_signing_key();
+
+        assert_eq!(restored.ed25519_seed(), sk.ed25519_seed());
+        assert_eq!(
+            restored.mldsa44_seed().expect("hybrid").as_slice(),
+            sk.mldsa44_seed().expect("hybrid").as_slice()
+        );
+        assert_eq!(restored.public_key(), sk.public_key());
+
+        let msg = b"creg-keygen-encrypted-roundtrip";
+        let sig = restored.sign(msg);
+        sk.public_key()
+            .verify(msg, &sig, VerifyMode::Strict)
+            .expect("decrypted hybrid key verifies");
+    }
+
+    #[test]
+    fn hybrid_key_file_refuses_in_repo_path() {
+        let root = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir(root.path().join(".git")).expect("fake git");
+        let nested = root.path().join("ops");
+        std::fs::create_dir(&nested).expect("ops dir");
+        let key_path = nested.join("witness.hybrid.key");
+        let sk = SigningKey::generate(SignatureScheme::HybridEd25519MlDsa44V1, &mut OsRng);
+
+        let err = write_hybrid_key_file(&key_path, &sk, "").expect_err("must refuse in-repo path");
+        assert!(err.to_string().contains("git worktree"));
+        assert!(!key_path.exists());
+    }
+
+    #[test]
+    fn hybrid_keygen_summary_prints_ed25519_mldsa_fingerprint_key_id_and_no_eth_address() {
+        let sk = SigningKey::generate(SignatureScheme::HybridEd25519MlDsa44V1, &mut OsRng);
+        let pubkey = sk.public_key();
+        let ed_pk_hex = hex::encode(pubkey.ed25519_bytes());
+        let mldsa_pk = pubkey.mldsa44_bytes().expect("hybrid mldsa44 public key");
+        let mldsa_fp = common::sha256_hex(&mldsa_pk);
+        let key_id = pubkey.key_id();
+
+        assert_eq!(ed_pk_hex.len(), 64);
+        assert_eq!(mldsa_pk.len(), 1312);
+
+        for role in KEYGEN_ROLES {
+            let key_path = PathBuf::from(format!("/var/tmp/creg-test/{role}.hybrid.key"));
+            let summary = format_hybrid_keygen_summary(role, &key_path, &pubkey);
+
+            assert!(summary.contains(role));
+            assert!(summary.contains("hybrid-ed25519-mldsa44-v1"));
+            assert!(summary.contains(&format!("key file v{KEYFILE_V2_VERSION}")));
+            assert!(summary.contains(&key_path.display().to_string()));
+            assert!(summary.contains(&ed_pk_hex));
+            assert!(summary.contains(&mldsa_fp));
+            assert!(summary.contains("(1312 bytes)"));
+            assert!(summary.contains(&format!("Key ID: {key_id}")));
+            assert!(summary.contains("creg publish"));
+            assert!(summary.contains("creg witness"));
+            assert!(summary.contains("creg-node"));
+            assert!(!summary.contains("ETH address"));
+            assert!(!summary.contains("0x"));
+        }
     }
 }
 
