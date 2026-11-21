@@ -5,9 +5,9 @@
 //! proof.  The tree follows the RFC 6962 split rule and uses domain-separated
 //! SHA-256 leaf (`0x00`) and node (`0x01`) hashes.
 
+use crate::crypto::{PublicKey, Signature, SignatureScheme, SigningKey, VerifyMode};
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
-use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 
@@ -344,7 +344,7 @@ pub fn sign_tree_head(
     key: &SigningKey,
 ) -> SignedTreeHead {
     SignedTreeHead {
-        signature: hex::encode(key.sign(&head.signing_bytes()).to_bytes()),
+        signature: key.sign(&head.signing_bytes()).to_hex(),
         head,
         log_signer_id: signer_id.into(),
     }
@@ -357,11 +357,15 @@ pub fn verify_signed_tree_head(signed: &SignedTreeHead, public_key_hex: &str) ->
         .try_into()
         .map_err(|_| anyhow::anyhow!("log public key must be 32 bytes"))?;
     let signature_bytes = hex::decode(&signed.signature).context("invalid tree-head signature")?;
-    let signature =
-        Signature::from_slice(&signature_bytes).context("invalid tree-head signature length")?;
-    VerifyingKey::from_bytes(&key)
+    let signature = Signature::from_bytes(SignatureScheme::Ed25519, &signature_bytes)
+        .context("invalid tree-head signature length")?;
+    PublicKey::from_bytes(SignatureScheme::Ed25519, &key)
         .context("invalid log public key")?
-        .verify(&signed.head.signing_bytes(), &signature)
+        .verify(
+            &signed.head.signing_bytes(),
+            &signature,
+            VerifyMode::Permissive,
+        )
         .context("tree-head signature verification failed")
 }
 
@@ -378,7 +382,7 @@ pub fn sign_witnessed_tree_head(
     witness_id: impl Into<String>,
     key: &SigningKey,
 ) -> WitnessedTreeHead {
-    let signature = hex::encode(key.sign(&witness_bytes(&signed)).to_bytes());
+    let signature = key.sign(&witness_bytes(&signed)).to_hex();
     WitnessedTreeHead {
         signed_head: signed,
         witness_signatures: vec![WitnessSignature {
@@ -416,11 +420,12 @@ impl WitnessedTreeHead {
             let Ok(signature_bytes) = hex::decode(&witness.signature) else {
                 continue;
             };
-            let Ok(signature) = Signature::from_slice(&signature_bytes) else {
+            let Ok(signature) = Signature::from_bytes(SignatureScheme::Ed25519, &signature_bytes)
+            else {
                 continue;
             };
-            if VerifyingKey::from_bytes(&key)
-                .and_then(|key| key.verify(&payload, &signature))
+            if PublicKey::from_bytes(SignatureScheme::Ed25519, &key)
+                .and_then(|key| key.verify(&payload, &signature, VerifyMode::Permissive))
                 .is_ok()
             {
                 valid_witnesses += 1;
@@ -561,8 +566,8 @@ mod tests {
 
     #[test]
     fn witnessed_head_requires_distinct_trusted_witnesses() {
-        let log_key = SigningKey::from_bytes(&[1; 32]);
-        let witness_key = SigningKey::from_bytes(&[2; 32]);
+        let log_key = SigningKey::from_ed25519_seed(&[1; 32]);
+        let witness_key = SigningKey::from_ed25519_seed(&[2; 32]);
         let head = TreeHead {
             version: TRANSPARENCY_LOG_VERSION,
             log_id: "test-log".into(),
@@ -576,23 +581,22 @@ mod tests {
             minimum_witnesses: 1,
             trusted_witness_keys: BTreeMap::new(),
         };
-        policy.trusted_witness_keys.insert(
-            "witness-a".into(),
-            hex::encode(witness_key.verifying_key().as_bytes()),
-        );
+        policy
+            .trusted_witness_keys
+            .insert("witness-a".into(), witness_key.public_key().to_hex());
         witnessed
-            .verify(&hex::encode(log_key.verifying_key().as_bytes()), &policy)
+            .verify(&log_key.public_key().to_hex(), &policy)
             .unwrap();
         policy.minimum_witnesses = 2;
         assert!(witnessed
-            .verify(&hex::encode(log_key.verifying_key().as_bytes()), &policy)
+            .verify(&log_key.public_key().to_hex(), &policy)
             .is_err());
     }
 
     #[test]
     fn client_verification_rejects_stale_and_accepts_consistent_head() {
-        let log_key = SigningKey::from_bytes(&[3; 32]);
-        let witness_key = SigningKey::from_bytes(&[4; 32]);
+        let log_key = SigningKey::from_ed25519_seed(&[3; 32]);
+        let witness_key = SigningKey::from_ed25519_seed(&[4; 32]);
         let events: Vec<TransparencyEvent> = (0..2)
             .map(|sequence| TransparencyEvent {
                 version: TRANSPARENCY_LOG_VERSION,
@@ -625,10 +629,7 @@ mod tests {
             &witness_key,
         );
         let mut keys = BTreeMap::new();
-        keys.insert(
-            "witness-a".into(),
-            hex::encode(witness_key.verifying_key().as_bytes()),
-        );
+        keys.insert("witness-a".into(), witness_key.public_key().to_hex());
         let policy = TransparencyVerificationPolicy {
             maximum_head_age_seconds: 60,
             maximum_future_skew_seconds: 5,
@@ -641,7 +642,7 @@ mod tests {
             &events[1],
             &inclusion_proof("test-log", &leaves, 1).unwrap(),
             &witnessed,
-            &hex::encode(log_key.verifying_key().as_bytes()),
+            &log_key.public_key().to_hex(),
             &policy,
             Some(&previous),
             Some(&consistency_proof("test-log", &leaves, 1).unwrap()),
@@ -654,7 +655,7 @@ mod tests {
             &events[1],
             &inclusion_proof("test-log", &leaves, 1).unwrap(),
             &witnessed,
-            &hex::encode(log_key.verifying_key().as_bytes()),
+            &log_key.public_key().to_hex(),
             &policy,
             Some(&previous),
             Some(&consistency_proof("test-log", &leaves, 1).unwrap()),
@@ -667,9 +668,9 @@ mod tests {
 
     #[test]
     fn merge_from_combines_independent_witness_signatures() {
-        let log_key = SigningKey::from_bytes(&[5; 32]);
-        let witness_a = SigningKey::from_bytes(&[6; 32]);
-        let witness_b = SigningKey::from_bytes(&[7; 32]);
+        let log_key = SigningKey::from_ed25519_seed(&[5; 32]);
+        let witness_a = SigningKey::from_ed25519_seed(&[6; 32]);
+        let witness_b = SigningKey::from_ed25519_seed(&[7; 32]);
         let head = TreeHead {
             version: TRANSPARENCY_LOG_VERSION,
             log_id: "test-log".into(),
@@ -683,17 +684,11 @@ mod tests {
         let merged = WitnessedTreeHead::merge_from(&[a, b]).unwrap();
         assert_eq!(merged.witness_signatures.len(), 2);
         let mut keys = BTreeMap::new();
-        keys.insert(
-            "org-a".into(),
-            hex::encode(witness_a.verifying_key().as_bytes()),
-        );
-        keys.insert(
-            "org-b".into(),
-            hex::encode(witness_b.verifying_key().as_bytes()),
-        );
+        keys.insert("org-a".into(), witness_a.public_key().to_hex());
+        keys.insert("org-b".into(), witness_b.public_key().to_hex());
         merged
             .verify(
-                &hex::encode(log_key.verifying_key().as_bytes()),
+                &log_key.public_key().to_hex(),
                 &WitnessPolicy {
                     minimum_witnesses: 2,
                     trusted_witness_keys: keys,
@@ -704,8 +699,8 @@ mod tests {
 
     #[test]
     fn merge_from_rejects_distinct_signed_heads() {
-        let log_key = SigningKey::from_bytes(&[8; 32]);
-        let witness = SigningKey::from_bytes(&[9; 32]);
+        let log_key = SigningKey::from_ed25519_seed(&[8; 32]);
+        let witness = SigningKey::from_ed25519_seed(&[9; 32]);
         let first = TreeHead {
             version: TRANSPARENCY_LOG_VERSION,
             log_id: "test-log".into(),

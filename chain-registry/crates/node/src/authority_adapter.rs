@@ -699,7 +699,7 @@ impl AuthorityChallengeV1 {
                 "challenge is expired, premature, or too long-lived",
             ));
         }
-        use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+        use common::crypto::{PublicKey, Signature, SignatureScheme, VerifyMode};
         let public_key = hex::decode(&self.next_controller_ed25519_pubkey).map_err(|_| {
             AuthorityAdapterError::InvalidRequest("challenge controller key is not hexadecimal")
         })?;
@@ -715,14 +715,20 @@ impl AuthorityChallengeV1 {
                 "challenge controller signature is not canonical",
             ));
         }
-        let public_key = VerifyingKey::try_from(public_key.as_slice()).map_err(|_| {
-            AuthorityAdapterError::InvalidRequest("challenge controller key is invalid")
-        })?;
-        let signature = Signature::try_from(signature.as_slice()).map_err(|_| {
-            AuthorityAdapterError::InvalidRequest("challenge controller signature is invalid")
-        })?;
+        let public_key =
+            PublicKey::from_bytes(SignatureScheme::Ed25519, &public_key).map_err(|_| {
+                AuthorityAdapterError::InvalidRequest("challenge controller key is invalid")
+            })?;
+        let signature =
+            Signature::from_bytes(SignatureScheme::Ed25519, &signature).map_err(|_| {
+                AuthorityAdapterError::InvalidRequest("challenge controller signature is invalid")
+            })?;
         public_key
-            .verify(self.signing_message().as_bytes(), &signature)
+            .verify(
+                self.signing_message().as_bytes(),
+                &signature,
+                VerifyMode::Permissive,
+            )
             .map_err(|_| {
                 AuthorityAdapterError::InvalidRequest(
                     "challenge controller signature verification failed",

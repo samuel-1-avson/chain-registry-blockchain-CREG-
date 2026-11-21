@@ -1066,8 +1066,11 @@ async fn runtime_config(State(state): State<SharedState>) -> impl IntoResponse {
         validator_pubkey: s.config.validator_privkey.as_ref().and_then(|pk| {
             let raw = pk.strip_prefix("0x").unwrap_or(pk.as_str());
             if let Ok(bytes) = hex::decode(raw) {
-                if let Ok(sk) = ed25519_dalek::SigningKey::try_from(bytes.as_slice()) {
-                    return Some(hex::encode(sk.verifying_key().as_bytes()));
+                if let Ok(sk) = common::crypto::SigningKey::from_seed(
+                    common::crypto::SignatureScheme::Ed25519,
+                    &bytes,
+                ) {
+                    return Some(sk.public_key().to_hex());
                 }
             }
             None
@@ -1202,20 +1205,20 @@ fn verify_ed25519_identity_signature(
     ed25519_pubkey: &str,
     signature_hex: &str,
 ) -> Result<(), String> {
-    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+    use common::crypto::{PublicKey, Signature, SignatureScheme, VerifyMode};
 
     let pubkey_bytes =
         hex::decode(ed25519_pubkey).map_err(|_| "Ed25519 pubkey must be valid hex".to_string())?;
-    let verifying_key = VerifyingKey::try_from(pubkey_bytes.as_slice())
+    let verifying_key = PublicKey::from_bytes(SignatureScheme::Ed25519, &pubkey_bytes)
         .map_err(|error| format!("Invalid Ed25519 pubkey: {error}"))?;
 
     let signature_bytes = hex::decode(signature_hex.trim().trim_start_matches("0x"))
         .map_err(|_| "Ed25519 identity signature must be valid hex".to_string())?;
-    let signature = Signature::try_from(signature_bytes.as_slice())
+    let signature = Signature::from_bytes(SignatureScheme::Ed25519, &signature_bytes)
         .map_err(|error| format!("Invalid Ed25519 identity signature: {error}"))?;
 
     verifying_key
-        .verify(message.as_bytes(), &signature)
+        .verify(message.as_bytes(), &signature, VerifyMode::Permissive)
         .map_err(|error| format!("Invalid Ed25519 identity signature: {error}"))
 }
 
@@ -2604,7 +2607,7 @@ async fn revoke_package(
     Path(canonical): Path<String>,
     Json(req): Json<RevokeReq>,
 ) -> Response {
-    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+    use common::crypto::{PublicKey, Signature, SignatureScheme, VerifyMode};
 
     let canonical = urlencoding::decode(&canonical)
         .unwrap_or_default()
@@ -2637,13 +2640,13 @@ async fn revoke_package(
     let sig_valid: Result<(), _> = (|| {
         let pk_bytes = hex::decode(&req.revoker_pubkey)
             .map_err(|_| anyhow::anyhow!("revoker_pubkey is not valid hex"))?;
-        let vk = VerifyingKey::try_from(pk_bytes.as_slice())
+        let vk = PublicKey::from_bytes(SignatureScheme::Ed25519, &pk_bytes)
             .map_err(|_| anyhow::anyhow!("revoker_pubkey is not a valid Ed25519 key"))?;
         let sig_bytes = hex::decode(&req.signature)
             .map_err(|_| anyhow::anyhow!("signature is not valid hex"))?;
-        let sig = Signature::try_from(sig_bytes.as_slice())
+        let sig = Signature::from_bytes(SignatureScheme::Ed25519, &sig_bytes)
             .map_err(|_| anyhow::anyhow!("signature is not a valid Ed25519 signature"))?;
-        vk.verify(sig_msg.as_bytes(), &sig)
+        vk.verify(sig_msg.as_bytes(), &sig, VerifyMode::Permissive)
             .map_err(|_| anyhow::anyhow!("Signature verification failed"))
     })();
 
@@ -2767,7 +2770,7 @@ async fn get_transparency_head(
 }
 
 fn transparency_log_signer(
-) -> std::result::Result<Option<(String, ed25519_dalek::SigningKey)>, String> {
+) -> std::result::Result<Option<(String, common::crypto::SigningKey)>, String> {
     let Ok(raw) = std::env::var("CREG_TRANSPARENCY_LOG_KEY") else {
         return Ok(None);
     };
@@ -2785,7 +2788,7 @@ fn transparency_log_signer(
         .unwrap_or_else(|| "log-operator".into());
     Ok(Some((
         signer_id,
-        ed25519_dalek::SigningKey::from_bytes(&bytes),
+        common::crypto::SigningKey::from_ed25519_seed(&bytes),
     )))
 }
 
@@ -3094,20 +3097,20 @@ async fn receive_block_announcement(
     State(state): State<SharedState>,
     Json(ann): Json<BlockAnnounceReq>,
 ) -> impl IntoResponse {
-    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+    use common::crypto::{PublicKey, Signature, SignatureScheme, VerifyMode};
 
     // ── 1. Verify Ed25519 signature ───────────────────────────────────────────
     let sig_msg = format!("{}:{}", ann.block_hash, ann.height);
     let sig_valid: Result<(), _> = (|| {
         let pk_bytes = hex::decode(&ann.proposer_pubkey)
             .map_err(|_| anyhow::anyhow!("proposer_pubkey is not valid hex"))?;
-        let vk = VerifyingKey::try_from(pk_bytes.as_slice())
+        let vk = PublicKey::from_bytes(SignatureScheme::Ed25519, &pk_bytes)
             .map_err(|_| anyhow::anyhow!("proposer_pubkey is not a valid Ed25519 key"))?;
         let sig_bytes = hex::decode(&ann.signature)
             .map_err(|_| anyhow::anyhow!("signature is not valid hex"))?;
-        let sig = Signature::try_from(sig_bytes.as_slice())
+        let sig = Signature::from_bytes(SignatureScheme::Ed25519, &sig_bytes)
             .map_err(|_| anyhow::anyhow!("signature is not a valid Ed25519 signature"))?;
-        vk.verify(sig_msg.as_bytes(), &sig)
+        vk.verify(sig_msg.as_bytes(), &sig, VerifyMode::Permissive)
             .map_err(|_| anyhow::anyhow!("Signature verification failed"))
     })();
 
@@ -3686,7 +3689,7 @@ async fn rotate_publisher_key(
     Extension(tx_sender): Extension<FinalizedTxSender>,
     Json(req): Json<RotateKeyRequest>,
 ) -> Response {
-    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+    use common::crypto::{PublicKey, Signature, SignatureScheme, VerifyMode};
 
     if let Err(error) = common::validate_namespace_prefix(&req.canonical_prefix) {
         return (
@@ -3704,11 +3707,11 @@ async fn rotate_publisher_key(
     let verify_sig = |pubkey_hex: &str, msg: &str, sig_hex: &str| -> anyhow::Result<()> {
         let pk_bytes = hex::decode(pubkey_hex)?;
         let sig_bytes = hex::decode(sig_hex)?;
-        let vk = VerifyingKey::try_from(pk_bytes.as_slice())
+        let vk = PublicKey::from_bytes(SignatureScheme::Ed25519, &pk_bytes)
             .map_err(|_| anyhow::anyhow!("bad pubkey"))?;
-        let sig = Signature::try_from(sig_bytes.as_slice())
+        let sig = Signature::from_bytes(SignatureScheme::Ed25519, &sig_bytes)
             .map_err(|_| anyhow::anyhow!("bad signature"))?;
-        vk.verify(msg.as_bytes(), &sig)
+        vk.verify(msg.as_bytes(), &sig, VerifyMode::Permissive)
             .map_err(|_| anyhow::anyhow!("signature verification failed"))
     };
 
@@ -4461,8 +4464,8 @@ async fn attest_namespace_authority(
             Ok(bytes) => bytes,
             Err(_) => return server_err("Validator authority signer key must be 32 bytes"),
         };
-        let signing_key = ed25519_dalek::SigningKey::from_bytes(&private_bytes);
-        let validator_pubkey = hex::encode(signing_key.verifying_key().as_bytes());
+        let signing_key = common::crypto::SigningKey::from_ed25519_seed(&private_bytes);
+        let validator_pubkey = signing_key.public_key().to_hex();
         let Some(validator_id) = validators
             .validators
             .iter()
@@ -4609,16 +4612,13 @@ async fn attest_namespace_authority(
         Ok(statement) => statement,
         Err(error) => return server_err(error.to_string()),
     };
-    use ed25519_dalek::Signer;
-    let signing_key = ed25519_dalek::SigningKey::from_bytes(&validator_private_key);
+    let signing_key = common::crypto::SigningKey::from_ed25519_seed(&validator_private_key);
     let signature = common::NamespaceAuthoritySignature {
         validator_id,
         validator_pubkey,
-        signature: hex::encode(
-            signing_key
-                .sign(statement.signing_message().as_bytes())
-                .to_bytes(),
-        ),
+        signature: signing_key
+            .sign(statement.signing_message().as_bytes())
+            .to_hex(),
     };
     Json(NamespaceAuthorityAttestationResponse {
         statement,
@@ -4865,7 +4865,7 @@ async fn receive_vote(
 ) -> Response {
     // ── Authenticate: verify the vote is from a known validator ──────────────
     {
-        use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+        use common::crypto::{PublicKey, Signature, SignatureScheme, VerifyMode};
 
         let s = state.read().await;
 
@@ -4941,7 +4941,7 @@ async fn receive_vote(
                     .into_response()
             }
         };
-        let vk = match VerifyingKey::try_from(pubkey_bytes.as_slice()) {
+        let vk = match PublicKey::from_bytes(SignatureScheme::Ed25519, &pubkey_bytes) {
             Ok(k) => k,
             Err(_) => {
                 return (
@@ -4965,7 +4965,7 @@ async fn receive_vote(
                     .into_response()
             }
         };
-        let sig = match Signature::try_from(sig_bytes.as_slice()) {
+        let sig = match Signature::from_bytes(SignatureScheme::Ed25519, &sig_bytes) {
             Ok(s) => s,
             Err(_) => {
                 return (
@@ -5009,7 +5009,10 @@ async fn receive_vote(
                 &vote_metadata,
             )
         };
-        if vk.verify(msg.as_bytes(), &sig).is_err() {
+        if vk
+            .verify(msg.as_bytes(), &sig, VerifyMode::Permissive)
+            .is_err()
+        {
             return (
                 StatusCode::UNAUTHORIZED,
                 Json(ErrorResponse {

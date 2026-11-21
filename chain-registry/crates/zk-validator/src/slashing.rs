@@ -353,9 +353,7 @@ impl SlashingProofGenerator {
         )?;
 
         let verify_vote_sig = |vote: &VoteDetails, label: &str| -> Result<()> {
-            use ed25519_dalek::{
-                Signature as Ed25519Sig, Verifier, VerifyingKey as Ed25519VerifyingKey,
-            };
+            use common::crypto::{PublicKey, Signature, SignatureScheme, VerifyMode};
 
             let raw = vote.signature_hex.trim_start_matches("0x");
             let sig_bytes = match hex::decode(raw) {
@@ -387,15 +385,13 @@ impl SlashingProofGenerator {
                 .as_bytes(),
             );
 
-            let vk = Ed25519VerifyingKey::from_bytes(&validator_pubkey_bytes)
+            let vk = PublicKey::from_bytes(SignatureScheme::Ed25519, &validator_pubkey_bytes)
                 .map_err(|e| anyhow::anyhow!("invalid Ed25519 pubkey in evidence: {}", e))?;
 
-            let sig_arr: [u8; 64] = sig_bytes
-                .try_into()
+            let sig = Signature::from_bytes(SignatureScheme::Ed25519, &sig_bytes)
                 .expect("length already checked to be 64");
-            let sig = Ed25519Sig::from_bytes(&sig_arr);
 
-            vk.verify(&msg, &sig)
+            vk.verify(&msg, &sig, VerifyMode::Permissive)
                 .map_err(|_| anyhow::anyhow!("{} Ed25519 signature verification failed", label))?;
 
             Ok(())

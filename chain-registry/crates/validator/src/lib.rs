@@ -289,7 +289,7 @@ const AAA_MESSAGE_DOMAIN: &str = "creg-aaa-v1";
 /// canonical package id, the content hash, and the verdict so it cannot be
 /// replayed across packages or versions.
 fn verify_aaa_proof(proof: &AuditProof, canonical: &str, content_hash: &str) -> Result<()> {
-    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+    use common::crypto::{PublicKey, Signature, SignatureScheme, VerifyMode};
 
     let pinned_pubkey = std::env::var("CREG_AAA_PUBKEY")
         .map_err(|_| anyhow::anyhow!("CREG_AAA_PUBKEY is not set — cannot verify AAA proof"))?;
@@ -313,19 +313,19 @@ fn verify_aaa_proof(proof: &AuditProof, canonical: &str, content_hash: &str) -> 
 
     let pubkey_bytes = hex::decode(proof.auditor_pubkey.trim())
         .map_err(|e| anyhow::anyhow!("auditor_pubkey is not valid hex: {}", e))?;
-    let vk = VerifyingKey::try_from(pubkey_bytes.as_slice())
+    let vk = PublicKey::from_bytes(SignatureScheme::Ed25519, &pubkey_bytes)
         .map_err(|e| anyhow::anyhow!("auditor_pubkey is not a valid Ed25519 key: {}", e))?;
 
     let sig_bytes = hex::decode(&proof.signature)
         .map_err(|e| anyhow::anyhow!("signature is not valid hex: {}", e))?;
-    let sig = Signature::try_from(sig_bytes.as_slice())
+    let sig = Signature::from_bytes(SignatureScheme::Ed25519, &sig_bytes)
         .map_err(|e| anyhow::anyhow!("signature is not a valid Ed25519 signature: {}", e))?;
 
     let msg = format!(
         "{}|{}|{}|{}",
         AAA_MESSAGE_DOMAIN, canonical, content_hash, proof.verdict
     );
-    vk.verify(msg.as_bytes(), &sig)
+    vk.verify(msg.as_bytes(), &sig, VerifyMode::Permissive)
         .map_err(|e| anyhow::anyhow!("AAA signature verification failed: {}", e))?;
 
     Ok(())

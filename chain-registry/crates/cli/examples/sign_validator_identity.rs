@@ -1,5 +1,5 @@
 use anyhow::{bail, Context, Result};
-use ed25519_dalek::{Signer, SigningKey};
+use common::crypto::SigningKey;
 
 #[derive(Debug, Default)]
 struct Args {
@@ -20,8 +20,8 @@ fn main() -> Result<()> {
     let key_array: [u8; 32] = key_bytes
         .try_into()
         .map_err(|_| anyhow::anyhow!("validator key must be exactly 32 bytes"))?;
-    let signing_key = SigningKey::from_bytes(&key_array);
-    let ed25519_pubkey = hex::encode(signing_key.verifying_key().as_bytes());
+    let signing_key = SigningKey::from_ed25519_seed(&key_array);
+    let ed25519_pubkey = signing_key.public_key().to_hex();
 
     let message = validator_identity_registration_message(
         &args.chain_id,
@@ -37,7 +37,7 @@ fn main() -> Result<()> {
         serde_json::json!({
             "message": message,
             "ed25519_pubkey": ed25519_pubkey,
-            "ed25519_signature": hex::encode(signature.to_bytes()),
+            "ed25519_signature": signature.to_hex(),
         })
     );
 

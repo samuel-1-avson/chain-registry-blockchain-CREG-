@@ -4,7 +4,7 @@
 //! and coordination of decryption requests.
 
 use crate::{KeyShare, ThresholdEncryption, ThresholdError};
-use ed25519_dalek::{Signature, VerifyingKey};
+use common::crypto::{PublicKey, Signature, SignatureScheme, VerifyMode};
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
 use std::collections::HashMap;
@@ -522,8 +522,6 @@ fn verify_ed25519_signature(
     signature_bytes: &[u8],
     build_message: impl FnOnce(&mut Vec<u8>),
 ) -> Result<bool, String> {
-    use ed25519_dalek::Verifier;
-
     if pubkey_bytes.len() != 32 {
         return Err(format!(
             "Expected 32-byte pubkey, got {} bytes",
@@ -537,17 +535,17 @@ fn verify_ed25519_signature(
         ));
     }
 
-    let key_arr: [u8; 32] = pubkey_bytes.try_into().expect("length checked above");
-    let sig_arr: [u8; 64] = signature_bytes.try_into().expect("length checked above");
-
-    let verifying_key =
-        VerifyingKey::from_bytes(&key_arr).map_err(|e| format!("Invalid pubkey: {}", e))?;
-    let signature = Signature::from_bytes(&sig_arr);
+    let verifying_key = PublicKey::from_bytes(SignatureScheme::Ed25519, pubkey_bytes)
+        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let signature = Signature::from_bytes(SignatureScheme::Ed25519, signature_bytes)
+        .expect("length checked above");
 
     let mut msg = Vec::new();
     build_message(&mut msg);
 
-    Ok(verifying_key.verify(&msg, &signature).is_ok())
+    Ok(verifying_key
+        .verify(&msg, &signature, VerifyMode::Permissive)
+        .is_ok())
 }
 
 /// Get current Unix timestamp

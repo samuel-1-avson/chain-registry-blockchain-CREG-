@@ -518,12 +518,14 @@ async fn drive_pbft_view_changes(state: Arc<RwLock<NodeState>>, p2p_handle: crat
             last_view_change_at = std::time::Instant::now();
             continue;
         };
-        let Ok(sk) = ed25519_dalek::SigningKey::try_from(pk_bytes.as_slice()) else {
+        let Ok(sk) = common::crypto::SigningKey::from_seed(
+            common::crypto::SignatureScheme::Ed25519,
+            &pk_bytes,
+        ) else {
             tracing::warn!("Skipping view-change broadcast: validator key is not 32 bytes");
             last_view_change_at = std::time::Instant::now();
             continue;
         };
-        use ed25519_dalek::Signer;
         let local_vote = {
             let mut s = state.write().await;
             if s.chain.tip_height().ok() != Some(tip.0)
@@ -541,7 +543,7 @@ async fn drive_pbft_view_changes(state: Arc<RwLock<NodeState>>, p2p_handle: crat
             };
             let mut vote = signal.vote;
             let message = vote.signing_message();
-            vote.signature = hex::encode(sk.sign(message.as_bytes()).to_bytes());
+            vote.signature = sk.sign(message.as_bytes()).to_hex();
             let result = s
                 .chain
                 .pbft_safety_journal()
@@ -1140,8 +1142,10 @@ async fn prepare_proposer_context(
             .as_deref()
             .context("prepared reproposal requires the replacement validator key")?;
         let key_bytes = hex::decode(private_key_hex.trim_start_matches("0x"))?;
-        let signing_key = ed25519_dalek::SigningKey::try_from(key_bytes.as_slice())?;
-        use ed25519_dalek::Signer;
+        let signing_key = common::crypto::SigningKey::from_seed(
+            common::crypto::SignatureScheme::Ed25519,
+            &key_bytes,
+        )?;
         let signing_message = consensus::pbft::reproposal_signing_message(
             &block.hash(),
             view_number,
@@ -1153,7 +1157,7 @@ async fn prepare_proposer_context(
             target_view: view_number,
             leader_id: node_id.clone(),
             view_change_certificate: view_change_certificate.clone(),
-            leader_signature: hex::encode(signing_key.sign(signing_message.as_bytes()).to_bytes()),
+            leader_signature: signing_key.sign(signing_message.as_bytes()).to_hex(),
         })
     } else {
         None
@@ -1284,12 +1288,13 @@ async fn produce_block(
 
     if let Some(ref privkey_hex) = privkey {
         if let Ok(pk_bytes) = hex::decode(privkey_hex) {
-            if let Ok(sk) = ed25519_dalek::SigningKey::try_from(pk_bytes.as_slice()) {
-                use ed25519_dalek::Signer;
-
+            if let Ok(sk) = common::crypto::SigningKey::from_seed(
+                common::crypto::SignatureScheme::Ed25519,
+                &pk_bytes,
+            ) {
                 let prep_msg_str = consensus::pbft::pbft_signature_message("prepare", &bh);
-                let prep_sig = hex::encode(sk.sign(prep_msg_str.as_bytes()).to_bytes());
-                let pubkey = hex::encode(sk.verifying_key().as_bytes());
+                let prep_sig = sk.sign(prep_msg_str.as_bytes()).to_hex();
+                let pubkey = sk.public_key().to_hex();
 
                 let prep_sig_obj = common::BlockSignature {
                     validator_id: node_id.clone(),
@@ -1354,7 +1359,7 @@ async fn produce_block(
                             ))
                         })?;
                     let commit_msg_str = consensus::pbft::pbft_signature_message("commit", &bh);
-                    let commit_sig = hex::encode(sk.sign(commit_msg_str.as_bytes()).to_bytes());
+                    let commit_sig = sk.sign(commit_msg_str.as_bytes()).to_hex();
 
                     let commit_sig_obj = common::BlockSignature {
                         validator_id: node_id.clone(),

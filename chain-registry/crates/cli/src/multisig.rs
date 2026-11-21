@@ -297,15 +297,14 @@ pub fn sign(session_path: &Path, privkey_hex: &str) -> Result<()> {
 }
 
 fn sign_legacy_session(session_path: &Path, privkey_hex: &str) -> Result<()> {
-    use ed25519_dalek::{Signer, SigningKey};
+    use common::crypto::{SignatureScheme, SigningKey};
 
     let mut session = MultisigSession::load(session_path)?;
 
     let privkey_bytes = hex::decode(privkey_hex.trim()).context("Invalid private key hex")?;
-    let signing_key =
-        SigningKey::try_from(privkey_bytes.as_slice()).context("Invalid Ed25519 private key")?;
-    let pubkey = signing_key.verifying_key();
-    let pubkey_hex = hex::encode(pubkey.as_bytes());
+    let signing_key = SigningKey::from_seed(SignatureScheme::Ed25519, &privkey_bytes)
+        .context("Invalid Ed25519 private key")?;
+    let pubkey_hex = signing_key.public_key().to_hex();
 
     // Check for duplicate signer
     if session.signatures.iter().any(|(pk, _)| pk == &pubkey_hex) {
@@ -326,8 +325,7 @@ fn sign_legacy_session(session_path: &Path, privkey_hex: &str) -> Result<()> {
         &session.content_hash,
         &session.publisher_address,
     );
-    let signature = signing_key.sign(msg.as_bytes());
-    let sig_hex = hex::encode(signature.to_bytes());
+    let sig_hex = signing_key.sign(msg.as_bytes()).to_hex();
 
     session.signatures.push((pubkey_hex.clone(), sig_hex));
     session.save(session_path)?;

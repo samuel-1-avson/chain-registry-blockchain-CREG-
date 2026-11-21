@@ -60,32 +60,34 @@ pub fn select_validators(
 /// Minimal VRF proof using deterministic Ed25519 signatures.
 /// Returns `(output_hex, proof_hex)` where output = SHA256(signature).
 pub fn prove(seed: &[u8], privkey_hex: &str) -> Result<(String, String)> {
-    use ed25519_dalek::{Signer, SigningKey};
+    // ADR-017: the VRF stays on Ed25519 (ML-DSA signatures are not unique).
+    use common::crypto::SigningKey;
     let key_bytes = hex::decode(privkey_hex.trim())?;
     let key_arr: [u8; 32] = key_bytes
         .try_into()
         .map_err(|_| anyhow::anyhow!("Private key must be 32 bytes"))?;
-    let sk = SigningKey::from_bytes(&key_arr);
-    let sig = sk.sign(seed);
-    let proof = hex::encode(sig.to_bytes());
-    let output = sha256_hex(&sig.to_bytes());
+    let sk = SigningKey::from_ed25519_seed(&key_arr);
+    let sig = sk.sign(seed).to_bytes();
+    let proof = hex::encode(&sig);
+    let output = sha256_hex(&sig);
     Ok((output, proof))
 }
 
 /// Verify a VRF proof: checks that `proof` is a valid Ed25519 signature over `seed`
 /// by `pubkey_hex` and that `sha256(proof) == output_hex`.
 pub fn verify(seed: &[u8], pubkey_hex: &str, output_hex: &str, proof_hex: &str) -> Result<()> {
-    use ed25519_dalek::{Signature, VerifyingKey};
+    use common::crypto::{PublicKey, Signature, SignatureScheme, VerifyMode};
     let pk_bytes = hex::decode(pubkey_hex)?;
-    let vk = VerifyingKey::try_from(pk_bytes.as_slice())
+    let vk = PublicKey::from_bytes(SignatureScheme::Ed25519, &pk_bytes)
         .map_err(|_| anyhow::anyhow!("Invalid Ed25519 public key"))?;
     let sig_bytes = hex::decode(proof_hex)?;
-    let sig = Signature::try_from(sig_bytes.as_slice())
+    let sig = Signature::from_bytes(SignatureScheme::Ed25519, &sig_bytes)
         .map_err(|_| anyhow::anyhow!("Invalid Ed25519 signature"))?;
     // Strict verification: the VRF output is sha256(signature), so accepting
     // more than one valid encoding of a signature would let a proposer grind
-    // its own selection output.
-    vk.verify_strict(seed, &sig)
+    // its own selection output. (A signer can still grind by choosing its own
+    // nonce; see ADR-017 section 2.)
+    vk.verify(seed, &sig, VerifyMode::Strict)
         .map_err(|_| anyhow::anyhow!("VRF proof verification failed"))?;
     if sha256_hex(&sig_bytes) != output_hex {
         anyhow::bail!("VRF output does not match proof");

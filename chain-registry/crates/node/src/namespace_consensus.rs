@@ -5,11 +5,11 @@
 //! reorg, and rebuild paths verify only chain-pinned data and signatures.
 
 use anyhow::{Context, Result};
+use common::crypto::{PublicKey, Signature, SignatureScheme, VerifyMode};
 use common::{
     CertifiedNamespaceAuthority, NamespaceAuthorityPolicySpec, NamespaceAuthorityPurpose,
     NamespaceLifecycleAction, PublisherAuthorizationV1, Transaction,
 };
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
@@ -497,13 +497,15 @@ fn verify_publisher_signatures(
         let Ok(signature) = hex::decode(signature) else {
             return false;
         };
-        let Ok(pubkey) = VerifyingKey::try_from(pubkey.as_slice()) else {
+        let Ok(pubkey) = PublicKey::from_bytes(SignatureScheme::Ed25519, &pubkey) else {
             return false;
         };
-        let Ok(signature) = Signature::try_from(signature.as_slice()) else {
+        let Ok(signature) = Signature::from_bytes(SignatureScheme::Ed25519, &signature) else {
             return false;
         };
-        pubkey.verify(message.as_bytes(), &signature).is_ok()
+        pubkey
+            .verify(message.as_bytes(), &signature, VerifyMode::Permissive)
+            .is_ok()
     };
 
     if authorization.publisher_pubkeys.is_empty() {

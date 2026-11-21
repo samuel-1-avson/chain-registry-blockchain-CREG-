@@ -67,22 +67,22 @@ pub fn verify_pbft_phase_signature(
     pubkey_hex: &str,
     signature_hex: &str,
 ) -> Result<()> {
-    use ed25519_dalek::{Signature, VerifyingKey};
+    use common::crypto::{PublicKey, Signature, SignatureScheme, VerifyMode};
 
     let expected_pubkey = pubkey_hex.trim_start_matches("0x").to_ascii_lowercase();
     let pubkey_bytes = hex::decode(&expected_pubkey)
         .map_err(|e| anyhow::anyhow!("Invalid validator pubkey hex for PBFT {}: {}", phase, e))?;
-    let verifying_key = VerifyingKey::try_from(pubkey_bytes.as_slice())
+    let verifying_key = PublicKey::from_bytes(SignatureScheme::Ed25519, &pubkey_bytes)
         .map_err(|e| anyhow::anyhow!("Invalid validator pubkey for PBFT {}: {}", phase, e))?;
 
     let signature_bytes = hex::decode(signature_hex.trim_start_matches("0x"))
         .map_err(|e| anyhow::anyhow!("Invalid PBFT {} signature hex: {}", phase, e))?;
-    let signature = Signature::try_from(signature_bytes.as_slice())
+    let signature = Signature::from_bytes(SignatureScheme::Ed25519, &signature_bytes)
         .map_err(|e| anyhow::anyhow!("Invalid PBFT {} signature format: {}", phase, e))?;
 
     let message = pbft_signature_message(phase, block_hash);
     verifying_key
-        .verify_strict(message.as_bytes(), &signature)
+        .verify(message.as_bytes(), &signature, VerifyMode::Strict)
         .map_err(|e| anyhow::anyhow!("Invalid PBFT {} signature: {}", phase, e))
 }
 
@@ -542,13 +542,13 @@ fn prepared_block_hash(header: &PreparedBlockHeader) -> Result<String> {
 }
 
 fn verify_message_signature(pubkey_hex: &str, message: &str, signature_hex: &str) -> Result<()> {
-    use ed25519_dalek::{Signature, VerifyingKey};
+    use common::crypto::{PublicKey, Signature, SignatureScheme, VerifyMode};
 
     let pubkey = hex::decode(pubkey_hex.trim_start_matches("0x"))?;
-    let key = VerifyingKey::try_from(pubkey.as_slice())?;
+    let key = PublicKey::from_bytes(SignatureScheme::Ed25519, &pubkey)?;
     let signature = hex::decode(signature_hex.trim_start_matches("0x"))?;
-    let signature = Signature::try_from(signature.as_slice())?;
-    key.verify_strict(message.as_bytes(), &signature)?;
+    let signature = Signature::from_bytes(SignatureScheme::Ed25519, &signature)?;
+    key.verify(message.as_bytes(), &signature, VerifyMode::Strict)?;
     Ok(())
 }
 

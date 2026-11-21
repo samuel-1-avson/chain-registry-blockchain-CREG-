@@ -8,11 +8,11 @@
 //! does not create independent witnesses.
 
 use anyhow::{bail, Context, Result};
+use common::crypto::SigningKey;
 use common::{
     sign_witnessed_tree_head, verify_signed_tree_head, ConsistencyProof, SignedTreeHead, TreeHead,
     WitnessedTreeHead,
 };
-use ed25519_dalek::SigningKey;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -177,7 +177,7 @@ pub fn load_witness_signing_key(path: &Path) -> Result<SigningKey> {
     let bytes: [u8; 32] = secret
         .try_into()
         .map_err(|_| anyhow::anyhow!("witness key must be 32 bytes"))?;
-    Ok(SigningKey::from_bytes(&bytes))
+    Ok(SigningKey::from_ed25519_seed(&bytes))
 }
 
 pub fn default_witness_key_path() -> PathBuf {
@@ -341,7 +341,6 @@ mod tests {
     use common::{
         consistency_proof, leaf_hash, sign_tree_head, tree_root, TRANSPARENCY_LOG_VERSION,
     };
-    use ed25519_dalek::SigningKey;
 
     fn head(log_id: &str, size: u64, root: &str, issued: &str) -> TreeHead {
         TreeHead {
@@ -355,8 +354,8 @@ mod tests {
 
     fn keys() -> (SigningKey, SigningKey) {
         (
-            SigningKey::from_bytes(&[11u8; 32]),
-            SigningKey::from_bytes(&[12u8; 32]),
+            SigningKey::from_ed25519_seed(&[11u8; 32]),
+            SigningKey::from_ed25519_seed(&[12u8; 32]),
         )
     }
 
@@ -367,7 +366,7 @@ mod tests {
         let signed = sign_tree_head(tree, "log-operator", &log);
         let tick = tick(
             &signed,
-            &hex::encode(log.verifying_key().as_bytes()),
+            &log.public_key().to_hex(),
             "org-a",
             &witness,
             None,
@@ -390,7 +389,7 @@ mod tests {
         let signed = sign_tree_head(tree, "log-operator", &log);
         let err = tick(
             &signed,
-            &hex::encode(log.verifying_key().as_bytes()),
+            &log.public_key().to_hex(),
             "log-operator",
             &log,
             None,
@@ -408,7 +407,7 @@ mod tests {
         let signed = sign_tree_head(observed, "log-operator", &log);
         let tick = tick(
             &signed,
-            &hex::encode(log.verifying_key().as_bytes()),
+            &log.public_key().to_hex(),
             "org-a",
             &witness,
             Some(&accepted),
@@ -431,7 +430,7 @@ mod tests {
         let signed = sign_tree_head(observed, "log-operator", &log);
         let tick = tick(
             &signed,
-            &hex::encode(log.verifying_key().as_bytes()),
+            &log.public_key().to_hex(),
             "org-a",
             &witness,
             Some(&accepted),
@@ -458,7 +457,7 @@ mod tests {
         let signed = sign_tree_head(second, "log-operator", &log);
         let tick = tick(
             &signed,
-            &hex::encode(log.verifying_key().as_bytes()),
+            &log.public_key().to_hex(),
             "org-a",
             &witness,
             Some(&first),
@@ -507,7 +506,7 @@ mod tests {
         let signed = sign_tree_head(second, "log-operator", &log);
         let tick = tick(
             &signed,
-            &hex::encode(log.verifying_key().as_bytes()),
+            &log.public_key().to_hex(),
             "org-a",
             &witness,
             Some(&first),

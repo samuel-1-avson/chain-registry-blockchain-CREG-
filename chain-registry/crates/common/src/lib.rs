@@ -4,6 +4,7 @@
 pub mod block;
 pub mod chain_spec;
 pub mod consensus_encoding;
+pub mod crypto;
 pub mod error;
 pub mod feature_flags;
 pub mod hot_key;

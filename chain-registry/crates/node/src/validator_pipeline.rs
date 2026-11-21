@@ -376,7 +376,7 @@ async fn process_package(
     };
 
     let our_sig = {
-        use ed25519_dalek::{Signer, SigningKey};
+        use common::crypto::SigningKey;
         let key_bytes = match hex::decode(privkey_str) {
             Ok(b) => b,
             Err(e) => {
@@ -393,8 +393,8 @@ async fn process_package(
                 return;
             }
         };
-        let signing_key = SigningKey::from_bytes(&key_arr);
-        let validator_pubkey = hex::encode(signing_key.verifying_key().as_bytes());
+        let signing_key = SigningKey::from_ed25519_seed(&key_arr);
+        let validator_pubkey = signing_key.public_key().to_hex();
         let approved = matches!(vote, ValidatorVote::Approve);
         let scanner_profile_digest =
             common::scanner_profile_digest(&ml_model_version, &analysis_bundles);
@@ -434,7 +434,7 @@ async fn process_package(
         common::ValidatorSignature {
             validator_id: node_id.clone(),
             validator_pubkey,
-            signature: hex::encode(signature.to_bytes()),
+            signature: signature.to_hex(),
             vote: vote.clone(),
             signed_at: Utc::now(),
             ml_model_version,

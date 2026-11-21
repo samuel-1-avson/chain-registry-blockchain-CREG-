@@ -13,8 +13,8 @@
 // or the absence of a later revocation; the install freshness gate handles those.
 
 use anyhow::{bail, Context, Result};
+use common::crypto::{PublicKey, Signature, SignatureScheme, VerifyMode};
 use common::{sha256_hex, Block, BlockHeader};
-use ed25519_dalek::{Signature, VerifyingKey};
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -258,19 +258,21 @@ pub fn verify_pbft_consensus(
                 e
             )
         })?;
-        let verifying_key = VerifyingKey::try_from(pubkey_bytes.as_slice()).map_err(|e| {
-            anyhow::anyhow!("Invalid validator pubkey for {}: {}", sig.validator_id, e)
-        })?;
+        let verifying_key = PublicKey::from_bytes(SignatureScheme::Ed25519, &pubkey_bytes)
+            .map_err(|e| {
+                anyhow::anyhow!("Invalid validator pubkey for {}: {}", sig.validator_id, e)
+            })?;
 
         let signature_bytes = hex::decode(sig.signature.trim_start_matches("0x")).map_err(|e| {
             anyhow::anyhow!("Invalid signature hex from {}: {}", sig.validator_id, e)
         })?;
-        let signature = Signature::try_from(signature_bytes.as_slice()).map_err(|e| {
-            anyhow::anyhow!("Invalid signature format from {}: {}", sig.validator_id, e)
-        })?;
+        let signature =
+            Signature::from_bytes(SignatureScheme::Ed25519, &signature_bytes).map_err(|e| {
+                anyhow::anyhow!("Invalid signature format from {}: {}", sig.validator_id, e)
+            })?;
 
         verifying_key
-            .verify_strict(message.as_bytes(), &signature)
+            .verify(message.as_bytes(), &signature, VerifyMode::Strict)
             .map_err(|e| {
                 anyhow::anyhow!(
                     "Cryptographic signature verification failed for {}: {}",

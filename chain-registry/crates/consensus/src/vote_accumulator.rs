@@ -22,8 +22,8 @@
 // with the validator set.
 
 use chrono::{DateTime, Utc};
+use common::crypto::{PublicKey, Signature, SignatureScheme, VerifyMode};
 use common::{ValidatorSignature, ValidatorVote};
-use ed25519_dalek::{Signature, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -166,7 +166,7 @@ impl PackageVoteState {
                 ));
             }
         };
-        let signature = match Signature::try_from(sig_bytes.as_slice()) {
+        let signature = match Signature::from_bytes(SignatureScheme::Ed25519, &sig_bytes) {
             Ok(sig) => sig,
             Err(e) => {
                 return SignatureVerification::Malformed(format!(
@@ -192,7 +192,7 @@ impl PackageVoteState {
                 pubkey_bytes.len()
             ));
         }
-        let verifying_key = match VerifyingKey::try_from(pubkey_bytes.as_slice()) {
+        let verifying_key = match PublicKey::from_bytes(SignatureScheme::Ed25519, &pubkey_bytes) {
             Ok(k) => k,
             Err(e) => {
                 return SignatureVerification::Malformed(format!(
@@ -214,7 +214,7 @@ impl PackageVoteState {
             &vote.evidence_digest,
         );
 
-        if let Err(e) = verifying_key.verify_strict(message.as_bytes(), &signature) {
+        if let Err(e) = verifying_key.verify(message.as_bytes(), &signature, VerifyMode::Strict) {
             return SignatureVerification::Invalid(format!("Ed25519 verification failed: {}", e));
         }
 

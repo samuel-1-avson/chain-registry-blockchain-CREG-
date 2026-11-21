@@ -258,18 +258,17 @@ fn print_role_next_steps(role: &str, key_path: &Path, pubkey_hex: &str) {
 /// Generate a new keypair and save it to `output_path`.
 /// If `output_path` is None, defaults to ~/.creg/publisher.key
 pub fn run(output_path: Option<&Path>, role: &str) -> Result<()> {
-    use ed25519_dalek::SigningKey;
+    use common::crypto::SigningKey;
     use rand::rngs::OsRng;
 
     let role = normalize_keygen_role(role)?;
 
     let mut secret_bytes = [0u8; 32];
     OsRng.fill_bytes(&mut secret_bytes);
-    let signing_key = SigningKey::from_bytes(&secret_bytes);
-    let pubkey = signing_key.verifying_key();
+    let signing_key = SigningKey::from_ed25519_seed(&secret_bytes);
 
-    let privkey_hex = hex::encode(signing_key.as_bytes());
-    let pubkey_hex = hex::encode(pubkey.as_bytes());
+    let privkey_hex = hex::encode(signing_key.ed25519_seed());
+    let pubkey_hex = signing_key.public_key().to_hex();
 
     // ── Save private key ──────────────────────────────────────────────────────
     let key_path = output_path
@@ -325,7 +324,7 @@ pub fn run(output_path: Option<&Path>, role: &str) -> Result<()> {
 /// mnemonic. Otherwise a fresh 24-word mnemonic is generated and displayed.
 pub fn run_with_mnemonic(output_path: Option<&Path>, role: &str, restore: bool) -> Result<()> {
     use bip39::Mnemonic;
-    use ed25519_dalek::SigningKey;
+    use common::crypto::SigningKey;
     use hmac::{Hmac, Mac};
     use sha2::Sha512;
 
@@ -353,11 +352,10 @@ pub fn run_with_mnemonic(output_path: Option<&Path>, role: &str, restore: bool) 
     // First 32 bytes = private key, last 32 bytes = chain code (unused for Ed25519)
     let secret_bytes: [u8; 32] = result[..32].try_into().context("HMAC output too short")?;
 
-    let signing_key = SigningKey::from_bytes(&secret_bytes);
-    let pubkey = signing_key.verifying_key();
+    let signing_key = SigningKey::from_ed25519_seed(&secret_bytes);
 
-    let privkey_hex = hex::encode(signing_key.as_bytes());
-    let pubkey_hex = hex::encode(pubkey.as_bytes());
+    let privkey_hex = hex::encode(signing_key.ed25519_seed());
+    let pubkey_hex = signing_key.public_key().to_hex();
 
     // Save private key
     let key_path = output_path
@@ -427,7 +425,7 @@ pub fn run_with_mnemonic(output_path: Option<&Path>, role: &str, restore: bool) 
 /// Rotate an existing keypair: generate a new key, back up the old one,
 /// write the new one to the same path, and print the new public key.
 pub fn rotate(key_path: Option<&Path>, role: &str) -> Result<()> {
-    use ed25519_dalek::SigningKey;
+    use common::crypto::{SignatureScheme, SigningKey};
     use rand::rngs::OsRng;
 
     let role = normalize_keygen_role(role)?;
@@ -466,11 +464,8 @@ pub fn rotate(key_path: Option<&Path>, role: &str) -> Result<()> {
     };
 
     if let Ok(old_bytes) = hex::decode(old_privkey_hex.trim()) {
-        if let Ok(old_sk) = SigningKey::try_from(old_bytes.as_slice()) {
-            println!(
-                "  Old pubkey:  {} (Ed25519)",
-                hex::encode(old_sk.verifying_key().as_bytes())
-            );
+        if let Ok(old_sk) = SigningKey::from_seed(SignatureScheme::Ed25519, &old_bytes) {
+            println!("  Old pubkey:  {} (Ed25519)", old_sk.public_key().to_hex());
             if derive_eth_address(old_privkey_hex.trim()).is_some()
                 && (role == "publisher" || role == "validator")
             {
@@ -485,10 +480,9 @@ pub fn rotate(key_path: Option<&Path>, role: &str) -> Result<()> {
     // Generate new key
     let mut secret_bytes = [0u8; 32];
     OsRng.fill_bytes(&mut secret_bytes);
-    let new_sk = SigningKey::from_bytes(&secret_bytes);
-    let new_pk = new_sk.verifying_key();
-    let new_priv = hex::encode(new_sk.as_bytes());
-    let new_pub = hex::encode(new_pk.as_bytes());
+    let new_sk = SigningKey::from_ed25519_seed(&secret_bytes);
+    let new_priv = hex::encode(new_sk.ed25519_seed());
+    let new_pub = new_sk.public_key().to_hex();
 
     // Prompt for encryption passphrase for the new key.
     let passphrase = dialoguer::Password::new()

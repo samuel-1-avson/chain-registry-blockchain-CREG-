@@ -293,10 +293,10 @@ pub fn run_reconstruct(share_files: &[std::path::PathBuf], output_path: &Path) -
         );
     }
 
-    use ed25519_dalek::SigningKey;
-    let signing_key = SigningKey::try_from(key_bytes.as_slice())
+    use common::crypto::{SignatureScheme, SigningKey};
+    let signing_key = SigningKey::from_seed(SignatureScheme::Ed25519, &key_bytes)
         .context("Reconstructed key is not a valid Ed25519 key")?;
-    let pubkey_hex = hex::encode(signing_key.verifying_key().as_bytes());
+    let pubkey_hex = signing_key.public_key().to_hex();
 
     // Prompt for encryption before saving
     let passphrase = dialoguer::Password::new()

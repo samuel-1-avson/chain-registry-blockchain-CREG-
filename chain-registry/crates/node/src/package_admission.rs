@@ -763,7 +763,7 @@ fn validate_package_id(request: &PublishRequest) -> Result<(), AdmissionError> {
 }
 
 pub(crate) fn verify_publish_sig(req: &PublishRequest) -> anyhow::Result<()> {
-    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+    use common::crypto::{PublicKey, Signature, SignatureScheme, VerifyMode};
 
     if req.publisher_address.trim().is_empty() {
         anyhow::bail!("Publisher EVM address is required for runtime admission");
@@ -772,7 +772,7 @@ pub(crate) fn verify_publish_sig(req: &PublishRequest) -> anyhow::Result<()> {
     let primary_pubkey = req.publisher_pubkey.trim();
     let primary_pubkey_bytes =
         hex::decode(primary_pubkey).context("Publisher Ed25519 public key must be valid hex")?;
-    VerifyingKey::try_from(primary_pubkey_bytes.as_slice())
+    PublicKey::from_bytes(SignatureScheme::Ed25519, &primary_pubkey_bytes)
         .map_err(|_| anyhow::anyhow!("Invalid Ed25519 public key"))?;
 
     let msg = publisher_signature_message(req)?;
@@ -780,12 +780,12 @@ pub(crate) fn verify_publish_sig(req: &PublishRequest) -> anyhow::Result<()> {
     // Single-signature fallback.
     if req.publisher_pubkeys.is_empty() {
         let sig_bytes = hex::decode(&req.signature)?;
-        let vk = VerifyingKey::try_from(primary_pubkey_bytes.as_slice())
+        let vk = PublicKey::from_bytes(SignatureScheme::Ed25519, &primary_pubkey_bytes)
             .map_err(|_| anyhow::anyhow!("Invalid Ed25519 public key"))?;
-        let sig = Signature::try_from(sig_bytes.as_slice())
+        let sig = Signature::from_bytes(SignatureScheme::Ed25519, &sig_bytes)
             .map_err(|_| anyhow::anyhow!("Invalid Ed25519 signature"))?;
         return vk
-            .verify(msg.as_bytes(), &sig)
+            .verify(msg.as_bytes(), &sig, VerifyMode::Permissive)
             .map_err(|_| anyhow::anyhow!("Signature verification failed"));
     }
 
@@ -817,15 +817,18 @@ pub(crate) fn verify_publish_sig(req: &PublishRequest) -> anyhow::Result<()> {
             Ok(b) => b,
             Err(_) => continue,
         };
-        let vk = match VerifyingKey::try_from(pk_bytes.as_slice()) {
+        let vk = match PublicKey::from_bytes(SignatureScheme::Ed25519, &pk_bytes) {
             Ok(k) => k,
             Err(_) => continue,
         };
-        let sig = match Signature::try_from(sig_bytes.as_slice()) {
+        let sig = match Signature::from_bytes(SignatureScheme::Ed25519, &sig_bytes) {
             Ok(s) => s,
             Err(_) => continue,
         };
-        if vk.verify(msg.as_bytes(), &sig).is_ok() {
+        if vk
+            .verify(msg.as_bytes(), &sig, VerifyMode::Permissive)
+            .is_ok()
+        {
             valid += 1;
             if is_primary_pubkey {
                 primary_signed = true;

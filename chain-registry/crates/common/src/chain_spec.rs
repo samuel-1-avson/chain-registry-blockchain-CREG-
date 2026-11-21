@@ -292,28 +292,24 @@ impl ChainSpec {
 
     /// Verify the spec's Ed25519 signature.
     pub fn verify_signature(&self, signature_hex: &str, pubkey_hex: &str) -> anyhow::Result<()> {
-        use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+        use crate::crypto::{PublicKey, Signature, SignatureScheme, VerifyMode};
 
-        if self.signing.signature_algorithm != "ed25519" {
+        let Some(scheme) = SignatureScheme::from_id(&self.signing.signature_algorithm) else {
             anyhow::bail!("unsupported spec signature algorithm");
-        }
+        };
 
         let pubkey_bytes = hex::decode(pubkey_hex.trim_start_matches("0x"))
             .map_err(|_| anyhow::anyhow!("invalid pubkey hex"))?;
-        let pubkey = VerifyingKey::from_bytes(
-            &pubkey_bytes
-                .try_into()
-                .map_err(|_| anyhow::anyhow!("pubkey must be 32 bytes"))?,
-        )
-        .map_err(|e| anyhow::anyhow!("invalid verifying key: {}", e))?;
+        if pubkey_bytes.len() != scheme.public_key_len() {
+            anyhow::bail!("pubkey must be {} bytes", scheme.public_key_len());
+        }
+        let pubkey = PublicKey::from_bytes(scheme, &pubkey_bytes)
+            .map_err(|e| anyhow::anyhow!("invalid verifying key: {}", e))?;
 
         let sig_bytes = hex::decode(signature_hex.trim_start_matches("0x"))
             .map_err(|_| anyhow::anyhow!("invalid signature hex"))?;
-        let signature = Signature::from_bytes(
-            &sig_bytes
-                .try_into()
-                .map_err(|_| anyhow::anyhow!("signature must be 64 bytes"))?,
-        );
+        let signature = Signature::from_bytes(scheme, &sig_bytes)
+            .map_err(|_| anyhow::anyhow!("signature must be {} bytes", scheme.signature_len()))?;
 
         let message = format!(
             "{}|{}",
@@ -322,7 +318,7 @@ impl ChainSpec {
         );
 
         pubkey
-            .verify(message.as_bytes(), &signature)
+            .verify(message.as_bytes(), &signature, VerifyMode::Permissive)
             .map_err(|_| anyhow::anyhow!("spec signature verification failed"))
     }
 

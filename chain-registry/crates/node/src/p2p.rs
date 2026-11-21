@@ -207,14 +207,13 @@ fn report_pbft_validation_failure(
 /// Helper to sign a PBFT phase message (prepare/commit) using our key.
 /// Returns (signature_hex, pubkey_hex). Logs on failure in caller.
 fn sign_pbft_phase(
-    sk: &ed25519_dalek::SigningKey,
+    sk: &common::crypto::SigningKey,
     phase: &str,
     block_hash: &str,
 ) -> (String, String) {
-    use ed25519_dalek::Signer;
     let message = consensus::pbft::pbft_signature_message(phase, block_hash);
-    let signature = hex::encode(sk.sign(message.as_bytes()).to_bytes());
-    let pubkey = hex::encode(sk.verifying_key().as_bytes());
+    let signature = sk.sign(message.as_bytes()).to_hex();
+    let pubkey = sk.public_key().to_hex();
     (signature, pubkey)
 }
 
@@ -222,7 +221,7 @@ async fn sign_and_record_commit(
     state: &mut crate::NodeState,
     block_hash: &str,
     validator_id: &str,
-    signing_key: &ed25519_dalek::SigningKey,
+    signing_key: &common::crypto::SigningKey,
 ) -> anyhow::Result<(common::GossipMessage, bool)> {
     let (height, prev_hash, view_number) = state
         .pbft_engine
@@ -318,7 +317,7 @@ fn validate_vote_gossip_message(
     message: &[u8],
     validator_set: &common::ValidatorSet,
 ) -> Result<crate::gossip::VoteGossip, VoteValidationError> {
-    use ed25519_dalek::{Signature, VerifyingKey};
+    use common::crypto::{PublicKey, Signature, SignatureScheme, VerifyMode};
 
     let vote = serde_json::from_slice::<crate::gossip::VoteGossip>(message)
         .map_err(|_| VoteValidationError::Malformed)?;
@@ -360,12 +359,12 @@ fn validate_vote_gossip_message(
         return Err(VoteValidationError::MissingConsensusEvidence);
     }
 
-    let verifying_key = VerifyingKey::try_from(pubkey_bytes.as_slice())
+    let verifying_key = PublicKey::from_bytes(SignatureScheme::Ed25519, &pubkey_bytes)
         .map_err(|_| VoteValidationError::InvalidValidatorPubkey)?;
 
     let signature_bytes =
         hex::decode(&vote.signature).map_err(|_| VoteValidationError::InvalidSignatureHex)?;
-    let signature = Signature::try_from(signature_bytes.as_slice())
+    let signature = Signature::from_bytes(SignatureScheme::Ed25519, &signature_bytes)
         .map_err(|_| VoteValidationError::InvalidSignatureFormat)?;
 
     let scanner_profile =
@@ -398,7 +397,7 @@ fn validate_vote_gossip_message(
     };
 
     verifying_key
-        .verify_strict(message.as_bytes(), &signature)
+        .verify(message.as_bytes(), &signature, VerifyMode::Strict)
         .map_err(|_| VoteValidationError::SignatureVerificationFailed)?;
 
     Ok(vote)
@@ -1462,8 +1461,7 @@ impl P2PNode {
                                                 if let Some(our_privkey_hex) = &s.config.validator_privkey {
                                                     let bh = block.hash();
                                                     if let Ok(pk_bytes) = hex::decode(our_privkey_hex) {
-                                                        if let Ok(sk) = ed25519_dalek::SigningKey::try_from(pk_bytes.as_slice()) {
-                                                            use ed25519_dalek::Signer;
+                                                        if let Ok(sk) = common::crypto::SigningKey::from_seed(common::crypto::SignatureScheme::Ed25519, &pk_bytes) {
                                                             let (signature, pubkey) = sign_pbft_phase(&sk, "prepare", &bh);
                                                             let sig_obj = common::BlockSignature { validator_id: our_id.clone(), pubkey: pubkey.clone(), signature: signature.clone() };
                                                             let signing_message = consensus::pbft::pbft_signature_message("prepare", &bh);
@@ -1560,7 +1558,7 @@ impl P2PNode {
                                         if let Ok(true) = s.pbft_engine.prepare(&block_hash, &validator_id, sig) {
                                             if let Some(private_key_hex) = &s.config.validator_privkey {
                                                 if let Ok(key_bytes) = hex::decode(private_key_hex) {
-                                                    if let Ok(signing_key) = ed25519_dalek::SigningKey::try_from(key_bytes.as_slice()) {
+                                                    if let Ok(signing_key) = common::crypto::SigningKey::from_seed(common::crypto::SignatureScheme::Ed25519, &key_bytes) {
                                                         let our_id = s.config.node_id.clone();
                                                         match sign_and_record_commit(&mut s, &block_hash, &our_id, &signing_key).await {
                                                             Ok((commit_msg, finalized)) => {

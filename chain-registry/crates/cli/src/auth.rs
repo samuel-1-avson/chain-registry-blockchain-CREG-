@@ -179,16 +179,21 @@ pub fn hkdf_sha512(salt: &[u8], ikm: &[u8], info: &[u8], len: usize) -> Result<V
     }
 }
 
+/// Derive the publisher's Ed25519 key from an EIP-712 wallet signature.
+///
+/// This key is classical only: a quantum attacker who recovers the wallet's
+/// secp256k1 key can recompute the (RFC 6979 deterministic) signature and so
+/// this seed. Never derive a post-quantum key this way (ADR-017 section 4).
 pub fn derive_ed25519_key_from_signature(
     sig_bytes: &[u8; 65],
-) -> Result<(ed25519_dalek::SigningKey, String)> {
+) -> Result<(common::crypto::SigningKey, String)> {
     let seed = hkdf_sha512(EIP712_SALT.as_bytes(), sig_bytes, HKDF_INFO, 32)?;
     let seed_arr: [u8; 32] = seed
         .as_slice()
         .try_into()
         .context("Seed length must be 32 bytes")?;
-    let signing_key = ed25519_dalek::SigningKey::from_bytes(&seed_arr);
-    let pubkey_hex = hex::encode(signing_key.verifying_key().as_bytes());
+    let signing_key = common::crypto::SigningKey::from_ed25519_seed(&seed_arr);
+    let pubkey_hex = signing_key.public_key().to_hex();
     Ok((signing_key, pubkey_hex))
 }
 
@@ -226,7 +231,7 @@ pub fn derive_from_private_key(
 
     Ok(DerivedIdentity {
         wallet_address,
-        ed25519_privkey_hex: hex::encode(ed_key.as_bytes()),
+        ed25519_privkey_hex: hex::encode(ed_key.ed25519_seed()),
         ed25519_pubkey_hex: ed_pubkey,
     })
 }
@@ -297,7 +302,7 @@ pub fn derive_from_token(
 
     Ok(DerivedIdentity {
         wallet_address: payload.wallet,
-        ed25519_privkey_hex: hex::encode(ed_key.as_bytes()),
+        ed25519_privkey_hex: hex::encode(ed_key.ed25519_seed()),
         ed25519_pubkey_hex: ed_pubkey,
     })
 }
@@ -553,7 +558,7 @@ async fn accept_auth_loop(
 
             return Ok(DerivedIdentity {
                 wallet_address: payload.wallet,
-                ed25519_privkey_hex: hex::encode(ed_key.as_bytes()),
+                ed25519_privkey_hex: hex::encode(ed_key.ed25519_seed()),
                 ed25519_pubkey_hex: ed_pubkey,
             });
         }

@@ -1406,7 +1406,7 @@ pub(crate) fn verify_block_signatures(
     block: &common::Block,
     validator_set: &ValidatorSet,
 ) -> anyhow::Result<()> {
-    use ed25519_dalek::{Signature, VerifyingKey};
+    use common::crypto::{PublicKey, Signature, SignatureScheme, VerifyMode};
 
     // Genesis has no signatures by design.
     if block.header.height == 0 {
@@ -1488,7 +1488,7 @@ pub(crate) fn verify_block_signatures(
                 Ok(b) => b,
                 Err(_) => continue,
             };
-            let vk = match VerifyingKey::try_from(pubkey_bytes.as_slice()) {
+            let vk = match PublicKey::from_bytes(SignatureScheme::Ed25519, &pubkey_bytes) {
                 Ok(k) => k,
                 Err(_) => continue,
             };
@@ -1496,7 +1496,7 @@ pub(crate) fn verify_block_signatures(
                 Ok(b) => b,
                 Err(_) => continue,
             };
-            let ed_sig = match Signature::try_from(sig_bytes.as_slice()) {
+            let ed_sig = match Signature::from_bytes(SignatureScheme::Ed25519, &sig_bytes) {
                 Ok(s) => s,
                 Err(_) => continue,
             };
@@ -1533,7 +1533,10 @@ pub(crate) fn verify_block_signatures(
                 ),
             };
 
-            if vk.verify_strict(message.as_bytes(), &ed_sig).is_ok() {
+            if vk
+                .verify(message.as_bytes(), &ed_sig, VerifyMode::Strict)
+                .is_ok()
+            {
                 let profile_key = format!(
                     "{}:{}",
                     common::scanner_profile_digest(&sig.ml_model_version, &sig.analysis_bundles),

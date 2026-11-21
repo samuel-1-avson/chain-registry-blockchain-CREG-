@@ -293,17 +293,17 @@ pub async fn run(
     // ── 5. Sign: sig = Ed25519(privkey, canonical || content_hash || publisher_address) ─────
     let privkey_bytes = hex::decode(privkey_hex.trim()).context("Invalid private key hex")?;
 
-    use ed25519_dalek::{Signer, SigningKey};
-    let signing_key =
-        SigningKey::try_from(privkey_bytes.as_slice()).context("Invalid Ed25519 private key")?;
-    let primary_pubkey = hex::encode(signing_key.verifying_key().as_bytes());
+    use common::crypto::{SignatureScheme, SigningKey};
+    let signing_key = SigningKey::from_seed(SignatureScheme::Ed25519, &privkey_bytes)
+        .context("Invalid Ed25519 private key")?;
+    let primary_pubkey = signing_key.public_key().to_hex();
     let mut signers = vec![(primary_pubkey.clone(), signing_key)];
     for key_hex in extra_privkeys {
         let key_bytes = hex::decode(key_hex.trim())
             .with_context(|| format!("Invalid extra private key hex: {}", key_hex))?;
-        let sk = SigningKey::try_from(key_bytes.as_slice())
+        let sk = SigningKey::from_seed(SignatureScheme::Ed25519, &key_bytes)
             .with_context(|| format!("Invalid Ed25519 extra private key: {}", key_hex))?;
-        signers.push((hex::encode(sk.verifying_key().as_bytes()), sk));
+        signers.push((sk.public_key().to_hex(), sk));
     }
     signers.sort_by(|left, right| left.0.cmp(&right.0));
     signers.dedup_by(|left, right| left.0 == right.0);
@@ -359,7 +359,7 @@ pub async fn run(
     };
     let signatures: Vec<String> = signers
         .iter()
-        .map(|(_, signer)| hex::encode(signer.sign(msg.as_bytes()).to_bytes()))
+        .map(|(_, signer)| signer.sign(msg.as_bytes()).to_hex())
         .collect();
 
     let request = PublishRequest {
@@ -981,7 +981,7 @@ pub async fn sign_offline(
     ipfs_url: Option<&str>,
     output_path: &Path,
 ) -> Result<()> {
-    use ed25519_dalek::{Signer, SigningKey};
+    use common::crypto::{SignatureScheme, SigningKey};
 
     let publisher_address = canonicalize_publisher_address(publisher_address)?;
     let publisher_authorization_config = load_publisher_authorization_config()?;
@@ -1042,14 +1042,14 @@ pub async fn sign_offline(
 
     // 5. Sign with Ed25519
     let privkey_bytes = hex::decode(privkey_hex.trim()).context("Invalid private key hex")?;
-    let signing_key =
-        SigningKey::try_from(privkey_bytes.as_slice()).context("Invalid Ed25519 private key")?;
-    let primary_pubkey = hex::encode(signing_key.verifying_key().as_bytes());
+    let signing_key = SigningKey::from_seed(SignatureScheme::Ed25519, &privkey_bytes)
+        .context("Invalid Ed25519 private key")?;
+    let primary_pubkey = signing_key.public_key().to_hex();
     let mut signers = vec![(primary_pubkey.clone(), signing_key)];
     for key_hex in extra_privkeys {
         let key_bytes = hex::decode(key_hex.trim())?;
-        let signer = SigningKey::try_from(key_bytes.as_slice())?;
-        signers.push((hex::encode(signer.verifying_key().as_bytes()), signer));
+        let signer = SigningKey::from_seed(SignatureScheme::Ed25519, &key_bytes)?;
+        signers.push((signer.public_key().to_hex(), signer));
     }
     signers.sort_by(|left, right| left.0.cmp(&right.0));
     signers.dedup_by(|left, right| left.0 == right.0);
@@ -1105,7 +1105,7 @@ pub async fn sign_offline(
     };
     let signatures: Vec<String> = signers
         .iter()
-        .map(|(_, signer)| hex::encode(signer.sign(msg.as_bytes()).to_bytes()))
+        .map(|(_, signer)| signer.sign(msg.as_bytes()).to_hex())
         .collect();
 
     let request = PublishRequest {

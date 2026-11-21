@@ -1,7 +1,7 @@
 //! Durable propagation of actual publisher/validator revocation proofs.
 use anyhow::{Context, Result};
+use common::crypto::{PublicKey, Signature, SignatureScheme, VerifyMode};
 use common::{PackageStatus, SignedRevocationRequest, Transaction};
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use std::{
     io::Write,
     path::{Path, PathBuf},
@@ -37,11 +37,12 @@ fn verify_signature(request: &SignedRevocationRequest) -> Result<()> {
         "invalid revocation proof bounds"
     );
     let key = hex::decode(&request.revoker_pubkey)?;
-    let key = VerifyingKey::try_from(key.as_slice())?;
+    let key = PublicKey::from_bytes(SignatureScheme::Ed25519, &key)?;
     let signature = hex::decode(&request.signature)?;
     key.verify(
         request.signing_message().as_bytes(),
-        &Signature::try_from(signature.as_slice())?,
+        &Signature::from_bytes(SignatureScheme::Ed25519, &signature)?,
+        VerifyMode::Permissive,
     )?;
     Ok(())
 }

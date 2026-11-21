@@ -344,7 +344,7 @@ impl DecryptionService {
     /// Message layout: `canonical_bytes || encrypted_share || timestamp_be_8bytes`
     /// Recipients can verify using the validator's registered `validator_pubkey`.
     fn sign_response(&self, canonical: &str, encrypted_share: &[u8], timestamp: u64) -> Vec<u8> {
-        use ed25519_dalek::{Signer, SigningKey};
+        use common::crypto::SigningKey;
 
         // Build signing key from the 32-byte validator private key.
         if self.config.validator_key.len() != 32 {
@@ -358,15 +358,14 @@ impl DecryptionService {
         let key_bytes: [u8; 32] = self.config.validator_key[..32]
             .try_into()
             .expect("length checked above");
-        let signing_key = SigningKey::from_bytes(&key_bytes);
+        let signing_key = SigningKey::from_ed25519_seed(&key_bytes);
 
         // Construct the message to sign.
         let mut msg = canonical.as_bytes().to_vec();
         msg.extend_from_slice(encrypted_share);
         msg.extend_from_slice(&timestamp.to_be_bytes());
 
-        let signature = signing_key.sign(&msg);
-        signature.to_bytes().to_vec()
+        signing_key.sign(&msg).to_bytes()
     }
 }
 
@@ -421,7 +420,7 @@ impl DecryptionClient {
         canonical: &str,
         purpose: &str,
     ) -> Result<Vec<DecryptionResponse>, ThresholdError> {
-        use ed25519_dalek::{Signer, SigningKey};
+        use common::crypto::SigningKey;
 
         let timestamp = current_timestamp();
 
@@ -430,15 +429,15 @@ impl DecryptionClient {
             let key_bytes: [u8; 32] = self.requestor_key[..32]
                 .try_into()
                 .expect("length checked above");
-            let signing_key = SigningKey::from_bytes(&key_bytes);
-            let pubkey_hex = hex::encode(signing_key.verifying_key().as_bytes());
+            let signing_key = SigningKey::from_ed25519_seed(&key_bytes);
+            let pubkey_hex = signing_key.public_key().to_hex();
 
             let mut msg = canonical.as_bytes().to_vec();
             msg.extend_from_slice(purpose.as_bytes());
             msg.extend_from_slice(&timestamp.to_be_bytes());
             let sig = signing_key.sign(&msg);
 
-            (pubkey_hex, sig.to_bytes().to_vec())
+            (pubkey_hex, sig.to_bytes())
         } else {
             warn!("Requestor key is not 32 bytes — sending unsigned decryption request");
             (hex::encode(&self.requestor_pubkey), vec![])

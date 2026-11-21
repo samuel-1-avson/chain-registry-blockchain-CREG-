@@ -733,11 +733,11 @@ async fn get_json<T: for<'de> Deserialize<'de>>(
 mod tests {
     use super::*;
     use chrono::TimeZone;
+    use common::crypto::SigningKey;
     use common::{
         consistency_proof, inclusion_proof, sign_tree_head, sign_witnessed_tree_head, tree_root,
         Finding, FindingSeverity, PackageId, VerdictSource, TRANSPARENCY_LOG_VERSION,
     };
-    use ed25519_dalek::SigningKey;
 
     fn pkg() -> PackageId {
         PackageId::new("npm", "left-pad", "1.0.0")
@@ -945,17 +945,14 @@ mod tests {
     }
 
     fn sample_keys() -> (SigningKey, SigningKey, String, BTreeMap<String, String>) {
-        let log_key = SigningKey::from_bytes(&[11u8; 32]);
-        let witness_key = SigningKey::from_bytes(&[12u8; 32]);
+        let log_key = SigningKey::from_ed25519_seed(&[11u8; 32]);
+        let witness_key = SigningKey::from_ed25519_seed(&[12u8; 32]);
         let mut keys = BTreeMap::new();
-        keys.insert(
-            "witness-a".into(),
-            hex::encode(witness_key.verifying_key().as_bytes()),
-        );
+        keys.insert("witness-a".into(), witness_key.public_key().to_hex());
         (
             log_key.clone(),
             witness_key,
-            hex::encode(log_key.verifying_key().as_bytes()),
+            log_key.public_key().to_hex(),
             keys,
         )
     }

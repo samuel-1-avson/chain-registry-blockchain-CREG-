@@ -5,7 +5,7 @@
 // Outputs the hex-encoded Ed25519 detached signature to stdout.
 
 use common::chain_spec::{to_jcs_canonical_json, ChainSpec, SPEC_SIGNATURE_DOMAIN};
-use ed25519_dalek::{Signer, SigningKey};
+use common::crypto::{SignatureScheme, SigningKey};
 use std::fs;
 
 fn main() -> anyhow::Result<()> {
@@ -34,12 +34,9 @@ fn main() -> anyhow::Result<()> {
         .map_err(|_| anyhow::anyhow!("{environment_variable} is not set or is not Unicode"))?;
     let privkey_hex = private_key.trim().trim_start_matches("0x");
     let privkey_bytes = hex::decode(privkey_hex)?;
-    let signing_key = SigningKey::from_bytes(
-        &privkey_bytes
-            .try_into()
-            .map_err(|_| anyhow::anyhow!("private key must be 32 bytes"))?,
-    );
-    let verifying_key_hex = hex::encode(signing_key.verifying_key().as_bytes());
+    let signing_key = SigningKey::from_seed(SignatureScheme::Ed25519, &privkey_bytes)
+        .map_err(|_| anyhow::anyhow!("private key must be 32 bytes"))?;
+    let verifying_key_hex = signing_key.public_key().to_hex();
     const DISCLOSED_DEVELOPMENT_PUBKEY: &str =
         "0437e4adac481519cd6ae66907294c40cfcbf0bdeadd47806f6233be4bd5f82d";
     if verifying_key_hex == DISCLOSED_DEVELOPMENT_PUBKEY {
@@ -61,6 +58,6 @@ fn main() -> anyhow::Result<()> {
     let message = format!("{}|{}", SPEC_SIGNATURE_DOMAIN, String::from_utf8(jcs)?);
     let signature = signing_key.sign(message.as_bytes());
 
-    println!("{}", hex::encode(signature.to_bytes()));
+    println!("{}", signature.to_hex());
     Ok(())
 }

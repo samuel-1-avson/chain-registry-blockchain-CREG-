@@ -426,7 +426,7 @@ impl CertifiedNamespaceAuthority {
         &self,
         expected_validator_set_hash: &str,
     ) -> Result<(), &'static str> {
-        use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+        use crate::crypto::{PublicKey, Signature, SignatureScheme, VerifyMode};
         use std::collections::HashSet;
 
         self.statement.validate_structure()?;
@@ -502,13 +502,17 @@ impl CertifiedNamespaceAuthority {
             let Ok(signature_bytes) = hex::decode(&signature.signature) else {
                 return Err("authority certificate signature encoding is invalid");
             };
-            let Ok(pubkey) = VerifyingKey::try_from(pubkey.as_slice()) else {
+            let Ok(pubkey) = PublicKey::from_bytes(SignatureScheme::Ed25519, &pubkey) else {
                 return Err("authority certificate signer public key is invalid");
             };
-            let Ok(signature) = Signature::try_from(signature_bytes.as_slice()) else {
+            let Ok(signature) = Signature::from_bytes(SignatureScheme::Ed25519, &signature_bytes)
+            else {
                 return Err("authority certificate signature is invalid");
             };
-            if pubkey.verify(message.as_bytes(), &signature).is_err() {
+            if pubkey
+                .verify(message.as_bytes(), &signature, VerifyMode::Permissive)
+                .is_err()
+            {
                 return Err("authority certificate signature verification failed");
             }
         }
@@ -779,7 +783,7 @@ impl NamespaceLifecycleEventV2 {
     }
 
     pub fn verify_controller_signatures(&self) -> Result<(), &'static str> {
-        use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+        use crate::crypto::{PublicKey, Signature, SignatureScheme, VerifyMode};
 
         self.validate_structure()?;
         let message = self.signing_message();
@@ -787,11 +791,11 @@ impl NamespaceLifecycleEventV2 {
             let pubkey = hex::decode(pubkey).map_err(|_| "invalid controller public key")?;
             let signature =
                 hex::decode(signature).map_err(|_| "invalid controller signature encoding")?;
-            let key = VerifyingKey::try_from(pubkey.as_slice())
+            let key = PublicKey::from_bytes(SignatureScheme::Ed25519, &pubkey)
                 .map_err(|_| "invalid controller public key")?;
-            let signature = Signature::try_from(signature.as_slice())
+            let signature = Signature::from_bytes(SignatureScheme::Ed25519, &signature)
                 .map_err(|_| "invalid controller signature")?;
-            key.verify(message.as_bytes(), &signature)
+            key.verify(message.as_bytes(), &signature, VerifyMode::Permissive)
                 .map_err(|_| "controller signature verification failed")
         };
 
@@ -874,7 +878,7 @@ impl NamespaceLifecycleEvent {
     /// not require the old controller: it instead requires the successor
     /// signature plus a separately verified authority proof before application.
     pub fn verify_controller_signatures(&self) -> Result<(), &'static str> {
-        use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+        use crate::crypto::{PublicKey, Signature, SignatureScheme, VerifyMode};
 
         self.validate_structure()?;
         let message = self.signing_message();
@@ -882,11 +886,11 @@ impl NamespaceLifecycleEvent {
             let pubkey = hex::decode(pubkey).map_err(|_| "invalid controller public key")?;
             let signature =
                 hex::decode(signature).map_err(|_| "invalid controller signature encoding")?;
-            let key = VerifyingKey::try_from(pubkey.as_slice())
+            let key = PublicKey::from_bytes(SignatureScheme::Ed25519, &pubkey)
                 .map_err(|_| "invalid controller public key")?;
-            let signature = Signature::try_from(signature.as_slice())
+            let signature = Signature::from_bytes(SignatureScheme::Ed25519, &signature)
                 .map_err(|_| "invalid controller signature")?;
-            key.verify(message.as_bytes(), &signature)
+            key.verify(message.as_bytes(), &signature, VerifyMode::Permissive)
                 .map_err(|_| "controller signature verification failed")
         };
 

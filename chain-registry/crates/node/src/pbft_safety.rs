@@ -4,8 +4,8 @@
 //! or checkpoint restore cannot roll a validator's vote lock backward.
 
 use anyhow::{bail, Context, Result};
+use common::crypto::{PublicKey, Signature, SignatureScheme, VerifyMode};
 use common::{Block, PreparedCertificate, ViewChangeVote};
-use ed25519_dalek::{Signature, VerifyingKey};
 use rocksdb::{Options, WriteOptions, DB};
 use serde::{Deserialize, Serialize};
 use std::{path::Path, sync::Mutex};
@@ -809,17 +809,19 @@ fn normalize_hash(value: &str, name: &str) -> Result<String> {
 
 fn verify_pubkey(pubkey: &str) -> Result<()> {
     let bytes = hex::decode(pubkey).context("decode PBFT validator public key")?;
-    VerifyingKey::try_from(bytes.as_slice()).context("parse PBFT validator public key")?;
+    PublicKey::from_bytes(SignatureScheme::Ed25519, &bytes)
+        .context("parse PBFT validator public key")?;
     Ok(())
 }
 
 fn verify_signature(pubkey: &str, message: &str, signature: &str) -> Result<()> {
     let bytes = hex::decode(normalize_hex(signature)).context("decode PBFT signature")?;
-    let signature = Signature::try_from(bytes.as_slice()).context("parse PBFT signature")?;
+    let signature =
+        Signature::from_bytes(SignatureScheme::Ed25519, &bytes).context("parse PBFT signature")?;
     let key_bytes = hex::decode(pubkey).context("decode PBFT validator public key")?;
-    let key =
-        VerifyingKey::try_from(key_bytes.as_slice()).context("parse PBFT validator public key")?;
-    key.verify_strict(message.as_bytes(), &signature)
+    let key = PublicKey::from_bytes(SignatureScheme::Ed25519, &key_bytes)
+        .context("parse PBFT validator public key")?;
+    key.verify(message.as_bytes(), &signature, VerifyMode::Strict)
         .context("verify PBFT signing decision")
 }
 

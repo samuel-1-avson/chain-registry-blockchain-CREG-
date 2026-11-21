@@ -668,9 +668,12 @@ async fn main() -> Result<()> {
             .context("validator startup has no PBFT signing key")?;
         let private_key_bytes = hex::decode(private_key_hex.trim_start_matches("0x"))
             .context("validator PBFT signing key is not valid hex")?;
-        let signing_key = ed25519_dalek::SigningKey::try_from(private_key_bytes.as_slice())
-            .context("validator PBFT signing key must contain 32 bytes")?;
-        let validator_pubkey = hex::encode(signing_key.verifying_key().as_bytes());
+        let signing_key = common::crypto::SigningKey::from_seed(
+            common::crypto::SignatureScheme::Ed25519,
+            &private_key_bytes,
+        )
+        .context("validator PBFT signing key must contain 32 bytes")?;
+        let validator_pubkey = signing_key.public_key().to_hex();
         if cfg!(feature = "phase-c-real-fleet")
             && !config.validator_set.validators.iter().any(|validator| {
                 validator.id == config.node_id
